@@ -109,8 +109,8 @@ class CronRelayService(CronTargetedOperationsMixin, CronRuntimeOperationsMixin, 
         bot_id: Optional[str] = None,
         runtime_stage: Optional[str] = None,
         device_id: str | None = None,
-        create_by_id: str | None = None,
         operator_id: str | None = None,
+        authenticated_user_id: str | None = None,
     ) -> dict:
         """获取用户所有 Bots 的定时任务（平铺展示）
 
@@ -124,12 +124,12 @@ class CronRelayService(CronTargetedOperationsMixin, CronRuntimeOperationsMixin, 
         Returns:
             {"success": True, "data": [...], "total": N}
         """
-        if device_id is not None or create_by_id is not None:
+        if device_id is not None or operator_id is not None:
             if not bot_id or bot_id == "all" or not runtime_stage:
                 raise CronRelayError("targeted listing requires bot_id and runtime_stage", 400)
             return await self._forward_targeted_cron_request(
                 bot_id=bot_id, user_id=user_id, runtime_stage=runtime_stage,
-                device_id=device_id, create_by_id=create_by_id, operator_id=operator_id,
+                device_id=device_id, operator_id=operator_id, authenticated_user_id=authenticated_user_id,
                 method="GET", path="/api/cron",
             )
         if runtime_stage is not None and runtime_stage not in VALID_RUNTIME_STAGES:
@@ -264,18 +264,18 @@ class CronRelayService(CronTargetedOperationsMixin, CronRuntimeOperationsMixin, 
         runtime_stage: str | None = None,
         device_uuid: str | None = None,
         device_id: str | None = None,
-        create_by_id: str | None = None,
         operator_id: str | None = None,
+        authenticated_user_id: str | None = None,
     ) -> dict:
         """获取指定 Bot 的运行中任务。
 
         服务 Bot 必须指定 runtime_stage，并按运行实例聚合；个人 Bot 不接收
         runtime_stage 或 device_uuid。
         """
-        if device_id is not None or create_by_id is not None:
+        if device_id is not None or operator_id is not None:
             result = await self._forward_targeted_cron_request(
                 bot_id=bot_id, user_id=user_id, runtime_stage=runtime_stage or "draft",
-                device_id=device_id, create_by_id=create_by_id, operator_id=operator_id,
+                device_id=device_id, operator_id=operator_id, authenticated_user_id=authenticated_user_id,
                 method="GET", path="/api/cron/running",
             )
             data = result.get("data", {})

@@ -7,7 +7,7 @@
 - OCB 远端 dev：42ace7ecebc8d9e6490f34d5818bb2b518288fc9。
 - OCB 对应 Avernet gitlink：4be93ad5dcb5edee79baf8421b029ce20eee9267。以下 backend community 路径均属于 Avernet，不能用 OCB 当前本地 checkout 代替。
 - daas-scripts 远端 dev：20dede548eb34613d363bf8fc8b78d337f19d050。
-- 用户确认：create_by_id 是任务创建人，同时作为 Caller 身份。
+- 用户确认：operator_id 是任务创建人，同时作为 Caller 身份。
 - 成功标准：一条创建请求只写入一个明确的运行容器；发布、扩容、重发不把任务带到其他容器；查询和管理可再次定位该容器。
 
 ## 当前源码证据
@@ -36,7 +36,7 @@
   "bot_id": "service_bot_id",
   "runtime_stage": "online",
   "device_id": "runtime_device_uuid",
-  "create_by_id": "caller_staff_id",
+  "operator_id": "caller_staff_id",
   "name": "每日汇总",
   "schedule": "0 9 * * *",
   "command": "汇总昨日数据",
@@ -47,11 +47,11 @@
 
 device_id 的 API 含义明确为运行实例 UUID，对接内部 device_uuid；不是 binding_id、BaaS Bot UUID、设备表自增 ID 或 ARCA shell ID。如果调用方目前传的是其他 ID，需要在既有设备服务内明确转换，不能猜测。内部已有 device_uuid 查询契约时统一名称或作为兼容别名；同时提供且不一致应拒绝。
 
-创建流程：真实登录用户权限校验 → 校验 create_by_id → 选择服务/Caller binding → 校验 device_id 属于该 binding 和运行态 → 固定单个 CronRuntimeTarget → 原传输接口调用一次。
+创建流程：真实登录用户权限校验 → 校验 operator_id → 选择服务/Caller binding → 校验 device_id 属于该 binding 和运行态 → 固定单个 CronRuntimeTarget → 原传输接口调用一次。
 
 - 常规服务 Bot：通过既有发布记录选择 draft/verify/online binding，再验证并锁定一个 device_uuid。多实例创建缺少 device_id 时拒绝，不能随机选或广播。
-- Caller 服务 Bot：create_by_id 作为 actor_user_id，选择该 Caller 已有实例 binding；不自动创建或唤醒 Caller 容器。device_id 必须属于该 Caller，不能拿父服务实例替代。
-- create_by_id 不替换真实登录用户 user.staffId，也不替换 Bot owner_id。本人创建可默认当前登录用户；代建需通过现有 Bot 管理授权，没有代建权限则拒绝。日志同时记录真实操作者和创建人。
+- Caller 服务 Bot：operator_id 作为 actor_user_id，选择该 Caller 已有实例 binding；不自动创建或唤醒 Caller 容器。device_id 必须属于该 Caller，不能拿父服务实例替代。
+- operator_id 不替换真实登录用户 user.staffId，也不替换 Bot owner_id。本人创建可默认当前登录用户；代建需通过现有 Bot 管理授权，没有代建权限则拒绝。日志同时记录真实操作者和创建人。
 - 显式给出错误 stage、Caller、device_id 或不可用 binding 时明确失败，不回退到草稿或其他容器。
 - 个人 Bot 和未使用新参数的旧请求保留既有草稿路径；服务 Bot 的预发/生产创建必须明确目标。前端配套提交选择的 stage 和实例。
 - RuntimeBindingResolutionService 的 Caller 分支目前按 Caller 当前实例查找，并不自动建立“每个 stage 一个 Caller 实例”的映射。必须明确所选 Caller 实例对应哪个发布运行态；若既有元数据不能证明，则拒绝不匹配请求，不声称 stage 已验证。
@@ -70,12 +70,12 @@ result = await service.create_cron(
     body=adapter_body,
     runtime_stage=data.get("runtime_stage", "draft"),
     device_id=data.get("device_id"),
-    create_by_id=data.get("create_by_id") or user.staffId,
-    operator_id=user.staffId,
+    operator_id=data.get("operator_id") or user.staffId,
+    authenticated_user_id=user.staffId,
 )
 ```
 
-router 不查询发布记录、不选择 binding、不按设备循环。路由字段不盲目塞入底层引擎任务 body；底层未知字段可能被拒绝。create_by_id 首先作为路由和审计字段，若要求任务详情永久保存创建人，需单独核验引擎已有 metadata 契约再最小接线。
+router 不查询发布记录、不选择 binding、不按设备循环。路由字段不盲目塞入底层引擎任务 body；底层未知字段可能被拒绝。operator_id 首先作为路由和审计字段，若要求任务详情永久保存创建人，需单独核验引擎已有 metadata 契约再最小接线。
 
 同目录 schemas.py 的 CreateCronRequest 当前未被该入口使用。新增字段时要实际校验原始 JSON，不能只改未接入的模型。
 
@@ -88,7 +88,7 @@ resolved = self._runtime_binding_service.resolve(
     RuntimeBindingRequest(
         bot_id=bot_id,
         owner_id=authorized_owner_id,
-        actor_user_id=create_by_id,
+        actor_user_id=operator_id,
         stage=runtime_stage,
         target=RuntimeBindingTarget.AUTO,
     )
@@ -102,11 +102,11 @@ return await self._forward_runtime_target_request(
 )
 ```
 
-base_target 必须使用本次 resolved binding 构造，不能预先走旧草稿解析：Caller 父 Bot 可能没有草稿 binding。AUTO 在服务 Bot call_type=caller 时选择 Caller；如果未来要在同一 Caller 服务 Bot 上区分父服务任务和 Caller 任务，应显式定义 scope，不能用 create_by_id 是否等于 owner 来猜。
+base_target 必须使用本次 resolved binding 构造，不能预先走旧草稿解析：Caller 父 Bot 可能没有草稿 binding。AUTO 在服务 Bot call_type=caller 时选择 Caller；如果未来要在同一 Caller 服务 Bot 上区分父服务任务和 Caller 任务，应显式定义 scope，不能用 operator_id 是否等于 owner 来猜。
 
-cron_runtime_targets.py:228 的 _resolve_runtime_context 也必须沿用锁定 binding。Caller 即使 stage=draft，仍调用既有 device_context_resolver.resolve_for_binding(binding_id, operator_id, bot_id=bot_id, device_uuid=...)，不能再走父 Bot 的默认草稿 resolver。device_context_resolver.py:106 已提供此接口。
+cron_runtime_targets.py:228 的 _resolve_runtime_context 也必须沿用锁定 binding。Caller 即使 stage=draft，仍调用既有 device_context_resolver.resolve_for_binding(binding_id, authenticated_user_id, bot_id=bot_id, device_uuid=...)，不能再走父 Bot 的默认草稿 resolver。device_context_resolver.py:106 已提供此接口。
 
-创建响应保留原任务结果，并附 runtime_stage、device_id、create_by_id，供后续管理定位。不扩张数据库 schema，不重写 Engine/Relay 调度器。
+创建响应保留原任务结果，并附 runtime_stage、device_id、operator_id，供后续管理定位。不扩张数据库 schema，不重写 Engine/Relay 调度器。
 
 ### 3. 单实例管理
 
@@ -147,3 +147,7 @@ detail/update/delete/run/runs/running 使用相同目标字段和领域解析。
 
 ## 2026-10-11 编码补充
 用户已批准编码、rebase到dev、创建PR和修复CI，且确认新建隔离worktree。Avernet编码基线使用GitHub dev 193256c75，OCB 42ace7eceb，daas 20dede54。旧无目标参数请求保留草稿父服务；显式Caller定向创建只接受online，verify/draft不伪装为Caller隔离环境。device_id映射内部device_uuid，指定实例管理走同一解析。前端位于OCB corp，独立PR；源码先GitHub，镜像可验证后再更新gitlink。
+
+## 2026-10-19 字段更名
+
+按用户要求，本文接口字段已统一为operator_id，替代原create_by_id；它仍表示任务创建人/Caller身份。真实登录操作者在内部单独使用authenticated_user_id，不能由请求字段覆盖。详见012-operator-id-rename.md。

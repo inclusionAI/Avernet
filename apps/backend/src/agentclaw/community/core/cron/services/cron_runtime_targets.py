@@ -51,8 +51,8 @@ class CronRuntimeTarget:
     publish_id: int | None = None
     publish_status: str | None = None
     device_uuid: str | None = None
-    create_by_id: str | None = None
     operator_id: str | None = None
+    authenticated_user_id: str | None = None
     fixed_binding: bool = False
     caller_binding: bool = False
 
@@ -229,8 +229,8 @@ class CronRuntimeTargetMixin:
         if target.device_uuid:
             item["device_uuid"] = target.device_uuid
             item["device_id"] = target.device_uuid
-        if target.create_by_id:
-            item["create_by_id"] = target.create_by_id
+        if target.operator_id:
+            item["operator_id"] = target.operator_id
 
     def _resolve_runtime_context(self, target: CronRuntimeTarget):
         """根据 target 构造 adapter 连接上下文。"""
@@ -247,7 +247,7 @@ class CronRuntimeTargetMixin:
             )
         return self._resolver.resolve_for_binding(
             target.binding_id,
-            (target.operator_id or target.owner_id) if target.caller_binding else target.owner_id,
+            (target.authenticated_user_id or target.owner_id) if target.caller_binding else target.owner_id,
             bot_id=target.bot_id,
             **kwargs,
         )

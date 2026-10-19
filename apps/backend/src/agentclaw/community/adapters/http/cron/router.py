@@ -80,14 +80,14 @@ def _resolve_user_identity(
         return owner_id, owner_id
 
 
-def _target_parameters(runtime_stage, device_id, device_uuid, create_by_id, user):
+def _target_parameters(runtime_stage, device_id, device_uuid, operator_id, user):
     try:
         target = CronTargetRequest(runtime_stage=runtime_stage, device_id=device_id,
-                                   device_uuid=device_uuid, create_by_id=create_by_id)
+                                   device_uuid=device_uuid, operator_id=operator_id)
     except ValidationError as exc:
         raise CronRelayError("Invalid Cron runtime target", error_code=400) from exc
-    return dict(device_id=target.device_id, create_by_id=target.create_by_id,
-                operator_id=user.staffId)
+    return dict(device_id=target.device_id, operator_id=target.operator_id,
+                authenticated_user_id=user.staffId)
 
 
 async def extract_cron_body_params(ctx) -> PermissionParams:
@@ -125,7 +125,7 @@ async def list_crons(
     runtime_stage: str | None = Query(None, description="运行态：draft/verify/online"),
     device_id: str | None = Query(None, description="Target runtime instance UUID"),
     device_uuid: str | None = Query(None, description="Alias for device_id"),
-    create_by_id: str | None = Query(None, description="Creator and Caller identity"),
+    operator_id: str | None = Query(None, description="Creator and Caller identity"),
     user: AuthenticatedUser = Depends(get_current_user),
     service: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
@@ -133,7 +133,7 @@ async def list_crons(
     """获取定时任务列表（平铺展示）"""
     logger.info(f"[list_crons] user={user.staffId}, bot_id={bot_id}, owner_id={owner_id}")
     try:
-        target_parameters = _target_parameters(runtime_stage, device_id, device_uuid, create_by_id, user)
+        target_parameters = _target_parameters(runtime_stage, device_id, device_uuid, operator_id, user)
         effective_user_id, effective_nick_name = _resolve_user_identity(
             owner_id, bot_id, user, bot_service
         )
@@ -213,14 +213,14 @@ async def get_running_crons(
     runtime_stage: str | None = Query(None, description="运行态：draft/verify/online"),
     device_uuid: str | None = Query(None, description="运行实例 device_uuid"),
     device_id: str | None = Query(None, description="Target runtime instance UUID"),
-    create_by_id: str | None = Query(None, description="Creator and Caller identity"),
+    operator_id: str | None = Query(None, description="Creator and Caller identity"),
     user: AuthenticatedUser = Depends(get_current_user),
     service: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> CronListApiResponse:
     """获取正在执行的任务列表"""
     try:
-        target_parameters = _target_parameters(runtime_stage, device_id, device_uuid, create_by_id, user)
+        target_parameters = _target_parameters(runtime_stage, device_id, device_uuid, operator_id, user)
         effective_user_id, effective_nick_name = _resolve_user_identity(
             owner_id, bot_id, user, bot_service
         )
@@ -229,7 +229,7 @@ async def get_running_crons(
             nick_name=effective_nick_name,
             bot_id=bot_id,
             runtime_stage=runtime_stage,
-            device_uuid=device_uuid if not (device_id or create_by_id) else None,
+            device_uuid=device_uuid if not (device_id or operator_id) else None,
             **target_parameters,
         )
         return CronListApiResponse(
@@ -272,14 +272,14 @@ async def get_cron(
     runtime_stage: str = Query("draft", description="运行态：draft/verify/online"),
     device_uuid: str | None = Query(None, description="Alias for device_id"),
     device_id: str | None = Query(None, description="Target runtime instance UUID"),
-    create_by_id: str | None = Query(None, description="Creator and Caller identity"),
+    operator_id: str | None = Query(None, description="Creator and Caller identity"),
     user: AuthenticatedUser = Depends(get_current_user),
     service: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> ApiResponse:
     """获取单个定时任务详情"""
     try:
-        target_parameters = _target_parameters(runtime_stage, device_id, device_uuid, create_by_id, user)
+        target_parameters = _target_parameters(runtime_stage, device_id, device_uuid, operator_id, user)
         effective_user_id, effective_nick_name = _resolve_user_identity(
             owner_id, bot_id, user, bot_service
         )
@@ -321,7 +321,7 @@ async def create_cron(
         data = await request.json()
         if not isinstance(data, dict):
             raise CronRelayError("Cron body must be an object", error_code=400)
-        target_parameters = _target_parameters(data.get("runtime_stage"), data.get("device_id"), data.get("device_uuid"), data.get("create_by_id"), user)
+        target_parameters = _target_parameters(data.get("runtime_stage"), data.get("device_id"), data.get("device_uuid"), data.get("operator_id"), user)
         bot_id = data.get("bot_id")
         owner_id = data.get("owner_id")
         cron_name = data.get("name")
@@ -370,7 +370,7 @@ async def create_cron(
             failed_targets=result.get("failed_targets", []),
         )
     except CronRelayError as e:
-        logger.warning("cron.create.failure bot_id=%s operator_id=%s error_code=%s", data.get("bot_id") if isinstance(data, dict) else None, user.staffId, e.error_code)
+        logger.warning("cron.create.failure bot_id=%s authenticated_user_id=%s error_code=%s", data.get("bot_id") if isinstance(data, dict) else None, user.staffId, e.error_code)
         return ApiResponse(success=False, message=str(e), error_code=e.error_code)
     except Exception as e:
         logger.error(f"[create_cron] Error: {e}")
@@ -390,7 +390,7 @@ async def update_cron(
     runtime_stage: str = Query("draft", description="运行态：draft/verify/online"),
     device_uuid: str | None = Query(None, description="Alias for device_id"),
     device_id: str | None = Query(None, description="Target runtime instance UUID"),
-    create_by_id: str | None = Query(None, description="Creator and Caller identity"),
+    operator_id: str | None = Query(None, description="Creator and Caller identity"),
     user: AuthenticatedUser = Depends(get_current_user),
     service: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
@@ -398,7 +398,7 @@ async def update_cron(
     """更新定时任务"""
     logger.info(f"[update_cron] user={user.staffId}, bot_id={bot_id}, task_id={task_id}")
     try:
-        target_parameters = _target_parameters(runtime_stage, device_id, device_uuid, create_by_id, user)
+        target_parameters = _target_parameters(runtime_stage, device_id, device_uuid, operator_id, user)
         data = await request.json()
         effective_user_id, effective_nick_name = _resolve_user_identity(
             owner_id, bot_id, user, bot_service
@@ -441,7 +441,7 @@ async def delete_cron(
     runtime_stage: str = Query("draft", description="运行态：draft/verify/online"),
     device_uuid: str | None = Query(None, description="Alias for device_id"),
     device_id: str | None = Query(None, description="Target runtime instance UUID"),
-    create_by_id: str | None = Query(None, description="Creator and Caller identity"),
+    operator_id: str | None = Query(None, description="Creator and Caller identity"),
     user: AuthenticatedUser = Depends(get_current_user),
     service: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
@@ -449,7 +449,7 @@ async def delete_cron(
     """删除定时任务"""
     logger.info(f"[delete_cron] user={user.staffId}, bot_id={bot_id}, task_id={task_id}")
     try:
-        target_parameters = _target_parameters(runtime_stage, device_id, device_uuid, create_by_id, user)
+        target_parameters = _target_parameters(runtime_stage, device_id, device_uuid, operator_id, user)
         effective_user_id, effective_nick_name = _resolve_user_identity(
             owner_id, bot_id, user, bot_service
         )
@@ -490,7 +490,7 @@ async def run_cron(
     runtime_stage: str = Query("draft", description="运行态：draft/verify/online"),
     device_uuid: str | None = Query(None, description="Alias for device_id"),
     device_id: str | None = Query(None, description="Target runtime instance UUID"),
-    create_by_id: str | None = Query(None, description="Creator and Caller identity"),
+    operator_id: str | None = Query(None, description="Creator and Caller identity"),
     user: AuthenticatedUser = Depends(get_current_user),
     service: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
@@ -498,7 +498,7 @@ async def run_cron(
     """立即执行定时任务"""
     logger.info(f"[run_cron] user={user.staffId}, bot_id={bot_id}, task_id={task_id}, force={force}")
     try:
-        target_parameters = _target_parameters(runtime_stage, device_id, device_uuid, create_by_id, user)
+        target_parameters = _target_parameters(runtime_stage, device_id, device_uuid, operator_id, user)
         effective_user_id, effective_nick_name = _resolve_user_identity(
             owner_id, bot_id, user, bot_service
         )
@@ -542,14 +542,14 @@ async def get_cron_runs(
     runtime_stage: str | None = Query(None, description="运行态：draft/verify/online"),
     device_uuid: str | None = Query(None, description="运行实例 device_uuid"),
     device_id: str | None = Query(None, description="Target runtime instance UUID"),
-    create_by_id: str | None = Query(None, description="Creator and Caller identity"),
+    operator_id: str | None = Query(None, description="Creator and Caller identity"),
     user: AuthenticatedUser = Depends(get_current_user),
     service: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> ApiResponse:
     """获取任务执行历史"""
     try:
-        target_parameters = _target_parameters(runtime_stage, device_id, device_uuid, create_by_id, user)
+        target_parameters = _target_parameters(runtime_stage, device_id, device_uuid, operator_id, user)
         if device_uuid and not runtime_stage:
             raise CronRelayError("device_uuid requires runtime_stage", error_code=400)
 
@@ -564,7 +564,7 @@ async def get_cron_runs(
             task_id=task_id,
             limit=limit,
             runtime_stage=runtime_stage or "draft",
-            device_uuid=device_uuid if not (device_id or create_by_id) else None,
+            device_uuid=device_uuid if not (device_id or operator_id) else None,
             **target_parameters,
         )
 

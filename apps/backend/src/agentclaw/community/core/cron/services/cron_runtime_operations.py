@@ -332,14 +332,14 @@ class CronRuntimeOperationsMixin:
         task_id: str,
         runtime_stage: str = RUNTIME_STAGE_DRAFT,
         device_id: str | None = None,
-        create_by_id: str | None = None,
         operator_id: str | None = None,
+        authenticated_user_id: str | None = None,
     ) -> dict:
         """获取指定运行态的任务详情。"""
-        if device_id is not None or create_by_id is not None:
+        if device_id is not None or operator_id is not None:
             return await self._forward_targeted_cron_request(
                 bot_id=bot_id, user_id=user_id, runtime_stage=runtime_stage or "draft",
-                device_id=device_id, create_by_id=create_by_id, operator_id=operator_id,
+                device_id=device_id, operator_id=operator_id, authenticated_user_id=authenticated_user_id,
                 method="GET", path=f"/api/cron/{task_id}",
                 include_bot_context=True,
             )
@@ -362,14 +362,14 @@ class CronRuntimeOperationsMixin:
         body: dict,
         runtime_stage: str | None = None,
         device_id: str | None = None,
-        create_by_id: str | None = None,
         operator_id: str | None = None,
+        authenticated_user_id: str | None = None,
     ) -> dict:
         """在草稿态创建定时任务。"""
-        if runtime_stage is not None or device_id is not None or create_by_id is not None:
+        if runtime_stage is not None or device_id is not None or operator_id is not None:
             return await self._forward_targeted_cron_request(
                 bot_id=bot_id, user_id=user_id, runtime_stage=runtime_stage or "draft",
-                device_id=device_id, create_by_id=create_by_id, operator_id=operator_id,
+                device_id=device_id, operator_id=operator_id, authenticated_user_id=authenticated_user_id,
                 method="POST", path="/api/cron",
                 body=body,
             )
@@ -393,14 +393,14 @@ class CronRuntimeOperationsMixin:
         body: Optional[dict],
         runtime_stage: str = RUNTIME_STAGE_DRAFT,
         device_id: str | None = None,
-        create_by_id: str | None = None,
         operator_id: str | None = None,
+        authenticated_user_id: str | None = None,
     ) -> dict:
         """更新定时任务；发布态仅支持启停同步。"""
-        if device_id is not None or create_by_id is not None:
+        if device_id is not None or operator_id is not None:
             return await self._forward_targeted_cron_request(
                 bot_id=bot_id, user_id=user_id, runtime_stage=runtime_stage or "draft",
-                device_id=device_id, create_by_id=create_by_id, operator_id=operator_id,
+                device_id=device_id, operator_id=operator_id, authenticated_user_id=authenticated_user_id,
                 method="PUT", path=f"/api/cron/{task_id}",
                 body=body,
             )
@@ -455,14 +455,14 @@ class CronRuntimeOperationsMixin:
         task_id: str,
         runtime_stage: str = RUNTIME_STAGE_DRAFT,
         device_id: str | None = None,
-        create_by_id: str | None = None,
         operator_id: str | None = None,
+        authenticated_user_id: str | None = None,
     ) -> dict:
         """删除草稿态定时任务。"""
-        if device_id is not None or create_by_id is not None:
+        if device_id is not None or operator_id is not None:
             return await self._forward_targeted_cron_request(
                 bot_id=bot_id, user_id=user_id, runtime_stage=runtime_stage or "draft",
-                device_id=device_id, create_by_id=create_by_id, operator_id=operator_id,
+                device_id=device_id, operator_id=operator_id, authenticated_user_id=authenticated_user_id,
                 method="DELETE", path=f"/api/cron/{task_id}",
             )
 
@@ -487,14 +487,14 @@ class CronRuntimeOperationsMixin:
         force: bool = False,
         runtime_stage: str = RUNTIME_STAGE_DRAFT,
         device_id: str | None = None,
-        create_by_id: str | None = None,
         operator_id: str | None = None,
+        authenticated_user_id: str | None = None,
     ) -> dict:
         """触发定时任务；发布态会按运行实例 fan-out。"""
-        if device_id is not None or create_by_id is not None:
+        if device_id is not None or operator_id is not None:
             return await self._forward_targeted_cron_request(
                 bot_id=bot_id, user_id=user_id, runtime_stage=runtime_stage or "draft",
-                device_id=device_id, create_by_id=create_by_id, operator_id=operator_id,
+                device_id=device_id, operator_id=operator_id, authenticated_user_id=authenticated_user_id,
                 method="POST", path=f"/api/cron/{task_id}/run",
                 params={"force": force},
             )
@@ -541,14 +541,14 @@ class CronRuntimeOperationsMixin:
         runtime_stage: str = RUNTIME_STAGE_DRAFT,
         device_uuid: str | None = None,
         device_id: str | None = None,
-        create_by_id: str | None = None,
         operator_id: str | None = None,
+        authenticated_user_id: str | None = None,
     ) -> dict:
         """获取任务运行记录；发布态可按实例筛选。"""
-        if device_id is not None or create_by_id is not None:
+        if device_id is not None or operator_id is not None:
             return await self._forward_targeted_cron_request(
                 bot_id=bot_id, user_id=user_id, runtime_stage=runtime_stage or "draft",
-                device_id=device_id, create_by_id=create_by_id, operator_id=operator_id,
+                device_id=device_id, operator_id=operator_id, authenticated_user_id=authenticated_user_id,
                 method="GET", path=f"/api/cron/{task_id}/runs",
                 params={"limit": limit},
             )

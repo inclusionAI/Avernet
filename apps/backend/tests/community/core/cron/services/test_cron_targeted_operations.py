@@ -65,7 +65,7 @@ async def test_creation_locks_one_device_and_returns_target(stage):
         body={"name": "Daily", "command": "Summarize"},
         runtime_stage=stage,
         device_id="instance-a",
-        operator_id="owner",
+        authenticated_user_id="owner",
     )
     assert svc._transport.invoke.await_count == 1
     assert svc._resolver.resolve_for_bot.call_count == 0
@@ -74,11 +74,12 @@ async def test_creation_locks_one_device_and_returns_target(stage):
     )
     assert result["data"]["runtime_stage"] == stage
     assert result["data"]["device_id"] == "instance-a"
-    assert result["data"]["create_by_id"] == "owner"
+    assert result["data"]["operator_id"] == "owner"
+    assert "create_by_id" not in result["data"]
 
 
 @pytest.mark.asyncio
-async def test_caller_creator_is_not_operator_and_checks_delegation():
+async def test_caller_identity_is_not_authenticated_user_and_checks_delegation():
     svc = service(caller=True)
     svc._transport.invoke.return_value = {"success": True, "data": {"task_id": "job"}}
     await svc.create_cron(
@@ -88,8 +89,8 @@ async def test_caller_creator_is_not_operator_and_checks_delegation():
         body={},
         runtime_stage="online",
         device_id="instance-b",
-        create_by_id="caller",
-        operator_id="admin",
+        operator_id="caller",
+        authenticated_user_id="admin",
     )
     request = svc._runtime_bindings.resolve.call_args.args[0]
     assert request.actor_user_id == "caller"
@@ -115,13 +116,13 @@ async def test_caller_creator_is_not_operator_and_checks_delegation():
 )
 async def test_failed_target_never_forwards_or_falls_back(failure, expected):
     svc = service(caller=failure == "caller_missing")
-    kwargs = dict(runtime_stage="online", device_id="instance-a", operator_id="owner")
+    kwargs = dict(runtime_stage="online", device_id="instance-a", authenticated_user_id="owner")
     if failure == "wrong_device":
         kwargs["device_id"] = "foreign-instance"
     elif failure == "missing_device":
         kwargs["device_id"] = None
     elif failure == "delegation":
-        kwargs["create_by_id"] = "caller"
+        kwargs["operator_id"] = "caller"
         svc._collaborators.check_permission.side_effect = PermissionError("Denied")
     elif failure == "caller_missing":
         svc._runtime_bindings.resolve.side_effect = CallerInstanceNotReadyError(
@@ -176,8 +177,8 @@ async def test_management_targets_original_container(operation):
         nick_name="Owner",
         runtime_stage="online",
         device_id="instance-a",
-        create_by_id="caller",
-        operator_id="owner",
+        operator_id="caller",
+        authenticated_user_id="owner",
     )
     if operation != "list_running_crons":
         kwargs["task_id"] = "job"
@@ -253,6 +254,8 @@ async def test_transport_boundary_events_keep_session_key_and_exclude_credential
     ]:
         assert event in output
     assert "business-session" in output
+    assert "'operator_id': 'owner'" in output
+    assert "'authenticated_user_id': 'owner'" in output
     assert "test-secret" not in output
     assert "notify-secret" not in output
     svc._transport.invoke.side_effect = RuntimeError("Adapter unavailable")
@@ -315,10 +318,10 @@ async def test_list_is_routed_to_caller_and_decorates_every_row():
         nick_name="Owner",
         runtime_stage="online",
         device_id="instance-a",
-        create_by_id="caller",
+        operator_id="caller",
     )
     assert [row["device_id"] for row in result["data"]] == ["instance-a", "instance-a"]
-    assert [row["create_by_id"] for row in result["data"]] == ["caller", "caller"]
+    assert [row["operator_id"] for row in result["data"]] == ["caller", "caller"]
     assert svc._transport.invoke.await_count == 1
     with pytest.raises(CronRelayError):
         await svc.list_all_crons(
@@ -408,10 +411,10 @@ async def test_running_rows_keep_caller_target_metadata():
         nick_name="Owner",
         runtime_stage="online",
         device_id="instance-a",
-        create_by_id="caller",
+        operator_id="caller",
     )
     assert result["data"][0]["device_id"] == "instance-a"
-    assert result["data"][0]["create_by_id"] == "caller"
+    assert result["data"][0]["operator_id"] == "caller"
 
 
 def test_log_projection_includes_notify_contract_fields_only():

@@ -21,10 +21,11 @@ from tests.community.framework import (
     [
         {"runtime_stage": "production"},
         {"runtime_stage": "online", "device_id": 123},
-        {"runtime_stage": "online", "create_by_id": ""},
+        {"runtime_stage": "online", "operator_id": ""},
+        {"runtime_stage": "online", "operator_id": 123},
         {"runtime_stage": "online", "device_id": "a", "device_uuid": "b"},
         {"device_id": "a"},
-        {"create_by_id": "caller"},
+        {"operator_id": "caller"},
     ],
 )
 def test_target_schema_rejects_invalid_fields(target):
@@ -48,14 +49,14 @@ def test_target_schema_normalizes_matching_aliases():
         json_body={
             "bot_id": "bot_test",
             "runtime_stage": "draft",
-            "create_by_id": "u_owner",
+            "operator_id": "u_owner",
             "name": "Daily",
             "schedule": "0 9 * * *",
             "command": "Summarize",
         },
     ),
     seed=_seed_bot_with_owner,
-    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    expect=ExpectSuccess(status=200, json_contains={"success": True, "data": {"operator_id": "u_owner"}}),
 )
 def create_explicit_draft():
     """The actual DI service resolves the existing local binding."""
@@ -106,7 +107,7 @@ def create_invalid_stage():
             "bot_id": "bot_test",
             "owner_id": "u_owner",
             "runtime_stage": "draft",
-            "create_by_id": "u_owner",
+            "operator_id": "u_owner",
             "name": "Daily",
             "schedule": "0 9 * * *",
             "command": "Summarize",
@@ -119,6 +120,42 @@ def create_admin_delegation():
     """Existing ADMIN permission grants delegation without replacing the operator."""
 
 
+def _seed_member_with_lock(world):
+    from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import CollaboratorLockService
+    from tests.community.factories.access import make_staff_user
+    from tests.community.factories.bot_collaborator import make_collaborator
+
+    _seed_bot_with_owner(world)
+    make_staff_user(world, user_id="u_member")
+    make_collaborator(world, bot_id="bot_test", owner_id="u_owner",
+                      user_id="u_member", role="member", operator_id="u_owner")
+    world.get(CollaboratorLockService).acquire_lock("bot_test", "u_owner", "u_member")
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/cron",
+    scenario="operator_does_not_override_authenticated_user",
+    input=CaseInput(
+        headers={"x-user-id": "u_member"},
+        json_body={
+            "bot_id": "bot_test",
+            "owner_id": "u_owner",
+            "runtime_stage": "draft",
+            "operator_id": "u_owner",
+            "authenticated_user_id": "u_owner",
+            "name": "Unauthorized delegation",
+            "schedule": "0 9 * * *",
+            "command": "Summarize",
+        },
+    ),
+    seed=_seed_member_with_lock,
+    expect=ExpectError(status=403, json_contains={"success": False, "error_code": 403}),
+)
+def create_operator_cannot_spoof_authenticated_user():
+    """Body identity fields cannot upgrade a real MEMBER to an ADMIN/OWNER."""
+
+
 @endpoint_test(
     method="GET",
     path="/api/cron",
@@ -128,7 +165,7 @@ def create_admin_delegation():
         query_params={
             "bot_id": "bot_test",
             "runtime_stage": "draft",
-            "create_by_id": "u_owner",
+            "operator_id": "u_owner",
         },
     ),
     seed=_seed_bot_with_owner,
@@ -168,7 +205,7 @@ def list_invalid_alias():
         query_params={
             "bot_id": "bot_test",
             "runtime_stage": "draft",
-            "create_by_id": "u_owner",
+            "operator_id": "u_owner",
         },
     ),
     seed=_seed_bot_with_owner,
@@ -188,7 +225,7 @@ def detail_targeted_cron():
         query_params={
             "bot_id": "bot_test",
             "runtime_stage": "draft",
-            "create_by_id": "u_owner",
+            "operator_id": "u_owner",
         },
         json_body={"name": "Updated"},
     ),
@@ -209,7 +246,7 @@ def update_targeted_cron():
         query_params={
             "bot_id": "bot_test",
             "runtime_stage": "draft",
-            "create_by_id": "u_owner",
+            "operator_id": "u_owner",
         },
     ),
     seed=_seed_bot_with_owner,
@@ -229,7 +266,7 @@ def delete_targeted_cron():
         query_params={
             "bot_id": "bot_test",
             "runtime_stage": "draft",
-            "create_by_id": "u_owner",
+            "operator_id": "u_owner",
             "force": True,
         },
     ),
@@ -250,7 +287,7 @@ def run_targeted_cron():
         query_params={
             "bot_id": "bot_test",
             "runtime_stage": "draft",
-            "create_by_id": "u_owner",
+            "operator_id": "u_owner",
         },
     ),
     seed=_seed_bot_with_owner,
@@ -269,7 +306,7 @@ def runs_targeted_cron():
         query_params={
             "bot_id": "bot_test",
             "runtime_stage": "draft",
-            "create_by_id": "u_owner",
+            "operator_id": "u_owner",
         },
     ),
     seed=_seed_bot_with_owner,
@@ -303,7 +340,7 @@ def _seed_with_adapter_failure(world):
         query_params={
             "bot_id": "bot_test",
             "runtime_stage": "draft",
-            "create_by_id": "u_owner",
+            "operator_id": "u_owner",
         },
     ),
     seed=_seed_with_adapter_failure,

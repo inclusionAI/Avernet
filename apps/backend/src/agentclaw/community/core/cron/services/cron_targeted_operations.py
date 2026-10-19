@@ -38,7 +38,7 @@ _CRON_LOG_FIELDS = {
     "runtime_stage",
     "device_id",
     "device_uuid",
-    "create_by_id",
+    "operator_id",
     "sessionKey",
     "session_key",
     "created_at",
@@ -80,19 +80,19 @@ class CronTargetedOperationsMixin:
         user_id: str,
         runtime_stage: str,
         device_id: str | None,
-        create_by_id: str | None,
-        operator_id: str,
+        operator_id: str | None,
+        authenticated_user_id: str,
     ) -> tuple[dict, CronRuntimeTarget]:
         self._validate_runtime_stage(runtime_stage)
-        creator = create_by_id or operator_id
+        creator = operator_id or authenticated_user_id
         bot = self._bot_provider.get_bot(bot_id, user_id)
         owner_id = bot.get("owner_id") or user_id
         # COSEC: A supplied creator selects a Caller; it never grants management rights.
-        if creator != operator_id:
+        if creator != authenticated_user_id:
             try:
                 self._collaborators.check_permission(
                     bot["id"],
-                    operator_id,
+                    authenticated_user_id,
                     owner_id,
                     PermissionLevel.ADMIN,
                 )
@@ -122,8 +122,8 @@ class CronTargetedOperationsMixin:
             bot_type=bot.get("bot_type") or "personal",
             runtime_stage=runtime_stage,
             binding_id=resolved.binding_id,
-            create_by_id=creator,
-            operator_id=operator_id,
+            operator_id=creator,
+            authenticated_user_id=authenticated_user_id,
             fixed_binding=True,
             caller_binding=resolved.source is RuntimeBindingSource.CALLER_INSTANCE,
         )
@@ -159,13 +159,13 @@ class CronTargetedOperationsMixin:
                 )
         target = replace(target, device_uuid=device_id)
         logger.info(
-            "cron.target.resolved bot_id=%s stage=%s binding_id=%s device_id=%s create_by_id=%s operator_id=%s",
+            "cron.target.resolved bot_id=%s stage=%s binding_id=%s device_id=%s operator_id=%s authenticated_user_id=%s",
             bot_id,
             runtime_stage,
             target.binding_id,
             device_id,
             creator,
-            operator_id,
+            authenticated_user_id,
         )
         return bot, target
 
@@ -176,8 +176,8 @@ class CronTargetedOperationsMixin:
         user_id: str,
         runtime_stage: str,
         device_id: str | None = None,
-        create_by_id: str | None = None,
         operator_id: str | None = None,
+        authenticated_user_id: str | None = None,
         method: str,
         path: str,
         body: dict | None = None,
@@ -185,13 +185,13 @@ class CronTargetedOperationsMixin:
         include_bot_context: bool = False,
     ) -> dict:
         started = monotonic()
-        operator = operator_id or user_id
+        authenticated_user = authenticated_user_id or user_id
         fields = dict(
             bot_id=bot_id,
             runtime_stage=runtime_stage,
             device_id=device_id,
-            create_by_id=create_by_id or operator,
-            operator_id=operator,
+            operator_id=operator_id or authenticated_user,
+            authenticated_user_id=authenticated_user,
             method=method,
             path=path,
         )
@@ -210,8 +210,8 @@ class CronTargetedOperationsMixin:
                 user_id=user_id,
                 runtime_stage=runtime_stage,
                 device_id=device_id,
-                create_by_id=create_by_id,
-                operator_id=operator,
+                operator_id=operator_id,
+                authenticated_user_id=authenticated_user,
             )
             logger.info(
                 "cron.transport.request system=engine direction=out fields=%s binding_id=%s body=%s params=%s",
@@ -240,7 +240,7 @@ class CronTargetedOperationsMixin:
                     runtime_stage=target.runtime_stage,
                     device_id=target.device_uuid,
                     device_uuid=target.device_uuid,
-                    create_by_id=target.create_by_id,
+                    operator_id=target.operator_id,
                 )
             if isinstance(result.get("data"), list):
                 for item in result["data"]:
