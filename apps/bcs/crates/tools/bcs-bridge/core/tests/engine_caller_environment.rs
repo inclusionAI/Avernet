@@ -13,6 +13,8 @@ async fn concurrent_engine_processes_receive_their_own_actor() {
     use std::os::unix::fs::PermissionsExt;
     let dir=tempfile::tempdir().unwrap();let bin=dir.path().join("engine");
     std::fs::write(&bin,r#"#!/bin/sh
+# Consume the initial request before replying so the driver cannot write to a closed pipe.
+IFS= read -r request || exit 1
 printf '{"type":"result","subtype":"success","result":"%s","is_error":false,"session_id":"session"}\n' "$BCN_ACTOR_BOT_ID"
 "#).unwrap();
     std::fs::set_permissions(&bin,std::fs::Permissions::from_mode(0o755)).unwrap();
