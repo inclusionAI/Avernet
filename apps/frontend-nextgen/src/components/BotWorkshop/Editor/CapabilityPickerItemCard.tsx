@@ -51,6 +51,9 @@ export function CapabilityPickerItemCard({
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
             <span className="truncate text-xs font-medium">{item.name}</span>
+            {/* 与 /market/skill MarketItemCard 徽标语义对齐：官方紫、推荐橙；SkillCenter 来源才会回传这两个 additive 字段 */}
+            {'isOfficial' in item && item.isOfficial ? <Badge tone="purple">官方</Badge> : null}
+            {'isRecommended' in item && item.isRecommended ? <Badge tone="warning">推荐</Badge> : null}
             {'version' in item && item.version ? <Badge>{item.version}</Badge> : null}
             {alreadyAdded ? <Badge tone="primary">已添加</Badge> : null}
           </span>
@@ -60,6 +63,14 @@ export function CapabilityPickerItemCard({
         </span>
         {active ? <Check className="size-4 shrink-0 text-primary" /> : null}
       </Button>
+      {'tags' in item && Array.isArray(item.tags) && item.tags.length > 0 ? (
+        <div className="ml-9 mt-1 flex min-w-0 items-center gap-1">
+          {/* SC tagList 拼为单 chip（先用 / 分隔），与 MarketItemCard SkillCardFooterRow 一致；无内容不渲染 */}
+          <Badge tone="neutral" className="min-w-0 truncate">
+            {item.tags.join(' / ')}
+          </Badge>
+        </div>
+      ) : null}
       {onDelete && !alreadyAdded ? (
         <Button
           variant="ghost"
