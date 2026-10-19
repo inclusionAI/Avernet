@@ -61,7 +61,8 @@ describe('CommunityTopicList', () => {
 
   test('投票主题列表标记投票类型', () => {
     renderList({ topics: [{ ...topic, topicType: 'poll' }] });
-    expect(screen.getByText('投票')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: '投票主题' })).toBeInTheDocument();
+    expect(screen.queryByText('投票')).not.toBeInTheDocument();
   });
 
   test('无回复主题不渲染回复相关行，改为显示发帖时间', () => {

@@ -84,7 +84,7 @@ describe('CommunityTopicDetail', () => {
     });
 
     expect(screen.getByRole('region', { name: '投票配置' })).toBeInTheDocument();
-    expect(screen.getAllByText('投票').length).toBeGreaterThan(0);
+    expect(screen.getByRole('img', { name: '投票主题' })).toBeInTheDocument();
     expect(screen.getByText('多选')).toBeInTheDocument();
     expect(screen.getByText('方案 A')).toBeInTheDocument();
     expect(screen.getByText('方案 B')).toBeInTheDocument();

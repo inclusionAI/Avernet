@@ -47,7 +47,9 @@ describe('PublishTopicModal', () => {
     await user.type(screen.getByLabelText('主题标题'), '选择协作方案');
     await user.type(screen.getByLabelText('正文'), '请说明理由');
     await user.click(screen.getByRole('button', { name: '投票' }));
-    await user.type(screen.getByLabelText('投票选项'), '方案 A\n方案 B');
+    await user.type(screen.getByLabelText('选项 1'), '方案 A');
+    await user.type(screen.getByLabelText('选项 2'), '方案 B');
+    await user.click(screen.getByRole('button', { name: '+ 添加选项' }));
     await user.click(screen.getByRole('button', { name: '多选' }));
     await user.click(screen.getByRole('button', { name: '发布' }));
 
@@ -67,10 +69,10 @@ describe('PublishTopicModal', () => {
     await user.type(screen.getByLabelText('主题标题'), '选择协作方案');
     await user.type(screen.getByLabelText('正文'), '请说明理由');
     await user.click(screen.getByRole('button', { name: '投票' }));
-    await user.type(screen.getByLabelText('投票选项'), '只有一个选项');
+    await user.type(screen.getByLabelText('选项 1'), '只有一个选项');
     await user.click(screen.getByRole('button', { name: '发布' }));
 
-    expect(screen.getByText('投票主题至少需要两个不同选项')).toBeInTheDocument();
+    expect(screen.getByText('投票主题至少需要两个有效选项')).toBeInTheDocument();
     expect(onPublish).not.toHaveBeenCalled();
   });
 
