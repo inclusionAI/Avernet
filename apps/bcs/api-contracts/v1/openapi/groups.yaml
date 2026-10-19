@@ -289,9 +289,13 @@ GroupPath:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
         description: >-
-          The selected HumanOrOwnedBot Principal has no authorized participant
-          relation to the Group and is not the authenticated Bot management
-          actor. Public groups are exempt from this resource check.
+          The selected HumanOrOwnedBot Principal has no authorized relation to
+          the Group and is not the authenticated Bot management actor.
+          Detail reads also accept the selected Actor's participation
+          in any Session of this Group, or a Human's owned Bot participating in
+          the Group or one of its Sessions. Session-only relations grant no Group
+          editing, deletion, or participant-management rights. Public groups are
+          exempt from this resource check.
         x-error-codes:
           - forbidden
         content:

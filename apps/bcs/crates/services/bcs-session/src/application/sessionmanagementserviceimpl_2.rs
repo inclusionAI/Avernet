@@ -556,6 +556,14 @@ impl SessionManagementService for SessionManagementServiceImpl {
             .await?)
     }
 
+    async fn has_group_session_participant(
+        &self,
+        group_id: &str,
+        actor_ids: &[String],
+    ) -> Result<bool, SessionUseCaseError> {
+        Ok(self.repo.has_group_session_participant(group_id, actor_ids).await?)
+    }
+
     async fn delete(&self, session_id: &str) -> Result<bool, SessionUseCaseError> {
         Ok(self.repo.delete(session_id).await?)
     }

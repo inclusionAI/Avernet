@@ -105,6 +105,34 @@ impl MySqlSessionStore {
 }
 
 impl MySqlSessionStore {
+    pub(super) async fn repo_has_group_session_participant(
+        &self,
+        group_id: &str,
+        actor_ids: &[String],
+    ) -> ServiceResult<bool> {
+        // Bound SQL parameters and result size; never load full Session rows or
+        // issue one membership query per owned Bot. No cache: revocations must
+        // be visible on the next detail request.
+        for batch in actor_ids.chunks(200) {
+            let placeholders = vec!["?"; batch.len()].join(", ");
+            let sql = format!(
+                "SELECT 1 FROM bcs_session_participants p \
+                 JOIN bcs_group_sessions s ON s.env = p.env \
+                 AND s.session_id = p.session_id AND s.group_id = p.group_id \
+                 WHERE p.env = ? AND p.group_id = ? \
+                 AND p.bot_uuid IN ({placeholders}) LIMIT 1"
+            );
+            let mut params = vec![DbValue::from(self.env.as_str()), DbValue::from(group_id)];
+            params.extend(batch.iter().map(|id| DbValue::from(id.as_str())));
+            let rows = self.db.query(DbStatement::with_params(sql, params)).await
+                .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
+            if !rows.is_empty() {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     pub(super) async fn repo_list_group_ids_by_session_participant(&self, bot_uuid: &str) -> Vec<String> {
         let sql = "SELECT DISTINCT group_id FROM bcs_session_participants \
                    WHERE env = ? AND bot_uuid = ?";

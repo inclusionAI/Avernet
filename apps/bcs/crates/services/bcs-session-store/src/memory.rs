@@ -673,6 +673,22 @@ impl SessionRepoPort for MemorySessionRepo {
         seen.into_iter().collect()
     }
 
+    async fn has_group_session_participant(
+        &self,
+        group_id: &str,
+        actor_ids: &[String],
+    ) -> ServiceResult<bool> {
+        if actor_ids.is_empty() {
+            return Ok(false);
+        }
+        let actor_ids = actor_ids.iter().map(String::as_str).collect::<std::collections::HashSet<_>>();
+        let state = self.state.read().await;
+        Ok(state.sessions.values().any(|session| {
+            session.group_id == group_id
+                && session.participants.iter().any(|p| actor_ids.contains(p.bot_uuid.as_str()))
+        }))
+    }
+
     async fn delete(&self, session_id: &str) -> ServiceResult<bool> {
         let mut st = self.state.write().await;
         let existed = st.sessions.remove(session_id).is_some();

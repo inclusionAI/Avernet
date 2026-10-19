@@ -224,6 +224,14 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
             .await
     }
 
+    async fn has_group_session_participant(
+        &self,
+        group_id: &str,
+        actor_ids: &[String],
+    ) -> Result<bool, SessionUseCaseError> {
+        self.inner.has_group_session_participant(group_id, actor_ids).await
+    }
+
     async fn delete(&self, session_id: &str) -> Result<bool, SessionUseCaseError> {
         self.collaboration_runtime
             .cancel_session_runs(session_id, "session_deleted")

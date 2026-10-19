@@ -118,10 +118,16 @@ impl GroupServiceImpl {
         {
             return Ok(true);
         }
-        match principal {
-            Principal::Bot(_) => Ok(Self::group_management_actor_ids(group)
-                .iter()
-                .any(|actor_id| actor_id == &principal_actor_id)),
+        let mut session_actor_ids = match principal {
+            Principal::Bot(_) => {
+                if Self::group_management_actor_ids(group)
+                    .iter()
+                    .any(|actor_id| actor_id == &principal_actor_id)
+                {
+                    return Ok(true);
+                }
+                Vec::new()
+            }
             Principal::Human(human) => {
                 let owned_bot_ids = self
                     .registry
@@ -132,12 +138,20 @@ impl GroupServiceImpl {
                     .filter(|bot| bot.actor_kind == ActorKind::Bot)
                     .map(|bot| bot.bot_uuid)
                     .collect::<HashSet<_>>();
-                Ok(group.participants.iter().any(|participant| {
+                if group.participants.iter().any(|participant| {
                     participant.actor_kind == ActorKind::Bot
                         && owned_bot_ids.contains(&participant.bot_uuid)
-                }))
+                }) {
+                    return Ok(true);
+                }
+                owned_bot_ids.into_iter().collect::<Vec<_>>()
             }
-        }
+        };
+        session_actor_ids.push(principal_actor_id);
+        self.sessions
+            .has_group_session_participant(&group.id, &session_actor_ids)
+            .await
+            .map_err(|error| ApplicationError::internal(error.to_string()))
     }
 
     /// The effective Human principal may act as itself or as an owned Bot

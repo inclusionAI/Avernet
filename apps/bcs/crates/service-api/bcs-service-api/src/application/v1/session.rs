@@ -246,6 +246,9 @@ pub trait SessionService: Send + Sync {
         command: AddSessionParticipant,
     ) -> Result<SessionParticipant, ApplicationError>;
 
+    /// Human-only mutation. In addition to Session managers, a Human owner may
+    /// change an existing owned Bot's auto/muted mode. Ownership alone grants
+    /// neither message-view-scope changes nor general Session management.
     async fn update_participant(
         &self,
         command: UpdateSessionParticipant,
