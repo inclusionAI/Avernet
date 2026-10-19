@@ -201,6 +201,7 @@ export function createRepairReleaseService(input: {
           || selected.draft?.candidateCommit !== approval.candidateCommit || selected.draft?.packDigest !== approval.packDigest
           || digestRepairJson(selected.draft) !== approval.candidateDigest || digestRepairJson(selected.checks) !== approval.checksDigest || revisions[0].phase === 'drafting'
           || revisions.find(r => r.draft !== null && (r.phase !== 'no_change' || isAutomaticBatch(r.input)))?.revision !== request.revision) conflict('部署前候选或审核确认已变化');
+        await new RepairBatchRepository(tx).assertHistoricalScopeAvailable(tx, selected.input, true);
         for (const item of changedChainItems(revisions, selected, true)) {
           if(historicalReference(item))continue;
           const current = await new RepairBatchRepository(tx).getItem(approval.workflowId, item.itemId);

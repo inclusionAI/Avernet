@@ -11,11 +11,14 @@ export async function bindAnalysisWorkflowSnapshot(db: IDatabase, workflowId: st
     || refs.some(ref => ref.status !== 'resolved' || workflowSnapshotKey(ref.snapshot) !== workflowSnapshotKey(first.snapshot) || ref.status === 'resolved' && ref.snapshot.configDigest !== first.snapshot.configDigest)) return {status:'unresolved',reason:'IDENTITY_MISMATCH'};
   return first;
 }
-export function analysisWorkflowSnapshot(row: {scope_json: string; workflow_snapshot_json?: string | null}): WorkflowSnapshotBinding {
+export function storedAnalysisWorkflowSnapshot(row: {scope_json: string; workflow_snapshot_json?: string | null}): WorkflowSnapshotBinding | null {
   const stored = parseWorkflowSnapshotBinding(row.workflow_snapshot_json);
   if (stored) return stored;
-  try { return parseWorkflowSnapshotBinding(JSON.stringify(JSON.parse(row.scope_json).workflowSnapshot)) ?? {status:'unresolved',reason:'LEGACY_MISSING'}; }
-  catch { return {status:'unresolved',reason:'LEGACY_MISSING'}; }
+  try { return parseWorkflowSnapshotBinding(JSON.stringify(JSON.parse(row.scope_json).workflowSnapshot)); }
+  catch { return null; }
+}
+export function analysisWorkflowSnapshot(row: {scope_json: string; workflow_snapshot_json?: string | null}): WorkflowSnapshotBinding {
+  return storedAnalysisWorkflowSnapshot(row) ?? {status:'unresolved',reason:'LEGACY_MISSING'};
 }
 export async function hasAnalysisSnapshotColumn(db: IDatabase): Promise<boolean> {
   try { await db.query('SELECT workflow_snapshot_json FROM workflow_evolution_analysis_runs WHERE 1 = 0'); return true; }

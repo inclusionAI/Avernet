@@ -76,4 +76,53 @@ describe('explicit historical reference generation',()=>{
    await f.service.cancel('human',revision.taskId,1);
    expect(await f.db.query("SELECT state,active_task_id FROM workflow_repair_items WHERE item_id='item-1'")).toEqual([{state:'verified',active_task_id:'old-task'}]);
  });
+ it('fences concurrent history-only requests with different IDs without reserving historical items',async()=>{
+   const f=await setup();
+   const request={...f.request,itemIds:['item-1'],historicalItemIds:['item-1'],selection:{'item-1':f.request.selection['item-1']}};
+   const results=await Promise.allSettled([f.service.create('human',{...request,requestId:'history-a'}),f.service.create('human',{...request,requestId:'history-b'})]);
+   expect(results.filter(r=>r.status==='fulfilled')).toHaveLength(1);
+   const rejected=results.find(r=>r.status==='rejected') as PromiseRejectedResult;
+   expect(rejected.reason).toMatchObject({code:'ITEM_BUSY',details:{reasonCode:'HISTORICAL_TASK_EXISTS'}});
+   expect(f.calls).toHaveLength(1);
+   expect(await f.db.query('SELECT * FROM workflow_repair_items')).toEqual([]);
+   const created=(results.find(r=>r.status==='fulfilled') as PromiseFulfilledResult<Awaited<ReturnType<typeof f.service.create>>>).value;
+   await f.service.cancel('human',created.taskId,1);
+   expect((await f.service.create('human',{...request,requestId:'after-cancel'})).taskId).not.toBe(created.taskId);
+   expect(f.calls).toHaveLength(2);
+ });
+
+ it('keeps upstream manual-goal behavior for historical text suggestions without patch preconditions',async()=>{
+   const f=await setup();
+   f.items[1].proposal={summary:'Keep this historical requirement'};
+   f.items[1].instruction='Preserve the old constraint where applicable';
+   const result=await f.service.create('human',{...f.request,itemIds:['item-1'],historicalItemIds:['item-1'],selection:{'item-1':f.request.selection['item-1']}});
+   expect(result.input.items[0]).toMatchObject({proposal:f.items[1].proposal,instruction:f.items[1].instruction,context:{referenceOnly:true}});
+   expect(f.calls).toHaveLength(1);
+ });
+ it('fences publication of legacy duplicate historical tasks before a second external dispatch',async()=>{
+   const f=await setup();
+   for(const m of repairReleaseMigrations)for(const sql of m.sql)await f.db.exec(f.db.dialect.renderDdl(sql));
+   const request={...f.request,itemIds:['item-1'],historicalItemIds:['item-1'],selection:{'item-1':f.request.selection['item-1']}};
+   const first=await f.service.create('human',{...request,requestId:'legacy-a'});
+   // Reconstruct two tasks accepted before the generation fence existed.
+   await f.service.cancel('human',first.taskId,1);
+   const second=await f.service.create('human',{...request,requestId:'legacy-b'});
+   await f.db.exec("UPDATE workflow_repair_revisions SET phase='drafting',state_version=0 WHERE task_id=?",[first.taskId]);
+   for(const revision of [first,second]) {
+     const draft={candidateCommit:'d'.repeat(40),parentCandidateCommit:revision.input.baseline.packCommit,packDigest:'e'.repeat(40),itemResults:[{itemId:'item-1',status:'changed',reason:'Adapted historical goal'}]};
+     await f.service.report({workflowId:'wf-1',taskId:revision.taskId,revision:1,expectedStateVersion:0,status:'succeeded',draft,
+       checks:{schemaVersion:'workflow-repair-checks/v1',candidateCommit:draft.candidateCommit,packDigest:draft.packDigest,candidateDigest:digestRepairJson(draft),static:{status:'passed'},mock:{status:'passed'},coverage:[{itemId:'item-1'}]}});
+   }
+   f.executionPort.diff=async request=>({...request,files:[{path:'workflows/wf-1.yaml',status:'M',before:'old',after:'new',binary:false,truncated:false,patch:'@@ -1 +1 @@\n-old\n+new'}],truncated:false});
+   let dispatched=0;
+   const release=createRepairReleaseService({db:f.db,workbench:f.service,publisher:{targets:async()=>[{id:'target',botId:'bot',ownerId:'owner',environment:'pre',label:'fixture'}],activeBaseline:async()=>first.input.baseline,
+     dispatch:async()=>{dispatched++;return {status:'running'};},reconcile:async()=>({status:'running'})}});
+   const approvals=await Promise.all([first,second].map(revision=>release.confirm('human',revision.taskId,{revision:1,expectedStateVersion:1,requestId:`confirm-${revision.taskId}`,targetId:'target',acknowledgeUncoveredChecks:true})));
+   const results=await Promise.allSettled([first,second].map((revision,index)=>release.deploy('human',revision.taskId,{revision:1,expectedApprovalVersion:approvals[index].stateVersion,requestId:`deploy-${revision.taskId}`})));
+   expect(results.filter(r=>r.status==='fulfilled')).toHaveLength(1);
+   expect((results.find(r=>r.status==='rejected') as PromiseRejectedResult).reason).toMatchObject({code:'ITEM_BUSY',details:{reasonCode:'HISTORICAL_TASK_EXISTS'}});
+   expect(dispatched).toBe(1);
+   expect(await f.db.query('SELECT * FROM workflow_repair_items')).toEqual([]);
+ });
+
 });

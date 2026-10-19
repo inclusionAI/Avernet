@@ -1,6 +1,6 @@
 import { WorkflowSnapshotRepository } from '@avernet/clawweb-shared/server/services/workflow-snapshot';
 import type { WorkflowSnapshotInput } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot';
-import { bindAnalysisWorkflowSnapshot, analysisWorkflowSnapshot, hasAnalysisSnapshotColumn } from './analysis-workflow-snapshot.js';
+import { bindAnalysisWorkflowSnapshot, analysisWorkflowSnapshot, storedAnalysisWorkflowSnapshot, hasAnalysisSnapshotColumn } from './analysis-workflow-snapshot.js';
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import {
   canonicalJson,
@@ -258,9 +258,28 @@ export class WorkflowEvolutionRepository {
   }
 
   async getWorkflowSnapshotInput(analysisId: string): Promise<WorkflowSnapshotInput> {
-    const analysis = await this.findAnalysisRun(analysisId);
-    if (!analysis) throw new Error('analysis_not_found');
-    const binding = analysisWorkflowSnapshot(analysis);
+    const { analysis, binding } = await this.db.transaction(async tx => {
+      const lock = tx.dbType === 'mysql' || tx.dbType === 'zdas' ? ' FOR UPDATE' : '';
+      const analysis = (await tx.query<WorkflowEvolutionAnalysisRow>(
+        `SELECT * FROM workflow_evolution_analysis_runs WHERE analysis_id = ?${lock}`, [analysisId],
+      ))[0];
+      if (!analysis) throw new Error('analysis_not_found');
+      const stored = storedAnalysisWorkflowSnapshot(analysis);
+      if (stored) return { analysis, binding: stored };
+      // Accepted pre-rollout work has no binding yet. Resolve only its original
+      // run scope and freeze once; never substitute today's active/saved version.
+      const scope = JSON.parse(analysis.scope_json) as { flowIds?: unknown };
+      const scoped = Array.isArray(scope.flowIds) ? [...new Set(scope.flowIds.map(String).filter(Boolean))] : [];
+      const flowIds = scoped.length ? scoped : analysis.flow_id ? [analysis.flow_id] : [];
+      const binding = await bindAnalysisWorkflowSnapshot(tx, analysis.workflow_id, flowIds);
+      const column = await hasAnalysisSnapshotColumn(tx);
+      const written = await tx.exec(
+        `UPDATE workflow_evolution_analysis_runs SET scope_json = ?${column ? ', workflow_snapshot_json = ?' : ''} WHERE analysis_id = ?`,
+        [canonicalJson({ ...scope, workflowSnapshot: binding }), ...(column ? [canonicalJson(binding)] : []), analysisId],
+      );
+      if (written.affectedRows !== 1) throw new Error('analysis snapshot association failed');
+      return { analysis, binding };
+    });
     if (binding.status !== 'resolved') throw new Error('WORKFLOW_SNAPSHOT_UNAVAILABLE');
     if (binding.snapshot.workflowId !== analysis.workflow_id) throw new Error('IDENTITY_MISMATCH');
     return new WorkflowSnapshotRepository(this.db).read(binding.snapshot);
