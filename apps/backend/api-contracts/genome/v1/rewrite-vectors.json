@@ -1,5 +1,5 @@
 {
-  "description": "Test vectors for the rewrite measure (README §6.3), with the numerator, denominator and lcs_cell_limit of risk-tiers.json. a and b are a file's lines in the base and after the patch, written as runs [line, count] so long files stay short: [[\"x\", 3]] is three lines \"x\". lcs is given when the remaining cells are within the limit; flagged is the rewrite flag.",
+  "description": "Test vectors for the rewrite measure (README §6.3), with the numerator, denominator and lcs_cell_limit of risk-tiers.json. a and b are a file's lines in the base and after the patch, written as runs [line, count] so long files stay short: [[\"x\", 3]] is three lines \"x\". lcs is given when the remaining cells are within the limit; flagged is the rewrite flag. A vector gives either a and b, or a_text and b_text, the file text before and after, which is split into lines by README §6.3's rule.",
   "vectors": [
     {
       "name": "identical",
@@ -502,6 +502,52 @@
       "over_cell_limit": true,
       "flagged": true,
       "note": "4096 * 4097 > 2^24: flagged without computing the LCS, although the exact measure would not flag it"
+    },
+    {
+      "name": "text-empty-to-newline",
+      "a_text": "",
+      "b_text": "\n",
+      "over_cell_limit": false,
+      "flagged": true,
+      "note": "\"\" is no lines and \"\\n\" is one empty line: every line is new, flagged",
+      "lcs": 0
+    },
+    {
+      "name": "text-final-newline-added",
+      "a_text": "a",
+      "b_text": "a\n",
+      "over_cell_limit": false,
+      "flagged": false,
+      "note": "\"a\" and \"a\\n\" are both [\"a\"]: no line changed",
+      "lcs": 1
+    },
+    {
+      "name": "text-cr-is-part-of-the-line",
+      "a_text": "a\nb\n",
+      "b_text": "a\r\nb\n",
+      "over_cell_limit": false,
+      "flagged": true,
+      "note": "only \\n splits; \"a\\r\" differs from \"a\": changed 2/4",
+      "lcs": 1
+    },
+    {
+      "name": "asymmetric-within-cell-limit",
+      "a": [
+        [
+          "x",
+          1
+        ]
+      ],
+      "b": [
+        [
+          "y",
+          65536
+        ]
+      ],
+      "over_cell_limit": false,
+      "flagged": true,
+      "note": "1 * 65536 is within the limit, so the LCS is computed exactly (0); an implementation must stay bounded here, where Myers' D is about N + M",
+      "lcs": 0
     }
   ]
 }

@@ -39,7 +39,7 @@ from tests.community.contracts.genome_canonical_json import (
     revision_id,
     sha256_digest,
 )
-from tests.community.contracts.genome_rewrite import lcs_length, rewrite_flagged, strip_common
+from tests.community.contracts.genome_rewrite import lcs_length, rewrite_flagged, strip_common, to_lines
 
 _BACKEND = Path(__file__).resolve().parents[3]
 _CONTRACT = _BACKEND / "api-contracts" / "genome" / "v1"
@@ -378,7 +378,10 @@ def _expand(runs: list[list[Any]]) -> list[str]:
 @pytest.mark.parametrize("vector", _REWRITE["vectors"], ids=lambda v: v["name"])
 def test_rewrite_vectors(vector: dict[str, Any]) -> None:
     threshold = _RISK_TIERS["rewrite_threshold"]
-    a, b = _expand(vector["a"]), _expand(vector["b"])
+    if "a_text" in vector:
+        a, b = to_lines(vector["a_text"]), to_lines(vector["b_text"])
+    else:
+        a, b = _expand(vector["a"]), _expand(vector["b"])
     _, rest_a, rest_b = strip_common(a, b)
     assert (len(rest_a) * len(rest_b) > threshold["lcs_cell_limit"]) == vector["over_cell_limit"]
     if "lcs" in vector:

@@ -8,9 +8,11 @@ reaches the same answer. This module is the reference the contract test checks
 ``core/bot_genome/`` and keeps the vectors as its oracle.
 
 The exact LCS is computed with Myers' O((N+M)D) shortest edit script, where D
-is the number of inserted plus deleted lines: LCS = (N + M - D) / 2. Any exact
-algorithm gives the same answer; this one is fast when the files are close,
-which is the case the cell limit leaves to it.
+is the number of inserted plus deleted lines: LCS = (N + M - D) / 2. Myers is
+fast when the files are close, but D can approach N + M when they are not, so
+it stops once its work would pass N * M and finishes with the O(N * M) table
+instead. Either way the work stays within twice the cell product the contract
+bounds. Any exact algorithm gives the same answer.
 
 Usage::
 
@@ -19,6 +21,14 @@ Usage::
 from __future__ import annotations
 
 from collections.abc import Sequence
+
+
+def to_lines(text: str) -> list[str]:
+    """README §6.3: split on "\n"; a final "\n" ends the last line, and empty text has no lines."""
+    lines = text.split("\n")
+    if lines[-1] == "":
+        lines.pop()
+    return lines
 
 
 def strip_common(a: Sequence[str], b: Sequence[str]) -> tuple[int, Sequence[str], Sequence[str]]:
@@ -34,12 +44,14 @@ def strip_common(a: Sequence[str], b: Sequence[str]) -> tuple[int, Sequence[str]
 
 
 def lcs_length(a: Sequence[str], b: Sequence[str]) -> int:
-    """Exact length of the longest common subsequence of two line lists (Myers)."""
+    """Exact length of the longest common subsequence of two line lists, in O(N * M) work at most."""
     n, m = len(a), len(b)
     if n == 0 or m == 0:
         return 0
     frontier = {1: 0}  # diagonal k -> furthest x reached with d edits
     for d in range(n + m + 1):
+        if d * (n + m) > n * m:
+            return _lcs_table(a, b)
         for k in range(-d, d + 1, 2):
             if k == -d or (k != d and frontier[k - 1] < frontier[k + 1]):
                 x = frontier[k + 1]  # step down: insert a line of b
@@ -52,6 +64,18 @@ def lcs_length(a: Sequence[str], b: Sequence[str]) -> int:
             if x >= n and y >= m:
                 return (n + m - d) // 2
     raise AssertionError("unreachable: d = n + m always reaches the end")
+
+
+def _lcs_table(a: Sequence[str], b: Sequence[str]) -> int:
+    """The O(N * M) dynamic programme, one row at a time."""
+    row = [0] * (len(b) + 1)
+    for line in a:
+        diagonal = 0
+        for j, other in enumerate(b):
+            above = row[j + 1]
+            row[j + 1] = diagonal + 1 if line == other else max(above, row[j])
+            diagonal = above
+    return row[-1]
 
 
 def rewrite_flagged(

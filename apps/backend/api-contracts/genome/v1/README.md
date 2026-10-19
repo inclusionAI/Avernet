@@ -463,6 +463,11 @@ that is empty before and after is never flagged. The threshold is
 `rewrite_threshold` in `risk-tiers.json` (`2/5`, written as a numerator and a
 denominator).
 
+**Lines.** A file's bytes are decoded as UTF-8 and split on `\n` only (a `\r`
+stays part of its line). A final `\n` ends the last line and does not start a
+new, empty one, and an empty file has no lines: `""` is `[]`, `"\n"` is
+`[""]`, and `"a"` and `"a\n"` are both `["a"]`.
+
 Exact LCS costs `len(a) * len(b)` in time, which is unbounded for the large
 files the limits allow. So the measure is bounded, deterministically, and
 every implementation reaches the same answer:
@@ -474,9 +479,12 @@ every implementation reaches the same answer:
 2. If the remaining `len(a) * len(b)` exceeds `rewrite_threshold.lcs_cell_limit`
    (`16777216`, 2^24), flag the file `rewrite` without computing the LCS. A
    change that large is reviewed by a person (T2) rather than scored.
-3. Otherwise compute the exact LCS of the remaining lines. `LCS(a, b)` is
-   that plus the number of lines removed from each side, and the rule above
-   applies to the whole file.
+3. Otherwise compute the exact LCS of the remaining lines, with an algorithm
+   whose work is bounded by their `len(a) * len(b)` (a dynamic programme, or
+   Myers' O((N+M)D) diff falling back to one: `D` can approach `N + M` when
+   the two sides are very different in length). `LCS(a, b)` is that plus the
+   number of lines removed from each side, and the rule above applies to the
+   whole file.
 
 [`rewrite-vectors.json`](rewrite-vectors.json) fixes the answers an
 implementation must reach, including a change of exactly 2/5 (not flagged), a
