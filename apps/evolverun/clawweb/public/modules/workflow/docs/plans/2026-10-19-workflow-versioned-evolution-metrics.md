@@ -8,7 +8,7 @@
 
 **Tech Stack:** 现有 TypeScript SQL repositories、Vitest、React 查询与问题组件。
 
-**Spec:** [spec.md §8](spec.md#8-配套指标r7扩展交付)。前置：[核心计划](plan.md)任务1–3；发布效果沿用任务4–6的精确目标绑定。
+**Spec:** [spec.md §8](../specs/2026-10-19-workflow-versioned-evolution.md#8-配套指标r7扩展交付)。前置：[核心计划](../plans/2026-10-19-workflow-versioned-evolution.md)任务1–3；发布效果沿用任务4–6的精确目标绑定。
 
 状态：2026-10-19 按投入范围复审；仅文档。路径前缀：`CW=apps/evolverun/clawweb`、`WF=$CW/public/modules/workflow`、`EV=$CW/public/modules/clawevolve`，均为所属仓库相对路径。
 

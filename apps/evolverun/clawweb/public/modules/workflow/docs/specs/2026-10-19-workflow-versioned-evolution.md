@@ -2,7 +2,7 @@
 
 日期：2026-10-19。状态：按生产影响与投入范围复审后的修订稿；尚未实现、测试或上线。
 
-实施计划：[核心计划](plan.md)、[扩展指标计划](metrics-plan.md)。
+实施计划：[核心计划](../plans/2026-10-19-workflow-versioned-evolution.md)、[扩展指标计划](../plans/2026-10-19-workflow-versioned-evolution-metrics.md)。
 
 ## 1. 已确认的需求与边界
 

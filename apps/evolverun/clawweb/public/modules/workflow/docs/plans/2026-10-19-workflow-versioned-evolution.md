@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript、现有 SQLite/MySQL/ZDAS 适配、Vitest、Node test、现有 Python 生成消费者测试。
 
-**Spec:** [spec.md](spec.md)。扩展指标单独执行 [metrics-plan.md](metrics-plan.md)。
+**Spec:** [spec.md](../specs/2026-10-19-workflow-versioned-evolution.md)。扩展指标单独执行 [metrics-plan.md](../plans/2026-10-19-workflow-versioned-evolution-metrics.md)。
 
 状态：2026-10-19 按生产影响与投入范围复审；仅文档，尚未实施或运行产品测试。
 
