@@ -16,7 +16,8 @@ import { getRouteMeta } from './routeMeta';
  * 全局壳（refactor-global-nav-shell）：单侧边栏 + 内容区两栏布局，顶栏（AppHeader）已退役，
  * 原「工作/管理」区域 Tab 随之移除——协作/Bot 双分组常驻侧栏，不再按区域整体换组。
  * 顶栏功能（Logo/通知中心/用户身份/帮助）全部归位进 AppSidebar。
- * <lg 视口：内流侧栏由 AppSidebar hidden，经左上悬浮汉堡打开一级导航抽屉（与桌面同数据源 SidebarNavList）。
+ * <lg 视口：内流侧栏由 AppSidebar hidden，一级导航入口为内容区顶部占位条带（正常流，
+ * 不悬浮压住页面控件）；精简视图（navigationVisibility=hidden）不渲染条带、零预留。
  */
 export function AppShell({ children }: { children: React.ReactNode }) {
   const location = useLocation();
@@ -82,17 +83,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             currentUser={currentUser}
           />
         )}
-        <main className="relative min-w-0 flex-1 overflow-hidden">
-          {/* <lg 一级导航入口（原顶栏汉堡归位为悬浮按钮）：≥lg 隐藏(内流侧栏可见)。 */}
+        {/* 内容列：<lg 顶条带与 main 正常流堆叠；main 以 min-h-0+flex-1 承接剩余高度，保持 h-full 消费链。 */}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {/* <lg 一级导航入口条带：正常流常驻占位（h-12 对齐页面顶栏），不再悬浮压住页面控件。 */}
           {!hideNavigation && (
-            <div className="absolute left-2 top-2 z-40 lg:hidden">
+            <div className="flex h-12 shrink-0 items-center border-b border-border bg-card px-2 lg:hidden">
               <IconButton label="打开导航" icon={<Menu className="h-4 w-4" />} onClick={() => setMobileNavOpen(true)} />
             </div>
           )}
-          {children}
-        </main>
+          <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden">{children}</main>
+        </div>
       </div>
-      {/* <lg 一级导航抽屉：≥lg 内流侧栏可见；<lg 由左上悬浮汉堡触发本抽屉。 */}
+      {/* <lg 一级导航抽屉：≥lg 内流侧栏可见；<lg 由内容区顶部导航条带的汉堡钮触发本抽屉。 */}
       {!hideNavigation && (
         <Drawer open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
           <DrawerContent side="left" size="sm" showClose={false} bodyClassName="p-0 flex flex-col">

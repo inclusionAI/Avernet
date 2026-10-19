@@ -77,4 +77,12 @@ describe('ChatLayoutPanelSlot', () => {
     (mockPanelRenders.at(-1)?.onIsOpenChange as (open: boolean) => void)?.(true);
     expect(onOpenStateChange).toHaveBeenCalledWith(true);
   });
+
+  it('slot 私有 props 剥离：dismissOnOutside 不透传给 SDK Panel（缺省 true 行为由真实 SDK 用例看守）', () => {
+    mockPanelRenders = [];
+    render(<ChatLayoutPanelSlot {...asRootInjected({ bridge: 'bridge', dismissOnOutside: false })} />);
+    // strip-before-forward：SDK Panel 不感知收起策略，只收到业务 props。
+    expect(mockPanelRenders.at(-1)?.dismissOnOutside).toBeUndefined();
+    expect(mockPanelRenders.at(-1)?.bridge).toBe('bridge');
+  });
 });

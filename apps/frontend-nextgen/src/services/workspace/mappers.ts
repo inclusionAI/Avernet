@@ -1,6 +1,7 @@
 import type {
   GroupKind,
   GroupView,
+  HumanMentionNotifyMode,
   ParticipantRole,
   ParticipantView,
   SessionKind,
@@ -75,6 +76,11 @@ function isParticipantMode(value: unknown): value is 'auto' | 'muted' | 'present
 
 function isMessageViewScope(value: unknown): value is 'full' | 'participant' {
   return value === 'full' || value === 'participant';
+}
+
+/** @Human 通知来源枚举守卫：旧版后端缺省或枚举漂移时整字段丢弃，不伪造默认值。 */
+export function isHumanMentionNotifyMode(value: unknown): value is HumanMentionNotifyMode {
+  return value === 'all' || value === 'driver_bot_only' || value === 'none';
 }
 const ROLE_NATIVE_TO_DOMAIN: Record<string, ParticipantRole> = {
   owner: 'owner',

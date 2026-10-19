@@ -1,6 +1,6 @@
 import { Button, Card, Switch } from '@/components/ui';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import type { GroupView, IdentityView } from '@/domain/collaboration';
+import type { GroupUpdatePatch, GroupView, IdentityView } from '@/domain/collaboration';
 import type { DingTalkBindingState } from '@/services/workspace/channelBindingService';
 import type { PolicyResult } from '@/services/workspace/groupService';
 import type { DomainResult } from '@/services/workspace/identityService';
@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import type { GroupDingTalkConfig } from './DingTalkConfigPanel';
 import { DingTalkConfigPanel } from './DingTalkConfigPanel';
 import { EditableName } from './EditableName';
+import { HumanNotifyModeField } from './HumanNotifyModeField';
 import { ManagePanelHeader } from './ManagePanelHeader';
 import { ManagePanelTabs } from './ManagePanelTabs';
 import { MemberList } from './MemberList';
@@ -23,10 +24,7 @@ export interface GroupManagePanelProps {
   authenticatedUserId?: string | null;
   authenticatedUserName?: string | null;
   onClose: () => void;
-  onUpdate: (patch: {
-    name?: string;
-    visibility?: 'private' | 'public';
-  }) => Promise<DomainResult<GroupView> | null> | void;
+  onUpdate: (patch: GroupUpdatePatch) => Promise<DomainResult<GroupView> | null> | void;
   onDissolve: () => void;
   onLeaveGroup: (actorId: string) => Promise<boolean>;
   onAddMember: (actorId: string) => Promise<boolean>;
@@ -151,6 +149,11 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
                   aria-label="公开群"
                 />
               </div>
+              <HumanNotifyModeField
+                value={group.humanMentionNotifyMode}
+                canManage={canManageGroup}
+                onUpdate={onUpdate}
+              />
               {!canManageGroup ? (
                 <p className="m-0 mt-2 text-xs text-muted-foreground">{canManage.disabledReason}</p>
               ) : null}

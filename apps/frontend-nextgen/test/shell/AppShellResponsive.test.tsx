@@ -82,6 +82,23 @@ beforeEach(() => {
   useWorkspaceStore.getState().reset();
 });
 
+describe('AppShell <lg 一级导航入口条（内流占位）', () => {
+  it('导航入口以正常流条带渲染并先于内容（非绝对定位浮层），不再压住页面自身顶栏控件', () => {
+    mockViewport.desktop = false;
+    renderShell();
+    const navToggle = screen.getByRole('button', { name: '打开导航' });
+    const strip = navToggle.parentElement as HTMLElement;
+    // 口径：入口条自带占位高度（正常流）——修复前为 absolute 浮层，
+    // 与页面内容（如群聊/单聊顶栏「打开会话列表」箭头）重叠导致点击冲突。
+    expect(strip.className).not.toContain('absolute');
+    // 高度预留仅限 <lg：桌面内流侧栏可见时条带隐藏（lg:hidden）不占高度。
+    expect(strip.className).toContain('lg:hidden');
+    // 条带先于内容渲染：内容相对条带为后续兄弟节点，正常流中各自占位。
+    const page = screen.getByTestId('page');
+    expect(strip.compareDocumentPosition(page) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
 describe('AppShell responsive off-canvas nav (一级)', () => {
   it('below lg: hamburger opens the nav drawer', () => {
     mockViewport.desktop = false;

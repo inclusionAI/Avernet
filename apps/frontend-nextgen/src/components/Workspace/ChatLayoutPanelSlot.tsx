@@ -12,6 +12,9 @@
  * 本组件后组合分发——Root 的 setter 原样透传（ResizeHandle 语义不变），
  * App 侧 onOpenStateChange 串联其后，获得与 SDK 一致的真实开合态
  * （Monitor 激活态与 SidePanelCollapseButton 显隐同源消费）。
+ *
+ * 收起策略 dismissOnOutside（默认 true，单聊侧口径）为私有 prop：false 时不订阅点外
+ * 收起、仅显式信号关闭；转发 SDK 前剥离。
  */
 import { useWorkspacePanelDismiss } from '@/hooks/useWorkspacePanelDismiss';
 import type { PanelHandle } from '@tc-chat/core';
@@ -30,6 +33,8 @@ type ChatLayoutPanelInjectedProps = {
 export type ChatLayoutPanelSlotProps = ChatLayoutPanelProps & {
   /** App 侧真实开合态观察口（含默认挂载 openTab 自动展开，非仅用户点按路径）。 */
   onOpenStateChange?: (isOpen: boolean) => void;
+  /** 点击面板外部是否收起；默认 true。false：仅经顶栏「副屏」钮/悬浮「收起」钮关闭。 */
+  dismissOnOutside?: boolean;
 };
 
 // 公开类型缺 onIsOpenChange 声明，运行时由 Root 注入并由本组件组合分发。
@@ -41,7 +46,7 @@ export const ChatLayoutPanelSlot = forwardRef<PanelHandle, ChatLayoutPanelSlotPr
   props,
   ref,
 ) {
-  const { onOpenStateChange, ...rest } = props;
+  const { onOpenStateChange, dismissOnOutside = true, ...rest } = props;
   const handleRef = useRef<PanelHandle | null>(null);
   const panelClass = `workspace-sdk-panel-${useId().replace(/:/g, '')}`;
   const [open, setOpen] = useState(props.defaultOpen ?? false);
@@ -62,7 +67,8 @@ export const ChatLayoutPanelSlot = forwardRef<PanelHandle, ChatLayoutPanelSlotPr
     [panelClass],
   );
   const dismiss = useCallback(() => handleRef.current?.closePanel(), []);
-  useWorkspacePanelDismiss(open, contains, dismiss);
+  // 传 false 不订阅点外收起，仅保留 ref 显式关闭通道。
+  useWorkspacePanelDismiss(open && dismissOnOutside, contains, dismiss);
   const injected = rest as ChatLayoutPanelProps & ChatLayoutPanelInjectedProps;
   const rootIsOpenChange = injected.onIsOpenChange;
   const handleIsOpenChange = useCallback(

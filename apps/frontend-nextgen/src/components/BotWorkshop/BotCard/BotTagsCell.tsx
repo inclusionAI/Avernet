@@ -1,4 +1,5 @@
 import { Badge } from '@/components/ui/Badge';
+import { getBotEngineBadgeTone } from '@/components/BotEngineBadgeTone';
 import type { BotDomain } from '@/services/botWorkshop';
 import { Cloud, Laptop } from 'lucide-react';
 import React from 'react';
@@ -16,22 +17,6 @@ export interface BotTagsCellProps {
   bot: BotDomain;
 }
 
-function engineTone(engine: string): 'primary' | 'success' | 'warning' | 'purple' | 'neutral' {
-  switch (engine.toLowerCase()) {
-    case 'openclaw':
-      return 'primary';
-    case 'teclaw':
-      return 'success';
-    case 'hermes':
-      return 'warning';
-    case 'claude_code':
-    case 'claude-code':
-      return 'purple';
-    default:
-      return 'neutral';
-  }
-}
-
 const BotTagsCell: React.FC<BotTagsCellProps> = ({ bot }) => {
   const isAgentCodingBot = bot.runtime.isAgentCodingBot;
   const engineLabel = isAgentCodingBot
@@ -40,7 +25,7 @@ const BotTagsCell: React.FC<BotTagsCellProps> = ({ bot }) => {
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <Badge tone={engineTone(bot.runtime.engine)}>{engineLabel}</Badge>
+      <Badge tone={getBotEngineBadgeTone(bot.runtime.engine)}>{engineLabel}</Badge>
       <Badge tone={bot.deployment === 'local' ? 'warning' : 'primary'}>
         {bot.deployment === 'local' ? (
           <Laptop aria-hidden className="mr-1 size-3" />

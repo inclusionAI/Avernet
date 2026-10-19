@@ -86,7 +86,9 @@ it('group panel exposes base info tabs and member management', () => {
   expect(screen.getByText('群成员（1）')).toBeInTheDocument();
   expect(screen.getByText('分享协作群')).toBeInTheDocument();
   expect(screen.getByText('人类角色可以通过链接加入协作群')).toBeInTheDocument();
-  expect(screen.queryByText(/Human/)).not.toBeInTheDocument();
+  // 「@Human 通知来源」为 2026-10 需求新增的管理字段标签（见 GroupManagePanel.test.tsx），
+  // 此处仅回归旧的裸「Human」残留文案不再出现。
+  expect(screen.queryByText('Human')).not.toBeInTheDocument();
   expect(screen.getByText('删除协作群')).toBeInTheDocument();
 });
 
