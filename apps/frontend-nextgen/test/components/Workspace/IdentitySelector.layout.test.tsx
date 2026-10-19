@@ -510,4 +510,78 @@ describe('WorkspaceIdentitySelector 布局形态与 hover 提示', () => {
     fireEvent.pointerMove(trigger);
     expect(await screen.findByRole('tooltip')).toHaveTextContent('示例用户');
   });
+
+  it('sidebarChip 布局渲染紧凑身份行：无标题区，点击打开按触发宽度的切换列表，分段指示当前身份种类', async () => {
+    render(
+      <WorkspaceIdentitySelector
+        identities={identities}
+        activeId="human_900004"
+        onChange={() => {}}
+        layout="sidebarChip"
+      />,
+    );
+
+    // v2 设计稿身份行：没有「当前协作身份」标题区，只有整行 chip 一个触发器。
+    expect(screen.queryByText('当前协作身份')).not.toBeInTheDocument();
+    const trigger = screen.getByRole('button', { name: '当前协作身份：示例用户' });
+    expect(trigger).toHaveClass('h-8', 'w-full');
+    expect(trigger).toHaveTextContent('示例用户');
+    expect(trigger).toHaveTextContent('(900004)');
+    // 分段指示：用户高亮为白胶囊，Bot 弱化。
+    const segmented = trigger.querySelector('[aria-hidden="true"] > span:nth-child(1)');
+    expect(segmented?.textContent).toBe('用户');
+    // 点击整行打开身份切换列表（按触发宽度），可切换到 Bot 身份。
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    const popoverContent = await screen.findByRole('dialog');
+    expect(popoverContent).toHaveClass('w-[var(--radix-popover-trigger-width)]');
+    expect(popoverContent).not.toHaveClass('w-[320px]');
+    const botOption = await screen.findByRole('button', { name: /协作 Bot/ });
+    expect(screen.getByLabelText('协作 Bot')).toHaveStyle({ width: '32px', height: '32px' });
+    fireEvent.click(botOption);
+    await waitFor(() => expect(trigger).toHaveAttribute('aria-expanded', 'false'));
+  });
+});
+
+it('发现页 inline 布局隐藏标签并支持切换', async () => {
+  const onChange = jest.fn();
+  render(
+    <WorkspaceIdentitySelector
+      identities={identities}
+      activeId="human_900004"
+      onChange={onChange}
+      layout="inline"
+      headerLabel="为 Ta 加好友："
+    />,
+  );
+  const trigger = screen.getByRole('button', { name: '当前协作身份：示例用户' });
+  expect(trigger.parentElement).toHaveClass('flex', 'items-center');
+  expect(screen.queryByText('为 Ta 加好友：')).not.toBeInTheDocument();
+  expect(trigger).toHaveTextContent('示例用户');
+  expect(trigger).not.toHaveTextContent('900004');
+  expect(screen.queryByRole('button', { name: '切换工作身份' })).not.toBeInTheDocument();
+  fireEvent.click(trigger);
+  await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
+  fireEvent.click(screen.getByText('协作 Bot'));
+  expect(onChange).toHaveBeenCalledWith('bot-online');
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+});
+
+
+it('inline Bot 触发按钮展示引擎名称', () => {
+  render(<WorkspaceIdentitySelector identities={identities} activeId="bot-online" onChange={jest.fn()} layout="inline" />);
+  const trigger = screen.getByRole('button', { name: '当前协作身份：协作 Bot' });
+  expect(trigger).toHaveTextContent('OpenClaw');
+  expect(screen.getByText('OpenClaw')).toHaveClass('rounded-md', 'bg-muted', 'text-foreground');
+  expect(screen.queryByText('当前协作身份')).not.toBeInTheDocument();
+});
+
+
+it('inline 用户触发按钮展示蓝色用户标签', () => {
+  render(<WorkspaceIdentitySelector identities={identities} activeId="human_900004" onChange={jest.fn()} layout="inline" />);
+  const trigger = screen.getByRole('button', { name: '当前协作身份：示例用户' });
+  const label = screen.getByText('用户');
+  expect(trigger).toContainElement(label);
+  expect(label).toHaveClass('rounded-md', 'bg-primary/10', 'text-primary');
+  expect(trigger).not.toHaveTextContent('引擎类型暂无');
 });

@@ -32,7 +32,11 @@
 
 /* ==========================================================================
    设计令牌 — 亮色（默认）
-   来源：DESIGN-SYSTEM.md §2.1 —— shadcn 默认主题
+   来源：v2 设计稿 SVG 向量稿直读（~/Downloads/team claw/*.svg，restore 精修）；
+   品牌蓝单色：--brand = --primary = #2563eb（217.2 83.2% 53.3%，白字 5.17:1 达 AA）。
+   B1 曾按 PDF 位图设 #3880f8/#1368f7 分档，系位图误读，2026-10-09 已回正；
+   详见 openspec/changes/restore-design-b1-token-shell/design.md 与
+   docs/design-system/v2-restoration-b1-handoff.md
    ========================================================================== */
 :root {
   /* shadcn 语义令牌 */
@@ -43,7 +47,7 @@
   --popover: 0 0% 100%;
   --popover-foreground: 240 10% 3.9%;
 
-  --primary: 221.2 83.2% 53.3%; /* 经典科技蓝 #2563eb = rgb(37, 99, 235) */
+  --primary: 217.2 83.2% 53.3%; /* 经典科技蓝 #2563eb，白字 5.17:1 达 AA 正文（SVG 向量稿实测主色，restore-design-b1-token-shell/restore-design-v2 精修回正） */
   --primary-foreground: 0 0% 98%;
 
   --secondary: 240 4.8% 95.9%;
@@ -61,8 +65,17 @@
   --success: 142 71% 45%;
   --warning: 38 92% 50%;
   --info: 199 89% 48%;
+  --star: 36 90% 53%; /* 收藏金 #F39E1C（dmore 全 16 画板星标 icon 实测）；与 --warning 警示橙（#F59F0A）语义分离，B1 精修 6.5 */
   --purple: 272 81% 56%; /* 管理角色标签紫（群主/主节点），purple-600 #9333ea */
-  --brand: 221.2 83.2% 53.3%; /* 经典科技蓝 #2563eb，与 --primary 保持一致 */
+  --brand: 217.2 83.2% 53.3%; /* 经典科技蓝 #2563eb——SVG 向量稿 45 处实测主色；与 --primary 同值，v2 分档（#3880f8/#1368f7）系位图误读已回正；派生阶梯/选中态/图标源 */
+
+  /* SVG 向量稿实测中性阶（restore-design-v2 精修）：#EBEBEB 选中胶囊 / #525252 行标题 /
+     #868686 分组小题 / #B9BEC5 占位与浅文本 / #A1A1AA 图标次级。色板其余与 zinc 语义 token 同源。 */
+  --selected: 0 0% 92%;
+  --content-strong: 0 0% 32%;
+  --content-soft: 0 0% 53%;
+  --content-hint: 215 9% 75%;
+  --content-icon: 240 5% 65%;
 
   --border: 240 5.9% 90%;
   --input: 240 5.9% 90%;
@@ -101,8 +114,12 @@
 
   /* 聊天面板 bot 回复气泡底色(rgb 246,249,255)。 */
   --color-chat-bubble-bot: hsl(var(--brand) / 0.04);
+
+  /* 系统消息详情提示：固定深灰实底，保持长文本的阅读对比度。 */
+  --color-system-message-tooltip: rgb(76, 76, 77);
+  --color-system-message-tooltip-foreground: hsl(0deg 0% 98%);
   --shell-header-height: 56px;
-  --shell-sidebar-width: 224px;
+  --shell-sidebar-width: 224px; /* SVG 稿 rail 实宽 200（restore-design-v2 精修）；品牌锁版换新版后加宽至 224（单行预算 200px：图标组 96px + 锁版 ≤104px），见 AppSidebar 品牌区注释 */
 
   /* 浮层层级统一由组件 Token 管理，避免业务页面散落 z-index 魔法数。
      注意：Select/Popover 等锚定浮层会 Portal 到 body，若层级低于 Drawer/Dialog，
@@ -124,6 +141,17 @@
   --aix-color-text: hsl(var(--foreground));
   --aix-color-text-strong: hsl(var(--foreground));
   --aix-color-text-muted: hsl(var(--muted-foreground));
+
+  /* restore-design-v2 精修（SVG 实测）：Sender 输入卡边框 #E4E4E7 / 分隔线 #EEEEEE /
+     占位文本 #B9BEC5 / 次级文本 zinc / 软底与 hover 底 zinc-100 / 错误红 destructive。 */
+  --aix-color-border: hsl(var(--border));
+  --aix-color-border-light: hsl(var(--border) / 0.55);
+  --aix-color-text-disabled: hsl(var(--content-hint));
+  --aix-color-text-secondary: hsl(var(--muted-foreground));
+  --aix-color-bg: hsl(var(--background));
+  --aix-color-bg-subtle: hsl(var(--muted));
+  --aix-color-bg-hover: hsl(var(--muted));
+  --aix-color-error: hsl(var(--destructive));
 
   /* 字号桥：正文 14px 为受控偏离（showcase §5.3 写 12px，群聊可读性取 14px）；
      label/xs 从 SDK 13px/11px 对齐项目 12px 档。 */
@@ -167,8 +195,16 @@
   --success: 142 71% 45%;
   --warning: 38 92% 50%;
   --info: 199 89% 48%;
+  --star: 36 90% 53%; /* 收藏金（暗色稿未交付，暂与亮色同值；待暗色批次复核） */
   --purple: 272 81% 56%;
   --brand: 221.7 100% 65%; /* D2: 暗色 brand 提亮 */
+
+  /* SVG 中性阶暗色对应（亮色 #EBEBEB/#525252/#868686/#B9BEC5/#A1A1AA 的暗态适配） */
+  --selected: 240 4% 15.9%;
+  --content-strong: 0 0% 78%;
+  --content-soft: 0 0% 62%;
+  --content-hint: 215 9% 45%;
+  --content-icon: 240 5% 45%;
 
   --border: 240 3.7% 15.9%;
   --input: 240 3.7% 15.9%;
@@ -210,6 +246,7 @@
 
   --color-success: hsl(var(--success));
   --color-warning: hsl(var(--warning));
+  --color-star: hsl(var(--star));
   --color-error: hsl(var(--destructive));
   --color-info: hsl(var(--info));
   --color-purple: hsl(var(--purple));
@@ -218,6 +255,13 @@
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
+
+  /* SVG 向量稿实测中性阶（restore-design-v2 精修） */
+  --color-selected: hsl(var(--selected));
+  --color-content-strong: hsl(var(--content-strong));
+  --color-content-soft: hsl(var(--content-soft));
+  --color-content-hint: hsl(var(--content-hint));
+  --color-content-icon: hsl(var(--content-icon));
 
   --radius-sm: var(--radius-sm);
   --radius-md: var(--radius-md);
@@ -508,6 +552,104 @@ button {
 }
 
 /* ==========================================================================
+   会话消息加载骨架（ChatMessageSkeleton）专属动效：
+   chat-skeleton-sweep —— 一道品牌蓝扫光在占位单元上自左向右掠过，组件侧按行
+   施加负 animation-delay 错峰，整幅骨架如「逐行誊写中的对话稿」；
+   chat-skeleton-dot —— 终点行光珠，节奏回声 @tc-chat/ui Bubble LoadingDots
+   （styles.js：9px、bounce 1.2s、0.2s 逐粒延迟），语义为「历史仍在抵达」。
+   prefers-reduced-motion 下全部静止（占位轮廓随 bg-* 保留）。
+   ========================================================================== */
+@keyframes chat-skeleton-sweep {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: 0% 0;
+  }
+}
+.chat-skeleton-sweep {
+  background-image: linear-gradient(
+    100deg,
+    transparent 42%,
+    hsl(var(--primary) / 0.12) 50%,
+    transparent 58%
+  );
+  background-size: 200% 100%;
+  animation: chat-skeleton-sweep 2.4s ease-in-out infinite;
+}
+
+@keyframes chat-skeleton-dot {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  40% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+}
+.chat-skeleton-dot {
+  animation: chat-skeleton-dot 1.2s ease-in-out infinite;
+}
+.chat-skeleton-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.chat-skeleton-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-skeleton-sweep,
+  .chat-skeleton-dot {
+    animation: none;
+  }
+}
+
+/* ==========================================================================
+   「通用协作能力」能力集气泡（CapabilitySetViewer）专属动效：
+   capability-pop-in —— 气泡开合淡入轻浮（ui/Popover 的 animate-in 工具类缺编译
+   插件为空操作，此处局部补齐，作用域仅限本气泡 className，不影响其余弹层）；
+   capability-page-in —— 列表 ⇄ 明细双页导航的明细页进入右滑淡入。
+   prefers-reduced-motion 下全部静止。
+   ========================================================================== */
+@keyframes capability-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.capability-popover[data-state='open'] {
+  animation: capability-pop-in 150ms ease-out;
+}
+
+@keyframes capability-page-in {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.capability-page-in {
+  animation: capability-page-in 180ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .capability-popover[data-state='open'],
+  .capability-page-in {
+    animation: none;
+  }
+}
+
+/* ==========================================================================
    qiankun 主应用根容器：开启 qiankun master 后，框架以 #root-master 包裹主应用
    挂载点。需与上方 html/body/#root 一致撑满高度，否则子应用（MicroApp）容器会
    沿着 0 高度的父级塌缩，aix-card 卡片 Tab 不显示。
@@ -726,4 +868,28 @@ div:has(> .task-loop-card-root) {
 }
 .sidebar-actions-cover-selected {
   background: hsl(var(--muted));
+}
+
+/* ==========================================================================
+   发送键 32×32 rx10（v2 还原 restore-design-chat-page-b2-b3 Batch 2）
+   ==========================================================================
+   dmore index.html「发送」节点实测：32×32、圆角 10、#2563EB、空态 40% 透明
+   （@tc-chat/ui BaseButton 缺省即 32×32 + :disabled opacity .4，与本值一致）。
+   SDK SendButton styled 覆写为 36×36，且未暴露尺寸 prop——按 D3「包装层主题桥」
+   路径经 .sender-shell descendent 级联回正（不 fork SDK；同排 Stop/Queue/Loading
+   键保持 Base 32 基准与发送键同尺寸）。 */
+.sender-shell button[title='发送消息'],
+.sender-shell button[title='停止生成'],
+.sender-shell button[title='加入队列发送'],
+.sender-shell button[title='取消生成'] {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+}
+.sender-shell button[title='发送消息'] svg,
+.sender-shell button[title='停止生成'] svg,
+.sender-shell button[title='加入队列发送'] svg,
+.sender-shell button[title='取消生成'] svg {
+  width: 16px;
+  height: 16px;
 }

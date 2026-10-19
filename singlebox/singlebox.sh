@@ -20,6 +20,7 @@ set -e
 #   all             Full local product stack (BAAS + Backend + BCS + BCSFuse + 5 OpenClaw bots + demo bot + Frontend)
 #   bcs_bots        BCS + 5 local OpenClaw bots
 #   bcs_frontend    BCS + Frontend (E2E)
+#   bbs_demo       BBS tutorial stack (no 5 local profile bots)
 #   hybrid          OpenClaw profile stack with optional Claude Code bots
 #
 
@@ -194,6 +195,7 @@ source "${SCRIPT_DIR}/modules/bcs_bots.sh"
 
 # Group modules (must be after service modules they compose)
 source "${SCRIPT_DIR}/modules/all.sh"
+source "${SCRIPT_DIR}/modules/bbs_demo.sh"
 source "${SCRIPT_DIR}/modules/bcs_frontend.sh"
 source "${SCRIPT_DIR}/modules/hybrid.sh"
 
@@ -227,6 +229,9 @@ resolve_services() {
             ;;
         bcs_bots)
             echo "bcs bots"
+            ;;
+        bbs_demo)
+            echo "${BBS_DEMO_START_ORDER[*]}"
             ;;
         hybrid|merchant_hybrid)
             hybrid_configure_mode
@@ -465,7 +470,7 @@ show_help() {
     done
     echo ""
     echo "Groups:"
-    for grp in all bcs_bots bcs_frontend hybrid; do
+    for grp in all bcs_bots bcs_frontend bbs_demo hybrid; do
         if type -t "${grp}_help" &>/dev/null; then
             echo "  $( "${grp}_help" )"
         fi
@@ -1028,7 +1033,7 @@ main() {
                 LOCAL_MODE=true
                 shift
                 ;;
-            baas|backend|gateway|bcs|bcsfuse|frontend|engine|bots|bcs_bots|bcs_frontend|hybrid|merchant_hybrid|all)
+            baas|backend|gateway|bcs|bcsfuse|frontend|engine|bots|bcs_bots|bcs_frontend|bbs_demo|hybrid|merchant_hybrid|all)
                 # Legacy: service name without command defaults to start
                 services+=("$1")
                 if [ -z "$command" ]; then

@@ -9,7 +9,6 @@ from src.application.ports.worker_profile_content_store import (
 )
 from src.domain.models.worker_profile_content import WorkerProfileContent
 
-
 _LEGACY_ROUTE_METHODS = (
     "activate_profile",
     "delete_profile",
@@ -17,6 +16,7 @@ _LEGACY_ROUTE_METHODS = (
     "get_active_profiles",
     "get_profile",
     "list_profiles",
+    "save_if_version",
     "upsert_profile",
 )
 
@@ -29,6 +29,11 @@ class WorkerProfileContentStoreCompatibilityAdapter:
 
     def save(self, content: WorkerProfileContent) -> WorkerProfileContent:
         return self._store.save(content)
+
+    def save_if_version(
+        self, content: WorkerProfileContent, expected_version: int | None,
+    ) -> WorkerProfileContent | None:
+        return self._store.save_if_version(content, expected_version)
 
     def get(self, worker_id: str, profile_id: str) -> WorkerProfileContent | None:
         return self._store.get(worker_id, profile_id)

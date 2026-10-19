@@ -208,6 +208,37 @@ class OrmPublishRepository(OrmConnectionMixin, PublishRepository):
         return record
 
     @with_orm_session
+    def list_active_by_bot_ids(
+        self, bot_ids: list[int], tenant: str, env: str
+    ) -> list[PublishRecord]:
+        log.info(
+            "list_active_by_bot_ids: bot_ids=%s, tenant=%s, env=%s",
+            bot_ids,
+            tenant,
+            env,
+        )
+        if not bot_ids:
+            log.info("[publish:list_active_by_bot_ids] result: 0 rows")
+            return []
+        rows = (
+            self._session.query(PublishModel)
+            .filter(
+                PublishModel.bot_id.in_(bot_ids),
+                PublishModel.tenant == tenant,
+                PublishModel.env == env,
+                PublishModel.status.notin_(
+                    ["SUCCESS", "FAILED", "REJECTED", "REVOKED"]
+                ),
+                PublishModel.is_deleted == 0,
+            )
+            .order_by(PublishModel.id.desc())
+            .all()
+        )
+        items = [r.to_record() for r in rows]
+        log.info("[publish:list_active_by_bot_ids] result: %s rows", len(items))
+        return items
+
+    @with_orm_session
     def soft_delete(
         self, *, publish_id: int, tenant: str, env: str, modifier: str
     ) -> None:

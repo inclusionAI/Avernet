@@ -22,6 +22,18 @@ class SystemConfigKey(StrEnum):
         {module}.{purpose} - e.g., "arca.dft_tenant"
     """
 
+    # A2A v1.0 client-side grey-release switch (1b migration)
+    A2A_CLIENT_MODE = "bot_run.a2a_client_mode"
+    """BaaS→engine adapter 传输灰度开关。
+
+    Value: "off" (default) | "grey" | "on"
+    - off:  整组件走 v3 WS——生产默认，行为与迁移前一致
+    - grey: 引擎容器 Agent Card 声明 JSONRPC 1.x 时走 A2A，否则回退 v3
+    - on:   强制 A2A，能力探测失败直接抛错（fail-fast，不静默降级）
+    Grey boundary: 附件与 HITL resolve 流程尚在 1b 范围外（A2A 路径对
+    附件显式报错、resolve 需 E4 引擎面），启用 grey 前须确认业务流不含两者。
+    """
+
     # Arca PaaS platform configuration
     ARCA_DFT_TENANT = "arca.dft_tenant"
     """Default tenant ID for Arca PaaS platform (per environment).
@@ -98,4 +110,16 @@ class SystemConfigKey(StrEnum):
     Usage: read at the start of each sweep (env-scoped); a matching bot skips
     the stop-bot / pod-destroy, exempting long-running demos, canaries, and key
     accounts that must not be reclaimed by expiry.
+    """
+
+    # ── 敏感日志过滤豁免开关 ────────────────────────────────────
+
+    SENSITIVE_BYPASS_SESSION_KEYS = "bot_run.sensitive_bypass_session_keys"
+    """敏感日志过滤豁免的 session_key 片段白名单。
+
+    Value: comma- and/or newline-separated list of session_key 片段。
+    Usage: AsyncChatClientPool 读取（TTL 缓存，默认 60s 刷新，
+    配置变更无需重启），以 loader 函数注入 AsyncChatClient；
+    兜底事件日志的 sessionKey 包含任一片段时，不做敏感字段
+    过滤（全量打印 payload）。未配置或读取失败时默认仍做过滤。
     """

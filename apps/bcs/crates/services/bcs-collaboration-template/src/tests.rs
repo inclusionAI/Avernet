@@ -71,6 +71,7 @@ async fn lists_default_language_templates_by_priority() -> Result<(), Box<dyn st
             "micro-merchant-event-orchestration",
             "write-review-loop",
             "research-writing-loops",
+            "nested-review-loops",
             "single-bot-guided-answer",
         ]
     );
@@ -109,6 +110,7 @@ async fn list_marks_judge_templates_when_disabled() -> Result<(), Box<dyn std::e
             "micro-merchant-event-orchestration",
             "single-bot-guided-answer",
             "bot-human-bot-review",
+            "nested-review-loops",
             "research-writing-loops",
             "write-and-review",
             "write-review-loop",
@@ -128,7 +130,7 @@ async fn list_marks_judge_templates_when_disabled() -> Result<(), Box<dyn std::e
             tags: vec!["judge".to_string()],
         })
         .await?;
-    assert_eq!(english_response.templates.len(), 4);
+    assert_eq!(english_response.templates.len(), 5);
     assert_eq!(
         english_response
             .templates
@@ -137,6 +139,7 @@ async fn list_marks_judge_templates_when_disabled() -> Result<(), Box<dyn std::e
             .collect::<Vec<_>>(),
         vec![
             "Bot-Human-Bot Review (requires LLM)",
+            "Nested Delivery Review Loops (requires LLM)",
             "Research and Writing Loops (requires LLM)",
             "Write & Review (requires LLM)",
             "Writing Review Loop (requires LLM)",
@@ -190,7 +193,7 @@ async fn returns_localized_loop_template_with_editorial_judge() -> Result<(), Bo
             accept_language: None,
             tags: vec!["loop".into()],
         }).await?;
-        assert_eq!(list.templates.len(), 2);
+        assert_eq!(list.templates.len(), 3);
         assert_eq!(list.templates[0].id, "write-review-loop");
         assert_eq!(list.templates[0].name, name);
         assert_eq!(list.templates[0].priority, 35);
@@ -238,6 +241,36 @@ async fn returns_localized_multiple_loop_template() -> Result<(), Box<dyn std::e
         let nodes = &detail.definition["runtime"]["state_machine"]["nodes"];
         assert_eq!(nodes.as_object().unwrap().values().filter(|node| node["kind"] == "loop").count(), 2);
         assert_eq!(nodes["research_loop"]["transitions"]["approved"]["targets"], serde_json::json!(["writing_loop"]));
+        let parsed: CollaborationDefinition = serde_yaml::from_str(&detail.yaml)?;
+        assert!(parsed.uses_judge());
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn returns_localized_nested_loop_template() -> Result<(), Box<dyn std::error::Error>> {
+    let repo = Arc::new(FileCollaborationTemplateRepo::new(seed_template_dir()));
+    let service = CollaborationTemplateServiceImpl::new(repo, "zh-CN").with_judge_templates_enabled(true);
+    for (lang, name) in [("zh-CN", "嵌套交付评审循环"), ("en-US", "Nested Delivery Review Loops")] {
+        let list = service.list_templates(ListCollaborationTemplatesQuery {
+            requested_language: Some(lang.into()), accept_language: None, tags: vec!["loop".into()],
+        }).await?;
+        let template = list.templates.iter().find(|item| item.id == "nested-review-loops").unwrap();
+        assert_eq!(template.name, name);
+        assert_eq!(template.priority, 37);
+        assert_eq!(template.available_languages, vec!["zh-CN", "en-US"]);
+        for role in ["author", "reviewer", "owner"] {
+            assert!(template.participants[role].required);
+        }
+        let detail = service.get_template(GetCollaborationTemplateQuery {
+            template_id: template.id.clone(), requested_language: Some(lang.into()),
+            accept_language: None, format: CollaborationTemplateFormat::Yaml,
+        }).await?;
+        assert_eq!(detail.name, name);
+        let outer = &detail.definition["runtime"]["state_machine"]["nodes"]["delivery_cycles"];
+        assert_eq!(outer["loop"]["max_iterations"], 2);
+        assert_eq!(outer["loop"]["nodes"]["review_rounds"]["kind"], "loop");
+        assert_eq!(outer["loop"]["nodes"]["review_rounds"]["loop"]["max_iterations"], 3);
         let parsed: CollaborationDefinition = serde_yaml::from_str(&detail.yaml)?;
         assert!(parsed.uses_judge());
     }

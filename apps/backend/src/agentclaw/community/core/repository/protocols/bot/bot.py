@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.repository.models import (
         BotRestartLockRecord,
     )
+    from agentclaw.community.core.skills_pool.types import InitialSkillLayoutSelection
 
 
 @runtime_checkable
@@ -36,12 +37,23 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def insert_with_initial_skill_layout(
+        self,
+        bot_data: Dict[str, Any],
+        *,
+        layout: InitialSkillLayoutSelection | None,
+    ) -> Dict[str, Any]:
+        """Create a Bot and its selected initial layout in one transaction."""
+        ...
+
+    @abstractmethod
     def get_by_id_and_owner(
         self,
         bot_id: str,
         owner_id: str,
         *,
         execution_options: dict | None = None,
+        env: str | None = None,
     ) -> Optional[Dict[str, Any]]:
         """Get bot by bot_id and owner_id.
 
@@ -51,6 +63,9 @@ class BotRepository(Protocol):
         refresh-token callback, which is served under ``/api`` and thus runs
         under the DEFAULT tenant but must resolve an external-tenant bot).
         ``None`` means no override — preserves existing behavior.
+
+        ``env`` optionally overrides the runtime data environment for admin
+        cross-env corrections; ``None`` keeps the current-env scoping.
         """
         ...
 
@@ -268,9 +283,18 @@ class BotRepository(Protocol):
 
     @abstractmethod
     def update_space_by_owner(
-        self, *, bot_id: str, owner_id: str, space_id: int
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        space_id: int,
+        env: str | None = None,
     ) -> Optional[Dict[str, Any]]:
-        """Atomically replace the structured Space assignment of an owned Bot."""
+        """Atomically replace the structured Space assignment of an owned Bot.
+
+        ``env`` optionally overrides the runtime data environment for admin
+        cross-env corrections; ``None`` keeps the current-env scoping.
+        """
         ...
 
     @abstractmethod
@@ -318,12 +342,15 @@ class BotRepository(Protocol):
         *,
         owner_id: str,
         personal_space_id: int | None,
+        env: str | None = None,
     ) -> int:
         """Count an owner's live Bots in their logical Personal Space.
 
         Legacy rows with ``space_id IS NULL`` belong to that same scope and are
         included alongside the numeric Personal Space id when one exists.
         Desktop and TeClaw Bots do not consume quota and are excluded.
+        An explicit ``env`` targets a specific environment for admin
+        cross-env corrections.
         """
         ...
 
@@ -332,10 +359,12 @@ class BotRepository(Protocol):
         self,
         *,
         space_id: int,
+        env: str | None = None,
     ) -> int:
         """Count live quota-consuming Bots in one Space across owners.
 
-        Desktop and TeClaw Bots are excluded.
+        Desktop and TeClaw Bots are excluded. An explicit ``env`` targets a
+        specific environment for admin cross-env corrections.
         """
         ...
 

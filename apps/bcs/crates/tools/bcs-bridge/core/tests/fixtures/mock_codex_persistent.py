@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""Stateful app-server fixture. Log/PID make process reuse and recovery observable."""
+import json
+import os
+import sys
+import time
+
+log_path = sys.argv[1]
+MOCK_DELAY = float(os.environ.get("MOCK_DELAY", "0"))
+threads = set()
+turns = 0
+counter = 0
+ignore_interrupts = set()
+delayed_turns = set()
+delayed_completions = {}
+
+
+def send(value):
+    print(json.dumps(value), flush=True)
+
+
+for raw in sys.stdin:
+    request = json.loads(raw)
+    method = request.get("method")
+    params = request.get("params") or {}
+    with open(log_path, "a") as log:
+        log.write(json.dumps(dict(request, pid=os.getpid())) + "\n")
+    if MOCK_DELAY:
+        time.sleep(MOCK_DELAY)
+    response = {}
+    if method == "initialize":
+        response = {"capabilities": {}}
+    elif method == "initialized":
+        continue
+    elif method in ("thread/start", "thread/resume"):
+        if method == "thread/start":
+            counter += 1
+            thread = f"thread-{os.getpid()}-{counter}"
+        else:
+            thread = params["threadId"]
+            if thread in threads or thread == "external-owned":
+                send({"id": request["id"], "error": {"message": "already has an active writer"}})
+                continue
+        threads.add(thread)
+        response = {"thread": {"id": thread}}
+    elif method == "turn/start":
+        thread = params["threadId"]
+        assert thread in threads
+        prompt = params["input"][0]["text"]
+        if prompt == "crash":
+            os._exit(2)
+        turns += 1
+        turn = f"turn-{turns}"
+        if prompt == "late-start":
+            time.sleep(0.15)
+        stale = delayed_completions.pop(thread, None)
+        # A parked completion is normally consumed by the follow-up turn, but the
+        # interrupt that parks it can land late (the engine interrupts a turn
+        # whose turn/start ack outlived its client): then a later, non-follow-up
+        # turn pops it. Only a real follow-up names a phase/shape; a late
+        # consumer still owes the one stale completion so the log count holds.
+        if stale is not None and prompt.startswith("followup-"):
+            phase, shape = prompt.removeprefix("followup-").split(":", 1)
+        else:
+            phase, shape = (None, None)
+        def stale_completion():
+            event_params = {"threadId": thread, "turn": {"id": stale, "status": "interrupted"}}
+            if shape == "flat":
+                event_params = {"threadId": thread, "turnId": stale}
+            elif shape == "conflicting":
+                event_params["turnId"] = turn
+            send({"method": "turn/completed", "params": event_params})
+            with open(log_path, "a") as log:
+                log.write(json.dumps({"pid": os.getpid(), "method": "fixture/stale-completion",
+                    "params": {"phase": phase, "shape": shape}}) + "\n")
+
+        if stale is not None and phase is None:
+            stale_completion()
+        if stale and phase == "before-ack":
+            stale_completion()
+        send({"id": request["id"], "result": {"turn": {"id": turn}}})
+        if stale and phase == "after-ack":
+            stale_completion()
+        if prompt == "fail":
+            send({"method": "turn/completed", "params": {
+                "threadId": thread, "turnId": turn,
+                "turn": {"id": turn, "status": "failed", "error": {"message": "test failure"}}}})
+            continue
+        if prompt == "ignore-interrupt":
+            ignore_interrupts.add(turn)
+        if prompt == "hold-delayed-completion":
+            delayed_turns.add(turn)
+        if prompt in ("hold", "late-start", "ignore-interrupt", "hold-delayed-completion"):
+            continue
+        send({"method": "item/agentMessage/delta", "params": {
+            "threadId": thread, "turnId": turn, "delta": f"{os.getpid()}:"}})
+        if stale and phase == "during-output":
+            stale_completion()
+        send({"method": "item/agentMessage/delta", "params": {
+            "threadId": thread, "turnId": turn, "delta": prompt}})
+        send({"method": "turn/completed", "params": {
+            "threadId": thread, "turn": {"id": turn, "status": "completed"}}})
+        continue
+    elif method == "turn/interrupt":
+        if params["turnId"] in ignore_interrupts:
+            continue
+        send({"id": request["id"], "result": {}})
+        if params["turnId"] in delayed_turns:
+            delayed_completions[params["threadId"]] = params["turnId"]
+            continue
+        send({"method": "turn/completed", "params": dict(params, turn={"id": params["turnId"], "status": "interrupted"})})
+        continue
+    else:
+        raise AssertionError(method)
+    send({"id": request["id"], "result": response})

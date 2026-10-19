@@ -338,3 +338,94 @@ def test_reconciler_exposes_phase_one_cli_profile_gate(
     assert reconciler.supports_profile(
         bot={"active_engine": engine_type, "template_type": template_type}
     ) is expected
+
+
+_BOT = {
+    "id": 7,
+    "bot_id": "bot-1",
+    "owner_id": "owner-1",
+    "active_engine": "openclaw",
+    "template_type": None,
+}
+
+
+def _reconciler(passport: _Passport) -> CliPassportScopeReconciler:
+    return CliPassportScopeReconciler(
+        passport_plugin=passport,  # type: ignore[arg-type]
+        identity_repository=_IdentityRepository(),  # type: ignore[arg-type]
+    )
+
+
+def test_add_cli_writes_the_complete_scope_with_the_new_item() -> None:
+    """Adding one CLI must keep MCP identities, history and defaults intact."""
+    passport = _Passport()
+
+    result = _reconciler(passport).add_cli(
+        bot=_BOT,
+        item={
+            "cli_code": "yuque-cli",
+            "cli_name": "yuque-cli",
+            "cli_desc": "Yuque",
+            "identity_mode": "owner",
+        },
+    )
+
+    assert result.cli_codes == ("dataphin", "deepinsight-cli", "yuque-cli")
+    assert result.updated is True
+    assert passport.updated is not None
+    scope = passport.updated["resource_scope"]
+    assert scope["mcp_items"] == [{"mcp_code": "mcp.a", "identity_mode": "caller"}]
+    assert scope["cli_items"][0]["identity_mode"] == "caller"  # sparse override kept
+    assert scope["cli_items"][-1] == {
+        "cli_code": "yuque-cli",
+        "cli_name": "yuque-cli",
+        "cli_desc": "Yuque",
+        "identity_mode": "owner",
+    }
+
+
+def test_remove_cli_drops_only_the_target() -> None:
+    passport = _Passport()
+
+    result = _reconciler(passport).remove_cli(bot=_BOT, cli_code="dataphin")
+
+    assert result.cli_codes == ("deepinsight-cli",)
+    assert passport.updated is not None
+    scope = passport.updated["resource_scope"]
+    assert [item["cli_code"] for item in scope["cli_items"]] == ["deepinsight-cli"]
+    assert scope["mcp_codes"] == ["mcp.a"]
+
+
+def test_mutation_failure_propagates_and_is_logged_without_details() -> None:
+    class _UpdateFailingPassport(_Passport):
+        def update_passport(self, **kwargs: object) -> None:
+            raise RuntimeError("agentpass-secret-body")
+
+    with patch(
+        "agentclaw.community.core.mcp.services.cli_passport_scope.logger"
+    ) as logger:
+        with pytest.raises(RuntimeError):
+            _reconciler(_UpdateFailingPassport()).remove_cli(bot=_BOT, cli_code="dataphin")
+
+    logged = " ".join(str(call) for call in logger.method_calls)
+    assert "cli_passport_mutation_failed" in logged
+    assert "agentpass_cli_scope_update_failed" in logged
+    assert "agentpass-secret-body" not in logged
+
+
+def test_add_cli_of_an_ungranted_default_is_not_a_duplicate() -> None:
+    """``deepinsight-cli`` is an openclaw default the history lacks; adding it
+    explicitly must not hand the normalizer the same code twice."""
+    passport = _Passport()
+
+    result = _reconciler(passport).add_cli(
+        bot=_BOT,
+        item={
+            "cli_code": "deepinsight-cli",
+            "cli_name": "deepinsight-cli",
+            "cli_desc": "",
+            "identity_mode": "owner",
+        },
+    )
+
+    assert result.cli_codes == ("dataphin", "deepinsight-cli")

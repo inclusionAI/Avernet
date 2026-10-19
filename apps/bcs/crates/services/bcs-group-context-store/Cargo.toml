@@ -1,0 +1,26 @@
+[package]
+name = "bcs-group-context-store"
+description = "Group Context persistence stores for BCS"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+async-trait = { workspace = true }
+bcs-db-api = { workspace = true }
+bcs-domain = { workspace = true }
+chrono = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+bcs-config-api = { workspace = true }
+bcs-db-local = { workspace = true }
+bcs-db-mysql = { workspace = true }
+mysql_async = { workspace = true }
+
+[lints]
+workspace = true

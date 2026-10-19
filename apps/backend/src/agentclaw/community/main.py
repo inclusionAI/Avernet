@@ -29,6 +29,33 @@ _LOCAL_PROFILES = (
 )
 
 
+_REDACTED_FOR_LOG = "<redacted>"
+_REDACTED_RUNTIME_CONFIG_PATHS = {
+    ("user_config", "openapi_bot", "api_key_secret"),
+    ("user_config", "bcs_client", "token_secret"),
+    ("user_config", "bcs_client", "secret_secret"),
+}
+
+
+def _redact_runtime_config_for_log(
+    value: object,
+    path: tuple[str, ...] = (),
+) -> object:
+    """Copy a config dump and replace literal runtime credentials."""
+    if isinstance(value, dict):
+        return {
+            key: (
+                _REDACTED_FOR_LOG
+                if path + (str(key),) in _REDACTED_RUNTIME_CONFIG_PATHS
+                else _redact_runtime_config_for_log(child, path + (str(key),))
+            )
+            for key, child in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_redact_runtime_config_for_log(item, path) for item in value]
+    return value
+
+
 def _require_local_profile(profile: DeployProfile) -> None:
     """Reject a corp/prod profile — it must boot via agentclaw/corp/main.py."""
     if profile not in _LOCAL_PROFILES:
@@ -105,7 +132,11 @@ if __name__ == "__main__":  # pragma: no cover - entrypoint wiring; profile gate
 
         from agentclaw.community.core.config.sofa import sofa_config as config
         logger.info("runtime config (local)")
-        logger.info(json.dumps(config.model_dump(), ensure_ascii=False, indent=2))
+        logger.info(json.dumps(
+            _redact_runtime_config_for_log(config.model_dump()),
+            ensure_ascii=False,
+            indent=2,
+        ))
 
         # 2. Start uvicorn directly.
         # Schema bootstrap, event-listener subscription, and every other

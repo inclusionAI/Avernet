@@ -552,7 +552,7 @@ class TestDeviceCredentials:
         assert DeviceCredentials is not None
 
     def test_all_fields_default_to_none(self) -> None:
-        """All 9 fields default to None on a fresh DeviceCredentials()."""
+        """All credential fields default to None on a fresh model."""
         from secbaas.community.api.device_manage import DeviceCredentials
 
         dc = DeviceCredentials()
@@ -565,6 +565,9 @@ class TestDeviceCredentials:
         assert dc.bot_type is None
         assert dc.agent_code is None
         assert dc.stage is None
+        assert dc.agentclaw_skills_layout is None
+        assert dc.agentclaw_skills_layout_contract_version is None
+        assert dc.agentclaw_skills_layout_phase is None
 
     def test_serialization_alias_maps_to_uppercase(self) -> None:
         """model_dump(by_alias=True) produces uppercase keys matching wire format."""
@@ -613,8 +616,8 @@ class TestDeviceCredentials:
         assert dump["CLIENT_ID"] == "cid"
         assert dump["ENTITY_ID"] == "eid"
 
-    def test_all_nine_fields_serialize_correctly(self) -> None:
-        """All 9 fields with values serialize to correct uppercase keys."""
+    def test_all_fields_serialize_correctly(self) -> None:
+        """All credential fields serialize to their uppercase wire keys."""
         from secbaas.community.api.device_manage import DeviceCredentials
 
         dc = DeviceCredentials(
@@ -627,6 +630,9 @@ class TestDeviceCredentials:
             bot_type="bt",
             agent_code="ac",
             stage="s",
+            agentclaw_skills_layout="pool",
+            agentclaw_skills_layout_contract_version="1",
+            agentclaw_skills_layout_phase="pool_active",
         )
         dump = dc.model_dump(exclude_none=True, by_alias=True)
         assert dump == {
@@ -639,6 +645,9 @@ class TestDeviceCredentials:
             "BOT_TYPE": "bt",
             "AGENT_CODE": "ac",
             "STAGE": "s",
+            "AGENTCLAW_SKILLS_LAYOUT": "pool",
+            "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "1",
+            "AGENTCLAW_SKILLS_LAYOUT_PHASE": "pool_active",
         }
 
     def test_constructor_with_kwargs_accepts_lowercase_names(self) -> None:

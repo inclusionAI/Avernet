@@ -16,6 +16,7 @@ scripts/
     ├── frontend.sh         # 前端
     ├── bcs.sh              # BCS 协调服务
     ├── all.sh              # 组合: 当前 all 组
+    ├── bbs_demo.sh          # 组合: BBS Demo（不含默认 5 个 profile Bot）
     └── bcs_frontend.sh     # 组合: BCS + 前端
 ```
 
@@ -222,7 +223,7 @@ foo_help() {
 ```
 
 实现机制：
-- `resolve_services()` 将组名 (`all`, `bcs_frontend`) 展开为服务列表，普通服务名原样返回
+- `resolve_services()` 将组名 (`all`, `bbs_demo`, `bcs_frontend`) 展开为服务列表，普通服务名原样返回
 - `check_prereqs_for_services()` 逐个调用 `<svc>_prereqs`，汇总 PREREQ_ERRORS/PREREQ_WARNINGS
 - 无 `_prereqs` 函数的服务跳过并提示
 - `start_service()` 启动前自动调用 `_prereqs`，失败则中止
@@ -245,7 +246,7 @@ foo_help() {
 5. **模块是集成层** — 委托服务自身脚本 (`src/*/scripts/`) 或自己实现
 6. **utils.sh 纯函数** — 无状态，不被 ≥2 个模块用则留在模块内
 7. **双 source 守卫** — 每个文件开头 `_XXX_SH_LOADED` 防重复加载
-8. **组合模块** — `all`, `bcs_frontend` 组合其他模块，不直接管理进程
+8. **组合模块** — `all`, `bbs_demo`, `bcs_frontend` 组合其他模块，不直接管理进程
 9. **新增服务** — 创建 `modules/<name>.sh` + 在 `singlebox.sh` 添加 source + 修改 ORDER 数组
 10. **hosts 检查归服务** — 如服务确实需要 hosts 绑定，由对应服务的 `<name>_prereqs()` 按需实现
 

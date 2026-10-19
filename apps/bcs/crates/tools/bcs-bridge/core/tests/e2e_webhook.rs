@@ -392,6 +392,67 @@ async fn codex_app_server_emits_thinking_and_tool_events() {
 }
 
 #[tokio::test]
+async fn bulk_final_from_turn_items_reaches_chat_final_without_streamed_deltas() {
+    // Regression: turns that end with no streamed agentMessage deltas (the
+    // whole answer presented as a single final item, e.g. long tool-heavy
+    // runs) previously completed with an empty chat.final. The driver must
+    // extract the answer from the completed turn's own items.
+    let url = support::spawn_app_with_mock("mock_codex_app_server.py", "codex").await;
+    let resp = reqwest::Client::builder().no_proxy().build().unwrap()
+        .post(format!("{url}/webhook"))
+        .bearer_auth("tok-b2p")
+        .header("X-BCN-Protocol-Version", "2.0")
+        .json(&json!({
+            "type": "req", "id": "bulk-final-run", "method": "chat.send",
+            "session_id": "bulk-final-session",
+            "to_bot": {"provider_id": "bridge-1", "provider_bot_ref": "worker-1"},
+            "message": {"role": "user", "content": [{"type": "text", "text": "BULK_FINAL: 已经全面 review 完成"}]}
+        }))
+        .send()
+        .await
+        .unwrap();
+    let text = resp.text().await.unwrap();
+    assert!(!text.contains("BULK_FINAL:"), "marker must be stripped: {text}");
+    assert!(text.contains("\"state\":\"final\""), "expected a final frame: {text}");
+    assert!(text.contains("已经全面 review 完成"),
+        "bulk-final answer must reach the final frame: {text}");
+}
+
+#[tokio::test]
+async fn progress_delta_does_not_shadow_turn_completed_final_message() {
+    // In-flight agentMessage deltas can be mere commentary ("Checking the
+    // PR..."), not the real answer. The completed turn's own items carry
+    // the authoritative final text — the driver must prefer that over the
+    // progress delta, so chat.final carries the full conclusion rather
+    // than the earlier prefix.
+    let url = support::spawn_app_with_mock("mock_codex_app_server.py", "codex").await;
+    let resp = reqwest::Client::builder().no_proxy().build().unwrap()
+        .post(format!("{url}/webhook"))
+        .bearer_auth("tok-b2p")
+        .header("X-BCN-Protocol-Version", "2.0")
+        .json(&json!({
+            "type": "req", "id": "progress-final-run", "method": "chat.send",
+            "session_id": "progress-final-session",
+            "to_bot": {"provider_id": "bridge-1", "provider_bot_ref": "worker-1"},
+            "message": {"role": "user", "content": [{"type": "text", "text": "PROGRESS_FINAL: 完整 review 答案: No more than necessary."}]}
+        }))
+        .send()
+        .await
+        .unwrap();
+    let text = resp.text().await.unwrap();
+    assert!(text.contains("Checking the PR..."), "progress commentary must stream: {text}");
+    assert!(text.contains("\"state\":\"final\""), "expected a final frame: {text}");
+    assert!(text.contains("完整 review 答案"),
+        "final frame must carry the authoritative items[] message, not the progress delta: {text}");
+    let final_pos = text.rfind("完整 review 答案").expect("missing the progress message\nand the final answer\nbar");
+    let progress_pos = text.find("Checking the PR...").expect("no progress text at all");
+    assert!(progress_pos < final_pos, "the real answer must come after the progress message");
+    // The final answer does NOT merely re-echo the commentary line.
+    let after_final = &text[final_pos..];
+    assert!(!after_final.contains("chat.final'd"), "final content must not be replicated from the commentary");
+}
+
+#[tokio::test]
 async fn trace_records_raw_converted_and_sse_events() {
     let trace_dir = tempfile::tempdir().unwrap();
     let bin = format!(

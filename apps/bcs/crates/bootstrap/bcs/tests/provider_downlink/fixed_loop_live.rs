@@ -2,12 +2,15 @@
 //! No runtime/store methods are called to advance or inspect these stories.
 
 use super::*;
+use bcs_db_api::{DbPlugin, DbStatement};
+use bcs_db_local::LocalSqliteDbPlugin;
 use std::collections::{BTreeMap, VecDeque};
 
 #[path = "loop_channel.rs"]
 mod channel;
 
 const HUMAN: &str = "11111111";
+static INIT_PERSISTENT_SECRET: std::sync::Once = std::sync::Once::new();
 
 struct LiveStory {
     client: reqwest::Client,
@@ -16,7 +19,8 @@ struct LiveStory {
     bot: RegisteredProviderBot,
     _driver: MockBot,
     _directory: tempfile::TempDir,
-    server: tokio::task::JoinHandle<Result<(), bcs::BcsError>>,
+    server: Option<tokio::task::JoinHandle<Result<(), bcs::BcsError>>>,
+    persistent_config: Option<bcs::BcsConfig>,
     receiver: tokio::task::JoinHandle<()>,
     events: Arc<Mutex<Vec<Value>>>,
     notifications: Arc<Mutex<Vec<Value>>>,
@@ -28,7 +32,7 @@ struct LiveStory {
 
 impl Drop for LiveStory {
     fn drop(&mut self) {
-        self.server.abort();
+        if let Some(server) = &self.server { server.abort(); }
         self.receiver.abort();
         self.provider._handle.abort();
     }
@@ -56,6 +60,14 @@ fn principal() -> String {
 
 impl LiveStory {
     async fn start(scenario: &str, outcomes: Vec<&'static str>) -> Self {
+        Self::start_with_storage(scenario, outcomes, false).await
+    }
+
+    async fn start_persistent(scenario: &str, outcomes: Vec<&'static str>) -> Self {
+        Self::start_with_storage(scenario, outcomes, true).await
+    }
+
+    async fn start_with_storage(scenario: &str, outcomes: Vec<&'static str>, persistent: bool) -> Self {
         let events = Arc::new(Mutex::new(Vec::new()));
         let notifications = Arc::new(Mutex::new(Vec::new()));
         let decisions = Arc::new(Mutex::new(VecDeque::from(outcomes)));
@@ -88,6 +100,7 @@ impl LiveStory {
         config.auth.mock_user_id = Some(HUMAN.into());
         config.auth.allow_mock_headers = true;
         config.collaboration.loop_execution_enabled = true;
+        config.collaboration.nested_loop_execution_enabled = true;
         config.llm.provider_type = LlmProviderType::OpenAiCompatible;
         config.llm.base_url = format!("http://{receiver_addr}/v1");
         config.llm.api_key_env = None;
@@ -102,7 +115,33 @@ impl LiveStory {
         config.channels.providers.insert("loop-live-im".into(), bcs_config_api::ChannelProviderConfig {
             enabled: true, options: BTreeMap::from([("endpoint".into(), json!(format!("http://{receiver_addr}/notifications")))]),
         });
-        let (addr, server) = start_test_server_with_config(config).await;
+        let persistent_config = if persistent {
+            INIT_PERSISTENT_SECRET.call_once(|| {
+                // SAFETY: the dedicated key is initialized once before the persistent server reads it.
+                unsafe {
+                    std::env::set_var(
+                        "BCS_SECRET_LOOP_LIVE",
+                        "test-only-gateway-principal-signing-key",
+                    )
+                };
+            });
+            config.database.sqlite.path = directory.path().join("nested-loop-live.db").to_string_lossy().into_owned();
+            config.secret.provider = "env".into();
+            config.gateway_principal.signing_key_secret = Some("loop-live".into());
+            config.group_session_ws.signing_key_secret = "loop-live".into();
+            config.state_machine_history.persistence_enabled = true;
+            config.message_history.state_machine_cutoff_timestamp = 0;
+            config.security.outbound_url.block_private_networks = false;
+            config.security.outbound_url.allow_loopback = true;
+            Some(config.clone())
+        } else {
+            None
+        };
+        let (addr, server) = if persistent {
+            start_persistent_test_server_with_config(config).await
+        } else {
+            start_test_server_with_config(config).await
+        };
         let client = reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(10)).build().unwrap();
         checked(client.post(format!("http://{addr}/me/ensure-human")).header("X-Mock-User-Id", HUMAN).json(&json!({}))).await;
         let mut driver = MockBot::connect(addr).await;
@@ -132,7 +171,36 @@ impl LiveStory {
         Self { run_id: started["run"]["run_id"].as_str().unwrap().into(),
             session_id: started["run"]["session_id"].as_str().unwrap().into(),
             client, addr, provider, bot, _driver: driver, _directory: directory,
-            server, receiver, events, notifications, decisions, group_id }
+            server: Some(server), persistent_config, receiver, events, notifications, decisions, group_id }
+    }
+
+    async fn restart(&mut self, nested_execution_enabled: bool) {
+        let server = self.server.take().expect("running persistent server");
+        server.abort();
+        match server.await {
+            Err(error) if error.is_cancelled() => {}
+            result => panic!("persistent test server did not stop after abort: {result:?}"),
+        }
+        let mut config = self.persistent_config.clone().expect("persistent server config");
+        config.collaboration.nested_loop_execution_enabled = nested_execution_enabled;
+        let (addr, server) = start_persistent_test_server_with_config(config.clone()).await;
+        self.addr = addr;
+        self.server = Some(server);
+        self.persistent_config = Some(config);
+    }
+
+    async fn execute_persistent_sql(&self, sql: &str) {
+        let path = &self.persistent_config.as_ref().expect("persistent server config")
+            .database.sqlite.path;
+        LocalSqliteDbPlugin::new_file(path).expect("open persistent story database")
+            .execute(DbStatement::new(sql)).await.expect("execute persistent story SQL");
+    }
+
+    async fn raw_response(&self, pending: &Value, text: &str) -> reqwest::Response {
+        self.client.post(format!("http://{}/state-machine-runs/{}/nodes/{}/respond",
+            self.addr, self.run_id, pending["node_id"].as_str().unwrap()))
+            .header("X-Mock-User-Id", HUMAN).json(&json!({"content": text}))
+            .send().await.expect("Human response request")
     }
 
     async fn get(&self, path: &str) -> Value {
@@ -180,7 +248,7 @@ impl LiveStory {
     }
 
     async fn notification(&self, pending: &Value) -> Value {
-        for _ in 0..200 {
+        for _ in 0..400 {
             if let Some(event) = self.notifications.lock().await.iter().find(|event|
                 event["purpose"] == "HumanInputRequest" && event["payload"]["node_id"] == pending["node_id"]) {
                 assert_eq!(event["recipient"], "local-reviewer");
@@ -260,7 +328,52 @@ fn bot_node() -> Value {
         "instruction": "Use the previous result to produce the next output."})
 }
 
+fn named_human_node(display_name: &str, instruction: &str) -> Value {
+    let mut node = human_node();
+    node["display_name"] = json!(display_name);
+    node["instruction"] = json!(instruction);
+    node
+}
+
+fn nested_human_definition() -> String {
+    let inner_review = named_human_node("Inner review", "Review the innermost result.");
+    let mut middle_gate = named_human_node("Middle gate", "Confirm the middle iteration.");
+    middle_gate["transitions"] = json!({"complete": {"targets": ["inner"]}});
+    let middle_result = named_human_node("Middle result", "Confirm the middle result.");
+    let mut outer_gate = named_human_node("Outer gate", "Confirm the outer iteration.");
+    outer_gate["transitions"] = json!({"complete": {"targets": ["middle"]}});
+    let mut outer_result = named_human_node("Outer result", "Decide whether another outer iteration is required.");
+    outer_result["judge"] = json!({"type": "llm", "criteria": ["Whether the overall review is complete"],
+        "outcomes": ["repeat", "done"]});
+    let mut finalize = bot_node();
+    finalize["display_name"] = json!("Publish nested review");
+    finalize["final_output"] = json!(true);
+    let inner = json!({"kind": "loop", "display_name": "Inner review", "loop": {
+        "mode": "fixed", "max_iterations": 2, "entry_node": "inner_review", "result_node": "inner_review",
+        "continue_outcomes": ["complete"], "break_outcomes": [], "exhausted_outcome": "inner_exhausted",
+        "nodes": {"inner_review": inner_review}
+    }, "transitions": {"inner_exhausted": {"targets": ["middle_result"]}}});
+    let middle = json!({"kind": "loop", "display_name": "Middle review", "loop": {
+        "mode": "fixed", "max_iterations": 2, "entry_node": "middle_gate", "result_node": "middle_result",
+        "continue_outcomes": ["complete"], "break_outcomes": [], "exhausted_outcome": "middle_exhausted",
+        "nodes": {"middle_gate": middle_gate, "inner": inner, "middle_result": middle_result}
+    }, "transitions": {"middle_exhausted": {"targets": ["outer_result"]}}});
+    let outer = json!({"kind": "loop", "display_name": "Outer review", "loop": {
+        "mode": "fixed", "max_iterations": 3, "entry_node": "outer_gate", "result_node": "outer_result",
+        "continue_outcomes": ["repeat"], "break_outcomes": ["done"], "exhausted_outcome": "outer_exhausted",
+        "nodes": {"outer_gate": outer_gate, "middle": middle, "outer_result": outer_result}
+    }, "transitions": {"done": {"targets": ["finalize"]},
+        "outer_exhausted": {"targets": ["finalize"]}}});
+    json!({"name": "Nested Human live", "participants": {"worker": {"required": true}},
+        "runtime": {"kind": "state_machine", "state_machine": {"version": 2, "graph_mode": "hierarchical",
+            "human_input_channel": {"channel_type": "loop-live-im"},
+            "nodes": {"outer": outer, "finalize": finalize}
+        }}}
+    ).to_string()
+}
+
 fn definition(scenario: &str) -> String {
+    if scenario == "nested_human" { return nested_human_definition(); }
     let human_entry = scenario == "human_entry";
     let approved = scenario == "approved";
     let mut entry = if human_entry { human_node() } else { bot_node() };
@@ -359,4 +472,154 @@ async fn story_c_human_entry_receives_previous_result_and_replies_to_current_exe
     story.finish_bot("second-reviewed-result", Some("second-human-input")).await;
     story.finish_bot("final-live-output", Some("second-reviewed-result")).await;
     story.verify_completed(5, 0).await;
+}
+
+#[tokio::test]
+async fn nested_human_story_preserves_parent_context_and_direct_notifications() {
+    let story = LiveStory::start("nested_human", vec!["repeat", "done"]).await;
+    let mut first_inner = BTreeMap::<(u64, u64), (String, String)>::new();
+    let mut stale_node = None;
+    for index in 0..20 {
+        let pending = story.pending().await;
+        let execution = &pending["execution"];
+        let path = execution["loop_path"].as_array().expect("nested loop path");
+        assert!((1..=3).contains(&path.len()));
+        let notification = story.notification(&pending).await;
+        let notification_text = notification["text"].as_str().unwrap();
+        if !pending["loop_context"].is_null() {
+            assert_eq!(pending["loop_context"]["loop_path"], execution["loop_path"]);
+            assert!(notification_text.contains("路径："));
+            for frame in path {
+                assert!(notification_text.contains(&format!("{} {}/{}", frame["loop_id"].as_str().unwrap(),
+                    frame["iteration"].as_u64().unwrap(), frame["max_iterations"].as_u64().unwrap())));
+            }
+        }
+        let content = format!("nested-human-{index}");
+        if execution["definition_node_id"] == "inner_review" {
+            let parent = (path[0]["iteration"].as_u64().unwrap(), path[1]["iteration"].as_u64().unwrap());
+            if path[2]["iteration"] == 1 {
+                assert!(pending["loop_context"]["previous_result"].is_null());
+                first_inner.insert(parent, (pending["node_id"].as_str().unwrap().into(), content.clone()));
+            } else {
+                let expected = first_inner.get(&parent).expect("first inner result for parent");
+                assert_eq!(pending["loop_context"]["previous_result"]["execution_node_id"], expected.0);
+                assert_eq!(pending["loop_context"]["previous_result"]["output"], expected.1);
+                assert_eq!(notification_text.matches(&expected.1).count(), 1);
+            }
+        }
+        story.respond(&pending, &content).await;
+        if stale_node.is_none() && execution["definition_node_id"] == "inner_review" {
+            let node_id = pending["node_id"].as_str().unwrap().to_owned();
+            let stale = story.client.post(format!("http://{}/state-machine-runs/{}/nodes/{node_id}/respond",
+                story.addr, story.run_id)).header("X-Mock-User-Id", HUMAN)
+                .json(&json!({"content": "stale-nested-human"})).send().await.unwrap();
+            assert_eq!(stale.status(), reqwest::StatusCode::CONFLICT);
+            stale_node = Some(node_id);
+        }
+    }
+    assert_eq!(first_inner.len(), 4);
+    assert!(stale_node.is_some());
+    story.finish_bot("final-live-output", Some("nested-human-19")).await;
+    let graph = story.verify_completed(21, 10).await;
+    assert_eq!(graph["loops"].as_object().unwrap().keys().cloned().collect::<Vec<_>>(),
+        vec!["outer", "outer/middle", "outer/middle/inner"]);
+    let skipped: Vec<_> = graph["nodes"].as_array().unwrap().iter()
+        .filter(|node| node["status"] == "skipped").collect();
+    assert!(skipped.iter().all(|node| node["execution"]["loop_path"][0]["iteration"] == 3));
+}
+
+#[tokio::test]
+async fn nested_human_persistent_story_recovers_with_admission_disabled() {
+    let mut story = LiveStory::start_persistent("nested_human", vec!["repeat", "done"]).await;
+    let mut stale_node = None;
+    for index in 0..20 {
+        let mut pending = story.pending().await;
+        if index == 0 {
+            let original_notification = story.notification(&pending).await;
+            let node_id = pending["node_id"].as_str().unwrap().to_owned();
+            assert_eq!(story.notifications.lock().await.iter()
+                .filter(|event| event["purpose"] == "HumanInputRequest"
+                    && event["payload"]["node_id"] == node_id).count(), 1);
+            story.restart(true).await;
+            let recovered = story.pending().await;
+            assert_eq!(recovered["node_id"], node_id);
+            assert_eq!(recovered["execution"], pending["execution"]);
+            let recovered_notification = story.notification(&recovered).await;
+            assert_eq!(recovered_notification["payload"], original_notification["payload"]);
+            assert_eq!(recovered_notification["text"], original_notification["text"]);
+            assert_eq!(recovered_notification["recipient"], original_notification["recipient"]);
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            assert_eq!(story.notifications.lock().await.iter()
+                .filter(|event| event["purpose"] == "HumanInputRequest"
+                    && event["payload"]["node_id"] == node_id).count(), 1,
+                "restart must not repeat an accepted notification");
+            pending = recovered;
+        }
+        if [4, 10, 19].contains(&index) {
+            let node_id = pending["node_id"].as_str().unwrap().to_owned();
+            story.restart(index < 10).await;
+            let recovered = story.pending().await;
+            assert_eq!(recovered["node_id"], node_id);
+            assert_eq!(recovered["execution"], pending["execution"]);
+            pending = recovered;
+            if let Some(stale_node) = &stale_node {
+                let stale = story.client.post(format!("http://{}/state-machine-runs/{}/nodes/{stale_node}/respond",
+                    story.addr, story.run_id)).header("X-Mock-User-Id", HUMAN)
+                    .json(&json!({"content": "stale-after-restart"})).send().await.unwrap();
+                assert_eq!(stale.status(), reqwest::StatusCode::CONFLICT);
+            }
+        }
+        assert!(!pending["execution"]["loop_path"].as_array().unwrap().is_empty());
+        if index == 12 {
+            story.execute_persistent_sql("CREATE TRIGGER reject_nested_history BEFORE INSERT ON bcs_messages BEGIN SELECT RAISE(ABORT,'injected nested history failure'); END").await;
+            let failed = story.raw_response(&pending, "persistent-human-12").await;
+            assert!(failed.status().is_server_error(), "history failure returned {}", failed.status());
+            let accepted = story.get(&format!("/state-machine-runs/{}/nodes/{}", story.run_id,
+                pending["node_id"].as_str().unwrap())).await;
+            assert_eq!(accepted["node"]["artifact_text"], "persistent-human-12");
+            story.execute_persistent_sql("DROP TRIGGER reject_nested_history").await;
+            story.restart(false).await;
+            let mut recovered_next = None;
+            let mut last_retry = String::new();
+            'history_retry: for _ in 0..20 {
+                let retry = story.raw_response(&pending, "persistent-human-12").await;
+                let status = retry.status();
+                last_retry = retry.text().await.unwrap();
+                assert!(status.is_success() || status == reqwest::StatusCode::CONFLICT,
+                    "history retry returned {status}: {last_retry}");
+                for _ in 0..10 {
+                    let current = story.get(&format!("/state-machine-runs/{}/nodes/{}", story.run_id,
+                        pending["node_id"].as_str().unwrap())).await;
+                    if current["node"]["status"] == "completed" {
+                        recovered_next = Some(story.pending().await);
+                        break 'history_retry;
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            }
+            let recovered_next = recovered_next.unwrap_or_else(||
+                panic!("history retry must advance to the next Human node: {last_retry}"));
+            assert_ne!(recovered_next["node_id"], pending["node_id"]);
+            let stale = story.raw_response(&pending, "stale-after-history-recovery").await;
+            assert_eq!(stale.status(), reqwest::StatusCode::CONFLICT);
+            continue;
+        }
+        if index == 19 {
+            story.execute_persistent_sql("CREATE TRIGGER reject_nested_skip BEFORE UPDATE ON bcs_state_machine_node_runs WHEN NEW.status='skipped' AND OLD.status<>'skipped' BEGIN SELECT RAISE(ABORT,'injected nested skip failure'); END").await;
+            let failed = story.raw_response(&pending, "persistent-human-19").await;
+            assert!(failed.status().is_server_error(), "skip failure returned {}", failed.status());
+            story.execute_persistent_sql("DROP TRIGGER reject_nested_skip").await;
+            story.restart(false).await;
+            let stale = story.raw_response(&pending, "stale-after-skip-restart").await;
+            assert_eq!(stale.status(), reqwest::StatusCode::CONFLICT);
+            continue;
+        }
+        story.respond(&pending, &format!("persistent-human-{index}")).await;
+        stale_node.get_or_insert_with(|| pending["node_id"].as_str().unwrap().to_owned());
+    }
+    story.finish_bot("final-live-output", Some("persistent-human-19")).await;
+    let graph = story.verify_completed(21, 10).await;
+    assert_eq!(graph["loops"].as_object().unwrap().len(), 3);
+    assert_eq!(story.persistent_config.as_ref().unwrap()
+        .collaboration.nested_loop_execution_enabled, false);
 }

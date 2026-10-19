@@ -15,13 +15,15 @@ from agentclaw.community.core.repository.implementations.task.task_node_reposito
 from agentclaw.community.core.repository.implementations.task.task_node_run_info_repository import (
     TaskNodeRunInfoRepository,
 )
-from agentclaw.community.core.task.domain.models import Status, TaskSourceType, TaskType
+from agentclaw.community.core.task.domain.models import TaskSourceType, TaskType
 from agentclaw.community.core.task.domain.requests import (
-    RequestAcceptance, RequestContext, RequestGoal, RequestMetadata,
-    RequestTaskSpec, TaskInfoRequest,
+    RequestAcceptance, RequestContext, RequestGoal, RequestTaskSpec, TaskInfoRequest,
 )
-from agentclaw.community.core.task.task_center.engine import CoopGroupStart
+from agentclaw.community.core.task.task_runner.execution_adapters import CoopGroupStart
 from agentclaw.community.core.task.task_center.task_service import TaskService
+from agentclaw.community.core.task.task_center.task_service_support import (
+    normalize_owner_bot_id,
+)
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 
 
@@ -45,12 +47,12 @@ class _FakeRunner:
     def __init__(self, calls: list[tuple]) -> None:
         self._calls = calls
 
-    async def start_run(self, nodes) -> None:
-        self._calls.append(("start_run", nodes))
+    async def start_run(self, node) -> None:
+        self._calls.append(("start_run", node))
 
 
 class _FakeEngine:
-    """Stands in for ExecutionEngine; records calls at its current runner seam."""
+    """Stands in for CentralizedExecutionAdapter; records calls at its current runner seam."""
     def __init__(self, graph):
         self._graph = graph
         self.workflow_session = "wf-session-1"
@@ -65,8 +67,8 @@ class _FakeEngine:
 def _request(task_type: TaskType, *, owner_bot_id: str = "b1", owner_user_id: str = "u1", **xec) -> TaskInfoRequest:
     return TaskInfoRequest(
         task_spec=RequestTaskSpec(
-            metadata=RequestMetadata(title="T", instruction="do"),
-            context=RequestContext(background="bg"),
+
+            context=RequestContext(background="bg", title="T"),
             goal=RequestGoal(objective="o", acceptances=[RequestAcceptance(id="a", acceptance="d")]),
         ),
         source_type=TaskSourceType.API,
@@ -88,7 +90,7 @@ def _service(task_type_stub_engine):
     node_repo, run_repo = _repos()
     svc = TaskService(graph, task_info_repo=None, task_node_repo=node_repo,
                       task_node_run_info_repo=run_repo, task_id_provider=lambda: "t1")
-    svc._engine = task_type_stub_engine  # inject the fake engine
+    svc._centralized_adapter = task_type_stub_engine  # inject the fake engine
     return svc, node_repo, run_repo
 
 
@@ -102,14 +104,12 @@ def test_execute_workflow_dispatches_to_runner():
 
     assert result.success is True and result.task_id == "t1"
     assert len(eng.calls) == 1
-    kind, nodes = eng.calls[0]
+    kind, node = eng.calls[0]
     assert kind == "start_run"
-    assert len(nodes) == 1
-    node = nodes[0]
     assert node.node_id == "t1"
     assert node.run_info.run_mode == "single_bot"
     assert node.run_info.assignee == "b1"
-    assert node.task_spec.metadata.title == "/wf 1 2"
+    assert node.task_spec.context.title == "/wf 1 2"
 
 
 @pytest.mark.parametrize("owner_bot_id", ["b1", "b1:u1"])
@@ -122,9 +122,9 @@ def test_execute_workflow_accepts_pure_or_composite_owner_bot_id(owner_bot_id):
     )
 
     assert result.success is True
-    _, nodes = eng.calls[0]
-    assert nodes[0].run_info.assignee == "b1"
-    assert nodes[0].task_spec.metadata.title == "/wf "
+    _, node = eng.calls[0]
+    assert node.run_info.assignee == "b1"
+    assert node.task_spec.context.title == "/wf "
 
 
 def test_execute_yaml_composes_owner_identity_before_forming_group():
@@ -167,7 +167,7 @@ def test_normalize_owner_bot_id_preserves_real_owner_on_mismatch():
         owner_user_id="35983",
         yaml="kind: collab",
     )
-    norm = TaskService._normalize_owner_bot_id(req)
+    norm = normalize_owner_bot_id(req)
     assert norm.owner_bot_id == "default:146836"  # 真实归属保留(不被 35983 覆盖)
     assert norm.owner_user_id == "35983"  # 执行用户(人类观察者)
 

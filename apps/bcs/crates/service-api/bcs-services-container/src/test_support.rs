@@ -59,6 +59,9 @@ pub fn with_all_noop() -> ServicesBuilder {
         .workbench_sessions(Arc::new(NoopWorkbenchSessionService))
         .group_proposals(Arc::new(NoopGroupProposalService))
         .group_message_history(Arc::new(NoopGroupMessageHistoryService))
+        .group_context(Arc::new(bcs_app_group_context::GroupContextApplicationServiceImpl::new(
+            Arc::new(bcs_group_context_store::MemoryGroupContextRepo::new()),
+        )))
         .group_fusion(Arc::new(NoopGroupFusionService))
         .system_message(Arc::new(NoopSystemMessageService))
         .session_management(Arc::new(NoopSessionManagementService))

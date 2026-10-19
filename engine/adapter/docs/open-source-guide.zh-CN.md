@@ -133,7 +133,7 @@ openclaw 引擎是连接 **[OpenClaw](https://www.npmjs.com/package/openclaw)** 
 与 claude_code 的网关不同，它**未内置**在本导出中——但它是一个公共 npm 包，可自行安装运行：
 
 ```bash
-npm i -g openclaw            # 需 >= 2026.5.x —— 见下方版本说明
+npm i -g openclaw            # 2026.3.x 也可连接 —— 见下方版本说明
 openclaw gateway run --dev --allow-unconfigured    # 监听 ws://127.0.0.1:18789
 ```
 
@@ -146,10 +146,10 @@ python start.py --port 20003
 # -> "Connected to OpenClaw Gateway: protocol=4"
 ```
 
-> **网关版本很关键（已实测）。** 内置客户端使用 OpenClaw connect 协议 **v4**，需要
-> **openclaw ≥ 2026.5.x**。较旧的网关（如 2026.3.x，协议 v3）会拒绝握手并报
-> `Handshake failed: protocol mismatch`。若需对接其它网关协议版本，可通过
-> `OPENCLAW_GATEWAY_PROTOCOL_VERSION`（默认 `4`）覆盖。
+> **网关版本很关键（已实测）。** 内置客户端握手时声明支持 OpenClaw connect 协议
+> **v3-v4**，因此可连接 openclaw 2026.3.x（协商到 v3）与 ≥ 2026.5.x（协商到 v4）。
+> `OPENCLAW_GATEWAY_PROTOCOL_VERSION`（默认 `4`）只表示最高协议版本；最低版本由适配器的
+> v3 wire envelope 决定。
 
 > 与 claude_code 一样，网关代表你驱动模型，完整对话需要 OpenClaw 自身的模型/凭据配置。
 > 引擎 ↔ 网关的握手本身已在 openclaw 2026.6.x 上实测通过。

@@ -25,7 +25,6 @@ from agentclaw.community.core.caller_identity.contracts import (
     CallerContext,
     CallerIamTokenContext,
     CallerIdentityAmbiguousError,
-    CallerIdentityNotFoundError,
     CallerIdentityPermissionError,
     CallerIdentityReadOnlyError,
     CallerIdentityStage,
@@ -40,6 +39,11 @@ from agentclaw.community.core.caller_identity.credential import (
     CALLER_CHAT_TASK,
     AuthContext,
     CallerToken,
+)
+from agentclaw.community.core.caller_identity.guard import (
+    load_bot,
+    lock_epoch_matches,
+    require_owner_of_active_service_bot,
 )
 from agentclaw.community.core.caller_identity.session_validator import CallerSessionValidator
 from agentclaw.community.core.caller_identity.protocols import (
@@ -243,11 +247,7 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
         )
         normalized_call_type = self._parse_call_type(call_type)
         bot = self._get_bot(bot_id, entity_id)
-        # COSEC: entity-scoped lookup identifies the Bot; only its owner can mutate it.
-        if str(bot.get("owner_id") or "") != actor_id:
-            raise CallerIdentityPermissionError
-        if bot.get("bot_type") != "service" or bot.get("status") != "ACTIVE":
-            raise CallerIdentityReadOnlyError
+        require_owner_of_active_service_bot(bot, actor_id)
         if self._cli_scope_reconciler is None:
             logger.error(
                 "cli_call_type_update_failed bot_id=%s cli_code=%s actor_id=%s "
@@ -305,21 +305,17 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
             if item.get("cli_code")
         }
         lock_key = f"{bot_id}:{actor_id}"
-        lock = self._lock_repository.get_by_key(lock_key)
-        if lock_epoch is None:
-            if lock is not None:
-                logger.warning(
-                    "cli_call_type_update_failed bot_id=%s cli_code=%s actor_id=%s "
-                    "phase=lock error_type=%s lock_epoch_supplied=%s duration_ms=%s",
-                    bot_id, cli_code, actor_id, "LockEpochInvalid", False,
-                    int((time.monotonic() - started) * 1000),
-                )
-                raise CallerLockEpochError
-        elif lock is None or lock.holder_user_id != actor_id or lock.id != lock_epoch:
+        if not lock_epoch_matches(
+            self._lock_repository,
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            actor_id=actor_id,
+            lock_epoch=lock_epoch,
+        ):
             logger.warning(
                 "cli_call_type_update_failed bot_id=%s cli_code=%s actor_id=%s "
                 "phase=lock error_type=%s lock_epoch_supplied=%s duration_ms=%s",
-                bot_id, cli_code, actor_id, "LockEpochInvalid", True,
+                bot_id, cli_code, actor_id, "LockEpochInvalid", lock_epoch is not None,
                 int((time.monotonic() - started) * 1000),
             )
             raise CallerLockEpochError
@@ -749,18 +745,7 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
         bot_id: str,
         entity_id: str | None = None,
     ) -> Mapping[str, Any]:
-        if entity_id is not None:
-            bot = self._bot_repository.get_by_id_and_entity(bot_id, entity_id)
-        else:
-            try:
-                # COSEC: do not select an arbitrary duplicate Bot when callers
-                # omit entity_id; the caller-specific lookup fails closed.
-                bot = self._bot_repository.get_unique_by_id(bot_id)
-            except BotLookupAmbiguousError as exc:
-                raise CallerIdentityAmbiguousError from exc
-        if bot is None:
-            raise CallerIdentityNotFoundError
-        return bot
+        return load_bot(self._bot_repository, bot_id=bot_id, entity_id=entity_id)
 
     def _holds_lock(self, bot: Mapping[str, Any], actor_id: str) -> bool:
         lock = self._lock_repository.get_by_key(f"{bot['bot_id']}:{bot['owner_id']}")

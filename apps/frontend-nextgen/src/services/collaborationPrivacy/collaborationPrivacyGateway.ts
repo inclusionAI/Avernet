@@ -21,6 +21,11 @@ export interface PublicationCommand {
   audience: PublicAudience;
   config: PublicConfig;
   deptEntries?: Array<{ deptNo: string; deptName: string }>;
+  /**
+   * 外部 Bot 直改路由：仅 PATCH /openapi/v1/collaboration/bots/{botId}，无审批链路。
+   * 部门范围为组织完整名称字符串（deptName），限定组织提交前必须先 GET 最新 friend_ext 做整体合并。
+   */
+  isExternalBot?: boolean;
 }
 export interface PublicationPendingResult {
   status: 'pending';

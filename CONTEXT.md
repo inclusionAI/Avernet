@@ -176,6 +176,16 @@ _避免使用_: Accepted Batch、Promotion Ready
 服务 Bot 发布物中记录的、已经从 Skill Reference 解析出的具体技能版本。它是某次发布的确定性输入，不等同于控制面的 Track Latest 绑定策略。
 _避免使用_: Bot 技能绑定、固定版本策略
 
+## Skills Runtime Layout
+
+**Pool-native Bot Layout**:
+Bot 创建时即以 Pool 作为唯一技能内容权威的运行时布局。它不曾以 Legacy 作为内容权威，也不经过 Legacy 到 Pool 的迁移切换。
+_避免使用_: 新 Bot Cutover、空 Legacy 迁移
+
+**Legacy Layout Migration**:
+将创建时使用 Legacy 技能内容权威的既有 Bot 前滚到 Pool 的布局迁移。它只适用于存量 Legacy Bot，不适用于以 Pool-native 布局创建的新 Bot。
+_避免使用_: Pool-native 初始化、新 Bot Cutover
+
 ## 生命周期
 
 **Bot 回收（Bot Recycling）**:

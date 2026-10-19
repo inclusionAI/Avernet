@@ -3,6 +3,7 @@ import { ChatPanel, resolveSingleSender } from '@/components/Workspace/ChatPanel
 import type { ConversationTarget } from '@/services/workspace/workspaceModel';
 import { describe, expect, it, jest } from '@jest/globals';
 import type { ChatBridge } from '@tc-chat/core';
+import type { CommandConfig, SenderRef } from '@tc-chat/ui/es/Sender';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -123,6 +124,57 @@ const baseProps = {
 };
 
 describe('ChatPanel interactive', () => {
+  it('副屏镜像开时渲染右上「收起」悬浮钮并触发 toggle；未开或未提供 toggle 时不渲染', () => {
+    const onToggleSidePane = jest.fn();
+    const { rerender } = render(
+      <ChatPanel
+        target={botModeTarget as any}
+        mode="bot"
+        interactive
+        connectionStatus="connected"
+        messages={[]}
+        isRequesting={false}
+        isLoadingMessages={false}
+        retryCount={0}
+        supportState={{ phase: 'ready', error: null }}
+        onSend={() => {}}
+        onStop={() => {}}
+        onReconnect={() => {}}
+        {...baseProps}
+        sidePaneOpen
+        onToggleSidePane={onToggleSidePane}
+      />,
+    );
+
+    // 开态：右上悬浮钮存在（PanelRightClose 图标），点按触发一次 toggle 关闭。
+    const collapse = screen.getByRole('button', { name: '收起副屏' });
+    expect(collapse.querySelector('svg')).toHaveClass('lucide-panel-right-close');
+    fireEvent.click(collapse);
+    expect(onToggleSidePane).toHaveBeenCalledTimes(1);
+
+    // 关态：不渲染。
+    rerender(
+      <ChatPanel
+        target={botModeTarget as any}
+        mode="bot"
+        interactive
+        connectionStatus="connected"
+        messages={[]}
+        isRequesting={false}
+        isLoadingMessages={false}
+        retryCount={0}
+        supportState={{ phase: 'ready', error: null }}
+        onSend={() => {}}
+        onStop={() => {}}
+        onReconnect={() => {}}
+        {...baseProps}
+        sidePaneOpen={false}
+        onToggleSidePane={onToggleSidePane}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: '收起副屏' })).toBeNull();
+  });
+
   it('窄屏会话列表入口位于单聊标题左侧并使用右箭头图标', () => {
     const onOpenSessionList = jest.fn();
     render(
@@ -237,9 +289,12 @@ describe('ChatPanel interactive', () => {
         {...baseProps}
       />,
     );
-    expect(screen.getByText('已连接')).toBeInTheDocument();
+    const status = screen.getByRole('status', { name: '已连接' });
+    expect(status).toHaveTextContent('已连接');
     // v1.4：超长标题下连接状态不换行不被挤占（shrink-0 + nowrap，收缩只由标题承担）
-    expect(screen.getByText('已连接')).toHaveClass('shrink-0', 'whitespace-nowrap');
+    expect(status).toHaveClass('shrink-0', 'whitespace-nowrap');
+    // v1.5 窄宽收纳：已连接文案 <lg 仅保绿点，可访问名由 aria-label 承接。
+    expect(screen.getByText('已连接')).toHaveClass('hidden', 'lg:inline');
   });
 
   it('sessionTitle 传入时顶栏显示会话标题（与协作群顶栏一致），缺省回退 Bot 名称', () => {
@@ -331,7 +386,7 @@ describe('ChatPanel interactive', () => {
     );
     expect(screen.queryByRole('button', { name: '会话文件' })).not.toBeInTheDocument();
   });
-  it('用户消息优先使用顶栏真实用户头像，Bot 消息仍使用 Bot 头像', () => {
+  it('消息区头像 24px：用户用顶栏真实头像、Bot 用 target.avatar（dmore 交付包复测）', () => {
     const userAvatarUrl = 'https://example.test/user-avatar.png';
     const userSender = resolveSingleSender(
       { id: 'u1', role: 'user', content: '你好', status: 'history' } as never,
@@ -349,9 +404,10 @@ describe('ChatPanel interactive', () => {
     const assistantAvatar = render(<>{assistantSender.avatar}</>);
 
     expect(userAvatar.container.querySelector('img')).toHaveAttribute('src', userAvatarUrl);
-    expect(userAvatar.container.querySelector('img')).toHaveClass('shrink-0');
-    expect(assistantAvatar.container.querySelector('img')).toBeNull();
-    expect(assistantAvatar.container.textContent).toContain('B');
+    expect(userAvatar.container.querySelector('img')?.getAttribute('style')).toContain('24');
+    // dmore 005/006/009/013：Bot 消息左侧 24px 头像，取 target.avatar。
+    expect(assistantAvatar.container.querySelector('img')).toHaveAttribute('src', 'B');
+    expect(assistantAvatar.container.querySelector('img')?.getAttribute('style')).toContain('24');
   });
 
   it('按 senderId 匹配认证用户名称，不把 Bot viewer 当作用户发起人', () => {
@@ -498,7 +554,7 @@ describe('ChatPanel interactive', () => {
     expect(screen.queryByTestId('user-message-actions-u2')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '引用消息' })).not.toBeInTheDocument();
     const latestUserActionArea = screen.getByTestId('message-copy-action-u2');
-    expect(latestUserActionArea).toHaveClass('justify-end', 'pr-11');
+    expect(latestUserActionArea).toHaveClass('justify-end');
     fireEvent.click(within(latestUserActionArea).getByRole('button', { name: '编辑消息' }));
     expect(onDraftChange).toHaveBeenCalledWith('最近的问题');
     expect(screen.getByRole('status', { name: '编辑消息状态' })).toBeInTheDocument();
@@ -508,9 +564,9 @@ describe('ChatPanel interactive', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('用户提问右对齐、Bot 回复左对齐，并使用 14px 正文与分组间距', () => {
+  it('用户提问右对齐、Bot 回复左对齐，并使用 13px 正文与分组间距（dmore 实测）', () => {
     mockBubbleRenders.length = 0;
-    render(
+    const { container: panel } = render(
       <ChatPanel
         target={botModeTarget as any}
         viewer={viewer}
@@ -537,11 +593,15 @@ describe('ChatPanel interactive', () => {
     const bubbles = mockBubbleRenders.filter(Boolean);
     expect(bubbles).toHaveLength(2);
     expect(bubbles.map((props) => props.className)).toEqual([
-      'mb-6 message-bubble-compact [--aix-markdown-font-size:14px] [--aix-font-size-base:14px]',
-      'mb-0 message-bubble-compact [--aix-markdown-font-size:14px] [--aix-font-size-base:14px]',
+      'message-bubble-compact [--aix-markdown-font-size:13px] [--aix-font-size-base:13px]',
+      'message-bubble-compact [--aix-markdown-font-size:13px] [--aix-font-size-base:13px]',
     ]);
+    // 分组间距(16px 同发送者/24px 切换)落在消息项外壳，操作行得以贴近本条气泡末尾。
+    expect(panel.querySelector('[data-message-id="u1"]')).toHaveClass('mb-6');
+    expect(panel.querySelector('[data-message-id="a1"]')).toHaveClass('mb-0');
     expect(bubbles.map((props) => (props.sender as { align?: string }).align)).toEqual(['right', 'left']);
-    expect((bubbles[0].sender as { bubbleColor?: string }).bubbleColor).toBe('hsl(var(--primary) / 0.1)');
+    // SVG 稿实测：用户气泡 = #F5F5F5 中性灰（原品牌 10% 蓝底已回正），Bot 气泡无底。
+    expect((bubbles[0].sender as { bubbleColor?: string }).bubbleColor).toBe('hsl(var(--muted))');
     expect((bubbles[1].sender as { bubbleColor?: string }).bubbleColor).toBeUndefined();
     const messageMeta = screen.getAllByTestId('message-sender-meta');
     expect(messageMeta).toHaveLength(2);
@@ -589,8 +649,8 @@ describe('ChatPanel interactive', () => {
       />,
     );
 
-    expect(screen.getByTestId('message-copy-action-u-copy')).toHaveClass('justify-end', 'pr-11');
-    expect(screen.getByTestId('message-copy-action-a-copy')).toHaveClass('justify-start', 'pl-11');
+    expect(screen.getByTestId('message-copy-action-u-copy')).toHaveClass('justify-end');
+    expect(screen.getByTestId('message-copy-action-a-copy')).toHaveClass('justify-start');
     expect(screen.getAllByRole('button', { name: '复制整条消息' })).toHaveLength(2);
     expect(mockBubbleRenders[1].actions).toBeTruthy();
 
@@ -655,5 +715,93 @@ describe('ChatPanel interactive', () => {
       />,
     );
     expect(mockPanelRenders.some((p) => p.bridge === bridge)).toBe(true);
+  });
+
+  it('onSidePaneIsOpenChange 经 ChatLayoutPanelSlot 收进副屏 onIsOpenChange 组合链（真实开合态接线）', () => {
+    mockPanelRenders.length = 0;
+    const onSidePaneIsOpenChange = jest.fn();
+    render(
+      <ChatPanel
+        target={botModeTarget as any}
+        mode="bot"
+        interactive
+        connectionStatus="connected"
+        messages={[]}
+        isRequesting={false}
+        isLoadingMessages={false}
+        retryCount={0}
+        supportState={{ phase: 'ready', error: null }}
+        onSend={() => {}}
+        onStop={() => {}}
+        onReconnect={() => {}}
+        onSidePaneIsOpenChange={onSidePaneIsOpenChange}
+        {...baseProps}
+      />,
+    );
+    // 副屏插槽包装组件把 App 观察口组合进真实 onIsOpenChange（渲染器默认展开经此点亮收起钮）。
+    const panelProps = mockPanelRenders.at(-1) as { onIsOpenChange?: (open: boolean) => void };
+    expect(typeof panelProps?.onIsOpenChange).toBe('function');
+    panelProps?.onIsOpenChange?.(true);
+    expect(onSidePaneIsOpenChange).toHaveBeenCalledWith(true);
+  });
+
+  it('真空会话确认后渲染富化空态：Bot头像标记+主副文案+开场 chips，chip 一键写入输入框', async () => {
+    const insert = jest.fn();
+    const focus = jest.fn();
+    // 真实 <Sender> 经 useImperativeHandle 挂桩,React 不会把 DOM 覆进 ref.current;
+    // 测试桩 <input> 会。以只读 getter 形态保住命令式桩,与真实运行时语义一致。
+    const senderRef = {
+      get current() {
+        return { insert, focus };
+      },
+      set current(_node: unknown) {
+        void _node;
+      },
+    } as unknown as React.RefObject<SenderRef>;
+    const command = {
+      categories: [
+        {
+          key: '__bot_commands__',
+          label: '命令',
+          items: [
+            { id: '__skill_entry__', name: 'skill' },
+            { id: '__file_entry__', name: 'file' },
+          ],
+        },
+      ],
+      onSelect: () => {},
+      format: () => '',
+    } as unknown as CommandConfig;
+    render(
+      <ChatPanel
+        target={botModeTarget as any}
+        mode="bot"
+        interactive
+        connectionStatus="connected"
+        messages={[]}
+        isRequesting={false}
+        isLoadingMessages={false}
+        retryCount={0}
+        supportState={{ phase: 'ready', error: null }}
+        onSend={() => {}}
+        onStop={() => {}}
+        onReconnect={() => {}}
+        senderRef={senderRef}
+        command={command}
+        {...baseProps}
+      />,
+    );
+
+    // 两态强制：真空会话须等 EMPTY_CONFIRM_MS（1s）确认后才从骨架屏切到富化空态。
+    const heading = await screen.findByText('发送一条消息开始对话', undefined, { timeout: 2500 });
+    expect(heading).toBeInTheDocument();
+    // 副文案取 Bot 摘要（botModeTarget.summary = '单聊'）。
+    expect(screen.getByText('单聊')).toBeInTheDocument();
+    // 开场指令 chips：按命令面板装配物取舍（file/skill 均在），点击写入输入框并聚焦。
+    fireEvent.click(screen.getByRole('button', { name: /引用文件/ }));
+    expect(insert).toHaveBeenCalledWith('/file');
+    expect(focus).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: /调用技能/ }));
+    expect(insert).toHaveBeenCalledWith('/skill');
   });
 });

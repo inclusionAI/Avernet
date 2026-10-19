@@ -31,6 +31,7 @@ import logging
 import os
 import time
 import uuid
+from contextlib import aclosing, nullcontext
 from typing import Any, Callable, Dict, Optional
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -39,6 +40,7 @@ from pydantic import ValidationError
 from engine.community.config import load_max_connections, load_mcp_token_settings
 from engine.community.plugin_api.auth_gate.protocol import AuthGateService
 from engine.community.core.chat.models import ChatAbortRequest, ChatRequest
+from engine.community.plugin_api.openclaw.chat import ChatAckCallback, OpenClawChatAck
 from engine.community.core.engine.context import AuthContext
 from engine.community.core.resource_references.service import ResourceReferenceService
 from engine.community.core.resource_materialization.models import (
@@ -301,6 +303,7 @@ class EngineWebSocketServer:
         )
         self._resource_materialization_service = resource_materialization_service
         self._connections: Dict[str, WebSocket] = {}
+        self._ack_chat_tasks: dict[str, set[asyncio.Task]] = {}
         self._conn_auth: Dict[str, AuthContext] = {}
         self._session_subscribers: Dict[str, set[str]] = {}
         self._conn_sessions: Dict[str, set[str]] = {}
@@ -378,6 +381,11 @@ class EngineWebSocketServer:
 
     async def _release_conn(self, conn_id: str) -> None:
         """Tell the active engine this connection is gone and drop session subscriptions."""
+        tasks = self._ack_chat_tasks.pop(conn_id, set())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         self._unsubscribe_conn(conn_id)
         await self._openclaw_resume.detach(conn_id)
         auth = self._conn_auth.pop(conn_id, None)
@@ -535,7 +543,8 @@ class EngineWebSocketServer:
                         response, followup_events = await self._handle_request(
                             websocket, conn_id, request, auth_gate_service=auth_gate_service,
                         )
-                        await websocket.send_text(response.to_json())
+                        if response is not None:
+                            await websocket.send_text(response.to_json())
                         for event_name, event_payload in followup_events:
                             await self._send_event(websocket, event_name, event_payload)
                     else:
@@ -586,7 +595,7 @@ class EngineWebSocketServer:
         request: RequestFrame,
         *,
         auth_gate_service: AuthGateService,
-    ) -> tuple[ResponseFrame, list[tuple[str, Dict[str, Any]]]]:
+    ) -> tuple[ResponseFrame | None, list[tuple[str, Dict[str, Any]]]]:
         """Dispatch a `req` frame to the appropriate plugin.
 
         Known methods (chat.send / chat.abort / sessions.reset) route to
@@ -1086,7 +1095,7 @@ class EngineWebSocketServer:
         params: Dict[str, Any],
         *,
         auth_gate_service: AuthGateService,
-    ) -> ResponseFrame:
+    ) -> ResponseFrame | None:
         """Accept chat.send and spawn a background streaming task."""
         session_key = params.get("sessionKey")
         message = params.get("message")
@@ -1236,6 +1245,8 @@ class EngineWebSocketServer:
                     params.get("timeoutMs"),
                     run_id,
                     auth,
+                    request_id=request.id,
+                    resume_ticket=ticket,
                     attachments=attachments,
                     chat_attachment_requests=chat_attachment_requests,
                     chat_image_requests=chat_image_requests,
@@ -1243,15 +1254,7 @@ class EngineWebSocketServer:
                     prompt_file_refs=prompt_file_refs,
                 )
             )
-            return ResponseFrame.ok_response(
-                request.id,
-                {
-                    "accepted": True,
-                    "runId": run_id,
-                    "resumeTicket": ticket,
-                    "recovery": "process_local_v1",
-                },
-            )
+            return None
 
         # The browser only sends chat.send. Bind this connection before starting
         # the stream so OpenClaw-originated inject events can reach the session.
@@ -1261,7 +1264,22 @@ class EngineWebSocketServer:
             # Listener binding is best-effort and must not reject a valid chat.send.
             log.warning("chat.send: failed to bind inject listener: %s", e)
 
-        # ack first, then stream events in the background
+        if manager.engine == "openclaw":
+            task = asyncio.create_task(self._run_ack_chat(
+                websocket, conn_id, request.id, session_key, message,
+                params.get("timeoutMs"), params.get("idempotencyKey"),
+                attachments=attachments,
+                chat_attachment_requests=chat_attachment_requests,
+                chat_image_requests=chat_image_requests,
+                resource_references=resource_references,
+                prompt_file_refs=prompt_file_refs,
+            ))
+            tasks = self._ack_chat_tasks.setdefault(conn_id, set())
+            tasks.add(task)
+            task.add_done_callback(tasks.discard)
+            return None
+
+        # Other engines retain their immediate acknowledgement.
         response = ResponseFrame.ok_response(request.id, {"accepted": True})
 
         asyncio.create_task(
@@ -1292,9 +1310,36 @@ class EngineWebSocketServer:
         timeout_ms: Optional[int],
         run_id: str,
         auth: AuthContext,
+        *,
+        request_id: str,
+        resume_ticket: str,
         **stream_kwargs: Any,
     ) -> None:
         run.state = "running"
+        acknowledged = False
+
+        async def acknowledge(ack: OpenClawChatAck) -> None:
+            nonlocal acknowledged
+            acknowledged = True
+            actual_run_id = ack.payload.get("runId")
+            if isinstance(actual_run_id, str) and actual_run_id:
+                run.run_id = actual_run_id
+            if not ack.ok:
+                run.state = "error"
+            elif ack.payload.get("status") == "ok":
+                run.state = "final"
+            response = ack.response(request_id)
+            response.payload.update(
+                resumeTicket=resume_ticket, recovery="process_local_v1"
+            )
+            paths = self._conn_materialized_redaction_paths.get(conn_id, ())
+            wire = _redact_materialized_paths(response.to_dict(), paths)
+            try:
+                await websocket.send_text(json.dumps(wire))
+            except Exception:
+                # Resume owns the run, not the original socket. Keep collecting.
+                log.debug("chat recovery: initial ACK could not be delivered")
+
         try:
             await self._stream_chat_events(
                 websocket,
@@ -1305,28 +1350,39 @@ class EngineWebSocketServer:
                 run_id,
                 auth_override=auth,
                 resume_run=run,
+                on_ack=acknowledge,
                 **stream_kwargs,
             )
         except asyncio.CancelledError:
-            await self._emit_stream_event(
-                websocket,
-                "chat",
-                {
-                    "sessionKey": session_key,
-                    "runId": run_id,
-                    "state": "aborted",
-                },
-                resume_run=run,
-            )
+            if not acknowledged:
+                await acknowledge(OpenClawChatAck(
+                    False, {}, ErrorShape(ErrorCodes.UNAVAILABLE, "OpenClaw chat startup cancelled")
+                ))
+                run.state = "aborted"
+            else:
+                await self._emit_stream_event(
+                    websocket,
+                    "chat",
+                    {
+                        "sessionKey": session_key,
+                        "runId": run.run_id,
+                        "state": "aborted",
+                    },
+                    resume_run=run,
+                )
             raise
         finally:
+            if not acknowledged:
+                await acknowledge(OpenClawChatAck(
+                    False, {}, ErrorShape(ErrorCodes.UNAVAILABLE, "OpenClaw chat startup failed")
+                ))
             if run.state not in ("final", "error", "aborted"):
                 await self._emit_stream_event(
                     websocket,
                     "chat",
                     {
                         "sessionKey": session_key,
-                        "runId": run_id,
+                        "runId": run.run_id,
                         "state": "error",
                         "errorMessage": "Chat stream ended without a terminal event.",
                     },
@@ -1337,6 +1393,36 @@ class EngineWebSocketServer:
                 await EngineManager.get_instance().on_connection_close(auth)
             except Exception:
                 log.exception("chat recovery: could not release upstream connection")
+
+    async def _run_ack_chat(self, websocket, conn_id, request_id, *args, **kwargs) -> None:
+        acknowledged = False
+
+        async def acknowledge(ack: OpenClawChatAck) -> None:
+            nonlocal acknowledged
+            # Mark before I/O: a failed write must not cause a duplicate ACK.
+            acknowledged = True
+            response = ack.response(request_id)
+            paths = self._conn_materialized_redaction_paths.get(conn_id, ())
+            wire = _redact_materialized_paths(response.to_dict(), paths)
+            await websocket.send_text(json.dumps(wire))
+
+        try:
+            await self._stream_chat_events(
+                websocket, conn_id, *args, on_ack=acknowledge, **kwargs
+            )
+        except asyncio.CancelledError:
+            acknowledged = True
+            raise
+        except Exception:
+            log.exception("OpenClaw ACK stream failed: conn=%s", conn_id)
+        finally:
+            if not acknowledged:
+                try:
+                    await acknowledge(OpenClawChatAck(
+                        False, {}, ErrorShape(ErrorCodes.UNAVAILABLE, "OpenClaw chat startup failed")
+                    ))
+                except Exception:
+                    log.debug("OpenClaw failure ACK could not be delivered")
 
     async def _stream_chat_events(
         self,
@@ -1357,6 +1443,7 @@ class EngineWebSocketServer:
         prompt_file_refs: Optional[list[dict[str, Any]]] = None,
         auth_override: AuthContext | None = None,
         resume_run: OpenClawResumeRun | None = None,
+        on_ack: ChatAckCallback | None = None,
     ) -> None:
         """Relay `ChatService.stream` events back to the client verbatim.
 
@@ -1371,6 +1458,29 @@ class EngineWebSocketServer:
             conn_id,
             session_key_hash,
         )
+        acknowledged = False
+        ack_failed = False
+
+        async def acknowledge(ack: OpenClawChatAck) -> None:
+            nonlocal acknowledged, ack_failed
+            acknowledged = True
+            # Negative ACKs deliver the request-level outcome to the client
+            # themselves — the exhaustion guard below must not re-report.
+            if not ack.ok:
+                ack_failed = True
+            await on_ack(ack)
+
+        async def send_error(payload: dict[str, Any], **event_options: Any) -> None:
+            if on_ack is not None and not acknowledged:
+                message = payload.get("errorMessage", "OpenClaw chat startup failed")
+                if resume_run is not None and not payload.get("errorCode"):
+                    message = "Chat stream failed."
+                await acknowledge(OpenClawChatAck(False, {}, ErrorShape(
+                    payload.get("errorCode", ErrorCodes.UNAVAILABLE),
+                    message,
+                )))
+            else:
+                await self._emit_stream_event(websocket, "chat", payload, **event_options)
 
         if chat_image_requests:
             try:
@@ -1415,12 +1525,10 @@ class EngineWebSocketServer:
                     "invalid_image_content": "ATTACHMENT_IMAGE_INVALID_CONTENT",
                     "media_type_mismatch": "ATTACHMENT_IMAGE_MIME_MISMATCH",
                 }.get(exc.reason, "ATTACHMENT_IMAGE_DOWNLOAD_FAILED")
-                await self._emit_stream_event(
-                    websocket,
-                    "chat",
+                await send_error(
                     {
                         "sessionKey": session_key,
-                        **({"runId": idempotency_key} if resume_run is not None else {}),
+                        **({"runId": resume_run.run_id} if resume_run is not None else {}),
                         "state": "error",
                         "errorCode": code,
                         "errorMessage": "The attached image could not be prepared.",
@@ -1494,12 +1602,10 @@ class EngineWebSocketServer:
                         await self._resource_materialization_service.remove_chat_materialization(
                             resource_id
                         )
-                await self._emit_stream_event(
-                    websocket,
-                    "chat",
+                await send_error(
                     {
                         "sessionKey": session_key,
-                        **({"runId": idempotency_key} if resume_run is not None else {}),
+                        **({"runId": resume_run.run_id} if resume_run is not None else {}),
                         "state": "error",
                         "errorCode": exc.code,
                         "errorMessage": exc.user_message,
@@ -1596,60 +1702,28 @@ class EngineWebSocketServer:
                     session_key_hash,
                     len(resolved.materialized_files),
                 )
-            event_count = 0
             log.info(
                 "[stream] Starting to iterate chat_plugin.stream() session_key_hash=%s",
                 session_key_hash,
             )
-            async for event_frame in chat_plugin.stream(chat_request, auth=auth):
-                event_count += 1
-                event_name = event_frame.event
-                event_data = event_frame.payload
-                state = event_data.get("state", "")
-                run_id = event_data.get("runId", "")
-
-                # seq/ts stamping happens inside _send_event (guarded so
-                # pre-populated payloads are preserved).
-                event_data.setdefault("sessionKey", session_key)
-
-                # The live listener already fans this frame out to the current
-                # connection. Avoid sending the same inject event a second time
-                # through the foreground chat stream.
-                if (
-                    isinstance(run_id, str)
-                    and run_id.startswith("inject-")
-                    and self._connection_has_live_inject_listener(conn_id, session_key)
-                ):
-                    continue
-
-                await self._emit_stream_event(
-                    websocket,
-                    event_name,
-                    event_data,
-                    materialized_paths=materialized_paths,
+            ack_options = {"on_ack": acknowledge} if on_ack is not None else {}
+            stream = chat_plugin.stream(chat_request, auth=auth, **ack_options)
+            async with (aclosing(stream) if on_ack is not None else nullcontext()):
+                await self._relay_chat_stream(
+                    websocket, conn_id, session_key, stream, materialized_paths,
+                    on_ack is not None, lambda: acknowledged, send_error,
                     resume_run=resume_run,
+                    ack_failed=(lambda: ack_failed) if on_ack is not None else None,
                 )
-
-                if state in ("final", "error", "aborted"):
-                    if isinstance(run_id, str) and run_id.startswith("inject-"):
-                        continue
-                    log.info(
-                        "[stream] chat stream ended: conn=%s session_key_hash=%s reason=%s total_events=%s",
-                        conn_id,
-                        session_key_hash,
-                        state,
-                        event_count,
-                    )
-                    break
 
         except WebSocketDisconnect:
             log.info(f"Client disconnected during chat stream: {conn_id}")
         except Exception as e:
             log.exception(f"Chat stream error: {conn_id}, {e}")
             try:
-                await self._emit_stream_event(websocket, "chat", {
+                await send_error({
                     "sessionKey": session_key,
-                    **({"runId": idempotency_key} if resume_run is not None else {}),
+                    **({"runId": resume_run.run_id} if resume_run is not None else {}),
                     "state": "error",
                     "errorMessage": (
                         "Chat stream failed." if resume_run is not None else str(e)
@@ -1657,6 +1731,102 @@ class EngineWebSocketServer:
                 }, resume_run=resume_run, materialized_paths=materialized_paths)
             except Exception:
                 pass
+
+    async def _relay_chat_stream(
+        self, websocket, conn_id, session_key, stream, materialized_paths,
+        expects_ack, acknowledged, send_error,
+        *, resume_run: OpenClawResumeRun | None = None,
+        ack_failed: Callable[[], bool] | None = None,
+    ) -> None:
+        event_count = 0
+        terminal_seen = False
+        reply_delivered = False
+        synth_run_id: str = ""
+        session_key_hash = hashlib.sha256(session_key.encode("utf-8")).hexdigest()[:16]
+        async for event_frame in stream:
+            if expects_ack and not acknowledged():
+                await send_error(event_frame.payload)
+                return
+            event_count += 1
+            event_name = event_frame.event
+            event_data = event_frame.payload
+            state = event_data.get("state", "")
+            run_id = event_data.get("runId", "")
+            if (
+                isinstance(run_id, str)
+                and run_id
+                and not run_id.startswith("inject-")
+            ):
+                # Sticky engine runId for the synthesized terminal below
+                # (per-frame run_id keeps its original inject semantics).
+                synth_run_id = run_id
+            event_data.setdefault("sessionKey", session_key)
+
+            # The live listener already delivers inject frames to this connection.
+            if (
+                isinstance(run_id, str)
+                and run_id.startswith("inject-")
+                and self._connection_has_live_inject_listener(conn_id, session_key)
+            ):
+                continue
+
+            await self._emit_stream_event(
+                websocket, event_name, event_data, materialized_paths=materialized_paths,
+                resume_run=resume_run,
+            )
+            if event_name == "message":
+                # Local-echo reply shape: a bare "message" event carries the
+                # full assistant reply — the run did complete, it just never
+                # speaks the delta/final vocabulary.
+                reply_delivered = True
+            if state in ("final", "error", "aborted"):
+                if isinstance(run_id, str) and run_id.startswith("inject-"):
+                    continue
+                terminal_seen = True
+                log.info(
+                    "[stream] chat stream ended: conn=%s session_key_hash=%s reason=%s total_events=%s",
+                    conn_id, session_key_hash, state, event_count,
+                )
+                break
+        if terminal_seen or reply_delivered:
+            return
+        # The engine stream ended without ever delivering final/error/aborted
+        # (observed live: model-provider death after full retry exhaustion —
+        # the stream simply closed). Synthesize the missing terminal error
+        # here so every client sees an explicit end state instead of hanging
+        # to its own timeout. Already-terminal runs never reach this branch
+        # (the loop breaks on the first terminal frame).
+        if expects_ack and ack_failed is not None and ack_failed():
+            # A negative ACK already delivered this request's outcome — the
+            # failed ACK is the client's terminal; don't double-report.
+            log.debug(
+                "[stream] stream exhausted after a failed ACK: conn=%s "
+                "session_key_hash=%s total_events=%s",
+                conn_id, session_key_hash, event_count,
+            )
+            return
+        payload: dict[str, Any] = {
+            "sessionKey": session_key,
+            "state": "error",
+            "errorCode": "STREAM_TERMINATED_WITHOUT_FINAL",
+            "errorMessage": (
+                "The engine chat stream ended before a final result was "
+                "produced; the run did not complete."
+            ),
+        }
+        if synth_run_id:
+            payload["runId"] = synth_run_id
+        elif resume_run is not None and resume_run.run_id:
+            payload["runId"] = resume_run.run_id
+        await send_error(
+            payload, resume_run=resume_run,
+            materialized_paths=materialized_paths,
+        )
+        log.warning(
+            "[stream] chat stream exhausted without a terminal frame: "
+            "conn=%s session_key_hash=%s total_events=%s",
+            conn_id, session_key_hash, event_count,
+        )
 
     # ── chat.abort ─────────────────────────────────────────────────────────
 

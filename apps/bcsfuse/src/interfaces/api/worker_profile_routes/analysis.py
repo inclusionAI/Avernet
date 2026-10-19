@@ -3,8 +3,10 @@
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
+
+from src.application.services.worker_sync_merge import profile_analysis_source_matches
 
 
 logger = logging.getLogger(__name__)
@@ -120,7 +122,6 @@ async def _analyze_and_persist_async(
             # 构建 WorkerProfileContent 供 analyzer 使用
             from src.domain.models.worker_profile_content import WorkerProfileContent
 
-            contents = profile_data.get("contents", {})
             content_data = dict(profile_data)
             content_data.update({
                 "worker_id": worker_id,
@@ -157,13 +158,6 @@ async def _analyze_and_persist_async(
                 f"tags={analysis.capability_tags}"
             )
 
-            contents["profile"] = analysis.semantic_profile
-            contents["capabilities"] = analysis.capability_tags
-            contents["short_profile"] = analysis.short_profile
-
-            profile_data["contents"] = contents
-            profile_data["updated_at"] = datetime.utcnow().isoformat()
-
             # 重新获取 profile_store 并更新（后台任务无 request，从 app context 获取）
             from src.interfaces.api.dependencies.fusion_dependencies import (
                 get_app_context,
@@ -173,7 +167,23 @@ async def _analyze_and_persist_async(
             if _ctx and hasattr(_ctx, 'registry'):
                 profile_store = _ctx.registry.get('worker_profile_content_store')
             if profile_store:
-                profile_store.upsert_profile(worker_id, profile_id, profile_data)
+                current = profile_store.get(worker_id, profile_id)
+                if current is None:
+                    logger.info(f"[BG-LLM][{worker_id}] Profile deleted; skip stale analysis")
+                    return
+                if not profile_analysis_source_matches(profile_data, current):
+                    logger.info(f"[BG-LLM][{worker_id}] Profile changed; skip stale analysis")
+                    return
+                current_data = current.model_dump(mode="json")
+                current_contents = dict(current_data["contents"])
+                current_contents.update({
+                    "profile": analysis.semantic_profile,
+                    "capabilities": analysis.capability_tags,
+                    "short_profile": analysis.short_profile,
+                })
+                current_data["contents"] = current_contents
+                current_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+                profile_store.upsert_profile(worker_id, profile_id, current_data)
                 logger.info(
                     f"[BG-LLM][{worker_id}] Profile persisted successfully, "
                     f"profile_len={len(analysis.semantic_profile or '')}"

@@ -13,11 +13,19 @@ from collections.abc import Iterable
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.models.skill import BotSkillInstallation
+from agentclaw.community.core.models.skill_installation_source import (
+    BotSkillInstallationSource,
+    SkillInstallationSourceKind,
+)
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 
 
-def install(session, *, bot_id: str, owner_id: str, env: str, skill_id: int) -> bool:
-    """Ensure the row exists; return whether this call created it.
+def install(
+    session, *, bot_id: str, owner_id: str, env: str, skill_id: int,
+    source_kind: SkillInstallationSourceKind | None = None,
+    source_set_id: int | None = None,
+) -> bool:
+    """Ensure the row and declared origin; return whether either changed.
 
     Each insert gets its own SAVEPOINT so a lost race rolls back that row
     alone. A losing insert is the only recoverable ``IntegrityError``, so
@@ -31,18 +39,19 @@ def install(session, *, bot_id: str, owner_id: str, env: str, skill_id: int) -> 
         .first()
     )
     if present is not None:
-        return False
+        return _record_source(session, present, source_kind, source_set_id, created=False)
     try:
         with session.begin_nested():
-            session.add(
-                BotSkillInstallation(
+            installation = BotSkillInstallation(
                     bot_id=bot_id,
                     owner_id=owner_id,
                     skill_id=int(skill_id),
                     env=env,
                     avernet_tenant=get_current_avernet_tenant(),
                 )
-            )
+            session.add(installation)
+            session.flush()
+            _record_source(session, installation, source_kind, source_set_id, created=True)
         return True
     except IntegrityError:
         winner = (
@@ -53,7 +62,59 @@ def install(session, *, bot_id: str, owner_id: str, env: str, skill_id: int) -> 
         )
         if not winner:
             raise
-        return False
+        return _record_source(session, winner, source_kind, source_set_id, created=False)
+
+
+def _record_source(session, installation, kind, set_id, *, created: bool) -> bool:
+    if kind is None:
+        return False  # Explicitly unknown: never infer historical provenance.
+    if (kind is SkillInstallationSourceKind.DIRECT) != (set_id is None):
+        raise ValueError("only Direct provenance has no source Set")
+    row = session.query(BotSkillInstallationSource).filter_by(
+        installation_id=installation.id,
+        avernet_tenant=get_current_avernet_tenant(),
+    ).with_for_update().one_or_none()
+    if not created and kind is SkillInstallationSourceKind.DEFAULT:
+        if row is None or row.source_kind != SkillInstallationSourceKind.DEFAULT:
+            return False
+    if row is not None:
+        if row.source_kind == kind and row.source_set_id == set_id:
+            return False
+        row.source_kind, row.source_set_id = kind.value, set_id
+    else:
+        session.add(BotSkillInstallationSource(
+            installation_id=installation.id, source_kind=kind.value,
+            source_set_id=set_id, avernet_tenant=get_current_avernet_tenant(),
+        ))
+    session.flush()
+    return True
+
+
+def sources(
+    session, *, bot_id: str, owner_id: str, env: str, locked: bool = False,
+) -> dict[int, tuple[str, int | None]]:
+    rows = _rows(session, bot_id=bot_id, owner_id=owner_id, env=env).join(
+        BotSkillInstallationSource,
+        BotSkillInstallationSource.installation_id == BotSkillInstallation.id,
+    ).filter(
+        BotSkillInstallationSource.avernet_tenant == get_current_avernet_tenant(),
+    ).with_entities(
+        BotSkillInstallation.skill_id,
+        BotSkillInstallationSource.source_kind,
+        BotSkillInstallationSource.source_set_id,
+    )
+    if locked:
+        rows = rows.with_for_update()
+    return {int(skill_id): (kind, set_id) for skill_id, kind, set_id in rows.all()}
+
+
+def _delete_sources(session, rows) -> None:
+    installation_ids = [value[0] for value in rows.with_entities(BotSkillInstallation.id).all()]
+    if installation_ids:
+        session.query(BotSkillInstallationSource).filter(
+            BotSkillInstallationSource.installation_id.in_(installation_ids),
+            BotSkillInstallationSource.avernet_tenant == get_current_avernet_tenant(),
+        ).delete(synchronize_session=False)
 
 
 def uninstall(
@@ -63,18 +124,18 @@ def uninstall(
     ids = sorted({int(skill_id) for skill_id in skill_ids})
     if not ids:
         return 0
-    return (
-        _rows(session, bot_id=bot_id, owner_id=owner_id, env=env)
-        .filter(BotSkillInstallation.skill_id.in_(ids))
-        .delete(synchronize_session=False)
+    rows = _rows(session, bot_id=bot_id, owner_id=owner_id, env=env).filter(
+        BotSkillInstallation.skill_id.in_(ids)
     )
+    _delete_sources(session, rows)
+    return rows.delete(synchronize_session=False)
 
 
 def uninstall_all(session, *, bot_id: str, owner_id: str, env: str) -> int:
     """Delete every row of the Bot; return how many existed."""
-    return _rows(session, bot_id=bot_id, owner_id=owner_id, env=env).delete(
-        synchronize_session=False
-    )
+    rows = _rows(session, bot_id=bot_id, owner_id=owner_id, env=env)
+    _delete_sources(session, rows)
+    return rows.delete(synchronize_session=False)
 
 
 def installed_ids(

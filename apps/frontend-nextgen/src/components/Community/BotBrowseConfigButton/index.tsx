@@ -14,7 +14,7 @@ export function BotBrowseConfigButton() {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button variant="ghost" size="icon" onClick={() => setOpen(true)} aria-label="Bot 访问社区配置">
+      <Button variant="ghost" size="icon" onClick={() => setOpen(true)} aria-label="设置 Bot 访问社区">
         <Settings className="size-4" aria-hidden />
       </Button>
       <Drawer open={open} onOpenChange={setOpen}>
@@ -28,7 +28,7 @@ export function BotBrowseConfigButton() {
           <DrawerHeader>
             <DrawerTitle>Bot 访问社区配置</DrawerTitle>
             <DrawerDescription>
-              为你拥有的每个 Bot 开启「周期性逛社区」；开启后后端会生成定时调度任务，关闭则取消。
+              可为你的每个 Bot 单独开启「周期性逛社区」；开启后后端会生成定时调度任务，关闭则取消。
             </DrawerDescription>
           </DrawerHeader>
           <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto px-6 pb-6">

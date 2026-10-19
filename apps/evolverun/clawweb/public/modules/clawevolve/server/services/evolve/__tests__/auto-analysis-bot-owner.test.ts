@@ -18,7 +18,7 @@ describe("failed-run automatic analysis identity", () => {
     const run = { workflow_id: "wf-1", origin_bot_id: originBotId, user_id: userId };
     const start = vi.fn().mockResolvedValue({ ok: true });
     const observer = createFailedRunAutoAnalysisObserver({
-      flowRunRepo: { findByFlowId: async () => run },
+      flowRunRepo: { isTrialRun: async () => false, findByFlowId: async () => run },
       starter: { start },
       isWorkflowEnabled: async () => true,
     });
@@ -32,7 +32,7 @@ describe("failed-run automatic analysis identity", () => {
   it.each(["running", "waiting", "succeeded", "canceled"])("does not analyze %s runs", async (status) => {
     const start = vi.fn();
     const observer = createFailedRunAutoAnalysisObserver({
-      flowRunRepo: { findByFlowId: async () => ({ workflow_id: "wf-1", origin_bot_id: "bot:331844", user_id: "gateway-client" }) },
+      flowRunRepo: { isTrialRun: async () => false, findByFlowId: async () => ({ workflow_id: "wf-1", origin_bot_id: "bot:331844", user_id: "gateway-client" }) },
       starter: { start },
       isWorkflowEnabled: async () => true,
     });
@@ -43,7 +43,7 @@ describe("failed-run automatic analysis identity", () => {
   it("does not bypass the workflow switch", async () => {
     const start = vi.fn();
     const observer = createFailedRunAutoAnalysisObserver({
-      flowRunRepo: { findByFlowId: async () => ({ workflow_id: "wf-1", origin_bot_id: "bot:331844", user_id: "gateway-client" }) },
+      flowRunRepo: { isTrialRun: async () => false, findByFlowId: async () => ({ workflow_id: "wf-1", origin_bot_id: "bot:331844", user_id: "gateway-client" }) },
       starter: { start },
       isWorkflowEnabled: async () => false,
     });
@@ -55,11 +55,21 @@ describe("failed-run automatic analysis identity", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const start = vi.fn();
     const observer = createFailedRunAutoAnalysisObserver({
-      flowRunRepo: { findByFlowId: async () => ({ workflow_id: "wf-1", origin_bot_id: "bot:", user_id: null }) },
+      flowRunRepo: { isTrialRun: async () => false, findByFlowId: async () => ({ workflow_id: "wf-1", origin_bot_id: "bot:", user_id: null }) },
       starter: { start },
       isWorkflowEnabled: async () => true,
     });
     await observer({ flowId: "flow-1", status: "failed" });
     expect(start).not.toHaveBeenCalled();
   });
+});
+
+it("does not automatically analyze failed candidate trials", async () => {
+  const start = vi.fn();
+  const observer = createFailedRunAutoAnalysisObserver({
+    flowRunRepo: { isTrialRun: async () => true, findByFlowId: vi.fn() },
+    starter: { start }, isWorkflowEnabled: async () => true,
+  });
+  await observer({ flowId: "trial", status: "failed" });
+  expect(start).not.toHaveBeenCalled();
 });

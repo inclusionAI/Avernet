@@ -112,20 +112,45 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
         version: 22,
         name: "message_deliveries",
     },
-    SqliteMigration { version: 23, name: "message_delivery_policy" },
-    SqliteMigration { version: 24, name: "delivery_worker_queries" },
-    SqliteMigration { version: 25, name: "delivery_context_selection" },
-    SqliteMigration { version: 26, name: "delivery_pending_abort" },
-    SqliteMigration { version: 27, name: "run_reply_segments" },
-    SqliteMigration { version: 28, name: "provider_bot_webhook" },
-    SqliteMigration { version: 29, name: "fixed_loop_runtime" },
-    SqliteMigration { version: 30, name: "bot_provider_storage" },
+    SqliteMigration {
+        version: 23,
+        name: "message_delivery_policy",
+    },
+    SqliteMigration {
+        version: 24,
+        name: "delivery_worker_queries",
+    },
+    SqliteMigration {
+        version: 25,
+        name: "delivery_context_selection",
+    },
+    SqliteMigration {
+        version: 26,
+        name: "delivery_pending_abort",
+    },
+    SqliteMigration {
+        version: 27,
+        name: "run_reply_segments",
+    },
+    SqliteMigration {
+        version: 28,
+        name: "provider_bot_webhook",
+    },
+    SqliteMigration {
+        version: 29,
+        name: "fixed_loop_runtime",
+    },
+    SqliteMigration {
+        version: 30,
+        name: "bot_provider_storage",
+    },
     SqliteMigration {
         version: 31,
         name: "group_human_mention_notify_mode",
     },
     SqliteMigration { version: 32, name: "session_registry" },
     SqliteMigration { version: 33, name: "provider_slug" },
+    SqliteMigration { version: 34, name: "group_context" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -224,6 +249,7 @@ pub async fn run_sqlite_bootstrap_tables(db: &dyn DbPlugin) -> DbResult<()> {
     ensure_bcs_session_files(db).await?;
     ensure_sqlite_bot_task_modes(db).await?;
     ensure_sqlite_bot_internal_attributes(db).await?;
+    ensure_sqlite_group_context_supersede_columns(db).await?;
     Ok(())
 }
 
@@ -328,53 +354,95 @@ async fn apply_sqlite_migration_body(
             Ok(())
         }
         23 => {
-            db.execute(DbStatement::new(include_str!("../../../../migrations/sqlite/023_message_delivery_policy.sql"))).await?;
+            db.execute(DbStatement::new(include_str!(
+                "../../../../migrations/sqlite/023_message_delivery_policy.sql"
+            )))
+            .await?;
             Ok(())
         }
         24 => {
-            for sql in include_str!("../../../../migrations/sqlite/024_delivery_worker_queries.sql").split(';').map(str::trim).filter(|s| !s.is_empty()) {
+            for sql in include_str!("../../../../migrations/sqlite/024_delivery_worker_queries.sql")
+                .split(';')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
                 db.execute(DbStatement::new(sql)).await?;
             }
             Ok(())
         }
         25 => {
-            for sql in include_str!("../../../../migrations/sqlite/025_delivery_context_selection.sql").split(';').map(str::trim).filter(|s| !s.is_empty()) {
+            for sql in
+                include_str!("../../../../migrations/sqlite/025_delivery_context_selection.sql")
+                    .split(';')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+            {
                 db.execute(DbStatement::new(sql)).await?;
             }
             Ok(())
         }
         26 => {
-            db.execute(DbStatement::new(include_str!("../../../../migrations/sqlite/026_delivery_pending_abort.sql"))).await?;
+            db.execute(DbStatement::new(include_str!(
+                "../../../../migrations/sqlite/026_delivery_pending_abort.sql"
+            )))
+            .await?;
             Ok(())
         }
         27 => {
-            db.execute(DbStatement::new(include_str!("../../../../migrations/sqlite/027_run_reply_segments.sql"))).await?;
+            db.execute(DbStatement::new(include_str!(
+                "../../../../migrations/sqlite/027_run_reply_segments.sql"
+            )))
+            .await?;
             Ok(())
         }
         28 => {
-            db.execute(DbStatement::new(include_str!("../../../../migrations/sqlite/028_provider_bot_webhook.sql"))).await?;
+            db.execute(DbStatement::new(include_str!(
+                "../../../../migrations/sqlite/028_provider_bot_webhook.sql"
+            )))
+            .await?;
             Ok(())
         }
         29 => add_sqlite_fixed_loop_runtime_schema(db).await,
         30 => {
-            let columns = db.query(DbStatement::new("PRAGMA table_info(bcs_bots)")).await?
-                .iter().map(|row| db_get_column::<String>(row, "name")).collect::<DbResult<Vec<_>>>()?;
-            let indexes = db.query(DbStatement::new("PRAGMA index_list(bcs_bots)")).await?;
+            let columns = db
+                .query(DbStatement::new("PRAGMA table_info(bcs_bots)"))
+                .await?
+                .iter()
+                .map(|row| db_get_column::<String>(row, "name"))
+                .collect::<DbResult<Vec<_>>>()?;
+            let indexes = db
+                .query(DbStatement::new("PRAGMA index_list(bcs_bots)"))
+                .await?;
             let mut index_present = false;
             for row in indexes {
                 if db_get_column::<String>(&row, "name")? == "uk_bcs_bots_provider_ref_env" {
                     if !db_get_column::<bool>(&row, "unique")? {
-                        return Err(DbError::Conversion("Bot Provider/ref index must be unique".into()));
+                        return Err(DbError::Conversion(
+                            "Bot Provider/ref index must be unique".into(),
+                        ));
                     }
                     index_present = true;
                 }
             }
-            let added = ["provider_id", "provider_bot_ref", "connection_mode", "webhook_url"];
-            for (index, sql) in include_str!("../../../../migrations/sqlite/030_bot_provider_storage.sql")
-                .split(';').map(str::trim).filter(|sql| !sql.is_empty()).enumerate()
+            let added = [
+                "provider_id",
+                "provider_bot_ref",
+                "connection_mode",
+                "webhook_url",
+            ];
+            for (index, sql) in
+                include_str!("../../../../migrations/sqlite/030_bot_provider_storage.sql")
+                    .split(';')
+                    .map(str::trim)
+                    .filter(|sql| !sql.is_empty())
+                    .enumerate()
             {
-                if index < added.len() && columns.iter().any(|column| column == added[index]) { continue; }
-                if index == added.len() && index_present { continue; }
+                if index < added.len() && columns.iter().any(|column| column == added[index]) {
+                    continue;
+                }
+                if index == added.len() && index_present {
+                    continue;
+                }
                 db.execute(DbStatement::new(sql)).await?;
             }
             Ok(())
@@ -390,16 +458,32 @@ async fn apply_sqlite_migration_body(
         }
         32 => {
             let steps = include_str!("../../../../migrations/sqlite/032_session_registry.sql")
-                .split(';').map(str::trim).filter(|sql| !sql.is_empty())
-                .map(|sql| DbTransactionStep::Execute(DbStatement::new(sql))).collect();
+                .split(';')
+                .map(str::trim)
+                .filter(|sql| !sql.is_empty())
+                .map(|sql| DbTransactionStep::Execute(DbStatement::new(sql)))
+                .collect();
             db.transaction(steps).await?;
             Ok(())
         }
         33 => {
             let steps = include_str!("../../../../migrations/sqlite/033_provider_slug.sql")
-                .split(';').map(str::trim).filter(|sql| !sql.is_empty())
-                .map(|sql| DbTransactionStep::Execute(DbStatement::new(sql))).collect();
+                .split(';')
+                .map(str::trim)
+                .filter(|sql| !sql.is_empty())
+                .map(|sql| DbTransactionStep::Execute(DbStatement::new(sql)))
+                .collect();
             db.transaction(steps).await?;
+            Ok(())
+        }
+        34 => {
+            for sql in include_str!("../../../../migrations/sqlite/034_group_context.sql")
+                .split(';')
+                .map(str::trim)
+                .filter(|sql| !sql.is_empty())
+            {
+                db.execute(DbStatement::new(sql)).await?;
+            }
             Ok(())
         }
         _ => Ok(()),
@@ -418,12 +502,18 @@ fn validate_applied_sqlite_migration(
     applied: &AppliedMigration,
 ) -> DbResult<()> {
     let checksum = sqlite_migration_checksum(migration);
-    if applied.name == migration.name && applied.dialect == "sqlite" && applied.checksum == checksum {
+    if applied.name == migration.name && applied.dialect == "sqlite" && applied.checksum == checksum
+    {
         return Ok(());
     }
     Err(DbError::InvalidInput(format!(
         "sqlite migration checksum mismatch for version {} ({}): applied={}, current={} (expected name={}, dialect=sqlite; applied dialect={})",
-        migration.version, applied.name, applied.checksum, checksum, migration.name, applied.dialect
+        migration.version,
+        applied.name,
+        applied.checksum,
+        checksum,
+        migration.name,
+        applied.dialect
     )))
 }
 

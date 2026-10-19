@@ -24,6 +24,8 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
+from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
+
 from agentclaw.community.core.bot_management.engines.default import (
     DefaultProvisioningStrategy,
 )
@@ -178,6 +180,9 @@ def _make_service(
     if lock_repo is None:
         lock_repo = FakeRestartLockRepo()
     svc = BotService.__new__(BotService)
+    svc._restart_backup_dependencies = RestartBackupDependencies(
+        baas_runtime=lambda: svc._baas_service_provider(),
+    )
     svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = bot_repository if bot_repository is not None else MagicMock()
     svc._restart_lock_repo = lock_repo
@@ -185,6 +190,10 @@ def _make_service(
     svc._device_service_provider = (lambda: device_provider) if device_provider is not None else (lambda: MagicMock())
     svc._oss_record_repo = MagicMock()
     svc._skill_set_factory = MagicMock()
+    svc._skills_pool_native_creation_policy = MagicMock(
+        select=MagicMock(return_value=None)
+    )
+    svc._skill_layout_repository = MagicMock()
     svc._template_service = MagicMock()
     svc._baas_service_provider = baas_service_provider
     svc._device_binding_repo = device_binding_repo if device_binding_repo is not None else MagicMock()
@@ -1279,8 +1288,8 @@ class TestRestartGuardOrchestration:
         baas.upgrade_bot.assert_called_once()
         assert call_order == ["bcn", "upgrade"]
 
-    def test_restart_baas_ineligible_template_does_not_register_bcn(self):
-        """applicationCoding 不在 BCN Provider 注册范围内。"""
+    def test_restart_baas_application_template_registers_bcn(self):
+        """applicationCoding 重启也自动注册 BCN Provider。"""
         repo = FakeRestartLockRepo()
         svc = _make_service(repo)
         svc._drm_reader.read.return_value = "true"
@@ -1303,7 +1312,7 @@ class TestRestartGuardOrchestration:
 
         svc.restart_bot(bot_id="bot001", user_id="user001")
 
-        svc._bcn_service.register_provider_bot.assert_not_called()
+        svc._bcn_service.register_provider_bot.assert_called_once()
         baas.upgrade_bot.assert_called_once()
 
     def test_restart_baas_bcn_registration_failure_does_not_block_upgrade(self):
@@ -2004,6 +2013,7 @@ class TestRestartBaasPendingAndQueue:
             "restart_workflow_baseline": 32272,
             "restart_publish_id": None,
             "restart_image_policy_on_success": None,
+            "envs": None,
         }
 
     @pytest.mark.parametrize("baseline", [0, 32272])
@@ -2097,6 +2107,7 @@ class TestRestartBaasPendingAndQueue:
             "restart_workflow_baseline": 0,
             "restart_publish_id": None,
             "restart_image_policy_on_success": None,
+            "envs": None,
         }
         assert bind_repo.update_device_props.call_args_list[1].kwargs["props"] == {
             "publish_id": "9377",

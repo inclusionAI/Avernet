@@ -241,7 +241,9 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
                     "placeholder": rule.get("placeholder") or "",
                     "separator": rule.get("separator") or "",
                 }
-                await self.append_session_outbound_rule(session_key, session_rule)
+                await self.append_session_outbound_rule(
+                    bot_id, session_key, session_rule
+                )
             return True
 
         self._bots.setdefault(
@@ -253,11 +255,12 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
         return True
 
     async def append_session_outbound_rule(
-        self, session_key: str, rule: dict[str, Any]
+        self, bot_id: str, session_key: str, rule: dict[str, Any]
     ) -> bool:
         """Append a session-scoped rule in the in-memory store.
 
         Args:
+            bot_id: The teclaw_bot_id for the target device.
             session_key: Raw session key used as the storage dimension.
             rule: Single header operation rule in TeClaw session API format.
 
@@ -268,7 +271,8 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
             raise ValueError("session_key must not be empty")
         self._session_outbound_rules.setdefault(session_key, []).append(rule)
         logger.info(
-            "[stub-teclaw] session outbound rule appended session_key=%s",
+            "[stub-teclaw] session outbound rule appended bot_id=%s session_key=%s",
+            bot_id,
             session_key,
         )
         return True

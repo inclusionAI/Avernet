@@ -27,6 +27,9 @@ consumes:
   - "CallerIdentityRepositoryProtocol"
   - "AuthRelationshipPlugin"
   - "DeviceService"
+  - "ArcaRestartBindings (binding reads)"
+  - "ArcaRestartTransport (fixed-target Arca command execution)"
+  - "BaasRestartRuntime (coding backup inventory/commands)"
   - "ResourceService"
   - "BotPublishService"
   - "SkillCenter factories"
@@ -39,12 +42,14 @@ consumes:
   - "CachePlugin quota lock"
   - "CapabilityDesiredStateRepositoryProtocol"
 internal_dependencies:
+  - agentclaw.community.core.engine_runtime
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.identity    # MCP execution identity carried into the restart Passport refresh
   - agentclaw.community.core.repository.protocols.platform    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.skills_pool    # persisted initial layout and restart selection
   - agentclaw.community.core.repository.protocols.capability_desired_state    # explicit Skill/MCP Installation purge during Bot deletion
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_app_grant.protocols    # sweep contract: deletion withdraws the bot's app authorizations
@@ -67,11 +72,14 @@ internal_dependencies:
   - agentclaw.community.core.spaces.models    # SpaceRecord/SpaceType used by Bot Space assignment
   - agentclaw.community.core.spaces.protocols    # Space lookup used by quota configuration
   - agentclaw.community.core.skill_center
+  - agentclaw.community.core.skills_pool.native_creation
+  - agentclaw.community.core.skills_pool.types
   - agentclaw.community.core.task_queue
   - agentclaw.community.core.workspace
   - agentclaw.community.di
   - agentclaw.community.di.modules
   - agentclaw.community.kernel.lifecycle
+  - agentclaw.community.kernel.device_dto    # CommandResult contract for coding-owned Arca backup execution
   - agentclaw.community.log
   - agentclaw.community.plugin_api.devices
   - agentclaw.community.plugin_api.drm
@@ -90,6 +98,21 @@ internal_dependencies:
 ### Change impact
 
 Highest-fanout domain — 12+ other core domains import it. BotService signature changes ripple widely. Repository protocol changes break the corresponding plugin_impl repos.
+
+Coding restart recovery policy, target checks and the direct-Arca command transport
+contract are internal to `engines/aicoding/restart_arca.py`. `ArcaRestartBindings`
+only reads the captured binding; `ArcaRestartTransport` wraps the existing provider
+hook. The composition root selects that hook, while the shared device router and
+its ordinary APIs stay unchanged. Changes require community strategy tests and OCB
+corp sandbox/tenant execution-versus-release contract tests. Bound coding Arca
+replacement orchestration lives in `engines/aicoding/restart_arca_lifecycle.py`;
+the coding worker invokes it directly, just as it invokes the BaaS executor.
+Shared stop/start primitives and allocation lock handoff remain unchanged.
+`aicoding/restart_dependencies.py` owns the immutable, lazy
+`RestartBackupDependencies` envelope and its BaaS runtime contract. DI supplies
+it once; BotService and both coding executors pass the same envelope rather
+than separate provider-specific backup factories. Published/Caller dispatch
+adapts its existing runtime into this envelope without changing its callers.
 
 ## Owner display name on OpenAPI creation
 
@@ -134,3 +157,10 @@ and receipt verification. An empty or unqueryable BaaS inventory and backup
 failures still block replacement. This change adds no API, schema, configuration,
 or frontend migration; it only removes the backup dependency from direct ARCA
 restart. Normal stop/start failures continue to propagate.
+
+## Engine release inspection
+
+`engine_version/` exposes an authorized, read-only Service API for personal and
+service draft Bot release checks. It consumes existing repositories, the
+DeviceContextResolver and DeviceAdapterTransport and never invokes lifecycle or
+publish-policy writes. See its README for the contract and deployment boundary.

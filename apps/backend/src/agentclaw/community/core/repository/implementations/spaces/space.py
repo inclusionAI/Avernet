@@ -174,43 +174,48 @@ class SpaceRepository(SpaceRepositoryProtocol):
         creator_id: str,
         creator_user_name: str | None,
         env: str,
+        initial_members: dict[str, str | None] | None = None,
     ):
-        try:
-            with self._db.transactional_orm_session() as db:
-                space = self._Space(
-                    space_code=self._new_code(),
-                    space_type=SpaceType.TEAM.value,
-                    name=name,
-                    personal_owner_id=None,
+        with self._db.transactional_orm_session() as db:
+            space = self._Space(
+                space_code=self._new_code(),
+                space_type=SpaceType.TEAM.value,
+                name=name,
+                personal_owner_id=None,
+                env=env,
+                created_by=creator_id,
+                updated_by=creator_id,
+            )
+            db.add(space)
+            db.flush()
+            db.add(
+                self._Member(
+                    space_id=space.id,
+                    user_id=creator_id,
+                    user_name=creator_user_name,
+                    role=self._stored_role(SpaceRole.ADMIN),
                     env=env,
                     created_by=creator_id,
-                    updated_by=creator_id,
                 )
-                db.add(space)
-                db.flush()
-                db.add(
-                    self._Member(
-                        space_id=space.id,
-                        user_id=creator_id,
-                        user_name=creator_user_name,
-                        role=self._stored_role(SpaceRole.ADMIN),
-                        env=env,
-                        created_by=creator_id,
-                    )
-                )
-                db.flush()
-                db.refresh(space)
-                # The caller performs required external synchronization while
-                # this transaction remains open. Any exception raised before
-                # this context exits rolls both rows back. After SC succeeds,
-                # the caller assigns its returned team id to this record; the
-                # repository persists it in the same OB transaction.
-                record = space.to_record()
-                yield record
-                space.sc_team_id = record.sc_team_id
-                db.flush()
-        except IntegrityError as exc:
-            raise SpaceAlreadyExistsError("unable to allocate space code") from exc
+            )
+            db.flush()
+            for user_id, user_name in (initial_members or {}).items():
+                if user_id != creator_id:
+                    db.add(self._Member(
+                        space_id=space.id, user_id=user_id, user_name=user_name,
+                        role=SpaceRole.MEMBER.value, env=env, created_by=creator_id,
+                    ))
+            db.flush()
+            db.refresh(space)
+            # The caller performs required external synchronization while
+            # this transaction remains open. Any exception raised before
+            # this context exits rolls both rows back. After SC succeeds,
+            # the caller assigns its returned team id to this record; the
+            # repository persists it in the same OB transaction.
+            record = space.to_record()
+            yield record
+            space.sc_team_id = record.sc_team_id
+            db.flush()
 
     def get_space(self, *, space_id: int, env: str):
         with self._db.orm_session() as db:
@@ -495,7 +500,15 @@ class SpaceRepository(SpaceRepositoryProtocol):
         env: str,
     ):
         try:
-            with self._db.orm_session() as db:
+            with self._db.transactional_orm_session() as db:
+                # Share the parent lock with maintenance deletion. Re-check in
+                # this transaction, not only in the calling permission service.
+                parent = db.query(self._Space.id).filter(
+                    self._Space.id == space_id, self._Space.env == env,
+                    self._Space.deleted_at.is_(None),
+                ).with_for_update().one_or_none()
+                if parent is None:
+                    raise SpaceNotFoundError(f"space {space_id} not found")
                 row = self._Member(
                     space_id=space_id,
                     user_id=user_id,

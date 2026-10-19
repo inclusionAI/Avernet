@@ -183,7 +183,7 @@ def skipped_dual_domain_upload_result(
 
 
 def upload_bench_domains(
-    *, plan: dict[str, Any], manifest: dict[str, Any], task_id: str
+    *, plan: dict[str, Any], manifest: dict[str, Any], task_id: str, step_id: str = ""
 ) -> dict[str, Any]:
     packages = {
         split: BenchSplitPackage.from_manifest(manifest, split) for split in _SPLITS
@@ -252,6 +252,7 @@ def upload_bench_domains(
                 user_id,
                 expected_template_names=list(package.template_names),
                 expected_template_hashes=package.template_hashes(),
+                **({"source_task_id": task_id, "source_step_id": step_id} if step_id else {}),
             )
             uploaded.update(
                 {"split": split, **package.result_fields(), "user_meta": user_meta}

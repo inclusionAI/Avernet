@@ -54,6 +54,16 @@ _STRUCTURAL_NON_BUSINESS: frozenset[str] = frozenset(
 )
 
 
+def _has_python_source(directory: Path) -> bool:
+    """Distinguish a module tree from a bytecode-only cache remnant.
+
+    Some long-lived developer machines have empty ``__pycache__`` directories left
+    behind after a package was relocated. They are not modules in a clean checkout,
+    so counting them would make this denominator depend on ignored local state.
+    """
+    return any(source.is_file() and source.suffix == ".py" for source in directory.rglob("*"))
+
+
 def all_core_modules() -> set[str]:
     """Top-level business module package names under agentclaw/core/."""
     regular_packages = {
@@ -68,6 +78,7 @@ def all_core_modules() -> set[str]:
         if child.is_dir()
         and not child.name.startswith("_")
         and child.name not in regular_packages
+        and _has_python_source(child)
     }
     return (regular_packages | namespace_packages) - _STRUCTURAL_NON_BUSINESS
 
@@ -186,6 +197,12 @@ _SPACES_FAMILY_EXEMPT_REASON = (
 
 SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "aicoding": _EXEMPT_REASON,
+    "acli_clis": (
+        "Installs tools with the internal acli client, which the open-source "
+        "singlebox image does not ship, so a real install cannot run there. "
+        "Covered by service, port, engine runner/router and /openapi/v1 endpoint "
+        "tests; drain when singlebox gains an acli stand-in."
+    ),
     "spaces": _SPACES_FAMILY_EXEMPT_REASON,
     "market_favorites": _SPACES_FAMILY_EXEMPT_REASON,
     "work_orders": _SPACES_FAMILY_EXEMPT_REASON,
@@ -250,6 +267,14 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
         "with one). Drain this when singlebox can provision a container."
     ),
     "channel": _EXEMPT_REASON,
+    "agentswarm": (
+        "Emergent agent-swarm module. A real singlebox flow needs a working LLM "
+        "provider and the swarm worker running end to end; reachable routes are "
+        "covered meanwhile by tests/community/core/agentswarm/service/test_service.py "
+        "and tests/community/adapters/http/agentswarm/test_http_adapter.py (submit/list/cancel plus the router DTO and "
+        "error mapping through the assembled FastAPI app). Drain this when "
+        "singlebox binds an LLM config and drives a full run through the router."
+    ),
     "caller_identity": (
         "Agent Principal and BaaS outbound-rule calls require remote credentials; "
         "covered by local API/core tests until a singlebox-compatible external seam exists."
@@ -260,6 +285,7 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "config_compose": _EXEMPT_REASON,
     "desktop_bot": _EXEMPT_REASON,
     "task": _TASK_FRAMEWORK_EXEMPT_REASON,
+    # feedback/forum implementations are owned by core/task; task remains exempt.
     "economy": _EXEMPT_REASON,
     "events": _EXEMPT_REASON,
     "gateway_principal": _GATEWAY_PRINCIPAL_EXEMPT_REASON,

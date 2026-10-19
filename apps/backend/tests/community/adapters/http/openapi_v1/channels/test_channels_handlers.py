@@ -276,7 +276,9 @@ async def test_update_preserves_null_secret_clears_nullable_fields_and_syncs_act
                 "client_secret": None,
                 "card_template_id": None,
                 "card_template_key": None,
-                "enable_streaming_cards": True,
+                # 显式关掉流式：模板清空后流式必须为关，
+                # 否则是 streaming-card 校验要拒绝的非法组合。
+                "enable_streaming_cards": False,
             }
         }
     )
@@ -299,7 +301,7 @@ async def test_update_preserves_null_secret_clears_nullable_fields_and_syncs_act
     assert update_args["config"]["client_secret"] == "secret-1"
     assert update_args["config"]["card_template_id"] is None
     assert update_args["config"]["card_template_key"] is None
-    assert update_args["config"]["enable_streaming_cards"] is True
+    assert update_args["config"]["enable_streaming_cards"] is False
     assert ("sync", 1) in service.calls
     assert result.data.status == "active"
 
@@ -517,6 +519,7 @@ def test_read_contract_never_defines_client_secret():
 
 # ── binding_mode 契约 ──────────────────────────────────────────────
 
+
 def test_create_defaults_to_plugin_mode():
     channel = ChannelCreate(
         type="dingding",
@@ -577,6 +580,7 @@ def test_create_rejects_bcn_fields_for_plugin_mode():
 
 
 # ── router binding_mode 投影与不可变校验 ───────────────────────────
+
 
 def _bcn_body() -> ChannelCreate:
     return ChannelCreate(
@@ -640,11 +644,13 @@ async def test_create_plugin_omits_bcn_keys():
 
 @pytest.mark.asyncio
 async def test_get_projects_binding_mode():
-    record = _record(config={
-        **_record().config,
-        "binding_mode": "bcn_gateway",
-        "group_chat_scope": "per_sender",
-    })
+    record = _record(
+        config={
+            **_record().config,
+            "binding_mode": "bcn_gateway",
+            "group_chat_scope": "per_sender",
+        }
+    )
     service = _Channels([record])
 
     response = await get_channel(
@@ -663,7 +669,9 @@ async def test_get_projects_binding_mode():
 
 @pytest.mark.asyncio
 async def test_update_rejects_binding_mode_change():
-    service = _Channels([_record(config={**_record().config, "binding_mode": "plugin"})])
+    service = _Channels(
+        [_record(config={**_record().config, "binding_mode": "plugin"})]
+    )
 
     response = await update_channel(
         bot_id="bot-1",
@@ -683,17 +691,27 @@ async def test_update_rejects_binding_mode_change():
 
 @pytest.mark.asyncio
 async def test_update_rejects_plugin_field_on_bcn_channel():
-    service = _Channels([_record(config={
-        **_record().config,
-        "binding_mode": "bcn_gateway",
-        "robot_code": "robot-1",
-    })])
+    service = _Channels(
+        [
+            _record(
+                config={
+                    **_record().config,
+                    "binding_mode": "bcn_gateway",
+                    "robot_code": "robot-1",
+                }
+            )
+        ]
+    )
 
     response = await update_channel(
         bot_id="bot-1",
         channel_id=1,
         body=ChannelUpdate(
-            config={"client_id": "client-2", "client_secret": "secret-2", "dm_policy": "open"}
+            config={
+                "client_id": "client-2",
+                "client_secret": "secret-2",
+                "dm_policy": "open",
+            }
         ),
         request=_request(),
         user_id="owner-1",
@@ -714,13 +732,20 @@ async def test_update_explicit_null_bcn_fields_keep_stored_values():
     ``_binding_payload`` 的 ``config.get(..., default)`` 对"键存在且为
     None"返回 None —— payload 会送 null。显式 null 按省略处理，保留存量值。
     """
-    service = _Channels([_record(status="0", config={
-        **_record().config,
-        "binding_mode": "bcn_gateway",
-        "robot_code": "robot-1",
-        "group_chat_scope": "per_sender",
-        "outbound_visibility": "full_transcript",
-    })])
+    service = _Channels(
+        [
+            _record(
+                status="0",
+                config={
+                    **_record().config,
+                    "binding_mode": "bcn_gateway",
+                    "robot_code": "robot-1",
+                    "group_chat_scope": "per_sender",
+                    "outbound_visibility": "full_transcript",
+                },
+            )
+        ]
+    )
     body = ChannelUpdate.model_validate(
         {
             "config": {
@@ -749,3 +774,523 @@ async def test_update_explicit_null_bcn_fields_keep_stored_values():
     assert update_args["config"]["outbound_visibility"] == "full_transcript"
     assert update_args["config"]["client_id"] == "client-2"
     assert result.data.config.group_chat_scope == "per_sender"
+
+
+# ── 流式卡片模板联动校验（create/update 双侧 422）─────────────────────
+
+
+def test_create_rejects_streaming_without_card_template():
+    with pytest.raises(ValidationError) as exc:
+        ChannelCreate(
+            type="dingding",
+            config={
+                "client_id": "client-1",
+                "client_secret": "secret-1",
+                "enable_streaming_cards": True,
+            },
+        )
+    assert "card_template_id" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_create_accepts_streaming_with_card_template():
+    service = _Channels()
+
+    await create_channel(
+        bot_id="bot-1",
+        body=ChannelCreate(
+            type="dingding",
+            config={
+                "client_id": "client-new",
+                "client_secret": "secret-new",
+                "enable_streaming_cards": True,
+                "card_template_id": "tpl-1",
+            },
+        ),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+
+    create_kwargs = next(c for name, c in service.calls if name == "create")
+    assert create_kwargs["config"]["enable_streaming_cards"] is True
+    assert create_kwargs["config"]["card_template_id"] == "tpl-1"
+
+
+@pytest.mark.asyncio
+async def test_update_rejects_enabling_streaming_without_template():
+    """开启流式但不给模板 —— 合并存量后仍缺模板，422。"""
+    service = _Channels(
+        [
+            _record(
+                status="0",
+                config={
+                    **_record().config,
+                    "card_template_id": None,
+                },
+            )
+        ]
+    )
+
+    response = await update_channel(
+        bot_id="bot-1",
+        channel_id=1,
+        body=ChannelUpdate(config={"enable_streaming_cards": True}),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+    assert response.status_code == 422
+    assert json.loads(response.body)["message"] == "Channel mode violation"
+
+
+@pytest.mark.asyncio
+async def test_update_rejects_clearing_template_while_streaming_stays_on():
+    """存量已是"流式开+有模板"的合法行，清掉模板后 422。"""
+    service = _Channels(
+        [
+            _record(
+                status="0",
+                config={
+                    **_record().config,
+                    "enable_streaming_cards": True,
+                    "card_template_id": "tpl-1",
+                },
+            )
+        ]
+    )
+
+    response = await update_channel(
+        bot_id="bot-1",
+        channel_id=1,
+        body=ChannelUpdate(
+            config={
+                "client_id": "client-2",
+                "client_secret": "secret-2",
+                "card_template_id": None,
+            }
+        ),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+    assert response.status_code == 422
+    assert json.loads(response.body)["message"] == "Channel mode violation"
+
+
+@pytest.mark.asyncio
+async def test_update_accepts_streaming_when_template_kept():
+    """改其他字段但保留有效模板 → 合法通过。"""
+    service = _Channels(
+        [
+            _record(
+                status="0",
+                config={
+                    **_record().config,
+                    "enable_streaming_cards": True,
+                    "card_template_id": "tpl-1",
+                },
+            )
+        ]
+    )
+
+    result = await update_channel(
+        bot_id="bot-1",
+        channel_id=1,
+        body=ChannelUpdate(
+            config={
+                "client_id": "client-2",
+                "client_secret": "secret-2",
+            }
+        ),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+    update_args = next(value for name, value in service.calls if name == "update")
+    assert update_args["config"]["card_template_id"] == "tpl-1"
+    assert result.data.config.card_template_id == "tpl-1"
+
+
+# ── forward_sender_identity（BCN 专属：钉钉发送人身份透传开关）─────────
+
+
+def test_create_rejects_forward_sender_identity_for_plugin_mode():
+    with pytest.raises(ValidationError) as exc:
+        ChannelCreate(
+            type="dingding",
+            config={
+                "client_id": "client-1",
+                "client_secret": "secret-1",
+                "forward_sender_identity": True,
+            },
+        )
+    assert "forward_sender_identity" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_create_bcn_gateway_stores_forward_sender_identity():
+    service = _Channels()
+
+    await create_channel(
+        bot_id="bot-1",
+        body=ChannelCreate(
+            type="dingding",
+            binding_mode="bcn_gateway",
+            config={
+                "client_id": "client-1",
+                "client_secret": "secret-1",
+                "robot_code": "robot-1",
+                "forward_sender_identity": True,
+            },
+        ),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+
+    create_kwargs = next(c for name, c in service.calls if name == "create")
+    assert create_kwargs["config"]["forward_sender_identity"] is True
+
+
+@pytest.mark.asyncio
+async def test_create_bcn_gateway_omits_unset_flag():
+    """未传时不能落 null —— BCS payload 的 config.get 兜底 False。"""
+    service = _Channels()
+
+    await create_channel(
+        bot_id="bot-1",
+        body=_bcn_body(),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+
+    create_kwargs = next(c for name, c in service.calls if name == "create")
+    assert "forward_sender_identity" not in create_kwargs["config"]
+
+
+@pytest.mark.asyncio
+async def test_get_projects_forward_sender_identity():
+    bcn = _record(
+        config={
+            **_record().config,
+            "binding_mode": "bcn_gateway",
+            "forward_sender_identity": True,
+        }
+    )
+    plugin = _record(channel_id=2)
+
+    for channel_id, expected in ((1, True), (2, None)):
+        response = await get_channel(
+            bot_id="bot-1",
+            channel_id=channel_id,
+            request=_request(),
+            user_id="owner-1",
+            owner_id="owner-1",
+            relay=_Relay(),
+            service=_Channels([bcn, plugin]),
+        )
+        payload = json.loads(response.model_dump_json())["data"]
+        assert payload["config"]["forward_sender_identity"] == expected
+
+
+@pytest.mark.asyncio
+async def test_update_bcn_channel_sets_flag():
+    service = _Channels(
+        [
+            _record(
+                status="0",
+                config={
+                    **_record().config,
+                    "binding_mode": "bcn_gateway",
+                    "robot_code": "robot-1",
+                },
+            )
+        ]
+    )
+
+    await update_channel(
+        bot_id="bot-1",
+        channel_id=1,
+        body=ChannelUpdate(
+            config={
+                "client_id": "client-2",
+                "client_secret": "secret-2",
+                "forward_sender_identity": True,
+            }
+        ),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+
+    update_args = next(value for name, value in service.calls if name == "update")
+    assert update_args["config"]["forward_sender_identity"] is True
+
+
+@pytest.mark.asyncio
+async def test_update_explicit_null_flag_keeps_stored_value():
+    service = _Channels(
+        [
+            _record(
+                status="0",
+                config={
+                    **_record().config,
+                    "binding_mode": "bcn_gateway",
+                    "robot_code": "robot-1",
+                    "forward_sender_identity": True,
+                },
+            )
+        ]
+    )
+
+    await update_channel(
+        bot_id="bot-1",
+        channel_id=1,
+        body=ChannelUpdate.model_validate(
+            {
+                "config": {
+                    "client_id": "client-2",
+                    "client_secret": "secret-2",
+                    "forward_sender_identity": None,
+                }
+            }
+        ),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+
+    update_args = next(value for name, value in service.calls if name == "update")
+    assert update_args["config"]["forward_sender_identity"] is True
+
+
+@pytest.mark.asyncio
+async def test_update_rejects_flag_on_plugin_channel():
+    service = _Channels([_record()])
+
+    response = await update_channel(
+        bot_id="bot-1",
+        channel_id=1,
+        body=ChannelUpdate(
+            config={
+                "client_id": "client-2",
+                "client_secret": "secret-2",
+                "forward_sender_identity": True,
+            }
+        ),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+    assert response.status_code == 422
+    assert json.loads(response.body)["message"] == "Channel mode violation"
+
+
+# ── stage 维度移植（老前端"生效环境"选择器 → 服务 Bot 专属写入口）──────
+
+
+class _ServiceRelay(_Relay):
+    """bot_type=service 的 resolve 结果（stage 行只对服务 Bot 开放）。"""
+
+    async def resolve_bot_off_loop(self, bot_id: str, owner_id: str, caller_id: str):
+        return BotFacts(
+            bot_id=bot_id,
+            bot_type="service",
+            active_engine="openclaw",
+            owner_id=owner_id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_service_bot_stores_requested_stage():
+    service = _Channels()
+
+    await create_channel(
+        bot_id="bot-1",
+        body=ChannelCreate(
+            type="dingding",
+            stage="verify",
+            config={"client_id": "client-1", "client_secret": "secret-1"},
+        ),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_ServiceRelay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+
+    create_kwargs = next(c for name, c in service.calls if name == "create")
+    assert create_kwargs["stage"] == "verify"
+
+
+@pytest.mark.asyncio
+async def test_create_rejects_stage_rows_for_personal_bot():
+    service = _Channels()
+
+    response = await create_channel(
+        bot_id="bot-1",
+        body=ChannelCreate(
+            type="dingding",
+            stage="verify",
+            config={"client_id": "client-1", "client_secret": "secret-1"},
+        ),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+    assert response.status_code == 422
+    assert json.loads(response.body)["message"] == "Channel mode violation"
+    assert not any(name == "create" for name, _ in service.calls)
+
+
+@pytest.mark.asyncio
+async def test_list_for_service_bot_includes_verify_online_rows():
+    service = _Channels(
+        [
+            _record(1),
+            _record(2, stage="verify"),
+            _record(3, stage="online"),
+            _record(4, deleted=1, stage="verify"),
+        ]
+    )
+
+    result = await list_channels(
+        bot_id="bot-1",
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_ServiceRelay(),
+        service=service,
+    )
+
+    assert [item.id for item in result.data] == [1, 2, 3]
+    assert [item.stage for item in result.data] == ["draft", "verify", "online"]
+
+
+@pytest.mark.asyncio
+async def test_list_for_personal_bot_still_hides_verify_online_rows():
+    service = _Channels(
+        [
+            _record(1),
+            _record(2, stage="verify"),
+        ]
+    )
+
+    result = await list_channels(
+        bot_id="bot-1",
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+    )
+
+    assert [item.id for item in result.data] == [1]
+
+
+@pytest.mark.asyncio
+async def test_update_keeps_stored_stage():
+    service = _Channels([_record(status="0", stage="verify")])
+    assert service.records[1].stage == "verify"
+
+    await update_channel(
+        bot_id="bot-1",
+        channel_id=1,
+        body=ChannelUpdate(config={"client_id": "client-2"}),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_ServiceRelay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+
+    assert service.records[1].stage == "verify"
+
+
+@pytest.mark.asyncio
+async def test_get_verify_row_visible_for_service_bot_only():
+    verify = _record(stage="verify")
+    # 服务 Bot：可读
+    result = await get_channel(
+        bot_id="bot-1",
+        channel_id=1,
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_ServiceRelay(),
+        service=_Channels([verify]),
+    )
+    assert result.data.stage == "verify"
+    # 个人 bot：越界 → 404 信封（envelope_errors 捕获后落响应，不外抛）
+    denied = await get_channel(
+        bot_id="bot-1",
+        channel_id=1,
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=_Channels([verify]),
+    )
+    assert denied.status_code == 404
+
+
+def test_create_rejects_stage_rows_for_bcn_gateway_mode():
+    """老实现"生效环境"是插件页专属；bcn 行的 verify/online 无消费方，422。"""
+    with pytest.raises(ValidationError) as exc:
+        ChannelCreate(
+            type="dingding",
+            binding_mode="bcn_gateway",
+            stage="verify",
+            config={
+                "client_id": "client-1",
+                "client_secret": "secret-1",
+                "robot_code": "robot-1",
+            },
+        )
+    assert "plugin channels" in str(exc.value)

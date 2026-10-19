@@ -1,111 +1,95 @@
-import { useEffect, useState } from 'react'
-import { repairBatches } from '../../../api/repair-batches'
-import type { RepairDiff, RepairTaskDetail } from '../../../../server/contracts/repair-workbench'
-import { button, JsonDetails, phases } from './repair-view'
-
-const message = (value: unknown) => value instanceof Error ? value.message : String(value)
-const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
-const records = (value: unknown) => Array.isArray(value) ? value.map(record) : []
-const reportLabel = (value: unknown, fallback: string) => ({ changed: '已修改', not_needed: '无需修改', unresolved: '未解决', passed: '通过', failed: '失败', not_covered: '未覆盖', mock: 'Mock', none: '未覆盖', external_resources: '外部资源', pack_script_execution: 'Pack 脚本执行' }[String(value)] ?? (value == null ? fallback : String(value)))
-const executionLabels: Record<NonNullable<RepairTaskDetail['execution']>['status'], string> = {
-  created: '等待派发', dispatching: '正在派发；状态未确认时不要重复提交', dispatched: '已派发，等待生成结果',
-  running: 'AIS 正在生成候选 Pack', dispatch_failed: '派发未确认', succeeded: '执行结果已返回', failed: '执行失败', cancelled: '执行已取消',
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import type { RepairTaskDetail } from '../../../../server/contracts/repair-workbench'
+import type { RepairRevision } from '../../../../server/contracts/repair-batch'
+import { button, primary, JsonDetails } from './repair-view'
+import { candidateLabel } from './repair-release-view'
+import RepairCandidateReview from './RepairCandidateReview'
+import RepairTaskScope from './RepairTaskScope'
+import RepairReleaseFlow from './RepairReleaseFlow'
+import RepairVerification from './RepairVerification'
+const views=[['scope','问题与方案'],['candidate','候选与发布'],['observe','效果观察']] as const
+type View=typeof views[number][0]
+const executionLabels:Record<string,string>={created:'等待派发',dispatching:'正在派发，结果尚未确认',dispatched:'已派发，等待生成结果',running:'正在生成候选',dispatch_failed:'派发失败',dispatch_uncertain:'派发结果待核对',succeeded:'执行结果已返回',failed:'执行失败',cancelled:'已取消'}
+function preference(key:string){try{return JSON.parse(sessionStorage.getItem(key)||'null')}catch{return null}}
+function initialRevision(detail:RepairTaskDetail){
+ const published=detail.release?.deployments.find(row=>row.status==='succeeded')
+ return (['failed','no_change'].includes(detail.latestAttempt.phase)&&published?published.revision:detail.latestSuccessful?.revision)??detail.latestAttempt.revision
 }
-
-export default function RepairTaskPanel({ detail, canEdit, onFeedback, onCancel, onRetryDispatch, dispatchError, busy }: {
-  detail: RepairTaskDetail; canEdit: boolean; onFeedback: () => void; onCancel: () => void; busy: boolean;
-  onRetryDispatch: () => void; dispatchError: string;
-}) {
-  const [selectedRevision, setSelectedRevision] = useState(detail.latestSuccessful?.revision ?? detail.latestAttempt.revision)
-  const [base, setBase] = useState<'baseline' | 'parent'>('baseline')
-  const [diff, setDiff] = useState<RepairDiff | null>(null)
-  const [diffError, setDiffError] = useState('')
-  const [diffLoading, setDiffLoading] = useState(false)
-  const [showDiff, setShowDiff] = useState(false)
-  const [retry, setRetry] = useState(0)
-  const revision = detail.revisions.find(item => item.revision === selectedRevision) ?? detail.latestAttempt
-  const candidate = typeof revision.draft?.candidateCommit === 'string' ? revision.draft.candidateCommit : null
-  const checks = revision.checks
-  const outcomes = records(revision.draft?.itemResults)
-  const coverage = records(checks?.coverage)
-  useEffect(() => {
-    if (!showDiff || !candidate || !detail.capabilities.diff) return
-    let current = true; setDiffLoading(true); setDiffError(''); setDiff(null)
-    repairBatches.diff(detail.taskId, revision.revision, base).then(value => { if (current) setDiff(value) })
-      .catch(error => { if (current) setDiffError(message(error)) }).finally(() => { if (current) setDiffLoading(false) })
-    return () => { current = false }
-  }, [detail.taskId, revision.revision, candidate, detail.capabilities.diff, base, showDiff, retry])
-
-  return <section aria-label="修复任务详情" className="mt-4 rounded-xl border border-blue-200 bg-white p-4">
-    <h3 className="break-all text-sm font-semibold">修复任务 {detail.taskId}</h3>
-    <div className="mt-3 grid gap-2 sm:grid-cols-2">
-      <div className={`rounded-lg p-3 text-xs ${detail.latestAttempt.phase === 'failed' ? 'bg-red-50 text-red-700' : 'bg-slate-50 text-slate-700'}`}>
-        最近尝试：v{detail.latestAttempt.revision} · {phases[detail.latestAttempt.phase] ?? detail.latestAttempt.phase}
-        <JsonDetails title="查看本次失败原因" value={detail.latestAttempt.error} />
-      </div>
-      <p className="rounded-lg bg-blue-50 p-3 text-xs text-blue-700">{detail.latestSuccessful ? `最近成功候选：v${detail.latestSuccessful.revision}` : '尚无成功候选稿'}</p>
-    </div>
-    {detail.execution && <div className={`mt-3 rounded-lg border p-3 text-xs ${detail.execution.status === 'dispatch_failed' ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-slate-200 bg-slate-50 text-slate-600'}`}>
-      <p className="mb-1 font-medium">执行与派发状态 · v{detail.latestAttempt.revision}</p>
-      <p>{executionLabels[detail.execution.status]}</p>
-      {detail.execution.jobId && <p className="mt-1 break-all text-slate-500">AIS Job：{detail.execution.jobId} · 第 {detail.execution.attempt} 次</p>}
-      {detail.execution.rawStatus && <p className="mt-1 text-slate-500">平台状态：{detail.execution.rawStatus}</p>}
-      {detail.execution.errorCode && <code className="mt-1 block break-all">{detail.execution.errorCode}</code>}
-      {detail.latestAttempt.phase === 'drafting' && ['created', 'dispatch_failed'].includes(detail.execution.status) && <>
-        <p className="mt-2">重试沿用本版冻结输入，不会创建新版本。</p>
-        <button type="button" className={`${button} mt-2`} disabled={!canEdit || !detail.capabilities.generation || busy} onClick={onRetryDispatch}>重试派发</button>
-      </>}
-      {dispatchError && <p role="alert" className="mt-2 text-red-600">派发重试未确认：{dispatchError}</p>}
-    </div>}
-    <p className="mt-3 text-xs leading-5 text-slate-500">生成结果仅供审阅，尚未应用到工作流或部署。当前不提供发布能力。</p>
-    <div className="mt-3 flex flex-wrap items-center gap-2">
-      <label className="text-xs">查看版本 <select aria-label="查看修复版本" className="ml-1 rounded border border-slate-200 p-2" value={revision.revision}
-        onChange={event => { setSelectedRevision(Number(event.target.value)); setShowDiff(false); setDiff(null); setDiffError(''); setBase('baseline') }}>
-        {detail.revisions.map(item => <option key={item.revision} value={item.revision}>v{item.revision} · {phases[item.phase] ?? item.phase}</option>)}
-      </select></label>
-      <button type="button" className={button} disabled={!canEdit || !detail.capabilities.generation || busy || !['review', 'blocked', 'failed'].includes(detail.latestAttempt.phase)} onClick={onFeedback}>反馈并生成下一版</button>
-      {['drafting', 'review', 'blocked', 'failed'].includes(detail.latestAttempt.phase) && <button type="button" className={button} disabled={!canEdit || busy} onClick={onCancel}>取消修复任务</button>}
-    </div>
-    {revision.input.instructions && <p className="mt-3 whitespace-pre-wrap text-xs text-slate-600">修复说明：{revision.input.instructions}</p>}
-    {revision.input.feedback && <p className="mt-2 whitespace-pre-wrap text-xs text-slate-600">本版反馈：{revision.input.feedback}</p>}
-    {candidate ? <><p className="mt-4 text-xs text-slate-500">候选提交</p><code className="block break-all text-xs text-slate-700">{candidate}</code></> : <p className="mt-4 text-xs text-slate-500">此版本暂无候选稿。</p>}
-    {typeof revision.draft?.summary === 'string' && <p className="mt-2 whitespace-pre-wrap text-sm">{revision.draft.summary}</p>}
-    <div className="mt-4 space-y-2"><h4 className="text-xs font-semibold">逐项修复结果</h4>{revision.input.items.map(item => {
-      const outcome = outcomes.find(outcome => outcome.itemId === item.itemId)
-      const covered = coverage.find(row => row.itemId === item.itemId)
-      return <div className="rounded-lg border border-slate-200 p-3 text-xs" key={item.itemId}>
-        <p className="font-medium">{typeof item.proposal?.summary === 'string' ? item.proposal.summary : item.instruction || item.itemId}</p>
-        <p className="mt-1 text-slate-600">处理结论：{outcome ? reportLabel(outcome.status, '未提供状态') : '尚未提供逐项结论'}</p>
-        {outcome?.reason != null && <p className="mt-1 text-slate-500">{String(outcome.reason)}</p>}
-        <p className="mt-1 text-slate-500">验证覆盖：{covered ? `${reportLabel(covered.mode, '未覆盖')} · ${String(covered.assertionCount ?? 0)} 条断言` : '未覆盖'}</p>
-      </div>
-    })}</div>
-    <div className="mt-4 rounded-lg bg-slate-50 p-3 text-xs">
-      <h4 className="font-semibold">候选检查</h4>
-      <p className="mt-2">静态检查：{reportLabel(record(checks?.static).status, '尚未执行')} · Mock 检查：{reportLabel(record(checks?.mock).status, '尚未执行')}</p>
-      {Array.isArray(record(checks?.static).issues) && <ul className="mt-2 list-inside list-disc text-red-700">{(record(checks?.static).issues as unknown[]).map((issue, index) => <li key={index}>{String(issue)}</li>)}</ul>}
-      <p className="mt-2 text-amber-700">未覆盖：{Array.isArray(checks?.uncoveredChecks) ? checks.uncoveredChecks.map(value => reportLabel(value, '未知')).join('、') || '报告未声明' : '尚未提供检查报告'}。Mock 通过不代表线上资源或脚本执行已验证。</p>
-      <JsonDetails title="完整检查报告" value={checks} /><JsonDetails title="完整候选报告" value={revision.draft} /><JsonDetails title="此版本错误" value={revision.error} />
-    </div>
-    {candidate && <div className="mt-4">
-      <div className="flex flex-wrap items-center gap-2"><button type="button" className={button} disabled={!detail.capabilities.diff} onClick={() => setShowDiff(value => !value)}>{showDiff ? '收起差异' : '查看差异'}</button>
-        <label className="text-xs">比较基准 <select aria-label="比较基准" className="rounded border border-slate-200 p-2" value={base} onChange={event => { setDiff(null); setDiffError(''); setBase(event.target.value as typeof base) }}>
-          <option value="baseline">任务基线</option><option value="parent" disabled={!revision.input.parentCandidateCommit}>上一成功候选</option>
-        </select></label></div>
-      {!detail.capabilities.diff && <p className="mt-2 text-xs text-slate-500">当前未提供差异读取能力。</p>}
-      {showDiff && diffLoading && <p role="status" className="mt-2 text-xs">加载候选差异…</p>}
-      {showDiff && diffError && <p role="alert" className="mt-2 text-xs text-red-600">差异加载失败：{diffError} <button className={button} onClick={() => setRetry(value => value + 1)}>重试差异</button></p>}
-      {showDiff && diff && <div className="mt-3 space-y-3">
-        {diff.truncated && <p className="text-xs text-amber-700">差异已截断，仅展示部分内容。</p>}
-        {!diff.files.length && <p className="text-xs text-slate-500">此基准下没有文件差异。</p>}
-        {diff.files.map(file => <details key={file.path} open className="overflow-hidden rounded-lg border border-slate-200">
-          <summary className="cursor-pointer break-all bg-slate-50 px-3 py-2 text-xs">{file.status} · {file.path}</summary>
-          {file.binary ? <p className="p-3 text-xs">二进制文件，无法展示文本差异。</p> : <div className="grid sm:grid-cols-2">
-            <div className="min-w-0 bg-red-50/50 p-3"><p className="mb-2 text-xs text-red-700">修改前</p><pre className="max-h-80 overflow-auto text-[11px]">{file.before ?? '(文件不存在)'}</pre></div>
-            <div className="min-w-0 bg-emerald-50/50 p-3"><p className="mb-2 text-xs text-emerald-700">修改后</p><pre className="max-h-80 overflow-auto text-[11px]">{file.after ?? '(文件已删除)'}</pre></div>
-          </div>}{file.truncated && <p className="p-2 text-xs text-amber-700">此文件内容已截断。</p>}
-        </details>)}
-      </div>}
-    </div>}
+export default function RepairTaskPanel({detail,canEdit,onFeedback,onNextRound,onCancel,onRetryDispatch,onRetryGeneration,onRefresh,onHistoryPageChange,dispatchError,busy}:{
+ detail:RepairTaskDetail;canEdit:boolean;onFeedback:()=>void;onCancel:()=>void;busy:boolean;onRetryGeneration:()=>void;
+ onRefresh:()=>void;onRetryDispatch:()=>void;dispatchError:string;onHistoryPageChange?:(page:number)=>void;onNextRound?:(publishedRevision:number)=>void;
+}){
+ const storageKey=`repair-workspace:${detail.workflowId}:${detail.taskId}`
+ const saved=useRef(preference(storageKey))
+ const [selectedRevision,setSelectedRevision]=useState<number>(Number.isSafeInteger(saved.current?.revision)?saved.current.revision:initialRevision(detail))
+ const [view,setView]=useState<View>(views.some(([key])=>key===saved.current?.view)?saved.current.view:detail.release?.deployments.some(row=>row.revision===initialRevision(detail)&&row.status==='succeeded')?'observe':'candidate')
+ const manualSelection=useRef(!!saved.current && saved.current.followLatest!==true)
+ const known=useRef(new Map<number,RepairRevision>())
+ for(const row of [...detail.revisions,...(detail.latestSuccessful?[detail.latestSuccessful]:[]),detail.latestAttempt])known.current.set(row.revision,row)
+ const revision=known.current.get(selectedRevision)??detail.latestSuccessful??detail.latestAttempt
+ const revisions=[...known.current.values()].sort((a,b)=>b.revision-a.revision)
+ const id=useId(),tabRefs=useRef<Array<HTMLButtonElement|null>>([])
+ const latest=detail.latestAttempt
+ const deployment=detail.release?.deployments.find(row=>row.revision===revision.revision&&row.status!=='failed')??detail.release?.deployments.find(row=>row.revision===revision.revision)
+ const published=deployment?.status==='succeeded'&&!!deployment.receipt
+ const alreadyPublished=detail.revisions.some(row=>row.phase==='published')||!!detail.release?.deployments.some(row=>row.status==='succeeded')
+ const publishedRevision=published?revision.revision:detail.release?.deployments.find(row=>row.status==='succeeded'&&!!row.receipt)?.revision
+ const automatic=!!latest.input.automation?.roundId
+ const canGenerate=canEdit&&detail.capabilities.generation&&!busy&&!alreadyPublished
+ const [observations,setObservations]=useState<Record<string,string>>({})
+ const onObservation=useCallback((summary:string)=>{if(deployment)setObservations(previous=>previous[deployment.id]===summary?previous:{...previous,[deployment.id]:summary})},[deployment?.id])
+ const status=published?`已发布部署 #${deployment.receipt!.deployNumber} · ${observations[deployment.id]??'观察状态待读取'}`:automatic && revision.revision===latest.revision && detail.automaticProgress ? detail.automaticProgress.publishable?'整轮核对完成，待审阅发布':`整轮核对中（${detail.automaticProgress.completedBatches}/${detail.automaticProgress.totalBatches}）`:candidateLabel(detail,revision)
+ useEffect(()=>{if(!manualSelection.current)setSelectedRevision(initialRevision(detail))},[detail.latestSuccessful?.revision,latest.revision])
+ useEffect(()=>{try{sessionStorage.setItem(storageKey,JSON.stringify({view,revision:revision.revision,followLatest:!manualSelection.current}))}catch{/* Inspection still works when browser storage is unavailable. */}},[storageKey,view,revision.revision])
+ function switchRevision(value:number){manualSelection.current=true;setSelectedRevision(value)}
+ const source=revision.input.automation?'每日自动优化':'手动优化'
+ return <div className="min-w-0 space-y-5">
+  <header role="region" aria-label="当前候选" className="rounded-xl border border-input bg-card p-5">
+   <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="min-w-0"><p className="text-xs text-muted-foreground">{detail.workflowId} · {source}</p><h2 className="mt-2 text-xl font-semibold">当前查看 v{revision.revision}</h2><p className="mt-2 text-sm text-foreground" aria-live="polite">{status}</p></div>
+    <label className="text-xs text-muted-foreground">候选版本<select aria-label="查看修复版本" className="ml-2 max-w-full rounded border border-input bg-background p-2 text-foreground" value={revision.revision} onChange={event=>switchRevision(Number(event.target.value))}>{revisions.map(row=><option key={row.revision} value={row.revision}>v{row.revision} · {candidateLabel(detail,row)}</option>)}</select></label>
+   </div>
+   {!canEdit&&<p className="mt-3 text-xs text-warning-foreground">当前只有查看权限。</p>}
+   {publishedRevision!==undefined&&onNextRound&&<div className="mt-4 space-y-2 border-t border-border pt-4">
+    <button type="button" className={primary} disabled={!canEdit||busy} onClick={()=>onNextRound(publishedRevision)}>开始下一轮优化</button>
+    <p className="text-xs text-muted-foreground">观察中也可选择其他问题与建议；提交时基于最新生效版本创建独立新任务，保留本轮观察记录。</p>
+   </div>}
+   {latest.revision!==revision.revision&&<p className="mt-3 text-xs text-muted-foreground">最新尝试 v{latest.revision}：{candidateLabel(detail,latest)}；当前仍查看 v{revision.revision}。</p>}
+   {latest.phase==='failed'&&<div className="mt-3 space-y-2 border-t border-border pt-3 text-sm">
+    <p>{latest.error?.code==='GIT_RESULT_UNAVAILABLE'?'原候选结果尚未读取成功，请核对原结果。':detail.latestSuccessful?'最新生成失败，已有候选保留。':'首次生成失败，尚无候选。'}</p>
+    <div className="flex flex-wrap gap-2"><button className={primary} disabled={!canGenerate} onClick={onRetryGeneration}>{latest.error?.code==='GIT_RESULT_UNAVAILABLE'?'重新读取候选':'重新生成 Pack'}</button>
+    {!automatic&&<button className={button} disabled={!canGenerate||latest.error?.code==='GIT_RESULT_UNAVAILABLE'} onClick={onFeedback}>调整范围与要求</button>}
+    {detail.latestSuccessful&&<button className={button} onClick={()=>{switchRevision(detail.latestSuccessful!.revision);setView('candidate')}}>返回上一成功候选审核</button>}</div>
+   </div>}
+   {detail.execution&&<details className="mt-3 text-xs text-muted-foreground"><summary>最近 v{latest.revision} 的执行记录{latest.revision!==revision.revision?'（与当前候选分开保留）':''}</summary><p className="mt-2">{executionLabels[detail.execution.status]}</p><JsonDetails title="执行记录" value={detail.execution}/><JsonDetails title="最近尝试错误" value={latest.error}/></details>}
+   {latest.phase==='drafting'&&detail.execution&&<div className="mt-3 flex flex-wrap items-center gap-2 text-sm"><p>{executionLabels[detail.execution.status]}</p>
+    {['created','dispatch_failed'].includes(detail.execution.status)&&<button className={button} disabled={!canGenerate} onClick={onRetryDispatch}>重试派发</button>}
+    {detail.execution.status==='dispatch_uncertain'&&<button className={button} disabled={busy} onClick={onRefresh}>核对任务状态</button>}
+   </div>}
+   {dispatchError&&<p role="alert" className="mt-3 text-xs text-destructive">{dispatchError}</p>}
+  </header>
+  <div role="tablist" aria-label="任务内容" className="grid grid-cols-3 rounded-lg border border-input bg-card p-1">
+   {views.map(([key,label],index)=><button key={key} ref={element=>{tabRefs.current[index]=element}} id={`${id}-${key}`} type="button" role="tab" aria-selected={view===key} aria-controls={`${id}-${key}-panel`} tabIndex={view===key?0:-1} onClick={()=>setView(key)} onKeyDown={event=>{
+    const next=event.key==='Home'?0:event.key==='End'?2:event.key==='ArrowRight'?(index+1)%3:event.key==='ArrowLeft'?(index+2)%3:-1
+    if(next>=0){event.preventDefault();setView(views[next][0]);tabRefs.current[next]?.focus()}
+   }} className={`min-w-0 rounded px-2 py-3 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring ${view===key?'bg-primary/10 text-primary':'text-muted-foreground hover:bg-muted'}`}>{label}</button>)}
+  </div>
+  <section role="tabpanel" id={`${id}-scope-panel`} aria-labelledby={`${id}-scope`} hidden={view!=='scope'} className="space-y-4">
+   <RepairTaskScope revision={revision}/>
+   {detail.automaticProgress&&<p className="text-sm text-muted-foreground">本轮已纳入 {detail.scopeItemCount??revision.input.items.length} 项 · 核对进度 {detail.automaticProgress.completedBatches}/{detail.automaticProgress.totalBatches}</p>}
+   {!automatic&&canGenerate&&latest.phase!=='failed'&&<button className={button} onClick={onFeedback}>调整范围与要求</button>}
   </section>
+  <section role="tabpanel" id={`${id}-candidate-panel`} aria-labelledby={`${id}-candidate`} hidden={view!=='candidate'} className="space-y-4">
+   <RepairCandidateReview key={revision.revision} detail={detail} revision={revision} active={view==='candidate'}/>
+   <RepairReleaseFlow detail={detail} selectedRevision={revision.revision} canEdit={canEdit} onRefresh={onRefresh}/>
+   {!automatic&&!alreadyPublished&&['review','blocked'].includes(latest.phase)&&<button className={button} disabled={!canGenerate||revision.revision!==detail.latestSuccessful?.revision} onClick={onFeedback}>反馈并生成下一版</button>}
+  </section>
+  <section role="tabpanel" id={`${id}-observe-panel`} aria-labelledby={`${id}-observe`} hidden={view!=='observe'} className="rounded-lg border border-input bg-card p-5">
+   {view==='observe'&&(published?<RepairVerification key={deployment.id} detail={detail} deployment={deployment} canEdit={canEdit} onSummary={onObservation}/>:<div className="space-y-3 text-sm"><h3 className="font-semibold">尚无可观察的发布版本</h3><p>{deployment&&['created','dispatching','running','uncertain'].includes(deployment.status)?'发布结果尚未确认，请先核对同一个发布请求。':'此候选尚未发布，暂无对应部署的观察证据。'}</p><button className={button} onClick={()=>setView('candidate')}>查看候选与发布</button></div>)}
+  </section>
+  <details className="text-xs text-muted-foreground"><summary>历史生成记录与任务操作</summary><ul className="mt-2 space-y-2">{detail.revisions.map(row=><li key={row.revision}>v{row.revision} · {candidateLabel(detail,row)}</li>)}</ul>
+   {detail.revisionPage&&detail.revisionPage.totalPages>1&&<div className="mt-3 space-y-2"><p>历史记录第 {detail.revisionPage.page}/{detail.revisionPage.totalPages} 页 · 共 {detail.revisionPage.total} 次</p><button className={button} disabled={busy||detail.revisionPage.page<=1} onClick={()=>onHistoryPageChange?.(detail.revisionPage!.page-1)}>较新记录</button><button className={button} disabled={busy||detail.revisionPage.page>=detail.revisionPage.totalPages} onClick={()=>onHistoryPageChange?.(detail.revisionPage!.page+1)}>较早记录</button></div>}
+   {!alreadyPublished&&['drafting','review','blocked','failed'].includes(latest.phase)&&<button className={`${button} mt-3`} disabled={!canEdit||busy} onClick={onCancel}>取消修复任务</button>}
+  </details>
+ </div>
 }

@@ -44,13 +44,16 @@ cwd = {}
         serde_json::from_slice(&fs::read(self.runtime("bridge.pid.json")).unwrap()).unwrap()
     }
     async fn ping(&self) -> bool {
+        self.ping_result().await.is_ok()
+    }
+    async fn ping_result(&self) -> Result<(), String> {
         let client = reqwest::Client::builder().no_proxy().timeout(Duration::from_millis(200)).build().unwrap();
-        match client.post(format!("http://{}/webhook", self.address)).bearer_auth("test-webhook-secret")
+        let response = client.post(format!("http://{}/webhook", self.address)).bearer_auth("test-webhook-secret")
             .json(&json!({"type":"req","id":"ping","method":"bot.ping",
-                "to_bot":{"provider_id":"test-provider","provider_bot_ref":"test-agent"}})).send().await {
-            Ok(response) => response.status().is_success(),
-            Err(_) => false,
-        }
+                "to_bot":{"provider_id":"test-provider","provider_bot_ref":"test-agent"}})).send().await
+            .map_err(|error| format!("ping transport error: {error:?}"))?;
+        if response.status().is_success() { Ok(()) }
+        else { Err(format!("ping HTTP status {}", response.status())) }
     }
     async fn wait_ready(&self) {
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -63,6 +66,10 @@ cwd = {}
 
 impl Drop for Fixture {
     fn drop(&mut self) {
+        if std::thread::panicking() {
+            eprintln!("daemon fixture address={}; log={}", self.address,
+                fs::read_to_string(self.runtime("bridge.log")).unwrap_or_default());
+        }
         // Keep real background services scoped to their temporary HOME, including assertion failures.
         let _ = std::process::Command::new(env!("CARGO_BIN_EXE_bcs-bridge"))
             .env("HOME", self.home.path()).arg("stop")
@@ -71,7 +78,7 @@ impl Drop for Fixture {
 }
 
 fn diagnostic(output: &Output) -> String {
-    format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr))
+    format!("status={} {}{}", output.status, String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr))
 }
 fn success(output: &Output) { assert!(output.status.success(), "{}", diagnostic(output)); }
 
@@ -93,31 +100,29 @@ async fn lifecycle_help_and_stopped_commands_need_no_config_or_credentials() {
 #[allow(unsafe_code)] // Read the test-owned daemon's session ID without signalling it.
 #[tokio::test]
 async fn daemon_is_ready_detached_and_can_stop_after_config_is_deleted() {
-    for flag in ["--daemon", "--deamon"] {
-        let fixture = Fixture::new();
-        let output = fixture.daemon(flag).await;
-        success(&output);
-        assert!(fixture.ping().await, "daemon returned before webhook became ready");
-        let record = fixture.record();
-        let pid = record["pid"].as_u64().unwrap() as i32;
-        assert_eq!(unsafe { libc::getsid(pid) }, pid);
-        assert_eq!(Path::new(record["config"].as_str().unwrap()), fixture.config.canonicalize().unwrap());
-        for name in ["bridge.pid.json", "bridge.log", "bridge.lock", "bridge.sock"] {
-            assert_eq!(fs::metadata(fixture.runtime(name)).unwrap().permissions().mode() & 0o777, 0o600);
-        }
-        fs::remove_file(&fixture.config).unwrap();
-        let status = fixture.command().arg("status").env("BRIDGE_CONFIG", "/missing")
-            .env("BCS_BRIDGE_PROVIDER_TOKENS", "invalid").output().await.unwrap();
-        success(&status);
-        assert!(diagnostic(&status).contains("running"));
-        assert!(diagnostic(&status).contains(&pid.to_string()));
-        success(&fixture.output(&["stop"]).await);
-        assert!(!fixture.ping().await);
-        assert!(!fixture.runtime("bridge.pid.json").exists());
-        assert!(fixture.runtime("bridge.lock").exists(), "never unlink the lock inode");
-        assert!(diagnostic(&fixture.output(&["status"]).await).contains("stopped"));
-        assert!(!fs::read_to_string(fixture.runtime("bridge.log")).unwrap().contains("test-webhook-secret"));
+    let fixture = Fixture::new();
+    let output = fixture.daemon("--daemon").await;
+    success(&output);
+    assert!(fixture.ping().await, "daemon returned before webhook became ready");
+    let record = fixture.record();
+    let pid = record["pid"].as_u64().unwrap() as i32;
+    assert_eq!(unsafe { libc::getsid(pid) }, pid);
+    assert_eq!(Path::new(record["config"].as_str().unwrap()), fixture.config.canonicalize().unwrap());
+    for name in ["bridge.pid.json", "bridge.log", "bridge.lock", "bridge.sock"] {
+        assert_eq!(fs::metadata(fixture.runtime(name)).unwrap().permissions().mode() & 0o777, 0o600);
     }
+    fs::remove_file(&fixture.config).unwrap();
+    let status = fixture.command().arg("status").env("BRIDGE_CONFIG", "/missing")
+        .env("BCS_BRIDGE_PROVIDER_TOKENS", "invalid").output().await.unwrap();
+    success(&status);
+    assert!(diagnostic(&status).contains("running"));
+    assert!(diagnostic(&status).contains(&pid.to_string()));
+    success(&fixture.output(&["stop"]).await);
+    assert!(!fixture.ping().await);
+    assert!(!fixture.runtime("bridge.pid.json").exists());
+    assert!(fixture.runtime("bridge.lock").exists(), "never unlink the lock inode");
+    assert!(diagnostic(&fixture.output(&["status"]).await).contains("stopped"));
+    assert!(!fs::read_to_string(fixture.runtime("bridge.log")).unwrap().contains("test-webhook-secret"));
 }
 
 #[tokio::test]
@@ -153,7 +158,9 @@ async fn concurrent_daemon_starts_allow_exactly_one_instance() {
     let fixture = Fixture::new();
     let (a, b) = tokio::join!(fixture.daemon("--daemon"), fixture.daemon("--daemon"));
     assert_ne!(a.status.success(), b.status.success(), "a={} b={}", diagnostic(&a), diagnostic(&b));
-    assert!(fixture.ping().await);
+    fixture.ping_result().await.unwrap_or_else(|error| panic!(
+        "{error}; a={} b={}; log={}", diagnostic(&a), diagnostic(&b),
+        fs::read_to_string(fixture.runtime("bridge.log")).unwrap_or_default()));
     success(&fixture.output(&["stop"]).await);
 }
 

@@ -2,8 +2,14 @@
 
 [简体中文](docker.zh-CN.md)
 
-This guide shows how to build a Docker image from `Dockerfile.ocb` and start a
+This guide shows how to build a Docker image from `docker/minibcn/Dockerfile.ocb` and start a
 local Avernet stack.
+
+> Current limitation: `docker/ocb-entrypoint.sh` still passes the removed
+> `--local` flag to Singlebox, so the current container startup fails.
+> The paths below match the repository layout, but do not constitute a verified
+> working Docker startup. Until the Docker entrypoint is updated, use
+> [native Quick Start](quick-start.md).
 
 The Docker path has two steps:
 
@@ -18,7 +24,7 @@ The Docker path has two steps:
 |---|---|
 | BCS server | Bot Coordination Service written in Rust, exposed on `:21000` |
 | Frontend workbench | Static Avernet frontend built from `apps/frontend`, exposed on `:8000` |
-| `bcs-cli` | Command-line tool at `/opt/ocb/src/bcs/target/debug/bcs-cli` |
+| `bcs-cli` | Command-line tool at `/opt/ocb/apps/bcs/target/debug/bcs-cli` |
 | Global `openclaw` command | Installed from the public npm registry so OpenClaw can run inside the container or on the host |
 | BCN plugin | `openclaw-channel-bcn`, built from source and symlinked to `/root/.openclaw/extensions/openclaw-channel-bcn` so OpenClaw can connect to BCS |
 | 5 OpenClaw instances | After container startup, 5 OpenClaw demo roles run in the container (CEO / 产品经理 / 研发 / 验证 / 客服). Each connects to BCS through the BCN plugin, onboards automatically, and listens on `:30001`/`:30011`/`:30021`/`:30031`/`:30041` |
@@ -37,7 +43,7 @@ Install these on your machine first:
 - Optional: the corresponding model API key
 - Optional: the corresponding model ID
 
-Do not write API keys into `Dockerfile.ocb`, and do not commit them to Git. Pass
+Do not write API keys into `docker/minibcn/Dockerfile.ocb`, and do not commit them to Git. Pass
 them at container runtime with `-e`.
 
 ## Step 1: Build the image
@@ -45,7 +51,7 @@ them at container runtime with `-e`.
 Run this from the repository root:
 
 ```bash
-docker build -f Dockerfile.ocb -t ocb:local .
+docker build -f docker/minibcn/Dockerfile.ocb -t ocb:local .
 ```
 
 This will:
@@ -65,7 +71,7 @@ usually run `docker build` directly. If apt / cargo / npm / Rust toolchain
 downloads are slow in mainland China, add one build argument:
 
 ```bash
-docker build -f Dockerfile.ocb -t ocb:local \
+docker build -f docker/minibcn/Dockerfile.ocb -t ocb:local \
   --build-arg USE_CN_MIRROR=1 \
   .
 ```
@@ -80,7 +86,7 @@ If your registry certificate is temporarily broken, you can disable npm TLS
 verification for this build:
 
 ```bash
-docker build -f Dockerfile.ocb -t ocb:local \
+docker build -f docker/minibcn/Dockerfile.ocb -t ocb:local \
   --build-arg NPM_STRICT_SSL=false \
   .
 ```
@@ -100,33 +106,41 @@ calls will not be available.
 - `<model-api-key>`: model API key, for example `sk-xxxxxxxxxxxxxxxx`
 - `<model-id>`: model ID shown by your model provider
 
-With Docker Compose, you do not need `.env.local` by default. Create it only
+Build `ocb:local` from the repository root using Step 1 first. The Compose file
+is at `docker/minibcn/docker-compose.yml`; its build context has not yet been
+updated for that move. The commands below use the already-built image with
+`--no-build`, rather than the outdated Compose build definition:
+
+```bash
+docker compose -f docker/minibcn/docker-compose.yml up --no-build
+```
+
+With Docker Compose, you do not need `singlebox/.env.local` by default. Create it only
 when you need to override ports, change the local mock display name, choose a
 host OpenClaw config directory, or set model API values explicitly:
 
 ```bash
-test -f .env.local || cp .env.example .env.local
-# Uncomment or edit optional values in .env.local as needed.
-docker compose --env-file .env.local up --build
+test -f singlebox/.env.local || cp singlebox/.env.example singlebox/.env.local
+# Uncomment or edit optional values in singlebox/.env.local as needed.
+docker compose -f docker/minibcn/docker-compose.yml --env-file singlebox/.env.local up --no-build
 ```
 
 Docker mounts `${HOME}/.openclaw` read-only into the container and tries to
 reuse its `openclaw.json` when complete `OPENCLAW_OPENAI_*` values are not set.
-This path aligns with the native `singlebox.sh` 5-bot behavior: complete
-`OPENCLAW_OPENAI_*` values take priority; otherwise the host OpenClaw model
-config is used as fallback; if neither is available, startup continues, but bots
-cannot produce real replies.
+This is Docker's legacy model-source behavior, not the native Singlebox
+`mock` / `manual` / `home` menu. Native `manual` mode requires complete
+`OPENCLAW_OPENAI_*` values and does not fall back to the host JSON.
 If the host config directory does not exist, Docker Compose may create an empty
 directory; startup still continues, but no host model config is reused.
 
-To use another host OpenClaw config directory, set this in `.env.local`:
+To use another host OpenClaw config directory, set this in `singlebox/.env.local`:
 
 ```bash
 OPENCLAW_HOST_CONFIG_DIR=/path/to/.openclaw
 ```
 
 If you do not have a host OpenClaw config, you can also set these values
-together in `.env.local`:
+together in `singlebox/.env.local`:
 
 ```bash
 OPENCLAW_OPENAI_BASE_URL=https://api.openai.com/v1
@@ -153,7 +167,7 @@ After startup, the container will:
 - Start BCS with local configuration.
 - Start the frontend workbench on `:8000`.
 - Start 5 OpenClaw instances (CEO / 产品经理 / 研发 / 验证 / 客服), each launched by
-  `src/bcs/scripts/start_bcs_bots.sh`.
+  `apps/bcs/scripts/start_bcs_bots.sh`.
 - Connect the 5 OpenClaw instances to BCS through the BCN plugin (WebSocket
   `/ws/bot`).
 - Onboard the 5 OpenClaw instances to BCS.
@@ -181,10 +195,19 @@ but BCS WebSocket links still use the host BCS port.
 The web UI is the default path. You can also use these lower-level connection
 options:
 
+The `docker exec`, `docker cp`, log, and stop examples below use the
+`ocb-local` name from the `docker run --name` example. With Compose, use the
+`teamclaw` service instead, for example:
+
+```bash
+docker compose -f docker/minibcn/docker-compose.yml exec teamclaw \
+  /opt/ocb/apps/bcs/target/debug/bcs-cli --url http://127.0.0.1:21000 list
+```
+
 ### Option A: Use `bcs-cli` inside the container
 
 ```bash
-docker exec -it ocb-local /opt/ocb/src/bcs/target/debug/bcs-cli \
+docker exec -it ocb-local /opt/ocb/apps/bcs/target/debug/bcs-cli \
   --url http://127.0.0.1:21000 onboard \
   --name "My Bot" --summary "Hello bot"
 ```
@@ -192,7 +215,7 @@ docker exec -it ocb-local /opt/ocb/src/bcs/target/debug/bcs-cli \
 ### Option B: Copy `bcs-cli` to the host
 
 ```bash
-docker cp ocb-local:/opt/ocb/src/bcs/target/debug/bcs-cli ./bcs-cli
+docker cp ocb-local:/opt/ocb/apps/bcs/target/debug/bcs-cli ./bcs-cli
 ./bcs-cli --url http://127.0.0.1:21000 onboard --name "My Bot"
 ```
 
@@ -218,21 +241,21 @@ OpenClaw immediately** after the plugin has been built into `dist/`.
 ```bash
 # Run from the repository root.
 (
-  cd src/bcs/crates/plugins/openclaw-channel-bcn
+  cd apps/bcs/crates/plugins/openclaw-channel-bcn
   npm install
   npm run build
 )
 
 # Symlink to the OpenClaw extensions directory.
 mkdir -p ~/.openclaw/extensions
-ln -sfn "$(pwd)/src/bcs/crates/plugins/openclaw-channel-bcn" \
+ln -sfn "$(pwd)/apps/bcs/crates/plugins/openclaw-channel-bcn" \
   ~/.openclaw/extensions/openclaw-channel-bcn
 
 # Verify the symlink points to the source checkout.
 ls -l ~/.openclaw/extensions/openclaw-channel-bcn
 ```
 
-This is the same thing `Dockerfile.ocb` does inside the container, with
+This is the same thing `docker/minibcn/Dockerfile.ocb` does inside the container, with
 `/opt/ocb` replaced by the host repository path.
 
 #### C-2. Copy from the container with `docker cp`
@@ -242,7 +265,7 @@ the already built `dist/` from the container:
 
 ```bash
 mkdir -p ~/.openclaw/extensions
-docker cp ocb-local:/opt/ocb/src/bcs/crates/plugins/openclaw-channel-bcn \
+docker cp ocb-local:/opt/ocb/apps/bcs/crates/plugins/openclaw-channel-bcn \
   ~/.openclaw/extensions/openclaw-channel-bcn
 ```
 
@@ -261,7 +284,7 @@ BCS_URL=ws://127.0.0.1:21000/ws/bot \
 Register the host OpenClaw instance with BCS:
 
 ```bash
-./src/bcs/target/debug/bcs-cli --url http://127.0.0.1:21000 onboard \
+./apps/bcs/target/debug/bcs-cli --url http://127.0.0.1:21000 onboard \
   --name "Host OpenClaw" \
   --summary "OpenClaw on host machine" \
   --domains "local,openclaw" \
@@ -295,7 +318,7 @@ validate BCS, the BCN plugin, and local bot onboard.
 
 To validate real model calls with Docker Compose, Docker tries to reuse
 `${HOME}/.openclaw/openclaw.json` by default. If you do not have a host OpenClaw
-config, set these values together in `.env.local`:
+config, set these values together in `singlebox/.env.local`:
 
 ```bash
 OPENCLAW_OPENAI_BASE_URL=<model-api-base-url>
@@ -317,7 +340,7 @@ If another program on your machine already uses `21000` or `8000`, choose a
 different port. Docker Compose uses the same value inside the container and on
 the host.
 
-With Docker Compose, edit these values in `.env.local`:
+With Docker Compose, edit these values in `singlebox/.env.local`:
 
 ```bash
 BCS_PORT=<available-bcs-port>
@@ -327,19 +350,19 @@ FRONTEND_PORT=<available-frontend-port>
 Then start with:
 
 ```bash
-docker compose --env-file .env.local up --build
+docker compose -f docker/minibcn/docker-compose.yml --env-file singlebox/.env.local up --no-build
 ```
 
 Check BCS with:
 
 ```bash
 set -a
-. ./.env.local
+. ./singlebox/.env.local
 set +a
 curl "http://127.0.0.1:${BCS_PORT:-21000}/health"
 ```
 
-Open the frontend with the `FRONTEND_PORT` value from `.env.local`; if it is not set, the default is `http://127.0.0.1:8000/`.
+Open the frontend with the `FRONTEND_PORT` value from `singlebox/.env.local`; if it is not set, the default is `http://127.0.0.1:8000/`.
 
 ### 3. Dependency download failed
 
@@ -366,7 +389,7 @@ and supports this.
 
 ## This is not a production image
 
-`Dockerfile.ocb` is for local trials and integration work.
+`docker/minibcn/Dockerfile.ocb` is for local trials and integration work.
 
 It starts BCS and 5 test bots in development mode. It is useful for first-time
 BCS validation, but it is not intended as a production deployment image.

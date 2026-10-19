@@ -30,7 +30,7 @@ class BotBindingInfo:
     sandbox_id: str | None = None
     device_id: str = ""
     device_provider: str = ""
-    binding_id: int = 0
+    binding_id: int | None = None
     device_props: dict[str, Any] = field(default_factory=dict)
     bot_type: str = "personal"
     baas_session_id: str | None = None

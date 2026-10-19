@@ -1,4 +1,6 @@
 /** @jest-environment jsdom */
+import { fireEvent, render, screen } from '@testing-library/react';
+import '@testing-library/jest-dom';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { TextDecoder, TextEncoder } from 'node:util';
@@ -68,7 +70,8 @@ describe('collaboration square accessible UI', () => {
     );
     expect(html).toContain('申请好友权限');
     expect(html).not.toContain('查看画像');
-    expect(html).toContain('<dl');
+    expect(html).toContain(bot.ownerName);
+    expect(html).toContain(bot.id);
     expect(html).toContain('Owner 用户');
     expect(html).toContain('Bot UUID');
     expect(html).not.toContain('Owner用户 ·');
@@ -77,7 +80,7 @@ describe('collaboration square accessible UI', () => {
     expect(html).toContain('分享');
     expect(html).not.toContain('需求分析');
     expect(html).not.toContain('bg-gray-');
-    expect(friendHtml).toContain('已经是好友');
+    expect(friendHtml).toContain('好友Bot');
     expect(friendHtml).toContain('立即开始对话');
     expect(friendHtml).not.toContain('申请好友权限');
 
@@ -183,12 +186,16 @@ describe('collaboration square accessible UI', () => {
   });
 
   test('公开 Bot 页面保留名称搜索与智能搜索入口', () => {
-    const html = renderToStaticMarkup(
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: jest.fn() });
+    render(
       <SquareSearchBar resource="bot" query="" mode="name" onQueryChange={jest.fn()} onModeChange={jest.fn()} />,
     );
-    expect(html).toContain('名称搜索');
-    expect(html).toContain('智能搜索');
-    expect(html).toContain('搜索 Bot 名称');
+    const modeSelect = screen.getByRole('combobox', { name: 'Bot 搜索模式' });
+    expect(modeSelect).toHaveTextContent('名称搜索');
+    expect(screen.getByRole('textbox', { name: '搜索 Bot 名称' })).toBeInTheDocument();
+    fireEvent.keyDown(modeSelect, { key: 'ArrowDown' });
+    expect(screen.getByRole('option', { name: '名称搜索' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '智能搜索' })).toBeInTheDocument();
   });
 
   test('页面实现遵守项目 UI 与分层约束', () => {
@@ -213,7 +220,7 @@ describe('collaboration square accessible UI', () => {
     expect(source).not.toContain('queryCollaborationBots');
     expect(source).not.toContain('当前以 Human 身份');
     expect(source).not.toContain('当前用户身份不可用');
-    expect(source).toContain(
+    expect(source).not.toContain(
       '可按 Bot 名称或 Owner 用户名称搜索公开 Bot，也可通过能力描述进行智能搜索，为我或我的 Bot 申请加对方 Bot 为好友。',
     );
     expect(source).toContain('输入能力或职责描述后，将智能搜索匹配的公开 Bot。');
@@ -222,7 +229,7 @@ describe('collaboration square accessible UI', () => {
     expect(source).toContain('new IntersectionObserver');
     expect(source).toContain('onScroll={handleScroll}');
     expect(source).toContain('rootMargin: `0px 0px ${LOAD_MORE_PRELOAD_DISTANCE}px 0px`');
-    expect(source).toContain('发现协作群，支持基于公开协作群快速创建新会话。');
+    expect(source).not.toContain('发现协作群，支持基于公开协作群快速创建新会话。');
     expect(source).toContain('发现公开 BBS 求助任务');
     expect(source).toContain('resource="task"');
     expect(source).toContain('/collaboration-square/tasks');

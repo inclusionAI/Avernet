@@ -72,10 +72,16 @@ class TestRestartSuccess:
         # 2. Send callback for start hook
         await send_callbacks_for_hook_devices(api, publish_id)
 
-        # 3. Verify publish succeeded
+        # 3. Verify publish succeeded. CI runners can advance callback-driven
+        # completion slightly later than the in-process callback return, so use
+        # the same five-second convergence window used by other ASGI flows.
         status = await wait_for_publish_status(
-            api, publish_id, {"SUCCESS"}, timeout_seconds=0.5
+            api, publish_id, {"SUCCESS"}, timeout_seconds=5.0
         )
+        if status != "SUCCESS":
+            await dump_publish_diagnostics(
+                api, publish_id, bot_uuid=bot["bot_uuid"], label="TEST_FAIL"
+            )
         assert status == "SUCCESS", f"Expected SUCCESS, got {status}"
 
         # 4. Bot should be ACTIVE

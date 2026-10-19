@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="540" viewBox="0 0 1000 540" font-family="system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" role="img" aria-label="经验领域模型">
+<title>经验领域模型</title>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#475569"/></marker></defs>
+<rect width="1000" height="540" fill="#ffffff"/>
+<rect x="30" y="40" width="200" height="64" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
+<text x="130.0" y="55.0" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">引擎</text>
+<text x="130.0" y="72.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">原始会话</text>
+<text x="130.0" y="89.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">（OpenClaw、Claude Code 等）</text>
+<rect x="30" y="160" width="200" height="92" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="130.0" y="180.5" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">SessionExport sx_402</text>
+<text x="130.0" y="197.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">一次导出请求</text>
+<text x="130.0" y="214.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">status：queued → succeeded</text>
+<text x="130.0" y="231.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">package_digest</text>
+<rect x="30" y="370" width="200" height="125" rx="8" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5" stroke-dasharray="5 4"/>
+<text x="130.0" y="390.0" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">RetentionPolicy</text>
+<text x="130.0" y="407.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">按租户</text>
+<text x="130.0" y="424.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">episode_days · feedback_days</text>
+<text x="130.0" y="441.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">pii_categories</text>
+<text x="130.0" y="458.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">training_export_opt_in</text>
+<text x="130.0" y="475.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">适用于每一条记录</text>
+<rect x="290" y="30" width="420" height="300" rx="10" fill="#f8fafc" stroke="#0d9488" stroke-width="2"/>
+<text x="500" y="52" font-size="13.5" font-weight="700" fill="#134e4a" text-anchor="middle" dominant-baseline="middle">Episode ep_91 — 一次会话，不可变</text>
+<rect x="303" y="72" width="192" height="118" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="399.0" y="105.5" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">turns: list[Turn]</text>
+<text x="399.0" y="122.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">role · text · at</text>
+<text x="399.0" y="139.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">tool_calls: list[ToolCall]</text>
+<text x="399.0" y="156.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">ToolCall {name, args}</text>
+<rect x="505" y="72" width="192" height="118" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="601.0" y="105.5" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">outcome: Outcome</text>
+<text x="601.0" y="122.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">status（OutcomeStatus）</text>
+<text x="601.0" y="139.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">feedback_ids</text>
+<text x="601.0" y="156.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">→ 决定结果的反馈</text>
+<rect x="303" y="205" width="192" height="110" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="399.0" y="243.0" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">cost: Cost</text>
+<text x="399.0" y="260.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">usd · input_tokens</text>
+<text x="399.0" y="277.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">output_tokens</text>
+<rect x="505" y="205" width="192" height="110" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="601.0" y="243.0" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">source: SourceRef</text>
+<text x="601.0" y="260.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">engine · session_id</text>
+<text x="601.0" y="277.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">content_digest</text>
+<rect x="290" y="370" width="420" height="125" rx="8" fill="#e0e7ff" stroke="#4f46e5" stroke-width="1.5"/>
+<text x="500.0" y="398.5" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">EvalTrace et_5521 — 一次评测 rollout</text>
+<text x="500.0" y="415.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">由 Verification 写入</text>
+<text x="500.0" y="432.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">evaluation_id · suite · case_id · split · seed</text>
+<text x="500.0" y="449.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">transcript: list[Turn]（与 episode 的 turns 形状相同）</text>
+<text x="500.0" y="466.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">grades: list[GraderResult {grader, score, critique}] · cost</text>
+<rect x="790" y="40" width="180" height="130" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+<text x="880.0" y="79.5" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Feedback fb_204</text>
+<text x="880.0" y="96.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">kind · source</text>
+<text x="880.0" y="113.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">score · text · data</text>
+<text x="880.0" y="130.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">episode_id（可选）</text>
+<rect x="790" y="250" width="180" height="64" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
+<text x="880.0" y="273.5" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">GenomeRevision r41</text>
+<text x="880.0" y="290.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">01-genome.zh-CN.md</text>
+<line x1="130" y1="104" x2="130" y2="158" stroke="#475569" stroke-width="1.5" marker-end="url(#ah)"/>
+<text x="160" y="131" font-size="11.5" font-weight="500" fill="#334155" text-anchor="middle" dominant-baseline="middle">导出</text>
+<line x1="230" y1="206" x2="288" y2="206" stroke="#475569" stroke-width="1.5" marker-end="url(#ah)"/>
+<text x="259" y="178" font-size="11.5" font-weight="500" fill="#334155" text-anchor="middle" dominant-baseline="middle">摄取时</text>
+<text x="259" y="192" font-size="11.5" font-weight="500" fill="#334155" text-anchor="middle" dominant-baseline="middle">规范化</text>
+<line x1="788" y1="105" x2="712" y2="105" stroke="#475569" stroke-width="1.5" marker-end="url(#ah)"/>
+<text x="750" y="93" font-size="11.5" font-weight="500" fill="#334155" text-anchor="middle" dominant-baseline="middle">针对</text>
+<line x1="712" y1="282" x2="788" y2="282" stroke="#475569" stroke-width="1.5" marker-end="url(#ah)"/>
+<text x="750" y="270" font-size="11.5" font-weight="500" fill="#334155" text-anchor="middle" dominant-baseline="middle">revision_id</text>
+<line x1="880" y1="170" x2="880" y2="248" stroke="#475569" stroke-width="1.5" marker-end="url(#ah)"/>
+<text x="923" y="209" font-size="11.5" font-weight="500" fill="#334155" text-anchor="middle" dominant-baseline="middle">revision_id</text>
+<line x1="712" y1="410" x2="845" y2="316" stroke="#475569" stroke-width="1.5" marker-end="url(#ah)"/>
+<text x="835" y="395" font-size="11.5" font-weight="500" fill="#334155" text-anchor="middle" dominant-baseline="middle">revision_id（总是有值）</text>
+<text x="500" y="518" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">每条记录都标明其 Bot（BotRef {owner_id, bot_id}）。</text>
+</svg>

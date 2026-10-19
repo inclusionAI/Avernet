@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from engine.community.core.skills.layout_planner import RuntimeLayoutContext
 from engine.community.plugins.skills_pool.layout_activation import _Layout
 
 _GENERATION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -35,13 +36,18 @@ def cleanup_quarantine(
     engine: str,
     home: Path,
     migration_generation: str,
+    layout_context: RuntimeLayoutContext | None = None,
 ) -> QuarantineCleanupResult:
     if not _GENERATION.fullmatch(migration_generation):
         return QuarantineCleanupResult(
             QuarantineCleanupStatus.INVALID,
             {"reason": "invalid_migration_generation"},
         )
-    layout = _Layout.for_engine(engine, home)
+    layout = (
+        _Layout.for_runtime_context(engine, layout_context)
+        if layout_context is not None
+        else _Layout.for_engine(engine, home)
+    )
     root = layout.pool_root / ".migration-quarantine"
     generation = root / migration_generation
     trusted_home = Path(os.path.abspath(home))

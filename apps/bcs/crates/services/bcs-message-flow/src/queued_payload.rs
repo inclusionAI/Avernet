@@ -101,7 +101,7 @@ pub async fn read_bounded_queued_payload(
         if message.group_id != row.group_id || message.session_seq != row.source_session_seq {
             return Err("canonical message scope or sequence mismatch".into());
         }
-        let body = message.content.get("text").and_then(serde_json::Value::as_str).ok_or("canonical message text is invalid")?;
+        let body = canonical_text(&message)?;
         let body = project(row, body)?;
         let prefix = format!("\n[from:{}; seq:{}]\n", message.sender_id, message.session_seq);
         let omitted = total > selection.selected.len() as u64 + 1;
@@ -164,7 +164,7 @@ pub async fn read_bounded_queued_payload(
     if saved.as_ref().is_some_and(|s| s != &selection) { return Err("context selection changed".into()); }
     let source = repo.get_message_by_id(&carrier.session_id, &carrier.source_message_id).await.map_err(|_| "canonical source read failed")?.ok_or("canonical source missing")?;
     if source.group_id != carrier.group_id || source.session_seq != carrier.source_session_seq { return Err("canonical source scope mismatch".into()); }
-    let body = project(carrier, source.content.get("text").and_then(serde_json::Value::as_str).ok_or("canonical source text invalid")?)?;
+    let body = project(carrier, canonical_text(&source)?)?;
     if !text.is_empty() { text.push_str("\n当前请求：\n"); }
     text.push_str(&body);
     let files: Vec<Attachment> = source.content.get("attachments").map(|v| serde_json::from_value(v.clone())).transpose().map_err(|_| "canonical attachments are invalid")?.unwrap_or_default();
@@ -175,4 +175,16 @@ pub async fn read_bounded_queued_payload(
         state_version: carrier.state.state_version,
         selection,
     })
+}
+
+// One-shot results retain the original history string rather than a Group
+// inbound envelope. Both Send sources and later bound Injects use this shape.
+fn canonical_text(message: &bcs_domain::PersistedMessage) -> Result<&str, String> {
+    if message.message_type == "chat"
+        && message.visibility_domain == Some(bcs_domain::MessageVisibilityDomain::StateMachine)
+        && let Some(text) = message.content.as_str() {
+        return Ok(text);
+    }
+    message.content.get("text").and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "canonical message text invalid".into())
 }

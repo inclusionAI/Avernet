@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { EvolveTask } from '../../api/client'
 import SkillTaskRuntimePanel from '../SkillTaskRuntimePanel'
 
-const api = vi.hoisted(() => ({ evolve: { getTaskSkillDiff: vi.fn() } }))
+const api = vi.hoisted(() => ({ evolve: { getTaskSkillDiff: vi.fn(), decideSkillVersion: vi.fn() } }))
 vi.mock('../../api/client', () => ({ api }))
 
 function task(artifact?: { ref: string; sha256: string }): EvolveTask {
@@ -33,7 +33,7 @@ describe('Skill candidate diff polling', () => {
 
     view.rerender(panel(task({ ref: 'candidate/package.zip', sha256: 'ready-hash' })))
 
-    const summary = await screen.findByText('Skill 候选版本')
+    const summary = await screen.findByText('查看候选版本差异')
     const candidate = summary.closest('details')!
     expect(candidate.open).toBe(false)
     expect(screen.queryByText('完整对比')).toBeNull()
@@ -101,5 +101,53 @@ describe('Skill candidate diff polling', () => {
     expect(screen.queryByText('Ready candidate')).toBeNull()
     expect(screen.queryByText('Frozen baseline')).toBeNull()
     expect(api.evolve.getTaskSkillDiff).toHaveBeenLastCalledWith('TASK-2')
+  })
+})
+
+
+describe('Skill candidate acceptance entry', () => {
+  const waiting = { ...task({ ref: 'candidate.zip', sha256: 'sha' }), status: 'waiting_acceptance' } as EvolveTask
+
+  it('keeps acceptance visible with collapsed diff and preserves explicit confirmation', async () => {
+    api.evolve.getTaskSkillDiff.mockResolvedValue(readyDiff)
+    api.evolve.decideSkillVersion.mockResolvedValue({})
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const updated = vi.fn(async () => {})
+    render(<SkillTaskRuntimePanel task={waiting} canOperate onUpdated={updated} />)
+    const accept = screen.getByRole('button', { name: '接受并应用' })
+    expect(accept.closest('details')).toBeNull()
+    expect(screen.getByText('查看候选版本差异').closest('details')?.open).toBe(false)
+    fireEvent.click(accept)
+    expect(confirm).toHaveBeenCalledWith('确认将本次候选版本应用回 Host 中的原 Skill？')
+    expect(api.evolve.decideSkillVersion).not.toHaveBeenCalled()
+    confirm.mockReturnValue(true)
+    fireEvent.click(accept)
+    await waitFor(() => expect(api.evolve.decideSkillVersion).toHaveBeenCalledWith('TASK-1', 'accept'))
+    await waitFor(() => expect(updated).toHaveBeenCalledTimes(1))
+    confirm.mockRestore()
+  })
+
+  it('shows decision failures without requiring the diff to be expanded', async () => {
+    api.evolve.getTaskSkillDiff.mockResolvedValue(readyDiff)
+    api.evolve.decideSkillVersion.mockRejectedValue(new Error('Application failed'))
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<SkillTaskRuntimePanel task={waiting} canOperate onUpdated={async () => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: '拒绝' }))
+    const error = await screen.findByRole('alert')
+    expect(error.textContent).toBe('Application failed')
+    expect(error.closest('details')).toBeNull()
+    expect(api.evolve.decideSkillVersion).toHaveBeenCalledWith('TASK-1', 'reject')
+    confirm.mockRestore()
+  })
+
+  it.each([
+    { value: waiting, canOperate: false },
+    { value: { ...waiting, status: 'completed' } as EvolveTask, canOperate: true },
+    { value: { ...task(), status: 'waiting_acceptance' } as EvolveTask, canOperate: true },
+  ])('retains candidate, status and permission requirements ($canOperate)', ({ value, canOperate }) => {
+    api.evolve.getTaskSkillDiff.mockResolvedValue(readyDiff)
+    render(<SkillTaskRuntimePanel task={value} canOperate={canOperate} onUpdated={async () => {}} />)
+    expect(screen.queryByRole('button', { name: '接受并应用' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '拒绝' })).toBeNull()
   })
 })

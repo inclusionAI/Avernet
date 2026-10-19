@@ -24,9 +24,11 @@ set -euo pipefail
 #   bash apps/bcs/scripts/e2e_coverage.sh              # full flow
 #   bash apps/bcs/scripts/e2e_coverage.sh --skip-start # instrumented bcs already running; run e2e + stop + aggregate only
 #   bash apps/bcs/scripts/e2e_coverage.sh --no-stop    # do not stop bcs after running (debug; no aggregation)
-#   bash apps/bcs/scripts/e2e_coverage.sh --bcs-line-min 40 --bcs-method-min 36
-#                                                    # gate line >=40%, method >=36%
+#   bash apps/bcs/scripts/e2e_coverage.sh --bcs-line-min 41 --bcs-method-min 36
+#                                                    # gate line >=41%, method >=36%
 #   bash apps/bcs/scripts/e2e_coverage.sh --force-rebuild # force-rebuild instrumented bcs (ignore cache)
+#   bash apps/bcs/scripts/e2e_coverage.sh --changed-base-ref origin/dev [--changed-line-min 50]
+#                                                    # changed-line coverage (gated when min > 0)
 #
 # Coverage scope: bcs server (crate bcs) only; excludes the 5 bots / Python.
 
@@ -40,6 +42,12 @@ bcsfuse_port="${BCSFUSE_PORT:-8765}"
 compat_min="${BCS_E2E_COVERAGE_MIN:-0}"
 line_min="${BCS_E2E_LINE_MIN:-$compat_min}"
 method_min="${BCS_E2E_METHOD_MIN:-$compat_min}"
+# Base ref for E2E changed-line coverage; empty skips it.
+changed_base_ref="${BCS_E2E_CHANGED_BASE_REF:-}"
+# Changed-line coverage must be > this % once the change has at least
+# changed_line_min_lines instrumentable lines in scope; 0 = report only.
+changed_line_min="${BCS_E2E_CHANGED_LINE_MIN:-0}"
+changed_line_min_lines="${BCS_E2E_CHANGED_LINE_MIN_LINES:-20}"
 # The coverage runner is a local test launcher, so explicitly provide the same
 # non-production Principal key to both the BCS child and the E2E client.
 export AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
@@ -70,8 +78,20 @@ while [[ "$#" -gt 0 ]]; do
         exit 2
       fi
       method_min="$2"; shift 2 ;;
+    --changed-base-ref)
+      if [[ "$#" -lt 2 ]]; then
+        echo "Error: --changed-base-ref requires a value" >&2
+        exit 2
+      fi
+      changed_base_ref="$2"; shift 2 ;;
+    --changed-line-min)
+      if [[ "$#" -lt 2 ]]; then
+        echo "Error: --changed-line-min requires a value" >&2
+        exit 2
+      fi
+      changed_line_min="$2"; shift 2 ;;
     --force-rebuild) force_rebuild=1; shift ;;
-    -h|--help)      sed -n '2,30p' "$0"; exit 0 ;;
+    -h|--help)      sed -n '2,32p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -139,11 +159,9 @@ preflight_reclaim_ports() {
 }
 
 # 1. Start the instrumented service + bcsfuse + 5 bots (unless --skip-start).
-#    Uses --standalone so bot profiles live under <checkout>/.standalone-openclaw
-#    (per-checkout isolation) instead of the shared ~/.openclaw-* that --local
-#    writes. Without this, running in a second checkout/worktree collides with
-#    the first's ~/.openclaw-* stamps ("profile exists but does not match this
-#    singlebox local stack"). e2e.sh needs the 5 demo bots onboarded first
+#    Singlebox isolates bot profiles under <checkout>/.standalone-openclaw by
+#    default; --standalone remains an explicit compatibility alias for that
+#    same layout. e2e.sh needs the 5 demo bots onboarded first
 #    (UUIDs resolved by name), so start bcs_bots not just bcs; otherwise
 #    GET /bots is empty and every resolution fails. bcs_bots = bcs + bots,
 #    no frontend (e2e needs none).
@@ -156,7 +174,7 @@ if [[ "$skip_start" -eq 0 ]]; then
   # it the instrumented server falls back to the profiler default
   # `default_<hash>_<pid>.profraw` in its own CWD — the repo root, where
   # singlebox is invoked from — leaking profraw there (outside target/, not
-  # covered by src/bcs/.gitignore). Pointing it at cov-e2e/llvm-cov-target
+  # covered by apps/bcs/.gitignore). Pointing it at cov-e2e/llvm-cov-target
   # keeps runtime profraw next to the objects cargo llvm-cov report merges.
   cov_runtime_dir="$bcs_dir/target/cov-e2e/llvm-cov-target"
   export LLVM_PROFILE_FILE="$cov_runtime_dir/bcs-%m-%p.profraw"
@@ -168,8 +186,8 @@ if [[ "$skip_start" -eq 0 ]]; then
   # still hit the running bcs server and are logged server-side — what we want).
   export BCS_DEBUG=true
   # Match start_bcs_binary: BCS_LOG = ${LOG_DIR}/bcs.log where
-  # LOG_DIR=${DEP_DIR}/logs and DEP_DIR=<repo>/scripts/.dependencies (DEP_DIR is
-  # resolved relative to singlebox's own SCRIPT_DIR = <repo>/scripts, NOT the
+  # LOG_DIR=${DEP_DIR}/logs and DEP_DIR=<repo>/singlebox/.dependencies (DEP_DIR is
+  # resolved relative to singlebox's own SCRIPT_DIR = <repo>/singlebox, NOT the
   # repo root). singlebox redirects bcs's stderr to it; debug_middleware writes
   # there with BCS_DEBUG=true above. The file is truncated right before e2e runs
   # below so the endpoint report counts only the e2e suite's hits, not singlebox's
@@ -314,13 +332,56 @@ if [[ "$no_stop" -eq 0 ]]; then
   #     its exit code is combined with e2e's below — no more swallowed gate
   #     (the old `[[ e2e eq 0 ]] && exit` skipped coverage failure when e2e
   #     itself failed, so coverage thresholds appeared not to take effect).
-  # A threshold of 0 is report-only. Pre-push/CI gate line >=40% and method
+  # A threshold of 0 is report-only. Pre-push/CI gate line >=41% and method
   # >=36%; --bcs-min remains available to set both to one value.
+  # With a base ref, also measure changed-line coverage from cobertura.xml.
+  # It gates only when changed_line_min > 0 (e2e_cov_gate.py fails closed
+  # then, including when no base ref was given).
+  # In-memory repo implementations (Memory*Repo / Memory*Store in the store
+  # crates) verified to be unreachable in the SQLite E2E stack
+  # (selected only without a database, or only by tests). They are excluded
+  # from the changed-line metric only; the overall denominator is unchanged.
+  # NOT listed because the SQLite stack runs them by default:
+  #   bcs-chat-run-store/src/memory.rs   (async_chat_run_store = "memory")
+  #   bcs-interaction/src/memory_store.rs (always used by the interaction service)
+  #   bcs-channel-store/src/memory.rs    (fallback while channels.enabled = false)
+  # A listed file that shows any E2E hit is counted again with a warning.
+  e2e_unreachable_memory_repos=(
+    bcs-bot-store/src/memory.rs
+    bcs-bot-store/src/memory_bot_provider_storage.rs
+    bcs-bot-store/src/memory_registration_create.rs
+    bcs-event-store/src/memory.rs
+    bcs-friend-store/src/memory.rs
+    bcs-group-store/src/memory.rs
+    bcs-group-store/src/memory_builder.rs
+    bcs-group-store/src/memory_mutation.rs
+    bcs-invite-code-store/src/memory.rs
+    bcs-message-store/src/memory.rs
+    bcs-message-store/src/memory_delivery_work.rs
+    bcs-organization-store/src/memory.rs
+    bcs-relation-store/src/memory.rs
+    bcs-session-file-store/src/memory.rs
+    bcs-session-store/src/memory.rs
+    bcs-session-store/src/memory_operations/
+    bcs-user-identity/src/memory.rs
+  )
+  changed_skip_regex="^crates/services/($(IFS='|'; printf '%s' "${e2e_unreachable_memory_repos[*]}" | sed 's/\./\\./g'))"
+  changed_args=(--changed-line-min "$changed_line_min"
+    --changed-line-min-lines "$changed_line_min_lines"
+    --changed-skip-regex "$changed_skip_regex")
+  # Never ship a previous run's changed-line report as this run's result.
+  rm -f "$cov_dir/changed_line_coverage.json"
+  if [[ -n "$changed_base_ref" ]]; then
+    changed_args+=(--cobertura "$out_xml" --base-ref "$changed_base_ref"
+      --ignore-filename-regex "$cov_ignore_regex"
+      --changed-json "$cov_dir/changed_line_coverage.json")
+  fi
   if [[ -f "$summary_json" ]]; then
     ( cd "$bcs_dir" && python3 scripts/e2e_cov_gate.py \
         --summary "$summary_json" \
         --line-min "$line_min" \
-        --method-min "$method_min" ) || cov_gate_status=$?
+        --method-min "$method_min" \
+        "${changed_args[@]+"${changed_args[@]}"}" ) || cov_gate_status=$?
   else
     echo "WARN: coverage summary.json not found ($summary_json); skipping coverage gate." >&2
     # Missing summary is itself a gate failure when a threshold was requested:

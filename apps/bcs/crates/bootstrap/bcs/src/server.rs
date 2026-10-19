@@ -39,7 +39,9 @@ use crate::plugins::{
     build_registered_leader_election, build_registered_llm_provider,
     build_registered_security_gateway, build_registered_user_directory,
 };
-use bcs_api_http::v1::gateway_principal::{GatewayPrincipalTokenVerifier, GatewayPrincipalTrust};
+use bcs_api_http::v1::gateway_principal::{
+    GatewayPrincipalReSigner, GatewayPrincipalTokenVerifier, GatewayPrincipalTrust,
+};
 use bcs_api_http::v1::openapi::SessionFileUrlProjector;
 use bcs_api_http::{ApiState, PrincipalVerifier};
 use bcs_app_bot::{BotServiceConfig, BotServiceImpl, InternalBotAttributesServiceImpl};
@@ -71,8 +73,7 @@ use bcs_collaboration_store::{
 };
 use bcs_collaboration_template::{CollaborationTemplateServiceImpl, FileCollaborationTemplateRepo};
 use bcs_db_api::DbSqlFlavor;
-use bcs_domain::{MessageAudience, MessageVisibilityDomain, NewMessage, SenderType};
-use bcs_friend::{FriendCore, FriendRequestCore};
+use bcs_friend::{FriendCore, FriendRequestCore, FriendshipWritebackService};
 use bcs_friend_store::{
     DbFriendRequestStore, DbFriendStore, MemoryFriendRepo, MemoryFriendRequestRepo,
 };
@@ -113,11 +114,11 @@ use bcs_service_api::port::{
     EventRecordFactoryPort, EventRecorderPort, GroupSessionTokenPort, SecretAccessPort,
 };
 use bcs_service_api::{
-    A2aChatRunService, A2aChatService, BotActor, BotCandidateSearchCoreService,
+    A2aChatRunService, A2aChatService, BotCandidateSearchCoreService,
     BotCatalogCleanupPort,
     BotControlPlaneCoreService, BotControlPlaneRepoPort, BotDeliveryPort, BotDeliveryTarget,
     BotMetricsSnapshotPort, BotRegistryCoreService, BotRunContextPort, BotTerminalEvent,
-    BotTerminalObserverPort, BotTerminalState, CallerContext, CanResolveInteraction,
+    BotTerminalObserverPort, BotTerminalState, CanResolveInteraction,
     ChannelBindingCleanupPort, ChannelService, CollaborationRuntimeService,
     CollaborationTemplateService, CompositeBotTerminalObserver, DirectChatClientKind,
     DirectChatRunEvent, DirectChatRunLifecycleHook, DirectChatRunReason, DirectChatRunSnapshotPort,
@@ -133,7 +134,7 @@ use bcs_service_api::{
     ServiceError, ServiceResult,
     SessionChannelDeliveryOutcome, SessionChannelOutboundPort, SessionManagementService,
     StateMachineResultPublishCommand, StateMachineResultPublisherPort, StateMachineTerminalEvent,
-    SystemMessageService, WebSendCommand, WsCloseReason, WsErrorKind,
+    SystemMessageService, WsCloseReason, WsErrorKind,
     WsLifecycleInstrumentationHook, WsPeer,
     port::repo::{
         ChannelBindingRepoPort, ConversationSessionRepoPort, HumanInputRequestRepoPort,
@@ -284,6 +285,7 @@ async fn build_session_files_service(
 /// when the calling thread already runs a tokio runtime (e.g. tests).
 /// The production path (`new_with_infrastructure`) is already async and
 /// calls [`build_session_files_service`] directly, without this overhead.
+#[cfg(any(test, feature = "test-utils"))]
 fn build_session_files_service_blocking(
     config: &BcsConfig,
     env: String,
@@ -309,6 +311,7 @@ fn build_session_files_service_blocking(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(any(test, feature = "test-utils"))]
 fn build_eventing_runtime_blocking(
     config: &BcsConfig,
     repo: Arc<dyn bcs_service_api::port::repo::EventRepoPort>,
@@ -482,18 +485,11 @@ fn deferred_session_channel_outbound() -> (
 
 struct MessageFlowStateMachineResultPublisher {
     message_flow: Arc<dyn MessageFlowService>,
-    message_repo: Arc<dyn MessageRepoPort>,
 }
 
 impl MessageFlowStateMachineResultPublisher {
-    fn new(
-        message_flow: Arc<dyn MessageFlowService>,
-        message_repo: Arc<dyn MessageRepoPort>,
-    ) -> Self {
-        Self {
-            message_flow,
-            message_repo,
-        }
+    fn new(message_flow: Arc<dyn MessageFlowService>) -> Self {
+        Self { message_flow }
     }
 }
 
@@ -503,56 +499,7 @@ impl StateMachineResultPublisherPort for MessageFlowStateMachineResultPublisher 
         &self,
         cmd: StateMachineResultPublishCommand,
     ) -> ServiceResult<()> {
-        let idempotency_key = format!("state-machine-result:{}", cmd.run_id);
-        let saved = self.message_repo
-            .append_message_with_id(idempotency_key.clone(), NewMessage {
-                group_id: cmd.group_id.clone(),
-                session_id: cmd.session_id.clone(),
-                sender_id: cmd.sender_bot_id.clone(),
-                sender_type: SenderType::Bot,
-                message_type: "chat".to_string(),
-                content: serde_json::Value::String(cmd.content.clone()),
-                client_msg_id: Some(idempotency_key.clone()),
-                owner_bot_id: None,
-                created_at: cmd.created_at_ms,
-                run_id: cmd.run_id.clone(),
-                visibility_domain: MessageVisibilityDomain::StateMachine,
-                audience: Some(MessageAudience::Public),
-            })
-            .await
-            .map_err(|error| {
-                bcs_service_api::ServiceError::InternalError(format!(
-                    "persist state-machine result before delivery: {error}"
-                ))
-            })?;
-        if saved.group_id != cmd.group_id || saved.session_id != cmd.session_id || saved.run_id != cmd.run_id
-            || saved.sender_id != cmd.sender_bot_id || saved.sender_type != SenderType::Bot
-            || saved.message_type != "chat" || saved.content != serde_json::Value::String(cmd.content.clone())
-            || saved.client_msg_id.as_ref() != Some(&idempotency_key) || saved.created_at != cmd.created_at_ms
-            || saved.visibility_domain != Some(MessageVisibilityDomain::StateMachine) || saved.audience != Some(MessageAudience::Public) {
-            return Err(bcs_service_api::ServiceError::Conflict("Chat result history conflicts with saved publication".into()));
-        }
-        self.message_flow
-            .handle_web_send(WebSendCommand {
-                caller: CallerContext::Bot(BotActor {
-                    bot_uuid: cmd.sender_bot_id.clone(),
-                }),
-                group_id: cmd.group_id,
-                session_id: Some(cmd.session_id),
-                from_actor_id: cmd.sender_bot_id,
-                from_name: None,
-                message: cmd.content,
-                mentions: Vec::new(),
-                attachments: None,
-                thinking: None,
-                idempotency_key: Some(idempotency_key),
-                source_im_message_id: None,
-                channel_sender_identity: None,
-                sender_conn_id: None,
-                provider_bypass_headers: Vec::new(),
-            })
-            .await?;
-        Ok(())
+        self.message_flow.publish_state_machine_result(cmd).await
     }
 }
 
@@ -894,12 +841,14 @@ fn build_configured_channel_providers(
     Ok(providers)
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 fn build_file_collaboration_template_service(
     config: &BcsConfig,
 ) -> Arc<dyn CollaborationTemplateService> {
     build_file_collaboration_template_service_with_judge_templates(config, config.llm.is_enabled())
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 fn build_standalone_collaboration_template_service(
     config: &BcsConfig,
 ) -> Arc<dyn CollaborationTemplateService> {
@@ -1219,6 +1168,7 @@ struct ProviderRepoBundle {
     organization_candidates: Arc<dyn bcs_service_api::OrganizationCandidateReadPort>,
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 fn memory_provider_repos(bots: Arc<dyn bcs_service_api::BotRepoPort>, source: bcs_domain::bot_provider::DownlinkDetectionSource) -> ProviderRepoBundle {
     let store = Arc::new(MemoryProviderStore::new());
     let bot_providers = Arc::new(bcs_bot_store::provider::MemoryBotProviderStore::new(bots, store.clone()));
@@ -1270,6 +1220,7 @@ fn db_provider_repos(
     }
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 fn memory_organization_services(
     provider_repos: &ProviderRepoBundle,
     provider_core: Arc<dyn ProviderCoreService>,
@@ -1457,11 +1408,13 @@ fn build_gateway_principal_verifier_from_process(
     build_gateway_principal_verifier(config, material.as_deref())
 }
 
-async fn build_gateway_principal_verifier_from_secret_access(
+/// Resolve the gateway principal signing-key material: the configured secret
+/// store name, or the `signing_key_env` process fallback. Returned raw —
+/// callers own the empty/blank policy.
+async fn resolve_gateway_principal_material(
     config: &GatewayPrincipalConfig,
     secret_access: Arc<dyn SecretAccessPort>,
-) -> crate::Result<Arc<dyn PrincipalVerifier>> {
-    config.validate().map_err(crate::BcsError::InvalidConfig)?;
+) -> crate::Result<Option<String>> {
     let secret_name = config
         .signing_key_secret
         .as_deref()
@@ -1474,14 +1427,45 @@ async fn build_gateway_principal_verifier_from_secret_access(
                 "Gateway Principal signing key secret '{secret_name}' is required"
             ))
         })?;
-        return build_gateway_principal_verifier(config, Some(record.value.as_str()));
+        return Ok(Some(record.value));
     }
 
-    build_gateway_principal_verifier_from_process(config)
+    Ok(std::env::var(&config.signing_key_env).ok())
+}
+
+async fn build_gateway_principal_verifier_from_secret_access(
+    config: &GatewayPrincipalConfig,
+    secret_access: Arc<dyn SecretAccessPort>,
+) -> crate::Result<Arc<dyn PrincipalVerifier>> {
+    config.validate().map_err(crate::BcsError::InvalidConfig)?;
+    let material = resolve_gateway_principal_material(config, secret_access).await?;
+    build_gateway_principal_verifier(config, material.as_deref())
+}
+
+/// Build the principal re-signer that friend-auth-sync hands the backend a
+/// `bcs`-issued credential with. Same trust the openapi admission gate runs
+/// under — a principal the re-signer verifies is one BCN admits elsewhere —
+/// and the same key resolution the verifier mandates at boot.
+async fn build_gateway_principal_resigner(
+    config: &GatewayPrincipalConfig,
+    secret_access: Arc<dyn SecretAccessPort>,
+) -> crate::Result<GatewayPrincipalReSigner> {
+    config.validate().map_err(crate::BcsError::InvalidConfig)?;
+    let trust = GatewayPrincipalTrust::new(
+        config.issuers.clone(),
+        config.audience.clone(),
+        config.key_id.clone(),
+    )
+    .map_err(|error| crate::BcsError::InvalidConfig(error.to_string()))?;
+    let material = resolve_gateway_principal_material(config, secret_access).await?;
+    let signing_key = gateway_principal_signing_key(material.as_deref())?;
+    GatewayPrincipalReSigner::new(signing_key.as_bytes(), trust)
+        .map_err(|error| crate::BcsError::InvalidConfig(error.to_string()))
 }
 
 const GROUP_SESSION_WS_TEST_SIGNING_KEY: &str = "test-only-group-session-key-at-least-32-bytes";
 
+#[cfg(any(test, feature = "test-utils"))]
 fn group_session_test_secret_access(config: &BcsConfig) -> Arc<dyn SecretAccessPort> {
     Arc::new(InMemorySecretAccess::with_entries([(
         config
@@ -1494,6 +1478,7 @@ fn group_session_test_secret_access(config: &BcsConfig) -> Arc<dyn SecretAccessP
     )]))
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 fn build_secret_access_blocking(config: &BcsConfig) -> crate::Result<Arc<dyn SecretAccessPort>> {
     std::thread::scope(|scope| {
         scope
@@ -1555,11 +1540,16 @@ fn build_invite_code_service(
         },
         _ => Arc::new(MemoryInviteCodeRepo::with_data_dir(config.bots_base_dir.clone())),
     };
-    Arc::new(InviteCodeServiceImpl::new(
-        repo,
-        invite_token_secret,
-        config.invite.public_claim_max_count,
-    ))
+    Arc::new(
+        InviteCodeServiceImpl::new(
+            repo,
+            invite_token_secret,
+            config.invite.public_claim_max_count,
+        )
+        // 与 invite-code gate 中间件同源接线：开关关闭时 /me 合成"已绑定"，
+        // 客户端提示行为完全由该后端开关控制。
+        .with_gate_enabled(config.invite.invite_code_gate_enabled),
+    )
 }
 
 async fn resolve_secret_value(
@@ -1822,6 +1812,7 @@ fn build_openapi_v1_state(
     )
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 pub(crate) fn gateway_principal_verifier_for_tests() -> Arc<dyn PrincipalVerifier> {
     build_gateway_principal_verifier(
         &GatewayPrincipalConfig::default(),
@@ -2058,6 +2049,26 @@ mod gateway_principal_tests {
         }
     }
 
+    #[tokio::test]
+    async fn gateway_principal_resigner_resolves_the_same_secret_key() {
+        let mut config = trust_config();
+        config.signing_key_secret =
+            Some("other_manual_teamclawgw_principal_signing_key".to_string());
+        let access: Arc<dyn bcs_service_api::port::SecretAccessPort> =
+            Arc::new(InMemorySecretAccess::with_entries([(
+                "other_manual_teamclawgw_principal_signing_key",
+                "teamclawgw".to_string(),
+                "mist-test-signing-key".to_string(),
+            )]));
+
+        let resigner = build_gateway_principal_resigner(&config, access).await;
+
+        assert!(
+            resigner.is_ok(),
+            "friend-auth-sync's re-signer needs the same signing key the verifier mandates: {resigner:?}"
+        );
+    }
+
     #[test]
     fn blank_gateway_principal_trust_or_lookup_config_is_rejected() {
         for field in ["issuers", "audience", "key_id", "signing_key_env"] {
@@ -2158,6 +2169,7 @@ mod candidate_search_wiring_tests {
     }
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 impl Default for BcsServerState {
     fn default() -> Self {
         let config = BcsConfig::default();
@@ -2477,6 +2489,7 @@ impl Default for BcsServerState {
             .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
             .with_fixed_loop_limits(config.collaboration.fixed_loop_limits)
             .with_loop_execution_enabled(config.collaboration.loop_execution_enabled)
+            .with_nested_loop_execution_enabled(config.collaboration.nested_loop_execution_enabled)
             .with_history_persistence(config.state_machine_history.persistence_enabled)
             .with_history_cutoff_timestamp(config.message_history.state_machine_cutoff_timestamp)
             .with_loop_instrumentation(state_machine_loop_instrumentation(metrics.as_ref()))
@@ -2484,7 +2497,6 @@ impl Default for BcsServerState {
             .with_session_channel_outbound(session_channel_outbound)
             .with_result_publisher(Arc::new(MessageFlowStateMachineResultPublisher::new(
                 message_flow.clone(),
-                message_repo.clone(),
             )))
             .with_message_repo(message_repo.clone())
             .with_frontend_delivery(frontend_delivery.clone())
@@ -2625,6 +2637,10 @@ impl Default for BcsServerState {
             provider_bot_events_impl.clone();
         let provider_bot_events: Arc<dyn ProviderBotEventService> = provider_bot_events_impl;
         provider_transport.set_ingest(provider_event_ingest, bot_run_context.clone());
+        let group_context_service: Arc<dyn bcs_service_api::GroupContextApplicationService> =
+            Arc::new(bcs_app_group_context::GroupContextApplicationServiceImpl::new(
+                Arc::new(bcs_group_context_store::MemoryGroupContextRepo::new()),
+            ));
         let services = ServicesBuilder::default()
             .registry(bot_registry.clone())
             .group(sessions)
@@ -2639,6 +2655,7 @@ impl Default for BcsServerState {
             .message_flow(message_flow)
             .interactions(interactions)
             .group_message_history(group_message_history)
+            .group_context(group_context_service)
             .a2a_chat(a2a_chat)
             .a2a_chat_runs(a2a_chat_runs)
             .collaboration_runtime(collaboration_runtime)
@@ -3258,6 +3275,7 @@ fn create_message_flow_builder(
     message_flow
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 fn finalize_message_flow(
     message_flow: BcsMessageFlow,
     system_message: Arc<dyn bcs_service_api::SystemMessageService>,
@@ -3746,6 +3764,7 @@ impl GroupHistoryBotRequestPort for BootstrapGroupHistoryBotRequestPort {
 
 impl BcsServer {
     /// Create a new BCS server.
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn new(config: BcsConfig) -> Self {
         let outbound_url_guard = outbound_url_guard_from_config(&config);
         let group_session_secret_access = build_secret_access_blocking(&config)
@@ -3775,6 +3794,7 @@ impl BcsServer {
         )
     }
 
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn new_allowing_private_outbound_for_tests(config: BcsConfig) -> Self {
         let group_session_secret_access = group_session_test_secret_access(&config);
         Self::new_with_outbound_url_guards(
@@ -3788,6 +3808,7 @@ impl BcsServer {
         )
     }
 
+    #[cfg(any(test, feature = "test-utils"))]
     fn new_with_outbound_url_guards(
         config: BcsConfig,
         provider_webhook_url_guard: OutboundUrlGuard,
@@ -4092,6 +4113,7 @@ impl BcsServer {
             .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
             .with_fixed_loop_limits(config.collaboration.fixed_loop_limits)
             .with_loop_execution_enabled(config.collaboration.loop_execution_enabled)
+            .with_nested_loop_execution_enabled(config.collaboration.nested_loop_execution_enabled)
             .with_history_persistence(config.state_machine_history.persistence_enabled)
             .with_history_cutoff_timestamp(config.message_history.state_machine_cutoff_timestamp)
             .with_loop_instrumentation(state_machine_loop_instrumentation(metrics.as_ref()))
@@ -4099,7 +4121,6 @@ impl BcsServer {
             .with_session_channel_outbound(session_channel_outbound)
             .with_result_publisher(Arc::new(MessageFlowStateMachineResultPublisher::new(
                 message_flow.clone(),
-                message_repo.clone(),
             )))
             .with_message_repo(message_repo.clone())
             .with_frontend_delivery(frontend_delivery.clone())
@@ -4229,6 +4250,10 @@ impl BcsServer {
             provider_bot_events_impl.clone();
         let provider_bot_events: Arc<dyn ProviderBotEventService> = provider_bot_events_impl;
         provider_transport.set_ingest(provider_event_ingest, bot_run_context.clone());
+        let group_context_service: Arc<dyn bcs_service_api::GroupContextApplicationService> =
+            Arc::new(bcs_app_group_context::GroupContextApplicationServiceImpl::new(
+                Arc::new(bcs_group_context_store::MemoryGroupContextRepo::new()),
+            ));
         let services = ServicesBuilder::default()
             .registry(bot_registry.clone())
             .group(sessions)
@@ -4243,6 +4268,7 @@ impl BcsServer {
             .message_flow(message_flow)
             .interactions(interactions)
             .group_message_history(group_message_history)
+            .group_context(group_context_service)
             .a2a_chat(a2a_chat)
             .a2a_chat_runs(a2a_chat_runs)
             .collaboration_runtime(collaboration_runtime)
@@ -4637,22 +4663,46 @@ impl BcsServer {
             };
         let friend_auth_sync: Arc<dyn bcs_service_api::port::FriendAuthSyncPort> =
             match config.friend_work_order_base_url.as_deref() {
-                Some(base_url) => Arc::new(
-                    HttpFriendAuthSyncPort::new(base_url)
-                        .expect("friend_work_order_base_url must be a valid HTTP(S) URL"),
-                ),
+                Some(base_url) => {
+                    // Each sync call is credentialed: the inbound principal is
+                    // re-addressed as a `bcs`-issued token, because the backend
+                    // only trusts gateway/bcs issuers and answers 401 to the
+                    // iss=backend copy the friend work-order callback sends.
+                    let resigner = build_gateway_principal_resigner(
+                        &config.gateway_principal,
+                        group_session_secret_access.clone(),
+                    )
+                    .await?;
+                    Arc::new(
+                        HttpFriendAuthSyncPort::new(base_url)
+                            .expect("friend_work_order_base_url must be a valid HTTP(S) URL")
+                            .with_principal_resigner(resigner),
+                    )
+                }
                 None => Arc::new(bcs_service_api::port::NoopFriendAuthSyncPort),
             };
-        let connect_service_impl = Arc::new(bcs_edge_permission::DbConnectService::new(
-            edge_grant_store.clone(),
-            profile_store.clone(),
-            request_store.clone(),
-            bot_config_store.clone(),
-            user_directory.clone(),
-            friend_connect_notification,
-            friend_auth_sync.clone(),
-            edge_permission_env,
-        ));
+        // Edge→legacy friendship reverse sync (coexistence): bots friended via
+        // the edge-permission Connect flow get a mirrored bcs_friendships row
+        // so the collaboration group gate (still reading the legacy store)
+        // sees the relationship. Spec: 2026-10-15-edge-connect-friendship-writeback.
+        let friendship_writeback: Arc<dyn bcs_service_api::port::FriendshipWritebackPort> =
+            Arc::new(FriendshipWritebackService::new(
+                friend_repo.clone(),
+                relation_svc.clone(),
+            ));
+        let connect_service_impl = Arc::new(
+            bcs_edge_permission::DbConnectService::new(
+                edge_grant_store.clone(),
+                profile_store.clone(),
+                request_store.clone(),
+                bot_config_store.clone(),
+                user_directory.clone(),
+                friend_connect_notification,
+                friend_auth_sync.clone(),
+                edge_permission_env,
+            )
+            .with_friendship_writeback(Some(friendship_writeback)),
+        );
         let connect_service: Arc<dyn bcs_service_api::application::ConnectService> =
             connect_service_impl.clone();
         let edge_permission_friend_sync: Arc<dyn bcs_service_api::EdgePermissionFriendSyncService> =
@@ -4972,6 +5022,7 @@ impl BcsServer {
                 .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
                 .with_fixed_loop_limits(config.collaboration.fixed_loop_limits)
                 .with_loop_execution_enabled(config.collaboration.loop_execution_enabled)
+                .with_nested_loop_execution_enabled(config.collaboration.nested_loop_execution_enabled)
             .with_history_persistence(config.state_machine_history.persistence_enabled)
             .with_history_cutoff_timestamp(config.message_history.state_machine_cutoff_timestamp)
                 .with_loop_instrumentation(state_machine_loop_instrumentation(metrics.as_ref()))
@@ -4979,7 +5030,6 @@ impl BcsServer {
                 .with_session_channel_outbound(session_channel_outbound)
                 .with_result_publisher(Arc::new(MessageFlowStateMachineResultPublisher::new(
                     message_flow.clone(),
-                    message_repo.clone(),
                 )))
                 .with_message_repo(message_repo.clone())
                 .with_frontend_delivery(frontend_delivery.clone())
@@ -5127,6 +5177,24 @@ impl BcsServer {
             provider_bot_events_impl.clone();
         let provider_bot_events: Arc<dyn ProviderBotEventService> = provider_bot_events_impl;
         provider_transport.set_ingest(provider_event_ingest, bot_run_context.clone());
+        let group_context_repo: Arc<dyn bcs_group_context_store::GroupContextRepo> = match db_kind {
+            DbPluginKind::LocalSqlite => {
+                Arc::new(bcs_group_context_store::SqlGroupContextStore::sqlite(db_plugin.clone()))
+            }
+            DbPluginKind::Mysql => {
+                Arc::new(bcs_group_context_store::SqlGroupContextStore::oceanbase(db_plugin.clone()))
+            }
+            DbPluginKind::External(provider) => {
+                panic!(
+                    "external database plugin '{}' has no group-context store wiring",
+                    provider
+                )
+            }
+        };
+        let group_context_service: Arc<dyn bcs_service_api::GroupContextApplicationService> =
+            Arc::new(bcs_app_group_context::GroupContextApplicationServiceImpl::new(
+                group_context_repo,
+            ));
         let services = ServicesBuilder::default()
             .registry(bot_registry.clone())
             .group(sessions)
@@ -5141,6 +5209,7 @@ impl BcsServer {
             .message_flow(message_flow)
             .interactions(interactions)
             .group_message_history(group_message_history)
+            .group_context(group_context_service)
             .a2a_chat(a2a_chat)
             .a2a_chat_runs(a2a_chat_runs)
             .collaboration_runtime(collaboration_runtime)
@@ -5481,6 +5550,7 @@ impl BcsServer {
 
     fn spawn_state_machine_progression_scanner(&self) -> crate::state_machine_progression_scanner::ProgressionRecoveryTask {
         tracing::info!(loop_execution_enabled = self.config.collaboration.loop_execution_enabled,
+            nested_loop_execution_enabled = self.config.collaboration.nested_loop_execution_enabled,
             "State Machine progression recovery started");
         crate::state_machine_progression_scanner::spawn(
             self.state.leader_election.clone(),
@@ -5501,6 +5571,10 @@ impl BcsServer {
 
     /// Run the server with graceful shutdown support.
     pub async fn run(self) -> Result<()> {
+        self.run_with_listener(None).await
+    }
+
+    pub(crate) async fn run_with_listener(self, listener: Option<tokio::net::TcpListener>) -> Result<()> {
         // Also stop durable workers if address parsing, lifecycle setup or bind
         // fails before the normal graceful-shutdown path is installed.
         let _delivery_shutdown_guard = crate::message_delivery_wiring::StartupGuard(
@@ -5573,9 +5647,17 @@ impl BcsServer {
             "Bot Coordination Service starting"
         );
 
-        let listener = tokio::net::TcpListener::bind(addr)
-            .await
-            .map_err(crate::BcsError::IoError)?;
+        let listener = match listener {
+            Some(listener) => listener,
+            None => tokio::net::TcpListener::bind(addr)
+                .await
+                .map_err(crate::BcsError::IoError)?,
+        };
+        // The external-process test fixture consumes this record from its own
+        // child's stdout; a successful health check alone cannot identify it.
+        info!("BCS_LISTENING {}", serde_json::json!({
+            "address": listener.local_addr().map_err(crate::BcsError::IoError)?.to_string(),
+        }));
 
         let shutdown_lifecycle = self.state.lifecycle.clone();
         let final_lifecycle = self.state.lifecycle.clone();
@@ -6126,6 +6208,7 @@ mod tests {
             session_id: "session-1".to_string(),
             run_id: "run-1".to_string(),
             node_id: "review".to_string(),
+            execution: None,
             display_name: "Review".to_string(),
             instruction: "Review the draft".to_string(),
             assignee_actor_id: "human-1".to_string(),

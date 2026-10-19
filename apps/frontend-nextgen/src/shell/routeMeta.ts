@@ -1,8 +1,8 @@
 import { getCapabilities } from '@/capabilities';
 
 /**
- * 路由分组（refactor-global-nav-shell）：collab=协作分组、bot=Bot 分组、legacy=老功能过渡组
- * （废弃入口保底可达）、dev=开发页（不进侧栏分组导航）。原 work/manage 双区域模型随顶栏区域 Tab 退役。
+ * 路由分组（refactor-global-nav-shell）：collab=协作分组、bot=Bot 分组、legacy=无产品导航位的
+ * 存量页面（只保留直接链接访问）、dev=开发页（不进侧栏分组导航）。原 work/manage 双区域模型随顶栏区域 Tab 退役。
  */
 export type RouteSection = 'collab' | 'bot' | 'legacy' | 'dev';
 
@@ -72,7 +72,6 @@ export const routeMetaList: RouteMeta[] = [
     path: '/work/my-task',
     title: '任务列表',
     section: 'legacy',
-    navKey: 'my-task',
     openCore: true,
   },
   // 发现页自带模块级 SquareIdentityPicker。
@@ -120,6 +119,13 @@ export const routeMetaList: RouteMeta[] = [
     openCore: true,
   },
   {
+    path: '/evolution-factory',
+    title: '智能进化',
+    section: 'bot',
+    navKey: 'evolution-factory',
+    openCore: true,
+  },
+  {
     path: '/bot-workshop',
     title: 'Bot管理',
     section: 'bot',
@@ -132,10 +138,19 @@ export const routeMetaList: RouteMeta[] = [
     section: 'bot',
     navKey: 'bot-workshop',
     openCore: true,
+    // 编辑器是独立工作台；全局主导航仅在返回 Bot 管理列表后恢复，避免与编辑器内的模块导航并列。
+    navigationVisibility: 'hidden',
   },
   {
     path: '/bot-workshop/logs',
     title: 'Bot 日志',
+    section: 'bot',
+    navKey: 'bot-workshop',
+    openCore: true,
+  },
+  {
+    path: '/bot-workshop/task-instances',
+    title: '任务实例',
     section: 'bot',
     navKey: 'bot-workshop',
     openCore: true,

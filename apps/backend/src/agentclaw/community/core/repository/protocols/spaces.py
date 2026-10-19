@@ -6,6 +6,9 @@ from abc import abstractmethod
 from typing import ContextManager, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.spaces.management_models import (
+        ManagedSpace, MemberPageQuery, SpacePageQuery,
+    )
     from agentclaw.community.core.spaces.models import (
         SpaceListScope,
         PersonalSpaceLookupRecord,
@@ -49,6 +52,7 @@ class SpaceRepositoryProtocol(Protocol):
         creator_id: str,
         creator_user_name: str | None,
         env: str,
+        initial_members: dict[str, str | None] | None = None,
     ) -> ContextManager[SpaceRecord]: ...
 
     @abstractmethod
@@ -115,3 +119,28 @@ class SpaceRepositoryProtocol(Protocol):
     def update_member_role(
         self, *, space_id: int, user_id: str, role: SpaceRole, env: str
     ) -> SpaceMemberRecord | None: ...
+
+
+@runtime_checkable
+class SpaceManagementRepositoryProtocol(Protocol):
+    """Maintenance persistence; every read/write must filter the explicit env.
+
+    Batch operations lock the parent, check existence and commit atomically.
+    Missing relations are no-ops on remove, but reject an entire role batch.
+    """
+    @abstractmethod
+    def list_teams(self, *, query: SpacePageQuery, env: str) -> dict: ...
+    @abstractmethod
+    def get_team(self, *, space_id: int, env: str) -> ManagedSpace: ...
+    @abstractmethod
+    def rename_team(self, *, space_id: int, name: str, actor_id: str, env: str) -> dict: ...
+    @abstractmethod
+    def delete_team(self, *, space_id: int, with_members: bool, env: str) -> dict: ...
+    @abstractmethod
+    def list_members(self, *, space_id: int, query: MemberPageQuery, env: str) -> dict: ...
+    @abstractmethod
+    def add_members(self, *, space_id: int, members: dict[str, str | None], actor_id: str, env: str) -> dict: ...
+    @abstractmethod
+    def remove_members(self, *, space_id: int, user_ids: list[str], env: str) -> dict: ...
+    @abstractmethod
+    def set_member_roles(self, *, space_id: int, user_ids: list[str], role: str, env: str) -> dict: ...

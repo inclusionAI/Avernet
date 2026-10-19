@@ -108,7 +108,11 @@ jest.mock('@/pages/Workspace/hooks/useGroupSessions', () => ({
     createShare: jest.fn(),
   }),
 }));
-jest.mock('@/pages/Workspace/hooks/useGroupChat', () => ({ useGroupChat: () => ({}) }));
+// GroupWorkspaceArea 直接读 chat.chat.messages / chat.panelRef（头部图标域编排），
+// 桩件需提供最小 chat 契约（其余 chat.* 字段仅作为 props 透传给已 mock 的 GroupChatPane）。
+jest.mock('@/pages/Workspace/hooks/useGroupChat', () => ({
+  useGroupChat: () => ({ chat: { messages: [] }, panelRef: { current: null } }),
+}));
 jest.mock('@/pages/Workspace/hooks/useGroupManagement', () => ({ useGroupManagement: () => ({}) }));
 jest.mock('@/pages/Workspace/hooks/useSessionManagement', () => ({ useSessionManagement: () => ({}) }));
 jest.mock('@/pages/Workspace/hooks/useGroupCreateDialog', () => ({

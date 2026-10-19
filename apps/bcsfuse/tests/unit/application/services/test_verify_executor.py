@@ -130,10 +130,8 @@ class TestVerifyExecutorInit:
             bcn_chat_token="",
             bcn_chat_cookie="",
         )
-        results = executor.execute("w1", _make_probes())
-        # This is async but we can check it returns a coroutine
         import asyncio
-        results = asyncio.get_event_loop().run_until_complete(results)
+        results = asyncio.run(executor.execute("w1", _make_probes()))
         assert len(results) == 3
         assert all(r.failed for r in results)
 

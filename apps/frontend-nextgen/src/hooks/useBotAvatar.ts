@@ -34,10 +34,13 @@ export function useBotAvatar(botId: string) {
     save: async () => {
       setSaving(true);
       try {
-        setValue(await botAvatarService.save(botId, value));
+        const savedUrl = await botAvatarService.save(botId, value);
+        setValue(savedUrl);
         toast.success('头像已保存');
+        return savedUrl;
       } catch (e) {
         toast.error(e instanceof Error ? e.message : '头像保存失败');
+        return undefined;
       } finally {
         setSaving(false);
       }

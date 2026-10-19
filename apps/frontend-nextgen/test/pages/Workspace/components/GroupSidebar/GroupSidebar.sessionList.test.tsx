@@ -63,15 +63,17 @@ describe('GroupSidebar', () => {
     expect(screen.queryByText(/3 个成员/)).not.toBeInTheDocument();
   });
 
-  it('会话区树形导轨（验收微调）：干线由会话行自带，容器不再渲染贯穿线', () => {
+  it('会话区：容器无缩进导轨/贯穿线，行标题对齐固定头像槽后的一级名称', () => {
     render(<GroupSidebar {...makeProps()} />);
     const sessions = screen.getByLabelText('协作群会话列表：主站群');
-    expect(sessions).toHaveClass('pl-6');
-    // 容器不再渲染贯穿干线（before:* 已移除），干线与末行截断由每行 SessionCard 自带。
-    expect(sessions).not.toHaveClass('before:absolute');
-    const rails = sessions.querySelectorAll('[data-session-tree-rail]');
-    expect(rails.length).toBeGreaterThan(0);
-    expect(rails[0]).toHaveClass('-left-2', 'top-0', 'bottom-0', 'w-px', 'bg-border');
+    expect(sessions).not.toHaveClass('pl-6');
+    expect(sessions.querySelectorAll('[data-session-tree-rail]').length).toBe(0);
+    expect(sessions.querySelectorAll('[data-session-tree-elbow]').length).toBe(0);
+    // 会话行由 52px margin + 8px padding 对齐一级名称，胶囊 hover/选中同几何。
+    const sessionTrigger = screen.getByRole('button', { name: /会话一/ });
+    expect(sessionTrigger).toHaveClass('ml-[52px]');
+    const capsule = sessionTrigger.previousElementSibling as HTMLElement;
+    expect(capsule).toHaveClass('left-2', 'right-2', 'rounded-md');
   });
 
   it('选中协作群暂无会话时展示明确空态', () => {
@@ -99,19 +101,19 @@ describe('GroupSidebar', () => {
     expect(screen.queryByRole('group', { name: '会话范围筛选' })).not.toBeInTheDocument();
   });
 
-  it('协作群会话与 Bot 会话统一使用消息 Icon', () => {
+  it('v2 会话行无前置消息图标、无日期（设计稿「群目录二级」同构）', () => {
     const { container } = render(<GroupSidebar {...makeProps()} />);
 
-    expect(container.querySelectorAll('svg.lucide-message-square')).toHaveLength(2);
-    expect(container.querySelector('[data-session-indicator].rounded-full')).not.toBeInTheDocument();
+    expect(container.querySelectorAll('svg.lucide-message-square')).toHaveLength(0);
+    expect(container.querySelector('[data-session-indicator]')).not.toBeInTheDocument();
   });
 
-  it('群会话没有次行内容时使用紧凑行高', () => {
+  it('v2 群会话使用 32px 紧凑行高（h-8，对齐对话会话行几何）', () => {
     render(<GroupSidebar {...makeProps()} />);
 
     const sessionTrigger = screen.getByRole('button', { name: /会话一/ });
-    expect(sessionTrigger).toHaveClass('min-h-12', 'py-2');
-    expect(sessionTrigger.parentElement).toHaveClass('min-h-12');
+    expect(sessionTrigger).toHaveClass('h-8');
+    expect(sessionTrigger.parentElement).toHaveClass('min-h-8');
     expect(sessionTrigger.textContent).not.toContain('个成员');
   });
 

@@ -20,6 +20,7 @@ use crate::v1::common::{PrincipalVerificationError, PrincipalVerifier};
 const CLOCK_SKEW_SECONDS: u64 = 5;
 const GATEWAY_PRINCIPAL_HEADER: &str = "x-avernet-principal";
 
+#[derive(Clone)]
 pub struct GatewayPrincipalTrust {
     issuers: Vec<String>,
     audience: String,

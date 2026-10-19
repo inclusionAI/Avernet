@@ -1,12 +1,13 @@
 """BBS 接力任务根级 CAS 占有(claim_bbs_owner)单测。对齐 task-3 brief(TDD RED→GREEN)。"""
 import threading
 
+import pytest
+
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
-    Metadata,
     Relation,
     RelationType,
     RuntimeInfo,
@@ -20,10 +21,10 @@ from agentclaw.community.core.task.task_context.task_graph_service import TaskGr
 
 
 def _ti(tid="p1"):
-    return TaskInfo(
+    return TaskInfo(task_id=tid,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=tid, title="t", instruction="i"),
-            context=Context(background="", extend_props={}),
+
+            context=Context(background="", extend_props={}, title="t"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")]),
         ),
         source_type="bot",
@@ -67,6 +68,25 @@ def test_claim_rejects_non_bbs_task():
         pass
 
 
+def test_relay_root_rejects_bbs_claim():
+    svc = TaskGraphService()
+    info = _ti("p-relay")
+    info.execution_config["orchestration_mode"] = "relay"
+    svc.initialize_graph(info)
+    svc.update_task_graph_info(
+        "p-relay", TaskGraphPatch(extend_props_patch={"bbs_mode": True})
+    )
+
+    with pytest.raises(TaskStateError, match="Relay root cannot be claimed"):
+        svc.claim_bbs_owner("p-relay", "botA", node_id="p-relay")
+
+    root = next(
+        node for node in svc._require_graph("p-relay").tasks
+        if node.node_id == "p-relay"
+    )
+    assert root.run_info.extend_props.get("bbs_owner") is None
+
+
 def test_claim_writes_owner_and_claim_at_on_root():
     """root.run_info.extend_props['bbs_owner'/'bbs_claim_at'] 被写入。"""
     import time as _time
@@ -92,8 +112,8 @@ def test_claim_preserves_existing_hung_subtrees():
         task_id="p7",
         status=Status.HUNG,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id="h1", title="hung", instruction="i"),
-            context=Context(background="", extend_props={}),
+
+            context=Context(background="", extend_props={}, title="hung"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")]),
         ),
         run_info=RuntimeInfo(),

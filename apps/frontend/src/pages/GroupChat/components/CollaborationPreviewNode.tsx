@@ -74,6 +74,8 @@ export function buildNodeAriaLabel(data: CollaborationGraphNodeData) {
     `预览节点 ${data.definition.node_id}`,
     ...(data.definition.execution ? [
       `Loop ${data.definition.execution.loop_id}`,
+      ...(data.definition.execution.loop_path ? [`路径 ${data.definition.execution.loop_path
+        .map((frame) => `${frame.loop_id} ${frame.iteration}/${frame.max_iterations}`).join(' → ')}`] : []),
       `逻辑节点 ${data.definition.execution.definition_node_id}`,
     ] : []),
     `类型 ${presentation.kindLabel}`,
@@ -99,6 +101,7 @@ export default function CollaborationNode({ data }: NodeProps<CollaborationFlowN
       aria-label={ariaLabel}
       data-loop-id={data.definition.execution?.loop_id}
       data-loop-iteration={data.definition.execution?.iteration}
+      data-loop-path={data.definition.execution?.loop_path?.map((frame) => frame.loop_id).join('/')}
       title={ariaLabel}
       onClick={handleSelect}
       onKeyDown={(event) => {

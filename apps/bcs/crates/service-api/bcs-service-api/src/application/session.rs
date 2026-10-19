@@ -273,6 +273,21 @@ pub trait SessionManagementService: Send + Sync {
         bot_uuid: &str,
     ) -> Result<Vec<String>, SessionUseCaseError>;
 
+    /// Whether any supplied Actor currently participates in a Session of this
+    /// Group. Empty input is false. Includes completed Sessions; does not grant
+    /// management rights. Implementations must batch lookups and propagate
+    /// persistence failures rather than reporting absence.
+    async fn has_group_session_participant(
+        &self,
+        _group_id: &str,
+        _actor_ids: &[String],
+    ) -> Result<bool, SessionUseCaseError> {
+        Err(SessionUseCaseError::Internal(ServiceError::InvalidOperation {
+            message: "Batch Session membership lookup is not configured".into(),
+            request_id: None,
+        }))
+    }
+
     /// Abort active StateMachine runs before deleting the Session.
     async fn delete(&self, session_id: &str) -> Result<bool, SessionUseCaseError>;
 

@@ -5,11 +5,68 @@ import type { DomainResult } from './identityService';
 
 const PAGE_SIZE = 100;
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
+
+function readString(...values: unknown[]): string | undefined {
+  const value = values.find((item) => typeof item === 'string' && item.trim());
+  return typeof value === 'string' ? value.trim() : undefined;
+}
+
+/** 与 managed Bot 目录一致：模板信息可能分布在顶层、engine_properties、template_config 或 bot_template_config。 */
+function readTemplateType(dto: CollaboratingBotDto): string | undefined {
+  const engineProperties = asRecord(dto.engine_properties);
+  const templateConfig = asRecord(engineProperties.template_config ?? dto.template_config);
+  return readString(
+    dto.template_type ?? undefined,
+    engineProperties.template_type,
+    templateConfig.template_type,
+    templateConfig.template_key,
+  );
+}
+
+/** 历史引擎按工坊契约归一模板副维度；例如 aicoding 缺省对应 personalCoding。 */
+function normalizeTemplateType(engine: string, templateType: string | undefined) {
+  if (templateType) return templateType;
+  const normalizedEngine = engine.trim().toLowerCase().replace(/[\s_-]/g, '');
+  if (normalizedEngine === 'aicoding') return 'personalCoding';
+  if (normalizedEngine === 'applicationcoding') return 'applicationCoding';
+  return undefined;
+}
+
+function readTemplateName(dto: CollaboratingBotDto, templateType: string | undefined): string | undefined {
+  const engineProperties = asRecord(dto.engine_properties);
+  const templateConfig = asRecord(engineProperties.template_config ?? dto.template_config);
+  const botTemplateConfig = asRecord(templateConfig.bot_template_config ?? dto.bot_template_config);
+  const name = readString(
+    dto.template_name,
+    engineProperties.template_name,
+    templateConfig.template_name,
+    botTemplateConfig.template_name,
+  );
+  if (name) return name;
+
+  const normalizedTemplateType = templateType?.toLowerCase().replace(/[\s_-]/g, '');
+  if (normalizedTemplateType === 'applicationcoding') return '应用 Bot';
+  if (normalizedTemplateType === 'personalcoding') return '个人 Coding Bot';
+  return undefined;
+}
+
 function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
   const realBotId = dto.bot_id.trim();
   const ownerId = dto.entity_id?.trim() || undefined;
   const botId = ownerId ? `${realBotId}:${ownerId}` : realBotId;
-  const runtime = resolveBotRuntime({ engine: dto.engine, botType: dto.bot_type, botId });
+  const declaredTemplateType = readTemplateType(dto);
+  const templateType = normalizeTemplateType(dto.engine, declaredTemplateType);
+  const templateName = readTemplateName(dto, templateType);
+  const runtime = resolveBotRuntime({
+    botId: realBotId,
+    engine: dto.engine,
+    botType: dto.bot_type,
+    templateType,
+    templateName,
+  });
   return {
     botId,
     realBotId,
@@ -22,6 +79,8 @@ function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
     reachability: 'reachable',
     chatable: Boolean(realBotId && ownerId),
     isAgentCodingBot: runtime.isAgentCodingBot,
+    templateType: runtime.templateType,
+    templateName: runtime.templateName,
   };
 }
 

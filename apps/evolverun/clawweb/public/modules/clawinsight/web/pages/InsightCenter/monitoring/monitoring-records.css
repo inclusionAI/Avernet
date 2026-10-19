@@ -677,6 +677,17 @@ to {
 .insight-monitoring .monitoring-empty { padding: 36px 20px; text-align: center; color: #647084; }
 @media (max-width: 650px) { .insight-monitoring .result-tabs { gap: 14px; } .insight-monitoring .record-title { font-size: 13px; } }
 .insight-monitoring .next-arrow { transform: rotate(180deg); }
+.insight-monitoring .recovery-task-links {
+  display:flex; flex-wrap:wrap; align-items:baseline; gap:10px 20px; padding:3px 0 16px; font-size:12px;
+}
+.insight-monitoring .recovery-task-label { color:var(--sub); white-space:nowrap; }
+.insight-monitoring .recovery-task-item { display:flex; align-items:center; gap:12px; }
+.insight-monitoring .recovery-task-item .health { font-weight:500; white-space:nowrap; }
+.insight-monitoring .recovery-task-item .health.running { color:var(--blue); }
+.insight-monitoring .recovery-task-link {
+  display:inline-flex; align-items:center; gap:4px; color:var(--blue); font-weight:500; white-space:nowrap;
+}
+.insight-monitoring .recovery-task-link:hover { text-decoration:underline; text-underline-offset:3px; }
 
 /* Keep summaries compact. Long labels use ellipsis; title and detail retain
    the full text without allowing it to cover the session time. */

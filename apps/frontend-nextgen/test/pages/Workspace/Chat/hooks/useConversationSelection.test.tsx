@@ -422,9 +422,20 @@ describe('useConversationSelection 视图数据推导', () => {
     expect(result.current.readonly.friend).toEqual({ userId: 'f9', displayName: '小明' });
     expect(result.current.readonly.session?.sessionId).toBe('os1');
 
-    // 清掉缓存后 friend/session 降级(bot 仍来自目录)→ 页渲染「请选择」空态,不崩。
-    seedStore({ sessionsByBotId: {} });
-    expect(result.current.readonly).toEqual({ bot: managedBot, friend: null, session: null });
+    // 清掉缓存(如 sessionKey 过滤重建)后由认领快照兜底:会话与好友资料仍可解析,bot 仍来自目录。
+    act(() => seedStore({ sessionsByBotId: {} }));
+    expect(result.current.readonly).toEqual({
+      bot: managedBot,
+      friend: { userId: 'f9', displayName: '小明' },
+      session: {
+        sessionId: 'os1',
+        botId: 'bot-a:1',
+        title: '他人会话',
+        messageCount: 0,
+        gmtModified: '',
+        gmtCreate: '',
+      },
+    });
   });
 
   it('selectReadonlySession:展开 Bot/好友并写入 others 选中', () => {
@@ -440,6 +451,116 @@ describe('useConversationSelection 视图数据推导', () => {
     expect(store.selectedOrigin).toBe('others');
     expect(store.selectedFriendUserId).toBe('f9');
     expect(store.selectedSessionId).toBe('os1');
+  });
+});
+
+describe('已打开主会话的保留快照(过滤把会话移出列表时仍驱动主舞台)', () => {
+  const rowOf = (botId: string, sessionId: string, title = sessionId) => ({
+    sessionId,
+    botId,
+    title,
+    messageCount: 0,
+    gmtCreate: '',
+    gmtModified: '',
+  });
+  const mineViewOf = (sessionId: string) => ({
+    botId: 'bot-a:1',
+    origin: 'mine' as const,
+    scope: 'all' as const,
+    sessions: { ...emptyList, items: [rowOf('bot-a:1', sessionId)] },
+    friendDirectory: { items: [], loading: false, error: null },
+    friendGroups: {},
+  });
+
+  it('mine:列表缓存被过滤删除后,快照继续驱动主会话;选中身份变化即失效', () => {
+    seedStore({
+      sessionsByBotId: { 'bot-a:1': mineViewOf('s1') },
+      selectedBotId: 'bot-a:1',
+      selectedSection: 'managed',
+      selectedOrigin: 'mine',
+      selectedScope: 'all',
+      selectedSessionId: 's1',
+    });
+    const { result } = renderHook(() =>
+      useConversationSelection({ managedBots: [managedView], friendBots: [], hydrated: false }),
+    );
+    expect(result.current.interactive.session?.sessionId).toBe('s1');
+
+    // setSessionKeyFilter 等过滤变化会删除列表缓存;中央认领在解析成功后已写快照,舞台保持打开。
+    expect(useConversationStore.getState().selectedSessionSnapshot?.session.sessionId).toBe('s1');
+    act(() => seedStore({ sessionsByBotId: {} }));
+    expect(result.current.interactive.session?.sessionId).toBe('s1');
+    // spec: 搜索只改变侧栏列表,不因结果为空而自动关闭已打开的主会话。
+    expect(result.current.interactive.bot?.botId).toBe('bot-a:1');
+
+    // 选中其他会话后快照身份失效,不得复活旧会话。
+    act(() =>
+      useConversationStore.getState().selectConversation({
+        botId: 'bot-a:1',
+        section: 'managed',
+        origin: 'mine',
+        scope: 'all',
+        friendUserId: null,
+        sessionId: 's2' as string | null,
+      }),
+    );
+    expect(useConversationStore.getState().selectedSessionSnapshot).toBeNull();
+    expect(result.current.interactive.session).toBeNull();
+  });
+
+  it('friend:好友列表被过滤删除后,快照继续驱动主会话', () => {
+    seedStore({
+      friendBotSessionsByBotId: { 'friend:2': { ...emptyList, items: [rowOf('friend:2', 'fs1')] } },
+      selectedBotId: 'friend:2',
+      selectedSection: 'friend',
+      selectedOrigin: 'mine',
+      selectedScope: 'all',
+      selectedSessionId: 'fs1',
+    });
+    const { result } = renderHook(() =>
+      useConversationSelection({ managedBots: [], friendBots: [friendView], hydrated: false }),
+    );
+    expect(result.current.interactive.session?.sessionId).toBe('fs1');
+
+    // 解析成功即中央认领;过滤删除好友列表缓存后主会话保持打开。
+    expect(useConversationStore.getState().selectedSessionSnapshot?.session.sessionId).toBe('fs1');
+    act(() => seedStore({ friendBotSessionsByBotId: {} }));
+    expect(result.current.interactive.session?.sessionId).toBe('fs1');
+  });
+
+  it('selectReadonlySession 写入快照;others 分组缓存被过滤删除后仍可解析只读会话与好友', () => {
+    seedStore({
+      sessionsByBotId: {
+        'bot-a:1': {
+          botId: 'bot-a:1',
+          origin: 'others',
+          scope: 'all',
+          sessions: emptyList,
+          friendDirectory: { items: [{ userId: 'f9', displayName: '小明' }], loading: false, error: null },
+          friendGroups: {
+            f9: {
+              friend: { userId: 'f9', displayName: '小明' },
+              state: 'loaded',
+              sessions: { ...emptyList, items: [rowOf('bot-a:1', 'os1', '他人会话')] },
+              expanded: true,
+            },
+          },
+        },
+      },
+    });
+    const { result } = renderHook(() =>
+      useConversationSelection({ managedBots: [managedView], friendBots: [], hydrated: false }),
+    );
+
+    act(() => result.current.selectReadonlySession('bot-a:1', 'os1', 'f9'));
+    expect(useConversationStore.getState().selectedSessionSnapshot?.session.sessionId).toBe('os1');
+    expect(result.current.readonly.session?.sessionId).toBe('os1');
+
+    // 过滤变化删除 others 缓存(目录+分组),只读舞台仍由快照提供会话与好友资料。
+    act(() => seedStore({ sessionsByBotId: {} }));
+    expect(result.current.readonly.session?.sessionId).toBe('os1');
+    expect(result.current.readonly.friend).toEqual({ userId: 'f9', displayName: '小明' });
+    expect(result.current.readonly.bot?.botId).toBe('bot-a:1');
   });
 });
 
@@ -515,4 +636,85 @@ it('团队目录晚到覆盖重复好友归类时，切到 team 请求上下文�
   expect(result.current.selection).toMatchObject({ section: 'team', botId: bot.botId, sessionId: 'old' });
   expect(result.current.interactive).toEqual({ bot: null, session: null });
   expect(useConversationStore.getState().originByManagedBotId[bot.botId] ?? 'mine').toBe('mine');
+});
+
+describe('无显式写点的选中由选择 Hook 中央认领快照', () => {
+  const rowOf = (botId: string, sessionId: string, title = sessionId) => ({
+    sessionId,
+    botId,
+    title,
+    messageCount: 0,
+    gmtCreate: '',
+    gmtModified: '',
+  });
+
+  it('mine:URL 深链解析出生的会话被认领,缓存被过滤删除后主会话仍保持', () => {
+    seedStore({
+      sessionsByBotId: {
+        'bot-a:1': {
+          botId: 'bot-a:1',
+          origin: 'mine',
+          scope: 'all',
+          sessions: { ...emptyList, items: [rowOf('bot-a:1', 's1')] },
+          friendDirectory: { items: [], loading: false, error: null },
+          friendGroups: {},
+        },
+      },
+    });
+    const { result } = renderHook(() =>
+      useConversationSelection({ managedBots: [managedView], friendBots: [], hydrated: false }),
+    );
+
+    // URL 入向只写选中,无显式写点;解析成功即认领。
+    act(() => result.current.onRouteSelection({ section: 'managed', botId: 'bot-a:1', sessionId: 's1' }));
+    expect(result.current.interactive.session?.sessionId).toBe('s1');
+    expect(useConversationStore.getState().selectedSessionSnapshot?.session.sessionId).toBe('s1');
+
+    // 过滤变化删除列表缓存后,已打开主会话仍由快照驱动。
+    act(() => seedStore({ sessionsByBotId: {} }));
+    expect(result.current.interactive.session?.sessionId).toBe('s1');
+  });
+
+  it('others:URL 深链解析出的只读会话与好友资料被认领,缓存被过滤删除后仍可解析', () => {
+    const { result } = renderHook(() =>
+      useConversationSelection({ managedBots: [managedView], friendBots: [], hydrated: false }),
+    );
+    act(() =>
+      result.current.onRouteSelection({
+        section: 'managed',
+        botId: 'bot-a:1',
+        origin: 'others',
+        friendUserId: 'f9',
+        sessionId: 'os1',
+      }),
+    );
+    act(() =>
+      seedStore({
+        sessionsByBotId: {
+          'bot-a:1': {
+            botId: 'bot-a:1',
+            origin: 'others',
+            scope: 'all',
+            sessions: emptyList,
+            friendDirectory: { items: [{ userId: 'f9', displayName: '小明' }], loading: false, error: null },
+            friendGroups: {
+              f9: {
+                friend: { userId: 'f9', displayName: '小明' },
+                state: 'loaded',
+                sessions: { ...emptyList, items: [rowOf('bot-a:1', 'os1', '他人会话')] },
+                expanded: true,
+              },
+            },
+          },
+        },
+      }),
+    );
+    expect(result.current.readonly.session?.sessionId).toBe('os1');
+    expect(useConversationStore.getState().selectedSessionSnapshot?.session.sessionId).toBe('os1');
+
+    // 过滤变化删除 others 缓存(目录+分组),只读舞台仍由快照提供会话与好友资料。
+    act(() => seedStore({ sessionsByBotId: {} }));
+    expect(result.current.readonly.session?.sessionId).toBe('os1');
+    expect(result.current.readonly.friend).toEqual({ userId: 'f9', displayName: '小明' });
+  });
 });

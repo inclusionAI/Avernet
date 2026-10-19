@@ -29,7 +29,7 @@
   ],
   "scripts": {
     "check": "tsc -p tsconfig.json --noEmit",
-    "build": "tsc -p tsconfig.json && mkdir -p dist/server/fixtures && cp -R server/fixtures/. dist/server/fixtures/ && cp web/pages/InsightCenter/monitoring/*.css dist/web/pages/InsightCenter/monitoring/",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/server/fixtures && cp -R server/fixtures/. dist/server/fixtures/ && cp web/pages/InsightCenter/monitoring/*.css dist/web/pages/InsightCenter/monitoring/ && cp web/pages/InsightCenter/monitoring/session-recovery/*.css dist/web/pages/InsightCenter/monitoring/session-recovery/",
     "test": "vitest run",
     "test:monitoring": "vitest run --config vitest.monitoring.config.ts",
     "monitoring:local": "node dist/server/services/monitoring/local-host.js",
@@ -54,6 +54,7 @@
     "react-router-dom": "^7.0.0"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
@@ -63,13 +64,12 @@
     "@types/node": "^24.12.3",
     "@types/react": "^19.2.14",
     "@vitejs/plugin-react": "^6.0.1",
+    "@vitest/coverage-v8": "3.2.7",
     "jsdom": "^27.0.1",
     "react": "^19.2.6",
     "react-router-dom": "^7.15.1",
+    "tailwindcss": "^4.3.0",
     "typescript": "~6.0.2",
-    "vitest": "3.2.7",
-    "@vitest/coverage-v8": "3.2.7",
-    "@tailwindcss/vite": "^4.3.0",
-    "tailwindcss": "^4.3.0"
+    "vitest": "3.2.7"
   }
 }

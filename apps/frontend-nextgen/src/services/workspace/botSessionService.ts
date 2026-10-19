@@ -1,5 +1,6 @@
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import type { IdentityView } from '@/domain/collaboration';
+import type { ConversationSessionRequestRange } from '@/domain/conversation/types';
 import { resolveOpenApiUserId } from '@/domain/userIdentity';
 import { listBots as listOwnedBotsApi, type OwnedBotDto } from '@/services/backendApi/bots/botController';
 import {
@@ -29,6 +30,8 @@ export interface ChatBotView {
   displayName: string;
   avatarUrl?: string;
   online: boolean;
+  /** bots 接口返回的原始状态(PENDING/ACTIVE/FAILED 等);视图侧对非可用态整行禁用,缺省视为可用。 */
+  status?: string;
   reachability?: 'reachable' | 'unreachable';
   chatable: boolean;
   engine?: string;
@@ -230,6 +233,7 @@ function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
     ownerId,
     displayName: dto.bot_name || dto.bot_id,
     online: dto.status === 'ACTIVE' || dto.status === 'online',
+    status: dto.status,
     reachability: 'reachable',
     chatable: COMPOUND_ID_RE.test(botId),
     engine: dto.engine_type ?? dto.engine,
@@ -277,13 +281,18 @@ export const botSessionService = {
     userId: string,
     page = 1,
     pageSize = BOT_SESSION_PAGE_SIZE,
+    sessionKey = '',
+    range?: ConversationSessionRequestRange,
   ): Promise<DomainResult<BotSessionPageView>> {
     try {
+      // session_key 原样透传(空条件省略),由 backendRequest 负责查询串编码。
       const params = withFriendBotRequestParams(bot, userId, {
         user_id: resolveUserId(userId),
         owner_id: bot.ownerId,
         page,
         page_size: pageSize,
+        ...(sessionKey ? { session_key: sessionKey } : {}),
+        ...(range ? { device_uuid: range.deviceUuid, ...(range.stage ? { stage: range.stage } : {}) } : {}),
       });
       const resp = await listBotSessions(bot.realBotId, params);
       const items = (resp.data?.items ?? []).map((s) => toSessionView(s, bot.botId));
@@ -406,6 +415,7 @@ export const botSessionService = {
     userId: string,
     page = 1,
     pageSize = BOT_SESSION_PAGE_SIZE,
+    range?: ConversationSessionRequestRange,
   ): Promise<DomainResult<BotSessionPageView>> {
     try {
       const params = withFriendBotRequestParams(bot, userId, {
@@ -413,6 +423,7 @@ export const botSessionService = {
         owner_id: bot.ownerId,
         page,
         page_size: pageSize,
+        ...(range ? { device_uuid: range.deviceUuid, ...(range.stage ? { stage: range.stage } : {}) } : {}),
       });
       const resp = await listFavoriteSessions(bot.realBotId, params);
       const items = (resp.data?.items ?? []).map((s) => toSessionView(s, bot.botId, true));

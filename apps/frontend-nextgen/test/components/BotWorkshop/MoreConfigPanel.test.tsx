@@ -24,4 +24,7 @@ test('引擎配置支持确认后恢复默认配置', async () => {
   await user.click(screen.getByRole('button', { name: '确认恢复' }));
 
   expect(onRestoreDefaults).toHaveBeenCalledTimes(1);
+  const editor = screen.getByLabelText('引擎 JSON 配置');
+  expect(editor).toHaveClass('bg-transparent', 'font-mono', 'text-background');
+  expect(editor.parentElement).toHaveClass('bg-foreground');
 });

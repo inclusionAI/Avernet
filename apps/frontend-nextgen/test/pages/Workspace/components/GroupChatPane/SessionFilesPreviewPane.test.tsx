@@ -4,7 +4,7 @@ import type { SessionFilePreviewState } from '@/pages/Workspace/hooks/useSession
 import { describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 function textPreview(overrides: Partial<SessionFilePreviewState> = {}): SessionFilePreviewState {
   return {
@@ -34,6 +34,21 @@ describe('SessionFilesPreviewPane（预览体渲染）', () => {
     expect(container.querySelector('strong')?.textContent).toBe('回归测试');
     // 源码标记不应原样出现。
     expect(screen.queryByText('# 部署手册')).not.toBeInTheDocument();
+  });
+
+  it('md 文本的原始 HTML 只显示为文本，事件属性不能进入 DOM', () => {
+    const { container } = render(
+      <PreviewPane
+        file={{ name: '不可信说明.md', size: 1024 }}
+        filesStateEmpty={false}
+        preview={textPreview({ text: '<script>alert(1)</script><img src=x onerror="alert(2)">' })}
+        onDownload={jest.fn()}
+        onBack={jest.fn()}
+      />,
+    );
+
+    expect(container.querySelector('script')).toBeNull();
+    expect(container.querySelector('img[onerror]')).toBeNull();
   });
 
   it('非 md 文本走等宽 pre 原文展示（txt/log/json 等）', () => {
@@ -128,5 +143,36 @@ describe('SessionFilesPreviewPane（预览体渲染）', () => {
     expect(iframe).toHaveAttribute('src', 'https://gw.example/page.html');
     expect(iframe).toHaveAttribute('sandbox', '');
     expect(screen.getByText('网页')).toBeInTheDocument();
+  });
+
+  it('引用按钮可选：传 onReference 渲染并透传，不传不渲染（群聊侧零影响）', () => {
+    const onReference = jest.fn();
+
+    // 不传 onReference（群聊 / 回归守护）：预览头无「引用」。
+    const { rerender } = render(
+      <PreviewPane
+        file={{ name: '说明文档.md', size: 1024 }}
+        filesStateEmpty={false}
+        preview={textPreview({ text: 'x' })}
+        onDownload={jest.fn()}
+        onBack={jest.fn()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: '引用' })).not.toBeInTheDocument();
+
+    // 传 onReference（单聊副屏）：渲染「引用」并透传点击。
+    rerender(
+      <PreviewPane
+        file={{ name: '说明文档.md', size: 1024 }}
+        filesStateEmpty={false}
+        preview={textPreview({ text: 'x' })}
+        onDownload={jest.fn()}
+        onReference={onReference}
+        onBack={jest.fn()}
+      />,
+    );
+    const refBtn = screen.getByRole('button', { name: '引用' });
+    fireEvent.click(refBtn);
+    expect(onReference).toHaveBeenCalledTimes(1);
   });
 });

@@ -102,6 +102,49 @@ pub(super) async fn ensure_sqlite_bot_internal_attributes(db: &dyn DbPlugin) -> 
     Ok(())
 }
 
+pub(super) async fn ensure_sqlite_group_context_supersede_columns(
+    db: &dyn DbPlugin,
+) -> DbResult<()> {
+    if !table_exists(db, "bcs_group_contexts").await? {
+        return Ok(());
+    }
+
+    let columns = sqlite_table_columns(db, "bcs_group_contexts").await?;
+    if !columns.iter().any(|column| column == "is_superseded") {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_group_contexts ADD COLUMN is_superseded INTEGER NOT NULL DEFAULT 0 CHECK (is_superseded IN (0, 1))",
+        ))
+        .await?;
+    }
+    if !columns.iter().any(|column| column == "gmt_superseded") {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_group_contexts ADD COLUMN gmt_superseded TEXT NULL",
+        ))
+        .await?;
+    }
+
+    db.execute(DbStatement::new(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uk_group_context_active_name_scope \
+         ON bcs_group_contexts(name, scope) \
+         WHERE is_superseded = 0",
+    ))
+    .await?;
+    db.execute(DbStatement::new(
+        "CREATE INDEX IF NOT EXISTS idx_group_context_name_scope_active \
+         ON bcs_group_contexts(name, scope, is_superseded) \
+         WHERE is_superseded = 0",
+    ))
+    .await?;
+    db.execute(DbStatement::new(
+        "CREATE INDEX IF NOT EXISTS idx_group_context_scope_active \
+         ON bcs_group_contexts(scope, is_superseded) \
+         WHERE is_superseded = 0",
+    ))
+    .await?;
+
+    Ok(())
+}
+
 pub(super) async fn ensure_sqlite_session_collected_column(db: &dyn DbPlugin) -> DbResult<()> {
     if !table_exists(db, "bcs_session_participants").await? {
         return Ok(());
@@ -181,24 +224,56 @@ pub(super) async fn add_sqlite_fixed_loop_runtime_schema(db: &dyn DbPlugin) -> D
     // This migration contains thirteen plain DDL statements, without routines or
     // semicolons in literals. Keep the column guards tied to their exact DDL.
     let statements = include_str!("../../../../../migrations/sqlite/029_fixed_loop_runtime.sql")
-        .split(';').map(str::trim).filter(|sql| !sql.is_empty()).collect::<Vec<_>>();
-    let [plan, hash, compiler, failure_action, phase, owner, token, lease_until, progression, session_recovery, checkpoints, checkpoint_index, terminal_im_index] = statements.as_slice() else {
-        return Err(DbError::InvalidInput("unexpected fixed Loop migration statements".into()));
+        .split(';')
+        .map(str::trim)
+        .filter(|sql| !sql.is_empty())
+        .collect::<Vec<_>>();
+    let [
+        plan,
+        hash,
+        compiler,
+        failure_action,
+        phase,
+        owner,
+        token,
+        lease_until,
+        progression,
+        session_recovery,
+        checkpoints,
+        checkpoint_index,
+        terminal_im_index,
+    ] = statements.as_slice()
+    else {
+        return Err(DbError::InvalidInput(
+            "unexpected fixed Loop migration statements".into(),
+        ));
     };
     for (table, additions) in [
-        ("bcs_state_machine_definition_snapshots", vec![
-            ("execution_plan_json", *plan),
-            ("execution_plan_content_hash", *hash),
-            ("execution_plan_compiler_version", *compiler),
-        ]),
-        ("bcs_state_machine_node_runs", vec![("failure_action", *failure_action),
-            ("runtime_phase", *phase), ("recovery_lease_owner", *owner),
-            ("recovery_lease_token", *token), ("recovery_lease_until_ms", *lease_until)]),
+        (
+            "bcs_state_machine_definition_snapshots",
+            vec![
+                ("execution_plan_json", *plan),
+                ("execution_plan_content_hash", *hash),
+                ("execution_plan_compiler_version", *compiler),
+            ],
+        ),
+        (
+            "bcs_state_machine_node_runs",
+            vec![
+                ("failure_action", *failure_action),
+                ("runtime_phase", *phase),
+                ("recovery_lease_owner", *owner),
+                ("recovery_lease_token", *token),
+                ("recovery_lease_until_ms", *lease_until),
+            ],
+        ),
     ] {
         let columns = sqlite_table_columns(db, table).await?;
         for (column, sql) in additions {
             if !sql.starts_with(&format!("ALTER TABLE {table} ADD COLUMN {column} ")) {
-                return Err(DbError::InvalidInput(format!("unexpected fixed Loop DDL for {table}.{column}")));
+                return Err(DbError::InvalidInput(format!(
+                    "unexpected fixed Loop DDL for {table}.{column}"
+                )));
             }
             if !columns.iter().any(|existing| existing == column) {
                 db.execute(DbStatement::new(sql)).await?;
@@ -206,7 +281,13 @@ pub(super) async fn add_sqlite_fixed_loop_runtime_schema(db: &dyn DbPlugin) -> D
         }
     }
     // CREATE INDEX IF NOT EXISTS also resumes after an unrecorded partial apply.
-    for sql in [*progression, *session_recovery, *checkpoints, *checkpoint_index, *terminal_im_index] {
+    for sql in [
+        *progression,
+        *session_recovery,
+        *checkpoints,
+        *checkpoint_index,
+        *terminal_im_index,
+    ] {
         db.execute(DbStatement::new(sql)).await?;
     }
     Ok(())
@@ -326,7 +407,9 @@ pub(super) async fn add_sqlite_one_shot_opening_message_override_schema(
     Ok(())
 }
 
-pub(super) async fn add_sqlite_state_machine_rerun_lineage_schema(db: &dyn DbPlugin) -> DbResult<()> {
+pub(super) async fn add_sqlite_state_machine_rerun_lineage_schema(
+    db: &dyn DbPlugin,
+) -> DbResult<()> {
     if !table_exists(db, "bcs_state_machine_runs").await? {
         return Ok(());
     }
@@ -451,7 +534,9 @@ pub(super) async fn add_sqlite_group_participant_tags_schema(db: &dyn DbPlugin) 
     Ok(())
 }
 
-pub(super) async fn add_sqlite_human_input_output_metadata_schema(db: &dyn DbPlugin) -> DbResult<()> {
+pub(super) async fn add_sqlite_human_input_output_metadata_schema(
+    db: &dyn DbPlugin,
+) -> DbResult<()> {
     if table_exists(db, "bcs_state_machine_node_runs").await? {
         let columns = sqlite_table_columns(db, "bcs_state_machine_node_runs").await?;
         let additions = [
@@ -479,27 +564,90 @@ pub(super) async fn add_sqlite_edge_permission_schema(db: &dyn DbPlugin) -> DbRe
         (
             "edge_grants",
             "CREATE TABLE IF NOT EXISTS edge_grants (id INTEGER PRIMARY KEY AUTOINCREMENT, env TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, grant_kind TEXT NOT NULL, grant_ref_id INTEGER NOT NULL, rules TEXT, status TEXT NOT NULL DEFAULT 'approved', originator_policy_type TEXT NOT NULL DEFAULT 'any', originator_policy_data TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-            &["id", "env", "from_id", "to_id", "grant_kind", "grant_ref_id", "rules", "status", "originator_policy_type", "originator_policy_data"],
+            &[
+                "id",
+                "env",
+                "from_id",
+                "to_id",
+                "grant_kind",
+                "grant_ref_id",
+                "rules",
+                "status",
+                "originator_policy_type",
+                "originator_policy_data",
+            ],
         ),
         (
             "permission_profiles",
             "CREATE TABLE IF NOT EXISTS permission_profiles (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id TEXT NOT NULL, env TEXT NOT NULL, name TEXT NOT NULL DEFAULT 'default', description TEXT, rules_template TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1, digest TEXT NOT NULL, is_default INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active', created_by TEXT NOT NULL, updated_by TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-            &["id", "bot_id", "env", "name", "description", "rules_template", "revision", "digest", "is_default", "status", "created_by", "updated_by"],
+            &[
+                "id",
+                "bot_id",
+                "env",
+                "name",
+                "description",
+                "rules_template",
+                "revision",
+                "digest",
+                "is_default",
+                "status",
+                "created_by",
+                "updated_by",
+            ],
         ),
         (
             "permission_requests",
             "CREATE TABLE IF NOT EXISTS permission_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT NOT NULL, edge_id INTEGER, env TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, request_kind TEXT NOT NULL, requested_ref_id INTEGER, requested_rules TEXT, message TEXT, status TEXT NOT NULL DEFAULT 'pending', decision_reason TEXT, created_by TEXT NOT NULL, decided_by TEXT, decided_at TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-            &["id", "request_id", "edge_id", "env", "from_id", "to_id", "request_kind", "requested_ref_id", "requested_rules", "message", "status", "decision_reason", "created_by", "decided_by", "decided_at"],
+            &[
+                "id",
+                "request_id",
+                "edge_id",
+                "env",
+                "from_id",
+                "to_id",
+                "request_kind",
+                "requested_ref_id",
+                "requested_rules",
+                "message",
+                "status",
+                "decision_reason",
+                "created_by",
+                "decided_by",
+                "decided_at",
+            ],
         ),
         (
             "capabilities",
             "CREATE TABLE IF NOT EXISTS capabilities (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id TEXT NOT NULL, env TEXT NOT NULL, tool TEXT NOT NULL, operation TEXT, specifier_schema TEXT, source TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', raw_metadata TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-            &["id", "bot_id", "env", "tool", "operation", "specifier_schema", "source", "status", "raw_metadata"],
+            &[
+                "id",
+                "bot_id",
+                "env",
+                "tool",
+                "operation",
+                "specifier_schema",
+                "source",
+                "status",
+                "raw_metadata",
+            ],
         ),
         (
             "authz_decision_logs",
             "CREATE TABLE IF NOT EXISTS authz_decision_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, env TEXT NOT NULL, task_id TEXT, run_id TEXT, from_id TEXT NOT NULL, to_id TEXT NOT NULL, originator TEXT, context_type TEXT NOT NULL, decision TEXT NOT NULL, reason_code TEXT NOT NULL, grant_refs TEXT NOT NULL, context_json TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-            &["id", "env", "task_id", "run_id", "from_id", "to_id", "originator", "context_type", "decision", "reason_code", "grant_refs", "context_json"],
+            &[
+                "id",
+                "env",
+                "task_id",
+                "run_id",
+                "from_id",
+                "to_id",
+                "originator",
+                "context_type",
+                "decision",
+                "reason_code",
+                "grant_refs",
+                "context_json",
+            ],
         ),
     ];
     for (_, create_sql, _) in EDGE_TABLES {

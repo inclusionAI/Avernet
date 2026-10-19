@@ -1,7 +1,7 @@
 //! Transport-independent engine execution and bounded typed event retention.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -17,6 +17,8 @@ use crate::engine::trace::TraceContext;
 use crate::sse;
 use crate::runtime::{AppState, DownstreamRequest};
 use crate::config::BotConfig;
+use crate::run_buffer::{RunEventBuffer, retained_event_size, MAX_RETAINED_BYTES, MAX_RETAINED_EVENTS};
+pub use crate::run_buffer::{DeliveryCursorError, RetentionMode, RetentionStats};
 
 /// Grace TTL for a terminal run's buffered frames before lazy sweep removes the
 /// entry (lets a late re-send replay the terminal state).
@@ -28,7 +30,7 @@ const TERMINAL_GRACE: Duration = Duration::from_secs(300);
 const TERMINAL_POLL: Duration = Duration::from_millis(25);
 
 /// Result of attempting to push one frame into the run's buffer+broadcast.
-enum PushOutcome {
+pub(crate) enum PushOutcome {
     /// Frame accepted; loop continues.
     Ok,
     /// Broadcast had no subscribers: BCS disconnected → abort + close.
@@ -45,9 +47,6 @@ pub struct RunEvent {
     pub ts: u64,
     pub event: StreamEvent,
 }
-
-const MAX_RETAINED_BYTES: usize = 32 * 1024 * 1024;
-const MAX_RETAINED_EVENTS: usize = 8192;
 
 /// One active or terminal run's shared state: abort token, broadcast sender,
 /// replay buffer, terminal flag, and the idempotency fingerprint.
@@ -70,16 +69,18 @@ const MAX_RETAINED_EVENTS: usize = 8192;
 pub struct RunHandle {
     pub run_id: String,
     pub abort: CancellationToken,
-    upstream: Arc<AtomicBool>,
+    retention_mode: RetentionMode,
     /// Whether the plugin transport this run reports through can uplink V3
-    /// interaction events. Only read together with `upstream` (gateway runs
+    /// interaction events. Only read together with the retention mode (gateway runs
     /// fall back to the gateway SSE encoder, which supports interactions).
     interaction_uplink: Arc<AtomicBool>,
     delivery_pinned: Arc<AtomicBool>,
     delivery_released_at: Arc<Mutex<Option<Instant>>>,
-    retained_bytes: Arc<AtomicUsize>,
+    /// Set when the retention byte/event budget first fires inside this run:
+    /// guards a one-shot WARN so overflow no longer vanishes silently.
+    overflow_warned: Arc<AtomicBool>,
     pub tx: broadcast::Sender<RunEvent>,
-    pub buffer: Arc<Mutex<Vec<RunEvent>>>,
+    buffer: Arc<Mutex<RunEventBuffer>>,
     pub terminal: Arc<AtomicBool>,
     abort_requested: Arc<AtomicBool>,
     /// `stopReason` to surface in the terminal `chat_aborted` SSE frame. Set by
@@ -91,25 +92,49 @@ pub struct RunHandle {
 }
 
 impl RunHandle {
+    /// Snapshot of currently retained records; Plugin consumption uses the checked cursor API.
     pub fn snapshot_after(&self, seq: u64) -> Vec<RunEvent> {
-        self.buffer.lock().unwrap_or_else(|p| p.into_inner()).iter()
-            .filter(|event| event.seq > seq).cloned().collect()
+        self.buffer.lock().unwrap_or_else(|p| p.into_inner()).snapshot_after(seq)
     }
 
-    /// Clone only the next retained record for a delivery cursor.
-    pub fn next_after(&self, seq: u64) -> Option<RunEvent> {
-        self.buffer.lock().unwrap_or_else(|p| p.into_inner()).iter()
-            .find(|event| event.seq > seq).cloned()
+    pub fn retention_mode(&self) -> RetentionMode { self.retention_mode }
+
+    pub fn retention_stats(&self) -> RetentionStats {
+        self.buffer.lock().unwrap_or_else(|p| p.into_inner()).stats()
     }
+
+    /// Clone only the next retained record; never silently skip a reclaimed prefix.
+    pub fn next_after(&self, seq: u64) -> Result<Option<RunEvent>, DeliveryCursorError> {
+        let buffer = self.buffer.lock().unwrap_or_else(|p| p.into_inner());
+        let committed_through = buffer.stats().delivery_cursor;
+        if self.is_upstream() && seq > committed_through {
+            return Err(DeliveryCursorError::Uncommitted {cursor:seq, committed_through});
+        }
+        buffer.next_after(seq)
+    }
+
+    /// Commit one locally consumed Plugin record, not a server-persistence ACK.
+    pub fn commit_delivery_through(&self, seq: u64) -> Result<(), DeliveryCursorError> {
+        if self.retention_mode != RetentionMode::PluginPending {
+            return Err(DeliveryCursorError::WrongMode);
+        }
+        self.buffer.lock().unwrap_or_else(|p| p.into_inner()).commit_delivery_through(seq)
+    }
+
+    fn is_upstream(&self) -> bool { self.retention_mode == RetentionMode::PluginPending }
 
     pub fn release_delivery(&self) {
-        if !self.upstream.load(Ordering::SeqCst) || !self.is_terminal() { return; }
+        if !self.is_upstream() || !self.is_terminal() { return; }
         let mut released_at = self.delivery_released_at.lock().unwrap_or_else(|p| p.into_inner());
         if released_at.is_some() { return; }
         let mut buffer = self.buffer.lock().unwrap_or_else(|p| p.into_inner());
+        let stats = buffer.stats();
+        tracing::debug!(run = %self.run_id, retention_mode = self.retention_mode.label(),
+            delivery_cursor = stats.delivery_cursor, last_emitted_seq = stats.last_emitted_seq,
+            retained_events = stats.retained_events, retained_bytes = stats.retained_bytes,
+            peak_retained_events = stats.peak_retained_events, peak_retained_bytes = stats.peak_retained_bytes,
+            "releasing terminal run delivery; discarding any remaining records");
         buffer.clear();
-        buffer.shrink_to_fit();
-        self.retained_bytes.store(0, Ordering::SeqCst);
         // A long offline run gets a full tombstone grace period after delivery.
         // Repeated releases must not renew that period indefinitely.
         *released_at = Some(Instant::now());
@@ -117,20 +142,15 @@ impl RunHandle {
     }
 
     fn cancel_if_gateway_disconnected(&self) {
-        if !self.upstream.load(Ordering::SeqCst) && self.tx.receiver_count() == 0 {
+        if !self.is_upstream() && self.tx.receiver_count() == 0 {
             self.abort.cancel();
         }
-    }
-
-    pub(crate) fn set_upstream(&self, upstream: bool) {
-        self.upstream.store(upstream, Ordering::SeqCst);
-        self.delivery_pinned.store(upstream, Ordering::SeqCst);
     }
 
     /// Whether the plugin transport this run reports through can uplink V3
     /// interaction events. Gateway runs keep the default (true for behavior):
     /// the gateway encoder always supports interaction frames, so the flag is
-    /// only meaningful together with `set_upstream(true)`.
+    /// only meaningful for `RetentionMode::PluginPending`.
     pub(crate) fn set_interaction_uplink(&self, supported: bool) {
         self.interaction_uplink.store(supported, Ordering::SeqCst);
     }
@@ -252,6 +272,11 @@ impl RunRegistry {
     /// marks "same id already present" (re-attach / terminal-replay / conflict
     /// decision belongs to the caller, which compares [`RunHandle::matches`]).
     pub fn begin(&self, run_id: &str, fingerprint: String) -> (RunHandle, bool) {
+        self.begin_with_mode(run_id, fingerprint, RetentionMode::GatewayReplay)
+    }
+
+    /// Fix retention policy before publishing the handle or spawning the driver.
+    pub fn begin_with_mode(&self, run_id: &str, fingerprint: String, retention_mode: RetentionMode) -> (RunHandle, bool) {
         let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         Self::sweep_locked(&mut inner);
         if let Some(entry) = inner.map.get(run_id) {
@@ -260,14 +285,14 @@ impl RunRegistry {
         let (tx, _rx) = broadcast::channel::<RunEvent>(256);
         let handle = RunHandle {
             run_id: run_id.to_string(),
-            upstream: Arc::new(AtomicBool::new(false)),
+            retention_mode,
             interaction_uplink: Arc::new(AtomicBool::new(false)),
-            delivery_pinned: Arc::new(AtomicBool::new(false)),
+            delivery_pinned: Arc::new(AtomicBool::new(retention_mode == RetentionMode::PluginPending)),
             delivery_released_at: Arc::new(Mutex::new(None)),
-            retained_bytes: Arc::new(AtomicUsize::new(0)),
+            overflow_warned: Arc::new(AtomicBool::new(false)),
             abort: CancellationToken::new(),
             tx,
-            buffer: Arc::new(Mutex::new(Vec::new())),
+            buffer: Arc::new(Mutex::new(RunEventBuffer::default())),
             terminal: Arc::new(AtomicBool::new(false)),
             abort_requested: Arc::new(AtomicBool::new(false)),
             abort_reason: Arc::new(Mutex::new("user_cancelled".to_string())),
@@ -287,6 +312,12 @@ impl RunRegistry {
         if let Some(entry) = inner.map.get_mut(run_id) {
             entry.handle.terminal.store(true, Ordering::SeqCst);
             entry.finished_at = Some(Instant::now());
+            let stats = entry.handle.retention_stats();
+            tracing::debug!(run = %run_id, retention_mode = entry.handle.retention_mode.label(),
+                last_emitted_seq = stats.last_emitted_seq, delivery_cursor = stats.delivery_cursor,
+                retained_events = stats.retained_events, retained_bytes = stats.retained_bytes,
+                peak_retained_events = stats.peak_retained_events, peak_retained_bytes = stats.peak_retained_bytes,
+                "run cleanup complete; pending delivery may continue");
         }
     }
 
@@ -527,7 +558,7 @@ async fn run_driver(
                         break;
                     }
                     Some(StreamEvent::Interaction(interaction))
-                        if handle.upstream.load(Ordering::SeqCst)
+                        if handle.is_upstream()
                             && !handle.interaction_uplink()
                             && interaction.phase == bcs_protocol::stream::InteractionPhase::Requested => {
                         state.interactions.invalidate_run(&run_id, json!({ "decision": "deny" }));
@@ -648,76 +679,76 @@ async fn run_driver(
     state.runs.finish(&run_id);
 }
 
-/// Count serialized bytes without allocating another copy of a large payload.
-fn serialized_size<T: serde::Serialize>(value: &T) -> Result<usize, serde_json::Error> {
-    struct Counter(usize);
-    impl std::io::Write for Counter {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0 = self.0.saturating_add(bytes.len());
-            Ok(bytes.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
-    }
-    let mut counter = Counter(0);
-    serde_json::to_writer(&mut counter, value)?;
-    Ok(counter.0)
-}
-
-/// Account for all typed fields and raw snapshots, independent of any wire format.
-fn retained_event_size(event: &StreamEvent) -> Result<usize, serde_json::Error> {
-    use bcs_protocol::stream::AgentData;
-    let size = match event {
-        StreamEvent::Chat(c) => serialized_size(&(&c.run_id, c.seq, c.ts, &c.state, &c.session_id,
-            &c.content, &c.delta_text, &c.stop_reason, &c.error_message, &c.error_kind, &c.error_code, &c.message, &c.raw))?,
-        StreamEvent::Agent(a) => {
-            let metadata = serialized_size(&(&a.run_id, a.seq, a.ts, &a.session_id, &a.raw))?;
-            metadata + match &a.data {
-                AgentData::Tool(data) => serialized_size(data)?,
-                AgentData::Thinking(data) => serialized_size(data)?,
-                AgentData::Approval(data) => serialized_size(data)?,
-                AgentData::Lifecycle(data) => serialized_size(data)?,
-                AgentData::Phase(data) => serialized_size(data)?,
-                AgentData::Unknown { stream, raw } => serialized_size(&(stream, raw))?,
-                AgentData::Assistant { raw } | AgentData::Error { raw } => serialized_size(raw)?,
-            }
-        }
-        StreamEvent::Interaction(i) => serialized_size(&(&i.run_id, i.seq, i.ts, &i.session_id,
-            &i.phase, &i.interaction_id, &i.kind, &i.raw))?,
-        StreamEvent::Unknown { event, raw } => serialized_size(&(event, raw))?,
-        StreamEvent::Ping { ts } => serialized_size(ts)?,
-    };
-    Ok(size + size_of::<RunEvent>())
-}
-
 /// Retain a typed event; reserve one bounded terminal error beyond the budget.
-fn push_frame(
+pub(crate) fn push_frame(
     handle: &RunHandle,
     seq: &mut u64,
     run_id: &str,
     ev: &StreamEvent,
     trace: Option<&TraceContext>,
 ) -> PushOutcome {
-    *seq += 1;
-    let ts = now_ms();
     let size = retained_event_size(ev).map(|size| size.saturating_add(run_id.len()));
     let mut buffer = handle.buffer.lock().unwrap_or_else(|p| p.into_inner());
-    let failure = match size {
-        Ok(size) if buffer.len() >= MAX_RETAINED_EVENTS || handle.retained_bytes.load(Ordering::SeqCst).saturating_add(size) > MAX_RETAINED_BYTES => Some(("run event retention limit exceeded", "buffer_overflow")),
-        Ok(size) => { handle.retained_bytes.fetch_add(size, Ordering::SeqCst); None }
-        Err(_) => Some(("event serialization failed", "runtime_error")),
+    // A failed retention attempt reserves exactly one terminal record, even if a
+    // caller accidentally tries to push again while engine cancellation propagates.
+    if buffer.failure_retained() { return PushOutcome::Terminate; }
+    *seq += 1;
+    let ts = now_ms();
+    let stats = buffer.stats();
+    let mut accounted_bytes = 0;
+    let failure: Option<(String, &'static str)> = match size {
+        Ok(size) => match buffer.limit_reason(size) {
+            Some(reason) => {
+                let overdue_bytes = stats.retained_bytes.saturating_add(size).saturating_sub(MAX_RETAINED_BYTES);
+                if !handle.overflow_warned.swap(true, Ordering::SeqCst) {
+                    tracing::warn!(target: "bcs_bridge_core::run",
+                        run = %run_id, retention_mode = handle.retention_mode.label(), limit_reason = reason,
+                        buffer_events = stats.retained_events, retained_bytes = stats.retained_bytes,
+                        delivery_cursor = stats.delivery_cursor, last_emitted_seq = stats.last_emitted_seq,
+                        next_event_bytes = size,
+                        "run event retention budget exceeded before terminal error; aborting the run");
+                }
+                Some((format!(
+                    "run event retention limit exceeded (limits: MAX_RETAINED_BYTES={MAX_RETAINED_BYTES}, \
+                     MAX_RETAINED_EVENTS={MAX_RETAINED_EVENTS}; before this event: {bytes} bytes in \
+                     {events} records, next event {size} bytes, projected overage {overdue_bytes} bytes; \
+                     retention_mode={mode}, limit_reason={reason}, delivery_cursor={cursor}, last_emitted_seq={last})",
+                    bytes = stats.retained_bytes, events = stats.retained_events,
+                    mode = handle.retention_mode.label(), cursor = stats.delivery_cursor, last = stats.last_emitted_seq), "buffer_overflow"))
+            }
+            None => { accounted_bytes = size; None }
+        },
+        Err(_) => Some(("event serialization failed".to_string(), "runtime_error")),
     };
-    let event = match failure {
+    let event = match &failure {
+        Some((message, kind)) if *kind == "buffer_overflow" => {
+            let mut failed = sse::chat_error(run_id, message, Some(kind));
+            if let StreamEvent::Chat(chat) = &mut failed { chat.stop_reason = Some("buffer_overflow".into()); }
+            failed
+        }
         Some((message, kind)) => sse::chat_error(run_id, message, Some(kind)),
         None => ev.clone(),
     };
+    if failure.is_some() {
+        // The bounded replacement must be accounted too: otherwise reclaiming it
+        // could underflow after normal records have all been consumed.
+        match retained_event_size(&event) {
+            Ok(size) => accounted_bytes = size.saturating_add(run_id.len()),
+            Err(error) => {
+                tracing::error!(%run_id, %error, "cannot account terminal retention error");
+                handle.abort.cancel();
+                return PushOutcome::Terminate;
+            }
+        }
+    }
     if let Some(trace) = trace { trace.record_converted(&event, *seq); }
     let record = RunEvent { run_id: run_id.to_string(), seq: *seq, ts, event };
-    buffer.push(record.clone());
+    buffer.append(record.clone(), accounted_bytes, failure.is_some());
     let sent = handle.tx.send(record).is_ok();
     if failure.is_some() {
         handle.abort.cancel();
         PushOutcome::Terminate
-    } else if sent || handle.upstream.load(Ordering::SeqCst) {
+    } else if sent || handle.is_upstream() {
         PushOutcome::Ok
     } else {
         PushOutcome::Disconnect
@@ -726,7 +757,8 @@ fn push_frame(
 
 /// Subscribe synchronously before spawning an engine. Replay also repairs a
 /// lagging broadcast receiver from the retained records without sequence gaps.
-pub fn forward_stream(handle: RunHandle) -> impl Stream<Item = RunEvent> + Send + 'static {
+pub fn forward_stream(handle: RunHandle) -> Result<impl Stream<Item = RunEvent> + Send + 'static, DeliveryCursorError> {
+    if handle.is_upstream() { return Err(DeliveryCursorError::WrongMode); }
     let (tx, rx) = mpsc::channel::<RunEvent>(64);
     let mut subscriber = {
         let _buffer = handle.buffer.lock().unwrap_or_else(|p| p.into_inner());
@@ -750,7 +782,7 @@ pub fn forward_stream(handle: RunHandle) -> impl Stream<Item = RunEvent> + Send 
             }
         }
     });
-    tokio_stream::wrappers::ReceiverStream::new(rx)
+    Ok(tokio_stream::wrappers::ReceiverStream::new(rx))
 }
 
 /// The caller must create its subscription before spawning the engine.
@@ -767,299 +799,5 @@ pub fn spawn_run(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn delivered_large_request_keeps_only_fixed_size_fingerprint() {
-        let req: DownstreamRequest = serde_json::from_value(json!({
-            "id": "large-request", "method": "chat.send", "session_id": "session",
-            "to_bot": {"provider_id": "provider", "provider_bot_ref": "worker"},
-            "message": {"content": [{"type": "text", "text": "x".repeat(8 * 1024 * 1024)}]}
-        })).unwrap();
-        let fingerprint = body_fingerprint(&req, "session");
-        let registry = RunRegistry::new();
-        let (handle, _) = registry.begin(&req.id, fingerprint.clone());
-        handle.set_upstream(true);
-        registry.finish(&req.id);
-        handle.release_delivery();
-        assert_eq!(handle.fp.len(), 64, "tombstones must not retain request text");
-        let (same, is_new) = registry.begin(&req.id, body_fingerprint(&req, "session"));
-        assert!(!is_new);
-        assert!(same.matches(&fingerprint));
-        let mut changed = req;
-        changed.message = Some(json!({"content": [{"type": "text", "text": "changed"}]}));
-        assert!(!same.matches(&body_fingerprint(&changed, "session")));
-    }
-
-    #[test]
-    fn delivered_upstream_keeps_tombstone_but_releases_payloads() {
-        let registry = RunRegistry::new();
-        let (handle, _) = registry.begin("delivered", "fp".into());
-        handle.set_upstream(true);
-        let mut seq = 0;
-        push_frame(&handle, &mut seq, "delivered", &sse::chat_delta("delivered", "payload"), None);
-        handle.release_delivery();
-        assert!(handle.delivery_pinned.load(Ordering::SeqCst), "active delivery cannot be released");
-        assert_eq!(handle.snapshot_after(0).len(), 1);
-        registry.finish("delivered");
-        handle.release_delivery();
-        assert!(handle.snapshot_after(0).is_empty());
-        assert_eq!(handle.retained_bytes.load(Ordering::SeqCst), 0);
-        let (repeated, is_new) = registry.begin("delivered", "fp".into());
-        assert!(!is_new, "a duplicate must not launch a new engine");
-        assert!(repeated.is_terminal());
-        assert!(repeated.matches("fp"));
-    }
-
-    #[tokio::test]
-    async fn dropping_idle_gateway_subscription_cancels_promptly() {
-        let registry = RunRegistry::new();
-        let (handle, _) = registry.begin("idle", "fp".into());
-        drop(forward_stream(handle.clone()));
-        tokio::time::timeout(Duration::from_millis(200), handle.abort.cancelled()).await.unwrap();
-    }
-
-    #[test]
-    fn runtime_retains_events_without_gateway_wire_support() {
-        let registry = RunRegistry::new();
-        let (handle, _) = registry.begin("opaque", "fp".into());
-        handle.set_upstream(true);
-        let mut seq = 0;
-        let event = StreamEvent::Unknown { event: "opaque".into(), raw: json!({"x": 7}) };
-        assert!(matches!(push_frame(&handle, &mut seq, "opaque", &event, None), PushOutcome::Ok));
-        assert!(matches!(handle.next_after(0).unwrap().event, StreamEvent::Unknown { .. }));
-    }
-
-    #[test]
-    fn retention_budget_counts_raw_event_payloads() {
-        let registry = RunRegistry::new();
-        let (handle, _) = registry.begin("raw-budget", "fp".into());
-        handle.set_upstream(true);
-        let mut seq = 0;
-        let mut event = sse::chat_delta("raw-budget", "small wire delta");
-        if let StreamEvent::Chat(chat) = &mut event { chat.raw = json!({"trace": "x".repeat(7 * 1024 * 1024)}); }
-        for _ in 0..4 {
-            assert!(matches!(push_frame(&handle, &mut seq, "raw-budget", &event, None), PushOutcome::Ok));
-        }
-        assert!(matches!(push_frame(&handle, &mut seq, "raw-budget", &event, None), PushOutcome::Terminate));
-        assert!(matches!(&handle.snapshot_after(4)[0].event, StreamEvent::Chat(chat) if chat.error_kind.as_deref() == Some("buffer_overflow")));
-    }
-
-    #[test]
-    fn upstream_without_receivers_retains_until_delivery_released() {
-        let registry = RunRegistry::new();
-        let (handle, _) = registry.begin("offline", "fp".into());
-        handle.set_upstream(true);
-        let mut seq = 0;
-        assert!(matches!(push_frame(&handle, &mut seq, "offline", &sse::chat_final("offline", "done".into()), None), PushOutcome::Ok));
-        registry.finish("offline");
-        registry.inner.lock().unwrap().map.get_mut("offline").unwrap().finished_at = Some(Instant::now() - TERMINAL_GRACE - Duration::from_secs(1));
-        assert!(registry.get("offline").is_some());
-        assert_eq!(handle.snapshot_after(0).len(), 1);
-        handle.release_delivery();
-        assert!(registry.get("offline").is_some(), "delivery starts a fresh tombstone grace period");
-        let (_, is_new) = registry.begin("offline", "fp".into());
-        assert!(!is_new, "late offline delivery must not permit re-execution");
-        let expired = Instant::now() - TERMINAL_GRACE - Duration::from_secs(1);
-        *handle.delivery_released_at.lock().unwrap() = Some(expired);
-        handle.release_delivery();
-        assert_eq!(*handle.delivery_released_at.lock().unwrap(), Some(expired), "release is idempotent");
-        assert!(registry.get("offline").is_none(), "delivered tombstone expires after its delivery grace");
-    }
-
-    #[test]
-    fn retention_count_overflow_keeps_terminal_error_and_cancels() {
-        let registry = RunRegistry::new();
-        let (handle, _) = registry.begin("overflow", "fp".into());
-        handle.set_upstream(true);
-        let mut seq = 0;
-        for _ in 0..MAX_RETAINED_EVENTS {
-            assert!(matches!(push_frame(&handle, &mut seq, "overflow", &sse::chat_delta("overflow", "x"), None), PushOutcome::Ok));
-        }
-        assert!(matches!(push_frame(&handle, &mut seq, "overflow", &sse::chat_delta("overflow", "x"), None), PushOutcome::Terminate));
-        assert!(handle.abort.is_cancelled());
-        let events = handle.snapshot_after(MAX_RETAINED_EVENTS as u64);
-        assert_eq!(events.len(), 1);
-        assert!(matches!(&events[0].event, StreamEvent::Chat(chat) if chat.state == ChatState::Error && chat.error_kind.as_deref() == Some("buffer_overflow")));
-    }
-
-    #[tokio::test]
-    async fn forwarder_repairs_broadcast_lag_without_gaps() {
-        use futures::StreamExt;
-        let registry = RunRegistry::new();
-        let (handle, _) = registry.begin("lag", "fp".into());
-        let mut stream = Box::pin(forward_stream(handle.clone()));
-        let mut seq = 0;
-        for _ in 0..600 {
-            assert!(matches!(push_frame(&handle, &mut seq, "lag", &sse::chat_delta("lag", "x"), None), PushOutcome::Ok));
-        }
-        registry.finish("lag");
-        for expected in 1..=600 {
-            assert_eq!(stream.next().await.unwrap().seq, expected);
-        }
-        assert!(stream.next().await.is_none());
-    }
-
-    #[test]
-    fn structured_retention_preserves_metadata() {
-        let registry = RunRegistry::new();
-        let (handle, _) = registry.begin("typed-run", "fp".into());
-        let _receiver = handle.tx.subscribe();
-        let mut seq = 0;
-        push_frame(&handle, &mut seq, "typed-run", &sse::chat_final("typed-run", "done".into()), None);
-        let events = handle.snapshot_after(0);
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].run_id, "typed-run");
-        assert_eq!(events[0].seq, 1);
-        assert_eq!(events[0].ts, handle.snapshot_after(0)[0].ts);
-        assert!(handle.snapshot_after(1).is_empty());
-        push_frame(&handle, &mut seq, "typed-run", &sse::chat_final("typed-run", "second".into()), None);
-        let first = handle.next_after(0).unwrap();
-        assert_eq!(first.seq, 1);
-        assert_eq!(first.ts, events[0].ts);
-        assert_eq!(handle.next_after(1).unwrap().seq, 2);
-        assert!(handle.next_after(2).is_none());
-    }
-
-    #[test]
-    fn begin_new_then_existing_returns_same_handle() {
-        let reg = RunRegistry::new();
-        let (h1, is_new) = reg.begin("r-1", "fp-a".into());
-        assert!(is_new);
-        let (h2, is_new2) = reg.begin("r-1", "fp-a".into());
-        assert!(!is_new2);
-        assert!(h2.matches("fp-a"), "existing handle carries the same fingerprint");
-        assert!(h1.matches("fp-a"));
-        assert!(!h1.matches("fp-b"));
-        assert!(reg.get("r-1").is_some());
-        assert!(reg.get("r-2").is_none());
-    }
-
-    #[test]
-    fn finish_marks_terminal_and_retains_for_replay() {
-        let reg = RunRegistry::new();
-        let (h, _) = reg.begin("r-9", "fp".into());
-        assert!(!h.is_terminal());
-        reg.finish("r-9");
-        assert!(h.is_terminal());
-        assert!(reg.get("r-9").is_some(), "terminal run retained within grace TTL");
-    }
-
-    #[test]
-    fn body_fingerprint_stable_for_same_body_distinct_for_different() {
-        let mk = |msg: serde_json::Value, sid: &str, ref_: &str| {
-            let req = DownstreamRequest {
-                id: "x".into(),
-                method: "chat.send".into(),
-                to_bot: crate::webhook::ToBot { provider_id: "p".into(), provider_bot_ref: ref_.into() },
-                session_id: Some(sid.into()),
-                message: Some(msg),
-                from: None,
-                timeout_ms: None,
-                params: None,
-            };
-            body_fingerprint(&req, sid)
-        };
-        let m = serde_json::json!({"role":"user","content":[{"type":"text","text":"hi"}]});
-        let a = mk(m.clone(), "s-1", "b-1");
-        let b = mk(m.clone(), "s-1", "b-1");
-        assert_eq!(a, b, "same body → same fingerprint");
-        let c = mk(m.clone(), "s-1", "b-2");
-        assert_ne!(a, c, "different ref → different fingerprint");
-        let d = mk(serde_json::json!({"role":"user","content":[{"type":"text","text":"yo"}]}), "s-1", "b-1");
-        assert_ne!(a, d, "different message → different fingerprint");
-    }
-
-    #[test]
-    fn extract_message_text_joins_multiple_content_blocks() {
-        let m = serde_json::json!({"content":[
-            {"type":"text","text":"line1"},
-            {"type":"image","text":"ignored"},  // non-text type but text present: still joined
-            {"type":"text","text":"line2"},
-            {"type":"text"},                     // no text: skipped
-        ]});
-        assert_eq!(extract_message_text(Some(&m)), "line1\nignored\nline2");
-        assert_eq!(extract_message_text(None), "");
-    }
-
-    #[test]
-    fn request_abort_sets_flag_overrides_reason_and_cancels_token() {
-        // A fresh run handle's flag is false and stop_reason defaults to
-        // "user_cancelled"; calling request_abort flips the flag, overrides the
-        // stop_reason, and cancels the CancellationToken.
-        let reg = RunRegistry::new();
-        let (h, _) = reg.begin("r-a", "fp".into());
-        assert!(!h.is_abort_requested(), "fresh run is not aborted");
-        assert_eq!(h.abort_stop_reason(), "user_cancelled");
-
-        let r2 = h.clone();
-        h.request_abort("provider_shutdown");
-        assert!(h.is_abort_requested(), "flag set after request_abort");
-        assert_eq!(h.abort_stop_reason(), "provider_shutdown", "reason overridden");
-        assert!(r2.is_abort_requested(), "shared flag visible to cloned handle");
-        assert_eq!(r2.abort_stop_reason(), "provider_shutdown");
-        // Cancellation propagates to all clones (CancellationToken is shared).
-        assert!(h.abort.is_cancelled(), "token cancelled after request_abort");
-    }
-
-    #[test]
-    fn find_terminal_run_returns_terminal_match_none_for_active_or_unknown() {
-        // Active run (not terminal): find_terminal_run returns None — abort
-        // goes through the sessions.active_run path instead.
-        let reg = RunRegistry::new();
-        let (_h_active, _) = reg.begin("r-active", "fp".into());
-        reg.record_session("r-active", "bot-1", "s-1");
-        assert_eq!(reg.find_terminal_run("bot-1", "s-1"), None, "active run is not terminal");
-
-        // Mark it terminal: now find_terminal_run resolves to its run_id.
-        reg.finish("r-active");
-        assert_eq!(reg.find_terminal_run("bot-1", "s-1").as_deref(), Some("r-active"));
-
-        // Unknown session and bot mismatch: no match.
-        assert_eq!(reg.find_terminal_run("bot-1", "s-unknown"), None, "unknown session");
-        assert_eq!(reg.find_terminal_run("bot-other", "s-1"), None, "bot mismatch");
-    }
-
-    #[test]
-    fn remove_drops_entry_and_run_session_association_for_rollback() {
-        // chat.send's 429 rollback path: the placeholder entry created by
-        // `begin` (and its record_session association, if any) must be wiped
-        // so the same run_id is not pinned in the registry and a same-id retry
-        // is not later surprised by a stale terminal-replay entry. `remove`
-        // bypasses the grace-TTL retention `finish` relies on.
-        let reg = RunRegistry::new();
-        let (_h, is_new) = reg.begin("r-roll", "fp".into());
-        assert!(is_new);
-        reg.record_session("r-roll", "bot-1", "s-1");
-        assert!(reg.get("r-roll").is_some());
-
-        reg.remove("r-roll");
-
-        assert!(reg.get("r-roll").is_none(), "entry removed by rollback");
-        assert_eq!(reg.find_terminal_run("bot-1", "s-1"), None,
-            "run_session association pruned alongside the entry");
-    }
-
-    #[tokio::test]
-    async fn abort_all_cancels_every_active_run_and_skips_terminal() {
-        // Two active + one terminal: only the two active handles have their
-        // abort tokens cancelled after abort_all; the terminal one stays as-is
-        // (it was already cancelled when its run loop finalized).
-        let reg = RunRegistry::new();
-        let (h_a, _) = reg.begin("r-a", "fp".into());
-        let (h_b, _) = reg.begin("r-b", "fp".into());
-        let (h_t, _) = reg.begin("r-t", "fp".into());
-        reg.finish("r-t");
-        assert!(!h_a.abort.is_cancelled());
-        assert!(!h_b.abort.is_cancelled());
-
-        reg.abort_all("provider_shutdown").await;
-
-        assert!(h_a.abort.is_cancelled(), "active run a cancelled");
-        assert!(h_b.abort.is_cancelled(), "active run b cancelled");
-        assert!(!h_t.abort.is_cancelled(), "terminal run skipped");
-        assert!(h_a.is_abort_requested() && h_b.is_abort_requested(), "flag set on each");
-        assert_eq!(h_a.abort_stop_reason(), "provider_shutdown");
-    }
-}
+#[path = "run_tests.rs"]
+mod tests;

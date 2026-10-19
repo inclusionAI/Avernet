@@ -398,6 +398,21 @@ pub trait SessionRepoPort: Send + Sync {
     ) -> ServiceResult<Vec<String>> {
         Ok(self.list_group_ids_by_session_participant(bot_uuid).await)
     }
+
+    /// Fallible existence check for current Session participation within one
+    /// Group. Empty input returns false; Session status does not affect the
+    /// relation. SQL stores must scope by environment and batch Actor IDs,
+    /// without loading full Sessions or issuing one query per Actor.
+    async fn has_group_session_participant(
+        &self,
+        _group_id: &str,
+        _actor_ids: &[String],
+    ) -> ServiceResult<bool> {
+        Err(ServiceError::InvalidOperation {
+            message: "Batch Session membership lookup is not configured".into(),
+            request_id: None,
+        })
+    }
     async fn delete(&self, session_id: &str) -> ServiceResult<bool>;
 
     // ── session collection (收藏) ──────────────────────────────

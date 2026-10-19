@@ -20,6 +20,37 @@ useLoginStrategyStore.getState().setLoginStrategy(getCapabilities().getLoginStra
 
 export { request } from './requestConfig';
 
+/**
+ * qiankun master 的 runtime modifier。
+ *
+ * excludeAssetFilter 无法直接写在 config 里：plugin-qiankun 生成 masterOptions.ts 时使用
+ * JSON.stringify，函数字段会被静默丢弃。这里在运行期重建，让 Monaco CDN 资源保留原生
+ * <script> 注入路径，避免子应用 loader 被 qiankun 改写为 fetch+eval 后在宿主安全策略下
+ * 失败。前缀只由 Internal overlay 的 define 注入；Open Core 下为空时原样返回配置。
+ */
+interface QiankunRuntimeConfig {
+  master?: {
+    excludeAssetFilter?: (assetUrl: string) => boolean;
+  };
+}
+
+export const qiankun = (config: QiankunRuntimeConfig = {}) => {
+  const monacoCdnPrefix =
+    typeof TEAMCLAW_MONACO_CDN_PREFIX !== 'undefined'
+      ? TEAMCLAW_MONACO_CDN_PREFIX
+      : '';
+  if (!monacoCdnPrefix) return config;
+
+  return {
+    ...config,
+    master: {
+      ...config.master,
+      excludeAssetFilter: (assetUrl: string) =>
+        assetUrl.startsWith(`${monacoCdnPrefix}/`),
+    },
+  } satisfies QiankunRuntimeConfig;
+};
+
 export function onRouteChange({ location }: { location: { pathname: string } }) {
   const redirect = getCapabilities().getRuntimeRouteRedirect({ pathname: location.pathname });
   if (redirect.status === 'available' && redirect.value && redirect.value !== location.pathname) {

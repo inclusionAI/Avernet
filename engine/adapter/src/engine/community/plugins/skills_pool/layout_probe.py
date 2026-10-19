@@ -6,9 +6,7 @@ import json
 import os
 import stat
 from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -37,31 +35,13 @@ from engine.community.plugins.skills_pool.center_mount import (
     CenterMountStatus,
     inspect_center_mount,
 )
-
-
-class RuntimeLayoutInspectionStatus(str, Enum):
-    READY = "READY"
-    NOT_CAPABLE = "NOT_CAPABLE"
-    TRANSIENT_ERROR = "TRANSIENT_ERROR"
-    INVALID = "INVALID"
-
-
-@dataclass(frozen=True)
-class RuntimeLayoutInspection:
-    status: RuntimeLayoutInspectionStatus
-    engine: str
-    layout_contract_version: str
-    preparation_id: str | None
-    evidence: dict[str, Any]
-
-    def to_data(self) -> dict[str, Any]:
-        return {
-            "status": self.status.value,
-            "engine": self.engine,
-            "layout_contract_version": self.layout_contract_version,
-            "preparation_id": self.preparation_id,
-            "evidence": self.evidence,
-        }
+from engine.community.plugins.skills_pool.inspection_types import (
+    RuntimeLayoutInspection,
+    RuntimeLayoutInspectionStatus,
+)
+from engine.community.plugins.skills_pool.steady_layout import (
+    inspect_openclaw_steady_active,
+)
 
 
 def _ready_evidence(
@@ -404,6 +384,7 @@ def inspect_runtime_layout(
     expected_contract_version: str = LAYOUT_CONTRACT_VERSION,
     mapping_contract_version: str | None = MAPPING_CONTRACT_VERSION,
     home: Path = Path("/home/admin"),
+    layout_context: RuntimeLayoutContext | None = None,
     repo_is_mounted: Callable[[Path], bool] = os.path.ismount,
     center_is_mounted: Callable[[Path], bool] | None = None,
     repo_delivery: RepoDelivery | None = None,
@@ -428,8 +409,17 @@ def inspect_runtime_layout(
             engine_type=engine,
             layout_contract_version=expected_contract_version,
         ),
-        RuntimeLayoutContext(home=home),
+        layout_context or RuntimeLayoutContext(home=home),
     )
+    if engine == "openclaw":
+        steady = inspect_openclaw_steady_active(
+            layout=layout,
+            expected_contract_version=expected_contract_version,
+            repo_is_mounted=repo_is_mounted,
+            center_is_mounted=center_is_mounted,
+        )
+        if steady is not None:
+            return steady
     try:
         marker_stat = layout.marker.stat()
     except (FileNotFoundError, NotADirectoryError):

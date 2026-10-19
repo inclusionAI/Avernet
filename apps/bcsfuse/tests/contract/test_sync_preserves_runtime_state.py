@@ -27,6 +27,8 @@ def sync_app(monkeypatch):
     runtime = InMemoryWorkerRuntimeStateStore()
     audit = InMemoryWorkerAuditLogStore()
     profiles = MagicMock()
+    profiles.get.return_value = None
+    profiles.save_if_version.side_effect = lambda content, _version: content
     app = FastAPI()
     app.state.context = SimpleNamespace(registry={
         "worker_registry_store": workers,
@@ -79,7 +81,7 @@ def test_visibility_sync_preserves_runtime_and_still_updates_profile(sync_app, m
     assert runtime.get_runtime_state("bot:owner") == state
     assert workers.get_by_id("bot:owner").state.runtime_state == state
     assert workers.get_by_id("bot:owner").state.availability.value == availability
-    profiles.upsert_profile.assert_called_once()
+    profiles.save_if_version.assert_called_once()
     availability_sync.assert_called_with("bot:owner", availability)
 
 
@@ -380,8 +382,91 @@ def test_sync_uses_worker_name_when_profile_display_name_is_omitted(sync_app):
     )
 
     assert response.status_code == 200, response.text
-    profile_data = profiles.upsert_profile.call_args.args[2]
+    profile_data = profiles.save_if_version.call_args.args[0].model_dump()
     assert profile_data["display_name"] == "墨韵研发2号"
+
+
+def test_sync_reports_profile_write_failure_instead_of_success(sync_app):
+    client, _, _, profiles, _ = sync_app
+    profiles.save_if_version.side_effect = RuntimeError("profile write failed")
+
+    response = client.post(
+        "/v1/workers/bot:owner/sync",
+        json={"name": "Bot", "profile": {"profile_id": "default"}},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"]["code"] == "PROFILE_SYNC_FAILED"
+
+
+def test_sync_reports_repeated_profile_version_conflicts(sync_app):
+    client, _, _, profiles, _ = sync_app
+    profiles.save_if_version.side_effect = None
+    profiles.save_if_version.return_value = None
+
+    response = client.post(
+        "/v1/workers/bot:owner/sync",
+        json={"name": "Bot", "profile": {"profile_id": "default"}},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"]["code"] == "PROFILE_SYNC_FAILED"
+
+
+def test_sync_reports_profile_activation_failure(sync_app):
+    client, _, _, profiles, _ = sync_app
+    profiles.activate_profile.return_value = False
+
+    response = client.post(
+        "/v1/workers/bot:owner/sync",
+        json={"name": "Bot", "profile": {"profile_id": "default"}},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"]["code"] == "PROFILE_SYNC_FAILED"
+
+
+def test_sync_requires_profile_store(sync_app):
+    client, _, _, _, _ = sync_app
+    client.app.state.context.registry.pop("worker_profile_content_store")
+
+    response = client.post(
+        "/v1/workers/bot:owner/sync",
+        json={"name": "Bot", "profile": {"profile_id": "default"}},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "PROVIDER_NOT_AVAILABLE"
+
+
+def test_sync_rejects_profile_store_without_versioned_save_before_worker_write(sync_app):
+    client, workers, _, profiles, _ = sync_app
+    profiles.save_if_version = None
+
+    response = client.post(
+        "/v1/workers/bot:owner/sync",
+        json={"name": "Bot", "profile": {"profile_id": "default"}},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "PROVIDER_NOT_AVAILABLE"
+    assert workers.get_by_id("bot:owner") is None
+
+
+def test_sparse_sync_uses_preserved_availability_for_analysis(sync_app):
+    client, workers, runtime, _, _ = sync_app
+    seed_worker(workers, runtime, WorkerRuntimeState.OFFLINE)
+    analyzer_task = analysis._analyze_and_persist_async
+    analyzer_task.reset_mock()
+
+    response = client.post(
+        "/v1/workers/bot:owner/sync",
+        json={"name": "Bot", "profile": {"profile_id": "default"}},
+    )
+
+    assert response.status_code == 200, response.text
+    assert workers.get_by_id("bot:owner").state.availability.value == "private"
+    analyzer_task.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -389,6 +474,9 @@ async def test_background_analysis_preserves_profile_identity_and_skills(monkeyp
     import asyncio
 
     from src.application.services.profile_analyzer_service import ProfileAnalysisResult
+    from src.infra.public.stores.in_memory_worker_profile_content_store import (
+        InMemoryWorkerProfileContentStore,
+    )
     from src.interfaces.api import profile_routes
     from src.interfaces.api.dependencies import fusion_dependencies
 
@@ -405,7 +493,18 @@ async def test_background_analysis_preserves_profile_identity_and_skills(monkeyp
         )
 
     analyzer.analyze.side_effect = analyze
-    profile_store = MagicMock()
+    profile_store = InMemoryWorkerProfileContentStore()
+    profile_data = {
+        "worker_id": "20261008_j8u4z0l7:334018",
+        "profile_id": "default",
+        "display_name": "墨韵研发2号",
+        "description": "研发协作机器人",
+        "soul_md": "负责研发协作",
+        "contents": {},
+        "skill_sets": [{"name": "code_review", "description": "代码评审"}],
+        "metadata": {"source": "bcs"},
+    }
+    profile_store.upsert_profile(profile_data["worker_id"], "default", profile_data)
     running_loop = asyncio.get_running_loop()
     used_executors = []
 
@@ -430,18 +529,7 @@ async def test_background_analysis_preserves_profile_identity_and_skills(monkeyp
     await analysis._analyze_and_persist_async(
         worker_id="20261008_j8u4z0l7:334018",
         profile_id="default",
-        profile_data={
-            "worker_id": "20261008_j8u4z0l7:334018",
-            "profile_id": "default",
-            "display_name": "墨韵研发2号",
-            "description": "研发协作机器人",
-            "soul_md": "负责研发协作",
-            "contents": {},
-            "skill_sets": [
-                {"name": "code_review", "description": "代码评审"},
-            ],
-            "metadata": {"source": "bcs"},
-        },
+        profile_data=profile_data,
         max_retries=0,
     )
 
@@ -451,5 +539,113 @@ async def test_background_analysis_preserves_profile_identity_and_skills(monkeyp
     assert content.description == "研发协作机器人"
     assert [skill.name for skill in content.skill_sets] == ["code_review"]
     assert used_executors == [analysis._get_llm_analysis_executor()]
-    persisted = profile_store.upsert_profile.call_args.args[2]
-    assert persisted["contents"]["capabilities"] == ["代码评审"]
+    persisted = profile_store.get(profile_data["worker_id"], "default")
+    assert persisted.contents["capabilities"] == ["代码评审"]
+    assert persisted.display_name == "墨韵研发2号"
+    assert [skill.name for skill in persisted.skill_sets] == ["code_review"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cleared_generated_only", [False, True])
+async def test_stale_background_analysis_cannot_restore_an_older_profile(
+    monkeypatch, cleared_generated_only,
+):
+    from src.application.services.profile_analyzer_service import ProfileAnalysisResult
+    from src.infra.public.stores.in_memory_worker_profile_content_store import (
+        InMemoryWorkerProfileContentStore,
+    )
+    from src.interfaces.api.dependencies import fusion_dependencies
+
+    worker_id = "bot:owner"
+    store = InMemoryWorkerProfileContentStore()
+    snapshot = {
+        "worker_id": worker_id,
+        "profile_id": "default",
+        "display_name": "Old Bot",
+        "soul_md": "Old instructions",
+        "contents": {"identity": "old", "profile": "Old generated"},
+        "skill_sets": [{"name": "old_skill"}],
+        "metadata": {"source": "bcs"},
+    }
+    newer = {
+        **snapshot,
+        "display_name": "New Bot",
+        "soul_md": "New instructions",
+        "contents": {"identity": "new", "profile": "New generated"},
+        "skill_sets": [{"name": "new_skill"}],
+    }
+    if cleared_generated_only:
+        newer = {**snapshot, "contents": {"identity": "old"}}
+    store.upsert_profile(worker_id, "default", newer)
+    analyzer = MagicMock()
+    analyzer.analyze.return_value = ProfileAnalysisResult(
+        semantic_profile="Stale result",
+        capability_tags=["old"],
+        llm_success=True,
+        short_profile="Stale",
+    )
+    monkeypatch.setattr(analysis, "_get_profile_analyzer", lambda: analyzer)
+    monkeypatch.setattr(
+        fusion_dependencies,
+        "get_app_context",
+        lambda: SimpleNamespace(registry={"worker_profile_content_store": store}),
+    )
+
+    await analysis._analyze_and_persist_async(worker_id, "default", snapshot, max_retries=0)
+
+    profile = store.get(worker_id, "default")
+    if cleared_generated_only:
+        assert profile.display_name == "Old Bot"
+        assert profile.soul_md == "Old instructions"
+        assert [skill.name for skill in profile.skill_sets] == ["old_skill"]
+        assert profile.contents == {"identity": "old"}
+    else:
+        assert profile.display_name == "New Bot"
+        assert profile.soul_md == "New instructions"
+        assert [skill.name for skill in profile.skill_sets] == ["new_skill"]
+        assert profile.contents == {"identity": "new", "profile": "New generated"}
+
+
+@pytest.mark.asyncio
+async def test_failed_background_analysis_keeps_generated_fields(monkeypatch):
+    from src.application.services.profile_analyzer_service import ProfileAnalysisResult
+    from src.infra.public.stores.in_memory_worker_profile_content_store import (
+        InMemoryWorkerProfileContentStore,
+    )
+    from src.interfaces.api.dependencies import fusion_dependencies
+
+    profile_data = {
+        "worker_id": "bot:owner",
+        "profile_id": "default",
+        "soul_md": "Current instructions",
+        "contents": {
+            "profile": "Current profile",
+            "capabilities": ["review"],
+            "short_profile": "Reviewer",
+        },
+    }
+    store = InMemoryWorkerProfileContentStore()
+    store.upsert_profile("bot:owner", "default", profile_data)
+    analyzer = MagicMock()
+    analyzer.analyze.return_value = ProfileAnalysisResult(
+        semantic_profile="",
+        capability_tags=[],
+        llm_success=False,
+        error_message="analysis unavailable",
+    )
+    monkeypatch.setattr(analysis, "_get_profile_analyzer", lambda: analyzer)
+    monkeypatch.setattr(
+        fusion_dependencies,
+        "get_app_context",
+        lambda: SimpleNamespace(registry={"worker_profile_content_store": store}),
+    )
+
+    await analysis._analyze_and_persist_async(
+        "bot:owner", "default", profile_data, max_retries=0,
+    )
+
+    assert store.get("bot:owner", "default").contents == {
+        "profile": "Current profile",
+        "capabilities": ["review"],
+        "short_profile": "Reviewer",
+    }

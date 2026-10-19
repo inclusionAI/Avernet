@@ -1,3 +1,5 @@
+import { createTeamclawRouter } from "./routes/teamclaw.js";
+import type { TeamclawBotDirectory } from "./services/evolve/teamclaw-scope.js";
 import { SkillPackageStorage, type SkillPackageStorageOptions } from "./services/object-storage/skill-package-storage.js";
 import { resolveEvolveHostCapabilities } from "./services/evolve/host-capabilities.js";
 import type { Router } from "express";
@@ -21,6 +23,8 @@ import {
   type InternalEvolveWorkflowRuntime,
 } from "./routes/internal/evolve.js";
 import { createInternalTaskGuardRouter } from "./routes/internal/task-guard.js";
+import { registerGeneratedBenchDomainRoute, type GeneratedBenchBotSpaceResolver } from "./routes/generated-bench-domain.js";
+import { Router as createRouter } from "express";
 import { createBenchRouter } from "./routes/bench.js";
 import { createStageSkillsRouter } from "./routes/stage-skills.js";
 import { createSkillAssetsRouter } from "./routes/skill-assets.js";
@@ -54,6 +58,7 @@ export type ClawevolveModuleOptions = {
   artifactUrlStore?: Pick<ObjectStore, "createSignedUrl">;
   /** Signing store whose endpoint is reachable from AIS containers. */
   aisArtifactUrlStore?: Pick<ObjectStore, "createSignedUrl">;
+  aisStatusHandlers?: EvolveRouterDeps["aisStatusHandlers"];
   artifactBucket?: string;
   skillPackageStorage?: SkillPackageStorageOptions;
   clawInsight?: ClawInsightInternalApi;
@@ -64,6 +69,9 @@ export type ClawevolveModuleOptions = {
   workflowRuntime?: InternalEvolveWorkflowRuntime;
   hostLocalSkills?: BotSkillGateway;
   hostSpaces?: SpaceDirectory;
+  hostTeamclawBots?: TeamclawBotDirectory;
+  hostTeamclawSpaces?: SpaceDirectory;
+  resolveGeneratedBenchBotSpace?: GeneratedBenchBotSpaceResolver;
   hostExtensions?: readonly EvolveExtension[];
   /** Host-owned model catalog. Public code intentionally defines no provider defaults. */
   modelConfig?: EvolveModelConfig;
@@ -143,6 +151,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
     skillPackages,
     artifactUrlStore: options.artifactUrlStore,
     aisArtifactUrlStore: options.aisArtifactUrlStore,
+    aisStatusHandlers: options.aisStatusHandlers,
     botWorkflowPermissionRepo: botWorkflowPermission,
     hostLocalSkills: options.hostLocalSkills ?? null,
     hostSpaces: options.hostSpaces,
@@ -176,7 +185,12 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
     workflowRuntime: options.workflowRuntime,
   });
   const taskGuardRouter = createInternalTaskGuardRouter(evolve);
-  const benchRouter = createBenchRouter(
+  const benchRouter = createRouter();
+  registerGeneratedBenchDomainRoute(benchRouter, {
+    tasks: evolve, domains: benchDomain, resolveBotSpace: options.resolveGeneratedBenchBotSpace,
+  });
+  benchRouter.use(spaceAccessErrorHandler);
+  benchRouter.use(createBenchRouter(
     benchDomain,
     benchTemplate,
     benchTemplateVersion,
@@ -185,17 +199,21 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
     db,
     benchArtifact,
     benchTag,
-  );
+  ));
 
   let runAnalysisTimeoutTimer: NodeJS.Timeout | null = null;
   let suggestionApplyTimeoutTimer: NodeJS.Timeout | null = null;
 
   return {
     dispatch,
-    publicRouter,
+    publicRouter: createRouter()
+      .use("/teamclaw", createTeamclawRouter({kind:"evolve",legacy:publicRouter,spaces:options.hostTeamclawSpaces ?? options.hostSpaces,bots:options.hostTeamclawBots,tasks:evolve,domains:benchDomain,runs:benchRun}))
+      .use(publicRouter),
     internalRouter,
     taskGuardRouter,
-    benchRouter,
+    benchRouter: createRouter()
+      .use("/teamclaw", createTeamclawRouter({kind:"bench",legacy:benchRouter,spaces:options.hostTeamclawSpaces ?? options.hostSpaces,bots:options.hostTeamclawBots,tasks:evolve,domains:benchDomain,runs:benchRun}))
+      .use(benchRouter),
     internalApi: {
       async createInsightTask(input) {
         if (!insightTaskService) throw new Error("ClawInsight integration is unavailable");

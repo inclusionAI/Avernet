@@ -62,6 +62,7 @@ def import_all_models() -> None:
     import agentclaw.community.core.bot_dormant.sqlite_models  # noqa: F401  ac_bot_dormant_*
     import agentclaw.community.core.task_queue.repository.models  # noqa: F401  ac_task_queue
     import agentclaw.community.core.task.repository.models  # noqa: F401  task_info / task_node / task_node_run_info / task_node_relation / task_callback
+    import agentclaw.community.core.task.forum.repository.models  # noqa: F401  ac_forum_topic / ac_forum_post
     import agentclaw.community.core.task.task_discovery.discovered_task_models  # noqa: F401  ac_discovered_tasks
     import agentclaw.community.core.task.task_discovery.lock_models  # noqa: F401  ac_task_discovery_lock
     import agentclaw.community.core.skills_pool.repository.models  # noqa: F401  ac_bot_skill_layout_state
@@ -74,6 +75,7 @@ def import_all_models() -> None:
     import agentclaw.community.core.market_favorites.repository.models  # noqa: F401  ac_market_favorite
     import agentclaw.community.core.bot_message_feedback.models  # noqa: F401  ac_bot_message_feedback
     import agentclaw.community.core.work_orders.repository.models  # noqa: F401  ac_work_order / ac_work_order_notification
+    import agentclaw.community.core.agentswarm.repository.registry  # noqa: F401  ac_agent_swarm_* (run/agent/message/result_shard/round/guard_event/job/audit)
 
 
 def _metadatas() -> list[MetaData]:

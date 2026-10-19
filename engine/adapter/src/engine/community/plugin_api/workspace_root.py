@@ -10,6 +10,8 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from engine.community.core.skills.layout_planner import RuntimeLayoutContext
+
 log = logging.getLogger("engine.workspace_root")
 
 
@@ -30,6 +32,24 @@ def workspace_root() -> Path:
     result = Path.home() / ".openclaw" / "workspace"
     log.info("[workspace_root] env=UNSET → %s (fallback,shared)", result)
     return result
+
+
+def openclaw_runtime_layout_context() -> RuntimeLayoutContext:
+    """Return the Skills layout home for the current per-Bot OpenClaw runtime.
+
+    ``OPENCLAW_WORKSPACE_DIR`` is the per-Bot workspace. The per-Bot
+    OpenClaw root replaces the container's ``/home/admin`` prefix in the
+    layout contract; it contains ``openclaw.json`` and the ``workspace``
+    Skills subtree. When
+    the per-Bot value is absent, retain the existing deployment default.
+    """
+    workspace = workspace_root_strict()
+    if workspace is None:
+        return RuntimeLayoutContext()
+    return RuntimeLayoutContext(
+        home=workspace.parent,
+        openclaw_root=workspace.parent,
+    )
 
 
 def workspace_root_strict() -> Optional[Path]:

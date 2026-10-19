@@ -1,23 +1,27 @@
+import { workflowSnapshotKey } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot'
+import { itemSnapshot, snapshotLabel, type RepairVersionScope } from '../../../../server/contracts/repair-version-scope'
+import ProposalEvidence from './ProposalEvidence'
+import { proposalChecked, proposalMembers } from '../../../../server/contracts/repair-proposal'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { RepairCandidatesResponse, RepairInboxItem, RepairInboxFilter } from '../../../../server/contracts/repair-workbench'
 import { repairBatches } from '../../../api/repair-batches'
 import { repairReadError } from '../../../api/repair-read-error'
-import { exclusion, itemTitle, states } from './repair-view'
+import { exclusion, itemTitle, itemHeading, states } from './repair-view'
 import { changeSummary, sourceRunCount } from './RepairItemDetail'
 
 /** Compare and select suggestions within one issue; evidence is fetched only on expansion. */
 export default function IssueRepairSuggestions({ workflowId, signature, includeHistorical, initialItemId, onResult, renderItem,
-  selected = [], onToggle, canEdit = false, limit = 100, cacheVersion = '', initialPage }: {
-  workflowId: string; signature?: string; includeHistorical: boolean; initialItemId?: string | null
+  selected = [], onToggle, canEdit = false, limit = 100, cacheVersion = '', initialPage, versionScope = 'current', snapshotKey }: {
+  versionScope?: RepairVersionScope; snapshotKey?: string; workflowId: string; signature?: string; includeHistorical: boolean; initialItemId?: string | null
   selected?: string[]; onToggle?: (id: string) => void; canEdit?: boolean; limit?: number
   cacheVersion?: string; initialPage?: RepairCandidatesResponse
   onResult: (result: RepairCandidatesResponse) => void; renderItem: (item: RepairInboxItem, canEdit: boolean) => ReactNode
 }) {
   const [page, setPage] = useState(1)
   const [state, setState] = useState<RepairInboxFilter>('all')
-  const query = useQuery({ queryKey: ['repair-suggestions', workflowId, signature, includeHistorical, state, page, cacheVersion, canEdit],
-    queryFn: () => repairBatches.candidates(workflowId, { signature, state, page, pageSize: 20, includeHistorical }),
+  const query = useQuery({ queryKey: ['repair-suggestions', workflowId, signature, includeHistorical, versionScope, snapshotKey, state, page, cacheVersion, canEdit],
+    queryFn: () => repairBatches.candidates(workflowId, { versionScope, snapshotKey, signature, state, page, pageSize: 20, includeHistorical }),
     initialData: page === 1 && state === 'all' ? initialPage : undefined,
     staleTime: 30_000, gcTime: 300_000, retry: false })
   const data = query.error ? undefined : query.data
@@ -43,18 +47,23 @@ export default function IssueRepairSuggestions({ workflowId, signature, includeH
       : error ? <div role="alert" className="text-sm text-red-700">{error}<button className="ml-2 underline" onClick={() => void query.refetch()}>重试建议</button></div>
       : !data?.items.length ? <p className="text-sm text-slate-600">当前范围没有匹配的修复建议。可调整状态或历史范围，分析依据仍可查看。</p>
       : <div className="space-y-3">{data.items.map(item => {
-        const reason = exclusion(item)
-        const checked = selected.includes(item.itemId)
+        const reason = exclusion(item, undefined, data?.activeSnapshot?.status === 'resolved' ? workflowSnapshotKey(data.activeSnapshot.snapshot) : undefined)
+        const binding = itemSnapshot(item)
+        const checked = proposalChecked(item, selected)
+      const partial = !checked && proposalMembers(item).some(member => selected.includes(member.itemId))
         const runs = sourceRunCount(item)
-        return <article key={item.itemId} className={`rounded-lg border p-3 ${checked ? 'border-blue-300 bg-blue-50/30' : 'border-slate-200'}`}>
+        return <article id={`repair-suggestion-${item.itemId}`} key={item.itemId} className={`rounded-lg border p-3 ${checked ? 'border-blue-300 bg-blue-50/30' : 'border-slate-200'}`}>
           <div className="flex items-start gap-3">
             <input type="checkbox" aria-label={`选择 ${itemTitle(item)}`} checked={checked}
-              disabled={!canEdit || !data.canEdit || !!reason || !checked && selected.length >= limit}
+              disabled={!canEdit || !data.canEdit || !!reason || !checked && new Set([...selected, ...proposalMembers(item).map(member => member.itemId)]).size > limit}
               onChange={() => onToggle?.(item.itemId)} className="mt-1 h-4 w-4 shrink-0 accent-blue-600" />
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold leading-6 text-slate-900">{itemTitle(item)}</p>
-              <p className="mt-1 text-xs leading-5 text-slate-600">{changeSummary(item)}</p>
+              <p className="text-sm font-semibold leading-6 text-slate-900">{itemHeading(item)}</p>
+              {binding?.status === 'resolved' && <p className="mt-1 text-xs text-slate-500">{snapshotLabel(binding.snapshot)}{versionScope === 'historical' ? ' · 仅作参考目标' : ''}</p>}
+              <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-600">{changeSummary(item)}</p>
               <p className="mt-1 text-xs text-slate-500">{states[item.state]} · {runs === null ? '来源运行数未知' : `依据覆盖 ${runs} 个运行`}</p>
+              {partial && <p className="mt-1 text-xs text-warning-foreground">原选择只覆盖部分来源，勾选此方案可确认完整范围。</p>}
+          <ProposalEvidence item={item} canEdit={canEdit} />
               {reason && <p className="mt-1 text-xs text-amber-700">{reason}</p>}
               <button type="button" aria-expanded={expanded === item.itemId} className="mt-2 text-xs font-medium text-blue-700 hover:underline focus-visible:outline"
                 onClick={() => setExpanded(value => value === item.itemId ? '' : item.itemId)}>

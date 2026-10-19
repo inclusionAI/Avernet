@@ -2,39 +2,22 @@
  * Internal API Logger — structured logging for all ClawMind↔clawweb API calls.
  * Writes to both console (stdout) and a log file for production debugging.
  */
-import { appendFileSync, mkdirSync, existsSync, statSync, renameSync } from "node:fs";
+import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-const LOG_DIR = join(homedir(), ".openclaw", "logs");
+// Fixed log files are rotated and retained by the deployment's logrotate rules.
+// The production process runs as admin, whose home is /home/admin.
+const LOG_DIR = join(homedir(), "logs", "clawweb");
 const LOG_FILE = join(LOG_DIR, "clawweb-internal-api.log");
-const MAX_LOG_SIZE = 50 * 1024 * 1024; // 50MB rotation threshold
 
 let logDirReady = false;
+let writeFailureReported = false;
 
 function ensureLogDir(): void {
   if (logDirReady) return;
-  try {
-    if (!existsSync(LOG_DIR)) {
-      mkdirSync(LOG_DIR, { recursive: true });
-    }
-    logDirReady = true;
-  } catch {
-    // If we can't create the log dir, fall back to console-only
-  }
-}
-
-function rotateIfNeeded(): void {
-  try {
-    if (!existsSync(LOG_FILE)) return;
-    const stat = statSync(LOG_FILE);
-    if (stat.size > MAX_LOG_SIZE) {
-      const backup = LOG_FILE.replace(".log", `.${Date.now()}.log`);
-      renameSync(LOG_FILE, backup);
-    }
-  } catch {
-    // Rotation is best-effort
-  }
+  mkdirSync(LOG_DIR, { recursive: true });
+  logDirReady = true;
 }
 
 type ApiLogMethod = "READ" | "WRITE" | "PUT" | "DELETE";
@@ -59,10 +42,14 @@ export function apiLog(method: ApiLogMethod, path: string, details: Record<strin
   // File output (best-effort)
   try {
     ensureLogDir();
-    rotateIfNeeded();
     appendFileSync(LOG_FILE, line + "\n", "utf-8");
-  } catch {
-    // File logging is best-effort, never block the request
+    writeFailureReported = false;
+  } catch (error) {
+    // Keep serving requests, but make an unavailable log destination visible.
+    if (!writeFailureReported) {
+      writeFailureReported = true;
+      console.error(`[clawweb] Cannot write internal API log to ${LOG_FILE}`, error);
+    }
   }
 }
 

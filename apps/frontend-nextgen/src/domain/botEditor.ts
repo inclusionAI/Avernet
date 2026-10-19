@@ -8,6 +8,12 @@ export interface BotEditorSkill {
   source?: 'local' | 'teamclaw-market' | 'skillcenter-market' | 'workshop';
   homepageUrl?: string;
   active: boolean;
+  /** SkillCenter 官方标记（additive；其余来源缺省为 falsy 不展示） */
+  isOfficial?: boolean;
+  /** SkillCenter 推荐标记（additive；其余来源缺省为 falsy 不展示） */
+  isRecommended?: boolean;
+  /** 标签 chips（SkillCenter tagList；其余来源缺省为空数组不展示） */
+  tags?: string[];
 }
 
 export interface BotEditorMcp {
@@ -97,6 +103,8 @@ export interface BotEditorRoutine {
   model?: string;
   timeoutSecs?: number;
   modifiedAt?: string;
+  /** 后端若提供则展示；不可用时 UI 明确展示占位，不在前端推算。 */
+  nextRunAt?: string;
 }
 
 export interface BotEditorRoutineInput {

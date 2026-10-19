@@ -989,6 +989,7 @@ def test_release_translates_frozen_layout_into_container_env() -> None:
     ) == {
         "AGENTCLAW_SKILLS_LAYOUT": "pool",
         "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "skills-pool-p3-v1",
+        "AGENTCLAW_SKILLS_LAYOUT_PHASE": "pool_active",
     }
 
 

@@ -1299,7 +1299,7 @@ export function resolveChatRunId(requestId: unknown, idempotencyKey: unknown): s
 /**
  * Select the BCS identity OpenClaw should wrap in its own agent/channel route.
  * Protocol v3 supplies both fields with the same canonical session id. Older
- * frames keep their existing group-based histories.
+ * frames fall back to the group ID as their synthetic direct peer identity.
  */
 export function resolveEngineSessionPeerId(
   params: Pick<ChatSendParams, 'session_key' | 'bcs_group_id'>
@@ -1312,6 +1312,40 @@ export function resolveEngineSessionPeerId(
     return requestedSessionKey === canonicalSessionId ? requestedSessionKey : canonicalSessionId;
   }
   return params.bcs_group_id || onboardingPeerId;
+}
+
+type SessionScopeBinding = {
+  type?: string;
+  match: { channel: string };
+  session?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+/** Isolate BCS direct sessions in a local config copy, including route overrides. */
+export function withBcsDirectSessionScope<T extends {
+  session?: Record<string, unknown>;
+  bindings?: readonly SessionScopeBinding[];
+}>(
+  cfg: T,
+): Omit<T, 'session' | 'bindings'> & {
+    session: Record<string, unknown> & { dmScope: 'per-account-channel-peer' };
+    bindings?: SessionScopeBinding[];
+  } {
+  const { session, bindings, ...rest } = cfg;
+  return {
+    ...rest,
+    session: { ...session, dmScope: 'per-account-channel-peer' },
+    ...(bindings ? {
+      bindings: bindings.map(binding => {
+        if ((binding.type !== undefined && binding.type !== 'route')
+          || binding.match.channel.trim().toLowerCase() !== CHANNEL_ID) return binding;
+        return {
+          ...binding,
+          session: { ...binding.session, dmScope: 'per-account-channel-peer' },
+        };
+      }),
+    } : {}),
+  };
 }
 
 /** Handle chat.send request from BCS. */
@@ -1386,7 +1420,7 @@ export async function handleChatSend(
 
   try {
     const rt = getBcsRuntime();
-    const currentCfg = await rt.config.loadConfig();
+    const currentCfg = withBcsDirectSessionScope(await rt.config.loadConfig());
     const preparedImages = await prepareImageAttachments({
       attachments: imageAttachments,
       abortSignal: abortController.signal,
@@ -1411,7 +1445,7 @@ export async function handleChatSend(
       channel: CHANNEL_ID,
       accountId: account.accountId,
       peer: {
-        kind: 'group',
+        kind: 'direct',
         id: resolveEngineSessionPeerId(params, `onboarding-${account.botId}`),
       },
     });
@@ -1450,7 +1484,7 @@ export async function handleChatSend(
       AccountId: account.accountId,
       OriginatingChannel: CHANNEL_ID,
       OriginatingTo: bcsGroupId || `bcs:${account.botId}`,
-      ChatType: 'group',
+      ChatType: 'direct',
       SenderName: senderName,
       SenderId: senderId,
       Provider: CHANNEL_ID,
@@ -1599,47 +1633,53 @@ export async function handleChatSend(
   }
 }
 
-/** Handle session.delete request from BCS - delete local session via gateway. */
+/** Delete exactly one canonical BCS Session's local engine history. */
 export async function handleSessionDelete(
   request: RequestFrame,
   client: BcsWsClient,
-  _account: ResolvedBcsAccount,
+  account: ResolvedBcsAccount,
   log?: { info: (...args: unknown[]) => void; warn: (...args: unknown[]) => void; error: (...args: unknown[]) => void },
   dataDir?: string,
 ): Promise<void> {
   const params = request.params as unknown as SessionDeleteParams;
-  const bcsGroupId = params.bcs_group_id;
-  log?.info?.(`[session.delete] Deleting session for group ${bcsGroupId}`);
-
-  // 1. Find sessionKey from memory mapping
-  const sessionKey = groupIdToSessionKey.get(bcsGroupId);
-
-  if (!sessionKey) {
-    log?.warn?.(`[session.delete] No sessionKey mapping found for group ${bcsGroupId}`);
-    client.sendResponse(request.id, true, {}); // ACK anyway
+  const bcsSessionId = nonEmptyString(params.bcs_session_id);
+  const scope = parseSessionScopedGroupId(bcsSessionId);
+  if (!scope || scope.sessionId.length <= scope.groupId.length + 1
+    || (params.bcs_group_id !== undefined && nonEmptyString(params.bcs_group_id) !== scope.groupId)) {
+    client.sendResponse(request.id, false, undefined, {
+      code: 'INVALID_REQUEST',
+      message: 'session.delete requires a canonical bcs_session_id and a matching bcs_group_id when supplied',
+      retryable: false,
+    });
     return;
   }
 
   try {
     const rt = getBcsRuntime();
-    const currentCfg = await rt.config.loadConfig();
-
-    // 2. Call gateway sessions.delete
-    await callGatewaySessionDelete({
+    const currentCfg = withBcsDirectSessionScope(await rt.config.loadConfig());
+    // Resolve from the canonical ID and account, including after a plugin restart.
+    // A group's latest-session cache must never select a deletion target.
+    const route = rt.channel.routing.resolveAgentRoute({
       cfg: currentCfg,
-      sessionKey,
-      dataDir,
-      log,
+      channel: CHANNEL_ID,
+      accountId: account.accountId,
+      peer: { kind: 'direct', id: scope.sessionId },
     });
+    const sessionKey = route.sessionKey;
+    await callGatewaySessionDelete({ cfg: currentCfg, sessionKey, dataDir, log });
 
-    // 3. Clean up memory mappings
     sessionKeyToGroupId.delete(sessionKey);
-    groupIdToSessionKey.delete(bcsGroupId);
+    sessionKeyToBcsSessionId.delete(sessionKey);
+    sessionKeyToRouteScope.delete(sessionKey);
+    for (const [ key, value ] of groupIdToSessionKey) {
+      if (value === sessionKey) groupIdToSessionKey.delete(key);
+    }
     sessionRoutingMode.delete(sessionKey);
     sessionKeyToClient.delete(sessionKey);
     sessionTaskGroupInfo.delete(sessionKey);
+    pendingRouteBySessionKey.delete(sessionKey);
 
-    log?.info?.(`[session.delete] Session deleted: ${sessionKey}`);
+    log?.info?.(`[session.delete] Session deleted: ${bcsSessionId} -> ${sessionKey}`);
     client.sendResponse(request.id, true, {});
   } catch (err) {
     log?.error?.(`[session.delete] Failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -1821,14 +1861,14 @@ export async function handleChatInject(
   // Record into OpenClaw session and inject message via gateway
   try {
     const rt = getBcsRuntime();
-    const currentCfg = await rt.config.loadConfig();
+    const currentCfg = withBcsDirectSessionScope(await rt.config.loadConfig());
 
     const route = rt.channel.routing.resolveAgentRoute({
       cfg: currentCfg,
       channel: CHANNEL_ID,
       accountId: account.accountId,
       peer: {
-        kind: 'group',
+        kind: 'direct',
         id: resolveEngineSessionPeerId(params, `onboarding-${account.botId}`),
       },
     });
@@ -1859,7 +1899,7 @@ export async function handleChatInject(
       AccountId: account.accountId,
       OriginatingChannel: CHANNEL_ID,
       OriginatingTo: bcsGroupId || `bcs:${account.botId}`,
-      ChatType: 'group',
+      ChatType: 'direct',
       SenderName: senderName,
       SenderId: senderId,
       Provider: CHANNEL_ID,
@@ -2089,7 +2129,7 @@ export async function handleChatHistory(
 
   try {
     const rt = getBcsRuntime();
-    const currentCfg = await rt.config.loadConfig();
+    const currentCfg = withBcsDirectSessionScope(await rt.config.loadConfig());
 
     // Look up the OpenClaw sessionKey from the reverse mapping
     let sessionKey = resolveSessionKeyFromGroupId(bcsGroupId);
@@ -2101,7 +2141,7 @@ export async function handleChatHistory(
         channel: CHANNEL_ID,
         accountId: account.accountId,
         peer: {
-          kind: 'group',
+          kind: 'direct',
           id: bcsGroupId,
         },
       });
@@ -2856,7 +2896,10 @@ export async function handleAssignTask(
   }
 
   const taskInfo = sessionTaskGroupInfo.get(sessionKey);
-  const groupId = taskInfo?.groupId ?? sessionKeyToGroupId.get(sessionKey);
+  // task.* RPCs retain the legacy session-scoped group_id wire contract.
+  // V3 separates group and canonical Session IDs on chat.send.
+  const groupId = sessionKeyToBcsSessionId.get(sessionKey)
+    ?? taskInfo?.groupId ?? sessionKeyToGroupId.get(sessionKey);
   if (!groupId) {
     return { ok: false, error: 'No group context for this session' };
   }
@@ -2936,7 +2979,10 @@ export async function handleTaskMessage(
   }
 
   const taskInfo = sessionTaskGroupInfo.get(sessionKey);
-  const groupId = taskInfo?.groupId ?? sessionKeyToGroupId.get(sessionKey);
+  // task.* RPCs retain the legacy session-scoped group_id wire contract.
+  // V3 separates group and canonical Session IDs on chat.send.
+  const groupId = sessionKeyToBcsSessionId.get(sessionKey)
+    ?? taskInfo?.groupId ?? sessionKeyToGroupId.get(sessionKey);
   if (!groupId) {
     return { ok: false, error: 'No group context for this session' };
   }
@@ -3010,7 +3056,10 @@ export async function handleTaskComplete(
   }
 
   const taskInfo = sessionTaskGroupInfo.get(sessionKey);
-  const groupId = taskInfo?.groupId ?? sessionKeyToGroupId.get(sessionKey);
+  // task.* RPCs retain the legacy session-scoped group_id wire contract.
+  // V3 separates group and canonical Session IDs on chat.send.
+  const groupId = sessionKeyToBcsSessionId.get(sessionKey)
+    ?? taskInfo?.groupId ?? sessionKeyToGroupId.get(sessionKey);
   if (!groupId) {
     return { ok: false, error: 'No group context for this session' };
   }

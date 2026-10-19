@@ -67,3 +67,24 @@ export function DesktopStartProgress({ botId }: { botId: string }) {
     </div>
   );
 }
+
+/** 离线状态不查询初始化进度，避免把「打开客户端」和状态徽章挤在同一单元格中。 */
+export function DesktopOfflineNotice({ botId }: { botId: string }) {
+  return (
+    <div id={`desktop-progress-${botId}`} className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 text-xs">
+      <div>
+        <p className="m-0 text-sm font-medium">设备离线</p>
+        <p className="m-0 mt-1 text-muted-foreground">打开桌面客户端并保持在线后，即可继续使用此 Bot。</p>
+      </div>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => {
+          window.location.href = 'teamclaw://open';
+        }}
+      >
+        打开客户端
+      </Button>
+    </div>
+  );
+}

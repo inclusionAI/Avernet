@@ -45,6 +45,20 @@ The response is `{groups: [...]}`. Each group has `workflowId`, `signature`,
 `inputDigest`, `flowIds`, `sources`, `summarySources`, `summary`, `stale`,
 `aggregationStatus` and `aggregationId`.
 
+Paginated reads return `priority` with diagnostic severity, deduplicated observed
+issue-run counts (`day.affected`, `week.affected`) and `lastOccurredAtMs` from
+actual run timestamps. Only issue-associated flow IDs are queried; unrelated runs
+and node executions are not read. Missing/invalid or future timestamps are excluded.
+Default `sort=priority` orders by severity then latest occurrence; `sort=frequency`
+orders by seven-day observed count then latest occurrence; `sort=recent` uses latest
+occurrence. Filters and ordering apply before pagination, within the requested
+version scope. A resolved frozen analysis snapshot remains authoritative for both
+version filtering and source presentation when run records disappear or change;
+run bindings are a legacy fallback, and explicit identity mismatches stay unresolved.
+Retired window denominator/analysis/rate fields, `previousWeek` and
+`trend` are null, never fabricated zeros. Coverage and rates are deferred and are
+not prerequisites for issue/suggestion browsing.
+
 Browser eligibility uses the server-supported compact v2 input, not the legacy
 v1 default used by unversioned Bot requests. `not_generated` means eligible but
 not generated, not that a compatible Bot has been deployed. Bot preparation still

@@ -51,9 +51,6 @@ from secbaas.community.plugins.sandbox.arca import (
 from secbaas.community.plugins.sandbox.arca.aliyun_ack import (
     aliyun_ack_plugin_factory,
 )
-from secbaas.community.plugins.sandbox.arca.local_docker import (
-    LocalDockerArcaSandboxPlugin,
-)
 from secbaas.community.plugins.sandbox.arca.local_k8s import (
     local_k8s_plugin_factory,
 )
@@ -208,7 +205,6 @@ class PluginContainer(containers.DeclarativeContainer):
         config.plugins.sandbox.arca,
         stub=providers.Object(StubArcaSandboxPlugin),
         local_proc=providers.Object(LocalProcessArcaSandboxPlugin),
-        local_docker=providers.Object(LocalDockerArcaSandboxPlugin),
         local_k8s=providers.Singleton(
             local_k8s_plugin_factory,
             arca_utils=arca_utils,

@@ -71,3 +71,22 @@ describe('approval display configuration', () => {
     expect(await screen.findByText('操作失败: 您不是此审批的授权审批人')).toBeTruthy();
   });
 });
+
+describe('authorized handler visibility', () => {
+  it.each(['HUMAN_CONFIRM', 'SUPPLEMENT_COMPLETE', 'APPROVAL'])('shows all handlers for %s, including ID-only records to a viewer', async (approvalType) => {
+    show({ ...card, approvalType, isApprover: false, approverIds: ['001', '002', '003'], approverNames: ['Alex', '', '  '] });
+    expect(await screen.findByText('可处理人员')).toBeTruthy();
+    expect(screen.getByText('Alex')).toBeTruthy();
+    expect(screen.getByText('001')).toBeTruthy();
+    expect(screen.getByText('002')).toBeTruthy();
+    expect(screen.getByText('003')).toBeTruthy();
+  });
+});
+
+it('keeps a later name paired with its ID after a blank name', async () => {
+  show({ ...card, approverIds: ['001', '002', '003'], approverNames: ['Alex', '', 'Chris'] });
+  const chris = await screen.findByText('Chris');
+  expect(chris.textContent).toContain('003');
+  expect(chris.textContent).not.toContain('002');
+  expect(screen.getByText('002').textContent).not.toContain('Chris');
+});

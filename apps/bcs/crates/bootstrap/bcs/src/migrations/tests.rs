@@ -32,6 +32,41 @@ async fn index_exists(db: &dyn DbPlugin, index: &str) -> DbResult<bool> {
     Ok(!rows.is_empty())
 }
 
+#[tokio::test]
+async fn sqlite_group_context_supersede_columns_are_repaired_idempotently() -> DbResult<()> {
+    let db = LocalSqliteDbPlugin::new()?;
+    db.execute(DbStatement::new(
+        "CREATE TABLE bcs_group_contexts (
+            id INTEGER PRIMARY KEY,
+            name TEXT,
+            scope_level TEXT,
+            scope TEXT,
+            content TEXT,
+            visible_to_json TEXT,
+            collect_from_json TEXT,
+            supersedes INTEGER,
+            change_reason TEXT,
+            valid_from TEXT,
+            valid_to TEXT,
+            tx_time TEXT,
+            gmt_create TEXT,
+            gmt_modified TEXT
+        )",
+    ))
+    .await?;
+
+    ensure_sqlite_group_context_supersede_columns(&db).await?;
+    let columns = column_names(&db, "bcs_group_contexts").await?;
+    assert!(columns.iter().any(|column| column == "is_superseded"));
+    assert!(columns.iter().any(|column| column == "gmt_superseded"));
+    assert!(index_exists(&db, "uk_group_context_active_name_scope").await?);
+    assert!(index_exists(&db, "idx_group_context_name_scope_active").await?);
+    assert!(index_exists(&db, "idx_group_context_scope_active").await?);
+
+    ensure_sqlite_group_context_supersede_columns(&db).await?;
+    Ok(())
+}
+
 #[test]
 fn mysql_queue_tables_preserve_business_keys_with_audit_columns() {
     let deliveries = include_str!("../../../../../migrations/mysql/021_message_deliveries.sql");
@@ -39,13 +74,20 @@ fn mysql_queue_tables_preserve_business_keys_with_audit_columns() {
     for sql in [deliveries, policy] {
         assert!(sql.contains("id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT"));
         assert!(sql.contains("gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"));
-        assert!(sql.contains("gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"));
+        assert!(sql.contains(
+            "gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
+        ));
         assert!(sql.contains("PRIMARY KEY (id)"));
         assert!(sql.contains("updated_at_ms BIGINT NOT NULL"));
     }
     assert!(deliveries.contains("UNIQUE KEY uk_delivery_env_id (env, delivery_id)"));
     assert!(deliveries.contains("created_at_ms BIGINT NOT NULL"));
-    for key in ["env, source_message_id, target_bot_id", "env, run_id", "env, idempotency_key", "env, request_id"] {
+    for key in [
+        "env, source_message_id, target_bot_id",
+        "env, run_id",
+        "env, idempotency_key",
+        "env, request_id",
+    ] {
         assert!(deliveries.contains(&format!("UNIQUE ({key})")));
     }
     assert!(policy.contains("UNIQUE KEY uk_delivery_policy_env (env)"));
@@ -80,42 +122,30 @@ async fn fresh_sqlite_migrations_create_human_output_metadata() -> DbResult<()> 
     assert!(columns.iter().any(|column| column == "task_dream_mode"));
     assert!(columns.iter().any(|column| column == "user_visibility"));
     assert!(columns.iter().any(|column| column == "friend_ext"));
-    assert!(
-        columns
-            .iter()
-            .any(|column| column == "friend_check_in_strategy")
-    );
+    assert!(columns
+        .iter()
+        .any(|column| column == "friend_check_in_strategy"));
     let node_columns = column_names(&db, "bcs_state_machine_node_runs").await?;
     assert!(node_columns.iter().any(|column| column == "outcome"));
     assert!(node_columns.iter().any(|column| column == "responded_by"));
     let request_columns = column_names(&db, "bcs_human_input_requests").await?;
-    assert!(
-        request_columns
-            .iter()
-            .any(|column| column == "active_slot_key")
-    );
-    assert!(
-        request_columns
-            .iter()
-            .any(|column| column == "provider_message_ref")
-    );
+    assert!(request_columns
+        .iter()
+        .any(|column| column == "active_slot_key"));
+    assert!(request_columns
+        .iter()
+        .any(|column| column == "provider_message_ref"));
     assert!(request_columns.iter().any(|column| column == "created_at"));
     let session_columns = column_names(&db, "bcs_group_sessions").await?;
-    assert!(
-        session_columns
-            .iter()
-            .any(|column| column == "callback_lease_owner")
-    );
-    assert!(
-        session_columns
-            .iter()
-            .any(|column| column == "callback_lease_token")
-    );
-    assert!(
-        session_columns
-            .iter()
-            .any(|column| column == "callback_lease_until_ms")
-    );
+    assert!(session_columns
+        .iter()
+        .any(|column| column == "callback_lease_owner"));
+    assert!(session_columns
+        .iter()
+        .any(|column| column == "callback_lease_token"));
+    assert!(session_columns
+        .iter()
+        .any(|column| column == "callback_lease_until_ms"));
     assert!(index_exists(&db, "idx_session_callback_recovery").await?);
     assert_eq!(
         migration_rows(&db).await?,
@@ -194,10 +224,26 @@ async fn fresh_sqlite_migrations_create_human_output_metadata() -> DbResult<()> 
                 "sqlite".to_string()
             ),
             (22, "message_deliveries".to_string(), "sqlite".to_string()),
-            (23, "message_delivery_policy".to_string(), "sqlite".to_string()),
-            (24, "delivery_worker_queries".to_string(), "sqlite".to_string()),
-            (25, "delivery_context_selection".to_string(), "sqlite".to_string()),
-            (26, "delivery_pending_abort".to_string(), "sqlite".to_string()),
+            (
+                23,
+                "message_delivery_policy".to_string(),
+                "sqlite".to_string()
+            ),
+            (
+                24,
+                "delivery_worker_queries".to_string(),
+                "sqlite".to_string()
+            ),
+            (
+                25,
+                "delivery_context_selection".to_string(),
+                "sqlite".to_string()
+            ),
+            (
+                26,
+                "delivery_pending_abort".to_string(),
+                "sqlite".to_string()
+            ),
             (27, "run_reply_segments".to_string(), "sqlite".to_string()),
             (28, "provider_bot_webhook".to_string(), "sqlite".to_string()),
             (29, "fixed_loop_runtime".to_string(), "sqlite".to_string()),
@@ -208,7 +254,8 @@ async fn fresh_sqlite_migrations_create_human_output_metadata() -> DbResult<()> 
                 "sqlite".to_string()
             ),
             (32, "session_registry".to_string(), "sqlite".to_string()),
-            (33, "provider_slug".to_string(), "sqlite".to_string())
+            (33, "provider_slug".to_string(), "sqlite".to_string()),
+            (34, "group_context".to_string(), "sqlite".to_string())
         ]
     );
     Ok(())
@@ -220,7 +267,7 @@ async fn sqlite_migration_plan_reports_all_versions() -> DbResult<()> {
 
     let report = check_sqlite_migrations(&db).await?;
 
-    assert_eq!(report.pending_versions.len(), 33);
+    assert_eq!(report.pending_versions.len(), 34);
     assert_eq!(report.pending_versions[0].version, 1);
     assert_eq!(report.pending_versions[0].name, "init_schema");
     assert!(report.pending_versions[0].statements.is_empty());
@@ -323,7 +370,9 @@ async fn sqlite_callback_lease_migration_repairs_legacy_session_table() -> DbRes
 
 #[test]
 fn mysql_callback_lease_migration_adds_recovery_index() {
-    let migration = include_str!("../../../../../migrations/mysql/016_session_callback_lease_and_chat_runs.sql");
+    let migration = include_str!(
+        "../../../../../migrations/mysql/016_session_callback_lease_and_chat_runs.sql"
+    );
     assert!(migration.contains("ADD INDEX `idx_session_callback_recovery`"));
     for column in [
         "`env`",
@@ -383,15 +432,14 @@ fn mysql_rerun_lineage_migration_adds_unique_direct_child_constraint() {
     }
     assert!(migration.contains("ADD UNIQUE INDEX `uk_sm_run_rerun_of` (`env`, `rerun_of`)"));
     assert!(
-        migration
-            .contains("ADD INDEX `idx_sm_runs_root` (`env`, `root_run_id`, `created_at_ms`)")
+        migration.contains("ADD INDEX `idx_sm_runs_root` (`env`, `root_run_id`, `created_at_ms`)")
     );
     assert!(!migration.contains("SET `root_run_id` = `run_id`"));
 }
 
 #[tokio::test]
-async fn sqlite_one_shot_opening_message_override_migration_repairs_legacy_run_table()
--> DbResult<()> {
+async fn sqlite_one_shot_opening_message_override_migration_repairs_legacy_run_table(
+) -> DbResult<()> {
     let db = LocalSqliteDbPlugin::new()?;
     db.execute(DbStatement::new(
         "CREATE TABLE bcs_state_machine_runs (
@@ -405,11 +453,9 @@ async fn sqlite_one_shot_opening_message_override_migration_repairs_legacy_run_t
     add_sqlite_one_shot_opening_message_override_schema(&db).await?;
 
     let columns = column_names(&db, "bcs_state_machine_runs").await?;
-    assert!(
-        columns
-            .iter()
-            .any(|column| column == "opening_message_override_json")
-    );
+    assert!(columns
+        .iter()
+        .any(|column| column == "opening_message_override_json"));
     Ok(())
 }
 
@@ -417,9 +463,7 @@ async fn sqlite_one_shot_opening_message_override_migration_repairs_legacy_run_t
 fn mysql_one_shot_opening_message_override_migration_adds_nullable_column() {
     let migration =
         include_str!("../../../../../migrations/mysql/018_one_shot_opening_message_override.sql");
-    assert!(migration.contains(
-        "ADD COLUMN `opening_message_override_json` text DEFAULT NULL"
-    ));
+    assert!(migration.contains("ADD COLUMN `opening_message_override_json` text DEFAULT NULL"));
 }
 
 #[test]
@@ -429,10 +473,16 @@ fn mysql_human_participant_message_visibility_migration_is_additive() {
         "../../../../../migrations/mysql/020_human_participant_message_visibility.sql"
     );
     for column in [
-        "message_view_scope", "message_visibility_version", "visibility_domain",
-        "audience_kind", "audience_actor_ids_json",
+        "message_view_scope",
+        "message_visibility_version",
+        "visibility_domain",
+        "audience_kind",
+        "audience_actor_ids_json",
     ] {
-        assert!(!baseline.contains(&format!("`{column}`")), "{column} belongs to migration 020");
+        assert!(
+            !baseline.contains(&format!("`{column}`")),
+            "{column} belongs to migration 020"
+        );
     }
     assert!(!baseline.contains("idx_messages_session_audience_created"));
     assert!(migration.contains("ADD COLUMN `message_view_scope`"));
@@ -452,8 +502,7 @@ fn mysql_participant_tags_are_added_only_by_migration_011() {
 }
 
 #[tokio::test]
-async fn sqlite_human_participant_visibility_migration_repairs_legacy_tables()
--> DbResult<()> {
+async fn sqlite_human_participant_visibility_migration_repairs_legacy_tables() -> DbResult<()> {
     let db = LocalSqliteDbPlugin::new()?;
     db.execute(DbStatement::new(
         "CREATE TABLE bcs_group_participants (
@@ -495,18 +544,14 @@ async fn sqlite_human_participant_visibility_migration_repairs_legacy_tables()
     add_sqlite_human_participant_message_visibility_schema(&db).await?;
     add_sqlite_human_participant_message_visibility_schema(&db).await?;
 
-    assert!(
-        column_names(&db, "bcs_group_participants")
-            .await?
-            .iter()
-            .any(|column| column == "message_view_scope")
-    );
-    assert!(
-        column_names(&db, "bcs_group_sessions")
-            .await?
-            .iter()
-            .any(|column| column == "message_visibility_version")
-    );
+    assert!(column_names(&db, "bcs_group_participants")
+        .await?
+        .iter()
+        .any(|column| column == "message_view_scope"));
+    assert!(column_names(&db, "bcs_group_sessions")
+        .await?
+        .iter()
+        .any(|column| column == "message_visibility_version"));
     let message_columns = column_names(&db, "bcs_messages").await?;
     for expected in [
         "visibility_domain",
@@ -550,10 +595,7 @@ async fn sqlite_human_participant_visibility_migration_repairs_legacy_tables()
         None
     );
     assert_eq!(
-        bcs_db_api::db_get_column_opt::<String>(
-            &messages[0],
-            "audience_actor_ids_json"
-        )?,
+        bcs_db_api::db_get_column_opt::<String>(&messages[0], "audience_actor_ids_json")?,
         None
     );
     Ok(())
@@ -643,10 +685,26 @@ async fn sqlite_migrations_are_idempotent() -> DbResult<()> {
                 "sqlite".to_string()
             ),
             (22, "message_deliveries".to_string(), "sqlite".to_string()),
-            (23, "message_delivery_policy".to_string(), "sqlite".to_string()),
-            (24, "delivery_worker_queries".to_string(), "sqlite".to_string()),
-            (25, "delivery_context_selection".to_string(), "sqlite".to_string()),
-            (26, "delivery_pending_abort".to_string(), "sqlite".to_string()),
+            (
+                23,
+                "message_delivery_policy".to_string(),
+                "sqlite".to_string()
+            ),
+            (
+                24,
+                "delivery_worker_queries".to_string(),
+                "sqlite".to_string()
+            ),
+            (
+                25,
+                "delivery_context_selection".to_string(),
+                "sqlite".to_string()
+            ),
+            (
+                26,
+                "delivery_pending_abort".to_string(),
+                "sqlite".to_string()
+            ),
             (27, "run_reply_segments".to_string(), "sqlite".to_string()),
             (28, "provider_bot_webhook".to_string(), "sqlite".to_string()),
             (29, "fixed_loop_runtime".to_string(), "sqlite".to_string()),
@@ -657,7 +715,8 @@ async fn sqlite_migrations_are_idempotent() -> DbResult<()> {
                 "sqlite".to_string()
             ),
             (32, "session_registry".to_string(), "sqlite".to_string()),
-            (33, "provider_slug".to_string(), "sqlite".to_string())
+            (33, "provider_slug".to_string(), "sqlite".to_string()),
+            (34, "group_context".to_string(), "sqlite".to_string())
         ]
     );
     Ok(())
@@ -693,22 +752,18 @@ async fn sqlite_eventing_database_upgrades_to_group_opening_message() -> DbResul
 
     run_sqlite_migrations(&db).await?;
 
-    assert!(
-        column_names(&db, "bcs_groups")
-            .await?
-            .iter()
-            .any(|column| column == "opening_message_json")
-    );
+    assert!(column_names(&db, "bcs_groups")
+        .await?
+        .iter()
+        .any(|column| column == "opening_message_json"));
     // group_opening_message is no longer the tail migration (task_modes at v12
     // follows it), so assert it was re-applied as the version-11 row rather than
     // as the last row; re-applying while the column already exists must not
     // fail on a duplicate column.
-    assert!(
-        migration_rows(&db)
-            .await?
-            .iter()
-            .any(|(version, name, _)| *version == 11 && name == "group_opening_message")
-    );
+    assert!(migration_rows(&db)
+        .await?
+        .iter()
+        .any(|(version, name, _)| *version == 11 && name == "group_opening_message"));
     Ok(())
 }
 
@@ -724,7 +779,9 @@ async fn sqlite_group_opening_message_column_repair_adds_missing_column() -> DbR
     ensure_sqlite_group_opening_message_column(&db).await?;
     let columns = sqlite_table_columns(&db, "bcs_groups").await?;
     assert!(
-        columns.iter().any(|column| column == "opening_message_json"),
+        columns
+            .iter()
+            .any(|column| column == "opening_message_json"),
         "legacy bcs_groups must gain opening_message_json; got {columns:?}"
     );
     Ok(())
@@ -852,11 +909,9 @@ async fn sqlite_bootstrap_adds_internal_attributes_to_legacy_bots() -> DbResult<
     let columns = column_names(&db, "bcs_bots").await?;
     assert!(columns.iter().any(|column| column == "user_visibility"));
     assert!(columns.iter().any(|column| column == "friend_ext"));
-    assert!(
-        columns
-            .iter()
-            .any(|column| column == "friend_check_in_strategy")
-    );
+    assert!(columns
+        .iter()
+        .any(|column| column == "friend_check_in_strategy"));
     let rows = db
         .query(DbStatement::new(
             "SELECT user_visibility, friend_check_in_strategy FROM bcs_bots WHERE bot_uuid = 'legacy-bot'",

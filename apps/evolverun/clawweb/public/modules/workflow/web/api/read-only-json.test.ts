@@ -17,7 +17,7 @@ describe('bounded repair reads', () => {
     expect(requestInit?.method).toBe('POST')
     const body = new Headers(requestInit?.headers).get('Content-Encoding') === 'gzip'
       ? gunzipSync(requestInit?.body as Uint8Array).toString('utf8') : requestInit?.body as string
-    expect(JSON.parse(body)).toEqual({ workflowId: 'wf-1', pageSize: 1, previewSignatures })
+    expect(JSON.parse(body)).toEqual({ workflowId: 'wf-1', pageSize: 1, previewSignatures, metadataPage: 1 })
   })
 
   it('also aborts a stalled body-bearing preview read', async () => {
@@ -49,5 +49,17 @@ describe('bounded repair reads', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ items: [] }) }))
     expect(await repairBatches.candidates('wf-1')).toEqual({ items: [] })
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('assembles every metadata page and rejects mixed source snapshots', async () => {
+    const page=(number:number,digest='same')=>({inputDigest:'source',items:[],tasks:[{taskId:`task-${number}`}],repairSignatureKeys:[`signature-${number}`],facets:{nodes:[`node-${number}`],failureModes:[]},metadata:{page:number,totalPages:2,digest}})
+    const urls:string[]=[]
+    vi.stubGlobal('fetch',vi.fn(async(url:string)=>{urls.push(url);return {ok:true,json:async()=>page(url.includes('metadataPage=2')?2:1)}}))
+    const result=await repairBatches.candidates('wf-1')
+    expect(result.tasks.map(row=>row.taskId)).toEqual(['task-1','task-2'])
+    expect(result.facets.nodes).toEqual(['node-1','node-2'])
+    expect(urls).toHaveLength(2)
+    vi.stubGlobal('fetch',vi.fn(async(url:string)=>({ok:true,json:async()=>page(url.includes('metadataPage=2')?2:1,url.includes('metadataPage=2')?'changed':'same')})))
+    await expect(repairBatches.candidates('wf-1')).rejects.toThrow('建议来源已变化')
   })
 })

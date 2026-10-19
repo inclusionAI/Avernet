@@ -2,9 +2,11 @@ import type {
   DeliveryPolicy,
   GroupKind,
   GroupSessionPage,
+  GroupUpdatePatch,
   GroupView,
   IdentityView,
   ParticipantRole,
+  ParticipantView,
 } from '@/domain/collaboration';
 import {
   createGroup as createGroupApi,
@@ -22,7 +24,7 @@ import {
   loadGroupSessionsOrBcs as execLoadGroupSessionsOrBcs,
 } from './groupExecuteService';
 import type { DomainError, DomainResult } from './identityService';
-import { mapGroupListItem, mapSessionListItem } from './mappers';
+import { isHumanMentionNotifyMode, mapGroupListItem, mapSessionListItem } from './mappers';
 
 export interface PolicyResult {
   allowed: boolean;
@@ -159,6 +161,9 @@ export const groupService = {
         driverBotUuid: d.driver_bot_uuid,
         ...(d.initial_session_id ? { initialSessionId: d.initial_session_id } : {}),
         ...(d.membership ? { membership: d.membership } : {}),
+        ...(isHumanMentionNotifyMode(d.human_mention_notify_mode)
+          ? { humanMentionNotifyMode: d.human_mention_notify_mode }
+          : {}),
         isPublic: d.visibility === 'public',
         deliveryPolicy,
       };
@@ -182,6 +187,15 @@ export const groupService = {
    *  实现下沉 groupExecuteService（依赖注入通用 loadGroupDetail 规避循环依赖）。供 hook 选中补拉调用。 */
   loadGroupDetailOrBcs(groupId: string, viewBotId?: string): Promise<DomainResult<GroupView>> {
     return execLoadGroupDetailOrBcs(groupId, viewBotId, (id, vid) => this.loadGroupDetail(id, vid));
+  },
+
+  /** 侧栏群行头像堆成员补拉（2026-10-12 群行去文件夹、还原设计稿）：群列表接口
+   *  （BCS NormalGroupSummary）只回传 participant_count、不含 participants 明细，
+   *  群行渲染真实头像需按群拉一次详情；这里仅透出 participants，其他字段不消费。
+   *  拉取失败或详情无成员返回 null（不抛错），缓存与并发预算由调用方（useGroupWorkspace）负责。 */
+  async loadGroupParticipants(groupId: string, viewBotId?: string): Promise<ParticipantView[] | null> {
+    const res = await this.loadGroupDetailOrBcs(groupId, viewBotId);
+    return res.ok && res.data.participants.length > 0 ? res.data.participants : null;
   },
 
   /** 选中/展开群填充会话列表的统一入口（仅会话，不含群详情）：BCS 群走 loadBcsGroupSessions，
@@ -302,17 +316,14 @@ export const groupService = {
 
   async updateGroup(
     groupId: string,
-    patch: {
-      name?: string;
-      visibility?: 'private' | 'public';
-      deliveryPolicy?: DeliveryPolicy;
-    },
+    patch: GroupUpdatePatch,
   ): Promise<DomainResult<GroupView>> {
     try {
       await updateGroup(groupId, {
         name: patch.name,
         visibility: patch.visibility,
         delivery_policy: patch.deliveryPolicy ? { bot_final_delivery: patch.deliveryPolicy } : undefined,
+        human_mention_notify_mode: patch.humanMentionNotifyMode,
       });
       return this.loadGroupDetail(groupId);
     } catch (err) {

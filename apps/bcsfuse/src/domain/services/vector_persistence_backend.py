@@ -30,6 +30,7 @@ VectorPersistenceBackend Protocol
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
@@ -162,6 +163,38 @@ class VectorPersistenceBackend(Protocol):
 
 
 @runtime_checkable
+class BatchedVectorPersistenceBackend(Protocol):
+    """Read active vectors in ID order without materializing the full snapshot.
+
+    Each yielded page contains at most ``batch_size`` points. A caller can
+    replay changes after a checkpoint taken before iteration to reconcile
+    writes that race with the page scan.
+    """
+
+    def iter_batches(self, batch_size: int) -> Iterator[list[VectorPoint]]:
+        """Yield non-empty, bounded pages of active vectors in ID order."""
+        ...
+
+
+@runtime_checkable
+class PointLookupVectorPersistenceBackend(Protocol):
+    """Optional durable primary-key lookup for one active vector."""
+
+    def load_by_id(self, id: str) -> VectorPoint | None:
+        """Return the exact active point, or None when it is absent/deleted."""
+        ...
+
+
+@runtime_checkable
+class WorkerScopedVectorPersistenceBackend(Protocol):
+    """Optional durable lookup for a Worker's active vectors."""
+
+    def load_by_worker(self, worker_id: str) -> list[VectorPoint]:
+        """Return active points whose payload owns the exact worker_id."""
+        ...
+
+
+@runtime_checkable
 class IncrementalVectorPersistenceBackend(VectorPersistenceBackend, Protocol):
     """Persistence backend that exposes an ordered durable change feed."""
 
@@ -170,8 +203,23 @@ class IncrementalVectorPersistenceBackend(VectorPersistenceBackend, Protocol):
         ...
 
 
+@runtime_checkable
+class BatchedIncrementalVectorPersistenceBackend(Protocol):
+    """Read a durable change feed in bounded, ordered pages."""
+
+    def iter_change_batches_since(
+        self, checkpoint: float, batch_size: int
+    ) -> Iterator[VectorChangeSet]:
+        """Yield pages of at most ``batch_size`` mutations after checkpoint."""
+        ...
+
+
 __all__ = [
+    "BatchedIncrementalVectorPersistenceBackend",
+    "BatchedVectorPersistenceBackend",
     "IncrementalVectorPersistenceBackend",
+    "PointLookupVectorPersistenceBackend",
     "VectorChangeSet",
     "VectorPersistenceBackend",
+    "WorkerScopedVectorPersistenceBackend",
 ]

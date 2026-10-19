@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="600" viewBox="0 0 1120 600" font-family="system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" role="img" aria-label="Orchestration lives inside the strategy; the platform owns one fixed pipeline">
+<title>Orchestration lives inside the strategy; the platform owns one fixed pipeline</title>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#475569"/></marker><marker id="ahl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/></marker><marker id="ahp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#7c3aed"/></marker></defs>
+<rect width="1120" height="600" fill="#ffffff"/>
+<rect x="20" y="16" width="1080" height="340" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="36" y="36" font-size="13" font-weight="600" fill="#334155" text-anchor="start" dominant-baseline="middle">Strategy side — ClawEvolve writes its own orchestration inside run(ctx). The platform does not know these stages exist.</text>
+<text x="1084" y="36" font-size="11" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle" font-style="italic">each row: one way to write run(ctx)</text>
+<text x="30" y="77.5" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start" dominant-baseline="middle">bot_evolution</text>
+<text x="30" y="90.5" font-size="11" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">diagnose-first (with sessions)</text>
+<rect x="215" y="66" width="140" height="36" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="285.0" y="84.0" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">experience.sessions()</text>
+<path d="M 355 84 L 369 84" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="369" y="66" width="160" height="36" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="449.0" y="84.0" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">models.complete() · diagnose</text>
+<path d="M 529 84 L 543 84" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="543" y="66" width="150" height="36" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="618.0" y="84.0" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">add_train_cases() · plan</text>
+<path d="M 693 84 L 700 84" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<text x="30" y="137.5" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start" dominant-baseline="middle">bot_evolution</text>
+<text x="30" y="150.5" font-size="11" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">direct-goal (no sessions)</text>
+<rect x="215" y="126" width="100" height="36" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="265.0" y="144.0" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">params.goal</text>
+<path d="M 315 144 L 329 144" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="329" y="126" width="150" height="36" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="404.0" y="144.0" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">add_train_cases() · plan</text>
+<path d="M 479 144 L 700 144" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<text x="30" y="197.5" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start" dominant-baseline="middle">skill_evolution</text>
+<text x="30" y="210.5" font-size="11" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">allowed_genes: [skills]</text>
+<rect x="215" y="186" width="470" height="36" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="450.0" y="204.0" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">as diagnose-first, scoped to the skill named in params; the patch touches skills/&lt;name&gt; only</text>
+<path d="M 685 204 L 700 204" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<text x="30" y="257.5" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start" dominant-baseline="middle">skill_hardening</text>
+<text x="30" y="270.5" font-size="11" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">one round, no train evaluation</text>
+<rect x="215" y="246" width="150" height="36" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="290.0" y="264.0" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">workspace.materialise()</text>
+<path d="M 365 264 L 379 264" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="379" y="246" width="150" height="36" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="454.0" y="264.0" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">agents.start(hardening)</text>
+<path d="M 529 264 L 543 264" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="543" y="246" width="100" height="36" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="593.0" y="264.0" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">ws.to_patch()</text>
+<path d="M 643 264 L 657 264" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="657" y="246" width="130" height="36" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="722.0" y="264.0" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">candidates.submit()</text>
+<path d="M 787 264 L 801 264" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="801" y="246" width="140" height="36" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="871.0" y="264.0" font-size="10.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">candidates.verdict(id)</text>
+<rect x="700" y="56" width="392" height="176" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="896" y="74" font-size="12" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Round n (n ≤ max_rounds) · keys &lt;run_id&gt;/round-n/…</text>
+<text x="712" y="96" font-size="10.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">workspace.materialise(base, key)  → sandbox copy</text>
+<text x="712" y="117" font-size="10.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">agents.start(&quot;clawevolve-tune&quot;)  → op id · wait</text>
+<text x="712" y="138" font-size="10.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">agents.start(&quot;clawevolve-review&quot;)  → op id · wait</text>
+<text x="712" y="159" font-size="10.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">evaluation.start_train(ws)  → score + critiques (train only)</text>
+<text x="712" y="180" font-size="10.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">own filter (successor of action_accept) → candidates.submit(ws.to_patch())</text>
+<text x="712" y="201" font-size="10.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">candidates.verdict(id) every poll_s → accept? next round builds on it</text>
+<rect x="215" y="296" width="877" height="44" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="30" y="318" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start" dominant-baseline="middle">a future flow</text>
+<text x="30" y="331" font-size="11" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">BCN, model, …</text>
+<text x="653" y="311" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">A new flow is a new strategy version: no platform change. Only a resource the catalog lacks needs one,</text>
+<text x="653" y="327" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">and then it is a catalog entry (Layer B), proposed once a second strategy needs it (03 §4, R19).</text>
+<path d="M 520 356 L 520 384" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="508" y="370" font-size="11.5" font-weight="400" fill="#475569" text-anchor="end" dominant-baseline="middle">candidates.submit(patch, rationale, evidence)</text>
+<path d="M 600 384 L 600 356" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="612" y="370" font-size="11.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">candidates.verdict(id): status + validation aggregates only</text>
+<rect x="20" y="386" width="1080" height="198" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="36" y="406" font-size="13" font-weight="600" fill="#334155" text-anchor="start" dominant-baseline="middle">Platform side — one fixed pipeline, identical for every strategy. A strategy cannot alter, skip, or run it.</text>
+<rect x="36" y="426" width="122" height="74" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="97.0" y="448.82" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">record</text>
+<text x="97.0" y="464.04" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">candidate revision</text>
+<text x="97.0" y="478.21" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">candidate/&lt;run&gt;/&lt;n&gt;</text>
+<path d="M 158 463 L 170 463" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="170" y="426" width="122" height="74" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="231.0" y="448.82" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">floor</text>
+<text x="231.0" y="464.04" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">schema · genes &amp; pins</text>
+<text x="231.0" y="478.21" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">secret / PII scan</text>
+<path d="M 292 463 L 304 463" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="304" y="426" width="122" height="74" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="365.0" y="448.82" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">verify</text>
+<text x="365.0" y="464.04" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">hidden splits · paired</text>
+<text x="365.0" y="478.21" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">binding's profile</text>
+<path d="M 426 463 L 438 463" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="438" y="426" width="122" height="74" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="499.0" y="448.82" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">gate</text>
+<text x="499.0" y="464.04" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">verdict + floor</text>
+<text x="499.0" y="478.21" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">risk tier T0–T3</text>
+<path d="M 560 463 L 572 463" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="572" y="426" width="122" height="74" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="633.0" y="448.82" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">review</text>
+<text x="633.0" y="464.04" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">auto ≤ ceiling, else</text>
+<text x="633.0" y="478.21" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">review queue · approve</text>
+<path d="M 694 463 L 706 463" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="706" y="426" width="122" height="74" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="767.0" y="448.82" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">promote</text>
+<text x="767.0" y="464.04" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">active → r42</text>
+<text x="767.0" y="478.21" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">previous → r41 (CAS)</text>
+<path d="M 828 463 L 840 463" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="840" y="426" width="122" height="74" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+<text x="901.0" y="448.82" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">apply</text>
+<text x="901.0" y="464.04" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">Manifest apply</text>
+<text x="901.0" y="478.21" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">→ engine · running bot</text>
+<path d="M 962 463 L 974 463" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)"/>
+<rect x="974" y="426" width="122" height="74" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="1035.0" y="448.82" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">ledger</text>
+<text x="1035.0" y="464.04" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">every step, accepted</text>
+<text x="1035.0" y="478.21" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">or rejected, is kept</text>
+<text x="560" y="528" font-size="11" font-weight="400" fill="#334155" text-anchor="middle" dominant-baseline="middle">Analogy: the platform is the CI runner, the artifact store, and the deploy gate; the strategy is the pipeline script a team keeps in its own repo.</text>
+<text x="560" y="548" font-size="11" font-weight="400" fill="#334155" text-anchor="middle" dominant-baseline="middle">Default pipeline shipped by the platform: platform/manual-patch (reference) and clawevolve/bot-evolution (primary default), both ordinary strategies (04).</text>
+<text x="560" y="568" font-size="11" font-weight="400" fill="#334155" text-anchor="middle" dominant-baseline="middle">Owners choose per bot, in the bindings: which strategy, trigger, allowed genes, verification profile, budget, params (06 §3).</text>
+</svg>

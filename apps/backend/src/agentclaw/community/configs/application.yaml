@@ -195,11 +195,25 @@ user_config:
   # test_shipped_config_no_corp_identifiers 守卫）。实际工号由各部署环境的
   # overlay 配置提供（见对应环境覆盖配置），不进入社区源码。
 
+  # Privileged cron operations deny everyone until the deployment supplies IDs.
+  admin:
+    cron_admin: []
+
   # 操作员白名单（控制 /api/v1/access/allow、/disallow 等管理接口的调用权限）
   # 中性默认为空（无特权操作员）；corp env overlay 提供工号列表，community 在
   # application-community.yaml 中列自己的 admin subject id。
   whitelist:
     operator_names: []
+
+  # Public API (/openapi/v1) caller-identity policy.
+  # user_id_bypass: ``user_id`` query values accepted as-is on every user-scoped
+  # public operation, whoever the authenticated person is — the "must name
+  # yourself" 403 is skipped for them. Empty = no exemption (the default).
+  # MUST stay empty in pre/prod: the backend refuses to boot there when this
+  # list is non-empty (OpenApiUserIdBypassConfigModule, resolved by
+  # build_injector on every profile), and tests pin the shipped value to empty.
+  openapi:
+    user_id_bypass: []
 
   # 浏览器 CORS allow-list — 中性默认仅 localhost origin。corp env overlay 追加
   # 公司前端 origin + envspot/tern-dev 正则；community 在

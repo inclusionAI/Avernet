@@ -1,3 +1,4 @@
+import { GroupIdentityDisplay } from './GroupIdentityDisplay';
 import { CreateGroupSessionModal } from '@/components/CollaborationSquare/CreateGroupSessionModal';
 import GroupCard from '@/components/CollaborationSquare/GroupCard';
 import { GroupMembersModal } from '@/components/CollaborationSquare/GroupMembersModal';
@@ -14,7 +15,7 @@ const LOAD_MORE_PRELOAD_DISTANCE = 420;
 
 function GroupLoadingState() {
   return (
-    <div aria-label="正在加载公开协作群" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <div aria-label="正在加载公开协作群" className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
       {[0, 1, 2].map((item) => (
         <Card key={item}>
           <Skeleton.Card />
@@ -58,11 +59,17 @@ export function PublicGroupSquareSection({ square, scrollRootRef, canLoadMore }:
 
   return (
     <>
-      <SquareSearchBar
-        resource="group"
-        query={square.groupQuery}
-        onQueryChange={(query) => square.setQuery('group', query)}
-      />
+      <div className="flex flex-col items-end gap-3 md:flex-row md:items-center md:justify-end">
+        <SquareSearchBar
+          resource="group"
+          query={square.groupQuery}
+          onQueryChange={(query) => square.setQuery('group', query)}
+          className="w-full md:max-w-md"
+        />
+        <div className="w-full max-w-[280px] md:w-[280px] md:shrink-0">
+          <GroupIdentityDisplay />
+        </div>
+      </div>
       {square.loading && <GroupLoadingState />}
       {!square.loading && square.error && (
         <Card>
@@ -83,7 +90,7 @@ export function PublicGroupSquareSection({ square, scrollRootRef, canLoadMore }:
         </Card>
       )}
       {!square.loading && !square.error && square.visibleGroups.length > 0 && (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
           {square.visibleGroups.map((group) => (
             <GroupCard
               key={group.id}

@@ -53,9 +53,19 @@ internal_dependencies:
   - agentclaw.community.core.task.repository.models  # SQLite ORM side-effect import for task_* table creation
   - agentclaw.community.core.task.task_discovery.discovered_task_models  # SQLite ORM side-effect import for ac_discovered_tasks table creation
   - agentclaw.community.core.workspace
+  - agentclaw.community.core.agentswarm.config.settings  # factory derives its setup-timeout default from the swarm config
+  - agentclaw.community.core.agentswarm.domain.models  # swarm domain vocabulary typed in the local subagent/artifact impls
+  - agentclaw.community.core.agentswarm.repository  # per-attempt ledger (agent_attempt) sink injected into the factory's terminal destroy sweep
+  - agentclaw.community.core.agentswarm.runtime.observability  # D39 metrics facade consumed by local swarm plugins
+  - agentclaw.community.core.agentswarm.runtime.security  # security gate helpers used by local swarm plugins
+  - agentclaw.community.core.agentswarm.service.protocols  # swarm service protocol types referenced by local impls
   - agentclaw.community.kernel
   - agentclaw.community.log
   - agentclaw.community.plugin_api.approval_workflow
+  - agentclaw.community.plugin_api.agentswarm.artifact
+  - agentclaw.community.plugin_api.agentswarm.bot
+  - agentclaw.community.plugin_api.agentswarm.llm
+  - agentclaw.community.plugin_api.agentswarm.subagent
   - agentclaw.community.plugin_api.auth
   - agentclaw.community.plugin_api.auth_relationship
   - agentclaw.community.plugin_api.base
@@ -74,9 +84,11 @@ internal_dependencies:
   - agentclaw.community.plugin_api.health_probe
   - agentclaw.community.plugin_api.http_client
   - agentclaw.community.plugin_api.impl_registry
+  - agentclaw.community.plugin_api.local_skill_security_provider
   - agentclaw.community.plugin_api.mcp_auth
   - agentclaw.community.plugin_api.mcp_center
   - agentclaw.community.plugin_api.notify_sender
+  - agentclaw.community.plugin_api.task_discovery_notify
   - agentclaw.community.plugin_api.model_api
   - agentclaw.community.plugin_api.models
   - agentclaw.community.plugin_api.object_storage
@@ -95,6 +107,8 @@ internal_dependencies:
   - agentclaw.community.plugin_api.token_exchange
   - agentclaw.community.plugin_api.tracer
   - agentclaw.community.plugins.prod.baas_service    # LocalBaasService inherits ProdBaasService to reuse httpx logic, override URL only
+  - agentclaw.community.plugins.community.agentswarm.bot_subagent  # the local DefaultSubagentFactory builds bot-kind subagents through the community impl
+  - agentclaw.community.plugins.community.agentswarm.host  # bot_id_for: the deterministic swarm-persona bot identity the local factory shares with the platform adapter
   - agentclaw.community.utils.env_utils
   - agentclaw.community.utils.avernet_tenant_guard  # Shared tenant isolation for local SQLite ORM models
 ```

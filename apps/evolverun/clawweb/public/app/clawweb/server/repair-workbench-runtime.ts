@@ -1,3 +1,10 @@
+import { WorkflowSnapshotRepository } from '@avernet/clawweb-shared/server/services/workflow-snapshot';
+import { repairSourceSnapshot } from '@avernet/workflow/server/services/repair-source-snapshot';
+import { resolveAnalysisConfig } from '@avernet/clawweb-shared/server/db';
+import { createProposalModel } from './repair-proposal-model.js';
+import { createProposalCoordinator, type ProposalModelPort } from '@avernet/workflow/server/services/repair-proposal-integration';
+import { createRepairTrialService } from '@avernet/workflow/server/services/repair-trial-service';
+import type { RepairTrialPort } from '@avernet/workflow/server/contracts/repair-trial';
 /** Shared composition root for the public and internal ClawWeb Hosts.
  * Workflow owns control-plane rules; old repositories supply read-only analysis sources.
  * The Host supplies verified identity and, independently, its AIS execution adapter.
@@ -13,12 +20,25 @@ import { createRepairBatchesRouter } from '@avernet/workflow/server/routes/repai
 import { createRepairAuthorizer, type RepairPrincipalResolver } from '@avernet/workflow/server/routes/repair-authorization';
 import { RepairBatchError } from '@avernet/workflow/server/contracts/repair-batch';
 import type { RepairExecutionPort } from '@avernet/workflow/server/contracts/repair-workbench';
+import type { RepairPublicationPort } from '@avernet/workflow/server/contracts/repair-release';
+import { createRepairReleaseService } from '@avernet/workflow/server/services/repair-release-service';
+import { createRepairVerificationService } from '@avernet/workflow/server/services/repair-verification-service';
+import { createWorkflowAutomation } from '@avernet/workflow/server/services/workflow-automation-service';
+import { RepairAutomationDeniedError, type WorkflowAutomationPorts, type WorkflowAutomationService } from '@avernet/workflow/server/contracts/workflow-automation';
+import type { AutoAnalysisSettings } from '@avernet/workflow/server/services/task-guard/auto-analysis-settings';
 
 export function createWorkflowRepairRuntime(db: IDatabase, options: {
   principal: RepairPrincipalResolver;
+  environment?: string;
+  proposalModel?: ProposalModelPort;
   execution?: RepairExecutionPort;
-}): { service: ReturnType<typeof createRepairWorkbenchService>; router: Router } {
+  publication?: RepairPublicationPort;
+  trial?: RepairTrialPort;
+  automation?: { settings: AutoAnalysisSettings; ports: WorkflowAutomationPorts; now?: () => number };
+}): { service: ReturnType<typeof createRepairWorkbenchService>; release: ReturnType<typeof createRepairReleaseService>; trials: ReturnType<typeof createRepairTrialService>; router: Router; automation: WorkflowAutomationService | undefined; monitor: { reconcile(): Promise<number> } } {
   const sources = createRepairSourcePort({
+    snapshot: repairSourceSnapshot,
+    snapshotRuns: (tx, flowIds) => new WorkflowSnapshotRepository(tx).forRuns(flowIds),
     groups: (tx, workflowId, sourceOptions) => new IssueAggregationRepository(tx).listSources(workflowId, sourceOptions),
     suggestions: async (tx, workflowId, sourceOptions) => {
       const rows: RepairSuggestionSource[] = [];
@@ -40,6 +60,7 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
     },
     evidence: (tx, _workflowId, eventIds) => new WorkflowEvolutionRepository(tx).listEvidenceByEventIds(eventIds),
   });
+  sources.activeSnapshot = (tx, workflowId) => new WorkflowSnapshotRepository(tx).active(workflowId);
   sources.readVersion = async (tx, workflowId) => {
     // No JSON bodies: independently committed analysis, legacy sources and human
     // dispositions all invalidate the bounded read projection on every instance.
@@ -48,6 +69,7 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
       ['workflow_healing_diagnoses', 'id', 'gmt_modified'],
       ['workflow_healing_suggestions', 'id', 'gmt_modified'],
       ['workflow_repair_items', 'state_version', 'updated_at_ms'],
+      ['workflow_deploy_history', 'is_active', 'deploy_number'],
     ];
     const versions = [];
     for (const [table, version, updated] of tables) {
@@ -56,7 +78,54 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
     }
     return JSON.stringify(versions);
   };
-  const service = createRepairWorkbenchService(db, sources, options.execution);
+  let automation: WorkflowAutomationService | undefined;
+  const execution = options.execution ? { ...options.execution, dispatch: async (request: Parameters<RepairExecutionPort['dispatch']>[0]) => {
+    if (request.input.automation) {
+      if (!automation) throw new RepairAutomationDeniedError('AUTOMATION_UNAVAILABLE');
+      await automation.authorizeDraft({ workflowId: request.input.baseline.workflowId, actorId: request.actorId, taskId: request.input.taskId,
+        origin: request.input.automation, itemIds: request.input.items.map(item => item.itemId) });
+    }
+    return options.execution!.dispatch(request);
+  } } : undefined;
+  const proposals = execution && options.environment ? createProposalCoordinator({ db, scopeKey: options.environment, hydrate: async (workflowId, items) => {
+    const hydrated = sources.hydrate ? await sources.hydrate(db, workflowId, items) : items;
+    for (const item of hydrated) for (const diagnosis of (Array.isArray(item.context?.diagnoses) ? item.context.diagnoses : []) as Array<Record<string, unknown>>) {
+      const row = (await db.query<{workflow_deploy_number:number}>('SELECT workflow_deploy_number FROM flow_runs WHERE workflow_id = ? AND flow_id = ?', [workflowId,diagnosis.flowId]))[0];
+      diagnosis.observedDeployNumber = row?.workflow_deploy_number ?? null;
+    }
+    return hydrated as import('@avernet/workflow/server/contracts/repair-workbench').RepairInboxItem[];
+  }, read: workflowId => service.proposalSnapshot(workflowId),
+    model: options.proposalModel ?? createProposalModel(resolveAnalysisConfig()) }) : undefined;
+  const service = createRepairWorkbenchService(db, sources, execution, proposals);
+  if (options.automation) automation = createWorkflowAutomation({ db, workbench: service, ...options.automation });
+  const release = createRepairReleaseService({ db, workbench: service, publisher: options.publication });
+  const trials = createRepairTrialService({ db, workbench: service, port: options.trial });
   const authorize = createRepairAuthorizer(options.principal, new BotWorkflowPermissionRepository(db));
-  return { service, router: createRepairBatchesRouter({ service, authorize }) };
+  const verification = createRepairVerificationService(db, options.publication);
+  const monitor = { async reconcile() {
+    // Aggregation is an independent durable worker, never part of single-case dispatch.
+    void proposals?.tick().catch(() => console.warn('[workflow-repair] proposal aggregation worker will retry'));
+    const count = await service.reconcile();
+    let after = '';
+    const status = db.dialect.driver === 'better-sqlite3' ? "JSON_EXTRACT(body_json, '$.status')"
+      : "JSON_UNQUOTE(JSON_EXTRACT(body_json, '$.status'))";
+    for (;;) {
+      const pending = await db.query<{ record_id: string; body_json: string }>(`SELECT record_id, body_json FROM workflow_repair_release_records
+        WHERE record_kind = 'deployment' AND ${status} IN ('dispatching', 'running', 'uncertain')
+        AND record_id > ? ORDER BY record_id LIMIT 100`, [after]);
+      if (!pending.length) break;
+      for (const row of pending) {
+        const deployment = JSON.parse(row.body_json);
+        if (['dispatching', 'running', 'uncertain'].includes(deployment.status)) {
+          try { await release.reconcile(deployment.actorId, deployment.taskId, deployment.id); }
+          catch { console.warn('[workflow-repair] publication reconciliation requires attention', { deploymentId: deployment.id }); }
+        }
+      }
+      after = pending.at(-1)!.record_id;
+    }
+    await verification.automatic.reconcile();
+    await automation?.tick();
+    return count;
+  } };
+  return { service, release, trials, monitor, automation, router: createRepairBatchesRouter({ service, authorize, release, trials, verification }) };
 }

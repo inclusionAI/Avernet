@@ -743,6 +743,14 @@ impl SessionRepoPort for MySqlSessionStore {
         bot_uuid: &str,
     ) -> ServiceResult<Vec<String>> { self.repo_try_list_group_ids_by_session_participant(bot_uuid).await }
 
+    async fn has_group_session_participant(
+        &self,
+        group_id: &str,
+        actor_ids: &[String],
+    ) -> ServiceResult<bool> {
+        self.repo_has_group_session_participant(group_id, actor_ids).await
+    }
+
     async fn delete(&self, session_id: &str) -> ServiceResult<bool> { self.repo_delete(session_id).await }
 
     async fn collect(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<()> { self.repo_collect(session_id, bot_uuid).await }

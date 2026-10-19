@@ -9,6 +9,9 @@
       "collaborator_admin": [
         "100000"
       ],
+      "cron_admin": [
+        "100000"
+      ],
       "device_admin": [
         "100000"
       ],
@@ -27,6 +30,10 @@
     },
     "agentclawproxy": {
       "base_url": "http://127.0.0.1:9999"
+    },
+    "agentswarm": {
+      "artifact_store_root": "${AGENTSWARM_ARTIFACT_ROOT:-/tmp/agentswarm/artifacts}",
+      "enabled": true
     },
     "aidesktop_root": "~/.aidesktop",
     "antcode": {
@@ -56,12 +63,21 @@
       "desktop_template_uuid": "TEMPLATE-f996ecc77d224ef7bd80757d8d2bcd0d",
       "eval_template_uuid": "TEMPLATE-2e3192faa8994fe8bb8bc7be8671b431",
       "personal_bot_template_uuid": "TEMPLATE-54942a40aa794eaaae2be166f94890ed",
+      "runtime_identity_metadata": true,
       "teclaw_template_uuid": "TEMPLATE-3106e731ffb04e0285e27c387e153737",
       "template_uuid": "TEMPLATE-4d0e2849d7004111836333de782b95d8",
       "tenant": "team_claw"
     },
     "bcn": {
       "base_url": "http://localhost:21000"
+    },
+    "bcs_client": {
+      "base_url": "http://localhost:21000",
+      "base_url_pre": "http://localhost:21000",
+      "secret_secret": "local-noop",
+      "task_callback_url": "http://localhost:8888",
+      "task_callback_url_pre": "http://localhost:8888",
+      "token_secret": "local-noop"
     },
     "bcsfuse": {
       "base_url": "https://bcsfuse-pre.teamclaw.com"
@@ -172,6 +188,15 @@
     },
     "mock_tcauth": true,
     "nas_mount_root": "/home/admin/.bot_shared_nas/arca/arcaagentclaw",
+    "openapi": {
+      "user_id_bypass": []
+    },
+    "openapi_bot": {
+      "api_key_prefix": "${api_key_prefix:-}",
+      "api_key_secret": "${api_key_secret:-}",
+      "base_url": "http://localhost:8890",
+      "base_url_pre": "http://localhost:8890"
+    },
     "openclaw": {
       "skills_repo_url": ""
     },
@@ -211,6 +236,9 @@
       "frontend_url": "http://localhost:8000",
       "robot_code": "dummy-robot-code"
     },
+    "task_dispatch": {
+      "backend_url": "http://localhost:8888"
+    },
     "task_queue_worker": {
       "enabled": true,
       "poll_interval_seconds": 0.2,
@@ -245,6 +273,7 @@
       "desktop_ttl_minutes": 0,
       "eval_template_uuid": "TEMPLATE-2e3192faa8994fe8bb8bc7be8671b431",
       "personal_bot_template_uuid": "TEMPLATE-54942a40aa794eaaae2be166f94890ed",
+      "runtime_identity_metadata": true,
       "teclaw_template_uuid": "TEMPLATE-3106e731ffb04e0285e27c387e153737",
       "template_uuid": "TEMPLATE-4d0e2849d7004111836333de782b95d8",
       "tenant": "team_claw"

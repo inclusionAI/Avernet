@@ -239,6 +239,7 @@ class ClawBotService(BotService):
         headers = self._get_headers(sandbox_id)
 
         client = await self._client_pool.get(sandbox_id, url, headers)
+
         try:
             auth_token = context.build_auth_token() if context else None
             app_id = context.app_id if context else None
@@ -304,6 +305,7 @@ class ClawBotService(BotService):
         headers = self._get_headers(sandbox_id)
 
         client = await self._client_pool.get(sandbox_id, url, headers)
+
         auth_token = context.build_auth_token() if context else None
         app_id = context.app_id if context else None
 
@@ -366,6 +368,7 @@ class ClawBotService(BotService):
         headers = self._get_headers(sandbox_id)
 
         client = await self._client_pool.get(sandbox_id, url, headers)
+
         try:
             auth_token = context.build_auth_token() if context else None
             await client.inject_message(
@@ -546,10 +549,29 @@ class ClawBotService(BotService):
         headers = self._get_headers(sandbox_id)
 
         try:
-            client = await self._client_pool.get(sandbox_id, url, headers)
+            client = await self._client_pool.get(
+                sandbox_id, url, headers, session_key=session_id
+            )
+
             # 注意：chat.abort 的 run_id 是引擎侧 run 标识，与 baas_bot_run.run_id
             # 语义不同，不能把后者透传过去；用 sessionKey 定位即可。
-            await client.chat_abort(session_key=session_id)
+            # R3-3：A2A 传输下 chat_abort ok=True 只代表传输任务已取消、
+            # 结果流已终结；引擎停止确认以 engineAbort 附录为准——非
+            # confirmed 落结构化告警，不得推断执行已停止。
+            abort_result = await client.chat_abort(session_key=session_id)
+            if (
+                isinstance(abort_result, dict)
+                and abort_result.get("a2a")
+                and abort_result.get("ok")
+                and abort_result.get("engineAbort") != "confirmed"
+            ):
+                logger.warning(
+                    "[ClawBotService.abort] transport cancelled but engine "
+                    "stop unconfirmed: session_id=%s engineAbort=%s "
+                    "(engine may still be running)",
+                    session_id,
+                    abort_result.get("engineAbort"),
+                )
             logger.info(
                 "[ClawBotService.abort] engine abort sent: session_id=%s",
                 session_id,

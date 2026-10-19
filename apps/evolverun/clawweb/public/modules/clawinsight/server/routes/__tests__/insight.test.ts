@@ -19,8 +19,8 @@ import { GovernanceRuleProvider } from "../../services/insight/governance-rule-p
 import { InsightAutoRepairRepository, upsertRuleTrust } from "../../repositories/insight-auto-repair-repository.js";
 import { readAutoRepairRule } from "../../services/insight/auto-repair-policy.js";
 import type { InsightTaskService } from "../../services/evolve/insight-task-service.js";
-import type { RepairTaskService } from "../../services/repair/repair-runtime.js";
-import { RepairError } from "../../services/repair/errors.js";
+import type { RepairTaskService } from "../../services/repair/full-repair/repair-runtime.js";
+import { AgentToolError as RepairError } from "../../services/repair/common/agent-tools/errors.js";
 import type { RuleEvolutionService } from "../../services/insight/rule-evolution-service.js";
 import { createInsightRouter } from "../insight.js";
 

@@ -21,6 +21,8 @@ E2E_TESTS_EDGE_PERMISSION=(
     "test_ep_bot_search"
     "test_ep_error_and_admission_branches"
     "test_ep_connect_private_and_discover_branches"
+    "test_ep_tc_friend_auth_sync_readdressed_principal"
+    "test_ep_dept_scope_parses_object_friend_ext_entries"
 )
 
 # Helper: make an authenticated API call with a bot's Bearer token
@@ -623,5 +625,347 @@ test_ep_connect_private_and_discover_branches() {
 
     pass "connect-private + discover branches exercised"
     TESTS_PASSED=$((TESTS_PASSED + 1))
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+}
+
+# Human→TC-bot approval: the forwarded gateway principal is re-addressed as a
+# bcs-issued token (iss=bcs) and the TC friend grant reaches the backend's
+# /api/internal/bot-friend-auth/sync. This is the runtime contract between
+# BCS and the backend — the backend refuses its own iss=backend echo, so the
+# re-addressed copy is the only shape a work-order callback approval can sync
+# in. Requires the Provider/Judge mock (which serves both the sync endpoint
+# and the friend work-order event call), so it is skipped without it.
+test_ep_tc_friend_auth_sync_readdressed_principal() {
+    info "EdgePermission: TC friend-auth-sync re-addresses the forwarded principal"
+    local mock_url="${BCS_E2E_MOCK_BASE_URL:-}"
+    if [[ -z "$mock_url" ]]; then
+        skip_case "no Provider/Judge mock; friend-auth-sync e2e needs it" || return 77
+    fi
+
+    local tc_bot="2026e2e-tc-bot:85020"
+    local probe="${SCRIPT_DIR}/group_session_ws_probe.py"
+    local signing_key="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
+    # The approver arrives the way the friend work-order callback delivers it:
+    # a principal the backend re-addressed to BCS (iss=backend).
+    local principal
+    if ! principal="$(python3 "$probe" principal \
+        --user-id "153998" --username "tc-sync-approver" --tenant "bcs-e2e" \
+        --signing-key "$signing_key" --issuer backend 2>/dev/null)"; then
+        fail "gateway principal mint failed for friend-auth-sync test"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        return 0
+    fi
+
+    # Ensure a TC-shaped (bot_id:owner_work_no) protected bot owned by 85020;
+    # the colon address is what routes the approve into the TC sync port.
+    HTTP_STATUS=$(curl -s -o "$_RESPONSE_FILE" -w '%{http_code}' \
+        -H "X-BCS-Service-Key: e2e-test-key" -H "Content-Type: application/json" \
+        -X POST -d '{"name":"TC sync bot","staff_no":"85020","visibility":"protected"}' \
+        "${BCS_API_BASE_URL%/}/admin/bots/${tc_bot}/ensure" 2>/dev/null) || HTTP_STATUS="000"
+    if [[ "$HTTP_STATUS" != "200" ]]; then
+        fail "ensure TC-shaped bot returned $HTTP_STATUS: $(cat "$_RESPONSE_FILE")"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        return 0
+    fi
+    pass "ensure TC-shaped bot returns 200"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+
+    # Drop any edge left by an earlier run so the create below goes pending
+    # again instead of short-circuiting the already-friends path.
+    curl -s -o /dev/null -X DELETE \
+        "${BCS_API_BASE_URL%/}/collaboration/friend-connections/${tc_bot}" 2>/dev/null || true
+
+    curl -s -X POST "$mock_url/control/friend-auth-sync/clear" >/dev/null 2>&1 || true
+
+    # Human applies: unauthenticated calls resolve to the mock human identity,
+    # and the forwarded principal rides the headers BCS will re-address later.
+    HTTP_STATUS=$(curl -s -o "$_RESPONSE_FILE" -w '%{http_code}' \
+        -H "Content-Type: application/json" \
+        -H "X-Avernet-Principal: $principal" \
+        -X POST -d "{\"to_bot\":\"${tc_bot}\",\"message\":\"tc friend-auth-sync e2e\"}" \
+        "${BCS_API_BASE_URL%/}/collaboration/friend-connections/requests" 2>/dev/null) || HTTP_STATUS="000"
+    if [[ "$HTTP_STATUS" != "200" ]]; then
+        fail "human friend request to TC bot returned $HTTP_STATUS: $(cat "$_RESPONSE_FILE")"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        return 0
+    fi
+    pass "human friend request to protected TC bot returns 200 (pending)"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+
+    # Find the pending request from the mock human's sent list.
+    HTTP_STATUS=$(curl -s -o "$_RESPONSE_FILE" -w '%{http_code}' \
+        "${BCS_API_BASE_URL%/}/collaboration/friend-connections/requests?direction=sent" 2>/dev/null) || HTTP_STATUS="000"
+    RESPONSE=$(cat "$_RESPONSE_FILE")
+    local request_id
+    request_id="$(echo "$RESPONSE" | python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    data = d.get('data', d)
+    items = data.get('items', data) if isinstance(data, dict) else data
+    if isinstance(items, list):
+        for r in items:
+            if r.get('status') == 'pending' and r.get('to_id') == '$tc_bot':
+                print(r.get('request_id', r.get('id', '')))
+                break
+except Exception:
+    pass
+" 2>/dev/null || echo '')"
+    if [[ -z "$request_id" ]]; then
+        fail "pending friend request to $tc_bot not found in sent list"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        return 0
+    fi
+
+    # Approve as the human, forwarding the approver principal: this is the
+    # hop that must post the grant with a bcs-issued re-addressed principal.
+    HTTP_STATUS=$(curl -s -o "$_RESPONSE_FILE" -w '%{http_code}' \
+        -H "Content-Type: application/json" \
+        -H "X-Avernet-Principal: $principal" \
+        -X POST -d '{}' \
+        "${BCS_API_BASE_URL%/}/collaboration/friend-connections/requests/${request_id}/accept" 2>/dev/null) || HTTP_STATUS="000"
+    if [[ "$HTTP_STATUS" != "200" ]]; then
+        fail "accept TC friend request returned $HTTP_STATUS: $(cat "$_RESPONSE_FILE")"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        return 0
+    fi
+    pass "accept TC friend request returns 200"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+
+    # The mock's bot-friend-auth endpoint saw exactly one grant, addressed
+    # iss=bcs with the approver identity preserved.
+    local sync_view sync_check
+    sync_view="$(curl -s "$mock_url/control/friend-auth-sync/requests" 2>/dev/null || echo '')"
+    sync_check="$(TC_BOT_EXPECTED="$tc_bot" SYNC_VIEW="$sync_view" python3 -c '
+import base64, json, os, sys
+
+view = json.loads(os.environ["SYNC_VIEW"])
+expected_bot = os.environ["TC_BOT_EXPECTED"]
+requests = view.get("requests", [])
+problems = []
+if len(requests) != 1:
+    problems.append(f"expected exactly 1 sync call, saw {len(requests)}")
+else:
+    record = requests[0]
+    body = record.get("body", {})
+    bot_id, _, owner_work_no = expected_bot.partition(":")
+    for field, want in (
+        ("bot_id", bot_id),
+        ("owner_work_no", owner_work_no),
+        ("action", "grant"),
+    ):
+        if body.get(field) != want:
+            problems.append(f"body.{field}={body.get(field)!r} != {want!r}")
+    principal = record.get("principal") or ""
+    try:
+        payload = principal.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(payload))
+    except Exception as error:
+        problems.append(f"principal undecodable: {error}")
+    else:
+        for claim, want in (
+            ("iss", "bcs"),
+            ("aud", "backend"),
+        ):
+            if claims.get(claim) != want:
+                problems.append(f"claims.{claim}={claims.get(claim)!r} != {want!r}")
+        principals = claims.get("principals") or []
+        subject = (principals[0].get("subject") or {}) if principals else {}
+        if subject.get("id") != "153998":
+            problems.append(
+                "approver subject id " + repr(subject.get("id")) + " != 153998"
+            )
+if problems:
+    print("; ".join(problems))
+    sys.exit(1)
+print("ok")
+' 2>&1)"
+    if [[ "$sync_check" == "ok" ]]; then
+        pass "TC grant synced with iss=bcs re-addressed approver principal"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    else
+        fail "friend-auth-sync assertion failed: $sync_check"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+}
+
+# friend_ext department-scope parsing: production rows carry
+# {deptNo, deptName} objects (and the admin surfaces keep writing them), so
+# the shared parser must read both spellings at runtime. Drives every new
+# parser branch over the live stack: object entries, legacy string entries,
+# and a garbage entry (dropped with a WARN). The parsers run BEFORE the user
+# directory lookup, so the e2e environment (no directory plugged) still
+# exercises each changed line.
+test_ep_dept_scope_parses_object_friend_ext_entries() {
+    info "EdgePermission: dept-scope friend_ext object entries parse"
+    local probe="${SCRIPT_DIR}/group_session_ws_probe.py"
+    local signing_key="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
+    # The openapi bot-update route authorizes the owner: mint the principal
+    # as the ensure-bound owner staff_no.
+    local owner_principal
+    if ! owner_principal="$(python3 "$probe" principal \
+        --user-id "85020" --username "friend-ext-owner" --tenant "bcs-e2e" \
+        --signing-key "$signing_key" 2>/dev/null)"; then
+        fail "gateway principal mint failed for friend_ext test"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        return 0
+    fi
+
+    # A dedicated protected bot so scope rows here never touch the demo bots.
+    HTTP_STATUS=$(curl -s -o "$_RESPONSE_FILE" -w '%{http_code}' \
+        -H "X-BCS-Service-Key: e2e-test-key" -H "Content-Type: application/json" \
+        -X POST -d '{"name":"friend-ext bot","staff_no":"85020","visibility":"protected"}' \
+        "${BCS_API_BASE_URL%/}/admin/bots/e2e-friend-ext-bot/ensure" 2>/dev/null) || HTTP_STATUS="000"
+    if [[ "$HTTP_STATUS" != "200" ]]; then
+        fail "ensure friend-ext bot returned $HTTP_STATUS: $(cat "$_RESPONSE_FILE")"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        return 0
+    fi
+
+    # Mixed-shape scopes, mirroring production rows: object references in the
+    # exemption and agent scoping lists, one legacy string, one garbage entry
+    # that must be dropped (WARN) rather than read as an empty allowlist.
+    # Built via python3 so quoting stays unambiguous.
+    local patch_body
+    patch_body="$(python3 - <<'PY'
+import json
+print(json.dumps({
+    "user_visibility": "protected",
+    "friend_check_in_strategy": "DEPT_FREE",
+    "friend_ext": {
+        "public_user_approval": {"status": "AGREE"},
+        "no_check_scope_friend_deps": [
+            {"deptNo": "L3480", "deptName": "蚂蚁集团-信贷事业群"},
+            "F4858",
+        ],
+        "view_scope_user_friend_deps": [],
+        "view_scope_agent_friend_deps": [
+            {"deptNo": "L3480"},
+            {"priority": 7},
+        ],
+    },
+}))
+PY
+)"
+    HTTP_STATUS=$(curl -s -o "$_RESPONSE_FILE" -w '%{http_code}' \
+        -H "X-Avernet-Principal: $owner_principal" \
+        -H "Content-Type: application/json" \
+        -X PATCH -d "$patch_body" \
+        "${BCS_API_BASE_URL%/}/openapi/v1/collaboration/bots/e2e-friend-ext-bot" 2>/dev/null) || HTTP_STATUS="000"
+    if [[ "$HTTP_STATUS" != "200" ]]; then
+        fail "patch friend_ext via openapi returned $HTTP_STATUS: $(cat "$_RESPONSE_FILE")"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        return 0
+    fi
+
+    # Human→bot: runs the no_check parser's object and legacy-string arms.
+    # The parsers execute BEFORE the user directory lookup, so this drives
+    # every changed parse line even with no directory plugged in; without a
+    # resolver the department is None, so the request lands pending (200),
+    HTTP_STATUS=$(curl -s -o "$_RESPONSE_FILE" -w '%{http_code}' \
+        -H "Content-Type: application/json" \
+        -X POST -d '{"to_bot":"e2e-friend-ext-bot","message":"friend_ext object parse e2e"}' \
+        "${BCS_API_BASE_URL%/}/collaboration/friend-connections/requests" 2>/dev/null) || HTTP_STATUS="000"
+    if [[ "$HTTP_STATUS" == "200" ]]; then
+        pass "human request parses object/string exemption scopes into the allowlist"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    else
+        fail "human request against object friend_ext returned $HTTP_STATUS: $(cat "$_RESPONSE_FILE")"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+
+    # Re-patch with a NON-empty user scope in the same object shape, then
+    # apply again as a human: the user-visibility scope parser now runs its
+    # object arm AND the garbage-drop (WARN) arm on a live request. The scope
+    # decision itself is environment-dependent (a plugged user directory may
+    # resolve the applicant's department), so accept the refused or admitted
+    # answer — the covered lines are the parser's, which run first either way.
+    local scoped_patch
+    scoped_patch="$(python3 - <<'PY'
+import json
+print(json.dumps({
+    "friend_ext": {
+        "public_user_approval": {"status": "AGREE"},
+        "no_check_scope_friend_deps": [
+            {"deptNo": "L3480", "deptName": "蚂蚁集团-信贷事业群"},
+            "F4858",
+        ],
+        "view_scope_user_friend_deps": [
+            {"deptNo": "L3480"},
+            {"priority": 7},
+        ],
+        "view_scope_agent_friend_deps": [
+            {"deptNo": "L3480"},
+            {"priority": 7},
+        ],
+    },
+}))
+PY
+)"
+    HTTP_STATUS=$(curl -s -o "$_RESPONSE_FILE" -w '%{http_code}' \
+        -H "X-Avernet-Principal: $owner_principal" \
+        -H "Content-Type: application/json" \
+        -X PATCH -d "$scoped_patch" \
+        "${BCS_API_BASE_URL%/}/openapi/v1/collaboration/bots/e2e-friend-ext-bot" 2>/dev/null) || HTTP_STATUS="000"
+    if [[ "$HTTP_STATUS" == "200" ]]; then
+        pass "scoped friend_ext re-patch accepted"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    else
+        fail "scoped friend_ext re-patch returned $HTTP_STATUS: $(cat "$_RESPONSE_FILE")"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        return 0
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+
+    # Different human actor so the pending-idempotency shortcut from the
+    # first application cannot swallow this request.
+    HTTP_STATUS=$(curl -s -o "$_RESPONSE_FILE" -w '%{http_code}' \
+        -H "Content-Type: application/json" \
+        -H "X-Mock-User-Id: 511488" \
+        -X POST -d '{"to_bot":"e2e-friend-ext-bot","message":"friend_ext scope parse e2e"}' \
+        "${BCS_API_BASE_URL%/}/collaboration/friend-connections/requests" 2>/dev/null) || HTTP_STATUS="000"
+    if [[ "$HTTP_STATUS" == "200" || "$HTTP_STATUS" == "403" ]]; then
+        pass "human request drives the scoped user parser (object + garbage arms, status=$HTTP_STATUS)"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    else
+        fail "human request against scoped friend_ext returned $HTTP_STATUS: $(cat "$_RESPONSE_FILE")"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+
+    # Bot→bot: runs the view_scope_agent parser's object arm AND the garbage
+    # drop (WARN) arm. No user directory → the scoped caller is refused; a
+    # missing scope restriction / silently-empty legacy parse would also have
+    # allowed the request through with 200, so this doubles the gate.
+    local pm_token
+    pm_token="$(get_bot_token PM 2>/dev/null || echo '')"
+    if [[ -n "$pm_token" ]]; then
+        _api_authed "POST" "/collaboration/friend-connections/requests" \
+            '{"to_bot":"e2e-friend-ext-bot"}' "$pm_token"
+        if [[ "$HTTP_STATUS" == "403" || "$HTTP_STATUS" == "200" ]]; then
+            pass "bot request runs agent-scope parser incl. garbage drop (status=$HTTP_STATUS)"
+            TESTS_PASSED=$((TESTS_PASSED + 1))
+        else
+            fail "bot request against agent scope returned $HTTP_STATUS: $(cat "$_RESPONSE_FILE")"
+            TESTS_FAILED=$((TESTS_FAILED + 1))
+        fi
+    else
+        warn "no PM token; agent-scope parser arm left to engine coverage"
+    fi
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
 }

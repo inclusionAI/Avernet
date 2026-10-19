@@ -1,16 +1,15 @@
 import { getCapabilities } from '@/capabilities';
 import type { LucideIcon } from 'lucide-react';
-import { Bot, Compass, FlaskConical, ListTodo, MessagesSquare, Users } from 'lucide-react';
+import { Bot, Compass, FlaskConical, MessagesSquare, Users, Zap } from 'lucide-react';
 import { getRouteMeta, type RouteSection } from './routeMeta';
 
-/** 侧栏导航分组成员：协作 / Bot 双固定分组 + legacy 过渡分组（无继任位存量项，待移除）。 */
-export type NavigationSection = Extract<RouteSection, 'collab' | 'bot' | 'legacy'>;
+/** 产品侧栏只展示协作与 Bot 两个固定分组。 */
+export type NavigationSection = Extract<RouteSection, 'collab' | 'bot'>;
 
-/** 分组展示名（「老功能」为过渡分组，legacy 项清零后随 deprecated 机制一并退役）。 */
+/** 产品侧栏分组展示名。 */
 export const navSectionLabels: Record<NavigationSection, string> = {
   collab: '协作',
   bot: 'Bot',
-  legacy: '老功能',
 };
 
 export interface NavigationItem {
@@ -20,8 +19,6 @@ export interface NavigationItem {
   icon: LucideIcon;
   section: NavigationSection;
   description: string;
-  /** 过渡标记：在新 IA 中无继任位的存量项为 true（侧栏带「待移除」徽标），迁移完成后由功能负责人摘除。 */
-  deprecated?: boolean;
 }
 
 // Open Core 基线一级导航项。内部专属入口已剥离（capability 注入），
@@ -31,7 +28,7 @@ export interface NavigationItem {
 //
 // 归组映射（refactor-global-nav-shell design.md 决议表）：
 // - 同路由就地改名归组 = 迁移即完成，不打 deprecated（bot-workshop→Bot管理、collaboration-square→发现）；
-// - 无继任位存量项（my-task / collaboration-privacy）沉 legacy 组带 deprecated，由各功能负责人逐项摘除；
+// - 无继任位存量项不展示在产品侧栏；存量页面仅保留直接 URL 访问能力；
 // - 【管理后台】项已由 split-admin-space-ticket-pages 退役（拆分至 /space-admin、/ticket-center
 //   独立路由，入口为空间切换弹层设置 icon / 通知弹层「查看全部」，不占导航位）。
 // - workspace-conversation-navigation-refactor：原「对话协作」（/workspace）拆分为
@@ -79,20 +76,19 @@ export const navigationItems: NavigationItem[] = [
     description: '创建、配置和发布 Bot',
   },
   {
-    id: 'my-task',
-    label: '任务列表',
-    path: '/work/my-task',
-    icon: ListTodo,
-    section: 'legacy',
-    description: '查看用户任务与定时任务两个 Tab',
-    deprecated: true,
+    id: 'evolution-factory',
+    label: '智能进化',
+    path: '/evolution-factory',
+    icon: Zap,
+    section: 'bot',
+    description: '诊断、评估和优化 Bot',
   },
 ];
 
 /**
  * 合并 Open Core 基线 navigationItems 与 internal overlay 注入的额外导航项。
  * 合并策略：internal 项按自身 `section` 追加到同名分组末尾（internal overlay 的能力工坊/能力市场
- * 携带 `section: 'bot'`，落 Bot 分组），flat 序恒为 collab → bot → legacy。
+ * 携带 `section: 'bot'`，落 Bot 分组），flat 序恒为 collab → bot。
  * Open Core 形态下 capability 返回 []，结果 = Open Core 基线项。
  *
  * split-admin-space-ticket-pages：【管理后台】基线项退役，getShellVisibility().adminEntry 形态
@@ -104,7 +100,6 @@ export function getMergedNavigationItems(): NavigationItem[] {
   const grouped: Record<NavigationSection, NavigationItem[]> = {
     collab: navigationItems.filter((item) => item.section === 'collab'),
     bot: navigationItems.filter((item) => item.section === 'bot'),
-    legacy: navigationItems.filter((item) => item.section === 'legacy'),
   };
   if (internal.status === 'available' && internal.value.length) {
     // 未知 section 剔除（防御性收口：契约变更期的录入错误不进侧栏）。
@@ -112,7 +107,10 @@ export function getMergedNavigationItems(): NavigationItem[] {
       if (grouped[item.section]) grouped[item.section].push(item);
     }
   }
-  return [...grouped.collab, ...grouped.bot, ...grouped.legacy];
+  // Evolution stays last in the Bot group, including after internal overlays.
+  const evolution = grouped.bot.findIndex((item) => item.id === 'evolution-factory');
+  if (evolution >= 0) grouped.bot.push(...grouped.bot.splice(evolution, 1));
+  return [...grouped.collab, ...grouped.bot];
 }
 
 export function getNavigationItem(pathname: string) {
@@ -120,7 +118,7 @@ export function getNavigationItem(pathname: string) {
   const merged = getMergedNavigationItems();
   // 带 navKey 的路由按 meta 命中导航项；无导航位的路由（/space-admin、/ticket-center）
   // 侧栏不高亮任何菜单项，落 prefix 兜底匹配（同样不会命中）。
-  if (meta?.navKey && (meta.section === 'collab' || meta.section === 'bot' || meta.section === 'legacy')) {
+  if (meta?.navKey && (meta.section === 'collab' || meta.section === 'bot')) {
     return merged.find((item) => item.id === meta.navKey);
   }
 

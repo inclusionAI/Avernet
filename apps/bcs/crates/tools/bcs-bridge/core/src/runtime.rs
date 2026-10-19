@@ -66,15 +66,40 @@ impl AppState {
         })
     }
 
+    /// Reap owned persistent processes before the service returns.
+    pub async fn shutdown_engines(&self) {
+        futures::future::join_all(self.engines.values().map(|engine| engine.shutdown())).await;
+    }
+
     /// The engine configured for a bot of this provider.
     pub fn engine(&self, provider_bot_ref: &str) -> Option<Arc<dyn crate::engine::Engine>> {
         self.engines.get(provider_bot_ref).cloned()
     }
 }
 
+pub type RunStream = Pin<Box<dyn Stream<Item = RunEvent> + Send>>;
+
+pub enum RunDelivery {
+    Gateway { stream: RunStream },
+    Plugin,
+}
+
+impl RunDelivery {
+    fn for_handle(handle: &RunHandle) -> Result<Self, BridgeError> {
+        match handle.retention_mode() {
+            crate::run::RetentionMode::PluginPending => Ok(Self::Plugin),
+            crate::run::RetentionMode::GatewayReplay => {
+                let stream = crate::run::forward_stream(handle.clone())
+                    .map_err(|error| BridgeError::unavailable(error.to_string()))?;
+                Ok(Self::Gateway {stream:Box::pin(stream)})
+            }
+        }
+    }
+}
+
 pub enum RuntimeReply {
     Json { status: u16, body: Value },
-    Run { handle: RunHandle, stream: Pin<Box<dyn Stream<Item = RunEvent> + Send>> },
+    Run { handle: RunHandle, delivery: RunDelivery },
 }
 
 fn json_reply(body: Value) -> RuntimeReply { RuntimeReply::Json { status: 200, body } }
@@ -140,14 +165,18 @@ async fn handle_chat_send(
     // `is_new == false` for an existing id, so the re-attach / terminal-replay
     // / conflict decision below runs entirely before `try_start_run` (which is
     // new-id only). Same-id retries with a different body still 409.
-    let (handle, is_new) = state.runs.begin(&run_id, fp.clone());
+    let mode = match state.config.mode {
+        crate::config::ConnectionMode::Plugin => crate::run::RetentionMode::PluginPending,
+        crate::config::ConnectionMode::Gateway => crate::run::RetentionMode::GatewayReplay,
+    };
+    let (handle, is_new) = state.runs.begin_with_mode(&run_id, fp.clone(), mode);
     if !is_new {
         if !handle.matches(&fp) {
             // same id, different body → conflict (409)
             return Err(BridgeError::conflict());
         }
-        let stream = Box::pin(crate::run::forward_stream(handle.clone()));
-        return Ok(RuntimeReply::Run { handle, stream });
+        let delivery = RunDelivery::for_handle(&handle)?;
+        return Ok(RuntimeReply::Run { handle, delivery });
     }
 
     // 6. New run: claim the session slot (429 if a different run is busy).
@@ -175,10 +204,9 @@ async fn handle_chat_send(
     state
         .runs
         .record_session(&run_id, &bot.provider_bot_ref, &session_id);
-    handle.set_upstream(state.config.mode == crate::config::ConnectionMode::Plugin);
-    let stream = Box::pin(crate::run::forward_stream(handle.clone()));
+    let delivery = RunDelivery::for_handle(&handle)?;
     crate::run::spawn_run(state, req, bot, session_id, handle.clone());
-    Ok(RuntimeReply::Run { handle, stream })
+    Ok(RuntimeReply::Run { handle, delivery })
 }
 
 /// `interaction.resolve` ACK with a STRING error (spec §5.1 — this method does

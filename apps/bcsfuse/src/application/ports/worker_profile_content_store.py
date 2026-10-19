@@ -16,6 +16,12 @@ class WorkerProfileContentStore(Protocol):
 
     def save(self, content: WorkerProfileContent) -> WorkerProfileContent: ...
 
+    def save_if_version(
+        self, content: WorkerProfileContent, expected_version: int | None,
+    ) -> WorkerProfileContent | None:
+        """Insert if absent (None), or update the exact version; None means conflict."""
+        ...
+
     def get(self, worker_id: str, profile_id: str) -> WorkerProfileContent | None: ...
 
     def list_by_worker(self, worker_id: str) -> WorkerProfileContentList: ...
@@ -37,4 +43,11 @@ class WorkerProfileContentStore(Protocol):
     def get_all_active(self) -> list[WorkerProfileContent]: ...
 
 
-__all__ = ["WorkerProfileContentStore"]
+@runtime_checkable
+class WorkerScopedProfileContentStore(Protocol):
+    """Optional active-record lookup bounded to exact Worker IDs."""
+
+    def get_active_by_workers(self, worker_ids: list[str]) -> list[WorkerProfileContent]: ...
+
+
+__all__ = ["WorkerProfileContentStore", "WorkerScopedProfileContentStore"]

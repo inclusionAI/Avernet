@@ -27,6 +27,7 @@ from collections.abc import Sequence
 from engine.community.core.engine.capability import Capability
 from engine.community.core.engine.context import AuthContext
 from engine.community.core.engine.exceptions import CapabilityNotSupportedError
+from engine.community.core.skills.layout_planner import RuntimeLayoutContext
 from engine.community.core.skills.local_package_application import (
     LocalSkillPackageApplication,
 )
@@ -96,9 +97,17 @@ def _serialize_pool_mapping(
 class OpenClawSkillsAdapter(SkillsService):
     """`SkillsService` backed by the OpenClaw native skills port."""
 
-    def __init__(self, port: OpenClawSkillsPort) -> None:
+    def __init__(
+        self,
+        port: OpenClawSkillsPort,
+        *,
+        local_layout_context: RuntimeLayoutContext | None = None,
+    ) -> None:
         self._port = port
-        self._local_packages = LocalSkillPackageApplication("openclaw")
+        self._local_packages = LocalSkillPackageApplication(
+            "openclaw",
+            context=local_layout_context or RuntimeLayoutContext(),
+        )
 
     async def apply_local_package(
         self,

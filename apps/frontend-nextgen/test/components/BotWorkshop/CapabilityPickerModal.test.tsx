@@ -207,6 +207,32 @@ test('引用空间 Skill 的详情操作独立于勾选', async () => {
   expect(screen.getByRole('button', { name: '添加' })).toBeDisabled();
 });
 
+test('我的 Skill 未添加项可悬停删除，已添加项不提供删除', async () => {
+  const onLocalDelete = jest.fn().mockResolvedValue(undefined);
+  render(
+    <CapabilityPickerModal
+      kind="skill"
+      open
+      marketItems={[]}
+      skillCenterItems={[]}
+      workshopItems={[]}
+      myItems={[
+        { id: 'local-1', name: '可删除', active: false, source: 'local' },
+        { id: 'local-2', name: '已添加项', active: false, source: 'local' },
+      ]}
+      existingIds={['local-2']}
+      onOpenChange={jest.fn()}
+      onConfirm={jest.fn()}
+      onLocalDelete={onLocalDelete}
+    />,
+  );
+  await userEvent.click(screen.getByRole('button', { name: '我的 Skill' }));
+
+  await userEvent.click(screen.getByRole('button', { name: '删除可删除' }));
+  expect(onLocalDelete).toHaveBeenCalledWith('local-1');
+  expect(screen.queryByRole('button', { name: '删除已添加项' })).not.toBeInTheDocument();
+});
+
 test('我的 Skill 未添加时可查看详情，已添加时两个操作均禁用', async () => {
   const onViewSkill = jest.fn();
   render(

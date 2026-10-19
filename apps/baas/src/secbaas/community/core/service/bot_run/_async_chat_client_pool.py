@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
+from functools import partial
 
 from secbaas.community.api.config_manage import SystemConfigManageService
 from secbaas.community.core.service.config import SystemConfigKey
@@ -28,6 +29,10 @@ from ._async_chat_client import AsyncChatClient
 
 logger = get_logger("core-bot-run")
 
+# 敏感日志豁免片段的 TTL 缓存时长（秒）：过期后重新查 DB，
+# 配置变更无需重启即可生效
+_BYPASS_KEYS_TTL_SECONDS = 60.0
+
 
 @dataclass
 class _ConnEntry:
@@ -35,6 +40,9 @@ class _ConnEntry:
 
     client: AsyncChatClient
     last_used: float = field(default_factory=time.time)
+    # P1-3：建连时生效的灰度模式快照——复用路径用它校验连接模式与当前
+    # 配置一致（AsyncChatClient 的模式随构造钉死，翻转只能靠池层失效）
+    a2a_mode: str = "off"
 
 
 class AsyncChatClientPool:
@@ -81,6 +89,11 @@ class AsyncChatClientPool:
         self._retry_base_backoff = retry_base_backoff
         self._system_config_service = system_config_service
         self._interaction_service = interaction_service
+        # 敏感日志豁免片段缓存：(loaded_at, keys)；-inf 表示未加载
+        self._bypass_keys_cache: tuple[float, tuple[str, ...]] = (
+            float("-inf"),
+            (),
+        )
         # sandbox_id -> 连接列表
         self._clients: dict[str, list[_ConnEntry]] = {}
         # per-key lock，保护同一 sandbox_id 的并发创建
@@ -100,6 +113,7 @@ class AsyncChatClientPool:
         sandbox_id: str,
         uri: str,
         headers: dict[str, str] | None = None,
+        session_key: str | None = None,
     ) -> AsyncChatClient:
         """获取该 sandbox_id 对应的连接（Least-Sessions 选择，On-demand 扩容）
 
@@ -107,14 +121,42 @@ class AsyncChatClientPool:
             sandbox_id: 沙箱标识，作为连接池的 key
             uri: WebSocket URI
             headers: WebSocket 请求头
+            session_key: R4-1 session 归属定向。携带时先按归属查找持有
+                该 session 在途状态的连接（覆盖含 mode-stale 的全部连接）
+                ——A2A 的 CancelTask 依赖建连实例内的 engine_task_id 记
+                录，"普通负载分配"在默认 max_conns_per_sandbox=2 下即可
+                把取消路由到无记录的新连接（RUN_NOT_TRACKED，永不发
+                CancelTask）。无归属时回退正常分配（v3 chat.abort 按
+                sessionKey 对任意连接成立；A2A 由内层诚实判
+                RUN_NOT_TRACKED）。
 
         Returns:
             可用的 AsyncChatClient 实例
         """
+        # R4-1：归属查找先于一切建连/模式决策（多出来的 owner 对象不应
+        # 触发扩容；mode-stale 持有者的连接模式不参与校验——它正在服务
+        # 该 session 的在途 run）。
+        if session_key is not None:
+            owner = self._find_session_owner(sandbox_id, session_key)
+            if owner is not None:
+                logger.info(
+                    "[ChatClientPool] session-routed get: sandbox=%s owner_conns=%d",
+                    sandbox_id,
+                    len(self._clients.get(sandbox_id, [])),
+                )
+                return owner
+        # P1-3：每次 get() 决策点读一次当前灰度模式——复用连接前校验其
+        # 建连模式快照与当前配置一致，不一致的停止承接新请求（空闲即时
+        # 收口关闭，在途的排空后关闭）。读频与建连同一粒度（每 get 恰一
+        # 次 A2A_CLIENT_MODE 读取）：off 且无 config 服务时是纯常量路径
+        # （零 I/O，off 快路径语义不变）；开关翻转即时生效、无陈旧窗口。
+        current_mode = self._read_a2a_mode(self._system_config_service)
+        self._sweep_mode_stale(sandbox_id, current_mode)
+
         # 快速路径（无锁）：仅尝试复用空闲连接，不触发扩容决策。
         # 扩容决策必须在锁内做，否则多个协程会同时看到"需要扩容"
         # 并各自创建连接。
-        client = self._pick_idle(sandbox_id)
+        client = self._pick_idle(sandbox_id, current_mode)
         if client is not None:
             logger.info(
                 "[ChatClientPool] Fast path reused idle connection: "
@@ -134,8 +176,11 @@ class AsyncChatClientPool:
 
         # 慢路径：per-key lock 内完成所有决策（复用/扩容/创建）
         async with key_lock:
+            # 排空模式翻转过的重连窗口（sweep 幂等——锁内再校一次，
+            # 覆盖 fast/slow 之间状态变化的窄窗口）
+            self._sweep_mode_stale(sandbox_id, current_mode)
             # 优先复用空闲连接
-            client = self._pick_idle(sandbox_id)
+            client = self._pick_idle(sandbox_id, current_mode)
             if client is not None:
                 logger.info(
                     "[ChatClientPool] Slow path reused idle connection "
@@ -159,10 +204,10 @@ class AsyncChatClientPool:
                     len(entries),
                     self._max_conns_per_sandbox,
                 )
-                best = self._pick_least_sessions(entries)
+                best = self._pick_least_sessions(entries, current_mode)
                 if best is not None:
                     return best
-                # 所有连接都不健康且已被清理，继续创建新的
+                # 所有连接都不健康（或模式翻转不匹配）且已被清理，继续创建新的
 
             # 需要创建新连接（无连接、或未达上限且都在忙）
             logger.info(
@@ -180,14 +225,19 @@ class AsyncChatClientPool:
                 session_key_timeout=self._session_key_timeout,
                 max_retries=self._max_retries,
                 retry_base_backoff=self._retry_base_backoff,
+                a2a_mode=current_mode,
                 ignore_case=self._read_ignore_case(self._system_config_service),
                 interaction_service=self._interaction_service
                 if self._enable_process_interaction(self._system_config_service)
                 else None,
+                sensitive_bypass_keys_loader=partial(
+                    self._load_sensitive_bypass_keys,
+                    self._system_config_service,
+                ),
             )
             await new_client.connect()
 
-            entry = _ConnEntry(client=new_client)
+            entry = _ConnEntry(client=new_client, a2a_mode=current_mode)
             if sandbox_id not in self._clients:
                 self._clients[sandbox_id] = []
             self._clients[sandbox_id].append(entry)
@@ -227,6 +277,32 @@ class AsyncChatClientPool:
     # ── 内部实现 ──────────────────────────────────────────────────────────
 
     @staticmethod
+    def _read_a2a_mode(
+        system_config_service: SystemConfigManageService | None,
+    ) -> str:
+        """从 system_config 读取 A2A 灰度模式（1b 迁移开关）。
+
+        与 _read_ignore_case 同构：config 服务缺席/异常/未配置都回退
+        "off"（生产零变化）；值合法域 off|grey|on，非法回退 off 并告警。
+        """
+        if system_config_service is None:
+            return "off"
+        try:
+            resp = system_config_service.get_config(SystemConfigKey.A2A_CLIENT_MODE)
+        except Exception:
+            logger.warning(
+                "failed to read a2a_client_mode config, defaulting to off",
+                exc_info=True,
+            )
+            return "off"
+        value = (resp.conf_value or "").strip().lower() if resp else ""
+        if value not in ("off", "grey", "on"):
+            if value:
+                logger.warning("invalid a2a_client_mode %r, defaulting to off", value)
+            return "off"
+        return value
+
+    @staticmethod
     def _read_ignore_case(
         system_config_service: SystemConfigManageService | None,
     ) -> bool:
@@ -247,6 +323,48 @@ class AsyncChatClientPool:
             return False
         return (resp.conf_value or "").strip().lower() == "true"
 
+    def _load_sensitive_bypass_keys(
+        self,
+        system_config_service: SystemConfigManageService | None,
+    ) -> tuple[str, ...]:
+        """读取敏感日志过滤豁免的 session_key 片段（TTL 缓存）。
+
+        配置 ``bot_run.sensitive_bypass_session_keys``：逗号/换行
+        分隔的片段列表；_log_event 的 sessionKey 包含任一片段时，
+        兜底事件日志不做敏感字段过滤（全量打印 payload）。
+
+        结果（含空列表与读取失败）缓存
+        ``_BYPASS_KEYS_TTL_SECONDS`` 秒，过期后重新查询 DB
+        （配置变更无需重启，分钟级生效）；
+        未配置或读取失败期间返回空元组，默认仍做过滤。
+        """
+        now = time.monotonic()
+        loaded_at, cached = self._bypass_keys_cache
+        if now - loaded_at < _BYPASS_KEYS_TTL_SECONDS:
+            return cached
+        if system_config_service is None:
+            return ()
+        try:
+            resp = system_config_service.get_config(
+                SystemConfigKey.SENSITIVE_BYPASS_SESSION_KEYS
+            )
+            raw = (resp.conf_value or "") if resp is not None else ""
+            keys = tuple(
+                part.strip()
+                for part in raw.replace("\n", ",").split(",")
+                if part.strip()
+            )
+        except Exception:
+            logger.warning(
+                "failed to read sensitive_bypass_session_keys, "
+                "sensitive log filtering stays enabled",
+                exc_info=True,
+            )
+            keys = ()
+        # 空结果/读取失败同样缓存，避免未配置时每条日志事件查 DB
+        self._bypass_keys_cache = (now, keys)
+        return keys
+
     @staticmethod
     def _enable_process_interaction(
         system_config_service: SystemConfigManageService | None,
@@ -266,18 +384,80 @@ class AsyncChatClientPool:
             return False
         return (resp.conf_value or "").strip().lower() == "true"
 
-    def _pick_idle(self, sandbox_id: str) -> AsyncChatClient | None:
+    def _sweep_mode_stale(self, sandbox_id: str, current_mode: str) -> None:
+        """P1-3：收口与当前灰度模式不一致的存量连接。
+
+        空闲的移出池并异步关闭（立即释放，不承接新请求）；在途的保留在池
+        中（不误杀正在跑的请求），由 _pick_* 按模式跳过，排空后的下一次
+        get() 会在本方法将其关闭。全同步段（无 await），无并发窗口。
+        """
+        entries = self._clients.get(sandbox_id)
+        if not entries:
+            return
+
+        kept: list[_ConnEntry] = []
+        stale_idle: list[_ConnEntry] = []
+        for entry in entries:
+            if entry.a2a_mode != current_mode and not entry.client.has_active_sessions:
+                stale_idle.append(entry)
+                continue
+            kept.append(entry)
+
+        if not stale_idle:
+            return
+        if kept:
+            self._clients[sandbox_id] = kept
+        else:
+            del self._clients[sandbox_id]
+        for entry in stale_idle:
+            logger.info(
+                "[ChatClientPool] Closing stale a2a_mode=%s connection "
+                "(current=%s): sandbox=%s",
+                entry.a2a_mode,
+                current_mode,
+                sandbox_id,
+            )
+            asyncio.ensure_future(self._safe_close(entry.client))
+
+    def _find_session_owner(
+        self, sandbox_id: str, session_key: str
+    ) -> AsyncChatClient | None:
+        """按 session 找持有它的连接（R4-1）。
+
+        扫描面 = 该 key 的全部连接：忙/闲不限（归属与负载无关）、模式
+        不限（模式翻转后仍在途的旧连接继续服务它的 run，直到收口）。
+        单条探测失败不传染（连接坏由既有清理路径处理）。
+        """
+        for entry in self._clients.get(sandbox_id, []):
+            try:
+                if entry.client.tracks_session(session_key):
+                    return entry.client
+            except Exception:
+                logger.exception(
+                    "[ChatClientPool] session owner probe failed: sandbox=%s",
+                    sandbox_id,
+                )
+        return None
+
+    def _pick_idle(
+        self, sandbox_id: str, expected_mode: str | None = None
+    ) -> AsyncChatClient | None:
         """从已有连接中复用空闲连接（无锁，快速路径）
 
         仅当存在空闲（active_session_count == 0）且健康的连接时返回。
         如果所有连接都在忙、有不健康连接、或无连接，返回 None 交给慢路径。
         不做扩容决策（扩容在锁内做），避免多协程同时触发创建。
+
+        expected_mode 非 None 时，建连模式快照不一致的连接被跳过
+        （P1-3 翻转校验）——直连该方法的旧调用方（无期望模式）不受影响。
         """
         entries = self._clients.get(sandbox_id)
         if not entries:
             return None
 
         for entry in entries:
+            if expected_mode is not None and entry.a2a_mode != expected_mode:
+                continue
             if not entry.client.is_connected:
                 continue
             if entry.client.is_reconnecting:
@@ -288,15 +468,20 @@ class AsyncChatClientPool:
 
         return None
 
-    def _pick_least_sessions(self, entries: list[_ConnEntry]) -> AsyncChatClient | None:
+    def _pick_least_sessions(
+        self, entries: list[_ConnEntry], expected_mode: str | None = None
+    ) -> AsyncChatClient | None:
         """从给定连接列表中选择活跃会话数最少的健康连接
 
-        重连中的连接会被跳过，不参与选择。
+        重连中的连接会被跳过，不参与选择；expected_mode 非 None 时模式
+        快照不一致的连接同样被跳过（P1-3 翻转校验）。
         """
         best_entry: _ConnEntry | None = None
         best_count = float("inf")
 
         for entry in entries:
+            if expected_mode is not None and entry.a2a_mode != expected_mode:
+                continue
             if not entry.client.is_connected:
                 continue
             if entry.client.is_reconnecting:

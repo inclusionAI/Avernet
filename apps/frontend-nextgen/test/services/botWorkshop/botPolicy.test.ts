@@ -19,6 +19,23 @@ describe('botPolicy', () => {
     expect(actions.find((action) => action.action === 'logs')).toMatchObject({ visible: true, enabled: true });
   });
 
+  test.each([
+    ['初始化中的服务 Bot', { status: 'PROVISIONING', publish: null }, '部署中'],
+    ['发布失败的服务 Bot', { status: 'ACTIVE', publish: { id: 1, status: 'FAILED', version: 1 } }, '状态异常'],
+  ])('%s 禁止从列表进入编辑页', (_label, fields, reason) => {
+    const bot = mapBotDto({
+      bot_id: 'service-lifecycle-entry',
+      bot_type: 'service',
+      kind: 'service',
+      engine: 'openclaw',
+      actions: ['view', 'edit', 'chat'],
+      ...fields,
+    }).item;
+
+    expect(getBotEntryAvailability(bot)).toMatchObject({ enabled: false, disabledReason: expect.stringContaining(reason) });
+    expect(getInventoryActionAvailability(bot, 'edit')).toMatchObject({ visible: true, enabled: false });
+  });
+
   test.each(['deploying', 'prestable', 'offline', 'failed', 'unknown'] as const)(
     '%s 状态禁止从列表进入 Bot 内部',
     (lifecycle) => {

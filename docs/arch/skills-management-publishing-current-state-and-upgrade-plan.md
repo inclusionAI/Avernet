@@ -349,6 +349,7 @@ LayoutIdentity {
 
 RuntimeLayoutContext {
   home
+  openclaw_root?
 }
 
 ResolvedSkillLayout {
@@ -367,7 +368,11 @@ ResolvedSkillLayout {
 }
 ```
 
-一次解析同时返回 Legacy 与 Pool 的完整拓扑。Resolver 不读取 marker、Backend
+一次解析同时返回 Legacy 与 Pool 的完整拓扑。`home` 是云容器布局的默认
+runtime home；`openclaw_root` 是可选且仅用于 OpenClaw 的 per-Bot root，用于
+Desktop/local 下把 `/home/admin/.openclaw` 重定向到当前 Bot 的
+OpenClaw state root。未提供时保持云容器的 `home/<dot-openclaw>` 布局。
+Resolver 不读取 marker、Backend
 状态或 rollout 配置，不执行文件操作，也不选择当前权威布局。preparation、
 probe、activate、mapping、rollback 和 cleanup 根据各自协议消费命名路径；
 Backend 状态机负责决定 CRUD、mapping 和 locator 当前使用 Legacy 还是 Pool。

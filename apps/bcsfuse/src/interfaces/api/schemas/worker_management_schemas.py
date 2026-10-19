@@ -94,7 +94,8 @@ class SyncProfileData(BaseModel):
     """
     Profile data within a sync request.
 
-    Aligned with original root contract (worker_routes.py::SyncProfileData).
+    Omitted fields preserve an existing profile. Supplied scalar values and
+    skill_sets replace; nonempty maps merge, and empty maps clear all keys.
     """
     profile_id: str = Field(
         default="default",
@@ -103,27 +104,27 @@ class SyncProfileData(BaseModel):
     )
     display_name: Optional[str] = Field(
         default=None,
-        description="Display name",
+        description="Display name. Omitted preserves an existing value; supplied value replaces.",
     )
     soul_md: Optional[str] = Field(
         default=None,
-        description="SOUL.md content",
+        description="SOUL.md content. Omitted preserves; an empty string clears.",
     )
     contents: dict[str, Any] = Field(
         default_factory=dict,
-        description="Extended content map, supports any type",
+        description="Extended content map. Omitted preserves; nonempty merges by key; {} clears.",
     )
     skill_sets: list[dict[str, Any]] = Field(
         default_factory=list,
-        description="Skill sets",
+        description="Skill sets. Omitted preserves; supplied list replaces, including [].",
     )
     metadata: dict[str, Any] = Field(
         default_factory=dict,
-        description="Extended metadata",
+        description="Extended metadata. Omitted preserves; nonempty merges by key; {} clears.",
     )
     summary: Optional[SummaryData] = Field(
         default=None,
-        description="Summary info including capability and role",
+        description="Summary info. Omitted preserves ecb_summary; null removes it.",
     )
     activate: bool = Field(
         default=True,
@@ -135,7 +136,9 @@ class WorkerSyncRequest(BaseModel):
     """
     Worker sync request.
 
-    Sync worker and profile; preserve existing runtime state when omitted.
+    Sync worker and profile. Omitted mutable fields preserve existing values;
+    supplied values replace them, including explicit empty lists and strings.
+    Omitted or null runtime state preserves the current state.
     New workers default to online unless an explicit runtime state is supplied.
     Sent by BCS during bot onboard. Idempotent — safe to call repeatedly.
 
@@ -152,15 +155,15 @@ class WorkerSyncRequest(BaseModel):
     )
     description: Optional[str] = Field(
         default=None,
-        description="Description",
+        description="Description. Omitted preserves an existing value; an empty string clears.",
     )
     responsibilities: list[str] = Field(
         default_factory=lambda: ["general"],
-        description="Responsibilities",
+        description="Responsibilities. Omitted preserves on update; supplied list replaces.",
     )
     domains: list[str] = Field(
         default_factory=list,
-        description="Domains",
+        description="Domains. Omitted preserves on update; supplied list replaces.",
     )
     runtime_state: Optional[str] = Field(
         default=None,
@@ -168,19 +171,19 @@ class WorkerSyncRequest(BaseModel):
     )
     capabilities: list[dict[str, Any]] = Field(
         default_factory=list,
-        description="Capabilities",
+        description="Capabilities. Omitted preserves on update; supplied list replaces.",
     )
     skills: list[dict[str, Any]] = Field(
         default_factory=list,
-        description="Skills",
+        description="Skills. Omitted preserves on update; supplied list replaces.",
     )
     availability: str = Field(
         default="protected",
-        description="Visibility (private/protected/public)",
+        description="Visibility (private/protected/public). Omitted preserves on update.",
     )
     trust_level: str = Field(
         default="guarded",
-        description="Trust level",
+        description="Trust level. Omitted preserves on update.",
     )
     profile_key: Optional[str] = Field(
         default=None,

@@ -162,6 +162,53 @@ it('按 SkillCenter、TeamClaw 和工坊可消费接口分类候选 Skill', asyn
   ]);
 });
 
+it('SkillCenter 接口的 isOfficial/isRecommended/tagList additive 字段透传 BotEditorSkill 卡片徽标', async () => {
+  controller.listSkillCenterSkills.mockResolvedValue({
+    data: {
+      total: 1,
+      items: [
+        {
+          skillCode: 'sc-2',
+          skillName: '官方推荐 Skill',
+          latestVersionNumber: '2.1',
+          isOfficial: true,
+          isRecommended: true,
+          tagList: ['数据分析', '内部共创'],
+        },
+      ],
+    },
+  });
+
+  const { items } = await botEditorService.searchSkillCenterSkills('', 1);
+  expect(items).toEqual([
+    expect.objectContaining({
+      id: 'sc-2',
+      name: '官方推荐 Skill',
+      version: '2.1',
+      source: 'skillcenter-market',
+      isOfficial: true,
+      isRecommended: true,
+      tags: ['数据分析', '内部共创'],
+    }),
+  ]);
+});
+
+it('SkillCenter 接口的 isOfficial/isRecommended 为 null 或 falsy 时不渲染徽标且 tagList 缺省空数组', async () => {
+  controller.listSkillCenterSkills.mockResolvedValue({
+    data: { total: 1, items: [{ skillCode: 'sc-3', skillName: '普通 Skill', isOfficial: null, isRecommended: false }] },
+  });
+
+  const { items } = await botEditorService.searchSkillCenterSkills('', 1);
+  expect(items).toEqual([
+    expect.objectContaining({
+      id: 'sc-3',
+      isOfficial: undefined,
+      isRecommended: undefined,
+      tags: undefined,
+    }),
+  ]);
+});
+
 it('打开添加 MCP 时只按需加载市场 MCP，不加载 Skill 候选接口', async () => {
   controller.searchMarketMcpServers.mockResolvedValue({
     data: { total: 1, items: [{ server_code: 'mcp.weather', name: '天气 MCP' }] },

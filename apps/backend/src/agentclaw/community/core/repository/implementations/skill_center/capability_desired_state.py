@@ -61,6 +61,7 @@ from agentclaw.community.core.repository.capability_desired_state_types import (
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.core.models.skill_installation_source import SkillInstallationSourceKind
 
 from agentclaw.community.core.skill_center.errors import (
     SkillRuntimeNameConflictError,
@@ -452,6 +453,7 @@ class CapabilityDesiredStateRepository(
                     owner_id=owner_id,
                     env=get_current_env(),
                     skill_id=int(skill.id),
+                    source_kind=SkillInstallationSourceKind.SKILL_SET, source_set_id=int(row.id),
                 )
             session.flush()
             # This Skill's MCP dependencies are the MCPs the projection is
@@ -611,6 +613,7 @@ class CapabilityDesiredStateRepository(
                         owner_id=owner_id,
                         env=get_current_env(),
                         skill_id=skill_id,
+                        source_kind=SkillInstallationSourceKind.SKILL_SET, source_set_id=int(row.id),
                     )
                 for server_code in sorted(direct_mcp_codes):
                     mcp_installations.install(
@@ -738,12 +741,15 @@ class CapabilityDesiredStateRepository(
             )
             session.flush()
             for skill_id in sorted(state.installations):
+                source = state.installation_sources.get(skill_id)
                 skill_installations.install(
                     session,
                     bot_id=bot_id,
                     owner_id=owner_id,
                     env=get_current_env(),
                     skill_id=skill_id,
+                    source_kind=SkillInstallationSourceKind(source[0]) if source else None,
+                    source_set_id=source[1] if source else None,
                 )
             mcp_installations.uninstall_all(
                 session, bot_id=bot_id, owner_id=owner_id, env=get_current_env()
@@ -940,6 +946,9 @@ class CapabilityDesiredStateRepository(
                 )
         return CapabilityDesiredState(
             installations=self._installations(session, bot_id, owner_id),
+            installation_sources=skill_installations.sources(
+                session, bot_id=bot_id, owner_id=owner_id, env=get_current_env(),
+            ),
             set_active={int(row.id): bool(row.is_active) for row in sets},
             memberships={set_id: tuple(items) for set_id, items in memberships.items()},
             mcp_installations=self._mcp_installations(session, bot_id, owner_id),

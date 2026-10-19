@@ -307,6 +307,9 @@ class BotDeployConfig:
     engine_type: str | None = None
     resource_spec: ResourceSpecification | None = None
     docker_image: str | None = None
+    # Existing BaaS ARCA metadata channel. Used only by singlebox to carry the
+    # runtime identity; ``None`` keeps the wire field absent everywhere else.
+    arca_metadata: Dict[str, str] | None = None
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式。"""
@@ -359,6 +362,8 @@ class BotDeployConfig:
             result["docker_image"] = self.docker_image
         if self.engine_type is not None:
             result["engine_type"] = self.engine_type
+        if self.arca_metadata is not None:
+            result["arca_metadata"] = self.arca_metadata
         return result
 
 
@@ -427,6 +432,7 @@ class BaasService:  # pragma: no cover
         deploy_composer: DeployConfigComposer,
         personal_bot_template_uuid: Optional[str] = None,
         theta_master_key_secret: str = "",
+        runtime_identity_metadata: bool = False,
     ):
         """初始化 BaasService。
 
@@ -482,6 +488,9 @@ class BaasService:  # pragma: no cover
         self._common_whitelist_service = common_whitelist_service
         self._outbound_rule_provider = outbound_rule_provider
         self._theta_master_key_secret = theta_master_key_secret
+        # Singlebox-only: carry bot identity through the existing BaaS ARCA
+        # metadata channel. Disabled for every default deployment.
+        self._runtime_identity_metadata = runtime_identity_metadata
         # Which container this deployment runs: the boot chain, the mounts and
         # the storage volume of every bot it creates. Selected once in the
         # composition root from ``baas.deploy_runtime``.
@@ -833,6 +842,12 @@ class BaasService:  # pragma: no cover
             resource_spec=resource_spec,
         )
 
+        local_runtime_identity = (
+            {"entity_id": entity_id, "entity_type": entity_type}
+            if self._runtime_identity_metadata
+            else None
+        )
+
         # 构建部署配置
         # user_id / tc_bot_id: BaaS 侧按 user_id+tc_bot_id 唯一确定 workspace 目录
         # (与 desktop_bot_service._build_create_bot_payload 同款姿势)
@@ -858,6 +873,7 @@ class BaasService:  # pragma: no cover
             envs=envs,
             resource_spec=resource_spec,
             docker_image=docker_image,
+            arca_metadata=local_runtime_identity,
         )
 
         # 构建配置
@@ -907,6 +923,16 @@ class BaasService:  # pragma: no cover
         envs = {"AGENTCLAW_ENGINE": engine}
         if extra_envs:
             envs.update(extra_envs)
+        layout_keys = {
+            "AGENTCLAW_SKILLS_LAYOUT",
+            "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION",
+            "AGENTCLAW_SKILLS_LAYOUT_PHASE",
+        }
+        layout_envs = {
+            key: value
+            for key, value in envs.items()
+            if key in layout_keys
+        }
 
         docker_image = None
         overrides = SandboxOverrides.from_template_config(template_config)
@@ -917,6 +943,11 @@ class BaasService:  # pragma: no cover
                 raise BaasServiceError(f"沙箱覆写参数校验失败: {e}") from e
 
             envs = overrides.merged_envs(envs)
+            # Layout selection is a persisted platform decision.  Template
+            # envs may extend the sandbox but cannot rewrite that authority.
+            for key in layout_keys:
+                envs.pop(key, None)
+            envs.update(layout_envs)
             if overrides.resource_spec is not None:
                 resource_spec = overrides.resource_spec
             if overrides.image is not None:

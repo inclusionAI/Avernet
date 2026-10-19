@@ -1,3 +1,4 @@
+import { WorkflowSnapshotRepository } from '@avernet/clawweb-shared/server/services/workflow-snapshot';
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import Database from "better-sqlite3";
@@ -68,6 +69,28 @@ afterEach(async () => {
 });
 
 describe("evolve knowledge endpoints", () => {
+  it('separates current and historical issue evidence before issue pagination', async () => {
+    await db.exec("INSERT INTO workflow_deploy_history (pack_id,workflow_id,deploy_number,version,tag_name,spec_json,is_active,action) VALUES ('pack','wf',34,39,'deploy/wf/#34','{}',0,'deploy'),('pack','wf',35,40,'deploy/wf/#35','{}',1,'deploy')");
+    for(const [flow,version,deploy] of [['old',39,34],['current',40,35]] as const){
+      await db.exec("INSERT INTO flow_runs (flow_id,workflow_id,status,started_at,workflow_version,workflow_deploy_number) VALUES (?,'wf','completed',1,?,?)",[flow,version,deploy]);
+      const result={schemaVersion:'workflow-evolution-analysis/v1',analysisId:flow,facts:[],inferences:[],unknowns:[],diagnoses:[{diagnosisId:flow,flowIds:[flow],nodeId:'fetch',failureSignature:'timeout',failureMode:'timeout',severity:'high',reasoning:flow,evidenceEventIds:[]}]};
+      await db.exec("INSERT INTO workflow_evolution_analysis_runs (analysis_id,request_key,scope_type,scope_json,flow_id,workflow_id,status,analysis_version,result_json,requested_at_ms,completed_at_ms) VALUES (?,?,'single_run','{}',?,'wf','completed','v1',?,1,2)",[flow,flow,flow,JSON.stringify(result)]);
+    }
+    const current=await (await fetch(`${baseUrl}/api/evolve/issue-groups?workflowId=wf&page=1&pageSize=20&versionScope=current`)).json();
+    expect(current.groups).toHaveLength(1);
+    expect(current.groups[0].flowIds).toEqual(['current']);
+    const historical=await (await fetch(`${baseUrl}/api/evolve/issue-groups?workflowId=wf&versionScope=historical`)).json();
+    expect(historical.groups[0].flowIds).toEqual(['old']);
+    for (const id of ['old','current']) await db.exec('UPDATE workflow_evolution_analysis_runs SET scope_json=? WHERE analysis_id=?', [JSON.stringify({workflowSnapshot:await new WorkflowSnapshotRepository(db).forRun(id)}),id]);
+    const repo = new WorkflowEvolutionRepository(db);
+    await repo.createAnalysisRun({analysisId:'bound',requestKey:'bound',workflowId:'wf',flowId:'current',scopeType:'single_run',scope:{flowIds:['current']},analysisVersion:'v1',requestedAtMs:3});
+    await expect(repo.completeAnalysisRun('bound',{schemaVersion:'workflow-evolution-analysis/v1',analysisId:'bound',facts:[],inferences:[],unknowns:[],diagnoses:[{diagnosisId:'d',flowIds:['current'],nodeId:'fetch',failureSignature:'timeout',failureMode:'timeout',severity:'high',reasoning:'Wrong source',evidenceEventIds:[],proposal:{schemaVersion:'workflow-patch/v1',workflowId:'wf',baseSpecDigest:'b'.repeat(64),summary:'Wrong version',operations:[{op:'replace',nodeId:'fetch',path:'/executor/timeoutMs',value:99}]}}]},4)).rejects.toThrow('proposal configuration does not match analysis snapshot');
+    const jobs=await new IssueAggregationRepository(db).prepare('current');
+    expect(jobs).toHaveLength(1); expect(jobs[0].input.flowIds).toEqual(['current']);
+    expect(await new IssueAggregationRepository(db).prepare('old')).toEqual([]);
+
+  });
+
   it('filters and pages issues, with stable facets independent of the current page', async () => {
     for (const [id, node, mode] of [['a', 'fetch', 'timeout'], ['b', 'fetch', 'timeout'], ['c', 'write', 'token-waste']]) {
       await repo.createDiagnosis({ diagnosisId: id, flowId: id, workflowId: 'wf', runId: id,
@@ -145,8 +168,10 @@ describe("evolve knowledge endpoints", () => {
     expect((await response.json() as { groups: unknown[] }).groups).toHaveLength(1);
     const light = await (await fetch(`${baseUrl}/api/evolve/issue-groups?workflowId=wf&view=summary`)).json() as { groups: Array<{ presentation: string; sources: Array<Record<string, unknown>> }> };
     expect(light.groups[0].presentation).toBe('summary');
-    expect(light.groups[0].sources[0].reasoning).toBe('');
+    expect(light.groups[0].sources[0].reasoning.length).toBeGreaterThan(0);
+    expect(light.groups[0].sources[0].reasoning.length).toBeLessThanOrEqual(240);
     expect(light.groups[0].sources[0]).not.toHaveProperty('proposal');
+    expect(light.groups[0].sources[0]).not.toHaveProperty('analysisContext.facts');
     const detail = await (await fetch(`${baseUrl}/api/evolve/issue-groups?workflowId=wf&signature=timeout`)).json() as { groups: Array<{ sources: Array<{ proposal: { summary: string } }> }> };
     expect(detail.groups[0].sources[0].proposal.summary).toMatch(/timeout/);
     const missing = await (await fetch(`${baseUrl}/api/evolve/issue-groups?workflowId=wf&signature=missing`)).json() as { groups: unknown[] };
@@ -188,6 +213,8 @@ describe("evolve knowledge endpoints", () => {
       VALUES ('parent', 'parent', 'single_run', '{}', 'run-a', 'wf', 'completed', 'v1', ?, 1, 1)`, [JSON.stringify(result)]);
     if (!requestedVersion) {
       const capability = await (await fetch(`${baseUrl}/internal/analysis-runs/parent/input`)).json();
+      expect(capability.issueAggregationSupported).toBe(false);
+      expect(capability.issueAggregationOwner).toBe('clawweb-service');
       expect(capability.issueAggregationInputVersions).toEqual([
         'workflow-issue-summary-input/v1', 'workflow-issue-summary-input/v2',
       ]);

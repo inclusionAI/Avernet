@@ -14,6 +14,9 @@
 app_name: "agentclaw"
 
 user_config:
+  task_discovery:
+    frontend_url: "${FRONTEND_URL:-http://localhost:8000}"
+
   # ── Neutral application policy ────────────────────────────────────────────
 
   # Bot workspace filesystem layout (consumed by WorkspaceConfig). Neutral
@@ -48,7 +51,7 @@ user_config:
   # Per-owner device allocation policy (neutral knobs only).
   device_allocation:
     mode: "multi"
-    max_devices_per_entity: 5
+    max_devices_per_entity: 2
 
   # OSS↔NAS migration mount roots (host-side paths, deployment-neutral).
   # NOTE: the OssToNasConfig provider reads these as FLAT user_config keys
@@ -315,6 +318,12 @@ user_config:
     secret_secret: "${secret_secret:-}"
     task_callback_url: "${BACKEND_URL:-}"
 
+  # Backend self origin used in task execution instructions. Runtime code reads
+  # this typed YAML setting; it never selects a deployment profile or reads an
+  # environment variable directly. Each deploy overlay supplies its own value.
+  task_dispatch:
+    backend_url: ""
+
   # merchant_task_bot_bindings → static-plan template bot binding (role_key ->
   #   bot uuid). Public profile: a SINGLE env-injected JSON string
   #   (``${MERCHANT_TASK_BOT_BINDINGS:-}``) so the role<->uuid mapping of our own
@@ -324,3 +333,17 @@ user_config:
   #   (content routing/materialize stays green on a bare/CI build); only a real
   #   dispatch then degrades (BCS rejects a literal ${...}).
   merchant_task_bot_bindings: "${MERCHANT_TASK_BOT_BINDINGS:-}"
+
+  # The swarm runtime's operational knobs and its own LLM endpoint.
+  agentswarm:
+    enabled: true
+    artifact_store_root: "${AGENTSWARM_ARTIFACT_ROOT:-/tmp/agentswarm/artifacts}"
+    # agentswarm-specific LLM — deliberately NOT shared with the top-level
+    # `llm:` harness block. base_url + secret_name are required for any
+    # agent execution; empty base_url keeps submits fail-closed with
+    # "agentswarm llm config missing: base_url/api_key required".
+    llm:
+      base_url: "${AGENTSWARM_LLM_BASE_URL:-${LLM_BASE_URL:-}}"
+      secret_name: "${AGENTSWARM_LLM_SECRET_NAME:-LLM_AUTH_TOKEN}"
+      model: "${AGENTSWARM_LLM_MODEL:-${LLM_BALANCED_MODEL:-glm-5.2}}"
+      timeout_ms: "${AGENTSWARM_LLM_TIMEOUT_MS:-${LLM_DEFAULT_TIMEOUT_MS:-180000}}"

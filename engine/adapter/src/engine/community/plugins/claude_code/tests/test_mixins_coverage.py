@@ -1223,47 +1223,85 @@ class TestChatMixin:
         c.set_response("interaction.resolve", (_ok({}), []))
         impl, _ = _impl(c)
         out = await impl.resolve_exec_approval(
-            session_key="s", run_id="r1", decision="allow-once", message="ok")
+            session_key="s", interaction_id="int:r1", decision="allow-once", message="ok")
         assert out["success"] is True
         assert out["followup_events"] == []
         _, args, kw = _last_call(c)
-        assert kw["params"] == {"interactionId": "r1", "decision": "allow-once", "message": "ok"}
+        assert kw["params"] == {"interactionId": "int:r1", "decision": "allow-once", "message": "ok"}
 
     async def test_resolve_exec_approval_without_message(self):
         c = _FakeRelayClient()
         c.set_response("interaction.resolve", (_ok({}), []))
         impl, _ = _impl(c)
-        await impl.resolve_exec_approval(session_key="s", run_id="r1", decision="deny")
+        await impl.resolve_exec_approval(session_key="s", interaction_id="int:r1", decision="deny")
         _, args, kw = _last_call(c)
-        assert kw["params"] == {"interactionId": "r1", "decision": "deny"}
+        assert kw["params"] == {"interactionId": "int:r1", "decision": "deny"}
 
-    async def test_resolve_interaction_with_response(self):
+    async def test_resolve_interaction_with_answer(self):
         c = _FakeRelayClient()
         ev = EventFrame(event="interaction.resolved", payload={"done": True})
         c.set_response("interaction.resolve", (_ok({"ack": True}), [ev]))
         impl, _ = _impl(c)
-        out = await impl.resolve_interaction(session_key="s", run_id="r1", response="ans")
+        out = await impl.resolve_interaction(session_key="s", interaction_id="int:r1", answer="ans")
         assert out["success"] is True
         assert out["followup_events"] == [("interaction.resolved", {"done": True})]
         _, args, kw = _last_call(c)
-        assert kw["params"] == {"interactionId": "r1", "action": "submit", "message": "ans"}
+        assert kw["params"] == {"interactionId": "int:r1", "decision": "submit", "answer": "ans"}
 
-    async def test_resolve_interaction_without_response(self):
+    async def test_resolve_interaction_without_answer(self):
         c = _FakeRelayClient()
         c.set_response("interaction.resolve", (_ok({}), []))
         impl, _ = _impl(c)
-        await impl.resolve_interaction(session_key="s", run_id="r1")
+        await impl.resolve_interaction(session_key="s", interaction_id="int:r1")
         _, args, kw = _last_call(c)
-        assert kw["params"] == {"interactionId": "r1", "action": "submit"}
+        assert kw["params"] == {"interactionId": "int:r1", "decision": "submit"}
+
+    async def test_resolve_interaction_cancel_verbatim(self):
+        # R3-1：cancel 决策不得被改写成 submit
+        c = _FakeRelayClient()
+        c.set_response("interaction.resolve", (_ok({}), []))
+        impl, _ = _impl(c)
+        await impl.resolve_interaction(session_key="s", interaction_id="int:r1", decision="cancel")
+        _, args, kw = _last_call(c)
+        assert kw["params"] == {"interactionId": "int:r1", "decision": "cancel"}
+
+    async def test_resolve_interaction_answer_and_message_wire_encoding(self):
+        # R3-1 补充：自由文本 answer 与人工说明 message 同等上 wire
+        #（v3 builder 同构）
+        c = _FakeRelayClient()
+        c.set_response("interaction.resolve", (_ok({}), []))
+        impl, _ = _impl(c)
+        await impl.resolve_interaction(
+            session_key="s", interaction_id="int:r1", answer="ans", message="why")
+        _, args, kw = _last_call(c)
+        assert kw["params"] == {"interactionId": "int:r1", "decision": "submit",
+                                "answer": "ans", "message": "why"}
+
+    async def test_resolve_interaction_structured_payload(self):
+        # R3-1：answers/values 逐字上 wire；selected_options 在边界转
+        # selectedOptions（内层 tuple 也转 list）
+        c = _FakeRelayClient()
+        c.set_response("interaction.resolve", (_ok({}), []))
+        impl, _ = _impl(c)
+        await impl.resolve_interaction(
+            session_key="s", interaction_id="int:r1",
+            answers={"q1": "A"}, values={"v": "x"},
+            selected_options=[("o1", "o2")])
+        _, args, kw = _last_call(c)
+        assert kw["params"] == {
+            "interactionId": "int:r1", "decision": "submit",
+            "answers": {"q1": "A"}, "values": {"v": "x"},
+            "selectedOptions": [["o1", "o2"]],
+        }
 
     async def test_resolve_mode_transition(self):
         c = _FakeRelayClient()
         c.set_response("mode_transition.resolve", (_ok({}), []))
         impl, _ = _impl(c)
-        out = await impl.resolve_mode_transition(session_key="s", run_id="r1", decision="proceed")
+        out = await impl.resolve_mode_transition(session_key="s", interaction_id="int:r1", decision="proceed")
         assert out["success"] is True
         _, args, kw = _last_call(c)
-        assert kw["params"] == {"transitionId": "r1", "decision": "proceed"}
+        assert kw["params"] == {"transitionId": "int:r1", "decision": "proceed"}
 
     async def test_resolve_connect_exception(self):
         impl, _ = _impl(_FakeRelayClient())
@@ -1271,7 +1309,7 @@ class TestChatMixin:
             raise ConnectionError("no relay")
         impl._relay = _bad_relay
         out = await impl.resolve_exec_approval(
-            session_key="s", run_id="r1", decision="allow-once")
+            session_key="s", interaction_id="int:r1", decision="allow-once")
         assert out["success"] is False
         assert out["error"]["code"] == "INTERNAL_ERROR"
 
@@ -1279,7 +1317,7 @@ class TestChatMixin:
         c = _FakeRelayClient()
         c.set_raise(ConnectionError("boom"))
         impl, _ = _impl(c)
-        out = await impl.resolve_interaction(session_key="s", run_id="r1")
+        out = await impl.resolve_interaction(session_key="s", interaction_id="int:r1")
         assert out["success"] is False
         assert out["error"]["code"] == "INTERNAL_ERROR"
 

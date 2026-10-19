@@ -17,7 +17,7 @@ mode="${SINGLEBOX_COVERAGE_MODE:-real}"
 model_config_mode="${SINGLEBOX_COVERAGE_MODEL_CONFIG_MODE:-mock}"
 module_manifest="$script_dir/singlebox_coverage_modules.yaml"
 bcs_coverage_dir="$repo_root/apps/bcs/target/cov-e2e"
-bcs_line_min="${SINGLEBOX_COVERAGE_BCS_LINE_MIN:-40}"
+bcs_line_min="${SINGLEBOX_COVERAGE_BCS_LINE_MIN:-41}"
 bcs_method_min="${SINGLEBOX_COVERAGE_BCS_METHOD_MIN:-36}"
 coverage_standalone_root=""
 coverage_standalone_runtime=""
@@ -218,7 +218,11 @@ run_real_singlebox() {
     STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
     STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
     bash "$repo_root/singlebox/singlebox.sh" --standalone setup all
+  # Gateway, BCS, and Backend use different env var names for the same HMAC
+  # principal contract. All three ends must receive the same coverage key.
   env SINGLEBOX_COVERAGE=1 SINGLEBOX_COVERAGE_DIR="$coverage_root/raw" OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE="$model_config_mode" \
+    principal_signing_key="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \
+    AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \
     AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \
     BCS_DEBUG=true BCS_COVERAGE_FORCE_REBUILD="${BCS_COVERAGE_FORCE_REBUILD:-1}" \
     BACKEND_READY_ATTEMPTS="${BACKEND_READY_ATTEMPTS:-120}" \
@@ -325,6 +329,7 @@ run_bcs_e2e() {
     STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
     STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
     BCS_BOTS_DATA_DIR="$coverage_standalone_root/profiles" \
+    AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \
     bash "$repo_root/apps/bcs/scripts/e2e_coverage.sh" \
       --skip-start \
       --bcs-line-min "$bcs_line_min" \
@@ -338,7 +343,8 @@ run_bcs_e2e() {
     summary.json \
     endpoint_coverage.xml \
     endpoint_coverage.txt \
-    cli_command_coverage.txt; do
+    cli_command_coverage.txt \
+    changed_line_coverage.json; do
     if [[ -f "$bcs_coverage_dir/$artifact" ]]; then
       cp "$bcs_coverage_dir/$artifact" "$bcs_report_dir/$artifact"
     fi

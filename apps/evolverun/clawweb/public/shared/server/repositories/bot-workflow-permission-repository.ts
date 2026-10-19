@@ -324,6 +324,66 @@ export class BotWorkflowPermissionRepository implements RunViewPermissions {
   }
 
   /**
+   * Shared helper: check a boolean permission field on a workflow using the
+   * whitelist model. Mirrors hasEditPermission but for any permission column.
+   */
+  private async hasPermission(
+    workflowId: string,
+    userId: string,
+    field: "can_view" | "can_execute" | "can_edit",
+    botId?: string,
+  ): Promise<boolean> {
+    // Step 1: No permission records → deny (whitelist model)
+    const countRows = await this.db.query<{ cnt: number }>(
+      "SELECT COUNT(*) as cnt FROM bot_workflow_permissions WHERE workflow_id = ?",
+      [workflowId],
+    );
+    if (countRows[0].cnt === 0) return false;
+
+    // Step 2: Check global wildcard (bot_owner_id='*') → allow if permission = 1
+    const globalRows = await this.db.query<Record<string, number>>(
+      `SELECT ${field} FROM bot_workflow_permissions WHERE workflow_id = ? AND bot_owner_id = '*' AND (bot_id IS NULL OR bot_id = '' OR bot_id = '*') AND ${field} = 1 LIMIT 1`,
+      [workflowId],
+    );
+    if (globalRows.length > 0) return true;
+
+    // Step 3: Web user check (no botId): any matching row whose bot_owner_id matches.
+    if (!botId) {
+      const userRows = await this.db.query<Record<string, number>>(
+        `SELECT ${field} FROM bot_workflow_permissions WHERE workflow_id = ? AND bot_owner_id = ? AND ${field} = 1 LIMIT 1`,
+        [workflowId, userId],
+      );
+      if (userRows.length > 0) return true;
+      return (await this.inheritedGrants(userId, workflowId)).some(row => row[field] === 1);
+    }
+
+    // Step 4: A concrete bot can inherit owner-level permission.
+    const ownerRows = await this.db.query<Record<string, number>>(
+      `SELECT ${field} FROM bot_workflow_permissions WHERE workflow_id = ? AND bot_owner_id = ? AND (bot_id IS NULL OR bot_id = '' OR bot_id = '*') AND ${field} = 1 LIMIT 1`,
+      [workflowId, userId],
+    );
+    if (ownerRows.length > 0) return true;
+
+    // Step 5: Or receive permission through its exact bot-level row.
+    const botRows = await this.db.query<Record<string, number>>(
+      `SELECT ${field} FROM bot_workflow_permissions WHERE workflow_id = ? AND bot_owner_id = ? AND bot_id = ? AND ${field} = 1 LIMIT 1`,
+      [workflowId, userId, botId],
+    );
+    if (botRows.length > 0) return true;
+
+    // Step 6: Has records but no permission.
+    return false;
+  }
+
+  async hasViewPermission(workflowId: string, userId: string, botId?: string): Promise<boolean> {
+    return this.hasPermission(workflowId, userId, "can_view", botId);
+  }
+
+  async hasExecutePermission(workflowId: string, userId: string, botId?: string): Promise<boolean> {
+    return this.hasPermission(workflowId, userId, "can_execute", botId);
+  }
+
+  /**
    * Check if a user has edit permission on a workflow (whitelist model).
    *   1. No permission records for this workflow → deny (whitelist)
    *   2. Check global wildcard (bot_owner_id='*') → allow if can_edit = 1
@@ -332,49 +392,7 @@ export class BotWorkflowPermissionRepository implements RunViewPermissions {
    *   5. Otherwise deny.
    */
   async hasEditPermission(workflowId: string, userId: string, botId?: string): Promise<boolean> {
-    // Step 1: No permission records → deny (whitelist model)
-    const countRows = await this.db.query<{ cnt: number }>(
-      "SELECT COUNT(*) as cnt FROM bot_workflow_permissions WHERE workflow_id = ?",
-      [workflowId],
-    );
-    if (countRows[0].cnt === 0) return false;
-
-    // Step 2: Check global wildcard (bot_owner_id='*' grants edit to everyone)
-    // Treat bot_id='*' the same as NULL/empty: owner-level / all-bots grant.
-    const globalRows = await this.db.query<Pick<BotWorkflowPermissionRow, "can_edit">>(
-      `SELECT can_edit FROM bot_workflow_permissions WHERE workflow_id = ? AND bot_owner_id = '*' AND (bot_id IS NULL OR bot_id = '' OR bot_id = '*') AND can_edit = 1 LIMIT 1`,
-      [workflowId],
-    );
-    if (globalRows.length > 0) return true;
-
-    // Step 3: The management UI is user-scoped. A row written for one of the
-    // user's bots still means that user owns the editable workflow permission.
-    if (!botId) {
-      const userRows = await this.db.query<Pick<BotWorkflowPermissionRow, "can_edit">>(
-        `SELECT can_edit FROM bot_workflow_permissions WHERE workflow_id = ? AND bot_owner_id = ? AND can_edit = 1 LIMIT 1`,
-        [workflowId, userId],
-      );
-      if (userRows.length > 0) return true;
-      return (await this.inheritedGrants(userId, workflowId)).some(row => row.can_edit === 1);
-    }
-
-    // Step 4: A concrete bot can inherit owner-level permission.
-    // Treat bot_id='*' as owner-level wildcard, same as NULL/empty.
-    const ownerRows = await this.db.query<Pick<BotWorkflowPermissionRow, "can_edit">>(
-      `SELECT can_edit FROM bot_workflow_permissions WHERE workflow_id = ? AND bot_owner_id = ? AND (bot_id IS NULL OR bot_id = '' OR bot_id = '*') AND can_edit = 1 LIMIT 1`,
-      [workflowId, userId],
-    );
-    if (ownerRows.length > 0) return true;
-
-    // Step 5: Or receive permission through its exact bot-level row.
-    const botRows = await this.db.query<Pick<BotWorkflowPermissionRow, "can_edit">>(
-      `SELECT can_edit FROM bot_workflow_permissions WHERE workflow_id = ? AND bot_owner_id = ? AND bot_id = ? AND can_edit = 1 LIMIT 1`,
-      [workflowId, userId, botId],
-    );
-    if (botRows.length > 0) return true;
-
-    // Step 6: Has records but no edit permission.
-    return false;
+    return this.hasPermission(workflowId, userId, "can_edit", botId);
   }
 
   /** Cascade update workflow_id in permissions when a workflow is renamed */

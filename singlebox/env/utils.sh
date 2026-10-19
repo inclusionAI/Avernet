@@ -711,6 +711,7 @@ check_port_available() {
 # 用法: check_prereqs_for_services backend frontend bcs
 check_prereqs_for_services() {
     local services=("$@")
+    local svc
     local has_error=false
 
     if [ ${#services[@]} -eq 0 ]; then

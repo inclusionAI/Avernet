@@ -1,7 +1,8 @@
 /**
  * 任务执行 Loop Controller —— 单一边界，统一 Envelope{code,message,data,request_id}。
- * - execute/dashboard/list：端点前缀由 capability getTaskApiBase 注入
- *   （Open Core /openapi/v1/collaboration/tasks，internal overlay /api/v1/collaboration/tasks）。
+ * - execute：端点前缀由 capability getTaskApiBase 注入（Open Core /openapi/v1/collaboration/tasks，
+ *   internal overlay /api/v1/collaboration/tasks）。
+ * - dashboard/list：统一读公开面 TASK_READ_API_BASE=/openapi/v1/collaboration/tasks。
  *
  * 默认走相对路径（dev proxy / prod 网关转发）。
  * 测试场景可通过 baseUrl 直连本地 singlebox（localhost:8888），绕过 proxy。

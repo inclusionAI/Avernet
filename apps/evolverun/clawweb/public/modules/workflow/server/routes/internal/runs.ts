@@ -1,3 +1,4 @@
+import { RepairBatchError } from '../../contracts/repair-batch.js';
 /**
  * Internal API routes for flow_runs — write and read operations for ClawMind.
  */
@@ -8,6 +9,7 @@ import type { FlowControlAppConfig } from "@avernet/clawweb-shared/server/db";
 import { apiLog, apiLogBody } from "../internal-logger.js";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 import type { RunTerminalObserver } from "@avernet/clawevolve/server/services/evolve/run-analysis-starter";
+
 
 function scheduleTerminalObserver(
   observer: RunTerminalObserver | undefined,
@@ -33,18 +35,21 @@ export function createInternalRunsRouter(
 
   /** POST / — insert a flow run */
   router.post("/", asyncHandler(async (req: Request, res: Response) => {
-    apiLogBody("WRITE", "/runs", req.body);
+    // State snapshots can be large and may contain workflow inputs; keep them out of request logs.
+    apiLog("WRITE", "/runs", { flowId: req.body?.flow_id, workflowId: req.body?.workflow_id, runStatus: req.body?.status,
+      stateJsonBytes: typeof req.body?.state_json === 'string' ? Buffer.byteLength(req.body.state_json) : 0 });
     if (!flowRunRepo) {
       apiLog("WRITE", "/runs", { status: 503, error: "Database not configured" });
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
     try {
-      const { flow_id, workflow_id, workflow_title, status, triggered_by, params_json, input_json, node_count, identity_key, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number } = req.body as {
+      const { flow_id, workflow_id, workflow_title, status, state_json, triggered_by, params_json, input_json, node_count, identity_key, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number } = req.body as {
         flow_id?: string;
         workflow_id?: string;
         workflow_title?: string;
         status?: string;
+        state_json?: string | null;
         triggered_by?: string;
         params_json?: string;
         input_json?: string;
@@ -68,6 +73,20 @@ export function createInternalRunsRouter(
         return;
       }
 
+      if (state_json != null) {
+        if (typeof state_json !== "string") {
+          res.status(400).json({ success: false, error: "Bad Request", message: "state_json must be a JSON object string" });
+          return;
+        }
+        try {
+          const state = JSON.parse(state_json);
+          if (state === null || typeof state !== "object" || Array.isArray(state)) throw new Error("not an object");
+        } catch {
+          res.status(400).json({ success: false, error: "Bad Request", message: "state_json must be a JSON object string" });
+          return;
+        }
+      }
+
       for (const [field, value] of Object.entries({ workflow_version, workflow_deploy_number })) {
         // A Git snapshot/draft run is not bound to a published release, even if
         // this workflow has releases. Keep ClawMind's sentinel without inventing a version.
@@ -78,11 +97,12 @@ export function createInternalRunsRouter(
         }
       }
 
-      const ok = await flowRunRepo.insert({
+      const run = {
         flowId: flow_id,
         workflowId: workflow_id,
         workflowTitle: workflow_title ?? null,
         status,
+        stateJson: state_json ?? null,
         triggeredBy: triggered_by ?? null,
         paramsJson: params_json ?? null,
         inputJson: input_json ?? null,
@@ -98,7 +118,9 @@ export function createInternalRunsRouter(
         engine: engine ?? null,
         workflowVersion: workflow_version ?? null,
         workflowDeployNumber: workflow_deploy_number ?? null,
-      });
+      };
+      const registered = await flowRunRepo.insertForRequest(req.body, run);
+      const ok = registered !== null || await flowRunRepo.insert(run);
       if (!ok) {
         apiLog("WRITE", "/runs", { status: 500, error: "Failed to insert flow run", flow_id, workflow_id });
         res.status(500).json({ success: false, error: "Internal Server Error", message: "Failed to insert flow run" });
@@ -106,10 +128,11 @@ export function createInternalRunsRouter(
       }
       const row = await flowRunRepo.findFullByFlowId(flow_id);
       apiLog("WRITE", "/runs", { status: 201, flow_id, workflow_id, status_field: status });
-      res.status(201).json({ success: true, data: row });
+      res.status(registered === 'existing' ? 200 : 201).json({ success: true, data: row });
     } catch (error) {
+      if (error instanceof RepairBatchError) { res.status(409).json({ success: false, error: error.message, code: error.code }); return; }
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("WRITE", "/runs", { status: 500, error: msg });
+      apiLog("WRITE", "/runs", { status: 500, error: "Run insert rejected" });
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -117,14 +140,14 @@ export function createInternalRunsRouter(
   /** PUT /:flowId/completion — update completion fields */
   router.put("/:flowId/completion", asyncHandler(async (req: Request, res: Response) => {
     const flowId = String(req.params.flowId);
-    apiLogBody("PUT", `/runs/${flowId}/completion`, req.body, { flowId });
+    apiLogBody("PUT", `/runs/${flowId}/completion`, { fields: Object.keys(req.body ?? {}) }, { flowId });
     if (!flowRunRepo) {
       apiLog("PUT", `/runs/${flowId}/completion`, { flowId, status: 503, error: "Database not configured" });
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
     try {
-      const { status, result_json, input_json, total_duration_ms, total_token_usage, succeeded_count, failed_count, completed_at } = req.body as {
+      const { status, result_json, input_json, total_duration_ms, total_token_usage, succeeded_count, failed_count, completed_at, retry_epoch } = req.body as {
         status?: string;
         result_json?: string;
         input_json?: string;
@@ -133,13 +156,19 @@ export function createInternalRunsRouter(
         succeeded_count?: number;
         failed_count?: number;
         completed_at?: number;
+        retry_epoch?: number;
       };
+      if (retry_epoch !== undefined && (!Number.isSafeInteger(retry_epoch) || retry_epoch < 0)) {
+        res.status(400).json({ success: false, error: "Bad Request", message: "retry_epoch must be a nonnegative safe integer" });
+        return;
+      }
 
       const completion: import("../../repositories/flow-run-repository.js").FlowRunCompletion = {
         status: status!,
         totalDurationMs: total_duration_ms ?? null,
         totalTokenUsage: total_token_usage ?? null,
         completedAt: completed_at ?? Math.floor(Date.now() / 1000),
+        retryEpoch: retry_epoch,
       };
       // result_json: only set when explicitly provided (undefined = preserve existing value)
       if (result_json !== undefined) {
@@ -156,8 +185,9 @@ export function createInternalRunsRouter(
       }
       const row = await flowRunRepo.updateCompletion(flowId, completion);
       if (!row) {
-        apiLog("PUT", `/runs/${flowId}/completion`, { flowId, status: 404 });
-        res.status(404).json({ success: false, error: "Not Found", message: `Flow run "${flowId}" not found` });
+        const exists = await flowRunRepo.findFullByFlowId(flowId);
+        apiLog("PUT", `/runs/${flowId}/completion`, { flowId, status: exists ? 409 : 404 });
+        res.status(exists ? 409 : 404).json({ success: false, error: exists ? "Conflict" : "Not Found", message: exists ? `Flow run "${flowId}" has a different retry epoch or is terminal` : `Flow run "${flowId}" not found` });
         return;
       }
       apiLog("PUT", `/runs/${flowId}/completion`, { flowId, status: 200, newStatus: status });
@@ -176,19 +206,24 @@ export function createInternalRunsRouter(
    *  when the SQL ran; `claimed` tells the caller whether it won. */
   router.put("/:flowId/fail-if-running", asyncHandler(async (req: Request, res: Response) => {
     const flowId = String(req.params.flowId);
-    apiLogBody("PUT", `/runs/${flowId}/fail-if-running`, req.body, { flowId });
+    apiLogBody("PUT", `/runs/${flowId}/fail-if-running`, { fields: Object.keys(req.body ?? {}) }, { flowId });
     if (!flowRunRepo) {
       apiLog("PUT", `/runs/${flowId}/fail-if-running`, { flowId, status: 503, error: "Database not configured" });
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
     try {
-      const { reason, current_phase, total_duration_ms, completed_at } = req.body as {
+      const { reason, current_phase, total_duration_ms, completed_at, retry_epoch } = req.body as {
         reason?: string;
         current_phase?: string;
         total_duration_ms?: number | null;
         completed_at?: number;
+        retry_epoch?: number;
       };
+      if (retry_epoch !== undefined && (!Number.isSafeInteger(retry_epoch) || retry_epoch < 0)) {
+        res.status(400).json({ success: false, error: "Bad Request", message: "retry_epoch must be a nonnegative safe integer" });
+        return;
+      }
       if (!reason) {
         res.status(400).json({ success: false, error: "Bad Request", message: "reason is required" });
         return;
@@ -198,6 +233,7 @@ export function createInternalRunsRouter(
         currentPhase: current_phase ?? "timeout",
         totalDurationMs: total_duration_ms ?? null,
         completedAt: completed_at ?? Math.floor(Date.now() / 1000),
+        retryEpoch: retry_epoch,
       });
       apiLog("PUT", `/runs/${flowId}/fail-if-running`, { flowId, status: 200, claimed });
       res.json({ success: true, data: { claimed } });
@@ -244,7 +280,7 @@ export function createInternalRunsRouter(
   /** PUT /:flowId/status — update status */
   router.put("/:flowId/status", asyncHandler(async (req: Request, res: Response) => {
     const flowId = String(req.params.flowId);
-    const { status } = req.body as { status?: string };
+    const { status, retry_epoch } = req.body as { status?: string; retry_epoch?: number };
     apiLog("PUT", `/runs/${flowId}/status`, { flowId, newStatus: status });
     if (!flowRunRepo) {
       apiLog("PUT", `/runs/${flowId}/status`, { flowId, status: 503, error: "Database not configured" });
@@ -258,7 +294,12 @@ export function createInternalRunsRouter(
         return;
       }
 
-      const row = await flowRunRepo.updateStatus(flowId, status);
+      if (retry_epoch !== undefined && (!Number.isSafeInteger(retry_epoch) || retry_epoch < 0)) {
+        res.status(400).json({ success: false, error: "Bad Request", message: "retry_epoch must be a nonnegative safe integer" });
+        return;
+      }
+
+      const row = await flowRunRepo.updateStatus(flowId, status, retry_epoch);
       if (!row) {
         apiLog("PUT", `/runs/${flowId}/status`, { flowId, status: 404 });
         res.status(404).json({ success: false, error: "Not Found", message: `Flow run "${flowId}" not found` });
@@ -373,7 +414,7 @@ export function createInternalRunsRouter(
   /** PUT /:flowId/result-json — overwrite result_json with last successful node output */
   router.put("/:flowId/result-json", asyncHandler(async (req: Request, res: Response) => {
     const flowId = String(req.params.flowId);
-    apiLogBody("PUT", `/runs/${flowId}/result-json`, req.body, { flowId });
+    apiLogBody("PUT", `/runs/${flowId}/result-json`, { fields: Object.keys(req.body ?? {}) }, { flowId });
     if (!flowRunRepo) {
       apiLog("PUT", `/runs/${flowId}/result-json`, { flowId, status: 503, error: "Database not configured" });
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
@@ -429,30 +470,15 @@ export function createInternalRunsRouter(
       return;
     }
     try {
-      const run = await flowRunRepo.findByFlowId(flowId);
-      if (!run) {
+      const result = await flowRunRepo.resetFailedForRetry(flowId, tx =>
+        nodeExecRepo ? nodeExecRepo.resetFailedByFlowId(flowId, tx) : Promise.resolve(0));
+      if (result.status === 'not_found') {
         apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 404 });
         res.status(404).json({ success: false, error: "Not Found", message: `Flow run "${flowId}" not found` });
         return;
       }
-
-      // Reset failed node executions
-      let resetCount = 0;
-      if (nodeExecRepo) {
-        resetCount = await nodeExecRepo.resetFailedByFlowId(flowId);
-      }
-
-      // Decrement failed_count by the number of reset nodes (not blindly clear to 0)
-      // and set status back to running
-      const ok = await flowRunRepo.resetFailedForRetry(flowId, resetCount);
-      if (!ok) {
-        apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 500, error: "Failed to reset run" });
-        res.status(500).json({ success: false, error: "Internal Server Error", message: "Failed to reset run for retry" });
-        return;
-      }
-
-      apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 200, resetNodes: resetCount });
-      res.json({ success: true, data: { flowId, resetNodes: resetCount } });
+      apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 200, resetNodes: result.resetCount });
+      res.json({ success: true, data: { flowId, resetNodes: result.resetCount } });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 500, error: msg });
@@ -460,10 +486,39 @@ export function createInternalRunsRouter(
     }
   }));
 
+  /** PUT /:flowId/retry-resume — complete a locally journaled retry without changing node history or started_at. */
+  router.put("/:flowId/retry-resume", asyncHandler(async (req: Request, res: Response) => {
+    const flowId = String(req.params.flowId);
+    if (!flowRunRepo) {
+      res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
+      return;
+    }
+    try {
+      const retryEpoch = (req.body as { retry_epoch?: unknown })?.retry_epoch;
+      if (!Number.isSafeInteger(retryEpoch) || (retryEpoch as number) < 1) {
+        res.status(400).json({ success: false, error: "Bad Request", message: "retry_epoch must be a positive safe integer" });
+        return;
+      }
+      const outcome = await flowRunRepo.resumeForRetry(flowId, retryEpoch as number);
+      if (outcome === 'not_found') {
+        res.status(404).json({ success: false, error: "Not Found", message: `Flow run "${flowId}" not found` });
+        return;
+      }
+      if (outcome === 'conflict') {
+        res.status(409).json({ success: false, error: "Conflict", message: `Flow run "${flowId}" is no longer retryable` });
+        return;
+      }
+      res.json({ success: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ success: false, error: "Internal Server Error", message });
+    }
+  }));
+
   /** PUT /:flowId/state — mirror the engine's TaskFlow stateJson (boundary writes) */
   router.put("/:flowId/state", asyncHandler(async (req: Request, res: Response) => {
     const flowId = String(req.params.flowId);
-    apiLogBody("PUT", `/runs/${flowId}/state`, req.body, { flowId });
+    apiLogBody("PUT", `/runs/${flowId}/state`, { fields: Object.keys(req.body ?? {}) }, { flowId });
     if (!flowRunRepo) {
       apiLog("PUT", `/runs/${flowId}/state`, { flowId, status: 503, error: "Database not configured" });
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });

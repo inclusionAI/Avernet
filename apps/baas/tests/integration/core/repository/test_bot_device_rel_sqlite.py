@@ -17,6 +17,7 @@ pytestmark = pytest.mark.integration
 
 TEST_ENV = get_current_env()
 TEST_TENANT = "test_tenant"
+OTHER_ENV = f"{TEST_ENV}-cross"
 
 
 def _generate_uuid() -> str:
@@ -201,3 +202,58 @@ class TestBotDeviceRelSqliteOrmEquivalence:
 
         count = repo.count_by_bot_id(bot_id, TEST_TENANT, TEST_ENV)
         assert count == 2
+
+
+class TestMaxLiveBotIdForBotIdsSqlite:
+    """max_live_bot_id_for_bot_ids: MAX over live rels, no tenant/env filter."""
+
+    def _insert_rel(self, repo, bot_id: int, *, env: str = TEST_ENV) -> int:
+        return repo.insert_rel(
+            bot_id=bot_id,
+            device_uuid=_generate_uuid(),
+            tenant=TEST_TENANT,
+            env=env,
+            domain="test_domain",
+            creator="test_user",
+            modifier="test_user",
+        )
+
+    def test_max_picks_largest_bot_id_among_live_rels_and_ignores_tombstones(self):
+        repo: BotDeviceRelRepository = (
+            get_container().repository.bot_device_rel_repository()
+        )
+        bot_a = _create_bot()
+        bot_b = _create_bot()
+        bot_c = _create_bot()
+        assert bot_a < bot_b < bot_c
+
+        self._insert_rel(repo, bot_a)
+        self._insert_rel(repo, bot_c)
+        tombstoned_rel = self._insert_rel(repo, bot_b)
+        repo.soft_delete(
+            rel_id=tombstoned_rel, tenant=TEST_TENANT, env=TEST_ENV, modifier="admin"
+        )
+
+        assert repo.max_live_bot_id_for_bot_ids([bot_a, bot_b, bot_c]) == bot_c
+        assert repo.max_live_bot_id_for_bot_ids([bot_a]) == bot_a
+        assert repo.max_live_bot_id_for_bot_ids([bot_b]) is None, (
+            "all of bot_b's rels are tombstoned — D-04 rows never count as live"
+        )
+
+    def test_counts_rel_rows_in_other_envs(self):
+        repo: BotDeviceRelRepository = (
+            get_container().repository.bot_device_rel_repository()
+        )
+        bot_id = _create_bot()
+
+        self._insert_rel(repo, bot_id, env=OTHER_ENV)
+
+        assert repo.max_live_bot_id_for_bot_ids([bot_id]) == bot_id
+
+    def test_empty_bot_id_list_returns_none(self):
+        repo = get_container().repository.bot_device_rel_repository()
+        assert repo.max_live_bot_id_for_bot_ids([]) is None
+
+    def test_unknown_bot_ids_return_none(self):
+        repo = get_container().repository.bot_device_rel_repository()
+        assert repo.max_live_bot_id_for_bot_ids([99999998, 99999999]) is None

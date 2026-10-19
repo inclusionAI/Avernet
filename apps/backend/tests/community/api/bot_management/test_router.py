@@ -4,7 +4,7 @@ Uses a minimal FastAPI test app — never imports agentclaw.servers.web.app.
 """
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
@@ -19,7 +19,6 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotInvalidLifecycleStateError,
     BotNotFoundError,
     BotOperationNotAllowedError,
-    BotPermissionError,
     DeviceAllocationError,
     BotNameExistsError,
     BotNameInvalidError,
@@ -28,7 +27,10 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE,
     DeviceLimitError,
 )
-from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
+from agentclaw.community.core.bot_management.errors import (
+    BotCreationRetainedError,
+    BotLookupAmbiguousError,
+)
 from agentclaw.community.core.errors import Unauthorized
 from agentclaw.community.plugin_api.passport import PassportError, PassportPlugin
 from agentclaw.community.plugin_api.auth import AuthPlugin
@@ -47,6 +49,7 @@ def _bind_bot_service(
     policy_service=None,
     create_bot_for_others_service=None,
     default_bot_passport_repair_service=None,
+    bot_space_service=None,
 ):
     from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.api.bot_service import BotServiceProtocol
@@ -56,11 +59,16 @@ def _bind_bot_service(
     from agentclaw.community.api.create_bot_for_others_service import (
         CreateBotForOthersServiceProtocol,
     )
+    from agentclaw.community.api.bot_space_service import BotSpaceServiceProtocol
+
+    if bot_space_service is None:
+        bot_space_service = MagicMock()
 
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotService, to=svc)
             binder.bind(BotServiceProtocol, to=svc)
+            binder.bind(BotSpaceServiceProtocol, to=bot_space_service)
             if create_bot_for_others_service is not None:
                 binder.bind(
                     CreateBotForOthersServiceProtocol,
@@ -1902,6 +1910,31 @@ class TestGetAuthStatus:
         assert data["success"] is False
         assert data["error_code"] == 429
 
+    def test_issued_retained_creation_returns_retry_handle(self, client):
+        tc, svc, passport = client
+        passport.query_auth_status.return_value = {
+            "status": "ISSUED",
+            "token": "tok",
+        }
+        svc.create_bot.side_effect = BotCreationRetainedError(
+            bot_id="bot1",
+            message="device allocation interrupted",
+        )
+
+        response = tc.post(
+            "/api/bots/auth-status",
+            json={"bot_id": "bot1", "bot_name": "NewBot"},
+        )
+
+        assert response.json() == {
+            "success": False,
+            "message": (
+                "创建Bot失败，可使用 bot_id 重试: device allocation interrupted"
+            ),
+            "error_code": 500,
+            "data": {"bot_id": "bot1", "retryable": True},
+        }
+
 
 # ---------------------------------------------------------------------------
 # GET /api/bots/{bot_id}/passport
@@ -2422,3 +2455,282 @@ class TestUpdateBotExtForOthers:
             json={"target_user_id": "u1", "target_bot_id": "b1", "ext_update": {"k": "v"}},
         )
         assert resp.json()["error_code"] == 500
+
+
+# ---------------------------------------------------------------------------
+# POST /api/bots/change-space-for-others  (admin only, batch)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def space_admin_client(mock_bot_service, mock_passport):
+    """Admin-authenticated client with a mock BotSpaceService bound."""
+    from agentclaw.community.adapters.http.bot_management.router import router
+
+    bot_space_service = MagicMock()
+    admin_id = "100000"  # seeded super_admin in application-test.yaml
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_request_context] = lambda: _make_ctx(user_id=admin_id)
+    app.state.default_bot_passport_repair_service = MagicMock()
+    app.state.create_bot_for_others_service = MagicMock()
+    attach_injector(app, Injector([_bind_bot_service(
+        mock_bot_service,
+        bot_repo=MagicMock(),
+        passport=mock_passport,
+        auth=MagicMock(),
+        auth_rel=MagicMock(),
+        skill_set_factory=_stub_skill_set_factory(),
+        bot_space_service=bot_space_service,
+    )]))
+    yield TestClient(app), bot_space_service
+
+
+def _assignment(changed):
+    """A minimal BotSpaceAssignmentResult stand-in for the duck-typed route."""
+    assignment = MagicMock()
+    assignment.changed = changed
+    assignment.space.id = 123
+    return assignment
+
+
+class TestChangeSpaceForOthers:
+    def test_permission_denied_for_non_admin(self, client):
+        tc, svc, _ = client
+        resp = tc.post(
+            "/api/bots/change-space-for-others",
+            json={"space_id": 123, "bot_list": [{"owner_id": "u1", "bot_id": "b1"}]},
+        )
+        assert resp.json()["error_code"] == 403
+
+    def test_missing_space_id(self, space_admin_client):
+        tc, space_svc = space_admin_client
+        resp = tc.post(
+            "/api/bots/change-space-for-others",
+            json={"bot_list": [{"owner_id": "u1", "bot_id": "b1"}]},
+        )
+        assert resp.json()["error_code"] == 400
+        space_svc.change_space.assert_not_called()
+
+    def test_space_id_not_int(self, space_admin_client):
+        tc, space_svc = space_admin_client
+        resp = tc.post(
+            "/api/bots/change-space-for-others",
+            json={"space_id": "123", "bot_list": [{"owner_id": "u1", "bot_id": "b1"}]},
+        )
+        assert resp.json()["error_code"] == 400
+
+    def test_missing_bot_list(self, space_admin_client):
+        tc, space_svc = space_admin_client
+        resp = tc.post("/api/bots/change-space-for-others", json={"space_id": 123})
+        assert resp.json()["error_code"] == 400
+        space_svc.change_space.assert_not_called()
+
+    def test_empty_bot_list(self, space_admin_client):
+        tc, space_svc = space_admin_client
+        resp = tc.post(
+            "/api/bots/change-space-for-others", json={"space_id": 123, "bot_list": []}
+        )
+        assert resp.json()["error_code"] == 400
+
+    def test_bot_list_over_cap(self, space_admin_client):
+        tc, space_svc = space_admin_client
+        bot_list = [
+            {"owner_id": "u1", "bot_id": f"b{i}"} for i in range(101)
+        ]
+        resp = tc.post(
+            "/api/bots/change-space-for-others",
+            json={"space_id": 123, "bot_list": bot_list},
+        )
+        assert resp.json()["error_code"] == 400
+        assert "100" in resp.json()["message"]
+        space_svc.change_space.assert_not_called()
+
+    def test_success_and_service_called_per_item(self, space_admin_client):
+        tc, space_svc = space_admin_client
+        space_svc.change_space.return_value = _assignment(changed=True)
+        resp = tc.post(
+            "/api/bots/change-space-for-others",
+            json={
+                "space_id": 123,
+                "bot_list": [
+                    {"owner_id": "u1", "bot_id": "b1"},
+                    {"owner_id": "u2", "bot_id": "b2"},
+                ],
+            },
+        )
+        body = resp.json()
+        assert body["success"] is True
+        assert body["data"]["total"] == 2
+        assert body["data"]["succeeded"] == 2
+        assert body["data"]["failed"] == 0
+        assert all(r["success"] and r["changed"] for r in body["data"]["results"])
+        assert space_svc.change_space.call_count == 2
+        space_svc.change_space.assert_any_call(
+            bot_id="b1", owner_id="u1", space_id=123, env=None
+        )
+        space_svc.change_space.assert_any_call(
+            bot_id="b2", owner_id="u2", space_id=123, env=None
+        )
+
+    def test_mixed_batch_reports_per_item_outcome(self, space_admin_client):
+        from agentclaw.community.core.bot_management.bot_quota import (
+            BotQuotaExceededError,
+            BotQuotaScope,
+            BotQuotaSnapshot,
+        )
+        from agentclaw.community.core.spaces.models import SpaceType
+
+        quota_snapshot = BotQuotaSnapshot(
+            scope=BotQuotaScope(
+                owner_id="u3", space_id=123, space_name="s", space_type=SpaceType.TEAM
+            ),
+            ceiling=1,
+            used=1,
+        )
+
+        def _change(*, bot_id, owner_id, space_id, env=None):
+            if bot_id == "missing":
+                raise BotNotFoundError(f"Bot not found: {bot_id}")
+            if bot_id == "quota":
+                raise BotQuotaExceededError(quota_snapshot)
+            if bot_id == "same":
+                return _assignment(changed=False)
+            return _assignment(changed=True)
+
+        space_svc = space_admin_client[1]
+        space_svc.change_space.side_effect = _change
+
+        tc = space_admin_client[0]
+        resp = tc.post(
+            "/api/bots/change-space-for-others",
+            json={
+                "space_id": 123,
+                "bot_list": [
+                    {"owner_id": "u1", "bot_id": "ok"},
+                    {"owner_id": "u2", "bot_id": "missing"},
+                    {"owner_id": "u3", "bot_id": "quota"},
+                    {"owner_id": "u4", "bot_id": "same"},
+                ],
+            },
+        )
+        body = resp.json()
+        assert body["success"] is True
+        assert body["data"]["total"] == 4
+        assert body["data"]["succeeded"] == 2
+        assert body["data"]["failed"] == 2
+        results = {r["bot_id"]: r for r in body["data"]["results"]}
+        assert results["ok"]["success"] is True and results["ok"]["changed"] is True
+        assert results["same"]["success"] is True and results["same"]["changed"] is False
+        assert "已在目标空间" in results["same"]["message"]
+        assert results["missing"]["success"] is False
+        assert "Bot不存在" in results["missing"]["message"]
+        assert results["quota"]["success"] is False
+        assert "quota" in results["quota"]["message"]
+
+    def test_item_with_blank_fields_fails_per_item(self, space_admin_client):
+        tc, space_svc = space_admin_client
+        space_svc.change_space.return_value = _assignment(changed=True)
+        resp = tc.post(
+            "/api/bots/change-space-for-others",
+            json={
+                "space_id": 123,
+                "bot_list": [
+                    {"owner_id": "  ", "bot_id": "b1"},
+                    {"owner_id": "u1", "bot_id": "b2"},
+                ],
+            },
+        )
+        body = resp.json()
+        assert body["data"]["total"] == 2
+        assert body["data"]["succeeded"] == 1
+        assert body["data"]["failed"] == 1
+        results = {r["bot_id"]: r for r in body["data"]["results"]}
+        assert results["b1"]["success"] is False
+        assert space_svc.change_space.call_count == 1
+
+    def test_space_error_fails_item_only(self, space_admin_client):
+        from agentclaw.community.core.spaces.errors import SpaceAccessDeniedError
+
+        space_svc = space_admin_client[1]
+        space_svc.change_space.side_effect = SpaceAccessDeniedError(
+            "personal space belongs to another user"
+        )
+        tc = space_admin_client[0]
+        resp = tc.post(
+            "/api/bots/change-space-for-others",
+            json={"space_id": 123, "bot_list": [{"owner_id": "u1", "bot_id": "b1"}]},
+        )
+        body = resp.json()
+        assert body["data"]["failed"] == 1
+        assert "personal space" in body["data"]["results"][0]["message"]
+
+    def test_env_threaded_to_service_and_echoed(self, space_admin_client):
+        tc, space_svc = space_admin_client
+        space_svc.change_space.return_value = _assignment(changed=True)
+        resp = tc.post(
+            "/api/bots/change-space-for-others",
+            json={
+                "space_id": 123,
+                "bot_list": [{"owner_id": "u1", "bot_id": "b1"}],
+                "env": "prod",
+            },
+        )
+        body = resp.json()
+        assert body["success"] is True
+        space_svc.change_space.assert_called_once_with(
+            bot_id="b1", owner_id="u1", space_id=123, env="prod"
+        )
+        assert body["data"]["env"] == "prod"
+
+    def test_env_blank_treated_as_absent(self, space_admin_client):
+        from agentclaw.community.utils.env_utils import get_current_env
+
+        tc, space_svc = space_admin_client
+        space_svc.change_space.return_value = _assignment(changed=True)
+        resp = tc.post(
+            "/api/bots/change-space-for-others",
+            json={
+                "space_id": 123,
+                "bot_list": [{"owner_id": "u1", "bot_id": "b1"}],
+                "env": "   ",
+            },
+        )
+        body = resp.json()
+        assert body["success"] is True
+        space_svc.change_space.assert_called_once_with(
+            bot_id="b1", owner_id="u1", space_id=123, env=None
+        )
+        assert body["data"]["env"] == get_current_env()
+
+    def test_env_wrong_type_rejected(self, space_admin_client):
+        tc, space_svc = space_admin_client
+        resp = tc.post(
+            "/api/bots/change-space-for-others",
+            json={
+                "space_id": 123,
+                "bot_list": [{"owner_id": "u1", "bot_id": "b1"}],
+                "env": 123,
+            },
+        )
+        assert resp.json()["error_code"] == 400
+        space_svc.change_space.assert_not_called()
+
+    def test_failed_reasons_appear_in_summary_log(self, space_admin_client, caplog):
+        import logging as _logging
+
+        tc, space_svc = space_admin_client
+        space_svc.change_space.side_effect = BotNotFoundError("Bot not found: b1")
+        with caplog.at_level(_logging.INFO, logger="start"):
+            tc.post(
+                "/api/bots/change-space-for-others",
+                json={
+                    "space_id": 123,
+                    "bot_list": [{"owner_id": "u1", "bot_id": "b1"}],
+                },
+            )
+        assert any(
+            "failed_reasons={'BotNotFound': 1}" in r.message
+            for r in caplog.records
+            if "change_space_for_others" in r.message
+        )

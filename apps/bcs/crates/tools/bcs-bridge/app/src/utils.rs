@@ -26,8 +26,35 @@ pub fn resolve_engine_bin(override_bin: Option<&Path>, default_bin: &str) -> any
 }
 
 fn absolute_path(path: &Path) -> anyhow::Result<PathBuf> {
-    if path.is_absolute() { Ok(path.to_path_buf()) }
-    else { Ok(std::env::current_dir().context("Cannot read current directory")?.join(path)) }
+    let absolute = if path.is_absolute() { path.to_path_buf() }
+        else { std::env::current_dir().context("Cannot read current directory")?.join(path) };
+    // Normalize directory aliases (e.g. macOS /var -> /private/var), but preserve
+    // the executable's own symlink name: wrappers may select behavior by argv[0].
+    let name = absolute.file_name().context("Executable path must name a file")?;
+    Ok(absolute.parent().context("Executable path has no parent directory")?
+        .canonicalize().context("Cannot resolve executable directory")?.join(name))
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn directory_aliases_match_without_resolving_the_executable_symlink() {
+        use std::os::unix::{fs::symlink, fs::PermissionsExt};
+        let root = tempfile::tempdir().unwrap();
+        let bin = root.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let engine = bin.join("engine");
+        std::fs::write(&engine, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&engine, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let alias = root.path().join("alias");
+        symlink(&bin, &alias).unwrap();
+        let resolved = resolve_engine_bin(Some(&engine), "unused").unwrap();
+        assert_eq!(resolve_engine_bin(Some(&alias.join("engine")), "unused").unwrap(), resolved);
+        symlink(&engine, bin.join("wrapper")).unwrap();
+        assert_ne!(resolve_engine_bin(Some(&alias.join("wrapper")), "unused").unwrap(), resolved);
+    }
 }
 
 fn is_executable_file(path: &Path) -> bool {

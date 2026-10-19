@@ -39,6 +39,29 @@ def _principal() -> str:
     )
 
 
+def _bcs_readdressed_principal() -> str:
+    # The envelope BCN's re-signer emits for this endpoint: the approver's
+    # claims, re-addressed as iss=bcs. The ordinary-HTTP seam must accept this
+    # issuer — it is the only shape a friend work-order callback approval can
+    # arrive in (the backend's own iss=backend copy is answered 401 when
+    # echoed back verbatim). Unlike the 60s production envelope, this token is
+    # minted at import time and the full CI suite may run the case many
+    # minutes later, so it carries the file's long-lived 3600s window.
+    now = int(time.time())
+    return jwt.encode(
+        {
+            "iss": "bcs",
+            "aud": "backend",
+            "iat": now,
+            "exp": now + 3600,
+            "principals": [{"type": "user", "subject": {"id": "85020", "username": "owner"}}],
+        },
+        _SIGNING_KEY,
+        algorithm="HS256",
+        headers={"kid": "bare"},
+    )
+
+
 def _boot_verifier(_world) -> None:
     init_principal_verifier_config(_Resolver(), "friend-auth-endpoint-test-key", strict=False)
 
@@ -92,3 +115,59 @@ def sync_happy():
 )
 def sync_invalid_body():
     pass
+
+
+@endpoint_test(
+    method="POST",
+    path=_PATH,
+    scenario="bcs_readdressed_grant_is_accepted",
+    seed=_seed_sync_service,
+    input=CaseInput(
+        headers={PRINCIPAL_HEADER: _bcs_readdressed_principal()}, json_body=_BODY
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"synced": True, "reason": "created", "auth_id": 42},
+    ),
+)
+def sync_bcs_readdressed_grant():
+    """A BCN-re-addressed (iss=bcs) approver principal authenticates.
+
+    This is the premise the BCS friend-auth-sync re-signer relies on: tokens
+    it mints for this endpoint must pass ``require_user_caller``. If this
+    fails, every friend approval synced through the work-order callback
+    answers 401 at the backend.
+    """
+
+
+@endpoint_test(
+    method="POST",
+    path=_PATH,
+    scenario="backend_readdressed_principal_is_refused",
+    seed=_boot_verifier,
+    input=CaseInput(
+        headers={
+            # The backend re-addresses the approver's principal to iss=backend
+            # before calling BCN's accept route; echoing that copy back here
+            # (the pre-fix friend-auth-sync behavior) must stay a uniform 401.
+            PRINCIPAL_HEADER: jwt.encode(
+                {
+                    "iss": "backend",
+                    "aud": "bcs",
+                    "iat": int(time.time()),
+                    "exp": int(time.time()) + 3600,
+                    "principals": [
+                        {"type": "user", "subject": {"id": "85020", "username": "owner"}}
+                    ],
+                },
+                _SIGNING_KEY,
+                algorithm="HS256",
+                headers={"kid": "bare"},
+            )
+        },
+        json_body=_BODY,
+    ),
+    expect=ExpectError(status=401),
+)
+def sync_backend_readdressed_principal_refused():
+    """The backend's own issuer is not on the ordinary-HTTP allow-list."""

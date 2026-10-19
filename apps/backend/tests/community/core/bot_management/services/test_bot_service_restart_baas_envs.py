@@ -73,6 +73,7 @@ def _make_service(
     )
     svc._oss_record_repo = MagicMock()
     svc._skill_set_factory = MagicMock()
+    svc._skill_layout_repository = MagicMock()
     svc._device_binding_repo = MagicMock()
     svc._bot_publish_repo = MagicMock()
     # template_service.get_template_config 返回读回的 template_config（含 model/runtime/token）
@@ -374,6 +375,7 @@ class TestRestartBaasEnvInjection:
             "restart_workflow_baseline": 0,
             "restart_publish_id": None,
             "restart_image_policy_on_success": None,
+            "envs": {"AGENTCLAW_SKILLS_LAYOUT": "legacy"},
         }
         assert calls[1].kwargs["props"] == {
             "publish_id": "12372",
@@ -396,6 +398,61 @@ class TestRestartBaasEnvInjection:
             deadline_seconds=86400,
             delay_seconds=2,
         )
+
+    def test_pool_restart_replays_persisted_layout_to_runtime_and_binding(self):
+        from agentclaw.community.core.skills_pool.types import (
+            SkillLayout,
+            SkillLayoutPhase,
+        )
+
+        svc, baas, _device_service = _make_service(template_config={})
+        svc._skill_layout_repository.get.return_value = MagicMock(
+            active_layout=SkillLayout.POOL,
+            layout_contract_version="skills-pool-p3-v1",
+            phase=SkillLayoutPhase.POOL_ACTIVE,
+        )
+        bot = _make_bot(active_engine="openclaw", template_type=None)
+
+        svc._restart_bot_baas(
+            bot_id="bot001",
+            user_id="user001",
+            binding_id=42,
+            bot=bot,
+        )
+
+        expected_layout = {
+            "AGENTCLAW_SKILLS_LAYOUT": "pool",
+            "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "skills-pool-p3-v1",
+            "AGENTCLAW_SKILLS_LAYOUT_PHASE": "pool_active",
+        }
+        assert baas.upgrade_bot.call_args.kwargs["extra_envs"] == expected_layout
+        first_props = svc._device_binding_repo.update_device_props.call_args_list[
+            0
+        ].kwargs["props"]
+        assert first_props["envs"] == expected_layout
+
+    def test_pool_rollback_phase_requires_runtime_recovery(self):
+        from agentclaw.community.core.skills_pool.types import (
+            SkillLayout,
+            SkillLayoutPhase,
+        )
+
+        svc, _baas, _device_service = _make_service(template_config={})
+        svc._skill_layout_repository.get.return_value = MagicMock(
+            active_layout=SkillLayout.POOL,
+            layout_contract_version="skills-pool-p3-v1",
+            phase=SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING,
+        )
+
+        assert svc._skills_layout_env(
+            env="dev",
+            entity_id="user001",
+            bot_id="bot001",
+        ) == {
+            "AGENTCLAW_SKILLS_LAYOUT": "pool",
+            "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "skills-pool-p3-v1",
+            "AGENTCLAW_SKILLS_LAYOUT_PHASE": "recovery_required",
+        }
 
     def test_restart_baas_enqueues_recovery_before_pending_and_external_call(self):
         svc, baas, device_service = _make_service(template_config={})
@@ -675,3 +732,57 @@ class TestRestartBaasCodefuseTokenPassthrough:
 
         payload = svc._task_queue_service.enqueue.call_args.args[1]
         assert "codefuse_token" not in payload
+
+
+@pytest.mark.parametrize("coding_prepare", [False, True])
+@pytest.mark.parametrize("engine,bot_type", [("openclaw", "personal"), ("openclaw", "desktop"), ("openclaw", "service"), ("aicoding", "personal"), ("architect", "personal")])
+def test_restart_registers_without_legacy_gates(coding_prepare, engine, bot_type):
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_request import AicodingBaasPreparation
+    svc, baas, _ = _make_service(template_config={"capabilities": {"bcn": {"join_as_provider": False}}})
+    svc._drm_reader.read.return_value = "false"
+    svc._bcn_service.register_provider_bot.return_value = {"bot_uuid": "bcn-1"}
+    bot = {**_make_bot(active_engine=engine, bot_type=bot_type), "ext": {"bcn_registered": True}}
+    if coding_prepare:
+        result = AicodingBaasPreparation(svc).prepare(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
+        assert result.bot_uuid == "BOT-uuid-9"
+    else:
+        svc._restart_bot_baas(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
+        baas.upgrade_bot.assert_called_once()
+    expected = dict(teamclaw_bot_uuid="bot001", owner_workno="user001", name="TestBot", summary="")
+    if engine == "openclaw" and bot_type in ("personal", "desktop"):
+        expected["connection_mode"] = "plugin"
+    svc._bcn_service.register_provider_bot.assert_called_once_with(**expected)
+
+
+@pytest.mark.parametrize("coding_prepare", [False, True])
+def test_restart_registration_failure_does_not_block_preparation(coding_prepare):
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_request import AicodingBaasPreparation
+    svc, baas, _ = _make_service(template_config={})
+    svc._drm_reader.read.return_value = "false"
+    svc._bcn_service.register_provider_bot.side_effect = RuntimeError("BCN unavailable")
+    bot = _make_bot()
+    if coding_prepare:
+        result = AicodingBaasPreparation(svc).prepare(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
+        assert result.bot_uuid == "BOT-uuid-9"
+    else:
+        svc._restart_bot_baas(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
+        baas.upgrade_bot.assert_called_once()
+    svc._bcn_service.register_provider_bot.assert_called_once()
+
+
+@pytest.mark.parametrize("coding_prepare", [False, True])
+def test_restart_durable_intent_remains_early_return(coding_prepare):
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_request import AicodingBaasPreparation, BaasRestartInProgress
+    from agentclaw.community.core.devices.services.baas_publish_task_handlers import RESTART_REQUEST_ID_KEY, RESTART_WORKFLOW_BASELINE_KEY
+    svc, baas, device = _make_service(template_config={})
+    device.get_device.return_value.device_props = {
+        RESTART_REQUEST_ID_KEY: "existing-request", RESTART_WORKFLOW_BASELINE_KEY: 3,
+    }
+    bot = _make_bot()
+    if coding_prepare:
+        result = AicodingBaasPreparation(svc).prepare(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
+        assert isinstance(result, BaasRestartInProgress)
+    else:
+        svc._restart_bot_baas(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
+    svc._bcn_service.register_provider_bot.assert_not_called()
+    baas.upgrade_bot.assert_not_called()

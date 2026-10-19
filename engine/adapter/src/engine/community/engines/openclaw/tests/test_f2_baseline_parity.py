@@ -105,6 +105,8 @@ GOLDEN_SUPPORTED = frozenset({
     Capability.CLI_LIST,
     Capability.CLI_REPLACE,
     Capability.CLI_DOWNLOAD,
+    Capability.CLI_ACLI_INSTALL,
+    Capability.CLI_ACLI_UNINSTALL,
 })
 GOLDEN_LIMITED = frozenset({Capability.MCP_START, Capability.MCP_STOP})
 

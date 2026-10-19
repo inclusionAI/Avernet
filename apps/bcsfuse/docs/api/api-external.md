@@ -52,7 +52,7 @@ Authorization: Bearer <BCSFUSE_AUTH_TOKEN>
 
 ## 1. POST /api/v1/workers/{worker_id}/sync
 
-注册或同步 Worker，原子操作：创建/更新 Worker → 上线 → 写入/激活 Profile。
+注册或同步 Worker 与 Profile。新 Worker 默认上线；已有 Worker 未传 `runtime_state` 时保留原状态。
 
 ### 路径参数
 
@@ -67,28 +67,36 @@ Authorization: Bearer <BCSFUSE_AUTH_TOKEN>
   "name": "string (必填)",
   "type": "bot|human (默认: bot)",
   "description": "string (选填)",
-  "runtime_state": "online|offline (默认: online)",
+  "availability": "private|protected|public (新 Worker 默认 protected)",
+  "runtime_state": "online|offline (已有 Worker 省略时保留)",
+  "capabilities": [{"name": "nlp", "level": "expert"}],
+  "skills": [{"name": "search", "source": "builtin", "trust_level": "guarded"}],
   "profile": {
-    "profile_id": "string (必填，通常为 'default')",
-    "summary": "string",
-    "expertise": ["string"],
-    "scenarios": ["string"],
-    "constraints": ["string"]
+    "profile_id": "default",
+    "display_name": "My Bot",
+    "soul_md": "Bot instructions",
+    "contents": {"identity": "Assistant"},
+    "skill_sets": [{"name": "search"}],
+    "metadata": {"source": "bcs"},
+    "summary": {"capability": "NLP", "role": "Assistant"},
+    "activate": true
   }
 }
 ```
+
+更新已有数据时，`name` 必传；其他未出现的字段保留旧值。显式传空字符串或空数组会清空相应字段；`contents`、`metadata` 传非空对象时按键合并，显式传 `{}` 时清空整张映射。`skill_sets` 显式传入时整体替换。`runtime_state: null` 与省略一样保留现状。LLM 分析失败时保留旧值；回写前若检测到画像已更新，则丢弃过期结果。
+同一 Worker 或 Profile 的并发同步会按存储版本重新合并并有限重试；若冲突持续，分别返回 `SYNC_WORKER_ERROR` 或 `PROFILE_SYNC_FAILED`，不会将丢失更新报告为成功。
 
 ### 响应
 
 ```json
 {
+  "success": true,
   "worker_id": "my-bot-001",
-  "name": "My Bot",
-  "role": "AI Assistant",
+  "created": false,
   "runtime_state": "online",
-  "profile_uploaded": true,
-  "created_at": "2026-07-09T10:00:00Z",
-  "updated_at": "2026-07-09T10:00:00Z"
+  "profile_id": "default",
+  "profile_activated": true
 }
 ```
 
@@ -100,23 +108,23 @@ Authorization: Bearer <BCSFUSE_AUTH_TOKEN>
 | 400 | 请求体无效 |
 | 401 | 未认证 |
 | 422 | 参数校验失败 |
+| 500 | Worker 或 Profile 同步失败（`SYNC_WORKER_ERROR` / `PROFILE_SYNC_FAILED`；已提交的前序写入不会回滚，可重试） |
 | 503 | Provider 不可用 |
 
 ### 示例
 
 ```bash
 curl -X POST http://localhost:8765/api/v1/workers/my-bot-001/sync \
-  -H "Authorization: Bearer dev-opencore-token" \
+  -H "Authorization: Bearer <BCSFUSE_AUTH_TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "My Bot",
     "type": "bot",
-    "runtime_state": "online",
+    "availability": "protected",
     "profile": {
       "profile_id": "default",
-      "summary": "Expert in NLP and search",
-      "expertise": ["Python", "Machine Learning"],
-      "scenarios": ["question answering", "information retrieval"]
+      "soul_md": "Expert in NLP and search",
+      "contents": {"identity": "Assistant"}
     }
   }'
 ```

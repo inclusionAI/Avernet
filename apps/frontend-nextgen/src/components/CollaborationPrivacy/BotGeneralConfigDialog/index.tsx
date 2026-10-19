@@ -30,8 +30,13 @@ import { Copy, RefreshCw, ShieldCheck } from 'lucide-react';
 interface BotGeneralConfigDialogProps {
   /** BotWorkshop 列表行数据：身份三要素（id / 名称 / 引擎）+ 头像透传；外部 Bot PRD 预留同形复用。 */
   bot: BotDomain;
+  /** 外部 Bot 仅配置对 Bot 可见性、好友审批及群聊参与。 */
+  isExternalBot?: boolean;
   onClose: () => void;
 }
+
+const codingBotAbilitySettings = ['collaborationStatus'] as const;
+const generalConfigAbilitySettings = ['collaborationStatus', 'profilePublic'] as const;
 
 function DialogLoadingState() {
   return (
@@ -41,9 +46,15 @@ function DialogLoadingState() {
   );
 }
 
-export function BotGeneralConfigDialog({ bot, onClose }: BotGeneralConfigDialogProps) {
-  const privacy = useCollaborationPrivacy({ fixedBotId: bot.id });
+export function BotGeneralConfigDialog({ bot, isExternalBot = false, onClose }: BotGeneralConfigDialogProps) {
+  // 外部 Bot 由入口显式声明（绝不按 ID 猜测）：加载与可见性提交都走外部 PATCH 直改合同，无审批链路。
+  const privacy = useCollaborationPrivacy({ fixedBotId: bot.id, isExternalBot });
   const targetBot = privacy.visibleBots[0];
+  // Coding Bot 按 AgentCoding 模板能力裁剪协作能力；未声明 BCN 时整个分组不渲染。
+  const isAgentCodingBot = bot.runtime.isAgentCodingBot;
+  const showCollaborationAbilitySettings = !isAgentCodingBot || bot.runtime.bcnEnabled === true;
+  // 外部 Bot 与 Coding Bot 仅展示群聊参与；其他 Bot 隐藏任务认领与 Dream Mode。
+  const visibleAbilitySettings = isExternalBot || isAgentCodingBot ? codingBotAbilitySettings : generalConfigAbilitySettings;
   // 显示与复制均以协作域 Bot UUID 为准（含 :port 后缀，与协作权限页一致）；
   // 加载中/未命中时回退行数据 Bot ID（collab-permission-entry-migration 验收修正）。
   const displayId = targetBot?.id ?? bot.id;
@@ -129,6 +140,8 @@ export function BotGeneralConfigDialog({ bot, onClose }: BotGeneralConfigDialogP
             )}
             <BotVisibilitySettings
               bot={targetBot}
+              showUserVisibility={!isExternalBot}
+              isExternalBot={isExternalBot}
               onEditPublication={privacy.openPublicationEditor}
               onViewScope={privacy.openScopeViewer}
             />
@@ -137,12 +150,15 @@ export function BotGeneralConfigDialog({ bot, onClose }: BotGeneralConfigDialogP
               onEditFriendApproval={privacy.openFriendEditor}
               onViewFriendApprovalScope={privacy.openFriendScopeViewer}
             />
-            <BotAbilitySettings
-              bot={targetBot}
-              busyAction={privacy.busyAction}
-              onToggleDirect={privacy.toggleDirect}
-              grid
-            />
+            {showCollaborationAbilitySettings ? (
+              <BotAbilitySettings
+                bot={targetBot}
+                busyAction={privacy.busyAction}
+                onToggleDirect={privacy.toggleDirect}
+                grid
+                visibleSettings={visibleAbilitySettings}
+              />
+            ) : null}
           </div>
         )}
         <ConfirmDialog
@@ -165,6 +181,7 @@ export function BotGeneralConfigDialog({ bot, onClose }: BotGeneralConfigDialogP
           <PublicationEditor
             open
             audience={privacy.publicationEditor.audience}
+            isExternalBot={isExternalBot}
             initialConfig={privacy.publicationBot.publication[privacy.publicationEditor.audience]}
             onSearch={(keyword, signal) => privacy.searchDepartments(keyword, signal)}
             loading={

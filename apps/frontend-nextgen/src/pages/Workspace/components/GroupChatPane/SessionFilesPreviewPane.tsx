@@ -1,7 +1,8 @@
+import { SafeHtml } from '@/assets/TaskPanel/SafeHtml';
 import { Badge, Button } from '@/components/ui';
 import type { SessionFilePreviewState } from '@/pages/Workspace/hooks/useSessionFilePreview';
 import { formatFileSize } from '@/services/workspace/sessionFileUtils';
-import { ArrowLeft, Download, FileText, FolderOpen, Share2 } from 'lucide-react';
+import { ArrowLeft, Download, FileText, FolderOpen, Reply, Share2 } from 'lucide-react';
 import { isMarkdownFile, renderSessionFileMarkdown } from './sessionFileMarkdown';
 /** 预览面板所需的最小文件字段（群聊 / 单聊共用）。 */
 export interface PreviewFile {
@@ -101,9 +102,9 @@ function PreviewBody({ file, preview, onDownload }: PreviewBodyProps) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         {isMarkdownFile(file.name) ? (
-          <div
+          <SafeHtml
             className="markdown-body app-scrollbar min-h-0 flex-1 overflow-y-auto px-6 py-4 text-sm leading-6 text-foreground"
-            dangerouslySetInnerHTML={{ __html: renderSessionFileMarkdown(preview.text) }}
+            html={renderSessionFileMarkdown(preview.text)}
           />
         ) : (
           <pre
@@ -149,12 +150,22 @@ interface PreviewPaneProps {
   filesStateEmpty: boolean;
   preview: SessionFilePreviewState;
   onDownload: () => void;
+  /** 引用到输入框（单聊副屏特有）：传入即在预览头渲染「引用」，群聊侧不传不受影响。 */
+  onReference?: () => void;
   onShare?: () => void;
   /** 下钻模式：传入即在预览头渲染「返回文件列表」导航（合并原独立导航层，释放纵向空间）。 */
   onBack?: () => void;
 }
 
-export function PreviewPane({ file, filesStateEmpty, preview, onDownload, onShare, onBack }: PreviewPaneProps) {
+export function PreviewPane({
+  file,
+  filesStateEmpty,
+  preview,
+  onDownload,
+  onReference,
+  onShare,
+  onBack,
+}: PreviewPaneProps) {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-card">
       {file ? (
@@ -176,6 +187,16 @@ export function PreviewPane({ file, filesStateEmpty, preview, onDownload, onShar
                 </Button>
               ) : null}
               <div className="ml-auto flex shrink-0 items-center gap-2">
+                {onReference ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    leftIcon={<Reply className="h-3.5 w-3.5" aria-hidden />}
+                    onClick={() => void onReference()}
+                  >
+                    引用
+                  </Button>
+                ) : null}
                 {onShare ? (
                   <Button
                     size="sm"

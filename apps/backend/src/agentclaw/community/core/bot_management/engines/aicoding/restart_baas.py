@@ -1,8 +1,8 @@
 """Ordinary coding BaaS restart orchestration; never called by other engines.
 
 Own the backup -> prepare -> submit boundary rather than inserting callbacks
-into BotService or the BaaS client. Published/Caller and direct-provider paths
-continue to use their existing entrypoints. All shared services are reused as
+into BotService or the BaaS client. Published/Caller paths retain their existing
+entrypoints; bound Arca coding tasks use the sibling Arca lifecycle executor. All shared services are reused as
 collaborators, never monkey-patched or reconfigured per request.
 """
 
@@ -65,11 +65,16 @@ class AicodingSubmissionMixin:
         if execution is None or execution.payload["provider"] != "baas":
             return
         execution.check_target(ctx, execution.payload["binding_id"])
-        if execution.verify_backup is None:
-            raise RuntimeError("缺少已验证的备份，禁止提交重启")
-        # Configuration preparation can take time. Recheck the actual container
-        # and committed generation at the last possible moment before submission.
-        execution.verify_backup()
+        if execution.verify_backup is not None:
+            execution.verify_backup()
+        else:
+            logger.warning(
+                "event=aicoding_restart_backup phase=verify_receipt status=degraded "
+                "reason=missing_verifier action=continue_restart data_loss_risk=true "
+                "bot_id=%s target_id=%s operation_id=%s",
+                ctx.bot_id, execution.payload['device_id'], execution.operation_id,
+            )
+        # Mandatory operation ownership/CAS is independent of optional backup.
         execution.fence_mutation()
 
     def on_restart_submission_error(self, ctx, error, *, clear_intent) -> None:
@@ -159,7 +164,7 @@ class AicodingBaasRestart:
             ctx,
             binding_id=bot["binding_id"],
             device_service_provider=service._device_service_provider,
-            target_runtime_provider=service._baas_service_provider,
+            restart_dependencies=service._restart_backup_dependencies,
             bot_repository=service._repository,
         )
         env, entity_id = get_current_env(), bot["entity_id"]

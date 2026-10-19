@@ -29,6 +29,7 @@ test('创建钉钉渠道时透传流式卡片配置', async () => {
 
   await botAdvancedConfigService.createChannel('bot-1', {
     bindingMode: 'plugin',
+    stage: 'verify',
     description: '研发群',
     clientId: 'client-1',
     clientSecret: 'secret-1',
@@ -45,6 +46,7 @@ test('创建钉钉渠道时透传流式卡片配置', async () => {
   expect(createChannel).toHaveBeenCalledWith('bot-1', {
     type: 'dingding',
     binding_mode: 'plugin',
+    stage: 'verify',
     description: '研发群',
     config: {
       client_id: 'client-1',
@@ -72,6 +74,7 @@ test('渠道列表兼容 OpenAPI 直接数组并保留完整配置', async () =>
         binding_mode: 'bcn_gateway',
         status: 'active',
         description: '研发群',
+        stage: 'online',
         created_at: '2026-09-03T10:00:00Z',
         config: {
           client_id: 'client-1',
@@ -84,6 +87,7 @@ test('渠道列表兼容 OpenAPI 直接数组并保留完整配置', async () =>
           robot_code: 'robot-1',
           group_chat_scope: 'conversation_shared',
           outbound_visibility: 'lead_only',
+          forward_sender_identity: true,
         },
       },
     ],
@@ -102,6 +106,7 @@ test('渠道列表兼容 OpenAPI 直接数组并保留完整配置', async () =>
       robotCode: 'robot-1',
       groupChatScope: 'conversation_shared',
       outboundVisibility: 'lead_only',
+      forwardSenderIdentity: true,
     }),
   ]);
 });
@@ -126,6 +131,7 @@ test('创建 BCN 渠道时只提交 BCN 模式允许的配置', async () => {
     includeSenderName: true,
     groupChatScope: 'per_sender',
     outboundVisibility: 'full_transcript',
+    forwardSenderIdentity: true,
   });
 
   expect(createChannel).toHaveBeenCalledWith('bot-1', {
@@ -140,6 +146,7 @@ test('创建 BCN 渠道时只提交 BCN 模式允许的配置', async () => {
       card_template_id: null,
       group_chat_scope: 'per_sender',
       outbound_visibility: 'full_transcript',
+      forward_sender_identity: true,
     },
   });
 });

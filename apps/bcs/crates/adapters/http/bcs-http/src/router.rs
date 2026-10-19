@@ -65,6 +65,7 @@ fn build_api_routes() -> Router<HttpAppState> {
         )
         .route("/providers", post(routes::providers::register_provider))
         .route("/providers/by-slug/{slug}", get(routes::providers::get_provider_by_slug))
+        .route("/api/v1/collaboration/providers/by-slug/{slug}", get(routes::providers::get_provider_by_slug))
         .route(
             "/providers/agentpass/resolve",
             post(routes::providers::resolve_agentpass_bot),
@@ -246,6 +247,10 @@ fn build_api_routes() -> Router<HttpAppState> {
             "/collaboration/definitions/validate",
             post(routes::collaboration_definitions::validate_collaboration_definition_yaml),
         )
+        .route("/groupcontext/add", post(routes::group_context::add))
+        .route("/groupcontext/update", post(routes::group_context::update))
+        .route("/groupcontext/list", post(routes::group_context::list))
+        .route("/groupcontext/get", post(routes::group_context::get))
         .route("/groups/request", post(routes::group_requests::group_request))
         .route(
             "/groups/{token}/confirm",

@@ -22,6 +22,11 @@ from agentclaw.community.adapters.http.openapi_v1.responses import envelope_erro
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.core.bot_collaborator.models import CollaboratorRecord
+from agentclaw.community.core.bot_inventory.errors import BotInventoryPermissionError
+from agentclaw.community.core.bot_inventory.protocols import (
+    BotInventoryTemplatePort,
+    BusinessSpaceContextProtocol,
+)
 from agentclaw.community.di import Injected
 
 from .schemas import CollaboratingBot, CollaborationSummary
@@ -33,7 +38,13 @@ router = APIRouter(
 )
 
 
-def _to_item(bot: dict[str, Any], relation: CollaboratorRecord) -> CollaboratingBot:
+def _to_item(
+    bot: dict[str, Any],
+    relation: CollaboratorRecord,
+    *,
+    template_config: dict[str, Any] | None,
+    space: dict[str, str] | None,
+) -> CollaboratingBot:
     engine = bot.get("active_engine") or ""
     return CollaboratingBot(
         bot_id=bot["bot_id"],
@@ -45,12 +56,50 @@ def _to_item(bot: dict[str, Any], relation: CollaboratorRecord) -> Collaborating
         cluster_name=cluster_for_engine(engine),
         bot_type=bot.get("bot_type") or "",
         status=bot.get("status") or "",
+        template_type=bot.get("template_type") or None,
+        template_config=template_config,
+        space=space,
         collaboration=CollaborationSummary(
             id=relation.id,
             role=relation.role,
             joined_at=relation.gmt_create,
         ),
     )
+
+
+def _resolve_template_configs(
+    rows: list[dict[str, Any]], template_port: BotInventoryTemplatePort
+) -> dict[str, dict[str, Any]]:
+    bot_ids = [
+        str(row["bot_id"])
+        for row in rows
+        if row.get("bot_id") and row.get("template_type")
+    ]
+    return template_port.list_template_configs_by_bot_ids(list(dict.fromkeys(bot_ids)))
+
+
+def _resolve_row_spaces(
+    rows: list[dict[str, Any]], space_context: BusinessSpaceContextProtocol
+) -> dict[tuple[str, str], dict[str, str] | None]:
+    resolved: dict[tuple[str, str], dict[str, str] | None] = {}
+    for row in rows:
+        owner_id = str(row.get("owner_id") or "")
+        space_id = str(row.get("space_id") or "")
+        key = (owner_id, space_id)
+        if key in resolved:
+            continue
+        try:
+            ref = space_context.bot_space(
+                bot=row, owner_id=owner_id, current_space=None
+            )
+        except BotInventoryPermissionError:
+            ref = None
+        resolved[key] = (
+            {"space_id": ref.space_id, "name": ref.name, "kind": ref.kind}
+            if ref is not None
+            else None
+        )
+    return resolved
 
 
 @router.get("", response_model=Envelope[Page[CollaboratingBot]])
@@ -63,6 +112,10 @@ async def list_collaborating_bots(
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     collaborators: CollaboratorServiceProtocol = Injected(
         CollaboratorServiceProtocol
+    ),
+    template_port: BotInventoryTemplatePort = Injected(BotInventoryTemplatePort),
+    space_context: BusinessSpaceContextProtocol = Injected(
+        BusinessSpaceContextProtocol
     ),
 ) -> Envelope[Page[CollaboratingBot]]:
     """List live Bots for which the acting user has a collaborator record.
@@ -96,10 +149,23 @@ async def list_collaborating_bots(
         page=page_params.page,
         page_size=page_params.page_size,
     )
-    items = [
-        _to_item(bot, relation_by_pair[(bot["bot_id"], bot["owner_id"])])
-        for bot in result["items"]
-    ]
+    rows = result["items"]
+    template_configs, row_spaces = await asyncio.gather(
+        asyncio.to_thread(_resolve_template_configs, rows, template_port),
+        asyncio.to_thread(_resolve_row_spaces, rows, space_context),
+    )
+    items = []
+    for bot in rows:
+        owner_id = str(bot.get("owner_id") or "")
+        bot_id = str(bot.get("bot_id") or "")
+        items.append(
+            _to_item(
+                bot,
+                relation_by_pair[(bot["bot_id"], bot["owner_id"])],
+                template_config=template_configs.get(bot_id),
+                space=row_spaces.get((owner_id, str(bot.get("space_id") or ""))),
+            )
+        )
     return page(result["total"], items, request)
 
 

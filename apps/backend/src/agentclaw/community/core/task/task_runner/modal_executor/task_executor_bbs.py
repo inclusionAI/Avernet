@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from typing import Any
 
 from agentclaw.community.core.task.domain.errors import BotIdentityResolutionError
@@ -24,6 +23,12 @@ class TaskExecutorBbsMixin:
         owner_user_id: str | None,
         task_instruction: str,
         deadline_monotonic: float,
+        relay_execution: bool = False,
+        task_objective: str = "",
+        acceptances: list[dict[str, Any]] | None = None,
+        upstream_outputs: dict[str, Any] | None = None,
+        relay_blackboard: dict[str, Any] | None = None,
+        relay_token: str = "",
     ) -> dict:
         """BBS 旁路:single bot 任务改由 manager_worker 协作群执行(受 singlebot_2_group 开关控制)。
 
@@ -37,7 +42,7 @@ class TaskExecutorBbsMixin:
         (由 bbs_runner ``try/except`` 回退 ``send_and_wait_async``);群进入终态(completed/failed/aborted)
         一律返回(不抛、不重复执行)。
         """
-        driver_bot = str(winner_bot_id or "").partition(":")[0]
+        driver_bot = str(winner_bot_id or "").strip()
         if not driver_bot:
             raise BotIdentityResolutionError(
                 f"bbs manager_worker 群缺 driver bot:winner_bot_id={winner_bot_id!r}"
@@ -53,8 +58,18 @@ class TaskExecutorBbsMixin:
                 "manager_bot_id": driver_bot,
                 "loop_task_id": loop_task_id,
                 "task_instruction": task_instruction,
+                "dynamic_task_node_protocol": relay_execution,
+                "relay_execution": relay_execution,
             },
         )
+        if relay_execution:
+            gf.extend_props.update({
+                "task_objective": task_objective,
+                "acceptances": acceptances or [],
+                "upstream_outputs": upstream_outputs or {},
+                "relay_blackboard": relay_blackboard or {},
+                "relay_token": relay_token,
+            })
         logger.info(
             "[task][bbs_mode] manager_worker 群建群前 task=%s node=%s driver=%s owner=%s",
             task_id, node_id, driver_bot, owner_user_id,
@@ -70,7 +85,7 @@ class TaskExecutorBbsMixin:
             task_id, gid, session_id,
         )
 
-        return {"session_id": session_id, "success": True}
+        return {"group_id": gid, "session_id": session_id, "success": True}
 
         """
         # 阻塞轮询:终态判据 + output 来源**对齐** TaskExecutorResultPoller._poll_terminal(session 模)
@@ -122,6 +137,7 @@ class TaskExecutorBbsMixin:
             skill_name=bbs_modal_executor._BBS_SKILL_NAME,
             on_bbs_report=self._on_bbs_report,
             group_executor=self._bbs_execute_as_manager_worker_group,
+            task_context_service=self._task_context_service,
         )
 
     @staticmethod

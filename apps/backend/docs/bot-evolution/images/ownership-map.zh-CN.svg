@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="740" viewBox="0 0 1180 740" font-family="system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" role="img" aria-label="谁负责什么：平台基础设施、ClawEvolve 迁移、评估与验证">
+<title>谁负责什么：平台基础设施、ClawEvolve 迁移、评估与验证</title>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#475569"/></marker><marker id="ahl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/></marker><marker id="ahp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#7c3aed"/></marker></defs>
+<rect width="1180" height="740" fill="#ffffff"/>
+<rect x="30" y="16" width="360" height="50" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="210.0" y="33.58" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">平台基础设施</text>
+<text x="210.0" y="49.75" font-size="11" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">可插拔进化策略系统</text>
+<rect x="30" y="78" width="360" height="40" rx="6" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+<text x="40" y="98" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">apps/evolution 骨架 · 组合根</text>
+<text x="382" y="98" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-08</text>
+<rect x="30" y="124" width="360" height="40" rx="6" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+<text x="40" y="144" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">进化运行：绑定、触发、运行、租约</text>
+<text x="382" y="144" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-06 · 08</text>
+<rect x="30" y="170" width="360" height="40" rx="6" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+<text x="40" y="190" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">策略端口、能力目录、作业协议</text>
+<text x="382" y="190" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-06</text>
+<rect x="30" y="216" width="360" height="40" rx="6" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+<text x="40" y="236" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">策略注册中心 · 一致性套件 · 策略 SDK</text>
+<text x="382" y="236" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-09</text>
+<rect x="30" y="262" width="360" height="40" rx="6" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+<text x="40" y="282" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">进化 API：OpenAPI 文档、gateway 路由</text>
+<text x="382" y="282" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-07</text>
+<rect x="30" y="308" width="360" height="40" rx="6" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+<text x="40" y="328" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">Backend 中的基因组注册中心 · Manifest 变更</text>
+<text x="382" y="328" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-03 · 04</text>
+<rect x="30" y="354" width="360" height="40" rx="6" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+<text x="40" y="374" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">晋升：底线、门禁、评审队列、晋升</text>
+<text x="382" y="374" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-12</text>
+<rect x="30" y="400" width="360" height="40" rx="6" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+<text x="40" y="420" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">platform/manual-patch 参考策略</text>
+<text x="382" y="420" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-08</text>
+<rect x="410" y="16" width="360" height="50" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="590.0" y="33.58" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">ClawEvolve 迁移</text>
+<text x="590.0" y="49.75" font-size="11" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">主默认进化策略</text>
+<rect x="410" y="78" width="360" height="40" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+<text x="420" y="98" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">策略项目：strategy.json、Dockerfile、run(ctx)</text>
+<text x="762" y="98" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-13</text>
+<rect x="410" y="124" width="360" height="40" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+<text x="420" y="144" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">黑盒适配器：stage skill 跑在沙箱工作区上</text>
+<text x="762" y="144" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-13</text>
+<rect x="410" y="170" width="360" height="40" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+<text x="420" y="190" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">随策略交付的智能体定义</text>
+<text x="762" y="190" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-13</text>
+<rect x="410" y="216" width="360" height="40" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+<text x="420" y="236" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">按运行 id 的自有进度存储 · 幂等键</text>
+<text x="762" y="236" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-13</text>
+<rect x="410" y="262" width="360" height="40" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+<text x="420" y="282" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">OpenClaw 会话导出 → experience.sessions@1</text>
+<text x="762" y="282" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-10</text>
+<rect x="410" y="308" width="360" height="40" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+<text x="420" y="328" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">自己的提交过滤器；去掉 pack/restore/deploy</text>
+<text x="762" y="328" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-13</text>
+<rect x="410" y="354" width="360" height="40" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+<text x="420" y="374" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">params_schema：window_days、max_rounds、goal、skill</text>
+<text x="762" y="374" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-13</text>
+<rect x="410" y="400" width="360" height="40" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+<text x="420" y="420" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">AgentEvolve UI 作为过渡期的 A 层调用方</text>
+<text x="762" y="420" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-20</text>
+<rect x="790" y="16" width="360" height="50" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="970.0" y="33.58" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">评估与验证</text>
+<text x="970.0" y="49.75" font-size="11" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">归平台所有的验证器</text>
+<rect x="790" y="78" width="360" height="40" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="800" y="98" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">验证：套件、划分、验证配置、比较器</text>
+<text x="1142" y="98" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-11</text>
+<rect x="790" y="124" width="360" height="40" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="800" y="144" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">评分器：从 lib_grading 提取 platform/clawbench</text>
+<text x="1142" y="144" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-11</text>
+<rect x="790" y="170" width="360" height="40" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="800" y="190" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">执行器：本地沙箱 · 经 eval_env 的评测 bot</text>
+<text x="1142" y="190" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-11</text>
+<rect x="790" y="216" width="360" height="40" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="800" y="236" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">evaluation.train@1：训练集评估 + add_train_cases</text>
+<text x="1142" y="236" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-11</text>
+<rect x="790" y="262" width="360" height="40" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="800" y="282" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">判定策略；ClawEvolve 门禁改为阻断规则</text>
+<text x="1142" y="282" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-11</text>
+<rect x="790" y="308" width="360" height="40" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="800" y="328" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">门禁校准与回放 · 留出集审计</text>
+<text x="1142" y="328" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-11 · 23</text>
+<rect x="790" y="354" width="360" height="40" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="800" y="374" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">服务 bot 发布与 Quality Task 的验证门禁</text>
+<text x="1142" y="374" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-22</text>
+<rect x="790" y="400" width="360" height="40" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="800" y="420" font-size="10" font-weight="400" fill="#0f172a" text-anchor="start" dominant-baseline="middle">由 ClawWeb Bench 存储播种的套件注册中心</text>
+<text x="1142" y="420" font-size="9.5" font-weight="400" fill="#64748b" text-anchor="end" dominant-baseline="middle">RSI-11</text>
+<path d="M 392 160 L 408 160" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)" marker-start="url(#ahl)"/>
+<path d="M 772 160 L 788 160" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)" marker-start="url(#ahl)"/>
+<path d="M 392 298 L 408 298" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)" marker-start="url(#ahl)"/>
+<path d="M 772 298 L 788 298" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)" marker-start="url(#ahl)"/>
+<path d="M 392 436 L 408 436" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)" marker-start="url(#ahl)"/>
+<path d="M 772 436 L 788 436" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ahl)" marker-start="url(#ahl)"/>
+<rect x="30" y="456" width="1120" height="128" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="46" y="476" font-size="13" font-weight="600" fill="#334155" text-anchor="start" dominant-baseline="middle">工作流之间的契约，以及拥有它的文档</text>
+<text x="40" y="498" font-size="11.5" font-weight="700" fill="#0f172a" text-anchor="start" dominant-baseline="middle">平台 ↔ ClawEvolve</text>
+<text x="40" y="518" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">策略端口 run(ctx) 与作业协议 —— 03 §2、06 §9</text>
+<text x="40" y="534" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">注册记录、params_schema、智能体定义 —— 03 §2.2</text>
+<text x="40" y="550" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">Episode 模式与会话导出契约 —— 02 §5</text>
+<text x="40" y="566" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">端口两侧的一致性套件 —— 03 §8.4</text>
+<text x="420" y="498" font-size="11.5" font-weight="700" fill="#0f172a" text-anchor="start" dominant-baseline="middle">ClawEvolve ↔ 评估</text>
+<text x="420" y="518" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">evaluation.train@1：添加用例、分数、点评 —— 03 §4.2、07 §5</text>
+<text x="420" y="534" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">判定视图：只有状态与汇总 —— 07 §2.6</text>
+<text x="420" y="550" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">用例格式 clawbench-md@1 —— 07 §2.2</text>
+<text x="420" y="566" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">被提取的 ClawBench 评分器与门禁 —— 04 §4.5</text>
+<text x="800" y="498" font-size="11.5" font-weight="700" fill="#0f172a" text-anchor="start" dominant-baseline="middle">平台 ↔ 评估</text>
+<text x="800" y="518" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">verify(candidate, profile) 与训练集评估 —— 06 §5.4、07 §9</text>
+<text x="800" y="534" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">FloorCheck 与 GateDecision —— 08 §4</text>
+<text x="800" y="550" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">写入经验存储的评测轨迹 —— 02 §1</text>
+<text x="800" y="566" font-size="10" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">经 eval_publish / eval_env 的部署执行器 —— 07 §2.3</text>
+<rect x="30" y="600" width="1120" height="124" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="46" y="620" font-size="12" font-weight="700" fill="#0f172a" text-anchor="start" dominant-baseline="middle">在互相对接编码之前需要一起敲定</text>
+<text x="46" y="642" font-size="10.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">RSI-01  接受或修订 DR-1（基因组是进化的单元）和 DR-2（晋升归平台所有）</text>
+<text x="46" y="659" font-size="10.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">DS-6  ClawEvolve 是一个带参数的策略，还是三个（bot_evolution、skill_evolution、skill_hardening）</text>
+<text x="46" y="676" font-size="10.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">ER-10 / S-8  沙箱中的 job worker 如何访问策略自己的进度存储</text>
+<text x="46" y="693" font-size="10.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">DS-2  ClawBench 是默认评分器还是多个之一 · DS-1  ClawEvolve 策略代码的长期归属</text>
+<text x="46" y="710" font-size="10.5" font-weight="400" fill="#475569" text-anchor="start" dominant-baseline="middle">OP-4（本指南 §7）  运行中途的人工输入：ClawEvolve 的 stage 可以向用户提问；平台的运行是无人值守的</text>
+</svg>

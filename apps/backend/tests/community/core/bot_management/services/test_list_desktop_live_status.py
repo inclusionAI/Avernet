@@ -29,6 +29,10 @@ def _make_bot_service(repository, device_status_client, teclaw_provision=None) -
         teclaw_provision_service_provider=lambda: teclaw_provision,
         device_status_client=device_status_client,
         cron_auto_setup_service_provider=lambda: MagicMock(),
+        skills_pool_native_creation_policy=MagicMock(
+            select=MagicMock(return_value=None)
+        ),
+        skill_layout_repository=MagicMock(),
     )
 
 

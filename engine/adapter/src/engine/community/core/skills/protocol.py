@@ -260,6 +260,13 @@ class SkillsService(Protocol):
     ) -> PoolMappingPublishResult:
         """Publish a complete mapping set.
 
+        Unselected Repo/Center active symlinks are platform-owned and retired
+        across Legacy and Pool roots. Local requires explicit retired_mappings;
+        real directories, external links and structural bridges are retained.
+        A valid empty snapshot retires all shared active links. Failed parsing
+        permits no inferred cleanup; pending content keeps its declared name.
+        Cleanup errors are unresolved, never a successful publication.
+
         ``skills-pool-mapping-v2`` carries logical intents. An omitted version
         is the compatibility form for legacy physical ``SymlinkItem`` values.
 
@@ -274,7 +281,10 @@ class SkillsService(Protocol):
         request: PoolMappingApplyRequest,
         auth: AuthContext | None = None,
     ) -> PoolMappingApplyResult:
-        """Apply one BEST_EFFORT logical snapshot with integrated checks."""
+        """Apply one complete BEST_EFFORT logical snapshot with integrated checks.
+
+        Uses publish_pool_mappings shared-link retirement semantics. Declared
+        Center links remain selected even when content is not yet available."""
         ...
 
     async def verify_pool_mappings(

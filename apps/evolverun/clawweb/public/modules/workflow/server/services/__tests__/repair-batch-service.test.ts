@@ -26,7 +26,8 @@ describe('repair workbench control service', () => {
     const result = await service.candidates('wf-1', { pageSize: 1, previewSignatures: f.items.map((_, i) => `issue-${i}`) });
     expect(Buffer.byteLength(JSON.stringify({ ...result, canEdit: true }))).toBeLessThan(4 * 1024 * 1024);
     expect(result.issuePreviews?.map(preview => preview.total)).toEqual([1, 1, 1, 1, 1, 1, 1]);
-    expect(result.issuePreviews?.some(preview => preview.total > preview.items.length)).toBe(true);
+    expect(result.issuePreviews?.every(preview => preview.total === preview.items.length)).toBe(true);
+    expect(result.issuePreviews?.[0].items[0].readSummary?.originalBytes).toBeGreaterThan(900000);
     expect(result.issuePreviews?.[6].items[0].itemId).toBe('item-6');
     expect((await service.item('wf-1', 'item-5')).proposal).toEqual(f.items[5].proposal);
     expect(result.page.total).toBe(7);
@@ -70,6 +71,21 @@ describe('repair workbench control service', () => {
     ]);
     expect(load).toHaveBeenCalledTimes(1);
     expect(await f.db.query('SELECT * FROM workflow_repair_items')).toEqual([]);
+  });
+  it('returns complete suggestion facets before filtering and pagination', async () => {
+    const f = await setup(25, false);
+    f.items.forEach((item, index) => { item.context = { diagnoses: [{
+      nodeId: index < 20 ? 'fetch' : 'write', failureMode: index < 20 ? 'timeout' : 'output',
+    }] }; });
+    const first = await f.service.candidates('wf-1', { pageSize: 20 });
+    expect(first.items).toHaveLength(20);
+    expect(first.facets).toEqual({ nodes: ['fetch', 'write'], failureModes: ['output', 'timeout'] });
+    const filtered = await f.service.candidates('wf-1', { nodeId: 'write', failureMode: 'output' });
+    expect(filtered.items).toHaveLength(5);
+    expect(filtered.facets).toEqual(first.facets);
+    const empty = await f.service.candidates('wf-1', { nodeId: 'missing' });
+    expect(empty.items).toHaveLength(0);
+    expect(empty.facets).toEqual(first.facets);
   });
   it('applies node, problem type and signature filters before counts and pagination without changing the selection digest', async () => {
     const f = await setup(4, false);
@@ -197,26 +213,28 @@ describe('repair workbench control service', () => {
     expect(revision.input).not.toHaveProperty('excludedSourceRefs');
     expect(JSON.stringify(revision.input).length).toBeLessThan(20_000);
   });
-  it('rejects >100, stale digest, byte limits and cross-workflow selections before persisting tasks', async () => {
+  it('rejects oversized and cross-workflow requests without using a stale list digest as a manual gate', async () => {
     const f = await setup(101);
     await expect(f.service.create('human', f.request)).rejects.toMatchObject({ code: 'INVALID_INPUT' });
-    await expect(f.service.create('human', { ...f.request, itemIds: ['item-0'], inputDigest: '0'.repeat(64) })).rejects.toMatchObject({ code: 'SOURCE_CHANGED' });
     await expect(f.service.create('human', { ...f.request, itemIds: ['item-0'], instructions: '界'.repeat(22000) })).rejects.toMatchObject({ code: 'PAYLOAD_TOO_LARGE' });
     const other = await f.service.candidates('wf-2');
     await expect(f.service.create('human', { ...f.request, workflowId: 'wf-2', itemIds: ['item-0'], inputDigest: other.inputDigest })).rejects.toMatchObject({ code: 'ITEM_NOT_FOUND' });
     expect(await f.db.query('SELECT * FROM ce_tasks')).toEqual([]);
+    const created = await f.service.create('human', { ...f.request, itemIds: ['item-0'], inputDigest: '0'.repeat(64) });
+    expect(created.input.items.map(item=>item.itemId)).toEqual(['item-0']);
   });
   it('arbitrates concurrent create attempts and rejects reused requests with changed instructions', async () => {
     const f = await setup();
     const attempts = await Promise.allSettled([f.service.create('human', f.request), f.service.create('human', { ...f.request, requestId: 'create-2' })]);
-    expect(attempts.filter(r => r.status === 'fulfilled')).toHaveLength(1);
+    expect(attempts.filter(r => r.status === 'fulfilled')).toHaveLength(2);
+    expect(f.calls).toHaveLength(1);
     expect(await f.db.query('SELECT * FROM ce_tasks')).toHaveLength(1);
     await expect(f.service.create('human', { ...f.request, instructions: 'changed' })).rejects.toMatchObject({ code: 'IDEMPOTENCY_MISMATCH' });
   });
-  it('retains a failed dispatch as the same frozen attempt and only retries its idempotent dispatch', async () => {
+  it('retains a rejected dispatch as the same frozen input and retries only after explicit rejection', async () => {
     const f = await setup();
     let attempts = 0;
-    f.executionPort.dispatch = async () => { if (++attempts === 1) throw new Error('network outcome unknown'); return { jobId: 'job-retry' }; };
+    f.executionPort.dispatch = async () => { if (++attempts === 1) throw new Error('AIS executeSnapshot HTTP 400: invalid request'); return { jobId: 'job-retry' }; };
     const revision = await f.service.create('human', f.request);
     expect(revision.phase).toBe('drafting');
     expect(await f.db.query('SELECT status FROM ce_steps')).toEqual([{ status: 'dispatch_failed' }]);
@@ -226,11 +244,33 @@ describe('repair workbench control service', () => {
     expect(attempts).toBe(2);
     expect(await f.db.query('SELECT * FROM ce_tasks')).toHaveLength(1);
   });
-  it('exposes dispatch failure after reload and explicitly retries the same input without resolving sources', async () => {
+  it('prevents duplicate dispatch when the first AIS response is uncertain', async () => {
     const f = await setup();
     f.executionPort.dispatch = async () => { throw new Error('unknown outcome'); };
     const revision = await f.service.create('human', f.request);
-    expect((await f.service.task(revision.taskId)).execution).toMatchObject({ status: 'dispatch_failed', errorCode: 'DISPATCH_UNCERTAIN' });
+    expect((await f.service.task(revision.taskId)).execution).toMatchObject({ status: 'dispatch_uncertain', errorCode: 'DISPATCH_UNCERTAIN' });
+    await expect(f.service.retryDispatch('human', revision.taskId, 1)).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
+  });
+  it('treats an AIS HTTP 408 as uncertain because the job may already exist', async () => {
+    const f = await setup();
+    f.executionPort.dispatch = async () => { throw new Error('AIS executeSnapshot HTTP 408: request timeout'); };
+    const revision = await f.service.create('human', f.request);
+    expect((await f.service.task(revision.taskId)).execution).toMatchObject({ status: 'dispatch_uncertain', errorCode: 'DISPATCH_UNCERTAIN' });
+    await expect(f.service.retryDispatch('human', revision.taskId, 1)).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
+  });
+  it('quarantines an interrupted dispatch instead of blindly sending another AIS job', async () => {
+    const f = await setup();
+    const created = await f.service.create('human', f.request);
+    await f.db.exec("UPDATE ce_steps SET status = 'dispatching', gmt_modified = ?", [Math.floor(Date.now() / 1000) - 121]);
+    expect(await f.service.reconcile(10)).toBe(0);
+    expect((await f.service.task(created.taskId)).execution).toMatchObject({ status: 'dispatch_uncertain', errorCode: 'DISPATCH_UNCERTAIN' });
+    await expect(f.service.retryDispatch('human', created.taskId, 1)).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
+  });
+  it('retries an explicitly rejected AIS request without resolving sources again', async () => {
+    const f = await setup();
+    f.executionPort.dispatch = async () => { throw new Error('AIS executeSnapshot HTTP 400: invalid request'); };
+    const revision = await f.service.create('human', f.request);
+    expect((await f.service.task(revision.taskId)).execution).toMatchObject({ status: 'dispatch_failed', errorCode: 'DISPATCH_REJECTED' });
     f.executionPort.dispatch = async input => { f.calls.push(input); return { jobId: 'job-retry' }; };
     f.executionPort.resolveBaseline = async () => { throw new Error('must not reload baseline'); };
     f.sourcePort.load = async () => { throw new Error('must not reload sources'); };
@@ -291,6 +331,62 @@ describe('repair workbench control service', () => {
     expect((await f.service.task(created.taskId)).latestAttempt.phase).toBe('drafting');
     expect((await f.service.task(created.taskId)).execution?.status).toBe('dispatched');
   });
+  const modelInput = (taskId: string, itemId = 'item-0') => ({ itemId, coreInput: 'Exact application prompt', materials: {
+    schemaVersion: 'repair-local-materials/v1', taskId, revision: 1, root: '/ais/repair-materials/one',
+    files: [{ kind: 'item', path: 'item.json', bytes: 42, sha256: 'a'.repeat(64), purpose: 'Read original goal', itemIds: [itemId] }],
+  } });
+  const invalidModelInputs: Array<[string, (entry: ReturnType<typeof modelInput>) => unknown]> = [
+    ['non-array records', entry => entry],
+    ['null records', () => null],
+    ['missing item ID', entry => [Object.fromEntries(Object.entries(entry).filter(([key]) => key !== 'itemId'))]],
+    ['unknown item ID', entry => [{ ...entry, itemId: 'not-selected' }]],
+    ['duplicate item records', entry => [entry, entry]],
+    ['empty core prompt', entry => [{ ...entry, coreInput: '  ' }]],
+    ['partially corrupt records', entry => [entry, null]],
+    ['null material index', entry => [{ ...entry, materials: null }]],
+    ['array material index', entry => [{ ...entry, materials: [] }]],
+    ['incomplete material index', entry => [{ ...entry, materials: {} }]],
+    ['unknown material schema', entry => [{ ...entry, materials: { ...entry.materials, schemaVersion: 'unknown' } }]],
+    ['another task index', entry => [{ ...entry, materials: { ...entry.materials, taskId: 'another-task' } }]],
+    ['another revision index', entry => [{ ...entry, materials: { ...entry.materials, revision: 2 } }]],
+    ['missing material root', entry => [{ ...entry, materials: { ...entry.materials, root: '' } }]],
+    ['non-array file index', entry => [{ ...entry, materials: { ...entry.materials, files: {} } }]],
+    ['null file entry', entry => [{ ...entry, materials: { ...entry.materials, files: [null] } }]],
+    ['negative material bytes', entry => [{ ...entry, materials: { ...entry.materials, files: [{ ...entry.materials.files[0], bytes: -1 }] } }]],
+    ['invalid material hash', entry => [{ ...entry, materials: { ...entry.materials, files: [{ ...entry.materials.files[0], sha256: 'invalid' }] } }]],
+    ['unknown material source', entry => [{ ...entry, materials: { ...entry.materials, files: [{ ...entry.materials.files[0], itemIds: ['not-selected'] }] } }]],
+    ['duplicate material sources', entry => [{ ...entry, materials: { ...entry.materials, files: [{ ...entry.materials.files[0], itemIds: ['item-0', 'item-0'] }] } }]],
+    ['duplicate material paths', entry => [{ ...entry, materials: { ...entry.materials, files: [entry.materials.files[0], entry.materials.files[0]] } }]],
+  ];
+  it.each(invalidModelInputs)('rejects %s even with a matching candidate digest, leaving the revision unsettled', async (_name, corrupt) => {
+    const f = await setup();
+    const created = await f.service.create('human', f.request);
+    const draft = { candidateCommit: 'd'.repeat(40), parentCandidateCommit: created.input.baseline.packCommit, packDigest: 'e'.repeat(40),
+      itemResults: f.items.map(item => ({ itemId: item.itemId, status: 'changed', reason: 'Fixed' })), modelInputs: corrupt(modelInput(created.taskId)) };
+    const checks = { schemaVersion: 'workflow-repair-checks/v1', candidateCommit: draft.candidateCommit, packDigest: draft.packDigest,
+      candidateDigest: digestRepairJson(draft), static: { status: 'passed' }, mock: { status: 'not_covered' }, coverage: f.items.map(item => ({ itemId: item.itemId })) };
+    await expect(f.service.report({ workflowId: 'wf-1', taskId: created.taskId, revision: 1, expectedStateVersion: 0, status: 'succeeded', draft, checks })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    const task = await f.service.task(created.taskId);
+    expect(task.latestAttempt).toMatchObject({ phase: 'drafting', draft: null, checks: null, stateVersion: 0 });
+    expect(task.execution?.status).toBe('dispatched');
+  });
+  it.each(['omitted', 'empty', 'multiple', 'integrated'])('preserves %s model inputs through report validation and persistence', async mode => {
+    const f = await setup();
+    const created = await f.service.create('human', f.request);
+    const first = modelInput(created.taskId);
+    first.materials.files[0].itemIds = ['item-0', 'item-1'];
+    first.materials.files.push({ ...first.materials.files[0], kind: 'engine-reference', path: 'engine.json', itemIds: [] });
+    const records = mode === 'empty' ? [] : mode === 'multiple' ? [first, modelInput(created.taskId, 'item-1')] : [first];
+    const draft = { candidateCommit: 'd'.repeat(40), parentCandidateCommit: created.input.baseline.packCommit, packDigest: 'e'.repeat(40),
+      itemResults: f.items.map(item => ({ itemId: item.itemId, status: 'changed', reason: 'Fixed' })), ...(mode === 'omitted' ? {} : { modelInputs: records }) };
+    const checks = { schemaVersion: 'workflow-repair-checks/v1', candidateCommit: draft.candidateCommit, packDigest: draft.packDigest,
+      candidateDigest: digestRepairJson(draft), static: { status: 'passed' }, mock: { status: 'not_covered' }, coverage: f.items.map(item => ({ itemId: item.itemId })) };
+    await f.service.report({ workflowId: 'wf-1', taskId: created.taskId, revision: 1, expectedStateVersion: 0, status: 'succeeded', draft, checks });
+    const task = await f.service.task(created.taskId);
+    expect(task.latestAttempt.draft).toEqual(draft);
+    expect(task.latestAttempt.checks?.candidateDigest).toBe(digestRepairJson(draft));
+    expect(task.latestAttempt.input).toEqual(created.input);
+  });
   it('polls the stored AIS job and settles a Git-backed result without a callback', async () => {
     const f = await setup();
     const created = await f.service.create('human', f.request);
@@ -309,6 +405,44 @@ describe('repair workbench control service', () => {
     expect((await f.service.task(created.taskId)).latestAttempt.phase).toBe('review');
     expect((await f.service.task(created.taskId)).execution).toMatchObject({ status: 'succeeded', jobId: 'job-1' });
   });
+  it('fails after bounded waiting when AIS succeeds but Git never publishes a valid result', async () => {
+    const f = await setup();
+    const created = await f.service.create('human', f.request);
+    f.setRemoteStatus({ status: 'success', rawStatus: 'success', errorMessage: null });
+    expect(await f.service.reconcile(10)).toBe(0);
+    const row = (await f.db.query<{ output_json: string }>('SELECT output_json FROM ce_steps'))[0];
+    const output = JSON.parse(row.output_json);
+    expect(output.successObservedAtMs).toEqual(expect.any(Number));
+    await f.db.exec('UPDATE ce_steps SET output_json = ?', [JSON.stringify({ ...output, successObservedAtMs: Date.now() - 301_000 })]);
+    expect(await f.service.reconcile(10)).toBe(1);
+    expect((await f.service.task(created.taskId)).latestAttempt).toMatchObject({ phase: 'failed', error: { code: 'GIT_RESULT_UNAVAILABLE' } });
+  });
+  it('settles a timed-out AIS job and requests remote stop', async () => {
+    const f = await setup();
+    const created = await f.service.create('human', f.request);
+    const row = (await f.db.query<{ output_json: string }>('SELECT output_json FROM ce_steps'))[0];
+    await f.db.exec('UPDATE ce_steps SET output_json = ?', [JSON.stringify({
+      ...JSON.parse(row.output_json), requestedAtMs: Date.now() - 2_401_000,
+    })]);
+    expect(await f.service.reconcile(10)).toBe(1);
+    expect(f.stops).toHaveLength(1);
+    expect((await f.service.task(created.taskId)).latestAttempt).toMatchObject({ phase: 'failed', error: { code: 'AIS_TIMEOUT' } });
+  });
+  it('settles an AIS no-change result without offering an unchanged Pack for review', async () => {
+    const f = await setup();
+    const created = await f.service.create('human', f.request);
+    const draft = { candidateCommit: 'd'.repeat(40), parentCandidateCommit: created.input.baseline.packCommit, packDigest: 'e'.repeat(40),
+      itemResults: f.items.map(i => ({ itemId: i.itemId, status: 'not_needed', reason: 'No Pack edit required' })) };
+    const checks = { schemaVersion: 'workflow-repair-checks/v1', candidateCommit: draft.candidateCommit, packDigest: draft.packDigest,
+      candidateDigest: digestRepairJson(draft), static: { status: 'passed' }, mock: { status: 'not_covered' }, coverage: f.items.map(i => ({ itemId: i.itemId })) };
+    f.setGeneratedResult({ status: 'no_change', draft, checks });
+    f.setRemoteStatus({ status: 'success', rawStatus: 'success', errorMessage: null });
+    expect(await f.service.reconcile(10)).toBe(1);
+    const task = await f.service.task(created.taskId);
+    expect(task.latestAttempt.phase).toBe('no_change');
+    expect(task.execution?.status).toBe('succeeded');
+    expect((await f.service.candidates('wf-1')).items.every(i => i.state === 'pending')).toBe(true);
+  });
   it('persists cancellation before best-effort stopping the exact AIS attempt', async () => {
     const f = await setup();
     const created = await f.service.create('human', f.request);
@@ -317,12 +451,80 @@ describe('repair workbench control service', () => {
     expect(f.stops).toHaveLength(1);
     expect(f.stops[0]).toMatchObject({ jobId: 'job-1', identity: { attempt: 1 }, input: created.input });
   });
-  it('reports oversized inbox reads explicitly instead of dropping items', async () => {
+  it('projects oversized inbox reads without dropping items or changing frozen sources', async () => {
     const f = await setup(13);
     f.items.forEach(item => { item.context = { evidence: 'x'.repeat(350000) }; });
-    const outcome = await f.service.candidates('wf-1').then(() => 'unexpected success', error => error.code);
-    expect(outcome).toBe('PAYLOAD_TOO_LARGE');
+    const outcome = await f.service.candidates('wf-1');
+    expect(outcome.items).toHaveLength(13);
+    expect(Buffer.byteLength(JSON.stringify(outcome))).toBeLessThan(64 * 1024);
+    expect((await f.service.item('wf-1', 'item-0')).context?.evidence).toBe(f.items[0].context?.evidence);
     expect(await f.db.query('SELECT * FROM workflow_repair_items')).toHaveLength(0);
+  });
+  it('recovers a late Git result on the same revision without dispatching another job', async () => {
+    const f = await setup();
+    const first = await f.service.create('human', f.request);
+    f.setRemoteStatus({ status: 'success', rawStatus: 'success', errorMessage: null });
+    await f.service.report({ workflowId: 'wf-1', taskId: first.taskId, revision: 1,
+      expectedStateVersion: 0, status: 'failed', error: { code: 'GIT_RESULT_UNAVAILABLE' } });
+    const draft = { candidateCommit: 'd'.repeat(40), parentCandidateCommit: first.input.baseline.packCommit,
+      packDigest: 'e'.repeat(40), itemResults: f.items.map(i => ({ itemId: i.itemId, status: 'changed', reason: 'Fixed' })) };
+    const checks = { schemaVersion: 'workflow-repair-checks/v1', candidateCommit: draft.candidateCommit,
+      packDigest: draft.packDigest, candidateDigest: digestRepairJson(draft), static: { status: 'passed' },
+      mock: { status: 'not_covered' }, coverage: f.items.map(i => ({ itemId: i.itemId })) };
+    f.setGeneratedResult({ status: 'succeeded', draft, checks });
+    await f.service.retryResult('human', first.taskId, 1);
+    expect((await f.service.task(first.taskId)).latestAttempt).toMatchObject({ revision: 1, phase: 'review', error: { code: 'GIT_RESULT_UNAVAILABLE' } });
+    expect(f.calls).toHaveLength(1);
+    await f.service.retryResult('human', first.taskId, 1);
+    expect(f.calls).toHaveLength(1);
+  });
+  it('retries a failed first generation with frozen input and one idempotent next revision', async () => {
+    const f = await setup();
+    const first = await f.service.create('human', { ...f.request, instructions: 'Keep business rules' });
+    f.setRemoteStatus({ status: 'failed', rawStatus: 'failed', errorMessage: 'model failed' });
+    await f.service.reconcile();
+    f.items.push({ ...f.items[0], itemId: 'new-item', proposalKey: 'f'.repeat(64) });
+    const retry = { expectedRevision: 1, requestId: 'retry-first' };
+    const next = await f.service.retryGeneration('human', first.taskId, retry);
+    expect(next.input.items).toEqual(first.input.items);
+    expect(next.input.instructions).toBe('Keep business rules');
+    expect(next.input.parentCandidateCommit).toBeNull();
+    expect(next.revision).toBe(2);
+    expect(await f.service.retryGeneration('human', first.taskId, retry)).toEqual(next);
+    expect(f.calls).toHaveLength(2);
+    await expect(f.service.report({ workflowId: 'wf-1', taskId: first.taskId, revision: 1,
+      expectedStateVersion: 0, status: 'failed', error: { code: 'LATE' } })).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
+  });
+  it.each(['AIS_FAILED', 'AIS_STOPPED', 'AIS_TIMEOUT'])('recovers an already-pushed candidate before retrying %s', async code => {
+    const f = await setup();
+    const first = await f.service.create('human', f.request);
+    await f.service.report({ workflowId: 'wf-1', taskId: first.taskId, revision: 1,
+      expectedStateVersion: 0, status: 'failed', error: { code } });
+    f.setRemoteStatus({ status: 'failed', rawStatus: 'failed', errorMessage: 'Failed after Git push' });
+    const draft = { candidateCommit: 'd'.repeat(40), parentCandidateCommit: first.input.baseline.packCommit,
+      packDigest: 'e'.repeat(40), itemResults: f.items.map(i => ({ itemId: i.itemId, status: 'changed', reason: 'Fixed before platform failure' })) };
+    f.setGeneratedResult({ status: 'succeeded', draft, checks: { schemaVersion: 'workflow-repair-checks/v1',
+      candidateCommit: draft.candidateCommit, packDigest: draft.packDigest, candidateDigest: digestRepairJson(draft),
+      static: { status: 'passed' }, mock: { status: 'not_covered' }, coverage: f.items.map(i => ({ itemId: i.itemId })) } });
+    const originalRead = f.executionPort.readResult;
+    f.executionPort.readResult = vi.fn().mockRejectedValueOnce(new Error('Git transport unavailable')).mockImplementation(originalRead);
+    const retry = { expectedRevision: 1, requestId: 'recover-post-push' };
+    await expect(f.service.retryGeneration('human', first.taskId, retry)).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
+    expect((await f.service.task(first.taskId)).revisions).toHaveLength(1);
+    const recovered = await f.service.retryGeneration('human', first.taskId, retry);
+    expect(recovered).toMatchObject({ revision: 1, phase: 'review', error: { code } });
+    expect(await f.service.retryGeneration('human', first.taskId, retry)).toEqual(recovered);
+    expect((await f.service.task(first.taskId)).revisions).toHaveLength(1);
+    expect(f.calls).toHaveLength(1);
+  });
+  it('does not retry a timed-out generation while the remote job still runs', async () => {
+    const f = await setup();
+    const first = await f.service.create('human', f.request);
+    await f.service.report({ workflowId: 'wf-1', taskId: first.taskId, revision: 1,
+      expectedStateVersion: 0, status: 'failed', error: { code: 'AIS_TIMEOUT' } });
+    await expect(f.service.retryGeneration('human', first.taskId, { expectedRevision: 1, requestId: 'retry-timeout' }))
+      .rejects.toMatchObject({ code: 'STATE_CONFLICT' });
+    expect(f.calls).toHaveLength(1);
   });
   it('settles trusted success to review and failed iteration retains success; cancellation releases items', async () => {
     const f = await setup();
@@ -347,4 +549,40 @@ describe('repair workbench control service', () => {
     expect((await f.service.candidates('wf-1')).items.every(i => i.state === 'pending')).toBe(true);
     await expect(f.service.report({ workflowId: 'wf-1', taskId: r2.taskId, revision: 2, expectedStateVersion: 1, status: 'failed', error: { code: 'LATE' } })).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
   });
+});
+
+it('allows independent scopes and reuses the same frozen scope instead of generating it twice', async () => {
+  const f = await repairFixture(2);
+  try {
+    const service = createRepairWorkbenchService(f.db, f.sourcePort, f.executionPort);
+    const inbox = await service.candidates('wf-1');
+    const request = { workflowId: 'wf-1', itemIds: ['item-0'], inputDigest: inbox.inputDigest, instructions: '', requestId: 'first' };
+    const first = await service.create('human', request);
+    const reused = await service.create('human', { ...request, requestId: 'same-scope' });
+    expect(reused.taskId).toBe(first.taskId); expect(f.calls).toHaveLength(1);
+    const independent = await service.create('human', { ...request, itemIds: ['item-1'], requestId: 'independent' });
+    expect(independent.taskId).not.toBe(first.taskId); expect(f.calls).toHaveLength(2);
+  } finally { await f.db.close(); }
+});
+
+it('retains ignored evidence until expiry or materially new high-impact evidence, without rewriting its audit', async () => {
+  const f = await repairFixture(1);
+  const service = createRepairWorkbenchService(f.db, f.sourcePort, f.executionPort);
+  try {
+    f.items[0].context = { diagnoses: [{ flowId: 'old', severity: 'high', evidenceEventIds: ['event-old'] }] };
+    const inbox = await service.candidates('wf-1');
+    const untilMs = Date.now() + 1000;
+    await service.disposition('actor', { workflowId: 'wf-1', itemId: 'item-0', inputDigest: inbox.inputDigest,
+      contentRevision: 1, expectedStateVersion: 0, action: 'no_action', reason: '等待业务窗口', requestId: 'defer', untilMs });
+    expect((await service.candidates('wf-1')).items.some(item => item.previousItemId === 'item-0')).toBe(false);
+    f.items[0].context = { diagnoses: [{ flowId: 'old', severity: 'high', evidenceEventIds: ['event-old', 'event-critical-new'] }] };
+    const fresh = await service.candidates('wf-1');
+    expect(fresh.items.some(item => item.previousItemId === 'item-0' && item.state === 'pending')).toBe(true);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(untilMs + 1000);
+    const expired = await service.candidates('wf-1');
+    expect(expired.items.some(item => item.previousItemId === 'item-0' && item.context?.dispositionResume)).toBe(true);
+    now.mockRestore();
+    const stored = (await f.db.query<{ disposition_json: string }>('SELECT disposition_json FROM workflow_repair_items WHERE item_id = ?', ['item-0']))[0];
+    expect(JSON.parse(stored.disposition_json)).toMatchObject({ reason: '等待业务窗口', untilMs, evidenceEventIds: ['event-old'] });
+  } finally { vi.restoreAllMocks(); await f.db.close(); }
 });

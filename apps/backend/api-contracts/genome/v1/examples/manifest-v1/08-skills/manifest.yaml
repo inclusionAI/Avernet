@@ -1,0 +1,23 @@
+schema_version: 1
+
+sources:
+  content:
+    protocol: git
+    url: https://code.example-corp.com/team/content.git
+    ref: v1.2.0
+    auth: corp-git-content
+  order-lookup:
+    protocol: oss
+    bucket: artifacts
+    key: tools/skills/order-lookup-1.4.0.zip
+    auth: oss-artifacts
+
+manifest:
+  skills:
+    - name: quality-check
+      from: content
+      subpath: skills/quality-check/
+    - name: order-lookup
+      from: order-lookup
+      digest: "sha256:896e1cb125db379d13790e045213f16bb8c936b29ff0b0d6ca33b1ea037c359f"
+      unpack: zip

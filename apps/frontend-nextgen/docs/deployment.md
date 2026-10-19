@@ -13,8 +13,8 @@ The container refuses to start until all variables are provided:
 | Variable                           | Existing frontend route responsibility                                       |
 | ---------------------------------- | ---------------------------------------------------------------------------- |
 | `BCS_AUTH_UPSTREAM`                | BCS `/auth/*` OAuth routes                                                   |
-| `TASK_ENGINE_UPSTREAM`             | `/openapi/v1/collaboration/tasks/*` task execute/dashboard/list/grant/revoke |
-| `TEAMCLAW_GATEWAY_UPSTREAM`        | `/openapi/*` and non-task `/api/v1/collaboration/*`                          |
+| `TASK_ENGINE_UPSTREAM`             | Non-BBS `/openapi/v1/collaboration/tasks/*` task execute/dashboard/list/grant/revoke |
+| `TEAMCLAW_GATEWAY_UPSTREAM`        | BBS `/openapi/v1/collaboration/tasks/bbs/*`, bot-scoped BBS routes, other `/openapi/*`, and non-task `/api/v1/collaboration/*` |
 | `TEAMCLAW_ADMIN_UPSTREAM`          | Reserved for the separately deployed admin service; see note below           |
 | `PRIVATE_CHAT_MANAGEMENT_UPSTREAM` | `/api/*` private-chat management                                             |
 | `PRIVATE_CHAT_SESSION_UPSTREAM`    | `/proxypass/*` and WebSocket                                                 |
@@ -28,6 +28,12 @@ Values must be absolute upstream origins understood by Nginx, for example an int
 The current frontend development proxy proves that space, work-order and work-order-notification paths use the separate admin upstream. The Nginx template therefore places those three specific locations before the broad `/openapi/` Gateway location.
 
 ## Build
+
+`DSH_REGISTRATION_GUIDE_URL` optionally supplies the DeepSeek Harness guide through
+runtime configuration. Set it to an HTTP(S) guide for the plugin version deployed
+with this release, using an immutable revision when hosting documentation in Git.
+When absent, the optional guide link is hidden; all inline onboarding steps remain
+available. Internal overlays can override the guide capability independently.
 
 ```bash
 docker build -t <ACR_REGISTRY>/<NAMESPACE>/avernet-frontend-nextgen:<VERSION> .

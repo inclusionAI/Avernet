@@ -156,12 +156,21 @@ class AicodingDurableRestartMixin:
             "operation_id": uuid.uuid4().hex,
             "engine": bot["active_engine"],
             "binding_id": bot.get("binding_id"),
-            "previous_status": bot["status"],
+            "previous_status": "PENDING",  # Admission persists this before enqueue.
             "device_id": binding.get("device_id"),
             "provider": binding.get("device_provider"),
             "nick_name": kwargs.get("nick_name"),
             "started_at": time.time(),
         }
+        if binding.get("device_provider") == "arca":
+            # Physical identity is already on the binding, exactly as release
+            # resolves it. No BaaS inventory or sandbox-list request is needed.
+            payload["sandbox_id"] = (binding.get("device_props") or {}).get("sandbox_id")
+        if bot["status"] != "PENDING":
+            if services.repository.update_by_owner(
+                bot_id, owner_id, {"status": "PENDING"}
+            ) is None:
+                raise BotServiceError(f"Bot not found while preparing restart: {bot_id}")
         task, _created = services.task_queue.enqueue(
             TASK_TYPE,
             payload,
@@ -268,6 +277,10 @@ class AicodingRestartHandler:
                 or bot.get("active_engine") != payload["engine"]
                 or binding.get("device_id") != payload["device_id"]
                 or binding.get("device_provider") != payload["provider"]
+                or (
+                    payload["provider"] == "arca" and "sandbox_id" in payload
+                    and (binding.get("device_props") or {}).get("sandbox_id") != payload["sandbox_id"]
+                )
             ):
                 state.fail("重启目标已变化，本次重启已终止，旧容器未销毁")
                 return Fail("target changed")
@@ -281,6 +294,10 @@ class AicodingRestartHandler:
                 from .restart_baas import AicodingBaasRestart
 
                 result = AicodingBaasRestart(service).execute(bot, execution)
+            elif payload["provider"] == "arca":
+                from .restart_arca_lifecycle import AicodingArcaRestart
+
+                result = AicodingArcaRestart(service).execute(bot, execution)
             else:
                 result = service.restart_bot(
                     bot_id=state.bot_id,
@@ -311,7 +328,7 @@ class AicodingRestartHandler:
             ):
                 return Reschedule(POLL_SECONDS)
             message = (
-                "备份已完成，但重启提交前准备失败；本次重启已终止，旧容器未执行替换"
+                "重启提交前准备失败；本次重启已终止，旧容器未执行替换"
                 if execution.verify_backup is not None
                 else _failure_message(error, fenced=execution.fenced)
             )

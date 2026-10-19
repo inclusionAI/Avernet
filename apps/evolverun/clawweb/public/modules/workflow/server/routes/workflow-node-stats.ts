@@ -9,11 +9,29 @@ import type { NodeStatsRepository } from "../repositories/node-stats-repository.
 import type { HealthSnapshotRepository } from "../repositories/health-snapshot-repository.js";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 
+import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
+import { requireWorkflowAccess } from "@avernet/clawweb-shared/server/services/workflow-access";
+import type { WorkflowVersionComparisonService } from "../services/workflow-version-comparison-service.js";
+
 export function createWorkflowNodeStatsRouter(
   nodeStatsRepo: NodeStatsRepository | null,
   healthSnapshotRepo: HealthSnapshotRepository | null,
+  versionComparison?: WorkflowVersionComparisonService,
+  botPermRepo: BotWorkflowPermissionRepository | null = null,
 ): Router {
   const router = Router();
+
+  router.get("/:workflowId/version-comparison", asyncHandler(async (req: Request, res: Response) => {
+    if (!await requireWorkflowAccess(req, res, botPermRepo, String(req.params.workflowId), 'view')) return;
+    if (!versionComparison) { res.status(503).json({ error: "Service Unavailable" }); return; }
+    const parse = (name: string) => req.query[name] === undefined ? undefined : /^\d+$/.test(String(req.query[name])) ? Number(req.query[name]) : NaN;
+    try {
+      res.json({ data: await versionComparison.compare(String(req.params.workflowId), { baseline: parse('baseline'), current: parse('current'), days: parse('days') }) });
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('INVALID_COMPARISON:')) { res.status(400).json({ error: error.message }); return; }
+      throw error;
+    }
+  }));
 
   // GET /:workflowId/node-stats — per-node statistics
   router.get("/:workflowId/node-stats", asyncHandler(async (req: Request, res: Response) => {

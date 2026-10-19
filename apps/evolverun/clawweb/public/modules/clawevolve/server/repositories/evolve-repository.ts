@@ -1,3 +1,5 @@
+import { productionRunsSql, productionDiagnosesSql } from "@avernet/clawweb-shared/server/services/run-purpose";
+import { spaceBotPredicate, type SpaceBot } from "../services/evolve/teamclaw-scope.js";
 import { randomUUID } from "node:crypto";
 import { recordSkillTaskEvent, skillAuditTransaction, skillTestBenchSnapshot, type SkillTaskEventUpdate } from './skill-audit.js';
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
@@ -184,12 +186,14 @@ export type EvolveTaskLogArchiveRow = {
 };
 
 export type EvolveTaskPageQuery = {
+  authorizedBots?: SpaceBot[];
   createdBy: string | null;
   ownerUserId?: string | null;
   page: number;
   pageSize: number;
   taskTypes?: string[];
   excludedTaskTypes?: string[];
+  targetType?: "bot";
   statuses?: string[];
   query?: string;
 };
@@ -220,6 +224,8 @@ export type EvolveOptimizeVersionRow = {
 };
 
 export type EvolveBotRuntime = {
+  entityId?: string;
+  entityType?: string;
   activeEngine: string | null;
   botType: string | null;
   hasServiceBot: boolean;
@@ -416,22 +422,33 @@ export class EvolveRepository {
     return (await this.db.query<EvolvePackRow>("SELECT * FROM ce_packs WHERE pack_id = ?", [packId]))[0] ?? null;
   }
 
-  async listPacks(userId: string | null, botId?: string): Promise<EvolvePackRow[]> {
+  async listPacks(userId: string | null, botId?: string, authorizedBots?: SpaceBot[], taskId?: string): Promise<EvolvePackRow[]> {
     const clauses: string[] = [];
     const params: unknown[] = [];
+    if (authorizedBots) {
+      const filter = spaceBotPredicate(authorizedBots, "t", this.db.dbType === "sqlite");
+      clauses.push(filter.sql); params.push(...filter.values);
+    }
+    if (taskId) { clauses.push("t.task_id = ?"); params.push(taskId); }
     if (userId) { clauses.push("p.user_id = ?"); params.push(userId); }
     if (botId) { clauses.push("p.bot_id = ?"); params.push(botId); }
     return this.db.query<EvolvePackRow>(
       `SELECT p.* FROM ce_packs p
+       ${authorizedBots || taskId ? "INNER JOIN ce_tasks t ON t.task_id = p.source_task_id" : ""}
        ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""}
        ORDER BY p.gmt_create DESC, p.id DESC`,
       params,
     );
   }
 
-  async listCompletedOptimizeVersions(userId: string | null, botId?: string): Promise<EvolveOptimizeVersionRow[]> {
+  async listCompletedOptimizeVersions(userId: string | null, botId?: string, authorizedBots?: SpaceBot[], taskId?: string): Promise<EvolveOptimizeVersionRow[]> {
     const clauses = ["s.step_type = 'optimize'", "s.status IN ('succeeded', 'completed')"];
     const params: unknown[] = [];
+    if (authorizedBots) {
+      const filter = spaceBotPredicate(authorizedBots, "t", this.db.dbType === "sqlite");
+      clauses.push(filter.sql); params.push(...filter.values);
+    }
+    if (taskId) { clauses.push("t.task_id = ?"); params.push(taskId); }
     if (userId) { clauses.push("t.user_id = ?"); params.push(userId); }
     if (botId) { clauses.push("t.bot_id = ?"); params.push(botId); }
     return this.db.query<EvolveOptimizeVersionRow>(
@@ -465,12 +482,13 @@ export class EvolveRepository {
     return tasks.filter((task) => this.taskUsesPack(task, pack));
   }
 
-  async countPackApplications(packs: EvolvePackRow[]): Promise<Record<string, number>> {
+  async countPackApplications(packs: EvolvePackRow[], authorizedBots?: SpaceBot[]): Promise<Record<string, number>> {
     if (packs.length === 0) return {};
     const ownerUserIds = [...new Set(packs.map((pack) => pack.user_id))];
+    const filter = authorizedBots ? spaceBotPredicate(authorizedBots,"",this.db.dbType === "sqlite") : null;
     const tasks = await this.db.query<EvolveTaskRow>(
-      `SELECT * FROM ce_tasks WHERE task_type = 'pack_restore' AND user_id IN (${ownerUserIds.map(() => "?").join(",")})`,
-      ownerUserIds,
+      `SELECT * FROM ce_tasks WHERE task_type = 'pack_restore' AND user_id IN (${ownerUserIds.map(() => "?").join(",")})${filter ? ` AND ${filter.sql}` : ""}`,
+      [...ownerUserIds,...(filter?.values ?? [])],
     );
     return Object.fromEntries(packs.map((pack) => [
       pack.pack_id, tasks.filter((task) => task.bot_id === pack.bot_id && this.taskUsesPack(task, pack)).length,
@@ -1441,7 +1459,7 @@ export class EvolveRepository {
   }>> {
     return this.db.query(
       `SELECT flow_id, workflow_id, status, failed_count, started_at, completed_at
-       FROM flow_runs
+       FROM ${productionRunsSql()} flow_runs
        WHERE workflow_id = ? AND status = 'failed' AND failed_count > 0
          AND gmt_create >= ?
          AND evolution_analysis_status IS NULL
@@ -1457,7 +1475,7 @@ export class EvolveRepository {
   }>> {
     return this.db.query(
       `SELECT flow_id, evolution_analysis_status, evolution_analyzed_at
-       FROM flow_runs
+       FROM ${productionRunsSql()} flow_runs
        WHERE workflow_id = ? AND evolution_analysis_status IS NOT NULL
        ORDER BY evolution_analyzed_at DESC`,
       [workflowId],
@@ -1479,7 +1497,7 @@ export class EvolveRepository {
     const params: unknown[] = [options.workflowId];
     const totalRow = (await this.db.query<{ total: number }>(
       `SELECT COUNT(*) AS total FROM (
-         SELECT failure_signature FROM workflow_healing_diagnoses WHERE workflow_id = ? GROUP BY failure_signature
+         SELECT failure_signature FROM ${productionDiagnosesSql()} workflow_healing_diagnoses WHERE workflow_id = ? GROUP BY failure_signature
        ) t`,
       params,
     ))[0];
@@ -1496,7 +1514,7 @@ export class EvolveRepository {
       `SELECT failure_signature, node_id, executor_type, failure_mode,
               COUNT(*) AS occurrence_count,
               GROUP_CONCAT(DISTINCT flow_id) AS evidence_flow_ids
-       FROM workflow_healing_diagnoses
+       FROM ${productionDiagnosesSql()} workflow_healing_diagnoses
        WHERE workflow_id = ?
        GROUP BY failure_signature, node_id, executor_type, failure_mode
        ORDER BY occurrence_count DESC, MAX(gmt_create) DESC
@@ -1552,8 +1570,22 @@ export class EvolveRepository {
   async listTasksPage(input: EvolveTaskPageQuery): Promise<{ rows: EvolveTaskRow[]; total: number }> {
     const clauses: string[] = [];
     const params: unknown[] = [];
+    if (input.authorizedBots) {
+      const filter = spaceBotPredicate(input.authorizedBots, "", this.db.dbType === "sqlite");
+      clauses.push(filter.sql); params.push(...filter.values);
+    }
     if (input.createdBy) { clauses.push("created_by = ?"); params.push(input.createdBy); }
     if (input.ownerUserId) { clauses.push("user_id = ?"); params.push(input.ownerUserId); }
+    if (input.taskTypes && input.taskTypes.length === 0) return { rows: [], total: 0 };
+    if (input.targetType === "bot") {
+      // Invalid legacy config is read as empty config, just as in publicTask.
+      const config = "CASE WHEN JSON_VALID(config_json) THEN config_json ELSE '{}' END";
+      const target = `JSON_EXTRACT(${config}, '$.targetSkillAssetId')`;
+      const value = this.db.dbType === "sqlite"
+        ? target
+        : `CASE WHEN JSON_TYPE(${target}) = 'NULL' THEN NULL ELSE JSON_UNQUOTE(${target}) END`;
+      clauses.push(`COALESCE(${value}, '') = ''`);
+    }
     if (input.taskTypes?.length) {
       clauses.push(`task_type IN (${input.taskTypes.map(() => "?").join(",")})`);
       params.push(...input.taskTypes);
@@ -1912,11 +1944,12 @@ export class EvolveRepository {
 
   private async resolveOwnedEvolveBotRuntime(userId: string, botId: string, env?: string): Promise<EvolveBotRuntime | null> {
     const rows = await this.botDb.query<{
-      active_engine: string | null; bot_type: string | null; bot_status: string | null; binding_id: string | number | null;
+      entity_id: string; entity_type: string; active_engine: string | null; bot_type: string | null; bot_status: string | null; binding_id: string | number | null;
       device_provider: string | null; device_id: string | null;
       device_props: unknown; binding_status: string | null; env: string | null;
     }>(
       `SELECT b.active_engine, b.bot_type, b.status AS bot_status, b.binding_id,
+              b.entity_id, b.entity_type,
               d.device_provider, d.device_id, d.device_props, d.status AS binding_status,
               COALESCE(d.env, b.env) AS env
        FROM ac_bots b
@@ -1957,6 +1990,7 @@ export class EvolveRepository {
       [botId, userId, userId, env ?? "", env ?? ""],
     ).catch(() => []);
     return {
+      entityId: row.entity_id, entityType: row.entity_type,
       activeEngine: row.active_engine,
       botType: row.bot_type,
       hasServiceBot: Number(publishedRows[0]?.published_count ?? 0) > 0,
@@ -2311,7 +2345,8 @@ export class EvolveRepository {
           input.ext === undefined ? null : JSON.stringify(input.ext),
           lifecycleAt, terminal ? lifecycleAt : null, now, stepId],
       );
-      if (input.status === "failed" || input.status === "canceled") {
+      // Auxiliary Agent executions do not own the business Task's terminal state.
+      if ((input.status === "failed" || input.status === "canceled") && step.step_type !== "agent_execution") {
         await tx.exec(
           "UPDATE ce_tasks SET status = ?, error_message = ?, gmt_modified = ? WHERE task_id = ?",
           [input.status === "canceled" ? "canceled" : "failed", input.errorMessage ?? input.status, now, step.task_id],

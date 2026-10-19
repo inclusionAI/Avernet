@@ -5,7 +5,8 @@
 //! [`EngineFactory`] registered under a string id in the [`EngineRegistry`];
 //! `[[bot]] engine = "<id>"` selects one.
 //! The built-in factories are [`claude_code::ClaudeCodeFactory`] (`claude-code`)
-//! and [`codex_app_server::CodexAppServerFactory`] (`codex`). Distributions add
+//! [`codex_app_server::CodexAppServerFactory`] (`codex`) and
+//! [`codex_desktop::CodexDesktopFactory`] (`codex-desktop`). Distributions add
 //! engines or override a built-in by registering a factory under the same id.
 //!
 //! Engine contract:
@@ -23,6 +24,9 @@
 pub mod claude_code;
 pub mod cli;
 pub mod codex_app_server;
+pub mod codex_desktop;
+mod codex_transport;
+mod codex_persistent;
 pub mod trace;
 
 use std::collections::BTreeMap;
@@ -53,6 +57,12 @@ pub struct TurnRequest {
     pub permission_mode: Option<String>,
     pub interactions: InteractionRegistry,
     pub trace: Option<trace::TraceContext>,
+    /// Sliding idle window for the engine's stdout stream: every received
+    /// line pushes the turn's "still making progress" deadline this far out.
+    /// `None` lets each engine pick its default. When the window expires the
+    /// turn fails with an explicitly named error instead of wedging until
+    /// the outer run deadline with no signal to BCS.
+    pub idle_timeout: Option<std::time::Duration>,
 }
 
 impl TurnRequest {
@@ -73,6 +83,7 @@ impl TurnRequest {
             permission_mode: None,
             interactions: InteractionRegistry::new(),
             trace: None,
+            idle_timeout: None,
         }
     }
 }
@@ -114,6 +125,11 @@ pub enum TurnError {
 
 #[async_trait::async_trait]
 pub trait Engine: Send + Sync {
+    /// Read-only availability check before registration/startup. Never creates a turn.
+    async fn preflight(&self) -> Result<(), TurnError> { Ok(()) }
+    /// Release persistent resources after service admission has stopped.
+    /// Repeated calls must be safe; the engine is not reused after shutdown.
+    async fn shutdown(&self) {}
     async fn run_turn(
         &self,
         req: TurnRequest,
@@ -134,6 +150,12 @@ pub trait EngineFactory: Send + Sync {
     /// executable lookup and ignores `default_bin`; `build` receives an empty path.
     /// Existing subprocess factories retain executable validation by default.
     fn requires_bin(&self) -> bool { true }
+    /// Require engine options during registration rather than later runtime setup.
+    fn registration_requires_options(&self) -> bool { false }
+    /// False when the driver consumes `permission_mode` (e.g. Claude-flavored
+    /// engines via their protocol flag). Engines that ignore the field let the
+    /// registry warn instead of silently dropping the configured policy.
+    fn ignores_permission_mode(&self) -> bool { true }
     /// Build an engine for `bin`, validating the bot's `engine_options`.
     fn build(&self, bin: PathBuf, options: &toml::Table) -> Result<Arc<dyn Engine>, String>;
 }
@@ -152,6 +174,7 @@ impl EngineRegistry {
         let mut registry = Self::new();
         registry.register(claude_code::ClaudeCodeFactory::default());
         registry.register(codex_app_server::CodexAppServerFactory::default());
+        registry.register(codex_desktop::CodexDesktopFactory::default());
         registry
     }
 
@@ -175,6 +198,17 @@ impl EngineRegistry {
             if bot.engine_bin.is_some() { return Err(format!("engine '{}' does not accept engine_bin", bot.engine)); }
             PathBuf::new()
         };
+        if bot.permission_mode.is_some() && factory.ignores_permission_mode() {
+            tracing::warn!(target: "bcs_bridge_core::engine",
+                bot = %bot.provider_bot_ref, engine = %bot.engine,
+                "permission_mode is ignored by this engine; configure its own engine_options instead");
+        }
+        if !bot.engine_options.is_empty() {
+            tracing::warn!(target: "bcs_bridge_core::engine",
+                bot = %bot.provider_bot_ref, engine = %bot.engine,
+                engine_options = %bot.engine_options.keys().map(String::as_str).collect::<Vec<_>>().join(","),
+                "bot runs with custom engine_options policy");
+        }
         factory.build(bin, &bot.engine_options)
             .map_err(|error| format!("engine '{}' for bot '{}': {error}", bot.engine, bot.provider_bot_ref))
     }
@@ -262,11 +296,15 @@ mod tests {
     #[test]
     fn builtin_registry_builds_claude_code_and_codex() {
         let registry = EngineRegistry::builtin();
-        assert_eq!(registry.ids().collect::<Vec<_>>(), ["claude-code", "codex"]);
+        assert_eq!(registry.ids().collect::<Vec<_>>(), ["claude-code", "codex", "codex-desktop"]);
         assert_eq!(registry.get("claude-code").unwrap().default_bin(), "claude");
         assert_eq!(registry.get("codex").unwrap().default_bin(), "codex");
         assert!(registry.build(&bot("claude-code")).is_ok());
         assert!(registry.build(&bot("codex")).is_ok());
+        let mut desktop = bot("codex-desktop");
+        desktop.engine_bin = None;
+        desktop.engine_options.insert("socket".into(), "/tmp/desktop.sock".into());
+        assert!(registry.build(&desktop).is_ok());
     }
 
     #[test]
@@ -275,9 +313,12 @@ mod tests {
         let error = registry.build(&bot("bogus")).err().unwrap();
         assert!(error.contains("unknown engine 'bogus'") && error.contains("claude-code, codex"), "{error}");
         let mut configured = bot("codex");
-        configured.engine_options.insert("sandbox".into(), "workspace-write".into());
+        configured.engine_options.insert("bogus_option".into(), "workspace-write".into());
         let error = registry.build(&configured).err().unwrap();
-        assert!(error.contains("unsupported engine_options key 'sandbox'"), "{error}");
+        assert!(error.contains("unsupported engine_options key 'bogus_option'"), "{error}");
+        let mut configured = bot("codex");
+        configured.engine_options.insert("sandbox".into(), "workspace-write".into());
+        assert!(registry.build(&configured).is_ok(), "codex now accepts sandbox engine_options");
     }
 
     #[test]
@@ -285,7 +326,7 @@ mod tests {
         let mut registry = EngineRegistry::builtin();
         registry.register(FakeFactory { id: "codex" }).register(FakeFactory { id: "custom" });
         assert_eq!(registry.get("codex").unwrap().default_bin(), "fake-engine");
-        assert_eq!(registry.ids().collect::<Vec<_>>(), ["claude-code", "codex", "custom"]);
+        assert_eq!(registry.ids().collect::<Vec<_>>(), ["claude-code", "codex", "codex-desktop", "custom"]);
         assert!(registry.build(&bot("custom")).is_ok());
     }
 

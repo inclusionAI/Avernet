@@ -5,9 +5,9 @@ set +x
 profile="web"
 endpoint=""
 bot_name="DeepSeek Harness Bot"
-package_spec="@avernet-plugin/deepseek-harness-channel-bcn"
+package_spec="@avernet-plugin/deepseek-harness-channel-bcn@0.2.0"
 start_dsh=true
-dsh_package="${DSH_PACKAGE:-@deepseek-ai/dsh@0.1.1-rc.2}"
+dsh_package="${DSH_PACKAGE:-@deepseek-ai/dsh@0.2.1-alpha.2}"
 
 usage() {
   echo "Usage: install-dsh.sh --endpoint <url> [--profile <name>] [--bot-name <name>] [--package <npm-spec-or-path>] [--no-start]"
@@ -84,6 +84,9 @@ fi
 onboarding_token="${BCN_ONBOARDING_TOKEN:-}"
 unset BCN_ONBOARDING_TOKEN
 
+# DSH's plugin manager validates the package's peer compatibility range and
+# rejects incompatible runtimes before activation. Keep one version policy in
+# package.json instead of pinning a second policy in this installer.
 dsh plugin --profile "$profile" add -- "$package_spec"
 dsh plugin --profile "$profile" exec dsh-bcn-configure -- \
   --profile "$profile" \

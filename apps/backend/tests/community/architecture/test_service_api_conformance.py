@@ -45,6 +45,12 @@ from __future__ import annotations
 
 import inspect
 
+from agentclaw.community.api.space_management_service import SpaceManagementServiceProtocol
+from agentclaw.community.core.spaces.services.space_management_service import SpaceManagementService
+
+from agentclaw.community.api.cron_admin_service import CronAdminServiceProtocol
+from agentclaw.community.core.cron.services.cron_admin import CronAdminService
+
 import pytest
 from agentclaw.community.api.file_count_service import FileCountServiceProtocol
 from agentclaw.community.api.mcp_scoped_config_service import MCPScopedConfigServiceProtocol
@@ -91,6 +97,8 @@ from agentclaw.community.api.source_credential_service import (
     SourceCredentialServiceProtocol,
 )
 from agentclaw.community.api.bot_space_service import BotSpaceServiceProtocol
+from agentclaw.community.api.engine_version_service import EngineVersionServiceProtocol
+from agentclaw.community.core.bot_management.engine_version.service import EngineVersionService
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.api.engine_connection_service import (
     EngineConnectionServiceProtocol,
@@ -298,6 +306,10 @@ from agentclaw.community.core.tc_file_upload_integrations.coordinator import (
 from agentclaw.community.core.service_bot.services.service_publication_facade import (
     ServicePublicationFacade,
 )
+from agentclaw.community.api.agentswarm_service import (
+    AgentSwarmServiceProtocol,
+)
+from agentclaw.community.core.agentswarm.service import AgentSwarmService
 from agentclaw.community.core.service_bot.services.service_edit_lock_service import (
     ServiceEditLockService,
 )
@@ -313,9 +325,15 @@ from agentclaw.community.core.spaces.services import (
     SpaceService,
 )
 
+from agentclaw.community.api.acli_cli_service import AcliCliServiceProtocol
+from agentclaw.community.core.acli_clis.service import AcliCliService
+
 
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
 _PAIRS = [
+    (SpaceManagementServiceProtocol, SpaceManagementService),
+    (CronAdminServiceProtocol, CronAdminService),
+    (AgentSwarmServiceProtocol, AgentSwarmService),
     (MCPScopedConfigServiceProtocol, MCPScopedConfigService),
     (FileCountServiceProtocol, FileCountService),
     (BuildIgnoreServiceProtocol, BuildIgnoreService),
@@ -338,6 +356,7 @@ _PAIRS = [
     (BotInventoryBotPort, BotService),
     (DesktopBotInventoryPort, DesktopBotService),
     (EngineConfigServiceProtocol, EngineConfigService),
+    (EngineVersionServiceProtocol, EngineVersionService),
     (EngineRuntimeRelayProtocol, EngineRuntimeRelay),
     (EngineConnectionServiceProtocol, EngineConnectionService),
     (HealthDiagnosisServiceProtocol, HealthDiagnosisService),
@@ -370,6 +389,7 @@ _PAIRS = [
     (ServiceEditLockServiceProtocol, ServiceEditLockService),
     (ServiceArtifactLineageReaderProtocol, ServiceArtifactLineageReader),
     (SpaceSkillOfflineServiceProtocol, SpaceSkillOfflineService),
+    (AcliCliServiceProtocol, AcliCliService),
 ]
 
 _IDS = [f"{p.__name__}->{c.__name__}" for p, c in _PAIRS]

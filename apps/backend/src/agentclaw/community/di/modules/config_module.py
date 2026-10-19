@@ -17,6 +17,7 @@ from __future__ import annotations
 import math
 from dataclasses import fields
 from typing import Any
+from urllib.parse import urlparse
 from injector import Module, inject, provider, singleton
 from agentclaw.community.core.skill_center import draft_content
 from agentclaw.community.core.task_queue.types import MAX_APP_LEN
@@ -580,6 +581,7 @@ class ConfigModule(Module):
             desktop_template_uuid=block.get(
                 "desktop_template_uuid", defaults.desktop_template_uuid
             ),
+            runtime_identity_metadata=bool(block.get("runtime_identity_metadata", False)),
             teclaw_template_uuid=block.get(
                 "teclaw_template_uuid", defaults.teclaw_template_uuid
             ),
@@ -908,7 +910,7 @@ class ConfigModule(Module):
     @singleton
     @provider
     def task_dispatch(self) -> cfg.TaskDispatchConfig:
-        """Task dispatch policy.
+        """Task dispatch runtime configuration loaded from deployment YAML.
 
         YAML shape::
 
@@ -921,8 +923,21 @@ class ConfigModule(Module):
         round-trip for staged experiments.
         """
         block = _block("task_dispatch")
+        backend_url = _coerce(block, "backend_url", str, "", "task_dispatch").strip()
+        if not backend_url:
+            callback_url = _coerce(
+                _block("bcs_client"),
+                "task_callback_url",
+                str,
+                "",
+                "bcs_client",
+            ).strip()
+            parsed = urlparse(callback_url)
+            if parsed.scheme in {"http", "https"} and parsed.netloc:
+                backend_url = f"{parsed.scheme}://{parsed.netloc}"
         defaults = cfg.TaskDispatchConfig()
         return cfg.TaskDispatchConfig(
+            backend_url=backend_url or defaults.backend_url,
             task_search_skill_enabled=_coerce(
                 block,
                 "task_search_skill_enabled",

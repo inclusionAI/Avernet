@@ -1,5 +1,12 @@
 # bcs-message-store Context
 
+
+Group admission also accepts one-shot chat results as StateMachine/Public
+strings with a Bot sender and nonempty Run identity. Canonical history retains
+the original string and timestamp, atomically with target deliveries. Arbitrary
+string bodies for other flows remain invalid. Shared Memory/SQLite repository
+conformance covers the shape, duplicate identity and invalid variants.
+
 ## Provides
 
 admit_batch commits canonical sources, target admissions, sequence allocation and
@@ -28,6 +35,8 @@ external delivery. Memory, SQLite and MySQL Text/Prepared share this contract.
 
 Delivery decoding failures emit rate-limited column names/types and a fixed error
 category, never row values or serde errors that could include message/header data.
+Delivery JSON columns accept either strings or UTF-8 JSON bytes returned by DB
+plugins; SQL NULL handling and rejection of malformed JSON remain unchanged.
 
 Application-supplied admission rejections commit as unsent Failed rows (Send or
 Inject), with a fixed last_error_code, alongside other admitted recipients.

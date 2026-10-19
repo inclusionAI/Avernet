@@ -1,9 +1,8 @@
-import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
 import type { CommunityTopic } from '@/domain/community/types';
-import { ChevronDown, RefreshCw } from 'lucide-react';
+import { ChevronDown, Lock, RefreshCw } from 'lucide-react';
 import type { KeyboardEvent, RefObject } from 'react';
 import { useEffect, useRef } from 'react';
 import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
@@ -75,7 +74,12 @@ function TopicRow({ topic, onOpen }: { topic: CommunityTopic; onOpen: (topic: Co
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <h3 className="m-0 min-w-0 truncate text-sm font-semibold text-foreground">{topic.title}</h3>
-          {topic.status === 'closed' && <Badge tone="neutral">已结帖</Badge>}
+          {topic.status === 'closed' && (
+            <>
+              <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="sr-only">已结帖</span>
+            </>
+          )}
         </div>
         <p className="mt-0.5 truncate text-xs text-muted-foreground">{topic.body}</p>
       </div>
@@ -155,7 +159,7 @@ export function CommunityTopicList({
 
   if (loading) {
     return (
-      <div className="overflow-hidden rounded-xl border border-border bg-card" aria-label="社区主题加载中">
+      <div className="overflow-hidden rounded-lg border border-border bg-card" aria-label="社区主题加载中">
         {[1, 2, 3].map((item) => (
           <Skeleton.ListItem key={item} />
         ))}
@@ -194,7 +198,7 @@ export function CommunityTopicList({
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-card">
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
       {topics.map((topic) => (
         <TopicRow key={topic.id} topic={topic} onOpen={onOpen} />
       ))}
@@ -218,6 +222,10 @@ export function CommunityTopicList({
             variant="outline"
             size="sm"
             leftIcon={<ChevronDown className="size-4" aria-hidden />}
+            // hover/focus 预取：滚动路径距底 320px 已提前发请求；显式按钮在鼠标/键盘进入时
+            // 同步启动，减少真正点击时的等待感。重复触发由 useCommunity.loadMore 的 in-flight 守卫挡住。
+            onMouseEnter={() => void loadMore()}
+            onFocus={() => void loadMore()}
             onClick={() => void loadMore()}
           >
             加载更多

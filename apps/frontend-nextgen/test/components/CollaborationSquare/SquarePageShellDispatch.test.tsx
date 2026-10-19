@@ -92,38 +92,39 @@ describe('SquarePageShell three-way dispatch', () => {
     expect(screen.getByRole('link', { name: '公开协作群' })).toHaveAttribute('href', '/collaboration-square/groups');
   });
 
-  test('resource=bot 渲染 Bot 面板且资源说明归属当前内容区', () => {
+  test('resource=bot 保留导航和面板，不再渲染内容区标题及说明', () => {
     render(<SquarePageShell resource="bot" />);
     expect(screen.getByText('bot panel')).toBeInTheDocument();
-    const description = screen.getByText(/可按 Bot 名称或 Owner 用户名称搜索公开 Bot/);
     const resourceRegion = screen.getByRole('region', { name: '公开 Bot内容' });
-    expect(screen.getByRole('banner')).toContainElement(description);
-    expect(resourceRegion).toContainElement(description);
+    expect(screen.queryByRole('heading', { name: '公开 Bot' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/可按 Bot 名称或 Owner 用户名称搜索公开 Bot/)).not.toBeInTheDocument();
     expect(resourceRegion).toContainElement(screen.getByText('bot panel'));
-    const botNav = screen.getByRole('link', { name: '公开 Bot' });
-    expect(botNav.className).toMatch(/text-foreground/);
+    const botNav = screen.getByRole('link', { name: '公开Bot' });
+    expect(botNav).toHaveClass('bg-primary/10', 'text-primary');
+    expect(resourceRegion).toHaveClass('space-y-5');
+    expect(resourceRegion.parentElement).toHaveClass('pt-3', 'lg:px-8');
     expect(botNav).toHaveAttribute('aria-current', 'page');
   });
 
-  test('resource=group 渲染群块且资源说明归属当前内容区', () => {
+  test('resource=group 保留导航与群块，不显示重复标题和说明', () => {
     render(<SquarePageShell resource="group" />);
     expect(screen.getByText('group section')).toBeInTheDocument();
-    const description = screen.getByText('发现协作群，支持基于公开协作群快速创建新会话。');
+    expect(screen.queryByText('发现协作群，支持基于公开协作群快速创建新会话。')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '公开协作群' })).not.toBeInTheDocument();
     const resourceRegion = screen.getByRole('region', { name: '公开协作群内容' });
-    expect(screen.getByRole('banner')).toContainElement(description);
-    expect(resourceRegion).toContainElement(description);
+    expect(screen.queryByRole('banner')).not.toBeInTheDocument();
     expect(resourceRegion).toContainElement(screen.getByText('group section'));
     const groupNav = screen.getByRole('link', { name: '公开协作群' });
-    expect(groupNav.className).toMatch(/text-foreground/);
+    expect(groupNav).toHaveClass('bg-primary/10', 'text-primary');
     expect(groupNav).toHaveAttribute('aria-current', 'page');
   });
 
   test('两个资源导航始终以命名导航链接呈现（社区已迁至实验室一级导航）', () => {
     render(<SquarePageShell resource="bot" />);
     const navigation = screen.getByRole('navigation');
-    expect(screen.getByRole('link', { name: '公开 Bot' })).toHaveAttribute('href', '/collaboration-square/bots');
+    expect(screen.getByRole('link', { name: '公开Bot' })).toHaveAttribute('href', '/collaboration-square/bots');
     expect(screen.getByRole('link', { name: '公开协作群' })).toHaveAttribute('href', '/collaboration-square/groups');
-    expect(navigation).toContainElement(screen.getByRole('link', { name: '公开 Bot' }));
+    expect(navigation).toContainElement(screen.getByRole('link', { name: '公开Bot' }));
   });
 
   test('Bot 工作身份下两 Tab 恒显（公开协作群固定登录用户身份，不再隐藏入口）', () => {
@@ -134,7 +135,7 @@ describe('SquarePageShell three-way dispatch', () => {
 
     render(<SquarePageShell resource="bot" />);
 
-    expect(screen.getByRole('link', { name: '公开 Bot' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '公开Bot' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '公开协作群' })).toBeInTheDocument();
   });
 
@@ -150,8 +151,8 @@ describe('SquarePageShell three-way dispatch', () => {
     expect(source).not.toContain('bg-gray-');
     expect(source).not.toContain('message.');
     expect(source).not.toContain('src/internal');
-    expect(source).toContain('可按 Bot 名称或 Owner 用户名称搜索公开 Bot');
-    expect(source).toContain('发现协作群，支持基于公开协作群快速创建新会话。');
+    expect(source).not.toContain('可按 Bot 名称或 Owner 用户名称搜索公开 Bot');
+    expect(source).not.toContain('发现协作群，支持基于公开协作群快速创建新会话。');
 
     const navigationSource = readFileSync(
       path.join(process.cwd(), 'src/components/CollaborationSquare/SquareNavigation/index.tsx'),

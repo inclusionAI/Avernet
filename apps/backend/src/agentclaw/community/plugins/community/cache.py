@@ -6,7 +6,8 @@ construction from the configured ``redis_url``:
 
 - **Redis** (``redis_url`` set): the exact algorithm corp runs — ``SET key token
   NX EX ttl`` to acquire, an atomic compare-and-delete Lua script to release —
-  against a plain ``redis.Redis``. Correct for a multi-worker deploy.
+  against a plain ``redis.Redis``. Correct for a multi-worker deploy. Release
+  requires ``EVAL``; there is no non-atomic fallback.
 - **In-process** (``redis_url`` empty): a dict + ``threading.Lock`` + TTL, with
   a process-local lock. **Single-process only** — the in-process lock is NOT
   shared across workers, so a horizontally-scaled deploy without Redis would get
@@ -33,7 +34,8 @@ logger = get_logger()
 
 
 def _new_lock_token() -> str:
-    return f"{uuid.uuid4().hex[:8]}:{int(time.time())}"
+    # The token is the only proof of ownership: keep all 128 bits.
+    return uuid.uuid4().hex
 
 
 class _RedisBackend:
@@ -128,41 +130,29 @@ class _RedisBackend:
             return None
 
     def release_lock(self, lock_key: str, lock_value: str) -> bool:
-        storage_key = f"lock:{lock_key}"
+        """Release only via the atomic compare-and-delete script.
+
+        There is deliberately no GET+DELETE fallback: between the two calls the
+        lease can expire and another worker acquire it, and the DELETE would
+        then remove the new owner's lock. If eval fails the lock stays until
+        its TTL expires, which is safe.
+        """
         try:
-            try:
-                result = self._redis.eval(
-                    self._RELEASE_LOCK_SCRIPT, 1, storage_key, lock_value
-                )
-                if result == 0:
-                    logger.warning(
-                        "Cache release_lock: value mismatch (atomic), key=%s",
-                        lock_key,
-                    )
-                    return False
-                return True
-            except Exception as lua_err:
-                # eval unavailable → non-atomic GET+DELETE fallback.
-                logger.debug(
-                    "Cache release_lock: Lua eval not available, fallback: %s",
-                    lua_err,
-                )
-                current = self._redis.get(storage_key)
-                if current is not None:
-                    current = current.decode("utf-8")
-                if current != lock_value:
-                    logger.warning(
-                        "Cache release_lock: value mismatch, key=%s", lock_key
-                    )
-                    return False
-                self._redis.delete(storage_key)
-                return True
+            result = self._redis.eval(
+                self._RELEASE_LOCK_SCRIPT, 1, f"lock:{lock_key}", lock_value
+            )
         except Exception as e:
             logger.error(
                 "[CACHE-INFRA-FAILURE] Cache release_lock error: key=%s, "
                 "error=%s", lock_key, e, exc_info=True,
             )
             return False
+        if result == 0:
+            logger.warning(
+                "Cache release_lock: value mismatch (atomic), key=%s", lock_key
+            )
+            return False
+        return True
 
     def renew_lock_strict(
         self, lock_key: str, lock_value: str, ttl: int = 30

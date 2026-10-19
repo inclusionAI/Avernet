@@ -1,8 +1,9 @@
 // 对话工作台目录与会话 Service(设计依据:docs/specs/2026-09-24-workspace-conversation-navigation-refactor.md)。
 // 组合 botSessionService / collaborationCandidateService 的既有映射,不重复协议转换。
 // 由调用方(Hook)传入已鉴权的 Human ID,本 Service 不读取任何 Store / 路由。
+import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import { supportsBotSessionFavorites } from '@/domain/botEngine';
-import type { ConversationSessionScope } from '@/domain/conversation/types';
+import type { ConversationSessionRequestRange, ConversationSessionScope } from '@/domain/conversation/types';
 import {
   BOT_SESSION_PAGE_SIZE,
   botSessionService,
@@ -23,6 +24,13 @@ export interface ConversationDirectoryResult {
 
 function toConversationFriendBotView(view: CollaborationBotView): ChatBotView {
   const { realBotId, ownerId } = splitBotId(view.id);
+  const runtime = resolveBotRuntime({
+    botId: realBotId,
+    engine: view.engine,
+    botType: view.botType,
+    templateType: view.templateType,
+    templateName: view.templateName,
+  });
   return {
     botId: view.id,
     realBotId,
@@ -35,6 +43,7 @@ function toConversationFriendBotView(view: CollaborationBotView): ChatBotView {
     engine: view.engine,
     botType: view.botType,
     isFriendBot: true,
+    isAgentCodingBot: runtime.isAgentCodingBot,
   };
 }
 
@@ -60,30 +69,41 @@ export const conversationService = {
     };
   },
 
-  /** 管理 Bot(origin=mine)会话分页;scope=favorite 走收藏会话接口。 */
+  /** 管理 Bot(origin=mine)会话分页;scope=favorite 走收藏会话接口(不携带 session_key)。 */
   async listManagedSessions(
     bot: ChatBotView,
     userId: string,
     scope: ConversationSessionScope,
     page: number = 1,
     pageSize: number = BOT_SESSION_PAGE_SIZE,
+    sessionKey: string = '',
+    range?: ConversationSessionRequestRange,
   ): Promise<DomainResult<BotSessionPageView>> {
+    const rangeArgs: [] | [ConversationSessionRequestRange] = range ? [range] : [];
     if (scope === 'favorite' && supportsBotSessionFavorites(bot.engine)) {
-      return botSessionService.listFavoriteSessionsPage(bot, userId, page, pageSize);
+      return botSessionService.listFavoriteSessionsPage(bot, userId, page, pageSize, ...rangeArgs);
     }
-    const result = await botSessionService.listSessionsPage(bot, userId, page, pageSize);
+    const result = await botSessionService.listSessionsPage(bot, userId, page, pageSize, sessionKey, ...rangeArgs);
     return result.ok ? { ok: true, data: await conversationFavoriteService.hydrate(bot, userId, result.data) } : result;
   },
 
-  /** Human→Bot 好友 Bot 会话分页:鉴权 Human 既作 user_id 也作 f_user_id。 */
+  /** Human→Bot 好友 Bot 会话分页:鉴权 Human 既作 user_id 也作 f_user_id;
+   *  scope=favorite 走收藏接口,supportsBotSessionFavorites 保留引擎能力边界(TEClaw 回退普通列表)。 */
   async listFriendBotSessions(
     bot: ChatBotView,
     userId: string,
     page: number = 1,
     pageSize: number = BOT_SESSION_PAGE_SIZE,
+    scope: ConversationSessionScope = 'all',
+    sessionKey: string = '',
+    range?: ConversationSessionRequestRange,
   ): Promise<DomainResult<BotSessionPageView>> {
     const friendBot = { ...bot, isFriendBot: true };
-    const result = await botSessionService.listSessionsPage(friendBot, userId, page, pageSize);
+    const rangeArgs: [] | [ConversationSessionRequestRange] = range ? [range] : [];
+    if (scope === 'favorite' && supportsBotSessionFavorites(bot.engine)) {
+      return botSessionService.listFavoriteSessionsPage(friendBot, userId, page, pageSize, ...rangeArgs);
+    }
+    const result = await botSessionService.listSessionsPage(friendBot, userId, page, pageSize, sessionKey, ...rangeArgs);
     return result.ok
       ? { ok: true, data: await conversationFavoriteService.hydrate(friendBot, userId, result.data) }
       : result;

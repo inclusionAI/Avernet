@@ -19,7 +19,8 @@ use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_domain::{
     CollaborationDefinition, CollaborationDefinitionRef, OpeningMessage, ParticipantRole, ResolvedParticipant,
     ResolvedParticipantBinding, RuntimeParticipantBinding, StateMachineDeliveryCorrelation,
-    StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus,
+    StateMachineLoopFrame, StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun,
+    StateMachineRunStatus,
 };
 use bcs_event_store::DbEventStore;
 use bcs_service_api::port::repo::{AppendEventRecord, StateMachineEventfulTransition};
@@ -41,6 +42,9 @@ mod real_mysql_fixed_loop;
 
 #[path = "support/batched_nodes.rs"]
 mod batched_nodes;
+
+#[path = "support/branch_skip.rs"]
+mod branch_skip;
 
 #[path = "support/failure_contract.rs"]
 mod failure_contract;
@@ -118,6 +122,26 @@ fn fixed_loop_snapshot_fixture() -> bcs_service_api::port::repo::StateMachineRun
     }
 }
 
+fn nested_loop_path_snapshot_fixture() -> bcs_service_api::port::repo::StateMachineRunSnapshot {
+    use sha2::{Digest, Sha256};
+
+    let mut snapshot = fixed_loop_snapshot_fixture();
+    let stored = snapshot.execution_plan.as_mut().expect("fixed Loop plan");
+    stored.compiler_version = "bcs.fixed-loop.compiler/v2".into();
+    stored.plan.compiler_version = stored.compiler_version.clone();
+    for metadata in stored.plan.node_metadata.values_mut() {
+        let (Some(loop_id), Some(iteration), Some(max_iterations)) = (
+            metadata.loop_id.clone(), metadata.iteration, metadata.max_iterations,
+        ) else { continue; };
+        metadata.loop_path = Some(vec![
+            StateMachineLoopFrame { loop_id: "outer".into(), iteration: 1, max_iterations: 1 },
+            StateMachineLoopFrame { loop_id, iteration, max_iterations },
+        ]);
+    }
+    stored.content_hash = format!("{:x}", Sha256::digest(serde_json::to_vec(&stored.plan).unwrap()));
+    snapshot
+}
+
 fn assert_snapshot_eq(
     actual: &bcs_service_api::port::repo::StateMachineRunSnapshot,
     expected: &bcs_service_api::port::repo::StateMachineRunSnapshot,
@@ -132,8 +156,18 @@ fn assert_snapshot_eq(
 }
 
 async fn snapshot_round_trip_is_immutable(store: &dyn StateMachineDefinitionRepoPort) {
+    snapshot_fixture_round_trip_is_immutable(store, fixed_loop_snapshot_fixture()).await;
+}
+
+async fn nested_snapshot_round_trip_is_immutable(store: &dyn StateMachineDefinitionRepoPort) {
+    snapshot_fixture_round_trip_is_immutable(store, nested_loop_path_snapshot_fixture()).await;
+}
+
+async fn snapshot_fixture_round_trip_is_immutable(
+    store: &dyn StateMachineDefinitionRepoPort,
+    snapshot: bcs_service_api::port::repo::StateMachineRunSnapshot,
+) {
     let run = test_run();
-    let snapshot = fixed_loop_snapshot_fixture();
     store.save_run_snapshot(&run, 7, &snapshot.definition, snapshot.resolved_participant_bindings.as_ref(), snapshot.execution_plan.as_ref()).await.unwrap();
     let mut changed = snapshot.clone();
     changed.definition.name = "Changed authoring".into();
@@ -157,6 +191,18 @@ async fn sqlite_fixed_loop_snapshot_round_trip_is_immutable() {
 }
 
 #[tokio::test]
+async fn memory_nested_loop_path_snapshot_round_trip_is_immutable() {
+    nested_snapshot_round_trip_is_immutable(&MemoryCollaborationStore::new()).await;
+}
+
+#[tokio::test]
+async fn sqlite_nested_loop_path_snapshot_round_trip_is_immutable() {
+    let db: Arc<dyn DbPlugin> = Arc::new(LocalSqliteDbPlugin::new().unwrap());
+    bootstrap_migrations::run_sqlite_migrations(db.as_ref()).await.unwrap();
+    nested_snapshot_round_trip_is_immutable(&MySqlCollaborationStore::sqlite(db, "test".into())).await;
+}
+
+#[tokio::test]
 async fn mysql_fixed_loop_snapshot_preserves_all_fields_in_one_write_and_read() {
     let snapshot = fixed_loop_snapshot_fixture();
     let db = Arc::new(RecordingDb::default());
@@ -176,6 +222,29 @@ async fn mysql_fixed_loop_snapshot_preserves_all_fields_in_one_write_and_read() 
     drop(writes);
     let loaded = store.get_run_snapshot("sm-run-1").await.unwrap().unwrap();
     assert_snapshot_eq(&loaded, &snapshot);
+}
+
+#[tokio::test]
+async fn mysql_nested_loop_path_snapshot_preserves_v2_fields_in_one_write_and_read() {
+    let snapshot = nested_loop_path_snapshot_fixture();
+    let db = Arc::new(RecordingDb::default());
+    let store = MySqlCollaborationStore::new(db.clone(), "test".into());
+    store.save_run_snapshot(&test_run(), 7, &snapshot.definition, snapshot.resolved_participant_bindings.as_ref(), snapshot.execution_plan.as_ref()).await.unwrap();
+    let writes = db.executes.lock().await;
+    let statement = &writes[0];
+    *db.snapshot_json.lock().await = Some(statement.params()[8].as_str().unwrap().into());
+    let mut columns = db.snapshot_extra_columns.lock().await;
+    for (index, name) in [(9, "resolved_participant_bindings_json"), (10, "execution_plan_json"), (11, "execution_plan_content_hash"), (12, "execution_plan_compiler_version")] {
+        columns.insert(name.into(), statement.params()[index].clone());
+    }
+    drop(columns);
+    drop(writes);
+    let loaded = store.get_run_snapshot("sm-run-1").await.unwrap().unwrap();
+    assert_snapshot_eq(&loaded, &snapshot);
+    let stored = loaded.execution_plan.unwrap();
+    let nested = stored.plan.node_metadata["ln-stored-1"]
+        .loop_path.as_ref().expect("v2 loop path");
+    assert_eq!(nested.iter().map(|frame| frame.loop_id.as_str()).collect::<Vec<_>>(), ["outer", "rounds"]);
 }
 
 #[tokio::test]
@@ -209,9 +278,11 @@ async fn fixed_loop_snapshot_write_failure_is_propagated_and_missing_plan_is_rej
     assert!(memory.get_run_snapshot("sm-run-1").await.unwrap().is_none());
 }
 
-async fn fixed_loop_rerun_copies_snapshot_once<T: StateMachineDefinitionRepoPort + StateMachineRunRepoPort>(store: &T) {
+async fn loop_rerun_copies_snapshot_once<T: StateMachineDefinitionRepoPort + StateMachineRunRepoPort>(
+    store: &T,
+    snapshot: bcs_service_api::port::repo::StateMachineRunSnapshot,
+) {
     use bcs_service_api::{CreateStateMachineRerun, CreateStateMachineRerunOutcome};
-    let snapshot = fixed_loop_snapshot_fixture();
     let mut source = test_run();
     source.status = StateMachineRunStatus::Failed;
     source.error = Some("source failure".into());
@@ -248,7 +319,12 @@ async fn fixed_loop_rerun_copies_snapshot_once<T: StateMachineDefinitionRepoPort
 
 #[tokio::test]
 async fn memory_fixed_loop_rerun_preserves_source_plan_and_concurrent_uniqueness() {
-    fixed_loop_rerun_copies_snapshot_once(&MemoryCollaborationStore::new()).await;
+    loop_rerun_copies_snapshot_once(&MemoryCollaborationStore::new(), fixed_loop_snapshot_fixture()).await;
+}
+
+#[tokio::test]
+async fn memory_nested_loop_rerun_preserves_compiler_v2_path_snapshot() {
+    loop_rerun_copies_snapshot_once(&MemoryCollaborationStore::new(), nested_loop_path_snapshot_fixture()).await;
 }
 
 #[tokio::test]
@@ -259,7 +335,24 @@ async fn sqlite_fixed_loop_rerun_preserves_source_plan_and_concurrent_uniqueness
         "INSERT INTO bcs_group_sessions (env, session_id, group_id, session_kind, status, activation_count, participants) \
          VALUES ('test', 'group-1:abcdef12', 'group-1', 'chat', 'running', 1, '[]')"
     )).await.unwrap();
-    fixed_loop_rerun_copies_snapshot_once(&MySqlCollaborationStore::sqlite(db, "test".into())).await;
+    loop_rerun_copies_snapshot_once(
+        &MySqlCollaborationStore::sqlite(db, "test".into()),
+        fixed_loop_snapshot_fixture(),
+    ).await;
+}
+
+#[tokio::test]
+async fn sqlite_nested_loop_rerun_preserves_compiler_v2_path_snapshot() {
+    let db: Arc<dyn DbPlugin> = Arc::new(LocalSqliteDbPlugin::new().unwrap());
+    bootstrap_migrations::run_sqlite_migrations(db.as_ref()).await.unwrap();
+    db.execute(DbStatement::new(
+        "INSERT INTO bcs_group_sessions (env, session_id, group_id, session_kind, status, activation_count, participants) \
+         VALUES ('test', 'group-1:abcdef12', 'group-1', 'chat', 'running', 1, '[]')"
+    )).await.unwrap();
+    loop_rerun_copies_snapshot_once(
+        &MySqlCollaborationStore::sqlite(db, "test".into()),
+        nested_loop_path_snapshot_fixture(),
+    ).await;
 }
 
 #[tokio::test]

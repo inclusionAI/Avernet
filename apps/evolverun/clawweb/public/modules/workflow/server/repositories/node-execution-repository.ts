@@ -281,19 +281,13 @@ export class NodeExecutionRepository {
   }
 
   /** Reset all failed node executions for a flow back to pending (for retry-failed). */
-  async resetFailedByFlowId(flowId: string): Promise<number> {
-    try {
-      const now = this.db.dialect.now();
-      const result = await this.db.exec(
-        `UPDATE node_executions SET status = 'pending', error_text = NULL, duration_ms = NULL, completed_at = NULL, gmt_modified = ? WHERE flow_id = ? AND status = 'failed'`,
-        [now, flowId],
-      );
-      return result.affectedRows;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.warn(`[db] NodeExecutionRepository.resetFailedByFlowId failed: ${msg}`);
-      return 0;
-    }
+  async resetFailedByFlowId(flowId: string, db: IDatabase = this.db): Promise<number> {
+    const now = db.dialect.now();
+    const result = await db.exec(
+      `UPDATE node_executions SET status = 'pending', error_text = NULL, duration_ms = NULL, completed_at = NULL, gmt_modified = ? WHERE flow_id = ? AND status = 'failed'`,
+      [now, flowId],
+    );
+    return result.affectedRows;
   }
 
   async deleteByFlowId(flowId: string): Promise<number> {

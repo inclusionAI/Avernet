@@ -634,16 +634,20 @@ fn handle_session_delete(
             return Ok(());
         }
     };
-    let matching = state
-        .history
-        .keys()
-        .filter(|key| session_belongs_to_group(key, &params.bcs_group_id))
-        .cloned()
-        .collect::<Vec<_>>();
+    let session_id = params.bcs_session_id.trim();
+    let valid = session_id.split_once(':').is_some_and(|(group, suffix)| {
+        !group.is_empty() && !suffix.is_empty()
+            && params.bcs_group_id.as_ref().is_none_or(|value| value.trim() == group)
+    });
+    if !valid {
+        send(outgoing_tx, error_response(request.id, "invalid_params",
+            "session.delete requires a canonical bcs_session_id and a matching bcs_group_id when supplied", false));
+        return Ok(());
+    }
     let pending_run_ids = state
         .pending_runs
         .iter()
-        .filter(|(_, pending)| session_belongs_to_group(&pending.session_key, &params.bcs_group_id))
+        .filter(|(_, pending)| pending.session_key == session_id)
         .map(|(run_id, _)| run_id.clone())
         .collect::<Vec<_>>();
     for run_id in pending_run_ids {
@@ -651,29 +655,16 @@ fn handle_session_delete(
             pending.cancellation.cancel();
         }
     }
-    for key in matching {
-        state.history.remove(&key);
-        state.behavior.clear_session(&key);
-    }
-    state.idempotency.remove_group(&params.bcs_group_id);
-    state
-        .supervisions
-        .retain(|session, _| !session_belongs_to_group(session, &params.bcs_group_id));
-    state
-        .dispatch_requests
-        .retain(|_, pending| !session_belongs_to_group(&pending.session_key, &params.bcs_group_id));
+    state.history.remove(session_id);
+    state.behavior.clear_session(session_id);
+    state.idempotency.remove_session(session_id);
+    state.supervisions.remove(session_id);
+    state.dispatch_requests.retain(|_, pending| pending.session_key != session_id);
     send(
         outgoing_tx,
         ok_response(request.id, json!({"deleted": true})),
     );
     Ok(())
-}
-
-fn session_belongs_to_group(session_key: &str, group_id: &str) -> bool {
-    session_key == group_id
-        || session_key
-            .strip_prefix(group_id)
-            .is_some_and(|suffix| suffix.starts_with(':'))
 }
 
 fn behavior_input(params: &ChatSendParams, task_id: Option<String>) -> BehaviorInput {
@@ -1640,9 +1631,9 @@ impl IdempotencyCache {
         self.values.insert(key, value);
     }
 
-    fn remove_group(&mut self, group_id: &str) {
+    fn remove_session(&mut self, session_id: &str) {
         self.values
-            .retain(|_, cached| !session_belongs_to_group(&cached.session_key, group_id));
+            .retain(|_, cached| cached.session_key != session_id);
         let values = &self.values;
         self.order.retain(|key| values.contains_key(key));
     }
@@ -2383,7 +2374,7 @@ mod tests {
     }
 
     #[test]
-    fn session_delete_cancels_only_matching_group_runs_and_cache() {
+    fn session_delete_cancels_only_the_requested_session_runs_and_cache() {
         let behavior = BehaviorConfig::Fixed {
             replies: vec!["你好".to_string()],
             scope: StateScope::Session,
@@ -2394,7 +2385,7 @@ mod tests {
             .insert("group-a:session".to_string(), Vec::new());
         state
             .history
-            .insert("group-b:session".to_string(), Vec::new());
+            .insert("group-a:other".to_string(), Vec::new());
 
         let deleted_run = CancellationToken::new();
         let retained_run = CancellationToken::new();
@@ -2408,7 +2399,7 @@ mod tests {
         state.pending_runs.insert(
             "run-b".to_string(),
             PendingRun {
-                session_key: "group-b:session".to_string(),
+                session_key: "group-a:other".to_string(),
                 cancellation: retained_run.clone(),
             },
         );
@@ -2422,11 +2413,11 @@ mod tests {
             },
         );
         state.idempotency.insert(
-            "group-b:session\0request".to_string(),
+            "group-a:other\0request".to_string(),
             CachedRun {
                 run_id: "run-b".to_string(),
-                group_id: "group-b".to_string(),
-                session_key: "group-b:session".to_string(),
+                group_id: "group-a".to_string(),
+                session_key: "group-a:other".to_string(),
                 reply: Some("你好".to_string()),
             },
         );
@@ -2437,7 +2428,7 @@ mod tests {
             RequestFrame::new(
                 "delete",
                 "session.delete",
-                Some(json!({"bcs_group_id": "group-a"})),
+                Some(json!({"bcs_group_id": "group-a", "bcs_session_id": "group-a:session"})),
             ),
             &outgoing_tx,
         )
@@ -2454,7 +2445,7 @@ mod tests {
         assert!(!state.pending_runs.contains_key("run-a"));
         assert!(state.pending_runs.contains_key("run-b"));
         assert!(!state.history.contains_key("group-a:session"));
-        assert!(state.history.contains_key("group-b:session"));
+        assert!(state.history.contains_key("group-a:other"));
         assert!(
             !state
                 .idempotency
@@ -2465,8 +2456,29 @@ mod tests {
             state
                 .idempotency
                 .values
-                .contains_key("group-b:session\0request")
+                .contains_key("group-a:other\0request")
         );
+    }
+
+    #[test]
+    fn session_delete_rejects_missing_or_conflicting_session_identity() {
+        for params in [
+            json!({"bcs_group_id": "group-a"}),
+            json!({"bcs_session_id": "group-a"}),
+            json!({"bcs_session_id": "group-a:"}),
+            json!({"bcs_session_id": "group-a:session", "bcs_group_id": "group-b"}),
+        ] {
+            let mut state = RuntimeState::new(&BehaviorConfig::Fixed {
+                replies: vec!["hello".into()], scope: StateScope::Session,
+            });
+            state.history.insert("group-a:session".into(), Vec::new());
+            let (tx, mut rx) = mpsc::unbounded_channel();
+            handle_session_delete(&mut state, RequestFrame::new("delete", "session.delete", Some(params)), &tx)
+                .unwrap_or_else(|error| panic!("delete handler failed: {error}"));
+            let BcsFrame::Response(response) = rx.try_recv().unwrap_or_else(|error| panic!("missing response: {error}")) else { panic!("expected response") };
+            assert!(!response.ok);
+            assert!(state.history.contains_key("group-a:session"));
+        }
     }
 
     #[tokio::test]

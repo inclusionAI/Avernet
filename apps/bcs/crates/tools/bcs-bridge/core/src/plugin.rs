@@ -16,6 +16,8 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 const MAX_PENDING_RUNS: usize = 16;
 const MAX_ROUTES: usize = 1024;
 const ROUTE_TTL: Duration = Duration::from_secs(300);
+const MAX_OCCUPIED_RETRIES: u32 = 6;
+const MAX_OCCUPIED_BACKOFF: Duration = Duration::from_secs(8);
 
 struct PendingRun {
     handle: RunHandle,
@@ -48,8 +50,10 @@ struct BotClient {
     wire_seq: u64,
 }
 
+#[derive(Debug)]
 enum ConnectionFailure {
     Retry(&'static str),
+    AlreadyConnected,
     Fatal(anyhow::Error),
     Kicked,
 }
@@ -81,6 +85,7 @@ pub async fn serve(state: Arc<AppState>, shutdown: CancellationToken) -> anyhow:
             }
         }
     }
+    state.shutdown_engines().await;
     match first_error { Some(error) => Err(error), None => Ok(()) }
 }
 
@@ -97,6 +102,7 @@ impl BotClient {
     }
 
     async fn run(mut self, stop: CancellationToken) -> anyhow::Result<()> {
+        let mut occupied_retries = 0;
         let outcome = loop {
             let connected = tokio::select! {
                 _ = stop.cancelled() => break Ok(()),
@@ -104,6 +110,7 @@ impl BotClient {
             };
             let result = match connected {
                 Ok((mut socket, identity)) => {
+                    occupied_retries = 0;
                     // Never cancel a spawned SQLite commit midway through
                     // shutdown: await it before releasing the database owner.
                     match self.state.sessions.save_identity(&self.config.url, &self.bot.provider_bot_ref, identity.clone()).await {
@@ -123,6 +130,7 @@ impl BotClient {
                 },
                 Err(error) => Err(error),
             };
+            let mut retry_delay = Duration::from_millis(self.config.reconnect_interval_ms);
             match result {
                 Ok(()) => break Ok(()),
                 Err(ConnectionFailure::Kicked) => {
@@ -130,6 +138,16 @@ impl BotClient {
                     break Ok(());
                 }
                 Err(ConnectionFailure::Fatal(error)) => break Err(error),
+                Err(ConnectionFailure::AlreadyConnected) => {
+                    if occupied_retries == MAX_OCCUPIED_RETRIES {
+                        break Err(anyhow!("BCS still reports an active WebSocket connection after bounded retries; stop the other bridge or wait for its connection to expire, then start again"));
+                    }
+                    retry_delay = retry_delay.saturating_mul(1 << occupied_retries).min(MAX_OCCUPIED_BACKOFF);
+                    occupied_retries += 1;
+                    tracing::warn!(provider_bot_ref = %self.bot.provider_bot_ref, attempt = occupied_retries,
+                        max_retries = MAX_OCCUPIED_RETRIES, delay_ms = retry_delay.as_millis() as u64,
+                        "BCS still holds the previous Bot connection; retrying bot.connect");
+                }
                 Err(ConnectionFailure::Retry(reason)) => {
                     tracing::warn!(provider_bot_ref = %self.bot.provider_bot_ref, reason, pending_runs = self.pending.len(),
                         "upstream disconnected; retaining runs for reconnect");
@@ -137,7 +155,7 @@ impl BotClient {
             }
             tokio::select! {
                 _ = stop.cancelled() => break Ok(()),
-                _ = tokio::time::sleep(Duration::from_millis(self.config.reconnect_interval_ms)) => {}
+                _ = tokio::time::sleep(retry_delay) => {}
             }
         };
         for pending in self.pending.values() {
@@ -186,7 +204,8 @@ impl BotClient {
             // V3 uplink: canonical Run Event frames and HITL interaction
             // support. A server without V3 answers with its best version and
             // the client adapts (only 2 and 3 are accepted below).
-            protocol_version:Some(3), client_kind:None,
+            protocol_version:Some(3),
+            client_kind:Some("native_mcp".to_owned()),
         };
         let request = BcsFrame::Request(RequestFrame::new(&id,"bot.connect",Some(
             serde_json::to_value(params).map_err(|error| ConnectionFailure::Fatal(error.into()))?)));
@@ -206,6 +225,9 @@ impl BotClient {
             }
         }).await.map_err(|_| ConnectionFailure::Retry("bot.connect response timeout"))??;
         if !response.ok {
+            if response.error.as_ref().is_some_and(|error| error.code == "already_connected") {
+                return Err(ConnectionFailure::AlreadyConnected);
+            }
             let retry = response.error.as_ref().is_some_and(|error| error.retryable || error.code == "bot_id_conflict");
             return Err(if retry { ConnectionFailure::Retry("bot.connect temporarily rejected") }
                 else { ConnectionFailure::Fatal(anyhow!("BCS rejected bot.connect; check Bot identity, token and protocol")) });
@@ -217,6 +239,10 @@ impl BotClient {
             return Err(ConnectionFailure::Fatal(anyhow!("bot.connect returned a mismatched identity, protocol or empty token")));
         }
         self.protocol_v3 = connected.protocol_version == 3;
+        if self.bot.engine == "qwenwork" && !connected.capabilities.as_ref()
+            .is_some_and(|capabilities| capabilities.tool_result_task_intent) {
+            tracing::warn!("BCS did not enable MCP task coordination; check the Bot Provider configuration and server version");
+        }
         let identity = ConnectionIdentity {bot_id:connected.bot_uuid,token:connected.token};
         Ok((socket, identity))
     }
@@ -272,6 +298,9 @@ impl BotClient {
     }
 
     async fn dispatch(&mut self, request: RequestFrame) -> Result<Value, BridgeError> {
+        if self.state.config.mode != crate::config::ConnectionMode::Plugin {
+            return Err(BridgeError::invalid_request("Plugin delivery requires plugin mode"));
+        }
         self.routes.retain(|run_id,route| self.pending.contains_key(run_id) || route.touched.elapsed() < ROUTE_TTL);
         let wire_group = request.params.as_ref().and_then(|p| p.get("bcs_group_id")).and_then(Value::as_str).unwrap_or_default().to_string();
         let alias = request.params.as_ref().and_then(|p| p.get("session_key")).and_then(Value::as_str).unwrap_or_default().to_string();
@@ -320,12 +349,11 @@ impl BotClient {
                 Err(error)
             }
             RuntimeReply::Json {body,..} => Ok(body),
-            RuntimeReply::Run {handle,stream} => {
-                // The runtime stream is gateway-facing. Upstream reads its
-                // durable-in-process event buffer using its own delivery cursor.
-                drop(stream);
+            RuntimeReply::Run {handle,delivery:runtime::RunDelivery::Plugin} => {
                 handle.set_interaction_uplink(self.protocol_v3);
-                let cursor = self.routes.get(&run_id).map_or(0, |route| route.cursor);
+                // A terminal tombstone may outlive its route by a poll interval.
+                // Recover the consumed prefix rather than starting again at zero.
+                let cursor = self.routes.get(&run_id).map_or(handle.retention_stats().delivery_cursor, |route| route.cursor);
                 self.routes.entry(run_id.clone()).or_insert_with(|| Route {
                     session,alias,group:wire_group.clone(),wire_session,cursor,touched:Instant::now(),
                 });
@@ -335,6 +363,8 @@ impl BotClient {
                 self.pending.entry(run_id.clone()).or_insert_with(|| PendingRun {handle,encoder,cursor,failed_delivery:false});
                 Ok(json!({"run_id":run_id}))
             }
+            RuntimeReply::Run {delivery:runtime::RunDelivery::Gateway {..},..} =>
+                Err(BridgeError::invalid_request("Plugin delivery requires plugin mode")),
         }
     }
 
@@ -346,7 +376,7 @@ impl BotClient {
         Ok(())
     }
 
-    async fn flush_events(&mut self, socket: &mut Socket) -> Result<(), ConnectionFailure> {
+    async fn flush_events<S: futures::Sink<Message> + Unpin>(&mut self, socket: &mut S) -> Result<(), ConnectionFailure> {
         let timeout = self.timeout();
         let mut delivered = Vec::new();
         for (run_id,pending) in &mut self.pending {
@@ -357,8 +387,11 @@ impl BotClient {
                 }
                 continue;
             }
+            if !self.routes.get(run_id).is_some_and(|route| route.cursor == pending.cursor) {
+                return Err(ConnectionFailure::Fatal(anyhow!("inconsistent Plugin delivery route cursor")));
+            }
             // One event per run per tick prevents a busy session starving others.
-            if let Some(event) = pending.handle.next_after(pending.cursor) {
+            if let Some(event) = pending.handle.next_after(pending.cursor).map_err(|error| ConnectionFailure::Fatal(error.into()))? {
                 let (frame, rejected) = match pending.encoder.encode(&event) {
                     Ok(frame) => (frame, false),
                     Err(error) => {
@@ -383,13 +416,18 @@ impl BotClient {
                     // this run. Other Bots/sessions keep their connections.
                     pending.failed_delivery = true;
                     pending.handle.request_abort("encoding_error");
+                    continue;
                 }
+                // No await after the local write: commit the buffer and both
+                // route cursors as one synchronous step. This is not a BCS ACK.
+                pending.handle.commit_delivery_through(event.seq)
+                    .map_err(|error| ConnectionFailure::Fatal(error.into()))?;
                 pending.cursor = event.seq;
                 if let Some(route) = self.routes.get_mut(run_id) { route.cursor = pending.cursor; route.touched = Instant::now(); }
             } else if pending.handle.is_terminal() {
                 // Check terminal BEFORE the empty snapshot again: a final may
                 // have been appended between the first snapshot and this flag.
-                if pending.handle.next_after(pending.cursor).is_none() {
+                if pending.handle.next_after(pending.cursor).map_err(|error| ConnectionFailure::Fatal(error.into()))?.is_none() {
                     pending.handle.release_delivery();
                     delivered.push(run_id.clone());
                 }
@@ -409,7 +447,7 @@ fn request_params_session(params: Option<&Value>) -> Option<String> {
     (!session.trim().is_empty()).then(|| session.to_string())
 }
 
-async fn send(socket: &mut Socket, frame: &BcsFrame, timeout: Duration) -> Result<(), ConnectionFailure> {
+async fn send<S: futures::Sink<Message> + Unpin>(socket: &mut S, frame: &BcsFrame, timeout: Duration) -> Result<(), ConnectionFailure> {
     let text = serde_json::to_string(frame).map_err(|error| ConnectionFailure::Fatal(error.into()))?;
     tokio::time::timeout(timeout,socket.send(Message::Text(text.into()))).await
         .map_err(|_| ConnectionFailure::Retry("WebSocket write timeout"))?
@@ -433,3 +471,7 @@ async fn receive(socket: &mut Socket, timeout: Duration) -> Result<Option<BcsFra
         _ => Err(ConnectionFailure::Retry("unsupported WebSocket frame")),
     }
 }
+
+#[cfg(test)]
+#[path = "plugin_retention_tests.rs"]
+mod retention_tests;

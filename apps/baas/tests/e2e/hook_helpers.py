@@ -108,8 +108,15 @@ async def wait_for_publish_status(
     target_statuses: set[str],
     timeout_seconds: float = 0.5,
     poll_interval: float = 0.05,
+    treat_not_found_as_success: bool = True,
 ) -> str:
-    """Poll until publish reaches one of the target statuses."""
+    """Poll until publish reaches one of the target statuses.
+
+    Some legacy workflows delete a completed publish record. By default, and
+    for backward compatibility, a 404 while waiting for SUCCESS is treated as
+    SUCCESS. Callers that must observe a specific terminal status can disable
+    that interpretation and keep polling through transient 404 responses.
+    """
     t0 = time.monotonic()
     status = "UNKNOWN"
     first_status = True
@@ -119,14 +126,15 @@ async def wait_for_publish_status(
             params=api.params(),
         )
         if resp.status_code == 404:
-            if "SUCCESS" in target_statuses:
+            status = "NOT_FOUND"
+            if treat_not_found_as_success and "SUCCESS" in target_statuses:
                 log.info(
                     f"[WAIT_STATUS] publish={publish_id} → NOT_FOUND (took {time.monotonic() - t0:.2f}s)"
                 )
                 return "SUCCESS"
-            return "NOT_FOUND"
-        assert resp.status_code == 200
-        status = resp.json()["data"]["status"]
+        else:
+            assert resp.status_code == 200
+            status = resp.json()["data"]["status"]
         if first_status:
             log.info(
                 f"[WAIT_STATUS] publish={publish_id} initial={status}, targets={target_statuses}"
@@ -168,8 +176,14 @@ async def send_callbacks_for_hook_devices(
     stderr: str = "",
     timeout_seconds: float = 0.5,
     poll_interval: float = 0.05,
+    min_publish_retry_count: int | None = None,
 ) -> list[dict]:
-    """Find CREATED devices in the current running batch and send callback for each."""
+    """Find CREATED devices in the current running batch and send callback for each.
+
+    ``min_publish_retry_count`` waits for a retry attempt instead of firing against
+    the initial attempt. This is required for failure-retry tests whose background
+    hook callback races with the manual success callback.
+    """
     t0 = time.monotonic()
     elapsed = 0.0
     created_devices = []
@@ -179,7 +193,12 @@ async def send_callbacks_for_hook_devices(
         created_devices = [
             d
             for d in devices
-            if d.get("device_uuid") and d.get("result_status") == "PROCESSING"
+            if d.get("device_uuid")
+            and d.get("result_status") == "PROCESSING"
+            and (
+                min_publish_retry_count is None
+                or d.get("publish_retry_count", 0) >= min_publish_retry_count
+            )
         ]
         poll_count += 1
         if created_devices:
@@ -210,7 +229,8 @@ async def send_callbacks_for_hook_devices(
 
     assert created_devices, (
         f"No CREATED devices with device_uuid found for publish_id={publish_id} "
-        f"after {timeout_seconds}s — callback was never invoked"
+        f"after {timeout_seconds}s with min_publish_retry_count="
+        f"{min_publish_retry_count} — callback was never invoked"
     )
 
     log.info(

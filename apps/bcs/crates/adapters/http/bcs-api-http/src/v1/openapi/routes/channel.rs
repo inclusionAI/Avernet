@@ -6,7 +6,7 @@ use axum::extract::{Extension, Json, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
-use bcs_service_api::application::v1::{require_authenticated_user, AuthenticatedCaller, ApplicationError};
+use bcs_service_api::application::v1::{require_authenticated_user, AuthenticatedCaller, ApplicationError, GetSession};
 use bcs_service_api::application::channel::{ChannelService, ChannelUseCaseError};
 
 use crate::v1::common::{
@@ -15,13 +15,15 @@ use crate::v1::common::{
 use crate::v1::openapi::dto::channel::{
     ChannelBindingDto, ChannelBindingPage, CreateChannelBindingRequest, ListBindingsByTargetQuery,
     UpdateChannelBindingRequest, normalize_target_query,
+    ChannelConversationDto, ChannelConversationPage, ListConversationsBySessionQuery,
 };
 
-/// Channels/bindings OpenAPI router — mounted under `/openapi/v1/collaboration`.
+/// Channel OpenAPI router — mounted under `/openapi/v1/collaboration`.
 ///
-/// Human-only is enforced in the adapter via `require_authenticated_user(caller)`;
+/// Bindings are Human-only via `require_authenticated_user(caller)`;
 /// the shared `ChannelService` carries no actor (merged-app design). All five
-/// operations reuse the legacy `ChannelService` implementation.
+/// binding operations reuse the legacy `ChannelService` implementation.
+/// Conversation reads reuse Session application authorization for Humans/Bots.
 pub fn router() -> Router<ApiState> {
     Router::new()
         .route(
@@ -29,10 +31,42 @@ pub fn router() -> Router<ApiState> {
             post(create_binding).get(list_bindings),
         )
         .route("/channels/bindings/by-target", get(list_bindings_by_target))
+        .route("/channels/conversations/by-session", get(list_conversations_by_session))
         .route(
             "/channels/bindings/{id}",
             patch(update_binding).delete(delete_binding),
         )
+}
+
+async fn list_conversations_by_session(
+    State(state): State<ApiState>,
+    Extension(caller): Extension<AuthenticatedCaller>,
+    Extension(request_id): Extension<RequestId>,
+    query: Result<Query<ListConversationsBySessionQuery>, QueryRejection>,
+) -> Result<Response, ErrorResponse> {
+    let Query(query) = query.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let session_id = query.bcs_session_id.trim();
+    if session_id.is_empty() {
+        return Err(invalid_request(&request_id, "bcs_session_id is required"));
+    }
+    let channel_type = query.channel_type.map(|value| value.trim().to_string());
+    if channel_type.as_ref().is_some_and(|value| value.is_empty()) {
+        return Err(invalid_request(&request_id, "channel_type must not be blank"));
+    }
+    // The Session application facade owns Human/owned-Bot selection and
+    // participant authorization. Never query mappings before it succeeds.
+    state.session_service.get(GetSession {
+        caller,
+        session_id: session_id.to_string(),
+    }).await.map_err(|error| application_error_response(&request_id, error))?;
+    let mappings = channel_service(&state, &request_id)?
+        .list_conversations_by_session(session_id, channel_type)
+        .await
+        .map_err(|error| application_error_response(&request_id, map_channel_error(error)))?;
+    let items = mappings.into_iter().map(ChannelConversationDto::from).collect();
+    Ok(Json(Envelope::success(
+        20_000, "OK", ChannelConversationPage { items }, request_id.0,
+    )).into_response())
 }
 
 /// Resolve the shared `ChannelService` slot; fail-closed as `internal` if the

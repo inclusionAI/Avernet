@@ -39,6 +39,13 @@ DEFAULT_MCPORTER_CONFIG_PATH = "~/.mcporter/mcporter.json"
 # 默认最大连接数（0 表示不限制）
 DEFAULT_MAX_CONNECTIONS = 0
 
+#: Where acli installs market tools. Shared by every engine and by the default
+#: CLIs the image installs at boot, so one acli record covers them all. It is
+#: on persisted storage (``/home/admin``) and is the directory the agent image
+#: puts on ``PATH``, so it is fixed rather than configurable: any other
+#: directory would install tools the agent cannot run.
+ACLI_INSTALL_DIR = "/home/admin/.agentclaw/bin"
+
 
 @dataclass(frozen=True)
 class MCPTokenSettings:
@@ -568,3 +575,28 @@ def load_file_count_roots(engine: str) -> tuple[Path, tuple[Path, ...]]:
         root = workspace_root().parent
         return root, (root, root.parent / "openclawExt")
     raise FileCountError("unsupported")
+
+
+def get_local_base_url() -> str:
+    """Local base URL for A2A Agent Card generation (interface URL field).
+
+    Resolution order (design §6.5 "url base 由部署侧注入"):
+      1. A2A_PUBLIC_BASE_URL — deployment-injected externally reachable
+         base URL (behind a gateway/proxy the loopback address would point
+         clients at themselves — the public URL is the only correct value).
+      2. SERVER_HOST/SERVER_PORT — the variables scripts/run.sh actually
+         exports (:133-134). A wildcard listen address (0.0.0.0) is not
+         publishable; substitute loopback.
+      3. Defaults mirroring start.py.
+    """
+    import os
+
+    public = os.environ.get("A2A_PUBLIC_BASE_URL", "").strip().rstrip("/")
+    if public:
+        return public
+
+    host = os.environ.get("SERVER_HOST", "127.0.0.1")
+    if host in ("0.0.0.0", "::", ""):
+        host = "127.0.0.1"
+    port = os.environ.get("SERVER_PORT", "20003")
+    return f"http://{host}:{port}"

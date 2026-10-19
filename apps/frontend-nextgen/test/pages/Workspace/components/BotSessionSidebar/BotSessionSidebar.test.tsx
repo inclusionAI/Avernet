@@ -741,11 +741,10 @@ describe('BotSessionSidebar', () => {
     const sessionsArea = screen.getByLabelText('Bot会话列表：可聊Bot');
     expect(sessionsArea).toHaveClass('pl-6');
     expect(sessionsArea).not.toHaveClass('bg-muted/20');
-    // 容器不再渲染贯穿干线（before:* 已移除），干线与末行截断由每行 SessionCard 自带。
+    // 容器不再渲染贯穿干线（before:* 已移除）；行自带干线也已按 dmore 平齐化裁决移除（parity 最小同步）。
     expect(sessionsArea).not.toHaveClass('before:absolute');
-    const rails = sessionsArea.querySelectorAll('[data-session-tree-rail]');
-    expect(rails.length).toBeGreaterThan(0);
-    expect(rails[0]).toHaveClass('-left-2', 'top-0', 'bottom-0', 'w-px', 'bg-border');
+    expect(sessionsArea.querySelectorAll('[data-session-tree-rail]').length).toBe(0);
+    expect(sessionsArea.querySelectorAll('[data-session-tree-elbow]').length).toBe(0);
   });
 
   it('Bot 会话背景铺满列表宽度，不保留整体缩进', () => {

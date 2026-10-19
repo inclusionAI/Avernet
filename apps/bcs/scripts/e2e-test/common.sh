@@ -7,13 +7,13 @@
 
 BCS_API_BASE_URL="${BCS_API_BASE_URL:-http://127.0.0.1:21000}"
 # Mock caller identity. Defaults must match singlebox's bcs/bots modules
-# (scripts/modules/bcs.sh, scripts/modules/bots.sh), which start BCS with
+# (singlebox/modules/bcs.sh, singlebox/modules/bots.sh), which start BCS with
 # BCS_MOCK_USER_ID=001 / admin. Override via env if BCS was started with a
 # different mock user (e.g. BCS_MOCK_USER_ID=xxx ./e2e.sh).
 BCS_MOCK_USER_ID="${BCS_MOCK_USER_ID:-001}"
 BCS_MOCK_USER_NICK_NAME="${BCS_MOCK_USER_NICK_NAME:-admin}"
 
-# Bot IDs (must match the default 5bots_profile started by ./singlebox/singlebox.sh --local start bcs_bots).
+# Bot IDs (must match the default 5bots_profile started by ./singlebox/singlebox.sh start bcs_bots).
 # Code names map to the 5bots_profile roles: CEO / 产品经理(PM) / 研发(ENG) / 验证(QA) / 客服(CS).
 BOT_CEO_ID="${BOT_CEO_ID:-CEO}"
 BOT_PM_ID="${BOT_PM_ID:-产品经理}"
@@ -604,7 +604,11 @@ bcs_cli() {
         else
             ensure_cli_token "$bot" >/dev/null || { BCS_CLI_STDOUT=""; BCS_CLI_STDERR=""; BCS_CLI_EXIT=126; return 126; }
         fi
-        args+=(--token "$BCS_CLI_TOKEN")
+        if [[ "$sub" == "group-context" ]]; then
+            args+=(--auth "$BCS_CLI_TOKEN")
+        else
+            args+=(--token "$BCS_CLI_TOKEN")
+        fi
     fi
     shift
     args+=("$@")
@@ -623,7 +627,7 @@ bcs_cli() {
     fi
     command_path="$sub"
     case "$sub" in
-        friend|channel|visibility|session|service|collaboration|collaborate|chat-run)
+        friend|channel|visibility|session|service|collaboration|collaborate|chat-run|group-context)
             [[ -n "$nested" && "$nested" != -* ]] && command_path="$sub $nested"
             ;;
     esac

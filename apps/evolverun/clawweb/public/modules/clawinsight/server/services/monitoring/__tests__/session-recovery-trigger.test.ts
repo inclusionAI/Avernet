@@ -1,0 +1,109 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { DIAGNOSIS_VERSION, type DiagnosisEvent } from "../contracts.js";
+import { createMonitoringRecoveryTrigger, SESSION_RECOVERY_ALLOWLIST_KEY } from "../session-recovery-trigger.js";
+import { SessionRecoveryError } from "../../repair/session-recovery/errors.js";
+
+const bot = { bot_id: "default", entity_id: "001234", env: "prod" };
+const event: DiagnosisEvent = {
+  schemaVersion: DIAGNOSIS_VERSION, eventId: "event-1", diagnosisId: "event-1", botId: "default",
+  entityId: "001234", env: "prod", engine: "OC", sessionKey: "agent:main:session:original",
+  sessionId: "physical-session", traceId: null, occurredAt: null, diagnosedAt: "2026-10-15T00:00:00.000Z",
+  decision: "ALERT", tcFaultLabel: "TC.MCP.PERMISSION", confidence: 0.2,
+  businessProblemCategory: null, businessProblemSubtype: null,
+  businessDiagnosis: "用户需要读取文档，但尚未取得正文。", systemDiagnosis: "文档访问被拒绝。",
+  handlerName: "NOT_COMPLETED", humanIntervention: false,
+};
+function setup() {
+  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ allowed_bots: [bot] }) }) };
+  const service = { create: vi.fn().mockResolvedValue({ event_id: event.eventId, delivery_key: "receipt", status: "accepted" }) };
+  return { config, service, trigger: createMonitoringRecoveryTrigger({ config, service }) };
+}
+beforeEach(() => { vi.restoreAllMocks(); });
+
+describe("monitoring automatic recovery", () => {
+  it.each(["OC", "TE"] as const)("maps %s diagnostics to the existing approval flow without inferring a location", async engine => {
+    const { config, service, trigger } = setup();
+    await trigger.trigger({ ...event, engine, humanIntervention: true });
+    expect(config.findByKey).toHaveBeenCalledWith(SESSION_RECOVERY_ALLOWLIST_KEY);
+    const [request, actor] = service.create.mock.calls[0];
+    expect(request).toEqual({
+      event_id: event.eventId, tc_fault_label: event.tcFaultLabel, target: { ...bot, engine },
+      session_key: event.sessionKey, delivery_key: expect.any(String),
+      diagnosis: `业务诊断：${event.businessDiagnosis}\n系统诊断：${event.systemDiagnosis}`,
+    });
+    expect(actor).toEqual({ userId: "001234", isAdmin: false });
+    expect(request).not.toHaveProperty("error_location");
+    expect(request).not.toHaveProperty("execution_level");
+  });
+
+  it.each([
+    { decision: "PASS" }, { decision: "UNRESOLVED" },
+    { handlerName: "COMPLETED" }, { handlerName: null },
+  ])("does not trigger for an ineligible diagnostic %j", async patch => {
+    const { config, service, trigger } = setup();
+    await trigger.trigger({ ...event, ...patch } as DiagnosisEvent);
+    expect(config.findByKey).not.toHaveBeenCalled();
+    expect(service.create).not.toHaveBeenCalled();
+  });
+
+  it("requires the exact Bot, Owner and environment and reloads the saved configuration", async () => {
+    const { config, service, trigger } = setup();
+    for (const patch of [{ botId: "another" }, { entityId: "1234" }, { env: "pre" }]) {
+      await trigger.trigger({ ...event, ...patch });
+    }
+    expect(service.create).not.toHaveBeenCalled();
+    await trigger.trigger(event);
+    config.findByKey.mockResolvedValueOnce({ enabled: 0, config_json: "invalid disabled content" });
+    await trigger.trigger(event);
+    config.findByKey.mockResolvedValueOnce(null);
+    await trigger.trigger(event);
+    config.findByKey.mockResolvedValueOnce({ enabled: 1, config_json: '{"allowed_bots":[]}' });
+    await trigger.trigger(event);
+    expect(service.create).toHaveBeenCalledTimes(1);
+    expect(config.findByKey).toHaveBeenCalledTimes(7);
+  });
+
+  it.each([
+    "invalid", "null", '{"allowed_bots":true}', '{"allowed_bots":[],"enabled":true}',
+    JSON.stringify({ allowed_bots: [{ ...bot, env: "*" }] }),
+    JSON.stringify({ allowed_bots: [{ ...bot, entity_id: "001234 " }] }),
+    JSON.stringify({ allowed_bots: [bot, bot] }),
+  ])("fails closed on invalid enabled configuration: %s", async config_json => {
+    const { config, service, trigger } = setup();
+    config.findByKey.mockResolvedValue({ enabled: 1, config_json });
+    await expect(trigger.trigger(event)).rejects.toMatchObject({ code: "NOT_READY" });
+    expect(service.create).not.toHaveBeenCalled();
+  });
+
+  it("preserves retryable configuration and task storage errors instead of acknowledging them", async () => {
+    const { config, service, trigger } = setup();
+    config.findByKey.mockRejectedValueOnce(new Error("configuration DB unavailable"));
+    await expect(trigger.trigger(event)).rejects.toMatchObject({ code: "NOT_READY" });
+    service.create.mockRejectedValueOnce(new Error("task storage unavailable"));
+    await expect(trigger.trigger(event)).rejects.toMatchObject({ code: "NOT_READY" });
+    await trigger.trigger(event);
+    expect(service.create).toHaveBeenCalledTimes(2);
+    expect(service.create.mock.calls[0]).toEqual(service.create.mock.calls[1]);
+  });
+
+  it("does not retry an explicitly rejected recovery request as a temporary storage failure", async () => {
+    const { service, trigger } = setup();
+    service.create.mockRejectedValueOnce(new SessionRecoveryError(409, "conflict", "request changed"));
+    await expect(trigger.trigger(event)).rejects.toMatchObject({ code: "EVENT_CONFLICT" });
+  });
+
+  it("does not substitute a physical Session ID or Trace ID when the real session key is missing", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { service, trigger } = setup();
+    await trigger.trigger({ ...event, sessionKey: null, traceId: "trace" });
+    expect(service.create).not.toHaveBeenCalled();
+    expect(warning).toHaveBeenCalledWith("[monitoring] recovery skipped", expect.objectContaining({ eventId: event.eventId, reason: "invalid_recovery_input" }));
+  });
+
+  it("returns a retryable error only for allowed targets when the recovery service is unavailable", async () => {
+    const { config } = setup();
+    const trigger = createMonitoringRecoveryTrigger({ config, service: null });
+    await trigger.trigger({ ...event, entityId: "another-owner" });
+    await expect(trigger.trigger(event)).rejects.toMatchObject({ code: "NOT_READY" });
+  });
+});

@@ -19,6 +19,7 @@ export const botAdvancedConfigService = {
       id: item.id,
       type: item.type,
       bindingMode: item.binding_mode ?? 'plugin',
+      stage: item.stage ?? undefined,
       description: item.description,
       status: item.status,
       clientId: item.config.client_id,
@@ -34,6 +35,7 @@ export const botAdvancedConfigService = {
       includeSenderName: item.config.include_sender_name !== false,
       groupChatScope: item.config.group_chat_scope ?? undefined,
       outboundVisibility: item.config.outbound_visibility ?? undefined,
+      forwardSenderIdentity: item.config.forward_sender_identity ?? undefined,
       createdAt: item.created_at ?? undefined,
       updatedAt: item.updated_at ?? undefined,
     }));
@@ -52,6 +54,7 @@ export const botAdvancedConfigService = {
             ...common,
             group_chat_scope: input.groupChatScope ?? 'per_sender',
             outbound_visibility: input.outboundVisibility ?? 'full_transcript',
+            forward_sender_identity: input.forwardSenderIdentity ?? false,
           }
         : {
             ...common,
@@ -65,6 +68,7 @@ export const botAdvancedConfigService = {
     return botEditorController.createChannel(botId, {
       type: 'dingding',
       binding_mode: input.bindingMode,
+      ...(input.bindingMode === 'plugin' && input.stage ? { stage: input.stage } : {}),
       description: input.description || null,
       config,
     });
@@ -83,6 +87,7 @@ export const botAdvancedConfigService = {
             ...common,
             group_chat_scope: input.groupChatScope ?? 'per_sender',
             outbound_visibility: input.outboundVisibility ?? 'full_transcript',
+            forward_sender_identity: input.forwardSenderIdentity ?? false,
           }
         : {
             ...common,

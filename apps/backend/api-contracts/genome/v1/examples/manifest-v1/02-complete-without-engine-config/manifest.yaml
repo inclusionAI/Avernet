@@ -1,0 +1,67 @@
+schema_version: 1
+
+sources:
+  content:
+    protocol: git
+    url: https://code.example-corp.com/team/content.git
+    ref: v1.2.0
+    auth: corp-git-content
+  order-lookup:
+    protocol: oss
+    bucket: artifacts
+    key: tools/skills/order-lookup-1.4.0.zip
+    auth: oss-artifacts
+  shopctl:
+    protocol: oss
+    bucket: artifacts
+    key: tools/shopctl/2.3.0/shopctl-linux-amd64
+    auth: oss-artifacts
+
+manifest:
+  identity:
+    - type: SOUL.md
+      from: content
+      subpath: bots/support-agent/soul.md
+    - type: RULES.md
+      from: content
+      subpath: kb/service-rules.md
+    - type: SAFETY.md
+      content: |
+        # 安全边界
+        不承诺退款金额；涉及资损问题一律转人工。
+
+  resources:
+    - path: data/faq.csv
+      from: content
+      subpath: kb/faq.csv
+      on_fetch_failure: keep_last
+    - path: data/kb/
+      from: content
+      subpath: kb/
+      on_fetch_failure: keep_last
+
+  skills:
+    - name: quality-check
+      from: content
+      subpath: skills/quality-check/
+    - name: order-lookup
+      from: order-lookup
+      digest: "sha256:896e1cb125db379d13790e045213f16bb8c936b29ff0b0d6ca33b1ea037c359f"
+      unpack: zip
+
+  cli_tools:
+    - name: shopctl
+      from: shopctl
+      digest: "sha256:d89a79825b1468374f2d0a5cdc5c856694730e6355624d0b2f925db5202a68a0"
+      version: "2.3.0"
+
+  mcp:
+    - server_code: mcp.ant.homistudio.meetmcp
+
+script:
+  body: |
+    #!/bin/bash
+    set -euo pipefail
+    # 仅沙箱网络可达的内部服务，平台侧 fetch 够不到，只能在容器内取
+    curl -fsSL http://inner-ops.example.com/whitelist/today.json \
+      -o "$HOME/workspace/data/whitelist.json"

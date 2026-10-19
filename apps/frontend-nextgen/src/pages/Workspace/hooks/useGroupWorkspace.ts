@@ -6,6 +6,7 @@ import { shouldMuteNonAuthedToast } from '@/utils/loginToastGate';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import type { UseGroupWorkspaceResult } from './useGroupWorkspace.types';
+import { useGroupWorkspaceMutations } from './useGroupWorkspaceMutations';
 import { useSelectedGroupDetail } from './useSelectedGroupDetail';
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -58,6 +59,13 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
   const [loadedListIdentity, setLoadedListIdentity] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSearchRef = useRef('');
+  // 成员补拉缓存 / 选中群详情重载 / 解散群：下沉至 useGroupWorkspaceMutations（控本体体积）。
+  const { seedFromCache, enrichParticipants, reloadSelectedGroup, dissolveGroup } = useGroupWorkspaceMutations({
+    sessionGroups,
+    setSessionGroups,
+    activeIdentityId,
+    selectedGroupId,
+  });
 
   const resolveIdentity = useCallback(
     (identityId: string | null): IdentityView | null => {
@@ -74,6 +82,9 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
     [identities],
   );
 
+  // 群行头像堆成员补拉（fire-and-forget）：对列表未回传 participants 的群按详情逐个拉取，
+  // 逐群合并进 sessionGroups（不整替整行，避免覆盖列表的 membership 等视图字段）。
+  // 失败也写入缓存占位（空名单），防止逐字防抖搜索对同一失败群反复请求；页面重挂载即重置。
   const loadGroups = useCallback(
     async (identityId: string | null, q?: string) => {
       const identity = resolveIdentity(identityId);
@@ -92,12 +103,16 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
           : await groupService.loadGroups(identity, { q, membership });
         if (useWorkspaceStore.getState().activeIdentityId !== identityId) return;
         if (res.ok) {
-          setSessionGroups(res.data);
+          // 先用缓存过的成员名单给新列表播种（列表接口不回传 participants），再对仍未有
+          // 成员的群异步补拉详情——防抖搜索/身份切换的列次同一群不再重复请求。
+          const seeded = seedFromCache(res.data);
+          setSessionGroups(seeded);
           // 仅当这次列表仍属于当前活动身份时才记成“已为该身份加载完成”,
           // 避免身份切换后旧身份的残留响应把 loadedListIdentity 写成旧值。
           if (useWorkspaceStore.getState().activeIdentityId === identityId) {
             setLoadedListIdentity(identityId);
           }
+          void enrichParticipants(seeded, identity.kind === 'bot' ? identity.id : undefined);
         } else {
           if (pinnedGroup) setSessionGroups([]);
           setGroupsError(res.error.friendlyMessage);
@@ -109,7 +124,7 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
         useWorkspaceStore.getState().setIsGroupsLoading(false);
       }
     },
-    [resolveIdentity, membership, pinnedGroup],
+    [resolveIdentity, membership, pinnedGroup, seedFromCache, enrichParticipants],
   );
 
   // 身份变化或成员视角切换 → 重载列表并清空上轮搜索基线，避免防抖 effect 误判为新搜索。
@@ -179,46 +194,6 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
   const retryGroups = useCallback(async () => {
     await loadGroups(activeIdentityId, lastSearchRef.current || undefined);
   }, [activeIdentityId, loadGroups, pinnedGroup]);
-
-  const reloadSelectedGroup = useCallback(
-    async (groupId?: string) => {
-      const gid = groupId ?? selectedGroupId;
-      if (!gid) return;
-      const res = await groupService.loadGroupDetailOrBcs(gid, activeIdentityId ?? undefined);
-      if (!res.ok) {
-        toast.error(res.error.friendlyMessage);
-        return;
-      }
-      setSessionGroups((current) =>
-        current.some((g) => g.groupId === gid)
-          ? current.map((g) => (g.groupId === gid ? res.data : g))
-          : [res.data, ...current],
-      );
-    },
-    [activeIdentityId, selectedGroupId],
-  );
-
-  const dissolveGroup = useCallback(
-    async (groupId: string) => {
-      const group = sessionGroups.find((g) => g.groupId === groupId) ?? null;
-      const permission = groupService.canDissolveGroup(group, useWorkspaceStore.getState().activeIdentityId);
-      if (!permission.allowed) {
-        toast.info(permission.disabledReason ?? '当前无权解散该协作群。');
-        return;
-      }
-      const res = await groupService.dissolveGroup(groupId);
-      if (!res.ok) {
-        toast.error(res.error.friendlyMessage);
-        return;
-      }
-      toast.success('协作群已解散');
-      setSessionGroups((current) => current.filter((g) => g.groupId !== groupId));
-      if (useWorkspaceStore.getState().selectedGroupId === groupId) {
-        useWorkspaceStore.getState().selectGroup(null);
-      }
-    },
-    [sessionGroups],
-  );
 
   return {
     identities,

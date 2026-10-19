@@ -648,6 +648,8 @@ def service_skills_manifest_env(
     contract = manifest.get("layout_contract_version")
     if contract:
         env["AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION"] = str(contract)
+    if manifest["active_layout"] == SkillLayout.POOL.value:
+        env["AGENTCLAW_SKILLS_LAYOUT_PHASE"] = SkillLayoutPhase.POOL_ACTIVE.value
     return env
 
 

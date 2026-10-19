@@ -62,3 +62,30 @@ def test_workspace_root_accepts_relative_path():
     with patch.dict(os.environ, {"OPENCLAW_WORKSPACE_DIR": "relative/workspace"}):
         result = workspace_root()
     assert result == Path("relative/workspace")
+
+
+def test_openclaw_runtime_layout_context_uses_workspace_parent(monkeypatch):
+    """per-bot OPENCLAW_WORKSPACE_DIR → Skills 布局的 runtime home 是其父目录。"""
+    from engine.community.plugin_api.workspace_root import (
+        openclaw_runtime_layout_context,
+    )
+
+    workspace = Path("/tmp/per-bot/openclaw/workspace")
+    monkeypatch.setenv("OPENCLAW_WORKSPACE_DIR", str(workspace))
+
+    context = openclaw_runtime_layout_context()
+
+    assert context.home == workspace.parent
+    assert context.openclaw_root == workspace.parent
+
+
+def test_openclaw_runtime_layout_context_keeps_default_when_workspace_unset(monkeypatch):
+    """无 per-bot workspace 时保持既有部署默认，而不是读取宿主 HOME。"""
+    from engine.community.core.skills.layout_planner import RuntimeLayoutContext
+    from engine.community.plugin_api.workspace_root import (
+        openclaw_runtime_layout_context,
+    )
+
+    monkeypatch.delenv("OPENCLAW_WORKSPACE_DIR", raising=False)
+
+    assert openclaw_runtime_layout_context() == RuntimeLayoutContext()

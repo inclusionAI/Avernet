@@ -62,6 +62,43 @@ class TestOpenClawEngineMetadata:
 
 
 class TestOpenClawEngineWiring:
+    @pytest.mark.asyncio
+    async def test_local_skill_package_uses_per_bot_runtime_root(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
+    ) -> None:
+        """包上传不能回退到部署默认的 /home/admin/.openclaw。"""
+        import io
+        import zipfile
+
+        from engine.community.core.skills.models import (
+            LocalSkillPackageApplyRequest,
+            LocalSkillPackageLayout,
+        )
+
+        workspace = tmp_path / "openclaw" / "workspace"
+        monkeypatch.setenv("OPENCLAW_WORKSPACE_DIR", str(workspace))
+        package = io.BytesIO()
+        with zipfile.ZipFile(package, "w") as archive:
+            archive.writestr(
+                "SKILL.md",
+                "name: bbs-browse\ndescription: Browse BBS topics\n",
+            )
+
+        engine = OpenClawEngine(client=_fake_client())
+        result = await engine.skills.apply_local_package(
+            LocalSkillPackageApplyRequest(
+                skill_name="bbs-browse",
+                layout=LocalSkillPackageLayout.LEGACY,
+                package=package.getvalue(),
+            )
+        )
+
+        target = workspace / "skills/skills-local/bbs-browse"
+        assert result.target_path == str(target)
+        assert (target / "SKILL.md").is_file()
+
     def test_constructs_adapters(self):
         # Post-F2: the engine is assembled from the core/adapters/openclaw ACL,
         # not the legacy in-tree services.

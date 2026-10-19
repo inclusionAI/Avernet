@@ -2,6 +2,12 @@
 
 ## Provides
 
+- `GET /openapi/v1/collaboration/channels/conversations/by-session` reuses the
+  Session V1 application facade's Human/owned-Bot read authorization before
+  querying Channel mappings. It returns a V1 envelope with all mappings and
+  no IM user identity or provider configuration. Historical fallback remains
+  owned by ChannelService; app-only callers cannot read the mappings.
+
 - Shared V1 normal-Group responses include `driver_bot_name` on both `/groups`
   and `/public-groups` summaries, and `driver_bot_owner` / `driver_bot_owner_name`
   on detail responses (create/get/update). Missing values serialize as JSON

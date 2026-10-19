@@ -217,7 +217,9 @@ interface CliOptions {
   botName: string;
 }
 
-function parseArgs(args: string[]): CliOptions {
+export function parseArgs(args: string[]): CliOptions {
+  // Newer DSH/pnpm exec forwards its separator to the executable.
+  if (args[0] === '--') args = args.slice(1);
   const values = new Map<string, string>();
   for (let index = 0; index < args.length; index += 1) {
     const option = args[index];

@@ -1,4 +1,6 @@
-import { Button, Empty, IconButton, Skeleton } from '@/components/ui';
+import { ChatMessageSkeleton } from '@/components/Workspace/ChatPanel/ChatMessageSkeleton';
+import { PrimaryNavToggle } from '@/components/Workspace/PrimaryNav';
+import { Button, Empty, IconButton } from '@/components/ui';
 import { List, MessageSquare, Plus } from 'lucide-react';
 import type { ConversationSessionPlaceholderModel } from '../hooks/useConversationSessionPlaceholder';
 
@@ -11,14 +13,18 @@ export function ConversationSessionPlaceholder({
 }) {
   return (
     <section aria-label={`${model.botName} 的会话`} className="flex min-w-0 flex-1 flex-col bg-background">
-      <div className="ml-12 mt-2 self-start lg:hidden">
+      {/* 占位顶行（加载/失败/空态也保留 <lg 顶行双入口）：壳内一级导航入口与页头同构，
+          置于「打开会话列表」左侧——无页头阶段不回退到壳的独立条带，避免阶段切换条带闪跳；
+          壳外/精简路由下导航入口自动为 null，仅剩会话列表入口。 */}
+      <div className="ml-12 mt-2 flex items-center gap-1 self-start lg:hidden">
+        <PrimaryNavToggle />
         <IconButton label="打开会话列表" icon={<List className="h-4 w-4" />} onClick={onOpenSessionList} />
       </div>
       {model.status === 'loading' ? (
-        <div role="status" aria-label="加载会话列表" className="space-y-4 p-6">
-          <Skeleton.Block className="h-10 w-1/3" />
-          <Skeleton.Block className="h-24 w-2/3" />
-        </div>
+        // 展开 Bot 后会话列表在途：借用 ChatMessageSkeleton 的「誊写稿」占位——
+        // 主导走向是自动选中会话后 ChatPanel 仍以同一骨架装载消息，全程同一画布语言
+        // （expand-selection spec 的零跳变延伸）；本段仅短暂在途，读屏话术覆写为「加载会话列表」。
+        <ChatMessageSkeleton ariaLabel="加载会话列表" />
       ) : (
         <div className="flex flex-1 items-center justify-center">
           <Empty

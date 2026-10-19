@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { VersionComparison } from './VersionComparison'
 
 type TrendPoint = {
   date: string
@@ -27,6 +28,7 @@ export function SuccessTrendCard({
   showRangeSelector?: boolean
   embedded?: boolean
 }) {
+  const [view, setView] = useState<'trend' | 'versions'>(() => new URLSearchParams(window.location.search).get('view') === 'version-comparison' ? 'versions' : 'trend')
   const [localDays, setLocalDays] = useState<7 | 30>(7)
   const days = controlledDays ?? localDays
   const [data, setData] = useState<TrendPoint[]>([])
@@ -35,6 +37,7 @@ export function SuccessTrendCard({
   const [requestSeq, setRequestSeq] = useState(0)
 
   useEffect(() => {
+    if (view !== 'trend') return
     let cancelled = false
     const fetchTrend = async () => {
       setLoading(true)
@@ -55,7 +58,7 @@ export function SuccessTrendCard({
     }
     fetchTrend()
     return () => { cancelled = true }
-  }, [workflowId, days, requestSeq])
+  }, [workflowId, days, requestSeq, view])
 
   const changeDays = (next: 7 | 30) => {
     if (onDaysChange) onDaysChange(next)
@@ -74,10 +77,13 @@ export function SuccessTrendCard({
     <div className={`${embedded ? '' : 'rounded-xl border border-slate-200'} bg-white px-4 py-3`}>
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-baseline gap-2">
-          <span className="text-sm font-semibold text-slate-900">成功率趋势</span>
-          {!compact && <span className={`text-2xl font-bold ${currentSuccessRate === '—' ? 'text-gray-300' : Number(currentSuccessRate.replace('%', '')) >= 80 ? 'text-emerald-600' : Number(currentSuccessRate.replace('%', '')) >= 50 ? 'text-amber-600' : 'text-rose-600'}`}>{currentSuccessRate}</span>}
+          <div className="flex gap-2 text-sm">
+            <button type="button" aria-pressed={view === 'trend'} onClick={() => setView('trend')} className={view === 'trend' ? 'font-semibold text-slate-900' : 'text-slate-400'}>成功率趋势</button>
+            <button type="button" aria-pressed={view === 'versions'} onClick={() => setView('versions')} className={view === 'versions' ? 'font-semibold text-slate-900' : 'text-slate-400'}>版本对比</button>
+          </div>
+          {view === 'trend' && !compact && <span className={`text-2xl font-bold ${currentSuccessRate === '—' ? 'text-gray-300' : Number(currentSuccessRate.replace('%', '')) >= 80 ? 'text-emerald-600' : Number(currentSuccessRate.replace('%', '')) >= 50 ? 'text-amber-600' : 'text-rose-600'}`}>{currentSuccessRate}</span>}
         </div>
-        {showRangeSelector && <div className="flex items-center gap-1">
+        {view === 'trend' && showRangeSelector && <div className="flex items-center gap-1">
           {[7, 30].map((d) => (
             <button
               key={d}
@@ -90,6 +96,7 @@ export function SuccessTrendCard({
         </div>}
       </div>
 
+      {view === 'versions' ? <VersionComparison workflowId={workflowId} /> : <>
       {/* 折线图 */}
       {loading ? (
         <div className="h-[60px] flex items-center justify-center">
@@ -182,10 +189,11 @@ export function SuccessTrendCard({
         <span>{currentDetail}</span>
         {change !== null && change !== 0 && (
           <span className={change > 0 ? 'text-green-500' : 'text-red-500'}>
-            {change > 0 ? '↑' : '↓'} {Math.abs(change).toFixed(1)}% 比前日
+            {change > 0 ? '↑' : '↓'} {Math.abs(change).toFixed(1)} 个百分点 比前日
           </span>
         )}
       </div>
+      </>}
     </div>
   )
 }

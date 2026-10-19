@@ -250,6 +250,10 @@ user_config:
     # checks (admission.py USER_DELEGATED) — so it inherits the wide rule
     # above, exactly like the other operations that admit a machine caller.
 
+    # Group creation classifies known Bots before collaborator access exists.
+    "GET /openapi/v1/bots/{bot_id}/classification":
+      user: required
+
     "GET /openapi/v1/bots/{bot_id}/authorized-apps":
       user: required
     "DELETE /openapi/v1/bots/{bot_id}/authorized-apps/{app_id}":
@@ -439,6 +443,16 @@ user_config:
           path: schemas/bots.openapi.json
           refresh_seconds: 300
       bots:
+        server: backend
+        schema:
+          source: file
+          path: schemas/bots.openapi.json
+          refresh_seconds: 300
+      # The backend's agent-swarm surface: submit/poll/cancel SSE runs under
+      # /openapi/v1/agentswarm (additive-only within v1; a breaking change
+      # ships as /openapi/v2/agentswarm). Forwards verbatim — the gateway only
+      # signs; the backend owns admission, tenant derivation and audit.
+      agentswarm:
         server: backend
         schema:
           source: file

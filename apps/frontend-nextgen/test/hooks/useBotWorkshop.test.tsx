@@ -253,6 +253,66 @@ it('点击健康检查时导航到独立健康检查页面', async () => {
   await waitFor(() => expect(history.push).toHaveBeenCalledWith('/bot-workshop/health-check?id=bot-1'));
 });
 
+it('显式协作者可进入任意引擎的 Bot 会话', () => {
+  mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined, userId: 'u2' });
+  mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+  useWorkspaceStore.setState({ activeIdentityId: 'u2' });
+  const { result } = renderHook(() => useBotWorkshop());
+
+  const collaboratorBot = {
+    id: 'team-openclaw-bot',
+    ownerId: 'owner-1',
+    runtime: { isAgentCodingBot: false },
+    actions: ['view', 'chat', 'edit'],
+  } as unknown as BotDomain;
+  const spaceMemberBot = {
+    id: 'space-member-openclaw-bot',
+    ownerId: 'owner-1',
+    runtime: { isAgentCodingBot: false },
+    actions: ['view', 'chat'],
+  } as unknown as BotDomain;
+
+  expect(result.current.canOpenConversation(collaboratorBot)).toBe(true);
+  expect(result.current.canOpenConversation(spaceMemberBot)).toBe(false);
+});
+
+it('非协作者不能从工坊进入普通引擎 Bot 会话', () => {
+  mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined, userId: 'u2' });
+  mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+  useWorkspaceStore.setState({ activeIdentityId: 'u2' });
+  const { result } = renderHook(() => useBotWorkshop());
+
+  const openclawSpaceMemberBot = {
+    id: 'openclaw-bot',
+    ownerId: 'owner-1',
+    runtime: { isAgentCodingBot: false },
+    actions: ['view', 'chat'],
+  } as unknown as BotDomain;
+
+  expect(result.current.canOpenConversation(openclawSpaceMemberBot)).toBe(false);
+});
+
+it('无 Owner 匹配且后端未声明 chat 时不开放会话', () => {
+  mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined, userId: 'u2' });
+  mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+  useWorkspaceStore.setState({ activeIdentityId: 'u2' });
+  const { result } = renderHook(() => useBotWorkshop());
+
+  const ownerBot = {
+    id: 'owner-bot',
+    ownerId: 'u2',
+    actions: ['view'],
+  } as unknown as BotDomain;
+  const restrictedBot = {
+    id: 'restricted-bot',
+    ownerId: 'owner-1',
+    actions: ['view'],
+  } as unknown as BotDomain;
+
+  expect(result.current.canOpenConversation(ownerBot)).toBe(true);
+  expect(result.current.canOpenConversation(restrictedBot)).toBe(false);
+});
+
 it('Coding Bot 点击去使用时跳转到 Coding Chat，并携带当前 Bot ID', () => {
   mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
   mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
@@ -269,9 +329,7 @@ it('Coding Bot 点击去使用时跳转到 Coding Chat，并携带当前 Bot ID'
     result.current.openConversation(bot);
   });
 
-  expect(history.push).toHaveBeenCalledWith(
-    '/coding/coding-chat?botId=coding-bot%3A2088&space_id=73&space_name=%E6%B5%8B%E8%AF%95%E7%A9%BA%E9%97%B4',
-  );
+  expect(history.push).toHaveBeenCalledWith('/coding/coding-chat?botId=coding-bot');
 });
 
 it('点击对话时跳转到用户单聊并展开对应 Bot', () => {

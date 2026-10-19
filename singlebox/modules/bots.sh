@@ -844,10 +844,7 @@ bots_dynamic_write_openclaw_config() {
             ]
           },
           messages: {
-            ackReactionScope: "group-mentions",
-            groupChat: {
-              visibleReplies: "automatic"
-            }
+            ackReactionScope: "group-mentions"
           },
           commands: {
             native: "auto",

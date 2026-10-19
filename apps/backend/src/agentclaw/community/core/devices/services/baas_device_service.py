@@ -18,6 +18,9 @@ from agentclaw.community.core.devices.models import (
 )
 from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+from agentclaw.community.core.devices.protocols import LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY
+from agentclaw.community.core.devices.startup_identity import resolve_startup_identity
 from agentclaw.community.core.devices.services.baas_device_lifecycle_executor import (
     BaasDeviceLifecycleError,
     BaasDeviceLifecycleExecutor,
@@ -50,6 +53,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.devices.protocols import (
         BotQueryProtocol,
         BotSyncProtocol,
+        LayoutInitializationConfirmationProtocol,
         McpSyncProtocol,
     )
     from agentclaw.community.core.service_bot.services.baas_service import BaasService
@@ -110,6 +114,7 @@ class BaasDeviceService(DeviceService):
         template_service: TemplateConfigReader | None = None,
         secret_resolver: SecretResolver | None = None,
         theta_master_key_secret: str = "",
+        layout_confirmation: "LayoutInitializationConfirmationProtocol",
     ):
         super().__init__(
             repository=repository,
@@ -120,6 +125,7 @@ class BaasDeviceService(DeviceService):
             mcp_sync=mcp_sync,
             vault=vault,
             task_queue_service=task_queue_service,
+            layout_confirmation=layout_confirmation,
         )
         self._baas_service = baas_service
         self._header_updater = BaasDeviceHeaderUpdater(
@@ -181,8 +187,8 @@ class BaasDeviceService(DeviceService):
     ) -> AllocatedDevice:
         """Create a BaaS-managed device via ``POST /api/v1/bots`` and
         ``approve_publish``. Returns an ``AllocatedDevice`` whose
-        ``device_props`` carry ``bot_uuid`` + ``publish_id`` so
-        ``_start_service`` (polling) and ``_do_release`` (destroy) can use them.
+        ``device_props`` carry ``bot_uuid`` + ``publish_id`` so the durable
+        create-publish poll/init tasks and ``_do_release`` (destroy) can use them.
         """
         bot_name = bolt_id  # parent uses bot_id for naming; bot_name passed in via extra_envs not available here
         return self._allocate_via_baas(
@@ -274,6 +280,32 @@ class BaasDeviceService(DeviceService):
             owner_id=owner_id,
             device_props=device_props,
         )
+
+    @override
+    def _after_active_binding_recovered(self, *, record: DeviceBindingRecord) -> None:
+        """Re-deliver only the current Pool callback, never repeat container init."""
+        if not self._binding_declares_pool(record):
+            return
+        if record.device_props["envs"].get("AGENTCLAW_SKILLS_LAYOUT_PHASE") != "pool_initializing":
+            return
+        identity = resolve_startup_identity(record.device_props)
+        if identity is None:
+            raise BaasDeviceServiceError("missing Skills Pool recovery startup identity")
+        if record.device_props.get(LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY) == identity:
+            return
+        ok, message = baas_publish_lifecycle.dispatch_pool_layout_confirmation(
+            binding=record,
+            startup_identity=identity,
+            dispatch_watchdog=self._container_init().dispatch_watchdog,
+        )
+        if not ok:
+            raise BaasDeviceServiceError(message)
+
+    @override
+    def retry_creation_confirmation(self, *, binding_id: int) -> None:
+        record = self.get_device(binding_id=binding_id)
+        if record.status == DeviceBindingStatus.ACTIVE.value:
+            self._after_active_binding_recovered(record=record)
 
     def _allocate_via_baas(
         self,
@@ -413,6 +445,7 @@ class BaasDeviceService(DeviceService):
             device_provider=BAAS_DEVICE_PROVIDER,
             device_props={
                 "bot_uuid": baas_result.bot_uuid,
+                "client_id": baas_result.bot_uuid,
                 "local_device_id": device_id,
                 "publish_id": baas_result.publish_id,
                 "device_from": "baas",
@@ -477,31 +510,6 @@ class BaasDeviceService(DeviceService):
             baas_service=self._baas_service,
             device=device,
             shell_cmd=shell_cmd,
-        )
-
-    def _start_service(
-        self,
-        *,
-        device: AllocatedDevice,
-        nas_mappings: list[NasMappingInfo] | None = None,
-        engine: str = DEFAULT_ENGINE_TYPE,
-        bot_type: str = "",
-        bot_id: str | None = None,
-        owner_id: str | None = None,
-        admins: list[str] | None = None,
-        codefuse_token: str | None = None,
-    ) -> tuple[bool, str]:
-        return baas_publish_lifecycle.run_start_service_polling(
-            baas_service=self._baas_service,
-            device=device,
-            run_container_init=self._run_container_init,
-            report_device_alive=self.report_device_alive,
-            engine=engine,
-            bot_type=bot_type,
-            bot_id=bot_id,
-            owner_id=owner_id,
-            admins=admins,
-            codefuse_token=codefuse_token,
         )
 
     def poll_publish_once(self, *, publish_id: int) -> str | None:
@@ -621,6 +629,7 @@ class BaasDeviceService(DeviceService):
                 bot_id=resolved_bot_id,
                 owner_id=resolved_owner_id,
                 callback_token=callback_token,
+                startup_identity=str(publish_id),
                 admins=admins,
                 codefuse_token=codefuse_token,
             )
@@ -663,6 +672,7 @@ class BaasDeviceService(DeviceService):
         bot_id: str | None,
         owner_id: str | None,
         callback_token: str,
+        startup_identity: str,
         admins: list[str] | None,
         codefuse_token: str | None = None,
     ) -> None:
@@ -676,6 +686,7 @@ class BaasDeviceService(DeviceService):
             bot_id=bot_id,
             owner_id=owner_id,
             callback_token=callback_token,
+            startup_identity=startup_identity,
             admins=admins,
             codefuse_token=codefuse_token,
         )
@@ -692,6 +703,27 @@ class BaasDeviceService(DeviceService):
 
     def _start_baas_sandbox_service(self, **kwargs) -> None:
         self._container_init()._start_baas_sandbox_service(**kwargs)
+
+    def dispatch_restart_layout_confirmation(
+        self,
+        *,
+        binding: DeviceBindingRecord,
+        publish_id: int,
+    ) -> tuple[bool, str]:
+        """Dispatch an instance-bound status callback for a Pool restart."""
+
+        props = binding.device_props or {}
+        envs = props.get("envs")
+        if not isinstance(envs, dict) or envs.get("AGENTCLAW_SKILLS_LAYOUT") != "pool":
+            return True, "layout confirmation not required"
+        if str(props.get("restart_publish_id") or "") != str(publish_id):
+            return False, "stale Skills Pool restart publish identity"
+        ok, message = baas_publish_lifecycle.dispatch_pool_layout_confirmation(
+            binding=binding,
+            startup_identity=str(publish_id),
+            dispatch_watchdog=self._container_init().dispatch_watchdog,
+        )
+        return (True, "Skills Pool restart callback dispatched") if ok else (ok, message)
 
     @staticmethod
     def _deserialize_symbol(symbol: str | None) -> list:

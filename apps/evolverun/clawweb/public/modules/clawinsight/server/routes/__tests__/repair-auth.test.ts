@@ -1,12 +1,12 @@
 import { once } from "node:events";
 import express from "express";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RepairTaskService } from "../../services/repair/repair-runtime.js";
-import { RepairError } from "../../services/repair/errors.js";
+import type { RepairTaskService } from "../../services/repair/full-repair/repair-runtime.js";
+import { AgentToolError as RepairError } from "../../services/repair/common/agent-tools/errors.js";
 import {
   type VerifiedRequestActor,
-} from "../../services/repair/request-actor.js";
-import type { RepairWorkloadVerifier } from "../../services/repair/workload-verifier.js";
+} from "../../services/repair/common/request-actor.js";
+import type { RepairWorkloadVerifier } from "../../services/repair/full-repair/workload-verifier.js";
 import { createRepairRouter } from "../repair.js";
 
 let server: ReturnType<express.Application["listen"]> | null;

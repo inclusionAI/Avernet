@@ -2,6 +2,10 @@
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from .authorization_rules_retiring import RETIRING_AUTHORIZATION
+from .authorization_rules_task import (
+    TASK_BBS_AUTHORIZATION,
+    TASK_PUBLIC_AUTHORIZATION,
+)
 from .models_authorization import (
     EDIT_LOCK,
     INHERITED as INHERITED,
@@ -19,6 +23,9 @@ from .rule_shape_audit import assert_member_writes_name_explicit_origin
 #: No row is :class:`Check` yet: this change builds the seam, and moving each
 #: group onto it is its own session (``spec.md`` *Decisions* 4).
 AUTHORIZATION: dict[tuple[str, str], Authorization] = {
+    ("GET", "/openapi/v1/bots/{bot_id}/classification"): NoCheck(
+        "authenticated minimal classification before establishing Bot collaboration"
+    ),
     ("GET", "/openapi/v1/bots/{bot_id}/avatar"): OWNER_SCOPED,
     ("PUT", "/openapi/v1/bots/{bot_id}/avatar"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/links"): OWNER_SCOPED,
@@ -46,7 +53,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/activate"): Check(PermissionLevel.OWNER),
     ("POST", "/openapi/v1/bots/{bot_id}/recycle"): Check(PermissionLevel.OWNER),
     ("GET", "/openapi/v1/bots/{bot_id}/approvals/mode"): Check(PermissionLevel.MEMBER),
-    ("PUT", "/openapi/v1/bots/{bot_id}/approvals/mode"): Check(PermissionLevel.MEMBER, explicit=True),
+    ("PUT", "/openapi/v1/bots/{bot_id}/approvals/mode"): Check(
+        PermissionLevel.MEMBER, explicit=True
+    ),
     ("GET", "/openapi/v1/bots/{bot_id}/approvals/modes"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/auth-status"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/authorized-apps"): ServiceChecked(
@@ -120,6 +129,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     # this set. Reading what a bot has is part of working on it; installing an
     # executable on someone's bot is an ADMIN act. No EDIT_LOCK — like the
     # manifest beside them, these are not drafted.
+    ("GET", "/openapi/v1/bots/{bot_id}/engine-version"): Check(PermissionLevel.MEMBER, explicit=True),
     ("GET", "/openapi/v1/bots/{bot_id}/cli-tools"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/cli-tools"): Check(PermissionLevel.ADMIN),
     (
@@ -181,15 +191,21 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"): Check(
         PermissionLevel.MEMBER, EDIT_LOCK, explicit=True
     ),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(PermissionLevel.MEMBER, explicit=True),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(
+        PermissionLevel.MEMBER, explicit=True
+    ),
     ("GET", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(PermissionLevel.MEMBER, explicit=True),
+    ("POST", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(
+        PermissionLevel.MEMBER, explicit=True
+    ),
     ("POST", "/openapi/v1/bots/{bot_id}/edit-lock/steal"): Check(
         PermissionLevel.MEMBER, explicit=True
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/editors"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/editors"): Check(PermissionLevel.ADMIN),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/editors/me"): Check(PermissionLevel.MEMBER, explicit=True),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/editors/me"): Check(
+        PermissionLevel.MEMBER, explicit=True
+    ),
     ("DELETE", "/openapi/v1/bots/{bot_id}/editors/{editor_id}"): Check(
         PermissionLevel.ADMIN
     ),
@@ -210,7 +226,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/engine/config"): OWNER_SCOPED,
     ("PUT", "/openapi/v1/bots/{bot_id}/engine/config"): OWNER_SCOPED,
-    ("POST", "/openapi/v1/bots/{bot_id}/engine/restart"): Check(PermissionLevel.MEMBER, explicit=True),
+    ("POST", "/openapi/v1/bots/{bot_id}/engine/restart"): Check(
+        PermissionLevel.MEMBER, explicit=True
+    ),
     ("GET", "/openapi/v1/bots/{bot_id}/engine/status"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/harness/apply"): ServiceChecked(
         PermissionLevel.ADMIN, "…openapi_v1.harness.router"
@@ -292,6 +310,11 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("PATCH", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type"): Check(
         PermissionLevel.OWNER, EDIT_LOCK
     ),
+    ("GET", "/openapi/v1/bots/{bot_id}/clis"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/clis"): Check(PermissionLevel.OWNER, EDIT_LOCK),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/clis/{cli_code}"): Check(
+        PermissionLevel.OWNER, EDIT_LOCK
+    ),
     ("GET", "/openapi/v1/bots/{bot_id}/models"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/models/{model_id:path}"): Check(
         PermissionLevel.MEMBER
@@ -302,7 +325,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/render-screens"): NoCheck(
         "share and group viewers must render panels without an Editor relation"
     ),
-    ("POST", "/openapi/v1/bots/{bot_id}/render-screens"): Check(PermissionLevel.MEMBER, explicit=True),
+    ("POST", "/openapi/v1/bots/{bot_id}/render-screens"): Check(
+        PermissionLevel.MEMBER, explicit=True
+    ),
     ("DELETE", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"): Check(
         PermissionLevel.MEMBER, explicit=True
     ),
@@ -499,6 +524,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"): Check(
         PermissionLevel.MEMBER
     ),
+    ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/security-observations"): Check(
+        PermissionLevel.MEMBER
+    ),
     ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate"): Check(
         PermissionLevel.MEMBER, explicit=True
     ),
@@ -620,6 +648,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         "tenant-identical marketplace"
     ),
     ("POST", "/openapi/v1/bots/market/skills"): NoCheck("tenant-identical marketplace"),
+    ("GET", "/openapi/v1/bots/market/clis"): NoCheck("tenant-identical marketplace"),
     ("GET", "/openapi/v1/bots/mcp/servers"): NoCheck(
         "tenant-identical MCP catalogue and per-caller config"
     ),
@@ -816,7 +845,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     (
         "GET",
         "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-approval-policy",
-    ): NoCheck("Current Skill Owner Grant, adjudicated by the Skill service"),
+    ): NoCheck("Active Team Space membership, adjudicated by the Skill service"),
     (
         "PUT",
         "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-approval-policy",
@@ -898,35 +927,13 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/work-orders/{work_order_id}/reject"): NoCheck(
         "the named user's own work orders and notifications"
     ),
-    # ── Task public surface (execute/dashboard/list + grant/revoke stateless relay; mounted via the gateway
-    # ── `collaboration-tasks` domain → backend). Tasks address no bot, so the
-    # ── bot-level `Check` does not apply; the caller identity is resolved by
-    # ── the gateway spanner + `_PUBLIC_AUTH`; `list` uses caller-selected
-    # ── user_id only as a task-record filter. `NoCheck` is the settled mode here, not a
-    # ── placeholder — see `admission.py` for the machine-caller decision.
-    ("POST", "/openapi/v1/collaboration/tasks/execute"): NoCheck(
-        "a task, not a bot; the submitter is the task owner"
-    ),
-    ("GET", "/openapi/v1/collaboration/tasks/dashboard"): NoCheck(
-        "a task, not a bot; read-only task graph by task_id"
-    ),
-    ("GET", "/openapi/v1/collaboration/tasks/list"): NoCheck(
-        "a task, not a bot; filters records by the named user"
-    ),
-    ("GET", "/openapi/v1/collaboration/tasks/bbs/list"): NoCheck(
-        "a task, not a bot; paged read of BBS relay tasks"
-    ),
-    ("POST", "/openapi/v1/collaboration/tasks/grant"): NoCheck(
-        "a stateless relay to secbaas; the human Cookie/Referer authorizes the grant, not a bot permission"
-    ),
-    ("POST", "/openapi/v1/collaboration/tasks/revoke"): NoCheck(
-        "a stateless relay to secbaas; the human Cookie/Referer authorizes the revoke, not a bot permission"
-    ),
+    **TASK_PUBLIC_AUTHORIZATION,
     # ── Retiring addresses in ``deprecated/``: the other half of the table,
     # a same-keyed dict unioned in unchanged — split out to keep this file
     # inside the module-size cap (Rule 9). See
     # ``authorization_rules_retiring`` for the rows.
     **RETIRING_AUTHORIZATION,
+    **TASK_BBS_AUTHORIZATION,
 }
 
 

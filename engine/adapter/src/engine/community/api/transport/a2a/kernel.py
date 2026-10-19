@@ -1,0 +1,533 @@
+"""A2A transport kernel — run lifecycle, subscription, D14 idempotency.
+
+Design: docs/superpowers/specs/2026-10-13-engine-a2a-protocol-replacement-design.md §8
+Spike reference: spike/a2a/.harness/src/kernel.py (55 tests green)
+
+Invariants:
+  1. last_seq independent of event buffer (cache_limit clears buffer, not seq)
+  2. cache_limit (count/bytes/total budget) marks explicit replay refusal;
+     delivery continues
+  3. subscribe(): lock-internal snapshot+registration (no loss window)
+  4. slow subscriber: kicked on QueueFull with termination signal
+  5. complete_run(): set state → publish terminal → finish
+  6. T1 终态单次（§8.6）：run 进终态后 cancel 胜出——后续 delta/final/
+     status/interaction 帧全部丢弃，迟到的 complete_run 不改写状态
+"""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import time
+import uuid
+from typing import Any
+
+from engine.community.api.transport.a2a import wire
+
+MAX_RUNS = 16
+MAX_EVENTS_PER_RUN = 20_000
+MAX_BYTES_PER_RUN = 16 * 1024 * 1024
+TOTAL_BUDGET_BYTES = 64 * 1024 * 1024
+SUBSCRIBER_QUEUE_SIZE = 256
+TERMINAL_TTL_SECONDS = 180
+# inject 操作级去重表上限与 TTL（超过上限先按 TTL 清理过期项）
+_INJECT_DEDUP_MAX = 10_000
+_INJECT_DEDUP_TTL_SECONDS = 1_800
+# R13-2 inject 生命周期状态
+_INJECT_IN_PROGRESS = "in_progress"
+_INJECT_ACCEPTED = "accepted"
+_INJECT_UNKNOWN = "unknown"
+
+
+def _digest(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
+class UnknownOutcomeSentinel:
+    def __repr__(self) -> str:
+        return "UNKNOWN_OUTCOME"
+
+
+class KeyConflictError(Exception):
+    pass
+
+
+class _InvalidParamError(ValueError):
+    """Boundary type violation — maps to JSON-RPC -32602."""
+
+
+class _Run:
+    __slots__ = ("run_id", "context_id", "state", "events", "bytes", "last_seq",
+                 "saw_delta", "cache_limit", "subscribers", "lock",
+                 "replay_expires_at", "idempotency_key", "request_digest",
+                 "latest_text", "native_run_id")
+
+    def __init__(self, run_id: str, context_id: str):
+        self.run_id = run_id
+        self.context_id = context_id
+        self.state = "TASK_STATE_SUBMITTED"
+        self.events: list[dict[str, Any]] = []
+        self.bytes = 0
+        self.last_seq = 0
+        self.saw_delta = False
+        self.cache_limit = False
+        self.subscribers: list[asyncio.Queue] = []
+        self.lock = asyncio.Lock()
+        self.replay_expires_at: float | None = None
+        self.idempotency_key: str | None = None
+        self.request_digest: str | None = None
+        self.native_run_id: str | None = None   # engine 的原生 runId (bridge 首帧写入)
+
+        # R12-7: content snapshot maintained independently of the replay
+        # buffer — cache_limit clears events but GetTask still answers with
+        # the latest generated text.
+        self.latest_text: str = ""
+
+
+class A2aKernel:
+    UNKNOWN_OUTCOME = UnknownOutcomeSentinel()
+
+    def __init__(self) -> None:
+        self.runs: dict[str, _Run] = {}
+        self._idem: dict[tuple[str, str], str] = {}
+        self._inject_dedup: dict[tuple[str, str], tuple[str, float]] = {}
+        # E4/H1: interactionId → rid 注册表（HITL resolve 定位 run）
+        self._interactions: dict[str, str] = {}
+        # R4-2: interaction-level pending ledger — registered but not yet resolved (the registry values in _interactions are
+        # never audited; repeat submissions/decisions are judged by this set)
+        self._resolved_interactions: set[str] = set()
+        # R6-2: per-iid pending generation — the number of times the same iid has been re-pended (after resolved).
+        # The router captures the generation before forwarding; when the RPC comes back, only the corresponding
+        # generation is cleared, preventing old replies from wiping out the new round's pending
+        self._interaction_generation: dict[str, int] = {}
+        self._context_subs: dict[str, list[asyncio.Queue]] = {}
+        self._total_bytes = 0
+        self._global_lock = asyncio.Lock()
+
+    # ── D14 atomic entry ──
+    async def open_run(self, context_id: str | None, idempotency_key: str,
+                       mode: str, request_digest: str | None = None
+                       ) -> tuple[str, bool] | UnknownOutcomeSentinel:
+        # R12-8: unhashable wire values (list/dict messageId or contextId)
+        # would blow up as TypeError deep inside the idem dict — reject at
+        # the boundary with the protocol error instead.
+        if not isinstance(context_id, str):
+            raise ValueError("contextId is required")
+        if not isinstance(idempotency_key, str):
+            raise _InvalidParamError("messageId must be a string")
+        if not context_id or not idempotency_key:
+            raise ValueError("contextId is required")
+        async with self._global_lock:
+            existing = self._idem.get((context_id, idempotency_key))
+            if existing is not None and existing in self.runs:
+                r = self.runs[existing]
+                if r.request_digest != request_digest:
+                    raise KeyConflictError((context_id, idempotency_key))
+                return existing, False
+            if mode == "retry_only":
+                return self.UNKNOWN_OUTCOME
+            if len(self.runs) >= MAX_RUNS:
+                # D7/v3 语义对齐（openclaw_resume 硬拒）：无可驱逐的终态
+                # run 时显式拒绝，不做无声突破上限。
+                self._evict_oldest_finished()
+                if len(self.runs) >= MAX_RUNS:
+                    raise RuntimeError(
+                        f"run capacity exhausted ({MAX_RUNS} active runs)")
+            rid = uuid.uuid4().hex[:12]
+            r = _Run(rid, context_id)
+            r.idempotency_key = idempotency_key
+            r.request_digest = request_digest
+            self.runs[rid] = r
+            self._idem[(context_id, idempotency_key)] = rid
+
+        await self._publish(rid, wire.wire_task_event(rid, context_id,
+                                                      r.state))
+        return rid, True
+
+    async def send_message(self, context_id: str, message_text: str,
+                           idempotency_key: str, mode: str = "first"
+                           ) -> dict[str, Any] | UnknownOutcomeSentinel:
+        digest = _digest(message_text)
+        out = await self.open_run(context_id, idempotency_key, mode, digest)
+        if out is self.UNKNOWN_OUTCOME:
+            return out
+        rid, created = out
+        # open_run 只会返回三样：UNKNOWN_OUTCOME（上一行已排除）、注册在
+        # runs 里的既有 run（`existing in self.runs` 先验）、或刚注册的新 run；
+        # 返回点与本行之间无 await，run 不可能凭空消失——不做死路 None 分支。
+        r = self.runs[rid]
+        return {"task": {"id": r.run_id, "contextId": r.context_id,
+                         "status": {"state": r.state},
+                         "metadata": {"created": created}}}
+
+    # ── completion ──
+    async def complete_run(self, rid: str,
+                           state: str = "TASK_STATE_COMPLETED",
+                           detail: dict[str, Any] | None = None) -> None:
+        """终态单次（T1）：``detail`` 只随首个终态下发（结构化错误说明，
+        errorCode/errorMessage/engine_frame），run 已终态时连同迟到
+        complete_run 一起丢弃，不复活、不二次终结。"""
+        r = self.runs[rid]
+        if r.state in wire.TERMINAL_STATES:
+            # T1（§8.6）：终态单次——迟到终帧不覆盖首个终态（cancel 胜出），
+            # 不二次终结订阅者。
+            return
+        r.state = state
+        await self._publish(rid, wire.wire_status_update(
+            rid, r.context_id, state, seq=r.last_seq,
+            extra_metadata=detail))
+        r.replay_expires_at = time.monotonic() + TERMINAL_TTL_SECONDS
+        marker = wire.wire_terminal_marker(rid, r.context_id, state,
+                                           r.last_seq, detail)
+        for q in list(r.subscribers):
+            self._deliver_terminal(r, q, marker)
+        asyncio.get_running_loop().call_later(TERMINAL_TTL_SECONDS,
+                                              self._evict, rid)
+
+    def _deliver_terminal(self, r: _Run, q: asyncio.Queue,
+                          item: dict[str, Any] | None) -> None:
+        try:
+            q.put_nowait(item)
+        except asyncio.QueueFull:
+            if q in r.subscribers:
+                r.subscribers.remove(q)
+            # 队列刚抛过 QueueFull：get_nowait 让出一件必成功；让位后
+            # put 也必成功——两步间无 await，单线程事件循环内不存在并发
+            # 生产者，不设永不可达的二层防御臂。
+            q.get_nowait()
+            q.put_nowait(item)
+
+    def _evict(self, rid: str) -> None:
+        r = self.runs.pop(rid, None)
+        if r:
+            self._total_bytes -= r.bytes
+            self._idem.pop((r.context_id, r.idempotency_key), None)
+            for q in list(r.subscribers):
+                self._deliver_terminal(r, q, None)
+
+    def _evict_oldest_finished(self) -> None:
+        for rid, r in sorted(self.runs.items(),
+                             key=lambda kv: kv[1].replay_expires_at or 0):
+            if r.replay_expires_at is not None:
+                self._evict(rid)
+                return
+
+    # ── publish ──
+    async def _publish(self, rid: str, event: dict[str, Any]) -> None:
+        r = self.runs[rid]
+        async with r.lock:
+            r.last_seq += 1
+            event["seq"] = r.last_seq
+            event_size = len(str(event))
+
+            if not r.cache_limit:
+                fits = (len(r.events) < MAX_EVENTS_PER_RUN
+                        and r.bytes + event_size <= MAX_BYTES_PER_RUN
+                        and self._total_bytes + event_size <= TOTAL_BUDGET_BYTES)
+                if fits:
+                    r.events.append(event)
+                    r.bytes += event_size
+                    self._total_bytes += event_size
+                else:
+                    self._total_bytes -= r.bytes
+                    r.events = []
+                    r.bytes = 0
+                    r.cache_limit = True
+
+            for q in list(r.subscribers):
+                try:
+                    q.put_nowait(event)
+                except asyncio.QueueFull:
+                    r.subscribers.remove(q)
+                    # 同 _deliver_terminal 的不可达性论证：刚满过的队列
+                    # get 让位必成功、让位后补投 None 也必成功。
+                    q.get_nowait()
+                    q.put_nowait(None)
+
+    async def publish_delta(self, rid: str, text: str) -> None:
+        r = self.runs[rid]
+        if r.state in wire.TERMINAL_STATES:
+            return                     # T1：终态后增量丢弃（cancel 胜出）
+        first = not r.saw_delta
+        r.saw_delta = True
+        r.latest_text += text          # 增量累积进内容快照（R12-7）
+        artifact_id = f"text-{rid}"
+        await self._publish(rid, wire.wire_artifact_update(
+            rid, r.context_id, 0, artifact_id, text,
+            append=not first, last_chunk=False))
+
+    async def publish_final(self, rid: str, text: str) -> None:
+        r = self.runs[rid]
+        if r.state in wire.TERMINAL_STATES:
+            return                     # T1：终态后终稿不改写内核快照
+        r.latest_text = text           # 终稿全量替换快照（R12-7）
+        await self._publish(rid, wire.wire_artifact_update(
+            rid, r.context_id, 0, f"text-{rid}", text,
+            append=False, last_chunk=True))
+
+    def publish_engine_inject(self, context_id: str, text: str,
+                              inject_id: str) -> None:
+        """R12-3: engine-callback inject frames (runId=inject-*) fan out to
+        context subscribers only — they never touch the current run's
+        artifact stream or lifecycle (ws_server keeps the same exception)."""
+        ev = wire.wire_inject_message(context_id, text, inject_id)
+        for q in list(self._context_subs.get(context_id, [])):
+            try:
+                q.put_nowait(ev)
+            except asyncio.QueueFull:
+                pass
+
+    async def publish_status(self, rid: str, state: str) -> None:
+        r = self.runs[rid]
+        if r.state in wire.TERMINAL_STATES:
+            return                     # T1：终态后不做状态回退
+        r.state = state
+        await self._publish(rid, wire.wire_status_update(
+            rid, r.context_id, state, seq=0))
+
+    async def publish_interaction_requested(self, rid: str,
+                                            interaction_id: str,
+                                            payload: dict[str, Any]) -> None:
+        """HITL 请求：state 转 INPUT_REQUIRED（终态之外的专用状态，
+        complete_run 语义不变）。"""
+        r = self.runs[rid]
+        if r.state in wire.TERMINAL_STATES:
+            return                     # T1：终态后不再注册新 interaction
+        self._interactions[interaction_id] = rid
+        # R6-2: the numeric-pending generation of the same iid increments on each request — old RPC replies
+        # are only allowed to clear the generation that was in effect when they set out
+        self._interaction_generation[interaction_id] = \
+            self._interaction_generation.get(interaction_id, 0) + 1
+        # R4-2: in-flight re-request (suspending the same tool again) → remove it from the resolved set, the iid returns to pending
+        self._resolved_interactions.discard(interaction_id)
+        r.state = "TASK_STATE_INPUT_REQUIRED"
+        await self._publish(rid, wire.wire_interaction_requested(
+            rid, r.context_id, 0, interaction_id, payload))
+
+    def interaction_generation(self, interaction_id: str) -> int:
+        """该 iid 当前的 pending 轮次（未请求过 = 0）——R6-2 router 捕获用。"""
+        return self._interaction_generation.get(interaction_id, 0)
+
+    async def publish_interaction_resolved(
+            self, rid: str, payload: dict[str, Any],
+            expected_generation: int | None = None) -> None:
+        """HITL 决议：按 iid 记账 + 全清后才回 WORKING（R4-2）。
+
+        expected_generation（R6-2）：调用方在 resolve RPC 出发前捕获的轮次。
+        只清对应轮次——RPC 等待期间该 iid 已经"engine 决议 + 再挂起"时,
+        旧回复不再入账、不再上行（旧轮次的 resolved 事实已由引擎回
+        显路径如实发布),新 pending 不被旧回复洗掉。None = 无轮次约束
+        （引擎回显/legacy 路径,事件本身就是真实态）。
+
+        gateway 注册表支持同一 run 多个 pending（SDK 并发 canUseTool），
+        决议只清自己——run 是否回 WORKING 取决于还有没有未决项，绝不用
+        一个 run 状态顶替每个 interaction 的可决性。决议帧不带 iid（旧
+        引擎侧回显/强恢复）= "引擎已恢复整个 run"——清空该 run 全部未决
+        项再回 WORKING（R1 兼容锚：已 resolve 后重复提交 → conflict 语义
+        不变）。
+        """
+        r = self.runs[rid]
+        if r.state in wire.TERMINAL_STATES:
+            return                     # T1：终态后决议不改写 run 状态
+        # 身份三键提取（R5-1，与 wire R18-1b 同集）：OpenClaw 审批回流
+        # 只带 approvalId（bridge 原样上抛），漏它会把"有明确身份的单项
+        # 决议"错打进 legacy 全清分支。
+        iid = (payload.get("interactionId") or payload.get("id")
+               or payload.get("approvalId"))
+        if isinstance(iid, str) and iid:
+            if self._interactions.get(iid) == rid:
+                if expected_generation is not None and \
+                        self._interaction_generation.get(iid, 0) \
+                        != expected_generation:
+                    # R6-2 轮次不匹配：RPC 出发的是旧轮次,现在同 iid 上
+                    # pending 的是新轮次——直接丢弃本次补发,不改账不动态
+                    # 不上行(旧轮次 resolved 已由引擎回显如实发布)。
+                    return
+                self._resolved_interactions.add(iid)
+                unresolved = [i for i, owner in self._interactions.items()
+                              if owner == rid
+                              and i not in self._resolved_interactions]
+                if not unresolved:
+                    r.state = "TASK_STATE_WORKING"
+            # 有明确身份但未注册/不匹配：按"未知身份的独立事件"只原样
+            # 发布——既不 per-iid 清账，也**不得降级清全**（R5-1：未知
+            # 身份不是"run 已整体恢复"的证据，清全会让同 run 其余
+            # pending 被 conflict 锁死）。
+        else:
+            # 真正无身份的 legacy 帧（旧引擎回显/强恢复）= "引擎恢复整个
+            # run"——清空全部未决再回 WORKING（R1 幂等锚保留）。
+            self._resolved_interactions.update(
+                i for i, owner in self._interactions.items()
+                if owner == rid and i not in self._resolved_interactions)
+            r.state = "TASK_STATE_WORKING"
+        # R5-2：wire 帧携带 run **真实**状态（部分决议仍是
+        # INPUT_REQUIRED）+ 独立事件标识——见 wire_interaction_resolved 语义。
+        await self._publish(rid, wire.wire_interaction_resolved(
+            rid, r.context_id, 0, payload, state=r.state))
+
+    def interaction_pending(self, rid: str, interaction_id: str) -> bool:
+        """该 iid 在此 run 上是否仍是未决 pending（R4-2 router 冲突判定）。
+
+        注册且未 resolved 才可决；已 resolved 的重复提交、无主 iid 均
+        False——状态机不再代理这个判断。
+        """
+        return (self._interactions.get(interaction_id) == rid
+                and interaction_id not in self._resolved_interactions)
+
+    async def publish_agent_progress(self, rid: str,
+                                     payload: dict[str, Any],
+                                     event_name: str = "agent") -> None:
+        """agent/tool/mode_transition 事件不上收 run 状态，仅作为
+        statusUpdate 流出（R17-2：事件名保留，本方法签名带 event_name）。"""
+        r = self.runs[rid]
+        if r.state in wire.TERMINAL_STATES:
+            return                     # T1：终态后迟到帧不再入流
+        await self._publish(rid, wire.wire_agent_progress(
+            rid, r.context_id, 0, payload, event_name=event_name))
+
+    # ── cancel（TC-CANCEL，设计 §7/§8.6）──
+
+    async def cancel_run(self, rid: str) -> dict[str, Any]:
+        """非终态 run → CANCELED 终态；只做状态迁移与订阅者终结——
+        不触碰 _interactions 注册表（§8.6：HITL resolution 记录独立于
+        run 生命周期，迟到决策仍可判读）。
+
+        幂等（T1）：已终态 run 不迁移、不重复终结——返回当前快照（state
+        即终局事实），判读交给 caller（router：终态后取消 → 标准错误，
+        data 带 state 消除歧义）。
+        """
+        r = self.runs.get(rid)
+        if r is None:
+            raise LookupError(rid)
+        if r.state not in wire.TERMINAL_STATES:
+            await self.complete_run(rid, "TASK_STATE_CANCELED")
+        return self.run_snapshot(r)
+
+    def run_snapshot(self, r: _Run) -> dict[str, Any]:
+        return {"id": r.run_id, "contextId": r.context_id,
+                "status": {"state": r.state}, "metadata": {}}
+
+    # ── subscribe / replay ──
+    async def subscribe(self, rid: str, since_seq: int | None = None
+                        ) -> tuple[list[dict[str, Any]], asyncio.Queue]:
+        r = self.runs.get(rid)
+        if r is None:
+            raise LookupError(rid)
+
+        q: asyncio.Queue = asyncio.Queue(maxsize=SUBSCRIBER_QUEUE_SIZE)
+        async with r.lock:
+            backlog = ([] if since_seq is None
+                       else [e for e in r.events if e["seq"] > since_seq])
+            r.subscribers.append(q)
+            if since_seq is None:
+                q.put_nowait(wire.wire_task_event(rid, r.context_id,
+                                                  r.state))
+        if r.state in wire.TERMINAL_STATES:
+            q.put_nowait(wire.wire_terminal_marker(rid, r.context_id,
+                                                   r.state, r.last_seq))
+        return backlog, q
+
+    async def replay(self, rid: str, since_seq: int
+                     ) -> tuple[list[dict[str, Any]], asyncio.Queue] | None:
+        r = self.runs.get(rid)
+        if r is None or r.cache_limit:
+            return None
+        if (r.replay_expires_at is not None
+                and time.monotonic() > r.replay_expires_at):
+            return None
+        return await self.subscribe(rid, since_seq=since_seq)
+
+    def unsubscribe(self, rid: str, q: asyncio.Queue) -> None:
+        r = self.runs.get(rid)
+        if r and q in r.subscribers:
+            r.subscribers.remove(q)
+
+    # ── inject lifecycle (R13-2: dedup state and engine write are coupled) ──
+    #
+    # States per (context, inject_id) key:
+    #   in_progress — reserved, engine write in flight
+    #   accepted    — engine write confirmed; event broadcast happened
+    #   unknown     — timeout/ambiguous outcome; key retained (engine may
+    #                 have written — never blindly delete and retry)
+    #
+    # Broadcast happens exactly at commit (after engine confirmation).
+    # Explicit engine rejection rolls the key back — retry is allowed.
+
+    async def inject_reserve(self, context_id: str, inject_id: str) -> str:
+        """Returns 'in_progress' for a fresh reservation, or the
+        'duplicate_<state>' status of an existing key."""
+        key = (context_id, inject_id)
+        now = time.monotonic()
+        # M1: TTL prune keeps the dedup table bounded on long-lived
+        # processes (records expire rather than accumulate forever).
+        if len(self._inject_dedup) > _INJECT_DEDUP_MAX:
+            expired = [k for k, (_, ts) in self._inject_dedup.items()
+                       if now - ts > _INJECT_DEDUP_TTL_SECONDS]
+            for k in expired:
+                self._inject_dedup.pop(k, None)
+        existing = self._inject_dedup.get(key)
+        if existing is not None:
+            return f"duplicate_{existing[0]}"
+        self._inject_dedup[key] = (_INJECT_IN_PROGRESS, now)
+        return "in_progress"
+
+    def inject_commit(self, context_id: str, text: str,
+                      inject_id: str) -> bool:
+        """Mark accepted and broadcast to context subscribers — only after
+        the engine write confirmed. Returns False when the key is gone."""
+        key = (context_id, inject_id)
+        existing = self._inject_dedup.get(key)
+        if existing is None:
+            return False
+        self._inject_dedup[key] = (_INJECT_ACCEPTED, existing[1])
+        ev = wire.wire_inject_message(context_id, text, inject_id)
+        for q in list(self._context_subs.get(context_id, [])):
+            try:
+                q.put_nowait(ev)
+            except asyncio.QueueFull:
+                pass
+        return True
+
+    def inject_rollback(self, context_id: str,
+                        inject_id: str) -> bool:
+        """Explicit engine rejection: drop the key so a same-key retry
+        re-attempts the write. Never broadcast."""
+        key = (context_id, inject_id)
+        existing = self._inject_dedup.pop(key, None)
+        return existing is not None
+
+    def inject_unknown(self, context_id: str, inject_id: str) -> None:
+        """Ambiguous outcome (timeout): retain the key as unknown — the
+        engine may already have written; a same-key retry must not
+        blindly re-execute. A new operation uses a new messageId."""
+        key = (context_id, inject_id)
+        existing = self._inject_dedup.get(key)
+        if existing is not None:
+            self._inject_dedup[key] = (_INJECT_UNKNOWN, existing[1])
+
+    def subscribe_context(self, context_id: str) -> asyncio.Queue:
+        q: asyncio.Queue = asyncio.Queue(maxsize=SUBSCRIBER_QUEUE_SIZE)
+        self._context_subs.setdefault(context_id, []).append(q)
+        return q
+
+    def unsubscribe_context(self, context_id: str,
+                            q: asyncio.Queue) -> None:
+        subs = self._context_subs.get(context_id, [])
+        if q in subs:
+            subs.remove(q)
+
+    def get_run(self, rid: str) -> _Run | None:
+        return self.runs.get(rid)
+
+    def interaction_run(self, interaction_id: str) -> tuple[str, _Run] | None:
+        """E4/H1: (rid, run)——不存在/已驱逐返回 None。"""
+        rid = self._interactions.get(interaction_id)
+        if rid is None:
+            return None
+        r = self.runs.get(rid)
+        return (rid, r) if r else None
+
+    def note_native_run_id(self, rid: str, native_run_id: str) -> None:
+        """E4: engine 原生 runId 一次性写入（先到先得）。"""
+        r = self.runs.get(rid)
+        if r is not None and r.native_run_id is None:
+            r.native_run_id = native_run_id

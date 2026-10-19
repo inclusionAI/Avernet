@@ -57,6 +57,18 @@ class BotDeviceRelRepository(Protocol):
         """Soft delete all relationships for a bot with tenant+env isolation. Returns affected count."""
         ...
 
+    def max_live_bot_id_for_bot_ids(self, bot_ids: list[int]) -> int | None:
+        """MAX(bot_id) over live rel rows whose bot_id is in ``bot_ids``.
+
+        Live = ``is_deleted == 0`` per the D-04 tombstone convention (a
+        soft-deleted row carries its own id in ``is_deleted``). No
+        tenant/env filter — deliberate cross-env semantics mirroring the
+        admin restore endpoint's contract (see ``get_by_id_only`` /
+        ``restore_bot_record_by_id``). Returns None when the list is
+        empty or no live rel row matches.
+        """
+        ...
+
     def batch_insert_rels(
         self,
         *,

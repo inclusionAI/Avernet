@@ -38,6 +38,16 @@ def test_deploy_config_to_dict_includes_docker_image():
     assert d["docker_image"] == "registry.example.com/aicoding:latest"
 
 
+def test_deploy_config_to_dict_omits_arca_metadata_when_none():
+    assert "arca_metadata" not in BotDeployConfig().to_dict()
+
+
+def test_deploy_config_to_dict_includes_arca_metadata_when_set():
+    cfg = BotDeployConfig(arca_metadata={"entity_id": "E1", "entity_type": "staff"})
+    d = cfg.to_dict()
+    assert d["arca_metadata"] == {"entity_id": "E1", "entity_type": "staff"}
+
+
 def _make_service():
     from agentclaw.community.core.service_bot.services.baas_service import BaasService
     return BaasService(
@@ -147,6 +157,60 @@ def test_build_create_bot_payload_supports_auto_approve_and_extra_envs():
     assert payload["config"]["deploy_config"]["envs"] == {
         "AGENTCLAW_ENGINE": "claude_code",
         "BOT_TYPE": "personalCoding",
+    }
+
+
+def test_build_create_bot_payload_omits_runtime_identity_by_default():
+    svc = _make_service()
+    svc._deploy_composer.build_start_command = MagicMock(return_value="echo start")
+    svc._get_destroy_cmd = MagicMock(return_value="echo destroy")
+    svc._deploy_composer.build_mount_points = MagicMock(return_value=[])
+    svc._deploy_composer.build_storage = MagicMock(return_value=None)
+    svc._build_outbound_operation_rule = MagicMock(return_value=None)
+    svc._should_mount_home_dir_storage = MagicMock(return_value=False)
+
+    payload = svc._build_create_bot_payload(
+        bot={
+            "bot_id": "B1",
+            "entity_id": "E1",
+            "entity_type": "staff",
+            "active_engine": "openclaw",
+        },
+        owner_id="U1",
+        request_id="req-1234567890-abcdefghijklmno",
+        device_count=1,
+        migration_path="",
+    )
+
+    assert "arca_metadata" not in payload["config"]["deploy_config"]
+
+
+def test_build_create_bot_payload_sends_runtime_identity_for_singlebox():
+    svc = _make_service()
+    svc._runtime_identity_metadata = True
+    svc._deploy_composer.build_start_command = MagicMock(return_value="echo start")
+    svc._get_destroy_cmd = MagicMock(return_value="echo destroy")
+    svc._deploy_composer.build_mount_points = MagicMock(return_value=[])
+    svc._deploy_composer.build_storage = MagicMock(return_value=None)
+    svc._build_outbound_operation_rule = MagicMock(return_value=None)
+    svc._should_mount_home_dir_storage = MagicMock(return_value=False)
+
+    payload = svc._build_create_bot_payload(
+        bot={
+            "bot_id": "B1",
+            "entity_id": "E1",
+            "entity_type": "staff",
+            "active_engine": "openclaw",
+        },
+        owner_id="U1",
+        request_id="req-1234567890-abcdefghijklmno",
+        device_count=1,
+        migration_path="",
+    )
+
+    assert payload["config"]["deploy_config"]["arca_metadata"] == {
+        "entity_id": "E1",
+        "entity_type": "staff",
     }
 
 
@@ -286,6 +350,54 @@ def test_payload_maps_template_config_overrides_to_deploy_config():
         "BOT_TYPE": "personalCoding",
         "USER_ENV": "yes",
     }
+
+
+def test_template_env_cannot_override_persisted_layout_selection():
+    svc = _make_service()
+    envs, _resource_spec, _image = svc._resolve_deploy_envs_spec_image(
+        engine="openclaw",
+        extra_envs={
+            "AGENTCLAW_SKILLS_LAYOUT": "pool",
+            "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "skills-pool-p3-v1",
+            "AGENTCLAW_SKILLS_LAYOUT_PHASE": "pool_initializing",
+        },
+        template_config={
+            "envs": {
+                "AGENTCLAW_SKILLS_LAYOUT": "legacy",
+                "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "stale-contract",
+                "AGENTCLAW_SKILLS_LAYOUT_PHASE": "pool_active",
+                "USER_ENV": "yes",
+            }
+        },
+        resource_spec=None,
+    )
+
+    assert envs["AGENTCLAW_SKILLS_LAYOUT"] == "pool"
+    assert envs["AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION"] == (
+        "skills-pool-p3-v1"
+    )
+    assert envs["AGENTCLAW_SKILLS_LAYOUT_PHASE"] == "pool_initializing"
+    assert envs["USER_ENV"] == "yes"
+
+
+def test_template_env_cannot_invent_pool_layout_selection():
+    svc = _make_service()
+    envs, _resource_spec, _image = svc._resolve_deploy_envs_spec_image(
+        engine="hermes",
+        extra_envs=None,
+        template_config={
+            "envs": {
+                "AGENTCLAW_SKILLS_LAYOUT": "pool",
+                "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "skills-pool-p3-v1",
+                "AGENTCLAW_SKILLS_LAYOUT_PHASE": "pool_active",
+            }
+        },
+        resource_spec=None,
+    )
+
+    assert "AGENTCLAW_SKILLS_LAYOUT" not in envs
+    assert "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION" not in envs
+    assert "AGENTCLAW_SKILLS_LAYOUT_PHASE" not in envs
 
 
 def test_payload_ignores_template_config_command_until_baas_has_field():

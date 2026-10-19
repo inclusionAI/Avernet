@@ -1,5 +1,8 @@
 //! QwenWork desktop adapter. BCN transport and run ownership remain in bridge core.
+pub mod setup;
 mod lifecycle;
+mod questions;
+mod desktop_control;
 mod session;
 mod transport;
 mod turn;
@@ -26,6 +29,8 @@ struct Options {
     secret: String,
     hook_secret: String,
     database_path: PathBuf,
+    mcp_socket_path: Option<PathBuf>,
+    settings_path: Option<PathBuf>,
 }
 
 impl Options {
@@ -51,6 +56,12 @@ impl Options {
                     .into(),
             );
         }
+        if value.mcp_socket_path.as_ref().is_some_and(|p| !p.is_absolute()) {
+            return Err("qwenwork mcp_socket_path must be absolute".into());
+        }
+        if value.settings_path.as_ref().is_some_and(|p| !p.is_absolute()) {
+            return Err("qwenwork settings_path must be absolute".into());
+        }
         Ok(value)
     }
 }
@@ -70,7 +81,8 @@ impl EngineFactory for QwenWorkFactory {
         if !bin.as_os_str().is_empty() {
             return Err("qwenwork attaches to a running app; remove engine_bin".into());
         }
-        let options = Options::parse(options)?;
+        let options = setup::desktop_options(options).map_err(|_| "Cannot load shared QwenWork desktop configuration".to_string())?;
+        let options = Options::parse(&options)?;
         session::validate(&options.database_path)?;
         let listener = std::net::TcpListener::bind(options.listen)
             .map_err(|e| format!("qwenwork listener: {e}"))?;
@@ -125,6 +137,7 @@ struct Active {
 enum Input {
     Snapshot { text: String, finished: bool },
     Hook(serde_json::Value),
+    Question { hook: serde_json::Value, reply: tokio::sync::oneshot::Sender<serde_json::Value> },
 }
 
 struct Inner {

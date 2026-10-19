@@ -1,0 +1,34 @@
+{
+  "patch_schema": 1,
+  "base": "sha256:9e21ea360e6d4bdb63a151d280a7f1802402a8294b5033c92239731bd1e8d1fe",
+  "ops": [
+    {
+      "op": "file.edit",
+      "target": "persona/SOUL.md",
+      "edits": [
+        {
+          "kind": "insert_after",
+          "anchor": "## Tone",
+          "content": "Confirm the order id before quoting amounts."
+        },
+        {
+          "kind": "replace_section",
+          "heading": "## Escalation",
+          "content": "Escalate to a human when a refund exceeds the policy limit.\n\n"
+        }
+      ]
+    },
+    {
+      "op": "resource.add",
+      "path": "data/returns.md",
+      "content": {
+        "digest": "sha256:a191ca8f49999530a2cf4f48562ffde7d62011b3bcfe040195da089a3f117c95"
+      }
+    }
+  ],
+  "rationale": "Partial-refund requests were escalated too late in 6 of 9 failing episodes.",
+  "evidence": [
+    "episode:ep_91",
+    "feedback:fb_311"
+  ]
+}

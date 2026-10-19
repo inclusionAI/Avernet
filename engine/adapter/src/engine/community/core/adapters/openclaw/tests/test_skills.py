@@ -186,3 +186,47 @@ async def test_per_skill_ops_raise_capability_not_supported(call):
     adapter = OpenClawSkillsAdapter(_FakeSkillsPort())
     with pytest.raises(CapabilityNotSupportedError):
         await call(adapter)
+
+
+@pytest.mark.asyncio
+async def test_apply_local_package_uses_assembled_per_bot_layout(tmp_path) -> None:
+    """Local Skill package 不能回退到部署默认的 /home/admin。"""
+    import io
+    import zipfile
+
+    from engine.community.core.skills.layout_planner import RuntimeLayoutContext
+    from engine.community.core.skills.models import (
+        LocalSkillPackageApplyRequest,
+        LocalSkillPackageLayout,
+    )
+
+    package = io.BytesIO()
+    with zipfile.ZipFile(package, "w") as archive:
+        archive.writestr(
+            "SKILL.md",
+            "name: bbs-browse\ndescription: Browse BBS topics\n",
+        )
+
+    openclaw_root = tmp_path / "openclaw"
+    adapter = OpenClawSkillsAdapter(
+        object(),  # Local package publication is owned by the SkillsService.
+        local_layout_context=RuntimeLayoutContext(
+            home=openclaw_root.parent,
+            openclaw_root=openclaw_root,
+        ),
+    )
+
+    result = await adapter.apply_local_package(
+        LocalSkillPackageApplyRequest(
+            skill_name="bbs-browse",
+            layout=LocalSkillPackageLayout.LEGACY,
+            package=package.getvalue(),
+        )
+    )
+
+    target = (
+        openclaw_root
+        / "workspace/skills/skills-local/bbs-browse/SKILL.md"
+    )
+    assert result.target_path == str(target.parent)
+    assert target.is_file()

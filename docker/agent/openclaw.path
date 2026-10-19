@@ -12,3 +12,4 @@
 models
 plugins
 agents.defaults.models
+channels.bcs.heartbeatIntervalMs

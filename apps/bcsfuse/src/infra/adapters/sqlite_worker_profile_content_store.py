@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import datetime
+from functools import wraps
+from threading import RLock
 from typing import Optional
 
 from src.domain.models.worker_profile_content import (
@@ -23,6 +25,19 @@ from src.domain.models.worker_profile_content import (
     WorkerProfileContentList,
 )
 from src.infra.adapters.sqlite_schema import init_schema
+from src.infra.profile_description_metadata import (
+    split_profile_description,
+    with_profile_description,
+)
+
+
+def _serialized_connection(method):
+    """Keep reads and writes off a shared SQLite connection during transactions."""
+    @wraps(method)
+    def locked(self, *args, **kwargs):
+        with self._write_lock:
+            return method(self, *args, **kwargs)
+    return locked
 
 
 # Profile contents 表 Schema（与线上 MySQL 字段名一致）
@@ -75,6 +90,7 @@ class SQLiteWorkerProfileContentStore:
         self._db_path = db_path
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        self._write_lock = RLock()
 
         # 初始化基础 schema
         init_schema(self._conn)
@@ -102,6 +118,9 @@ class SQLiteWorkerProfileContentStore:
                 metadata = json.loads(row["metadata"])
             except (json.JSONDecodeError, TypeError):
                 pass
+        metadata, description = split_profile_description(
+            metadata, row["description"] if "description" in row.keys() else None,
+        )
 
         # 解析 contents（扩展内容 JSON Map）
         # 包含 LLM 分析结果: {"profile": "语义画像", "capabilities": ["标签", ...]}
@@ -116,6 +135,7 @@ class SQLiteWorkerProfileContentStore:
             worker_id=row["worker_id"],
             profile_id=row["profile_id"],
             display_name=row["display_name"],
+            description=description,
             soul_md=row["soul_md"],
             agents_md=row["agents_md"],
             tools_md=row["tools_md"],
@@ -136,6 +156,10 @@ class SQLiteWorkerProfileContentStore:
         return f"profile_{worker_id}_{profile_id}"
 
     def save(self, content: WorkerProfileContent) -> WorkerProfileContent:
+        with self._write_lock:
+            return self._save_unlocked(content)
+
+    def _save_unlocked(self, content: WorkerProfileContent) -> WorkerProfileContent:
         """保存 Profile 内容"""
         now = datetime.utcnow()
         profile_id = content.profile_id or "default"
@@ -179,7 +203,7 @@ class SQLiteWorkerProfileContentStore:
                     content.heartbeat_md,
                     json.dumps(content.contents),
                     json.dumps([s.model_dump() for s in content.skill_sets]),
-                    json.dumps(content.metadata),
+                    json.dumps(with_profile_description(content.metadata, content.description)),
                     content.content_type.value,
                     new_version,
                     now.isoformat(),
@@ -212,7 +236,7 @@ class SQLiteWorkerProfileContentStore:
                     content.heartbeat_md,
                     json.dumps(content.contents),
                     json.dumps([s.model_dump() for s in content.skill_sets]),
-                    json.dumps(content.metadata),
+                    json.dumps(with_profile_description(content.metadata, content.description)),
                     content.content_type.value,
                     1 if content.is_active else 0,
                     1,
@@ -230,6 +254,75 @@ class SQLiteWorkerProfileContentStore:
 
         return content
 
+    def save_if_version(
+        self, content: WorkerProfileContent, expected_version: int | None,
+    ) -> WorkerProfileContent | None:
+        """Atomically insert or replace a Profile only at its expected version."""
+        now = datetime.utcnow().isoformat()
+        profile_id = content.profile_id or "default"
+        with self._write_lock:
+            cursor = self._conn.cursor()
+            try:
+                values = (
+                    content.display_name, content.soul_md,
+                    content.agents_md, content.tools_md, content.boot_md,
+                    content.heartbeat_md, json.dumps(content.contents),
+                    json.dumps([item.model_dump() for item in content.skill_sets]),
+                    json.dumps(with_profile_description(content.metadata, content.description)),
+                    content.content_type.value,
+                )
+                if expected_version is None:
+                    try:
+                        cursor.execute(
+                            """INSERT INTO bcsfuse_worker_profile_contents (
+                                id, worker_id, profile_id, display_name,
+                                soul_md, agents_md, tools_md, boot_md, heartbeat_md,
+                                contents, skill_sets, metadata, content_type,
+                                is_active, version, gmt_create, gmt_modify
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+                            (
+                                self._generate_id(content.worker_id, profile_id),
+                                content.worker_id, profile_id, *values,
+                                1 if content.is_active else 0, now, now,
+                            ),
+                        )
+                    except sqlite3.IntegrityError as error:
+                        if error.sqlite_errorcode not in (
+                            sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY,
+                            sqlite3.SQLITE_CONSTRAINT_UNIQUE,
+                        ):
+                            raise
+                        self._conn.rollback()
+                        return None
+                else:
+                    cursor.execute(
+                        """UPDATE bcsfuse_worker_profile_contents SET
+                            display_name = ?, soul_md = ?,
+                            agents_md = ?, tools_md = ?, boot_md = ?,
+                            heartbeat_md = ?, contents = ?, skill_sets = ?,
+                            metadata = ?, content_type = ?, version = version + 1,
+                            gmt_modify = ?
+                        WHERE worker_id = ? AND profile_id = ? AND version = ?""",
+                        (*values, now, content.worker_id, profile_id, expected_version),
+                    )
+                    if cursor.rowcount != 1:
+                        self._conn.rollback()
+                        return None
+                cursor.execute(
+                    "SELECT * FROM bcsfuse_worker_profile_contents WHERE worker_id = ? AND profile_id = ?",
+                    (content.worker_id, profile_id),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    raise RuntimeError("saved profile could not be read back")
+                saved = self._row_to_content(row)
+                self._conn.commit()
+                return saved
+            except Exception:
+                self._conn.rollback()
+                raise
+
+    @_serialized_connection
     def get(self, worker_id: str, profile_id: str) -> Optional[WorkerProfileContent]:
         """获取指定 Profile"""
         profile_id = profile_id or "default"
@@ -246,6 +339,7 @@ class SQLiteWorkerProfileContentStore:
 
         return self._row_to_content(row)
 
+    @_serialized_connection
     def list_by_worker(self, worker_id: str) -> WorkerProfileContentList:
         """列出 Worker 的所有 Profiles"""
         cursor = self._conn.cursor()
@@ -270,6 +364,7 @@ class SQLiteWorkerProfileContentStore:
             active_profile_id=active_profile_id,
         )
 
+    @_serialized_connection
     def delete(self, worker_id: str, profile_id: str) -> bool:
         """删除 Profile"""
         profile_id = profile_id or "default"
@@ -283,6 +378,7 @@ class SQLiteWorkerProfileContentStore:
 
         return cursor.rowcount > 0
 
+    @_serialized_connection
     def activate(self, worker_id: str, profile_id: str) -> Optional[WorkerProfileContent]:
         """设置活跃 Profile"""
         profile_id = profile_id or "default"
@@ -308,6 +404,7 @@ class SQLiteWorkerProfileContentStore:
 
         return self.get(worker_id, profile_id)
 
+    @_serialized_connection
     def get_active(self, worker_id: str) -> Optional[WorkerProfileContent]:
         """获取活跃 Profile"""
         cursor = self._conn.cursor()
@@ -322,6 +419,7 @@ class SQLiteWorkerProfileContentStore:
 
         return self._row_to_content(row)
 
+    @_serialized_connection
     def exists(self, worker_id: str, profile_id: str) -> bool:
         """检查 Profile 是否存在"""
         profile_id = profile_id or "default"
@@ -333,6 +431,7 @@ class SQLiteWorkerProfileContentStore:
         )
         return cursor.fetchone() is not None
 
+    @_serialized_connection
     def count(self, worker_id: Optional[str] = None) -> int:
         """统计 Profile 数量"""
         cursor = self._conn.cursor()
@@ -347,6 +446,7 @@ class SQLiteWorkerProfileContentStore:
 
         return cursor.fetchone()[0]
 
+    @_serialized_connection
     def get_all_active(self) -> list[WorkerProfileContent]:
         """获取所有活跃 Profile"""
         cursor = self._conn.cursor()
@@ -357,6 +457,24 @@ class SQLiteWorkerProfileContentStore:
 
         return [self._row_to_content(row) for row in rows]
 
+    @_serialized_connection
+    def get_active_by_workers(self, worker_ids: list[str]) -> list[WorkerProfileContent]:
+        """Restrict active Profile reads to the requested Worker IDs."""
+        if not worker_ids:
+            return []
+        cursor = self._conn.cursor()
+        try:
+            placeholders = ", ".join(["?"] * len(worker_ids))
+            cursor.execute(
+                "SELECT * FROM bcsfuse_worker_profile_contents "
+                f"WHERE is_active = 1 AND worker_id IN ({placeholders})",
+                tuple(worker_ids),
+            )
+            return [self._row_to_content(row) for row in cursor.fetchall()]
+        finally:
+            cursor.close()
+
+    @_serialized_connection
     def close(self) -> None:
         """关闭数据库连接"""
         self._conn.close()

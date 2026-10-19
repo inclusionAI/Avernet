@@ -417,8 +417,8 @@ class MySQLWorkerRegistryStore:
 
         data = self._worker_to_dict(updated)
         set_clause = ", ".join([f"{k} = %s" for k in data.keys() if k not in ("id", "gmt_create")])
-        sql = f"UPDATE bcsfuse_workers SET {set_clause} WHERE id = %s"
-        params = [v for k, v in data.items() if k not in ("id", "gmt_create")] + [updated.id]
+        sql = f"UPDATE bcsfuse_workers SET {set_clause} WHERE id = %s AND version = %s"
+        params = [v for k, v in data.items() if k not in ("id", "gmt_create")] + [updated.id, worker.version]
 
         conn = self._pool.get_connection()
         try:
@@ -426,6 +426,8 @@ class MySQLWorkerRegistryStore:
             cursor = conn.cursor(dictionary=True)
             try:
                 cursor.execute(sql, params)
+                if cursor.rowcount != 1:
+                    raise ValueError(f"Version conflict: expected {worker.version} for {worker.id}")
                 cursor.execute(
                     "SELECT gmt_create, gmt_modify FROM bcsfuse_workers WHERE id = %s",
                     (updated.id,),

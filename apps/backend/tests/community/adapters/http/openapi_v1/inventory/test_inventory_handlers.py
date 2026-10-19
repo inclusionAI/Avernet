@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock
+from datetime import datetime
 
 import pytest
 from fastapi import FastAPI
@@ -25,9 +26,10 @@ from agentclaw.community.core.bot_inventory.protocols import (
 )
 from agentclaw.community.core.bot_inventory.services.bot_inventory_service import BotInventoryService
 from agentclaw.community.core.bot_inventory.services.lifecycle_view import BotLifecycleView
-from agentclaw.community.core.bot_inventory.adapters.noop_service_lifecycle import (
-    NoopServiceLifecyclePort,
+from agentclaw.community.core.bot_inventory.adapters.service_lifecycle import (
+    ServiceLifecycleView,
 )
+from agentclaw.community.core.service_bot.repository.models import BotPublishRecord, PublishStatus
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 
 
@@ -86,7 +88,18 @@ def desktop_service():
 
 
 @pytest.fixture
-def client(bot_service, desktop_service):
+def publication_repo(monkeypatch):
+    monkeypatch.setattr(
+        "agentclaw.community.core.bot_inventory.adapters.service_lifecycle.get_current_env",
+        lambda: "dev",
+    )
+    repo = MagicMock()
+    repo.list_by_source_bots.return_value = []
+    return repo
+
+
+@pytest.fixture
+def client(bot_service, desktop_service, publication_repo):
     class _M(Module):
         def configure(self, binder):
             space = NoopBusinessSpaceContext()
@@ -99,7 +112,7 @@ def client(bot_service, desktop_service):
                 desktop_service=desktop_service,
                 access_service=access,
                 business_space=space,
-                lifecycle_view=BotLifecycleView(NoopServiceLifecyclePort()),
+                lifecycle_view=BotLifecycleView(ServiceLifecycleView(publication_repo)),
                 edit_lock_view=MagicMock(states_for_bots=MagicMock(return_value={})),
                 template_port=_TemplatePortStub(),
             )
@@ -129,6 +142,10 @@ def test_list_inventory_combines_personal_cloud_and_local(client):
     ids = {item["bot_id"] for item in data["items"]}
     assert data["total"] == 2
     assert ids == {"c1", "l1"}
+    by_id = {item["bot_id"]: item for item in data["items"]}
+    assert by_id["c1"]["status"] == "ACTIVE"
+    assert by_id["l1"]["status"] == "OFFLINE"
+    assert all(item["publish"] is None for item in data["items"])
 
 
 def test_list_inventory_carries_template_snapshot_verbatim(client):
@@ -155,6 +172,84 @@ def test_inventory_openapi_declares_upgrade_action(client):
     schema = client.app.openapi()["components"]["schemas"]["BotInventoryItem"]
 
     assert "upgrade" in schema["properties"]["actions"]["items"]["enum"]
+
+
+def _publication(record_id, status, version):
+    return BotPublishRecord(
+        id=record_id, source_bot_pk=1, source_bot_id="c1",
+        publish_bot_id="c1", name="Service", owner_id="u1",
+        permission_owner="u1", env="dev", status=status.value, version=version,
+        last_pub_id=0, gmt_create=datetime(2026, 10, 15),
+        gmt_modified=datetime(2026, 10, 15),
+    )
+
+
+@pytest.mark.parametrize("bot_status", ["PENDING", "PROVISIONING", "ACTIVE", "FAILED"])
+@pytest.mark.parametrize(
+    "publish_status,display_state",
+    [
+        (PublishStatus.DRAFT, "service_draft"),
+        (PublishStatus.FAILED, "service_deploying"),
+        (PublishStatus.VALIDATING, "service_prestable"),
+        (PublishStatus.SUCCESS, "service_online"),
+        (PublishStatus.RELEASED, "service_offline"),
+    ],
+)
+def test_service_status_is_bot_status_with_separate_publication(
+    client, bot_service, publication_repo, bot_status, publish_status, display_state,
+):
+    bot_service.list_bots_by_conditions.return_value = {
+        "total": 1, "items": [{**CLOUD, "bot_type": "service", "status": bot_status}],
+    }
+    publication_repo.list_by_source_bots.return_value = [_publication(10, publish_status, 1)]
+    data = _ok(client.get("/openapi/v1/bots/all", params={"is_service": "true"}))
+    item, = data["items"]
+    assert item["status"] == bot_status
+    assert item["publish"] == {"id": 10, "status": publish_status.value, "version": 1}
+    assert item["display_state"] == display_state
+    assert item["internal_status"] == publish_status.value
+    assert item["publication_id"] == 10
+    assert item["publication_version"] == 1
+    publication_repo.list_by_source_bots.assert_called_once()
+    publication_repo.list_by_source_bot.assert_not_called()
+
+
+def test_service_cards_keep_their_own_publication(client, bot_service, publication_repo):
+    bot_service.list_bots_by_conditions.return_value = {
+        "total": 1, "items": [{**CLOUD, "bot_type": "service"}],
+    }
+    publication_repo.list_by_source_bots.return_value = [
+        _publication(10, PublishStatus.SUCCESS, 1),
+        _publication(11, PublishStatus.DRAFT, 2),
+    ]
+    data = _ok(client.get("/openapi/v1/bots/all", params={"is_service": "true"}))
+    assert data["total"] == 2
+    cards = {item["publication_id"]: item for item in data["items"]}
+    assert cards[10]["publish"] == {"id": 10, "status": PublishStatus.SUCCESS.value, "version": 1}
+    assert cards[11]["publish"] == {"id": 11, "status": PublishStatus.DRAFT.value, "version": 2}
+    assert {item["status"] for item in cards.values()} == {"ACTIVE"}
+    assert cards[10]["card_id"] != cards[11]["card_id"]
+    assert "offline" in cards[10]["actions"]
+    assert "publish_staging" in cards[11]["actions"]
+    publication_repo.list_by_source_bots.assert_called_once()
+
+
+def test_service_without_publication_does_not_fabricate_publish(client, bot_service):
+    bot_service.list_bots_by_conditions.return_value = {
+        "total": 1, "items": [{**CLOUD, "bot_type": "service", "status": "PROVISIONING"}],
+    }
+    data = _ok(client.get("/openapi/v1/bots/all", params={"is_service": "true"}))
+    item, = data["items"]
+    assert item["status"] == "PROVISIONING"
+    assert item["publish"] is None
+    assert item["publication_id"] is None
+    assert item["actions"] == ["view"]
+
+
+def test_inventory_publication_schema_is_bounded_and_nullable(client):
+    schemas = client.app.openapi()["components"]["schemas"]
+    assert set(schemas["InventoryPublication"]["properties"]) == {"id", "status", "version"}
+    assert {"type": "null"} in schemas["BotInventoryItem"]["properties"]["publish"]["anyOf"]
 
 
 def test_inventory_openapi_declares_restart_publish_action(client):

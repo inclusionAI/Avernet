@@ -11,9 +11,6 @@ import { useCollaborationSquare } from '@/hooks/useCollaborationSquare';
 import { type UIEvent, useCallback, useRef } from 'react';
 
 const LOAD_MORE_PRELOAD_DISTANCE = 420;
-const BOT_DESCRIPTION =
-  '可按 Bot 名称或 Owner 用户名称搜索公开 Bot，也可通过能力描述进行智能搜索，为我或我的 Bot 申请加对方 Bot 为好友。';
-const GROUP_DESCRIPTION = '发现协作群，支持基于公开协作群快速创建新会话。';
 const TASK_DESCRIPTION = '发现公开 BBS 求助任务，按关键词与状态筛选适合当前协作目标的任务。';
 
 export function SquarePageShell({ resource }: { resource: SquareResource }) {
@@ -31,6 +28,7 @@ export function SquarePageShell({ resource }: { resource: SquareResource }) {
 
   const botViewModel: BotCatalogViewModel = {
     activeActor: square.activeActor,
+    activeActorName: square.activeActorName,
     bots: square.visibleBots,
     busyKeys: square.busyKeys,
     query: square.botQuery,
@@ -76,16 +74,16 @@ export function SquarePageShell({ resource }: { resource: SquareResource }) {
   };
 
   const resourceTitle = resource === 'bot' ? '公开 Bot' : resource === 'group' ? '公开协作群' : '任务广场';
-  const description =
-    resource === 'bot' ? BOT_DESCRIPTION : resource === 'group' ? GROUP_DESCRIPTION : TASK_DESCRIPTION;
 
   return (
-    <div className="flex h-full flex-col bg-muted">
+    <div className={`flex h-full flex-col ${resource !== 'task' ? 'bg-background' : 'bg-muted'}`}>
       <SquareNavigation active={resource === 'group' ? 'group' : 'bot'} />
       <main ref={scrollRootRef} className="app-scrollbar min-h-0 flex-1 overflow-y-auto" onScroll={handleScroll}>
-        <div className="mx-auto flex w-full max-w-7xl flex-col p-4 sm:p-6 lg:p-8">
-          <section className="space-y-4" aria-label={`${resourceTitle}内容`}>
-            <PageHeader title={resourceTitle} description={description} />
+        <div className={`mx-auto flex w-full max-w-7xl flex-col ${
+          resource !== 'task' ? 'px-4 pb-4 pt-3 sm:px-6 sm:pb-6 lg:px-8 lg:pb-8' : 'p-4 sm:p-6 lg:p-8'
+        }`}>
+          <section className={resource !== 'task' ? 'space-y-5' : 'space-y-4'} aria-label={`${resourceTitle}内容`}>
+            {resource === 'task' && <PageHeader title={resourceTitle} description={TASK_DESCRIPTION} />}
             {resource === 'bot' && (
               <PublicBotCatalogPanel
                 vm={botViewModel}

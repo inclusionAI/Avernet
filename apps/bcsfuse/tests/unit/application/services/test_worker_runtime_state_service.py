@@ -90,6 +90,30 @@ class TestWorkerRuntimeStateService:
 
         assert updated.state.runtime_state == WorkerRuntimeState.ONLINE
 
+    def test_deferred_online_vector_sync_checks_current_state(
+        self, service, sample_worker, runtime_state_store, monkeypatch,
+    ):
+        from unittest.mock import Mock
+
+        vector_sync = Mock()
+        monkeypatch.setattr(service, "_sync_vector_runtime_state", vector_sync)
+        runtime_state_store.set_runtime_state(sample_worker.id, WorkerRuntimeState.OFFLINE)
+
+        service.set_online(sample_worker.id, defer_vector_sync=True)
+        vector_sync.assert_not_called()
+
+        runtime_state_store.set_runtime_state(sample_worker.id, WorkerRuntimeState.OFFLINE)
+        service.sync_online_vectors_if_current(sample_worker.id)
+        vector_sync.assert_not_called()
+
+        runtime_state_store.set_runtime_state(sample_worker.id, WorkerRuntimeState.ONLINE)
+        service.sync_online_vectors_if_current(sample_worker.id)
+        vector_sync.assert_called_once_with(sample_worker.id, WorkerRuntimeState.ONLINE)
+
+        vector_sync.reset_mock()
+        service.set_online(sample_worker.id, defer_vector_sync=True)
+        vector_sync.assert_not_called()
+
     def test_set_online_disabled_worker(self, service, registry_store, runtime_state_store):
         """测试 disabled worker 不能设为 online"""
         # 创建 disabled worker

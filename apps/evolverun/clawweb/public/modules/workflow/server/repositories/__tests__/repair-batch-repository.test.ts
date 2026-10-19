@@ -93,7 +93,7 @@ describe('repair item/revision storage using real SQLite', () => {
     await expect(db.transaction(tx => repo.createRevision(tx, { input: frozen(), requestId: 'request-1', requestDigest: '9'.repeat(64), expectedAttemptRevision: 0 }))).rejects.toMatchObject({ code: 'IDEMPOTENCY_MISMATCH' });
     await expect(db.transaction(tx => repo.setDisposition(tx, { workflowId: 'wf-1', itemId: 'item-1', expectedStateVersion: 1, action: 'no_action', actorId: 'human', requestId: 'ignore', reason: '' }))).rejects.toMatchObject({ code: 'ITEM_BUSY' });
     const other = { ...frozen(), taskId: 'task-2', taskBranch: 'repair/wf-1/task-2' };
-    await expect(create(repo, db, other, 'other-request')).rejects.toMatchObject({ code: 'ACTIVE_TASK_CONFLICT' });
+    await expect(create(repo, db, other, 'other-request')).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
     expect(await repo.getRevision('wf-1', 'task-2', 1)).toBeNull();
   });
 
@@ -108,7 +108,7 @@ describe('repair item/revision storage using real SQLite', () => {
     await makeItem(repo, db);
     await create(repo, db);
     const result = { workflowId: 'wf-1', taskId: 'task-1', revision: 1, expectedStateVersion: 0,
-      draft: { candidateCommit: '1'.repeat(40), packDigest: 'f'.repeat(40) }, checks: { candidateCommit: '1'.repeat(40), status: 'not_covered' }, phase: 'review' as const };
+      draft: { candidateCommit: '1'.repeat(40), packDigest: 'f'.repeat(40), modelInputs: [{itemId:'item-1',coreInput:'Exact prompt for v1',materials:{files:[{path:'event.json',bytes:42}]}}] }, checks: { candidateCommit: '1'.repeat(40), status: 'not_covered' }, phase: 'review' as const };
     await db.transaction(tx => repo.completeDraft(tx, result));
     await expect(db.transaction(tx => repo.failDraft(tx, { workflowId: 'wf-1', taskId: 'task-1', revision: 1, expectedStateVersion: 1, error: { code: 'LATE_FAILURE' } }))).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
     await create(repo, db, frozen([item()], 2), 'request-2', 1);

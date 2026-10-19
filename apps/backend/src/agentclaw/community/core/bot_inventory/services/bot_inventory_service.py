@@ -474,7 +474,7 @@ class BotInventoryService(BotInventoryServiceProtocol):
             display_state = lifecycle_card.display_state
             actions = lifecycle_card.actions
             disabled = {}
-            raw_status = lifecycle_card.status
+            raw_status = str(row.get("status") or "")
         actions, disabled = self._actions_for_level(
             kind=kind,
             actions=tuple(actions),

@@ -5,24 +5,54 @@ from typing import Protocol, runtime_checkable
 
 from agentclaw.community.core.task.domain.models import (
     AcceptanceResult,
+    BotCandidate,
     NodeOpResult,
     TaskExecutionGraph,
+    TaskContext,
     TaskNode,
     TaskOpResult,
+    TaskReportCommand,
+    TaskReportResult,
     TaskSpec,
 )
 from agentclaw.community.core.task.domain.requests import TaskInfoRequest
-from agentclaw.community.core.task.repository.types import TaskInfoRecord
+from agentclaw.community.core.task.domain.intake import (
+    TaskIntakeCommand,
+    TaskIntakeContext,
+    TaskIntakeResult,
+)
+from agentclaw.community.core.task.repository.types import (
+    BbsTaskOverviewRecord,
+    TaskInfoRecord,
+)
 
 
 @runtime_checkable
 class TaskServiceProtocol(Protocol):
-    """系统唯一对外入口。facade 内部由 ExecutionEngine 编排核协调
+    """系统唯一对外入口。facade 内部由 CentralizedExecutionAdapter 编排核协调
     TaskGraphService/TaskPlanner/TaskDispatcher/TaskRunner。"""
 
     async def execute(self, request: TaskInfoRequest) -> TaskOpResult:
         """提交执行任务:持久化 task_info(PENDING)→ initialize_graph(根 PENDING)→ 编排核 on_execute
         首帧推进。task_id 服务端生成(uuid4)。返回 TaskOpResult(含 task_id + run_id)。"""
+        ...
+
+    async def intake(
+        self, command: TaskIntakeCommand, context: TaskIntakeContext,
+    ) -> TaskIntakeResult: ...
+
+    def get_confirmed_intake(
+        self, session_id: str, owner_user_id: str,
+    ) -> TaskIntakeResult: ...
+
+    async def dispatch_node(self, task_id: str, node_id: str) -> TaskNode: ...
+
+    async def dispatch_pending_intents(self, *, limit: int = 100) -> int: ...
+
+    def get_task_context(self, task_id: str) -> TaskContext: ...
+
+    def get_node_context(self, task_id: str, node_id: str) -> TaskContext:
+        """Return the graph-projected S1 input for one baton."""
         ...
 
     def get_task_dashboard(
@@ -53,11 +83,29 @@ class TaskServiceProtocol(Protocol):
         """列持久化任务记录的一页(1-based),可选按状态(单值或逗号分隔多值)和 owner 过滤,返回 (items, total)。"""
         ...
 
-    def claim_bbs_task(self, task_id: str, bot_id: str) -> NodeOpResult:
+    def list_bbs_tasks(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        *,
+        search_word: str | None = None,
+        status: str | None = None,
+    ) -> tuple[list[BbsTaskOverviewRecord], int]: ...
+
+    def claim_bbs_task(
+        self, task_id: str, bot_id: str, node_id: str | None = None, *,
+        claim_id: str | None = None,
+    ) -> NodeOpResult:
         """BBS 接力步②:任务根级 CAS 占有(恰一赢;输者/非 bbs 任务 → TaskStateError)。
 
         供 bbs/claim 路由(FR-PICK-02)调用,委托 TaskGraphService.claim_bbs_owner。"""
         ...
+
+    async def report(self, command: TaskReportCommand) -> TaskReportResult: ...
+
+    async def search_bots(
+        self, *, query: str, task_id: str, node_id: str,
+    ) -> list[BotCandidate]: ...
 
     def attach_bbs_node(
         self, task_id: str, parent_node_id: str, task_spec: TaskSpec, bot_id: str
@@ -76,9 +124,25 @@ class TaskServiceProtocol(Protocol):
         """BBS 接力步⑤:回投 scoped 节点终态 + 释放 claim;收口由框架经 owner 复核根 gap 自行收口(非 bot 声明)。
 
         acceptance_result(PASS→SUCCESS / FAIL+gaps→DONE)/ output_patch(checkpoint fold)/
-        exec_error(执行报错 fold)。bot_id 须为当前 bbs_owner,否则 TaskStateError。委托 ExecutionEngine.on_bbs_report。
+        exec_error(执行报错 fold)。bot_id 须为当前 bbs_owner,否则 TaskStateError。委托 CentralizedExecutionAdapter.on_bbs_report。
         """
         ...
+
+    async def update_task_node_info(
+        self,
+        task_id: str,
+        node_id: str,
+        *,
+        status: str | None = None,
+        run_mode: str | None = None,
+        assignee: str | None = None,
+        output_patch: dict | None = None,
+        acceptance_result: AcceptanceResult | None = None,
+        exec_error: str | None = None,
+        progress_reason: str | None = None,
+        failure_reason: str | None = None,
+        extend_props_patch: dict | None = None,
+    ) -> NodeOpResult: ...
 
     async def converge_by_session(
         self, session_id: str, *, success: bool, output: object = None,
@@ -101,5 +165,5 @@ class TaskServiceProtocol(Protocol):
     async def redrive_task(self, task_id: str) -> None:
         """Recovery resume entrypoint: re-dispatch a hydrated non-terminal task
         after an instance restart / rolling deploy. Idempotent; non-terminal
-        runtime status only. Drives ``ExecutionEngine.redrive``."""
+        runtime status only. Drives ``CentralizedExecutionAdapter.redrive``."""
         ...

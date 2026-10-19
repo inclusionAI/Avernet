@@ -1385,10 +1385,10 @@ def test_cutover_retry_replays_residue_after_merge_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from engine.community.plugins.openclaw import layout_activation
+    from engine.community.plugins.skills_pool import layout_storage
 
     home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
-    real_merge = layout_activation.merge_post_cutover_changes
+    real_merge = layout_storage.merge_post_cutover_changes
     fail_residue_once = True
 
     def recreate_legacy_local() -> None:
@@ -1405,7 +1405,7 @@ def test_cutover_retry_replays_residue_after_merge_failure(
         return real_merge(**kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(
-        layout_activation,
+        layout_storage,
         "merge_post_cutover_changes",
         flaky_merge,
     )

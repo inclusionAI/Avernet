@@ -1,0 +1,26 @@
+schema_version: 1
+
+sources:
+  content:
+    protocol: git
+    url: https://code.example-corp.com/team/content.git
+    ref: v1.2.0
+    auth: corp-git-content
+  order-lookup:
+    protocol: oss
+    bucket: artifacts
+    key: tools/skills/order-lookup-1.4.0.zip
+    auth: oss-artifacts
+
+manifest:
+  identity:
+    - type: SOUL.md
+      from: content
+      subpath: bots/support-agent/soul.md
+    - type: RULES.md
+      from: content
+      subpath: kb/service-rules.md
+    - type: SAFETY.md
+      content: |
+        # 安全边界
+        不承诺退款金额；涉及资损问题一律转人工。

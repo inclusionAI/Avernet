@@ -40,6 +40,7 @@ from agentclaw.community.core.models.mcp import (
     BotMCPInstallation,
     SkillSetMCPServer,
 )
+from agentclaw.community.core.models.skill_installation_source import BotSkillInstallationSource
 from agentclaw.community.core.models.skill import (
     BotSkillInstallation,
     Skill,
@@ -607,6 +608,7 @@ def test_openapi_declares_local_compatibility_and_skill_asset_operations():
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate": {"post"},
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/content": {"get"},
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters": {"get", "put"},
+        "/openapi/v1/bots/{bot_id}/skills/{skill_id}/security-observations": {"get"},
     }
     for path in (
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate",
@@ -734,6 +736,7 @@ def test_a_skillset_bridged_skill_is_listed_and_gains_its_installation(tmp_path)
         SkillSetSkill,
         SkillSetMCPServer,
         BotSkillInstallation,
+        BotSkillInstallationSource,
         BotMCPInstallation,
         DefaultSkillsetSkillExclusion,
     ):
@@ -838,6 +841,7 @@ def test_router_uses_verified_principal_and_real_tenant_guard(tmp_path):
         SkillSetSkill,
         SkillSetMCPServer,
         BotSkillInstallation,
+        BotSkillInstallationSource,
         BotMCPInstallation,
         DefaultSkillsetSkillExclusion,
     ):
@@ -967,6 +971,7 @@ def test_default_bot_scope_is_owner_distinguished(tmp_path):
         SkillSetSkill,
         SkillSetMCPServer,
         BotSkillInstallation,
+        BotSkillInstallationSource,
         BotMCPInstallation,
         DefaultSkillsetSkillExclusion,
     ):

@@ -41,6 +41,9 @@ from agentclaw.community.api.local_skill_upload_service import (
 from agentclaw.community.api.direct_activation_service import (
     DirectActivationServiceProtocol,
 )
+from agentclaw.community.core.repository.protocols.local_skill_security_observation import (
+    LocalSkillSecurityObservationRepositoryProtocol,
+)
 from agentclaw.community.core.bot_app_grant.models import BotAppGrantRecord
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.gateway_principal import (
@@ -107,6 +110,23 @@ class _Grants:
         return []
 
 
+class _Observations:
+    def get_observed_incarnation_id(self, **_kwargs):
+        return None
+
+    def get_latest_handoff_for_asset(self, **_kwargs):
+        return None
+
+    def get_identity_for_asset(self, **_kwargs):
+        return None
+
+    def get_current_for_asset(self, **_kwargs):
+        return None
+
+    def page_for_asset(self, **_kwargs):
+        return 0, ()
+
+
 class _Skills:
     """One skill, on the shared bot, owned by ``OWNER``."""
 
@@ -116,6 +136,7 @@ class _Skills:
             "bolt_id": BOT,
             "user_id": OWNER,
             "name": "shared-skill",
+            "git_path": "local://shared-skill",
             "active": True,
             "gmt_created": datetime(2026, 8, 1),
             "gmt_modified": datetime(2026, 8, 2),
@@ -187,6 +208,9 @@ def client():
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotAppGrantServiceProtocol, to=_Grants())
+            binder.bind(
+                LocalSkillSecurityObservationRepositoryProtocol, to=_Observations()
+            )
             for protocol in (
                 SkillQueryServiceProtocol,
                 LocalSkillDeleteServiceProtocol,
@@ -358,3 +382,12 @@ def test_a_granted_application_cannot_aim_asset_operations_at_another_bot(
         f"/openapi/v1/bots/b-other/skills/{SKILL}/content?user_id={CALLER}"
     )
     assert response.status_code == 404
+
+
+def test_granted_application_reads_shared_bot_security_observations(client) -> None:
+    response = client.get(
+        f"/openapi/v1/bots/{BOT}/skills/{SKILL}/security-observations"
+        f"?user_id={CALLER}&owner_id={OWNER}"
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["history"] == {"total": 0, "items": []}

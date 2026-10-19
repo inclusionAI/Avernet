@@ -64,7 +64,6 @@ from agentclaw.community.api.work_order_service import (
 from agentclaw.community.core.work_orders.callbacks import (
     WorkOrderCallbackCredential,
 )
-from agentclaw.community.core.work_orders.errors import WorkOrderAccessDeniedError
 from agentclaw.community.core.work_orders.models import (
     WorkOrderDecision as DomainWorkOrderDecision,
     WorkOrderItemType as DomainWorkOrderItemType,
@@ -383,10 +382,6 @@ async def create_work_order_event(
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[WorkOrderEventCreated]:
     actor_id = _require_user_delegation(caller)
-    if body.approval_mode.value == "AUTO":
-        raise WorkOrderAccessDeniedError(
-            "AUTO events require a trusted internal business caller"
-        )
     event_log = body.model_dump(mode="json")
     if body.approval_mode.value == "MANUAL":
         event_log.pop("approval_mode", None)

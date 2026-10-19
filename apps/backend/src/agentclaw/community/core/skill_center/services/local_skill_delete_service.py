@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Callable
 
 from injector import inject
@@ -35,6 +36,11 @@ from agentclaw.community.core.skills_pool.edit_guard import (
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 from agentclaw.community.core.skill_center.local_skill_delete_service_protocol import LocalSkillDeleteServiceProtocol
+from agentclaw.community.core.skill_center.local_skill_security_upload_hook import (
+    LocalSkillSecurityUploadHook,
+)
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -55,6 +61,8 @@ class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
         skill_service_factory: SkillServiceFactory,
         edit_guard: SkillsPoolEditGuard,
         device_context_resolver_provider: Callable[[], "DeviceContextResolver"],
+        security_hook_provider: Callable[[], LocalSkillSecurityUploadHook],
+        security_observation_enabled: bool,
     ) -> None:
         self._skill_repo = skill_repo
         self._skill_set_repo = skill_set_repo
@@ -63,6 +71,8 @@ class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
         self._skill_service_factory = skill_service_factory
         self._edit_guard = edit_guard
         self._device_context_resolver_provider = device_context_resolver_provider
+        self._security_hook_provider = security_hook_provider
+        self._security_observation_enabled = security_observation_enabled
 
     async def delete_local_skill(
         self, *, skill_id: str, owner_id: str, user_id: str
@@ -118,6 +128,18 @@ class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
                     raise RuntimeError("Local Skill record disappeared during deletion")
             except Exception as exc:
                 raise LocalSkillStorageError() from exc
+            if self._security_observation_enabled:
+                try:
+                    self._security_hook_provider().record_deletion(
+                        bot_id=bot_id, owner_id=owner_id,
+                        actor_id=user_id, skill_id=int(skill_id),
+                    )
+                except Exception:
+                    logger.exception(
+                        "Local Skill deletion security sync could not be recorded "
+                        "bot_id=%s owner_id=%s skill_id=%s actor_id=%s",
+                        bot_id, owner_id, skill_id, user_id,
+                    )
         finally:
             self._edit_guard.release(lease)
 

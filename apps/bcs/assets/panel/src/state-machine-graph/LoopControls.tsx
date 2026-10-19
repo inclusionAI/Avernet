@@ -2,7 +2,7 @@ import React from 'react';
 import styled from 'styled-components';
 import type { StateMachineRunGraph } from '../StateMachineRunView';
 import type { LoopGroupLayout } from './layout';
-import { loopProgress } from './loops';
+import { loopInstance, loopProgress } from './loops';
 
 const Bar = styled.div`
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
@@ -19,22 +19,24 @@ export function LoopControls({ graph, choices, onChoose }: {
   onChoose: (loopId: string, iteration?: number) => void;
 }) {
   return <>{Object.entries(graph.loops || {}).map(([id, loop]) => {
-    const progress = loopProgress(graph, id);
-    return <Bar key={id} data-loop-controls={id}>
+    const instance = loopInstance(graph, id, choices);
+    const progress = loopProgress(graph, id, instance.ancestorIterations);
+    return <Bar key={instance.key} data-loop-controls={id} data-loop-instance={instance.key}>
       <strong title={`max_iterations: ${loop.max_iterations}`}>{loop.display_name || id}</strong><span>{progress.status}</span>
       {progress.rounds.length > 0 && <label>查看执行 <select aria-label={`${loop.display_name || id} 查看执行`}
-        value={progress.rounds.some((round) => round.iteration === choices[id]) ? choices[id] : progress.iteration} onChange={(event) => onChoose(id, Number(event.target.value))}>
+        value={progress.rounds.some((round) => round.iteration === choices[instance.key]) ? choices[instance.key] : progress.iteration} onChange={(event) => onChoose(instance.key, Number(event.target.value))}>
         {progress.rounds.map((round) => <option key={round.iteration} value={round.iteration}>
           #{round.iteration} · {round.label}
         </option>)}
       </select></label>}
-      {choices[id] !== undefined && <button type="button" onClick={() => onChoose(id)}>回到当前执行</button>}
+      {choices[instance.key] !== undefined && <button type="button" onClick={() => onChoose(instance.key)}>回到当前执行</button>}
     </Bar>;
   })}</>;
 }
 
 export function LoopContainers({ groups }: { groups: LoopGroupLayout[] }) {
-  return <>{groups.map((group) => <g key={`${group.loopId}:${group.iteration}`} data-loop-container={group.loopId}>
+  return <>{groups.map((group) => <g key={group.instanceKey || `${group.loopId}:${group.iteration}`}
+    data-loop-container={group.loopId} data-loop-instance={group.instanceKey}>
     <title>{group.title} · Loop #{group.iteration} · max_iterations: {group.maxIterations}</title>
     <rect x={group.x} y={group.y} width={group.width} height={group.height} rx={12} fill="#fff" fillOpacity={0.4} stroke="#e2e8f0" strokeWidth={1} />
     <text x={group.x + 12} y={group.y + 23} fill="#64748b" fontSize={11} fontWeight={500}>

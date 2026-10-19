@@ -420,3 +420,31 @@ class TestDeleteProviderBot:
                 teamclaw_bot_uuid="bot-uuid",
                 owner_workno="123",
             )
+
+
+@pytest.mark.parametrize("status", [200, 409, 500])
+def test_registration_boundary_logs_business_fields_without_credentials(status, service, http, caplog):
+    caplog.set_level("INFO")
+    response = _ok_response(status, {
+        "bot_uuid": "bcn-log-bot", "provider_id": "prv_40354c8a",
+        "provider_bot_ref": "log-bot:owner", "name": "Log Bot",
+        "summary": "business summary", "owners": ["owner"],
+        "bot_runtime_token": "private-runtime-value",
+    })
+    response.text = 'private-runtime-value'
+    http.set_response("post", response)
+    with patch("agentclaw.community.core.bot_management.services.bcn_service.get_current_env", return_value="pre"):
+        if status == 500:
+            with pytest.raises(BcnServiceError):
+                service.register_provider_bot(teamclaw_bot_uuid="log-bot", owner_workno="owner", name="Log Bot", summary="business summary")
+        else:
+            service.register_provider_bot(teamclaw_bot_uuid="log-bot", owner_workno="owner", name="Log Bot", summary="business summary")
+    assert "event=request" in caplog.text
+    assert f"event={'failure' if status == 500 else 'success'}" in caplog.text
+    assert "business summary" in caplog.text
+    assert "Log Bot" in caplog.text
+    assert "log-bot:owner" in caplog.text
+    assert f"status={status}" in caplog.text
+    assert "elapsed_ms=" in caplog.text
+    assert "private-runtime-value" not in caplog.text
+    assert "test-bcn-token" not in caplog.text

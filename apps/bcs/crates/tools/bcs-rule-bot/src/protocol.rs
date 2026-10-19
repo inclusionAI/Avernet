@@ -26,7 +26,8 @@ pub struct ChatHistoryParams {
 
 #[derive(Debug, Deserialize)]
 pub struct SessionDeleteParams {
-    pub bcs_group_id: String,
+    pub bcs_session_id: String,
+    pub bcs_group_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

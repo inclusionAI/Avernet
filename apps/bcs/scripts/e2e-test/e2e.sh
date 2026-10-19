@@ -5,7 +5,7 @@
 #   BCS must be running with the 5 demo bots onboarded. The standard way is to
 #   start BCS + bots via singlebox with the default 5bots_profile:
 #
-#     ./singlebox/singlebox.sh --local start bcs_bots
+#     ./singlebox/singlebox.sh start bcs_bots
 #
 #   This onboards 5 bots (CEO / 产品经理 / 研发 / 验证 / 客服), which e2e
 #   resolves by name (see BOT_*_ID defaults in common.sh).
@@ -85,6 +85,7 @@ source "$SCRIPT_DIR/stories.sh"
 source "$SCRIPT_DIR/cli-stories.sh"
 source "$SCRIPT_DIR/fixed_loop_story.sh"
 source "$SCRIPT_DIR/session_files.sh"
+source "$SCRIPT_DIR/session_owner_story.sh"
 source "$SCRIPT_DIR/edge_permission.sh"
 
 # ============================================================================

@@ -6,6 +6,8 @@ module; request-scoped service factories remain here.
 
 from __future__ import annotations
 
+from agentclaw.community.core.skill_center.services.runtime_projections.skill_projection_guard import SkillProjectionGuard
+
 import dataclasses
 from typing import Callable
 
@@ -14,6 +16,8 @@ from injector import Binder, Injector, Module, inject, provider, singleton
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
+from agentclaw.community.core.skill_center import local_skill_security_upload_hook
+from agentclaw.community.di import local_skill_security_config
 from agentclaw.community.api.repository_catalog_service import (
     RepositoryCatalogServiceProtocol,
 )
@@ -89,6 +93,12 @@ from agentclaw.community.core.repository.protocols.skill_center import (
     SkillPropagationLogRepository,
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.local_skill_security_observation import (
+    LocalSkillSecurityObservationRepositoryProtocol,
+)
+from agentclaw.community.core.repository.implementations.skill_center.local_skill_security_observation import (
+    LocalSkillSecurityObservationRepository,
+)
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillSetRepository,
 )
@@ -217,6 +227,9 @@ from agentclaw.community.di.modules.draft_content_store_module import (
 from agentclaw.community.di.modules.local_skill_upload_module import (
     LocalSkillUploadBindings,
 )
+from agentclaw.community.di.modules.local_skill_security_task_module import (
+    LocalSkillSecurityTaskBindings,
+)
 from agentclaw.community.di.modules.skill_center_protocols import (
     SkillCenterProtocolBindings,
 )
@@ -270,6 +283,7 @@ class SkillCenterModule(
     CanonicalCenterStoreBindings,
     DraftContentStoreBindings,
     LocalSkillUploadBindings,
+    LocalSkillSecurityTaskBindings,
     SkillCenterInternalTokenBindings,
     SkillCenterProtocolBindings,
     Module,
@@ -277,6 +291,8 @@ class SkillCenterModule(
     """Production singletons + factories for skill_center."""
 
     def configure(self, binder: Binder) -> None:
+        LocalSkillUploadBindings.configure(self, binder)
+        LocalSkillSecurityTaskBindings.configure(self, binder)
         # ``SkillServiceFactory`` / ``SkillSetServiceFactory`` /
         # ``SkillParameterServiceFactory`` now live in
         # ``core.skill_center.factories`` so ``api/`` and ``core/`` can
@@ -328,6 +344,11 @@ class SkillCenterModule(
         binder.bind(
             SkillCenterSyncLogRepository,
             to=UnifiedSkillCenterSyncLogRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            LocalSkillSecurityObservationRepositoryProtocol,
+            to=LocalSkillSecurityObservationRepository,
             scope=singleton,
         )
         bind_space_skill_repositories(binder)
@@ -531,6 +552,7 @@ class SkillCenterModule(
         skill_service_factory: SkillServiceFactory,
         edit_guard: SkillsPoolEditGuard,
         injector: Injector,
+        security_config: local_skill_security_config.LocalSkillSecurityObservationConfig,
     ) -> LocalSkillDeleteServiceProtocol:
         return LocalSkillDeleteService(
             skill_repo,
@@ -540,6 +562,8 @@ class SkillCenterModule(
             skill_service_factory,
             edit_guard,
             lambda: injector.get(DeviceContextResolver),
+            lambda: injector.get(local_skill_security_upload_hook.LocalSkillSecurityUploadHook),
+            security_config.enabled,
         )
 
     @singleton
@@ -571,20 +595,9 @@ class SkillCenterModule(
         pool_layouts: SkillsPoolLayoutRepositoryProtocol,
         device_contexts: DeviceContextResolver,
         center_content: CenterContentDistribution,
+        guard: SkillProjectionGuard,
     ) -> EngineRuntimeProjectionRegistry:
-        """Which runtime contract each engine's projection obeys.
-
-        Routing only — the same shape as ``CommunityDeviceSyncModule``: adding
-        an engine whose runtime differs means a new implementation and an entry
-        here, with no edit to the others. Per-domain is the *default* rather
-        than an enumerated key, so an ordinary new engine needs no entry at all
-        and mis-routing one takes a wrong entry rather than a forgotten right
-        one.
-
-        Only ``PerDomainRuntimeProjection`` takes collaborators: the Skills
-        Pool runtime and layout repository, which no other implementation and
-        no longer the projector itself needs.
-        """
+        """Wire guarded per-domain delivery; Teclaw keeps whole-artifact delivery."""
         from agentclaw.community.core.skill_center.services.runtime_projections.per_domain import (
             PerDomainRuntimeProjection,
         )
@@ -602,6 +615,7 @@ class SkillCenterModule(
                     pool_layouts=pool_layouts,
                     device_contexts=device_contexts,
                     center_content=center_content,
+                    guard=guard,
                 ),
             ),
             by_engine={"teclaw": WholeArtifactRuntimeProjection()},

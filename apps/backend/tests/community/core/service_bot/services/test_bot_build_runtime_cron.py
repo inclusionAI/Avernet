@@ -37,6 +37,8 @@ def test_publish_retry_removes_old_cron_and_never_imports_source_tasks(tmp_path,
         write(target, name, "old-artifact-task")
     write(source, "workspace/app.py", "published-code")
     write(source, "workspace/cron/example.txt", "unrelated-workspace-file")
+    if plan.engine_type == "aicoding":
+        write(source.parent, ".codefuse/fuse/codefuse.json", "published-codefuse-config")
     if plan.extra_sync_source_relpath:
         (source.parent / plan.extra_sync_source_relpath).mkdir()
     service = BotBuildService.__new__(BotBuildService)
@@ -55,6 +57,8 @@ def test_publish_retry_removes_old_cron_and_never_imports_source_tasks(tmp_path,
     assert (target / "workspace/app.py").read_text() == "published-code"
     assert (target / "workspace/cron/example.txt").exists()
     assert (source / "cron/jobs.json").read_text() == "source-task"
+    if plan.engine_type == "aicoding":
+        assert (target / "home/.codefuse/fuse/codefuse.json").read_text() == "published-codefuse-config"
     service._device_service.exec_shell_new.assert_not_called()
 
 
@@ -68,6 +72,8 @@ def test_restore_legacy_artifact_preserves_draft_runtime_tasks(tmp_path, monkeyp
         write(artifact, name, "legacy-published-task")
         write(draft, name, "draft-only-task")
     write(artifact, "workspace/app.py", "restored-code")
+    if plan.engine_type == "aicoding":
+        write(artifact, "home/.codefuse/fuse/codefuse.json", "restored-codefuse-config")
     if plan.extra_sync_target_relpath:
         (artifact / plan.extra_sync_target_relpath).mkdir()
     provider = MagicMock()
@@ -101,3 +107,5 @@ def test_restore_legacy_artifact_preserves_draft_runtime_tasks(tmp_path, monkeyp
         assert (draft / "sessions/cron-tasks.json").read_text() == "draft-only-task"
         assert (draft / "sessions/cron-runs.json").read_text() == "draft-only-task"
     assert (draft / "workspace/app.py").read_text() == "restored-code"
+    if plan.engine_type == "aicoding":
+        assert (nas_root / ".codefuse/fuse/codefuse.json").read_text() == "restored-codefuse-config"

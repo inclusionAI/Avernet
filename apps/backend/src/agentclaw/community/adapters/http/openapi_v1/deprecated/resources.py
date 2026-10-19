@@ -34,11 +34,13 @@ from ._requery import (
     deprecated_doc,
     pin_owner_to_user,
     with_query_parameter,
+    without_parameter,
 )
 from ._shim import legacy_router
 
 
 def _bot_to_query(endpoint, method, new_path):
+    endpoint = without_parameter(endpoint, "target")
     return pin_owner_to_user(
         with_query_parameter(
             endpoint,

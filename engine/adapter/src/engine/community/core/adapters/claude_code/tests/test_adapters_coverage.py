@@ -1843,7 +1843,7 @@ class TestChatAdapterCoverage:
     async def test_resolve_interaction_delegates(self):
         port = _ChatPort()
         adapter = ClaudeCodeChatAdapter(port)
-        result = await adapter.resolve_interaction("sk", "r1", response="yes")
+        result = await adapter.resolve_interaction("sk", "r1", decision="submit", answer="yes")
         assert result == {"resolved": "interaction"}
 
     async def test_resolve_mode_transition_delegates(self):

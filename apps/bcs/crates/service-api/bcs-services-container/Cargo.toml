@@ -12,13 +12,17 @@ workspace = true
 
 [dependencies]
 bcs-service-api = { workspace = true }
+bcs-app-group-context = { workspace = true, optional = true }
+bcs-group-context-store = { workspace = true, optional = true }
 bcs-test-support = { workspace = true, optional = true }
 thiserror = { workspace = true }
 
 [features]
-test-support = ["dep:bcs-test-support"]
+test-support = ["dep:bcs-test-support", "dep:bcs-app-group-context", "dep:bcs-group-context-store"]
 
 [dev-dependencies]
 async-trait = { workspace = true }
+bcs-app-group-context = { workspace = true }
+bcs-group-context-store = { workspace = true }
 bcs-test-support = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

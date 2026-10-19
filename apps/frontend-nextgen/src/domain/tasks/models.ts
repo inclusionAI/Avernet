@@ -20,6 +20,8 @@ export interface TaskExecConfig {
   orchestration_mode?: 'centralized' | 'relay';
   /** relay 根节点句柄；仅用于把首棒注入当前主 Bot 会话。 */
   root_node_id?: string;
+  /** Backend 生成的首棒协议；Frontend 只能原样转发到当前 Bot 会话。 */
+  root_execution_instruction?: string;
   MAX_DEPTH?: number;
   MAX_LOOP?: number;
   MAX_HARNESS?: number;

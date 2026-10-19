@@ -1,9 +1,11 @@
 import asyncio
+import uuid
 
 import httpx
 
+from agentclaw.community.core.task.domain.errors import BotIdentityResolutionError
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status, TaskNode, TaskSpec,
+    AcceptanceCriteria, Context, Goal, RuntimeInfo, Status, TaskNode, TaskSpec,
 )
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
@@ -11,7 +13,7 @@ from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
 )
 from agentclaw.community.core.task.task_runner.client.prompt_formatter import PromptFormatterImpl
 from agentclaw.community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
-from agentclaw.community.core.task.task_runner.client.double.double_bcs_bot_identity_resolver import (
+from tests.community.core.task.support.double.double_bcs_bot_identity_resolver import (
     _DoubleBcsBotIdentityResolver,
 )
 
@@ -62,8 +64,7 @@ def test_get_state_machine_run():
 
 def _node(group_id="g1"):
     return TaskNode(node_id="n1", task_id="t1", status=Status.RUNNING,
-                    task_spec=TaskSpec(Metadata("t1", "T", "do"), Context("bg"),
-                                       Goal("O", [AcceptanceCriteria("a1", "d")])),
+                    task_spec=TaskSpec(context=Context("bg", title="T"), goal=Goal("O", [AcceptanceCriteria("a1", "d")])),
                     run_info=RuntimeInfo(run_mode="coop_group", assignee=group_id),
                     node_run_graph=None)  # type: ignore[arg-type]
 
@@ -147,6 +148,10 @@ class _Graph:
     def update_task_node_info(self, patch):
         self.patches.append(patch)
 
+    def report(self, data):
+        assert data.data["report_type"] == "NODE_PATCH"
+        return self.update_task_node_info(data.data["payload"]["patch"])
+
 
 def test_dispatch_state_machine_persists_group_run_ids_to_node_extend_props():
     """动态派发 state_machine 后,group_id/run_id 应落进节点 run_info.extend_props(dashboard 可见),
@@ -207,11 +212,12 @@ def test_form_coop_group_does_not_attach_event_subscriptions():
     assert not bcs.created_req.event_subscriptions
 
 
-def test_form_coop_group_compares_referenced_bots_by_pure_bot_id():
-    """owner 切分补全丢 ``:owner`` 后 ``bot_ids[0]`` 为纯 bot_id,而 ``participant_bindings`` 透传全 ``bot:owner`` 串;
-    校验须按纯 bot_id 归一化比对,否则 owner 同时被 ``bot_ids``(纯)与 bindings(全串)引用时被假性判"不在
-    GroupFormation.bot_ids"(回归:预发 e2e owner=20260825_bohtfhe6:35983 兼 binding writer,被报
-    ``group bindings reference bots outside GroupFormation.bot_ids: [..bohtfhe6:35983]``)。"""
+def test_form_coop_group_uses_full_binding_identity_to_resolve_bare_participant():
+    """Legacy bare participants are disambiguated by the full identity in bindings.
+
+    This preserves the historical owner-split recovery case without weakening
+    identity matching back to the product-prefix-only comparison.
+    """
     bcs = _Bcs()
     exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
                        poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
@@ -223,9 +229,45 @@ def test_form_coop_group_compares_referenced_bots_by_pure_bot_id():
     req = bcs.created_req
     assert req is not None
     assert set(req.participant_bindings) == {"writer", "editor"}
-    # double resolver 对每个 id 拼 :double-owner(全串 b1:35983 → b1:35983:double-owner),证明流程确实到 resolve
-    assert req.participant_bindings["writer"]["bot_ids"] == ["b1:35983:double-owner"]
-    assert req.participant_bindings["editor"]["bot_ids"] == ["e1:35983:double-owner"]
+    assert [p["bot_uuid"] for p in req.participants] == ["b1:35983", "e1:35983"]
+    assert req.participant_bindings["writer"]["bot_ids"] == ["b1:35983"]
+    assert req.participant_bindings["editor"]["bot_ids"] == ["e1:35983"]
+
+
+def test_form_coop_group_rejects_cross_owner_manager_reference():
+    """A manager reference must name the same full BCS identity as participants."""
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
+
+    try:
+        _run(exe.form_coop_group(GroupFormation(
+            bot_ids=["default:410025"], collab_mode="manager_worker",
+            extend_props={"manager_bot_id": "default:399002"},
+        )))
+    except BotIdentityResolutionError as exc:
+        assert "default:399002" in str(exc)
+    else:
+        raise AssertionError("cross-owner manager reference must fail closed")
+    assert bcs.created_req is None
+
+
+def test_form_coop_group_aliases_bare_participant_to_full_manager():
+    """A bare participant and full manager with the same product are one bot."""
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["default"], collab_mode="manager_worker",
+        members_info=[{"bot_id": "default:410025", "role": "manager"}],
+        extend_props={"manager_bot_id": "default:410025"},
+    )))
+
+    req = bcs.created_req
+    assert req is not None
+    assert req.driver_bot == "default:410025"
+    assert req.master_bot == "default:410025"
+    assert req.participants == [{"bot_uuid": "default:410025", "role": "manager"}]
 
 
 def test_form_coop_group_adds_binding_targets_to_participants():
@@ -257,11 +299,34 @@ def test_form_coop_group_adds_binding_targets_to_participants():
     assert req is not None
     participant_ids = {p["bot_uuid"] for p in req.participants}
     assert participant_ids == {
-        "default:146836:double-owner",
-        "default:153364:double-owner",
+        "default:146836",
+        "default:153364",
     }
-    assert req.participant_bindings["editor"]["bot_ids"] == ["default:146836:double-owner"]
-    assert req.participant_bindings["writer"]["bot_ids"] == ["default:153364:double-owner"]
+    assert req.participant_bindings["editor"]["bot_ids"] == ["default:146836"]
+    assert req.participant_bindings["writer"]["bot_ids"] == ["default:153364"]
+
+
+def test_form_coop_group_relay_uses_stable_node_scoped_idempotency_key():
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["mgr", "worker"],
+        collab_mode="manager_worker",
+        members_info=[{"bot_id": "mgr", "role": "manager"}, {"bot_id": "worker", "role": "worker"}],
+        extend_props={
+            "relay_execution": True,
+            "loop_task_id": "task-1::node-group",
+            "task_id": "task-1",
+            "node_id": "node-group",
+            "manager_bot_id": "mgr",
+        },
+    )))
+
+    expected = str(uuid.uuid5(
+        uuid.NAMESPACE_URL, "avernet-relay-group:task-1::node-group"
+    ))
+    assert bcs.created_req.idempotency_key == expected
 
 
 def test_form_coop_group_manager_worker_attaches_event_subscriptions():

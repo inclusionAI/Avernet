@@ -11,9 +11,26 @@ from agentclaw.community.api.task.task_grant_service import (
     RevokeResult,
     TaskClaimGrantServiceProtocol,
 )
+from agentclaw.community.core.task.domain.intake import (
+    IntakeTarget,
+    IntakeTargetType,
+    TaskExecutionMode,
+    TaskIntakeResult,
+    TaskIntakeStatus,
+)
 from agentclaw.community.core.task.domain.models import (
+    AcceptanceCriteria,
+    Context,
+    Goal,
     NodeOpResult,
+    RuntimeInfo,
+    Status,
+    TaskContext,
+    TaskExecutionGraph,
+    TaskNode,
     TaskOpResult,
+    TaskSourceType,
+    TaskSpec,
 )
 from agentclaw.community.core.task.task_discovery.discovery_service import DiscoveryService
 from agentclaw.community.core.task.task_discovery.scheduler import TaskDiscoveryScheduler
@@ -48,6 +65,9 @@ _CALLBACK_BODY = {
     "loop_task_id": "task-endpoint-1::root",
 }
 
+_STAFF_COOKIE = {"cookie": "staff_id=user-endpoint-1"}
+
+
 
 class _CallbackSink:
     async def start_run(self, _data) -> None:
@@ -61,6 +81,12 @@ class _CallbackTaskService:
     def __init__(self) -> None:
         self.callback = _CallbackSink()
 
+    def get_task_dashboard(self, task_id, node_id=None, *, include_action_log=False):
+        # The /callback happy path's legacy-result guard reads
+        # ``graph.extend_props.get("execution_config", {})``; an empty stand-in
+        # short-circuits the guard (no relay-mode reject).
+        return SimpleNamespace(extend_props={})
+
 
 def _seed_task_service(world) -> None:
     async def execute(_self, _task_info):
@@ -71,7 +97,7 @@ def _seed_task_service(world) -> None:
             extend_props={"group_id": "bcs_grp_endpoint_1"},
         )
 
-    def claim(_self, task_id, _bot_id):
+    def claim(_self, task_id, bot_id=None, node_id=None, *, claim_id=None):
         return NodeOpResult(task_id=task_id, node_id="root", success=True)
 
     def attach(_self, task_id, _parent_node_id, _task_spec, _bot_id):
@@ -111,6 +137,111 @@ def _seed_scheduler_error(world) -> None:
         raise RuntimeError("scheduler unavailable")
 
     bind_overrides(world, TaskDiscoveryScheduler, {"get_status": get_status})
+
+
+_DOMAIN_TASK_SPEC = TaskSpec(
+    context=Context(
+        title="Endpoint case",
+        background="endpoint coverage",
+        extend_props={"deliverables": ["report"], "constraints": []},
+    ),
+    goal=Goal(
+        objective="exercise the task intake and relay routes",
+        acceptances=[AcceptanceCriteria(id="ac1", description="return the case fixture")],
+    ),
+)
+_TOKEN = "relay-1"
+
+
+def _seed_internal_task(world) -> None:
+    def get_task_dashboard(_self, _task_id, _node_id=None, *, include_action_log=False):
+        return TaskExecutionGraph(
+            run_id=1,
+            loop_round=0,
+            status=Status.PENDING,
+            task_id="task-endpoint-1",
+        )
+
+    bind_overrides(world, TaskServiceProtocol, {"get_task_dashboard": get_task_dashboard})
+
+
+def _seed_relay_context(world) -> None:
+    node = TaskNode(
+        node_id="relay-node-1",
+        task_id="task-endpoint-1",
+        status=Status.RUNNING,
+        task_spec=_DOMAIN_TASK_SPEC,
+        run_info=RuntimeInfo(extend_props={"relay_token": _TOKEN}),
+        node_run_graph=None,
+    )
+    graph = TaskExecutionGraph(
+        run_id=1,
+        loop_round=0,
+        status=Status.RUNNING,
+        tasks=[node],
+        extend_props={"execution_config": {"orchestration_mode": "relay"}},
+        task_id="task-endpoint-1",
+    )
+
+    def get_task_dashboard(_self, _task_id, _node_id=None, *, include_action_log=False):
+        return graph
+
+    def get_node_context(_self, _task_id, _node_id):
+        return TaskContext(
+            spec=_DOMAIN_TASK_SPEC,
+            all_done_output=[],
+            gaps=[],
+            task_id="task-endpoint-1",
+            node_id="relay-node-1",
+            root_task_spec=_DOMAIN_TASK_SPEC,
+            current_task_spec=_DOMAIN_TASK_SPEC,
+        )
+
+    bind_overrides(
+        world,
+        TaskServiceProtocol,
+        {"get_task_dashboard": get_task_dashboard, "get_node_context": get_node_context},
+    )
+
+
+def _seed_intake(world) -> None:
+    async def intake(_self, _command, _context):
+        return TaskIntakeResult(
+            session_id="intake-session-1",
+            owner_user_id="user-endpoint-1",
+            source_type=TaskSourceType.API,
+            status=TaskIntakeStatus.CLARIFYING,
+            create_time_ms=1,
+            update_time_ms=1,
+        )
+
+    bind_overrides(world, TaskServiceProtocol, {"intake": intake})
+
+
+def _seed_confirmed_start(world) -> None:
+    confirmed = TaskIntakeResult(
+        session_id="intake-session-1",
+        owner_user_id="user-endpoint-1",
+        source_type=TaskSourceType.API,
+        status=TaskIntakeStatus.CONFIRMED,
+        target=IntakeTarget(IntakeTargetType.BOT, "bot-endpoint-1"),
+        execution_mode=TaskExecutionMode.RELAY,
+        task_spec=_DOMAIN_TASK_SPEC,
+        create_time_ms=1,
+        update_time_ms=1,
+    )
+
+    def get_confirmed_intake(_self, _session_id, _owner_user_id):
+        return confirmed
+
+    async def execute(_self, _request):
+        return TaskOpResult(task_id="task-confirmed-1", success=True, run_id=1)
+
+    bind_overrides(
+        world,
+        TaskServiceProtocol,
+        {"get_confirmed_intake": get_confirmed_intake, "execute": execute},
+    )
 
 
 def _seed_scheduled_trigger_error(world) -> None:
@@ -154,6 +285,136 @@ def execute_happy():
     expect=ExpectError(status=422),
 )
 def execute_error():
+    pass
+
+
+# Authenticated dashboard lookup for a single goal.
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/{{task_id}}",
+    scenario="happy_ok",
+    seed=_seed_internal_task,
+    input=CaseInput(headers=_STAFF_COOKIE, path_params={"task_id": "task-endpoint-1"}),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"code": 200000, "data": {"run_id": 1, "status": "DEFINED"}},
+    ),
+)
+def internal_task_happy():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/{{task_id}}",
+    scenario="err_unauthenticated",
+    input=CaseInput(path_params={"task_id": "task-endpoint-1"}),
+    expect=ExpectError(status=401),
+)
+def internal_task_unauthenticated():
+    pass
+
+
+# Human-authenticated two-phase intake and formal execution.
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/intake",
+    scenario="happy_ok",
+    seed=_seed_intake,
+    input=CaseInput(
+        headers=_STAFF_COOKIE,
+        json_body={
+            "action": "START",
+            "message": "Clarify this endpoint case",
+            "requested_target": {"target_type": "BOT", "target_id": "bot-endpoint-1"},
+        },
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {"session_id": "intake-session-1", "status": "CLARIFYING"},
+        },
+    ),
+)
+def intake_happy():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/intake",
+    scenario="err_unauthenticated",
+    input=CaseInput(json_body={"action": "START", "message": "Clarify this"}),
+    expect=ExpectError(status=401),
+)
+def intake_unauthenticated():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/start",
+    scenario="happy_ok",
+    seed=_seed_confirmed_start,
+    input=CaseInput(
+        headers=_STAFF_COOKIE,
+        json_body={"session_id": "intake-session-1"},
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"code": 200000, "data": {"task_id": "task-confirmed-1"}},
+    ),
+)
+def confirmed_start_happy():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/start",
+    scenario="err_unauthenticated",
+    input=CaseInput(json_body={"session_id": "intake-session-1"}),
+    expect=ExpectError(status=401),
+)
+def confirmed_start_unauthenticated():
+    pass
+
+
+# Distributed Relay fetches node context under its current execution generation.
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/{{task_id}}/nodes/{{node_id}}/context",
+    scenario="happy_ok",
+    seed=_seed_relay_context,
+    input=CaseInput(
+        headers={"X-Relay-Token": _TOKEN},
+        path_params={"task_id": "task-endpoint-1", "node_id": "relay-node-1"},
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {"task_id": "task-endpoint-1", "node_id": "relay-node-1"},
+        },
+    ),
+)
+def relay_context_happy():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/{{task_id}}/nodes/{{node_id}}/context",
+    scenario="err_expired_relay_attempt",
+    seed=_seed_relay_context,
+    input=CaseInput(
+        headers={"X-Relay-Token": "expired"},
+        path_params={"task_id": "task-endpoint-1", "node_id": "relay-node-1"},
+    ),
+    expect=ExpectError(status=409),
+)
+def relay_context_expired_attempt():
     pass
 
 
@@ -360,7 +621,6 @@ def scheduled_trigger_error():
 
 # ── 任务认领 grant/revoke + claim_on JOIN 灰度开关(internal /api/v1 face)─────────
 _GRANT_BODY = {"bcs_bot_id": "bot-endpoint-1:ent"}
-_STAFF_COOKIE = {"cookie": "staff_id=user-endpoint-1"}
 
 
 def _seed_grant_service(world) -> None:

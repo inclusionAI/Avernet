@@ -1,7 +1,8 @@
 import { digestCanonicalJson, type WorkflowEvolutionDiagnosis } from './contracts.js';
 
-export type IssueAnalysis = { analysisId: string; flowId: string | null; flowIds?: string[]; completedAtMs: number; diagnoses: WorkflowEvolutionDiagnosis[] };
-export type IssueSource = WorkflowEvolutionDiagnosis & { sourceId: string; analysisId: string; flowId: string; completedAtMs: number };
+type IssueDiagnosis = Omit<WorkflowEvolutionDiagnosis, 'severity'> & { severity: WorkflowEvolutionDiagnosis['severity'] | null };
+export type IssueAnalysis = { analysisId: string; flowId: string | null; flowIds?: string[]; completedAtMs: number; analysisContext?: { facts: unknown[]; inferences: unknown[]; unknowns: unknown[]; evidenceStatus: unknown; workflowSnapshot?: unknown }; diagnoses: IssueDiagnosis[] };
+export type IssueSource = IssueDiagnosis & { sourceId: string; analysisId: string; flowId: string; completedAtMs: number; analysisContext?: IssueAnalysis['analysisContext'] };
 export type IssueGroup = { workflowId: string; signature: string; inputDigest: string; flowIds: string[]; sources: IssueSource[] };
 export const ISSUE_AGGREGATION_INPUT_V1 = 'workflow-issue-summary-input/v1' as const;
 export const ISSUE_AGGREGATION_INPUT_V2 = 'workflow-issue-summary-input/v2' as const;
@@ -74,7 +75,7 @@ export function buildIssueGroups(workflowId: string, analyses: IssueAnalysis[]):
   for (const [flowId, analysis] of latest) {
     for (const diagnosis of analysis.diagnoses.filter(d => d.flowIds.includes(flowId))) {
       const source: IssueSource = { ...diagnosis, flowIds: [flowId], flowId, analysisId: analysis.analysisId,
-        completedAtMs: analysis.completedAtMs,
+        completedAtMs: analysis.completedAtMs, ...(analysis.analysisContext ? { analysisContext: analysis.analysisContext } : {}),
         sourceId: digestCanonicalJson([analysis.analysisId, diagnosis.diagnosisId, flowId]),
       };
       const sources = groups.get(diagnosis.failureSignature) ?? [];

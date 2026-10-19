@@ -463,6 +463,18 @@ pub async fn prepare_group_admission(
     sender_name: &str,
     sender_owner: Option<String>,
 ) -> ServiceResult<Option<AdmitMessageDeliveries>> {
+    prepare_group_admission_with_message(flow, group, command, decision, sender_name, sender_owner, None).await
+}
+
+pub(crate) async fn prepare_group_admission_with_message(
+    flow: &BcsMessageFlow,
+    group: &Group,
+    command: &WebSendCommand,
+    decision: &RoutingDecision,
+    sender_name: &str,
+    sender_owner: Option<String>,
+    canonical_message: Option<(&str, &NewMessage)>,
+) -> ServiceResult<Option<AdmitMessageDeliveries>> {
     // State-machine is an independently gated business flow, even when its
     // transport happens to be the group endpoint.
     if group.group_strategy == GroupStrategy::StateMachine {
@@ -521,26 +533,32 @@ pub async fn prepare_group_admission(
         });
     }
     let now_ms = chrono::Utc::now().timestamp_millis();
-    let message_id = uuid::Uuid::new_v4().to_string();
-    let sender_type = if command.from_actor_id.starts_with("human_") { SenderType::Human } else { SenderType::Bot };
-    let (visibility_domain, audience) = crate::group_flow::persisted_message_visibility(Some(group), &command.from_actor_id, sender_type, "chat", None)?;
-    let message = NewMessage {
-        group_id: group.id.clone(),
-        session_id: session_id.into(),
-        sender_id: command.from_actor_id.clone(),
-        sender_type: if command.from_actor_id.starts_with("human_") {
-            SenderType::Human
-        } else {
-            SenderType::Bot
-        },
-        message_type: "chat".into(),
-        content: queued_inbound_content(command),
-        client_msg_id: command.idempotency_key.clone(),
-        visibility_domain,
-        audience,
-        owner_bot_id: None,
-        created_at: now_ms as u64,
-        run_id: String::new(),
+    let (message_id, message) = match canonical_message {
+        Some((id, message)) => (id.to_owned(), message.clone()),
+        None => {
+            let message_id = uuid::Uuid::new_v4().to_string();
+            let sender_type = if command.from_actor_id.starts_with("human_") { SenderType::Human } else { SenderType::Bot };
+            let (visibility_domain, audience) = crate::group_flow::persisted_message_visibility(Some(group), &command.from_actor_id, sender_type, "chat", None)?;
+            let message = NewMessage {
+                group_id: group.id.clone(),
+                session_id: session_id.into(),
+                sender_id: command.from_actor_id.clone(),
+                sender_type: if command.from_actor_id.starts_with("human_") {
+                    SenderType::Human
+                } else {
+                    SenderType::Bot
+                },
+                message_type: "chat".into(),
+                content: queued_inbound_content(command),
+                client_msg_id: command.idempotency_key.clone(),
+                visibility_domain,
+                audience,
+                owner_bot_id: None,
+                created_at: now_ms as u64,
+                run_id: String::new(),
+            };
+            (message_id, message)
+        }
     };
     let event = prepare_message_event(flow, &message_id, &message)?;
     Ok(Some(AdmitMessageDeliveries {

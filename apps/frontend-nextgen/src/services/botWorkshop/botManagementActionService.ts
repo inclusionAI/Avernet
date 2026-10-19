@@ -9,8 +9,13 @@ const runners: Record<BotManagementVerb, (bot: BotDomain) => Promise<void>> = {
   },
   delete: (bot) => botWorkshopService.remove(bot),
   restart: (bot) => botWorkshopService.restart(bot),
+  // Coding Bot暂时以 engine_restart 作为入口，但实际预设转发 Relay refetch 语义。
   engine_restart: (bot) =>
-    bot.deployment === 'local' ? botWorkshopService.restart(bot) : botWorkshopService.restartEngine(bot.id),
+    bot.runtime.isAgentCodingBot
+      ? botWorkshopService.refetchEngine(bot.id)
+      : bot.deployment === 'local'
+      ? botWorkshopService.restart(bot)
+      : botWorkshopService.restartEngine(bot.id),
   upgrade: (bot) => botWorkshopService.enableService(bot.id),
   restart_publish: (bot) => botWorkshopService.restartPublish(bot),
 };

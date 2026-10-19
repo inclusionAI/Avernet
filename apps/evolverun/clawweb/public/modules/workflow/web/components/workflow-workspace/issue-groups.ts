@@ -1,9 +1,14 @@
+import type { WorkflowSnapshotBinding } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot'
+import type { RepairVersionScope } from '../../../server/contracts/repair-version-scope'
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import type { EvolveRunDiagnosis } from '@avernet/clawweb-shared/web/api/client';
 import { readOnlyJson } from '../../api/read-only-json';
 
+import type { IssuePriority } from '@avernet/clawevolve/server/services/evolution/issue-priority';
+
 export type IssueGroupView = {
+  versionScope?: RepairVersionScope; priority?: IssuePriority;
   presentation?: 'summary';
   workflowId: string; signature: string; inputDigest: string; flowIds: string[];
   aggregationStatus: string; aggregationId: string | null; stale: boolean;
@@ -11,25 +16,29 @@ export type IssueGroupView = {
   aggregationInputSummary?: { totalSources: number; fullSources: number; compactSources: number } | null;
   sources: Array<{ sourceId: string; flowId: string; flowIds: string[]; analysisId: string; diagnosisId: string;
     nodeId: string | null; failureSignature: string; failureMode: string; reasoning: string; completedAtMs: number; evidenceEventIds: string[];
-    proposal?: { summary: string; operations: unknown[] } }>;
+    analysisContext?: { workflowSnapshot?: WorkflowSnapshotBinding }; proposal?: { summary: string; operations: unknown[] } }>;
   summarySources?: IssueGroupView['sources'];
   summary: null | { summary: string; unknowns: string[]; causes: Array<{ title: string; conclusion: string;
     certainty: 'supported' | 'hypothesis' | 'unknown'; sourceIds: string[] }> };
 };
 
-export type IssuePageQuery = { page: number; pageSize: number; nodeId?: string; failureMode?: string };
+export type IssuePageQuery = { versionScope?: RepairVersionScope; page: number; pageSize: number; nodeId?: string; failureMode?: string; sort?: 'priority' | 'frequency' | 'recent'; severity?: string };
 export type IssuePage = { groups: IssueGroupView[]; facets?: { nodes: string[]; modes: string[] };
   page?: { page: number; pageSize: number; total: number; totalPages: number } };
 export function useIssueGroups(workflowId: string, query?: IssuePageQuery) {
   const params = new URLSearchParams({ workflowId, view: 'summary' });
   if (query) {
     params.set('page', String(query.page)); params.set('pageSize', String(query.pageSize));
+    if (query.versionScope) params.set('versionScope', query.versionScope);
+    if (query.sort) params.set('sort', query.sort);
+    if (query.severity) params.set('severity', query.severity);
     if (query.nodeId) params.set('nodeId', query.nodeId);
     if (query.failureMode) params.set('failureMode', query.failureMode);
   }
   return useQuery({ queryKey: ['evolve-issue-groups', workflowId, query],
     queryFn: ({ signal }) => readOnlyJson<IssuePage>(`/api/evolve/issue-groups?${params}`, signal),
     retry: false, staleTime: 30_000, gcTime: 300_000,
+    placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === workflowId ? previous : undefined,
     enabled: !!workflowId,
     refetchInterval: query => query.state.data?.groups.some(group => group.aggregationStatus === 'queued') ? 15_000 : 60_000,
   });
@@ -37,10 +46,11 @@ export function useIssueGroups(workflowId: string, query?: IssuePageQuery) {
 
 export function useIssueGroupDetail(group: IssueGroupView | undefined) {
   const compact = group?.presentation === 'summary';
-  const query = useQuery({ queryKey: ['issue-detail', group?.workflowId, group?.signature, group?.inputDigest, group?.aggregationId, group?.aggregationStatus],
+  const query = useQuery({ queryKey: ['issue-detail', group?.workflowId, group?.signature, group?.inputDigest, group?.aggregationId, group?.aggregationStatus, group?.versionScope],
     enabled: compact && !!group, staleTime: 30_000, gcTime: 300_000, retry: false,
     queryFn: async ({ signal }) => {
       const params = new URLSearchParams({ workflowId: group!.workflowId, signature: group!.signature });
+      if (group!.versionScope) params.set('versionScope', group!.versionScope);
       const result = await readOnlyJson<{ groups: IssueGroupView[] }>(`/api/evolve/issue-groups?${params}`, signal);
       const detail = result.groups.find(value => value.signature === group!.signature);
       if (!detail) throw new Error('该问题已更新，请刷新问题列表');
@@ -51,14 +61,14 @@ export function useIssueGroupDetail(group: IssueGroupView | undefined) {
 }
 
 /** A selected issue stays reachable even when it is not on the current list page. */
-export function useSelectedIssueGroup(workflowId: string, signature: string | null, current?: IssueGroupView) {
+export function useSelectedIssueGroup(workflowId: string, signature: string | null, current?: IssueGroupView, versionScope: RepairVersionScope = 'current') {
   const [lookup, setLookup] = useState<{ group?: IssueGroupView; error?: string }>({})
   const [refresh, setRefresh] = useState(0)
   useEffect(() => {
     setLookup({})
     if (!signature || current) return
     const controller = new AbortController()
-    const params = new URLSearchParams({ workflowId, signature, view: 'summary' })
+    const params = new URLSearchParams({ workflowId, signature, view: 'summary', versionScope })
     readOnlyJson<{ groups: IssueGroupView[] }>(`/api/evolve/issue-groups?${params}`, controller.signal)
       .then(result => {
         if (controller.signal.aborted) return
@@ -66,7 +76,7 @@ export function useSelectedIssueGroup(workflowId: string, signature: string | nu
         setLookup(group ? { group } : { error: '该问题已更新，请刷新问题列表。' })
       }).catch(reason => { if (!controller.signal.aborted) setLookup({ error: reason instanceof Error ? reason.message : String(reason) }) })
     return () => controller.abort()
-  }, [workflowId, signature, current?.signature, refresh])
+  }, [workflowId, signature, current?.signature, refresh, versionScope])
   return { group: current ?? (lookup.group?.signature === signature ? lookup.group : undefined),
     error: lookup.error, retry: () => setRefresh(value => value + 1) }
 }

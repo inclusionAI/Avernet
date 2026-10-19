@@ -13,9 +13,9 @@ import json
 import logging
 import sqlite3
 from datetime import datetime
+from functools import wraps
+from threading import RLock
 from typing import Optional
-
-logger = logging.getLogger(__name__)
 
 from src.domain.models.worker import (
     Worker,
@@ -35,6 +35,17 @@ from src.domain.models.worker_source_info import WorkerSourceType
 from src.domain.models.worker_config import WorkerConfig
 from src.domain.exceptions import DuplicateWorkerException, WorkerNotFoundException
 from src.infra.adapters.sqlite_schema import init_schema
+
+logger = logging.getLogger(__name__)
+
+
+def _serialized_connection(method):
+    """Keep all operations on one SQLite connection outside peer transactions."""
+    @wraps(method)
+    def locked(self, *args, **kwargs):
+        with self._connection_lock:
+            return method(self, *args, **kwargs)
+    return locked
 
 
 class SQLiteWorkerRegistryStore:
@@ -60,6 +71,7 @@ class SQLiteWorkerRegistryStore:
             db_path: 数据库路径，默认为内存模式
         """
         self._db_path = db_path
+        self._connection_lock = RLock()
         # check_same_thread=False 允许在多线程环境中使用
         # timeout=30.0 允许等待30秒获取锁
         self._conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30.0)
@@ -234,6 +246,7 @@ class SQLiteWorkerRegistryStore:
             "updated_by": worker.updated_by,
         }
 
+    @_serialized_connection
     def create(self, worker: Worker) -> Worker:
         """
         创建 Worker
@@ -267,6 +280,7 @@ class SQLiteWorkerRegistryStore:
 
         return worker.model_copy(deep=True)
 
+    @_serialized_connection
     def get_by_id(self, worker_id: str) -> Optional[Worker]:
         """
         根据 ID 获取 Worker
@@ -286,6 +300,7 @@ class SQLiteWorkerRegistryStore:
 
         return self._row_to_worker(row)
 
+    @_serialized_connection
     def get_by_ids(self, worker_ids: list[str]) -> dict[str, Worker]:
         """根据 ID 列表批量获取 Worker"""
         if not worker_ids:
@@ -299,6 +314,7 @@ class SQLiteWorkerRegistryStore:
         rows = cursor.fetchall()
         return {row["id"]: self._row_to_worker(row) for row in rows}
 
+    @_serialized_connection
     def batch_get_configs(self, worker_ids: list[str]) -> tuple[dict[str, "WorkerConfig"], list[str]]:
         """批量获取 Worker config，仅查 id + config 列"""
         from src.domain.models.worker_config import WorkerConfig
@@ -325,6 +341,7 @@ class SQLiteWorkerRegistryStore:
         not_found = [wid for wid in worker_ids if wid not in found_ids]
         return configs, not_found
 
+    @_serialized_connection
     def list(
         self,
         lifecycle_states: Optional[list[WorkerLifecycleState]] = None,
@@ -381,6 +398,7 @@ class SQLiteWorkerRegistryStore:
 
         return workers
 
+    @_serialized_connection
     def update(self, worker: Worker) -> Worker:
         """
         更新 Worker
@@ -407,15 +425,19 @@ class SQLiteWorkerRegistryStore:
         # 更新数据库
         data = self._worker_to_dict(updated_worker)
         set_clause = ", ".join([f"{k} = ?" for k in data.keys() if k != "id"])
-        sql = f"UPDATE bcsfuse_workers SET {set_clause} WHERE id = ?"
-        params = [v for k, v in data.items() if k != "id"] + [updated_worker.id]
+        sql = f"UPDATE bcsfuse_workers SET {set_clause} WHERE id = ? AND version = ?"
+        params = [v for k, v in data.items() if k != "id"] + [updated_worker.id, worker.version]
 
         cursor = self._conn.cursor()
         cursor.execute(sql, params)
+        if cursor.rowcount != 1:
+            self._conn.rollback()
+            raise ValueError(f"Version conflict: expected {worker.version} for {worker.id}")
         self._conn.commit()
 
         return updated_worker.model_copy(deep=True)
 
+    @_serialized_connection
     def update_lifecycle_state(
         self,
         worker_id: str,
@@ -439,6 +461,7 @@ class SQLiteWorkerRegistryStore:
         worker.lifecycle_state = lifecycle_state
         return self.update(worker)
 
+    @_serialized_connection
     def update_trust_level(self, worker_id: str, trust_level: TrustLevel) -> Worker:
         """更新 Worker 信任级别。"""
         worker = self.get_by_id(worker_id)
@@ -456,6 +479,7 @@ class SQLiteWorkerRegistryStore:
         worker.state = new_state
         return self.update(worker)
 
+    @_serialized_connection
     def delete(self, worker_id: str) -> bool:
         """
         删除 Worker（完整级联删除）
@@ -517,6 +541,7 @@ class SQLiteWorkerRegistryStore:
         )
         return True
 
+    @_serialized_connection
     def exists(self, worker_id: str) -> bool:
         """
         检查 Worker 是否存在
@@ -525,6 +550,7 @@ class SQLiteWorkerRegistryStore:
         cursor.execute("SELECT 1 FROM bcsfuse_workers WHERE id = ?", (worker_id,))
         return cursor.fetchone() is not None
 
+    @_serialized_connection
     def count(
         self,
         lifecycle_states: Optional[list[WorkerLifecycleState]] = None,
@@ -544,6 +570,7 @@ class SQLiteWorkerRegistryStore:
         cursor.execute(sql, params)
         return cursor.fetchone()[0]
 
+    @_serialized_connection
     def close(self) -> None:
         """关闭数据库连接"""
         self._conn.close()

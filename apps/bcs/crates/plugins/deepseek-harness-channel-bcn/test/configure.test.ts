@@ -4,7 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
-import { configureProfile } from '../src/configure.js';
+import { configureProfile, parseArgs } from '../src/configure.js';
+
+test('configuration CLI accepts the separator forwarded by DSH plugin exec', () => {
+  const args = ['--profile', 'web', '--endpoint', 'http://127.0.0.1:21000/', '--bot-name', 'BCN'];
+  assert.deepEqual(parseArgs(['--', ...args]), parseArgs(args));
+  assert.throws(() => parseArgs([...args, '--unknown']), /unknown option/);
+});
 
 test('configures a profile idempotently while preserving other patches and !!js expressions', async () => {
   const dshHome = await createProfile('configure-preserve', `
@@ -87,6 +93,7 @@ test('install script keeps the onboarding Token away from install and configure 
   const fakeDsh = join(binDir, 'dsh');
   await writeFile(fakeDsh, `#!/usr/bin/env node
 const fs = require('node:fs');
+if (process.argv[2] === '--version') { console.log('0.2.1-alpha.2'); process.exit(0); }
 fs.appendFileSync(process.env.CALL_LOG, JSON.stringify({ args: process.argv.slice(2), token: process.env.BCN_ONBOARDING_TOKEN ?? null }) + '\\n');
 `);
   await chmod(fakeDsh, 0o755);
@@ -125,6 +132,20 @@ test('install script is valid Bash', () => {
   assert.equal(result.status, 0, result.stderr);
 });
 
+test('install script stops when the DSH plugin manager rejects an incompatible runtime', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-bcn-old-cli-'));
+  await writeFile(join(root, 'dsh'), '#!/bin/sh\nif [ "$4" = add ]; then echo "incompatible DSH runtime" >&2; exit 1; fi\necho unexpected configure or startup >&2\nexit 9\n');
+  await chmod(join(root, 'dsh'), 0o755);
+  const result = spawnSync('/bin/bash', [new URL('../install-dsh.sh', import.meta.url).pathname,
+    '--endpoint', 'http://127.0.0.1:21000/'], {
+    encoding: 'utf8',
+    env: { ...process.env, PATH: `${root}:/usr/bin:/bin`, BCN_ONBOARDING_TOKEN: 'not-a-real-token' },
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /incompatible DSH runtime/);
+  assert.doesNotMatch(result.stderr + result.stdout, /not-a-real-token|unexpected configure or startup/);
+});
+
 async function createProfile(profile: string, patch: string): Promise<string> {
   const dshHome = await mkdtemp(join(tmpdir(), 'dsh-bcn-configure-'));
   const profileDir = join(dshHome, 'profiles', profile);
@@ -148,6 +169,6 @@ test('install script explains how to install DSH when the CLI is missing', async
     },
   });
   assert.equal(result.status, 1);
-  assert.match(`${result.stdout}${result.stderr}`, /npm install --global @deepseek-ai\/dsh@0\.1\.1-rc\.2/);
+  assert.match(`${result.stdout}${result.stderr}`, /npm install --global @deepseek-ai\/dsh@0\.2\.1-alpha\.2/);
   assert.doesNotMatch(`${result.stdout}${result.stderr}`, /registration-secret/);
 });

@@ -181,6 +181,80 @@ class SQLiteVectorPersistenceBackend:
         logger.info("[SQLiteVectorBackend] Loaded %d vectors", len(points))
         return points
 
+    def load_by_id(self, id: str) -> VectorPoint | None:
+        """Read one point while retaining load_all's decode-failure behavior."""
+        cursor = self._conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT id, vector, payload FROM bcsfuse_vector_embeddings WHERE id = ?",
+                (id,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            try:
+                return VectorPoint(
+                    id=row["id"], vector=self._deserialize_vector(row["vector"]),
+                    payload=json.loads(row["payload"]),
+                )
+            except Exception as e:
+                logger.warning("[SQLiteVectorBackend] Failed to load vector %s: %s", id, e)
+                return None
+        finally:
+            cursor.close()
+
+    def iter_batches(self, batch_size: int):
+        """Yield bounded vector pages for local index rebuilds."""
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+
+        cursor = self._conn.cursor()
+        try:
+            cursor.execute("SELECT MAX(id) FROM bcsfuse_vector_embeddings")
+            row = cursor.fetchone()
+            upper_id = row[0] if row else None
+        finally:
+            cursor.close()
+        if upper_id is None:
+            return
+        last_id = None
+        while True:
+            cursor = self._conn.cursor()
+            try:
+                if last_id is None:
+                    cursor.execute(
+                        "SELECT id, vector, payload FROM bcsfuse_vector_embeddings "
+                        "WHERE id <= ? ORDER BY id LIMIT ?",
+                        (upper_id, batch_size),
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT id, vector, payload FROM bcsfuse_vector_embeddings "
+                        "WHERE id > ? AND id <= ? ORDER BY id LIMIT ?",
+                        (last_id, upper_id, batch_size),
+                    )
+                rows = cursor.fetchall()
+                points = [
+                    VectorPoint(
+                        id=row["id"],
+                        vector=self._deserialize_vector(row["vector"]),
+                        payload=json.loads(row["payload"]),
+                    )
+                    for row in rows
+                ]
+                page_length = len(rows)
+                if rows:
+                    last_id = rows[-1]["id"]
+                del rows
+            finally:
+                cursor.close()
+
+            if not points:
+                return
+            yield points
+            if page_length < batch_size:
+                return
+
     def delete(self, id: str) -> bool:
         """删除单个向量点"""
         cursor = self._conn.cursor()

@@ -14,7 +14,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 ChannelType = Literal["dingding"]
 ChannelStatus = Literal["active", "inactive"]
-ChannelStage = Literal["draft"]
+# 三值口径与老前端一致（老页面"生效环境"选择器）：draft 是唯一可默认的
+# 值；verify/online 行是发布流的输入（按 stage 现读合成各环境的渠道配置），
+# 仅服务 Bot 允许写入。stage 在创建后不可变。
+ChannelStage = Literal["draft", "verify", "online"]
 ChannelBindingMode = Literal["plugin", "bcn_gateway"]
 GroupChatScope = Literal["per_sender", "conversation_shared"]
 OutboundVisibility = Literal["full_transcript", "lead_only"]
@@ -28,7 +31,11 @@ _PLUGIN_ONLY_FIELDS: tuple[str, ...] = (
     "aix_enable",
     "include_sender_name",
 )
-_BCN_ONLY_FIELDS: tuple[str, ...] = ("group_chat_scope", "outbound_visibility")
+_BCN_ONLY_FIELDS: tuple[str, ...] = (
+    "group_chat_scope",
+    "outbound_visibility",
+    "forward_sender_identity",
+)
 
 
 def validate_mode_matrix(
@@ -60,6 +67,25 @@ def validate_mode_matrix(
                 "fields only valid for bcn_gateway channels were provided: "
                 + ", ".join(rejected)
             )
+
+
+def validate_streaming_card_template(
+    *,
+    enable_streaming_cards: bool | None,
+    card_template_id: str | None,
+) -> None:
+    """Streaming cards need a template id — surface the gap at validation time.
+
+    Without this check a ``card_template_id``-less streaming config rows
+    through both surfaces: the plugin write path stores it and the BCS
+    payload (``send_mode: streaming_card`` with an empty template) is
+    structurally accepted. The card then fails only at message time, where
+    the user cannot tell which configuration is at fault.
+    """
+    if enable_streaming_cards and not (card_template_id or "").strip():
+        raise ValueError(
+            "card_template_id is required when enable_streaming_cards is true"
+        )
 
 
 class DingTalkChannelConfigCreate(BaseModel):
@@ -108,6 +134,13 @@ class DingTalkChannelConfigCreate(BaseModel):
     outbound_visibility: OutboundVisibility | None = Field(
         default=None,
         description="Outbound transcript visibility; only valid when binding_mode is 'bcn_gateway'.",
+    )
+    forward_sender_identity: bool | None = Field(
+        default=None,
+        description=(
+            "Whether inbound messages forward the DingTalk sender identity to the "
+            "Bot's context; only valid when binding_mode is 'bcn_gateway'."
+        ),
     )
 
 
@@ -161,6 +194,13 @@ class DingTalkChannelConfigUpdate(BaseModel):
         default=None,
         description="New outbound visibility; omit to keep. bcn_gateway channels only.",
     )
+    forward_sender_identity: bool | None = Field(
+        default=None,
+        description=(
+            "Whether inbound messages forward the DingTalk sender identity; "
+            "omit to keep. bcn_gateway channels only."
+        ),
+    )
 
 
 class DingTalkChannelConfig(BaseModel):
@@ -206,10 +246,17 @@ class DingTalkChannelConfig(BaseModel):
         default=None,
         description="Outbound visibility when binding_mode is 'bcn_gateway'; null otherwise.",
     )
+    forward_sender_identity: bool | None = Field(
+        default=None,
+        description=(
+            "Whether inbound messages forward the DingTalk sender identity when "
+            "binding_mode is 'bcn_gateway'; null otherwise."
+        ),
+    )
 
 
 class ChannelCreate(BaseModel):
-    """Create one inactive draft Channel on the Bot named in the path."""
+    """Create one inactive Channel row on the Bot named in the path."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -223,6 +270,16 @@ class ChannelCreate(BaseModel):
             "config; 'bcn_gateway' syncs a BCS binding (per-sender sessions)."
         ),
     )
+    stage: ChannelStage = Field(
+        default="draft",
+        description=(
+            "Which configuration stage the row belongs to; the legacy UI's "
+            "'生效环境' selector. verify/online rows are publish-flow inputs "
+            "for service Bots, exist only for 'plugin' channels (the legacy "
+            "BCN page has no stage concept), and are rejected for other bot "
+            "types. Immutable after creation."
+        ),
+    )
 
     @model_validator(mode="after")
     def _check_binding_mode_matrix(self) -> "ChannelCreate":
@@ -231,6 +288,18 @@ class ChannelCreate(BaseModel):
             robot_code=self.config.robot_code,
             fields_set=self.config.model_fields_set,
         )
+        validate_streaming_card_template(
+            enable_streaming_cards=self.config.enable_streaming_cards,
+            card_template_id=self.config.card_template_id,
+        )
+        # 老实现里"生效环境"是插件页专属能力（BCN 页无 stage 概念）。当前
+        # 消费方亦然：发布流只合成 plugin 行的 engine_overrides，BCS 同步
+        # 又跳过 verify/online —— 放行只会产出一个无消费方的组合。
+        if self.stage != "draft" and self.binding_mode == "bcn_gateway":
+            raise ValueError(
+                "stage 'verify'/'online' applies to plugin channels; "
+                "bcn_gateway channels resolve their environment through BCS"
+            )
         return self
 
     description: str | None = Field(
@@ -291,7 +360,10 @@ class Channel(BaseModel):
     )
     stage: ChannelStage = Field(
         default="draft",
-        description="Configuration stage; the public API exposes draft only.",
+        description=(
+            "Configuration stage the row belongs to. verify/online rows exist "
+            "only as publish inputs for service Bots; other bots expose draft."
+        ),
     )
     created_at: datetime | None = Field(
         default=None, description="Channel creation time when available."

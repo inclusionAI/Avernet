@@ -108,22 +108,27 @@ describe('WorkspaceIdentitySelector 能力入口与 Popover 交互', () => {
     const dialog = await screen.findByRole('dialog');
     expect(screen.queryByText('Bot 接入')).not.toBeInTheDocument();
     expect(dialog).toHaveTextContent('接入外部 Bot');
-    expect(dialog).toHaveTextContent('选择接入方式，复制命令后在对应环境中执行，即可完成外部 Bot 的初始化接入。');
-    expect(dialog).toHaveTextContent('用户自助接入');
+    expect(dialog).toHaveTextContent('选择 Bot 类型，按对应指南完成接入。');
+    expect(screen.getByRole('button', { name: 'DeepSeek Harness' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'OpenClaw' }));
+    await waitFor(() => expect(getRegistrationTokenMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('button', { name: /在终端执行/ })).toHaveAttribute('aria-pressed', 'true');
     expect(dialog).toHaveTextContent('install.sh --token token-1 --bcs-endpoint http://127.0.0.1:21000');
     expect(dialog).not.toHaveTextContent('Use this token for bot registration within 6 hours');
     expect(dialog).toHaveTextContent(/Token 有效期至：/);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Bot 自动接入' }));
+    fireEvent.click(screen.getByRole('button', { name: /让 Bot 执行/ }));
+    expect(screen.getByRole('button', { name: /让 Bot 执行/ })).toHaveAttribute('aria-pressed', 'true');
     await waitFor(() => expect(screen.getByRole('dialog')).toHaveTextContent('your TOKEN is token-1'));
-    fireEvent.click(screen.getByRole('button', { name: /复制/ }));
+    fireEvent.click(screen.getByRole('button', { name: '复制指引' }));
 
     await waitFor(() =>
       expect(writeText).toHaveBeenCalledWith(
         'Follow the instructions in https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/crates/plugins/openclaw-channel-bcn/install-instructions/install.md to join BCN (Bot Coordination Network), your TOKEN is token-1 and BCS_ENDPOINT is http://127.0.0.1:21000.',
       ),
     );
-    expect(getRegistrationTokenMock).toHaveBeenCalledTimes(1);
+    // 切换 Bot 类型会取新的 Token；OpenClaw 内切换终端/指引模式复用该 Token。
+    expect(getRegistrationTokenMock).toHaveBeenCalledTimes(2);
   });
 
   it('打开入口和点击当前身份不会切换，点击其他身份后关闭 Popover', async () => {

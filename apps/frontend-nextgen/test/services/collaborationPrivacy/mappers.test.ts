@@ -81,6 +81,48 @@ describe('collaboration privacy service mappers', () => {
     });
   });
 
+  it('derives the 对 Bot(agent) audience scope by visibility + view_scope_agent_friend_deps', () => {
+    // agent: 不是 private 且 view_scope_agent_friend_deps 为空 → 全部可见
+    const agentFullyVisible = mapBotDtoToDomain(
+      createBot({ visibility: 'protected', user_visibility: 'private', friend_ext: {} }),
+    );
+    expect(agentFullyVisible.publication.bot).toEqual({ scope: 'all', organizationPaths: [] });
+
+    // agent: 不是 private 且 view_scope_agent_friend_deps 非空 → 部分部门可见（限定组织可申请）
+    const agentRestricted = mapBotDtoToDomain(
+      createBot({
+        visibility: 'public',
+        user_visibility: 'private',
+        friend_ext: { view_scope_agent_friend_deps: [{ deptNo: 'AI_PLATFORM', deptName: 'AI 平台部' }] },
+      }),
+    );
+    expect(agentRestricted.publication.bot).toEqual({
+      scope: 'restricted',
+      organizationPaths: [['AI 平台部']],
+      organizationEntries: [{ deptNo: 'AI_PLATFORM', path: ['AI 平台部'] }],
+    });
+
+    // agent: visibility === 'private' → 不可见（不变）
+    const agentPrivate = mapBotDtoToDomain(
+      createBot({ visibility: 'private', user_visibility: 'private', friend_ext: {} }),
+    );
+    expect(agentPrivate.publication.bot).toEqual({ scope: 'none', organizationPaths: [] });
+
+    // agent: visibility 缺失 → 不可见
+    const agentMissing = mapBotDtoToDomain(
+      createBot({ visibility: undefined, user_visibility: 'private', friend_ext: {} }),
+    );
+    expect(agentMissing.publication.bot).toEqual({ scope: 'none', organizationPaths: [] });
+  });
+
+  it('keeps 对用户 audience scope unchanged: protected without deps stays restricted (agent-only rule must not leak)', () => {
+    const userProtectedWithoutDeps = mapBotDtoToDomain(
+      createBot({ visibility: 'private', user_visibility: 'protected', friend_ext: {} }),
+    );
+    expect(userProtectedWithoutDeps.publication.user).toEqual({ scope: 'restricted', organizationPaths: [] });
+    expect(userProtectedWithoutDeps.publication.bot).toEqual({ scope: 'none', organizationPaths: [] });
+  });
+
   it('reads friend_check_in_strategy and no_check_scope_friend_deps when the DTO carries them', () => {
     expect(
       mapBotDtoToDomain(

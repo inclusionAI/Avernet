@@ -6,6 +6,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
+
 from agentclaw.community.core.bot_management.engines.aicoding.restart_state import (
     journal,
     task_key,
@@ -99,7 +101,6 @@ def lifecycle():
     )
     service._template_service.get_template.return_value = None
     service._template_service.get_template_config.return_value = None
-    service._should_register_bcn_provider = Mock(return_value=False)
     service._resolve_bcn_provider_connection_mode = Mock(return_value="ws")
     service._build_engine_extra_envs = Mock(return_value=None)
     service._attach_template_uid_context = Mock(return_value=None)
@@ -204,42 +205,75 @@ async def test_real_lost_baas_response_uses_existing_recovery_intent(lifecycle):
 
 
 @pytest.mark.parametrize("engine", ["aicoding", "claude_code"])
+@pytest.mark.parametrize("backup_outcome", ["committed", "transport_error", "legacy", "not_mounted"])
 @pytest.mark.asyncio
-async def test_real_arca_stop_start_skips_backup_and_records_handoff(lifecycle, engine):
+async def test_real_arca_async_backup_precedes_stop_start(lifecycle, engine, backup_outcome):
+    import json
+    from agentclaw.community.core.devices.services.device_service_router import DeviceServiceRouter
+    from agentclaw.community.core.bot_management.engines.aicoding import restart_backup
+
     s = lifecycle
     s.repo.bot["active_engine"] = engine
-    s.binding["device_provider"] = "arca"
+    s.binding.update(device_provider="arca", device_props={"sandbox_id": "old-sandbox@8"})
     events = []
     s.service._resolve_restart_target_provider = Mock(return_value="arca")
-    device = s.service._device_service_provider()
-    device.release_device.side_effect = lambda **_: events.append("release")
+    s.service.restart_bot = Mock(side_effect=AssertionError("coding must not use generic restart"))
+    provider = s.service._device_service_provider()
+    binding_repo = Mock()
+    binding_repo.get_by_id.side_effect = lambda _: SimpleNamespace(**deepcopy(s.binding))
+    router = DeviceServiceRouter(
+        repository=binding_repo, bot_query=Mock(), providers={"arca": provider},
+        default_provider_key="arca",
+    )
+    s.service._device_service_provider = lambda: router
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import ArcaRestartTransport
+    s.service._restart_backup_dependencies = RestartBackupDependencies(
+        baas_runtime=lambda: s.platform,
+        arca_transport=lambda: ArcaRestartTransport(provider._exec_shell_new),
+    )
+    provider.release_device.side_effect = lambda **_: events.append("release")
 
     def start(**kwargs):
         assert journal(s.repo.bot)["phase"] == "RESTARTING"
         assert s.repo.bot["binding_id"] is None
         events.append("allocate")
         s.repo.bot.update(binding_id=8, status="PENDING")
-        s.binding.update(id=8, device_id="new")
+        s.binding.update(id=8, device_id="new", device_props={"sandbox_id": "new-sandbox"})
         return deepcopy(s.repo.bot)
 
     s.service.start_bot = Mock(side_effect=start)
-
-    device.exec_shell_new.side_effect = RuntimeError("sandbox destroyed")
-
     await s.service.restart_bot_async(bot_id="b", user_id="o")
     task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key("b", "o"))
-    with patch(
-        "agentclaw.community.core.bot_management.engines.aicoding.restart_backup.prepare_backup",
-        side_effect=AssertionError("ARCA must not probe or back up"),
-    ) as backup:
+    assert task.payload["sandbox_id"] == "old-sandbox@8"
+    assert events == []  # HTTP admission never waits for backup or releases.
+    provider._exec_shell_new.assert_not_called()
+    operation = task.payload["operation_id"]
+
+    def execute(*, device, shell_cmd):
+        assert device.device_props == {"sandbox_id": "old-sandbox@8"}
+        assert "release" not in events
+        assert operation in shell_cmd
+        events.append("backup")
+        if backup_outcome == "transport_error":
+            raise ConnectionError("old sandbox unavailable")
+        running = len(events) == 1
+        return SimpleNamespace(exit_code=0, stdout=json.dumps({
+            "version": 1, "operation_id": operation, "boot_id": "old-boot",
+            "status": ("running" if running else "committed")
+            if backup_outcome == "committed" else backup_outcome,
+            "backup": {"status": "success", "generation_id": "g1", "operation_id": operation},
+        }))
+
+    provider._exec_shell_new.side_effect = execute
+    with patch.object(restart_backup.time, "sleep"):
         assert isinstance(s.handler.handle(task.payload), Reschedule)
-    backup.assert_not_called()
-    device.exec_shell_new.assert_not_called()
-    assert events == ["release", "allocate"]
+    backup_calls = {"transport_error": 1, "legacy": 2, "not_mounted": 2, "committed": 3}
+    assert events == ["backup"] * backup_calls[backup_outcome] + ["release", "allocate"]
     assert isinstance(s.handler.handle(task.payload), Reschedule)
     s.repo.bot["status"] = "ACTIVE"
     assert isinstance(s.handler.handle(task.payload), Complete)
     s.platform.post_bots_api.assert_not_called()
+    provider.exec_shell_new.assert_not_called()  # ordinary exec guards unchanged
     s.service.start_bot.assert_called_once()
 
 
@@ -319,11 +353,11 @@ async def test_definitive_404_marks_failed_and_clears_poll_intent(lifecycle):
 
 
 @pytest.mark.asyncio
-async def test_final_receipt_failure_clears_intent_without_remote_submit(lifecycle):
+async def test_final_identity_change_clears_intent_without_remote_submit(lifecycle):
     s = lifecycle
     await s.service.restart_bot_async(bot_id="b", user_id="o")
     task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key("b", "o"))
-    receipt = Mock(side_effect=[None, RestartBackupError("receipt_stale", "changed")])
+    receipt = Mock(side_effect=[None, RestartBackupError("instance_changed", "changed")])
     with patch.object(AicodingRestartBackupMixin, "_prepare_restart", return_value=receipt):
         assert isinstance(s.handler.handle(task.payload), Fail)
     assert s.repo.bot["status"] == "FAILED"
@@ -539,3 +573,142 @@ def test_engine_preparation_matches_legacy_payload_builder_arguments(lifecycle, 
         return values
 
     assert normalized(coding_arguments) == normalized(legacy_arguments)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('outcome', ['prepare_failed', 'submitted', 'ambiguous'])
+async def test_degraded_backup_real_worker_submission_boundary(lifecycle, outcome):
+    s = lifecycle
+    await s.service.restart_bot_async(bot_id='b', user_id='o')
+    s.platform.list_devices_by_bot_uuid.return_value = [
+        {'status': 'ACTIVE', 'provider_device_id': 'physical'}]
+    mutations = []
+
+    def post(**kwargs):
+        if kwargs['action'] == 'aicoding_restart_backup':
+            raise ConnectionError('private backup output')
+        assert journal(s.repo.bot)['phase'] == 'RESTARTING'
+        mutations.append(kwargs)
+        if outcome == 'ambiguous':
+            raise TimeoutError('private submission output')
+        return {'publish_id': 12}
+
+    s.platform.post_bots_api.side_effect = post
+    if outcome == 'prepare_failed':
+        s.platform._build_create_bot_payload.side_effect = ValueError('private config')
+    task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key('b', 'o'))
+    result = s.handler.handle(task.payload)
+    if outcome == 'prepare_failed':
+        assert isinstance(result, Fail)
+        assert not mutations
+        message = s.repo.bot['ext']['start_message']
+        assert '提交前准备失败' in message
+        assert '备份已完成' not in message and 'private' not in message
+    else:
+        assert isinstance(result, Reschedule)
+        assert len(mutations) == 1
+        assert s.repo.bot['status'] == 'PENDING'
+        assert s.repo.bot['ext'].get('start_status') != 'FAILED'
+    s.handler.handle(task.payload)
+    assert len(mutations) == (0 if outcome == 'prepare_failed' else 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('changed', [False, True])
+async def test_inventory_change_after_initial_failure_does_not_veto_submission(lifecycle, changed, caplog):
+    s = lifecycle
+    await s.service.restart_bot_async(bot_id='b', user_id='o')
+    def inventory(target):
+        return [{'status': 'ACTIVE', 'provider_device_id': target}]
+    s.platform.list_devices_by_bot_uuid.side_effect = [
+        ConnectionError('unavailable'), inventory('old'), inventory('new' if changed else 'old')]
+    task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key('b', 'o'))
+    result = s.handler.handle(task.payload)
+    assert isinstance(result, Reschedule)
+    s.platform.post_bots_api.assert_called_once()
+    assert s.platform.post_bots_api.call_args.kwargs['action'] == 'coding_restart'
+    if changed:
+        assert 'reason=target_changed' in caplog.text
+    assert s.repo.bot['ext'].get('start_status') != 'FAILED'
+    assert isinstance(s.handler.handle(task.payload), Reschedule)
+    s.platform.post_bots_api.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('phase', ['prepare', 'verify'])
+@pytest.mark.parametrize('changed', [False, True])
+async def test_late_boot_response_does_not_veto_original_restart(lifecycle, phase, changed, caplog):
+    import json
+    from agentclaw.community.core.bot_management.engines.aicoding import restart_backup as backup
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_state import current_restart
+
+    s = lifecycle
+    await s.service.restart_bot_async(bot_id='b', user_id='o')
+    s.platform.list_devices_by_bot_uuid.return_value = [
+        {'status': 'ACTIVE', 'provider_device_id': 'physical'}]
+    now = [0]
+    commands, mutations = [], []
+
+    def post(**kwargs):
+        if kwargs['action'] != 'aicoding_restart_backup':
+            mutations.append(kwargs)
+            return {'publish_id': 12}
+        commands.append(kwargs)
+        late = len(commands) == 2
+        if late:
+            now[0] = 1501
+        operation = current_restart.get().operation_id
+        status = 'running' if phase == 'prepare' and not late else 'committed'
+        return {'exit_code': 0, 'stdout': json.dumps({
+            'version': 1, 'operation_id': operation, 'status': status,
+            'boot_id': 'B' if late and changed else 'A',
+            'backup': {'status': 'success', 'generation_id': 'g', 'operation_id': operation},
+        })}
+
+    s.platform.post_bots_api.side_effect = post
+    task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key('b', 'o'))
+    with patch.object(backup.time, 'monotonic', side_effect=lambda: now[0]), \
+         patch.object(backup.time, 'sleep'):
+        result = s.handler.handle(task.payload)
+    assert len(commands) == 2
+    assert isinstance(result, Reschedule)
+    assert len(mutations) == 1  # Neither backup timeout nor identity change vetoes restart.
+    assert 'reason=timeout' in caplog.text
+    assert 'action=continue_restart' in caplog.text
+    assert s.repo.bot['ext'].get('start_status') != 'FAILED'
+    assert isinstance(s.handler.handle(task.payload), Reschedule)
+    assert len(mutations) == 1  # Redelivery observes; it never repeats the mutation.
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("engine", ["openclaw", "moltis", "hermes", "unknown"])
+async def test_other_engines_arca_restart_never_resolves_backup_transport(lifecycle, engine):
+    s = lifecycle
+    s.repo.bot["active_engine"] = engine
+    s.binding.update(device_provider="arca", device_props={"sandbox_id": "old-sandbox@8"})
+    s.service._resolve_restart_target_provider = Mock(return_value="arca")
+    transport = Mock(side_effect=AssertionError("non-coding must not resolve backup transport"))
+    s.service._restart_backup_dependencies = RestartBackupDependencies(
+        baas_runtime=transport, arca_transport=transport,
+    )
+    device = s.service._device_service_provider()
+    events = []
+    device.release_device.side_effect = lambda **_: events.append("release")
+
+    def start(**kwargs):
+        assert s.repo.bot["binding_id"] is None
+        events.append("allocate")
+        s.repo.bot.update(binding_id=8, status="PENDING")
+        return deepcopy(s.repo.bot)
+
+    s.service.start_bot = Mock(side_effect=start)
+    with patch.object(AicodingRestartBackupMixin, "_prepare_restart") as backup:
+        result = await s.service.restart_bot_async(bot_id="b", user_id="o")
+    assert result["status"] == "PENDING"
+    assert events == ["release", "allocate"]
+    assert not s.queue.tasks
+    transport.assert_not_called()
+    backup.assert_not_called()
+    device.exec_shell_new.assert_not_called()
+    device._exec_shell_new.assert_not_called()
+    s.platform.post_bots_api.assert_not_called()

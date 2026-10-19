@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from tests.community.framework.flow import FlowCase, FlowStep
+from tests.community.framework import flow_coverage
 from tests.community.framework.flow_coverage import (
     covered_modules,
     all_core_modules,
@@ -22,6 +23,28 @@ def test_all_core_modules_nonempty_and_strings():
     mods = all_core_modules()
     assert mods and all(isinstance(m, str) for m in mods)
     assert "bot_management" in mods  # known core module
+
+
+def test_all_core_modules_ignores_bytecode_only_cache_remnants(tmp_path, monkeypatch):
+    packaged = tmp_path / "packaged"
+    packaged.mkdir()
+    (packaged / "__init__.py").write_text("", encoding="utf-8")
+
+    namespace = tmp_path / "namespace"
+    namespace.mkdir()
+    (namespace / "business.py").write_text("", encoding="utf-8")
+
+    cache_only = tmp_path / "cache_only"
+    bytecode_dir = cache_only / "__pycache__"
+    bytecode_dir.mkdir(parents=True)
+    (bytecode_dir / "business.cpython-312.pyc").write_bytes(b"")
+
+    monkeypatch.setattr(flow_coverage._core_pkg, "__path__", [str(tmp_path)])
+
+    modules = flow_coverage.all_core_modules()
+
+    assert {"packaged", "namespace"} <= modules
+    assert "cache_only" not in modules
 
 
 def test_exempt_entries_have_reasons():

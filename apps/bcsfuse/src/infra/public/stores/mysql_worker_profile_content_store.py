@@ -35,16 +35,25 @@ import logging
 import os
 import threading
 import uuid
-from typing import Optional, List, TYPE_CHECKING
+from typing import TYPE_CHECKING, List, Optional
+
+from mysql.connector import Error as MySQLError
+from mysql.connector.errorcode import ER_DUP_ENTRY
 
 if TYPE_CHECKING:
-    from src.infra.public.database.mysql_connection_pool import MySQLConnectionPoolProvider
+    from src.infra.public.database.mysql_connection_pool import (
+        MySQLConnectionPoolProvider,
+    )
 
 from src.domain.models.worker_profile_content import (
     ProfileContentType,
     SkillSet,
     WorkerProfileContent,
     WorkerProfileContentList,
+)
+from src.infra.profile_description_metadata import (
+    split_profile_description,
+    with_profile_description,
 )
 
 logger = logging.getLogger(__name__)
@@ -177,10 +186,14 @@ class MySQLWorkerProfileContentStore:
 
     def _row_to_content(self, row: dict) -> WorkerProfileContent:
         """Convert database row to WorkerProfileContent."""
+        metadata, description = split_profile_description(
+            self._parse_json(row["metadata"]), row.get("description"),
+        )
         return WorkerProfileContent(
             worker_id=row["worker_id"],
             profile_id=row["profile_id"],
             display_name=row["display_name"],
+            description=description,
             soul_md=row["soul_md"],
             agents_md=row["agents_md"],
             tools_md=row["tools_md"],
@@ -188,7 +201,7 @@ class MySQLWorkerProfileContentStore:
             heartbeat_md=row["heartbeat_md"],
             contents=self._parse_json(row["contents"]),
             skill_sets=self._parse_skill_sets(row["skill_sets"]),
-            metadata=self._parse_json(row["metadata"]),
+            metadata=metadata,
             content_type=ProfileContentType(row["content_type"]),
             is_active=bool(row["is_active"]),
             version=row["version"],
@@ -210,7 +223,9 @@ class MySQLWorkerProfileContentStore:
             "heartbeat_md": content.heartbeat_md,
             "contents": self._serialize_json(content.contents),
             "skill_sets": self._serialize_json([s.model_dump() for s in content.skill_sets]),
-            "metadata": self._serialize_json(content.metadata),
+            "metadata": self._serialize_json(
+                with_profile_description(content.metadata, content.description)
+            ),
             "content_type": content.content_type.value,
             "is_active": 1 if content.is_active else 0,
             "version": content.version,
@@ -297,6 +312,81 @@ class MySQLWorkerProfileContentStore:
                 cursor.execute(
                     "SELECT * FROM bcsfuse_worker_profile_contents WHERE worker_id = %s AND profile_id = %s",
                     (content.worker_id, profile_id),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    raise RuntimeError("saved profile could not be read back")
+                saved = content.model_copy(deep=True)
+                saved.created_at = row["gmt_create"]
+                saved.updated_at = row["gmt_modify"]
+                saved.version = row["version"]
+                saved.is_active = bool(row["is_active"])
+                conn.commit()
+                return saved
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                cursor.close()
+        finally:
+            conn.close()
+
+    def save_if_version(
+        self, content: WorkerProfileContent, expected_version: int | None,
+    ) -> WorkerProfileContent | None:
+        """Atomically save only when the stored Profile version still matches."""
+        data = self._content_to_dict(content)
+        conn = self._pool.get_connection()
+        try:
+            conn.start_transaction()
+            cursor = conn.cursor(dictionary=True)
+            try:
+                if expected_version is None:
+                    try:
+                        cursor.execute(
+                            """INSERT INTO bcsfuse_worker_profile_contents (
+                                id, worker_id, profile_id, display_name,
+                                soul_md, agents_md, tools_md, boot_md, heartbeat_md,
+                                contents, skill_sets, metadata, content_type,
+                                is_active, version
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s,
+                                      %s, %s, %s, %s, %s, 1)""",
+                            (
+                                data["id"], data["worker_id"], data["profile_id"],
+                                data["display_name"], data["soul_md"],
+                                data["agents_md"], data["tools_md"], data["boot_md"],
+                                data["heartbeat_md"], data["contents"], data["skill_sets"],
+                                data["metadata"], data["content_type"], data["is_active"],
+                            ),
+                        )
+                    except MySQLError as error:
+                        if error.errno != ER_DUP_ENTRY:
+                            raise
+                        conn.rollback()
+                        return None
+                else:
+                    cursor.execute(
+                        """UPDATE bcsfuse_worker_profile_contents SET
+                            display_name = %s, soul_md = %s,
+                            agents_md = %s, tools_md = %s, boot_md = %s,
+                            heartbeat_md = %s, contents = %s, skill_sets = %s,
+                            metadata = %s, content_type = %s, version = version + 1,
+                            gmt_modify = CURRENT_TIMESTAMP
+                        WHERE worker_id = %s AND profile_id = %s AND version = %s""",
+                        (
+                            data["display_name"], data["soul_md"],
+                            data["agents_md"], data["tools_md"], data["boot_md"],
+                            data["heartbeat_md"], data["contents"], data["skill_sets"],
+                            data["metadata"], data["content_type"],
+                            data["worker_id"], data["profile_id"], expected_version,
+                        ),
+                    )
+                    if cursor.rowcount != 1:
+                        conn.rollback()
+                        return None
+                cursor.execute(
+                    "SELECT * FROM bcsfuse_worker_profile_contents WHERE worker_id = %s AND profile_id = %s",
+                    (data["worker_id"], data["profile_id"]),
                 )
                 row = cursor.fetchone()
                 if row is None:
@@ -489,6 +579,26 @@ class MySQLWorkerProfileContentStore:
     # Dict-compatible API used by OSS routes
     # =========================================================
 
+    def get_active_by_workers(self, worker_ids: list[str]) -> list[WorkerProfileContent]:
+        """Read the same active records as get_all_active, scoped at the SQL boundary."""
+        if not worker_ids:
+            return []
+        conn = self._pool.get_connection()
+        try:
+            cursor = conn.cursor(dictionary=True)
+            try:
+                placeholders = ", ".join(["%s"] * len(worker_ids))
+                cursor.execute(
+                    "SELECT * FROM bcsfuse_worker_profile_contents "
+                    f"WHERE is_active = 1 AND worker_id IN ({placeholders})",
+                    tuple(worker_ids),
+                )
+                return [self._row_to_content(row) for row in cursor.fetchall()]
+            finally:
+                cursor.close()
+        finally:
+            conn.close()
+
     def upsert_profile(self, worker_id: str, profile_id: str, content: dict) -> bool:
         """Upsert profile content from dict (OSS route compatibility)."""
         profile_id = profile_id or "default"
@@ -576,6 +686,7 @@ class MySQLWorkerProfileContentStore:
             "worker_id": profile.worker_id,
             "profile_id": profile.profile_id,
             "display_name": profile.display_name,
+            "description": profile.description,
             "soul_md": profile.soul_md,
             "agents_md": profile.agents_md,
             "tools_md": profile.tools_md,

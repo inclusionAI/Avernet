@@ -39,9 +39,15 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
 
     assert result.returncode == 0, result.stdout + result.stderr
     document = json.loads((tmp_path / "bcn.openapi.json").read_text(encoding="utf-8"))
-    # 67 collaboration operations + the five public auth operations exposed by
+    # 68 collaboration operations + the five public auth operations exposed by
     # the authentication facade.
-    assert sum(len(path_item) for path_item in document["paths"].values()) == 72
+    assert sum(len(path_item) for path_item in document["paths"].values()) == 73
+    assert (
+        "get"
+        in document["paths"][
+            "/openapi/v1/collaboration/channels/conversations/by-session"
+        ]
+    )
     assert (
         "get"
         in document["paths"][
@@ -91,7 +97,15 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
     internal = json.loads(
         (tmp_path / "bcn-internal.openapi.json").read_text(encoding="utf-8")
     )
-    assert sum(len(path_item) for path_item in internal["paths"].values()) == 23
+    assert sum(len(path_item) for path_item in internal["paths"].values()) == 24
+    provider_path = "/api/v1/collaboration/providers/by-slug/{slug}"
+    assert set(internal["paths"][provider_path]) == {"get"}
+    provider = internal["paths"][provider_path]["get"]
+    assert provider["operationId"] == "get_provider_by_slug"
+    assert provider["security"] == []
+    assert provider["x-avernet-security"] == {}
+    assert provider["x-avernet-raw-response"] is True
+    assert provider_path not in document["paths"]
     bot_self_path = "/api/v1/collaboration/bots/me"
     assert set(internal["paths"][bot_self_path]) == {"get"}
     bot_self = internal["paths"][bot_self_path]["get"]
@@ -105,12 +119,8 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
         "post" in internal["paths"]["/api/v1/collaboration/sessions/{session_id}/files"]
     )
     assert "post" in internal["paths"]["/api/v1/collaboration/definitions/validate"]
-    # 21 → 22 with the rerun endpoint bcs added in #1645. This suite is
-    # path-filtered on `apps/gateway`, so it does not run on a bcs-only commit —
-    # which is how a count this test pins goes stale on `dev` and only surfaces
-    # on the next gateway PR. (It was bumped independently on both sides for
-    # exactly that reason.) Naming the new operation, and not just the number,
-    # is what makes the next drift readable.
+    # Keep explicit operation assertions alongside the count so catalog drift
+    # identifies the missing route instead of only reporting a different total.
     assert (
         "post"
         in internal["paths"]["/api/v1/collaboration/state-machine-runs/{run_id}/reruns"]
@@ -126,6 +136,7 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
         "Collaboration / Invite Codes",
         "Collaboration / Channels",
         "Collaboration / Event Subscriptions",
+        "Group Context",
     ]
     assert document["paths"]["/openapi/v1/collaboration/sessions/{session_id}/token"][
         "post"

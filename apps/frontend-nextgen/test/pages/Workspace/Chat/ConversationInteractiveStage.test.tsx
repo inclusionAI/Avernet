@@ -64,6 +64,7 @@ const mockFileFeature: UseBotSessionFilesFeatureResult = {
   closeFileDrawer: () => {},
   fileDrawerOpen: false,
   openUpload: () => {},
+  capabilitySets: null,
 };
 
 const mockUseTaskExecution = jest.fn(
@@ -74,12 +75,11 @@ const mockUseTaskExecution = jest.fn(
     workflows: [],
     workflowsLoading: false,
     loadWorkflows: () => Promise.resolve(),
-    selectedWorkflow: null,
-    pendingDynamic: false,
+    selections: [] as never[],
     selectWorkflow: () => {},
     selectDynamic: () => {},
+    removeSelection: () => {},
     clearSelection: () => {},
-    submitFromComposer: () => Promise.resolve({ ok: false, reason: '' }),
     submit: () => Promise.resolve({ ok: false, reason: '' }),
     validate: () => null,
   }),
@@ -314,7 +314,9 @@ describe('交互式主舞台(mine / 好友 Bot 单聊)', () => {
     expect(mockChatPanelProps?.command).toBe(mockFileFeature.command);
     expect(mockChatPanelProps?.fileToolbar).toBe(mockFileFeature.fileToolbar);
     expect(mockChatPanelProps?.senderRef).toBe(mockFileFeature.senderRef);
-    expect(mockChatPanelProps?.onManageFiles).toBe(mockFileFeature.openFileDrawer);
+    // chat-header-panels（Batch 4）：原「会话文件」头部图标收敛，入口由五图标列的「资源管理」承接
+    //（onManageFiles 不再透传，headerActions 插槽替代）。
+    expect(mockChatPanelProps?.onManageFiles).toBeUndefined();
     expect(screen.getByTestId('file-feature-node')).toBeInTheDocument();
     expect(screen.getByTestId('composer-menu')).toBeInTheDocument();
     expect(screen.getByTestId('composer-menu')).toHaveAttribute('data-disabled', 'false');

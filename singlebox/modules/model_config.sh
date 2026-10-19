@@ -136,7 +136,7 @@ singlebox_model_config_required_for_services() {
     local service
     for service in "$@"; do
         case "$service" in
-            all|baas|bots|bcs_bots|hybrid|merchant_hybrid)
+            all|bbs_demo|baas|bots|bcs_bots|hybrid|merchant_hybrid)
                 return 0
                 ;;
         esac
@@ -147,9 +147,11 @@ singlebox_model_config_required_for_services() {
 singlebox_mock_model_stop_required_for_services() {
     local service
     for service in "$@"; do
-        if [ "$service" = "all" ]; then
-            return 0
-        fi
+        case "$service" in
+            all|bbs_demo)
+                return 0
+                ;;
+        esac
     done
     return 1
 }
@@ -160,7 +162,7 @@ singlebox_model_config_prompt() {
         {
             echo "Choose model config mode:"
             echo "  1) mock     Use fixed-format local model replies"
-            echo "  2) manual   Use values from .env.local"
+            echo "  2) manual   Use values from singlebox/.env.local"
             echo "  3) home     Import model fields from ~/.openclaw/openclaw.json"
             echo ""
             printf "Select [1-3]: "
@@ -216,7 +218,7 @@ singlebox_model_config_require_manual_env() {
     if [ "${OPENCLAW_OPENAI_API_KEY:-}" = "OPENAI_API_KEY" ]; then
         if [ -z "${OPENAI_API_KEY:-}" ]; then
             log_error "OPENCLAW_OPENAI_API_KEY references OPENAI_API_KEY, but OPENAI_API_KEY is not set."
-            log_error "Set OPENAI_API_KEY in the launch environment, or set OPENCLAW_OPENAI_API_KEY to a real key in ${PROJECT_ROOT}/.env.local."
+            log_error "Set OPENAI_API_KEY in the launch environment, or set OPENCLAW_OPENAI_API_KEY to a real key in ${PROJECT_ROOT}/singlebox/.env.local."
             return 1
         fi
         OPENCLAW_OPENAI_API_KEY="$OPENAI_API_KEY"
@@ -235,7 +237,7 @@ singlebox_model_config_require_manual_env() {
         for name in "${missing[@]}"; do
             log_error "  ${name}"
         done
-        log_error "Set them in ${PROJECT_ROOT}/.env.local or choose SINGLEBOX_MODEL_CONFIG_MODE=mock."
+        log_error "Set them in ${PROJECT_ROOT}/singlebox/.env.local or choose SINGLEBOX_MODEL_CONFIG_MODE=mock."
         return 1
     fi
 }

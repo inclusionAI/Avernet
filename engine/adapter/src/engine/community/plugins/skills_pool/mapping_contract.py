@@ -103,11 +103,14 @@ def apply_logical_mapping_payload(
     retired_payload: object,
     additional_retirement_roots: Sequence[Path] = (),
     home: Path = Path("/home/admin"),
+    layout_context: RuntimeLayoutContext | None = None,
     center_content_payload: object | None = None,
     content_adapter: CenterContentAdapter,
 ) -> MappingApplyResult:
     """Validate, inspect Center, and BEST_EFFORT apply one logical snapshot."""
 
+    context = layout_context or RuntimeLayoutContext(home=home)
+    home = context.home
     # Validate before taking a runtime lock so malformed requests have no
     # filesystem side effects. The locked implementation validates again at
     # its own trust boundary and serializes a slow download with a later
@@ -128,6 +131,7 @@ def apply_logical_mapping_payload(
         payload=preview_mappings,
         mapping_contract_version=preview_contract,
         home=home,
+        layout_context=context,
     )
     resolve_mapping_payload(
         engine=engine,
@@ -136,8 +140,10 @@ def apply_logical_mapping_payload(
         mapping_contract_version=preview_contract,
         additional_retirement_roots=additional_retirement_roots,
         home=home,
+        layout_context=context,
     )
-    lock_key = (str(Path(home).absolute()), engine)
+    runtime_home = context.openclaw_root or context.home
+    lock_key = (str(Path(runtime_home).absolute()), engine)
     with _APPLY_LOCKS_GUARD:
         apply_lock = _APPLY_LOCKS.setdefault(lock_key, threading.Lock())
     with apply_lock:
@@ -148,6 +154,7 @@ def apply_logical_mapping_payload(
             retired_payload=retired_payload,
             additional_retirement_roots=additional_retirement_roots,
             home=home,
+            layout_context=context,
             center_content_payload=center_content_payload,
             content_adapter=content_adapter,
         )
@@ -161,11 +168,14 @@ def _apply_logical_mapping_payload_locked(
     retired_payload: object,
     additional_retirement_roots: Sequence[Path] = (),
     home: Path = Path("/home/admin"),
+    layout_context: RuntimeLayoutContext | None = None,
     center_content_payload: object | None = None,
     content_adapter: CenterContentAdapter,
 ) -> MappingApplyResult:
     """Apply one validated snapshot while holding the per-runtime lock."""
 
+    context = layout_context or RuntimeLayoutContext(home=home)
+    home = context.home
     mappings = _deduplicate_logical_payload(mappings_payload)
     retired = _deduplicate_logical_payload(retired_payload)
     all_mappings = [*mappings, *retired]
@@ -180,6 +190,7 @@ def _apply_logical_mapping_payload_locked(
         payload=mappings,
         mapping_contract_version=contract,
         home=home,
+        layout_context=context,
     )
     retired_resolved = resolve_mapping_payload(
         engine=engine,
@@ -188,10 +199,11 @@ def _apply_logical_mapping_payload_locked(
         mapping_contract_version=contract,
         additional_retirement_roots=additional_retirement_roots,
         home=home,
+        layout_context=context,
     )
     layout = resolve_filesystem_skill_layout(
         LayoutIdentity(engine_type=engine, layout_contract_version=LAYOUT_CONTRACT_VERSION),
-        RuntimeLayoutContext(home=home),
+        context,
     )
     pending_center_names: set[str] = set()
     pending_center_keys: set[tuple[tuple[str, str], ...]] = set()
@@ -312,8 +324,13 @@ def _apply_logical_mapping_payload_locked(
     ]
     published = publish_pool_mappings(
         mappings=[physical for _, physical in desired_pairs],
+        deferred_mappings=[
+            physical for raw, physical in zip(mappings, desired_resolved.mappings, strict=True)
+            if _logical_key(raw) in pending_center_keys
+        ],
         retired_mappings=[physical for _, physical in retired_pairs],
         home=home,
+        layout_context=context,
         engine=engine,
         source_layout=source_layout,
         additional_retirement_roots=additional_retirement_roots,
@@ -387,6 +404,8 @@ async def apply_logical_mapping_request(
     params: dict[str, object],
     engine: str,
     additional_retirement_roots: Sequence[Path] = (),
+    home: Path = Path("/home/admin"),
+    layout_context: RuntimeLayoutContext | None = None,
     content_adapter: CenterContentAdapter,
 ) -> dict[str, object]:
     """Run the shared filesystem contract without blocking the HTTP event loop."""
@@ -401,6 +420,8 @@ async def apply_logical_mapping_request(
         retired_payload=params.get("retired_mappings", []),
         center_content_payload=params.get("center_content"),
         additional_retirement_roots=additional_retirement_roots,
+        home=home,
+        layout_context=layout_context,
         content_adapter=content_adapter,
     )
     return result.to_data()
@@ -432,6 +453,7 @@ def resolve_mapping_payload(
     mapping_contract_version: str | None = None,
     additional_retirement_roots: Sequence[Path] = (),
     home: Path = Path("/home/admin"),
+    layout_context: RuntimeLayoutContext | None = None,
 ) -> ResolvedMappingPayload:
     """Resolve logical v2 or legacy unversioned physical mappings.
 
@@ -529,7 +551,7 @@ def resolve_mapping_payload(
             engine_type=engine,
             layout_contract_version=LAYOUT_CONTRACT_VERSION,
         ),
-        RuntimeLayoutContext(home=home),
+        layout_context or RuntimeLayoutContext(home=home),
     )
     local_root = (
         plan.pool_local

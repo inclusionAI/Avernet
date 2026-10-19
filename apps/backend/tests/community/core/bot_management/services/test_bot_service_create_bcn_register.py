@@ -1,13 +1,4 @@
-"""Unit tests for BCN provider registration during create_bot.
-
-create_bot 在 Bot 落库后、设备分配前，应按与 start_bot 相同的条件注册 BCN Provider:
-- active_engine == "claude_code" 且 template_type 为 "normalCC"、None 或空字符串
-- active_engine == "claude_code" 且 template_type == "personalCoding"
-- active_engine == "aicoding" 且 template_type == "personalCoding"
-- active_engine == "teclaw" (所有 bot_type)
-- active_engine == "openclaw" 且 bot_type 为 "service" 或 "personal"
-- 注册失败不阻塞 create_bot 主流程
-"""
+"""All persisted Bots register with BCN before provisioning or early return."""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -23,13 +14,24 @@ from agentclaw.community.core.devices.repository.record import DeviceBindingReco
 def _make_service(*, current_bots: int = 0) -> BotService:
     """构造用于 create_bot BCN 注册测试的最小 BotService。"""
     svc = BotService.__new__(BotService)
+    svc._skills_pool_native_creation_policy = MagicMock(
+        select=MagicMock(return_value=None)
+    )
+    svc._skill_layout_repository = MagicMock()
     svc._bot_storage_policy = None
     svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = MagicMock()
     svc._repository.count_by_owner.return_value = current_bots
     svc._repository.get_by_id_and_owner.return_value = None
     svc._repository.exists_by_bot_name.return_value = False
-    svc._repository.insert.side_effect = lambda data: {"id": 1, **data}
+
+    def _insert_with_layout(data, *, layout):
+        record = {"id": 1, **data}
+        svc._repository.get_by_id_and_owner.return_value = record
+        return record
+
+    svc._repository.insert_with_initial_skill_layout.side_effect = _insert_with_layout
+    svc._repository.claim_provisioning.return_value = True
     svc._repository.update_by_owner.return_value = None
     svc._repository.soft_delete_by_owner.return_value = None
 
@@ -179,7 +181,7 @@ class TestCreateBotBcnRegister:
             ext={"service_bot_config": {"device_count": 3}},
         )
 
-        inserted_ext = svc._repository.insert.call_args.args[0]["ext"]
+        inserted_ext = svc._repository.insert_with_initial_skill_layout.call_args.args[0]["ext"]
         assert inserted_ext == {
             "service_bot_config": {"device_count": 3},
             "sbot_use_default_image": True,
@@ -222,12 +224,12 @@ class TestCreateBotBcnRegister:
             },
         )
 
-        inserted_ext = svc._repository.insert.call_args.args[0]["ext"]
+        inserted_ext = svc._repository.insert_with_initial_skill_layout.call_args.args[0]["ext"]
         assert inserted_ext == {"service_bot_config": {"device_count": 3}}
         common_config.get_value.assert_called_once()
 
-    def test_claude_code_application_coding_does_not_trigger_bcn_register(self):
-        """claude_code + applicationCoding 创建时不应触发 BCN 注册。"""
+    def test_claude_code_application_coding_triggers_bcn_register(self):
+        """Application templates must not suppress registration."""
         svc = _make_service()
         _attach_device_service(svc)
 
@@ -242,7 +244,7 @@ class TestCreateBotBcnRegister:
                 template_type="applicationCoding",
             )
 
-        svc._bcn_service.register_provider_bot.assert_not_called()
+        svc._bcn_service.register_provider_bot.assert_called_once()
 
     def test_claude_code_personal_coding_triggers_bcn_register(self):
         """claude_code + personalCoding 创建时应触发 BCN 注册。"""
@@ -298,14 +300,6 @@ class TestCreateBotBcnRegister:
             summary="",
         )
 
-    def test_aicoding_application_coding_does_not_match_bcn_register_condition(self):
-        """aicoding + applicationCoding 不应命中 BCN 注册条件。"""
-        assert BotService._should_register_bcn_provider(
-            active_engine="aicoding",
-            bot_type="personal",
-            template_type="applicationCoding",
-        ) is False
-
     @pytest.mark.parametrize(
         ("template_type", "template_type_state"),
         [(None, "none"), ("", "empty")],
@@ -343,8 +337,7 @@ class TestCreateBotBcnRegister:
             name="cc-no-template",
             summary="",
         )
-        assert "event=legacy_claude_code_missing_template_type" in caplog.text
-        assert f"template_type_state={template_type_state}" in caplog.text
+        assert "register bot to BCN as provider" in caplog.text
 
     def test_teclaw_personal_triggers_bcn_register(self):
         """teclaw 引擎 personal bot 创建时应触发 BCN 注册（与 claude_code 一致）。"""
@@ -425,31 +418,19 @@ class TestCreateBotBcnRegister:
         assert [name for name, _ in timeline[:2]] == ["register", "apply_device"]
         assert timeline[0][1]["connection_mode"] == "plugin"
 
-    @pytest.mark.parametrize(
-        ("capabilities", "expected"),
-        [
-            ({"bcn": {"join_as_provider": False}}, False),
-            ({"enable_bcn_network": True}, True),
-        ],
-    )
-    def test_openclaw_personal_respects_declared_bcn_capability(
-        self,
-        capabilities,
-        expected,
-    ):
-        """Factory capability must stay ahead of the legacy OpenClaw fallback."""
-        assert BotService._should_register_bcn_provider(
-            active_engine="openclaw",
-            bot_type="personal",
-            template_type="personal",
-            template_config={
-                "template_key": "openclaw-personal",
-                "capabilities": capabilities,
-            },
-        ) is expected
+    @pytest.mark.parametrize("capabilities", [{"bcn": {"join_as_provider": False}}, {}])
+    def test_create_ignores_disabled_or_missing_bcn_capability(self, capabilities):
+        svc = _make_service()
+        _attach_device_service(svc)
+        svc.create_bot(
+            user_id="u1", nick_name="nick", bot_id="factory-bot", engine_type="openclaw",
+            bot_type="personal", template_type="personal",
+            template_config={"template_key": "openclaw-personal", "capabilities": capabilities},
+        )
+        svc._bcn_service.register_provider_bot.assert_called_once()
 
-    def test_moltis_engine_does_not_trigger_bcn_register(self):
-        """moltis 引擎不应触发 BCN 注册。"""
+    def test_moltis_engine_triggers_bcn_register(self):
+        """Moltis also registers with the default gateway mode."""
         svc = _make_service()
         _attach_device_service(svc)
 
@@ -463,7 +444,7 @@ class TestCreateBotBcnRegister:
                 bot_type="personal",
             )
 
-        svc._bcn_service.register_provider_bot.assert_not_called()
+        svc._bcn_service.register_provider_bot.assert_called_once()
 
     def test_bcn_register_failure_does_not_block_create(self):
         """BCN 注册失败不阻塞 create_bot 主流程。"""
@@ -485,8 +466,8 @@ class TestCreateBotBcnRegister:
         assert result["bot_id"] == "cc-fail-1"
         assert result["status"] == "ACTIVE"
 
-    def test_drm_disabled_skips_bcn_register(self):
-        """DRM 开关关闭时不应触发 BCN 注册。"""
+    def test_drm_disabled_still_registers(self):
+        """Lifecycle registration bypasses the legacy DRM switch."""
         svc = _make_service()
         _attach_device_service(svc)
 
@@ -501,4 +482,37 @@ class TestCreateBotBcnRegister:
                 template_type="normalCC",
             )
 
-        svc._bcn_service.register_provider_bot.assert_not_called()
+        svc._bcn_service.register_provider_bot.assert_called_once()
+
+
+@pytest.mark.parametrize("engine", ["hermes", "moltis", "deepseek_harness", "claude_code", "aicoding", "teclaw", "openclaw"])
+@pytest.mark.parametrize("bot_type", ["personal", "desktop", "service"])
+def test_deferred_create_registers_all_engine_types_once(engine, bot_type):
+    svc = _make_service()
+    device_service = _attach_device_service(svc)
+    svc._bcn_service.register_provider_bot.return_value = {"bot_uuid": "bcn-1"}
+    with patch.object(BotService, "_is_claude_code_bcn_register_enabled", return_value=False):
+        record = svc.create_bot(
+            user_id="u1", nick_name="nick", bot_name="all-bots", bot_desc="description",
+            bot_id="all-1", engine_type=engine, bot_type=bot_type, provision=False,
+        )
+    assert record["bot_id"] == "all-1"
+    expected = dict(teamclaw_bot_uuid="all-1", owner_workno="u1", name="all-bots", summary="description")
+    if engine == "openclaw" and bot_type in ("personal", "desktop"):
+        expected["connection_mode"] = "plugin"
+    svc._bcn_service.register_provider_bot.assert_called_once_with(**expected)
+    svc._repository.update_by_owner.assert_called_with(
+        "all-1", "u1", {"ext": {"bcn_registered": True}},
+    )
+    device_service.apply_device.assert_not_called()
+    if bot_type != "desktop":
+        svc.provision_bot(bot_id="all-1", user_id="u1", nick_name="nick")
+        svc._bcn_service.register_provider_bot.assert_called_once_with(**expected)
+
+
+def test_deferred_create_environment_skip_does_not_mark_registered():
+    svc = _make_service()
+    svc._bcn_service.register_provider_bot.return_value = {"skipped": True}
+    record = svc.create_bot(user_id="u1", nick_name="nick", bot_id="skip-1", engine_type="hermes", provision=False)
+    assert record["bot_id"] == "skip-1"
+    svc._repository.update_by_owner.assert_not_called()

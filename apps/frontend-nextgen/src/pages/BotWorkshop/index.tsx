@@ -3,6 +3,7 @@ import { BotAccessModal } from '@/components/BotWorkshop/BotAccessModal';
 import { BotBasicInfoDrawer } from '@/components/BotWorkshop/BotBasicInfoDrawer';
 import BotTable from '@/components/BotWorkshop/BotCard';
 import BotTableSkeleton from '@/components/BotWorkshop/BotCard/BotTableSkeleton';
+import { ContainerInstancesModal } from '@/components/BotWorkshop/ContainerInstancesModal';
 import { BotManagementTabs, type BotManagementTab } from '@/components/BotWorkshop/BotManagementTabs';
 import BotWorkshopToolbar from '@/components/BotWorkshop/BotWorkshopToolbar';
 import CreateBotModal from '@/components/BotWorkshop/CreateBotModal';
@@ -22,6 +23,7 @@ const BotWorkshopPage: React.FC = () => {
   const [publicationBot, setPublicationBot] = useState<BotDomain>();
   const [generalConfigBot, setGeneralConfigBot] = useState<BotDomain>();
   const [basicInfoBot, setBasicInfoBot] = useState<BotDomain>();
+  const [containerBot, setContainerBot] = useState<BotDomain>();
   const [activeTab, setActiveTab] = useState<BotManagementTab>('tc');
   const showBotLogs = getCapabilities().getLoginStrategy().value === 'ace-gateway';
   const effectiveTab = workshop.currentSpaceKind === 'personal' ? activeTab : 'tc';
@@ -100,6 +102,11 @@ const BotWorkshopPage: React.FC = () => {
                     getHealthCheckAvailability={workshop.getHealthCheckAvailability}
                     onOpenLogs={showBotLogs ? workshop.openLogs : undefined}
                     getLogAction={showBotLogs ? workshop.logActionFor : undefined}
+                    onOpenTaskInstances={workshop.openTaskInstances}
+                    canOpenTaskInstances={workshop.canOpenTaskInstances}
+                    onOpenContainers={setContainerBot}
+                    canViewContainers={workshop.canViewContainers}
+                    containerUserId={workshop.containerUserId}
                     onChangeSpace={(bot) => {
                       if (workshop.canChangeSpace(bot)) workshop.openSpaceChange(bot);
                     }}
@@ -173,6 +180,12 @@ const BotWorkshopPage: React.FC = () => {
           <BotGeneralConfigDialog bot={generalConfigBot} onClose={() => setGeneralConfigBot(undefined)} />
         ) : null}
         <BotBasicInfoDrawer bot={basicInfoBot} onClose={() => setBasicInfoBot(undefined)} />
+        <ContainerInstancesModal
+          bot={containerBot}
+          userId={workshop.containerUserId}
+          canRestart={containerBot ? workshop.canRestartContainer(containerBot) : false}
+          onClose={() => setContainerBot(undefined)}
+        />
       </div>
     </main>
   );

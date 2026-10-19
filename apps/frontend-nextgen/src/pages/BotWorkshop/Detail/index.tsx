@@ -24,6 +24,7 @@ import { cn } from '@/utils/cn';
 import { useLocation } from '@umijs/max';
 import React, { useEffect, useState } from 'react';
 import { DetailHeader } from './DetailHeader';
+import { DetailNavigation } from './DetailNavigation';
 import { mainTabs, moreTabs, type MainTab } from './detailTabs';
 
 const BotWorkshopDetailPage: React.FC = () => {
@@ -39,7 +40,7 @@ const BotWorkshopDetailPage: React.FC = () => {
       : undefined;
   const currentSpaceId = useSpaceContext((state) => state.currentSpaceId);
   const requestIdentity = useBotWorkshopEditorIdentity();
-  const detail = useBotWorkshopDetail(id, editable, requestIdentity.ready, ownerId);
+  const detail = useBotWorkshopDetail(id, editable, requestIdentity.ready, ownerId, requestIdentity.userId);
   const addressedOwnerId = ownerId ?? detail.bot?.ownerId;
   const isOwner = isSameHumanIdentity(addressedOwnerId, requestIdentity.userId);
   const editor = useBotEditor(
@@ -62,12 +63,16 @@ const BotWorkshopDetailPage: React.FC = () => {
   );
   const [tab, setTab] = useState<MainTab>('capability');
   const [more, setMore] = useState<MoreConfigTab>();
+  const [debugOpen, setDebugOpen] = useState(true);
+  const [debugFullscreen, setDebugFullscreen] = useState(false);
   useEffect(() => {
     if (!isOwner && more === 'engine') setMore(undefined);
   }, [isOwner, more]);
   useEffect(() => {
     setTab('capability');
     setMore(undefined);
+    setDebugOpen(true);
+    setDebugFullscreen(false);
   }, [id]);
   if (!id)
     return (
@@ -96,67 +101,53 @@ const BotWorkshopDetailPage: React.FC = () => {
       />
     );
   const bot = detail.bot;
+  const visibleMainTabs = mainTabs.filter((item) => item.key !== 'routine' || desktopPolicy.routines);
+  const visibleMoreTabs = moreTabs.filter(
+    (item) =>
+      ({
+        engine: desktopPolicy.engineConfig && isOwner,
+        md: desktopPolicy.markdown,
+        node: desktopPolicy.nodes,
+        channel: desktopPolicy.channels,
+        screen: desktopPolicy.screens,
+      })[item.key],
+  );
   return (
-    <main className="flex h-full min-h-0 flex-col bg-background">
-      <DetailHeader bot={bot} editable={editable} isOwner={isOwner} onBack={detail.back} />
+    <main className="bot-editor-shell flex h-full min-h-0 flex-col bg-background">
+      <DetailHeader
+        bot={bot}
+        editable={editable}
+        isOwner={isOwner}
+        debugOpen={debugOpen}
+        saving={detail.saving}
+        onBack={detail.back}
+        onOpenDebug={() => setDebugOpen(true)}
+        onSaveBasic={detail.save}
+        onReload={() => void detail.retry()}
+      />
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <nav
-          aria-label="Bot 编辑模块"
-          className="app-scrollbar flex w-16 shrink-0 flex-col items-center gap-2 overflow-y-auto border-r border-border bg-muted/30 py-4"
+        <DetailNavigation
+          hidden={debugFullscreen}
+          mainTabs={visibleMainTabs}
+          moreTabs={visibleMoreTabs}
+          activeTab={tab}
+          activeMore={more}
+          onTabChange={(nextTab) => {
+            setTab(nextTab);
+            setMore(undefined);
+          }}
+          onMoreChange={(nextMore) => {
+            setMore(nextMore);
+            if (nextMore === 'engine') void editor.loadEngineConfig();
+          }}
+        />
+        <section
+          className={cn(
+            'app-scrollbar min-w-0 flex-1 overflow-y-auto bg-background lg:max-w-none',
+            debugOpen && !debugFullscreen && 'border-r border-border lg:w-[56%] lg:flex-none',
+            debugFullscreen && 'hidden',
+          )}
         >
-          {mainTabs
-            .filter((item) => item.key !== 'routine' || desktopPolicy.routines)
-            .map((item) => (
-              <Button
-                key={item.key}
-                variant="ghost"
-                size="icon"
-                className={cn(
-                  'h-11 w-full flex-col gap-1 text-xs font-normal',
-                  tab === item.key && !more && 'bg-primary/10 text-primary hover:bg-primary/10 hover:text-primary',
-                )}
-                aria-label={item.label}
-                onClick={() => {
-                  setTab(item.key);
-                  setMore(undefined);
-                }}
-              >
-                {item.icon}
-                <span>{item.label}</span>
-              </Button>
-            ))}
-          {moreTabs
-            .filter(
-              (item) =>
-                ({
-                  engine: desktopPolicy.engineConfig && isOwner,
-                  md: desktopPolicy.markdown,
-                  node: desktopPolicy.nodes,
-                  channel: desktopPolicy.channels,
-                  screen: desktopPolicy.screens,
-                }[item.key]),
-            )
-            .map((item) => (
-              <Button
-                key={item.key}
-                variant="ghost"
-                size="icon"
-                className={cn(
-                  'h-11 w-full flex-col gap-1 text-xs font-normal',
-                  more === item.key && 'bg-primary/10 text-primary hover:bg-primary/10 hover:text-primary',
-                )}
-                aria-label={item.label}
-                onClick={() => {
-                  setMore(item.key);
-                  if (item.key === 'engine') void editor.loadEngineConfig();
-                }}
-              >
-                {item.icon}
-                <span>{item.label}</span>
-              </Button>
-            ))}
-        </nav>
-        <section className="app-scrollbar min-w-0 flex-1 border-r border-border bg-background overflow-y-auto lg:w-[42%] lg:max-w-[720px] lg:flex-none">
           {editor.loading ? (
             <Spin tip="加载编辑配置…" />
           ) : more === 'md' ? (
@@ -170,6 +161,7 @@ const BotWorkshopDetailPage: React.FC = () => {
             <ChannelConfigPanel
               channels={advanced.channels}
               editable={editable}
+              serviceBot={bot.serviceMode === 'service'}
               onCreate={advanced.createChannel}
               onUpdate={advanced.updateChannel}
               onToggle={advanced.toggleChannel}
@@ -197,6 +189,7 @@ const BotWorkshopDetailPage: React.FC = () => {
             />
           ) : tab === 'capability' ? (
             <CapabilityPanel
+              compact={debugOpen && !debugFullscreen}
               desktop={bot.deployment === 'local'}
               onLocalToggle={editor.toggleSkill}
               onLocalDelete={editor.deleteSkill}
@@ -259,9 +252,26 @@ const BotWorkshopDetailPage: React.FC = () => {
             <TaskEscort bot={bot} />
           )}
         </section>
-        <div className="hidden min-w-0 flex-1 lg:flex">
-          <DebugChatPanel bot={bot} runtimeStage={runtimeStage} ownerId={addressedOwnerId} />
-        </div>
+        {debugOpen ? (
+          <div
+            className={cn(
+              'hidden min-w-0 flex-1 transition-[flex-basis,width] duration-200 ease-out lg:flex',
+              debugFullscreen && 'flex',
+            )}
+          >
+            <DebugChatPanel
+              bot={bot}
+              runtimeStage={runtimeStage}
+              ownerId={addressedOwnerId}
+              fullscreen={debugFullscreen}
+              onClose={() => {
+                setDebugOpen(false);
+                setDebugFullscreen(false);
+              }}
+              onToggleFullscreen={() => setDebugFullscreen((current) => !current)}
+            />
+          </div>
+        ) : null}
       </div>
     </main>
   );

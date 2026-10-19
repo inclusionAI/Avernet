@@ -24,14 +24,14 @@
 //! | `{"type":"result","subtype":_}` 非成功 | `CcMap::Failed(note)` → `TurnError::EngineExited` |
 //! | `{"type":"control_request","request":{"subtype":"can_use_tool",…}}` | `CcMap::ControlRequest { request_id, tool_name, input }` → 驱动接线 HITL 交互（register→requested→await resolution→control_response→resolved） |
 
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::{HashMap, HashSet, VecDeque}, path::PathBuf, sync::Arc};
 
 use bcs_protocol::stream::{AgentData, InteractionKind, InteractionPhase, StreamEvent, ToolData, ToolPhase};
 use serde_json::{json, Value};
 
 use crate::engine::cli::CliSession;
 use crate::engine::{
-    is_valid_engine_session_id, Engine, TurnError, TurnOutcome, TurnRequest,
+    is_valid_engine_session_id, Engine, SessionObserver, TurnError, TurnOutcome, TurnRequest,
 };
 use crate::sse;
 
@@ -71,6 +71,8 @@ impl Default for ClaudeCodeFactory {
 impl crate::engine::EngineFactory for ClaudeCodeFactory {
     fn id(&self) -> &str { &self.id }
     fn default_bin(&self) -> &str { &self.default_bin }
+    /// The Claude driver forwards `permission_mode` as its protocol flag.
+    fn ignores_permission_mode(&self) -> bool { false }
     fn build(&self, bin: PathBuf, options: &toml::Table) -> Result<Arc<dyn Engine>, String> {
         crate::engine::reject_engine_options(options)?;
         Ok(Arc::new(ClaudeCode::new(bin, self.prefix_args.clone())))
@@ -85,7 +87,12 @@ impl crate::engine::EngineFactory for ClaudeCodeFactory {
 /// `TurnError::EngineExited`）；`Events` 是该行产出的 [`StreamEvent`]；
 /// `Ignore` 标记“JSON 合法但未识别”；`Malformed` 标记“非法 JSON”；
 /// `ControlRequest` 携带 `can_use_tool` 的 request_id/tool_name/input，由
-/// `run_turn` 接线为 HITL 交互（Task 12）。
+/// `run_turn` 接线为 HITL 交互（Task 12）；
+/// `BackgroundStarted`/`BackgroundDelivered` 携带后台任务生命周期（启动/投递）
+/// （`system/task_started` / `system/task_notification`）的工具调用 id
+/// （及通知的 status），由 `run_turn` 维护 pending 后台任务集合——
+/// `result` 仅在该集合为空时才算 turn 终态：CLI 会在每个后台任务完成后
+/// 自动唤醒主 agent 并再发一个 `result`。
 #[derive(Debug)]
 pub(crate) enum CcMap {
     Events(Vec<StreamEvent>),
@@ -102,6 +109,28 @@ pub(crate) enum CcMap {
         tool_name: String,
         input: Value,
     },
+    /// A background task was launched (`system/task_started`), keyed by the
+    /// tool call that launched it; `task_id` (when present) lets a later
+    /// notification that omits `tool_use_id` still resolve this call.
+    BackgroundStarted { task_id: Option<String>, tool_use_id: String },
+    /// A terminal `system/task_notification` — enqueue time, NOT delivery:
+    /// the task stopped, and the CLI has queued the notification it will
+    /// hand the model later. Recorded so the wake that delivers it can
+    /// release exactly one wait; see `CcTurnMapper::enqueued`.
+    BackgroundEnqueued { task_id: Option<String>, tool_use_id: Option<String>, status: String },
+    /// A background-task completion **delivered to the model** — a user-type
+    /// line whose plain-string content is the `<task-notification>` payload
+    /// the CLI injects when it wakes the agent. Only a delivered notification
+    /// releases the wait: the enqueue-side `system/task_notification` line
+    /// fires when the task finishes, but the CLI defers delivery while the
+    /// model is mid-round, so a `result` between enqueue and delivery would
+    /// otherwise cut the turn short with undelivered results still queued
+    /// (observed in production: two finders' notifications were enqueued
+    /// mid-round, the model's "still waiting" round-end read as final, and
+    /// the queued deliveries died with the reaped process tree).
+    /// `tool_use_id` is absent in some CLI versions — `task_id` correlation
+    /// from `task_started` covers them.
+    BackgroundDelivered { task_id: Option<String>, tool_use_id: Option<String>, status: String },
 }
 
 /// Claude tool results carry only an ID. Keep their complete start names within
@@ -110,44 +139,254 @@ struct CcTurnMapper<'a> {
     run_id: &'a str,
     // None marks an ambiguous or missing name; don't guess a coordination tool.
     pending_tools: HashMap<String, Option<String>>,
+    /// Tool call ids that launched async background work this turn. A `result`
+    /// line only finalizes the turn once this is empty — and entries are
+    /// released only by DELIVERED notifications (the `<task-notification>`
+    /// user message the CLI injects when it wakes the agent), not by the
+    /// enqueue-time `system/task_notification` line: the CLI queues
+    /// notifications that complete mid-round, so a result can land while
+    /// completed-but-undelivered work is still queued behind the model's
+    /// current round.
+    background: HashSet<String>,
+    /// `task_id -> tool_use_id` from `task_started` lines; lets a
+    /// `task_notification` that omits `tool_use_id` (recorded in some CLI
+    /// versions) still release the right wait.
+    task_ids: HashMap<String, String>,
+    /// Terminal notifications queued inside the CLI, awaiting their
+    /// auto-wake. Engines differ in how a completion reaches the model:
+    /// some surface the delivery itself as a user `<task-notification>`
+    /// line (handled by [`CcMap::BackgroundDelivered`]); others stay
+    /// silent on stdout and instead begin each auto-wake round with a
+    /// `system/init` line — and hand the model exactly ONE queued
+    /// notification per wake. This queue mirrors the CLI's, so each wake
+    /// releases exactly one wait whoever fronts it: the release gate is
+    /// the pending COUNT, and an identity swap between popped and
+    /// actually-delivered entries is invisible to it. A delivered user
+    /// line cancels its alias here so the two signals can never
+    /// double-release one wait.
+    enqueued: VecDeque<CcQueuedNotice>,
+}
+
+/// One queued terminal notification awaiting delivery, as recorded from
+/// the enqueue-time `system/task_notification` line.
+struct CcQueuedNotice {
+    task_id: Option<String>,
+    tool_use_id: Option<String>,
 }
 
 impl<'a> CcTurnMapper<'a> {
     fn new(run_id: &'a str) -> Self {
-        Self { run_id, pending_tools: HashMap::new() }
+        Self {
+            run_id,
+            pending_tools: HashMap::new(),
+            background: HashSet::new(),
+            task_ids: HashMap::new(),
+            enqueued: VecDeque::new(),
+        }
+    }
+
+    /// Number of background tasks still pending completion.
+    fn background_pending(&self) -> usize {
+        self.background.len()
+    }
+
+    /// An auto-wake round opened (`system/init`): the CLI hands the model
+    /// exactly ONE queued notification per wake. Pop the queue front and
+    /// release the wait it resolves. The gate is the pending COUNT — if the
+    /// popped entry and the actually-delivered notification trade places
+    /// (queue order is an arrival-time assumption), the swap is invisible:
+    /// one wake, one release, however the names line up. An empty queue
+    /// (startup round, a wake for nothing queued yet) releases nothing; a
+    /// popped entry this run can't attribute (unknown ids) is consumed
+    /// anyway — the CLI spent this wake, and its slot must not survive to
+    /// steal a later release.
+    fn consume_wake(&mut self) {
+        let Some(notice) = self.enqueued.pop_front() else { return };
+        let _ = self.finish_background(
+            notice.task_id.as_deref(),
+            notice.tool_use_id.as_deref(),
+            "completed",
+        );
+    }
+
+    /// Remove the first queue entry matching a delivered notification. Each key
+    /// is compared only when the caller actually supplies it: a `None` argument
+    /// matches nothing, so a tool-result delivery (which carries only a
+    /// tool_use_id) cannot remove another task's notice merely because that
+    /// notice also lacks a task_id. The delivery already released its wait
+    /// directly, and the wake that ends up carrying its alias must not empty-pop
+    /// a second consumer out of a pending set that has already drained.
+    fn cancel_enqueued_alias(&mut self, task_id: Option<&str>, tool_use_id: Option<&str>) {
+        if let Some(i) = self.enqueued.iter().position(|notice| {
+            (tool_use_id.is_some() && notice.tool_use_id.as_deref() == tool_use_id)
+                || (task_id.is_some() && notice.task_id.as_deref() == task_id)
+        }) {
+            self.enqueued.remove(i);
+        }
+    }
+
+    /// Track a background launch. Only called on evidence the work actually
+    /// started (`task_started`, or the async-launch receipt): a
+    /// `run_in_background: true` request that is denied or fails validation
+    /// never emits either, and eagerly registering it would wedge the turn
+    /// on work that will never notify.
+    fn register_background(&mut self, tool_use_id: &str, task_id: Option<&str>) {
+        if !tool_use_id.trim().is_empty() {
+            self.background.insert(tool_use_id.to_owned());
+            if let Some(task_id) = non_empty(task_id) {
+                self.task_ids.insert(task_id.to_owned(), tool_use_id.to_owned());
+            }
+        }
+    }
+
+    /// Release a background wait on a terminal `task_notification` status;
+    /// `running`/`pending` progress reports must keep the wait. Resolves the
+    /// waiting call by `tool_use_id`, falling back to the `task_id`
+    /// correlation for notifications that omit it.
+    /// Returns true when a pending wait was found and released; false for
+    /// unknown ids (a stale delivery the caller should mark downstream).
+    fn finish_background(&mut self, task_id: Option<&str>, tool_use_id: Option<&str>, status: &str) -> bool {
+        if !terminal_task_status(status) {
+            return false;
+        }
+        let released = tool_use_id
+            .map(str::to_owned)
+            .or_else(|| task_id.and_then(|id| self.task_ids.get(id).cloned()));
+        match released.filter(|id| !id.trim().is_empty()) {
+            Some(released) => self.background.remove(&released),
+            None => false,
+        }
     }
 
     fn map_line(&mut self, line: &str) -> CcMap {
-        let mut mapped = map_cc_line(line, self.run_id);
-        if let CcMap::Events(events) = &mut mapped {
-            for event in events {
-                let StreamEvent::Agent(agent) = event else { continue; };
-                let AgentData::Tool(tool) = &mut agent.data else { continue; };
-                let Some(id) = tool.tool_call_id.as_deref().filter(|id| !id.trim().is_empty()) else {
-                    continue;
-                };
-                match tool.phase {
-                    ToolPhase::Start => {
-                        let name = tool.name.clone().filter(|name| !name.trim().is_empty());
-                        self.pending_tools.entry(id.to_owned())
-                            .and_modify(|existing| {
-                                if existing != &name {
-                                    *existing = None;
-                                }
-                            })
-                            .or_insert(name);
-                    }
-                    ToolPhase::Result => {
-                        // Consume once: an orphan/repeated result must not inherit
-                        // a different call's name or derive it from result content.
-                        tool.name = self.pending_tools.remove(id).flatten();
-                    }
-                    _ => {}
-                }
+        let mapped = map_cc_line(line, self.run_id);
+        match mapped {
+            // Background lifecycle lines are consumed into tracking state here;
+            // run_turn only reads background_pending() to gate the wait.
+            CcMap::BackgroundStarted { task_id, tool_use_id } => {
+                self.register_background(&tool_use_id, task_id.as_deref());
+                CcMap::Ignore
             }
+            CcMap::BackgroundEnqueued { task_id, tool_use_id, .. } => {
+                self.enqueued.push_back(CcQueuedNotice { task_id, tool_use_id });
+                CcMap::Ignore
+            }
+            CcMap::BackgroundDelivered { task_id, tool_use_id, status } => {
+                let consumed = self.finish_background(task_id.as_deref(), tool_use_id.as_deref(), &status);
+                // Either signal drains the same delivery: cancel the queued
+                // alias so a later wake cannot pop the spent slot and strand
+                // the notification that wake actually delivered.
+                self.cancel_enqueued_alias(task_id.as_deref(), tool_use_id.as_deref());
+                if !consumed {
+                    // This delivery targets a task this run never launched:
+                    // the CLI is replaying a notification undelivered by a
+                    // previous (killed) turn. Forward it downstream with a
+                    // visible marker so BCS consumers can tell a recycled
+                    // result from a fresh one.
+                    let text = format!(
+                        "<task-notification>{}{}",
+                        task_id.map(|t| format!(" task_id={t}")).unwrap_or_default(),
+                        STALE_DELIVERY_MARKER,
+                    );
+                    return CcMap::Events(vec![sse::chat_delta(self.run_id, &text)]);
+                }
+                CcMap::Ignore
+            }
+            // A wake round opens with system/init: release one queued wait before
+            // the id passes through for session persistence.
+            CcMap::SessionId(s) => {
+                self.consume_wake();
+                CcMap::SessionId(s)
+            }
+            CcMap::Events(mut events) => {
+                // Belt-and-braces launch coverage for engines that omit the
+                // task lifecycle lines: the async-launch receipt is a
+                // whole-result prefix from a launch-capable tool (matching it
+                // in arbitrary tool output — e.g. reading this source — would
+                // phantom-register a wait that never notifies).
+                for event in &mut events {
+                    let StreamEvent::Agent(agent) = event else { continue; };
+                    let AgentData::Tool(tool) = &mut agent.data else { continue; };
+                    let Some(id) = tool.tool_call_id.as_deref().filter(|id| !id.trim().is_empty()).map(str::to_owned) else {
+                        continue;
+                    };
+                    match tool.phase {
+                        ToolPhase::Start => {
+                            let name = tool.name.clone().filter(|name| !name.trim().is_empty());
+                            self.pending_tools.entry(id)
+                                .and_modify(|existing| {
+                                    if existing != &name {
+                                        *existing = None;
+                                    }
+                                })
+                                .or_insert(name);
+                        }
+                        ToolPhase::Result => {
+                            let name = self.pending_tools.remove(&id).flatten();
+                            if matches!(name.as_deref(), Some("Bash") | Some("Task") | Some("Agent"))
+                                && async_launch_receipt(&tool.result)
+                            {
+                                // Old protocol: this result is the launch RECEIPT
+                                // ("Command running in background …"); the task is
+                                // still running, so register the wait.
+                                self.register_background(&id, None);
+                            } else if self.background.contains(&id) {
+                                // Claude Code 2.1.199 auto-backgrounds a long
+                                // foreground call and delivers its real output as
+                                // an ordinary tool_result carrying the SAME id —
+                                // never a `<task-notification>` line or a wake.
+                                // That tool_result IS the delivery, so release the
+                                // wait here (and cancel the enqueue-time alias so a
+                                // later wake cannot pop a spent slot and drain a
+                                // different task's still-pending wait). Without
+                                // this the run's `result` is swallowed forever and
+                                // the turn hangs until the idle watchdog.
+                                self.finish_background(None, Some(&id), "completed");
+                                self.cancel_enqueued_alias(None, Some(&id));
+                            }
+                            // Consume once: an orphan/repeated result must not inherit
+                            // a different call's name or derive it from result content.
+                            tool.name = name;
+                        }
+                        _ => {}
+                    }
+                }
+                CcMap::Events(events)
+            }
+            other => other,
         }
-        mapped
     }
+}
+
+/// Marker appended to a delivered `<task-notification>` when its tool call id
+/// does not belong to this run — i.e. the CLI is replaying a notification
+/// that a previous (killed) run left undelivered in the session queue. The
+/// marker makes the replay visible to BCS consumers and downstream viewers
+/// so a recycled result doesn't read as a fresh response.
+const STALE_DELIVERY_MARKER: &str =
+    "\n--------- replayed from a previous run (background task completed before this turn started) -------";
+
+/// Whether a tool result is the async-launch receipt of a background task
+/// (Agent/Task: "Async agent launched successfully"; background Bash:
+/// "Command running in background") rather than a completed tool call.
+fn async_launch_receipt(result: &Option<Value>) -> bool {
+    let Some(result) = result else { return false };
+    match result {
+        Value::String(text) => receipt_text(text),
+        // Block-array content carries receipts as single text blocks.
+        Value::Array(blocks) => blocks.iter().any(|b| {
+            b.get("text").and_then(Value::as_str).map(receipt_text).unwrap_or(false)
+        }),
+        _ => false,
+    }
+}
+
+fn receipt_text(text: &str) -> bool {
+    // Receipts ARE the whole result text; a mere mention inside other output
+    // (this source, a log line) must not read as a launch.
+    let text = text.trim();
+    text.starts_with("Async agent launched successfully")
+        || text.starts_with("Command running in background with ID:")
 }
 
 /// 把一行 claude `stream-json` NDJSON 映射为引擎中立的 [`CcMap`]。
@@ -175,13 +414,58 @@ pub(crate) fn map_cc_line(line: &str, run_id: &str) -> CcMap {
 
 fn map_system(v: &Value) -> CcMap {
     let subtype = v.get("subtype").and_then(|x| x.as_str()).unwrap_or("");
-    if subtype != "init" {
-        return CcMap::Ignore;
-    }
-    match v.get("session_id").and_then(|x| x.as_str()) {
-        Some(s) if !s.is_empty() => CcMap::SessionId(s.to_string()),
+    match subtype {
+        "init" => match v.get("session_id").and_then(|x| x.as_str()) {
+            Some(s) if !s.is_empty() => CcMap::SessionId(s.to_string()),
+            _ => CcMap::Ignore,
+        },
+        // Background-task lifecycle (recorded from a live capture).
+        "task_started" => {
+            let tool_use_id = non_empty(v.get("tool_use_id").and_then(|x| x.as_str()));
+            match tool_use_id {
+                Some(id) => CcMap::BackgroundStarted {
+                    task_id: non_empty(v.get("task_id").and_then(|x| x.as_str())).map(str::to_string),
+                    tool_use_id: id.to_string(),
+                },
+                None => CcMap::Ignore,
+            }
+        }
+        // `task_notification` fires when the task finishes — enqueue time,
+        // NOT delivery time. The CLI queues the notification and delivers it
+        // to the model later: some CLI versions surface that delivery as a
+        // user `<task-notification>` line (map_user parses it); others hand
+        // the model exactly one queued notification per auto-wake round,
+        // opened by a new `system/init` line. Both signals gate the same
+        // release, so the enqueue is recorded — never a release on its own
+        // (deliveries can land while the model is mid-round; a result then
+        // must stay intermediate or completed-but-undelivered work dies
+        // with the turn).
+        "task_notification" => {
+            let status = v.get("status").and_then(|x| x.as_str()).unwrap_or("");
+            if !terminal_task_status(status) {
+                return CcMap::Ignore;
+            }
+            // Queue entries mirror the CLI's own queue membership — unknown
+            // ids included: the slot still occupies a wake that must not pop
+            // a legitimate wait.
+            CcMap::BackgroundEnqueued {
+                task_id: non_empty(v.get("task_id").and_then(|x| x.as_str())).map(str::to_string),
+                tool_use_id: non_empty(v.get("tool_use_id").and_then(|x| x.as_str())).map(str::to_string),
+                status: status.to_string(),
+            }
+        }
         _ => CcMap::Ignore,
     }
+}
+
+fn non_empty(s: Option<&str>) -> Option<&str> {
+    s.filter(|s| !s.trim().is_empty())
+}
+
+/// Whether a task status is terminal: only terminal statuses release a
+/// background wait. `running`/`pending` progress reports must keep it.
+fn terminal_task_status(status: &str) -> bool {
+    matches!(status, "completed" | "failed" | "stopped" | "killed")
 }
 
 fn map_stream_event(v: &Value, run_id: &str) -> CcMap {
@@ -269,7 +553,51 @@ fn tool_result_carries_mark(content: &Value) -> bool {
     }
 }
 
+/// Parse a delivered `<task-notification>` user message: `(task_id,
+/// tool_use_id, status)` when the whole plain-string content is the
+/// notification payload. `tool_use_id` is omitted by some CLI versions — the
+/// caller resolves those through the `task_id` correlation `task_started`
+/// recorded. A missing `<status>` cannot release the wait (the release rule
+/// is terminal-status-driven), so such payloads read as not-a-notification.
+fn delivered_notification(content: &str) -> Option<(Option<&str>, Option<&str>, String)> {
+    let text = content.trim();
+    if !text.starts_with("<task-notification>") {
+        return None;
+    }
+    let status = xml_field(text, "status")?;
+    Some((
+        xml_field(text, "task-id"),
+        xml_field(text, "tool-use-id"),
+        status.to_string(),
+    ))
+}
+
+/// Extract `<tag>…</tag>` inner text; None when the tag is absent or empty.
+fn xml_field<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = text.find(&open)? + open.len();
+    let end = text[start..].find(&close)? + start;
+    non_empty(Some(&text[start..end]))
+}
+
 fn map_user(v: &Value, run_id: &str) -> CcMap {
+    // A delivered background-task notification arrives as PLAIN-STRING
+    // content (the `<task-notification>` payload the CLI injects to wake the
+    // agent). String-only is load-bearing: tool results ride in block
+    // arrays, so a tool result that merely echoes notification text — a CR
+    // reading this source, a grep of a task output file — can never
+    // impersonate a delivery.
+    if let Some(content) = v.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+        if let Some((task_id, tool_use_id, status)) = delivered_notification(content) {
+            return CcMap::BackgroundDelivered {
+                task_id: task_id.map(str::to_string),
+                tool_use_id: tool_use_id.map(str::to_string),
+                status,
+            };
+        }
+        return CcMap::Ignore;
+    }
     let content = match v
         .get("message")
         .and_then(|m| m.get("content"))
@@ -723,6 +1051,22 @@ async fn handle_control_request(
     Ok(())
 }
 
+/// Default sliding idle window for the engine stream. Every received line
+/// pushes the turn's "still making progress" deadline this far out; only a
+/// stream that stays silent for the whole window fails the turn — with a
+/// named error that reports the stalled background count. The window must
+/// cover silences that are protocol-required, not stalls: model TTFT spikes
+/// on large contexts, and the full runtime of a background task or async
+/// agent the engine is waiting on (recorded live: task_started to
+/// task_notification the stream emits nothing for the task's whole
+/// duration — a 3-minute background wait is 3 minutes of legitimate
+/// silence). Ten minutes absorbs those while still surfacing a genuinely
+/// wedged stream (2026-10-14/2026-10-16 class) long before the outer run
+/// deadline. A shorter window was tried (120s, 2026-10-16) and reverted:
+/// it killed healthy turns parked on multi-minute background work. A
+/// per-turn `req.idle_timeout` override still wins when set.
+const IDLE_WINDOW: std::time::Duration = std::time::Duration::from_secs(600);
+
 #[async_trait::async_trait]
 impl Engine for ClaudeCode {
     async fn run_turn(
@@ -773,15 +1117,36 @@ impl Engine for ClaudeCode {
 
         let mut engine_session_id = req.engine_session_id.clone();
         let mut mapper = CcTurnMapper::new(&req.run_id);
+        // Sliding idle watchdog: every received line pushes this deadline out.
+        // A stream that goes quiet forever — the CLI wedged on something the
+        // bridge can't observe — must fail the turn explicitly instead of
+        // wedging until the outer run deadline with BCS waiting on a final.
+        let idle_window = req.idle_timeout.unwrap_or(IDLE_WINDOW);
+        let mut idle_deadline = tokio::time::Instant::now() + idle_window;
         loop {
+            let idle_timer = tokio::time::sleep_until(idle_deadline);
             tokio::select! {
                 _ = abort.cancelled() => {
                     cli.kill().await;
                     return Err(TurnError::Aborted);
                 }
+                _ = idle_timer => {
+                    let pending = mapper.background_pending();
+                    cli.kill().await;
+                    return Err(TurnError::EngineExited(format!(
+                        "stream idle for {idle_window:?} ({pending} pending background task(s))"
+                    )));
+                }
                 line = cli.next_line() => {
+                    idle_deadline = tokio::time::Instant::now() + idle_window;
                     let Some(line) = line.map_err(TurnError::Io)? else {
-                        return Err(TurnError::EngineExited("stdout EOF before result".into()));
+                        let pending = mapper.background_pending();
+                        let note = if pending > 0 {
+                            format!(" with {pending} pending background task(s)")
+                        } else {
+                            String::new()
+                        };
+                        return Err(TurnError::EngineExited(format!("stdout EOF before result{note}")));
                     };
                     match mapper.map_line(&line) {
                         CcMap::SessionId(s) => {
@@ -798,7 +1163,22 @@ impl Engine for ClaudeCode {
                             }
                         },
                         CcMap::Final(text) => {
+                            if mapper.background_pending() > 0 {
+                                // Intermediate result: background work launched this
+                                // turn is still pending, so the CLI keeps the turn
+                                // alive — it auto-wakes the agent on each
+                                // task_notification and emits another result once
+                                // the work is done. Its text already reached BCS
+                                // through the streamed deltas; swallow this result
+                                // and keep reading. The run deadline bounds the wait.
+                                continue;
+                            }
                             return Ok(TurnOutcome { engine_session_id, final_text: Some(text) });
+                        }
+                        CcMap::BackgroundStarted { .. }
+                        | CcMap::BackgroundEnqueued { .. }
+                        | CcMap::BackgroundDelivered { .. } => {
+                            // Consumed into mapper tracking inside map_line.
                         }
                         CcMap::Failed(note) => {
                             cli.kill().await;
@@ -815,6 +1195,12 @@ impl Engine for ClaudeCode {
                                 input,
                             )
                             .await?;
+                            // The watchdog measures ENGINE silence, but the
+                            // await above parked on a human decision for an
+                            // unbounded time during which engine silence is
+                            // protocol-required. Restart the window: the moment
+                            // the approval lands, the engine owes output again.
+                            idle_deadline = tokio::time::Instant::now() + idle_window;
                         }
                         CcMap::Ignore | CcMap::Malformed => {}
                     }
@@ -914,6 +1300,9 @@ mod tests {
                 CcMap::Final(text) => final_text = Some(text),
                 CcMap::Failed(_) => {}
                 CcMap::ControlRequest { .. } => {}
+                CcMap::BackgroundStarted { .. }
+                | CcMap::BackgroundEnqueued { .. }
+                | CcMap::BackgroundDelivered { .. } => {}
                 CcMap::Ignore | CcMap::Malformed => {}
             }
         }
@@ -1387,5 +1776,555 @@ mod tests {
             },
             other => panic!("expected Events, got {other:?}"),
         }
+    }
+
+    // -- 后台任务（async subagent / background bash）的 turn 续接 ------------
+
+    struct NullObserver;
+    #[async_trait::async_trait]
+    impl SessionObserver for NullObserver {
+        async fn established(&self, _: &str) -> Result<(), String> { Ok(()) }
+    }
+
+    /// Drive a full `run_turn` against a mock Claude Code script.
+    async fn run_mock_cc(script: &str) -> Result<TurnOutcome, TurnError> {
+        let engine = ClaudeCode::new(PathBuf::from("bash"), vec![script.to_string()]);
+        let req = TurnRequest::new("r-bg", "hi", ".", Arc::new(NullObserver));
+        let (tx, _rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
+        engine
+            .run_turn(req, tx, tokio_util::sync::CancellationToken::new())
+            .await
+    }
+
+    #[test]
+    fn task_lifecycle_lines_map_to_tracking_variants() {
+        // Shapes recorded from a live CLI capture. task_started carries the
+        // ids the mapper registers by; heavy task_notification system lines
+        // are INERT (enqueue-time only — release happens on delivery);
+        // delivered notifications arrive as user lines with plain-string
+        // `<task-notification>` content.
+        let started = r#"{"type":"system","subtype":"task_started","task_id":"t1","tool_use_id":"toolu_1","task_type":"local_agent"}"#;
+        match map_cc_line(started, "r-1") {
+            CcMap::BackgroundStarted { task_id, tool_use_id } => {
+                assert_eq!(task_id.as_deref(), Some("t1"));
+                assert_eq!(tool_use_id, "toolu_1");
+            }
+            other => panic!("expected BackgroundStarted, got {other:?}"),
+        }
+        // Enqueue-time terminal lines record the queued notification — a slot
+        // in the wake queue, never a release on their own (the CLI defers
+        // delivery while the model is mid-round; production 2026-10-14:
+        // results cut the turn with two enqueued-but-undelivered finders).
+        let enq = r#"{"type":"system","subtype":"task_notification","task_id":"t1","tool_use_id":"toolu_1","status":"completed","summary":"done"}"#;
+        match map_cc_line(enq, "r-1") {
+            CcMap::BackgroundEnqueued { task_id, tool_use_id, status } => {
+                assert_eq!(task_id.as_deref(), Some("t1"));
+                assert_eq!(tool_use_id.as_deref(), Some("toolu_1"));
+                assert_eq!(status, "completed");
+            }
+            other => panic!("expected BackgroundEnqueued, got {other:?}"),
+        }
+        // A terminal notice without ids still occupies a future wake, so it
+        // enqueues too; wake-side resolution handles the missing ids.
+        let anonymous = r#"{"type":"system","subtype":"task_notification","status":"completed"}"#;
+        match map_cc_line(anonymous, "r-1") {
+            CcMap::BackgroundEnqueued { task_id, tool_use_id, .. } => {
+                assert_eq!(task_id, None);
+                assert_eq!(tool_use_id, None);
+            }
+            other => panic!("expected anonymous BackgroundEnqueued, got {other:?}"),
+        }
+        // Non-terminal statuses and id-less task_started stay inert.
+        for inert in [
+            r#"{"type":"system","subtype":"task_notification","task_id":"t1","tool_use_id":"toolu_1","status":"running"}"#,
+            r#"{"type":"system","subtype":"task_started","task_id":"t2"}"#,
+        ] {
+            assert!(matches!(map_cc_line(inert, "r-1"), CcMap::Ignore), "must be inert: {inert}");
+        }
+        // The delivered notification: user line, plain-string content,
+        // fields extracted for the delivery-driven release.
+        let delivered = json!({
+            "type": "user",
+            "message": {"role": "user", "content":
+                "<task-notification>\n<task-id>t1</task-id>\n<tool-use-id>toolu_1</tool-use-id>\n<status>completed</status>\n<summary>done</summary>\n</task-notification>"}
+        }).to_string();
+        match map_cc_line(&delivered, "r-1") {
+            CcMap::BackgroundDelivered { task_id, tool_use_id, status } => {
+                assert_eq!(task_id.as_deref(), Some("t1"));
+                assert_eq!(tool_use_id.as_deref(), Some("toolu_1"));
+                assert_eq!(status, "completed");
+            }
+            other => panic!("expected BackgroundDelivered, got {other:?}"),
+        }
+        // Legacy delivery without <tool-use-id>: task_id rides for correlation.
+        let legacy = json!({
+            "type": "user",
+            "message": {"role": "user", "content":
+                "<task-notification>\n<task-id>t1</task-id>\n<status>completed</status>\n</task-notification>"}
+        }).to_string();
+        match map_cc_line(&legacy, "r-1") {
+            CcMap::BackgroundDelivered { task_id, tool_use_id, status } => {
+                assert_eq!(task_id.as_deref(), Some("t1"));
+                assert_eq!(tool_use_id, None);
+                assert_eq!(status, "completed");
+            }
+            other => panic!("expected BackgroundDelivered, got {other:?}"),
+        }
+        // A delivered payload without <status> cannot release (the release
+        // rule is terminal-status-driven): reads as not-a-notification.
+        let statusless = json!({
+            "type": "user",
+            "message": {"role": "user", "content":
+                "<task-notification>\n<task-id>t1</task-id>\n<tool-use-id>toolu_1</tool-use-id>\n</task-notification>"}
+        }).to_string();
+        assert!(matches!(map_cc_line(&statusless, "r-1"), CcMap::Ignore));
+    }
+
+    #[test]
+    fn enqueue_side_notification_does_not_release_only_delivery_does() {
+        // The wait releases on the delivered user `<task-notification>`, never
+        // on the enqueue-time system line — and plain-string content only,
+        // so tool results echoing notification text (a CR reading this very
+        // source) can never impersonate a delivery.
+        let mut mapper = CcTurnMapper::new("r-1");
+        let started = r#"{"type":"system","subtype":"task_started","task_id":"t-bg","tool_use_id":"toolu_bg","task_type":"local_agent"}"#;
+        assert!(matches!(mapper.map_line(started), CcMap::Ignore));
+        assert_eq!(mapper.background_pending(), 1);
+        let enqueued = r#"{"type":"system","subtype":"task_notification","task_id":"t-bg","tool_use_id":"toolu_bg","status":"completed"}"#;
+        assert!(matches!(mapper.map_line(enqueued), CcMap::Ignore));
+        assert_eq!(mapper.background_pending(), 1, "enqueue must keep the wait");
+        let delivered = json!({
+            "type": "user",
+            "message": {"role": "user", "content":
+                "<task-notification>\n<task-id>t-bg</task-id>\n<tool-use-id>toolu_bg</tool-use-id>\n<status>completed</status>\n</task-notification>"}
+        }).to_string();
+        assert!(matches!(mapper.map_line(&delivered), CcMap::Ignore));
+        assert_eq!(mapper.background_pending(), 0, "delivery releases");
+    }
+
+    #[test]
+    fn notification_text_in_tool_results_does_not_read_as_delivery() {
+        // Foreground tool output that carries the notification payload — a CR
+        // reading this fixture, a grep over an tasks/ directory — rides in
+        // block arrays; only plain-string user content is a delivery.
+        let mut mapper = CcTurnMapper::new("r-1");
+        let started = r#"{"type":"system","subtype":"task_started","task_id":"t-bg","tool_use_id":"toolu_e","task_type":"local_agent"}"#;
+        assert!(matches!(mapper.map_line(started), CcMap::Ignore));
+        let read_start = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_r","name":"Read","input":{"path":"mock fixture"}}]}}"#;
+        assert!(matches!(mapper.map_line(read_start), CcMap::Events(_)));
+        let echo = json!({
+            "type": "user",
+            "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_r", "is_error": false, "content": [
+                {"type": "text", "text": "<task-notification>\n<task-id>t-bg</task-id>\n<tool-use-id>toolu_e</tool-use-id>\n<status>completed</status>\n</task-notification>"}
+            ]}]}
+        }).to_string();
+        assert!(matches!(mapper.map_line(&echo), CcMap::Events(_)), "tool_result array must map as events");
+        assert_eq!(mapper.background_pending(), 1, "tool output must not release the wait");
+    }
+
+    #[test]
+    fn inline_tool_result_for_a_backgrounded_id_releases_the_wait() {
+        // Claude Code 2.1.199 auto-backgrounds a long-running foreground Bash
+        // (no run_in_background from the model): it emits task_started, then an
+        // enqueue-time task_notification, then delivers the real output as an
+        // ORDINARY block-array tool_result carrying the SAME tool_use_id — and
+        // never surfaces a `<task-notification>` user line nor a `system/init`
+        // wake. Recorded live (repro6): sleep 25 → task_started(toolu),
+        // task_notification(completed), user tool_result(id=toolu), result.
+        // The delivery IS that tool_result, so a result for a registered
+        // background id must release the wait — otherwise the run's `result`
+        // is swallowed forever and the turn hangs until the idle watchdog.
+        let mut mapper = CcTurnMapper::new("r-1");
+        let start = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_bg","name":"Bash","input":{"command":"sleep 25; echo DONE","timeout":120000}}]}}"#;
+        assert!(matches!(mapper.map_line(start), CcMap::Events(_)));
+        let started = r#"{"type":"system","subtype":"task_started","task_id":"t-bg","tool_use_id":"toolu_bg","task_type":"local_bash"}"#;
+        assert!(matches!(mapper.map_line(started), CcMap::Ignore));
+        assert_eq!(mapper.background_pending(), 1, "task_started registers the wait");
+        let enqueued = r#"{"type":"system","subtype":"task_notification","task_id":"t-bg","tool_use_id":"toolu_bg","status":"completed"}"#;
+        assert!(matches!(mapper.map_line(enqueued), CcMap::Ignore));
+        assert_eq!(mapper.background_pending(), 1, "enqueue alone must not release");
+        // The real output, delivered inline as an ordinary tool_result with the
+        // backgrounded id. This is the delivery this engine actually surfaces.
+        let delivered = json!({
+            "type": "user",
+            "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_bg", "is_error": false, "content": [
+                {"type": "text", "text": "DONE"}
+            ]}]}
+        }).to_string();
+        assert!(matches!(mapper.map_line(&delivered), CcMap::Events(_)), "still forwarded as a tool event");
+        assert_eq!(mapper.background_pending(), 0, "inline delivery of a backgrounded id releases the wait");
+    }
+
+    #[test]
+    fn inline_delivery_cancels_its_wake_queue_alias() {
+        // The enqueue-time task_notification parked an alias in the wake queue.
+        // Once the inline tool_result releases the wait directly, that alias is
+        // spent: a later system/init wake must not pop it and drain a DIFFERENT
+        // task's still-pending wait.
+        let mut mapper = CcTurnMapper::new("r-1");
+        for (t, u) in [("t-x", "toolu_x"), ("t-y", "toolu_y")] {
+            let started = format!(
+                r#"{{"type":"system","subtype":"task_started","task_id":"{t}","tool_use_id":"{u}","task_type":"local_bash"}}"#
+            );
+            assert!(matches!(mapper.map_line(&started), CcMap::Ignore));
+            let noticed = format!(
+                r#"{{"type":"system","subtype":"task_notification","task_id":"{t}","tool_use_id":"{u}","status":"completed"}}"#
+            );
+            assert!(matches!(mapper.map_line(&noticed), CcMap::Ignore));
+        }
+        assert_eq!(mapper.background_pending(), 2);
+        // x delivered inline (ordinary tool_result) — releases x and cancels
+        // its queued alias.
+        let delivered_x = json!({
+            "type": "user",
+            "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_x", "is_error": false, "content": "x done"}]}
+        }).to_string();
+        assert!(matches!(mapper.map_line(&delivered_x), CcMap::Events(_)));
+        assert_eq!(mapper.background_pending(), 1, "x released by its inline delivery");
+        // A wake must release y — impossible if x's spent alias still fronts it.
+        let wake = r#"{"type":"system","subtype":"init","session_id":"cc-sess-wake"}"#;
+        assert!(matches!(mapper.map_line(wake), CcMap::SessionId(_)));
+        assert_eq!(mapper.background_pending(), 0, "wake releases y, not x's spent alias");
+    }
+
+    #[test]
+    fn inline_delivery_cancels_the_matching_alias_not_a_taskidless_one() {
+        // Two auto-backgrounded tasks. Task A's task_notification OMITS task_id
+        // (some CLI recordings do), so its queued alias is {task_id: None, …}.
+        // When B is delivered inline, cancelling B's alias must key on B's own
+        // id — it must NOT match A's notice merely because A's task_id is also
+        // absent. Otherwise the following wake pops B's spent slot, A's wait is
+        // stranded, and the turn hangs until the idle watchdog.
+        let mut mapper = CcTurnMapper::new("r-1");
+        for u in ["toolu_a", "toolu_b"] {
+            let started = format!(
+                r#"{{"type":"system","subtype":"task_started","tool_use_id":"{u}","task_type":"local_bash"}}"#
+            );
+            assert!(matches!(mapper.map_line(&started), CcMap::Ignore));
+        }
+        assert_eq!(mapper.background_pending(), 2);
+        // A's completion notification omits task_id; B's carries both keys.
+        let notice_a = r#"{"type":"system","subtype":"task_notification","tool_use_id":"toolu_a","status":"completed"}"#;
+        assert!(matches!(mapper.map_line(notice_a), CcMap::Ignore));
+        let notice_b = r#"{"type":"system","subtype":"task_notification","task_id":"t-b","tool_use_id":"toolu_b","status":"completed"}"#;
+        assert!(matches!(mapper.map_line(notice_b), CcMap::Ignore));
+        assert_eq!(mapper.background_pending(), 2, "enqueue alone must not release");
+        // B delivered inline — releases B and must cancel B's alias, not A's.
+        let delivered_b = json!({
+            "type": "user",
+            "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_b", "is_error": false, "content": "b done"}]}
+        }).to_string();
+        assert!(matches!(mapper.map_line(&delivered_b), CcMap::Events(_)));
+        assert_eq!(mapper.background_pending(), 1, "B released by its inline delivery");
+        // The wake must release A through A's still-queued alias. If B's cancel
+        // wrongly removed A's alias, the wake pops B's spent slot and A hangs.
+        let wake = r#"{"type":"system","subtype":"init","session_id":"cc-sess-wake"}"#;
+        assert!(matches!(mapper.map_line(wake), CcMap::SessionId(_)));
+        assert_eq!(mapper.background_pending(), 0, "wake releases A, not B's spent alias");
+    }
+
+    #[test]
+    fn background_launch_requires_evidence_not_just_the_request() {
+        // A `run_in_background: true` request alone is not a launch: a denied or
+        // invalid call never emits task_started or a receipt, and registering
+        // it would wedge the turn on work that will never notify.
+        let mut mapper = CcTurnMapper::new("r-1");
+        let start = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_d","name":"Bash","input":{"command":"sleep 1","run_in_background":true}}]}}"#;
+        assert!(matches!(mapper.map_line(start), CcMap::Events(_)));
+        assert_eq!(mapper.background_pending(), 0, "request alone must not register");
+        // The authoritative launch evidence does.
+        let launched = r#"{"type":"system","subtype":"task_started","task_id":"t1","tool_use_id":"toolu_d","task_type":"local_bash"}"#;
+        assert!(matches!(mapper.map_line(launched), CcMap::Ignore));
+        assert_eq!(mapper.background_pending(), 1);
+    }
+
+    #[test]
+    fn receipt_registration_requires_initiating_tool_and_whole_text_prefix() {
+        // Receipt markers seen inside other tools' output — CRs reading this
+        // very source, grep over logs — must not read as background launches.
+        let mut mapper = CcTurnMapper::new("r-1");
+        let read_start = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_r","name":"Read","input":{"path":"claude_code.rs"}}]}}"#;
+        assert!(matches!(mapper.map_line(read_start), CcMap::Events(_)));
+        let read_result = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_r","content":"core/src/engine/claude_code.rs: text.contains(\"Async agent launched successfully\")"}]}}"#;
+        assert!(matches!(mapper.map_line(read_result), CcMap::Events(_)));
+        assert_eq!(mapper.background_pending(), 0, "substring in a Read result must not register");
+        // A Bash result that merely mentions the sentence mid-text: excluded.
+        let bash_start = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_g","name":"Bash","input":{"command":"grep receipt src"}}]}}"#;
+        assert!(matches!(mapper.map_line(bash_start), CcMap::Events(_)));
+        let grep_result = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_g","content":"logs: text.contains(\"Command running in background\")"}]}}"#;
+        assert!(matches!(mapper.map_line(grep_result), CcMap::Events(_)));
+        assert_eq!(mapper.background_pending(), 0, "mid-text mention must not register");
+        // The recorded receipt shape — the whole result, from an initiating
+        // tool — registers.
+        let bg_start = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_b","name":"Bash","input":{"command":"sleep 1","run_in_background":true}}]}}"#;
+        assert!(matches!(mapper.map_line(bg_start), CcMap::Events(_)));
+        let receipt = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_b","content":"Command running in background with ID: bp1. Output is being written to: /tmp/x. You will be notified when it completes.","is_error":false}]}}"#;
+        assert!(matches!(mapper.map_line(receipt), CcMap::Events(_)));
+        assert_eq!(mapper.background_pending(), 1);
+    }
+
+    #[test]
+    fn task_id_correlation_releases_waits_from_deliveries_without_tool_id() {
+        let mut mapper = CcTurnMapper::new("r-1");
+        let started = r#"{"type":"system","subtype":"task_started","task_id":"t-legacy","tool_use_id":"toolu_leg","task_type":"local_agent"}"#;
+        assert!(matches!(mapper.map_line(started), CcMap::Ignore));
+        assert_eq!(mapper.background_pending(), 1);
+        // Recorded pre-0.3.269 shape: the delivered notification omits
+        // <tool-use-id>; task_id must release the correlated wait.
+        let legacy_delivered = json!({
+            "type": "user",
+            "message": {"role": "user", "content":
+                "<task-notification>\n<task-id>t-legacy</task-id>\n<status>completed</status>\n</task-notification>"}
+        }).to_string();
+        assert!(matches!(mapper.map_line(&legacy_delivered), CcMap::Ignore));
+        assert_eq!(mapper.background_pending(), 0, "task_id must release the correlated wait");
+    }
+
+    #[test]
+    fn wake_inits_release_one_enqueued_notification_each() {
+        // Real-capture protocol (2026-10-14 production + lab): this CLI
+        // never surfaces the delivered <task-notification> on stdout —
+        // completions arrive as enqueue-time system lines, and each
+        // auto-wake round (a new system/init) hands the model exactly ONE
+        // queued notification. Draining one wait per wake is the ONLY way
+        // this pending set can ever empty, so it is the only way the turn
+        // can ever finalize.
+        let mut mapper = CcTurnMapper::new("r-1");
+        for (t, u) in [("t-a", "toolu_a"), ("t-b", "toolu_b"), ("t-c", "toolu_c")] {
+            let started = format!(
+                r#"{{"type":"system","subtype":"task_started","task_id":"{t}","tool_use_id":"{u}","task_type":"local_agent"}}"#
+            );
+            assert!(matches!(mapper.map_line(&started), CcMap::Ignore));
+        }
+        assert_eq!(mapper.background_pending(), 3);
+        for (t, u) in [("t-a", "toolu_a"), ("t-b", "toolu_b"), ("t-c", "toolu_c")] {
+            let noticed = format!(
+                r#"{{"type":"system","subtype":"task_notification","task_id":"{t}","tool_use_id":"{u}","status":"completed"}}"#
+            );
+            assert!(matches!(mapper.map_line(&noticed), CcMap::Ignore));
+            assert_eq!(mapper.background_pending(), 3, "enqueue must keep the wait");
+        }
+        // Three wakes deliver the three queued notifications — one each. C
+        // was enqueued before B's wake yet delivered a round later, so the
+        // pops must not race ahead of arrivals: one release per wake, no
+        // more, whoever fronts the queue.
+        for expected in [2, 1, 0] {
+            let wake = r#"{"type":"system","subtype":"init","session_id":"cc-sess-wake"}"#;
+            assert!(matches!(mapper.map_line(wake), CcMap::SessionId(_)));
+            assert_eq!(mapper.background_pending(), expected, "one wake releases exactly one");
+        }
+        // A fourth wake (round running with nothing left queued) must be a
+        // no-op — it can neither release a wait that does not exist nor
+        // fabricate a stale-marker event.
+        let wake = r#"{"type":"system","subtype":"init","session_id":"cc-sess-wake"}"#;
+        assert!(matches!(mapper.map_line(wake), CcMap::SessionId(_)));
+        assert_eq!(mapper.background_pending(), 0);
+    }
+
+    #[test]
+    fn delivered_user_line_cancels_its_alias_in_the_wake_queue() {
+        // Engines that DO surface deliveries (user <task-notification> lines)
+        // resolve their wait directly — and must cancel the queued alias from
+        // the enqueue-time system line, or the following wake pops the spent
+        // alias instead, and the notification that wake actually delivered is
+        // left owning a wait that stays pending forever.
+        let mut mapper = CcTurnMapper::new("r-1");
+        for (t, u) in [("t-x", "toolu_x"), ("t-y", "toolu_y")] {
+            let started = format!(
+                r#"{{"type":"system","subtype":"task_started","task_id":"{t}","tool_use_id":"{u}","task_type":"local_agent"}}"#
+            );
+            assert!(matches!(mapper.map_line(&started), CcMap::Ignore));
+        }
+        assert_eq!(mapper.background_pending(), 2);
+        for (t, u) in [("t-x", "toolu_x"), ("t-y", "toolu_y")] {
+            let noticed = format!(
+                r#"{{"type":"system","subtype":"task_notification","task_id":"{t}","tool_use_id":"{u}","status":"completed"}}"#
+            );
+            assert!(matches!(mapper.map_line(&noticed), CcMap::Ignore));
+            assert_eq!(mapper.background_pending(), 2, "enqueue must keep the wait");
+        }
+        // x is delivered as a user line (CLI versions that surface the
+        // delivery on stdout): releases x directly, cancels its alias.
+        let delivered = json!({
+            "type": "user",
+            "message": {"role": "user", "content":
+                "<task-notification>\n<task-id>t-x</task-id>\n<tool-use-id>toolu_x</tool-use-id>\n<status>completed</status>\n</task-notification>"}
+        }).to_string();
+        assert!(matches!(mapper.map_line(&delivered), CcMap::Ignore));
+        assert_eq!(mapper.background_pending(), 1, "user line releases its own wait");
+        // The wake that delivers y must release y — impossible while x's
+        // spent alias still fronts the queue.
+        let wake = r#"{"type":"system","subtype":"init","session_id":"cc-sess-wake"}"#;
+        assert!(matches!(mapper.map_line(wake), CcMap::SessionId(_)));
+        assert_eq!(
+            mapper.background_pending(), 0,
+            "wake must release y, not pop x's spent alias"
+        );
+    }
+
+    #[test]
+    fn stale_delivery_for_unknown_task_emits_marked_event() {
+        // A notification whose tool call id was never registered this run
+        // (a replay from a previous killed turn) must not be silent: forward
+        // it downstream with a visible marker.
+        let mut mapper = CcTurnMapper::new("r-1");
+        let stale = json!({
+            "type": "user",
+            "message": {"role": "user", "content":
+                "<task-notification>\n<task-id>t-stale</task-id>\n<tool-use-id>toolu_old</tool-use-id>\n<status>completed</status>\n<summary>old finder result</summary>\n</task-notification>"}
+        }).to_string();
+        match mapper.map_line(&stale) {
+            CcMap::Events(events) => {
+                let StreamEvent::Chat(chat) = &events[0] else { panic!("expected chat delta") };
+                let text = chat.delta_text.as_deref().unwrap_or("");
+                assert!(text.contains(STALE_DELIVERY_MARKER), "must carry the marker: {text}");
+                assert!(text.contains("t-stale"), "must surface the task id: {text}");
+            }
+            other => panic!("expected marked event, got {other:?}"),
+        }
+        assert_eq!(mapper.background_pending(), 0, "stale delivery must not register");
+    }
+
+    #[tokio::test]
+    async fn turn_waits_for_pending_background_tasks_before_finalizing() {
+        // A `result` that lands while a background task is still pending is
+        // intermediate: the CLI stays alive, auto-wakes on the
+        // task_notification, and ends the turn again with the real final text.
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/mock_cc_background_continuation.sh"
+        );
+        let outcome = run_mock_cc(script).await.expect("turn must end on the second result");
+        assert_eq!(outcome.final_text.as_deref(), Some("final answer after background agent"));
+        assert_eq!(outcome.engine_session_id.as_deref(), Some("cc-sess-bg"));
+    }
+
+    #[tokio::test]
+    async fn turn_finalizes_when_background_result_is_delivered_inline() {
+        // The 2026-10-16 incident, end to end: an auto-backgrounded command
+        // whose completion the engine delivers as an ordinary tool_result (not
+        // a `<task-notification>` line, not a wake). The inline delivery
+        // releases the wait, so the single `result` finalizes the turn instead
+        // of being swallowed until the idle watchdog kills the engine.
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/mock_cc_bg_inline_delivery.sh"
+        );
+        let outcome = run_mock_cc(script)
+            .await
+            .expect("inline delivery must release the wait so result finalizes");
+        assert_eq!(outcome.final_text.as_deref(), Some("the background command printed DONE"));
+        assert_eq!(outcome.engine_session_id.as_deref(), Some("cc-sess-inline"));
+    }
+
+    #[tokio::test]
+    async fn engine_eof_with_pending_background_tasks_reads_as_explicit_error() {
+        // Stdout EOF while background work is pending must not read as a
+        // successful turn with the intermediate result as its final text.
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/mock_cc_bg_pending_eof.sh"
+        );
+        let error = run_mock_cc(script)
+            .await
+            .expect_err("EOF with a pending background task must not read as success");
+        let text = error.to_string();
+        assert!(text.contains("pending background task"), "unexpected error: {text}");
+    }
+
+    #[tokio::test]
+    async fn denied_background_launch_does_not_wedge_the_turn() {
+        // A run_in_background request refused before launch emits no
+        // task_started and no receipt; the turn must finalize on its single
+        // result instead of swallowing it until the deadline.
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/mock_cc_bg_denied_launch.sh"
+        );
+        let outcome = run_mock_cc(script).await.expect("denied launch must not wedge");
+        assert_eq!(outcome.final_text.as_deref(), Some("not launched"));
+    }
+
+    #[tokio::test]
+    async fn notification_without_tool_id_still_releases_the_wait() {
+        // Pre-0.3.269 CLI recordings omit tool_use_id from the delivered
+        // notification; the task_id correlation from task_started must
+        // release the wait.
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/mock_cc_bg_taskid_notification.sh"
+        );
+        let outcome = run_mock_cc(script).await.expect("legacy notification must release");
+        assert_eq!(outcome.final_text.as_deref(), Some("released via task_id"));
+    }
+
+    #[tokio::test]
+    async fn result_landing_between_enqueue_and_delivery_stays_intermediate() {
+        // Production incident 2026-10-14 replay: two finders completed
+        // mid-round (enqueue-time system lines only), the model ended its
+        // round with "still waiting for B/C", and the queued deliveries had
+        // not landed. That round's result MUST be swallowed — not finalized —
+        // and the turn must end on the final round's result after every
+        // delivery has landed.
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/mock_cc_bg_late_delivered_notifications.sh"
+        );
+        let outcome = run_mock_cc(script)
+            .await
+            .expect("turn must run until the queued deliveries landed");
+        assert_eq!(outcome.final_text.as_deref(), Some("summary table for all three finders"));
+    }
+
+    #[tokio::test]
+    async fn enqueue_only_protocol_finalizes_through_wake_rounds() {
+        // Second production incident 2026-10-14 (session e6f0d46d): every
+        // event crossed to BCS — launches, progress, all four results'
+        // streamed texts — yet the turn never sent a final: the engine
+        // never emits the user <task-notification> lines the release logic
+        // was waiting on, so the pending set could never drain and every
+        // result stayed swallowed. With wake-driven release the same
+        // protocol must run to the real final result.
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/mock_cc_bg_enqueue_wakes.sh"
+        );
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            run_mock_cc(script),
+        )
+        .await
+        .expect("turn must not wedge on an un-drainable pending set")
+        .expect("turn must finalize on the last round's result");
+        assert_eq!(outcome.final_text.as_deref(), Some("summary table for all three finders"));
+    }
+
+    #[tokio::test]
+    async fn idle_stream_with_pending_background_fails_explicitly() {
+        // The hang shape the same incident left behind: the engine goes
+        // permanently silent with a pending background task and neither a
+        // result nor a notification will ever come. The sliding idle
+        // watchdog must end the turn with a named error that reports the
+        // stalled background count — not wedge until the run deadline with
+        // BCS waiting on a final that never arrives.
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/mock_cc_bg_idle_forever.sh"
+        );
+        let mut req = TurnRequest::new("r-idle", "hi", ".", Arc::new(NullObserver));
+        req.idle_timeout = Some(std::time::Duration::from_millis(300));
+        let engine = ClaudeCode::new(PathBuf::from("bash"), vec![script.to_string()]);
+        let (tx, _rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
+        let turn = engine.run_turn(req, tx, tokio_util::sync::CancellationToken::new());
+        let error = tokio::time::timeout(std::time::Duration::from_secs(5), turn)
+            .await
+            .expect("watchdog must fire, not wedge")
+            .expect_err("a quiet stream must fail the turn");
+        let text = error.to_string();
+        assert!(text.contains("idle"), "must name the idle watchdog: {text}");
+        assert!(
+            text.contains("1 pending background task"),
+            "must report the stalled background count: {text}"
+        );
     }
 }

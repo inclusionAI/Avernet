@@ -8,6 +8,7 @@ Cron / scheduled-job relay — relays scheduled actions to bots via device servi
 purpose: "Cron / scheduled-job relay — relays scheduled actions to bots via device service."
 provides:
   - "CronRelay service"
+  - "CronAdminServiceProtocol (privileged list and disable only)"
 consumes:
   - "BotService"
   - "DeviceService"
@@ -16,6 +17,7 @@ consumes:
 internal_dependencies:
   - agentclaw.community.core.runtime_binding
   - agentclaw.community.core.bot_collaborator
+  - agentclaw.community.core.access
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module
   - agentclaw.community.core.bot_management

@@ -29,10 +29,32 @@ module_config:
 
 # ─────────────────── user_config 覆盖 ───────────────────
 user_config:
+  # The same production adapter/port contract as every other deployment. The
+  # local BaaS OpenAPI key is injected by the deployment just like api_key_secret
+  # is injected in production.
+  openapi_bot:
+    base_url: "http://localhost:8890"
+    base_url_pre: "http://localhost:8890"
+    api_key_secret: "${api_key_secret:-}"
+    api_key_prefix: "${api_key_prefix:-}"
+
+  bcs_client:
+    base_url: "http://localhost:21000"
+    base_url_pre: "http://localhost:21000"
+    token_secret: "local-noop"
+    secret_secret: "local-noop"
+    task_callback_url: "http://localhost:8888"
+    task_callback_url_pre: "http://localhost:8888"
+
+  task_dispatch:
+    backend_url: "http://localhost:8888"
+
   # Privileged-user allow-lists (admin scopes) — SYNTHETIC ids, tests/ci only.
   # Real employee ids never ship in community source. Acceptance tests authorize
   # with "100000" (the doc-example placeholder).
   admin:
+    cron_admin:
+      - "100000"
     super_admin:
       - "100000"
     disk_usage_admin:
@@ -136,6 +158,7 @@ user_config:
     api_base_url: "http://localhost:8890"
     template_uuid: "TEMPLATE-4d0e2849d7004111836333de782b95d8"
     tenant: "team_claw"
+    runtime_identity_metadata: true
     arca_template_id_pre: "ARCA-TEMPLATE-000000001403860d"
     arca_template_id: "TEMPLATE-2e3192faa8994fe8bb8bc7be8671b431"
     # Relocated from di/config.py neutral defaults (C1).
@@ -274,3 +297,10 @@ user_config:
   secret_names:
     aiworkbench_repo_url: "other_manual_agentclaw_aiworkbench_repo_url"
     skill_center_internal_token: "other_manual_agentclaw_skill_center_internal_token"
+
+  # The swarm runtime's operational knobs. The LLM comes from the `llm:`
+  # yaml block under `user_config:` (the same one the harness reads) — no
+  # agentswarm-specific LLM config exists.
+  agentswarm:
+    enabled: true
+    artifact_store_root: "${AGENTSWARM_ARTIFACT_ROOT:-/tmp/agentswarm/artifacts}"

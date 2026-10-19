@@ -109,42 +109,7 @@ class CliPassportScopeReconciler:
             snapshot = self._build_snapshot(bot, requested_cli_identity_modes)
             updated = snapshot.changed or force_update
             if updated:
-                logger.info(
-                    "agentpass_cli_scope_update_requested bot_id=%s engine_type=%s "
-                    "mcp_codes=%s cli_codes=%s cli_identity_modes=%s",
-                    bot_id,
-                    engine_type,
-                    [item["mcp_code"] for item in snapshot.mcp_items],
-                    [item["cli_code"] for item in snapshot.cli_items],
-                    {item["cli_code"]: item["identity_mode"] for item in snapshot.cli_items},
-                )
-                update_started = time.monotonic()
-                try:
-                    self._passport_plugin.update_passport(
-                        bot_id=bot_id,
-                        user_id=owner_id,
-                        engine_type=engine_type,
-                        resource_scope=snapshot.resource_scope,
-                    )
-                except Exception as exc:
-                    logger.error(
-                        "agentpass_cli_scope_update_failed bot_id=%s engine_type=%s "
-                        "status=failed error_type=%s duration_ms=%s",
-                        bot_id,
-                        engine_type,
-                        type(exc).__name__,
-                        int((time.monotonic() - update_started) * 1000),
-                    )
-                    raise
-                logger.info(
-                    "agentpass_cli_scope_update_succeeded bot_id=%s engine_type=%s "
-                    "status=succeeded mcp_count=%s cli_count=%s duration_ms=%s",
-                    bot_id,
-                    engine_type,
-                    len(snapshot.mcp_items),
-                    len(snapshot.cli_items),
-                    int((time.monotonic() - update_started) * 1000),
-                )
+                self._write(bot_id=bot_id, owner_id=owner_id, engine_type=engine_type, snapshot=snapshot)
         except Exception as exc:
             logger.error(
                 "cli_passport_reconcile_failed bot_id=%s engine_type=%s error_type=%s duration_ms=%s",
@@ -166,10 +131,122 @@ class CliPassportScopeReconciler:
             updated=updated,
         )
 
+    def add_cli(
+        self, *, bot: Mapping[str, Any], item: Mapping[str, Any]
+    ) -> CliScopeReconcileResult:
+        """Add one CLI to the bot's complete scope and write it.
+
+        History wins over ``item`` for a code already granted, so the caller
+        decides whether an existing grant is a conflict before calling this.
+        """
+        return self._mutate(bot=bot, action="add", added_cli_items=[item])
+
+    def remove_cli(
+        self, *, bot: Mapping[str, Any], cli_code: str
+    ) -> CliScopeReconcileResult:
+        """Remove one CLI from the bot's complete scope and write it."""
+        return self._mutate(bot=bot, action="remove", removed_cli_codes={cli_code})
+
+    def _mutate(
+        self,
+        *,
+        bot: Mapping[str, Any],
+        action: str,
+        added_cli_items: list[Mapping[str, Any]] | None = None,
+        removed_cli_codes: set[str] | None = None,
+    ) -> CliScopeReconcileResult:
+        started = time.monotonic()
+        bot_id = _required_text(bot, "bot_id")
+        owner_id = _required_text(bot, "owner_id")
+        engine_type = _required_text(bot, "active_engine")
+        target_codes = sorted(
+            [str(item.get("cli_code")) for item in added_cli_items or []]
+            + list(removed_cli_codes or ())
+        )
+        logger.info(
+            "cli_passport_mutation_requested bot_id=%s engine_type=%s action=%s cli_codes=%s",
+            bot_id, engine_type, action, target_codes,
+        )
+        try:
+            snapshot = self._build_snapshot(
+                bot,
+                added_cli_items=added_cli_items,
+                removed_cli_codes=removed_cli_codes,
+            )
+            self._write(bot_id=bot_id, owner_id=owner_id, engine_type=engine_type, snapshot=snapshot)
+        except Exception as exc:
+            logger.error(
+                "cli_passport_mutation_failed bot_id=%s engine_type=%s action=%s "
+                "cli_codes=%s error_type=%s duration_ms=%s",
+                bot_id, engine_type, action, target_codes, type(exc).__name__,
+                int((time.monotonic() - started) * 1000),
+            )
+            raise
+        logger.info(
+            "cli_passport_mutation_succeeded bot_id=%s engine_type=%s action=%s "
+            "cli_codes=%s duration_ms=%s",
+            bot_id, engine_type, action, target_codes, int((time.monotonic() - started) * 1000),
+        )
+        return CliScopeReconcileResult(
+            cli_codes=tuple(str(item["cli_code"]) for item in snapshot.cli_items),
+            manifest_version=self._manifest_resolver.manifest_version,
+            manifest_digest=self._manifest_resolver.manifest_digest,
+            updated=True,
+        )
+
+    def _write(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        engine_type: str,
+        snapshot: _CliScopeSnapshot,
+    ) -> None:
+        """One complete overwrite-style Passport update, logged."""
+        logger.info(
+            "agentpass_cli_scope_update_requested bot_id=%s engine_type=%s "
+            "mcp_codes=%s cli_codes=%s cli_identity_modes=%s",
+            bot_id,
+            engine_type,
+            [item["mcp_code"] for item in snapshot.mcp_items],
+            [item["cli_code"] for item in snapshot.cli_items],
+            {item["cli_code"]: item["identity_mode"] for item in snapshot.cli_items},
+        )
+        update_started = time.monotonic()
+        try:
+            self._passport_plugin.update_passport(
+                bot_id=bot_id,
+                user_id=owner_id,
+                engine_type=engine_type,
+                resource_scope=snapshot.resource_scope,
+            )
+        except Exception as exc:
+            logger.error(
+                "agentpass_cli_scope_update_failed bot_id=%s engine_type=%s "
+                "status=failed error_type=%s duration_ms=%s",
+                bot_id,
+                engine_type,
+                type(exc).__name__,
+                int((time.monotonic() - update_started) * 1000),
+            )
+            raise
+        logger.info(
+            "agentpass_cli_scope_update_succeeded bot_id=%s engine_type=%s "
+            "status=succeeded mcp_count=%s cli_count=%s duration_ms=%s",
+            bot_id,
+            engine_type,
+            len(snapshot.mcp_items),
+            len(snapshot.cli_items),
+            int((time.monotonic() - update_started) * 1000),
+        )
+
     def _build_snapshot(
         self,
         bot: Mapping[str, Any],
         requested_cli_identity_modes: Mapping[str, str] | None = None,
+        *,
+        added_cli_items: list[Mapping[str, Any]] | None = None,
+        removed_cli_codes: set[str] | None = None,
     ) -> _CliScopeSnapshot:
         """Build the one full MCP+CLI snapshot shared by Bootstrap and CLI edits."""
         bot_id = _required_text(bot, "bot_id")
@@ -193,10 +270,12 @@ class CliPassportScopeReconciler:
             passport,
             desired_mcp_items=historical_mcp_items,
             mcp_identity_modes=mcp_identity_modes,
-            additional_cli_items=self._manifest_resolver.required_cli_items(
-                engine_type, template_type
-            ),
+            additional_cli_items=_dedupe_by_code([
+                *self._manifest_resolver.required_cli_items(engine_type, template_type),
+                *(added_cli_items or []),
+            ]),
             cli_identity_modes=cli_identity_modes,
+            removed_cli_codes=removed_cli_codes,
         )
         return _CliScopeSnapshot(
             historical_cli_items=historical_cli_items,
@@ -297,6 +376,20 @@ def _merge_desired_mcp_identity_modes(
         item["identity_mode"] = _normalized_mcp_identity_mode(identity)
         merged.append(item)
     return merged
+
+
+def _dedupe_by_code(items: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """First occurrence wins: an explicit add of a not-yet-granted default
+    must not reach the strict normalizer as a duplicate code."""
+    seen: set[object] = set()
+    unique: list[Mapping[str, Any]] = []
+    for item in items:
+        code = item.get("cli_code")
+        if code in seen:
+            continue
+        seen.add(code)
+        unique.append(item)
+    return unique
 
 
 def _normalize_cli_additions(

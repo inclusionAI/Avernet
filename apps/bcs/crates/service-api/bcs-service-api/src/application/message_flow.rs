@@ -376,6 +376,16 @@ pub trait MessageFlowService: Send + Sync {
         _downstream_run_id: Option<&str>,
     ) -> ServiceResult<()> { Ok(()) }
 
+    /// Publish a one-shot Run's immutable chat result. Managed targets are
+    /// accepted durably; legacy targets must acknowledge synchronous delivery.
+    /// History identity is stable; ambiguous legacy calls must not be replayed.
+    async fn publish_state_machine_result(
+        &self,
+        _cmd: crate::StateMachineResultPublishCommand,
+    ) -> ServiceResult<()> {
+        Err(service_not_configured("state-machine result publication"))
+    }
+
     async fn handle_web_send(&self, cmd: WebSendCommand) -> ServiceResult<WebSendOutcome>;
 
     async fn handle_group_chat(&self, _cmd: GroupChatCommand) -> ServiceResult<GroupChatOutcome> {

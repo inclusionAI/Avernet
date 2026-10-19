@@ -14,7 +14,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
-    Metadata,
     RuntimeInfo,
     Status,
     TaskInfo,
@@ -28,10 +27,10 @@ from agentclaw.community.core.task.task_harness.harness import TaskHarness
 
 
 def _task_info(task_id: str = "t1") -> TaskInfo:
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="T", instruction="do"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="T"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="ac1", description="d")]),
         ),
         source_type="bot",
@@ -89,6 +88,41 @@ class Recorder:
 
 
 class TestHarnessOnlyPollsExecutionLeaves:
+    def test_relay_root_is_not_reset(self, svc, graph):
+        graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
+        root = svc._get_node(graph, "t1")
+        svc.update_task_node_info(_patch(
+            "t1", "t1", status=Status.RUNNING, run_mode="single_bot", assignee="bot1"
+        ))
+        root.run_info.extend_props["relay_root"] = True
+
+        clock = _Clock(0.0)
+        rec = Recorder()
+        h = TaskHarness(svc, rec, clock=clock, default_sla_timeout=1.0)
+        h.register("t1")
+        h._poll_once()
+        clock.advance(10.0)
+
+        assert h._poll_once() == []
+        assert root.status == Status.RUNNING
+        assert rec.patches == []
+
+    def test_relay_successor_is_still_reset(self, svc, graph):
+        graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
+        _dispatch_running(svc, graph, "c1")
+
+        clock = _Clock(0.0)
+        rec = Recorder()
+        h = TaskHarness(svc, rec, clock=clock, default_sla_timeout=1.0)
+        h.register("t1")
+        h._poll_once()
+        clock.advance(10.0)
+        resets = h._poll_once()
+
+        assert resets[0].node_id == "c1"
+        assert resets[0].status == Status.PENDING
+        assert rec.patches[0].node_id == "c1"
+
     def test_running_parent_with_children_is_not_reset(self, svc, graph):
         svc.add_task_nodes([_child("c1")], parent_node_id="t1")
         root = svc._get_node(graph, "t1")

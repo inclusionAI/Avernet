@@ -54,6 +54,10 @@ def _device_key(conn_info: dict[str, Any]) -> str:
 
 _DEFAULT_PROXY_TIMEOUT = 30.0
 
+#: The simulated acli market: market name -> command.
+_ACLI_MARKET = {"dataphin": "dataphin", "deepinsight-cli": "di", "yuque-cli": "yuque"}
+_ACLI_ALIASES = {"di": "deepinsight-cli"}
+
 
 @plugin_impl(
     mode=Mode.LOCAL,
@@ -71,16 +75,58 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
     sentinel applies (test deployments have no engine to proxy to).
     """
 
-    def __init__(self, *, default_adapter_url: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        default_adapter_url: str | None = None,
+        proxy_cron: bool = False,
+        proxy_skills: bool = False,
+    ) -> None:
         self._default_adapter_url = (
             default_adapter_url.rstrip("/") if default_adapter_url else None
         )
+        # Singlebox opts in to real runtime state. The defaults preserve the
+        # original in-memory behavior used by contract and injection tests.
+        self._proxy_cron = bool(proxy_cron)
+        self._proxy_skills = bool(proxy_skills)
         # device_key -> {cron_id -> cron item}
         self._crons: dict[str, dict[str, dict[str, Any]]] = {}
         self._materialized_contents: dict[str, tuple[bytes, str, str]] = {}
+        # device_key -> installed acli market names
+        self._acli_installed: dict[str, set[str]] = {}
         self._seq = 0
 
     # ── helpers ──────────────────────────────────────────────────────────
+
+    def _acli(
+        self,
+        conn_info: dict[str, Any],
+        path: str,
+        body: dict[str, Any],
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """A tiny acli install target, so ``/openapi/v1/bots/{bot_id}/clis`` runs end to end.
+
+        Mirrors the engine contract (``/api/cli/acli/*``): an unknown name is
+        ``install_failed``, a command alias resolves to its market name, and
+        uninstalling a tool never installed here is success.
+        """
+        installed = self._acli_installed.setdefault(_device_key(conn_info), set())
+        name = str(body.get("name") or "")
+        if path == "/api/cli/acli/install":
+            market_name = _ACLI_ALIASES.get(name, name)
+            if market_name not in _ACLI_MARKET:
+                return {"success": False, "error": "install_failed", "message": f"no such cli: {name}"}
+            installed.add(market_name)
+            return {"success": True, "data": {
+                "name": market_name, "command": _ACLI_MARKET[market_name],
+                "description": "", "version": "1.0.0",
+            }}
+        if path == "/api/cli/acli/uninstall":
+            present = name in installed
+            installed.discard(name)
+            return {"success": True, "data": {"name": name, "uninstalled": present}}
+        return {"success": False, "error": "unsupported_route"}
 
     def _store(self, conn_info: dict[str, Any]) -> dict[str, dict[str, Any]]:
         return self._crons.setdefault(_device_key(conn_info), {})
@@ -151,6 +197,20 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
         }
 
     # ── transport ────────────────────────────────────────────────────────
+
+    def _proxied_adapter_url(
+        self, conn_info: dict[str, Any], path: str
+    ) -> str | None:
+        """Resolve an adapter URL for an opted-in runtime-state path."""
+        should_proxy = (
+            (self._proxy_cron and path.startswith("/api/cron"))
+            or (
+                self._proxy_skills
+                and path
+                in {"/api/skills/mappings/apply", "/api/skills/layout/probe"}
+            )
+        )
+        return self._resolve_adapter_url(conn_info) if should_proxy else None
 
     def _resolve_adapter_url(self, conn_info: dict[str, Any]) -> str | None:
         """Per-device adapter base URL for unmatched paths.
@@ -236,6 +296,18 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
         *,
         timeout: float | None = None,
     ) -> dict[str, Any]:
+        proxied_adapter_url = self._proxied_adapter_url(conn_info, path)
+        if proxied_adapter_url is not None:
+            return await self._proxy(
+                proxied_adapter_url,
+                conn_info,
+                method,
+                path,
+                body,
+                params,
+                timeout,
+            )
+
         if path == "/health":
             return {"status": "ok", "engine": conn_info.get("engine", "openclaw")}
         if path == "/api/engine/capabilities":
@@ -305,6 +377,9 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
                     },
                 },
             }
+
+        if path.startswith("/api/cli/acli/"):
+            return self._acli(conn_info, path, body or {}, params or {})
 
         # ── Guard: only /api/cron* paths enter the in-memory store.
         # Everything else either proxies to the device's adapter (when an
@@ -428,6 +503,53 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
             "error_code": 404,
         }
 
+    async def _proxy_multipart(
+        self,
+        adapter_url: str,
+        conn_info: dict[str, Any],
+        path: str,
+        *,
+        files: Mapping[str, tuple[str, bytes, str]],
+        data: Mapping[str, str],
+        headers: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        """Forward multipart Skill-package operations to the engine adapter."""
+        url = f"{adapter_url}{path}"
+        request_headers = dict(conn_info.get("headers") or {})
+        if headers:
+            request_headers.update(headers)
+        try:
+            async with httpx.AsyncClient(
+                timeout=timeout or _DEFAULT_PROXY_TIMEOUT,
+                headers=request_headers or None,
+            ) as client:
+                resp = await client.post(
+                    url,
+                    files=list(files.items()),
+                    data=dict(data),
+                )
+        except httpx.TimeoutException as exc:
+            raise DeviceAdapterTimeoutError(
+                f"engine adapter timed out on {path}: {exc}"
+            ) from exc
+        except httpx.RequestError as exc:
+            raise ValueError(
+                f"engine adapter unreachable at {adapter_url}: {exc}"
+            ) from exc
+
+        if resp.status_code == 404:
+            raise DeviceAdapterEndpointNotFoundError(resp.text)
+        if resp.status_code >= 400:
+            raise DeviceAdapterHTTPStatusError(resp.status_code, resp.text)
+
+        if not resp.content:
+            return {"success": True, "data": None, "message": None}
+        try:
+            return resp.json()
+        except ValueError:
+            return {"success": True, "data": resp.text, "message": None}
+
     async def invoke_multipart(
         self,
         conn_info: dict[str, Any],
@@ -438,6 +560,22 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
         headers: Mapping[str, str] | None = None,
         timeout: float | None = None,
     ) -> dict[str, Any]:
+        if (
+            self._proxy_skills
+            and path in {"/api/skills/local/apply", "/api/v1/file/skill-package"}
+        ):
+            adapter_url = self._resolve_adapter_url(conn_info)
+            if adapter_url is not None:
+                return await self._proxy_multipart(
+                    adapter_url,
+                    conn_info,
+                    path,
+                    files=files,
+                    data=data,
+                    headers=headers,
+                    timeout=timeout,
+                )
+
         uploaded = files.get("file")
         if uploaded is None:
             return {"success": False, "error": "invalid_package"}

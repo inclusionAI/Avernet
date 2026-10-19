@@ -75,12 +75,22 @@ describe('executeTaskService orchestration mode mapping', () => {
   });
 
   it('relay 响应把后端盖章的模式和根节点映射到领域记录', async () => {
-    mockedExecuteTask.mockResolvedValue(executeResponse({ orchestration_mode: 'relay', root_node_id: 'root-1' }));
+    mockedExecuteTask.mockResolvedValue(
+      executeResponse({
+        orchestration_mode: 'relay',
+        root_node_id: 'root-1',
+        root_execution_instruction: '[task-execute]\nbackend_url=https://backend.example',
+      }),
+    );
 
     const record = await executeTaskService({ form, ctx: context });
 
     expect(record.task_info.execution_config).toEqual(
-      expect.objectContaining({ orchestration_mode: 'relay', root_node_id: 'root-1' }),
+      expect.objectContaining({
+        orchestration_mode: 'relay',
+        root_node_id: 'root-1',
+        root_execution_instruction: '[task-execute]\nbackend_url=https://backend.example',
+      }),
     );
     expect(useTaskStore.getState().lastTaskRecord).toBe(record);
   });

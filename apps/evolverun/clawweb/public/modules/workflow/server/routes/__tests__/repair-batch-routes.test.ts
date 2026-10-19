@@ -6,6 +6,7 @@ import { gzipSync } from 'node:zlib';
 import { createRepairWorkbenchService } from '../../services/repair-batch-service.js';
 import { createRepairBatchesRouter } from '../repair-batches.js';
 import { repairFixture } from '../../services/__tests__/repair-batch-fixtures.js';
+import { createRepairSourcePort } from '../../repositories/repair-source-adapter.js';
 import { digestRepairJson } from '../../contracts/repair-batch.js';
 
 describe('repair workbench HTTP authorization and lifecycle', () => {
@@ -36,6 +37,43 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     }
     return { ...f, service, request };
   }
+  it('returns a definite pre-creation failure instead of an unknown write result when the deployed pack cannot be read', async () => {
+    const f = await setup();
+    const inbox = await f.request('/candidates?workflowId=wf-1');
+    f.executionPort.resolveBaseline = async () => { throw new Error('private git diagnostic'); };
+    const failed = await f.request('/', { workflowId: 'wf-1', inputDigest: inbox.body.inputDigest,
+      itemIds: ['item-0', 'item-1'], instructions: 'Keep selection', requestId: 'baseline-read' });
+    expect(failed).toMatchObject({ status: 503, body: { code: 'CAPABILITY_UNAVAILABLE',
+      reasonCode: 'BASELINE_READ_FAILED', stage: 'baseline', outcome: 'not_created' } });
+    expect(JSON.stringify(failed.body)).not.toContain('private git diagnostic');
+    expect(f.calls).toHaveLength(0);
+    expect((await f.request('/requests/lookup?workflowId=wf-1&requestId=baseline-read')).body.revision).toBeNull();
+  });
+  it.each([1,110])('reads oversized evidence from %i diagnoses through real GET/POST without applying the generation freeze limit', async count => {
+    const f = await repairFixture(0); close.push(() => f.db.close());
+    const source = { diagnosisId:'d',analysisId:'a',flowId:'run',sourceId:'s',completedAtMs:1,
+      failureSignature:'timeout',failureMode:'timeout',nodeId:'query',reasoning:'证'.repeat(366000)+'x'.repeat(976),evidenceEventIds:[],
+      proposal:{summary:'修复查询',operations:[{op:'replace',nodeId:'query',path:'/prompt',value:'full prompt'}]} };
+    const sources=Array.from({length:count},(_,i)=>({...source,diagnosisId:`d-${i}`,analysisId:`a-${i}`,flowId:`run-${i}`,sourceId:`s-${i}`,reasoning:count===1?source.reasoning:'x'.repeat(9600)}));
+    const port=createRepairSourcePort({groups:async()=>[{workflowId:'wf-1',signature:'timeout|step1',inputDigest:'a'.repeat(64),sources}],suggestions:async()=>[],evidence:async()=>[]});
+    const service=createRepairWorkbenchService(f.db,port,f.executionPort);
+    const app=express();app.use(express.json({limit:'10mb'}));app.use('/api/workflow-repairs',createRepairBatchesRouter({service,authorize:async()=>({actorId:'test',canEdit:true})}));
+    const server=await new Promise<Server>(resolve=>{const s=app.listen(0,'127.0.0.1',()=>resolve(s))});close.unshift(()=>new Promise<void>(resolve=>server.close(()=>resolve())));
+    const url=`http://127.0.0.1:${(server.address() as {port:number}).port}/api/workflow-repairs`;
+    const body={workflowId:'wf-1',previewSignatures:['timeout|step1']};
+    for(const post of [false,true]){
+      const response=await fetch(url+(post?'/candidates/query':'/candidates?workflowId=wf-1&previewSignature=timeout%7Cstep1'),post?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}:undefined);
+      const json=await response.json();
+      console.log('oversized source HTTP reproduction',JSON.stringify({method:post?'POST':'GET',requestBytes:post?Buffer.byteLength(JSON.stringify(body)):0,status:response.status,responseBytes:Buffer.byteLength(JSON.stringify(json)),code:json.code,limit:json.limit,actualBytes:json.actualBytes}));
+      expect(response.status).toBe(200);expect(Buffer.byteLength(JSON.stringify(json))).toBeLessThan(64*1024);
+      expect(json.page.total).toBe(1);expect(json.items[0].readSummary).toMatchObject({sourceCount:count,runCount:count,diagnosisCount:count});
+      const detail=await fetch(url+`/items/${json.items[0].itemId}?workflowId=wf-1`).then(r=>r.json());
+      expect(detail.context.diagnoses).toHaveLength(count);
+      expect(detail.context.diagnoses[0].reasoning).toBe(sources[0].reasoning);
+      await expect(service.create('test',{workflowId:'wf-1',inputDigest:json.inputDigest,itemIds:[json.items[0].itemId],instructions:'',requestId:'oversize'})).rejects.toMatchObject({code:'PAYLOAD_TOO_LARGE'});
+    }
+    expect(f.calls).toHaveLength(0);expect(await f.db.query('SELECT * FROM workflow_repair_items')).toEqual([]);
+  });
   it('requires view/edit permission and derives the mutation actor from verified authorization', async () => {
     const f = await setup();
     expect((await f.request('/candidates?workflowId=wf-1', undefined, 'denied')).status).toBe(403);
@@ -50,6 +88,21 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     expect((await f.request(`/${created.body.taskId}`, undefined, 'denied')).status).toBe(403);
     expect((await f.request(`/${created.body.taskId}/revisions/1`, undefined, 'viewer')).status).toBe(200);
     expect((await f.request(`/${created.body.taskId}/revisions/999`)).status).toBe(404);
+  });
+  it('authorizes frozen-input retry and returns the same revision for duplicate requests', async () => {
+    const f = await setup();
+    const inbox = await f.request('/candidates?workflowId=wf-1');
+    const created = await f.request('/', { workflowId: 'wf-1', inputDigest: inbox.body.inputDigest,
+      itemIds: ['item-0'], instructions: 'Keep rules', requestId: 'first' });
+    f.setRemoteStatus({ status: 'failed', rawStatus: 'failed', errorMessage: 'model failed' });
+    await f.service.reconcile();
+    const path = `/${created.body.taskId}/retry-generation`;
+    const input = { expectedRevision: 1, requestId: 'retry-first' };
+    expect((await f.request(path, input, 'viewer')).status).toBe(403);
+    const [first, repeated] = await Promise.all([f.request(path, input), f.request(path, input)]);
+    expect(first.status).toBe(202); expect(repeated.status).toBe(202);
+    expect(first.body.revision).toBe(2); expect(repeated.body).toEqual(first.body);
+    expect(f.calls).toHaveLength(2);
   });
   it('validates and forwards server-side inbox pagination', async () => {
     const f = await setup();
@@ -91,7 +144,9 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     expect((await f.request('/candidates/query', body, 'denied')).status).toBe(403);
     expect((await f.request('/candidates/query', { ...body, previewSignatures: [...previewSignatures, 'extra'] })).status).toBe(400);
     expect((await f.request('/candidates/query', { ...body, pageSize: 201 })).status).toBe(400);
-    expect((await f.request('/candidates/query', { ...body, extra: 'x'.repeat(256 * 1024) })).status).toBe(413);
+    const oversized=await f.request('/candidates/query', { ...body, extra: 'x'.repeat(256 * 1024) });
+    expect(oversized).toMatchObject({status:413,body:{code:'PAYLOAD_TOO_LARGE',stage:'request_body',reasonCode:'REPAIR_REQUEST_TOO_LARGE',limit:262144}});
+    expect(oversized.body.actualBytes).toBeGreaterThan(262144);
   });
   it('keeps dispositions usable with generation unavailable and cancels with a JSON acknowledgement', async () => {
     const f = await setup(false);
@@ -111,7 +166,7 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     const f = await setup();
     const inbox = (await f.request('/candidates?workflowId=wf-1')).body;
     const input = { workflowId: 'wf-1', inputDigest: inbox.inputDigest, itemIds: ['item-0'], instructions: '', requestId: 'create' };
-    expect((await f.request('/', { ...input, inputDigest: '0'.repeat(64) })).status).toBe(409);
+    expect((await f.request('/', { ...input, inputDigest: '0'.repeat(64), requestId: 'stale-list' })).status).toBe(202);
     expect((await f.request('/', { ...input, instructions: '界'.repeat(22000) })).status).toBe(413);
     const created = (await f.request('/', input)).body;
     expect((await f.request(`/${created.taskId}/revisions/1.5`)).status).toBe(400);
@@ -131,7 +186,7 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     await f.service.report({ workflowId: 'wf-1', taskId: created.taskId, revision: 1, expectedStateVersion: 0, status: 'succeeded', draft, checks });
     const diff = await f.request(`/${created.taskId}/revisions/1/diff?base=baseline&candidateCommit=forged`);
     expect(diff).toMatchObject({ status: 200, body: { candidateCommit: draft.candidateCommit, baseCommit: created.input.baseline.packCommit } });
-    f.executionPort.dispatch = async () => { throw new Error('uncertain'); };
+    f.executionPort.dispatch = async () => { throw new Error('AIS executeSnapshot HTTP 400: invalid request'); };
     const revised = await f.request(`/${created.taskId}/revisions`, { ...input, requestId: 'revision-2', feedback: 'Improve further', expectedAttemptRevision: 1, parentCandidateCommit: draft.candidateCommit });
     expect(revised).toMatchObject({ status: 202, body: { revision: 2, phase: 'drafting' } });
     expect((await f.request(`/${created.taskId}`)).body.execution.status).toBe('dispatch_failed');
@@ -140,4 +195,28 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     expect(await f.request(`/${created.taskId}/retry-dispatch`, { expectedRevision: 2 })).toEqual({ status: 202, body: { ok: true } });
     expect((await f.request(`/${created.taskId}/retry-dispatch`, { expectedRevision: 1 })).status).toBe(409);
   });
+  it('returns a recovery action and rechecks failed results without dispatching before an optional-text revision', async () => {
+    const f = await setup();
+    const inbox = (await f.request('/candidates?workflowId=wf-1')).body;
+    const input = { workflowId: 'wf-1', inputDigest: inbox.inputDigest, itemIds: ['item-0'], instructions: '', requestId: 'first' };
+    const created = (await f.request('/', input)).body;
+    f.setRemoteStatus({ status: 'failed', rawStatus: 'failed', errorMessage: 'failed' });
+    await f.service.reconcile();
+    const originalRead = f.executionPort.readResult;
+    f.executionPort.readResult = async () => { throw new Error('Git transport unavailable'); };
+    const revised = { ...input, requestId: 'revision-two', expectedAttemptRevision: 1, parentCandidateCommit: null, feedback: '' };
+    expect(await f.request(`/${created.taskId}/revisions`, revised)).toMatchObject({ status: 409,
+      body: { code: 'STATE_CONFLICT', recoveryAction: 'retry-result', reasonCode: 'RESULT_READ_UNKNOWN' } });
+    expect(f.calls).toHaveLength(1);
+    expect(await f.request(`/${created.taskId}/retry-result`, { expectedRevision: 1 })).toMatchObject({ status: 409,
+      body: { recoveryAction: 'retry-result' } });
+    f.executionPort.readResult = originalRead;
+    expect(await f.request(`/${created.taskId}/retry-result`, { expectedRevision: 1 })).toEqual({ status: 202, body: { ok: true } });
+    expect(f.calls).toHaveLength(1);
+    expect((await f.service.task(created.taskId)).latestAttempt.phase).toBe('failed');
+    expect(await f.request(`/${created.taskId}/revisions`, revised)).toMatchObject({ status: 202,
+      body: { revision: 2, input: { instructions: '', feedback: '' } } });
+    expect(f.calls).toHaveLength(2);
+  });
+
 });

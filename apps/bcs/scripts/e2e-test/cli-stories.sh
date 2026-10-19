@@ -555,3 +555,119 @@ story_cli_operator_validates_channel_management() {
     api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
     require_status "CLI channel lookup group is cleaned up" "200" || return
 }
+
+# User story: An operator writes and reads Group Context through bcs-cli.
+#
+# Flow:
+#   Create a CLI-managed group -> add a group-scoped context entry -> read it
+#   directly -> update the active value -> list group-level entries -> clean up.
+#
+# Critical assertions:
+#   - The four public group-context CLI leaves are exercised against BCS HTTP
+#     routes, keeping CLI and adapter endpoint coverage complete.
+#   - Add/update return the stable ok status.
+#   - Get/list expose the active entry after mutation.
+story_cli_operator_manages_group_context() {
+    info "Story: an operator manages Group Context through bcs-cli"
+    local group_id session_id ctx_name content updated session_content round_content list_has_item get_has_content get_has_updated
+
+    _cli_story_create_pm_group "CLI group-context workspace" || return
+    group_id="$CLI_STORY_GROUP_ID"
+    session_id=$(printf '%s\n' "$BCS_CLI_STDOUT" | sed -n 's/^  Session: //p' | head -1)
+    assert_not_empty "CLI group-context workspace returns a session id" "$session_id"
+    if [[ -z "$session_id" ]]; then
+        api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
+        return
+    fi
+    ctx_name="cli_e2e_context_$$"
+    content="initial group context from cli e2e"
+    updated="updated group context from cli e2e"
+    session_content="session group context from cli e2e"
+    round_content="round group context from cli e2e"
+
+    _cli_story_run "operator adds a group context entry" PM group-context add \
+        --group-id "$group_id" \
+        --name "$ctx_name" \
+        --scope-level group \
+        --content "$content" \
+        --visible-to "{\"userIds\":[\"$BOT_PM_UUID\"]}" \
+        --collect-from "{\"userIds\":[\"$BOT_PM_UUID\"]}" || {
+        api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
+        return
+    }
+    assert_json_eq "CLI group-context add succeeds" "$BCS_CLI_STDOUT" "status" "ok"
+
+    _cli_story_run "operator adds a session context entry" PM group-context add \
+        --group-id "$group_id" \
+        --session-id "$session_id" \
+        --name "$ctx_name" \
+        --scope-level session \
+        --content "$session_content" \
+        --visible-to "{\"userIds\":[\"$BOT_PM_UUID\"]}" \
+        --collect-from "{\"userIds\":[\"$BOT_PM_UUID\"]}" || {
+        api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
+        return
+    }
+    assert_json_eq "CLI group-context session add succeeds" "$BCS_CLI_STDOUT" "status" "ok"
+
+    _cli_story_run "operator adds a round context entry" PM group-context add \
+        --group-id "$group_id" \
+        --session-id "$session_id" \
+        --round-id "round-cli-e2e-$$" \
+        --name "$ctx_name" \
+        --scope-level round \
+        --content "$round_content" \
+        --visible-to "{\"userIds\":[\"$BOT_PM_UUID\"]}" \
+        --collect-from "{\"userIds\":[\"$BOT_PM_UUID\"]}" || {
+        api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
+        return
+    }
+    assert_json_eq "CLI group-context round add succeeds" "$BCS_CLI_STDOUT" "status" "ok"
+
+    _cli_story_run "operator gets the group context entry" PM group-context get \
+        --group-id "$group_id" \
+        --name "$ctx_name" \
+        --scope-level group \
+        --limit 3 || {
+        api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
+        return
+    }
+    get_has_content=$(_cli_json_array_has_object "$BCS_CLI_STDOUT" "items" "name" "$ctx_name" "content" "$content")
+    assert_eq "CLI group-context get returns the added content" "$get_has_content" "1"
+
+    _cli_story_run "operator updates the group context entry" PM group-context update \
+        --group-id "$group_id" \
+        --name "$ctx_name" \
+        --scope-level group \
+        --content "$updated" \
+        --visible-to "{\"userIds\":[\"$BOT_PM_UUID\"]}" \
+        --change-reason "e2e update" || {
+        api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
+        return
+    }
+    assert_json_eq "CLI group-context update succeeds" "$BCS_CLI_STDOUT" "status" "ok"
+
+    _cli_story_run "operator lists group context entries" PM group-context list \
+        --group-id "$group_id" \
+        --session-id "$session_id" \
+        --round-id "round-cli-e2e-$$" \
+        --scope-levels group,session,round || {
+        api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
+        return
+    }
+    list_has_item=$(_cli_json_array_has_object "$BCS_CLI_STDOUT" "contexts" "name" "$ctx_name" "permission" "WR")
+    assert_eq "CLI group-context list returns the updated metadata" "$list_has_item" "1"
+
+    _cli_story_run "operator gets the updated group context entry" PM group-context get \
+        --group-id "$group_id" \
+        --name "$ctx_name" \
+        --scope-level group || {
+        api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
+        return
+    }
+    get_has_updated=$(_cli_json_array_has_object "$BCS_CLI_STDOUT" "items" "name" "$ctx_name" "content" "$updated")
+    assert_eq "CLI group-context get returns the updated content" "$get_has_updated" "1"
+
+    api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
+    require_status "CLI group-context group is cleaned up" "200" || return
+}

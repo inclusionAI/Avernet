@@ -188,6 +188,22 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
 对本机引擎适配器 API 的调用 + 就绪等待 + 重试），提升 script 用户的体验。
 届时按 `startup-ops` 独立契约版本化，probe 门控。
 
+- **A3（acli 市场工具，公开 API `/openapi/v1/bots/{bot_id}/clis` 使用）**：与 A2 的上传二进制
+  不同，这里由引擎在容器内调用 `acli` 安装市场上的工具。openclaw 与 claude_code 提供两个端点（市场搜索不需要容器，由 backend 直接调用市场 API），
+  约定与 A2 相同：参数非法返回 `400`，acli 拒绝返回 `200` + `success:false` + `error`，
+  `404` 只表示「引擎没有该端点」。
+
+  | 端点 | 请求 | 语义 |
+  | --- | --- | --- |
+  | `POST /api/cli/acli/install` | `{name}` | `acli install <name> --install-dir <引擎安装目录> --yes --json`，返回 `{name, command, description, version}` |
+  | `POST /api/cli/acli/uninstall` | `{name}` | acli 有记录则 `acli tool uninstall <name> --yes --json`；没有记录也算成功（`uninstalled: false`） |
+
+  **安装目录归引擎（与 A2 一致）**：平台只给出工具名，不下发也不知道安装目录。openclaw 与 claude_code
+  共用固定目录 `/home/admin/.agentclaw/bin`（引擎常量 `ACLI_INSTALL_DIR`，不可配置：镜像只把这个目录放进
+  `PATH`，换目录会装出 agent 运行不了的工具），与启动时安装的默认 CLI 同目录、同一份 acli 记录。引擎以
+  `HOME=<安装目录的父目录>/acli-home` 运行 acli，使 acli 的安装记录与程序一起落在持久化存储上，重启后
+  仍能卸载；超时或请求取消时整组杀掉 acli 及其子进程。
+
 ## 5. 开放问题（定稿前需要拍板）
 
 | # | 问题 | 倾向 | 决策人 |

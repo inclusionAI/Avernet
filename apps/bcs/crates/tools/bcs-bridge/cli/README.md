@@ -15,6 +15,13 @@ bridge's `/webhook`) or as a **plugin** (the bridge dials the BCS Bot WebSocket
 `/ws/bot`). Each turn invokes an engine adapter and streams its
 output back to BCS as chat, thinking, tool and interaction (HITL) events.
 
+In plugin mode, every engine requests protocol V3 and `client_kind = "native_mcp"`
+in each `bot.connect` handshake, including reconnects. BCS still decides whether
+to enable MCP task coordination from the Bot's Provider policy or, for Bots
+without a Provider, the deployment's uplink permissions. On servers that require
+a matching client profile, the Provider must use `coordination.mode = "native_mcp"`;
+a `mcporter_mcp` Provider does not match this handshake. V2 fallback remains supported.
+
 ## Crates
 
 | Crate | Kind | Responsibility |
@@ -79,11 +86,33 @@ engine_bin = "/usr/local/bin/claude"
 cwd = "/home/me/workspace"
 # model = "..."
 # permission_mode = "..."      # engine-specific
-# engine_options = { ... }     # engine-specific; claude-code/codex accept none
+# engine_options = { ... }     # engine-specific, e.g. Codex sandbox/approval settings
 
 [registration]
 api_url = "https://bcs.example.com/prefix"
 ```
+
+## Codex process and thread lifecycle
+
+For `engine = "codex"`, each Bot owns one long-running `codex app-server`
+process, started lazily on its first request. Different conversations use
+separate threads and can run concurrently. Follow-up turns reuse the loaded
+thread with `turn/start`; they do not repeatedly call `thread/resume`.
+
+Bridge persists the thread mapping before sending the first turn. After a Bridge
+or app-server restart, the next request resumes that saved thread. An app-server
+failure fails in-flight requests and does not replay prompts or start a restart
+loop. Cancellation interrupts only the affected turn, including cancellation
+before `turn/start` returns. A rejected/unacknowledged interrupt or a broken
+protocol connection shuts down the owned server; affected work fails explicitly.
+Stopping Bridge reaps its owned app-server and child processes, including when
+all conversations are idle. Raw stdout trace records follow their current run;
+shared process stderr uses `runId = "app-server"`.
+
+Codex still permits only one writer process per thread. A separate desktop
+process cannot take over a Bridge-held thread. Stop Bridge before handing it
+over; if another process already holds the thread, Bridge reports the error
+without stealing the lock or silently creating a different thread.
 
 ## Extending: plugins
 
@@ -117,6 +146,11 @@ fn main() -> std::process::ExitCode {
 | `profile::DeployProfile` | app | `ExplicitProfile` (no built-in endpoints) | Default registration API and Bot WebSocket endpoints |
 | `credentials::CredentialSource` | app | `EnvCredentials` | Webhook Bearer token per Provider (gateway mode) |
 | `identity::IdentityResolver` | app | `StaticBearer` | `provider_bot_ref` for `--provider-auth <id>`, with an optional preflight |
+
+Distributions can call `.registration_permission_mode("my-engine", "<mode>")`
+on the application builder to write `permission_mode` into newly registered
+Bots using that engine. Engines without an entry omit this field; existing
+runtime configurations are unaffected. The open-source defaults have no entries.
 
 The built-in drivers can be reused for launchers that speak the same protocol:
 `ClaudeCodeFactory::custom(id, default_bin, prefix_args)` and
@@ -154,6 +188,26 @@ such engines. Existing factories and configurations keep their behavior.
 - The engine id is stored with each persisted session: changing a Bot's engine
   starts new engine sessions.
 
+## Event retention and delivery guarantees
+
+Plugin mode retains events that have not yet been locally consumed. After a
+successful WebSocket write (or an encoder-defined no-frame result), it advances
+the run delivery cursor and releases that prefix. Thinking events still count
+toward both budgets. The 16,384-record / 32 MiB limits therefore bound pending
+retention rather than the cumulative length of a healthy, continuously consumed
+run. A genuinely full pending buffer still terminates the run with a retained
+`buffer_overflow` error; events are never silently evicted to make room.
+
+Local write success is **not** a BCS persistence acknowledgment. Reconnects keep
+the existing cursor and retry the unconsumed suffix; this does not introduce
+exactly-once delivery or recovery of in-flight events after a bridge process
+restart. Memory accounting is a retention budget, not an exact process RSS limit.
+
+Gateway mode remains different: a same-ID retry replays the full retained run
+history before following live events. Gateway history is not reclaimed using the
+Plugin cursor. Both modes share the increased 16,384-record budget; the byte
+budget remains 32 MiB. Gateway still applies these limits to cumulative history.
+
 ## Development
 
 ```bash
@@ -171,3 +225,88 @@ python3 scripts/bcn_sim.py send "hello"      # in another terminal
 Tests use mock engines, temporary directories and loopback listeners; no real
 engine or BCS service is required. The two `engine::cli` pipe-capacity tests need
 a kernel that permits `F_SETPIPE_SZ` of at least 8 KiB.
+
+### Distribution identity discovery
+
+For connections to an existing desktop host, see
+[Codex desktop host integration](docs/codex-desktop.md). The `codex-desktop`
+engine uses the host's Unix WebSocket and requires no engine executable.
+
+`IdentityResolver::registration_ref` receives the selected engine, canonical workspace
+and optional `--provider-bot-ref`. The default preserves the explicit reference;
+distributions can discover an existing local identity. Resolved references are
+validated before `registration_client` prepares authentication for both identity
+lookup and registration. `RegistrationClient::with_headers` applies the prepared
+headers to both requests, with redirects disabled. Credentials stay in the
+short-lived client and are not added to saved bridge configuration. Identity
+verification remains the resolver's responsibility; discovery alone is not proof
+of identity. Company-specific SDK implementations belong in their distribution.
+
+
+## Named connection profiles
+
+Use `--profile <name>` consistently with `register`, `init`, `deinit` and `start`.
+Profiles keep configurations and relative state databases in separate
+`~/.bcn-bridge/profiles/<name>/` directories. A profile name selects local
+configuration, not an implicit service URL; supply the intended registration
+API and upstream endpoints when registering. Names accept 1-64 ASCII letters,
+digits, hyphens or underscores. `--config` remains supported but cannot be
+combined with `--profile`.
+
+Repeated registration of an existing profile verifies provider, engine and
+endpoints and reuses the stored Bot without a network registration request.
+Explicitly conflicting workspace/model options are rejected. New profiles may
+reuse local engine options from a verified active instance of the same engine.
+When QwenWork is stopped, saved regular TOML configs directly in ~/.bcn-bridge
+and named profiles are searched (bounded to 128 entries per directory, excluding
+backups and symlinks). Identical desktop settings are reused; conflicting
+settings block registration and require starting the intended existing profile.
+Only desktop settings cross environments,
+without sharing its BCN identity or durable state. One user still runs one bridge:
+stop the current instance before starting another profile. Status prints the
+active profile; this is not a remote connectivity claim.
+
+For intentional replacement, stop the bridge and use `register --replace-existing`.
+The CLI fences concurrent startup, retains a private rollback configuration
+beside the original. For the same Provider, API endpoint, mode, engine and Bot
+reference (omitted reference keeps the saved one), local settings are updated
+without registration; Bot ID, credentials and state are retained.
+Changing the Provider, API endpoint or explicit Bot reference performs new
+registration and selects fresh state. Changing mode or engine for the same Bot
+is rejected. Failures leave the original local config intact.
+
+When replacing a configuration for the same engine, explicit
+`--engine-option NAME=VALUE` keys override the saved `engine_options`; omitted keys retain their
+saved values and TOML types. This applies both to local updates that keep the
+Bot UUID and to registrations that receive a new UUID. For example,
+`--replace-existing --engine-option sandbox=read-only` replaces a previously
+saved `sandbox = "danger-full-access"` without resetting other engine options.
+Omitting all `--engine-option` flags retains the saved options. The merged
+options are validated before registration or saving; invalid combinations fail
+without changing the original configuration. Options from a different engine
+are not inherited.
+
+Gateway webhook changes use the existing authenticated Provider PATCH API.
+Supply `BRIDGE_PROVIDER_ADMIN_TOKEN` or `--provider-admin-token`; a registration
+token or Bot token cannot authorize that change. This credential is never saved
+in the configuration. Legacy gateway configurations without webhook metadata
+also require this authenticated update to verify the endpoint. If a network or
+response error leaves the remote update uncertain, verify its endpoint before
+restarting; the original local configuration remains available.
+
+Profile reuse also verifies an explicitly supplied `--provider-bot-ref`. Omit it
+to retain the saved identity (plugin mode generates a reference on first registration).
+Gateway registration saves `registration.webhook_url`; reuse rejects a changed
+delivery URL, including its path or query. Legacy gateway configurations without
+this metadata cannot be verified and require stopped, explicit replacement.
+
+Explicit `--engine-bin` and gateway `--listen` values must also match the saved
+profile. Omitting these options preserves the saved runtime settings, even when
+they differ from CLI defaults. Executable paths retain symlink identity because
+wrapper behavior can depend on the invoked name. Use explicit replacement to
+change an executable or bind address.
+
+Gateway replacement may omit `--webhook-url` when saved metadata belongs to the
+same Provider, API endpoint, reference, engine and gateway mode. Local listener
+updates retain that endpoint without administrator authentication or network calls.
+New bindings still require an explicit webhook URL.

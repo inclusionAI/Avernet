@@ -1,5 +1,12 @@
 # bcs-service-api Context
 
+
+MessageFlowService::publish_state_machine_result accepts the original one-shot
+result command. Success acknowledges durable Group admission for managed targets
+and synchronous acceptance for legacy targets, never Bot completion. Publication
+must reject conflicting facts, empty admission and rejected/failed targets.
+Stable history identity does not promise idempotent legacy network delivery.
+
 ## Provides
 
 ProviderManagementService and ProviderCoreService expose public slug discovery
@@ -116,6 +123,10 @@ dispatcher-to-Send boundary without native inject.
   of the execution switch. V1 omits these fields; legacy Run/Node rows without
   snapshots retain their existing raw read path. Present v2 snapshots with a
   missing, corrupt or unsupported plan fail instead of returning partial metadata.
+  Compiler v2 nested leaves carry a nonempty outer-to-inner `loop_path`; the
+  legacy loop fields continue to identify its nearest frame. Pending HumanInput,
+  HumanInputReady and frozen State Machine history metadata reuse that same
+  execution object. Compiler v1 payloads omit `loop_path` byte-for-byte.
   Both HTTP adapters, public Session creation, OpenAPI and panel DTOs preserve
   the projection. Graph node `outcome` is the saved actual outcome; consumers
   compare it with edge.outcome instead of inferring selection from target state.
@@ -173,6 +184,16 @@ dispatcher-to-Send boundary without native inject.
   Terminal IM uses its own checkpoint recovery page, independent of active Runs.
   Already committed RetryScheduled attempts use
   their saved identity; no extra attempt is created by progression itself.
+
+- Branch skipping uses scalar node-ID/status reads and atomic `skip_nodes` CAS
+  batches of at most 200 distinct IDs. Every requested node must still be
+  Pending/Ready/RetryScheduled in the active environment/Running Run; otherwise
+  the entire batch rolls back and returns false. Runtime preserves shared joins,
+  traverses already-Skipped ancestors, refreshes after a foreground race at most
+  three times, and surfaces persistent contention/errors for scanner backoff.
+  Recovery also batches skips rather than reading Run status per node. A
+  single-row guarded UPDATE needs no explicit transaction. Memory, SQLite and
+  real MySQL Text/Prepared use the same contract; no schema/Plugin API changes.
 
 - Failed-attempt recovery uses a repo-only `StateMachineFailureAction` saved
   alongside Failed/error/completed_at by one Running-attempt CAS. Retry scheduling
@@ -354,8 +375,8 @@ Actor-selection semantics, and the crate does not own concrete runtime behavior.
 
 ## Tests
 
-- `cargo test --package bcs-service-api --manifest-path src/bcs/Cargo.toml`
-- `cargo check --package bcs-service-api --all-targets --manifest-path src/bcs/Cargo.toml`
+- `cargo test --package bcs-service-api --manifest-path apps/bcs/Cargo.toml`
+- `cargo check --package bcs-service-api --all-targets --manifest-path apps/bcs/Cargo.toml`
 
 ## Friend connection list contract
 

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import inspect
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 import pytest
 
-from agentclaw.community.adapters.http.token_exchange.router import get_iam_token
+from agentclaw.community.adapters.http.token_exchange.router import get_iam_token, router
 from agentclaw.community.api.caller_iam_token_service import (
     CallerIamTokenServiceProtocol,
 )
@@ -26,6 +30,61 @@ def _service(*, iam_token: str = "iam-token", error: str | None = None) -> Magic
         return_value=CallerIamTokenOutcome(iam_token=iam_token, error=error)
     )
     return service
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("params", "expected"),
+    [
+        ({"session_key": "snake-session"}, "snake-session"),
+        ({"sessionKey": "camel-session"}, "camel-session"),
+        ({"session_key": "canonical", "sessionKey": "legacy"}, "canonical"),
+        ({"session_key": "", "sessionKey": "legacy"}, ""),
+        ({"sessionKey": ""}, ""),
+        ({}, None),
+        ({"session_key": "agent:bot:default:a+b/%25?=中文"}, "agent:bot:default:a+b/%25?=中文"),
+        ({"sessionKey": "agent:bot:default:a+b/%25?=中文"}, "agent:bot:default:a+b/%25?=中文"),
+    ],
+)
+async def test_iam_http_session_query_names_forward_unchanged(params, expected, caplog):
+    service = _service()
+    app = FastAPI()
+    app.include_router(router)
+    dependency = inspect.signature(get_iam_token).parameters["service"].default.dependency
+    app.dependency_overrides[dependency] = lambda: service
+
+    with caplog.at_level(logging.INFO):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/api/v1/token/iam", params=params)
+
+    assert response.status_code == 200
+    assert response.json() == {"success": True, "iam_token": "iam-token"}
+    kwargs = service.get_iam_token.call_args.kwargs
+    if expected is None:
+        assert "session_key" not in kwargs
+    else:
+        assert kwargs["session_key"] == expected
+    inbound = next(record for record in caplog.records if "caller_iam_request_received" in record.message)
+    assert f"'session_key': {expected!r}" in inbound.message
+    assert "caller_iam_response_succeeded" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_iam_http_empty_canonical_session_keeps_business_error(caplog):
+    service = _service(error="CALLER_CREDENTIAL_REQUEST_INVALID")
+    app = FastAPI()
+    app.include_router(router)
+    dependency = inspect.signature(get_iam_token).parameters["service"].default.dependency
+    app.dependency_overrides[dependency] = lambda: service
+
+    with caplog.at_level(logging.INFO):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/api/v1/token/iam", params={"session_key": "", "sessionKey": "legacy"})
+
+    assert service.get_iam_token.call_args.kwargs["session_key"] == ""
+    assert response.status_code == 400
+    assert response.json() == {"success": False, "error": "CALLER_CREDENTIAL_REQUEST_INVALID"}
+    assert "caller_iam_response_failed" in caplog.text
 
 
 @pytest.mark.asyncio

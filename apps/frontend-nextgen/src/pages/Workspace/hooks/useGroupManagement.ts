@@ -1,4 +1,4 @@
-import type { DeliveryPolicy, GroupView } from '@/domain/collaboration';
+import type { GroupUpdatePatch, GroupView } from '@/domain/collaboration';
 import type { DingTalkBindingState, GroupDingTalkConfig } from '@/services/workspace/channelBindingService';
 import { channelBindingService } from '@/services/workspace/channelBindingService';
 import { groupMemberService } from '@/services/workspace/groupMemberService';
@@ -10,15 +10,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
 export interface UseGroupManagementResult {
-  updateGroup: (patch: {
-    name?: string;
-    visibility?: 'private' | 'public';
-    deliveryPolicy?: DeliveryPolicy;
-  }) => Promise<DomainResult<GroupView> | null>;
+  updateGroup: (patch: GroupUpdatePatch) => Promise<DomainResult<GroupView> | null>;
   addMember: (actorId: string) => Promise<boolean>;
   removeMember: (actorId: string) => Promise<boolean>;
   leaveGroup: (actorId: string) => Promise<boolean>;
-  createShare: (targetGroupId?: string) => Promise<DomainResult<{ invitationUrl: string }>>;
+  createShare: (targetGroupId?: string, expiresInSeconds?: number) => Promise<DomainResult<{ invitationUrl: string }>>;
   /** 当前群的钉钉绑定状态：null 未绑定 / view 已绑定 / 'conflict' 多绑定冲突。 */
   dingTalkBinding: DingTalkBindingState;
   dingTalkLoading: boolean;
@@ -128,7 +124,7 @@ export function useGroupManagement(
   );
 
   const createShare = useCallback(
-    async (targetGroupId?: string) => {
+    async (targetGroupId?: string, expiresInSeconds?: number) => {
       const shareGroupId = targetGroupId ?? groupId;
       if (!shareGroupId) {
         return {
@@ -136,7 +132,10 @@ export function useGroupManagement(
           error: { code: 'GROUP_MISSING', friendlyMessage: '未选择协作群', canRetry: false },
         };
       }
-      const res = await invitationService.createGroupShare(shareGroupId);
+      const res = await invitationService.createGroupShare(
+        shareGroupId,
+        expiresInSeconds,
+      );
       if (!res.ok) notifyError(res);
       return res;
     },

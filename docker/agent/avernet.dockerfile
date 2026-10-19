@@ -216,12 +216,15 @@ RUN ln -sf /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-bundle.crt
 # ==================== Stage 3: Runtime ====================
 FROM node:22-bookworm-slim AS runtime
 
+# /home/admin/.agentclaw/bin is where the engine installs acli market tools
+# (engine constant ACLI_INSTALL_DIR); it is on PATH so the
+# agent can run a tool as soon as it is added.
 ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/home/admin \
     OPENCLAW_PORT=18789 \
     OPENCLAW_GATEWAY_TOKEN=ack-openclaw \
     OPENCLAW_STATE_DIR=/home/admin/.openclaw \
-    PATH=/usr/local/bin:/home/admin/.local/bin:$PATH \
+    PATH=/usr/local/bin:/home/admin/.local/bin:/home/admin/.agentclaw/bin:$PATH \
     TZ=Asia/Shanghai
 
 # Runtime deps (python3 needed by supervisor venv symlink).

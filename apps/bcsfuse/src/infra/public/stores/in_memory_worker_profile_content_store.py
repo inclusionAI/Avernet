@@ -3,8 +3,9 @@ In-Memory Worker Profile Content Store
 
 In-memory implementation for testing without database dependencies.
 """
-from typing import Optional, List
 from datetime import datetime
+from threading import RLock
+from typing import List, Optional
 
 from src.domain.models.worker_profile_content import (
     WorkerProfileContent,
@@ -24,30 +25,48 @@ class InMemoryWorkerProfileContentStore:
         """Initialize in-memory store."""
         self._store: dict[tuple[str, str], dict] = {}
         self._active_profiles: dict[str, str] = {}  # worker_id -> active profile_id
+        self._write_lock = RLock()
 
     def save(self, content: WorkerProfileContent) -> WorkerProfileContent:
         """Save a domain profile through the canonical persistence port."""
-        stored = content.model_copy(deep=True)
-        now = datetime.utcnow()
-        previous = self._store.get((stored.worker_id, stored.profile_id))
-        if previous is not None:
-            previous_content = WorkerProfileContent.model_validate(previous)
-            stored.created_at = previous_content.created_at
-            stored.version = previous_content.version + 1
-            stored.is_active = previous_content.is_active
-        else:
-            stored.created_at = stored.created_at or now
-        stored.updated_at = now
-        self._store[(stored.worker_id, stored.profile_id)] = stored.model_dump()
-        return stored.model_copy(deep=True)
+        with self._write_lock:
+            stored = content.model_copy(deep=True)
+            now = datetime.utcnow()
+            previous = self._store.get((stored.worker_id, stored.profile_id))
+            if previous is not None:
+                previous_content = WorkerProfileContent.model_validate(previous)
+                stored.created_at = previous_content.created_at
+                stored.version = previous_content.version + 1
+                stored.is_active = previous_content.is_active
+            else:
+                stored.created_at = stored.created_at or now
+            stored.updated_at = now
+            self._store[(stored.worker_id, stored.profile_id)] = stored.model_dump()
+            return stored.model_copy(deep=True)
+
+    def save_if_version(
+        self, content: WorkerProfileContent, expected_version: int | None,
+    ) -> WorkerProfileContent | None:
+        """Save only if the profile still has the version read by the caller."""
+        with self._write_lock:
+            previous = self._store.get((content.worker_id, content.profile_id))
+            if expected_version is None:
+                if previous is not None:
+                    return None
+            elif previous is None or previous.get("version", 1) != expected_version:
+                return None
+            return self.save(content)
 
     def upsert_profile(self, worker_id: str, profile_id: str, content: dict) -> bool:
         """Legacy dict write used by existing HTTP response adapters."""
-        stored = dict(content)
-        if self._active_profiles.get(worker_id) == profile_id:
-            stored["is_active"] = True
-        self._store[(worker_id, profile_id)] = stored
-        return True
+        with self._write_lock:
+            stored = dict(content)
+            previous = self._store.get((worker_id, profile_id))
+            stored["version"] = previous.get("version", 1) + 1 if previous else 1
+            if self._active_profiles.get(worker_id) == profile_id:
+                stored["is_active"] = True
+            self._store[(worker_id, profile_id)] = stored
+            return True
 
     def create_profile(self, worker_id: str, profile_id: str, content: dict) -> bool:
         """Create a new profile through the legacy dict API."""
@@ -163,6 +182,15 @@ class InMemoryWorkerProfileContentStore:
             content
             for worker_id, profile_id in self._active_profiles.items()
             if (content := self.get(worker_id, profile_id)) is not None
+        ]
+
+    def get_active_by_workers(self, worker_ids: list[str]) -> list[WorkerProfileContent]:
+        """Retain active-record ordering while reading only the requested owners."""
+        owners = set(worker_ids)
+        return [
+            content
+            for worker_id, profile_id in self._active_profiles.items()
+            if worker_id in owners and (content := self.get(worker_id, profile_id)) is not None
         ]
 
     def get_active_profiles(self, worker_ids: Optional[List[str]] = None) -> List[dict]:

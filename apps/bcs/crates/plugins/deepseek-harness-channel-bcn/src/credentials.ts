@@ -2,7 +2,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import { credentialRef } from '@deepseek-ai/dsh-credentials';
 import type { Config } from './config.js';
 import { canonicalizeEndpoint, resolveEndpoint, type DnsResolver, type ResolvedEndpoint } from './endpoint.js';
-import { BcnOnboardingClient, NodeHttpTransport, type HttpTransport } from './http-client.js';
+import { BcnRegistrationClient, NodeHttpTransport, type HttpTransport } from './http-client.js';
 import { parseBotSession, type BotSession } from './protocol.js';
 
 export interface ResolvedBotSession {
@@ -10,7 +10,7 @@ export interface ResolvedBotSession {
   endpoint: ResolvedEndpoint;
 }
 
-export async function loadOrOnboardBotSession(
+export async function loadOrRegisterBotSession(
   ctx: Context,
   config: Config,
   options: { resolver?: DnsResolver; transport?: HttpTransport } = {},
@@ -25,12 +25,6 @@ export async function loadOrOnboardBotSession(
         'Configured BCN endpoint differs from the endpoint bound into BCN_BOT_SESSION; clear or rotate the Bot Session before changing endpoints',
       );
     }
-    const client = new BcnOnboardingClient(
-      endpoint,
-      options.transport ?? new NodeHttpTransport(),
-      config.connectionTimeoutMs,
-    );
-    await client.onboard(session, config);
     return { session, endpoint };
   }
 
@@ -43,7 +37,7 @@ export async function loadOrOnboardBotSession(
     throw new Error(`BCN onboarding token credential ${config.onboardingTokenRef} is not configured`);
   }
 
-  const client = new BcnOnboardingClient(
+  const client = new BcnRegistrationClient(
     endpoint,
     options.transport ?? new NodeHttpTransport(),
     config.connectionTimeoutMs,
@@ -57,10 +51,9 @@ export async function loadOrOnboardBotSession(
     botName: registration.bot_name,
   };
 
-  // Persist immediately after exchange: a later descriptor failure is
-  // recoverable on restart and never requires logging or copying the Bot token.
+  // /register already creates the Bot, sets its name, and establishes ownership.
+  // Persist before connecting so restarts reuse this identity without registering again.
   await ctx.credentials.set(botSessionRef, JSON.stringify(session));
-  await client.onboard(session, config);
   return { session, endpoint };
 }
 

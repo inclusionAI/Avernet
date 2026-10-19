@@ -56,7 +56,9 @@ slug 长度为 1–64，只允许小写 ASCII 字母、数字和连字符，首�
 同一环境内唯一，禁用的 Provider 也占用该 slug。非法值返回 HTTP 400；重复值
 返回 409，且本次提交的 name/config/slug 均不变。重命名后旧 slug 不再可查询。
 
-无需认证调用 `GET /providers/by-slug/{slug}`，响应仅包含基本信息：
+旧入口 `GET /providers/by-slug/{slug}` 保留兼容，响应和错误语义相同。
+
+无需认证调用 `GET /api/v1/collaboration/providers/by-slug/{slug}`，响应仅包含基本信息：
 
 ```json
 {

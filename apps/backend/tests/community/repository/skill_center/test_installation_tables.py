@@ -24,6 +24,9 @@ from agentclaw.community.core.repository.implementations.skill_center.tables imp
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 
+from agentclaw.community.core.models.skill_installation_source import BotSkillInstallationSource
+
+
 class _Database:
     def __init__(self, engine) -> None:
         self._factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
@@ -44,6 +47,7 @@ class _Database:
 def test_skill_installation_is_idempotent_and_tenant_scoped(tmp_path) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'installation.db'}")
     BotSkillInstallation.__table__.create(engine)
+    BotSkillInstallationSource.__table__.create(engine)
     db = _Database(engine)
     scope = {"env": "pre", "owner_id": "owner-a", "bot_id": "bot-1"}
 

@@ -1,0 +1,25 @@
+{
+  "patch_schema": 1,
+  "base": "sha256:22755f072e4c98e18595150e6ac125eb3300274ab668c37b731cc1bfd9cd3196",
+  "ops": [
+    {
+      "op": "memory.update",
+      "item": {
+        "key": "returns-window",
+        "source": [
+          "episode:ep_97",
+          "feedback:fb_400"
+        ],
+        "tags": [
+          "policy",
+          "returns"
+        ],
+        "text": "Returns are accepted within 45 days of delivery."
+      }
+    }
+  ],
+  "rationale": "Example of one op kind, covering every field and value shape it allows; see README §6.1.",
+  "evidence": [
+    "episode:ep_91"
+  ]
+}

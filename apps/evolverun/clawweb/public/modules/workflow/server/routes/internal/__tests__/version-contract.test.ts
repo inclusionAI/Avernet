@@ -22,7 +22,7 @@ describe("ClawMind workflow version wire contract", () => {
   let server: Server;
   let baseUrl: string;
   beforeAll(async () => {
-    raw.exec(`CREATE TABLE flow_runs (
+    raw.exec(`CREATE TABLE workflow_repair_release_records (record_id TEXT, record_kind TEXT, body_json TEXT); CREATE TABLE flow_runs (
       id INTEGER PRIMARY KEY, flow_id TEXT UNIQUE, workflow_id TEXT, workflow_title TEXT, status TEXT,
       params_json TEXT, input_json TEXT, result_json TEXT, node_count INTEGER, succeeded_count INTEGER,
       failed_count INTEGER, total_duration_ms INTEGER, total_token_usage INTEGER, triggered_by TEXT,
@@ -54,6 +54,19 @@ describe("ClawMind workflow version wire contract", () => {
     expect(response.status).toBe(201);
     const row = raw.prepare("SELECT workflow_version, workflow_deploy_number FROM flow_runs WHERE flow_id = ?").get("v2-run");
     expect(row).toEqual({ workflow_version: 2, workflow_deploy_number: 5 });
+  });
+
+  it("inserts the initial state in the same write as the run", async () => {
+    const stateJson = JSON.stringify({ workflowId: "demo", nodeStates: {} });
+    const response = await fetch(`${baseUrl}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ flow_id: "state-run", workflow_id: "demo", status: "running", state_json: stateJson }) });
+    expect(response.status).toBe(201);
+    expect(raw.prepare("SELECT state_json FROM flow_runs WHERE flow_id = 'state-run'").get()).toEqual({ state_json: stateJson });
+  });
+
+  it("rejects a double-encoded initial state", async () => {
+    const response = await fetch(`${baseUrl}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ flow_id: "invalid-state", workflow_id: "demo", status: "running", state_json: JSON.stringify('{"workflowId":"demo"}') }) });
+    expect(response.status).toBe(400);
+    expect(raw.prepare("SELECT flow_id FROM flow_runs WHERE flow_id = 'invalid-state'").get()).toBeUndefined();
   });
 
   it("keeps legacy inserts without version metadata compatible", async () => {

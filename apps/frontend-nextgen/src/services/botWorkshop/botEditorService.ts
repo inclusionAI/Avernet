@@ -164,6 +164,10 @@ export const botEditorService = {
           homepageUrl: item.homepageUrl,
           source: 'skillcenter-market',
           active: false,
+          // 与 /market/skill MarketItemCard 的徽标语义一致：官方紫、推荐橙、tagList 拼为单 chip
+          isOfficial: item.isOfficial === true ? true : undefined,
+          isRecommended: item.isRecommended === true ? true : undefined,
+          tags: Array.isArray(item.tagList) ? item.tagList.map((tag) => String(tag)) : undefined,
         },
       ];
     });

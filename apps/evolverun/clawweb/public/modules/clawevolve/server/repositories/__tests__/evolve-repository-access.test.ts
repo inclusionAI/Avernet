@@ -89,7 +89,7 @@ describe("EvolveRepository collaborative Bot access", () => {
       if (sql.includes("SELECT b.active_engine") && params[1] === "collaborator-1") return [];
       if (sql.includes("SELECT c.owner_id")) return [{ owner_id: "owner-2" }];
       if (sql.includes("SELECT b.active_engine") && params[1] === "owner-2") return [{
-        active_engine: "openclaw", bot_type: "service", bot_status: "active", binding_id: 7,
+        entity_id: "owner-2", entity_type: "staff", active_engine: "openclaw", bot_type: "service", bot_status: "active", binding_id: 7,
         device_provider: "BAAS", device_id: "device-1", binding_status: "active", env: "prod",
       }];
       if (sql.includes("COUNT(*) AS published_count")) return [{ published_count: 1 }];
@@ -101,7 +101,7 @@ describe("EvolveRepository collaborative Bot access", () => {
 
     expect(resolved).toEqual(expect.objectContaining({
       ownerId: "owner-2", accessType: "collaborator",
-      runtime: expect.objectContaining({ botType: "service", hasServiceBot: true }),
+      runtime: expect.objectContaining({ entityId: "owner-2", entityType: "staff", botType: "service", hasServiceBot: true }),
     }));
     expect(db.calls.some((call) => call.params[1] === "owner-2")).toBe(true);
   });
@@ -111,7 +111,7 @@ describe("EvolveRepository collaborative Bot access", () => {
       if (sql.includes("SELECT b.active_engine") && params[1] === "collaborator-1") return [];
       if (sql.includes("SELECT c.owner_id")) return [{ owner_id: "owner-2" }];
       if (sql.includes("SELECT b.active_engine") && params[1] === "owner-2") return [{
-        active_engine: "openclaw", bot_type: "service", bot_status: "active", binding_id: 7,
+        entity_id: "owner-2", entity_type: "staff", active_engine: "openclaw", bot_type: "service", bot_status: "active", binding_id: 7,
         device_provider: "BAAS", device_id: "device-1", binding_status: "active", env: "prod",
       }];
       if (sql.includes("COUNT(*) AS published_count")) return [{ published_count: 1 }];
@@ -122,7 +122,30 @@ describe("EvolveRepository collaborative Bot access", () => {
       .resolveEvolveBotRuntime("collaborator-1", "service-bot");
 
     expect(runtime).toEqual(expect.objectContaining({
-      ownerId: "owner-2", accessType: "collaborator", botType: "service",
+      ownerId: "owner-2", accessType: "collaborator", entityId: "owner-2", entityType: "staff", botType: "service",
     }));
+  });
+});
+
+
+describe("task list target filter SQL", () => {
+  it("uses guarded MySQL JSON extraction in the shared COUNT and SELECT predicate", async () => {
+    const db = new RecordingDb((sql) => sql.includes("COUNT(*)") ? [{ total: 0 }] : []);
+    await new EvolveRepository(db).listTasksPage({ createdBy: "creator", ownerUserId: "owner",
+      page: 2, pageSize: 20, taskTypes: ["diagnose", "full"], targetType: "bot", statuses: ["running"], query: "keyword" });
+    expect(db.calls).toHaveLength(2);
+    const [count, rows] = db.calls;
+    expect(count.sql.split("WHERE ")[1]).toBe(rows.sql.split("WHERE ")[1].split(" ORDER BY")[0]);
+    expect(count.sql).toContain("CASE WHEN JSON_VALID(config_json) THEN config_json ELSE '{}' END");
+    expect(count.sql).toContain("JSON_UNQUOTE");
+    expect(count.sql).toContain("JSON_TYPE");
+    expect(count.params).toEqual(["creator", "owner", "diagnose", "full", "running", ...Array(5).fill("%keyword%")]);
+    expect(rows.params).toEqual([...count.params, 20, 20]);
+  });
+  it("returns an empty type intersection without accidentally dropping the filter", async () => {
+    const db = new RecordingDb(() => []);
+    expect(await new EvolveRepository(db).listTasksPage({ createdBy: "creator", page: 1, pageSize: 20, taskTypes: [] }))
+      .toEqual({ rows: [], total: 0 });
+    expect(db.calls).toHaveLength(0);
   });
 });

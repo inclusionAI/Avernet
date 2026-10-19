@@ -112,6 +112,8 @@ from agentclaw.community.adapters.http.common_config.router import router as com
 from agentclaw.community.adapters.http.bot_common_config.router import router as bot_common_config_router  # noqa: E402
 from agentclaw.community.adapters.http.skills_pool import router as skills_pool_ops_router  # noqa: E402
 from agentclaw.community.adapters.http.beta_quota.router import router as beta_quota_router  # noqa: E402
+from agentclaw.community.adapters.http.task.bbs import read_router as bbs_internal_read_router, router as bbs_internal_router  # noqa: E402
+from agentclaw.community.adapters.http.task.feedback import read_router as feedback_internal_read_router  # noqa: E402
 from agentclaw.community.adapters.http.channel.router import router as channel_router  # noqa: E402
 from agentclaw.community.adapters.http.quality.router import router as quality_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_message_feedback.router import router as bot_message_feedback_router  # noqa: E402
@@ -124,6 +126,7 @@ from agentclaw.community.adapters.http.bot_message_feedback.router import router
 # configuration declares the collaboration domain.
 from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router  # noqa: E402
 from agentclaw.community.adapters.http.work_orders.router import router as work_orders_http_router  # noqa: E402
+from agentclaw.community.adapters.http.agentswarm import router as agentswarm_router_module  # noqa: E402
 from agentclaw.community.adapters.http.bot_friend_auth.router import router as bot_friend_auth_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_render_screen.router import router as render_screen_router  # noqa: E402
 from agentclaw.community.adapters.http.antprocess import router as antprocess_router  # noqa: E402
@@ -156,6 +159,7 @@ from agentclaw.community.adapters.http.caller_identity.router import router as c
 from agentclaw.community.adapters.http.bot_dormant import router as bot_dormant_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_dormant.router import internal_router as bot_dormant_internal_router  # noqa: E402
 from agentclaw.community.adapters.http.spaces_internal import router as spaces_internal_router  # noqa: E402
+from agentclaw.community.adapters.http.spaces_management import router as spaces_management_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_build import router as service_bot_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_publish import router as service_bot_publish_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_file_count import router as service_bot_file_count_router  # noqa: E402
@@ -171,7 +175,6 @@ from agentclaw.community.kernel.lifecycle import discover_lifecycle_participants
 from agentclaw.community.log import get_logger  # noqa: E402
 
 logger = get_logger()
-
 
 @asynccontextmanager
 async def _app_lifespan(app: FastAPI):
@@ -246,14 +249,12 @@ async def _app_lifespan(app: FastAPI):
                 type(p).__name__, r, exc_info=r,
             )
 
-
 app = FastAPI(lifespan=_app_lifespan)
 
 # Refuse traffic in a process that has not finalized — outside every other
 # middleware, and at construction, because the lifespan guard above only fires
 # on hosts that drive the lifespan protocol.
 install_worker_runtime_guard(app)
-
 
 def finalize_worker_runtime() -> None:
     """Initialize everything this worker process owns — see :mod:`.boot`.
@@ -273,7 +274,6 @@ def finalize_worker_runtime() -> None:
     called it at the bottom of its own import, so calling it again is a no-op.
     """
     _finalize_worker_runtime(app, profile=_deploy_profile)
-
 
 # =============================================================================
 # Exception translation: DomainError / DataProxyError -> HTTP response
@@ -339,6 +339,7 @@ from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
     CallerLockEpochError,
     CallerMcpNotFoundError, CallerMcpSyncError,
 )
+from agentclaw.community.adapters.http.acli_cli_status import ACLI_CLI_ERROR_STATUS  # noqa: E402
 from agentclaw.community.core.skill_center.errors import (  # noqa: E402
     McpEndpointUnavailableError,
     McpPermissionDeniedError,
@@ -391,13 +392,13 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     # back off the whole endpoint over what is a per-Bot lock conflict.
     SkillSetControlPlaneLockUnavailableError: 409,
     SkillSetRuntimeReconcileError: 500,
+    **ACLI_CLI_ERROR_STATUS,
 }
 
 _DATA_PROXY_ERROR_STATUS_MAP: dict[type[DataProxyError], int] = {
     EngineUrlNotConfigured: 500,
     EngineUnreachable:      502,
 }
-
 
 def _trace_headers(request: Request) -> dict[str, str]:
     """Return ``{"X-Trace-ID": <id>}`` for echoing on error responses.
@@ -904,6 +905,9 @@ app.include_router(common_config_router)
 app.include_router(bot_common_config_router)
 app.include_router(skills_pool_ops_router)
 app.include_router(beta_quota_router)
+app.include_router(bbs_internal_read_router)
+app.include_router(bbs_internal_router)
+app.include_router(feedback_internal_read_router)  # /api/v1/collaboration/tasks/feedback — internal mirror of /openapi/v1/collaboration/tasks/feedback
 app.include_router(channel_router)
 app.include_router(quality_router)
 app.include_router(bot_message_feedback_router)
@@ -911,6 +915,8 @@ app.include_router(task_internal_router)
 app.include_router(task_callback_router)
 app.include_router(task_router)
 app.include_router(work_orders_http_router)
+app.include_router(agentswarm_router_module.router)
+agentswarm_router_module.register_exception_handlers(app)
 app.include_router(bot_friend_auth_router)
 try:
     app.include_router(render_screen_router)
@@ -952,6 +958,7 @@ app.include_router(caller_identity_router)
 app.include_router(bot_dormant_router.router)
 app.include_router(bot_dormant_internal_router)
 app.include_router(spaces_internal_router)
+app.include_router(spaces_management_router)
 app.include_router(service_bot_router)
 app.include_router(service_bot_publish_router)
 app.include_router(service_bot_file_count_router)

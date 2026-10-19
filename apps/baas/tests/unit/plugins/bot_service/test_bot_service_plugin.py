@@ -184,7 +184,7 @@ class TestBotBindingData:
         )
         assert data.publish_id is None
         assert data.publish_status is None
-        assert data.binding_id == 0
+        assert data.binding_id is None
         assert data.device_provider == ""
         assert data.device_id == ""
 

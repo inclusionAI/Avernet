@@ -49,7 +49,12 @@ class TestHookFailureRetry:
         publish_id = bot["publish_id"]
         assert (await approve_publish(api, publish_id)) == 200
 
-        await send_callbacks_for_hook_devices(api, publish_id)
+        await send_callbacks_for_hook_devices(
+            api,
+            publish_id,
+            timeout_seconds=5.0,
+            min_publish_retry_count=1,
+        )
         status = await wait_for_publish_status(
             api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=5.0
         )
@@ -76,7 +81,11 @@ class TestHookFailureRetry:
         assert (await approve_publish(api, publish_id)) == 200
 
         status = await wait_for_publish_status(
-            api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=5.0
+            api,
+            publish_id,
+            {"SUCCESS", "FAILED"},
+            timeout_seconds=5.0,
+            treat_not_found_as_success=False,
         )
         assert status == "FAILED"
 
@@ -101,7 +110,11 @@ class TestHookFailureRetry:
         assert (await approve_publish(api, publish_id)) == 200
 
         status = await wait_for_publish_status(
-            api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=5.0
+            api,
+            publish_id,
+            {"SUCCESS", "FAILED"},
+            timeout_seconds=5.0,
+            treat_not_found_as_success=False,
         )
         assert status == "FAILED"
 
@@ -119,7 +132,12 @@ class TestHookFailureRetry:
         )
         publish_id = bot["publish_id"]
         assert (await approve_publish(api, publish_id)) == 200
-        await send_callbacks_for_hook_devices(api, publish_id)
+        await send_callbacks_for_hook_devices(
+            api,
+            publish_id,
+            timeout_seconds=5.0,
+            min_publish_retry_count=1,
+        )
         await wait_for_publish_status(
             api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=5.0
         )

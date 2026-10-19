@@ -3,13 +3,30 @@
 from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.devices.repository.record import DataInitExecutionClaim
 
 
 @runtime_checkable
 class DeviceServiceProtocol(Protocol):
-    """Service API for device management surface used by HTTP routes."""
+    """Service API for device management and lifecycle consumers."""
 
     def apply_device(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def retry_creation_confirmation(self, *, binding_id: int) -> None:
+        """Resume unconfirmed startup for the retained binding's provider.
+
+        Non-participating providers are a no-op. An ACTIVE, unconfirmed
+        Pool-native BaaS binding re-delivers its current callback only;
+        dispatch/persistence failures propagate to the creation caller.
+        """
+        ...
+
+    def update_pool_data_init_ext_if_claim_matches(
+        self, *, bot_id: str, owner_id: str, claim: DataInitExecutionClaim,
+        updates: dict,
+    ) -> bool:
+        """Validate the worker claim and atomically merge/renew, or return False."""
+        ...
 
     def release_device(self, *args: Any, **kwargs: Any) -> Any: ...
 

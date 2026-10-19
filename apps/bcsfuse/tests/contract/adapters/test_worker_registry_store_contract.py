@@ -126,6 +126,10 @@ def test_profile_route_compatibility_adapter_uses_only_typed_port():
         },
     )
     assert adapter.get_profile(worker_id, profile_id)["display_name"] == "Compatibility"
+    current = adapter.get(worker_id, profile_id)
+    assert adapter.save_if_version(
+        current.model_copy(update={"display_name": "Updated"}), current.version,
+    ).display_name == "Updated"
     assert adapter.list_profiles(worker_id)[0]["profile_id"] == profile_id
     assert adapter.activate_profile(worker_id, profile_id)
     assert adapter.get_active_profile_for_worker(worker_id)["profile_id"] == profile_id

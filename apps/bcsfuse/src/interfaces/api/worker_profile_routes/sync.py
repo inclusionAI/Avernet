@@ -2,17 +2,22 @@
 
 import logging
 from datetime import datetime
-from fastapi import Request, HTTPException, status
+
+from fastapi import HTTPException, Request, status
+from starlette.concurrency import run_in_threadpool
+
+from src.application.services.worker_sync_merge import (
+    save_merged_worker,
+    save_merged_profile,
+)
 from src.interfaces.api.schemas.worker_management_schemas import (
-    WorkerSyncRequest,
-    WorkerSyncResponse,
     Availability,
     TrustLevel,
+    WorkerSyncRequest,
+    WorkerSyncResponse,
 )
 
-from . import analysis
-from . import common
-from . import vector_sync
+from . import analysis, common, vector_sync
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +33,7 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
     """
     P1: Sync worker and profile without changing omitted runtime state.
 
-    Atomic sync operation aligned with root_original contract:
+    Sync operation aligned with root_original contract:
     - Create or update worker
     - Apply explicit runtime_state; otherwise preserve it (new workers default online)
     - Upsert and activate profile
@@ -55,6 +60,14 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
                 "code": "PROVIDER_NOT_AVAILABLE",
                 "message": "worker_registry_store provider not available"
             }
+        )
+    if profile_store is None or not callable(getattr(profile_store, "save_if_version", None)):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "PROVIDER_NOT_AVAILABLE",
+                "message": "worker_profile_content_store versioned save not available",
+            },
         )
 
     # Track created flag for response
@@ -96,8 +109,12 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
             "protected": Availability.PROTECTED,
             "public": Availability.PUBLIC,
         }
-        availability = availability_map.get(req.availability, Availability.PROTECTED)
-        logger.info(f"[SYNC-AVAILABILITY-TRACE] worker_id={worker_id}, request_availability={req.availability}, mapped_availability={availability.value}")
+        availability = (
+            availability_map.get(req.availability, Availability.PROTECTED)
+            if existing is None or "availability" in req.model_fields_set
+            else existing.state.availability
+        )
+        logger.info(f"[SYNC-AVAILABILITY-TRACE] worker_id={worker_id}, request_availability={req.availability}, effective_availability={availability.value}")
 
         if existing is None:
             # Create new worker
@@ -117,9 +134,10 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
                 ),
                 responsibilities=req.responsibilities if hasattr(req, 'responsibilities') else [],
                 domains=req.domains,
-                capabilities=req.capabilities or [
-                    {"name": "general", "level": "intermediate"},
-                ],
+                capabilities=(
+                    req.capabilities if "capabilities" in req.model_fields_set else
+                    [{"name": "general", "level": "intermediate"}]
+                ),
                 skills=req.skills,
                 resources=[],
                 state=WorkerState(
@@ -145,23 +163,16 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
             logger.info(f"[Workers R3 Sync] Worker created: {worker_id} with active_profile_key={active_profile_key}")
         else:
             # Update existing worker
-            worker_dict = existing.model_dump() if hasattr(existing, 'model_dump') else existing.dict()
-            worker_dict["identity"]["name"] = req.name
-            if req.description is not None:
-                worker_dict["identity"]["description"] = req.description
-            worker_dict["responsibilities"] = req.responsibilities
-            worker_dict["domains"] = req.domains
-            # Phase 2.6.5: Update availability from request
-            worker_dict["state"]["availability"] = availability
-            # Update active_profile_key
-            if req.profile.activate:
-                worker_dict['active_profile_key'] = (
+            existing = save_merged_worker(
+                worker_store,
+                req.model_dump(),
+                req.model_fields_set,
+                worker_id=worker_id,
+                active_profile_key=(
                     req.profile_key or f"{worker_id}:{profile_id}"
-                )
-
-            from src.domain.models.worker import Worker as WorkerModel
-            updated_worker = WorkerModel.model_validate(worker_dict)
-            worker_store.update(updated_worker)
+                ) if req.profile.activate else None,
+            )
+            availability = existing.state.availability
             logger.info(f"[Workers R3 Sync] Worker updated: {worker_id}, availability={availability.value}")
 
         # Step 2: Only explicit changes or new workers write runtime state.
@@ -230,14 +241,22 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
 
                     # Sync runtime_state + availability to vector store payloads (Faiss + Qdrant)
                     try:
-                        vector_sync._sync_runtime_state_to_vector_store(worker_id, effective_runtime_state)
+                        await run_in_threadpool(
+                            vector_sync._sync_runtime_state_to_vector_store,
+                            worker_id,
+                            effective_runtime_state,
+                        )
                         if isinstance(current_worker, dict):
                             avail = (current_worker.get("state") or {}).get("availability", "protected")
                         else:
                             avail = getattr(getattr(current_worker, 'state', None), 'availability', 'protected')
                             if hasattr(avail, 'value'):
                                 avail = avail.value
-                        vector_sync._sync_availability_to_vector_store(worker_id, avail)
+                        await run_in_threadpool(
+                            vector_sync._sync_availability_to_vector_store,
+                            worker_id,
+                            avail,
+                        )
                     except Exception as sync_err:
                         logger.warning(f"[Workers R3 Sync] Vector payload sync failed: {sync_err}")
 
@@ -245,7 +264,11 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
                 logger.info(f"[Workers R3 Sync] Runtime state preserved: {worker_id} -> {effective_runtime_state}")
                 # Availability still changed even though runtime state did not.
                 try:
-                    vector_sync._sync_availability_to_vector_store(worker_id, availability.value)
+                    await run_in_threadpool(
+                        vector_sync._sync_availability_to_vector_store,
+                        worker_id,
+                        availability.value,
+                    )
                 except Exception as sync_err:
                     logger.warning(f"[Workers R3 Sync] Vector availability sync failed: {sync_err}")
             else:
@@ -321,49 +344,36 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
                     f"profile_store_class={type(profile_store).__name__}"
                 )
 
-                # Construct profile data from request (root_original contract)
-                # Merge summary into contents if provided
-                merged_contents = dict(req.profile.contents)
-                if req.profile.summary is not None:
-                    merged_contents["ecb_summary"] = req.profile.summary.model_dump(exclude_none=True)
-
-                # Fallback profile: ensure contents["profile"] exists for high-weight
-                # vector fragment (0.65).  If the caller didn't provide it, generate
-                # a fallback from soul_md / name / description so the vector index
-                # is immediately useful.  LLM analysis will replace it later.
-                if not merged_contents.get("profile"):
-                    fallback = analysis._generate_fallback_profile(req, merged_contents)
-                    if fallback:
-                        merged_contents["profile"] = fallback
-                        logger.info(
-                            f"[SYNC_FALLBACK_PROFILE] worker_id={worker_id}, "
-                            f"generated fallback profile, len={len(fallback)}"
-                        )
-
-                profile_data = {
-                    "worker_id": worker_id,  # CRITICAL: Include worker_id for ProfileResponse
-                    "profile_id": profile_id,  # CRITICAL: Include profile_id for ProfileResponse
-                    "soul_md": req.profile.soul_md or "",  # SOUL.md content
-                    "display_name": req.profile.display_name or req.name,
-                    "description": req.description,
-                    "contents": merged_contents,
-                    "skill_sets": req.profile.skill_sets,
-                    "metadata": req.profile.metadata,
-                    "created_at": datetime.utcnow().isoformat(),
-                    "updated_at": datetime.utcnow().isoformat(),
-                }
-
-                # Upsert profile
-                profile_store.upsert_profile(worker_id, profile_id, profile_data)
+                profile_data, generated_fallback = save_merged_profile(
+                    profile_store,
+                    req.profile.model_dump(),
+                    req.profile.model_fields_set,
+                    worker_id=worker_id,
+                    profile_id=profile_id,
+                    worker_name=req.name,
+                    description=req.description,
+                    description_supplied="description" in req.model_fields_set,
+                    fallback_profile=analysis._generate_fallback_profile(
+                        req, req.profile.contents,
+                    ),
+                )
+                merged_contents = profile_data["contents"]
+                if generated_fallback:
+                    logger.info(
+                        f"[SYNC_FALLBACK_PROFILE] worker_id={worker_id}, "
+                        f"generated fallback profile, len={len(merged_contents['profile'])}"
+                    )
                 logger.info(
                     f"[SYNC_PROFILE_UPSERT] worker_id={worker_id}, profile_id={profile_id}, "
                     f"profile_key={worker_id}:{profile_id}, profile_store_class={type(profile_store).__name__}, "
-                    f"method=upsert_profile, success=True, contents_keys={list(merged_contents.keys())}"
+                    f"method=save_if_version, success=True, contents_keys={list(merged_contents.keys())}"
                 )
 
                 # Activate profile if requested (root_original contract)
                 if req.profile.activate:
-                    profile_store.activate_profile(worker_id, profile_id)
+                    activated = profile_store.activate_profile(worker_id, profile_id)
+                    if activated is False:
+                        raise RuntimeError("profile store rejected activation")
                     profile_activated = True
                     logger.info(
                         f"[SYNC_PROFILE_ACTIVATE] worker_id={worker_id}, profile_id={profile_id}, "
@@ -496,7 +506,9 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
                     import time
                     start_time = time.time()
 
-                    index_success = _build_vector_index_for_worker(worker_id)
+                    index_success = await run_in_threadpool(
+                        _build_vector_index_for_worker, worker_id
+                    )
 
                     elapsed_ms = int((time.time() - start_time) * 1000)
 
@@ -532,7 +544,7 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
                 # LLM Profile Analysis (aligned with internal worker_routes.py)
                 # Condition: availability != private OR runtime_state == online
                 should_run_llm_analysis = (
-                    req.availability != "private"
+                    availability.value != "private"
                     or effective_runtime_state == "online"
                 )
 
@@ -571,11 +583,12 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
                 else:
                     logger.info(
                         f"[SYNC_LLM] worker_id={worker_id}, skipped "
-                        f"(availability={req.availability}, runtime_state={effective_runtime_state})"
+                        f"(availability={availability.value}, runtime_state={effective_runtime_state})"
                     )
 
+            except HTTPException:
+                raise
             except Exception as e:
-                # Profile upsert failure is non-fatal
                 logger.error(
                     f"[SYNC_PROFILE_UPSERT] worker_id={worker_id}, profile_id={profile_id}, "
                     f"profile_store_class={type(profile_store).__name__}, method=upsert_profile, "
@@ -583,12 +596,17 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
                     exc_info=True
                 )
                 logger.error(f"[Workers R3 Sync] Profile upsert failed for {worker_id}: {e}", exc_info=True)
-                # Worker remains online, but profile_activated = False
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={"code": "PROFILE_SYNC_FAILED", "message": "Profile sync failed; retry the request"},
+                ) from e
         else:
-            # No profile store available
-            logger.warning(
-                f"[SYNC_PROFILE_SKIP] worker_id={worker_id}, profile_store_class=None, "
-                f"reason='profile_store provider not available'"
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "code": "PROVIDER_NOT_AVAILABLE",
+                    "message": "worker_profile_content_store provider not available",
+                },
             )
 
         # Preserve the internal sync contract: when capability verification is

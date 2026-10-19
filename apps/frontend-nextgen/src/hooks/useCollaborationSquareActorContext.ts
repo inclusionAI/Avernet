@@ -13,6 +13,7 @@ interface CollaborationSquareActorContext {
   humanBotContext: HumanBotActionContext | null;
   viewer: BotCatalogViewer | null;
   activeActor: FriendRequestActor | null;
+  activeActorName?: string;
 }
 
 /**
@@ -55,5 +56,10 @@ export function useCollaborationSquareActorContext(
     resetSquare();
   }, [actorKey, resetSquare]);
 
-  return { humanIdentityStatus, humanBotContext, viewer, activeActor };
+  return {
+    humanIdentityStatus, humanBotContext, viewer, activeActor,
+    activeActorName: identity?.kind === 'user'
+      ? humanIdentity?.displayName || identity.displayName
+      : identity?.displayName,
+  };
 }

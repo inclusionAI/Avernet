@@ -1,4 +1,5 @@
 import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui';
+import { useWorkspacePanelDismiss } from '@/hooks/useWorkspacePanelDismiss';
 import { cn } from '@/utils/cn';
 import { ChevronLeft, ChevronRight, GripVertical } from 'lucide-react';
 import type { KeyboardEvent, ReactNode, PointerEvent as ReactPointerEvent } from 'react';
@@ -16,7 +17,8 @@ interface ResizableWorkspaceSidebarProps extends Omit<React.HTMLAttributes<HTMLE
   children: ReactNode;
   ariaLabel: string;
   className?: string;
-  collapsedContent?: ReactNode;
+  /** 折叠态内容：静态节点，或 (expand) => ReactNode 渲染函数——传入 expand() 供收起条上的入口反展开本栏。 */
+  collapsedContent?: ReactNode | ((expand: () => void) => ReactNode);
   /** 挂载边缘：left=左侧栏（默认，手柄右缘、拖右变宽、含折叠态）；right=右侧副屏（手柄左缘、拖左变宽、方向语义反转、无折叠态、小屏不隐藏）。 */
   side?: 'left' | 'right';
   /** 独立宽度组（默认为对话协作左栏常量）；右侧副屏按需传入。 */
@@ -25,6 +27,7 @@ interface ResizableWorkspaceSidebarProps extends Omit<React.HTMLAttributes<HTMLE
   defaultWidth?: number;
   /** 宽度持久化 key（默认为左栏 key）；不同面板传独立 key 避免互相覆盖。 */
   storageKey?: string;
+  onDismiss?: () => void; // 右侧临时面板点击外部关闭；左侧常驻列表不启用。
 }
 
 function clampWidth(width: number, minWidth: number, maxWidth: number): number {
@@ -84,6 +87,7 @@ export function ResizableWorkspaceSidebar({
   maxWidth: maxWidthProp,
   defaultWidth: defaultWidthProp,
   storageKey: storageKeyProp,
+  onDismiss,
   ...rest
 }: ResizableWorkspaceSidebarProps) {
   const isRight = side === 'right';
@@ -92,6 +96,8 @@ export function ResizableWorkspaceSidebar({
   const defaultW = defaultWidthProp ?? WORKSPACE_SIDEBAR_DEFAULT_WIDTH;
   const storageK = storageKeyProp ?? WORKSPACE_SIDEBAR_STORAGE_KEY;
   const sidebarRef = useRef<HTMLElement | null>(null);
+  const containsTarget = useCallback((target: Node) => sidebarRef.current?.contains(target) ?? false, []);
+  useWorkspacePanelDismiss(isRight, containsTarget, onDismiss);
   const contentId = `workspace-sidebar-content-${useId().replace(/:/g, '')}`;
   const [preferredWidth, setPreferredWidth] = useState(() => readStoredWidth(storageK, defaultW, minW, maxW));
   const [collapsed, setCollapsed] = useState(() => (isRight ? false : readStoredCollapsed()));
@@ -223,7 +229,17 @@ export function ResizableWorkspaceSidebar({
         {children}
       </div>
 
-      {collapsed && <div className="absolute inset-0 flex overflow-hidden">{collapsedContent}</div>}
+      {collapsed && (
+        <div className="absolute inset-0 flex overflow-hidden">
+          {/* 渲染函数形态把 expand() 交给收起条（如「+N 溢出 / 空位占位」入口反展开本栏），静态节点形态行为不变。 */}
+          {typeof collapsedContent === 'function'
+            ? collapsedContent(() => {
+                setCollapsed(false);
+                persistCollapsed(false);
+              })
+            : collapsedContent}
+        </div>
+      )}
 
       {!isRight && (
         <TooltipProvider delayDuration={300}>

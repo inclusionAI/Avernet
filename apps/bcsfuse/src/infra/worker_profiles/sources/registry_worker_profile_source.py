@@ -80,14 +80,28 @@ class RegistryWorkerProfileSource:
         Returns:
             WorkerProfileScanResult
         """
+        return self._scan()
+
+    def scan_for_workers(self, worker_ids: list[str]) -> WorkerProfileScanResult:
+        """Retain scan's lifecycle/runtime filters without listing all Workers."""
+        return self._scan(worker_ids)
+
+    def _scan(self, worker_ids: list[str] | None = None) -> WorkerProfileScanResult:
         profiles = []
         scan_warnings = []
 
         try:
             # 获取所有 active 状态的 Worker（使用 list 方法，传入 lifecycle_states 过滤）
-            all_workers = self._registry_store.list(
-                lifecycle_states=[WorkerLifecycleState.ACTIVE]
-            )
+            if worker_ids is None:
+                all_workers = self._registry_store.list(
+                    lifecycle_states=[WorkerLifecycleState.ACTIVE]
+                )
+            else:
+                all_workers = [
+                    worker for worker_id in dict.fromkeys(worker_ids)
+                    if (worker := self._registry_store.get_by_id(worker_id)) is not None
+                    and worker.lifecycle_state == WorkerLifecycleState.ACTIVE
+                ]
 
             for worker in all_workers:
                 # 已在 list() 中过滤 lifecycle_state，这里只需检查 runtime_state

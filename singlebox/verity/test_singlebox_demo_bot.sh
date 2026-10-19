@@ -117,6 +117,7 @@ printf '%s\n' '{"success":true,"data":{"bots":[{"bot_id":"default","bot_name":"d
 SH
   chmod +x "${tmpbin}/curl"
   PATH="${tmpbin}:$PATH"
+  hash -r
 
   # shellcheck source=/dev/null
   source "$MODULE"
@@ -152,6 +153,7 @@ printf '%s\n' '{"success":true,"data":{"bot_id":"default"}}'
 SH
   chmod +x "${tmpbin}/curl"
   PATH="${tmpbin}:$PATH"
+  hash -r
   export CURL_ARGS_FILE="${tmpbin}/args.txt"
 
   # shellcheck source=/dev/null
@@ -501,38 +503,228 @@ test_ensure_does_not_onboard_after_fatal_verification_error() {
   assert_eq "verify" "$(cat "$sequence_file")" "fatal verification should not mutate BCS"
 }
 
-test_start_waits_for_backend_ready_without_auto_onboard() {
+test_bbs_defaults_define_two_role_specific_bots() {
+  setup_env
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  demo_bot_defaults
+  demo_bbs_validate_definitions
+  assert_eq "2" "${#DEMO_BBS_BOT_NAMES[@]}" "BBS demo bot count"
+  assert_eq "社区产品官" "${DEMO_BBS_BOT_NAMES[0]}" "product bot name"
+  assert_eq "社区工程官" "${DEMO_BBS_BOT_NAMES[1]}" "engineering bot name"
+  assert_eq "4" "${#DEMO_BBS_TOPIC_TITLES[@]}" "initial topic count"
+  assert_eq "3" "${#DEMO_BBS_SKILL_NAMES[@]}" "BBS skill count"
+  assert_eq "bbs-browse" "${DEMO_BBS_SKILL_NAMES[0]}" "browse skill"
+  assert_eq "bbs-topic-handler" "${DEMO_BBS_SKILL_NAMES[1]}" "topic skill"
+  assert_eq "bbs-create-topic" "${DEMO_BBS_SKILL_NAMES[2]}" "create skill"
+
+  # The open-source demo runs against a local backend. Built-in web tools may
+  # block localhost/private addresses, so all three packaged skills must force
+  # exec+curl for their BBS API calls.
+  for skill_name in "${DEMO_BBS_SKILL_NAMES[@]}"; do
+    skill_file="${DEMO_BBS_SKILL_ROOT}/${skill_name}/SKILL.md"
+    [ -f "$skill_file" ] || fail "missing BBS skill source: $skill_name"
+    grep -F '## 本地接口调用方式（强制）' "$skill_file" >/dev/null ||
+      fail "$skill_name must define the exec+curl transport contract"
+    grep -F '本地 BBS API 必须通过 OpenClaw `exec` 执行 `curl`' "$skill_file" >/dev/null ||
+      fail "$skill_name must require exec+curl for BBS API calls"
+    grep -F '禁止 `web_fetch` 或 `browser` 访问' "$skill_file" >/dev/null ||
+      fail "$skill_name must forbid web tools for local BBS API calls"
+  done
+}
+
+test_bbs_topic_payload_uses_human_demo_author_and_idempotency_key() {
+  setup_env
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  demo_bot_defaults
+  payload="$(demo_bbs_topic_payload "fixed-topic-id" "Topic title" "Topic body")"
+  jq -e '
+    .author_type == "HUMAN" and
+    .author_id == "mock-user" and
+    .author_display_name == "DemoUser" and
+    .client_request_id == "fixed-topic-id" and
+    .title == "Topic title" and
+    .body == "Topic body"
+  ' <<< "$payload" >/dev/null || fail "BBS topic payload mismatch"
+}
+
+test_bbs_start_seeds_topics_bots_skills_and_subscriptions_in_order() (
   setup_env
   # shellcheck source=/dev/null
   source "$MODULE"
   sequence_file="$(mktemp)"
 
-  demo_bot_find_existing() { return 0; }
-  demo_bot_create() {
-    printf '%s\n' "create" >> "$sequence_file"
-    printf '%s\n' "default"
+  backend_ready() { return 0; }
+  bcs_ready() { return 0; }
+  demo_bbs_require_gateway() { return 0; }
+  demo_bbs_validate_definitions() { return 0; }
+  demo_bbs_topics_seed() {
+    printf '%s\n' "topics" >> "$sequence_file"
+    return 0
   }
+  demo_bbs_validate_definitions() { return 0; }
+  demo_bbs_find_existing() {
+    printf '%s\n' "find:$1" >> "$sequence_file"
+    case "$1" in
+      社区产品官) printf '%s\n' "bot-product" ;;
+      社区工程官) printf '%s\n' "bot-engineering" ;;
+    esac
+  }
+  demo_bbs_create() { fail "existing BBS demo bots must be reused"; }
   demo_bot_wait_ready() {
-    printf '%s\n' "wait:$1" >> "$sequence_file"
+    printf '%s\n' "ready:$1" >> "$sequence_file"
+    return 0
   }
-  demo_bot_ensure_bcn() { fail "demo bot startup must not auto-onboard"; }
+  demo_bbs_skills_install() {
+    printf '%s\n' "skills:$1" >> "$sequence_file"
+    return 0
+  }
+  demo_bbs_subscription_enable() {
+    printf '%s\n' "subscription:$1" >> "$sequence_file"
+  }
 
   demo_bot_start
-  assert_eq $'create\nwait:default' "$(cat "$sequence_file")" "demo bot start order"
-}
+  assert_eq $'topics\nfind:社区产品官\nready:bot-product\nfind:社区工程官\nready:bot-engineering\nskills:bot-product\nsubscription:bot-product\nskills:bot-engineering\nsubscription:bot-engineering'     "$(cat "$sequence_file")" "BBS demo start order"
+)
 
-test_all_order_includes_bots_and_demo_before_frontend() {
+test_bbs_start_fails_fast_when_topic_seed_fails() (
+  setup_env
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  demo_bbs_validate_definitions() { return 0; }
+  backend_ready() { return 0; }
+  bcs_ready() { return 0; }
+  demo_bbs_require_gateway() { return 0; }
+  demo_bbs_topics_seed() {
+    log_error "topic seed failed"
+    return 1
+  }
+  demo_bbs_find_existing() { fail "topic seeding must run before access to bot list"; }
+
+  if demo_bot_start >/dev/null 2>&1; then
+    fail "BBS demo start must fail when topic initialization fails"
+  fi
+)
+
+test_bbs_skill_upload_uses_gateway_and_returns_skill_id() (
+  setup_env
+  tmpbin="$(mktemp -d)"
+  cat > "${tmpbin}/curl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "${CURL_ARGS_FILE}"
+printf '%s\n' '{"code":201000,"data":{"skill":{"skill_id":"9","name":"bbs-browse","active":false}}}'
+SH
+  chmod +x "${tmpbin}/curl"
+  PATH="${tmpbin}:$PATH"
+  hash -r
+  export CURL_ARGS_FILE="${tmpbin}/args.txt"
+
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  demo_bot_defaults
+  skill_id="$(demo_bbs_skill_upload "bot-product" "bbs-browse")"
+  assert_eq "9" "$skill_id" "uploaded skill id"
+  args="$(cat "$CURL_ARGS_FILE")"
+  grep -F 'POST http://127.0.0.1:8889/openapi/v1/bots/bot-product/skills?user_id=mock-user&owner_id=mock-user' <<< "$args" >/dev/null || fail "BBS skill upload URL missing"
+  grep -F 'x-dev-user: mock-user' <<< "$args" >/dev/null || fail "BBS skill upload caller header missing"
+  grep -F -- '--data-binary @' <<< "$args" >/dev/null || fail "BBS skill upload must send a zip body"
+)
+
+test_bbs_skill_activation_requires_real_runtime_convergence() (
+  setup_env
+  tmpbin="$(mktemp -d)"
+  cat > "${tmpbin}/curl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "${CURL_ARGS_FILE}"
+printf '%s\n' '{"code":200000,"data":{"skill":{"skill_id":"9","name":"bbs-browse","active":true},"changed":true,"runtime_projection":{"status":"CONVERGED","pending_count":0}}}'
+SH
+  chmod +x "${tmpbin}/curl"
+  PATH="${tmpbin}:$PATH"
+  hash -r
+  export CURL_ARGS_FILE="${tmpbin}/args.txt"
+
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  demo_bot_defaults
+  demo_bbs_skill_activate "bot-product" "9" "bbs-browse"
+  grep -F 'POST http://127.0.0.1:8889/openapi/v1/bots/bot-product/skills/9/activate?user_id=mock-user&owner_id=mock-user'     "$CURL_ARGS_FILE" >/dev/null || fail "BBS skill activation URL missing"
+)
+
+test_bbs_subscription_enable_uses_internal_unified_contract() (
+  setup_env
+  tmpbin="$(mktemp -d)"
+  cat > "${tmpbin}/curl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "${CURL_ARGS_FILE}"
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-d" ]; then
+    shift
+    printf '%s\n' "$1" > "${CURL_BODY_FILE}"
+    break
+  fi
+  shift
+done
+printf '%s\n' '{"code":200000,"message":"OK","data":{"bot_id":"bot-product","owner_user_id":"mock-user","mode":"openclaw","note":"product note"}}'
+SH
+  chmod +x "${tmpbin}/curl"
+  PATH="${tmpbin}:$PATH"
+  export CURL_ARGS_FILE="${tmpbin}/args.txt"
+  export CURL_BODY_FILE="${tmpbin}/body.json"
+
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  demo_bot_defaults
+  demo_bbs_subscription_enable "bot-product" "product note"
+  grep -F 'POST http://127.0.0.1:8888/api/v1/collaboration/tasks/bots/bot-product/bbs/browse-subscription?owner_user_id=mock-user'     "$CURL_ARGS_FILE" >/dev/null || fail "BBS subscription URL missing"
+  grep -F 'x-user-id: mock-user' "$CURL_ARGS_FILE" >/dev/null || fail "BBS subscription caller header missing"
+  jq -e '.note == "product note"' "$CURL_BODY_FILE" >/dev/null || fail "BBS subscription body mismatch"
+)
+
+test_bbs_subscription_enable_fails_without_success_contract() (
+  setup_env
+  tmpbin="$(mktemp -d)"
+  cat > "${tmpbin}/curl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' '{"detail":"BBS cron setup failed"}'
+SH
+  chmod +x "${tmpbin}/curl"
+  PATH="${tmpbin}:$PATH"
+
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  demo_bot_defaults
+  if demo_bbs_subscription_enable "bot-product" "product note" >/dev/null 2>&1; then
+    fail "BBS subscription must fail when the unified contract is not successful"
+  fi
+)
+
+test_all_order_places_gateway_before_demo_bot() {
   setup_env
   # shellcheck source=/dev/null
   source "${ROOT}/singlebox/modules/all.sh"
-  # bcsfuse starts before bcs (all.sh's canonical order); this pin was left on
-  # the older swap by an earlier order change — dev itself fails it today.
-  assert_eq "baas backend bcsfuse bcs bots demo_bot frontend" "${START_ORDER[*]}" "all start order"
-  # Stop is the unconditional union (legacy + gateway): a stack started under a
-  # non-legacy FRONTEND_VARIANT is routinely stopped from a shell without it,
-  # and gateway_stop is a no-op when the gateway is not running.
+  # demo_bot uploads BBS demo skills through Gateway, so Gateway must be part
+  # of every variant's canonical start order and must precede demo_bot.
+  assert_eq "baas backend bcsfuse bcs bots gateway demo_bot frontend" "${START_ORDER[*]}" "all start order"
   assert_eq "frontend gateway demo_bot bots bcsfuse bcs backend baas" "${STOP_ORDER[*]}" "all stop order"
 }
+
+test_start_fails_fast_when_gateway_is_not_ready() (
+  setup_env
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  demo_bbs_gateway_ready() { return 1; }
+  local errors=""
+  log_error() { errors="${errors}${1}\n"; }
+
+  if demo_bot_start >/tmp/singlebox-demo-gateway-test.out 2>&1; then
+    fail "demo_bot_start must fail when Gateway is unavailable"
+  fi
+  grep -F 'Gateway is not ready' <<<"$errors" >/dev/null || \
+    fail "missing Gateway readiness error"
+  grep -F 'BBS demo skills are uploaded through Gateway' <<<"$errors" >/dev/null || \
+    fail "missing Gateway dependency explanation"
+)
 
 test_backend_ready_function_exists() {
   setup_env
@@ -544,6 +736,14 @@ test_backend_ready_function_exists() {
 test_defaults_are_community_safe
 test_env_overrides_are_used
 test_bcs_bot_id_uses_backend_bot_and_entity_id
+test_bbs_defaults_define_two_role_specific_bots
+test_bbs_topic_payload_uses_human_demo_author_and_idempotency_key
+test_bbs_start_seeds_topics_bots_skills_and_subscriptions_in_order
+test_bbs_skill_upload_uses_gateway_and_returns_skill_id
+test_bbs_skill_activation_requires_real_runtime_convergence
+test_bbs_start_fails_fast_when_topic_seed_fails
+test_bbs_subscription_enable_uses_internal_unified_contract
+test_bbs_subscription_enable_fails_without_success_contract
 test_find_existing_parses_backend_list
 test_find_existing_ignores_malformed_response
 test_create_posts_to_local_backend
@@ -564,8 +764,8 @@ test_admin_onboard_posts_demo_metadata
 test_ensure_skips_connect_when_already_visible
 test_ensure_reports_missing_bot_without_auto_onboard
 test_ensure_does_not_onboard_after_fatal_verification_error
-test_start_waits_for_backend_ready_without_auto_onboard
-test_all_order_includes_bots_and_demo_before_frontend
+test_all_order_places_gateway_before_demo_bot
+test_start_fails_fast_when_gateway_is_not_ready
 test_backend_ready_function_exists
 
-printf 'PASS: singlebox demo bot module tests\n'
+printf '%s\n' "PASS: singlebox demo bot module tests"

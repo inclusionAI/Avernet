@@ -49,7 +49,25 @@ class ReplaceRequest(BaseModel):
     tools: list[ReplaceToolItem] = Field(default_factory=list)
 
 
+class AcliInstallRequest(BaseModel):
+    """``POST /api/cli/acli/install`` — install one tool from the acli market.
+
+    The caller names only the tool. Where it is installed is the engine's
+    choice (``ACLI_INSTALL_DIR``), shared by every engine.
+    """
+
+    name: str
+
+
+class AcliUninstallRequest(BaseModel):
+    """``POST /api/cli/acli/uninstall`` — remove a tool acli installed."""
+
+    name: str
+
+
 __all__ = [
+    "AcliInstallRequest",
+    "AcliUninstallRequest",
     "DeleteRequest",
     "InstallRequest",
     "ReplaceRequest",

@@ -1,0 +1,10 @@
+{
+  "outcome": "refused",
+  "violations": [
+    {
+      "location": "manifest.engine_config",
+      "code": "unsupported_category",
+      "reason": "engine_config is refused until #2858"
+    }
+  ]
+}

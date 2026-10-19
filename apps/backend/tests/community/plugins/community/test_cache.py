@@ -1,7 +1,7 @@
 """Unit tests for the community CommunityCache (B3).
 
 Parametrized over both backends: a high-fidelity ``fakeredis`` (exercises the
-SET NX / Lua-or-fallback lock path) and the in-process fallback.
+SET NX / Lua lock path) and the in-process fallback.
 """
 
 from __future__ import annotations
@@ -15,11 +15,37 @@ from agentclaw.community.plugins.community.cache import CommunityCache
 from agentclaw.community.plugin_api.cache import CacheLockInfrastructureError
 
 
+class _LuaScriptFake:
+    """fakeredis plus ``eval`` for the two lock scripts.
+
+    fakeredis only runs Lua when ``lupa`` is installed, which is not a
+    dependency, so the compare-and-delete / compare-and-expire scripts are
+    emulated here. The script-text asserts pin the emulation to the real
+    scripts.
+    """
+
+    def __init__(self) -> None:
+        self._fake = fakeredis.FakeStrictRedis()
+
+    def __getattr__(self, name):
+        return getattr(self._fake, name)
+
+    def eval(self, script, _numkeys, key, token, *args):
+        assert 'redis.call("get", KEYS[1]) == ARGV[1]' in script
+        expected = token.encode() if isinstance(token, str) else token
+        if self._fake.get(key) != expected:
+            return 0
+        if 'redis.call("del", KEYS[1])' in script:
+            return self._fake.delete(key)
+        assert 'redis.call("expire", KEYS[1], ARGV[2])' in script
+        return self._fake.expire(key, args[0])
+
+
 @pytest.fixture(params=["inproc", "redis"])
 def cache(request, monkeypatch) -> CommunityCache:
     if request.param == "inproc":
         return CommunityCache("")
-    fake = fakeredis.FakeStrictRedis()
+    fake = _LuaScriptFake()
     monkeypatch.setattr(real_redis.Redis, "from_url", lambda url, **kw: fake)
     return CommunityCache("redis://fake")
 
@@ -88,23 +114,7 @@ def test_in_proc_renew_with_correct_token_keeps_lock():
 
 
 def test_redis_renew_uses_atomic_compare_and_expire(monkeypatch):
-    class _EvalCapableFake:
-        def __init__(self) -> None:
-            self._fake = fakeredis.FakeStrictRedis()
-
-        def __getattr__(self, name):
-            return getattr(self._fake, name)
-
-        def eval(self, script, _numkeys, key, token, ttl):
-            assert 'redis.call("get", KEYS[1]) == ARGV[1]' in script
-            assert 'redis.call("expire", KEYS[1], ARGV[2])' in script
-            current = self._fake.get(key)
-            expected = token.encode() if isinstance(token, str) else token
-            if current != expected:
-                return 0
-            return self._fake.expire(key, ttl)
-
-    fake = _EvalCapableFake()
+    fake = _LuaScriptFake()
     monkeypatch.setattr(real_redis.Redis, "from_url", lambda url, **kw: fake)
     cache = CommunityCache("redis://fake")
     token = cache.acquire_lock_strict("L", ttl=30)
@@ -161,7 +171,7 @@ def test_redis_unreachable_degrades_without_raising(monkeypatch):
     assert cache.set("k", "v", ttl=10) is False  # the ex= branch also swallows
     assert cache.delete("k") is False
     assert cache.acquire_lock("L") is None  # NOT misread as "held"
-    assert cache.release_lock("L", "tok") is False  # eval+fallback both fail
+    assert cache.release_lock("L", "tok") is False
     assert cache.get_json("k") is None
     assert cache.set_json("k", {"a": 1}) is False
     with pytest.raises(CacheLockInfrastructureError):
@@ -177,7 +187,7 @@ def test_set_json_non_serializable_returns_false(cache):
 
 def test_redis_release_lock_paths(monkeypatch):
     # Drive the Redis release_lock branches explicitly against fakeredis.
-    fake = fakeredis.FakeStrictRedis()
+    fake = _LuaScriptFake()
     monkeypatch.setattr(real_redis.Redis, "from_url", lambda url, **k: fake)
     cache = CommunityCache("redis://fake")
     token = cache.acquire_lock("L")
@@ -185,3 +195,37 @@ def test_redis_release_lock_paths(monkeypatch):
     assert cache.acquire_lock("L") is None  # still held
     assert cache.release_lock("L", token) is True  # holder releases
     assert cache.acquire_lock("L") is not None  # now free
+
+
+def test_redis_release_eval_failure_never_falls_back_to_get_delete(monkeypatch):
+    # A GET+DELETE fallback could delete a lock re-acquired by another worker
+    # after this lease expired, so an eval failure must leave the key alone.
+    class _EvalFails(_LuaScriptFake):
+        calls: list[str] = []
+
+        def eval(self, *a, **k):
+            raise real_redis.ConnectionError("eval timed out")
+
+        def get(self, *a, **k):
+            self.calls.append("get")
+            return self._fake.get(*a, **k)
+
+        def delete(self, *a, **k):
+            self.calls.append("delete")
+            return self._fake.delete(*a, **k)
+
+    fake = _EvalFails()
+    monkeypatch.setattr(real_redis.Redis, "from_url", lambda url, **k: fake)
+    cache = CommunityCache("redis://fake")
+    token = cache.acquire_lock_strict("L", ttl=30)
+    assert token is not None
+    assert cache.release_lock("L", token) is False
+    assert fake.calls == []
+    assert fake._fake.get("lock:L") == token.encode()  # lease left to its TTL
+
+
+def test_lock_token_is_full_uuid4_hex(cache):
+    token = cache.acquire_lock_strict("L")
+    assert token is not None
+    assert len(token) == 32
+    int(token, 16)  # hex only

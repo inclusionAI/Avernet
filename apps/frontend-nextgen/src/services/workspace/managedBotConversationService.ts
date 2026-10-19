@@ -112,12 +112,13 @@ export const managedBotConversationService = {
     }
   },
 
-  /** 该 Bot 视角下某好友用户的会话分页(只读);返回值即 Catalog 缓存态,Hook 只做装饰。 */
+  /** 该 Bot 视角下某好友用户的会话分页(只读,可选 sessionKey 过滤);返回值即 Catalog 缓存态,Hook 只做装饰。 */
   async listOtherSessions(
     bot: ChatBotView,
     friendUserId: string,
     page: number = 1,
     pageSize: number = BOT_SESSION_PAGE_SIZE,
+    sessionKey: string = '',
   ): Promise<DomainResult<ConversationSessionListState>> {
     if (bot.isTeamBot) return { ok: false, error: TEAM_OTHERS_UNAVAILABLE };
     const context = resolveOwnerContext(bot);
@@ -126,12 +127,14 @@ export const managedBotConversationService = {
       return { ok: false, error: INVALID_CONTEXT_ERROR };
     }
     try {
+      // 身份链路保持既有语义(所有者视角 + 好友 f_user_id);session_key 为原始字符串,空条件省略。
       const response = await listBotSessions(context.realBotId, {
         user_id: context.ownerId,
         owner_id: context.ownerId,
         f_user_id: friendId,
         page,
         page_size: pageSize,
+        ...(sessionKey ? { session_key: sessionKey } : {}),
       });
       const source = response.data?.items ?? [];
       const total = response.data?.total ?? source.length;

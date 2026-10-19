@@ -1,5 +1,5 @@
 import { getCapabilities } from '@/capabilities';
-import type { WorkflowItem } from '@/services/botWorkshop/agentCodingLegacyService';
+import type { CodeRepositoryTenant, WorkflowItem } from '@/services/botWorkshop/agentCodingLegacyService';
 import { CodeRepoListField, YuqueKbReposField } from '../aicoding/configFields';
 import { fromCodeRepoItems, renderYuqueKbError, toCodeRepoItems } from './AppCodingConfigUtils';
 import { ArchitectBotConfigField } from './ArchitectBotConfigField';
@@ -13,6 +13,12 @@ interface AppCodingRepositoryFieldsProps {
   setBackendRepos: (value: string[]) => void;
   setFrontendRepos: (value: string[]) => void;
   setLibRepos: (value: string[]) => void;
+  backendRepoTenant: CodeRepositoryTenant;
+  setBackendRepoTenant: (value: CodeRepositoryTenant) => void;
+  frontendRepoTenant: CodeRepositoryTenant;
+  setFrontendRepoTenant: (value: CodeRepositoryTenant) => void;
+  libRepoTenant: CodeRepositoryTenant;
+  setLibRepoTenant: (value: CodeRepositoryTenant) => void;
   duplicateRepoUrls: Set<string>;
   yuqueKbRepos: { url: string; token: string }[];
   setYuqueKbRepos: (value: { url: string; token: string }[]) => void;
@@ -39,6 +45,8 @@ export function AppCodingRepositoryFields(props: AppCodingRepositoryFieldsProps)
         disabled={props.disabled || props.repoFieldsDisabled}
         removeDisabled={props.repoFieldsDisabled}
         duplicateUrls={props.duplicateRepoUrls}
+        tenant={props.backendRepoTenant}
+        onTenantChange={props.setBackendRepoTenant}
       />
 
       {/* 前端代码仓库 */}
@@ -49,6 +57,8 @@ export function AppCodingRepositoryFields(props: AppCodingRepositoryFieldsProps)
         disabled={props.disabled || props.repoFieldsDisabled}
         removeDisabled={props.repoFieldsDisabled}
         duplicateUrls={props.duplicateRepoUrls}
+        tenant={props.frontendRepoTenant}
+        onTenantChange={props.setFrontendRepoTenant}
       />
 
       {/* lib 代码仓库 */}
@@ -59,6 +69,8 @@ export function AppCodingRepositoryFields(props: AppCodingRepositoryFieldsProps)
         disabled={props.disabled || props.repoFieldsDisabled}
         removeDisabled={props.repoFieldsDisabled}
         duplicateUrls={props.duplicateRepoUrls}
+        tenant={props.libRepoTenant}
+        onTenantChange={props.setLibRepoTenant}
       />
 
       {/* 重复仓库地址提示 */}

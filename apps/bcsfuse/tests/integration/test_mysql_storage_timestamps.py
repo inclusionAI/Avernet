@@ -116,6 +116,29 @@ def test_profile_save_update_activate_return_persisted_database_times(pool):
     assert_current(pool, activated.updated_at)
 
 
+def test_profile_description_survives_save_without_schema_change(pool):
+    store = MySQLWorkerProfileContentStore(pool)
+    store.save(WorkerProfileContent(
+        worker_id="description-test", description="Before restart",
+        metadata={"source": "api"},
+    ))
+    assert store.get("description-test", "default").description == "Before restart"
+    assert store.get("description-test", "default").metadata == {"source": "api"}
+
+    with pool.get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SHOW COLUMNS FROM bcsfuse_worker_profile_contents LIKE 'description'"
+            )
+            assert cursor.fetchone() is None
+
+    restarted = MySQLWorkerProfileContentStore(pool)
+    restarted.save(WorkerProfileContent(
+        worker_id="description-test", description="After restart",
+    ))
+    assert restarted.get("description-test", "default").description == "After restart"
+
+
 def test_runtime_state_insert_and_update_use_database_clock(pool):
     store = MySQLWorkerRuntimeStateStore(pool)
     for state in (WorkerRuntimeState.ONLINE, WorkerRuntimeState.OFFLINE):

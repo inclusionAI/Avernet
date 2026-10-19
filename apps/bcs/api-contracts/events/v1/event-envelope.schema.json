@@ -494,6 +494,16 @@
         "duration_ms": { "$ref": "#/$defs/NonNegativeInteger" }
       }
     },
+    "StateMachineLoopFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["loop_id", "iteration", "max_iterations"],
+      "properties": {
+        "loop_id": { "$ref": "#/$defs/OpaqueId" },
+        "iteration": { "type": "integer", "minimum": 1 },
+        "max_iterations": { "type": "integer", "minimum": 1 }
+      }
+    },
     "StateMachineNodeExecutionMetadata": {
       "type": "object",
       "additionalProperties": false,
@@ -502,7 +512,12 @@
         "definition_node_id": { "$ref": "#/$defs/OpaqueId" },
         "loop_id": { "$ref": "#/$defs/OpaqueId" },
         "iteration": { "type": "integer", "minimum": 1 },
-        "max_iterations": { "type": "integer", "minimum": 1 }
+        "max_iterations": { "type": "integer", "minimum": 1 },
+        "loop_path": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/StateMachineLoopFrame" }
+        }
       }
     },
     "StateMachineNodeStartedData": {

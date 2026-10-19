@@ -71,6 +71,7 @@ impl BridgePeer {
         let bot_id = connect["params"]["bot_id"].as_str().expect("bot.connect bot_id").to_owned();
         // The bridge always requests V3; the peer negotiates its own version.
         assert_eq!(connect["params"]["protocol_version"], 3);
+        assert_eq!(connect["params"]["client_kind"], "native_mcp");
         match expected_token {
             Some(token) => assert_eq!(connect["params"]["token"], token),
             None => assert!(connect["params"].get("token").is_none()
@@ -85,6 +86,80 @@ impl BridgePeer {
         })).await;
         (bot_id, socket)
     }
+}
+
+#[tokio::test]
+async fn all_engines_request_native_mcp() {
+    for engine in ["claude-code", "codex", "qwenwork", "cfuse-cc", "cfuse-codex", "custom-engine"] {
+        let mut peer = BridgePeer::one_bot().await;
+        peer.config.bots[0].engine = engine.into();
+        // Reuse the fake CLI engine; this test isolates the outgoing handshake.
+        let mut registry = EngineRegistry::builtin();
+        registry.register(bcs_bridge_core::engine::claude_code::ClaudeCodeFactory::custom(engine, "unused", vec![]));
+        let state = Arc::new(AppState::new(peer.config.clone(), &registry).unwrap());
+        let (_, shutdown, task) = peer.start_state(state);
+        let _socket = peer.accept("bot-a", None).await;
+        stop(shutdown, task).await;
+    }
+}
+
+#[tokio::test]
+async fn immediate_restart_retries_the_old_connection_then_runs_normally() {
+    let peer = BridgePeer::one_bot().await;
+    let (_, shutdown, task) = peer.start().await;
+    for _ in 0..2 {
+        reject_connect(&peer, "already_connected").await;
+    }
+    let mut socket = peer.accept("bot-a", None).await;
+    send_json(&mut socket, chat_send("restart-request", "restart-run", "group-a:session-a", "after restart")).await;
+    let final_frame = recv_application(&mut socket, is_final).await;
+    assert_eq!(final_frame["payload"]["runId"], "restart-run");
+    assert_eq!(engine_starts(peer.dir.path()).len(), 1);
+    stop(shutdown, task).await;
+}
+
+#[tokio::test]
+async fn persistent_duplicate_connection_exhausts_its_retry_budget() {
+    let peer = BridgePeer::one_bot().await;
+    let (_, _shutdown, task) = peer.start().await;
+    for _ in 0..7 {
+        reject_connect(&peer, "already_connected").await;
+    }
+    let error = tokio::time::timeout(IO_TIMEOUT, task).await.unwrap().unwrap().unwrap_err();
+    assert!(error.to_string().contains("active WebSocket connection"));
+    assert!(tokio::time::timeout(Duration::from_millis(100), peer.listener.accept()).await.is_err());
+    assert!(!peer.dir.path().join("worker-1/engine-starts.jsonl").exists());
+}
+
+#[tokio::test]
+async fn credential_and_protocol_rejections_do_not_retry() {
+    for code in ["invalid_token", "unsupported_protocol_version", "dispatch_error"] {
+        let peer = BridgePeer::one_bot().await;
+        let (_, _shutdown, task) = peer.start().await;
+        reject_connect(&peer, code).await;
+        assert!(tokio::time::timeout(IO_TIMEOUT, task).await.unwrap().unwrap().is_err());
+        assert!(tokio::time::timeout(Duration::from_millis(100), peer.listener.accept()).await.is_err());
+    }
+}
+
+#[tokio::test]
+async fn shutdown_interrupts_duplicate_connection_backoff() {
+    let mut peer = BridgePeer::one_bot().await;
+    peer.config.plugin.as_mut().unwrap().reconnect_interval_ms = 8_000;
+    let (_, shutdown, task) = peer.start().await;
+    reject_connect(&peer, "already_connected").await;
+    shutdown.cancel();
+    tokio::time::timeout(Duration::from_secs(1), task).await.unwrap().unwrap().unwrap();
+    assert!(tokio::time::timeout(Duration::from_millis(100), peer.listener.accept()).await.is_err());
+}
+
+async fn reject_connect(peer: &BridgePeer, code: &str) {
+    let (stream, _) = tokio::time::timeout(IO_TIMEOUT, peer.listener.accept()).await.unwrap().unwrap();
+    let mut socket = accept_async(stream).await.unwrap();
+    let connect = recv_json(&mut socket).await;
+    assert_eq!(connect["method"], "bot.connect");
+    send_json(&mut socket, json!({"type":"res", "id":connect["id"], "ok":false,
+        "error":{"code":code,"message":"synthetic connection rejection","retryable":false}})).await;
 }
 
 #[tokio::test]
@@ -209,9 +284,13 @@ async fn missing_heartbeat_response_forces_an_authenticated_reconnect() {
 
 #[tokio::test]
 async fn two_bots_keep_same_group_sessions_and_events_isolated() {
+    init_tracing();
     let dir = tempfile::tempdir().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let config = config_for(&dir, listener.local_addr().unwrap(), &["worker-1", "worker-2"]);
+    let mut config = config_for(&dir, listener.local_addr().unwrap(), &["worker-1", "worker-2"]);
+    let plugin = config.plugin.as_mut().unwrap();
+    plugin.heartbeat_interval_ms = 20;
+    let held_run_duration = Duration::from_millis(plugin.connect_timeout_ms * 2);
     let peer = BridgePeer { dir, listener, config, version: 3 };
     let (_, shutdown, task) = peer.start().await;
     let (first_id, first) = peer.accept_any(None).await;
@@ -225,14 +304,32 @@ async fn two_bots_keep_same_group_sessions_and_events_isolated() {
         (second, first)
     };
 
-    send_json(&mut bot_a, chat_send("a-send", "run-a", "shared-group", "alpha-only")).await;
-    send_json(&mut bot_b, chat_send("b-send", "run-b", "shared-group", "beta-only")).await;
-    let a_ack = recv_response_without_events(&mut bot_a, "a-send").await;
-    let b_ack = recv_response_without_events(&mut bot_b, "b-send").await;
+    send_json(&mut bot_a, chat_send("a-send", "run-a", "shared-group", "WAIT_OFFLINE alpha-only")).await;
+    send_json(&mut bot_b, chat_send("b-send", "run-b", "shared-group", "WAIT_OFFLINE beta-only")).await;
+    // Service both sockets throughout their runs: waiting for A's final before
+    // reading B can leave B's bot.status unanswered and trigger a reconnect.
+    let ((a_ack, a_final), (b_ack, b_final), ()) = tokio::join!(
+        async {
+            let ack = recv_response_without_events(&mut bot_a, "a-send").await;
+            (ack, recv_application(&mut bot_a, is_final).await)
+        },
+        async {
+            let ack = recv_response_without_events(&mut bot_b, "b-send").await;
+            (ack, recv_application(&mut bot_b, is_final).await)
+        },
+        async {
+            let engine_dir = peer.dir.path();
+            wait_for_file(&engine_dir.join("worker-1/initial-delta")).await;
+            wait_for_file(&engine_dir.join("worker-2/initial-delta")).await;
+            // Keep both runs alive beyond the heartbeat deadline so a fast
+            // engine cannot hide a peer that stops servicing either socket.
+            tokio::time::sleep(held_run_duration).await;
+            std::fs::write(engine_dir.join("worker-1/release-engine"), "release").unwrap();
+            std::fs::write(engine_dir.join("worker-2/release-engine"), "release").unwrap();
+        },
+    );
     assert_eq!(a_ack["payload"]["run_id"], "run-a");
     assert_eq!(b_ack["payload"]["run_id"], "run-b");
-    let a_final = recv_application(&mut bot_a, is_final).await;
-    let b_final = recv_application(&mut bot_b, is_final).await;
     assert!(a_final.to_string().contains("alpha-only"));
     assert!(!a_final.to_string().contains("beta-only"));
     assert!(b_final.to_string().contains("beta-only"));

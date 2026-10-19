@@ -1,6 +1,6 @@
-// 统一错误/成功提示入口:集中 duration 与可关闭性,并把后端 message(+request_id)透传给用户。
-// 规范:docs/design-system/ui-interaction-spec.md §11.5 —— 错误 6s、可手动关、位置右下角;
-// 位置/颜色/可关闭由全局 <Toaster>(src/components/ui/sonner.tsx)承载,本 helper 只管文案与停留时长。
+// 统一错误/成功提示入口:集中 duration,并把后端 message(+request_id)透传给用户。
+// 规范:docs/design-system/ui-interaction-spec.md §11.5 —— 错误 6s;
+// 位置/颜色由全局 <Toaster>(src/components/ui/sonner.tsx)承载,本 helper 只管文案与停留时长。
 //
 // 去重(global-error-notify-dedup):当调用方提供稳定 `id`(协议层 toastKey)时开启两层去重——
 //  ① 同 id 在 ERROR_COOLDOWN_MS 内重复发起即静默 return(堵风暴/连点);

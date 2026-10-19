@@ -1,0 +1,25 @@
+schema_version: 1
+
+sources:
+  shopctl:
+    protocol: oss
+    bucket: artifacts
+    key: tools/shopctl/2.3.0/shopctl-linux-amd64
+    auth: oss-artifacts
+  content:
+    protocol: git
+    url: https://code.example-corp.com/team/content.git
+    ref: v1.2.0
+    auth: corp-git-content
+  order-lookup:
+    protocol: oss
+    bucket: artifacts
+    key: tools/skills/order-lookup-1.4.0.zip
+    auth: oss-artifacts
+
+manifest:
+  cli_tools:
+    - name: shopctl
+      from: shopctl
+      digest: "sha256:d89a79825b1468374f2d0a5cdc5c856694730e6355624d0b2f925db5202a68a0"
+      version: "2.3.0"

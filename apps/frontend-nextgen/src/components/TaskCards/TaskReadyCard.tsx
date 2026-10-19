@@ -23,6 +23,9 @@ export function TaskReadyCard({ data }: { data: TaskCardData }) {
   const task = normalizeReadyTask(data);
   const confirmSet = new Set(data.needs_confirmation ?? []);
   const submitTaskCardAction = useTaskCardAction();
+  // Benchmark execution is owned by benchmark_execute on the backend. The
+  // historical card only remains visible for later session playback.
+  const autoExecute = data.hidden_flags?.evaluation_auto_execute === true;
 
   const [editingField, setEditingField] = useState<EditableField | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -75,7 +78,7 @@ export function TaskReadyCard({ data }: { data: TaskCardData }) {
             </span>
           ) : null}
           <div className="flex-1" />
-          {!isEditing ? (
+          {!autoExecute && !isEditing ? (
             <Button
               variant="ghost"
               disabled={isDisabled}
@@ -131,7 +134,7 @@ export function TaskReadyCard({ data }: { data: TaskCardData }) {
           <span className="text-[11px] leading-none">🔗</span>
           <span className="text-[11px] font-medium text-gray-700">关联资源</span>
           <div className="flex-1" />
-          {!isEditing ? (
+          {!autoExecute && !isEditing ? (
             <Button
               variant="ghost"
               disabled={isDisabled}
@@ -202,7 +205,7 @@ export function TaskReadyCard({ data }: { data: TaskCardData }) {
                 </span>
               ) : null}
               <div className="flex-1" />
-              {!goalEditing ? (
+              {!autoExecute && !goalEditing ? (
                 <Button
                   variant="ghost"
                   disabled={goalDisabled}
@@ -241,27 +244,29 @@ export function TaskReadyCard({ data }: { data: TaskCardData }) {
         <div className="px-3.5 pb-2">
           <p className="text-[9px] text-gray-400 flex items-center gap-1 leading-none">
             <Lightbulb className="h-2 w-2" aria-hidden />
-            需要修改？直接在对话中告诉我
+            {autoExecute ? '评测任务已由服务端自动执行' : '需要修改？直接在对话中告诉我'}
           </p>
         </div>
 
-        {/* Actions */}
-        <div className="px-3.5 pb-3.5">
-          <div className="flex items-center gap-1.5">
-            <Button variant="ghost" onClick={() => handleAction('discard')} className={taskCardDiscardBtnClass}>
-              <Trash2 className="h-2.5 w-2.5" aria-hidden />
-              丢弃
-            </Button>
-            <Button variant="ghost" onClick={() => handleAction('save')} className={taskCardSaveBtnClass}>
-              <Bookmark className="h-2.5 w-2.5" aria-hidden />
-              暂存
-            </Button>
-            <Button variant="ghost" onClick={() => handleAction('execute')} className={taskCardExecuteBtnClass}>
-              <Check className="h-2.5 w-2.5" aria-hidden />
-              确认
-            </Button>
+        {/* Evaluation cards are pre-confirmed and executed by benchmark_execute. */}
+        {!autoExecute ? (
+          <div className="px-3.5 pb-3.5">
+            <div className="flex items-center gap-1.5">
+              <Button variant="ghost" onClick={() => handleAction('discard')} className={taskCardDiscardBtnClass}>
+                <Trash2 className="h-2.5 w-2.5" aria-hidden />
+                丢弃
+              </Button>
+              <Button variant="ghost" onClick={() => handleAction('save')} className={taskCardSaveBtnClass}>
+                <Bookmark className="h-2.5 w-2.5" aria-hidden />
+                暂存
+              </Button>
+              <Button variant="ghost" onClick={() => handleAction('execute')} className={taskCardExecuteBtnClass}>
+                <Check className="h-2.5 w-2.5" aria-hidden />
+                确认
+              </Button>
+            </div>
           </div>
-        </div>
+        ) : null}
       </div>
     </div>
   );

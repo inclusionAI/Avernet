@@ -20,6 +20,14 @@ def segment(value: str) -> str:
     return urllib.parse.quote(value, safe="")
 
 
+def workflow_history(messages: list[dict], run_id: str) -> list[dict]:
+    """Select this Run's records and its once-published Chat result."""
+    result_id = "state-machine-result:" + run_id
+    return [message for message in messages
+            if (message.get("metadata") or {}).get("state_machine", {}).get("run_id") == run_id
+            or message.get("id") == result_id]
+
+
 def bot_node(name: str) -> dict:
     return {
         "kind": "bot_task", "display_name": name,
@@ -75,7 +83,7 @@ def definition(approved: bool) -> dict:
 class Story:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
-        self.token = os.environ["BCS_E2E_DRIVER_TOKEN"]
+        self.token = os.getenv("BCS_E2E_DRIVER_TOKEN", "")
         self.http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         self.groups: list[str] = []
         self.bot: dict = {}
@@ -178,7 +186,7 @@ class Story:
         assert len(pending) == 1, pending
         return pending[0]
 
-    def finish_bot(self, content: str, previous: str) -> None:
+    def finish_bot(self, content: str, previous: str) -> str:
         captured = self.wait("Provider chat.send", lambda: self.request("/control/provider/requests", mock=True)["requests"],
                              lambda items: any(item["body"].get("method") == "chat.send" for item in items))
         requests = [item for item in captured if item["body"].get("method") == "chat.send"]
@@ -197,6 +205,7 @@ class Story:
             headers={"X-BCN-Provider-Id": self.provider["provider_id"], "Authorization": "Bearer " + self.bot["bot_runtime_token"]},
             status=(200, 409)), lambda body: body.get("error") != "transport_conflict")
         assert not response.get("error"), response
+        return request["body"]["id"]
 
     def exercise(self, approved: bool, directory: Path) -> None:
         self.start(approved, directory)
@@ -255,15 +264,20 @@ class Story:
                 assert len(matching) == 1
                 assert matching[0]["content"] == node["artifact_text"]
                 assert matching[0]["metadata"]["state_machine"].get("execution") == detail.get("execution")
-        # Reloading the persisted graph must not change snapshots or republish.
+        # A one-shot Run publishes into a live Chat: routed Bot replies may
+        # arrive after Run completion. Reload must preserve this Run's records
+        # and publication, without requiring unrelated Chat traffic to stop.
         assert self.cli("query", "--run", self.run_id, "--graph") == graph
-        assert self.request(history_path) == history
+        reloaded_history = self.request(history_path)
+        assert workflow_history(reloaded_history, self.run_id) == workflow_history(history, self.run_id), \
+            "Reload must preserve workflow records and the published result"
         if not approved:
             session = self.request(f"/sessions/{segment(self.session_id)}")
             assert session["status"] == "running", "One-shot completion must preserve the Chat session"
-            published = [message for message in history if message.get("content") == "final-editorial-output"
-                         and (message.get("metadata") or {}).get("state_machine", {}).get("event") != "output"]
-            assert len(published) == 1, "One-shot final result must reach chat exactly once"
+            for snapshot in (history, reloaded_history):
+                published = [message for message in snapshot if message.get("content") == "final-editorial-output"
+                             and (message.get("metadata") or {}).get("state_machine", {}).get("event") != "output"]
+                assert len(published) == 1, "One-shot final result must reach chat exactly once"
 
     def cleanup(self) -> None:
         for group in self.groups:

@@ -7,14 +7,18 @@ from collections.abc import Callable
 from typing import Any
 
 from agentclaw.community.core.devices.models import AllocatedDevice, DeviceBindingStatus
+from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.devices.services.device_service import BAAS_DEVICE_PROVIDER
+from agentclaw.community.core.devices.startup_identity import resolve_startup_identity
 from agentclaw.community.log import get_logger
 
 
 logger = get_logger()
 
-_PUBLISH_POLL_INTERVAL_SECONDS = 5
-_PUBLISH_POLL_TIMEOUT_SECONDS = 600
+
+def create_publish_poll_idempotency_key(*, binding_id: int, publish_id: int) -> str:
+    """Return the stable key for one live create-publish poll lifecycle."""
+    return f"baas-create-poll:{binding_id}:{publish_id}"
 
 
 def enqueue_create_publish_poll(
@@ -44,6 +48,10 @@ def enqueue_create_publish_poll(
             started_at_epoch_s=time.time(),
         ),
         deadline_seconds=86400,
+        idempotency_key=create_publish_poll_idempotency_key(
+            binding_id=binding_id,
+            publish_id=publish_id,
+        ),
     )
     return True
 
@@ -93,106 +101,36 @@ def handle_after_binding_persisted(
     return True
 
 
-def run_start_service_polling(
+def dispatch_pool_layout_confirmation(
     *,
-    baas_service: Any,
-    device: AllocatedDevice,
-    run_container_init: Callable[..., None],
-    report_device_alive: Callable[..., None],
-    engine: str,
-    bot_type: str,
-    bot_id: str | None,
-    owner_id: str | None,
-    admins: list[str] | None,
-    codefuse_token: str | None,
+    binding: DeviceBindingRecord,
+    startup_identity: str,
+    dispatch_watchdog: Callable[..., None],
 ) -> tuple[bool, str]:
-    """Block until BaaS publish reaches SUCCESS, run init, then mark alive."""
-    publish_id_raw = device.device_props.get("publish_id")
-    callback_token = device.device_props.get("callback_token", "")
-    bot_uuid = device.device_props.get("bot_uuid", "")
-    if not publish_id_raw:
-        return False, "missing publish_id in device_props"
+    """Reuse the authenticated startup callback after create recovery or restart."""
+    props = binding.device_props or {}
+    envs = props.get("envs")
+    if not isinstance(envs, dict) or envs.get("AGENTCLAW_SKILLS_LAYOUT") != "pool":
+        return True, "layout confirmation not required"
+    if envs.get("AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION") != "skills-pool-p3-v1":
+        return False, "unsupported Skills Pool startup contract"
+    if resolve_startup_identity(props) != startup_identity:
+        return False, "stale Skills Pool startup identity"
+    bot_uuid = str(props.get("bot_uuid") or "")
+    client_id = str(props.get("client_id") or binding.device_id)
+    callback_token = str(props.get("callback_token") or "")
+    if not bot_uuid or not client_id or not callback_token:
+        return False, "incomplete Skills Pool startup callback context"
     try:
-        publish_id = int(publish_id_raw)
-    except (TypeError, ValueError):
-        return False, f"invalid publish_id: {publish_id_raw!r}"
-
-    start = time.monotonic()
-    last_status = ""
-    from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
-
-    logger.info(
-        "[_start_service] BaaS device polling start: device_id=%s publish_id=%s",
-        device.device_id,
-        publish_id,
-    )
-
-    while (time.monotonic() - start) < _PUBLISH_POLL_TIMEOUT_SECONDS:
-        time.sleep(_PUBLISH_POLL_INTERVAL_SECONDS)
-        try:
-            progress = baas_service.get_publish_progress(
-                publish_id=publish_id,
-                include_devices=False,
-            )
-        except BaasServiceError as exc:
-            logger.warning(
-                "[_start_service] get_publish_progress transient error "
-                "(will retry): publish_id=%s error=%s",
-                publish_id,
-                exc,
-            )
-            continue
-
-        status = (progress or {}).get("status", "")
-        last_status = status
-        logger.info(
-            "[_start_service] publish progress: device_id=%s publish_id=%s status=%s",
-            device.device_id,
-            publish_id,
-            status,
+        dispatch_watchdog(
+            bot_uuid=bot_uuid,
+            client_id=client_id,
+            token=callback_token,
+            startup_identity=startup_identity,
         )
-
-        if status == "SUCCESS":
-            if not bot_uuid:
-                return False, "publish SUCCESS but missing bot_uuid in device_props"
-
-            try:
-                run_container_init(
-                    bot_uuid=bot_uuid,
-                    device=device,
-                    engine=engine,
-                    bot_type=bot_type,
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    callback_token=callback_token,
-                    admins=admins,
-                    codefuse_token=codefuse_token,
-                )
-            except Exception as exc:
-                logger.exception(
-                    "[_start_service] container init failed: device_id=%s error=%s",
-                    device.device_id,
-                    exc,
-                )
-                return False, f"container init failed: {exc}"
-
-            try:
-                report_device_alive(device_id=device.device_id, token=callback_token)
-            except Exception as exc:
-                logger.exception(
-                    "[_start_service] report_device_alive failed after SUCCESS: %s",
-                    exc,
-                )
-                return False, f"report_device_alive failed: {exc}"
-            return True, "BaaS publish SUCCESS, init done, device active"
-
-        if status == "FAILED":
-            return False, f"BaaS publish FAILED: publish_id={publish_id}"
-
-    return False, (
-        f"BaaS publish polling timeout after {_PUBLISH_POLL_TIMEOUT_SECONDS}s "
-        f"(last_status={last_status!r}, publish_id={publish_id})"
-    )
+    except Exception as exc:
+        return False, f"Skills Pool startup callback dispatch failed: {exc}"
+    return True, "Skills Pool startup callback dispatched"
 
 
 def poll_publish_once(*, baas_service: Any, publish_id: int) -> str | None:

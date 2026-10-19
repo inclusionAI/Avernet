@@ -1,5 +1,18 @@
 {
   "raw_user_config": {
+    "admin": {
+      "cron_admin": []
+    },
+    "agentswarm": {
+      "artifact_store_root": "${AGENTSWARM_ARTIFACT_ROOT:-/tmp/agentswarm/artifacts}",
+      "enabled": true,
+      "llm": {
+        "base_url": "${AGENTSWARM_LLM_BASE_URL:-${LLM_BASE_URL:-}}",
+        "model": "${AGENTSWARM_LLM_MODEL:-${LLM_BALANCED_MODEL:-glm-5.2}}",
+        "secret_name": "${AGENTSWARM_LLM_SECRET_NAME:-LLM_AUTH_TOKEN}",
+        "timeout_ms": "${AGENTSWARM_LLM_TIMEOUT_MS:-${LLM_DEFAULT_TIMEOUT_MS:-180000}}"
+      }
+    },
     "app": {
       "description": "Custom SOFAPy application",
       "local_debug": true,
@@ -74,7 +87,7 @@
       "task_deadline_seconds": 600
     },
     "device_allocation": {
-      "max_devices_per_entity": 5,
+      "max_devices_per_entity": 2,
       "mode": "multi"
     },
     "device_provider": "local",
@@ -121,6 +134,9 @@
         "secure": true
       }
     },
+    "openapi": {
+      "user_id_bypass": []
+    },
     "openapi_bot": {
       "api_key_prefix": "${api_key_prefix:-}",
       "api_key_secret": "${api_key_secret:-}",
@@ -155,6 +171,12 @@
       "scan_interval_hours": 1,
       "storage_dir": "./data/skills_scan"
     },
+    "task_discovery": {
+      "frontend_url": "${FRONTEND_URL:-http://localhost:8000}"
+    },
+    "task_dispatch": {
+      "backend_url": ""
+    },
     "task_queue_worker": {
       "enabled": true
     },
@@ -179,6 +201,7 @@
       "desktop_ttl_minutes": 0,
       "eval_template_uuid": "",
       "personal_bot_template_uuid": "",
+      "runtime_identity_metadata": false,
       "teclaw_template_uuid": "",
       "template_uuid": "${BAAS_TEMPLATE_ID:-}",
       "tenant": "${BAAS_TENANT:-}"
@@ -225,7 +248,7 @@
     },
     "device_allocation": {
       "arca_legacy_tenant": "legacy",
-      "max_devices_per_entity": 5,
+      "max_devices_per_entity": 2,
       "mode": "multi"
     },
     "device_provider": {

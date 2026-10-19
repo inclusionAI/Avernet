@@ -191,3 +191,35 @@ it('team 收藏写回管理类缓存，不写好友缓存；他人来源禁止�
   });
   expect(toggle).not.toHaveBeenCalled();
 });
+
+it('好友 favorite 取消收藏清空选中时按好友语义写 all 范围', async () => {
+  const friend: ConversationBotView = { ...view, section: 'friend', bot: { ...view.bot, isFriendBot: true } };
+  const s = useConversationStore.getState();
+  act(() => {
+    s.setFriendBotScope(view.bot.botId, 'favorite');
+    s.setFriendBotSessions(view.bot.botId, firstPageOf([{ ...session, sessionId: 'fav1', favorite: true }], 1));
+    s.selectConversation({
+      botId: view.bot.botId,
+      section: 'friend',
+      origin: 'mine',
+      scope: 'all',
+      friendUserId: null,
+      sessionId: 'fav1',
+    });
+  });
+  toggle.mockResolvedValue({ ok: true, data: false });
+  const { result } = renderHook(() =>
+    useConversationFavorites({ userId: 'user', managedBots: [], friendBots: [friend] }),
+  );
+
+  await act(async () => {
+    await result.current.toggleFavorite(view.bot.botId, 'friend', 'fav1');
+  });
+
+  const after = useConversationStore.getState();
+  expect(toggle).toHaveBeenCalledWith(friend.bot, 'user', 'fav1', false);
+  expect(after.selectedSessionId).toBeNull();
+  // 好友 Bot 的主选中范围恒 all(好友筛选只作用于侧栏列表),不得写管理语义的 favorite。
+  expect(after.selectedScope).toBe('all');
+  expect(after.friendBotSessionsByBotId[view.bot.botId].items).toEqual([]);
+});

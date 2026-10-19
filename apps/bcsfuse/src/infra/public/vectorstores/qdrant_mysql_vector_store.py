@@ -8,7 +8,7 @@ Architecture:
 - MySQL (bcsfuse_vector_points): durable source of truth
 - Qdrant Local: disposable local index for fast ANN search
 - Write-through: MySQL first, then Qdrant
-- Rebuild: load all vectors from MySQL into Qdrant on startup/request
+- Rebuild: page durable vectors into Qdrant on startup/request
 """
 from __future__ import annotations
 
@@ -19,18 +19,26 @@ from typing import Any, List, Optional
 
 from src.domain.models.vector_point import VectorPoint
 from src.domain.models.vector_search_hit import VectorSearchHit
-from src.domain.services.vector_store_adapter import VectorStoreAdapter
 from src.domain.services.vector_persistence_backend import (
+    BatchedIncrementalVectorPersistenceBackend,
+    BatchedVectorPersistenceBackend,
     IncrementalVectorPersistenceBackend,
+    PointLookupVectorPersistenceBackend,
     VectorPersistenceBackend,
+    WorkerScopedVectorPersistenceBackend,
 )
+from src.domain.services.vector_store_adapter import VectorStoreAdapter
 from src.infra.public.observability.storage_logging import (
     log_storage_error,
     log_storage_event,
 )
-from src.infra.public.vectorstores.qdrant_local_vector_store import QdrantLocalVectorStore
 from src.infra.public.vectorstores.qdrant_keyword_index import QdrantKeywordIndex
-from src.infra.vectorstore_backends.mysql_vector_persistence_backend import MySQLVectorPersistenceBackend
+from src.infra.public.vectorstores.qdrant_local_vector_store import (
+    QdrantLocalVectorStore,
+)
+from src.infra.vectorstore_backends.mysql_vector_persistence_backend import (
+    MySQLVectorPersistenceBackend,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +115,7 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
     # Write path
     # ------------------------------------------------------------------
 
-    def upsert(self, points: List[VectorPoint]) -> None:
+    def upsert(self, points: List[VectorPoint], *, timing_worker_id: str | None = None) -> None:
         """Insert or update vector points.
 
         Write-through: durable MySQL first, then local Qdrant index.
@@ -117,7 +125,19 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
             return
 
         # 1. Durable write to MySQL (must succeed)
-        self._persistence.save_batch(points)
+        write_started_at = time.perf_counter()
+        write_status = "failed"
+        try:
+            self._persistence.save_batch(points)
+            write_status = "ok"
+        finally:
+            if timing_worker_id is not None:
+                logger.info(
+                    "[VECTOR-TIMING] phase=durable_write worker_id=%s backend=%s "
+                    "points=%d status=%s elapsed_ms=%.1f",
+                    timing_worker_id, type(self._persistence).__name__, len(points),
+                    write_status, (time.perf_counter() - write_started_at) * 1000,
+                )
         log_storage_event(
             logger,
             logging.DEBUG,
@@ -131,8 +151,11 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         )
 
         # 2. Update local Qdrant index
+        local_started_at = time.perf_counter()
+        local_status = "failed"
         try:
-            self._upsert_local(points)
+            self._upsert_local(points, timing_worker_id=timing_worker_id)
+            local_status = "ok"
         except Exception as e:
             log_storage_error(
                 logger,
@@ -151,18 +174,56 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
                 "DEGRADED_REBUILD_REQUIRED: "
                 "QDRANT_INDEX_UPDATE_FAILED_AFTER_DURABLE_WRITE. Rebuild required"
             ) from e
+        finally:
+            if timing_worker_id is not None:
+                logger.info(
+                    "[VECTOR-TIMING] phase=local_index worker_id=%s points=%d status=%s elapsed_ms=%.1f",
+                    timing_worker_id, len(points), local_status,
+                    (time.perf_counter() - local_started_at) * 1000,
+                )
 
     def update_payload_by_worker(self, worker_id: str, payload_updates: dict) -> int:
         """Write through all exact-owner points, including locally unseen ones."""
-        with self._index_lock:
-            points = [
-                VectorPoint(id=point.id, vector=point.vector,
-                            payload={**point.payload, **payload_updates})
-                for point in self._persistence.load_all()
-                if point.payload.get("worker_id") == worker_id
-            ]
-            self.upsert(points)
-            return len(points)
+        started_at = time.perf_counter()
+        lock_wait_ms = read_ms = prepare_ms = upsert_ms = 0.0
+        read_method = "unknown"
+        candidates = updated = 0
+        outcome = "failed"
+        try:
+            with self._index_lock:
+                lock_wait_ms = (time.perf_counter() - started_at) * 1000
+                phase_started_at = time.perf_counter()
+                if isinstance(self._persistence, WorkerScopedVectorPersistenceBackend):
+                    read_method = "load_by_worker"
+                    source_points = self._persistence.load_by_worker(worker_id)
+                else:
+                    read_method = "load_all"
+                    source_points = self._persistence.load_all()
+                read_ms = (time.perf_counter() - phase_started_at) * 1000
+                candidates = len(source_points)
+                phase_started_at = time.perf_counter()
+                points = [
+                    VectorPoint(id=point.id, vector=point.vector,
+                                payload={**point.payload, **payload_updates})
+                    for point in source_points
+                    if point.payload.get("worker_id") == worker_id
+                ]
+                prepare_ms = (time.perf_counter() - phase_started_at) * 1000
+                updated = len(points)
+                phase_started_at = time.perf_counter()
+                self.upsert(points, timing_worker_id=worker_id)
+                upsert_ms = (time.perf_counter() - phase_started_at) * 1000
+                outcome = "ok"
+                return updated
+        finally:
+            logger.info(
+                "[VECTOR-TIMING] phase=payload_sync worker_id=%s backend=%s read_method=%s "
+                "candidates=%d updated=%d status=%s lock_wait_ms=%.1f read_ms=%.1f "
+                "prepare_ms=%.1f upsert_ms=%.1f total_ms=%.1f",
+                worker_id, type(self._persistence).__name__, read_method,
+                candidates, updated, outcome, lock_wait_ms, read_ms,
+                prepare_ms, upsert_ms, (time.perf_counter() - started_at) * 1000,
+            )
 
     def delete_by_worker(self, worker_id: str) -> int:
         """Delete owned vectors from durable storage and the local index."""
@@ -249,6 +310,8 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
 
     def get(self, id: str) -> Optional[VectorPoint]:
         """Get a single vector point from MySQL durable backend."""
+        if isinstance(self._persistence, PointLookupVectorPersistenceBackend):
+            return self._persistence.load_by_id(id)
         for point in self._persistence.load_all():
             if point.id == id:
                 return point
@@ -289,12 +352,20 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
 
     def rebuild_from_backend(self, batch_size: int = 100) -> dict[str, Any]:
         """Rebuild the local Qdrant index from the durable backend."""
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+        if not isinstance(self._persistence, BatchedVectorPersistenceBackend):
+            raise TypeError("persistence backend must support bounded iter_batches")
         logger.info("[QdrantMySQLVectorStore] Rebuilding indexes from durable backend...")
         start = time.time()
         supports_incremental_sync = isinstance(
             self._persistence,
             IncrementalVectorPersistenceBackend,
         )
+        if supports_incremental_sync and not isinstance(
+            self._persistence, BatchedIncrementalVectorPersistenceBackend
+        ):
+            raise TypeError("incremental backend must support bounded change batches")
         rebuild_checkpoint = (
             self._persistence.get_last_modified_time()
             if supports_incremental_sync
@@ -313,41 +384,47 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
 
         with self._index_lock:
             self._ensure_client()
-            all_points = self._persistence.load_all()
             keywords = QdrantKeywordIndex()
+            old_keywords = self._keywords
             self._keywords_ready = False
-            try:
-                for i in range(0, len(all_points), batch_size):
-                    keywords.upsert(all_points[i:i + batch_size])
-            except Exception:
-                keywords.close()
-                raise
-            self._keywords.close()
-            self._keywords = keywords
-            durable_ids = {point.id for point in all_points}
-            stale_ids = set(self._qdrant.get_vector_ids()) - durable_ids
-            total_loaded = len(all_points)
+            swapped_keywords = False
+            total_loaded = 0
             total_indexed = 0
+            try:
+                stale_ids = set(self._qdrant.get_vector_ids())
+                for points in self._persistence.iter_batches(batch_size):
+                    if not points or len(points) > batch_size:
+                        raise ValueError("persistence backend yielded an invalid vector page")
+                    keywords.upsert(points)
+                    self._qdrant.upsert(points)
+                    stale_ids.difference_update(point.id for point in points)
+                    total_loaded += len(points)
+                    total_indexed += len(points)
+                for point_id in stale_ids:
+                    self._qdrant.delete(point_id)
 
-            for i in range(0, len(all_points), batch_size):
-                points = all_points[i:i + batch_size]
-                self._qdrant.upsert(points)
-                total_indexed += len(points)
-            for point_id in stale_ids:
-                self._qdrant.delete(point_id)
-            if supports_incremental_sync:
-                changes = self._persistence.load_changes_since(rebuild_checkpoint)
-                if changes.upserts:
-                    self._upsert_local(changes.upserts)
-                if changes.deleted_ids:
-                    self._delete_local(changes.deleted_ids)
-                self._last_sync_time = max(
-                    rebuild_checkpoint,
-                    changes.checkpoint,
-                )
-            else:
-                self._last_sync_time = self._persistence.get_last_modified_time()
-            self._keywords_ready = True
+                self._keywords = keywords
+                swapped_keywords = True
+                if supports_incremental_sync:
+                    self._last_sync_time = rebuild_checkpoint
+                    for changes in self._persistence.iter_change_batches_since(
+                        rebuild_checkpoint, batch_size
+                    ):
+                        if changes.upserts:
+                            self._upsert_local(changes.upserts)
+                        if changes.deleted_ids:
+                            self._delete_local(changes.deleted_ids)
+                        self._last_sync_time = max(
+                            self._last_sync_time, changes.checkpoint
+                        )
+                else:
+                    self._last_sync_time = self._persistence.get_last_modified_time()
+                self._keywords_ready = True
+            finally:
+                if swapped_keywords:
+                    old_keywords.close()
+                else:
+                    keywords.close()
 
         duration_ms = (time.time() - start) * 1000
         result = {
@@ -372,16 +449,23 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
             raise RuntimeError(
                 "configured persistence backend does not support incremental sync"
             )
-        changes = self._persistence.load_changes_since(self._last_sync_time)
+        if not isinstance(self._persistence, BatchedIncrementalVectorPersistenceBackend):
+            raise RuntimeError("configured persistence backend does not support bounded sync")
         with self._index_lock:
-            if changes.upserts:
-                self._upsert_local(changes.upserts)
-            if changes.deleted_ids:
-                self._delete_local(changes.deleted_ids)
-            self._last_sync_time = max(self._last_sync_time, changes.checkpoint)
+            upserted = 0
+            deleted = 0
+            checkpoint = self._last_sync_time
+            for changes in self._persistence.iter_change_batches_since(checkpoint, 100):
+                if changes.upserts:
+                    self._upsert_local(changes.upserts)
+                    upserted += len(changes.upserts)
+                if changes.deleted_ids:
+                    self._delete_local(changes.deleted_ids)
+                    deleted += len(changes.deleted_ids)
+                self._last_sync_time = max(self._last_sync_time, changes.checkpoint)
         return {
-            "upserted": len(changes.upserts),
-            "deleted": len(changes.deleted_ids),
+            "upserted": upserted,
+            "deleted": deleted,
         }
 
     def clear(self) -> None:
@@ -410,12 +494,32 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         except Exception as e:
             logger.warning("[QdrantMySQLVectorStore] Failed to close MySQL: %s", e)
 
-    def _upsert_local(self, points: list[VectorPoint]) -> None:
+    def _upsert_local(
+        self, points: list[VectorPoint], *, timing_worker_id: str | None = None,
+    ) -> None:
         with self._index_lock:
+            phase_started_at = time.perf_counter()
             self._ensure_client()
+            if timing_worker_id is not None:
+                logger.info(
+                    "[VECTOR-TIMING] phase=local_client_ready worker_id=%s elapsed_ms=%.1f",
+                    timing_worker_id, (time.perf_counter() - phase_started_at) * 1000,
+                )
             try:
+                phase_started_at = time.perf_counter()
                 self._qdrant.upsert(points)
+                if timing_worker_id is not None:
+                    logger.info(
+                        "[VECTOR-TIMING] phase=dense_index worker_id=%s points=%d elapsed_ms=%.1f",
+                        timing_worker_id, len(points), (time.perf_counter() - phase_started_at) * 1000,
+                    )
+                phase_started_at = time.perf_counter()
                 self._keywords.upsert(points)
+                if timing_worker_id is not None:
+                    logger.info(
+                        "[VECTOR-TIMING] phase=keyword_index worker_id=%s points=%d elapsed_ms=%.1f",
+                        timing_worker_id, len(points), (time.perf_counter() - phase_started_at) * 1000,
+                    )
             except Exception:
                 self._keywords_ready = False
                 raise
