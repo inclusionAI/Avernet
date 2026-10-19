@@ -71,11 +71,7 @@ impl BridgePeer {
         let bot_id = connect["params"]["bot_id"].as_str().expect("bot.connect bot_id").to_owned();
         // The bridge always requests V3; the peer negotiates its own version.
         assert_eq!(connect["params"]["protocol_version"], 3);
-        if self.config.bots.iter().any(|bot| bot.engine == "qwenwork") {
-            assert_eq!(connect["params"]["client_kind"], "native_mcp");
-        } else {
-            assert!(connect["params"]["client_kind"].is_null());
-        }
+        assert_eq!(connect["params"]["client_kind"], "native_mcp");
         match expected_token {
             Some(token) => assert_eq!(connect["params"]["token"], token),
             None => assert!(connect["params"].get("token").is_none()
@@ -93,16 +89,18 @@ impl BridgePeer {
 }
 
 #[tokio::test]
-async fn qwenwork_requests_native_mcp_without_changing_other_engine_handshakes() {
-    let mut peer = BridgePeer::one_bot().await;
-    peer.config.bots[0].engine = "qwenwork".into();
-    // Reuse the fake CLI engine; this test isolates the outgoing handshake.
-    let mut registry = EngineRegistry::builtin();
-    registry.register(bcs_bridge_core::engine::claude_code::ClaudeCodeFactory::custom("qwenwork", "unused", vec![]));
-    let state = Arc::new(AppState::new(peer.config.clone(), &registry).unwrap());
-    let (_, shutdown, task) = peer.start_state(state);
-    let _socket = peer.accept("bot-a", None).await;
-    stop(shutdown, task).await;
+async fn all_engines_request_native_mcp() {
+    for engine in ["claude-code", "codex", "qwenwork", "cfuse-cc", "cfuse-codex", "custom-engine"] {
+        let mut peer = BridgePeer::one_bot().await;
+        peer.config.bots[0].engine = engine.into();
+        // Reuse the fake CLI engine; this test isolates the outgoing handshake.
+        let mut registry = EngineRegistry::builtin();
+        registry.register(bcs_bridge_core::engine::claude_code::ClaudeCodeFactory::custom(engine, "unused", vec![]));
+        let state = Arc::new(AppState::new(peer.config.clone(), &registry).unwrap());
+        let (_, shutdown, task) = peer.start_state(state);
+        let _socket = peer.accept("bot-a", None).await;
+        stop(shutdown, task).await;
+    }
 }
 
 #[tokio::test]
