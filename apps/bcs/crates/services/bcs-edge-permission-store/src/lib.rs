@@ -1185,7 +1185,7 @@ fn row_to_edge_grant(row: &DbRow) -> ServiceResult<EdgeGrant> {
 /// a legacy `bot_info.friend_ext` fallback for older rows.
 fn row_to_bot_actor_config(row: &DbRow) -> ServiceResult<BotActorConfig> {
     let bot_info = optional_string(row, "bot_info")?
-        .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok())
+        .and_then(|value| bcs_domain::bot_info::decode_bot_info::<serde_json::Value>(&value).ok())
         .unwrap_or_default();
     let user_visibility = optional_string(row, "user_visibility")?
         .unwrap_or_else(|| "protected".to_string());
@@ -1490,6 +1490,8 @@ fn service_db_error(operation: &'static str, err: DbError) -> ServiceError {
 
 #[cfg(test)]
 mod tests {
+    mod bot_info_compat;
+
     use super::*;
     use bcs_db_local::LocalSqliteDbPlugin;
 

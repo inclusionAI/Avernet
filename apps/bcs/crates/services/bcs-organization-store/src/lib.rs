@@ -454,10 +454,10 @@ fn row_to_member(row: DbRow) -> ServiceResult<OrganizationMember> {
 fn row_to_discovery_bot(row: DbRow) -> ServiceResult<OrganizationDiscoveryBot> {
     let bot_uuid = required_string(&row, "bot_uuid")?;
     let mut capabilities = match optional_string(&row, "bot_info")? {
-        Some(bot_info) => serde_json::from_str::<BotCapabilities>(&bot_info).map_err(|error| {
-            ServiceError::InternalError(format!(
-                "organization db bot_info: invalid capabilities JSON: {error}"
-            ))
+        Some(bot_info) => bcs_domain::bot_info::decode_bot_info::<BotCapabilities>(&bot_info).map_err(|_| {
+            ServiceError::InternalError(
+                "organization db bot_info: invalid capabilities JSON".to_string()
+            )
         })?,
         None => BotCapabilities::default(),
     };
@@ -519,6 +519,8 @@ fn service_db_error(operation: &'static str, error: DbError) -> ServiceError {
 
 #[cfg(test)]
 mod tests {
+    mod bot_info_compat;
+
     use std::collections::{BTreeMap, VecDeque};
     use std::sync::Mutex;
 

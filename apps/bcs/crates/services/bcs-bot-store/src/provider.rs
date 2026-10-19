@@ -1000,7 +1000,7 @@ impl ProviderBotBindingRepoPort for DbProviderStore {
               AND b.actor_kind = 'bot'"
             .to_string();
         let mut params = vec![DbValue::from(env.as_str())];
-        append_provider_discovery_selector_sql(selector, &mut sql, &mut params);
+        append_provider_discovery_selector_sql(self.flavor, selector, &mut sql, &mut params);
         sql.push_str(" ORDER BY pb.bot_uuid");
         let rows = self
             .query(
@@ -1094,11 +1094,12 @@ impl OrganizationCandidateReadPort for DbProviderStore {
                 .map(|provider_id| DbValue::from(provider_id.as_str())),
         );
         if let Some(q) = query.q.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
-            filter_sql.push_str(
+            let object = super::bot_info_object_sql(self.flavor, "b.bot_info");
+            filter_sql.push_str(&format!(
                 " AND (LOWER(pb.bot_uuid) LIKE ? \
                    OR LOWER(b.name) LIKE ? \
-                   OR LOWER(COALESCE(b.bot_info, '')) LIKE ?)",
-            );
+                   OR LOWER({object}) LIKE ?)"
+            ));
             let pattern = like_pattern(q);
             for _ in 0..3 {
                 params.push(DbValue::from(pattern.as_str()));
@@ -1193,7 +1194,7 @@ fn parse_provider_bot_record(row: &DbRow) -> Option<ProviderBotDiscoveryRecord> 
 
 fn parse_provider_bot_capabilities(row: &DbRow) -> Option<BotCapabilities> {
     let mut capabilities = optional_string(row, "bot_info")
-        .and_then(|bot_info| serde_json::from_str::<BotCapabilities>(&bot_info).ok())
+        .and_then(|bot_info| bcs_domain::bot_info::decode_bot_info::<BotCapabilities>(&bot_info).ok())
         .unwrap_or_default();
     if let Some(name) = optional_string(row, "bot_name") {
         capabilities.name = Some(name);
@@ -1202,6 +1203,7 @@ fn parse_provider_bot_capabilities(row: &DbRow) -> Option<BotCapabilities> {
 }
 
 fn append_provider_discovery_selector_sql(
+    flavor: DbSqlFlavor,
     selector: &ProviderBotDiscoverySelector,
     sql: &mut String,
     params: &mut Vec<DbValue>,
@@ -1220,18 +1222,20 @@ fn append_provider_discovery_selector_sql(
         }
         ProviderBotDiscoverySelector::Query(query) => {
             let pattern = like_pattern(query);
-            sql.push_str(
+            let object = super::bot_info_object_sql(flavor, "b.bot_info");
+            sql.push_str(&format!(
                 " AND (LOWER(pb.bot_uuid) LIKE ? \
                    OR LOWER(b.name) LIKE ? \
-                   OR LOWER(COALESCE(b.bot_info, '')) LIKE ?)",
-            );
+                   OR LOWER({object}) LIKE ?)"
+            ));
             for _ in 0..3 {
                 params.push(DbValue::from(pattern.as_str()));
             }
         }
         ProviderBotDiscoverySelector::RequiredSkills(skills) => {
             for skill in skills {
-                sql.push_str(" AND LOWER(COALESCE(b.bot_info, '')) LIKE ?");
+                let object = super::bot_info_object_sql(flavor, "b.bot_info");
+                sql.push_str(&format!(" AND LOWER({object}) LIKE ?"));
                 let pattern = like_pattern(skill);
                 params.push(DbValue::from(pattern.as_str()));
             }

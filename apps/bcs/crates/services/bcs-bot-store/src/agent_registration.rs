@@ -23,9 +23,10 @@ impl PersistentBotRepo {
         // branches participate in ambiguity detection. Legacy binding
         // metadata is a fallback for Bots not yet migrated to affiliation fields.
         // Disabled bindings/Bot status do not remove persisted registration.
+        let object = super::bot_info_object_sql(self.flavor, "b.bot_info");
         let legacy_code = match self.flavor {
-            DbSqlFlavor::Mysql => "JSON_UNQUOTE(JSON_EXTRACT(b.bot_info, '$.agent_code'))",
-            DbSqlFlavor::Sqlite => "json_extract(b.bot_info, '$.agent_code')",
+            DbSqlFlavor::Mysql => format!("JSON_UNQUOTE(JSON_EXTRACT({object}, '$.agent_code'))"),
+            DbSqlFlavor::Sqlite => format!("json_extract({object}, '$.agent_code')"),
         };
         let sql = format!(
             "SELECT b.bot_uuid, COALESCE(b.agent_code, {legacy_code}) AS matched_agent_code, \
@@ -61,7 +62,7 @@ impl PersistentBotRepo {
             .map_err(|_| failure("Invalid Agent Bot name"))?;
         let info: Option<String> = db_get_column_opt(row, "bot_info")
             .map_err(|_| failure("Invalid Agent Bot info"))?;
-        let info = info.map(|value| serde_json::from_str::<PublicBotInfo>(&value))
+        let info = info.map(|value| super::decode_bot_info::<PublicBotInfo>(&value))
             .transpose().map_err(|_| failure("Invalid Agent Bot info"))?;
         let column_code: Option<String> = db_get_column_opt(row, "agent_code")
             .map_err(|_| failure("Invalid Agent registration identity"))?;

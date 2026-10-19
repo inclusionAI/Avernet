@@ -46,6 +46,10 @@ pub mod provider;
 pub mod provider_cache;
 mod registration_create;
 mod agent_registration;
+mod bot_info_storage;
+
+use bcs_domain::bot_info::decode_bot_info;
+use bot_info_storage::{bot_info_json_set, bot_info_object_sql};
 
 #[cfg(test)]
 #[path = "../tests/unit/heartbeat.rs"]
@@ -57,28 +61,6 @@ pub use provider::{DbProviderStore, MemoryProviderStore};
 
 /// Maximum time before a bot registration expires (5 minutes).
 const BOT_EXPIRY: Duration = Duration::from_secs(300);
-
-fn bot_info_json_set(
-    updates: Vec<(&'static str, serde_json::Value)>,
-) -> ServiceResult<(String, Vec<Value>)> {
-    let mut expressions = Vec::with_capacity(updates.len());
-    let mut params = Vec::with_capacity(updates.len());
-    for (path, value) in updates {
-        expressions.push(format!("'{path}', json_extract(?, '$')"));
-        params.push(Value::from(serde_json::to_string(&value).map_err(|error| {
-            ServiceError::InternalError(error.to_string())
-        })?));
-    }
-    Ok((
-        format!(
-            "bot_info = JSON_SET(\
-             CASE WHEN JSON_VALID(bot_info) AND LOWER(JSON_TYPE(bot_info)) = 'object' \
-                  THEN bot_info ELSE JSON_OBJECT() END, {})",
-            expressions.join(", ")
-        ),
-        params,
-    ))
-}
 
 fn serialized_string_value<T: Serialize>(value: &T) -> ServiceResult<String> {
     serde_json::to_value(value)
@@ -352,7 +334,7 @@ impl PersistentBotRepo {
             // the caller doesn't know the token — preserve whatever is in DB.
             // Update only lifecycle-owned JSON fields so private control-plane
             // attributes and forward-compatible keys remain authoritative.
-            let (bot_info_assignment, bot_info_params) = bot_info_json_set(vec![
+            let (bot_info_assignment, bot_info_params) = bot_info_json_set(self.flavor, vec![
                 ("$.summary", serde_json::to_value(&bot_info.summary)?),
                 ("$.domains", serde_json::to_value(&bot_info.domains)?),
                 ("$.skills", serde_json::to_value(&bot_info.skills)?),
@@ -497,7 +479,7 @@ impl PersistentBotRepo {
             let bot_info: BotInfo = db_get_column_opt::<String>(row, "bot_info")
                 .ok()
                 .flatten()
-                .and_then(|s| serde_json::from_str(&s).ok())
+                .and_then(|s| decode_bot_info(&s).ok())
                 .unwrap_or_default();
 
             let hidden = status_str == "hidden";
@@ -594,7 +576,7 @@ impl PersistentBotRepo {
             .ok()?;
         let row = rows.first()?;
         let bot_info_str: String = db_get_column_opt(row, "bot_info").ok().flatten()?;
-        serde_json::from_str(&bot_info_str).ok()
+        decode_bot_info(&bot_info_str).ok()
     }
 
     /// Check if bot exists in the configured database.
@@ -702,7 +684,7 @@ impl PersistentBotRepo {
                 let bot_info: BotInfo = db_get_column_opt::<String>(row, "bot_info")
                     .ok()
                     .flatten()
-                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .and_then(|s| decode_bot_info(&s).ok())
                     .unwrap_or_default();
 
                 // H.3: derive hidden from bcs_bots.status (column may be absent
@@ -1010,7 +992,7 @@ impl PersistentBotRepo {
             let bot_info: BotInfo = db_get_column_opt::<String>(row, "bot_info")
                 .ok()
                 .flatten()
-                .and_then(|s| serde_json::from_str(&s).ok())
+                .and_then(|s| decode_bot_info(&s).ok())
                 .unwrap_or_default();
             let is_friend: bool = db_get_column_opt::<i64>(row, "is_friend")
                 .ok()
@@ -1630,7 +1612,7 @@ impl BotRepoPort for PersistentBotRepo {
                 let bot_info: BotInfo = db_get_column_opt::<String>(row, "bot_info")
                     .ok()
                     .flatten()
-                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .and_then(|s| decode_bot_info(&s).ok())
                     .unwrap_or_default();
 
                 let status_str: String = db_get_column_opt(row, "status")
@@ -2005,19 +1987,26 @@ impl BotRepoPort for PersistentBotRepo {
                 bot_info.summary = Some(default_summary.to_string());
             }
 
-            // Re-serialize and compare to detect if anything actually changed.
-            let merged_str = serde_json::to_string(&bot_info).unwrap_or_default();
-            let needs_backfill = merged_str != existing_json.to_string();
+            // Backfill only missing fields. Serializing the typed projection over
+            // the entire document would discard private/forward-compatible keys.
+            let defaults = serde_json::to_value(&bot_info)?;
+            let mut updates = Vec::new();
+            for (key, path) in [
+                ("summary", "$.summary"), ("domains", "$.domains"),
+                ("skills", "$.skills"), ("scopes", "$.scopes"), ("hidden", "$.hidden"),
+            ] {
+                if existing_json.get(key).is_none() || (key == "summary" && needs_summary) {
+                    updates.push((path, defaults[key].clone()));
+                }
+            }
 
-            if needs_backfill {
-                let sql = "UPDATE bcs_bots SET bot_info = ? WHERE bot_uuid = ? AND env = ?";
+            if !updates.is_empty() {
+                let (assignment, mut params) = bot_info_json_set(self.flavor, updates)?;
+                let sql = format!("UPDATE bcs_bots SET {assignment} WHERE bot_uuid = ? AND env = ?");
+                params.extend([Value::from(bot_uuid.as_str()), Value::from(env.as_str())]);
                 self.db_execute_affected(
-                    sql,
-                    vec![
-                        Value::from(merged_str.as_str()),
-                        Value::from(bot_uuid.as_str()),
-                        Value::from(env.as_str()),
-                    ],
+                    &sql,
+                    params,
                 )
                 .await
                 .map_err(|e| {
@@ -2183,7 +2172,7 @@ impl BotRepoPort for PersistentBotRepo {
                 let bot_info: BotInfo = db_get_column_opt::<String>(row, "bot_info")
                     .ok()
                     .flatten()
-                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .and_then(|s| decode_bot_info(&s).ok())
                     .unwrap_or_default();
                 let name: Option<String> = db_get_column_opt(row, "name").ok().flatten();
                 let visibility: String = db_get_column_opt(row, "visibility")
@@ -2843,7 +2832,7 @@ fn control_plane_record_from_row(row: &DbRow) -> ServiceResult<BotControlPlaneRe
         .map_err(|error| ServiceError::InternalError(error.to_string()))?;
     let bot_info = db_get_column_opt::<String>(row, "bot_info")
         .map_err(|error| ServiceError::InternalError(error.to_string()))?
-        .and_then(|value| serde_json::from_str::<BotInfo>(&value).ok())
+        .and_then(|value| decode_bot_info::<BotInfo>(&value).ok())
         .unwrap_or_default();
     let agent_code = db_get_column_opt::<String>(row, "agent_code")
         .map_err(|error| ServiceError::InternalError(error.to_string()))?
@@ -3159,10 +3148,10 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             params.extend(values.iter().map(|value| Value::from(value.as_str())));
         }
         if let Some(search_text) = search_text.as_ref() {
-            predicates.push(
-                "(INSTR(LOWER(COALESCE(b.name, '')), ?) > 0 OR INSTR(LOWER(COALESCE(b.bot_info, '')), ?) > 0 OR INSTR(LOWER(b.bot_uuid), ?) > 0)"
-                    .to_string(),
-            );
+            let object = bot_info_object_sql(self.flavor, "b.bot_info");
+            predicates.push(format!(
+                "(INSTR(LOWER(COALESCE(b.name, '')), ?) > 0 OR INSTR(LOWER({object}), ?) > 0 OR INSTR(LOWER(b.bot_uuid), ?) > 0)"
+            ));
             params.push(Value::from(search_text.as_str()));
             params.push(Value::from(search_text.as_str()));
             params.push(Value::from(search_text.as_str()));
@@ -3461,7 +3450,7 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
                 }
             }
             if !json_updates.is_empty() {
-                let (assignment, json_params) = bot_info_json_set(json_updates)?;
+                let (assignment, json_params) = bot_info_json_set(self.flavor, json_updates)?;
                 assignments.push(assignment);
                 params.extend(json_params);
             }
