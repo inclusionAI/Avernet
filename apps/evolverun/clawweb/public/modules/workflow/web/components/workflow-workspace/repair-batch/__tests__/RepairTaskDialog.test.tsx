@@ -207,7 +207,7 @@ describe('RepairTaskDialog', () => {
     repairApi.task.mockResolvedValue(failed); repairApi.retryGeneration.mockResolvedValue({});
     render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false}
       canEdit onClose={() => {}} onChanged={() => {}} />);
-    await userEvent.click(await screen.findByRole('button', { name: '重新生成 Pack' }));
+    await userEvent.click(await screen.findByRole('button', { name: '重试生成' }));
     expect(repairApi.retryGeneration).toHaveBeenCalledWith('FIX-1', expect.objectContaining({ expectedRevision: 1, requestId: expect.any(String) }));
     expect(repairApi.candidates).not.toHaveBeenCalled(); expect(repairApi.cancel).not.toHaveBeenCalled();
   });
@@ -218,8 +218,8 @@ describe('RepairTaskDialog', () => {
     render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false}
       canEdit onClose={() => {}} onChanged={() => {}} />);
     expect(await screen.findByText('保留的候选')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '重新生成 Pack' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: '返回上一成功候选审核' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '重试生成' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '返回上一成功候选审核' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '重新优化' })).toBeEnabled();
   });
   it('polls an active generation until the task becomes reviewable', async () => {
@@ -459,7 +459,7 @@ it('pages older candidate history while preserving the full current attempt and 
   render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit onClose={vi.fn()} onChanged={vi.fn()} />);
   await user.click(await screen.findByRole('tab', { name: '优化目标' }));
   expect(screen.getByText(/本轮已纳入 225 项/)).toBeVisible();
-  await user.click(screen.getByText('历史生成记录与任务操作', { selector: 'summary' }));
+  await user.click(screen.getByText('历史生成记录', { selector: 'summary' }));
   await user.click(screen.getByRole('button', { name: '较早记录' }));
   await waitFor(() => expect(repairApi.task).toHaveBeenLastCalledWith('FIX-1', 2));
   expect(await screen.findByText('历史记录第 2/2 页 · 共 25 次')).toBeInTheDocument();

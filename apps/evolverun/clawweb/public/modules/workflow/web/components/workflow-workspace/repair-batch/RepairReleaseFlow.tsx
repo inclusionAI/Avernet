@@ -88,7 +88,7 @@ export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, o
   </section>
   return <section aria-label="审阅部署与效果验证" className="rounded-xl border border-input bg-card p-5">
     <h3 className="text-base font-semibold">{title}</h3>
-    <p className="mt-2 text-sm leading-6 text-muted-foreground">{succeeded ? '在发布后效果页查看对应版本的样本与判定。'
+    <p className="mt-2 text-sm leading-6 text-muted-foreground">{succeeded ? '在发布后效果页查看对应版本的样本与判定；下一轮将基于最新生效版本创建独立任务。'
       : pending ? '先核对同一个发布请求，结果未明确前不重复发布。'
       : '可以补充反馈重新优化、取消本次任务，或确认发布此版本。'}</p>
     {automatic && !automaticReady && !succeeded && <p className="mt-3 text-sm text-muted-foreground">本轮尚未完整校验，暂不可发布；保留各项进度与结果。</p>}
@@ -108,9 +108,9 @@ export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, o
       <p className="text-sm text-muted-foreground">影响范围包括本次 Diff 中的工作流、脚本和资源。业务效果及未覆盖检查将在生效后观察；无有效验证规则的问题不会自动宣称已修复。</p>
       <label className="flex items-start gap-2 text-sm leading-6"><input type="checkbox" checked={ack} onChange={event => setAck(event.target.checked)} />我已审阅完整 Diff、检查报告和影响范围，接受未覆盖风险并确认发布此版本。</label>
     </div></RepairDialog>}
-    {!succeeded && <footer aria-label="当前修复步骤与下一步" className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-input pt-4">
+    {(!succeeded || actions) && <footer aria-label="当前修复步骤与下一步" className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-input pt-4">
       <fieldset aria-label="其他任务操作" disabled={busy||dialog||pending||trialOpen} className="flex flex-wrap gap-2">{actions}</fieldset>
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         {trialConfigured && canEdit && isCurrent && selected?.phase === 'review' && !pending && !succeeded && <button className={button} disabled={busy} onClick={() => setTrialOpen(true)}>先试跑</button>}
         {pending && deployment.target.scope === 'workflow' && <button className={button} disabled={busy || !canEdit} onClick={() => void resume()}>继续原发布</button>}
         {!succeeded && <button className={primary} disabled={trialOpen || dialog || busy || (pending ? !canEdit : !canPublish)}

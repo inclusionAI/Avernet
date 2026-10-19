@@ -29,7 +29,7 @@ it('switches actual content without generating, trialing or publishing and suppo
  expect(screen.queryByRole('heading',{name:'本版改动'})).not.toBeInTheDocument();
  await user.keyboard('{End}');expect(within(tabs).getByRole('tab',{name:'发布后效果'})).toHaveFocus();
  expect(screen.getByText('此候选尚未发布，暂无对应部署的观察证据。')).toBeVisible();
- await user.click(screen.getByRole('button',{name:'查看改动与发布'}));
+ await user.click(screen.getByRole('tab',{name:'改动与发布'}));
  expect(screen.getByRole('heading',{name:'本版改动'})).toBeVisible();
  expect(onFeedback).not.toHaveBeenCalled();expect(api.publish).not.toHaveBeenCalled();expect(api.deploymentTargets).not.toHaveBeenCalled();
 });
@@ -81,7 +81,7 @@ it('allows read-only navigation but disables publish and source editing',async()
  mount(fixture(),{canEdit:false});expect(await screen.findByRole('button',{name:'发布此版本'})).toBeDisabled();
  await userEvent.click(screen.getByRole('tab',{name:'优化目标'}));
  expect(screen.getByText('当前只有查看权限。')).toBeVisible();expect(screen.getByRole('button',{name:'重新优化'})).toBeDisabled();
- await userEvent.click(screen.getByRole('tab',{name:'发布后效果'}));expect(screen.getByRole('button',{name:'查看改动与发布'})).toBeEnabled();
+ await userEvent.click(screen.getByRole('tab',{name:'发布后效果'}));expect(screen.getByRole('tab',{name:'改动与发布'})).toBeEnabled();
 });
 it('retains the same publication request after a lost response and inspection tab switches',async()=>{
  api.deploymentTargets.mockResolvedValue({targets:[{id:'workflow:pre:wf',scope:'workflow',label:'工作流 wf',environment:'pre'}]});
@@ -169,7 +169,7 @@ it('leads with the task goal and source, keeps version secondary and model mater
 it('keeps a completed automatic chain with prior changes reviewable and cancellable after its last no-change batch', async () => {
  const detail=fixture();detail.latestAttempt.phase='no_change';detail.latestAttempt.input.automation={roundId:'daily'} as never;
  detail.automaticProgress={completedBatches:2,totalBatches:2,changedItems:1,publishable:true};
- mount(detail);await userEvent.click(screen.getByText('历史生成记录与任务操作',{selector:'summary'}));
+ mount(detail);await userEvent.click(screen.getByText('历史生成记录',{selector:'summary'}));
  expect(screen.getByRole('button',{name:'取消本次任务'})).toBeEnabled();
  expect(screen.getByRole('button',{name:'发布此版本'})).toBeEnabled();
 });
@@ -190,4 +190,34 @@ it('offers regeneration and cancellation beside publishing for a completed autom
  await userEvent.click(screen.getByRole('button',{name:'重新优化',exact:true}));expect(onFeedback).toHaveBeenCalledOnce();
  await userEvent.click(screen.getByRole('button',{name:'取消本次任务'}));expect(onCancel).toHaveBeenCalledOnce();
  expect(screen.getByRole('button',{name:'发布此版本'})).toBeEnabled();expect(api.publish).not.toHaveBeenCalled();
+});
+
+it('keeps one task action area across tabs without duplicate hidden controls or header shortcuts', async () => {
+ const onFeedback=vi.fn(),onCancel=vi.fn();mount(fixture(),{onFeedback,onCancel});
+ const user=userEvent.setup();
+ for(const tab of ['改动与发布','优化目标','发布后效果']){
+  await user.click(screen.getByRole('tab',{name:tab}));
+  const actions=screen.getByRole('heading',{name:'任务操作'}).closest('section')!;
+  for(const name of ['重新优化','取消本次任务','发布此版本']){
+   expect(screen.getAllByRole('button',{name,exact:true,hidden:true})).toHaveLength(1);
+   expect(within(actions).getByRole('button',{name,exact:true})).toBeVisible();
+  }
+  expect(within(screen.getByRole('region',{name:'当前候选'})).queryByRole('button')).not.toBeInTheDocument();
+ }
+ expect(screen.queryByRole('button',{name:'查看改动与发布'})).not.toBeInTheDocument();
+ await user.click(screen.getByRole('button',{name:'重新优化',exact:true}));expect(onFeedback).toHaveBeenCalledOnce();
+ await user.click(screen.getByRole('button',{name:'取消本次任务'}));expect(onCancel).toHaveBeenCalledOnce();
+ expect(api.publish).not.toHaveBeenCalled();
+});
+it('places failure recovery and the published next-round action in the shared operation area', async () => {
+ const detail=fixture();const latest={...detail.latestAttempt,revision:2,phase:'failed' as const,draft:null,error:{code:'AIS_FAILED',message:'failed'}};
+ detail.latestAttempt=latest;detail.revisions.push(latest);const onRetryGeneration=vi.fn();const first=mount(detail,{onRetryGeneration});
+ const actions=screen.getByRole('heading',{name:'任务操作'}).closest('section')!;
+ await userEvent.click(within(actions).getByRole('button',{name:'重试生成'}));expect(onRetryGeneration).toHaveBeenCalledOnce();
+ expect(screen.queryByRole('button',{name:'返回上一成功候选审核'})).not.toBeInTheDocument();first.unmount();sessionStorage.clear();
+ const published=fixture();published.latestAttempt.phase='published';published.release!.deployments=[{id:'deploy',revision:1,status:'succeeded',baselineDeployNumber:159,receipt:{deployNumber:160}} as never];
+ const onNextRound=vi.fn();mount(published,{onNextRound});
+ expect(screen.getAllByRole('button',{name:'开始下一轮优化',hidden:true})).toHaveLength(1);
+ expect(within(screen.getByRole('region',{name:'当前候选'})).queryByRole('button')).not.toBeInTheDocument();
+ await userEvent.click(screen.getByRole('button',{name:'开始下一轮优化'}));expect(onNextRound).toHaveBeenCalledWith(1);
 });
