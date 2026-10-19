@@ -55,9 +55,10 @@
       "oneOf": [{"type": "string", "maxLength": 65536}, {"$ref": "#/definitions/digestRef"}]
     },
     "unifiedDiff": {
-      "description": "Hunks only, starting at '@@'; no ---/+++ headers; no fuzz (README §6.2). Inline text like content: maxLength bounds code points, and the 64 KiB UTF-8 byte limit is checked when the patch is recorded; a larger change is sent as whole-file content by digest.",
+      "description": "A change to one text file, written as the hunks of a unified diff (the format `diff -u` and `git diff` print), without the ---/+++ file header lines. Each hunk starts with '@@ -<old start>,<old count> +<new start>,<new count> @@'; then each line starts with ' ' (unchanged context), '-' (removed) or '+' (added). Context and removed lines must match the file exactly: no fuzz (README §6.2). Inline text like content: maxLength bounds code points, and the 64 KiB UTF-8 byte limit is checked when the patch is recorded; a larger change is sent as whole-file content by digest.",
       "type": "string",
       "maxLength": 65536,
+      "examples": ["@@ -1,2 +1,2 @@\n # Shipping\n-Standard shipping takes 3-5 working days.\n+Standard shipping takes 2-4 working days.\n"],
       "pattern": "^@@ -[0-9]+(,[0-9]+)? \\+[0-9]+(,[0-9]+)? @@"
     },
     "skillFilePath": {
@@ -147,8 +148,9 @@
         "op": {"description": "Marks this op shape.", "const": "skill.add"},
         "name": {"$ref": "genome-revision.schema.json#/definitions/skillName", "description": "The new skill's name; equals the SKILL.md metadata name."},
         "files": {
-          "description": "Path inside the skill -> the file's content; must include SKILL.md.",
+          "description": "The skill's files, as a map from path inside the skill to that file's content; it must include SKILL.md. The keys are file paths chosen by the author, not fixed field names, so the map has no `properties` list: `propertyNames` says what a key may be (a skillFilePath), and `additionalProperties` says what every value must be (content: inline text, or {digest} of uploaded bytes for a binary or large file).",
           "type": "object",
+          "examples": [{"SKILL.md": "---\nname: invoice-lookup\ndescription: Look up an invoice by order id.\n---\nRun scripts/lookup.py.\n", "scripts/lookup.py": "print('ok')\n", "assets/logo.png": {"digest": "sha256:02a3e298f1533f62558c58e4c70edcab9af5a50d62d925fd5390942020fb0fb8"}}],
           "required": ["SKILL.md"],
           "maxProperties": 500,
           "propertyNames": {"$ref": "#/definitions/skillFilePath"},
@@ -182,8 +184,9 @@
           }
         },
         "files": {
-          "description": "Path -> new content, or null to delete the file. SKILL.md cannot be deleted.",
+          "description": "Whole-file changes, as a map from path inside the skill to the file's new content (inline text or {digest}), or null to delete that file. Adds a file when the path is new, replaces it when it exists. SKILL.md can be replaced but not deleted: its own entry under `properties` allows only content, while `additionalProperties` (every other path) also allows null.",
           "type": "object",
+          "examples": [{"scripts/check.py": null, "scripts/check.sh": "#!/bin/sh\necho ok\n", "assets/badge.png": {"digest": "sha256:6ae79bfb0b33bac762ed7f4cc278d814c30d5555098d36ecd4e313331f9e9d04"}}],
           "minProperties": 1,
           "propertyNames": {"$ref": "#/definitions/skillFilePath"},
           "properties": {"SKILL.md": {"$ref": "#/definitions/content"}},
@@ -202,7 +205,8 @@
       }
     },
     "resourceAdd": {
-      "description": "Op resource.add: adds a file resource, or a directory resource from an uploaded tree (if/then: a path ending in '/' requires content by digest).",
+      "description": "Op resource.add: adds a file resource, or a directory resource from an uploaded tree. The if/then pair is a conditional rule: if `path` ends in '/' (a directory entry), then `content` must be {digest} of an uploaded acm-tree-v1 blob, because a directory cannot be given as inline text. A file path may use either form of content.",
+      "examples": [{"op": "resource.add", "path": "data/faq/", "content": {"digest": "sha256:30b884a411447c5dae5db89b6aab4c59114b454477be951e82d5e123622344ff"}}, {"op": "resource.add", "path": "data/notes.md", "content": "# Notes\n"}],
       "type": "object",
       "additionalProperties": false,
       "required": ["op", "path", "content"],
@@ -235,7 +239,7 @@
       }
     },
     "memoryUpdate": {
-      "description": "Op memory.update: replaces the text, tags and source of an existing item, by key.",
+      "description": "Op memory.update: replaces the text, tags and source of an existing item, by key; the item stays, with new content. Compare memory.retire, which removes the item.",
       "type": "object",
       "additionalProperties": false,
       "required": ["op", "item"],
@@ -245,7 +249,7 @@
       }
     },
     "memoryRetire": {
-      "description": "Op memory.retire: removes a curated memory item; earlier revisions keep it.",
+      "description": "Op memory.retire: removes a curated memory item, by key; earlier revisions keep it. Compare memory.update, which keeps the item and changes its content.",
       "type": "object",
       "additionalProperties": false,
       "required": ["op", "key"],

@@ -143,6 +143,31 @@ def test_schemas_are_valid_draft_07() -> None:
         jsonschema.Draft7Validator.check_schema(schema)
 
 
+def _schema_examples(node: Any, pointer: str = "") -> Iterator[tuple[str, Any]]:
+    """Every ``examples`` entry in a schema, with the JSON pointer of the schema it illustrates."""
+    if isinstance(node, dict):
+        for example in node.get("examples", []):
+            yield pointer, example
+        for key, child in node.items():
+            if key != "examples":
+                yield from _schema_examples(child, f"{pointer}/{key}")
+    elif isinstance(node, list):
+        for index, child in enumerate(node):
+            yield from _schema_examples(child, f"{pointer}/{index}")
+
+
+def test_schema_examples_are_valid() -> None:
+    """The ``examples`` in the schemas illustrate them, so each one must validate where it stands."""
+    found = 0
+    for schema in (_REVISION_SCHEMA, _PATCH_SCHEMA):
+        for pointer, example in _schema_examples(schema):
+            validator = jsonschema.Draft7Validator({"$ref": schema["$id"] + "#" + pointer}, registry=_REGISTRY)
+            errors = [error.message for error in validator.iter_errors(example)]
+            assert not errors, (pointer, errors)
+            found += 1
+    assert found, "the schemas carry examples"
+
+
 @pytest.mark.parametrize("path", _REVISIONS, ids=_ids(_REVISIONS))
 def test_every_example_revision_is_valid(path: Path) -> None:
     record = _load(path)

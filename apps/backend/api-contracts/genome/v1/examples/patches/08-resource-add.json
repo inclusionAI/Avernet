@@ -1,0 +1,29 @@
+{
+  "patch_schema": 1,
+  "base": "sha256:9e21ea360e6d4bdb63a151d280a7f1802402a8294b5033c92239731bd1e8d1fe",
+  "ops": [
+    {
+      "op": "resource.add",
+      "path": "data/faq/",
+      "content": {
+        "digest": "sha256:30b884a411447c5dae5db89b6aab4c59114b454477be951e82d5e123622344ff"
+      }
+    },
+    {
+      "op": "resource.add",
+      "path": "data/notes.md",
+      "content": "# Notes\nThe shop is closed on public holidays.\n"
+    },
+    {
+      "op": "resource.add",
+      "path": "data/prices.csv",
+      "content": {
+        "digest": "sha256:693e15fcee60f22376bec03af601ad49030c5b16ec2cc2139a84776a637a610b"
+      }
+    }
+  ],
+  "rationale": "Example of one op kind, covering every field and value shape it allows; see README §6.1.",
+  "evidence": [
+    "episode:ep_91"
+  ]
+}

@@ -6,9 +6,16 @@
       "op": "persona.add",
       "type": "OUTPUT.md",
       "content": "# Output\nReply in at most three sentences.\n"
+    },
+    {
+      "op": "persona.add",
+      "type": "USER.md",
+      "content": {
+        "digest": "sha256:15ef1528a9df5a6391fb278defc54bf59ff1819d51b808f1821c6aab6f8225b3"
+      }
     }
   ],
-  "rationale": "Example of one op; see README §6.1.",
+  "rationale": "Example of one op kind, covering every field and value shape it allows; see README §6.1.",
   "evidence": [
     "episode:ep_91"
   ]

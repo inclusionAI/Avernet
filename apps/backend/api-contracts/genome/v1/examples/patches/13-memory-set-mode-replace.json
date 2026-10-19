@@ -7,7 +7,7 @@
       "mode": "replace"
     }
   ],
-  "rationale": "Example of one op; see README §6.1.",
+  "rationale": "Example of one op kind, covering every field and value shape it allows; see README §6.1.",
   "evidence": [
     "episode:ep_91"
   ]
