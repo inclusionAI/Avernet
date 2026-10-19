@@ -16,6 +16,7 @@ in ``tests/endpoints/`` can request them by name.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 
 import httpx
@@ -34,6 +35,7 @@ from tests.community.framework.world import World
 # The injector is set in ``app_with_testing_modules`` and read by
 # ``world`` in the same test scope.
 _CURRENT_TEST_INJECTOR: dict[int, Injector] = {}
+logger = logging.getLogger(__name__)
 
 
 @pytest.fixture
@@ -123,7 +125,12 @@ def app_with_testing_modules(request) -> FastAPI:
             raise RuntimeError(
                 "BaasPublishPoller threads did not stop before test database disposal"
             )
-        engine.dispose()
+        # StaticPool shares one SQLite connection with background sessions.
+        # Use their lock so disposal cannot race an in-flight query/transaction.
+        logger.debug("test.database.dispose stage=waiting engine_id=%s", id(engine))
+        with db_mod._session_lock:
+            engine.dispose()
+        logger.debug("test.database.dispose stage=complete engine_id=%s", id(engine))
 
 
 @pytest.fixture
