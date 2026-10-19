@@ -81,7 +81,8 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
         <div className="space-y-3">
           <Card className="rounded-lg bg-card p-3">
             <p className="m-0 mb-2 text-sm font-medium text-foreground">基础信息</p>
-            <p className="m-0 mb-1 text-xs text-muted-foreground">会话标题</p>
+            {/* 字级口径与 GroupManagePanel 一致：标签黑加粗、值弱灰普通字重、12px 统一。 */}
+            <p className="m-0 mb-1 text-xs font-medium text-foreground">会话标题</p>
             <EditableName
               value={session.title}
               canEdit={isSessionDriverOrManager}
@@ -90,24 +91,30 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
             />
             <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-3 text-xs">
               <div>
-                <p className="m-0 text-muted-foreground">类型</p>
-                <p className="m-0 mt-1 font-medium text-foreground">{GROUP_KIND_LABEL[props.groupKind]}</p>
+                <p className="m-0 text-xs font-medium text-foreground">类型</p>
+                <p className="m-0 mt-1 text-xs font-normal text-muted-foreground">
+                  {GROUP_KIND_LABEL[props.groupKind]}
+                </p>
               </div>
               <div>
-                <p className="m-0 text-muted-foreground">成员数量</p>
-                <p className="m-0 mt-1 font-medium text-foreground">
+                <p className="m-0 text-xs font-medium text-foreground">成员数量</p>
+                <p className="m-0 mt-1 text-xs font-normal text-muted-foreground">
                   {session.participantCount || session.participants.length}
                 </p>
               </div>
             </div>
             <div className="mt-3 space-y-3 text-xs">
               <div>
-                <p className="m-0 text-muted-foreground">群 ID</p>
-                <p className="m-0 mt-1 break-all font-mono text-xs text-foreground">{session.groupId}</p>
+                <p className="m-0 text-xs font-medium text-foreground">群 ID</p>
+                <p className="m-0 mt-1 break-all font-mono text-xs font-normal text-muted-foreground">
+                  {session.groupId}
+                </p>
               </div>
               <div>
-                <p className="m-0 text-muted-foreground">会话 ID</p>
-                <p className="m-0 mt-1 break-all font-mono text-xs text-foreground">{session.sessionId}</p>
+                <p className="m-0 text-xs font-medium text-foreground">会话 ID</p>
+                <p className="m-0 mt-1 break-all font-mono text-xs font-normal text-muted-foreground">
+                  {session.sessionId}
+                </p>
               </div>
             </div>
           </Card>

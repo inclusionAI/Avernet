@@ -35,13 +35,14 @@ export function HumanNotifyModeField({ value, canManage, onUpdate }: HumanNotify
 
   return (
     <div className="mt-3">
-      <p className="m-0 mb-1 text-xs text-muted-foreground">@Human 通知来源</p>
+      {/* 标签/选中值对齐基础信息卡口径；仅改实例 className，不动 Select 基座。 */}
+      <p className="m-0 mb-1 text-xs font-medium text-foreground">@Human 通知来源</p>
       <Select
         value={currentValue}
         onValueChange={(next) => void handleChange(next as HumanMentionNotifyMode)}
         disabled={!canManage || saving}
       >
-        <SelectTrigger aria-label="@Human 通知来源" className="w-full">
+        <SelectTrigger aria-label="@Human 通知来源" className="w-full font-normal text-muted-foreground">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

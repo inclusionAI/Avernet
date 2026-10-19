@@ -196,8 +196,8 @@ it('group panel hides 退出协作群 for non-member viewer', () => {
 
 it('group panel shows name as read-only text with explicit edit entry (view-first)', () => {
   render(<GroupManagePanel {...groupProps()} />);
-  // 面板头副标题与编辑组件都会出现群名，selector 限定编辑组件的查看态文本（text-sm）
-  expect(screen.getByText('我的群', { selector: 'p.text-sm' })).toBeInTheDocument();
+  // 查看态值节点以 data-testid 定位（2026-10-16 值态字级收敛为 12px 弱灰后不再能用 p.text-sm 圈选）
+  expect(screen.getByTestId('editable-name-value')).toHaveTextContent('我的群');
   // 查看态不出现输入框：低频编辑不常驻输入组件
   expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: '编辑群名称' })).toBeInTheDocument();
@@ -222,7 +222,7 @@ it('group panel name edit cancel restores view state without calling onUpdate', 
   fireEvent.click(screen.getByRole('button', { name: '编辑群名称' }));
   fireEvent.change(screen.getByRole('textbox'), { target: { value: '临时名' } });
   fireEvent.click(screen.getByRole('button', { name: '取消' }));
-  expect(screen.getByText('我的群', { selector: 'p.text-sm' })).toBeInTheDocument();
+  expect(screen.getByTestId('editable-name-value')).toHaveTextContent('我的群');
   expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   expect(handlers.onUpdate).not.toHaveBeenCalled();
 });
@@ -230,7 +230,7 @@ it('group panel name edit cancel restores view state without calling onUpdate', 
 it('group panel hides name edit entry when cannot manage', () => {
   const denied: PolicyResult = { allowed: false, disabledReason: '无权限' };
   render(<GroupManagePanel {...groupProps()} canManage={denied} />);
-  expect(screen.getByText('我的群', { selector: 'p.text-sm' })).toBeInTheDocument();
+  expect(screen.getByTestId('editable-name-value')).toHaveTextContent('我的群');
   expect(screen.queryByRole('button', { name: '编辑群名称' })).not.toBeInTheDocument();
 });
 
