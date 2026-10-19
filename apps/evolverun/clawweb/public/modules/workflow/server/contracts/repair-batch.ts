@@ -45,6 +45,8 @@ export type RepairBatchInput = {
   parentCandidateCommit: string | null; feedback: string; previousReportRef: string | null; taskBranch: string;
 };
 export type RepairRevisionPhase = 'drafting' | 'review' | 'blocked' | 'publishing' | 'published' | 'no_change' | 'failed' | 'cancelled';
+/** Optional AIS result record. Core input is the exact application prompt; materials are an index, not file bodies. */
+export type RepairModelInput = { itemId: string; coreInput: string; materials: Record<string, unknown> };
 export type RepairRevision = {
   workflowId: string; taskId: string; revision: number; phase: RepairRevisionPhase; stateVersion: number;
   requestId: string; requestDigest: string; input: RepairBatchInput;
