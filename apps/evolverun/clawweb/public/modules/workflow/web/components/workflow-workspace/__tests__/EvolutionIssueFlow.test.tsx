@@ -554,7 +554,6 @@ describe('issue and optimization flow', () => {
     await openIssueRepairs(false)
     await userEvent.click(await screen.findByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' }))
     await userEvent.click(screen.getByRole('button', { name: '下一页建议' }))
-    expect(await screen.findByText(/原选择与文字要求均已保留/)).toBeInTheDocument()
     expect(await screen.findByRole('checkbox', { name: '选择 新来源建议' })).not.toBeChecked()
     expect(screen.getByRole('button', { name: '生成优化草稿（1）' })).toBeEnabled()
   })

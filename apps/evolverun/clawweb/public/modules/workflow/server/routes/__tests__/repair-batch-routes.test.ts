@@ -166,7 +166,7 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     const f = await setup();
     const inbox = (await f.request('/candidates?workflowId=wf-1')).body;
     const input = { workflowId: 'wf-1', inputDigest: inbox.inputDigest, itemIds: ['item-0'], instructions: '', requestId: 'create' };
-    expect((await f.request('/', { ...input, inputDigest: '0'.repeat(64) })).status).toBe(409);
+    expect((await f.request('/', { ...input, inputDigest: '0'.repeat(64), requestId: 'stale-list' })).status).toBe(202);
     expect((await f.request('/', { ...input, instructions: '界'.repeat(22000) })).status).toBe(413);
     const created = (await f.request('/', input)).body;
     expect((await f.request(`/${created.taskId}/revisions/1.5`)).status).toBe(400);

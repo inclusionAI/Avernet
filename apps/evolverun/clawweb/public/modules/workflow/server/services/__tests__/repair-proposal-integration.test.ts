@@ -55,7 +55,7 @@ it('returns bounded current-plan authorization when rechecking selected original
  expect(classify).toHaveBeenCalledTimes(1);
  expect(await f.db.query('SELECT * FROM workflow_repair_revisions')).toHaveLength(0);
 });
-it('does not let complementary classification authorize a changed baseline',async()=>{
+it('keeps changed-baseline originals as manual draft goals without requiring classification authorization',async()=>{
  const {c,advance,classify}=await setup(2);
  f.items.forEach(item=>{item.proposal!.baseSpecDigest='e'.repeat(64)});
  await c.tick();advance(3000);await c.tick();
@@ -66,19 +66,21 @@ it('does not let complementary classification authorize a changed baseline',asyn
  const page=await service.candidates('wf-1');
  expect(page.items[0].aggregation).toMatchObject({status:'ready',relation:'complementary',reevaluation:true,itemIds:['item-0','item-1']});
  const state=await service.selectionState('wf-1',['item-0','item-1'],false);
- await expect(service.create('human',{workflowId:'wf-1',itemIds:['item-0','item-1'],inputDigest:page.inputDigest,selection:Object.fromEntries(state.items.map(item=>[item.itemId,item.selectionDigest!])),instructions:'preserve current constraints',requestId:'stale-pair'})).rejects.toMatchObject({details:{reasonCode:'PROPOSAL_BASELINE_CHANGED',itemIds:['item-0','item-1']}});
+ const created=await service.create('human',{workflowId:'wf-1',itemIds:['item-0','item-1'],inputDigest:page.inputDigest,selection:Object.fromEntries(state.items.map(item=>[item.itemId,item.selectionDigest!])),instructions:'preserve current constraints',requestId:'stale-pair'});
+ expect(created.input.items.map(item=>item.itemId)).toEqual(['item-0','item-1']);
  expect(f.items.every(item=>item.proposal!.baseSpecDigest==='e'.repeat(64))).toBe(true);
- expect(f.calls).toHaveLength(0);
+ expect(f.calls).toHaveLength(1);
 });
-it('rejects a changed single baseline without dispatching or inheriting an unselected member',async()=>{
+it('generates one selected original without inheriting an unselected plan member',async()=>{
  const {c,advance}=await setup(2);
  f.items.forEach(item=>{item.proposal!.baseSpecDigest='e'.repeat(64)});
  await c.tick();advance(3000);await c.tick();
  const service=createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort,c);
  const state=await service.selectionState('wf-1',['item-1'],false);
  expect(state.plans[0].itemIds).toEqual(['item-0','item-1']);
- await expect(service.create('human',{workflowId:'wf-1',itemIds:['item-1'],inputDigest:state.inputDigest,selection:{'item-1':state.items[0].selectionDigest!},instructions:'keep the original goal',requestId:'one-original'})).rejects.toMatchObject({details:{reasonCode:'PROPOSAL_BASELINE_CHANGED',itemIds:['item-1']}});
- expect(f.calls).toHaveLength(0);
+ const created=await service.create('human',{workflowId:'wf-1',itemIds:['item-1'],inputDigest:state.inputDigest,selection:{'item-1':state.items[0].selectionDigest!},instructions:'keep the original goal',requestId:'one-original'});
+ expect(created.input.items.map(item=>item.itemId)).toEqual(['item-1']);
+ expect(f.calls).toHaveLength(1);
 });
 it.each([false,true])('never lets a model combine contradictory scalars or omit originals (stale=%s)',async(stale)=>{
  const {c,read,classify,advance}=await setup(2);
@@ -137,8 +139,8 @@ it('freezes all original sources and the actual consumer protocol in one generat
  const revision=await integrated.create('reviewer',{workflowId:'wf-1',itemIds:page.items[0].aggregation!.itemIds,inputDigest:page.inputDigest,instructions:'keep business behavior',requestId:'integrated-generation'});
  expect(revision.input.instructions).toBe('keep business behavior');
  expect(revision.input.items.map(i=>i.itemId)).toEqual(['item-0','item-1','item-2']);
- expect(revision.input.integration?.schemaVersion).toBe('workflow-proposal-plan/v1');
- expect(revision.input.integration?.plans[0].originalItemIds).toEqual(['item-0','item-1','item-2']);
+ expect(revision.input.integration).toBeUndefined();
+ expect(revision.input.items.every(item=>item.context?.evidencePacket)).toBe(true);
  expect(f.calls).toHaveLength(1);
 });
 it('a model omitting or inventing a source fails safely without hiding original suggestions',async()=>{
@@ -157,13 +159,14 @@ it('preserves supported vs unknown cause references and rejects invented evidenc
  expect(cards.every(card=>card.aggregation?.status==='unavailable')).toBe(true);
 });
 
-it('does not generate when critical evidence payloads are absent or modified',async()=>{
+it('records missing evidence for review without blocking a manual draft',async()=>{
  const {c}=await setup(1);
  f.items[0].context!.diagnoses=[{flowId:'run-1',nodeId:'query',evidence:[{eventId:'missing',missing:true}]}];
  const integrated=createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort,c);
  const page=await integrated.candidates('wf-1');
- await expect(integrated.create('reviewer',{workflowId:'wf-1',itemIds:['item-0'],inputDigest:page.inputDigest,instructions:'',requestId:'evidence-missing'})).rejects.toThrow(/证据/);
- expect(f.calls).toHaveLength(0);
+ const created=await integrated.create('reviewer',{workflowId:'wf-1',itemIds:['item-0'],inputDigest:page.inputDigest,instructions:'',requestId:'evidence-missing'});
+ expect(created.input.items[0].context?.evidencePacket).toMatchObject({missingEvidence:true});
+ expect(f.calls).toHaveLength(1);
 });
 
 it('serves original suggestions without pretending they are queued before a job exists',async()=>{
@@ -200,8 +203,8 @@ it('retains a reviewed shared cause in every affected frozen plan without adding
  const page=await integrated.candidates('wf-1');
  const revision=await integrated.create('reviewer',{workflowId:'wf-1',itemIds:['item-0','item-1'],inputDigest:page.inputDigest,instructions:'',requestId:'shared-cause'});
  expect(revision.input.items.map(item=>item.itemId)).toEqual(['item-0','item-1']);
- expect(revision.input.integration?.plans).toHaveLength(2);
- expect(revision.input.integration?.plans.map(plan=>plan.causes)).toEqual(reviewed.map(card=>card.aggregation!.causes));
+ expect(revision.input.integration).toBeUndefined();
+ expect(revision.input.items.map(item=>item.proposal)).toEqual(f.items.slice(0,2).map(item=>item.proposal));
 });
 
 it.each([false,true])('resolves every original member to the same aggregation details (hydration=%s)',async(hydrate)=>{

@@ -25,16 +25,17 @@ it('classifies baseline read failure as not created and permits the same request
   expect(f.calls).toHaveLength(1);
 });
 
-it('also classifies the final baseline recheck before freezing as not created', async () => {
+it('uses one current Git baseline for a manual draft instead of requiring a second version check', async () => {
   const f = await repairFixture(); close.push(() => f.db.close());
   const resolve = f.executionPort.resolveBaseline; let reads = 0;
   f.executionPort.resolveBaseline = async id => { if (++reads === 2) throw new Error('final baseline read failed'); return resolve(id); };
   const service = createRepairWorkbenchService(f.db, f.sourcePort, f.executionPort);
   const snapshot = await service.candidates('wf-1');
-  await expect(service.create('human', { workflowId: 'wf-1', itemIds: ['item-0', 'item-1'], inputDigest: snapshot.inputDigest,
-    instructions: '', requestId: 'final-check' })).rejects.toMatchObject({ details: { outcome: 'not_created', stage: 'baseline' } });
-  expect(await f.db.query('SELECT * FROM workflow_repair_revisions')).toEqual([]);
-  expect(f.calls).toHaveLength(0);
+  const created = await service.create('human', { workflowId: 'wf-1', itemIds: ['item-0', 'item-1'], inputDigest: snapshot.inputDigest,
+    instructions: '', requestId: 'final-check' });
+  expect(created.phase).toBe('drafting'); expect(reads).toBe(1);
+  expect(await f.db.query('SELECT * FROM workflow_repair_revisions')).toHaveLength(1);
+  expect(f.calls).toHaveLength(1);
 });
 
 it('retains typed semantic baseline rejection instead of masking it as transport uncertainty', async () => {

@@ -68,7 +68,7 @@ it('shows one primary action, durable failed deployment status and Git links ins
     deployments: [{ id: 'failed', approvalId: 'approved', revision: 1, status: 'failed', error: '发布入口不存在' }] } as never
   repairApi.task.mockResolvedValue(detail)
   render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit onClose={() => {}} onChanged={() => {}} />)
-  expect(await screen.findByRole('button', { name: '发布此版本' })).toBeEnabled()
+  expect(await screen.findByRole('button', { name: '审阅并发布' })).toBeEnabled()
   expect(screen.getAllByLabelText('当前修复步骤与下一步')).toHaveLength(1)
   expect(screen.queryByRole('button', { name: '进入候选确认' })).not.toBeInTheDocument()
   expect(screen.getByRole('combobox', { name: '查看修复版本' })).toHaveDisplayValue('v1 · 部署失败')
@@ -92,7 +92,7 @@ it('shows the selected historical failure and identifies the latest execution se
   expect(screen.getByText(/最近 v6 的执行记录/)).toBeVisible()
   expect(screen.getByText(/AIS 任务执行或提交失败/)).toBeVisible()
   expect(screen.queryByText('当前查看的是历史候选，请切回最新可用候选。')).not.toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: '发布此版本' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '审阅并发布' })).not.toBeInTheDocument()
 })
 
 it('makes failure without any successful candidate a recovery state rather than a review target', async () => {
@@ -102,7 +102,7 @@ it('makes failure without any successful candidate a recovery state rather than 
   render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit onClose={() => {}} onChanged={() => {}} />)
   expect(await screen.findByText('首次生成失败，尚无候选。')).toBeVisible()
   expect(screen.queryByText('当前查看的是历史候选，请切回最新可用候选。')).not.toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: '发布此版本' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '审阅并发布' })).not.toBeInTheDocument()
 })
 
 it('explains the latest no-change attempt without calling it historical or asking for publication', async () => {
@@ -137,7 +137,7 @@ it('lets a read-only user revisit a published scope and candidate without editin
   expect(repairApi.candidates).not.toHaveBeenCalled()
   expect(repairApi.revise).not.toHaveBeenCalled()
   expect(repairApi.retryDispatch).not.toHaveBeenCalled()
-  expect(screen.queryByRole('button', { name: '发布此版本' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '审阅并发布' })).not.toBeInTheDocument()
 })
 
 describe('RepairTaskDialog', () => {

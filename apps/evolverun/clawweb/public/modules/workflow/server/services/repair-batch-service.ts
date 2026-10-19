@@ -464,8 +464,8 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     return this.generate(actorId, taskId, { ...base, expectedAttemptRevision: raw.expectedAttemptRevision, parentCandidateCommit: raw.parentCandidateCommit, feedback: raw.feedback });
   }
   /** Only used before the new revision transaction/dispatch, never for an unknown write result. */
-  private async generationBaseline(workflowId: string) {
-    try { return await this.execution!.resolveBaseline(workflowId); }
+  private async generationBaseline(workflowId: string, purpose?: 'draft') {
+    try { return await this.execution!.resolveBaseline(workflowId, purpose); }
     catch (error) {
       if (error instanceof RepairBatchError) throw error;
       // Preserve the low-level diagnostic for server logs without exposing Git/credentials to clients.
@@ -482,13 +482,13 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     const prior = await serial(this.db, () => new RepairBatchRepository(this.db).findRequest(request.workflowId, request.requestId, digest));
     let revision = prior;
     if (!revision) {
-      const baseline = taskId ? (await this.task(taskId)).latestAttempt.input.baseline : await this.generationBaseline(request.workflowId);
+      const baseline = taskId ? (await this.task(taskId)).latestAttempt.input.baseline : await this.generationBaseline(request.workflowId, request.automation ? undefined : 'draft');
       if (taskId && request.automation?.roundId && canonicalRepairJson(await this.generationBaseline(request.workflowId)) !== canonicalRepairJson(baseline)) fail('STATE_CONFLICT', '自动优化的生效基线已变化，请重新评估', { reasonCode: 'BASELINE_STALE' });
       if (baseline.workflowId !== request.workflowId) fail('CONTENT_MISMATCH', 'Provider resolved a different workflow');
       const selected = request.selection ? await serial(this.db, async () => {
         const snapshot = await this.snapshot(this.db, request.workflowId, 'full', { itemIds: request.itemIds, includeHistorical: true });
         await this.reviewVersionRequest(request,snapshot.items,taskId,this.db);
-        reviewSelected(request, snapshot.items, await this.selectionDigest(request,snapshot.items,snapshot.inputDigest,this.db), taskId);
+        if (request.automation) reviewSelected(request, snapshot.items, await this.selectionDigest(request,snapshot.items,snapshot.inputDigest,this.db), taskId);
         return snapshot.items.filter(item => request.itemIds.includes(item.itemId));
       }) : await this.items(request.workflowId, request.itemIds);
       const target=taskId?(await this.task(taskId)).latestAttempt.input.items[0]?.context?.targetSnapshot as import('@avernet/clawweb-shared/server/contracts/workflow-snapshot').WorkflowSnapshotRef|undefined:reviewVersionSelection(request,selected,await this.sources.activeSnapshot?.(this.db,request.workflowId));
@@ -496,11 +496,12 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       const frozenSelected=selected.map(item=>freezeReference(item,target));
       const hasReferences=frozenSelected.some(historicalReference);
       if(hasReferences&&this.execution?.integrationVersion!=='workflow-proposal-plan/v1')fail('CAPABILITY_UNAVAILABLE','生成器尚未支持历史建议参考',{reasonCode:'HISTORICAL_REFERENCE_UNSUPPORTED'});
-      assertProposalBaseline(frozenSelected, baseline);
-      const integrated = hasReferences?{instructions:'',integration:historicalIntegration(frozenSelected,baseline)}:this.proposals ? await this.proposals.prepare(request.workflowId, selected, baseline) : { instructions: '', integration: undefined };
+      // Manual goals are reconciled during drafting; automatic batches retain patch validation.
+      if (request.automation) assertProposalBaseline(frozenSelected, baseline);
+      const integrated = hasReferences?{instructions:'',integration:historicalIntegration(frozenSelected,baseline)}:request.automation && this.proposals ? await this.proposals.prepare(request.workflowId, selected, baseline) : { instructions: '', integration: undefined };
       const frozenInstructions = [request.instructions, integrated.instructions].filter(Boolean).join('\n\n');
       if (frozenInstructions.length > MAX_INSTRUCTIONS_CHARS) fail('PAYLOAD_TOO_LARGE', '整合目标与说明过长，请缩小本次选择范围');
-      if (!taskId && canonicalRepairJson(await this.generationBaseline(request.workflowId)) !== canonicalRepairJson(baseline)) fail('STATE_CONFLICT', '生效版本在准备期间再次变化，选择与要求保留', { reasonCode: 'BASELINE_STALE' });
+      if (request.automation && !taskId && canonicalRepairJson(await this.generationBaseline(request.workflowId)) !== canonicalRepairJson(baseline)) fail('STATE_CONFLICT', '生效版本在准备期间再次变化，选择与要求保留', { reasonCode: 'BASELINE_STALE' });
       revision = await this.tx(async tx => {
         const repo = new RepairBatchRepository(tx);
         await repo.lockWorkflow(tx, request.workflowId);
@@ -513,7 +514,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
           itemIds: request.itemIds, includeHistorical: true,
         });
         await this.reviewVersionRequest(request,snapshot.items,taskId,tx);
-        reviewSelected(request, snapshot.items, await this.selectionDigest(request,snapshot.items,snapshot.inputDigest,tx), taskId);
+        if (request.automation) reviewSelected(request, snapshot.items, await this.selectionDigest(request,snapshot.items,snapshot.inputDigest,tx), taskId);
         if (!taskId) {
           const occupied = snapshot.items.filter(item => request.itemIds.includes(item.itemId));
           const taskIds = [...new Set(occupied.map(item => item.activeTaskId).filter((id): id is string => !!id))];
@@ -541,7 +542,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         const excludedSourceRefs = snapshot.items.filter(item => !request.itemIds.includes(item.itemId) && item.sourceAvailable)
           .flatMap(item => item.sources).sort((a, b) => canonicalRepairJson(a).localeCompare(canonicalRepairJson(b)));
         const input: RepairBatchInput = { schemaVersion: 'workflow-repair/v2', taskId: id,
-          revision: (previous?.latestAttempt.revision ?? 0) + 1, baseline, items: this.proposals || integrated.integration ? prepareProposalEvidence(selected, true) : selected,
+          revision: (previous?.latestAttempt.revision ?? 0) + 1, baseline, items: this.proposals || integrated.integration ? prepareProposalEvidence(selected, !!request.automation) : selected,
           excludedSources: { count: excludedSourceRefs.length, digest: digestRepairJson(excludedSourceRefs) },
           ...(request.automation ? { automation: request.automation } : {}),
           ...('integration' in integrated && integrated.integration ? { integration: integrated.integration } : {}),

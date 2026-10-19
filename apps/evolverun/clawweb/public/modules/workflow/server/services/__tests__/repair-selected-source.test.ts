@@ -22,16 +22,17 @@ it('accepts unchanged selected originals when unselected sources or supporting e
   expect(result.input.items[0].context?.diagnoses).toEqual([{ flowId: 'new-supporting-run' }]);
   expect(f.calls).toHaveLength(1);
 });
-it('identifies changed selected content without accepting unseen values or creating a task', async () => {
+it('keeps the selected original identity when its source summary updates before drafting', async () => {
   const service = await setup();
   const shown = await service.candidates('wf-1');
   f.items[0].proposal!.summary = 'different selected goal';
-  await expect(service.create('human', { workflowId: 'wf-1', itemIds: ['item-0'], inputDigest: shown.inputDigest,
-    selection: { 'item-0': shown.items[0].selectionDigest! }, instructions: '', requestId: 'changed' }))
-    .rejects.toMatchObject({ code: 'SOURCE_CHANGED', details: { reasonCode: 'SELECTED_ITEMS_CHANGED', items: [{ itemId: 'item-0', reasonCode: 'CONTENT_CHANGED' }] } });
-  expect(f.calls).toHaveLength(0);
+  const created = await service.create('human', { workflowId: 'wf-1', itemIds: ['item-0'], inputDigest: shown.inputDigest,
+    selection: { 'item-0': shown.items[0].selectionDigest! }, instructions: '', requestId: 'changed' });
+  expect(created.input.items.map(item => item.itemId)).toEqual(['item-0']);
+  expect(created.input.items[0].proposal?.summary).toBe('different selected goal');
+  expect(f.calls).toHaveLength(1);
 });
-it('rejects a genuinely changed baseline before dispatch while preserving original proposal and evidence', async () => {
+it('generates against current Git while preserving the selected original proposal and evidence', async () => {
   const plain = await setup();
   for (const m of repairReleaseMigrations) for (const sql of m.sql) await f.db.exec(f.db.dialect.renderDdl(sql));
   f.items[0].proposal = { baseSpecDigest: 'e'.repeat(64), summary: 'report Markdown', operations: [{ op: 'replace', nodeId: 'report', path: '/executor/prompt', value: 'old full prompt' }] };
@@ -40,12 +41,13 @@ it('rejects a genuinely changed baseline before dispatch while preserving origin
   const coordinator = createProposalCoordinator({ db: f.db, read: wf => plain.proposalSnapshot(wf) });
   const service = createRepairWorkbenchService(f.db, f.sourcePort, f.executionPort, coordinator);
   const shown = await service.candidates('wf-1');
-  await expect(service.create('human', { workflowId: 'wf-1', itemIds: ['item-0'], inputDigest: shown.inputDigest,
-    selection: { 'item-0': shown.items.find(i => i.itemId === 'item-0')!.selectionDigest! }, instructions: '', requestId: 'reevaluate' }))
-    .rejects.toMatchObject({ code: 'SOURCE_CHANGED', details: { reasonCode: 'PROPOSAL_BASELINE_CHANGED', itemIds: ['item-0'] } });
+  const created = await service.create('human', { workflowId: 'wf-1', itemIds: ['item-0'], inputDigest: shown.inputDigest,
+    selection: { 'item-0': shown.items.find(i => i.itemId === 'item-0')!.selectionDigest! }, instructions: '', requestId: 'reevaluate' });
+  expect(created.input.items[0].proposal).toEqual(original.proposal);
+  expect(created.input.items[0].context?.diagnoses).toEqual(original.context?.diagnoses);
   expect(f.items[0]).toEqual(original);
-  expect(f.calls).toHaveLength(0);
-  expect(await f.db.query('SELECT * FROM workflow_repair_revisions')).toHaveLength(0);
+  expect(f.calls).toHaveLength(1);
+  expect(await f.db.query('SELECT * FROM workflow_repair_revisions')).toHaveLength(1);
 });
 it('reads bounded selection identities for >1MiB evidence but still rejects generation before freezing or dispatch', async () => {
   const service = await setup();
@@ -59,15 +61,16 @@ it('reads bounded selection identities for >1MiB evidence but still rejects gene
   expect(f.calls).toHaveLength(0);
   expect(await f.db.query('SELECT * FROM workflow_repair_revisions')).toHaveLength(0);
 });
-it.each(['operations', 'patches'])('does not sequentially overwrite conflicting stale %s without a coordinator', async kind => {
+it.each(['operations', 'patches'])('passes conflicting %s as draft goals without applying either one', async kind => {
   const service = await setup();
   f.items.forEach((item, i) => { item.proposal = { baseSpecDigest: 'e'.repeat(64), [kind]: kind === 'operations'
     ? [{ op: 'replace', nodeId: 'query', path: '/timeout', value: i ? 240 : 120 }]
     : [{ file: 'workflows/wf-1.yaml', content: i ? 'second' : 'first' }] }; });
   const shown = await service.candidates('wf-1');
-  await expect(service.create('human', { workflowId: 'wf-1', itemIds: f.items.map(i => i.itemId), inputDigest: shown.inputDigest,
-    instructions: '', requestId: 'conflicts' })).rejects.toMatchObject({ code: 'SOURCE_CHANGED', details: { reasonCode: 'PROPOSAL_BASELINE_CHANGED' } });
-  expect(f.calls).toHaveLength(0);
+  const created = await service.create('human', { workflowId: 'wf-1', itemIds: f.items.map(i => i.itemId), inputDigest: shown.inputDigest,
+    instructions: '', requestId: 'conflicts' });
+  expect(created.input.items.map(item => item.proposal)).toEqual(f.items.map(item => item.proposal));
+  expect(f.calls).toHaveLength(1);
 });
 it('permits the owning task to revise a frozen processing original after its live source disappears', async () => {
   const service = await setup();
@@ -84,7 +87,7 @@ it('permits the owning task to revise a frozen processing original after its liv
   expect(next.revision).toBe(2);
   expect(next.input.baseline).toEqual(first.input.baseline);
 });
-it('preserves strict evidence freezing for current proposals', async () => {
+it('marks incomplete evidence without blocking drafts and still redacts credentials', async () => {
   const plain = await setup();
   for (const m of repairReleaseMigrations) for (const sql of m.sql) await f.db.exec(f.db.dialect.renderDdl(sql));
   const coordinator = createProposalCoordinator({ db: f.db, read: wf => plain.proposalSnapshot(wf) });
@@ -92,9 +95,11 @@ it('preserves strict evidence freezing for current proposals', async () => {
   f.items[0].proposal = { baseSpecDigest: 'a'.repeat(64), operations: [{ op: 'replace', nodeId: 'report', path: '/prompt', value: 'old' }] };
   f.items[0].context = { diagnoses: [{ flowId: 'run', evidence: [{ eventId: 'missing', payload: null, missing: true }] }] };
   const shown = await service.candidates('wf-1');
-  await expect(service.create('human', { workflowId: 'wf-1', itemIds: ['item-0'], inputDigest: shown.inputDigest,
-    instructions: '', requestId: 'missing-evidence' })).rejects.toMatchObject({ code: 'INVALID_INPUT', details: { reasonCode: 'EVIDENCE_INCOMPLETE' } });
-  expect(f.calls).toHaveLength(0);
+  const partial = await service.create('human', { workflowId: 'wf-1', itemIds: ['item-0'], inputDigest: shown.inputDigest,
+    instructions: '', requestId: 'missing-evidence' });
+  expect(partial.input.items[0].context?.evidencePacket).toMatchObject({ missingEvidence: true });
+  expect(f.calls).toHaveLength(1);
+  await service.cancel('human', partial.taskId, 1);
   f.items[0].context = { diagnoses: [{ flowId: 'run', evidence: [{ eventId: 'safe', payload: { text: 'complete evidence', authorization: 'credential-placeholder' } }] }] };
   const fresh = await service.candidates('wf-1');
   const created = await service.create('human', { workflowId: 'wf-1', itemIds: ['item-0'], inputDigest: fresh.inputDigest, instructions: '', requestId: 'safe-evidence' });

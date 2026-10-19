@@ -90,7 +90,7 @@ export type RepairExecutionReadRequest = RepairDispatchRequest & { jobId: string
  */
 export interface RepairExecutionPort {
   integrationVersion?: 'workflow-proposal-plan/v1';
-  resolveBaseline(workflowId: string): Promise<RepairBaseline>;
+  resolveBaseline(workflowId: string, purpose?: 'draft'): Promise<RepairBaseline>;
   dispatch(input: RepairDispatchRequest): Promise<{ jobId: string }>;
   status(input: RepairExecutionReadRequest): Promise<RepairJobStatus>;
   readResult(input: RepairExecutionReadRequest): Promise<RepairGeneratedResult>;

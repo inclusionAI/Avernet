@@ -1,16 +1,10 @@
 import { useState } from 'react'
 import { repairBatches } from '../../../api/repair-batches'
 import type { RepairInboxItem } from '../../../../server/contracts/repair-workbench'
-const labels = { ready:'已整理',queued:'建议整理排队中',organizing:'正在整理建议',retryable:'整理待重试',unavailable:'整理服务暂不可用，可单独处理一条原建议，或恢复服务后重试',uncertain:'待整合',stale:'旧基线建议：生成时会保留原始证据，基于最新生效 Pack 重新评估，不直接套用旧修改' }
 export default function ProposalEvidence({item,canEdit=false}:{item:RepairInboxItem;canEdit?:boolean}) {
-  const [retry,setRetry]=useState('')
   const plan=item.aggregation
   if(!plan)return null
   return <div className="mt-2 text-xs text-muted-foreground">
-    {plan.status!=='ready'&&<p role="status">{labels[plan.status]}</p>}
-    {plan.reevaluation&&plan.status!=='stale'&&<p role="status">{labels.stale}</p>}
-    {canEdit&&['unavailable','retryable'].includes(plan.status)&&<button type="button" disabled={retry==='正在请求重试'} className="text-primary underline" onClick={async()=>{setRetry('正在请求重试');try{await repairBatches.retryProposalIntegration(item.workflowId);setRetry('已请求重试，整理结果将由后台更新')}catch{setRetry('暂时无法重试整理，请稍后重试')}}}>重试整理</button>}
-    {retry&&<p role="status">{retry}</p>}
     {plan.causes?.length ? <details className="mt-1"><summary>原因与待确认项</summary>{plan.causes.map((cause,i)=><p key={i}>{ {supported:'证据支持',hypothesis:'推测',unknown:'未知'}[cause.certainty]}：{cause.title}</p>)}{plan.unknowns?.map((text,i)=><p key={i}>{text}</p>)}</details> : null}
     <details className="mt-1"><summary className="cursor-pointer">原始建议与证据（{plan.originals.length}）</summary>
       {plan.originals.map(original=><article key={original.itemId} className="mt-2 border-t border-border pt-2">

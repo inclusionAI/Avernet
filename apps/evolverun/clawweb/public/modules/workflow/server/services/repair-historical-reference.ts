@@ -2,7 +2,6 @@ import {workflowSnapshotKey, type WorkflowSnapshotBinding, type WorkflowSnapshot
 import {itemSnapshot, itemSnapshotKey} from '../contracts/repair-version-scope.js';
 import {RepairBatchError,digestRepairJson,type RepairItem,type RepairBaseline,type RepairBatchInput} from '../contracts/repair-batch.js';
 import type {RepairSelectionRequest,RepairInboxItem} from '../contracts/repair-workbench.js';
-import {selectionConflicts} from '../contracts/repair-selection.js';
 export {historicalReference} from '../contracts/repair-version-scope.js';
 function changed(reasonCode:string,itemIds:string[]=[]):never{
  throw new RepairBatchError('SOURCE_CHANGED',reasonCode==='TARGET_VERSION_CHANGED'?'当前生效版本已变化，选择与要求已保留，请核对新目标后提交':'所选建议的来源版本需要核对，其他选择与要求已保留',{reasonCode,itemIds});
@@ -25,9 +24,7 @@ export function freezeReference(item:RepairItem,target:WorkflowSnapshotRef|undef
 }
 /** All explicitly selected goals are rewritten together against the current files, never old patches applied sequentially. */
 export function historicalIntegration(items:RepairItem[],baseline:RepairBaseline):NonNullable<RepairBatchInput['integration']>{
- for(const item of items)if(!itemSnapshot(item)||!Array.isArray(item.proposal?.operations)&&!Array.isArray(item.proposal?.patches))changed('PLAN_SCOPE_INCOMPLETE',[item.itemId]);
- const scalars=selectionConflicts(items).filter(conflict=>!/prompt|instruction|content|body/i.test(conflict.path));
- if(scalars.length)throw new RepairBatchError('INVALID_INPUT','所选目标要求不同取值，请保留一种方案',{reasonCode:'PLAN_CONFLICT',conflicts:scalars});
+ for(const item of items)if(!itemSnapshot(item))changed('PLAN_SCOPE_INCOMPLETE',[item.itemId]);
  return {schemaVersion:'workflow-proposal-plan/v1',baselineSpecDigest:baseline.specDigest,plans:[{id:digestRepairJson(['historical-reference/v1',baseline,items.map(i=>i.itemId)]),originalItemIds:items.map(i=>i.itemId),
  goals:items.map(i=>`核对原始建议 ${i.itemId} 的完整目标，在当前目标文件中保留适用约束；历史来源仅作参考，不重放旧补丁。`),relation:'complementary'}]};
 }
