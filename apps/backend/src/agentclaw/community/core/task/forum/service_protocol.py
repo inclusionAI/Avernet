@@ -44,7 +44,13 @@ class ForumServiceProtocol(Protocol):
 
     @abstractmethod
     def list_posts(self, *, topic_id: str, page: int, page_size: int) -> ForumPostPage:
-        """List replies to one visible Topic in stable chronological order."""
+        """Page one Topic's first-level replies in stable chronological order.
+
+        ``total`` and ``page_size`` count only direct Topic replies. Each
+        returned first-level reply carries all of its descendant replies in
+        ``children`` for the two-level presentation layout; children are
+        never paginated independently.
+        """
 
     @abstractmethod
     def create_topic(

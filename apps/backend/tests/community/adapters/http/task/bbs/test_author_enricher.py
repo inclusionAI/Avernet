@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from agentclaw.community.adapters.http.task.bbs.author_enricher import (
@@ -168,6 +169,20 @@ def test_batches_duplicate_bot_authors():
     assert out[0].display_name == "Bot A"
     assert out[1].display_name == "Bot A"
     assert out[2].display_name is None  # bot-b had no name → null
+
+
+def test_bot_display_name_enrichment_reaches_child_reply_group():
+    bot_service = _BotService({"bot-x": {"bot_name": "Bot X"}})
+    injector = _Injector({BotServiceProtocol: bot_service})
+    child = _post(AUTHOR_TYPE_BOT, "bot-x")
+    parent = _post(AUTHOR_TYPE_HUMAN, "user-a")
+    grouped = replace(parent, children=(child,))
+
+    out = enrich_bot_display_names([grouped], request=_Request(injector))
+
+    assert out[0].display_name is None
+    assert out[0].children[0].display_name == "Bot X"
+    assert bot_service.calls == ["bot-x"]
 
 
 def test_empty_input_returns_empty_list():

@@ -159,32 +159,75 @@ def test_list_posts_orders_chronologically_and_keeps_total_on_empty_page(db):
     assert beyond.items == ()
 
 
-def test_list_posts_returns_reference_and_derives_floor_from_full_order(db):
+def test_list_posts_returns_reference_and_two_level_floor_groups(db):
     repo = ForumRepository(db)
     topic = _topic(repo, "topic", title="topic")
-    first = _reply(repo, topic.topic_id, "post-1", "first")
-    second = _reply(repo, topic.topic_id, "post-2", "second")
-    third = _reply(
+    first_floor = _reply(repo, topic.topic_id, "post-1", "first floor")
+    second_floor = _reply(repo, topic.topic_id, "post-2", "second floor")
+    child = _reply(
         repo,
         topic.topic_id,
         "post-3",
-        "third",
-        reply_to_post_id=first.post_id,
+        "reply to first floor",
+        reply_to_post_id=first_floor.post_id,
+    )
+    grandchild = _reply(
+        repo,
+        topic.topic_id,
+        "post-4",
+        "reply to the child",
+        reply_to_post_id=child.post_id,
     )
 
-    full = repo.list_posts(topic_id=topic.topic_id, offset=0, limit=20)
-    page = repo.list_posts(topic_id=topic.topic_id, offset=2, limit=1)
+    first_page = repo.list_posts(topic_id=topic.topic_id, offset=0, limit=1)
+    second_page = repo.list_posts(topic_id=topic.topic_id, offset=1, limit=1)
+    beyond = repo.list_posts(topic_id=topic.topic_id, offset=2, limit=1)
 
-    assert [item.post_id for item in full.items] == [
-        first.post_id,
-        second.post_id,
-        third.post_id,
-    ]
-    assert full.items[2].reply_to_post_id == first.post_id
-    assert full.items[2].reply_to_floor_no == 1
-    assert page.items[0].post_id == third.post_id
-    assert page.items[0].reply_to_post_id == first.post_id
-    assert page.items[0].reply_to_floor_no == 1
+    assert first_page.total == 2
+    assert [item.post_id for item in first_page.items] == [first_floor.post_id]
+    assert [
+        item.post_id for item in first_page.items[0].children
+    ] == [child.post_id, grandchild.post_id]
+    assert first_page.items[0].children[0].reply_to_post_id == first_floor.post_id
+    assert first_page.items[0].children[0].reply_to_floor_no == 1
+    # A reply to a child has no floor-bearing target; it stays in the same group.
+    assert first_page.items[0].children[1].reply_to_post_id == child.post_id
+    assert first_page.items[0].children[1].reply_to_floor_no is None
+
+    assert second_page.items[0].post_id == second_floor.post_id
+    assert second_page.items[0].children == ()
+    assert beyond.total == 2
+    assert beyond.items == ()
+
+
+def test_list_topics_counts_nested_replies_and_latest_child_activity(db):
+    repo = ForumRepository(db)
+    topic = _topic(repo, "topic", title="topic")
+    first_floor = _reply(
+        repo, topic.topic_id, "post-1", "first floor"
+    )
+    child = _reply(
+        repo,
+        topic.topic_id,
+        "post-2",
+        "child",
+        reply_to_post_id=first_floor.post_id,
+    )
+    grandchild = _reply(
+        repo,
+        topic.topic_id,
+        "post-3",
+        "grandchild",
+        reply_to_post_id=child.post_id,
+    )
+
+    result = repo.list_topics(keyword=None, status=None, offset=0, limit=20)
+
+    assert result.items[0].reply_count == 3
+    assert result.items[0].latest_activity_at and (
+        result.items[0].latest_activity_at.replace(tzinfo=None)
+        == grandchild.created_at.replace(tzinfo=None)
+    )
 
 
 def test_list_posts_allows_closed_topic_but_hides_cross_tenant_topic(db):

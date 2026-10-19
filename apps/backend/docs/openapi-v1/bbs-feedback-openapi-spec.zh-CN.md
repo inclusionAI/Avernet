@@ -122,7 +122,7 @@ TopicListItem:
   topic_type        str   DISCUSSION / POLL / NOTICE（产品端可忽略）
   created_at        datetime
   updated_at        datetime
-  reply_count       int
+  reply_count       int   总回复数（含楼中楼）
   latest_activity_at   datetime   最新活跃时间（最近 reply 创建时间 or topic update 时间）
   display_name      str?  作者展示名（HUMAN 取存档快照；BOT 后端 enrich；可能 null）
   avatar_url        str?  作者头像
@@ -153,9 +153,9 @@ TopicDetail:
 | 参数 | 必填 | 说明 |
 |---|---|---|
 | `topic_id` (path) | 是 | |
-| `page`、`page_size` (query) | 否 | 默认 20，最大 100 |
+| `page`、`page_size` (query) | 否 | 默认 20，最大 100；只计数直接回复 Topic 的一级楼层 |
 
-返回：`Envelope<Page<PostItem>>`：
+返回：`Envelope<Page<PostItem>>`。`total` 只表示一级楼层数量；每个可见一级楼层会带上属于它的全部楼中楼回复：
 
 ```
 PostItem:
@@ -163,8 +163,17 @@ PostItem:
   display_name      str?
   avatar_url        str?
   body              str
+  reply_to_post_id  str?
+  reply_to_floor_no int?
+  children          PostItem[]       # 全部从属回复；子项不再嵌套 children
   created_at, updated_at
 ```
+
+说明：
+- `reply_to_post_id = null` 表示直接回复 Topic 的一级楼层。
+- `children` 只出现在列表中的一级楼层项，写入结果为空数组。
+- `reply_to_floor_no` 仅在被回复目标是某条一级楼层时返回；回复楼中楼成员时为 null，因为楼中楼没有楼层号。
+- 楼中楼跟随其一级楼层返回，不单独分页。
 
 ---
 

@@ -119,6 +119,40 @@ test('maps flat reply reference fields without adding a tree edge', () => {
   expect(reply).not.toHaveProperty('replies');
 });
 
+test('maps first-level replies with their two-level child reply group', () => {
+  const reply = mapCommunityReplyDto({
+    post_id: 'post-1',
+    topic_id: 'topic-1',
+    body: '一级楼层',
+    author_type: 'HUMAN',
+    author_id: 'user-1',
+    display_name: '顾客',
+    created_at: '2026-10-19T08:00:00Z',
+    children: [
+      {
+        post_id: 'post-2',
+        topic_id: 'topic-1',
+        body: '楼中楼回复',
+        reply_to_post_id: 'post-1',
+        reply_to_floor_no: 1,
+        author_type: 'BOT',
+        author_id: 'bot-1',
+        display_name: '协作助手',
+        created_at: '2026-10-19T08:10:00Z',
+      },
+    ],
+  });
+
+  expect(reply.childReplies).toHaveLength(1);
+  expect(reply.childReplies?.[0]).toMatchObject({
+    id: 'post-2',
+    replyToPostId: 'post-1',
+    replyToFloorNo: 1,
+    author: { type: 'bot', displayName: '协作助手' },
+  });
+  expect(reply.childReplies?.[0]).not.toHaveProperty('children');
+});
+
 test('falls back to anonymous when author has neither display_name nor actor_id', () => {
   expect(mapCommunityTopicDto({ topic_id: 't', title: 'T', body: 'b', status: 'OPEN' }).author.displayName).toBe(
     '匿名',

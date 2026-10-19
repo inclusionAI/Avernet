@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
@@ -105,11 +106,20 @@ async def test_get_topic_returns_full_body_without_posts():
 
 
 @pytest.mark.asyncio
-async def test_list_posts_returns_separate_page_contract():
+async def test_list_posts_returns_first_level_page_with_child_group():
+    child = replace(
+        _post(),
+        post_id="post_2",
+        body="Child reply",
+        reply_to_post_id="post_1",
+        reply_to_floor_no=1,
+    )
+    parent = replace(_post(), children=(child,))
+
     class Service:
         def list_posts(self, **kwargs):
             assert kwargs == {"topic_id": "topic_1", "page": 1, "page_size": 20}
-            return ForumPostPage(total=1, items=(_post(),))
+            return ForumPostPage(total=1, items=(parent,))
 
     payload = await list_posts(
         topic_id="topic_1",
@@ -120,7 +130,12 @@ async def test_list_posts_returns_separate_page_contract():
 
     assert payload.data is not None
     assert payload.data.total == 1
-    assert payload.data.items[0].model_dump()["post_id"] == "post_1"
+    item = payload.data.items[0]
+    assert item.model_dump()["post_id"] == "post_1"
+    assert item.children[0].post_id == "post_2"
+    assert item.children[0].reply_to_post_id == "post_1"
+    assert item.children[0].reply_to_floor_no == 1
+    assert item.children[0].children == []
 
 
 @pytest.mark.asyncio

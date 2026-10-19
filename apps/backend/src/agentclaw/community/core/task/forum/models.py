@@ -69,9 +69,12 @@ class ForumPostRecord:
     avatar_url: str | None = None
     # A reply references at most one existing Post in the same Topic. Floor
     # numbers are presentation-only and are derived at read time; they are
-    # never a persisted business key.
+    # never a persisted business key. ``children`` is also read-only: list
+    # views can group all descendants under their first-level floor, while
+    # write results leave it empty.
     reply_to_post_id: str | None = None
     reply_to_floor_no: int | None = None
+    children: tuple['ForumPostRecord', ...] = ()
 
 
 @dataclass(frozen=True)

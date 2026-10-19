@@ -30,8 +30,13 @@ export interface CommunityReply {
   createdAt: string;
   /** Optional Post being referenced. The list remains flat; this is not a tree edge. */
   replyToPostId?: string;
-  /** Read-only floor number derived by the backend from current chronological order. */
+  /** Read-only floor number derived by the backend from first-level reply order. */
   replyToFloorNo?: number;
+  /**
+   * Presentation-only replies shown inside this first-level floor.
+   * The write contract remains a single `reply_to_post_id`.
+   */
+  childReplies?: CommunityReply[];
 }
 
 export interface CommunityTopicPage {
@@ -39,7 +44,7 @@ export interface CommunityTopicPage {
   total: number;
 }
 
-/** 回帖分页（后端 GET /topics/{id}/posts 返回 Envelope<Page<PostItem>>）。 */
+/** 回帖分页；total 只计数一级楼层，children 跟随当前页所属楼层返回。 */
 export interface CommunityReplyPage {
   items: CommunityReply[];
   total: number;

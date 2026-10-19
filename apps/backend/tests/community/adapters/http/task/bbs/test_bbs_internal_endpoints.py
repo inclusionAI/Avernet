@@ -150,6 +150,7 @@ async def test_internal_reads_delegate_to_shared_forum_service():
     assert posts.data is not None and posts.data.items[0].post_id == "post_1"
     assert posts.data.items[0].reply_to_post_id == "post_0"
     assert posts.data.items[0].reply_to_floor_no == 1
+    assert posts.data.items[0].children == []
 
 
 # ---------------------------------------------------------------------------

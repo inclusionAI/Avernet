@@ -212,31 +212,79 @@ class ForumRepository(ForumRepositoryProtocol):
             if topic is None:
                 raise NotFound("topic not found")
 
-            query = db.query(ForumPostModel).filter(ForumPostModel.topic_id == topic_id)
-            total = query.count()
-            ordered_ids = (
-                db.query(ForumPostModel.post_id)
+            rows = (
+                db.query(ForumPostModel)
                 .filter(ForumPostModel.topic_id == topic_id)
                 .order_by(ForumPostModel.gmt_create.asc(), ForumPostModel.id.asc())
                 .all()
             )
-            floor_by_post_id = {
-                row.post_id: floor for floor, row in enumerate(ordered_ids, 1)
-            }
-            rows = (
-                query.order_by(ForumPostModel.gmt_create.asc(), ForumPostModel.id.asc())
-                .offset(offset)
-                .limit(limit)
-                .all()
+            first_level_rows = tuple(
+                row for row in rows if row.reply_to_post_id is None
             )
+            total = len(first_level_rows)
+            visible_rows = first_level_rows[offset : offset + limit]
+            floor_by_post_id = {
+                row.post_id: floor
+                for floor, row in enumerate(first_level_rows, start=1)
+            }
+
+            children_by_parent: dict[str, list[ForumPostModel]] = {}
+            for row in rows:
+                if row.reply_to_post_id is not None:
+                    children_by_parent.setdefault(
+                        row.reply_to_post_id, []
+                    ).append(row)
+
             items = tuple(
                 replace(
                     row.to_record(),
-                    reply_to_floor_no=floor_by_post_id.get(row.reply_to_post_id),
+                    reply_to_floor_no=None,
+                    children=tuple(
+                        replace(
+                            child.to_record(),
+                            reply_to_floor_no=floor_by_post_id.get(
+                                child.reply_to_post_id
+                            ),
+                        )
+                        for child in self._descendant_rows(
+                            root_post_id=row.post_id,
+                            all_rows=rows,
+                            children_by_parent=children_by_parent,
+                        )
+                    ),
                 )
-                for row in rows
+                for row in visible_rows
             )
             return ForumPostPage(total=total, items=items)
+
+    @staticmethod
+    def _descendant_rows(
+        *,
+        root_post_id: str,
+        all_rows: list[ForumPostModel],
+        children_by_parent: dict[str, list[ForumPostModel]],
+    ) -> list[ForumPostModel]:
+        """Collect all descendants of one first-level reply without recursion.
+
+        Storage keeps a single parent edge. Every descendant therefore belongs
+        to the same two-level presentation group, including replies addressed
+        to another child. The returned list preserves global chronological
+        order from ``all_rows`` and cycle guards make malformed data safe.
+        """
+        descendant_ids: set[str] = set()
+        queue = [root_post_id]
+        while queue:
+            parent_id = queue.pop(0)
+            if parent_id in descendant_ids:
+                continue
+            descendant_ids.add(parent_id)
+            queue.extend(
+                child.post_id
+                for child in children_by_parent.get(parent_id, [])
+                if child.post_id not in descendant_ids
+            )
+        descendant_ids.discard(root_post_id)
+        return [row for row in all_rows if row.post_id in descendant_ids]
 
     def create_topic(
         self,

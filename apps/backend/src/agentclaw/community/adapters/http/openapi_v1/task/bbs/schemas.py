@@ -309,7 +309,7 @@ class TopicListItem(BaseModel):
     created_at: datetime = Field(description="UTC creation timestamp.")
     updated_at: datetime = Field(description="UTC last-modified timestamp.")
     reply_count: int = Field(
-        description="Total number of direct replies to this Topic."
+        description="Total number of replies to this Topic, including nested replies."
     )
     latest_activity_at: datetime = Field(
         description="Latest activity timestamp: the latest reply creation time, "
@@ -402,9 +402,18 @@ class PostItem(BaseModel):
     reply_to_floor_no: int | None = Field(
         default=None,
         description=(
-            "Read-only floor number of the referenced Post, derived from the "
-            "current chronological reply order. Not persisted; never a stable "
-            "business identifier."
+            "Read-only floor number when the referenced Post is a first-level "
+            "reply. Null when the target is a child reply and therefore has "
+            "no floor number. Not persisted; never a stable business identifier."
+        ),
+    )
+    children: list["PostItem"] = Field(
+        default_factory=list,
+        description=(
+            "All descendant replies shown inside this first-level floor's "
+            "two-level reply group. Empty on write results and on first-level "
+            "replies that have no child replies. Children never contain another "
+            "children array in the list view."
         ),
     )
     created_at: datetime = Field(description="UTC creation timestamp.")
@@ -412,7 +421,9 @@ class PostItem(BaseModel):
 
     @classmethod
     def from_record(cls, post: ForumPostRecord) -> "PostItem":
-        return cls(**post.__dict__)
+        payload = dict(post.__dict__)
+        payload["children"] = [cls.from_record(child) for child in post.children]
+        return cls(**payload)
 
 
 # ---------------------------------------------------------------------------

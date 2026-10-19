@@ -42,7 +42,12 @@ class ForumRepositoryProtocol(Protocol):
 
     @abstractmethod
     def list_posts(self, *, topic_id: str, offset: int, limit: int) -> ForumPostPage:
-        """List replies after confirming the Topic is visible."""
+        """Page first-level replies after confirming the Topic is visible.
+
+        ``offset``/``limit`` and the returned total apply only to direct
+        Topic replies. Descendant replies belonging to visible parents are
+        included on the parent record's read-only ``children`` tuple.
+        """
 
     @abstractmethod
     def create_topic(

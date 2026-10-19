@@ -140,7 +140,7 @@ async def list_posts(
     page_params: PageParamsDep,
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[Page[PostItem]]:
-    """Page through a Topic's replies in stable chronological order."""
+    """Page first-level replies; child replies follow their parent floor."""
     result = service.list_posts(
         topic_id=topic_id,
         page=page_params.page,
