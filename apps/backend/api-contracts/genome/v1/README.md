@@ -186,7 +186,9 @@ trees (`canonical_tree_bytes` in
   or `..` segment, no control character (NUL included), no backslash and no
   drive letter (the path rule of the patch schema's `skillFilePath`; a NUL
   or control character in a name would be recorded but fail when apply
-  writes the file), and **unique**: a blob that lists one path twice is
+  writes the file), no segment longer than 255 bytes of UTF-8 (a file
+  system's limit on one name; JSON Schema cannot count bytes, so the Registry
+  checks it, for resource paths and patch file paths too), and **unique**: a blob that lists one path twice is
   refused, because it would not identify a single tree. No member path may
   be a whole-segment prefix of another (`a.md` with `a.md/b.md`): no file
   system holds both, and apply would write `a.md`, then fail on

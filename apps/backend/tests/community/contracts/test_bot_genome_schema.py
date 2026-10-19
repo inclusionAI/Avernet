@@ -274,6 +274,7 @@ def _tree_members(data: bytes) -> list[tuple[str, bytes]]:
     assert not colliding, f"tree members {colliding} are files and also directories of other members"
     for name in names:
         assert _SAFE_MEMBER_PATH.match(name), f"tree member path {name!r} is not a safe relative path"
+        assert all(len(s.encode()) <= 255 for s in name.split("/")), f"a segment of {name!r} is over 255 bytes"
     return members
 
 
