@@ -289,9 +289,12 @@ describe('ChatPanel interactive', () => {
         {...baseProps}
       />,
     );
-    expect(screen.getByText('已连接')).toBeInTheDocument();
+    const status = screen.getByRole('status', { name: '已连接' });
+    expect(status).toHaveTextContent('已连接');
     // v1.4：超长标题下连接状态不换行不被挤占（shrink-0 + nowrap，收缩只由标题承担）
-    expect(screen.getByText('已连接')).toHaveClass('shrink-0', 'whitespace-nowrap');
+    expect(status).toHaveClass('shrink-0', 'whitespace-nowrap');
+    // v1.5 窄宽收纳：已连接文案 <lg 仅保绿点，可访问名由 aria-label 承接。
+    expect(screen.getByText('已连接')).toHaveClass('hidden', 'lg:inline');
   });
 
   it('sessionTitle 传入时顶栏显示会话标题（与协作群顶栏一致），缺省回退 Bot 名称', () => {

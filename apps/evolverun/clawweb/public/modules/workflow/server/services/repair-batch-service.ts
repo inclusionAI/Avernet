@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { repairStage } from '../observability/repair-diagnostics.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import {
-  RepairBatchError, boundedRepairJson, canonicalRepairJson, digestRepairJson, validateRepairItem, validateRepairItemStructure,
+  RepairBatchError, boundedRepairJson, canonicalRepairJson, digestRepairJson, validateRepairItem, validateRepairItemStructure, validateRepairModelInputs,
   MAX_ITEMS, MAX_REQUEST_BYTES, MAX_INSTRUCTIONS_CHARS, MAX_RESULT_BYTES, MAX_REPORT_BYTES,
   type RepairBatchInput, type RepairItem, type RepairRevision, type StoredRepairItem,
 } from '../contracts/repair-batch.js';
@@ -308,11 +308,13 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         fail('INVALID_INPUT', 'Invalid issue preview scope');
       }
       const snapshot = await this.readSnapshot(workflowId, includeHistorical);
-      const versionItems=snapshot.items.filter(item=>inVersionScope(item,activeSnapshot,versionScope));
+      if (query.snapshotKey !== undefined && !requiredText(query.snapshotKey, 2048)) fail('INVALID_INPUT', 'Invalid snapshot key');
+      const versionItems=snapshot.items.filter(item=>inVersionScope(item,activeSnapshot,versionScope) && (query.snapshotKey === undefined || (itemSnapshotKey(item) ?? 'unresolved') === query.snapshotKey));
       const versionInputDigest=activeSnapshot===undefined?snapshot.inputDigest:versionDigest(versionItems);
+      // Preserve the full model work unit; signature filters apply to presented cards.
       let presentation = versionItems;
       if (!query.rawItems && this.proposals && this.execution) {
-        try { presentation = await this.proposals.present(workflowId, versionItems, this.sources.activeSnapshot?undefined:await this.execution.resolveBaseline(workflowId)); }
+        try { presentation = await this.proposals.present(workflowId, presentation, this.sources.activeSnapshot?undefined:await this.execution.resolveBaseline(workflowId)); }
         catch { /* A failed aggregation/read never removes original suggestions or breaks the issue list. */ }
       }
       const visibleItems = presentation.filter(item => matchesScope(item, { signature: query.signature }) && (includeHistorical ||
@@ -796,6 +798,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       else {
         boundedRepairJson(input.draft, MAX_RESULT_BYTES); boundedRepairJson(input.checks, MAX_REPORT_BYTES);
         const draft = input.draft; const checks = input.checks;
+        validateRepairModelInputs(draft.modelInputs, current.input);
         const ids = current.input.items.map(item => item.itemId).sort();
         const itemResults = draft.itemResults as Array<{ itemId: string; status: string; reason: string }>;
         const coverage = checks.coverage as Array<{ itemId: string }>;

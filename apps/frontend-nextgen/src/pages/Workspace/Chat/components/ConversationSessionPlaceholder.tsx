@@ -1,4 +1,5 @@
 import { ChatMessageSkeleton } from '@/components/Workspace/ChatPanel/ChatMessageSkeleton';
+import { PrimaryNavToggle } from '@/components/Workspace/PrimaryNav';
 import { Button, Empty, IconButton } from '@/components/ui';
 import { List, MessageSquare, Plus } from 'lucide-react';
 import type { ConversationSessionPlaceholderModel } from '../hooks/useConversationSessionPlaceholder';
@@ -12,7 +13,11 @@ export function ConversationSessionPlaceholder({
 }) {
   return (
     <section aria-label={`${model.botName} 的会话`} className="flex min-w-0 flex-1 flex-col bg-background">
-      <div className="ml-12 mt-2 self-start lg:hidden">
+      {/* 占位顶行（加载/失败/空态也保留 <lg 顶行双入口）：壳内一级导航入口与页头同构，
+          置于「打开会话列表」左侧——无页头阶段不回退到壳的独立条带，避免阶段切换条带闪跳；
+          壳外/精简路由下导航入口自动为 null，仅剩会话列表入口。 */}
+      <div className="ml-12 mt-2 flex items-center gap-1 self-start lg:hidden">
+        <PrimaryNavToggle />
         <IconButton label="打开会话列表" icon={<List className="h-4 w-4" />} onClick={onOpenSessionList} />
       </div>
       {model.status === 'loading' ? (

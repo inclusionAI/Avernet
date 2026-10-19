@@ -1,5 +1,5 @@
 import { WORKSPACE_RIGHT_PANEL_LAYOUT } from '@/components/Workspace/workspacePanelLayout';
-import type { DeliveryPolicy, GroupView, IdentityView, SessionView } from '@/domain/collaboration';
+import type { GroupUpdatePatch, GroupView, IdentityView, SessionView } from '@/domain/collaboration';
 import type { DingTalkBindingState } from '@/services/workspace/channelBindingService';
 import type { PolicyResult } from '@/services/workspace/groupService';
 import type { DomainResult } from '@/services/workspace/identityService';
@@ -20,11 +20,7 @@ export interface WorkspaceManagePanelsProps {
   authenticatedUserId?: string | null;
   authenticatedUserName?: string | null;
   onClose: () => void;
-  onUpdateGroup: (patch: {
-    name?: string;
-    visibility?: 'private' | 'public';
-    deliveryPolicy?: DeliveryPolicy;
-  }) => Promise<DomainResult<GroupView> | null> | void;
+  onUpdateGroup: (patch: GroupUpdatePatch) => Promise<DomainResult<GroupView> | null> | void;
   onDissolveGroup: () => void;
   onLeaveGroup: (actorId: string) => Promise<boolean>;
   onAddGroupMember: (actorId: string) => Promise<boolean>;

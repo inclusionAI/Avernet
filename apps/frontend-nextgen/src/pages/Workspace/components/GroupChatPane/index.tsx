@@ -260,10 +260,14 @@ export function GroupChatPane(props: GroupChatPaneProps) {
             />
           </div>
         ) : null}
+        {/* 协作群副屏口径：加宽至 480（不动 WORKSPACE_RIGHT_PANEL_LAYOUT 共用宽度）；
+            不随点外收起，仅顶栏「副屏」钮/悬浮「收起」钮关闭。 */}
         <ChatLayoutPanelSlot
           ref={panelRef}
           onAction={handlePanelAction}
           bridge={chatBridge}
+          panelWidth={480}
+          dismissOnOutside={false}
           onOpenStateChange={onSidePaneIsOpenChange}
         />
       </ChatLayout>

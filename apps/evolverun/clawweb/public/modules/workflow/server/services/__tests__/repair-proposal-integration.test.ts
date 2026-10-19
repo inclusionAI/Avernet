@@ -259,3 +259,31 @@ it('organizes version-bound sources without reading Git or using the active depl
   expect(result.items[0].aggregation?.status).toBe('ready');
   expect(result.items[0].aggregation?.originals).toHaveLength(2);
 });
+
+it.each(['current','historical'] as const)('keeps cross-issue plans and conflicts intact in %s signature reads',async(versionScope)=>{
+ const {c,read,advance,classify}=await setup(3);
+ const binding={status:'resolved' as const,snapshot:{kind:'deployment' as const,workflowId:'wf-1',workflowVersion:39,deployNumber:34,configDigest:'a'.repeat(64)}};
+ f.sourcePort.activeSnapshot=async()=>binding;
+ f.items.forEach((item,i)=>{item.context={...item.context,signature:`issue-${i}`,sourceSnapshot:binding};item.sources=item.sources.map(source=>({...source,signature:`issue-${i}`}));});
+ const conflict={itemIds:['item-1','item-2'],nodeId:'query',path:'/executor/prompt',reason:'Choose one output constraint'};
+ classify.mockResolvedValueOnce({plans:[{itemIds:['item-0','item-1'],title:'Preserve both goals',changes:['input and output'],relation:'complementary'},
+  {itemIds:['item-2'],title:'Alternative goal',changes:['different output'],relation:'complementary'}],conflicts:[conflict]});
+ await c.tick();advance(3000);await c.tick();
+ const service=createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort,c);
+ const full=await service.candidates('wf-1');
+ expect(full.items[0].aggregation).toMatchObject({status:'ready',itemIds:['item-0','item-1'],conflicts:[conflict]});
+ if(versionScope==='historical')f.sourcePort.activeSnapshot=async()=>({...binding,snapshot:{...binding.snapshot,workflowVersion:40,deployNumber:35}});
+ for(const signature of ['issue-0','issue-1']){
+  const page=await service.candidates('wf-1',{signature,versionScope,...versionScope==='historical'?{snapshotKey:JSON.stringify(['deployment','wf-1',39,34])}:{}});
+  expect(page.items).toHaveLength(1);
+  expect(page.items[0].aggregation).toEqual(full.items[0].aggregation);
+  expect(page.page.total).toBe(1);
+ }
+ if(versionScope==='current'){
+  const snapshot=await read('wf-1');
+  const prepared=await c.prepare('wf-1',snapshot.items.filter(item=>item.itemId!=='item-2'),{...await f.executionPort.resolveBaseline('wf-1'),activeDeployNumber:34});
+  expect(prepared.integration?.plans[0].id).toBe(full.items[0].aggregation!.id);
+  expect(prepared.integration?.plans[0].originalItemIds).toEqual(['item-0','item-1']);
+ }
+ expect(classify).toHaveBeenCalledTimes(1);
+});

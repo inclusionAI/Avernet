@@ -122,3 +122,33 @@ it('counts distinct frozen runs from suggestion and diagnosis context alongside 
  mount(detail);await userEvent.click(screen.getByRole('tab',{name:'问题与方案'}));
  expect(screen.getByText(/依据覆盖 4 个运行/)).toBeVisible();expect(screen.queryByText(/来源运行数未知/)).not.toBeInTheDocument();
 });
+
+it('shows the selected revision model prompts and optional index while preserving original evidence',async()=>{
+ const detail=fixture();
+ detail.latestAttempt.draft!.modelInputs=[
+  {itemId:'source',coreInput:'Exact core sent for source <script>alert(1)</script>',materials:{root:'/ais/repair-materials/one',files:[{kind:'event',path:'event-one.json',bytes:500,sha256:'abc',purpose:'Read on conflicting evidence',itemIds:['source']}] }},
+  {itemId:'source-two',coreInput:'Second call core',materials:{root:'/ais/repair-materials/two',files:[]}},
+ ];
+ const old={...detail.latestAttempt,revision:0,draft:{candidateCommit:'f'.repeat(40)}};detail.revisions.push(old);
+ mount(detail);const user=userEvent.setup();await user.click(screen.getByRole('tab',{name:'问题与方案'}));
+ expect(screen.getByText('原始建议与证据',{selector:'summary'})).toBeVisible();
+ const cores=screen.getAllByText('模型核心输入',{selector:'summary'});
+ expect(cores).toHaveLength(2);await user.click(cores[0]);await user.click(cores[1]);
+ expect(screen.getByText('Exact core sent for source <script>alert(1)</script>')).toBeVisible();
+ expect(screen.getByText('Second call core')).toBeVisible();
+ expect(document.querySelector('script')).toBeNull();
+ const indices=screen.getAllByText('可选材料索引',{selector:'summary'});await user.click(indices[0]);
+ expect(screen.getByText(/event-one.json/)).toBeVisible();
+ expect(screen.getByText(/Read on conflicting evidence/)).toBeVisible();
+ await user.selectOptions(screen.getByRole('combobox',{name:'查看修复版本'}),'0');
+ expect(screen.queryByText('Second call core')).not.toBeInTheDocument();
+ expect(screen.getByText(/暂无实际模型输入记录/)).toBeVisible();
+ expect(api.publish).not.toHaveBeenCalled();
+});
+
+it('does not substitute original evidence when an old task has no model input record',async()=>{
+ mount();await userEvent.click(screen.getByRole('tab',{name:'问题与方案'}));
+ expect(screen.getByText(/暂无实际模型输入记录/)).toBeVisible();
+ expect(screen.queryByText('模型核心输入',{selector:'summary'})).not.toBeInTheDocument();
+ expect(screen.getByText('原始建议与证据',{selector:'summary'})).toBeVisible();
+});

@@ -66,6 +66,7 @@ jest.mock('@/components/ui', () => {
 });
 
 const { AppShell } = require('@/shell/AppShell') as typeof import('@/shell/AppShell');
+const { PrimaryNavToggle } = require('@/components/Workspace/PrimaryNav') as typeof import('@/components/Workspace/PrimaryNav');
 
 function renderShell() {
   return render(
@@ -75,11 +76,38 @@ function renderShell() {
   );
 }
 
+/** chat/group 页头形态的子树：真实 PrimaryNavToggle + 本地「打开会话列表」代表钮。 */
+const headerLikeChildren = (
+  <>
+    <PrimaryNavToggle />
+    <button type="button" aria-label="打开会话列表" />
+  </>
+);
+
 beforeEach(() => {
   mockLocation.pathname = '/workspace';
   mockHistoryPush.mockClear();
   mockHistoryReplace.mockClear();
   useWorkspaceStore.getState().reset();
+});
+
+describe('AppShell <lg 一级导航入口条（内流占位）', () => {
+  it('导航入口以正常流条带渲染并先于内容（非绝对定位浮层），不再压住页面自身顶栏控件', () => {
+    mockViewport.desktop = false;
+    renderShell();
+    const navToggle = screen.getByRole('button', { name: '打开导航' });
+    const strip = navToggle.parentElement as HTMLElement;
+    // 口径：入口条自带占位高度（正常流）——修复前为 absolute 浮层，
+    // 与页面内容（如群聊/单聊顶栏「打开会话列表」箭头）重叠导致点击冲突。
+    expect(strip.className).not.toContain('absolute');
+    // 高度预留仅限 <lg：桌面内流侧栏可见时条带隐藏（lg:hidden）不占高度。
+    expect(strip.className).toContain('lg:hidden');
+    // 兜底条带Marker：页头内联入口登记后本条被抑制（见下方内联入口用例）。
+    expect(strip).toHaveAttribute('data-testid', 'primary-nav-fallback-strip');
+    // 条带先于内容渲染：内容相对条带为后续兄弟节点，正常流中各自占位。
+    const page = screen.getByTestId('page');
+    expect(strip.compareDocumentPosition(page) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });
 
 describe('AppShell responsive off-canvas nav (一级)', () => {
@@ -216,5 +244,75 @@ describe('AppShell 工作身份路由保护', () => {
     );
     expect(mockHistoryReplace).not.toHaveBeenCalled();
     expect(screen.getByTestId('page')).toBeInTheDocument();
+  });
+});
+
+describe('AppShell 页头内联一级导航入口（2026-10-19 用户反馈：独立条带与页头双行 → 同排单行）', () => {
+  it('<lg：导航入口并入页头行、位于「打开会话列表」左侧，h-12 兜底条带不再渲染', () => {
+    mockViewport.desktop = false;
+    mockLocation.pathname = '/workspace/chat';
+    render(<AppShell>{headerLikeChildren}</AppShell>);
+
+    const navEntry = screen.getByRole('button', { name: '打开导航' });
+    // 规格对齐页头 Chevron：28px(sm) 图标钮、桌面内流侧栏可见时不占位。
+    expect(navEntry).toHaveClass('h-7', 'w-7', 'lg:hidden');
+    // 排序在「打开会话列表」之前（同一行内、最左）。
+    const sessionListEntry = screen.getByRole('button', { name: '打开会话列表' });
+    expect(navEntry.compareDocumentPosition(sessionListEntry) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // 页头登记了内联入口：壳的 h-12 兜底条带被抑制（无独立条带占位）。
+    expect(screen.queryByTestId('primary-nav-fallback-strip')).not.toBeInTheDocument();
+  });
+
+  it('<lg：内联入口打开壳同一抽屉，选中导航项后跳转并收起', () => {
+    mockViewport.desktop = false;
+    mockLocation.pathname = '/workspace/chat';
+    render(<AppShell>{headerLikeChildren}</AppShell>);
+    expect(screen.queryByTestId('drawer-content')).not.toBeInTheDocument();
+
+    // 内联入口与原条带入口共用 AppShell 内的同一条抽屉（含真实 SidebarNavList）。
+    fireEvent.click(screen.getByRole('button', { name: '打开导航' }));
+    expect(screen.getByTestId('drawer-content')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '对话' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '对话' }));
+    expect(mockHistoryPush).toHaveBeenCalledWith('/workspace/chat');
+    expect(screen.queryByTestId('drawer-content')).not.toBeInTheDocument();
+  });
+
+  it('chat 页头卸载后（空 Bot/引导等无页头阶段）兜底条带回归，一级导航不缺失', () => {
+    mockViewport.desktop = false;
+    mockLocation.pathname = '/workspace/chat';
+    const view = render(<AppShell>{headerLikeChildren}</AppShell>);
+    expect(screen.queryByTestId('primary-nav-fallback-strip')).not.toBeInTheDocument();
+
+    view.rerender(
+      <AppShell>
+        <div data-testid="page" />
+      </AppShell>,
+    );
+    // 无页头路由同样保留一级导航入口：登记清零后条带回归。
+    expect(screen.getByTestId('primary-nav-fallback-strip')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '打开导航' })).toBeInTheDocument();
+  });
+
+  it('精简路由（navigationVisibility=hidden）：页头内联入口为 null，零登记零占位', () => {
+    mockViewport.desktop = false;
+    mockLocation.pathname = '/workspace/collaboration/group';
+    render(<AppShell>{headerLikeChildren}</AppShell>);
+
+    expect(screen.queryByRole('button', { name: '打开导航' })).not.toBeInTheDocument();
+    // 「打开会话列表」仍按页头自身装配渲染（壳不干预页头本地入口）。
+    expect(screen.getByRole('button', { name: '打开会话列表' })).toBeInTheDocument();
+  });
+
+  it('>=lg：内联入口显示类为 lg:hidden，桌面零额外占位、抽屉关闭', () => {
+    mockViewport.desktop = true;
+    mockLocation.pathname = '/workspace/chat';
+    render(<AppShell>{headerLikeChildren}</AppShell>);
+
+    const navEntry = screen.getByRole('button', { name: '打开导航' });
+    expect(navEntry).toHaveClass('lg:hidden');
+    expect(screen.getByTestId('app-sidebar')).toBeInTheDocument();
+    expect(screen.queryByTestId('drawer-content')).not.toBeInTheDocument();
   });
 });

@@ -57,4 +57,12 @@ describe('versioned repair issue scope',()=>{
     const fresh=await createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort).candidates('wf-1');
     expect(fresh.inputDigest).toBe(before.inputDigest);
   });
+  it('filters historical suggestions by the explicitly expanded source version',async()=>{
+    const f=await setup();
+    const key=JSON.stringify(['deployment','wf-1',40,35]);
+    const response=await f.service.candidates('wf-1',{versionScope:'historical',snapshotKey:key,includeHistorical:true});
+    expect(response.items.map(i=>i.itemId)).toEqual(['item-1']);
+    expect((await f.service.candidates('wf-1',{versionScope:'historical',snapshotKey:'unresolved',includeHistorical:true})).items.map(i=>i.itemId)).toEqual(['item-2']);
+  });
+
 });

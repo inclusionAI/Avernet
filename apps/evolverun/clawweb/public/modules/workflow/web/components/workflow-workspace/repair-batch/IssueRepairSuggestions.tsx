@@ -12,16 +12,16 @@ import { changeSummary, sourceRunCount } from './RepairItemDetail'
 
 /** Compare and select suggestions within one issue; evidence is fetched only on expansion. */
 export default function IssueRepairSuggestions({ workflowId, signature, includeHistorical, initialItemId, onResult, renderItem,
-  selected = [], onToggle, canEdit = false, limit = 100, cacheVersion = '', initialPage, versionScope = 'current' }: {
-  versionScope?: RepairVersionScope; workflowId: string; signature?: string; includeHistorical: boolean; initialItemId?: string | null
+  selected = [], onToggle, canEdit = false, limit = 100, cacheVersion = '', initialPage, versionScope = 'current', snapshotKey }: {
+  versionScope?: RepairVersionScope; snapshotKey?: string; workflowId: string; signature?: string; includeHistorical: boolean; initialItemId?: string | null
   selected?: string[]; onToggle?: (id: string) => void; canEdit?: boolean; limit?: number
   cacheVersion?: string; initialPage?: RepairCandidatesResponse
   onResult: (result: RepairCandidatesResponse) => void; renderItem: (item: RepairInboxItem, canEdit: boolean) => ReactNode
 }) {
   const [page, setPage] = useState(1)
   const [state, setState] = useState<RepairInboxFilter>('all')
-  const query = useQuery({ queryKey: ['repair-suggestions', workflowId, signature, includeHistorical, versionScope, state, page, cacheVersion, canEdit],
-    queryFn: () => repairBatches.candidates(workflowId, { versionScope, signature, state, page, pageSize: 20, includeHistorical }),
+  const query = useQuery({ queryKey: ['repair-suggestions', workflowId, signature, includeHistorical, versionScope, snapshotKey, state, page, cacheVersion, canEdit],
+    queryFn: () => repairBatches.candidates(workflowId, { versionScope, snapshotKey, signature, state, page, pageSize: 20, includeHistorical }),
     initialData: page === 1 && state === 'all' ? initialPage : undefined,
     staleTime: 30_000, gcTime: 300_000, retry: false })
   const data = query.error ? undefined : query.data

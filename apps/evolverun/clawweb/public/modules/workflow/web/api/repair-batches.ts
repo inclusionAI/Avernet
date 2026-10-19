@@ -35,6 +35,7 @@ export const repairBatches = {
     const params = new URLSearchParams({ workflowId })
     params.set('metadataPage', String(metadataPage))
     if (query.versionScope) params.set('versionScope', query.versionScope)
+    if (query.snapshotKey) params.set('snapshotKey', query.snapshotKey)
     if (query.state) params.set('state', query.state)
     if (query.page) params.set('page', String(query.page))
     if (query.pageSize) params.set('pageSize', String(query.pageSize))

@@ -96,8 +96,9 @@ export function createEvolveKnowledgeRouter(
       // Opt-in presentation keeps full-source consumers unchanged.
       res.json({ ...result, groups: req.query.view === 'summary' ? groups.map(group => ({ ...group,
         presentation: 'summary',
-        sources: group.sources.map(({ proposal: _proposal, reasoning, evidenceEventIds: _evidence, ...source }) => ({
+        sources: group.sources.map(({ proposal: _proposal, reasoning, evidenceEventIds: _evidence, analysisContext, ...source }) => ({
           ...source, reasoning: reasoning.slice(0, 240), evidenceEventIds: [],
+          ...(analysisContext?.workflowSnapshot ? { analysisContext: { workflowSnapshot: analysisContext.workflowSnapshot } } : {}),
         })), summarySources: [],
         summary: group.summary ? { summary: group.summary.summary.slice(0, 240), causes: [], unknowns: [] } : null,
       })) : groups });

@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 import type { GroupView, SessionView } from '@/domain/collaboration';
 import { GroupHeader, type GroupHeaderProps } from '@/pages/Workspace/components/GroupHeader';
+import { PrimaryNavContext, type PrimaryNavApi } from '@/components/Workspace/PrimaryNav';
 import { expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
@@ -183,4 +184,73 @@ it('图标钮面板开合状态以 aria-pressed 表达', () => {
 it('连接状态使用顶栏独立状态区，不进入身份胶囊', () => {
   render(<GroupHeader {...buildProps()} />);
   expect(screen.getByRole('group', { name: '协作群 主站群' })).not.toContainElement(screen.getByRole('status'));
+});
+
+/** AppShell 壳上下文桩：单测直渲 GroupHeader 时的真实壳契约最小复现。 */
+const primaryNavApi: PrimaryNavApi = {
+  openNav: jest.fn(),
+  mountNavEntry: jest.fn(),
+  unmountNavEntry: jest.fn(),
+};
+
+it('壳外直渲不渲染一级导航入口（上下文缺省 null，页头组件可独立渲染）', () => {
+  render(<GroupHeader {...buildProps({ onOpenSessionList: jest.fn() })} />);
+  expect(screen.queryByRole('button', { name: '打开导航' })).not.toBeInTheDocument();
+});
+
+it('壳内渲染：一级导航入口与「打开会话列表」同排且在其左侧（28px、<lg）', () => {
+  render(
+    <PrimaryNavContext.Provider value={primaryNavApi}>
+      <GroupHeader {...buildProps({ onOpenSessionList: jest.fn() })} />
+    </PrimaryNavContext.Provider>,
+  );
+
+  const navEntry = screen.getByRole('button', { name: '打开导航' });
+  const sessionListEntry = screen.getByRole('button', { name: '打开会话列表' });
+  expect(navEntry).toHaveClass('h-7', 'w-7', 'lg:hidden');
+  expect(navEntry.compareDocumentPosition(sessionListEntry) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(navEntry);
+  expect(primaryNavApi.openNav).toHaveBeenCalledTimes(1);
+});
+
+it('壳内渲染（空群占位分支）：导航入口仍渲染且先于「打开会话列表」', () => {
+  render(
+    <PrimaryNavContext.Provider value={primaryNavApi}>
+      <GroupHeader {...buildProps({ selectedGroup: null, selectedSession: null, onOpenSessionList: jest.fn() })} />
+    </PrimaryNavContext.Provider>,
+  );
+
+  const navEntry = screen.getByRole('button', { name: '打开导航' });
+  const sessionListEntry = screen.getByRole('button', { name: '打开会话列表' });
+  expect(navEntry.compareDocumentPosition(sessionListEntry) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+it('已连接文案窄宽收纳：<lg/副屏挤压仅保绿点，可访问名恒在；警示/错误态不收纳', () => {
+  const view = render(<GroupHeader {...buildProps()} />);
+  // success 专属收纳：视口 lg 与群头容器 32.5rem 双闸（副屏挤窄主区同样仅绿点）。
+  const connectedStatus = screen.getByRole('status');
+  expect(connectedStatus).toHaveAttribute('aria-label', '已连接');
+  expect(connectedStatus).not.toHaveAttribute('title');
+  expect(screen.getByText('已连接')).toHaveClass('hidden', 'lg:@min-[32.5rem]/group-header:inline');
+
+  // 非 success 态保留完整文案（连接失败需要被读到），不参与收纳。
+  view.rerender(<GroupHeader {...buildProps({ connectionStatus: 'error' })} />);
+  expect(screen.getByText('连接失败')).not.toHaveClass('hidden');
+  expect(screen.getByRole('status').querySelector('span')).toHaveClass('bg-destructive');
+  view.unmount();
+});
+
+it('会话 ID 为空时复制静默不写剪贴板（抽取前原守卫原样保留）', () => {
+  const writeText = jest.fn();
+  Object.assign(navigator, { clipboard: { writeText } });
+  render(
+    <GroupHeader
+      {...buildProps({
+        selectedSession: { ...session, sessionId: '' },
+      })}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: '复制会话 ID' }));
+  return Promise.resolve().then(() => expect(writeText).not.toHaveBeenCalled());
 });

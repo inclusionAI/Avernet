@@ -3,6 +3,9 @@
 ## Provides
 
 - `SessionServiceImpl`, the transport-agnostic BCN V1 Session facade.
+- Human owners may change an existing owned Bot participant's auto/muted mode
+  without Session management authority. This exception does not grant scope
+  changes, participant insertion, or other Session management rights.
 - StateMachine/ordinary-history merging uses the shared domain identity and
   newest-first projection. Durable messages take precedence across legacy IDs;
   workflow metadata does not group distinct outputs into a single chat round.

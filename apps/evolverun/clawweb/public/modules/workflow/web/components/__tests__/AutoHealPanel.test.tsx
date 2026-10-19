@@ -5,6 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AutoHealDiagnosisResult, FlowRun } from '@avernet/clawweb-shared/web/types'
 import AutoHealPanel from '../AutoHealPanel'
 
+// Keep React Query and HTTP handling real; @avernet/clawweb-shared resolves to source through
+// the vitest alias, so the re-exported hooks and fetchJson never come from dist.
+
 const run: FlowRun = {
   flow_id: 'source-cron-flow', workflow_id: 'cron-workflow', workflow_title: 'Cron workflow',
   status: 'failed', triggered_by: 'cron', node_count: 1, succeeded_count: 0, failed_count: 1,

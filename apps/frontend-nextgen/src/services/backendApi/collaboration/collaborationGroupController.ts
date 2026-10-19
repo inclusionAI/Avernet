@@ -7,6 +7,8 @@ export type GroupStrategy = 'chat' | 'manager_worker' | 'state_machine';
 export type DeliveryPolicy = { bot_final_delivery: 'send_to_driver' | 'inject_observers' };
 export type GroupVisibility = 'private' | 'public';
 export type GroupStatus = 'active' | 'dissolved' | 'purge' | 'closed' | 'inactive' | 'completed' | 'error';
+/** @Human 消息外部渠道通知来源（BCS HumanMentionNotifyMode 线值）。 */
+export type HumanMentionNotifyMode = 'all' | 'driver_bot_only' | 'none';
 
 export interface GroupParticipantDto {
   actor_id: string;
@@ -62,6 +64,8 @@ export interface GroupDetailData {
   driver_bot_owner?: string;
   driver_bot_owner_name?: string;
   collaboration: GroupCollaboration;
+  /** @Human 消息外部渠道通知来源；旧版后端详情响应可能缺省（服务端存量默认 all）。 */
+  human_mention_notify_mode?: HumanMentionNotifyMode;
   name?: string;
   created_at: number;
   updated_at: number;
@@ -111,6 +115,8 @@ export interface GroupUpdateBody {
   name?: string;
   visibility?: GroupVisibility;
   delivery_policy?: DeliveryPolicy;
+  /** @Human 消息通知来源；省略=保持服务端原值，显式 null 会被后端拒绝。 */
+  human_mention_notify_mode?: HumanMentionNotifyMode;
 }
 
 export interface ListGroupsParams {

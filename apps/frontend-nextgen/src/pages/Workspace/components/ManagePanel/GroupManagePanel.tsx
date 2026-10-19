@@ -1,6 +1,6 @@
 import { Button, Card, Switch } from '@/components/ui';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import type { GroupView, IdentityView } from '@/domain/collaboration';
+import type { GroupUpdatePatch, GroupView, IdentityView } from '@/domain/collaboration';
 import type { DingTalkBindingState } from '@/services/workspace/channelBindingService';
 import type { PolicyResult } from '@/services/workspace/groupService';
 import type { DomainResult } from '@/services/workspace/identityService';
@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import type { GroupDingTalkConfig } from './DingTalkConfigPanel';
 import { DingTalkConfigPanel } from './DingTalkConfigPanel';
 import { EditableName } from './EditableName';
+import { HumanNotifyModeField } from './HumanNotifyModeField';
 import { ManagePanelHeader } from './ManagePanelHeader';
 import { ManagePanelTabs } from './ManagePanelTabs';
 import { MemberList } from './MemberList';
@@ -23,10 +24,7 @@ export interface GroupManagePanelProps {
   authenticatedUserId?: string | null;
   authenticatedUserName?: string | null;
   onClose: () => void;
-  onUpdate: (patch: {
-    name?: string;
-    visibility?: 'private' | 'public';
-  }) => Promise<DomainResult<GroupView> | null> | void;
+  onUpdate: (patch: GroupUpdatePatch) => Promise<DomainResult<GroupView> | null> | void;
   onDissolve: () => void;
   onLeaveGroup: (actorId: string) => Promise<boolean>;
   onAddMember: (actorId: string) => Promise<boolean>;
@@ -106,7 +104,8 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
           <div className="space-y-3">
             <Card className="rounded-lg bg-card p-3">
               <p className="m-0 mb-2 text-sm font-medium text-foreground">基础信息</p>
-              <p className="m-0 mb-1 text-xs text-muted-foreground">群名称</p>
+              {/* 字级口径（2026-10-16 反馈）：标签黑加粗、值弱灰普通字重，统一 12px。 */}
+              <p className="m-0 mb-1 text-xs font-medium text-foreground">群名称</p>
               <EditableName
                 value={group.name}
                 canEdit={canManageGroup}
@@ -115,29 +114,31 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
               />
               <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-3 text-xs">
                 <div>
-                  <p className="m-0 text-muted-foreground">类型</p>
-                  <p className="m-0 mt-1 font-medium text-foreground">{KIND_LABEL[group.kind]}</p>
+                  <p className="m-0 text-xs font-medium text-foreground">类型</p>
+                  <p className="m-0 mt-1 text-xs font-normal text-muted-foreground">{KIND_LABEL[group.kind]}</p>
                 </div>
                 <div>
-                  <p className="m-0 text-muted-foreground">可见性</p>
-                  <p className="m-0 mt-1 font-medium text-foreground">{group.isPublic ? '公开群' : '私密群'}</p>
+                  <p className="m-0 text-xs font-medium text-foreground">可见性</p>
+                  <p className="m-0 mt-1 text-xs font-normal text-muted-foreground">
+                    {group.isPublic ? '公开群' : '私密群'}
+                  </p>
                 </div>
                 <div>
-                  <p className="m-0 text-muted-foreground">成员数量</p>
-                  <p className="m-0 mt-1 font-medium text-foreground">
+                  <p className="m-0 text-xs font-medium text-foreground">成员数量</p>
+                  <p className="m-0 mt-1 text-xs font-normal text-muted-foreground">
                     {group.participantCount || group.participants.length}
                   </p>
                 </div>
                 <div>
-                  <p className="m-0 text-muted-foreground">创建时间</p>
-                  <p className="m-0 mt-1 font-medium text-foreground">
+                  <p className="m-0 text-xs font-medium text-foreground">创建时间</p>
+                  <p className="m-0 mt-1 text-xs font-normal text-muted-foreground">
                     {new Date(group.createdAt).toLocaleDateString()}
                   </p>
                 </div>
               </div>
               <div className="mt-3 text-xs">
-                <p className="m-0 text-muted-foreground">群 ID</p>
-                <p className="m-0 mt-1 break-all font-mono text-xs text-foreground">{group.groupId}</p>
+                <p className="m-0 text-xs font-medium text-foreground">群 ID</p>
+                <p className="m-0 mt-1 break-all font-mono text-xs font-normal text-muted-foreground">{group.groupId}</p>
               </div>
               <div className="mt-3 flex items-center justify-between gap-2">
                 <div className="min-w-0">
@@ -151,6 +152,11 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
                   aria-label="公开群"
                 />
               </div>
+              <HumanNotifyModeField
+                value={group.humanMentionNotifyMode}
+                canManage={canManageGroup}
+                onUpdate={onUpdate}
+              />
               {!canManageGroup ? (
                 <p className="m-0 mt-2 text-xs text-muted-foreground">{canManage.disabledReason}</p>
               ) : null}

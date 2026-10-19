@@ -1,11 +1,12 @@
 import { Drawer, DrawerContent, DrawerTitle, IconButton } from '@/components/ui';
+import { PrimaryNavContext, type PrimaryNavApi } from '@/components/Workspace/PrimaryNav';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { useMinWidth } from '@/hooks/useMediaQuery';
 import { ensurePersonalSpaceOnAppEntry, initSpaceContext } from '@/hooks/useSpaceContext';
 import { workspaceService } from '@/services/workspace/workspaceService';
 import { history, useLocation } from '@umijs/max';
 import { Menu } from 'lucide-react';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppSidebar } from './AppSidebar';
 import { OpenSourceExperienceNotice } from './OpenSourceExperienceNotice';
 import { SidebarNavList } from './SidebarNavList';
@@ -16,7 +17,10 @@ import { getRouteMeta } from './routeMeta';
  * 全局壳（refactor-global-nav-shell）：单侧边栏 + 内容区两栏布局，顶栏（AppHeader）已退役，
  * 原「工作/管理」区域 Tab 随之移除——协作/Bot 双分组常驻侧栏，不再按区域整体换组。
  * 顶栏功能（Logo/通知中心/用户身份/帮助）全部归位进 AppSidebar。
- * <lg 视口：内流侧栏由 AppSidebar hidden，经左上悬浮汉堡打开一级导航抽屉（与桌面同数据源 SidebarNavList）。
+ * <lg 视口：chat/group 页头经 PrimaryNavContext 就地渲染一级导航入口（与「打开会话列表」
+ * 同排、位于其左）；页头登记内联入口后，内容区顶部占位条带被抑制（2026-10-19 用户反馈：
+ * 条带+页头双行占位）。无页头的路由（非对话页、空 Bot/空群的页头缺席阶段）由条带兜底，
+ * 一级导航任何公开路由始终可达；精简视图（navigationVisibility=hidden）不渲染条带、零预留。
  */
 export function AppShell({ children }: { children: React.ReactNode }) {
   const location = useLocation();
@@ -26,7 +30,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const mergedItems = useMemo(() => getMergedNavigationItems(), []);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  // 页头内联一级导航入口的挂载数：>0 时抑制壳的 h-12 兜底条带（登记来自 PrimaryNavToggle）。
+  const [inlineNavEntries, setInlineNavEntries] = useState(0);
   const isDesktop = useMinWidth(1024);
+
+  // 页头「打开导航」通道：回调恒稳定（上下文值不变 → 页头登记 effect 不重跑、无登记/撤销环）。
+  const openNav = useCallback(() => setMobileNavOpen(true), []);
+  const mountNavEntry = useCallback(() => setInlineNavEntries((count) => count + 1), []);
+  const unmountNavEntry = useCallback(() => setInlineNavEntries((count) => Math.max(0, count - 1)), []);
+  const primaryNavApi = useMemo<PrimaryNavApi>(
+    () => ({ openNav, mountNavEntry, unmountNavEntry }),
+    [openNav, mountNavEntry, unmountNavEntry],
+  );
 
   // 空间上下文初始化时机（3.1）：进入 Bot 分组任一路由时触发（替换原 area==='manage'）——覆盖切换器
   // 被形态开关隐藏（spaceSwitcher=false）时 Bot 页面对 spaceContextStore 的消费；
@@ -69,38 +84,45 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <div className="flex h-full flex-col bg-[var(--color-bg)]">
-      <OpenSourceExperienceNotice />
-      <div className="flex min-h-0 flex-1">
-        {!hideNavigation && (
-          <AppSidebar
-            activePath={location.pathname}
-            collapsed={sidebarCollapsed}
-            items={mergedItems}
-            onNavigate={(path) => history.push(path)}
-            onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
-            currentUser={currentUser}
-          />
-        )}
-        <main className="relative min-w-0 flex-1 overflow-hidden">
-          {/* <lg 一级导航入口（原顶栏汉堡归位为悬浮按钮）：≥lg 隐藏(内流侧栏可见)。 */}
+    <PrimaryNavContext.Provider value={hideNavigation ? null : primaryNavApi}>
+      <div className="flex h-full flex-col bg-[var(--color-bg)]">
+        <OpenSourceExperienceNotice />
+        <div className="flex min-h-0 flex-1">
           {!hideNavigation && (
-            <div className="absolute left-2 top-2 z-40 lg:hidden">
-              <IconButton label="打开导航" icon={<Menu className="h-4 w-4" />} onClick={() => setMobileNavOpen(true)} />
-            </div>
+            <AppSidebar
+              activePath={location.pathname}
+              collapsed={sidebarCollapsed}
+              items={mergedItems}
+              onNavigate={(path) => history.push(path)}
+              onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
+              currentUser={currentUser}
+            />
           )}
-          {children}
-        </main>
+          {/* 内容列：<lg 顶条带与 main 正常流堆叠；main 以 min-h-0+flex-1 承接剩余高度，保持 h-full 消费链。 */}
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {/* <lg 一级导航兜底条带：仅当页头未登记内联入口时渲染（chat/group 页头改为同排行内钮后，
+                此处不再占独立 48px 行，避免与页头双行堆叠）。正常流常驻占位，不悬浮压住页面控件。 */}
+            {!hideNavigation && inlineNavEntries === 0 && (
+              <div
+                data-testid="primary-nav-fallback-strip"
+                className="flex h-12 shrink-0 items-center border-b border-border bg-card px-2 lg:hidden"
+              >
+                <IconButton label="打开导航" icon={<Menu className="h-4 w-4" />} onClick={openNav} />
+              </div>
+            )}
+            <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden">{children}</main>
+          </div>
+        </div>
+        {/* <lg 一级导航抽屉：≥lg 内流侧栏可见；<lg 由页头内联入口或兜底条带的汉堡钮触发本抽屉。 */}
+        {!hideNavigation && (
+          <Drawer open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+            <DrawerContent side="left" size="sm" showClose={false} bodyClassName="p-0 flex flex-col">
+              <DrawerTitle className="sr-only">主导航</DrawerTitle>
+              <SidebarNavList activePath={location.pathname} items={mergedItems} onNavigate={handleMobileNavigate} />
+            </DrawerContent>
+          </Drawer>
+        )}
       </div>
-      {/* <lg 一级导航抽屉：≥lg 内流侧栏可见；<lg 由左上悬浮汉堡触发本抽屉。 */}
-      {!hideNavigation && (
-        <Drawer open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
-          <DrawerContent side="left" size="sm" showClose={false} bodyClassName="p-0 flex flex-col">
-            <DrawerTitle className="sr-only">主导航</DrawerTitle>
-            <SidebarNavList activePath={location.pathname} items={mergedItems} onNavigate={handleMobileNavigate} />
-          </DrawerContent>
-        </Drawer>
-      )}
-    </div>
+    </PrimaryNavContext.Provider>
   );
 }

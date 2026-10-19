@@ -587,8 +587,8 @@ function DiagnosisPanel({
         </div>
       )}
 
-      {data && !isLoading && !isError && <section aria-label="问题列表" aria-busy={updatingIssues} className="space-y-4">
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3">
+      {data && !isLoading && !isError && <section aria-label="问题列表" aria-busy={updatingIssues} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-slate-200 px-4 py-3">
           <h3 className="text-sm font-semibold text-slate-900">当前版本问题 · 共 {issuePage.total} 个问题</h3>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <label className="mr-2 flex items-center gap-2 text-xs text-slate-600">
@@ -596,7 +596,7 @@ function DiagnosisPanel({
                 onChange={event => changeHistoryScope(event.target.checked)} className="h-4 w-4 accent-blue-600" />{repairData?.activeSnapshot !== undefined ? '包含更早记录（30天前）' : '包含历史未复现'}
             </label>
             <select aria-label="问题排序" value={sort} onChange={event => { setSort(event.target.value as typeof sort); setRepairPage(1) }} className="rounded-md border border-input bg-background px-2 py-1 text-xs">
-              <option value="priority">影响优先</option><option value="frequency">近期频率</option><option value="recent">最近发生</option>
+              <option value="priority">影响优先</option><option value="frequency">近7天发现次数</option><option value="recent">最近发生</option>
             </select>
             <select aria-label="影响程度" value={severity} onChange={event => { setSeverity(event.target.value); setRepairPage(1) }} className="rounded-md border border-input bg-background px-2 py-1 text-xs">
               <option value="all">全部影响</option><option value="critical">严重</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option><option value="unknown">待评估</option>
@@ -626,12 +626,12 @@ function DiagnosisPanel({
         {filtered.length === 0 && <div className="px-4 py-10 text-center text-xs text-slate-400">没有符合当前筛选条件的问题</div>}
 
 
-        <div className="space-y-4">
+        <div className="divide-y divide-slate-200">
           {filtered.map(({ cluster, suggestion }) => {
           const summary = cluster.aggregation?.summary?.summary ?? '聚合结论尚未生成，查看单次运行分析。'
           const task = suggestion ? applyTaskMap[suggestion.id] : undefined
           const preview = repairData?.issuePreviews?.find(value => value.signature === cluster.signature)
-          return <article key={cluster.signature} data-layout="compact-issue-row" className="overflow-hidden rounded-xl border border-slate-300 bg-white px-5 pb-4 shadow-sm">
+          return <article key={cluster.signature} data-layout="compact-issue-row" className="overflow-hidden bg-white px-5 pb-4">
             <div className="-mx-5 grid items-start gap-3 border-b border-slate-200 bg-slate-50/80 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_auto]">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
@@ -663,11 +663,10 @@ function DiagnosisPanel({
           </article>
           })}
         </div>
-      </section>}
-
-      {data && !isLoading && <section aria-label="问题分页" className="rounded-lg border border-slate-200 bg-white px-4">
-        <Pagination page={issuePage.page} pageSize={issuePage.pageSize} total={issuePage.total}
-          onChange={(page, pageSize) => { setRepairPage(page); setRepairPageSize(pageSize) }} />
+        <footer role="region" aria-label="问题分页" className="border-t border-slate-200 px-4">
+          <Pagination page={issuePage.page} pageSize={issuePage.pageSize} total={issuePage.total}
+            onChange={(page, pageSize) => { setRepairPage(page); setRepairPageSize(pageSize) }} />
+        </footer>
       </section>}
       {!selectedSignature && !selectedRepairItemId && !historyOpen && !selectionOpen && !draftOpen && <RepairSelectionBar fixed count={proposalSelection(selectedItems).length} issueCount={selectedIssueCount} reason={generationReason}
         onGenerate={openDraft} onView={() => setSelectionOpen(true)}

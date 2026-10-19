@@ -320,6 +320,38 @@ describe('BCS group routing by bcs_grp_ prefix', () => {
     });
   });
 
+  it('BCS 群详情回读 human_mention_notify_mode（OpenAPI envelope 形态）', async () => {
+    useWorkspaceStore.setState({ bcsGroupIds: {} });
+    global.fetch = jest.fn<typeof fetch>().mockImplementation(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes('/sessions')) return jsonOk({ code: 200000, message: 'OK', data: { items: [] } });
+      return jsonOk({
+        code: 200000,
+        message: 'OK',
+        data: { id: 'bcs_grp_abc', name: 'G', participants: [], human_mention_notify_mode: 'driver_bot_only' },
+      });
+    });
+
+    const res = await groupService.loadGroupDetailOrBcs('bcs_grp_abc', 'human-me');
+
+    expect(res.ok).toBe(true);
+    expect(res.ok && res.data.humanMentionNotifyMode).toBe('driver_bot_only');
+  });
+
+  it('BCS 历史详情缺省 human_mention_notify_mode 时不伪造默认值', async () => {
+    useWorkspaceStore.setState({ bcsGroupIds: {} });
+    global.fetch = jest.fn<typeof fetch>().mockImplementation(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes('/sessions')) return jsonOk({ code: 200000, message: 'OK', data: { items: [] } });
+      return jsonOk({ code: 200000, message: 'OK', data: { id: 'bcs_grp_legacy', name: 'G', participants: [] } });
+    });
+
+    const res = await groupService.loadGroupDetailOrBcs('bcs_grp_legacy', 'human-me');
+
+    expect(res.ok).toBe(true);
+    expect(res.ok && res.data.humanMentionNotifyMode).toBeUndefined();
+  });
+
   it('routes non-prefixed group to generic listGroupSessions path with view_bot_id', async () => {
     sc.listGroupSessions.mockResolvedValue({
       code: 20000,
@@ -657,6 +689,98 @@ describe('createGroup', () => {
       originator: 'actor-bot',
       participants: [{ actor_id: 'b1' }],
     });
+    expect(res.ok).toBe(false);
+    expect((res as { error: { code: string } }).error.code).toBe('GROUP_CONFLICT');
+  });
+});
+
+describe('human_mention_notify_mode（@Human 通知来源）', () => {
+  const sessionsPage = { code: 20000, message: '', request_id: 'r', data: { items: [], total: 0, offset: 0, limit: 50 } };
+  const detailWith = (mode: unknown, omit = false) => ({
+    code: 20000,
+    message: '',
+    request_id: 'r',
+    data: {
+      group_id: 'g9',
+      version: 1,
+      kind: 'normal' as const,
+      name: 'X',
+      status: 'active' as const,
+      visibility: 'private' as const,
+      originator_actor_id: 'bot-1',
+      participants: [],
+      driver_bot_uuid: 'bot-1',
+      collaboration: {
+        strategy: 'chat' as const,
+        delivery_policy: { bot_final_delivery: 'send_to_driver' as const },
+      },
+      created_at: 1,
+      updated_at: 1,
+      ...(omit ? {} : { human_mention_notify_mode: mode }),
+    },
+  });
+
+  it.each(['all', 'driver_bot_only', 'none'] as const)(
+    'GET 群详情将 human_mention_notify_mode=%s 映射进 GroupView.humanMentionNotifyMode',
+    async (mode) => {
+      gc.getGroup.mockResolvedValue(detailWith(mode));
+      sc.listGroupSessions.mockResolvedValue(sessionsPage);
+
+      const res = await groupService.loadGroupDetail('g9');
+
+      expect(gc.getGroup).toHaveBeenCalledWith('g9');
+      expect(res.ok && res.data.humanMentionNotifyMode).toBe(mode);
+    },
+  );
+
+  it('旧版后端详情缺省该字段时映射 undefined（展示层按服务端存量默认 all 兜底）', async () => {
+    gc.getGroup.mockResolvedValue(detailWith(undefined, true));
+    sc.listGroupSessions.mockResolvedValue(sessionsPage);
+
+    const res = await groupService.loadGroupDetail('g9');
+
+    expect(res.ok && res.data.humanMentionNotifyMode).toBeUndefined();
+  });
+
+  it('详情返回未知枚举值不写入领域对象（防后端枚举漂移）', async () => {
+    gc.getGroup.mockResolvedValue(detailWith('sometimes'));
+    sc.listGroupSessions.mockResolvedValue(sessionsPage);
+
+    const res = await groupService.loadGroupDetail('g9');
+
+    expect(res.ok && res.data.humanMentionNotifyMode).toBeUndefined();
+  });
+
+  it.each(['all', 'driver_bot_only', 'none'] as const)(
+    'PATCH 仅携带 human_mention_notify_mode=%s（未提交字段省略，服务端保持原值）',
+    async (mode) => {
+      gc.updateGroup.mockResolvedValue(detailWith(mode));
+      gc.getGroup.mockResolvedValue(detailWith(mode));
+      sc.listGroupSessions.mockResolvedValue(sessionsPage);
+
+      const res = await groupService.updateGroup('g9', { humanMentionNotifyMode: mode });
+
+      expect(gc.updateGroup).toHaveBeenCalledTimes(1);
+      expect(gc.updateGroup).toHaveBeenCalledWith('g9', { human_mention_notify_mode: mode });
+      expect(res.ok && res.data.humanMentionNotifyMode).toBe(mode);
+    },
+  );
+
+  it('PATCH 群名称时不携带通知来源（省略即保持服务端原值）', async () => {
+    gc.updateGroup.mockResolvedValue(detailWith('none'));
+    gc.getGroup.mockResolvedValue(detailWith('none'));
+    sc.listGroupSessions.mockResolvedValue(sessionsPage);
+
+    await groupService.updateGroup('g9', { name: '新群名' });
+
+    expect(gc.updateGroup).toHaveBeenCalledWith('g9', { name: '新群名' });
+  });
+
+  it('PATCH 409 映射 GROUP_CONFLICT（沿用既有运行时错误处理）', async () => {
+    gc.updateGroup.mockRejectedValue({ status: 409 });
+
+    const res = await groupService.updateGroup('g9', { humanMentionNotifyMode: 'none' });
+
     expect(res.ok).toBe(false);
     expect((res as { error: { code: string } }).error.code).toBe('GROUP_CONFLICT');
   });

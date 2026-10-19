@@ -564,6 +564,9 @@ pub trait GroupService: Send + Sync {
         self.create_with_outcome(command).await
     }
 
+    /// Detail reads accept the selected Actor's Session membership in this
+    /// Group, including a Human's owned Bot in such a Session. This read-only
+    /// relation does not grant Group editing or participant management.
     async fn get(&self, query: GetGroup) -> Result<GroupDetail, ApplicationError>;
 
     async fn update(&self, command: UpdateGroup) -> Result<GroupDetail, ApplicationError>;

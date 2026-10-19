@@ -1,4 +1,4 @@
-import type { RepairItem, RepairRevision } from '../../../../server/contracts/repair-batch'
+import type { RepairItem, RepairModelInput, RepairRevision } from '../../../../server/contracts/repair-batch'
 import { JsonDetails } from './repair-view'
 function impact(items:RepairItem[]) {
  const labels:Record<string,string>={low:'低',medium:'中',high:'高',critical:'严重'}
@@ -12,9 +12,19 @@ export default function RepairTaskScope({revision}:{revision:RepairRevision}) {
   ...(Array.isArray(item.context?.suggestions)?item.context.suggestions:[]).flatMap(row=>Array.isArray(row?.runIds)?row.runIds:Array.isArray(row?.impactRunIds)?row.impactRunIds:[]),
  ]).filter((id):id is string=>typeof id==='string'&&!!id))
  const plans=revision.input.integration?.plans
+ const modelInputs=Array.isArray(revision.draft?.modelInputs)?revision.draft.modelInputs.filter((entry):entry is RepairModelInput=>
+  !!entry&&typeof entry.itemId==='string'&&typeof entry.coreInput==='string'&&!!entry.materials&&typeof entry.materials==='object'&&!Array.isArray(entry.materials)):[]
  return <section aria-label="所选版本处理范围" className="rounded-lg border border-input bg-card p-5">
   <h3 className="text-base font-semibold">本版处理范围</h3>
   <p className="mt-2 text-sm text-muted-foreground">{revision.input.items.length} 项原始建议 · {flows.size ? `依据覆盖 ${flows.size} 个运行` : '来源运行数未知'} · 近期影响次数未知</p>
+  <div className="mt-4 rounded-lg border border-input p-4 text-sm">
+   <h4 className="font-medium">实际模型输入</h4>
+   {modelInputs.length?<><p className="mt-1 text-xs text-muted-foreground">材料路径对应模型调用时的 AIS 本地文件；此处仅展示索引。</p>{modelInputs.map((entry,index)=><article key={index} className="mt-3">
+    <p className="text-xs text-muted-foreground">第 {index+1} 次模型调用</p>
+    <details className="mt-2 text-xs"><summary className="cursor-pointer text-muted-foreground">模型核心输入</summary><pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted/50 p-3 text-[11px]">{entry.coreInput}</pre></details>
+    <JsonDetails title="可选材料索引" value={entry.materials}/>
+   </article>)}</>:<p className="mt-2 text-xs text-muted-foreground">暂无实际模型输入记录；该次结果尚未回传记录、使用旧版生成器，或未调用模型。</p>}
+  </div>
   {plans?.length ? <div className="mt-4 space-y-3">{plans.map((plan,index)=><article key={plan.id} className="rounded-lg border border-input p-4">
    <h4 className="text-sm font-medium">方案 {index+1} · {plan.originalItemIds.length} 项来源</h4>
    <p className="mt-1 text-xs text-muted-foreground">诊断影响：{impact(revision.input.items.filter(item=>plan.originalItemIds.includes(item.itemId)))}</p>

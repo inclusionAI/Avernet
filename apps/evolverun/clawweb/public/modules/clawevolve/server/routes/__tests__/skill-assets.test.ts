@@ -21,6 +21,7 @@ let artifactRoot: string | undefined;
 let database: SqliteDatabase | undefined;
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
   server = undefined;
   if (database) await database.close();
@@ -288,6 +289,8 @@ describe("Skill historical snapshot availability", () => {
 
   it('projects only the frozen Test Bench association, never private event detail or live reports', async () => {
     const test = await startRouter(true);
+    // Legitimate public timestamps can contain the live-report sentinel digits.
+    vi.spyOn(database!.dialect, 'now').mockReturnValue(1_792_399_999);
     await test.repo.createAsset({ assetId: 'ASSET', versionId: 'BASE', ownerUserId: 'owner-1', botId: 'bot-1',
       externalSkillId: '47', displayName: 'Skill', packageRef: 'base', packageSha256: 'base' });
     const tasks = new EvolveRepository(database!);
@@ -306,7 +309,9 @@ describe("Skill historical snapshot availability", () => {
     expect(body.items[0].testBench).toEqual({ taskId: 'TASK', stepId: 'OPTIMIZE', round: 1,
       scoreComparison: { name: 'test_score', baseline: null, candidate: 0, delta: null } });
     expect(body.items.slice(1).every((item: { testBench: unknown }) => item.testBench === null)).toBe(true);
-    expect(JSON.stringify(body)).not.toMatch(/never-public|private-code|detail_json|999/);
+    // The exact testBench equality above rejects live candidate=999 without matching public timestamps.
+    expect(JSON.stringify(body)).not.toMatch(/never-public|private-code|detail_json/);
+    expect(body.items[0].updatedAt).toBe(1_792_399_999);
     const other = await fetch(`${test.baseUrl}/skill-events`, { headers: { 'X-User-Id': 'owner-2' } });
     expect(await other.json()).toEqual({ items: [] });
   });
