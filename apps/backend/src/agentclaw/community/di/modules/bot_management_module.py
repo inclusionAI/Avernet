@@ -20,6 +20,7 @@ from __future__ import annotations
 from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import ArcaRestartTransport
+from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
 
 from typing import Annotated, Callable
 
@@ -494,10 +495,21 @@ class BotManagementModule(Module):
 
     @singleton
     @provider
+    def restart_backup_dependencies(self, injector: Injector) -> RestartBackupDependencies:
+        # Store factories only: no provider is resolved for non-coding engines,
+        # and coding resolves just its selected backend within the strategy.
+        return RestartBackupDependencies(
+            baas_runtime=lambda: injector.get(BaasService),
+            arca_transport=lambda: injector.get(ArcaRestartTransport),
+        )
+
+    @singleton
+    @provider
     @inject
     def bot_service(
         self,
         repository: BotRepository,
+        restart_backup_dependencies: RestartBackupDependencies,
         allocation_config: cfg.DeviceAllocationConfig,
         workspace_hosting_config: cfg.WorkspaceHostingConfig,
         device_binding_repo: DeviceBindingRepository,
@@ -545,7 +557,7 @@ class BotManagementModule(Module):
             oss_record_repo=oss_record_repo,
             bot_publish_service_provider=bot_publish_service_provider,
             device_service_provider=device_service_provider,
-            arca_restart_transport_provider=lambda: injector.get(ArcaRestartTransport),
+            restart_backup_dependencies=restart_backup_dependencies,
             # Lazy for symmetry with the providers above, not for a cycle:
             # BotAppGrantService reaches only repositories. Resolved on demand
             # so bot deletion is the only thing that pays for it.

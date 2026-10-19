@@ -7,6 +7,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
+
 from agentclaw.community.core.bot_management.engines.aicoding.restart_state import (
     BUSINESS_TIMEOUT,
     KEY,
@@ -678,7 +680,7 @@ async def test_real_backup_failure_keeps_durable_restart_running_without_failed_
     def restart(**kwargs):
         verify = s.strategy.prepare_restart(
             s.ctx, binding_id=7, device_service=devices, bot_repository=s.repo,
-            target_runtime_provider=lambda: runtime,
+            restart_dependencies=RestartBackupDependencies(baas_runtime=lambda: runtime),
         )
         verify()
         assert not current_restart.get().fenced
@@ -720,7 +722,7 @@ async def test_backup_degradation_does_not_swallow_mutation_fence_failure(setup,
     devices.get_device.return_value = s.binding
     try:
         verify = s.strategy.prepare_restart(s.ctx, binding_id=7, device_service=devices,
-                                            bot_repository=s.repo, target_runtime_provider=lambda: runtime)
+                                            bot_repository=s.repo, restart_dependencies=RestartBackupDependencies(baas_runtime=lambda: runtime))
         verify()
         if failure == 'database':
             s.repo.failed_write = True

@@ -6,6 +6,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
+
 from agentclaw.community.core.bot_management.engines.aicoding.restart_state import (
     journal,
     task_key,
@@ -225,7 +227,10 @@ async def test_real_arca_async_backup_precedes_stop_start(lifecycle, engine, bac
     )
     s.service._device_service_provider = lambda: router
     from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import ArcaRestartTransport
-    s.service._arca_restart_transport_provider = lambda: ArcaRestartTransport(provider._exec_shell_new)
+    s.service._restart_backup_dependencies = RestartBackupDependencies(
+        baas_runtime=lambda: s.platform,
+        arca_transport=lambda: ArcaRestartTransport(provider._exec_shell_new),
+    )
     provider.release_device.side_effect = lambda **_: events.append("release")
 
     def start(**kwargs):
@@ -683,7 +688,9 @@ async def test_other_engines_arca_restart_never_resolves_backup_transport(lifecy
     s.binding.update(device_provider="arca", device_props={"sandbox_id": "old-sandbox@8"})
     s.service._resolve_restart_target_provider = Mock(return_value="arca")
     transport = Mock(side_effect=AssertionError("non-coding must not resolve backup transport"))
-    s.service._arca_restart_transport_provider = transport
+    s.service._restart_backup_dependencies = RestartBackupDependencies(
+        baas_runtime=transport, arca_transport=transport,
+    )
     device = s.service._device_service_provider()
     events = []
     device.release_device.side_effect = lambda **_: events.append("release")

@@ -37,7 +37,7 @@ class AicodingArcaRestart:
         verify = strategy.prepare_restart(
             ctx, binding_id=bot["binding_id"],
             device_service_provider=service._device_service_provider,
-            arca_restart_transport_provider=service._arca_restart_transport_provider,
+            restart_dependencies=service._restart_backup_dependencies,
             bot_repository=service._repository,
         )
         env, entity_id = get_current_env(), bot["entity_id"]

@@ -6,6 +6,8 @@ from unittest.mock import Mock, call
 import httpx
 import pytest
 
+from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
+
 from agentclaw.community.core.bot_management.engines.aicoding import restart_backup as backup
 from agentclaw.community.core.bot_management.engines.aicoding.strategy import AicodingProvisioningStrategy
 from agentclaw.community.core.bot_management.engines.provisioning import BotProvisioningContext
@@ -92,7 +94,7 @@ def test_real_client_reaches_container_skip_and_rechecks_inventory(status):
     }}
     ctx = BotProvisioningContext(bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding')
     verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(
-        ctx, device_id=BOT, target_runtime=service, operation_id=operation)
+        ctx, device_id=BOT, restart_dependencies=RestartBackupDependencies.for_instance(service), operation_id=operation)
     verify()
     assert http.get.call_args_list == 2 * [
         call(f'/api/v1/bots/{BOT}/devices', params={'tenant': service._tenant}, timeout=30.0)]

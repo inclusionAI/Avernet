@@ -6,6 +6,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
+
 from agentclaw.community.core.bot_management.engines.aicoding import restart_backup as backup
 from agentclaw.community.core.bot_management.engines.aicoding.strategy import AicodingProvisioningStrategy
 from agentclaw.community.core.bot_management.engines.provisioning import BotProvisioningContext
@@ -43,8 +45,11 @@ def target():
 def prepare(s):
     return AicodingProvisioningStrategy(s.ctx.active_engine).prepare_restart(
         s.ctx, binding_id=42, device_service_provider=lambda: s.router,
-        bot_repository=s.bot_repo, target_runtime_provider=s.runtime, operation_id=OPERATION,
-        arca_restart_transport_provider=lambda: ArcaRestartTransport(s.provider._exec_shell_new),
+        bot_repository=s.bot_repo, operation_id=OPERATION,
+        restart_dependencies=RestartBackupDependencies(
+            baas_runtime=s.runtime,
+            arca_transport=lambda: ArcaRestartTransport(s.provider._exec_shell_new),
+        ),
     )
 
 

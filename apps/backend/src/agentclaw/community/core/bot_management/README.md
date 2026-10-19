@@ -29,6 +29,7 @@ consumes:
   - "DeviceService"
   - "ArcaRestartBindings (binding reads)"
   - "ArcaRestartTransport (fixed-target Arca command execution)"
+  - "BaasRestartRuntime (coding backup inventory/commands)"
   - "ResourceService"
   - "BotPublishService"
   - "SkillCenter factories"
@@ -107,6 +108,11 @@ corp sandbox/tenant execution-versus-release contract tests. Bound coding Arca
 replacement orchestration lives in `engines/aicoding/restart_arca_lifecycle.py`;
 the coding worker invokes it directly, just as it invokes the BaaS executor.
 Shared stop/start primitives and allocation lock handoff remain unchanged.
+`aicoding/restart_dependencies.py` owns the immutable, lazy
+`RestartBackupDependencies` envelope and its BaaS runtime contract. DI supplies
+it once; BotService and both coding executors pass the same envelope rather
+than separate provider-specific backup factories. Published/Caller dispatch
+adapts its existing runtime into this envelope without changing its callers.
 
 ## Owner display name on OpenAPI creation
 

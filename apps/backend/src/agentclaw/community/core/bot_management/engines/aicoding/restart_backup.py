@@ -17,7 +17,8 @@ from urllib.parse import quote
 
 from agentclaw.community.log import get_logger
 
-from .restart_arca import ArcaRestartTransport, BoundArcaRestartExecutor, RestartBackupTargetChanged
+from .restart_arca import BoundArcaRestartExecutor, RestartBackupTargetChanged
+from .restart_dependencies import RestartBackupDependencies
 
 logger = get_logger()
 
@@ -344,8 +345,7 @@ def _operation_id(value, restart_key=None):
 
 
 class AicodingRestartBackupMixin:
-    def prepare_restart(self, ctx, *, device_service_provider=None,
-                        target_runtime_provider=None, **kwargs):
+    def prepare_restart(self, ctx, *, device_service_provider=None, **kwargs):
         """Back up outside the caller's lock; return the under-lock verifier.
 
         Backup I/O and receipt failures degrade to warnings. Binding reads,
@@ -362,7 +362,7 @@ class AicodingRestartBackupMixin:
         kwargs['operation_id'] = _operation_id(
             kwargs.get('operation_id'), kwargs.pop('restart_key', None)
         )
-        verify = self._prepare_restart(ctx, target_runtime_provider=target_runtime_provider, **kwargs)
+        verify = self._prepare_restart(ctx, **kwargs)
         if execution is None:
             return verify
 
@@ -381,16 +381,24 @@ class AicodingRestartBackupMixin:
             await asyncio.to_thread(verify)
 
     def _prepare_restart(self, ctx, *, binding_id=None, device_service=None,
-                        bot_repository=None, device_id=None, target_runtime=None,
-                        target_runtime_provider=None, operation_id=None, arca_restart_transport_provider=None):
+                        bot_repository=None, device_id=None,
+                        operation_id=None, restart_dependencies: RestartBackupDependencies | None = None):
         """Only coding engines probe runtime; no generic lifecycle/status changes."""
         try:
             operation_id = _operation_id(operation_id)
+            dependencies = restart_dependencies or RestartBackupDependencies()
             if device_id is not None:
+                target_runtime = None
                 identity = dict(bot_id=ctx.bot_id, target_id=device_id,
                                 operation_id=operation_id)
+                def inventory():
+                    nonlocal target_runtime
+                    if target_runtime is None:
+                        target_runtime = dependencies.baas_runtime()
+                    return _query_inventory(target_runtime, **identity, phase='resolve')
+
                 targets = _best_effort(
-                    lambda: _query_inventory(target_runtime, **identity, phase='resolve'),
+                    inventory,
                     phase='resolve', **identity,
                 )
                 if targets == {}:
@@ -447,7 +455,8 @@ class AicodingRestartBackupMixin:
                 # Resolving the backup-only client is not a restart prerequisite.
                 check = _best_effort(
                     lambda: self._prepare_restart(
-                        ctx, device_id=target, target_runtime=target_runtime_provider(),
+                        ctx, device_id=target,
+                        restart_dependencies=RestartBackupDependencies.for_instance(dependencies.baas_runtime()),
                         operation_id=operation_id),
                     phase='prepare', bot_id=ctx.bot_id, target_id=target,
                     operation_id=operation_id,
@@ -467,11 +476,7 @@ class AicodingRestartBackupMixin:
                 else:
                     # Same physical identity as release, not a BaaS inventory or
                     # the logical device_id. Target/DB checks must stay blocking.
-                    transport = (
-                        arca_restart_transport_provider()
-                        if arca_restart_transport_provider is not None
-                        else ArcaRestartTransport()
-                    )
+                    transport = dependencies.arca_transport()
                     executor = BoundArcaRestartExecutor(
                         bindings=device_service, transport=transport,
                         binding_id=binding_id,

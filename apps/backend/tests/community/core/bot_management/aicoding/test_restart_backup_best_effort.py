@@ -5,6 +5,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
+
 from agentclaw.community.core.bot_management.engines.aicoding import restart_backup as backup
 from agentclaw.community.core.bot_management.engines.aicoding.strategy import AicodingProvisioningStrategy
 from agentclaw.community.core.bot_management.engines.provisioning import BotProvisioningContext
@@ -40,7 +42,7 @@ def test_preparation_failures_continue_with_warning_not_fake_success(failure, en
     else:
         runtime.post_bots_api.return_value = failure
     check = AicodingProvisioningStrategy(engine)._prepare_restart(
-        context(engine), device_id='target', target_runtime=runtime, operation_id=OPERATION,
+        context(engine), device_id='target', restart_dependencies=RestartBackupDependencies.for_instance(runtime), operation_id=OPERATION,
     )
     check()
     assert runtime.post_bots_api.call_count == 1  # Never retry start during verification.
@@ -59,7 +61,7 @@ def test_unavailable_inventory_continues_without_random_target(inventory, caplog
     else:
         runtime.list_devices_by_bot_uuid.return_value = inventory
     verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(
-        context(), device_id='target', target_runtime=runtime,
+        context(), device_id='target', restart_dependencies=RestartBackupDependencies.for_instance(runtime),
     )
     verify()
     runtime.post_bots_api.assert_not_called()
@@ -113,7 +115,7 @@ def test_inventory_change_continues_after_failed_backup(caplog):
         [{'provider_device_id': 'new', 'status': 'ACTIVE'}],
     ]
     runtime.post_bots_api.side_effect = ConnectionError('unreachable')
-    verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(context(), device_id='target', target_runtime=runtime)
+    verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(context(), device_id='target', restart_dependencies=RestartBackupDependencies.for_instance(runtime))
     verify()
     assert 'reason=target_changed' in caplog.text
     assert runtime.post_bots_api.call_count == 1
@@ -126,7 +128,7 @@ def test_verification_inventory_unavailable_does_not_block():
     ]
     runtime.post_bots_api.return_value = committed()
     verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(
-        context(), device_id='target', target_runtime=runtime, operation_id=OPERATION,
+        context(), device_id='target', restart_dependencies=RestartBackupDependencies.for_instance(runtime), operation_id=OPERATION,
     )
     verify()
     assert runtime.post_bots_api.call_count == 2
@@ -139,7 +141,7 @@ def test_each_replica_still_gets_backup_attempt_after_one_fails():
     ]
     runtime.post_bots_api.side_effect = [ConnectionError('down'), committed(), committed()]
     verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(
-        context(), device_id='target', target_runtime=runtime, operation_id=OPERATION,
+        context(), device_id='target', restart_dependencies=RestartBackupDependencies.for_instance(runtime), operation_id=OPERATION,
     )
     verify()
     assert [c.kwargs['path'] for c in runtime.post_bots_api.call_args_list] == [
@@ -187,7 +189,7 @@ def test_durable_budget_is_shared_across_replicas_and_redelivery(caplog):
              patch.object(backup.time, 'sleep', side_effect=lambda delay: now.__setitem__(0, now[0] + delay)):
             for _ in range(2):  # A later delivery cannot restart the budget either.
                 AicodingProvisioningStrategy('aicoding')._prepare_restart(
-                    context(), device_id='target', target_runtime=runtime, operation_id=OPERATION)()
+                    context(), device_id='target', restart_dependencies=RestartBackupDependencies.for_instance(runtime), operation_id=OPERATION)()
         assert now[0] == 1500
         runtime.post_bots_api.assert_called_once()
         assert runtime.post_bots_api.call_args.kwargs['path'].endswith('/p1/commands')
@@ -205,7 +207,7 @@ def test_late_valid_inventory_becomes_baseline_without_starting_backup(caplog):
         [{'provider_device_id': 'new', 'status': 'ACTIVE'}],
     ]
     verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(
-        context(), device_id='target', target_runtime=runtime)
+        context(), device_id='target', restart_dependencies=RestartBackupDependencies.for_instance(runtime))
     verify()
     verify()
     verify()

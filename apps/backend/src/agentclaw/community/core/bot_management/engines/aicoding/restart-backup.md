@@ -211,3 +211,33 @@ Non-coding engines, unbound recovery, and admission's activation-in-progress
 fallback retain the existing generic lifecycle. Direct synchronous callers also
 retain their existing strategy precondition hook. This change does not migrate
 all device lifecycle behavior into coding policy or change published/Caller flows.
+
+## Unified backup dependency assembly
+
+`RestartBackupDependencies` in `restart_dependencies.py` is the single backup
+dependency passed by BotService and both coding restart executors. Its immutable
+fields hold factories for the existing BaaS inventory/command runtime and the
+pinned Arca transport. `BotManagementModule` assembles these lazily; OCB keeps
+selecting the existing Arca hook in its composition root. Constructing the
+envelope does not resolve either provider, perform network I/O or introduce a
+BotService/DeviceService dependency cycle. Non-coding strategies and unbound
+recovery do not resolve its factories.
+
+The strategy resolves only the selected capability. BaaS resolution failures
+still degrade backup inside the existing best-effort boundary; missing Arca
+transport still blocks replacement. Binding/database checks stay outside that
+boundary. This is dependency consolidation, not a new common provider API: BaaS
+continues to use inventory and Arca continues to pin the old binding's sandbox.
+
+The `prepare_instance_restart` published/Caller dispatcher preserves its existing
+`target_runtime` argument and wraps it with `RestartBackupDependencies.for_instance`
+before invoking the engine hook. No provider-specific backup factory is passed
+through BotService or the engine hook anymore. BotService's existing BaaS service
+dependency remains for non-backup lifecycle operations; this change does not
+remove that shared functionality.
+
+Propagation: deploy the updated DI assembly, BotService, strategy and tests
+together. Direct internal constructors that exercise coding backup must supply
+the envelope instead of `arca_restart_transport_provider`; the default represents
+unavailable backup capabilities, not backup success. HTTP inputs, queue payloads,
+provider APIs and backup helper/receipt formats are unchanged.
