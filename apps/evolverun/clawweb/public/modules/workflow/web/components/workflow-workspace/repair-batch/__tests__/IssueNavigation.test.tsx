@@ -99,6 +99,7 @@ it('reuses a recently visited issue page without refetching or hiding its sugges
   </QueryClientProvider>)
   await user.click(await screen.findByRole('checkbox', { name: '选择 retry' }))
   const pager = screen.getByRole('region', { name: '问题分页' })
+  expect(screen.getByRole('region', {name:'问题列表'})).toContainElement(pager)
   await user.click(within(pager).getByRole('button', { name: '下一页' }))
   await screen.findByText('node-20', { selector: 'span' })
   await waitFor(() => expect(previewScopes).toHaveLength(2))

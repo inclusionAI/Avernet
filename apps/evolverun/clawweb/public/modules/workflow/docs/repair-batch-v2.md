@@ -133,7 +133,7 @@ OCB 已实现以上内容重建；部署历史事务激活前还会再次调用�
 
 | 请求 | 行为 |
 | --- | --- |
-| `GET /candidates?workflowId=&state=&page=&pageSize=&includeHistorical=&nodeId=&failureMode=&signature=` | 默认读取最近 30 天，显式 `includeHistorical=true` 包含历史；可选节点/类型/签名先过滤再分页和计数；inputDigest 仍绑定整个时间范围的来源，支持跨页选择；不读取证据 payload，不物化写库 |
+| `GET /candidates?workflowId=&state=&page=&pageSize=&includeHistorical=&nodeId=&failureMode=&signature=&versionScope=&snapshotKey=` | 默认读取最近 30 天，显式 `includeHistorical=true` 包含历史；可选节点/类型/签名先过滤再分页和计数；inputDigest 仍绑定整个时间范围的来源，支持跨页选择；不读取证据 payload，不物化写库 |
 | `POST /candidates/query` | 只读查询，与 GET 使用相同 view 权限、过滤和快照；JSON 请求体包含 workflowId 和查询字段，批量 previewSignatures 最多 50 个，解压后请求体最多 256 KiB，避免长签名撑大 URL。返回每个问题的真实总数及最多 3 项预览，与全局建议页独立；先为基础响应和所有总数预留字节，再按剩余 4 MiB 响应预算添加完整项，不截断建议。预算不足时预览可少于 3 项或为空，仍可通过“查看全部”分页读取。旧 GET previewSignature 参数兼容保留，新客户端不再使用 |
 | `GET /items/:itemId?workflowId=` | 展开单条时读取该项完整建议、来源与证据 payload |
 | `POST /` | 校验当前来源摘要，原子写入处理项、修订、workflow_repair task 和 draft step，提交后派发，202 |
@@ -243,3 +243,11 @@ MySQL/ZDAS 仅有 DDL 渲染契约检查；真实目标数据库迁移、事务�
 内部宿主兼容当前写入端的 `ClawMind workflow-repair-result/v1` 提交头，区分 Pack candidate commit 和承载结果元数据的 commit；同时保留旧 `ClawMind repair result v1` 读取。读取当前协议时校验任务、轮次、执行身份、候选父节点、Pack tree/digest、检查摘要及 manifest。`previousReportRef` 随读取请求传入，只有精确匹配上一成功轮次且绑定原父候选的旧结果，才可确认本轮尚未写结果。
 
 分支不存在必须由成功的远端 `ls-remote` 明确确认，不能从 fetch 失败推断。首次任务确认没有分支返回 `RepairResultAbsentError`；已有成功候选但分支消失、远端不可达或结果校验不通过仍属于未知状态，继续阻止重复生成。
+
+### 版本归属与历史读取
+
+建议的来源版本从冻结分析引用或原运行对应的唯一部署/保存快照读取，独立于补丁 `baseSpecDigest`；文字建议同样能关联版本，明确的身份不符仍保留未确认状态。原补丁和摘要不改写，自动生成继续执行既有补丁基线校验。
+
+历史区先按部署版本、保存测试和版本未确认分组，再展开问题；只有展开的问题读取建议。可选 `snapshotKey` 与 `versionScope=historical` 一起在计数、分页前过滤该来源版本。筛选、问题行与分页属于一个列表容器。
+
+版本列表读取复用有界的短期投影，部署、运行或分析版本变化使其失效；聚合任务准备和候选写入仍读取权威来源。摘要响应仅保留来源身份、版本和短文本，不传完整分析 facts/inferences。

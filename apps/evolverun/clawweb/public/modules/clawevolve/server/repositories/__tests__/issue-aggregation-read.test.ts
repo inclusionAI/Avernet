@@ -250,3 +250,33 @@ it('removes trial evidence from model and legacy issue frequency sources', async
   expect(result.groups).toEqual([]);
   expect(result.page.total).toBe(0);
 });
+
+it('bounds cold priority-read round trips and reuses versioned sources across pages', async () => {
+  const {repository}=await seed(1,0,1);
+  raw.exec(`ALTER TABLE workflow_evolution_analysis_runs ADD COLUMN state_version INTEGER DEFAULT 0;
+    CREATE TABLE flow_runs(flow_id TEXT PRIMARY KEY,workflow_id TEXT,workflow_version INTEGER,workflow_deploy_number INTEGER,state_json TEXT,started_at INTEGER);
+    CREATE TABLE workflow_deploy_history(workflow_id TEXT,version INTEGER,deploy_number INTEGER,spec_json TEXT,is_active INTEGER);
+    CREATE TABLE node_executions(flow_id TEXT,node_id TEXT);
+    INSERT INTO workflow_deploy_history VALUES ('wf',34,34,'{"id":"wf"}',1);`);
+  const insert=raw.prepare("INSERT INTO flow_runs VALUES (?,'wf',34,34,NULL,?)");
+  const node=raw.prepare("INSERT INTO node_executions VALUES (?,'node-0')");
+  const now=Date.now();
+  raw.transaction(()=>{for(let i=0;i<35001;i++){const id=i===0?'run-0-0':`ordinary-${i}`;insert.run(id,now-1000);node.run(id);}})();
+  const query=vi.spyOn(db,'query');
+  const first=await repository.listPage('wf',{page:1,pageSize:20,versionScope:'current'});
+  expect(first.groups[0].priority?.week.related).toBe(35001);
+  console.info('[versioned issue read budget]',{runs:35001,coldQueries:query.mock.calls.length});
+  expect(query.mock.calls.length).toBeLessThan(70);
+  query.mockClear();
+  await repository.listPage('wf',{page:2,pageSize:10,versionScope:'current',sort:'recent'});
+  expect(query.mock.calls.filter(([sql])=>/SELECT id, analysis_id/.test(sql))).toHaveLength(0);
+  expect(query.mock.calls.filter(([sql])=>/FROM node_executions/.test(sql))).toHaveLength(0);
+  console.info('[versioned issue read budget]',{warmQueries:query.mock.calls.length});
+  raw.prepare("INSERT INTO flow_runs VALUES ('new-run','wf',34,34,NULL,?)").run(now-1000);
+  raw.exec("INSERT INTO node_executions VALUES ('new-run','node-0')");
+  expect((await repository.listPage('wf',{page:1,pageSize:20,versionScope:'current'})).groups[0].priority?.week.related).toBe(35002);
+  raw.exec(`UPDATE workflow_deploy_history SET is_active=0; INSERT INTO workflow_deploy_history VALUES ('wf',35,35,'{"id":"wf"}',1);`);
+  expect((await repository.listPage('wf',{page:1,pageSize:20,versionScope:'current'})).page.total).toBe(0);
+  const history=await repository.listPage('wf',{page:1,pageSize:20,versionScope:'historical'});
+  expect(history.groups[0].sources[0].analysisContext?.workflowSnapshot).toMatchObject({status:'resolved',snapshot:{workflowVersion:34,deployNumber:34}});
+});

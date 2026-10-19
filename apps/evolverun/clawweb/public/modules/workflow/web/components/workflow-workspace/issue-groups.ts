@@ -1,3 +1,4 @@
+import type { WorkflowSnapshotBinding } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot'
 import type { RepairVersionScope } from '../../../server/contracts/repair-version-scope'
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
@@ -15,7 +16,7 @@ export type IssueGroupView = {
   aggregationInputSummary?: { totalSources: number; fullSources: number; compactSources: number } | null;
   sources: Array<{ sourceId: string; flowId: string; flowIds: string[]; analysisId: string; diagnosisId: string;
     nodeId: string | null; failureSignature: string; failureMode: string; reasoning: string; completedAtMs: number; evidenceEventIds: string[];
-    proposal?: { summary: string; operations: unknown[] } }>;
+    analysisContext?: { workflowSnapshot?: WorkflowSnapshotBinding }; proposal?: { summary: string; operations: unknown[] } }>;
   summarySources?: IssueGroupView['sources'];
   summary: null | { summary: string; unknowns: string[]; causes: Array<{ title: string; conclusion: string;
     certainty: 'supported' | 'hypothesis' | 'unknown'; sourceIds: string[] }> };
