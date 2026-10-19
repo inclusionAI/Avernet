@@ -13,6 +13,7 @@ import {
   Skeleton,
 } from '@/components/ui';
 import { useBotRegistrationToken } from '@/pages/Workspace/hooks/useBotRegistrationToken';
+import { resolveBcsEndpoint } from '@/services/workspace/botRegistrationService';
 import { Check, Copy, MessageSquare, RefreshCw, Terminal } from 'lucide-react';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -41,12 +42,15 @@ function formatExpiresAt(expiresAt: number | null): string | null {
 export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogProps) {
   const panelCapability = getCapabilities().getAdditionalBotRegistrationPanels?.();
   const additionalPanels = panelCapability?.status === 'available' ? panelCapability.value : [];
+  const qwenWorkEnabled =
+    getCapabilities().getQwenWorkBotRegistrationConfig(resolveBcsEndpoint() ?? '').status === 'available';
+  const deepSeekHarnessEnabled = getCapabilities().getDeepSeekHarnessRegistrationEnabled().value;
   const poolabEnabled = getCapabilities().getPoolabBridgeInstallation().value !== null;
   const engineOptions = [
     ...(poolabEnabled ? [{ value: 'poolab' as const, label: 'Poolab' }] : []),
     ...additionalPanels.map(({ id, label }) => ({ value: id, label })),
-    { value: 'deepseek-harness', label: 'DeepSeek Harness' },
-    { value: 'qwenwork', label: '千问办公' },
+    ...(deepSeekHarnessEnabled ? [{ value: 'deepseek-harness', label: 'DeepSeek Harness' }] : []),
+    ...(qwenWorkEnabled ? [{ value: 'qwenwork', label: '千问办公' }] : []),
     { value: 'openclaw', label: 'OpenClaw' },
   ];
   const defaultEngine = engineOptions[0].value;
