@@ -23,6 +23,21 @@ this file that need more than one record (a patch against its base, a policy
 against the risk tiers) are checked by whoever records the revision, the
 Genome Registry in Backend (work item RSI-03).
 
+**Reading the schemas.** JSON Schema has one kind of object; whether an
+object is a record or a map is shown by how the schemas here combine its
+keywords. Every object here uses one of two forms:
+
+| Form | Keywords | Meaning | Example |
+| --- | --- | --- | --- |
+| Record | `properties` lists the fields, `additionalProperties: false` | Fixed field names; any other key is refused | `spec`, `personaFile`, every op |
+| Map | no `properties` (or only a few special keys), `additionalProperties: <schema>`, and `propertyNames` when keys are restricted | Keys are data chosen by the author; `propertyNames` constrains each key, `additionalProperties` each value | `files` of `skill.add`, `mcpConfig.headers`, `policy.risk_overrides`, `revision.annotations` (any key) |
+
+Two objects are neither: `spec.engine_config` allows no key at all
+(`maxProperties: 0`), and a patch's `op` is a wrapper whose `oneOf` picks the
+op's record. `oneOf` means exactly one alternative matches, `anyOf` at least
+one, `allOf` all of them; `if`/`then` applies `then` only to values that
+match `if`.
+
 **Consumers.** Backend's Genome Registry validates every revision and patch it
 records and is the authority: an invalid patch is answered `422`. The
 `apps/evolution` service and the strategy SDK read these same files to check a
