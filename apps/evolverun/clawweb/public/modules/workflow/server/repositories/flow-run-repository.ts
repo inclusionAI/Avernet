@@ -451,6 +451,21 @@ export class FlowRunRepository {
   async updateStatus(flowId: string, status: string, retryEpoch?: number): Promise<boolean> {
     const now = this.db.dialect.now();
     if (retryEpoch === undefined) {
+      if (status === 'running') {
+        try {
+          // Reopening through the original API retires the preceding explicit
+          // epoch. Do this in the same write, before assigning the new status.
+          const result = await this.db.exec(
+            `UPDATE flow_runs SET retry_epoch = CASE WHEN status <> 'running' AND retry_epoch > 0 THEN 0 ELSE retry_epoch END,
+             status = ?, gmt_modified = ?, completed_at = NULL WHERE flow_id = ?`,
+            [status, now, flowId],
+          );
+          return result.affectedRows > 0;
+        } catch (error) {
+          if (!/unknown column.*retry_epoch|no such column: retry_epoch\b/i.test(String(error))) throw error;
+          // Older schemas have no epoch to invalidate; keep their original API.
+        }
+      }
       const result = await this.db.exec(
         `UPDATE flow_runs SET status = ?, gmt_modified = ?${status === 'running' ? ', completed_at = NULL' : ''} WHERE flow_id = ?`,
         [status, now, flowId],

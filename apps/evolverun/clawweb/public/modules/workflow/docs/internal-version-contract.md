@@ -30,7 +30,7 @@ These changes are additive and require no schema migration: the two run columns 
 
 ## Restart recovery retry compatibility
 
-Current ClawMind performs retry bookkeeping in its local journal. It uses the existing `PUT /runs/:flowId/status` with `status: running`, waits for that write, then starts execution. The status write clears the previous `completed_at`, preserving `started_at` and node history. It no longer calls `retry-resume` or sends `retry_epoch` on status, completion, or timeout writes.
+Current ClawMind performs retry bookkeeping in its local journal. It uses the existing `PUT /runs/:flowId/status` with `status: running`, waits for that write, then starts execution. The status write clears the previous `completed_at`, preserving `started_at` and node history. When it reopens a non-running record with a positive epoch, the same atomic update resets that epoch to zero so the preceding explicit-epoch client cannot finish the new attempt. Already-running status updates do not reset the epoch. Schemas without the column use the original status update; other database errors are propagated. It no longer calls `retry-resume` or sends `retry_epoch` on status, completion, or timeout writes.
 
 Requests that omit `retry_epoch` retain the original API contract even when the stored value is `NULL`, zero, or positive. Status updates do not narrow the previously supported retry states. Completion uses the existing run identity; `fail-if-running` retains its atomic nonterminal-state check. The legacy `retry-failed` operation still resets child nodes and the run in one transaction, including records written by an epoch-aware plugin.
 

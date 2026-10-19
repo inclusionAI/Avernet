@@ -155,7 +155,7 @@ it('keeps the original status and completion contract usable with null, zero, an
         raw.prepare('INSERT INTO flow_runs (flow_id, status, retry_epoch, started_at, completed_at) VALUES (?, ?, ?, 1, 100)').run(id, status, epoch);
         expect(await runs.updateStatus(id, 'running')).toBe(true);
         expect(raw.prepare('SELECT status, started_at, completed_at, retry_epoch FROM flow_runs WHERE flow_id = ?').get(id))
-          .toEqual({ status: 'running', started_at: 1, completed_at: null, retry_epoch: epoch });
+          .toEqual({ status: 'running', started_at: 1, completed_at: null, retry_epoch: epoch === 2 ? 0 : epoch });
         expect(await runs.updateCompletion(id, { status: 'succeeded', completedAt: 200, succeededCount: 1, failedCount: 0 })).toBe(true);
       }
     }
@@ -194,5 +194,54 @@ it('keeps ordinary retry, completion, and timeout usable on a schema without ret
     expect(await runs.updateStatus('flow', 'running')).toBe(true);
     expect(await runs.updateCompletion('flow', { status: 'succeeded', completedAt: 20, succeededCount: 1, failedCount: 0 })).toBe(true);
     expect(raw.prepare('SELECT started_at, status FROM flow_runs').get()).toEqual({ started_at: 1, status: 'succeeded' });
+  } finally { await db.close(); }
+});
+
+it('invalidates the preceding explicit epoch when the original status API reopens a run', async () => {
+  const raw = new Database(':memory:');
+  raw.exec(`CREATE TABLE flow_runs (
+    flow_id TEXT PRIMARY KEY, status TEXT, retry_epoch INTEGER, started_at INTEGER, completed_at INTEGER,
+    gmt_modified INTEGER, total_duration_ms INTEGER, total_token_usage INTEGER, current_phase TEXT,
+    result_json TEXT, input_json TEXT, succeeded_count INTEGER, failed_count INTEGER
+  );`);
+  const db = new SqliteDatabase(raw);
+  try {
+    const runs = new FlowRunRepository(db);
+    for (const status of ['failed', 'blocked', 'waiting', 'succeeded', 'cancelled']) {
+      raw.prepare('INSERT INTO flow_runs (flow_id, status, retry_epoch, started_at, completed_at, result_json) VALUES (?, ?, 2, 1, 100, ?)')
+        .run(status, status, 'previous result');
+      expect(await runs.updateStatus(status, 'running')).toBe(true);
+      expect(await runs.updateCompletion(status, { status: 'failed', completedAt: 200, resultJson: 'late old result', succeededCount: 0, failedCount: 1, retryEpoch: 2 })).toBe(false);
+      expect(await runs.markFailedIfRunning(status, { reason: 'old timeout', currentPhase: 'P1', completedAt: 200, retryEpoch: 2 })).toBe(false);
+      expect(await runs.updateStatus(status, 'failed', 2)).toBe(false);
+      expect(await runs.resumeForRetry(status, 3)).toBe('conflict');
+      expect(raw.prepare('SELECT status, retry_epoch, started_at, completed_at, result_json FROM flow_runs WHERE flow_id = ?').get(status))
+        .toEqual({ status: 'running', retry_epoch: 0, started_at: 1, completed_at: null, result_json: 'previous result' });
+      expect(await runs.updateCompletion(status, { status: 'succeeded', completedAt: 300, resultJson: 'new result', succeededCount: 1, failedCount: 0 })).toBe(true);
+    }
+  } finally { await db.close(); }
+});
+
+it('does not invalidate an explicit epoch for an already-running status update', async () => {
+  const raw = new Database(':memory:');
+  raw.exec(`CREATE TABLE flow_runs (flow_id TEXT PRIMARY KEY, status TEXT, retry_epoch INTEGER, completed_at INTEGER, gmt_modified INTEGER);
+    INSERT INTO flow_runs VALUES ('flow', 'running', 2, NULL, 1);`);
+  const db = new SqliteDatabase(raw);
+  try {
+    expect(await new FlowRunRepository(db).updateStatus('flow', 'running')).toBe(true);
+    expect(raw.prepare('SELECT status, retry_epoch FROM flow_runs').get()).toEqual({ status: 'running', retry_epoch: 2 });
+  } finally { await db.close(); }
+});
+
+it('does not fall back to an unguarded status write on other database failures', async () => {
+  const raw = new Database(':memory:');
+  raw.exec(`CREATE TABLE flow_runs (flow_id TEXT PRIMARY KEY, status TEXT, retry_epoch INTEGER, completed_at INTEGER, gmt_modified INTEGER);
+    INSERT INTO flow_runs VALUES ('flow', 'failed', 2, 100, 1);
+    CREATE TRIGGER reject_epoch_update BEFORE UPDATE OF retry_epoch ON flow_runs BEGIN SELECT RAISE(ABORT, 'retry write failed'); END;`);
+  const db = new SqliteDatabase(raw);
+  try {
+    await expect(new FlowRunRepository(db).updateStatus('flow', 'running')).rejects.toThrow('retry write failed');
+    expect(raw.prepare('SELECT status, retry_epoch, completed_at FROM flow_runs').get())
+      .toEqual({ status: 'failed', retry_epoch: 2, completed_at: 100 });
   } finally { await db.close(); }
 });
