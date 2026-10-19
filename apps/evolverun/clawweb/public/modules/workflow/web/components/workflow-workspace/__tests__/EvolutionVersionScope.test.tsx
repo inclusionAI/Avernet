@@ -14,7 +14,7 @@ it('submits explicitly selected historical originals against one visible current
   repairApi.selection.mockResolvedValue({ items: [old], missing: [], inputDigest: 'c'.repeat(64), canEdit: true, activeSnapshot: { status: 'resolved', snapshot: active } })
   const user = userEvent.setup()
   render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
-  await user.click(await screen.findByRole('button', { name: '全部建议与历史' }))
+  await user.click(await screen.findByRole('button', { name: '查找全部建议' }))
   await user.click(await screen.findByRole('checkbox', { name: '选择 历史约束' }))
   await user.click(screen.getByRole('button', { name: '生成优化草稿（1）' }))
   const submit = await screen.findByRole('button', { name: '生成 Pack 草稿' })

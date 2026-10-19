@@ -107,7 +107,7 @@ it('restores the exact parent/child observation link after reloading the child t
 it('clears the lineage when returning to the issue list before opening an unrelated task', async () => {
   await createChild([{ taskId: 'FIX-unrelated', revision: 1, phase: 'review', updatedAtMs: 1, itemCount: 1 }])
   await userEvent.click(screen.getByRole('button', { name: /返回问题与优化/ }))
-  await userEvent.click(within(await screen.findByRole('region', { name: '问题与优化任务入口' })).getByRole('button', { name: '查看本轮任务' }))
+  await userEvent.click(within(await screen.findByRole('region', { name: '问题与优化任务入口' })).getByRole('button', { name: '查看并审阅' }))
   await waitFor(() => expect(repairApi.task).toHaveBeenCalledWith('FIX-unrelated'))
   expect(screen.queryByRole('button', { name: '返回上一轮观察', exact: true })).not.toBeInTheDocument()
   expect(JSON.parse(sessionStorage.getItem('workflow-repair:wf-1')!)).not.toHaveProperty('lineage')

@@ -285,6 +285,7 @@ function DiagnosisPanel({
   const repairBackedSignatureKeys = new Set(repairData?.repairSignatureKeys ?? [])
   const filtered = enriched
   const issuePage = data?.page ?? { page: 1, pageSize: repairPageSize, total: enriched.length, totalPages: 1 }
+  const hasIssueFilters = nodeFilter !== 'all' || modeFilter !== 'all' || severity !== 'all'
   const activeRepairTask = [...(repairData?.tasks ?? [])].sort((a, b) => b.updatedAtMs - a.updatedAtMs).find(task => ['drafting', 'review', 'blocked', 'publishing', 'failed'].includes(task.phase))
   const selectedItems = selectedRepairIds.flatMap(id => selectionItems[id] ? [selectionItems[id]] : [])
   const selectedIssueCount = new Set(selectedItems.map(item => item.context?.signature ?? item.groupKey)).size
@@ -553,16 +554,15 @@ function DiagnosisPanel({
   </>
 
   return (
-    <div className="space-y-3 pb-36">
+    <div className={`space-y-3 ${selectedRepairIds.length ? 'pb-36' : 'pb-6'}`}>
       <div>
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div><h3 className="text-sm font-semibold text-slate-900">问题与优化</h3>
-            <p className="mt-1 text-xs leading-5 text-slate-500">选择问题与方案 → 生成优化草稿 → 审阅并确认发布 → 自动验证。可跨页取舍方案。</p></div>
+          <p className="text-xs leading-5 text-slate-500">选择问题与方案 → 生成优化草稿 → 审阅并确认发布 → 自动验证。可跨页取舍方案。</p>
           {!repairOpen && <button type="button" className={primary} onClick={() => setRepairOpen(true)}>进入修复处理</button>}
         </div>
       </div>
 
-      <RepairTaskEntry tasks={repairData?.tasks ?? []} issueCount={data?.page?.total} loading={repairLoading}
+      <RepairTaskEntry tasks={repairData?.tasks ?? []} loading={repairLoading} error={!!repairError}
         onOpen={openTask} />
 
       {isLoading && <p role="status" className="rounded-lg bg-slate-50 p-4 text-xs text-slate-500">正在加载问题摘要；修复建议和任务独立加载。</p>}
@@ -575,27 +575,21 @@ function DiagnosisPanel({
       {suggestionsLoading && <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">历史建议仍在加载，不影响查看问题与修复任务。</p>}
       {repairNotice && <p role="status" className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">{repairNotice}</p>}
       {draftNeedsCheck && <p role="alert" className="text-xs text-destructive">{repairActionError || '提交结果尚未确认。'} <button type="button" disabled={repairBusy} className="underline" onClick={() => void recoverDraft()}>核对任务状态</button></p>}
-      {activeSnapshot?.status === 'resolved' && <p className="text-xs text-slate-600">生成目标：{snapshotLabel(activeSnapshot.snapshot)}{hasHistorical ? ` · 已选 ${historicalItemIds.length} 条历史参考` : ''}</p>}
       {targetChanged && <button type="button" disabled={repairBusy} onClick={() => void reviewCurrentSelection(true)} className="text-xs text-blue-700 underline">核对当前目标版本并保留已选范围</button>}
       {selectionNotice && !selectionNotice.startsWith('默认不选择') && <p role="status" className="text-xs text-amber-800">{selectionNotice}</p>}
 
 
 
-      {!isLoading && !isError && diagnoses.length === 0 && standaloneSuggestions.length === 0 && nodeFilter === 'all' && modeFilter === 'all' && (
-        <div className="rounded-xl border border-slate-200 bg-white p-5 text-xs text-slate-500">
-          当前生效版本暂无已记录异常。历史版本可在下方展开查看。任务护航会分析失败运行，也会保留成功运行中的异常和退化信号。
-        </div>
-      )}
-
       {data && !isLoading && !isError && <section aria-label="问题列表" aria-busy={updatingIssues} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-slate-200 px-4 py-3">
-          <h3 className="text-sm font-semibold text-slate-900">当前版本问题 · 共 {issuePage.total} 个问题</h3>
+          <div><h3 className="text-sm font-semibold text-slate-900">当前版本问题 · {issuePage.total} 个</h3>
+            {activeSnapshot?.status === 'resolved' && <p className="mt-1 text-xs text-slate-500">{snapshotLabel(activeSnapshot.snapshot)}{hasHistorical ? ` · 已选 ${historicalItemIds.length} 条历史参考` : ''}</p>}</div>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <label className="mr-2 flex items-center gap-2 text-xs text-slate-600">
               <input type="checkbox" aria-label="包含历史未复现" checked={includeHistorical} disabled={repairBusy}
                 onChange={event => changeHistoryScope(event.target.checked)} className="h-4 w-4 accent-blue-600" />{repairData?.activeSnapshot !== undefined ? '包含更早记录（30天前）' : '包含历史未复现'}
             </label>
-            <select aria-label="问题排序" value={sort} onChange={event => { setSort(event.target.value as typeof sort); setRepairPage(1) }} className="rounded-md border border-input bg-background px-2 py-1 text-xs">
+            {(issuePage.total > 0 || hasIssueFilters) && <><select aria-label="问题排序" value={sort} onChange={event => { setSort(event.target.value as typeof sort); setRepairPage(1) }} className="rounded-md border border-input bg-background px-2 py-1 text-xs">
               <option value="priority">影响优先</option><option value="frequency">近7天发现次数</option><option value="recent">最近发生</option>
             </select>
             <select aria-label="影响程度" value={severity} onChange={event => { setSeverity(event.target.value); setRepairPage(1) }} className="rounded-md border border-input bg-background px-2 py-1 text-xs">
@@ -619,11 +613,11 @@ function DiagnosisPanel({
               <option value="all">全部模式</option>
               {modes.map((m) => <option key={m} value={m}>{issueModeLabel(m)}</option>)}
             </select>
-            <span className="pl-1 text-[11px] text-slate-400">本页 {filtered.length} 个问题</span>
+            </>}
           </div>
         </div>
 
-        {filtered.length === 0 && <div className="px-4 py-10 text-center text-xs text-slate-400">没有符合当前筛选条件的问题</div>}
+        {filtered.length === 0 && <div className="px-4 py-5 text-sm text-slate-500">{hasIssueFilters ? '没有符合当前筛选条件的问题' : standaloneSuggestions.length ? '当前版本暂无问题分组，已有建议见下方。' : '当前生效版本暂无已记录问题，可查看历史版本的问题与建议。'}</div>}
 
 
         <div className="divide-y divide-slate-200">
@@ -663,12 +657,12 @@ function DiagnosisPanel({
           </article>
           })}
         </div>
-        <footer role="region" aria-label="问题分页" className="border-t border-slate-200 px-4">
+        {issuePage.total > 0 && <footer role="region" aria-label="问题分页" className="border-t border-slate-200 px-4">
           <Pagination page={issuePage.page} pageSize={issuePage.pageSize} total={issuePage.total}
             onChange={(page, pageSize) => { setRepairPage(page); setRepairPageSize(pageSize) }} />
-        </footer>
+        </footer>}
       </section>}
-      {!selectedSignature && !selectedRepairItemId && !historyOpen && !selectionOpen && !draftOpen && <RepairSelectionBar fixed count={proposalSelection(selectedItems).length} issueCount={selectedIssueCount} reason={generationReason}
+      {selectedRepairIds.length > 0 && !selectedSignature && !selectedRepairItemId && !historyOpen && !selectionOpen && !draftOpen && <RepairSelectionBar fixed count={proposalSelection(selectedItems).length} issueCount={selectedIssueCount} reason={generationReason}
         onGenerate={openDraft} onView={() => setSelectionOpen(true)}
         onClear={repairBusy ? undefined : () => setSelectedRepairIds([])}
         onTask={activeRepairTask ? () => openTask(activeRepairTask.taskId) : undefined} />}
@@ -677,7 +671,7 @@ function DiagnosisPanel({
         onToggle={toggleRepairItem} canEdit={canEdit && repairData?.canEdit === true && !repairLoading && !repairBusy}
         onResult={acceptRepairPage} renderItem={renderRepairItem} />}
       <button type="button" className="text-sm text-slate-600 hover:text-blue-700 hover:underline"
-        onClick={() => { setRepairOpen(true); setHistoryOpen(true) }}>全部建议与历史</button>
+        onClick={() => { setRepairOpen(true); setHistoryOpen(true) }}>查找全部建议</button>
       {historyOpen && <RepairDialog title="全部建议与历史" onClose={() => setHistoryOpen(false)}>
         <p className="mb-3 text-xs text-muted-foreground">全部历史，不受上方问题筛选影响；此视图的分页和筛选单独生效。</p>
         <p className="mb-3 text-xs text-slate-500">用于查找未出现在当前问题页的旧建议；这里的分页仅针对建议。</p>

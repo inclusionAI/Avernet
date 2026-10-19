@@ -268,7 +268,7 @@ vi.mock('../../../api/hooks', () => ({
 
 async function openIssueRepairs(expand = true) {
   if (lifecycle.hideGroups || lifecycle.groupsLoading || lifecycle.groupsError) {
-    if (!screen.queryByRole('dialog', { name: '全部建议与历史' })) await userEvent.click(screen.getByRole('button', { name: '全部建议与历史' }))
+    if (!screen.queryByRole('dialog', { name: '全部建议与历史' })) await userEvent.click(screen.getByRole('button', { name: '查找全部建议' }))
   } else {
     if (!screen.queryByRole('dialog', { name: '问题详情' })) await userEvent.click(screen.getAllByRole('button', { name: '问题详情' })[0])
     await userEvent.click(screen.getByRole('button', { name: '修复建议' }))

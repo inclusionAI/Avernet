@@ -230,19 +230,19 @@ describe('issue and optimization flow', () => {
     render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
     await waitFor(() => expect(repairApi.candidates).toHaveBeenCalled())
 
-    expect(await screen.findByRole('region', { name: '问题与优化任务入口' })).toHaveTextContent('优化 1 项问题')
+    expect(await screen.findByRole('region', { name: '问题与优化任务入口' })).toHaveTextContent('包含 1 条建议')
     const issue = screen.getByText('fetch-data', { selector: 'span' }).closest('article')!
     expect(within(issue).queryByRole('checkbox')).not.toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', { name: '查看本轮任务' }))
+    await userEvent.click(screen.getByRole('button', { name: '查看并审阅' }))
     const taskDialog = await screen.findByRole('region', { name: 'Workflow 修复工作区' })
     expect(within(taskDialog).getByText('候选修复已生成')).toBeInTheDocument()
     await userEvent.click(within(taskDialog).getByRole('tab', { name: '效果观察' }))
     expect(within(taskDialog).getByText('此候选尚未发布，暂无对应部署的观察证据。')).toBeVisible()
     await userEvent.click(within(taskDialog).getByRole('button', { name: /返回问题与优化/ }))
 
-    expect(screen.getByRole('button', { name: '生成优化草稿（0）' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '继续现有任务' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '本次修复操作' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '查看并审阅' })).toBeVisible()
   })
 
 
@@ -316,7 +316,7 @@ describe('issue and optimization flow', () => {
     render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
 
     await waitFor(() => expect(repairApi.candidates).toHaveBeenCalled())
-    expect(await screen.findByRole('region', { name: '本次修复操作' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '本次修复操作' })).not.toBeInTheDocument()
     const issue = screen.getByText('write-report', { selector: 'span' }).closest('article')!
     expect(issue).not.toBeNull()
     await userEvent.click(within(issue).getByRole('button', { name: '问题详情' }))
@@ -365,7 +365,7 @@ describe('issue and optimization flow', () => {
     await closeIssue()
     await userEvent.click(screen.getByRole('checkbox', { name: '包含历史未复现' }))
 
-    expect(screen.getByRole('button', { name: '生成优化草稿（0）' })).toBeDisabled()
+    expect(screen.queryByRole('region', { name: '本次修复操作' })).not.toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '处理任务' })).not.toBeInTheDocument()
   })
 
@@ -391,7 +391,7 @@ describe('issue and optimization flow', () => {
 
     view.rerender(<MemoryRouter><EvolutionTab workflowId="wf-2" section="diagnosis" /></MemoryRouter>)
     expect(screen.queryByText('旧工作流修复项')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '生成优化草稿（0）' })).toBeDisabled()
+    expect(screen.queryByRole('region', { name: '本次修复操作' })).not.toBeInTheDocument()
   })
 
   it.each([
@@ -467,13 +467,13 @@ describe('issue and optimization flow', () => {
         body: JSON.stringify({ code: 'FORBIDDEN', requestId: '8c8ed247-2578-4439-8857-e6a6a83e1211' }) }))
     render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
     await waitFor(() => expect(repairApi.candidates).toHaveBeenCalled())
-    await waitFor(() => expect(screen.getByRole('region', { name: '本次修复操作' })).toHaveTextContent('在问题下勾选'))
+    expect(screen.queryByRole('region', { name: '本次修复操作' })).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('checkbox', { name: '包含历史未复现' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('访问被拒绝（403）')
     expect(screen.getByRole('alert')).toHaveTextContent('8c8ed247-2578-4439-8857-e6a6a83e1211')
     expect(screen.queryByText('223')).not.toBeInTheDocument()
 
-    expect(screen.getByRole('button', { name: '生成优化草稿（0）' })).toBeDisabled()
+    expect(screen.queryByRole('region', { name: '本次修复操作' })).not.toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: '问题详情' }).length).toBeGreaterThan(0)
   })
 

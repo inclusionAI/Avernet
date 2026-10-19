@@ -37,6 +37,7 @@ const result: RepairCandidatesResponse = {
 const requests: URL[] = []
 const previewScopes: string[][] = []
 let omitPreviews = false
+let noIssues = false
 const choices = () => within(screen.queryByRole('dialog', { name: '问题详情' }) ?? document.body)
 const group = (i: number) => ({ workflowId: 'wf', signature: `issue-${i}`, inputDigest: String(i),
   flowIds: [`run-${i}`], aggregationStatus: 'not_generated', aggregationId: null, summary: null, stale: false,
@@ -44,7 +45,7 @@ const group = (i: number) => ({ workflowId: 'wf', signature: `issue-${i}`, input
     nodeId: `node-${i}`, failureSignature: `issue-${i}`, failureMode: i === 20 ? 'error' : 'timeout', reasoning: 'slow', completedAtMs: i + 1, evidenceEventIds: [] }],
 })
 beforeEach(() => {
-  sessionStorage.clear(); requests.length = 0; previewScopes.length = 0; omitPreviews = false
+  sessionStorage.clear(); requests.length = 0; previewScopes.length = 0; omitPreviews = false; noIssues = false
   accessState.ready = true
   result.capabilities.generation = true
   result.capabilities.reason = null
@@ -58,7 +59,7 @@ beforeEach(() => {
     if (url.pathname.endsWith('/issue-groups')) {
       const page = Number(url.searchParams.get('page') ?? 1)
       const pageSize = Number(url.searchParams.get('pageSize') ?? 20)
-      const all = Array.from({ length: 21 }, (_, i) => group(i))
+      const all = noIssues ? [] : Array.from({ length: 21 }, (_, i) => group(i))
       const filtered = all.filter(g => (!url.searchParams.has('nodeId') || g.sources[0].nodeId === url.searchParams.get('nodeId'))
         && (!url.searchParams.has('failureMode') || g.sources[0].failureMode === url.searchParams.get('failureMode'))
         && (!url.searchParams.has('signature') || g.signature === url.searchParams.get('signature')))
@@ -245,12 +246,45 @@ it('keeps repair context usable when the issue endpoint fails before returning a
     <MemoryRouter><EvolutionTab workflowId="wf" /></MemoryRouter>
   </QueryClientProvider>)
   await screen.findByRole('alert')
-  await user.click(screen.getByRole('button', { name: '全部建议与历史' }))
+  await user.click(screen.getByRole('button', { name: '查找全部建议' }))
   const dialog = screen.getByRole('dialog', { name: '全部建议与历史' })
   const checkbox = await within(dialog).findByRole('checkbox', { name: '选择 retry' })
   expect(checkbox).toBeEnabled()
   await user.click(checkbox)
   expect(within(dialog).getByRole('button', { name: '生成优化草稿（1）' })).toBeEnabled()
+})
+
+it('uses one empty state and hides unused controls without hiding history scope', async () => {
+  noIssues = true
+  result.items = []
+  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <MemoryRouter><EvolutionTab workflowId="wf" /></MemoryRouter>
+  </QueryClientProvider>)
+  const list = await screen.findByRole('region', { name: '问题列表' })
+  expect(within(list).getByText('当前生效版本暂无已记录问题，可查看历史版本的问题与建议。')).toBeVisible()
+  expect(screen.queryByText(/暂无已记录异常/)).not.toBeInTheDocument()
+  expect(screen.queryByText('没有符合当前筛选条件的问题')).not.toBeInTheDocument()
+  expect(screen.queryByRole('combobox', { name: '问题排序' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('combobox', { name: '问题节点' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('region', { name: '问题分页' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('region', { name: '本次修复操作' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '生成优化草稿（0）' })).not.toBeInTheDocument()
+  expect(screen.getByRole('checkbox', { name: '包含历史未复现' })).toBeEnabled()
+  expect(screen.getByRole('button', { name: '查找全部建议' })).toBeVisible()
+})
+
+it('shows the fixed generation bar only after selection and removes it after clearing', async () => {
+  const user = userEvent.setup()
+  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <MemoryRouter><EvolutionTab workflowId="wf" /></MemoryRouter>
+  </QueryClientProvider>)
+  const choice = await choices().findByRole('checkbox', { name: '选择 retry' })
+  expect(screen.queryByRole('region', { name: '本次修复操作' })).not.toBeInTheDocument()
+  await user.click(choice)
+  const bar = screen.getByRole('region', { name: '本次修复操作' })
+  expect(within(bar).getByRole('button', { name: '生成优化草稿（1）' })).toBeVisible()
+  await user.click(within(bar).getByRole('button', { name: '清空选择' }))
+  expect(screen.queryByRole('region', { name: '本次修复操作' })).not.toBeInTheDocument()
 })
 
 it('turns and filters issue pages while batching suggestion previews for the visible signatures', async () => {
