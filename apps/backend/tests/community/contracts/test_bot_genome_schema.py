@@ -9,6 +9,7 @@ same files. Until then this suite is what keeps the files honest:
 - every digest and revision id in the examples is real (the bytes are in
   ``examples/blobs/``);
 - the canonical JSON vectors reproduce;
+- the rewrite-measure vectors reproduce (README §6.3);
 - every patch op has a risk tier, and the tier tables in the design docs equal
   ``risk-tiers.json``;
 - every Manifest v1 example in ``docs/bot-config-manifest/examples.zh-CN.md``
@@ -38,6 +39,7 @@ from tests.community.contracts.genome_canonical_json import (
     revision_id,
     sha256_digest,
 )
+from tests.community.contracts.genome_rewrite import lcs_length, rewrite_flagged, strip_common
 
 _BACKEND = Path(__file__).resolve().parents[3]
 _CONTRACT = _BACKEND / "api-contracts" / "genome" / "v1"
@@ -157,6 +159,8 @@ def test_every_example_patch_is_valid(path: Path) -> None:
     assert not errors, errors
     assert all(is_canonical_gene_path(gene) for gene in _patch_gene_paths(patch))
     canonicalize(patch)  # a patch is hashed into its candidate id, so it must be canonicalizable
+    for file_path in _patch_file_paths(patch):
+        _assert_segments(file_path)
 
 
 @pytest.mark.parametrize("path", _INVALID, ids=_ids(_INVALID))
@@ -217,6 +221,8 @@ def test_example_revision_ids_and_digests_are_real(path: Path) -> None:
         _blob(entry["digest"]).decode("utf-8")  # apply refuses a persona file that is not UTF-8
     _assert_resource_paths(spec["resources"])
     for entry in spec["resources"]:
+        _assert_segments(entry["path"])
+    for entry in spec["resources"]:
         _assert_resource_admitted(entry)
     for entry in spec["skills"]:
         if entry["origin"] == "local":
@@ -263,6 +269,20 @@ def test_patch_digest_references_are_real(path: Path) -> None:
 _SAFE_MEMBER_PATH = re.compile(_PATCH_SCHEMA["definitions"]["skillFilePath"]["pattern"])
 
 
+def _assert_segments(path: str) -> None:
+    """No path segment is over 255 bytes of UTF-8, a file system's name limit (README §3.4)."""
+    assert all(len(s.encode()) <= 255 for s in path.split("/")), f"a segment of {path!r} is over 255 bytes"
+
+
+def _patch_file_paths(patch: dict[str, Any]) -> Iterator[str]:
+    """Every workspace or skill file path a patch names."""
+    for op in patch["ops"]:
+        if "path" in op:
+            yield op["path"]
+        yield from (op.get("files") or {})
+        yield from (d["path"] for d in op.get("file_diffs", []))
+
+
 def _tree_members(data: bytes) -> list[tuple[str, bytes]]:
     """Decode an acm-tree-v1 blob and require its canonical form (README §3.4)."""
     members = decode_tree_bytes(data)
@@ -274,7 +294,7 @@ def _tree_members(data: bytes) -> list[tuple[str, bytes]]:
     assert not colliding, f"tree members {colliding} are files and also directories of other members"
     for name in names:
         assert _SAFE_MEMBER_PATH.match(name), f"tree member path {name!r} is not a safe relative path"
-        assert all(len(s.encode()) <= 255 for s in name.split("/")), f"a segment of {name!r} is over 255 bytes"
+        _assert_segments(name)
     return members
 
 
@@ -343,6 +363,31 @@ def test_canonical_json_rejections(vector: dict[str, Any]) -> None:
 def test_revision_id_vectors(vector: dict[str, Any]) -> None:
     assert canonicalize({"spec": vector["spec"], "policy": vector["policy"]}).decode() == vector["canonical"]
     assert revision_id(vector["spec"], vector["policy"]) == vector["revision_id"]
+
+
+# --------------------------------------------------------------------------------------------
+# Rewrite measure vectors
+
+_REWRITE = _load(_CONTRACT / "rewrite-vectors.json")
+
+
+def _expand(runs: list[list[Any]]) -> list[str]:
+    return [line for line, count in runs for _ in range(count)]
+
+
+@pytest.mark.parametrize("vector", _REWRITE["vectors"], ids=lambda v: v["name"])
+def test_rewrite_vectors(vector: dict[str, Any]) -> None:
+    threshold = _RISK_TIERS["rewrite_threshold"]
+    a, b = _expand(vector["a"]), _expand(vector["b"])
+    _, rest_a, rest_b = strip_common(a, b)
+    assert (len(rest_a) * len(rest_b) > threshold["lcs_cell_limit"]) == vector["over_cell_limit"]
+    if "lcs" in vector:
+        assert len(a) - len(rest_a) + lcs_length(rest_a, rest_b) == vector["lcs"]
+    flagged = rewrite_flagged(
+        a, b, numerator=threshold["numerator"], denominator=threshold["denominator"],
+        cell_limit=threshold["lcs_cell_limit"],
+    )
+    assert flagged == vector["flagged"], vector["note"]
 
 
 # --------------------------------------------------------------------------------------------

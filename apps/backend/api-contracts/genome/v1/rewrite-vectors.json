@@ -1,0 +1,507 @@
+{
+  "description": "Test vectors for the rewrite measure (README §6.3), with the numerator, denominator and lcs_cell_limit of risk-tiers.json. a and b are a file's lines in the base and after the patch, written as runs [line, count] so long files stay short: [[\"x\", 3]] is three lines \"x\". lcs is given when the remaining cells are within the limit; flagged is the rewrite flag.",
+  "vectors": [
+    {
+      "name": "identical",
+      "a": [
+        [
+          "line 0",
+          1
+        ],
+        [
+          "line 1",
+          1
+        ],
+        [
+          "line 2",
+          1
+        ],
+        [
+          "line 3",
+          1
+        ],
+        [
+          "line 4",
+          1
+        ],
+        [
+          "line 5",
+          1
+        ],
+        [
+          "line 6",
+          1
+        ],
+        [
+          "line 7",
+          1
+        ],
+        [
+          "line 8",
+          1
+        ],
+        [
+          "line 9",
+          1
+        ]
+      ],
+      "b": [
+        [
+          "line 0",
+          1
+        ],
+        [
+          "line 1",
+          1
+        ],
+        [
+          "line 2",
+          1
+        ],
+        [
+          "line 3",
+          1
+        ],
+        [
+          "line 4",
+          1
+        ],
+        [
+          "line 5",
+          1
+        ],
+        [
+          "line 6",
+          1
+        ],
+        [
+          "line 7",
+          1
+        ],
+        [
+          "line 8",
+          1
+        ],
+        [
+          "line 9",
+          1
+        ]
+      ],
+      "over_cell_limit": false,
+      "flagged": false,
+      "note": "no line changed",
+      "lcs": 10
+    },
+    {
+      "name": "both-empty",
+      "a": [],
+      "b": [],
+      "over_cell_limit": false,
+      "flagged": false,
+      "note": "a file empty before and after is never flagged",
+      "lcs": 0
+    },
+    {
+      "name": "created-from-empty",
+      "a": [],
+      "b": [
+        [
+          "a",
+          1
+        ],
+        [
+          "b",
+          1
+        ],
+        [
+          "c",
+          1
+        ]
+      ],
+      "over_cell_limit": false,
+      "flagged": true,
+      "note": "every line is new",
+      "lcs": 0
+    },
+    {
+      "name": "two-of-ten-replaced",
+      "a": [
+        [
+          "line 0",
+          1
+        ],
+        [
+          "line 1",
+          1
+        ],
+        [
+          "line 2",
+          1
+        ],
+        [
+          "line 3",
+          1
+        ],
+        [
+          "line 4",
+          1
+        ],
+        [
+          "line 5",
+          1
+        ],
+        [
+          "line 6",
+          1
+        ],
+        [
+          "line 7",
+          1
+        ],
+        [
+          "line 8",
+          1
+        ],
+        [
+          "line 9",
+          1
+        ]
+      ],
+      "b": [
+        [
+          "line 0",
+          1
+        ],
+        [
+          "line 1",
+          1
+        ],
+        [
+          "line 2",
+          1
+        ],
+        [
+          "new 3",
+          1
+        ],
+        [
+          "new 4",
+          1
+        ],
+        [
+          "line 5",
+          1
+        ],
+        [
+          "line 6",
+          1
+        ],
+        [
+          "line 7",
+          1
+        ],
+        [
+          "line 8",
+          1
+        ],
+        [
+          "line 9",
+          1
+        ]
+      ],
+      "over_cell_limit": false,
+      "flagged": false,
+      "note": "changed 4/20 = 1/5, under 2/5",
+      "lcs": 8
+    },
+    {
+      "name": "four-of-ten-replaced",
+      "a": [
+        [
+          "line 0",
+          1
+        ],
+        [
+          "line 1",
+          1
+        ],
+        [
+          "line 2",
+          1
+        ],
+        [
+          "line 3",
+          1
+        ],
+        [
+          "line 4",
+          1
+        ],
+        [
+          "line 5",
+          1
+        ],
+        [
+          "line 6",
+          1
+        ],
+        [
+          "line 7",
+          1
+        ],
+        [
+          "line 8",
+          1
+        ],
+        [
+          "line 9",
+          1
+        ]
+      ],
+      "b": [
+        [
+          "line 0",
+          1
+        ],
+        [
+          "line 1",
+          1
+        ],
+        [
+          "line 2",
+          1
+        ],
+        [
+          "n3",
+          1
+        ],
+        [
+          "n4",
+          1
+        ],
+        [
+          "n5",
+          1
+        ],
+        [
+          "n6",
+          1
+        ],
+        [
+          "line 7",
+          1
+        ],
+        [
+          "line 8",
+          1
+        ],
+        [
+          "line 9",
+          1
+        ]
+      ],
+      "over_cell_limit": false,
+      "flagged": false,
+      "note": "changed 8/20 = exactly 2/5: not flagged, the rule is strictly greater",
+      "lcs": 6
+    },
+    {
+      "name": "five-of-ten-replaced",
+      "a": [
+        [
+          "line 0",
+          1
+        ],
+        [
+          "line 1",
+          1
+        ],
+        [
+          "line 2",
+          1
+        ],
+        [
+          "line 3",
+          1
+        ],
+        [
+          "line 4",
+          1
+        ],
+        [
+          "line 5",
+          1
+        ],
+        [
+          "line 6",
+          1
+        ],
+        [
+          "line 7",
+          1
+        ],
+        [
+          "line 8",
+          1
+        ],
+        [
+          "line 9",
+          1
+        ]
+      ],
+      "b": [
+        [
+          "line 0",
+          1
+        ],
+        [
+          "line 1",
+          1
+        ],
+        [
+          "line 2",
+          1
+        ],
+        [
+          "n3",
+          1
+        ],
+        [
+          "n4",
+          1
+        ],
+        [
+          "n5",
+          1
+        ],
+        [
+          "n6",
+          1
+        ],
+        [
+          "n7",
+          1
+        ],
+        [
+          "line 8",
+          1
+        ],
+        [
+          "line 9",
+          1
+        ]
+      ],
+      "over_cell_limit": false,
+      "flagged": true,
+      "note": "changed 10/20 = 1/2, over 2/5",
+      "lcs": 5
+    },
+    {
+      "name": "overlap-prefix-and-suffix",
+      "a": [
+        [
+          "x",
+          2
+        ]
+      ],
+      "b": [
+        [
+          "x",
+          1
+        ]
+      ],
+      "over_cell_limit": false,
+      "flagged": false,
+      "note": "prefix first: the prefix takes the shared x, nothing is left for the suffix; LCS 1",
+      "lcs": 1
+    },
+    {
+      "name": "overlap-double-count-trap",
+      "a": [
+        [
+          "x",
+          5
+        ]
+      ],
+      "b": [
+        [
+          "x",
+          1
+        ]
+      ],
+      "over_cell_limit": false,
+      "flagged": true,
+      "note": "LCS 1, changed 4/6. Stripping prefix and suffix independently would count the one x twice (LCS 2, changed 2/6) and not flag it",
+      "lcs": 1
+    },
+    {
+      "name": "cell-limit-equal",
+      "a": [
+        [
+          "u",
+          1
+        ],
+        [
+          "x",
+          4094
+        ],
+        [
+          "w",
+          1
+        ]
+      ],
+      "b": [
+        [
+          "v",
+          1
+        ],
+        [
+          "x",
+          4094
+        ],
+        [
+          "z",
+          1
+        ]
+      ],
+      "over_cell_limit": false,
+      "flagged": false,
+      "note": "nothing to strip; 4096 * 4096 = 2^24 is not over the limit, so the exact LCS (4094) decides: changed 4/8192, not flagged",
+      "lcs": 4094
+    },
+    {
+      "name": "cell-limit-exceeded",
+      "a": [
+        [
+          "u",
+          1
+        ],
+        [
+          "x",
+          4094
+        ],
+        [
+          "w",
+          1
+        ]
+      ],
+      "b": [
+        [
+          "v",
+          1
+        ],
+        [
+          "x",
+          4095
+        ],
+        [
+          "z",
+          1
+        ]
+      ],
+      "over_cell_limit": true,
+      "flagged": true,
+      "note": "4096 * 4097 > 2^24: flagged without computing the LCS, although the exact measure would not flag it"
+    }
+  ]
+}

@@ -13,6 +13,7 @@ decision: [ADR 0019](../../../../../docs/adr/0019-bot-genome-is-the-unit-of-evol
 | [`genome-patch.schema.json`](genome-patch.schema.json) | A Genome Patch and every op |
 | [`risk-tiers.json`](risk-tiers.json) | The default tier of every op, the raises, and the rewrite threshold |
 | [`canonical-json-vectors.json`](canonical-json-vectors.json) | Test vectors for canonical JSON and identity |
+| [`rewrite-vectors.json`](rewrite-vectors.json) | Test vectors for the rewrite measure (§6.3), including the threshold and cell-limit boundaries |
 | [`manifest-v1-compatibility.md`](manifest-v1-compatibility.md) | How every Bot Config Manifest v1 field maps to a revision and back |
 | [`examples/`](examples/) | Valid and invalid records with real digests, and Manifest v1 round-trip cases |
 
@@ -476,6 +477,11 @@ every implementation reaches the same answer:
 3. Otherwise compute the exact LCS of the remaining lines. `LCS(a, b)` is
    that plus the number of lines removed from each side, and the rule above
    applies to the whole file.
+
+[`rewrite-vectors.json`](rewrite-vectors.json) fixes the answers an
+implementation must reach, including a change of exactly 2/5 (not flagged), a
+prefix and suffix that would overlap if stripped independently, and the
+products exactly at and one row over `lcs_cell_limit`.
 
 **Replacement.** A patch that removes an entry and adds an entry with the
 same gene path (§2: a persona type, a skill name, or a resource path with
