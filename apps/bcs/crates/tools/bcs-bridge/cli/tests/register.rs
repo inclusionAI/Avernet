@@ -717,3 +717,69 @@ async fn codex_options_are_not_inherited_when_registering_a_different_engine() {
     assert!(after["bot"][0].get("engine_options").is_none());
     assert_eq!(api.calls().len(), 2);
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn new_profile_reuses_only_desktop_options_from_the_verified_active_instance() {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let home = tempfile::tempdir().unwrap();
+    let old_api = Api::new().await;
+    let args = ["--mode", "plugin", "--engine", "codex", "--upstream-url", "ws://127.0.0.1:21000/ws/bot"];
+    let initial = register(home.path(), &args).args(["--api-url", &old_api.base, "--provider-bot-ref", "worker-a",
+        "--engine-option", "sandbox=read-only"]).output().await.unwrap();
+    assert!(initial.status.success(), "{:?}: {}", initial.status, diagnostic(&initial));
+    let mut old = saved(home.path());
+    old["bot"][0]["token"] = "old-bot-token".into();
+    let original = toml::to_string(&old).unwrap();
+    std::fs::write(config_path(home.path()), &original).unwrap();
+    let directory = home.path().join(".bcn-bridge");
+    let lock = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false)
+        .open(directory.join("bridge.lock")).unwrap();
+    lock.try_lock().unwrap();
+    let record = json!({"pid": 12345, "instance_id": "test-instance", "config": config_path(home.path()), "started_at": 0});
+    std::fs::write(directory.join("bridge.pid.json"), serde_json::to_vec(&record).unwrap()).unwrap();
+    let socket = tokio::net::UnixListener::bind(directory.join("bridge.sock")).unwrap();
+    let task = tokio::spawn(async move {
+        let (stream, _) = socket.accept().await.unwrap();
+        let mut reader = BufReader::new(stream);
+        let mut request = String::new();
+        reader.read_line(&mut request).await.unwrap();
+        let request: serde_json::Value = serde_json::from_str(&request).unwrap();
+        assert_eq!(request["command"], "status");
+        assert_eq!(request["instance_id"], record["instance_id"]);
+        let response = json!({"record": record, "state": "running"}).to_string() + "\n";
+        reader.get_mut().write_all(response.as_bytes()).await.unwrap();
+    });
+    let api = Api::new().await;
+    let output = register(home.path(), &args).args(["--profile", "pre", "--api-url", &api.base,
+        "--provider-bot-ref", "worker-b"]).output().await.unwrap();
+    assert!(output.status.success(), "{:?}: {}", output.status, diagnostic(&output));
+    task.await.unwrap();
+    let new: toml::Value = toml::from_str(&std::fs::read_to_string(directory.join("profiles/pre/bridge.toml")).unwrap()).unwrap();
+    assert_eq!(new["bot"][0]["engine_options"], old["bot"][0]["engine_options"]);
+    assert_eq!(new["bot"][0]["provider_bot_ref"].as_str(), Some("worker-b"));
+    assert_eq!(new["bot"][0]["token"].as_str(), Some(BOT_TOKEN));
+    assert_eq!(new["api_url"].as_str(), Some(api.base.as_str()));
+    assert_eq!(api.calls().len(), 1);
+    assert_eq!(std::fs::read_to_string(config_path(home.path())).unwrap(), original);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn replacement_registration_still_refuses_a_running_instance_before_network() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    let args = ["--mode", "plugin", "--engine", "codex", "--api-url", &api.base,
+        "--upstream-url", "ws://127.0.0.1:21000/ws/bot", "--provider-bot-ref", "worker-a"];
+    let initial = register(home.path(), &args).output().await.unwrap();
+    assert!(initial.status.success(), "{:?}: {}", initial.status, diagnostic(&initial));
+    let original = std::fs::read(config_path(home.path())).unwrap();
+    let lock = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false)
+        .open(home.path().join(".bcn-bridge/bridge.lock")).unwrap();
+    lock.try_lock().unwrap();
+    let output = register(home.path(), &args).arg("--replace-existing").output().await.unwrap();
+    assert!(!output.status.success());
+    assert!(diagnostic(&output).contains("bcs-bridge stop"), "{}", diagnostic(&output));
+    assert_eq!(api.calls().len(), 1);
+    assert_eq!(std::fs::read(config_path(home.path())).unwrap(), original);
+}

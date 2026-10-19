@@ -327,8 +327,10 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     if webhook_token.is_some() && args.provider_auth != "agentpass-subbots" { config::runtime(&document, path, webhook_token.as_deref())?; }
     let replacing = bootstrap.previous.is_some();
     let prepared = PreparedConfig::new(path, bootstrap.original.clone())?;
+    // Appending changes an existing runtime configuration. A new profile only
+    // copies desktop options and must remain registrable while another runs.
     #[cfg(unix)]
-    let _runtime_guard = if _runtime_reservation.is_none() {
+    let _runtime_guard = if append && _runtime_reservation.is_none() {
         Some(crate::instance::registration_guard(&crate::cli::runtime_dir()?)?)
     } else { None };
     if replacing {
