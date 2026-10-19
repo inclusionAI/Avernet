@@ -19,7 +19,6 @@ from agentclaw.community.core.bot_management.errors import (
     BotLookupAmbiguousError,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,8 +29,6 @@ class ResolvedBotContext:
     bot_id: str
     entity_id: str
     current_owner_id: str
-    env: str
-    tenant: str
     bot: Mapping[str, Any]
 
     @property
@@ -121,8 +118,6 @@ class BotAddressResolver(BotAddressResolverProtocol):
             bot_id=str(bot["bot_id"]),
             entity_id=str(bot["entity_id"]),
             current_owner_id=str(bot["owner_id"]),
-            env=str(bot["env"]),
-            tenant=get_current_avernet_tenant(),
             bot=bot,
         )
 

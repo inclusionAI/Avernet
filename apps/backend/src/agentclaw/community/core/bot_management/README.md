@@ -124,8 +124,9 @@ use `bot_pk` or `entity_id` for Bot resources while retaining
 `current_owner_id` for authorization, notification and audit semantics.
 
 The database tenant guard and current environment remain mandatory parts of the
-lookup. A bare `bot_id` is allowed only through the explicit unique lookup and
-fails closed for repeated `default` Bots.
+lookup and are enforced by the persistence layer; `ResolvedBotContext` does not
+duplicate them as fields. A bare `bot_id` is allowed only through the explicit
+unique lookup and fails closed for repeated `default` Bots.
 
 ## Owner display name on OpenAPI creation
 
