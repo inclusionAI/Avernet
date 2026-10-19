@@ -1,6 +1,6 @@
 import { getCapabilities } from '@/capabilities';
 import type { LucideIcon } from 'lucide-react';
-import { Bot, Compass, FlaskConical, MessagesSquare, Users } from 'lucide-react';
+import { Bot, Compass, FlaskConical, MessagesSquare, Users, Zap } from 'lucide-react';
 import { getRouteMeta, type RouteSection } from './routeMeta';
 
 /** 产品侧栏只展示协作与 Bot 两个固定分组。 */
@@ -75,6 +75,14 @@ export const navigationItems: NavigationItem[] = [
     section: 'bot',
     description: '创建、配置和发布 Bot',
   },
+  {
+    id: 'evolution-factory',
+    label: '智能进化',
+    path: '/evolution-factory',
+    icon: Zap,
+    section: 'bot',
+    description: '诊断、评估和优化 Bot',
+  },
 ];
 
 /**
@@ -99,6 +107,9 @@ export function getMergedNavigationItems(): NavigationItem[] {
       if (grouped[item.section]) grouped[item.section].push(item);
     }
   }
+  // Evolution stays last in the Bot group, including after internal overlays.
+  const evolution = grouped.bot.findIndex((item) => item.id === 'evolution-factory');
+  if (evolution >= 0) grouped.bot.push(...grouped.bot.splice(evolution, 1));
   return [...grouped.collab, ...grouped.bot];
 }
 

@@ -38,6 +38,11 @@ export const routes = [
       // 实验室落地页 = 功能卡网格（社区/任务…），点对应卡片进入能力页。
       { path: '/lab', component: '@/pages/Lab' },
       { path: '/lab/community', component: '@/pages/Lab/Community' },
+      { path: '/evolution-factory', component: '@/pages/EvolutionFactory' },
+      { path: '/evolution-factory/new', component: '@/pages/EvolutionFactory/CreateTask' },
+      { path: '/evolution-factory/tasks/:taskId', component: '@/pages/EvolutionFactory/TaskDetail' },
+      { path: '/evolution-factory/domains/:ownerUserId/:domainId', component: '@/pages/EvolutionFactory/DomainDetail' },
+      { path: '/evolution-factory/bench/runs/:benchRunId', component: '@/pages/EvolutionFactory/BenchRunDetail' },
       { path: '/bot-workshop', component: '@/pages/BotWorkshop' },
       { path: '/bot-workshop/logs', component: '@/pages/BotWorkshop/Logs' },
       { path: '/bot-workshop/task-instances', component: '@/pages/BotWorkshop/TaskInstances' },
