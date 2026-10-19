@@ -13,9 +13,11 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
+from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
 from agentclaw.community.plugin_api.evaluation_gate import (
     GATE_ERROR,
     GATE_EVAL_FAILED_ENFORCE,
+    GATE_EVALUATING,
     GatePublishDecision,
 )
 
@@ -183,3 +185,95 @@ async def test_gate_space_resolve_failure_does_not_skip_gate():
     svc._advance_status.assert_not_called()
     assert result.data["gate"]["status"] == "evaluating"
     assert gate.calls[0]["space_id"] == ""
+
+
+@pytest.mark.asyncio
+async def test_gate_not_consulted_for_non_draft_status():
+    """门禁 seam 只在草稿态推进点生效；非 DRAFT 状态（BUILDING 等）不查门禁。
+
+    防回归：若有人把门禁判定挪到 describe 分支或抬到 process 顶部，
+    此用例会捕获（gate.calls 不应为空 → 失败）。
+    """
+    record = _make_publish_record(status=PublishStatus.BUILDING.value)
+    gate = _FakeGate(
+        GatePublishDecision(allowed=False, status=GATE_EVAL_FAILED_ENFORCE, reason="不通过")
+    )
+    svc, publish_service, record = _mk_service(gate, record=record)
+    svc._advance_status = Mock(return_value=True)
+    # 非草稿态走 describe-only；桩掉以拿到确定性结果（describe 实现不属本用例关注点）。
+    svc._describe_publish_status = Mock(
+        return_value=PublishFlowResult(
+            publish_id=record.id,
+            status=PublishStatus.BUILDING.value,
+            message="building",
+            action="process",
+        )
+    )
+
+    result = await svc.process(publish_id=record.id, operator="u1")
+
+    assert gate.calls == []  # 门禁未被咨询
+    svc._advance_status.assert_not_called()
+    publish_service.mutate_publish_ext.assert_not_called()  # 不落门禁摘要
+    assert result.status == PublishStatus.BUILDING.value
+
+
+@pytest.mark.asyncio
+async def test_gate_evaluating_blocks_and_records_ext():
+    """评测中（evaluationg）→ 不推进、ext.gate 落『评测中』摘要。"""
+    gate = _FakeGate(
+        GatePublishDecision(
+            allowed=False,
+            status=GATE_EVALUATING,
+            reason="评测任务执行中，评测期间不可预发发布",
+            hit=True,
+            hit_type="space",
+            mode="enforce",
+            policy_name="风控预发门禁策略",
+        )
+    )
+    svc, publish_service, record = _mk_service(gate)
+
+    result = await svc.process(publish_id=1, operator="u1")
+
+    svc._advance_status.assert_not_called()
+    assert result.status == PublishStatus.DRAFT.value
+    assert result.data["gate"]["status"] == GATE_EVALUATING
+    assert result.data["gate"]["mode"] == "enforce"
+    # 草稿态推进点解析 space_id（bot_service.get_bot 返回 sp-1）
+    assert gate.calls[0]["space_id"] == "sp-1"
+    assert "评测" in result.message
+    publish_service.mutate_publish_ext.assert_called_once()
+    _, mutator = publish_service.mutate_publish_ext.call_args[0]
+    ext: dict = {}
+    mutator(ext)
+    assert ext["gate"]["status"] == GATE_EVALUATING
+    assert ext["gate"]["policy_name"] == "风控预发门禁策略"
+
+
+@pytest.mark.asyncio
+async def test_gate_ext_record_failure_does_not_unblock():
+    """ext.gate 摘要落库失败 → 仍阻断（摘要吞掉 warning，阻断语义不变）。
+
+    PublishFlowService._check_evaluation_gate 对 mutate_publish_ext 做了
+    try/except，但阻断结果（result.data.gate）照常返回；本用例锁这一兜底，
+    避免有人误把 ext 落库失败回退成放行。
+    """
+    gate = _FakeGate(
+        GatePublishDecision(
+            allowed=False,
+            status=GATE_EVAL_FAILED_ENFORCE,
+            reason="评测门禁未通过，预发发布已阻断",
+            hit=True,
+            mode="enforce",
+        )
+    )
+    svc, publish_service, record = _mk_service(gate)
+    publish_service.mutate_publish_ext.side_effect = RuntimeError("db gone")
+
+    result = await svc.process(publish_id=1, operator="u1")
+
+    svc._advance_status.assert_not_called()  # 仍阻断
+    assert result.status == PublishStatus.DRAFT.value
+    assert result.data["gate"]["status"] == GATE_EVAL_FAILED_ENFORCE
+    publish_service.mutate_publish_ext.assert_called_once()  # 尝试落过摘要

@@ -78,7 +78,8 @@ export function ServicePublicationDrawer({
       onOpenChange={(open) => {
         if (!open) onClose();
       }}
-    >      <DrawerContent size="lg">
+    >
+      <DrawerContent size="lg">
         <DrawerHeader>
           <DrawerTitle>{bot?.name} · 服务发布</DrawerTitle>
           <DrawerDescription>发布、审批与阶段推进均使用服务 Bot Lifecycle OpenAPI。</DrawerDescription>
