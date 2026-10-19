@@ -456,13 +456,15 @@ that is empty before and after is never flagged. The threshold is
 denominator).
 
 **Replacement.** A patch that removes an entry and adds an entry with the
-same key (a resource path, a persona type, a skill name) replaces it, and
-the add is judged as a change to the existing entry, not as a new one, so a
-remove-then-add cannot avoid the rewrite flag a `file.edit` would get. The
-add is flagged `rewrite` when the entry is a file whose old and new bytes
-are both UTF-8 text and the line rule above flags them (`a` the old file, `b`
-the new); and always when the entry is a directory or a file that is not
-UTF-8 text, since no line measure applies to it. For persona files and
+same gene path (§2: a persona type, a skill name, or a resource path with
+its trailing `/` removed, so `foo.md` and `foo.md/` are the same entry)
+replaces it, and the add is judged as a change to the existing entry, not as
+a new one, so a remove-then-add cannot avoid the rewrite flag a `file.edit`
+would get. The add is flagged `rewrite` when the old and new entries are
+both files whose bytes are UTF-8 text and the line rule above flags them
+(`a` the old file, `b` the new); and always otherwise: when either is a
+directory (including a file replaced by a directory, or the reverse) or a
+file that is not UTF-8 text, since no line measure applies. For persona files and
 skills this changes nothing (their add and remove are already T2); it
 matters for resources, whose add and remove are T1.
 

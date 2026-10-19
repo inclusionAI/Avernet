@@ -710,7 +710,7 @@ Raises applied after the per-op mapping:
 
 - **Rewrite flag.** An op flagged `rewrite` (more than 2/5 of an existing
   text file's lines changed, by exact line LCS) is at least T2. An entry a
-  patch removes and re-adds under the same key is judged as a replacement
+  patch removes and re-adds under the same gene path is judged as a replacement
   and flagged the same way (contract README §6.3).
   Whole-file regeneration erodes context ("context collapse"), so large
   rewrites always get human eyes.

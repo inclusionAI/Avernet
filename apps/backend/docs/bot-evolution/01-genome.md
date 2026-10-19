@@ -1103,7 +1103,7 @@ secret/PII/URL scanning, is in [08-promotion.md](08-promotion.md)):
 - **Rewrite detection.** An op that changes more than 2/5 of an existing
   text file's lines, measured with the exact longest common subsequence of
   lines (contract README §6.3), is flagged `rewrite` and raises the risk tier.
-  So is an entry a patch removes and re-adds under the same key: it is judged
+  So is an entry a patch removes and re-adds under the same gene path: it is judged
   as a replacement, not as a new entry.
 - **Limits.** Patch size, file count, and file size limits mirror Manifest
   limits.
