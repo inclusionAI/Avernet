@@ -129,7 +129,8 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", (endpoin
     ]);
     if (endpoint === "deploy") {
       expect(deps.triggerRun).toHaveBeenCalledTimes(2);
-      expect(deps.triggerRun).toHaveBeenLastCalledWith(spec.id, "operator");
+      // Third argument carries the source run; absent here, so the re-run has no target Bot.
+      expect(deps.triggerRun).toHaveBeenLastCalledWith(spec.id, "operator", null);
     }
     expect(deps.gitConfig).toEqual(fallbackGitConfig);
     expect(deps.gitAuthor).toEqual(fallbackAuthor);

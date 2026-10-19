@@ -169,12 +169,13 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       ));
       app.use("/api/auto-heal", createAutoHealRouter({
         db,
+        flowRunRepo,
         workflowSpecRepo,
         deployHistoryRepo,
         botPermRepo,
         gitConfig: autoHealGitConfig,
         gitAuthor: autoHealAuthor,
-        triggerRun: createAutoHealTriggerRun(),
+        triggerRun: createAutoHealTriggerRun(flowRunRepo),
       }));
 
       const staticDir = resolve(dirname(fileURLToPath(import.meta.url)), "../web");

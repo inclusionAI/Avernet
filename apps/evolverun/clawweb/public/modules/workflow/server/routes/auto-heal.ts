@@ -6,13 +6,16 @@
  *   POST /auto-heal/save      — save a fixed spec to git + DB (no deploy tag)
  *   POST /auto-heal/deploy    — deploy active spec from DB with git tag + history
  *   POST /auto-heal/apply     — DEPRECATED, returns 410 unless opt-in
- *   POST /auto-heal/run       — trigger a workflow run (unchanged)
+ *   POST /auto-heal/run       — run on the source Bot and lifecycle stage
  */
 import { Router, type Request, type Response } from "express";
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 import { resolveWorkflowActorId } from "@avernet/clawweb-shared/server/services/workflow-access";
 import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
+import { sendIntervention } from "@avernet/clawevolve/server/services/baas-intervention";
+import type { FlowRunRepository } from "../repositories/flow-run-repository.js";
+import { createAutoHealRunRouter, type AutoHealRunSender } from "./auto-heal-run.js";
 import { resolveAutoHealGitSettings } from "../config/auto-heal-git-config.js";
 import { WorkflowSpecRepository } from "../repositories/workflow-spec-repository.js";
 import { WorkflowDeployHistoryRepository } from "../repositories/workflow-deploy-history-repository.js";
@@ -25,6 +28,8 @@ export interface AutoHealRouteDependencies {
   workflowSpecRepo: WorkflowSpecRepository;
   deployHistoryRepo: WorkflowDeployHistoryRepository;
   botPermRepo: BotWorkflowPermissionRepository | null;
+  flowRunRepo?: FlowRunRepository | null;
+  sendIntervention?: AutoHealRunSender;
   /** Bootstrap fallbacks; enabled DB Git settings are resolved per request. */
   gitConfig: ClawFlowsGitConfig;
   gitAuthor: GitAuthor;
@@ -37,6 +42,11 @@ function getActor(req: Request): string {
 
 export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
   const router = Router();
+  router.use(createAutoHealRunRouter({
+    flowRunRepo: deps.flowRunRepo ?? null,
+    botPermRepo: deps.botPermRepo,
+    sendIntervention: deps.sendIntervention ?? sendIntervention,
+  }));
 
   router.post(
     "/save",
@@ -89,10 +99,12 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
     "/deploy",
     asyncHandler(async (req: Request, res: Response) => {
       try {
-        const { workflowId, packId, diagnosisId, note, autoRun } = req.body as {
+        const { workflowId, packId, diagnosisId, sourceFlowId, note, autoRun } = req.body as {
           workflowId?: string;
           packId?: string | null;
           diagnosisId?: string | null;
+          /** Source run whose Bot the post-deploy re-run must target. */
+          sourceFlowId?: string | null;
           note?: string | null;
           autoRun?: boolean;
         };
@@ -119,6 +131,7 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
           workflowId,
           packId: packId ?? null,
           diagnosisId: diagnosisId ?? null,
+          sourceFlowId: sourceFlowId ?? null,
           note: note ?? null,
           autoRun,
           actorId: actor,

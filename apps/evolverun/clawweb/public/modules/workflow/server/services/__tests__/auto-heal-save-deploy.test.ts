@@ -266,7 +266,34 @@ describe("AutoHealDeployService", () => {
 
     const row = await specRepo.findByWorkflowId("wf-test");
     expect(row?.version).toBe(1);
-    expect(triggerRun).toHaveBeenCalledWith("wf-test", "user-1");
+    // No source run supplied, so the re-run cannot resolve a target Bot.
+    expect(triggerRun).toHaveBeenCalledWith("wf-test", "user-1", null);
+  });
+
+  it("forwards the source run so the re-run targets its own Bot", async () => {
+    const service = new AutoHealDeployService(
+      ctx.db as never,
+      specRepo,
+      deployHistoryRepo,
+      botPermRepo,
+      gitConfig,
+      gitAuthor,
+      triggerRun,
+    );
+
+    await service.deploy({
+      workflowId: "wf-test",
+      packId: "pack-1",
+      sourceFlowId: "60c5aff6-2a07-42ac-8d93-dbd8bbbaabb6",
+      actorId: "user-1",
+    });
+
+    // The re-run must reach the Bot that ran the source, never the diagnosis Bot.
+    expect(triggerRun).toHaveBeenCalledWith(
+      "wf-test",
+      "user-1",
+      "60c5aff6-2a07-42ac-8d93-dbd8bbbaabb6",
+    );
   });
 
   it("allows deploy with execute permission (no edit)", async () => {

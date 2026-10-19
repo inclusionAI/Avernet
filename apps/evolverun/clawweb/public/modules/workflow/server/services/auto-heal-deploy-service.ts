@@ -36,6 +36,11 @@ export type AutoHealDeployInput = {
   workflowId: string;
   packId?: string | null;
   diagnosisId?: string | null;
+  /**
+   * Run being repaired. The post-deploy re-run must reach the Bot that ran this
+   * source, so the target Bot is read from it rather than from autoHeal config.
+   */
+  sourceFlowId?: string | null;
   note?: string | null;
   autoRun?: boolean;
   actorId: string;
@@ -82,7 +87,11 @@ export class AutoHealDeployService {
     private botPermRepo: BotWorkflowPermissionRepository | null,
     private gitConfig: ClawFlowsGitConfig,
     private author: GitAuthor,
-    private triggerRun?: (workflowId: string, actorId: string) => Promise<string | null>,
+    private triggerRun?: (
+      workflowId: string,
+      actorId: string,
+      sourceFlowId?: string | null,
+    ) => Promise<string | null>,
   ) {}
 
   async deploy(input: AutoHealDeployInput): Promise<AutoHealDeployResult> {
@@ -253,7 +262,7 @@ export class AutoHealDeployService {
     let runId: string | null | undefined;
     if (input.autoRun !== false && this.triggerRun) {
       try {
-        runId = await this.triggerRun(workflowId, actorId);
+        runId = await this.triggerRun(workflowId, actorId, input.sourceFlowId ?? null);
       } catch (runErr) {
         const msg = runErr instanceof Error ? runErr.message : String(runErr);
         console.warn(`[auto-heal] deploy succeeded but auto-run failed for ${workflowId}: ${msg}`);
