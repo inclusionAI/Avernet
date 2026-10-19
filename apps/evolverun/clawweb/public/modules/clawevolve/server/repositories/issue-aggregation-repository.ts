@@ -1,5 +1,5 @@
 import { WorkflowSnapshotRepository } from '@avernet/clawweb-shared/server/services/workflow-snapshot';
-import { workflowSnapshotKey } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot';
+import { workflowSnapshotKey, type WorkflowSnapshotBinding } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot';
 import { analysisWorkflowSnapshot } from './analysis-workflow-snapshot.js';
 import { issuePriority, compareIssuePriority, type IssueSort, type IssuePriority } from '../services/evolution/issue-priority.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
@@ -93,21 +93,31 @@ export class IssueAggregationRepository {
     }
     const all=[...analyses,...legacyByRun.values()];
     let runRefs: Awaited<ReturnType<WorkflowSnapshotRepository['forRuns']>> | undefined;
+    const sourceRef = (context: IssueAnalysis['analysisContext'], flowId: string): WorkflowSnapshotBinding => {
+      const frozen = context?.workflowSnapshot as WorkflowSnapshotBinding | undefined;
+      const ref = frozen?.status === 'resolved' || frozen?.status === 'unresolved' && frozen.reason === 'IDENTITY_MISMATCH'
+        ? frozen : runRefs?.get(flowId) ?? { status: 'unresolved', reason: 'LEGACY_MISSING' };
+      return ref.status === 'resolved' && ref.snapshot.workflowId !== workflowId ? {status:'unresolved',reason:'IDENTITY_MISMATCH'} : ref;
+    };
     if(options.versionScope&&options.versionScope!=='all'){
       const snapshots=new WorkflowSnapshotRepository(this.db),active=await snapshots.active(workflowId);
       const activeKey=active?.status==='resolved'?workflowSnapshotKey(active.snapshot):null;
       const ids=[...new Set(all.flatMap(a=>[...(a.flowIds??[]),...(a.flowId?[a.flowId]:[]),...a.diagnoses.flatMap(d=>d.flowIds)]))];
       const refs = await snapshots.forRuns(ids);
       runRefs = refs;
-      const current = new Map([...refs].map(([id, ref]) => [id, !!activeKey && ref.status === 'resolved' && workflowSnapshotKey(ref.snapshot) === activeKey]));
-      const keep=(id:string)=>options.versionScope==='current'?current.get(id)===true:current.get(id)!==true;
-      for(const a of all){a.flowId=a.flowId&&keep(a.flowId)?a.flowId:null;a.flowIds=a.flowIds?.filter(keep);a.diagnoses=a.diagnoses.map(d=>({...d,flowIds:d.flowIds.filter(keep)})).filter(d=>d.flowIds.length>0);}
+      for(const a of all){
+        const keep=(id:string)=>{
+          const ref=sourceRef(a.analysisContext,id),current=!!activeKey&&ref.status==='resolved'&&workflowSnapshotKey(ref.snapshot)===activeKey;
+          return options.versionScope==='current'?current:!current;
+        };
+        a.flowId=a.flowId&&keep(a.flowId)?a.flowId:null;a.flowIds=a.flowIds?.filter(keep);a.diagnoses=a.diagnoses.map(d=>({...d,flowIds:d.flowIds.filter(keep)})).filter(d=>d.flowIds.length>0);
+      }
     }
     return buildIssueGroups(workflowId, all).map(group => {
       if (!runRefs) return group;
       const sources = group.sources.map(source => ({ ...source, analysisContext: {
         facts: [], inferences: [], unknowns: [], evidenceStatus: null, ...source.analysisContext,
-        workflowSnapshot: runRefs!.get(source.flowId) ?? {status:'unresolved',reason:'LEGACY_MISSING'},
+        workflowSnapshot: sourceRef(source.analysisContext, source.flowId),
       } }));
       return { ...group, sources, inputDigest: digestCanonicalJson({ workflowId, signature: group.signature, sources }) };
     });

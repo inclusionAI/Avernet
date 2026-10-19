@@ -259,3 +259,35 @@ it('sorts the full issue set before paging and refreshes only associated run tim
   raw.prepare("UPDATE flow_runs SET started_at=? WHERE flow_id='run-2-0'").run(now - 100);
   expect((await read('recent')).groups[0].signature).toBe('issue-2');
 });
+
+it.each(['missing', 'changed'] as const)('preserves a frozen historical analysis snapshot when its run is %s', async state => {
+  const { repository } = await seed(1, 0, 1);
+  const frozen = { status: 'resolved', snapshot: { kind: 'deployment', workflowId: 'wf', workflowVersion: 34, deployNumber: 34, configDigest: 'a'.repeat(64) } };
+  raw.exec(`ALTER TABLE workflow_evolution_analysis_runs ADD COLUMN state_version INTEGER DEFAULT 0;
+    CREATE TABLE flow_runs(flow_id TEXT PRIMARY KEY,workflow_id TEXT,workflow_version INTEGER,workflow_deploy_number INTEGER,state_json TEXT,started_at INTEGER);
+    CREATE TABLE workflow_deploy_history(workflow_id TEXT,version INTEGER,deploy_number INTEGER,spec_json TEXT,is_active INTEGER);
+    INSERT INTO workflow_deploy_history VALUES ('wf',35,35,'{"id":"wf"}',1);`);
+  raw.prepare('UPDATE workflow_evolution_analysis_runs SET scope_json=?').run(JSON.stringify({ workflowSnapshot: frozen }));
+  if (state === 'changed') raw.prepare("INSERT INTO flow_runs VALUES ('run-0-0','wf',35,35,NULL,?)").run(Date.now());
+  expect((await repository.listPage('wf',{page:1,pageSize:20,versionScope:'current'})).groups).toEqual([]);
+  const history = await repository.listPage('wf',{page:1,pageSize:20,versionScope:'historical'});
+  expect(history.groups[0].sources[0].analysisContext?.workflowSnapshot).toEqual(frozen);
+});
+
+it.each(['resolved', 'LEGACY_MISSING', 'IDENTITY_MISMATCH', 'wrong-workflow'] as const)('uses the frozen analysis identity with %s binding before run fallback', async kind => {
+  const { repository } = await seed(1, 0, 1);
+  raw.exec(`ALTER TABLE workflow_evolution_analysis_runs ADD COLUMN state_version INTEGER DEFAULT 0;
+    CREATE TABLE flow_runs(flow_id TEXT PRIMARY KEY,workflow_id TEXT,workflow_version INTEGER,workflow_deploy_number INTEGER,state_json TEXT,started_at INTEGER);
+    CREATE TABLE workflow_deploy_history(workflow_id TEXT,version INTEGER,deploy_number INTEGER,spec_json TEXT,is_active INTEGER);
+    INSERT INTO workflow_deploy_history VALUES ('wf',35,35,'{"id":"wf"}',1);`);
+  const frozen = kind === 'resolved' || kind === 'wrong-workflow' ? { status:'resolved', snapshot:{ kind:'deployment', workflowId:kind === 'wrong-workflow'?'other':'wf', workflowVersion:35, deployNumber:35, configDigest:'a'.repeat(64) } } : { status:'unresolved',reason:kind };
+  raw.prepare('UPDATE workflow_evolution_analysis_runs SET scope_json=?').run(JSON.stringify({workflowSnapshot:frozen}));
+  if(kind !== 'resolved') raw.prepare("INSERT INTO flow_runs VALUES ('run-0-0','wf',35,35,NULL,?)").run(Date.now());
+  const current=await repository.listPage('wf',{page:1,pageSize:20,versionScope:'current'});
+  expect(current.groups).toHaveLength(kind==='resolved'||kind==='LEGACY_MISSING'?1:0);
+  if(kind==='resolved') expect(current.groups[0].sources[0].analysisContext?.workflowSnapshot).toEqual(frozen);
+  if(kind==='IDENTITY_MISMATCH'||kind==='wrong-workflow'){
+    const history=await repository.listPage('wf',{page:1,pageSize:20,versionScope:'historical'});
+    expect(history.groups[0].sources[0].analysisContext?.workflowSnapshot).toEqual({status:'unresolved',reason:'IDENTITY_MISMATCH'});
+  }
+});
