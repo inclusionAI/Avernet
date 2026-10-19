@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, VecDeque};
 mod channel;
 
 const HUMAN: &str = "11111111";
+const JUDGE_CLAIM_CONFLICT: &str = "conflict: human Judge is already claimed or no longer active";
 static INIT_PERSISTENT_SECRET: std::sync::Once = std::sync::Once::new();
 
 struct LiveStory {
@@ -241,10 +242,37 @@ impl LiveStory {
         assert_eq!(prompt.matches(output).count(), 1, "previous result must not be duplicated");
     }
 
+    async fn completed_response(&self, pending: &Value, attempt: i64, text: &str) -> Value {
+        let path = format!("/state-machine-runs/{}/nodes/{}", self.run_id, pending["node_id"].as_str().unwrap());
+        let mut detail = self.get(&path).await;
+        for _ in 0..200 {
+            assert_eq!(detail["node"]["attempt"], attempt, "Human response changed attempt: {detail}");
+            if detail["node"]["status"] == "completed" {
+                assert_eq!(detail["node"]["artifact_text"], text, "Human response changed content: {detail}");
+                assert_eq!(detail["node"]["responded_by"], format!("human_{HUMAN}"), "Human response changed responder: {detail}");
+                return detail;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            detail = self.get(&path).await;
+        }
+        panic!("Human response did not complete: {detail}");
+    }
+
     async fn respond(&self, pending: &Value, text: &str) {
         assert_eq!(pending["response_ref"], format!("{}/{}", self.run_id, pending["node_id"].as_str().unwrap()));
-        checked(self.client.post(format!("http://{}/state-machine-runs/{}/nodes/{}/respond", self.addr, self.run_id,
-            pending["node_id"].as_str().unwrap())).header("X-Mock-User-Id", HUMAN).json(&json!({"content": text}))).await;
+        let before = self.get(&format!("/state-machine-runs/{}/nodes/{}", self.run_id, pending["node_id"].as_str().unwrap())).await;
+        let attempt = before["node"]["attempt"].as_i64().expect("Human attempt");
+        let response = self.raw_response(pending, text).await;
+        let status = response.status();
+        let body: Value = response.json().await.expect("Human response JSON");
+        if status.is_success() { return; }
+        // Recovery can finish the same accepted input before the foreground claim/CAS.
+        assert!(status == reqwest::StatusCode::CONFLICT && body["error"] == "conflict"
+            && matches!(body["message"].as_str(), Some(JUDGE_CLAIM_CONFLICT
+                | "conflict: human response lost the completion race"
+                | "conflict: state-machine transition changed concurrently: invalid database input: transaction parameter 5 references missing row 0 from step 0")),
+            "Human response returned {status}: {body}");
+        self.completed_response(pending, attempt, text).await;
     }
 
     async fn notification(&self, pending: &Value) -> Value {
@@ -530,6 +558,11 @@ async fn nested_human_story_preserves_parent_context_and_direct_notifications() 
 
 #[tokio::test]
 async fn nested_human_persistent_story_recovers_with_admission_disabled() {
+    // This current-thread runtime keeps the scanner under the scoped subscriber.
+    let recovery_log = tempfile::NamedTempFile::new().expect("recovery log file");
+    let _recovery_subscriber = tracing::subscriber::set_default(tracing_subscriber::fmt().json()
+        .with_max_level(tracing::Level::WARN)
+        .with_writer(recovery_log.reopen().expect("recovery log writer")).finish());
     let mut story = LiveStory::start_persistent("nested_human", vec!["repeat", "done"]).await;
     let mut stale_node = None;
     for index in 0..20 {
@@ -605,9 +638,45 @@ async fn nested_human_persistent_story_recovers_with_admission_disabled() {
             continue;
         }
         if index == 19 {
+            assert_eq!(pending["execution"]["definition_node_id"], "outer_result");
+            assert_eq!(pending["execution"]["loop_path"][0]["iteration"], 2);
+            let before = story.get(&format!("/state-machine-runs/{}/nodes/{}", story.run_id, pending["node_id"].as_str().unwrap())).await;
+            let attempt = before["node"]["attempt"].as_i64().expect("Human attempt before skip failure");
             story.execute_persistent_sql("CREATE TRIGGER reject_nested_skip BEFORE UPDATE ON bcs_state_machine_node_runs WHEN NEW.status='skipped' AND OLD.status<>'skipped' BEGIN SELECT RAISE(ABORT,'injected nested skip failure'); END").await;
             let failed = story.raw_response(&pending, "persistent-human-19").await;
-            assert!(failed.status().is_server_error(), "skip failure returned {}", failed.status());
+            let status = failed.status();
+            let body: Value = failed.json().await.expect("skip failure JSON");
+            assert!((status.is_server_error() && body["message"].as_str()
+                .is_some_and(|message| message.contains("injected nested skip failure")))
+                || (status == reqwest::StatusCode::CONFLICT && body["error"] == "conflict"
+                    && body["message"] == JUDGE_CLAIM_CONFLICT),
+                "skip failure returned {status}: {body}");
+            if status == reqwest::StatusCode::CONFLICT {
+                let mut observed_skip_failure = false;
+                for _ in 0..200 {
+                    let log = std::fs::read_to_string(recovery_log.path()).expect("recovery log");
+                    observed_skip_failure = log.lines()
+                        .map(|line| serde_json::from_str::<Value>(line).expect("recovery log JSON"))
+                        .any(|event| event["target"] == "state_machine_progression_scanner"
+                            && event["fields"]["run_id"] == story.run_id
+                            && event["fields"]["error"].as_str().is_some_and(|error|
+                                error.contains("injected nested skip failure")));
+                    if observed_skip_failure { break; }
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                }
+                assert!(observed_skip_failure, "skip failure was not surfaced by recovery: {}",
+                    std::fs::read_to_string(recovery_log.path()).expect("recovery log"));
+            }
+            // Inspect the durable checkpoint before removing the skip failure injection.
+            let completed = story.completed_response(&pending, attempt, "persistent-human-19").await;
+            assert_eq!(completed["node"]["outcome"], "done", "skip failure checkpoint: {completed}");
+            assert_eq!(story.run().await["run"]["status"], "running", "skip failure must not finish the Run");
+            let graph = story.get(&format!("/state-machine-runs/{}/graph", story.run_id)).await;
+            let future: Vec<_> = graph["nodes"].as_array().unwrap().iter()
+                .filter(|node| node["execution"]["loop_path"][0]["iteration"] == 3).collect();
+            assert_eq!(future.len(), 10, "future outer iteration after skip failure: {graph}");
+            assert!(future.iter().all(|node| node["status"] != "skipped"),
+                "skip trigger must block all future outer nodes: {future:?}");
             story.execute_persistent_sql("DROP TRIGGER reject_nested_skip").await;
             story.restart(false).await;
             let stale = story.raw_response(&pending, "stale-after-skip-restart").await;
