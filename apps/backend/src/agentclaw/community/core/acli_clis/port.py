@@ -5,9 +5,11 @@ reaches the service as :class:`AcliPortError` with a short ``code`` the
 service and the HTTP layer branch on:
 
 * ``not_running`` — the bot has no reachable container.
-* ``engine_unsupported`` — the engine build has no acli endpoints.
+* ``engine_unsupported`` — the engine answered 501: it refuses acli.
+* ``engine_outdated`` — the engine's own route-miss 404: its build predates acli.
 * ``invalid_input`` — the engine refused the request as malformed.
-* ``timeout`` / ``engine_unreachable`` — the call itself failed.
+* ``timeout`` / ``engine_unreachable`` — the call itself failed (a 404 from the
+  gateway rather than the engine is ``engine_unreachable``).
 * any code the engine's runner reported (``install_failed``,
   ``uninstall_failed``, ``acli_unavailable``, ``bad_output``, …).
 """
