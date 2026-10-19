@@ -651,6 +651,9 @@ def build_public_router() -> APIRouter:
             router, responses=USER_SCOPED_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
         )
 
+    from .dws_hosting.router import router as dws_hosting_router
+    public.include_router(dws_hosting_router, responses=ENGINE_RUNTIME_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH)
+
     # `bots` is mixed too, but stays last for the wildcard-ordering rule above.
     public.include_router(
         bots_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH

@@ -25986,6 +25986,176 @@
         ],
         "title": "AgentAttemptDetailDTO",
         "type": "object"
+      },
+      "Envelope_dict_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results.",
+            "title": "Data"
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[dict]",
+        "type": "object"
+      },
+      "EnabledUpdate": {
+        "additionalProperties": false,
+        "description": "Explicit consent to start or stop automatic hosting.",
+        "properties": {
+          "enabled": {
+            "description": "True starts after authorization and rule checks; false stops and fences unsent work.",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "expected_version": {
+            "description": "Saved rule version required to enable; disabling ignores stale versions.",
+            "minimum": 0.0,
+            "title": "Expected Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "enabled",
+          "expected_version"
+        ],
+        "title": "EnabledUpdate",
+        "type": "object"
+      },
+      "SettingsUpdate": {
+        "additionalProperties": false,
+        "description": "Optimistic update; stale versions never overwrite saved owner rules.",
+        "properties": {
+          "expected_version": {
+            "description": "Version returned by GET settings; zero for the first save.",
+            "minimum": 0.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/Settings",
+            "description": "Complete owner-confirmed settings to save atomically."
+          }
+        },
+        "required": [
+          "expected_version",
+          "settings"
+        ],
+        "title": "SettingsUpdate",
+        "type": "object"
+      },
+      "Settings": {
+        "additionalProperties": false,
+        "description": "Owner-confirmed natural-language hosting instructions.",
+        "properties": {
+          "custom_window": {
+            "default": "",
+            "description": "Required natural-language schedule when window is custom.",
+            "maxLength": 1000,
+            "title": "Custom Window",
+            "type": "string"
+          },
+          "label_suffix": {
+            "default": "",
+            "description": "Optional text appended to the mandatory AI label; cannot remove the label.",
+            "maxLength": 80,
+            "title": "Label Suffix",
+            "type": "string"
+          },
+          "persona": {
+            "default": "",
+            "description": "Optional reply style and persona instructions.",
+            "maxLength": 2000,
+            "title": "Persona",
+            "type": "string"
+          },
+          "rules": {
+            "description": "Natural-language reply, ignore and escalation rules.",
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Rules",
+            "type": "string"
+          },
+          "timezone": {
+            "default": "Asia/Shanghai",
+            "description": "IANA timezone used to interpret message timestamps and schedule.",
+            "maxLength": 100,
+            "title": "Timezone",
+            "type": "string"
+          },
+          "window": {
+            "default": "always",
+            "description": "Hosting schedule: always; night 20:00-08:30; or custom instructions.",
+            "enum": [
+              "always",
+              "night",
+              "custom"
+            ],
+            "title": "Window",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rules"
+        ],
+        "title": "Settings",
+        "type": "object"
+      },
+      "TakeoverUpdate": {
+        "additionalProperties": false,
+        "description": "Pause or resume automatic handling for one bound direct conversation.",
+        "properties": {
+          "conversation_id": {
+            "description": "DWS direct-conversation ID in this owner's hosting binding.",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "taken_over": {
+            "description": "True fences future automatic replies for the conversation; false resumes.",
+            "title": "Taken Over",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "conversation_id",
+          "taken_over"
+        ],
+        "title": "TakeoverUpdate",
+        "type": "object"
       }
     }
   },
@@ -92831,6 +93001,1653 @@
         "summary": "Ready",
         "tags": [
           "agentswarm"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/dws-hosting": {
+      "get": {
+        "operationId": "status_openapi_v1_bots__bot_id__dws_hosting_get",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 501000,
+                  "message": "Not supported by this bot's engine; see the engine capabilities endpoint",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not supported for this bot — either its engine does not declare the capability (see the engine-capabilities endpoint) or the operation is not offered for this bot type"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 504000,
+                  "message": "Engine request timed out",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service timed out"
+          }
+        },
+        "summary": "Status",
+        "tags": [
+          "dws-hosting"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/dws-hosting/authorization": {
+      "post": {
+        "operationId": "authorize_openapi_v1_bots__bot_id__dws_hosting_authorization_post",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 501000,
+                  "message": "Not supported by this bot's engine; see the engine capabilities endpoint",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not supported for this bot — either its engine does not declare the capability (see the engine-capabilities endpoint) or the operation is not offered for this bot type"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 504000,
+                  "message": "Engine request timed out",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service timed out"
+          }
+        },
+        "summary": "Authorize",
+        "tags": [
+          "dws-hosting"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/dws-hosting/authorization/check": {
+      "post": {
+        "operationId": "check_authorization_openapi_v1_bots__bot_id__dws_hosting_authorization_check_post",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 501000,
+                  "message": "Not supported by this bot's engine; see the engine capabilities endpoint",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not supported for this bot — either its engine does not declare the capability (see the engine-capabilities endpoint) or the operation is not offered for this bot type"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 504000,
+                  "message": "Engine request timed out",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service timed out"
+          }
+        },
+        "summary": "Check Authorization",
+        "tags": [
+          "dws-hosting"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/dws-hosting/conversations": {
+      "get": {
+        "operationId": "conversations_openapi_v1_bots__bot_id__dws_hosting_conversations_get",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Zero-based conversation offset.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Zero-based conversation offset.",
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum conversations to return (1-100).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Maximum conversations to return (1-100).",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 501000,
+                  "message": "Not supported by this bot's engine; see the engine capabilities endpoint",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not supported for this bot — either its engine does not declare the capability (see the engine-capabilities endpoint) or the operation is not offered for this bot type"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 504000,
+                  "message": "Engine request timed out",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service timed out"
+          }
+        },
+        "summary": "Conversations",
+        "tags": [
+          "dws-hosting"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/dws-hosting/enabled": {
+      "put": {
+        "operationId": "enabled_openapi_v1_bots__bot_id__dws_hosting_enabled_put",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnabledUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 501000,
+                  "message": "Not supported by this bot's engine; see the engine capabilities endpoint",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not supported for this bot — either its engine does not declare the capability (see the engine-capabilities endpoint) or the operation is not offered for this bot type"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 504000,
+                  "message": "Engine request timed out",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service timed out"
+          }
+        },
+        "summary": "Enabled",
+        "tags": [
+          "dws-hosting"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/dws-hosting/settings": {
+      "get": {
+        "operationId": "settings_openapi_v1_bots__bot_id__dws_hosting_settings_get",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 501000,
+                  "message": "Not supported by this bot's engine; see the engine capabilities endpoint",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not supported for this bot — either its engine does not declare the capability (see the engine-capabilities endpoint) or the operation is not offered for this bot type"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 504000,
+                  "message": "Engine request timed out",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service timed out"
+          }
+        },
+        "summary": "Settings",
+        "tags": [
+          "dws-hosting"
+        ]
+      },
+      "put": {
+        "operationId": "save_settings_openapi_v1_bots__bot_id__dws_hosting_settings_put",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 501000,
+                  "message": "Not supported by this bot's engine; see the engine capabilities endpoint",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not supported for this bot — either its engine does not declare the capability (see the engine-capabilities endpoint) or the operation is not offered for this bot type"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 504000,
+                  "message": "Engine request timed out",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service timed out"
+          }
+        },
+        "summary": "Save Settings",
+        "tags": [
+          "dws-hosting"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/dws-hosting/takeover": {
+      "put": {
+        "operationId": "takeover_openapi_v1_bots__bot_id__dws_hosting_takeover_put",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TakeoverUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 501000,
+                  "message": "Not supported by this bot's engine; see the engine capabilities endpoint",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not supported for this bot — either its engine does not declare the capability (see the engine-capabilities endpoint) or the operation is not offered for this bot type"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 504000,
+                  "message": "Engine request timed out",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service timed out"
+          }
+        },
+        "summary": "Takeover",
+        "tags": [
+          "dws-hosting"
         ]
       }
     }

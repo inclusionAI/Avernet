@@ -17,12 +17,14 @@ from .models_authorization import (
     ServiceChecked,
 )
 from .rule_shape_audit import assert_member_writes_name_explicit_origin
+from .dws_hosting.inventory import OPERATIONS as DWS_OPERATIONS, PATH as DWS_PATH
 
 #: Every operation on this surface, exactly once, keyed as ``ADMISSION`` is.
 #:
 #: No row is :class:`Check` yet: this change builds the seam, and moving each
 #: group onto it is its own session (``spec.md`` *Decisions* 4).
 AUTHORIZATION: dict[tuple[str, str], Authorization] = {
+    **{(method, DWS_PATH + suffix): OWNER_SCOPED for method, suffix in DWS_OPERATIONS},
     ("GET", "/openapi/v1/bots/{bot_id}/classification"): NoCheck(
         "authenticated minimal classification before establishing Bot collaboration"
     ),

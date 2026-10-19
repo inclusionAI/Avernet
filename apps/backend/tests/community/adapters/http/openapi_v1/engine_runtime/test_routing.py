@@ -34,10 +34,11 @@ def _all_engine_runtime_paths() -> set[str]:
     from agentclaw.community.adapters.http.openapi_v1.deprecated import (
         ENGINE_RUNTIME_GROUPS as LEGACY,
     )
+    from agentclaw.community.adapters.http.openapi_v1.dws_hosting.router import router as dws_management
 
     return {
         _schema_path(r.path)
-        for g in [*_ENGINE_RUNTIME_GROUPS, *LEGACY]
+        for g in [*_ENGINE_RUNTIME_GROUPS, *LEGACY, dws_management]
         for r in g.routes
         if isinstance(r, APIRoute)
     }
