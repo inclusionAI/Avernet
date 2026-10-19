@@ -17,9 +17,6 @@ const moduleNameMapper = {
   // （package.json main），故测试环境重定向到 lib/ 用真实实现：既省掉全量转译整个 UI 库的开销，
   // 也绕开 es/ 里的 .css/.less 副作用导入（lib/ 无此问题）。
   '^@tc-chat/ui/es/(.*)$': '<rootDir>/node_modules/@tc-chat/ui/lib/$1',
-  // @tc-chat/* 的 dist 引用了 @babel/runtime 的 esm helpers（同样是未转译 ESM）。
-  // @babel/runtime 在 helpers/ 下发了等价 CJS 版本，重定向过去即可，无需再转译一遍 runtime。
-  '^@babel/runtime/helpers/esm/(.*)$': '<rootDir>/node_modules/@babel/runtime/helpers/$1',
   '^react-syntax-highlighter/dist/esm/styles/prism$':
     '<rootDir>/node_modules/react-syntax-highlighter/dist/cjs/styles/prism/index.js',
 };
@@ -30,9 +27,10 @@ const moduleNameMapper = {
 // tc-chat/ui's CJS MarkdownRenderer still imports @ant-design/colors/es from a
 // nested dependency. DiceBear likewise ships ESM-only packages used by the bot
 // avatar generator. Transform these package namespaces; the rest of
-// node_modules stays ignored.
+// node_modules stays ignored. tnpm resolves scoped packages through physical
+// `_@scope_name@` directories, so include both normal and physical layouts.
 const transformIgnorePatterns = [
-  '/node_modules/(?!@tc-chat/|@ant-design/colors/|@dicebear/)',
+  '/node_modules/(?!@tc-chat/|_@tc-chat_|@ant-design/colors/|_@ant-design_colors@|@dicebear/|_@dicebear_|@babel/runtime/|_@babel_runtime@)',
   '\\.pnp\\.[^\\\\/]+$',
 ];
 

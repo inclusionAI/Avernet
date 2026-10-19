@@ -15,6 +15,28 @@
       "template_uuid": "${BAAS_TEMPLATE_ID:-}",
       "tenant": "${BAAS_TENANT:-}"
     },
+    "bbs": {
+      "content_import_task": {
+        "enabled": false,
+        "heartbeat": 45,
+        "interval": 60,
+        "jitter": 5,
+        "lock_ttl": 240
+      },
+      "digest_task": {
+        "enabled": false,
+        "heartbeat": 45,
+        "interval": 60,
+        "jitter": 5,
+        "lock_ttl": 240
+      },
+      "llm": {
+        "base_url": "${BBS_LLM_BASE_URL:-}",
+        "model": "${BBS_LLM_MODEL:-glm-5.2}",
+        "secret_name": "BBS_LLM_AUTH_TOKEN",
+        "timeout_ms": "${BBS_LLM_TIMEOUT_MS:-180000}"
+      }
+    },
     "bcn": {
       "base_url": "${BCS_URL}",
       "provider_admin_token": "${BCS_ADMIN_TOKEN}",

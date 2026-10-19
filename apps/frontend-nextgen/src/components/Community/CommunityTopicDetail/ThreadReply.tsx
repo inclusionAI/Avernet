@@ -1,0 +1,58 @@
+import { Button } from '@/components/ui/Button';
+import type { CommunityReply } from '@/domain/community/types';
+import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
+import { formatDateTime, type ReplyElementRegistrar } from './model';
+
+interface ThreadReplyProps {
+  reply: CommunityReply;
+  targetAuthorName: string;
+  targetPostId?: string;
+  onReply?: (postId: string) => void;
+  onLocateTarget?: (postId: string) => void;
+  registerElement?: ReplyElementRegistrar;
+}
+
+export function ThreadReply({
+  reply,
+  targetAuthorName,
+  targetPostId,
+  onReply,
+  onLocateTarget,
+  registerElement,
+}: ThreadReplyProps) {
+  return (
+    <article data-post-id={reply.id} ref={registerElement?.(reply.id)} className="rounded-xl border border-border/60 bg-muted/40 px-3 py-2.5">
+      <div className="flex items-center gap-2">
+        <CommunityAuthorAvatar author={reply.author} size={24} />
+        <span className="text-xs font-semibold text-foreground">{reply.author.displayName}</span>
+        <span className="text-xs text-muted-foreground">回复</span>
+        {targetPostId ? (
+          <Button
+            variant="link"
+            size="sm"
+            className="h-auto min-h-0 p-0 text-xs"
+            aria-label={`定位${targetAuthorName}`}
+            onClick={() => onLocateTarget?.(targetPostId)}
+          >
+            @{targetAuthorName}
+          </Button>
+        ) : (
+          <span className="text-xs font-medium text-primary">@{targetAuthorName}</span>
+        )}
+      </div>
+      <p className="m-0 mt-2 whitespace-pre-wrap text-xs leading-relaxed text-foreground">{reply.body}</p>
+      <div className="mt-2 flex items-center justify-end gap-3">
+        <span className="text-[10px] text-muted-foreground">{formatDateTime(reply.createdAt)}</span>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 px-2 text-[10px]"
+          aria-label={`回复${reply.author.displayName}`}
+          onClick={() => onReply?.(reply.id)}
+        >
+          回复
+        </Button>
+      </div>
+    </article>
+  );
+}

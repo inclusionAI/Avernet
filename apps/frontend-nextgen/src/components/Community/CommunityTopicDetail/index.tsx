@@ -3,260 +3,12 @@ import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { Textarea } from '@/components/ui/Textarea';
 import type { CommunityReply, CommunityTopic } from '@/domain/community/types';
-import { ArrowLeft, User } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
-
-function formatDateTime(value: string) {
-  if (!value) return '时间未知';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '时间未知';
-  const pad = (input: number) => String(input).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(
-    date.getMinutes(),
-  )}`;
-}
-
-interface CommunityThreadReply {
-  reply: CommunityReply;
-  targetAuthorName: string;
-  targetPostId?: string;
-}
-
-interface CommunityFloorReplyGroup {
-  reply: CommunityReply;
-  floorNo: number;
-  children: CommunityThreadReply[];
-}
-
-function indexReplies(replies: CommunityReply[]) {
-  const replyById = new Map<string, CommunityReply>();
-  replies.forEach((reply) => {
-    replyById.set(reply.id, reply);
-    reply.childReplies?.forEach((child) => replyById.set(child.id, child));
-  });
-  return replyById;
-}
-
-/**
- * Normalizes nested API payloads and the older flat page shape. The nested
- * payload is canonical for 楼中楼: `reply.childReplies` already contains every
- * descendant of that first-level floor. The flat path only remains as a
- * compatibility fallback for tests and clients provisioned before v2.
- */
-function buildReplyGroups(
-  replies: CommunityReply[],
-  firstFloorNo: number,
-): CommunityFloorReplyGroup[] {
-  const replyById = indexReplies(replies);
-  const targetName = (postId?: string) =>
-    postId ? replyById.get(postId)?.author.displayName || '原回复' : '原回复';
-
-  if (replies.some((reply) => reply.childReplies?.length)) {
-    return replies.map((reply, index) => ({
-      reply,
-      floorNo: firstFloorNo + index,
-      children: (reply.childReplies ?? []).map((child) => ({
-        reply: child,
-        targetAuthorName: targetName(child.replyToPostId),
-        targetPostId: child.replyToPostId,
-      })),
-    }));
-  }
-
-  const groups: CommunityFloorReplyGroup[] = [];
-  const groupByReplyId = new Map<string, CommunityFloorReplyGroup>();
-
-  replies.forEach((reply, index) => {
-    const target = reply.replyToPostId ? replyById.get(reply.replyToPostId) : undefined;
-    const targetGroup = target ? groupByReplyId.get(target.id) : undefined;
-
-    if (target && targetGroup) {
-      targetGroup.children.push({
-        reply,
-        targetAuthorName: target.author.displayName,
-        targetPostId: target.id,
-      });
-      groupByReplyId.set(reply.id, targetGroup);
-      return;
-    }
-
-    const group: CommunityFloorReplyGroup = {
-      reply,
-      floorNo: firstFloorNo + index,
-      children: [],
-    };
-    groups.push(group);
-    groupByReplyId.set(reply.id, group);
-  });
-
-  return groups;
-}
-
-type ReplyElementRegistrar = (postId?: string) => (instance: HTMLElement | null) => void;
-
-interface ThreadReplyProps {
-  reply: CommunityReply;
-  targetAuthorName: string;
-  targetPostId?: string;
-  onReply?: (postId: string) => void;
-  onLocateTarget?: (postId: string) => void;
-  registerElement?: ReplyElementRegistrar;
-}
-
-function ThreadReply({
-  reply,
-  targetAuthorName,
-  targetPostId,
-  onReply,
-  onLocateTarget,
-  registerElement,
-}: ThreadReplyProps) {
-  return (
-    <article data-post-id={reply.id} ref={registerElement?.(reply.id)} className="rounded-xl border border-border/60 bg-muted/40 px-3 py-2.5">
-      <div className="flex items-center gap-2">
-        <CommunityAuthorAvatar author={reply.author} size={24} />
-        <span className="text-xs font-semibold text-foreground">{reply.author.displayName}</span>
-        <span className="text-xs text-muted-foreground">回复</span>
-        {targetPostId ? (
-          <Button
-            variant="link"
-            size="sm"
-            className="h-auto min-h-0 p-0 text-xs"
-            aria-label={`定位${targetAuthorName}`}
-            onClick={() => onLocateTarget?.(targetPostId)}
-          >
-            @{targetAuthorName}
-          </Button>
-        ) : (
-          <span className="text-xs font-medium text-primary">@{targetAuthorName}</span>
-        )}
-      </div>
-      <p className="m-0 mt-2 whitespace-pre-wrap text-xs leading-relaxed text-foreground">{reply.body}</p>
-      <div className="mt-2 flex items-center justify-end gap-3">
-        <span className="text-[10px] text-muted-foreground">{formatDateTime(reply.createdAt)}</span>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 px-2 text-[10px]"
-          aria-label={`回复${reply.author.displayName}`}
-          onClick={() => onReply?.(reply.id)}
-        >
-          回复
-        </Button>
-      </div>
-    </article>
-  );
-}
-
-interface FloorProps {
-  floor: number;
-  postId?: string;
-  replyToPostId?: string;
-  replyToFloorNo?: number;
-  author: CommunityTopic['author'];
-  body: string;
-  createdAt: string;
-  onReply?: (postId: string) => void;
-  threadReplies: CommunityThreadReply[];
-  expanded: boolean;
-  onToggleThreadReplies: () => void;
-  onLocateTarget?: (postId: string) => void;
-  registerElement?: ReplyElementRegistrar;
-}
-
-// 一级楼层保持原布局；楼中楼只作为其下方的两层从属展示区。
-function Floor({
-  floor,
-  postId,
-  replyToPostId,
-  replyToFloorNo,
-  author,
-  body,
-  createdAt,
-  onReply,
-  threadReplies,
-  expanded,
-  onToggleThreadReplies,
-  onLocateTarget,
-  registerElement,
-}: FloorProps) {
-  const visibleThreadReplies = expanded ? threadReplies : threadReplies.slice(0, 2);
-  const childListId = postId ? `${postId}-children` : undefined;
-
-  return (
-    <article data-post-id={postId} ref={registerElement?.(postId)} className="border-b border-border/60 py-4 last:border-b-0">
-      <div className="flex items-center gap-2">
-        <CommunityAuthorAvatar author={author} size={36} />
-        <span className="text-sm font-semibold text-foreground">{author.displayName}</span>
-        <Badge
-          tone={floor === 0 ? 'primary' : 'neutral'}
-          className={
-            floor === 0
-              ? 'gap-1 rounded bg-foreground px-1.5 py-0.5 text-[10px] text-background'
-              : 'h-6 rounded px-2 py-0 text-[10px]'
-          }
-        >
-          {floor === 0 ? <User className="size-3" aria-hidden /> : null}
-          {floor === 0 ? '楼主' : `${floor}楼`}
-        </Badge>
-        {replyToPostId ? (
-          <Badge tone="outline" className="h-6 rounded px-2 py-0.5 text-[10px]">
-            {typeof replyToFloorNo === 'number' ? `回复 ${replyToFloorNo}楼` : '回复原回复'}
-          </Badge>
-        ) : null}
-      </div>
-      <div className="mt-2 pl-[44px] pr-[44px]">
-        <div className="min-h-[120px]">
-          <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed text-foreground">{body}</p>
-        </div>
-        <div className="mt-2 flex items-center justify-between gap-3">
-          <span className="text-xs text-muted-foreground">发表于：{formatDateTime(createdAt)}</span>
-          {postId ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 px-2.5 text-xs"
-              aria-label={`回复第${floor}楼`}
-              onClick={() => onReply?.(postId)}
-            >
-              回复
-            </Button>
-          ) : null}
-        </div>
-        {threadReplies.length > 0 ? (
-          <div id={childListId} aria-label="楼中楼回复" className="mt-3 space-y-2 border-l border-border pl-3">
-            {visibleThreadReplies.map(({ reply, targetAuthorName, targetPostId }) => (
-              <ThreadReply
-                key={reply.id}
-                reply={reply}
-                targetAuthorName={targetAuthorName}
-                targetPostId={targetPostId}
-                onReply={onReply}
-                onLocateTarget={onLocateTarget}
-                registerElement={registerElement}
-              />
-            ))}
-            {threadReplies.length > 2 ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-full px-0 text-[10px] text-primary"
-                aria-expanded={expanded}
-                aria-controls={childListId}
-                onClick={onToggleThreadReplies}
-              >
-                {expanded ? '收起 ▴' : `查看全部 ${threadReplies.length} 条回复 ▾`}
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-    </article>
-  );
-}
+import { Floor } from './Floor';
+import { buildReplyGroups } from './model';
+import { ReplyComposer } from './ReplyComposer';
 
 export interface CommunityTopicDetailProps {
   topic: CommunityTopic | null;
@@ -300,8 +52,6 @@ export function CommunityTopicDetail({
   onCancelReply,
   onSubmitReply,
 }: CommunityTopicDetailProps) {
-  const [replyDraft, setReplyDraft] = useState('');
-  const [replySubmitError, setReplySubmitError] = useState<string | null>(null);
   const [expandedReplyIds, setExpandedReplyIds] = useState<Record<string, boolean>>({});
   const replyElementsRef = useRef(new Map<string, HTMLElement | null>());
 
@@ -344,19 +94,6 @@ export function CommunityTopicDetail({
   useEffect(() => {
     setExpandedReplyIds({});
   }, [replyPage]);
-
-  const submitReply = async () => {
-    const body = replyDraft.trim();
-    if (!body) {
-      setReplySubmitError('请输入回复内容');
-      return;
-    }
-    const submitted = await onSubmitReply(body);
-    if (submitted) {
-      setReplyDraft('');
-      setReplySubmitError(null);
-    }
-  };
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -466,37 +203,13 @@ export function CommunityTopicDetail({
                 />
               ))}
               {topic.status === 'open' ? (
-                <section className="py-4" aria-label="回复编辑区">
-                  <div className="mb-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                    <span>{replyTargetPostId ? `正在回复第 ${replyTargetFloor ?? '目标'} 楼` : '直接回复主题'}</span>
-                    {replyTargetPostId ? (
-                      <Button variant="ghost" size="sm" className="h-7 px-2.5" onClick={onCancelReply}>
-                        取消引用
-                      </Button>
-                    ) : null}
-                  </div>
-                  <Textarea
-                    className="min-h-[96px] rounded-lg border-border bg-card px-3 py-3 text-sm leading-relaxed"
-                    value={replyDraft}
-                    onChange={(event) => {
-                      setReplyDraft(event.target.value);
-                      setReplySubmitError(null);
-                    }}
-                    placeholder={replyTargetPostId ? '回复这个楼层...' : '回复这个主题...'}
-                    maxLength={20000}
-                    variant={replySubmitError ? 'error' : 'default'}
-                    aria-label="回复正文"
-                    aria-invalid={!!replySubmitError}
-                  />
-                  {replySubmitError ? <p className="m-0 mt-2 text-xs text-destructive">{replySubmitError}</p> : null}
-                  <Button
-                    className="mt-3 bg-foreground px-4 text-xs text-background hover:opacity-90"
-                    loading={replyPublishing}
-                    onClick={() => void submitReply()}
-                  >
-                    {replyTargetPostId ? '发送楼层回复' : '发送回复'}
-                  </Button>
-                </section>
+                <ReplyComposer
+                  replyTargetFloor={replyTargetFloor}
+                  replyTargetPostId={replyTargetPostId}
+                  publishing={replyPublishing}
+                  onCancelReply={onCancelReply}
+                  onSubmitReply={onSubmitReply}
+                />
               ) : null}
               {!replies.length && !replyLoading && <p className="py-6 text-center text-sm text-muted-foreground">暂时还没有回复</p>}
               {replyLoading && (
