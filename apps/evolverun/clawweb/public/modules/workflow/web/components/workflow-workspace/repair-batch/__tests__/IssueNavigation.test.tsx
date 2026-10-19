@@ -165,7 +165,7 @@ it('discards another page cache when a refreshed snapshot reports changed source
   result.inputDigest = 'e'.repeat(64)
   result.items = [item('updated')]
   await act(async () => { await client.invalidateQueries({ queryKey: ['repair-issue-previews', 'wf'], predicate: query => query.getObserversCount() > 0 }) })
-  expect(await screen.findByText(/retry：原始来源已不可用/)).toBeVisible()
+  await waitFor(() => expect(screen.getByRole('button', { name: '生成优化草稿（1）' })).toBeEnabled())
   await user.click(within(screen.getByRole('region', { name: '问题分页' })).getByRole('button', { name: '上一页' }))
   expect(await screen.findByRole('checkbox', { name: '选择 updated' })).not.toBeChecked()
   expect(screen.queryByRole('checkbox', { name: '选择 retry' })).not.toBeInTheDocument()
@@ -381,11 +381,8 @@ it('retains conflicting sources for candidate review without silently choosing a
   await user.click(await choices().findByRole('checkbox', { name: '选择 600' }))
   await user.click(choices().getByRole('checkbox', { name: '选择 90' }))
   await user.click(within(screen.getByRole('dialog', { name: '问题详情' })).getByRole('button', { name: '关闭' }))
-  expect(screen.getByRole('button', { name: '生成优化草稿（2）' })).toBeDisabled()
-  expect(screen.getByRole('alert')).toHaveTextContent('冲突')
-  expect(screen.getByRole('alert')).toHaveTextContent('fetch · /executor/timeoutMs')
-  expect(screen.getByRole('alert')).toHaveTextContent('600')
-  expect(screen.getByRole('alert')).toHaveTextContent('90')
+  expect(screen.getByRole('button', { name: '生成优化草稿（2）' })).toBeEnabled()
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   await user.click(screen.getByRole('checkbox', { name: '选择 90' }))
   await user.click(screen.getByRole('button', { name: '生成优化草稿（1）' }))
   const confirmation = screen.getByRole('region', { name: 'Workflow 修复工作区' })
@@ -429,7 +426,7 @@ it('pages suggestions independently and preserves explicit selections without se
   expect(await choices().findByRole('checkbox', { name: '选择 suggestion-0' })).toBeChecked()
 })
 
-it('blocks generation inside the selection workspace itself while a selected conflict remains', async () => {
+it('allows selected conflicting goals to be reconciled during draft generation', async () => {
   const items = [600, 90].map(value => ({ ...item(String(value)),
     proposal: { summary: `超时${value}`, operations: [{ nodeId: 'fetch', path: '/executor/timeoutMs', value }] } }))
   const generate = vi.fn()
@@ -439,8 +436,8 @@ it('blocks generation inside the selection workspace itself while a selected con
   await screen.findByRole('button', { name: '生成 Pack 草稿' })
   await waitFor(() => expect(screen.queryByText('读取建议…')).not.toBeInTheDocument())
   const button = screen.getByRole('button', { name: '生成 Pack 草稿' })
-  expect(button).toBeDisabled()
+  expect(button).toBeEnabled()
   await userEvent.click(button)
-  expect(generate).not.toHaveBeenCalled()
-  expect(screen.getByRole('alert')).toHaveTextContent('fetch · /executor/timeoutMs')
+  expect(generate).toHaveBeenCalledTimes(1)
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 })

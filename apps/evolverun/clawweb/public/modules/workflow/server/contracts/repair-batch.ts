@@ -33,7 +33,7 @@ export type StoredRepairItem = RepairItem & {
 export type RepairBaseline = {
   workflowId: string; packId: string; releaseRevision: number; activeDeployNumber: number | null;
   specDigest: string; repoId: string; specPath: string; packCommit: string; packDigest: string;
-  /** Canonical deployed JSON, verified against the tagged configuration; specDigest remains raw Git bytes. */
+  /** Canonical deployed JSON context; manual drafts need not match it to Git. specDigest remains raw Git bytes. */
   proposalSpecDigest?: string;
 };
 export type RepairBatchInput = {

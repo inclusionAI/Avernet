@@ -84,7 +84,7 @@ export type RepairExecutionReadRequest = RepairDispatchRequest & { jobId: string
  * read from the exact task repair branch after success; no browser callback or OSS artifact is used.
  */
 export interface RepairExecutionPort {
-  resolveBaseline(workflowId: string): Promise<RepairBaseline>;
+  resolveBaseline(workflowId: string, purpose?: 'draft'): Promise<RepairBaseline>;
   dispatch(input: RepairDispatchRequest): Promise<{ jobId: string }>;
   status(input: RepairExecutionReadRequest): Promise<RepairJobStatus>;
   readResult(input: RepairExecutionReadRequest): Promise<RepairGeneratedResult>;

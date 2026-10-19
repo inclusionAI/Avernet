@@ -213,14 +213,15 @@ describe('repair workbench control service', () => {
     expect(revision.input).not.toHaveProperty('excludedSourceRefs');
     expect(JSON.stringify(revision.input).length).toBeLessThan(20_000);
   });
-  it('rejects >100, stale digest, byte limits and cross-workflow selections before persisting tasks', async () => {
+  it('rejects oversized and cross-workflow requests without using a stale list digest as a manual gate', async () => {
     const f = await setup(101);
     await expect(f.service.create('human', f.request)).rejects.toMatchObject({ code: 'INVALID_INPUT' });
-    await expect(f.service.create('human', { ...f.request, itemIds: ['item-0'], inputDigest: '0'.repeat(64) })).rejects.toMatchObject({ code: 'SOURCE_CHANGED' });
     await expect(f.service.create('human', { ...f.request, itemIds: ['item-0'], instructions: '界'.repeat(22000) })).rejects.toMatchObject({ code: 'PAYLOAD_TOO_LARGE' });
     const other = await f.service.candidates('wf-2');
     await expect(f.service.create('human', { ...f.request, workflowId: 'wf-2', itemIds: ['item-0'], inputDigest: other.inputDigest })).rejects.toMatchObject({ code: 'ITEM_NOT_FOUND' });
     expect(await f.db.query('SELECT * FROM ce_tasks')).toEqual([]);
+    const created = await f.service.create('human', { ...f.request, itemIds: ['item-0'], inputDigest: '0'.repeat(64) });
+    expect(created.input.items.map(item=>item.itemId)).toEqual(['item-0']);
   });
   it('arbitrates concurrent create attempts and rejects reused requests with changed instructions', async () => {
     const f = await setup();

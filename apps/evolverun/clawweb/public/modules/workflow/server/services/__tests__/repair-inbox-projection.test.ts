@@ -70,7 +70,8 @@ it('retains every member and frozen original when a real exact plan contains lar
   expect(revision.input.items).toHaveLength(10);
   expect(revision.input.items.every(row=>!('readSummary' in row))).toBe(true);
   expect((revision.input.items[0].context?.diagnoses as Array<{reasoning:string}>)[0].reasoning).toBe('证'.repeat(10000));
-  expect(revision.input.integration?.plans[0].originalItemIds).toHaveLength(10);
+  expect(revision.input.integration).toBeUndefined();
+  expect(revision.input.items.flatMap(row=>row.sources)).toHaveLength(10);
 });
 it('pages complete metadata and retains trusted raw reads for legacy automatic selection',async()=>{
   const f=await repairFixture(125);fixtures.push(f);

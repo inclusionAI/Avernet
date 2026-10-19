@@ -126,7 +126,7 @@ it('blocks selection and submission when edit permission is revoked after enteri
   expect(screen.getByRole('button', { name: '生成 Pack 草稿' })).toBeDisabled()
   expect(repairApi.create).not.toHaveBeenCalled()
 })
-it('keeps the affected-item reason visible after the automatic refresh rechecks the remaining valid selection', async () => {
+it('keeps both chosen goals through a source refresh without forcing reselection', async () => {
   const a = repairItem('a', '目标 A'), b = repairItem('b', '目标 B'), revised = repairItem('a', '目标 A 已变化')
   mount({ items: [a, b] })
   let changed = false
@@ -140,8 +140,9 @@ it('keeps the affected-item reason visible after the automatic refresh rechecks 
   await userEvent.type(screen.getByRole('textbox', { name: '本次修复要求' }), '保留要求')
   await userEvent.click(screen.getByRole('button', { name: '生成 Pack 草稿' }))
   await waitFor(() => expect(repairApi.selection.mock.calls.length).toBeGreaterThanOrEqual(2))
-  expect(await screen.findByText(/目标 A：建议内容已变化，请审阅后重新勾选/)).toBeVisible()
+  expect(await screen.findByRole('checkbox', { name: '选择 目标 A 已变化' })).toBeChecked()
   expect(screen.getByRole('checkbox', { name: '选择 目标 B' })).toBeChecked()
+  expect(screen.getByRole('button', { name: '生成 Pack 草稿' })).toBeEnabled()
   expect(screen.getByRole('textbox', { name: '本次修复要求' })).toHaveValue('保留要求')
   expect(repairApi.create).toHaveBeenCalledTimes(1)
 })
