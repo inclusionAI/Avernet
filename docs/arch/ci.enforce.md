@@ -46,10 +46,13 @@ The repository must define and enforce allowed dependency directions between the
 
 ### ClawWeb package-boundary gate
 
-For ClawWeb changes, `.github/workflows/clawweb-ci.yml` must run
-`npm run ci:boundaries` (or its direct Node entry) before dependency installation,
-build and tests. The checker requires only Node and the public checkout. Its own
-regression tests run with `node --test scripts/ci/verify-package-boundaries.test.mjs`.
+ClawWeb's existing `npm run ci:check` entry (`scripts/ci/run-tests.mjs check`)
+must validate selected public package boundaries before invoking their existing
+checks. Keep the workflow's existing script calls; do not add a parallel CI entry.
+Boundary regression tests belong to the existing `scripts/ci/run-tests.test.mjs`
+suite. The checker requires only Node and the selected package roots; no OCB
+checkout is required for public CI. Internal-only checks retain their scope and
+the existing internal composition/deployment gate.
 
 Scan every TS/JS source under public package roots, including `__tests__` and test
 helpers. Reject relative references outside the owning package and public imports

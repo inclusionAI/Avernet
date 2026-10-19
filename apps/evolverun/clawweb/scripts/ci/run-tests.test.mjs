@@ -1,10 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { selectWorkspacePackages } from './run-tests.mjs';
+import { main, selectWorkspacePackages } from './run-tests.mjs';
 import { classifyResult, writeReports } from './test-reports.mjs';
+import { verifyPackageBoundaries } from './verify-package-boundaries.mjs';
+
+function verifyFixture(root) {
+  return verifyPackageBoundaries(['workflow', 'shared'].map(name => ({ root: join(root, 'public', name) })));
+}
 
 const json = { numTotalTests: 1, numPassedTests: 1, numFailedTests: 0,
   numPendingTests: 0, numFailedTestSuites: 0, success: true, testResults: [{ status: 'passed' }] };
@@ -58,4 +63,67 @@ test('package scope selects only OCB-owned internal packages', () => {
     ['@ocb/example', '@ocb/host']);
   assert.deepEqual(selectWorkspacePackages(packages, 'public').map(pkg => pkg.name),
     ['@avernet/example']);
+});
+
+function fixture(t, source) {
+  const root = mkdtempSync(join(tmpdir(), 'clawweb-boundaries-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  for (const name of ['workflow', 'shared']) {
+    mkdirSync(join(root, 'public', name), { recursive: true });
+    writeFileSync(join(root, 'public', name, 'package.json'), JSON.stringify({ name: `@avernet/${name}` }));
+  }
+  const directory = join(root, 'public/workflow/web/__tests__');
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, 'sample.test.tsx'), source);
+  return root;
+}
+
+for (const source of [
+  "import { x } from '../../../shared/client'",
+  "export { x } from '../../../shared/client'",
+  "const x = import('../../../shared/client')",
+  "vi.mock('@avernet/shared/client', () => import('../../../shared/client'))",
+  "vi.mock('../../../shared/client', () => ({}))",
+  "vi.importActual('../../../shared/client')",
+  "require('../../../shared/client')",
+]) {
+  test(`rejects cross-package references in tests: ${source}`, (t) => {
+    assert.throws(() => verifyFixture(fixture(t, source)), /relative import escapes package/);
+  });
+}
+
+test('accepts public package entry points and package-local relative imports', (t) => {
+  const root = fixture(t, "import { x } from '@avernet/clawweb-shared/web/api/client'; import { y } from '../hooks'; vi.mock('../local')");
+  assert.equal(verifyFixture(root), 2);
+});
+
+test('rejects public imports of internal packages', (t) => {
+  assert.throws(() => verifyFixture(fixture(t, "import x from '@ocb/private'")), /imports OCB/);
+});
+
+test('resolves symlinked directories even when the imported file has not been generated', (t) => {
+  const root = fixture(t, "import x from './linked/not-generated'");
+  symlinkSync(join(root, 'public/shared'), join(root, 'public/workflow/web/__tests__/linked'), 'dir');
+  assert.throws(() => verifyFixture(root), /relative import escapes package/);
+});
+
+test('does not check generated output or installed dependencies', (t) => {
+  const root = fixture(t, "import x from '../hooks'");
+  for (const name of ['dist', 'dist-server', 'node_modules']) {
+    const directory = join(root, 'public/workflow', name);
+    mkdirSync(directory);
+    writeFileSync(join(directory, 'generated.js'), "import x from '../../shared/client'");
+  }
+  assert.equal(verifyFixture(root), 2);
+});
+
+test('fails closed when no packages are discovered', () => {
+  assert.throws(() => verifyPackageBoundaries([]), /No public ClawWeb packages/);
+});
+
+
+test('existing ci:check entry rejects a boundary violation before invoking package checks', (t) => {
+  const root = fixture(t, "import x from '../../../shared/client'");
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ workspaces: ['public/workflow', 'public/shared'] }));
+  assert.throws(() => main(['check', root]), /relative import escapes package/);
 });

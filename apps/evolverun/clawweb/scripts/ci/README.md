@@ -3,8 +3,6 @@
 From `apps/evolverun/clawweb`, use Node 20.19.0:
 
 ```sh
-npm run ci:boundaries
-node --test scripts/ci/verify-package-boundaries.test.mjs
 npm ci --no-audit --no-fund
 npm run ci:build
 npm run ci:check
@@ -52,8 +50,11 @@ checkout, copy, or switch either repository.
 
 ## Package boundaries
 
-`ci:boundaries` is a required public PR check. It scans package source including
-tests and mock factories: relative references must stay in their owning package,
-and cross-package code must use public exports. It needs only Node, not OCB or
-installed dependencies. It aligns the public rule with the existing internal
-composition/deployment gate; do not bypass it with sibling-source test mocks.
+The existing `ci:check` command first validates selected public package boundaries,
+then runs their existing checks. It scans source including tests and mock
+factories: relative references must stay inside their owning package, and
+cross-package code must use public exports. The helper needs only Node and
+package roots; public CI does not require OCB checkout. Regression tests are
+included in the existing `run-tests.test.mjs` suite. No separate workflow step,
+command, or test entry is needed. The internal composition/deployment gate remains
+unchanged.

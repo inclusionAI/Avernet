@@ -2,7 +2,6 @@
 // Public counterpart of OCB's deployment package-boundary check; no checkout or dependencies needed.
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 function walk(root, visit) {
   for (const entry of readdirSync(root, { withFileTypes: true })) {
@@ -30,16 +29,12 @@ function inside(root, target) {
   return rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel));
 }
 
-export function verifyPackageBoundaries(workspaceRoot) {
-  const publicRoot = resolve(workspaceRoot, 'public');
-  const manifests = [];
-  walk(publicRoot, (path) => {
-    if (basename(path) === 'package.json') manifests.push(path);
-  });
-  if (!manifests.length) throw new Error('No public ClawWeb packages found');
+export function verifyPackageBoundaries(packages) {
+  if (!packages.length) throw new Error('No public ClawWeb packages found');
   const names = new Set();
-  for (const manifest of manifests.sort()) {
-    const root = realpathSync(dirname(manifest));
+  for (const pkg of packages) {
+    const root = realpathSync(pkg.root);
+    const manifest = join(root, 'package.json');
     const metadata = JSON.parse(readFileSync(manifest, 'utf8'));
     if (!metadata.name || names.has(metadata.name)) throw new Error(`Missing/duplicate package name: ${manifest}`);
     names.add(metadata.name);
@@ -60,15 +55,4 @@ export function verifyPackageBoundaries(workspaceRoot) {
     });
   }
   return names.size;
-}
-
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try {
-    const count = verifyPackageBoundaries(resolve(process.argv[2] || '.'));
-    console.log(`CLAWWEB_PUBLIC_PACKAGE_COUNT=${count}`);
-    console.log('CLAWWEB_PACKAGE_BOUNDARIES_OK=1');
-  } catch (error) {
-    console.error(error.message);
-    process.exitCode = 1;
-  }
 }

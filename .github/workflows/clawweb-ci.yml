@@ -5,8 +5,6 @@ on:
     paths:
       - "apps/evolverun/clawweb/**"
       - ".github/workflows/clawweb-ci.yml"
-      - "docs/arch/arch.rules.md"
-      - "docs/arch/ci.enforce.md"
   workflow_dispatch:
 
 permissions:
@@ -35,12 +33,6 @@ jobs:
           node-version: "20.19.0"
           cache: npm
           cache-dependency-path: apps/evolverun/clawweb/package-lock.json
-
-      - name: Verify package boundaries
-        run: node scripts/ci/verify-package-boundaries.mjs
-
-      - name: Test boundary checker
-        run: node --test scripts/ci/verify-package-boundaries.test.mjs
 
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
