@@ -4,7 +4,9 @@
   "rewrite_threshold": {
     "numerator": 2,
     "denominator": 5,
-    "description": "Flag rewrite when 5 * (len(a) + len(b) - 2 * LCS(a, b)) > 2 * (len(a) + len(b)) over the file's lines (README §6.3)."
+    "description": "Flag rewrite when 5 * (len(a) + len(b) - 2 * LCS(a, b)) > 2 * (len(a) + len(b)) over the file's lines (README §6.3).",
+    "lcs_cell_limit": 16777216,
+    "lcs_cell_limit_description": "After removing the lines a and b share at the start and at the end, if the remaining len(a) * len(b) exceeds this, the file is flagged rewrite without computing the LCS (README §6.3)."
   },
   "rules": [
     {"op": "file.edit", "target": "persona", "tier": "T2", "reason": "persona edit"},

@@ -462,6 +462,21 @@ that is empty before and after is never flagged. The threshold is
 `rewrite_threshold` in `risk-tiers.json` (`2/5`, written as a numerator and a
 denominator).
 
+Exact LCS costs `len(a) * len(b)` in time, which is unbounded for the large
+files the limits allow. So the measure is bounded, deterministically, and
+every implementation reaches the same answer:
+
+1. Remove the longest common prefix of `a` and `b`, then the longest common
+   suffix of what remains (prefix first, so the two never overlap). This
+   does not change the result (the removed lines are in every longest common
+   subsequence), and it makes a small edit to a large file cheap.
+2. If the remaining `len(a) * len(b)` exceeds `rewrite_threshold.lcs_cell_limit`
+   (`16777216`, 2^24), flag the file `rewrite` without computing the LCS. A
+   change that large is reviewed by a person (T2) rather than scored.
+3. Otherwise compute the exact LCS of the remaining lines. `LCS(a, b)` is
+   that plus the number of lines removed from each side, and the rule above
+   applies to the whole file.
+
 **Replacement.** A patch that removes an entry and adds an entry with the
 same gene path (§2: a persona type, a skill name, or a resource path with
 its trailing `/` removed, so `foo.md` and `foo.md/` are the same entry)
