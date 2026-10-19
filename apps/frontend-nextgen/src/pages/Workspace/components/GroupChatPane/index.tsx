@@ -1,4 +1,3 @@
-import { Empty } from '@/components/ui';
 import { ChatLayoutPanelSlot } from '@/components/Workspace/ChatLayoutPanelSlot';
 import { SidePanelCollapseButton } from '@/components/Workspace/SidePanelCollapseButton';
 import { filterVisibleGroupMessages } from '@/pages/Workspace/hooks/groupChatHistoryUtils';
@@ -9,7 +8,6 @@ import { useMessageEdit } from '@/pages/Workspace/hooks/useMessageEdit';
 import { useMessageInteractions } from '@/pages/Workspace/hooks/useMessageInteractions';
 import type { MentionConfig } from '@tc-chat/ui';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
-import { Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { GroupHeader } from '../GroupHeader';
 import { ComposerStatusBar } from './ComposerStatusBar';
@@ -18,6 +16,7 @@ import { GroupChatCollabPanel } from './GroupChatCollabPanel';
 import { GroupChatComposer } from './GroupChatComposer';
 import { GroupChatMessageArea } from './GroupChatMessageArea';
 import type { GroupChatPaneProps } from './GroupChatPane.types';
+import { GroupChatPlaceholder } from './GroupChatPlaceholder';
 import { GroupQuestionPanel } from './GroupQuestionPanel';
 import { buildGroupMentionConfig, isHumanOnlyMention } from './mentionHelpers';
 import { resolveSender } from './messageHelpers';
@@ -142,15 +141,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
       userIdentityName,
     });
   if (!group) {
-    return (
-      <section className="flex min-w-0 flex-1 items-center justify-center bg-background">
-        <Empty
-          title="欢迎进入协作群对话现场"
-          description="在左侧选择一个协作群，开始与多个 Bot 和用户协同。"
-          icon={<Sparkles className="h-5 w-5" />}
-        />
-      </section>
-    );
+    return <GroupChatPlaceholder onOpenSessionList={onOpenSessionList} />;
   }
 
   const showError = supportState.phase === 'error';
