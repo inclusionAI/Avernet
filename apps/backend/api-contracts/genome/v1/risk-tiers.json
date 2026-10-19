@@ -26,7 +26,7 @@
     {"op": "memory.set_mode", "target": "memory", "tier": "T1", "reason": "memory mode seed or merge"}
   ],
   "raises": [
-    {"kind": "rewrite", "min_tier": "T2", "reason": "a file.edit or skill.update changed more than the rewrite threshold of a file"},
+    {"kind": "rewrite", "min_tier": "T2", "reason": "a file.edit or skill.update changed more than the rewrite threshold of a file, or a patch replaced an entry by removing and re-adding its key (README §6.3)"},
     {"kind": "guardrail_touch", "min_tier": "T2", "reason": "the patch mentions or edits guardrail-like text (07-verification.md)"}
   ]
 }

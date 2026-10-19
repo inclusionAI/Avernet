@@ -245,10 +245,10 @@
         "parent": {"description": "The revision this one was made from; null only for the bot's first revision.", "oneOf": [{"type": "null"}, {"$ref": "#/definitions/revisionId"}]},
         "created_by": {"$ref": "#/definitions/provenance", "description": "Who recorded it."},
         "created_at": {"description": "When it was recorded, UTC, RFC 3339 with a Z suffix.", "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z(?![\\s\\S])"},
-        "status": {"description": "Where the revision is in its lifecycle (01-genome.md §4.4); the only field besides annotations that changes after recording.", "type": "string", "enum": ["draft", "candidate", "accepted", "rejected", "promoted", "archived"]},
+        "status": {"description": "Where the revision is in its lifecycle (01-genome.md §4.4). Besides status, only annotations and the append-only evaluations change after recording.", "type": "string", "enum": ["draft", "candidate", "accepted", "rejected", "promoted", "archived"]},
         "patch_digest": {"description": "The stored patch that turned parent into this revision; null when a whole Manifest document was recorded.", "oneOf": [{"type": "null"}, {"$ref": "#/definitions/digest"}]},
         "evidence": {"description": "The Experience records that motivated the change; [] for most manual edits.", "type": "array", "items": {"$ref": "#/definitions/evidenceRef"}},
-        "evaluations": {"description": "Ids of the Verification evaluations run on this revision; scores stay in Verification.", "type": "array", "items": {"type": "string", "pattern": "^ev_[A-Za-z0-9]+(?![\\s\\S])"}},
+        "evaluations": {"description": "Ids of the Verification evaluations run on this revision; scores stay in Verification. Append-only: [] at record time, then Verification appends an id when an evaluation of this revision finishes.", "type": "array", "items": {"type": "string", "pattern": "^ev_[A-Za-z0-9]+(?![\\s\\S])"}},
         "annotations": {"description": "Free-form labels added after recording, e.g. {'experiment': 'escalation-wording'}.", "type": "object", "additionalProperties": {"type": "string"}}
       }
     }

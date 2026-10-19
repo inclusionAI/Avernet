@@ -96,10 +96,10 @@ How the types relate:
 
 | Type | What it is | Owned by | Lifecycle |
 | --- | --- | --- | --- |
-| `GenomeRevision` | One immutable version of a bot's definition: `spec` + `policy`, plus platform-written metadata (`revision`) | Genome Registry | Recorded once (from a patch or a Manifest document), never edited; only its `status` and annotations change; never deleted |
+| `GenomeRevision` | One immutable version of a bot's definition: `spec` + `policy`, plus platform-written metadata (`revision`) | Genome Registry | Recorded once (from a patch or a Manifest document), never edited; only its `status`, annotations and the append-only `evaluations` list change; never deleted |
 | `GenomeSpec` | The evolvable content of a revision: persona, skills, memory, resources, tools, engine config, script | Genome Registry (authored by owners, proposed by strategies) | Part of a revision; hashed |
 | `GenomePolicy` | The non-evolvable section: mutable genes, pins, risk overrides | Bot owner / tenant admin | Part of a revision; hashed; copied forward verbatim by the platform; no patch may touch it |
-| `RevisionMetadata` | Id, per-bot `seq`, parent, provenance, status, evidence and evaluation ids, annotations | Genome Registry (platform-written) | Written at record time; status/annotations updated later; not hashed |
+| `RevisionMetadata` | Id, per-bot `seq`, parent, provenance, status, evidence and evaluation ids, annotations | Genome Registry (platform-written) | Written at record time; status/annotations updated later, evaluation ids appended by Verification; not hashed |
 | `Provenance` | Who or what created a revision (a person, a strategy run, later a bot) | Genome Registry | Written once at record time |
 | `GenomeRef` | A named, movable pointer to a revision (`active`, `previous`, `canary`, `draft`, `candidate/<run>/<n>`) | Genome Registry; each ref has exactly one kind of mover | Moved by compare-and-swap; every move is an audited event |
 | `GenomePatch` | A typed, itemized change against a named base revision; the only thing a strategy may submit | Submitted by strategies (via [Evolution Run](06-evolution-run.md)) or humans; checked by the Registry | Stored content-addressed; its digest is the candidate id |
@@ -1103,6 +1103,8 @@ secret/PII/URL scanning, is in [08-promotion.md](08-promotion.md)):
 - **Rewrite detection.** An op that changes more than 2/5 of an existing
   text file's lines, measured with the exact longest common subsequence of
   lines (contract README §6.3), is flagged `rewrite` and raises the risk tier.
+  So is an entry a patch removes and re-adds under the same key: it is judged
+  as a replacement, not as a new entry.
 - **Limits.** Patch size, file count, and file size limits mirror Manifest
   limits.
 - **Rationale and evidence.** `rationale` is required; `evidence` is

@@ -151,7 +151,7 @@ revision_id = "sha256:" + lowercase_hex( SHA-256( JCS( {"policy": policy, "spec"
 ```
 
 Only `spec` and `policy` are hashed. `genome_schema` and the `revision`
-metadata (parent, provenance, status, `seq`, annotations) are not, so
+metadata (parent, provenance, status, `seq`, evaluations, annotations) are not, so
 identical content has the same id however and whenever it was produced
 (01-genome.md §4.4).
 
@@ -454,6 +454,17 @@ flag when `5 * (len(a) + len(b) - 2 * LCS) > 2 * (len(a) + len(b))`. A file
 that is empty before and after is never flagged. The threshold is
 `rewrite_threshold` in `risk-tiers.json` (`2/5`, written as a numerator and a
 denominator).
+
+**Replacement.** A patch that removes an entry and adds an entry with the
+same key (a resource path, a persona type, a skill name) replaces it, and
+the add is judged as a change to the existing entry, not as a new one, so a
+remove-then-add cannot avoid the rewrite flag a `file.edit` would get. The
+add is flagged `rewrite` when the entry is a file whose old and new bytes
+are both UTF-8 text and the line rule above flags them (`a` the old file, `b`
+the new); and always when the entry is a directory or a file that is not
+UTF-8 text, since no line measure applies to it. For persona files and
+skills this changes nothing (their add and remove are already T2); it
+matters for resources, whose add and remove are T1.
 
 **Guardrail touch.** Detected by the verifier integrity rules
 (07-verification.md); this contract only fixes its consequence.
