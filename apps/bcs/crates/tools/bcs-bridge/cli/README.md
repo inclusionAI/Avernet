@@ -188,6 +188,26 @@ such engines. Existing factories and configurations keep their behavior.
 - The engine id is stored with each persisted session: changing a Bot's engine
   starts new engine sessions.
 
+## Event retention and delivery guarantees
+
+Plugin mode retains events that have not yet been locally consumed. After a
+successful WebSocket write (or an encoder-defined no-frame result), it advances
+the run delivery cursor and releases that prefix. Thinking events still count
+toward both budgets. The 16,384-record / 32 MiB limits therefore bound pending
+retention rather than the cumulative length of a healthy, continuously consumed
+run. A genuinely full pending buffer still terminates the run with a retained
+`buffer_overflow` error; events are never silently evicted to make room.
+
+Local write success is **not** a BCS persistence acknowledgment. Reconnects keep
+the existing cursor and retry the unconsumed suffix; this does not introduce
+exactly-once delivery or recovery of in-flight events after a bridge process
+restart. Memory accounting is a retention budget, not an exact process RSS limit.
+
+Gateway mode remains different: a same-ID retry replays the full retained run
+history before following live events. Gateway history is not reclaimed using the
+Plugin cursor. Both modes share the increased 16,384-record budget; the byte
+budget remains 32 MiB. Gateway still applies these limits to cumulative history.
+
 ## Development
 
 ```bash

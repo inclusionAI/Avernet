@@ -381,7 +381,7 @@ async fn bridge_runtime_invokes_native_engine_and_emits_one_terminal() {
         "message":{"role":"user","content":[{"type":"text","text":"hi"}]}}),
     )
     .unwrap();
-    let RuntimeReply::Run { mut stream, .. } = runtime::dispatch(state.clone(), req).await.unwrap()
+    let RuntimeReply::Run { delivery: runtime::RunDelivery::Gateway { mut stream }, .. } = runtime::dispatch(state.clone(), req).await.unwrap()
     else {
         panic!("run missing");
     };
