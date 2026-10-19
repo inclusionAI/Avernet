@@ -155,9 +155,6 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
             ));
         }
         let downlink = parse_downlink_config(&provider.config)?;
-        if command.expected_auth_mode.is_some_and(|expected| expected != downlink.auth_mode) {
-            return Err(ServiceError::Conflict("provider authentication mode does not match".into()));
-        }
         let identity = bcs_service_api::types::provider_identity::normalize(downlink.auth_mode, &command.provider_bot_ref, command.bot_slug.as_deref()).map_err(invalid)?;
         command.provider_bot_ref = identity.provider_bot_ref.clone();
         let effective_webhook_url = self.endpoint(&provider, &downlink, &command).await?;

@@ -111,6 +111,7 @@ bot-name/bot_name compatibility are covered by route and facade contract tests.
 The internal `agents/me` route maps parent verification and bounded pagination
 through `BotSelfService`; `bots/me` accepts optional Actor and concrete Static
 Tokens. Both remain outside Gateway Principal middleware and return no-store
-responses. Scoped registration parses `bot_slug` and `expected_auth_mode`.
+responses. Scoped registration parses `bot_slug`; the core derives authentication
+mode from the Provider configuration.
 Gateway Principal checks retain the signed Bot UUID and reject a mismatching
 Actor; bootstrap additionally injects current persisted-state validation.

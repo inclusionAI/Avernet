@@ -7,8 +7,6 @@ use async_trait::async_trait;
 
 #[derive(Clone)]
 pub struct RegisterProviderBot {
-    /// Optional precondition, checked against the Provider before any mutation.
-    pub expected_auth_mode: Option<bcs_domain::ProviderAuthMode>,
     pub bot_slug: Option<String>,
     pub provider_id: String,
     /// Stable Provider identity. For AgentPass, the real agent code; persisted

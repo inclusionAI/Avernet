@@ -221,7 +221,6 @@ class Story:
             "mode": "plugin",
             "provider_bot_ref": parent,
             "bot_slug": "coder",
-            "expected_auth_mode": mode,
         }
         self.request(
             "scoped registration requires a slug",
@@ -231,13 +230,6 @@ class Story:
                 {k: v for k, v in query.items() if k != "bot_slug"}
             ),
             400,
-        )
-        self.request(
-            "scoped registration rejects stale mode",
-            "POST",
-            "/register?"
-            + urllib.parse.urlencode({**query, "expected_auth_mode": "static_bearer"}),
-            409,
         )
         second, _ = self.request(
             "register coder with scoped credential",

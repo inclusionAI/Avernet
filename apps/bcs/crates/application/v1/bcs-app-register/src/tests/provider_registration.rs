@@ -103,7 +103,6 @@ pub(super) fn scoped_payload() -> ProviderRegisterTokenPayload {
 
 fn register_command(token: String) -> RegisterBot {
     RegisterBot {
-        expected_auth_mode: None,
             bot_slug: None,
         token,
         bot_name: "Test Bot".into(),
@@ -125,10 +124,6 @@ async fn legacy_token_cannot_request_provider_registration_before_bot_writes() {
         .unwrap()
         .token;
     for command in [
-        RegisterBot {
-            expected_auth_mode: Some(bcs_domain::ProviderAuthMode::AgentPassSubbots),
-            ..register_command(token.clone())
-        },
         RegisterBot {
             bot_slug: None,
             mode: Some(ProviderRegistrationMode::Gateway),
@@ -248,7 +243,6 @@ async fn scoped_registration_uses_token_identity_and_maps_only_public_result() {
     ] {
         let view = svc
             .register_bot(RegisterBot {
-                expected_auth_mode: Some(bcs_domain::ProviderAuthMode::AgentPassSubbots),
             bot_slug: None,
                 mode,
                 provider_bot_ref: Some("ref-1".into()),
@@ -282,7 +276,6 @@ async fn scoped_registration_uses_token_identity_and_maps_only_public_result() {
         let command = calls.last().unwrap();
         assert_eq!(command.provider_id, "provider-a");
         assert_eq!(command.owner, "human_staff-1");
-        assert_eq!(command.expected_auth_mode, Some(bcs_domain::ProviderAuthMode::AgentPassSubbots));
         assert_eq!(
             command.mode,
             mode.unwrap_or(ProviderRegistrationMode::Plugin)
@@ -298,7 +291,6 @@ async fn scoped_registration_requires_nonblank_reference_before_core() {
     for reference in [None, Some(""), Some("  ")] {
         assert!(matches!(
             svc.register_bot(RegisterBot {
-                expected_auth_mode: None,
             bot_slug: None,
                 provider_bot_ref: reference.map(str::to_string),
                 ..register_command(provider_registration_token::encode(
@@ -428,7 +420,6 @@ async fn issuance_and_redemption_core_errors_are_typed_and_redacted() {
             let actual = if redeem {
                 *core.register_error.lock().unwrap() = Some(error);
                 svc.register_bot(RegisterBot {
-                    expected_auth_mode: None,
             bot_slug: None,
                     provider_bot_ref: Some("ref-1".into()),
                     ..register_command(provider_registration_token::encode(

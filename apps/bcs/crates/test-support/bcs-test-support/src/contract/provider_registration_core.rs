@@ -19,7 +19,6 @@ pub async fn provider_registration_core_service_contract_tests(
         Err(ServiceError::Forbidden(_))
     ));
     let request = RegisterProviderBot {
-        expected_auth_mode: None,
             bot_slug: None,
         provider_id: provider_id.into(),
         provider_bot_ref: "contract-upstream".into(),

@@ -31,8 +31,6 @@ pub struct RegisterTokenScope {
 /// Command for registering a bot with a register token.
 #[derive(Debug, Clone)]
 pub struct RegisterBot {
-    /// Optional precondition, checked against the Provider before any mutation.
-    pub expected_auth_mode: Option<bcs_domain::ProviderAuthMode>,
     pub bot_slug: Option<String>,
     pub token: String,
     pub bot_name: String,

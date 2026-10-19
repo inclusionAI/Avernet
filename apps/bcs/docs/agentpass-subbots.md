@@ -29,13 +29,12 @@ references, return 409. The existing environment/Provider/reference unique
 constraint protects concurrent creation. There is no registration-check API.
 Ordinary capability updates retain the stored parent and cannot replace it.
 
-Scoped registration additionally accepts optional
-`expected_auth_mode=agentpass-subbots`. A mismatch with the Provider's stored
-mode fails before any mutation; the parameter cannot change Provider settings.
-Old callers may omit it. Existing scoped/admin registration tokens remain the
-registration proof. Mandatory live AgentPass proof during registration is a
-separate enhancement. SQL Bot creation and gateway projection are atomic;
-subsequent owner-edge failures still require reconciliation, so a failed POST
+Registration derives its authentication mode solely from the Provider's stored
+configuration. Clients supply the parent reference and, for subbots, the Bot slug.
+Existing scoped/admin registration tokens remain the registration proof. Mandatory
+live AgentPass proof during registration is a separate enhancement. SQL Bot
+creation and gateway projection are atomic; subsequent owner-edge failures still
+require reconciliation, so a failed POST
 must not be assumed to mean that no Bot was created.
 
 ## Request identity
@@ -100,7 +99,7 @@ restart without restored Provider metadata, affiliated Bots fail closed instead
 of becoming ordinary implicit AgentPass Bots.
 
 Server acceptance covers sibling registration, duplicate/tombstone conflicts,
-mode mismatch without writes, parent immutability, environment isolation,
+Provider-configured identity composition, parent immutability, environment isolation,
 ambiguous ordinary identity, Actor mismatch, credential conflicts, terminal
 errors, bounded discovery, signed-state checks, Provider events and WS identity.
 Real enterprise SDK/Poolab traffic is validated in the OCB integration PRs.

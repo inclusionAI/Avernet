@@ -55,16 +55,22 @@ async fn actual_registration_rejects_duplicate_and_deleted_slug_without_replacin
 }
 
 #[tokio::test]
-async fn expected_subbot_mode_is_checked_by_registration_before_writes() {
-    let f = fixture_with_auth(None, true, None, ProviderAuthMode::AgentPass).await;
-    let mut command = request(&f, ProviderRegistrationMode::Plugin);
-    command.bot_slug = Some("reviewer".into());
-    command.expected_auth_mode = Some(ProviderAuthMode::AgentPassSubbots);
-    assert!(matches!(f.core.register(command.clone()).await, Err(ServiceError::Conflict(_))));
-    assert!(f.membership.list_provider_bot_metadata(Some(&f.provider)).await.unwrap().is_empty());
-    command.expected_auth_mode = None;
-    let ordinary = f.core.register(command).await.unwrap();
-    assert_eq!(ordinary.record.provider_bot_ref, "stable-ref");
+async fn registration_uses_provider_auth_mode() {
+    for mode in [ProviderAuthMode::AgentPass, ProviderAuthMode::AgentPassSubbots] {
+        let f = fixture_with_auth(None, true, None, mode).await;
+        let mut command = request(&f, ProviderRegistrationMode::Plugin);
+        command.bot_slug = Some("reviewer".into());
+        let result = f.core.register(command).await.unwrap();
+        assert_eq!(result.auth_mode, mode);
+        assert_eq!(result.identity.agent_code.as_deref(), Some("stable-ref"));
+        if mode == ProviderAuthMode::AgentPassSubbots {
+            assert_eq!(result.record.provider_bot_ref, "stable-ref:reviewer");
+            assert_eq!(result.identity.bot_slug.as_deref(), Some("reviewer"));
+        } else {
+            assert_eq!(result.record.provider_bot_ref, "stable-ref");
+            assert_eq!(result.identity.bot_slug, None);
+        }
+    }
 }
 
 #[tokio::test]
@@ -72,7 +78,6 @@ async fn concurrent_subbot_registration_of_same_slug_has_one_winner() {
     let f = fixture_with_auth(None, true, None, ProviderAuthMode::AgentPassSubbots).await;
     let mut command = request(&f, ProviderRegistrationMode::Plugin);
     command.bot_slug = Some("reviewer".into());
-    command.expected_auth_mode = Some(ProviderAuthMode::AgentPassSubbots);
     let (a, b) = tokio::join!(f.core.register(command.clone()), f.core.register(command));
     assert_eq!(usize::from(a.is_ok()) + usize::from(b.is_ok()), 1);
     assert!(matches!(a.err().or_else(|| b.err()), Some(ServiceError::Conflict(_))));

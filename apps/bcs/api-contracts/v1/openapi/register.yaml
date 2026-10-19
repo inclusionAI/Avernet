@@ -219,13 +219,6 @@ RegisterPath:
           minLength: 1
           maxLength: 128
           pattern: '^[A-Za-z0-9_.:-]+$'
-      - name: expected_auth_mode
-        in: query
-        required: false
-        description: Optional Provider authentication-mode precondition for scoped registration. A mismatch returns 409 before any write; it never changes the Provider mode. Legacy v1 tokens reject it.
-        schema:
-          type: string
-          enum: [static_bearer, provider_admin, agentpass, agentpass-subbots]
       - name: bot_slug
         in: query
         required: false
