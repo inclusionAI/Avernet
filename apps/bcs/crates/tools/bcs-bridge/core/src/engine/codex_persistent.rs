@@ -122,7 +122,7 @@ impl NativeServer {
         }
         if guard.is_none() {
             // Raw stdout is traced after demultiplexing, under the current run.
-            let mut process = CliSession::spawn(bin, args, &req.cwd, &[],
+            let mut process = CliSession::spawn(bin, args, &req.cwd, &req.env,
                 req.trace.as_ref().map(TraceContext::shared_process)).await.map_err(TurnError::Spawn)?;
             process.disable_raw_trace();
             let mut connection = CodexConnection::Process(process);

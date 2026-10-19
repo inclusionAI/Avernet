@@ -21,6 +21,10 @@ const LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Runtime files of one bridge instance, all under `directory` (by default
 /// `~/.bcn-bridge`). Separate directories hold independent instances.
 struct Paths { directory: PathBuf }
+pub(crate) fn registration_guard(directory: &Path) -> anyhow::Result<File> {
+    let paths = Paths::new(directory); paths.create()?;
+    paths.lock(true)?.context("Stop the bridge before adding a Bot")
+}
 impl Paths {
     fn new(directory: &Path) -> Self { Self { directory: directory.to_owned() } }
     fn file(&self, name: &str) -> PathBuf { self.directory.join(name) }
@@ -88,11 +92,19 @@ pub fn reserve_registration(runtime_dir: &Path) -> anyhow::Result<File> {
     paths.lock(true)?.context("A bridge instance is running; stop it with bcs-bridge stop before --replace-existing")
 }
 
-pub async fn run(config: ProviderConfig, engines: &EngineRegistry, config_path: &Path, runtime_dir: &Path) -> anyhow::Result<()> {
+pub async fn run(_config: ProviderConfig, engines: &EngineRegistry, config_path: &Path, runtime_dir: &Path, credentials: &dyn crate::credentials::CredentialSource, cwd_override: Option<&Path>) -> anyhow::Result<()> {
     let paths = Paths::new(runtime_dir);
     paths.create()?;
     let lock = paths.lock(true)?.context("A bridge instance is already starting or running; use bcs-bridge status or stop")?;
     let instance = Instance { paths, _lock: lock };
+    // Registration and startup share the lock; reload only after acquiring it.
+    let mut config = crate::config::load_runtime(config_path, credentials)?;
+    if let Some(cwd) = cwd_override {
+        if config.bots.len() != 1 || !matches!(config.bots[0].engine.as_str(), "codex" | "codex-desktop") {
+            anyhow::bail!("--cwd requires a configuration containing one native Codex Bot");
+        }
+        config.bots[0].cwd = cwd.canonicalize().context("Cannot resolve requested working directory")?;
+    }
     let socket = instance.paths.file("bridge.sock");
     match fs::remove_file(&socket) {
         Ok(()) => {},

@@ -53,6 +53,7 @@ pub(crate) fn load_runtime_with_settings(path: &Path, credentials: &dyn Credenti
 /// Supply the resolved webhook credential in memory; never persist the runtime copy.
 pub fn runtime(table: &toml::Table, path: &Path, webhook_token: Option<&str>) -> anyhow::Result<ProviderConfig> {
     let mut runtime = table.clone();
+    runtime.remove("registration");
     // Read old configuration files, but never trust their credential as a fallback.
     runtime.remove("bcs_to_provider_token");
     if let Some(token) = webhook_token {
@@ -66,6 +67,21 @@ pub struct Bootstrap {
     pub settings: RegistrationSettings,
     pub original: Option<String>,
     pub previous: Option<toml::Table>,
+    pub document: toml::Table,
+}
+
+pub fn read_for_registration(path: &Path, auth: &str, provider: &str, mode: &str) -> anyhow::Result<Bootstrap> {
+    if auth != "agentpass-subbots" { return read_bootstrap(path); }
+    let original = read_existing(path)?;
+    let (settings, table) = parse(original.as_deref().unwrap_or(""))?;
+    if !table.contains_key("provider_id") && !table.contains_key("bot") { return read_bootstrap(path); }
+    if auth != "agentpass-subbots"
+        || table.get("provider_auth").and_then(toml::Value::as_str) != Some(auth)
+        || table.get("provider_id").and_then(toml::Value::as_str) != Some(provider)
+        || table.get("mode").and_then(toml::Value::as_str) != Some(mode) {
+        bail!("Only agentpass-subbots configurations with the same Provider and connection mode can append Bots");
+    }
+    Ok(Bootstrap { settings, original, previous: None, document: table })
 }
 
 pub fn read_bootstrap(path: &Path) -> anyhow::Result<Bootstrap> {
@@ -82,11 +98,11 @@ pub fn read_registration_source(path: &Path, replace_existing: bool) -> anyhow::
         if table.get("provider_id").and_then(toml::Value::as_str).is_none()
             || !table.get("bot").and_then(toml::Value::as_array).is_some_and(|bots| !bots.is_empty())
         { bail!("Existing runtime configuration is incomplete; review it before replacing"); }
-        return Ok(Bootstrap { settings, original, previous: Some(table) });
+        return Ok(Bootstrap { settings, original, previous: Some(table), document: toml::Table::new() });
     }
     table.remove("bcs_to_provider_token");
     if !table.is_empty() { bail!("Before registration, configuration may contain only [registration] settings"); }
-    Ok(Bootstrap { settings, original, previous: None })
+    Ok(Bootstrap { settings, original, previous: None, document: toml::Table::new() })
 }
 
 fn read_existing(path: &Path) -> anyhow::Result<Option<String>> {
@@ -109,6 +125,15 @@ pub struct PreparedConfig {
 }
 
 impl PreparedConfig {
+    pub fn save_recovery(mut self, text: &str, reason: &str) -> anyhow::Result<()> {
+        if self.temporary.write_all(text.as_bytes()).is_err() {
+            return recovery(self.temporary, "writing recovery configuration failed; file may be incomplete");
+        }
+        if self.temporary.as_file().sync_all().is_err() {
+            return recovery(self.temporary, "syncing recovery configuration failed; durability is not guaranteed");
+        }
+        recovery(self.temporary, reason)
+    }
     pub fn new(path: &Path, original: Option<String>) -> anyhow::Result<Self> {
         let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
         let mut builder = fs::DirBuilder::new();

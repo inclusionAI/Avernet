@@ -12,6 +12,8 @@ use tracing::{Level, debug, info};
 use tracing_subscriber::FmtSubscriber;
 
 mod client;
+mod caller_context;
+pub use caller_context::CallerContext;
 pub mod oauth;
 
 pub use client::{

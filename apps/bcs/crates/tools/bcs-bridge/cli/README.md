@@ -290,3 +290,22 @@ Gateway replacement may omit `--webhook-url` when saved metadata belongs to the
 same Provider, API endpoint, reference, engine and gateway mode. Local listener
 updates retain that endpoint without administrator authentication or network calls.
 New bindings still require an explicit webhook URL.
+
+
+### AgentPass sibling Bots
+
+Distributions that provide an `agentpass-subbots` identity resolver can register
+multiple Bots under one verified parent. Use `--provider-auth agentpass-subbots`
+and optionally `--bot-slug reviewer`. When omitted, the bridge generates a slug
+and persists it before the first POST so retries keep the same identity.
+
+The bridge sends a complete `provider_bot_ref=<parent>:<slug>` on both scoped
+registration routes. It sends neither `bot_slug` nor `expected_auth_mode` as a
+request parameter. The server selects behavior from its Provider configuration,
+parses the last colon and preserves the full ref. Slugs must match
+`[a-z0-9][a-z0-9_-]{0,31}`; the complete ref is limited to 128 bytes.
+
+Successful registration appends a Bot with its own UUID and Static Token to the
+same bridge config. Runtime child processes receive a per-Bot caller context;
+`bcs-cli` forwards its `X-BCN-Actor-Bot-Id`. A Static Token selects its own Bot,
+while a parent AgentPass token requires an explicit Actor for subbots.

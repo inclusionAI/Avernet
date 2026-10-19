@@ -24,7 +24,8 @@ for raw in sys.stdin:
     method = request.get("method")
     params = request.get("params") or {}
     with open(log_path, "a") as log:
-        log.write(json.dumps(dict(request, pid=os.getpid())) + "\n")
+        log.write(json.dumps(dict(request, pid=os.getpid(),
+            actor=os.environ.get("BCN_ACTOR_BOT_ID"))) + "\n")
     if MOCK_DELAY:
         time.sleep(MOCK_DELAY)
     response = {}

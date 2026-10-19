@@ -85,10 +85,11 @@ impl RegistrationClient {
         Ok(())
     }
 
-    pub(crate) async fn register(&self, token: &str, name: &str, agent_code: &str, mode: &str, webhook: Option<&str>, provider_id: &str) -> anyhow::Result<BotRegistration> {
+    pub(crate) async fn register(&self, token: &str, name: &str, agent_code: &str, mode: &str, webhook: Option<&str>, provider_id: &str, slug: Option<&str>) -> anyhow::Result<BotRegistration> {
         let mut url = self.endpoint(if self.legacy_registration { "register" } else { "openapi/v1/collaboration/register" })?;
+        let provider_bot_ref = composed_ref(agent_code, slug)?;
         let mut pairs = vec![
-            ("token", token), ("bot-name", name), ("provider_bot_ref", agent_code), ("mode", mode),
+            ("token", token), ("bot-name", name), ("provider_bot_ref", provider_bot_ref.as_str()), ("mode", mode),
         ];
         if let Some(webhook) = webhook { pairs.push(("webhook_url", webhook)); }
         url.query_pairs_mut().extend_pairs(pairs);
@@ -111,11 +112,26 @@ impl RegistrationClient {
         if [&registration.bot_uuid, &registration.bot_token, &registration.registration.provider_id]
             .iter().any(|value| value.trim().is_empty())
             || registration.registration.provider_id != provider_id
-            || registration.registration.provider_bot_ref != agent_code || registration.registration.mode != mode {
+            || registration.registration.provider_bot_ref != provider_bot_ref
+            || registration.registration.mode != mode
+            || slug.is_some_and(|s| registration.registration.auth_mode.as_deref() != Some("agentpass-subbots")
+                || registration.registration.agent_code.as_deref() != Some(agent_code)
+                || registration.registration.bot_slug.as_deref() != Some(s)) {
             bail!("Registration succeeded but returned invalid credentials or a mismatched binding");
         }
         Ok(registration)
     }
+}
+
+/// Compose and validate before marking the pending registration as submitted.
+pub(super) fn composed_ref(parent: &str, slug: Option<&str>) -> anyhow::Result<String> {
+    if !super::valid_provider_bot_ref(parent) { bail!("Invalid Provider identity"); }
+    let reference = if let Some(slug) = slug {
+        super::pending::validate_slug(slug)?;
+        format!("{parent}:{slug}")
+    } else { parent.to_owned() };
+    if reference.len() > 128 { bail!("Composed provider_bot_ref exceeds 128 bytes"); }
+    Ok(reference)
 }
 
 async fn body(mut response: Response, operation: &str) -> anyhow::Result<Vec<u8>> {
@@ -140,6 +156,12 @@ pub struct RegistrationScope {
     pub provider_id: String,
     pub provider_bot_ref: String,
     pub mode: String,
+    #[serde(default)]
+    pub auth_mode: Option<String>,
+    #[serde(default)]
+    pub agent_code: Option<String>,
+    #[serde(default)]
+    pub bot_slug: Option<String>,
 }
 
 #[cfg(test)]
@@ -201,7 +223,7 @@ mod tests {
         }.with_headers(headers);
         let client = if legacy { client.with_legacy_registration() } else { client };
         client.get("api/v1/collaboration/bots/me", "Identity", "Request failed").await.unwrap();
-        client.register("test-register-token", "Test Bot", "agent_test", "plugin", None, "prv_test").await.unwrap();
+        client.register("test-register-token", "Test Bot", "agent_test", "plugin", None, "prv_test", None).await.unwrap();
         server.join().unwrap();
         }
     }

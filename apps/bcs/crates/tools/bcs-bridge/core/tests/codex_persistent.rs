@@ -80,6 +80,39 @@ async fn consecutive_turns_reuse_process_and_loaded_thread_without_resuming() {
 }
 
 #[tokio::test]
+async fn persistent_servers_keep_each_bots_caller_environment_across_turns() {
+    let temp = tempfile::tempdir().unwrap();
+    let log_a = temp.path().join("actor-a.jsonl");
+    let log_b = temp.path().join("actor-b.jsonl");
+    async fn run_actor(engine: Arc<CodexAppServer>, actor: &str) {
+        let mut session = None;
+        for _ in 0..2 {
+            let mut req = TurnRequest::new(actor, "hello", "/tmp", Arc::new(Observer));
+            req.engine_session_id = session;
+            req.env = vec![("BCN_ACTOR_BOT_ID".into(), actor.into()),
+                ("BCN_AUTH_MODE".into(), "agentpass-subbots".into())];
+            let (tx, mut rx) = tokio::sync::mpsc::channel(128);
+            let drain = tokio::spawn(async move { while rx.recv().await.is_some() {} });
+            let outcome = tokio::time::timeout(Duration::from_secs(10),
+                engine.run_turn(req, tx, CancellationToken::new())).await.unwrap().unwrap();
+            drain.await.unwrap();
+            session = outcome.engine_session_id;
+        }
+        engine.shutdown().await;
+    }
+    tokio::join!(run_actor(engine(&log_a), "bot_A"), run_actor(engine(&log_b), "bot_B"));
+    for (log, actor) in [(&log_a, "bot_A"), (&log_b, "bot_B")] {
+        let calls = requests(log);
+        assert!(!calls.is_empty());
+        assert!(calls.iter().all(|call| call["actor"] == actor));
+        assert_eq!(calls.iter().filter(|call| call["method"] == "initialize").count(), 1);
+        assert_eq!(calls.iter().filter(|call| call["method"] == "turn/start").count(), 2);
+        assert!(calls.iter().all(|call| call["pid"] == calls[0]["pid"]));
+    }
+    assert_ne!(requests(&log_a)[0]["pid"], requests(&log_b)[0]["pid"]);
+}
+
+#[tokio::test]
 async fn crash_fails_current_turn_and_next_request_restarts_and_resumes() {
     let temp = tempfile::tempdir().unwrap();
     let log = temp.path().join("rpc.jsonl");

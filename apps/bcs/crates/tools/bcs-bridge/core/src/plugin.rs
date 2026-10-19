@@ -57,9 +57,14 @@ enum ConnectionFailure {
     Kicked,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+struct BotIdentityFailure(String);
+
 /// Run one independent client per configured Bot. Shutdown cancels and reaps
 /// active engine turns; an ordinary socket error only reconnects its client.
 pub async fn serve(state: Arc<AppState>, shutdown: CancellationToken) -> anyhow::Result<()> {
+    let isolate_bot_identity = state.config.provider_auth.as_deref() == Some("agentpass-subbots");
     let config = state.config.plugin.clone().context("plugin config required")?;
     let stop = shutdown.child_token();
     let mut clients = JoinSet::new();
@@ -75,8 +80,11 @@ pub async fn serve(state: Arc<AppState>, shutdown: CancellationToken) -> anyhow:
         match result {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
+                let isolate = isolate_bot_identity && error.is::<BotIdentityFailure>();
                 if first_error.is_none() { first_error = Some(error); }
-                stop.cancel();
+                if isolate {
+                    tracing::warn!("Upstream Bot identity failed; sibling Bot clients remain running");
+                } else { stop.cancel(); }
             }
             Err(error) => {
                 if first_error.is_none() { first_error = Some(anyhow!("upstream client task failed: {error}")); }
@@ -93,7 +101,7 @@ impl BotClient {
         let bot_id = bot.bot_id.clone().context("plugin bot_id required")?;
         let saved = state.sessions.load_identity(&config.url, &bot.provider_bot_ref).await?;
         let identity = match saved {
-            Some(identity) if identity.bot_id != bot_id => return Err(anyhow!("stored identity does not match configured bot_id")),
+            Some(identity) if identity.bot_id != bot_id => return Err(anyhow!(BotIdentityFailure("stored identity does not match configured bot_id".into()))),
             Some(identity) => identity,
             None => ConnectionIdentity { bot_id, token:bot.token.clone().unwrap_or_default() },
         };
@@ -229,13 +237,13 @@ impl BotClient {
             }
             let retry = response.error.as_ref().is_some_and(|error| error.retryable || error.code == "bot_id_conflict");
             return Err(if retry { ConnectionFailure::Retry("bot.connect temporarily rejected") }
-                else { ConnectionFailure::Fatal(anyhow!("BCS rejected bot.connect; check Bot identity, token and protocol")) });
+                else { ConnectionFailure::Fatal(anyhow!(BotIdentityFailure("BCS rejected bot.connect; check Bot identity, token and protocol".into()))) });
         }
         let connected: BotConnectResponse = serde_json::from_value(response.payload.unwrap_or(Value::Null))
-            .map_err(|_| ConnectionFailure::Fatal(anyhow!("invalid bot.connect response")))?;
+            .map_err(|_| ConnectionFailure::Fatal(anyhow!(BotIdentityFailure("invalid bot.connect response".into()))))?;
         if !matches!(connected.protocol_version, 2 | 3)
             || connected.bot_uuid != self.identity.bot_id || connected.token.trim().is_empty() {
-            return Err(ConnectionFailure::Fatal(anyhow!("bot.connect returned a mismatched identity, protocol or empty token")));
+            return Err(ConnectionFailure::Fatal(anyhow!(BotIdentityFailure("bot.connect returned a mismatched identity, protocol or empty token".into()))));
         }
         self.protocol_v3 = connected.protocol_version == 3;
         if self.bot.engine == "qwenwork" && !connected.capabilities.as_ref()

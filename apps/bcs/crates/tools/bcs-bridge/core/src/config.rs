@@ -25,6 +25,8 @@ fn default_connect_timeout_ms() -> u64 { 10_000 }
 #[serde(deny_unknown_fields)]
 pub struct BotConfig {
     pub provider_bot_ref: String,
+    pub agent_code: Option<String>,
+    pub bot_slug: Option<String>,
     pub bot_id: Option<String>,
     pub token: Option<String>,
     /// Engine id resolved through the [`crate::engine::EngineRegistry`].
@@ -59,6 +61,8 @@ impl std::fmt::Debug for BotConfig {
 #[serde(deny_unknown_fields)]
 pub struct ProviderConfig {
     pub provider_id: String,
+    pub provider_auth: Option<String>,
+    pub api_url: Option<String>,
     #[serde(default)]
     pub mode: ConnectionMode,
     pub listen: Option<SocketAddr>,
@@ -90,6 +94,16 @@ pub enum ConfigError {
 }
 
 impl ProviderConfig {
+    /// Applied to each engine subprocess; never mutates the bridge environment.
+    pub fn execution_env(&self, bot: &BotConfig) -> Vec<(String, String)> {
+        let mut env = Vec::new();
+        if self.provider_auth.as_deref() == Some("agentpass-subbots") {
+            env.push(("BCN_AUTH_MODE".into(), "agentpass-subbots".into()));
+            env.push(("BCN_ACTOR_BOT_ID".into(), bot.bot_id.clone().unwrap_or_default()));
+        }
+        if let Some(url) = &self.api_url { env.push(("BCS_API_BASE_URL".into(), url.clone())); }
+        env
+    }
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
         let text = std::fs::read_to_string(path)?;
         Self::from_toml(&text, path)
@@ -114,6 +128,16 @@ impl ProviderConfig {
         }
         let mut refs = HashSet::new();
         for bot in &self.bots {
+            if self.provider_auth.as_deref() == Some("agentpass-subbots") {
+                let parent = bot.agent_code.as_deref().filter(|s| !s.is_empty())
+                    .ok_or(ConfigError::Invalid("subbots require agent_code"))?;
+                let slug = bot.bot_slug.as_deref().filter(|s| !s.is_empty())
+                    .ok_or(ConfigError::Invalid("subbots require bot_slug"))?;
+                if bot.provider_bot_ref != format!("{parent}:{slug}")
+                    || bot.bot_id.as_deref().is_none_or(|s| s.is_empty()) {
+                    return Err(ConfigError::Invalid("invalid subbot identity"));
+                }
+            }
             if bot.provider_bot_ref.trim().is_empty() || !refs.insert(&bot.provider_bot_ref) {
                 return Err(ConfigError::Invalid("provider_bot_ref must be nonempty and unique"));
             }

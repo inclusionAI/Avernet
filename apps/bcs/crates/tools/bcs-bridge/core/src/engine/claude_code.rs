@@ -69,6 +69,7 @@ impl Default for ClaudeCodeFactory {
 }
 
 impl crate::engine::EngineFactory for ClaudeCodeFactory {
+    fn supports_caller_env(&self) -> bool { true }
     fn id(&self) -> &str { &self.id }
     fn default_bin(&self) -> &str { &self.default_bin }
     /// The Claude driver forwards `permission_mode` as its protocol flag.
@@ -1099,7 +1100,7 @@ impl Engine for ClaudeCode {
             args.push(model.clone());
         }
 
-        let mut cli = CliSession::spawn(&self.bin, &args, &req.cwd, &[], req.trace.clone())
+        let mut cli = CliSession::spawn(&self.bin, &args, &req.cwd, &req.env, req.trace.clone())
             .await
             .map_err(TurnError::Spawn)?;
 

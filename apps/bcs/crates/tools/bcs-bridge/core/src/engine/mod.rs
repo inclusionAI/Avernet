@@ -63,6 +63,7 @@ pub struct TurnRequest {
     /// turn fails with an explicitly named error instead of wedging until
     /// the outer run deadline with no signal to BCS.
     pub idle_timeout: Option<std::time::Duration>,
+    pub env: Vec<(String, String)>,
 }
 
 impl TurnRequest {
@@ -84,6 +85,7 @@ impl TurnRequest {
             interactions: InteractionRegistry::new(),
             trace: None,
             idle_timeout: None,
+            env: Vec::new(),
         }
     }
 }
@@ -140,6 +142,8 @@ pub trait Engine: Send + Sync {
 
 /// Creates [`Engine`]s for bots configured with `engine = "<id>"`.
 pub trait EngineFactory: Send + Sync {
+    /// Whether each execution can pass its Bot context to engine tool children.
+    fn supports_caller_env(&self) -> bool { false }
     /// Configuration id; also recorded with persisted engine sessions, so a
     /// bot keeps its sessions only while its engine id is unchanged.
     fn id(&self) -> &str;
@@ -192,6 +196,9 @@ impl EngineRegistry {
         let factory = self.get(&bot.engine).ok_or_else(|| format!(
             "unknown engine '{}' for bot '{}'; available engines: {}",
             bot.engine, bot.provider_bot_ref, self.ids().collect::<Vec<_>>().join(", ")))?;
+        if bot.bot_slug.is_some() && !factory.supports_caller_env() {
+            return Err(format!("engine '{}' cannot propagate subbot identity", bot.engine));
+        }
         let bin = if factory.requires_bin() {
             bot.engine_bin.clone().unwrap_or_else(|| PathBuf::from(factory.default_bin()))
         } else {
@@ -271,6 +278,8 @@ mod tests {
 
     fn bot(engine: &str) -> BotConfig {
         BotConfig {
+            agent_code: None,
+            bot_slug: None,
             bot_id: None,
             token: None,
             provider_bot_ref: "worker".into(),
