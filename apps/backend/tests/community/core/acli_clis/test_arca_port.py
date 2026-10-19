@@ -87,7 +87,10 @@ async def test_uninstall_reports_whether_anything_was_removed() -> None:
     ("resolver_error", "transport", "code"),
     [
         (RuntimeError("no binding"), _Transport(), "not_running"),
-        (None, _Transport(error=DeviceAdapterEndpointNotFoundError("nope")), "engine_unsupported"),
+        (None, _Transport(error=DeviceAdapterEndpointNotFoundError(
+            '{"detail":"Not Found"}', standard_route_missing=True)), "engine_outdated"),
+        (None, _Transport(error=DeviceAdapterEndpointNotFoundError("gateway: no route")),
+         "engine_unreachable"),
         (None, _Transport(error=DeviceAdapterHTTPStatusError(501, "x")), "engine_unsupported"),
         (None, _Transport(error=DeviceAdapterHTTPStatusError(400, "x")), "invalid_input"),
         (None, _Transport(error=DeviceAdapterHTTPStatusError(503, "x")), "engine_unreachable"),

@@ -156,7 +156,10 @@ before the `{bot_id}` wildcard. It calls the market API directly
 ?status=published&q=<keyword>` answers `{success, data: [ … ]}` with every match
 at once, so paging is done in the backend. The URL is deployment config (prod
 and pre differ); empty means `501` not configured.
-Status mapping: `not_running` → `409`; `engine_unsupported` → `501`;
+Status mapping: `not_running` → `409`; `engine_outdated` (the engine's own
+route-miss `404`: a supported engine type whose build predates acli) → `409`;
+`engine_unsupported` (an unsupported engine type, or an engine `501`) → `501`;
+a `404` from the gateway rather than the engine → `engine_unreachable`;
 `not_found`, `cli_name_mismatch` → `422`; `install_failed`,
 `uninstall_failed`, `engine_unreachable`, `timeout` → `502`; guard errors reuse
 the caller-identity statuses. Registration everywhere the call-type route

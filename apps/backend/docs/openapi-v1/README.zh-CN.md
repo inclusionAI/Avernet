@@ -977,12 +977,12 @@ Spec：`apps/backend/specs/2026-10-15-openapi-v1-acli-clis/`。
 | 状态码 | 场景 | `data` |
 |---|---|---|
 | 404 | 删除 bot 没有的 CLI | — |
-| 409 | 已授权；删除默认 CLI；bot 不是 `ACTIVE` 或无运行中的容器 | bot/容器场景为 `{code, reason}`（`not_running`） |
+| 409 | 已授权；删除默认 CLI；bot 不是 `ACTIVE` 或无运行中的容器（`not_running`）；bot 的引擎版本早于 acli，需要更新或重启（`engine_outdated`） | bot/容器场景为 `{code, reason}` |
 | 422 | 传入别名（`di`） | `{market_name}` |
 | 422 | acli 拒绝请求（通常是名称不存在） | `{code, reason}` |
 | 423 | 未持有编辑锁 | — |
-| 501 | bot 的引擎不支持 acli（仅 openclaw 与 claude_code 支持） | — |
-| 502 | acli 或容器调用失败；Passport 写入失败或未持久化 | acli 场景为 `{code, reason}` |
+| 501 | bot 的引擎类型不支持 acli（仅 openclaw 与 claude_code 支持），或引擎返回 `501` | — |
+| 502 | acli 或容器调用失败（网关而非引擎返回的 `404` 记为 `engine_unreachable`）；Passport 写入失败或未持久化 | acli 场景为 `{code, reason}` |
 
 安装目录由引擎决定（两种引擎均为 `/home/admin/.agentclaw/bin`），位于持久化存储且在引擎 `PATH` 上，
 因此重启后仍在、也无需重启即可使用；平台只给出工具名。删除 CLI 时保留其 caller/owner 选择，再次添加会恢复

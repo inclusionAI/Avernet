@@ -114,8 +114,21 @@ class ArcaAcliPort(AcliPort):
                 context.conn_info, method, path, body=body, params=params, timeout=timeout,
             )
         except DeviceAdapterEndpointNotFoundError as error:
+            if error.standard_route_missing:
+                # The engine itself answered "no such route": its build predates
+                # acli, and nothing ran. Its engine type still supports acli.
+                raise AcliPortError(
+                    "engine_outdated",
+                    "the bot's engine version has no acli endpoints; update or restart the bot",
+                ) from error
+            # Any other 404 came from the hop (gateway, proxy, a recycled
+            # container), so whether the engine ran anything is unknown.
+            logger.warning(
+                "acli_port_unreachable bot_id=%s path=%s error_type=%s status=404",
+                bot_id, path, type(error).__name__,
+            )
             raise AcliPortError(
-                "engine_unsupported", "the bot's engine has no acli endpoints"
+                "engine_unreachable", "the engine could not be reached (HTTP 404)"
             ) from error
         except DeviceAdapterHTTPStatusError as error:
             if error.status_code == 501:

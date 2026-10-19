@@ -67,6 +67,15 @@ class AcliBotNotRunningError(AcliContainerError):
     """The bot has no running container to run acli in."""
 
 
+class AcliEngineOutdatedError(AcliContainerError):
+    """The bot's engine type supports acli, but its running build predates it.
+
+    The engine answered its framework's own "no such route" 404, so nothing ran
+    in the container. Updating or restarting the bot fixes it, so this is a
+    state of the bot, not ``AcliEngineUnsupportedError``.
+    """
+
+
 class AcliRequestRejectedError(AcliContainerError):
     """acli rejected the request itself — most often a name the market lacks."""
 
@@ -124,6 +133,7 @@ __all__ = [
     "AcliCliNotGrantedError",
     "AcliContainerError",
     "AcliDefaultCliError",
+    "AcliEngineOutdatedError",
     "AcliEngineUnsupportedError",
     "AcliGrantSyncError",
     "AcliMarketNotConfiguredError",

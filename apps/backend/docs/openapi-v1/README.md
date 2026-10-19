@@ -1727,12 +1727,12 @@ error but landed counts as done.
 | Status | When | `data` |
 |---|---|---|
 | 404 | Removing a CLI the bot does not have | — |
-| 409 | Already granted; removing a default CLI; the bot is not `ACTIVE` or has no running container | `{code, reason}` (`not_running`) for the bot/container case |
+| 409 | Already granted; removing a default CLI; the bot is not `ACTIVE` or has no running container (`not_running`); the bot's engine build predates acli and needs an update or restart (`engine_outdated`) | `{code, reason}` for the bot/container cases |
 | 422 | Passing an alias (`di`) | `{market_name}` |
 | 422 | acli rejected the request (usually an unknown name) | `{code, reason}` |
 | 423 | Edit lock not held | — |
-| 501 | The bot's engine has no acli (only openclaw and claude_code do) | — |
-| 502 | acli or the container hop failed; the Passport write failed or did not persist | `{code, reason}` for acli |
+| 501 | The bot's engine type has no acli (only openclaw and claude_code do), or the engine answered `501` | — |
+| 502 | acli or the container hop failed (a `404` from the gateway rather than the engine is `engine_unreachable`); the Passport write failed or did not persist | `{code, reason}` for acli |
 
 Where tools are installed is the engine's choice (`/home/admin/.agentclaw/bin`
 in both engines), on persisted storage and on the engine's `PATH`, so tools

@@ -19,6 +19,7 @@ from agentclaw.community.core.acli_clis.errors import (
     AcliCliNotGrantedError,
     AcliContainerError,
     AcliDefaultCliError,
+    AcliEngineOutdatedError,
     AcliEngineUnsupportedError,
     AcliGrantSyncError,
     AcliMarketUnavailableError,
@@ -675,13 +676,37 @@ async def test_a_stale_lock_epoch_is_refused() -> None:
     assert [c[0] for c in container.calls] == ["install"]
 
 
-async def test_engine_without_endpoints_reads_as_unsupported() -> None:
+async def test_an_engine_that_refuses_acli_reads_as_unsupported() -> None:
     container = _Container()
-    container.install_error = AcliPortError("engine_unsupported", "old engine")
+    container.install_error = AcliPortError("engine_unsupported", "engine answered 501")
     service, *_ = _service(container=container)
 
     with pytest.raises(AcliEngineUnsupportedError):
         await _add(service)
+
+
+async def test_an_outdated_engine_is_not_called_unsupported_and_changes_nothing() -> None:
+    """A supported engine type on an old build: the bot needs an update, not a refusal."""
+    container = _Container()
+    container.install_error = AcliPortError("engine_outdated", "old build")
+    service, agentpass, _, _ = _service(container=container)
+
+    with pytest.raises(AcliEngineOutdatedError) as caught:
+        await _add(service)
+
+    assert caught.value.code == "engine_outdated"
+    assert agentpass.codes == ["dataphin"]
+
+
+async def test_remove_on_an_outdated_engine_regrants_because_nothing_ran() -> None:
+    container = _Container(installed={"yuque-cli"})
+    container.uninstall_errors = [AcliPortError("engine_outdated", "old build")]
+    service, agentpass, _, _ = _service(container=container, granted=["dataphin", "yuque-cli"])
+
+    with pytest.raises(AcliEngineOutdatedError):
+        await _remove(service)
+
+    assert agentpass.codes == ["dataphin", "yuque-cli"]
 
 
 async def test_grant_that_landed_despite_an_error_is_a_success() -> None:

@@ -174,6 +174,7 @@ from agentclaw.community.api.acli_cli_service import (
     AcliCliNameMismatchError,
     AcliCliNotGrantedError,
     AcliDefaultCliError,
+    AcliEngineOutdatedError,
     AcliEngineUnsupportedError,
     AcliGrantSyncError,
     AcliMarketNotConfiguredError,
@@ -393,6 +394,9 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     AcliCliNameMismatchError: (422, "Use the tool's acli market name"),
     AcliEngineUnsupportedError: (501, "This bot's engine does not support acli CLIs"),
     AcliBotNotRunningError: (409, "The bot has no running container"),
+    AcliEngineOutdatedError: (
+        409, "This bot's engine version does not support acli CLIs yet; update or restart the bot"
+    ),
     AcliRequestRejectedError: (422, "acli rejected the request"),
     AcliOperationFailedError: (502, "The acli operation failed"),
     AcliGrantSyncError: (502, "The CLI grant could not be synchronized"),

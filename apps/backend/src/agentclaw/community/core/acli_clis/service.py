@@ -26,6 +26,7 @@ from agentclaw.community.core.acli_clis.errors import (
     AcliCliNameMismatchError,
     AcliCliNotGrantedError,
     AcliBotNotRunningError,
+    AcliEngineOutdatedError,
     AcliDefaultCliError,
     AcliEngineUnsupportedError,
     AcliGrantSyncError,
@@ -589,6 +590,8 @@ def _container_error(error: AcliPortError) -> DomainError:
         return AcliEngineUnsupportedError()
     if error.code == "not_running":
         return AcliBotNotRunningError(error.code, error.message)
+    if error.code == "engine_outdated":
+        return AcliEngineOutdatedError(error.code, error.message)
     if error.code in _REJECTED_CODES:
         return AcliRequestRejectedError(error.code, error.message)
     return AcliOperationFailedError(error.code, error.message)
