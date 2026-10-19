@@ -11,7 +11,9 @@ from agentclaw.community.core.bot_management.engines.aicoding.strategy import Ai
 from agentclaw.community.core.bot_management.engines.provisioning import BotProvisioningContext
 from agentclaw.community.core.devices.errors import InvalidDeviceStatusError
 from agentclaw.community.core.devices.services.device_service_router import DeviceServiceRouter
-from agentclaw.community.core.devices.errors import RestartBackupTargetChanged
+from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import (
+    BoundArcaRestartExecutor, RestartBackupTargetChanged,
+)
 from tests.community.core.bot_management.aicoding.test_restart_backup import OPERATION, response
 from tests.community.core.devices.services.test_device_service import _make_service, _make_record
 
@@ -128,16 +130,16 @@ def test_missing_provider_never_falls_back_to_another_provider(target):
     s = target
     s.router._providers.clear()
     with pytest.raises(RestartBackupTargetChanged):
-        s.router.prepare_arca_restart_executor(
-            binding_id=42, device_id=s.record.device_id, sandbox_id='old-sandbox@8',
+        BoundArcaRestartExecutor(
+            devices=s.router, binding_id=42, device_id=s.record.device_id, sandbox_id='old-sandbox@8',
         )
     s.provider._exec_shell_new.assert_not_called()
 
 
 def test_executor_keeps_snapshot_when_props_are_mutated(target):
     s = target
-    executor = s.router.prepare_arca_restart_executor(
-        binding_id=42, device_id=s.record.device_id, sandbox_id='old-sandbox@8',
+    executor = BoundArcaRestartExecutor(
+        devices=s.router, binding_id=42, device_id=s.record.device_id, sandbox_id='old-sandbox@8',
     )
     original = deepcopy(s.record.device_props)
     s.record.device_props['sandbox_id'] = 'new-sandbox'
@@ -159,3 +161,19 @@ def test_missing_sandbox_is_degraded_but_later_target_appearance_blocks(target, 
     with pytest.raises(RestartBackupTargetChanged):
         verify()
     s.provider._exec_shell_new.assert_not_called()
+
+
+def test_running_backup_polls_before_final_verification(target):
+    s = target
+    committed = s.provider._exec_shell_new.return_value
+    s.provider._exec_shell_new.side_effect = [response('running'), committed, committed]
+    with patch.object(backup.time, 'sleep') as sleep:
+        verify = prepare(s)
+    assert s.provider._exec_shell_new.call_count == 2
+    sleep.assert_called_once_with(backup.POLL_SECONDS)
+    verify()
+    assert s.provider._exec_shell_new.call_count == 3
+    for call in s.provider._exec_shell_new.call_args_list:
+        assert call.kwargs['device'].device_props == {'sandbox_id': 'old-sandbox@8'}
+        assert OPERATION in call.kwargs['shell_cmd']
+    s.runtime.assert_not_called()

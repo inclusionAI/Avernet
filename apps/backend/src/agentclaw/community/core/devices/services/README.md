@@ -119,20 +119,21 @@ caller 必须走 `resolver.resolve_for_bot + dispatcher.dispatch(ctx)`
 - Handoff（for_bot 38 caller 治理）: [`docs/superpowers/handoffs/2026-06-15-device-sync-supplier-for-bot-cleanup-handoff.md`](../../../../../../docs/superpowers/handoffs/2026-06-15-device-sync-supplier-for-bot-cleanup-handoff.md)
 
 
-## Internal coding restart execution
+## Internal fixed-target command transport
 
-`DeviceServiceRouter.prepare_arca_restart_executor(binding_id, device_id,
-sandbox_id)` returns a `BoundArcaRestartExecutor` for an already-authorized
-restart of that exact old binding. This is not a general command endpoint:
-only coding restart helper commands are supplied by the lifecycle strategy.
-The executor allows ACTIVE/PENDING/FAILED/STOPPED bindings, verifies the captured
-physical target before every exec and before replacement, and delegates to the
-registered Arca provider's existing execution hook for release-compatible tenant
-resolution. Missing bindings, target changes, database read failures and missing
-providers raise `RestartBackupTargetChanged`, never a fallback to another
-provider. Runtime command failures propagate to the coding best-effort policy.
-Normal `exec_shell_new` permissions and lifecycle state remain unchanged.
+`DeviceServiceRouter.bind_device_executor(device=AllocatedDevice(...))` returns
+an internal command callable pinned to a copied device snapshot and its registered
+provider. Unknown providers raise `DeviceServiceError`; there is no default-provider
+fallback or logical-device re-resolution. Each invocation receives a fresh copy
+of the snapshot. Command failures propagate unchanged.
 
-Consumers: coding restart preparation in `core.bot_management.engines.aicoding`.
-Implementations: the DeviceService router plus the existing corp Arca provider;
-community tests use an isolated provider hook. No public HTTP/Plugin API change.
+This is a lifecycle capability, not an HTTP command endpoint. The authorized
+caller owns eligibility, binding revalidation and recovery policy. Ordinary
+`exec_shell_new` retains its ACTIVE/PENDING restriction. The device layer knows
+nothing about backup scripts, retry budgets, receipts or coding restart states.
+
+The AICoding consumer in `engines/aicoding/restart_arca.py` owns old-target checks,
+FAILED/STOPPED recovery eligibility and blocking restart errors. The registered
+Arca provider retains sandbox/tenant translation and platform command execution.
+Tests cover snapshot isolation, strict dispatch and unchanged failure propagation;
+OCB corp tests check that execution and release address the same sandbox/tenant.

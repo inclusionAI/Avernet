@@ -27,6 +27,7 @@ consumes:
   - "CallerIdentityRepositoryProtocol"
   - "AuthRelationshipPlugin"
   - "DeviceService"
+  - "ArcaRestartDevices (binding reads and fixed-target command transport)"
   - "ResourceService"
   - "BotPublishService"
   - "SkillCenter factories"
@@ -76,6 +77,7 @@ internal_dependencies:
   - agentclaw.community.di
   - agentclaw.community.di.modules
   - agentclaw.community.kernel.lifecycle
+  - agentclaw.community.kernel.device_dto    # CommandResult contract for coding-owned Arca backup execution
   - agentclaw.community.log
   - agentclaw.community.plugin_api.devices
   - agentclaw.community.plugin_api.drm
@@ -94,6 +96,12 @@ internal_dependencies:
 ### Change impact
 
 Highest-fanout domain — 12+ other core domains import it. BotService signature changes ripple widely. Repository protocol changes break the corresponding plugin_impl repos.
+
+Coding restart recovery policy and target checks are internal to
+`engines/aicoding/restart_arca.py`. Its device capability contract consumes binding
+records and `CommandResult`; the router supplies fixed-target transport without
+backup semantics. Changes to this capability require community transport tests
+and OCB corp sandbox/tenant execution-versus-release contract tests.
 
 ## Owner display name on OpenAPI creation
 

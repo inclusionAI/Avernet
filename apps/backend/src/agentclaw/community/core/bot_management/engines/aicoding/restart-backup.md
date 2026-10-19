@@ -57,8 +57,9 @@ The registry adapter is shared dispatch, not an independent lifecycle pipeline.
   old binding's `device_props.sandbox_id`, exactly as destruction does; no BaaS
   inventory or sandbox-list query is involved. The existing provider execution
   hook retains ownership of sandbox suffix/tenant translation.
-- `DeviceServiceRouter.prepare_arca_restart_executor` is an internal restart-only
-  interface returning a pinned `execute(command)` / `verify()` executor. It has
+- `BoundArcaRestartExecutor` in `aicoding/restart_arca.py` is a strategy-owned
+  pinned `execute(command)` / `verify()` executor. It consumes the internal
+  `DeviceServiceRouter.bind_device_executor` transport capability. It has
   no HTTP exposure or default-provider fallback. ACTIVE/PENDING/FAILED/STOPPED
   bindings may still identify a live old sandbox and are eligible for backup.
   Normal `exec_shell_new` keeps its existing ACTIVE/PENDING restriction. The
@@ -171,8 +172,9 @@ configuration and executor-capacity tuning are separate unresolved review items.
 
 ## Direct ARCA rollout and propagation
 
-The coding strategy consumes the internal pinned executor supplied by the
-DeviceService router; the registered Arca provider implements execution via its
+The coding strategy owns the pinned executor, recovery-state eligibility and
+blocking target errors in `restart_arca.py`. The DeviceService router supplies
+only a copied-target command transport; the registered Arca provider implements execution via its
 existing `_exec_shell_new` hook and SandboxRuntimeClient. No new SDK dependency,
 public HTTP contract, generic exec permission, queue type or database schema is
 introduced. OCB must update its Avernet gitlink to deploy the strategy and router

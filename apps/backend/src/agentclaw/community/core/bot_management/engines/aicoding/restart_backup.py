@@ -15,10 +15,9 @@ import uuid
 from typing import Any, Callable
 from urllib.parse import quote
 
-from agentclaw.community.core.devices.errors import (
-    RestartBackupTargetChanged,
-)
 from agentclaw.community.log import get_logger
+
+from .restart_arca import BoundArcaRestartExecutor, RestartBackupTargetChanged
 
 logger = get_logger()
 
@@ -468,8 +467,9 @@ class AicodingRestartBackupMixin:
                 else:
                     # Same physical identity as release, not a BaaS inventory or
                     # the logical device_id. Target/DB checks must stay blocking.
-                    executor = device_service.prepare_arca_restart_executor(
-                        binding_id=binding_id, device_id=target, sandbox_id=sandbox_id,
+                    executor = BoundArcaRestartExecutor(
+                        devices=device_service, binding_id=binding_id,
+                        device_id=target, sandbox_id=sandbox_id,
                     )
                     receipt_check = _attempt_backup(
                         execute=executor.execute, operation_id=operation_id,

@@ -66,12 +66,17 @@ The frontend continues to use the original stored-runtime readiness semantics.
 - Amendment (2026-10-11): backup is best effort. Unavailable/invalid inventory,
   backup command failures, failed receipts and timeouts log sanitized warnings
   and continue the original restart. These failures alone do not mark the Bot
-  FAILED. Direct ARCA bindings skip this backup protocol; BaaS-managed containers
-  still attempt it, including those hosted on ARCA.
+  FAILED.
 - Amendment (2026-10-12): backup-observed physical target/boot changes only warn
   and continue restart. Lifecycle binding/engine/operation changes still block. Database,
   durable mutation-fence and worker-level failures retain their original error
   handling, including FAILED journal/start status where applicable.
+- Amendment (2026-10-19): direct ARCA bindings now participate in the same helper
+  protocol; BaaS-managed containers retain BaaS inventory and command transport.
+  Arca target checks, recovery-state eligibility and blocking errors live in
+  `engines/aicoding/restart_arca.py`; the device router supplies only fixed-target
+  command transport, without coding-specific backup policy. Changes to the
+  captured Arca binding/sandbox remain blocking, unlike backup receipt failures.
 - Restart may destroy the old container without a confirmed backup, losing data
   not previously persisted. A backend timeout does not cancel the historical
   helper. If replacement fails, previously stopped workloads are not guaranteed

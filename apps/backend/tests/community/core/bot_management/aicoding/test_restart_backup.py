@@ -262,8 +262,11 @@ def test_backup_failure_continues_original_restart_and_lock_ownership(phase, pro
     bot = _make_bot(active_engine='aicoding', binding_id=42)
     repository, state = _stateful_bot_repository(bot)
     device = Mock()
-    device.get_device.return_value = {'device_id': 'old-container', 'device_provider': provider, 'status': 'ACTIVE',
-                                     'device_props': {'sandbox_id': 'old-sandbox'}}
+    from tests.community.core.devices.services.test_device_service import _make_record
+    device.get_device.return_value = _make_record(
+        id=42, device_id='old-container', device_provider=provider, status='ACTIVE',
+        device_props={'sandbox_id': 'old-sandbox'},
+    )
     runtime = Mock()
     runtime.list_devices_by_bot_uuid.return_value = [{'provider_device_id': 'physical', 'status': 'ACTIVE'}]
     svc = _make_service(locks, bot_repository=repository, device_provider=device,
