@@ -49,3 +49,47 @@ The affected consumer (影响的 consumer) is the V1 Group detail facade. The ne
 - No deployed request replay, live MySQL execution or full product E2E was performed. SQL behavior is covered by SQLite conformance and recording-DB query/error assertions.
 - Independent static review found no correctness or security regressions and confirmed the Session facade extraction preserves unrelated logic. Its informational index concern was checked against all current MySQL migrations: the required index prefix already exists in migrations 004/005, not just the initial schema.
 - After the user requested a commit on a new branch from `dev`, the patch was transferred without conflicts onto `origin/dev` at `25e802715`. All five affected crate suites and the 65 HTTP route tests passed again; the updated base has 73 validated OpenAPI operations. The full architecture run and its recorded baseline failures above preceded this transfer; full architecture/product E2E was not repeated on the new branch.
+
+## CI coverage follow-up
+
+The PR's live E2E gate reported 158/681 changed executable lines (23.20%).
+The extracted participant mutation facade had no public PATCH requests in the
+existing stories, and the Session-only Group detail membership SQL was not
+exercised. Unit-test coverage is not runtime E2E evidence.
+
+- [x] Add `scripts/e2e-test/session_owner_story.py`: independent users and Bots,
+  public V1 mode/scope updates, negative management checks, Session-only Group
+  reads and revocation. Use real HTTP and SQLite persistence, not domain calls.
+- [x] Register the story in a small sourced shell file and the default runner;
+  do not modify the oversized existing `stories.sh` or coverage thresholds.
+- [x] Run the story against an isolated instrumented server; compute changed-line
+  coverage with the existing checker and the PR merge base. Keep failed-CI
+  evidence separate from fresh local runtime profiles.
+- [x] Check syntax, source line counts, cleanup and diff hygiene. Record exactly
+  which focused/full-stack checks ran and any remaining validation limits.
+
+### Focused validation results
+
+- Replayed the downloaded failed CI Cobertura report against `25e802715` with
+  `scripts/e2e_cov_gate.py`: reproduced exit 1 and **158/681 (23.20%)**.
+- Built the current `bcs` server with the same instrumentation flags as
+  Singlebox (`-Cinstrument-coverage -Clink-dead-code`, incremental disabled,
+  `line-tables-only` debug info). Started a separate local SQLite instance on
+  an unused port; the existing development stack was not stopped or modified.
+- Executed `python3 scripts/e2e-test/session_owner_story.py --base-url <local-url>`:
+  **60 HTTP assertions passed**, plus response/persisted-state assertions and
+  successful Session/Group/Bot cleanup. Repeated runs use fresh identities.
+- Removed diagnostic-run profiles from the measured directory before the final
+  run. The fresh story alone produced **549/681 (80.62%)** changed-line coverage;
+  no downloaded CI coverage was merged into this result. The existing checker
+  passed with `--base-ref 25e802715 --changed-line-min 60`, retaining the existing
+  SQLite-only exclusion for `bcs-session-store/src/memory.rs`.
+- Key runtime hits: participant mutation **210/228**, Session authorization
+  **301/399**, Group authorization **11/17**, new SQL existence query **17/17**.
+- Shell syntax, Python compilation, default-story registration, changed-source
+  line counts and `git diff --check` pass. No production Rust, gate threshold,
+  denominator calculation or CI exclusion was changed.
+- This was focused live E2E validation, **not** a rerun of the complete unified
+  Singlebox stack. Overall line/method, all-story, endpoint/CLI coverage and the
+  canonical Singlebox artifact verifier still need the PR CI rerun. The full
+  launcher would reclaim ports used by the existing local development stack.
