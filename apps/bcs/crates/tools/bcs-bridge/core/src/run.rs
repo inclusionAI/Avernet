@@ -78,6 +78,9 @@ pub struct RunHandle {
     delivery_pinned: Arc<AtomicBool>,
     delivery_released_at: Arc<Mutex<Option<Instant>>>,
     retained_bytes: Arc<AtomicUsize>,
+    /// Set when the retention byte/event budget first fires inside this run:
+    /// guards a one-shot WARN so overflow no longer vanishes silently.
+    overflow_warned: Arc<AtomicBool>,
     pub tx: broadcast::Sender<RunEvent>,
     pub buffer: Arc<Mutex<Vec<RunEvent>>>,
     pub terminal: Arc<AtomicBool>,
@@ -265,6 +268,7 @@ impl RunRegistry {
             delivery_pinned: Arc::new(AtomicBool::new(false)),
             delivery_released_at: Arc::new(Mutex::new(None)),
             retained_bytes: Arc::new(AtomicUsize::new(0)),
+            overflow_warned: Arc::new(AtomicBool::new(false)),
             abort: CancellationToken::new(),
             tx,
             buffer: Arc::new(Mutex::new(Vec::new())),
@@ -701,12 +705,31 @@ fn push_frame(
     let ts = now_ms();
     let size = retained_event_size(ev).map(|size| size.saturating_add(run_id.len()));
     let mut buffer = handle.buffer.lock().unwrap_or_else(|p| p.into_inner());
-    let failure = match size {
-        Ok(size) if buffer.len() >= MAX_RETAINED_EVENTS || handle.retained_bytes.load(Ordering::SeqCst).saturating_add(size) > MAX_RETAINED_BYTES => Some(("run event retention limit exceeded", "buffer_overflow")),
+    let failure: Option<(String, &'static str)> = match size {
+        Ok(size) if buffer.len() >= MAX_RETAINED_EVENTS || handle.retained_bytes.load(Ordering::SeqCst).saturating_add(size) > MAX_RETAINED_BYTES => {
+            let current_bytes = handle.retained_bytes.load(Ordering::SeqCst);
+            let overdue_bytes = current_bytes.saturating_add(size).saturating_sub(MAX_RETAINED_BYTES);
+            Some((format!(
+                "run event retention limit exceeded (limits: MAX_RETAINED_BYTES={MAX_RETAINED_BYTES}, \
+                 MAX_RETAINED_EVENTS={MAX_RETAINED_EVENTS}; before this event: {current_bytes} bytes in \
+                 {events} records, next event {next} bytes, projected overage {overdue_bytes} bytes)",
+                events = buffer.len(), next = size), "buffer_overflow"))
+        }
         Ok(size) => { handle.retained_bytes.fetch_add(size, Ordering::SeqCst); None }
-        Err(_) => Some(("event serialization failed", "runtime_error")),
+        Err(_) => Some(("event serialization failed".to_string(), "runtime_error")),
     };
-    let event = match failure {
+    let event = match &failure {
+        Some((message, kind)) if *kind == "buffer_overflow" => {
+            if !handle.overflow_warned.swap(true, Ordering::SeqCst) {
+                tracing::warn!(target: "bcs_bridge_core::run",
+                    run = %run_id, buffer_events = buffer.len(),
+                    retained_bytes = handle.retained_bytes.load(Ordering::SeqCst),
+                    "run event retention budget exceeded; aborting the run and surfacing a terminal error upstream");
+            }
+            let mut failed = sse::chat_error(run_id, message, Some(kind));
+            if let StreamEvent::Chat(chat) = &mut failed { chat.stop_reason = Some("buffer_overflow".into()); }
+            failed
+        }
         Some((message, kind)) => sse::chat_error(run_id, message, Some(kind)),
         None => ev.clone(),
     };

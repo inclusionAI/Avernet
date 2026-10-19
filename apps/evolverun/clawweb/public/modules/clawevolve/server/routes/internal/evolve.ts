@@ -275,7 +275,7 @@ export function createInternalEvolveRouter(repos: InternalEvolveRepos): Router {
         }
       }
     }
-    res.json({ ...input, workflowSpecDigest, workflowSpec, issueAggregationSupported: true,
+    res.json({ ...input, workflowSpecDigest, workflowSpec, issueAggregationSupported: false, issueAggregationOwner: 'clawweb-service', proposalAggregationVersion: 'workflow-proposal-plan/v1',
       issueAggregationInputVersions: [ISSUE_AGGREGATION_INPUT_V1, ISSUE_AGGREGATION_INPUT_V2] });
   });
 

@@ -7,6 +7,7 @@ service 侧事实快照,读侧投影按秒粒度签名去重兜底。
 """
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -89,8 +90,8 @@ class _Service(TaskServiceDeliveryMixin):
 
 @pytest.mark.asyncio
 async def test_dispatch_node_emits_s6_delivered_trajectory_row() -> None:
-    """S6 写时发射:交付成功 → 一条 dispatch 轨迹行(action_result=delivered,
-    七字段对齐表列;ext_info 带 trace_step + S6_DISPATCH 标识)。"""
+    """S6 写时发射:交付成功 → 一条 dispatch 轨迹行(action_result 为输出
+    JSON,七字段对齐表列;ext_info 带 trace_step + S6_DISPATCH 标识)。"""
     node = _make_node()
     service = _Service(node)
 
@@ -102,7 +103,17 @@ async def test_dispatch_node_emits_s6_delivered_trajectory_row() -> None:
     assert len(ctx.calls) == 1
     task_id, node_id, action_type, kwargs = ctx.calls[0]
     assert (task_id, node_id, action_type) == ("task-1", "node-1", "dispatch")
-    assert kwargs["action_result"] == "delivered"
+    action_result = json.loads(kwargs["action_result"])
+    assert action_result == {
+        "status": "completed",
+        "dispatched": True,
+        "target_node_id": "node-1",
+        "run_mode": "single_bot",
+        "assignee": "bot-1",
+        "actual_run_mode": None,
+        "group_id": None,
+        "session_id": None,
+    }
     assert '"target_node_id": "node-1"' in kwargs["action_input"]
     assert kwargs["status_from"] == Status.RUNNING
     assert kwargs["ext_info"] == {"trace_step": True, "step": "S6_DISPATCH"}
@@ -111,7 +122,7 @@ async def test_dispatch_node_emits_s6_delivered_trajectory_row() -> None:
 
 @pytest.mark.asyncio
 async def test_dispatch_node_emits_s6_failed_trajectory_row_and_reraises() -> None:
-    """S6 失败:轨迹行 action_result=failed + error_msg(原始异常照常外抛)。"""
+    """S6 失败:轨迹行 action_result 为失败输出 JSON + error_msg(原始异常照常外抛)。"""
     node = _make_node()
     service = _Service(node, dispatch_exc=_DispatchError("boom"))
 
@@ -122,7 +133,10 @@ async def test_dispatch_node_emits_s6_failed_trajectory_row_and_reraises() -> No
     ctx = service._task_context_service
     assert len(ctx.calls) == 1
     _, _, _, kwargs = ctx.calls[0]
-    assert kwargs["action_result"] == "failed"
+    assert json.loads(kwargs["action_result"]) == {
+        "status": "failed",
+        "dispatched": False,
+    }
     assert "DispatchError" in str(kwargs["error_msg"])
     assert kwargs["ext_info"] == {"trace_step": True, "step": "S6_DISPATCH"}
 

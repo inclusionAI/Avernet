@@ -63,11 +63,11 @@ function containersCell() {
 describe('BotTable 表格结构', () => {
   const bot = mapBotDto({ bot_id: 'b1', bot_name: 'Openclaw Bot', engine: 'openclaw', status: 'ACTIVE' }).item;
 
-  test('短描述收进机器人信息，容器信息仍独立于 Bot 标签', () => {
+  test('短描述收进 Bot 信息，容器信息仍独立于 Bot 标签', () => {
     renderTable(bot);
 
     expect(screen.getAllByRole('columnheader').map((header) => header.textContent)).toEqual([
-      '机器人信息',
+      'Bot信息',
       '状态',
       '版本',
       'bot 标签',
@@ -251,7 +251,7 @@ describe('BotTable conversation action', () => {
 
     expect(onConversation).toHaveBeenCalledWith(bot);
   });
-  test('非 Owner 对话入口置灰并提示原因', () => {
+  test('非 Owner 对话入口置灰', () => {
     const bot = mapBotDto({ bot_id: 'b4', bot_name: 'Shared Bot', engine: 'openclaw', actions: ['chat'] }).item;
     const onConversation = jest.fn();
     renderTable(bot, {
@@ -259,8 +259,36 @@ describe('BotTable conversation action', () => {
       canOpenConversation: () => false,
       getInventoryActions: () => ({ chat: { action: 'chat', visible: true, enabled: true } }),
     });
-    expect(screen.getByRole('button', { name: '与 Shared Bot 对话' })).toBeDisabled();
+    const chatButton = screen.getByRole('button', { name: '与 Shared Bot 对话' });
+    expect(chatButton).toBeDisabled();
     expect(onConversation).not.toHaveBeenCalled();
+  });
+
+  test('同一时刻只展开一个更多操作菜单', () => {
+    const first = mapBotDto({ bot_id: 'first', bot_name: 'First Bot', actions: ['view'] }).item;
+    const second = mapBotDto({ bot_id: 'second', bot_name: 'Second Bot', actions: ['view'] }).item;
+    render(<BotTable bots={[first, second]} onView={noop} onAction={async () => undefined} />);
+
+    const [firstTrigger, secondTrigger] = screen.getAllByRole('button', { name: /管理 .* Bot/ });
+    fireEvent.click(firstTrigger);
+    expect(firstTrigger).toHaveAttribute('data-state', 'open');
+    fireEvent.click(secondTrigger);
+    expect(firstTrigger).toHaveAttribute('data-state', 'closed');
+    expect(secondTrigger).toHaveAttribute('data-state', 'open');
+  });
+
+  test('同一 Bot 的不同卡片也只展开触发的一个更多操作菜单', () => {
+    const first = mapBotDto({ bot_id: 'same-bot', card_id: 'service:same-bot:1', bot_name: 'First Bot', actions: ['view'] }).item;
+    const second = mapBotDto({ bot_id: 'same-bot', card_id: 'service:same-bot:2', bot_name: 'Second Bot', actions: ['view'] }).item;
+    render(<BotTable bots={[first, second]} onView={noop} onAction={async () => undefined} />);
+
+    const [firstTrigger, secondTrigger] = screen.getAllByRole('button', { name: /管理 .* Bot/ });
+    fireEvent.click(firstTrigger);
+    expect(firstTrigger).toHaveAttribute('data-state', 'open');
+    expect(secondTrigger).toHaveAttribute('data-state', 'closed');
+    fireEvent.click(secondTrigger);
+    expect(firstTrigger).toHaveAttribute('data-state', 'closed');
+    expect(secondTrigger).toHaveAttribute('data-state', 'open');
   });
   test('异常态 Coding Bot 的去使用入口置灰', () => {
     const bot = mapBotDto({
@@ -656,7 +684,7 @@ describe('Agent Coding Bot row actions', () => {
     expect(onConversation).toHaveBeenCalledWith(bot);
   });
 
-  test('普通空间成员点击 Coding Bot 去使用时回退基础信息', () => {
+  test('普通空间成员不能使用非协作的 Coding Bot', () => {
     const bot = mapBotDto({
       bot_id: 'space-member-coding-bot',
       bot_name: '空间成员 Coding Bot',
@@ -668,22 +696,14 @@ describe('Agent Coding Bot row actions', () => {
       actions: ['view', 'chat'],
     }).item;
     const onConversation = jest.fn();
-    const onView = jest.fn();
-
     renderTable(bot, {
       onConversation,
-      onView,
       onAction: jest.fn().mockResolvedValue(undefined),
       canOpenConversation: (item) => item.actions.includes('edit'),
     });
 
     const useButton = screen.getByRole('button', { name: '去使用 空间成员 Coding Bot' });
-    expect(useButton).toBeEnabled();
-    fireEvent.click(useButton);
-    fireEvent.click(dataRow());
-
-    expect(onView).toHaveBeenCalledTimes(2);
-    expect(onView).toHaveBeenNthCalledWith(1, bot);
+    expect(useButton).toBeDisabled();
     expect(onConversation).not.toHaveBeenCalled();
   });
 

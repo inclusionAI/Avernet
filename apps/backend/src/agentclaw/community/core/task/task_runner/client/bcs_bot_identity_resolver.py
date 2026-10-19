@@ -21,14 +21,28 @@ class BotServiceBcsBotIdentityResolver(BcsBotIdentityResolver):
         if not ids:
             raise BotIdentityResolutionError("BCS identity resolution requires at least one bot_id")
         # 已带 ':'(BCS 'bot_id:owner_id')原样透传,不再查 BotService 重复拼接/查询。
+        for bot_id in ids:
+            product_id, separator, owner_id = bot_id.partition(":")
+            if separator and (
+                not product_id
+                or not owner_id
+                or ":" in owner_id
+            ):
+                raise BotIdentityResolutionError(
+                    f"invalid full BCS bot identity: {bot_id}"
+                )
         resolved: dict[str, str] = {bot_id: bot_id for bot_id in ids if ":" in bot_id}
         need_lookup = [bot_id for bot_id in ids if ":" not in bot_id]
         if not need_lookup:
             return resolved
+        # A product bot_id can exist for many owners (notably each owner's
+        # ``default`` bot). A page one row larger than the ID list makes at least
+        # one duplicate visible; ``total`` is authoritative when the full result
+        # still cannot fit on this page.
         page = self._bot_service.list_bots_by_conditions(
             bot_ids=need_lookup,
             page=1,
-            page_size=len(need_lookup),
+            page_size=max(len(need_lookup) + 1, 2),
         )
         items = (page or {}).get("items") or []
         by_id: dict[str, list[dict]] = {}
@@ -39,16 +53,35 @@ class BotServiceBcsBotIdentityResolver(BcsBotIdentityResolver):
             if bot_id in need_lookup:
                 by_id.setdefault(bot_id, []).append(item)
 
+        total_raw = (page or {}).get("total")
+        try:
+            total = int(total_raw) if total_raw is not None else len(items)
+        except (TypeError, ValueError):
+            total = len(items)
+        missing = [
+            bot_id for bot_id in need_lookup if not by_id.get(bot_id)
+        ]
+        ambiguous = [
+            bot_id for bot_id in need_lookup if len(by_id.get(bot_id) or []) > 1
+        ]
+        # ``total > len(need_lookup)`` means at least one product bot_id has
+        # multiple owner rows even when a truncated page hides that duplicate.
+        if ambiguous or total > len(need_lookup):
+            raise BotIdentityResolutionError(
+                "ambiguous bot owner for BCS identity: "
+                f"bot_ids={ambiguous or need_lookup}, "
+                f"total={max(total, len(items))}, returned={len(items)}"
+            )
+        if missing:
+            raise BotIdentityResolutionError(
+                "bot not found for BCS identity: "
+                f"bot_ids={missing}, total={total}, returned={len(items)}"
+            )
+
         for bot_id in need_lookup:
             matches = by_id.get(bot_id) or []
-            if not matches:
-                raise BotIdentityResolutionError(f"bot not found for BCS identity: {bot_id}")
-            if len(matches) != 1:
-                raise BotIdentityResolutionError(
-                    f"ambiguous bot owner for BCS identity: bot_id={bot_id}, matches={len(matches)}"
-                )
             owner_id = str(matches[0].get("owner_id") or "").strip()
             if not owner_id:
-                raise BotIdentityResolutionError(f"bot owner_id missing: {bot_id}")
+                raise BotIdentityResolutionError(f"bot owner_id missing: bot_id={bot_id}")
             resolved[bot_id] = f"{bot_id}:{owner_id}"
         return resolved

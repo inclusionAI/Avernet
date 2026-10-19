@@ -6,6 +6,8 @@ module; request-scoped service factories remain here.
 
 from __future__ import annotations
 
+from agentclaw.community.core.skill_center.services.runtime_projections.skill_projection_guard import SkillProjectionGuard
+
 import dataclasses
 from typing import Callable
 
@@ -593,20 +595,9 @@ class SkillCenterModule(
         pool_layouts: SkillsPoolLayoutRepositoryProtocol,
         device_contexts: DeviceContextResolver,
         center_content: CenterContentDistribution,
+        guard: SkillProjectionGuard,
     ) -> EngineRuntimeProjectionRegistry:
-        """Which runtime contract each engine's projection obeys.
-
-        Routing only — the same shape as ``CommunityDeviceSyncModule``: adding
-        an engine whose runtime differs means a new implementation and an entry
-        here, with no edit to the others. Per-domain is the *default* rather
-        than an enumerated key, so an ordinary new engine needs no entry at all
-        and mis-routing one takes a wrong entry rather than a forgotten right
-        one.
-
-        Only ``PerDomainRuntimeProjection`` takes collaborators: the Skills
-        Pool runtime and layout repository, which no other implementation and
-        no longer the projector itself needs.
-        """
+        """Wire guarded per-domain delivery; Teclaw keeps whole-artifact delivery."""
         from agentclaw.community.core.skill_center.services.runtime_projections.per_domain import (
             PerDomainRuntimeProjection,
         )
@@ -624,6 +615,7 @@ class SkillCenterModule(
                     pool_layouts=pool_layouts,
                     device_contexts=device_contexts,
                     center_content=center_content,
+                    guard=guard,
                 ),
             ),
             by_engine={"teclaw": WholeArtifactRuntimeProjection()},

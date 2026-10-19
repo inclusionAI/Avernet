@@ -413,7 +413,7 @@ def test_enter_root_bbs_emits_submit_enter_bbs_row_synchronously(svc):
 
     rows = [
         r for r in repo.list_events_by_task("t7")
-        if r.action_type == "submit" and r.action_result == "enter_bbs"
+        if r.action_type == "harness-engine-submit" and r.action_result == "enter_bbs"
     ]
     assert rows, "enter_bbs submit row must be recorded SYNCHRONOUSLY at production time"
     row = rows[0]

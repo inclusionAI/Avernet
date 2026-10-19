@@ -23,7 +23,8 @@ NOT built; ``do_analysis`` on ``/trajectory`` is the single trigger):
   performs NO DB write of any kind and NO tc_bot call; per-node fetch failure
   degrades with WARNING to the persisted ``ext_info.session_msgs`` snapshot.
 
-* ``do_analysis=True``:
+* ``force_analysis=True``(**请求大模型的唯一情况**;``do_analysis`` 为兼容
+  参数,单独出现即纯读,不校验 bot 配置):
   1. ``assemble(task_id)`` → ``TaskTrajectory`` (timeline).
   2. Build ``ext_info_lookup: Callable[[TrajectoryEvent], dict | None]`` from
      the repo's ``list_events_by_task`` records. The assembler DROPS ``ext_info``
@@ -43,6 +44,9 @@ NOT built; ``do_analysis`` on ``/trajectory`` is the single trigger):
   7. Return the ``TaskTrajectory`` with the fresh ``analysis`` set (mutate
      ``.analysis`` + ``.gmt_modified`` on the returned object — avoids a second
      DB round-trip; ``.analysis`` == the new JSON).
+  NB: 原"do_analysis 增量幂等快路径"(时间线指纹比对命中免跑 bot)随
+  2026-10-15 触发口径改变永久不可达已移除;``timeline_version`` 仅作溯源
+  信息盖入 analysis JSON。
 
 Bot failure/timeout → analyzer raises ``TrajectoryAnalysisError``; the service
 MUST NOT backfill and re-raises (decision #14 waiver is EMISSION-only; the
@@ -117,10 +121,25 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("task.trajectory")
 
+
+def _display_run_mode(node) -> "str | None":
+    """轨迹展示用的真实模态(2026-10-16 规则):
+
+    ``run_mode=bbs`` **短路直判 bbs**——BBS 节点的 ``extend_props.actual_run_mode``
+    可能残留单 bot 交通过渡值,展示口径一律以图的 bbs 为准;其余模态沿用
+    ``effective_run_mode``(``actual_run_mode`` 优先,缺失回退 ``run_mode``)。
+
+    NB:刻意**不改**全局 ``effective_run_mode``——它还驱动 harness 的 BBS 租约
+    语义,轨迹展示规则单独收口在此。"""
+    runtime = getattr(node, "run_info", None)
+    if runtime is not None and str(runtime.run_mode or "").strip() == "bbs":
+        return "bbs"
+    return effective_run_mode(node)
+
 # 会话明细探测:取最近 N 条 msg(条数上限),内容**不截断**(去掉了单条/总量
 # 字符预算,按需求保留会话原文;N 经 TrajectoryAnalysisConfig.
-# running_session_message_limit 配置,默认 50)。
-_RUNNING_SESSION_DEFAULT_MSG_LIMIT = 50
+# running_session_message_limit 配置,默认 200)。
+_RUNNING_SESSION_DEFAULT_MSG_LIMIT = 200
 
 # 引擎侧会话 key 判别(读通道分派依据):匹配 → 引擎会话(BaaS Open API 读,
 # ``agent:main:session:{uuid}:user:{pid}`` openclaw / ``agent:{bot}:session:...``
@@ -143,6 +162,60 @@ def _is_engine_session_id(session_id: str) -> bool:
     False = BCS 会话键或无法识别的形态 → 走既有 BCS 通道(读失败按既有
     WARNING 降级,不误伤 BCS 新格式)。"""
     return bool(session_id) and _ENGINE_SESSION_KEY_RE.match(session_id) is not None
+
+
+# 主事件判别(2026-10-15 验收语义):relay 轨迹的主序列 = Bot 上报的 trace step,
+# 其 action_type 直接采用 step 码——"S 后带数字再带其它"(如 S1_CONTEXT、
+# S4A_EXECUTION、S5A_REFRESH_GAPS);组装序即 id 正序(仓储 ORDER BY gmt_create,id)。
+_MAIN_EVENT_RE = re.compile(r"^S\d+")
+
+# 子任务结果展示虚拟事件(2026-10-16):读时追加在每个子任务 timeline 末尾,
+# 承载 output / session_msgs / actual_run_mode——不落库、无 id,顶层展示位
+# (不参与 system_logs 嵌套的子事件归并)。
+_RESULT_DISPLAY_ACTION = "task_result_display"
+_RESULT_DISPLAY_RESULT = "display"
+
+
+def _is_main_event(action_type: object) -> bool:
+    """顶层主事件(S �码 ``^S\d+``,或 ``task_result_display`` 虚拟展示事件)。"""
+    value = str(getattr(action_type, "value", action_type) or "")
+    if value == _RESULT_DISPLAY_ACTION:
+        return True
+    return bool(value) and _MAIN_EVENT_RE.match(value) is not None
+
+
+def _nest_system_logs(trajectory: TaskTrajectory) -> None:
+    """读时把 timeline 整理为"主事件序列 + 嵌套系统事件"两态(不落库)。
+
+    规则(2026-10-15 验收):
+    * 主事件 = action_type 匹配 ``^S\\d+`` 的 trace step 行,留在顶层时间线;
+    * 各子任务(task_id+node_id)的**其它 action_type 事件**(system 侧:submit /
+      reset / dispatch 投递 / transition 等)挂到**距离最近的前一个主事件**的
+      ``system_logs`` 列表——子事件 id 必须小于下一主事件 id(组装序即 id 序,
+      逐个 append 天然按 id 正序);
+    * 子事件的 id 早于该子任务首个主事件的(如任务提交 submit)无前置主,
+      **保持平级**;所在子任务没有任何主事件的,该子任务的事件整体保持平级
+      (中心化任务的常规形态不受影响——无 S 码即无变换,零重排)。
+    """
+    if not trajectory.timeline:
+        return
+    if not any(_is_main_event(e.action_type) for e in trajectory.timeline):
+        return  # 无主事件(中心化常规/relay 未上报):零变换
+    flat: list[TrajectoryEvent] = []
+    last_main_by_node: dict[str, TrajectoryEvent] = {}
+    for event in trajectory.timeline:
+        if _is_main_event(event.action_type):
+            flat.append(event)
+            last_main_by_node[event.node_id] = event
+            continue
+        host = last_main_by_node.get(event.node_id)
+        if host is None:
+            flat.append(event)  # 无前置主:保持平级,不丢数据
+            continue
+        if host.system_logs is None:
+            host.system_logs = []
+        host.system_logs.append(event)
+    trajectory.timeline = flat
 
 
 # ---------------------------------------------------------------------------
@@ -215,24 +288,6 @@ def _timeline_fingerprint(records: list[TrajectoryEventRecord]) -> str:
         )
         parts.append(f"|{rec.id}:{formatted}")
     return hashlib.sha256("".join(parts).encode("utf-8")).hexdigest()
-
-
-def _persisted_timeline_version(analysis_json: str | None) -> str | None:
-    """Defensively read the ``timeline_version`` stamped inside the persisted
-    head-row analysis JSON. ``None`` on any failure — non-dict JSON, corrupt
-    text, or a legacy analysis persisted before the key existed (``None`` is
-    the "never matches" sentinel: legacy rows re-analyze exactly once, then
-    carry the stamp)."""
-    if not analysis_json:
-        return None
-    try:
-        parsed = json.loads(analysis_json)
-    except (json.JSONDecodeError, TypeError):
-        return None
-    if not isinstance(parsed, dict):
-        return None
-    version = parsed.get("timeline_version")
-    return version if isinstance(version, str) and version else None
 
 
 def _event_key(event: TrajectoryEvent) -> tuple:
@@ -429,152 +484,97 @@ class TaskTrajectoryService(
         force_analysis: bool = False,
         session_detail: bool = False,
     ) -> TaskTrajectory:
-        """Read the trajectory for ``task_id``; optionally trigger bot analysis.
+        """Read the trajectory for ``task_id``; bot analysis ONLY on force.
 
-        ``do_analysis=False`` (default, PURE READ): assembler reads the events
-        table and returns ``TaskTrajectory``; ``analysis`` = persisted or
-        ``None``; no DB write, no bot call. 纯读默认**不携带会话明细**
-        (``session_detail=False``:零外部 GET,响应更轻);``session_detail=True``
-        时才对每个带 session_id 的子任务**实拉会话明细**(只读外部服务;
-        BCS 键走 BCS 读口,引擎键 ``agent:main:session:*`` 走 BaaS Open API——
-        结果只挂返回的内存轨迹对象,不落库);单节点拉取失败 WARNING 降级,
-        回退末位事件 ext_info 快照。
+        2026-10-15 语义收紧:**请求大模型(分析 bot)的唯一情况 =
+        ``force_analysis=true``**;``do_analysis`` 降级为兼容参数(不再有触发
+        效力,也不校验 bot 配置)——``do_analysis=true`` 单独出现即纯读,返回
+        已持久化的 ``analysis``。
 
-        ``do_analysis=True``: INCREMENTALLY IDEMPOTENT — assembles; computes the
-        timeline fingerprint (ALL the task's event rows, ``id+gmt_create`` 正序);
-        if the head row carries a non-empty ``analysis`` whose persisted
-        ``timeline_version`` equals the freshly computed fingerprint (the
-        timeline is unchanged since the last analysis), returns it directly
-        WITHOUT calling the bot (省一次 bot 调用 / 504). Mismatch — empty/None
-        analysis, a legacy analysis without a stamp, or new events appended
-        after the last backfill — re-runs the bot: builds ``ext_info_lookup``
-        → calls the configured ``tc_bot`` analyzer → stamps the fresh
-        ``timeline_version`` → serializes the ``TrajectoryAnalysis`` JSON →
-        ``backfill_analysis`` (overwrite, 决策 #13 on the bot-run path) → returns
-        the same-shape ``TaskTrajectory`` carrying the fresh analysis. To FORCE
-        a refresh, append/change timeline events (or clear the head-row
-        analysis), then re-call ``do_analysis=True``. Bot failure/timeout →
-        ``TrajectoryAnalysisError`` re-raised (504, no backfill — 决策 #14); bot
-        not configured (AND analysis stale/absent) →
-        ``TrajectoryAnalysisNotConfiguredError`` (503).
+        纯读(``force_analysis=false``,含 ``do_analysis=true`` 单独出现):
+        assembler 读事件表返回 ``TaskTrajectory``;``analysis`` = 持久值或
+        ``None``;不写库不调 bot;``session_detail=true`` 时对每个带 session_id
+        的子任务实拉会话明细(BCS 键走 BCS 读口,引擎键走 BaaS Open API,只挂
+        内存返回,不落库;单节点失败 WARNING 回退末位事件 ext_info 快照)。
+
+        ``force_analysis=true``:组装 → RUNNING 会话物化研判 → 配置的
+        ``tc_bot`` 分析 → ``timeline_version`` 盖戳 → ``backfill_analysis``
+        (overwrite, 决策 #13)→ 返回携带新 analysis 的同形态轨迹。
+        Bot 失败/超时 → ``TrajectoryAnalysisError``(504, 不回填, 决策 #14);
+        bot 未配置 → ``TrajectoryAnalysisNotConfiguredError``(503)。
         """
-        # force_analysis=True 隐含执行分析(即便 do_analysis 未传);并对 _do_analysis
-        # 说"跳过快路径"——忽略 timeline 版本号比对,强制重跑 bot + 重新回填盖戳。
-        if force_analysis:
-            do_analysis = True
-        if not do_analysis:
+        if not force_analysis:
             trajectory = self._assembler.assemble(task_id)
-            self._attach_node_outputs(trajectory)
-            # session_detail=True 才实拉会话明细(REQ-8 不变式保持:纯读绝不写库——
-            # merge_last_event_ext_info / backfill_analysis 只在分析路径可达;
-            # 纯读实拉结果仅挂返回的内存轨迹对象)。默认 false 零外部 GET,
-            # 返回不携带 session_msgs;单节点拉取失败已在 helper 内 WARNING 降级,
-            # 节点缺席 fresh map → _attach_session_msgs 自然回退该子任务末位事件
-            # 的 ext_info 缓存快照(零额外回退代码)。
+            outputs, run_modes = self._attach_node_outputs(trajectory)
+            # session_detail=true 才实拉会话明细(REQ-8 不变式保持:纯读绝不
+            # 写库;结果只挂返回的内存轨迹对象)。默认 false 零外部 GET,
+            # 单节点拉取失败 WARNING 降级回退末位事件 ext_info 缓存快照。
+            session_msgs = {}
             if session_detail:
                 records = self._safe_list_records(task_id)
                 fresh = await self._live_session_msgs_for_read(task_id)
-                self._attach_session_msgs(trajectory, records, fresh)
-            # session_detail 与 do_analysis 完全独立:分析路径内部的会话物化/
-            # 研判/返回态富化不受该参数影响(见 _do_analysis)。
+                session_msgs = self._collect_session_msgs_by_node(records, fresh)
+            # 子任务结果展示虚拟事件(2026-10-16):output/会话明细/真实模态
+            # 挂在每个子任务 timeline 最后的 task_result_display 上。
+            self._append_result_display_events(trajectory, outputs, run_modes, session_msgs)
+            # 最后一步读时嵌套:S 码主序列 + 子事件挂 system_logs(不落库)。
+            _nest_system_logs(trajectory)
             return trajectory
-        return await self._do_analysis(task_id, force_analysis=force_analysis)
+        # 大模型唯一触发口:force_analysis(原 do_analysis 增量幂等快路径随
+        # 触发口径改变而不可达,已在 _do_analysis 内一并移除)。
+        return await self._do_analysis(task_id)
 
     # ------------------------------------------------------------------
     # do_analysis=True orchestration
     # ------------------------------------------------------------------
 
-    async def _do_analysis(
-        self, task_id: str, *, force_analysis: bool = False,
-    ) -> TaskTrajectory:
-        """Assemble → (非强制且 timeline 版本与持久分析戳一致则直接返回) → build
-        ext_info_lookup → analyze → stamp timeline_version → backfill → return。
+    async def _do_analysis(self, task_id: str) -> TaskTrajectory:
+        """force_analysis=true 的分析编排:assemble → 会话物化/研判 → 调 bot →
+        盖 timeline_version 溯源戳 → backfill → 返回。
 
-        ``force_analysis=True``:完全跳过版本号幂等快路径——即使指纹与持久戳一致
-        也重新调 bot + 回填盖戳(供 bot 换代/强刷结论场景;语义与清空 head analysis
-        等价,但不依赖写库复位)。"""
-        _forced = bool(force_analysis)
-        # 1. Assemble the timeline (read-side; no DB write beyond the head UPSERT
-        #    which preserves existing analysis/gmt_modified).
-        trajectory = self._assembler.assemble(task_id)
-        # 1a. 读时富化:每个子任务(task_id+node_id)的最后一条事件挂上该节点的
-        #     当前产出(task_execution_graph 查询接口)。旁路,失败降级不抛;两模式
-        #     返回的 timeline 同形态(含快路径直接返回的持久化分析)。
-        self._attach_node_outputs(trajectory)
+        2026-10-15 语义:本方法**仅由 force_analysis=true 触达**,每跑即全量
+        重分析——原"do_analysis 增量幂等快路径"(时间线指纹比对命中即免跑 bot)
+        随触发口径改变永久不可达,已移除;``timeline_version`` 仍作为**溯源
+        信息**盖进 analysis JSON(记录本次分析对应的时间线形态,非幂等键)。
+        """
 
-        # 1b. Read ALL the task's event rows ONCE — feeding both the timeline
-        #     fingerprint and the ext_info_lookup below. Read failure → WARNING
-        #     + ``fingerprint=None`` (the never-matching sentinel: an
-        #     unfingerprintable read must NOT be treated as a stale-match — the
-        #     analysis re-runs rather than serving possibly-stale analysis).
+        # 读全部事件行:ext_info_lookup 的数据源(ext_info 不入领域对象,REQ-1)。
+        # 读取失败 → WARNING + ext_info 降级为空查找表(分析照常执行)。
         try:
             records = self._repo.list_events_by_task(task_id)
-        except Exception as ex:  # noqa: BLE001  指纹读失败 → 视为不匹配(重跑,不误命中)
+        except Exception as ex:  # noqa: BLE001
             logger.warning(
-                "[task][trajectory] list_events_by_task 失败,指纹未计算 task=%s: %s: %s",
+                "[task][trajectory] list_events_by_task 失败,ext_info 降级 "
+                "task=%s: %s: %s",
                 task_id, type(ex).__name__, ex,
             )
             records = None
+        ext_info_lookup = _build_ext_info_lookup(self._repo, task_id, records=records)
         fingerprint = _timeline_fingerprint(records) if records is not None else None
 
-        # 2. Incremental idempotent fast path: head analysis present AND its
-        #    persisted ``timeline_version`` equals the freshly computed
-        #    fingerprint → the timeline has not changed since the last
-        #    analysis; return the persisted analysis WITHOUT calling the bot
-        #    (省一次 bot 调用 / 504). Mismatch → the timeline gained events
-        #    after the last backfill → re-run the bot and re-stamp. A legacy
-        #    analysis persisted before ``timeline_version`` existed carries no
-        #    stamp → mismatch → re-analyzes exactly once, then carries the
-        #    stamp. ``fingerprint=None`` (records read failed) never matches.
-        self._attach_session_msgs(trajectory, records)  # 快路径返回同样带会话消息(展示用)
-        if (
-            not _forced
-            and trajectory.analysis
-            and fingerprint is not None
-            and _persisted_timeline_version(trajectory.analysis) == fingerprint
-        ):
-            logger.info(
-                "[task][trajectory] timeline_version match, skip bot call "
-                "(idempotent do_analysis) task=%s head_analysis_len=%d",
-                task_id, len(trajectory.analysis),
-            )
-            return trajectory
+        # 组装时间线(头行 UPSERT 保留既有 analysis/gmt_modified)。
+        trajectory = self._assembler.assemble(task_id)
+        outputs, run_modes = self._attach_node_outputs(trajectory)
 
-        # 3. Build ext_info_lookup from the same records (the assembler DROPPED
-        #    ext_info; the analyzer re-queries via this closure).
-        ext_info_lookup = _build_ext_info_lookup(self._repo, task_id, records=records)
+        # RUNNING 节点会话明细探测(决策 #14 精神:观测旁路,永不抛)——
+        # 有节点卡在 RUNNING 时实拉会话明细组 brief,交给分析 bot 判读
+        # "工具调用报错 / 执行完不上报结果"等 timeline 看不到的问题。
+        running_sessions, fresh_session_msgs = await self._collect_session_briefs(
+            task_id, records, force_analysis=True,
+        )
 
-        # 4. Resolve the deployment-configured analysis bot_id (decision #10:
-        #    NOT per-request). None → 503 (service capability not ready, fix
-        #    config — distinct from 504 bot failure/timeout).
+        # 解析部署配置的分析 bot_id(决策 #10:非 per-request)。None → 503。
         analysis_bot_id = self._resolve_analysis_bot_id()
-        logger.info(f"[task][task_trajectory] analysis_bot_id={analysis_bot_id}")
-
         if analysis_bot_id is None:
             raise TrajectoryAnalysisNotConfiguredError(
                 "trajectory analysis bot is not configured "
                 "(task_trajectory.analysis_bot_id — or analysis_bot_id_pre for the "
                 "pre env — missing in user_config); "
-                "do_analysis=true requires a deployment-configured bot_id"
+                "force_analysis=true requires a deployment-configured bot_id"
             )
 
-        # 5. RUNNING 节点会话明细探测(决策 #14 精神:观测旁路,永不抛)。有节点卡在
-        #    RUNNING 时,经 task_execution_graph 拿 session_id → BCS 拉会话明细,
-        #    组 brief 交给分析 bot(大模型)判"工具调用报错 / 执行完不上报结果"等
-        #    timeline 看不到的问题。任一步失败 → 降级跳过该节点(WARNING),不影响
-        #    主分析。
-        running_sessions, fresh_session_msgs = await self._collect_session_briefs(
-            task_id, records, force_analysis=force_analysis,
-        )
-
-        # 6. Call the analyzer (tc_bot executor; synchronous with timeout per
-        #    决策 #10). Raises TrajectoryAnalysisError on bot CALL failure/
-        #    timeout or an EMPTY/unusable response — the caller (router) maps
-        #    to 504; the service does NOT backfill on this path (decision #14).
-        #    NB: a NON-EMPTY malformed-JSON response no longer 504s — the
-        #    analyzer repairs bare inner quotes (方案A) or degrades to the raw
-        #    text as analysis_output (方案B); only an empty response has
-        #    nothing to salvage.
+        # 调分析 bot(tc_bot;失败/超时/空响应 → TrajectoryAnalysisError=504,
+        # 不回填,决策 #14)。
         analysis = await self._analyzer.analyze(
             trajectory,
             ext_info_lookup,
@@ -583,36 +583,21 @@ class TaskTrajectoryService(
             running_sessions=running_sessions,
         )
 
-        # 7. Stamp the timeline fingerprint the analysis was computed from —
-        #    the NEXT ``do_analysis=true`` compares its re-computed fingerprint
-        #    against this stamp (match → skip the bot). A ``records`` read
-        #    failure stamps ``None`` → the next call re-runs (never a stale
-        #    match). Stamped on the service side — the analyzer stays
-        #    transport-only and knows nothing of the repo.
+        # 盖 timeline_version 溯源戳(溯源信息;非幂等键)。
         analysis.timeline_version = fingerprint
 
-        # 8. Serialize the flat TrajectoryAnalysis (no event list, no recursion —
-        #    P0). ensure_ascii=False keeps Chinese error messages readable in
-        #    the persisted JSON (matches the emitter's ext_info convention).
-        #    The JSON now carries ``timeline_version`` automatically via ``asdict``.
+        # 序列化扁平 TrajectoryAnalysis(P0;中文可读)。
         analysis_json = json.dumps(asdict(analysis), ensure_ascii=False)
 
-        # 9. Backfill (overwrite both tables' analysis+gmt_modified — P1b
-        #    transactional; decision #13 overwrite). Bot-failure path did NOT
-        #    reach here (analyzer raised in step 6).
+        # 回填(overwrite 两表 analysis+gmt_modified — P1b 事务;决策 #13)。
         self._repo.backfill_analysis(task_id, analysis_json)
 
-        # 9b. 返回态富化:本回合实际拉取的 session_msgs 覆盖快照后挂末位事件,
-        #     保证 do_analysis=true 返回的 timeline 也能在 HTML 展示每个子任务的
-        #     最新会话消息。
-        if fresh_session_msgs:
-            self._attach_session_msgs(trajectory, records, fresh_session_msgs)
-
-        # 10. Return the TaskTrajectory carrying the fresh analysis. Mutate the
-        #    in-memory object (avoids a second DB round-trip); gmt_modified
-        #    reflects the backfill moment.
+        # 返回态富化:会话明细归集(本回合实拉覆盖快照)→ 虚拟展示事件 + 嵌套。
+        session_msgs = self._collect_session_msgs_by_node(records, fresh_session_msgs)
+        self._append_result_display_events(trajectory, outputs, run_modes, session_msgs)
         trajectory.analysis = analysis_json
         trajectory.gmt_modified = int(time.time() * 1000)
+        _nest_system_logs(trajectory)
         return trajectory
 
     # ------------------------------------------------------------------
@@ -620,26 +605,20 @@ class TaskTrajectoryService(
     # (决策 #14 精神:观测旁路,graph 未接线/图读失败 → 跳过,绝不影响轨迹本体)。
     # ------------------------------------------------------------------
 
-    def _attach_node_outputs(self, trajectory: TaskTrajectory) -> None:
-        """把每个子任务(task_id+node_id)的**当前产出**与**真实执行模态**挂到它在
-        timeline 中的**最后一条**事件上。
+    def _attach_node_outputs(
+        self, trajectory: TaskTrajectory
+    ) -> "tuple[dict[str, dict], dict[str, str]]":
+        """计算各子任务当前产出与真实模态(2026-10-16 起**不再逐事件挂载**:
+        结果由 ``_append_result_display_events`` 追加的 ``task_result_display``
+        虚拟事件承载,挂各子任务 timeline 的最后)。
 
-        产出数据经 ``task_execution_graph`` 的查询接口获取
-        (``query_task_dashboard`` → ``node.run_info.output``——执行回投写图的
-        节点级 dict 产出)。真实模态取 ``effective_run_mode(node)``
-        (``run_info.extend_props.actual_run_mode`` 优先,缺失回退 ``run_mode``),
-        同源同挂法。倒序扫 timeline 找每个 node 的末位事件(正序时间线的
-        "最新一条"),挂 ``ev.output``(浅拷贝与图现场解耦)与
-        ``ev.actual_run_mode``。挂载语义:空 ``{}`` / 缺失的产出、无模态均保持
-        ``None``(缺字段=无信号,DTO/HTML 不透出)。
-
-        旁路保障:``graph`` 未接线(轻量 DI)→ 静默跳过;图读失败(任务已删 /
-        relay 外部托管等)→ WARNING + 返回未富化;一律**不**影响 ``get_trajectory``
-        本体返回。注意:富化不写库、不进指纹(``timeline_version`` 仍只敏感于
-        事件行变化)。
+        产出经 ``query_task_dashboard`` → ``node.run_info.output``;真实模态取
+        ``_display_run_mode``(run_mode=bbs 短路,其余 ``effective_run_mode``)。
+        缺素材的节点不出现在返回 map(缺字段=无信号)。旁路:graph 未接线 → 空
+        maps;图读失败 → WARNING + 空 maps;不落库、不进指纹。
         """
         if self._graph is None or not trajectory.timeline:
-            return
+            return {}, {}
         try:
             graph = self._graph.query_task_dashboard(trajectory.task_id)
         except Exception as ex:  # noqa: BLE001  图读失败 → 不富化,轨迹本体照常
@@ -647,7 +626,7 @@ class TaskTrajectoryService(
                 "[task][trajectory] 节点产出富化图读失败,跳过 task=%s: %s: %s",
                 trajectory.task_id, type(ex).__name__, ex,
             )
-            return
+            return {}, {}
         outputs: dict[str, dict] = {}
         run_modes: dict[str, str] = {}
         root_spec = None
@@ -655,27 +634,58 @@ class TaskTrajectoryService(
             out = getattr(node.run_info, "output", None)
             if isinstance(out, dict) and out:
                 outputs[node.node_id] = out
-            # 真实模态:actual_run_mode 优先(执行时交通覆盖),缺失回退 run_mode;
-            # 两者皆缺 → 不挂(缺字段=无信号)。
-            mode = effective_run_mode(node)
+            mode = _display_run_mode(node)
             if mode:
                 run_modes[node.node_id] = mode
             if node.node_id == trajectory.task_id:
                 root_spec = getattr(node, "task_spec", None)
-        if outputs or run_modes:
-            last_seen: set[str] = set()
-            for ev in reversed(trajectory.timeline):
-                node_id = ev.node_id
-                if node_id in last_seen:
-                    continue  # 该节点的当前态(output/modality)只挂最后一条
-                last_seen.add(node_id)
-                out = outputs.get(node_id)
-                if out:
-                    ev.output = dict(out)
-                mode = run_modes.get(node_id)
-                if mode:
-                    ev.actual_run_mode = mode
         self._attach_submit_goal(trajectory, root_spec)
+        return outputs, run_modes
+
+    def _append_result_display_events(
+        self,
+        trajectory: TaskTrajectory,
+        outputs: "dict[str, dict]",
+        run_modes: "dict[str, str]",
+        session_msgs_by_node: "dict[str, list] | None" = None,
+    ) -> None:
+        """在每个子任务 timeline 的**最后**追加虚拟事件 ``task_result_display``:
+        承载该子任务的 output / session_msgs / actual_run_mode(读时富化,不落库、
+        无表行 id;gmt 取该子任务真实末位事件 +1ms 保持排序)。
+
+        仅当该子任务有任何展示素材(产出/模态/会话明细任一)时才追加——空节点
+        保持干净(缺字段=无信号)。插入发生在 ``_nest_system_logs`` 之前,虚拟事件
+        按**顶层主事件**对待(``_is_main_event``),不被嵌套收编。
+        """
+        if not trajectory.timeline:
+            return
+        msgs_by_node = session_msgs_by_node or {}
+        last_idx_by_node: dict[str, int] = {}
+        for idx, ev in enumerate(trajectory.timeline):
+            last_idx_by_node[ev.node_id] = idx
+        inserts: list[tuple[int, TrajectoryEvent]] = []
+        for node_id, last_idx in last_idx_by_node.items():
+            out = outputs.get(node_id)
+            mode = run_modes.get(node_id)
+            msgs = msgs_by_node.get(node_id)
+            if not out and not mode and not msgs:
+                continue
+            last = trajectory.timeline[last_idx]
+            gmt = int(last.gmt_create) + 1
+            inserts.append((last_idx + 1, TrajectoryEvent(
+                task_id=trajectory.task_id,
+                node_id=node_id,
+                action_type=_RESULT_DISPLAY_ACTION,
+                action_result=_RESULT_DISPLAY_RESULT,
+                attempt=0,
+                gmt_create=gmt,
+                gmt_modified=gmt,
+                output=dict(out) if isinstance(out, dict) else out,
+                session_msgs=list(msgs) if msgs else None,
+                actual_run_mode=mode,
+            )))
+        for pos, ev in sorted(inserts, key=lambda pair: pair[0], reverse=True):
+            trajectory.timeline.insert(pos, ev)
 
     def _attach_submit_goal(self, trajectory: TaskTrajectory, root_spec) -> None:
         """把 timeline **第一条 submit 事件**的 ``action_input`` 富化为 TaskSpec 的

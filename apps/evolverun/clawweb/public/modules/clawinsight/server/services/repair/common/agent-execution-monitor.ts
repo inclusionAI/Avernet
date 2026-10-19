@@ -1,3 +1,5 @@
+import { getCurrentEnv } from "@avernet/clawweb-shared/server/env";
+import { resolveTaskControlPlaneEnvironment, type AgentControlPlaneEnvironment } from "./task-control-plane.js";
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import type { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve-repository";
 import type { AisExecutor } from "@avernet/clawevolve/server/contracts/ais-executor";
@@ -7,6 +9,7 @@ import { redactPersistableText } from "@avernet/clawweb-shared/server/services/r
 
 /** Recover missing Base callbacks through the same injected business lifecycle handlers. */
 export async function reconcileAgentExecutions(deps: {
+  controlPlaneEnvironment: AgentControlPlaneEnvironment;
   db: IDatabase; repo: EvolveRepository;
   providers: Readonly<Record<string, Pick<AisExecutor, "getJobStatusDetail" | "stopExecution">>>;
   handlers: Readonly<Record<string, AisStatusHandler>>;
@@ -23,6 +26,7 @@ export async function reconcileAgentExecutions(deps: {
         const task = await deps.repo.findTask(row.task_id), step = await deps.repo.findStep(row.step_id);
         if (!task || !step) continue;
         const config = JSON.parse(task.config_json), contract = aisContractForStep(config, JSON.parse(step.ext_json ?? "{}"), step.step_id);
+        if (resolveTaskControlPlaneEnvironment(config) !== deps.controlPlaneEnvironment) continue;
         const name = contract?.aisBase.statusHandler;
         if (typeof name !== "string" || !Object.hasOwn(deps.handlers, name) || !Object.hasOwn(deps.providers, name)) continue;
         const execution = config.execution;
@@ -49,11 +53,12 @@ export async function reconcileAgentExecutions(deps: {
   }
 }
 
-export function startAgentExecutionMonitor(deps: Parameters<typeof reconcileAgentExecutions>[0]): () => Promise<void> {
+export function startAgentExecutionMonitor(deps: Omit<Parameters<typeof reconcileAgentExecutions>[0], "controlPlaneEnvironment"> & { controlPlaneEnvironment?: AgentControlPlaneEnvironment }): () => Promise<void> {
+  const controlPlaneEnvironment = deps.controlPlaneEnvironment ?? (getCurrentEnv() === "prod" ? "prod" : "pre");
   let inFlight: Promise<void> | undefined;
   const timer = setInterval(() => {
     if (inFlight) return;
-    inFlight = reconcileAgentExecutions(deps).catch(() => console.error("[agent-execution] monitor unavailable"))
+    inFlight = reconcileAgentExecutions({ ...deps, controlPlaneEnvironment }).catch(() => console.error("[agent-execution] monitor unavailable"))
       .finally(() => { inFlight = undefined; });
   }, 20000);
   timer.unref();

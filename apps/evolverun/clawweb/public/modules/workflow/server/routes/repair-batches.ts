@@ -45,14 +45,23 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
   }));
   const handle = (fn: (request: Request, response: Response) => Promise<void>, bodyLimit = MAX_REQUEST_BYTES) => async (request: Request, response: Response) => {
     try {
-      if (request.method !== 'GET') boundedRepairJson(request.body, bodyLimit);
+      if (request.method !== 'GET') {
+        try { boundedRepairJson(request.body, bodyLimit); } catch (error) {
+          if (error instanceof RepairBatchError) throw new RepairBatchError(error.code, error.message, { ...error.details, stage: 'request_body', reasonCode: 'REPAIR_REQUEST_TOO_LARGE' });
+          throw error;
+        }
+      }
       await fn(request, response);
     } catch (error) {
       if (error instanceof RepairBatchError) {
+        if (error.code === 'PAYLOAD_TOO_LARGE') console.warn('[workflow-repair] payload limit', {
+          requestId: response.getHeader('X-Repair-Request-Id'), stage: error.details.stage ?? 'service',
+          reasonCode: error.details.reasonCode ?? error.code, limit: error.details.limit, actualBytes: error.details.actualBytes,
+        });
         const status = error.code === 'INVALID_INPUT' ? 400 : error.code === 'PAYLOAD_TOO_LARGE' ? 413
           : error.code === 'CAPABILITY_UNAVAILABLE' ? 503
           : ['WORKFLOW_NOT_FOUND', 'TASK_NOT_FOUND', 'REVISION_NOT_FOUND', 'ITEM_NOT_FOUND'].includes(error.code) ? 404 : 409;
-        response.status(status).json({ error: error.message, code: error.code, ...error.details });
+        response.status(status).json({ error: error.message, code: error.code, ...error.details, requestId: response.getHeader('X-Repair-Request-Id') });
       } else {
         console.error('[workflow-repair] request failed', {
           method: request.method,
@@ -79,6 +88,11 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
     const actor = await access(request, response, task.workflowId, mode);
     return actor ? { task, actor } : null;
   }
+  router.post('/proposal-integration/retry', handle(async (req, res) => {
+    const workflowId = text(req.body?.workflowId, 'workflowId');
+    if (!await access(req, res, workflowId, 'edit')) return;
+    await service.retryProposalIntegration?.(workflowId); res.json({ ok: true });
+  }));
   router.get('/:taskId/deployment/:deploymentId/verification', handle(async (req, res) => {
     const access = await taskAccess(req, res, 'view');
     if (!access) return;
@@ -105,7 +119,7 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
     const state = query.state ?? 'all';
     if (typeof state !== 'string' || !['pending', 'processing', 'awaiting_verification', 'closed', 'no_action', 'all'].includes(state)) throw new RepairBatchError('INVALID_INPUT', 'Invalid state');
     if (actor) res.json({ ...await service.candidates(workflowId, { state: state as RepairInboxFilter,
-      page: positive(query.page, 'page', 1), pageSize: positive(query.pageSize, 'pageSize', 20, 200),
+      metadataPage: positive(query.metadataPage, 'metadataPage', 1), page: positive(query.page, 'page', 1), pageSize: positive(query.pageSize, 'pageSize', 20, 200),
       nodeId: query.nodeId === undefined ? undefined : text(query.nodeId, 'nodeId'),
       failureMode: query.failureMode === undefined ? undefined : text(query.failureMode, 'failureMode'),
       signature: query.signature === undefined ? undefined : text(query.signature, 'signature'),
@@ -116,10 +130,15 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
   router.get('/candidates', candidates);
   // Body-bearing query only: view authorization, identical snapshot, no materialization or task writes.
   router.post('/candidates/query', candidates);
+  router.post('/selection/query', handle(async (req, res) => {
+    const workflowId = text(req.body?.workflowId, 'workflowId');
+    const actor = await access(req, res, workflowId, 'view');
+    if (actor) res.json({ ...await service.selectionState(workflowId, req.body.itemIds, boolean(req.body.includeHistorical, 'includeHistorical')), canEdit: actor.canEdit });
+  }));
   router.get('/items/:itemId', handle(async (req, res) => {
     const workflowId = text(req.query.workflowId, 'workflowId');
     const actor = await access(req, res, workflowId, 'view');
-    if (actor) res.json(await service.item(workflowId, text(req.params.itemId, 'itemId')));
+    if (actor) res.json(await service.item(workflowId, text(req.params.itemId, 'itemId'), boolean(req.query.originalOnly, 'originalOnly')));
   }));
   router.post('/', handle(async (req, res) => {
     const workflowId = text(req.body?.workflowId, 'workflowId');

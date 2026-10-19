@@ -411,7 +411,8 @@ _SAMPLE_RATIONALE: dict = dataclasses.asdict(
 
 
 def _gate_dispatch_records(repo: _TrajRepo) -> list[TrajectoryEventRecord]:
-    return [r for r in repo.records if r.action_type == "dispatch"]
+    return [r for r in repo.records if r.action_type in ("dispatch",
+                                            "harness-engine-dispatch")]
 
 
 class TestDispatchGateEmitsTrajectory:

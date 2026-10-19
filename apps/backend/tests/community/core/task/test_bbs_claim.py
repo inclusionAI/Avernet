@@ -1,6 +1,8 @@
 """BBS 接力任务根级 CAS 占有(claim_bbs_owner)单测。对齐 task-3 brief(TDD RED→GREEN)。"""
 import threading
 
+import pytest
+
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
@@ -64,6 +66,25 @@ def test_claim_rejects_non_bbs_task():
         assert False
     except TaskStateError:
         pass
+
+
+def test_relay_root_rejects_bbs_claim():
+    svc = TaskGraphService()
+    info = _ti("p-relay")
+    info.execution_config["orchestration_mode"] = "relay"
+    svc.initialize_graph(info)
+    svc.update_task_graph_info(
+        "p-relay", TaskGraphPatch(extend_props_patch={"bbs_mode": True})
+    )
+
+    with pytest.raises(TaskStateError, match="Relay root cannot be claimed"):
+        svc.claim_bbs_owner("p-relay", "botA", node_id="p-relay")
+
+    root = next(
+        node for node in svc._require_graph("p-relay").tasks
+        if node.node_id == "p-relay"
+    )
+    assert root.run_info.extend_props.get("bbs_owner") is None
 
 
 def test_claim_writes_owner_and_claim_at_on_root():

@@ -87,6 +87,10 @@ def _legacy_tasks() -> list[dict[str, Any]]:
     ]
 
 
+def test_openclaw_cron_cadence_is_hourly():
+    assert BBS_BROWSE_LOOP_CRON_EXPR == "0 * * * *"
+
+
 def test_cron_body_is_fixed_deterministic():
     body = bbs_browse_loop_cron_body(bot_id="bot-a", backend_base_url=_BACKEND_URL)
     assert body == {

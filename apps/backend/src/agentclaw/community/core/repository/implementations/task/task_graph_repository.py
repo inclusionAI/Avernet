@@ -283,9 +283,30 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
             if node.run_info.run_mode not in {"single_bot", "coop_group", "bbs"}:
                 continue
             if node.run_info.run_mode == "bbs" and node.status == Status.RUNNING:
-                # BBS claim rotates the node's execution token and immediately
-                # sends the winner its instruction inside the existing publish
-                # operation. It must not reopen the auction intent.
+                # BBS claim marks the node RUNNING and immediately sends the
+                # winner its instruction inside the existing publish operation.
+                # A claimed BBS node is therefore delivered; keep the durable
+                # row for run-generation identity, but settle it so the redriver
+                # cannot redispatch a completed auction later.
+                if node.run_info.extend_props.get("bbs_owner"):
+                    relay_token = node.run_info.extend_props.get("relay_token")
+                    existing = db.query(TaskDeliveryIntentModel).filter(
+                        TaskDeliveryIntentModel.task_id == graph.task_id,
+                        TaskDeliveryIntentModel.node_id == node.node_id,
+                    ).with_for_update().first()
+                    now = int(time.time() * 1000)
+                    has_active_lease = (
+                        existing is not None
+                        and existing.state == "DELIVERING"
+                        and existing.lease_until_ms is not None
+                        and existing.lease_until_ms >= now
+                    )
+                    if existing is not None and relay_token and not has_active_lease:
+                        existing.relay_token = relay_token
+                        existing.state = "DELIVERED"
+                        existing.lease_until_ms = None
+                        existing.lease_token = None
+                        existing.last_error = None
                 continue
             if (
                 node.run_info.run_mode != "bbs"
@@ -410,6 +431,31 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
             )
             if count != 1:
                 raise TaskStateError("delivery intent cannot be requeued")
+
+    def settle_delivery_intent(
+        self, task_id: str, node_id: str, relay_token: str,
+    ) -> bool:
+        """Settle a stale intent without redispatching an already-finished node."""
+        with self._transaction() as db:
+            row = (
+                db.query(TaskDeliveryIntentModel)
+                .filter(
+                    TaskDeliveryIntentModel.task_id == task_id,
+                    TaskDeliveryIntentModel.node_id == node_id,
+                    TaskDeliveryIntentModel.relay_token == relay_token,
+                )
+                .with_for_update()
+                .first()
+            )
+            if row is None:
+                return False
+            if row.state == "DELIVERED":
+                return True
+            row.state = "DELIVERED"
+            row.lease_until_ms = None
+            row.lease_token = None
+            row.last_error = None
+            return True
 
     def _upsert_callback_audit(self, db, record) -> None:
         """Write the inbound callback audit row with ``process_status='PROCESSED'``

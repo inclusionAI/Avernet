@@ -84,6 +84,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from datetime import datetime
 from typing import Optional
@@ -357,7 +358,23 @@ class TaskTrajectoryAssembler:
         only fires on a stale/legacy row.
         """
         # action_type is required (DB NOT NULL); unknown value → ValueError.
-        action_type = TrajectoryActionType(rec.action_type)
+        # 2026-10-15 起 relay trace step 行以 step 码(S+数字,如 S1_CONTEXT)作为
+        # action_type 落表——枚举之外**仅放行 ^S\d+ 形态**;其余未知值仍按损坏行跳过。
+        try:
+            action_type: object = TrajectoryActionType(rec.action_type)
+        except ValueError:
+            raw_action = str(rec.action_type or "")
+            if (
+                re.match(r"^S\d+", raw_action)
+                or raw_action.startswith("harness-engine-")
+                or raw_action == "system"
+            ):
+                # 2026-10-16:harness 引擎闸门发射的行统一 ``harness-engine-`` 前缀
+                # (centralized_recovery._harness_action)——枚举之外放行 S 码
+                # step 行与此前缀形态,其余仍按损坏行跳过。
+                action_type = raw_action
+            else:
+                raise
         # status_from/status_to are UPPERCASE on the Status enum; Optional.
         status_from = Status(rec.status_from) if rec.status_from is not None else None
         status_to = Status(rec.status_to) if rec.status_to is not None else None

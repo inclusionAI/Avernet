@@ -79,7 +79,7 @@ engine_bin = "/usr/local/bin/claude"
 cwd = "/home/me/workspace"
 # model = "..."
 # permission_mode = "..."      # engine-specific
-# engine_options = { ... }     # engine-specific; claude-code/codex accept none
+# engine_options = { ... }     # engine-specific, e.g. Codex sandbox/approval settings
 
 [registration]
 api_url = "https://bcs.example.com/prefix"
@@ -243,10 +243,21 @@ For intentional replacement, stop the bridge and use `register --replace-existin
 The CLI fences concurrent startup, retains a private rollback configuration
 beside the original. For the same Provider, API endpoint, mode, engine and Bot
 reference (omitted reference keeps the saved one), local settings are updated
-without registration; Bot ID, credentials, engine options and state are retained.
+without registration; Bot ID, credentials and state are retained.
 Changing the Provider, API endpoint or explicit Bot reference performs new
 registration and selects fresh state. Changing mode or engine for the same Bot
 is rejected. Failures leave the original local config intact.
+
+When replacing a configuration for the same engine, explicit
+`--engine-option NAME=VALUE` keys override the saved `engine_options`; omitted keys retain their
+saved values and TOML types. This applies both to local updates that keep the
+Bot UUID and to registrations that receive a new UUID. For example,
+`--replace-existing --engine-option sandbox=read-only` replaces a previously
+saved `sandbox = "danger-full-access"` without resetting other engine options.
+Omitting all `--engine-option` flags retains the saved options. The merged
+options are validated before registration or saving; invalid combinations fail
+without changing the original configuration. Options from a different engine
+are not inherited.
 
 Gateway webhook changes use the existing authenticated Provider PATCH API.
 Supply `BRIDGE_PROVIDER_ADMIN_TOKEN` or `--provider-admin-token`; a registration

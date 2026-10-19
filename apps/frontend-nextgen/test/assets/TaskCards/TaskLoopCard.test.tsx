@@ -1,7 +1,6 @@
 /** @jest-environment jsdom */
 import { TaskLoopCard } from '@/components/TaskCards/TaskLoopCard';
 import { submitTaskCardAction } from '@/services/tasks/taskCardBridge';
-import { clearEvaluationAutoExecuteClaimsForTest } from '@/services/tasks/taskEvaluationAutoExecute';
 import { fireEvent, render, screen } from '@testing-library/react';
 
 jest.mock('@/services/tasks/taskCardBridge', () => ({
@@ -23,7 +22,6 @@ function cardProps(content: unknown) {
 describe('TaskLoopCard', () => {
   beforeEach(() => {
     mockedSubmit.mockClear();
-    clearEvaluationAutoExecuteClaimsForTest();
   });
 
   it('renders a task_ready payload without cardId or global data', () => {
@@ -128,7 +126,7 @@ describe('TaskLoopCard', () => {
     });
   });
 
-  it('auto-executes a pre-confirmed evaluation card exactly once and hides manual actions', () => {
+  it('renders a pre-confirmed evaluation card read-only without frontend execution', () => {
     const task = {
       task_type: 'dynamic' as const,
       goal: '完成存储行业尽调',
@@ -142,27 +140,19 @@ describe('TaskLoopCard', () => {
       evaluation_auto_execute_id: 'evaluation-delivery-1',
     };
 
-    const first = render(<TaskLoopCard {...cardProps({ type: 'task_ready', task, hidden_flags })} />);
-
-    expect(mockedSubmit).toHaveBeenCalledTimes(1);
-    expect(mockedSubmit).toHaveBeenCalledWith('执行任务', {
-      __taskAction: 'execute',
-      __taskAutoExecute: true,
-      task: expect.objectContaining({
-        goal: '完成存储行业尽调',
-        hidden_flags,
-      }),
-    });
-    expect(screen.getByText('评测任务已确认，正在自动提交')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: '确认' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '编辑' })).toBeNull();
-
-    first.unmount();
     render(<TaskLoopCard {...cardProps({ type: 'task_ready', task, hidden_flags })} />);
-    expect(mockedSubmit).toHaveBeenCalledTimes(1);
+
+    expect(screen.getByText('任务已就绪')).toBeTruthy();
+    expect(screen.getByText('完成存储行业尽调')).toBeTruthy();
+    expect(screen.getByText('评测任务已由服务端自动执行')).toBeTruthy();
+    expect(mockedSubmit).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: '确认' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '丢弃' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '暂存' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '编辑' })).toBeNull();
   });
 
-  it('does not auto-execute an evaluation card without a unique delivery id', () => {
+  it('keeps an evaluation card read-only even without a unique delivery id', () => {
     render(
       <TaskLoopCard
         {...cardProps({
@@ -180,11 +170,12 @@ describe('TaskLoopCard', () => {
       />,
     );
 
+    expect(screen.getByText('评测任务已由服务端自动执行')).toBeTruthy();
     expect(mockedSubmit).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: '确认' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '确认' })).toBeNull();
   });
 
-  it('auto-executes an evaluation card with smoke flags and keeps the action single-shot', () => {
+  it('renders an evaluation card with smoke flags but does not dispatch from history', () => {
     const task = {
       task_type: 'dynamic' as const,
       goal: '完成存储行业尽调',
@@ -205,12 +196,10 @@ describe('TaskLoopCard', () => {
 
     render(<TaskLoopCard {...cardProps({ type: 'task_ready', task, hidden_flags })} />);
 
-    expect(mockedSubmit).toHaveBeenCalledTimes(1);
-    expect(mockedSubmit).toHaveBeenCalledWith('执行任务', {
-      __taskAction: 'execute',
-      __taskAutoExecute: true,
-      task: expect.objectContaining({ hidden_flags }),
-    });
+    expect(screen.getByText('完成存储行业尽调')).toBeTruthy();
+    expect(screen.getByText('明确投资价值')).toBeTruthy();
+    expect(mockedSubmit).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: '确认' })).toBeNull();
   });
 
   it('forwards the hidden relay smoke flag when dispatching a confirmed task', () => {

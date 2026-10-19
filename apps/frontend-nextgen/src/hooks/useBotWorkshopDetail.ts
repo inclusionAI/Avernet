@@ -3,7 +3,13 @@ import { history } from '@umijs/max';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
-export function useBotWorkshopDetail(id: string | null, editable: boolean, enabled = true, ownerId?: string) {
+export function useBotWorkshopDetail(
+  id: string | null,
+  editable: boolean,
+  enabled = true,
+  ownerId?: string,
+  currentUserId?: string,
+) {
   const [bot, setBot] = useState<BotDomain>();
   const [loading, setLoading] = useState(Boolean(id));
   const [saving, setSaving] = useState(false);
@@ -13,13 +19,13 @@ export function useBotWorkshopDetail(id: string | null, editable: boolean, enabl
     setLoading(true);
     setError(undefined);
     try {
-      setBot(await botWorkshopService.detail(id, ownerId));
+      setBot(await botWorkshopService.detail(id, ownerId, currentUserId));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Bot 详情加载失败');
     } finally {
       setLoading(false);
     }
-  }, [enabled, id, ownerId]);
+  }, [currentUserId, enabled, id, ownerId]);
   useEffect(() => {
     void load();
   }, [load]);

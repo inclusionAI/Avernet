@@ -26,6 +26,12 @@ class TaskExecutorRelayMixin:
             )
             return False
         persisted_graph = self._graph.query_task_dashboard(node.task_id)
+        if persisted_graph.is_relay and node.node_id == node.task_id:
+            logger.error(
+                "[task][bbs_mode] reject Relay root BBS dispatch task=%s node=%s",
+                node.task_id, node.node_id,
+            )
+            return False
         if not any(current.node_id == node.node_id for current in persisted_graph.tasks):
             logger.error(
                 "[task][bbs_mode] dispatch failed: node missing task=%s node=%s",

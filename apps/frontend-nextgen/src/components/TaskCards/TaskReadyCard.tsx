@@ -1,9 +1,8 @@
 import { Button, Textarea } from '@/components/ui';
 import { useTaskCardAction } from '@/hooks/useTaskCardAction';
-import { claimEvaluationAutoExecute } from '@/services/tasks/taskEvaluationAutoExecute';
 import { cn } from '@/utils/cn';
 import { Bookmark, Check, ExternalLink, Lightbulb, Pencil, Trash2 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { asItems, normalizeReadyTask } from './shared';
 import {
   EditFieldControls,
@@ -24,20 +23,9 @@ export function TaskReadyCard({ data }: { data: TaskCardData }) {
   const task = normalizeReadyTask(data);
   const confirmSet = new Set(data.needs_confirmation ?? []);
   const submitTaskCardAction = useTaskCardAction();
-  const autoExecuteId = data.hidden_flags?.evaluation_auto_execute_id?.trim() ?? '';
-  const autoExecute = data.hidden_flags?.evaluation_auto_execute === true && autoExecuteId.length > 0;
-  const autoExecuteStartedRef = useRef(false);
-
-  useEffect(() => {
-    if (!autoExecute || autoExecuteStartedRef.current) return;
-    autoExecuteStartedRef.current = true;
-    if (!claimEvaluationAutoExecute(autoExecuteId)) return;
-    submitTaskCardAction('执行任务', {
-      __taskAction: 'execute',
-      __taskAutoExecute: true,
-      task,
-    });
-  }, [autoExecute, autoExecuteId, submitTaskCardAction, task]);
+  // Benchmark execution is owned by benchmark_execute on the backend. The
+  // historical card only remains visible for later session playback.
+  const autoExecute = data.hidden_flags?.evaluation_auto_execute === true;
 
   const [editingField, setEditingField] = useState<EditableField | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -256,11 +244,11 @@ export function TaskReadyCard({ data }: { data: TaskCardData }) {
         <div className="px-3.5 pb-2">
           <p className="text-[9px] text-gray-400 flex items-center gap-1 leading-none">
             <Lightbulb className="h-2 w-2" aria-hidden />
-            {autoExecute ? '评测任务已确认，正在自动提交' : '需要修改？直接在对话中告诉我'}
+            {autoExecute ? '评测任务已由服务端自动执行' : '需要修改？直接在对话中告诉我'}
           </p>
         </div>
 
-        {/* Evaluation cards are pre-confirmed and auto-submit once on mount. */}
+        {/* Evaluation cards are pre-confirmed and executed by benchmark_execute. */}
         {!autoExecute ? (
           <div className="px-3.5 pb-3.5">
             <div className="flex items-center gap-1.5">

@@ -34,6 +34,7 @@ from agentclaw.community.core.skill_center.policies.capability_ownership import 
 )
 from agentclaw.community.core.skill_center.offline_policy import require_skill_online
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.core.models.skill_installation_source import SkillInstallationSourceKind
 
 
 class DirectInstallationCommands:
@@ -75,7 +76,12 @@ class DirectInstallationCommands:
                 default_engine_types=default_engine_types,
             )
             if int(skill.id) in old.installations:
-                return DesiredStateMutation({}, False, old)
+                changed = skill_installations.install(
+                    session, bot_id=bot_id, owner_id=owner_id,
+                    env=get_current_env(), skill_id=int(skill.id),
+                    source_kind=SkillInstallationSourceKind.DIRECT,
+                )
+                return DesiredStateMutation({}, changed, old)
             self._require_unique_runtime_names(
                 session, bot_id=bot_id, owner_id=owner_id,
                 candidate_ids={int(skill.id)},
@@ -86,6 +92,7 @@ class DirectInstallationCommands:
                 owner_id=owner_id,
                 env=get_current_env(),
                 skill_id=int(skill.id),
+                source_kind=SkillInstallationSourceKind.DIRECT,
             )
             session.flush()
             # The Skill's MCP dependencies join the Bot's projected MCP set

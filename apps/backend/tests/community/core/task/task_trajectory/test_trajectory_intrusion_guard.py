@@ -356,8 +356,16 @@ def _set_running_root(svc, task_id, *, request_input: str | None = None) -> None
 
 # The lifecycle span action_types in order. The consolidated guard asserts
 # each was attempted and each got a WARNING in the cross-gate assertions.
+# 2026-10-16:harness 闸门(reset / MISS dispatch / HUNG transition / enter_bbs)
+# 的 action_type 统一 ``harness-engine-`` 前缀;引擎闸门(submit/plan/hit dispatch/
+# execute/verify)保持裸词。跨闸门守卫对两种形态都断言。
+# 2026-10-16:harness 闸门(reset / HUNG transition / enter_bbs)的 action_type
+# 统一 ``harness-engine-`` 前缀;引擎闸门(submit/plan/hit dispatch/execute/
+# verify)保持裸词。本守卫的生命周期 span 不含 MISS 派发(harness-engine-dispatch
+# 属另一路径,由 dispatch 门miss 专题用例覆盖)。
 _TRAJECTORY_ACTION_TYPES = (
-    "submit", "plan", "dispatch", "execute", "verify", "reset",
+    "submit", "plan", "dispatch", "execute", "verify",
+    "harness-engine-reset", "harness-engine-transition", "harness-engine-submit",
 )
 
 

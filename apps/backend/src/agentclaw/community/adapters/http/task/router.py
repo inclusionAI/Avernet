@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
@@ -35,6 +36,7 @@ from agentclaw.community.adapters.http.task.bbs_routes import router as bbs_api_
 from agentclaw.community.adapters.http.task.intake_routes import router as intake_api_router
 from agentclaw.community.adapters.http.task.callback_routes import (
     _dispatch,
+    emit_relay_report_reject_trajectory,
     persist_relay_report_audit,
     task_callback_router as task_callback_router,
 )
@@ -61,6 +63,7 @@ from agentclaw.community.core.task.task_runner.client.ports import (
     OpenApiBotPort,
 )
 from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
+    build_benchmark_task_launch_message,
     compose_benchmark_a2a_session_id,
     format_benchmark_prompt,
 )
@@ -107,54 +110,92 @@ async def execute_task_internal(
 async def benchmark_execute_task_internal(
     body: TaskInfoRequestDTO,
     request: Request,
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
     bot_port: OpenApiBotPort = Injected(OpenApiBotPort),  # noqa: B008
     bcs_client: BcsClientPort = Injected(BcsClientPort),  # noqa: B008
     bot_tokens: BcsBotTokenProvider = Injected(BcsBotTokenProvider),  # noqa: B008
 ) -> Envelope[TaskOpResultDTO]:
-    """Benchmark 执行(内部副本,不经 spanner)。构造 prompt 直接发给 bot,不创建 task。
+    """Benchmark 自动执行(内部副本,不经 spanner)。
 
-    task_id 由 bot 在 session 中自行生成;本端点只负责把 task_spec 构造为 prompt 并通过
-    OpenApiBotPort.send_message 发给 owner_bot。返回 benchmark_run_id / benchmark_session_id。
+    评测会话由 API 创建,不能依赖前端挂载 task_ready 卡片触发 execute。端点先发送原
+    benchmark prompt 让 Bot 产出可回放的澄清卡片;随后创建正式任务,把副屏声明和 relay
+    根指令作为第二条消息发回同一会话,使评测不开会话也能自动执行。
 
-    A2A 分支(execution_config.target_bot_id 与 target_user_id 同时非空):不建 task、不改走
-    openapi messages 通道,由 owner_bot 经 BCS A2A ``chat-async`` 直接发给目标 bot
-    (``POST /bots/{target_bot_id}:{target_user_id}/chat-async``);发送方身份取
-    ``BcsBotTokenProvider.get_token(owner_bot_id)``(bcs_bots.session_token)作 Bearer;
-    sessionId 由服务端生成(``compose_benchmark_a2a_session_id``,格式
-    ``bcs-cli:task-<时间戳>-<随机6位>``)。"""
-    # 构造 prompt 并直接发给 bot(不调 service.execute,不创建 task)
-    task_spec_dict = body.task_spec.model_dump()
-    prompt = format_benchmark_prompt(task_spec_dict)
+    A2A 分支第一个请求仍由 owner_bot(caller/proxy)发起;正式任务的 owner 绑定到
+    target_bot_id/target_user_id,并复用服务端生成的 benchmark session。
+    """
+    task_request = task_info_request_from_dto(body)
+    prompt = format_benchmark_prompt(body.task_spec.model_dump())
     bot_identity = compose_bot_identity(body.owner_bot_id, body.owner_user_id)
 
     a2a_target_bot = str(body.execution_config.target_bot_id or "").strip() or None
     a2a_target_user = str(body.execution_config.target_user_id or "").strip() or None
+    a2a = bool(a2a_target_bot and a2a_target_user)
 
-    extend_props: dict[str, Any] = {}
-    if a2a_target_bot and a2a_target_user:
-        # A2A 分支:owner_bot → target_bot 的 BCS chat-async;不走 ensure_grant/openapi 通道。
+    extend_props: dict[str, Any] = {
+        "benchmark_channel": "a2a" if a2a else "openapi",
+    }
+    caller_token: str | None = None
+    session_id = ""
+
+    def _send_failed(exc: Exception) -> TaskOpResult:
+        extend_props["benchmark_send"] = f"error: {exc}"
+        return TaskOpResult(
+            task_id="",
+            success=False,
+            run_id=0,
+            error=f"benchmark prompt send failed: {exc}",
+            extend_props=extend_props,
+        )
+
+    if a2a:
+        if bcs_client is None:
+            return envelope(
+                op_result_to_dto(
+                    TaskOpResult(
+                        task_id="",
+                        success=False,
+                        run_id=0,
+                        error="benchmark prompt send failed: BCS client is unavailable",
+                        extend_props={**extend_props, "benchmark_send": "error"},
+                    )
+                ),
+                request,
+            )
         session_id = compose_benchmark_a2a_session_id()
-        extend_props["benchmark_channel"] = "a2a"
         extend_props["benchmark_session_id"] = session_id
-        if bcs_client is not None:
-            try:
-                caller_token = (
-                    bot_tokens.get_token(bot_identity) if bot_tokens is not None else None
-                )
-                sent = await bcs_client.send_message_a2a(
-                    target_bot_id=a2a_target_bot,
-                    target_user_id=a2a_target_user,
-                    message=prompt,
-                    session_id=session_id,
-                    caller_bearer=caller_token,
-                )
-                extend_props["benchmark_run_id"] = sent.run_id
-                extend_props["benchmark_send"] = "ok"
-            except Exception as exc:  # noqa: BLE001
-                extend_props["benchmark_send"] = f"error: {exc}"
-        else:
-            extend_props["benchmark_send"] = "skip"
-    elif bot_port is not None:
+        caller_token = bot_tokens.get_token(bot_identity)
+        try:
+            sent = await bcs_client.send_message_a2a(
+                target_bot_id=str(a2a_target_bot),
+                target_user_id=str(a2a_target_user),
+                message=prompt,
+                session_id=session_id,
+                caller_bearer=caller_token,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return envelope(op_result_to_dto(_send_failed(exc)), request)
+        extend_props["benchmark_run_id"] = sent.run_id
+        extend_props["benchmark_send"] = "ok"
+        task_request = replace(
+            task_request,
+            owner_bot_id=str(a2a_target_bot),
+            owner_user_id=str(a2a_target_user),
+        )
+    else:
+        if bot_port is None:
+            return envelope(
+                op_result_to_dto(
+                    TaskOpResult(
+                        task_id="",
+                        success=False,
+                        run_id=0,
+                        error="benchmark prompt send failed: bot port is unavailable",
+                        extend_props={**extend_props, "benchmark_send": "error"},
+                    )
+                ),
+                request,
+            )
         try:
             await bot_port.ensure_grant(bot_identity)
             sent = await bot_port.send_message(
@@ -162,20 +203,90 @@ async def benchmark_execute_task_internal(
                 message=prompt,
                 metadata={"benchmark": True},
             )
-            extend_props["benchmark_run_id"] = sent.run_id
-            extend_props["benchmark_session_id"] = sent.session_id
-            extend_props["benchmark_send"] = "ok"
         except Exception as exc:  # noqa: BLE001
-            extend_props["benchmark_send"] = f"error: {exc}"
-    else:
-        extend_props["benchmark_send"] = "skip"
+            return envelope(op_result_to_dto(_send_failed(exc)), request)
+        if not (sent.session_id or "").strip():
+            return envelope(
+                op_result_to_dto(
+                    TaskOpResult(
+                        task_id="",
+                        success=False,
+                        run_id=0,
+                        error="benchmark prompt send failed: bot session id is unavailable",
+                        extend_props={
+                            **extend_props,
+                            "benchmark_run_id": sent.run_id,
+                            "benchmark_send": "error",
+                        },
+                    )
+                ),
+                request,
+            )
+        session_id = str(sent.session_id)
+        extend_props["benchmark_run_id"] = sent.run_id
+        extend_props["benchmark_session_id"] = session_id
+        extend_props["benchmark_send"] = "ok"
 
-    result = TaskOpResult(
-        task_id="",
-        success=True,
-        run_id=0,
-        extend_props=extend_props,
+    execution_config = dict(task_request.execution_config)
+    execution_config["main_session_id"] = session_id
+    task_request = replace(task_request, execution_config=execution_config)
+
+    result = await service.execute(task_request)
+    result_props = result.extend_props or {}
+    if not result.success:
+        result.extend_props = {**result_props, **extend_props}
+        return envelope(op_result_to_dto(result), request)
+    root_instruction = str(result_props.get("root_execution_instruction") or "")
+    result_mode = str(result_props.get("orchestration_mode") or "")
+    if result_mode == "relay" and not root_instruction.strip():
+        result = replace(
+            result,
+            success=False,
+            error="relay task creation returned no root execution instruction",
+        )
+        result.extend_props = result_props = {**result_props, **extend_props}
+        return envelope(op_result_to_dto(result), request)
+
+    launch_message = build_benchmark_task_launch_message(
+        task_id=result.task_id,
+        owner_user_id=task_request.owner_user_id,
+        task_spec=body.task_spec.model_dump(),
+        root_execution_instruction=root_instruction,
     )
+    try:
+        if a2a:
+            launch_sent = await bcs_client.send_message_a2a(
+                target_bot_id=str(a2a_target_bot),
+                target_user_id=str(a2a_target_user),
+                message=launch_message,
+                session_id=session_id,
+                caller_bearer=caller_token,
+            )
+        else:
+            launch_sent = await bot_port.send_message(
+                bot_id=bot_identity,
+                message=launch_message,
+                metadata={"benchmark": True, "session_id": session_id},
+            )
+    except Exception as exc:  # noqa: BLE001
+        result = replace(
+            result,
+            success=False,
+            error=f"benchmark task launch send failed: {exc}",
+        )
+        result.extend_props = {
+            **result_props,
+            **extend_props,
+            "benchmark_launch_send": f"error: {exc}",
+        }
+        return envelope(op_result_to_dto(result), request)
+
+    result.extend_props = {
+        **result_props,
+        **extend_props,
+        "benchmark_launch_run_id": launch_sent.run_id,
+        "benchmark_launch_send": "ok",
+    }
     return envelope(op_result_to_dto(result), request)
 
 
@@ -435,6 +546,11 @@ async def report_callback(
             await persist_relay_report_audit(
                 svc, raw=raw_event, command=command,
                 error=f"{type(relay_exc).__name__}: {relay_exc}",
+            )
+            # 被拒上报也落一条 system 轨迹行(错误信息 + 完整堆栈,2026-10-16):
+            # best-effort 吞异常,原异常照原路径外抛(不被掩盖、不被替换)。
+            emit_relay_report_reject_trajectory(
+                svc, command=command, exc=relay_exc,
             )
             raise
         await persist_relay_report_audit(

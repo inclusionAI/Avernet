@@ -2102,9 +2102,13 @@
             "type": "string"
           },
           "stage": {
-            "const": "draft",
             "default": "draft",
-            "description": "Configuration stage; the public API exposes draft only.",
+            "description": "Configuration stage the row belongs to. verify/online rows exist only as publish inputs for service Bots; other bots expose draft.",
+            "enum": [
+              "draft",
+              "verify",
+              "online"
+            ],
             "title": "Stage",
             "type": "string"
           },
@@ -2178,6 +2182,17 @@
             ],
             "description": "Optional human-readable purpose of the Channel.",
             "title": "Description"
+          },
+          "stage": {
+            "default": "draft",
+            "description": "Which configuration stage the row belongs to; the legacy UI's '生效环境' selector. verify/online rows are publish-flow inputs for service Bots, exist only for 'plugin' channels (the legacy BCN page has no stage concept), and are rejected for other bot types. Immutable after creation.",
+            "enum": [
+              "draft",
+              "verify",
+              "online"
+            ],
+            "title": "Stage",
+            "type": "string"
           },
           "type": {
             "const": "dingding",
@@ -4111,6 +4126,19 @@
             "title": "Enable Streaming Cards",
             "type": "boolean"
           },
+          "forward_sender_identity": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether inbound messages forward the DingTalk sender identity when binding_mode is 'bcn_gateway'; null otherwise.",
+            "title": "Forward Sender Identity"
+          },
           "group_chat_scope": {
             "anyOf": [
               {
@@ -4244,6 +4272,19 @@
             "description": "Whether DingTalk cards update while output streams.",
             "title": "Enable Streaming Cards",
             "type": "boolean"
+          },
+          "forward_sender_identity": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether inbound messages forward the DingTalk sender identity to the Bot's context; only valid when binding_mode is 'bcn_gateway'.",
+            "title": "Forward Sender Identity"
           },
           "group_chat_scope": {
             "anyOf": [
@@ -4412,6 +4453,19 @@
             ],
             "description": "Enable or disable streaming cards; omit to keep.",
             "title": "Enable Streaming Cards"
+          },
+          "forward_sender_identity": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether inbound messages forward the DingTalk sender identity; omit to keep. bcn_gateway channels only.",
+            "title": "Forward Sender Identity"
           },
           "group_chat_scope": {
             "anyOf": [
@@ -24890,6 +24944,1047 @@
           "created_at"
         ],
         "title": "SkillSecurityObservation",
+        "type": "object"
+      },
+      "RunSummaryDTO": {
+        "properties": {
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "final_answer": {
+            "title": "Final Answer"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "termination_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Termination Reason"
+          }
+        },
+        "required": [
+          "run_id",
+          "status"
+        ],
+        "title": "RunSummaryDTO",
+        "type": "object"
+      },
+      "SubmitRunDTO": {
+        "additionalProperties": false,
+        "properties": {
+          "agents": {
+            "items": {
+              "$ref": "#/components/schemas/AgentSpecDTO"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Agents",
+            "type": "array"
+          },
+          "goal": {
+            "maxLength": 8000,
+            "title": "Goal",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "maxLength": 190,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunOptionsDTO"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProviderKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tenant": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Tenant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant",
+          "goal",
+          "agents"
+        ],
+        "title": "SubmitRunDTO",
+        "type": "object"
+      },
+      "RunOptionsDTO": {
+        "additionalProperties": false,
+        "description": "Per-request operational overrides — values absent from the request\nfall back to the deployment's `agentswarm.orchestration.*` config.\n\nKeys mirror the yaml config keys so operators think in one vocabulary.\nAll values are upper-bounded by the deployment config: a caller can\ntighten a budget (shorter timeout, fewer turns) but never loosen it\npast what the deployment allows (the max in `_validated` clamps to\nthe configured value).",
+        "properties": {
+          "max_attempts": {
+            "anyOf": [
+              {
+                "maximum": 3.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-agent retry cap for this run (fresh-context attempts). Omitted falls to the deployment default (3). Non-retryable failures (e.g. a space quota ceiling) stop at the first attempt regardless.",
+            "title": "Max Attempts"
+          },
+          "max_total_agents": {
+            "anyOf": [
+              {
+                "maximum": 64.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total spawn ceiling for the run.",
+            "title": "Max Total Agents"
+          },
+          "max_turns": {
+            "anyOf": [
+              {
+                "maximum": 50.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Orchestrator decision-turn budget.",
+            "title": "Max Turns"
+          },
+          "max_width": {
+            "anyOf": [
+              {
+                "maximum": 16.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Max concurrently in-flight agents (e.g. 10 tasks with max_width=3: only 3 run at a time, the rest queue).",
+            "title": "Max Width"
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model for agents that don't specify their own.",
+            "title": "Model Name"
+          },
+          "per_attempt_timeout_seconds": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 600.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Upper bound for one attempt task (seconds).",
+            "title": "Per Attempt Timeout Seconds"
+          },
+          "slice_max_seconds": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 3600.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Orchestrator deadline per slice (seconds).",
+            "title": "Slice Max Seconds"
+          }
+        },
+        "title": "RunOptionsDTO",
+        "type": "object"
+      },
+      "SubmitRunResponseDTO": {
+        "properties": {
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "title": "SubmitRunResponseDTO",
+        "type": "object"
+      },
+      "RunStatus": {
+        "enum": [
+          "RUNNING",
+          "COMPLETED",
+          "FAILED",
+          "CANCELLED",
+          "TIMED_OUT",
+          "GUARD_KILLED",
+          "STUCK"
+        ],
+        "title": "RunStatus",
+        "type": "string"
+      },
+      "ProviderKind": {
+        "description": "Which serving substrate backs the run (wire + ac_agent_swarm_run.provider).",
+        "enum": [
+          "default",
+          "stub",
+          "avernet"
+        ],
+        "title": "ProviderKind",
+        "type": "string"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "AgentSpecDTO": {
+        "additionalProperties": false,
+        "properties": {
+          "bot_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bot Type"
+          },
+          "config_manifest": {
+            "default": "",
+            "description": "Full five-category bot_config_manifest YAML document for this agent (mcp/resources/skills/cli_tools/identity + sources + script), exactly as POST /openapi/v1/bots/with-manifest accepts it. When present, the swarm provisions the agent's bot from this document verbatim; the platform's preflight validates its grammar.",
+            "maxLength": 200000,
+            "title": "Config Manifest",
+            "type": "string"
+          },
+          "engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine"
+          },
+          "identity_file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identity File"
+          },
+          "instructions": {
+            "default": "",
+            "maxLength": 20000,
+            "title": "Instructions",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AgentKind",
+            "default": "llm"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            "maxProperties": 32,
+            "propertyNames": {
+              "maxLength": 200
+            },
+            "title": "Metadata",
+            "type": "object"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "name": {
+            "maxLength": 128,
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "maxLength": 256,
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "role"
+        ],
+        "title": "AgentSpecDTO",
+        "type": "object"
+      },
+      "AgentKind": {
+        "enum": [
+          "llm",
+          "bot"
+        ],
+        "title": "AgentKind",
+        "type": "string"
+      },
+      "CancelResponseDTO": {
+        "properties": {
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "status"
+        ],
+        "title": "CancelResponseDTO",
+        "type": "object"
+      },
+      "RunDetailDTO": {
+        "properties": {
+          "agent_catalog": {
+            "items": {
+              "$ref": "#/components/schemas/AgentCatalogSpecDTO"
+            },
+            "title": "Agent Catalog",
+            "type": "array"
+          },
+          "agents": {
+            "items": {
+              "$ref": "#/components/schemas/AgentDetailDTO"
+            },
+            "title": "Agents",
+            "type": "array"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "final_answer": {
+            "title": "Final Answer"
+          },
+          "goal": {
+            "title": "Goal",
+            "type": "string"
+          },
+          "guards": {
+            "items": {
+              "$ref": "#/components/schemas/GuardEventDetailDTO"
+            },
+            "title": "Guards",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "rounds": {
+            "items": {
+              "$ref": "#/components/schemas/RoundDetailDTO"
+            },
+            "title": "Rounds",
+            "type": "array"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tenant": {
+            "title": "Tenant",
+            "type": "string"
+          },
+          "termination_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Termination Reason"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "tenant",
+          "goal",
+          "provider"
+        ],
+        "title": "RunDetailDTO",
+        "type": "object"
+      },
+      "RoundDetailDTO": {
+        "properties": {
+          "cohort_agent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Cohort Agent Ids",
+            "type": "array"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "orchestrator_steps": {
+            "title": "Orchestrator Steps",
+            "type": "integer"
+          },
+          "round_id": {
+            "title": "Round Id",
+            "type": "string"
+          },
+          "slowest_attempt_steps": {
+            "title": "Slowest Attempt Steps",
+            "type": "integer"
+          },
+          "stage_index": {
+            "title": "Stage Index",
+            "type": "integer"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "round_id",
+          "stage_index",
+          "orchestrator_steps",
+          "slowest_attempt_steps",
+          "cohort_agent_ids",
+          "started_at"
+        ],
+        "title": "RoundDetailDTO",
+        "type": "object"
+      },
+      "AgentDetailDTO": {
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "attempt_ledger": {
+            "items": {
+              "$ref": "#/components/schemas/AgentAttemptDetailDTO"
+            },
+            "title": "Attempt Ledger",
+            "type": "array"
+          },
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "bot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bot Id"
+          },
+          "bot_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bot State"
+          },
+          "depth": {
+            "title": "Depth",
+            "type": "integer"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "idempotency_key": {
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/AgentMessageDetailDTO"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "output": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output"
+          },
+          "parent_agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Agent Id"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentResultDetailDTO"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "spawn_round": {
+            "title": "Spawn Round",
+            "type": "integer"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id",
+          "name",
+          "kind",
+          "status",
+          "depth",
+          "spawn_round",
+          "idempotency_key",
+          "attempts"
+        ],
+        "title": "AgentDetailDTO",
+        "type": "object"
+      },
+      "GuardEventDetailDTO": {
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "integer"
+          },
+          "details": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "kind",
+          "created_at"
+        ],
+        "title": "GuardEventDetailDTO",
+        "type": "object"
+      },
+      "AgentCatalogSpecDTO": {
+        "properties": {
+          "engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          }
+        },
+        "required": [
+          "name",
+          "kind"
+        ],
+        "title": "AgentCatalogSpecDTO",
+        "type": "object"
+      },
+      "AgentResultDetailDTO": {
+        "properties": {
+          "artifact_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Key"
+          },
+          "payload": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload"
+          },
+          "routed_at": {
+            "title": "Routed At",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "routed_at"
+        ],
+        "title": "AgentResultDetailDTO",
+        "type": "object"
+      },
+      "AgentMessageDetailDTO": {
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "artifact_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Key"
+          },
+          "content": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "integer"
+          },
+          "decision": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "token_usage": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Usage"
+          }
+        },
+        "required": [
+          "message_id",
+          "agent_id",
+          "seq",
+          "role",
+          "created_at"
+        ],
+        "title": "AgentMessageDetailDTO",
+        "type": "object"
+      },
+      "AgentAttemptDetailDTO": {
+        "properties": {
+          "binding_state": {
+            "title": "Binding State",
+            "type": "string"
+          },
+          "claim_epoch": {
+            "title": "Claim Epoch",
+            "type": "integer"
+          },
+          "executor_id": {
+            "title": "Executor Id",
+            "type": "string"
+          },
+          "executor_kind": {
+            "title": "Executor Kind",
+            "type": "string"
+          },
+          "executor_name": {
+            "title": "Executor Name",
+            "type": "string"
+          },
+          "result_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Message"
+          },
+          "result_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Status"
+          },
+          "slice_retry_index": {
+            "title": "Slice Retry Index",
+            "type": "integer"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          }
+        },
+        "required": [
+          "claim_epoch",
+          "slice_retry_index",
+          "executor_kind",
+          "executor_id",
+          "executor_name",
+          "binding_state"
+        ],
+        "title": "AgentAttemptDetailDTO",
         "type": "object"
       }
     }
@@ -91269,6 +92364,473 @@
         "summary": "Get Skill Security Observations",
         "tags": [
           "skills"
+        ]
+      }
+    },
+    "/openapi/v1/agentswarm/runs": {
+      "get": {
+        "operationId": "list_runs_openapi_v1_agentswarm_runs_get",
+        "parameters": [
+          {
+            "description": "tenant scope for the run",
+            "in": "query",
+            "name": "tenant",
+            "required": true,
+            "schema": {
+              "description": "tenant scope for the run",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Tenant",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RunStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Runs",
+        "tags": [
+          "agentswarm"
+        ]
+      },
+      "post": {
+        "operationId": "submit_run_openapi_v1_agentswarm_runs_post",
+        "parameters": [
+          {
+            "description": "block until terminal and return the full run",
+            "in": "query",
+            "name": "wait",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "block until terminal and return the full run",
+              "title": "Wait",
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitRunDTO"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SubmitRunResponseDTO"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RunSummaryDTO"
+                    }
+                  ],
+                  "title": "Response Submit Run Openapi V1 Agentswarm Runs Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Run",
+        "tags": [
+          "agentswarm"
+        ]
+      }
+    },
+    "/openapi/v1/agentswarm/runs/{run_id}": {
+      "get": {
+        "operationId": "get_run_openapi_v1_agentswarm_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "tenant scope for the run",
+            "in": "query",
+            "name": "tenant",
+            "required": true,
+            "schema": {
+              "description": "tenant scope for the run",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Tenant",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunSummaryDTO"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Run",
+        "tags": [
+          "agentswarm"
+        ]
+      }
+    },
+    "/openapi/v1/agentswarm/runs/{run_id}/cancel": {
+      "post": {
+        "operationId": "cancel_run_openapi_v1_agentswarm_runs__run_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "tenant scope for the run",
+            "in": "query",
+            "name": "tenant",
+            "required": true,
+            "schema": {
+              "description": "tenant scope for the run",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Tenant",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelResponseDTO"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Run",
+        "tags": [
+          "agentswarm"
+        ]
+      }
+    },
+    "/openapi/v1/agentswarm/runs/{run_id}/events": {
+      "get": {
+        "operationId": "stream_run_openapi_v1_agentswarm_runs__run_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "tenant scope for the run",
+            "in": "query",
+            "name": "tenant",
+            "required": true,
+            "schema": {
+              "description": "tenant scope for the run",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Tenant",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream Run",
+        "tags": [
+          "agentswarm"
+        ]
+      }
+    },
+    "/openapi/v1/agentswarm/runs/{run_id}/report": {
+      "get": {
+        "operationId": "report_openapi_v1_agentswarm_runs__run_id__report_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "tenant scope for the run",
+            "in": "query",
+            "name": "tenant",
+            "required": true,
+            "schema": {
+              "description": "tenant scope for the run",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Tenant",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Report",
+        "tags": [
+          "agentswarm"
+        ]
+      }
+    },
+    "/openapi/v1/agentswarm/runs/{run_id}/detail": {
+      "get": {
+        "operationId": "run_detail_openapi_v1_agentswarm_runs__run_id__detail_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "tenant scope for the run",
+            "in": "query",
+            "name": "tenant",
+            "required": true,
+            "schema": {
+              "description": "tenant scope for the run",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Tenant",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunDetailDTO"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Detail",
+        "tags": [
+          "agentswarm"
+        ]
+      }
+    },
+    "/openapi/v1/agentswarm/health": {
+      "get": {
+        "operationId": "health_openapi_v1_agentswarm_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Openapi V1 Agentswarm Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "agentswarm"
+        ]
+      }
+    },
+    "/openapi/v1/agentswarm/ready": {
+      "get": {
+        "operationId": "ready_openapi_v1_agentswarm_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Ready Openapi V1 Agentswarm Ready Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ready",
+        "tags": [
+          "agentswarm"
         ]
       }
     }

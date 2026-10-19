@@ -82,6 +82,10 @@ export default function WorkflowWorkspace() {
     setSelectedId(id)
     const next = new URLSearchParams(searchParams)
     next.set('workflowId', id)
+    if (id !== selectedWorkflow?.workflow_id) {
+      next.delete('baseline')
+      next.delete('current')
+    }
     if (activeView === 'dashboard') {
       next.set('tab', 'evolution')
       next.set('evoTab', 'diagnosis')

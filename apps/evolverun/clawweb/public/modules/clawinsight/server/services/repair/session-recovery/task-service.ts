@@ -1,3 +1,4 @@
+import { resolveTaskControlPlaneEnvironment, type AgentControlPlaneEnvironment } from "../common/task-control-plane.js";
 import type { AgentRuntimeTargetSnapshot } from "../common/agent-tools/contracts.js";
 import { containsSecret } from "@avernet/clawweb-shared/server/services/redaction";
 import { createHash, randomUUID } from "node:crypto";
@@ -24,6 +25,7 @@ export interface RecoveryTaskReporter { report(result: RecoveryTaskResult): Prom
 export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
   private readonly now: () => number;
   constructor(private readonly deps: {
+    controlPlaneEnvironment: AgentControlPlaneEnvironment;
     tasks: RecoveryTaskStore;
     agent: RecoveryAgentExecutor;
     notifier: RecoveryTaskNotifier;
@@ -45,7 +47,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       return { event_id: request.event_id, delivery_key: request.delivery_key, status: "accepted", task_id: taskId };
     }
     const runtimeTarget = await this.deps.resolveTarget?.(request);
-    const task: RecoveryStoredTask = { schemaVersion: "session-recovery-task/v1", taskId, request, level,
+    const task: RecoveryStoredTask = { schemaVersion: "session-recovery-task/v1", taskId, request, level, controlPlaneEnvironment: this.deps.controlPlaneEnvironment,
       status: "running", phase: "assess", version: 1, shared: false, observationDeadlineAt: null, ownerDeadlineAt: null,
       ...(runtimeTarget ? { runtimeTarget, authorizationScopeDigest: createHash("sha256").update(JSON.stringify({ target: request.target, level })).digest("hex"), current: { stepId: `${taskId}-1` } } : {}),
       plan: null, judgment: null, evidence: [], pending_results: [], timeline: [this.event("created", "service", "收到诊断并创建自愈任务", { request, handbook, initial_intervention: "agent" }),
@@ -65,7 +67,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
 
   private async start(task: RecoveryStoredTask): Promise<void> {
     task = await this.required(task.taskId);
-    if (task.status !== "running") return;
+    if (task.status !== "running" || !this.ownsTask(task)) return;
     try { await this.deps.agent.start(task); }
     catch (error) {
       const latest = await this.required(task.taskId);
@@ -194,16 +196,18 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
 
   async executionFailure(taskId: string, reason: string, executionId?: string, retryable = false): Promise<void> {
     const previous = await this.required(taskId);
-    if (previous.status !== "running" || (executionId && (previous.execution?.executionId !== executionId || previous.execution.state === "ended"))) return;
+    if (!this.ownsTask(previous) || previous.status !== "running" || (executionId && (previous.execution?.executionId !== executionId || previous.execution.state === "ended"))) return;
     const task = await this.mutate(taskId, previous.version, value => {
       if (value.status !== "running") this.fail(409, "任务已离开执行阶段");
       if (executionId && (value.execution?.executionId !== executionId || value.execution.state === "ended")) this.fail(409, "旧执行已结束");
       const failures = (value.executionRetry?.failures ?? 0) + 1;
+      const failedExecutionId = executionId ?? value.execution?.executionId;
       const delay = retryable ? EXECUTION_RETRY_DELAYS_MS[failures - 1] : undefined;
       const summary = delay !== undefined ? `${reason}；已保存进度，${delay / 1000} 秒后重试 AIS 执行（第 ${failures} 次重试）`
         : retryable ? `${reason}；AIS 执行重试次数已用尽（失败 ${failures} 次），原任务效果未确认` : reason;
       return { ...value, status: delay !== undefined ? "running" : "failed", version: value.version + 1,
-        executionRetry: { failures, retryAt: delay !== undefined ? this.now() + delay : 0 },
+        executionRetry: { failures, retryAt: delay !== undefined ? this.now() + delay : 0,
+          ...(failedExecutionId ? { executionId: failedExecutionId } : {}) },
         judgment: delay !== undefined ? value.judgment : this.failureJudgment(value, summary),
         timeline: [...value.timeline, this.event("execution", "service", summary, { execution_id: executionId, retryable, failures, retry_at_ms: delay !== undefined ? this.now() + delay : null })] };
     });
@@ -223,8 +227,13 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       for (const task of batch) {
       cursor = task.taskId;
       try {
+        if (!this.ownsTask(task)) continue;
         // Persisted retry scheduling also survives a process restart between state save and release.
-        if (task.status === "running" && task.executionRetry?.retryAt && task.execution?.state !== "ended") await this.deps.agent.release(task);
+        if (task.status === "running" && task.executionRetry?.retryAt && task.execution?.state !== "ended") {
+          // A retained retry marker must never retire a successor launched by another worker.
+          if (task.executionRetry.executionId !== task.execution?.executionId) continue;
+          await this.deps.agent.release(task);
+        }
         if (task.status === "running" && ["observe", "verify"].includes(task.phase)
           && task.observationDeadlineAt !== null && task.observationDeadlineAt <= this.now() && !task.requiresFreshObservation) {
           await this.observe(task.taskId, task.version, { delivery: task.judgment?.delivery ?? "unconfirmed", response: task.judgment?.response ?? "unknown",
@@ -267,7 +276,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
   async reportResults(): Promise<void> {
     let cursor = "";
     for (;;) {
-      const batch = await this.deps.tasks.listForReporting?.(20, cursor) ?? [];
+      const batch = await this.deps.tasks.listForReporting?.(20, cursor, this.deps.controlPlaneEnvironment) ?? [];
       if (!batch.length) return;
       await Promise.all(batch.map(task => this.reportPending(task)));
       cursor = batch[batch.length - 1].taskId;
@@ -275,6 +284,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
   }
 
   async reportPending(task: RecoveryStoredTask): Promise<void> {
+    if (!this.ownsTask(task)) return;
     for (const result of task.pending_results) {
       try {
         await this.deps.reporter.report(result);
@@ -285,6 +295,9 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         return;
       }
     }
+  }
+  private ownsTask(task: RecoveryStoredTask): boolean {
+    return resolveTaskControlPlaneEnvironment(task) === this.deps.controlPlaneEnvironment;
   }
   private async required(taskId: string): Promise<RecoveryStoredTask> {
     const task = await this.deps.tasks.find(taskId); if (!task) this.fail(404, "自愈任务不存在"); return task;

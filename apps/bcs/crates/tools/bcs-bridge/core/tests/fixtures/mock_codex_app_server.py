@@ -82,6 +82,57 @@ for raw in sys.stdin:
                 "delta": "先处理工具结果，再回答。",
             },
         })
+        bulk_final = text.startswith("BULK_FINAL:")
+        if bulk_final:
+            # No streaming agentMessage deltas at all; the answer arrives only
+            # as a whole agentMessage item inside turn.completed. Exercises
+            # the driver's bulk-final fallback on the real JSON-RPC path
+            # (mirrors how real review turns have answered without deltas).
+            send({
+                "jsonrpc": "2.0",
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "t-1",
+                    "turnId": turn_id,
+                    "turn": {
+                        "status": "completed",
+                        "items": [
+                            {"type": "agentMessage", "phase": "final_answer",
+                             "text": text[len("BULK_FINAL:"):].lstrip()},
+                        ],
+                    },
+                },
+            })
+            continue
+        progress_final = text.startswith("PROGRESS_FINAL:")
+        if progress_final:
+            # Progress commentary streams first, then the real answer arrives
+            # inside turn.completed.items. Exercises that an in-flight delta
+            # never shadows the authoritative final message.
+            send({
+                "jsonrpc": "2.0",
+                "method": "item/agentMessage/delta",
+                "params": {
+                    "threadId": "t-1", "turnId": turn_id,
+                    "delta": "Checking the PR...",
+                },
+            })
+            send({
+                "jsonrpc": "2.0",
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "t-1",
+                    "turnId": turn_id,
+                    "turn": {
+                        "status": "completed",
+                        "items": [
+                            {"type": "agentMessage", "phase": "final_answer",
+                             "text": text[len("PROGRESS_FINAL:"):].lstrip()},
+                        ],
+                    },
+                },
+            })
+            continue
         send({
             "jsonrpc": "2.0",
             "method": "item/agentMessage/delta",

@@ -34,16 +34,242 @@ use crate::engine::codex_transport::CodexConnection;
 use crate::engine::{Engine, TurnError, TurnOutcome, TurnRequest};
 use crate::sse;
 
+/// Codex engine sandbox mode, forwarded into every `thread/*` and`turn/start`
+/// wire parameter. `workspace-write` is the bridge default: the bot works
+/// within its configured working directory, matching the cfuse interactive
+/// (TUI) capability surface instead of the legacy read-only lockdown.
+///
+/// The wire serialization normalizes to the engine's recorded form
+/// (kebab-case, echo of the rollout `turn_context.sandbox_policy.type`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CodexSandbox {
+    #[default]
+    WorkspaceWrite,
+    ReadOnly,
+    DangerFullAccess,
+}
+
+// Wire values as the codex app-server records them in rollout context.
+const SANDBOX_READ_ONLY: &str = "read-only";
+const SANDBOX_WORKSPACE_WRITE: &str = "workspace-write";
+const SANDBOX_DANGER_FULL_ACCESS: &str = "danger-full-access";
+
+// `turn/start` sandboxPolicy.type is a strict camelCase enum on the wire; the
+// server rejects kebab-case ("unknown variant ..., expected one of
+// `dangerFullAccess`, `readOnly`, `externalSandbox`, `workspaceWrite`").
+const SANDBOX_TURN_READ_ONLY: &str = "readOnly";
+const SANDBOX_TURN_WORKSPACE_WRITE: &str = "workspaceWrite";
+const SANDBOX_TURN_DANGER_FULL_ACCESS: &str = "dangerFullAccess";
+
+impl CodexSandbox {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            SANDBOX_READ_ONLY => Some(Self::ReadOnly),
+            SANDBOX_WORKSPACE_WRITE => Some(Self::WorkspaceWrite),
+            SANDBOX_DANGER_FULL_ACCESS => Some(Self::DangerFullAccess),
+            _ => None,
+        }
+    }
+    /// Kebab-case form used by `thread/start` / `thread/resume` `sandbox`
+    /// (accepted there and echoed back in rollout turn_context records).
+    fn wire(self) -> &'static str {
+        match self {
+            Self::ReadOnly => SANDBOX_READ_ONLY,
+            Self::WorkspaceWrite => SANDBOX_WORKSPACE_WRITE,
+            Self::DangerFullAccess => SANDBOX_DANGER_FULL_ACCESS,
+        }
+    }
+
+    /// CamelCase form required by `turn/start` `sandboxPolicy.type`; the
+    /// server-side enum rejects kebab variants at request time.
+    fn turn_wire(self) -> &'static str {
+        match self {
+            Self::ReadOnly => SANDBOX_TURN_READ_ONLY,
+            Self::WorkspaceWrite => SANDBOX_TURN_WORKSPACE_WRITE,
+            Self::DangerFullAccess => SANDBOX_TURN_DANGER_FULL_ACCESS,
+        }
+    }
+}
+
+/// Codex approval policy, decides whether the engine may request approvals at all.
+/// `never` (bridge default) means no approval channel: operations outside the
+/// sandbox are denied outright instead of prompting.
+///
+/// Verified against a live cfuse codex 0.161 app-server (2026-10-18): the wire
+/// enum accepts `never | on-request | untrusted | granular`; the legacy
+/// `on-failure` value is rejected outright ("unknown variant"), so the bridge
+/// whitelist never offers it. `granular` exists upstream but stays unexposed
+/// until its per-command semantics are reviewed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CodexApprovalPolicy {
+    #[default]
+    Never,
+    OnRequest,
+    Untrusted,
+}
+
+impl CodexApprovalPolicy {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "never" => Some(Self::Never),
+            "on-request" => Some(Self::OnRequest),
+            "untrusted" => Some(Self::Untrusted),
+            _ => None,
+        }
+    }
+    fn wire(self) -> &'static str {
+        match self {
+            Self::Never => "never",
+            Self::OnRequest => "on-request",
+            Self::Untrusted => "untrusted",
+        }
+    }
+    fn asks_approvals(self) -> bool { !matches!(self, Self::Never) }
+}
+
+/// Who answers codex approval requests when `approval_policy` enables them.
+/// - `user` (default): a human reviewer via BCS HITL (requires the codex HITL
+///   wiring; not yet available in this driver).
+/// - `auto`: cfuse `auto_review`, the engine's programmatic policy engine
+///   (TUI parity: escalations are approved without human involvement).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CodexApprovalReview {
+    #[default]
+    User,
+    Auto,
+}
+
+impl CodexApprovalReview {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "user" => Some(Self::User),
+            "auto" => Some(Self::Auto),
+            _ => None,
+        }
+    }
+    fn wire(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Auto => "auto_review",
+        }
+    }
+}
+
+/// Per-bot Codex engine policy, parsed from `bot.engine_options`.
+/// Defaults (policy decision 2026-10-18): `workspace-write` sandbox,
+/// outbound network allowed, approvals never requested, and no reasoning
+/// effort override (the engine's config-level default applies).
+#[derive(Clone, Copy, Debug)]
+pub struct CodexOptions {
+    pub sandbox: CodexSandbox,
+    pub network_access: bool,
+    pub approval_policy: CodexApprovalPolicy,
+    pub approval_review: CodexApprovalReview,
+    /// `thread.*`/`turn.start` `effort`; None leaves the engine's own default
+    /// (cfuse config.toml `model_reasoning_effort`, currently `xhigh`).
+    pub reasoning_effort: Option<&'static str>,
+}
+
+impl Default for CodexOptions {
+    fn default() -> Self {
+        Self { sandbox: CodexSandbox::WorkspaceWrite, network_access: true,
+            approval_policy: CodexApprovalPolicy::Never, approval_review: CodexApprovalReview::User,
+            reasoning_effort: None }
+    }
+}
+
+impl CodexOptions {
+    const KEY_SANDBOX: &'static str = "sandbox";
+    const KEY_NETWORK_ACCESS: &'static str = "network_access";
+    const KEY_APPROVAL_POLICY: &'static str = "approval_policy";
+    const KEY_APPROVAL_REVIEW: &'static str = "approval_review";
+    const KEY_REASONING_EFFORT: &'static str = "reasoning_effort";
+
+    // `effort` wire values, mirroring the cfuse model catalog reasoning levels.
+    const EFFORTS: [&'static str; 5] = ["minimal", "low", "medium", "high", "xhigh"];
+
+    fn parse(options: &toml::Table) -> Result<Self, String> {
+        let mut parsed = Self { sandbox: CodexSandbox::WorkspaceWrite,
+            network_access: true, approval_policy: CodexApprovalPolicy::Never,
+            approval_review: CodexApprovalReview::User, reasoning_effort: None };
+        for (key, value) in options {
+            match (key.as_str(), value) {
+                (Self::KEY_SANDBOX, toml::Value::String(sandbox)) => {
+                    parsed.sandbox = CodexSandbox::parse(sandbox).ok_or_else(||
+                        format!("engine_options.sandbox must be one of '{SANDBOX_READ_ONLY}' | '{SANDBOX_WORKSPACE_WRITE}' | '{SANDBOX_DANGER_FULL_ACCESS}'"))?;
+                }
+                (Self::KEY_NETWORK_ACCESS, toml::Value::Boolean(network)) => parsed.network_access = *network,
+                (Self::KEY_APPROVAL_POLICY, toml::Value::String(policy)) => {
+                    parsed.approval_policy = CodexApprovalPolicy::parse(policy).ok_or_else(||
+                        format!("engine_options.approval_policy must be one of 'never' | 'on-request' | 'untrusted'"))?;
+                }
+                (Self::KEY_APPROVAL_REVIEW, toml::Value::String(review)) => {
+                    parsed.approval_review = CodexApprovalReview::parse(review).ok_or_else(||
+                        format!("engine_options.approval_review must be one of 'user' | 'auto'"))?;
+                }
+                (Self::KEY_REASONING_EFFORT, toml::Value::String(effort)) => {
+                    let trimmed = effort.trim();
+                    parsed.reasoning_effort = Some(Self::EFFORTS.iter().copied().find(|candidate| *candidate == trimmed)
+                        .ok_or_else(|| format!("engine_options.reasoning_effort must be one of {}",
+                            Self::EFFORTS.map(|e| format!("'{e}'")).join(" | ")))?);
+                }
+                _ => return Err(format!("unsupported engine_options key '{key}'")),
+            }
+        }
+        match (parsed.approval_policy.asks_approvals(), parsed.approval_review) {
+            // `never` closes the approval channel entirely; an auto reviewer
+            // never fires. The combo usually means the author wanted engine-side
+            // auto-approvals — fail fast instead of silently keeping the denial.
+            (false, CodexApprovalReview::Auto) => return Err("engine_options.approval_review='auto' requires approval_policy 'on-request' or 'untrusted'; with 'never' escalations are denied without a reviewer".into()),
+            // Human approval via BCS HITL needs codex→interaction routing that this
+            // driver does not implement yet; asking would hit the -32000 rejector.
+            (true, CodexApprovalReview::User) => return Err("engine_options.approval_review='user' with a non-'never' approval_policy requires codex HITL routing, which this driver does not implement yet; use approval_policy='never' or approval_review='auto'".into()),
+            _ => {}
+        }
+        if parsed.sandbox == CodexSandbox::DangerFullAccess && options.contains_key(Self::KEY_NETWORK_ACCESS) {
+            tracing::warn!(target: "bcs_bridge_core::engine",
+                "engine_options.network_access is a no-op with sandbox='danger-full-access'; the sandbox already permits everything");
+        }
+        if parsed.approval_review == CodexApprovalReview::Auto {
+            tracing::warn!(target: "bcs_bridge_core::engine",
+                "bot grants escalated unsandboxed execution via engine auto-review (cfuse auto_review); escalations may leave the declared sandbox without human approval");
+        }
+        tracing::warn!(target: "bcs_bridge_core::engine",
+            sandbox = parsed.sandbox.wire(), network_access = parsed.network_access,
+            approval_policy = parsed.approval_policy.wire(), approvals_reviewer = parsed.approval_review.wire(),
+            reasoning_effort = parsed.reasoning_effort.unwrap_or("(engine default)"),
+            "bot policy posture (codex engine)");
+        Ok(parsed)
+    }
+
+    fn wire_thread_sandbox(self) -> &'static str { self.sandbox.wire() }
+    fn wire_approval_policy(self) -> &'static str { self.approval_policy.wire() }
+    fn wire_approvals_reviewer(self) -> &'static str { self.approval_review.wire() }
+    fn wire_reasoning_effort(self) -> Option<&'static str> { self.reasoning_effort }
+    fn wire_sandbox_policy(self) -> Value {
+        match self.sandbox {
+            // danger-full-access disables sandboxing entirely; network is inherent.
+            CodexSandbox::DangerFullAccess => json!({"type": CodexSandbox::DangerFullAccess.turn_wire()}),
+            CodexSandbox::ReadOnly => json!({"type": CodexSandbox::ReadOnly.turn_wire(), "networkAccess": self.network_access}),
+            CodexSandbox::WorkspaceWrite => json!({"type": CodexSandbox::WorkspaceWrite.turn_wire(), "networkAccess": self.network_access}),
+        }
+    }
+}
+
 /// Codex app-server JSON-RPC driver.
 ///
-/// Known limitation: threads run with `approvalPolicy: never`, a read-only
-/// sandbox and no network access, and app-server requests are rejected rather
-/// than routed to HITL interactions.
+/// Known limitation: threads default to `approvalPolicy: never` with no HITL
+/// approval routing (app-server server requests are rejected rather than routed
+/// to interactions), while the sandbox/network posture is now configurable per
+/// bot via `bot.engine_options` (see [`CodexOptions`]; default
+/// `workspace-write` + `network_access: true`), replacing the previous hardcoded
+/// read-only/no-network lockdown.
 pub struct CodexAppServer {
     bin: PathBuf,
     prefix_args: Vec<String>,
     desktop: bool,
     socket: Option<PathBuf>,
+    options: CodexOptions,
     native: super::codex_persistent::NativeServer,
 }
 
@@ -51,12 +277,30 @@ impl CodexAppServer {
     /// `prefix_args` are placed before `app-server`, for launchers that select
     /// Codex through a subcommand or flag.
     pub fn new(bin: PathBuf, prefix_args: Vec<String>) -> Self {
-        Self { bin, prefix_args, desktop: false, socket: None, native: Default::default() }
+        Self::with_options(bin, prefix_args, CodexOptions::default())
+    }
+
+    fn with_options(bin: PathBuf, prefix_args: Vec<String>, options: CodexOptions) -> Self {
+        Self { bin, prefix_args, desktop: false, socket: None, options, native: Default::default() }
     }
 
     /// Connect over Unix WebSocket; never start, restart or stop the shared server.
+    /// Desktop threads are explicitly pinned to the engine's historical
+    /// bridge-side posture — read-only sandbox, no network, approvalPolicy
+    /// never, user reviewer — regardless of the standalone Codex engine's
+    /// own configured defaults. This keeps codex-desktop author-managed:
+    /// the desktop user drives their own app-server instance; this bridge
+    /// must not widen it as a side effect of newer standalone options.
     pub fn desktop(socket: PathBuf) -> Self {
-        Self { bin: PathBuf::new(), prefix_args: Vec::new(), desktop: true, socket: Some(socket), native: Default::default() }
+        Self { bin: PathBuf::new(), prefix_args: Vec::new(), desktop: true, socket: Some(socket),
+            options: CodexOptions {
+                sandbox: CodexSandbox::ReadOnly,
+                network_access: false,
+                approval_policy: CodexApprovalPolicy::Never,
+                approval_review: CodexApprovalReview::User,
+                reasoning_effort: None,
+            },
+            native: Default::default() }
     }
 
     pub(super) async fn initialize(&self, cli: &mut CodexConnection, next_id: &mut u64,
@@ -80,6 +324,26 @@ impl CodexAppServer {
         args.extend(["app-server".into(), "--listen".into(), "stdio://".into()]);
         args
     }
+
+    /// Warn when Codex has no sandbox launcher for a sandboxed mode, on Linux:
+    /// exec commands run through bubblewrap (`bwrap` on PATH or a bundled
+    /// `codex-resources/bwrap` beside the engine binary). The engine itself
+    /// reports the failure per command at turn time; this warning makes it
+    /// visible at start instead. Other platforms use other launchers (e.g.
+    /// macOS sandbox-exec) and need a different probe.
+    #[cfg(target_os = "linux")]
+    fn warn_sandbox_host(&self) {
+        if let Some(parent) = self.bin.parent()
+            && parent.join("codex-resources").join("bwrap").exists() { return; }
+        if executable_on_path("bwrap") { return; }
+        tracing::warn!(target: "bcs_bridge_core::engine",
+            sandbox = self.options.sandbox.wire(), engine_bin = %self.bin.display(),
+            "codex sandbox unavailable: bubblewrap is missing on this host; every sandboxed exec_command will panic at runtime. \
+             Install bubblewrap (yum/apt install bubblewrap) or set engine_options {{ sandbox = 'danger-full-access' }} for a sandbox-less bot");
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn warn_sandbox_host(&self) {}
 
     async fn abort_turn(&self, cli: &mut CodexConnection, thread_id: &str, turn_id: &str) -> Result<(), TurnError> {
         if self.desktop {
@@ -122,8 +386,7 @@ impl crate::engine::EngineFactory for CodexAppServerFactory {
     fn id(&self) -> &str { &self.id }
     fn default_bin(&self) -> &str { &self.default_bin }
     fn build(&self, bin: PathBuf, options: &toml::Table) -> Result<Arc<dyn Engine>, String> {
-        crate::engine::reject_engine_options(options)?;
-        Ok(Arc::new(CodexAppServer::new(bin, self.prefix_args.clone())))
+        Ok(Arc::new(CodexAppServer::with_options(bin, self.prefix_args.clone(), CodexOptions::parse(options)?)))
     }
 }
 
@@ -132,7 +395,16 @@ impl Engine for CodexAppServer {
     async fn shutdown(&self) { self.native.shutdown().await; }
 
     async fn preflight(&self) -> Result<(), TurnError> {
-        if !self.desktop { return Ok(()); }
+        if !self.desktop {
+            // The Codex Linux sandbox executes every exec_command through bwrap
+            // (or the bundled codex-resources/bwrap next to the engine binary).
+            // Without it every command panics at runtime — warn loudly here, in
+            // lieu of failing business startup on hosts that cannot provide it.
+            if self.options.sandbox != CodexSandbox::DangerFullAccess {
+                self.warn_sandbox_host();
+            }
+            return Ok(());
+        }
         let socket = self.socket.as_deref().ok_or_else(|| TurnError::Protocol("Missing desktop socket".into()))?;
         let mut connection = CodexConnection::connect(socket, None).await?;
         let result = self.initialize(&mut connection, &mut 1, &mut VecDeque::new(), &CancellationToken::new()).await;
@@ -170,7 +442,7 @@ impl Engine for CodexAppServer {
                 &mut next_id,
                 &mut backlog,
                 "thread/resume",
-                thread_resume_params(&req, session_id),
+                thread_resume_params(&req, session_id, self.options),
                 &abort,
             )
             .await?
@@ -180,7 +452,7 @@ impl Engine for CodexAppServer {
                 &mut next_id,
                 &mut backlog,
                 "thread/start",
-                thread_start_params(&req),
+                thread_start_params(&req, self.options),
                 &abort,
             )
             .await?
@@ -202,7 +474,7 @@ impl Engine for CodexAppServer {
             &mut next_id,
             &mut backlog,
             "turn/start",
-            turn_start_params(&req, &thread_id),
+            turn_start_params(&req, &thread_id, self.options),
             &start_abort,
         );
         let turn = if self.desktop {
@@ -214,7 +486,11 @@ impl Engine for CodexAppServer {
         })?;
 
         let mut deltas = String::new();
-        let mut thinking = String::new();
+        // Same-dumpgarnered thinking snapshots were previously concatenated
+        // per delta into `thinking` and re-sent inside every event; that
+        // made retention quadratic (N² copies of the same tail). Emit only
+        // the fresh fragment (mirrors the Claude driver), retaining linear
+        // thinking history.
         loop {
             let value = tokio::select! {
                 _ = abort.cancelled() => {
@@ -247,21 +523,11 @@ impl Engine for CodexAppServer {
                     }
                 }
                 "item/reasoning/textDelta" | "item/reasoning/summaryTextDelta" => {
-                    if let Some(delta) = extract_delta(&value) {
-                        thinking.push_str(&delta);
-                        if send_event(
-                            &events,
-                            sse::agent_thinking(
-                                &req.run_id,
-                                Some(delta),
-                                Some(thinking.clone()),
-                            ),
-                        )
-                        .await
-                        {
-                            self.abort_turn(&mut cli, &thread_id, &turn_id).await?;
-                            return Err(TurnError::Aborted);
-                        }
+                    if let Some(delta) = extract_delta(&value)
+                        && send_event(&events, sse::agent_thinking(&req.run_id, Some(delta), None)).await
+                    {
+                        self.abort_turn(&mut cli, &thread_id, &turn_id).await?;
+                        return Err(TurnError::Aborted);
                     }
                 }
                 "item/started" => {
@@ -296,11 +562,15 @@ impl Engine for CodexAppServer {
                     if let Some(message) = completed_failure_message(&value) {
                         return Err(TurnError::EngineExited(message));
                     }
-                    let final_text = if deltas.is_empty() {
-                        completed_text(&value).unwrap_or_default()
-                    } else {
-                        deltas
-                    };
+                    // The completed turn's own structured items are the
+                    // authoritative final message — a preceding streamed
+                    // `agentMessage/delta` may only be progress commentary
+                    // (e.g. "Checking the PR...") or a partial prefix of the
+                    // real answer. Prefer the authoritative snapshot; fall
+                    // back to accumulated deltas only when the snapshot
+                    // carries no answer (e.g. legacy engines that stream
+                    // everything).
+                    let final_text = completed_text(&value).unwrap_or(deltas);
                     cli.finish().await;
                     return Ok(TurnOutcome {
                         engine_session_id: Some(thread_id),
@@ -598,36 +868,43 @@ async fn respond_server_request(cli: &mut CodexConnection, request: &Value) -> R
     .await
 }
 
-fn thread_start_params(req: &TurnRequest) -> Value {
+fn with_reasoning_effort(mut params: Value, options: CodexOptions) -> Value {
+    if let Some(effort) = options.wire_reasoning_effort() {
+        params["effort"] = json!(effort);
+    }
+    params
+}
+
+fn thread_start_params(req: &TurnRequest, options: CodexOptions) -> Value {
     let mut params = json!({
         "cwd": req.cwd,
-        "approvalPolicy": "never",
-        "approvalsReviewer": "user",
-        "sandbox": "read-only",
+        "approvalPolicy": options.wire_approval_policy(),
+        "approvalsReviewer": options.wire_approvals_reviewer(),
+        "sandbox": options.wire_thread_sandbox(),
         "ephemeral": false,
         "threadSource": "bridge-provider",
     });
     if let Some(model) = req.model.as_deref().filter(|model| !model.is_empty()) {
         params["model"] = json!(model);
     }
-    params
+    with_reasoning_effort(params, options)
 }
 
-fn thread_resume_params(req: &TurnRequest, thread_id: &str) -> Value {
+fn thread_resume_params(req: &TurnRequest, thread_id: &str, options: CodexOptions) -> Value {
     let mut params = json!({
         "threadId": thread_id,
         "cwd": req.cwd,
-        "approvalPolicy": "never",
-        "approvalsReviewer": "user",
-        "sandbox": "read-only",
+        "approvalPolicy": options.wire_approval_policy(),
+        "approvalsReviewer": options.wire_approvals_reviewer(),
+        "sandbox": options.wire_thread_sandbox(),
     });
     if let Some(model) = req.model.as_deref().filter(|model| !model.is_empty()) {
         params["model"] = json!(model);
     }
-    params
+    with_reasoning_effort(params, options)
 }
 
-fn turn_start_params(req: &TurnRequest, thread_id: &str) -> Value {
+fn turn_start_params(req: &TurnRequest, thread_id: &str, options: CodexOptions) -> Value {
     let mut params = json!({
         "threadId": thread_id,
         "clientUserMessageId": req.run_id,
@@ -637,17 +914,14 @@ fn turn_start_params(req: &TurnRequest, thread_id: &str) -> Value {
             "text_elements": [],
         }],
         "cwd": req.cwd,
-        "approvalPolicy": "never",
-        "approvalsReviewer": "user",
-        "sandboxPolicy": {
-            "type": "readOnly",
-            "networkAccess": false,
-        },
+        "approvalPolicy": options.wire_approval_policy(),
+        "approvalsReviewer": options.wire_approvals_reviewer(),
+        "sandboxPolicy": options.wire_sandbox_policy(),
     });
     if let Some(model) = req.model.as_deref().filter(|model| !model.is_empty()) {
         params["model"] = json!(model);
     }
-    params
+    with_reasoning_effort(params, options)
 }
 
 fn extract_thread_id(value: &Value) -> Option<String> {
@@ -656,6 +930,18 @@ fn extract_thread_id(value: &Value) -> Option<String> {
         .and_then(Value::as_str)
         .or_else(|| value.get("threadId").and_then(Value::as_str))
         .map(str::to_string)
+}
+
+/// Locate an executable named `name` on PATH without launching it.
+#[cfg(unix)]
+fn executable_on_path(name: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|paths| std::env::split_paths(&paths).any(|directory| {
+        let candidate = directory.join(name);
+        std::fs::metadata(&candidate).is_ok_and(|metadata| {
+            use std::os::unix::fs::PermissionsExt;
+            metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+        })
+    }))
 }
 
 fn extract_turn_id(value: &Value) -> Option<String> {
@@ -717,14 +1003,37 @@ fn extract_delta(value: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Extract the final assistant text from a `turn/completed` notification.
+///
+/// Wire contract (verified live from bridge-side engine trace, 2026-10-18):
+/// the completed turn arrives as 
+/// `{threadId, turn:{items:[...]}}` with no `last_agent_message`, and the
+/// final answer lives in `params.turn.items[]` where `type == "agentMessage"`
+/// (typically `phase: "final_answer"`). Every turn that streams its answer
+/// still takes the earlier delta branch first — this path only matters when
+/// the engine delivers the answer as one whole message at turn end without
+/// streaming deltas. The engine journal uses a `last_agent_message` field in
+/// its own rollout files, so we also honor it as a legacy fallback, ordered
+/// after the wire-native shape.
 fn completed_text(value: &Value) -> Option<String> {
     let params = value.get("params")?;
-    params
-        .get("text")
-        .and_then(Value::as_str)
-        .or_else(|| params.get("finalText").and_then(Value::as_str))
-        .or_else(|| params.get("final_text").and_then(Value::as_str))
-        .map(str::to_string)
+    let mut fallback: Option<String> = None;
+    if let Some(items) = params.pointer("/turn/items").and_then(Value::as_array) {
+        for item in items.iter().rev() {
+            if item.get("type").and_then(Value::as_str) != Some("agentMessage") { continue; }
+            let Some(text) = item.get("text").and_then(Value::as_str).filter(|t| !t.trim().is_empty()) else { continue; };
+            if item.get("phase").and_then(Value::as_str) == Some("final_answer") {
+                return Some(text.to_owned());
+            }
+            if fallback.is_none() { fallback = Some(text.to_owned()); }
+        }
+    }
+    fallback.or_else(|| {
+        params.get("last_agent_message")
+            .and_then(Value::as_str)
+            .filter(|text| !text.trim().is_empty())
+            .map(str::to_string)
+    })
 }
 
 fn completed_failure_message(value: &Value) -> Option<String> {
@@ -815,6 +1124,40 @@ mod tests {
     }
 
     #[test]
+    fn thinking_deltas_stay_delta_only_never_carry_accumulated_snapshot() {
+        // Regression guard for the retention overflow seen 2026-10-18 in run
+        // 7e63c047: previously every reasoning delta was re-emitted with
+        // the full accumulated thinking text attached (`Some(delta)` +
+        // `Some(thinking.clone())`), amplifying retained thinking bytes
+        // quadratically (~31MB accumulated from 22KB of unique text). Emit
+        // only the fresh fragment, matching the Claude driver; this also
+        // keeps per-event retained size linear instead of O(N^2).
+        let run = "run-think";
+        let mut accumulated = String::new();
+        let mut emitted_bytes = 0usize;
+        for i in 0..500usize {
+            let delta = format!("d{i}-");
+            accumulated.push_str(&delta);
+            let event = sse::agent_thinking(run, Some(delta.clone()), None);
+            let StreamEvent::Agent(agent) = event else { panic!("expected Agent event"); };
+            let bcs_protocol::stream::AgentData::Thinking(thinking) = agent.data else {
+                panic!("agent_thinking must yield ThinkingData");
+            };
+            assert!(thinking.text.is_none(),
+                "must not embed the accumulated snapshot ({})",
+                accumulated.len());
+            assert_eq!(thinking.delta.as_deref(), Some(delta.as_str()));
+            emitted_bytes += thinking.delta.as_deref().unwrap().len()
+                + thinking.delta.as_deref().unwrap().len(); // shallow approximation
+        }
+        // rough linear sanity: emitted total is a small multiple of the unique stream
+        let unique = accumulated.len();
+        assert!(unique > 0);
+        assert!(emitted_bytes < unique * 8,
+            "emitted thinking stays near-linear, not quadratic (emitted={emitted_bytes}, unique={unique})");
+    }
+
+    #[test]
     fn completions_check_all_supplied_turn_ids_for_native_and_shared_connections() {
         for shared in [false, true] {
             for method in ["turn/completed", "agent/turn_completed", "agent/turn_failed"] {
@@ -828,6 +1171,208 @@ mod tests {
                 value["params"]["turnId"] = Value::Null;
                 assert!(!matches_turn(&value, "t-1", "turn-1", shared));
             }
+        }
+    }
+
+    fn table(pairs: &[(&str, toml::Value)]) -> toml::Table {
+        pairs.iter().cloned().map(|(k, v)| (k.to_owned(), v)).collect()
+    }
+
+    #[test]
+    fn completed_text_reads_agent_message_items_before_any_legacy_fallback() {
+        // The real wire shape (verified from a live bridge-side engine trace):
+        // the final answer lives in params.turn.items[] as
+        // {type:"agentMessage", phase:"final_answer", text:"..."}.
+        let wire = json!({"method":"turn/completed","params":{
+            "threadId":"t-1",
+            "turn":{
+                "completedAt":1792320351,"durationMs":95592,"error":null,
+                "id":"turn-1","status":"completed",
+                "items":[
+                    {"type":"reasoning","id":"rs-1"},
+                    {"type":"agentMessage","phase":"thinking","text":"对不起，还在中间分析。"},
+                    {"type":"agentMessage","phase":"final_answer","text":"已将完整 Review 发布到 PR。"},
+                ],
+            },
+        }});
+        assert_eq!(completed_text(&wire).as_deref(), Some("已将完整 Review 发布到 PR。"));
+        // Without a final_answer entry, take the last agentMessage with text.
+        let wire = json!({"params":{"turn":{"items":[
+            {"type":"agentMessage","text":"first"},
+            {"type":"agentMessage","text":"second"},
+        ]}}});
+        assert_eq!(completed_text(&wire).as_deref(), Some("second"));
+        // agentMessage with empty text counts as absent.
+        let wire = json!({"params":{"turn":{"items":[
+            {"type":"agentMessage","phase":"final_answer","text":"  "},
+        ]}}});
+        assert_eq!(completed_text(&wire), None);
+    }
+
+    #[test]
+    fn completed_text_keeps_journal_shape_as_legacy_fallback() {
+        let value = json!({"method":"turn/completed","params":{
+            "threadId":"t-1","turnId":"turn-1",
+            "last_agent_message":"review done"
+        }});
+        assert_eq!(completed_text(&value).as_deref(), Some("review done"));
+        let legacy = json!({"method":"turn/completed","params":{
+            "text":"legacy fallback never delivered by this engine",
+            "finalText":"also unverified",
+            "final_text":"ditto"
+        }});
+        assert_eq!(completed_text(&legacy), None,
+            "speculative legacy keys must stay unread, matching the verified wire contract");
+        let empty = json!({"method":"turn/completed","params":{
+            "last_agent_message":"   "
+        }});
+        assert_eq!(completed_text(&empty), None, "whitespace-only tail text is not a real final");
+        // Wire-shape items win over any legacy key.
+        let both = json!({"params":{
+            "last_agent_message":"journal text",
+            "turn":{"items":[{"type":"agentMessage","phase":"final_answer","text":"wire text"}]},
+        }});
+        assert_eq!(completed_text(&both).as_deref(), Some("wire text"));
+    }
+
+    #[test]
+    fn codex_options_default_to_workspace_write_network_never() {
+        let options = CodexOptions::parse(&toml::Table::new()).unwrap();
+        assert_eq!(options.sandbox, CodexSandbox::WorkspaceWrite);
+        assert!(options.network_access);
+        assert_eq!(options.approval_policy, CodexApprovalPolicy::Never);
+        assert_eq!(options.approval_review, CodexApprovalReview::User);
+        assert_eq!(options.wire_thread_sandbox(), "workspace-write");
+        assert_eq!(options.wire_approval_policy(), "never");
+        assert_eq!(options.wire_approvals_reviewer(), "user");
+        assert_eq!(options.wire_sandbox_policy(),
+            json!({"type": "workspaceWrite", "networkAccess": true}));
+    }
+
+    #[test]
+    fn codex_options_parse_each_supported_key_and_reject_others() {
+        let options = CodexOptions::parse(&table(&[
+            ("sandbox", "read-only".into()),
+            ("network_access", false.into()),
+            ("approval_policy", "on-request".into()),
+            ("approval_review", "auto".into()),
+        ])).unwrap();
+        assert_eq!(options.sandbox, CodexSandbox::ReadOnly);
+        assert!(!options.network_access);
+        assert_eq!(options.approval_policy, CodexApprovalPolicy::OnRequest);
+        assert_eq!(options.approval_review, CodexApprovalReview::Auto);
+        assert_eq!(options.wire_approvals_reviewer(), "auto_review");
+        assert_eq!(options.wire_sandbox_policy(),
+            json!({"type": "readOnly", "networkAccess": false}));
+        for invalid in [
+            table(&[("bogus", "x".into())]),
+            table(&[("sandbox", "bogus".into())]),
+            table(&[("sandbox", 1.into())]),
+            table(&[("network_access", "true".into())]),
+            table(&[("approval_policy", "auto".into())]),
+            table(&[("approval_review", "everyone".into())]),
+            table(&[("reasoning_effort", "bogus".into())]),
+            table(&[("reasoning_effort", 3.into())]),
+        ] {
+            assert!(CodexOptions::parse(&invalid).is_err(), "accepted {invalid:?}");
+        }
+    }
+
+    #[test]
+    fn codex_options_reasoning_effort_only_sends_when_set() {
+        let options = CodexOptions::parse(&toml::Table::new()).unwrap();
+        assert_eq!(options.reasoning_effort, None, "defaults leave the engine-level effort untouched");
+        for (value, expected) in [
+            ("minimal", "minimal"), ("low", "low"), ("medium", "medium"),
+            ("high", "high"), ("xhigh", "xhigh"),
+        ] {
+            let parsed = CodexOptions::parse(&table(&[("reasoning_effort", value.into())])).unwrap();
+            assert_eq!(parsed.reasoning_effort, Some(expected));
+        }
+        let parsed = CodexOptions::parse(&table(&[("reasoning_effort", " high ".into())])).unwrap();
+        assert_eq!(parsed.reasoning_effort, Some("high"), "surrounding whitespace is trimmed");
+    }
+
+    #[test]
+    fn codex_options_reject_dead_approval_combinations() {
+        let auto_never = table(&[("approval_policy", "never".into()),
+            ("approval_review", "auto".into())]);
+        let error = CodexOptions::parse(&auto_never).unwrap_err();
+        assert!(error.contains("approval_review='auto' requires") && error.contains("never"), "{error}");
+        let user_asks = table(&[("approval_policy", "on-request".into()),
+            ("approval_review", "user".into())]);
+        let error = CodexOptions::parse(&user_asks).unwrap_err();
+        assert!(error.contains("HITL") && error.contains("does not implement"), "{error}");
+        // unset review on a non-never policy defaults to user and must fail the same way
+        let unset_review = table(&[("approval_policy", "on-request".into())]);
+        let error = CodexOptions::parse(&unset_review).unwrap_err();
+        assert!(error.contains("HITL"), "{error}");
+        assert!(CodexOptions::parse(&table(&[
+            ("approval_policy", "on-request".into()), ("approval_review", "auto".into()),
+        ])).is_ok());
+    }
+
+    #[test]
+    fn codex_options_danger_full_access_wire_omits_network() {
+        let options = CodexOptions::parse(&table(&[("sandbox", "danger-full-access".into())])).unwrap();
+        assert_eq!(options.sandbox, CodexSandbox::DangerFullAccess);
+        assert_eq!(options.wire_sandbox_policy(), json!({"type": "dangerFullAccess"}));
+        assert!(CodexOptions::parse(&table(&[
+            ("sandbox", "danger-full-access".into()), ("network_access", false.into()),
+        ])).is_ok(), "explicit network_access normalizes with a warning");
+    }
+
+    fn options_req(cwd: &str) -> TurnRequest {
+        struct TestObserver;
+        #[async_trait::async_trait]
+        impl crate::engine::SessionObserver for TestObserver {
+            async fn established(&self, _: &str) -> Result<(), String> { Ok(()) }
+        }
+        TurnRequest::new("run-1", "prompt", cwd, Arc::new(TestObserver))
+    }
+
+    #[test]
+    fn wire_params_follow_resolved_options_and_keep_bridge_identifiers() {
+        let options = CodexOptions::parse(&toml::Table::new()).unwrap();
+        let req = options_req("/tmp/x");
+        let thread = thread_start_params(&req, options);
+        assert_eq!(thread["sandbox"], "workspace-write");
+        assert_eq!(thread["approvalPolicy"], "never");
+        assert_eq!(thread["approvalsReviewer"], "user");
+        assert_eq!(thread["threadSource"], "bridge-provider");
+        assert_eq!(thread["ephemeral"], false);
+        assert!(thread.get("model").is_none());
+        let resume = thread_resume_params(&req, "t-1", options);
+        assert_eq!(resume["sandbox"], "workspace-write");
+        assert_eq!(resume["threadId"], "t-1");
+        let turn = turn_start_params(&req, "t-1", options);
+        assert_eq!(turn["sandboxPolicy"], json!({"type": "workspaceWrite", "networkAccess": true}));
+        assert_eq!(turn["approvalPolicy"], "never");
+        assert_eq!(turn["clientUserMessageId"], "run-1");
+        let read_only = CodexOptions::parse(&table(&[("sandbox", "read-only".into()),
+            ("network_access", false.into())])).unwrap();
+        let turn = turn_start_params(&req, "t-1", read_only);
+        assert_eq!(turn["sandboxPolicy"], json!({"type": "readOnly", "networkAccess": false}));
+        let banned = CodexOptions::parse(&table(&[("sandbox", "danger-full-access".into())])).unwrap();
+        assert_eq!(turn_start_params(&req, "t-1", banned)["sandboxPolicy"],
+            json!({"type": "dangerFullAccess"}));
+        assert_eq!(thread_start_params(&req, banned)["sandbox"], "danger-full-access");
+    }
+
+    #[test]
+    fn wire_params_carry_reasoning_effort_only_when_configured() {
+        let defaults = CodexOptions::parse(&toml::Table::new()).unwrap();
+        let req = options_req("/tmp/x");
+        for params in [thread_start_params(&req, defaults),
+            thread_resume_params(&req, "t-1", defaults), turn_start_params(&req, "t-1", defaults)] {
+            assert!(params.get("effort").is_none(), "no effort key without an override: {params}");
+        }
+        let with_effort = CodexOptions::parse(&table(&[
+            ("reasoning_effort", "medium".into()),
+        ])).unwrap();
+        for params in [thread_start_params(&req, with_effort),
+            thread_resume_params(&req, "t-1", with_effort), turn_start_params(&req, "t-1", with_effort)] {
+            assert_eq!(params["effort"], "medium");
         }
     }
 }

@@ -3,8 +3,8 @@
 // - managed+mine / friend:交互式 Session 列表(选中 / 新建 / 加载更多走 Hook 回调);
 // - managed+others:好友用户分组只读视图(分组渲染在 ConversationFriendGroup)。
 // 同一时刻仅一个 Bot 展开(跨我的/团队/好友分组,由 Store 单键替换统一互斥)。
-import { Badge, Button, IconButton } from '@/components/ui';
-import { getBotEngineLabel, supportsBotSessionFavorites } from '@/domain/botEngine';
+import { Button, IconButton } from '@/components/ui';
+import { supportsBotSessionFavorites } from '@/domain/botEngine';
 import type {
   ConversationBotSection,
   ConversationOrigin,
@@ -20,6 +20,7 @@ import React from 'react';
 import { AvatarTile } from '../../components/AvatarTile';
 import type { ConversationSessionListActions } from '../hooks/useConversationSessionActions';
 import { ConversationBotUnavailableTooltip, resolveBotUnavailable } from './ConversationBotUnavailableTooltip';
+import { ConversationBotRuntimeBadge } from './ConversationBotRuntimeBadge';
 import { OthersArea, type ConversationBotItemOthers } from './ConversationBotOthersArea';
 import { ConversationOriginFilter } from './ConversationOriginFilter';
 import { ConversationSessionIdSearchInput } from './ConversationSessionIdSearchInput';
@@ -87,8 +88,6 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   const interactive = isAgentCodingBot || bot.chatable;
   // Bot 可用状态(bots 接口 status):FAILED/PENDING 整行禁用并悬停提示原因(判定与文案见包装器)。
   const { reason: statusUnavailableReason, unavailable } = resolveBotUnavailable(bot.status);
-  // AgentCoding 行徽标展示模板名(区分多个 AgentCoding Bot);普通 Bot 展示引擎名,dmore「至多一枚」不变。
-  const runtimeLabel = bot.isAgentCodingBot ? bot.templateName || 'AgentCoding' : getBotEngineLabel(bot.engine);
   const canFavorite = supportsBotSessionFavorites(bot.engine);
   // 筛选/搜索的激活与可见:归属 others 或 favorite 范围点亮筛选;归属+范围筛选对管理 Bot 开放,
   // 好友 Bot 仅在有收藏能力时暴露「会话」范围(TEClaw 无收藏接口,不发收藏请求)。
@@ -165,14 +164,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
             <span className="w-full min-w-0 truncate text-sm font-semibold leading-5 text-content-strong">
               {bot.displayName}
             </span>
-            {runtimeLabel && (
-              <Badge
-                tone="neutral"
-                className="block max-w-full shrink-0 truncate rounded px-1.5 py-0.5 text-[10px] font-normal leading-3"
-              >
-                {runtimeLabel}
-              </Badge>
-            )}
+            <ConversationBotRuntimeBadge bot={bot} />
           </div>
         </Button>
         {hasSessionControls && !unavailable && (

@@ -55,6 +55,7 @@ from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayPro
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
+from agentclaw.community.core.engine_runtime.models import BotFacts
 from agentclaw.community.core.channel.errors import (
     ChannelEditLockedError,
     ChannelModeViolationError,
@@ -68,12 +69,14 @@ from agentclaw.community.di import config as cfg
 from .schemas import (
     Channel,
     ChannelCreate,
+    ChannelStage,
     ChannelStatus,
     ChannelStatusUpdate,
     ChannelType,
     ChannelUpdate,
     DingTalkChannelConfig,
     validate_mode_matrix,
+    validate_streaming_card_template,
 )
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
@@ -119,6 +122,28 @@ def _status(value: str) -> ChannelStatus:
     return "active" if value == "1" else "inactive"
 
 
+# 每种 bot 可见的渠道行域。draft 集 = 个人/其他 bot 的全部世界；服务 Bot
+# 额外暴露 verify/online 行 —— 它们是发布流的输入（老前端"生效环境"选择器
+# 写的就是这几档），创建后 stage 不可变。
+_DRAFT_STAGES: tuple[str | None, ...] = (None, "", "draft")
+_SERVICE_STAGES: tuple[str | None, ...] = (None, "", "draft", "verify", "online")
+
+
+def _allowed_stages(bot_type: str) -> tuple[str | None, ...]:
+    return _SERVICE_STAGES if bot_type == "service" else _DRAFT_STAGES
+
+
+# optional bcn_gateway-only config keys: an explicit null means "not provided"
+# (same semantics as client_secret) and is dropped before persisting — a stored
+# null would make the BCS ``_binding_payload``'s ``config.get(key, default)``
+# send null instead of the default/stored value.
+_BCN_OPTIONAL_KEYS: tuple[str, ...] = (
+    "group_chat_scope",
+    "outbound_visibility",
+    "forward_sender_identity",
+)
+
+
 def _safe_config(raw: dict[str, Any]) -> DingTalkChannelConfig:
     """Project the stored config without returning credentials or private URLs."""
     raw_allowlist = raw.get("allowlist")
@@ -141,6 +166,11 @@ def _safe_config(raw: dict[str, Any]) -> DingTalkChannelConfig:
         include_sender_name=bool(raw.get("include_sender_name", True)),
         group_chat_scope=raw.get("group_chat_scope"),
         outbound_visibility=raw.get("outbound_visibility"),
+        forward_sender_identity=(
+            bool(raw["forward_sender_identity"])
+            if "forward_sender_identity" in raw
+            else None
+        ),
     )
 
 
@@ -154,7 +184,7 @@ def _project(record: ChannelRecord) -> Channel:
         owner_id=record.identity_id,
         config=_safe_config(record.config),
         status=_status(record.status),
-        stage="draft",
+        stage=cast(ChannelStage, record.stage or "draft"),
         created_at=record.gmt_create,
         updated_at=record.gmt_modified,
     )
@@ -166,7 +196,7 @@ async def _authorize(
     bot_id: str,
     user_id: str,
     owner_id: str,
-) -> str:
+) -> BotFacts:
     facts = await resolve_operable_bot(
         relay,
         bot_id,
@@ -175,7 +205,7 @@ async def _authorize(
         stage="draft",
         surface="channels",
     )
-    return facts.owner_id
+    return facts
 
 
 def _require_edit_lock(
@@ -203,6 +233,7 @@ def _owned_channel(
     *,
     bot_id: str,
     owner_id: str,
+    stages: tuple[str | None, ...] = _DRAFT_STAGES,
 ) -> ChannelRecord:
     record = service.get_channel_by_id(channel_id)
     if (
@@ -211,7 +242,7 @@ def _owned_channel(
         or record.bind_bot_id != bot_id
         or record.identity_id != owner_id
         or record.type != "dingding"
-        or record.stage not in (None, "", "draft")
+        or record.stage not in stages
     ):
         raise ChannelNotFoundError("channel is outside the addressed Bot scope")
     return record
@@ -252,18 +283,22 @@ async def list_channels(
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     service: ChannelServiceProtocol = Injected(ChannelServiceProtocol),
 ) -> Envelope[list[Channel]]:
-    """List user-managed draft DingTalk Channels for the addressed Bot."""
-    resolved_owner = await _authorize(
+    """List the user's DingTalk Channels for the addressed Bot.
+
+    draft rows only (plus verify/online rows when the bot is a service Bot)."""
+    facts = await _authorize(
         relay=relay,
         bot_id=bot_id,
         user_id=user_id,
         owner_id=owner_id,
     )
+    resolved_owner = facts.owner_id
     records = service.list_channels(
         type="dingding",
         identity_id=resolved_owner,
         bind_bot_id=bot_id,
     )
+    stages = _allowed_stages(facts.bot_type)
     # The legacy service also returns a shared aideskdingding default row. It is
     # useful to the internal UI but is not owned by this user and therefore is
     # not part of the public per-Bot CRUD collection.
@@ -273,7 +308,7 @@ async def list_channels(
         if record.type == "dingding"
         and record.identity_id == resolved_owner
         and record.deleted == 0
-        and record.stage in (None, "", "draft")
+        and record.stage in stages
     ]
     return envelope(items, request)
 
@@ -297,21 +332,28 @@ async def create_channel(
     locks: CollaboratorLockServiceProtocol = Injected(CollaboratorLockServiceProtocol),
     aix_config: cfg.AixConfig = Injected(cfg.AixConfig),
 ) -> Envelope[Channel]:
-    """Create an inactive draft DingTalk Channel."""
-    resolved_owner = await _authorize(
+    """Create an inactive DingTalk Channel row (stage defaults to draft)."""
+    facts = await _authorize(
         relay=relay,
         bot_id=bot_id,
         user_id=user_id,
         owner_id=owner_id,
     )
+    resolved_owner = facts.owner_id
     _require_edit_lock(
         locks,
         bot_id=bot_id,
         owner_id=resolved_owner,
         user_id=user_id,
     )
+    # verify/online 行只对服务 Bot 开放（老前端"生效环境"选择器的移植）：
+    # 它们是发布流按 stage 合成各环境渠道配置的输入。
+    if body.stage != "draft" and facts.bot_type != "service":
+        raise ChannelModeViolationError(
+            "stage 'verify'/'online' is only configurable for service bots"
+        )
     config = body.config.model_dump()
-    for bcn_key in ("group_chat_scope", "outbound_visibility"):
+    for bcn_key in _BCN_OPTIONAL_KEYS:
         if config.get(bcn_key) is None:
             config.pop(bcn_key, None)
     config["binding_mode"] = body.binding_mode
@@ -326,13 +368,14 @@ async def create_channel(
         bind_bot_id=bot_id,
         config=config,
         status="0",
-        stage="draft",
+        stage=body.stage,
     )
     record = _owned_channel(
         service,
         channel_id,
         bot_id=bot_id,
         owner_id=resolved_owner,
+        stages=_allowed_stages(facts.bot_type),
     )
     return created(_project(record), request)
 
@@ -352,13 +395,14 @@ async def get_channel(
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     service: ChannelServiceProtocol = Injected(ChannelServiceProtocol),
 ) -> Envelope[Channel]:
-    """Get one draft Channel within the addressed Bot scope."""
-    resolved_owner = await _authorize(
+    """Get one Channel row within the addressed Bot scope (bot-type stage set)."""
+    facts = await _authorize(
         relay=relay,
         bot_id=bot_id,
         user_id=user_id,
         owner_id=owner_id,
     )
+    resolved_owner = facts.owner_id
     return envelope(
         _project(
             _owned_channel(
@@ -366,6 +410,7 @@ async def get_channel(
                 channel_id,
                 bot_id=bot_id,
                 owner_id=resolved_owner,
+                stages=_allowed_stages(facts.bot_type),
             )
         ),
         request,
@@ -391,13 +436,16 @@ async def update_channel(
     locks: CollaboratorLockServiceProtocol = Injected(CollaboratorLockServiceProtocol),
     aix_config: cfg.AixConfig = Injected(cfg.AixConfig),
 ) -> Envelope[Channel]:
-    """Partially update a draft Channel, preserving an omitted secret."""
-    resolved_owner = await _authorize(
+    """Partially update a Channel row, preserving an omitted secret.
+
+    stage is immutable: updates write back the row's stored stage."""
+    facts = await _authorize(
         relay=relay,
         bot_id=bot_id,
         user_id=user_id,
         owner_id=owner_id,
     )
+    resolved_owner = facts.owner_id
     _require_edit_lock(
         locks,
         bot_id=bot_id,
@@ -409,6 +457,7 @@ async def update_channel(
         channel_id,
         bot_id=bot_id,
         owner_id=resolved_owner,
+        stages=_allowed_stages(facts.bot_type),
     )
     stored_mode = record.config.get("binding_mode", "plugin")
     if body.binding_mode is not None and body.binding_mode != stored_mode:
@@ -421,11 +470,7 @@ async def update_channel(
         patch = body.config.model_dump(exclude_unset=True)
         if patch.get("client_secret") is None:
             patch.pop("client_secret", None)
-        # Explicit nulls on bcn keys mean "not provided" (same semantics as
-        # client_secret): keeping them would persist null, and the BCS
-        # ``_binding_payload``'s ``config.get(key, default)`` would then send
-        # null instead of the default/stored value.
-        for bcn_key in ("group_chat_scope", "outbound_visibility"):
+        for bcn_key in _BCN_OPTIONAL_KEYS:
             if patch.get(bcn_key) is None:
                 patch.pop(bcn_key, None)
         config.update(patch)
@@ -434,6 +479,10 @@ async def update_channel(
             stored_mode,
             robot_code=config.get("robot_code"),
             fields_set=set(patch),
+        )
+        validate_streaming_card_template(
+            enable_streaming_cards=config.get("enable_streaming_cards", False),
+            card_template_id=config.get("card_template_id"),
         )
     except ValueError as exc:
         raise ChannelModeViolationError(str(exc)) from exc
@@ -451,7 +500,7 @@ async def update_channel(
         bind_bot_id=bot_id,
         config=config,
         status=record.status,
-        stage="draft",
+        stage=record.stage,
     )
     if record.status == "1":
         await _sync_active(service, channel_id)
@@ -460,6 +509,7 @@ async def update_channel(
         channel_id,
         bot_id=bot_id,
         owner_id=resolved_owner,
+        stages=_allowed_stages(facts.bot_type),
     )
     return envelope(_project(updated), request)
 
@@ -482,13 +532,14 @@ async def update_channel_status(
     service: ChannelServiceProtocol = Injected(ChannelServiceProtocol),
     locks: CollaboratorLockServiceProtocol = Injected(CollaboratorLockServiceProtocol),
 ) -> Envelope[Channel]:
-    """Activate or deactivate a draft Channel and synchronize its runtime."""
-    resolved_owner = await _authorize(
+    """Activate or deactivate a Channel and synchronize its runtime."""
+    facts = await _authorize(
         relay=relay,
         bot_id=bot_id,
         user_id=user_id,
         owner_id=owner_id,
     )
+    resolved_owner = facts.owner_id
     _require_edit_lock(
         locks,
         bot_id=bot_id,
@@ -500,6 +551,7 @@ async def update_channel_status(
         channel_id,
         bot_id=bot_id,
         owner_id=resolved_owner,
+        stages=_allowed_stages(facts.bot_type),
     )
     await _set_status(service, channel_id, body.status)
     updated = _owned_channel(
@@ -507,6 +559,7 @@ async def update_channel_status(
         channel_id,
         bot_id=bot_id,
         owner_id=resolved_owner,
+        stages=_allowed_stages(facts.bot_type),
     )
     return envelope(_project(updated), request)
 
@@ -528,13 +581,14 @@ async def delete_channel(
     service: ChannelServiceProtocol = Injected(ChannelServiceProtocol),
     locks: CollaboratorLockServiceProtocol = Injected(CollaboratorLockServiceProtocol),
 ) -> Envelope[Deleted]:
-    """Deactivate and remove a draft Channel."""
-    resolved_owner = await _authorize(
+    """Deactivate and remove a Channel row (any stage visible to the caller)."""
+    facts = await _authorize(
         relay=relay,
         bot_id=bot_id,
         user_id=user_id,
         owner_id=owner_id,
     )
+    resolved_owner = facts.owner_id
     _require_edit_lock(
         locks,
         bot_id=bot_id,
@@ -546,6 +600,7 @@ async def delete_channel(
         channel_id,
         bot_id=bot_id,
         owner_id=resolved_owner,
+        stages=_allowed_stages(facts.bot_type),
     )
     if record.status == "1":
         await _set_status(service, channel_id, "inactive")

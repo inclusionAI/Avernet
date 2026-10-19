@@ -33,6 +33,7 @@ from agentclaw.community.core.skill_center.errors import (
 )
 from agentclaw.community.core.skill_center.offline_policy import require_skill_online
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.core.models.skill_installation_source import SkillInstallationSourceKind
 
 
 class ManifestDirectClaimCommands:
@@ -429,6 +430,7 @@ class ManifestDirectClaimCommands:
                 owner_id=owner_id,
                 env=get_current_env(),
                 skill_id=int(target.id),
+                source_kind=SkillInstallationSourceKind.DIRECT,
             )
             if installed and int(target.id) not in installed_before and not transitions:
                 transitions.add(("none", "direct"))

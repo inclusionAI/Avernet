@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+import html
 import json
+import re
 from typing import Any
 
 from agentclaw.community.core.task.domain.prompt_constants import (
@@ -307,6 +309,83 @@ def format_benchmark_prompt(task_spec: dict[str, Any]) -> str:
     parts.append(OUTPUT_LANGUAGE_CONSTRAINT)
 
     return "/task [TASK-LOOP-EVALUATION] " + "\n\n".join(parts)
+
+
+def _benchmark_task_title(task_spec: dict[str, Any]) -> str:
+    """Derive the side-panel title from the confirmed benchmark task facts."""
+    context = task_spec.get("context") or {}
+    goal = task_spec.get("goal") or {}
+    metadata = task_spec.get("metadata") or {}
+    raw_title = str(
+        context.get("title")
+        or metadata.get("title")
+        or goal.get("objective")
+        or metadata.get("instruction")
+        or ""
+    ).strip()
+    if not raw_title:
+        return "任务"
+    # Keep parity with the frontend helper: remove characters that can break the
+    # single-quoted HTML attribute or JSON value; the panel SDK shortens display.
+    for char in "<>'\"`":
+        raw_title = raw_title.replace(char, " ")
+    return raw_title.strip() or "任务"
+
+
+def _benchmark_html_attribute(value: str) -> str:
+    return html.escape(value, quote=True)
+
+
+def _safe_benchmark_root_instruction(instruction: str) -> str:
+    """Prevent user content from closing the hidden instruction comment early."""
+    return re.sub(
+        r"--!?>",
+        lambda match: match.group(0)[:2] + "\u200b" + match.group(0)[2:],
+        instruction,
+    )
+
+
+def build_benchmark_task_launch_message(
+    *,
+    task_id: str,
+    owner_user_id: str,
+    task_spec: dict[str, Any],
+    root_execution_instruction: str | None = None,
+) -> str:
+    """Build the same-session benchmark panel and hidden relay root message.
+
+    The benchmark route owns auto execution because API-created sessions may never
+    mount the frontend confirmation card. This message mirrors the frontend task
+    panel contract; for centralized tasks it contains only the visible panel.
+    """
+    tab = json.dumps(
+        {
+            "id": f"task-{task_id}",
+            "title": _benchmark_task_title(task_spec),
+            "closable": True,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    params = json.dumps(
+        {
+            "taskId": task_id,
+            "apiBaseUrl": "",
+            "bcsBaseUrl": "",
+            "userId": owner_user_id,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    panel = (
+        "<AixUI type=\"panel\" component=\"taskPanel.TaskLoopView\" "
+        f"tab='{_benchmark_html_attribute(tab)}' "
+        f"params='{_benchmark_html_attribute(params)}'></AixUI>"
+    )
+    instruction = (root_execution_instruction or "").strip()
+    if not instruction:
+        return panel
+    return f"{panel}\n<!--\n{_safe_benchmark_root_instruction(instruction)}\n-->"
 
 
 def compose_benchmark_a2a_session_id(now: float | None = None) -> str:

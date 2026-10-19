@@ -80,6 +80,11 @@ beforeEach(() => {
         }),
         page: { page, pageSize, total: result.items.length, totalPages: Math.ceil(result.items.length / pageSize) } }
     }
+    else if (url.pathname.endsWith('/selection/query')) {
+      const selected = JSON.parse(init?.body as string).itemIds as string[]
+      body = { inputDigest: result.inputDigest, canEdit: true, items: result.items.filter(item => selected.includes(item.itemId)),
+        missing: selected.filter(id => !result.items.some(item => item.itemId === id)) }
+    }
     else if (url.pathname.includes('/items/')) body = item(url.pathname.split('/').at(-1)!)
     else throw new Error(`Unexpected request: ${url.pathname}`)
     return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
@@ -160,7 +165,7 @@ it('discards another page cache when a refreshed snapshot reports changed source
   result.inputDigest = 'e'.repeat(64)
   result.items = [item('updated')]
   await act(async () => { await client.invalidateQueries({ queryKey: ['repair-issue-previews', 'wf'], predicate: query => query.getObserversCount() > 0 }) })
-  expect(screen.getByText(/建议来源已更新，原选择已清空/)).toBeVisible()
+  expect(await screen.findByText(/retry：原始来源已不可用/)).toBeVisible()
   await user.click(within(screen.getByRole('region', { name: '问题分页' })).getByRole('button', { name: '上一页' }))
   expect(await screen.findByRole('checkbox', { name: '选择 updated' })).not.toBeChecked()
   expect(screen.queryByRole('checkbox', { name: '选择 retry' })).not.toBeInTheDocument()
@@ -179,7 +184,7 @@ it('does not restore a cached generation action after another page discovers an 
   await user.click(within(screen.getByRole('region', { name: '问题分页' })).getByRole('button', { name: '上一页' }))
   await screen.findByRole('checkbox', { name: '选择 retry' })
   expect(screen.getByRole('button', { name: '继续现有任务' })).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: '生成优化草稿（1）' })).toBeEnabled()
+  await waitFor(() => expect(screen.getByRole('button', { name: '生成优化草稿（1）' })).toBeEnabled())
 })
 
 it('keeps cached suggestions visible during background validation and removes them on a forbidden response', async () => {

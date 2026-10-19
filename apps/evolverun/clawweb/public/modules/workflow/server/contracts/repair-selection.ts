@@ -1,23 +1,32 @@
 import type { RepairInboxItem } from './repair-workbench.js'
+import { repairSignatureKey } from './repair-workbench.js'
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']'
-  if (value && typeof value === 'object') return '{' + Object.entries(value).sort(([a], [b]) => a.localeCompare(b))
+  if (value && typeof value === 'object') return '{' + Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
     .map(([key, entry]) => JSON.stringify(key) + ':' + canonical(entry)).join(',') + '}'
   return JSON.stringify(value) ?? 'undefined'
 }
 
+/** Shared browser/server operation comparison; display projections never compare clipped values. */
+export function repairOperationIdentity(operation: Record<string, unknown>): string {
+  return repairSignatureKey(canonical({ op: operation.op ?? 'replace', hasValue: Object.hasOwn(operation, 'value'), value: operation.value ?? null }))
+}
+
 /** A conservative preview of structural conflicts, not a replacement for Pack validation. */
-export function selectionConflicts(items: RepairInboxItem[]) {
-  const operations = items.flatMap(item => (Array.isArray(item.proposal?.operations) ? item.proposal.operations : [])
+export function selectionConflicts(items: Array<Pick<RepairInboxItem, 'itemId' | 'proposal' | 'readSummary'>>) {
+  const operations = items.flatMap(item => item.readSummary ? item.readSummary.operations.map(op => ({ ...op, itemId: item.itemId })) : (Array.isArray(item.proposal?.operations) ? item.proposal.operations : [])
     .flatMap((raw: unknown) => {
       if (!raw || typeof raw !== 'object') return []
       const operation = raw as Record<string, unknown>
       if (typeof operation.path !== 'string' || operation.op === 'test') return []
       return [{ itemId: item.itemId, nodeId: String(operation.nodeId ?? '工作流'),
         path: operation.path.startsWith('/') ? operation.path : '/' + operation.path.replaceAll('.', '/'),
-        identity: canonical({ op: operation.op ?? 'replace', value: operation.value }) }]
-    }))
+        identity: repairOperationIdentity(operation) }]
+    }).concat((Array.isArray(item.proposal?.patches) ? item.proposal.patches : []).flatMap((patch: unknown) => {
+      if (!patch || typeof patch !== 'object' || typeof (patch as Record<string, unknown>).file !== 'string') return []
+      return [{ itemId: item.itemId, nodeId: `file:${(patch as Record<string, unknown>).file}`, path: '/', identity: repairSignatureKey(canonical(patch)) }]
+    })))
   const conflicts: Array<{ itemIds: string[]; nodeId: string; path: string }> = []
   const seen = new Set<string>()
   for (let i = 0; i < operations.length; i++) for (let j = i + 1; j < operations.length; j++) {

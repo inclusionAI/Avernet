@@ -37,6 +37,143 @@ test('entity_id 而不是 owner_id 作为会话 owner 上下文，mine 不标记
   expect(result.ok && result.data[0].isFriendBot).not.toBe(true);
 });
 
+test('团队 Coding Bot 保留模板分类字段，避免行标签退化为 AgentCoding', async () => {
+  list.mockResolvedValue({
+    code: 200000,
+    data: {
+      items: [
+        dto({
+          bot_name: '团队 Coding Bot',
+          engine: 'claude_code',
+          template_type: 'generalCC',
+          template_name: '通用 Coding Bot',
+        }),
+      ],
+      total: 1,
+    },
+  });
+
+  const result = await teamBotConversationService.listBots('human_viewer');
+
+  expect(result).toMatchObject({
+    ok: true,
+    data: [
+      {
+        botId: 'shared:team-entity',
+        displayName: '团队 Coding Bot',
+        isTeamBot: true,
+        isAgentCodingBot: true,
+        templateType: 'generalCC',
+        templateName: '通用 Coding Bot',
+      },
+    ],
+  });
+});
+
+test('团队 Coding Bot 从 template_config 读取模板名，与管理 Bot 目录一致', async () => {
+  list.mockResolvedValue({
+    code: 200000,
+    data: {
+      items: [
+        dto({
+          bot_id: 'architect-coding',
+          bot_name: '团队架构 Bot',
+          entity_id: 'entity-architect',
+          engine: 'claude_code',
+          template_type: 'generalCC',
+          template_name: undefined,
+          template_config: {
+            template_type: 'generalCC',
+            template_name: '架构 Bot',
+            bot_template_config: { template_name: '架构 Bot' },
+          },
+        }),
+        dto({
+          bot_id: 'normal-cc',
+          bot_name: '团队普通 CC',
+          entity_id: 'entity-normal',
+          engine: 'claude_code',
+          template_type: undefined,
+          template_name: undefined,
+          template_config: {
+            template_type: 'normalCC',
+            template_name: undefined,
+            bot_template_config: {},
+          },
+        }),
+      ],
+      total: 2,
+    },
+  });
+
+  const result = await teamBotConversationService.listBots('human_viewer');
+
+  expect(result).toMatchObject({
+    ok: true,
+    data: [
+      {
+        botId: 'architect-coding:entity-architect',
+        isAgentCodingBot: true,
+        templateType: 'generalCC',
+        templateName: '架构 Bot',
+      },
+      {
+        botId: 'normal-cc:entity-normal',
+        isAgentCodingBot: false,
+        templateType: 'normalCC',
+        templateName: undefined,
+      },
+    ],
+  });
+});
+
+test('团队历史 Coding Bot 缺失 template_name 时按模板分类生成可读标签', async () => {
+  list.mockResolvedValue({
+    code: 200000,
+    data: {
+      items: [
+        dto({
+          bot_id: 'application-coding',
+          bot_name: '团队应用 Coding Bot',
+          entity_id: 'entity-application',
+          engine: 'claude_code',
+          template_type: 'applicationCoding',
+          template_name: undefined,
+        }),
+        dto({
+          bot_id: 'personal-coding',
+          bot_name: '团队个人 Coding Bot',
+          entity_id: 'entity-personal',
+          engine: 'aicoding',
+          template_type: 'personalCoding',
+          template_name: undefined,
+        }),
+      ],
+      total: 2,
+    },
+  });
+
+  const result = await teamBotConversationService.listBots('human_viewer');
+
+  expect(result).toMatchObject({
+    ok: true,
+    data: [
+      {
+        botId: 'application-coding:entity-application',
+        isAgentCodingBot: true,
+        templateType: 'applicationCoding',
+        templateName: '应用 Bot',
+      },
+      {
+        botId: 'personal-coding:entity-personal',
+        isAgentCodingBot: true,
+        templateType: 'personalCoding',
+        templateName: '个人 Coding Bot',
+      },
+    ],
+  });
+});
+
 test('按 total 分页且按完整 bot_id/entity_id 去重，保留后端顺序', async () => {
   list.mockResolvedValueOnce({ code: 200000, data: { items: [dto(), dto({ entity_id: 'other-team' })], total: 101 } });
   list.mockResolvedValueOnce({ code: 200000, data: { items: [dto(), dto({ bot_id: 'last' })], total: 101 } });
@@ -63,6 +200,36 @@ test('团队 Bot 直接消费接口返回的 Coding 模板', async () => {
 
   expect(result.ok && result.data[0]).toMatchObject({
     isAgentCodingBot: true,
+  });
+});
+
+test('历史 aicoding 团队 Bot 缺 template_type 时归一为个人 Coding Bot', async () => {
+  list.mockResolvedValue({
+    code: 200000,
+    data: {
+      items: [
+        dto({
+          bot_name: '历史 AIcoding Bot',
+          engine: 'aicoding',
+          template_type: undefined,
+          template_name: undefined,
+        }),
+      ],
+      total: 1,
+    },
+  });
+
+  const result = await teamBotConversationService.listBots('human_viewer');
+
+  expect(result).toMatchObject({
+    ok: true,
+    data: [
+      {
+        isAgentCodingBot: true,
+        templateType: 'personalCoding',
+        templateName: '个人 Coding Bot',
+      },
+    ],
   });
 });
 

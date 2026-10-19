@@ -395,9 +395,42 @@ describe("AutoHealDeployService", () => {
     const placeholder = history.find((h) => h.deploy_number === 1);
     const real = history.find((h) => h.deploy_number === 6);
     expect(placeholder?.is_active).toBe(0);
-    expect(placeholder?.tag_name).toBeNull();
+    // The reserve step must never write a null tag_name: managed MySQL declares
+    // the column NOT NULL and the v65 relaxation never ran there, so a null
+    // would abort the deploy with "Column 'tag_name' cannot be null".
+    expect(placeholder?.tag_name).toBe("deploy/wf-test/#1");
     expect(real?.is_active).toBe(1);
     expect(real?.tag_name).toBe("deploy/wf-test/#6");
+  });
+
+  it("reserves a non-null tag name before the git push reveals the real tag", async () => {
+    const service = new AutoHealDeployService(
+      ctx.db as never,
+      specRepo,
+      deployHistoryRepo,
+      botPermRepo,
+      gitConfig,
+      gitAuthor,
+      triggerRun,
+    );
+
+    // Capture the row as it exists between reserve and activation.
+    let reservedTagName: string | null | undefined;
+    let reservedIsActive: number | undefined;
+    vi.spyOn(gitClient, "commitAndPushDeploy").mockImplementationOnce(async () => {
+      const rows = await ctx.db.query<{ tag_name: string; is_active: number }>(
+        "SELECT tag_name, is_active FROM workflow_deploy_history WHERE workflow_id = ? AND deploy_number = ?",
+        ["wf-test", 1],
+      );
+      reservedTagName = rows[0]?.tag_name;
+      reservedIsActive = rows[0]?.is_active;
+      return { branch: "wf/wf-test", tagName: "deploy/wf-test/#1", commit: "abc123", deployNumber: 1 };
+    });
+
+    await service.deploy({ workflowId: "wf-test", actorId: "user-1" });
+
+    expect(reservedTagName).toBe("deploy/wf-test/#1");
+    expect(reservedIsActive).toBe(0);
   });
 });
 

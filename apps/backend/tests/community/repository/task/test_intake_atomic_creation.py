@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from contextlib import contextmanager
 import asyncio
+import json
 import logging
 import time
 
@@ -19,8 +20,8 @@ from agentclaw.community.core.task.domain.intake import TaskIntakeStatus
 from agentclaw.community.core.task.domain.intake import TaskExecutionMode
 from agentclaw.community.core.task.domain.models import (
     AcceptanceResult, AcceptanceVerdict, Context, Goal, NodeAction, RuntimeInfo,
-    TaskInfo, TaskNode, TaskNodePatch, TaskReportCommand, TaskReportEventType,
-    TaskSourceType, TaskSpec,
+    Status, TaskInfo, TaskNode, TaskNodePatch, TaskReportCommand,
+    TaskReportEventType, TaskSourceType, TaskSpec,
 )
 from agentclaw.community.core.task.repository.models import (
     TaskDeliveryIntentModel, TaskInfoModel, TaskNodeModel,
@@ -160,7 +161,10 @@ def test_legacy_root_delivery_intent_is_retired_without_runner_dispatch() -> Non
         intent = session.query(TaskDeliveryIntentModel).one()
         assert intent.state == "DELIVERED"
     actions = repo.load_action_logs("task-1")["task-1"]
-    assert actions[-1].payload["action_result"] == "retired_legacy_root_intent"
+    assert json.loads(actions[-1].payload["action_result"]) == {
+        "status": "completed",
+        "retired_legacy_root_intent": True,
+    }
 
 
 def test_delivery_intent_claim_is_exclusive_and_recoverable() -> None:
@@ -315,7 +319,9 @@ def test_dispatch_node_acknowledges_only_after_real_dispatch() -> None:
     assert dispatcher.calls == 1
     actions = repo.load_action_logs("task-1")[node_id]
     assert actions[-1].action is NodeAction.DISPATCH
-    assert actions[-1].payload["action_result"] == "delivered"
+    dispatch_output = json.loads(actions[-1].payload["action_result"])
+    assert dispatch_output["status"] == "completed"
+    assert dispatch_output["dispatched"] is True
     with db.orm_session() as session:
         assert session.query(TaskDeliveryIntentModel).one().state == "DELIVERED"
 
@@ -430,6 +436,143 @@ def test_report_and_successor_delivery_intent_commit_together() -> None:
     assert other.apply_relay_report(plan) == planned
     assert other.get_node_context("task-1", "task-1").accepted_plan_report == planned
     assert other.get_node_context("task-1", planned.target_node_id).all_done_output[0].node_id == "task-1"
+
+
+def test_bbs_claim_settles_the_durable_publish_intent() -> None:
+    db, graph_service, repo, task_info, result = _setup()
+    graph_service.initialize_intake_graph(task_info, result.session_id)
+    root = graph_service.query_task_dashboard("task-1").tasks[0]
+    relay_token = root.run_info.extend_props["relay_token"]
+    graph_service.apply_relay_report(TaskReportCommand(
+        task_id="task-1", node_id="task-1",
+        event_id="execution-1", relay_token=relay_token,
+        event_type=TaskReportEventType.EXECUTION_RESULT,
+        event=TaskNodePatch(
+            task_id="task-1", node_id="task-1", execution_decision="DECLINED",
+        ),
+    ))
+    planned = graph_service.apply_relay_report(TaskReportCommand(
+        task_id="task-1", node_id="task-1",
+        event_id="plan-1", relay_token=relay_token,
+        event_type=TaskReportEventType.PLAN_RESULT,
+        event=TaskNode(
+            node_id=None, task_id="task-1", status=None,
+            task_spec=TaskSpec(Context("待认领", title="待认领"), Goal("补齐目标", [])),
+            run_info=RuntimeInfo(run_mode="bbs"), node_run_graph=None,
+        ),
+    ))
+    node_id = str(planned.target_node_id)
+    assert repo.list_pending_delivery_intents() == [("task-1", node_id)]
+
+    graph_service.claim_bbs_owner(
+        "task-1", "bot-2", node_id=node_id, claim_id="claim-1"
+    )
+
+    claimed = next(
+        item for item in graph_service.query_task_dashboard("task-1").tasks
+        if item.node_id == node_id
+    )
+    assert claimed.status is Status.RUNNING
+    with db.orm_session() as session:
+        intent = session.query(TaskDeliveryIntentModel).filter_by(node_id=node_id).one()
+        assert intent.state == "DELIVERED"
+        assert intent.lease_token is None
+        assert intent.lease_until_ms is None
+        assert intent.attempt == 0
+
+
+def test_bbs_claim_does_not_steal_an_active_delivery_lease() -> None:
+    db, graph_service, repo, task_info, result = _setup()
+    graph_service.initialize_intake_graph(task_info, result.session_id)
+    root = graph_service.query_task_dashboard("task-1").tasks[0]
+    relay_token = root.run_info.extend_props["relay_token"]
+    graph_service.apply_relay_report(TaskReportCommand(
+        task_id="task-1", node_id="task-1",
+        event_id="execution-1", relay_token=relay_token,
+        event_type=TaskReportEventType.EXECUTION_RESULT,
+        event=TaskNodePatch(
+            task_id="task-1", node_id="task-1", execution_decision="DECLINED",
+        ),
+    ))
+    planned = graph_service.apply_relay_report(TaskReportCommand(
+        task_id="task-1", node_id="task-1",
+        event_id="plan-1", relay_token=relay_token,
+        event_type=TaskReportEventType.PLAN_RESULT,
+        event=TaskNode(
+            node_id=None, task_id="task-1", status=None,
+            task_spec=TaskSpec(Context("待认领", title="待认领"), Goal("补齐目标", [])),
+            run_info=RuntimeInfo(run_mode="bbs"), node_run_graph=None,
+        ),
+    ))
+    node_id = str(planned.target_node_id)
+    token = next(
+        item for item in graph_service.query_task_dashboard("task-1").tasks
+        if item.node_id == node_id
+    ).run_info.extend_props["relay_token"]
+    _, lease_token = repo.claim_delivery_intent("task-1", node_id, token)
+
+    graph_service.claim_bbs_owner(
+        "task-1", "bot-2", node_id=node_id, claim_id="claim-1"
+    )
+
+    with db.orm_session() as session:
+        intent = session.query(TaskDeliveryIntentModel).filter_by(node_id=node_id).one()
+        assert intent.state == "DELIVERING"
+    repo.mark_delivery_intent("task-1", node_id, lease_token, delivered=True)
+    with db.orm_session() as session:
+        intent = session.query(TaskDeliveryIntentModel).filter_by(node_id=node_id).one()
+        assert intent.state == "DELIVERED"
+
+
+def test_stale_terminal_bbs_intent_is_settled_without_redispatch() -> None:
+    db, graph_service, repo, task_info, result = _setup()
+    graph_service.initialize_intake_graph(task_info, result.session_id)
+    root = graph_service.query_task_dashboard("task-1").tasks[0]
+    relay_token = root.run_info.extend_props["relay_token"]
+    graph_service.apply_relay_report(TaskReportCommand(
+        task_id="task-1", node_id="task-1",
+        event_id="execution-1", relay_token=relay_token,
+        event_type=TaskReportEventType.EXECUTION_RESULT,
+        event=TaskNodePatch(
+            task_id="task-1", node_id="task-1", execution_decision="DECLINED",
+        ),
+    ))
+    planned = graph_service.apply_relay_report(TaskReportCommand(
+        task_id="task-1", node_id="task-1",
+        event_id="plan-1", relay_token=relay_token,
+        event_type=TaskReportEventType.PLAN_RESULT,
+        event=TaskNode(
+            node_id=None, task_id="task-1", status=None,
+            task_spec=TaskSpec(Context("待认领", title="待认领"), Goal("补齐目标", [])),
+            run_info=RuntimeInfo(run_mode="bbs"), node_run_graph=None,
+        ),
+    ))
+    node_id = str(planned.target_node_id)
+    graph_service.claim_bbs_owner(
+        "task-1", "bot-2", node_id=node_id, claim_id="claim-1"
+    )
+    graph_service.update_task_node_info(TaskNodePatch(
+        task_id="task-1", node_id=node_id, status=Status.DONE,
+        extend_props_patch={"bbs_owner": None},
+    ))
+
+    # Simulate a legacy write that reached this code without graph-save
+    # settlement, then prove the redriver retires it instead of looping.
+    with db.orm_session() as session:
+        session.query(TaskDeliveryIntentModel).filter_by(node_id=node_id).update(
+            {"state": "PENDING", "lease_token": None, "lease_until_ms": None}
+        )
+
+    class Dispatcher:
+        async def dispatch(self, node):
+            raise AssertionError("terminal BBS intent must not be redispatched")
+
+    service = TaskService(graph_service, delivery_intents=repo)
+    service._relay_adapter._dispatcher = Dispatcher()
+    assert asyncio.run(service.dispatch_pending_intents()) == 1
+    with db.orm_session() as session:
+        intent = session.query(TaskDeliveryIntentModel).filter_by(node_id=node_id).one()
+        assert intent.state == "DELIVERED"
 
 
 def test_bbs_plan_registers_durable_publish_intent() -> None:

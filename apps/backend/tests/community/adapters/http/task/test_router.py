@@ -56,6 +56,16 @@ from agentclaw.community.core.task.task_runner.client.callback_data_enricher imp
 )
 
 
+class _RecordingTrajEmitter:
+    """生产 ``TaskService._task_context_service`` 的替真:记录 emit 调用供断言。"""
+
+    def __init__(self) -> None:
+        self.emit_calls: list[tuple] = []
+
+    def emit_trajectory_event(self, task_id, node_id, action_type, **kwargs):
+        self.emit_calls.append((task_id, node_id, action_type, kwargs))
+
+
 class _StubCallback:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
@@ -77,6 +87,34 @@ def _raise(exc):
     return _f
 
 
+_EXECUTION_TRACE_ACTION_TYPES = (
+    "S1_CONTEXT",
+    "S2_GAPS",
+    "S3_CAPABILITY",
+    "S4A_EXECUTION",
+    "S4B_REPORT",
+)
+
+
+def _execution_trace() -> dict:
+    return {
+        "steps": [
+            {
+                "action_type": action_type,
+                "action_input": (
+                    "{\"step\":\"" + action_type + "\",\"smoke_gate\":\"checked\"}"
+                ),
+                "action_result": f"{{\"status\":\"completed\",\"output\":\"{action_type}\"}}",
+                "status_from": "RUNNING",
+                "status_to": "RUNNING",
+                "boost_reason": "ok",
+                "error_msg": None,
+            }
+            for action_type in _EXECUTION_TRACE_ACTION_TYPES
+        ]
+    }
+
+
 def _make_node(task_id, node_id, status) -> TaskNode:
     return TaskNode(
         node_id=node_id,
@@ -96,6 +134,9 @@ class _StubService:
 
     def __init__(self) -> None:
         self.callback = _StubCallback()
+        # 生产 TaskService 的轨迹发射口属性名(emit_relay_report_reject_trajectory
+        # 经 getattr(svc, "_task_context_service") 查找)
+        self._task_context_service = _RecordingTrajEmitter()
         self._node_status: dict[tuple[str, str], Status] = {}
         self._node_planned_by: dict[tuple[str, str], str] = {}
         self._execution_config: dict = {}
@@ -367,6 +408,23 @@ class TestRouter:
             ("需要测试能力", "t1", "t1"),
         )
 
+    def test_relay_search_rejects_unknown_fields(self, task_client):
+        client, svc = task_client
+        before = len(svc.callback.calls)
+        response = client.post(
+            "/api/v1/collaboration/tasks/search",
+            json={
+                "query": "需要测试能力",
+                "task_id": "t1",
+                "node_id": "t1",
+                "relay_token": "run-1",
+                "extra": "x",
+            },
+        )
+
+        assert response.status_code == 422, response.text
+        assert len(svc.callback.calls) == before
+
     def test_relay_dispatch_uses_internal_network_and_origin_generation(
         self, task_client
     ):
@@ -392,6 +450,30 @@ class TestRouter:
         assert response.json()["data"] == {"ok": True, "node_id": "target"}
         assert svc.callback.calls[-1] == ("dispatch_node", ("t1", "target"))
 
+    def test_relay_dispatch_rejects_unknown_fields(self, task_client):
+        client, svc = task_client
+        svc.set_execution_config(
+            {"orchestration_mode": "relay", "intake_session_id": "tis-1"}
+        )
+        svc.set_node_status("t1", "origin", Status.RUNNING)
+        svc.set_node_status("t1", "target", Status.PENDING)
+        svc.set_node_planned_by("t1", "target", "origin")
+        before = len(svc.callback.calls)
+
+        response = client.post(
+            "/api/v1/collaboration/tasks/dispatch",
+            json={
+                "task_id": "t1",
+                "origin_node_id": "origin",
+                "target_node_id": "target",
+                "relay_token": "run-1",
+                "extra": "x",
+            },
+        )
+
+        assert response.status_code == 422, response.text
+        assert len(svc.callback.calls) == before
+
     def test_new_relay_report_requires_current_execution_generation(
         self,
         task_client,
@@ -407,11 +489,7 @@ class TestRouter:
             "event_type": "EXECUTION_RESULT",
             "event_id": "event-1",
             "relay_token": "run-1",
-            "trace": {"steps": [{
-                "action_type": "execute", "action_input": "step",
-                "action_result": "completed", "status_from": "RUNNING",
-                "status_to": "RUNNING", "boost_reason": "ok", "error_msg": None,
-            }]},
+            "trace": _execution_trace(),
             "event": {"execution_decision": "DECLINED"},
         }
         response = client.post("/api/v1/collaboration/tasks/callback/report", json=body)
@@ -457,8 +535,7 @@ class TestRouter:
         assert response.status_code == 422, response.text
         body = response.json()
         assert body["code"] == 422000
-        # 缺失字段必须被点名:该用例缺 trace → message 明确指出 trace
-        assert "trace" in body["message"], body["message"]
+        # 该用例的 422 来自非法 AcceptanceResult;trace 缺失不再参与判定。
         # 校验失败也落 task_callback 审计:best-effort 字段 + 脱敏原文 + exec_error
         ingests = [c for c in svc.callback.calls if c[0] == "ingest"]
         assert len(ingests) == 1, "422 校验失败仍应落一条 relay 审计行"
@@ -480,11 +557,8 @@ class TestRouter:
             "event_id": "event-v", "relay_token": "run-1",
             "event": {"execution_decision": "DECLINED"},
         }
-        full_step = {
-            "action_type": "execute", "action_input": "step",
-            "action_result": "completed", "status_from": "RUNNING",
-            "status_to": "RUNNING", "boost_reason": "ok", "error_msg": None,
-        }
+        full_steps = _execution_trace()["steps"]
+        full_step = full_steps[0]
 
         # ① trace 缺 steps → 点名 trace.steps
         r1 = client.post("/api/v1/collaboration/tasks/callback/report",
@@ -494,19 +568,22 @@ class TestRouter:
 
         # ② step 缺 boost_reason → 点名 trace.steps[0].boost_reason
         step_missing = {k: v for k, v in full_step.items() if k != "boost_reason"}
+        steps_missing = _execution_trace()["steps"]
+        steps_missing[0] = step_missing
         r2 = client.post("/api/v1/collaboration/tasks/callback/report",
-                        json={**base, "trace": {"steps": [step_missing]}})
+                        json={**base, "trace": {"steps": steps_missing}})
         assert r2.status_code == 422
         msg2 = r2.json()["message"]
         assert "boost_reason" in msg2 and "steps[0]" in msg2, msg2
 
-        # ③ action_type 非枚举 → 点名 action_type + 合法词表
-        bad_type = {**full_step, "action_type": "S5C_SEARCH_CANDIDATES"}
+        # ③ 空 action_type → 点名 action_type(S 码主事件标识合法值,不再限枚举)
+        steps_bad_type = _execution_trace()["steps"]
+        steps_bad_type[0] = {**full_step, "action_type": ""}
         r3 = client.post("/api/v1/collaboration/tasks/callback/report",
-                        json={**base, "trace": {"steps": [bad_type]}})
+                        json={**base, "trace": {"steps": steps_bad_type}})
         assert r3.status_code == 422
         msg3 = r3.json()["message"]
-        assert "action_type" in msg3 and "dispatch" in msg3 and "relay" in msg3, msg3
+        assert "action_type" in msg3, msg3
 
     def test_new_relay_report_persists_callback_audit_on_success(self, task_client):
         """成功上报:落一条 task_callback 审计行(invoker=relay,run_id=event_id+node_id
@@ -524,9 +601,7 @@ class TestRouter:
                 "event_type": "EXECUTION_RESULT",
                 "event_id": "event-1",
                 "relay_token": "run-1",
-                "trace": {"steps": [{"action_type": "execute", "action_input": "step",
-      "action_result": "completed", "status_from": "RUNNING", "status_to": "RUNNING",
-      "boost_reason": "ok", "error_msg": None}]},
+                "trace": _execution_trace(),
                 "event": {"execution_decision": "DECLINED"},
             },
         )
@@ -549,6 +624,41 @@ class TestRouter:
         assert raw["relay_token"] == "***"
         assert payload["result"]["_ext_info"]["task_id"] == "t1"
 
+    def test_new_relay_report_rejection_emits_system_trajectory_row(self, task_client):
+        """被拒上报(token 过期)→ 轨迹事件表落一条 system 类型事件:
+        action_type=system、error_msg=异常信息、ext_info含完整堆栈与
+        phase/event_id;原异常照常外抛(响应非 200)。"""
+        client, svc = task_client
+        svc.set_execution_config(
+            {"orchestration_mode": "relay", "intake_session_id": "tis-1"}
+        )
+        svc.set_node_status("t1", "t1", Status.RUNNING)
+        # trace 在线上契约可选;拒绝场景走 token 校验,不带 trace 最小化 body
+        response = client.post(
+            "/api/v1/collaboration/tasks/callback/report",
+            json={
+                "task_id": "t1",
+                "node_id": "t1",
+                "event_type": "EXECUTION_RESULT",
+                "event_id": "event-stale",
+                "relay_token": "stale-run",
+                "event": {"execution_decision": "DECLINED"},
+            },
+        )
+        assert response.status_code != 200, "拒绝照常外抛"
+
+        emitter = svc._task_context_service
+        assert len(emitter.emit_calls) == 1, "应恰落一条 system 轨迹行"
+        task_id, node_id, action_type, kwargs = emitter.emit_calls[0]
+        assert (task_id, node_id, action_type) == ("t1", "t1", "system")
+        assert "expired" in kwargs["error_msg"], kwargs["error_msg"]
+        ext = kwargs["ext_info"]
+        assert ext["phase"] == "callback_report"
+        assert ext["relay_event_id"] == "event-stale"
+        assert "TaskStateError" in ext["stack"], "堆栈应记录异常类型"
+        assert "require_relay_attempt" in ext["stack"] or "Traceback" in ext[
+            "stack"], f"堆栈应含调用栈: {ext['stack'][:200]}"
+
     def test_new_relay_report_persists_callback_audit_on_rejection(
         self, task_client
     ):
@@ -567,9 +677,7 @@ class TestRouter:
                 "event_type": "EXECUTION_RESULT",
                 "event_id": "event-stale",
                 "relay_token": "stale-run",
-                "trace": {"steps": [{"action_type": "execute", "action_input": "step",
-      "action_result": "completed", "status_from": "RUNNING", "status_to": "RUNNING",
-      "boost_reason": "ok", "error_msg": None}]},
+                "trace": _execution_trace(),
                 "event": {"execution_decision": "DECLINED"},
             },
         )
@@ -603,11 +711,7 @@ class TestRouter:
             "event_type": "EXECUTION_RESULT",
             "event_id": "ev-9",
             "relay_token": "secret-token",
-            "trace": {"steps": [{
-                "action_type": "execute", "action_input": "step",
-                "action_result": "completed", "status_from": "RUNNING",
-                "status_to": "RUNNING", "boost_reason": "ok", "error_msg": None,
-            }]},
+            "trace": _execution_trace(),
             "event": {"execution_decision": "DECLINED"},
         }
         command = TaskReportCommandDTO.model_validate(raw).to_domain()

@@ -126,6 +126,21 @@ class TaskHarness:
             return self._default_coop_group_sla
         return self._default_sla
 
+    def _is_relay_root(self, graph, node) -> bool:
+        """The first Relay baton lives in the originating conversation.
+
+        Its token is embedded in a one-time root instruction. Unlike a
+        Runner-delivered successor, Backend has no authoritative redelivery
+        attempt for that baton, so Harness must not expire or rotate it.
+        """
+        return bool(
+            graph.is_relay
+            and (
+                node.node_id == graph.task_id
+                or node.run_info.extend_props.get("relay_root")
+            )
+        )
+
     def _pending_timeout(self, task_id: str) -> float:
         """读 PENDING_TIMEOUT(派发异常/未派发→重搜推;优先 execution_config,缺省 default)。"""
         try:
@@ -158,7 +173,12 @@ class TaskHarness:
             # 只监控真正派发执行的叶子(run_mode ∈ 三模态);委托态父节点是 Status.PLANNING(非 RUNNING),
             # 不执行 bot run,不纳入 SLA 超时巡检(避免误复位委托中的分解/聚合节点)。
             _EXEC_MODES = ("single_bot", "coop_group", "bbs")
-            nodes = [n for n in nodes if effective_run_mode(n) in _EXEC_MODES]
+            nodes = [
+                n
+                for n in nodes
+                if effective_run_mode(n) in _EXEC_MODES
+                and not self._is_relay_root(task_graph, n)
+            ]
             now = self._clock()
             for n in nodes:
                 sla = self._sla_timeout(task_id, n)
@@ -228,6 +248,8 @@ class TaskHarness:
                 continue
             for n in failed:
                 if effective_run_mode(n) not in _EXEC_MODES:
+                    continue
+                if self._is_relay_root(task_graph, n):
                     continue
                 if effective_run_mode(n) == "bbs":
                     # bbs 节点 bot 自驱;FAILED 后由下个 bot 接力挂新节点(§10.4),harness 不重派。

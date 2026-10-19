@@ -53,6 +53,7 @@ class DesktopCreationLifecycleHooks:
     build_payload: Callable[..., dict[str, Any]]
     release_claim: Callable[..., None]
     start_publish_polling: Callable[..., None]
+    register_bcn_provider: Callable[..., None]
 
 
 class DesktopCreationLifecycle:
@@ -392,6 +393,10 @@ class DesktopCreationLifecycle:
                 raise DesktopBotServiceError(
                     f"Desktop bot binding update did not match: bot_id={bot_id}"
                 )
+            # Register after the full ext snapshot so its success marker survives.
+            self._hooks.register_bcn_provider(
+                bot={**bot, "ext": initial_ext}, user_id=user_id
+            )
             if publish_id:
                 self._hooks.start_publish_polling(
                     publish_id=str(publish_id),

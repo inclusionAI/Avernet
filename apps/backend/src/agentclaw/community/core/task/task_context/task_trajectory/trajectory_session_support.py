@@ -14,7 +14,7 @@ from agentclaw.community.core.task.task_context.task_trajectory.models import (
 )
 
 logger = logging.getLogger("task.trajectory")
-_RUNNING_SESSION_DEFAULT_MSG_LIMIT = 50
+_RUNNING_SESSION_DEFAULT_MSG_LIMIT = 200
 _ENGINE_SESSION_KEY_RE = re.compile(
     r"^(?:(?:agent:[^:]+:)?session:[^:]+:user:[^:]+"
     r"|user:[^:]+:session:[^:]+:agent:[^:]+)$",
@@ -57,7 +57,7 @@ class TrajectorySessionSupport:
         两段式(需求 2026-09-22):
 
         ① **物化(全节点,不管有没有完成)**:对每个带 ``session_id`` 的
-           (task_id,node_id) 子任务,取最近 ``limit``(默认 50,内容**不截断**)
+           (task_id,node_id) 子任务,取最近 ``limit``(默认 200,内容**不截断**)
            条 session msgs:末位事件 ``ext_info`` 已带 ``session_msgs`` →
            **缓存命中,不再实际拉取**;否则按 session_id 形态分派读通道实拉
            (BCS 会话键 → BCS;引擎 key ``agent:main:session:*`` 等 → BaaS
@@ -141,8 +141,9 @@ class TrajectorySessionSupport:
             # ②研判原料:仅未结束节点喂模型(msgs 原文)
             if state not in {s.value for s in _UNFINISHED}:
                 continue
-            if not excerpt:
-                continue
+            # NB:此处 excerpt 必非空——缓存命中分支以非空为前提,fetched 分支的
+            # 空 excerpt 已在其紧邻的 ``if not excerpt: continue`` 截走(原双重
+            # 防御中的后一处恒不可达,已删,保持 100% 覆盖诚实)。
             briefs.append({
                 "node_id": node.node_id,
                 "node_status": str(state),
@@ -167,7 +168,7 @@ class TrajectorySessionSupport:
 
     def _resolve_msg_limit(self) -> int:
         """每 session 最大消息条数(TrajectoryAnalysisConfig.
-        running_session_message_limit,默认 50;解析失败/未配置回落默认)。"""
+        running_session_message_limit,默认 200;解析失败/未配置回落默认)。"""
         try:
             return int(
                 getattr(self._config, "running_session_message_limit",
@@ -330,19 +331,17 @@ class TrajectorySessionSupport:
             )
             return None
 
-    def _attach_session_msgs(
-        self, trajectory: TaskTrajectory, records, fresh: "dict[str, list] | None" = None,
-    ) -> None:
-        """把每个子任务 (task_id+node_id) 的**会话消息**挂到它在 timeline 中的
-        **最后一条**事件上(读时富化,展示进 HTML/DTO;不落库——持久态由
-        ``merge_last_event_ext_info`` 的 ``session_msgs`` 键承载)。
+    def _collect_session_msgs_by_node(
+        self, records, fresh: "dict[str, list] | None" = None,
+    ) -> "dict[str, list]":
+        """按子任务归集会话明细(2026-10-16 起**不再逐事件挂载**:
+        返回 ``{node_id: msgs}``,由调用方经 ``_append_result_display_events``
+        挂到 ``task_result_display`` 虚拟展示事件)。
 
         来源优先级:``fresh``(本回合 do_analysis 刚实拉的最新内容) > 事件行快照
-        中该子任务末位事件 ``ext_info.session_msgs``(早前物化的缓存)。均无 →
-        不挂(None,缺字段=无信号)。观测旁路:任何失败不抛,不影响轨迹本体返回。
+        中该子任务末位事件 ``ext_info.session_msgs``(早前物化的缓存)。观测旁路:
+        任何失败返回已归集部分(至少空 dict),绝不抛。
         """
-        if not trajectory.timeline:
-            return
         msgs_by_node: dict[str, list] = {}
         try:
             for node_id, ext in self._last_event_ext_by_node(records).items():
@@ -352,17 +351,10 @@ class TrajectorySessionSupport:
         except Exception:  # noqa: BLE001  records 为 None(读失败)→ 空映射
             msgs_by_node = {}
         if fresh:
-            msgs_by_node.update({k: v for k, v in fresh.items() if isinstance(v, list) and v})
-        if not msgs_by_node:
-            return
-        last_seen: set[str] = set()
-        for ev in reversed(trajectory.timeline):
-            if ev.node_id in last_seen:
-                continue  # 更早的事件不挂(只挂末位)
-            last_seen.add(ev.node_id)
-            msgs = msgs_by_node.get(ev.node_id)
-            if msgs:
-                ev.session_msgs = [dict(m) if isinstance(m, dict) else m for m in msgs]
+            msgs_by_node.update(
+                {k: v for k, v in fresh.items() if isinstance(v, list) and v}
+            )
+        return msgs_by_node
 
     def _holder_bearer_token(self, node) -> "str | None":
         """解析 RUNNING 节点**持有者 bot** 的 BCS session_token(会话历史读取身份)。

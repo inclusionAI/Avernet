@@ -33,11 +33,14 @@ export type StoredRepairItem = RepairItem & {
 export type RepairBaseline = {
   workflowId: string; packId: string; releaseRevision: number; activeDeployNumber: number | null;
   specDigest: string; repoId: string; specPath: string; packCommit: string; packDigest: string;
+  /** Canonical deployed JSON, verified against the tagged configuration; specDigest remains raw Git bytes. */
+  proposalSpecDigest?: string;
 };
 export type RepairBatchInput = {
   schemaVersion: typeof REPAIR_BATCH_SCHEMA; taskId: string; revision: number; baseline: RepairBaseline;
   items: RepairItem[]; excludedSources: { count: number; digest: string }; instructions: string;
   automation?: AutomationOrigin;
+  integration?: { schemaVersion: 'workflow-proposal-plan/v1'; baselineSpecDigest: string; plans: Array<{ id: string; originalItemIds: string[]; goals: string[]; relation: string; causes?: import('./repair-proposal.js').ProposalCause[]; unknowns?: string[] }> };
   parentCandidateCommit: string | null; feedback: string; previousReportRef: string | null; taskBranch: string;
 };
 export type RepairRevisionPhase = 'drafting' | 'review' | 'blocked' | 'publishing' | 'published' | 'no_change' | 'failed' | 'cancelled';
@@ -95,17 +98,26 @@ export function validateSourceRef(value: unknown): SourceRef {
   }
   return value as SourceRef;
 }
-export function validateRepairItem(value: unknown): RepairItem {
+/** Structural validation for trusted reads; frozen task bytes are checked separately. */
+export function validateRepairItemStructure(value: unknown): RepairItem {
   valid(object(value), 'item');
   valid(text(value.itemId, 64) && text(value.groupKey, 128) && digest(value.proposalKey) && integer(value.contentRevision, 1), 'item identity');
   valid(value.previousItemId === null || text(value.previousItemId, 64), 'previousItemId');
   valid(value.proposal === null || object(value.proposal), 'proposal');
   valid(value.context === undefined || object(value.context), 'context');
-  valid(text(value.instruction, MAX_INSTRUCTIONS_CHARS, true), 'instruction');
+  valid(typeof value.instruction === 'string', 'instruction');
   valid(Array.isArray(value.sources) && value.sources.length > 0, 'item sources');
   value.sources.forEach(validateSourceRef);
-  boundedRepairJson(value, MAX_FROZEN_BYTES);
   return value as RepairItem;
+}
+export function validateRepairItem(value: unknown): RepairItem {
+  const item = validateRepairItemStructure(value);
+  valid(text(item.instruction, MAX_INSTRUCTIONS_CHARS, true), 'instruction');
+  try { boundedRepairJson(item, MAX_FROZEN_BYTES); } catch (error) {
+    if (error instanceof RepairBatchError) throw new RepairBatchError(error.code, error.message, { ...error.details, stage: 'frozen_item', reasonCode: 'REPAIR_FROZEN_ITEM_TOO_LARGE' });
+    throw error;
+  }
+  return item;
 }
 export function validateAutomationOrigin(value: unknown): AutomationOrigin {
   valid(object(value) && value.kind === 'daily' && digest(value.intentId)
@@ -118,12 +130,29 @@ export function validateAutomationOrigin(value: unknown): AutomationOrigin {
   return value as AutomationOrigin;
 }
 export function validateRepairBatchInput(value: unknown): RepairBatchInput {
-  boundedRepairJson(value, MAX_FROZEN_BYTES);
+  try { boundedRepairJson(value, MAX_FROZEN_BYTES); } catch (error) {
+    if (error instanceof RepairBatchError) throw new RepairBatchError(error.code, error.message, { ...error.details, stage: 'frozen_batch', reasonCode: 'REPAIR_FROZEN_BATCH_TOO_LARGE' });
+    throw error;
+  }
   valid(object(value) && value.schemaVersion === REPAIR_BATCH_SCHEMA, 'schemaVersion');
   valid(gitIdentity(value.taskId, 64) && integer(value.revision, 1), 'revision identity');
   valid(Array.isArray(value.items) && value.items.length > 0 && value.items.length <= MAX_ITEMS, 'items');
   value.items.forEach(validateRepairItem);
   if (value.automation !== undefined) validateAutomationOrigin(value.automation);
+  if (value.integration !== undefined) {
+    const integration = value.integration;
+    valid(object(integration) && integration.schemaVersion === 'workflow-proposal-plan/v1' && integration.baselineSpecDigest === (value.baseline as Record<string, unknown>)?.specDigest
+      && Array.isArray(integration.plans) && integration.plans.length > 0 && integration.plans.length <= MAX_ITEMS, 'proposal integration');
+    const ids: string[] = [];
+    for (const plan of integration.plans) {
+      valid(object(plan) && text(plan.id,64) && Array.isArray(plan.originalItemIds) && plan.originalItemIds.length > 0
+        && plan.originalItemIds.every((id:unknown) => text(id,64)) && Array.isArray(plan.goals) && plan.goals.every((goal:unknown)=>text(goal,400))
+        && ['exact','equivalent','complementary','uncertain'].includes(String(plan.relation)), 'integration plan');
+      ids.push(...plan.originalItemIds as string[]);
+    }
+    valid(new Set(ids).size === ids.length && canonicalRepairJson([...ids].sort()) === canonicalRepairJson(value.items.map((item:any)=>item.itemId).sort()), 'integration coverage');
+  }
+
   valid(new Set(value.items.map(item => item.itemId)).size === value.items.length, 'duplicate items');
   valid(object(value.excludedSources) && integer(value.excludedSources.count) && digest(value.excludedSources.digest), 'excludedSources');
   valid(text(value.instructions, MAX_INSTRUCTIONS_CHARS, true) && text(value.feedback, MAX_INSTRUCTIONS_CHARS, true), 'instructions/feedback');
@@ -135,6 +164,7 @@ export function validateRepairBatchInput(value: unknown): RepairBatchInput {
   valid(gitIdentity(baseline.workflowId, 190) && text(baseline.packId, 255) && text(baseline.repoId, 255), 'baseline identity');
   valid(integer(baseline.releaseRevision) && (baseline.activeDeployNumber === null || integer(baseline.activeDeployNumber, 1)), 'baseline revision');
   valid(digest(baseline.specDigest) && gitObject(baseline.packCommit) && gitObject(baseline.packDigest), 'baseline digests');
+  valid(baseline.proposalSpecDigest === undefined || digest(baseline.proposalSpecDigest), 'baseline proposalSpecDigest');
   valid(text(baseline.specPath, 1024) && !baseline.specPath.startsWith('/') && !baseline.specPath.includes('\\')
     && !baseline.specPath.split('/').some(part => part === '..' || part === '.' || part === ''), 'specPath');
   valid(value.taskBranch === `repair/${baseline.workflowId}/${value.taskId}`, 'taskBranch');
@@ -145,7 +175,8 @@ export function validateRepairBatchInput(value: unknown): RepairBatchInput {
 export function repairEvidenceFlows(item: RepairItem): string[] {
   const diagnoses = Array.isArray(item.context?.diagnoses) ? item.context.diagnoses : [];
   return [...new Set([...item.sources.flatMap(source => source.kind === 'diagnosis_candidate' ? [source.flowId] : []),
-    ...diagnoses.flatMap((entry: any) => [entry?.flowId, ...(Array.isArray(entry?.flowIds) ? entry.flowIds : [])])]
+    ...diagnoses.flatMap((entry: any) => [entry?.flowId, ...(Array.isArray(entry?.flowIds) ? entry.flowIds : [])]),
+    ...(Array.isArray(item.context?.suggestions) ? item.context.suggestions : []).flatMap((entry:any)=>Array.isArray(entry?.runIds)?entry.runIds:Array.isArray(entry?.impactRunIds)?entry.impactRunIds:[])]
     .filter((id): id is string => typeof id === 'string' && !!id))].sort();
 }
 

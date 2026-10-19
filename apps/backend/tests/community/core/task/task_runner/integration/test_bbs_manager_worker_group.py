@@ -45,5 +45,10 @@ def test_bbs_manager_worker_group_carries_relay_token() -> None:
     }
     assert len(executor.formations) == 1
     formation = executor.formations[0]
+    assert formation.bot_ids == ["winner:user"]
+    assert formation.members_info == [
+        {"bot_id": "winner:user", "role": "manager"}
+    ]
+    assert formation.extend_props["manager_bot_id"] == "winner:user"
     assert formation.extend_props["relay_execution"] is True
     assert formation.extend_props["relay_token"] == "attempt-1"

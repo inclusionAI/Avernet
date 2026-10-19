@@ -531,6 +531,10 @@ def claim_bbs_owner(
         if not graph.extend_props.get("bbs_mode"):
             raise TaskStateError(f"claim_bbs_owner: task={task_id} 非 bbs_mode 任务")
         target_id = node_id or task_id
+        if graph.is_relay and target_id == task_id:
+            raise TaskStateError(
+                f"claim_bbs_owner: Relay root cannot be claimed as a BBS baton task={task_id}"
+            )
         target = self._require_node(graph, target_id)
         if node_id is not None:
             if target.run_info.run_mode != "bbs" or target.status != Status.PENDING:

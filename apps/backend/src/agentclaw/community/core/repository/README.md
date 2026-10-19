@@ -135,6 +135,7 @@ provides:
   - FeedbackRepositoryProtocol
   # spaces / market_favorites
   - SpaceRepositoryProtocol
+  - SpaceManagementRepositoryProtocol
   - MarketFavoriteRepositoryProtocol
   - WorkOrderRepositoryProtocol
   # chat
@@ -228,6 +229,7 @@ provides:
   - FeedbackRepository
   # spaces / market_favorites
   - SpaceRepository
+  - SpaceManagementRepository
   - MarketFavoriteRepository
   - WorkOrderRepository
   # chat

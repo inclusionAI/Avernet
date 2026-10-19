@@ -54,6 +54,35 @@ def test_resolve_many_rejects_missing_owner():
         raise AssertionError("missing owner must fail identity resolution")
 
 
+def test_resolve_many_rejects_ambiguous_product_bot_id() -> None:
+    """A bare ``default`` bot_id belongs to many owners and must fail closed."""
+    service = _BotService([
+        {"bot_id": "default", "owner_id": "410025"},
+        {"bot_id": "default", "owner_id": "399002"},
+    ])
+    resolver = BotServiceBcsBotIdentityResolver(service)
+
+    try:
+        resolver.resolve_many(["default"])
+    except BotIdentityResolutionError as exc:
+        assert "ambiguous bot owner" in str(exc)
+        assert "default" in str(exc)
+    else:
+        raise AssertionError("an ambiguous bare bot id must fail identity resolution")
+
+
+def test_resolve_many_rejects_malformed_full_identity():
+    resolver = BotServiceBcsBotIdentityResolver(_BotService([]))
+
+    for malformed in ("default:", ":user", "default:user:extra"):
+        try:
+            resolver.resolve_many([malformed])
+        except BotIdentityResolutionError as exc:
+            assert malformed in str(exc)
+        else:
+            raise AssertionError(f"malformed identity must fail: {malformed}")
+
+
 def test_resolve_many_passes_through_ids_already_carrying_owner():
     # 已带 ':'(如上游已 resolve 成 BCS 'bot_id:owner_id')视为身份完整,原样透传、不再查 BotService,
     # 也只把真正需要查询的无 ':' id 传进 BotService。

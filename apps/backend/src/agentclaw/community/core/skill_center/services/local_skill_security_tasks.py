@@ -159,7 +159,7 @@ class _BaseSecurityTaskHandler:
         if observation is None or observation.skill_id is None:
             raise LookupError("security observation or formal asset is missing")
         if not (allow_deleted_poll and observation.check_id is not None) and (
-            self._repository.get_formal_incarnation_id(
+            self._repository.get_observed_incarnation_id(
                 env=env,
                 bot_id=observation.bot_id,
                 owner_id=observation.owner_id,
@@ -167,7 +167,7 @@ class _BaseSecurityTaskHandler:
             )
             != observation.incarnation_id
         ):
-            raise LookupError("formal Local Skill incarnation has changed")
+            raise LookupError("current Local Skill security identity has changed")
         identity = self._repository.get_identity_for_asset(
             env=env,
             bot_id=observation.bot_id,

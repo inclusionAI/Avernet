@@ -1,0 +1,101 @@
+id: tech-research-v2
+version: '1'
+title: 技术调研
+nodes:
+  - id: search
+    title: 搜索资料
+    executor:
+      type: embedded-agent
+      outputMode: text
+      prompt: >-
+        请搜索关于「{{input.params.topic}}」的技术资料。
+
+        调研深度：{{input.params.depth | default("simple")}}
+
+        请使用 web_search 工具搜索该技术的以下内容： 1. 技术概述和定义 2. 核心原理和架构 3. 主要特点和优势 4.
+        适用场景和使用案例 5. 主要竞品或替代方案 6. 相关文档和资源链接
+
+        请将搜索结果整理成结构化文本返回，包含关键信息摘要。
+      timeoutSeconds: 240
+      contextPolicy:
+        history: isolated
+    phase: P1
+    dependsOn: []
+    triggerRule: all_success
+    retry:
+      maxAttempts: 2
+      backoffMs: 1000
+      'on':
+        - executor-failed
+  - id: report
+    title: 生成调研报告
+    executor:
+      type: embedded-agent
+      outputMode: text
+      prompt: >-
+        基于search节点获取的调研数据，生成一份完整的技术调研报告。
+
+        【输出格式要求 - 必须严格遵守】 1. 必须返回JSON对象格式：{"report": "# 技术调研报告标题\n\n##
+        章节1...\n\n## 章节2..."} 2.
+        report字段值为完整的Markdown格式报告字符串，包含：技术概述、核心原理、主要特点、适用场景、竞品对比等章节 3.
+        使用双引号包裹JSON键和字符串值，内部换行使用\n转义 4. 不要添加任何JSON之外的前缀、后缀或解释文字 5.
+        确保JSON格式可被JSON.parse()成功解析
+
+        【数据来源】 search节点调研结果已提供，主题为：{{input.params.topic}}
+        调研深度：{{input.params.depth | default("simple")}}
+      timeoutSeconds: 180
+      contextPolicy:
+        history: isolated
+    phase: P2
+    dependsOn:
+      - search
+    triggerRule: all_success
+    retry:
+      maxAttempts: 1
+      backoffMs: 0
+      'on':
+        - executor-failed
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required:
+          - report
+        properties:
+          report:
+            type: string
+            description: Markdown格式的技术调研报告
+      type: object
+input:
+  mode: mixed
+  requiredParams:
+    - topic
+  sources:
+    params: true
+    message: true
+  optionalParams:
+    - depth
+identity:
+  key: '{{input.params.topic}}'
+  label: 技术调研：{{input.params.topic}}
+  duplicatePolicy: reject-active
+outputs:
+  finalResult:
+    from: '{{nodeOutput.report.result}}'
+    public: true
+    description: 技术调研报告
+defaults:
+  progress:
+    enabled: true
+    sink: chat
+  user:
+    id: system
+    name: System
+workflow: {}
+messages:
+  onCreated: 📝 技术调研流程已创建：{{input.params.topic}}
+  onFinished: ✅ 技术调研报告已生成：{{input.params.topic}}
+description: |
+  自动搜索技术主题并生成结构化调研报告。
+  输入技术主题，流程将自动搜索相关资料并输出包含技术概述、
+  核心原理、优缺点、应用场景和参考资料的调研报告。

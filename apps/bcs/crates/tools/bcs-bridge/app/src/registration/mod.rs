@@ -78,7 +78,7 @@ pub struct RegisterArgs {
     /// Override the engine executable (default: the engine's executable on PATH)
     #[arg(long)]
     engine_bin: Option<PathBuf>,
-    /// String engine option, e.g. socket=/absolute/path (repeatable)
+    /// String engine option, e.g. socket=/absolute/path (repeatable); replacement overrides only supplied keys
     #[arg(long, value_name = "NAME=VALUE")]
     engine_option: Vec<String>,
 }
@@ -169,10 +169,11 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
         Some(url) => url,
         None => app.profile().default_api_url()?,
     };
-    let saved_bin = bootstrap.previous.as_ref().and_then(|previous| previous.get("bot"))
+    let saved_bot = bootstrap.previous.as_ref().and_then(|previous| previous.get("bot"))
         .and_then(toml::Value::as_array).filter(|bots| bots.len() == 1)
         .filter(|bots| bots[0].get("engine").and_then(toml::Value::as_str) == Some(args.engine.as_str()))
-        .and_then(|bots| bots[0].get("engine_bin")).and_then(toml::Value::as_str).map(Path::new);
+        .map(|bots| &bots[0]);
+    let saved_bin = saved_bot.and_then(|bot| bot.get("engine_bin")).and_then(toml::Value::as_str).map(Path::new);
     let factory = app.engines().get(&args.engine).with_context(|| format!(
         "Unknown engine '{}'; available engines: {}", args.engine, app.engines().ids().collect::<Vec<_>>().join(", ")))?;
     let engine_bin = if factory.requires_bin() {
@@ -189,6 +190,13 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
         if engine_options.insert(name.to_owned(), value.into()).is_some() {
             bail!("Duplicate --engine-option name");
         }
+    }
+    // Resolve the effective settings before validation and share them across both
+    // replacement paths. Explicit CLI keys win; unrelated saved keys keep their types.
+    if let Some(saved) = saved_bot.and_then(|bot| bot.get("engine_options")) {
+        let mut merged = saved.as_table().context("Invalid saved engine options")?.clone();
+        merged.extend(engine_options);
+        engine_options = merged;
     }
     if !engine_options.is_empty() || factory.registration_requires_options() {
         let engine = factory.build(engine_bin.clone().unwrap_or_default(), &engine_options)
@@ -244,7 +252,7 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
         RegistrationApi::OpenApi => client,
         RegistrationApi::Root => client.with_legacy_registration(),
     };
-    if replacement::update(&args, path, &bootstrap, &provider_id, &api_url, &client, webhook_token.as_deref(), engine_bin.as_deref()).await? { return Ok(()); }
+    if replacement::update(&args, path, &bootstrap, &provider_id, &api_url, &client, webhook_token.as_deref(), engine_bin.as_deref(), &engine_options).await? { return Ok(()); }
     let mut bot = toml::Table::new();
     bot.insert("provider_bot_ref".into(), "pending-identity".into());
     bot.insert("engine".into(), args.engine.clone().into());
@@ -256,14 +264,6 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     }
     if let Some(engine_bin) = engine_bin {
         bot.insert("engine_bin".into(), engine_bin.to_str().context("Engine executable path must be UTF-8")?.into());
-    }
-    // Desktop/channel settings are independent of BCN identity and survive replacement.
-    if let Some(previous) = &bootstrap.previous {
-        if let Some(bots) = previous.get("bot").and_then(toml::Value::as_array) {
-            if bots.len() == 1 && bots[0].get("engine").and_then(toml::Value::as_str) == Some(args.engine.as_str()) {
-                if let Some(options) = bots[0].get("engine_options") { bot.insert("engine_options".into(), options.clone()); }
-            }
-        }
     }
     if bootstrap.previous.is_none() && !bot.contains_key("engine_options") {
         let runtime_dir = dirs::home_dir().context("Cannot locate home directory")?.join(".bcn-bridge");

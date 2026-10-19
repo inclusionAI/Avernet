@@ -280,7 +280,19 @@ class ChannelService:
             await self.sync_channel_to_openclaw(channel.id, action=action)
 
     async def _sync_bcn_binding(self, channel: ChannelRecord, *, action: str) -> None:
-        """apply → ensure active + push config; remove → deactivate. Fail-closed."""
+        """apply → ensure active + push config; remove → deactivate. Fail-closed.
+
+        verify/online 行不同步 BCS：它们是发布流的输入（agentclaw 侧按 stage 现读
+        合成各环境配置），不接运行时——与 openclaw 路径 ``sync_channel_to_openclaw``
+        按 stage 跳过的既有语义对齐（spec §5：bcn_gateway 仅 draft/live 生效）。
+        """
+        if channel.stage in ("verify", "online"):
+            logger.info(
+                "[ChannelService] skip BCS sync for stage=%s channel_id=%s",
+                channel.stage,
+                channel.id,
+            )
+            return
         if action == "apply":
             binding_id = await self._bcs_client.ensure_active(channel)
             self._store_bcs_binding_id(channel, binding_id)

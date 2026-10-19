@@ -107,6 +107,7 @@ provides:
   - BotRuntimeProjectorProtocol
   - SkillVersionMaterializerProtocol
   - SpaceSkillPublicationServiceProtocol
+  - SpaceManagementServiceProtocol
   - SkillCenterPublicationGatewayProtocol
   - SkillCenterReferenceServiceProtocol
   - SkillCenterSyncServiceProtocol
@@ -120,6 +121,7 @@ provides:
   - SpaceSkillOfflineServiceProtocol
   - TcResourceReadyObserverProtocol
   - AcliCliServiceProtocol
+  - AgentSwarmServiceProtocol
 consumes:
   - "No service impls at import time — Protocols only declare shape, they don't depend on concrete services"
   - "A small number of core dataclass / schema types used to type Protocol method signatures (see internal_dependencies)"
@@ -188,6 +190,7 @@ internal_dependencies:
   - agentclaw.community.core.tc_file_upload_integrations.service_protocol  # READY observation Service API re-exported for HTTP adapters
   - agentclaw.community.log                          # get_logger used by task_grant_service.py grant/revoke relay logging
   - agentclaw.community.core.access.policy_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.agentswarm.service.protocols  # AgentSwarm Service API Protocol + SubmitRunRequest DTO + typed submit errors, re-exported here
   - agentclaw.community.core.access.user_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.aicoding.architect_rebind_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.aicoding.data_proxy_service_protocol  # Protocol defined in its owning core module, re-exported here
@@ -280,6 +283,7 @@ internal_dependencies:
   - agentclaw.community.core.skills_pool.skills_pool_recovery_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.skills_pool.skills_pool_rollback_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.skills_pool.skills_pool_rollout_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.spaces.space_management_service_protocol
   - agentclaw.community.core.spaces.space_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.system_config.device_config_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.system_config.system_config_service_protocol  # Protocol defined in its owning core module, re-exported here

@@ -10,7 +10,7 @@ Covers:
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -107,7 +107,12 @@ class TestParamPassthrough:
             a2a_mode="off",
             ignore_case=False,
             interaction_service=None,
+            sensitive_bypass_keys_loader=ANY,
         )
+
+        # 未注入 system_config_service 时，loader 返回空豁免列表
+        loader = mock_cls.call_args.kwargs["sensitive_bypass_keys_loader"]
+        assert loader() == ()
 
         await pool.close_all()
 
@@ -881,3 +886,94 @@ class TestReadA2aModeFailure:
 
         assert mock_cls.call_args.kwargs["a2a_mode"] == "off"
         await pool.close_all()
+
+
+# ==================== sensitive bypass keys loader tests ====================
+
+
+class TestLoadSensitiveBypassKeys:
+    def test_none_service_returns_empty(self):
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        pool = AsyncChatClientPool()
+        assert pool._load_sensitive_bypass_keys(None) == ()
+
+    def test_parses_comma_and_newline(self):
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        pool = AsyncChatClientPool()
+        service = MagicMock()
+        service.get_config.return_value = MagicMock(
+            conf_value="abc, def\nghi,,"
+        )
+        assert pool._load_sensitive_bypass_keys(service) == (
+            "abc",
+            "def",
+            "ghi",
+        )
+
+    def test_queries_config_key(self):
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+        from secbaas.community.core.service.config import SystemConfigKey
+
+        pool = AsyncChatClientPool()
+        service = MagicMock()
+        service.get_config.return_value = None
+        pool._load_sensitive_bypass_keys(service)
+        service.get_config.assert_called_once_with(
+            SystemConfigKey.SENSITIVE_BYPASS_SESSION_KEYS
+        )
+
+    def test_cached_within_ttl(self):
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        pool = AsyncChatClientPool()
+        service = MagicMock()
+        service.get_config.return_value = MagicMock(conf_value="abc")
+        pool._load_sensitive_bypass_keys(service)
+        pool._load_sensitive_bypass_keys(service)
+        assert service.get_config.call_count == 1
+
+    def test_not_configured_cached_within_ttl(self):
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        pool = AsyncChatClientPool()
+        service = MagicMock()
+        service.get_config.return_value = None
+        pool._load_sensitive_bypass_keys(service)
+        pool._load_sensitive_bypass_keys(service)
+        assert service.get_config.call_count == 1
+
+    def test_requeries_after_ttl_expiry(self):
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        pool = AsyncChatClientPool()
+        service = MagicMock()
+        service.get_config.return_value = MagicMock(conf_value="abc")
+        assert pool._load_sensitive_bypass_keys(service) == ("abc",)
+        # 模拟缓存过期
+        pool._bypass_keys_cache = (float("-inf"), ())
+        assert pool._load_sensitive_bypass_keys(service) == ("abc",)
+        assert service.get_config.call_count == 2
+
+    def test_read_failure_returns_empty(self):
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        pool = AsyncChatClientPool()
+        service = MagicMock()
+        service.get_config.side_effect = RuntimeError("db down")
+        assert pool._load_sensitive_bypass_keys(service) == ()

@@ -24,6 +24,7 @@ pub(super) fn saved_webhook<'a>(args: &RegisterArgs, source: &'a Bootstrap, prov
 pub(super) async fn update(
     args: &RegisterArgs, path: &Path, source: &Bootstrap, provider: &str, api: &str,
     client: &RegistrationClient, webhook_token: Option<&str>, engine_bin: Option<&Path>,
+    engine_options: &toml::Table,
 ) -> anyhow::Result<bool> {
     let Some(previous) = &source.previous else { return Ok(false); };
     let same_provider = previous.get("provider_id").and_then(toml::Value::as_str) == Some(provider);
@@ -43,6 +44,7 @@ pub(super) async fn update(
     let mut bot = old_bot.clone();
     let same_engine = bot.get("engine").and_then(toml::Value::as_str) == Some(args.engine.as_str());
     if !same_engine { bail!("Changing an existing Bot's engine is unsupported; use a new profile and Bot reference"); }
+    if !engine_options.is_empty() { bot.insert("engine_options".into(), engine_options.clone().into()); }
     if let Some(cwd) = &args.cwd {
         let cwd = cwd.canonicalize().context("Cannot resolve requested working directory")?;
         bot.insert("cwd".into(), cwd.to_str().context("Working directory must be UTF-8")?.into());

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+import traceback
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -147,6 +148,55 @@ def relay_report_audit_payload(
 
 def _pick(raw: Any, key: str) -> Any:
     return raw.get(key) if isinstance(raw, dict) else None
+
+
+def emit_relay_report_reject_trajectory(
+    svc: TaskServiceProtocol,
+    *,
+    command: TaskReportCommand,
+    exc: Exception,
+) -> None:
+    """relay 上报被拒 → 轨迹事件表落一条 ``system`` 类型行(2026-10-16):
+    ``error_msg``=异常信息(截断 ≤500 防长文),``ext_info``={error, stack, phase,
+    relay_event_id} 携带**完整错误堆栈**供排障回溯。
+
+    best-effort 观测旁路:经 ``svc._task_context_service``(生产 TaskService 的
+    轨迹发射口;未接线/替真缺该属性 → no-op)发射,任何失败仅 WARNING,绝不
+    掩盖/替换原异常。读侧 assembler 对 ``system`` 白名单放行,嵌套时按
+    系统子事件挂最近主事件。"""
+    emitter = getattr(svc, "_task_context_service", None)
+    if emitter is None:
+        return
+    try:
+        message = f"{type(exc).__name__}: {exc}"
+        err_msg = message if len(message) <= 500 else message[:497] + "..."
+        stack = "".join(
+            traceback.format_exception(type(exc), exc, exc.__traceback__)
+        )
+        emitter.emit_trajectory_event(
+            command.task_id,
+            command.node_id,
+            "system",
+            action_result="report_rejected",
+            action_input=None,
+            error_msg=err_msg,
+            ext_info={
+                "error": message,
+                "stack": stack,
+                "phase": "callback_report",
+                "relay_event_id": command.event_id,
+            },
+            status_from=None,
+            status_to=None,
+            attempt=0,
+        )
+    except Exception as emit_exc:  # noqa: BLE001  观测旁路,吞而不抛
+        logger.warning(
+            "[task_callback] relay 拒绝上报轨迹发射失败 node=%s: %s",
+            command.node_id,
+            emit_exc,
+            exc_info=True,
+        )
 
 
 async def persist_relay_report_audit(

@@ -196,14 +196,19 @@ async function ensureSchemaVersionTable(db: IDatabase): Promise<boolean> {
 async function runMigrations(db: IDatabase, dbType: DbType): Promise<void> {
   const canDdl = await ensureSchemaVersionTable(db);
   if (!canDdl) {
-    console.warn("[clawweb] DDL denied — skipping migrations, assuming schema exists in managed DB");
-    return;
+    // Managed runtime accounts may deny CREATE regardless of whether the
+    // migration ledger exists or contains rows. Do not read or write the
+    // ledger or replay ordinary migrations here; only explicitly marked,
+    // idempotent self-healing repairs are attempted.
+    console.warn("[clawweb] DDL denied — assuming schema exists in managed DB");
   }
 
-  const current = await getSchemaVersion(db);
+  const current = canDdl ? await getSchemaVersion(db) : 0;
 
   for (const migration of migrations) {
-    if (migration.version <= current) continue;
+    if (!canDdl && !migration.selfHealing) continue;
+    // Self-healing repairs also run when the ledger reports them as applied.
+    if (!migration.selfHealing && migration.version <= current) continue;
     if (migration.sqliteOnly && dbType !== "sqlite") continue;
     if (migration.mysqlOnly && dbType !== "mysql" && dbType !== "zdas") continue;
     if (migration.migrate) await migration.migrate(db);
@@ -217,7 +222,10 @@ async function runMigrations(db: IDatabase, dbType: DbType): Promise<void> {
         // SQLite: "duplicate column name"; MySQL/OceanBase: "Duplicate column name".
         // Also tolerate the occasional "already exists" / "key column ... does not exist".
         // MySQL error 1091: "Can't DROP column" — column doesn't exist (fresh install).
+        // MySQL rendering strips CREATE INDEX IF NOT EXISTS; retain its idempotency.
         if (
+          (/^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s/i.test(ddl) &&
+            lower.includes("duplicate key name")) ||
           lower.includes("duplicate column name") ||
           lower.includes("no such column") ||
           lower.includes("already exists") ||
@@ -230,10 +238,12 @@ async function runMigrations(db: IDatabase, dbType: DbType): Promise<void> {
         }
       }
     }
-    await db.exec(
-      "INSERT INTO schema_version (version, description) VALUES (?, ?)",
-      [migration.version, migration.description]
-    );
+    if (canDdl) {
+      await db.exec(
+        "INSERT INTO schema_version (version, description) VALUES (?, ?)",
+        [migration.version, migration.description]
+      );
+    }
     console.log(`[clawweb] Migration v${migration.version}: ${migration.description}`);
   }
 

@@ -16,15 +16,16 @@ from agentclaw.community.adapters.http.task.schemas_node_context import (
     NodeTaskContextDTO,
     node_context_to_dto,
 )
+from agentclaw.community.adapters.http.task.schemas_relay_dispatch import (
+    TaskDispatchRequestDTO,
+    TaskDispatchResultDTO,
+)
 from agentclaw.community.adapters.http.task.schemas_relay_search import (
     BotCandidateDTO,
     TaskSearchRequestDTO,
     TaskSearchResultDTO,
 )
-from agentclaw.community.adapters.http.task.schemas import (
-    BbsClaimDTO,
-    TaskDispatchRequestDTO,
-)
+from agentclaw.community.adapters.http.task.schemas import BbsClaimDTO
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.di import Injected
@@ -97,13 +98,13 @@ async def search_bots(
     )
 
 
-@router.post("/dispatch", response_model=Envelope[dict[str, Any]])
+@router.post("/dispatch", response_model=Envelope[TaskDispatchResultDTO])
 @envelope_errors
 async def dispatch_relay_node(
     body: TaskDispatchRequestDTO,
     request: Request,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-) -> Envelope[dict[str, Any]]:
+) -> Envelope[TaskDispatchResultDTO]:
     if not body.origin_node_id or not body.relay_token:
         raise TaskStateError("relay dispatch requires origin_node_id and relay_token")
     graph = service.get_task_dashboard(body.task_id)
@@ -114,7 +115,9 @@ async def dispatch_relay_node(
     if target.run_info.extend_props.get("relay_planned_by") != origin.node_id:
         raise TaskStateError("relay dispatch target was not planned by this origin")
     node = await service.dispatch_node(body.task_id, body.target_node_id)
-    return envelope({"ok": True, "node_id": node.node_id}, request)
+    return envelope(
+        TaskDispatchResultDTO(ok=True, node_id=node.node_id), request
+    )
 
 
 @router.post("/bbs/claim", response_model=Envelope[dict[str, Any]])

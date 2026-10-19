@@ -325,6 +325,12 @@ class TaskGraphRepositoryProtocol(Protocol):
         self, task_id: str, node_id: str, relay_token: str, *, reason: str,
     ) -> None: ...
 
+
+    @abstractmethod
+    def settle_delivery_intent(
+        self, task_id: str, node_id: str, relay_token: str,
+    ) -> bool: ...
+
     @abstractmethod
     def save_graph(
         self,

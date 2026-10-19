@@ -42,7 +42,6 @@ import { createWorkflowRepairRuntime } from "./repair-workbench-runtime.js";
 import { AistudioService, resolveAistudioConfig } from "@avernet/clawinsight/server/services/aistudio-service";
 import { createRepairAisExecution, resolveRepairAisConfiguration } from "./repair-ais-execution.js";
 import { createAutoHealTriggerRun } from "./auto-heal-trigger-run.js";
-import { resolveAutoHealGitConfigFromDb } from "./auto-heal-config.js";
 
 export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecoveryRuntime } = {}): ClawWebBootstrap {
   return {
@@ -89,6 +88,7 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
         ? createRepairAisExecution(db, new AistudioService(aisConfig), repairConfig.gitStore, repairConfig.snapshotId)
         : undefined;
       const repairRuntime = createWorkflowRepairRuntime(db, {
+        environment: context.environment,
         principal: async request => {
           const identity = resolveAuthMeIdentity(request, { environment: context.environment });
           if (!identity) return null;
@@ -122,18 +122,17 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       }));
       app.use("/api/approval-cards", createInternalApprovalCardsRouter(approvalCardRepo));
 
-      // AutoHeal composition
+      // AutoHeal fallbacks only; the router resolves DB overrides on each save/deploy.
       const autoHealConfig = resolveAutoHealConfig();
-      const dbGitConfig = await resolveAutoHealGitConfigFromDb(db);
       const autoHealGitConfig = {
-        remoteUrl: dbGitConfig.remoteUrl || autoHealConfig.clawflowsRemoteUrl,
-        username: dbGitConfig.username || autoHealConfig.gitUsername,
-        email: dbGitConfig.email || autoHealConfig.gitAuthorEmail,
-        token: dbGitConfig.token || autoHealConfig.gitToken,
+        remoteUrl: autoHealConfig.clawflowsRemoteUrl,
+        username: autoHealConfig.gitUsername,
+        email: autoHealConfig.gitAuthorEmail,
+        token: autoHealConfig.gitToken,
       };
       const autoHealAuthor = {
-        name: dbGitConfig.authorName || autoHealConfig.gitAuthorName,
-        email: dbGitConfig.authorEmail || autoHealConfig.gitAuthorEmail,
+        name: autoHealConfig.gitAuthorName,
+        email: autoHealConfig.gitAuthorEmail,
       };
       const botPermRepo = new BotWorkflowPermissionRepository(db);
       const deployHistoryRepo = new WorkflowDeployHistoryRepository(db);

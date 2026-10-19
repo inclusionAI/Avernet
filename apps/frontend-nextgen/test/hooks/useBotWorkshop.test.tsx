@@ -253,22 +253,22 @@ it('点击健康检查时导航到独立健康检查页面', async () => {
   await waitFor(() => expect(history.push).toHaveBeenCalledWith('/bot-workshop/health-check?id=bot-1'));
 });
 
-it('显式协作者可进入成员 Coding Bot 会话', () => {
+it('显式协作者可进入任意引擎的 Bot 会话', () => {
   mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined, userId: 'u2' });
   mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
   useWorkspaceStore.setState({ activeIdentityId: 'u2' });
   const { result } = renderHook(() => useBotWorkshop());
 
   const collaboratorBot = {
-    id: 'team-coding-bot',
+    id: 'team-openclaw-bot',
     ownerId: 'owner-1',
-    runtime: { isAgentCodingBot: true },
+    runtime: { isAgentCodingBot: false },
     actions: ['view', 'chat', 'edit'],
   } as unknown as BotDomain;
   const spaceMemberBot = {
-    id: 'space-member-coding-bot',
+    id: 'space-member-openclaw-bot',
     ownerId: 'owner-1',
-    runtime: { isAgentCodingBot: true },
+    runtime: { isAgentCodingBot: false },
     actions: ['view', 'chat'],
   } as unknown as BotDomain;
 
@@ -276,7 +276,7 @@ it('显式协作者可进入成员 Coding Bot 会话', () => {
   expect(result.current.canOpenConversation(spaceMemberBot)).toBe(false);
 });
 
-it('普通引擎保持仅 Owner 可从工坊进入会话', () => {
+it('非协作者不能从工坊进入普通引擎 Bot 会话', () => {
   mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined, userId: 'u2' });
   mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
   useWorkspaceStore.setState({ activeIdentityId: 'u2' });

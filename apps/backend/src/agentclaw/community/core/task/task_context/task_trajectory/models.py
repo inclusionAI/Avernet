@@ -111,7 +111,7 @@ class TrajectoryEvent:
     task_id: str
     node_id: str
     action_type: TrajectoryActionType
-    action_result: str                       # 动作结果(success|hit_single|miss|failed|sla_timeout|...)
+    action_result: str                       # 系统动作结果词;Relay S-step/dispatch trace 为步骤推理输出 JSON(含 status 与实际输出字段)
     attempt: int                             # harness 重试序号快照
     gmt_create: int                          # 事件发射时间(ms epoch)
     gmt_modified: int                          # 分析回填时更新(未回填 == gmt_create)
@@ -120,13 +120,14 @@ class TrajectoryEvent:
     status_to: Status | None = None          # 动作后节点状态(未翻态时 None)
     error_type: ReasonCatalog | None = None   # 仅出错时填(成功为 None)
     error_msg: str | None = None              # 截断错误消息(成功为 None)
-    boost_reason: str | None = None           # 本次动作推进原因(成功推进时可填)
+    boost_reason: str | None = None           # 执行过程证据:为什么推进、为什么选择等维度信息
     holder_id: str | None = None              # Relay 当前动作执行人(ext_info 定向投影)
     analysis: str | None = None              # 内嵌 TrajectoryAnalysis JSON(发射时 None)
     output: dict[str, Any] | None = None      # 读时富化:节点当前产出(仅该节点最后一条事件;不落库)
     session_msgs: list[dict[str, Any]] | None = None  # 读时富化:子任务会话消息(BCS 键或引擎键分通道实拉/缓存;源自末位事件 ext_info.session_msgs 快照或本回合实拉;展示/DTO 用,不落库——纯读不写库,持久化仅分析路径 merge)
     search_probe: dict[str, Any] | None = None  # 读时定向投影:派发搜推三问采样摘要(源自本事件 ext_info;不落库,详见类 docstring)
     actual_run_mode: str | None = None        # 读时富化:节点真实执行模态(single_bot|coop_group|bbs;经 effective_run_mode 定——extend_props.actual_run_mode 优先,缺失回退 run_mode;仅该节点最后一条事件携带;不落库,缺字段=无信号)
+    system_logs: "list[TrajectoryEvent] | None" = None  # 读时嵌套(不落库):本主事件的系统子事件列表——子任务内非 S 码主事件(action_type 不匹配 ^S\\d+)、且 id 落在〔本主事件 id, 下一主事件 id〕区间者,按 id 正序挂此;主事件自身无嵌套时为 None
 
 
 @dataclass

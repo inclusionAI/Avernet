@@ -6,6 +6,7 @@ import datetime
 import sqlite3
 from collections.abc import AsyncIterator, Generator
 from contextlib import AbstractContextManager, contextmanager
+from threading import RLock
 from typing import Any
 
 from sqlalchemy import StaticPool, create_engine, event
@@ -67,6 +68,7 @@ class SqliteOrmPlugin(DataSourcePlugin):
             poolclass=StaticPool,
         )
         event.listen(self._sync_engine, "connect", _register_sqlite_json_functions)
+        self._sync_session_lock = RLock()
         self._sync_session_factory = sessionmaker(
             bind=self._sync_engine,
             autocommit=False,
@@ -149,15 +151,21 @@ class SqliteOrmPlugin(DataSourcePlugin):
 
     @contextmanager
     def orm_session(self) -> Generator[Session, None, None]:
-        session = self._sync_session_factory()
-        try:
-            yield session
-            session.commit()
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
+        # StaticPool shares one DBAPI connection across hook and request threads.
+        # Own it through commit/rollback/close so transactions cannot overlap.
+        with self._sync_session_lock:
+            session = self._sync_session_factory()
+            try:
+                yield session
+                session.commit()
+            except Exception as exc:
+                logger.debug(
+                    "sqlite.orm_session.rollback error_type=%s", type(exc).__name__
+                )
+                session.rollback()
+                raise
+            finally:
+                session.close()
 
     async def session(self) -> AsyncIterator[AsyncSession]:
         if self._async_session_factory is None:

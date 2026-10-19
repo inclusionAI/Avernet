@@ -43,14 +43,14 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "~4.0.5-alpha.1",
-    "@deepseek-ai/dsh-agent": "0.2.1-alpha.2",
-    "@deepseek-ai/dsh-credentials": "0.2.1-alpha.2",
-    "@deepseek-ai/dsh-llm": "0.2.1-alpha.2",
-    "@deepseek-ai/dsh-session": "0.2.1-alpha.2",
-    "@deepseek-ai/dsh-session-persistence": "0.2.1-alpha.2",
-    "@deepseek-ai/dsh-tools": "0.2.1-alpha.2",
-    "@deepseek-ai/dsh-user-approval": "0.2.1-alpha.2",
-    "@deepseek-ai/dsh-user-questions": "0.2.1-alpha.2",
+    "@deepseek-ai/dsh-agent": ">=0.2.0-rc.2 <=0.2.1-alpha.2",
+    "@deepseek-ai/dsh-credentials": ">=0.2.0-rc.2 <=0.2.1-alpha.2",
+    "@deepseek-ai/dsh-llm": ">=0.2.0-rc.2 <=0.2.1-alpha.2",
+    "@deepseek-ai/dsh-session": ">=0.2.0-rc.2 <=0.2.1-alpha.2",
+    "@deepseek-ai/dsh-session-persistence": ">=0.2.0-rc.2 <=0.2.1-alpha.2",
+    "@deepseek-ai/dsh-tools": ">=0.2.0-rc.2 <=0.2.1-alpha.2",
+    "@deepseek-ai/dsh-user-approval": ">=0.2.0-rc.2 <=0.2.1-alpha.2",
+    "@deepseek-ai/dsh-user-questions": ">=0.2.0-rc.2 <=0.2.1-alpha.2",
     "@deepseek-ai/schemastery": "~3.18.5-alpha.1"
   },
   "devDependencies": {

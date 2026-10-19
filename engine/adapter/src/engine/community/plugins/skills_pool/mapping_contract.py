@@ -324,6 +324,10 @@ def _apply_logical_mapping_payload_locked(
     ]
     published = publish_pool_mappings(
         mappings=[physical for _, physical in desired_pairs],
+        deferred_mappings=[
+            physical for raw, physical in zip(mappings, desired_resolved.mappings, strict=True)
+            if _logical_key(raw) in pending_center_keys
+        ],
         retired_mappings=[physical for _, physical in retired_pairs],
         home=home,
         layout_context=context,

@@ -13,9 +13,10 @@ repo**替真。
   的第一次上报)——两次都成功落账后,timeline 应严格等于 10 条 step(5+5),
   顺序 = EXECUTION steps → PLAN steps。
 
-step 字段映射(旧 ``{step,status,detail}`` → 新七字段,映射约定注记在常量旁):
-``action_input = 原始 step 名 + detail 压缩 JSON``、``action_result = 原 status``、
-``action_type`` 按 step 阶段取枚举值(plan/dispatch/execute/verify)。
+step 字段映射(2026-10-16 语义复核):``action_type`` = step 码本身(S1_CONTEXT 等,
+轨迹主事件标识);``action_input`` = 该步骤输入;``action_result`` = 该步骤实际输出
+或产出摘要;``boost_reason`` = 执行过程证据：为什么推进、为什么选择等等维度信息;``error_msg`` = 失败原因;
+``status_from/status_to`` = 本步骤前后节点状态。
 """
 from __future__ import annotations
 
@@ -86,85 +87,77 @@ PLAN_EVENT_ID = "fa239f79-e8f8-4fa6-b437-da3e8650d73f"
 #   S4A=execute(实际执行)、S4B=verify(执行回投就绪)。
 EXECUTION_STEPS = [
     {
-        "action_type": "plan",
-        "action_result": "completed",
-        "action_input": '{"step": "S1_CONTEXT", "recovery_stage": "fresh", '
-                        '"smoke_gate": "checked"}',
+        "action_type": "S1_CONTEXT",
+        "action_input": '{"context_endpoint": "/context", "recovery_stage": "fresh"}',
+        "action_result": '{"status": "completed", "context_recovered": true, "key_context_summary": "根验收与前序事实已恢复"}',
         "status_from": "RUNNING", "status_to": "RUNNING",
-        "boost_reason": "上下文与恢复阶段确认,烟测门通过", "error_msg": None,
+        "boost_reason": "S1 context API 返回有效 TaskContext,烟测门通过", "error_msg": None,
     },
     {
-        "action_type": "plan",
-        "action_result": "completed",
-        "action_input": '{"step": "S2_GAPS", "gaps": ["ac3_remaining", "ac2", '
-                        '"ac1_remaining", "ac4"]}',
+        "action_type": "S2_GAPS",
+        "action_input": '{"root_acceptances": ["ac1", "ac2", "ac3", "ac4"], "all_done_output": []}',
+        "action_result": '{"status": "completed", "task_gaps": ["ac3_remaining", "ac2", "ac1_remaining", "ac4"]}',
         "status_from": "RUNNING", "status_to": "RUNNING",
-        "boost_reason": "识别 4 条剩余缺口", "error_msg": None,
+        "boost_reason": "S2 对照根验收与前序事实,识别 4 条剩余缺口", "error_msg": None,
     },
     {
-        "action_type": "dispatch",
-        "action_result": "completed",
-        "action_input": '{"step": "S3_CAPABILITY", "decision": "accepted", '
-                        '"matched_gaps": ["ac3_remaining", "ac2", '
-                        '"ac1_remaining", "ac4"]}',
+        "action_type": "S3_CAPABILITY",
+        "action_input": '{"task_gaps": ["ac3_remaining", "ac2", "ac1_remaining", "ac4"], "identity_evidence": "任务需求助手可产出研究报告"}',
+        "action_result": '{"status": "completed", "decision": "accepted", "actual_goal": "完成竞争格局与客户需求分析"}',
         "status_from": "RUNNING", "status_to": "RUNNING",
-        "boost_reason": "能力全量匹配缺口,承接执行", "error_msg": None,
+        "boost_reason": "IDENTITY/AGENTS 职责与当前缺口匹配,承接执行", "error_msg": None,
     },
     {
-        "action_type": "execute",
-        "action_result": "completed",
-        "action_input": '{"step": "S4A_EXECUTION", "output_summary": '
-                        '"完成竞争格局+客户需求两大维度分析,产出阶段二报告"}',
+        "action_type": "S4A_EXECUTION",
+        "action_input": '{"actual_goal": "完成竞争格局与客户需求分析", "execution_plan": "读取前序事实并产出阶段二报告"}',
+        "action_result": '{"status": "completed", "output_summary": "完成竞争格局+客户需求两大维度分析,产出阶段二报告", "artifacts": ["report-stage-2.md"]}',
         "status_from": "RUNNING", "status_to": "RUNNING",
-        "boost_reason": "阶段二执行完成,正文见 output_patch", "error_msg": None,
+        "boost_reason": "关键执行过程完成,产物通过本棒局部验收", "error_msg": None,
     },
     {
-        "action_type": "verify",
-        "action_result": "ready",
-        "action_input": '{"step": "S4B_REPORT", "event_type": "EXECUTION_RESULT"}',
+        "action_type": "S4B_REPORT",
+        "action_input": '{"event_type": "EXECUTION_RESULT", "event_id": "0a5ee59b-1820-4459-b6a7-05612046a4e6"}',
+        "action_result": '{"status": "completed", "data_status": "APPLIED", "http_status": 200}',
         "status_from": "RUNNING", "status_to": "RUNNING",
-        "boost_reason": "EXECUTION_RESULT 就绪,准备上报", "error_msg": None,
+        "boost_reason": "服务端返回 APPLIED,执行结果已接纳", "error_msg": None,
     },
 ]
 
-# PLAN_RESULT(收敛分支)的 5 个 step(原 S5A~S5E),七字段映射:
-#   S5A/S5B/S5E=plan、S5C/S5D=dispatch(无下一棒,not_applicable)。
 PLAN_STEPS = [
     {
-        "action_type": "plan",
-        "action_result": "completed",
-        "action_input": '{"step": "S5A_REFRESH_GAPS", "refresh_task_gaps": []}',
+        "action_type": "S5A_REFRESH_GAPS",
+        "action_input": '{"root_acceptances": ["ac1", "ac2", "ac3", "ac4"], "accepted_execution_output": "阶段二报告"}',
+        "action_result": '{"status": "completed", "refresh_task_gaps": []}',
         "status_from": "RUNNING", "status_to": "RUNNING",
-        "boost_reason": "缺口收敛复核,无残留", "error_msg": None,
+        "boost_reason": "纳入本棒已接纳事实后,缺口收敛复核无残留", "error_msg": None,
     },
     {
-        "action_type": "plan",
-        "action_result": "completed",
-        "action_input": '{"step": "S5B_PLAN_NEXT_NODE", "relay_node": null}',
+        "action_type": "S5B_PLAN_NEXT_NODE",
+        "action_input": '{"refresh_task_gaps": []}',
+        "action_result": '{"status": "completed", "next_node": null, "closure": true}',
         "status_from": "RUNNING", "status_to": "RUNNING",
-        "boost_reason": "无下一棒,走任务收敛分支", "error_msg": None,
+        "boost_reason": "无剩余缺口,走任务收敛分支", "error_msg": None,
     },
     {
-        "action_type": "dispatch",
-        "action_result": "not_applicable",
-        "action_input": '{"step": "S5C_SEARCH_CANDIDATES"}',
+        "action_type": "S5C_SEARCH_CANDIDATES",
+        "action_input": '{"search_required": false, "reason": "closure"}',
+        "action_result": '{"status": "not_applicable", "search": null, "candidates": []}',
         "status_from": "RUNNING", "status_to": "RUNNING",
-        "boost_reason": "收敛分支无需搜推", "error_msg": None,
+        "boost_reason": "收敛分支没有下一棒,不触发搜索", "error_msg": None,
     },
     {
-        "action_type": "dispatch",
-        "action_result": "not_applicable",
-        "action_input": '{"step": "S5D_SELECT_EXECUTOR"}',
+        "action_type": "S5D_SELECT_EXECUTOR",
+        "action_input": '{"candidates": [], "search_required": false}',
+        "action_result": '{"status": "not_applicable", "selected_executor": null, "run_mode": null}',
         "status_from": "RUNNING", "status_to": "RUNNING",
-        "boost_reason": "收敛分支无需选执行者", "error_msg": None,
+        "boost_reason": "收敛分支没有下一棒,无需选执行者", "error_msg": None,
     },
     {
-        "action_type": "plan",
-        "action_result": "ready",
-        "action_input": '{"step": "S5E_REPORT_PLAN", "event_type": '
-                        '"PLAN_RESULT", "branch": "closure"}',
+        "action_type": "S5E_REPORT_PLAN",
+        "action_input": '{"event_type": "PLAN_RESULT", "branch": "closure", "event_id": "fa239f79-e8f8-4fa6-b437-da3e8650d73f"}',
+        "action_result": '{"status": "completed", "data_status": "APPLIED", "task_completed": true}',
         "status_from": "RUNNING", "status_to": "SUCCESS",
-        "boost_reason": "PLAN_RESULT 收敛上报就绪,任务完成", "error_msg": None,
+        "boost_reason": "服务端返回 APPLIED 且 task_completed=true,根任务收敛", "error_msg": None,
     },
 ]
 
@@ -420,12 +413,18 @@ async def test_two_relay_reports_project_step_timeline(monkeypatch) -> None:
     timeline = resp_traj.json()["data"]["timeline"]
 
     expected = EXECUTION_STEPS + PLAN_STEPS
-    assert len(timeline) == len(expected) == 10, (
-        f"timeline 数量应为两次上报 step 之和(10),实际 {len(timeline)}:"
-        f" {[e['action_type'] + '/' + str(e['action_result']) for e in timeline]}"
+    steps = [ev for ev in timeline if ev["action_type"] != "task_result_display"]
+    assert len(steps) == len(expected) == 10, (
+        f"step 数量应为两次上报 step 之和(10),实际 {len(steps)}:"
+        f" {[e['action_type'] + '/' + str(e['action_result']) for e in steps]}"
     )
+    virtuals = [ev for ev in timeline if ev["action_type"] == "task_result_display"]
+    assert len(virtuals) == 1, "该子任务应恰有一条虚拟展示事件"
+    assert virtuals[0]["output"] is not None
+    assert virtuals[0]["actual_run_mode"] == "single_bot"
+    assert virtuals[0]["gmt_create"] == steps[-1]["gmt_create"] + 1
 
-    for i, (ev, exp) in enumerate(zip(timeline, expected)):
+    for i, (ev, exp) in enumerate(zip(steps, expected)):
         assert ev["node_id"] == NODE_ID, f"第 {i} 条 node_id 错误"
         assert ev["action_type"] == exp["action_type"], f"第 {i} 条 action_type 不符"
         assert ev["action_result"] == exp["action_result"], f"第 {i} 条 action_result 不符"
@@ -436,7 +435,7 @@ async def test_two_relay_reports_project_step_timeline(monkeypatch) -> None:
         assert ev["error_msg"] is None, f"第 {i} 条 error_msg 应为 null"
         assert ev["attempt"] == 0, f"第 {i} 条 attempt 应为 0"
 
-    # 时间单调:EXECUTION 5 条先于 PLAN 5 条
+    # 时间单调:EXECUTION 5 条先于 PLAN 5 条(虚拟事件 gmt=末位+1,天然有序)
     stamps = [ev["gmt_create"] for ev in timeline]
     assert stamps == sorted(stamps), "timeline 必须按 gmt_create 升序"
 
@@ -499,13 +498,24 @@ def _chain_expected(node_ids: list[str]) -> list[tuple[str, dict]]:
     return expected
 
 
-def _assert_step_timeline(timeline: list[dict], expected: list[tuple[str, dict]]) -> None:
-    """timeline 与期望逐条对齐:数量、(node_id, step) 顺序、七字段一致性、时间单调。"""
-    assert len(timeline) == len(expected), (
-        f"timeline 数量应为 {len(expected)}(各棒 step 之和),"
-        f"实际 {len(timeline)}"
+def _assert_step_timeline(
+    timeline: list[dict],
+    expected: list[tuple[str, dict]],
+    *,
+    node_ids: list[str] | None = None,
+) -> None:
+    """timeline 与期望逐条对齐:数量、(node_id, step) 顺序、七字段一致性、时间单调。
+
+    2026-10-16 起每个有素材(产出/模态/会话)的子任务在自身 timeline 末尾多一条
+    ``task_result_display`` 虚拟事件——step 序列比对将其剥离后进行;虚拟事件由
+    ``node_ids`` 单独断言(每子任务恰好一条,携 output/actual_run_mode)。"""
+    steps = [ev for ev in timeline if ev["action_type"] != "task_result_display"]
+    virtuals = [ev for ev in timeline if ev["action_type"] == "task_result_display"]
+    assert len(steps) == len(expected), (
+        f"step 数量应为 {len(expected)},实际 {len(steps)}:"
+        f" {[e['action_type'] for e in steps]}"
     )
-    for i, (ev, (node_id, step)) in enumerate(zip(timeline, expected)):
+    for i, (ev, (node_id, step)) in enumerate(zip(steps, expected)):
         assert ev["node_id"] == node_id, f"第 {i} 条 node_id 错误"
         assert ev["action_type"] == step["action_type"], f"第 {i} 条 action_type 不符"
         assert ev["action_result"] == step["action_result"], f"第 {i} 条 action_result 不符"
@@ -516,6 +526,18 @@ def _assert_step_timeline(timeline: list[dict], expected: list[tuple[str, dict]]
         assert ev["error_msg"] is None, f"第 {i} 条 error_msg 应为 null"
     stamps = [ev["gmt_create"] for ev in timeline]
     assert stamps == sorted(stamps), "timeline 必须按 gmt_create 升序"
+    if node_ids is not None:
+        # 每个有素材的子任务恰好一条虚拟展示事件,携带产出与真实模态
+        by_node = {}
+        for ev in virtuals:
+            by_node.setdefault(ev["node_id"], []).append(ev)
+        assert set(by_node) == set(node_ids), f"虚拟事件节点归属: {sorted(by_node)}"
+        for node_id, evs in by_node.items():
+            assert len(evs) == 1, f"{node_id} 应恰好 1 条虚拟事件,实际 {len(evs)}"
+            assert evs[0]["action_result"] == "display"
+            assert evs[0]["output"] is not None, "虚拟事件应携带该子任务当前产出"
+            assert evs[0]["actual_run_mode"] == "single_bot"
+            assert evs[0]["session_msgs"] is None, "本场景未拉会话明细(纯读默认)"
 
 
 def _report_cycle(
@@ -602,6 +624,17 @@ async def test_two_subtask_relay_chain_projects_step_timeline(monkeypatch) -> No
     )
     child_id, child_token = dispatched
 
+    # ── 注入一条系统侧事件(模拟 harness reset):按验收规则应嵌挂到棒1 id 最近
+    #    的前一主事件(S5E)的 system_logs,顶层数量不变。注:发射偏移不推进假时钟,
+    #    须先把时钟推过棒1全部步骤区间,注入时刻才落在 S5E 之后 ──
+    clock.advance_ms(10)
+    service._task_context_service.emit_trajectory_event(
+        TASK_ID, NODE_ID, "reset",
+        action_result="sla_timeout",
+        boost_reason="harness 巡检复位(注入演示)",
+        now_ms=clock.ms,
+    )
+
     # ── 棒2:执行 → 收敛(任务完成)──
     _report_cycle(
         client, clock, graph, child_id, child_token,
@@ -613,13 +646,25 @@ async def test_two_subtask_relay_chain_projects_step_timeline(monkeypatch) -> No
     )
     assert resp.status_code == 200, resp.text
     timeline = resp.json()["data"]["timeline"]
-    _assert_step_timeline(timeline, _chain_expected([NODE_ID, child_id]))
+    _assert_step_timeline(timeline, _chain_expected([NODE_ID, child_id]),
+                         node_ids=[NODE_ID, child_id])
 
-    # 棒间归属核验:1 号棒 10 条、2 号棒 10 条
+    # 棒间归属核验:1 号棒 10 条 step、2 号棒 10 条 step(reset 已嵌挂不占顶层);
+    # 每棒另各有一条 task_result_display 虚拟展示事件 → 顶层各 11 条
     per_node = {}
     for ev in timeline:
-        per_node[ev["node_id"]] = per_node.get(ev["node_id"], 0) + 1
+        if ev["action_type"] != "task_result_display":
+            per_node[ev["node_id"]] = per_node.get(ev["node_id"], 0) + 1
     assert per_node == {NODE_ID: 10, child_id: 10}
+
+    # 系统事件嵌挂:reset(id 在棒1 S5E 之后)挂最近前主事件 S5E 的 system_logs
+    host = next(ev for ev in timeline
+                if ev["node_id"] == NODE_ID and ev["action_type"] == "S5E_REPORT_PLAN")
+    assert host["system_logs"] is not None
+    assert [sub["action_type"] for sub in host["system_logs"]] == ["reset"]
+    assert host["system_logs"][0]["action_result"] == "sla_timeout"
+    # 其余主事件无嵌挂
+    assert all(ev.get("system_logs") is None for ev in timeline if ev is not host)
 
     # W1:4 次上报各一条审计行
     assert len(service.callback.ingested) == 4
@@ -653,8 +698,8 @@ async def test_three_subtask_relay_chain_projects_step_timeline(monkeypatch) -> 
     )
     assert resp.status_code == 200, resp.text
     timeline = resp.json()["data"]["timeline"]
-    assert len(timeline) == 30, f"三棒 30 条 step,实际 {len(timeline)}"
-    _assert_step_timeline(timeline, _chain_expected(chain_nodes))
+    _assert_step_timeline(timeline, _chain_expected(chain_nodes),
+                         node_ids=chain_nodes)
 
     # 最后一棒收敛:图终态 DONE、根任务完成
     topology = graph.query_task_dashboard(TASK_ID)

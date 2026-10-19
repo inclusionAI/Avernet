@@ -10,9 +10,9 @@ import { button, primary, RepairDialog } from './repair-view'
 const frozenItemTitle = (item: RepairTaskDetail['latestAttempt']['input']['items'][number]) =>
   typeof item.proposal?.summary === 'string' ? item.proposal.summary : item.instruction || item.itemId
 
-export default function RepairTaskDialog({ workflowId, taskId, includeHistorical, canEdit, onClose, onChanged }: {
+export default function RepairTaskDialog({ workflowId, taskId, includeHistorical, canEdit, onClose, onChanged, onNextRound, onPreviousRound }: {
   workflowId: string; taskId: string; includeHistorical: boolean; canEdit: boolean;
-  onClose: () => void; onChanged: () => void;
+  onClose: () => void; onChanged: () => void; onNextRound?: (publishedRevision: number) => void; onPreviousRound?: () => void;
 }) {
   const [detail, setDetail] = useState<RepairTaskDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -75,6 +75,14 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     return () => { current = false }
   }, [mode, workflowId, feedbackPage, includeHistorical, sourceRefresh])
 
+  const inspectCandidate = (revision?: number) => {
+    try {
+      const key = `repair-workspace:${workflowId}:${taskId}`
+      const saved = JSON.parse(sessionStorage.getItem(key) || '{}')
+      sessionStorage.setItem(key, JSON.stringify({ ...saved, view: 'candidate', ...(revision ? { revision, followLatest: true } : {}) }))
+    } catch { /* Browser storage is optional. */ }
+    setMode('detail')
+  }
   const resultNeedsRead = detail?.latestAttempt.phase === 'failed' && detail.latestAttempt.error?.code === 'GIT_RESULT_UNAVAILABLE'
   const effectiveRecoveryAction = recoveryAction ?? (resultNeedsRead ? 'retry-result' : null)
   const reload = () => { setRefresh(value => value + 1); onChanged() }
@@ -110,7 +118,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
       if (['drafting', 'publishing'].includes(result.latestAttempt.phase)) setRefresh(value => value + 1)
       setRecoveryAction(null)
       if (result.latestAttempt.draft || result.latestAttempt.requestId === requestId.current || result.latestAttempt.revision !== detail.latestAttempt.revision) {
-        setMode('detail'); setNotice('任务状态已核对，当前结果已保留；未提交的范围调整也仍保留。')
+        inspectCandidate(result.latestSuccessful?.revision ?? result.latestAttempt.revision); setNotice('任务状态已核对，当前结果已保留；未提交的范围调整也仍保留。')
       } else setNotice('任务状态已核对，可以再次提交当前调整；相同内容沿用原请求编号。')
       onChanged()
     } catch (reason) {
@@ -174,7 +182,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     setBusy(true); setError(''); setNotice('')
     try {
       await repairBatches.revise(taskId, payload)
-      requestId.current = ''; requestPayloadKey.current = ''; setMode('detail'); setFeedback(''); reload()
+      requestId.current = ''; requestPayloadKey.current = ''; try { sessionStorage.removeItem(`repair-workspace:${workflowId}:${taskId}`) } catch {} setMode('detail'); setFeedback(''); reload()
     } catch (reason) {
       const failure = repairActionFailure(reason); setError(failure.message); setRecoveryAction(failure.action)
     }
@@ -197,7 +205,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
       : feedbackCandidatesError || !feedbackCandidates ? '建议读取失败，请重试后生成。'
       : !feedbackItemIds.length ? '请至少保留一条建议。' : ''
 
-    return <RepairWorkspace stage={1} title="调整范围与要求，生成下一轮候选" subtitle={`${workflowId} · 沿用冻结基线，保留原始问题与证据`} onBack={() => { if (!busy) setMode('detail') }} backLabel="返回审核 Pack" onSelect={openSelection} onReview={() => setMode('detail')} busy={busy}>
+    return <RepairWorkspace navigation={false} stage={1} title="调整范围与要求，生成下一轮候选" subtitle={`${workflowId} · 沿用冻结基线，保留原始问题与证据`} onBack={() => { if (!busy) inspectCandidate() }} backLabel="返回审核 Pack" onSelect={openSelection} onReview={() => setMode('detail')} busy={busy}>
     <p className="text-xs leading-5 text-muted-foreground">选择建议即可生成；修复要求与修改反馈均为选填。新候选保留原任务基线，不会应用或部署。</p>
     <p className="text-xs text-muted-foreground">{detail.latestSuccessful ? `下一轮从最新成功候选 v${detail.latestSuccessful.revision} 继续；查看历史版本不会改变生成基准。` : '当前尚无成功候选，下一轮从原任务基线开始。'}</p>
     <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_19rem]"><fieldset className="rounded-lg border border-input bg-card p-5">
@@ -244,26 +252,16 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     <button type="button" className={`${primary} mt-4`} disabled={busy} onClick={() => void cancel()}>{busy ? '取消中…' : '确认取消任务'}</button>
   </RepairDialog>
 
-  const deployment = detail?.release?.deployments[0]
-  const published = deployment?.status === 'succeeded'
-  const deploying = detail?.release?.approval?.status === 'approved' || !!deployment
-  const navigateRelease = () => document.getElementById(`repair-release-${taskId}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-  const navigateReview = () => document.getElementById(`repair-review-${taskId}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-  const navigateScope = () => document.getElementById(`repair-scope-${taskId}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-  const latestPhase = detail?.latestAttempt.phase
-  const title = latestPhase === 'failed' ? (detail?.latestSuccessful ? '最新生成失败，已保留可用候选' : '优化草稿生成失败，先恢复原任务')
-    : latestPhase === 'no_change' ? '本轮无需变更，查看已有候选与效果'
-    : latestPhase === 'drafting' ? '正在生成优化草稿'
-    : latestPhase === 'cancelled' ? '任务已取消，保留历史记录'
-    : published ? '自动观察新版本效果' : deploying ? '核对同一个发布请求' : '审阅差异与检查报告，确认发布'
-  return <RepairWorkspace stage={published ? 4 : deploying ? 3 : ['failed', 'drafting', 'no_change'].includes(latestPhase ?? '') ? 1 : 2} title={title} subtitle={`${workflowId} · 生成优化草稿 → 审阅并确认发布 → 自动验证`} onBack={() => { if (!busy) onClose() }} onSelect={detail ? (published || deploying ? navigateScope : openSelection) : undefined} onReview={navigateReview}
-    onDeploy={detail?.capabilities.publication || deploying ? navigateRelease : undefined} onVerify={published ? navigateRelease : undefined} busy={busy}>
+  return <section aria-label="Workflow 修复工作区" className="mx-auto max-w-[96rem] space-y-5 pb-8">
+    <button type="button" className="text-xs text-muted-foreground hover:text-primary" disabled={busy} onClick={onClose}>← 返回问题与优化</button>
+    {onPreviousRound && <button type="button" className={button} disabled={busy} onClick={onPreviousRound}>返回上一轮观察</button>}
     {loading && <p role="status" className="text-xs text-muted-foreground">加载修复任务…</p>}
     {taskError && <p role="alert" className="text-xs text-destructive">{taskError} <button type="button" className={button} disabled={busy} onClick={reload}>重试读取任务</button></p>}
-    {(error || notice || recoveryAction) && <div className="flex flex-wrap items-center gap-3 rounded-lg border border-input bg-card p-4"><p role={error ? 'alert' : 'status'} className="text-xs text-muted-foreground">{error || notice || dispatchError}</p>{recoveryButton}</div>}
-    {detail && <RepairTaskPanel key={`${detail.taskId}:${detail.latestSuccessful?.revision ?? detail.latestAttempt.revision}`}
+    {(error || notice || effectiveRecoveryAction) && <div className="flex flex-wrap items-center gap-3 rounded-lg border border-input bg-card p-4"><p role={error ? 'alert' : 'status'} className="text-xs text-muted-foreground">{error || notice || dispatchError}</p>{recoveryButton}</div>}
+    {detail && <RepairTaskPanel key={detail.taskId}
       detail={detail} onHistoryPageChange={setHistoryPage} canEdit={canEdit && !taskError && !loading && !recoveryAction} busy={busy} dispatchError={recoveryAction ? '' : dispatchError}
       onFeedback={openSelection}
+      onNextRound={onNextRound}
       onCancel={() => { setError(''); setMode('cancel') }} onRetryDispatch={() => void retryDispatch()} onRetryGeneration={() => void retryGeneration()} onRefresh={reload} />}
-  </RepairWorkspace>
+  </section>
 }

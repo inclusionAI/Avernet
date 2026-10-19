@@ -584,6 +584,8 @@ class TaskGraphService:
             relay_mode = (
                 graph.extend_props.get("execution_config", {}) or {}
             ).get("orchestration_mode") == "relay"
+            if relay_mode and patch.node_id == graph.task_id and patch.run_mode == "bbs":
+                raise TaskStateError(f"Relay root cannot be dispatched as a BBS baton: task={patch.task_id}")
             if relay_mode:
                 # Relay is baton-owned, not tree-aggregated. Once a node has
                 # handed off a successor, a later baton must not rewrite it.
@@ -802,6 +804,9 @@ class TaskGraphService:
         """图级原子写口,以可重放 patch 处理跨实例版本冲突。"""
 
         def mutation(graph):
+            patch_ext = patch.extend_props_patch or {}
+            if graph.is_relay and patch_ext.get("bbs_node_id") == graph.task_id:
+                raise TaskStateError(f"Relay BBS target cannot be the root node: task={task_id}")
             if patch.loop_round_increment is not None:
                 graph.loop_round += patch.loop_round_increment
             if patch.status is not None:

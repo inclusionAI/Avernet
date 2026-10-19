@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "workflow-patch/v1",
+  "workflowId": "tech-research-v2",
+  "baseSpecDigest": "a8ec32900df132bf751addce2dc84bb8b46ec9640cd1f31bd699a5bf648f039f",
+  "summary": "修改report节点prompt放弃JSON对象输出要求，改为直接生成纯Markdown格式报告；同步调整outputContract为string类型以匹配embedded-agent执行器的实际输出行为",
+  "operations": [
+    {
+      "nodeId": "report",
+      "op": "replace",
+      "path": "/executor/prompt",
+      "value": "基于search节点获取的调研数据，生成一份完整的技术调研报告。\n\n【输出格式要求】\n1. 直接返回纯Markdown格式的报告内容\n2. 报告必须包含以下章节：技术概述、核心原理、主要特点、适用场景、竞品对比\n3. 使用标准的Markdown语法，包括标题(#)、列表(-)、表格(|)等\n4. 不要添加JSON包装、前缀说明或后缀注释\n5. 报告开头使用一级标题#，章节使用二级标题##\n\n【数据来源】\nsearch节点调研结果已提供，主题为：{{input.params.topic}}\n调研深度：{{input.params.depth | default(\"simple\")}}"
+    },
+    {
+      "nodeId": "report",
+      "op": "replace",
+      "path": "/outputContract/type",
+      "value": "string"
+    },
+    {
+      "nodeId": "report",
+      "op": "replace",
+      "path": "/outputContract/schema",
+      "value": {
+        "type": "string"
+      }
+    }
+  ]
+}

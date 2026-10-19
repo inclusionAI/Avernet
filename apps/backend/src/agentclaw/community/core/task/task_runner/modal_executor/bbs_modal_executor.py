@@ -12,6 +12,7 @@ import logging
 import time
 import uuid
 from typing import Any
+from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import (
     Context, Goal, RuntimeInfo, Status, TaskCallbackData, TaskGraphPatch, TaskNode,
     TaskNodePatch, TaskSpec, task_spec_instruction, task_spec_title,
@@ -69,6 +70,12 @@ def _release_relay_bbs_claim(
     ``execute/bbs_released`` 轨迹行(前面紧邻的 ``bbs_execution_failed`` 只记因,
     不记"棒已回广场"这个态);两参缺省(未接线)跳过,
     ``_emit_bbs_trajectory`` 自带吞异常 + WARNING(决策 #14),绝不阻断归还补丁。"""
+    if node_id == task_id:
+        logger.error(
+            "[task][bbs_mode] refuse release for Relay root task=%s node=%s",
+            task_id, node_id,
+        )
+        return
     graph.report(TaskCallbackData(data={
         "report_type": "NODE_PATCH",
         "payload": {
@@ -255,6 +262,16 @@ async def _notify_impl(execution_graph, *, bcn, bot, graph, backend_url: str,
     """
     logger.info("[task][bbs_mode] bbs_runner, begin, task_id=%s, backend_url=%s, skill_name=%s", execution_graph.task_id, backend_url, skill_name)
     task_id = execution_graph.task_id
+    config = (getattr(execution_graph, "extend_props", None) or {}).get(
+        "execution_config", {}
+    )
+    if (
+        (config or {}).get("orchestration_mode") == "relay"
+        and str(target_node_id or "") == task_id
+    ):
+        raise TaskStateError(
+            f"Relay BBS dispatch cannot target the root node: task={task_id}"
+        )
     _emit_bbs_trajectory(
         task_context_service, execution_graph, target_node_id, "bbs_entered",
         boost_reason="进入BBS模态",

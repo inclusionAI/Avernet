@@ -3,6 +3,8 @@ import asyncio
 import json
 from unittest.mock import MagicMock
 
+import pytest
+
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, Context, Goal, RuntimeInfo, Status,
@@ -270,6 +272,31 @@ class _FakeOnBbsReport:
 
 
 _GOAL = "整理基础架构方向架构师名册"
+
+
+def test_notify_rejects_relay_bbs_targeting_root():
+    """BBS escalation applies only to Relay successors, never the root baton."""
+    execution_graph = _execution_graph("t-relay-root")
+    execution_graph.extend_props["execution_config"] = {"orchestration_mode": "relay"}
+    graph = _FakeGraph()
+    bot = _FakeBot(rates={"A": 90})
+    bcn = _FakeBcn(_roster("A"))
+
+    with pytest.raises(
+        TaskStateError, match="Relay BBS dispatch cannot target the root node"
+    ):
+        _run(notify(
+            execution_graph,
+            bcn=bcn,
+            bot=bot,
+            graph=graph,
+            backend_url="http://x",
+            target_node_id="t-relay-root",
+        ))
+
+    assert bot.bid_prompts == []
+    assert bot.sent_messages == []
+    assert graph.claimed is None
 
 
 def test_notify_keeps_hung_root_until_bbs_report():

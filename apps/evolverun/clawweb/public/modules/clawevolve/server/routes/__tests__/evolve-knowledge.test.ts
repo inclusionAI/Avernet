@@ -189,6 +189,8 @@ describe("evolve knowledge endpoints", () => {
       VALUES ('parent', 'parent', 'single_run', '{}', 'run-a', 'wf', 'completed', 'v1', ?, 1, 1)`, [JSON.stringify(result)]);
     if (!requestedVersion) {
       const capability = await (await fetch(`${baseUrl}/internal/analysis-runs/parent/input`)).json();
+      expect(capability.issueAggregationSupported).toBe(false);
+      expect(capability.issueAggregationOwner).toBe('clawweb-service');
       expect(capability.issueAggregationInputVersions).toEqual([
         'workflow-issue-summary-input/v1', 'workflow-issue-summary-input/v2',
       ]);

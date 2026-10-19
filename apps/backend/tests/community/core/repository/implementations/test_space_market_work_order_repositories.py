@@ -793,7 +793,7 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
     applicant_total, applicant_items = repository.list_items(
         actor_id="applicant-1",
         env="dev",
-        query_type=WorkOrderQueryType.PROCESSED_BY_ME,
+        query_type=WorkOrderQueryType.PENDING_FOR_ME,
         item_type=WorkOrderItemType.NOTICE,
         offset=0,
         limit=20,
@@ -807,7 +807,7 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
         repository.list_items(
             actor_id="applicant-1",
             env="dev",
-            query_type=WorkOrderQueryType.PENDING_FOR_ME,
+            query_type=WorkOrderQueryType.PROCESSED_BY_ME,
             item_type=WorkOrderItemType.NOTICE,
             offset=0,
             limit=20,
@@ -920,7 +920,7 @@ def test_work_order_repository_rejects_and_requires_reviewer(db) -> None:
     _, applicant_items = repository.list_items(
         actor_id="applicant-2",
         env="dev",
-        query_type=WorkOrderQueryType.PROCESSED_BY_ME,
+        query_type=WorkOrderQueryType.PENDING_FOR_ME,
         item_type=WorkOrderItemType.NOTICE,
         offset=0,
         limit=20,

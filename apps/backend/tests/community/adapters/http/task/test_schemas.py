@@ -1,3 +1,4 @@
+import copy
 import types as _types
 
 import pytest
@@ -5,6 +6,7 @@ from pydantic import ValidationError
 
 from agentclaw.community.adapters.http.task.schemas import (
     TaskCallbackRequest,
+    TaskDispatchRequestDTO,
     TaskNodeCallbackRequest,
     _normalize_execution_config,
     execution_graph_to_product_status,
@@ -19,6 +21,9 @@ from agentclaw.community.adapters.http.task.schemas_node_context import (
 )
 from agentclaw.community.adapters.http.task.schemas_relay_report import (
     TaskReportCommandDTO,
+)
+from agentclaw.community.adapters.http.task.schemas_relay_search import (
+    TaskSearchRequestDTO,
 )
 from agentclaw.community.core.task.domain.models import (
     Context,
@@ -121,19 +126,42 @@ def test_node_context_dto_projects_runtime_actual_goal() -> None:
 
 
 
-_TRACE = {
-    "steps": [
-        {
-            "action_type": "plan",
-            "action_input": "S5A_REFRESH_GAPS",
-            "action_result": "gaps_refreshed",
-            "status_from": "RUNNING",
-            "status_to": "SUCCESS",
-            "boost_reason": "gaps 无变更",
-            "error_msg": None,
-        }
-    ]
+_TRACE_ACTION_TYPES = {
+    "EXECUTION_RESULT": [
+        "S1_CONTEXT",
+        "S2_GAPS",
+        "S3_CAPABILITY",
+        "S4A_EXECUTION",
+        "S4B_REPORT",
+    ],
+    "PLAN_RESULT": [
+        "S5A_REFRESH_GAPS",
+        "S5B_PLAN_NEXT_NODE",
+        "S5C_SEARCH_CANDIDATES",
+        "S5D_SELECT_EXECUTOR",
+        "S5E_REPORT_PLAN",
+    ],
 }
+
+
+def _trace(event_type: str = "PLAN_RESULT") -> dict:
+    return {
+        "steps": [
+            {
+                "action_type": action_type,
+                "action_input": f"{{\"step\":\"{action_type}\"}}",
+                "action_result": f"{{\"status\":\"completed\",\"output\":\"{action_type} processed\"}}",
+                "status_from": None,
+                "status_to": None,
+                "boost_reason": "ok",
+                "error_msg": None,
+            }
+            for action_type in _TRACE_ACTION_TYPES[event_type]
+        ]
+    }
+
+
+_TRACE = _trace()
 
 
 def test_plan_report_dto_builds_one_unpersisted_node() -> None:
@@ -151,7 +179,7 @@ def test_plan_report_dto_builds_one_unpersisted_node() -> None:
                 },
                 "run_info": {"run_mode": "single_bot", "assignee": "bot-2"},
             },
-            "trace": _TRACE,
+            "trace": copy.deepcopy(_TRACE),
         }
     ).to_domain()
     assert command.event_id == "e1" and command.relay_token == "generation-1"
@@ -174,28 +202,73 @@ def test_report_dto_requires_complete_trace() -> None:
                 "done_items": ["acceptance-1"],
                 "gap_items": [],
             },
-            "trace": {
-                "steps": [
-                    {
-                        "action_type": "plan",
-                        "action_result": "gaps_refreshed",
-                        "action_input": "S5A_REFRESH_GAPS",
-                        "status_from": None,
-                        "status_to": None,
-                        "boost_reason": "gaps \u65e0\u53d8\u66f4",
-                        "error_msg": None,
-                    },
-                ],
-            },
+            "trace": copy.deepcopy(_TRACE),
         }
     ).to_domain()
 
     assert command.trace is not None
-    assert command.trace.steps[0].action_type == "plan"
-    assert command.trace.steps[0].action_result == "gaps_refreshed"
-    assert command.trace.steps[0].action_input == "S5A_REFRESH_GAPS"
+    assert command.trace.steps[0].action_type == "S5A_REFRESH_GAPS"
+    assert command.trace.steps[0].action_result == "{\"status\":\"completed\",\"output\":\"S5A_REFRESH_GAPS processed\"}"
+    assert command.trace.steps[0].action_input == "{\"step\":\"S5A_REFRESH_GAPS\"}"
     assert command.trace.steps[0].status_from is None
     assert command.trace.steps[0].status_to is None
+
+
+def test_report_trace_step_rejects_non_json_status_action_result() -> None:
+    trace = _trace()
+    trace["steps"][0]["action_result"] = "ready"
+
+    with pytest.raises(ValidationError, match="JSON object containing the step output"):
+        TaskReportCommandDTO.model_validate(
+            {
+                "task_id": "t1",
+                "node_id": "n1",
+                "event_id": "e1",
+                "relay_token": "generation-1",
+                "event_type": "PLAN_RESULT",
+                "event": None,
+                "task_acceptance_result": {
+                    "verdict": "DONE",
+                    "done_items": ["acceptance-1"],
+                    "gap_items": [],
+                },
+                "trace": trace,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("action_result", "expected_error"),
+    [
+        ("ready", "JSON object containing the step output"),
+        ("[]", "JSON object containing the step output"),
+        ('{"output":"ready"}', "action_result.status must be a non-empty string"),
+        ('{"status":"completed"}', "output fields in addition to status"),
+    ],
+)
+def test_report_trace_step_requires_output_json_with_status(
+    action_result: str, expected_error: str
+) -> None:
+    trace = _trace()
+    trace["steps"][0]["action_result"] = action_result
+
+    with pytest.raises(ValidationError, match=expected_error):
+        TaskReportCommandDTO.model_validate(
+            {
+                "task_id": "t1",
+                "node_id": "n1",
+                "event_id": "e1",
+                "relay_token": "generation-1",
+                "event_type": "PLAN_RESULT",
+                "event": None,
+                "task_acceptance_result": {
+                    "verdict": "DONE",
+                    "done_items": ["acceptance-1"],
+                    "gap_items": [],
+                },
+                "trace": trace,
+            }
+        )
 
 
 def test_plan_report_dto_rejects_client_generated_node_id() -> None:
@@ -207,7 +280,7 @@ def test_plan_report_dto_rejects_client_generated_node_id() -> None:
                 "event_id": "e1",
                 "relay_token": "generation-1",
                 "event_type": "PLAN_RESULT",
-                "trace": _TRACE,
+                "trace": copy.deepcopy(_TRACE),
                 "event": {
                     "node_id": "client-node",
                     "task_spec": {
@@ -228,20 +301,16 @@ def _command_body() -> dict:
         "relay_token": "generation-1",
         "event_type": "PLAN_RESULT",
         "event": None,
-        "trace": _TRACE,
+        "trace": copy.deepcopy(_TRACE),
     }
 
 
-def test_report_dto_requires_trace() -> None:
-    """trace 为必填:缺失 → ValidationError,错误信息明确指向 trace。"""
+def test_report_dto_trace_is_optional() -> None:
+    """trace 缺失 -> domain 命令携带 trace=None,不做第二套必填协议。"""
     body = _command_body()
     del body["trace"]
-    with pytest.raises(ValidationError) as excinfo:
-        TaskReportCommandDTO.model_validate(body)
-    assert any(
-        err["loc"] == ("trace",) and "Field required" in err["msg"]
-        for err in excinfo.value.errors()
-    ), excinfo.value.errors()
+    command = TaskReportCommandDTO.model_validate(body).to_domain()
+    assert command.trace is None
 
 
 def test_report_dto_requires_trace_steps() -> None:
@@ -273,16 +342,103 @@ def test_report_dto_step_requires_all_seven_fields(missing_field) -> None:
     ), f"{missing_field} 缺失未被点名: {excinfo.value.errors()}"
 
 
-def test_report_dto_step_requires_known_action_type() -> None:
-    """action_type 必须为轨迹动作枚举值(submit|plan|dispatch|execute|verify|
-    reset|transition|relay)——否则读侧枚举强校验会丢行,入口先拦并点名。"""
+def test_report_dto_accepts_step_code_action_type() -> None:
+    """action_type 为 Bot 侧步骤码,并按 PLAN_RESULT 序列原样透传。"""
     body = _command_body()
-    body["trace"]["steps"][0]["action_type"] = "S5C_SEARCH_CANDIDATES"
+    command = TaskReportCommandDTO.model_validate(body).to_domain()
+    assert command.trace.steps[0].action_type == "S5A_REFRESH_GAPS"
+    assert command.trace.steps[-1].action_type == "S5E_REPORT_PLAN"
+
+
+def test_report_dto_requires_exact_trace_sequence() -> None:
+    body = _command_body()
+    body["trace"]["steps"].reverse()
     with pytest.raises(ValidationError) as excinfo:
         TaskReportCommandDTO.model_validate(body)
-    errors = excinfo.value.errors()
-    assert any("action_type" in str(err["loc"]) for err in errors), errors
-    assert any("submit" in err["msg"] and "relay" in err["msg"] for err in errors)
+    assert "trace.steps must cover action types in order" in str(excinfo.value)
+
+    body = _command_body()
+    body["trace"]["steps"] = body["trace"]["steps"][:-1]
+    with pytest.raises(ValidationError) as excinfo:
+        TaskReportCommandDTO.model_validate(body)
+    assert "trace.steps must cover action types in order" in str(excinfo.value)
+
+    body = _command_body()
+    body["trace"]["steps"] = [
+        body["trace"]["steps"][0],
+        {**body["trace"]["steps"][1], "action_type": "S5A_REFRESH_GAPS"},
+    ]
+    with pytest.raises(ValidationError) as excinfo:
+        TaskReportCommandDTO.model_validate(body)
+    assert "trace.steps must cover action types in order" in str(excinfo.value)
+
+
+def test_report_dto_rejects_blank_required_strings() -> None:
+    body = _command_body()
+    body["task_id"] = " "
+    with pytest.raises(ValidationError) as excinfo:
+        TaskReportCommandDTO.model_validate(body)
+    assert "must be a non-empty string" in str(excinfo.value)
+
+    body = _command_body()
+    body["trace"]["steps"][0]["action_result"] = " "
+    with pytest.raises(ValidationError) as excinfo:
+        TaskReportCommandDTO.model_validate(body)
+    assert "must be a non-empty string when present" in str(excinfo.value)
+
+def test_report_dto_rejects_relay_token_in_trace() -> None:
+    body = _command_body()
+    body["trace"]["steps"][0]["action_input"] = (
+        "{\"relay_token\":\"generation-1\"}"
+    )
+    with pytest.raises(ValidationError) as excinfo:
+        TaskReportCommandDTO.model_validate(body)
+    assert "trace step must not contain relay_token" in str(excinfo.value)
+
+
+def test_report_dto_rejects_empty_action_type() -> None:
+    """空字符串 action_type → 校验失败并点名。"""
+    body = _command_body()
+    body["trace"]["steps"][0]["action_type"] = ""
+    with pytest.raises(ValidationError) as excinfo:
+        TaskReportCommandDTO.model_validate(body)
+    assert any(
+        "action_type" in str(err["loc"]) for err in excinfo.value.errors()
+    ), excinfo.value.errors()
+
+
+def test_relay_search_request_rejects_unknown_or_empty_fields() -> None:
+    valid = {
+        "query": "q",
+        "task_id": "t1",
+        "node_id": "n1",
+        "relay_token": "generation-1",
+    }
+    assert TaskSearchRequestDTO.model_validate(valid).task_id == "t1"
+
+    with pytest.raises(ValidationError):
+        TaskSearchRequestDTO.model_validate({**valid, "extra": "x"})
+    with pytest.raises(ValidationError):
+        TaskSearchRequestDTO.model_validate({**valid, "task_id": ""})
+    with pytest.raises(ValidationError):
+        TaskSearchRequestDTO.model_validate({**valid, "task_id": " "})
+
+
+def test_relay_dispatch_request_rejects_unknown_or_empty_fields() -> None:
+    valid = {
+        "task_id": "t1",
+        "target_node_id": "target",
+        "origin_node_id": "origin",
+        "relay_token": "generation-1",
+    }
+    assert TaskDispatchRequestDTO.model_validate(valid).target_node_id == "target"
+
+    with pytest.raises(ValidationError):
+        TaskDispatchRequestDTO.model_validate({**valid, "extra": "x"})
+    with pytest.raises(ValidationError):
+        TaskDispatchRequestDTO.model_validate({**valid, "target_node_id": ""})
+    with pytest.raises(ValidationError):
+        TaskDispatchRequestDTO.model_validate({**valid, "target_node_id": " "})
 
 
 def test_task_settings_dtos_accept_relay_execution() -> None:

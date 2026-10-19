@@ -138,28 +138,34 @@ describe('trusted workflow repair source adapter', () => {
     expect(warning).toHaveBeenCalledWith('[workflow-repair] skipped incompatible suggestion source', expect.objectContaining({ workflowId: 'wf', suggestionId: '1' }));
     warning.mockRestore();
   });
-  it('skips one legacy suggestion that exceeds the repair item contract without hiding valid items', async () => {
+  it('keeps long legacy instructions readable without accepting them as frozen instructions', async () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const suggestions = async () => [
       { id: 1, workflow_id: 'wf', failure_signature: 'bad', fix_spec: 'x'.repeat(20_001), proposal_json: null, status: 'pending' },
       { id: 2, workflow_id: 'wf', failure_signature: 'timeout', fix_spec: '增加超时', proposal_json: null, status: 'pending' },
     ];
-    const result = await createRepairSourcePort(readers({ groups: async () => [], suggestions })).load(db, 'wf');
-    expect(result).toHaveLength(1);
-    expect(result[0].item.instruction).toBe('增加超时');
-    expect(warning).toHaveBeenCalledWith('[workflow-repair] skipped incompatible suggestion source', expect.objectContaining({ workflowId: 'wf', suggestionId: '1' }));
+    const port = createRepairSourcePort(readers({ groups: async () => [], suggestions }));
+    const result = await port.load(db, 'wf', 'summary');
+    expect(result).toHaveLength(2);
+    const long = result.find(row => row.item.instruction.length > 20_000)!;
+    await expect(port.load(db, 'wf', 'full', { itemIds: [long.item.itemId] })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    expect(warning).not.toHaveBeenCalled();
     warning.mockRestore();
   });
-  it('skips one oversized legacy suggestion without hiding valid items', async () => {
+  it('retains oversized legacy suggestions for reads and rejects only selected frozen inputs', async () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const suggestions = async () => [
       { id: 1, workflow_id: 'wf', failure_signature: 'bad', fix_spec: '过大建议', proposal_json: JSON.stringify({ ...proposal(), details: 'x'.repeat(1_100_000) }), status: 'pending' },
       { id: 2, workflow_id: 'wf', failure_signature: 'timeout', fix_spec: '增加超时', proposal_json: null, status: 'pending' },
     ];
-    const result = await createRepairSourcePort(readers({ groups: async () => [], suggestions })).load(db, 'wf');
-    expect(result).toHaveLength(1);
-    expect(result[0].item.instruction).toBe('增加超时');
-    expect(warning).toHaveBeenCalledWith('[workflow-repair] skipped incompatible suggestion source', expect.objectContaining({ workflowId: 'wf', suggestionId: '1', code: 'PAYLOAD_TOO_LARGE' }));
+    const port = createRepairSourcePort(readers({ groups: async () => [], suggestions }));
+    const result = await port.load(db, 'wf', 'summary');
+    expect(result).toHaveLength(2);
+    const small = result.find(row => row.item.instruction === '增加超时')!;
+    const large = result.find(row => row.item.instruction === '过大建议')!;
+    expect((await port.load(db, 'wf', 'full', { itemIds: [small.item.itemId] }))).toHaveLength(2);
+    await expect(port.load(db, 'wf', 'full', { itemIds: [large.item.itemId] })).rejects.toMatchObject({ code: 'PAYLOAD_TOO_LARGE', details: { stage: 'frozen_item' } });
+    expect(warning).not.toHaveBeenCalled();
     warning.mockRestore();
   });
   it('rejects mismatched workflow groups and proposals', async () => {

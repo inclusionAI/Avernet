@@ -42,7 +42,7 @@ class TaskExecutorBbsMixin:
         (由 bbs_runner ``try/except`` 回退 ``send_and_wait_async``);群进入终态(completed/failed/aborted)
         一律返回(不抛、不重复执行)。
         """
-        driver_bot = str(winner_bot_id or "").partition(":")[0]
+        driver_bot = str(winner_bot_id or "").strip()
         if not driver_bot:
             raise BotIdentityResolutionError(
                 f"bbs manager_worker 群缺 driver bot:winner_bot_id={winner_bot_id!r}"

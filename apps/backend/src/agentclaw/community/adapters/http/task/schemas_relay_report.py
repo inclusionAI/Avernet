@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agentclaw.community.adapters.http.task.schemas import (
     AcceptanceResultDTO,
@@ -25,9 +26,6 @@ from agentclaw.community.core.task.domain.models import (
     TaskReportTraceStep,
     TaskReportEventType,
     TaskReportResult,
-)
-from agentclaw.community.core.task.task_context.task_trajectory.models import (
-    TrajectoryActionType,
 )
 
 
@@ -64,12 +62,17 @@ class PlannedNodeDTO(BaseModel):
 
 
 class TaskReportTraceStepDTO(BaseModel):
-    """单条 trace step——七字段**全键必填**(2026-10-15 收紧契约):
+    """单条 trace step——七字段**全键必填**(2026-10-15 契约):
 
     ``action_type|action_input|action_result|status_from|status_to|boost_reason|
-    error_msg`` 一键不可缺(值可为 None);``action_type`` 必须为轨迹动作枚举值
-    (``submit|plan|dispatch|execute|verify|reset|transition|relay``)——读侧
-    枚举强校验会丢弃未知值,入口先拦并点名。
+    error_msg`` 一键不可缺(值可为 None)。``action_type`` 即 Bot 侧 step 码
+    (S 后带数字+其它,如 S1_CONTEXT)——2026-10-15 起其即轨迹主事件的
+    action_type,读侧按 ``^S\\d+`` 识别主序列,不再限定枚举词表。
+
+    2026-10-16 语义复核:``action_input`` 是步骤输入;``action_result`` 是步骤
+    推理输出/产出摘要,必须为可解析的 JSON object 字符串,且包含非空 ``status``
+    字段与至少一个输出字段;``completed/failed/ready/not_applicable`` 等状态值
+    只能作为 JSON 内的 ``status`` 字段。``boost_reason`` 是执行过程证据：为什么推进、为什么选择等等维度信息;``error_msg`` 是失败原因;``status_from/status_to`` 是节点状态。
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -82,16 +85,42 @@ class TaskReportTraceStepDTO(BaseModel):
     boost_reason: str | None
     error_msg: str | None
 
-    @field_validator("action_type")
+    @field_validator(
+        "action_type",
+        "action_input",
+        "action_result",
+        "status_from",
+        "status_to",
+        "boost_reason",
+        "error_msg",
+        mode="after",
+    )
     @classmethod
-    def _action_type_in_trajectory_vocab(cls, value: str) -> str:
-        allowed = "|".join(member.value for member in TrajectoryActionType)
+    def _reject_blank(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("must be a non-empty string when present")
+        return value
+
+    @field_validator("action_result", mode="after")
+    @classmethod
+    def _require_step_output_json(cls, value: str) -> str:
         try:
-            TrajectoryActionType(value)
-        except ValueError:
+            output = json.loads(value)
+        except json.JSONDecodeError as exc:
             raise ValueError(
-                f"action_type 必须为轨迹动作枚举值之一: {allowed}"
-            ) from None
+                "action_result must be a JSON object containing the step output"
+            ) from exc
+        if not isinstance(output, dict):
+            raise ValueError(
+                "action_result must be a JSON object containing the step output"
+            )
+        status = output.get("status")
+        if not isinstance(status, str) or not status.strip():
+            raise ValueError("action_result.status must be a non-empty string")
+        if len(output) <= 1:
+            raise ValueError(
+                "action_result must contain step output fields in addition to status"
+            )
         return value
 
 
@@ -101,7 +130,49 @@ class TaskReportTraceDTO(BaseModel):
     steps: list[TaskReportTraceStepDTO]
 
 
+_TRACE_ACTION_TYPES: dict[TaskReportEventType, tuple[str, ...]] = {
+    TaskReportEventType.EXECUTION_RESULT: (
+        "S1_CONTEXT",
+        "S2_GAPS",
+        "S3_CAPABILITY",
+        "S4A_EXECUTION",
+        "S4B_REPORT",
+    ),
+    TaskReportEventType.PLAN_RESULT: (
+        "S5A_REFRESH_GAPS",
+        "S5B_PLAN_NEXT_NODE",
+        "S5C_SEARCH_CANDIDATES",
+        "S5D_SELECT_EXECUTOR",
+        "S5E_REPORT_PLAN",
+    ),
+}
+
+
+def _step_contains_relay_token(step: TaskReportTraceStepDTO, relay_token: str) -> bool:
+    values = (
+        step.action_type,
+        step.action_input,
+        step.action_result,
+        step.status_from,
+        step.status_to,
+        step.boost_reason,
+        step.error_msg,
+    )
+    return any(
+        isinstance(value, str)
+        and ("relay_token" in value or relay_token in value)
+        for value in values
+    )
+
+
 class TaskReportCommandDTO(BaseModel):
+    """Two-event Relay report command; ``trace`` is optional on the wire.
+
+    When ``trace`` is provided, ``trace.steps`` must be present, every step
+    must carry the seven fixed fields, and the step sequence must match the
+    report event type.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     task_id: str = Field(min_length=1)
@@ -113,7 +184,32 @@ class TaskReportCommandDTO(BaseModel):
     progress_reason: str = ""
     failure_reason: str | None = None
     task_acceptance_result: AcceptanceResultDTO | None = None
-    trace: TaskReportTraceDTO
+    trace: TaskReportTraceDTO | None = None
+
+    @field_validator("task_id", "node_id", "event_id", "relay_token", mode="after")
+    @classmethod
+    def _reject_blank_identity(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must be a non-empty string")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_trace_contract(self) -> "TaskReportCommandDTO":
+        if self.trace is None:
+            return self
+        expected = _TRACE_ACTION_TYPES[self.event_type]
+        actual = tuple(step.action_type for step in self.trace.steps)
+        if actual != expected:
+            raise ValueError(
+                "trace.steps must cover action types in order: "
+                + ", ".join(expected)
+            )
+        if any(
+            _step_contains_relay_token(step, self.relay_token)
+            for step in self.trace.steps
+        ):
+            raise ValueError("trace step must not contain relay_token")
+        return self
 
     def to_domain(self) -> TaskReportCommand:
         if self.event_type == TaskReportEventType.EXECUTION_RESULT:

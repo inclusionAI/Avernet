@@ -4,6 +4,7 @@
 //! Authorization/Cookie identity.
 
 use async_trait::async_trait;
+use bcs_api_http::v1::gateway_principal::GatewayPrincipalReSigner;
 use bcs_service_api::port::{
     FriendAuthSyncAction, FriendAuthSyncCommand, FriendAuthSyncPort,
 };
@@ -20,6 +21,7 @@ const SYNC_PATH: &str = "/api/internal/bot-friend-auth/sync";
 pub struct HttpFriendAuthSyncPort {
     client: reqwest::Client,
     base_url: reqwest::Url,
+    principal_resigner: Option<GatewayPrincipalReSigner>,
 }
 
 impl HttpFriendAuthSyncPort {
@@ -43,7 +45,23 @@ impl HttpFriendAuthSyncPort {
         Ok(Self {
             client: reqwest::Client::new(),
             base_url,
+            principal_resigner: None,
         })
+    }
+
+    /// Re-address the forwarded gateway principal as a `bcs`-issued token
+    /// before it reaches the backend.
+    ///
+    /// The friend work-order approval callback arrives carrying a principal
+    /// the backend re-addressed to US (`iss=backend`), and the backend's
+    /// ordinary-HTTP seam only trusts `gateway`/`bcs` issuers — echoing that
+    /// credential verbatim answers 401. With a re-signer, the port verifies
+    /// the inbound token and forwards a `bcs`-issued copy on the approver's
+    /// behalf; without one, the header echoes verbatim and the backend
+    /// judges it (pre-existing behavior).
+    pub fn with_principal_resigner(mut self, resigner: GatewayPrincipalReSigner) -> Self {
+        self.principal_resigner = Some(resigner);
+        self
     }
 
     fn sync_url(&self) -> Result<reqwest::Url, ServiceError> {
@@ -101,14 +119,28 @@ impl HttpFriendAuthSyncPort {
         };
         let mut request = self.client.post(url).timeout(SYNC_TIMEOUT);
         // Only forward the gateway principal + trace ids. Openapi
-        // Authorization/Cookie identity is intentionally NOT sent.
+        // Authorization/Cookie identity is intentionally NOT sent. With a
+        // re-signer configured, the principal is re-addressed as a
+        // `bcs`-issued token (see with_principal_resigner); a credential that
+        // fails the admission gate is never sent — the backend would only
+        // answer 401 to it.
         if let Some(auth) = command.request_auth.as_ref() {
             for (name, value) in &auth.forwarded_headers {
                 let lower = name.to_ascii_lowercase();
-                if lower == "x-avernet-principal"
-                    || lower == "x-request-id"
-                    || lower == "x-trace-id"
-                {
+                if lower == "x-avernet-principal" {
+                    let forwarded = match self.principal_resigner.as_ref() {
+                        None => value.as_str().to_string(),
+                        Some(resigner) => resigner.readdress(value.as_str()).map_err(|error| {
+                            ServiceError::InternalError(format!(
+                                "friend-auth-sync x-avernet-principal re-address failed: {error}"
+                            ))
+                        })?,
+                    };
+                    request = request.header(
+                        reqwest::header::HeaderName::from_static("x-avernet-principal"),
+                        &forwarded,
+                    );
+                } else if lower == "x-request-id" || lower == "x-trace-id" {
                     if let Ok(header_name) = reqwest::header::HeaderName::try_from(name.as_str()) {
                         request = request.header(header_name, value.as_str());
                     }

@@ -17,9 +17,6 @@ from agentclaw.community.core.task.domain.models import (
     TaskReportResult,
     task_spec_instruction,
 )
-from agentclaw.community.core.task.task_context.task_trajectory.models import (
-    TrajectoryActionType,
-)
 from agentclaw.community.core.task.task_runner.client.relay_prompt import (
     format_relay_execution_instruction,
 )
@@ -100,27 +97,17 @@ class TaskServiceRelayMixin:
         """trace.steps 逐条写时落表:一 step 一行,七字段与轨迹表对齐。
 
         ``now_ms`` 以当前时刻为基准按 step 序 +1 偏移,保证同一上报的 steps 在
-        timeline 内先后有序;``action_type`` 写侧先验枚举(读侧枚举强校验会把
-        未知值整行丢弃),非法值跳过该条 + WARNING;``ext_info`` 带
-        ``trace_step`` + ``relay_event_id`` 可追溯。"""
+        timeline 内先后有序;``action_type`` 即 Bot 侧 step 码(如 S1_CONTEXT,
+        2026-10-15 起为轨迹**主事件**的 action_type,直接透传不再限定枚举)。
+        ``ext_info`` 带 ``trace_step`` + ``relay_event_id`` 可追溯。"""
         if self._task_context_service is None:
             return
         base_ts = int(time.time() * 1000)
         for offset, step in enumerate(command.trace.steps, start=1):
-            try:
-                action_type = TrajectoryActionType(step.action_type)
-            except ValueError:
-                logger.warning(
-                    "[task][relay][trajectory] trace step 非法 action_type 跳过 "
-                    "task=%s node=%s event=%s action_type=%s",
-                    command.task_id, command.node_id, command.event_id,
-                    step.action_type,
-                )
-                continue
             self._task_context_service.emit_trajectory_event(
                 command.task_id,
                 command.node_id,
-                action_type,
+                step.action_type,
                 action_result=step.action_result,
                 action_input=step.action_input,
                 status_from=step.status_from,

@@ -501,10 +501,15 @@ class TaskReportTraceStep:
     """One Bot-side Relay check point submitted with a report event.
 
     上报时逐条与轨迹事件表对齐(七字段协议):每条 step 在 ``TaskServiceRelayMixin.
-    report`` 写时经 ``emit_trajectory_event`` 独立落一行 ``task_trajectory_events``
-    ——不做读时投影,已约定 action_type 必须取自 ``TrajectoryActionType``
-    (submit|plan|dispatch|execute|verify|reset|transition|relay),非法值写侧
-    跳过(读侧枚举强校验会丢行,先拦在上游)。
+    report`` 写时经 ``emit_trajectory_event`` 独立落一行 ``task_trajectory_events``。
+    HTTP 输入层的七个键必须全量出现;``action_type`` 直接使用步骤码(如 S1_CONTEXT、
+    S5C_SEARCH_CANDIDATES),不限定 ``TrajectoryActionType`` 旧枚举。
+    ``action_type`` 与 ``action_result`` 必须是可提交的非空文本,其余字段可为 null。
+
+    字段语义:``action_input`` 是步骤输入;``action_result`` 是步骤推理输出,
+    必须为 JSON object 字符串且包含 ``status`` 与实际输出字段;
+    ``boost_reason`` 是执行过程证据：为什么推进、为什么选择等等维度信息;``error_msg`` 是失败原因;
+    ``status_from/status_to`` 是节点状态。
     """
 
     action_type: str

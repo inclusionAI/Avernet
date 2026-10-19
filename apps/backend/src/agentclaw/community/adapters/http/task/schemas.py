@@ -10,6 +10,9 @@ from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from agentclaw.community.adapters.http.task.schemas_relay_dispatch import (
+    TaskDispatchRequestDTO as TaskDispatchRequestDTO,
+)
 from agentclaw.community.core.task.repository.serializers import task_spec_from_dict
 from agentclaw.community.adapters.http.task.schemas_trajectory import (
     TaskTrajectoryDTO as TaskTrajectoryDTO,
@@ -222,15 +225,6 @@ class TaskCallbackDataDTO(BaseModel):
         default_factory=dict,
         description="回投结果 {success: bool, data?: any, fail_detail?: str}",
     )
-
-
-class TaskDispatchRequestDTO(BaseModel):
-    """Dispatch a persisted Relay successor from its current origin generation."""
-
-    task_id: str
-    target_node_id: str
-    origin_node_id: str
-    relay_token: str
 
 
 # ===== Response DTOs =====

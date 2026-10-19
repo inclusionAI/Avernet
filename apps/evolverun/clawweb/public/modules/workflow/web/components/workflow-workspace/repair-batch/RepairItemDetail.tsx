@@ -1,3 +1,4 @@
+import ProposalEvidence from './ProposalEvidence'
 import { useEffect, useRef, useState } from 'react'
 import type { RepairInboxItem } from '../../../../server/contracts/repair-workbench'
 import { button, exclusion, isLegacyPreview, itemTitle, JsonDetails, states } from './repair-view'
@@ -14,6 +15,7 @@ function fieldLabel(operation: Record<string, unknown>) {
   return fieldNames[path.split(/[/.]/).at(-1) ?? path] ?? path
 }
 export function changeSummary(item: RepairInboxItem) {
+  if (item.aggregation?.changes.length) return item.aggregation.changes.join('；')
   const operations = records(item.proposal?.operations)
   if (!operations.length) return '文字建议，详情中查看修复要求'
   return operations.slice(0, 3).map(operation => {
@@ -24,6 +26,8 @@ export function changeSummary(item: RepairInboxItem) {
   }).join('；') + (operations.length > 3 ? `；另 ${operations.length - 3} 项` : '')
 }
 export function sourceRunCount(item: RepairInboxItem): number | null {
+  if (item.aggregation) return (item.aggregation.runCount ?? new Set(item.aggregation.flowIds).size) || null
+  if (item.readSummary) return item.readSummary.runCount || null
   return new Set(item.sources.flatMap(source => source.kind === 'diagnosis_candidate' ? [source.flowId] : [])).size || null
 }
 function ChangeValue({ value }: { value: unknown }) {
@@ -62,6 +66,7 @@ export default function RepairItemDetail({ item, detail, loading, error, onLoad,
   const diagnoses = records(detail?.context?.diagnoses)
   const runs = sourceRunCount(shown)
   return <div className="space-y-5">
+    <ProposalEvidence item={shown} canEdit={canEdit} />
     {!embedded && <header className="space-y-2">
       <p className="text-xs text-slate-500">{states[item.state]} · {runs === null ? '来源运行数未知' : `本建议来源覆盖 ${runs} 个运行`}</p>
       <h4 className="text-base font-semibold leading-7 text-slate-900">{itemTitle(shown)}</h4>
@@ -84,7 +89,7 @@ export default function RepairItemDetail({ item, detail, loading, error, onLoad,
     </section>
     <section aria-label="判断依据" className="space-y-3 border-t border-slate-100 pt-4">
       <h4 className="text-sm font-semibold text-slate-900">判断依据</h4>
-      <p className="text-xs leading-5 text-slate-500">{shown.sources.length} 条来源引用。以下诊断支持这条建议，不代表覆盖整个问题的所有运行。</p>
+      <p className="text-xs leading-5 text-slate-500">{shown.readSummary?.sourceCount ?? shown.sources.length} 条来源引用。以下诊断支持这条建议，不代表覆盖整个问题的所有运行。</p>
       {loading && <p role="status" className="text-xs text-slate-500">正在读取该建议的完整内容与依据，不影响浏览问题列表…</p>}
       {error && <div role="alert" className="text-xs text-red-600">建议详情读取失败：{error}<button type="button" className="ml-2 underline" onClick={() => onLoad(item.itemId)}>重试详情</button></div>}
       {!loading && !error && detail && !diagnoses.length && <p className="text-xs text-slate-500">暂无关联诊断正文，保留来源引用供核对。</p>}
@@ -101,7 +106,7 @@ export default function RepairItemDetail({ item, detail, loading, error, onLoad,
     </section>
     {detail && <JsonDetails title="技术详情（来源标识与完整载荷）" value={detail} />}
     {item.disposition && <p className="text-xs text-slate-500">处置记录：{item.disposition.reason}</p>}
-    {canEdit && !isLegacyPreview(item) && (item.state === 'pending' || item.state === 'no_action') && <button type="button" className={button}
+    {canEdit && !item.aggregation && !isLegacyPreview(item) && (item.state === 'pending' || item.state === 'no_action') && <button type="button" className={button}
       aria-label={`${item.state === 'no_action' ? '恢复' : '暂不处理'} ${itemTitle(item)}`}
       onClick={() => onDisposition(item, item.state === 'no_action' ? 'restore' : 'no_action')}>{item.state === 'no_action' ? '恢复待处理' : '暂不处理'}</button>}
   </div>

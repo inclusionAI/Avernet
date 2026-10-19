@@ -19,8 +19,10 @@ class SpaceAccessService(SpaceAccessServiceProtocol):
     def __init__(self, repository: SpaceRepositoryProtocol) -> None:
         self._repository = repository
 
-    def require_space(self, *, space_id: int):
-        space = self._repository.get_space(space_id=space_id, env=get_current_env())
+    def require_space(self, *, space_id: int, env: str | None = None):
+        space = self._repository.get_space(
+            space_id=space_id, env=env or get_current_env()
+        )
         if space is None:
             raise SpaceNotFoundError("space not found")
         return space
@@ -52,10 +54,12 @@ class SpaceAccessService(SpaceAccessServiceProtocol):
         )
         return member.role if member is not None else None
 
-    def require_space_member(self, *, space_id: int, user_id: str):
-        space = self.require_space(space_id=space_id)
+    def require_space_member(
+        self, *, space_id: int, user_id: str, env: str | None = None
+    ):
+        space = self.require_space(space_id=space_id, env=env)
         member = self._repository.get_member(
-            space_id=space_id, user_id=user_id, env=get_current_env()
+            space_id=space_id, user_id=user_id, env=env or get_current_env()
         )
         if member is None:
             raise SpaceAccessDeniedError("space membership required")

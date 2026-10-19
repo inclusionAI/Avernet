@@ -8,8 +8,6 @@ import pytest
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import (
     NodeAction,
-    NodeActionEvent,
-    Status,
     TaskReportCommand,
     TaskReportEventType,
     TaskReportResult,
@@ -130,21 +128,21 @@ def _trace_steps():
     return TaskReportTrace(
         steps=[
             TaskReportTraceStep(
-                action_type="execute",
-                action_result="tool_error_reported",
-                action_input="读取上下文并执行检索",
+                action_type="S1_CONTEXT",
+                action_result="{\"status\":\"completed\",\"context_recovered\":true}",
+                action_input="{\"context_endpoint\":\"/context\"}",
                 status_from="RUNNING",
                 status_to="RUNNING",
                 boost_reason="S1 上下文读取完成",
                 error_msg=None,
             ),
             TaskReportTraceStep(
-                action_type="verify",
-                action_result="accept_pass",
+                action_type="S4B_REPORT",
+                action_result="{\"status\":\"completed\",\"data_status\":\"APPLIED\"}",
             ),
-            TaskReportTraceStep(  # 非法 action_type → 写侧跳过(防读侧丢行)
-                action_type="S5C_SEARCH",
-                action_result="completed",
+            TaskReportTraceStep(  # S 码即轨迹主事件 action_type,原样透传落表
+                action_type="S5C_SEARCH_CANDIDATES",
+                action_result="{\"status\":\"completed\",\"raw_item_count\":3}",
             ),
         ]
     )
@@ -165,12 +163,13 @@ async def test_report_emits_only_trace_step_rows() -> None:
 
     assert result.status == TaskReportStatus.APPLIED
     assert [(c[1], c[2]) for c in ctx.calls] == [
-        ("node-1", "execute"),
-        ("node-1", "verify"),
-    ], "只发 step 行;非法 action_type 跳过;高层动作(execute/verify apply 行)不落表"
+        ("node-1", "S1_CONTEXT"),
+        ("node-1", "S4B_REPORT"),
+        ("node-1", "S5C_SEARCH_CANDIDATES"),
+    ], "只发 step 行(S 码 action_type 原样透传);高层动作(apply 行)不落表"
     step_1 = ctx.calls[0][3]
-    assert step_1["action_result"] == "tool_error_reported"
-    assert step_1["action_input"] == "读取上下文并执行检索"
+    assert step_1["action_result"] == "{\"status\":\"completed\",\"context_recovered\":true}"
+    assert step_1["action_input"] == "{\"context_endpoint\":\"/context\"}"
     assert step_1["status_from"] == "RUNNING" and step_1["status_to"] == "RUNNING"
     assert step_1["boost_reason"] == "S1 上下文读取完成"
     assert step_1["error_msg"] is None
@@ -233,4 +232,4 @@ async def test_report_precheck_failure_degrades_to_emit() -> None:
     result = await service.report(command)
 
     assert result.status == TaskReportStatus.APPLIED
-    assert len(ctx.calls) == 2
+    assert len(ctx.calls) == 3

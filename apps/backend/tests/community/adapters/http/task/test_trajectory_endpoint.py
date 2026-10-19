@@ -628,6 +628,192 @@ def test_trajectory_display_html_shows_actual_run_mode_per_subtask_block():
 
 
 @pytest.mark.unit
+def test_trajectory_dto_maps_action_name():
+    """action_name(2026-10-16):action_type 的中文人读名映射——已知码取映射表,
+    未知码兜底为 action_type 原文;虚拟展示事件与嵌挂子事件同样携带。"""
+    ev = TrajectoryEvent(
+        task_id="t1", node_id="n1", action_type="S1_CONTEXT",
+        action_result="completed", attempt=0, gmt_create=1000, gmt_modified=1000,
+    )
+    ev_fallback = TrajectoryEvent(
+        task_id="t1", node_id="n1", action_type="harness-engine-reset",
+        action_result="sla_timeout", attempt=0, gmt_create=1100, gmt_modified=1100,
+    )
+    ev_virtual = TrajectoryEvent(
+        task_id="t1", node_id="n1", action_type="task_result_display",
+        action_result="display", attempt=0, gmt_create=1200, gmt_modified=1200,
+        system_logs=[
+            TrajectoryEvent(
+                task_id="t1", node_id="n1", action_type="S5A_REFRESH_GAPS",
+                action_result="completed", attempt=0,
+                gmt_create=1300, gmt_modified=1300,
+            ),
+        ],
+    )
+    traj = TaskTrajectory(task_id="t1", gmt_create=1200, gmt_modified=1200,
+                         timeline=[ev, ev_fallback, ev_virtual], analysis=None)
+    c = _build_client(_StubTrajectoryService(trajectory=traj))
+    r = c.get("/openapi/v1/collaboration/tasks/trajectory", params={"task_id": "t1"})
+    assert r.status_code == 200
+    timeline = r.json()["data"]["timeline"]
+    assert timeline[0]["action_name"] == "步骤1:获取任务上下文"
+    assert timeline[1]["action_name"] == "harness-engine-reset", "未知码兜底原文"
+    assert timeline[2]["action_name"] == "当前子任务结果及消息详情展示"
+    assert timeline[2]["system_logs"][0]["action_name"] == "步骤5A:更新任务GAPs"
+
+
+@pytest.mark.unit
+def test_trajectory_display_html_shows_action_type_with_name():
+    """HTML 徽章渲染为 ``action_type(action_name)``;兜底场景(名称=原文)只显示
+    action_type 原文,避免 reset(reset) 式重复。"""
+    ev_s = TrajectoryEvent(
+        task_id="t1", node_id="n1", action_type="S5C_SEARCH_CANDIDATES",
+        action_result="not_applicable", attempt=0, gmt_create=1000, gmt_modified=1000,
+    )
+    ev_fallback = TrajectoryEvent(
+        task_id="t1", node_id="n1", action_type="harness-engine-reset",
+        action_result="sla_timeout", attempt=0, gmt_create=2000, gmt_modified=2000,
+    )
+    traj = TaskTrajectory(task_id="t1", gmt_create=2000, gmt_modified=2000,
+                          timeline=[ev_s, ev_fallback], analysis=None)
+    c = _build_client(_StubTrajectoryService(trajectory=traj))
+    r = c.get(
+        "/openapi/v1/collaboration/tasks/trajectory",
+        params={"task_id": "t1", "display": "html"},
+    )
+    assert r.status_code == 200
+    page = r.text
+    assert "S5C_SEARCH_CANDIDATES(步骤5C:搜索下一棒候选者)" in page
+    assert "harness-engine-reset(步骤" not in page, "兜底不产生映射"
+    assert "harness-engine-reset(" not in page, "兜底不重复展示(原名即名称)"
+
+
+@pytest.mark.unit
+def test_trajectory_dto_passes_through_system_logs():
+    """读时嵌套的 system_logs 经 DTO 递归透传:主事件携带、无嵌挂为 null、
+    嵌挂子事件自身不再嵌套。"""
+    ev = TrajectoryEvent(
+        task_id="t1", node_id="n1", action_type="S1_CONTEXT",
+        action_result="completed", attempt=0, gmt_create=1000, gmt_modified=1000,
+        system_logs=[
+            TrajectoryEvent(
+                task_id="t1", node_id="n1", action_type="execute",
+                action_result="success", attempt=0,
+                gmt_create=1100, gmt_modified=1100,
+            ),
+            TrajectoryEvent(
+                task_id="t1", node_id="n1", action_type="reset",
+                action_result="sla_timeout", attempt=0,
+                gmt_create=1200, gmt_modified=1200,
+            ),
+        ],
+    )
+    ev_plain = TrajectoryEvent(
+        task_id="t1", node_id="n1", action_type="S4A_EXECUTION",
+        action_result="completed", attempt=0, gmt_create=2000, gmt_modified=2000,
+    )
+    traj = TaskTrajectory(task_id="t1", gmt_create=2000, gmt_modified=2000,
+                         timeline=[ev, ev_plain], analysis=None)
+    c = _build_client(_StubTrajectoryService(trajectory=traj))
+    r = c.get("/openapi/v1/collaboration/tasks/trajectory", params={"task_id": "t1"})
+    assert r.status_code == 200
+    timeline = r.json()["data"]["timeline"]
+    # 主事件携带嵌挂子事件(按 id 正序),子事件不再嵌套
+    assert [s["action_type"] for s in timeline[0]["system_logs"]] == [
+        "execute", "reset",
+    ]
+    assert timeline[0]["system_logs"][0]["system_logs"] is None
+    assert timeline[1]["system_logs"] is None
+
+
+@pytest.mark.unit
+def test_trajectory_display_html_places_action_result_below_action_input():
+    """action_result 展示位置(2026-10-16):不再在卡片头部,而是放在
+    action_input 折叠块的**下方**,带 ev-label 标签 + 红/绿语义 chip。"""
+    ev = TrajectoryEvent(
+        task_id="t1", node_id="n1", action_type="S1_CONTEXT",
+        action_result="completed", attempt=0, gmt_create=1000, gmt_modified=1000,
+        action_input="读取上下文原文",
+    )
+    traj = TaskTrajectory(
+        task_id="t1", gmt_create=1000, gmt_modified=1000,
+        timeline=[ev], analysis=None,
+    )
+    c = _build_client(_StubTrajectoryService(trajectory=traj))
+    r = c.get(
+        "/openapi/v1/collaboration/tasks/trajectory",
+        params={"task_id": "t1", "display": "html"},
+    )
+    assert r.status_code == 200
+    page = r.text
+
+    # ① action_result 的标签行出现在 action_input 折叠块之后
+    input_start = page.index("读取上下文原文")
+    result_line = page.index('<span class="ev-label">action_result</span>')
+    assert input_start < result_line, "action_result 应在 action_input 之下"
+
+    # ② 头部不再有结果 chip 以外的 action_result 出现(ev-head 内不含 chip)
+    head_start = page.index('<div class="ev-head">')
+    head_end = page.index("</div>", head_start)
+    head_html = page[head_start:head_end]
+    assert "completed" not in head_html, "头部不再展示 action_result"
+    assert 'class="chip' not in head_html
+
+
+@pytest.mark.unit
+def test_trajectory_display_html_renders_system_logs():
+    """HTML 页在携带嵌挂的主事件下渲染可折叠「系统事件」块:
+    默认收起(details 无 open 属性)、点 summary 展开、子事件逐条可见
+    (类型/结果/墙钟时间/原因,按 id 正序)。"""
+    import re as _re
+
+    ev = TrajectoryEvent(
+        task_id="t1", node_id="n1", action_type="S1_CONTEXT",
+        action_result="completed", attempt=0, gmt_create=1000, gmt_modified=1000,
+        system_logs=[
+            TrajectoryEvent(
+                task_id="t1", node_id="n1", action_type="execute",
+                action_result="success", attempt=0,
+                gmt_create=1100, gmt_modified=1100,
+                boost_reason="回投执行",
+            ),
+            TrajectoryEvent(
+                task_id="t1", node_id="n1", action_type="reset",
+                action_result="sla_timeout", attempt=0,
+                gmt_create=1200, gmt_modified=1200,
+                boost_reason="harness 巡检复位",
+            ),
+        ],
+    )
+    traj = TaskTrajectory(
+        task_id="t1", gmt_create=1000, gmt_modified=1000,
+        timeline=[ev], analysis=None,
+    )
+    c = _build_client(_StubTrajectoryService(trajectory=traj))
+    r = c.get(
+        "/openapi/v1/collaboration/tasks/trajectory",
+        params={"task_id": "t1", "display": "html"},
+    )
+    assert r.status_code == 200
+    page = r.text
+    # ① 找到 details 块:存在且默认收起(无 open 属性),summary 为点击展开控件
+    m = _re.search(r"<details class=\"ev-slog\">(.*?)</details>", page, _re.S)
+    assert m, "系统事件应为 <details class=ev-slog> 块"
+    block = m.group(0)
+    assert ' open' not in block, "默认必须收起(无 open 属性)"
+    assert "<summary>系统事件 · system_logs 2 条</summary>" in block, (
+        "summary 应作为展开控件并显示条数"
+    )
+    # ② 子事件逐条呈现:按 id 正序,含类型/结果/原因
+    assert "execute" in block and "reset" in block
+    assert block.index("execute") < block.index("reset"), "按 id 正序"
+    assert "sla_timeout" in block and "harness 巡检复位" in block
+    # ③ 每条携带墙钟时间(_fmt_time 换算自 1100/1200ms epoch)
+    from agentclaw.community.adapters.http.task.trajectory_html import _fmt_time
+    assert _fmt_time(1200) in block
+
+
+@pytest.mark.unit
 def test_trajectory_display_html_renders_enriched_node_output():
     """HTML 页在携带产出的最后一条事件下渲染可折叠的「节点产出」块。"""
     ev = TrajectoryEvent(

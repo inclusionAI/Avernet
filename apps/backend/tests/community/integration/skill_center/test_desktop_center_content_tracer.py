@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tests.community.helpers.skill_projection_guard import PassThroughSkillProjectionGuard
+
 import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
@@ -147,6 +149,7 @@ async def test_prepare_delivery_apply_publishes_exact_cache_and_link(
         probe_service=object(),
     )
     delivery = SkillRuntimeDelivery(
+        guard=PassThroughSkillProjectionGuard(),
         pool_runtime=runtime,
         pool_layouts=_Layouts(),
         device_contexts=_Contexts(),

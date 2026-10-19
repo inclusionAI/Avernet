@@ -146,7 +146,7 @@ class _RaisingOnResetRepo:
         self.reset_attempts = 0
 
     def insert_event(self, record: TrajectoryEventRecord) -> TrajectoryEventRecord:
-        if record.action_type == "reset":
+        if record.action_type == "harness-engine-reset":
             self.reset_attempts += 1
             raise RuntimeError("simulated RESET insert failure")
         return record
@@ -218,7 +218,7 @@ class _TrajectoryCaseEngine(CentralizedExecutionAdapter):
 
 
 def _reset_records(repo: _TrajRepo) -> list[TrajectoryEventRecord]:
-    return [r for r in repo.records if r.action_type == "reset"]
+    return [r for r in repo.records if r.action_type == "harness-engine-reset"]
 
 
 def _ext_info(record: TrajectoryEventRecord) -> dict:
@@ -276,7 +276,7 @@ class TestResetSlaTimeout:
         records = _reset_records(repo)
         assert len(records) == 1, [(r.action_type, r.action_result) for r in repo.records]
         rec = records[0]
-        assert rec.action_type == "reset"
+        assert rec.action_type == "harness-engine-reset"
         assert rec.action_result == "sla_timeout"
         assert rec.status_from == Status.RUNNING
         assert rec.status_to == Status.PENDING
@@ -342,7 +342,7 @@ class TestResetPendingDispatchStuck:
         records = _reset_records(repo)
         assert len(records) == 1, [(r.action_type, r.action_result) for r in repo.records]
         rec = records[0]
-        assert rec.action_type == "reset"
+        assert rec.action_type == "harness-engine-reset"
         assert rec.action_result == "pending_dispatch_stuck"
         assert rec.status_from == Status.PENDING
         assert rec.status_to == Status.PENDING

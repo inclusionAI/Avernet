@@ -3,6 +3,8 @@
 from dataclasses import replace
 from unittest.mock import MagicMock
 
+from tests.community.helpers.skill_projection_guard import PassThroughSkillProjectionGuard
+
 import pytest
 
 from agentclaw.community.api.skills_pool_operational_query_service import (
@@ -91,6 +93,7 @@ def test_skill_runtime_delivery_is_wired_only_into_per_domain_projection() -> No
     center_content = MagicMock(spec=CenterContentDistribution)
 
     registry = SkillCenterModule().engine_runtime_projection_registry(
+        guard=PassThroughSkillProjectionGuard(),
         pool_runtime=pool_runtime,
         pool_layouts=pool_layouts,
         device_contexts=device_contexts,
@@ -396,3 +399,16 @@ def test_coding_template_pool_paths_use_aicoding_physical_layout(
     assert local_directory == expected
     assert upload_storage._device_directory == expected
     assert delete_storage._device_directory == expected
+
+
+def test_real_composition_wires_shared_snapshot_guard(test_injector):
+    from agentclaw.community.core.skill_center.services.runtime_projections.skill_projection_guard import SkillProjectionGuard
+    from agentclaw.community.core.skill_center.services.runtime_projections.registry import EngineRuntimeProjectionRegistry
+    from agentclaw.community.core.skill_center.capability_state_contract import BotCapabilityStateReaderProtocol
+    from agentclaw.community.plugin_api.cache import CachePlugin
+
+    registry = test_injector.get(EngineRuntimeProjectionRegistry)
+    guard = registry.for_engine("openclaw")._skill_delivery._guard
+    assert isinstance(guard, SkillProjectionGuard)
+    assert guard._cache is test_injector.get(CachePlugin)
+    assert guard._reader is test_injector.get(BotCapabilityStateReaderProtocol)

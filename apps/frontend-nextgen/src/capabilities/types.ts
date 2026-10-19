@@ -475,6 +475,8 @@ export interface AppCapabilities {
    * 同步签名，组件仅消费可见性，不感知部署环境。
    */
   getBotRegistrationEnabled: () => CapabilityResult<boolean>;
+  /** Deployment-owned DSH guide link; null hides the optional link, preserving inline steps. */
+  getDeepSeekHarnessRegistrationGuideUrl: () => CapabilityResult<string | null>;
   /** Additional deployment-owned onboarding panels; public deployments default to none. */
   getAdditionalBotRegistrationPanels: () => CapabilityResult<
     {
@@ -485,7 +487,13 @@ export interface AppCapabilities {
   >;
   getQwenWorkBotRegistrationConfig: (bcsEndpoint: string) => CapabilityResult<{ providerSlug: string; apiUrl: string }>;
   /** Optional deployment-managed installer and executable; null uses the public release installer. */
-  getQwenWorkBridgeInstallation: () => CapabilityResult<{ installCommand: string; binary: string; profiles?: boolean; guideUrl?: string; personalizeBotName?: boolean } | null>;
+  getQwenWorkBridgeInstallation: () => CapabilityResult<{
+    installCommand: string;
+    binary: string;
+    profiles?: boolean;
+    guideUrl?: string;
+    personalizeBotName?: boolean;
+  } | null>;
   /**
    * Poolab 一键接入脚本与公开指南地址（部署差异）。Open Core 默认 `null`，表示该部署未启用
    * Poolab 接入；internal overlay 覆盖为 `{ oneClickScriptUrl, guideUrl }` 以开放 Poolab Tab。

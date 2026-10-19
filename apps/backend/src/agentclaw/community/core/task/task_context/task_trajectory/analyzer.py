@@ -183,7 +183,7 @@ def _terminal_status(timeline: list[TrajectoryEvent]) -> Status | None:
     path."""
     # 1. Prefer a terminal TRANSITION row (spec REQ-9 "末条 terminal TRANSITION 事件").
     for ev in reversed(timeline):
-        if ev.action_type == TrajectoryActionType.TRANSITION and ev.status_to in _TERMINAL_STATUSES:
+        if _action_is(ev.action_type, TrajectoryActionType.TRANSITION) and ev.status_to in _TERMINAL_STATUSES:
             return ev.status_to
     # 2. FALLBACK: the engine does not always log a terminal TRANSITION (e.g.
     #    acceptance-FAIL routes HUNG via _escalate_hung, bypassing the
@@ -226,9 +226,9 @@ def _build_analysis_input(
             ext = ext_info_lookup(ev) or {}
         except Exception:  # noqa: BLE001  lookup must not crash the summary
             ext = {}
-        if ev.action_type == TrajectoryActionType.DISPATCH and isinstance(ext, dict) and "_dispatch_rationale" in ext:
+        if _action_is(ev.action_type, TrajectoryActionType.DISPATCH) and isinstance(ext, dict) and "_dispatch_rationale" in ext:
             dispatch_with_rationale += 1
-        if ev.action_type == TrajectoryActionType.RESET and isinstance(ext, dict) and "elapsed_ms" in ext:
+        if _action_is(ev.action_type, TrajectoryActionType.RESET) and isinstance(ext, dict) and "elapsed_ms" in ext:
             reset_with_metrics += 1
     parts = [f"events={len(timeline)}"]
     for at in sorted(counts):
@@ -301,7 +301,7 @@ def _derive_failure_reason(
     #            error_type=EXECUTION_TIMEOUT → execution_timeout with
     #            elapsed/threshold from that RESET event's ext_info.
     for ev in reversed(timeline):
-        if ev.action_type == TrajectoryActionType.RESET and (
+        if _action_is(ev.action_type, TrajectoryActionType.RESET) and (
             ev.action_result == "sla_timeout"
             or ev.error_type == ReasonCatalog.EXECUTION_TIMEOUT
         ):
@@ -312,7 +312,7 @@ def _derive_failure_reason(
 
     # Bullet 2: most recent EXECUTE/VERIFY with error_type=UNDERLYING_INTERFACE_ERROR.
     for ev in reversed(timeline):
-        if ev.action_type in (TrajectoryActionType.EXECUTE, TrajectoryActionType.VERIFY) and (
+        if _action_is(ev.action_type, TrajectoryActionType.EXECUTE, TrajectoryActionType.VERIFY) and (
             ev.error_type == ReasonCatalog.UNDERLYING_INTERFACE_ERROR
         ):
             return f"underlying_interface_error: {ev.error_msg or ''}"
@@ -320,7 +320,7 @@ def _derive_failure_reason(
     # Bullet 3: RESET with action_result="pending_dispatch_stuck" →
     #           dispatch_stuck with elapsed from ext_info.
     for ev in reversed(timeline):
-        if ev.action_type == TrajectoryActionType.RESET and ev.action_result == "pending_dispatch_stuck":
+        if _action_is(ev.action_type, TrajectoryActionType.RESET) and ev.action_result == "pending_dispatch_stuck":
             ext = _safe_lookup(ext_info_lookup, ev)
             elapsed = ext.get("elapsed_ms") if ext else None
             return f"dispatch_stuck: 停留 {elapsed}ms"
@@ -334,13 +334,13 @@ def _derive_failure_reason(
     # Bullet 5: last PLAN with action_result ∈ {parse_fail, call_fail} →
     #           plan_failure with the origin (the action_result itself).
     for ev in reversed(timeline):
-        if ev.action_type == TrajectoryActionType.PLAN and ev.action_result in ("parse_fail", "call_fail"):
+        if _action_is(ev.action_type, TrajectoryActionType.PLAN) and ev.action_result in ("parse_fail", "call_fail"):
             return f"plan_failure: {ev.action_result}"
 
     # Bullet 6: acceptance FAIL — EXECUTE/VERIFY with action_result="accept_fail"
     #           → acceptance_failed with the acceptance_result (action_result).
     for ev in reversed(timeline):
-        if ev.action_type in (TrajectoryActionType.EXECUTE, TrajectoryActionType.VERIFY) and (
+        if _action_is(ev.action_type, TrajectoryActionType.EXECUTE, TrajectoryActionType.VERIFY) and (
             ev.action_result == "accept_fail"
         ):
             return f"acceptance_failed: {ev.action_result}"
@@ -365,6 +365,20 @@ def _derive_failure_reason(
     # None (→ early return) for an empty timeline, so `timeline` is always
     # non-empty here. Defensive only.
     return None  # pragma: no cover
+
+
+_HARNESS_ENGINE_PREFIX = "harness-engine-"
+
+
+def _action_is(raw: object, *members: TrajectoryActionType) -> bool:
+    """``raw``(枚举或自由字符串)是否语义等于给定动作之一——兼容
+    ``harness-engine-`` 前缀形态(2026-10-16:harness 闸门的行带前缀,
+    例如 harness-engine-reset 语义同为 reset)。"""
+    value = getattr(raw, "value", raw)
+    text = str(value)
+    if text.startswith(_HARNESS_ENGINE_PREFIX):
+        text = text[len(_HARNESS_ENGINE_PREFIX):]
+    return any(text == member.value for member in members)
 
 
 def _derive_boost_reason(
@@ -394,7 +408,7 @@ def _derive_boost_reason(
     """
     last_dispatch: TrajectoryEvent | None = None
     for ev in reversed(timeline):
-        if ev.action_type == TrajectoryActionType.DISPATCH:
+        if _action_is(ev.action_type, TrajectoryActionType.DISPATCH):
             last_dispatch = ev
             break
     if last_dispatch is None:
@@ -494,7 +508,7 @@ def _build_ext_info_brief(
     brief: dict[str, Any] = {}
     # Last DISPATCH event's _dispatch_rationale 概要 → boost_reason signal.
     for ev in reversed(timeline):
-        if ev.action_type == TrajectoryActionType.DISPATCH:
+        if _action_is(ev.action_type, TrajectoryActionType.DISPATCH):
             ext = _safe_lookup(ext_info_lookup, ev) or {}
             rationale = ext.get("_dispatch_rationale") if isinstance(ext, dict) else None
             if isinstance(rationale, dict) and rationale:
@@ -550,7 +564,7 @@ def _build_ext_info_brief(
     # mislead the bot into thinking the RESET had a malformed metric).
     for ev in reversed(timeline):
         if (
-            ev.action_type == TrajectoryActionType.RESET
+            _action_is(ev.action_type, TrajectoryActionType.RESET)
             and ev.action_result in ("sla_timeout", "pending_dispatch_stuck")
         ):
             ext = _safe_lookup(ext_info_lookup, ev)

@@ -40,7 +40,7 @@ const BotWorkshopDetailPage: React.FC = () => {
       : undefined;
   const currentSpaceId = useSpaceContext((state) => state.currentSpaceId);
   const requestIdentity = useBotWorkshopEditorIdentity();
-  const detail = useBotWorkshopDetail(id, editable, requestIdentity.ready, ownerId);
+  const detail = useBotWorkshopDetail(id, editable, requestIdentity.ready, ownerId, requestIdentity.userId);
   const addressedOwnerId = ownerId ?? detail.bot?.ownerId;
   const isOwner = isSameHumanIdentity(addressedOwnerId, requestIdentity.userId);
   const editor = useBotEditor(

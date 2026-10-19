@@ -49,6 +49,8 @@ export type RecoveryTaskState = {
   status: RecoveryTaskStatus;
   phase: RecoveryPhase;
   version: number;
+  /** Absent on legacy tasks; never inferred from the target Bot environment. */
+  controlPlaneEnvironment?: import("../common/task-control-plane.js").AgentControlPlaneEnvironment;
   /** Absent on legacy tasks; only true enables read-only sharing. */
   shared?: boolean;
   observationDeadlineAt: number | null;
@@ -63,7 +65,7 @@ export type RecoveryTaskState = {
   execution?: AgentExecution;
   executionNo?: number;
   /** Task-wide infrastructure failure budget; retryAt is zero while an attempt is active. */
-  executionRetry?: { failures: number; retryAt: number };
+  executionRetry?: { failures: number; retryAt: number; executionId?: string };
   aisExecution?: AisArtifactContract;
   requiresFreshObservation?: boolean;
 };
@@ -93,6 +95,6 @@ export interface RecoveryTaskStore {
   update(taskId: string, expectedVersion: number, change: (current: RecoveryStoredTask) => RecoveryStoredTask): Promise<RecoveryStoredTask | null>;
   failResult?(taskId: string, resultVersion: number): Promise<void>;
   acknowledgeResult(taskId: string, resultVersion: number): Promise<void>;
-  listForReporting?(limit: number, afterTaskId?: string): Promise<RecoveryStoredTask[]>;
+  listForReporting?(limit: number, afterTaskId: string, controlPlaneEnvironment: import("../common/task-control-plane.js").AgentControlPlaneEnvironment): Promise<RecoveryStoredTask[]>;
   listForMaintenance?(limit: number, afterTaskId?: string): Promise<RecoveryStoredTask[]>;
 }

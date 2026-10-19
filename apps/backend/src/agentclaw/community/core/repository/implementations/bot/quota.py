@@ -13,6 +13,7 @@ class BotQuotaQueries:
         *,
         owner_id: str,
         personal_space_id: int | None,
+        env: str | None = None,
     ) -> int:
         with self._db.orm_session() as db:
             query = db.query(self.Model).filter(
@@ -23,7 +24,7 @@ class BotQuotaQueries:
                     self.Model.active_engine.is_(None),
                     func.lower(func.trim(self.Model.active_engine)) != "teclaw",
                 ),
-                self._env(),
+                self._env(env=env),
             )
             if personal_space_id is None:
                 query = query.filter(self.Model.space_id.is_(None))
@@ -40,6 +41,7 @@ class BotQuotaQueries:
         self,
         *,
         space_id: int,
+        env: str | None = None,
     ) -> int:
         with self._db.orm_session() as db:
             return (
@@ -50,7 +52,7 @@ class BotQuotaQueries:
                     or_(
                         self.Model.bot_type.is_(None), self.Model.bot_type != "desktop"
                     ),
-                    self._env(),
+                    self._env(env=env),
                     or_(
                         self.Model.active_engine.is_(None),
                         func.lower(func.trim(self.Model.active_engine)) != "teclaw",

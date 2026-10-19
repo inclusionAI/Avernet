@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from injector import Binder, Module, inject, provider, singleton
 
+from agentclaw.community.api.space_management_service import SpaceManagementServiceProtocol
+from agentclaw.community.core.repository.protocols.spaces import SpaceManagementRepositoryProtocol
+from agentclaw.community.core.repository.implementations.spaces.management import SpaceManagementRepository
+from agentclaw.community.core.spaces.services.space_management_service import SpaceManagementService
+from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
 from agentclaw.community.api.market_favorite_service import (
     MarketFavoriteServiceProtocol,
 )
@@ -141,6 +146,7 @@ from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 
 class SpacesModule(Module):
     def configure(self, binder: Binder) -> None:
+        binder.bind(SpaceManagementRepositoryProtocol, to=SpaceManagementRepository, scope=singleton)
         binder.bind(SpaceRepositoryProtocol, to=SpaceRepository, scope=singleton)
         binder.bind(
             MarketFavoriteRepositoryProtocol,
@@ -323,3 +329,13 @@ class SpacesModule(Module):
             registry=registry,
             handler=handler,
         )
+
+    @singleton
+    @provider
+    @inject
+    def space_management_service(
+        self, repository: SpaceManagementRepositoryProtocol,
+        spaces: SpaceRepositoryProtocol, skill_center: SkillCenterClient,
+        staff: StaffDeptPlugin,
+    ) -> SpaceManagementServiceProtocol:
+        return SpaceManagementService(repository, spaces, skill_center, staff, get_current_env)

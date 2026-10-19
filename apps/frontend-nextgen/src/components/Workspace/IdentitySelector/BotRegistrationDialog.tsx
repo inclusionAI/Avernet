@@ -16,6 +16,7 @@ import { useBotRegistrationToken } from '@/pages/Workspace/hooks/useBotRegistrat
 import { Check, Copy, MessageSquare, RefreshCw, Terminal } from 'lucide-react';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 
+import { DeepSeekHarnessRegistrationPanel } from './DeepSeekHarnessRegistrationPanel';
 import { PoolabRegistrationPanel } from './PoolabRegistrationPanel';
 import { QwenWorkRegistrationPanel } from './QwenWorkRegistrationPanel';
 
@@ -41,7 +42,15 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
   const panelCapability = getCapabilities().getAdditionalBotRegistrationPanels?.();
   const additionalPanels = panelCapability?.status === 'available' ? panelCapability.value : [];
   const poolabEnabled = getCapabilities().getPoolabBridgeInstallation().value !== null;
-  const [engine, setEngine] = useState<RegistrationEngine>('openclaw');
+  const engineOptions = [
+    ...(poolabEnabled ? [{ value: 'poolab' as const, label: 'Poolab' }] : []),
+    ...additionalPanels.map(({ id, label }) => ({ value: id, label })),
+    { value: 'deepseek-harness', label: 'DeepSeek Harness' },
+    { value: 'qwenwork', label: '千问办公' },
+    { value: 'openclaw', label: 'OpenClaw' },
+  ];
+  const defaultEngine = engineOptions[0].value;
+  const [engine, setEngine] = useState<RegistrationEngine>(defaultEngine);
   const AdditionalPanel = additionalPanels.find((panel) => panel.id === engine)?.Panel;
   const [mode, setMode] = useState<AccessMode>('self');
   const [copied, setCopied] = useState(false);
@@ -49,6 +58,13 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
   const { token, expiresAt, isLoading, error, bcsEndpoint, retry } = useBotRegistrationToken(
     open && engine === 'openclaw',
   );
+
+  useEffect(() => {
+    if (open) {
+      setEngine(defaultEngine);
+      setCopied(false);
+    }
+  }, [open, defaultEngine]);
 
   useEffect(
     () => () => {
@@ -89,18 +105,15 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
           aria-label="Bot 类型"
           value={engine}
           onChange={setEngine}
-          className="w-full"
-          options={[
-            { value: 'openclaw', label: 'OpenClaw' },
-            { value: 'qwenwork', label: '千问办公' },
-            ...additionalPanels.map(({ id, label }) => ({ value: id, label })),
-            ...(poolabEnabled ? [{ value: 'poolab' as const, label: 'Poolab' }] : []),
-          ]}
+          className="w-full overflow-x-auto"
+          options={engineOptions}
         />
         {AdditionalPanel ? (
           <Suspense fallback={<p role="status">正在加载接入指南…</p>}>
             <AdditionalPanel open={open} />
           </Suspense>
+        ) : engine === 'deepseek-harness' ? (
+          <DeepSeekHarnessRegistrationPanel open={open} />
         ) : engine === 'qwenwork' ? (
           <QwenWorkRegistrationPanel open={open} />
         ) : engine === 'poolab' ? (
@@ -110,15 +123,29 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
             <section className="space-y-2" aria-label="OpenClaw 接入方式">
               <p className="text-xs font-medium text-muted-foreground">如何接入 OpenClaw？</p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {([
-                  { value: 'self', label: '在终端执行', description: '复制安装命令，在 Bot 所在设备执行', icon: Terminal },
-                  { value: 'auto', label: '让 Bot 执行', description: '复制接入指引，发送给 OpenClaw Bot', icon: MessageSquare },
-                ] as const).map((option) => (
+                {(
+                  [
+                    {
+                      value: 'self',
+                      label: '在终端执行',
+                      description: '复制安装命令，在 Bot 所在设备执行',
+                      icon: Terminal,
+                    },
+                    {
+                      value: 'auto',
+                      label: '让 Bot 执行',
+                      description: '复制接入指引，发送给 OpenClaw Bot',
+                      icon: MessageSquare,
+                    },
+                  ] as const
+                ).map((option) => (
                   <Button
                     key={option.value}
                     variant="outline"
                     aria-pressed={mode === option.value}
-                    className={`h-auto min-w-0 justify-start gap-3 whitespace-normal p-3 text-left ${mode === option.value ? 'border-primary bg-primary/5' : ''}`}
+                    className={`h-auto min-w-0 justify-start gap-3 whitespace-normal p-3 text-left ${
+                      mode === option.value ? 'border-primary bg-primary/5' : ''
+                    }`}
                     onClick={() => {
                       setMode(option.value);
                       setCopied(false);

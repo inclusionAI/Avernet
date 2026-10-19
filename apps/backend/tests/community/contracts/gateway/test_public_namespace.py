@@ -28,6 +28,11 @@ _DECLARED_PREFIXES = (
     # Department directory search — a tenant-wide catalogue read, declared with
     # its own gateway domain + route_security entry.
     "/openapi/v1/org/dept",
+    # Agent-swarm compute surface (submit/poll/list/detail/cancel/SSE/report).
+    # Declared with its own gateway domain (upstreams.domains.agentswarm →
+    # backend, schema bots.openapi.json) + route_security (the top-level
+    # /** user:required default — no explicit override).
+    "/openapi/v1/agentswarm",
     # BCS publish-to-users — the external contract path the gateway's
     # `collaboration-publish` domain routes to the backend (pulled out of the
     # broad collaboration→bcs namespace). Declared with its gateway domain +

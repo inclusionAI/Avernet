@@ -1,6 +1,7 @@
 """Assembled-app coverage through real DI, authorization and persistence."""
 
 import time
+from functools import partial
 from types import SimpleNamespace
 import jwt
 
@@ -25,7 +26,7 @@ class SecretResolver:
         return SimpleNamespace(secret_user="test", secret_value=_KEY)
 
 
-def seed(world):
+def seed(world, engine="openclaw"):
     init_principal_verifier_config(SecretResolver(), "test-key", strict=False)
     world.get(BotRepository).insert(
         {
@@ -37,7 +38,7 @@ def seed(world):
             "entity_type": "staff",
             "creator_id": _OWNER,
             "status": "ACTIVE",
-            "active_engine": "openclaw",
+            "active_engine": engine,
             "bot_type": "personal",
         }
     )
@@ -99,4 +100,50 @@ def version_unbound():
     expect=ExpectError(status=404, json_contains={"code": 404000, "data": None}),
 )
 def version_missing():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/{bot_id}/engine-version",
+    scenario="not_applicable",
+    seed=partial(seed, engine="teclaw"),
+    input=request("version-bot"),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "detection": {
+                    "status": "not_applicable",
+                    "reason": "engine_not_supported",
+                },
+                "restart_hint": "none",
+                "comparison": "unknown",
+            },
+        },
+    ),
+)
+def version_teclaw_not_applicable():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/{bot_id}/engine-version",
+    scenario="hermes_unbound",
+    seed=partial(seed, engine="hermes"),
+    input=request("version-bot"),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "detection": {"status": "read_failed", "reason": "device_not_bound"},
+                "restart_hint": "unknown",
+            },
+        },
+    ),
+)
+def version_hermes_unbound():
     pass

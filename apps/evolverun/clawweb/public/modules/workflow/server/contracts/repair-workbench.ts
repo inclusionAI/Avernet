@@ -5,7 +5,13 @@ import type { AutomationOrigin } from './workflow-automation.js';
 import type { RepairReleaseDetail } from './repair-release.js';
 
 export type RepairCapabilities = { generation: boolean; diff: boolean; publication: boolean; reason: string | null };
-export type RepairInboxItem = StoredRepairItem & { sourceAvailable: boolean };
+export type RepairInboxItem = StoredRepairItem & { sourceAvailable: boolean;
+  /** Trusted identity of original executable content; independent of supporting runs and list pagination. */
+  selectionDigest?: string;
+  /** Bounded display projection. Fetch item detail for original proposal/evidence; never freeze this projection. */
+  readSummary?: { sourceCount: number; runCount: number; diagnosisCount: number; originalBytes: number;
+    operations: Array<{nodeId: string; path: string; identity: string}>; conflictsComplete: boolean };
+  aggregation?: import('./repair-proposal.js').ProposalAggregation };
 export function repairSignatureKey(signature: string): string {
   const bytes = new TextEncoder().encode(signature);
   const hash = (seed: bigint) => {
@@ -17,19 +23,20 @@ export function repairSignatureKey(signature: string): string {
 }
 export type RepairInboxFilter = 'pending' | 'processing' | 'awaiting_verification' | 'closed' | 'no_action' | 'all';
 export type RepairCandidatesQuery = { state?: RepairInboxFilter; page?: number; pageSize?: number; includeHistorical?: boolean;
-  nodeId?: string; failureMode?: string; signature?: string; previewSignatures?: string[] };
+  nodeId?: string; failureMode?: string; signature?: string; previewSignatures?: string[]; rawItems?: boolean; metadataPage?: number };
 export type RepairTaskSummary = { taskId: string; revision: number; phase: RepairRevision['phase']; updatedAtMs: number; itemCount: number; title?: string };
 export type RepairCandidatesResponse = {
   schemaVersion: 'workflow-repair/v2'; workflowId: string; inputDigest: string;
   items: RepairInboxItem[]; tasks: RepairTaskSummary[]; capabilities: RepairCapabilities;
-  /** Up to 3 intact summaries per issue within the shared response byte budget. Total is never truncated. */
+  metadata?: { page: number; totalPages: number; digest: string; tasks: number; signatureKeys: number; nodes: number; failureModes: number };
+  /** Up to 3 bounded summaries per issue within the shared response byte budget. Total is never truncated. */
   issuePreviews?: Array<{ signature: string; total: number; items: RepairInboxItem[] }>;
   includeHistorical: boolean; activeLookbackDays: number;
   repairSignatureKeys: string[];
-  /** Complete visible scope, independent of node/type filters and pagination. */
+  /** Visible scope before filters/item pagination, paged by metadata.page. Browser API assembles all metadata pages. */
   facets: { nodes: string[]; failureModes: string[] };
   counts: Record<RepairInboxFilter, number>;
-  page: { page: number; pageSize: number; total: number; totalPages: number };
+  page: { page: number; pageSize: number; total: number; totalPages: number; snapshotDigest?: string };
   limits: { maxItems: number; maxRequestBytes: number }; canEdit: boolean;
 };
 export type RepairTaskDetail = {
@@ -45,7 +52,10 @@ export type RepairTaskDetail = {
 export type RepairSelectionRequest = {
   automation?: AutomationOrigin;
   workflowId: string; itemIds: string[]; inputDigest: string; instructions: string; requestId: string; includeHistorical?: boolean;
+  selection?: Record<string, string>;
 };
+export type RepairSelectionState = { inputDigest: string; items: RepairInboxItem[]; missing: string[]; canEdit: boolean;
+  plans?: Array<Omit<import('./repair-proposal.js').ProposalAggregation, 'originals' | 'flowIds'>> };
 export type RepairFeedbackRequest = RepairSelectionRequest & {
   expectedAttemptRevision: number; parentCandidateCommit: string | null; feedback: string;
 };
@@ -82,8 +92,9 @@ export interface RepairExecutionPort {
   diff?(input: { workflowId: string; taskId: string; revision: number; baseCommit: string; candidateCommit: string }): Promise<RepairDiff>;
 }
 export interface RepairWorkbenchService {
+  selectionState(workflowId: string, itemIds: string[], includeHistorical: boolean): Promise<Omit<RepairSelectionState, 'canEdit'>>;
   candidates(workflowId: string, query?: RepairCandidatesQuery): Promise<Omit<RepairCandidatesResponse, 'canEdit'>>;
-  item(workflowId: string, itemId: string): Promise<RepairInboxItem>;
+  item(workflowId: string, itemId: string, originalOnly?: boolean): Promise<RepairInboxItem>;
   task(taskId: string): Promise<RepairTaskDetail>;
   items(workflowId: string, itemIds: string[]): Promise<RepairInboxItem[]>;
   request(workflowId: string, requestId: string): Promise<RepairRevision | null>;
@@ -95,6 +106,7 @@ export interface RepairWorkbenchService {
   retryResult(actorId: string, taskId: string, expectedRevision: number): Promise<void>;
   retryGeneration(actorId: string, taskId: string, request: { expectedRevision: number; requestId: string }): Promise<RepairRevision>;
   retryDispatch(actorId: string, taskId: string, expectedRevision: number): Promise<void>;
+  retryProposalIntegration?(workflowId: string): Promise<void>;
   reconcile(limit?: number): Promise<number>;
   diff(taskId: string, revision: number, base: 'baseline' | 'parent'): Promise<RepairDiff>;
 }

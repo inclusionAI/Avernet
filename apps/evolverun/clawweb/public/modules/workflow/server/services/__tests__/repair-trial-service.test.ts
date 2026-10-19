@@ -5,16 +5,27 @@ import { repairFixture } from './repair-batch-fixtures.js';
 import { repairReleaseMigrations } from '@avernet/clawweb-shared/server/schema-repair-release';
 import { createRepairTrialService } from '../repair-trial-service.js';
 import { digestRepairJson } from '../../contracts/repair-batch.js';
-import { hasSensitiveTrialInput, redactTrial } from '../repair-trial-input.js';
+import { redactTrial, redactTrialInput, trialSensitiveValues } from '../repair-trial-input.js';
 
-it('checks sensitive input beyond preview limits without treating bulk input as a secret', () => {
+it('redacts schema-marked sensitive business fields and nested echoed values, independently of their names', () => {
+  const schema = { properties: { customer: { type: 'string', sensitive: true }, settings: { properties: { note: { writeOnly: true } } },
+    rows: { type: 'array', items: { properties: { value: { format: 'password' } } } } } };
+  const input = { customer: 'private-customer', settings: { note: 'private-note', locale: 'zh' }, rows: [{ value: 'private-value' }] };
+  const values = trialSensitiveValues(input, schema);
+  expect(values).toEqual(expect.arrayContaining(['private-customer', 'private-note', 'private-value']));
+  expect(redactTrialInput(input, schema)).toEqual({ customer: '[REDACTED]', settings: { note: '[REDACTED]', locale: 'zh' }, rows: [{ value: '[REDACTED]' }] });
+  expect(redactTrial('echo private-customer private-note private-value', values)).not.toContain('private-');
+  const tuple = { items: [{ writeOnly: true }, { type: 'string' }] };
+  expect(redactTrialInput([1234, 'public'], tuple)).toEqual(['[REDACTED]', 'public']);
+  expect(redactTrial('echo 1234', trialSensitiveValues([1234, 'public'], tuple))).toBe('echo [REDACTED]');
+});
+
+it('bounds history previews while redacting native credential keys and echoed values from the full input', () => {
   const safe = { query: 'ordinary text '.repeat(700), items: Array.from({ length: 101 }, (_, i) => i) };
-  expect(hasSensitiveTrialInput(safe)).toBe(false);
   expect(redactTrial(safe)).not.toEqual(safe);
-  expect(hasSensitiveTrialInput({ items: [...safe.items, { credentials: { value: 'test-only' } }] })).toBe(true);
-  expect(hasSensitiveTrialInput({ query: safe.query + ' Bearer test-only-value' })).toBe(true);
-  expect(hasSensitiveTrialInput({ accessKey: 'test-only' })).toBe(true);
-  expect(hasSensitiveTrialInput({ executionTicket: 'test-only' })).toBe(true);
+  expect(redactTrial({ accessKey: 'test-access', executionTicket: 'test-ticket' })).toEqual({ accessKey: '[REDACTED]', executionTicket: '[REDACTED]' });
+  const input = { items: [...safe.items, { credentials: { value: 'full-input-private-value' } }] };
+  expect(redactTrial('echo full-input-private-value', trialSensitiveValues(input))).toBe('echo [REDACTED]');
 });
 
 it('freezes the reviewed Pack, validates input, deduplicates dispatch and binds once through ordinary run registration; preserves review', async () => {
@@ -31,15 +42,24 @@ it('freezes the reviewed Pack, validates input, deduplicates dispatch and binds 
       checks: { schemaVersion: 'workflow-repair-checks/v1', candidateCommit: draft.candidateCommit, packDigest: draft.packDigest, candidateDigest: digestRepairJson(draft), static: { status: 'passed' }, mock: { status: 'not_covered' }, coverage: [{ itemId: 'item-0', mode: 'not_covered' }], uncoveredChecks: [] } });
     let sends = 0, saves = 0;
     const service = createRepairTrialService({ db: f.db, workbench, port: {
+      prepare: async (_candidate, actor, targetId) => {
+        if (actor !== 'actor' || targetId !== 'bot') throw Error('unauthorized');
+        return { id: 'bot', botId: 'bot', ownerId: 'owner', environment: 'prod', label: 'Bot', executionMode: 'pinned', capabilityId: 'c'.repeat(64) };
+      },
       targets: async (_w, actor) => actor === 'actor' ? [{ id: 'bot', botId: 'bot', ownerId: 'owner', environment: 'prod', label: 'Bot' }] : [],
-      inspect: async (_candidate, mode) => ({ ...(mode === 'saved' ? { source: 'saved' as const } : {}), packId: base.packId, workflowIds: ['wf-1', 'child'], candidateRef: `refs/heads/snapshots/${draft.candidateCommit}`, inputSchema: { type: 'object', required: ['query'], properties: { query: { type: 'string' }, password: { type: 'string' } } } }),
+      inspect: async (_candidate, mode) => ({ ...(mode === 'saved' ? { source: 'saved' as const } : {}), packId: base.packId, workflowIds: ['wf-1', 'child'], candidateRef: `refs/heads/snapshots/${draft.candidateCommit}`, inputSchema: {
+        type: 'object', required: ['query'], $defs: { customer: { type: 'string', writeOnly: true, default: 'customer-private-default' } },
+        properties: { query: { type: 'string' }, password: { type: 'string', default: 'schema-private-default' }, customer: { allOf: [{ $ref: '#/$defs/customer' }] } },
+      } }),
       save: async () => { saves++; }, dispatch: async () => { sends++; throw Error('response lost'); },
     } });
-    const request = { revision: 1, expectedStateVersion: 1, requestId: 'trial', targetId: 'bot', input: { query: 'hello', password: 'very-secret' }, inputSchemaDigest: digestRepairJson((await service.options('actor', rev.taskId, 1)).inputSchema) };
+    const request = { revision: 1, expectedStateVersion: 1, requestId: 'trial', targetId: 'bot', input: { query: 'hello', password: 'very-secret', customer: 'customer-private-default' }, inputSchemaDigest: digestRepairJson((await service.options('actor', rev.taskId, 1)).inputSchema) };
     await expect(service.start('actor', rev.taskId, { ...request, input: {} })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
     const trial = await service.start('actor', rev.taskId, request);
     expect(trial).toMatchObject({ status: 'unknown', candidateCommit: draft.candidateCommit, packDigest: draft.packDigest, input: { password: '[REDACTED]' } });
     expect(JSON.stringify(trial)).not.toContain('very-secret');
+    expect(JSON.stringify(trial)).not.toContain('schema-private-default');
+    expect(JSON.stringify(trial)).not.toContain('customer-private-default');
     expect((await service.start('actor', rev.taskId, request)).id).toBe(trial.id);
     expect(sends).toBe(1); expect(saves).toBe(1);
     await expect(service.start('actor', rev.taskId, { ...request, input: { query: 'changed' } })).rejects.toMatchObject({ code: 'IDEMPOTENCY_MISMATCH' });
@@ -66,6 +86,13 @@ it('freezes the reviewed Pack, validates input, deduplicates dispatch and binds 
     expect(f.raw.prepare("SELECT COUNT(*) AS n FROM workflow_repair_release_records WHERE record_kind='trial_run'").get()).toEqual({ n: 2 });
     expect(f.raw.prepare("SELECT workflow_id FROM workflow_repair_release_records WHERE record_id='child-flow'").get()).toEqual({ workflow_id: 'child' });
     expect((await service.list(rev.taskId))[0]).toMatchObject({ flowId: 'actual-native-flow', status: 'waiting' });
+    f.raw.prepare("UPDATE flow_runs SET result_json=? WHERE flow_id='actual-native-flow'").run(JSON.stringify({ customer: request.input.customer, echo: JSON.stringify(request.input), public: 'readable' }));
+    const history = (await service.list(rev.taskId))[0];
+    expect(history.input.customer).toBe('[REDACTED]');
+    expect(history.output).toContain('readable');
+    expect(JSON.stringify(history)).not.toContain('customer-private-default');
+    expect(JSON.stringify(history)).not.toContain('very-secret');
+    expect((await service.resolveRunRequest(trial.id, { botId: 'bot', ownerId: 'owner' })).input).toEqual(request.input);
     const boundary = 'b'.repeat(64);
     await registerRunRequest(f.db, { ...child, flow_id: boundary }, async tx => { await tx.exec("INSERT INTO flow_runs VALUES (?, 'child', 'bot:owner', 'running', NULL, NULL)", [boundary]); });
     expect(f.raw.prepare("SELECT record_id FROM workflow_repair_release_records WHERE record_id=?").get(boundary)).toEqual({ record_id: boundary });
@@ -79,13 +106,12 @@ it('freezes the reviewed Pack, validates input, deduplicates dispatch and binds 
     f.raw.prepare("UPDATE workflow_repair_release_records SET body_json=? WHERE record_id=?").run(JSON.stringify({ ...JSON.parse(failed.body_json), status: 'failed' }), trial.id);
     await expect(registerRunRequest(f.db, registered, insert)).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
     await expect(registerRunRequest(f.db, { ...child, flow_id: 'late-child' }, insert)).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
-    await expect(service.start('actor', rev.taskId, { ...request, mode: 'saved', requestId: 'sensitive-legacy' })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
-    await expect(service.start('actor', rev.taskId, { ...request, mode: 'saved', requestId: 'nested-sensitive-legacy', input: { query: 'ordinary', credentials: { value: 'test-only' } } })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
-    for (const key of ['accessKey', 'executionTicket']) await expect(service.start('actor', rev.taskId, { ...request, mode: 'saved', requestId: `sensitive-${key}`, input: { query: 'ordinary', [key]: 'test-only' } })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
-    const bulkInput = { query: 'ordinary text '.repeat(700), items: Array.from({ length: 101 }, (_, i) => i), fields: Object.fromEntries(Array.from({ length: 101 }, (_, i) => [`field${i}`, i])) };
-    const legacy = await service.start('actor', rev.taskId, { ...request, mode: 'saved', requestId: 'legacy', input: bulkInput });
-    expect(legacy.inputDigest).toBe(digestRepairJson(bulkInput));
-    expect(legacy.mode).toBe('saved'); expect(saves).toBe(1);
+    // Browser mode cannot select the mutable saved ref or put sensitive input in chat.
+    const spoofed = await service.start('actor', rev.taskId, { ...request, mode: 'saved', requestId: 'mode-spoof' });
+    expect(spoofed.mode).toBe('pinned'); expect(saves).toBe(2); expect(sends).toBe(2);
+    // Previously persisted saved-mode records remain readable and isolated after upgrading.
+    const legacy = { ...spoofed, mode: 'saved', inputDigest: digestRepairJson(request.input) };
+    f.raw.prepare("UPDATE workflow_repair_release_records SET body_json=? WHERE record_id=?").run(JSON.stringify(legacy), legacy.id);
     await expect(service.resolveRunRequest(legacy.id, { botId: 'bot', ownerId: 'owner' })).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
     const ordinary = { flow_id: 'legacy-root', workflow_id: 'wf-1',
       origin_bot_id: 'bot', origin_session_key: `agent:main:workflow-trial:${legacy.id}` };

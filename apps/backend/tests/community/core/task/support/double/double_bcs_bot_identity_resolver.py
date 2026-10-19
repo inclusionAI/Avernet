@@ -7,4 +7,8 @@ class _DoubleBcsBotIdentityResolver:
         self._owner_id = owner_id
 
     def resolve_many(self, product_bot_ids: list[str]) -> dict[str, str]:
-        return {bot_id: f"{bot_id}:{self._owner_id}" for bot_id in product_bot_ids}
+        """Resolve bare IDs as test data, but preserve full BCS identities."""
+        return {
+            bot_id: bot_id if ":" in bot_id else f"{bot_id}:{self._owner_id}"
+            for bot_id in product_bot_ids
+        }

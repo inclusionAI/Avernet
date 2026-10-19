@@ -24,12 +24,12 @@ def _base64url(payload: bytes) -> str:
 
 
 def _gateway_principal_token(
-    *, user_id: str, username: str, tenant: str, signing_key: str
+    *, user_id: str, username: str, tenant: str, signing_key: str, issuer: str
 ) -> str:
     now = int(time.time())
     header = {"alg": "HS256", "kid": "bare", "typ": "JWT"}
     claims = {
-        "iss": "gateway",
+        "iss": issuer,
         "aud": "bcs",
         "iat": now,
         "exp": now + 60,
@@ -140,6 +140,12 @@ def _parser() -> argparse.ArgumentParser:
     principal.add_argument("--username", required=True)
     principal.add_argument("--tenant", required=True)
     principal.add_argument("--signing-key", required=True)
+    # BCS trusts both issuers: "gateway" is the forwarded shape, "backend" is
+    # the re-addressed copy the friend work-order approval callback arrives
+    # with (which BCS must re-address as iss=bcs before handing it back).
+    principal.add_argument(
+        "--issuer", default="gateway", choices=["gateway", "backend"]
+    )
 
     websocket = commands.add_parser("websocket")
     websocket.add_argument("--url", required=True)
@@ -156,6 +162,7 @@ def main() -> int:
                     username=args.username,
                     tenant=args.tenant,
                     signing_key=args.signing_key,
+                    issuer=args.issuer,
                 )
             )
         else:

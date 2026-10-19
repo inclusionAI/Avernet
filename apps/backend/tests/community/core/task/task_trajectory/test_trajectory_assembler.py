@@ -895,3 +895,95 @@ def test_assemble_events_without_search_material_keep_probe_none():
     ])
     timeline = TaskTrajectoryAssembler(repo).assemble("T-1").timeline
     assert [ev.search_probe for ev in timeline] == [None, None, None, None, None]
+
+
+def test_assemble_search_probe_ignores_non_dict_ext_json():
+    """ext_info 是合法 JSON 但非 dict(数组形态)→ probe None(防御,不抛)。"""
+    repo = _FakeRepo(events=[_event_record(
+        id=1, node_id="n1", action_type="dispatch", action_result="hit_single",
+        ext_info='["not", "a", "dict"]',
+    )])
+    timeline = TaskTrajectoryAssembler(repo).assemble("T-1").timeline
+    assert timeline[0].search_probe is None
+
+
+def test_assemble_projects_relay_dispatch_search_evidence():
+    """hit_single/hit_multi/miss 且 ext_info 带 ``search_evidence``(relay 投递
+    决策证据)→ relay_dispatch 形态 probe(tokens/keywords/candidates 全投影)。"""
+    ev_ext = (
+        '{"schema_v":1,"search_evidence":{"query":"支付失败分析","origin_node_id":"o1",'
+        '"search_result":{"tokens":["支付","失败"],"keyword_hits":[{"k":"支付","bot_ids":["b1"]}],'
+        '"raw_item_count":5,"candidates":[{"bot_id":"b1","bot_name":"Risk Bot","score":0.9}],'
+        '"tokens_ok":true},"candidate_evaluations":[{"bot_id":"b1","score":0.9,"selected":true,'
+        '"decision":"top","score_reason":"满分"}],"miss_reason":"无"}}'
+    )
+    repo = _FakeRepo(events=[_event_record(
+        id=1, node_id="n2", action_type="dispatch", action_result="hit_single",
+        ext_info=ev_ext,
+    )])
+    probe = TaskTrajectoryAssembler(repo).assemble("T-1").timeline[0].search_probe
+    assert probe is not None
+    assert probe["decision_mode"] == "relay_dispatch"
+    assert probe["query"] == "支付失败分析"
+    assert probe["origin_node_id"] == "o1"
+    assert probe["tokens"] == ["支付", "失败"]
+    assert probe["keywords"][0]["bot_ids"] == ["b1"]
+    assert probe["raw_item_count"] == 5
+    assert probe["candidates"][0]["bot_id"] == "b1"
+    assert probe["candidate_evaluations"][0]["score_reason"] == "满分"
+    assert probe["miss_reason"] == "无"
+
+
+def test_assemble_search_event_without_sampling_keeps_probe_none():
+    """relay search 事件(action_result=search)但 ext_info 无 search_sampling
+    键 → 无素材,probe None(缺字段=无信号)。"""
+    repo = _FakeRepo(events=[_event_record(
+        id=1, node_id="n3", action_type="dispatch", action_result="search",
+        ext_info='{"schema_v":1,"candidates":[]}',
+    )])
+    probe = TaskTrajectoryAssembler(repo).assemble("T-1").timeline[0].search_probe
+    assert probe is None
+
+
+def test_assemble_hit_single_without_search_evidence_probe_none():
+    """hit_single 事件行但 ext_info 无 ``search_evidence`` 键 → 无素材,probe None。"""
+    repo = _FakeRepo(events=[_event_record(
+        id=1, node_id="n4", action_type="dispatch", action_result="hit_single",
+        ext_info='{"schema_v":1}',
+    )])
+    probe = TaskTrajectoryAssembler(repo).assemble("T-1").timeline[0].search_probe
+    assert probe is None
+
+def test_assemble_passes_through_harness_engine_prefix_action_types():
+    """harness 模块轨迹事件(2026-10-16)action_type 带 ``harness-engine-`` 前缀
+    (harness-engine-reset/transition/dispatch/submit)——读侧白名单放行原样透传,
+    不当损坏行丢弃;这些事件非 S 码,读时按系统子事件嵌挂最近主事件。"""
+    repo = _FakeRepo(events=[
+        _event_record(id=1, node_id="n1", action_type="S1_CONTEXT",
+                      action_result="completed", ms=_MS_BASE),
+        _event_record(id=2, node_id="n1", action_type="harness-engine-reset",
+                      action_result="sla_timeout", ms=_MS_BASE + 100),
+        _event_record(id=3, node_id="n1", action_type="harness-engine-transition",
+                      action_result="to_hung", ms=_MS_BASE + 200),
+    ])
+    timeline = TaskTrajectoryAssembler(repo).assemble("T-1").timeline
+    assert len(timeline) == 3, "前缀行不得被当损坏行跳过"
+    assert str(getattr(timeline[1].action_type, "value", timeline[1].action_type)) == (
+        "harness-engine-reset"
+    )
+    assert str(getattr(timeline[2].action_type, "value", timeline[2].action_type)) == (
+        "harness-engine-transition"
+    )
+
+def test_assemble_passes_through_system_reject_action_type():
+    """``system`` 类型(2026-10-16:callback/report 拒绝上报的轨迹行)读侧白名单
+    放行原样透传;其非 S 码,读时按系统子事件嵌挂。"""
+    repo = _FakeRepo(events=[
+        _event_record(id=1, node_id="n1", action_type="S1_CONTEXT",
+                      action_result="completed", ms=_MS_BASE),
+        _event_record(id=2, node_id="n1", action_type="system",
+                      action_result="report_rejected", ms=_MS_BASE + 100),
+    ])
+    timeline = TaskTrajectoryAssembler(repo).assemble("T-1").timeline
+    assert len(timeline) == 2, "system 行不得被当损坏行跳过"
+    assert str(getattr(timeline[1].action_type, "value", timeline[1].action_type)) == "system"

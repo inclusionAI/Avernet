@@ -35,3 +35,19 @@ test('保存名称和描述，并保留头像编辑入口', async () => {
   await waitFor(() => expect(onSave).toHaveBeenCalledWith({ name: '新名称', description: '新的描述' }));
   expect(onOpenChange).toHaveBeenCalledWith(false);
 });
+
+test('弹窗未打开或无编辑权限时不挂载头像设置', () => {
+  const bot = mapBotDto({ bot_id: 'bot-1', bot_name: 'Bot', engine: 'openclaw' }).item;
+  const props = {
+    bot,
+    saving: false,
+    onOpenChange: jest.fn(),
+    onSave: jest.fn(async () => undefined),
+    onAvatarSaved: jest.fn(),
+  };
+  const { rerender } = render(<BotBasicInfoDialog {...props} editable open={false} />);
+
+  expect(screen.queryByText('头像设置')).not.toBeInTheDocument();
+  rerender(<BotBasicInfoDialog {...props} editable={false} open />);
+  expect(screen.queryByText('头像设置')).not.toBeInTheDocument();
+});

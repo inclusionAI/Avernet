@@ -21,6 +21,7 @@ from agentclaw.community.core.spaces.models import SpaceType
 from agentclaw.community.core.bot_management.bot_space_service_protocol import (
     BotSpaceServiceProtocol,
 )
+from agentclaw.community.utils.env_utils import get_current_env
 
 
 class BotSpaceService(BotSpaceServiceProtocol):
@@ -42,15 +43,31 @@ class BotSpaceService(BotSpaceServiceProtocol):
         self._bot_quota = bot_quota
 
     def change_space(
-        self, *, bot_id: str, owner_id: str, space_id: int
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        space_id: int,
+        env: str | None = None,
     ) -> BotSpaceAssignmentResult:
-        bot = self._repository.get_by_id_and_owner(bot_id, owner_id)
+        # Normalize once here; every collaborator below receives the
+        # resolved data env so admin cross-env corrections stay on a
+        # single business code path. Order of checks is load-bearing for
+        # unknown env values: the bot lookup fails fast before quota or
+        # write is ever reached.
+        # An explicit env is matched as-is against the ``env`` column —
+        # no family folding (gray->prod, prepub->pre); folding only
+        # applies to the runtime fallback. Invalid values fail closed
+        # at the bot lookup.
+        env = env or get_current_env()
+        bot = self._repository.get_by_id_and_owner(bot_id, owner_id, env=env)
         if bot is None:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
 
         space, _member = self._space_access.require_space_member(
             space_id=space_id,
             user_id=owner_id,
+            env=env,
         )
         if (
             space.space_type is SpaceType.PERSONAL
@@ -91,13 +108,17 @@ class BotSpaceService(BotSpaceServiceProtocol):
                 bot_id=bot_id,
                 owner_id=owner_id,
                 space_id=persisted_space_id,
+                env=env,
             )
         else:
-            with self._bot_quota.guard_add(owner_id=owner_id, space_id=space.id):
+            with self._bot_quota.guard_add(
+                owner_id=owner_id, space_id=space.id, env=env
+            ):
                 updated = self._repository.update_space_by_owner(
                     bot_id=bot_id,
                     owner_id=owner_id,
                     space_id=persisted_space_id,
+                    env=env,
                 )
         if updated is None:
             # The Bot may have been deleted between the read and write. Mask it

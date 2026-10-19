@@ -23,6 +23,7 @@ from agentclaw.community.core.models.mcp import (
     BotMCPInstallation,
     SkillSetMCPServer,
 )
+from agentclaw.community.core.models.skill_installation_source import BotSkillInstallationSource
 from agentclaw.community.core.models.skill import (
     BotSkillInstallation,
     Skill,
@@ -534,6 +535,7 @@ def test_a_bridged_skill_is_active_in_detail_before_any_listing_ran(tmp_path):
         SkillSetSkill,
         SkillSetMCPServer,
         BotSkillInstallation,
+        BotSkillInstallationSource,
         BotMCPInstallation,
         DefaultSkillsetSkillExclusion,
     ):

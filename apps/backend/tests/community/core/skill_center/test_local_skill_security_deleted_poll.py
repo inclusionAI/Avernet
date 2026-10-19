@@ -23,7 +23,7 @@ def _delete_formal_asset(db: _Database, repository: LocalSkillSecurityObservatio
     with avernet_tenant_scope("teamclaw"):
         assert repository.record_asset_deleted(
             env="pre", bot_id="bot-a", owner_id="owner-a",
-            skill_id=42, actor_id="deleter-b", incarnation_id="incarnation-a",
+            skill_id=42, actor_id="deleter-b",
         ) is not None
 
 

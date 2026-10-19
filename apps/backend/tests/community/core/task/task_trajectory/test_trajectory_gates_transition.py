@@ -160,7 +160,7 @@ class _RaisingOnTransitionRepo:
         self.transition_attempts = 0
 
     def insert_event(self, record: TrajectoryEventRecord) -> TrajectoryEventRecord:
-        if record.action_type == "transition":
+        if record.action_type in ("transition", "harness-engine-transition"):
             self.transition_attempts += 1
             raise RuntimeError("simulated TRANSITION insert failure")
         return record
@@ -217,7 +217,8 @@ class _TrajectoryCaseEngine(CentralizedExecutionAdapter):
 
 
 def _transition_records(repo: _TrajRepo) -> list[TrajectoryEventRecord]:
-    return [r for r in repo.records if r.action_type == "transition"]
+    return [r for r in repo.records if r.action_type in ("transition",
+                                              "harness-engine-transition")]
 
 
 def _ext_info(record: TrajectoryEventRecord) -> dict:
@@ -297,7 +298,7 @@ class TestTransitionGateHung:
         trans = _transition_records(repo)
         assert len(trans) == 1, [(r.action_type, r.action_result) for r in repo.records]
         rec = trans[0]
-        assert rec.action_type == "transition"
+        assert rec.action_type == "harness-engine-transition"
         assert rec.action_result == "hung"
         assert rec.action_input is None, "REQ-1: transition action_input=null"
         assert rec.status_from == Status.RUNNING

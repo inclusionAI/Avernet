@@ -69,7 +69,7 @@ describe('Workflow Repair Git-backed AIS execution', () => {
     const baseline = await store.baseline({ workflowId: 'wf', packId: 'pack', version: 4,
       deployNumber: 1, tagName: 'deploy/wf/#1', specJson: f.spec });
     expect(baseline).toMatchObject({ packCommit: f.baseline, releaseRevision: 4,
-      specDigest: createHash('sha256').update(f.spec).digest('hex'), specPath: 'workflows/wf.yaml' });
+      specDigest: createHash('sha256').update(f.spec).digest('hex'), proposalSpecDigest: digestRepairJson({ id: 'wf', nodes: [] }), specPath: 'workflows/wf.yaml' });
 
     writeFileSync(join(f.source, 'workflows/wf.yaml'), 'id: wf\nnodes: [fixed]\n');
     f.git(f.source, 'commit', '-qam', 'candidate');

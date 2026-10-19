@@ -125,7 +125,7 @@ class LocalSkillSecurityTaskReconciler(LifecycleBase):
         self, env: str, handoff: LocalSkillSecurityHandoffAttempt
     ) -> None:
         if (
-            self._repository.get_formal_incarnation_id(
+            self._repository.get_observed_incarnation_id(
                 env=env,
                 bot_id=handoff.bot_id,
                 owner_id=handoff.owner_id,

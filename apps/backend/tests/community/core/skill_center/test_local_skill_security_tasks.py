@@ -422,7 +422,7 @@ def test_deleted_skill_syncs_offline_without_a_live_ac_skill_row():
     with avernet_tenant_scope("teamclaw"):
         identity = repository.record_asset_deleted(
             env="pre", bot_id="bot-a", owner_id="owner-a",
-            skill_id=42, actor_id="deleter-b", incarnation_id="incarnation-a",
+            skill_id=42, actor_id="deleter-b",
         )
         pending = repository.list_pending_sync_identities(
             env="pre", after_provider_skill_id=None, limit=10,
@@ -484,7 +484,7 @@ def test_deleted_skill_syncs_offline_without_a_verified_snapshot():
     with avernet_tenant_scope("teamclaw"):
         identity = repository.record_asset_deleted(
             env="pre", bot_id="bot-a", owner_id="owner-a",
-            skill_id=42, actor_id="deleter-b", incarnation_id="incarnation-a",
+            skill_id=42, actor_id="deleter-b",
         )
     assert identity is not None
     assert identity.sync_target_observation_id is not None
@@ -698,10 +698,10 @@ def test_unreserved_upload_cannot_be_recovered_without_a_scan_row():
         assert repository.list_repairable_handoffs(
             env="pre", after_observation_id=None, limit=100,
         ) == ()
-        incarnation_id = repository.get_formal_incarnation_id(
+        incarnation_id = repository.get_observed_incarnation_id(
             env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=42,
         )
-        assert incarnation_id == "incarnation-a"
+        assert incarnation_id is None
         assert repository.get_current_for_asset(
             env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=42,
             incarnation_id=incarnation_id,

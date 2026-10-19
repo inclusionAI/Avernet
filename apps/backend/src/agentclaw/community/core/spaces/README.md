@@ -18,6 +18,8 @@ Space-specific delegation model is approved.
 purpose: "Own Space lifecycle, membership, roles, and reusable Space authorization decisions."
 provides:
   - SpaceService
+  - SpaceManagementService
+  - SpaceManagementServiceProtocol
   - SpaceMemberService
   - SpaceAccessService
   - SpaceAccessServiceProtocol
@@ -54,3 +56,26 @@ Role and creator invariants are authorization rules. Changes affect every
 Space-scoped feature, not only member management. The tenant column, tenant
 guard registration, and tenant-leading unique keys are one isolation mechanism
 and must change together.
+
+## Script maintenance exception
+
+The ordinary HTTP `/api/spaces` surface uses `SpaceManagementServiceProtocol`.
+Its explicit maintenance policy permits removing or demoting the creator and
+removing the last ADMIN; the normal page/OpenAPI governance remains unchanged.
+The HTTP maintenance adapter requires an authenticated super-admin using the
+existing configured staff whitelist; core remains transport-agnostic.
+Existing creator-based authorization on other entrypoints is not revoked by
+removing that creator's membership here.
+
+Both creation commands accept only `TEAM` (default when omitted), designate the
+initial ADMIN by employee work number, and call Skill Center inside the local
+transaction. The caller is not auto-added. All operations resolve the server
+environment with existing `get_current_env` wiring; requests cannot select it.
+Names retain the existing creator/environment/active-TEAM comparison behavior.
+SC rename/delete, member synchronization, skill handoff and distributed creation
+compensation are deliberately outside this maintenance contract. A failed local
+commit after SC success can leave an external team and must not be blindly retried.
+
+The new HTTP SQLite suites cover all eleven entrypoints, environment boundaries,
+real persistence, atomic rollback and idempotent membership/role operations.
+SQLite does not establish production row-lock concurrency guarantees.

@@ -96,6 +96,8 @@ def test_relay_prompt_pins_acceptance_wire_contract() -> None:
     assert "禁止 PASS/FAIL" in prompt
     assert "{id,passed,summary}" in prompt
     assert "task_acceptance_result 只验收 root task" in prompt
+    assert "不是已接纳事实" in prompt
+    assert "不能据此提交 root task 的 task_acceptance_result" in prompt
     assert "只有 refresh_task_gaps=[] 时才允许非空" in prompt
     assert "收口必须 verdict=DONE 且 gap_items=[]" in prompt
     assert "不得复制节点级 local_acceptance_result" in prompt
@@ -114,14 +116,60 @@ def test_relay_prompt_requires_structured_diagnostic_trace() -> None:
         acceptances=[],
     )
 
-    assert "每个 step.detail 都使用 7 个固定字段" in prompt
+    assert "每次 report 请求都必须带顶层 trace={steps:[...]}" in prompt
+    assert "HTTP 契约允许省略 trace" in prompt
+    assert "本 Runtime 不得省略" in prompt
+    assert "EXECUTION_RESULT.trace.steps 必须按顺序恰好 5 条" in prompt
+    assert "S1_CONTEXT、S2_GAPS、S3_CAPABILITY、S4A_EXECUTION、S4B_REPORT" in prompt
+    assert "PLAN_RESULT.trace.steps 必须按顺序恰好 5 条" in prompt
+    assert (
+        "S5A_REFRESH_GAPS、S5B_PLAN_NEXT_NODE、S5C_SEARCH_CANDIDATES、"
+        in prompt
+    )
+    assert "S5D_SELECT_EXECUTOR、S5E_REPORT_PLAN" in prompt
     assert "action_type、action_input、action_result、status_from、status_to、boost_reason、error_msg" in prompt
-    assert "S1~S4b 的 action_type=execute" in prompt
-    assert "S5.1~S5.5 的 action_type=plan" in prompt
-    assert "S6 由服务端补充 action_type=dispatch" in prompt
-    assert "不要在 detail 中另外展开 input/output/evidence/error 等一级字段" in prompt
-    assert "S4a 记录执行计划、关键工具调用摘要、产物路径" in prompt
-    assert "S5.3 记录搜索词、raw_item_count、候选评分" in prompt
+    assert "允许为 null 的键也必须显式传 null" in prompt
+    assert "action_type 和 action_result 必须是非空字符串" in prompt
+    assert "action_input 必须是字符串或 null" in prompt
+    assert "action_result 记录该步骤的推理输出内容" in prompt
+    assert "必须序列化为紧凑 JSON object" in prompt
+    assert "包含非空 status 字段" in prompt
+    assert "等状态值只能作为 JSON 内的 status 字段" in prompt
+    assert "boost_reason 记录执行过程证据：为什么推进、为什么选择等等维度信息" in prompt
+    assert "结构化内容先序列化为紧凑 JSON 文本" in prompt
+    assert "禁止 step/status/detail 或下挂 detail 的旧结构" in prompt
+    assert "step.detail" not in prompt
+    assert "action_type=execute" not in prompt
+    assert "action_type=plan" not in prompt
+    assert "S6 不进入 report trace" in prompt
+    assert "S4A_EXECUTION 记录执行计划、关键工具调用摘要、产物路径" in prompt
+    assert "S5C_SEARCH_CANDIDATES 记录搜索词、raw_item_count、候选评分" in prompt
     assert "manager-only manager_worker 群" in prompt
+    assert "S5D 选择失败" in prompt
     assert "不放 relay_token、密钥、会话凭证" in prompt
     assert "trace JSON 在构造后固定" in prompt
+
+
+def test_relay_delivery_prompt_uses_required_trace_contract() -> None:
+    from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
+        format_task_node_business_instruction,
+    )
+
+    prompt = format_task_node_business_instruction(
+        task_id="task-1",
+        node_id="node-1",
+        backend="https://backend.example",
+        objective="完成任务",
+        instruction="执行并上报",
+        acceptances=[],
+        relay_execution=True,
+        relay_token="generation-1",
+    )
+
+    assert "每次 report 请求都必须带顶层 trace={steps:[...]}" in prompt
+    assert "HTTP 契约允许省略 trace" in prompt
+    assert "本 Runtime 不得省略" in prompt
+    assert "EXECUTION_RESULT.trace.steps" in prompt
+    assert "PLAN_RESULT.trace.steps" in prompt
+    assert "禁止 step/status/detail 或下挂 detail 的旧结构" in prompt
+    assert "backend_url=https://backend.example" in prompt

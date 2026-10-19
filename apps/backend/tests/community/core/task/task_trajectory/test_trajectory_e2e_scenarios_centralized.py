@@ -460,7 +460,7 @@ class TestHungNoReportReason:
         _run(eng.on_harness(_patch(task_id, child, status=Status.PENDING,
                                    extend_props_patch={"harness_reset": "timeout"})))
         reset_rows = [r for r in repo.list_events_by_task(task_id)
-                      if r.action_type == "reset"]
+                      if r.action_type == "harness-engine-reset"]
         assert reset_rows, "no reset row for the never-reporting node"
         rec = reset_rows[0]
         assert rec.action_result == "sla_timeout"
@@ -485,7 +485,7 @@ class TestHungNoReportReason:
                     pass
         _run(_hung())
         hung = [r for r in repo.list_events_by_task(task_id)
-                if r.action_type == "transition" and r.status_to == Status.HUNG]
+                if r.action_type == "harness-engine-transition" and r.status_to == Status.HUNG]
         assert hung, "no HUNG transition after harness exhaustion"
         assert hung[0].error_type == ReasonCatalog.HUNG.value
         assert hung[0].error_msg == "exec_stuck"  # the hung-with-no-report reason
@@ -593,7 +593,7 @@ class TestCentralizedSearchEmptyDispatch:
         for m in miss_patches:
             _run(eng.on_miss(m))
 
-        rows = [r for r in repo.list_events_by_task(task_id) if r.action_type == "dispatch"]
+        rows = [r for r in repo.list_events_by_task(task_id) if r.action_type == "harness-engine-dispatch"]
         assert rows, "no dispatch row for the miss case"
         rec = rows[0]
         assert rec.action_result == "miss"

@@ -45,6 +45,9 @@ from __future__ import annotations
 
 import inspect
 
+from agentclaw.community.api.space_management_service import SpaceManagementServiceProtocol
+from agentclaw.community.core.spaces.services.space_management_service import SpaceManagementService
+
 from agentclaw.community.api.cron_admin_service import CronAdminServiceProtocol
 from agentclaw.community.core.cron.services.cron_admin import CronAdminService
 
@@ -303,6 +306,10 @@ from agentclaw.community.core.tc_file_upload_integrations.coordinator import (
 from agentclaw.community.core.service_bot.services.service_publication_facade import (
     ServicePublicationFacade,
 )
+from agentclaw.community.api.agentswarm_service import (
+    AgentSwarmServiceProtocol,
+)
+from agentclaw.community.core.agentswarm.service import AgentSwarmService
 from agentclaw.community.core.service_bot.services.service_edit_lock_service import (
     ServiceEditLockService,
 )
@@ -324,7 +331,9 @@ from agentclaw.community.core.acli_clis.service import AcliCliService
 
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
 _PAIRS = [
+    (SpaceManagementServiceProtocol, SpaceManagementService),
     (CronAdminServiceProtocol, CronAdminService),
+    (AgentSwarmServiceProtocol, AgentSwarmService),
     (MCPScopedConfigServiceProtocol, MCPScopedConfigService),
     (FileCountServiceProtocol, FileCountService),
     (BuildIgnoreServiceProtocol, BuildIgnoreService),

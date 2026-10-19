@@ -9,7 +9,7 @@ export const REPAIR_PLAN_VERSION = "ce-repair-plan/v2";
 
 export type RepairTargetEnvironment = "pre" | "prod";
 export type RepairExecutionMode = "OWNER" | "ADMIN_ONCE";
-export type RepairControlPlaneEnvironment = "pre" | "prod";
+export type RepairControlPlaneEnvironment = import("../common/task-control-plane.js").AgentControlPlaneEnvironment;
 export type RepairPhase = "repair_plan" | "repair_apply";
 export type RepairAgentMode = "openclaw" | "cfuse";
 export type RepairCfuseEngine = "cfuse" | "claude-code";

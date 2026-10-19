@@ -356,6 +356,29 @@ class TestUpdateTaskNodeInfo:
         assert node.run_info.extend_props["actual_run_mode"] == "single_bot"
         assert node.run_info.extend_props["relay_token"] == "generation-1"
 
+    def test_relay_root_rejects_bbs_dispatch_write(
+        self, svc: TaskGraphService, graph
+    ):
+        graph.extend_props["execution_config"] = {"orchestration_mode": "relay"}
+        node = svc._get_node(graph, "t1")
+        svc.update_task_node_info(
+            _patch("t1", "t1", status=Status.RUNNING, run_mode="single_bot", assignee="bot-manager")
+        )
+        node.run_info.extend_props["relay_root"] = True
+        node.run_info.extend_props["relay_token"] = "generation-1"
+
+        with pytest.raises(
+            TaskStateError, match="Relay root cannot be dispatched as a BBS baton"
+        ):
+            svc.update_task_node_info(
+                _patch("t1", "t1", status=Status.PENDING, run_mode="bbs", assignee=None)
+            )
+
+        assert node.status == Status.RUNNING
+        assert node.run_info.run_mode == "single_bot"
+        assert node.run_info.assignee == "bot-manager"
+        assert node.run_info.extend_props["relay_token"] == "generation-1"
+
     def test_relay_business_run_mode_change_rotates_execution_generation(
         self, svc: TaskGraphService, graph
     ):
@@ -575,6 +598,23 @@ class TestUpdateTaskGraphInfo:
         svc.update_task_graph_info("t1", TaskGraphPatch(output_patch={"result": "all_done"}))
         g = svc.update_task_graph_info("t1", TaskGraphPatch(output_patch={"extra": "x"}))
         assert g.output == {"result": "all_done", "extra": "x"}  # 浅合并累积
+
+    def test_relay_graph_patch_rejects_root_bbs_target(
+        self, svc: TaskGraphService, graph
+    ):
+        graph.extend_props["execution_config"] = {"orchestration_mode": "relay"}
+        with pytest.raises(
+            TaskStateError, match="Relay BBS target cannot be the root node"
+        ):
+            svc.update_task_graph_info(
+                "t1",
+                TaskGraphPatch(
+                    extend_props_patch={"bbs_mode": True, "bbs_node_id": "t1"}
+                ),
+            )
+
+        assert graph.extend_props.get("bbs_mode") is None
+        assert graph.extend_props.get("bbs_node_id") is None
 
     def test_extend_props_patch_merge(self, svc: TaskGraphService, graph):
         svc.update_task_graph_info("t1", TaskGraphPatch(extend_props_patch={"bbs_mode": True}))

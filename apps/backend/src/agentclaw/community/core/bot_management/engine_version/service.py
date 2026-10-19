@@ -19,7 +19,6 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 )
 from agentclaw.community.core.repository.protocols.bot import (
     BotRepository,
-    TemplateRepository,
 )
 from agentclaw.community.core.repository.protocols.devices import (
     DeviceBindingRepository,
@@ -41,7 +40,6 @@ from .models import (
     EngineReleaseProbe,
 )
 from .release import compare, release_target
-from .policy import has_version_override, restart_restriction
 
 
 from .protocol import EngineVersionServiceProtocol
@@ -52,7 +50,6 @@ class EngineVersionService(EngineVersionServiceProtocol):
         self,
         *,
         bots: BotRepository,
-        templates: TemplateRepository,
         bindings: DeviceBindingRepository,
         resolver: DeviceContextResolver,
         probe: EngineReleaseProbe,
@@ -61,7 +58,6 @@ class EngineVersionService(EngineVersionServiceProtocol):
         config: EngineVersionConfig,
     ) -> None:
         self._bots = bots
-        self._templates = templates
         self._bindings = bindings
         self._resolver = resolver
         self._probe = probe
@@ -98,9 +94,20 @@ class EngineVersionService(EngineVersionServiceProtocol):
             "stage": stage,
             "checked_at": datetime.now(timezone.utc).isoformat(),
         }
+        target = release_target(self._config.target_release)
+        if bot.get("active_engine") not in {"openclaw", "hermes"}:
+            return {
+                "detection": {
+                    "status": "not_applicable",
+                    "reason": "engine_not_supported",
+                },
+                "release_target": target,
+                "comparison": "unknown",
+                "restart_hint": "none",
+                "context": context,
+            }
         detection: Detection = {"status": "read_failed", "reason": "probe_unavailable"}
         current: CurrentVersion = {}
-        provider = ""
         try:
             binding = await asyncio.to_thread(
                 self._bindings.get_active_by_bot_and_owner,
@@ -110,7 +117,6 @@ class EngineVersionService(EngineVersionServiceProtocol):
             if binding is None:
                 detection = {"status": "read_failed", "reason": "device_not_bound"}
             else:
-                provider = binding.device_provider
                 selected = await self._select_instance(binding, device_uuid)
                 if selected:
                     context["instance_id"] = selected
@@ -134,7 +140,6 @@ class EngineVersionService(EngineVersionServiceProtocol):
         except Exception:
             # External errors can contain credentials/addresses. Publish controlled reasons.
             detection = {"status": "read_failed", "reason": "probe_unavailable"}
-        target = release_target(self._config.target_release)
         comparison = compare(detection, current, target)
         result: EngineVersionResult = {
             "detection": detection,
@@ -147,34 +152,6 @@ class EngineVersionService(EngineVersionServiceProtocol):
         }
         if current:
             result["current"] = current
-        try:
-            template_record = await asyncio.to_thread(
-                self._templates.get_by_bot_id, bot_id
-            )
-            template = template_record.get("ext") or {} if template_record else {}
-            if not isinstance(template, dict):
-                raise ValueError("invalid template")
-            if has_version_override(template):
-                result["detection"] = {
-                    "status": "read_failed",
-                    "reason": "source_unverified",
-                }
-                result.pop("current", None)
-                result["comparison"] = "unknown"
-                result["restart_hint"] = "unknown"
-            else:
-                reason = restart_restriction(bot, template, provider=provider)
-                if reason and comparison in {"older", "legacy"}:
-                    result["restart_hint"] = (
-                        "unknown"
-                        if reason == "restart_path_unverified"
-                        else "restricted"
-                    )
-                    result["restart_reason"] = reason
-        except Exception:
-            # Preserve completed version facts when image-policy reads fail.
-            result["restart_hint"] = "unknown"
-            result["restart_reason"] = "policy_unknown"
         return result
 
     async def _select_instance(self, binding, requested: str | None) -> str:

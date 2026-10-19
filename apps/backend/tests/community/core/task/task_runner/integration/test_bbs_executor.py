@@ -83,6 +83,32 @@ def test_task_executor_dispatch_bbs_propagates_graph_lookup_failure():
         _run(exe.dispatch([_node("updated objective")]))
 
 
+def test_task_executor_dispatch_bbs_rejects_relay_root():
+    execution_graph = TaskExecutionGraph(
+        run_id=1,
+        loop_round=1,
+        status=Status.HUNG,
+        tasks=[persisted_root := _node("persisted objective")],
+        task_id="t1",
+    )
+    execution_graph.extend_props["execution_config"] = {"orchestration_mode": "relay"}
+    graph = MagicMock()
+    graph.query_task_dashboard.return_value = execution_graph
+    exe = TaskExecutor(
+        bot=MagicMock(), bcs=MagicMock(), bcn=MagicMock(),
+        formatter=None, context=None, sink=None, poller=None,
+        graph=graph, api_base_url="http://test:8888",
+    )
+
+    with patch(
+        "agentclaw.community.core.task.task_runner.modal_executor.bbs_modal_executor.notify",
+        new_callable=AsyncMock,
+    ) as notify:
+        assert _run(exe.dispatch([_node("updated objective")])) == [False]
+        notify.assert_not_awaited()
+    assert persisted_root.status == Status.HUNG
+
+
 def test_task_executor_dispatch_bbs_returns_false_when_node_missing():
     graph = MagicMock()
     graph.query_task_dashboard.return_value = TaskExecutionGraph(
@@ -100,6 +126,27 @@ def test_task_executor_dispatch_bbs_returns_false_when_node_missing():
     ) as notify:
         assert _run(exe.dispatch([_node("updated objective")])) == [False]
         notify.assert_not_awaited()
+
+
+def test_release_relay_bbs_claim_refuses_root_target():
+    """A corrupted root claim must never be "released" by rewriting the root."""
+    from types import SimpleNamespace
+
+    from agentclaw.community.core.task.task_runner.modal_executor import (
+        bbs_modal_executor as bbs,
+    )
+
+    graph = MagicMock()
+    bbs._release_relay_bbs_claim(
+        graph,
+        "t1",
+        "t1",
+        "relay BBS execution failed",
+        task_context_service=SimpleNamespace(),
+        execution_graph=SimpleNamespace(task_id="t1", tasks=[]),
+    )
+
+    assert graph.report.call_count == 0
 
 
 def test_release_relay_bbs_claim_emits_bbs_released_trajectory():

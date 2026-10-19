@@ -599,13 +599,29 @@ def test_dispatch_single_bot_2_group_bypass_creates_two_person_group():
     assert len(bcs.created) == 1
     req = bcs.created[0]
     assert req.group_strategy == "manager_worker"
-    assert {"bot_uuid": "drv:double-owner", "role": "manager"} in req.participants
+    assert {"bot_uuid": "drv:35983", "role": "manager"} in req.participants
     assert {"bot_uuid": "human_35983", "bot_name": "35983", "role": "observer"} in req.participants
     assert req.routing_policy == {"default_bot_final_delivery": "inject_observers"}
     assert req.originator is None  # manager 作建群 caller,不设人类 originator(BCS 拒人类建群)
     assert poller.registered == []  # 默认 Push(skill_report),singlebot_2_group 不注册 Pull poller
     flip = [p for p in graph.patches if p.run_mode == "coop_group"]
     assert flip and flip[0].extend_props_patch.get("actual_run_mode") == "single_bot"
+
+
+def test_dispatch_single_bot_2_group_preserves_composite_driver_identity():
+    """Relay single-bot handoff must keep the selected ``bot:owner`` identity."""
+    exe, bot, bcs, poller, graph = _exe2()
+
+    ok = _run(exe.dispatch([
+        _node("default:410025", {"assignee_owner_id": "410025"})
+    ]))
+
+    assert ok == [True]
+    assert bot.sent == []
+    req = bcs.created[0]
+    assert req.driver_bot == "default:410025"
+    assert {"bot_uuid": "default:410025", "role": "manager"} in req.participants
+    assert graph.patches
 
 
 def test_dispatch_single_bot_2_group_uses_relay_protocol_in_relay_mode():

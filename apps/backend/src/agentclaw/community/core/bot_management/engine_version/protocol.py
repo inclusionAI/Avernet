@@ -19,6 +19,9 @@ class EngineVersionServiceProtocol(Protocol):
     ) -> EngineVersionResult:
         """Read version facts and advice; no lifecycle, Pin or publication writes.
 
+        OpenClaw/Hermes older or legacy releases recommend restart independently
+        of provider/image policy; same/newer needs none. Other engines return
+        not_applicable with no device access after authorization and stage checks.
         Missing metadata is legacy. Transport/command failures are read_failed.
         Non-draft stages and ambiguous/missing instance selections raise domain
         errors, never selecting another runtime. Admission precedes any probe.

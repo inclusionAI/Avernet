@@ -39,7 +39,9 @@ use crate::plugins::{
     build_registered_leader_election, build_registered_llm_provider,
     build_registered_security_gateway, build_registered_user_directory,
 };
-use bcs_api_http::v1::gateway_principal::{GatewayPrincipalTokenVerifier, GatewayPrincipalTrust};
+use bcs_api_http::v1::gateway_principal::{
+    GatewayPrincipalReSigner, GatewayPrincipalTokenVerifier, GatewayPrincipalTrust,
+};
 use bcs_api_http::v1::openapi::SessionFileUrlProjector;
 use bcs_api_http::{ApiState, PrincipalVerifier};
 use bcs_app_bot::{BotServiceConfig, BotServiceImpl, InternalBotAttributesServiceImpl};
@@ -1406,11 +1408,13 @@ fn build_gateway_principal_verifier_from_process(
     build_gateway_principal_verifier(config, material.as_deref())
 }
 
-async fn build_gateway_principal_verifier_from_secret_access(
+/// Resolve the gateway principal signing-key material: the configured secret
+/// store name, or the `signing_key_env` process fallback. Returned raw —
+/// callers own the empty/blank policy.
+async fn resolve_gateway_principal_material(
     config: &GatewayPrincipalConfig,
     secret_access: Arc<dyn SecretAccessPort>,
-) -> crate::Result<Arc<dyn PrincipalVerifier>> {
-    config.validate().map_err(crate::BcsError::InvalidConfig)?;
+) -> crate::Result<Option<String>> {
     let secret_name = config
         .signing_key_secret
         .as_deref()
@@ -1423,10 +1427,40 @@ async fn build_gateway_principal_verifier_from_secret_access(
                 "Gateway Principal signing key secret '{secret_name}' is required"
             ))
         })?;
-        return build_gateway_principal_verifier(config, Some(record.value.as_str()));
+        return Ok(Some(record.value));
     }
 
-    build_gateway_principal_verifier_from_process(config)
+    Ok(std::env::var(&config.signing_key_env).ok())
+}
+
+async fn build_gateway_principal_verifier_from_secret_access(
+    config: &GatewayPrincipalConfig,
+    secret_access: Arc<dyn SecretAccessPort>,
+) -> crate::Result<Arc<dyn PrincipalVerifier>> {
+    config.validate().map_err(crate::BcsError::InvalidConfig)?;
+    let material = resolve_gateway_principal_material(config, secret_access).await?;
+    build_gateway_principal_verifier(config, material.as_deref())
+}
+
+/// Build the principal re-signer that friend-auth-sync hands the backend a
+/// `bcs`-issued credential with. Same trust the openapi admission gate runs
+/// under — a principal the re-signer verifies is one BCN admits elsewhere —
+/// and the same key resolution the verifier mandates at boot.
+async fn build_gateway_principal_resigner(
+    config: &GatewayPrincipalConfig,
+    secret_access: Arc<dyn SecretAccessPort>,
+) -> crate::Result<GatewayPrincipalReSigner> {
+    config.validate().map_err(crate::BcsError::InvalidConfig)?;
+    let trust = GatewayPrincipalTrust::new(
+        config.issuers.clone(),
+        config.audience.clone(),
+        config.key_id.clone(),
+    )
+    .map_err(|error| crate::BcsError::InvalidConfig(error.to_string()))?;
+    let material = resolve_gateway_principal_material(config, secret_access).await?;
+    let signing_key = gateway_principal_signing_key(material.as_deref())?;
+    GatewayPrincipalReSigner::new(signing_key.as_bytes(), trust)
+        .map_err(|error| crate::BcsError::InvalidConfig(error.to_string()))
 }
 
 const GROUP_SESSION_WS_TEST_SIGNING_KEY: &str = "test-only-group-session-key-at-least-32-bytes";
@@ -2013,6 +2047,26 @@ mod gateway_principal_tests {
             assert!(!message.contains("mist-test-signing-key"));
             panic!("Mist-backed Gateway Principal signing key must be accepted: {message}");
         }
+    }
+
+    #[tokio::test]
+    async fn gateway_principal_resigner_resolves_the_same_secret_key() {
+        let mut config = trust_config();
+        config.signing_key_secret =
+            Some("other_manual_teamclawgw_principal_signing_key".to_string());
+        let access: Arc<dyn bcs_service_api::port::SecretAccessPort> =
+            Arc::new(InMemorySecretAccess::with_entries([(
+                "other_manual_teamclawgw_principal_signing_key",
+                "teamclawgw".to_string(),
+                "mist-test-signing-key".to_string(),
+            )]));
+
+        let resigner = build_gateway_principal_resigner(&config, access).await;
+
+        assert!(
+            resigner.is_ok(),
+            "friend-auth-sync's re-signer needs the same signing key the verifier mandates: {resigner:?}"
+        );
     }
 
     #[test]
@@ -4609,10 +4663,22 @@ impl BcsServer {
             };
         let friend_auth_sync: Arc<dyn bcs_service_api::port::FriendAuthSyncPort> =
             match config.friend_work_order_base_url.as_deref() {
-                Some(base_url) => Arc::new(
-                    HttpFriendAuthSyncPort::new(base_url)
-                        .expect("friend_work_order_base_url must be a valid HTTP(S) URL"),
-                ),
+                Some(base_url) => {
+                    // Each sync call is credentialed: the inbound principal is
+                    // re-addressed as a `bcs`-issued token, because the backend
+                    // only trusts gateway/bcs issuers and answers 401 to the
+                    // iss=backend copy the friend work-order callback sends.
+                    let resigner = build_gateway_principal_resigner(
+                        &config.gateway_principal,
+                        group_session_secret_access.clone(),
+                    )
+                    .await?;
+                    Arc::new(
+                        HttpFriendAuthSyncPort::new(base_url)
+                            .expect("friend_work_order_base_url must be a valid HTTP(S) URL")
+                            .with_principal_resigner(resigner),
+                    )
+                }
                 None => Arc::new(bcs_service_api::port::NoopFriendAuthSyncPort),
             };
         // Edge→legacy friendship reverse sync (coexistence): bots friended via

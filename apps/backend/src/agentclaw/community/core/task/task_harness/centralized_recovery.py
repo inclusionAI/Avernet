@@ -145,6 +145,17 @@ def _reset_elapsed_ms(self, node: "TaskNode | None") -> int | None:
         return None
 
 
+# harness 模块轨迹事件的 action_type 统一前缀(2026-10-16):标记事件由
+# harness 引擎闸门发射(非 bot 上报、非中心化引擎闸门)——读侧 assembler 对
+# 该前缀白名单放行(见 assembler._map_record),嵌套时按系统子事件处理。
+_HARNESS_ENGINE_PREFIX = "harness-engine-"
+
+
+def _harness_action(action: str) -> str:
+    """harness 轨迹 action_type 加统一前缀(如 reset → harness-engine-reset)。"""
+    return _HARNESS_ENGINE_PREFIX + action
+
+
 def _emit_reset_trajectory(
     self,
     task_id: str,
@@ -176,7 +187,7 @@ def _emit_reset_trajectory(
     self._log_trajectory(
         task_id,
         node_id,
-        "reset",  # TrajectoryActionType.RESET.value(TYPE_CHECKING-only enum; emitter accepts str)
+        _harness_action("reset"),  # harness-engine-reset(harness 引擎发射标记)
         action_result=action_result,
         action_input=None,
         ext_info=ext_info,
@@ -215,7 +226,7 @@ def _emit_enter_bbs_trajectory(self, task_id: str, current) -> None:
         self._log_trajectory(
             task_id,
             task_id,  # node_id = 根节点(BBS 广场任务产生的主体)
-            "submit",  # TrajectoryActionType.SUBMIT.value(复用;emitter accepts str)
+            _harness_action("submit"),  # harness-engine-submit(harness 引擎发射标记)
             action_result="enter_bbs",
             action_input=None,
             ext_info={
@@ -420,7 +431,7 @@ async def on_miss(self, patch: TaskNodePatch) -> None:
         self._log_trajectory(
             patch.task_id,
             patch.node_id,
-            "dispatch",  # TrajectoryActionType.DISPATCH.value (TYPE_CHECKING-only enum)
+            _harness_action("dispatch"),  # harness-engine-dispatch(harness 引擎发射标记)
             action_result="miss",
             action_input=None,
             ext_info=_miss_ext_info,
@@ -607,7 +618,7 @@ def _hung_and_escalate(self, task_id: str, node_id: str, hung_reason: str) -> No
     self._log_trajectory(
         task_id,
         node_id,
-        "transition",  # TrajectoryActionType.TRANSITION.value
+        _harness_action("transition"),  # harness-engine-transition(harness 引擎发射标记)
         action_result=self._transition_action_result(Status.HUNG),
         action_input=None,
         error_type=ReasonCatalog.HUNG,

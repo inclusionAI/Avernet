@@ -72,13 +72,10 @@ def can_create_service_with_template(
 ) -> bool:
     """Whether a factory snapshot may create a service bot directly.
 
-    Mirrors the BCN provider-registration surface (``BotService.
-    _should_register_bcn_provider``): declared capabilities are the only truth
-    source — a service create needs provider join allowed; without a
-    capabilities node only the legacy registration bucket
-    (personalCoding / normalCC) covers claude_code templates. Keeps the
-    direct-create allowed surface and the registration surface one surface,
-    so no combination can build silently unbound service bots.
+    Declared capabilities govern service creation eligibility. Without a
+    capabilities node, legacy personalCoding / normalCC templates remain
+    eligible. This policy is separate from lifecycle BCN registration,
+    which is attempted for every created Bot.
     """
     if has_declared_capabilities(template_config):
         return can_join_bcn_as_provider(template_config)

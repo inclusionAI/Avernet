@@ -164,12 +164,20 @@ def test_report_trace_is_recorded_once_and_is_part_of_event_fingerprint() -> Non
     trace = TaskReportTrace(
         steps=[
             TaskReportTraceStep(
-                action_type="execute",
+                action_type="S1_CONTEXT",
                 action_result="context_read",
                 action_input="读取上下文",
             ),
-            TaskReportTraceStep(action_type="plan", action_result="gaps_refreshed"),
-            TaskReportTraceStep(action_type="verify", action_result="accept_pass"),
+            TaskReportTraceStep(
+                action_type="S2_GAPS",
+                action_result="gaps_refreshed",
+                action_input="{\"gaps\":[\"ac3\"]}",
+            ),
+            TaskReportTraceStep(
+                action_type="S3_CAPABILITY",
+                action_result="accept_pass",
+                action_input="{\"actual_goal\":\"完成缺口\"}",
+            ),
         ]
     )
     execution = replace(_execution(), trace=trace)
@@ -184,7 +192,7 @@ def test_report_trace_is_recorded_once_and_is_part_of_event_fingerprint() -> Non
     # trace 属于 event fingerprint:同 event_id 不同 trace → 冲突拒绝
     changed_trace = TaskReportTrace(
         steps=[
-            TaskReportTraceStep(action_type="execute", action_result="changed"),
+            TaskReportTraceStep(action_type="S1_CONTEXT", action_result="changed"),
         ]
     )
     with pytest.raises(TaskStateError, match="conflicts"):
@@ -212,9 +220,9 @@ def test_plan_report_trace_is_recorded_once() -> None:
         trace=TaskReportTrace(
             steps=[
                 TaskReportTraceStep(
-                    action_type="plan",
+                    action_type="S5A_REFRESH_GAPS",
                     action_result="gaps_refreshed",
-                    action_input="S5A_REFRESH_GAPS",
+                    action_input="{\"refresh_task_gaps\":[\"ac3\"]}",
                 ),
             ]
         ),

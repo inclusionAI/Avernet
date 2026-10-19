@@ -1529,3 +1529,52 @@ async def test_tc_bot_tolerates_missing_final_status_and_error_category():
     assert ta.analysis_output == "老协议结论"
     assert ta.final_status is None
     assert ta.error_category is None
+
+
+# ---------------------------------------------------------------------------
+# 覆盖率专项:_derive_boost_reason 的 miss_reason 分支 + _repair 转义对分支
+# ---------------------------------------------------------------------------
+
+
+def test_derive_boost_reason_miss_appends_miss_reason():
+    """MISS 且 rationale 带 miss_reason → boost 文案补 "未选中原因=…"。"""
+    from agentclaw.community.core.task.task_context.task_trajectory.analyzer import (
+        _derive_boost_reason,
+    )
+    timeline = [TrajectoryEvent(
+        task_id="t1", node_id="n1",
+        action_type=TrajectoryActionType.DISPATCH,
+        action_result="miss", attempt=0, gmt_create=1000, gmt_modified=1000,
+        action_input="",
+    )]
+    rationale = {
+        "strategy_name": "search", "decision_mode": "rule",
+        "candidates": [{"bot_id": "b1"}],
+        "join_dropped": [{"bot_id": "b2", "reason": "claim_mode_off"}],
+        "miss_reason": "无匹配候选",
+    }
+
+    def _lookup(_event):
+        return {"_dispatch_rationale": rationale}
+
+    boost = _derive_boost_reason(timeline, _lookup)
+    assert boost is not None
+    assert "未选中原因=无匹配候选" in boost
+    assert "MISS" in boost or "miss" in boost
+    assert "1个(claim_mode_off)" in boost
+
+
+def test_repair_inner_bare_quotes_keeps_legal_escape_pairs():
+    """字符串内的合法反斜杠转义对原样保留,不被二次转义。"""
+    from agentclaw.community.core.task.task_context.task_trajectory.analyzer import (
+        _repair_inner_bare_quotes,
+    )
+    # 源串内嵌 JSON,值里已有合法转义对 \z —— 修复器应成对保留
+    text = '结论: {"a": "路径C:\\z 继续好"} 结束'
+    out = _repair_inner_bare_quotes(text)
+    assert out is not None
+    assert "\\z" in out, "合法转义对应成对保留"
+    # 裸内引号(闭引号后跟字母)仍应补转义
+    text2 = '结论: {"a": "bad "quoted" tail"}'
+    out2 = _repair_inner_bare_quotes(text2)
+    assert out2 is not None and '\\\"' in out2

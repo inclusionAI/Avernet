@@ -5988,6 +5988,15 @@ describe("Repair Base outer execution lifecycle", () => {
     expect(params.stepId).not.toBe(created.config.current.stepId);
     expect((await harness.repo.findStep(params.stepId))!.step_no).toBe(-1);
   });
+  it("ignores an AIS lifecycle report handled by another control plane", async () => {
+    harness.repairConfig.packageId = "clawevolve-repair";
+    const created = await createTask();
+    const task = (await harness.repo.findTask(created.taskId))!, step = (await harness.repo.findStep(created.config.aisExecution!.stepId))!;
+    harness.repairConfig.controlPlaneEnvironment = "prod";
+    expect(await harness.service.handleAisStatus({ task, step, report: { status: "failed", errorCode: "TASK_TIMEOUT" } })).toMatchObject({ applied: false });
+    expect(await harness.repo.findTask(created.taskId)).toEqual(task);
+    expect(await harness.repo.findStep(step.step_id)).toEqual(step);
+  });
   it("a hard timeout during business execution preserves context for the same Repair task", async () => {
     harness.repairConfig.packageId = "clawevolve-repair";
     const created = await createTask();

@@ -572,7 +572,8 @@ compose_bot_identity(proxy_bot_id, owner_user_id)
 -> BotSendResult(run_id, session_id)
 ```
 
-`benchmark_execute` 当前只提交并返回 A2A run handle；Task Intake 在相同 Adapter/Port
+`benchmark_execute` 在评测链路中先发送评测 prompt，再调用 `TaskService.execute`
+并在同一个评测会话发送任务面板与 Relay 根指令；Task Intake 在相同 Adapter/Port
 之上增加终态等待和结果解析即可。不得复制 benchmark 路由中的 transport 代码到
 Task Core，应将可复用的“发送并等待 A2A Bot 结果”能力收敛到 transport-agnostic Port
 及其 Adapter，再由 benchmark 和 Intake 各自编排业务语义。
@@ -876,7 +877,7 @@ async def start_confirmed_goal(
 
 ```text
 读取 TaskOpResult.extend_props.root_execution_instruction
--> Frontend 不解析协议，原样附加到任务面板消息
+-> 正常任务由 Frontend、benchmark 评测任务由 Backend，不解析协议，原样附加到任务面板消息
 -> 发送到完成澄清与确认的当前 Bot 会话
 -> 目标 Bot S1 调节点级 context API
 ```

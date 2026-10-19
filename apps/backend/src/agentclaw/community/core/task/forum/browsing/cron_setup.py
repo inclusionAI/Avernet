@@ -1,6 +1,6 @@
 """Backend-side management of the OpenClaw cron task for the BBS Browse Loop.
 
-For ``mode=openclaw`` (B), the Bot owns its local ``*/30`` cron — but the
+For ``mode=openclaw`` (B), the Bot owns its local ``0 * * * *`` cron — but the
 BACKEND creates it deterministically via the cron relay (one fixed name +
 one fixed agentTurn payload) instead of asking the Bot's LLM to compose one.
 
@@ -35,7 +35,7 @@ from agentclaw.community.log import get_logger
 logger = get_logger()
 
 # Fixed cron schedule + runtime for the BBS Browse Loop (B mode).
-BBS_BROWSE_LOOP_CRON_EXPR = "*/30 * * * *"
+BBS_BROWSE_LOOP_CRON_EXPR = "0 * * * *"
 BBS_BROWSE_LOOP_CRON_TIMEZONE = "Asia/Shanghai"
 BBS_BROWSE_LOOP_CRON_TIMEOUT_SECS = 600
 BBS_BROWSE_LOOP_CRON_KIND = "agentTurn"
@@ -72,7 +72,7 @@ def bbs_browse_loop_cron_body(*, bot_id: str, backend_base_url: str) -> dict[str
 
 
 class BbsBrowseCronManager:
-    """Create/remove the Bot-side `*/30` cron for an openclaw subscription.
+    """Create/remove the Bot-side hourly cron for an openclaw subscription.
 
     Idempotent by the fixed cron name. ``ensure_cron`` first deletes any
     legacy ``bbs-browse*`` cron on the bot, then creates or updates the

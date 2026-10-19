@@ -43,8 +43,11 @@ export type ClawFlowsGitConfig = {
 };
 
 function isolatedGitEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const isolated = Object.fromEntries(
+    Object.entries(env).filter(([key]) => !key.startsWith("GIT_CONFIG_")),
+  ) as NodeJS.ProcessEnv;
   return {
-    ...env,
+    ...isolated,
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_CONFIG_GLOBAL: "/dev/null",
   };
@@ -63,20 +66,21 @@ function git(
         cwd,
         env: options?.env ?? isolatedGitEnvironment(process.env),
         encoding: "utf-8",
+        // execFileSync otherwise forwards stderr before we can sanitize errors.
+        stdio: ["ignore", "pipe", "pipe"],
         timeout: options?.timeout ?? 60_000,
         maxBuffer: options?.maxBuffer ?? 16 * 1024 * 1024,
       },
     );
     return result.trim();
   } catch (err: unknown) {
-    const stderr = typeof (err as { stderr?: string }).stderr === "string"
-      ? (err as { stderr: string }).stderr.trim()
-      : "";
-    const stdout = typeof (err as { stdout?: string }).stdout === "string"
-      ? (err as { stdout: string }).stdout.trim()
-      : "";
-    const message = (err as { message?: string }).message ?? String(err);
-    throw new Error(`git ${args.join(" ")} in ${cwd}: ${stderr || stdout || message}`);
+    // Remote servers and helpers can echo credentials (raw, encoded or Basic
+    // auth). Never include their output, Error.message/cause, or argv in errors.
+    let commandIndex = 0;
+    while (args[commandIndex] === "-c") commandIndex += 2;
+    const status = (err as { status?: unknown } | null)?.status;
+    const detail = typeof status === "number" ? ` (exit ${status})` : "";
+    throw new Error(`git ${args[commandIndex]} failed${detail}`);
   }
 }
 
@@ -86,32 +90,28 @@ function parseDeployTag(tagName: string): { workflowId: string; number: number }
   return { workflowId: match[1], number: parseInt(match[2], 10) };
 }
 
-function getHostFromRemoteUrl(remoteUrl: string): string {
-  const hostMatch = remoteUrl.match(/https?:\/\/([^/]+)/);
-  return hostMatch?.[1] ?? "";
+function httpRemoteUrl(remoteUrl: string): URL | null {
+  // SCP-like SSH paths and local/file paths must not receive HTTP credentials.
+  if (!/^https?:\/\//i.test(remoteUrl)) return null;
+  try {
+    return new URL(remoteUrl);
+  } catch {
+    // URL's own error can contain userinfo from the input.
+    throw new Error("Invalid HTTP Git remote URL");
+  }
 }
 
-async function configureGitCredential(
-  repoDir: string,
-  remoteUrl: string,
-  username: string,
-  token: string | undefined,
-): Promise<void> {
-  const host = getHostFromRemoteUrl(remoteUrl);
-  if (!host || !token) return;
+function credentialHelper(credentialsPath: string): string {
+  // Git runs helpers through a shell even though we use execFileSync. Quote
+  // only the path; the username/token are never part of this command.
+  const quotedPath = "'" + credentialsPath.replace(/'/g, "'\\''") + "'";
+  return `store --file ${quotedPath}`;
+}
 
-  git(repoDir, ["config", "credential.helper", "cache --timeout 86400"]);
-  execFileSync(
-    "git",
-    ["credential", "approve"],
-    {
-      cwd: repoDir,
-      input: `protocol=https\nhost=${host}\nusername=${username}\npassword=${token}\n`,
-      encoding: "utf-8",
-      timeout: 5_000,
-      env: isolatedGitEnvironment(process.env),
-    },
-  );
+async function writeCredentials(authDir: string, contents: string): Promise<string> {
+  const credentialsPath = path.join(authDir, "credentials");
+  await writeFile(credentialsPath, contents, { mode: 0o600, flag: "wx" });
+  return credentialHelper(credentialsPath);
 }
 
 function getTempRepoPrefix(): string {
@@ -143,16 +143,67 @@ export async function cloneClawflows(
 ): Promise<void> {
   if (!config.remoteUrl) throw new Error("clawflowsRemoteUrl is not configured");
 
-  git(repoDir, ["clone", "--quiet", config.remoteUrl, "."], {
-    env: isolatedGitEnvironment(process.env),
-    timeout: 120_000,
-  });
+  const remote = httpRemoteUrl(config.remoteUrl);
+  let cloneUrl = config.remoteUrl;
+  let credentials: string | undefined;
+  if (remote) {
+    // Reject cleartext authentication before creating files or invoking Git.
+    if (remote.protocol !== "https:" && (config.token || remote.password)) {
+      throw new Error("Git credentials require HTTPS");
+    }
+    const token = config.token || decodeURIComponent(remote.password);
+    const username = config.username || decodeURIComponent(remote.username);
+    remote.username = "";
+    remote.password = "";
+    cloneUrl = remote.href;
+    if (token) {
+      // Newlines/NUL cannot be represented by Git's line-based helper protocol.
+      if (/[\r\n\0]/.test(username + token)) {
+        throw new Error("Git credentials contain unsupported control characters");
+      }
+      const credentialUrl = new URL(remote.origin);
+      credentialUrl.username = encodeURIComponent(username);
+      credentialUrl.password = encodeURIComponent(token);
+      credentials = `${credentialUrl.href}\n`;
+    }
+  }
 
-  git(repoDir, ["config", "user.name", config.username || "clawweb"]);
-  git(repoDir, ["config", "user.email", config.email || `${config.username || "clawweb"}@antgroup.com`]);
+  let repoAuthDir: string | undefined;
+  try {
+    let bootstrapAuthDir: string | undefined;
+    try {
+      const cloneOptions: string[] = [];
+      if (credentials) {
+        // Clone requires an empty destination. Use a private sibling directory
+        // so credentials are available BEFORE the very first network request.
+        bootstrapAuthDir = await mkdtemp(path.join(path.dirname(path.resolve(repoDir)), "cw-autoheal-auth-"));
+        const helper = await writeCredentials(bootstrapAuthDir, credentials);
+        cloneOptions.push("-c", "credential.helper=", "-c", `credential.helper=${helper}`);
+      }
+      git(repoDir, [...cloneOptions, "clone", "--quiet", cloneUrl, "."], {
+        env: isolatedGitEnvironment(process.env),
+        timeout: 120_000,
+      });
+      git(repoDir, ["remote", "set-url", "origin", cloneUrl]);
+      git(repoDir, ["config", "user.name", config.username || "clawweb"]);
+      git(repoDir, ["config", "user.email", config.email || `${config.username || "clawweb"}@antgroup.com`]);
 
-  if (config.token) {
-    await configureGitCredential(repoDir, config.remoteUrl, config.username, config.token);
+      if (credentials) {
+        // A new owned directory also lets failure cleanup remove partial writes
+        // without deleting files that predated this operation.
+        repoAuthDir = await mkdtemp(path.join(repoDir, ".git", "cw-autoheal-auth-"));
+        const helper = await writeCredentials(repoAuthDir, credentials);
+        git(repoDir, ["config", "--local", "--replace-all", "credential.helper", ""]);
+        git(repoDir, ["config", "--local", "--add", "credential.helper", helper]);
+      }
+    } finally {
+      if (bootstrapAuthDir) await rm(bootstrapAuthDir, { recursive: true, force: true });
+    }
+  } catch (err) {
+    // Includes clone, config, partial credential writes and bootstrap cleanup
+    // failures. Successful repos retain credentials until removeTempRepo().
+    if (repoAuthDir) await rm(repoAuthDir, { recursive: true, force: true });
+    throw err;
   }
 }
 

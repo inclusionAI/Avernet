@@ -182,9 +182,14 @@ def apply_relay_report(
             if previous["fingerprint"] != digest:
                 raise TaskStateError("relay report conflicts with an accepted event")
             return _result_from_record(previous), None, False
+        has_successor = any(edge.src_id == command.node_id for edge in graph.relations)
         if node.status != Status.RUNNING:
-            raise TaskStateError("relay report requires a RUNNING origin node")
-        if any(edge.src_id == command.node_id for edge in graph.relations):
+            raise TaskStateError(
+                "relay report requires a RUNNING origin node "
+                f"(task_id={command.task_id} node_id={command.node_id} "
+                f"status={node.status.value} handed_off={has_successor})"
+            )
+        if has_successor:
             raise TaskStateError("relay origin has already handed off a successor")
 
         action_events: list[NodeActionEvent] = []

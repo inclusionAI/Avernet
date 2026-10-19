@@ -12,6 +12,7 @@ function render(ui: Parameters<typeof renderView>[0]) {
 }
 const repairApi = vi.hoisted(() => ({
   candidates: vi.fn(),
+  selection: vi.fn(),
   request: vi.fn(),
   item: vi.fn(),
   create: vi.fn(),
@@ -52,6 +53,7 @@ beforeEach(() => {
   Object.values(repairApi).forEach(mock => mock.mockReset())
   repairApi.diff.mockResolvedValue({ files: [], truncated: false })
   repairApi.candidates.mockImplementation(() => new Promise(() => {}))
+  repairApi.selection.mockResolvedValue({ inputDigest: 'c'.repeat(64), items: [repairItem()], missing: [], canEdit: true })
   repairApi.create.mockResolvedValue({ taskId: 'FIX-2', revision: 1 })
   repairApi.task.mockImplementation(() => new Promise(() => {}))
   repairApi.disposition.mockResolvedValue({})

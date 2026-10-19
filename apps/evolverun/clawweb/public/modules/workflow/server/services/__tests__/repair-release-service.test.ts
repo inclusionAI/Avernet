@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { repairFixture } from './repair-batch-fixtures.js';
 import { createRepairWorkbenchService } from '../repair-batch-service.js';
 import { createRepairReleaseService } from '../repair-release-service.js';
+import { createRepairVerificationService } from '../repair-verification-service.js';
 import { digestRepairJson } from '../../contracts/repair-batch.js';
 import { repairReleaseMigrations } from '@avernet/clawweb-shared/server/schema-repair-release';
 import type { RepairPublicationPort } from '../../contracts/repair-release.js';
@@ -50,6 +51,50 @@ describe('reviewed candidate publication', () => {
     expect(f.dispatches).toEqual([]);
     expect((await f.service.detail(f.revision.taskId)).approval).toEqual(approval);
     expect((await f.workbench.task(f.revision.taskId)).latestAttempt.phase).toBe('review');
+  });
+  it('creates the next task on the latest effective baseline and preserves the published task and observation evidence', async () => {
+    const f = await setup();
+    const approval = await f.service.confirm('reviewer', f.revision.taskId, f.request);
+    const deployment = await f.service.deploy('reviewer', f.revision.taskId, { revision: 1, expectedApprovalVersion: approval.stateVersion, requestId: 'publish-fixture' });
+    await f.service.reconcile('reviewer', f.revision.taskId, deployment.id);
+    await f.db.exec('CREATE TABLE flow_runs (flow_id TEXT PRIMARY KEY, workflow_id TEXT, workflow_deploy_number INTEGER, status TEXT, started_at INTEGER, completed_at INTEGER, total_duration_ms INTEGER, total_token_usage INTEGER)');
+    await f.db.exec('CREATE TABLE workflow_healing_diagnoses (flow_id TEXT, workflow_id TEXT, failure_signature TEXT, failure_mode TEXT)');
+    await f.db.exec('CREATE TABLE node_executions (flow_id TEXT, node_id TEXT, status TEXT, started_at INTEGER)');
+    await f.db.exec('CREATE TABLE workflow_deploy_history (workflow_id TEXT, deploy_number INTEGER, is_active INTEGER)');
+    await f.db.exec("INSERT INTO workflow_deploy_history VALUES ('wf-1', 8, 1)");
+    await f.db.exec("INSERT INTO flow_runs VALUES ('observed-run', 'wf-1', 8, 'succeeded', 1, 2, 1, 10)");
+    const verification = createRepairVerificationService(f.db);
+    const item = await f.workbench.item('wf-1', 'item-0');
+    await verification.conclude('reviewer', f.revision.taskId, deployment.id, { requestId: 'observing-fixture', itemId: item.itemId,
+      expectedStateVersion: item.stateVersion, result: 'inconclusive', reason: '样本不足，继续观察', flowIds: ['observed-run'] });
+    const observation = await verification.evidence(f.revision.taskId, deployment.id);
+    const conclusions = await verification.conclusions(f.revision.taskId);
+    expect(observation.samples).toHaveLength(1);
+    expect(conclusions).toHaveLength(1);
+    const oldTask = await f.workbench.task(f.revision.taskId);
+    const oldRelease = await f.service.detail(f.revision.taskId);
+    const oldEvidence = await f.db.query('SELECT * FROM workflow_healing_outcomes');
+    f.items.push({ ...f.items[0], itemId: 'next-item', groupKey: 'next-group', proposalKey: digestRepairJson('next'),
+      sources: [{ kind: 'suggestion', suggestionId: 'next-suggestion', proposalDigest: digestRepairJson('next'), instructionDigest: digestRepairJson('') }] });
+    const inbox = await f.workbench.candidates('wf-1');
+    expect(inbox.items.find(item => item.itemId === 'item-0')?.state).toBe('awaiting_verification');
+    // The active deployment changes after the selection screen has loaded.
+    const latest = { ...f.baseline, activeDeployNumber: 9, releaseRevision: 9, packCommit: 'f'.repeat(40) };
+    f.executionPort.resolveBaseline = async () => latest;
+    const request = { workflowId: 'wf-1', itemIds: ['next-item'], inputDigest: inbox.inputDigest, requestId: 'next-round', instructions: '' };
+    const next = await f.workbench.create('reviewer', request);
+    expect(next.taskId).not.toBe(f.revision.taskId);
+    expect(next.revision).toBe(1);
+    expect(next.input.baseline).toEqual(latest);
+    expect(next.input.parentCandidateCommit).toBeNull();
+    expect(await f.workbench.create('reviewer', request)).toEqual(next);
+    await expect(f.workbench.create('reviewer', { ...request, requestId: 'adopted-again', itemIds: ['item-0'] })).rejects.toMatchObject({ code: 'ITEM_BUSY' });
+    expect(await f.workbench.task(f.revision.taskId)).toEqual(oldTask);
+    expect(await f.service.detail(f.revision.taskId)).toEqual(oldRelease);
+    expect(await verification.evidence(f.revision.taskId, deployment.id)).toEqual(observation);
+    expect(await verification.conclusions(f.revision.taskId)).toEqual(conclusions);
+    const currentEvidence = await f.db.query<{ id: number }>('SELECT * FROM workflow_healing_outcomes');
+    expect(currentEvidence.filter(row => oldEvidence.some(old => old.id === row.id))).toEqual(oldEvidence);
   });
   it('rejects unauthorized targets and stale review versions', async () => {
     const f = await setup();

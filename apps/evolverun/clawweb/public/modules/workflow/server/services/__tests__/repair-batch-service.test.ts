@@ -26,7 +26,8 @@ describe('repair workbench control service', () => {
     const result = await service.candidates('wf-1', { pageSize: 1, previewSignatures: f.items.map((_, i) => `issue-${i}`) });
     expect(Buffer.byteLength(JSON.stringify({ ...result, canEdit: true }))).toBeLessThan(4 * 1024 * 1024);
     expect(result.issuePreviews?.map(preview => preview.total)).toEqual([1, 1, 1, 1, 1, 1, 1]);
-    expect(result.issuePreviews?.some(preview => preview.total > preview.items.length)).toBe(true);
+    expect(result.issuePreviews?.every(preview => preview.total === preview.items.length)).toBe(true);
+    expect(result.issuePreviews?.[0].items[0].readSummary?.originalBytes).toBeGreaterThan(900000);
     expect(result.issuePreviews?.[6].items[0].itemId).toBe('item-6');
     expect((await service.item('wf-1', 'item-5')).proposal).toEqual(f.items[5].proposal);
     expect(result.page.total).toBe(7);
@@ -393,11 +394,13 @@ describe('repair workbench control service', () => {
     expect(f.stops).toHaveLength(1);
     expect(f.stops[0]).toMatchObject({ jobId: 'job-1', identity: { attempt: 1 }, input: created.input });
   });
-  it('reports oversized inbox reads explicitly instead of dropping items', async () => {
+  it('projects oversized inbox reads without dropping items or changing frozen sources', async () => {
     const f = await setup(13);
     f.items.forEach(item => { item.context = { evidence: 'x'.repeat(350000) }; });
-    const outcome = await f.service.candidates('wf-1').then(() => 'unexpected success', error => error.code);
-    expect(outcome).toBe('PAYLOAD_TOO_LARGE');
+    const outcome = await f.service.candidates('wf-1');
+    expect(outcome.items).toHaveLength(13);
+    expect(Buffer.byteLength(JSON.stringify(outcome))).toBeLessThan(64 * 1024);
+    expect((await f.service.item('wf-1', 'item-0')).context?.evidence).toBe(f.items[0].context?.evidence);
     expect(await f.db.query('SELECT * FROM workflow_repair_items')).toHaveLength(0);
   });
   it('recovers a late Git result on the same revision without dispatching another job', async () => {
