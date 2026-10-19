@@ -280,7 +280,18 @@ _story_platform_entrypoints() {
     assert_not_empty "manifest bundle has an asset URL" "$asset_url"
     [[ -n "$asset_url" ]] || return
 
-    api_get "$asset_url"
+    if [[ "$asset_url" =~ ^https?:// ]]; then
+        # Absolute URL (external CDN): api_get would prefix it with the
+        # BCS base URL and return 000. Fetch directly instead.
+        local asset_hdr
+        asset_hdr="$(mktemp)"
+        RESPONSE="$(curl -sS --max-time 60 -D "$asset_hdr" "$asset_url")" \
+            && HTTP_STATUS="$(awk 'NR==1 {print $2}' "$asset_hdr")" \
+            || HTTP_STATUS="000"
+        RESPONSE_HEADERS="$(cat "$asset_hdr")"; rm -f "$asset_hdr"
+    else
+        api_get "$asset_url"
+    fi
     require_status "advertised manifest asset is downloadable" "200" || return
     assert_contains "manifest asset uses JavaScript content type" "$RESPONSE_HEADERS" "application/javascript"
     local asset_bytes
