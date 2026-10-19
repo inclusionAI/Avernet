@@ -4,8 +4,8 @@ import type { PropsWithChildren } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAutoHealSourceRun, type SourceAutoHealRunRequest } from '../useAutoHealSourceRun'
 
-// Exercise the source fetchJson implementation, not a potentially stale dist build.
-vi.mock('@avernet/clawweb-shared/web/api/client', () => import('../../../../../shared/web/api/client'))
+// @avernet/clawweb-shared resolves to source through the vitest alias, so this exercises the
+// source fetchJson implementation rather than a potentially stale dist build.
 
 let queryClient: QueryClient
 const fetchMock = vi.fn<typeof fetch>()

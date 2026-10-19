@@ -5,9 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AutoHealDiagnosisResult, FlowRun } from '@avernet/clawweb-shared/web/types'
 import AutoHealPanel from '../AutoHealPanel'
 
-// Keep React Query and HTTP handling real; resolve shared modules to source.
-vi.mock('@avernet/workflow/web/api/hooks', () => import('../../../../../shared/web/api/hooks'))
-vi.mock('@avernet/clawweb-shared/web/api/client', () => import('../../../../../shared/web/api/client'))
+// Keep React Query and HTTP handling real; @avernet/clawweb-shared resolves to source through
+// the vitest alias, so the re-exported hooks and fetchJson never come from dist.
 
 const run: FlowRun = {
   flow_id: 'source-cron-flow', workflow_id: 'cron-workflow', workflow_title: 'Cron workflow',
