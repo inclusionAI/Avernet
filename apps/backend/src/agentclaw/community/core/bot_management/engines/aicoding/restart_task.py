@@ -294,6 +294,10 @@ class AicodingRestartHandler:
                 from .restart_baas import AicodingBaasRestart
 
                 result = AicodingBaasRestart(service).execute(bot, execution)
+            elif payload["provider"] == "arca":
+                from .restart_arca_lifecycle import AicodingArcaRestart
+
+                result = AicodingArcaRestart(service).execute(bot, execution)
             else:
                 result = service.restart_bot(
                     bot_id=state.bot_id,

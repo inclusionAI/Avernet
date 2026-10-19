@@ -215,6 +215,7 @@ async def test_real_arca_async_backup_precedes_stop_start(lifecycle, engine, bac
     s.binding.update(device_provider="arca", device_props={"sandbox_id": "old-sandbox@8"})
     events = []
     s.service._resolve_restart_target_provider = Mock(return_value="arca")
+    s.service.restart_bot = Mock(side_effect=AssertionError("coding must not use generic restart"))
     provider = s.service._device_service_provider()
     binding_repo = Mock()
     binding_repo.get_by_id.side_effect = lambda _: SimpleNamespace(**deepcopy(s.binding))

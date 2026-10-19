@@ -124,6 +124,12 @@ def setup(monkeypatch):
         self.service.restart_bot(bot_id=execution.state.bot_id,
                                  user_id=execution.state.owner_id,
                                  nick_name=execution.payload.get("nick_name")))
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_arca_lifecycle import AicodingArcaRestart
+
+    monkeypatch.setattr(AicodingArcaRestart, "execute", lambda self, bot, execution:
+        self.service.restart_bot(bot_id=execution.state.bot_id,
+                                 user_id=execution.state.owner_id,
+                                 nick_name=execution.payload.get("nick_name")))
     repo, queue = Repository(), Queue()
     binding = {
         "status": "ACTIVE",

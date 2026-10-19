@@ -1,8 +1,8 @@
 """Ordinary coding BaaS restart orchestration; never called by other engines.
 
 Own the backup -> prepare -> submit boundary rather than inserting callbacks
-into BotService or the BaaS client. Published/Caller and direct-provider paths
-continue to use their existing entrypoints. All shared services are reused as
+into BotService or the BaaS client. Published/Caller paths retain their existing
+entrypoints; bound Arca coding tasks use the sibling Arca lifecycle executor. All shared services are reused as
 collaborators, never monkey-patched or reconfigured per request.
 """
 

@@ -103,7 +103,10 @@ contract are internal to `engines/aicoding/restart_arca.py`. `ArcaRestartBinding
 only reads the captured binding; `ArcaRestartTransport` wraps the existing provider
 hook. The composition root selects that hook, while the shared device router and
 its ordinary APIs stay unchanged. Changes require community strategy tests and OCB
-corp sandbox/tenant execution-versus-release contract tests.
+corp sandbox/tenant execution-versus-release contract tests. Bound coding Arca
+replacement orchestration lives in `engines/aicoding/restart_arca_lifecycle.py`;
+the coding worker invokes it directly, just as it invokes the BaaS executor.
+Shared stop/start primitives and allocation lock handoff remain unchanged.
 
 ## Owner display name on OpenAPI creation
 

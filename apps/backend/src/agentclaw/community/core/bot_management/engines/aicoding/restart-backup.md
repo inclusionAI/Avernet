@@ -53,7 +53,7 @@ The registry adapter is shared dispatch, not an independent lifecycle pipeline.
 ## Existing transports only
 
 - Direct ARCA bindings now attempt the same asynchronous helper protocol before
-  their original stop/start flow. Their physical target comes directly from the
+  their strategy-owned replacement flow, reusing the original stop/start primitives. Their physical target comes directly from the
   old binding's `device_props.sandbox_id`, exactly as destruction does; no BaaS
   inventory or sandbox-list query is involved. The existing provider execution
   hook retains ownership of sandbox suffix/tenant translation.
@@ -191,3 +191,23 @@ Before rollout, verify helper ownership/sudo, committed receipts, durable storag
 and restore into a replacement sandbox in staging. Unit mocks do not prove
 those runtime/storage properties. This change does not install runtime scripts
 or introduce a new restore format.
+
+## Coding Arca replacement orchestration
+
+For admitted, bound Arca coding tasks, `AicodingArcaRestart` in
+`restart_arca_lifecycle.py` owns backup-before-lock ordering, under-lock target
+verification and mutation fencing, service-bot default-image selection, and
+stop/start orchestration. Like `AicodingBaasRestart`, it is invoked directly by
+the coding worker, not through `BotService.restart_bot`. Shared stop/start,
+provider selection and allocation remain existing lifecycle collaborators.
+
+A busy lock causes rescheduling without mutation. A preparation/verification
+failure never releases the old sandbox. Before allocation handoff, exceptions
+release only the acquired lock token; after successful handoff, the allocation
+worker retains lock-release ownership. Ambiguous post-fence failures are observed
+without replaying stop/start. Failed release retains the original restart warning.
+
+Non-coding engines, unbound recovery, and admission's activation-in-progress
+fallback retain the existing generic lifecycle. Direct synchronous callers also
+retain their existing strategy precondition hook. This change does not migrate
+all device lifecycle behavior into coding policy or change published/Caller flows.
