@@ -164,8 +164,9 @@ RegisterPath:
       overridden by request parameters. Provider authorization is checked again
       on redemption. Plugin saves membership without HTTP delivery binding.
       Both modes support static_bearer, provider_admin and agentpass Providers.
-      agentpass-subbots requires bot_slug. BCS stores the original parent as
-      agent_code and composes provider_bot_ref as parent:slug. Existing Providers
+      agentpass-subbots requires a complete provider_bot_ref in parent:slug form.
+      BCS splits the last colon, validates both parts, stores the parent as
+      agent_code and preserves the supplied ref. Existing Providers
       cannot change authentication mode.
       For AgentPass, provider_bot_ref must be the real AgentPass agent code;
       BCS saves it as the Bot's agent_code, as in Provider-admin registration.
@@ -213,21 +214,12 @@ RegisterPath:
       - name: provider_bot_ref
         in: query
         required: false
-        description: Required with a Provider-scoped v2 token; stable identity within the Provider. For AgentPass Providers, supply the real AgentPass agent code, which is also stored as the Bot's agent_code in both modes.
+        description: Required with a Provider-scoped v2 token; stable identity within the Provider. For agentpass, supply the real AgentPass agent code. For agentpass-subbots, supply the client-composed parent:slug ref; the last colon delimits a slug matching [a-z0-9][a-z0-9_-]{0,31}, and only the parent is stored as agent_code. The complete ref is limited to 128 bytes.
         schema:
           type: string
           minLength: 1
           maxLength: 128
           pattern: '^[A-Za-z0-9_.:-]+$'
-      - name: bot_slug
-        in: query
-        required: false
-        description: Required for agentpass-subbots; ignored by other modes. Unique under Provider and parent, including tombstones.
-        schema:
-          type: string
-          minLength: 1
-          maxLength: 32
-          pattern: '^[a-z0-9][a-z0-9_-]{0,31}$'
       - name: webhook_url
         in: query
         required: false

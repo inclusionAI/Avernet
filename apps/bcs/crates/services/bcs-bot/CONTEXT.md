@@ -79,8 +79,9 @@ Duplicate Provider/ref returns Conflict; distinct refs may share a valid registe
 Upstream memberships never create delivery bindings or MOCK credentials through this
 flow. Legacy Provider-admin plugin registration retains its MOCK/preserved-token rules.
 Both flows derive ordinary AgentPass Bot `agent_code` from `provider_bot_ref`.
-Subbot mode preserves the original parent in `agent_code` and composes the stored
-ref with `bot_slug`, in either connection mode, using the loaded Provider config
+Subbot mode parses the last colon in the client-composed `provider_bot_ref`,
+validates both parts and preserves the parent in `agent_code` and the full ref
+unchanged, in either connection mode, using the loaded Provider config
 and existing atomic Bot write. This does not add a repository read or a separate metadata update.
 BotCore, ProviderCore and ProviderManagement synchronize gateway webhook/deletion
 changes through the injected projection. Delivery switching validates affiliation

@@ -140,7 +140,7 @@ class Story:
 
     def run(self):
         suffix = uuid.uuid4().hex[:12]
-        parent = f"poolab-e2e-{suffix}"
+        parent = f"poolab:e2e:{suffix}"
         mode = "agentpass-subbots"
         provider, _ = self.request(
             "create subbots Provider",
@@ -168,16 +168,16 @@ class Story:
             "name": "E2E Reviewer",
             "summary": "Review changes",
             "owners": [self.human],
-            "provider_bot_ref": parent,
-            "bot_slug": "reviewer",
+            "provider_bot_ref": f"{parent}:reviewer",
         }
-        for invalid in (None, "Uppercase", "has:separator", "x" * 33):
+        for invalid in ("parent-without-slug", ":a", f"{parent}:", f"{parent}:Uppercase",
+                        "bad/parent:a", f"{parent}:" + "x" * 33):
             self.request(
-                "reject invalid slug before registration",
+                "reject invalid complete ref before registration",
                 "POST",
                 path + "/bots",
                 400,
-                body={**registration, "bot_slug": invalid},
+                body={**registration, "provider_bot_ref": invalid},
                 token=admin,
             )
         first, _ = self.request(
@@ -194,7 +194,7 @@ class Story:
         self.check(
             first["auth_mode"] == mode
             and first["provider_bot_ref"] == f"{parent}:reviewer",
-            "server composes ref",
+            "server preserves client-composed ref",
         )
         a = {
             "id": first["bot_uuid"],
@@ -219,18 +219,23 @@ class Story:
             "token": scoped["token"],
             "bot-name": "E2E Coder",
             "mode": "plugin",
-            "provider_bot_ref": parent,
-            "bot_slug": "coder",
+            "provider_bot_ref": f"{parent}:coder",
         }
         self.request(
-            "scoped registration requires a slug",
+            "removed bot_slug cannot complete a malformed ref",
             "POST",
             "/register?"
             + urllib.parse.urlencode(
-                {k: v for k, v in query.items() if k != "bot_slug"}
+                {**query, "provider_bot_ref": "parent-without-slug", "bot_slug": "coder"}
             ),
             400,
         )
+        for invalid in (":a", f"{parent}:", f"{parent}:Uppercase", "bad/parent:a"):
+            self.request(
+                "scoped registration rejects malformed complete ref", "POST",
+                "/register?" + urllib.parse.urlencode({**query, "provider_bot_ref": invalid}),
+                400,
+            )
         second, _ = self.request(
             "register coder with scoped credential",
             "POST",
@@ -244,7 +249,7 @@ class Story:
         self.check(
             identity["auth_mode"] == mode
             and identity["provider_bot_ref"] == f"{parent}:coder",
-            "both paths compose the same identity",
+            "both paths parse the same identity",
         )
         b = {
             "id": second["bot_uuid"],
@@ -458,7 +463,7 @@ class Story:
         self.request(
             "scoped path cannot reclaim deleted slug",
             "POST",
-            "/register?" + urllib.parse.urlencode({**query, "bot_slug": "reviewer"}),
+            "/register?" + urllib.parse.urlencode({**query, "provider_bot_ref": f"{parent}:reviewer"}),
             409,
         )
         self.request(

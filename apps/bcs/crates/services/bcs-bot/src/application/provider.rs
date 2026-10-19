@@ -252,7 +252,7 @@ impl ProviderManagementService for ProviderManagement {
         let provider = self.get_active_provider(&command.provider_id, &command.provider_admin_token).await?;
         let config: serde_json::Value = serde_json::from_str(&provider.config).map_err(|_| ServiceError::InternalError("invalid Provider configuration".into()))?;
         let auth_mode: bcs_service_api::ProviderAuthMode = serde_json::from_value(config.pointer("/downlink/auth_mode").cloned().unwrap_or_default()).map_err(|_| ServiceError::InternalError("invalid Provider mode".into()))?;
-        let identity = bcs_service_api::types::provider_identity::normalize(auth_mode, &command.provider_bot_ref, command.bot_slug.as_deref()).map_err(|message| ServiceError::InvalidOperation { message: message.into(), request_id: None })?;
+        let identity = bcs_service_api::types::provider_identity::normalize(auth_mode, &command.provider_bot_ref).map_err(|message| ServiceError::InvalidOperation { message: message.into(), request_id: None })?;
         if auth_mode == bcs_service_api::ProviderAuthMode::AgentPassSubbots { command.bot_uuid = None; command.reject_existing_bot_uuid = false; }
         if command.reject_existing_bot_uuid {
             self.reject_existing_bot_uuid_for_unbound_ref(
@@ -278,7 +278,6 @@ impl ProviderManagementService for ProviderManagement {
                 &command.provider_id,
                 &command.provider_admin_token,
                 RegisterProviderBotParams {
-            bot_slug: command.bot_slug,
                     webhook_url: command.webhook_url,
                     bot_name: command.name,
                     summary: command.summary,

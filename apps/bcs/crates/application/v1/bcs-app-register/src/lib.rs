@@ -87,7 +87,6 @@ impl RegisterServiceImpl {
         let owner = payload.id.strip_prefix("human_")
             .ok_or(ApplicationError::Unauthenticated)?;
         let result = self.provider_registration()?.register(RegisterProviderBot {
-            bot_slug: command.bot_slug.clone(),
             provider_id: payload.provider_id,
             provider_bot_ref: provider_bot_ref.to_string(),
             owner: owner.to_string(),
@@ -482,7 +481,6 @@ mod tests {
             .expect("issue");
         let registration = svc
             .register_bot(RegisterBot {
-            bot_slug: None,
                 mode: None,
                 provider_bot_ref: None,
                 webhook_url: None,
@@ -523,7 +521,6 @@ mod tests {
         for bad in ["not-a-token"] {
             let error = svc
                 .register_bot(RegisterBot {
-            bot_slug: None,
                 mode: None,
                 provider_bot_ref: None,
                 webhook_url: None,
@@ -545,7 +542,6 @@ mod tests {
         );
         let error = svc
             .register_bot(RegisterBot {
-            bot_slug: None,
                 mode: None,
                 provider_bot_ref: None,
                 webhook_url: None,
@@ -564,7 +560,6 @@ mod tests {
         for bad in ["a", too_long.as_str()] {
             let error = svc
                 .register_bot(RegisterBot {
-            bot_slug: None,
                 mode: None,
                 provider_bot_ref: None,
                 webhook_url: None,
@@ -589,7 +584,6 @@ mod tests {
             .expect("issue");
         let error = svc
             .register_bot(RegisterBot {
-            bot_slug: None,
                 mode: None,
                 provider_bot_ref: None,
                 webhook_url: None,
@@ -613,7 +607,6 @@ mod tests {
             .expect("issue");
         let registration = svc
             .register_bot(RegisterBot {
-            bot_slug: None,
                 mode: None,
                 provider_bot_ref: None,
                 webhook_url: None,

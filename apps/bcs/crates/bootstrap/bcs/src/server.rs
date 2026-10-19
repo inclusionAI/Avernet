@@ -6102,7 +6102,6 @@ mod tests {
             .expect("register provider");
         let bot = provider_management
             .register_provider_bot(bcs_service_api::RegisterProviderBotCommand {
-            bot_slug: None,
                 webhook_url: None,
                 provider_id: registered.provider_id.clone(),
                 provider_admin_token: registered.provider_admin_token.clone(),

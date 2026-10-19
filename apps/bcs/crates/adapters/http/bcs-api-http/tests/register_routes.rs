@@ -214,18 +214,17 @@ async fn unknown_and_empty_modes_are_bad_requests_without_echoing_capabilities()
 }
 
 #[tokio::test]
-async fn actual_registration_preserves_parent_and_slug() {
+async fn actual_registration_preserves_complete_ref() {
     // Removed query fields are ignored, including values outside the old enum.
-    for extra in ["", "&expected_auth_mode=not-a-mode"] {
+    for extra in ["", "&expected_auth_mode=not-a-mode&bot_slug=ignored"] {
         let service = fake_service(false);
         let request = bare_request("POST", &format!(
-            "/openapi/v1/collaboration/register?token=registration-token&bot_name=Test&provider_bot_ref=parent&bot_slug=a&mode=plugin{extra}"
+            "/openapi/v1/collaboration/register?token=registration-token&bot_name=Test&provider_bot_ref=parent%3Aa&mode=plugin{extra}"
         ));
         let response = test_router(service.clone()).oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::CREATED);
         let commands = service.registered.lock().unwrap();
         assert_eq!(commands.len(), 1);
-        assert_eq!(commands[0].bot_slug.as_deref(), Some("a"));
-        assert_eq!(commands[0].provider_bot_ref.as_deref(), Some("parent"));
+        assert_eq!(commands[0].provider_bot_ref.as_deref(), Some("parent:a"));
     }
 }

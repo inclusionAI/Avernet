@@ -227,7 +227,6 @@ pub async fn register_provider_bot(
         .services
         .provider_management
         .register_provider_bot(RegisterProviderBotCommand {
-            bot_slug: req.bot_slug,
             webhook_url: req.webhook_url,
             provider_id,
             provider_admin_token,

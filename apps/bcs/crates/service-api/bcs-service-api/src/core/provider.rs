@@ -51,7 +51,6 @@ pub struct RegisteredProvider {
 /// `POST /bots/onboard` flow.
 #[derive(Debug, Clone, Default)]
 pub struct RegisterProviderBotParams {
-    pub bot_slug: Option<String>,
     pub webhook_url: Option<String>,
     pub bot_name: String,
     pub summary: Option<String>,

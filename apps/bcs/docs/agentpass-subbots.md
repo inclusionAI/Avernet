@@ -18,10 +18,18 @@ converted. There is no database migration or new identity table.
 
 For parent `P` and slug `reviewer`, both Provider-admin and scoped registration
 store `agent_code=P` and `provider_bot_ref=P:reviewer`, and issue an independent
-Bot UUID and Static Token. The supplied `provider_bot_ref` is the parent before
-composition. The server requires `bot_slug` in this mode; it must match
-`[a-z0-9][a-z0-9_-]{0,31}`, with a composed reference no longer than 128 bytes.
-Other modes ignore `bot_slug`.
+Bot UUID and Static Token. Clients supply the complete `provider_bot_ref`.
+The server splits at the last `:`, validates the parent against
+`[A-Za-z0-9_.:-]+` and the slug against `[a-z0-9][a-z0-9_-]{0,31}`, and preserves
+the full ref unchanged. The full ref must be at most 128 bytes. A parent may
+itself contain colons: `poolab:region:P:reviewer` resolves to parent
+`poolab:region:P`. Other modes preserve the entire ref without parsing a suffix.
+
+Slug is only a bridge argument/local configuration field. Bridge composes the
+ref before requesting registration; neither registration request accepts a
+separate `bot_slug` or `expected_auth_mode` parameter. Response `bot_slug` remains
+derived metadata, not a database column. Removed/unknown request fields do not
+change the supplied ref; an incomplete ref still fails registration.
 
 Both registration paths validate identity, endpoint readiness and reference
 occupancy during registration. Duplicate references, including deleted Bot
@@ -30,7 +38,7 @@ constraint protects concurrent creation. There is no registration-check API.
 Ordinary capability updates retain the stored parent and cannot replace it.
 
 Registration derives its authentication mode solely from the Provider's stored
-configuration. Clients supply the parent reference and, for subbots, the Bot slug.
+configuration. Clients supply the complete Provider Bot reference.
 Existing scoped/admin registration tokens remain the registration proof. Mandatory
 live AgentPass proof during registration is a separate enhancement. SQL Bot
 creation and gateway projection are atomic; subsequent owner-edge failures still
@@ -99,7 +107,7 @@ restart without restored Provider metadata, affiliated Bots fail closed instead
 of becoming ordinary implicit AgentPass Bots.
 
 Server acceptance covers sibling registration, duplicate/tombstone conflicts,
-Provider-configured identity composition, parent immutability, environment isolation,
+Provider-configured identity parsing, parent immutability, environment isolation,
 ambiguous ordinary identity, Actor mismatch, credential conflicts, terminal
 errors, bounded discovery, signed-state checks, Provider events and WS identity.
 Real enterprise SDK/Poolab traffic is validated in the OCB integration PRs.

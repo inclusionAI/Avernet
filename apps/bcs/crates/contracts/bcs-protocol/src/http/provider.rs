@@ -168,8 +168,6 @@ pub struct PatchProviderRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterProviderBotRequest {
-    #[serde(default)]
-    pub bot_slug: Option<String>,
     pub name: String,
     /// Overrides the Provider's default downlink URL for this Bot.
     #[serde(default)]

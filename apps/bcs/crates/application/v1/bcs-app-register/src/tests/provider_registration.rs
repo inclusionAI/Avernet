@@ -45,7 +45,7 @@ impl ProviderRegistrationCoreService for FakeProviderRegistration {
             return Err(error);
         }
         Ok(ProviderRegistrationResult {
-            identity: bcs_domain::provider_identity::normalize(bcs_domain::ProviderAuthMode::StaticBearer, &command.provider_bot_ref, None).unwrap(),
+            identity: bcs_domain::provider_identity::normalize(bcs_domain::ProviderAuthMode::StaticBearer, &command.provider_bot_ref).unwrap(),
             auth_mode: bcs_domain::ProviderAuthMode::StaticBearer,
             effective_webhook_url: if command.mode == ProviderRegistrationMode::Gateway {
                 Some(
@@ -103,7 +103,6 @@ pub(super) fn scoped_payload() -> ProviderRegisterTokenPayload {
 
 fn register_command(token: String) -> RegisterBot {
     RegisterBot {
-            bot_slug: None,
         token,
         bot_name: "Test Bot".into(),
         mode: None,
@@ -125,27 +124,22 @@ async fn legacy_token_cannot_request_provider_registration_before_bot_writes() {
         .token;
     for command in [
         RegisterBot {
-            bot_slug: None,
             mode: Some(ProviderRegistrationMode::Gateway),
             ..register_command(token.clone())
         },
         RegisterBot {
-            bot_slug: None,
             provider_bot_ref: Some("ref".into()),
             ..register_command(token.clone())
         },
         RegisterBot {
-            bot_slug: None,
             webhook_url: Some("https://example.test/hook".into()),
             ..register_command(token.clone())
         },
         RegisterBot {
-            bot_slug: None,
             provider_bot_ref: Some(String::new()),
             ..register_command(token.clone())
         },
         RegisterBot {
-            bot_slug: None,
             webhook_url: Some(String::new()),
             ..register_command(token.clone())
         },
@@ -243,7 +237,6 @@ async fn scoped_registration_uses_token_identity_and_maps_only_public_result() {
     ] {
         let view = svc
             .register_bot(RegisterBot {
-            bot_slug: None,
                 mode,
                 provider_bot_ref: Some("ref-1".into()),
                 ..register_command(provider_registration_token::encode(
@@ -291,7 +284,6 @@ async fn scoped_registration_requires_nonblank_reference_before_core() {
     for reference in [None, Some(""), Some("  ")] {
         assert!(matches!(
             svc.register_bot(RegisterBot {
-            bot_slug: None,
                 provider_bot_ref: reference.map(str::to_string),
                 ..register_command(provider_registration_token::encode(
                     &scoped_payload(),
@@ -322,7 +314,6 @@ async fn requested_mode_must_be_in_signed_allowlist() {
         };
         assert!(matches!(
             svc.register_bot(RegisterBot {
-            bot_slug: None,
                 mode: requested,
                 provider_bot_ref: Some("ref-1".into()),
                 ..register_command(provider_registration_token::encode(&payload, SECRET))
@@ -364,7 +355,6 @@ async fn expired_or_wrong_secret_tokens_never_reach_core() {
     ] {
         assert!(matches!(
             svc.register_bot(RegisterBot {
-            bot_slug: None,
                 provider_bot_ref: Some("ref-1".into()),
                 ..register_command(token)
             })
@@ -420,7 +410,6 @@ async fn issuance_and_redemption_core_errors_are_typed_and_redacted() {
             let actual = if redeem {
                 *core.register_error.lock().unwrap() = Some(error);
                 svc.register_bot(RegisterBot {
-            bot_slug: None,
                     provider_bot_ref: Some("ref-1".into()),
                     ..register_command(provider_registration_token::encode(
                         &scoped_payload(),
@@ -465,7 +454,6 @@ async fn legacy_token_and_registration_json_keep_exact_old_shape() {
     );
     let result = svc
         .register_bot(RegisterBot {
-            bot_slug: None,
             mode: Some(ProviderRegistrationMode::Plugin),
             ..register_command(view.token)
         })

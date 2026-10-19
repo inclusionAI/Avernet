@@ -141,7 +141,7 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
 
     async fn register(
         &self,
-        mut command: RegisterProviderBot,
+        command: RegisterProviderBot,
     ) -> ServiceResult<ProviderRegistrationResult> {
         let provider = self
             .authorized_provider(&command.provider_id, &command.owner)
@@ -155,8 +155,7 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
             ));
         }
         let downlink = parse_downlink_config(&provider.config)?;
-        let identity = bcs_service_api::types::provider_identity::normalize(downlink.auth_mode, &command.provider_bot_ref, command.bot_slug.as_deref()).map_err(invalid)?;
-        command.provider_bot_ref = identity.provider_bot_ref.clone();
+        let identity = bcs_service_api::types::provider_identity::normalize(downlink.auth_mode, &command.provider_bot_ref).map_err(invalid)?;
         let effective_webhook_url = self.endpoint(&provider, &downlink, &command).await?;
         // No reservation journal and no credential replay. The database enforces
         // Provider/ref uniqueness across both modes, including deleted Bots.

@@ -81,7 +81,6 @@ pub struct UpdateProviderCommand {
 
 #[derive(Debug, Clone)]
 pub struct RegisterProviderBotCommand {
-    pub bot_slug: Option<String>,
     pub webhook_url: Option<String>,
     pub provider_id: String,
     pub provider_admin_token: String,

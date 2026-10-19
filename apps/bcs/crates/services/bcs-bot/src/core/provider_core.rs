@@ -134,7 +134,6 @@ impl ProviderCore {
         params: RegisterProviderBotParams,
     ) -> ServiceResult<(ProviderBotBinding, Option<String>)> {
         let RegisterProviderBotParams {
-            bot_slug,
             webhook_url,
             bot_name,
             summary,
@@ -151,7 +150,7 @@ impl ProviderCore {
             .await?;
         validate_external_id("provider_bot_ref", &provider_bot_ref)?;
         let downlink = parse_downlink_config(&provider.config)?;
-        let identity = bcs_service_api::types::provider_identity::normalize(downlink.auth_mode, &provider_bot_ref, bot_slug.as_deref()).map_err(|message| ServiceError::InvalidOperation { message: message.into(), request_id: None })?;
+        let identity = bcs_service_api::types::provider_identity::normalize(downlink.auth_mode, &provider_bot_ref).map_err(|message| ServiceError::InvalidOperation { message: message.into(), request_id: None })?;
         let provider_bot_ref = identity.provider_bot_ref;
         let bot_uuid = if downlink.auth_mode == ProviderAuthMode::AgentPassSubbots { None } else { bot_uuid };
         let owner = owners.first().map(|owner| owner.trim()).unwrap_or_default();

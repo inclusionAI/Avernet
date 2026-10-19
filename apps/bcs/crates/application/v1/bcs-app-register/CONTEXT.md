@@ -68,7 +68,8 @@ legacy compatibility, mode and credential rejection, and sanitized error mapping
 
 ## Subbot registration
 
-The facade passes optional `bot_slug` into the shared registration core, which
-derives authentication mode from the Provider's stored configuration.
+The facade passes the complete `provider_bot_ref` into the shared registration
+core, which derives authentication mode from the Provider configuration and
+parses the parent/slug only for agentpass-subbots.
 Successful scoped responses add auth mode, original parent and Bot slug metadata.
 Occupancy validation belongs to registration itself; no precheck API is exposed.

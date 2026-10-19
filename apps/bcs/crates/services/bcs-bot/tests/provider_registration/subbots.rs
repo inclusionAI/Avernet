@@ -4,10 +4,10 @@ use super::*;
 async fn two_subbots_register_with_one_parent_and_distinct_refs() {
     let f = fixture_with_auth(None, true, None, ProviderAuthMode::AgentPassSubbots).await;
     let mut a = request(&f, ProviderRegistrationMode::Plugin);
-    a.bot_slug = Some("reviewer".into());
+    a.provider_bot_ref = "stable-ref:reviewer".into();
     let a = f.core.register(a).await.unwrap();
     let mut b = request(&f, ProviderRegistrationMode::Plugin);
-    b.bot_slug = Some("coder".into());
+    b.provider_bot_ref = "stable-ref:coder".into();
     let b = f.core.register(b).await.unwrap();
     assert_ne!(a.record.bot_uuid, b.record.bot_uuid);
     assert_eq!(a.record.provider_bot_ref, "stable-ref:reviewer");
@@ -16,12 +16,12 @@ async fn two_subbots_register_with_one_parent_and_distinct_refs() {
         assert_eq!(f.registry.try_get(id).await.unwrap().unwrap().capabilities.agent_code.as_deref(), Some("stable-ref"));
     }
     let mut duplicate = request(&f, ProviderRegistrationMode::Plugin);
-    duplicate.bot_slug = Some("reviewer".into());
+    duplicate.provider_bot_ref = "stable-ref:reviewer".into();
     assert!(matches!(f.core.register(duplicate).await, Err(ServiceError::Conflict(_))));
 }
 
 #[tokio::test]
-async fn subbot_registration_requires_slug_before_writes() {
+async fn subbot_registration_requires_complete_ref_before_writes() {
     let f = fixture_with_auth(None, true, None, ProviderAuthMode::AgentPassSubbots).await;
     assert!(f.core.register(request(&f, ProviderRegistrationMode::Plugin)).await.is_err());
     assert!(f.membership.get_provider_bot_by_ref(&f.provider, "stable-ref").await.unwrap().is_none());
@@ -31,7 +31,7 @@ async fn subbot_registration_requires_slug_before_writes() {
 async fn subbot_authentication_requires_actor_for_parent_but_not_static_token() {
     let f = fixture_with_auth(None, true, None, ProviderAuthMode::AgentPassSubbots).await;
     let mut a = request(&f, ProviderRegistrationMode::Plugin);
-    a.bot_slug = Some("reviewer".into());
+    a.provider_bot_ref = "stable-ref:reviewer".into();
     let a = f.core.register(a).await.unwrap();
     let core = f.registry.as_ref().clone().with_bot_provider_repo(f.membership.clone());
     assert!(core.resolve_agent_bot("stable-ref", None).await.is_err());
@@ -45,7 +45,7 @@ async fn subbot_authentication_requires_actor_for_parent_but_not_static_token() 
 async fn actual_registration_rejects_duplicate_and_deleted_slug_without_replacing_identity() {
     let f = fixture_with_auth(None, true, None, ProviderAuthMode::AgentPassSubbots).await;
     let mut command = request(&f, ProviderRegistrationMode::Plugin);
-    command.bot_slug = Some("reviewer".into());
+    command.provider_bot_ref = "stable-ref:reviewer".into();
     let first = f.core.register(command.clone()).await.unwrap();
     assert!(matches!(f.core.register(command.clone()).await, Err(ServiceError::Conflict(_))));
     assert_eq!(f.membership.list_provider_bot_metadata(Some(&f.provider)).await.unwrap().len(), 1);
@@ -59,15 +59,16 @@ async fn registration_uses_provider_auth_mode() {
     for mode in [ProviderAuthMode::AgentPass, ProviderAuthMode::AgentPassSubbots] {
         let f = fixture_with_auth(None, true, None, mode).await;
         let mut command = request(&f, ProviderRegistrationMode::Plugin);
-        command.bot_slug = Some("reviewer".into());
+        command.provider_bot_ref = "stable-ref:reviewer".into();
         let result = f.core.register(command).await.unwrap();
         assert_eq!(result.auth_mode, mode);
-        assert_eq!(result.identity.agent_code.as_deref(), Some("stable-ref"));
         if mode == ProviderAuthMode::AgentPassSubbots {
+            assert_eq!(result.identity.agent_code.as_deref(), Some("stable-ref"));
             assert_eq!(result.record.provider_bot_ref, "stable-ref:reviewer");
             assert_eq!(result.identity.bot_slug.as_deref(), Some("reviewer"));
         } else {
-            assert_eq!(result.record.provider_bot_ref, "stable-ref");
+            assert_eq!(result.record.provider_bot_ref, "stable-ref:reviewer");
+            assert_eq!(result.identity.agent_code.as_deref(), Some("stable-ref:reviewer"));
             assert_eq!(result.identity.bot_slug, None);
         }
     }
@@ -77,7 +78,7 @@ async fn registration_uses_provider_auth_mode() {
 async fn concurrent_subbot_registration_of_same_slug_has_one_winner() {
     let f = fixture_with_auth(None, true, None, ProviderAuthMode::AgentPassSubbots).await;
     let mut command = request(&f, ProviderRegistrationMode::Plugin);
-    command.bot_slug = Some("reviewer".into());
+    command.provider_bot_ref = "stable-ref:reviewer".into();
     let (a, b) = tokio::join!(f.core.register(command.clone()), f.core.register(command));
     assert_eq!(usize::from(a.is_ok()) + usize::from(b.is_ok()), 1);
     assert!(matches!(a.err().or_else(|| b.err()), Some(ServiceError::Conflict(_))));
@@ -92,7 +93,7 @@ async fn provider_admin_subbots_ignore_legacy_ref_as_uuid_and_preserve_parent_on
     let mut ids = vec![];
     for slug in ["reviewer", "coder"] {
         let params = bcs_service_api::RegisterProviderBotParams {
-            bot_name: slug.into(), owners: vec!["alice".into()], provider_bot_ref: "parent".into(), bot_slug: Some(slug.into()),
+            bot_name: slug.into(), owners: vec!["alice".into()], provider_bot_ref: format!("parent:{slug}"),
             bot_uuid: Some("parent".into()), connection_mode: bcs_service_api::ProviderBotConnectionMode::Plugin, ..Default::default()
         };
         let (binding, token) = admin.register_provider_bot_with_bot_uuid(&f.provider, &token, params).await.unwrap();
@@ -111,7 +112,7 @@ async fn provider_admin_subbots_ignore_legacy_ref_as_uuid_and_preserve_parent_on
 async fn provider_callback_uses_actor_and_allows_subbot_static_token() {
     let f = fixture_with_auth(Some("https://example.test/hook"), true, None, ProviderAuthMode::AgentPassSubbots).await;
     let mut command = request(&f, ProviderRegistrationMode::Gateway);
-    command.bot_slug = Some("reviewer".into());
+    command.provider_bot_ref = "stable-ref:reviewer".into();
     let bot = f.core.register(command).await.unwrap();
     let registry = Arc::new(f.registry.as_ref().clone().with_bot_provider_repo(f.membership.clone()));
     let admin = ProviderCore::new(f.providers.clone(), f.providers.clone(), f.providers.clone(), registry).with_bot_provider_repo(f.membership.clone());
@@ -125,7 +126,7 @@ async fn provider_callback_uses_actor_and_allows_subbot_static_token() {
 async fn generic_writes_cannot_reparent_a_provider_bot() {
     let f = fixture_with_auth(None, true, None, ProviderAuthMode::AgentPassSubbots).await;
     let mut command = request(&f, ProviderRegistrationMode::Plugin);
-    command.bot_slug = Some("a".into());
+    command.provider_bot_ref = "stable-ref:a".into();
     let bot = f.core.register(command).await.unwrap();
     let core = f.registry.as_ref().clone().with_bot_provider_repo(f.membership.clone());
     let mut caps = core.try_get(&bot.record.bot_uuid).await.unwrap().unwrap().capabilities;

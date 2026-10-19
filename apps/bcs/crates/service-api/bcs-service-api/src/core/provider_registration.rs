@@ -7,7 +7,6 @@ use async_trait::async_trait;
 
 #[derive(Clone)]
 pub struct RegisterProviderBot {
-    pub bot_slug: Option<String>,
     pub provider_id: String,
     /// Stable Provider identity. For AgentPass, the real agent code; persisted
     /// as BotCapabilities.agent_code in both plugin and gateway modes.
