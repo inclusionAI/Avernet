@@ -26,9 +26,7 @@ def _default(value, fallback):
     return value if value not in (None, "") else fallback
 
 
-def _bot_env(value: str | None) -> str:
-    if value:
-        return value
+def _bot_env() -> str:
     runtime = os.getenv("SERVER_ENV", "dev").lower()
     return "pre" if runtime in ("prepub", "pre") else runtime
 
@@ -91,7 +89,7 @@ class PluginContainer(containers.DeclarativeContainer):
     bot_registry = providers.Factory(
         BotRepository,
         db=database,
-        env=providers.Callable(_bot_env, config.bot_registry.env),
+        env=providers.Callable(_bot_env),
     )
     app_registry = providers.Factory(AppRepository, db=database)
     access_key_registry = providers.Factory(AccessKeyRepository, db=database)

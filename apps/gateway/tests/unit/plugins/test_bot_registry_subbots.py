@@ -1,6 +1,7 @@
 import pytest
 
 from gateway.community.bootstrap import initialize_database
+from gateway.community.bootstrap.plugins._plugin_core import PluginContainer
 from gateway.community.core.bot import BotRepository, BotRow
 from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 from gateway.community.spi.auth import AuthError
@@ -21,6 +22,20 @@ def db_with_bots():
                 )
             )
     return db
+
+
+async def test_registry_uses_runtime_environment_despite_stale_config(monkeypatch):
+    monkeypatch.setenv("SERVER_ENV", "prod")
+    container = PluginContainer()
+    container.config.bot_registry.env.from_value("dev")
+    with container.database.override(db_with_bots()):
+        repo = container.bot_registry()
+
+    bot = await repo.find_bot_by_token("token_3")
+    assert bot is not None
+    assert bot.bot_uuid == "bot_3"
+    assert await repo.find_bot_by_token("token_1") is None
+    assert (await repo.find_bot_by_agent_code("parent")).bot_uuid == "bot_3"
 
 
 async def test_parent_lookup_rejects_ambiguous_default_bots():

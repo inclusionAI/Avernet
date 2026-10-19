@@ -13,8 +13,12 @@ from gateway.community.spi.authn import CredentialBundle
 )
 def test_registry_environment_matches_bcn(monkeypatch, runtime, expected):
     monkeypatch.setenv("SERVER_ENV", runtime)
-    assert _bot_env(None) == expected
-    assert _bot_env("custom") == "custom"
+    assert _bot_env() == expected
+
+
+def test_registry_environment_defaults_to_dev(monkeypatch):
+    monkeypatch.delenv("SERVER_ENV", raising=False)
+    assert _bot_env() == "dev"
 
 
 def test_conflicting_dedicated_bot_tokens_are_rejected():
