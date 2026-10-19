@@ -2,13 +2,18 @@ import { randomUUID } from 'node:crypto';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { RepairBatchError, digestRepairJson, type RepairRevision } from '../contracts/repair-batch.js';
 import type { RepairWorkbenchService } from '../contracts/repair-workbench.js';
-import type { RepairTrial, RepairTrialCandidate, RepairTrialPort, RepairTrialRequest } from '../contracts/repair-trial.js';
+import type { RepairTrial, RepairTrialCandidate, RepairTrialPort, RepairTrialRequest, RepairTrialStartFailure } from '../contracts/repair-trial.js';
 import { RepairReleaseRepository } from '../repositories/repair-release-repository.js';
 import { RepairBatchRepository } from '../repositories/repair-batch-repository.js';
 import { redactTrial, redactTrialInput, trialSensitiveValues, validateTrialInput } from './repair-trial-input.js';
 import { normalizeTrialInputDefinition } from '../contracts/repair-trial-input-definition.js';
 
 function conflict(message: string): never { throw new RepairBatchError('STATE_CONFLICT', message); }
+const startFailureMessages = {
+  REQUEST_READ_FAILED: 'Bot 无法读取本次试跑请求，工作流未启动',
+  REQUEST_INVALID: 'Bot 收到的试跑请求内容不完整或不匹配，工作流未启动',
+  START_FAILED: '候选准备或运行登记失败，请查看 Bot 原试跑会话',
+};
 function candidate(workflowId: string, taskId: string, revision: RepairRevision): RepairTrialCandidate {
   const { candidateCommit, packDigest } = revision.draft ?? {};
   if (typeof candidateCommit !== 'string' || !/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(candidateCommit)
@@ -127,6 +132,26 @@ export function createRepairTrialService(input: { db: IDatabase; workbench: Repa
       return { requestId: request.id, purpose: 'trial' as const, workflowId: request.workflowId, packId: request.options.packId,
         candidateRef: request.options.candidateRef, candidateCommit: request.candidateCommit, packDigest: request.packDigest,
         input: request.input, inputDigest: request.inputDigest };
+    },
+    async reportStartFailure(feedback: RepairTrialStartFailure) {
+      if (!Object.hasOwn(startFailureMessages, feedback.code)
+        || feedback.httpStatus !== undefined && feedback.httpStatus !== 0 && (!Number.isInteger(feedback.httpStatus) || feedback.httpStatus < 400 || feedback.httpStatus > 599)) {
+        throw new RepairBatchError('INVALID_INPUT', '试跑失败原因无效');
+      }
+      const before = await find(feedback.requestId);
+      if (feedback.botId !== before.target.botId || feedback.ownerId !== before.target.ownerId) conflict('运行请求的 Bot 身份不匹配');
+      await authorized(before);
+      const result = await db.transaction(async tx => {
+        const locked = await lock(tx, before.taskId), latest = await find(before.id, tx);
+        // Native registration wins: late/duplicate startup feedback cannot overwrite a run.
+        if (latest.flowId || latest.status === 'failed' || latest.status === 'succeeded') return latest;
+        const error = startFailureMessages[feedback.code as keyof typeof startFailureMessages]
+          + (feedback.httpStatus ? `（HTTP ${feedback.httpStatus}）` : '');
+        const failed = { ...latest, status: 'failed' as const, error, stateVersion: latest.stateVersion + 1, updatedAtMs: Date.now() };
+        await locked.records.update(failed, latest.stateVersion);
+        return failed;
+      });
+      return { requestId: result.id, flowId: result.flowId, status: result.status };
     },
   };
 }

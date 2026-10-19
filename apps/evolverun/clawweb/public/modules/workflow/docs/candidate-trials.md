@@ -4,6 +4,27 @@ The review page offers **先试跑** and **发布此版本**. The parameter form
 
 ## Existing execution path
 
+Request correlation uses the same UUID from delivery through native run registration:
+the Bot posts its actual `flowId` with `run_request_id` to the existing `/api/internal/runs`
+endpoint. There is no guessed/latest-run association or synthetic flow ID.
+
+Before a run exists, an updated Bot can post startup failure feedback to
+`POST /api/internal/run-requests/failures` behind the Host's existing signature middleware.
+The body is `{ requestId, botId, ownerId, code, httpStatus? }`, where `code` is
+`REQUEST_READ_FAILED`, `REQUEST_INVALID`, or `START_FAILED`; `httpStatus` is zero
+for transport failure or an integer from 400 to 599. No raw error, response, input,
+or credential is accepted for display. The target Bot identity and current execution
+authorization are checked before updating the existing trial record. Repeated feedback
+is idempotent; native registration wins over late startup feedback. This adds no table,
+request claim, dispatch retry, or workflow publication step.
+
+ClawMind must use its ordinary internal API transport (routing, signature and dynamic
+IAM identity) for both reads and feedback, not its external web-link URL. Deploy the
+updated workflow module before upgrading the plugin. Older plugins remain compatible
+but cannot report startup failure. If the API itself is unreachable, feedback cannot
+be persisted; the original Bot session remains the diagnostic source. No business
+command is automatically resent in that case.
+
 Workflow owns the review APIs and frozen run request. OCB supplies its existing Git store, Bot directory, permission checks and runtime delivery port. Updated ClawMind executes `/workflow run request://<UUID> --remote` through the ordinary run controller. There is no separate trial command, MCP tool, worker claim, completion receipt or local one-shot fence.
 
 `GET /api/workflow-repairs/:taskId/trials/options?revision=N` returns the exact candidate's normalized input definition/digest and authorized production OpenClaw Bots. JSON Schema, the existing field-map schema, independent `input.requiredParams`/root `requiredParams`, and root `params` defaults share one normalization contract. Missing definitions use an ordinary key/value form; explicit empty definitions show no parameters. Loading and read/format failure have separate states and retry. JSON is an optional advanced editor. Defaults initialize once per candidate and closing/reopening preserves edits. `POST /:taskId/trials` validates revision/stateVersion, inputSchemaDigest, target and bounded typed JSON input, then freezes the server-selected commit/tree, Pack, input and Bot identity. Exact-mode parameters never enter the command, message or URL. Ajv does not coerce values, add defaults or load external schemas. History and result previews redact sensitive keys/input values and cap output; nodes/logs use the existing run page.
