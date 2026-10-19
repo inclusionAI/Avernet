@@ -24,7 +24,9 @@ files, excluding tests, fixtures and generated output. Shared code executed only
 through another package is not counted as that package's own coverage. Incomplete
 coverage is labelled explicitly; do not interpret it as complete application coverage.
 
-GitHub publishes the summary and uploads reports even after test failure. Boundary, install, build, check and test failures are blocking. No coverage threshold is introduced. Existing business test failures
+GitHub publishes the summary and uploads reports even after test failure. Only
+the added test step is advisory during observation; install/build/check remain
+required. No coverage threshold is introduced. Existing business test failures
 must be tracked separately; this change does not repair or skip them.
 
 ## Local entry
@@ -47,14 +49,3 @@ To test the internal composition, pass the OCB repository path:
 
 This uses the same local symlink association as `start-clawweb.sh`; it does not
 checkout, copy, or switch either repository.
-
-## Package boundaries
-
-The existing `ci:check` command first validates selected public package boundaries,
-then runs their existing checks. It scans source including tests and mock
-factories: relative references must stay inside their owning package, and
-cross-package code must use public exports. The helper needs only Node and
-package roots; public CI does not require OCB checkout. Regression tests are
-included in the existing `run-tests.test.mjs` suite. No separate workflow step,
-command, or test entry is needed. The internal composition/deployment gate remains
-unchanged.

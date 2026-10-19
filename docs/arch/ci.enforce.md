@@ -44,29 +44,6 @@ The repository must define and enforce allowed dependency directions between the
 - adapters must not select implementations directly except in approved composition roots
 - plugin implementations must not depend directly on sibling plugin implementations unless explicitly allowed
 
-### ClawWeb package-boundary gate
-
-ClawWeb's existing `npm run ci:check` entry (`scripts/ci/run-tests.mjs check`)
-must validate selected public package boundaries before invoking their existing
-checks. Keep the workflow's existing script calls; do not add a parallel CI entry.
-Boundary regression tests belong to the existing `scripts/ci/run-tests.test.mjs`
-suite. The checker requires only Node and the selected package roots; no OCB
-checkout is required for public CI. Internal-only checks retain their scope and
-the existing internal composition/deployment gate.
-
-Scan every TS/JS source under public package roots, including `__tests__` and test
-helpers. Reject relative references outside the owning package and public imports
-of `@ocb/*`; resolve existing symlink ancestors even for missing target files.
-Only generated output (`dist`, `dist-server`) and `node_modules` are skipped.
-The check covers literal import/from/import(), require and vi/jest mock/actual
-references; it is a structural source check, not a complete runtime import graph.
-
-The internal deployment `verify_clawweb_workspace.mjs` remains mandatory for the
-public/internal composition. Public CI enforces the common public-package rule;
-it does not claim to validate internal packages. Changes to either check's common
-policy must be reviewed for consistency. Never skip test directories or relax a
-check solely to make a deployment pass.
-
 ### Recommended tooling
 - Python: `import-linter`, `deptry`, AST checks
 - Go: custom package dependency checks, `golangci-lint` rules
