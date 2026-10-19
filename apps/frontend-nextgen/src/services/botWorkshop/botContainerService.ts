@@ -51,8 +51,9 @@ function mapSnapshot(dto: BotContainerListDto): ContainerSnapshot {
 }
 
 export const botContainerService = {
-  async list(botId: string, userId: string): Promise<ContainerSnapshot> {
-    const response = await listBotContainers(botId, userId);
+  /** ownerId: Bot 拥有者工号,分享/协作场景按拥有者圈定查找范围(自己的 Bot 传本人同值)。 */
+  async list(botId: string, userId: string, ownerId?: string): Promise<ContainerSnapshot> {
+    const response = await listBotContainers(botId, userId, ownerId);
     if (!response.data) throw new Error('容器实例数据不可用');
     return mapSnapshot(response.data);
   },
