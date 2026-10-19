@@ -1,6 +1,17 @@
 import { expect, it } from 'vitest'
 import { repairActionFailure } from './repair-action-error'
 
+it('does not send a confirmed pre-creation baseline rejection into the check/retry loop', () => {
+  const result = repairActionFailure({ status: 503, body: JSON.stringify({ code: 'CAPABILITY_UNAVAILABLE',
+    reasonCode: 'BASELINE_READ_FAILED', stage: 'baseline', outcome: 'not_created', error: 'private git diagnostic' }) })
+  expect(result.action).toBeNull()
+  expect(result.message).toContain('未创建')
+  expect(result.message).not.toContain('private')
+  const unknown = repairActionFailure({ status: 500, body: JSON.stringify({ reasonCode: 'BASELINE_READ_FAILED' }) })
+  expect(unknown.action).toBe('refresh-task')
+  expect(unknown.message).not.toContain('未创建')
+})
+
 it.each([
   [{ code: 'STATE_CONFLICT', recoveryAction: 'retry-result', reasonCode: 'RESULT_READ_UNKNOWN' }, 'retry-result', '核对原结果'],
   [{ code: 'STATE_CONFLICT', recoveryAction: 'retry-result', reasonCode: 'EXECUTION_RUNNING' }, 'retry-result', '上一轮仍在执行'],

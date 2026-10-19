@@ -423,6 +423,18 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     if (this.execution && await this.requireStoppedAttempt(await this.task(taskId), actorId)) fail('STATE_CONFLICT', 'The original candidate was recovered; refresh it before submitting feedback', { recoveryAction: 'refresh-task', reasonCode: 'RESULT_RECOVERED' });
     return this.generate(actorId, taskId, { ...base, expectedAttemptRevision: raw.expectedAttemptRevision, parentCandidateCommit: raw.parentCandidateCommit, feedback: raw.feedback });
   }
+  /** Only used before the new revision transaction/dispatch, never for an unknown write result. */
+  private async generationBaseline(workflowId: string) {
+    try { return await this.execution!.resolveBaseline(workflowId); }
+    catch (error) {
+      if (error instanceof RepairBatchError) throw error;
+      // Preserve the low-level diagnostic for server logs without exposing Git/credentials to clients.
+      console.error('[workflow-repair] baseline read failed', { workflowId, error });
+      fail('CAPABILITY_UNAVAILABLE', '无法读取当前生效版本的部署包，本次未创建优化任务', {
+        reasonCode: 'BASELINE_READ_FAILED', stage: 'baseline', outcome: 'not_created',
+      });
+    }
+  }
   private async generate(actorId: string, taskId: string | null, request: RepairSelectionRequest | RepairFeedbackRequest): Promise<RepairRevision> {
     if (!this.execution) fail('CAPABILITY_UNAVAILABLE', 'Repair generation provider is unavailable');
     const digest = digestRepairJson({ actorId, taskId, request });
@@ -430,8 +442,8 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     const prior = await serial(this.db, () => new RepairBatchRepository(this.db).findRequest(request.workflowId, request.requestId, digest));
     let revision = prior;
     if (!revision) {
-      const baseline = taskId ? (await this.task(taskId)).latestAttempt.input.baseline : await this.execution.resolveBaseline(request.workflowId);
-      if (taskId && request.automation?.roundId && canonicalRepairJson(await this.execution.resolveBaseline(request.workflowId)) !== canonicalRepairJson(baseline)) fail('STATE_CONFLICT', '自动优化的生效基线已变化，请重新评估', { reasonCode: 'BASELINE_STALE' });
+      const baseline = taskId ? (await this.task(taskId)).latestAttempt.input.baseline : await this.generationBaseline(request.workflowId);
+      if (taskId && request.automation?.roundId && canonicalRepairJson(await this.generationBaseline(request.workflowId)) !== canonicalRepairJson(baseline)) fail('STATE_CONFLICT', '自动优化的生效基线已变化，请重新评估', { reasonCode: 'BASELINE_STALE' });
       if (baseline.workflowId !== request.workflowId) fail('CONTENT_MISMATCH', 'Provider resolved a different workflow');
       const selected = request.selection ? await serial(this.db, async () => {
         const snapshot = await this.snapshot(this.db, request.workflowId, 'full', { itemIds: request.itemIds, includeHistorical: request.includeHistorical });
@@ -442,7 +454,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       const integrated = this.proposals ? await this.proposals.prepare(request.workflowId, selected, baseline) : { instructions: '', integration: undefined };
       const frozenInstructions = [request.instructions, integrated.instructions].filter(Boolean).join('\n\n');
       if (frozenInstructions.length > MAX_INSTRUCTIONS_CHARS) fail('PAYLOAD_TOO_LARGE', '整合目标与说明过长，请缩小本次选择范围');
-      if (!taskId && canonicalRepairJson(await this.execution.resolveBaseline(request.workflowId)) !== canonicalRepairJson(baseline)) fail('STATE_CONFLICT', '生效版本在准备期间再次变化，选择与要求保留', { reasonCode: 'BASELINE_STALE' });
+      if (!taskId && canonicalRepairJson(await this.generationBaseline(request.workflowId)) !== canonicalRepairJson(baseline)) fail('STATE_CONFLICT', '生效版本在准备期间再次变化，选择与要求保留', { reasonCode: 'BASELINE_STALE' });
       revision = await this.tx(async tx => {
         const repo = new RepairBatchRepository(tx);
         await repo.lockWorkflow(tx, request.workflowId);

@@ -37,6 +37,18 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     }
     return { ...f, service, request };
   }
+  it('returns a definite pre-creation failure instead of an unknown write result when the deployed pack cannot be read', async () => {
+    const f = await setup();
+    const inbox = await f.request('/candidates?workflowId=wf-1');
+    f.executionPort.resolveBaseline = async () => { throw new Error('private git diagnostic'); };
+    const failed = await f.request('/', { workflowId: 'wf-1', inputDigest: inbox.body.inputDigest,
+      itemIds: ['item-0', 'item-1'], instructions: 'Keep selection', requestId: 'baseline-read' });
+    expect(failed).toMatchObject({ status: 503, body: { code: 'CAPABILITY_UNAVAILABLE',
+      reasonCode: 'BASELINE_READ_FAILED', stage: 'baseline', outcome: 'not_created' } });
+    expect(JSON.stringify(failed.body)).not.toContain('private git diagnostic');
+    expect(f.calls).toHaveLength(0);
+    expect((await f.request('/requests/lookup?workflowId=wf-1&requestId=baseline-read')).body.revision).toBeNull();
+  });
   it.each([1,110])('reads oversized evidence from %i diagnoses through real GET/POST without applying the generation freeze limit', async count => {
     const f = await repairFixture(0); close.push(() => f.db.close());
     const source = { diagnosisId:'d',analysisId:'a',flowId:'run',sourceId:'s',completedAtMs:1,

@@ -55,6 +55,23 @@ it('disables the new round entry for a read-only viewer', async () => {
   mount({ readOnly: true })
   expect(await screen.findByRole('button', { name: '开始下一轮优化' })).toBeDisabled()
 })
+it('keeps the chosen suggestions after a definite baseline read failure without asking to check a nonexistent task', async () => {
+  mount()
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole('button', { name: '开始下一轮优化' }))
+  const checkbox = await screen.findByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' })
+  await user.click(checkbox)
+  await user.type(screen.getByRole('textbox', { name: '本次修复要求' }), '保留业务约束')
+  repairApi.create.mockRejectedValueOnce({ status: 503, body: JSON.stringify({ code: 'CAPABILITY_UNAVAILABLE',
+    reasonCode: 'BASELINE_READ_FAILED', stage: 'baseline', outcome: 'not_created' }) })
+  await user.click(screen.getByRole('button', { name: '生成 Pack 草稿' }))
+  expect(await screen.findByText(/草稿未创建/)).toBeVisible()
+  expect(checkbox).toBeChecked()
+  expect(screen.getByRole('textbox', { name: '本次修复要求' })).toHaveValue('保留业务约束')
+  expect(screen.queryByRole('button', { name: '核对任务状态' })).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '生成 Pack 草稿' })).toBeEnabled()
+  expect(repairApi.create).toHaveBeenCalledTimes(1)
+})
 it('keeps the actual baseline rejection and reviewed selection without refreshing or resending', async () => {
   mount()
   const user = userEvent.setup()
