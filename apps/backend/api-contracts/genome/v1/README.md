@@ -181,7 +181,24 @@ the same bytes:
 Code-point order on these values equals UTF-8 byte order. JSON Schema cannot
 express "sorted"; the contract test and the Registry check it.
 
-Test vectors: [`canonical-json-vectors.json`](canonical-json-vectors.json).
+**Test vectors.** Two implementations, the Registry in Python and
+`apps/evolution` or a strategy SDK in another language, must turn the same
+record into the same bytes, or they compute different revision ids for the
+same bot. Reading this section is not enough to be sure of that, so
+[`canonical-json-vectors.json`](canonical-json-vectors.json) gives worked
+answers to check an implementation against. A *test vector* is one input
+with the exact output it must produce. The file has three lists:
+
+| List | Each entry gives | An implementation passes when |
+| --- | --- | --- |
+| `canonical` | `input` (any JSON text), `canonical` (its canonical form), `sha256` | Canonicalizing `input` gives exactly `canonical`, byte for byte, and hashing that gives `sha256` |
+| `rejected` | `input` that is outside the subset: a float (even `1.0`), an integer beyond ±(2^53 − 1), a lone surrogate, a duplicate member name | Canonicalizing `input` is refused |
+| `revision_ids` | a `spec` and a `policy`, their combined `canonical` form, and the `revision_id` | JCS of `{"policy", "spec"}` is exactly `canonical`, and its hash is `revision_id` |
+
+The `canonical` entries include RFC 8785's own examples, such as member
+sorting by UTF-16 code units, which is where implementations most often
+differ. The contract test runs every vector against the reference
+implementation in `tests/community/contracts/genome_canonical_json.py`.
 
 ### 3.2 Revision id
 
