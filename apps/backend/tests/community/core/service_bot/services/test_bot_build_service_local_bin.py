@@ -231,6 +231,9 @@ def _restore_service(monkeypatch, artifact, target_home):
 def test_build_and_restore_keep_engine_and_home_cli_separate(migration, monkeypatch, tmp_path, caplog):
     caplog.set_level("INFO")
     source, artifact, _, migrate = migration
+    agentclaw = source.parent / ".agentclaw"
+    agentclaw.mkdir()
+    (agentclaw / "cli").write_text("complete home CLI")
     engine_bin = source / ".local/bin"
     home_bin = source.parent / ".local/bin"
     engine_bin.mkdir(parents=True)
@@ -240,6 +243,7 @@ def test_build_and_restore_keep_engine_and_home_cli_separate(migration, monkeypa
     (home_bin / "cli").write_text("#!/bin/sh\nprintf 'home-cli'\n")
     (home_bin / "cli").chmod(0o755)
     assert migrate()
+    assert (artifact.parent / ".agentclaw/cli").read_text() == "complete home CLI"
     assert (artifact / ".local/bin/cli").read_text() == "engine-cli"
     assert (artifact / ".local/engine-data").read_text() == "engine state"
 
@@ -254,6 +258,7 @@ def test_build_and_restore_keep_engine_and_home_cli_separate(migration, monkeypa
     (artifact.parent / ".local/share/state").write_text("do not restore")
     commands, restore = _restore_service(monkeypatch, artifact, restored_home)
     assert restore()["restore_type"] == "migration_path"
+    assert (restored_home / ".agentclaw/cli").read_text() == "complete home CLI"
     assert (restored_home / ".openclaw/.local/bin/cli").read_text() == "engine-cli"
     assert (restored_home / ".openclaw/.local/engine-data").read_text() == "engine state"
     assert subprocess.check_output([str(restored_home / ".local/bin/cli")], text=True) == "home-cli"

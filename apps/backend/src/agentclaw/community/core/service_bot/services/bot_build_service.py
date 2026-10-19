@@ -35,6 +35,10 @@ from agentclaw.community.core.service_bot.services.build_ignore_rules import (
     is_excluded,
     validate_required_paths,
 )
+from agentclaw.community.core.service_bot.services.agentclaw_artifact import (
+    restore_agentclaw_artifact,
+    sync_agentclaw_artifact,
+)
 from agentclaw.community.core.service_bot.services.local_bin_artifact import (
     restore_local_bin_artifact,
     sync_local_bin_artifact,
@@ -1448,6 +1452,15 @@ class BotBuildService:
                     run_command=self._run_local_command,
                 )
 
+                sync_agentclaw_artifact(
+                    source_home=source_dir.parent,
+                    target_dir=target_dir,
+                    device_id=device_id,
+                    version=version_str,
+                    build_ignore_paths=build_ignore_paths,
+                    run_command=self._run_local_command,
+                )
+
             # Device-side fallback for extra-include files that are unreadable
             # on the NAS merge area due to NFS root_squash (uid-1000-owned
             # sessions/cron-tasks.json). Only the publish/migrate path has the
@@ -1965,6 +1978,15 @@ class BotBuildService:
             )
 
         restore_local_bin_artifact(
+            artifact_dir=artifact_dir,
+            target_home=draft_dir.parent,
+            bot_id=bot_id,
+            version=source_version,
+            run_command=self._run_local_command,
+            timeout_seconds=remaining_timeout(),
+        )
+
+        restore_agentclaw_artifact(
             artifact_dir=artifact_dir,
             target_home=draft_dir.parent,
             bot_id=bot_id,
