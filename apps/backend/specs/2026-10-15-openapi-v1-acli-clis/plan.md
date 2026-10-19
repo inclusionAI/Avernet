@@ -104,10 +104,12 @@ engine's `PATH`, so a tool installed there is runnable without a restart.
 
 ### Backend — application service (`core/acli_clis/service.py`)
 
-Guard, shared by every write: the actor owns the bot; the bot is an `ACTIVE`
-`service` bot; its engine is openclaw or claude_code. This is the check
-`CallerIdentityService.update_cli_call_type` performs today, extracted into
-`core/caller_identity/guard.py` and used by both (that service is 789 lines).
+Guard, run before every write: the bot is `ACTIVE` (else `409 not_running`);
+the actor owns it; its engine is openclaw or claude_code. Any bot type
+qualifies: device bootstrap reconciles a Passport CLI scope for every bot, and
+adding a tool involves no caller identity. The identity switch keeps its own
+service-bot rule (`core/caller_identity/guard.py`); `load_bot` and the
+lock-epoch check are shared.
 The collaborator lock epoch is resolved by the router exactly as the call-type
 route does.
 

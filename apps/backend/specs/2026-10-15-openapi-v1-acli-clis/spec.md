@@ -145,5 +145,7 @@ without waiting for a release each time a new tool is published.
 
 ## Open Questions
 
-- **Who may add and remove?** Default: the same rule as the identity switch —
-  the owner of an active service bot. Collaborator admins are refused.
+- **Who may add and remove?** The owner of an active bot of any type.
+  Collaborator admins are refused. (First shipped as "active service bot",
+  copied from the identity switch; that rule is about caller identity, which
+  adding a tool does not involve, so it was dropped for add and remove.)

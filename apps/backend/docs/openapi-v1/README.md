@@ -1710,6 +1710,10 @@ release). Spec: `apps/backend/specs/2026-10-15-openapi-v1-acli-clis/`.
 | DELETE | `/openapi/v1/bots/{bot_id}/clis/{cli_code}` | OWNER + edit lock | Revoke, then uninstall |
 | PATCH | `/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type` | OWNER + edit lock | Unchanged: switch `owner`/`caller` |
 
+Add and remove work on any bot type, personal or service: they need an `ACTIVE`
+bot, its owner and an acli engine, and involve no caller identity. Only the
+`call-type` switch is limited to service bots, the bots other people call.
+
 **All-or-nothing.** Add installs first and grants second; a failed grant
 uninstalls again. Remove revokes first and uninstalls second; a failed uninstall
 re-grants with the same identity. When the undo fails too — or an uninstall's
@@ -1723,7 +1727,7 @@ error but landed counts as done.
 | Status | When | `data` |
 |---|---|---|
 | 404 | Removing a CLI the bot does not have | — |
-| 409 | Already granted; removing a default CLI; no running container | `{code, reason}` for the container case |
+| 409 | Already granted; removing a default CLI; the bot is not `ACTIVE` or has no running container | `{code, reason}` (`not_running`) for the bot/container case |
 | 422 | Passing an alias (`di`) | `{market_name}` |
 | 422 | acli rejected the request (usually an unknown name) | `{code, reason}` |
 | 423 | Edit lock not held | — |

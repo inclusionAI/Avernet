@@ -34,7 +34,7 @@ provides:
 consumes:
   - "CliPassportScopeReconciler (core.mcp) — the only writer of a bot's whole Passport CLI scope"
   - "CliCapabilityManifestResolver (core.mcp) — which CLIs are a bot's defaults"
-  - "core.caller_identity guard — the owner, active-bot and edit-lock checks shared with the identity switch"
+  - "core.caller_identity guard — bot lookup and the edit-lock check shared with the identity switch"
   - "BotRepository, BotCollabLockRepositoryProtocol, CallerIdentityRepositoryProtocol (core.repository)"
   - "DeviceAdapterTransport (plugin_api) — the hop to the engine's /api/cli/acli/* endpoints"
   - "HttpClient (plugin_api) — the general client, for the market's search API"

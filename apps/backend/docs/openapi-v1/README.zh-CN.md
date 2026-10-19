@@ -965,6 +965,9 @@ Spec：`apps/backend/specs/2026-10-15-openapi-v1-acli-clis/`。
 | DELETE | `/openapi/v1/bots/{bot_id}/clis/{cli_code}` | OWNER + 编辑锁 | 先撤销授权，再卸载 |
 | PATCH | `/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type` | OWNER + 编辑锁 | 不变：切换 `owner`/`caller` |
 
+添加与删除适用于任意类型的 bot（个人或服务型）：只要求 bot 为 `ACTIVE`、调用方是 owner、引擎支持 acli，
+与调用方身份无关。只有 `call-type` 切换仅限服务型 bot（即供他人调用的 bot）。
+
 **全部成功或全部不变。** 添加先安装后授权，授权失败则卸载回去；删除先撤销后卸载，卸载失败则以原身份重新授权。
 若回滚本身也失败（或卸载结果未知），返回 `500`，`data.state` 说明 bot 停留的状态：
 `installed_not_granted`、`install_unknown_not_granted`、`grant_unknown_installed`、`revoked_still_installed`、
@@ -974,7 +977,7 @@ Spec：`apps/backend/specs/2026-10-15-openapi-v1-acli-clis/`。
 | 状态码 | 场景 | `data` |
 |---|---|---|
 | 404 | 删除 bot 没有的 CLI | — |
-| 409 | 已授权；删除默认 CLI；无运行中的容器 | 容器场景为 `{code, reason}` |
+| 409 | 已授权；删除默认 CLI；bot 不是 `ACTIVE` 或无运行中的容器 | bot/容器场景为 `{code, reason}`（`not_running`） |
 | 422 | 传入别名（`di`） | `{market_name}` |
 | 422 | acli 拒绝请求（通常是名称不存在） | `{code, reason}` |
 | 423 | 未持有编辑锁 | — |

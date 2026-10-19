@@ -43,12 +43,11 @@ from agentclaw.community.core.acli_clis.port import (
     AcliPortError,
     AcliTool,
 )
-from agentclaw.community.core.caller_identity.contracts import CallerLockEpochError
-from agentclaw.community.core.caller_identity.guard import (
-    load_bot,
-    lock_epoch_matches,
-    require_owner_of_active_service_bot,
+from agentclaw.community.core.caller_identity.contracts import (
+    CallerIdentityPermissionError,
+    CallerLockEpochError,
 )
+from agentclaw.community.core.caller_identity.guard import load_bot, lock_epoch_matches
 from agentclaw.community.core.errors import DomainError
 from agentclaw.community.core.mcp.services.cli_capabilities import (
     CliCapabilityManifestResolver,
@@ -453,14 +452,24 @@ class AcliCliService(AcliCliServiceProtocol):
     ) -> Mapping[str, Any]:
         """The bot, if ``actor_id`` may change its CLIs right now.
 
-        It must exist for ``entity_id``, be an active service bot, be owned by
-        ``actor_id``, run an engine that has acli, and ``lock_epoch`` must name
-        the edit lock ``actor_id`` holds (or be ``None`` while no lock exists).
-        The edit lock decides who may edit; it does not serialize one holder's
-        concurrent requests (see ``_serialized``).
+        It must exist for ``entity_id``, be active, be owned by ``actor_id``,
+        run an engine that has acli, and ``lock_epoch`` must name the edit lock
+        ``actor_id`` holds (or be ``None`` while no lock exists). The edit lock
+        decides who may edit; it does not serialize one holder's concurrent
+        requests (see ``_serialized``).
+
+        Any bot type qualifies: every bot's Passport carries a CLI scope (device
+        bootstrap reconciles it for all of them), and adding a tool involves no
+        caller identity. The service-bot rule belongs to the identity switch.
         """
         bot = load_bot(self._bots, bot_id=bot_id, entity_id=entity_id)
-        require_owner_of_active_service_bot(bot, actor_id)
+        # The bot is checked before the actor: whether it can take a change
+        # right now is the same answer for everyone.
+        if bot.get("status") != "ACTIVE":
+            raise AcliBotNotRunningError("not_running", "the bot is not running")
+        # COSEC: entity-scoped lookup identifies the Bot; only its owner can change it.
+        if str(bot.get("owner_id") or "") != actor_id:
+            raise CallerIdentityPermissionError
         self._require_acli_engine(bot)
         if not lock_epoch_matches(
             self._locks,

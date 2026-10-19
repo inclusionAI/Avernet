@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from agentclaw.community.core.acli_clis.errors import (
+    AcliBotNotRunningError,
     AcliCliAlreadyGrantedError,
     AcliCliNameMismatchError,
     AcliCliNotGrantedError,
@@ -33,7 +34,6 @@ from agentclaw.community.core.acli_clis.port import (
 from agentclaw.community.core.acli_clis.service import AcliCliService
 from agentclaw.community.core.caller_identity.contracts import (
     CallerIdentityPermissionError,
-    CallerIdentityReadOnlyError,
     CallerLockEpochError,
 )
 from agentclaw.community.core.caller_identity.models import McpCallType
@@ -632,12 +632,12 @@ def _raise(*_args, **_kwargs):
     ("bot", "actor", "error"),
     [
         (_bot(), "someone-else", CallerIdentityPermissionError),
-        (_bot(status="STOPPED"), OWNER, CallerIdentityReadOnlyError),
-        (_bot(bot_type="personal"), OWNER, CallerIdentityReadOnlyError),
+        (_bot(status="STOPPED"), OWNER, AcliBotNotRunningError),
+        (_bot(status="STOPPED"), "someone-else", AcliBotNotRunningError),
         (_bot(active_engine="hermes"), OWNER, AcliEngineUnsupportedError),
     ],
 )
-async def test_writes_are_owner_only_on_active_service_bots_with_acli(bot, actor, error) -> None:
+async def test_writes_are_owner_only_on_active_bots_with_acli(bot, actor, error) -> None:
     service, agentpass, container, _ = _service(bot=bot, granted=["dataphin", "yuque-cli"])
 
     with pytest.raises(error):
@@ -647,6 +647,19 @@ async def test_writes_are_owner_only_on_active_service_bots_with_acli(bot, actor
 
     assert container.calls == []
     assert agentpass.codes == ["dataphin", "yuque-cli"]
+
+
+@pytest.mark.parametrize("bot_type", ["personal", "assistant"])
+async def test_any_bot_type_can_add_and_remove(bot_type) -> None:
+    """Adding a tool involves no caller identity, so it is not a service-bot-only change."""
+    service, agentpass, container, _ = _service(bot=_bot(bot_type=bot_type))
+
+    await _add(service, "deepinsight-cli")
+    assert "deepinsight-cli" in agentpass.codes
+    await _remove(service, "deepinsight-cli")
+
+    assert "deepinsight-cli" not in agentpass.codes
+    assert [call[0] for call in container.calls] == ["install", "uninstall"]
 
 
 async def test_a_stale_lock_epoch_is_refused() -> None:
