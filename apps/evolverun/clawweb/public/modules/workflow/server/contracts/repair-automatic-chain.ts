@@ -73,7 +73,7 @@ export function retainedFeedbackCandidate(revisions: RepairRevision[]): RepairRe
   try{chain=automaticChain(revisions.filter(row=>row.revision<=candidate.revision),candidate,true)}
   catch(error){if(error instanceof RepairBatchError)return null;throw error}
   const ids=canonicalRepairJson([...new Set(chain.flatMap(row=>row.input.items.map(item=>item.itemId)))].sort());
-  const unchanged=revisions.filter(row=>row.revision>candidate.revision).every(row=>!isAutomaticBatch(row.input)&&row.phase==='no_change'
+  const unchanged=revisions.filter(row=>row.revision>candidate.revision&&row.phase!=='failed').every(row=>!isAutomaticBatch(row.input)&&row.phase==='no_change'
     &&row.draft?.candidateCommit===candidate.draft?.candidateCommit&&row.draft?.packDigest===candidate.draft?.packDigest
     &&row.input.parentCandidateCommit===candidate.draft?.candidateCommit&&(row.checks?.static as {status?:string})?.status==='passed'
     &&canonicalRepairJson(row.input.baseline)===canonicalRepairJson(candidate.input.baseline)

@@ -117,22 +117,29 @@ describe('automatic batch candidate chain', () => {
     expect(await f.approve(first.taskId,4)).toMatchObject({revision:4,status:'approved'});
   });
 
-  it('retains a complete automatic candidate when human feedback returns the identical candidate with no changes',async()=>{
+  it.each([0,1,2])('retains the automatic candidate and reservations after no-change feedback with %s failed retries',async(failures)=>{
     const f=await setup();const first=await f.workbench.create('scheduler',await f.request(0));
     for(let i=0;i<3;i++){
       if(i){const t=await f.workbench.task(first.taskId);await f.workbench.revise('scheduler',first.taskId,{...await f.request(i),expectedAttemptRevision:i,parentCandidateCommit:t.latestAttempt.draft!.candidateCommit as string,feedback:''});}
       await f.report(first.taskId,i,i===2);
     }
     const old=(await f.workbench.task(first.taskId)).latestAttempt;
-    const revision=await f.workbench.revise('human',first.taskId,{workflowId:'wf-1',itemIds:['item-0','item-1','item-2'],inputDigest:(await f.workbench.candidates('wf-1')).inputDigest,instructions:'保留全部目标',feedback:'再次检查',expectedAttemptRevision:3,parentCandidateCommit:old.draft!.candidateCommit as string,requestId:'human-no-change'});
+    let revision=await f.workbench.revise('human',first.taskId,{workflowId:'wf-1',itemIds:['item-0','item-1','item-2'],inputDigest:(await f.workbench.candidates('wf-1')).inputDigest,instructions:'保留全部目标',feedback:'再次检查',expectedAttemptRevision:3,parentCandidateCommit:old.draft!.candidateCommit as string,requestId:'human-no-change'});
+    for(let attempt=0;attempt<failures;attempt++){
+      await f.workbench.report({workflowId:'wf-1',taskId:first.taskId,revision:revision.revision,expectedStateVersion:revision.stateVersion,status:'failed',error:{code:'AIS_FAILED'}});
+      await expect(f.approve(first.taskId,3)).rejects.toMatchObject({code:'STATE_CONFLICT'});
+      f.setRemoteStatus({status:'failed',rawStatus:'failed',errorMessage:'controlled failed feedback'});
+      revision=await f.workbench.retryGeneration('human',first.taskId,{expectedRevision:revision.revision,requestId:`feedback-retry-${attempt}`});
+    }
     const draft={candidateCommit:old.draft!.candidateCommit,packDigest:old.draft!.packDigest,parentCandidateCommit:old.draft!.candidateCommit,itemResults:revision.input.items.map(item=>({itemId:item.itemId,status:'not_needed',reason:'原候选满足本次反馈'}))};
-    await f.workbench.report({workflowId:'wf-1',taskId:first.taskId,revision:4,expectedStateVersion:0,status:'no_change',draft,checks:{schemaVersion:'workflow-repair-checks/v1',candidateCommit:draft.candidateCommit,packDigest:draft.packDigest,candidateDigest:digestRepairJson(draft),static:{status:'passed'},mock:{status:'not_covered'},coverage:revision.input.items.map(item=>({itemId:item.itemId}))}});
+    await f.workbench.report({workflowId:'wf-1',taskId:first.taskId,revision:revision.revision,expectedStateVersion:revision.stateVersion,status:'no_change',draft,checks:{schemaVersion:'workflow-repair-checks/v1',candidateCommit:draft.candidateCommit,packDigest:draft.packDigest,candidateDigest:digestRepairJson(draft),static:{status:'passed'},mock:{status:'not_covered'},coverage:revision.input.items.map(item=>({itemId:item.itemId}))}});
     expect(await f.workbench.task(first.taskId)).toMatchObject({latestSuccessful:{revision:3},automaticProgress:{publishable:true}});
     expect((await f.workbench.candidates('wf-1')).tasks[0]).toMatchObject({phase:'review',revision:3});
     expect((await f.workbench.item('wf-1','item-0')).state).toBe('processing');
     expect(await new WorkflowAutomationRepository(f.db).pendingAutomaticTask('wf-1')).toBe(first.taskId);
     expect(await f.approve(first.taskId,3)).toMatchObject({revision:3,status:'approved'});
-    await f.workbench.cancel('human',first.taskId,4);
+    expect((await f.workbench.task(first.taskId)).revisions.filter(row=>row.phase==='failed')).toHaveLength(failures);
+    await f.workbench.cancel('human',first.taskId,revision.revision);
     expect((await f.workbench.task(first.taskId)).latestAttempt.phase).toBe('cancelled');
   });
 

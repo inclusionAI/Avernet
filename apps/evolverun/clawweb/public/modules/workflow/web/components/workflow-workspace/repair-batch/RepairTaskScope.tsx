@@ -26,7 +26,7 @@ export default function RepairTaskScope({revision}:{revision:RepairRevision}) {
    <details className="mt-2 text-xs text-muted-foreground"><summary>来源建议与依据</summary>{revision.input.items.filter(item=>plan.originalItemIds.includes(item.itemId)).map(item=><p key={item.itemId} className="mt-2">{String(item.proposal?.summary||item.instruction||'原始建议')}</p>)}<JsonDetails title="完整来源与证据" value={revision.input.items.filter(item=>plan.originalItemIds.includes(item.itemId))}/></details>
   </article>)}</div> : <ul className="mt-4 space-y-3">{revision.input.items.map(item=><li key={item.itemId} className="rounded-lg border border-input p-4 text-sm">
     <p className="font-medium">{String(item.proposal?.summary||(item.instruction.startsWith('当前生效 Pack 已变化')?'重新评估原修改的适用性':item.instruction)||'本版优化项')}</p>
-    {item.instruction.startsWith('当前生效 Pack 已变化')&&<p className="mt-2 rounded bg-amber-50 p-2 text-xs text-amber-900">基线变化提醒：{item.instruction}</p>}
+    {item.instruction.startsWith('当前生效 Pack 已变化')&&<p className="mt-2 rounded bg-warning/10 p-2 text-xs text-warning-foreground">基线变化提醒：{item.instruction}</p>}
     <p className="mt-1 text-xs text-muted-foreground">诊断影响：{impact([item])}</p>
     <p className="mt-1 text-xs text-muted-foreground">相关节点：{typeof item.context?.nodeId==='string'?item.context.nodeId:'未知'}</p>
     <JsonDetails title="原始建议与证据" value={item}/>

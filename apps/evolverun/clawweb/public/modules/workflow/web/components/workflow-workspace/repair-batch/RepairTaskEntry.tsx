@@ -4,11 +4,11 @@ import { phases, RepairDialog } from './repair-view'
 
 const pending = (task: RepairTaskSummary) => ['drafting', 'review', 'blocked', 'publishing', 'failed'].includes(task.phase)
 const statusStyle: Record<string, string> = {
-  review: 'bg-amber-100 text-amber-900', published: 'bg-emerald-100 text-emerald-900',
-  drafting: 'bg-blue-100 text-blue-900', publishing: 'bg-blue-100 text-blue-900',
-  blocked: 'bg-red-100 text-red-900', failed: 'bg-red-100 text-red-900',
+  review: 'bg-warning/10 text-warning-foreground', published: 'bg-success/10 text-success',
+  drafting: 'bg-primary/10 text-primary', publishing: 'bg-primary/10 text-primary',
+  blocked: 'bg-destructive/10 text-destructive', failed: 'bg-destructive/10 text-destructive',
 }
-const badge = (phase: string, label = phases[phase] ?? phase) => <span className={`inline-flex rounded-md px-2 py-1 text-xs font-semibold ${statusStyle[phase] ?? 'bg-slate-100 text-slate-700'}`}>{label}</span>
+const badge = (phase: string, label = phases[phase] ?? phase) => <span className={`inline-flex rounded-md px-2 py-1 text-xs font-semibold ${statusStyle[phase] ?? 'bg-muted text-muted-foreground'}`}>{label}</span>
 export default function RepairTaskEntry({ tasks, loading, error = false, onOpen }: {
   tasks: RepairTaskSummary[]; loading: boolean; error?: boolean; onOpen: (id: string) => void;
 }) {
