@@ -102,6 +102,7 @@ _RECOVERY_CONFIG = DesktopSkillRecoveryConfig(task_deadline_seconds=600)
 
 def _bot(*, binding_id: int = 17, status: str = "ACTIVE") -> dict:
     return {
+        "id": 101,
         "bot_id": "bot-a",
         "owner_id": "owner-a",
         "entity_id": "owner-a",
@@ -758,6 +759,10 @@ def test_reference_set_and_track_latest_share_one_task_for_latest_combined_plan(
                 "status": "ACTIVE",
                 "device_id": "device-a",
             } if (bot_id, owner_id) == ("bot-a", "owner-a") else None
+
+        def list_matches_by_legacy_locator(self, bot_id, locator):
+            bot = self.get_by_id_and_owner(bot_id, locator)
+            return [bot] if bot is not None else []
 
     class _Allow:
         def can_manage_bot(self, **_kwargs):

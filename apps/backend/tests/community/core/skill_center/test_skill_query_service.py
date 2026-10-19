@@ -63,6 +63,7 @@ _EMPTY = InstallationFlushPlan(
 _BOT = {
     "bot_id": "bot",
     "owner_id": "owner",
+    "entity_id": "owner",
     "env": "dev",
     "active_engine": "openclaw",
     "template_type": "",

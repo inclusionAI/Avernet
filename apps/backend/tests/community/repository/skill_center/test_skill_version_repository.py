@@ -67,12 +67,16 @@ class _Flush:
 class _Bots:
     def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict:
         return {
+            "id": 1,
             "bot_id": bot_id,
             "owner_id": owner_id,
             "entity_id": owner_id,
             "env": "pre",
             "active_engine": "openclaw",
         }
+
+    def list_matches_by_legacy_locator(self, bot_id: str, locator: str) -> list[dict]:
+        return [self.get_by_id_and_owner(bot_id, locator)]
 
 
 def _add_version(

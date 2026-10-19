@@ -232,7 +232,9 @@ def _seed_team_bot(world) -> None:
         world, "team-mcp-bot", owner_id="team-owner",
         entity_id="team-42", entity_type="team",
     )
-    _install_mcp(world, "team-mcp-bot", owner_id="team-owner")
+    # Installation.owner_id is the legacy physical column for the stable Bot
+    # entity locator.  The operational owner is deliberately different here.
+    _install_mcp(world, "team-mcp-bot", owner_id="team-42")
     _configure_seams(world, has_mcp=True)
 
 

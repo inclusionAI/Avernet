@@ -228,7 +228,8 @@ class _PersistedSkillQuery:
         row = self._skills.get_by_id(skill_id)
         assert row is not None
         assert str(row["bolt_id"]) == bot_id
-        assert str(row["user_id"]) == owner_id == user_id
+        assert str(row["user_id"]) == owner_id == "entity-1"
+        assert user_id == "owner"
         return row
 
 
@@ -253,7 +254,7 @@ def _seed(db: _Database, bots: BotRepository, skills: SkillRepository) -> int:
             "description": "old package",
             "git_path": "local://dependent",
             "is_public": False,
-            "user_id": "owner",
+            "user_id": "entity-1",
             "bolt_id": "bot-1",
             "status": "PUBLISHED",
             "mcp_dependencies": [{"code": "mcp.dep"}],
@@ -263,7 +264,7 @@ def _seed(db: _Database, bots: BotRepository, skills: SkillRepository) -> int:
     with db.transactional_orm_session() as session:
         skill_set = SkillSet(
             name="ordinary",
-            user_id="owner",
+            user_id="entity-1",
             bolt_id="bot-1",
             engine_type="moltis",
             is_active=True,
@@ -289,18 +290,18 @@ def _seed(db: _Database, bots: BotRepository, skills: SkillRepository) -> int:
                     env="dev",
                 ),
                 BotSkillInstallation(
-                    bot_id="bot-1", owner_id="owner", skill_id=skill_id, env="dev"
+                    bot_id="bot-1", owner_id="entity-1", skill_id=skill_id, env="dev"
                 ),
                 BotMCPInstallation(
-                    bot_id="bot-1", owner_id="owner",
+                    bot_id="bot-1", owner_id="entity-1",
                     server_code="mcp.explicit", env="dev",
                 ),
                 BotMCPInstallation(
-                    bot_id="bot-1", owner_id="owner",
+                    bot_id="bot-1", owner_id="entity-1",
                     server_code="mcp.omit", env="dev",
                 ),
                 BotMCPConfig(
-                    bot_id="bot-1", owner_id="owner", server_code="mcp.dep",
+                    bot_id="bot-1", owner_id="entity-1", server_code="mcp.dep",
                     config='{"headers":{"X-Stale":"value"}}', env="dev",
                 ),
             ]

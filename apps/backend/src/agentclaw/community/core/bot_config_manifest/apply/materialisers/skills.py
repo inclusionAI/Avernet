@@ -359,7 +359,7 @@ class SkillsMaterialiser(Materialiser):
                 package = planned.intent.value
                 uploaded = await self._uploads.upload_local_skill(
                     bot_id=ctx.bot_id,
-                    owner_id=ctx.owner_id,
+                    owner_id=ctx.entity_id,
                     actor_id=ctx.actor_id,
                     package=package.canonical_zip,
                 )
@@ -370,7 +370,7 @@ class SkillsMaterialiser(Materialiser):
                 await self._activation.claim_manifest_skill(
                     skill_id=skill_id,
                     bot_id=ctx.bot_id,
-                    owner_id=ctx.owner_id,
+                    owner_id=ctx.entity_id,
                     actor_id=ctx.actor_id,
                     apply_id=ctx.apply_id,
                 )
@@ -394,7 +394,7 @@ class SkillsMaterialiser(Materialiser):
                 await self._activation.remove_manifest_skill(
                     skill_id=str(asset.skill_id),
                     bot_id=ctx.bot_id,
-                    owner_id=ctx.owner_id,
+                    owner_id=ctx.entity_id,
                     actor_id=ctx.actor_id,
                     apply_id=ctx.apply_id,
                     remove_inactive_memberships=is_local,
@@ -406,7 +406,7 @@ class SkillsMaterialiser(Materialiser):
                             skill_id=str(asset.skill_id),
                             name=name,
                             bot_id=ctx.bot_id,
-                            owner_id=ctx.owner_id,
+                            owner_id=ctx.entity_id,
                             actor_id=ctx.actor_id,
                         )
                     except Exception:

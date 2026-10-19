@@ -56,11 +56,16 @@ class _Database:
 class _Bots:
     def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict:
         return {
+            "id": 1,
             "bot_id": bot_id,
             "owner_id": owner_id,
+            "entity_id": owner_id,
             "env": "dev",
             "active_engine": "openclaw",
         }
+
+    def list_matches_by_legacy_locator(self, bot_id: str, locator: str) -> list[dict]:
+        return [self.get_by_id_and_owner(bot_id, locator)]
 
 
 def test_an_excluded_default_member_is_no_longer_symlinked(tmp_path):
