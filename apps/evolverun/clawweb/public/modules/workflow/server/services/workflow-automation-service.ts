@@ -98,6 +98,8 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
   async function planDraft(cycle: AutomationJob) {
     const { actorId, policy } = await authority(cycle.workflowId, true);
     if (!cycle.data.completedDue || policy.scopeVersion !== 'all-qualified/v1' && cycle.data.draftDue === cycle.data.completedDue) return cycle;
+    const pendingTaskId = await repo.pendingAutomaticTask(cycle.workflowId);
+    if (pendingTaskId) return repo.patch(cycle, { reason: 'DRAFT_IN_PROGRESS', data: { ...cycle.data, blockingTaskId: pendingTaskId } }, now());
     const baseline = await input.ports.baseline(cycle.workflowId);
     if (policy.scopeVersion === 'all-qualified/v1') {
       const occupied=await repo.activeDraft(cycle.workflowId,undefined,baseline.activeDeployNumber??undefined);
@@ -146,6 +148,9 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
     if (!taskId) {
       if (['dispatching', 'uncertain'].includes(record.status) && record.attempts > 0) {
         await repo.patch(job, { status: 'uncertain', reason: 'DRAFT_REQUEST_REQUIRES_LOOKUP', nextAtMs: now() + 30000 }, now(), true); return;
+      }
+      if (await repo.pendingAutomaticTask(job.workflowId)) {
+        await repo.patch(job, { status: 'pending', reason: 'DRAFT_IN_PROGRESS', nextAtMs: now() + 60000 }, now(), true); return;
       }
       if (job.data.baseline && digestRepairJson(await input.ports.baseline(job.workflowId)) !== digestRepairJson(job.data.baseline)) {
         await repo.patch(job, { status: 'blocked', reason: 'BASELINE_REASSESSMENT_REQUIRED' }, now(), true); return;
@@ -226,7 +231,7 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
         if (cycle.data.evaluated !== evaluated) {
           await queueIssues(policy.workflowId, current);
           if (current.autoDraft) cycle = await planDraft(cycle);
-          cycle = await repo.patch(cycle, { data: { ...cycle.data, evaluated } }, now());
+          if (cycle.reason !== 'DRAFT_IN_PROGRESS') cycle = await repo.patch(cycle, { data: { ...cycle.data, evaluated, blockingTaskId: null } }, now());
         }
         for (const job of await repo.ready(policy.workflowId, 'auto_notice', now(), 3)) await notify(job);
       }

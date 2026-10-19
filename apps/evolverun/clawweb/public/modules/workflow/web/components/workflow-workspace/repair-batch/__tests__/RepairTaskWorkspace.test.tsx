@@ -22,15 +22,15 @@ beforeEach(()=>{sessionStorage.clear();vi.clearAllMocks();api.diff.mockResolvedV
 it('switches actual content without generating, trialing or publishing and supports arrow-key focus',async()=>{
  const user=userEvent.setup(),onFeedback=vi.fn();mount(fixture(),{onFeedback});
  const tabs=await screen.findByRole('tablist',{name:'任务内容'});
- expect(within(tabs).getByRole('tab',{name:'候选与发布'})).toHaveAttribute('aria-selected','true');
- expect(screen.queryByRole('heading',{name:'本版处理范围'})).not.toBeInTheDocument();
- await user.click(within(tabs).getByRole('tab',{name:'问题与方案'}));
- expect(screen.getByRole('heading',{name:'本版处理范围'})).toBeVisible();
- expect(screen.queryByRole('heading',{name:'候选修改'})).not.toBeInTheDocument();
- await user.keyboard('{End}');expect(within(tabs).getByRole('tab',{name:'效果观察'})).toHaveFocus();
+ expect(within(tabs).getByRole('tab',{name:'改动与发布'})).toHaveAttribute('aria-selected','true');
+ expect(screen.queryByRole('heading',{name:'本版优化目标'})).not.toBeInTheDocument();
+ await user.click(within(tabs).getByRole('tab',{name:'优化目标'}));
+ expect(screen.getByRole('heading',{name:'本版优化目标'})).toBeVisible();
+ expect(screen.queryByRole('heading',{name:'本版改动'})).not.toBeInTheDocument();
+ await user.keyboard('{End}');expect(within(tabs).getByRole('tab',{name:'发布后效果'})).toHaveFocus();
  expect(screen.getByText('此候选尚未发布，暂无对应部署的观察证据。')).toBeVisible();
- await user.click(screen.getByRole('button',{name:'查看候选与发布'}));
- expect(screen.getByRole('heading',{name:'候选修改'})).toBeVisible();
+ await user.click(screen.getByRole('button',{name:'查看改动与发布'}));
+ expect(screen.getByRole('heading',{name:'本版改动'})).toBeVisible();
  expect(onFeedback).not.toHaveBeenCalled();expect(api.publish).not.toHaveBeenCalled();expect(api.deploymentTargets).not.toHaveBeenCalled();
 });
 it('keeps the published v1 identity prominent when the latest automatic v2 needs no change',async()=>{
@@ -42,7 +42,7 @@ it('keeps the published v1 identity prominent when the latest automatic v2 needs
  mount(detail);
  const header=screen.getByRole('region',{name:'当前候选'});
  expect(within(header).getByText(/当前查看 v1/)).toBeVisible();expect(within(header).getByText(/部署 #160/)).toBeVisible();
- expect(screen.getByText(/每日自动优化/)).toBeVisible();expect(screen.queryByText(/自动生成草稿 · 等待人工审阅/)).not.toBeInTheDocument();
+ expect(screen.getByText(/自动任务/)).toBeVisible();expect(screen.queryByText(/自动生成草稿 · 等待人工审阅/)).not.toBeInTheDocument();
  expect(screen.getAllByRole('combobox',{name:'查看修复版本'})).toHaveLength(1);
  expect(screen.queryByRole('contentinfo',{name:'当前修复步骤与下一步'})).not.toBeInTheDocument();
  expect(await screen.findByText('暂无新版本运行样本，暂不能判断效果。')).toBeVisible();
@@ -51,7 +51,7 @@ it('keeps latest recovery separate from a selected historical candidate and show
  const detail=fixture();const latest={...detail.latestAttempt,revision:2,phase:'failed' as const,draft:null,error:{code:'AIS_FAILED',message:'v2 failure'}};
  detail.latestAttempt=latest;detail.revisions.push(latest);mount(detail);
  expect(screen.getByRole('region',{name:'当前候选'})).toHaveTextContent('当前查看 v1');
- expect(screen.getByText(/最新尝试 v2/)).toBeVisible();
+ expect(screen.getByText(/最近一次生成 v2/)).toBeVisible();
  await userEvent.selectOptions(screen.getByRole('combobox',{name:'查看修复版本'}),'2');
  expect(screen.getByText('所选版本 v2：生成失败')).toBeVisible();
  expect(screen.queryByRole('button',{name:'审阅并发布'})).not.toBeInTheDocument();
@@ -66,22 +66,22 @@ it('explains an intermediate automatic no-change batch without claiming the roun
 });
 it('summarizes real checks and outcomes before folded reports and retains diff retry',async()=>{
  api.diff.mockRejectedValueOnce(new Error('controlled diff unavailable')).mockResolvedValue({files:[],truncated:false});mount();
- expect(screen.getByText('已修改 1 项 · 无需修改 0 项 · 未解决 0 项')).toBeVisible();
+ expect(screen.getByText('已生成修改 1 项 · 无需修改 0 项 · 未解决 0 项')).toBeVisible();
  expect(screen.getByText(/静态检查：通过/)).toBeVisible();expect(screen.getByText(/Mock 检查：未覆盖/)).toBeVisible();
  expect(screen.queryByText('workflow repair candidate: 1/1 items changed')).not.toBeVisible();
  await userEvent.click(await screen.findByRole('button',{name:'重试差异'}));
  await waitFor(()=>expect(api.diff).toHaveBeenCalledTimes(2));
 });
 it('persists the inspection tab across a close and reopen without opening the scope editor',async()=>{
- const first=mount();await userEvent.click(screen.getByRole('tab',{name:'问题与方案'}));first.unmount();mount();
- expect(screen.getByRole('tab',{name:'问题与方案'})).toHaveAttribute('aria-selected','true');
- expect(screen.getByRole('heading',{name:'本版处理范围'})).toBeVisible();
+ const first=mount();await userEvent.click(screen.getByRole('tab',{name:'优化目标'}));first.unmount();mount();
+ expect(screen.getByRole('tab',{name:'优化目标'})).toHaveAttribute('aria-selected','true');
+ expect(screen.getByRole('heading',{name:'本版优化目标'})).toBeVisible();
 });
 it('allows read-only navigation but disables publish and source editing',async()=>{
  mount(fixture(),{canEdit:false});expect(await screen.findByRole('button',{name:'审阅并发布'})).toBeDisabled();
- await userEvent.click(screen.getByRole('tab',{name:'问题与方案'}));
+ await userEvent.click(screen.getByRole('tab',{name:'优化目标'}));
  expect(screen.getByText('当前只有查看权限。')).toBeVisible();expect(screen.queryByRole('button',{name:'调整范围与要求'})).not.toBeInTheDocument();
- await userEvent.click(screen.getByRole('tab',{name:'效果观察'}));expect(screen.getByRole('button',{name:'查看候选与发布'})).toBeEnabled();
+ await userEvent.click(screen.getByRole('tab',{name:'发布后效果'}));expect(screen.getByRole('button',{name:'查看改动与发布'})).toBeEnabled();
 });
 it('retains the same publication request after a lost response and inspection tab switches',async()=>{
  api.deploymentTargets.mockResolvedValue({targets:[{id:'workflow:pre:wf',scope:'workflow',label:'工作流 wf',environment:'pre'}]});
@@ -91,7 +91,7 @@ it('retains the same publication request after a lost response and inspection ta
  await screen.findByText('工作流 wf');await user.click(screen.getByRole('checkbox'));
  await user.click(screen.getByRole('button',{name:'确认审阅并发布'}));await screen.findByRole('alert');
  const request=api.publish.mock.calls[0];
- await user.click(screen.getByRole('tab',{name:'问题与方案'}));await user.click(screen.getByRole('tab',{name:'效果观察'}));await user.click(screen.getByRole('tab',{name:'候选与发布'}));
+ await user.click(screen.getByRole('tab',{name:'优化目标'}));await user.click(screen.getByRole('tab',{name:'发布后效果'}));await user.click(screen.getByRole('tab',{name:'改动与发布'}));
  expect(screen.getByRole('checkbox')).toBeChecked();expect(api.publish).toHaveBeenCalledTimes(1);
  await user.click(screen.getByRole('button',{name:'确认审阅并发布'}));await waitFor(()=>expect(api.publish).toHaveBeenCalledTimes(2));
  expect(api.publish.mock.calls[1]).toEqual(request);
@@ -108,8 +108,8 @@ it('does not attach a late publication error to a different selected revision',a
 it('shows provided diagnostic impact and folded cause certainty without inventing recent counts',async()=>{
  const detail=fixture();detail.latestAttempt.input.items[0].context={nodeId:'query',diagnoses:[{severity:'high'}]};
  detail.latestAttempt.input.integration={schemaVersion:'workflow-proposal-plan/v1',baselineSpecDigest:detail.latestAttempt.input.baseline.specDigest,plans:[{id:'plan',originalItemIds:['source'],goals:['校验输入并限制输出'],relation:'complementary',causes:[{title:'输入缺失',certainty:'hypothesis',itemIds:['source'],evidenceIds:[]}],unknowns:['缺少边界样本']}]};
- mount(detail);await userEvent.click(screen.getByRole('tab',{name:'问题与方案'}));
- expect(screen.getByText('诊断影响：高')).toBeVisible();expect(screen.getByText(/近期影响次数未知/)).toBeVisible();
+ mount(detail);await userEvent.click(screen.getByRole('tab',{name:'优化目标'}));
+ expect(screen.getByText('诊断影响：高')).toBeVisible();expect(screen.queryByText(/近期影响次数未知/)).not.toBeInTheDocument();
  await userEvent.click(screen.getByText('原因与依据',{selector:'summary'}));
  expect(screen.getByText('推测：输入缺失')).toBeVisible();expect(screen.getByText('待确认：缺少边界样本')).toBeVisible();
 });
@@ -119,7 +119,7 @@ it('counts distinct frozen runs from suggestion and diagnosis context alongside 
  item.sources=[{kind:'suggestion',suggestionId:'suggestion'}] as never;
  item.context={diagnoses:[{flowId:'run-a',flowIds:['run-a','run-b','',null]}],suggestions:[{runIds:['run-b','run-c',42]},{impactRunIds:['run-d','']},null]};
  detail.latestAttempt.input.items.push({...item,itemId:'direct',sources:[{kind:'diagnosis_candidate',flowId:'run-d'}] as never,context:{}});
- mount(detail);await userEvent.click(screen.getByRole('tab',{name:'问题与方案'}));
+ mount(detail);await userEvent.click(screen.getByRole('tab',{name:'优化目标'}));
  expect(screen.getByText(/依据覆盖 4 个运行/)).toBeVisible();expect(screen.queryByText(/来源运行数未知/)).not.toBeInTheDocument();
 });
 
@@ -130,8 +130,9 @@ it('shows the selected revision model prompts and optional index while preservin
   {itemId:'source-two',coreInput:'Second call core',materials:{root:'/ais/repair-materials/two',files:[]}},
  ];
  const old={...detail.latestAttempt,revision:0,draft:{candidateCommit:'f'.repeat(40)}};detail.revisions.push(old);
- mount(detail);const user=userEvent.setup();await user.click(screen.getByRole('tab',{name:'问题与方案'}));
+ mount(detail);const user=userEvent.setup();await user.click(screen.getByRole('tab',{name:'优化目标'}));
  expect(screen.getByText('原始建议与证据',{selector:'summary'})).toBeVisible();
+ await user.click(screen.getByText('模型输入与材料',{selector:'summary'}));
  const cores=screen.getAllByText('模型核心输入',{selector:'summary'});
  expect(cores).toHaveLength(2);await user.click(cores[0]);await user.click(cores[1]);
  expect(screen.getByText('Exact core sent for source <script>alert(1)</script>')).toBeVisible();
@@ -142,13 +143,42 @@ it('shows the selected revision model prompts and optional index while preservin
  expect(screen.getByText(/Read on conflicting evidence/)).toBeVisible();
  await user.selectOptions(screen.getByRole('combobox',{name:'查看修复版本'}),'0');
  expect(screen.queryByText('Second call core')).not.toBeInTheDocument();
- expect(screen.getByText(/暂无实际模型输入记录/)).toBeVisible();
+ expect(screen.getByText(/暂无实际模型输入记录/)).toBeInTheDocument();
  expect(api.publish).not.toHaveBeenCalled();
 });
 
 it('does not substitute original evidence when an old task has no model input record',async()=>{
- mount();await userEvent.click(screen.getByRole('tab',{name:'问题与方案'}));
- expect(screen.getByText(/暂无实际模型输入记录/)).toBeVisible();
+ mount();await userEvent.click(screen.getByRole('tab',{name:'优化目标'}));
+ expect(screen.getByText(/暂无实际模型输入记录/)).toBeInTheDocument();
  expect(screen.queryByText('模型核心输入',{selector:'summary'})).not.toBeInTheDocument();
  expect(screen.getByText('原始建议与证据',{selector:'summary'})).toBeVisible();
+});
+
+it('leads with the task goal and source, keeps version secondary and model materials after goals', async () => {
+ const detail=fixture();Object.assign(detail,{title:'修复报告输出格式',source:'automatic'});mount(detail);
+ const header=screen.getByRole('region',{name:'当前候选'});
+ expect(within(header).getByRole('heading',{name:'修复报告输出格式'})).toBeVisible();
+ expect(within(header).getByText('自动任务')).toBeVisible();
+ await userEvent.click(screen.getByRole('tab',{name:'优化目标'}));
+ const materials=screen.getByText('模型输入与材料',{selector:'summary'}).closest('details')!;
+ expect(materials).not.toHaveAttribute('open');
+ expect(screen.getByText('原始建议与证据',{selector:'summary'}).compareDocumentPosition(materials)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+ expect(screen.queryByText(/近期影响次数未知/)).not.toBeInTheDocument();
+});
+
+it('keeps a completed automatic chain with prior changes reviewable and cancellable after its last no-change batch', async () => {
+ const detail=fixture();detail.latestAttempt.phase='no_change';detail.latestAttempt.input.automation={roundId:'daily'} as never;
+ detail.automaticProgress={completedBatches:2,totalBatches:2,changedItems:1,publishable:true};
+ mount(detail);await userEvent.click(screen.getByText('历史生成记录与任务操作',{selector:'summary'}));
+ expect(screen.getByRole('button',{name:'取消修复任务'})).toBeEnabled();
+ expect(screen.getByRole('button',{name:'审阅并发布'})).toBeEnabled();
+});
+it('shows a compact goal preview for large tasks without losing any item results', async () => {
+ const detail=fixture();const first=detail.latestAttempt.input.items[0];
+ detail.latestAttempt.input.items=Array.from({length:5},(_,i)=>({...first,itemId:`source-${i}`,proposal:{summary:`目标 ${i}`}}));
+ detail.latestAttempt.draft!.itemResults=detail.latestAttempt.input.items.map(i=>({itemId:i.itemId,status:'changed',reason:'已调整'}));
+ mount(detail);const panel=within(screen.getByRole('tabpanel',{name:'改动与发布'}));
+ expect(panel.getByText('目标 0',{exact:true})).toBeVisible();expect(panel.getByText('目标 4',{exact:true})).not.toBeVisible();
+ await userEvent.click(screen.getByText('更多目标处理结果（2 项）',{selector:'summary'}));
+ expect(panel.getByText('目标 4',{exact:true})).toBeVisible();
 });

@@ -87,9 +87,9 @@ export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, o
   </section>
   return <section aria-label="审阅部署与效果验证" className="rounded-xl border border-input bg-card p-5">
     <h3 className="text-base font-semibold">{title}</h3>
-    <p className="mt-2 text-sm leading-6 text-muted-foreground">{succeeded ? '在效果观察页查看对应版本的样本与判定。'
+    <p className="mt-2 text-sm leading-6 text-muted-foreground">{succeeded ? '在发布后效果页查看对应版本的样本与判定。'
       : pending ? '先核对同一个发布请求，结果未明确前不重复发布。'
-      : '查看上方改动后，点击“审阅并发布”完成确认；无需另找审阅按钮。试跑可选。'}</p>
+      : '审阅改动和检查范围后确认发布。试跑可选，发布后再观察业务效果。'}</p>
     {automatic && !automaticReady && !succeeded && <p className="mt-3 text-sm text-muted-foreground">本轮尚未完整校验，暂不可发布；保留各项进度与结果。</p>}
     {!isCurrent && !succeeded && <p className="mt-3 text-sm text-muted-foreground">当前查看的是历史候选，请切回最新可用候选。</p>}
     {!detail.capabilities.publication && <p role="alert">发布能力未启用，请检查宿主配置。</p>}

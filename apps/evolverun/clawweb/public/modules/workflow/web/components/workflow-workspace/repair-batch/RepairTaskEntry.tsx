@@ -16,13 +16,13 @@ export default function RepairTaskEntry({ tasks, loading, error = false, onOpen 
   const ordered = [...tasks].sort((a, b) => b.updatedAtMs - a.updatedAtMs)
   const active = ordered.filter(pending), history = ordered.filter(task => !pending(task))
   const current = active[0] ?? ordered[0]
+  const origin = (task: RepairTaskSummary) => <span className="rounded border border-input px-2 py-1 text-xs text-muted-foreground">{task.source === 'automatic' ? '自动任务' : task.source === 'manual' ? '手动任务' : '来源未知'}</span>
   const title = (task: RepairTaskSummary) => task.title || `优化 ${task.itemCount} 条建议`
   const action = (task: RepairTaskSummary) => task.phase === 'review' ? '查看并审阅' : '查看任务'
   const row = (task: RepairTaskSummary) => <article key={task.taskId} aria-label={`优化任务 ${task.taskId}`} className="rounded-lg border border-input bg-card p-4 text-sm">
-    <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-semibold">优化任务 · v{task.revision}</h4>{badge(task.phase)}</div>
-    <p className="mt-2 line-clamp-2 text-muted-foreground" title={title(task)}>{title(task)}</p>
+    <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="min-w-0 flex-1 break-words font-semibold">{title(task)}</h4>{origin(task)}{badge(task.phase)}</div>
     <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-      <p className="text-xs text-muted-foreground">包含 {task.itemCount} 条建议 · {new Date(task.updatedAtMs).toLocaleString()}</p>
+      <p className="text-xs text-muted-foreground">v{task.revision} · 包含 {task.itemCount} 条建议 · {new Date(task.updatedAtMs).toLocaleString()}</p>
       <button type="button" className="font-medium text-primary underline" onClick={() => { setOpen(false); onOpen(task.taskId) }}>{action(task)}</button>
     </div>
     <details className="mt-2 text-xs text-muted-foreground"><summary>任务编号</summary><p className="break-all font-mono">{task.taskId}</p></details>
@@ -38,8 +38,8 @@ export default function RepairTaskEntry({ tasks, loading, error = false, onOpen 
     </div>
     {!tasks.length && <p className="mt-2 text-xs text-muted-foreground">{error ? '任务数量暂不可用' : loading ? '正在读取优化任务…' : '暂无优化任务，选择建议后可生成草稿。'}</p>}
     {current && <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3 text-sm">
-      <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-medium text-foreground">{pending(current) ? '最近需跟进任务' : '最近任务'} · v{current.revision}</p>{badge(current.phase)}<span className="text-xs text-muted-foreground">包含 {current.itemCount} 条建议</span></div>
-        <p className="mt-2 line-clamp-1 text-xs text-muted-foreground" title={title(current)}>任务说明：{title(current)}</p></div>
+      <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h4 className="min-w-0 break-words font-medium text-foreground">{title(current)}</h4>{origin(current)}{badge(current.phase)}<span className="text-xs text-muted-foreground">v{current.revision} · 包含 {current.itemCount} 条建议</span></div>
+</div>
       <button type="button" className={current.phase === 'review' ? primary : 'font-medium text-primary underline'} onClick={() => onOpen(current.taskId)}>{action(current)}</button>
     </div>}
     {open && <RepairDialog title="优化任务" onClose={() => setOpen(false)}>

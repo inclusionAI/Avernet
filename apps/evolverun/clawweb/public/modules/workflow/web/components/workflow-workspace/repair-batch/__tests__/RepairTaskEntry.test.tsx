@@ -55,3 +55,16 @@ it('keeps unread task totals distinct from a confirmed empty list', () => {
   expect(screen.getByText('任务数量暂不可用')).toBeVisible()
   expect(screen.queryByText(/暂无优化任务/)).not.toBeInTheDocument()
 })
+
+it('shows the real goal as the heading and separates origin from review status', async () => {
+ render(<RepairTaskEntry loading={false} onOpen={vi.fn()} tasks={[
+  {taskId:'auto',title:'优化 report 节点（2 条建议）',source:'automatic',phase:'review',revision:1,itemCount:2,updatedAtMs:2},
+  {taskId:'manual',title:'修复搜索超时',source:'manual',phase:'review',revision:1,itemCount:1,updatedAtMs:1},
+ ] as never}/>);
+ expect(screen.getByRole('heading',{name:'优化 report 节点（2 条建议）'})).toBeVisible();
+ expect(screen.getByText('自动任务')).toBeVisible();
+ await userEvent.click(screen.getByRole('button',{name:'查看全部任务（2）'}));
+ const dialog=screen.getByRole('dialog',{name:'优化任务'});
+ expect(within(dialog).getByRole('heading',{name:'修复搜索超时'})).toBeVisible();
+ expect(within(dialog).getByText('手动任务')).toBeVisible();
+});

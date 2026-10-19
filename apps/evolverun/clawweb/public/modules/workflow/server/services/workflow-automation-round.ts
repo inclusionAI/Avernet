@@ -30,6 +30,9 @@ export async function runAutomaticRound(input: { job: AutomationJob; repo: Workf
       if (job.status === 'uncertain' || job.status === 'dispatching') {
         job = await repo.patch(job, { status: 'uncertain', reason: 'DRAFT_REQUEST_REQUIRES_LOOKUP', nextAtMs: now() + 30000 }, now(), true); return;
       }
+      if (!taskId && await repo.pendingAutomaticTask(job.workflowId)) {
+        await repo.patch(job, { status: 'pending', reason: 'DRAFT_IN_PROGRESS', nextAtMs: now() + 60000 }, now(), true); return;
+      }
       const baseline = await ports.baseline(job.workflowId);
       if (digestRepairJson(baseline) !== digestRepairJson(job.data.baseline as RepairBaseline)) return stop('BASELINE_REASSESSMENT_REQUIRED');
       const snapshot = await workbench.candidates(job.workflowId, { includeHistorical: true, state: 'all', pageSize: 1,versionScope:'current' });

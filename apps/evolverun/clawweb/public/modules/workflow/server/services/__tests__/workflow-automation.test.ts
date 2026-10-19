@@ -298,6 +298,7 @@ it.each([true, false])('notifies a final no_change round only when prior batches
     if (!index) { f.advance(); await f.restart().tick(); }
   }
   const task = await f.workbench.task(id);
+  expect(await new WorkflowAutomationRepository(f.db).pendingAutomaticTask('wf-1')).toBe(priorChanged ? id : null);
   expect(task.latestAttempt.phase).toBe('no_change');
   expect(task.automaticProgress?.publishable).toBe(priorChanged);
   const notices = () => vi.mocked(f.ports.notify).mock.calls.filter(([notice]) => notice.title.includes('草稿'));
@@ -308,6 +309,11 @@ it.each([true, false])('notifies a final no_change round only when prior batches
   f.advance(); await f.restart().tick();
   expect(notices()).toHaveLength(priorChanged ? 1 : 0);
   expect(f.calls).toHaveLength(2);
+  if (priorChanged) {
+    await f.workbench.cancel('owner', id, task.latestAttempt.revision);
+    expect((await f.workbench.task(id)).latestAttempt.phase).toBe('cancelled');
+    expect(await new WorkflowAutomationRepository(f.db).pendingAutomaticTask('wf-1')).toBeNull();
+  }
   if (!priorChanged) {
     const inbox = await f.workbench.candidates('wf-1');
     const item = await f.workbench.item('wf-1', 'item-0');
@@ -352,4 +358,51 @@ it('does not let an old reviewed draft permanently block a different deployment,
  expect(await repo.activeDraft('wf-1','["deployment","wf-1",39,34]',34)).toBeNull();
  await f.db.exec("UPDATE workflow_repair_revisions SET phase='drafting' WHERE task_id=?",[task.taskId]);
  expect((await repo.activeDraft('wf-1','["deployment","wf-1",39,34]',34))?.id).toBe(job.id);
+});
+
+// A completed generation journal is not a completed human review.
+it.each([false, true])('pauses new automatic drafts across days while analysis continues, then resumes after cancellation (full=%s)', async full => {
+  const f = await fixture(true, 6, full);
+  await f.service.tick();
+  const task = await readyDraft(f);
+  f.advance(); await f.service.tick();
+  expect((await f.service.status('wf-1')).jobs.find(job => job.taskId === task.taskId)?.status).toBe('done');
+  const changed = f.items[0];
+  changed.context = {...changed.context, recurrence:{flowIds:['new-evidence'], count:2}};
+  f.analyze('additional-evidence');
+  f.advance(86400000);
+  const now = Date.parse('2026-11-02T02:02:00Z') / 1000;
+  f.raw.prepare('INSERT INTO flow_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(999, 'new-unanalysed-run', 'wf-1', 'failed', now - 86400, now - 86300, now - 10, now - 10);
+  for (let i = 0; i < 3; i++) { f.advance(); await f.restart().tick(); }
+  expect(f.calls).toHaveLength(1);
+  expect(vi.mocked(f.ports.analysis.start).mock.calls.some(([value]) => value.flowId === 'new-unanalysed-run')).toBe(true);
+  expect((await f.workbench.task(task.taskId)).latestAttempt.input).toEqual(task.latestAttempt.input);
+  const pending = await f.workbench.candidates('wf-1');
+  expect(pending.tasks).toHaveLength(1);
+  await f.workbench.cancel('owner', task.taskId, task.latestAttempt.revision);
+  for (let i = 0; i < 3; i++) { f.advance(); await f.restart().tick(); }
+  expect(f.calls).toHaveLength(2);
+  expect((await f.workbench.candidates('wf-1')).tasks).toHaveLength(2);
+});
+
+it('does not pause automatic drafting for a manually created task', async () => {
+ const f=await fixture(false,1,true);
+ const inbox=await f.workbench.candidates('wf-1');
+ await f.workbench.create('human',{workflowId:'wf-1',itemIds:['item-0'],inputDigest:inbox.inputDigest,instructions:'',requestId:'manual-only'});
+ expect(await new WorkflowAutomationRepository(f.db).pendingAutomaticTask('wf-1')).toBeNull();
+});
+
+it('also pauses a previously queued new automatic task while another draft awaits review', async () => {
+ const f=await fixture(true,6);await f.service.tick();const task=await readyDraft(f);
+ f.advance();await f.service.tick();
+ const repo=new WorkflowAutomationRepository(f.db), now=Date.parse('2026-11-01T02:03:00Z');
+ const queued=await repo.ensure('wf-1','auto_draft','queued-before-review',{actorId:'owner',baseline:f.baseline},now);
+ const inbox=await f.workbench.candidates('wf-1');
+ const request={workflowId:'wf-1',itemIds:['item-5'],inputDigest:inbox.inputDigest,instructions:'',requestId:queued.id,automation:{kind:'daily',intentId:queued.id,policyVersion:1,evidenceCutoffMs:now}};
+ const claimed=(await repo.claim(queued.id,now))!;
+ await repo.patch(claimed,{data:{...queued.data,request}},now,true);
+ f.advance(120000);await f.restart().tick();
+ expect(f.calls).toHaveLength(1);
+ expect(await repo.get(queued.id)).toMatchObject({reason:'DRAFT_IN_PROGRESS'});
+ expect((await f.workbench.candidates('wf-1')).tasks.map(t=>t.taskId)).toEqual([task.taskId]);
 });

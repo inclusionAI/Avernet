@@ -38,7 +38,7 @@ it('opens a fresh new-task selection from published v1/latest no-change v2, pres
   expect(repairApi.revise).not.toHaveBeenCalled()
   await user.click(screen.getByRole('button', { name: /返回上一轮观察/ }))
   await screen.findByText(/已发布部署 #160 · 观察读取失败/)
-  expect(screen.getByRole('tab', { name: '效果观察' })).toHaveAttribute('aria-selected', 'true')
+  expect(screen.getByRole('tab', { name: '发布后效果' })).toHaveAttribute('aria-selected', 'true')
   expect(screen.getByRole('combobox', { name: '查看修复版本' })).toHaveValue('1')
   await user.click(screen.getByRole('button', { name: '开始下一轮优化' }))
   await user.click(await screen.findByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' }))

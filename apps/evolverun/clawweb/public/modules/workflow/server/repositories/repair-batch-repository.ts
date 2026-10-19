@@ -309,8 +309,10 @@ export class RepairBatchRepository {
   async cancelTask(tx: IDatabase, input: { workflowId: string; taskId: string; expectedAttemptRevision: number; expectedStateVersion: number }): Promise<void> {
     await this.lockWorkflow(tx, input.workflowId);
     const current = await this.latest(tx, input.workflowId, input.taskId);
+    const awaitingAutomaticReview = current?.phase === 'no_change' && isAutomaticBatch(current.input)
+      && changedChainItems(await new RepairBatchRepository(tx).listRevisions(input.workflowId, input.taskId), current, true).length > 0;
     if (!current || current.revision !== input.expectedAttemptRevision || current.stateVersion !== input.expectedStateVersion
-      || !['drafting', 'review', 'blocked', 'failed'].includes(current.phase)) conflict('STATE_CONFLICT', 'Task cannot be cancelled');
+      || !(['drafting', 'review', 'blocked', 'failed'].includes(current.phase) || awaitingAutomaticReview)) conflict('STATE_CONFLICT', 'Task cannot be cancelled');
     const result = await tx.exec(`UPDATE workflow_repair_revisions SET phase = 'cancelled', state_version = state_version + 1, updated_at_ms = ?
       WHERE workflow_id = ? AND task_id = ? AND revision = ? AND state_version = ?`,
     [Date.now(), input.workflowId, input.taskId, current.revision, current.stateVersion]);

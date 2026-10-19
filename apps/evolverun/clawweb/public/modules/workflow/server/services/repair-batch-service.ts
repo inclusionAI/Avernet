@@ -1,3 +1,4 @@
+import { repairTaskPresentation } from '../contracts/repair-task-presentation.js';
 import {historicalReference,reviewVersionSelection,freezeReference,historicalIntegration} from './repair-historical-reference.js';
 import { inVersionScope, itemSnapshotKey } from '../contracts/repair-version-scope.js';
 import { workflowSnapshotKey } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot';
@@ -324,6 +325,8 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       const scopedItems = visibleItems.filter(item => matchesScope(item, query));
       const revisions = await repairStage('revisions', () => new RepairBatchRepository(this.db).listRevisions(workflowId));
       const heads = new Map<string, RepairRevision>();
+      const originals = new Map<string, RepairRevision>();
+      for (const revision of revisions) originals.set(revision.taskId, revision);
       for (const revision of revisions) if (!heads.has(revision.taskId)) heads.set(revision.taskId, revision);
       for (const revision of revisions) if (revision.phase === 'published') heads.set(revision.taskId, revision);
       const counts = Object.fromEntries((['pending', 'processing', 'awaiting_verification', 'closed', 'no_action', 'all'] as RepairInboxFilter[])
@@ -340,8 +343,15 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         ...(activeSnapshot!==undefined?{activeSnapshot,versionScope}:{}),
         tasks: [...heads.values()].map(r => {
           const itemCount = isAutomaticBatch(r.input) ? r.input.automation!.totalItems ?? new Set(revisions.filter(v => v.taskId === r.taskId).flatMap(v => v.input.items.map(item => item.itemId))).size : r.input.items.length;
-          return { taskId: r.taskId, revision: r.revision, phase: r.phase, updatedAtMs: r.updatedAtMs, itemCount,
-            title: isAutomaticBatch(r.input) ? `自动优化 ${itemCount} 项建议` : (r.input.items.map(item => item.proposal?.summary || item.instruction).find(value => typeof value === 'string' && value.trim()) as string | undefined)?.trim().split('\n')[0].slice(0, 72) || `优化 ${itemCount} 项问题` };
+          let phase = r.phase;
+          if (isAutomaticBatch(r.input) && phase === 'no_change') {
+            try {
+              const chain = automaticChain(revisions.filter(row => row.taskId === r.taskId), r, true);
+              if (chain.some(row => Array.isArray(row.draft?.itemResults) && row.draft.itemResults.some(item => item.status === 'changed'))) phase = 'review';
+            } catch (error) { if (!(error instanceof RepairBatchError)) throw error; }
+          }
+          return { taskId: r.taskId, revision: r.revision, phase, updatedAtMs: r.updatedAtMs, itemCount,
+            ...repairTaskPresentation(originals.get(r.taskId)!.input) };
         }),
         repairSignatureKeys, facets,
         counts, page: { page: selectedPage, pageSize, total: filtered.length, totalPages,
@@ -433,7 +443,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     if (!workflowId) fail('TASK_NOT_FOUND', 'Repair task does not exist');
     const revisions = await repo.listRevisions(workflowId, taskId);
     const execution = await new RepairTaskRepository(db).execution(taskId, revisions[0].revision);
-    const response: RepairTaskDetail = { workflowId, taskId, latestAttempt: revisions[0], latestSuccessful: revisions.find(r => r.draft !== null && (r.phase !== 'no_change' || isAutomaticBatch(r.input))) ?? null,
+    const response: RepairTaskDetail = { workflowId, taskId, ...repairTaskPresentation(revisions.at(-1)!.input), latestAttempt: revisions[0], latestSuccessful: revisions.find(r => r.draft !== null && (r.phase !== 'no_change' || isAutomaticBatch(r.input))) ?? null,
       revisions, capabilities: this.capabilities(), ...(execution ? { execution } : {}) };
     response.scopeItemCount = isAutomaticBatch(revisions[0].input) ? revisions[0].input.automation!.totalItems ?? new Set(revisions.flatMap(r => r.input.items.map(item => item.itemId))).size : revisions[0].input.items.length;
     if (isAutomaticBatch(revisions[0].input)) response.automaticProgress = {

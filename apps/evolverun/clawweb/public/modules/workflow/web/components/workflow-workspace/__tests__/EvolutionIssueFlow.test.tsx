@@ -237,7 +237,7 @@ describe('issue and optimization flow', () => {
     await userEvent.click(screen.getByRole('button', { name: '查看并审阅' }))
     const taskDialog = await screen.findByRole('region', { name: 'Workflow 修复工作区' })
     expect(within(taskDialog).getByText('候选修复已生成')).toBeInTheDocument()
-    await userEvent.click(within(taskDialog).getByRole('tab', { name: '效果观察' }))
+    await userEvent.click(within(taskDialog).getByRole('tab', { name: '发布后效果' }))
     expect(within(taskDialog).getByText('此候选尚未发布，暂无对应部署的观察证据。')).toBeVisible()
     await userEvent.click(within(taskDialog).getByRole('button', { name: /返回问题与优化/ }))
 

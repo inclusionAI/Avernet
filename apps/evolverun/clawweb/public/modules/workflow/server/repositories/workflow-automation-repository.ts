@@ -80,6 +80,16 @@ export class WorkflowAutomationRepository {
       await new RepairReleaseRepository(tx).update(next, current.stateVersion);
     });
   }
+  /** Generation completion does not settle the user's review. Inspect task state, not job status. */
+  async pendingAutomaticTask(workflowId: string): Promise<string | null> {
+    const rows = await this.db.query<{ task_id: string }>(`SELECT r.task_id FROM workflow_repair_revisions r
+      WHERE r.workflow_id = ? AND r.phase IN ('drafting','review','blocked','failed','publishing','no_change')
+      AND EXISTS (SELECT 1 FROM workflow_repair_revisions origin WHERE origin.task_id = r.task_id AND origin.revision = 1 AND JSON_EXTRACT(origin.input_json, '$.automation') IS NOT NULL)
+      AND NOT EXISTS (SELECT 1 FROM workflow_repair_revisions newer WHERE newer.task_id = r.task_id AND newer.revision > r.revision)
+      AND (r.phase <> 'no_change' OR EXISTS (SELECT 1 FROM workflow_repair_items item WHERE item.workflow_id = r.workflow_id AND item.active_task_id = r.task_id AND item.state = 'processing'))
+      ORDER BY r.created_at_ms, r.task_id LIMIT 1`, [workflowId]);
+    return rows[0]?.task_id ?? null;
+  }
   async activeDraft(workflowId: string,targetSnapshotKey?:string,activeDeployNumber?:number): Promise<AutomationJob | null> {
     let after='';
     for(;;){

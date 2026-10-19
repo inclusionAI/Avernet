@@ -46,7 +46,7 @@ describe('automatic batch candidate chain', () => {
       expect((await f.workbench.item('wf-1', 'item-0')).state).toBe('processing');
       await f.report(first.taskId, index, index === noChangeIndex);
     }
-    expect((await f.workbench.candidates('wf-1')).tasks[0]).toMatchObject({ itemCount: 3, title: '自动优化 3 项建议' });
+    expect((await f.workbench.candidates('wf-1')).tasks[0]).toMatchObject({ itemCount: 3, phase: 'review', title: '工作流优化（分 3 批）', source: 'automatic' });
     expect(await f.workbench.task(first.taskId)).toMatchObject({ scopeItemCount: 3, automaticProgress: { completedBatches: 3, totalBatches: 3, changedItems: 2, publishable: true } });
     const approval = await f.approve(first.taskId, 3);
     await f.release.deploy('human', first.taskId, { revision: 3, expectedApprovalVersion: approval.stateVersion, requestId: 'deploy' });

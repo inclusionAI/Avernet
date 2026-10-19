@@ -126,6 +126,7 @@ export default function RepairTrialPanel({ taskId, revision, enabled, open, onCl
     <details className="mt-2"><summary>参数（已脱敏）</summary><pre className="max-h-36 overflow-auto whitespace-pre-wrap">{JSON.stringify(row.input, null, 2)}</pre></details>
   </article>)}</div>{nextOffset !== null && <button className={button} onClick={() => void refresh(nextOffset)}>加载更早试跑</button>}</details>
   const readFailure = loadError && <div className="space-y-2"><p role="alert" className="text-sm text-destructive">{loadError}</p><button className={button} onClick={() => setLoadAttempt(value => value + 1)}>重新读取参数</button></div>
+  if (!open && !error && !records.length) return null
   return <section aria-label="候选试跑" className="mt-4 space-y-3 border-t border-input pt-4">
     {open && <RepairDialog title={`先试跑候选 v${revision.revision}`} onClose={onClose} footer={actions}><div className="space-y-3">
       <p className="text-sm text-muted-foreground">这是真实执行，可能调用 MCP 或写入业务系统。不会自动发布，也不计入正式版本效果。</p>

@@ -92,7 +92,15 @@ paged and byte bounded independently of the trusted internal complete chain.
 
 The round identity deduplicates the same scope/evidence/baseline within the
 saved policy version. Competing Hosts share workflow locks and leases; no new
-round is planned while one is progressing. Disabled or changed policies stop
+round is planned while one is progressing. A persisted automatic task awaiting
+review, blocked, failed, generating or publishing also pauses new automatic
+drafts for that workflow, even after its generation journal is done. A final
+no-change batch still pauses new drafts if earlier changes remain reserved for
+review. Manual tasks do not trigger this pause. Daily scans and analysis continue;
+new evidence stays in the inbox, while the frozen draft is unchanged. Paused
+planning does not checkpoint the evaluated scope, so after publication or
+cancellation the next tick can reassess accumulated evidence against the active
+baseline. Identical scope still follows the existing round deduplication. Disabled or changed policies stop
 new dispatch. Requests of unknown outcome reconcile their stable key without
 blind replay. A manual retry of confirmed generation failure persists a new
 retry key and preserves the exact failed batch; unresolved conflicts and user
