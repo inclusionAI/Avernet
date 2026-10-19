@@ -13,6 +13,7 @@
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "test:ci": "node scripts/ci/run-tests.mjs test",
+    "ci:boundaries": "node scripts/ci/verify-package-boundaries.mjs",
     "ci:build": "node scripts/ci/run-tests.mjs build",
     "ci:check": "node scripts/ci/run-tests.mjs check"
   },

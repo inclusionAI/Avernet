@@ -813,3 +813,23 @@ The following are presumptive violations unless explicitly justified:
 | 23 | Repeated patterns should be cataloged | Improves consistency by giving LLMs standard templates for recurring architectural problems. |
 | 24 | Architecture supports incremental change | Encourages LLMs to make smaller, safer, independently verifiable changes with bounded blast radius. |
 | 25 | Every contract has conformance tests | Gives LLMs a reliable verification target to catch breakage across multiple implementations. |
+
+
+## ClawWeb Supplement: Independent Package Boundaries
+
+Within `apps/evolverun/clawweb/public`, each package owns its source tree.
+Relative imports must remain inside that package. Cross-package consumers must
+use a declared public package export, not a sibling source path. This includes
+static imports, re-exports, literal dynamic imports and test mocks. Public
+packages must not import `@ocb/*` implementations.
+
+Tests, test helpers and fixtures containing executable source have no exemption.
+If a test requires the real implementation of another package, build that package
+and consume its public export; do not use a mock factory to reach sibling source
+or change the production export contract just for the test. Generated output and
+installed dependencies are not source owners and are excluded from scanning.
+
+The public PR gate and internal deployment gate enforce the same package-boundary
+policy. A passing typecheck or test run does not replace this check. Keep the
+public check independent of OCB checkout and do not weaken deployment checks to
+accommodate a public-package violation.

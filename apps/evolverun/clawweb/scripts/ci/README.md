@@ -3,6 +3,8 @@
 From `apps/evolverun/clawweb`, use Node 20.19.0:
 
 ```sh
+npm run ci:boundaries
+node --test scripts/ci/verify-package-boundaries.test.mjs
 npm ci --no-audit --no-fund
 npm run ci:build
 npm run ci:check
@@ -24,9 +26,7 @@ files, excluding tests, fixtures and generated output. Shared code executed only
 through another package is not counted as that package's own coverage. Incomplete
 coverage is labelled explicitly; do not interpret it as complete application coverage.
 
-GitHub publishes the summary and uploads reports even after test failure. Only
-the added test step is advisory during observation; install/build/check remain
-required. No coverage threshold is introduced. Existing business test failures
+GitHub publishes the summary and uploads reports even after test failure. Boundary, install, build, check and test failures are blocking. No coverage threshold is introduced. Existing business test failures
 must be tracked separately; this change does not repair or skip them.
 
 ## Local entry
@@ -49,3 +49,11 @@ To test the internal composition, pass the OCB repository path:
 
 This uses the same local symlink association as `start-clawweb.sh`; it does not
 checkout, copy, or switch either repository.
+
+## Package boundaries
+
+`ci:boundaries` is a required public PR check. It scans package source including
+tests and mock factories: relative references must stay in their owning package,
+and cross-package code must use public exports. It needs only Node, not OCB or
+installed dependencies. It aligns the public rule with the existing internal
+composition/deployment gate; do not bypass it with sibling-source test mocks.

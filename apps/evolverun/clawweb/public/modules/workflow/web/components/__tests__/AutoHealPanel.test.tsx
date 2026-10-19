@@ -5,10 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AutoHealDiagnosisResult, FlowRun } from '@avernet/clawweb-shared/web/types'
 import AutoHealPanel from '../AutoHealPanel'
 
-// Keep React Query and HTTP handling real; resolve shared modules to source.
-vi.mock('@avernet/workflow/web/api/hooks', () => import('../../../../../shared/web/api/hooks'))
-vi.mock('@avernet/clawweb-shared/web/api/client', () => import('../../../../../shared/web/api/client'))
-
 const run: FlowRun = {
   flow_id: 'source-cron-flow', workflow_id: 'cron-workflow', workflow_title: 'Cron workflow',
   status: 'failed', triggered_by: 'cron', node_count: 1, succeeded_count: 0, failed_count: 1,

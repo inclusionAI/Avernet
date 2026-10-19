@@ -4,9 +4,6 @@ import type { PropsWithChildren } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAutoHealSourceRun, type SourceAutoHealRunRequest } from '../useAutoHealSourceRun'
 
-// Exercise the source fetchJson implementation, not a potentially stale dist build.
-vi.mock('@avernet/clawweb-shared/web/api/client', () => import('../../../../../shared/web/api/client'))
-
 let queryClient: QueryClient
 const fetchMock = vi.fn<typeof fetch>()
 const request: SourceAutoHealRunRequest = { workflowId: 'cron-workflow', sourceFlowId: 'original-cron-flow' }
