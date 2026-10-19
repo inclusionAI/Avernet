@@ -1,3 +1,4 @@
+import { WorkflowSnapshotRepository } from '@avernet/clawweb-shared/server/services/workflow-snapshot';
 import { registerRunRequest } from '../services/run-request-registration.js';
 import { productionRunSql, trialRunSql, productionRunsSql, isTrialRun, type RunPurpose } from "@avernet/clawweb-shared/server/services/run-purpose";
 /**
@@ -341,6 +342,7 @@ export class FlowRunRepository {
           now,
         ],
       );
+      await new WorkflowSnapshotRepository(this.db).associateRun(run.flowId);
       return true;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);

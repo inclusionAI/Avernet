@@ -1,3 +1,4 @@
+import {historicalReference} from '../contracts/repair-version-scope.js';
 import { automaticAdvance, changedChainItems, isAutomaticBatch } from '../contracts/repair-automatic-chain.js';
 import { repairEvidenceFacts, repairEvidenceFlows } from '../contracts/repair-batch.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
@@ -197,6 +198,7 @@ export class RepairBatchRepository {
     if (input.parentCandidateCommit !== (successful?.draft?.candidateCommit ?? null)) conflict('CONTENT_MISMATCH', 'Parent must be the task last successful candidate');
     const claims = [];
     for (const frozenItem of input.items) {
+      if(historicalReference(frozenItem)){if(!input.integration)conflict('INVALID_INPUT','Historical references require goal integration');continue;}
       const stored = await this.readItem(tx, workflowId, frozenItem.itemId);
       if (!stored) conflict('ITEM_NOT_FOUND', 'Selected item does not exist in this workflow');
       if (canonicalRepairJson(content(stored)) !== canonicalRepairJson(content(frozenItem))) conflict('CONTENT_MISMATCH', 'Selected content changed');

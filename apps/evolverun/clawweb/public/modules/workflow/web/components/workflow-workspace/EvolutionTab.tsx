@@ -1,3 +1,7 @@
+import { workflowSnapshotKey } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot'
+import { itemSnapshotKey, snapshotLabel } from '../../../server/contracts/repair-version-scope'
+import { selectionConflicts } from '../../../server/contracts/repair-selection'
+import HistoricalIssueArchive from './repair-batch/HistoricalIssueArchive'
 import { expandProposalCards, proposalMembers, proposalChecked, proposalConflicts, proposalPending, proposalSelection } from '../../../server/contracts/repair-proposal'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -132,6 +136,7 @@ function DiagnosisPanel({
   const [repairPageSize, setRepairPageSize] = useState(initialRepairView.repairPageSize)
   const [includeHistorical, setIncludeHistorical] = useState(initialRepairView.includeHistorical)
   const [selectionItems, setSelectionItems] = useState<Record<string, RepairInboxItem>>({})
+  const [selectionTargetKey, setSelectionTargetKey] = useState('')
   const [selectionOpen, setSelectionOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [selectionNotice, setSelectionNotice] = useState('')
@@ -171,7 +176,7 @@ function DiagnosisPanel({
   const requestSequence = useRef(0)
   const detailRequests = useRef(new Set<string>())
   const detailEpoch = useRef(0)
-  const { data, isLoading, isError, isFetching, isPlaceholderData, refetch } = useIssueGroups(workflowId, { page: repairPage, pageSize: repairPageSize, sort, ...(severity !== 'all' ? { severity } : {}),
+  const { data, isLoading, isError, isFetching, isPlaceholderData, refetch } = useIssueGroups(workflowId, { versionScope: 'current', page: repairPage, pageSize: repairPageSize, sort, ...(severity !== 'all' ? { severity } : {}),
     ...(nodeFilter !== 'all' ? { nodeId: nodeFilter } : {}), ...(modeFilter !== 'all' ? { failureMode: modeFilter } : {}) })
   const diagnoses = (data?.groups ?? []).flatMap(groupDiagnoses)
   const updatingIssues = !!isFetching || !!isPlaceholderData
@@ -180,7 +185,7 @@ function DiagnosisPanel({
   const queryClient = useQueryClient()
   const repairQuery = useQuery({
     queryKey: ['repair-issue-previews', workflowId, includeHistorical, canEdit, repairRefresh, previewSignatures, previewSourceVersion],
-    queryFn: () => repairBatches.candidates(workflowId, { state: 'all', page: 1, pageSize: 1, includeHistorical,
+    queryFn: () => repairBatches.candidates(workflowId, { versionScope: 'current', state: 'all', page: 1, pageSize: 1, includeHistorical,
       previewSignatures: JSON.parse(previewSignatures) }),
     enabled: repairOpen && (!!data || isError) && accessReady,
     staleTime: 30_000, gcTime: 300_000, retry: false, refetchInterval: 60_000,
@@ -257,11 +262,11 @@ function DiagnosisPanel({
   for (const cluster of clusters) cluster.aggregation = data?.groups.find(group => group.signature === cluster.signature)
   const nodes = data?.facets?.nodes ?? Array.from(new Set(clusters.map((cluster) => cluster.node))).sort()
   const modes = data?.facets?.modes ?? Array.from(new Set(clusters.map((cluster) => cluster.mode).filter(Boolean)))
-  const suggestionBySignature = new Map(suggestions.map((suggestion) => {
+  const suggestionBySignature = new Map((repairData?.activeSnapshot === undefined ? suggestions : []).map((suggestion) => {
     const status = resolveSuggestionStatus(suggestion, localStatus, applyTaskMap[suggestion.id])
     return [suggestion.signature, { ...suggestion, status }] as const
   }))
-  const standaloneSuggestions = suggestions.map(suggestion =>
+  const standaloneSuggestions = (repairData?.activeSnapshot === undefined ? suggestions : []).map(suggestion =>
     ({ ...suggestion, status: resolveSuggestionStatus(suggestion, localStatus, applyTaskMap[suggestion.id]) }))
   const enriched = clusters.map((cluster) => {
     const suggestion = suggestionBySignature.get(cluster.signature)
@@ -289,8 +294,13 @@ function DiagnosisPanel({
   const activeRepairTask = [...(repairData?.tasks ?? [])].sort((a, b) => b.updatedAtMs - a.updatedAtMs).find(task => ['drafting', 'review', 'blocked', 'publishing', 'failed'].includes(task.phase))
   const selectedItems = selectedRepairIds.flatMap(id => selectionItems[id] ? [selectionItems[id]] : [])
   const selectedIssueCount = new Set(selectedItems.map(item => item.context?.signature ?? item.groupKey)).size
-  const conflicts = proposalConflicts(selectedItems)
-  const generationReason = proposalPending(selectedItems) ? '所选目标尚待整合，可保留单项或等待整理完成。' : conflicts.length ? '所选方案存在冲突，请在列表取消互斥方案后生成。' : draftNeedsCheck ? '提交结果尚未确认，请先核对任务状态。'
+  const activeSnapshot = repairData?.activeSnapshot
+  const currentTargetKey = activeSnapshot?.status === 'resolved' ? workflowSnapshotKey(activeSnapshot.snapshot) : ''
+  const targetChanged = !!selectedRepairIds.length && !!selectionTargetKey && selectionTargetKey !== currentTargetKey
+  const historicalItemIds = selectedItems.filter(item => itemSnapshotKey(item) && itemSnapshotKey(item) !== currentTargetKey).map(item => item.itemId)
+  const hasHistorical = historicalItemIds.length > 0
+  const conflicts = hasHistorical ? selectionConflicts(selectedItems).filter(conflict => !/prompt|instruction|content|body/i.test(conflict.path)) : proposalConflicts(selectedItems)
+  const generationReason = targetChanged ? '当前生效版本已变化，请核对生成目标；选择与要求已保留。' : activeSnapshot !== undefined && activeSnapshot?.status !== 'resolved' ? '尚无可确认的当前部署版本，可查看历史记录。' : !hasHistorical && proposalPending(selectedItems) ? '所选目标尚待整合，可保留单项或等待整理完成。' : conflicts.length ? '所选方案存在冲突，请在列表取消互斥方案后生成。' : draftNeedsCheck ? '提交结果尚未确认，请先核对任务状态。'
     : selectionChecking ? '正在逐项核对已选建议…' : selectionReviewError ? '已选建议核对失败，请重试核对；原选择与要求保留。'
     : selectionPlanReview ? '整合方案发生变化，请确认已选原始范围；不会自动纳入新成员。'
     : repairError ? '修复数据读取失败，请重试后再生成。'
@@ -315,6 +325,7 @@ function DiagnosisPanel({
   const toggleRepairItem = (id: string) => {
     if (selectionChecking || draftNeedsCheck) return
     selectionRemovalNotice.current = ''; setSelectionNotice('')
+    if (!selectedRepairIds.length) setSelectionTargetKey(currentTargetKey)
     setSelectedRepairIds(current => {
     const item = selectionItems[id]
     const ids = item ? proposalMembers(item).map(member => member.itemId) : [id]
@@ -334,6 +345,7 @@ function DiagnosisPanel({
       if (epoch !== selectionReviewEpoch.current) return
       if (!fresh.canEdit || !canEdit) { setSelectionReviewError(true); setRepairActionError('当前没有修改权限，原选择与要求已保留。'); return }
       const result = reviewedSelection(ids, items, fresh, confirmPlans)
+      if (confirmPlans && fresh.activeSnapshot?.status === 'resolved') setSelectionTargetKey(workflowSnapshotKey(fresh.activeSnapshot.snapshot))
       setSelectedRepairIds(result.retained); setSelectionItems(previous => ({ ...previous, ...result.current }))
       setSelectionPlanReview(result.planReview)
       if (confirmPlans) selectionRemovalNotice.current = ''
@@ -422,7 +434,7 @@ function DiagnosisPanel({
     if (generationReason || !repairData || !selectedRepairIds.length || repairBusy || draftNeedsCheck
       || !canEdit || !repairData.canEdit || !repairData.capabilities.generation || repairLoading || repairError) return
     const input = { workflowId, itemIds: selectedRepairIds, inputDigest: repairData.inputDigest,
-      instructions, includeHistorical: repairData.includeHistorical, ...(selectionProof(selectedRepairIds, selectionItems) ? { selection: selectionProof(selectedRepairIds, selectionItems) } : {}) }
+      instructions, includeHistorical: repairData.includeHistorical, ...(currentTargetKey ? { targetSnapshotKey: selectionTargetKey || currentTargetKey, historicalItemIds } : {}), ...(selectionProof(selectedRepairIds, selectionItems) ? { selection: selectionProof(selectedRepairIds, selectionItems) } : {}) }
     const payload = { ...input, requestId: nextRequestId(input) }
     if (new TextEncoder().encode(JSON.stringify(payload)).length > repairData.limits.maxRequestBytes) {
       setRepairActionError('请求内容过大，请缩短说明或减少选择。')
@@ -487,7 +499,7 @@ function DiagnosisPanel({
 
   const acceptRepairPage = (result: RepairCandidatesResponse) => {
         if (repairError) setRepairRefresh(value => value + 1)
-        if (initializedDigest.current && initializedDigest.current !== result.inputDigest) {
+        if (result.versionScope !== 'historical' && result.versionScope !== 'all' && initializedDigest.current && initializedDigest.current !== result.inputDigest) {
           if (selectedRepairIds.length && !draftNeedsCheck && !repairBusy) void reviewCurrentSelection()
           initializedDigest.current = result.inputDigest
           detailEpoch.current += 1; detailRequests.current.clear()
@@ -499,6 +511,7 @@ function DiagnosisPanel({
       }
 
   const renderRepairItem = (item: RepairInboxItem, scopeCanEdit = true) => <RepairItemDetail key={`${item.itemId}:${initializedDigest.current}`} item={item}
+      targetSnapshotKey={currentTargetKey || undefined}
       showSelection={!!selectedRepairItemId || !selectedSignature && !historyOpen}
       embedded={!selectedRepairItemId && (!!selectedSignature || historyOpen)}
       detail={repairDetails[item.itemId]} loading={repairDetailLoading[item.itemId]} error={repairDetailErrors[item.itemId]}
@@ -581,6 +594,8 @@ function DiagnosisPanel({
       {suggestionsLoading && <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">历史建议仍在加载，不影响查看问题与修复任务。</p>}
       {repairNotice && <p role="status" className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">{repairNotice}</p>}
       {draftNeedsCheck && <p role="alert" className="text-xs text-destructive">{repairActionError || '提交结果尚未确认。'} <button type="button" disabled={repairBusy} className="underline" onClick={() => void recoverDraft()}>核对任务状态</button></p>}
+      {activeSnapshot?.status === 'resolved' && <p className="text-xs text-slate-600">生成目标：{snapshotLabel(activeSnapshot.snapshot)}{hasHistorical ? ` · 已选 ${historicalItemIds.length} 条历史参考` : ''}</p>}
+      {targetChanged && <button type="button" disabled={selectionChecking} onClick={() => void reviewCurrentSelection(true)} className="text-xs text-blue-700 underline">核对当前目标版本并保留已选范围</button>}
       <RepairProposalChoices items={selectedItems} onRemove={toggleRepairItem} disabled={repairBusy} />
       {selectionNotice && !selectionNotice.startsWith('默认不选择') && <p role="status" className="text-xs text-amber-800">{selectionNotice}</p>}
 
@@ -588,17 +603,17 @@ function DiagnosisPanel({
 
       {!isLoading && !isError && diagnoses.length === 0 && standaloneSuggestions.length === 0 && nodeFilter === 'all' && modeFilter === 'all' && (
         <div className="rounded-xl border border-slate-200 bg-white p-5 text-xs text-slate-500">
-          当前工作流暂无已记录异常。任务护航会分析失败运行，也会保留成功运行中的异常和退化信号。
+          当前生效版本暂无已记录异常。历史版本可在下方展开查看。任务护航会分析失败运行，也会保留成功运行中的异常和退化信号。
         </div>
       )}
 
       {data && !isLoading && !isError && <section aria-label="问题列表" aria-busy={updatingIssues} className="space-y-4">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3">
-          <h3 className="text-sm font-semibold text-slate-900">问题列表 · 共 {issuePage.total} 个问题</h3>
+          <h3 className="text-sm font-semibold text-slate-900">当前版本问题 · 共 {issuePage.total} 个问题</h3>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <label className="mr-2 flex items-center gap-2 text-xs text-slate-600">
               <input type="checkbox" aria-label="包含历史未复现" checked={includeHistorical} disabled={repairBusy}
-                onChange={event => changeHistoryScope(event.target.checked)} className="h-4 w-4 accent-blue-600" />包含历史未复现
+                onChange={event => changeHistoryScope(event.target.checked)} className="h-4 w-4 accent-blue-600" />{repairData?.activeSnapshot !== undefined ? '包含更早记录（30天前）' : '包含历史未复现'}
             </label>
             <select aria-label="问题排序" value={sort} onChange={event => { setSort(event.target.value as typeof sort); setRepairPage(1) }} className="rounded-md border border-input bg-background px-2 py-1 text-xs">
               <option value="priority">影响优先</option><option value="frequency">近期频率</option><option value="recent">最近发生</option>
@@ -679,12 +694,15 @@ function DiagnosisPanel({
         onClear={repairBusy ? undefined : () => setSelectedRepairIds([])}
         onTask={activeRepairTask ? () => openTask(activeRepairTask.taskId) : undefined} />}
 
+      {activeSnapshot !== undefined && <HistoricalIssueArchive workflowId={workflowId} selected={selectedRepairIds}
+        onToggle={toggleRepairItem} canEdit={canEdit && repairData?.canEdit === true && !repairLoading && !repairBusy}
+        onResult={acceptRepairPage} renderItem={renderRepairItem} />}
       <button type="button" className="text-sm text-slate-600 hover:text-blue-700 hover:underline"
         onClick={() => { setRepairOpen(true); setHistoryOpen(true) }}>全部建议与历史</button>
       {historyOpen && <RepairDialog title="全部建议与历史" onClose={() => setHistoryOpen(false)}>
         <p className="mb-3 text-xs text-muted-foreground">全部历史，不受上方问题筛选影响；此视图的分页和筛选单独生效。</p>
         <p className="mb-3 text-xs text-slate-500">用于查找未出现在当前问题页的旧建议；这里的分页仅针对建议。</p>
-        <IssueRepairSuggestions key={repairRefresh} workflowId={workflowId} includeHistorical={includeHistorical}
+        <IssueRepairSuggestions key={repairRefresh} workflowId={workflowId} versionScope="all" includeHistorical={true}
           cacheVersion={repairCacheVersion}
           selected={selectedRepairIds} onToggle={toggleRepairItem} canEdit={canEdit && repairData?.canEdit === true && !repairLoading && !repairBusy}
           limit={Math.min(100, repairData?.limits.maxItems ?? 100)}

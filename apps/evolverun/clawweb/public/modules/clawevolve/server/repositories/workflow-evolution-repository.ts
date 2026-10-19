@@ -1,3 +1,6 @@
+import { WorkflowSnapshotRepository } from '@avernet/clawweb-shared/server/services/workflow-snapshot';
+import type { WorkflowSnapshotInput } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot';
+import { bindAnalysisWorkflowSnapshot, analysisWorkflowSnapshot, hasAnalysisSnapshotColumn } from './analysis-workflow-snapshot.js';
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import {
   canonicalJson,
@@ -45,6 +48,7 @@ export type WorkflowEvolutionAnalysisRow = {
   evidence_snapshot_ref: string | null;
   evidence_snapshot_digest: string | null;
   evidence_manifest_json: string | null;
+  workflow_snapshot_json?: string | null;
   task_id: string | null;
   step_id: string | null;
   analysis_version: string;
@@ -225,6 +229,8 @@ export class WorkflowEvolutionRepository {
     const scopeFlowIds = Array.isArray(input.scope.flowIds)
       ? [...new Set(input.scope.flowIds.map(String).filter(Boolean))]
       : (input.flowId ? [input.flowId] : []);
+    const workflowSnapshot = await bindAnalysisWorkflowSnapshot(this.db, input.workflowId ?? null, scopeFlowIds);
+    const snapshotColumn = await hasAnalysisSnapshotColumn(this.db);
     const manifest = await this.captureManifest(scopeFlowIds, input.requestedAtMs);
     const evidenceStatus = manifest.flows.length === 0 || manifest.flows.every((flow) => flow.status === "missing")
       ? "missing"
@@ -239,16 +245,25 @@ export class WorkflowEvolutionRepository {
       `INSERT INTO workflow_evolution_analysis_runs
        (analysis_id, request_key, scope_type, scope_json, flow_id, workflow_id, status,
         evidence_status, evidence_snapshot_ref, evidence_snapshot_digest, evidence_manifest_json,
-        task_id, step_id, analysis_version, requested_by, requested_at_ms, state_version, gmt_create, gmt_modified)
-       VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-      [input.analysisId, input.requestKey, input.scopeType, canonicalJson(input.scope), input.flowId ?? null,
+        task_id, step_id, analysis_version, requested_by, requested_at_ms, state_version, gmt_create, gmt_modified${snapshotColumn ? ", workflow_snapshot_json" : ""})
+       VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?${snapshotColumn ? ", ?" : ""})`,
+      [input.analysisId, input.requestKey, input.scopeType, canonicalJson({ ...input.scope, workflowSnapshot }), input.flowId ?? null,
         input.workflowId ?? null, evidenceStatus, snapshotRef, snapshotDigest, manifestJson,
         input.taskId ?? null, input.stepId ?? null, input.analysisVersion, input.requestedBy ?? null,
-        input.requestedAtMs, now, now],
+        input.requestedAtMs, now, now, ...(snapshotColumn ? [canonicalJson(workflowSnapshot)] : [])],
     );
     const row = await this.findAnalysisRun(input.analysisId);
     if (!row) throw new Error("analysis run insert failed");
     return row;
+  }
+
+  async getWorkflowSnapshotInput(analysisId: string): Promise<WorkflowSnapshotInput> {
+    const analysis = await this.findAnalysisRun(analysisId);
+    if (!analysis) throw new Error('analysis_not_found');
+    const binding = analysisWorkflowSnapshot(analysis);
+    if (binding.status !== 'resolved') throw new Error('WORKFLOW_SNAPSHOT_UNAVAILABLE');
+    if (binding.snapshot.workflowId !== analysis.workflow_id) throw new Error('IDENTITY_MISMATCH');
+    return new WorkflowSnapshotRepository(this.db).read(binding.snapshot);
   }
 
   async findAnalysisRun(analysisId: string): Promise<WorkflowEvolutionAnalysisRow | null> {
@@ -386,10 +401,14 @@ export class WorkflowEvolutionRepository {
     if (result.analysisId !== analysisId) throw new Error("analysis result identity mismatch");
     const frozenInput = await this.getAnalysisInput(analysisId);
     if (!frozenInput) throw new Error("analysis run not found");
+    const snapshotBinding = analysisWorkflowSnapshot(frozenInput.analysis);
     const allowedEventIds = new Set(frozenInput.evidence.map((event) => event.event_id));
     const manifest = JSON.parse(frozenInput.analysis.evidence_manifest_json ?? "null") as EvidenceManifest | null;
     const allowedFlowIds = new Set((manifest?.flows ?? []).map((flow) => flow.flowId));
     for (const diagnosis of result.diagnoses) {
+      if (diagnosis.proposal && snapshotBinding?.status === 'resolved' && diagnosis.proposal.baseSpecDigest !== snapshotBinding.snapshot.configDigest) {
+        throw new Error('proposal configuration does not match analysis snapshot');
+      }
       const unknownEventId = diagnosis.evidenceEventIds.find((eventId) => !allowedEventIds.has(eventId));
       if (unknownEventId) throw new Error(`diagnosis references evidence outside snapshot: ${unknownEventId}`);
       const unknownFlowId = allowedFlowIds.size > 0

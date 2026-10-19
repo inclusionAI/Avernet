@@ -15,7 +15,7 @@ const db = {
   dbType: "sqlite",
   dialect: sqliteDialect,
   exec: async (sql: string, params: unknown[] = []) => {
-    inserted = { sql, params };
+    if (sql.startsWith("INSERT INTO flow_runs")) inserted = { sql, params };
     return { affectedRows: 1 };
   },
   query: async (sql: string) => sql.includes("workflow_repair_release_records") ? [] : [{ flow_id: "flow", state_json: inserted?.params[4] ?? null }],

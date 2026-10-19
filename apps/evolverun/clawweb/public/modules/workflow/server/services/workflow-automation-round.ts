@@ -1,3 +1,4 @@
+import {workflowSnapshotKey} from '@avernet/clawweb-shared/server/contracts/workflow-snapshot';
 import type { AutomationWorkbench, WorkflowAutomationPorts, WorkflowAutomationPolicy } from '../contracts/workflow-automation.js';
 import type { RepairFeedbackRequest, RepairSelectionRequest } from '../contracts/repair-workbench.js';
 import type { RepairBaseline } from '../contracts/repair-batch.js';
@@ -25,13 +26,14 @@ export async function runAutomaticRound(input: { job: AutomationJob; repo: Workf
     if (!existing) {
       const access = await input.authority();
       if (access.actorId !== job.data.actorId || access.policy.version !== request.automation!.policyVersion) return stop('OWNER_OR_POLICY_CHANGED');
-      const baseline = await ports.baseline(job.workflowId);
-      if (digestRepairJson(baseline) !== digestRepairJson(job.data.baseline as RepairBaseline)) return stop('BASELINE_REASSESSMENT_REQUIRED');
-      // Resolve unknown outcomes via the stable request key. Do not re-dispatch an unknown creation.
+      // Resolve unknown outcomes via the stable request key before considering another target.
       if (job.status === 'uncertain' || job.status === 'dispatching') {
         job = await repo.patch(job, { status: 'uncertain', reason: 'DRAFT_REQUEST_REQUIRES_LOOKUP', nextAtMs: now() + 30000 }, now(), true); return;
       }
-      const snapshot = await workbench.candidates(job.workflowId, { includeHistorical: true, state: 'all', pageSize: 1 });
+      const baseline = await ports.baseline(job.workflowId);
+      if (digestRepairJson(baseline) !== digestRepairJson(job.data.baseline as RepairBaseline)) return stop('BASELINE_REASSESSMENT_REQUIRED');
+      const snapshot = await workbench.candidates(job.workflowId, { includeHistorical: true, state: 'all', pageSize: 1,versionScope:'current' });
+      if(request.targetSnapshotKey&&snapshot.activeSnapshot!==undefined&&(snapshot.activeSnapshot?.status!=='resolved'||workflowSnapshotKey(snapshot.activeSnapshot.snapshot)!==request.targetSnapshotKey))return stop('TARGET_VERSION_CHANGED');
       if (snapshot.inputDigest !== request.inputDigest) return stop('SOURCE_CHANGED');
       for (const item of await workbench.items(job.workflowId, request.itemIds)) {
         if (automaticItemDigest(item) !== job.data.revisions[item.itemId]) return stop('SOURCE_CHANGED');
@@ -61,6 +63,7 @@ export async function runAutomaticRound(input: { job: AutomationJob; repo: Workf
     if (['review', 'no_change'].includes(revision.phase)
       && (revision.checks?.static as { status?: string })?.status === 'passed' && typeof revision.draft?.candidateCommit === 'string') {
       try { automaticChain(task.revisions, revision); } catch { return stop('AUTOMATIC_CHAIN_INCOMPLETE'); }
+      if(digestRepairJson(await ports.baseline(job.workflowId))!==digestRepairJson(job.data.baseline as RepairBaseline))return stop('BASELINE_REASSESSMENT_REQUIRED');
       if (index + 1 < batches.length) {
         const next: RepairFeedbackRequest = { ...request, itemIds: batches[index + 1], requestId: `${job.id}:${index + 1}`,
           expectedAttemptRevision: revision.revision, parentCandidateCommit: revision.draft.candidateCommit, feedback: '',

@@ -1,3 +1,4 @@
+import {historicalReference} from '../contracts/repair-version-scope.js';
 import { changedChainItems } from '../contracts/repair-automatic-chain.js';
 import { productionRunsSql } from "@avernet/clawweb-shared/server/services/run-purpose";
 import { randomUUID } from 'node:crypto';
@@ -37,7 +38,7 @@ export function decideRepairEffect(rule: RepairEffectRule | null, deployNumber: 
 export function createRepairAutoVerification(db: IDatabase, publication?: RepairPublicationPort) {
   async function decisions(d: RepairDeployment) {
     const revision = await new RepairBatchRepository(db).getRevision(d.workflowId, d.taskId, d.revision);
-    const items = revision ? changedChainItems(await new RepairBatchRepository(db).listRevisions(d.workflowId, d.taskId), revision) : [];
+    const items = revision ? changedChainItems(await new RepairBatchRepository(db).listRevisions(d.workflowId, d.taskId), revision).filter(item=>!historicalReference(item)) : [];
     const changed = new Set(items.map(item => item.itemId));
     const result: Array<RepairEffectDecision & { itemId: string }> = [];
     const active = changed.size ? (await db.query<{ deploy_number: number }>('SELECT deploy_number FROM workflow_deploy_history WHERE workflow_id = ? AND is_active = 1', [d.workflowId]))[0] : null;

@@ -1,3 +1,6 @@
+import { WorkflowSnapshotRepository } from '@avernet/clawweb-shared/server/services/workflow-snapshot';
+import { workflowSnapshotKey } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot';
+import { analysisWorkflowSnapshot } from './analysis-workflow-snapshot.js';
 import { productionRunsSql } from "@avernet/clawweb-shared/server/services/run-purpose";
 import { issuePriority, compareIssuePriority, type IssueSort, type IssueRun, type IssuePriority } from '../services/evolution/issue-priority.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
@@ -37,7 +40,7 @@ export class IssueAggregationRepository {
     return this.groups(workflowId, { ...options, tolerateInvalid: true });
   }
 
-  private async groups(workflowId: string, options: { sinceMs?: number; tolerateInvalid?: boolean } = {}): Promise<IssueGroup[]> {
+  private async groups(workflowId: string, options: { sinceMs?: number; tolerateInvalid?: boolean; versionScope?: 'current'|'historical'|'all' } = {}): Promise<IssueGroup[]> {
     const analyses: IssueAnalysis[] = [];
     let afterId = 0;
     for (;;) {
@@ -52,7 +55,7 @@ export class IssueAggregationRepository {
         try {
           const result = validateWorkflowEvolutionAnalysisResult(JSON.parse(row.result_json ?? 'null'));
           const scope = JSON.parse(row.scope_json) as { flowIds?: unknown };
-          analyses.push({ analysisId: row.analysis_id, flowId: row.flow_id, flowIds: Array.isArray(scope.flowIds) ? scope.flowIds.map(String) : [], completedAtMs: row.completed_at_ms ?? row.requested_at_ms, diagnoses: result.diagnoses, analysisContext: { facts: result.facts, inferences: result.inferences, unknowns: result.unknowns, evidenceStatus: 'evidenceStatus' in result ? result.evidenceStatus : null } });
+          analyses.push({ analysisId: row.analysis_id, flowId: row.flow_id, flowIds: Array.isArray(scope.flowIds) ? scope.flowIds.map(String) : [], completedAtMs: row.completed_at_ms ?? row.requested_at_ms, diagnoses: result.diagnoses, analysisContext: { facts: result.facts, inferences: result.inferences, unknowns: result.unknowns, workflowSnapshot: analysisWorkflowSnapshot(row), evidenceStatus: 'evidenceStatus' in result ? result.evidenceStatus : null } });
         } catch (error) {
           if (!options.tolerateInvalid) throw error;
           console.warn('[workflow-repair] skipped incompatible analysis source', { workflowId, analysisId: row.analysis_id });
@@ -88,18 +91,28 @@ export class IssueAggregationRepository {
         reasoning: row.error_text || row.failure_signature, evidenceEventIds: [] });
       legacyByRun.set(row.flow_id, entry);
     }
-    return buildIssueGroups(workflowId, [...analyses, ...legacyByRun.values()]);
+    const all=[...analyses,...legacyByRun.values()];
+    if(options.versionScope&&options.versionScope!=='all'){
+      const snapshots=new WorkflowSnapshotRepository(this.db),active=await snapshots.active(workflowId);
+      const activeKey=active?.status==='resolved'?workflowSnapshotKey(active.snapshot):null;
+      const ids=[...new Set(all.flatMap(a=>[...(a.flowIds??[]),...(a.flowId?[a.flowId]:[]),...a.diagnoses.flatMap(d=>d.flowIds)]))];
+      const refs = await snapshots.forRuns(ids);
+      const current = new Map([...refs].map(([id, ref]) => [id, !!activeKey && ref.status === 'resolved' && workflowSnapshotKey(ref.snapshot) === activeKey]));
+      const keep=(id:string)=>options.versionScope==='current'?current.get(id)===true:current.get(id)!==true;
+      for(const a of all){a.flowId=a.flowId&&keep(a.flowId)?a.flowId:null;a.flowIds=a.flowIds?.filter(keep);a.diagnoses=a.diagnoses.map(d=>({...d,flowIds:d.flowIds.filter(keep)})).filter(d=>d.flowIds.length>0);}
+    }
+    return buildIssueGroups(workflowId, all);
   }
 
-  async list(workflowId: string, inputVersion: IssueAggregationInputVersion = ISSUE_AGGREGATION_INPUT_V1, signature?: string): Promise<PresentedIssueGroup[]> {
-    const allGroups = signature ? await this.readProjection(workflowId) : await this.groups(workflowId);
-    return this.present(workflowId, signature ? allGroups.filter(group => group.signature === signature) : allGroups, inputVersion);
+  async list(workflowId: string, inputVersion: IssueAggregationInputVersion = ISSUE_AGGREGATION_INPUT_V1, signature?: string, versionScope?: 'current'|'historical'|'all'): Promise<PresentedIssueGroup[]> {
+    const allGroups = versionScope ? await this.groups(workflowId,{versionScope,tolerateInvalid:true}) : signature ? await this.readProjection(workflowId) : await this.groups(workflowId);
+    return this.present(workflowId, signature ? allGroups.filter(group => group.signature === signature) : allGroups, inputVersion,!!versionScope&&versionScope!=='all');
   }
 
   /** Page the issue projection before loading frozen summaries, never page its suggestions. */
-  async listPage(workflowId: string, query: { page: number; pageSize: number; nodeId?: string; failureMode?: string; sort?: IssueSort; severity?: string }) {
-    const all = await this.readProjection(workflowId);
-    const runs = await this.priorityRuns(workflowId, [...new Set(all.flatMap(group => group.flowIds))]);
+  async listPage(workflowId: string, query: { page: number; pageSize: number; nodeId?: string; failureMode?: string; sort?: IssueSort; severity?: string; versionScope?: 'current'|'historical'|'all' }) {
+    const all = query.versionScope ? await this.groups(workflowId,{versionScope:query.versionScope,tolerateInvalid:true}) : await this.readProjection(workflowId);
+    const runs = await this.priorityRuns(workflowId, [...new Set(all.flatMap(group => group.flowIds))],query.versionScope);
     const priorities = new Map(all.map(group => [group.signature, issuePriority(group, runs)]));
     const identity = (group: IssueGroup) => [...group.sources].sort((a, b) =>
       b.completedAtMs - a.completedAtMs || a.sourceId.localeCompare(b.sourceId))[0];
@@ -116,11 +129,15 @@ export class IssueAggregationRepository {
     filtered.sort((a, b) => compareIssuePriority(priorities.get(a.signature)!, priorities.get(b.signature)!, query.sort ?? 'priority') || a.signature.localeCompare(b.signature));
     const totalPages = Math.max(1, Math.ceil(filtered.length / query.pageSize));
     const page = Math.min(query.page, totalPages);
-    const groups = await this.present(workflowId, filtered.slice((page - 1) * query.pageSize, page * query.pageSize), ISSUE_AGGREGATION_INPUT_V2);
+    const groups = await this.present(workflowId, filtered.slice((page - 1) * query.pageSize, page * query.pageSize), ISSUE_AGGREGATION_INPUT_V2,!!query.versionScope&&query.versionScope!=='all');
     return { groups: groups.map(group => ({ ...group, priority: priorities.get(group.signature)! })), facets, page: { page, pageSize: query.pageSize, total: filtered.length, totalPages } };
   }
 
-  private async priorityRuns(workflowId: string, affectedIds: string[]): Promise<IssueRun[]> {
+  private async priorityRuns(workflowId: string, affectedIds: string[],versionScope?: 'current'|'historical'|'all'): Promise<IssueRun[]> {
+    const active=versionScope&&versionScope!=='all'?await new WorkflowSnapshotRepository(this.db).active(workflowId):null;
+    const activeRef=active?.status==='resolved'&&active.snapshot.kind==='deployment'?active.snapshot:null;
+    const versionSql=!versionScope||versionScope==='all'?'':!activeRef?(versionScope==='current'?' AND 1 = 0':''):versionScope==='current'?' AND workflow_version = ? AND workflow_deploy_number = ?':' AND (COALESCE(workflow_version,-1) <> ? OR COALESCE(workflow_deploy_number,-1) <> ?)';
+    const versionParams=activeRef&&versionSql?[activeRef.workflowVersion,activeRef.deployNumber]:[];
     const runs = new Map<string, IssueRun>();
     const nowMs = Date.now(), sinceMs = nowMs - 14 * 86_400_000;
     const remember = (row: { flow_id: string; started_at: number }) => {
@@ -134,7 +151,7 @@ export class IssueAggregationRepository {
       const rows = await this.db.query<{ flow_id: string; started_at: number }>(
         `SELECT flow_id, started_at FROM ${productionRunsSql()} flow_runs WHERE workflow_id = ? AND flow_id > ?
          AND ((started_at >= ? AND started_at <= ?) OR (started_at >= ? AND started_at <= ?))
-         ORDER BY flow_id LIMIT 500`, [workflowId, after, sinceMs / 1000, nowMs / 1000, sinceMs, nowMs]);
+         ${versionSql} ORDER BY flow_id LIMIT 500`, [workflowId, after, sinceMs / 1000, nowMs / 1000, sinceMs, nowMs,...versionParams]);
       if (!rows.length) break;
       for (const row of rows) remember(row);
       after = rows.at(-1)!.flow_id;
@@ -234,7 +251,7 @@ export class IssueAggregationRepository {
     return groups;
   }
 
-  private async present(workflowId: string, groups: IssueGroup[], inputVersion: IssueAggregationInputVersion): Promise<PresentedIssueGroup[]> {
+  private async present(workflowId: string, groups: IssueGroup[], inputVersion: IssueAggregationInputVersion, restrictToSources = false): Promise<PresentedIssueGroup[]> {
     if (!groups.length) return [];
     // Do not transfer every historical frozen input/result just to locate the displayed revision.
     // Multi-path JSON_EXTRACT works in SQLite and MySQL/OceanBase without dialect-specific unquoting.
@@ -272,7 +289,8 @@ export class IssueAggregationRepository {
       const displayed = completed ?? current;
       const body = displayed ? bodies.get(displayed.analysis_id) : undefined;
       if (displayed && !body) throw new Error('aggregation snapshot unavailable');
-      const frozen = completed ? body!.snapshot.input : null;
+      const candidateFrozen = completed ? body!.snapshot.input : null;
+      const frozen=!restrictToSources||candidateFrozen?.sources.every(source=>group.flowIds.includes(source.flowId))?candidateFrozen:null;
       const currentStatus = current?.status === 'queued' && Date.now() - current.requested_at_ms > 600_000 ? 'failed' : current?.status;
       const settled = currentStatus === 'completed' || currentStatus === 'queued';
       const tooLarge = !settled && (group.sources.length > 500
@@ -296,7 +314,15 @@ export class IssueAggregationRepository {
     if (!parent || parent.status !== 'completed' || parent.scope_type === SCOPE || !parent.workflow_id) throw new Error('completed run analysis required');
     await this.db.exec(`UPDATE workflow_evolution_analysis_runs SET status = 'failed', error_code = 'aggregation_timeout', state_version = state_version + 1
       WHERE workflow_id = ? AND scope_type = ? AND status = 'queued' AND requested_at_ms < ?`, [parent.workflow_id, SCOPE, Date.now() - 600_000]);
-    const groups = await this.list(parent.workflow_id, inputVersion);
+    const source = analysisWorkflowSnapshot(parent);
+    let versionScope: 'current' | undefined;
+    if (source?.status === 'resolved') {
+      const active = await new WorkflowSnapshotRepository(this.db).active(parent.workflow_id);
+      // Completion of a historical/test analysis must not rebuild old model summaries.
+      if (active?.status !== 'resolved' || workflowSnapshotKey(active.snapshot) !== workflowSnapshotKey(source.snapshot)) return [];
+      versionScope = 'current';
+    }
+    const groups = await this.list(parent.workflow_id, inputVersion, undefined, versionScope);
     const parentResult = validateWorkflowEvolutionAnalysisResult(JSON.parse(parent.result_json!));
     const parentScope = JSON.parse(parent.scope_json) as { flowIds?: unknown };
     const declaredFlows = Array.isArray(parentScope.flowIds) ? parentScope.flowIds.map(String) : [];

@@ -80,10 +80,26 @@ export class WorkflowAutomationRepository {
       await new RepairReleaseRepository(tx).update(next, current.stateVersion);
     });
   }
-  async activeDraft(workflowId: string): Promise<AutomationJob | null> {
-    const rows = await this.db.query<{ body_json: string }>(`SELECT body_json FROM workflow_repair_release_records
-      WHERE task_id = ? AND record_kind = 'auto_draft' AND ${this.json('status')} NOT IN ('done', 'blocked') ORDER BY updated_at_ms LIMIT 1`, [taskScope(workflowId)]);
-    return rows[0] ? JSON.parse(rows[0].body_json) : null;
+  async activeDraft(workflowId: string,targetSnapshotKey?:string,activeDeployNumber?:number): Promise<AutomationJob | null> {
+    let after='';
+    for(;;){
+      const rows=await this.db.query<{record_id:string;body_json:string}>(`SELECT record_id,body_json FROM workflow_repair_release_records
+        WHERE task_id=? AND record_kind='auto_draft' AND ${this.json('status')} NOT IN ('done','blocked') AND record_id>?
+        ORDER BY record_id LIMIT 100`,[taskScope(workflowId),after]);
+      if(!rows.length)return null;
+      for(const row of rows){
+        const job=JSON.parse(row.body_json) as AutomationJob;
+        if(targetSnapshotKey===undefined&&activeDeployNumber===undefined)return job;
+        if(targetSnapshotKey&&job.data.targetSnapshotKey===targetSnapshotKey||activeDeployNumber!==undefined&&job.data.baseline?.activeDeployNumber===activeDeployNumber)return job;
+        if(['dispatching','uncertain'].includes(job.status))return job;
+        const task=job.data.realTaskId
+          ?(await this.db.query<{phase:string;input_json:string}>('SELECT phase,input_json FROM workflow_repair_revisions WHERE task_id=? ORDER BY revision DESC LIMIT 1',[job.data.realTaskId]))[0]
+          :job.data.request?.requestId?(await this.db.query<{phase:string;input_json:string}>('SELECT phase,input_json FROM workflow_repair_revisions WHERE workflow_id=? AND request_id=? ORDER BY revision DESC LIMIT 1',[workflowId,job.data.request.requestId]))[0]:null;
+        if(task){if(['drafting','publishing'].includes(task.phase)||JSON.parse(task.input_json).baseline?.activeDeployNumber===activeDeployNumber)return job;}
+        else if(job.data.baseline?.activeDeployNumber===undefined)return job;
+      }
+      after=rows.at(-1)!.record_id;
+    }
   }
   async recent(workflowId: string): Promise<AutomationJob[]> {
     return (await this.db.query<{ body_json: string }>(`SELECT body_json FROM workflow_repair_release_records WHERE task_id = ?

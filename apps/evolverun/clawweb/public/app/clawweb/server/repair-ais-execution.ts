@@ -210,6 +210,7 @@ Promise<{ snapshotId: number; gitStore: RepairGitStore } | undefined> {
 export function createRepairAisExecution(db: IDatabase, ais: AistudioService,
   git: RepairGitStore, snapshotId: number): RepairExecutionPort {
   return {
+    integrationVersion: 'workflow-proposal-plan/v1',
     async resolveBaseline(workflowId) {
       const row = await new WorkflowDeployHistoryRepository(db).findActiveByWorkflowId(workflowId);
       if (!row) throw new Error('Workflow has no active deployment');

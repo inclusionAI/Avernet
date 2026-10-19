@@ -74,6 +74,9 @@ export function createEvolveKnowledgeRouter(
     try {
       // Browser eligibility uses supported compaction; Bot preparation still negotiates its version.
       const signature = textOrNull(req.query.signature);
+      const versionScope=textOrNull(req.query.versionScope)??undefined;
+      if(versionScope&&!['current','historical','all'].includes(versionScope)){res.status(400).json({error:'invalid_version_scope'});return;}
+      const scope=versionScope as 'current'|'historical'|'all'|undefined;
       const paged = req.query.page !== undefined || req.query.pageSize !== undefined;
       const page = Number(req.query.page ?? 1);
       const pageSize = Number(req.query.pageSize ?? 20);
@@ -86,10 +89,10 @@ export function createEvolveKnowledgeRouter(
         res.status(400).json({ error: 'invalid_issue_sort_or_severity' }); return;
       }
       const repository = new IssueAggregationRepository(_db);
-      const result = paged ? await repository.listPage(workflowId, { page, pageSize,
+      const result = paged ? await repository.listPage(workflowId, { page, pageSize, versionScope:scope,
         sort: sort as 'priority' | 'frequency' | 'recent', severity: severity ?? undefined, nodeId: textOrNull(req.query.nodeId) ?? undefined, failureMode: textOrNull(req.query.failureMode) ?? undefined })
-        : { groups: await repository.list(workflowId, ISSUE_AGGREGATION_INPUT_V2, signature ?? undefined) };
-      const groups = result.groups;
+        : { groups: await repository.list(workflowId, ISSUE_AGGREGATION_INPUT_V2, signature ?? undefined,scope) };
+      const groups = result.groups.map(group => ({ ...group, ...(scope ? { versionScope: scope } : {}) }));
       // Opt-in presentation keeps full-source consumers unchanged.
       res.json({ ...result, groups: req.query.view === 'summary' ? groups.map(group => ({ ...group,
         presentation: 'summary',

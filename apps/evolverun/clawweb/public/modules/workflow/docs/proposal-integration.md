@@ -207,3 +207,22 @@ Publication receipts and new-version samples are local simulations only. These
 checks do not prove deployed Snapshot support, external provider quality,
 MySQL/OceanBase concurrency or real business effects. No real workflow, Bot, AIS,
 trial, production configuration, merge or deployment is exercised.
+
+### Version-scoped source goals
+
+The workbench requests `versionScope=current` for the active deployment and
+`versionScope=historical` for the folded archive. Omitting the issue API scope
+preserves legacy consumers. Selected-ID hydration includes the complete history.
+
+Historical selection declares `targetSnapshotKey` and the exact `historicalItemIds`.
+The server verifies source identity and freezes `context.sourceSnapshot`,
+`context.targetSnapshot`, and `context.referenceOnly`; it preserves the original
+proposal and its digest. Historical sources are goals in the existing v1 integrated
+writer, without source reservations or lifecycle updates. Feedback keeps the
+task's frozen target. New daily work accepts only the active deployment.
+
+The optional execution-port `integrationVersion` advertises local support for the
+existing v1 transport. A Host without this declaration rejects historical generation
+before task creation. This flag does not certify the configured AIS Snapshot:
+the existing paired-consumer deployment check above still applies. No consumer
+upgrade, Snapshot publication, or real model call is part of this implementation.

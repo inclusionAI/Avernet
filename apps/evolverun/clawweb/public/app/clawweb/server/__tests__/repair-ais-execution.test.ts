@@ -40,6 +40,11 @@ function fixture() {
 }
 
 describe('Workflow Repair Git-backed AIS execution', () => {
+  it('declares its existing v1 integration transport for historical goal generation', () => {
+    const adapter = createRepairAisExecution({} as IDatabase, {} as AistudioService, {} as RepairGitStore, 1);
+    expect(adapter.integrationVersion).toBe('workflow-proposal-plan/v1');
+  });
+
   it('rejects partial or invalid repair configuration but permits an unconfigured optional provider', async () => {
     await expect(resolveRepairAisConfiguration('fixture')).resolves.toBeUndefined();
     await expect(resolveRepairAisConfiguration('fixture', 'not-a-number', '/missing/repair-mirror.git'))

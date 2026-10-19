@@ -64,3 +64,11 @@ it('keeps multiple reviewed originals when an exact group gains an unselected eq
   const complementary = reviewedSelection(['a', 'b'], previous, { ...fresh, plans: fresh.plans.map(plan => plan.id === 'expanded' ? { ...plan, relation: 'complementary' as const } : plan) }, true)
   expect(complementary.retained).toEqual(['a', 'b']);expect(complementary.planReview).toBe(true)
 })
+
+it('retains a verified historical suggestion as a read-only goal for the current target', () => {
+  const snapshot = { kind: 'deployment' as const, workflowId: 'wf', workflowVersion: 39, deployNumber: 34, configDigest: 'a'.repeat(64) }
+  const old = { ...item('old'), state: 'verified' as const, context: { sourceSnapshot: { status: 'resolved', snapshot } } }
+  const fresh = { items: [old], missing: [], inputDigest: 'new', canEdit: true,
+    activeSnapshot: { status: 'resolved' as const, snapshot: { ...snapshot, workflowVersion: 40, deployNumber: 35 } } }
+  expect(reviewedSelection(['old'], { old }, fresh).retained).toEqual(['old'])
+})

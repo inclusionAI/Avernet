@@ -1,3 +1,4 @@
+import { workflowSnapshotKey, type WorkflowSnapshotRef } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot';
 import { createHash } from 'node:crypto';
 import type { AutomationOrigin } from './workflow-automation.js';
 
@@ -163,6 +164,19 @@ export function validateRepairBatchInput(value: unknown): RepairBatchInput {
   // The shared MySQL renderer maps VARCHAR(255) to VARCHAR(190).
   valid(gitIdentity(baseline.workflowId, 190) && text(baseline.packId, 255) && text(baseline.repoId, 255), 'baseline identity');
   valid(integer(baseline.releaseRevision) && (baseline.activeDeployNumber === null || integer(baseline.activeDeployNumber, 1)), 'baseline revision');
+  for (const item of value.items) {
+    if (item.context?.referenceOnly !== true) continue;
+    const binding = item.context.sourceSnapshot, target = item.context.targetSnapshot;
+    valid(value.integration && object(binding) && binding.status === 'resolved' && object(binding.snapshot) && object(target), 'historical reference');
+    const source = binding.snapshot;
+    valid(source.kind === 'deployment' && integer(source.workflowVersion, 1) && integer(source.deployNumber, 1)
+      || source.kind === 'saved' && gitObject(source.commit) && text(source.sourceFlowId, 255), 'historical source identity');
+    valid(source.workflowId === baseline.workflowId && target.workflowId === baseline.workflowId
+      && target.kind === 'deployment' && integer(target.workflowVersion, 1) && target.deployNumber === baseline.activeDeployNumber
+      && digest(target.configDigest) && digest(source.configDigest)
+      && workflowSnapshotKey(source as WorkflowSnapshotRef) !== workflowSnapshotKey(target as WorkflowSnapshotRef), 'historical target/source identity');
+  }
+
   valid(digest(baseline.specDigest) && gitObject(baseline.packCommit) && gitObject(baseline.packDigest), 'baseline digests');
   valid(baseline.proposalSpecDigest === undefined || digest(baseline.proposalSpecDigest), 'baseline proposalSpecDigest');
   valid(text(baseline.specPath, 1024) && !baseline.specPath.startsWith('/') && !baseline.specPath.includes('\\')

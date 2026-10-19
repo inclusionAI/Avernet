@@ -1,3 +1,5 @@
+import { WorkflowSnapshotRepository } from '@avernet/clawweb-shared/server/services/workflow-snapshot';
+import { repairSourceSnapshot } from '@avernet/workflow/server/services/repair-source-snapshot';
 import { resolveAnalysisConfig } from '@avernet/clawweb-shared/server/db';
 import { createProposalModel } from './repair-proposal-model.js';
 import { createProposalCoordinator, type ProposalModelPort } from '@avernet/workflow/server/services/repair-proposal-integration';
@@ -35,6 +37,8 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
   automation?: { settings: AutoAnalysisSettings; ports: WorkflowAutomationPorts; now?: () => number };
 }): { service: ReturnType<typeof createRepairWorkbenchService>; release: ReturnType<typeof createRepairReleaseService>; trials: ReturnType<typeof createRepairTrialService>; router: Router; automation: WorkflowAutomationService | undefined; monitor: { reconcile(): Promise<number> } } {
   const sources = createRepairSourcePort({
+    snapshot: repairSourceSnapshot,
+    snapshotRuns: (tx, flowIds) => new WorkflowSnapshotRepository(tx).forRuns(flowIds),
     groups: (tx, workflowId, sourceOptions) => new IssueAggregationRepository(tx).listSources(workflowId, sourceOptions),
     suggestions: async (tx, workflowId, sourceOptions) => {
       const rows: RepairSuggestionSource[] = [];
@@ -56,6 +60,7 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
     },
     evidence: (tx, _workflowId, eventIds) => new WorkflowEvolutionRepository(tx).listEvidenceByEventIds(eventIds),
   });
+  sources.activeSnapshot = (tx, workflowId) => new WorkflowSnapshotRepository(tx).active(workflowId);
   sources.readVersion = async (tx, workflowId) => {
     // No JSON bodies: independently committed analysis, legacy sources and human
     // dispositions all invalidate the bounded read projection on every instance.
@@ -64,6 +69,7 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
       ['workflow_healing_diagnoses', 'id', 'gmt_modified'],
       ['workflow_healing_suggestions', 'id', 'gmt_modified'],
       ['workflow_repair_items', 'state_version', 'updated_at_ms'],
+      ['workflow_deploy_history', 'is_active', 'deploy_number'],
     ];
     const versions = [];
     for (const [table, version, updated] of tables) {

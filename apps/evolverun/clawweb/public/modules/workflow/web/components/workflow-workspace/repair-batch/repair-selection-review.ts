@@ -1,3 +1,5 @@
+import { workflowSnapshotKey } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot'
+import { itemSnapshotKey } from '../../../../server/contracts/repair-version-scope'
 import type { RepairInboxItem, RepairSelectionState } from '../../../../server/contracts/repair-workbench'
 import { exclusion, itemTitle } from './repair-view'
 import { selectionConflicts } from '../../../../server/contracts/repair-selection'
@@ -9,18 +11,20 @@ export function selectionProof(ids: string[], items: Record<string, RepairInboxI
 const content = (item: RepairInboxItem) => item.selectionDigest ?? JSON.stringify([item.contentRevision, item.proposalKey, item.proposal, item.instruction])
 const planContent = (plan: NonNullable<RepairInboxItem['aggregation']> | NonNullable<RepairSelectionState['plans']>[number]) => JSON.stringify([plan.itemIds, plan.title, plan.changes, plan.relation, plan.causes, plan.unknowns, plan.conflicts])
 export function reviewedSelection(ids: string[], previous: Record<string, RepairInboxItem>, fresh: RepairSelectionState, confirmPlans = false) {
+  const targetKey = fresh.activeSnapshot?.status === 'resolved' ? workflowSnapshotKey(fresh.activeSnapshot.snapshot) : undefined
+  const historical = !!targetKey && fresh.items.some(item => ids.includes(item.itemId) && itemSnapshotKey(item) && itemSnapshotKey(item) !== targetKey)
   const originals = Object.fromEntries(fresh.items.map(item => [item.itemId, item]))
   const current = { ...originals }
   const removed: string[] = []
   let planReview = false
   const retained = ids.filter(id => {
     const item = current[id]
-    const reason = !item ? '原始来源已不可用' : exclusion(item) || (previous[id] && content(previous[id]) !== content(item) ? '建议内容已变化，请审阅后重新勾选' : '')
+    const reason = !item ? '原始来源已不可用' : exclusion(item, undefined, targetKey) || (previous[id] && content(previous[id]) !== content(item) ? '建议内容已变化，请审阅后重新勾选' : '')
     if (reason) removed.push(`${previous[id] ? itemTitle(previous[id]) : id}：${reason}`)
     return !reason
   })
   for (const id of retained) {
-    if (retained.length === 1) { const { aggregation: _plan, ...original } = current[id]; current[id] = original; continue }
+    if (retained.length === 1 || historical) { const { aggregation: _plan, ...original } = current[id]; current[id] = original; continue }
     const old = previous[id]?.aggregation, plan = fresh.plans?.find(plan => plan.itemIds.includes(id))
     if (!old && !plan) continue
     const unchanged = old && plan && planContent(old) === planContent(plan)

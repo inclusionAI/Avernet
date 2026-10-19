@@ -1,7 +1,7 @@
 import { digestCanonicalJson, type WorkflowEvolutionDiagnosis } from './contracts.js';
 
 type IssueDiagnosis = Omit<WorkflowEvolutionDiagnosis, 'severity'> & { severity: WorkflowEvolutionDiagnosis['severity'] | null };
-export type IssueAnalysis = { analysisId: string; flowId: string | null; flowIds?: string[]; completedAtMs: number; analysisContext?: { facts: unknown[]; inferences: unknown[]; unknowns: unknown[]; evidenceStatus: unknown }; diagnoses: IssueDiagnosis[] };
+export type IssueAnalysis = { analysisId: string; flowId: string | null; flowIds?: string[]; completedAtMs: number; analysisContext?: { facts: unknown[]; inferences: unknown[]; unknowns: unknown[]; evidenceStatus: unknown; workflowSnapshot?: unknown }; diagnoses: IssueDiagnosis[] };
 export type IssueSource = IssueDiagnosis & { sourceId: string; analysisId: string; flowId: string; completedAtMs: number; analysisContext?: IssueAnalysis['analysisContext'] };
 export type IssueGroup = { workflowId: string; signature: string; inputDigest: string; flowIds: string[]; sources: IssueSource[] };
 export const ISSUE_AGGREGATION_INPUT_V1 = 'workflow-issue-summary-input/v1' as const;

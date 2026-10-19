@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { runMigrations, type IDatabase } from '../db.js';
 import { dialectFor } from '../db/dialect.js';
 import { migrations } from '../schema.js';
+import { workflowSnapshotMigrations } from '../schema-workflow-snapshot.js';
 
 type Migration = (typeof migrations)[number];
 
@@ -64,6 +65,7 @@ function createDb(dbType: 'mysql' | 'zdas', options: {
       if (!options.canDdl) throw new Error('Unexpected schema_version read');
       return [{ v: options.current ?? 0 }] as T[];
     }
+    if (sql.includes('information_schema.TABLES')) return [] as T[];
     if (sql.includes('information_schema.COLUMNS')) return [{ IS_NULLABLE: 'NO' }] as T[];
     throw new Error(`Unexpected query: ${sql}`);
   }
@@ -122,7 +124,7 @@ describe.each(['mysql', 'zdas'] as const)('runMigrations on %s', dbType => {
 
     expect(query).toHaveBeenCalledWith('SELECT MAX(version) as v FROM schema_version');
     expect(exec.mock.calls.filter(([sql]) => sql === ledgerInsert).map(([, params]) => params)).toEqual(
-      migrations.filter(m => m.selfHealing || m.version > current).map(m => [m.version, m.description]),
+      [...migrations, ...workflowSnapshotMigrations].filter(m => m.selfHealing || m.version > current).map(m => [m.version, m.description]),
     );
     const firstDdl = db.dialect.renderDdl(migrations[0].sql[0]);
     expect(exec.mock.calls.some(([sql]) => sql === firstDdl)).toBe(current < 1);

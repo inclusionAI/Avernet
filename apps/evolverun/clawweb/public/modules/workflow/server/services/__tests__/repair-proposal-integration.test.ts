@@ -166,10 +166,10 @@ it('does not generate when critical evidence payloads are absent or modified',as
  expect(f.calls).toHaveLength(0);
 });
 
-it('serves original queued suggestions through strict bounded JSON before any model completes',async()=>{
+it('serves original suggestions without pretending they are queued before a job exists',async()=>{
  const {c}=await setup();const integrated=createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort,c);
  const page=await integrated.candidates('wf-1',{previewSignatures:['issue']});
- expect(page.items).toHaveLength(3);expect(page.items.every(i=>i.aggregation?.status==='queued')).toBe(true);
+ expect(page.items).toHaveLength(3);expect(page.items.every(i=>i.aggregation?.status==='uncertain')).toBe(true);
  expect(JSON.parse(JSON.stringify(page)).items).toHaveLength(3);
 });
 
@@ -236,4 +236,23 @@ it.each([false,true])('accepts supported evidence only from a cause member (cros
   expect(cards.flatMap(card=>card.aggregation?.causes??[])).toEqual([]);
   await expect(c.prepare('wf-1',snapshot.items,snapshot.baseline)).rejects.toThrow(/整合/);
  }
+});
+
+it('organizes version-bound sources without reading Git or using the active deployment as their fingerprint',async()=>{
+  f=await repairFixture(2);
+  for(const m of repairReleaseMigrations)for(const sql of m.sql)await f.db.exec(f.db.dialect.renderDdl(sql));
+  const binding={status:'resolved' as const,snapshot:{kind:'deployment' as const,workflowId:'wf-1',workflowVersion:39,deployNumber:34,configDigest:'a'.repeat(64)}};
+  f.items.forEach(item=>{item.context={sourceSnapshot:binding};});
+  f.sourcePort.activeSnapshot=async()=>binding;
+  f.executionPort.resolveBaseline=async()=>{throw new Error('Git manifest is unavailable');};
+  let time=1000;let service:ReturnType<typeof createRepairWorkbenchService>;
+  const classify=vi.fn(async({items}:any)=>({plans:[{itemIds:items.map((i:any)=>i.itemId),title:'Compatible goals',changes:['Preserve both goals'],relation:'complementary'}],conflicts:[]}));
+  const c=createProposalCoordinator({db:f.db,now:()=>time,read:workflowId=>service.proposalSnapshot(workflowId),model:{key:'local',classify}});
+  service=createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort,c);
+  await c.tick();time+=3000;await c.tick();
+  expect(classify).toHaveBeenCalledTimes(1);
+  const result=await service.candidates('wf-1');
+  expect(result.items).toHaveLength(1);
+  expect(result.items[0].aggregation?.status).toBe('ready');
+  expect(result.items[0].aggregation?.originals).toHaveLength(2);
 });

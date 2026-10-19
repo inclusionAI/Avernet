@@ -186,3 +186,13 @@ describe('trusted workflow repair source adapter', () => {
     await expect(createRepairSourcePort(readers({ evidence: async () => [{ event_id: 'ev-d1', workflow_id: 'wf', flow_id: 'run-d1', event_type: 'failed', payload_json: '{bad' }] })).load(db, 'wf')).rejects.toMatchObject({ code: 'INVALID_INPUT' });
   });
 });
+
+it('keeps identical proposals from different deployment identities as separate sources', async () => {
+  const value = {...proposal(),baseSpecDigest:'a'.repeat(64)};
+  const source=createRepairSourcePort(readers({groups:async()=>[{workflowId:'wf',signature:'timeout',inputDigest:'b'.repeat(64),sources:[diagnosis('d1',value),diagnosis('d2',value)]}],
+    snapshot:async(_db,_workflow,flowIds)=>({status:'resolved',snapshot:{kind:'deployment',workflowId:'wf',workflowVersion:flowIds[0]==='run-d1'?39:40,deployNumber:flowIds[0]==='run-d1'?34:35,configDigest:'a'.repeat(64)}})}));
+  const rows=await source.load(db,'wf','summary');
+  expect(rows).toHaveLength(2);
+  expect(new Set(rows.map(row=>row.item.itemId)).size).toBe(2);
+  expect(rows.map(row=>row.item.context?.sourceSnapshot)).toEqual(expect.arrayContaining([expect.objectContaining({status:'resolved',snapshot:expect.objectContaining({workflowVersion:39})}),expect.objectContaining({status:'resolved',snapshot:expect.objectContaining({workflowVersion:40})})]));
+});
