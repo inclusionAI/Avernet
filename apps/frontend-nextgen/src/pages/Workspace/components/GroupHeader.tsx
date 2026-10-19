@@ -1,6 +1,6 @@
 import { IconButton } from '@/components/ui';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { ChatConnectionStatus } from '@/components/Workspace/ChatConnectionStatus';
+import { PrimaryNavToggle } from '@/components/Workspace/PrimaryNav';
 import type { GroupView, SessionView } from '@/domain/collaboration';
 import type { GroupChatFavoritesModel } from '@/pages/Workspace/hooks/useGroupChatHeaderPanels';
 import type { DomainResult } from '@/services/workspace/identityService';
@@ -9,7 +9,6 @@ import type { ProviderConnectionStatus } from '@tc-chat/adapters';
 import {
   Bot,
   ChevronRight,
-  Copy,
   FolderOpen,
   History,
   Monitor,
@@ -20,8 +19,8 @@ import {
   Users,
 } from 'lucide-react';
 import { useRef, useState } from 'react';
-import { toast } from 'sonner';
 import { GroupAvatarStack } from './GroupSidebar/GroupItem';
+import { GroupSessionIdPill } from './GroupSessionIdPill';
 import { SharePopover } from './ManagePanel/SharePopover';
 
 export type GroupPanelKind = 'none' | 'members' | 'manage' | 'sessionManage' | 'resources' | 'history';
@@ -65,6 +64,9 @@ export interface GroupHeaderProps {
  * ① 群名/ID 胶囊各自 min-w-0 + truncate，胶囊对齐 chat 行为（胶囊有 40px 内在地板，退化到仅复制钮）；
  * ② <32.5rem 收起次级成员徽标（管理面板仍可见）；③ <30rem 折成两行（身份行 + 图标行），
  * 图标钮与复制入口任何宽度不隐藏。header 自身不能查询自身，断点容器是外层命名 wrapper。
+ * ④（2026-10-19 窄宽反馈）「已连接」文案与 ② 同断点收纳为仅绿点（视口 <lg 恒收纳）：
+ * 视口与容器双闸经 ChatConnectionStatus 的 labelVisibleClassName（lg:@min-[32.5rem]/…）并查，
+ * 正常态无需解释，警示/错误态保留完整文案与语义色，读屏名由 aria-label 恒撑。
  */
 function HeaderIcon({
   label,
@@ -130,17 +132,8 @@ export function GroupHeader({
     setShareOpen(true);
   };
 
-  const copySessionKey = async () => {
-    if (!selectedSession?.sessionId) return;
-    try {
-      await navigator.clipboard.writeText(selectedSession.sessionId);
-      toast.success('会话 ID 已复制');
-    } catch {
-      toast.error('复制失败，请手动复制。');
-    }
-  };
-
   // 窄屏会话列表入口（<lg viewport）：有群时排在 chip 前（进入身份行），无群时独踞左侧。
+  // 一级导航入口（壳提供）恒在会话列表入口左侧同排——壳外/精简路由由上下文裁剪为 null。
   const openSessionListButton = onOpenSessionList ? (
     <IconButton
       label="打开会话列表"
@@ -159,6 +152,7 @@ export function GroupHeader({
           {selectedGroup ? (
             /* 极窄（<30rem）wrapper basis-full 独占首行（flex-1 基线 0 不触发换行），图标钮列换到次行。 */
             <div className="flex min-w-0 max-w-full flex-1 items-center gap-2 @max-[30rem]/group-header:basis-full">
+              <PrimaryNavToggle />
               {openSessionListButton}
               <div
                 role="group"
@@ -169,28 +163,7 @@ export function GroupHeader({
                 <span className="min-w-0 shrink truncate text-[13px] leading-[18px] text-content-strong">
                   {selectedGroup.name}
                 </span>
-                {selectedSession ? (
-                  <TooltipProvider>
-                    <span className="flex h-5 min-w-10 max-w-[180px] shrink-[2] items-center gap-1 rounded-full bg-secondary px-2">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className="min-w-0 flex-1 truncate text-[11px] leading-[16.5px] text-foreground/85">
-                            {selectedSession.sessionId}
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent>{selectedSession.sessionId}</TooltipContent>
-                      </Tooltip>
-                      <IconButton
-                        label="复制会话 ID"
-                        icon={<Copy className="h-3 w-3" aria-hidden />}
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => void copySessionKey()}
-                        className="h-5 w-5 shrink-0 rounded-full text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
-                      />
-                    </span>
-                  </TooltipProvider>
-                ) : null}
+                {selectedSession ? <GroupSessionIdPill sessionId={selectedSession.sessionId} /> : null}
                 {participants.length > 0 || totalCount > 0 ? (
                   <span className="@max-[32.5rem]/group-header:hidden flex shrink-0 items-center gap-2">
                     <span aria-hidden className="h-3 w-px bg-foreground/10" />
@@ -207,10 +180,19 @@ export function GroupHeader({
                   </span>
                 ) : null}
               </div>
-              {selectedSession ? <ChatConnectionStatus {...CONNECTION_COPY[connectionStatus]} /> : null}
+              {selectedSession ? (
+                <ChatConnectionStatus
+                  {...CONNECTION_COPY[connectionStatus]}
+                  // ④ 窄宽收纳（视口+容器双闸）：桌面主区被副屏/管理面板挤到 <32.5rem 时同样仅绿点。
+                  labelVisibleClassName="lg:@min-[32.5rem]/group-header:inline"
+                />
+              ) : null}
             </div>
           ) : (
-            openSessionListButton
+            <>
+              <PrimaryNavToggle />
+              {openSessionListButton}
+            </>
           )}
 
           <div className="flex shrink-0 items-center justify-end gap-1">
