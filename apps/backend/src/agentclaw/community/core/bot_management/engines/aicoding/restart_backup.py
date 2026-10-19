@@ -17,7 +17,7 @@ from urllib.parse import quote
 
 from agentclaw.community.log import get_logger
 
-from .restart_arca import BoundArcaRestartExecutor, RestartBackupTargetChanged
+from .restart_arca import ArcaRestartTransport, BoundArcaRestartExecutor, RestartBackupTargetChanged
 
 logger = get_logger()
 
@@ -382,7 +382,7 @@ class AicodingRestartBackupMixin:
 
     def _prepare_restart(self, ctx, *, binding_id=None, device_service=None,
                         bot_repository=None, device_id=None, target_runtime=None,
-                        target_runtime_provider=None, operation_id=None):
+                        target_runtime_provider=None, operation_id=None, arca_restart_transport_provider=None):
         """Only coding engines probe runtime; no generic lifecycle/status changes."""
         try:
             operation_id = _operation_id(operation_id)
@@ -467,8 +467,14 @@ class AicodingRestartBackupMixin:
                 else:
                     # Same physical identity as release, not a BaaS inventory or
                     # the logical device_id. Target/DB checks must stay blocking.
+                    transport = (
+                        arca_restart_transport_provider()
+                        if arca_restart_transport_provider is not None
+                        else ArcaRestartTransport()
+                    )
                     executor = BoundArcaRestartExecutor(
-                        devices=device_service, binding_id=binding_id,
+                        bindings=device_service, transport=transport,
+                        binding_id=binding_id,
                         device_id=target, sandbox_id=sandbox_id,
                     )
                     receipt_check = _attempt_backup(

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
+from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import ArcaRestartTransport
 
 from typing import Annotated, Callable
 
@@ -544,6 +545,7 @@ class BotManagementModule(Module):
             oss_record_repo=oss_record_repo,
             bot_publish_service_provider=bot_publish_service_provider,
             device_service_provider=device_service_provider,
+            arca_restart_transport_provider=lambda: injector.get(ArcaRestartTransport),
             # Lazy for symmetry with the providers above, not for a cycle:
             # BotAppGrantService reaches only repositories. Resolved on demand
             # so bot deletion is the only thing that pays for it.

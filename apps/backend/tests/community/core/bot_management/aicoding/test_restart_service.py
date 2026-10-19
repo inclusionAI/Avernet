@@ -223,6 +223,8 @@ async def test_real_arca_async_backup_precedes_stop_start(lifecycle, engine, bac
         default_provider_key="arca",
     )
     s.service._device_service_provider = lambda: router
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import ArcaRestartTransport
+    s.service._arca_restart_transport_provider = lambda: ArcaRestartTransport(provider._exec_shell_new)
     provider.release_device.side_effect = lambda **_: events.append("release")
 
     def start(**kwargs):

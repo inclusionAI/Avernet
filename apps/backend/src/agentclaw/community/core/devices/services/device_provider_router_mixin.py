@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
-from typing import Callable, Protocol
+from typing import Protocol
 
 from agentclaw.community.core.devices.errors import DeviceServiceError
 from agentclaw.community.core.devices.services.arca_bot_create_baas_rollout_policy import (
@@ -11,8 +10,6 @@ from agentclaw.community.core.devices.services.arca_bot_create_baas_rollout_poli
 )
 from agentclaw.community.core.devices.services.device_service import DeviceService
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
-from agentclaw.community.core.devices.models import AllocatedDevice
-from agentclaw.community.kernel.device_dto import CommandResult
 from agentclaw.community.log import get_logger
 
 
@@ -102,24 +99,3 @@ class DeviceProviderRouterMixin:
             binding_id=binding_id,
             require_pool_confirmation=require_pool_confirmation,
         )
-
-    def bind_device_executor(
-        self: _ProviderRouter, *, device: AllocatedDevice,
-    ) -> Callable[[str], CommandResult]:
-        """Bind internal command transport to an explicit physical device snapshot.
-
-        No lookup by logical device ID, provider fallback, or lifecycle policy.
-        The authorized lifecycle caller owns eligibility and target revalidation.
-        This capability is not exposed by HTTP; ordinary exec guards are unchanged.
-        """
-        provider = self._providers.get(device.device_provider)
-        if provider is None:
-            raise DeviceServiceError("Device provider unavailable")
-        snapshot = deepcopy(device)
-
-        def execute(command: str) -> CommandResult:
-            return provider._exec_shell_new(
-                device=deepcopy(snapshot), shell_cmd=command,
-            )
-
-        return execute

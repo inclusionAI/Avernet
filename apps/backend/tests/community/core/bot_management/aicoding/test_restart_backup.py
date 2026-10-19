@@ -272,6 +272,9 @@ def test_backup_failure_continues_original_restart_and_lock_ownership(phase, pro
     svc = _make_service(locks, bot_repository=repository, device_provider=device,
                         baas_service_provider=lambda: runtime)
 
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import ArcaRestartTransport
+    svc._arca_restart_transport_provider = lambda: ArcaRestartTransport(Mock())
+
     def prepare_check(**kwargs):
         assert not locks.rows  # No 25-minute wait inside the old 120-second lease.
         if phase == 'prepare':
@@ -445,6 +448,8 @@ def test_old_coding_bot_without_new_script_completes_original_restart(engine, pr
     runtime.post_bots_api.side_effect = lambda **kw: vars(_run_absent_helper_probe(kw['payload']['cmd']))
     svc = _make_service(locks, bot_repository=repository, device_provider=routed_device,
                         baas_service_provider=lambda: runtime)
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import ArcaRestartTransport
+    svc._arca_restart_transport_provider = lambda: ArcaRestartTransport(device._exec_shell_new)
     with patch.object(svc, 'stop_bot', return_value=True) as stop, \
          patch.object(svc, 'start_bot', return_value=bot) as start, \
          patch.object(svc, '_restart_bot_baas', return_value=bot) as update:

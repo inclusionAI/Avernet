@@ -12,7 +12,7 @@ from agentclaw.community.core.bot_management.engines.provisioning import BotProv
 from agentclaw.community.core.devices.errors import InvalidDeviceStatusError
 from agentclaw.community.core.devices.services.device_service_router import DeviceServiceRouter
 from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import (
-    BoundArcaRestartExecutor, RestartBackupTargetChanged,
+    ArcaRestartTransport, BoundArcaRestartExecutor, RestartBackupTargetChanged,
 )
 from tests.community.core.bot_management.aicoding.test_restart_backup import OPERATION, response
 from tests.community.core.devices.services.test_device_service import _make_service, _make_record
@@ -44,6 +44,7 @@ def prepare(s):
     return AicodingProvisioningStrategy(s.ctx.active_engine).prepare_restart(
         s.ctx, binding_id=42, device_service_provider=lambda: s.router,
         bot_repository=s.bot_repo, target_runtime_provider=s.runtime, operation_id=OPERATION,
+        arca_restart_transport_provider=lambda: ArcaRestartTransport(s.provider._exec_shell_new),
     )
 
 
@@ -126,12 +127,12 @@ def test_target_change_during_poll_is_not_swallowed_as_best_effort(target):
     s.provider._exec_shell_new.assert_called_once()
 
 
-def test_missing_provider_never_falls_back_to_another_provider(target):
+def test_missing_transport_never_falls_back_to_ordinary_exec(target):
     s = target
-    s.router._providers.clear()
     with pytest.raises(RestartBackupTargetChanged):
         BoundArcaRestartExecutor(
-            devices=s.router, binding_id=42, device_id=s.record.device_id, sandbox_id='old-sandbox@8',
+            bindings=s.router, transport=ArcaRestartTransport(), binding_id=42,
+            device_id=s.record.device_id, sandbox_id='old-sandbox@8',
         )
     s.provider._exec_shell_new.assert_not_called()
 
@@ -139,7 +140,7 @@ def test_missing_provider_never_falls_back_to_another_provider(target):
 def test_executor_keeps_snapshot_when_props_are_mutated(target):
     s = target
     executor = BoundArcaRestartExecutor(
-        devices=s.router, binding_id=42, device_id=s.record.device_id, sandbox_id='old-sandbox@8',
+        bindings=s.router, transport=ArcaRestartTransport(s.provider._exec_shell_new), binding_id=42, device_id=s.record.device_id, sandbox_id='old-sandbox@8',
     )
     original = deepcopy(s.record.device_props)
     s.record.device_props['sandbox_id'] = 'new-sandbox'

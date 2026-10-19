@@ -73,9 +73,10 @@ The frontend continues to use the original stored-runtime readiness semantics.
   handling, including FAILED journal/start status where applicable.
 - Amendment (2026-10-19): direct ARCA bindings now participate in the same helper
   protocol; BaaS-managed containers retain BaaS inventory and command transport.
-  Arca target checks, recovery-state eligibility and blocking errors live in
-  `engines/aicoding/restart_arca.py`; the device router supplies only fixed-target
-  command transport, without coding-specific backup policy. Changes to the
+  Arca target checks, recovery-state eligibility, blocking errors and the
+  fixed-target command transport contract live in
+  `engines/aicoding/restart_arca.py`; a composition root supplies the existing
+  provider hook and the shared device router is unchanged. Changes to the
   captured Arca binding/sandbox remain blocking, unlike backup receipt failures.
 - Restart may destroy the old container without a confirmed backup, losing data
   not previously persisted. A backend timeout does not cancel the historical
