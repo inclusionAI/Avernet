@@ -201,7 +201,7 @@ only labels. The file has three lists:
 
 **Why some inputs are strings.** In `canonical` and `rejected`, `input` is a
 JSON *string* whose content is JSON text, not a JSON value. These tests are
-about how the text is written: key order, spacing, `"€"` versus `"€"`,
+about how the text is written: key order, spacing, `"\u20ac"` versus `"€"`,
 `1.0` versus `1`, a key written twice. Storing the input as a parsed value
 would lose exactly those details. The cost is a second layer of escaping, so
 decode the string once to see the text the implementation reads.
