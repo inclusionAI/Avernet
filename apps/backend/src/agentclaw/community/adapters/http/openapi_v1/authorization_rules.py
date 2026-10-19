@@ -17,7 +17,7 @@ from .models_authorization import (
     ServiceChecked,
 )
 from .rule_shape_audit import assert_member_writes_name_explicit_origin
-from .dws_hosting.inventory import OPERATIONS as DWS_OPERATIONS, PATH as DWS_PATH
+from .dws_hosting.admission import OPERATIONS as DWS_OPERATIONS, PATH as DWS_PATH
 
 #: Every operation on this surface, exactly once, keyed as ``ADMISSION`` is.
 #:

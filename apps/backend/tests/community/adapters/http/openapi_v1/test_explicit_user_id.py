@@ -570,7 +570,8 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # operations under /bots/{bot_id}/clis add four more: 181 -> 185. The acli
 # market search then moves to the tenant-wide /bots/market/clis, so one of
 # them leaves the path tier: path 185 -> 184, none 125 -> 126.
-_BOT_ID_PLACEMENT = {"path": 184, "query": 1, "none": 126}
+# DWS owner management adds eight Bot-path-addressed operations.
+_BOT_ID_PLACEMENT = {"path": 192, "query": 1, "none": 126}
 
 
 def _schema() -> dict:
@@ -776,7 +777,8 @@ def test_the_pinned_number_of_operations_take_it():
 # /bots/{bot_id}/clis take user_id like the identity switch beside them,
 # so ``taking`` grows 254 -> 258. The market search then moves to the
 # tenant-wide /bots/market/clis, which takes no user: 258 -> 257.
-    assert len(taking) == 257
+    # DWS management adds eight owner-scoped operations with explicit user_id.
+    assert len(taking) == 265
 
 
 def test_the_exempt_operations_take_none():

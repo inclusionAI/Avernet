@@ -52,7 +52,7 @@ def test_owner_commands_signed_with_resolved_identity(
         method,
         f"/openapi/v1/bots/{BOT}/dws-hosting{path}",
         json=body,
-        params={"user_id": "forged", "owner_id": "forged", "entity_id": "forged"},
+        params={"user_id": OWNER, "owner_id": "forged", "entity_id": "forged"},
     )
     assert ok(response) == {"ok": True}
     call = relay.calls[0]
@@ -76,6 +76,14 @@ def test_container_keys_cannot_authorize_another_bot_or_owner():
     assert config.bot_key(BOT, OWNER) != KEY
     assert config.bot_key(BOT, OWNER) != config.bot_key("other", OWNER)
     assert config.bot_key(BOT, OWNER) != config.bot_key(BOT, "other")
+
+
+def test_explicit_user_must_match_authenticated_caller(client, relay):
+    fails(
+        client.get(f"/openapi/v1/bots/{BOT}/dws-hosting?user_id=other"),
+        403,
+    )
+    assert not relay.attempts
 
 
 def test_app_only_principal_refused(make_client, relay):

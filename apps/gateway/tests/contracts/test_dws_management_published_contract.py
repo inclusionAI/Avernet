@@ -21,6 +21,8 @@ def test_dws_management_routes_and_strict_inputs_are_published():
         assert set(document["paths"][prefix + suffix]) == methods
         for operation in document["paths"][prefix + suffix].values():
             assert {"401", "404", "409", "503"} <= set(operation["responses"])
+            user_id = next(p for p in operation["parameters"] if p["name"] == "user_id")
+            assert user_id["in"] == "query" and user_id["required"] is True
     for name in ["Settings", "SettingsUpdate", "EnabledUpdate", "TakeoverUpdate"]:
         schema = document["components"]["schemas"][name]
         assert schema["additionalProperties"] is False

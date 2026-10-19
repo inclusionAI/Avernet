@@ -25,7 +25,10 @@ start listeners, store hosting data, or change existing chat/relay behavior.
 Prefix: `/openapi/v1/bots/{bot_id}/dws-hosting`. Human Owner only; personal
 OpenClaw Bots only. Identity is taken from the authenticated principal, never
 from caller-supplied owner/user/entity query parameters. App-only callers are
-refused. Responses use the existing OpenAPI envelope.
+refused. Every operation requires `?user_id=<authenticated user>` through the
+standard `require_user_id` dependency; a mismatched user is refused with 403.
+The signed command still uses the authenticated identity, not an owner hint.
+Responses use the existing OpenAPI envelope.
 
 | Method | Suffix | Purpose |
 | --- | --- | --- |

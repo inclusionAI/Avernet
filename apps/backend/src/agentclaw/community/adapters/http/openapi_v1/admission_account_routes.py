@@ -1,7 +1,7 @@
 """Account/local and retiring operation admission, composed into ADMISSION."""
 
 from .admission_modes import AdmissionMode
-from .dws_hosting.inventory import OPERATIONS as DWS_OPERATIONS, PATH as DWS_PATH
+from .dws_hosting.admission import OPERATIONS as DWS_OPERATIONS, PATH as DWS_PATH
 
 ACCOUNT_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     **{(method, DWS_PATH + suffix): AdmissionMode.REFUSED for method, suffix in DWS_OPERATIONS},

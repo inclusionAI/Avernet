@@ -1,4 +1,4 @@
-"""Owner self-service only; applications cannot opt into personal DWS consent."""
+"""Shared route policy keys for owner-only DWS admission and authorization."""
 
 OPERATIONS = (
     ("GET", ""),

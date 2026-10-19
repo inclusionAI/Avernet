@@ -18,6 +18,7 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     caller_owner_id,
     refuse_app_only_caller,
+    require_user_id,
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
@@ -33,13 +34,13 @@ from agentclaw.community.di.dws_management_config import (
     get_dws_management_config,
 )
 from .schemas import EnabledUpdate, SettingsUpdate, TakeoverUpdate
-from .inventory import PATH
+from .admission import PATH
 
 router = APIRouter(
     prefix=PATH,
     tags=["dws-hosting"],
     route_class=PublicAPIRoute,
-    dependencies=[Depends(refuse_app_only_caller)],
+    dependencies=[Depends(refuse_app_only_caller), Depends(require_user_id)],
 )
 
 
