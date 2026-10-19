@@ -102,9 +102,13 @@ async def test_opaque_user_oauth_can_accompany_a_dedicated_bot_token() -> None:
         _creds(
             {
                 "authorization": "Bearer human-oauth-token",
-                "x-bcs-bot-token": "bot-key",
+                "x-avernet-bot-token": "bot-key",
             }
         )
     )
     assert isinstance(result, BotPrincipal)
     assert result.bot.token == "bot-key"
+
+
+async def test_bcs_header_does_not_authenticate_a_bot_by_default() -> None:
+    assert await _strat().build(_creds({"x-bcs-bot-token": "bot-key"})) is None

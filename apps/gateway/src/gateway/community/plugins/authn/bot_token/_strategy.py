@@ -43,20 +43,11 @@ def is_jwt_format(token: str) -> bool:
 def extract_bot_token(creds: CredentialBundle, dedicated_header: str) -> str | None:
     """Extract a dedicated Bot token, otherwise non-JWT ``Authorization``.
 
-    A dedicated header is independent of user OAuth, which may be opaque.
-    Duplicate Bot headers must agree. The strategy resolves a different
-    Authorization credential before treating it as a second Bot token.
+    Only the configured dedicated header is recognized; no aliases are inferred.
+    It is independent of user OAuth, which may be opaque. The strategy resolves
+    a different Authorization credential before treating it as a second Bot token.
     """
-    names = (
-        ("x-avernet-bot-token", "x-bcs-bot-token")
-        if dedicated_header in ("x-avernet-bot-token", "x-bcs-bot-token")
-        else (dedicated_header,)
-    )
-    values: list[str] = [creds.headers.get(name, "").strip() for name in names if name]
-    values = [value for value in values if value]
-    if len(set(values)) > 1:
-        raise AuthError("Conflicting Bot credentials")
-    dedicated: str | None = values[0] if values else None
+    dedicated: str = creds.headers.get(dedicated_header, "").strip()
     auth: str = creds.headers.get(_AUTH_HEADER, "")
     if auth.lower().startswith("bearer"):
         token: str = auth[len("bearer") :].strip()
@@ -66,8 +57,7 @@ def extract_bot_token(creds: CredentialBundle, dedicated_header: str) -> str | N
         return dedicated
     if token and not is_jwt_format(token):
         return token
-    # No usable Authorization token → fall back to the dedicated header (as-is).
-    return dedicated
+    return None
 
 
 class BotTokenStrategy:
