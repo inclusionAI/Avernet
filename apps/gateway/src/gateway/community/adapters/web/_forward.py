@@ -75,7 +75,12 @@ def _bundle(connection: HTTPConnection) -> CredentialBundle:
     WebSocket carries the same headers, cookies and query a request does, and
     the two must not drift into reading credentials differently.
     """
-    for header in ("x-bcn-actor-bot-id", "authorization", "x-bcs-bot-token", "x-avernet-bot-token"):
+    for header in (
+        "x-bcn-actor-bot-id",
+        "authorization",
+        "x-bcs-bot-token",
+        "x-avernet-bot-token",
+    ):
         if len(connection.headers.getlist(header)) > 1:
             raise AuthError("duplicate identity header")
     return CredentialBundle(

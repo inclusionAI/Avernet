@@ -198,3 +198,21 @@ async fn actor_static_and_implicit_identity_reads_are_bounded() {
     assert_eq!(count.queries.load(Ordering::SeqCst),3);
     assert_eq!(count.rows.load(Ordering::SeqCst),4);
 }
+
+#[tokio::test]
+async fn pending_ws_token_lookup_has_bounded_reads_and_no_writes() {
+    let (db, count, repo) = fixture().await;
+    db.execute(DbStatement::new("ALTER TABLE bcs_providers ADD COLUMN config TEXT")).await.unwrap();
+    db.execute(DbStatement::new("ALTER TABLE bcs_providers ADD COLUMN disabled INTEGER DEFAULT 0")).await.unwrap();
+    let token = repo.connect_or_promote_streaming("pending".into()).await.unwrap();
+    count.queries.store(0, Ordering::SeqCst);
+    count.rows.store(0, Ordering::SeqCst);
+    assert!(repo.lookup_bot_token(&token, None).await.unwrap().is_some());
+    assert_eq!(count.queries.load(Ordering::SeqCst), 2);
+    assert_eq!(count.rows.load(Ordering::SeqCst), 0);
+    assert!(repo.lookup_bot_token("unknown", None).await.unwrap().is_none());
+    assert_eq!(count.queries.load(Ordering::SeqCst), 3);
+    repo.disconnect_streaming("pending").await;
+    assert!(repo.lookup_bot_token(&token, None).await.unwrap().is_some());
+    assert_eq!(count.queries.load(Ordering::SeqCst), 5);
+}

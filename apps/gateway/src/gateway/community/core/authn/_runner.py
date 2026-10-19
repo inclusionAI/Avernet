@@ -26,8 +26,8 @@ from gateway.community.spi.authn import (
     Presence,
     Principal,
     PrincipalType,
+    expected_actor_id,
 )
-from gateway.community.spi.authn._actor import expected_actor_id
 
 logger = get_logger("authn-runner")
 

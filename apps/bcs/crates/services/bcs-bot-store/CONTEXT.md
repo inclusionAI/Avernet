@@ -82,3 +82,10 @@ at most 101 rows. SQL predicates isolate environment and deleted actors. Memory
 storage persists a credential-free affiliation marker and fails closed when
 Provider metadata is missing after restart. Existing columns and uniqueness
 constraints are reused; no migration or additional credential cache is added.
+
+A freshly connected ordinary WS Bot can authenticate before onboarding persists
+its row. After the indexed token read misses, only a matching in-memory pending
+credential can trigger one extra bounded existence query (Bot and binding keys,
+including tombstones). Any persisted identity blocks this fallback, so stale
+memory tokens cannot bypass revocation, deletion or Provider state. Unknown
+tokens incur no extra query; no writes or new cache are introduced.

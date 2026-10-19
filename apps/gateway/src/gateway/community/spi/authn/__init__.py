@@ -7,6 +7,7 @@ their own domain SPIs: ``gateway.community.spi.bot`` /
 ``gateway.community.spi.access_key`` / ``gateway.community.spi.app``.
 """
 
+from ._actor import ACTOR_BOT_ID_HEADER, expected_actor_id
 from ._models import (
     AccessKey,
     AccessKeyPrincipal,
@@ -23,6 +24,7 @@ from ._models import (
 from ._protocols import AuthStrategy
 
 __all__ = [
+    "ACTOR_BOT_ID_HEADER",
     "AccessKey",
     "AccessKeyPrincipal",
     "AppPrincipal",
@@ -35,4 +37,5 @@ __all__ = [
     "PrincipalType",
     "ThirdPartyApp",
     "UserPrincipal",
+    "expected_actor_id",
 ]

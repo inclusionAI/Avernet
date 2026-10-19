@@ -97,7 +97,7 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
     internal = json.loads(
         (tmp_path / "bcn-internal.openapi.json").read_text(encoding="utf-8")
     )
-    assert sum(len(path_item) for path_item in internal["paths"].values()) == 24
+    assert sum(len(path_item) for path_item in internal["paths"].values()) == 25
     provider_path = "/api/v1/collaboration/providers/by-slug/{slug}"
     assert set(internal["paths"][provider_path]) == {"get"}
     provider = internal["paths"][provider_path]["get"]
@@ -106,6 +106,12 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
     assert provider["x-avernet-security"] == {}
     assert provider["x-avernet-raw-response"] is True
     assert provider_path not in document["paths"]
+    agent_self_path = "/api/v1/collaboration/agents/me"
+    assert set(internal["paths"][agent_self_path]) == {"get"}
+    agent_self = internal["paths"][agent_self_path]["get"]
+    assert agent_self["security"] == [{"AgentIdentityBearer": []}]
+    assert agent_self["x-avernet-security"] == {}
+    assert agent_self_path.replace("/api/", "/openapi/") not in document["paths"]
     bot_self_path = "/api/v1/collaboration/bots/me"
     assert set(internal["paths"][bot_self_path]) == {"get"}
     bot_self = internal["paths"][bot_self_path]["get"]

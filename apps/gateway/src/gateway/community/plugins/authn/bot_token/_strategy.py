@@ -26,8 +26,8 @@ from gateway.community.spi.authn import (
     CredentialBundle,
     Principal,
     PrincipalType,
+    expected_actor_id,
 )
-from gateway.community.spi.authn._actor import expected_actor_id
 from gateway.community.spi.bot import BotRegistry
 
 logger = get_logger("authn-bot-token")

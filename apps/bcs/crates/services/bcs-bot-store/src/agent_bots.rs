@@ -68,12 +68,47 @@ impl PersistentBotRepo {
         if let Some(actor) = actor { sql.push_str(" AND b.bot_uuid=?"); params.push(Value::from(actor)); }
         sql.push_str(" LIMIT 1");
         let rows = self.db_query(&sql, params).await.map_err(|_| failure("Bot credential read failed"))?;
+        if rows.is_empty() { return self.load_pending_streaming_bot(token, actor).await; }
         rows.first().map(record).transpose().and_then(|bot| {
             if actor.is_some_and(|id| bot.as_ref().is_some_and(|bot| bot.bot.bot_id != id)) {
                 return Err(failure("Bot credential identity mismatch"));
             }
             Ok(bot)
         })
+    }
+
+    // A first WS connection issues its token before onboard creates a DB row.
+    // Its pending credential remains valid across disconnect/reconnect until onboard.
+    async fn load_pending_streaming_bot(&self, token: &str, actor: Option<&str>) -> ServiceResult<Option<AgentBotRecord>> {
+        let Some(id) = self.token_to_bot.read().await.get(token).cloned() else { return Ok(None); };
+        if actor.is_some_and(|actor| actor != id) { return Ok(None); }
+        let env = resolve_env();
+        let bot = {
+            let bots = self.bots.read().await;
+            let Some(bot) = bots.get(&id) else { return Ok(None); };
+            if bot.session_token.as_deref() != Some(token)
+                || bot.actor_kind != bcs_service_api::ActorKind::Bot
+                || bot.env.as_deref() != Some(env.as_str()) {
+                return Ok(None);
+            }
+            bot.to_registered_bot()
+        };
+        // A persisted row (including tombstones or a rotated token) or legacy
+        // Provider binding is authoritative. Never fall back around it.
+        let rows = self.db_query(
+            "SELECT 1 FROM bcs_bots WHERE bot_uuid=? AND env=? UNION ALL SELECT 1 FROM bcs_provider_bot_bindings WHERE bot_uuid=? AND env=? LIMIT 1",
+            vec![Value::from(id.clone()), Value::from(env.clone()), Value::from(id), Value::from(env)],
+        ).await.map_err(|_| failure("Pending Bot identity read failed"))?;
+        if !rows.is_empty() { return Ok(None); }
+        Ok(Some(AgentBotRecord {
+            bot: AgentBotRegistration { bot_id: bot.bot_uuid, name: bot.capabilities.name,
+                summary: bot.capabilities.summary, provider_id: None, provider_bot_ref: None },
+            agent_code: bot.capabilities.agent_code.unwrap_or_default(), owner_id: bot.created_by,
+            provider_auth_mode: None, provider_disabled: false, binding_disabled: false,
+            status: serde_json::to_value(bot.status).map_err(|_| failure("invalid Bot status"))?
+                .as_str().unwrap_or("online").to_string(),
+            provider_metadata_loaded: true,
+        }))
     }
 }
 
