@@ -311,7 +311,8 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       if (query.snapshotKey !== undefined && !requiredText(query.snapshotKey, 2048)) fail('INVALID_INPUT', 'Invalid snapshot key');
       const versionItems=snapshot.items.filter(item=>inVersionScope(item,activeSnapshot,versionScope) && (query.snapshotKey === undefined || (itemSnapshotKey(item) ?? 'unresolved') === query.snapshotKey));
       const versionInputDigest=activeSnapshot===undefined?snapshot.inputDigest:versionDigest(versionItems);
-      let presentation = versionItems.filter(item => matchesScope(item, {signature:query.signature}));
+      // Preserve the full model work unit; signature filters apply to presented cards.
+      let presentation = versionItems;
       if (!query.rawItems && this.proposals && this.execution) {
         try { presentation = await this.proposals.present(workflowId, presentation, this.sources.activeSnapshot?undefined:await this.execution.resolveBaseline(workflowId)); }
         catch { /* A failed aggregation/read never removes original suggestions or breaks the issue list. */ }

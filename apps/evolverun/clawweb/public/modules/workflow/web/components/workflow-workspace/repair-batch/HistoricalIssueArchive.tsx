@@ -8,8 +8,10 @@ import IssueRepairSuggestions from './IssueRepairSuggestions'
 type Props = { workflowId: string; selected: string[]; canEdit: boolean; onToggle: (id: string) => void;
   onResult: (result: RepairCandidatesResponse) => void; renderItem: (item: RepairInboxItem, canEdit: boolean) => ReactNode }
 type Group = NonNullable<ReturnType<typeof useIssueGroups>['data']>['groups'][number]
+// Archive previews carry version-local evidence, never a mixed-version summary or digest.
+type ArchivedGroup = Pick<Group, 'signature' | 'sources'>
 function versionedGroups(groups: Group[]) {
-  const versions = new Map<string, { key: string; label: string; groups: Group[] }>()
+  const versions = new Map<string, { key: string; label: string; groups: ArchivedGroup[] }>()
   for (const group of groups) {
     const sources = new Map<string, Group['sources']>()
     for (const source of group.sources) {
@@ -18,14 +20,14 @@ function versionedGroups(groups: Group[]) {
       if (!versions.has(key)) versions.set(key, { key, label: binding?.status === 'resolved' ? snapshotLabel(binding.snapshot) : '版本未确认', groups: [] })
       sources.set(key, [...(sources.get(key) ?? []), source])
     }
-    for (const [key, members] of sources) versions.get(key)!.groups.push({ ...group, sources: members })
+    for (const [key, members] of sources) versions.get(key)!.groups.push({ signature: group.signature, sources: members })
   }
   return [...versions.values()]
 }
-function ArchivedIssue({ group, snapshotKey, ...props }: Props & { group: Group; snapshotKey: string }) {
+function ArchivedIssue({ group, snapshotKey, ...props }: Props & { group: ArchivedGroup; snapshotKey: string }) {
   const [open, setOpen] = useState(false)
   return <details className="border-t border-slate-200 px-4 py-3" onToggle={event => { if (event.target === event.currentTarget) setOpen(event.currentTarget.open) }}>
-    <summary className="cursor-pointer text-sm">{group.summary?.summary || group.sources[0]?.reasoning || group.signature}</summary>
+    <summary className="cursor-pointer text-sm">{group.sources[0]?.reasoning || group.signature}</summary>
     {open && <IssueRepairSuggestions {...props} signature={group.signature} snapshotKey={snapshotKey} includeHistorical versionScope="historical" />}
   </details>
 }

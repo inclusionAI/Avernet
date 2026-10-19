@@ -8,7 +8,7 @@ vi.mock('../../../../api/read-only-json', () => ({ readOnlyJson: vi.fn() }))
 vi.mock('../../../../api/repair-batches', () => ({ repairBatches: { candidates: vi.fn() } }))
 afterEach(() => vi.clearAllMocks())
 it('loads the folded history on demand and permits a verified historical goal without changing its lifecycle', async () => {
-  vi.mocked(readOnlyJson).mockResolvedValue({ groups: [{ signature: 'timeout', summary: { summary: 'Repeated timeout' }, sources: [{analysisContext:{workflowSnapshot:{status:'resolved',snapshot:{kind:'deployment',workflowId:'wf',workflowVersion:39,deployNumber:34,configDigest:'a'.repeat(64)}}}}] }], page: { page: 1, totalPages: 1 } })
+  vi.mocked(readOnlyJson).mockResolvedValue({ groups: [{ signature: 'timeout', summary: { summary: 'Repeated timeout' }, sources: [{reasoning:'Repeated timeout',analysisContext:{workflowSnapshot:{status:'resolved',snapshot:{kind:'deployment',workflowId:'wf',workflowVersion:39,deployNumber:34,configDigest:'a'.repeat(64)}}}}] }], page: { page: 1, totalPages: 1 } })
   const snapshot = { kind: 'deployment', workflowId: 'wf', workflowVersion: 39, deployNumber: 34, configDigest: 'a'.repeat(64) }
   vi.mocked(repairBatches.candidates).mockResolvedValue({ items: [{ itemId: 'old', state: 'verified', sourceAvailable: true, sources: [], proposal: { summary: 'Preserve timeout bound' }, context: { sourceSnapshot: { status: 'resolved', snapshot } } }],
     activeSnapshot: { status: 'resolved', snapshot: { ...snapshot, workflowVersion: 40, deployNumber: 35 } }, canEdit: true, page: { page: 1, total: 1, totalPages: 1 } } as never)
@@ -50,6 +50,25 @@ it('separates the same problem across deployment, saved-test and unknown version
   expect(screen.getByText('工作流运行版本 38 · 部署 33 · 本页 1 个问题')).toBeTruthy();
   expect(screen.getByText('保存测试 bbbbbbbb · 本页 1 个问题')).toBeTruthy();
   expect(screen.getByText('版本未确认 · 本页 1 个问题')).toBeTruthy();
+  expect(repairBatches.candidates).not.toHaveBeenCalled();
+  unmount();client.clear();
+});
+
+it('uses only version-local source text when a historical summary spans versions',async()=>{
+  const source=(flowId:string,version:number,reasoning:string)=>({sourceId:flowId,flowId,flowIds:[flowId],reasoning,
+    analysisContext:{workflowSnapshot:{status:'resolved',snapshot:{kind:'deployment',workflowId:'wf',workflowVersion:version,deployNumber:version,configDigest:'a'.repeat(64)}}}});
+  const sources=[source('old-a',38,'Version A timed out'),source('old-b',39,'Version B returned invalid JSON')];
+  vi.mocked(readOnlyJson).mockResolvedValue({groups:[{signature:'same-signature',flowIds:['old-a','old-b'],inputDigest:'mixed',
+    summary:{summary:'Combined conclusion for both versions'},summarySources:sources,sources}],page:{page:1,totalPages:1}});
+  const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
+  const {container,unmount}=render(<QueryClientProvider client={client}><HistoricalIssueArchive workflowId="wf" selected={[]} canEdit onToggle={()=>{}} onResult={()=>{}} renderItem={()=>null}/></QueryClientProvider>);
+  const outer=container.querySelector('details')!;outer.open=true;fireEvent(outer,new Event('toggle'));
+  await screen.findByText('工作流运行版本 38 · 部署 38 · 本页 1 个问题');
+  const versions=container.querySelectorAll('details > div > details');
+  for(const version of versions){(version as HTMLDetailsElement).open=true;fireEvent(version,new Event('toggle'));}
+  expect(await screen.findByText('Version A timed out')).toBeTruthy();
+  expect(screen.getByText('Version B returned invalid JSON')).toBeTruthy();
+  expect(screen.queryByText('Combined conclusion for both versions')).toBeNull();
   expect(repairBatches.candidates).not.toHaveBeenCalled();
   unmount();client.clear();
 });
