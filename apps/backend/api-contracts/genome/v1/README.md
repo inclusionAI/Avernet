@@ -34,9 +34,32 @@ keywords. Every object here uses one of two forms:
 
 Two objects are neither: `spec.engine_config` allows no key at all
 (`maxProperties: 0`), and a patch's `op` is a wrapper whose `oneOf` picks the
-op's record. `oneOf` means exactly one alternative matches, `anyOf` at least
-one, `allOf` all of them; `if`/`then` applies `then` only to values that
-match `if`.
+op's record.
+
+Every keyword the schemas use is standard JSON Schema draft-07
+([specification](https://json-schema.org/specification-links#draft-7)); none
+is a custom extension. The ones that are easy to misread:
+
+| Keyword | Means | Used for |
+| --- | --- | --- |
+| `$ref` | "validate against that schema"; `genome-revision.schema.json#/definitions/x` points into the other file | Sharing `digest`, `genePath`, `memoryItem`, … between the two schemas |
+| `oneOf` | exactly one of the alternatives matches | `null` or an object (`memory`, `script`, `parent`); one op shape per op; `local` or `center` skill |
+| `anyOf` | at least one alternative matches | `skill.update` needs `file_diffs`, `files`, or both |
+| `allOf` | every alternative matches | A sorted, unique list *and* each item a gene path or evidence reference |
+| `if` / `then` / `else` | `then` applies only to a value that matches `if`, `else` to one that does not | A directory `resource.add` needs content by digest; `strategy_run` provenance needs a `run_id`, a `user` one has none |
+| `not` | the value must not match | Refusing `run_id`/`step` on `user` provenance |
+| `const` | the value is exactly this | Each op's `op` field, `genome_schema: 1` |
+| `propertyNames` | rule for a map's keys | File paths, header names, gene paths in `risk_overrides` |
+| `additionalProperties` | `false`: no other keys; a schema: every other key's value must match it | Records (`false`) and maps (a schema), as above |
+| `uniqueItems` | no two list items are equal | Sorted string lists; the order itself is a Registry check (§3.1) |
+| `examples` | illustrations, not rules; the contract test checks each one is valid | `unifiedDiff`, the `files` maps, `resource.add` |
+
+**Patterns.** A `pattern` that must match the whole value ends with
+`(?![\s\S])`, "no character follows", instead of `$` (the only other one,
+`unifiedDiff`, checks just how the value starts). In Python's `re`, `$` also matches just before a
+final newline, so `"abc\n"` would pass `^abc$`; `(?![\s\S])` means the same
+in Python and in ECMAScript. Patterns use `[0-9]` rather than `\d`, which in
+Python also matches non-ASCII digits.
 
 **Consumers.** Backend's Genome Registry validates every revision and patch it
 records and is the authority: an invalid patch is answered `422`. The
