@@ -33,6 +33,14 @@ it('switches actual content without generating, trialing or publishing and suppo
  expect(screen.getByRole('heading',{name:'候选修改'})).toBeVisible();
  expect(onFeedback).not.toHaveBeenCalled();expect(api.publish).not.toHaveBeenCalled();expect(api.deploymentTargets).not.toHaveBeenCalled();
 });
+it('separates the workflow round from its local v1 candidate and supports switching rounds',async()=>{
+ const detail=fixture();detail.roundNumber=3;const onTask=vi.fn();
+ render(<RepairTaskPanel detail={detail} rounds={[{taskId:detail.taskId,roundNumber:3,revision:1,phase:'review',updatedAtMs:1,itemCount:1},{taskId:'previous',roundNumber:2,revision:1,phase:'published',updatedAtMs:0,itemCount:1}]} onTask={onTask}
+  canEdit busy={false} dispatchError="" onFeedback={vi.fn()} onCancel={vi.fn()} onRetryDispatch={vi.fn()} onRetryGeneration={vi.fn()} onRefresh={vi.fn()}/>);
+ expect(screen.getByRole('heading',{name:'第 3 轮优化 · 候选 v1'})).toBeVisible();
+ await userEvent.selectOptions(screen.getByRole('combobox',{name:'切换优化轮次'}),'previous');
+ expect(onTask).toHaveBeenCalledWith('previous');
+});
 it('keeps the published v1 identity prominent when the latest automatic v2 needs no change',async()=>{
  const detail=fixture();detail.latestSuccessful!.phase='published';
  detail.latestSuccessful!.input.automation={roundId:'daily'} as never;

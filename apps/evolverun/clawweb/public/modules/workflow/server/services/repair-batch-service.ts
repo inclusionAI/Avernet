@@ -149,6 +149,11 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     let sourceScope = scope;
     if (mode === 'full' && scope?.itemIds?.length && !this.sources.hydrate) {
       const selected = new Set(scope.itemIds);
+      const storedById = new Map(stored.map(item => [item.itemId, item]));
+      for (const id of selected) {
+        const item = storedById.get(id);
+        if (item?.episodeKey.startsWith('repeat:') && item.previousItemId) selected.add(item.previousItemId);
+      }
       const summaries = await repairStage('sources_summary', () => sourceRead(() => this.sources.load(db, workflowId, 'summary', { includeHistorical: scope.includeHistorical })));
       sourceScope = { ...scope, itemIds: summaries.filter(source => {
         const existing = byIdentity.get(identityKey(source.item, source.episodeKey));
@@ -211,6 +216,16 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
           activeTaskId: null, activeRevision: null, disposition: null, updatedAtMs: 0, sourceAvailable };
       items.set(itemId, preview);
       if (sourceAvailable) materializable.set(itemId, { ...source, item: refreshed });
+    }
+    // Repeated manual goals retain their own lifecycle while sharing the original
+    // evidence availability. Never move the previous round's observation owner.
+    for (const item of items.values()) if (item.episodeKey.startsWith('repeat:') && item.previousItemId) {
+      let original = items.get(item.previousItemId);
+      const visited = new Set([item.itemId]);
+      while (original && !original.sourceAvailable && original.episodeKey.startsWith('repeat:') && original.previousItemId && !visited.has(original.itemId)) {
+        visited.add(original.itemId); original = items.get(original.previousItemId);
+      }
+      if (original?.sourceAvailable) items.set(item.itemId, { ...item, sourceAvailable: true });
     }
     if (mode === 'full' && this.sources.hydrate) {
       const selected = [...items.values()].filter(item => !scope?.itemIds || scope.itemIds.includes(item.itemId));
@@ -295,10 +310,11 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       const totalPages = pages.length;
       const selectedPage = Math.min(page, totalPages);
       const items = pages[selectedPage - 1];
+      const rounds = await new RepairBatchRepository(this.db).roundNumbers(workflowId);
       const response: Omit<RepairCandidatesResponse, 'canEdit'> = { schemaVersion: 'workflow-repair/v2', workflowId, inputDigest: snapshot.inputDigest, items,
         tasks: [...heads.values()].map(r => {
           const itemCount = isAutomaticBatch(r.input) ? r.input.automation!.totalItems ?? new Set(revisions.filter(v => v.taskId === r.taskId).flatMap(v => v.input.items.map(item => item.itemId))).size : r.input.items.length;
-          return { taskId: r.taskId, revision: r.revision, phase: r.phase, updatedAtMs: r.updatedAtMs, itemCount,
+          return { taskId: r.taskId, ...(rounds.has(r.taskId) ? { roundNumber: rounds.get(r.taskId)! } : {}), revision: r.revision, phase: r.phase, updatedAtMs: r.updatedAtMs, itemCount,
             title: isAutomaticBatch(r.input) ? `自动优化 ${itemCount} 项建议` : (r.input.items.map(item => item.proposal?.summary || item.instruction).find(value => typeof value === 'string' && value.trim()) as string | undefined)?.trim().split('\n')[0].slice(0, 72) || `优化 ${itemCount} 项问题` };
         }),
         repairSignatureKeys, facets,
@@ -391,7 +407,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     if (!workflowId) fail('TASK_NOT_FOUND', 'Repair task does not exist');
     const revisions = await repo.listRevisions(workflowId, taskId);
     const execution = await new RepairTaskRepository(db).execution(taskId, revisions[0].revision);
-    const response: RepairTaskDetail = { workflowId, taskId, latestAttempt: revisions[0], latestSuccessful: revisions.find(r => r.draft !== null && (r.phase !== 'no_change' || isAutomaticBatch(r.input))) ?? null,
+    const response: RepairTaskDetail = { workflowId, taskId, roundNumber: (await repo.roundNumbers(workflowId)).get(taskId), latestAttempt: revisions[0], latestSuccessful: revisions.find(r => r.draft !== null && (r.phase !== 'no_change' || isAutomaticBatch(r.input))) ?? null,
       revisions, capabilities: this.capabilities(), ...(execution ? { execution } : {}) };
     response.scopeItemCount = isAutomaticBatch(revisions[0].input) ? revisions[0].input.automation!.totalItems ?? new Set(revisions.flatMap(r => r.input.items.map(item => item.itemId))).size : revisions[0].input.items.length;
     if (isAutomaticBatch(revisions[0].input)) response.automaticProgress = {
@@ -479,17 +495,23 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
           }
         }
         const selected: RepairItem[] = [];
+        const id = taskId ?? randomUUID();
         for (const itemId of request.itemIds) {
           const item = snapshot.items.find(item => item.itemId === itemId);
           if (!item || (!item.sourceAvailable && (!taskId || item.activeTaskId !== taskId))) fail('ITEM_NOT_FOUND', 'Selected source is unavailable in this workflow');
-          if (item.state !== 'pending' && !(taskId && item.state === 'processing' && item.activeTaskId === taskId)) fail('ITEM_BUSY', 'Selected item is not pending or owned by this task');
+          const repeat = !taskId && !request.automation && ['awaiting_verification', 'verified', 'ineffective'].includes(item.state);
+          if (!repeat && item.state !== 'pending' && !(taskId && item.state === 'processing' && item.activeTaskId === taskId)) fail('ITEM_BUSY', 'Selected item is not pending or owned by this task');
           const source = snapshot.materializable.get(itemId);
-          const stored = source ? await repo.materializeItem(tx, { workflowId: request.workflowId, ...source }) : await repo.getItem(request.workflowId, itemId);
+          const existing = repeat ? await repo.getItem(request.workflowId, itemId) : null;
+          const stored = existing ?? (source ? await repo.materializeItem(tx, { workflowId: request.workflowId, ...source }) : await repo.getItem(request.workflowId, itemId));
           if (!stored) fail('ITEM_NOT_FOUND', 'Selected item is unavailable');
           const { workflowId: _wf, episodeKey: _ep, state: _state, stateVersion: _sv, activeTaskId: _at, activeRevision: _ar, disposition: _d, updatedAtMs: _u, ...frozen } = stored;
-          selected.push(frozen);
+          if (repeat) {
+            const copy = { ...frozen, ...source?.item, itemId: digestRepairJson([itemId, id]), previousItemId: itemId };
+            await repo.materializeItem(tx, { workflowId: request.workflowId, episodeKey: `repeat:${id}`, item: copy });
+            selected.push(copy);
+          } else selected.push(frozen);
         }
-        const id = taskId ?? randomUUID();
         const feedback = 'feedback' in request ? request.feedback : '';
         const parentCandidateCommit = 'parentCandidateCommit' in request ? request.parentCandidateCommit : null;
         const excludedSourceRefs = snapshot.items.filter(item => !request.itemIds.includes(item.itemId) && item.sourceAvailable)

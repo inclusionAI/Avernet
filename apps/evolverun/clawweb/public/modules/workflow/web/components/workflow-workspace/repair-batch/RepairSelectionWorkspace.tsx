@@ -4,16 +4,17 @@ import { repairReadError } from '../../../api/repair-read-error'
 import type { RepairCandidatesResponse, RepairInboxItem } from '../../../../server/contracts/repair-workbench'
 import RepairWorkspace from './RepairWorkspace'
 import { changeSummary, sourceRunCount } from './RepairItemDetail'
-import { button, exclusion, itemTitle, itemHeading, primary, states } from './repair-view'
+import { button, exclusion, itemTitle, itemHeading, primary, states, previouslyHandled } from './repair-view'
 import { proposalChecked, proposalMembers, proposalSelection } from '../../../../server/contracts/repair-proposal'
 import ProposalEvidence from './ProposalEvidence'
 
 export default function RepairSelectionWorkspace({ workflowId, includeHistorical, refreshToken, selected, selectedItems, instructions, busy, reason, error,
-  onInstructions, onToggle, onResult, onDetail, onGenerate, onBack, onRecover, nextRound = false, canEdit = true, notice, onReviewSelection, onConfirmSelection, reviewPending = false }: {
+  onInstructions, onToggle, onResult, onDetail, onGenerate, onBack, onRecover, onTask, nextRound = false, canEdit = true, notice, onReviewSelection, onConfirmSelection, reviewPending = false }: {
   workflowId: string; includeHistorical: boolean; refreshToken: number; selected: string[]; selectedItems: RepairInboxItem[];
   instructions: string; busy: boolean; reason: string; error: string;
   onInstructions: (value: string) => void; onToggle: (id: string) => void; onResult: (result: RepairCandidatesResponse) => void;
   onDetail: (item: RepairInboxItem) => void; onGenerate: () => void; onBack: () => void
+  onTask?: (taskId: string) => void
   onRecover?: () => void; nextRound?: boolean; canEdit?: boolean; notice?: string; onReviewSelection?: () => void; onConfirmSelection?: () => void; reviewPending?: boolean
 }) {
   const [page, setPage] = useState(1)
@@ -24,6 +25,7 @@ export default function RepairSelectionWorkspace({ workflowId, includeHistorical
   const [node, setNode] = useState('')
   const [failureMode, setFailureMode] = useState('')
   const [reload, setReload] = useState(0)
+  const [historyOpen, setHistoryOpen] = useState(false)
   useEffect(() => {
     let current = true
     setLoading(true); setReadError('')
@@ -35,14 +37,16 @@ export default function RepairSelectionWorkspace({ workflowId, includeHistorical
   }, [workflowId, includeHistorical, refreshToken, page, node, failureMode, reload])
   const rows = (data?.items ?? []).map(item => reviewPending && selected.includes(item.itemId) ? selectedItems.find(original => original.itemId === item.itemId) ?? item : item)
     .filter(item => !query || `${itemTitle(item)} ${item.context?.nodeId ?? ''}`.toLowerCase().includes(query.toLowerCase()))
-  const selectable = rows.filter(item => !exclusion(item))
+  const history = rows.filter(previouslyHandled)
+  const shown = rows.filter(item => !previouslyHandled(item) || historyOpen || !!query)
+  const selectable = shown.filter(item => !exclusion(item))
   const allSelected = selectable.length > 0 && selectable.every(item => proposalChecked(item, selected))
   const nodes = data?.facets?.nodes ?? []
   const modes = data?.facets?.failureModes ?? []
   const readOnly = !canEdit || !data?.canEdit
   const blocker = reason || (readError ? '建议读取失败，请重试后生成。' : loading ? '读取建议…' : readOnly ? '当前只有查看权限。' : !selected.length ? '请选择建议。' : '')
   return <RepairWorkspace stage={1} title={nextRound ? '开始下一轮优化' : '把多条建议，变成一次修复'} subtitle={`${workflowId} · 选择独立建议，生成完整 Pack 候选`} onBack={onBack} backLabel={nextRound ? '返回上一轮观察' : undefined} busy={busy}>
-    {nextRound && <p className="rounded-lg border border-input bg-card p-4 text-sm">将创建独立新任务，提交时读取最新生效版本作为基线；上一轮任务、发布与观察记录继续保留。已采纳且待验证的建议不能重复选择。</p>}
+    {nextRound && <p className="rounded-lg border border-input bg-card p-4 text-sm">将创建独立新任务，基于最新生效版本生成草稿。已采纳的建议也可再次选择，上一轮任务、发布与观察记录继续保留。</p>}
     {notice && <p role="status" className="rounded-lg border border-input p-4 text-sm">{notice}</p>}
     <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_19rem]">
       <section className="overflow-hidden rounded-lg border border-input bg-card">
@@ -57,10 +61,12 @@ export default function RepairSelectionWorkspace({ workflowId, includeHistorical
         {readError && <p role="alert" className="px-5 py-3 text-xs text-destructive">{readError} <button onClick={() => setReload(v => v + 1)} className="underline">重试读取</button></p>}
         <div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead className="bg-muted/50 text-muted-foreground"><tr><th className="px-4 py-3"><input type="checkbox" aria-label="全选本页可用建议" checked={allSelected} disabled={busy || loading || readOnly || !selectable.length}
           onChange={() => { const targets = allSelected ? selectable : selectable.filter(item => !proposalChecked(item, selected)).slice(0, Math.max(0, 100 - selected.length)); targets.forEach(item => onToggle(item.itemId)) }} className="h-4 w-4 accent-primary" /></th><th>问题与修复建议</th><th className="px-4">来源</th><th className="px-4">处理提示</th></tr></thead>
-          <tbody>{rows.map(item => { const checked = proposalChecked(item, selected); const unavailable = exclusion(item); return <tr key={item.itemId} className={`border-t border-border/50 ${checked ? 'bg-primary/5' : ''}`}>
+          <tbody>{history.length > 0 && <tr><td colSpan={4} className="border-t border-border/50 px-4 py-3"><button type="button" className="text-primary" aria-expanded={historyOpen || !!query} onClick={() => setHistoryOpen(value => !value)}>已采纳与已验证的建议（本页 {history.length} 条，可展开重新选择）</button></td></tr>}{shown.map(item => { const checked = proposalChecked(item, selected); const unavailable = exclusion(item); const task = data?.tasks.find(row => row.taskId === item.activeTaskId); return <tr key={item.itemId} className={`border-t border-border/50 ${checked ? 'bg-primary/5' : ''}`}>
             <td className="px-4 py-4 align-top"><input type="checkbox" aria-label={`选择 ${itemTitle(item)}`} checked={checked} disabled={busy || loading || readOnly || !!unavailable || !checked && selected.length >= 100} onChange={() => onToggle(item.itemId)} className="h-4 w-4 accent-primary" /></td>
             <td className="min-w-64 py-4 pr-4"><p className="font-semibold leading-5 text-foreground">{itemHeading(item)}</p><ProposalEvidence item={item} canEdit={!busy && !readOnly} /><p className="mt-1 font-mono text-[10px] text-muted-foreground">{String(item.context?.nodeId ?? '')}</p><p className="mt-1 leading-5 text-muted-foreground">{changeSummary(item)}</p><button onClick={() => onDetail(item)} className="mt-1 text-primary hover:underline">查看问题与证据 ↗</button></td>
-            <td className="px-4 py-4 align-top text-muted-foreground">{sourceRunCount(item) ?? '未知'} 个运行</td><td className="px-4 py-4 align-top text-muted-foreground">{unavailable || states[item.state]}</td>
+            <td className="px-4 py-4 align-top text-muted-foreground">{sourceRunCount(item) ?? '未知'} 个运行</td><td className="px-4 py-4 align-top text-muted-foreground"><p>{unavailable || (previouslyHandled(item) ? `${item.state === 'awaiting_verification' ? '已采纳，待验证' : states[item.state]} · 可再次选择` : states[item.state])}</p>
+              {item.activeTaskId && onTask ? <button type="button" className="mt-2 text-primary hover:underline" onClick={() => onTask(item.activeTaskId!)}>{task?.roundNumber ? `查看第 ${task.roundNumber} 轮` : '查看对应迭代'}{item.activeRevision ? ` · 候选 v${item.activeRevision}` : ''}</button>
+                : previouslyHandled(item) && <p className="mt-2 text-xs">历史采纳记录，尚未关联具体迭代。</p>}</td>
           </tr> })}</tbody></table></div>
         {!loading && !readError && !rows.length && <p className="p-5 text-xs text-muted-foreground">当前范围没有匹配建议。</p>}
         {data && <div className="flex justify-between border-t border-input px-5 py-3 text-xs text-muted-foreground"><button disabled={loading || page <= 1} onClick={() => setPage(v => v - 1)}>上一页</button><span>建议第 {data.page.page}/{data.page.totalPages || 1} 页 · {data.page.total} 条</span><button disabled={loading || page >= data.page.totalPages} onClick={() => setPage(v => v + 1)}>下一页</button></div>}

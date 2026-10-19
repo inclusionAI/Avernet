@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { repairBatches } from '../../../api/repair-batches'
 import { repairActionFailure, type RepairRecoveryAction } from '../../../api/repair-action-error'
 import { repairReadError } from '../../../api/repair-read-error'
-import type { RepairCandidatesResponse, RepairTaskDetail } from '../../../../server/contracts/repair-workbench'
+import type { RepairCandidatesResponse, RepairTaskDetail, RepairTaskSummary } from '../../../../server/contracts/repair-workbench'
 import RepairTaskPanel from './RepairTaskPanel'
 import RepairWorkspace from './RepairWorkspace'
 import { button, primary, RepairDialog } from './repair-view'
@@ -10,9 +10,10 @@ import { button, primary, RepairDialog } from './repair-view'
 const frozenItemTitle = (item: RepairTaskDetail['latestAttempt']['input']['items'][number]) =>
   typeof item.proposal?.summary === 'string' ? item.proposal.summary : item.instruction || item.itemId
 
-export default function RepairTaskDialog({ workflowId, taskId, includeHistorical, canEdit, onClose, onChanged, onNextRound, onPreviousRound }: {
+export default function RepairTaskDialog({ workflowId, taskId, includeHistorical, canEdit, onClose, onChanged, onNextRound, onPreviousRound, rounds, onTask }: {
   workflowId: string; taskId: string; includeHistorical: boolean; canEdit: boolean;
   onClose: () => void; onChanged: () => void; onNextRound?: (publishedRevision: number) => void; onPreviousRound?: () => void;
+  rounds?: RepairTaskSummary[]; onTask?: (taskId: string) => void;
 }) {
   const [detail, setDetail] = useState<RepairTaskDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -261,7 +262,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     {detail && <RepairTaskPanel key={detail.taskId}
       detail={detail} onHistoryPageChange={setHistoryPage} canEdit={canEdit && !taskError && !loading && !recoveryAction} busy={busy} dispatchError={recoveryAction ? '' : dispatchError}
       onFeedback={openSelection}
-      onNextRound={onNextRound}
+      onNextRound={onNextRound} rounds={rounds} onTask={onTask}
       onCancel={() => { setError(''); setMode('cancel') }} onRetryDispatch={() => void retryDispatch()} onRetryGeneration={() => void retryGeneration()} onRefresh={reload} />}
   </section>
 }

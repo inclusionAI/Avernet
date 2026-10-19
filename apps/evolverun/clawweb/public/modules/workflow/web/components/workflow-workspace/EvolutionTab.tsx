@@ -527,13 +527,13 @@ function DiagnosisPanel({
 
   if (selectedTaskId) return <RepairTaskDialog key={selectedTaskId} workflowId={workflowId} taskId={selectedTaskId} includeHistorical={includeHistorical}
     canEdit={canEdit && repairData?.canEdit === true} onClose={closeTask} onChanged={() => setRepairRefresh(value => value + 1)}
-    onNextRound={startNextRound} onPreviousRound={previousRoundTaskId && roundChildTaskId === selectedTaskId ? returnToPreviousRound : undefined} />
+    onNextRound={startNextRound} rounds={repairData?.tasks} onTask={openTask} onPreviousRound={previousRoundTaskId && roundChildTaskId === selectedTaskId ? returnToPreviousRound : undefined} />
   if (draftOpen) return <>
     <RepairSelectionWorkspace workflowId={workflowId} includeHistorical={includeHistorical} refreshToken={repairRefresh} selected={selectedRepairIds}
       selectedItems={selectedItems} instructions={instructions} busy={repairBusy} reason={generationReason} error={repairActionError}
       onRecover={draftNeedsCheck ? () => void recoverDraft() : undefined} nextRound={!!previousRoundTaskId} canEdit={canEdit && repairData?.canEdit === true && !draftNeedsCheck}
       reviewPending={draftNeedsCheck} notice={selectionNotice}
-      onInstructions={setInstructions} onToggle={toggleRepairItem} onResult={acceptRepairPage} onDetail={item => {
+      onTask={openTask} onInstructions={setInstructions} onToggle={toggleRepairItem} onResult={acceptRepairPage} onDetail={item => {
         setSelectionItems(current => ({ ...current, [item.itemId]: item })); setSelectedRepairItemId(item.itemId)
       }} onGenerate={() => void submitDraft()} onBack={() => { if (previousRoundTaskId) returnToPreviousRound(); else if (!repairBusy) { setDraftOpen(false); closeDetail() } }} />
     {selectedRepairItem && <RepairDialog title="问题、建议与证据" onClose={() => setSelectedRepairItemId(null)}>{renderRepairItem(selectedRepairItem)}</RepairDialog>}

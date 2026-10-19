@@ -88,7 +88,10 @@ describe('reviewed candidate publication', () => {
     expect(next.input.baseline).toEqual(latest);
     expect(next.input.parentCandidateCommit).toBeNull();
     expect(await f.workbench.create('reviewer', request)).toEqual(next);
-    await expect(f.workbench.create('reviewer', { ...request, requestId: 'adopted-again', itemIds: ['item-0'] })).rejects.toMatchObject({ code: 'ITEM_BUSY' });
+    const repeated = await f.workbench.create('reviewer', { ...request, requestId: 'adopted-again', itemIds: ['item-0'] });
+    expect(repeated.input.baseline).toEqual(latest);
+    expect(repeated.input.items[0]).toMatchObject({ previousItemId: 'item-0', sources: item.sources });
+    expect(repeated.input.items[0].itemId).not.toBe('item-0');
     expect(await f.workbench.task(f.revision.taskId)).toEqual(oldTask);
     expect(await f.service.detail(f.revision.taskId)).toEqual(oldRelease);
     expect(await verification.evidence(f.revision.taskId, deployment.id)).toEqual(observation);

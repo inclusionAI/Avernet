@@ -69,6 +69,12 @@ export class RepairBatchRepository {
     const row = (await this.db.query<{ workflow_id: string }>('SELECT workflow_id FROM workflow_repair_revisions WHERE task_id = ? LIMIT 1', [taskId]))[0];
     return row?.workflow_id ?? null;
   }
+  async roundNumbers(workflowId: string): Promise<Map<string, number>> {
+    const rows = await this.db.query<{ task_id: string }>(`SELECT task_id FROM workflow_repair_revisions
+      WHERE workflow_id = ? GROUP BY task_id ORDER BY MIN(created_at_ms), task_id`, [workflowId]);
+    return new Map(rows.map((row, index) => [row.task_id, index + 1]));
+  }
+
   async listRevisions(workflowId: string, taskId?: string): Promise<RepairRevision[]> {
     return (await this.db.query<Row>(`SELECT * FROM workflow_repair_revisions WHERE workflow_id = ?${taskId ? ' AND task_id = ?' : ''} ORDER BY revision DESC`, taskId ? [workflowId, taskId] : [workflowId])).map(revisionFromRow);
   }

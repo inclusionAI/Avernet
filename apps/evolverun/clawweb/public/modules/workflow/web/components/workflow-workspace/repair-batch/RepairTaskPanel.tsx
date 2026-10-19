@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import type { RepairTaskDetail } from '../../../../server/contracts/repair-workbench'
+import type { RepairTaskDetail, RepairTaskSummary } from '../../../../server/contracts/repair-workbench'
 import type { RepairRevision } from '../../../../server/contracts/repair-batch'
-import { button, primary, JsonDetails } from './repair-view'
+import { button, primary, JsonDetails, phases } from './repair-view'
 import { candidateLabel } from './repair-release-view'
 import RepairCandidateReview from './RepairCandidateReview'
 import RepairTaskScope from './RepairTaskScope'
@@ -15,9 +15,10 @@ function initialRevision(detail:RepairTaskDetail){
  const published=detail.release?.deployments.find(row=>row.status==='succeeded')
  return (['failed','no_change'].includes(detail.latestAttempt.phase)&&published?published.revision:detail.latestSuccessful?.revision)??detail.latestAttempt.revision
 }
-export default function RepairTaskPanel({detail,canEdit,onFeedback,onNextRound,onCancel,onRetryDispatch,onRetryGeneration,onRefresh,onHistoryPageChange,dispatchError,busy}:{
+export default function RepairTaskPanel({detail,canEdit,onFeedback,onNextRound,onCancel,onRetryDispatch,onRetryGeneration,onRefresh,onHistoryPageChange,dispatchError,busy,rounds,onTask}:{
  detail:RepairTaskDetail;canEdit:boolean;onFeedback:()=>void;onCancel:()=>void;busy:boolean;onRetryGeneration:()=>void;
  onRefresh:()=>void;onRetryDispatch:()=>void;dispatchError:string;onHistoryPageChange?:(page:number)=>void;onNextRound?:(publishedRevision:number)=>void;
+ rounds?:RepairTaskSummary[];onTask?:(taskId:string)=>void;
 }){
  const storageKey=`repair-workspace:${detail.workflowId}:${detail.taskId}`
  const saved=useRef(preference(storageKey))
@@ -30,6 +31,7 @@ export default function RepairTaskPanel({detail,canEdit,onFeedback,onNextRound,o
  const revisions=[...known.current.values()].sort((a,b)=>b.revision-a.revision)
  const id=useId(),tabRefs=useRef<Array<HTMLButtonElement|null>>([])
  const latest=detail.latestAttempt
+ const roundOptions=rounds?.some(row=>row.taskId===detail.taskId)?rounds:rounds&&[{taskId:detail.taskId,roundNumber:detail.roundNumber,revision:latest.revision,phase:latest.phase,updatedAtMs:latest.updatedAtMs,itemCount:latest.input.items.length},...rounds]
  const deployment=detail.release?.deployments.find(row=>row.revision===revision.revision&&row.status!=='failed')??detail.release?.deployments.find(row=>row.revision===revision.revision)
  const published=deployment?.status==='succeeded'&&!!deployment.receipt
  const alreadyPublished=detail.revisions.some(row=>row.phase==='published')||!!detail.release?.deployments.some(row=>row.status==='succeeded')
@@ -46,8 +48,9 @@ export default function RepairTaskPanel({detail,canEdit,onFeedback,onNextRound,o
  return <div className="min-w-0 space-y-5">
   <header role="region" aria-label="当前候选" className="rounded-xl border border-input bg-card p-5">
    <div className="flex flex-wrap items-start justify-between gap-4">
-    <div className="min-w-0"><p className="text-xs text-muted-foreground">{detail.workflowId} · {source}</p><h2 className="mt-2 text-xl font-semibold">当前查看 v{revision.revision}</h2><p className="mt-2 text-sm text-foreground" aria-live="polite">{status}</p></div>
-    <label className="text-xs text-muted-foreground">候选版本<select aria-label="查看修复版本" className="ml-2 max-w-full rounded border border-input bg-background p-2 text-foreground" value={revision.revision} onChange={event=>switchRevision(Number(event.target.value))}>{revisions.map(row=><option key={row.revision} value={row.revision}>v{row.revision} · {candidateLabel(detail,row)}</option>)}</select></label>
+    <div className="min-w-0"><p className="text-xs text-muted-foreground">{detail.workflowId} · {source}</p><h2 className="mt-2 text-xl font-semibold">{detail.roundNumber ? `第 ${detail.roundNumber} 轮优化 · 候选 v${revision.revision}` : `当前查看 v${revision.revision}`}</h2><p className="mt-1 text-xs text-muted-foreground">候选编号仅在本轮内计数，不是工作流部署版本。</p><p className="mt-2 text-sm text-foreground" aria-live="polite">{status}</p></div>
+    <div className="flex flex-wrap gap-3">{roundOptions && roundOptions.length > 1 && onTask && <label className="text-xs text-muted-foreground">优化轮次<select aria-label="切换优化轮次" className="ml-2 max-w-64 rounded border border-input bg-background p-2 text-foreground" value={detail.taskId} onChange={event=>onTask(event.target.value)}>{roundOptions.map(row=><option key={row.taskId} value={row.taskId}>{row.roundNumber ? `第 ${row.roundNumber} 轮` : row.taskId.slice(0,8)} · {row.title || phases[row.phase]}</option>)}</select></label>}
+    <label className="text-xs text-muted-foreground">本轮候选<select aria-label="查看修复版本" className="ml-2 max-w-full rounded border border-input bg-background p-2 text-foreground" value={revision.revision} onChange={event=>switchRevision(Number(event.target.value))}>{revisions.map(row=><option key={row.revision} value={row.revision}>v{row.revision} · {candidateLabel(detail,row)}</option>)}</select></label></div>
    </div>
    {!canEdit&&<p className="mt-3 text-xs text-warning-foreground">当前只有查看权限。</p>}
    {publishedRevision!==undefined&&onNextRound&&<div className="mt-4 space-y-2 border-t border-border pt-4">

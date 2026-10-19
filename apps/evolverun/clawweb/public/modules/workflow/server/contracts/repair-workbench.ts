@@ -24,7 +24,7 @@ export function repairSignatureKey(signature: string): string {
 export type RepairInboxFilter = 'pending' | 'processing' | 'awaiting_verification' | 'closed' | 'no_action' | 'all';
 export type RepairCandidatesQuery = { state?: RepairInboxFilter; page?: number; pageSize?: number; includeHistorical?: boolean;
   nodeId?: string; failureMode?: string; signature?: string; previewSignatures?: string[]; rawItems?: boolean; metadataPage?: number };
-export type RepairTaskSummary = { taskId: string; revision: number; phase: RepairRevision['phase']; updatedAtMs: number; itemCount: number; title?: string };
+export type RepairTaskSummary = { taskId: string; roundNumber?: number; revision: number; phase: RepairRevision['phase']; updatedAtMs: number; itemCount: number; title?: string };
 export type RepairCandidatesResponse = {
   schemaVersion: 'workflow-repair/v2'; workflowId: string; inputDigest: string;
   items: RepairInboxItem[]; tasks: RepairTaskSummary[]; capabilities: RepairCapabilities;
@@ -40,7 +40,7 @@ export type RepairCandidatesResponse = {
   limits: { maxItems: number; maxRequestBytes: number }; canEdit: boolean;
 };
 export type RepairTaskDetail = {
-  workflowId: string; taskId: string; latestAttempt: RepairRevision;
+  workflowId: string; taskId: string; roundNumber?: number; latestAttempt: RepairRevision;
   latestSuccessful: RepairRevision | null; revisions: RepairRevision[]; capabilities: RepairCapabilities;
   release?: RepairReleaseDetail;
   revisionPage?: { page: number; pageSize: number; total: number; totalPages: number };
