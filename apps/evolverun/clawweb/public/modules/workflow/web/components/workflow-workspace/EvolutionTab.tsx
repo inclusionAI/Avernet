@@ -596,7 +596,7 @@ function DiagnosisPanel({
                 onChange={event => changeHistoryScope(event.target.checked)} className="h-4 w-4 accent-blue-600" />{repairData?.activeSnapshot !== undefined ? '包含更早记录（30天前）' : '包含历史未复现'}
             </label>
             <select aria-label="问题排序" value={sort} onChange={event => { setSort(event.target.value as typeof sort); setRepairPage(1) }} className="rounded-md border border-input bg-background px-2 py-1 text-xs">
-              <option value="priority">影响优先</option><option value="frequency">近期频率</option><option value="recent">最近发生</option>
+              <option value="priority">影响优先</option><option value="frequency">近7天发现次数</option><option value="recent">最近发生</option>
             </select>
             <select aria-label="影响程度" value={severity} onChange={event => { setSeverity(event.target.value); setRepairPage(1) }} className="rounded-md border border-input bg-background px-2 py-1 text-xs">
               <option value="all">全部影响</option><option value="critical">严重</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option><option value="unknown">待评估</option>

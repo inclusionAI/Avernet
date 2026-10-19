@@ -1,33 +1,27 @@
 # Issue coverage and read-only repair review
 
-## Issue statistics
+## Issue list facts
 
-All windows use actual run start time, normalize seconds/milliseconds, and
-deduplicate by flow ID. Related runs executed the issue's relevant nodes, or
-already carry evidence of that issue. Workflow-wide runs are used only when the
-issue has no node identity. Missing/invalid run times are excluded and reported.
+Issue cards show diagnostic severity, observed issue counts for the last 24 hours
+and seven days, and the latest actual run time. Counts deduplicate affected flow
+IDs. Run timestamps normalize seconds/milliseconds; missing/invalid or future
+times are excluded, and an unknown latest time is shown explicitly. Analysis
+completion time is never substituted for runtime.
 
-`IssueWindow.analyzed` counts runs with a valid completed analysis applicable to
-the issue's nodes. A node-scoped analysis contributes to that node, never to an
-unrelated node or whole-workflow coverage. Unknown findings do not erase the fact
-that analysis completed. Additive `complete` counts runs whose latest applicable
-analysis also has no unknown evidence; `legacyDiagnosed` separately reports
-related runs with legacy node diagnoses and no applicable completed analysis.
-Legacy diagnoses are evidence of examination, not proof of complete coverage.
-Clients receiving old responses show these new counts as pending, not zero.
+List reads fetch timestamps only for flows already associated with visible-scope
+issues, in bounded ID batches. They never scan unrelated runs, read node execution
+records, or compute coverage, sample rates, population rates or period trends.
+Default impact sorting uses severity then recency; the existing `frequency` query
+value now sorts by observed seven-day issue-run count and is labeled accordingly.
+Filtering and sorting apply to the full version-scoped issue set before pagination.
+Retired denominator/rate fields remain null in the response for compatibility,
+including previousWeek and trend; null never means zero coverage or healthy runs.
 
-The latest applicable analysis is selected by completion time with request-time
-fallback, then ID; insertion order does not override effective time. Malformed
-latest evidence blocks fallback to an older clean analysis. Invalid source
-results do not take down the entire paginated issue workspace; compatible
-sources and legacy diagnoses remain readable. Reads retain the existing bounded
-two-week statistics window, keyset pages, and exact-ID historical timestamp reads.
-
-The sample hit rate uses only completely analyzed applicable runs. It is labeled
-as a sample rate. A population occurrence rate and period trend are available
-only when all related runs have complete coverage. Missing analysis is never a
-healthy result. Severity continues to come from diagnostic evidence and existing
-sorting; the UI adds semantic color plus text, including an explicit unknown.
+Version association, historical-reference selection and daily evolution scope
+remain governed by the versioned-evolution contract. Read projections retain a
+10-second bound and invalidate on analysis/diagnosis or deployment changes; a late
+run association is re-read after that bound. Timestamp facts are read fresh, and
+write preparation always rebuilds authoritative source/version associations.
 
 ## Task entry and read-only review
 
@@ -75,19 +69,9 @@ placeholder; cached pages and previews remain reusable. Global legacy suggestion
 are never used as a loading fallback. The separate history view explicitly states
 that it does not follow the issue filters.
 
-`sampleHits` is an additive count of affected runs within the complete applicable
-sample, making the sample percentage reconcilable as sampleHits/complete. The UI
-also shows analyzed/related and complete/related. Partial completed analyses remain
-visible without being promoted into a healthy population denominator.
-
 Retained summary text is labeled separately from the latest aggregation attempt.
 A not-generated, queued or failed current attempt never labels retained content
 as nonexistent. Frozen summary evidence and current issue evidence remain distinct.
-
-Issue cards show severity, recent observed issue counts and supported trends. Detailed
-coverage counts, sample numerators/denominators, node/source evidence and sorting
-rules remain in collapsed statistics details. Unknown evidence remains unknown;
-insufficient coverage gets one short warning instead of repeated empty rates.
 
 Suggestions are selected directly in their original list. Independent changes and
 equal-value changes do not create a comparison directory. Only the existing
