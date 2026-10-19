@@ -442,3 +442,27 @@ it('allows selected conflicting goals to be reconciled during draft generation',
   expect(generate).toHaveBeenCalledTimes(1)
   expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 })
+
+it.each([403, 500])('hides cached issues and previews after a %s issue refetch failure, then recovers on retry', async status => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const { unmount } = render(<QueryClientProvider client={client}><MemoryRouter><EvolutionTab workflowId="wf" /></MemoryRouter></QueryClientProvider>)
+  await screen.findByRole('checkbox', { name: '选择 retry' })
+  const fetchOther = globalThis.fetch
+  let failed = true
+  vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
+    if (failed && input.includes('/issue-groups?')) return new Response(JSON.stringify({ code: status === 403 ? 'FORBIDDEN' : 'READ_FAILED' }), { status })
+    return fetchOther(input, init)
+  }))
+  await act(async () => { await client.invalidateQueries({ queryKey: ['evolve-issue-groups', 'wf'] }) })
+  expect(await screen.findByRole('alert')).toHaveTextContent('问题分组加载失败')
+  // A failed background refetch retains successful data in TanStack Query.
+  expect(client.getQueriesData({ queryKey: ['evolve-issue-groups', 'wf'] })[0][1]).toBeDefined()
+  expect(screen.queryByRole('region', { name: '问题列表' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('checkbox', { name: '选择 retry' })).not.toBeInTheDocument()
+  expect(screen.queryByText('当前生效版本暂无已记录异常。', { exact: false })).not.toBeInTheDocument()
+  failed = false
+  await userEvent.click(screen.getByRole('button', { name: '重试问题' }))
+  expect(await screen.findByRole('region', { name: '问题列表' })).toBeVisible()
+  expect(await screen.findByRole('checkbox', { name: '选择 retry' })).toBeVisible()
+  unmount(); client.clear()
+})

@@ -587,7 +587,7 @@ function DiagnosisPanel({
         </div>
       )}
 
-      {data && !isLoading && <section aria-label="问题列表" aria-busy={updatingIssues} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+      {data && !isLoading && !isError && <section aria-label="问题列表" aria-busy={updatingIssues} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-slate-200 px-4 py-3">
           <h3 className="text-sm font-semibold text-slate-900">当前版本问题 · 共 {issuePage.total} 个问题</h3>
           <div className="ml-auto flex flex-wrap items-center gap-2">
