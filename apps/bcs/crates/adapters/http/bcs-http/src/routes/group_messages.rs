@@ -335,7 +335,7 @@ pub(crate) async fn resolve_group_chat_caller(
     headers: &HeaderMap,
     uri: &Uri,
 ) -> Result<GroupChatCaller, LegacyGroupError> {
-    if let Some(bot_uuid) = state.bot_uuid_from_headers(headers).await {
+    if let Some(bot_uuid) = state.bot_uuid_from_headers(headers).await.map_err(|error| LegacyGroupError::new(StatusCode::from(error), "Bot authentication failed"))? {
         return Ok(GroupChatCaller::Bot { bot_uuid });
     }
 

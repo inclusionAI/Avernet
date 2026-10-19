@@ -13,3 +13,5 @@ pub use provider_core::ProviderCore;
 
 #[deprecated(note = "Use BotCore; BotRegistry is a temporary compatibility alias.")]
 pub type BotRegistry = BotCore;
+
+mod agent_identity;

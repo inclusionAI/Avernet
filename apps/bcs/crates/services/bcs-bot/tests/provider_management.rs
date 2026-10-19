@@ -169,6 +169,7 @@ async fn register_provider_bot(
     let outcome = ctx
         .management
         .register_provider_bot(RegisterProviderBotCommand {
+            bot_slug: None,
             webhook_url: None,
             provider_id: provider_id.to_string(),
             provider_admin_token: admin_token.to_string(),

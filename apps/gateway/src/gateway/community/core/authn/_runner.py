@@ -21,11 +21,13 @@ from gateway.community.core.authn._route_security import Requirement
 from gateway.community.logger import get_logger
 from gateway.community.spi.auth import AuthError
 from gateway.community.spi.authn import (
+    BotPrincipal,
     CredentialBundle,
     Presence,
     Principal,
     PrincipalType,
 )
+from gateway.community.spi.authn._actor import expected_actor_id
 
 logger = get_logger("authn-runner")
 
@@ -36,6 +38,11 @@ async def authenticate(
     registry: dict[PrincipalType, IdentityChain],
 ) -> dict[PrincipalType, Principal]:
     """Resolve every required/present identity, or raise ``AuthError`` (401/403)."""
+    actor = expected_actor_id(creds.headers)
+    if not requirement:
+        return {}  # Explicit passthrough; the downstream authenticates credentials.
+    if actor is not None and PrincipalType.BOT not in requirement:
+        raise AuthError("this route does not accept a Bot Actor")
     resolved: dict[PrincipalType, Principal] = {}
     for identity, presence in requirement.items():
         chain = registry.get(identity)
@@ -54,4 +61,8 @@ async def authenticate(
             continue  # OPTIONAL + exhausted → absent from the result set
         logger.info("identity %s resolved", identity.value)
         resolved[identity] = principal
+    if actor is not None:
+        bot = resolved.get(PrincipalType.BOT)
+        if not isinstance(bot, BotPrincipal) or bot.bot.bot_uuid != actor:
+            raise AuthError("Actor requires a matching authenticated Bot")
     return resolved

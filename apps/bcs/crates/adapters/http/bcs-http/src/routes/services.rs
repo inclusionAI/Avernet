@@ -265,7 +265,7 @@ async fn resolve_service_caller(
         }
     };
 
-    let bot_id = match state.bot_uuid_from_headers(headers).await {
+    let bot_id = match state.bot_uuid_from_headers(headers).await? {
         Some(bot_id) => bot_id,
         None => {
             return Err((

@@ -244,7 +244,7 @@ async fn resolve_caller(
     from_actor: Option<&str>,
     actor_kind: Option<&str>,
 ) -> Result<String, HttpAdapterError> {
-    let bearer_id = caller_actor_id_from_headers(state, headers, uri).await;
+    let bearer_id = caller_actor_id_from_headers(state, headers, uri).await?;
 
     let Some(bearer) = bearer_id else {
         return Err(HttpAdapterError::Unauthorized(

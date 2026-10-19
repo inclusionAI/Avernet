@@ -223,6 +223,7 @@ async fn register_bot(ctx: &TestContext, provider: &ProviderFixture, bot_uuid: &
             &provider.provider_id,
             &provider.admin_token,
             RegisterProviderBotParams {
+            bot_slug: None,
                 webhook_url: None,
                 bot_name: format!("{bot_uuid} name"),
                 summary: Some(format!("{bot_uuid} summary")),

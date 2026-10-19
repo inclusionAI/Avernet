@@ -77,7 +77,7 @@ async fn scoped_http_registration_uses_signed_owner_and_provider_anonymously() {
                 }
             );
             assert_eq!(body["data"].as_object().unwrap().len(), 4);
-            assert_eq!(body["data"]["registration"].as_object().unwrap().len(), 5);
+            assert_eq!(body["data"]["registration"].as_object().unwrap().len(), 8);
             assert!(!body.to_string().contains(token));
             assert!(!body.to_string().contains("attacker"));
             assert!(!body.to_string().contains("completed"));

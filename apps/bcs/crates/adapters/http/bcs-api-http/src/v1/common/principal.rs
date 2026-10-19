@@ -14,6 +14,8 @@ pub enum PrincipalVerificationError {
     Missing,
     #[error("Principal is invalid: {0}")]
     Invalid(String),
+    #[error("Bot identity store is unavailable")]
+    Unavailable,
 }
 
 /// Gateway-to-BCN trust boundary.
@@ -50,6 +52,12 @@ where
         Err(PrincipalVerificationError::Invalid(reason)) => {
             warn!(request_id = %request_id.0, %reason, "Gateway Principal verification failed");
             ErrorResponse::unauthenticated(request_id.0).into_response()
+        }
+        Err(PrincipalVerificationError::Unavailable) => {
+            super::application_error_response(&request_id,
+                bcs_service_api::application::v1::ApplicationError::bad_gateway(
+                    "bot_identity_unavailable", "Bot identity store unavailable",
+                )).into_response()
         }
     }
 }

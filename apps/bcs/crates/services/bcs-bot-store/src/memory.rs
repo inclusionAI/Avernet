@@ -5,6 +5,8 @@
 #[path = "memory_registration_create.rs"]
 mod registration_create;
 
+#[path = "memory_agent_bots.rs"]
+mod agent_bots;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -453,6 +455,16 @@ impl BotMetricsSnapshotPort for MemoryBotRepo {
 
 #[async_trait]
 impl BotRepoPort for MemoryBotRepo {
+    async fn persist_provider_affiliation(&self, record: &bcs_service_api::bot_provider::BotProviderRecord) -> ServiceResult<()> {
+        self.save_affiliation_marker(record).await
+    }
+    async fn local_provider_affiliation(&self, id: &str) -> ServiceResult<bool> {
+        match fs::metadata(self.bot_info_path(id).with_file_name("provider-identity.json")).await {
+            Ok(_) => Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error.into()),
+        }
+    }
     async fn try_load_token(&self, bot_id: &str) -> ServiceResult<Option<String>> {
         self.load_registration_token(bot_id).await
     }
@@ -1465,6 +1477,9 @@ impl BotRepoPort for MemoryBotRepo {
             .get(&(channel.to_string(), binding_key.to_string()))
             .cloned()
     }
+
+    async fn query_agent_bots(&self, query: &bcs_service_api::types::agent_registration::AgentBotQuery) -> ServiceResult<Vec<bcs_service_api::types::agent_registration::AgentBotRecord>> { self.load_agent_bots(query).await }
+    async fn lookup_bot_token(&self, token: &str, actor: Option<&str>) -> ServiceResult<Option<bcs_service_api::types::agent_registration::AgentBotRecord>> { self.load_token_bot(token, actor).await }
 
     async fn find_bot_by_agent_code(&self, agent_code: &str) -> Option<String> {
         if agent_code.is_empty() {

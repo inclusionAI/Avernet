@@ -447,7 +447,7 @@ async fn resolve_bot_caller(
     headers: &HeaderMap,
 ) -> Result<String, LegacyChatError> {
     bot_id_from_headers(state, headers)
-        .await
+        .await.map_err(|_| LegacyChatError::invalid_session_token())?
         .ok_or_else(LegacyChatError::invalid_session_token)
 }
 

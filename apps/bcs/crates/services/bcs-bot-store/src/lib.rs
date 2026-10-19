@@ -46,6 +46,7 @@ pub mod provider;
 pub mod provider_cache;
 mod registration_create;
 mod agent_registration;
+mod agent_bots;
 
 #[cfg(test)]
 #[path = "../tests/unit/heartbeat.rs"]
@@ -774,35 +775,35 @@ impl PersistentBotRepo {
         let env = resolve_env();
         let sql = "SELECT bot_uuid FROM bcs_bots WHERE session_token = ? AND env = ? AND COALESCE(is_deleted, 0) = 0";
 
-        info!(token = %token, env = %env, "find_bot_by_token_in_db: executing query");
+        info!(env = %env, "find_bot_by_token_in_db: executing query");
 
         let rows = match self
             .db_query(sql, vec![Value::from(token), Value::from(env.as_str())])
             .await
         {
             Ok(rows) => rows,
-            Err(e) => {
-                warn!(request_id = %bcs_observability::CurrentRequestId, token = %token, env = %env, error = %e, "find_bot_by_token_in_db: database query failed");
+            Err(_) => {
+                warn!(request_id = %bcs_observability::CurrentRequestId, env = %env, "find_bot_by_token_in_db: database query failed");
                 return None;
             }
         };
 
-        info!(token = %token, rows_count = rows.len(), "find_bot_by_token_in_db: query completed");
+        info!(rows_count = rows.len(), "find_bot_by_token_in_db: query completed");
 
         if let Some(row) = rows.first() {
             match db_get_column::<String>(row, "bot_uuid") {
                 Ok(bot_uuid) => {
-                    info!(token = %token, bot_uuid = %bot_uuid, "find_bot_by_token_in_db: found bot");
+                    info!(bot_uuid = %bot_uuid, "find_bot_by_token_in_db: found bot");
                     return Some(bot_uuid);
                 }
-                Err(e) => {
-                    warn!(request_id = %bcs_observability::CurrentRequestId, token = %token, error = %e, "find_bot_by_token_in_db: failed to get bot_uuid");
+                Err(_) => {
+                    warn!(request_id = %bcs_observability::CurrentRequestId, "find_bot_by_token_in_db: failed to get bot_uuid");
                     return None;
                 }
             }
         }
 
-        warn!(request_id = %bcs_observability::CurrentRequestId, token = %token, "find_bot_by_token_in_db: no bot found");
+        warn!(request_id = %bcs_observability::CurrentRequestId, "find_bot_by_token_in_db: no bot found");
         None
     }
 
@@ -2348,6 +2349,14 @@ impl BotRepoPort for PersistentBotRepo {
             warn!(request_id = %bcs_observability::CurrentRequestId, token_prefix = %prefix, "find_bot_by_token: token not found in memory or database");
         }
         result
+    }
+
+    async fn query_agent_bots(&self, query: &bcs_service_api::types::agent_registration::AgentBotQuery) -> ServiceResult<Vec<bcs_service_api::types::agent_registration::AgentBotRecord>> {
+        self.load_agent_bots(query).await
+    }
+
+    async fn lookup_bot_token(&self, token: &str, actor: Option<&str>) -> ServiceResult<Option<bcs_service_api::types::agent_registration::AgentBotRecord>> {
+        self.load_token_bot(token, actor).await
     }
 
     async fn find_bot_by_agent_code(&self, agent_code: &str) -> Option<String> {

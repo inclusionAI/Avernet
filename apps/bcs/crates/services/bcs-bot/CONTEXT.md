@@ -78,9 +78,10 @@ Human/owner-edge writes follow and failures propagate, without journal-based res
 Duplicate Provider/ref returns Conflict; distinct refs may share a valid register token.
 Upstream memberships never create delivery bindings or MOCK credentials through this
 flow. Legacy Provider-admin plugin registration retains its MOCK/preserved-token rules.
-Both flows derive AgentPass Bot `agent_code` from `provider_bot_ref` in either
-connection mode, using the already loaded Provider config and the existing atomic
-Bot write. This does not add a repository read or a separate metadata update.
+Both flows derive ordinary AgentPass Bot `agent_code` from `provider_bot_ref`.
+Subbot mode preserves the original parent in `agent_code` and composes the stored
+ref with `bot_slug`, in either connection mode, using the loaded Provider config
+and existing atomic Bot write. This does not add a repository read or a separate metadata update.
 BotCore, ProviderCore and ProviderManagement synchronize gateway webhook/deletion
 changes through the injected projection. Delivery switching validates affiliation
 before owner-edge writes. Bot control-plane views hydrate upstream affiliation from
@@ -95,3 +96,13 @@ Policy resolution is bounded: plugin ownership uses one indexed metadata read an
 one Provider lookup (the Provider store's existing cache applies); legacy unbound
 or Gateway paths may additionally read the binding projection. There are no scans,
 batch fan-outs, new caches or writes. Message flow retains its per-run surface cache.
+
+## AgentPass subbot identity
+
+New Providers may use `agentpass-subbots`. Both registration paths normalize
+parent plus Bot slug, create independent Bot credentials and reject occupied
+references. Ordinary updates retain the persisted parent. BotCore resolves
+parent/token plus optional Actor against current environment-scoped metadata;
+subbots require Actor for parent credentials, while Static Tokens identify their
+Bot directly. Provider events and runtime connection use cases enforce the same
+identity before mutation. See `docs/agentpass-subbots.md` for the full contract.

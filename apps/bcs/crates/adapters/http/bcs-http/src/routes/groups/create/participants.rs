@@ -7,7 +7,7 @@ pub(crate) async fn resolve_group_create_caller(
     headers: &HeaderMap,
     uri: &Uri,
 ) -> Result<Option<String>, HttpAdapterError> {
-    if let Some(caller) = state.bot_uuid_from_headers(headers).await {
+    if let Some(caller) = state.bot_uuid_from_headers(headers).await? {
         validate_container_header(state, headers, &caller)?;
         return Ok(Some(caller));
     }

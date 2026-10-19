@@ -134,6 +134,7 @@ impl ProviderCore {
         params: RegisterProviderBotParams,
     ) -> ServiceResult<(ProviderBotBinding, Option<String>)> {
         let RegisterProviderBotParams {
+            bot_slug,
             webhook_url,
             bot_name,
             summary,
@@ -149,6 +150,10 @@ impl ProviderCore {
             .authenticated_provider(provider_id, provider_admin_token)
             .await?;
         validate_external_id("provider_bot_ref", &provider_bot_ref)?;
+        let downlink = parse_downlink_config(&provider.config)?;
+        let identity = bcs_service_api::types::provider_identity::normalize(downlink.auth_mode, &provider_bot_ref, bot_slug.as_deref()).map_err(|message| ServiceError::InvalidOperation { message: message.into(), request_id: None })?;
+        let provider_bot_ref = identity.provider_bot_ref;
+        let bot_uuid = if downlink.auth_mode == ProviderAuthMode::AgentPassSubbots { None } else { bot_uuid };
         let owner = owners.first().map(|owner| owner.trim()).unwrap_or_default();
         if owners.len() != 1 || owner.is_empty() {
             return Err(ServiceError::InvalidOperation {
@@ -173,6 +178,9 @@ impl ProviderCore {
                 .get_binding_by_provider_ref(&provider.provider_id, &provider_bot_ref)
                 .await?
             {
+                if downlink.auth_mode == ProviderAuthMode::AgentPassSubbots {
+                    return Err(ServiceError::Conflict("Provider/ref is already registered".into()));
+                }
                 if webhook_url.is_some() && webhook_url != existing_binding.webhook_url {
                     return Err(ServiceError::Conflict(
                         "webhook_url differs from the registered Bot; use PATCH to update it".to_string(),
@@ -208,7 +216,6 @@ impl ProviderCore {
                 }
             }
         }
-        let downlink = parse_downlink_config(&provider.config)?;
         if matches!(connection_mode, ProviderBotConnectionMode::Gateway)
             && webhook_url.is_none() && downlink.webhook_url.is_none()
         {
@@ -227,8 +234,7 @@ impl ProviderCore {
             binding_channels: None,
             hidden: false,
             visibility: "protected".to_string(),
-            agent_code: (provider_auth_mode == ProviderAuthMode::AgentPass)
-                .then_some(provider_bot_ref.clone()),
+            agent_code: identity.agent_code,
             agent_token: None,
             ..BotCapabilities::default()
         };
@@ -240,12 +246,24 @@ impl ProviderCore {
             None => new_bot_uuid(),
         };
 
+        if provider_auth_mode == ProviderAuthMode::AgentPassSubbots {
+            let metadata = self.bot_providers.as_ref().ok_or_else(|| ServiceError::InternalError("atomic Provider Bot registration is not configured".into()))?;
+            let session_token = new_session_token();
+            metadata.create_provider_bot(BotProviderRecord {
+                bot_uuid: bot_uuid.clone(), provider_id: provider.provider_id.clone(), provider_bot_ref: provider_bot_ref.clone(),
+                connection_mode, webhook_url: webhook_url.clone(), is_deleted: false,
+            }, capabilities, owner, &session_token).await?;
+            let now = now_ms();
+            return Ok((ProviderBotBinding { bot_uuid, provider_id: provider.provider_id,
+                provider_bot_ref, webhook_url, disabled: false, created_at: now, updated_at: now }, Some(session_token)));
+        }
+
         match connection_mode {
             ProviderBotConnectionMode::Gateway => {
                 let session_token = new_session_token();
                 let bot_runtime_token = matches!(
                     provider_auth_mode,
-                    ProviderAuthMode::StaticBearer | ProviderAuthMode::ProviderAdmin
+                    ProviderAuthMode::StaticBearer | ProviderAuthMode::ProviderAdmin | ProviderAuthMode::AgentPassSubbots
                 )
                 .then(|| session_token.clone());
                 self.registry
@@ -395,6 +413,7 @@ pub(crate) fn parse_downlink_config(config: &str) -> ServiceResult<DownlinkConfi
     let auth_mode = match downlink.get("auth_mode").and_then(Value::as_str) {
         Some("static_bearer") => ProviderAuthMode::StaticBearer,
         Some("agentpass") => ProviderAuthMode::AgentPass,
+        Some("agentpass-subbots") => ProviderAuthMode::AgentPassSubbots,
         Some("provider_admin") => ProviderAuthMode::ProviderAdmin,
         Some(other) => {
             return Err(ServiceError::InvalidOperation {
@@ -597,6 +616,7 @@ fn provider_config(
     let auth_mode = match auth_mode {
         ProviderAuthMode::StaticBearer => "static_bearer",
         ProviderAuthMode::AgentPass => "agentpass",
+        ProviderAuthMode::AgentPassSubbots => "agentpass-subbots",
         ProviderAuthMode::ProviderAdmin => "provider_admin",
     };
     let mut config = serde_json::json!({
@@ -1136,11 +1156,8 @@ impl ProviderBotCoreService for ProviderCore {
         provider_id: &str,
         bot_runtime_token: &str,
     ) -> ServiceResult<RuntimeBotIdentity> {
-        let bot_uuid = self
-            .registry
-            .find_bot_by_token(bot_runtime_token)
-            .await
-            .ok_or_else(|| ServiceError::Unauthorized("invalid bot runtime token".to_string()))?;
+        let bot_uuid = self.registry.resolve_bot_token(bot_runtime_token, None).await?
+            .ok_or_else(|| ServiceError::Unauthorized("invalid bot runtime token".to_string()))?.bot.bot_id;
         let binding = self
             .bindings
             .get_binding_by_bot_uuid(&bot_uuid)
@@ -1151,7 +1168,7 @@ impl ProviderBotCoreService for ProviderCore {
         }
         let provider = self.load_provider_for_binding(&binding).await?;
         let auth_mode = parse_downlink_config(&provider.config)?.auth_mode;
-        if auth_mode != ProviderAuthMode::StaticBearer {
+        if !matches!(auth_mode, ProviderAuthMode::StaticBearer | ProviderAuthMode::AgentPassSubbots) {
             return Err(ServiceError::Unauthorized("auth_mode_mismatch".to_string()));
         }
         Ok(RuntimeBotIdentity {
@@ -1165,6 +1182,11 @@ impl ProviderBotCoreService for ProviderCore {
         provider_id: &str,
         agent_code: &str,
     ) -> ServiceResult<RuntimeBotIdentity> {
+        let provider = self.providers.get_provider(provider_id).await?.ok_or_else(|| ServiceError::ProviderNotFound(provider_id.into()))?;
+        if provider.disabled { return Err(ServiceError::Unauthorized("provider is disabled".into())); }
+        if parse_downlink_config(&provider.config)?.auth_mode == ProviderAuthMode::AgentPassSubbots {
+            return Err(ServiceError::Unauthorized("ActorRequired: parent AgentPass requires a Bot Actor".into()));
+        }
         let binding = self
             .bindings
             .get_binding_by_provider_ref(provider_id, agent_code)
@@ -1179,6 +1201,12 @@ impl ProviderBotCoreService for ProviderCore {
             bot_uuid: binding.bot_uuid,
             provider_id: provider_id.to_string(),
         })
+    }
+
+    async fn authenticate_agentpass_actor_event(&self, provider_id: &str, agent_code: &str, actor: &str) -> ServiceResult<RuntimeBotIdentity> {
+        let bot = self.registry.resolve_agent_bot(agent_code, Some(actor)).await?.ok_or_else(|| ServiceError::Unauthorized("AgentPass Bot is not registered".into()))?;
+        if bot.bot.provider_id.as_deref() != Some(provider_id) { return Err(ServiceError::Forbidden("provider_id_mismatch".into())); }
+        Ok(RuntimeBotIdentity { bot_uuid: bot.bot.bot_id, provider_id: provider_id.into() })
     }
 
     async fn authenticate_provider_admin_event(
@@ -1313,13 +1341,18 @@ impl ProviderBotCoreService for ProviderCore {
             .authenticated_provider(provider_id, provider_admin_token)
             .await?;
         validate_external_id("provider_bot_ref", provider_bot_ref)?;
-        let binding = self
-            .bindings
-            .get_binding_by_provider_ref(&provider.provider_id, provider_bot_ref)
-            .await?
-            .ok_or_else(|| {
-                ServiceError::BotNotFound(format!("provider bot '{}' not found", provider_bot_ref))
-            })?;
+        let binding = match self.bindings.get_binding_by_provider_ref(&provider.provider_id, provider_bot_ref).await? {
+            Some(binding) => binding,
+            None => {
+                let metadata = self.bot_providers.as_ref().ok_or_else(|| ServiceError::BotNotFound(provider_bot_ref.into()))?;
+                let record = metadata.get_provider_bot_by_ref(provider_id, provider_bot_ref).await?
+                    .filter(|record| record.connection_mode == BotConnectionMode::Plugin && !record.is_deleted)
+                    .ok_or_else(|| ServiceError::BotNotFound(provider_bot_ref.into()))?;
+                ProviderBotBinding { bot_uuid: record.bot_uuid, provider_id:record.provider_id,
+                    provider_bot_ref:record.provider_bot_ref, webhook_url:None, disabled:false,
+                    created_at:0, updated_at:0 }
+            }
+        };
         if binding.provider_id != provider.provider_id {
             return Err(ServiceError::Forbidden("provider_id_mismatch".to_string()));
         }
@@ -1331,17 +1364,12 @@ impl ProviderBotCoreService for ProviderCore {
         }
         let existing = self
             .registry
-            .get(&binding.bot_uuid)
-            .await
+            .try_get(&binding.bot_uuid)
+            .await?
             .ok_or_else(|| ServiceError::BotNotFound(binding.bot_uuid.clone()))?;
 
-        // `registry.get()` strips `agent_code` (routing identifier, not a general
-        // capability). Reconstruct it exactly as the register path does so an
-        // AgentPass bot's `agent_code` (== its `provider_bot_ref`) is not wiped
-        // from the DB column on the subsequent `register` save.
-        let auth_mode = parse_downlink_config(&provider.config)?.auth_mode;
-        let agent_code = (auth_mode == ProviderAuthMode::AgentPass)
-            .then(|| provider_bot_ref.to_string());
+        // Stored identity is immutable during ordinary capability updates.
+        let agent_code = existing.capabilities.agent_code.clone();
 
         // PATCH-merge: each `Some` replaces (empty Vec clears), `None` keeps.
         // `agent_token` is left `None` (managed in-memory only, never via caps).

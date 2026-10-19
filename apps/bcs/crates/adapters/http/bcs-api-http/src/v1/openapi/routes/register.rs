@@ -29,11 +29,13 @@ pub struct RegisterTokenQuery {
 
 #[derive(Debug, Deserialize)]
 pub struct RegisterQuery {
+    pub expected_auth_mode: Option<bcs_service_api::ProviderAuthMode>,
     pub token: Option<String>,
     #[serde(alias = "bot-name")]
     pub bot_name: Option<String>,
     pub mode: Option<ProviderRegistrationMode>,
     pub provider_bot_ref: Option<String>,
+    pub bot_slug: Option<String>,
     pub webhook_url: Option<String>,
 }
 
@@ -76,6 +78,8 @@ async fn register_bot(
     let result = state
         .register_service
         .register_bot(RegisterBot {
+            expected_auth_mode: query.expected_auth_mode,
+            bot_slug: query.bot_slug,
             token,
             bot_name,
             mode: query.mode,

@@ -50,3 +50,11 @@ requires Agent identity verification itself and supports Agents before registrat
 
 - `cargo test --package bcs-app-bot --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs-app-bot --all-targets --manifest-path src/bcs/Cargo.toml`
+
+## Parent discovery and selected Bot
+
+`get_agent_me` verifies the injected Agent identity and returns a bounded page of
+undeleted Bot summaries, including offline and disabled affiliations. Zero or
+multiple Bots succeed without returning credentials. `get_me_with_actor` retains
+a single-Bot projection, using a concrete Static Token or verified parent plus
+optional Actor; subbot parent credentials cannot implicitly select a child.

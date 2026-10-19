@@ -721,6 +721,7 @@ fn new_state() -> TestState {
     let bot_run_context = Arc::new(RecordingBotRunContext::default());
     let interactions = Arc::new(RecordingInteractionService::default());
     let dispatch_state = Arc::new(BotDispatchState {
+        expected_actor_id: None,
         bot_runtime: bot_runtime.clone(),
         message_flow: message_flow.clone(),
         collaboration_runtime: collaboration_runtime.clone(),
@@ -3415,4 +3416,22 @@ async fn bot_chat_event_frame_uses_explicit_bcs_session_id() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].group_id, "group-1");
     assert_eq!(events[0].bcs_session_id.as_deref(), Some("group-1:abcdef12"));
+}
+
+#[tokio::test]
+async fn connected_socket_cannot_handshake_as_another_bot() {
+    let state = new_state();
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut registered = None;
+    for id in ["bot-a", "bot-b"] {
+        let connect = BcsFrame::Request(RequestFrame::new(id, "bot.connect",
+            Some(serde_json::json!({"bot_id":id,"protocol_version":1}))));
+        dispatch_frame(&state.dispatch_state,&serde_json::to_string(&connect).unwrap(),&tx,&mut registered).await.unwrap();
+        let response = recv_response(&mut rx).await;
+        assert_eq!(response.ok,id=="bot-a");
+    }
+    assert_eq!(registered.as_deref(),Some("bot-a"));
+    assert_eq!(state.bot_runtime.connect_count.load(Ordering::Relaxed),1);
+    assert!(state.dispatch_state.bot_connections.is_connected("bot-a").await);
+    assert!(!state.dispatch_state.bot_connections.is_connected("bot-b").await);
 }

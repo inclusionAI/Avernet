@@ -31,6 +31,8 @@ pub enum ProviderAuthModeDto {
     StaticBearer,
     #[serde(rename = "agentpass")]
     AgentPass,
+    #[serde(rename = "agentpass-subbots")]
+    AgentPassSubbots,
     ProviderAdmin,
 }
 
@@ -166,6 +168,8 @@ pub struct PatchProviderRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterProviderBotRequest {
+    #[serde(default)]
+    pub bot_slug: Option<String>,
     pub name: String,
     /// Overrides the Provider's default downlink URL for this Bot.
     #[serde(default)]
@@ -193,6 +197,9 @@ pub struct RegisterProviderBotRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterProviderBotResponse {
+    pub auth_mode: ProviderAuthModeDto,
+    pub agent_code: Option<String>,
+    pub bot_slug: Option<String>,
     pub bot_uuid: String,
     pub webhook_url: Option<String>,
     pub provider_id: String,

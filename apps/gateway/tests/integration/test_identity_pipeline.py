@@ -81,7 +81,7 @@ def _db() -> DataSourcePlugin:
                 id=1,
                 session_token="bot-key",
                 bot_uuid="bot-7",
-                env="",
+                env="dev",
                 created_by="owner-1",
                 agent_code="agent-1",
             )

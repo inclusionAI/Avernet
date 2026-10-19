@@ -7,7 +7,7 @@ use bcs_service_api::core::provider_registration::*;
 use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
 use bcs_service_api::bot_provider::BotProviderRecord;
 use bcs_service_api::{
-    BotCapabilities, BotRegistryCoreService, ProviderAuthMode,
+    BotCapabilities, BotRegistryCoreService,
     ProviderBotBindingRepoPort, ProviderCredentialRepoPort, ProviderRecord, ProviderRepoPort,
     RelationCoreService, ServiceError, ServiceResult,
 };
@@ -141,7 +141,7 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
 
     async fn register(
         &self,
-        command: RegisterProviderBot,
+        mut command: RegisterProviderBot,
     ) -> ServiceResult<ProviderRegistrationResult> {
         let provider = self
             .authorized_provider(&command.provider_id, &command.owner)
@@ -155,6 +155,11 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
             ));
         }
         let downlink = parse_downlink_config(&provider.config)?;
+        if command.expected_auth_mode.is_some_and(|expected| expected != downlink.auth_mode) {
+            return Err(ServiceError::Conflict("provider authentication mode does not match".into()));
+        }
+        let identity = bcs_service_api::types::provider_identity::normalize(downlink.auth_mode, &command.provider_bot_ref, command.bot_slug.as_deref()).map_err(invalid)?;
+        command.provider_bot_ref = identity.provider_bot_ref.clone();
         let effective_webhook_url = self.endpoint(&provider, &downlink, &command).await?;
         // No reservation journal and no credential replay. The database enforces
         // Provider/ref uniqueness across both modes, including deleted Bots.
@@ -175,8 +180,7 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
             name: Some(record.bot_name.clone()), visibility: "protected".into(),
             // Match Provider-admin registration for both connection modes:
             // AgentPass identifies this Bot by its Provider's external ref.
-            agent_code: (downlink.auth_mode == ProviderAuthMode::AgentPass)
-                .then(|| record.provider_bot_ref.clone()),
+            agent_code: identity.agent_code.clone(),
             ..BotCapabilities::default()
         }, &record.owner, &record.bot_token).await?;
         self.registry
@@ -192,6 +196,8 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
         Ok(ProviderRegistrationResult {
             record,
             effective_webhook_url,
+            identity,
+            auth_mode: downlink.auth_mode,
         })
     }
 }

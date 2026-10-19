@@ -242,7 +242,7 @@ async fn authorize_conversation_lookup(
         Human { actor_id: String, staff_no: String },
     }
 
-    let caller = if let Some(bot_uuid) = state.bot_uuid_from_headers(headers).await {
+    let caller = if let Some(bot_uuid) = state.bot_uuid_from_headers(headers).await? {
         Caller::Bot(bot_uuid)
     } else {
         let staff_no = state

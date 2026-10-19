@@ -335,7 +335,7 @@ impl BotOnboardingService for BotOnboarding {
             ),
             binding_channels,
             visibility: effective_visibility,
-            agent_code: command.agent_code,
+            agent_code: command.agent_code.or_else(|| existing_caps.as_ref().and_then(|caps| caps.agent_code.clone())),
             agent_token: command.agent_token,
             ..Default::default()
         };

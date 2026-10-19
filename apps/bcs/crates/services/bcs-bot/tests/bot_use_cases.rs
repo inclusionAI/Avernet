@@ -2080,3 +2080,18 @@ async fn discovery_ignores_heartbeat_summary_and_keeps_static_metadata() {
     assert_eq!(matched.count, 1);
     assert_eq!(matched.bots[0].bot_uuid, "summary-bot");
 }
+
+#[tokio::test]
+async fn authenticated_connect_cannot_switch_body_identity() {
+    let fixture = RegistryFixture::new();
+    let service = fixture.service();
+    let b = service.connect_bot(bcs_service_api::BotConnectCommand {
+        caller_actor_id: None, token: None, bot_id: Some("b".into()), protocol_version: None,
+    }).await.unwrap();
+    for (id, token) in [(Some("c".into()), None), (None, Some(b.token))] {
+        assert!(service.connect_bot(bcs_service_api::BotConnectCommand {
+            caller_actor_id: Some("a".into()), token, bot_id: id, protocol_version: None,
+        }).await.is_err());
+    }
+    assert!(fixture.registry.get("c").await.is_none());
+}

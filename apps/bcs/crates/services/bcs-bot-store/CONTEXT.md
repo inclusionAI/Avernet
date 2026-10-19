@@ -72,3 +72,13 @@ projection writes are unchanged. No separate registration table is created or
 queried. Upstream migrations remain
 unchanged; this PR's unused drafts were consolidated before its first deployment.
 See docs/provider-bot-storage-migration.md for rollout limitations.
+
+## AgentPass subbot queries
+
+`query_agent_bots` and `lookup_bot_token` return authoritative identity records
+with joined Provider/binding state. Exact Actor/token reads return at most one
+row; implicit ordinary selection returns at most two candidates; discovery reads
+at most 101 rows. SQL predicates isolate environment and deleted actors. Memory
+storage persists a credential-free affiliation marker and fails closed when
+Provider metadata is missing after restart. Existing columns and uniqueness
+constraints are reused; no migration or additional credential cache is added.

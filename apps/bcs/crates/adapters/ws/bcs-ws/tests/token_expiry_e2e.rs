@@ -284,6 +284,7 @@ async fn start_test_server() -> (SocketAddr, Arc<BotConnectionRegistry>, Arc<Moc
     let bot_runtime = Arc::new(MockBotRuntime::default());
 
     let dispatch_state = Arc::new(BotDispatchState {
+        expected_actor_id: None,
         bot_runtime: bot_runtime.clone(),
         message_flow: Arc::new(MockMessageFlow),
         collaboration_runtime: Arc::new(MockCollaboration),

@@ -126,7 +126,7 @@ async fn resolve_put_caller(
     headers: &HeaderMap,
     uri: &Uri,
 ) -> Result<String, Response> {
-    if let Some(caller) = state.bot_uuid_from_headers(headers).await {
+    if let Some(caller) = state.bot_uuid_from_headers(headers).await? {
         return Ok(caller);
     }
 

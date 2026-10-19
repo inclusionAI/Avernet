@@ -31,6 +31,9 @@ pub struct RegisterTokenScope {
 /// Command for registering a bot with a register token.
 #[derive(Debug, Clone)]
 pub struct RegisterBot {
+    /// Optional precondition, checked against the Provider before any mutation.
+    pub expected_auth_mode: Option<bcs_domain::ProviderAuthMode>,
+    pub bot_slug: Option<String>,
     pub token: String,
     pub bot_name: String,
     pub mode: Option<ProviderRegistrationMode>,
@@ -50,6 +53,9 @@ pub struct BotRegistration {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BotRegistrationScope {
+    pub auth_mode: bcs_domain::ProviderAuthMode,
+    pub agent_code: Option<String>,
+    pub bot_slug: Option<String>,
     pub provider_id: String,
     pub provider_bot_ref: String,
     pub mode: ProviderRegistrationMode,

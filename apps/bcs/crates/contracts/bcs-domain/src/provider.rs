@@ -16,6 +16,8 @@ pub enum ProviderAuthMode {
     StaticBearer,
     #[serde(rename = "agentpass")]
     AgentPass,
+    #[serde(rename = "agentpass-subbots")]
+    AgentPassSubbots,
     ProviderAdmin,
 }
 

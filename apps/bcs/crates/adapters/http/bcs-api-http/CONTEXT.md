@@ -16,8 +16,8 @@
   User. DM response shapes and Gateway/resource authorization are unchanged.
 
 - Internal-only `GET /api/v1/collaboration/bots/me`, outside Gateway Principal
-  and invite-code middleware. It passes only a parsed Bearer token to
-  `BotSelfService`, which requires Agent identity authentication. Success and error
+  and invite-code middleware. It passes a parsed Bearer token and optional Actor to
+  `BotSelfService`, which verifies Agent identity or a concrete Bot Static Token. Success and error
   responses use V1 envelopes and `Cache-Control: no-store`; DTOs explicitly
   include only verified agent_code and safe persisted Bot metadata.
 
@@ -105,3 +105,12 @@ bot-name/bot_name compatibility are covered by route and facade contract tests.
 
 - `cargo test --package bcs-api-http --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs-api-http --all-targets --manifest-path src/bcs/Cargo.toml`
+
+## AgentPass subbot boundaries
+
+The internal `agents/me` route maps parent verification and bounded pagination
+through `BotSelfService`; `bots/me` accepts optional Actor and concrete Static
+Tokens. Both remain outside Gateway Principal middleware and return no-store
+responses. Scoped registration parses `bot_slug` and `expected_auth_mode`.
+Gateway Principal checks retain the signed Bot UUID and reject a mismatching
+Actor; bootstrap additionally injects current persisted-state validation.

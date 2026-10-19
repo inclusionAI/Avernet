@@ -171,12 +171,20 @@ async fn identity_lookup_failures_and_invalid_rows_fail_closed_with_request_cont
         assert_eq!(repo.find_bot_by_agent_code("invalid-row-agent").await, None);
         assert_eq!(repo.find_bot_by_agent_code("absent-agent").await, None);
     }).await;
-    for message in ["find_bot_by_token_in_db: database query failed", "find_bot_by_agent_code_in_db: query failed"] {
+    for message in ["find_bot_by_agent_code_in_db: query failed"] {
         assert!(warning(&events, message)["fields"]["error"].as_str().expect("database error").contains(DB_FAILURE));
     }
-    for message in ["find_bot_by_token_in_db: failed to get bot_uuid", "find_bot_by_agent_code_in_db: failed to get bot_uuid"] {
+    for message in ["find_bot_by_agent_code_in_db: failed to get bot_uuid"] {
         assert!(warning(&events, message)["fields"]["error"].as_str().expect("conversion error").contains("bot_uuid"));
     }
+    for message in ["find_bot_by_token_in_db: database query failed", "find_bot_by_token_in_db: failed to get bot_uuid"] {
+        let event = warning(&events, message);
+        assert!(event["fields"].get("error").is_none());
+        assert!(event["fields"].get("token").is_none());
+    }
+    let logged = serde_json::to_string(&events).unwrap();
+    assert!(!logged.contains("query-token"));
+    assert!(!logged.contains("invalid-row-token"));
     assert_eq!(warning(&events, "find_bot_by_agent_code_in_db: no bot found")["fields"]["agent_code"], "absent-agent");
     db.assert_complete();
 }

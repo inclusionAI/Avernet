@@ -7,6 +7,9 @@ use async_trait::async_trait;
 
 #[derive(Clone)]
 pub struct RegisterProviderBot {
+    /// Optional precondition, checked against the Provider before any mutation.
+    pub expected_auth_mode: Option<bcs_domain::ProviderAuthMode>,
+    pub bot_slug: Option<String>,
     pub provider_id: String,
     /// Stable Provider identity. For AgentPass, the real agent code; persisted
     /// as BotCapabilities.agent_code in both plugin and gateway modes.
@@ -21,6 +24,8 @@ pub struct RegisterProviderBot {
 pub struct ProviderRegistrationResult {
     pub record: ProviderRegistrationRecord,
     pub effective_webhook_url: Option<String>,
+    pub identity: bcs_domain::provider_identity::ProviderBotIdentity,
+    pub auth_mode: bcs_domain::ProviderAuthMode,
 }
 
 #[async_trait]

@@ -87,6 +87,8 @@ impl RegisterServiceImpl {
         let owner = payload.id.strip_prefix("human_")
             .ok_or(ApplicationError::Unauthenticated)?;
         let result = self.provider_registration()?.register(RegisterProviderBot {
+            expected_auth_mode: command.expected_auth_mode,
+            bot_slug: command.bot_slug.clone(),
             provider_id: payload.provider_id,
             provider_bot_ref: provider_bot_ref.to_string(),
             owner: owner.to_string(),
@@ -100,6 +102,9 @@ impl RegisterServiceImpl {
             bot_uuid: record.bot_uuid,
             bot_token: record.bot_token,
             registration: Some(BotRegistrationScope {
+                auth_mode: result.auth_mode,
+                agent_code: result.identity.agent_code,
+                bot_slug: result.identity.bot_slug,
                 provider_id: record.provider_id,
                 provider_bot_ref: record.provider_bot_ref,
                 mode: record.mode,
@@ -209,6 +214,7 @@ impl RegisterService for RegisterServiceImpl {
         if command.mode.unwrap_or(ProviderRegistrationMode::Plugin) != ProviderRegistrationMode::Plugin
             || command.provider_bot_ref.is_some()
             || command.webhook_url.is_some()
+            || command.expected_auth_mode.is_some()
         {
             return Err(ApplicationError::invalid(
                 "invalid_request", "legacy register tokens only support ordinary upstream registration",
@@ -478,6 +484,8 @@ mod tests {
             .expect("issue");
         let registration = svc
             .register_bot(RegisterBot {
+                expected_auth_mode: None,
+            bot_slug: None,
                 mode: None,
                 provider_bot_ref: None,
                 webhook_url: None,
@@ -518,6 +526,8 @@ mod tests {
         for bad in ["not-a-token"] {
             let error = svc
                 .register_bot(RegisterBot {
+                    expected_auth_mode: None,
+            bot_slug: None,
                 mode: None,
                 provider_bot_ref: None,
                 webhook_url: None,
@@ -539,6 +549,8 @@ mod tests {
         );
         let error = svc
             .register_bot(RegisterBot {
+                expected_auth_mode: None,
+            bot_slug: None,
                 mode: None,
                 provider_bot_ref: None,
                 webhook_url: None,
@@ -557,6 +569,8 @@ mod tests {
         for bad in ["a", too_long.as_str()] {
             let error = svc
                 .register_bot(RegisterBot {
+                    expected_auth_mode: None,
+            bot_slug: None,
                 mode: None,
                 provider_bot_ref: None,
                 webhook_url: None,
@@ -581,6 +595,8 @@ mod tests {
             .expect("issue");
         let error = svc
             .register_bot(RegisterBot {
+                expected_auth_mode: None,
+            bot_slug: None,
                 mode: None,
                 provider_bot_ref: None,
                 webhook_url: None,
@@ -604,6 +620,8 @@ mod tests {
             .expect("issue");
         let registration = svc
             .register_bot(RegisterBot {
+                expected_auth_mode: None,
+            bot_slug: None,
                 mode: None,
                 provider_bot_ref: None,
                 webhook_url: None,

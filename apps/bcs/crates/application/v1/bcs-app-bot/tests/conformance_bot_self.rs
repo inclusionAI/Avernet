@@ -36,8 +36,9 @@ fn verified() -> Result<VerifiedAgentIdentity, AgentIdentityError> {
 
 async fn schema(db: &dyn DbPlugin) {
     for sql in [
-        "CREATE TABLE bcs_bots (bot_uuid TEXT, env TEXT, agent_code TEXT, name TEXT, bot_info TEXT, provider_id TEXT, provider_bot_ref TEXT, actor_kind TEXT DEFAULT 'bot', is_deleted INTEGER DEFAULT 0)",
-        "CREATE TABLE bcs_provider_bot_bindings (bot_uuid TEXT,env TEXT,provider_id TEXT,provider_bot_ref TEXT)",
+        "CREATE TABLE bcs_bots (bot_uuid TEXT, env TEXT, agent_code TEXT, name TEXT, bot_info TEXT, provider_id TEXT, provider_bot_ref TEXT, created_by TEXT, status TEXT DEFAULT 'online', actor_kind TEXT DEFAULT 'bot', is_deleted INTEGER DEFAULT 0)",
+        "CREATE TABLE bcs_provider_bot_bindings (bot_uuid TEXT,env TEXT,provider_id TEXT,provider_bot_ref TEXT, disabled INTEGER DEFAULT 0)",
+        "CREATE TABLE bcs_providers (provider_id TEXT,env TEXT,config TEXT,disabled INTEGER DEFAULT 0)",
     ] { db.execute(DbStatement::new(sql)).await.unwrap(); }
 }
 
@@ -50,8 +51,8 @@ async fn verified_identity_is_required_before_any_registration_read() {
     ] {
         // There is intentionally no schema: a DB read would fail differently.
         let (_, identity, service) = fixture(Err(error)).await;
-        assert_eq!(service.get_me("credential").await.unwrap_err().code(), expected);
-        assert_eq!(*identity.seen.lock().unwrap(), ["credential"]);
+        assert_eq!(service.get_me("credential.test.jwt").await.unwrap_err().code(), expected);
+        assert_eq!(*identity.seen.lock().unwrap(), ["credential.test.jwt"]);
     }
 }
 
@@ -66,34 +67,35 @@ async fn empty_token_never_reaches_identity_provider() {
 async fn authenticated_unregistered_identity_then_persisted_registration_survives_token_refresh() {
     let (db, identity, service) = fixture(verified()).await;
     schema(db.as_ref()).await;
-    bot_self_service_contract_tests(&service, "old-token", BotSelfView {
+    db.execute(DbStatement::with_params("INSERT INTO bcs_providers (provider_id,env,config) VALUES ('provider-poolab',?,'{\"downlink\":{\"auth_mode\":\"agentpass\"}}')", vec![bcs_config::resolve_env_str().into()])).await.unwrap();
+    bot_self_service_contract_tests(&service, "old-token.test.jwt", BotSelfView {
         registration_status: BotRegistrationStatus::Unregistered, agent_code: "agent-001".into(), bot: None,
     }).await;
     db.execute(DbStatement::with_params(
         "INSERT INTO bcs_bots (bot_uuid,env,agent_code,name,bot_info,provider_id,provider_bot_ref) VALUES ('bot-001',?,'agent-001','Poolab Assistant','{\"summary\":\"Agent\",\"agent_token\":\"secret\"}','provider-poolab','agent-001')",
         vec![bcs_config::resolve_env_str().into()],
     )).await.unwrap();
-    let before = service.get_me("old-token").await.unwrap();
-    let after = service.get_me("refreshed-token").await.unwrap();
+    let before = service.get_me("old-token.test.jwt").await.unwrap();
+    let after = service.get_me("refreshed-token.test.jwt").await.unwrap();
     assert_eq!(before, after);
     assert_eq!(after.registration_status, BotRegistrationStatus::Registered);
     assert_eq!(after.bot.unwrap().bot_id, "bot-001");
-    assert_eq!(*identity.seen.lock().unwrap(), ["old-token", "old-token", "refreshed-token"]);
+    assert_eq!(*identity.seen.lock().unwrap(), ["old-token.test.jwt", "old-token.test.jwt", "refreshed-token.test.jwt"]);
 }
 
 #[tokio::test]
 async fn database_failure_and_ambiguous_mapping_never_return_unregistered() {
     let (db, _, service) = fixture(verified()).await;
-    assert_eq!(service.get_me("token").await.unwrap_err().code(), "internal_error");
+    assert_eq!(service.get_me("token.test.jwt").await.unwrap_err().code(), "internal_error");
     schema(db.as_ref()).await;
     for id in ["bot-a", "bot-b"] {
         db.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid,env,agent_code,bot_info) VALUES (?,?,'agent-001','{}')", vec![id.into(),bcs_config::resolve_env_str().into()])).await.unwrap();
     }
-    assert_eq!(service.get_me("token").await.unwrap_err().code(), "agent_registration_conflict");
+    assert_eq!(service.get_me("token.test.jwt").await.unwrap_err().code(), "agent_registration_conflict");
 }
 
 #[tokio::test]
 async fn broken_identity_provider_cannot_query_blank_agent_code() {
     let (_, _, service) = fixture(Ok(VerifiedAgentIdentity { agent_code: "  ".into() })).await;
-    assert_eq!(service.get_me("token").await.unwrap_err().code(), "agent_identity_unavailable");
+    assert_eq!(service.get_me("token.test.jwt").await.unwrap_err().code(), "agent_identity_unavailable");
 }

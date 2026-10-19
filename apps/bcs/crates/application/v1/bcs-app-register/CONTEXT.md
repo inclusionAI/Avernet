@@ -65,3 +65,11 @@ registration contract and compatibility tests.
 
 The facade suite includes real HTTP adapter integration with a fake scoped core,
 legacy compatibility, mode and credential rejection, and sanitized error mapping.
+
+## Subbot registration
+
+The facade passes optional `bot_slug` into the shared registration core and
+checks optional `expected_auth_mode` against stored Provider configuration before
+writes. Legacy non-Provider tokens cannot request that mode precondition.
+Successful scoped responses add auth mode, original parent and Bot slug metadata.
+Occupancy validation belongs to registration itself; no precheck API is exposed.

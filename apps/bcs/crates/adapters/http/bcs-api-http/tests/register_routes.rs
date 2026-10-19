@@ -212,3 +212,16 @@ async fn unknown_and_empty_modes_are_bad_requests_without_echoing_capabilities()
         assert!(service.registered.lock().unwrap().is_empty());
     }
 }
+
+#[tokio::test]
+async fn actual_registration_preserves_slug_and_expected_provider_mode() {
+    let service=fake_service(false);
+    let request=bare_request("POST","/openapi/v1/collaboration/register?token=registration-token&bot_name=Test&provider_bot_ref=parent&bot_slug=a&mode=plugin&expected_auth_mode=agentpass-subbots");
+    let response=test_router(service.clone()).oneshot(request).await.unwrap();
+    assert_eq!(response.status(),StatusCode::CREATED);
+    let commands=service.registered.lock().unwrap();
+    assert_eq!(commands.len(),1);
+    assert_eq!(commands[0].bot_slug.as_deref(),Some("a"));
+    assert_eq!(commands[0].provider_bot_ref.as_deref(),Some("parent"));
+    assert_eq!(commands[0].expected_auth_mode,Some(bcs_service_api::ProviderAuthMode::AgentPassSubbots));
+}

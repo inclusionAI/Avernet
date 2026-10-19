@@ -144,6 +144,7 @@ pub async fn get_provider_by_slug(
         auth_mode: match info.auth_mode {
             ProviderAuthMode::StaticBearer => ProviderAuthModeDto::StaticBearer,
             ProviderAuthMode::AgentPass => ProviderAuthModeDto::AgentPass,
+            ProviderAuthMode::AgentPassSubbots => ProviderAuthModeDto::AgentPassSubbots,
             ProviderAuthMode::ProviderAdmin => ProviderAuthModeDto::ProviderAdmin,
         },
         enabled: info.enabled,
@@ -226,6 +227,7 @@ pub async fn register_provider_bot(
         .services
         .provider_management
         .register_provider_bot(RegisterProviderBotCommand {
+            bot_slug: req.bot_slug,
             webhook_url: req.webhook_url,
             provider_id,
             provider_admin_token,
@@ -270,6 +272,14 @@ pub async fn register_provider_bot(
     }
 
     Ok(Json(RegisterProviderBotResponse {
+        auth_mode: match outcome.auth_mode {
+            ProviderAuthMode::StaticBearer => ProviderAuthModeDto::StaticBearer,
+            ProviderAuthMode::ProviderAdmin => ProviderAuthModeDto::ProviderAdmin,
+            ProviderAuthMode::AgentPass => ProviderAuthModeDto::AgentPass,
+            ProviderAuthMode::AgentPassSubbots => ProviderAuthModeDto::AgentPassSubbots,
+        },
+        agent_code: outcome.identity.agent_code,
+        bot_slug: outcome.identity.bot_slug,
         webhook_url: outcome.webhook_url,
         bot_uuid: outcome.bot_uuid,
         provider_id: outcome.provider_id,
@@ -624,6 +634,7 @@ fn auth_mode_from_wire(mode: ProviderAuthModeDto) -> ProviderAuthMode {
     match mode {
         ProviderAuthModeDto::StaticBearer => ProviderAuthMode::StaticBearer,
         ProviderAuthModeDto::AgentPass => ProviderAuthMode::AgentPass,
+        ProviderAuthModeDto::AgentPassSubbots => ProviderAuthMode::AgentPassSubbots,
         ProviderAuthModeDto::ProviderAdmin => ProviderAuthMode::ProviderAdmin,
     }
 }
@@ -631,6 +642,7 @@ fn auth_mode_from_wire(mode: ProviderAuthModeDto) -> ProviderAuthMode {
 fn auth_mode_to_wire(mode: &str) -> ProviderAuthModeDto {
     match mode {
         "agentpass" => ProviderAuthModeDto::AgentPass,
+        "agentpass-subbots" => ProviderAuthModeDto::AgentPassSubbots,
         "provider_admin" => ProviderAuthModeDto::ProviderAdmin,
         _ => ProviderAuthModeDto::StaticBearer,
     }

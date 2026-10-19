@@ -435,6 +435,7 @@ version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
+ "bcs-auth-api",
  "bcs-config-api",
  "bcs-domain",
  "bcs-service-api",
