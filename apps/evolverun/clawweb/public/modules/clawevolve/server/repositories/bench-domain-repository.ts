@@ -45,18 +45,18 @@ export class BenchDomainRepository {
         values.push(statusValue);
       }
       return this.db.query<BenchDomainRow>(
-        `SELECT ${SELECT_COLUMNS} FROM cm_bench_domains WHERE ${conditions.join(" AND ")} ORDER BY name`,
+        `SELECT ${SELECT_COLUMNS} FROM cm_bench_domains WHERE ${conditions.join(" AND ")} ORDER BY gmt_modified DESC, id DESC`,
         values,
       );
     }
     if (statusCondition) {
       return this.db.query<BenchDomainRow>(
-        `SELECT ${SELECT_COLUMNS} FROM cm_bench_domains WHERE ${statusCondition} ORDER BY name`,
+        `SELECT ${SELECT_COLUMNS} FROM cm_bench_domains WHERE ${statusCondition} ORDER BY gmt_modified DESC, id DESC`,
         [statusValue],
       );
     }
     return this.db.query<BenchDomainRow>(
-      `SELECT ${SELECT_COLUMNS} FROM cm_bench_domains ORDER BY name`,
+      `SELECT ${SELECT_COLUMNS} FROM cm_bench_domains ORDER BY gmt_modified DESC, id DESC`,
     );
   }
 
@@ -64,7 +64,7 @@ export class BenchDomainRepository {
     const where = [personalOwner ? "(space_id = ? OR (COALESCE(space_id, '') = '' AND owner_user_id = ?))" : "space_id = ?"];
     const values: unknown[] = personalOwner ? [spaceId, personalOwner] : [spaceId];
     if (filters?.status || !filters?.includeArchived) { where.push("status = ?"); values.push(filters?.status ?? "active"); }
-    return this.db.query<BenchDomainRow>(`SELECT ${SELECT_COLUMNS} FROM cm_bench_domains WHERE ${where.join(" AND ")} ORDER BY name`, values);
+    return this.db.query<BenchDomainRow>(`SELECT ${SELECT_COLUMNS} FROM cm_bench_domains WHERE ${where.join(" AND ")} ORDER BY gmt_modified DESC, id DESC`, values);
   }
 
   async findInSpace(owner: string, domain: string, spaceId: string, personalOwner?: string): Promise<BenchDomainRow | null> {
