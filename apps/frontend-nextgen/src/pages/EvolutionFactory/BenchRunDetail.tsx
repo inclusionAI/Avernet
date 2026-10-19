@@ -2,7 +2,6 @@ import { Button } from '@/components/ui/Button';
 import { Spin } from '@/components/ui/Spin';
 import type { JsonObject } from '@/domain/evolution/types';
 import { formatTime } from '@/domain/evolution/types';
-import { evolutionApi } from '@/services/backendApi/clawevolve/controller';
 import { history, useParams } from '@umijs/max';
 import { ArrowLeft } from 'lucide-react';
 import { useCallback, useState } from 'react';
@@ -12,13 +11,10 @@ import { formatCompactNumber, formatTokenUsage } from './benchToken';
 import { ErrorBox, EvolutionHeader, JsonView, Section, StatusBadge, useResource } from './shared';
 import { useEvolutionContext } from './useEvolutionContext';
 
-export default function BenchRunDetail() {
-  const context = useEvolutionContext();
-  return <BenchRunDetailContent key={context.key} />;
-}
 function BenchRunDetailContent() {
   const { benchRunId = '' } = useParams<{ benchRunId: string }>();
   const identity = useEvolutionContext();
+  const evolutionApi = identity.api;
   const run = useResource(
     useCallback(() => evolutionApi.run(benchRunId), [benchRunId, identity.key]),
     identity.ready,
@@ -183,4 +179,9 @@ function BenchRunDetailContent() {
       </div>
     </main>
   );
+}
+
+export default function BenchRunDetail() {
+  const context = useEvolutionContext();
+  return <BenchRunDetailContent key={context.key} />;
 }

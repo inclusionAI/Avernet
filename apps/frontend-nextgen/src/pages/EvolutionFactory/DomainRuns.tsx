@@ -1,10 +1,11 @@
+import { Button } from '@/components/ui/Button';
 import { Pagination } from '@/components/ui/Pagination';
 import { Spin } from '@/components/ui/Spin';
 import type { BenchRun } from '@/domain/evolution/types';
 import { formatTime } from '@/domain/evolution/types';
 import { history } from '@umijs/max';
 import { displayValue, elapsed } from './presentation';
-import { ErrorBox, StatusBadge } from './shared';
+import { ErrorBox, Hint, StatusBadge } from './shared';
 
 export function DomainRuns({
   data,
@@ -71,16 +72,19 @@ export function DomainRuns({
                     return (
                       <tr className="border-t border-border" key={run.benchRunId}>
                         <td className="p-3">
-                          <button
-                            type="button"
-                            className="block w-full truncate text-left font-mono text-primary hover:underline"
-                            title={run.benchRunId}
-                            onClick={() =>
-                              history.push(`/evolution-factory/bench/runs/${encodeURIComponent(run.benchRunId)}`)
-                            }
-                          >
-                            {run.benchRunId}
-                          </button>
+                          <Hint content={run.benchRunId}>
+                            <Button
+                              variant="ghost"
+                              style={{ height: 'auto', whiteSpace: 'normal' }}
+                              type="button"
+                              className="block w-full truncate text-left font-mono text-primary hover:underline"
+                              onClick={() =>
+                                history.push(`/evolution-factory/bench/runs/${encodeURIComponent(run.benchRunId)}`)
+                              }
+                            >
+                              {run.benchRunId}
+                            </Button>
+                          </Hint>
                         </td>
                         <td className="whitespace-nowrap p-3">
                           <span
@@ -94,9 +98,9 @@ export function DomainRuns({
                           </span>
                         </td>
                         <td className="p-3">
-                          <div className="truncate" title={template}>
-                            {template}
-                          </div>
+                          <Hint content={template}>
+                            <div className="truncate">{template}</div>
+                          </Hint>
                         </td>
                         <td className="whitespace-nowrap p-3">
                           {scope === 'template' ? `v${run.templateVersion}` : '—'}
@@ -114,27 +118,27 @@ export function DomainRuns({
                         </td>
                         <td className="whitespace-nowrap p-3">{displayValue(run.tokenUsage?.totalTokens)}</td>
                         <td className="p-3">
-                          <div className="truncate" title={run.model || undefined}>
-                            {run.model || '—'}
-                          </div>
+                          <Hint content={run.model || undefined}>
+                            <div className="truncate">{run.model || '—'}</div>
+                          </Hint>
                         </td>
                         <td className="p-3">
-                          <div className="truncate" title={run.suite || undefined}>
-                            {run.suite || '—'}
-                          </div>
+                          <Hint content={run.suite || undefined}>
+                            <div className="truncate">{run.suite || '—'}</div>
+                          </Hint>
                         </td>
                         <td className="p-3">
-                          <div className="truncate" title={run.scene || undefined}>
-                            {run.scene || '—'}
-                          </div>
+                          <Hint content={run.scene || undefined}>
+                            <div className="truncate">{run.scene || '—'}</div>
+                          </Hint>
                         </td>
                         <td className="whitespace-nowrap p-3">{formatTime(run.startedAt)}</td>
                         <td className="whitespace-nowrap p-3">{formatTime(run.completedAt)}</td>
                         <td className="whitespace-nowrap p-3">{elapsed(run.startedAt, run.completedAt)}</td>
                         <td className="p-3">
-                          <div className="truncate" title={run.clawmindFlowId || undefined}>
-                            {run.clawmindFlowId || '—'}
-                          </div>
+                          <Hint content={run.clawmindFlowId || undefined}>
+                            <div className="truncate">{run.clawmindFlowId || '—'}</div>
+                          </Hint>
                         </td>
                       </tr>
                     );

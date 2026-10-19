@@ -6,7 +6,7 @@ import EvolutionFactory from '@/pages/EvolutionFactory';
 import CreateTask from '@/pages/EvolutionFactory/CreateTask';
 import DomainDetail from '@/pages/EvolutionFactory/DomainDetail';
 import { StepOutput } from '@/pages/EvolutionFactory/StepOutput';
-import { evolutionApi } from '@/services/backendApi/clawevolve/controller';
+import { evolutionApi } from '@/services/evolution/evolutionService';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { history, useLocation } from '@umijs/max';
@@ -17,10 +17,19 @@ jest.mock('@umijs/max', () => ({
   useParams: () => ({ ownerUserId: 'owner', domainId: 'domain' }),
 }));
 jest.mock('@/pages/EvolutionFactory/useEvolutionContext', () => ({
-  useEvolutionContext: () => ({ ready: true, userId: 'owner', key: 'owner:42', spaceId: 42, loading: false }),
+  useEvolutionContext: () => ({
+    api: jest.requireMock<typeof import('@/services/evolution/evolutionService')>(
+      '@/services/evolution/evolutionService',
+    ).evolutionApi,
+    ready: true,
+    userId: 'owner',
+    key: 'owner:42',
+    spaceId: 42,
+    loading: false,
+  }),
 }));
 jest.mock('@/services/backendApi/bots/botController', () => ({ listBots: jest.fn() }));
-jest.mock('@/services/backendApi/clawevolve/controller', () => ({
+jest.mock('@/services/evolution/evolutionService', () => ({
   evolutionApi: {
     models: jest.fn(),
     bots: jest.fn(),

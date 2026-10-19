@@ -1,107 +1,19 @@
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Modal, ModalContent, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Spin } from '@/components/ui/Spin';
+import type { EvolutionVersion } from '@/domain/evolution/types';
 import { activeStatus, formatTime, type Task } from '@/domain/evolution/types';
-import { evolutionApi, type EvolutionVersion } from '@/services/backendApi/clawevolve/controller';
 import { history, useLocation } from '@umijs/max';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Choice, ErrorBox, useResource } from './shared';
-import { MarkdownReport } from './StepOutput';
 import { useEvolutionContext } from './useEvolutionContext';
+import { Comparison, stableVersion, VersionActions, versionLabel, versionStatus } from './VersionActions';
+import { VersionReview } from './VersionReview';
+export { stableVersion, versionStatus } from './VersionActions';
 
-export const versionLabel = (v: EvolutionVersion) =>
-  v.kind === 'initial' ? 'Initial' : v.kind === 'snapshot' ? '主动快照' : `R${v.round ?? 0}`;
-export function versionStatus(v: EvolutionVersion) {
-  const labels: Record<string, string> = {
-    accepted: '已接受',
-    accepted_unregistered: '已接受 · Pack 未登记',
-    promotion_failed: '晋升失败',
-    passed_not_promoted: '通过 Bench · 未晋升',
-    unregistered: 'Pack 未登记',
-    rejected: '未接受',
-  };
-  return (
-    labels[v.acceptanceStatus] ||
-    (v.kind === 'initial' ? '初始版本' : v.kind === 'snapshot' ? '未评测快照' : '状态未知')
-  );
-}
-export function stableVersion(items: EvolutionVersion[]) {
-  return (
-    items
-      .filter((v) => v.kind === 'round' && v.accepted === true && v.pack?.status === 'available')
-      .sort((a, b) => (b.round ?? 0) - (a.round ?? 0))[0] ||
-    items.find((v) => v.kind === 'initial' && v.pack?.status === 'available')
-  );
-}
-const score = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Number(v.toFixed(4)).toString() : '—');
-function Comparison({ version }: { version: EvolutionVersion }) {
-  const c = version.scoreComparison;
-  return c ? (
-    <div className="text-xs">
-      <p className="whitespace-nowrap">
-        {score(c.baseline)} → <strong>{score(c.candidate)}</strong> · Δ {score(c.delta)}
-      </p>
-      <p className="mt-1 text-muted-foreground">{c.name || 'test_score'}</p>
-    </div>
-  ) : (
-    <span className="text-xs text-muted-foreground">未评测</span>
-  );
-}
-function VersionActions({ version, onDiff }: { version: EvolutionVersion; onDiff: (v: EvolutionVersion) => void }) {
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const download = async () => {
-    setBusy(true);
-    setError('');
-    try {
-      const value = await evolutionApi.packDownload(
-        version.taskId,
-        version.stepId,
-        version.kind === 'initial' ? 'baseline' : version.kind,
-        version.round,
-      );
-      if (typeof value.url !== 'string' || !/^https?:\/\//.test(value.url)) throw new Error('下载地址不可用');
-      window.location.assign(value.url);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '下载失败');
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <div className="space-y-1">
-      <div className="flex flex-wrap gap-2">
-        {version.diff?.available && (
-          <Button size="sm" variant="ghost" onClick={() => onDiff(version)}>
-            Diff
-          </Button>
-        )}
-        {version.pack?.status === 'available' && (
-          <>
-            <Button size="sm" variant="ghost" disabled={busy} onClick={() => void download()}>
-              下载
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                history.push(
-                  `/evolution-factory/new?type=pack_restore&packId=${encodeURIComponent(version.pack!.packId)}`,
-                )
-              }
-            >
-              应用 Pack
-            </Button>
-          </>
-        )}
-      </div>
-      <ErrorBox message={error} />
-    </div>
-  );
-}
 export default function VersionList({ task, revision = 0 }: { task?: Task; revision?: number }) {
   const context = useEvolutionContext();
+  const evolutionApi = context.api;
   const { search } = useLocation();
   const result = useResource(
     useCallback(
@@ -166,42 +78,16 @@ export default function VersionList({ task, revision = 0 }: { task?: Task; revis
   const stable = stableVersion(result.data?.items ?? []);
   const candidate = task?.steps?.filter((s) => s.stepType === 'optimize' && activeStatus(s.status)).at(-1);
   const reviewModal = (
-    <Modal
-      open={!!review}
-      onOpenChange={(open) => {
-        if (!open) {
-          diffRevision.current += 1;
-          setReview(undefined);
-        }
+    <VersionReview
+      review={review}
+      onClose={() => {
+        diffRevision.current += 1;
+        setReview(undefined);
       }}
-    >
-      <ModalContent size="lg" className="max-w-[960px]" aria-describedby={undefined}>
-        <ModalHeader>
-          <ModalTitle>{review ? versionLabel(review) : ''} · 变更 Diff</ModalTitle>
-        </ModalHeader>
-        {review?.diff?.summary && <MarkdownReport content={review.diff.summary} />}
-        {!!review?.diff?.files?.length && (
-          <ul className="max-h-48 space-y-1 overflow-auto rounded-lg bg-muted p-3 font-mono text-xs">
-            {review.diff.files.map((file, i) => (
-              <li key={i} className="break-all">
-                {typeof file === 'string' ? file : JSON.stringify(file)}
-              </li>
-            ))}
-          </ul>
-        )}
-        <ErrorBox message={error} />
-        {loading ? (
-          <Spin tip="加载 Diff…" />
-        ) : (
-          <pre className="max-h-[65vh] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted p-4 font-mono text-xs">
-            {diff ||
-              (review?.diff?.artifactAvailable
-                ? '暂无 Diff 正文'
-                : '该历史版本未登记完整 Diff Artifact；以上为上报摘要和文件列表。')}
-          </pre>
-        )}
-      </ModalContent>
-    </Modal>
+      diff={diff}
+      error={error}
+      loading={loading}
+    />
   );
   if (task)
     return (
@@ -342,12 +228,14 @@ export default function VersionList({ task, revision = 0 }: { task?: Task; revis
                     <p className="text-xs text-muted-foreground">{v.userId}</p>
                   </td>
                   <td className="max-w-[240px] break-all p-3">
-                    <button
+                    <Button
+                      variant="ghost"
+                      style={{ height: 'auto', whiteSpace: 'normal' }}
                       className="text-primary"
                       onClick={() => history.push(`/evolution-factory/tasks/${encodeURIComponent(v.taskId)}`)}
                     >
                       {String(v.taskName || v.taskId)}
-                    </button>
+                    </Button>
                   </td>
                   <td className="whitespace-nowrap p-3">{versionStatus(v)}</td>
                   <td className="p-3">

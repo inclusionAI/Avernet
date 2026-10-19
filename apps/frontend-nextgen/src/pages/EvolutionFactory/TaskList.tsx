@@ -5,17 +5,17 @@ import { Input } from '@/components/ui/Input';
 import { Pagination } from '@/components/ui/Pagination';
 import { Spin } from '@/components/ui/Spin';
 import { canCancelStep, canRetryStep, formatTime, isBotEvolutionTask, taskTypes } from '@/domain/evolution/types';
-import { evolutionApi } from '@/services/backendApi/clawevolve/controller';
 import { history } from '@umijs/max';
 import { Plus, Search } from 'lucide-react';
 import { useCallback, useState } from 'react';
-import { Choice, ErrorBox, StatusBadge, TypeTag, useResource } from './shared';
+import { Choice, ErrorBox, Hint, StatusBadge, TypeTag, useResource } from './shared';
 import { useEvolutionContext } from './useEvolutionContext';
 
 import { stepName, taskTimes } from './presentation';
 
 export default function TaskList({ onCreate }: { onCreate?: () => void }) {
   const identity = useEvolutionContext();
+  const evolutionApi = identity.api;
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('all');
@@ -165,25 +165,25 @@ export default function TaskList({ onCreate }: { onCreate?: () => void }) {
                     return (
                       <tr key={task.task_id} className="border-t border-border">
                         <td className="p-3">
-                          <span className="block truncate font-medium" title={task.task_name}>
-                            {task.task_name}
-                          </span>
-                          <span className="mt-1 block truncate text-xs text-muted-foreground" title={task.task_id}>
-                            {task.task_id}
-                          </span>
+                          <Hint content={task.task_name}>
+                            <span className="block truncate font-medium">{task.task_name}</span>
+                          </Hint>
+                          <Hint content={task.task_id}>
+                            <span className="mt-1 block truncate text-xs text-muted-foreground">{task.task_id}</span>
+                          </Hint>
                         </td>
                         <td className="p-3">
-                          <div className="truncate text-xs text-muted-foreground" title={task.remark || undefined}>
-                            {task.remark || '—'}
-                          </div>
+                          <Hint content={task.remark || undefined}>
+                            <div className="truncate text-xs text-muted-foreground">{task.remark || '—'}</div>
+                          </Hint>
                         </td>
                         <td className="whitespace-nowrap p-3">
                           <TypeTag type={task.task_type} />
                         </td>
                         <td className="p-3">
-                          <div className="truncate" title={task.bot_id}>
-                            {task.bot_id}
-                          </div>
+                          <Hint content={task.bot_id}>
+                            <div className="truncate">{task.bot_id}</div>
+                          </Hint>
                           <span className="block text-xs text-muted-foreground">Owner {task.user_id}</span>
                         </td>
                         <td className="p-3">
@@ -198,18 +198,23 @@ export default function TaskList({ onCreate }: { onCreate?: () => void }) {
                         <td className="p-3">{step ? stepName(step.stepType) : '—'}</td>
                         <td className="whitespace-nowrap p-3">
                           <div className="flex items-center gap-1">
-                            <Button
-                              className="px-1 text-primary"
-                              variant="ghost"
-                              size="sm"
-                              disabled={!isBotEvolutionTask(task)}
-                              title={isBotEvolutionTask(task) ? undefined : '该历史任务不在本期迁移范围，请使用原入口'}
-                              onClick={() =>
-                                history.push(`/evolution-factory/tasks/${encodeURIComponent(task.task_id)}`)
+                            <Hint
+                              content={
+                                isBotEvolutionTask(task) ? undefined : '该历史任务不在本期迁移范围，请使用原入口'
                               }
                             >
-                              详情
-                            </Button>
+                              <Button
+                                className="px-1 text-primary"
+                                variant="ghost"
+                                size="sm"
+                                disabled={!isBotEvolutionTask(task)}
+                                onClick={() =>
+                                  history.push(`/evolution-factory/tasks/${encodeURIComponent(task.task_id)}`)
+                                }
+                              >
+                                详情
+                              </Button>
+                            </Hint>
                             {retryTarget && manage && (
                               <Button
                                 variant="ghost"

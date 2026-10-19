@@ -71,7 +71,7 @@ export function BenchBreakdown({ value }: { value: unknown }) {
             </strong>
             <p>
               得分：{String(row.score ?? row.value ?? '—')}
-              {row.maxScore != null ? ` / ${row.maxScore}` : ''}
+              {row.maxScore !== null && row.maxScore !== undefined ? ` / ${row.maxScore}` : ''}
             </p>
             {Boolean(row.reason || row.feedback || row.description) && (
               <MarkdownReport content={String(row.reason || row.feedback || row.description)} />

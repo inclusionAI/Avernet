@@ -1,6 +1,5 @@
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { evolutionApi } from '@/services/backendApi/clawevolve/controller';
 import { history, useLocation } from '@umijs/max';
 import { useCallback, useState } from 'react';
 import { Choice, ErrorBox, EvolutionHeader, Field, Section, useResource } from './shared';
@@ -9,6 +8,7 @@ import { useEvolutionContext } from './useEvolutionContext';
 /** Auxiliary version actions: deliberately not a sixth primary task type. */
 export default function PackForm({ restore }: { restore: boolean }) {
   const identity = useEvolutionContext();
+  const evolutionApi = identity.api;
   const [page, setPage] = useState(1);
   const bots = useResource(
     useCallback(() => evolutionApi.bots(page), [identity.key, page]),

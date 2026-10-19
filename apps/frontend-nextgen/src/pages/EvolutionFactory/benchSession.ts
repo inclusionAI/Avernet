@@ -16,6 +16,20 @@ export type BenchSessionContentBlock = {
   tone?: 'default' | 'thinking' | 'tool';
 };
 
+function stringifyBlock(value: unknown): string {
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function numberText(value: unknown): string {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n.toLocaleString() : '';
+}
+
 export function eventLabel(event: BenchSessionEvent): string {
   if (event.type === 'message') {
     const role = event.message?.role;
@@ -94,18 +108,4 @@ export function eventContentBlocks(event: BenchSessionEvent): BenchSessionConten
     }
   });
   return blocks.length ? blocks : [{ label: '内容', text: eventPreview(event) }];
-}
-
-function stringifyBlock(value: unknown): string {
-  if (typeof value === 'string') return value;
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function numberText(value: unknown): string {
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? n.toLocaleString() : '';
 }

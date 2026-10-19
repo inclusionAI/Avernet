@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/Button';
 import { Modal, ModalContent, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { taskTypes } from '@/domain/evolution/types';
 import { history, useLocation } from '@umijs/max';
@@ -24,10 +25,7 @@ const taskHints = {
   optimize: '需关联已完成诊断及目标规划的任务',
   full: '一句话目标 · 自动规划、优化和验证',
 };
-export default function EvolutionFactory() {
-  const context = useEvolutionContext();
-  return <EvolutionFactoryContent key={context.key} />;
-}
+
 function EvolutionFactoryContent() {
   const location = useLocation();
   const selectedTab = new URLSearchParams(location.search).get('tab');
@@ -97,7 +95,9 @@ function EvolutionFactoryContent() {
                   .map((type) => {
                     const Icon = taskIcons[type.type];
                     return (
-                      <button
+                      <Button
+                        variant="ghost"
+                        style={{ height: 'auto', whiteSpace: 'normal' }}
                         type="button"
                         key={type.type}
                         aria-label={type.label}
@@ -121,7 +121,7 @@ function EvolutionFactoryContent() {
                           </span>
                         </span>
                         <ChevronRight size={16} />
-                      </button>
+                      </Button>
                     );
                   })}
               </section>
@@ -131,4 +131,9 @@ function EvolutionFactoryContent() {
       </div>
     </main>
   );
+}
+
+export default function EvolutionFactory() {
+  const context = useEvolutionContext();
+  return <EvolutionFactoryContent key={context.key} />;
 }

@@ -1,83 +1,13 @@
-import { sanitizeMarkdownHtml } from '@/assets/TaskPanel/sanitizeHtml';
 import { Button } from '@/components/ui/Button';
 import type { JsonObject } from '@/domain/evolution/types';
-import { history } from '@umijs/max';
-import { ArrowUpRight, ChevronDown } from 'lucide-react';
-import MarkdownIt from 'markdown-it';
-import { useMemo, useState, type ReactNode } from 'react';
-import { displayValue } from './presentation';
+import { ChevronDown } from 'lucide-react';
+import { useState } from 'react';
+import { BenchResults } from './BenchResults';
+import { DiagnosisResults } from './DiagnosisResults';
+import { array, delta, MarkdownReport, object, present, ResultCard, RunLink, text } from './OutputPrimitives';
 import { JsonView } from './shared';
+export { MarkdownReport } from './OutputPrimitives';
 
-const markdown = new MarkdownIt({ html: false, breaks: true, linkify: true });
-export function MarkdownReport({ content }: { content: string }) {
-  const html = useMemo(() => sanitizeMarkdownHtml(markdown.render(content)), [content]);
-  return (
-    <div
-      className="prose prose-sm max-w-none overflow-x-auto break-words dark:prose-invert"
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
-  );
-}
-const object = (v: unknown): JsonObject => (v && typeof v === 'object' && !Array.isArray(v) ? (v as JsonObject) : {});
-const array = (v: unknown): JsonObject[] => (Array.isArray(v) ? v.map(object) : []);
-const present = (v: JsonObject) => Object.keys(v).length > 0;
-const text = displayValue;
-const delta = (v: unknown) => (typeof v === 'number' && v > 0 ? `+${text(v)}` : text(v));
-const tones = {
-  blue: 'border-blue-200/70 bg-blue-50/60 dark:border-blue-800 dark:bg-blue-950/20',
-  violet: 'border-violet-200/70 bg-violet-50/60 dark:border-violet-800 dark:bg-violet-950/20',
-  green: 'border-emerald-200/70 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-950/20',
-  amber: 'border-amber-200/70 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-950/20',
-};
-function ResultCard({
-  title,
-  tone = 'blue',
-  extra,
-  children,
-}: {
-  title: string;
-  tone?: keyof typeof tones;
-  extra?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section className={`min-w-0 rounded-xl border p-4 ${tones[tone]}`}>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h4 className="text-sm font-semibold">{title}</h4>
-        {extra}
-      </div>
-      {children}
-    </section>
-  );
-}
-function RunLink({ runId }: { runId: unknown }) {
-  if (typeof runId !== 'string' || !runId) return null;
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="max-w-full px-0 text-primary"
-      title={runId}
-      aria-label={`评估结果 · ${runId}`}
-      onClick={() => history.push(`/evolution-factory/bench/runs/${encodeURIComponent(runId)}`)}
-    >
-      查看评测结果
-      <ArrowUpRight size={14} className="ml-1 shrink-0" />
-    </Button>
-  );
-}
-function Values({ rows }: { rows: [string, unknown][] }) {
-  return (
-    <dl className="grid grid-cols-2 gap-3">
-      {rows.map(([name, value]) => (
-        <div key={name} className="min-w-0">
-          <dt className="text-xs text-muted-foreground">{name}</dt>
-          <dd className="mt-1 break-words font-mono text-sm font-semibold">{text(value)}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
 /** Preview the real deliverables, not generated descriptions or inferred scores. */
 export function outputHighlights(output: JsonObject): string[] {
   const spec = object(output.spec ?? output.specV0),
@@ -117,14 +47,9 @@ export function StepOutput({
   diffError?: string;
 }) {
   const [specExpanded, setSpecExpanded] = useState(false);
-  const diagnosis = object(output.diagnosis),
-    cases = object(output.cases),
-    goal = object(output.goal);
   const spec = object(output.spec ?? output.specV0),
     comparison = object(output.scoreComparison);
-  const baseline = object(output.baseline),
-    benchCases = object(output.benchCases),
-    domains = object(output.benchDomains);
+  const baseline = object(output.baseline);
   const change = object(output.diff),
     round = object(output.roundDecision),
     metrics = array(output.metrics);
@@ -146,203 +71,14 @@ export function StepOutput({
       });
   };
   collectRuns(output);
-  const caseItems = array(cases.items);
-  const renderCase = (item: JsonObject, i: number) => (
-    <div key={i} className="py-3 first:pt-0 last:pb-0">
-      <div className="flex min-w-0 items-start gap-2">
-        <span
-          className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${
-            item.type === 'good'
-              ? 'bg-emerald-100 text-emerald-800'
-              : item.type === 'bad'
-              ? 'bg-red-50 text-red-700'
-              : 'bg-muted text-muted-foreground'
-          }`}
-        >
-          {text(item.type)}
-        </span>
-        <span className="min-w-0 break-all font-mono text-xs leading-5">{text(item.caseId)}</span>
-      </div>
-      <p className="mt-2 break-words text-sm leading-relaxed text-muted-foreground">{text(item.summary)}</p>
-    </div>
-  );
   return (
     <div className="space-y-4">
       {showTitle && <h3 className="font-medium">产出物</h3>}
       {typeof output.summary === 'string' && (
         <p className="text-sm leading-relaxed text-muted-foreground">{output.summary}</p>
       )}
-      {(present(diagnosis) || present(cases) || Boolean(output.goal)) && (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {present(diagnosis) && (
-            <ResultCard title="诊断结论" tone="violet">
-              <p className="break-words text-sm leading-relaxed">{text(diagnosis.summary)}</p>
-            </ResultCard>
-          )}
-          {present(cases) && (
-            <ResultCard title="Bench Case">
-              <p className="text-xl font-semibold tabular-nums">
-                {text(cases.total ?? caseItems.length)}{' '}
-                <span className="text-xs font-normal text-muted-foreground">个 Case</span>
-              </p>
-              <p className="mt-2 text-xs text-muted-foreground">
-                Good {text(cases.goodCount)} / Bad {text(cases.badCount)}
-              </p>
-            </ResultCard>
-          )}
-          {Boolean(output.goal) && (
-            <ResultCard title="进化目标" tone="green">
-              <p className="break-words text-sm leading-relaxed">
-                {typeof output.goal === 'string' ? output.goal : text(goal.title ?? goal.summary)}
-              </p>
-            </ResultCard>
-          )}
-        </div>
-      )}
-      {array(diagnosis.issues).length > 0 && (
-        <details className="rounded-xl border border-border p-4">
-          <summary className="cursor-pointer text-sm font-medium">
-            问题与优化建议 · {array(diagnosis.issues).length}
-          </summary>
-          <div className="mt-3 divide-y divide-border">
-            {array(diagnosis.issues).map((issue, i) => (
-              <div key={i} className="py-3 first:pt-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-sm font-medium">{text(issue.title)}</p>
-                  <span className="rounded bg-muted px-2 py-0.5 text-xs">{text(issue.severity)}</span>
-                </div>
-                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{text(issue.suggestion)}</p>
-              </div>
-            ))}
-          </div>
-        </details>
-      )}
-      {array(goal.metrics).length > 0 && (
-        <ResultCard title="目标指标" tone="green">
-          <div className="grid gap-2 sm:grid-cols-2">
-            {array(goal.metrics).map((metric, i) => (
-              <div
-                key={i}
-                className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-lg bg-background/80 p-3 text-sm"
-              >
-                <span className="break-words font-medium">{text(metric.name ?? metric.key)}</span>
-                <span className="font-mono">
-                  {typeof metric.operator === 'string' ? metric.operator : ''} {text(metric.target)}{' '}
-                  {typeof metric.unit === 'string' ? metric.unit : ''}
-                </span>
-              </div>
-            ))}
-          </div>
-        </ResultCard>
-      )}
-      {caseItems.length > 0 && (
-        <section className="rounded-xl border border-border p-4">
-          <h4 className="mb-3 text-sm font-semibold">诊断 Case</h4>
-          <div className="divide-y divide-border">{caseItems.slice(0, 3).map(renderCase)}</div>
-          {caseItems.length > 3 && (
-            <details className="mt-3 border-t border-border pt-3">
-              <summary className="cursor-pointer text-xs text-primary">查看其余 {caseItems.length - 3} 个 Case</summary>
-              <div className="mt-3 divide-y divide-border">{caseItems.slice(3).map(renderCase)}</div>
-            </details>
-          )}
-        </section>
-      )}
-      {present(benchCases) && (
-        <ResultCard title="训练 / 测试 Case">
-          <Values
-            rows={[
-              ['训练集', benchCases.trainCount],
-              ['测试集', benchCases.testCount],
-            ]}
-          />
-          {present(domains) && (
-            <div className="mt-3 space-y-1 break-all text-xs text-muted-foreground">
-              <p>Train Domain：{text(domains.trainBenchDomainId)}</p>
-              <p>Test Domain：{text(domains.testBenchDomainId)}</p>
-            </div>
-          )}
-          {array(benchCases.items).length > 0 && (
-            <details className="mt-3">
-              <summary className="cursor-pointer text-xs text-primary">
-                查看 Case 明细 · {array(benchCases.items).length}
-              </summary>
-              <div className="mt-3 divide-y divide-border">
-                {array(benchCases.items).map((item, i) => {
-                  const template = object(item.template);
-                  return (
-                    <div key={i} className="space-y-1 py-2 text-xs">
-                      <p className="break-all">
-                        <span className="mr-2 rounded bg-background px-1.5 py-0.5">{text(item.split)}</span>
-                        {text(item.sourceCaseId ?? item.taskId)}
-                      </p>
-                      <p className="break-all text-muted-foreground">
-                        {text(template.templateName)} · v{text(template.version)}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
-            </details>
-          )}
-        </ResultCard>
-      )}
-      {present(baseline) && (
-        <ResultCard title="Train / Test Baseline">
-          <div className="grid gap-3 sm:grid-cols-2">
-            {(['train', 'test'] as const).map((role) => {
-              const result = object(baseline[role]);
-              if (!present(result)) return null;
-              const values = object(result.metrics),
-                producedHere = Boolean(stepId && result.producerStepId === stepId);
-              return (
-                <div key={role} className="min-w-0 rounded-lg bg-background/80 p-3">
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <h5 className="text-sm font-semibold">
-                      {role === 'train' ? 'Train · 训练基线' : 'Test · 测试基线'}
-                    </h5>
-                    {typeof result.producerStepId === 'string' && (
-                      <span className="rounded bg-muted px-2 py-0.5 text-xs">
-                        {producedHere ? '本节点生成' : '复用基线'}
-                      </span>
-                    )}
-                  </div>
-                  <Values
-                    rows={[
-                      ['得分', values.score],
-                      ['通过率', values.passRate],
-                      ['Case 数量', values.caseCount],
-                      ['满分', values.maxScore],
-                    ]}
-                  />
-                  {typeof result.domainId === 'string' && (
-                    <p className="mt-3 truncate text-xs text-muted-foreground" title={result.domainId}>
-                      Domain：{result.domainId}
-                    </p>
-                  )}
-                  {typeof result.producerStepId === 'string' && !producedHere && (
-                    <p className="mt-2 break-all text-xs text-muted-foreground">来源 Step：{result.producerStepId}</p>
-                  )}
-                  <RunLink runId={result.benchRunId} />
-                </div>
-              );
-            })}
-          </div>
-        </ResultCard>
-      )}
-      {typeof output.benchRunId === 'string' && (
-        <ResultCard title="Bench 结果">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <Values
-              rows={[
-                ['得分 / 满分', `${text(object(output.metrics).score)} / ${text(object(output.metrics).maxScore)}`],
-                ['通过率', object(output.metrics).passRate],
-                ['Case 数量', object(output.metrics).caseCount],
-              ]}
-            />
-            <RunLink runId={output.benchRunId} />
-          </div>
-        </ResultCard>
-      )}
+      <DiagnosisResults output={output} />
+      <BenchResults output={output} stepId={stepId} />
       {present(change) && (
         <ResultCard title="本轮 Diff">
           <p className="text-sm leading-relaxed">{text(change.summary)}</p>

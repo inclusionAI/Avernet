@@ -2,9 +2,10 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { labelOf, statusLabel } from '@/domain/evolution/types';
 import { history } from '@umijs/max';
-import type { ReactNode } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import { useCallback, useEffect, useState } from 'react';
 
 export function EvolutionHeader({ tab, actions }: { tab: 'tasks' | 'templates' | 'versions'; actions?: ReactNode }) {
@@ -22,7 +23,9 @@ export function EvolutionHeader({ tab, actions }: { tab: 'tasks' | 'templates' |
             ['versions', '进化版本'],
           ] as const
         ).map(([value, label]) => (
-          <button
+          <Button
+            variant="ghost"
+            style={{ height: 'auto', whiteSpace: 'normal' }}
             key={value}
             type="button"
             role="tab"
@@ -33,7 +36,7 @@ export function EvolutionHeader({ tab, actions }: { tab: 'tasks' | 'templates' |
             onClick={() => history.push(`/evolution-factory${value === 'tasks' ? '' : `?tab=${value}`}`)}
           >
             {label}
-          </button>
+          </Button>
         ))}
       </div>
     </div>
@@ -191,5 +194,20 @@ export function TypeTag({ type }: { type: string }) {
     <span className={`inline-flex whitespace-nowrap rounded px-2 py-0.5 text-xs ${typeTone(type)}`}>
       {labelOf(type)}
     </span>
+  );
+}
+
+/** Overflow labels retain hover and keyboard access through the shared UI primitive. */
+export function Hint({ content, children }: { content?: ReactNode; children: ReactElement }) {
+  if (!content) return children;
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild tabIndex={0}>
+          {children}
+        </TooltipTrigger>
+        <TooltipContent>{content}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }

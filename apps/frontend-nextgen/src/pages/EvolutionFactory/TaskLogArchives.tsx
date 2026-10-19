@@ -1,10 +1,10 @@
 import { Button } from '@/components/ui/Button';
-import { evolutionApi } from '@/services/backendApi/clawevolve/controller';
 import { useCallback, useState } from 'react';
 import { ErrorBox, StatusBadge, useResource } from './shared';
 import { useEvolutionContext } from './useEvolutionContext';
 export default function TaskLogArchives({ taskId }: { taskId: string }) {
   const identity = useEvolutionContext();
+  const evolutionApi = identity.api;
   const [open, setOpen] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');

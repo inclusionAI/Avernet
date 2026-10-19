@@ -5,15 +5,15 @@ import { Modal, ModalContent, ModalHeader, ModalTitle } from '@/components/ui/Mo
 import { Pagination } from '@/components/ui/Pagination';
 import { Spin } from '@/components/ui/Spin';
 import { Textarea } from '@/components/ui/Textarea';
-import { evolutionApi } from '@/services/backendApi/clawevolve/controller';
 import { history } from '@umijs/max';
 import { Plus, Search } from 'lucide-react';
 import { useCallback, useState } from 'react';
-import { ErrorBox, Field, useResource } from './shared';
+import { ErrorBox, Field, Hint, useResource } from './shared';
 import { useEvolutionContext } from './useEvolutionContext';
 
 export default function DomainList() {
   const identity = useEvolutionContext();
+  const evolutionApi = identity.api;
   const domains = useResource(
     useCallback(() => evolutionApi.domains(), [identity.key]),
     identity.ready,
@@ -107,23 +107,23 @@ export default function DomainList() {
                 {items.slice((page - 1) * 10, page * 10).map((d) => (
                   <tr className="border-t border-border" key={`${d.ownerUserId}/${d.domainId}`}>
                     <td className="p-4 font-medium">
-                      <div className="truncate" title={d.name}>
-                        {d.name}
-                      </div>
+                      <Hint content={d.name}>
+                        <div className="truncate">{d.name}</div>
+                      </Hint>
                     </td>
                     <td className="p-4">
-                      <div className="truncate font-mono text-xs text-muted-foreground" title={d.domainId}>
-                        {d.domainId}
-                      </div>
+                      <Hint content={d.domainId}>
+                        <div className="truncate font-mono text-xs text-muted-foreground">{d.domainId}</div>
+                      </Hint>
                     </td>
                     <td className="whitespace-nowrap p-4 text-xs text-muted-foreground">{d.ownerUserId}</td>
                     <td className="whitespace-nowrap p-4">
                       <span className="rounded bg-muted px-2 py-1 text-xs">{d.templateCount} 个模板</span>
                     </td>
                     <td className="p-4">
-                      <div className="truncate text-xs text-muted-foreground" title={d.description || undefined}>
-                        {d.description || '—'}
-                      </div>
+                      <Hint content={d.description || undefined}>
+                        <div className="truncate text-xs text-muted-foreground">{d.description || '—'}</div>
+                      </Hint>
                     </td>
                     <td className="whitespace-nowrap p-4">
                       <Button

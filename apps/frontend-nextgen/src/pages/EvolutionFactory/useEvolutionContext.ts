@@ -1,5 +1,6 @@
 import { useBotWorkshopRequestIdentity } from '@/hooks/useBotWorkshopEditorIdentity';
 import { initSpaceContext, useSpaceContext } from '@/hooks/useSpaceContext';
+import { evolutionApi } from '@/services/evolution/evolutionService';
 import { useEffect } from 'react';
 
 /** Module-local readiness only; never changes the shared request or space stores. */
@@ -10,6 +11,7 @@ export function useEvolutionContext() {
     if (identity.ready) void initSpaceContext();
   }, [identity.ready]);
   return {
+    api: evolutionApi,
     ...identity,
     spaceId: state.currentSpaceId,
     key: `${identity.userId ?? ''}:${state.currentSpaceId ?? ''}`,

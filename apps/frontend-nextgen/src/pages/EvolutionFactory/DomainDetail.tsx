@@ -1,26 +1,20 @@
 import { Button } from '@/components/ui/Button';
-import { Checkbox } from '@/components/ui/Checkbox';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { Input } from '@/components/ui/Input';
-import { Modal, ModalContent, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Spin } from '@/components/ui/Spin';
-import { Textarea } from '@/components/ui/Textarea';
 import type { Template } from '@/domain/evolution/types';
-import { evolutionApi } from '@/services/backendApi/clawevolve/controller';
 import { history, useParams } from '@umijs/max';
 import { ArrowLeft, Pencil } from 'lucide-react';
 import { useCallback, useState } from 'react';
+import { DomainEditors } from './DomainEditors';
 import { DomainRuns } from './DomainRuns';
-import { ErrorBox, EvolutionHeader, Field, JsonView, Section, useResource } from './shared';
+import { DomainTemplates } from './DomainTemplates';
+import { ErrorBox, EvolutionHeader, JsonView, Section, useResource } from './shared';
 import { useEvolutionContext } from './useEvolutionContext';
 
-export default function DomainDetail() {
-  const context = useEvolutionContext();
-  return <DomainDetailContent key={context.key} />;
-}
 function DomainDetailContent() {
   const { ownerUserId = '', domainId = '' } = useParams<{ ownerUserId: string; domainId: string }>();
   const identity = useEvolutionContext();
+  const evolutionApi = identity.api;
   const writable = identity.ready;
   const [runPage, setRunPage] = useState(1);
   const [tab, setTab] = useState<'detail' | 'tasks'>('detail');
@@ -205,7 +199,9 @@ function DomainDetailContent() {
               ['tasks', '关联任务'],
             ] as const
           ).map(([value, label]) => (
-            <button
+            <Button
+              variant="ghost"
+              style={{ height: 'auto', whiteSpace: 'normal' }}
               type="button"
               role="tab"
               key={value}
@@ -216,120 +212,20 @@ function DomainDetailContent() {
               onClick={() => setTab(value)}
             >
               {label}
-            </button>
+            </Button>
           ))}
         </div>
         {tab === 'detail' && (
-          <Section title="评测模板">
-            <ErrorBox message={templates.error} retry={templates.reload} />
-            {writable && (
-              <div className="mb-4 flex items-center gap-3">
-                <span className="text-xs text-muted-foreground">已选择 {selected.length} 个待发布模板</span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={!selected.length || busy}
-                  onClick={() => void batchPublish()}
-                >
-                  批量发布
-                </Button>
-              </div>
-            )}
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[1000px] table-fixed text-left text-sm">
-                <colgroup>
-                  {[55, 240, 240, 100, 100, 100, 165].map((width, i) => (
-                    <col key={i} style={{ width }} />
-                  ))}
-                </colgroup>
-                <thead className="bg-muted">
-                  <tr>
-                    {['选择', '模板名', '展示名称', '最新版本', '发布版本', '状态', '操作'].map((v) => (
-                      <th className="whitespace-nowrap p-3 text-xs font-medium" key={v}>
-                        {v}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {templates.data?.map((t) => (
-                    <tr className="border-b border-border" key={t.templateName}>
-                      <td className="p-3">
-                        <Checkbox
-                          aria-label={`选择模板 ${t.templateName}`}
-                          disabled={
-                            !writable || t.versions.find((v) => v.version === t.latestVersion)?.status !== 'draft'
-                          }
-                          checked={selected.includes(t.templateName)}
-                          onCheckedChange={(checked) =>
-                            setSelected((v) =>
-                              checked === true ? [...v, t.templateName] : v.filter((n) => n !== t.templateName),
-                            )
-                          }
-                        />
-                      </td>
-                      <td className="p-3">
-                        <div className="truncate font-mono text-xs" title={t.templateName}>
-                          {t.templateName}
-                        </div>
-                      </td>
-                      <td className="p-3">
-                        <div className="truncate font-medium" title={t.displayName || t.templateName}>
-                          {t.displayName || t.templateName}
-                        </div>
-                      </td>
-                      <td className="whitespace-nowrap p-3">
-                        <span className="rounded bg-primary/10 px-2 py-1 text-xs text-primary">v{t.latestVersion}</span>
-                      </td>
-                      <td className="whitespace-nowrap p-3">
-                        <span className="rounded bg-success/10 px-2 py-1 text-xs text-success">
-                          {t.publishedVersion === null ? '—' : `v${t.publishedVersion}`}
-                        </span>
-                      </td>
-                      <td className="whitespace-nowrap p-3">
-                        <span
-                          className={`rounded px-2 py-1 text-xs ${
-                            t.status === 'published' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'
-                          }`}
-                        >
-                          {t.status === 'published' ? '已发布' : t.status === 'draft' ? '草稿' : t.status}
-                        </span>
-                      </td>
-                      <td className="whitespace-nowrap p-3">
-                        <div className="flex gap-2">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            disabled={busy}
-                            onClick={() => void startTemplate(t.templateName)}
-                          >
-                            {writable ? '查看/编辑' : '查看'}
-                          </Button>
-                          {writable && (
-                            <ConfirmDialog
-                              title={`归档 ${t.templateName}？`}
-                              onConfirm={async () => {
-                                await mutation(() =>
-                                  evolutionApi.archiveTemplate(ownerUserId, domainId, t.templateName),
-                                );
-                              }}
-                            >
-                              <Button size="sm" variant="ghost" disabled={busy}>
-                                归档
-                              </Button>
-                            </ConfirmDialog>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {!templates.loading && !templates.error && !templates.data?.length && (
-              <p className="mt-3 text-sm text-muted-foreground">暂无模板</p>
-            )}
-          </Section>
+          <DomainTemplates
+            templates={templates}
+            writable={writable}
+            selected={selected}
+            setSelected={setSelected}
+            busy={busy}
+            batchPublish={batchPublish}
+            startTemplate={startTemplate}
+            archiveTemplate={(name) => mutation(() => evolutionApi.archiveTemplate(ownerUserId, domainId, name))}
+          />
         )}
         {tab === 'tasks' && (
           <DomainRuns
@@ -347,96 +243,46 @@ function DomainDetailContent() {
             <p className="mt-2 text-xs text-muted-foreground">上传/保存不代表已发布，请检查模板状态和发布结果。</p>
           </Section>
         )}
-        <Modal
-          open={editDomain}
-          onOpenChange={(v) => {
-            if (!busy) setEditDomain(v);
+        <DomainEditors
+          editDomain={editDomain}
+          setEditDomain={setEditDomain}
+          editTemplate={editTemplate}
+          setEditTemplate={setEditTemplate}
+          domainId={domainId}
+          domainName={domainName}
+          setDomainName={setDomainName}
+          description={description}
+          setDescription={setDescription}
+          displayName={displayName}
+          setDisplayName={setDisplayName}
+          markdown={markdown}
+          setMarkdown={setMarkdown}
+          busy={busy}
+          error={error}
+          writable={writable}
+          saveDomain={() =>
+            mutation(() => evolutionApi.updateDomain(ownerUserId, domainId, { name: domainName.trim(), description }))
+              .then(() => setEditDomain(false))
+              .catch(() => undefined)
+          }
+          saveTemplate={async () => {
+            if (!editTemplate || !writable) return;
+            await mutation(() =>
+              evolutionApi.saveTemplate(ownerUserId, domainId, editTemplate.templateName, {
+                contentMd: markdown,
+                displayName,
+              }),
+            )
+              .then(() => setEditTemplate(undefined))
+              .catch(() => undefined);
           }}
-        >
-          <ModalContent className="max-w-[520px]" aria-describedby={undefined}>
-            <ModalHeader>
-              <ModalTitle className="text-base">编辑 Domain</ModalTitle>
-            </ModalHeader>
-            <form
-              className="space-y-4"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void mutation(() =>
-                  evolutionApi.updateDomain(ownerUserId, domainId, { name: domainName.trim(), description }),
-                )
-                  .then(() => setEditDomain(false))
-                  .catch(() => undefined);
-              }}
-            >
-              <ErrorBox message={error} />
-              <Field label="Domain ID">
-                <Input readOnly value={domainId} />
-              </Field>
-              <Field label="名称 *">
-                <Input required value={domainName} onChange={(e) => setDomainName(e.target.value)} />
-              </Field>
-              <Field label="描述">
-                <Textarea value={description} onChange={(e) => setDescription(e.target.value)} />
-              </Field>
-              <div className="flex justify-end gap-2 border-t border-border pt-4">
-                <Button type="button" variant="outline" disabled={busy} onClick={() => setEditDomain(false)}>
-                  取消
-                </Button>
-                <Button type="submit" loading={busy}>
-                  确定
-                </Button>
-              </div>
-            </form>
-          </ModalContent>
-        </Modal>
-        <Modal
-          open={Boolean(editTemplate)}
-          onOpenChange={(v) => {
-            if (!busy && !v) setEditTemplate(undefined);
-          }}
-        >
-          <ModalContent size="xl" aria-describedby={undefined}>
-            <ModalHeader>
-              <ModalTitle className="text-base">{editTemplate?.templateName}</ModalTitle>
-            </ModalHeader>
-            <form
-              className="space-y-4"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!editTemplate || !writable) return;
-                void mutation(() =>
-                  evolutionApi.saveTemplate(ownerUserId, domainId, editTemplate.templateName, {
-                    contentMd: markdown,
-                    displayName,
-                  }),
-                )
-                  .then(() => setEditTemplate(undefined))
-                  .catch(() => undefined);
-              }}
-            >
-              <ErrorBox message={error} />
-              <Field label="显示名称">
-                <Input readOnly={!writable} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
-              </Field>
-              <Field label="模板 Markdown">
-                <Textarea
-                  required
-                  readOnly={!writable}
-                  rows={16}
-                  className="font-mono text-xs"
-                  value={markdown}
-                  onChange={(e) => setMarkdown(e.target.value)}
-                />
-              </Field>
-              {writable && (
-                <Button type="submit" loading={busy}>
-                  保存草稿
-                </Button>
-              )}
-            </form>
-          </ModalContent>
-        </Modal>
+        />
       </div>
     </main>
   );
+}
+
+export default function DomainDetail() {
+  const context = useEvolutionContext();
+  return <DomainDetailContent key={context.key} />;
 }

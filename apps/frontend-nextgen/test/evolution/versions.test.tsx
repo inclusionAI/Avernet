@@ -1,9 +1,9 @@
 /** @jest-environment jsdom */
-import type { Task } from '@/domain/evolution/types';
+import type { EvolutionVersion, Task } from '@/domain/evolution/types';
 import { formatTime } from '@/domain/evolution/types';
 import { BenchSessionReader } from '@/pages/EvolutionFactory/BenchReader';
 import VersionList, { stableVersion, versionStatus } from '@/pages/EvolutionFactory/VersionList';
-import { evolutionApi, type EvolutionVersion } from '@/services/backendApi/clawevolve/controller';
+import { evolutionApi } from '@/services/evolution/evolutionService';
 import { beforeEach, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen } from '@testing-library/react';
@@ -14,9 +14,17 @@ jest.mock('@umijs/max', () => {
   return { history: { push: j.fn() }, useLocation: () => ({ search: mockSearch }) };
 });
 jest.mock('@/pages/EvolutionFactory/useEvolutionContext', () => ({
-  useEvolutionContext: () => ({ ready: true, key: 'viewer:42', userId: 'viewer', spaceId: 42 }),
+  useEvolutionContext: () => ({
+    api: jest.requireMock<typeof import('@/services/evolution/evolutionService')>(
+      '@/services/evolution/evolutionService',
+    ).evolutionApi,
+    ready: true,
+    key: 'viewer:42',
+    userId: 'viewer',
+    spaceId: 42,
+  }),
 }));
-jest.mock('@/services/backendApi/clawevolve/controller', () => {
+jest.mock('@/services/evolution/evolutionService', () => {
   const j = require('@jest/globals').jest;
   return { evolutionApi: { versions: j.fn(), diff: j.fn(), packDownload: j.fn() } };
 });
@@ -152,12 +160,13 @@ it('sidebar shows generation time and links to same-space Bot-filtered versions'
     botId: 'bot',
   });
 });
-it.each(['42', '99'])('applies linked Bot filter only within the matching space (%s)', async (space) => {
+it.each([
+  ['42', 1, false],
+  ['99', 2, true],
+] as const)('applies linked Bot filter only within the matching space (%s)', async (space, count, otherVisible) => {
   mockSearch = `?tab=versions&space_id=${space}&botOwner=author&botId=bot`;
   api.versions.mockResolvedValue({ items: [item(), item({ versionId: 'other', botId: 'another-bot' })] });
   render(<VersionList />);
-  if (space === '42') {
-    expect(await screen.findByText('共 1 条 · 第 1 页')).toBeInTheDocument();
-    expect(screen.queryByText('another-bot', { selector: 'td' })).not.toBeInTheDocument();
-  } else expect(await screen.findByText('共 2 条 · 第 1 页')).toBeInTheDocument();
+  expect(await screen.findByText(`共 ${count} 条 · 第 1 页`)).toBeInTheDocument();
+  expect(Boolean(screen.queryByText('another-bot', { selector: 'td' }))).toBe(otherVisible);
 });

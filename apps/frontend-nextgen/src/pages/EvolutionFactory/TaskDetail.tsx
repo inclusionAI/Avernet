@@ -1,6 +1,5 @@
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { Modal, ModalContent, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Spin } from '@/components/ui/Spin';
 import type { Step, Task } from '@/domain/evolution/types';
 import {
@@ -11,28 +10,25 @@ import {
   isBotEvolutionTask,
   labelOf,
 } from '@/domain/evolution/types';
-import { evolutionApi } from '@/services/backendApi/clawevolve/controller';
 import { history, useLocation, useParams } from '@umijs/max';
-import { ArrowLeft, FileText, RefreshCw } from 'lucide-react';
+import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { CreateResult } from './CreateResult';
 import { stepName, taskTimes } from './presentation';
-import { ErrorBox, EvolutionHeader, JsonView, Section, StatusBadge, TypeTag, typeTone } from './shared';
-import { outputHighlights, StepOutput } from './StepOutput';
+import { ErrorBox, EvolutionHeader, JsonView, Section, StatusBadge, TypeTag } from './shared';
+import { TaskArtifacts } from './TaskArtifacts';
 import TaskLogArchives from './TaskLogArchives';
 import { TaskProgress } from './TaskProgress';
+import { TaskTimeline } from './TaskTimeline';
 import { useEvolutionContext } from './useEvolutionContext';
 import VersionList from './VersionList';
 
-export default function TaskDetail() {
-  const context = useEvolutionContext();
-  return <TaskDetailContent key={context.key} />;
-}
 function TaskDetailContent() {
   const { taskId = '' } = useParams<{ taskId: string }>();
   const location = useLocation();
   const created = new URLSearchParams(location.search).get('created') === '1';
   const identity = useEvolutionContext();
+  const evolutionApi = identity.api;
   const createdState = location.state as { createdTask?: Task; spaceKey?: string } | null;
   const returnedTask = createdState?.spaceKey === identity.key ? createdState.createdTask : undefined;
   const [task, setTask] = useState<Task | undefined>(() =>
@@ -187,131 +183,31 @@ function TaskDetailContent() {
               <Section title="执行进度">
                 <TaskProgress steps={task.steps ?? []} />
               </Section>
-              <Section title="执行时间线">
-                <ol className="space-y-0">
-                  {task.steps?.map((item, index) => (
-                    <li key={item.stepId} className="relative flex gap-4 pb-6 last:pb-0">
-                      {index < (task.steps?.length ?? 0) - 1 && (
-                        <span aria-hidden="true" className="absolute left-3.5 top-8 bottom-0 w-px bg-border" />
-                      )}
-                      <span
-                        className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs ${
-                          ['failed', 'canceled'].includes(item.status)
-                            ? 'bg-destructive/10 text-destructive'
-                            : ['succeeded', 'completed'].includes(item.status)
-                            ? 'bg-success/10 text-success'
-                            : typeTone(task.task_type)
-                        }`}
-                      >
-                        {index + 1}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-3">
-                          <button
-                            type="button"
-                            className="font-medium"
-                            onClick={() => {
-                              setSelected(item.stepId);
-                              setDiff(undefined);
-                              setOperationError('');
-                            }}
-                          >
-                            {stepName(item.stepType)}
-                            {item.roundNo !== null && item.roundNo !== undefined ? ` · 第 ${item.roundNo} 轮` : ''}
-                          </button>
-                          <StatusBadge status={item.status} />
-                          <span className="text-xs text-muted-foreground">
-                            {formatTime(item.startedAt)} → {formatTime(item.completedAt)}
-                          </span>
-                        </div>
-                        <p className="mt-2 text-sm text-muted-foreground">{item.summary || '等待执行结果'}</p>
-                        {item.error?.message && (
-                          <p className="mt-2 text-sm text-destructive">
-                            {item.error.code}：{item.error.message}
-                          </p>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ol>
-                {!task.steps?.length && <p className="text-sm text-muted-foreground">暂无执行步骤</p>}
-              </Section>
-              <Section title="产出物">
-                <p className="mb-4 text-xs leading-relaxed text-muted-foreground">
-                  按执行步骤归档，查看诊断结论、目标规划和每轮优化结果。
-                </p>
-                <div className="grid gap-3 md:grid-cols-3">
-                  {task.steps
-                    ?.filter((item) => item.output)
-                    .map((item) => (
-                      <button
-                        key={item.stepId}
-                        type="button"
-                        aria-label={`查看产出物 · ${stepName(item.stepType)} · ${item.stepId}`}
-                        aria-pressed={selected === item.stepId}
-                        className={`flex min-w-0 flex-col items-start rounded-xl border p-4 text-left transition-colors hover:border-primary hover:bg-primary/[0.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                          selected === item.stepId ? 'border-primary/50 bg-primary/[0.03]' : 'border-border bg-card'
-                        }`}
-                        onClick={() => {
-                          setSelected(item.stepId);
-                          setOutputOpen(true);
-                          setDiff(undefined);
-                          setOperationError('');
-                        }}
-                      >
-                        <span className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-primary/5 text-primary">
-                          <FileText size={18} />
-                        </span>
-                        <strong className="text-sm">
-                          {stepName(item.stepType)}
-                          {item.roundNo !== null && item.roundNo !== undefined ? ` · 第 ${item.roundNo} 轮` : ''}
-                        </strong>
-                        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                          {item.summary || '查看实际产出'}
-                        </p>
-                        <div className="mb-4 mt-3 flex flex-wrap gap-1.5">
-                          {outputHighlights(item.output!).map((label) => (
-                            <span key={label} className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-                              {label}
-                            </span>
-                          ))}
-                        </div>
-                        <div className="mt-auto flex w-full items-center justify-between gap-2 border-t border-border pt-3">
-                          <span className="text-xs text-muted-foreground">{formatTime(item.completedAt)}</span>
-                          <span className="text-xs font-medium text-primary">查看详情 →</span>
-                        </div>
-                      </button>
-                    ))}
-                </div>
-                {!task.steps?.some((item) => item.output) && (
-                  <p className="text-sm text-muted-foreground">暂无已生成的产出物</p>
-                )}
-                <Modal open={outputOpen && Boolean(step?.output)} onOpenChange={setOutputOpen}>
-                  <ModalContent size="xl" className="overflow-hidden" aria-describedby={undefined}>
-                    <ModalHeader>
-                      <ModalTitle className="text-base">产出物 · {step ? stepName(step.stepType) : ''}</ModalTitle>
-                    </ModalHeader>
-                    <div className="max-h-[calc(100vh-10rem)] min-h-0 overflow-y-auto pr-1">
-                      {step?.output && (
-                        <StepOutput
-                          key={step.stepId}
-                          output={step.output}
-                          stepId={step.stepId}
-                          showTitle={false}
-                          onViewDiff={
-                            step.status === 'succeeded' && step.stepType === 'optimize' && step.output.diff
-                              ? () => void viewDiff()
-                              : undefined
-                          }
-                          diff={diff}
-                          diffLoading={busy}
-                          diffError={operationError}
-                        />
-                      )}
-                    </div>
-                  </ModalContent>
-                </Modal>
-              </Section>
+              <TaskTimeline
+                task={task}
+                onSelect={(stepId) => {
+                  setSelected(stepId);
+                  setDiff(undefined);
+                  setOperationError('');
+                }}
+              />
+              <TaskArtifacts
+                task={task}
+                step={step}
+                selected={selected}
+                onSelect={(stepId) => {
+                  setSelected(stepId);
+                  setOutputOpen(true);
+                  setDiff(undefined);
+                  setOperationError('');
+                }}
+                outputOpen={outputOpen}
+                setOutputOpen={setOutputOpen}
+                onViewDiff={() => void viewDiff()}
+                diff={diff}
+                busy={busy}
+                operationError={operationError}
+              />
               {step && (
                 <Section title={`执行日志 · ${stepName(step.stepType)}`}>
                   <div className="mb-4 flex flex-wrap gap-3">
@@ -376,4 +272,9 @@ function TaskDetailContent() {
       </div>
     </main>
   );
+}
+
+export default function TaskDetail() {
+  const context = useEvolutionContext();
+  return <TaskDetailContent key={context.key} />;
 }

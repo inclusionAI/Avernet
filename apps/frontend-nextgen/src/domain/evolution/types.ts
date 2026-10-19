@@ -208,3 +208,33 @@ export interface BenchTokenUsage {
   cacheWriteTokens?: number;
   requestCount?: number;
 }
+
+export interface SpaceBot {
+  unambiguousEnvironment?: boolean;
+  ownerId: string;
+  botId: string;
+  env: string;
+  botName: string;
+  activeEngine: string;
+  deviceProvider?: string | null;
+  botType?: string | null;
+  hasServiceBot?: boolean;
+}
+export interface EvolutionVersion extends JsonObject {
+  versionId: string;
+  kind: 'initial' | 'round' | 'snapshot';
+  taskId: string;
+  stepId: string;
+  userId: string;
+  botId: string;
+  round?: number | null;
+  acceptanceStatus: string;
+  status?: string;
+  accepted?: boolean | null;
+  createdAt?: number | string;
+  pack?: { packId: string; status: string; artifact?: JsonObject } | null;
+  scoreComparison?: { name?: string; baseline: number | null; candidate: number | null; delta: number | null } | null;
+  reviewStatus?: string | null;
+  specVersion?: string | null;
+  diff?: { summary?: string; available?: boolean; artifactAvailable?: boolean; files?: unknown[] } | null;
+}

@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import type { Task } from '@/domain/evolution/types';
 import TaskDetail from '@/pages/EvolutionFactory/TaskDetail';
-import { evolutionApi } from '@/services/backendApi/clawevolve/controller';
+import { evolutionApi } from '@/services/evolution/evolutionService';
 import { beforeEach, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -16,9 +16,18 @@ jest.mock('@umijs/max', () => {
   };
 });
 jest.mock('@/pages/EvolutionFactory/useEvolutionContext', () => ({
-  useEvolutionContext: () => ({ ready: true, userId: 'owner', key: 'owner:42', spaceId: 42, loading: false }),
+  useEvolutionContext: () => ({
+    api: jest.requireMock<typeof import('@/services/evolution/evolutionService')>(
+      '@/services/evolution/evolutionService',
+    ).evolutionApi,
+    ready: true,
+    userId: 'owner',
+    key: 'owner:42',
+    spaceId: 42,
+    loading: false,
+  }),
 }));
-jest.mock('@/services/backendApi/clawevolve/controller', () => {
+jest.mock('@/services/evolution/evolutionService', () => {
   const mockJest = require('@jest/globals').jest;
   return {
     evolutionApi: {
