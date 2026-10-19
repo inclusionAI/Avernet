@@ -234,7 +234,7 @@ describe('issue and optimization flow', () => {
     const issue = screen.getByText('fetch-data', { selector: 'span' }).closest('article')!
     expect(within(issue).queryByRole('checkbox')).not.toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', { name: '查看并审阅' }))
+    await userEvent.click(screen.getByRole('button', { name: '查看任务' }))
     const taskDialog = await screen.findByRole('region', { name: 'Workflow 修复工作区' })
     expect(within(taskDialog).getByText('候选修复已生成')).toBeInTheDocument()
     await userEvent.click(within(taskDialog).getByRole('tab', { name: '发布后效果' }))
@@ -242,7 +242,7 @@ describe('issue and optimization flow', () => {
     await userEvent.click(within(taskDialog).getByRole('button', { name: /返回问题与优化/ }))
 
     expect(screen.queryByRole('region', { name: '本次修复操作' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '查看并审阅' })).toBeVisible()
+    expect(screen.getByRole('button', { name: '查看任务' })).toBeVisible()
   })
 
 

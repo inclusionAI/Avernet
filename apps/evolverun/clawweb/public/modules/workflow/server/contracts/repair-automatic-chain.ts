@@ -11,7 +11,7 @@ function roundIdentity(input: RepairBatchInput): string {
 export function automaticChain(revisions: RepairRevision[], final: RepairRevision, requireFinal = false): RepairRevision[] {
   if (!isAutomaticBatch(final.input)) return [final];
   const origin = final.input.automation!;
-  if (requireFinal && (origin.batchIndex !== origin.batchCount! - 1 || revisions[0]?.revision !== final.revision)) stop();
+  if (requireFinal && (origin.batchIndex !== origin.batchCount! - 1 || revisions[0]?.revision !== final.revision && retainedFeedbackCandidate(revisions)?.revision !== final.revision)) stop();
   const chain = revisions.filter(r => r.revision <= final.revision && r.phase !== 'failed').sort((a, b) => a.revision - b.revision);
   if (chain.length !== origin.batchIndex! + 1) stop();
   let parent: string | null = null;
@@ -33,6 +33,14 @@ export function automaticAdvance(revisions: RepairRevision[], input: RepairBatch
   const previous = revisions[0];
   if (!previous) { if (isAutomaticBatch(input) && (input.automation!.batchIndex !== 0 || input.parentCandidateCommit !== null)) stop(); return; }
   if (!isAutomaticBatch(previous.input) && !isAutomaticBatch(input)) return;
+  if (isAutomaticBatch(previous.input) && !isAutomaticBatch(input)) {
+    // Human feedback starts only from the complete, validated automatic candidate.
+    if (!['review', 'no_change'].includes(previous.phase)) stop();
+    automaticChain(revisions, previous, true);
+    if (canonicalRepairJson(previous.input.baseline) !== canonicalRepairJson(input.baseline)
+      || input.parentCandidateCommit !== previous.draft?.candidateCommit) stop();
+    return;
+  }
   if (!isAutomaticBatch(previous.input) || !isAutomaticBatch(input)) stop();
   if (previous.phase === 'failed') {
     const { revision: _old, previousReportRef: _ref, ...frozen } = previous.input;
@@ -53,4 +61,23 @@ export function automaticAdvance(revisions: RepairRevision[], input: RepairBatch
 export function changedChainItems(revisions: RepairRevision[], final: RepairRevision, requireFinal = false): RepairItem[] {
   return automaticChain(revisions, final, requireFinal).flatMap(revision => revision.input.items.filter(item =>
     Array.isArray(revision.draft?.itemResults) && revision.draft.itemResults.some(outcome => outcome.itemId === item.itemId && outcome.status === 'changed')));
+}
+
+/** A no-change feedback result keeps its identical prior candidate available for review. */
+export function retainedFeedbackCandidate(revisions: RepairRevision[]): RepairRevision | null {
+  const latest=revisions[0];
+  if(!latest||latest.phase!=='no_change'||isAutomaticBatch(latest.input))return null;
+  const candidate=revisions.find(row=>row.draft!==null&&(row.phase!=='no_change'||isAutomaticBatch(row.input)));
+  if(!candidate)return null;
+  let chain:RepairRevision[];
+  try{chain=automaticChain(revisions.filter(row=>row.revision<=candidate.revision),candidate,true)}
+  catch(error){if(error instanceof RepairBatchError)return null;throw error}
+  const ids=canonicalRepairJson([...new Set(chain.flatMap(row=>row.input.items.map(item=>item.itemId)))].sort());
+  const unchanged=revisions.filter(row=>row.revision>candidate.revision).every(row=>!isAutomaticBatch(row.input)&&row.phase==='no_change'
+    &&row.draft?.candidateCommit===candidate.draft?.candidateCommit&&row.draft?.packDigest===candidate.draft?.packDigest
+    &&row.input.parentCandidateCommit===candidate.draft?.candidateCommit&&(row.checks?.static as {status?:string})?.status==='passed'
+    &&canonicalRepairJson(row.input.baseline)===canonicalRepairJson(candidate.input.baseline)
+    &&canonicalRepairJson(row.input.items.map(item=>item.itemId).sort())===ids
+    &&Array.isArray(row.draft?.itemResults)&&row.draft.itemResults.every(item=>item.status==='not_needed'));
+  return unchanged?candidate:null;
 }

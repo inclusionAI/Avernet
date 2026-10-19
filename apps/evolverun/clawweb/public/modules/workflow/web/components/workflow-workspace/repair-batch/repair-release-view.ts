@@ -9,6 +9,7 @@ export function candidateLabel(detail: RepairTaskDetail, revision: RepairRevisio
   if (deployment) return ({ succeeded: '已生效，自动观察', failed: '部署失败', uncertain: '部署结果待核对',
     created: '等待部署', dispatching: '正在部署', running: '正在部署' })[deployment.status]
   if (approval?.status === 'approved' && approval.revision === revision.revision) return '已确认，待部署'
+  if(detail.automaticProgress?.publishable&&detail.latestSuccessful?.revision===revision.revision&&revision.input.automation?.roundId)return '待确认发布'
   return revision.phase === 'review' ? '待确认发布' : phases[revision.phase] ?? revision.phase
 }
 

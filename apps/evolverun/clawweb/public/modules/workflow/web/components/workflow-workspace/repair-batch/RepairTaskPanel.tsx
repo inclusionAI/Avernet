@@ -43,6 +43,13 @@ export default function RepairTaskPanel({detail,canEdit,onFeedback,onNextRound,o
  useEffect(()=>{if(!manualSelection.current)setSelectedRevision(initialRevision(detail))},[detail.latestSuccessful?.revision,latest.revision])
  useEffect(()=>{try{sessionStorage.setItem(storageKey,JSON.stringify({view,revision:revision.revision,followLatest:!manualSelection.current}))}catch{/* Inspection still works when browser storage is unavailable. */}},[storageKey,view,revision.revision])
  function switchRevision(value:number){manualSelection.current=true;setSelectedRevision(value)}
+ const completeAutomatic=!!detail.automaticProgress&&detail.automaticProgress.completedBatches===detail.automaticProgress.totalBatches
+ const feedbackPhase=['review','blocked','no_change'].includes(latest.phase)
+ const canCancel=!alreadyPublished&&['drafting','review','blocked','failed','no_change'].includes(latest.phase)
+ const taskActions=!alreadyPublished&&<>
+  {feedbackPhase&&<button type="button" className={button} disabled={!canGenerate||automatic&&!completeAutomatic} onClick={onFeedback}>重新优化</button>}
+  {canCancel&&<button type="button" className={button} disabled={!canEdit||busy} onClick={onCancel}>取消本次任务</button>}
+ </>
  const presentation=repairTaskPresentation([...known.current.values()].sort((a,b)=>a.revision-b.revision)[0].input)
  const source=(detail.source??presentation.source)==='automatic'?'自动任务':'手动任务'
  return <div className="min-w-0 space-y-5">
@@ -60,7 +67,7 @@ export default function RepairTaskPanel({detail,canEdit,onFeedback,onNextRound,o
    {latest.phase==='failed'&&<div className="mt-3 space-y-2 border-t border-border pt-3 text-sm">
     <p>{latest.error?.code==='GIT_RESULT_UNAVAILABLE'?'原候选结果尚未读取成功，请核对原结果。':detail.latestSuccessful?'最新生成失败，已有候选保留。':'首次生成失败，尚无候选。'}</p>
     <div className="flex flex-wrap gap-2"><button className={primary} disabled={!canGenerate} onClick={onRetryGeneration}>{latest.error?.code==='GIT_RESULT_UNAVAILABLE'?'重新读取候选':'重新生成 Pack'}</button>
-    {!automatic&&<button className={button} disabled={!canGenerate||latest.error?.code==='GIT_RESULT_UNAVAILABLE'} onClick={onFeedback}>调整范围与要求</button>}
+    {!automatic&&<button className={button} disabled={!canGenerate||latest.error?.code==='GIT_RESULT_UNAVAILABLE'} onClick={onFeedback}>重新优化</button>}
     {detail.latestSuccessful&&<button className={button} onClick={()=>{switchRevision(detail.latestSuccessful!.revision);setView('candidate')}}>返回上一成功候选审核</button>}</div>
    </div>}
    {detail.execution&&<details className="mt-3 text-xs text-muted-foreground"><summary>生成执行记录 · v{latest.revision}{latest.revision!==revision.revision?'（与当前候选分开保留）':''}</summary><p className="mt-2">{executionLabels[detail.execution.status]}</p><JsonDetails title="执行记录" value={detail.execution}/><JsonDetails title="最近尝试错误" value={latest.error}/></details>}
@@ -79,19 +86,18 @@ export default function RepairTaskPanel({detail,canEdit,onFeedback,onNextRound,o
   <section role="tabpanel" id={`${id}-scope-panel`} aria-labelledby={`${id}-scope`} hidden={view!=='scope'} className="space-y-4">
    <RepairTaskScope revision={revision}/>
    {detail.automaticProgress&&<p className="text-sm text-muted-foreground">本轮已纳入 {detail.scopeItemCount??revision.input.items.length} 项 · 核对进度 {detail.automaticProgress.completedBatches}/{detail.automaticProgress.totalBatches}</p>}
-   {!automatic&&canGenerate&&latest.phase!=='failed'&&<button className={button} onClick={onFeedback}>调整范围与要求</button>}
+   <div className="flex flex-wrap gap-2">{taskActions}</div>
   </section>
   <section role="tabpanel" id={`${id}-candidate-panel`} aria-labelledby={`${id}-candidate`} hidden={view!=='candidate'} className="space-y-4">
    <RepairCandidateReview key={revision.revision} detail={detail} revision={revision} active={view==='candidate'}/>
-   <RepairReleaseFlow detail={detail} selectedRevision={revision.revision} canEdit={canEdit} onRefresh={onRefresh}/>
-   {!automatic&&!alreadyPublished&&['review','blocked'].includes(latest.phase)&&<button className={button} disabled={!canGenerate||revision.revision!==detail.latestSuccessful?.revision} onClick={onFeedback}>反馈并生成下一版</button>}
+   <RepairReleaseFlow detail={detail} selectedRevision={revision.revision} canEdit={canEdit} onRefresh={onRefresh} actions={taskActions}/>
   </section>
   <section role="tabpanel" id={`${id}-observe-panel`} aria-labelledby={`${id}-observe`} hidden={view!=='observe'} className="rounded-lg border border-input bg-card p-4">
    {view==='observe'&&(published?<RepairVerification key={deployment.id} detail={detail} deployment={deployment} canEdit={canEdit} onSummary={onObservation}/>:<div className="space-y-3 text-sm"><h3 className="font-semibold">本版本尚未发布</h3><p>{deployment&&['created','dispatching','running','uncertain'].includes(deployment.status)?'发布结果尚未确认，请先核对同一个发布请求。':'此候选尚未发布，暂无对应部署的观察证据。'}</p><button className={button} onClick={()=>setView('candidate')}>查看改动与发布</button></div>)}
   </section>
   <details className="text-xs text-muted-foreground"><summary>历史生成记录与任务操作</summary><ul className="mt-2 space-y-2">{detail.revisions.map(row=><li key={row.revision}>v{row.revision} · {candidateLabel(detail,row)}</li>)}</ul>
    {detail.revisionPage&&detail.revisionPage.totalPages>1&&<div className="mt-3 space-y-2"><p>历史记录第 {detail.revisionPage.page}/{detail.revisionPage.totalPages} 页 · 共 {detail.revisionPage.total} 次</p><button className={button} disabled={busy||detail.revisionPage.page<=1} onClick={()=>onHistoryPageChange?.(detail.revisionPage!.page-1)}>较新记录</button><button className={button} disabled={busy||detail.revisionPage.page>=detail.revisionPage.totalPages} onClick={()=>onHistoryPageChange?.(detail.revisionPage!.page+1)}>较早记录</button></div>}
-   {!alreadyPublished&&(['drafting','review','blocked','failed'].includes(latest.phase)||latest.phase==='no_change'&&detail.automaticProgress?.publishable)&&<button className={`${button} mt-3`} disabled={!canEdit||busy} onClick={onCancel}>取消修复任务</button>}
+
   </details>
  </div>
 }

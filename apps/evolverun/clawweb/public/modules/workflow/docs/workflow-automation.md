@@ -146,3 +146,12 @@ failed includes failed/aborted/cancelled/canceled, matching the existing overvie
 Unknown deployment samples are counted separately. Zero samples produce null,
 not 0%; differences are percentage points, and observations do not establish
 causation. The task summary links the exact two deployment numbers.
+
+
+After the complete automatic batch chain is validated, an authorized user can
+submit human feedback as the next revision of the same task through the existing
+manual revision API. The automatic origin remains a task presentation attribute;
+subsequent human dispatches use the existing manual execution contract. A pending
+human revision of an automatically created task still pauses new automatic tasks.
+An identical, checked no-change feedback result retains the prior candidate and
+its pending ownership. Incomplete automatic batches cannot be bypassed this way.

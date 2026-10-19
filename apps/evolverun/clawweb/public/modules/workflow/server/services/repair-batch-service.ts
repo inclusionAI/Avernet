@@ -6,7 +6,7 @@ import { inboxSummary, inboxPages } from './repair-inbox-projection.js';
 import { prepareProposalEvidence } from './repair-proposal-evidence.js';
 import type { ProposalCoordinator } from './repair-proposal-integration.js';
 import { selectedContentDigest, reviewSelected, assertProposalBaseline } from './repair-selection-review.js';
-import { automaticChain, isAutomaticBatch } from '../contracts/repair-automatic-chain.js';
+import { automaticChain, isAutomaticBatch, retainedFeedbackCandidate } from '../contracts/repair-automatic-chain.js';
 import { RepairAutomationDeniedError } from '../contracts/workflow-automation.js';
 import { repairEvidenceFacts, repairEvidenceFlows, validateAutomationOrigin } from '../contracts/repair-batch.js';
 import { randomUUID } from 'node:crypto';
@@ -341,7 +341,9 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       const items = pages[selectedPage - 1];
       const response: Omit<RepairCandidatesResponse, 'canEdit'> = { schemaVersion: 'workflow-repair/v2', workflowId, inputDigest: versionInputDigest, items,
         ...(activeSnapshot!==undefined?{activeSnapshot,versionScope}:{}),
-        tasks: [...heads.values()].map(r => {
+        tasks: [...heads.values()].map(head => {
+          const retained=retainedFeedbackCandidate(revisions.filter(row=>row.taskId===head.taskId));
+          const r=retained?{...retained,updatedAtMs:head.updatedAtMs}:head;
           const itemCount = isAutomaticBatch(r.input) ? r.input.automation!.totalItems ?? new Set(revisions.filter(v => v.taskId === r.taskId).flatMap(v => v.input.items.map(item => item.itemId))).size : r.input.items.length;
           let phase = r.phase;
           if (isAutomaticBatch(r.input) && phase === 'no_change') {
@@ -446,15 +448,17 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     const response: RepairTaskDetail = { workflowId, taskId, ...repairTaskPresentation(revisions.at(-1)!.input), latestAttempt: revisions[0], latestSuccessful: revisions.find(r => r.draft !== null && (r.phase !== 'no_change' || isAutomaticBatch(r.input))) ?? null,
       revisions, capabilities: this.capabilities(), ...(execution ? { execution } : {}) };
     response.scopeItemCount = isAutomaticBatch(revisions[0].input) ? revisions[0].input.automation!.totalItems ?? new Set(revisions.flatMap(r => r.input.items.map(item => item.itemId))).size : revisions[0].input.items.length;
-    if (isAutomaticBatch(revisions[0].input)) response.automaticProgress = {
-      completedBatches: new Set(revisions.filter(r => ['review', 'no_change', 'publishing', 'published'].includes(r.phase)
+    const progressRevision=isAutomaticBatch(revisions[0].input)?revisions[0]:retainedFeedbackCandidate(revisions);
+    const progressRows=progressRevision?revisions.filter(row=>row.revision<=progressRevision.revision):[];
+    if (progressRevision&&isAutomaticBatch(progressRevision.input)) response.automaticProgress = {
+      completedBatches: new Set(progressRows.filter(r => ['review', 'no_change', 'publishing', 'published'].includes(r.phase)
         && (r.checks?.static as { status?: string })?.status === 'passed').map(r => r.input.automation!.batchIndex)).size,
-      totalBatches: revisions[0].input.automation!.batchCount!,
-      changedItems: new Set(revisions.filter(r => ['review', 'no_change', 'publishing', 'published'].includes(r.phase)).flatMap(r => Array.isArray(r.draft?.itemResults) ? r.draft.itemResults.filter(outcome => outcome.status === 'changed').map(outcome => outcome.itemId) : [])).size,
+      totalBatches: progressRevision.input.automation!.batchCount!,
+      changedItems: new Set(progressRows.filter(r => ['review', 'no_change', 'publishing', 'published'].includes(r.phase)).flatMap(r => Array.isArray(r.draft?.itemResults) ? r.draft.itemResults.filter(outcome => outcome.status === 'changed').map(outcome => outcome.itemId) : [])).size,
       publishable: false,
     };
     if (response.automaticProgress) {
-      try { automaticChain(revisions, revisions[0], true); response.automaticProgress.publishable = response.automaticProgress.changedItems! > 0; }
+      try { automaticChain(revisions, progressRevision!, true); response.automaticProgress.publishable = response.automaticProgress.changedItems! > 0; }
       catch (error) { if (!(error instanceof RepairBatchError)) throw error; }
     }
     return response;

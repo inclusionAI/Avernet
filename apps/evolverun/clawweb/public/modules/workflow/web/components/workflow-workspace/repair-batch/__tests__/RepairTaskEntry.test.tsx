@@ -16,7 +16,7 @@ it('makes pending tasks available at the page entry and keeps history collapsed'
   expect(within(current).getByText('调整搜索节点超时')).toBeVisible()
   expect(within(dialog).getByText('上一轮脚本修复')).not.toBeVisible()
   expect(within(current).getByText('a-uuid')).not.toBeVisible()
-  await userEvent.click(within(current).getByRole('button', { name: '查看并审阅' }))
+  await userEvent.click(within(current).getByRole('button', { name: '查看任务' }))
   expect(open).toHaveBeenCalledExactlyOnceWith('a-uuid')
 })
 
@@ -67,4 +67,17 @@ it('shows the real goal as the heading and separates origin from review status',
  const dialog=screen.getByRole('dialog',{name:'优化任务'});
  expect(within(dialog).getByRole('heading',{name:'修复搜索超时'})).toBeVisible();
  expect(within(dialog).getByText('手动任务')).toBeVisible();
+});
+
+it('shows every review task directly without opening the task history', async () => {
+ const open=vi.fn();render(<RepairTaskEntry loading={false} onOpen={open} tasks={[
+ {taskId:'auto',title:'自动报告优化',source:'automatic',phase:'review',revision:1,itemCount:2,updatedAtMs:3},
+ {taskId:'manual',title:'手动搜索优化',source:'manual',phase:'review',revision:2,itemCount:1,updatedAtMs:2},
+ {taskId:'old',title:'已发布优化',source:'automatic',phase:'published',revision:1,itemCount:1,updatedAtMs:1},
+ ]}/>);
+ expect(screen.getByRole('heading',{name:'自动报告优化'})).toBeVisible();
+ expect(screen.getByRole('heading',{name:'手动搜索优化'})).toBeVisible();
+ expect(screen.queryByRole('heading',{name:'已发布优化'})).not.toBeInTheDocument();
+ await userEvent.click(screen.getByRole('article',{name:'优化任务 manual'}).querySelector('button')!);
+ expect(open).toHaveBeenCalledWith('manual');
 });

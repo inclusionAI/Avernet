@@ -1,5 +1,5 @@
 import {historicalReference} from '../contracts/repair-version-scope.js';
-import { automaticAdvance, changedChainItems, isAutomaticBatch } from '../contracts/repair-automatic-chain.js';
+import { automaticAdvance, changedChainItems, isAutomaticBatch, retainedFeedbackCandidate } from '../contracts/repair-automatic-chain.js';
 import { repairEvidenceFacts, repairEvidenceFlows } from '../contracts/repair-batch.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import {
@@ -177,7 +177,7 @@ export class RepairBatchRepository {
   getRevision(workflowId: string, taskId: string, revision: number): Promise<RepairRevision | null> { return this.readRevision(this.db, workflowId, taskId, revision); }
   private async latest(tx: IDatabase, workflowId: string, taskId: string, successOnly = false): Promise<RepairRevision | null> {
     const row = (await tx.query<Row>(`SELECT * FROM workflow_repair_revisions WHERE workflow_id = ? AND task_id = ?
-      ${successOnly ? "AND draft_json IS NOT NULL AND phase <> 'no_change'" : ''} ORDER BY revision DESC LIMIT 1`, [workflowId, taskId]))[0];
+      ${successOnly ? "AND draft_json IS NOT NULL AND (phase <> 'no_change' OR JSON_EXTRACT(input_json, '$.automation.roundId') IS NOT NULL)" : ''} ORDER BY revision DESC LIMIT 1`, [workflowId, taskId]))[0];
     return row ? revisionFromRow(row) : null;
   }
   latestSuccessfulRevision(workflowId: string, taskId: string): Promise<RepairRevision | null> { return this.latest(this.db, workflowId, taskId, true); }
@@ -220,7 +220,7 @@ export class RepairBatchRepository {
     automaticAdvance(await new RepairBatchRepository(tx).listRevisions(workflowId, input.taskId), input);
     if ((await tx.query('SELECT 1 FROM workflow_repair_revisions WHERE task_id = ? AND phase = ? LIMIT 1', [input.taskId, 'published'])).length) conflict('STATE_CONFLICT', '已部署任务不能再生成候选；请依据效果结论创建新基线任务');
     if (request.expectedAttemptRevision !== (previous?.revision ?? 0) || input.revision !== (previous?.revision ?? 0) + 1
-      || (previous && !['review', 'blocked', 'failed', ...(isAutomaticBatch(input) ? ['no_change'] : [])].includes(previous.phase))) conflict('STATE_CONFLICT', 'Revision is not editable or latest attempt changed');
+      || (previous && !['review', 'blocked', 'failed', 'no_change'].includes(previous.phase))) conflict('STATE_CONFLICT', 'Revision is not editable or latest attempt changed');
     if (previous && canonicalRepairJson(previous.input.baseline) !== canonicalRepairJson(input.baseline)) conflict('CONTENT_MISMATCH', 'A task cannot change its frozen baseline');
     const successful = isAutomaticBatch(input) ? (await new RepairBatchRepository(tx).listRevisions(workflowId, input.taskId)).find(r => r.draft !== null && r.phase !== 'failed') : await this.latest(tx, workflowId, input.taskId, true);
     if (input.parentCandidateCommit !== (successful?.draft?.candidateCommit ?? null)) conflict('CONTENT_MISMATCH', 'Parent must be the task last successful candidate');
@@ -280,6 +280,11 @@ export class RepairBatchRepository {
       input.workflowId, input.taskId, input.revision, input.expectedStateVersion, current.phase]);
     if (result.affectedRows !== 1) conflict('STATE_CONFLICT', 'Draft result was already settled');
     let releaseUnchanged = input.phase === 'no_change' && !isAutomaticBatch(current.input);
+    if (releaseUnchanged) {
+      const revisions=await new RepairBatchRepository(tx).listRevisions(input.workflowId,input.taskId);
+      const retained=retainedFeedbackCandidate(revisions);
+      if(retained&&(retained.phase==='review'||changedChainItems(revisions,retained,true).length>0))releaseUnchanged=false;
+    }
     const origin = current.input.automation;
     if (input.phase === 'no_change' && isAutomaticBatch(current.input) && origin!.batchIndex === origin!.batchCount! - 1) {
       const revisions = await new RepairBatchRepository(tx).listRevisions(input.workflowId, input.taskId);
@@ -309,10 +314,9 @@ export class RepairBatchRepository {
   async cancelTask(tx: IDatabase, input: { workflowId: string; taskId: string; expectedAttemptRevision: number; expectedStateVersion: number }): Promise<void> {
     await this.lockWorkflow(tx, input.workflowId);
     const current = await this.latest(tx, input.workflowId, input.taskId);
-    const awaitingAutomaticReview = current?.phase === 'no_change' && isAutomaticBatch(current.input)
-      && changedChainItems(await new RepairBatchRepository(tx).listRevisions(input.workflowId, input.taskId), current, true).length > 0;
     if (!current || current.revision !== input.expectedAttemptRevision || current.stateVersion !== input.expectedStateVersion
-      || !(['drafting', 'review', 'blocked', 'failed'].includes(current.phase) || awaitingAutomaticReview)) conflict('STATE_CONFLICT', 'Task cannot be cancelled');
+      || !['drafting', 'review', 'blocked', 'failed', 'no_change'].includes(current.phase)) conflict('STATE_CONFLICT', 'Task cannot be cancelled');
+    if ((await tx.query('SELECT 1 FROM workflow_repair_revisions WHERE task_id = ? AND phase = ? LIMIT 1', [input.taskId, 'published'])).length) conflict('STATE_CONFLICT', '已发布任务不能取消');
     const result = await tx.exec(`UPDATE workflow_repair_revisions SET phase = 'cancelled', state_version = state_version + 1, updated_at_ms = ?
       WHERE workflow_id = ? AND task_id = ? AND revision = ? AND state_version = ?`,
     [Date.now(), input.workflowId, input.taskId, current.revision, current.stateVersion]);
