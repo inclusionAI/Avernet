@@ -216,6 +216,10 @@ fn is_private_visibility(value: &str) -> bool {
 /// 部门范围名单条目的匹配标签。旧格式为纯字符串条目，trim 后原样保留；新格式为
 /// {deptNo, deptName} 对象（兼容 dept_no/dept_name/name 形态）：按部门名称口径取名称，
 /// 名称缺失时按序回退部门编码。
+///
+/// 无法产出部门的条目（空白字符串、字段拼写不符或无关的对象、其他形状）会被
+/// 丢弃，并以 WARN 记录所在 key、序号与原条目——静默把名单读空曾将范围内的
+/// 免审批申请人送入审批流（无任何日志可循），因此每次丢弃必须留痕。
 fn friend_ext_scope_entry_match_label(item: &serde_json::Value) -> Option<String> {
     if let Some(value) = item.as_str() {
         let trimmed = value.trim();
@@ -237,10 +241,20 @@ fn bot_friend_ext_scope_friend_deps(
         .get(key)
         .and_then(|value| value.as_array())
         .map(|items| {
-            items
-                .iter()
-                .filter_map(friend_ext_scope_entry_match_label)
-                .collect::<HashSet<String>>()
+            let mut deps: HashSet<String> = HashSet::new();
+            for (index, item) in items.iter().enumerate() {
+                if let Some(label) = friend_ext_scope_entry_match_label(item) {
+                    deps.insert(label);
+                } else {
+                    warn!(
+                        friend_ext_key = key,
+                        entry_index = index,
+                        entry_kind = %item,
+                        "friend_ext scope entry yielded no department: expected a department string or a {{deptNo, deptName}} object",
+                    );
+                }
+            }
+            deps
         })
         .unwrap_or_default()
 }
@@ -4254,5 +4268,113 @@ mod tests {
             .await
             .expect("revoke must succeed despite writeback failure");
         assert!(!eg.has_friend_edge("x:f1", "x:f2", "dev").await);
+    }
+
+    // --- friend_ext scope department-reference parsing ------------------------
+    //
+    // Admin writes may persist department references as
+    // `{"deptNo": "L3480", "deptName": "蚂蚁集团-信贷事业群"}` objects (the
+    // shape found in production bcs_bots.friend_ext) while the parser only
+    // accepted plain strings — silently reading the exemption allowlist as
+    // empty and routing approval-exempt applicants into the approval flow.
+
+    #[test]
+    fn friend_scope_deps_accepts_department_reference_objects() {
+        let friend_ext: serde_json::Map<String, serde_json::Value> = serde_json::from_value(
+            serde_json::json!({
+                "no_check_scope_friend_deps": [
+                    {"deptNo": "L3480", "deptName": "蚂蚁集团-信贷事业群"},
+                    "蚂蚁集团-大安全-大安全技术部-AI基础设施",
+                    {"deptNo": ""},
+                    {}
+                ],
+            }),
+        )
+        .expect("friend_ext object");
+        let deps = bot_friend_ext_no_check_scope_friend_deps(&friend_ext);
+
+        // Object entries resolve by the department-NAME label (deptNo is the
+        // fallback only when the name is absent); a blank/entry-less object
+        // yields nothing. Plain strings ride along untouched.
+        let expected: HashSet<String> = [
+            "蚂蚁集团-信贷事业群".to_string(),
+            "蚂蚁集团-大安全-大安全技术部-AI基础设施".to_string(),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(deps, expected);
+    }
+
+    #[test]
+    fn friend_scope_deps_view_scope_accepts_objects_and_ignores_garbage() {
+        // Production rows persist the view scopes in the same {deptNo,
+        // deptName} object shape as the exemption list — the shared parser
+        // must read them identically (this key is human→protected-bot
+        // visibility scoping, the agent twin covers bot callers).
+        let friend_ext: serde_json::Map<String, serde_json::Value> = serde_json::from_value(
+            serde_json::json!({
+                "view_scope_user_friend_deps": [
+                    {"deptNo": "F4858"},
+                    "  ",
+                    42,
+                    {"deptName": "蚂蚁集团-信贷事业群"},
+                ],
+                "view_scope_agent_friend_deps": [],
+            }),
+        )
+        .expect("friend_ext object");
+        let deps = bot_friend_ext_view_scope_user_friend_deps(&friend_ext);
+        let expected: HashSet<String> = [
+            "F4858".to_string(),
+            "蚂蚁集团-信贷事业群".to_string(),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(deps, expected);
+        // An explicitly empty list stays empty — "no scope restriction" is a
+        // legitimate configuration and must not warn or misread.
+        assert!(bot_friend_ext_view_scope_agent_friend_deps(&friend_ext).is_empty());
+    }
+
+    #[tokio::test]
+    async fn dept_free_auto_approves_from_object_department_reference() {
+        // Mirrors the production incident shape: friend_ext persisted with
+        // {deptNo, deptName} objects must not read as an empty allowlist —
+        // an in-scope human applicant is auto-approved, not routed to approval.
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "human_1", "protected", "protected", "APPROVAL", "online", Some("85020"))
+            .await;
+        let friend_ext: serde_json::Map<String, serde_json::Value> = serde_json::from_value(
+            serde_json::json!({"no_check_scope_friend_deps": [
+                {"deptNo": "L3480", "deptName": "蚂蚁集团-信贷事业群"},
+            ]}),
+        )
+        .expect("friend_ext object");
+        // The directory returns a hierarchical path under the configured
+        // deptName — either form has to hit the allowlist.
+        seed_bot_with_friend_ext(
+            &db,
+            "x:dept_object",
+            "protected",
+            "protected",
+            "DEPT_FREE",
+            "online",
+            Some("85020"),
+            friend_ext,
+        )
+        .await;
+        let departments = Arc::new(StaticUserDirectoryPlugin {
+            departments: Arc::new(std::collections::HashMap::from([(
+                "1".to_string(),
+                "蚂蚁集团-信贷事业群-信贷技术".to_string(),
+            )])),
+        });
+        let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
+        let res = svc
+            .create_connect("human_1", "x:dept_object", None, None)
+            .await
+            .expect("deptNo/deptName object allowlist must auto-approve");
+        assert_eq!(res.status, ConnectStatus::Approved);
+        assert!(res.auto_accepted);
     }
 }
