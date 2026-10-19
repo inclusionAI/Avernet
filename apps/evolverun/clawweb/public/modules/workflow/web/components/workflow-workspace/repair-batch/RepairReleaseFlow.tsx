@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { RepairTaskDetail } from '../../../../server/contracts/repair-workbench'
 import type { RepairConfirmRequest, RepairReleaseTarget } from '../../../../server/contracts/repair-release'
 import { repairBatches } from '../../../api/repair-batches'
-import { button, primary } from './repair-view'
+import { button, primary, RepairDialog } from './repair-view'
 import { repairReleaseError } from '../../../api/repair-release-error'
 
 export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, onRefresh }: {
@@ -23,7 +23,6 @@ export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, o
   const request = useRef<RepairConfirmRequest | null>(null)
   const scope = `${detail.taskId}:${selectedRevision}`
   const scopeRef = useRef(scope); scopeRef.current = scope
-  const panel = useRef<HTMLElement>(null)
   const revision = detail.latestSuccessful
   const automatic = !!detail.latestAttempt.input?.automation?.roundId
   const automaticReady = automatic && detail.automaticProgress?.publishable === true && detail.latestAttempt.revision === selectedRevision
@@ -45,14 +44,16 @@ export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, o
   async function open() {
     const current = scope
     setDialog(true); setTarget(null); setAck(false); setError(''); setLoading(true)
-    panel.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
     try {
       const response = await repairBatches.deploymentTargets(detail.taskId)
       const scopes = response.targets.filter(row => row.scope === 'workflow')
       if (scopeRef.current !== current) return
-      if (scopes.length !== 1) throw new Error('没有唯一且已授权的工作流发布范围，请检查权限和宿主配置')
+      if (scopes.length !== 1) {
+        setError(scopes.length === 0 ? '没有可发布的工作流范围，请核对工作流权限和发布配置；尚未提交发布。' : '发布范围配置不明确，请管理员核对；尚未提交发布。')
+        return
+      }
       setTarget(scopes[0])
-    } catch (reason) { if (scopeRef.current === current) setError(repairReleaseError(reason)) }
+    } catch (reason) { if (scopeRef.current === current) setError(repairReleaseError(reason, 'prepare')) }
     finally { if (scopeRef.current === current) setLoading(false) }
   }
   async function publish() {
@@ -84,32 +85,35 @@ export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, o
     <p className="mt-2">{selected.phase === 'failed' ? '查看本版本错误和最近任务状态；历史失败版本不会因后续成功而变为成功。' : '查看本版本范围与逐项结果；此入口不执行生成或发布。'}</p>
     {!!detail.release?.deployments.some(row => row.status === 'succeeded') && <p className="mt-2">已有生效版本的发布与观察记录保留，切换对应候选版本查看。</p>}
   </section>
-  return <section ref={panel} aria-label="审阅部署与效果验证" className="scroll-mt-6 rounded-xl border border-input bg-card p-5">
+  return <section aria-label="审阅部署与效果验证" className="rounded-xl border border-input bg-card p-5">
     <h3 className="text-base font-semibold">{title}</h3>
     <p className="mt-2 text-sm leading-6 text-muted-foreground">{succeeded ? '在效果观察页查看对应版本的样本与判定。'
       : pending ? '先核对同一个发布请求，结果未明确前不重复发布。'
-      : '审阅候选后，可选择试跑或明确确认发布。'}</p>
+      : '查看上方改动后，点击“审阅并发布”完成确认；无需另找审阅按钮。试跑可选。'}</p>
     {automatic && !automaticReady && !succeeded && <p className="mt-3 text-sm text-muted-foreground">本轮尚未完整校验，暂不可发布；保留各项进度与结果。</p>}
     {!isCurrent && !succeeded && <p className="mt-3 text-sm text-muted-foreground">当前查看的是历史候选，请切回最新可用候选。</p>}
     {!detail.capabilities.publication && <p role="alert">发布能力未启用，请检查宿主配置。</p>}
     {deployment?.error && <p className="mt-3 text-sm text-destructive">{deployment.error}</p>}
-    {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
+    {error && !dialog && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
     {selected?.draft?.candidateCommit && <RepairTrialPanel taskId={detail.taskId} revision={selected} enabled={!!canEdit && !!isCurrent && selected.phase === 'review'} open={trialOpen} onClose={() => setTrialOpen(false)} onTrials={(rows, configured) => { setTrials(rows); setTrialConfigured(configured) }} />}
-    {dialog && <div role="region" aria-label="确认发布候选" className="mt-4 space-y-3 border-t border-input pt-4">
-      <h4 className="font-semibold">发布候选 v{selectedRevision}</h4>
+    {dialog && <RepairDialog title={`审阅并发布候选 v${selectedRevision}`} busy={busy} onClose={() => setDialog(false)} footer={<div className="flex flex-wrap justify-end gap-3">
+      <button className={button} disabled={busy} onClick={() => setDialog(false)}>返回查看改动</button>
+      <button className={primary} disabled={busy || loading || !canPublish || !ack || !target} onClick={() => void publish()}>{busy ? '正在提交发布…' : '确认审阅并发布'}</button>
+    </div>}><div className="space-y-3">
       {!trials.some(row => row.mode !== 'saved' && row.revision === selectedRevision && row.candidateCommit === selected?.draft?.candidateCommit && row.status === 'succeeded') && <p className="text-sm text-muted-foreground">此候选尚无成功试跑记录。可以明确跳过试跑，直接确认发布。</p>}
       {loading ? <p role="status">正在核对工作流发布范围…</p> : target && <p>{target.label}</p>}
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      {!loading && !target && <button className={button} onClick={() => void open()}>重新读取发布信息</button>}
       <p className="text-sm text-muted-foreground">影响范围包括本次 Diff 中的工作流、脚本和资源。业务效果及未覆盖检查将在生效后观察；无有效验证规则的问题不会自动宣称已修复。</p>
       <label className="flex items-start gap-2 text-sm leading-6"><input type="checkbox" checked={ack} onChange={event => setAck(event.target.checked)} />我已审阅完整 Diff、检查报告和影响范围，接受未覆盖风险并确认发布此版本。</label>
-    </div>}
+    </div></RepairDialog>}
     {!succeeded && <footer aria-label="当前修复步骤与下一步" className="mt-4 flex flex-wrap items-center justify-end gap-3 border-t border-input pt-4">
       <div className="flex items-center gap-3">
         {trialConfigured && canEdit && isCurrent && selected?.phase === 'review' && !pending && !succeeded && <button className={button} disabled={busy} onClick={() => setTrialOpen(true)}>先试跑</button>}
-        {dialog && <button className={button} disabled={busy} onClick={() => setDialog(false)}>返回审阅</button>}
         {pending && deployment.target.scope === 'workflow' && <button className={button} disabled={busy || !canEdit} onClick={() => void resume()}>继续原发布</button>}
-        {!succeeded && <button className={primary} disabled={trialOpen || busy || loading || (pending ? !canEdit : !canPublish || dialog && (!ack || !target))}
-          onClick={() => { if (pending) void reconcile(); else if (dialog) void publish(); else void open() }}>
-          {busy ? '提交中…' : pending ? '核对发布状态' : dialog ? '确认发布' : '发布此版本'}</button>}
+        {!succeeded && <button className={primary} disabled={trialOpen || dialog || busy || (pending ? !canEdit : !canPublish)}
+          onClick={() => { if (pending) void reconcile(); else void open() }}>
+          {busy ? '提交中…' : pending ? '核对发布状态' : '审阅并发布'}</button>}
       </div>
     </footer>}
   </section>

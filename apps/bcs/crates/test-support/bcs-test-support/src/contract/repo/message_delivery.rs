@@ -410,6 +410,7 @@ async fn run_reply_contract<T: MessageDeliveryRepoPort + MessageRepoPort>(repo: 
     assert_eq!(accepted.state.status, Status::Queued);
     assert_eq!(repo.get_delivery(&accepted.delivery_id).await?.unwrap().semantic_projection_json, rejected.targets[2].semantic_projection_json);
     assert!(repo.admit(rejected).await?.duplicate);
+    state_machine_result_admission(repo).await?;
     Ok(())
 }
 
@@ -427,4 +428,45 @@ pub async fn direct_a2a_session_registry_contract_tests(repo: &dyn bcs_service_a
         let (a,b) = tokio::join!(repo.ensure_direct_session(id), repo.ensure_direct_session(id));
         assert_eq!(a.unwrap(), b.unwrap());
         repo.validate_session_registry().await.unwrap();
+}
+
+async fn state_machine_result_admission<T: MessageDeliveryRepoPort + MessageRepoPort>(repo: &T)
+    -> Result<(), Box<dyn std::error::Error>> {
+    let mut result = command("state-machine-result:contract-run", &[("result-manager", DeliveryType::Send)]);
+    result.message.sender_id = "result-worker".into();
+    result.message.sender_type = SenderType::Bot;
+    result.message.run_id = "contract-run".into();
+    result.message.content = serde_json::json!("最终结果");
+    result.message.visibility_domain = bcs_domain::MessageVisibilityDomain::StateMachine;
+    result.message.audience = Some(bcs_domain::MessageAudience::Public);
+    let admitted = repo.admit(result.clone()).await?;
+    assert!(!admitted.duplicate);
+    assert_eq!(admitted.deliveries.len(), 1);
+    assert_eq!(admitted.deliveries[0].state.status, Status::Queued);
+    assert_eq!(admitted.message.content, result.message.content);
+    assert_eq!(admitted.message.run_id, "contract-run");
+    assert_eq!(admitted.message.visibility_domain, Some(result.message.visibility_domain));
+    assert_eq!(admitted.message.audience, result.message.audience);
+    let duplicate = repo.admit(result.clone()).await?;
+    assert!(duplicate.duplicate);
+    assert_eq!(duplicate.message.session_seq, admitted.message.session_seq);
+    assert_eq!(duplicate.deliveries[0].delivery_id, admitted.deliveries[0].delivery_id);
+    let mut changed = result.clone();
+    changed.message.content = serde_json::json!("冲突结果");
+    assert_eq!(repo.admit(changed).await?.message.content, result.message.content,
+        "applications must compare the original fact before acknowledging duplicates");
+    for field in ["flow", "domain", "run", "sender", "type"] {
+        let mut invalid = result.clone();
+        invalid.message_id = format!("invalid-result-{field}");
+        invalid.message.client_msg_id = Some(invalid.message_id.clone());
+        match field {
+            "flow" => invalid.flow_kind = DeliveryFlowKind::System,
+            "domain" => invalid.message.visibility_domain = bcs_domain::MessageVisibilityDomain::Chat,
+            "run" => invalid.message.run_id.clear(),
+            "sender" => invalid.message.sender_type = SenderType::Human,
+            _ => invalid.message.message_type = "unrelated".into(),
+        }
+        assert!(repo.admit(invalid).await.is_err(), "must not admit arbitrary string canonical bodies: {field}");
+    }
+    Ok(())
 }

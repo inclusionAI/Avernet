@@ -1,3 +1,5 @@
+import { workflowSnapshotKey, type WorkflowSnapshotRef } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot'
+import { itemSnapshotKey } from '../../../../server/contracts/repair-version-scope'
 import { useEffect, useRef, useState } from 'react'
 import { repairBatches } from '../../../api/repair-batches'
 import { repairActionFailure, type RepairRecoveryAction } from '../../../api/repair-action-error'
@@ -68,7 +70,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     let current = true
     setFeedbackCandidatesLoading(true)
     setFeedbackCandidatesError('')
-    repairBatches.candidates(workflowId, { state: 'pending', page: feedbackPage, pageSize: 20, includeHistorical })
+    repairBatches.candidates(workflowId, { ...(detail?.latestAttempt.input.items[0]?.context?.targetSnapshot ? { versionScope: 'all' as const } : {}), state: 'pending', page: feedbackPage, pageSize: 20, includeHistorical: detail?.latestAttempt.input.items[0]?.context?.targetSnapshot ? true : includeHistorical })
       .then(result => { if (current) setFeedbackCandidates(result) })
       .catch(reason => { if (current) setFeedbackCandidatesError(repairReadError(reason)) })
       .finally(() => { if (current) setFeedbackCandidatesLoading(false) })
@@ -161,9 +163,12 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     if (!detail || !feedbackCandidates || !feedbackItemIds.length || feedbackCandidatesLoading || feedbackCandidatesError || taskError || busy || effectiveRecoveryAction || !canEdit || !feedbackCandidates.canEdit
       || !detail.capabilities.generation || !['failed', 'review', 'blocked'].includes(detail.latestAttempt.phase)
       || editorRevision.current !== `${taskId}:${detail.latestAttempt.revision}`) return
+    const target = detail.latestAttempt.input.items[0]?.context?.targetSnapshot as WorkflowSnapshotRef | undefined
+    const targetKey = target ? workflowSnapshotKey(target) : undefined
+    const items = [...detail.latestAttempt.input.items, ...feedbackCandidates.items]
     const revisionInput = {
       workflowId, inputDigest: feedbackCandidates.inputDigest, includeHistorical: feedbackCandidates.includeHistorical,
-      itemIds: feedbackItemIds, instructions,
+      itemIds: feedbackItemIds, instructions, ...(targetKey ? { targetSnapshotKey: targetKey, historicalItemIds: feedbackItemIds.filter(id => { const item = items.find(value => value.itemId === id); return item && itemSnapshotKey(item) !== targetKey }) } : {}),
       expectedAttemptRevision: detail.latestAttempt.revision,
       parentCandidateCommit: typeof detail.latestSuccessful?.draft?.candidateCommit === 'string' ? detail.latestSuccessful.draft.candidateCommit : null,
       feedback: feedback.trim(),

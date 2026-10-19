@@ -98,21 +98,24 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
   async function planDraft(cycle: AutomationJob) {
     const { actorId, policy } = await authority(cycle.workflowId, true);
     if (!cycle.data.completedDue || policy.scopeVersion !== 'all-qualified/v1' && cycle.data.draftDue === cycle.data.completedDue) return cycle;
-    if (policy.scopeVersion === 'all-qualified/v1' && await repo.activeDraft(cycle.workflowId)) return cycle;
     const baseline = await input.ports.baseline(cycle.workflowId);
+    if (policy.scopeVersion === 'all-qualified/v1') {
+      const occupied=await repo.activeDraft(cycle.workflowId,undefined,baseline.activeDeployNumber??undefined);
+      if(occupied)return repo.patch(cycle,{reason:'DRAFT_IN_PROGRESS',data:{...cycle.data,blockingTaskId:occupied.data.realTaskId??null}},now());
+    }
     const selected = await selectAutomaticScope(input.workbench, issues, cycle.workflowId, baseline, policy.scopeVersion === 'all-qualified/v1'
       ? { db: input.db, minimumImpact: policy.minimumImpact ?? 'medium', evidenceCutoffMs: now() } : undefined);
     if (selected?.batches) {
       if (!selected.items.length && cycle.data.round) return cycle;
       const deferred = Object.values(selected.deferred ?? {}).reduce<Record<string, number>>((out, reason) => { out[reason] = (out[reason] ?? 0) + 1; return out; }, {});
-      const round = await repo.ensure(cycle.workflowId, 'auto_draft', digestRepairJson([selected.fingerprint, policy.version]), { actorId, fingerprint: selected.fingerprint, baseline,
+      const round = await repo.ensure(cycle.workflowId, 'auto_draft', digestRepairJson([selected.fingerprint, policy.version]), { actorId, fingerprint: selected.fingerprint, baseline,...(selected.targetSnapshotKey?{targetSnapshotKey:selected.targetSnapshotKey}:{}),
         total: selected.items.length, batches: selected.batches, revisions: selected.revisions, deferredItems: selected.deferred,
         completedBatches: 0, window: selected.window, evidenceCutoffMs: now() }, now());
       if (!round.data.request && selected.batches.length) {
         const claimed = await repo.claim(round.id, now());
         if (claimed) {
           const request: RepairSelectionRequest = { workflowId: cycle.workflowId, itemIds: selected.batches[0], inputDigest: selected.inputDigest,
-            includeHistorical: true, instructions: '', requestId: `${round.id}:0`, automation: { kind: 'daily', intentId: round.id, roundId: round.id,
+            includeHistorical: true, instructions: '', ...(selected.targetSnapshotKey?{targetSnapshotKey:selected.targetSnapshotKey,historicalItemIds:[]}:{}),requestId: `${round.id}:0`, automation: { kind: 'daily', intentId: round.id, roundId: round.id,
               policyVersion: policy.version, evidenceCutoffMs: round.data.evidenceCutoffMs, batchIndex: 0, batchCount: selected.batches.length, totalItems: selected.items.length } };
           await repo.patch(claimed, { data: { ...claimed.data, request } }, now(), true);
         }
@@ -122,13 +125,13 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
         completedBatches: round.data.completedBatches ?? 0, deferred, ...selected.window, evidenceCutoffMs: round.data.evidenceCutoffMs } } }, now());
     }
     if (!selected) return cycle;
-    const intent = await repo.ensure(cycle.workflowId, 'auto_draft', selected.fingerprint, { actorId, fingerprint: selected.fingerprint }, now());
+    const intent = await repo.ensure(cycle.workflowId, 'auto_draft', selected.fingerprint, { actorId, fingerprint: selected.fingerprint, baseline, ...(selected.targetSnapshotKey ? { targetSnapshotKey: selected.targetSnapshotKey } : {}) }, now());
     const existing = intent.data.request;
     if (!existing) {
       const claimed = await repo.claim(intent.id, now());
       if (claimed) {
         const request: RepairSelectionRequest = { workflowId: cycle.workflowId, itemIds: selected.items.map(item => item.itemId), inputDigest: selected.inputDigest,
-          instructions: '', requestId: intent.id, automation: { kind: 'daily', intentId: intent.id, policyVersion: policy.version, evidenceCutoffMs: now() } };
+          instructions: '', ...(selected.targetSnapshotKey?{targetSnapshotKey:selected.targetSnapshotKey,historicalItemIds:[]}:{}),requestId: intent.id, automation: { kind: 'daily', intentId: intent.id, policyVersion: policy.version, evidenceCutoffMs: now() } };
         await repo.patch(claimed, { data: { ...claimed.data, request } }, now(), true);
       }
     }
@@ -141,6 +144,12 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
     const existing = await input.workbench.request(job.workflowId, request.requestId);
     let taskId = existing?.taskId ?? job.data.realTaskId;
     if (!taskId) {
+      if (['dispatching', 'uncertain'].includes(record.status) && record.attempts > 0) {
+        await repo.patch(job, { status: 'uncertain', reason: 'DRAFT_REQUEST_REQUIRES_LOOKUP', nextAtMs: now() + 30000 }, now(), true); return;
+      }
+      if (job.data.baseline && digestRepairJson(await input.ports.baseline(job.workflowId)) !== digestRepairJson(job.data.baseline)) {
+        await repo.patch(job, { status: 'blocked', reason: 'BASELINE_REASSESSMENT_REQUIRED' }, now(), true); return;
+      }
       let access;
       try { access = await authority(job.workflowId, true); }
       catch (error) { if (!(error instanceof RepairAutomationDeniedError)) throw error;

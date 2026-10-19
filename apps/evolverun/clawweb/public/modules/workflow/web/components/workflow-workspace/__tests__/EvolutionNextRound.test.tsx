@@ -55,6 +55,23 @@ it('disables the new round entry for a read-only viewer', async () => {
   mount({ readOnly: true })
   expect(await screen.findByRole('button', { name: '开始下一轮优化' })).toBeDisabled()
 })
+it('keeps the chosen suggestions after a definite baseline read failure without asking to check a nonexistent task', async () => {
+  mount()
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole('button', { name: '开始下一轮优化' }))
+  const checkbox = await screen.findByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' })
+  await user.click(checkbox)
+  await user.type(screen.getByRole('textbox', { name: '本次修复要求' }), '保留业务约束')
+  repairApi.create.mockRejectedValueOnce({ status: 503, body: JSON.stringify({ code: 'CAPABILITY_UNAVAILABLE',
+    reasonCode: 'BASELINE_READ_FAILED', stage: 'baseline', outcome: 'not_created' }) })
+  await user.click(screen.getByRole('button', { name: '生成 Pack 草稿' }))
+  expect(await screen.findByText(/草稿未创建/)).toBeVisible()
+  expect(checkbox).toBeChecked()
+  expect(screen.getByRole('textbox', { name: '本次修复要求' })).toHaveValue('保留业务约束')
+  expect(screen.queryByRole('button', { name: '核对任务状态' })).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '生成 Pack 草稿' })).toBeEnabled()
+  expect(repairApi.create).toHaveBeenCalledTimes(1)
+})
 it('keeps the actual baseline rejection and reviewed selection without refreshing or resending', async () => {
   mount()
   const user = userEvent.setup()
@@ -109,7 +126,7 @@ it('blocks selection and submission when edit permission is revoked after enteri
   expect(screen.getByRole('button', { name: '生成 Pack 草稿' })).toBeDisabled()
   expect(repairApi.create).not.toHaveBeenCalled()
 })
-it('keeps the affected-item reason visible after the automatic refresh rechecks the remaining valid selection', async () => {
+it('keeps both chosen goals through a source refresh without forcing reselection', async () => {
   const a = repairItem('a', '目标 A'), b = repairItem('b', '目标 B'), revised = repairItem('a', '目标 A 已变化')
   mount({ items: [a, b] })
   let changed = false
@@ -123,8 +140,9 @@ it('keeps the affected-item reason visible after the automatic refresh rechecks 
   await userEvent.type(screen.getByRole('textbox', { name: '本次修复要求' }), '保留要求')
   await userEvent.click(screen.getByRole('button', { name: '生成 Pack 草稿' }))
   await waitFor(() => expect(repairApi.selection.mock.calls.length).toBeGreaterThanOrEqual(2))
-  expect(await screen.findByText(/目标 A：建议内容已变化，请审阅后重新勾选/)).toBeVisible()
+  expect(await screen.findByRole('checkbox', { name: '选择 目标 A 已变化' })).toBeChecked()
   expect(screen.getByRole('checkbox', { name: '选择 目标 B' })).toBeChecked()
+  expect(screen.getByRole('button', { name: '生成 Pack 草稿' })).toBeEnabled()
   expect(screen.getByRole('textbox', { name: '本次修复要求' })).toHaveValue('保留要求')
   expect(repairApi.create).toHaveBeenCalledTimes(1)
 })

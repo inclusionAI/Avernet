@@ -1,3 +1,4 @@
+import { workflowSnapshotKey, type WorkflowSnapshotBinding } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { repairStage } from '../observability/repair-diagnostics.js';
 import { RepairBatchError, canonicalRepairJson, digestRepairJson,
@@ -26,6 +27,8 @@ export type RepairEvidenceSource = {
 /** Composition roots adapt the legacy analysis/suggestion read APIs. The Workflow module
  * consumes these reads without constructing or extending the old evolution control plane. */
 export interface RepairSourceReaders {
+  snapshotRuns?(db: IDatabase, flowIds: string[]): Promise<Map<string, WorkflowSnapshotBinding>>;
+  snapshot?(db: IDatabase, workflowId: string, flowIds: string[], proposal: RecordValue | null, binding?: unknown, runs?: Map<string, WorkflowSnapshotBinding>): Promise<WorkflowSnapshotBinding>;
   groups(db: IDatabase, workflowId: string, options?: { sinceMs?: number }): Promise<GroupSource[]>;
   suggestions(db: IDatabase, workflowId: string, options?: { sinceMs?: number }): Promise<RepairSuggestionSource[]>;
   evidence(db: IDatabase, workflowId: string, eventIds: string[]): Promise<RepairEvidenceSource[]>;
@@ -122,6 +125,7 @@ export function createRepairSourcePort(readers: RepairSourceReaders): RepairSour
     if (groups.some(group => group.workflowId !== workflowId) || suggestions.some(row => row.workflow_id !== workflowId)) {
       throw new RepairBatchError('CONTENT_MISMATCH', 'Source belongs to another workflow');
     }
+    const runBindings = await readers.snapshotRuns?.(db, [...new Set([...groups.flatMap(group => group.sources.map(source => source.flowId)), ...suggestions.flatMap(row => ids(row.impact_run_ids))])]);
     const diagnosisContext = (source: DiagnosisSource): RecordValue => ({
       severity: source.severity ?? null, analysisId: source.analysisId, diagnosisId: source.diagnosisId, flowId: source.flowId,
       nodeId: source.nodeId, failureMode: source.failureMode, reasoning: source.reasoning, completedAtMs: source.completedAtMs,
@@ -130,9 +134,10 @@ export function createRepairSourcePort(readers: RepairSourceReaders): RepairSour
     });
     const items = new Map<string, SourceItem>();
     const groupMetadata = new Map(groups.map(group => [group.signature, group.sources[0]]));
-    const edit = (signature: string, value: RecordValue | null, instruction: string, textSourceId?: string): { itemId: string; row: SourceItem } => {
+    const edit = (signature: string, value: RecordValue | null, instruction: string, textSourceId?: string, binding?: WorkflowSnapshotBinding): { itemId: string; row: SourceItem } => {
       const groupKey = digestRepairJson([workflowId, signature]);
-      const proposalKey = digestRepairJson(proposalIdentity(value, instruction, textSourceId));
+      const sourceKey=binding?.status==='resolved'?workflowSnapshotKey(binding.snapshot):null;
+      const proposalKey = digestRepairJson(sourceKey ? [sourceKey,proposalIdentity(value,instruction,textSourceId)] : proposalIdentity(value, instruction, textSourceId));
       const itemId = digestRepairJson([workflowId, groupKey, proposalKey, 'initial']);
       const existing = items.get(itemId);
       // Only legacy suggestion validation needs a rollback copy. Diagnosis merging must
@@ -140,7 +145,7 @@ export function createRepairSourcePort(readers: RepairSourceReaders): RepairSour
       const row = existing ? textSourceId ? structuredClone(existing) : existing
         : { episodeKey: 'initial', initialState: 'pending', item: { itemId, groupKey, proposalKey,
           contentRevision: 1, previousItemId: null, proposal: value, instruction, sources: [],
-          context: { signature, nodeId: groupMetadata.get(signature)?.nodeId ?? null,
+          context: { signature, ...(binding ? {sourceSnapshot:binding}:{}), nodeId: groupMetadata.get(signature)?.nodeId ?? null,
             failureMode: groupMetadata.get(signature)?.failureMode ?? null, diagnoses: [], suggestions: [] } } } as SourceItem;
       return { itemId, row };
     };
@@ -149,7 +154,8 @@ export function createRepairSourcePort(readers: RepairSourceReaders): RepairSour
       const value = proposal(source.proposal, workflowId);
       // Diagnoses without actionable suggestions remain in the existing diagnostic view.
       if (!value || typeof value.summary !== 'string' || !value.summary.trim()) continue;
-      const { itemId, row } = edit(group.signature, value, value.summary.trim());
+      const binding=await readers.snapshot?.(db,workflowId,[source.flowId],value,source.analysisContext?.workflowSnapshot,runBindings);
+      const { itemId, row } = edit(group.signature, value, value.summary.trim(),undefined,binding);
       row.item.sources.push({ kind: 'diagnosis_candidate', signature: group.signature, inputDigest: group.inputDigest,
         candidateId: digestRepairJson(value), analysisId: source.analysisId, diagnosisId: source.diagnosisId, flowId: source.flowId });
       (row.item.context!.diagnoses as RecordValue[]).push(diagnosisContext(source));
@@ -163,7 +169,8 @@ export function createRepairSourcePort(readers: RepairSourceReaders): RepairSour
         if (!value && !instruction) continue;
         const diagnosisIds = ids(suggestion.source_diagnosis_ids);
         const runIds = ids(suggestion.impact_run_ids);
-        const { itemId, row } = edit(suggestion.failure_signature, value, instruction, String(suggestion.id));
+        const binding=await readers.snapshot?.(db,workflowId,runIds,value,undefined,runBindings);
+        const { itemId, row } = edit(suggestion.failure_signature, value, instruction, String(suggestion.id),binding);
         row.item.sources.push({ kind: 'suggestion', suggestionId: String(suggestion.id),
           proposalDigest: value ? digestRepairJson(value) : null, instructionDigest: digestRepairJson(instruction) });
         const related = groups.filter(group => group.signature === suggestion.failure_signature).flatMap(group => group.sources)

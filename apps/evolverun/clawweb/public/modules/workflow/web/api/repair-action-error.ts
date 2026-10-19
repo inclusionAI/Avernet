@@ -8,6 +8,9 @@ export function repairActionFailure(error: unknown): { message: string; action: 
     const parsed: unknown = JSON.parse(failure.body ?? '{}')
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) body = parsed as Record<string, unknown>
   } catch { /* Upstream HTML and unstructured errors are not user-facing diagnostics. */ }
+  if (body.reasonCode === 'BASELINE_READ_FAILED' && body.stage === 'baseline' && body.outcome === 'not_created') return {
+    message: '无法读取当前生效版本的部署包，草稿未创建。已保留所选建议，请联系维护人员修复后重试。', action: null,
+  }
   if (body.recoveryAction === 'retry-result') return {
     message: body.reasonCode === 'EXECUTION_RUNNING' ? '上一轮仍在执行，暂不能生成新一轮。请先核对原执行与结果。'
       : '上一轮候选结果尚未确认，请先核对原结果；不会重复派发任务。', action: 'retry-result',

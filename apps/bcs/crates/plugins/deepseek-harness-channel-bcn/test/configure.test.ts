@@ -132,9 +132,9 @@ test('install script is valid Bash', () => {
   assert.equal(result.status, 0, result.stderr);
 });
 
-test('install script stops before profile mutation when DSH is incompatible', async () => {
+test('install script stops when the DSH plugin manager rejects an incompatible runtime', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-bcn-old-cli-'));
-  await writeFile(join(root, 'dsh'), '#!/bin/sh\necho 0.1.1-rc.2\n');
+  await writeFile(join(root, 'dsh'), '#!/bin/sh\nif [ "$4" = add ]; then echo "incompatible DSH runtime" >&2; exit 1; fi\necho unexpected configure or startup >&2\nexit 9\n');
   await chmod(join(root, 'dsh'), 0o755);
   const result = spawnSync('/bin/bash', [new URL('../install-dsh.sh', import.meta.url).pathname,
     '--endpoint', 'http://127.0.0.1:21000/'], {
@@ -142,8 +142,8 @@ test('install script stops before profile mutation when DSH is incompatible', as
     env: { ...process.env, PATH: `${root}:/usr/bin:/bin`, BCN_ONBOARDING_TOKEN: 'not-a-real-token' },
   });
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /requires the tested DSH version 0.2.1-alpha.2/);
-  assert.doesNotMatch(result.stderr + result.stdout, /not-a-real-token/);
+  assert.match(result.stderr, /incompatible DSH runtime/);
+  assert.doesNotMatch(result.stderr + result.stdout, /not-a-real-token|unexpected configure or startup/);
 });
 
 async function createProfile(profile: string, patch: string): Promise<string> {

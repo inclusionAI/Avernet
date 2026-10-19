@@ -1,3 +1,5 @@
+import { itemSnapshot, itemSnapshotKey } from '../contracts/repair-version-scope.js';
+import type { WorkflowSnapshotBinding, WorkflowSnapshotRef } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot';
 import { prepareProposalEvidence } from './repair-proposal-evidence.js';
 import { needsReevaluation, assertProposalBaseline } from './repair-selection-review.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
@@ -9,30 +11,31 @@ import { WorkflowAutomationRepository, type AutomationJob } from '../repositorie
 
 export interface ProposalModelPort {
   key: string;
-  classify(input: { baseline: RepairBaseline; items: RepairInboxItem[]; signal: AbortSignal }): Promise<unknown>;
+  classify(input: { baseline?: RepairBaseline; sourceSnapshot?: WorkflowSnapshotRef; items: RepairInboxItem[]; signal: AbortSignal }): Promise<unknown>;
 }
-export type ProposalSnapshot = { items: RepairInboxItem[]; baseline: RepairBaseline };
+export type ProposalSnapshot = { items: RepairInboxItem[]; baseline?: RepairBaseline; activeSnapshot?: WorkflowSnapshotBinding | null };
 export type ProposalCoordinator = ReturnType<typeof createProposalCoordinator>;
 const norm = (path: string) => path.startsWith('/') ? path : '/' + path.replaceAll('.', '/');
 function operations(item: RepairItem) {
   return (Array.isArray(item.proposal?.operations) ? item.proposal.operations : []) as Array<Record<string, unknown>>;
 }
-function current(item: RepairItem, baseline: RepairBaseline) {
-  return !needsReevaluation(item, baseline);
+function current(item: RepairItem, baseline?: RepairBaseline) {
+  return !baseline || !needsReevaluation(item, baseline);
 }
 function eligible(items: RepairInboxItem[]) { return items.filter(item => item.sourceAvailable && item.state === 'pending'); }
 function scope(item: RepairInboxItem) { return String(item.context?.signature ?? item.groupKey); }
-function fingerprint(items: RepairInboxItem[], baseline: RepairBaseline) {
-  return digestRepairJson({ version: 'proposal-integration/v1', baseline,
+function fingerprint(items: RepairInboxItem[], baseline?: RepairBaseline) {
+  const source=itemSnapshot(items[0]);
+  return digestRepairJson({ version: source?'proposal-integration/v2':'proposal-integration/v1', ...(source?{sourceSnapshot:source}:{baseline:baseline??null}),
     items: [...items].sort((a,b)=>a.itemId.localeCompare(b.itemId)).map(item => ({ id:item.itemId, revision:item.contentRevision,
       proposal:item.proposal, instruction:item.instruction, sources:item.sources, context:item.context??null })) });
 }
-function groups(items: RepairInboxItem[], baseline: RepairBaseline) {
+function groups(items: RepairInboxItem[], baseline?: RepairBaseline) {
   // Model work units, not UI groups. Include different issues so shared goals can
   // retain a many-to-many source map; only the model's validated plans group cards.
   const buckets = new Map<string, RepairInboxItem[]>();
   for (const item of eligible(items)) {
-    const base=String(item.proposal?.baseSpecDigest??'unknown');
+    const base=itemSnapshotKey(item)??String(item.proposal?.baseSpecDigest??'unknown');
     const list=buckets.get(base)??[];list.push(item);buckets.set(base,list);
   }
   const out: Array<{key:string;items:RepairInboxItem[];fingerprint:string}>=[];
@@ -137,7 +140,7 @@ export function createProposalCoordinator(input:{db:IDatabase;read:(workflowId:s
       job=await repo.patch(job,{status:'dispatching',attempts:job.attempts+1},now());
       const abort=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;
       let result:unknown;
-      try{result=await Promise.race([input.model.classify({baseline:fresh.baseline,items:modelItems,signal:abort.signal}),new Promise((_,reject)=>{timer=setTimeout(()=>{abort.abort();reject(Object.assign(new Error('MODEL_TIMEOUT'),{status:504}));},25000);})]);}
+      try{result=await Promise.race([input.model.classify({...fresh.baseline?{baseline:fresh.baseline}:{},...itemSnapshot(modelItems[0])?.status==='resolved'?{sourceSnapshot:itemSnapshot(modelItems[0])!.snapshot}:{},items:modelItems,signal:abort.signal}),new Promise((_,reject)=>{timer=setTimeout(()=>{abort.abort();reject(Object.assign(new Error('MODEL_TIMEOUT'),{status:504}));},25000);})]);}
       finally{if(timer)clearTimeout(timer);}
       const validated=validate(result,modelItems);
       const latest=await jobGroup(job);
@@ -152,11 +155,11 @@ export function createProposalCoordinator(input:{db:IDatabase;read:(workflowId:s
       if(budget&&e.status===429){await repo.patch(budget,{nextAtMs:now()+delay},now(),true);budget=null;}
     }finally{if(budget)await repo.patch(budget,{nextAtMs:now()+1000},now(),true);}
   }
-  async function resolution(wf:string,items:RepairInboxItem[],baseline:RepairBaseline){
+  async function resolution(wf:string,items:RepairInboxItem[],baseline?:RepairBaseline){
     const fp=fingerprint(items,baseline),job=await get(wf,fp);
     const fallback=exact(items);
     let result=job?.status==='done'&&job.data.result?job.data.result as ProposalGrouping:fallback;
-    const status:ProposalAggregation['status']=job?.status==='done'&&job.data.result?'ready':job?.status==='dispatching'?'organizing':job?.status==='retryable'?'retryable':job?.status==='blocked'?'unavailable':'queued';
+    const status:ProposalAggregation['status']=job?.status==='done'&&job.data.result?'ready':job?.status==='dispatching'?'organizing':job?.status==='retryable'?'retryable':job?.status==='blocked'?'unavailable':job?'queued':'uncertain';
     return {fp,result,status};
   }
   return {
@@ -177,7 +180,7 @@ export function createProposalCoordinator(input:{db:IDatabase;read:(workflowId:s
       const rows=await input.db.query<{body_json:string}>("SELECT body_json FROM workflow_repair_release_records WHERE workflow_id = ? AND record_kind = 'proposal_group'",[workflowId]);
       for(const row of rows){const job:AutomationJob=JSON.parse(row.body_json);if(job.status==='blocked')await repo.recoverDraft(job,job.data,now());}
     },
-    async present(wf:string,items:RepairInboxItem[],baseline:RepairBaseline){
+    async present(wf:string,items:RepairInboxItem[],baseline?:RepairBaseline){
       const presented:RepairInboxItem[]=items.filter(i=>!i.sourceAvailable||i.state!=='pending');
       for(const g of groups(items,baseline)){
         const {fp,result,status}=await resolution(wf,g.items,baseline);
@@ -193,7 +196,7 @@ export function createProposalCoordinator(input:{db:IDatabase;read:(workflowId:s
     },
     async prepare(wf:string,selected:RepairItem[],baseline:RepairBaseline){
       const snapshot=await input.read(wf);
-      if(canonicalRepairJson(snapshot.baseline)!==canonicalRepairJson(baseline))throw new RepairBatchError('STATE_CONFLICT','生效版本在准备期间再次变化，请确认新版本后提交；选择与要求保留',{reasonCode:'BASELINE_STALE'});
+      if(snapshot.baseline?canonicalRepairJson(snapshot.baseline)!==canonicalRepairJson(baseline):snapshot.activeSnapshot?.status!=='resolved'||snapshot.activeSnapshot.snapshot.kind!=='deployment'||snapshot.activeSnapshot.snapshot.deployNumber!==baseline.activeDeployNumber||snapshot.activeSnapshot.snapshot.configDigest!==(baseline.proposalSpecDigest??baseline.specDigest))throw new RepairBatchError('STATE_CONFLICT','生效版本在准备期间再次变化，请确认新版本后提交；选择与要求保留',{reasonCode:'BASELINE_STALE'});
       assertProposalBaseline(selected, baseline);
       const ids=new Set(selected.map(i=>i.itemId));
       // One explicitly selected original is its own scope, not a partial

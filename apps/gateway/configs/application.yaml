@@ -448,6 +448,16 @@ user_config:
           source: file
           path: schemas/bots.openapi.json
           refresh_seconds: 300
+      # The backend's agent-swarm surface: submit/poll/cancel SSE runs under
+      # /openapi/v1/agentswarm (additive-only within v1; a breaking change
+      # ships as /openapi/v2/agentswarm). Forwards verbatim — the gateway only
+      # signs; the backend owns admission, tenant derivation and audit.
+      agentswarm:
+        server: backend
+        schema:
+          source: file
+          path: schemas/bots.openapi.json
+          refresh_seconds: 300
       auth:
         server: bcs
         protocols: [http]

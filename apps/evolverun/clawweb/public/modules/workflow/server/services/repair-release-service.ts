@@ -1,3 +1,4 @@
+import {historicalReference} from '../contracts/repair-version-scope.js';
 import { automaticChain, changedChainItems, isAutomaticBatch } from '../contracts/repair-automatic-chain.js';
 import { randomUUID } from 'node:crypto';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
@@ -82,6 +83,7 @@ export function createRepairReleaseService(input: {
           WHERE task_id = ? AND revision = ?`, [Date.now(), latest.taskId, latest.revision]);
         const chain = await new RepairBatchRepository(tx).listRevisions(latest.workflowId, latest.taskId);
         for (const outcome of changedChainItems(chain, revision)) {
+          if(historicalReference(outcome))continue;
           {
             const updated = await tx.exec(`UPDATE workflow_repair_items SET state = 'awaiting_verification', active_task_id = ?, active_revision = ?,
             state_version = state_version + 1, updated_at_ms = ? WHERE item_id = ? AND workflow_id = ?
@@ -199,7 +201,9 @@ export function createRepairReleaseService(input: {
           || selected.draft?.candidateCommit !== approval.candidateCommit || selected.draft?.packDigest !== approval.packDigest
           || digestRepairJson(selected.draft) !== approval.candidateDigest || digestRepairJson(selected.checks) !== approval.checksDigest || revisions[0].phase === 'drafting'
           || revisions.find(r => r.draft !== null && (r.phase !== 'no_change' || isAutomaticBatch(r.input)))?.revision !== request.revision) conflict('部署前候选或审核确认已变化');
+        await new RepairBatchRepository(tx).assertHistoricalScopeAvailable(tx, selected.input, true);
         for (const item of changedChainItems(revisions, selected, true)) {
+          if(historicalReference(item))continue;
           const current = await new RepairBatchRepository(tx).getItem(approval.workflowId, item.itemId);
           if (!current || !(current.state === 'processing' && current.activeTaskId === taskId || current.state === 'pending' && current.activeTaskId === null)) conflict('此候选的处理项已被移出、处置或占用，请重新核对修复范围');
           // Reserve the full reviewed scope before any external publication.

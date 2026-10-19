@@ -254,29 +254,16 @@ export function createInternalEvolveRouter(repos: InternalEvolveRepos): Router {
   router.get("/analysis-runs/:analysisId/input", async (req: Request, res: Response) => {
     const input = await workflowEvolutionRepo.getAnalysisInput(String(req.params.analysisId));
     if (!input) { res.status(404).json({ error: "analysis_not_found" }); return; }
-    let workflowSpecDigest: string | null = null;
-    let workflowSpec: Record<string, unknown> | null = null;
-    if (input.analysis.workflow_id) {
-      const row = (await db.query<{ spec_json: string }>(
-        "SELECT spec_json FROM workflow_specs WHERE workflow_id = ? LIMIT 1",
-        [input.analysis.workflow_id],
-      ).catch(() => []))[0];
-      if (row?.spec_json) {
-        try {
-          const { digestCanonicalJson } = await import("../../services/evolution/contracts.js");
-          const parsed = JSON.parse(row.spec_json) as unknown;
-          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-            workflowSpec = parsed as Record<string, unknown>;
-            workflowSpecDigest = digestCanonicalJson(workflowSpec);
-          }
-        } catch {
-          workflowSpec = null;
-          workflowSpecDigest = null;
-        }
-      }
+    try {
+      const snapshot = await workflowEvolutionRepo.getWorkflowSnapshotInput(input.analysis.analysis_id);
+      res.json({ ...input, ...snapshot, issueAggregationSupported: false, issueAggregationOwner: 'clawweb-service', proposalAggregationVersion: 'workflow-proposal-plan/v1',
+        issueAggregationInputVersions: [ISSUE_AGGREGATION_INPUT_V1, ISSUE_AGGREGATION_INPUT_V2] });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!['WORKFLOW_SNAPSHOT_UNAVAILABLE', 'IDENTITY_MISMATCH'].includes(message)) throw error;
+      res.status(409).json({ error: 'WORKFLOW_SNAPSHOT_UNAVAILABLE', reasonCode: message, issueAggregationSupported: false, issueAggregationOwner: 'clawweb-service',
+        issueAggregationInputVersions: [ISSUE_AGGREGATION_INPUT_V1, ISSUE_AGGREGATION_INPUT_V2] });
     }
-    res.json({ ...input, workflowSpecDigest, workflowSpec, issueAggregationSupported: false, issueAggregationOwner: 'clawweb-service', proposalAggregationVersion: 'workflow-proposal-plan/v1',
-      issueAggregationInputVersions: [ISSUE_AGGREGATION_INPUT_V1, ISSUE_AGGREGATION_INPUT_V2] });
   });
 
   router.post("/analysis-runs/:analysisId/claim", async (req: Request, res: Response) => {

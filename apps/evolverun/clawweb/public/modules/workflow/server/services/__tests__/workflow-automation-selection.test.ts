@@ -153,3 +153,25 @@ it('abandons a legacy selection when byte-page boundaries change without a propo
     expect(f.calls).toHaveLength(0);
   } finally {await f.db.close();}
 });
+
+it('selects only the actual active deployment even when old and remote suggestions share its configuration digest',async()=>{
+ const f=await repairFixture(3);
+ try{
+  const cutoff=Date.parse('2026-10-16T02:00:00Z');
+  f.raw.exec('CREATE TABLE flow_runs (workflow_id TEXT,flow_id TEXT,started_at INTEGER,completed_at INTEGER,workflow_version INTEGER,workflow_deploy_number INTEGER)');
+  const baseline={...await f.executionPort.resolveBaseline('wf-1'),activeDeployNumber:34};
+  const active={status:'resolved' as const,snapshot:{kind:'deployment' as const,workflowId:'wf-1',workflowVersion:39,deployNumber:34,configDigest:baseline.specDigest}};
+  f.sourcePort.activeSnapshot=async()=>active;
+  f.items.forEach((item,i)=>{
+   item.proposal={schemaVersion:'workflow-patch/v1',workflowId:'wf-1',baseSpecDigest:baseline.specDigest,summary:'fix',operations:[{op:'replace',nodeId:`node-${i}`,path:'/executor/timeoutSeconds',value:60}]};
+   item.context={sourceSnapshot:i===0?active:i===1?{status:'resolved',snapshot:{...active.snapshot,workflowVersion:38,deployNumber:33}}:{status:'resolved',snapshot:{kind:'saved',workflowId:'wf-1',commit:'b'.repeat(40),sourceFlowId:'flow-2',configDigest:baseline.specDigest}},diagnoses:[{flowId:`flow-${i}`,severity:'high',completedAtMs:cutoff-1}]};
+   f.raw.prepare('INSERT INTO flow_runs VALUES (?,?,?,?,?,?)').run('wf-1',`flow-${i}`,Date.parse('2026-10-15T00:00:00Z')/1000,Date.parse('2026-10-15T01:00:00Z')/1000,i===0?39:i===1?38:-1,i===0?34:i===1?33:null);
+  });
+  const workbench=createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort),read=workbench.candidates.bind(workbench);
+  // A mixed projection must not let a model plan smuggle historical members into automatic scope.
+  workbench.candidates=async(id,query)=>read(id,{...query,versionScope:'all'});
+  const result=await selectAutomaticScope(workbench,new IssueAggregationRepository(f.db),'wf-1',baseline,{db:f.db,minimumImpact:'medium',evidenceCutoffMs:cutoff});
+  expect(result?.items.map(i=>i.itemId)).toEqual(['item-0']);
+  expect(result?.targetSnapshotKey).toBe('["deployment","wf-1",39,34]');
+ }finally{await f.db.close();}
+});

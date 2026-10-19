@@ -428,6 +428,13 @@ impl MessageFlowService for BcsMessageFlow {
         }
         Ok(())
     }
+    async fn publish_state_machine_result(
+        &self,
+        cmd: bcs_service_api::StateMachineResultPublishCommand,
+    ) -> ServiceResult<()> {
+        state_machine_result::publish(self, cmd).await
+    }
+
     async fn handle_web_send(&self, cmd: WebSendCommand) -> ServiceResult<WebSendOutcome> {
         handle_web_send(self, cmd).await
     }
@@ -625,6 +632,7 @@ pub(crate) async fn apply_session_participant_scope(
 mod persistence;
 pub(crate) use persistence::{try_persist_group_message, persisted_message_visibility};
 use persistence::{persisted_inbound_content};
+mod state_machine_result;
 mod web_send;
 pub use web_send::{handle_web_send};
 mod group_send;

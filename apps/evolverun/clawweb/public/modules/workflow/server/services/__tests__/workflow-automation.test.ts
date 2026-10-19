@@ -325,3 +325,31 @@ it('excludes trials from terminal analysis and daily jobs', async () => {
   expect(f.ports.notify).not.toHaveBeenCalled();
   expect((await f.service.status('wf-1')).jobs.filter(job => job.kind === 'auto_run')).toEqual([]);
 });
+
+it('stops an automatic round before appending another batch after a deployment change',async()=>{
+ const f=await fixture(true,101,true);
+ for(let i=0;i<10;i++){await f.service.tick();f.advance();if(f.calls.length)break;}
+ const job=(await f.service.status('wf-1')).jobs.find(j=>j.kind==='auto_draft'&&j.taskId)!;
+ expect(job.taskId).toBeTruthy();
+ const task=await f.workbench.task(job.taskId!);
+ const draft={candidateCommit:'d'.repeat(40),parentCandidateCommit:f.baseline.packCommit,packDigest:'e'.repeat(40),itemResults:task.latestAttempt.input.items.map(item=>({itemId:item.itemId,status:'changed',reason:'fixture'}))};
+ await f.workbench.report({workflowId:'wf-1',taskId:task.taskId,revision:1,expectedStateVersion:0,status:'succeeded',draft,checks:{schemaVersion:'workflow-repair-checks/v1',candidateCommit:draft.candidateCommit,packDigest:draft.packDigest,candidateDigest:digestRepairJson(draft),static:{status:'passed'},mock:{status:'not_covered'},coverage:task.latestAttempt.input.items.map(item=>({itemId:item.itemId}))}});
+ f.baseline.activeDeployNumber=8;
+ f.advance();await f.restart().tick();
+ const record=await new WorkflowAutomationRepository(f.db).get(job.id);
+ expect(record).toMatchObject({status:'blocked',reason:'BASELINE_REASSESSMENT_REQUIRED'});
+ expect(record!.data.request.automation.batchIndex).toBe(0);
+ expect(f.calls).toHaveLength(1);
+});
+
+it('does not let an old reviewed draft permanently block a different deployment, but keeps a real in-flight task fenced',async()=>{
+ const f=await fixture(false,1,true),repo=new WorkflowAutomationRepository(f.db);
+ const page=await f.workbench.candidates('wf-1');
+ const task=await f.workbench.create('owner',{workflowId:'wf-1',itemIds:['item-0'],inputDigest:page.inputDigest,instructions:'',requestId:'old-review-task'});
+ const now=Date.parse('2026-11-01T02:00:00Z');
+ const job=await repo.ensure('wf-1','auto_draft','old-review',{baseline:{activeDeployNumber:7},realTaskId:task.taskId},now);
+ await f.db.exec("UPDATE workflow_repair_revisions SET phase='review' WHERE task_id=?",[task.taskId]);
+ expect(await repo.activeDraft('wf-1','["deployment","wf-1",39,34]',34)).toBeNull();
+ await f.db.exec("UPDATE workflow_repair_revisions SET phase='drafting' WHERE task_id=?",[task.taskId]);
+ expect((await repo.activeDraft('wf-1','["deployment","wf-1",39,34]',34))?.id).toBe(job.id);
+});

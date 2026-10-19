@@ -2,16 +2,36 @@
 import * as botsController from '@/services/backendApi/bots/botController';
 import * as botController from '@/services/backendApi/collaboration/collaborationBotController';
 import * as friendConnectionController from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
-import { collaborationCandidateService } from '@/services/workspace/collaborationCandidateService';
+import * as publicBotController from '@/services/backendApi/collaboration/publicBotController';
+import { collaborationCandidateService, type CollaborationBotView } from '@/services/workspace/collaborationCandidateService';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 jest.mock('@/services/backendApi/collaboration/collaborationBotController');
 jest.mock('@/services/backendApi/bots/botController');
 jest.mock('@/services/backendApi/collaboration/collaborationFriendConnectionController');
+jest.mock('@/services/backendApi/collaboration/publicBotController');
 
 const bc = botController as unknown as Record<string, jest.Mock<any>>;
 const bots = botsController as unknown as Record<string, jest.Mock<any>>;
 const connections = friendConnectionController as unknown as Record<string, jest.Mock<any>>;
+const publicBots = publicBotController as unknown as Record<string, jest.Mock<any>>;
+
+function candidateView(partial: Partial<CollaborationBotView> & { id: string; name: string }): CollaborationBotView {
+  return {
+    online: true,
+    status: 'online',
+    reachability: 'reachable',
+    visibility: 'public',
+    ...partial,
+  };
+}
+
+function discoveryResponse(items: Array<Record<string, unknown>>) {
+  return {
+    code: 200000 as const,
+    data: { items, total: items.length },
+  };
+}
 
 beforeEach(() => {
   jest.resetAllMocks();
@@ -258,5 +278,97 @@ describe('collaborationCandidateService', () => {
       limit: 50,
     });
     expect(res.ok && res.data.items[0]).toMatchObject({ id: 'b3', name: 'Gamma', isFriend: false });
+  });
+
+  it('recommendCandidates intersects discovery with candidates, sorts online first by score', async () => {
+    publicBots.discoverPublicBots.mockResolvedValue(
+      discoveryResponse([
+        { bot_uuid: 'b1:actor-1', recommendation: { score: 0.9, short_profile: '值班相关' } },
+        { bot_uuid: 'b9:actor-9', recommendation: { score: 0.95 } },
+        { bot_uuid: 'b2:actor-1', recommendation: { score: 0.4, short_profile: '分析相关' } },
+      ]),
+    );
+
+    const res = await collaborationCandidateService.recommendCandidates({
+      actorId: 'actor-1',
+      actorKind: 'bot',
+      keyword: ' 值班 ',
+      candidates: [
+        candidateView({ id: 'b1:actor-1', name: 'Alpha', online: false }),
+        candidateView({ id: 'b2:actor-1', name: 'Beta', online: true }),
+      ],
+    });
+
+    expect(publicBots.discoverPublicBots).toHaveBeenCalledWith(
+      {
+        keyword: '值班',
+        top_k: 20,
+        min_score: 0.01,
+        viewer_actor_type: 'bot',
+        viewer_actor_id: 'actor-1',
+      },
+      undefined,
+    );
+    expect(res.ok && res.data).toHaveLength(2);
+    // 在线项排在离线项之前；两项均附加推荐分与画像摘要。
+    expect(res.ok && res.data[0]).toMatchObject({
+      id: 'b2:actor-1',
+      name: 'Beta',
+      online: true,
+      recommendScore: 0.4,
+      shortProfile: '分析相关',
+    });
+    expect(res.ok && res.data[1]).toMatchObject({
+      id: 'b1:actor-1',
+      name: 'Alpha',
+      online: false,
+      recommendScore: 0.9,
+      shortProfile: '值班相关',
+    });
+  });
+
+  it('recommendCandidates returns empty without discovery when keyword is blank', async () => {
+    const res = await collaborationCandidateService.recommendCandidates({
+      actorId: 'actor-1',
+      actorKind: 'bot',
+      keyword: '   ',
+      candidates: [candidateView({ id: 'b1:actor-1', name: 'Alpha' })],
+    });
+
+    expect(publicBots.discoverPublicBots).not.toHaveBeenCalled();
+    expect(res).toEqual({ ok: true, data: [] });
+  });
+
+  it('recommendCandidates maps user actor kind to human viewer and passes empty intersection', async () => {
+    publicBots.discoverPublicBots.mockResolvedValue(
+      discoveryResponse([{ bot_uuid: 'b9:actor-9', recommendation: { score: 0.9 } }]),
+    );
+
+    const res = await collaborationCandidateService.recommendCandidates({
+      actorId: 'human_1',
+      actorKind: 'user',
+      keyword: '数据分析',
+      candidates: [candidateView({ id: 'b1:actor-1', name: 'Alpha' })],
+    });
+
+    expect(publicBots.discoverPublicBots).toHaveBeenCalledWith(
+      expect.objectContaining({ viewer_actor_type: 'human', viewer_actor_id: 'human_1' }),
+      undefined,
+    );
+    expect(res).toEqual({ ok: true, data: [] });
+  });
+
+  it('recommendCandidates returns domain error when discovery fails', async () => {
+    publicBots.discoverPublicBots.mockRejectedValue(new Error('network down'));
+
+    const res = await collaborationCandidateService.recommendCandidates({
+      actorId: 'actor-1',
+      actorKind: 'bot',
+      keyword: '值班',
+      candidates: [candidateView({ id: 'b1:actor-1', name: 'Alpha' })],
+    });
+
+    expect(res.ok).toBe(false);
+    expect(!res.ok && res.error.friendlyMessage).toBe('推荐可协作 Bot 失败，请稍后重试。');
   });
 });

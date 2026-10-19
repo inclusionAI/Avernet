@@ -306,6 +306,10 @@ from agentclaw.community.core.tc_file_upload_integrations.coordinator import (
 from agentclaw.community.core.service_bot.services.service_publication_facade import (
     ServicePublicationFacade,
 )
+from agentclaw.community.api.agentswarm_service import (
+    AgentSwarmServiceProtocol,
+)
+from agentclaw.community.core.agentswarm.service import AgentSwarmService
 from agentclaw.community.core.service_bot.services.service_edit_lock_service import (
     ServiceEditLockService,
 )
@@ -329,6 +333,7 @@ from agentclaw.community.core.acli_clis.service import AcliCliService
 _PAIRS = [
     (SpaceManagementServiceProtocol, SpaceManagementService),
     (CronAdminServiceProtocol, CronAdminService),
+    (AgentSwarmServiceProtocol, AgentSwarmService),
     (MCPScopedConfigServiceProtocol, MCPScopedConfigService),
     (FileCountServiceProtocol, FileCountService),
     (BuildIgnoreServiceProtocol, BuildIgnoreService),

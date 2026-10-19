@@ -1,3 +1,4 @@
+import {historicalReference} from '../contracts/repair-version-scope.js';
 import { automaticAdvance, changedChainItems, isAutomaticBatch } from '../contracts/repair-automatic-chain.js';
 import { repairEvidenceFacts, repairEvidenceFlows } from '../contracts/repair-batch.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
@@ -22,6 +23,13 @@ function itemFromRow(row: Row): StoredRepairItem {
     sources: JSON.parse(row.source_refs_json), state: row.state, stateVersion: Number(row.state_version),
     activeTaskId: row.active_task_id, activeRevision: row.active_revision == null ? null : Number(row.active_revision),
     disposition: row.disposition_json == null ? null : JSON.parse(row.disposition_json), updatedAtMs: Number(row.updated_at_ms) };
+}
+function historicalScope(input: RepairBatchInput): string | null {
+  if (!input.items.some(historicalReference)) return null;
+  return digestRepairJson({ target: input.items[0]?.context?.targetSnapshot ?? input.baseline,
+    sources: input.items.map(item => ({ itemId: item.itemId, contentRevision: item.contentRevision,
+      snapshot: item.context?.sourceSnapshot, sources: item.sources.map(canonicalRepairJson).sort() }))
+      .sort((a, b) => a.itemId.localeCompare(b.itemId)) });
 }
 function revisionFromRow(row: Row): RepairRevision {
   return { workflowId: row.workflow_id, taskId: row.task_id, revision: Number(row.revision), phase: row.phase,
@@ -174,6 +182,27 @@ export class RepairBatchRepository {
   }
   latestSuccessfulRevision(workflowId: string, taskId: string): Promise<RepairRevision | null> { return this.latest(this.db, workflowId, taskId, true); }
 
+  /** Caller holds the workflow lock. Task records fence read-only historical
+   * references without taking ownership of the original items. */
+  async assertHistoricalScopeAvailable(tx: IDatabase, input: RepairBatchInput, publication = false): Promise<void> {
+    const scope = historicalScope(input);
+    if (!scope) return;
+    const lock = tx.dbType === 'mysql' || tx.dbType === 'zdas' ? ' FOR UPDATE' : '';
+    const revisions = (await tx.query<Row>(
+      `SELECT * FROM workflow_repair_revisions WHERE workflow_id = ? ORDER BY revision DESC${lock}`, [input.baseline.workflowId],
+    )).map(revisionFromRow);
+    const seen = new Set<string>();
+    for (const other of revisions) {
+      if (!publication && seen.has(other.taskId)) continue;
+      seen.add(other.taskId);
+      if (other.taskId === input.taskId || (publication ? !['publishing', 'published'].includes(other.phase)
+        : ['cancelled', 'no_change'].includes(other.phase))) continue;
+      if (historicalScope(other.input) === scope) throw new RepairBatchError('ITEM_BUSY',
+        '这些历史建议已用于其他迭代，请查看对应任务或取消后重新生成',
+        { reasonCode: 'HISTORICAL_TASK_EXISTS', taskId: other.taskId });
+    }
+  }
+
   async createRevision(tx: IDatabase, request: {
     input: RepairBatchInput; requestId: string; requestDigest: string; expectedAttemptRevision: number;
   }): Promise<RepairRevision> {
@@ -195,8 +224,10 @@ export class RepairBatchRepository {
     if (previous && canonicalRepairJson(previous.input.baseline) !== canonicalRepairJson(input.baseline)) conflict('CONTENT_MISMATCH', 'A task cannot change its frozen baseline');
     const successful = isAutomaticBatch(input) ? (await new RepairBatchRepository(tx).listRevisions(workflowId, input.taskId)).find(r => r.draft !== null && r.phase !== 'failed') : await this.latest(tx, workflowId, input.taskId, true);
     if (input.parentCandidateCommit !== (successful?.draft?.candidateCommit ?? null)) conflict('CONTENT_MISMATCH', 'Parent must be the task last successful candidate');
+    await this.assertHistoricalScopeAvailable(tx, input);
     const claims = [];
     for (const frozenItem of input.items) {
+      if(historicalReference(frozenItem)){if(!input.integration)conflict('INVALID_INPUT','Historical references require goal integration');continue;}
       const stored = await this.readItem(tx, workflowId, frozenItem.itemId);
       if (!stored) conflict('ITEM_NOT_FOUND', 'Selected item does not exist in this workflow');
       if (canonicalRepairJson(content(stored)) !== canonicalRepairJson(content(frozenItem))) conflict('CONTENT_MISMATCH', 'Selected content changed');

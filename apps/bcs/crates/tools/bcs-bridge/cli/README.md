@@ -15,6 +15,13 @@ bridge's `/webhook`) or as a **plugin** (the bridge dials the BCS Bot WebSocket
 `/ws/bot`). Each turn invokes an engine adapter and streams its
 output back to BCS as chat, thinking, tool and interaction (HITL) events.
 
+In plugin mode, every engine requests protocol V3 and `client_kind = "native_mcp"`
+in each `bot.connect` handshake, including reconnects. BCS still decides whether
+to enable MCP task coordination from the Bot's Provider policy or, for Bots
+without a Provider, the deployment's uplink permissions. On servers that require
+a matching client profile, the Provider must use `coordination.mode = "native_mcp"`;
+a `mcporter_mcp` Provider does not match this handshake. V2 fallback remains supported.
+
 ## Crates
 
 | Crate | Kind | Responsibility |

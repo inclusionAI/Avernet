@@ -1,13 +1,11 @@
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import type { RequestOptions } from 'node:http';
-import type { Config } from './config.js';
 import type { ResolvedEndpoint } from './endpoint.js';
 import {
   MAX_FRAME_BYTES,
   asNonEmptyString,
   asRecord,
-  type BotSession,
   type RegisterBotResponse,
 } from './protocol.js';
 
@@ -89,7 +87,7 @@ export class NodeHttpTransport implements HttpTransport {
   }
 }
 
-export class BcnOnboardingClient {
+export class BcnRegistrationClient {
   constructor(
     private readonly endpoint: ResolvedEndpoint,
     private readonly transport: HttpTransport,
@@ -113,25 +111,4 @@ export class BcnOnboardingClient {
     return { bot_name: registeredName, bot_uuid: botUuid, bot_token: botToken };
   }
 
-  async onboard(session: BotSession, config: Config): Promise<void> {
-    const response = asRecord(await this.transport.requestJson(
-      this.endpoint,
-      'bots/onboard',
-      {
-        method: 'POST',
-        headers: { authorization: `Bearer ${session.botToken}` },
-        body: {
-          name: config.botName || session.botName,
-          summary: config.summary,
-          domains: config.domains,
-          skills: config.skills,
-          scopes: config.scopes,
-        },
-      },
-      this.timeoutMs,
-    ));
-    if (response?.onboarded !== true || asNonEmptyString(response.bot_uuid) !== session.botUuid) {
-      throw new Error('BCN rejected Bot descriptor onboarding');
-    }
-  }
 }

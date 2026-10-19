@@ -1,3 +1,4 @@
+import { WorkflowSnapshotRepository } from '@avernet/clawweb-shared/server/services/workflow-snapshot';
 import { registerRunRequest } from '../services/run-request-registration.js';
 import { productionRunSql, trialRunSql, productionRunsSql, isTrialRun, type RunPurpose } from "@avernet/clawweb-shared/server/services/run-purpose";
 /**
@@ -311,37 +312,42 @@ export class FlowRunRepository {
 
   async insert(run: FlowRunInsert): Promise<boolean> {
     try {
-      const now = this.db.dialect.now();
-      await this.db.exec(
-        `INSERT INTO flow_runs (flow_id, workflow_id, workflow_title, status, state_json, params_json, input_json, node_count, triggered_by, identity_key, current_phase, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number, gmt_create, gmt_modified)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          run.flowId,
-          run.workflowId,
-          run.workflowTitle ?? null,
-          run.status,
-          run.stateJson ?? null,
-          run.paramsJson ?? null,
-          run.inputJson ?? null,
-          run.nodeCount ?? 0,
-          run.triggeredBy ?? null,
-          run.identityKey ?? null,
-          run.currentPhase ?? null,
-          run.startedAt,
-          run.credentialsJson ?? null,
-          run.originSessionKey ?? null,
-          run.originSessionId ?? null,
-          run.originBotId ?? null,
-          run.userId ?? null,
-          run.pluginVersion ?? null,
-          run.engine ?? null,
-          run.workflowVersion ?? null,
-          run.workflowDeployNumber ?? null,
-          now,
-          now,
-        ],
-      );
-      return true;
+      // The run must not survive a failed snapshot read/write. Transaction-bound
+      // repositories reuse their caller's transaction for purpose registration.
+      return await this.db.transaction(async tx => {
+        const now = tx.dialect.now();
+        await tx.exec(
+          `INSERT INTO flow_runs (flow_id, workflow_id, workflow_title, status, state_json, params_json, input_json, node_count, triggered_by, identity_key, current_phase, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number, gmt_create, gmt_modified)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            run.flowId,
+            run.workflowId,
+            run.workflowTitle ?? null,
+            run.status,
+            run.stateJson ?? null,
+            run.paramsJson ?? null,
+            run.inputJson ?? null,
+            run.nodeCount ?? 0,
+            run.triggeredBy ?? null,
+            run.identityKey ?? null,
+            run.currentPhase ?? null,
+            run.startedAt,
+            run.credentialsJson ?? null,
+            run.originSessionKey ?? null,
+            run.originSessionId ?? null,
+            run.originBotId ?? null,
+            run.userId ?? null,
+            run.pluginVersion ?? null,
+            run.engine ?? null,
+            run.workflowVersion ?? null,
+            run.workflowDeployNumber ?? null,
+            now,
+            now,
+          ],
+        );
+        await new WorkflowSnapshotRepository(tx).associateRun(run.flowId);
+        return true;
+      });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.warn(`[db] FlowRunRepository.insert failed: ${msg}`);

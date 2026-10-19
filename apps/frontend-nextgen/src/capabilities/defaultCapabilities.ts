@@ -210,6 +210,24 @@ export const defaultCapabilities: AppCapabilities = {
     value: true,
   }),
   getAdditionalBotRegistrationPanels: () => ({ status: 'available', value: [] }),
+  getDeepSeekHarnessRegistrationEnabled: () => ({ status: 'available', value: true }),
+  getDeepSeekHarnessRegistrationGuideUrl: () => {
+    const runtime =
+      typeof window === 'undefined'
+        ? undefined
+        : (window as { AVERNET_RUNTIME_CONFIG?: { DSH_REGISTRATION_GUIDE_URL?: string } }).AVERNET_RUNTIME_CONFIG;
+    const value = runtime?.DSH_REGISTRATION_GUIDE_URL?.trim();
+    if (!value) return { status: 'available', value: null };
+    try {
+      const url = new URL(value);
+      if (['http:', 'https:'].includes(url.protocol) && !url.username && !url.password) {
+        return { status: 'available', value };
+      }
+    } catch {
+      // Invalid optional deployment links must not block the inline onboarding steps.
+    }
+    return { status: 'available', value: null };
+  },
   getQwenWorkBotRegistrationConfig: (bcsEndpoint) => {
     const runtime =
       typeof window === 'undefined'

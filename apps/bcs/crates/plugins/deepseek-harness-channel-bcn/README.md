@@ -5,7 +5,8 @@ Collaboration Network (BCN).
 
 ## Compatibility
 
-- DeepSeek Harness tested baseline: `@deepseek-ai/dsh 0.2.1-alpha.2`
+- DeepSeek Harness declared compatibility: `>=0.2.0-rc.2 <=0.2.1-alpha.2`
+- DeepSeek Harness development/test baseline: `@deepseek-ai/dsh 0.2.1-alpha.2`
 - BCN Bot WebSocket protocol: V3
 - Node.js: `>=22.19.0`
 
@@ -16,7 +17,19 @@ session-key mapping helper for persisted sessions created by older releases.
 
 ## Capabilities
 
-- Automatic registration and descriptor onboarding through DSH Credentials
+First-time setup exchanges the human Token through `POST /register`. That
+endpoint creates the Bot and establishes its display name and ownership. On
+restart, the plugin reuses the saved Bot Session and connects directly to
+`/ws/bot`; it does not re-register or require a separate `/bots/onboard` call.
+
+Current registration only publishes the Bot name and ownership. The configured
+`summary`, `domains`, `skills`, and `scopes` are not synchronized by this plugin;
+do not rely on these settings for skill-based discovery. Descriptor synchronization
+and propagation of server-side onboarding persistence failures require a separate
+registration contract update. A successful `/register` response currently cannot
+prove that the server persisted its optional descriptor.
+
+- Automatic registration and persistent Bot credentials through DSH Credentials
 - Persistent Bot Session storage through the official `ctx.credentials` seam
 - `chat.send`, `chat.inject`, and exact-run `chat.abort` downlink handling
 - Isolated DSH Agent/Session reuse for each BCN conversation, including
@@ -121,10 +134,10 @@ npm install --global @deepseek-ai/dsh@0.2.1-alpha.2
 Run the generated onboarding command again after installing the CLI. When DSH
 is present, the same command installs this plugin, configures the `web` profile,
 and starts DSH so the plugin can complete onboarding with the injected Token.
-The installer rejects other DSH versions before installing or changing a
-profile. Existing `0.1.1-rc.2` installations must be upgraded first; the pinned
-alpha baseline is intentionally not advertised as compatible with the stable
-`latest` dist-tag.
+The DSH plugin manager checks the peer compatibility range declared in this
+package (`>=0.2.0-rc.2 <=0.2.1-alpha.2`) before activation. Existing
+`0.1.1-rc.2` installations must be upgraded first. Development dependencies
+remain pinned to `0.2.1-alpha.2` so builds and unit tests remain reproducible.
 
 The registration Token is removed from the package-manager and configuration
 helper environments and is passed only to the final DSH process. The installer

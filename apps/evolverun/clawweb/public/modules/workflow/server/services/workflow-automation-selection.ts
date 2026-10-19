@@ -1,3 +1,5 @@
+import { workflowSnapshotKey } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot';
+import { itemSnapshotKey } from '../contracts/repair-version-scope.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { MAX_ITEMS, MAX_MODEL_INPUT_BYTES, type RepairItem } from '../contracts/repair-batch.js';
 import { validateWorkflowPatchProposal } from '@avernet/clawevolve/server/services/evolution/contracts';
@@ -8,22 +10,27 @@ import type { RepairBaseline } from '../contracts/repair-batch.js';
 import type { AutomationWorkbench } from '../contracts/workflow-automation.js';
 import type { RepairInboxItem } from '../contracts/repair-workbench.js';
 async function legacyAutomaticScope(workbench: AutomationWorkbench, issues: IssueAggregationRepository, workflowId: string, baseline: RepairBaseline) {
-  const ranked = await issues.listPage(workflowId, { page: 1, pageSize: 20, sort: 'priority' });
+  const header=await workbench.candidates(workflowId,{state:'pending',pageSize:1,versionScope:'current'});
+  if(header.activeSnapshot!==undefined&&(header.activeSnapshot?.status!=='resolved'||header.activeSnapshot.snapshot.kind!=='deployment'||header.activeSnapshot.snapshot.deployNumber!==baseline.activeDeployNumber))return null;
+  const ranked = await issues.listPage(workflowId, { page: 1, pageSize: 20, sort: 'priority',...(header.activeSnapshot!==undefined?{versionScope:'current' as const}:{}) });
   const candidates: RepairInboxItem[] = [];
   let inputDigest = '';
+  let targetSnapshotKey:string|undefined;
   for (const group of ranked.groups) {
     if (!group.priority?.severity) continue;
     let number = 1;
     let scopeDigest: string | undefined, totalPages: number | undefined;
     for (;;) {
-      const page = await workbench.candidates(workflowId, { state: 'pending', signature: group.signature, page: number, pageSize: 100, rawItems: true });
+      const page = await workbench.candidates(workflowId, { state: 'pending', signature: group.signature, page: number, pageSize: 100, rawItems: true,versionScope:'current' });
       if (!page.capabilities.generation) return null;
+      if(page.activeSnapshot!==undefined){if(page.activeSnapshot?.status!=='resolved'||page.activeSnapshot.snapshot.kind!=='deployment'||page.activeSnapshot.snapshot.deployNumber!==baseline.activeDeployNumber)return null;targetSnapshotKey=workflowSnapshotKey(page.activeSnapshot.snapshot);}
       if (inputDigest && inputDigest !== page.inputDigest) return null;
       if (number > 1 && (scopeDigest !== page.page.snapshotDigest || totalPages !== page.page.totalPages)) return null;
       scopeDigest = page.page.snapshotDigest; totalPages = page.page.totalPages;
       inputDigest = page.inputDigest;
       for (const item of expandProposalCards(page.items)) {
         const { aggregation: _projection, ...raw } = item;
+        if (targetSnapshotKey&&itemSnapshotKey(item)!==targetSnapshotKey)continue;
         if (item.state !== 'pending' || !item.sourceAvailable || (!Array.isArray(item.context?.diagnoses) || !item.context.diagnoses.length) || Buffer.byteLength(JSON.stringify(raw)) > 32000) continue;
         try {
           const proposal = validateWorkflowPatchProposal(item.proposal);
@@ -55,10 +62,10 @@ async function legacyAutomaticScope(workbench: AutomationWorkbench, issues: Issu
     if (selectedUnits === 5) break;
   }
   if (!items.length) return null;
-  const fingerprint = digestRepairJson({ baseline: baseline.packCommit, items: items.map(item => ({ id: item.itemId,
+  const fingerprint = digestRepairJson({ baseline: [baseline.packCommit,baseline.activeDeployNumber], items: items.map(item => ({ id: item.itemId,
     revision: item.contentRevision, proposal: item.proposalKey, recurrence: item.context?.recurrence ?? null,
     flows: [...new Set(item.sources.flatMap(source => source.kind === 'diagnosis_candidate' ? [source.flowId] : []))].sort() })) });
-  return { items, inputDigest, fingerprint };
+  return { items, inputDigest, fingerprint,...(targetSnapshotKey?{targetSnapshotKey}:{}) };
 }
 
 
@@ -67,7 +74,7 @@ export function previousShanghaiDay(now: number) {
   const untilMs = Math.floor((now + 8 * 3600000) / 86400000) * 86400000 - 8 * 3600000;
   return { fromMs: untilMs - 86400000, untilMs };
 }
-export type AutomaticScope = { items: RepairInboxItem[]; inputDigest: string; fingerprint: string;
+export type AutomaticScope = { targetSnapshotKey?:string; items: RepairInboxItem[]; inputDigest: string; fingerprint: string;
   batches?: string[][]; deferred?: Record<string, string>; revisions?: Record<string, string>; window?: ReturnType<typeof previousShanghaiDay> };
 export function automaticItemDigest(item: RepairItem) {
   return digestRepairJson({ id: item.itemId, revision: item.contentRevision, proposal: item.proposal, sources: item.sources, context: item.context ?? null });
@@ -79,9 +86,10 @@ export async function selectAutomaticScope(workbench: AutomationWorkbench, issue
   const deferred: Record<string, string> = {}, revisions: Record<string, string> = {};
   const items: RepairInboxItem[] = [];
   let inputDigest = '', page = 1, pageSize = 100;
+  let targetSnapshotKey:string|undefined;
   for (;;) {
     let result: Awaited<ReturnType<AutomationWorkbench['candidates']>>;
-    try { result = await workbench.candidates(workflowId, { state: 'pending', includeHistorical: true, page, pageSize }); }
+    try { result = await workbench.candidates(workflowId, { state: 'pending', includeHistorical: true, page, pageSize,versionScope:'current' }); }
     catch (error) {
       if ((error as { code?: string }).code !== 'PAYLOAD_TOO_LARGE' || pageSize === 1) throw error;
       // Response byte protection is a transport bound, never a candidate count limit.
@@ -91,13 +99,17 @@ export async function selectAutomaticScope(workbench: AutomationWorkbench, issue
       continue;
     }
     if (!result.capabilities.generation) return null;
+    if(result.activeSnapshot!==undefined){
+      if(result.activeSnapshot?.status!=='resolved'||result.activeSnapshot.snapshot.kind!=='deployment'||result.activeSnapshot.snapshot.deployNumber!==baseline.activeDeployNumber)return null;
+      const key=workflowSnapshotKey(result.activeSnapshot.snapshot);if(targetSnapshotKey&&key!==targetSnapshotKey)throw new Error('TARGET_VERSION_CHANGED');targetSnapshotKey=key;
+    }
     if (inputDigest && inputDigest !== result.inputDigest) throw new Error('SOURCE_CHANGED');
     inputDigest = result.inputDigest;
     const projected = expandProposalCards(result.items);
     const members = [...new Set(result.items.flatMap(card => proposalMembers(card).map(item => item.itemId)))];
     for (const raw of members.length ? await workbench.items(workflowId, members) : []) {
       const item = { ...raw, ...(projected.find(p => p.itemId === raw.itemId)?.aggregation ? { aggregation: projected.find(p => p.itemId === raw.itemId)!.aggregation } : {}) };
-      let reason: string | null = !item.sourceAvailable ? 'SOURCE_UNAVAILABLE' : null;
+      let reason: string | null = targetSnapshotKey&&itemSnapshotKey(item)!==targetSnapshotKey?'SOURCE_VERSION_MISMATCH':!item.sourceAvailable ? 'SOURCE_UNAVAILABLE' : null;
       const diagnoses = (Array.isArray(item.context?.diagnoses) ? item.context.diagnoses : []) as Array<Record<string, unknown>>;
       const eligible = diagnoses.filter(d => typeof d.completedAtMs === 'number' && d.completedAtMs <= scope.evidenceCutoffMs
         && ['low', 'medium', 'high', 'critical'].indexOf(String(d.severity)) >= (scope.minimumImpact === 'high' ? 2 : 1));
@@ -150,5 +162,5 @@ export async function selectAutomaticScope(workbench: AutomationWorkbench, issue
   if (batch.length) batches.push(batch);
   const selected = items.filter(item => !deferred[item.itemId]);
   const fingerprint = digestRepairJson({ baseline, minimumImpact: scope.minimumImpact, items: selected.map(item => revisions[item.itemId]), deferred });
-  return { items: selected, inputDigest, fingerprint, batches, deferred, revisions, window };
+  return { items: selected, inputDigest, fingerprint, batches, deferred, revisions, window,...(targetSnapshotKey?{targetSnapshotKey}:{}) };
 }
