@@ -155,3 +155,24 @@ subsequent human dispatches use the existing manual execution contract. A pendin
 human revision of an automatically created task still pauses new automatic tasks.
 An identical, checked no-change feedback result retains the prior candidate and
 its pending ownership. Incomplete automatic batches cannot be bypassed this way.
+
+### 聚合输入预算与失败诊断
+
+建议聚合以同一来源版本为边界，保留完整目标、操作值及用户约束，仅向模型
+发送至多两条代表诊断的关键事实/推断/未知项及有界事件摘录。完整原始建议
+仍保留；摘录注明不完整，不能把仅凭截断证据的原因升级为“证据支持”。
+
+工作单元先按修改字段结构排列，再按 100 项和核心 UTF-8 字节预算拆分；摘要读取尚未加载的事件
+预留摘录空间，调用前仍校验 180,000 字节上限。模型每次必须覆盖该单元全部
+来源，并继续执行冲突及来源引用校验。字节分批不会跨单元额外合并方案；不同
+节点的参数不能因标题相似就视作完全相同修改。
+
+`ProposalAggregation.diagnostic` 可包含 `reason / actualBytes / limitBytes /
+itemCount`。超限记录 `SCOPE_TOO_LARGE`，模型异常记录既有失败分类；新证据
+使工作单元过期记录 `SUPERSEDED`。这些信息写入现有 proposal_group 状态，
+并输出 `[workflow-repair] proposal diagnostic` 结构化日志，只含标识与预算，
+不记录模型输入、凭据或上游原始错误。页面明确区分已去重、已聚合、等待聚合、
+聚合待重试、聚合未完成、尚无当前结果；失败不会阻断用户明确选择原始目标。
+
+核心投影的缓存指纹与扫描版本更新为 core-v1，旧的超限 blocked 结果不会阻止
+新投影重新排队。既有请求预算、租约和来源变化核对继续生效。

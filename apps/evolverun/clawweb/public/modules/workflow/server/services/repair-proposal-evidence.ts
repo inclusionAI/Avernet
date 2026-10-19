@@ -1,5 +1,5 @@
-import { redactEvidenceValue } from '@avernet/clawweb-shared/server/services/redaction';
-import { canonicalRepairJson, digestRepairJson, RepairBatchError, type RepairItem } from '../contracts/repair-batch.js';
+import { redactEvidenceValue,redactValue } from '@avernet/clawweb-shared/server/services/redaction';
+import { canonicalRepairJson, digestRepairJson, MAX_MATERIAL_BYTES, RepairBatchError, type RepairItem } from '../contracts/repair-batch.js';
 /** Compare retained fields only: intentional credential removal is not clipping. */
 function collectionClipped(before:unknown, after:unknown):boolean {
   if(Array.isArray(before)&&Array.isArray(after))return before.length!==after.length||after.some((value,index)=>collectionClipped(before[index],value));
@@ -7,14 +7,14 @@ function collectionClipped(before:unknown, after:unknown):boolean {
   return false;
 }
 /** Inline only. Omitted exact duplicates retain an index; no unreadable external log references masquerade as evidence. */
-export function prepareProposalEvidence<T extends RepairItem>(items:T[], strict=false):T[] {
+export function prepareProposalEvidence<T extends RepairItem>(items:T[], strict=false,options:{complete?:boolean}={}):T[] {
   return items.map(item=>{
     const context=structuredClone(item.context??{});
     const diagnoses=(Array.isArray(context.diagnoses)?context.diagnoses:[]) as Array<Record<string,any>>;
     const sourceIndex:Array<Record<string,unknown>>=[], examples:Array<Record<string,unknown>>=[];
     const seen=new Map<string,number>();let missing=false,clipped=false;
     const redacted=(value:unknown)=>{
-      const safe=redactEvidenceValue(value);
+      const safe=options.complete?redactValue(value,0,{preserveBusinessBody:true,maxTextBytes:MAX_MATERIAL_BYTES,maxItems:100000,maxDepth:64}):redactEvidenceValue(value);
       clipped=collectionClipped(value,safe)||clipped;
       return safe;
     };

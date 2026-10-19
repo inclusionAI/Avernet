@@ -1,3 +1,4 @@
+import { RepairMaterialRepository } from '../repositories/repair-material-repository.js';
 import { repairTaskPresentation } from '../contracts/repair-task-presentation.js';
 import {historicalReference,reviewVersionSelection,freezeReference,historicalIntegration} from './repair-historical-reference.js';
 import { inVersionScope, itemSnapshotKey } from '../contracts/repair-version-scope.js';
@@ -13,7 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { repairStage } from '../observability/repair-diagnostics.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import {
-  RepairBatchError, boundedRepairJson, canonicalRepairJson, digestRepairJson, validateRepairItem, validateRepairItemStructure, validateRepairModelInputs,
+  RepairBatchError, boundedRepairJson, canonicalRepairJson, digestRepairJson, validateRepairMaterialItem, validateRepairItemStructure, validateRepairModelInputs,
   MAX_ITEMS, MAX_REQUEST_BYTES, MAX_INSTRUCTIONS_CHARS, MAX_RESULT_BYTES, MAX_REPORT_BYTES,
   type RepairBatchInput, type RepairItem, type RepairRevision, type StoredRepairItem,
 } from '../contracts/repair-batch.js';
@@ -251,7 +252,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       }
     }
     if (mode === 'full') for (const item of items.values()) {
-      if (!scope?.itemIds || scope.itemIds.includes(item.itemId)) validateRepairItem(item);
+      if (!scope?.itemIds || scope.itemIds.includes(item.itemId)) validateRepairMaterialItem(item);
     }
     return { items: [...items.values()].map((item): RepairInboxItem => ({ ...item, selectionDigest: selectedContentDigest(item) })), inputDigest, materializable };
   }
@@ -427,6 +428,16 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       return item;
     });
   }
+  async material(taskId:string,revision:number,itemId:string):Promise<RepairItem>{
+    const workflowId=await new RepairBatchRepository(this.db).taskWorkflow(taskId);
+    if(!workflowId)fail('TASK_NOT_FOUND','Repair task does not exist');
+    const row=await new RepairBatchRepository(this.db).getRevision(workflowId,taskId,revision);
+    if(!row)fail('REVISION_NOT_FOUND','Repair revision does not exist');
+    const input=await new RepairMaterialRepository(this.db).expand(row.input);
+    const item=input.items.find(item=>item.itemId===itemId);
+    if(!item)fail('ITEM_NOT_FOUND','Item is not in the frozen selection');
+    return item;
+  }
   async items(workflowId: string, itemIds: string[]): Promise<RepairInboxItem[]> {
     if (!Array.isArray(itemIds) || !itemIds.length || itemIds.length > MAX_ITEMS || itemIds.some(id => !requiredText(id, 64)) || new Set(itemIds).size !== itemIds.length) fail('INVALID_INPUT', 'Invalid item scope');
     return serial(this.db, async () => {
@@ -558,7 +569,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         const excludedSourceRefs = snapshot.items.filter(item => !request.itemIds.includes(item.itemId) && item.sourceAvailable)
           .flatMap(item => item.sources).sort((a, b) => canonicalRepairJson(a).localeCompare(canonicalRepairJson(b)));
         const input: RepairBatchInput = { schemaVersion: 'workflow-repair/v2', taskId: id,
-          revision: (previous?.latestAttempt.revision ?? 0) + 1, baseline, items: this.proposals || integrated.integration ? prepareProposalEvidence(selected, !!request.automation) : selected,
+          revision: (previous?.latestAttempt.revision ?? 0) + 1, baseline, items: this.proposals || integrated.integration ? prepareProposalEvidence(selected, !!request.automation,{complete:true}) : selected,
           excludedSources: { count: excludedSourceRefs.length, digest: digestRepairJson(excludedSourceRefs) },
           ...(request.automation ? { automation: request.automation } : {}),
           ...('integration' in integrated && integrated.integration ? { integration: integrated.integration } : {}),
@@ -576,6 +587,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
   }
   private async dispatch(revision: RepairRevision, actorId?: string): Promise<void> {
     if (!this.execution || revision.phase !== 'drafting') return;
+    const executionInput=await new RepairMaterialRepository(this.db).expand(revision.input);
     const executionId = randomUUID();
     const claimed = await this.tx(async tx => {
       const current = await new RepairBatchRepository(tx).getRevision(revision.workflowId, revision.taskId, revision.revision);
@@ -586,7 +598,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     let failure: 'rejected' | 'uncertain' | null = null; let jobId: string | null = null;
     try {
       const identity = { stepId: claimed.stepId, attempt: claimed.attempt, executionId: claimed.executionId };
-      const receipt = await this.execution.dispatch({ input: revision.input, actorId: actorId ?? claimed.actorId, identity });
+      const receipt = await this.execution.dispatch({ input: executionInput, actorId: actorId ?? claimed.actorId, identity });
       if (!receipt?.jobId?.trim() || receipt.jobId.length > 255) throw new Error('Invalid AIS job id');
       jobId = receipt.jobId;
     } catch (error) {

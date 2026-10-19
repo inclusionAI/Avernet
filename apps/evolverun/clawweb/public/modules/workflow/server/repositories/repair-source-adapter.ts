@@ -2,7 +2,7 @@ import { workflowSnapshotKey, type WorkflowSnapshotBinding } from '@avernet/claw
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { repairStage } from '../observability/repair-diagnostics.js';
 import { RepairBatchError, canonicalRepairJson, digestRepairJson,
-  validateRepairItem, validateRepairItemStructure, type RepairItem, type RepairItemState } from '../contracts/repair-batch.js';
+  validateRepairMaterialItem, validateRepairItemStructure, type RepairItem, type RepairItemState } from '../contracts/repair-batch.js';
 import type { RepairSourcePort } from '../contracts/repair-workbench.js';
 
 type RecordValue = Record<string, unknown>;
@@ -205,7 +205,7 @@ export function createRepairSourcePort(readers: RepairSourceReaders): RepairSour
           .sort((a, b) => canonicalRepairJson(a).localeCompare(canonicalRepairJson(b)));
       }
       validateRepairItemStructure(row.item);
-      if (mode === 'full' && (!scope?.itemIds || scope.itemIds.includes(row.item.itemId))) validateRepairItem(row.item);
+      if (mode === 'full' && (!scope?.itemIds || scope.itemIds.includes(row.item.itemId))) validateRepairMaterialItem(row.item);
     }
     return [...items.values()].sort((a, b) => a.item.itemId.localeCompare(b.item.itemId));
   } };

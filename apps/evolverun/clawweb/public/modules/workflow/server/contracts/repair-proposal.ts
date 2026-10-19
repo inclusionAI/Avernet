@@ -8,6 +8,7 @@ export type ProposalGrouping = { plans: ProposalPlan[]; conflicts: ProposalConfl
 export type ProposalAggregation = {
   id: string; fingerprint: string; itemIds: string[]; title: string; changes: string[]; relation: ProposalRelation;
   status: 'ready' | 'queued' | 'organizing' | 'retryable' | 'unavailable' | 'uncertain' | 'stale';
+  diagnostic?: {reason:string;actualBytes?:number;limitBytes?:number;itemCount?:number};
   reevaluation?: boolean;
   causes?: ProposalCause[]; unknowns?: string[];
   flowIds: string[]; runCount?: number; originals: RepairInboxItem[]; conflicts: ProposalConflict[];

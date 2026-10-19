@@ -2,7 +2,7 @@ import type { RepairTrial, RepairTrialRequest, RepairTrialOptions, RepairTrialTa
 import { fetchJson } from '@avernet/clawweb-shared/web/api/client'
 import { readOnlyJson } from './read-only-json'
 import type { RepairCandidatesQuery, RepairCandidatesResponse, RepairDiff, RepairFeedbackRequest, RepairInboxItem, RepairSelectionRequest, RepairSelectionState, RepairTaskDetail } from '../../server/contracts/repair-workbench'
-import type { RepairRevision, StoredRepairItem } from '../../server/contracts/repair-batch'
+import type { RepairItem, RepairRevision, StoredRepairItem } from '../../server/contracts/repair-batch'
 import type { RepairConfirmRequest, RepairDeployRequest, RepairApproval, RepairDeployment, RepairReleaseTarget } from '../../server/contracts/repair-release'
 import type { RepairVerificationEvidence, RepairVerificationConclusion } from '../../server/contracts/repair-verification'
 
@@ -59,6 +59,7 @@ export const repairBatches = {
   },
   item: (workflowId: string, itemId: string, originalOnly = false) => readOnlyJson<RepairInboxItem>(`${base}/items/${segment(itemId)}?workflowId=${segment(workflowId)}${originalOnly ? '&originalOnly=true' : ''}`),
   task: (taskId: string, revisionPage = 1) => readOnlyJson<RepairTaskDetail>(`${base}/${segment(taskId)}${revisionPage > 1 ? `?revisionPage=${revisionPage}` : ''}`),
+  material: (taskId:string,revision:number,itemId:string) => readOnlyJson<RepairItem>(`${base}/${segment(taskId)}/revisions/${revision}/materials/${segment(itemId)}`),
   create: (request: RepairSelectionRequest) => post<RepairRevision>(base, request),
   revise: (taskId: string, request: RepairFeedbackRequest) => post<RepairRevision>(`${base}/${segment(taskId)}/revisions`, request),
   disposition: (itemId: string, request: { workflowId: string; inputDigest: string; expectedStateVersion: number; contentRevision: number; untilMs?: number; action: 'no_action' | 'restore'; reason: string; requestId: string; includeHistorical?: boolean }) =>

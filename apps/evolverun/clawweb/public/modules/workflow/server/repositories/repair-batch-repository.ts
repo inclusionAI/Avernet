@@ -1,10 +1,11 @@
+import { RepairMaterialRepository } from './repair-material-repository.js';
 import {historicalReference} from '../contracts/repair-version-scope.js';
 import { automaticAdvance, changedChainItems, isAutomaticBatch, retainedFeedbackCandidate } from '../contracts/repair-automatic-chain.js';
 import { repairEvidenceFacts, repairEvidenceFlows } from '../contracts/repair-batch.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import {
   RepairBatchError, boundedRepairJson, canonicalRepairJson, digestRepairJson,
-  validateRepairBatchInput, validateRepairItem, MAX_FROZEN_BYTES, MAX_REPORT_BYTES, MAX_RESULT_BYTES,
+  validateRepairBatchInput, validateRepairMaterialItem, MAX_MATERIAL_BYTES, MAX_FROZEN_BYTES, MAX_REPORT_BYTES, MAX_RESULT_BYTES,
   type RepairBatchInput, type RepairDisposition, type RepairItem, type RepairRevision, type StoredRepairItem,
 } from '../contracts/repair-batch.js';
 
@@ -90,14 +91,14 @@ export class RepairBatchRepository {
   }
 
   async materializeItem(tx: IDatabase, input: { workflowId: string; episodeKey: string; item: RepairItem }): Promise<StoredRepairItem> {
-    const item = validateRepairItem(input.item);
+    const item = validateRepairMaterialItem(input.item);
     if (!input.episodeKey?.trim() || input.episodeKey.length > 128) conflict('INVALID_INPUT', 'Invalid episodeKey');
     await this.lockWorkflow(tx, input.workflowId);
     if (item.previousItemId && !await this.readItem(tx, input.workflowId, item.previousItemId)) conflict('ITEM_NOT_FOUND', 'Previous item is not in this workflow');
     const identity = [input.workflowId, item.groupKey, item.proposalKey, input.episodeKey];
     const identityDigest = digestRepairJson(identity);
     const existing = (await tx.query<Row>('SELECT * FROM workflow_repair_items WHERE identity_digest = ?', [identityDigest]))[0];
-    const contentJson = boundedRepairJson(snapshotContent(item), MAX_FROZEN_BYTES);
+    const contentJson = boundedRepairJson(snapshotContent(item), MAX_MATERIAL_BYTES);
     if (existing) {
       if (canonicalRepairJson([existing.workflow_id, existing.group_key, existing.proposal_key, existing.episode_key]) !== canonicalRepairJson(identity)
         || canonicalRepairJson(content(itemFromRow(existing))) !== canonicalRepairJson(content(item))) conflict('CONTENT_MISMATCH', 'An immutable content identity cannot be replaced');
@@ -206,7 +207,7 @@ export class RepairBatchRepository {
   async createRevision(tx: IDatabase, request: {
     input: RepairBatchInput; requestId: string; requestDigest: string; expectedAttemptRevision: number;
   }): Promise<RepairRevision> {
-    const input = validateRepairBatchInput(request.input);
+    const input = validateRepairBatchInput(await new RepairMaterialRepository(tx).freeze(request.input));
     if (!request.requestId?.trim() || request.requestId.length > 128 || !/^[a-f0-9]{64}$/.test(request.requestDigest)) conflict('INVALID_INPUT', 'Invalid revision request identity');
     const workflowId = input.baseline.workflowId;
     await this.lockWorkflow(tx, workflowId);

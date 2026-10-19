@@ -1,6 +1,8 @@
+import { projectRepairEvidence } from '../contracts/repair-evidence-projection.js';
+import { recordProposalDiagnostic } from '../observability/repair-diagnostics.js';
 import { itemSnapshot, itemSnapshotKey } from '../contracts/repair-version-scope.js';
 import type { WorkflowSnapshotBinding, WorkflowSnapshotRef } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot';
-import { prepareProposalEvidence } from './repair-proposal-evidence.js';
+import {redactEvidenceValue} from '@avernet/clawweb-shared/server/services/redaction';
 import { needsReevaluation, assertProposalBaseline } from './repair-selection-review.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { canonicalRepairJson, digestRepairJson, repairEvidenceFlows, RepairBatchError, type RepairBaseline, type RepairItem } from '../contracts/repair-batch.js';
@@ -26,7 +28,7 @@ function eligible(items: RepairInboxItem[]) { return items.filter(item => item.s
 function scope(item: RepairInboxItem) { return String(item.context?.signature ?? item.groupKey); }
 function fingerprint(items: RepairInboxItem[], baseline?: RepairBaseline) {
   const source=itemSnapshot(items[0]);
-  return digestRepairJson({ version: source?'proposal-integration/v2':'proposal-integration/v1', ...(source?{sourceSnapshot:source}:{baseline:baseline??null}),
+  return digestRepairJson({ version:'proposal-integration/core-v1', ...(source?{sourceSnapshot:source}:{baseline:baseline??null}),
     items: [...items].sort((a,b)=>a.itemId.localeCompare(b.itemId)).map(item => ({ id:item.itemId, revision:item.contentRevision,
       proposal:item.proposal, instruction:item.instruction, sources:item.sources, context:item.context??null })) });
 }
@@ -40,11 +42,19 @@ function groups(items: RepairInboxItem[], baseline?: RepairBaseline) {
   }
   const out: Array<{key:string;items:RepairInboxItem[];fingerprint:string}>=[];
   for(const [base,list] of [...buckets].sort(([a],[b])=>a.localeCompare(b))) {
-    list.sort((a,b)=>a.itemId.localeCompare(b.itemId));
-    for(let offset=0;offset<list.length;offset+=100) {
-      const batch=list.slice(offset,offset+100);
-      out.push({key:canonicalRepairJson([base,batch[0].itemId]),items:batch,fingerprint:fingerprint(batch,baseline)});
+    const family=(item:RepairItem)=>canonicalRepairJson([...new Set(operations(item).map(op=>canonicalRepairJson([op.op,op.path??null])))].sort());
+    list.sort((a,b)=>family(a).localeCompare(family(b))||a.itemId.localeCompare(b.itemId));
+    let batch:RepairInboxItem[]=[],bytes=2;
+    const flush=()=>{if(batch.length)out.push({key:canonicalRepairJson([base,batch[0].itemId]),items:batch,fingerprint:fingerprint(batch,baseline)});batch=[];bytes=2;};
+    for(const item of list){
+      // Summary reads carry event ids. Reserve space for the bounded excerpts hydrated during work.
+      const diagnoses=Array.isArray(item.context?.diagnoses)?item.context.diagnoses.slice(0,2) as Array<Record<string,any>>:[];
+      const reserve=diagnoses.filter(row=>Array.isArray(row.evidenceEventIds)&&row.evidenceEventIds.length&&!Array.isArray(row.evidence)).length*4096;
+      const size=Buffer.byteLength(canonicalRepairJson(projectRepairEvidence(item,true)))+reserve+1;
+      if(batch.length&&(batch.length===100||bytes+size>179000))flush();
+      batch.push(item);bytes+=size;
     }
+    flush();
   }
   return out.sort((a,b)=>a.key.localeCompare(b.key));
 }
@@ -84,13 +94,14 @@ function validate(raw:unknown, items:RepairInboxItem[]): ProposalGrouping {
   }
   if(covered.size!==allowed.size)throw new Error('MODEL_OMITTED_SOURCE');
   const available = new Map(items.map(item => [item.itemId,new Set(((item.context?.diagnoses??[]) as Array<Record<string,any>>).flatMap(d => (Array.isArray(d.evidence)?d.evidence:[]).filter((e:any)=>!e.missing&&e.payload!=null).map((e:any)=>e.eventId)))]));
+  const completeEvidence=new Set(items.flatMap(item=>((item.context?.diagnoses??[]) as Array<Record<string,any>>).flatMap(d=>Array.isArray(d.evidence)?d.evidence.filter((e:any)=>!e.missing&&e.payload!=null&&e.payload?.truncated!==true).map((e:any)=>e.eventId):[])));
   const causes = data.causes ?? [];
   if(items.some(i=>Array.isArray(i.context?.diagnoses)&&i.context.diagnoses.length)&&(!Array.isArray(causes)||!causes.length))throw new Error('MODEL_OMITTED_CAUSES');
   if(!Array.isArray(causes)||causes.length>100||causes.some(c=>!c||typeof c.title!=='string'||!c.title.trim()||c.title.length>500||!['supported','hypothesis','unknown'].includes(c.certainty)
     ||!Array.isArray(c.itemIds)||!c.itemIds.length||c.itemIds.some(id=>!allowed.has(id))||!Array.isArray(c.evidenceIds)||c.evidenceIds.some(id=>!c.itemIds.some(itemId=>available.get(itemId)?.has(id)))))throw new Error('MODEL_CAUSE_REFERENCE_INVALID');
   if(data.unknowns!==undefined&&(!Array.isArray(data.unknowns)||data.unknowns.length>50||data.unknowns.some(t=>typeof t!=='string'||t.length>1000)))throw new Error('MODEL_UNKNOWNS_INVALID');
 
-  return {plans:data.plans.map(p=>({...p,itemIds:[...p.itemIds].sort()})),conflicts,causes:causes.map(c=>({...c,certainty:c.certainty==='supported'&&!c.evidenceIds.length?'hypothesis':c.certainty})),unknowns:data.unknowns??[]};
+  return {plans:data.plans.map(p=>({...p,itemIds:[...p.itemIds].sort()})),conflicts,causes:causes.map(c=>({...c,certainty:c.certainty==='supported'&&(!c.evidenceIds.length||!c.evidenceIds.some(id=>completeEvidence.has(id)))?'hypothesis':c.certainty})),unknowns:data.unknowns??[]};
 }
 /** Durable background projection. GETs never submit models; all inputs are read again before a result or candidate is used. */
 export function createProposalCoordinator(input:{db:IDatabase;read:(workflowId:string)=>Promise<ProposalSnapshot>;model?:ProposalModelPort;now?:()=>number;random?:()=>number; scopeKey?:string; hydrate?:(workflowId:string,items:RepairInboxItem[])=>Promise<RepairInboxItem[]>}) {
@@ -103,14 +114,14 @@ export function createProposalCoordinator(input:{db:IDatabase;read:(workflowId:s
     return {fresh,group:groups(fresh.items,fresh.baseline).find(g=>g.fingerprint===job.data.fingerprint)};
   }
   async function scan(root:string){
-    const scan=await repo.ensure(root,'proposal_scan','backfill-v1:'+(input.scopeKey??'database'),{},now());const lease=await repo.claim(scan.id,now());if(!lease)return;
+    const scan=await repo.ensure(root,'proposal_scan','backfill-core-v1:'+(input.scopeKey??'database'),{},now());const lease=await repo.claim(scan.id,now());if(!lease)return;
     let scannedWorkflow = '';
     try {
       const wf=(await input.db.query<{workflow_id:string}>('SELECT workflow_id FROM workflow_specs WHERE workflow_id > ? ORDER BY workflow_id LIMIT 1',[lease.data.workflowCursor??'']))[0];
       if(!wf){await repo.patch(lease,{data:{workflowCursor:'',groupCursor:''},nextAtMs:now()+15000},now(),true);return;}
       scannedWorkflow=wf.workflow_id;
       const data=await input.read(wf.workflow_id);const all=groups(data.items,data.baseline).filter(g=>g.key>(lease.data.groupCursor??''));
-      for(const g of all.slice(0,20))if(g.items.length>1&&exact(g.items).plans.length>1){
+      for(const g of all.slice(0,20))if(g.items.length>1&&exact(g.items).plans.length>1||Buffer.byteLength(canonicalRepairJson(projectRepairEvidence(g.items[0],true)))>180000){
         const j=await repo.ensure(wf.workflow_id,'proposal_group',key(g.fingerprint),{fingerprint:g.fingerprint,scope:g.key,scopeKey:input.scopeKey??'database'},now());
         if(j.stateVersion===0){const claim=await repo.claim(j.id,now());if(claim)await repo.patch(claim,{nextAtMs:now()+2000},now(),true);}
       }
@@ -121,14 +132,16 @@ export function createProposalCoordinator(input:{db:IDatabase;read:(workflowId:s
     let job=await repo.claim(record.id,now());if(!job)return;
     if(job.id!==digestRepairJson([job.workflowId,'proposal_group',key(job.data.fingerprint)])){await repo.patch(job,{status:'done',reason:'PROVIDER_CHANGED'},now(),true);return;}
     let budget:AutomationJob|null=null;
+    let sizes:{actualBytes?:number;limitBytes?:number;itemCount?:number}={};
     try{
       const {fresh,group}=await jobGroup(job);
-      if(!group){await repo.patch(job,{status:'done',reason:'SUPERSEDED'},now(),true);return;}
-      if(!input.model){await repo.patch(job,{status:'blocked',reason:'MODEL_UNAVAILABLE'},now(),true);return;}
+      if(!group){recordProposalDiagnostic({workflowId:job.workflowId,fingerprint:job.data.fingerprint,reason:'SUPERSEDED'});await repo.patch(job,{status:'done',reason:'SUPERSEDED'},now(),true);return;}
+      if(!input.model){recordProposalDiagnostic({workflowId:job.workflowId,fingerprint:job.data.fingerprint,reason:'MODEL_UNAVAILABLE',itemCount:group.items.length});await repo.patch(job,{status:'blocked',reason:'MODEL_UNAVAILABLE'},now(),true);return;}
       const hydrated=input.hydrate?await input.hydrate(job.workflowId,group.items):group.items;
-      const modelItems=prepareProposalEvidence(hydrated);
+      const modelItems=hydrated.map(item=>{const projected=projectRepairEvidence(item,true);return {...projected,context:redactEvidenceValue(projected.context) as Record<string,unknown>};});
       const bytes=Buffer.byteLength(canonicalRepairJson(modelItems));
-      if(group.items.length>100||bytes>180000){await repo.patch(job,{status:'blocked',reason:'SCOPE_TOO_LARGE'},now(),true);return;}
+      sizes={actualBytes:bytes,limitBytes:180000,itemCount:group.items.length};
+      if(group.items.length>100||bytes>180000){const diagnostic={reason:'SCOPE_TOO_LARGE',actualBytes:bytes,limitBytes:180000,itemCount:group.items.length};recordProposalDiagnostic({workflowId:job.workflowId,fingerprint:group.fingerprint,...diagnostic});await repo.patch(job,{status:'blocked',reason:diagnostic.reason,data:{...job.data,diagnostic}},now(),true);return;}
       const global=await repo.ensure(root,'proposal_budget',input.model.key,{window:now(),tokens:0,requests:0},now());
       if(global.status==='blocked'){await repo.patch(job,{status:'blocked',reason:'PROVIDER_REQUIRES_RECOVERY'},now(),true);return;}
       budget=await repo.claim(global.id,now());
@@ -144,13 +157,15 @@ export function createProposalCoordinator(input:{db:IDatabase;read:(workflowId:s
       finally{if(timer)clearTimeout(timer);}
       const validated=validate(result,modelItems);
       const latest=await jobGroup(job);
-      if(!latest.group){await repo.patch(job,{status:'done',reason:'SUPERSEDED'},now(),true);return;}
+      if(!latest.group){recordProposalDiagnostic({workflowId:job.workflowId,fingerprint:job.data.fingerprint,reason:'SUPERSEDED'});await repo.patch(job,{status:'done',reason:'SUPERSEDED'},now(),true);return;}
       await repo.patch(job,{status:'done',reason:null,data:{...job.data,result:validated}},now(),true);
     }catch(error){
       const e=error as {status?:number;retryAfterMs?:number;permanent?:boolean};
       const transient=!e.permanent&&(e.status===429||e.status===408||e.status===504||!!e.status&&e.status>=500);
       const delay=Math.max(Number(e.retryAfterMs)||0,Math.min(300000,2000*2**job.attempts)*(1+random()));
-      await repo.patch(job,{status:transient&&job.attempts<4?'retryable':'blocked',reason:transient?'MODEL_RETRY_EXHAUSTED_OR_DELAYED':'MODEL_UNAVAILABLE_OR_INVALID',nextAtMs:now()+delay},now(),true);
+      const reason=transient?'MODEL_RETRY_EXHAUSTED_OR_DELAYED':'MODEL_UNAVAILABLE_OR_INVALID';
+      const diagnostic={...sizes,reason};recordProposalDiagnostic({workflowId:job.workflowId,fingerprint:job.data.fingerprint,...diagnostic});
+      await repo.patch(job,{status:transient&&job.attempts<4?'retryable':'blocked',reason,data:{...job.data,diagnostic},nextAtMs:now()+delay},now(),true);
       if(budget&&(e.permanent||[400,401,402,403].includes(e.status??0))){await repo.patch(budget,{status:'blocked',reason:'PROVIDER_REQUIRES_RECOVERY'},now(),true);budget=null;}
       if(budget&&e.status===429){await repo.patch(budget,{nextAtMs:now()+delay},now(),true);budget=null;}
     }finally{if(budget)await repo.patch(budget,{nextAtMs:now()+1000},now(),true);}
@@ -160,7 +175,7 @@ export function createProposalCoordinator(input:{db:IDatabase;read:(workflowId:s
     const fallback=exact(items);
     let result=job?.status==='done'&&job.data.result?job.data.result as ProposalGrouping:fallback;
     const status:ProposalAggregation['status']=job?.status==='done'&&job.data.result?'ready':job?.status==='dispatching'?'organizing':job?.status==='retryable'?'retryable':job?.status==='blocked'?'unavailable':job?'queued':'uncertain';
-    return {fp,result,status};
+    return {fp,result,status,diagnostic:job?.data.diagnostic??(status==='ready'?undefined:{reason:job?.reason??(job?'RESULT_NOT_READY':'CURRENT_RESULT_MISSING')})};
   }
   return {
     async tick(){
@@ -183,12 +198,12 @@ export function createProposalCoordinator(input:{db:IDatabase;read:(workflowId:s
     async present(wf:string,items:RepairInboxItem[],baseline?:RepairBaseline){
       const presented:RepairInboxItem[]=items.filter(i=>!i.sourceAvailable||i.state!=='pending');
       for(const g of groups(items,baseline)){
-        const {fp,result,status}=await resolution(wf,g.items,baseline);
+        const {fp,result,status,diagnostic}=await resolution(wf,g.items,baseline);
         for(const plan of result.plans){
           const originals=plan.itemIds.map(id=>g.items.find(i=>i.itemId===id)!);
           const reevaluation=originals.some(item=>!current(item,baseline));
-          const aggregation:ProposalAggregation={...plan,id:digestRepairJson([fp,plan.itemIds]),fingerprint:fp,reevaluation,status:reevaluation&&g.items.length===1?'stale':plan.relation==='exact'&&(originals.length>1||g.items.length===1)?'ready':status,
-            originals,...(result.causes?{causes:result.causes.filter(c=>c.itemIds.some(id=>plan.itemIds.includes(id)))}:{}),...(result.unknowns?{unknowns:result.unknowns}:{}),flowIds:[...new Set(originals.flatMap(repairEvidenceFlows))].sort(),conflicts:result.conflicts.filter(c=>c.itemIds.some(id=>plan.itemIds.includes(id)))};
+          const aggregation:ProposalAggregation={...plan,id:digestRepairJson([fp,plan.itemIds]),fingerprint:fp,reevaluation,status:reevaluation&&g.items.length===1?'stale':plan.relation==='exact'&&(originals.length>1||g.items.length===1&&status!=='unavailable')?'ready':status,
+            originals,...(diagnostic?{diagnostic}:{}),...(result.causes?{causes:result.causes.filter(c=>c.itemIds.some(id=>plan.itemIds.includes(id)))}:{}),...(result.unknowns?{unknowns:result.unknowns}:{}),flowIds:[...new Set(originals.flatMap(repairEvidenceFlows))].sort(),conflicts:result.conflicts.filter(c=>c.itemIds.some(id=>plan.itemIds.includes(id)))};
           presented.push({...originals[0],aggregation});
         }
       }

@@ -152,7 +152,7 @@ describe('trusted workflow repair source adapter', () => {
     expect(warning).not.toHaveBeenCalled();
     warning.mockRestore();
   });
-  it('retains oversized legacy suggestions for reads and rejects only selected frozen inputs', async () => {
+  it('retains large legacy material intact for the separate frozen-material budget', async () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const suggestions = async () => [
       { id: 1, workflow_id: 'wf', failure_signature: 'bad', fix_spec: '过大建议', proposal_json: JSON.stringify({ ...proposal(), details: 'x'.repeat(1_100_000) }), status: 'pending' },
@@ -164,7 +164,8 @@ describe('trusted workflow repair source adapter', () => {
     const small = result.find(row => row.item.instruction === '增加超时')!;
     const large = result.find(row => row.item.instruction === '过大建议')!;
     expect((await port.load(db, 'wf', 'full', { itemIds: [small.item.itemId] }))).toHaveLength(2);
-    await expect(port.load(db, 'wf', 'full', { itemIds: [large.item.itemId] })).rejects.toMatchObject({ code: 'PAYLOAD_TOO_LARGE', details: { stage: 'frozen_item' } });
+    const full=await port.load(db, 'wf', 'full', { itemIds: [large.item.itemId] });
+    expect(full.find(row=>row.item.itemId===large.item.itemId)!.item.proposal).toEqual(large.item.proposal);
     expect(warning).not.toHaveBeenCalled();
     warning.mockRestore();
   });

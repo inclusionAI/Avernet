@@ -34,3 +34,8 @@ export function finishRepairDiagnostic(context: Diagnostic, method: string, rout
   if (status >= 400) console.warn('[workflow-repair] request diagnostic', JSON.stringify(record));
   else console.info('[workflow-repair] request diagnostic', JSON.stringify(record));
 }
+
+/** Background aggregation failures contain identifiers and budgets, never model inputs or upstream text. */
+export function recordProposalDiagnostic(record:{workflowId:string;fingerprint:string;reason:string;actualBytes?:number;limitBytes?:number;itemCount?:number}):void{
+ console.warn('[workflow-repair] proposal diagnostic',JSON.stringify({...record,instance:hostname()}));
+}

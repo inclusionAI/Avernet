@@ -6,6 +6,8 @@ export const REPAIR_BATCH_SCHEMA = 'workflow-repair/v2' as const;
 export const MAX_ITEMS = 100;
 export const MAX_REQUEST_BYTES = 64 * 1024;
 export const MAX_FROZEN_BYTES = 1024 * 1024;
+// Separate bounded storage/transport budget; core inputs keep their existing 1 MiB limit.
+export const MAX_MATERIAL_BYTES = 16 * 1024 * 1024 - 4096;
 export const MAX_MODEL_INPUT_BYTES = 256 * 1024;
 export const MAX_RESULT_BYTES = 512 * 1024;
 export const MAX_PACK_BYTES = 20 * 1024 * 1024;
@@ -40,6 +42,7 @@ export type RepairBaseline = {
 export type RepairBatchInput = {
   schemaVersion: typeof REPAIR_BATCH_SCHEMA; taskId: string; revision: number; baseline: RepairBaseline;
   items: RepairItem[]; excludedSources: { count: number; digest: string }; instructions: string;
+  materials?: {schemaVersion:'repair-frozen-materials/v1';recordId:string;sha256:string;bytes:number};
   automation?: AutomationOrigin;
   integration?: { schemaVersion: 'workflow-proposal-plan/v1'; baselineSpecDigest: string; plans: Array<{ id: string; originalItemIds: string[]; goals: string[]; relation: string; causes?: import('./repair-proposal.js').ProposalCause[]; unknowns?: string[] }> };
   parentCandidateCommit: string | null; feedback: string; previousReportRef: string | null; taskBranch: string;
@@ -148,6 +151,12 @@ export function validateRepairItem(value: unknown): RepairItem {
   }
   return item;
 }
+/** Complete source bodies use the separate material budget; inline/core items keep their original cap. */
+export function validateRepairMaterialItem(value:unknown):RepairItem{
+ const item=validateRepairItemStructure(value);valid(text(item.instruction,MAX_INSTRUCTIONS_CHARS,true),'instruction');
+ try{boundedRepairJson(item,MAX_MATERIAL_BYTES);}catch(error){if(error instanceof RepairBatchError)throw new RepairBatchError(error.code,error.message,{...error.details,stage:'source_material',reasonCode:'REPAIR_MATERIALS_TOO_LARGE'});throw error;}
+ return item;
+}
 export function validateAutomationOrigin(value: unknown): AutomationOrigin {
   valid(object(value) && value.kind === 'daily' && digest(value.intentId)
     && integer(value.policyVersion, 1) && integer(value.evidenceCutoffMs, 1), 'automation origin');
@@ -167,6 +176,7 @@ export function validateRepairBatchInput(value: unknown): RepairBatchInput {
   valid(gitIdentity(value.taskId, 64) && integer(value.revision, 1), 'revision identity');
   valid(Array.isArray(value.items) && value.items.length > 0 && value.items.length <= MAX_ITEMS, 'items');
   value.items.forEach(validateRepairItem);
+  if(value.materials!==undefined){const ref=value.materials;valid(object(ref)&&ref.schemaVersion==='repair-frozen-materials/v1'&&digest(ref.recordId)&&digest(ref.sha256)&&integer(ref.bytes,1)&&Number(ref.bytes)<=MAX_MATERIAL_BYTES,'frozen materials');}
   if (value.automation !== undefined) validateAutomationOrigin(value.automation);
   if (value.integration !== undefined) {
     const integration = value.integration;
@@ -216,7 +226,8 @@ export function validateRepairBatchInput(value: unknown): RepairBatchInput {
 /** Flow identity, rather than analysis IDs or rewritten text, detects materially new ignored-scope evidence. */
 export function repairEvidenceFlows(item: RepairItem): string[] {
   const diagnoses = Array.isArray(item.context?.diagnoses) ? item.context.diagnoses : [];
-  return [...new Set([...item.sources.flatMap(source => source.kind === 'diagnosis_candidate' ? [source.flowId] : []),
+  const summary=item.context?.evidenceSummary as {flowIds?:string[]}|undefined;
+  return [...new Set([...(Array.isArray(summary?.flowIds)?summary.flowIds:[]),...item.sources.flatMap(source => source.kind === 'diagnosis_candidate' ? [source.flowId] : []),
     ...diagnoses.flatMap((entry: any) => [entry?.flowId, ...(Array.isArray(entry?.flowIds) ? entry.flowIds : [])]),
     ...(Array.isArray(item.context?.suggestions) ? item.context.suggestions : []).flatMap((entry:any)=>Array.isArray(entry?.runIds)?entry.runIds:Array.isArray(entry?.impactRunIds)?entry.impactRunIds:[])]
     .filter((id): id is string => typeof id === 'string' && !!id))].sort();
@@ -224,8 +235,9 @@ export function repairEvidenceFlows(item: RepairItem): string[] {
 
 export function repairEvidenceFacts(item: RepairItem) {
   const diagnoses = Array.isArray(item.context?.diagnoses) ? item.context.diagnoses : [];
-  const eventIds = [...new Set(diagnoses.flatMap((entry: any) => Array.isArray(entry?.evidenceEventIds) ? entry.evidenceEventIds : [])
+  const summary=item.context?.evidenceSummary as {eventIds?:string[];severity?:number}|undefined;
+  const eventIds = [...new Set([...(Array.isArray(summary?.eventIds)?summary.eventIds:[]),...diagnoses.flatMap((entry: any) => Array.isArray(entry?.evidenceEventIds) ? entry.evidenceEventIds : [])]
     .filter((id: unknown): id is string => typeof id === 'string'))].sort() as string[];
   const severity = diagnoses.reduce((rank: number, entry: any) => Math.max(rank, ['low', 'medium', 'high', 'critical'].indexOf(entry?.severity) + 1), 0);
-  return { eventIds, severity };
+  return { eventIds, severity:Math.max(severity,summary?.severity??0) };
 }

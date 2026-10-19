@@ -287,3 +287,23 @@ it.each(['current','historical'] as const)('keeps cross-issue plans and conflict
  }
  expect(classify).toHaveBeenCalledTimes(1);
 });
+
+it('classifies large report histories using bounded evidence excerpts while retaining every original',async()=>{
+ const {c,read,classify,advance}=await setup(18);
+ f.items.forEach((item,i)=>{item.context={nodeId:'query',diagnoses:[{flowId:`run-${i}`,analysisContext:{facts:['observed timeout']},evidence:[{eventId:`event-${i}`,payload:{report:'evidence line\n'.repeat(25000)}}]}]};});
+ classify.mockImplementationOnce(async(input:any)=>({plans:[{itemIds:input.items.map((item:any)=>item.itemId),title:'补齐超时与重试约束',changes:['保留各节点参数'],relation:'complementary'}],conflicts:[],causes:[{title:'observed timeout',certainty:'supported',itemIds:['item-0'],evidenceIds:['event-0']}]}));
+ await c.tick();advance(3000);await c.tick();
+ expect(classify).toHaveBeenCalledOnce();
+ const request=classify.mock.calls[0][0];expect(Buffer.byteLength(JSON.stringify(request.items))).toBeLessThan(180000);
+ expect(request.items[0].context.diagnoses[0].analysisContext.facts).toEqual(['observed timeout']);
+ const snapshot=await read('wf-1');const cards=await c.present('wf-1',snapshot.items,snapshot.baseline);
+ expect(cards).toHaveLength(1);expect(cards[0].aggregation?.itemIds).toHaveLength(18);
+ expect(cards[0].aggregation?.causes?.[0].certainty).toBe('hypothesis');
+ expect((cards[0].aggregation!.originals[0].context!.diagnoses as any[])[0].evidence[0].payload.report).toBe('evidence line\n'.repeat(25000));
+});
+it('retains actionable byte diagnostics when one aggregation goal itself exceeds the input budget',async()=>{
+ const {c,read,advance}=await setup(2);(f.items[0].proposal!.operations as any[])[0].value='long goal\n'.repeat(20000);
+ await c.tick();advance(3000);await c.tick();
+ const snapshot=await read('wf-1');const cards=await c.present('wf-1',snapshot.items,snapshot.baseline);
+ expect(cards.find(card=>card.itemId==='item-0')?.aggregation?.diagnostic).toMatchObject({reason:'SCOPE_TOO_LARGE',limitBytes:180000,itemCount:1});
+});

@@ -49,17 +49,20 @@ it('generates against current Git while preserving the selected original proposa
   expect(f.calls).toHaveLength(1);
   expect(await f.db.query('SELECT * FROM workflow_repair_revisions')).toHaveLength(1);
 });
-it('reads bounded selection identities for >1MiB evidence but still rejects generation before freezing or dispatch', async () => {
+it('reads bounded selection identities and freezes >1MiB evidence independently', async () => {
   const service = await setup();
+  for(const m of repairReleaseMigrations)for(const sql of m.sql)await f.db.exec(f.db.dialect.renderDdl(sql));
   f.items[0].context = { diagnoses: [{ flowId: 'large-run', evidence: [{ eventId: 'large', payload: { text: 'x'.repeat(1_100_000) } }] }] };
   const state = await service.selectionState('wf-1', ['item-0'], false);
   expect(state.items).toHaveLength(1);
   expect(JSON.stringify(state).length).toBeLessThan(12000);
   expect(state.items[0].selectionDigest).toMatch(/^[a-f0-9]{64}$/);
-  await expect(service.create('human', { workflowId: 'wf-1', itemIds: ['item-0'], inputDigest: state.inputDigest,
-    selection: { 'item-0': state.items[0].selectionDigest! }, instructions: '', requestId: 'large' })).rejects.toMatchObject({ code: 'PAYLOAD_TOO_LARGE' });
-  expect(f.calls).toHaveLength(0);
-  expect(await f.db.query('SELECT * FROM workflow_repair_revisions')).toHaveLength(0);
+  const revision=await service.create('human', { workflowId: 'wf-1', itemIds: ['item-0'], inputDigest: state.inputDigest,
+    selection: { 'item-0': state.items[0].selectionDigest! }, instructions: '', requestId: 'large' });
+  expect(revision.input.materials).toBeDefined();expect(Buffer.byteLength(JSON.stringify(revision.input))).toBeLessThan(1024*1024);
+  expect(JSON.stringify((await service.material(revision.taskId,1,'item-0')).context)).toContain('x'.repeat(1_100_000));
+  expect(f.calls).toHaveLength(1);
+  expect(await f.db.query('SELECT * FROM workflow_repair_revisions')).toHaveLength(1);
 });
 it.each(['operations', 'patches'])('passes conflicting %s as draft goals without applying either one', async kind => {
   const service = await setup();

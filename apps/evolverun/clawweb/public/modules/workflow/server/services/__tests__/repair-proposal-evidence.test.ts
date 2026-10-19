@@ -27,3 +27,12 @@ it('retains all 500 allowed events and does not treat removed credential fields 
  expect(diagnoses[0].evidence[499].payload).toEqual({observation:'value-499'});
  expect(JSON.stringify(prepared)).not.toContain('dummy');
 });
+
+it('retains complete redacted material independently from the bounded aggregation view',()=>{
+ const report='evidence line\n'.repeat(25000);
+ const original=item({diagnoses:[{flowId:'run',evidence:[{eventId:'report',payload:{report,apiKey:'dummy'}}]}]});
+ const full=prepareProposalEvidence([original],true,{complete:true})[0];
+ expect((full.context!.diagnoses as any[])[0].evidence[0].payload.report).toBe(report);
+ expect(JSON.stringify(full)).not.toContain('dummy');
+ expect(full.context?.evidencePacket).toMatchObject({clipped:false});
+});

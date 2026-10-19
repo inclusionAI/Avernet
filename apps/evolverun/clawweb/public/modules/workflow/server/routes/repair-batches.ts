@@ -226,6 +226,11 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
     const selected = await taskAccess(req, res, 'edit');
     if (selected) res.json(await release().reconcile(selected.actor.actorId, selected.task.taskId, text(req.params.deploymentId, 'deploymentId')));
   }));
+  router.get('/:taskId/revisions/:revision/materials/:itemId',handle(async(req,res)=>{
+    const selected=await taskAccess(req,res,'view');if(!selected)return;
+    if(!service.material)throw new RepairBatchError('CAPABILITY_UNAVAILABLE','冻结材料读取尚未配置');
+    res.json(await service.material(selected.task.taskId,revision(req.params.revision),text(req.params.itemId,'itemId')));
+  }));
   router.get('/:taskId/revisions/:revision', handle(async (req, res) => {
     const selected = await taskAccess(req, res, 'view');
     if (!selected) return;
