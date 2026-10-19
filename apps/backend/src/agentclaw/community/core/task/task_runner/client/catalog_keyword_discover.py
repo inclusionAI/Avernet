@@ -14,6 +14,7 @@ import logging
 import uuid
 from typing import Any
 
+from agentclaw.community.core.bot_management.utils import extract_agent_code_from_ext
 from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogCaller,
     BotCatalogSearchFilters,
@@ -39,8 +40,19 @@ def _normalize_state(value: Any) -> str:
     return str(value if value is not None else "").strip().lower()
 
 
+def _credential_ready(item: dict[str, Any]) -> bool:
+    """Return whether the candidate has a persisted execution credential.
+
+    The catalog can expose public entries that are still not executable by the relay
+    runtime because their backend record lacks the bot-level ``agent_code``. That
+    means a plain ``is_online/active`` check is not enough for task dispatch.
+    """
+    code = extract_agent_code_from_ext(item)
+    return bool(code and str(code).strip())
+
+
 def _runtime_ready(item: dict[str, Any]) -> bool:
-    """Post-filter catalog-online candidates that are currently undispatchable.
+    """Post-filter catalog-online candidates by backend runtime readiness.
 
     Only the existing authoritative runtime fields are interpreted:
     ``is_online`` from BCS catalog metadata, ``runtime_state`` from the legacy
@@ -90,9 +102,9 @@ class CatalogKeywordBotDiscover:
 
     - 关键词为空 → 返空(对齐 catalog 空关键词行为);
     - 无语义 score → 合成 ``recommend.score``(命中次序降权),保 stable 排序供策略排序;
-    - ``filters`` 的关键字意图由本地 runtime post-filter 保护:只解释现有契约中的
+    - ``filters`` 的关键字意图由本地 runtime + credential readiness post-filter 保护:只解释现有契约中的
       ``is_online``/``runtime_state``/Bot 生命周期 ``status`` 三类权威字段,且只有
-      online/ACTIVE 才可派发;字段缺失时不误伤;catalog 视野用
+      online/ACTIVE 且 ``ext.passport.agent_code`` 非空才可派发;运行态字段缺失时不误伤;catalog 视野用
       ``_DISPATCH_CATALOG_FILTERS`` 锁 ``visibility=public`` 且中和 ``user_visibility``
       (BCS None/Human 分支默认 {public,protected}),只取公开可认领 bot,不含 protected;
     - 身份参数:catalog ``caller`` 在 ``search_public_bot_metadata`` 顶部即 ``del caller``(废弃),
@@ -175,7 +187,11 @@ class CatalogKeywordBotDiscover:
             return []
         raw_items = res.get("items") or [] if isinstance(res, dict) else []
         valid_items = [item for item in raw_items if isinstance(item, dict)]
-        items = [item for item in valid_items if _runtime_ready(item)]
+        items = [
+            item
+            for item in valid_items
+            if _runtime_ready(item) and _credential_ready(item)
+        ]
         filtered_count = len(valid_items) - len(items)
         if filtered_count:
             logger.info(
