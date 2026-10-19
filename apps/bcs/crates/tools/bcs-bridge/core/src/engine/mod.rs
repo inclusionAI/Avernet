@@ -22,6 +22,7 @@
 //!   and await their resolution, or reject engine-side requests.
 
 pub mod claude_code;
+mod claude_completion;
 pub mod cli;
 pub mod codex_app_server;
 pub mod codex_desktop;

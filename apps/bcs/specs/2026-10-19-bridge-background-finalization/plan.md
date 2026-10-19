@@ -1,9 +1,30 @@
 # Bridge 后台任务收尾执行计划
 
 > 日期：2026-10-19
-> 状态：文档已起草；实现、Hook 隔离验证、公共/内部 Cargo 测试、发布均未执行。
+> 状态：隔离 opt-in 实现及公共回归完成；完整兼容性验收与内部启动检查尚未通过，不能推广。实际证据见 [validation.md](validation.md)。原计划的外部 helper/socket 由原生 SDK 控制协议替代。
 > 基线：GitHub `dev` 的 `7385c8323439081a4022b0623e13788d7f816e35`。
 > [Spec](spec.md) · [故障与已有实验](research.md)
+
+> 2026-10-20 交付指令：用户已明确授权 commit、push 和面向 dev 的 PR，并要求不再运行验证。下文未授权提交的记录描述此前实现阶段；本次交付沿用 validation.md 中的既有测试证据。
+
+## 当前执行结果
+
+以下原始检查表保留设计要求；本表和 validation.md 记录本次实际完成范围，未完成项不视为通过。
+
+| 阶段 | 实际结果 |
+| --- | --- |
+| P0 | 基线 53 个 Claude 测试通过；完成 mapper、权限及 trace 依赖盘点 |
+| P1 | 验证原生回调顺序、重复 Stop、既有 Hook 共存及 shell/subagent 有限范围；完整 G3/G4 未通过 |
+| P2 | 12 个确定性驱动测试通过，包含多个负例表及红绿记录 |
+| P3 | 受控拆分后旧测试通过；实现有限大小的候选、快照、去重和终态判定 |
+| P4 | 原生 initialize/hook_callback 代替 helper/socket；有界且可取消的 ACK，未修改用户设置 |
+| P5 | legacy/observe/hook_idle 接线；新模式不依赖旧消费 pending；唯一 TurnOutcome 出口 |
+| P6 | 公共 336 通过、2 忽略；另行实机测试 5 场景通过；架构检查通过；内部 --locked 启动测试被基线锁文件不一致阻塞 |
+| P7 | 新模式移除消费启发式，保留默认 legacy 和兼容说明；生产回滚演练、完整兼容矩阵及发布未执行 |
+
+一次独立审查发现的 3 项 Important 均已复现并修复；无遗留 minor。
+本次仅交付隔离研究验证用的显式 opt-in。managed policy、完整嵌套/恢复后台任务、
+MCP/workflow/监控及跨版本支持仍需补证据；未授权 commit/push/发布，工作区保持未提交。
 
 ## 0. 执行约束与工作区
 
@@ -50,8 +71,8 @@ P1 的输出必须包含准确的 Hook↔epoch↔result↔idle 关联算法及�
 - [x] 阅读当前 `claude_code.rs`、run outcome/Terminate 清理路径和发行注册入口。
 - [x] 确认 retention 回收已在当前 baseline，和本修复分开。
 - [x] 归档既有八组 stdout 实验的脱敏结论；没有宣称 Hook 验证已完成。
-- [ ] 跑下列现有测试，记录测试数、耗时、环境及失败分类。当前文档阶段尚未运行。
-- [ ] 盘点 mapper 的名称关联、工具结果、HITL、trace、session observer 依赖，确定最小拆分边界。
+- [x] 跑现有公共测试并记录实际结果；基线 53 通过，最终全套 336 通过，详见 validation.md。
+- [x] 盘点 mapper 的名称关联、工具结果、HITL、trace、session observer 依赖，确定最小拆分边界。
 
 ```bash
 cargo test --locked -p bcs-bridge-core --lib engine::claude_code::tests::
@@ -127,7 +148,10 @@ cargo test --locked -p bcs-bridge-core --test e2e_webhook
 
 **完成条件：** AC-01～09/14 纯逻辑通过；生产接线前仍默认 legacy。
 
-## P4. 自动 Hook helper 与本地报告通道
+## P4. 自动 Hook 注册（实现修订：原生控制通道）
+
+实施采用 spec §5 原生 initialize/hook_callback，不再新增下面最初规划的 helper/socket 文件。
+两者目的相同：进程隔离、主动结构化报告、原设置保留、有界 ACK；实际实现与测试见 validation.md。
 
 建议新增/修改：
 
@@ -201,4 +225,4 @@ cargo test --locked --manifest-path apps/bcs-internal/Cargo.toml -p bcs-bridge -
 - [ ] 公共变更先经 GitHub dev 的 PR/CI；内部发行后更新 OCB gitlink。提交/推送/发布需要后续明确授权。
 
 **最终交付定义：** 有支持范围、有成功与提前结束反例测试、有可回滚开关；不是“加入 Hook”
-或“减少了 pending”就宣称修复完成。本次文档任务仅提供研究、spec 和计划，不执行上述实现。
+或“减少了 pending”就宣称修复完成。用户后续要求继续实现；本次实现与有限验证结果见上表，完整发布验收尚未完成。

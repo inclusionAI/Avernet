@@ -16,6 +16,7 @@ pub struct CliSession {
     /// pid, so the group address still belongs to this session's tree only.
     reaped: bool,
     stdout_buffer: Vec<u8>,
+    stdout_limit: usize,
 }
 
 impl CliSession {
@@ -82,6 +83,7 @@ impl CliSession {
             trace,
             reaped: false,
             stdout_buffer: Vec::new(),
+            stdout_limit: usize::MAX,
         })
     }
 
@@ -108,8 +110,22 @@ impl CliSession {
         self.stdin = None;
     }
 
+    pub(super) fn limit_stdout_line(&mut self, bytes: usize) { self.stdout_limit = bytes; }
+
     pub async fn next_line(&mut self) -> std::io::Result<Option<String>> {
-        let n = self.stdout.read_until(b'\n', &mut self.stdout_buffer).await?;
+        let n = loop {
+            let available = self.stdout.fill_buf().await?;
+            if available.is_empty() { break 0; }
+            let end = available.iter().position(|b| *b == b'\n');
+            let take = end.map_or(available.len(), |i| i + 1);
+            if take > self.stdout_limit.saturating_sub(self.stdout_buffer.len()) {
+                self.stdout_buffer.clear();
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "engine stdout line exceeds configured limit"));
+            }
+            self.stdout_buffer.extend_from_slice(&available[..take]);
+            self.stdout.consume(take);
+            if end.is_some() { break take; }
+        };
         if n == 0 && self.stdout_buffer.is_empty() {
             return Ok(None);
         }

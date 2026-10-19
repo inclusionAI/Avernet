@@ -1,10 +1,10 @@
 # Bridge 后台任务收尾 Spec：Result + Idle + Stop 快照
 
 > 日期：2026-10-19
-> 状态：设计草案；方向已选定，G1–G4 未验收，不允许启用强制新判定。
+> 状态：已实现显式 opt-in；仅验证 cfuse 2.6.44 → Claude Code 2.1.199 的有限能力范围。默认 legacy，推广门槛和未测边界见 validation.md。
 > Owner：公共 BCS `bcs-bridge-core` 引擎适配边界；内部 launcher 由发行 composition 接线。
 > 公共源码基线：`7385c8323439081a4022b0623e13788d7f816e35`。
-> [问题与实验证据](research.md) · [执行计划](plan.md)
+> [问题与实验证据](research.md) · [执行计划](plan.md) · [实现验证](validation.md)
 
 ## 1. 决策与范围
 
@@ -12,7 +12,7 @@
 新到达的原生 idle 和有效 Stop 后台快照**共同判定 BCS run 收尾。不读取 transcript，
 不解析运行日志，不再以 bridge 启发式消费 pending 作为 final 的硬门槛。
 
-这是一项带前置能力验证的方案，不声称三种信号在当前 launcher 上已完成可靠接线。
+当前实现已通过真实 launcher 的普通回复、恢复会话、后台 Bash、执行中消费及通知入队验证。它仍是隔离研究验证用的有限范围 opt-in，不等于全部任务类别和企业策略已验收。
 如果无法证明同轮关联或快照覆盖，停止启用此路径并记录缺少的协议能力，不用时间窗、
 文本相似度、计数猜测补洞。
 
@@ -23,8 +23,8 @@
   本项 bridge 完成判定的既有 ADR；本草案不替换任何 accepted ADR。
 - 保持 BCS Plugin V2/V3、Gateway SSE 的现有终态语义；一个 run 至多一个成功/错误/
   取消终态，已终态的 run 不因迟到信号重新开启。
-- Hook 是 engine adapter 的进程本地辅助协议，不是新的 BCS 公共 endpoint；helper
-  启动与配置在 composition/CLI 层，纯判定逻辑不依赖 socket、环境变量或文件读取。
+- Hook 使用 engine adapter 的原生进程控制协议，不是新的 BCS 公共 endpoint；
+  注册与 ACK 在 driver 中，纯判定逻辑不依赖 socket、环境变量或文件读取。
 - 可复用实现留在公共 BCS；内部 launcher 注册、包装配置和兼容验证留在发行 overlay。
   公共 crate 不硬编码内部 launcher、模型、服务地址或凭据。
 - OCB = 业务/API adapter；Relay = AICoding runtime。本变更仅涉及现有 BCS bridge
@@ -37,7 +37,7 @@
 - 不修改事件保留上限、重放、发送 cursor、token 消耗统计或增量合并。
 - 不通过延长/缩短 600 秒 idle watchdog 掩盖完成证据不足。
 - 不修改用户/项目的永久 settings，不让业务手工安装或填写 Hook。
-- 不用 Stop hook 阻止模型停止或注入汇总提示；helper 不读取 transcript。
+- 不用 Stop hook 阻止模型停止或注入汇总提示；回调不读取 transcript。
 - 不停止长驻后台任务来制造空快照，不承诺任意未来 cron/监控任务都会自然结束。
 
 ## 2. 术语与问题
@@ -82,41 +82,40 @@
 
 ## 5. 自动 Hook 注入与接收
 
-### 5.1 装配
+### 5.1 原生控制协议（替代最初的外部 helper/socket 设计）
 
-1. run 启动前建立独立的本地接收通道和不可复用的进程代次标识。
-2. bridge 自带 helper 子命令，从 stdin 读取 Hook JSON，只报告白名单元数据。
-3. 通过 launcher 支持的临时配置机制添加同步、仅观察的 Stop hook。
-   helper 等待本地“已接收”ACK 有严格上界；正常返回不 block/continue/注入上下文。
-   接收器不能等 result 才 ACK，否则 CLI 等 hook、bridge 等 result 会形成死锁。
-4. helper 运行不能再次启动 bridge daemon、模型会话或递归触发自身。
-5. 原有 hooks 保留；相同注入不能重复注册。任何配置合并歧义在 G1 阻断。
-6. 正常结束、取消、崩溃都回收本 run 的 socket/临时配置；不清理其他进程文件。
+实测直接追加 `--settings` 与 cfuse 自有设置存在覆盖问题；原生 SDK 注册能够工作。
+因此不新增 command helper、socket、临时 settings 或全局配置：
 
-默认优先受限 Unix socket；其他平台采用等价本地受控通道，未实现的平台明确不支持。
-不得暴露公共监听地址。配置只作用于 bridge 启动的进程，不落用户全局/项目 settings。
-`--settings` 的重复参数与包装层自有注入如何合并必须实测，不能直接追加两个参数碰运气。
+1. 每个 run 的新 CLI 进程生成独立 initialize request ID 和 Stop callback ID。
+2. 设置子进程 `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1`，发送
+   `control_request/initialize`，注册 `hooks.Stop[].hookCallbackIds`。
+3. 收到匹配的 success control_response 后才发送唯一业务输入。握手上界 30 秒
+   （若 run idle override 更短，取更短值）；取消优先。
+4. CLI 从同一条有序 stdout 发送 `control_request/hook_callback`，包含独立
+   request_id、已注册 callback_id 和 Stop input。bridge 校验后立即回复空对象 ACK；
+   回调写入上界 5 秒。此 ACK 不修改模型输入、不 block、不注入上下文。
+5. 检查原生版本 `2.1.199`；其他版本明确 capability unavailable，不猜兼容性。
+6. Hook 随进程结束自动释放，继续沿已有 CliSession 进程树清理路径结束。
 
-### 5.2 辅助消息合同（拟新增，不是 CLI 原生字段）
+已有 command/plugin hooks 仍由 CLI 执行；bridge 不写任何用户/项目设置。
+企业 managed-policy 场景尚无实机验收，不声明支持；禁止绕过策略。
 
-建议消息包含 `protocol_version`、bridge run 身份、engine session 身份、进程代次、
-Hook invocation 身份、原生相关标识（仅在确实存在时）、快照状态与白名单任务条目。
-桥接层生成的字段必须标注来源；不能伪装成 CLI 自带 `turn_id`。
+### 5.2 证据与资源约束
 
-快照用显式变体表达：
+状态机区分 `None`（Unknown）、有效空快照和有效非空快照；格式错、缺字段、
+未知任务类型、非 running 描述、超限或非空 session_crons 均不当作空集合。
+验证过的快照类型为 shell/subagent，task_started 类型为 local_bash/local_agent。
 
-```text
-Unavailable(reason)
-Unsupported(capability)
-Known(snapshot_id, coverage_profile, live_task_descriptors)
-```
+输入行最多 2 MiB，在逐块读取时执行上限；候选 result 最多 1 MiB；快照最多
+512 条；每进程最多 2048 个 callback request ID 和 8192 个原生 init/result/state UUID，标识符最多 256 字节。
+不截断后放行。Hook/control_response 和坏 JSON 在 raw trace 前脱敏，
+不记录 Hook 中的回答、transcript_path、cwd、任务命令或凭据。
 
-`Known([])` 与缺失、null、格式错误、超限截断、部分覆盖不同。快照不可把未支持的
-工具/Agent/MCP/嵌套/监控类型静默过滤掉。任务名、提示词、输出正文均无需发送。
-
-回调认证凭据不得写 trace、日志或命令行；限制消息大小、队列容量、连接数与超时。
-重放按进程代次与 invocation 去重，已终态 run 拒绝后续回调。
-本地权限隔离不等于能抵御已完全控制同一用户/进程环境的恶意代码，不夸大安全保证。
+业务仅有一条输入；同一进程内没有 bridge 新输入并发。因此每次 init 建立新阶段，
+后续主 agent 输出、用户帧、任务生命周期变化使旧证据失效。
+成功 result 后最多等待 5 秒的新 idle（较短 run idle override 优先）；
+该等待上界只触发失败，绝不作为成功证据；回调不能刷新 watchdog。
 
 ## 6. 强关联，而非“同 session 内最近一次 Hook”
 
@@ -125,9 +124,8 @@ Known(snapshot_id, coverage_profile, live_task_descriptors)
 - `prompt_id`、`stop_hook_active` 或回答文本即使存在，也不是已证明的唯一 epoch 键。
 - 新路径必须使用 G2 验证出的原生 Hook 生命周期 ID/控制回调标识及输出边界，或由
   launcher/CLI 提供明确的相关标识。仅给 helper 加一个自增计数并不能解决配对。
-- 同步 helper ACK 只证明本地快照已被接收；它本身不证明后来哪个 result 属于该快照。
-- 两通道接收顺序不能替代引擎发生顺序。所有事件进入单一判定器；Hook 晚到可暂存
-  已看到的 result/idle 证据，但只能在同 epoch、无失效事件、取消未发生时重评估。
+- 同步回调 ACK 只证明本地快照已被接收；它本身不证明后来哪个 result 属于该快照。
+- 当前使用同一 stdout 的原生顺序，而非两通道到达时间。只接受当前阶段、result 之前的同步 Stop 回调；晚到、重复 request ID、无继续活动却重复 Stop 均明确拒绝。
 - `system/init` 是实验中观测到的边界之一；新的 init 使旧候选失效。不能把所有
   后台帧视为新主阶段，也不能以一次 init 消费一条通知来“修正”集合。
 - 其他 Stop hook 可阻止停止、触发重复 Stop；必须证明选中的快照属于实际完成轮，
@@ -158,7 +156,7 @@ Known(snapshot_id, coverage_profile, live_task_descriptors)
 | 新 idle + 同 epoch 有效空快照 + 最新成功候选 | 满足其余一致性条件后返回 TurnOutcome |
 | result 后有新 init，但尚无 idle | 旧候选失效，进入下一阶段 |
 | 已 idle 后收到完成通知，观察表归零 | 不复用旧 idle，不释放旧候选；等后续阶段证据 |
-| idle 已到、同轮回调稍晚到 | 仅在 G2 强关联成立且未出现更新阶段/失效事件时重评估 |
+| callback 晚于 result/idle | 当前原生同步协议不支持这种顺序，明确拒绝 |
 | 快照 Unknown、关联冲突、必要能力消失 | 不成功；执行有界诊断/错误路径 |
 | engine error、abort、deadline、retention 终止 | 错误/取消优先，禁止晚到成功覆写 |
 | 重复 result/hook/idle | 幂等，不产生第二个终态 |
@@ -193,8 +191,8 @@ stdout idle watchdog，不能把永远没有新引擎输出的 run 维持为活�
 ## 8. 旧逻辑的退出与兼容
 
 启动前固定模式，建议命名为 `legacy` / `observe` / `hook_idle`，作为显式受校验的
-engine adapter 配置/发行策略，非散落的环境判断。默认 legacy，完成 G1–G4 后才能
-选择 hook_idle；若明确选择而不支持，应拒绝或显式失败，不静默回退。
+engine adapter 配置/发行策略，非散落的环境判断。默认 legacy；当前 hook_idle 只用于
+明示版本的隔离研究验证，完成 G1–G4 后才能推广。若明确选择而不支持，应拒绝或显式失败，不静默回退。
 
 | 逻辑 | 新模式下的职责 |
 | --- | --- |
@@ -213,12 +211,11 @@ engine adapter 配置/发行策略，非散落的环境判断。默认 legacy，
 实现位置相对 `apps/bcs`：
 
 - `crates/tools/bcs-bridge/core/src/engine/claude_code.rs`：接线与现有 mapper 兼容。
-- 新增聚焦模块（命名待实施）：`engine/claude_completion.rs` 纯判定、
-  `engine/claude_hook.rs` 协议/受控接收；不得继续扩大 2330 行的单文件。
-- `crates/tools/bcs-bridge/app/src/`：helper CLI、临时配置、能力装配；
-  公共 CLI/内部发行复用，不复制业务状态机。
+- `engine/claude_completion.rs` 执行证据校验与判定；`engine/claude_code/`
+  分离 mapper、权限和测试，所有修改源码均不超过 1000 行。
+- 不增加 app helper/IPC；公共 CLI 与内部 cfuse factory 共用 core 的原生控制协议实现。
 - `engine/cli.rs`：仅在需要时增加可测试的子进程配置/资源所有权接线。
-- 不直接修改 run buffer/plugin 发送逻辑；内部发行仅添加 capability profile 和 argv 合并接线。
+- 不直接修改 run buffer/plugin 发送逻辑；内部发行已有 factory 共用 core，未增加内部运行逻辑。
 
 每条 delta 不做文件/数据库/IPC 访问；每次 Stop 至多一次有界本地报告，不按 token 回调。
 候选只保留最新一个、限定字节数；identity/快照去重索引有容量与生命周期上限。
@@ -245,7 +242,7 @@ engine adapter 配置/发行策略，非散落的环境判断。默认 legacy，
 | AC-10 | 配置含原有 hooks/权限/MCP/env，路径含空格 | 临时注入正确合并、不修改原配置，无 shell 注入 |
 | AC-11 | IPC 伪造/重放/超限/挂起、helper 或引擎崩溃 | 有界处理、隔离资源清理，不影响其他 run |
 | AC-12 | Plugin/Gateway 重连、重放、session 与 inject 持久化 | 现有协议回归不退化，工具结果不丢失 |
-| AC-13 | legacy/observe/hook_idle 模式与不支持版本 | 模式固定，可回滚，无 silent fallback |
+| AC-13 | legacy/observe/hook_idle 模式与不支持版本 | hook_idle 模式固定无 fallback；observe 仅在发送业务输入前允许放弃观察并重启为 legacy，且显式诊断 |
 | AC-14 | 普通无后台、空文本成功、执行失败、权限交互 | 不新增内容丢失或重复，错误不伪装成功 |
 
 ## 11. 发布与停止条件
