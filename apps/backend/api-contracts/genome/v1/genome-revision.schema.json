@@ -136,7 +136,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "url": {"description": "Absolute http(s) URL with a non-empty host; the Registry also applies the Manifest's parse check (urlsplit with a hostname).", "type": "string", "pattern": "^https?://([^\\s/?#@]*@)?(\\[[0-9A-Fa-f:.]+\\]|[^\\s/?#:@\\[\\]]+)(:[0-9]*)?([/?#][^\\s]*)?(?![\\s\\S])"},
+        "url": {"description": "Absolute http(s) URL with a non-empty host and no userinfo (no 'user:token@'), so a credential is never stored in a revision; the Registry also applies the Manifest's parse check (urlsplit with a hostname).", "type": "string", "pattern": "^https?://(\\[[0-9A-Fa-f:.]+\\]|[^\\s/?#:@\\[\\]]+)(:[0-9]*)?([/?#][^\\s]*)?(?![\\s\\S])"},
         "headers": {
           "description": "HTTP headers sent to the server, name to value. Stored as written, so they must not carry credentials (#2860).",
           "type": "object",

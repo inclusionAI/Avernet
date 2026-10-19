@@ -106,6 +106,7 @@ derived from the revision field by field as below.
 | `server_code` | maps | `spec.tools.mcp[].server_code` (the key) |
 | `config` absent | maps | No `config`: no bot override |
 | `config.url` | normalized | Scheme lower-cased |
+| `config.url` with userinfo (`https://user:token@host/…`) | refused (*recording only*) | The revision is never deleted, so a credential in the URL would be stored for good; the Manifest refuses userinfo in source URLs but not here |
 | `config.headers` | maps | Names and values as written ([#2860](https://github.com/inclusionAI/Avernet/issues/2860)). Names are not case-folded: the stored spelling is what reaches the device, and not every apply-time merge compares names case-insensitively |
 | `config.endpoint_env` | maps | |
 | `config.transport_protocol` | normalized | Upper-cased (the Manifest validator already does this) |

@@ -294,7 +294,9 @@ Every entry in `spec` is a **key**, the one field that names it, plus a
 - **`tools.mcp`.** `server_code` names a server in the MCP registry.
   `config`, when present, is the bot-level override with the Manifest's own
   closed set and limits: `url` (absolute `http`/`https` with a non-empty
-  host, the Manifest's own parse check; recording lower-cases the scheme,
+  host, the Manifest's own parse check, and no userinfo: a `user:token@` in
+  the URL would store a credential in a revision that is never deleted, so
+  recording refuses it, as the Manifest already does for source URLs; recording lower-cases the scheme,
   which URLs treat case-insensitively), `headers` (names
   1–256 characters, values up to 2000 characters, no CR or LF),
   `endpoint_env` (`PROD`, `PRE`), `transport_protocol` (`SSE`,
@@ -442,14 +444,17 @@ Conditions used by rules:
   the body are byte-identical.
 - **`mode`**: the value `memory.set_mode` sets.
 
-**Rewrite flag.** An op that changes an existing text file (`file.edit`, or
-`skill.update` on a text file) is flagged `rewrite` when
+**Rewrite flag.** A text file that exists in the base and that a patch
+changes (by `file.edit`, or `skill.update` on a text file) is measured once,
+from its content in the base to its content after the whole patch, so
+splitting a rewrite over several ops on one file cannot keep each step under
+the threshold. Every op that changes the file is flagged `rewrite` when
 
 ```text
 changed = (len(a) + len(b) - 2 * LCS(a, b)) / (len(a) + len(b))  >  2/5
 ```
 
-where `a` and `b` are the file's lines before and after and `LCS` is the exact
+where `a` and `b` are the file's lines in the base and after the patch, and `LCS` is the exact
 length of their longest common subsequence of lines (not a heuristic ratio
 such as Python's `difflib`). Compute it in integers, with no floating point:
 flag when `5 * (len(a) + len(b) - 2 * LCS) > 2 * (len(a) + len(b))`. A file
