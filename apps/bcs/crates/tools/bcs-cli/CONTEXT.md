@@ -56,3 +56,11 @@ The crate owns operator workflows and diagnostics. It does not own BCS server ru
 
 - `cargo test --package bcs-cli --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs-cli --all-targets --manifest-path src/bcs/Cargo.toml`
+
+## Per-Bot caller context
+
+Bridge child processes receive `BCN_AUTH_MODE=agentpass-subbots` and
+`BCN_ACTOR_BOT_ID=<Bot UUID>`. The CLI forwards the Actor through
+`X-BCN-Actor-Bot-Id` on JSON and file-transfer requests. Parent contexts skip
+ambient/session Static Tokens to avoid adopting another Bot's shared token;
+an explicit token remains supported. Actor is a selector, never a credential.

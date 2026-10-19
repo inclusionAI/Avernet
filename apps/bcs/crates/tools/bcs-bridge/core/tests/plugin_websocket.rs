@@ -509,6 +509,8 @@ async fn v3_interaction_round_trip_resolves_and_finishes_the_run() {
 fn config_for(dir: &TempDir, addr: std::net::SocketAddr, bots: &[&str]) -> ProviderConfig {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mock_cc_upstream.py");
     ProviderConfig {
+        provider_auth: None,
+        api_url: None,
         provider_id: "upstream-test".into(),
         mode: ConnectionMode::Plugin,
         listen: None,
@@ -526,6 +528,8 @@ fn config_for(dir: &TempDir, addr: std::net::SocketAddr, bots: &[&str]) -> Provi
             let cwd = dir.path().join(name);
             std::fs::create_dir_all(&cwd).unwrap();
             BotConfig {
+                agent_code: None,
+                bot_slug: None,
                 provider_bot_ref: (*name).into(),
                 bot_id: Some(format!("bot-{}", (b'a' + index as u8) as char)),
                 token: None,
@@ -667,4 +671,39 @@ async fn stop(shutdown: CancellationToken, task: JoinHandle<anyhow::Result<()>>)
     shutdown.cancel();
     tokio::time::timeout(IO_TIMEOUT, task).await
         .expect("plugin server ignored shutdown").expect("plugin task panicked").unwrap();
+}
+
+#[tokio::test]
+async fn subbot_identity_failure_keeps_its_sibling_running() {
+    let dir=tempfile::tempdir().unwrap();
+    let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut config=config_for(&dir,listener.local_addr().unwrap(), &["a","b"]);
+    config.provider_auth=Some("agentpass-subbots".into());
+    for (bot,slug) in config.bots.iter_mut().zip(["a","b"]) {
+        bot.agent_code=Some("parent".into());bot.bot_slug=Some(slug.into());
+        bot.provider_bot_ref=format!("parent:{slug}");bot.token=Some(format!("static-{slug}"));
+    }
+    let peer=BridgePeer {dir,listener,config,version:3};
+    let (_,shutdown,task)=peer.start().await;
+    let mut sockets=Vec::new();
+    for _ in 0..2 {
+        let (stream,_)=tokio::time::timeout(IO_TIMEOUT,peer.listener.accept()).await.unwrap().unwrap();
+        let mut socket=accept_async(stream).await.unwrap();
+        let connect=recv_json(&mut socket).await;
+        sockets.push((socket,connect));
+    }
+    let (mut b,b_req)=sockets.pop().unwrap();
+    let (mut a,a_req)=sockets.pop().unwrap();
+    if b_req["params"]["bot_id"]=="bot-a" { std::mem::swap(&mut a,&mut b); }
+    let (a_req,b_req)=if a_req["params"]["bot_id"]=="bot-a" {(a_req,b_req)} else {(b_req,a_req)};
+    send_json(&mut b,json!({"type":"res","id":b_req["id"],"ok":true,"payload":{
+        "bot_uuid":"bot-b","token":"static-b","is_new":false,"protocol_version":3,"min_supported_version":1
+    }})).await;
+    send_json(&mut a,json!({"type":"res","id":a_req["id"],"ok":false,
+        "error":{"code":"unauthorized","message":"Bot disabled","retryable":false}})).await;
+    send_json(&mut b,chat_send("sibling-request","sibling-run","group:s","Hello")).await;
+    let ack=recv_application(&mut b,|frame| frame["id"]=="sibling-request").await;
+    assert_eq!(ack["ok"],true);
+    shutdown.cancel();
+    tokio::time::timeout(IO_TIMEOUT,task).await.unwrap().unwrap().unwrap_err();
 }

@@ -173,7 +173,7 @@ pub async fn run(cli: Cli, app: &BridgeApp) -> anyhow::Result<()> {
             #[cfg(unix)] {
                 let config_path = config_path.canonicalize().context("Cannot resolve bridge configuration path")?;
                 if args.daemon { return crate::instance::start_daemon(&config_path, &runtime_dir()?, args.cwd.as_deref()).await; }
-                crate::instance::run(config, app.engines(), &config_path, &runtime_dir()?).await
+                crate::instance::run(config, app.engines(), &config_path, &runtime_dir()?, app.credentials(), args.cwd.as_deref()).await
             }
             #[cfg(not(unix))] {
                 if args.daemon || args.daemon_child { bail!("Background mode requires Unix"); }
@@ -190,7 +190,7 @@ pub async fn run(cli: Cli, app: &BridgeApp) -> anyhow::Result<()> {
 
 /// Instance runtime directory (lock, control socket, PID record, daemon log).
 #[cfg(unix)]
-fn runtime_dir() -> anyhow::Result<PathBuf> {
+pub(crate) fn runtime_dir() -> anyhow::Result<PathBuf> {
     Ok(dirs::home_dir().context("Cannot locate home directory for bridge instance management")?.join(".bcn-bridge"))
 }
 

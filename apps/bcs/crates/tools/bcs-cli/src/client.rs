@@ -37,7 +37,9 @@ pub const DEFAULT_BCS_URL: &str = "http://localhost:21000";
 /// so the cross-host auth isolation is auditable.
 fn build_http_client() -> reqwest::Client {
     let policy = reqwest::redirect::Policy::custom(move |attempt| {
-        if attempt.previous().len() >= 10 {
+        if attempt.previous().first().is_some_and(|source| source.origin() != attempt.url().origin()) {
+            attempt.stop()
+        } else if attempt.previous().len() >= 10 {
             attempt.error("too many redirects")
         } else {
             // cross-host or same-host: follow; reqwest strips Authorization on
@@ -112,6 +114,7 @@ pub struct BcsClient {
     /// W3C Trace Context inherited from the Bash tool process. The CLI is a
     /// transparent carrier and never creates its own span.
     traceparent: Option<HeaderValue>,
+    actor_id: Option<HeaderValue>,
 }
 
 // ============================================================================
@@ -165,6 +168,25 @@ pub enum ChatAsyncError {
 }
 
 impl BcsClient {
+    pub async fn current_bot_uuid(&self) -> Result<String> {
+        let base = self.base_url.trim_end_matches('/');
+        let base = base.strip_suffix("/api/v1/collaboration")
+            .or_else(|| base.strip_suffix("/openapi/v1/collaboration")).unwrap_or(base);
+        let url = format!("{base}/api/v1/collaboration/bots/me");
+        // This parent/self passthrough endpoint consumes one Bot credential.
+        // Office OAuth is used on business requests; do not substitute it here.
+        let request = if self.token.is_some() {
+            let mut identity = self.clone();
+            identity.oauth_headers = None;
+            identity.add_headers(self.http_client.get(url))
+        } else { self.add_auth(self.http_client.get(url)) };
+        let response = request.send().await?;
+        if !response.status().is_success() { return Err(anyhow!("Current Bot identity request failed")); }
+        let body: serde_json::Value = response.json().await?;
+        if body["code"] != 20000 { return Err(anyhow!("Current Bot identity was rejected")); }
+        body["data"]["bot"]["bot_id"].as_str().filter(|id| !id.is_empty())
+            .map(str::to_owned).context("No authenticated Bot; specify --bot-uuid")
+    }
     ///Create a new BCS client with the given base URL.
     pub fn new(base_url: impl Into<String>) -> Self {
         Self {
@@ -176,6 +198,7 @@ impl BcsClient {
             client_identity: None,
             service_key: None,
             traceparent: None,
+            actor_id: None,
         }
     }
 
@@ -190,6 +213,7 @@ impl BcsClient {
             client_identity: None,
             service_key: None,
             traceparent: None,
+            actor_id: None,
         }
     }
 
@@ -208,6 +232,7 @@ impl BcsClient {
             client_identity: None,
             service_key: None,
             traceparent: None,
+            actor_id: None,
         }
     }
 
@@ -226,6 +251,7 @@ impl BcsClient {
             client_identity: None,
             service_key: None,
             traceparent: None,
+            actor_id: None,
         }
     }
 
@@ -243,6 +269,7 @@ impl BcsClient {
             client_identity: None,
             service_key: Some(raw_key.into()),
             traceparent: None,
+            actor_id: None,
         }
     }
 
@@ -324,6 +351,9 @@ impl BcsClient {
     /// When no OAuth2 headers (prod), the layout is:
     /// - `Authorization: Bearer <bot_token>` (standard BCS auth)
     fn add_headers(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        let builder = if let Some(actor) = &self.actor_id {
+            builder.header("X-BCN-Actor-Bot-Id", actor)
+        } else { builder };
         let has_oauth = self.oauth_headers.is_some();
 
         if has_oauth {
@@ -2136,6 +2166,11 @@ impl BcsClient {
 // ============================================================================
 
 impl BcsClient {
+    pub fn set_actor_id(&mut self, actor: Option<&str>) -> Result<()> {
+        let caller = crate::CallerContext::new(None, actor)?;
+        self.actor_id = caller.actor_id().map(HeaderValue::from_str).transpose()?;
+        Ok(())
+    }
     /// Send a friend request.
     pub async fn send_friend_request(
         &self,
@@ -3049,25 +3084,21 @@ impl BcsClient {
         bytes: reqwest::Body,
         content_type: &str,
     ) -> Result<()> {
-        let bcs_host = reqwest::Url::parse(&self.base_url)
-            .ok()
-            .and_then(|u| u.host_str().map(String::from));
-        let target_host = reqwest::Url::parse(upload_url)
-            .ok()
-            .and_then(|u| u.host_str().map(String::from));
-        let cross_host = match (bcs_host.as_deref(), target_host.as_deref()) {
-            (Some(a), Some(b)) => a != b,
-            _ => false,
-        };
-        let mut req = self
-            .http_client
+        let source = reqwest::Url::parse(&self.base_url)?;
+        let target = reqwest::Url::parse(upload_url)?;
+        if !matches!(target.scheme(), "http" | "https") || target.host_str().is_none()
+            || !target.username().is_empty() || target.password().is_some() {
+            return Err(anyhow!("Invalid upload URL"));
+        }
+        let cross_host = source.origin() != target.origin();
+        let mut req = self.http_client
             .put(upload_url)
             .header(reqwest::header::CONTENT_TYPE, content_type)
             .body(bytes);
         if !cross_host {
             req = self.add_auth(req);
         }
-        let resp = req.send().await.context("put session file bytes")?;
+        let resp = req.send().await.map_err(reqwest::Error::without_url).context("put session file bytes")?;
         Self::ensure_success_status(resp, "put session file bytes").await
     }
 
@@ -3367,11 +3398,22 @@ impl BcsClient {
         if let Some(t) = ttl {
             url.push_str(&format!("?ttl={}", t));
         }
-        let resp = self
+        let mut resp = self
             .add_auth(self.http_client.get(&url))
             .send()
             .await
             .context("download session file")?;
+        if resp.status().is_redirection() {
+            let location = resp.headers().get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok()).context("Download redirect has no Location")?;
+            let target = resp.url().join(location)?;
+            if !matches!(target.scheme(), "http" | "https") || target.host_str().is_none()
+                || !target.username().is_empty() || target.password().is_some() {
+                return Err(anyhow!("Invalid download redirect"));
+            }
+            // Presigned storage URL authenticates itself; carry no BCN context.
+            resp = self.http_client.get(target).send().await.map_err(reqwest::Error::without_url).context("download storage content")?;
+        }
         if !resp.status().is_success() {
             let s = resp.status();
             let b = resp.text().await.unwrap_or_default();
@@ -3384,7 +3426,7 @@ impl BcsClient {
         use futures::StreamExt;
         let mut stream = resp.bytes_stream();
         while let Some(chunk) = stream.next().await {
-            tokio::io::AsyncWriteExt::write_all(&mut f, &chunk?).await?;
+            tokio::io::AsyncWriteExt::write_all(&mut f, &chunk.map_err(reqwest::Error::without_url)?).await?;
         }
         Ok(out_path)
     }

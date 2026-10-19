@@ -383,6 +383,7 @@ impl Default for CodexAppServerFactory {
 }
 
 impl crate::engine::EngineFactory for CodexAppServerFactory {
+    fn supports_caller_env(&self) -> bool { true }
     fn id(&self) -> &str { &self.id }
     fn default_bin(&self) -> &str { &self.default_bin }
     fn build(&self, bin: PathBuf, options: &toml::Table) -> Result<Arc<dyn Engine>, String> {
