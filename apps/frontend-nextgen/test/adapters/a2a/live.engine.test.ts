@@ -53,7 +53,8 @@ d('M1 活体冒烟 vs 真引擎 ' + (TARGET || '(A2A_LIVE_TARGET 未设,跳过)'
   it('GetTask(未门控只读) 假 taskId → 活体 -32000 not_found_or_expired reason', async () => {
     const req = buildRpcRequest('GetTask', { taskId: 'live-nonexistent' });
     await expect((async () => {
-      for await (const _ of streamRpc(`${TARGET}/rpc`, req, {})) { /* drain */ }
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars -- drain 需要绑定占位
+      for await (const _ev of streamRpc(`${TARGET}/rpc`, req, {})) { /* drain */ }
     })()).rejects.toMatchObject({
       failure: { kind: 'rpc', rpcError: { code: -32000,
         data: { reason: 'not_found_or_expired' } } },

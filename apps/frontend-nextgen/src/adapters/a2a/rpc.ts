@@ -46,7 +46,7 @@ export function buildRpcRequest(method: string, params: unknown): RpcRequest {
 export function parseRpcMessage(raw: string): ParsedRpc | null {
   let parsed: any;
   try { parsed = JSON.parse(raw); } catch { return null; }
-  if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
   if (typeof parsed.jsonrpc !== 'string' || parsed.jsonrpc !== '2.0') return null;
   const hasResult = parsed.result !== undefined;
   const hasError = parsed.error !== undefined;
@@ -57,9 +57,9 @@ export function parseRpcMessage(raw: string): ParsedRpc | null {
     return { id, result: parsed.result };
   }
   const e = parsed.error;
-  if (e == null || typeof e !== 'object'
+  if (typeof e !== 'object' || e === null
       || typeof e.code !== 'number' || typeof e.message !== 'string') return null;
-  const data = (e.data != null && typeof e.data === 'object' && !Array.isArray(e.data))
+  const data = (typeof e.data === 'object' && e.data !== null && !Array.isArray(e.data))
     ? e.data : undefined;                     // data 非对象 → 剥除
   const error: RpcError = data === undefined
     ? { code: e.code, message: e.message }
@@ -84,6 +84,6 @@ export function classifyFailure(input: {
   if (input.rpcError) return { kind: 'rpc', rpcError: input.rpcError };
   const s = input.httpStatus;
   if (s === 401 || s === 403) return { kind: 'auth', httpStatus: s };
-  if (s != null) return { kind: 'transport', httpStatus: s };
+  if (s !== undefined) return { kind: 'transport', httpStatus: s };
   return { kind: 'protocol' };                          // 无已知特征=协议问题
 }

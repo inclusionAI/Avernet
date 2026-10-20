@@ -180,6 +180,89 @@ function newMessageId(): string {
   return `a2a-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
+/** 终态成员的 status.state 读取（wire 事实：终态只随 statusUpdate 成员下发出） */
+function terminalStateOf(member: Record<string, unknown>): string {
+  const status = member.status;
+  if (typeof status === 'object' && status !== null
+    && typeof (status as { state?: unknown }).state === 'string') {
+    return (status as { state: string }).state;
+  }
+  return '';
+}
+
+/** 首个非空字符串（审批交互身份的候选键序读取） */
+function firstStrOf(...candidates: unknown[]): string {
+  for (const c of candidates) {
+    if (typeof c === 'string' && c !== '') return c;
+  }
+  return '';
+}
+
+/**
+ * v3 decision('allow-once'|'deny') → engine resolution（per interaction kind）。
+ * 引擎词汇表（事实源）：
+ *   exec        decision ∈ 'allow-once'|'allow-always'|'deny'（gateway
+ *               resolve.ts validDecisions）——v3 两值恰在表内，直传；
+ *   mode_switch decision ∈ 'proceed'|'stay'（同一 gateway 口径）——
+ *               allow-once→proceed / deny→stay；
+ *   ask_user    decision ∈ 'submit'|'cancel'，submit 需结构化答案载荷
+ *               （answer/answers/values/selected_options，router
+ *               `_validated_resolution`）——v3 decision 枚举零载荷面：
+ *               allow-once → null（typed 拒绝，B13+ UI 供答案）；deny →
+ *               'cancel'（无载荷正当路径）。
+ * kind 缺省 → 'exec'：唯一无 kind 的请求帧是 v3 形 exec.approval.requested
+ * （gateway interaction.requested 三类都显式带 kind）。
+ * 未知 kind（引擎新词汇）：原样透传，合法性与 422 由引擎裁决——pending 保持。
+ */
+function buildResolveResolution(
+  kind: string | undefined, decision: 'allow-once' | 'deny',
+): Record<string, unknown> | null {
+  switch (kind ?? 'exec') {
+    case 'exec':
+      return { kind: 'exec', decision };
+    case 'mode_switch':
+      return { kind: 'mode_switch', decision: decision === 'allow-once' ? 'proceed' : 'stay' };
+    case 'ask_user':
+      return decision === 'deny'
+        ? { kind: 'ask_user', decision: 'cancel' }
+        : null;                         // submit 无答案载荷面 → typed 拒绝
+    default:
+      return { kind, decision };        // 未知 kind 透传（引擎裁决）
+  }
+}
+
+/** 引擎 GetTask artifacts 的最新全量文本（[...latest_text...]——自后向前取首个非空） */
+function latestArtifactText(task: Record<string, unknown>): string | undefined {
+  const artifacts = Array.isArray(task.artifacts) ? task.artifacts : [];
+  for (let i = artifacts.length - 1; i >= 0; i -= 1) {
+    const a = artifacts[i];
+    if (typeof a !== 'object' || a === null || Array.isArray(a)) continue;
+    const parts = Array.isArray((a as Record<string, unknown>).parts)
+      ? (a as Record<string, unknown>).parts as unknown[] : [];
+    const text = parts.map((p) =>
+      (typeof p === 'object' && p !== null
+        && typeof (p as { text?: unknown }).text === 'string')
+        ? (p as { text: string }).text : '').join('');
+    if (text !== '') return text;
+  }
+  return undefined;
+}
+
+/** wire FAILED 终态 metadata → typed failure（errorCode/errorMessage 事实源） */
+function buildRunFailure(metadata: Record<string, unknown>): A2aRunFailure {
+  const errorCode = typeof metadata.errorCode === 'string' ? metadata.errorCode : undefined;
+  const errorMessage = typeof metadata.errorMessage === 'string' ? metadata.errorMessage : undefined;
+  return {
+    kind: 'rpc',
+    reason: 'run_failed',
+    ...(errorCode !== undefined ? { errorCode } : {}),
+    rpcError: {
+      code: RUN_FAILED_RPC_CODE,
+      message: errorMessage ?? 'a2a run failed',
+    },
+  };
+}
+
 export class A2AProvider {
   // ─── SDK 契约回调（ChatProvider drop-in 面） ─────────────────────────
   onMessage?: (message: A2aChatMessage) => void;
@@ -344,7 +427,7 @@ export class A2AProvider {
         return;
       }
       const typed = (err as { failure?: WireFailure }).failure;
-      if (typed && ctx.taskRunId == null) {
+      if (typed && ctx.taskRunId === null) {
         this.isRequesting = false;
         // B13：wire 级失败先播报给宿主（status:'error' 携带原始 typed failure，
         // 传输选择锁 auth/protocol → locked-v3 由此订阅分类——分类逻辑归宿主，
@@ -358,7 +441,7 @@ export class A2AProvider {
         this.onError?.(error);
         throw error;
       }
-      if (typed && bag.outcome == null) {
+      if (typed && bag.outcome === null) {
         // B11 spec §3 #1：known-taskId 断流按已消费游标自动恢复（ReplayEvents）。
         // ⚠️ 恢复期仍持请求槽：request() 尚未收尾，abort() 的 in-flight 门必须
         // 视之为在途（onComplete([]) 播报语义完整）；让位才放槽。
@@ -700,7 +783,7 @@ export class A2AProvider {
    *  · 返回 'final' | 'error' 表示 run 已到收账面（调用方截流）。
    */
   private consumeWireEvent(ev: WireEvent, bag: RunOutcomeBag): 'final' | 'error' | 'cont' {
-    if (bag.ctx.taskRunId == null) {
+    if (bag.ctx.taskRunId === null) {
       // wire task 成员带 id，其余成员带 taskId（同一 run id）——首帧即记
       const candidate = ev.type === 'task'
         ? (ev.member as { id?: unknown }).id
@@ -1023,57 +1106,6 @@ export class A2AProvider {
   }
 }
 
-/** 终态成员的 status.state 读取（wire 事实：终态只随 statusUpdate 成员下发出） */
-function terminalStateOf(member: Record<string, unknown>): string {
-  const status = member.status;
-  if (typeof status === 'object' && status !== null
-    && typeof (status as { state?: unknown }).state === 'string') {
-    return (status as { state: string }).state;
-  }
-  return '';
-}
-
-/** 首个非空字符串（审批交互身份的候选键序读取） */
-function firstStrOf(...candidates: unknown[]): string {
-  for (const c of candidates) {
-    if (typeof c === 'string' && c !== '') return c;
-  }
-  return '';
-}
-
-/**
- * v3 decision('allow-once'|'deny') → engine resolution（per interaction kind）。
- * 引擎词汇表（事实源）：
- *   exec        decision ∈ 'allow-once'|'allow-always'|'deny'（gateway
- *               resolve.ts validDecisions）——v3 两值恰在表内，直传；
- *   mode_switch decision ∈ 'proceed'|'stay'（同一 gateway 口径）——
- *               allow-once→proceed / deny→stay；
- *   ask_user    decision ∈ 'submit'|'cancel'，submit 需结构化答案载荷
- *               （answer/answers/values/selected_options，router
- *               `_validated_resolution`）——v3 decision 枚举零载荷面：
- *               allow-once → null（typed 拒绝，B13+ UI 供答案）；deny →
- *               'cancel'（无载荷正当路径）。
- * kind 缺省 → 'exec'：唯一无 kind 的请求帧是 v3 形 exec.approval.requested
- * （gateway interaction.requested 三类都显式带 kind）。
- * 未知 kind（引擎新词汇）：原样透传，合法性与 422 由引擎裁决——pending 保持。
- */
-function buildResolveResolution(
-  kind: string | undefined, decision: 'allow-once' | 'deny',
-): Record<string, unknown> | null {
-  switch (kind ?? 'exec') {
-    case 'exec':
-      return { kind: 'exec', decision };
-    case 'mode_switch':
-      return { kind: 'mode_switch', decision: decision === 'allow-once' ? 'proceed' : 'stay' };
-    case 'ask_user':
-      return decision === 'deny'
-        ? { kind: 'ask_user', decision: 'cancel' }
-        : null;                         // submit 无答案载荷面 → typed 拒绝
-    default:
-      return { kind, decision };        // 未知 kind 透传（引擎裁决）
-  }
-}
-
 /** 主回路 / 恢复轮 / 手工轮共用的 run 记账袋（B11 起单管线入账） */
 interface RunOutcomeBag {
   parser: SdkParser;
@@ -1086,34 +1118,3 @@ interface RunOutcomeBag {
   terminalApplied: boolean;
 }
 
-/** 引擎 GetTask artifacts 的最新全量文本（[...latest_text...]——自后向前取首个非空） */
-function latestArtifactText(task: Record<string, unknown>): string | undefined {
-  const artifacts = Array.isArray(task.artifacts) ? task.artifacts : [];
-  for (let i = artifacts.length - 1; i >= 0; i -= 1) {
-    const a = artifacts[i];
-    if (typeof a !== 'object' || a === null || Array.isArray(a)) continue;
-    const parts = Array.isArray((a as Record<string, unknown>).parts)
-      ? (a as Record<string, unknown>).parts as unknown[] : [];
-    const text = parts.map((p) =>
-      (typeof p === 'object' && p !== null
-        && typeof (p as { text?: unknown }).text === 'string')
-        ? (p as { text: string }).text : '').join('');
-    if (text !== '') return text;
-  }
-  return undefined;
-}
-
-/** wire FAILED 终态 metadata → typed failure（errorCode/errorMessage 事实源） */
-function buildRunFailure(metadata: Record<string, unknown>): A2aRunFailure {
-  const errorCode = typeof metadata.errorCode === 'string' ? metadata.errorCode : undefined;
-  const errorMessage = typeof metadata.errorMessage === 'string' ? metadata.errorMessage : undefined;
-  return {
-    kind: 'rpc',
-    reason: 'run_failed',
-    ...(errorCode !== undefined ? { errorCode } : {}),
-    rpcError: {
-      code: RUN_FAILED_RPC_CODE,
-      message: errorMessage ?? 'a2a run failed',
-    },
-  };
-}

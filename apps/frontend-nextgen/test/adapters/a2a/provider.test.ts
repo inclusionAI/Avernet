@@ -302,6 +302,7 @@ describe('connect() — card probe + scenario gate before connection state', () 
       const { provider } = newProvider({ fetchImpl: fetchImpl as any });
       const pending = provider.connect();
       // 先挂拒绝断言（防 timer 推进窗口内 unhandled rejection 噪音）
+      // eslint-disable-next-line jest/valid-expect -- 延后 await 的挂断言模式：挂上后先推进假 timer 再 await（保证断言时 timer 窗口必已走完）
       const assertion = expect(pending).rejects.toThrow('a2a probe failed: timeout');
       await jest.advanceTimersByTimeAsync(5000);
       await assertion;

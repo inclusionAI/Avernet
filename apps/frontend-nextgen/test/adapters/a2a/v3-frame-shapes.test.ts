@@ -76,6 +76,7 @@ type SdkParserCtor = new (config?: SdkParserConfig) => SdkParser;
 /** SDK 解析器候选位：包安装位直取（本 app 硬依赖 @tc-chat/adapters@2.1.0，
  * jest 经 babel 转译其后对 require 透明）。可用环境变量
  * A2A_OPENCLAW_PARSER_PATH 显式覆盖。 */
+// eslint-disable-next-line jest/no-export -- 契约基建：translate.test 经同一库取 true parser 对拍
 export function loadOpenClawParser(): SdkParserCtor {
   const relay = '@tc-chat/adapters/dist/openclaw/OpenClawParser.js';
   const candidates: Array<() => string | null> = [
@@ -123,6 +124,7 @@ interface PinnedFrame {
  * 每类 wire 事件一格：条目名即 translate.ts 的事件类。
  * 后续 translate.test.ts 直接 import 这份常量当 fixture。
  */
+// eslint-disable-next-line jest/no-export -- 契约事实源：translate.test 复用本表作 fixture
 export const V3_FRAME_SHAPES: Record<string, PinnedFrame> = {
   chatDelta: {
     frame: {
@@ -458,7 +460,9 @@ describe('v3 frame shapes pinned against the real OpenClawParser', () => {
     for (const [name, pinned] of Object.entries(V3_FRAME_SHAPES)) {
       expect(pinned.frame.type).toEqual(expect.stringMatching(/^(event|res)$/));
       if (pinned.frame.type === 'event') {
+        // eslint-disable-next-line jest/no-conditional-expect -- 表格循环校验：event 帧必须带非空 event 名
         expect(typeof pinned.frame.event).toBe('string');
+        // eslint-disable-next-line jest/no-conditional-expect -- 同上（第二断言）
         expect(pinned.frame.event.length).toBeGreaterThan(0);
       }
       expect(typeof pinned.source).toBe('string');

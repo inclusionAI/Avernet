@@ -213,7 +213,7 @@ describe('takeCachedA2AProvider（同步工厂捷径）', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
 
     settleFetch(okCardResponse());
-    await new Promise((r) => setTimeout(r, 0));   // 预热收敛（fetch→decide 微任务链）
+    await new Promise((r) => { setTimeout(r, 0); });   // 预热收敛（fetch→decide 微任务链）
     expect(cache.get(A2A_CHOICE_SESSION_KEY, URLS.rpcUrl)?.kind).toBe('a2a');
 
     // 同步命中：不再探测即得实例
@@ -235,7 +235,7 @@ describe('takeCachedA2AProvider（同步工厂捷径）', () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     })).toBeNull();
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => { setTimeout(r, 0); });
     expect(cache.get(A2A_CHOICE_SESSION_KEY, URLS.rpcUrl)?.kind).toBe('a2a');
   });
 

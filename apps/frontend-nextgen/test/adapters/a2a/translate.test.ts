@@ -99,6 +99,7 @@ it('(a) 引擎快照 fixture 全序列 → parser 到 final，累计文本 "你�
   for (const ev of events) {
     const out = translateEvent(ev, CTX, state);
     kinds.push(out ? out.kind : null);
+    // eslint-disable-next-line jest/no-conditional-expect -- 钉板逐帧驱动：有渲染面的事件才喂真 parser
     if (out) expect(parser.handleMessage(out.frame)).toBe(true);
   }
   // task 快照无渲染面；WORKING 心跳无渲染面；state-change(COMPLETED)@N+1
