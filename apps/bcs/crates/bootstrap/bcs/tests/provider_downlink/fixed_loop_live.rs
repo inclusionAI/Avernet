@@ -252,14 +252,28 @@ impl LiveStory {
             // Recovery can complete our accepted output before the request's
             // completion CAS. A 409 alone is not evidence of acceptance.
             assert!(body["message"].as_str().unwrap_or_default()
-                .contains("state-machine transition changed concurrently"), "{body}");
+                .contains("state-machine transition changed concurrently")
+                || body["message"].as_str().unwrap_or_default()
+                    .contains("human Judge is already claimed or no longer active"), "{body}");
         }
-        let current = self.get(&format!("/state-machine-runs/{}/nodes/{}", self.run_id,
-            pending["node_id"].as_str().unwrap())).await;
+        self.assert_committed_response(pending, text).await;
+    }
+
+    async fn assert_committed_response(&self, pending: &Value, text: &str) {
+        let path = format!("/state-machine-runs/{}/nodes/{}", self.run_id,
+            pending["node_id"].as_str().unwrap());
+        // A recovery worker may still be finishing the accepted Judge input.
+        // Observe completion without resubmitting the response.
+        let mut current = self.get(&path).await;
+        for _ in 0..200 {
+            if current["node"]["status"] == "completed" { break; }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            current = self.get(&path).await;
+        }
         assert_eq!(current["node"]["run_id"], self.run_id);
         assert_eq!(current["node"]["node_id"], pending["node_id"]);
         assert_eq!(current["execution"], pending["execution"]);
-        assert_eq!(current["node"]["status"], "completed", "HTTP {status}: {body}; {current}");
+        assert_eq!(current["node"]["status"], "completed", "{current}");
         assert_eq!(current["node"]["artifact_text"], text);
         assert_eq!(current["node"]["responded_by"], format!("human_{HUMAN}"));
     }
@@ -624,7 +638,20 @@ async fn nested_human_persistent_story_recovers_with_admission_disabled() {
         if index == 19 {
             story.execute_persistent_sql("CREATE TRIGGER reject_nested_skip BEFORE UPDATE ON bcs_state_machine_node_runs WHEN NEW.status='skipped' AND OLD.status<>'skipped' BEGIN SELECT RAISE(ABORT,'injected nested skip failure'); END").await;
             let failed = story.raw_response(&pending, "persistent-human-19").await;
-            assert!(failed.status().is_server_error(), "skip failure returned {}", failed.status());
+            let status = failed.status();
+            let body: Value = failed.json().await.unwrap();
+            assert!(status.is_server_error() || (status == reqwest::StatusCode::CONFLICT
+                && (body["message"].as_str().unwrap_or_default()
+                    .contains("human Judge is already claimed or no longer active")
+                    || body["message"].as_str().unwrap_or_default()
+                        .contains("state-machine transition changed concurrently"))),
+                "skip failure returned {status}: {body}");
+            story.assert_committed_response(&pending, "persistent-human-19").await;
+            let blocked = story.run().await;
+            assert_eq!(blocked["run"]["status"], "running");
+            assert_eq!(blocked["nodes"].as_array().unwrap().iter()
+                .filter(|node| node["status"] == "skipped").count(), 0,
+                "the injected failure must prevent all skip writes");
             story.execute_persistent_sql("DROP TRIGGER reject_nested_skip").await;
             story.restart(false).await;
             let stale = story.raw_response(&pending, "stale-after-skip-restart").await;
