@@ -17,7 +17,7 @@ from agentclaw.community.core.bot_genome.errors import (
     RefConflict,
     RevisionNotFound,
 )
-from agentclaw.community.core.bot_genome.models import ProvenanceKind, RefMover, RefUpdate, RevisionStatus, RunScope
+from agentclaw.community.core.bot_genome.models import Provenance, ProvenanceKind, RefMover, RefUpdate, RevisionStatus, RunScope
 from agentclaw.community.core.bot_genome.registry import DEFAULT_POLICY
 from agentclaw.community.core.bot_genome.repository.models import GenomePromotionRow
 from tests.community.core.bot_genome.example_blobs import MEMORY_BOT, SUPPORT_BOT, SUPPORT_BOT_CANDIDATE, BlobDir, load_patch, load_revisions
@@ -176,6 +176,15 @@ async def test_set_status_and_lookups(world: World) -> None:
             world.registry.get_revision(BOT, missing)
     with pytest.raises(RevisionNotFound):
         world.registry.set_status(BOT, "r9", RevisionStatus.ARCHIVED, actor=OWNER, reason="x")
+
+
+@pytest.mark.asyncio
+async def test_audit_columns_name_the_application_acting_for_the_user(world: World) -> None:
+    delegated = Provenance(ProvenanceKind.USER, OWNER.actor, recorded_as=f"app:7:on-behalf-of:{OWNER.actor}")
+    recorded = await world.registry.capture(BOT, created_by=delegated)
+    assert recorded.revision.revision.created_by.actor == delegated.audit, "the row says who really recorded it"
+    moved = world.registry.move_ref(BOT, RefUpdate("draft", recorded.revision.revision.id, None), actor=delegated, mover=RefMover.OWNER)
+    assert moved.moved_by.actor == delegated.audit
 
 
 # -- refs ------------------------------------------------------------------------------------------

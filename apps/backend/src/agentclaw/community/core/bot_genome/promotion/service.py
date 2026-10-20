@@ -112,7 +112,7 @@ class GenomePromotionService(GenomePromotionServiceProtocol):
                 document_json=canonicalize(compiled.document).decode("utf-8"),
                 going_back=status is RevisionStatus.PROMOTED and expected_revision != target.revision.id,
                 actor_kind=actor.kind.value,
-                actor_id=actor.actor,
+                actor_id=actor.audit,
                 reason=reason,
                 status="applying",
                 apply_kind=self._applier.kind,

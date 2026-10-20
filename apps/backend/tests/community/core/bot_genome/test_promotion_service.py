@@ -12,7 +12,7 @@ from agentclaw.community.core.bot_genome.errors import (
     RefConflict,
     RevisionNotFound,
 )
-from agentclaw.community.core.bot_genome.models import BotRef, RevisionStatus
+from agentclaw.community.core.bot_genome.models import BotRef, Provenance, ProvenanceKind, RevisionStatus
 from agentclaw.community.core.bot_genome.promotion.applier import PendingDeliveryApplier
 from tests.community.core.bot_genome.example_blobs import SUPPORT_BOT, BlobDir, load_patch, load_revisions
 from tests.community.core.bot_genome.service_fixtures import BOT, OWNER, RUN, World
@@ -137,6 +137,14 @@ async def test_the_pending_seam_refuses_everything_before_any_ref_moves(world: W
     assert _refs(world) == {} and world.promotion.list_promotions(BOT).total == 0
     with pytest.raises(AssertionError):
         await PendingDeliveryApplier().start(BOT, world.registry.compile(BOT, r1), actor=OWNER, reason="x")
+
+
+@pytest.mark.asyncio
+async def test_the_promotion_row_names_the_application_acting_for_the_user(world: World) -> None:
+    r1, _ = await _two_revisions(world)
+    delegated = Provenance(ProvenanceKind.USER, OWNER.actor, recorded_as="app:7:on-behalf-of:" + OWNER.actor)
+    promoted = await world.promotion.promote(BOT, revision=r1, ref="active", expected_revision=None, actor=delegated, reason="by an app")
+    assert promoted.actor.actor == delegated.audit and _refs(world) == {"active": r1}
 
 
 @pytest.mark.asyncio

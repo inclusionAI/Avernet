@@ -72,9 +72,16 @@ class BotRef:
 @dataclass(frozen=True)
 class Provenance:
     kind: ProvenanceKind
-    actor: str
+    actor: str  # the principal: the user acted for, which the MCP permission check is made against
     run_id: str | None = None
     step: str | None = None
+    #: How the audit columns name the actor when that differs from the principal: an admitted
+    #: application acting for a user is ``app:<id>:on-behalf-of:<user>``, never just the user.
+    recorded_as: str | None = None
+
+    @property
+    def audit(self) -> str:
+        return self.recorded_as or self.actor
 
     def as_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"kind": self.kind.value, "actor": self.actor}

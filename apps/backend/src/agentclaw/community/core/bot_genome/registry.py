@@ -229,7 +229,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         """File the produced bytes, then the revision row (idempotent by id), then a run's candidate ref."""
         scope = self._scope(bot)
         for digest, data in writes.items():
-            stored = self._content.store_produced(data, scope=scope, origin=origin, modifier=created_by.actor, category="genome")
+            stored = self._content.store_produced(data, scope=scope, origin=origin, modifier=created_by.audit, category="genome")
             if stored.digest != digest:
                 raise RuntimeError(f"produced bytes filed as {stored.digest}, expected {digest}")
         content = canonicalize({"policy": policy, "spec": spec}).decode("utf-8")
@@ -241,7 +241,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
                 genome_schema=1,
                 status=status.value,
                 created_kind=created_by.kind.value,
-                created_actor=created_by.actor,
+                created_actor=created_by.audit,
                 run_id=created_by.run_id,
                 run_step=created_by.step,
                 patch_digest=patch_digest,
@@ -264,7 +264,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
             name = candidate_ref(run.run_id, self._refs.candidate_count(**axes, run_id=run.run_id) + 1)
             moved = self._refs.move(
                 **axes, name=name, revision_id=rev_id, expected_revision_id=None,
-                moved_kind=created_by.kind.value, moved_actor=created_by.actor,
+                moved_kind=created_by.kind.value, moved_actor=created_by.audit,
                 run_id=run.run_id, reason=None, moved_at=_now(),
             )
             if moved is not None:
@@ -389,7 +389,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
             raise RevisionNotFound(update.revision)
         moved = self._refs.move(
             **self._axes(bot), name=update.name, revision_id=update.revision, expected_revision_id=update.expected_revision,
-            moved_kind=actor.kind.value, moved_actor=actor.actor, run_id=actor.run_id, reason=update.reason, moved_at=_now(),
+            moved_kind=actor.kind.value, moved_actor=actor.audit, run_id=actor.run_id, reason=update.reason, moved_at=_now(),
         )
         if moved is None:
             current = self._refs.get(**self._axes(bot), name=update.name)
@@ -406,7 +406,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
             raise LimitExceeded(f"an upload is at most {MAX_UPLOAD_BYTES} bytes")
         scope = self._scope(bot)
         existed = self._content.is_reachable(scope, sha256_digest(data))
-        stored = self._content.store_produced(data, scope=scope, origin="genome/upload", modifier=provenance.actor, category="genome")
+        stored = self._content.store_produced(data, scope=scope, origin="genome/upload", modifier=provenance.audit, category="genome")
         return ContentReceipt(digest=stored.digest, size=len(data), created=not existed)
 
     # -- delivery -----------------------------------------------------------------------------

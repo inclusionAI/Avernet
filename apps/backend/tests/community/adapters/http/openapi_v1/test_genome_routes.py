@@ -10,7 +10,7 @@ import pytest
 from fastapi import FastAPI, Response
 from starlette.requests import Request
 
-from agentclaw.community.adapters.http.openapi_v1.admission import ADMISSION
+from agentclaw.community.adapters.http.openapi_v1.admission import ADMISSION, ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.admission_modes import AdmissionMode
 from agentclaw.community.adapters.http.openapi_v1.authorization_rules import AUTHORIZATION, EDIT_LOCK
 from agentclaw.community.adapters.http.openapi_v1.bots import genome
@@ -62,6 +62,8 @@ _GENOME = "/openapi/v1/bots/{bot_id}/genome"
 R1, R2 = ("sha256:" + c * 64 for c in "ab")
 NOW = datetime(2026, 10, 19, 12, 0, 0)
 OWNER = Provenance(ProvenanceKind.USER, "u1")
+HUMAN = ActingCaller(user_id="u1", app_id=None)
+APP = ActingCaller(user_id="u1", app_id=7)
 BOT = {"entity_id": "ent_1", "active_engine": "openclaw", "bot_type": "personal", "entity_type": "staff"}
 
 
@@ -171,7 +173,7 @@ async def test_record_patch_answers_201_then_200_and_threads_the_run() -> None:
     registry.record_patch.return_value = RecordedRevision(_revision(R2), True, risk_tier="T2", flags=("persona/SOUL.md",), ref="candidate/run_7/1")
     body = RecordPatchRequest(status="candidate", run=RunScopePayload(run_id="run_7", binding_id="b1", allowed_genes=["persona"]), patch={"base": R1})
     response = Response()
-    out = await genome.record_genome_patch("bot_1", body, _request("POST"), response, "u1", "u1", _bot_service(), registry)
+    out = await genome.record_genome_patch("bot_1", body, _request("POST"), response, "u1", "u1", HUMAN, _bot_service(), registry)
     assert response.status_code == 201 and out.data.ref == "candidate/run_7/1" and out.data.flags == ["persona/SOUL.md"]
     bot, patch = registry.record_patch.await_args.args
     kwargs = registry.record_patch.await_args.kwargs
@@ -180,20 +182,29 @@ async def test_record_patch_answers_201_then_200_and_threads_the_run() -> None:
     assert kwargs["created_by"] == Provenance(ProvenanceKind.STRATEGY_RUN, "u1", run_id="run_7")
     registry.record_patch.return_value = RecordedRevision(_revision(R2), False)
     response = Response()
-    out = await genome.record_genome_patch("bot_1", RecordPatchRequest(status="draft", patch={}), _request("POST"), response, "u1", "u1", _bot_service(), registry)
+    out = await genome.record_genome_patch("bot_1", RecordPatchRequest(status="draft", patch={}), _request("POST"), response, "u1", "u1", HUMAN, _bot_service(), registry)
     assert response.status_code == 200 and out.data.created is False
     assert registry.record_patch.await_args.kwargs["created_by"] == OWNER
+
+
+def test_an_application_caller_is_recorded_as_itself_acting_for_the_user() -> None:
+    assert genome._actor("u1", HUMAN) == OWNER and OWNER.audit == "u1"
+    delegated = genome._actor("u1", APP)
+    assert (delegated.actor, delegated.recorded_as, delegated.audit) == ("u1", "app:7:on-behalf-of:u1", "app:7:on-behalf-of:u1")
+    run = genome._actor("u1", APP, run=RunScope("run_7", "b1", ("persona",)))
+    assert (run.kind, run.run_id, run.recorded_as) == (ProvenanceKind.STRATEGY_RUN, "run_7", "app:7:on-behalf-of:u1")
+    assert "recorded_as" not in delegated.as_dict(), "the contract's provenance shape is unchanged"
 
 
 async def test_capture_policy_and_lookups() -> None:
     registry = AsyncMock()
     registry.capture.return_value = RecordedRevision(_revision(), True)
     response = Response()
-    assert (await genome.capture_genome_revision("bot_1", _request("POST"), response, "u1", "u1", _bot_service(), registry)).data.id == R1
+    assert (await genome.capture_genome_revision("bot_1", _request("POST"), response, "u1", "u1", HUMAN, _bot_service(), registry)).data.id == R1
     assert response.status_code == 201
     registry.set_policy = Mock(return_value=RecordedRevision(_revision(), False))
     response = Response()
-    out = await genome.set_genome_policy("bot_1", PolicyRequest(mutable_genes=["persona"], pins=[]), _request("PUT"), response, "u1", "u1", _bot_service(), registry)
+    out = await genome.set_genome_policy("bot_1", PolicyRequest(mutable_genes=["persona"], pins=[]), _request("PUT"), response, "u1", "u1", HUMAN, _bot_service(), registry)
     assert response.status_code == 200 and registry.set_policy.call_args.args[1] == {"mutable_genes": ["persona"], "pins": [], "risk_overrides": {}}
     registry.get_revision = Mock(return_value=_revision())
     out = await genome.get_genome_revision("bot_1", "r1", _request(), "u1", "u1", _bot_service(), registry)
@@ -214,7 +225,7 @@ async def test_refs_content_and_promotions() -> None:
     assert (await genome.list_genome_refs("bot_1", _request(), "u1", "u1", _bot_service(), registry)).data.refs[0].moved_by.actor == "u1"
     registry.get_revision = Mock(return_value=_revision(R2))
     registry.move_ref = Mock(return_value=ref)
-    await genome.move_genome_draft_ref("bot_1", MoveRefRequest(revision="r2", expected_revision=R1, reason="wip"), _request("PUT"), "u1", "u1", _bot_service(), registry)
+    await genome.move_genome_draft_ref("bot_1", MoveRefRequest(revision="r2", expected_revision=R1, reason="wip"), _request("PUT"), "u1", "u1", HUMAN, _bot_service(), registry)
     update = registry.move_ref.call_args.args[1]
     assert (update.name, update.revision, update.expected_revision, update.reason) == ("draft", R2, R1, "wip")
     assert registry.move_ref.call_args.kwargs["mover"] is RefMover.OWNER
@@ -223,12 +234,12 @@ async def test_refs_content_and_promotions() -> None:
     assert (raw.body, raw.media_type) == (b"\x00bytes", "application/octet-stream")
     registry.put_content = Mock(return_value=SimpleNamespace(digest=R1, size=5, created=False))
     response = Response()
-    out = await genome.put_genome_content("bot_1", _request("PUT", body=b"hello"), response, "u1", "u1", _bot_service(), registry)
+    out = await genome.put_genome_content("bot_1", _request("PUT", body=b"hello"), response, "u1", "u1", HUMAN, _bot_service(), registry)
     assert response.status_code == 200 and out.data.size == 5 and registry.put_content.call_args.args[1] == b"hello"
 
     promotion = AsyncMock()
     promotion.promote.return_value = _promotion({"schema_version": 1})
-    out = await genome.promote_genome_revision("bot_1", PromoteRequest(revision="previous", expected_revision=R1, reason="back"), _request("POST"), "u1", "u1", _bot_service(), promotion)
+    out = await genome.promote_genome_revision("bot_1", PromoteRequest(revision="previous", expected_revision=R1, reason="back"), _request("POST"), "u1", "u1", HUMAN, _bot_service(), promotion)
     assert out.data.document == {"schema_version": 1} and out.data.status == "applied"
     assert promotion.promote.await_args.kwargs == {"revision": "previous", "ref": "active", "expected_revision": R1, "actor": OWNER, "reason": "back"}
     promotion.list_promotions = Mock(return_value=PromotionPage(1, (_promotion(),)))
