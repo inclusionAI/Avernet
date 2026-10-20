@@ -69,9 +69,10 @@ class _FakeRepository:
         ]
         return list(reversed(matched))[:max(0, limit)]
 
-    def has_digest(self, *, env, entity_id, bot_id, digest):
+    def has_digest(self, *, env, entity_id, bot_id, digest, source_url_prefix=None):
         return any(
             (r.env, r.entity_id, r.bot_id, r.digest) == (env, entity_id, bot_id, digest)
+            and (source_url_prefix is None or r.source_url.startswith(source_url_prefix))
             for r in self.rows
         )
 
@@ -686,6 +687,19 @@ def test_is_reachable_answers_per_bot(tmp_path):
     assert service.is_reachable(ContentScope(env="prod", entity_id="ent_a", bot_id="bot_1"), digest) is False
     with pytest.raises(ContentStoreError):
         service.is_reachable(SCOPE, "sha256:nope")
+
+
+def test_reachability_by_producer_ignores_what_the_manifest_fetched(tmp_path):
+    service, repo = _service(tmp_path)
+    data = b"fetched by the manifest first"
+    digest = "sha256:" + hashlib.sha256(data).hexdigest()
+    service.store(_fetched(data), scope=SCOPE, source_url="https://code.example.com/team/content.git")
+    assert service.is_reachable(SCOPE, digest) is True
+    assert service.is_reachable(SCOPE, digest, produced_by="genome") is False, "a Manifest fetch is not the registry's row"
+    produced = service.store_produced(data, scope=SCOPE, origin="genome/capture")
+    assert produced.id is not None and len(repo.rows) == 2, "the registry's own row is filed beside the fetched one"
+    assert service.is_reachable(SCOPE, digest, produced_by="genome") is True
+    assert service.store_produced(data, scope=SCOPE, origin="genome/upload").id is None, "but only once per producer"
 
 
 def test_store_produced_refuses_an_overwide_column_before_the_blob(tmp_path):

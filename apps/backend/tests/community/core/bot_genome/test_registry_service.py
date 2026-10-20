@@ -6,6 +6,8 @@ import json
 
 import pytest
 
+from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
+from agentclaw.community.core.bot_config_manifest.content import ContentScope
 from agentclaw.community.core.bot_genome.canonical import canonicalize, sha256_digest
 from agentclaw.community.core.bot_genome.errors import (
     CaptureRefused,
@@ -23,6 +25,7 @@ from agentclaw.community.core.bot_genome.repository.models import GenomePromotio
 from tests.community.core.bot_genome.example_blobs import MEMORY_BOT, SUPPORT_BOT, SUPPORT_BOT_CANDIDATE, BlobDir, load_patch, load_revisions
 from tests.community.core.bot_genome.service_fixtures import BOT, OTHER_BOT, OWNER, RUN, World
 from tests.community.core.bot_genome.test_capture import FakeReader
+from tests.community.core.bot_config_manifest.content.test_content_store import _fetched
 
 REVISIONS = load_revisions()
 SUPPORT_SPEC = REVISIONS[SUPPORT_BOT]["spec"]
@@ -231,6 +234,10 @@ async def test_content_is_reachable_per_bot_and_uploads_are_bounded(world: World
         world.registry.read_content(OTHER_BOT, soul)
     with pytest.raises(ContentNotReachable):
         world.registry.read_content(BOT, "sha256:" + "1" * 64)
+    fetched = b"fetched by a Manifest apply, never captured or uploaded"
+    world.content.store(_fetched(fetched), scope=ContentScope(env="dev", entity_id=BOT.entity_id, bot_id=BOT.bot_id), source_url="https://code.example.com/x.git")
+    with pytest.raises(ContentNotReachable):  # the bot holds the bytes, but no revision or upload of its own names them
+        world.registry.read_content(BOT, sha256_digest(fetched))
     with pytest.raises(ContentNotReachable):
         world.registry.read_content(BOT, "not-a-digest")
     receipt = world.registry.put_content(OTHER_BOT, b"hello", provenance=OWNER)
@@ -266,6 +273,9 @@ async def test_diff_compile_and_applied_revision(world: World) -> None:
         actor_kind="user", actor_id="u", reason="ship", status="applied", apply_kind="pending", apply_reference="apply_9", created_at=first.revision.revision.created_at,
     ))
     assert world.registry.applied_revision(BOT) == SUPPORT_BOT_CANDIDATE
+    for not_done in (ApplyStatus.RUNNING, ApplyStatus.PARTIAL, ApplyStatus.FAILED):
+        world.report(BOT, "apply_9", status=not_done)
+        assert world.registry.applied_revision(BOT) is None, f"a {not_done.value} apply is not what the bot runs"
 
 
 @pytest.mark.asyncio

@@ -72,8 +72,12 @@ class ManifestContentRepositoryProtocol(Protocol):
         entity_id: str,
         bot_id: str,
         digest: str,
+        source_url_prefix: Optional[str] = None,
     ) -> bool:
         """Whether one bot holds at least one provenance row for ``digest``.
+
+        With ``source_url_prefix``, only rows whose ``source_url`` starts
+        with it count (``produced://genome/`` for the registry's own rows).
 
         The reachability read the Genome Registry makes before it hands
         bytes to a caller: a digest another bot stored is not this bot's.

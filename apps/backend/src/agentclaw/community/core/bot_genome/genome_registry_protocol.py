@@ -116,5 +116,9 @@ class GenomeRegistryProtocol(Protocol):
 
     @abstractmethod
     def applied_revision(self, bot: BotRef) -> str | None:
-        """The revision whose promotion started the bot's last apply, or ``None``."""
+        """The revision whose promotion started the bot's last apply, or ``None``.
+
+        Only a ``SUCCEEDED`` apply counts: a running, partial or failed one
+        means the bot does not run that revision, so it reads as drift.
+        """
         ...

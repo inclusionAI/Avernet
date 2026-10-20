@@ -341,17 +341,20 @@ class ManifestContentService(ManifestContentServiceProtocol):
             modifier=stored_modifier,
         )
         self._write_blob(digest, data)
-        if self.is_reachable(scope, digest):
+        # Dedupe within the producer: a row the Manifest fetched does not stand in for the
+        # registry's own, which is what makes the digest reachable through the registry.
+        if self.is_reachable(scope, digest, produced_by=origin.split("/", 1)[0]):
             return record
         return self._repository.add(record)
 
-    def is_reachable(self, scope: ContentScope, digest: str) -> bool:
-        """A provenance row for this bot and digest exists."""
+    def is_reachable(self, scope: ContentScope, digest: str, *, produced_by: Optional[str] = None) -> bool:
+        """A provenance row for this bot and digest exists (filed by ``produced_by`` when given)."""
         return self._repository.has_digest(
             env=scope.env,
             entity_id=scope.entity_id,
             bot_id=scope.bot_id,
             digest=_require_valid_digest(digest),
+            source_url_prefix=None if produced_by is None else f"produced://{produced_by}/",
         )
 
     def read(self, digest: str) -> bytes:

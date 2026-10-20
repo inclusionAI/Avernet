@@ -109,8 +109,12 @@ class ManifestContentServiceProtocol(Protocol):
         ...
 
     @abstractmethod
-    def is_reachable(self, scope: ContentScope, digest: str) -> bool:
+    def is_reachable(self, scope: ContentScope, digest: str, *, produced_by: Optional[str] = None) -> bool:
         """Whether this bot holds a provenance row for the digest.
+
+        With ``produced_by`` (an origin's first segment, ``"genome"``), only
+        rows that producer filed count (``produced://genome/…``): a digest the
+        Manifest fetched for the bot is not thereby the registry's.
 
         Reachability is what lets the registry hand bytes to a caller: a
         digest that exists in the blob tree but was never stored *for this

@@ -17,6 +17,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
+from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
     BotConfigManifestApplyServiceProtocol,
 )
@@ -107,14 +108,18 @@ def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+#: The producer whose provenance rows make a digest the registry's: captured, patch-written or uploaded bytes.
+_PRODUCER = "genome"
+
+
 class _BotContent(ContentReader):
-    """The content store scoped to one bot: a digest is readable only when the bot holds a row for it."""
+    """The content store scoped to one bot: a digest is readable only when the registry filed a row for it for this bot."""
 
     def __init__(self, content: ManifestContentServiceProtocol, scope: ContentScope) -> None:
         self._content, self._scope = content, scope
 
     def read(self, digest: str) -> bytes:
-        if not DIGEST_RE.match(digest) or not self._content.is_reachable(self._scope, digest):
+        if not DIGEST_RE.match(digest) or not self._content.is_reachable(self._scope, digest, produced_by=_PRODUCER):
             raise ContentNotReachable(digest)
         try:
             return self._content.read(digest)
@@ -408,7 +413,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         if len(data) > MAX_UPLOAD_BYTES:
             raise LimitExceeded(f"an upload is at most {MAX_UPLOAD_BYTES} bytes")
         scope = self._scope(bot)
-        existed = self._content.is_reachable(scope, sha256_digest(data))
+        existed = self._content.is_reachable(scope, sha256_digest(data), produced_by=_PRODUCER)
         stored = self._content.store_produced(data, scope=scope, origin="genome/upload", modifier=provenance.audit, category="genome")
         return ContentReceipt(digest=stored.digest, size=len(data), created=not existed)
 
@@ -420,8 +425,8 @@ class GenomeRegistryService(GenomeRegistryProtocol):
 
     def applied_revision(self, bot: BotRef) -> str | None:
         report = self._applies.last_apply(entity_id=bot.entity_id, bot_id=bot.bot_id)
-        if report is None:
-            return None
+        if report is None or report.status is not ApplyStatus.SUCCEEDED:
+            return None  # running, partial or failed: the bot does not run that revision (yet)
         promotion = self._promotions.by_apply_reference(**self._axes(bot), apply_reference=report.apply_id)
         return None if promotion is None else promotion.revision_id
 

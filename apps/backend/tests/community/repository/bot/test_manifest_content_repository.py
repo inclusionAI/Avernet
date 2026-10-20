@@ -257,3 +257,5 @@ def test_has_digest_is_true_only_for_the_bot_that_holds_a_row(repo):
     assert repo.has_digest(env="dev", entity_id="ent_a", bot_id="bot_2", digest=digest) is False
     assert repo.has_digest(env="pre", entity_id="ent_a", bot_id="bot_1", digest=digest) is False
     assert repo.has_digest(env="dev", entity_id="ent_a", bot_id="bot_1", digest="sha256:" + "ef" * 32) is False
+    assert repo.has_digest(env="dev", entity_id="ent_a", bot_id="bot_1", digest=digest, source_url_prefix="produced://genome/") is False
+    assert repo.has_digest(env="dev", entity_id="ent_a", bot_id="bot_1", digest=digest, source_url_prefix="produced://genome_") is False, "LIKE wildcards are escaped"

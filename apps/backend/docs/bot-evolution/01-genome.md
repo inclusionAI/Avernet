@@ -1022,8 +1022,9 @@ RSI-04), the apply report (personal bot) and the publish record (service
 bot) repeat that digest, and the Registry maps a bot's last applied digest
 to the revision it runs. Until then the join is by apply id: the Registry
 takes the bot's last Manifest apply and looks for the promotion that
-started it (`apply_reference`); a last apply no promotion started means the
-bot runs something no revision describes.
+started it (`apply_reference`), counting only a `SUCCEEDED` apply; a last
+apply no promotion started, or one still running or failed, means the bot
+runs something no revision describes.
 
 **Drift.** A bot has *drifted* when its last applied document digest (from
 the latest apply report, or the publish record of the version that is

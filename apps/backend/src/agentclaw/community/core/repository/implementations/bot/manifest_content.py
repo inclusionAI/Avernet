@@ -115,20 +115,19 @@ class ManifestContentRepository(ManifestContentRepositoryProtocol):
         entity_id: str,
         bot_id: str,
         digest: str,
+        source_url_prefix: Optional[str] = None,
     ) -> bool:
         """One bot's rows for one digest: an existence read on the bot's index."""
         with self._db.orm_session() as session:
-            row = (
-                session.query(self._Manifest.id)
-                .filter(
-                    self._Manifest.env == env,
-                    self._Manifest.entity_id == entity_id,
-                    self._Manifest.bot_id == bot_id,
-                    self._Manifest.digest == digest,
-                )
-                .first()
+            query = session.query(self._Manifest.id).filter(
+                self._Manifest.env == env,
+                self._Manifest.entity_id == entity_id,
+                self._Manifest.bot_id == bot_id,
+                self._Manifest.digest == digest,
             )
-            return row is not None
+            if source_url_prefix is not None:
+                query = query.filter(self._Manifest.source_url.startswith(source_url_prefix, autoescape=True))
+            return query.first() is not None
 
     def latest_for(
         self,

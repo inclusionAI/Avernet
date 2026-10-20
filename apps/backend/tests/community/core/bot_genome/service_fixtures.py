@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.content.service import ManifestContentService
 from agentclaw.community.core.bot_genome.models import ApplyResult, BotRef, Provenance, ProvenanceKind
 from agentclaw.community.core.bot_genome.promotion.service import GenomePromotionService
@@ -123,5 +124,5 @@ class World:
             registry=self.registry, revisions=self.revisions, refs=self.refs, promotions=self.promotions, applier=self.applier, env=lambda: "dev"
         )
 
-    def report(self, bot: BotRef, apply_id: str) -> None:
-        self.applies.reports[(bot.entity_id, bot.bot_id)] = SimpleNamespace(apply_id=apply_id)
+    def report(self, bot: BotRef, apply_id: str, status: ApplyStatus = ApplyStatus.SUCCEEDED) -> None:
+        self.applies.reports[(bot.entity_id, bot.bot_id)] = SimpleNamespace(apply_id=apply_id, status=status)
