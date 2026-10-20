@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Annotated, Callable
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
 from agentclaw.community.adapters.http.access.schemas import (
     AllowDisallowData,
@@ -30,6 +30,7 @@ from agentclaw.community.api.bot_quota_service import BotQuotaServiceProtocol
 from agentclaw.community.api.user_list_service import UserListServiceProtocol
 from agentclaw.community.api.user_service import UserServiceProtocol
 from agentclaw.community.core.access.errors import UserNotFoundError
+from agentclaw.community.core.user_list.server_managed import ServerManagedUserListError
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
@@ -174,13 +175,16 @@ async def correct_user_list(
 ) -> ApiResponse[UserListCheckData]:
     """Apply one authenticated user-list correction in the selected environment."""
     correction_env = env or get_current_env()
-    in_whitelist = service.correct_membership(
-        actor_id=user.staffId,
-        entity_id=request.entity_id,
-        user_list_type=request.user_list_type,
-        in_whitelist=request.in_whitelist,
-        env=correction_env,
-    )
+    try:
+        in_whitelist = service.correct_membership(
+            actor_id=user.staffId,
+            entity_id=request.entity_id,
+            user_list_type=request.user_list_type,
+            in_whitelist=request.in_whitelist,
+            env=correction_env,
+        )
+    except ServerManagedUserListError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from None
     return ApiResponse(
         success=True,
         message="OK",

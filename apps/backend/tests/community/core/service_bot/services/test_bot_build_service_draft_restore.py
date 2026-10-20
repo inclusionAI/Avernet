@@ -30,6 +30,7 @@ def test_restore_draft_arca_rsyncs_versioned_artifact_into_draft_nas(monkeypatch
     baas = MagicMock()
     baas.resolve_container_provider.return_value = "baas"
     svc = BotBuildService(
+        user_list_repository=MagicMock(exists=MagicMock(return_value=False)),
         build_ignore_repository=MagicMock(get=MagicMock(return_value=None)),
         env="test",
         device_service=MagicMock(),
@@ -113,6 +114,7 @@ async def test_restore_teclaw_draft_submits_then_checks_progress_one_step_at_a_t
         {"status": "SUCCESS"},
     ]
     svc = BotBuildService(
+        user_list_repository=MagicMock(exists=MagicMock(return_value=False)),
         build_ignore_repository=MagicMock(get=MagicMock(return_value=None)),
         env="test",
         device_service=MagicMock(),
@@ -205,6 +207,7 @@ async def test_restore_teclaw_draft_reports_terminal_baas_failure():
     baas.update_teclaw_bot.return_value = {"publish_id": 902}
     baas.get_publish_progress.return_value = {"status": "FAILED"}
     svc = BotBuildService(
+        user_list_repository=MagicMock(exists=MagicMock(return_value=False)),
         build_ignore_repository=MagicMock(get=MagicMock(return_value=None)),
         env="test",
         device_service=MagicMock(),
@@ -250,6 +253,7 @@ async def test_restore_teclaw_draft_retries_after_progress_query_error():
     baas = MagicMock()
     baas.get_publish_progress.side_effect = RuntimeError("temporary gateway error")
     svc = BotBuildService(
+        user_list_repository=MagicMock(exists=MagicMock(return_value=False)),
         build_ignore_repository=MagicMock(get=MagicMock(return_value=None)),
         env="test",
         device_service=MagicMock(),

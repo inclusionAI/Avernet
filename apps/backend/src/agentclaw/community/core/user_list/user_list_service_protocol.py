@@ -25,7 +25,12 @@ class UserListServiceProtocol(Protocol):
         user_list_type: str,
         in_whitelist: bool,
         env: str | None = None,
-    ) -> bool: ...
+    ) -> bool:
+        """Correct frontend lists; server-managed types raise ServerManagedUserListError.
+
+        HTTP adapters expose this denial as 403 without modifying persistence.
+        """
+        ...
 
 
 __all__ = ["UserListServiceProtocol"]

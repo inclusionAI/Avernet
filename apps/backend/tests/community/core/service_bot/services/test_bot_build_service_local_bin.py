@@ -42,7 +42,7 @@ def migration(tmp_path):
 
     service._run_local_command = run_command
 
-    def migrate(rules=()):
+    def migrate(rules=(), *, enabled=True):
         return service._migrate_bot_instance(
             device_id="device-cli-test",
             source_dir=source,
@@ -51,6 +51,7 @@ def migration(tmp_path):
             is_nas=True,
             nas_storage_id=source.parent,
             build_ignore_paths=rules,
+            **({"include_runtime_artifacts": enabled} if enabled is not None else {}),
         )
 
     return source, target, commands, migrate
@@ -705,3 +706,15 @@ def test_skip_directory_link_removes_old_directory_and_omits_fifo(migration, tmp
     assert (source_bin / "directory").is_symlink()
     assert (source_bin / "pipe").exists()
     assert "--no-devices" in commands[-1] and "--no-specials" in commands[-1]
+
+
+def test_migration_defaults_to_skipping_both_cli_snapshots(migration):
+    source, target, commands, migrate = migration
+    for relative in (".agentclaw/tool", ".local/bin/tool"):
+        tool = source.parent / relative
+        tool.parent.mkdir(parents=True, exist_ok=True)
+        tool.write_text("payload")
+    assert migrate(enabled=None)
+    assert (target / "config.json").exists()
+    assert not (target.parent / ".agentclaw").exists()
+    assert not (target.parent / ".local").exists()

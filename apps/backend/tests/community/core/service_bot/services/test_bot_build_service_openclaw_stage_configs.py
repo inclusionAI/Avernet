@@ -21,6 +21,7 @@ def _make_service(channel_service: object = _UNSET) -> BotBuildService:
     service = BotBuildService.__new__(BotBuildService)
     service._build_ignore_repository = MagicMock(get=MagicMock(return_value=None))
     service._env = "test"
+    service._user_list_repository = MagicMock(exists=MagicMock(return_value=False))
     service._channel_service = MagicMock() if channel_service is _UNSET else channel_service
     service._common_whitelist_service = MagicMock()
     return service

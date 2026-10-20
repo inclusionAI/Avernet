@@ -32,6 +32,7 @@ def sync_agentclaw_artifact(
     version: str,
     build_ignore_paths: tuple[str, ...],
     run_command: Callable[..., Any],
+    enabled: bool = True,
 ) -> None:
     """Converge the complete CLI snapshot independently of the engine root."""
     source = source_home / ".agentclaw"
@@ -42,10 +43,12 @@ def sync_agentclaw_artifact(
     logger.info("service_bot.agentclaw.request " + fields + " symlink_policy=preserve", *context)
     try:
         _validate_directories(target_dir.parent)
-        _validate_directories(source_home)
-        reason = "excluded" if is_excluded(".agentclaw", build_ignore_paths) else ""
-        if not reason and not source.exists():
-            reason = "source_missing"
+        reason = "feature_disabled" if not enabled else ""
+        if not reason:
+            _validate_directories(source_home)
+            reason = "excluded" if is_excluded(".agentclaw", build_ignore_paths) else ""
+            if not reason and not source.exists():
+                reason = "source_missing"
         if reason:
             if target.exists():
                 logger.info("service_bot.agentclaw.cleanup.request " + fields + " reason=%s", *context, reason)
