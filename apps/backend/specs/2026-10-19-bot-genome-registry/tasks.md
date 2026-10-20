@@ -43,11 +43,11 @@
 - **Goal:** Persistence for revisions, refs (CAS), ref events, patches and promotions.
 - **Files:** `core/bot_genome/sql/2026_10_19_bot_genome.sql`, `core/bot_genome/repository/{__init__,models}.py`, `core/repository/protocols/bot/genome.py` (+ `__init__` exports), `core/repository/implementations/bot/genome.py`, `core/schema.py`; `tests/community/repository/bot/test_genome_repository.py`
 - **Done when:**
-  - [ ] The five tables are created by `create_all`; the DDL matches the ORM; the promotion row holds the compiled document (canonical JSON) and its digest.
-  - [ ] Inserting an existing `revision_id` returns the existing row without a new `seq`; a `seq` collision retries; `list` filters by status/parent newest-seq-first with totals.
-  - [ ] `move` is CAS on the expected revision (rowcount semantics), `move_pair` moves `active`+`previous` in one transaction, each move appends an event; `candidate_count(run)` supports numbering.
-  - [ ] Promotion rows round-trip; `by_apply_reference` finds the promotion for an apply id.
-  - [ ] `test_repository_contracts` passes (abstract members, declared protocols).
+  - [x] The five tables are created by `create_all`; the DDL matches the ORM; the promotion row holds the compiled document (canonical JSON) and its digest.
+  - [x] Inserting an existing `revision_id` returns the existing row without a new `seq`; a `seq` collision retries; `list` filters by status/parent newest-seq-first with totals.
+  - [x] `move` is CAS on the expected revision (rowcount semantics), `move_pair` moves `active`+`previous` in one transaction, each move appends an event; `candidate_count(run)` supports numbering.
+  - [x] Promotion rows round-trip; `by_apply_reference` finds the promotion for an apply id.
+  - [x] `test_repository_contracts` passes (abstract members, declared protocols).
 - **Depends on:** Task 1
 
 ## Task 6: Capture and compile

@@ -26,6 +26,12 @@ from agentclaw.community.core.repository.protocols.bot.config_manifest_apply imp
 from agentclaw.community.core.repository.protocols.bot.friend import (
     BotFriendRepositoryProtocol,
 )
+from agentclaw.community.core.repository.protocols.bot.genome import (
+    GenomePatchRepositoryProtocol,
+    GenomePromotionRepositoryProtocol,
+    GenomeRefRepositoryProtocol,
+    GenomeRevisionRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot.manifest_content import (
     DEFAULT_RECORD_LIMIT,
     ManifestContentRepositoryProtocol,
@@ -69,6 +75,10 @@ __all__ = [
     "BotStartupScriptRepositoryProtocol",
     "CollaboratorRepositoryProtocol",
     "DEFAULT_RECORD_LIMIT",
+    "GenomePatchRepositoryProtocol",
+    "GenomePromotionRepositoryProtocol",
+    "GenomeRefRepositoryProtocol",
+    "GenomeRevisionRepositoryProtocol",
     "ManifestContentRepositoryProtocol",
     "RenderScreenRepository",
     "SourceCredentialRepositoryProtocol",
