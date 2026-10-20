@@ -81,6 +81,10 @@ provides:
   - GeneChange
   - CompiledManifest
   - ContentReceipt
+  - ApplyResult
+  - Promotion
+  - PromotionPage
+  - PolicyRejected
   - GenomeError  # and its subclasses: RevisionNotFound, RefConflict, PatchRejected, CaptureRefused, LimitExceeded, MoverNotAllowed, ContentNotReachable, Drifted, NotPromotable, NotAppliable, PromotionUnsupported
   - Reason
   - canonicalize  # RFC 8785 subset, revision ids, digests (canonical.py)

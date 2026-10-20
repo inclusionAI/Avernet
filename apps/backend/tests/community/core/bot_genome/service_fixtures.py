@@ -10,7 +10,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.bot_config_manifest.content.service import ManifestContentService
-from agentclaw.community.core.bot_genome.models import BotRef, Provenance, ProvenanceKind
+from agentclaw.community.core.bot_genome.models import ApplyResult, BotRef, Provenance, ProvenanceKind
+from agentclaw.community.core.bot_genome.promotion.service import GenomePromotionService
 from agentclaw.community.core.bot_genome.registry import GenomeRegistryService
 from agentclaw.community.core.bot_genome.spec_checks import SpecChecks
 from agentclaw.community.core.repository.implementations.bot.genome import (
@@ -64,6 +65,30 @@ class FakeApplies:
         return self.reports.get((entity_id, bot_id))
 
 
+class FakeApplier:
+    """Accepts by default; ``refuse`` makes preflight raise it, ``fail`` makes start raise it."""
+
+    kind = "fake"
+
+    def __init__(self) -> None:
+        self.refuse: Exception | None = None
+        self.fail: Exception | None = None
+        self.preflights: list = []
+        self.starts: list = []
+        self.next_reference = "apply_1"
+
+    def preflight(self, bot, compiled) -> None:
+        self.preflights.append((bot, compiled))
+        if self.refuse is not None:
+            raise self.refuse
+
+    async def start(self, bot, compiled, *, actor, reason) -> ApplyResult:
+        self.starts.append((bot, compiled, actor, reason))
+        if self.fail is not None:
+            raise self.fail
+        return ApplyResult(kind=self.kind, reference=self.next_reference, detail="started")
+
+
 class World:
     """Everything a registry test needs, built once per test."""
 
@@ -89,6 +114,10 @@ class World:
             validator=self.validator,
             applies=self.applies,
             env=lambda: "dev",
+        )
+        self.applier = FakeApplier()
+        self.promotion = GenomePromotionService(
+            registry=self.registry, revisions=self.revisions, refs=self.refs, promotions=self.promotions, applier=self.applier, env=lambda: "dev"
         )
 
     def report(self, bot: BotRef, apply_id: str) -> None:

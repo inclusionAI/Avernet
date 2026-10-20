@@ -209,6 +209,41 @@ class CompiledManifest:
     document_digest: str
 
 
+@dataclass(frozen=True)
+class ApplyResult:
+    """What the delivery seam answered when it took a compiled revision."""
+
+    kind: str  # the applier: pending | direct | …
+    reference: str | None  # the applier's handle (an apply id), joined by applied_revision
+    detail: str = ""
+
+
+@dataclass(frozen=True)
+class Promotion:
+    """One promotion as recorded; ``document`` is carried only when the caller asked for it."""
+
+    id: str
+    ref: str
+    revision: str
+    from_revision: str | None
+    document_digest: str
+    going_back: bool
+    actor: Provenance
+    reason: str
+    status: str  # applying | applied | apply_failed
+    apply_kind: str
+    apply_reference: str | None
+    apply_detail: str
+    created_at: datetime
+    document: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class PromotionPage:
+    total: int
+    items: tuple[Promotion, ...]
+
+
 def parse_ref_name(name: str) -> tuple[str, str | None, int | None]:
     """``("active", None, None)`` for a fixed ref, ``("candidate", run_id, n)`` for a candidate ref.
 

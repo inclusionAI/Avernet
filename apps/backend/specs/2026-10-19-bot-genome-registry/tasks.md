@@ -74,9 +74,9 @@
 - **Goal:** Move `active`/`previous`, record the promotion with its compiled document, and hand the compiled revision to the delivery seam.
 - **Files:** `core/bot_genome/promotion/{__init__,promotion_service_protocol,applier,service}.py`, `api/bot_genome_promotion_service.py`; `tests/community/core/bot_genome/test_promotion_service.py`; conformance pair registered
 - **Done when:**
-  - [ ] `promote` follows the planned order (tested with a fake applier that accepts): `NotAppliable`/`PromotionUnsupported` from `preflight` leaves refs and statuses untouched; `Drifted` refuses non-owner actors only; `going_back` is set when the target was promoted before; a failed `start` records `apply_failed` with refs moved; the row carries the compiled document and digest.
-  - [ ] `PendingDeliveryApplier`, the only bound implementation, refuses a service bot as `PromotionUnsupported` and everything else as `NotAppliable` naming RSI-04; no Manifest is read or written anywhere on the promotion path.
-  - [ ] `get_promotion` / `list_promotions` read back rows, document included.
+  - [x] `promote` follows the planned order (tested with a fake applier that accepts): `NotAppliable`/`PromotionUnsupported` from `preflight` leaves refs and statuses untouched; `Drifted` refuses non-owner actors only; `going_back` is set when the target was promoted before; a failed `start` records `apply_failed` with refs moved; the row carries the compiled document and digest.
+  - [x] `PendingDeliveryApplier`, the only bound implementation, refuses a service bot as `PromotionUnsupported` and everything else as `NotAppliable` naming RSI-04; no Manifest is read or written anywhere on the promotion path.
+  - [x] `get_promotion` / `list_promotions` read back rows, document included.
 - **Depends on:** Task 7
 
 ## Task 9: DI wiring
