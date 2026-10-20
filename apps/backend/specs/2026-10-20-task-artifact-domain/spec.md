@@ -269,6 +269,9 @@ class CodeContent(ArtifactContent):
 -- 无外键(与 task_trajectory 同款约束:task 域表间不建 FK)。
 -- 幂等二道闸:select-first 后 INSERT,撞 uk_dedupe 让本事务失败走图版本重放(spec §5.3),
 -- 不做"冲突回滚再读"(prod plugin 无 SAVEPOINT)。
+-- content/content_hash/creator/modifier 列可空(用户定稿)但发布路径必填:NULL 仅为 schema 容错/
+-- 人工修数留口;content_hash 为 NULL 的行不被 uk_dedupe 判重(MySQL 唯一索引 NULL 互不相等),
+-- 意味着这类行回放即重复——故领域构造器与发布校验(§3/§4)不放宽,仍强制 content+hash+creator。
 -- creator/modifier/gmt_create/gmt_modify 为表结构房型列(用户定稿):行不可变,
 --   modifier 恒等于 creator、gmt_modify 恒等于 gmt_create,列保留纯为 schema 惯例兼容;
 -- gmt_create 由仓储以领域 created_at(ms)同事务双写,DB DEFAULT 仅为 fallback(trajectory 同款惯例)。
@@ -285,10 +288,10 @@ CREATE TABLE IF NOT EXISTS `task_artifact` (
     `attempt`         int           NOT NULL DEFAULT 0                            COMMENT '节点 harness_retries 快照(0 起;与报文交叉校验)',
     `scope_session_id` varchar(512) DEFAULT NULL                                  COMMENT '图绑定协作会话 ID(图绑定优先,未绑定采纳上报值;NULL=均无)',
     `kind`            varchar(64)   NOT NULL                                      COMMENT '内容形态(text|file|url_link|code),governed 枚举',
-    `content`         mediumtext    NOT NULL                                      COMMENT '内容分支 JSON(kind-tagged,tag=分支判别;不含字节/临时凭证/存储 handle)',
-    `content_hash`    char(64)      NOT NULL                                      COMMENT 'sha256(canonical_json(content)),uk_dedupe 成分',
-    `creator`         varchar(128)  NOT NULL                                      COMMENT '产出者(bot_id/group_id;system=系统写入,如控制信号)',
-    `modifier`        varchar(128)  NOT NULL                                      COMMENT '修改者(行不可变:恒等于 creator,房型惯例列)',
+    `content`         mediumtext    DEFAULT NULL                                  COMMENT '内容分支 JSON(kind-tagged,tag=分支判别;不含字节/临时凭证/存储 handle;发布路径必填,NULL 仅为 schema 容错/人工修数留口)',
+    `content_hash`    char(64)      DEFAULT NULL                                  COMMENT 'sha256(canonical_json(content)),uk_dedupe 成分;发布路径必填——NULL 行绕过幂等闸(MySQL 唯一索引 NULL 不判重)',
+    `creator`         varchar(128)  DEFAULT NULL                                  COMMENT '产出者(bot_id/group_id;system=系统写入,如控制信号;NULL=未记录)',
+    `modifier`        varchar(128)  DEFAULT NULL                                  COMMENT '修改者(行不可变:恒等于 creator,房型惯例列;NULL=未记录)',
     `gmt_create`      timestamp     NOT NULL DEFAULT CURRENT_TIMESTAMP            COMMENT '发布时间(仓储以领域 created_at 毫秒值双写,DB 默认仅 fallback)',
     `gmt_modify`      timestamp     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后修改时间(行不可变:恒等于 gmt_create,房型惯例列)',
     PRIMARY KEY (`id`) COMMENT '自增主键',
