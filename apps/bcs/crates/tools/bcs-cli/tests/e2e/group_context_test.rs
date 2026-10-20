@@ -282,6 +282,147 @@ async fn group_context_get_accepts_repeated_scope_level_flags() {
 }
 
 #[tokio::test]
+async fn group_context_non_group_scopes_omit_group_id_query() {
+    let ctx = TestContext::new()
+        .await
+        .expect("Failed to create test context");
+    let request_urls = Arc::new(Mutex::new(Vec::<String>::new()));
+
+    for operation in ["add", "update", "list", "get"] {
+        let urls = request_urls.clone();
+        let operation_path = format!("/groupcontext/{operation}");
+        let response_operation = operation.to_string();
+
+        Mock::given(method("POST"))
+            .and(path(operation_path))
+            .and(query_param("sessionId", "sess-001"))
+            .respond_with(move |request: &wiremock::Request| {
+                urls.lock().unwrap().push(request.url.to_string());
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "status": "ok",
+                    "operation": response_operation,
+                }))
+            })
+            .mount(&ctx.mock_server)
+            .await;
+
+        let mut command = ctx.cmd();
+        command
+            .arg("group-context")
+            .arg("--auth")
+            .arg("e2e-token")
+            .arg(operation);
+        match operation {
+            "add" => command
+                .arg("--session-id")
+                .arg("sess-001")
+                .arg("--name")
+                .arg("game_rule")
+                .arg("--scope-level")
+                .arg("session")
+                .arg("--content")
+                .arg("rules")
+                .arg("--collect-from")
+                .arg(r#"{"userIds":["judge_bot"]}"#),
+            "update" => command
+                .arg("--session-id")
+                .arg("sess-001")
+                .arg("--name")
+                .arg("player_state")
+                .arg("--scope-level")
+                .arg("session")
+                .arg("--change-reason")
+                .arg("metadata"),
+            "list" => command
+                .arg("--session-id")
+                .arg("sess-001")
+                .arg("--scope-level")
+                .arg("session"),
+            "get" => command
+                .arg("--session-id")
+                .arg("sess-001")
+                .arg("--name")
+                .arg("player_state")
+                .arg("--scope-level")
+                .arg("session"),
+            _ => unreachable!(),
+        };
+        let output = command
+            .output()
+            .expect("Failed to execute group-context command");
+        assert_success(&output);
+        assert_eq!(response_json(&output)["operation"], operation);
+    }
+
+    assert_eq!(request_urls.lock().unwrap().len(), 4);
+    assert!(
+        request_urls
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|url| !url.contains("groupId=")),
+        "non-group requests must not include groupId in the URL. URLs: {:?}",
+        request_urls.lock().unwrap()
+    );
+}
+
+#[tokio::test]
+async fn group_context_round_scope_uses_legal_round_id_without_group_id() {
+    let ctx = TestContext::new()
+        .await
+        .expect("Failed to create test context");
+    let url_capture = Arc::new(Mutex::new(String::new()));
+    let urls = url_capture.clone();
+    let operation = "add".to_string();
+
+    Mock::given(method("POST"))
+        .and(path("/groupcontext/add"))
+        .and(query_param("roundId", "sess-001:round-001"))
+        .respond_with(move |request: &wiremock::Request| {
+            *urls.lock().unwrap() = request.url.to_string();
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ok",
+                "operation": operation,
+            }))
+        })
+        .mount(&ctx.mock_server)
+        .await;
+
+    let output = ctx
+        .cmd()
+        .arg("group-context")
+        .arg("--auth")
+        .arg("e2e-token")
+        .arg("add")
+        .arg("--round-id")
+        .arg("sess-001:round-001")
+        .arg("--name")
+        .arg("player_word_1")
+        .arg("--scope-level")
+        .arg("round")
+        .arg("--content")
+        .arg("张三出局")
+        .arg("--visible-to")
+        .arg(r#"{"userIds":["bot-1"]}"#)
+        .arg("--collect-from")
+        .arg(r#"{"userIds":["bot-2"]}"#)
+        .output()
+        .expect("Failed to execute round-scope group-context add");
+
+    assert_success(&output);
+    assert_eq!(response_json(&output)["operation"], "add");
+    let url = url_capture.lock().unwrap();
+    assert!(
+        url.contains("roundId=sess-001%3Around-001"),
+        "URL was: {url}"
+    );
+    assert!(
+        !url.contains("groupId="),
+        "URL must not include groupId: {url}"
+    );
+}
+
+#[tokio::test]
 async fn group_context_rejects_invalid_visible_to_json() {
     let ctx = TestContext::new()
         .await

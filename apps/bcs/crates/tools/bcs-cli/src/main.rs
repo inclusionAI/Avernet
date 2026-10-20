@@ -1534,7 +1534,7 @@ enum GroupContextCommands {
     /// Add a new active context.
     Add {
         #[arg(long)]
-        group_id: String,
+        group_id: Option<String>,
         #[arg(long)]
         session_id: Option<String>,
         #[arg(long)]
@@ -1557,7 +1557,7 @@ enum GroupContextCommands {
     /// Supersede the active context version.
     Update {
         #[arg(long)]
-        group_id: String,
+        group_id: Option<String>,
         #[arg(long)]
         session_id: Option<String>,
         #[arg(long)]
@@ -1585,7 +1585,7 @@ enum GroupContextCommands {
     /// List visible or writable active contexts.
     List {
         #[arg(long)]
-        group_id: String,
+        group_id: Option<String>,
         #[arg(long)]
         session_id: Option<String>,
         #[arg(long)]
@@ -1600,7 +1600,7 @@ enum GroupContextCommands {
     /// Get visible active contexts ordered round/session/group.
     Get {
         #[arg(long)]
-        group_id: String,
+        group_id: Option<String>,
         #[arg(long)]
         session_id: Option<String>,
         #[arg(long)]
@@ -2299,11 +2299,16 @@ fn parse_group_context_owners(raw: &str) -> Result<serde_json::Value> {
 }
 
 fn group_context_query(
-    group_id: &str,
+    group_id: Option<&str>,
     session_id: Option<&str>,
     round_id: Option<&str>,
 ) -> Vec<(String, String)> {
-    let mut query = vec![("groupId".to_string(), group_id.to_string())];
+    let mut query = Vec::new();
+    if let Some(value) = group_id {
+        if !value.is_empty() {
+            query.push(("groupId".to_string(), value.to_string()));
+        }
+    }
     if let Some(value) = session_id {
         query.push(("sessionId".to_string(), value.to_string()));
     }
@@ -4461,7 +4466,11 @@ pub async fn run() -> Result<()> {
                     )
                 }
             };
-            let query = group_context_query(&group_id, session_id.as_deref(), round_id.as_deref());
+            let query = group_context_query(
+                group_id.as_deref(),
+                session_id.as_deref(),
+                round_id.as_deref(),
+            );
             let query_refs = query
                 .iter()
                 .map(|(key, value)| (key.as_str(), value.as_str()))
@@ -5745,6 +5754,102 @@ mod tests {
                 assert_eq!(scope_levels, vec!["group", "session"]);
             }
             _ => panic!("expected group-context list command"),
+        }
+    }
+
+    #[test]
+    fn group_context_query_omits_missing_and_empty_group_id() {
+        for group_id in [None, Some("")] {
+            let query = group_context_query(group_id, Some("sess-001"), None);
+            assert!(!query.iter().any(|(key, _)| key == "groupId"));
+        }
+    }
+
+    #[test]
+    fn group_context_query_includes_non_empty_group_id() {
+        let query = group_context_query(Some("game-room-7"), None, None);
+        assert_eq!(
+            query,
+            vec![("groupId".to_string(), "game-room-7".to_string())]
+        );
+    }
+
+    #[test]
+    fn group_context_commands_accept_non_group_scope_without_group_id() {
+        for (operation, args) in [
+            (
+                "add",
+                vec![
+                    "group-context",
+                    "add",
+                    "--session-id",
+                    "sess-001",
+                    "--name",
+                    "game_rule",
+                    "--scope-level",
+                    "session",
+                    "--content",
+                    "rules",
+                    "--collect-from",
+                    r#"{"userIds":["judge_bot"]}"#,
+                ],
+            ),
+            (
+                "update",
+                vec![
+                    "group-context",
+                    "update",
+                    "--session-id",
+                    "sess-001",
+                    "--name",
+                    "player_state",
+                    "--scope-level",
+                    "session",
+                    "--change-reason",
+                    "metadata",
+                ],
+            ),
+            (
+                "list",
+                vec![
+                    "group-context",
+                    "list",
+                    "--session-id",
+                    "sess-001",
+                    "--scope-level",
+                    "session",
+                ],
+            ),
+            (
+                "get",
+                vec![
+                    "group-context",
+                    "get",
+                    "--session-id",
+                    "sess-001",
+                    "--name",
+                    "player_state",
+                    "--scope-level",
+                    "session",
+                ],
+            ),
+        ] {
+            let mut input = vec!["bcs-cli"];
+            input.extend(args);
+            let cli = Cli::try_parse_from(input)
+                .unwrap_or_else(|error| panic!("failed to parse {operation}: {error}"));
+            let group_id = match cli.command {
+                Commands::GroupContext {
+                    command:
+                        GroupContextCommands::Add { group_id, .. }
+                        | GroupContextCommands::Update { group_id, .. }
+                        | GroupContextCommands::List { group_id, .. }
+                        | GroupContextCommands::Get { group_id, .. },
+                    ..
+                } => group_id,
+                _ => panic!("expected group-context {operation} command"),
+            };
+            assert_eq!(group_id, None, "unexpected group id for {operation}");
         }
     }
 
