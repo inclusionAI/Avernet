@@ -553,9 +553,42 @@ def test_chat_path_follows_the_engine(engine, path):
 
 
 def test_only_a_chat_socket_is_offered():
-    """A terminal socket was implemented and removed: the spec excludes an
-    interactive shell on a tenant's device from v1 at any scope."""
+    """Without a provider-issued A2A address, exactly the chat socket is
+    offered — same list as before the a2a socket existed. A terminal socket
+    was implemented and removed: the spec excludes an interactive shell on a
+    tenant's device from v1 at any scope, and the a2a socket is additive, so
+    a provider that names no A2A base changes nothing for its callers."""
     assert [s.kind for s in _build(_svc()).sockets] == ["chat"]
+
+
+def test_an_a2a_socket_is_published_verbatim_when_the_provider_issues_one():
+    """The provider is the only layer that knows where a browser can reach
+    the engine's A2A face, so its URL is the whole truth: published as
+    issued, re-addressed nowhere, appended with nothing. Rebuilding it from
+    the chat socket instead is the gap this socket closes — that URL points
+    at the gateway, which routes no agent-card path."""
+    devices = _Devices(a2a_base_url="http://bot-7f3a-vc.stable.alipay.net:32196")
+    sockets = _build(_svc(devices=devices)).sockets
+    assert [s.kind for s in sockets] == ["chat", "a2a"]
+    assert sockets[1].url == "http://bot-7f3a-vc.stable.alipay.net:32196"
+
+
+def test_an_empty_a2a_address_offers_no_socket():
+    """Blank is the provider's "nothing to hand out" answer and must not
+    become a socket whose URL opens nothing."""
+    devices = _Devices(a2a_base_url="")
+    assert [s.kind for s in _build(_svc(devices=devices)).sockets] == ["chat"]
+
+
+def test_the_a2a_socket_is_offered_for_a_bare_target_provider_too():
+    """The a2a socket hangs on the provider's answer, not on which branch the
+    *chat* URL took: an ARCA-shaped provider (bare target, composed onto the
+    gateway) carries the same A2A field as a relay one, and both publish it
+    the same way. Covers the proxy-path logic, not just the relay shape."""
+    devices = _arca(a2a_base_url="http://bot-arca-vc.stable.alipay.net:30203")
+    sockets = _build(_svc(devices=devices)).sockets
+    assert [s.kind for s in sockets] == ["chat", "a2a"]
+    assert sockets[1].url == "http://bot-arca-vc.stable.alipay.net:30203"
 
 
 def test_unbound_device_is_retryable_not_an_internal_error():
