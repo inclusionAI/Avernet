@@ -681,6 +681,16 @@ export class A2AProvider {
   // ─── B11 恢复面（自动恢复在 request() catch 内联；本节为公共锚点） ────
 
   /**
+   * 未终结任务判据（review R2-3 第二补丁；spec §3.1 销毁时点④的对偶面）：
+   * 有恢复锚、无已落终局、无在途请求——即"任务结果未确认、恢复入口在场"
+   * （manualRecover 可开轮前提的**只读镜像**，不触发轮）。宿主回滚换轨时据此
+   * 决定：true → 旧任务处理器保留（仅让出发送位），false → 可安全断连退役。
+   */
+  get hasUnterminatedRecovery(): boolean {
+    return this.recoveryAnchor !== null && !this.runSettled && !this.isRequesting;
+  }
+
+  /**
    * 手工恢复入口（B13/UI 接线；B11 只立 API 不进 UI）。
    * 开一轮**只读**恢复（不做 execute 重发）：fresh per-round 预算（spec：手工轮
    * 自成预算），事件走同一 translate→parser 管线与代际栅栏。
