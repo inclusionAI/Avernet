@@ -16,6 +16,7 @@ import {
   isLockCandidateError,
   isSendBannedForSession,
   maybeBuildA2AProvider,
+  resolveA2aUrls,
   takeCachedA2AProvider,
   type A2aBootstrapConfig,
   type A2aBootstrapDeps,
@@ -23,7 +24,7 @@ import {
 import { A2AProvider } from '@/adapters/a2a/A2AProvider';
 import { TransportChoiceCache } from '@/adapters/a2a/choiceCache';
 import { createSendBanRegistry } from '@/adapters/a2a/sendBan';
-import { a2aUrlsFromWsUrl } from '@/adapters/a2a/urls';
+import { a2aUrlsFromBaseUrl, a2aUrlsFromWsUrl } from '@/adapters/a2a/urls';
 import { makeEngineCard } from './helpers';
 
 // ─── 通用件 ───────────────────────────────────────────────────────────────
@@ -343,16 +344,129 @@ describe('isSendBannedForSession + deriveEndpointBase（§3.1 发送门）', () 
     const registry = createSendBanRegistry();
     const base = deriveEndpointBase(WS_URL)!;
     registry.begin(base, 'ctx-1');
-    expect(isSendBannedForSession('ctx-1', WS_URL, registry)).toBe(true);
-    expect(isSendBannedForSession('ctx-2', WS_URL, registry)).toBe(false);
+    expect(isSendBannedForSession('ctx-1', WS_URL, undefined, registry)).toBe(true);
+    expect(isSendBannedForSession('ctx-2', WS_URL, undefined, registry)).toBe(false);
     registry.releaseOnConfirmedAbort(base, 'ctx-1');
-    expect(isSendBannedForSession('ctx-1', WS_URL, registry)).toBe(false);
+    expect(isSendBannedForSession('ctx-1', WS_URL, undefined, registry)).toBe(false);
   });
 
   it('非 ws url 恒 false（v3 发送不受影响）', () => {
     const registry = createSendBanRegistry();
     registry.begin('http://x/rpc', 'ctx-1');
-    expect(isSendBannedForSession('ctx-1', 'http://x/rpc', registry)).toBe(false);
+    expect(isSendBannedForSession('ctx-1', 'http://x/rpc', undefined, registry)).toBe(false);
+  });
+});
+
+
+// ─── B17 服务端签发面（a2aBaseUrl 优先权） ───────────────────────────────
+
+const A2A_BASE_URL = 'http://arca-x-svc.stable.alipay.net:32196';
+const A2A_URLS = a2aUrlsFromBaseUrl(A2A_BASE_URL);
+const SIGNED_CONFIG: A2aBootstrapConfig = {
+  ...CONFIG,
+  // 网关 relay topo 的 ws url——按旧推导会派生出一个 404 的 A2A 面
+  //（正是 B17 存在的原因）；此处钉「签发值豁免一切 url 形状判断」。
+  url: 'wss://gw.example/openapi/v1/bots/messages/ws/abc/api/openclaw/ws?x-proxypass-token=tok',
+  a2aBaseUrl: A2A_BASE_URL,
+};
+
+describe('B17 决策表补充行：a2aBaseUrl 在场（resolveA2aUrls 单源）', () => {
+  it('resolveA2aUrls：签发值在场压过 ws 推导；缺席回退 ws 推导', () => {
+    expect(resolveA2aUrls(SIGNED_CONFIG).rpcUrl).toBe(A2A_URLS.rpcUrl);
+    expect(resolveA2aUrls(SIGNED_CONFIG).cardUrl).toBe(A2A_URLS.cardUrl);
+    expect(resolveA2aUrls(CONFIG).rpcUrl).toBe(URLS.rpcUrl);
+  });
+
+  it('签发值在场 + card 全过 → 探测/缓存/构造全部锚定签发地址', async () => {
+    const cache = new TransportChoiceCache();
+    const provider = await maybeBuildA2AProvider(SIGNED_CONFIG, {
+      choiceCache: cache,
+      switchOn: () => true,
+      fetchImpl: okCardResponse as unknown as typeof fetch,
+    });
+    expect(provider).toBeInstanceOf(A2AProvider);
+    expect(cache.get(A2A_CHOICE_SESSION_KEY, A2A_URLS.rpcUrl)?.kind).toBe('a2a');
+    expect((provider as any).config.a2aUrls.rpcUrl).toBe(A2A_URLS.rpcUrl);
+    expect((provider as any).config.a2aUrls.cardUrl).toBe(A2A_URLS.cardUrl);
+  });
+
+  it('签发值在场时 ws url 形状不再裁决入口（观测到的旧缺口：relay url→404 派生）', async () => {
+    const cache = new TransportChoiceCache();
+    const fetchImpl = jest.fn(async (_u: unknown) => okCardResponse());
+    const provider = await maybeBuildA2AProvider(SIGNED_CONFIG, {
+      choiceCache: cache,
+      switchOn: () => true,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(provider).toBeInstanceOf(A2AProvider);
+    // 探测命中的是签发地址的 card，不是从 relay ws url 派生的任何东西
+    expect(String(fetchImpl.mock.calls[0][0])).toBe(A2A_URLS.cardUrl);
+  });
+
+  it('签发值非法（ws scheme）→ 回 v3 拦截在 url 解析层，不落缓存', async () => {
+    const cache = new TransportChoiceCache();
+    const fetchImpl = jest.fn();
+    await expect(maybeBuildA2AProvider({ ...SIGNED_CONFIG, a2aBaseUrl: 'ws://host:1' }, {
+      choiceCache: cache,
+      switchOn: () => true,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    })).resolves.toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(cache.get(A2A_CHOICE_SESSION_KEY, A2A_URLS.rpcUrl)).toBeUndefined();
+  });
+
+  it('探测失败落在签发地址的键上（probe-v3 可翻案，键口径与构造同源）', async () => {
+    const cache = new TransportChoiceCache();
+    const fetchImpl = jest.fn(async () => { throw new TypeError('network down'); });
+    await expect(maybeBuildA2AProvider(SIGNED_CONFIG, {
+      choiceCache: cache,
+      switchOn: () => true,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    })).resolves.toBeNull();
+    expect(cache.get(A2A_CHOICE_SESSION_KEY, A2A_URLS.rpcUrl)?.kind).toBe('probe-v3');
+  });
+
+  it('takeCachedA2AProvider：缓存键随签发地址；命中同步换入', async () => {
+    const cache = new TransportChoiceCache();
+    let settleFetch!: (r: Response) => void;
+    const fetchImpl = jest.fn(
+      (_u: unknown) => new Promise<Response>((res) => { settleFetch = res; }),
+    );
+    const deps = (): A2aBootstrapDeps => ({
+      choiceCache: cache,
+      switchOn: () => true,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(takeCachedA2AProvider(SIGNED_CONFIG, deps())).toBeNull();
+    expect(String(fetchImpl.mock.calls[0][0])).toBe(A2A_URLS.cardUrl);
+    settleFetch(okCardResponse());
+    await new Promise((r) => { setTimeout(r, 0); });
+    const hit = takeCachedA2AProvider(SIGNED_CONFIG, {
+      choiceCache: cache,
+      switchOn: () => true,
+      fetchImpl: mustNotFetch as unknown as typeof fetch,
+    });
+    expect(hit).toBeInstanceOf(A2AProvider);
+    expect((hit as any).config.a2aUrls.rpcUrl).toBe(A2A_URLS.rpcUrl);
+  });
+});
+
+describe('B17 发送门：签发面在场时端点键同源切换', () => {
+  it('签发值在场 → 禁令键按签发地址解析（与 provider 注册面同键）', () => {
+    const registry = createSendBanRegistry();
+    registry.begin(A2A_URLS.rpcUrl, 'ctx-1');
+    // 旧口径的 ws 推导键（relay url 派生）≠ 签发键：若门不切换键，此断言
+    // 必然失败——正是把 a2aBaseUrl 接进门解析的原因。
+    expect(deriveEndpointBase(SIGNED_CONFIG.url)).not.toBe(A2A_URLS.rpcUrl);
+    expect(isSendBannedForSession('ctx-1', SIGNED_CONFIG.url, A2A_BASE_URL, registry)).toBe(true);
+    expect(isSendBannedForSession('ctx-2', SIGNED_CONFIG.url, A2A_BASE_URL, registry)).toBe(false);
+  });
+
+  it('签发值缺省 → 行为逐字节保持旧口径（回归线）', () => {
+    const registry = createSendBanRegistry();
+    const base = deriveEndpointBase(WS_URL)!;
+    registry.begin(base, 'ctx-1');
+    expect(isSendBannedForSession('ctx-1', WS_URL, undefined, registry)).toBe(true);
   });
 });
 
