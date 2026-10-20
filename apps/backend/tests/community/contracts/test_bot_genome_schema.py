@@ -31,7 +31,7 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
     canonical_tree_bytes,
     decode_tree_bytes,
 )
-from tests.community.contracts.genome_canonical_json import (
+from agentclaw.community.core.bot_genome.canonical import (
     NotCanonicalizable,
     canonicalize,
     is_canonical_gene_path,
@@ -39,7 +39,7 @@ from tests.community.contracts.genome_canonical_json import (
     revision_id,
     sha256_digest,
 )
-from tests.community.contracts.genome_rewrite import lcs_length, rewrite_flagged, strip_common, to_lines
+from agentclaw.community.core.bot_genome.rewrite import lcs_length, rewrite_flagged, strip_common, to_lines
 
 _BACKEND = Path(__file__).resolve().parents[3]
 _CONTRACT = _BACKEND / "api-contracts" / "genome" / "v1"

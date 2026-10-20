@@ -68,7 +68,7 @@
       }
     },
     "skillEntry": {
-      "description": "One skill of the bot. oneOf: the entry matches exactly one of the two shapes, chosen by origin. 'local' is a bot-owned skill whose files are stored; 'center' is a Skill Center skill pinned by version and not copied (README §4.2).",
+      "description": "One skill of the bot. oneOf: the entry matches exactly one of the three shapes, chosen by origin. 'local' is a bot-owned skill whose files are stored; 'center' is a Skill Center skill pinned by version and not copied; 'repo' is a skill supplied from the platform-synced shared skill repository, named by its repository path (README §4.2).",
       "oneOf": [
         {
           "description": "A bot-owned skill; its files are stored as one acm-tree-v1 tree.",
@@ -90,6 +90,17 @@
             "name": {"$ref": "#/definitions/skillName", "description": "The skill's name in Skill Center, and its key."},
             "origin": {"description": "Marks this shape: a Skill Center skill.", "const": "center"},
             "center_version": {"description": "The published Skill Center version this revision uses.", "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?![\\s\\S])"}
+          }
+        },
+        {
+          "description": "A skill supplied from the shared skill repository, by repository path; neither copied nor version-pinned (README §4.2).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "origin", "repo_path"],
+          "properties": {
+            "name": {"$ref": "#/definitions/skillName", "description": "The skill's name as the bot sees it, and its key."},
+            "origin": {"description": "Marks this shape: a shared-repository skill.", "const": "repo"},
+            "repo_path": {"description": "The skill's path inside the shared skill repository (what follows git:// on the skill row): relative, /-separated, no empty, . or .. segment, no backslash or control character.", "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!/)(?!.*(^|/)\\.\\.?(/|$))(?!.*//)[^\\u0000-\\u001f\\\\]+(?<!/)(?![\\s\\S])"}
           }
         }
       ]

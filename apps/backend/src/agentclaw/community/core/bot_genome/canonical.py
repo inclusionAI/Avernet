@@ -1,11 +1,10 @@
-"""Reference canonical JSON and digests for the Bot Genome contract (test-only).
+"""Canonical JSON and digests for the Bot Genome contract.
 
 The contract (``apps/backend/api-contracts/genome/v1/README.md`` §3) hashes
 records with the JSON Canonicalization Scheme, RFC 8785, restricted to a subset
-with no floats. This module is the reference the contract test checks the
-published vectors and example ids against. It is deliberately small and has no
-caller outside the tests: the Genome Registry (work item RSI-03) moves it into
-``core/bot_genome/`` and keeps ``canonical-json-vectors.json`` as its oracle.
+with no floats. This module is the registry's one implementation of that rule;
+``canonical-json-vectors.json`` is its oracle (``tests/community/core/bot_genome/
+test_canonical.py`` and the contract test run every vector against it).
 
 Why a subset is enough, and safe: RFC 8785 serialises numbers the way
 ECMAScript does for IEEE doubles, which is the part implementations most often

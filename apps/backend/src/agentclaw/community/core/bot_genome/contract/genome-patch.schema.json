@@ -1,0 +1,272 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://avernet/api-contracts/genome/v1/genome-patch.schema.json",
+  "title": "GenomePatch",
+  "description": "A typed, itemized change against a base revision (README §6). The schema checks shape only; whether each op applies to its base and stays inside the policy is checked when the patch is recorded (README §6.4).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["patch_schema", "base", "ops", "rationale", "evidence"],
+  "properties": {
+    "patch_schema": {"description": "Version of this format; 1 for genome v1.", "const": 1},
+    "base": {"$ref": "genome-revision.schema.json#/definitions/revisionId", "description": "The revision this patch is written against; every op must apply to it exactly (README §6.4)."},
+    "ops": {"description": "The changes, applied in order.", "type": "array", "minItems": 1, "maxItems": 200, "items": {"$ref": "#/definitions/op"}},
+    "rationale": {"description": "Why the change is proposed, in plain language for the reviewer.", "type": "string", "minLength": 1, "maxLength": 8192},
+    "evidence": {"description": "The Experience records that motivated the patch; required unless every op can be motivated by the rationale alone (README §6.4).", "type": "array", "items": {"$ref": "genome-revision.schema.json#/definitions/evidenceRef"}}
+  },
+  "definitions": {
+    "op": {
+      "description": "One change. The op field names the kind; oneOf: the object matches exactly one of the op shapes below, the one whose op constant it carries.",
+      "type": "object",
+      "required": ["op"],
+      "properties": {
+        "op": {
+          "description": "The kind of change (README §6.1).",
+          "type": "string",
+          "enum": [
+            "file.edit", "persona.add", "persona.remove", "skill.add", "skill.update", "skill.remove",
+            "resource.add", "resource.remove", "memory.add", "memory.update", "memory.retire", "memory.set_mode"
+          ]
+        }
+      },
+      "oneOf": [
+        {"$ref": "#/definitions/fileEdit"},
+        {"$ref": "#/definitions/personaAdd"},
+        {"$ref": "#/definitions/personaRemove"},
+        {"$ref": "#/definitions/skillAdd"},
+        {"$ref": "#/definitions/skillUpdate"},
+        {"$ref": "#/definitions/skillRemove"},
+        {"$ref": "#/definitions/resourceAdd"},
+        {"$ref": "#/definitions/resourceRemove"},
+        {"$ref": "#/definitions/memoryAdd"},
+        {"$ref": "#/definitions/memoryUpdate"},
+        {"$ref": "#/definitions/memoryRetire"},
+        {"$ref": "#/definitions/memorySetMode"}
+      ]
+    },
+    "digestRef": {
+      "description": "Bytes uploaded first with PUT …/genome/content.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["digest"],
+      "properties": {"digest": {"$ref": "genome-revision.schema.json#/definitions/digest", "description": "The uploaded bytes."}}
+    },
+    "content": {
+      "description": "Inline UTF-8 text, or a digest of uploaded bytes. maxLength bounds code points only; the 64 KiB UTF-8 byte limit is checked when the patch is recorded (README §6.4).",
+      "oneOf": [{"type": "string", "maxLength": 65536}, {"$ref": "#/definitions/digestRef"}]
+    },
+    "unifiedDiff": {
+      "description": "A change to one text file, written as the hunks of a unified diff (the format `diff -u` and `git diff` print), without the ---/+++ file header lines. Each hunk starts with '@@ -<old start>,<old count> +<new start>,<new count> @@'; then each line starts with ' ' (unchanged context), '-' (removed) or '+' (added). Context and removed lines must match the file exactly: no fuzz (README §6.2). Inline text like content: maxLength bounds code points, and the 64 KiB UTF-8 byte limit is checked when the patch is recorded; a larger change is sent as whole-file content by digest.",
+      "type": "string",
+      "maxLength": 65536,
+      "examples": ["@@ -1,2 +1,2 @@\n # Shipping\n-Standard shipping takes 3-5 working days.\n+Standard shipping takes 2-4 working days.\n"],
+      "pattern": "^@@ -[0-9]+(,[0-9]+)? \\+[0-9]+(,[0-9]+)? @@"
+    },
+    "skillFilePath": {
+      "description": "Relative path inside a skill, as SkillPackageValidator accepts it (any characters, including spaces and non-ASCII), in canonical form: no leading '/', no drive letter, no backslash, no control character, no empty, '.' or '..' segment, no trailing '/'.",
+      "type": "string",
+      "maxLength": 256,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*(^|/)\\.{1,2}(/|(?![\\s\\S])))(?!.*//)(?!.*/(?![\\s\\S]))[^\\u0000-\\u001f\\u007f]+(?![\\s\\S])"
+    },
+    "textEdit": {
+      "description": "One edit to a text file. oneOf: exactly one of the three kinds, chosen by kind (README §6.2).",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "heading", "content"],
+          "properties": {
+            "kind": {"description": "Replace everything under a Markdown heading; the heading line stays.", "const": "replace_section"},
+            "heading": {"description": "The heading line, e.g. '## Escalation'; must occur exactly once.", "type": "string", "pattern": "^#{1,6} [^\\n]+(?![\\s\\S])"},
+            "content": {"description": "The new text under the heading.", "type": "string", "maxLength": 65536}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "anchor", "content"],
+          "properties": {
+            "kind": {"description": "Insert text after an anchor line.", "const": "insert_after"},
+            "anchor": {"description": "One whole line of the file, which must occur exactly once.", "type": "string", "minLength": 1, "pattern": "^[^\\n]+(?![\\s\\S])"},
+            "content": {"description": "The text to insert.", "type": "string", "minLength": 1, "maxLength": 65536}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "diff"],
+          "properties": {
+            "kind": {"description": "Apply a unified diff; expresses any text change.", "const": "diff"},
+            "diff": {"$ref": "#/definitions/unifiedDiff", "description": "The hunks to apply."}
+          }
+        }
+      ]
+    },
+    "fileEdit": {
+      "description": "Op file.edit: edits one existing text file in place.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "target", "edits"],
+      "properties": {
+        "op": {"description": "Marks this op shape.", "const": "file.edit"},
+        "target": {
+          "description": "A persona file, a file inside a skill, a file resource, or a file inside a directory resource.",
+          "allOf": [
+            {"$ref": "genome-revision.schema.json#/definitions/genePath"},
+            {"type": "string", "pattern": "^(persona/[^/]+|skills/[^/]+/.+|resources/.+)(?![\\s\\S])"}
+          ]
+        },
+        "edits": {"description": "The edits, applied in order to the file.", "type": "array", "minItems": 1, "maxItems": 100, "items": {"$ref": "#/definitions/textEdit"}}
+      }
+    },
+    "personaAdd": {
+      "description": "Op persona.add: adds an identity file the bot does not have yet.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "type", "content"],
+      "properties": {
+        "op": {"description": "Marks this op shape.", "const": "persona.add"},
+        "type": {"$ref": "genome-revision.schema.json#/definitions/personaType", "description": "Which identity file to add."},
+        "content": {"$ref": "#/definitions/content", "description": "The file's text, which must be valid UTF-8."}
+      }
+    },
+    "personaRemove": {
+      "description": "Op persona.remove: removes an identity file.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "type"],
+      "properties": {
+        "op": {"description": "Marks this op shape.", "const": "persona.remove"},
+        "type": {"$ref": "genome-revision.schema.json#/definitions/personaType", "description": "Which identity file to remove."}
+      }
+    },
+    "skillAdd": {
+      "description": "Op skill.add: adds a local skill from its files.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "name", "files"],
+      "properties": {
+        "op": {"description": "Marks this op shape.", "const": "skill.add"},
+        "name": {"$ref": "genome-revision.schema.json#/definitions/skillName", "description": "The new skill's name; equals the SKILL.md metadata name."},
+        "files": {
+          "description": "The skill's files, as a map from path inside the skill to that file's content; it must include SKILL.md. The keys are file paths chosen by the author, not fixed field names, so the map has no `properties` list: `propertyNames` says what a key may be (a skillFilePath), and `additionalProperties` says what every value must be (content: inline text, or {digest} of uploaded bytes for a binary or large file).",
+          "type": "object",
+          "examples": [{"SKILL.md": "---\nname: invoice-lookup\ndescription: Look up an invoice by order id.\n---\nRun scripts/lookup.py.\n", "scripts/lookup.py": "print('ok')\n", "assets/logo.png": {"digest": "sha256:02a3e298f1533f62558c58e4c70edcab9af5a50d62d925fd5390942020fb0fb8"}}],
+          "required": ["SKILL.md"],
+          "maxProperties": 500,
+          "propertyNames": {"$ref": "#/definitions/skillFilePath"},
+          "additionalProperties": {"$ref": "#/definitions/content"}
+        }
+      }
+    },
+    "skillUpdate": {
+      "description": "Op skill.update: changes files of an existing local skill, by diffs, by whole-file content, or both (anyOf: at least one of file_diffs and files).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "name"],
+      "anyOf": [{"required": ["file_diffs"]}, {"required": ["files"]}],
+      "properties": {
+        "op": {"description": "Marks this op shape.", "const": "skill.update"},
+        "name": {"$ref": "genome-revision.schema.json#/definitions/skillName", "description": "The skill to change."},
+        "file_diffs": {
+          "description": "Unified diffs to existing text files of the skill; at most one per file, so at most the package's 500 files.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 500,
+          "items": {
+            "description": "One file's diff.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "diff"],
+            "properties": {
+              "path": {"$ref": "#/definitions/skillFilePath", "description": "The file to change."},
+              "diff": {"$ref": "#/definitions/unifiedDiff", "description": "The hunks to apply to it."}
+            }
+          }
+        },
+        "files": {
+          "description": "Whole-file changes, as a map from path inside the skill to the file's new content (inline text or {digest}), or null to delete that file. Adds a file when the path is new, replaces it when it exists. SKILL.md can be replaced but not deleted: its own entry under `properties` allows only content, while `additionalProperties` (every other path) also allows null.",
+          "type": "object",
+          "examples": [{"scripts/check.py": null, "scripts/check.sh": "#!/bin/sh\necho ok\n", "assets/badge.png": {"digest": "sha256:6ae79bfb0b33bac762ed7f4cc278d814c30d5555098d36ecd4e313331f9e9d04"}}],
+          "minProperties": 1,
+          "propertyNames": {"$ref": "#/definitions/skillFilePath"},
+          "properties": {"SKILL.md": {"$ref": "#/definitions/content"}},
+          "additionalProperties": {"oneOf": [{"type": "null"}, {"$ref": "#/definitions/content"}]}
+        }
+      }
+    },
+    "skillRemove": {
+      "description": "Op skill.remove: removes a skill, local or center.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "name"],
+      "properties": {
+        "op": {"description": "Marks this op shape.", "const": "skill.remove"},
+        "name": {"$ref": "genome-revision.schema.json#/definitions/skillName", "description": "The skill to remove."}
+      }
+    },
+    "resourceAdd": {
+      "description": "Op resource.add: adds a file resource, or a directory resource from an uploaded tree. The if/then pair is a conditional rule: if `path` ends in '/' (a directory entry), then `content` must be {digest} of an uploaded acm-tree-v1 blob, because a directory cannot be given as inline text. A file path may use either form of content.",
+      "examples": [{"op": "resource.add", "path": "data/faq/", "content": {"digest": "sha256:30b884a411447c5dae5db89b6aab4c59114b454477be951e82d5e123622344ff"}}, {"op": "resource.add", "path": "data/notes.md", "content": "# Notes\n"}],
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "path", "content"],
+      "properties": {
+        "op": {"description": "Marks this op shape.", "const": "resource.add"},
+        "path": {"$ref": "genome-revision.schema.json#/definitions/resourcePath", "description": "Where the resource goes in the workspace; ends in '/' for a directory."},
+        "content": {"$ref": "#/definitions/content", "description": "The file's content, or the uploaded acm-tree-v1 blob for a directory."}
+      },
+      "if": {"properties": {"path": {"pattern": "/(?![\\s\\S])"}}},
+      "then": {"properties": {"content": {"$ref": "#/definitions/digestRef", "description": "A directory resource is added from an uploaded acm-tree-v1 blob."}}}
+    },
+    "resourceRemove": {
+      "description": "Op resource.remove: removes a resource entry.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "path"],
+      "properties": {
+        "op": {"description": "Marks this op shape.", "const": "resource.remove"},
+        "path": {"$ref": "genome-revision.schema.json#/definitions/resourcePath", "description": "The entry to remove, as declared."}
+      }
+    },
+    "memoryAdd": {
+      "description": "Op memory.add: adds a curated memory item with a new key.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "item"],
+      "properties": {
+        "op": {"description": "Marks this op shape.", "const": "memory.add"},
+        "item": {"$ref": "genome-revision.schema.json#/definitions/memoryItem", "description": "The new item."}
+      }
+    },
+    "memoryUpdate": {
+      "description": "Op memory.update: replaces the text, tags and source of an existing item, by key; the item stays, with new content. Compare memory.retire, which removes the item.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "item"],
+      "properties": {
+        "op": {"description": "Marks this op shape.", "const": "memory.update"},
+        "item": {"$ref": "genome-revision.schema.json#/definitions/memoryItem", "description": "The item's new value; its key names the item to replace."}
+      }
+    },
+    "memoryRetire": {
+      "description": "Op memory.retire: removes a curated memory item, by key; earlier revisions keep it. Compare memory.update, which keeps the item and changes its content.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "key"],
+      "properties": {
+        "op": {"description": "Marks this op shape.", "const": "memory.retire"},
+        "key": {"$ref": "genome-revision.schema.json#/definitions/memoryKey", "description": "The item to retire."}
+      }
+    },
+    "memorySetMode": {
+      "description": "Op memory.set_mode: changes how apply writes the curated items into the engine's memory.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "mode"],
+      "properties": {
+        "op": {"description": "Marks this op shape.", "const": "memory.set_mode"},
+        "mode": {"description": "The new mode (see memorySpec.mode in the revision schema); replace is T3.", "type": "string", "enum": ["seed", "merge", "replace"]}
+      }
+    }
+  }
+}

@@ -367,7 +367,10 @@ Every entry in `spec` is a **key**, the one field that names it, plus a
   the digest is of what apply delivers. `center`: a governed Skill Center skill pinned by version and
   not copied (ADR 0010); a pinned version is a reference to a published
   version, not evidence that it is active. A Manifest v1 document cannot yet
-  declare a Center skill; RSI-04 adds that source.
+  declare a Center skill; RSI-04 adds that source. `repo`: a skill supplied from the
+  platform-synced shared skill repository, named by `repo_path` (what follows
+  `git://` on the skill row); neither copied nor version-pinned, because the
+  repository sync exposes no commit yet (added by RSI-03, additive under §1).
 - **`memory`.** `null`, or `{mode, items_digest}`. `mode` is `seed`, `merge`
   or `replace` (01-genome.md §2.2).
 - **`resources`.** `path` is workspace-relative: characters

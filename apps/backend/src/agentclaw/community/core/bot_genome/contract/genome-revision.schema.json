@@ -1,0 +1,267 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://avernet/api-contracts/genome/v1/genome-revision.schema.json",
+  "title": "GenomeRevision",
+  "description": "One immutable version of a bot's definition. Only spec and policy are hashed into revision.id (README §3.2). Rules that JSON Schema cannot express (list order, uniqueness of keys, engine-specific persona types, nesting of resources) are stated in README §3–§4 and checked by the Genome Registry.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["genome_schema", "revision", "spec", "policy"],
+  "properties": {
+    "genome_schema": {"description": "Version of this format; 1 for genome v1 (README §1).", "const": 1},
+    "revision": {"$ref": "#/definitions/revisionMetadata"},
+    "spec": {"$ref": "#/definitions/spec"},
+    "policy": {"$ref": "#/definitions/policy"}
+  },
+  "definitions": {
+    "digest": {
+      "description": "Address of stored bytes in the manifest content store: 'sha256:' and the lowercase hex SHA-256 of the bytes (README §3.3).",
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "revisionId": {
+      "description": "Identity of a revision: 'sha256:' and the hex SHA-256 of JCS({spec, policy}) (README §3.2). Same spec and policy, same id.",
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "safeInteger": {
+      "description": "An integer that every JSON implementation represents exactly, so hashing never depends on float handling (README §3.1).",
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
+    "riskTier": {"description": "Approval tier of a change, T0 (lowest) to T3 (needs the owner's approval); see risk-tiers.json and README §6.3.", "type": "string", "enum": ["T0", "T1", "T2", "T3"]},
+    "genePath": {
+      "description": "README §2. A category, then '/'-separated segments; bytes outside [A-Za-z0-9._-] and the segments '.' and '..' are percent-encoded (uppercase hex).",
+      "type": "string",
+      "pattern": "^(persona|skills|memory|resources|tools|engine_config|script)(/(?!\\.{1,2}(/|(?![\\s\\S])))([A-Za-z0-9._-]|%[0-9A-F]{2})+)*(?![\\s\\S])"
+    },
+    "personaType": {
+      "description": "An identity file type the Manifest accepts. The set a given bot accepts is narrower and depends on its engine (README §4.2).",
+      "type": "string",
+      "enum": [
+        "AGENTS.md", "BOOTSTRAP.md", "CLAUDE.md", "GREETING.md", "HEARTBEAT.md", "KNOWLEDGE.md", "OKR.md",
+        "OUTPUT.md", "README.md", "RULES.md", "SAFETY.md", "SOUL.md", "TOOLS.md", "USER.md"
+      ]
+    },
+    "skillName": {"description": "The Skill Center package name rule: apply requires the SKILL.md metadata name to match it and to equal the entry name. Reserved names are refused case-insensitively.", "type": "string", "pattern": "^(?![Ss][Kk][Ii][Ll][Ll][Ss]-([Cc][Ee][Nn][Tt][Ee][Rr]|[Ll][Oo][Cc][Aa][Ll]|[Rr][Ee][Pp][Oo])(?![\\s\\S]))[A-Za-z0-9-]+(?![\\s\\S])"},
+    "resourcePath": {
+      "description": "Workspace-relative; trailing '/' marks a directory entry. No empty, '.' or '..' segment.",
+      "type": "string",
+      "pattern": "^(?![/~])(?!.*(^|/)\\.{1,2}(/|(?![\\s\\S])))(?!.*//)[A-Za-z0-9._/-]+(?![\\s\\S])"
+    },
+    "memoryKey": {"description": "Stable name of one curated memory item, e.g. 'returns-window'; patch ops address an item by it.", "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*(?![\\s\\S])", "maxLength": 128},
+    "evidenceRef": {"description": "Reference to an Experience record that motivated a change or an item: 'episode:<id>', 'feedback:<id>' or 'eval:<id>' (01-genome.md §2.2).", "type": "string", "pattern": "^(episode|feedback|eval):[A-Za-z0-9_-]+(?![\\s\\S])"},
+    "sortedUniqueStrings": {
+      "description": "A list of strings without duplicates, sorted ascending in code-point order (README §3.1). JSON Schema checks uniqueness; the Registry checks the order.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string"}
+    },
+    "personaFile": {
+      "description": "One identity file of the bot (SOUL.md, RULES.md, ...). Keyed by type; the content is stored and referenced by digest.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "digest"],
+      "properties": {
+        "type": {"$ref": "#/definitions/personaType", "description": "Which identity file; at most one entry per type."},
+        "digest": {"$ref": "#/definitions/digest", "description": "The file's bytes, which must be valid UTF-8."}
+      }
+    },
+    "skillEntry": {
+      "description": "One skill of the bot. oneOf: the entry matches exactly one of the three shapes, chosen by origin. 'local' is a bot-owned skill whose files are stored; 'center' is a Skill Center skill pinned by version and not copied; 'repo' is a skill supplied from the platform-synced shared skill repository, named by its repository path (README §4.2).",
+      "oneOf": [
+        {
+          "description": "A bot-owned skill; its files are stored as one acm-tree-v1 tree.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "origin", "digest"],
+          "properties": {
+            "name": {"$ref": "#/definitions/skillName", "description": "The skill's name and key; equals the SKILL.md metadata name."},
+            "origin": {"description": "Marks this shape: a bot-owned skill.", "const": "local"},
+            "digest": {"$ref": "#/definitions/digest", "description": "acm-tree-v1 of the skill's files; must contain SKILL.md."}
+          }
+        },
+        {
+          "description": "A governed Skill Center skill, pinned by version (ADR 0010).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "origin", "center_version"],
+          "properties": {
+            "name": {"$ref": "#/definitions/skillName", "description": "The skill's name in Skill Center, and its key."},
+            "origin": {"description": "Marks this shape: a Skill Center skill.", "const": "center"},
+            "center_version": {"description": "The published Skill Center version this revision uses.", "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?![\\s\\S])"}
+          }
+        },
+        {
+          "description": "A skill supplied from the shared skill repository, by repository path; neither copied nor version-pinned (README §4.2).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "origin", "repo_path"],
+          "properties": {
+            "name": {"$ref": "#/definitions/skillName", "description": "The skill's name as the bot sees it, and its key."},
+            "origin": {"description": "Marks this shape: a shared-repository skill.", "const": "repo"},
+            "repo_path": {"description": "The skill's path inside the shared skill repository (what follows git:// on the skill row): relative, /-separated, no empty, . or .. segment, no backslash or control character.", "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!/)(?!.*(^|/)\\.\\.?(/|$))(?!.*//)[^\\u0000-\\u001f\\\\]+(?<!/)(?![\\s\\S])"}
+          }
+        }
+      ]
+    },
+    "memorySpec": {
+      "description": "The bot's curated memory as it appears in spec: the facts, rules and lessons the bot should start with (01-genome.md §7). Not the engine's runtime memory, which the bot writes itself and which is never in a revision. The items themselves are stored separately (memoryItems) and referenced by items_digest.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "items_digest"],
+      "properties": {
+        "mode": {"description": "How apply writes the curated items into the engine's memory. seed: write an item only if the engine has no item with that key, keeping everything already there. merge: write every item, overwriting the same key, keeping runtime items with other keys. replace: the engine's memory becomes exactly the curated items and runtime items are dropped (T3).", "type": "string", "enum": ["seed", "merge", "replace"]},
+        "items_digest": {"$ref": "#/definitions/digest", "description": "The stored item list (memoryItems), as canonical JSON (README §4.4)."}
+      }
+    },
+    "memoryItem": {
+      "description": "One curated memory item, inside the stored list that memorySpec.items_digest points at.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "text", "tags", "source"],
+      "properties": {
+        "key": {"$ref": "#/definitions/memoryKey", "description": "The item's key, unique in the list."},
+        "text": {"description": "The fact, rule or lesson itself, e.g. 'Returns are accepted within 30 days.'", "type": "string", "minLength": 1, "maxLength": 4096},
+        "tags": {"$ref": "#/definitions/sortedUniqueStrings", "description": "Free-form topic labels, e.g. ['returns']."},
+        "source": {"description": "What the item was learned from, e.g. ['episode:ep_97']. allOf: the value must satisfy both schemas, so it is a sorted list without duplicates whose every entry is an evidenceRef.", "allOf": [{"$ref": "#/definitions/sortedUniqueStrings"}, {"items": {"$ref": "#/definitions/evidenceRef"}}]}
+      }
+    },
+    "memoryItems": {
+      "description": "The format of the stored blob items_digest points at: the curated memory items, sorted by key. Not part of the revision document itself.",
+      "type": "array",
+      "items": {"$ref": "#/definitions/memoryItem"}
+    },
+    "resourceEntry": {
+      "description": "One file or directory the bot has in its workspace, keyed by path.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "digest"],
+      "properties": {
+        "path": {"$ref": "#/definitions/resourcePath", "description": "Where the resource goes in the workspace; ends in '/' for a directory."},
+        "digest": {"$ref": "#/definitions/digest", "description": "File bytes, or acm-tree-v1 for a directory entry."}
+      }
+    },
+    "mcpConfig": {
+      "description": "The bot-level override for one MCP server, the Manifest's closed set. Every field is optional; a field left out takes the user-level or Center value at apply time, which the revision does not pin (#2859). Header names as written (unique case-insensitively, a Registry check); transport upper-cased.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "url": {"description": "Absolute http(s) URL with a non-empty host and no userinfo (no 'user:token@'), so a credential is never stored in a revision; the Registry also applies the Manifest's parse check (urlsplit with a hostname).", "type": "string", "pattern": "^https?://(\\[[0-9A-Fa-f:.]+\\]|[^\\s/?#:@\\[\\]]+)(:[0-9]*)?([/?#][^\\s]*)?(?![\\s\\S])"},
+        "headers": {
+          "description": "HTTP headers sent to the server, name to value. Stored as written, so they must not carry credentials (#2860).",
+          "type": "object",
+          "propertyNames": {"pattern": "^[^\\r\\n]{1,256}(?![\\s\\S])"},
+          "additionalProperties": {"type": "string", "maxLength": 2000, "pattern": "^[^\\r\\n]*(?![\\s\\S])"}
+        },
+        "endpoint_env": {"description": "Which of the server's registered endpoints to use.", "type": "string", "enum": ["PROD", "PRE"]},
+        "transport_protocol": {"description": "The MCP transport.", "type": "string", "enum": ["SSE", "STREAMABLE_HTTP"]}
+      }
+    },
+    "mcpServerEntry": {
+      "description": "One MCP server enabled on this bot, keyed by server_code, with an optional bot-level override. User-level MCP config and Center defaults are not in the revision; apply reads them (#2859).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["server_code"],
+      "properties": {
+        "server_code": {"description": "The server's code in the MCP registry, e.g. 'mcp.ant.homistudio.meetmcp'.", "type": "string", "minLength": 1},
+        "config": {"$ref": "#/definitions/mcpConfig", "description": "The bot-level override; absent means no override."}
+      }
+    },
+    "spec": {
+      "description": "What the bot is: every category of its definition, each a list of key + value entries (README §4). Hashed into revision.id. Every category is present, even when empty, and no other key is allowed (additionalProperties: false).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["persona", "skills", "memory", "resources", "tools", "engine_config", "script"],
+      "properties": {
+        "persona": {"description": "Identity files, sorted by type.", "type": "array", "maxItems": 50, "items": {"$ref": "#/definitions/personaFile"}},
+        "skills": {"description": "Skills, sorted by name.", "type": "array", "maxItems": 50, "items": {"$ref": "#/definitions/skillEntry"}},
+        "memory": {"description": "Curated memory. oneOf: exactly one of the alternatives matches, so the value is either null (the bot has no curated memory) or a memorySpec.", "oneOf": [{"type": "null"}, {"$ref": "#/definitions/memorySpec"}]},
+        "resources": {"description": "Workspace files and directories, sorted by path.", "type": "array", "maxItems": 50, "items": {"$ref": "#/definitions/resourceEntry"}},
+        "tools": {
+          "description": "Tools the bot uses. Only MCP servers in v1; CLI tools are not part of genome v1.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mcp"],
+          "properties": {"mcp": {"description": "MCP servers, sorted by server_code.", "type": "array", "maxItems": 50, "items": {"$ref": "#/definitions/mcpServerEntry"}}}
+        },
+        "engine_config": {
+          "description": "Always {} in v1, until #2858 defines keys and value types.",
+          "type": "object",
+          "maxProperties": 0
+        },
+        "script": {
+          "description": "The bot's startup script. oneOf: either null (no script) or an object with the script body's digest.",
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["digest"],
+              "properties": {"digest": {"$ref": "#/definitions/digest", "description": "The script body's bytes."}}
+            }
+          ]
+        }
+      }
+    },
+    "policy": {
+      "description": "What automated actors may change on this bot (README §5). Hashed into revision.id; no patch can change it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mutable_genes", "pins", "risk_overrides"],
+      "properties": {
+        "mutable_genes": {"description": "Gene paths patches may change; anything not covered is off limits. Sorted, unique gene paths.", "allOf": [{"$ref": "#/definitions/sortedUniqueStrings"}, {"items": {"$ref": "#/definitions/genePath"}}]},
+        "pins": {"description": "Gene paths no patch may touch, even inside a mutable gene (e.g. persona/SAFETY.md). Sorted, unique gene paths.", "allOf": [{"$ref": "#/definitions/sortedUniqueStrings"}, {"items": {"$ref": "#/definitions/genePath"}}]},
+        "risk_overrides": {
+          "description": "Gene path to a risk tier for changes that touch it; can only raise an op's default tier (README §6.3).",
+          "type": "object",
+          "propertyNames": {"$ref": "#/definitions/genePath"},
+          "additionalProperties": {"$ref": "#/definitions/riskTier"}
+        }
+      }
+    },
+    "provenance": {
+      "description": "Who recorded the revision. A strategy_run revision names its run; a user revision has neither run_id nor step.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "actor"],
+      "properties": {
+        "kind": {"description": "user: a person, through the genome API. strategy_run: a strategy during an Evolution Run.", "type": "string", "enum": ["user", "strategy_run"]},
+        "actor": {"type": "string", "minLength": 1, "description": "A user id, or a strategy 'id@version'."},
+        "run_id": {"description": "strategy_run only: the Evolution Run that produced the revision.", "type": "string", "minLength": 1},
+        "step": {"description": "strategy_run only: the strategy's own label for the step, e.g. 'propose'.", "type": "string", "minLength": 1}
+      },
+      "if": {"properties": {"kind": {"const": "strategy_run"}}},
+      "then": {"required": ["run_id"]},
+      "else": {"not": {"anyOf": [{"required": ["run_id"]}, {"required": ["step"]}]}}
+    },
+    "revisionMetadata": {
+      "description": "Platform-written; not hashed (01-genome.md §2.4).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "seq", "bot", "parent", "created_by", "created_at", "status", "patch_digest", "evidence", "evaluations", "annotations"],
+      "properties": {
+        "id": {"$ref": "#/definitions/revisionId", "description": "This revision's identity."},
+        "seq": {"description": "Per-bot counter for people (r1, r42, ...); not an identity.", "type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "bot": {
+          "description": "The bot this revision belongs to.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["owner_id", "bot_id"],
+          "properties": {
+            "owner_id": {"description": "The bot owner's user id.", "type": "string", "minLength": 1},
+            "bot_id": {"description": "The bot's id.", "type": "string", "minLength": 1}
+          }
+        },
+        "parent": {"description": "The revision this one was made from; null only for the bot's first revision.", "oneOf": [{"type": "null"}, {"$ref": "#/definitions/revisionId"}]},
+        "created_by": {"$ref": "#/definitions/provenance", "description": "Who recorded it."},
+        "created_at": {"description": "When it was recorded, UTC, RFC 3339 with a Z suffix.", "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z(?![\\s\\S])"},
+        "status": {"description": "Where the revision is in its lifecycle (01-genome.md §4.4). Besides status, only annotations and the append-only evaluations change after recording.", "type": "string", "enum": ["draft", "candidate", "accepted", "rejected", "promoted", "archived"]},
+        "patch_digest": {"description": "The stored patch that turned parent into this revision; null when a whole Manifest document was recorded.", "oneOf": [{"type": "null"}, {"$ref": "#/definitions/digest"}]},
+        "evidence": {"description": "The Experience records that motivated the change; [] for most manual edits.", "type": "array", "items": {"$ref": "#/definitions/evidenceRef"}},
+        "evaluations": {"description": "Ids of the Verification evaluations run on this revision; scores stay in Verification. Append-only: [] at record time, then Verification appends an id when an evaluation of this revision finishes.", "type": "array", "items": {"type": "string", "pattern": "^ev_[A-Za-z0-9]+(?![\\s\\S])"}},
+        "annotations": {"description": "Free-form labels added after recording, e.g. {'experiment': 'escalation-wording'}.", "type": "object", "additionalProperties": {"type": "string"}}
+      }
+    }
+  }
+}

@@ -6,11 +6,11 @@
 - **Goal:** Create `core/bot_genome/` with the pure building blocks the rest depends on, move the two test-only reference modules into core, and add the `origin: repo` skill shape to the contract.
 - **Files:** `core/bot_genome/{__init__,contract,canonical,rewrite,gene_paths,models,errors,limits}.py`, `core/bot_genome/contract/*.json`, `core/bot_genome/README.md`; `api-contracts/genome/v1/genome-revision.schema.json`, `api-contracts/genome/v1/README.md` §4.2, one new `examples/revisions/*.json`; `tests/community/contracts/{genome_canonical_json,genome_rewrite}.py` (removed), `tests/community/contracts/test_bot_genome_schema.py` (imports); `tests/community/core/bot_genome/{test_canonical,test_rewrite,test_gene_paths,test_contract_copies}.py`
 - **Done when:**
-  - [ ] `canonical.py` and `rewrite.py` pass every vector in `canonical-json-vectors.json` and `rewrite-vectors.json`; the contract test imports them from core and still passes.
-  - [ ] `gene_paths.py` covers encode/decode, canonical-spelling refusal, `covers`, `overlaps`, and builders for every op's gene path (README §2, §6.1).
-  - [ ] The revision schema accepts `{"name", "origin": "repo", "repo_path"}` as a skill entry and refuses it with a digest or version; README §4.2 documents it as additive; a new example revision carries one; the contract test still passes.
-  - [ ] `contract.py` loads the schema pair and `risk-tiers.json` from the package copies; a test pins the copies byte-equal to `api-contracts/genome/v1/`.
-  - [ ] `README.md` carries the `## Context Boundary` block; `test_module_boundaries` passes with `core.bot_genome` added to the significant set.
+  - [x] `canonical.py` and `rewrite.py` pass every vector in `canonical-json-vectors.json` and `rewrite-vectors.json`; the contract test imports them from core and still passes.
+  - [x] `gene_paths.py` covers encode/decode, canonical-spelling refusal, `covers`, `overlaps`, and builders for every op's gene path (README §2, §6.1).
+  - [x] The revision schema accepts `{"name", "origin": "repo", "repo_path"}` as a skill entry and refuses it with a digest or version; README §4.2 documents it as additive; a new example revision carries one; the contract test still passes.
+  - [x] `contract.py` loads the schema pair and `risk-tiers.json` from the package copies; a test pins the copies byte-equal to `api-contracts/genome/v1/`.
+  - [x] `README.md` carries the `## Context Boundary` block; `test_module_boundaries` passes with `core.bot_genome` added to the significant set.
 - **Depends on:** —
 
 ## Task 2: Text edits, patch ops, policy and risk
