@@ -3,7 +3,8 @@
 from agentclaw.community.api.acli_cli_service import (
     AcliCliNameMismatchError,
     AcliContainerError,
-    AcliRollbackFailedError,
+    AcliOperation,
+    AcliOperationInProgressError,
 )
 from agentclaw.community.api.bot_config_manifest_service import (
     ManifestValidationError,
@@ -36,6 +37,22 @@ def error_data(exc: Exception) -> object | None:
         return {"code": exc.code, "reason": exc.detail}
     if isinstance(exc, AcliCliNameMismatchError):
         return {"market_name": exc.market_name}
-    if isinstance(exc, AcliRollbackFailedError):
-        return {"state": exc.state}
+    if isinstance(exc, AcliOperationInProgressError):
+        op = exc.operation
+        return {"operation": acli_operation_payload(op)} if isinstance(op, AcliOperation) else None
     return None
+
+
+def acli_operation_payload(op: AcliOperation) -> dict[str, object]:
+    """An acli operation as the public API publishes it."""
+    return {
+        "operation_id": op.id,
+        "kind": op.kind,
+        "action": op.action,
+        "cli_code": op.cli_code,
+        "stage": op.stage,
+        "status": op.status,
+        "step": op.step,
+        "error_code": op.error_code,
+        "error_message": op.error_message,
+    }

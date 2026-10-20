@@ -15,10 +15,16 @@ from agentclaw.community.adapters.http.openapi_v1.authorization_rules import (
 )
 from agentclaw.community.adapters.http.openapi_v1.bots.acli_clis import (
     add_bot_cli,
+    cancel_bot_cli_install,
+    cancel_bot_cli_uninstall,
+    get_cli_operation,
     list_bot_clis,
+    list_cli_operations,
+    operations_router,
     remove_bot_cli,
     router,
 )
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
 from agentclaw.community.adapters.http.openapi_v1.market.acli_clis import (
     router as market_router,
     search_acli_market,
@@ -26,9 +32,7 @@ from agentclaw.community.adapters.http.openapi_v1.market.acli_clis import (
 from agentclaw.community.adapters.http.openapi_v1.bots.schemas_acli_clis import AddBotCli
 from agentclaw.community.api.acli_cli_service import (
     AcliBotNotRunningError,
-    AcliCliAlreadyGrantedError,
     AcliCliNameMismatchError,
-    AcliCliNotGrantedError,
     AcliDefaultCliError,
     AcliEngineOutdatedError,
     AcliEngineUnsupportedError,
@@ -36,9 +40,15 @@ from agentclaw.community.api.acli_cli_service import (
     AcliMarketNotConfiguredError,
     AcliMarketPage,
     AcliMarketUnavailableError,
+    AcliOperation,
+    AcliOperationCancelledError,
     AcliOperationFailedError,
+    AcliOperationInProgressError,
+    AcliOperationNotActiveError,
+    AcliOperationNotFoundError,
+    AcliOutcome,
     AcliRequestRejectedError,
-    AcliRollbackFailedError,
+    AcliStageNotAllowedError,
     AcliTool,
     BotCli,
 )
@@ -65,6 +75,21 @@ def _body(response) -> dict:
     return json.loads(response.body)
 
 
+def _op(status: str = "succeeded", **fields) -> AcliOperation:
+    return AcliOperation(**{
+        "id": "a" * 32, "kind": "operation", "action": "install", "cli_code": "deepinsight-cli",
+        "stage": "draft", "status": status, "step": "installing" if status == "running" else None,
+        **fields,
+    })
+
+
+_OP_JSON = {
+    "operation_id": "a" * 32, "kind": "operation", "action": "install",
+    "cli_code": "deepinsight-cli", "stage": "draft", "status": "running", "step": "installing",
+    "error_code": None, "error_message": None,
+}
+
+
 async def test_routes_and_bars() -> None:
     app = FastAPI()
     app.include_router(router)
@@ -73,33 +98,48 @@ async def test_routes_and_bars() -> None:
     assert set(paths["/openapi/v1/bots/{bot_id}/clis"]) == {"get", "post"}
     assert "/openapi/v1/bots/{bot_id}/clis/market" not in paths
     assert set(paths["/openapi/v1/bots/{bot_id}/clis/{cli_code}"]) == {"delete"}
-    for method in ("GET",):
-        rule = AUTHORIZATION[(method, "/openapi/v1/bots/{bot_id}/clis")]
-        assert (rule.level, rule.edit_lock) == (PermissionLevel.MEMBER, None)
+    assert set(paths["/openapi/v1/bots/{bot_id}/clis/{cli_code}/install/cancel"]) == {"post"}
+    assert set(paths["/openapi/v1/bots/{bot_id}/clis/{cli_code}/uninstall/cancel"]) == {"post"}
+    app.include_router(operations_router)
+    paths = app.openapi()["paths"]
+    assert set(paths["/openapi/v1/bots/{bot_id}/cli-operations"]) == {"get"}
+    assert set(paths["/openapi/v1/bots/{bot_id}/cli-operations/{operation_id}"]) == {"get"}
+    for key in (
+        ("GET", "/openapi/v1/bots/{bot_id}/clis"),
+        ("GET", "/openapi/v1/bots/{bot_id}/cli-operations"),
+        ("GET", "/openapi/v1/bots/{bot_id}/cli-operations/{operation_id}"),
+    ):
+        assert (AUTHORIZATION[key].level, AUTHORIZATION[key].edit_lock) == (
+            PermissionLevel.MEMBER, None,
+        )
     for key in (
         ("POST", "/openapi/v1/bots/{bot_id}/clis"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/clis/{cli_code}"),
+        ("POST", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/install/cancel"),
+        ("POST", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/uninstall/cancel"),
     ):
         assert (AUTHORIZATION[key].level, AUTHORIZATION[key].edit_lock) == (
             PermissionLevel.OWNER, EDIT_LOCK,
         )
 
 
-async def test_list_returns_every_grant() -> None:
-    service = Mock()
+async def test_list_returns_what_the_runtime_has() -> None:
+    service = AsyncMock()
     service.list_bot_clis.return_value = [
         BotCli("dataphin", "dataphin-cli", "Dataphin", "owner", True),
         BotCli("adev-cli", "adev-cli", "", "caller", False),
     ]
 
-    response = await list_bot_clis("bot-1", _request(), "owner", "owner", service)
+    response = await list_bot_clis(
+        "bot-1", _request(), "owner", "owner", RuntimeStage.VERIFY, service
+    )
 
     assert [(i.cli_code, i.identity_mode.value, i.default) for i in response.data] == [
         ("dataphin", "owner", True),
         ("adev-cli", "caller", False),
     ]
-    service.list_bot_clis.assert_called_once_with(
-        bot_id="bot-1", entity_id="owner", actor_id="owner"
+    service.list_bot_clis.assert_awaited_once_with(
+        bot_id="bot-1", entity_id="owner", actor_id="owner", stage="verify"
     )
 
 
@@ -137,11 +177,13 @@ async def test_market_errors_map_to_their_status(error, status) -> None:
 
 async def test_add_passes_the_current_users_lock_epoch() -> None:
     service = AsyncMock()
-    service.add.return_value = AcliTool("deepinsight-cli", "di", "DI", "1.0.9")
+    service.add.return_value = AcliOutcome(
+        operation=_op(), tool=AcliTool("deepinsight-cli", "di", "DI", "1.0.9")
+    )
 
     response = await add_bot_cli(
         "bot-1", AddBotCli(cli_code="deepinsight-cli"), _request(), "owner", "owner",
-        service, _locks(38),
+        None, False, service, _locks(38),
     )
 
     assert (response.data.cli_code, response.data.command, response.data.version) == (
@@ -149,8 +191,23 @@ async def test_add_passes_the_current_users_lock_epoch() -> None:
     )
     service.add.assert_awaited_once_with(
         bot_id="bot-1", entity_id="owner", actor_id="owner",
-        cli_code="deepinsight-cli", lock_epoch=38,
+        cli_code="deepinsight-cli", lock_epoch=38, stage=None, run_async=False,
     )
+
+
+async def test_a_running_add_is_202_with_the_operation() -> None:
+    service = AsyncMock()
+    service.add.return_value = AcliOutcome(operation=_op("running"))
+
+    response = await add_bot_cli(
+        "bot-1", AddBotCli(cli_code="deepinsight-cli"), _request(), "owner", "owner",
+        RuntimeStage.ONLINE, True, service, _locks(),
+    )
+
+    assert response.status_code == 202
+    assert _body(response)["data"] == _OP_JSON
+    kwargs = service.add.await_args.kwargs
+    assert (kwargs["stage"], kwargs["run_async"]) == ("online", True)
 
 
 @pytest.mark.parametrize(
@@ -158,31 +215,85 @@ async def test_add_passes_the_current_users_lock_epoch() -> None:
 )
 async def test_a_lock_the_caller_does_not_hold_is_not_passed(locks) -> None:
     service = AsyncMock()
+    service.remove.return_value = AcliOutcome(operation=_op())
 
-    await remove_bot_cli("bot-1", "yuque-cli", _request(), "owner", "owner", service, locks)
+    await remove_bot_cli(
+        "bot-1", "yuque-cli", _request(), "owner", "owner", None, False, service, locks
+    )
 
     assert service.remove.await_args.kwargs["lock_epoch"] is None
 
 
-async def test_remove_answers_deleted() -> None:
+async def test_remove_answers_deleted_or_running() -> None:
     service = AsyncMock()
+    service.remove.return_value = AcliOutcome(operation=_op(action="uninstall"))
 
     response = await remove_bot_cli(
-        "bot-1", "yuque-cli", _request(), "owner", "owner", service, _locks(4)
+        "bot-1", "yuque-cli", _request(), "owner", "owner", None, False, service, _locks(4)
     )
 
     assert response.data.deleted is True
     service.remove.assert_awaited_once_with(
-        bot_id="bot-1", entity_id="owner", actor_id="owner", cli_code="yuque-cli", lock_epoch=4
+        bot_id="bot-1", entity_id="owner", actor_id="owner", cli_code="yuque-cli",
+        lock_epoch=4, stage=None, run_async=False,
+    )
+    service.remove.return_value = AcliOutcome(operation=_op("running"))
+    response = await remove_bot_cli(
+        "bot-1", "yuque-cli", _request(), "owner", "owner", None, True, service, _locks(4)
+    )
+    assert response.status_code == 202
+
+
+@pytest.mark.parametrize(
+    ("handler", "action"),
+    [(cancel_bot_cli_install, "install"), (cancel_bot_cli_uninstall, "uninstall")],
+)
+async def test_cancel_answers_with_the_cancel_operation(handler, action) -> None:
+    service = AsyncMock()
+    service.cancel.return_value = AcliOutcome(operation=_op(kind="cancel", action=action))
+
+    response = await handler(
+        "bot-1", "yuque-cli", _request(), "owner", "owner", None, False, service, _locks(4)
+    )
+
+    assert (response.data.kind, response.data.status) == ("cancel", "succeeded")
+    assert service.cancel.await_args.kwargs["action"] == action
+    service.cancel.return_value = AcliOutcome(operation=_op("running", kind="cancel"))
+    response = await handler(
+        "bot-1", "yuque-cli", _request(), "owner", "owner", None, True, service, _locks(4)
+    )
+    assert response.status_code == 202
+
+
+async def test_operations_read_back() -> None:
+    service = AsyncMock()
+    service.get_operation.return_value = _op("failed", error_code="install_failed",
+                                             error_message="no such cli")
+    service.live_operations.return_value = [_op("running")]
+
+    one = await get_cli_operation("bot-1", "a" * 32, _request(), "owner", "owner", service)
+    live = await list_cli_operations("bot-1", _request(), "owner", "owner", None, service)
+
+    assert (one.data.status, one.data.error_code) == ("failed", "install_failed")
+    assert [op.operation_id for op in live.data] == ["a" * 32]
+    service.get_operation.assert_awaited_once_with(
+        bot_id="bot-1", entity_id="owner", actor_id="owner", operation_id="a" * 32
+    )
+    service.live_operations.assert_awaited_once_with(
+        bot_id="bot-1", entity_id="owner", actor_id="owner", stage=None
     )
 
 
 @pytest.mark.parametrize(
     ("error", "status", "data"),
     [
-        (AcliCliAlreadyGrantedError("x"), 409, None),
-        (AcliCliNotGrantedError("x"), 404, None),
         (AcliDefaultCliError("x"), 409, None),
+        (AcliStageNotAllowedError(), 422, None),
+        (AcliOperationInProgressError(_op("running")), 409, {"operation": _OP_JSON}),
+        (AcliOperationNotActiveError(), 409, None),
+        (AcliOperationNotFoundError("x"), 404, None),
+        (AcliOperationCancelledError("cancelled", "stopped"), 409,
+         {"code": "cancelled", "reason": "stopped"}),
         (AcliCliNameMismatchError("di", "deepinsight-cli"), 422, {"market_name": "deepinsight-cli"}),
         (AcliEngineUnsupportedError(), 501, None),
         (AcliEngineOutdatedError("engine_outdated", "old build"), 409,
@@ -192,9 +303,8 @@ async def test_remove_answers_deleted() -> None:
         (AcliRequestRejectedError("install_failed", "no such cli"), 422,
          {"code": "install_failed", "reason": "no such cli"}),
         (AcliOperationFailedError("timeout", "slow"), 502, {"code": "timeout", "reason": "slow"}),
-        (AcliGrantSyncError(), 502, None),
-        (AcliRollbackFailedError("x", "installed_not_granted"), 500,
-         {"state": "installed_not_granted"}),
+        (AcliGrantSyncError("grant_failed", "not kept"), 502,
+         {"code": "grant_failed", "reason": "not kept"}),
     ],
 )
 async def test_domain_errors_map_to_their_status_and_data(error, status, data) -> None:
@@ -202,7 +312,8 @@ async def test_domain_errors_map_to_their_status_and_data(error, status, data) -
     service.add.side_effect = error
 
     response = await add_bot_cli(
-        "bot-1", AddBotCli(cli_code="x"), _request(), "owner", "owner", service, _locks()
+        "bot-1", AddBotCli(cli_code="x"), _request(), "owner", "owner", None, False,
+        service, _locks(),
     )
 
     assert response.status_code == status

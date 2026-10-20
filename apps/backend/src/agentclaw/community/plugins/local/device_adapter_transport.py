@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping
 import hashlib
+import json
 from typing import Any, Optional
 
 import httpx
@@ -94,6 +95,8 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
         self._materialized_contents: dict[str, tuple[bytes, str, str]] = {}
         # device_key -> installed acli market names
         self._acli_installed: dict[str, set[str]] = {}
+        # device_key -> {operation id -> operation}
+        self._acli_operations: dict[str, dict[str, dict[str, Any]]] = {}
         self._seq = 0
 
     # ── helpers ──────────────────────────────────────────────────────────
@@ -107,26 +110,66 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
     ) -> dict[str, Any]:
         """A tiny acli install target, so ``/openapi/v1/bots/{bot_id}/clis`` runs end to end.
 
-        Mirrors the engine contract (``/api/cli/acli/*``): an unknown name is
-        ``install_failed``, a command alias resolves to its market name, and
-        uninstalling a tool never installed here is success.
+        Mirrors the engine contract (``/api/cli/acli/*``) with operations that
+        end at once: an unknown name fails ``install_failed``, a command alias
+        resolves to its market name, uninstalling a tool never installed here
+        succeeds, and nothing is ever left running to cancel.
         """
-        installed = self._acli_installed.setdefault(_device_key(conn_info), set())
+        key = _device_key(conn_info)
+        installed = self._acli_installed.setdefault(key, set())
+        operations = self._acli_operations.setdefault(key, {})
         name = str(body.get("name") or "")
-        if path == "/api/cli/acli/install":
+        if path == "/api/cli/acli/tools":
+            return {"success": True, "data": {"tools": [
+                {"name": tool, "command": _ACLI_MARKET.get(tool, tool),
+                 "description": "", "version": "1.0.0"}
+                for tool in sorted(installed)
+            ]}}
+        if path.startswith("/api/cli/acli/operations/"):
+            op = operations.get(path.rsplit("/", 1)[-1])
+            if op is None:
+                raise DeviceAdapterEndpointNotFoundError(json.dumps({
+                    "success": False, "error": "operation_not_found", "data": None,
+                }))
+            return self._acli_answer(op)
+        if path.endswith("/cancel"):
+            raise DeviceAdapterHTTPStatusError(409, json.dumps({
+                "success": False, "error": "not_active", "message": "nothing is running",
+                "data": None,
+            }))
+        if path not in ("/api/cli/acli/install", "/api/cli/acli/uninstall"):
+            return {"success": False, "error": "unsupported_route"}
+        self._seq += 1
+        op: dict[str, Any] = {
+            "id": f"{self._seq:032x}", "action": path.rsplit("/", 1)[-1], "name": name,
+            "state": "succeeded", "result": None, "error": None,
+        }
+        if op["action"] == "install":
             market_name = _ACLI_ALIASES.get(name, name)
             if market_name not in _ACLI_MARKET:
-                return {"success": False, "error": "install_failed", "message": f"no such cli: {name}"}
-            installed.add(market_name)
-            return {"success": True, "data": {
-                "name": market_name, "command": _ACLI_MARKET[market_name],
-                "description": "", "version": "1.0.0",
-            }}
-        if path == "/api/cli/acli/uninstall":
-            present = name in installed
+                op.update(state="failed", error={
+                    "code": "install_failed", "message": f"no such cli: {name}",
+                })
+            else:
+                op["result"] = {
+                    "name": market_name, "command": _ACLI_MARKET[market_name],
+                    "description": "", "version": "1.0.0",
+                    "already_installed": market_name in installed,
+                }
+                installed.add(market_name)
+        else:
+            op["result"] = {"name": name, "uninstalled": name in installed}
             installed.discard(name)
-            return {"success": True, "data": {"name": name, "uninstalled": present}}
-        return {"success": False, "error": "unsupported_route"}
+        operations[op["id"]] = op
+        return self._acli_answer(op)
+
+    @staticmethod
+    def _acli_answer(op: dict[str, Any]) -> dict[str, Any]:
+        error = op["error"] or {}
+        return {
+            "success": op["state"] == "succeeded", "error": error.get("code"),
+            "message": error.get("message"), "data": {"operation": dict(op)},
+        }
 
     def _store(self, conn_info: dict[str, Any]) -> dict[str, dict[str, Any]]:
         return self._crons.setdefault(_device_key(conn_info), {})

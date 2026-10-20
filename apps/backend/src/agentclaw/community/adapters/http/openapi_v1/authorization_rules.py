@@ -317,6 +317,16 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("DELETE", "/openapi/v1/bots/{bot_id}/clis/{cli_code}"): Check(
         PermissionLevel.OWNER, EDIT_LOCK
     ),
+    ("POST", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/install/cancel"): Check(
+        PermissionLevel.OWNER, EDIT_LOCK
+    ),
+    ("POST", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/uninstall/cancel"): Check(
+        PermissionLevel.OWNER, EDIT_LOCK
+    ),
+    ("GET", "/openapi/v1/bots/{bot_id}/cli-operations"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/cli-operations/{operation_id}"): Check(
+        PermissionLevel.MEMBER
+    ),
     ("GET", "/openapi/v1/bots/{bot_id}/models"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/models/{model_id:path}"): Check(
         PermissionLevel.MEMBER

@@ -1,17 +1,21 @@
-"""What the acli CLI service needs from a bot's running container.
+"""What the acli CLI service needs from a bot runtime's container.
 
-The container runs ``acli``; the platform only asks it to. Every failure
-reaches the service as :class:`AcliPortError` with a short ``code`` the
-service and the HTTP layer branch on:
+The container runs ``acli``; the platform only asks it to. Every install and
+uninstall is an engine **operation**: submitted, then read back by id until it
+ends. Every failure reaches the service as :class:`AcliPortError` with a short
+``code`` the service and the HTTP layer branch on:
 
-* ``not_running`` — the bot has no reachable container.
+* ``not_running`` — the runtime has no reachable container.
 * ``engine_unsupported`` — the engine answered 501: it refuses acli.
-* ``engine_outdated`` — the engine's own route-miss 404: its build predates acli.
+* ``engine_outdated`` — the engine's own route-miss 404: its build predates
+  these endpoints.
+* ``engine_busy`` — another operation holds the container (``operation`` is it).
+* ``not_active`` — a cancel found nothing of that kind running.
 * ``invalid_input`` — the engine refused the request as malformed.
 * ``timeout`` / ``engine_unreachable`` — the call itself failed (a 404 from the
   gateway rather than the engine is ``engine_unreachable``).
-* any code the engine's runner reported (``install_failed``,
-  ``uninstall_failed``, ``acli_unavailable``, ``bad_output``, …).
+* ``bad_output`` — the engine answered something unreadable.
+* any code the engine's runner reported (``list_failed``, ``acli_unavailable``, …).
 """
 from __future__ import annotations
 
@@ -19,14 +23,22 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from agentclaw.community.core.acli_clis.operations import AcliRuntime, EngineOperation
+
 
 class AcliPortError(Exception):
-    """The container could not do what was asked. ``message`` is caller-safe."""
+    """The container could not do what was asked. ``message`` is caller-safe.
 
-    def __init__(self, code: str, message: str) -> None:
+    ``operation`` is the engine's active operation on ``engine_busy``.
+    """
+
+    def __init__(
+        self, code: str, message: str, *, operation: EngineOperation | None = None
+    ) -> None:
         super().__init__(f"{code}: {message}")
         self.code = code
         self.message = message
+        self.operation = operation
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,20 +77,28 @@ class AcliMarketPage:
 
 @runtime_checkable
 class AcliPort(Protocol):
-    """Install and uninstall acli tools in one bot's container."""
+    """acli operations in one bot runtime's container."""
 
     @abstractmethod
-    async def install(
-        self, *, bot_id: str, owner_id: str, name: str
-    ) -> AcliTool:
-        """Install ``name``; raises :class:`AcliPortError` on any refusal."""
+    async def submit(self, runtime: AcliRuntime, *, action: str, name: str) -> EngineOperation:
+        """Start an ``install`` or ``uninstall`` of ``name`` without waiting for it."""
         ...
 
     @abstractmethod
-    async def uninstall(
-        self, *, bot_id: str, owner_id: str, name: str
-    ) -> bool:
-        """Uninstall ``name``. ``False`` means acli had nothing installed."""
+    async def get_operation(
+        self, runtime: AcliRuntime, operation_id: str
+    ) -> EngineOperation | None:
+        """The engine operation ``operation_id``; ``None`` when the engine has no record."""
+        ...
+
+    @abstractmethod
+    async def cancel(self, runtime: AcliRuntime, *, action: str, name: str) -> EngineOperation:
+        """Ask the engine to cancel the running ``action`` of ``name``, without waiting."""
+        ...
+
+    @abstractmethod
+    async def list_tools(self, runtime: AcliRuntime) -> list[AcliTool]:
+        """What acli has installed in the runtime's container."""
         ...
 
 

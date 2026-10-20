@@ -284,6 +284,19 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "POST",
+        "/openapi/v1/bots/{bot_id}/clis/{cli_code}/install/cancel",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/clis/{cli_code}/uninstall/cancel",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/cli-operations"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/cli-operations/{operation_id}",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
         "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (

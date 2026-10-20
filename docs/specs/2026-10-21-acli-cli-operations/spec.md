@@ -151,7 +151,7 @@ The same routes on `/openapi/v1/bots/…` and the internal `/api/bots/…`.
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| GET | `…/{bot_id}/clis?stage=` | Installed CLIs of that stage, from its engine, with `identity_mode` from Passport and the `default` flag. `409 not_running` if the stage has no running container. |
+| GET | `…/{bot_id}/clis?stage=` | Installed CLIs of that stage, from its engine (`GET /tools`), plus the bot's default CLIs (installed by the image, not acli), with `identity_mode` from Passport and the `default` flag. `409 not_running` if the stage has no running container. |
 | POST | `…/{bot_id}/clis?stage=&async=` | Add: body `{cli_code}`. |
 | DELETE | `…/{bot_id}/clis/{cli_code}?stage=&async=` | Remove. Default CLIs still refused. |
 | POST | `…/{bot_id}/clis/{cli_code}/install/cancel?stage=&async=` | Cancel the add in progress. |
@@ -171,7 +171,8 @@ remove and cancel need the owner and the edit lock.
 - `TaskQueueService.enqueue(task_type="acli_clis.operation",
   idempotency_key=f"acli:op:{bot_pk}:{stage}", payload=…)`.
 - Payload, fixed at enqueue: `{action, cli_code, bot_id, owner_id, stage,
-  actor_id, identity_mode}`. The task id is the backend operation id.
+  actor_id, identity_mode}` plus `operation_id` (the backend operation id),
+  `entity_id`, `cli_desc` (the market's) and `enqueued_at`.
 - `created=False` (an add or remove is already live for this runtime,
   whatever its action and CLI): nothing new is enqueued; the answer is
   `409 operation_in_progress` with the live operation, meaning "this one is
@@ -190,6 +191,8 @@ remove and cancel need the owner and the edit lock.
     `name` match; if that operation already ended, the resubmit is a no-op
     (`already_installed` / `uninstalled: false`). Any other `engine_busy`
     means something else holds the container: retry until the deadline.
+  - An install whose engine result names another tool (acli resolved a
+    command alias the market could not be asked about) fails `name_mismatch`.
   - The engine's terminal state decides the task's: `succeeded` →
     `Complete`; `failed`, `cancelled`, `interrupted` → `Fail("<code>:
     <message>")`. No automatic resubmit: an `interrupted` operation fails the
@@ -198,17 +201,23 @@ remove and cancel need the owner and the edit lock.
 
 ### `ac_acli_operation`
 
-One row per operation task, written by the handler:
+One row per add, remove or cancel, written by the API right after the enqueue:
 
 | Column | |
 | --- | --- |
-| `task_id` | primary key; the backend operation id |
-| `bot_pk`, `stage`, `action`, `cli_code` | what the task does |
+| `operation_id` | unique; the id the API returns, also carried in the task payload |
+| `task_id` | the task (`ac_task_queue.id`) |
+| `kind`, `action`, `cli_code`, `bot_pk`, `stage` | what it does |
+| `target_operation_id` | the operation a cancel targets |
 | `engine_operation_id` | null until the engine accepted the submit |
-| `created_at`, `updated_at` | |
+| `gmt_create`, `gmt_modified` | |
 
-Status stays in the task queue; this table only links a task to its engine
-operation. New table, new DDL file; no existing migration changes.
+A task handler is never told its task id, so the operation id travels in the
+payload and the row links it to the task. Status stays in the task queue
+(`status`, `last_error` as `"<code>: <message>"`). A handler that finds no row
+waits for it up to 60 s, then fails. New table, new DDL file
+(`core/acli_clis/sql/2026_10_21_acli_operation.sql`); no existing migration
+changes.
 
 ### Cancel task
 

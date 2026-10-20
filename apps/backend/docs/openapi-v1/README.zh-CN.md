@@ -952,43 +952,56 @@ _已定案的决策（PR #610）：路径保持嵌套（`/openapi/v1/bots/mcp/..
 调用者"有权限"（该端点仅供参考，真正的强制点是 MCP 服务器本身）—— 已用测试钉住，使其读起来
 是一个决策而非 bug。_
 
-### ✅ Bot 的 acli CLI（4 个端点）· `openapi_v1/bots/acli_clis.py` —— **已实现（2026-10-15）**
-管理 bot 从内部 acli 市场安装的命令行工具。**AgentPass 是 bot 拥有哪些 CLI 的唯一记录**；
+### ✅ Bot 运行时的 acli CLI（8 个端点）· `openapi_v1/bots/acli_clis.py` —— **已实现（2026-10-15，操作化 2026-10-21）**
+管理 bot 运行时从内部 acli 市场安装的命令行工具。**运行时的容器是已安装工具的记录**；
 **acli 市场是唯一的目录**（平台不维护清单，新发布的工具无需发版即可添加）。
-Spec：`apps/backend/specs/2026-10-15-openapi-v1-acli-clis/`。
+Spec：`apps/backend/specs/2026-10-15-openapi-v1-acli-clis/` 与 `docs/specs/2026-10-21-acli-cli-operations/spec.md`。
 
 | 方法 | 路径 | 权限 | 用途 |
 |---|---|---|---|
-| GET | `/openapi/v1/bots/{bot_id}/clis` | MEMBER | bot 授权中的全部 CLI：`cli_code`、`cli_name`、`cli_desc`、`identity_mode`、`default` |
+| GET | `/openapi/v1/bots/{bot_id}/clis?stage=` | MEMBER | 运行时容器中已安装的 CLI，加上 bot 的默认 CLI：`cli_code`、`cli_name`、`cli_desc`、`identity_mode`、`default` |
 | GET | `/openapi/v1/bots/market/clis` | 任意调用方 | 搜索 acli 市场（`keyword`、`page_no`、`page_size`）。不绑定 bot：backend 直接调用配置项 `acli_market.search_url` 指向的市场 API；未配置时返回 `501`，市场不可达返回 `502`。 |
-| POST | `/openapi/v1/bots/{bot_id}/clis` | OWNER + 编辑锁 | `{cli_code}`（**市场名**，如 `deepinsight-cli`，而不是 `di`）：先安装，再以 `owner` 授权 |
-| DELETE | `/openapi/v1/bots/{bot_id}/clis/{cli_code}` | OWNER + 编辑锁 | 先撤销授权，再卸载 |
+| POST | `/openapi/v1/bots/{bot_id}/clis?stage=&async=` | OWNER + 编辑锁 | `{cli_code}`（**市场名**，如 `deepinsight-cli`，而不是 `di`）：先授权，再安装 |
+| DELETE | `/openapi/v1/bots/{bot_id}/clis/{cli_code}?stage=&async=` | OWNER + 编辑锁 | 卸载；授权保留 |
+| POST | `/openapi/v1/bots/{bot_id}/clis/{cli_code}/install/cancel?stage=&async=` | OWNER + 编辑锁 | 取消正在进行的添加，已装上的会被卸载 |
+| POST | `/openapi/v1/bots/{bot_id}/clis/{cli_code}/uninstall/cancel?stage=&async=` | OWNER + 编辑锁 | 取消正在进行的删除，已卸掉的会重新安装 |
+| GET | `/openapi/v1/bots/{bot_id}/cli-operations?stage=` | MEMBER | 运行时正在进行的操作（最多一个添加/删除和一个取消） |
+| GET | `/openapi/v1/bots/{bot_id}/cli-operations/{operation_id}` | MEMBER | 单个操作，进行中或已结束 |
 | PATCH | `/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type` | OWNER + 编辑锁 | 不变：切换 `owner`/`caller` |
 
-添加与删除适用于任意类型的 bot（个人或服务型）：只要求 bot 为 `ACTIVE`、调用方是 owner、引擎支持 acli，
-与调用方身份无关。只有 `call-type` 切换仅限服务型 bot（即供他人调用的 bot）。
+**运行时。** 服务型 bot 的 `stage` 为 `draft`（默认）、`verify` 或 `online`；其他 bot 只有一个运行时，
+不能传 `stage`（`422`）。该阶段没有运行中的容器时返回 `409`，`code` 为 `not_running`。
 
-**全部成功或全部不变。** 添加先安装后授权，授权失败则卸载回去；删除先撤销后卸载，卸载失败则以原身份重新授权。
-若回滚本身也失败（或卸载结果未知），返回 `500`，`data.state` 说明 bot 停留的状态：
-`installed_not_granted`、`install_unknown_not_granted`、`grant_unknown_installed`、`revoked_still_installed`、
-`revoked_install_unknown` 或 `revoke_unknown_installed`。
-安装结果未知时，会先卸载再返回错误；Passport 写入报错但实际已生效时，按成功处理。
+**操作。** 每次添加、删除、取消都是一个操作，由 backend 的持久任务执行，与调用方是否等待无关。
+不带 `async` 时最多等待 30 秒：期间结束则照常返回（`200` 带 `{cli_code, command, version}` / `deleted`，
+或对应错误）；仍在进行则返回 `202` 和操作。`async=true` 时立即返回 `202`。结果请按
+`…/cli-operations/{operation_id}` 查询，不要靠重新提交来查结果——重新提交是一个新请求。
+操作为 `{operation_id, kind, action, cli_code, stage, status, step, error_code, error_message}`，
+`status` 为 `running` / `succeeded` / `failed` / `cancelled`，进行中时 `step` 为
+`granting` / `installing` / `uninstalling` / `cancelling`。
+
+**同一运行时同时只有一个添加或删除。** 进行中再提交返回 `409`「Another CLI operation is in progress;
+try again later」，`data.operation` 为正在进行的操作。操作进行中可以取消；同一操作的第二次取消返回第一次的取消操作。
+
+**从不撤销授权。** 添加在安装前先授权（并回读确认）；删除只卸载。因此任一阶段已安装的工具都已授权。
 
 | 状态码 | 场景 | `data` |
 |---|---|---|
-| 404 | 删除 bot 没有的 CLI | — |
-| 409 | 已授权；删除默认 CLI；bot 不是 `ACTIVE` 或无运行中的容器（`not_running`）；bot 的引擎版本早于 acli，需要更新或重启（`engine_outdated`） | bot/容器场景为 `{code, reason}` |
+| 202 | 仍在进行（`async`，或超过 30 秒等待） | 操作 |
+| 404 | 该 bot 没有这个操作 id | — |
+| 409 | 运行时有其他操作正在进行 | `{operation}` |
+| 409 | 删除默认 CLI；没有可取消的对应操作；操作已被取消（`cancelled`）；bot 不是 `ACTIVE` 或运行时没有运行中的容器（`not_running`）；引擎版本早于这些端点（`engine_outdated`） | 容器场景为 `{code, reason}` |
 | 422 | 传入别名（`di`） | `{market_name}` |
-| 422 | acli 拒绝请求（通常是名称不存在） | `{code, reason}` |
+| 422 | 非服务型 bot 传了 `stage` | — |
+| 422 | acli 拒绝请求（通常是名称不存在；`install_failed`、`name_mismatch`） | `{code, reason}` |
 | 423 | 未持有编辑锁 | — |
 | 501 | bot 的引擎类型不支持 acli（仅 openclaw 与 claude_code 支持），或引擎返回 `501` | — |
-| 502 | acli 或容器调用失败（网关而非引擎返回的 `404` 记为 `engine_unreachable`）；Passport 写入失败或未持久化 | acli 场景为 `{code, reason}` |
+| 502 | acli 或容器调用失败；Passport 授权未生效（`grant_failed`） | `{code, reason}` |
 
 安装目录由引擎决定（两种引擎均为 `/home/admin/.agentclaw/bin`），位于持久化存储且在引擎 `PATH` 上，
 因此重启后仍在、也无需重启即可使用；平台只给出工具名。删除 CLI 时保留其 caller/owner 选择，再次添加会恢复
-owner 上次设定的身份。默认 CLI 每次启动都会重新授权，不能删除。开源镜像不带 acli：添加、删除与搜索返回
-`502`，`code` 为 `acli_unavailable`。
-同一 bot 的添加与删除在单个 backend 实例内串行执行。
+owner 上次设定的身份。默认 CLI 每次启动都会重新授权，不能删除。开源镜像不带 acli：添加或删除会以
+`code: acli_unavailable` 失败。
 
 ### 🟩 lucas-xzp · P1 —— resources（7 个端点）· `openapi_v1/resources/router.py`
 Bot 工作区的文件与目录；存储位置从不暴露。所有操作都以工作区相对路径 `path`
@@ -1224,6 +1237,10 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 
 ## Changelog（变更记录）（每次挪动看板时追加一条带日期的记录）
 
+- **2026-10-21** —— **acli CLI 操作化。** 添加、删除与新增的安装/卸载取消都是由 backend 任务执行的操作：
+  可选 `async`，同步最多等 30 秒后返回 `202`，用 `GET …/cli-operations[/{operation_id}]` 查询；同一运行时同时只有
+  一个添加/删除（进行中再提交返回 `409` 并带正在进行的操作）。`stage` 指定服务型 bot 的 draft/verify/online 运行时；
+  列表读取运行时容器；安装前先授权，且从不撤销授权。
 - **2026-10-15** —— **Bot 的 acli CLI。** 新增 `GET`/`POST /openapi/v1/bots/{bot_id}/clis`、
   `GET /openapi/v1/bots/market/clis` 与 `DELETE …/clis/{cli_code}`：搜索 acli 市场、添加（先安装后授权）与删除
   （先撤销后卸载）bot 的工具，均为全部成功或全部不变，回滚失败时返回具体状态。AgentPass 仍是唯一记录，

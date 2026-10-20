@@ -1,57 +1,86 @@
-"""List, search, add and remove a bot's acli market CLIs.
+"""List, search, add, remove and cancel a bot runtime's acli market CLIs.
 
-Two systems change together and neither has transactions: Passport (the
-grant, the only record of what a bot has) and the bot's container (the
-installed program). Each write therefore runs its two steps in a fixed order
-and undoes the first when the second fails:
+Spec: ``docs/specs/2026-10-21-acli-cli-operations/spec.md``.
 
-* **add** installs first, then grants. An unknown market name fails at the
-  install, before Passport is touched; a failed grant uninstalls again.
-* **remove** revokes first, then uninstalls. A failed uninstall re-grants.
-
-If the undo fails too, :class:`AcliRollbackFailedError` names the state the
-bot was left in, and the event is logged for repair.
+* **Every add, remove and cancel is a task-queue task** (``tasks.py``). The
+  API enqueues it and, unless ``async`` was asked for, waits up to 30 s for it
+  to end; a task still running then is answered as an operation to poll. How
+  long the request waits never changes what the task does (D10).
+* **One add or remove per runtime at a time.** A runtime is a bot's stage —
+  ``draft`` for any bot, ``verify`` / ``online`` for a service bot — and its
+  operations share one idempotency key. A second request while one is live
+  is refused with the live operation (``AcliOperationInProgressError``).
+* **The engine is the source of truth for what is installed** (D8): listing
+  asks the stage's container. The Passport grant is written before an install
+  and never revoked (D9), so anything installed in any stage is granted.
 """
 from __future__ import annotations
 
 import asyncio
 import time
-import weakref
-from collections.abc import AsyncIterator, Awaitable, Mapping
-from contextlib import asynccontextmanager
+import uuid
+from collections.abc import Mapping
 from typing import Any
 
 from agentclaw.community.core.acli_clis.errors import (
-    AcliCliAlreadyGrantedError,
-    AcliCliNameMismatchError,
-    AcliCliNotGrantedError,
     AcliBotNotRunningError,
-    AcliEngineOutdatedError,
+    AcliCliNameMismatchError,
     AcliDefaultCliError,
+    AcliEngineOutdatedError,
     AcliEngineUnsupportedError,
     AcliGrantSyncError,
     AcliMarketNotConfiguredError,
     AcliMarketUnavailableError,
+    AcliOperationCancelledError,
     AcliOperationFailedError,
+    AcliOperationInProgressError,
+    AcliOperationNotActiveError,
+    AcliOperationNotFoundError,
     AcliRequestRejectedError,
-    AcliRollbackFailedError,
+    AcliStageNotAllowedError,
 )
 from agentclaw.community.core.acli_clis.market import AcliMarketSearch
-from agentclaw.community.core.acli_clis.protocols import AcliCliServiceProtocol, BotCli
+from agentclaw.community.core.acli_clis.operations import (
+    CANCEL_TASK_DEADLINE_SECONDS,
+    CANCEL_TASK_TYPE,
+    CANCELLED,
+    FAILED,
+    INSTALL,
+    KIND_CANCEL,
+    KIND_OPERATION,
+    OPERATION_TASK_DEADLINE_SECONDS,
+    OPERATION_TASK_TYPE,
+    RUNNING,
+    SUCCEEDED,
+    UNINSTALL,
+    AcliOperation,
+    AcliRuntime,
+    OperationPayload,
+    cancel_key,
+    operation_key,
+    parse_task_error,
+)
 from agentclaw.community.core.acli_clis.port import (
     AcliMarketPage,
     AcliPort,
     AcliPortError,
     AcliTool,
 )
-from agentclaw.community.core.caller_identity.contracts import (
-    CallerIdentityPermissionError,
-    CallerLockEpochError,
+from agentclaw.community.core.acli_clis.protocols import (
+    AcliCliServiceProtocol,
+    AcliOutcome,
+    BotCli,
 )
+from agentclaw.community.core.acli_clis.repository.models import AcliOperationRecord
+from agentclaw.community.core.acli_clis.repository.store import AcliOperationStore
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
     resolve_operable_permission_level,
+)
+from agentclaw.community.core.caller_identity.contracts import (
+    CallerIdentityPermissionError,
+    CallerLockEpochError,
 )
 from agentclaw.community.core.caller_identity.guard import load_bot, lock_epoch_matches
 from agentclaw.community.core.errors import DomainError
@@ -68,16 +97,26 @@ from agentclaw.community.core.repository.protocols.bot import (
 from agentclaw.community.core.repository.protocols.identity import (
     CallerIdentityRepositoryProtocol,
 )
+from agentclaw.community.core.repository.protocols.platform import (
+    TaskQueueRepositoryProtocol,
+)
+from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
+from agentclaw.community.core.task_queue.types import TaskRecord, TaskStatus
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
 #: Engines whose containers ship acli and the ``/api/cli/acli/*`` endpoints.
 ACLI_ENGINES = frozenset({"openclaw", "claude_code"})
+SERVICE_BOT_TYPE = "service"
+DRAFT = "draft"
+#: How long a sync call waits for its operation (D2), and how often it looks.
+SYNC_WAIT_SECONDS = 30.0
+WAIT_POLL_SECONDS = 1.0
 
 
 class AcliCliService(AcliCliServiceProtocol):
-    """Orchestrates Passport and the container; owns no policy of its own."""
+    """Enqueues acli operations and reports on them; the tasks do the work."""
 
     def __init__(
         self,
@@ -90,6 +129,9 @@ class AcliCliService(AcliCliServiceProtocol):
         port: AcliPort,
         market: AcliMarketSearch,
         collaborators: CollaboratorServiceProtocol,
+        task_queue: TaskQueueService,
+        task_repository: TaskQueueRepositoryProtocol,
+        store: AcliOperationStore,
     ) -> None:
         self._bots = bot_repository
         self._locks = lock_repository
@@ -99,47 +141,51 @@ class AcliCliService(AcliCliServiceProtocol):
         self._port = port
         self._market = market
         self._collaborators = collaborators
-        # One add/remove at a time per bot: each spans Passport and container
-        # steps with awaits between them, and the owner's edit lock is
-        # reentrant, so two of the owner's requests could otherwise interleave.
-        self._bot_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
-            weakref.WeakValueDictionary()
-        )
+        self._tasks = task_queue
+        self._task_repo = task_repository
+        self._store = store
 
     # ── reads ────────────────────────────────────────────────────────────
 
-    def list_bot_clis(self, *, bot_id: str, entity_id: str, actor_id: str) -> list[BotCli]:
-        """Every CLI in the bot's Passport grant, however it got there.
+    async def list_bot_clis(
+        self, *, bot_id: str, entity_id: str, actor_id: str, stage: str | None = None
+    ) -> list[BotCli]:
+        """The CLIs installed in the stage's container, plus the bot's defaults.
 
-        ``actor_id`` must be at least a member of the bot, as for any other read
-        of its configuration; ``entity_id`` only locates the bot.
+        ``actor_id`` must be at least a member of the bot. The default CLIs are
+        installed by the image at every start rather than through acli, so
+        they are listed from the bot's profile.
         """
-        bot = load_bot(self._bots, bot_id=bot_id, entity_id=entity_id)
-        # COSEC: locating a bot does not authorize reading it.
-        level = resolve_operable_permission_level(
-            self._collaborators,
-            bot=bot,
-            user_id=actor_id,
-            owner_id=str(bot.get("owner_id") or ""),
-        )
-        if level < PermissionLevel.MEMBER:
-            raise CallerIdentityPermissionError
+        bot = await asyncio.to_thread(self._readable_bot, bot_id, entity_id, actor_id)
+        runtime = self._runtime(bot, stage)
+        try:
+            tools = await self._port.list_tools(runtime)
+        except AcliPortError as error:
+            raise _container_error(error.code, error.message) from error
         defaults = self._default_codes(bot)
         overrides = self._identities.list_draft_cli_call_types(
             int(bot["id"]), str(bot["active_engine"])
         )
-        items = self._reconciler.current_passport_cli_items(bot=bot)
-        return [
-            BotCli(
-                cli_code=str(item["cli_code"]),
-                cli_name=str(item.get("cli_name") or item["cli_code"]),
-                cli_desc=str(item.get("cli_desc") or ""),
-                identity_mode=_mode(overrides.get(str(item["cli_code"])))
-                or str(item.get("identity_mode") or "owner"),
-                default=str(item["cli_code"]) in defaults,
+        granted = {
+            str(item["cli_code"]): item
+            for item in self._reconciler.current_passport_cli_items(bot=bot)
+        }
+
+        def item(code: str, description: str) -> BotCli:
+            held = granted.get(code, {})
+            return BotCli(
+                cli_code=code,
+                cli_name=str(held.get("cli_name") or code),
+                cli_desc=str(held.get("cli_desc") or description),
+                identity_mode=_mode(overrides.get(code))
+                or str(held.get("identity_mode") or "owner"),
+                default=code in defaults,
             )
-            for item in items
-        ]
+
+        listed = [item(tool.name, tool.description) for tool in tools]
+        seen = {cli.cli_code for cli in listed}
+        listed += [item(code, "") for code in sorted(defaults) if code not in seen]
+        return listed
 
     async def search_market(
         self, *, keyword: str, page_no: int, page_size: int
@@ -149,6 +195,34 @@ class AcliCliService(AcliCliServiceProtocol):
         return await asyncio.to_thread(
             self._market.search, keyword=keyword, page_no=page_no, page_size=page_size
         )
+
+    async def get_operation(
+        self, *, bot_id: str, entity_id: str, actor_id: str, operation_id: str
+    ) -> AcliOperation:
+        """One add, remove or cancel of this bot, running or ended."""
+        bot = await asyncio.to_thread(self._readable_bot, bot_id, entity_id, actor_id)
+        record = await asyncio.to_thread(self._store.get, operation_id)
+        if record is None or record.bot_pk != int(bot["id"]):
+            raise AcliOperationNotFoundError(operation_id)
+        return await asyncio.to_thread(self._view, record)
+
+    async def live_operations(
+        self, *, bot_id: str, entity_id: str, actor_id: str, stage: str | None = None
+    ) -> list[AcliOperation]:
+        """The stage's running add/remove and cancel, if any."""
+        bot = await asyncio.to_thread(self._readable_bot, bot_id, entity_id, actor_id)
+        runtime = self._runtime(bot, stage)
+        found: list[AcliOperation] = []
+        for kind in (KIND_OPERATION, KIND_CANCEL):
+            record = await asyncio.to_thread(
+                self._store.latest, bot_pk=int(bot["id"]), stage=runtime.stage, kind=kind
+            )
+            if record is None:
+                continue
+            view = await asyncio.to_thread(self._view, record)
+            if view.running:
+                found.append(view)
+        return found
 
     # ── writes ───────────────────────────────────────────────────────────
 
@@ -160,120 +234,22 @@ class AcliCliService(AcliCliServiceProtocol):
         actor_id: str,
         cli_code: str,
         lock_epoch: int | None,
-    ) -> AcliTool:
-        """Install, then grant; uninstall again if the grant fails."""
-        async with self._serialized(bot_id):
-            return await self._add(
-                bot_id=bot_id, entity_id=entity_id, actor_id=actor_id,
-                cli_code=cli_code, lock_epoch=lock_epoch,
-            )
-
-    async def _add(
-        self,
-        *,
-        bot_id: str,
-        entity_id: str,
-        actor_id: str,
-        cli_code: str,
-        lock_epoch: int | None,
-    ) -> AcliTool:
-        started = time.monotonic()
-        bot = self._writable_bot(bot_id, entity_id, actor_id, lock_epoch)
-        owner_id = str(bot["owner_id"])
-        granted_before = self._granted_codes(bot)
-        if cli_code in granted_before:
-            raise AcliCliAlreadyGrantedError(cli_code)
-        # A tool removed earlier keeps the identity its owner chose, so a
-        # re-add restores it. Read before installing, so a failed read
-        # changes nothing.
-        identity_mode = self._kept_identity(bot, cli_code)
-        # Refuse a command alias before anything is installed, when the market
-        # can say what the alias stands for.
-        market_name = await self._alias_target(cli_code)
-        if market_name is not None:
-            raise AcliCliNameMismatchError(cli_code, market_name)
-        logger.info(
-            "acli_cli_add_requested bot_id=%s cli_code=%s actor_id=%s", bot_id, cli_code, actor_id
+        stage: str | None = None,
+        run_async: bool = False,
+    ) -> AcliOutcome:
+        """Grant, then install, ``cli_code`` in the stage's container."""
+        bot = await asyncio.to_thread(
+            self._writable_bot, bot_id, entity_id, actor_id, lock_epoch
         )
-
-        try:
-            tool = await self._port.install(
-                bot_id=bot_id, owner_id=owner_id, name=cli_code,
-            )
-        except asyncio.CancelledError:
-            # The request was abandoned (a worker shutting down, say) while the
-            # engine may still finish the install. Treat it like any uncertain
-            # install: clean up, shielded so the cleanup itself survives the
-            # cancellation, then let the cancellation through.
-            logger.warning(
-                "acli_cli_add_failed bot_id=%s cli_code=%s phase=install error_code=cancelled",
-                bot_id, cli_code,
-            )
-            await self._shielded(self._undo_install(
-                bot_id, owner_id, cli_code,
-                reason="install_cancelled", state="install_unknown_not_granted",
-            ))
-            raise
-        except AcliPortError as error:
-            logger.warning(
-                "acli_cli_add_failed bot_id=%s cli_code=%s phase=install error_code=%s",
-                bot_id, cli_code, error.code,
-            )
-            if error.code in _UNCERTAIN_CODES:
-                # The install may have completed out of sight. Uninstall so the
-                # bot cannot be left with an ungranted program; if that fails
-                # too, the state is unknown and is reported as such.
-                await self._undo_install(
-                    bot_id, owner_id, cli_code,
-                    reason="install_uncertain", state="install_unknown_not_granted",
-                )
-            raise _container_error(error) from error
-
-        if tool.name != cli_code:
-            # acli resolved an alias (``di`` → ``deepinsight-cli``). Passport
-            # codes are market names, so undo and point the caller at it —
-            # unless the bot already holds that tool, whose program must stay.
-            # Judged against the pre-install snapshot: a fresh read here could
-            # fail and strand the program the alias just installed.
-            if tool.name not in granted_before:
-                await self._undo_install(bot_id, owner_id, tool.name, reason="name_mismatch")
-            raise AcliCliNameMismatchError(cli_code, tool.name)
-
-        write_error: Exception | None = None
-        try:
-            self._reconciler.add_cli(
-                bot=bot,
-                item={
-                    "cli_code": cli_code,
-                    "cli_name": cli_code,
-                    "cli_desc": tool.description,
-                    "identity_mode": identity_mode,
-                },
-            )
-        except Exception as error:
-            logger.error(
-                "acli_cli_add_failed bot_id=%s cli_code=%s phase=grant error_type=%s",
-                bot_id, cli_code, type(error).__name__,
-            )
-            write_error = error
-        # Read the grant back even after a clean write: a Passport can accept
-        # a write it does not keep (the community self-issued one), or another
-        # whole-scope write can overwrite it. Only a confirmed grant succeeds.
-        if not self._passport_shows(
-            bot, cli_code, granted=True, unknown_state="grant_unknown_installed",
-            cause=write_error,
-        ):
-            await self._undo_install(
-                bot_id, owner_id, cli_code,
-                reason="grant_failed" if write_error else "grant_not_persisted",
-            )
-            raise AcliGrantSyncError from write_error
-
-        logger.info(
-            "acli_cli_add_succeeded bot_id=%s cli_code=%s version=%s duration_ms=%s",
-            bot_id, cli_code, tool.version, int((time.monotonic() - started) * 1000),
+        runtime = self._runtime(bot, stage)
+        listed = await self._market_entry(cli_code)
+        identity_mode = await asyncio.to_thread(self._kept_identity, bot, cli_code)
+        payload = self._payload(
+            bot, runtime, entity_id=entity_id, actor_id=actor_id, kind=KIND_OPERATION,
+            action=INSTALL, cli_code=cli_code, identity_mode=identity_mode,
+            cli_desc=listed.description if listed is not None else None,
         )
-        return tool
+        return await self._run(payload, run_async=run_async)
 
     async def remove(
         self,
@@ -283,190 +259,207 @@ class AcliCliService(AcliCliServiceProtocol):
         actor_id: str,
         cli_code: str,
         lock_epoch: int | None,
-    ) -> None:
-        """Revoke, then uninstall; re-grant if the uninstall fails."""
-        async with self._serialized(bot_id):
-            await self._remove(
-                bot_id=bot_id, entity_id=entity_id, actor_id=actor_id,
-                cli_code=cli_code, lock_epoch=lock_epoch,
-            )
+        stage: str | None = None,
+        run_async: bool = False,
+    ) -> AcliOutcome:
+        """Uninstall ``cli_code`` from the stage's container. The grant stays (D9)."""
+        bot = await asyncio.to_thread(
+            self._writable_bot, bot_id, entity_id, actor_id, lock_epoch
+        )
+        runtime = self._runtime(bot, stage)
+        if cli_code in self._default_codes(bot):
+            raise AcliDefaultCliError(cli_code)
+        payload = self._payload(
+            bot, runtime, entity_id=entity_id, actor_id=actor_id, kind=KIND_OPERATION,
+            action=UNINSTALL, cli_code=cli_code,
+        )
+        return await self._run(payload, run_async=run_async)
 
-    async def _remove(
+    async def cancel(
         self,
         *,
         bot_id: str,
         entity_id: str,
         actor_id: str,
         cli_code: str,
+        action: str,
         lock_epoch: int | None,
-    ) -> None:
-        """Revoke the grant, then uninstall the program; all or nothing.
+        stage: str | None = None,
+        run_async: bool = False,
+    ) -> AcliOutcome:
+        """Cancel the running ``action`` of ``cli_code``; the engine reverts it."""
+        bot = await asyncio.to_thread(
+            self._writable_bot, bot_id, entity_id, actor_id, lock_epoch
+        )
+        runtime = self._runtime(bot, stage)
+        target = await asyncio.to_thread(
+            self._store.latest, bot_pk=int(bot["id"]), stage=runtime.stage, kind=KIND_OPERATION
+        )
+        if target is None or target.action != action or target.cli_code != cli_code or not (
+            await asyncio.to_thread(self._view, target)
+        ).running:
+            raise AcliOperationNotActiveError(f"no {action} of {cli_code!r} is running")
+        payload = self._payload(
+            bot, runtime, entity_id=entity_id, actor_id=actor_id, kind=KIND_CANCEL,
+            action=action, cli_code=cli_code, target_operation_id=target.operation_id,
+        )
+        return await self._run(payload, run_async=run_async)
 
-        Refused up front: a tool the bot lacks (``AcliCliNotGrantedError``) and
-        a default tool (``AcliDefaultCliError``). Then:
+    # ── running an operation ─────────────────────────────────────────────
 
-        * revoke fails → re-read Passport. Still granted → ``AcliGrantSyncError``
-          (nothing changed); revoked after all → carry on; unreadable →
-          ``revoke_unknown_installed``.
-        * uninstall fails → re-grant with the same identity and return the
-          container error; if that re-grant fails too → ``revoked_still_installed``
-          (or ``revoke_unknown_installed`` when Passport cannot be read).
-        * uninstall's answer never arrives (timeout, unreachable, bad output) →
-          stay revoked, the safe side, and report ``revoked_install_unknown``.
-
-        A state is reported as ``AcliRollbackFailedError`` (``500``, ``data.state``).
-        """
-        started = time.monotonic()
-        bot = self._writable_bot(bot_id, entity_id, actor_id, lock_epoch)
-        owner_id = str(bot["owner_id"])
-        held = {
-            str(item["cli_code"]): item
-            for item in self._reconciler.current_passport_cli_items(bot=bot)
-        }
-        if cli_code not in held:
-            raise AcliCliNotGrantedError(cli_code)
-        if cli_code in self._default_codes(bot):
-            raise AcliDefaultCliError(cli_code)
+    async def _run(self, payload: OperationPayload, *, run_async: bool) -> AcliOutcome:
+        """Enqueue ``payload`` and answer for it: at once, or once it ends (≤ 30 s)."""
+        cancel = payload.kind == KIND_CANCEL
+        result = await asyncio.to_thread(
+            self._tasks.enqueue,
+            CANCEL_TASK_TYPE if cancel else OPERATION_TASK_TYPE,
+            payload.to_dict(),
+            CANCEL_TASK_DEADLINE_SECONDS if cancel else OPERATION_TASK_DEADLINE_SECONDS,
+            idempotency_key=(cancel_key if cancel else operation_key)(
+                payload.bot_pk, payload.stage
+            ),
+        )
+        if not result.created:
+            live = await asyncio.to_thread(self._view_of_task, result.record)
+            if cancel and live is not None and (
+                live.action == payload.action and live.cli_code == payload.cli_code
+            ):
+                # The same cancel is already on its way: answer for that one.
+                return await self._answer(live, payload.runtime, run_async=run_async)
+            raise AcliOperationInProgressError(live)
+        await asyncio.to_thread(self._store.create, AcliOperationRecord(
+            operation_id=payload.operation_id,
+            task_id=result.record.id,
+            kind=payload.kind,
+            action=payload.action,
+            cli_code=payload.cli_code,
+            bot_pk=payload.bot_pk,
+            stage=payload.stage,
+            target_operation_id=payload.target_operation_id,
+        ))
         logger.info(
-            "acli_cli_remove_requested bot_id=%s cli_code=%s actor_id=%s",
-            bot_id, cli_code, actor_id,
+            "acli_operation_enqueued operation_id=%s kind=%s action=%s cli_code=%s "
+            "bot_id=%s stage=%s actor_id=%s",
+            payload.operation_id, payload.kind, payload.action, payload.cli_code,
+            payload.bot_id, payload.stage, payload.actor_id,
+        )
+        view = await asyncio.to_thread(self._view_of_id, payload.operation_id)
+        return await self._answer(view, payload.runtime, run_async=run_async)
+
+    async def _answer(
+        self, view: AcliOperation, runtime: AcliRuntime, *, run_async: bool
+    ) -> AcliOutcome:
+        if run_async:
+            return AcliOutcome(operation=view)
+        deadline = time.monotonic() + SYNC_WAIT_SECONDS
+        while view.running and time.monotonic() < deadline:
+            await asyncio.sleep(WAIT_POLL_SECONDS)
+            view = await asyncio.to_thread(self._view_of_id, view.id)
+        if view.running:
+            return AcliOutcome(operation=view)
+        if view.status == SUCCEEDED:
+            tool = None
+            if view.kind == KIND_OPERATION and view.action == INSTALL:
+                tool = await self._installed_tool(view, runtime)
+            return AcliOutcome(operation=view, tool=tool)
+        raise _container_error(view.error_code or FAILED, view.error_message or "")
+
+    async def _installed_tool(self, view: AcliOperation, runtime: AcliRuntime) -> AcliTool:
+        """What the engine reported installing; the code alone if it no longer says."""
+        record = await asyncio.to_thread(self._store.get, view.id)
+        result: Mapping[str, Any] = {}
+        if record is not None and record.engine_operation_id:
+            try:
+                op = await self._port.get_operation(runtime, record.engine_operation_id)
+            except AcliPortError:
+                op = None
+            result = (op.result if op is not None else None) or {}
+        return AcliTool(
+            name=str(result.get("name") or view.cli_code),
+            command=str(result.get("command") or ""),
+            description=str(result.get("description") or ""),
+            version=str(result.get("version") or ""),
         )
 
-        write_error: Exception | None = None
-        try:
-            self._reconciler.remove_cli(bot=bot, cli_code=cli_code)
-        except Exception as error:
-            logger.error(
-                "acli_cli_remove_failed bot_id=%s cli_code=%s phase=revoke error_type=%s",
-                bot_id, cli_code, type(error).__name__,
-            )
-            write_error = error
-        # Confirm the revoke before the destructive step, even after a clean
-        # write: uninstalling while Passport still grants the tool would leave
-        # the bot authorized for a missing command. Nothing is uninstalled yet,
-        # so an unreadable Passport leaves the grant in an unknown state.
-        if not self._passport_shows(
-            bot, cli_code, granted=False, unknown_state="revoke_unknown_installed",
-            cause=write_error,
-        ):
-            raise AcliGrantSyncError from write_error
+    def _view_of_id(self, operation_id: str) -> AcliOperation:
+        record = self._store.get(operation_id)
+        if record is None:
+            raise AcliOperationNotFoundError(operation_id)
+        return self._view(record)
 
-        try:
-            await self._port.uninstall(
-                bot_id=bot_id, owner_id=owner_id, name=cli_code,
-            )
-        except asyncio.CancelledError:
-            # Abandoned mid-uninstall: whether the program is gone is unknown,
-            # so stay revoked, the safe side, and record the state.
-            logger.error(
-                "acli_cli_rollback_failed bot_id=%s cli_code=%s "
-                "state=revoked_install_unknown error_code=cancelled",
-                bot_id, cli_code,
-            )
-            raise
-        except AcliPortError as error:
-            logger.warning(
-                "acli_cli_remove_failed bot_id=%s cli_code=%s phase=uninstall error_code=%s",
-                bot_id, cli_code, error.code,
-            )
-            if error.code in _UNCERTAIN_CODES:
-                # The uninstall may have completed out of sight. Re-granting
-                # could authorize a tool that is gone, so stay revoked — the
-                # safe side — and report that the program's state is unknown.
-                logger.error(
-                    "acli_cli_rollback_failed bot_id=%s cli_code=%s "
-                    "state=revoked_install_unknown error_code=%s",
-                    bot_id, cli_code, error.code,
-                )
-                raise AcliRollbackFailedError(cli_code, "revoked_install_unknown") from error
-            self._undo_revoke(bot, cli_code, held[cli_code])
-            raise _container_error(error) from error
+    def _view_of_task(self, task: TaskRecord) -> AcliOperation | None:
+        operation_id = (task.payload or {}).get("operation_id")
+        record = self._store.get(str(operation_id)) if operation_id else None
+        return self._view(record, task) if record is not None else None
 
-        logger.info(
-            "acli_cli_remove_succeeded bot_id=%s cli_code=%s duration_ms=%s",
-            bot_id, cli_code, int((time.monotonic() - started) * 1000),
+    def _view(self, record: AcliOperationRecord, task: TaskRecord | None = None) -> AcliOperation:
+        """The operation as the API reports it: its task's status, read now."""
+        task = task or self._task_repo.get_by_id(record.task_id)
+        status = task.status if task is not None else TaskStatus.FAILED
+        error_code = error_message = None
+        if status in (TaskStatus.PENDING, TaskStatus.RUNNING):
+            state = RUNNING
+        elif status == TaskStatus.SUCCEEDED:
+            state = SUCCEEDED
+        else:
+            error_code, error_message = parse_task_error(
+                task.last_error if task is not None else "lost: the operation's task is gone"
+            )
+            if status == TaskStatus.TIMED_OUT and error_code == FAILED:
+                error_code, error_message = "timeout", "the operation did not finish in time"
+            state = CANCELLED if error_code == CANCELLED else FAILED
+        step = None
+        if state == RUNNING:
+            if record.kind == KIND_CANCEL:
+                step = "cancelling"
+            elif record.engine_operation_id is None and record.action == INSTALL:
+                step = "granting"
+            else:
+                step = "installing" if record.action == INSTALL else "uninstalling"
+        return AcliOperation(
+            id=record.operation_id, kind=record.kind, action=record.action,
+            cli_code=record.cli_code, stage=record.stage, status=state, step=step,
+            error_code=error_code, error_message=error_message,
         )
 
-    @asynccontextmanager
-    async def _serialized(self, bot_id: str) -> AsyncIterator[None]:
-        # Held locally while waiting or held, so the weak entry lives exactly
-        # as long as some request for this bot does.
-        lock = self._bot_locks.get(bot_id)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._bot_locks[bot_id] = lock
-        async with lock:
-            yield
-
-    @staticmethod
-    async def _shielded(cleanup: Awaitable[None]) -> None:
-        """Run ``cleanup`` to completion even though the caller was cancelled.
-
-        A failed cleanup is already logged with its state by the cleanup
-        itself; the cancellation, not that error, is what the caller sees.
-        """
-        try:
-            await asyncio.shield(cleanup)
-        except (AcliRollbackFailedError, asyncio.CancelledError):
-            pass
-
-    # ── rollback ─────────────────────────────────────────────────────────
-
-    async def _undo_install(
-        self,
-        bot_id: str,
-        owner_id: str,
-        name: str,
-        *,
-        reason: str,
-        state: str = "installed_not_granted",
-    ) -> None:
-        try:
-            # Shielded: a request cancelled mid-cleanup must not stop the
-            # uninstall it already asked for.
-            await asyncio.shield(self._port.uninstall(
-                bot_id=bot_id, owner_id=owner_id, name=name,
-            ))
-        except asyncio.CancelledError:
-            logger.error(
-                "acli_cli_rollback_failed bot_id=%s cli_code=%s state=%s "
-                "reason=%s error_code=cancelled",
-                bot_id, name, state, reason,
-            )
-            raise
-        except AcliPortError as error:
-            logger.error(
-                "acli_cli_rollback_failed bot_id=%s cli_code=%s state=%s "
-                "reason=%s error_code=%s",
-                bot_id, name, state, reason, error.code,
-            )
-            raise AcliRollbackFailedError(name, state) from error
-
-    def _undo_revoke(self, bot: Mapping[str, Any], cli_code: str, item: Mapping[str, Any]) -> None:
-        """Re-grant ``item`` after a failed uninstall, so the bot is as before the remove.
-
-        The caller/owner override lives in its own table and the revoke did not
-        touch it, so re-granting restores the same identity.
-        """
-        write_error: Exception | None = None
-        try:
-            self._reconciler.add_cli(bot=bot, item=item)
-        except Exception as error:
-            write_error = error
-        # Read back after a clean write too: a re-grant Passport did not keep
-        # leaves the bot revoked with its program installed.
-        if not self._passport_shows(
-            bot, cli_code, granted=True, unknown_state="revoke_unknown_installed",
-            cause=write_error,
-        ):
-            logger.error(
-                "acli_cli_rollback_failed bot_id=%s cli_code=%s "
-                "state=revoked_still_installed error_type=%s",
-                bot["bot_id"], cli_code, type(write_error).__name__ if write_error else None,
-            )
-            raise AcliRollbackFailedError(cli_code, "revoked_still_installed") from write_error
+    def _payload(
+        self, bot: Mapping[str, Any], runtime: AcliRuntime, *, entity_id: str, actor_id: str,
+        kind: str, action: str, cli_code: str, identity_mode: str | None = None,
+        cli_desc: str | None = None, target_operation_id: str | None = None,
+    ) -> OperationPayload:
+        return OperationPayload(
+            operation_id=uuid.uuid4().hex, kind=kind, action=action, cli_code=cli_code,
+            bot_pk=int(bot["id"]), bot_id=runtime.bot_id, entity_id=entity_id,
+            owner_id=runtime.owner_id, stage=runtime.stage, actor_id=actor_id,
+            enqueued_at=time.time(), identity_mode=identity_mode, cli_desc=cli_desc,
+            target_operation_id=target_operation_id,
+        )
 
     # ── shared checks ────────────────────────────────────────────────────
+
+    def _runtime(self, bot: Mapping[str, Any], stage: str | None) -> AcliRuntime:
+        """The runtime ``stage`` names (D7): any stage for a service bot, default
+        ``draft``; none for a bot with one runtime."""
+        if stage is not None and str(bot.get("bot_type") or "") != SERVICE_BOT_TYPE:
+            raise AcliStageNotAllowedError
+        return AcliRuntime(
+            bot_id=str(bot["bot_id"]), owner_id=str(bot["owner_id"]), stage=stage or DRAFT
+        )
+
+    def _readable_bot(self, bot_id: str, entity_id: str, actor_id: str) -> Mapping[str, Any]:
+        """The bot, if ``actor_id`` is at least a member of it."""
+        bot = load_bot(self._bots, bot_id=bot_id, entity_id=entity_id)
+        # COSEC: locating a bot does not authorize reading it.
+        level = resolve_operable_permission_level(
+            self._collaborators,
+            bot=bot,
+            user_id=actor_id,
+            owner_id=str(bot.get("owner_id") or ""),
+        )
+        if level < PermissionLevel.MEMBER:
+            raise CallerIdentityPermissionError
+        self._require_acli_engine(bot)
+        return bot
 
     def _writable_bot(
         self, bot_id: str, entity_id: str, actor_id: str, lock_epoch: int | None
@@ -475,13 +468,8 @@ class AcliCliService(AcliCliServiceProtocol):
 
         It must exist for ``entity_id``, be active, be owned by ``actor_id``,
         run an engine that has acli, and ``lock_epoch`` must name the edit lock
-        ``actor_id`` holds (or be ``None`` while no lock exists). The edit lock
-        decides who may edit; it does not serialize one holder's concurrent
-        requests (see ``_serialized``).
-
-        Any bot type qualifies: every bot's Passport carries a CLI scope (device
-        bootstrap reconciles it for all of them), and adding a tool involves no
-        caller identity. The service-bot rule belongs to the identity switch.
+        ``actor_id`` holds (or be ``None`` while no lock exists). Any bot type
+        qualifies; adding a tool involves no caller identity.
         """
         bot = load_bot(self._bots, bot_id=bot_id, entity_id=entity_id)
         # The bot is checked before the actor: whether it can take a change
@@ -507,12 +495,11 @@ class AcliCliService(AcliCliServiceProtocol):
         if str(bot.get("active_engine") or "") not in ACLI_ENGINES:
             raise AcliEngineUnsupportedError
 
-    async def _alias_target(self, cli_code: str) -> str | None:
-        """The market name ``cli_code`` is a command alias for, if the market says so.
+    async def _market_entry(self, cli_code: str) -> AcliTool | None:
+        """The market's entry for ``cli_code``; refuses a command alias.
 
-        ``None`` when ``cli_code`` is itself a market name, or when the market
-        cannot be asked; the install's own reply is then the check of last
-        resort, as before.
+        ``None`` when the market cannot be asked or does not list it: the
+        engine's install is then the check of last resort.
         """
         try:
             page = await asyncio.to_thread(
@@ -520,9 +507,13 @@ class AcliCliService(AcliCliServiceProtocol):
             )
         except (AcliMarketNotConfiguredError, AcliMarketUnavailableError):
             return None
-        if any(tool.name == cli_code for tool in page.items):
-            return None
-        return next((t.name for t in page.items if t.command == cli_code), None)
+        listed = next((tool for tool in page.items if tool.name == cli_code), None)
+        if listed is not None:
+            return listed
+        alias_of = next((t.name for t in page.items if t.command == cli_code), None)
+        if alias_of is not None:
+            raise AcliCliNameMismatchError(cli_code, alias_of)
+        return None
 
     def _kept_identity(self, bot: Mapping[str, Any], cli_code: str) -> str:
         """``caller`` if the owner set this tool to caller before, else ``owner``.
@@ -534,53 +525,6 @@ class AcliCliService(AcliCliServiceProtocol):
             int(bot["id"]), str(bot["active_engine"])
         )
         return _mode(overrides.get(cli_code)) or "owner"
-
-    def _passport_shows(
-        self,
-        bot: Mapping[str, Any],
-        cli_code: str,
-        *,
-        granted: bool,
-        unknown_state: str,
-        cause: Exception | None,
-    ) -> bool:
-        """Re-read Passport after a write: does it show ``cli_code`` as ``granted``?
-
-        Every grant or revoke ends here, whether its write raised or not, so
-        the outcome always follows what Passport actually holds rather than
-        what the write call reported. When Passport cannot be read, nothing
-        safe can be undone, so this raises :class:`AcliRollbackFailedError`
-        naming ``unknown_state``.
-        """
-        state = self._grant_state(bot, cli_code)
-        if state is None:
-            logger.error(
-                "acli_cli_rollback_failed bot_id=%s cli_code=%s state=%s",
-                bot["bot_id"], cli_code, unknown_state,
-            )
-            raise AcliRollbackFailedError(cli_code, unknown_state) from cause
-        if cause is not None and state is granted:
-            logger.info(
-                "acli_cli_passport_write_landed_despite_error bot_id=%s cli_code=%s granted=%s",
-                bot["bot_id"], cli_code, granted,
-            )
-        return state is granted
-
-    def _grant_state(self, bot: Mapping[str, Any], cli_code: str) -> bool | None:
-        """Whether Passport now grants ``cli_code``; ``None`` when it cannot say."""
-        try:
-            return cli_code in self._granted_codes(bot)
-        except Exception as error:
-            logger.warning(
-                "acli_cli_grant_recheck_failed bot_id=%s cli_code=%s error_type=%s",
-                bot["bot_id"], cli_code, type(error).__name__,
-            )
-            return None
-
-    def _granted_codes(self, bot: Mapping[str, Any]) -> set[str]:
-        return {
-            str(item["cli_code"]) for item in self._reconciler.current_passport_cli_items(bot=bot)
-        }
 
     def _default_codes(self, bot: Mapping[str, Any]) -> set[str]:
         template_type = bot.get("template_type")
@@ -599,22 +543,27 @@ def _mode(value: object) -> str | None:
     return str(getattr(value, "value", value)).strip().lower() or None
 
 
-#: Port codes after which the container may or may not have done the work.
-_UNCERTAIN_CODES = frozenset({"timeout", "engine_unreachable", "bad_output"})
-#: Port codes caused by the request itself rather than by the container.
-_REJECTED_CODES = frozenset({"install_failed", "invalid_input"})
+#: Codes caused by the request itself rather than by the container.
+_REJECTED_CODES = frozenset({"install_failed", "invalid_input", "name_mismatch"})
 
 
-def _container_error(error: AcliPortError) -> DomainError:
-    if error.code == "engine_unsupported":
+def _container_error(code: str, message: str) -> DomainError:
+    """The domain error for an operation or port failure ``code``."""
+    if code == "engine_unsupported":
         return AcliEngineUnsupportedError()
-    if error.code == "not_running":
-        return AcliBotNotRunningError(error.code, error.message)
-    if error.code == "engine_outdated":
-        return AcliEngineOutdatedError(error.code, error.message)
-    if error.code in _REJECTED_CODES:
-        return AcliRequestRejectedError(error.code, error.message)
-    return AcliOperationFailedError(error.code, error.message)
+    if code == "not_running":
+        return AcliBotNotRunningError(code, message)
+    if code == "engine_outdated":
+        return AcliEngineOutdatedError(code, message)
+    if code == CANCELLED:
+        return AcliOperationCancelledError(code, message)
+    if code == "not_active":
+        return AcliOperationNotActiveError(message)
+    if code == "grant_failed":
+        return AcliGrantSyncError(code, message)
+    if code in _REJECTED_CODES:
+        return AcliRequestRejectedError(code, message)
+    return AcliOperationFailedError(code, message)
 
 
 __all__ = ["ACLI_ENGINES", "AcliCliService", "BotCli"]

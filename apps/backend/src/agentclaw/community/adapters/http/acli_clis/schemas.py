@@ -35,10 +35,24 @@ class AddedBotCli(BaseModel):
 
 
 class RemovedBotCli(BaseModel):
-    """The tool was revoked and uninstalled."""
+    """The tool was uninstalled; its grant is kept."""
 
     cli_code: str
     deleted: bool
+
+
+class CliOperation(BaseModel):
+    """One add, remove or cancel of a bot runtime's CLI."""
+
+    operation_id: str
+    kind: str
+    action: str
+    cli_code: str
+    stage: str
+    status: str
+    step: str | None
+    error_code: str | None
+    error_message: str | None
 
 
 class AcliMarketItem(BaseModel):
@@ -64,5 +78,6 @@ __all__ = [
     "AddBotCliRequest",
     "AddedBotCli",
     "BotCliItem",
+    "CliOperation",
     "RemovedBotCli",
 ]

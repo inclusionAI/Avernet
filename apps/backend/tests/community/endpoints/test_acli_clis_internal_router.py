@@ -1,9 +1,10 @@
 """Endpoint coverage for the internal ``/api/bots/.../clis`` routes.
 
-The same real router, service, Passport scope writer and engine port as the
-``/openapi/v1`` cases in ``test_acli_clis_router.py``, reached as an
-authenticated internal user (``x-user-id``). Ordering, rollback and every
-failure branch are pinned by the service tests in ``tests/community/core/acli_clis``.
+The same real router, service, task queue, Passport scope writer and engine
+port as the ``/openapi/v1`` cases in ``test_acli_clis_router.py``, reached as an
+authenticated internal user (``x-user-id``). The test world runs no task
+worker, so writes are asked for ``async``; running operations to their end is
+pinned by the service tests in ``tests/community/core/acli_clis``.
 """
 
 from __future__ import annotations
@@ -72,6 +73,11 @@ def _seed_bot_with_added_cli(world) -> None:
     _seed_bot(world, codes=("dataphin", "yuque-cli"))
 
 
+def _seed_bot_and_market(world) -> None:
+    _seed_bot(world)
+    _seed_market(world)
+
+
 def _seed_market(world) -> None:
     _seed_owner(world)
     world.injector.binder.bind(
@@ -132,11 +138,11 @@ def internal_search_acli_market_not_configured():
     seed=_seed_bot_with_added_cli,
     expect=ExpectSuccess(status=200),
     extra_assertions=(
-        lambda response, _world: _assert_codes(response, ["dataphin", "yuque-cli"]),
+        lambda response, _world: _assert_default_listed(response, "dataphin"),
     ),
 )
 def internal_list_bot_clis_happy():
-    """Every grant is listed for the bot's owner."""
+    """The container's tools plus the defaults, flagged."""
 
 
 @endpoint_test(
@@ -178,18 +184,19 @@ def internal_list_bot_clis_refuses_a_non_member():
     scenario="happy",
     input=CaseInput(
         path_params={"bot_id": _BOT_ID},
-        query_params=_ENTITY,
+        query_params=_ENTITY | {"async": "true"},
         headers=_HEADERS,
         json_body={"cli_code": "deepinsight-cli"},
     ),
     seed=_seed_personal_bot,
     expect=ExpectSuccess(
-        status=200,
-        json_contains={"cli_code": "deepinsight-cli", "command": "di", "version": "1.0.0"},
+        status=202,
+        json_contains={"cli_code": "deepinsight-cli", "action": "install",
+                       "stage": "draft", "status": "running"},
     ),
 )
 def internal_add_bot_cli_happy():
-    """Installed in the container, then granted; a personal bot qualifies."""
+    """Enqueued for the bot's one runtime; a personal bot qualifies."""
 
 
 @endpoint_test(
@@ -202,7 +209,7 @@ def internal_add_bot_cli_happy():
         headers=_HEADERS,
         json_body={"cli_code": "di"},
     ),
-    seed=_seed_bot,
+    seed=_seed_bot_and_market,
     expect=ExpectError(status=422),
 )
 def internal_add_bot_cli_alias():
@@ -215,14 +222,57 @@ def internal_add_bot_cli_alias():
     scenario="happy",
     input=CaseInput(
         path_params={"bot_id": _BOT_ID, "cli_code": "yuque-cli"},
-        query_params=_ENTITY,
+        query_params=_ENTITY | {"async": "true"},
         headers=_HEADERS,
     ),
     seed=_seed_bot_with_added_cli,
-    expect=ExpectSuccess(status=200, json_contains={"cli_code": "yuque-cli", "deleted": True}),
+    expect=ExpectSuccess(
+        status=202, json_contains={"cli_code": "yuque-cli", "action": "uninstall"}
+    ),
 )
 def internal_remove_bot_cli_happy():
-    """Revoked, then uninstalled."""
+    """Enqueued; the grant is never revoked."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/bots/{bot_id}/cli-operations",
+    scenario="happy",
+    input=CaseInput(path_params={"bot_id": _BOT_ID}, query_params=_ENTITY, headers=_HEADERS),
+    seed=_seed_bot,
+    expect=ExpectSuccess(status=200, json_equals=[]),
+)
+def internal_list_cli_operations_happy():
+    """Nothing is running in the runtime."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/bots/{bot_id}/clis/{cli_code}/{action}/cancel",
+    scenario="error",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID, "cli_code": "yuque-cli", "action": "install"},
+        query_params=_ENTITY,
+        headers=_HEADERS,
+    ),
+    seed=_seed_bot,
+    expect=ExpectError(status=409),
+)
+def internal_cancel_not_active():
+    """Nothing is running to cancel."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/bots/{bot_id}/cli-operations/{operation_id}",
+    scenario="error",
+    input=CaseInput(path_params={"bot_id": _BOT_ID, "operation_id": "0" * 32},
+                    query_params=_ENTITY, headers=_HEADERS),
+    seed=_seed_bot,
+    expect=ExpectError(status=404),
+)
+def internal_get_cli_operation_unknown():
+    """An operation id this bot never had."""
 
 
 @endpoint_test(
@@ -241,5 +291,6 @@ def internal_remove_default_bot_cli():
     """A default CLI is re-granted at every start, so removing it is refused."""
 
 
-def _assert_codes(response, codes: list[str]) -> None:
-    assert [item["cli_code"] for item in response.json()] == codes, response.json()
+def _assert_default_listed(response, code: str) -> None:
+    items = {item["cli_code"]: item for item in response.json()}
+    assert items[code]["default"] is True, response.json()

@@ -55,6 +55,22 @@ class AddBotCli(BaseModel):
     )
 
 
+class AcliCliOperation(BaseModel):
+    """One add, remove or cancel of a bot runtime's CLI."""
+
+    operation_id: str = Field(description="Read it back at `GET …/cli-operations/{operation_id}`.")
+    kind: str = Field(description="`operation` (an add or remove) or `cancel`.")
+    action: str = Field(description="`install` or `uninstall`; for a cancel, the one it cancels.")
+    cli_code: str = Field(description="The CLI's acli market name.")
+    stage: str = Field(description="The runtime: `draft`, `verify` or `online`.")
+    status: str = Field(description="`running`, `succeeded`, `failed` or `cancelled`.")
+    step: str | None = Field(
+        description="While running: `granting`, `installing`, `uninstalling` or `cancelling`."
+    )
+    error_code: str | None = Field(description="Why it failed, e.g. `install_failed`.")
+    error_message: str | None = Field(description="The reason, for people.")
+
+
 class AddedBotCli(BaseModel):
     """The tool installed and granted."""
 
@@ -66,6 +82,7 @@ class AddedBotCli(BaseModel):
 __all__ = [
     "AcliMarketItem",
     "AcliMarketPageResult",
+    "AcliCliOperation",
     "AddBotCli",
     "AddedBotCli",
     "BotCliItem",

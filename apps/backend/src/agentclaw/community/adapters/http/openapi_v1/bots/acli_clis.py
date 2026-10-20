@@ -1,20 +1,23 @@
-"""A bot's acli market CLIs — ``/openapi/v1/bots/{bot_id}/clis``.
+"""A bot runtime's acli market CLIs — ``/openapi/v1/bots/{bot_id}/clis``.
 
-List what the bot is granted, add a tool (installed in the running container,
-then granted) and remove one (revoked, then uninstalled). Searching the market
-is ``GET /openapi/v1/bots/market/clis``: the market is the same for every bot. Switching a CLI's identity stays at
-``PATCH …/clis/{cli_code}/call-type``.
+List what a runtime has installed, add a tool (granted, then installed), remove
+one (uninstalled; the grant stays), cancel either, and read the operations
+back at ``/openapi/v1/bots/{bot_id}/cli-operations``. ``stage`` picks the
+runtime (service bots only); ``async`` answers at once with the operation.
+Searching the market is ``GET /openapi/v1/bots/market/clis``. Switching a CLI's
+identity stays at ``PATCH …/clis/{cli_code}/call-type``.
 
-Nothing about ordering or rollback is decided here: ``AcliCliService`` owns
-both. Reads are MEMBER-level; writes are owner-only behind the edit lock, the
-bars of the identity switch beside them.
+Nothing about running an operation is decided here: ``AcliCliService`` owns it.
+Reads are MEMBER-level; writes are owner-only behind the edit lock, the bars of
+the identity switch beside them.
 """
 from __future__ import annotations
 
 import asyncio
 from typing import Annotated
 
-from fastapi import APIRouter, Path, Request
+from fastapi import APIRouter, Path, Query, Request
+from fastapi.responses import JSONResponse
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
@@ -22,20 +25,24 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Deleted,
     Envelope,
 )
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import OwnerIdDep
+from agentclaw.community.adapters.http.openapi_v1.errors_payloads import acli_operation_payload
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
+    accepted,
     deleted,
     envelope,
     envelope_errors,
 )
-from agentclaw.community.api.acli_cli_service import AcliCliServiceProtocol
+from agentclaw.community.api.acli_cli_service import AcliCliServiceProtocol, AcliOperation
 from agentclaw.community.api.collaborator_lock_service import (
     CollaboratorLockServiceProtocol,
 )
 from agentclaw.community.di import Injected
 
 from .schemas_acli_clis import (
+    AcliCliOperation,
     AddBotCli,
     AddedBotCli,
     BotCliItem,
@@ -46,10 +53,28 @@ router = APIRouter(
     tags=["CLIs"],
     route_class=PublicAPIRoute,
 )
+#: The operations themselves, under their own path.
+operations_router = APIRouter(
+    prefix="/openapi/v1/bots/{bot_id}/cli-operations",
+    tags=["CLIs"],
+    route_class=PublicAPIRoute,
+)
 
 CliCodePath = Annotated[
     str, Path(description="The CLI code, as returned by the CLI listing.")
 ]
+StageParam = Annotated[
+    RuntimeStage | None,
+    Query(description="The runtime: `draft` (default), `verify` or `online`. Service bots "
+          "only; omit it for any other bot."),
+]
+AsyncParam = Annotated[
+    bool,
+    Query(alias="async", description="Answer at once with the operation (`202`) instead of "
+          "waiting up to 30 s for it to end."),
+]
+_ACCEPTED = {202: {"model": Envelope[AcliCliOperation],
+                   "description": "Still running; poll `…/cli-operations/{operation_id}`."}}
 
 
 async def _lock_epoch(
@@ -66,6 +91,20 @@ async def _lock_epoch(
     return epoch if isinstance(epoch, int) and not isinstance(epoch, bool) else None
 
 
+def _operation(op: AcliOperation) -> AcliCliOperation:
+    return AcliCliOperation(**acli_operation_payload(op))
+
+
+def _still_running(op: AcliOperation, request: Request) -> JSONResponse:
+    return JSONResponse(
+        status_code=202, content=accepted(_operation(op), request).model_dump()
+    )
+
+
+def _stage(stage: RuntimeStage | None) -> str | None:
+    return stage.value if stage is not None else None
+
+
 @router.get("", response_model=Envelope[list[BotCliItem]])
 @envelope_errors
 async def list_bot_clis(
@@ -73,11 +112,13 @@ async def list_bot_clis(
     request: Request,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
+    stage: StageParam = None,
     service: AcliCliServiceProtocol = Injected(AcliCliServiceProtocol),
 ) -> Envelope[list[BotCliItem]]:
-    """Every CLI the bot is granted, whether or not it was added here."""
-    items = await asyncio.to_thread(
-        service.list_bot_clis, bot_id=bot_id, entity_id=owner_id, actor_id=user_id
+    """The CLIs installed in the runtime, as its container reports them, plus the
+    bot's defaults. `409` when the runtime has no running container."""
+    items = await service.list_bot_clis(
+        bot_id=bot_id, entity_id=owner_id, actor_id=user_id, stage=_stage(stage)
     )
     return envelope(
         [
@@ -94,7 +135,7 @@ async def list_bot_clis(
     )
 
 
-@router.post("", response_model=Envelope[AddedBotCli])
+@router.post("", response_model=Envelope[AddedBotCli], responses=_ACCEPTED)
 @envelope_errors
 async def add_bot_cli(
     bot_id: BotIdPath,
@@ -102,24 +143,36 @@ async def add_bot_cli(
     request: Request,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
+    stage: StageParam = None,
+    run_async: AsyncParam = False,
     service: AcliCliServiceProtocol = Injected(AcliCliServiceProtocol),
     locks: CollaboratorLockServiceProtocol = Injected(CollaboratorLockServiceProtocol),
-) -> Envelope[AddedBotCli]:
-    """Install an acli market tool in the running bot, then grant it as `owner`."""
-    tool = await service.add(
+) -> Envelope[AddedBotCli] | JSONResponse:
+    """Grant an acli market tool, then install it in the runtime.
+
+    `409` with the operation in progress when another add or remove is running
+    in this runtime.
+    """
+    outcome = await service.add(
         bot_id=bot_id,
         entity_id=owner_id,
         actor_id=user_id,
         cli_code=body.cli_code,
         lock_epoch=await _lock_epoch(locks, bot_id=bot_id, owner_id=owner_id, user_id=user_id),
+        stage=_stage(stage),
+        run_async=run_async,
     )
+    if outcome.operation.running or outcome.tool is None:
+        return _still_running(outcome.operation, request)
     return envelope(
-        AddedBotCli(cli_code=body.cli_code, command=tool.command, version=tool.version),
+        AddedBotCli(
+            cli_code=body.cli_code, command=outcome.tool.command, version=outcome.tool.version
+        ),
         request,
     )
 
 
-@router.delete("/{cli_code}", response_model=Envelope[Deleted])
+@router.delete("/{cli_code}", response_model=Envelope[Deleted], responses=_ACCEPTED)
 @envelope_errors
 async def remove_bot_cli(
     bot_id: BotIdPath,
@@ -127,18 +180,122 @@ async def remove_bot_cli(
     request: Request,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
+    stage: StageParam = None,
+    run_async: AsyncParam = False,
     service: AcliCliServiceProtocol = Injected(AcliCliServiceProtocol),
     locks: CollaboratorLockServiceProtocol = Injected(CollaboratorLockServiceProtocol),
-) -> Envelope[Deleted]:
-    """Revoke the CLI, then uninstall it. Default CLIs cannot be removed."""
-    await service.remove(
+) -> Envelope[Deleted] | JSONResponse:
+    """Uninstall the CLI from the runtime. Its grant is kept. Default CLIs cannot be removed."""
+    outcome = await service.remove(
         bot_id=bot_id,
         entity_id=owner_id,
         actor_id=user_id,
         cli_code=cli_code,
         lock_epoch=await _lock_epoch(locks, bot_id=bot_id, owner_id=owner_id, user_id=user_id),
+        stage=_stage(stage),
+        run_async=run_async,
     )
+    if outcome.operation.running:
+        return _still_running(outcome.operation, request)
     return deleted(request)
 
 
-__all__ = ["router"]
+async def _cancel(
+    action: str, *, bot_id: str, cli_code: str, request: Request, user_id: str,
+    owner_id: str, stage: RuntimeStage | None, run_async: bool,
+    service: AcliCliServiceProtocol, locks: CollaboratorLockServiceProtocol,
+) -> Envelope[AcliCliOperation] | JSONResponse:
+    outcome = await service.cancel(
+        bot_id=bot_id,
+        entity_id=owner_id,
+        actor_id=user_id,
+        cli_code=cli_code,
+        action=action,
+        lock_epoch=await _lock_epoch(locks, bot_id=bot_id, owner_id=owner_id, user_id=user_id),
+        stage=_stage(stage),
+        run_async=run_async,
+    )
+    if outcome.operation.running:
+        return _still_running(outcome.operation, request)
+    return envelope(_operation(outcome.operation), request)
+
+
+@router.post(
+    "/{cli_code}/install/cancel", response_model=Envelope[AcliCliOperation], responses=_ACCEPTED
+)
+@envelope_errors
+async def cancel_bot_cli_install(
+    bot_id: BotIdPath,
+    cli_code: CliCodePath,
+    request: Request,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    stage: StageParam = None,
+    run_async: AsyncParam = False,
+    service: AcliCliServiceProtocol = Injected(AcliCliServiceProtocol),
+    locks: CollaboratorLockServiceProtocol = Injected(CollaboratorLockServiceProtocol),
+) -> Envelope[AcliCliOperation] | JSONResponse:
+    """Cancel the running add of the CLI; whatever it installed is removed. The grant stays."""
+    return await _cancel(
+        "install", bot_id=bot_id, cli_code=cli_code, request=request, user_id=user_id,
+        owner_id=owner_id, stage=stage, run_async=run_async, service=service, locks=locks,
+    )
+
+
+@router.post(
+    "/{cli_code}/uninstall/cancel", response_model=Envelope[AcliCliOperation], responses=_ACCEPTED
+)
+@envelope_errors
+async def cancel_bot_cli_uninstall(
+    bot_id: BotIdPath,
+    cli_code: CliCodePath,
+    request: Request,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    stage: StageParam = None,
+    run_async: AsyncParam = False,
+    service: AcliCliServiceProtocol = Injected(AcliCliServiceProtocol),
+    locks: CollaboratorLockServiceProtocol = Injected(CollaboratorLockServiceProtocol),
+) -> Envelope[AcliCliOperation] | JSONResponse:
+    """Cancel the running remove of the CLI; it is reinstalled if it was already removed."""
+    return await _cancel(
+        "uninstall", bot_id=bot_id, cli_code=cli_code, request=request, user_id=user_id,
+        owner_id=owner_id, stage=stage, run_async=run_async, service=service, locks=locks,
+    )
+
+
+@operations_router.get("", response_model=Envelope[list[AcliCliOperation]])
+@envelope_errors
+async def list_cli_operations(
+    bot_id: BotIdPath,
+    request: Request,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    stage: StageParam = None,
+    service: AcliCliServiceProtocol = Injected(AcliCliServiceProtocol),
+) -> Envelope[list[AcliCliOperation]]:
+    """The runtime's running operations: at most one add or remove and one cancel."""
+    ops = await service.live_operations(
+        bot_id=bot_id, entity_id=owner_id, actor_id=user_id, stage=_stage(stage)
+    )
+    return envelope([_operation(op) for op in ops], request)
+
+
+@operations_router.get("/{operation_id}", response_model=Envelope[AcliCliOperation])
+@envelope_errors
+async def get_cli_operation(
+    bot_id: BotIdPath,
+    operation_id: Annotated[str, Path(min_length=1, max_length=64)],
+    request: Request,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    service: AcliCliServiceProtocol = Injected(AcliCliServiceProtocol),
+) -> Envelope[AcliCliOperation]:
+    """One add, remove or cancel of this bot, running or ended."""
+    op = await service.get_operation(
+        bot_id=bot_id, entity_id=owner_id, actor_id=user_id, operation_id=operation_id
+    )
+    return envelope(_operation(op), request)
+
+
+__all__ = ["operations_router", "router"]
