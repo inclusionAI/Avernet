@@ -77,3 +77,23 @@ export const ARTIFACT_TYPE_LABELS: Record<string, string> = {
   file: '文件',
   other: '其他',
 };
+
+/** V2 PRD present 展示态 → 中英 label 与主色(spec §3.3;failed/hung/cancelled 透传沿用既有色) */
+export const PRESENT_TONES: Record<string, { label: string; color: string }> = {
+  pending: { label: '待执行', color: C.textMuted },
+  running: { label: '执行中', color: C.warning },
+  rework: { label: '返工中', color: C.warning },
+  done: { label: '已完成', color: C.success },
+  merged: { label: '已合入', color: C.success },
+  failed: { label: '执行失败', color: C.danger },
+  hung: { label: '任务挂起', color: C.primary },
+  cancelled: { label: '已取消', color: C.textMuted },
+};
+
+/** V2 产物 kind(Descriptor 口径)→ 徽章 label;legacy 产物用 ARTIFACT_TYPE_LABELS */
+export const ARTIFACT_KIND_LABELS: Record<string, string> = {
+  text: '文本',
+  file: '文件',
+  url_link: '链接',
+  code: '代码',
+};
