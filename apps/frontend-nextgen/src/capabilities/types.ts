@@ -56,6 +56,18 @@ export interface HelpLink {
 }
 
 /**
+ * 任务副屏 V2 会话联动目标(P4,spec §3.2):节点 → 关联会话跳转。
+ * kind=group 需带 groupId(协作群页直选);kind=bot/friend 走 bot 会话路由。
+ * Open Core 默认实现 = 站内会话路由;内部 overlay 可覆盖为平台级导航。
+ */
+export interface TaskSessionJumpTarget {
+  sessionId: string;
+  kind: 'group' | 'bot' | 'friend' | 'unknown';
+  groupId?: string | null;
+  botId?: string | null;
+}
+
+/**
  * 版本发布说明数据（用户须知 + 新版本内容）。由 ReleaseNotesCapability.load 异步拉取，
  * 数据源为内部雨燕配置（teamclaw-release-note_*）。富文本 HTML 来自受信运营平台，UI 用
  * 受约束的富文本渲染器展示。Open Core 无此数据源 → capability 返回 null（菜单不展示该项）。
@@ -344,6 +356,8 @@ export interface AppCapabilities {
   getLegacyVersionSwitch: () => CapabilityResult<LegacyVersionSwitchSpec | null>;
   getHelpLinks: () => CapabilityResult<HelpLink[]>;
   openExternal: (href: string) => CapabilityResult<null>;
+  /** 任务副屏 V2 会话联动(P4,spec §3.2):跳转到任务节点关联会话;Open Core 默认站内会话路由。 */
+  navigateToConversation: (target: TaskSessionJumpTarget) => CapabilityResult<null>;
   getRuntimeRouteRedirect: (context: RuntimeRouteContext) => CapabilityResult<string | null>;
   getBotHealthCapability: () => CapabilityResult<BotHealthCapability>;
   getCurrentOpenApiUserId: (context?: CurrentUserContext) => CapabilityResult<string | undefined>;

@@ -1,6 +1,10 @@
 import { normalizeOpenApiUserId, resolveOpenApiUserId } from '@/domain/userIdentity';
 import { useExternalAuthStore } from '@/stores/externalAuthStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import {
+  getCollaborationBotConversationUrl,
+  getCollaborationGroupConversationUrl,
+} from '@/utils/collaborationSquare';
 import { Bot, Terminal } from 'lucide-react';
 import { AvernetMarkLogo, AvernetWordmarkLogo } from './brandLogos';
 import type {
@@ -22,6 +26,7 @@ import type {
   RuntimeEnvironment,
   ShellVisibility,
   TaskClaimGrantStrategy,
+  TaskSessionJumpTarget,
   UserProfilePresentation,
   UserSearchCapability,
 } from './types';
@@ -46,6 +51,23 @@ export const defaultCapabilities: AppCapabilities = {
   getLegacyVersionSwitch: (): CapabilityResult<LegacyVersionSwitchSpec | null> =>
     unsupported(null, '当前部署形态不提供版本切换'),
   openExternal: () => unsupported(null, '当前运行环境暂不支持打开外部链接'),
+  // 任务副屏 V2 会话联动(P4,spec §3.2):Open Core 默认 = 站内会话路由——群会话 /workspace/collaboration,
+  // 单聊 /workspace/chat(bot 目标 + section 由对话页按目录归属解析)。sessionId 缺失显式 unsupported。
+  navigateToConversation: (target: TaskSessionJumpTarget): CapabilityResult<null> => {
+    if (!target.sessionId) {
+      return unsupported(null, '会话跳转目标缺少 sessionId');
+    }
+    const url =
+      target.kind === 'group'
+        ? getCollaborationGroupConversationUrl(target.groupId ?? null, target.sessionId)
+        : getCollaborationBotConversationUrl(target.botId ?? '', target.sessionId);
+    // 懒 require umi history:静态 import 会把 @umijs/max 拉进 jest 依赖图(esbuild 环境不变量崩),
+    // 且 capability 求值频率低;只在真正发生跳转时取模块。
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const umiHistory = (require('@umijs/max') as { history: { push: (url: string) => void } }).history;
+    umiHistory.push(url);
+    return { status: 'available', value: null };
+  },
   // Open Core 默认路由重定向：当前无收敛项——/space-admin、/ticket-center 由页面级 getAdminSections
   // 守卫（阿里云形态 spaces=false 时 SpaceAdmin 页 replace 回落 /ticket-center），不在运行期重定向。
   // 返回 null。internal overlay 仍显式 override 为 null 作为防御性回归护栏（见 src/extensions/internal.ts）。

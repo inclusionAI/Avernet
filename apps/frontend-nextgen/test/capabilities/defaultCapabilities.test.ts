@@ -227,3 +227,38 @@ describe('Open Core default capabilities', () => {
     expect(r.value).toBe('skip');
   });
 });
+
+// ── 任务副屏 V2 会话联动(P4):Open Core 默认站内会话路由(URL 构建与跳转) ──
+jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
+import { history as mockHistory } from '@umijs/max';
+
+describe('defaultCapabilities.navigateToConversation', () => {
+  const pushMock = mockHistory.push as unknown as jest.Mock;
+
+  it('群会话目标 → /workspace/collaboration?…&group=&session=', () => {
+    const result = defaultCapabilities.navigateToConversation({
+      sessionId: 'bcs_grp_902:round:2',
+      kind: 'group',
+      groupId: 'g-902',
+    });
+    expect(result.status).toBe('available');
+    const url = pushMock.mock.calls[0][0] as string;
+    expect(url.startsWith('/workspace/collaboration?')).toBe(true);
+    expect(url).toContain('session=');
+    expect(url).toContain('group=');
+  });
+
+  it('单聊目标 → /workspace/chat?bot=&session=', () => {
+    defaultCapabilities.navigateToConversation({ sessionId: 'agent:main:session:s-1', kind: 'bot', botId: 'bot-9' });
+    const url = pushMock.mock.calls[1][0] as string;
+    expect(url.startsWith('/workspace/chat?')).toBe(true);
+    expect(url).toContain('bot=bot-9');
+    expect(url).toContain('session=');
+  });
+
+  it('sessionId 缺失 → unsupported,不触发跳转', () => {
+    const result = defaultCapabilities.navigateToConversation({ sessionId: '', kind: 'unknown' });
+    expect(result.status).toBe('unsupported');
+    expect(pushMock).toHaveBeenCalledTimes(2); // 不变
+  });
+});
