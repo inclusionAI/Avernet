@@ -22,11 +22,18 @@ into.
 ### Terms used in this spec
 
 - **Base / parent.** Every revision except a bot's first has one parent: the
-  revision it was made from. For a patch that is the patch's `base`; for a
-  Manifest document it is the revision the caller names as `base` when
-  recording (the one their edit started from). Ids are content hashes, so
-  recording the same content again returns the existing revision and does
-  not change its parent.
+  revision it was made from. For a patch that is the patch's `base`, and it
+  is required. For a Manifest document the document is the source of truth
+  for every category it declares; `base` matters only for what it does not
+  say: the categories it leaves out are copied from the base, and the base
+  becomes the parent so the history stays one tree. When recording a
+  document, `base` is optional: omitted, it defaults to the bot's `active`
+  revision, and for a bot with no revisions yet to "no parent", with
+  omitted categories captured from the bot's current state. A caller
+  editing an unpromoted draft names the draft as `base` so the history
+  records what the edit started from. Ids are content hashes, so recording
+  the same content again returns the existing revision and does not change
+  its parent.
 - **Compare-and-swap (CAS).** A ref move carries the revision the caller
   believes the ref points at now; the move happens only if that is still
   true, otherwise it is refused with the current value. This is what stops
@@ -102,8 +109,10 @@ Recording:
 - [ ] A Manifest document may leave categories out (to the Manifest, an
       omitted category means "leave the bot as it is"), but a revision must
       be total: every category present. So an omitted category is filled
-      from the revision the caller named as `base`. For a bot's first
-      revision there is no base yet, so omitted categories are captured from
+      from the `base` revision (the one the caller names, or `active` when
+      they name none; see *Terms*). A document that declares every category
+      is recorded as it is, and `base` then only sets the parent. For a
+      bot's first revision there is no base yet, so omitted categories are captured from
       what the bot has now (its identity files, skills, resources, MCP
       servers and script), which also covers bots that were set up through
       the console and never had a Manifest.

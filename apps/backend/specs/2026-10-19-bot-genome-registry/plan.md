@@ -313,7 +313,8 @@ the bot's whole configuration); the dominance test gains the promotion row.
 {"base": "sha256:a90b…", "status": "candidate",
  "run": {"run_id": "run_7f3", "binding_id": "bind_01", "allowed_genes": ["persona", "skills"]},
  "patch": {"patch_schema": 1, "base": "sha256:a90b…", "ops": [...], "rationale": "…", "evidence": ["episode:ep_91"]}}
-// (request, from a document)
+// (request, from a document; `base` optional here: defaults to the `active` revision, or to no parent on a
+//  bot with no revisions, whose omitted categories are then captured from current state)
 {"base": "sha256:a90b…", "status": "draft", "manifest": {"format": "yaml", "document": "schema_version: 1\n…"}}
 // 201 / 200
 {"id": "sha256:7c1e…", "seq": 42, "status": "candidate", "parent": "sha256:a90b…",
