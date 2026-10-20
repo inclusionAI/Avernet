@@ -157,7 +157,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
 
   async list(eventId: string, actor: RecoveryActor) {
     if (!eventId || eventId.length > 128) this.fail(422, "event_id 无效");
-    const tasks = await this.deps.tasks.listForEvent(eventId, actor.userId);
+    const tasks = await this.deps.tasks.listForEvent(eventId, actor.userId, actor.isAdmin);
     return tasks.filter(task => this.canOperate(task, actor) || task.shared === true)
       .map(task => ({ task_id: task.taskId, status: task.status, phase: task.phase, effect: task.judgment?.effect ?? "unknown" }));
   }

@@ -10,7 +10,7 @@ function setup(callbackFails = false) {
   const store: RecoveryTaskStore = {
     create: async value => { if (records.has(value.taskId)) throw new Error("duplicate"); records.set(value.taskId, structuredClone(value)); },
     find: async id => records.has(id) ? structuredClone(records.get(id)!) : null,
-    listForEvent: async (eventId, ownerId) => [...records.values()].filter(value => value.request.event_id === eventId && (value.request.target.entity_id === ownerId || value.shared === true)),
+    listForEvent: async (eventId, ownerId, isAdmin) => [...records.values()].filter(value => value.request.event_id === eventId && (isAdmin || value.request.target.entity_id === ownerId || value.shared === true)),
     listForReporting: async (limit, afterTaskId = "") => [...records.values()].filter(value => value.taskId > afterTaskId && value.pending_results.length > 0).sort((a, b) => a.taskId.localeCompare(b.taskId)).slice(0, limit),
     listForMaintenance: async (limit, afterTaskId = "") => [...records.values()].filter(value => value.taskId > afterTaskId).slice(0, limit),
     update: async (id, version, change) => {
@@ -84,6 +84,12 @@ describe("self-healing task orchestration", () => {
   it("does not reveal another Owner's task", async () => {
     const { service } = setup(); const ack = await service.create(request, actor);
     await expect(service.detail(ack.task_id, { userId: "stranger", isAdmin: false })).rejects.toMatchObject({ status: 403 });
+  });
+  it("lists private linked tasks for administrators without exposing them to other users", async () => {
+    const { service } = setup(); const { task_id } = await service.create(request, actor);
+    expect(await service.list(request.event_id, { userId: "admin", isAdmin: true })).toMatchObject([{ task_id }]);
+    expect(await service.list(request.event_id, { userId: "reader", isAdmin: false })).toEqual([]);
+    expect(await service.list("other-event", { userId: "admin", isAdmin: true })).toEqual([]);
   });
   it("keeps legacy tasks private and sharing idempotent without changing the workflow or reporting results", async () => {
     const { service, records, agent, reporter } = setup();

@@ -91,7 +91,7 @@ export type RecoveryStoredTask = RecoveryTaskState & {
 export interface RecoveryTaskStore {
   create(value: RecoveryStoredTask, stepId: string): Promise<void>;
   find(taskId: string): Promise<RecoveryStoredTask | null>;
-  listForEvent(eventId: string, ownerId: string): Promise<RecoveryStoredTask[]>;
+  listForEvent(eventId: string, ownerId: string, isAdmin: boolean): Promise<RecoveryStoredTask[]>;
   update(taskId: string, expectedVersion: number, change: (current: RecoveryStoredTask) => RecoveryStoredTask): Promise<RecoveryStoredTask | null>;
   /** Append a notification fact atomically without changing the Agent's business-state version. */
   appendNotification(taskId: string, event: RecoveryTimelineEvent): Promise<boolean>;

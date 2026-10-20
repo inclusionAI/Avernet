@@ -70,6 +70,15 @@ beforeEach(async () => {
   reporter = { report: async result => { callbacks.push(result); } };
   service = new SessionRecoveryTaskService({ controlPlaneEnvironment: "pre", tasks, agent, notifier, reporter, observationMs: 3600000, now: () => now, resolveTarget: async () => recoveryTargetSnapshot(target), actionNotifier });
 });
+it("queries private event tasks for administrators while preserving Owner and sharing filters", async () => {
+  const task = await create();
+  expect((await service.list(request.event_id, { userId: "admin", isAdmin: true })).map(value => value.task_id)).toEqual([task.taskId]);
+  expect(await service.list(request.event_id, { userId: "reader", isAdmin: false })).toEqual([]);
+  expect(await service.list("other-event", { userId: "admin", isAdmin: true })).toEqual([]);
+  await service.setTaskShared(task.taskId, true, actor);
+  expect(await service.list(request.event_id, { userId: "reader", isAdmin: false })).toHaveLength(1);
+});
+
 it("persists deduplicated group delivery facts without changing the business version or exposing them to the Agent", async () => {
   const task = await create();
   const sent = await agent.retryMessage(task, { clientRequestId: "group-advice", purpose: "纠正原操作", message: "请按真实工具参数继续" });
