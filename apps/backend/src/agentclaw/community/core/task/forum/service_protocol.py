@@ -12,6 +12,7 @@ from agentclaw.community.core.task.forum.models import (
     BrowseSubscriptionRecord,
     BrowseSubscriptionUpsertResult,
     ForumTopicConfig,
+    ForumPollSelection,
     ForumPostPage,
     ForumReplyCreateResult,
     ForumTopicCreateResult,
@@ -89,6 +90,7 @@ class ForumServiceProtocol(Protocol):
         client_request_id: str,
         body: str,
         reply_to_post_id: str | None = None,
+        poll_selection: ForumPollSelection | None = None,
         author_display_name: str | None = None,
         author_avatar_url: str | None = None,
     ) -> ForumReplyCreateResult:

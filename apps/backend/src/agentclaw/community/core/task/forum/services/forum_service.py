@@ -38,6 +38,7 @@ from agentclaw.community.core.task.forum.models import (
     TOPIC_TYPE_POLL,
     TOPIC_TYPES,
     ForumPollConfig,
+    ForumPollSelection,
     ForumTopicConfig,
     ForumPostPage,
     ForumReplyCreateResult,
@@ -173,6 +174,7 @@ class ForumService(ForumServiceProtocol):
         client_request_id: str,
         body: str,
         reply_to_post_id: str | None = None,
+        poll_selection: ForumPollSelection | None = None,
         author_display_name: str | None = None,
         author_avatar_url: str | None = None,
     ) -> ForumReplyCreateResult:
@@ -196,6 +198,12 @@ class ForumService(ForumServiceProtocol):
         normalized_reply_to_post_id = self._optional_text(
             reply_to_post_id, "reply_to_post_id", MAX_ID_LENGTH
         )
+        topic = self._repository.get_topic(normalized_topic_id)
+        if topic is None:
+            raise NotFound("topic not found")
+        normalized_poll_selection = self._reply_poll_selection(
+            poll_selection, topic
+        )
         return self._repository.create_reply(
             topic_id=normalized_topic_id,
             author_type=normalized_author_type,
@@ -203,6 +211,7 @@ class ForumService(ForumServiceProtocol):
             client_request_id=request_id,
             body=normalized_body,
             reply_to_post_id=normalized_reply_to_post_id,
+            poll_selection=normalized_poll_selection,
             author_display_name=normalized_display_name,
             author_avatar_url=normalized_avatar,
         )
@@ -246,6 +255,51 @@ class ForumService(ForumServiceProtocol):
                 f"{field} must contain no more than {max_length} characters"
             )
         return normalized
+
+    @staticmethod
+    def _reply_poll_selection(
+        value: ForumPollSelection | None, topic: ForumTopicRecord
+    ) -> ForumPollSelection | None:
+        if topic.topic_type != TOPIC_TYPE_POLL:
+            if value is None:
+                return None
+            raise ValidationError(
+                "poll_selection is only allowed when topic_type is POLL"
+            )
+        if value is None:
+            raise ValidationError(
+                "poll_selection is required when topic_type is POLL"
+            )
+        if topic.topic_config is None or topic.topic_config.poll is None:
+            raise ValidationError(
+                "poll_selection requires topic_config.poll on the addressed Topic"
+            )
+        poll = topic.topic_config.poll
+        indices = tuple(value.option_indices)
+        if not indices:
+            raise ValidationError(
+                "poll_selection.option_indices must contain at least one option"
+            )
+        if any(
+            not isinstance(index, int)
+            or isinstance(index, bool)
+            or index < 0
+            or index >= len(poll.options)
+            for index in indices
+        ):
+            raise ValidationError(
+                "poll_selection.option_indices contains an invalid option index"
+            )
+        if len(indices) != len(set(indices)):
+            raise ValidationError(
+                "poll_selection.option_indices must not contain duplicates"
+            )
+        if poll.selection == POLL_SELECTION_SINGLE and len(indices) != 1:
+            raise ValidationError(
+                "poll_selection.option_indices must contain exactly one option "
+                "for SINGLE polls"
+            )
+        return ForumPollSelection(option_indices=indices)
 
     @classmethod
     def _topic_config(cls, value: ForumTopicConfig | None) -> ForumTopicConfig | None:

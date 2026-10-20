@@ -25,6 +25,7 @@ from agentclaw.community.core.task.forum.models import (
     ForumPollConfig,
     ForumPollResultOptionRecord,
     ForumPollResultRecord,
+    ForumPollSelection,
     ForumPostRecord,
     ForumTopicConfig,
     ForumTopicRecord,
@@ -127,6 +128,39 @@ def _poll_result_options_from_row(
     return tuple(options)
 
 
+def _poll_selection_from_row(value: object | None) -> ForumPollSelection | None:
+    """Decode one Post's structured vote selection from JSON storage."""
+
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("ac_forum_post.poll_selection must be a JSON object or null")
+    indices = value.get("option_indices")
+    if (
+        not isinstance(indices, list)
+        or not indices
+        or not all(
+            isinstance(index, int)
+            and not isinstance(index, bool)
+            and index >= 0
+            for index in indices
+        )
+    ):
+        raise ValueError(
+            "ac_forum_post.poll_selection.option_indices must be a "
+            "non-empty non-negative integer array"
+        )
+    if set(value) != {"option_indices"}:
+        raise ValueError(
+            "ac_forum_post.poll_selection may contain only option_indices"
+        )
+    if len(indices) != len(set(indices)):
+        raise ValueError(
+            "ac_forum_post.poll_selection.option_indices must not contain duplicates"
+        )
+    return ForumPollSelection(option_indices=tuple(indices))
+
+
 def _topic_config_from_row(value: object | None) -> ForumTopicConfig | None:
     """Decode the generic Topic configuration JSON.
 
@@ -178,6 +212,17 @@ def _analysis_from_row(
         raise ValueError("ac_forum_topic.analysis_result.tags must be a string array")
     tags = tuple(tag_row)
 
+    cursor_row = value.get("poll_cursor_id", 0)
+    if (
+        not isinstance(cursor_row, int)
+        or isinstance(cursor_row, bool)
+        or cursor_row < 0
+    ):
+        raise ValueError(
+            "ac_forum_topic.analysis_result.poll_cursor_id "
+            "must be a non-negative integer"
+        )
+
     stats_row = value.get("poll_stats")
     if stats_row is None:
         poll_result = None
@@ -215,7 +260,12 @@ def _analysis_from_row(
             updated_at=updated_at,
         )
 
-    return ForumTopicAnalysisRecord(summary=summary, tags=tags, poll_result=poll_result)
+    return ForumTopicAnalysisRecord(
+        summary=summary,
+        tags=tags,
+        poll_result=poll_result,
+        poll_cursor_id=cursor_row,
+    )
 
 
 class ForumTopicModel(Base):
@@ -340,6 +390,7 @@ class ForumPostModel(Base):
     author_display_name = Column(String(256), nullable=True)
     author_avatar_url = Column(String(1024), nullable=True)
     body = Column(Text, nullable=False)
+    poll_selection = Column(JSON, nullable=True)
     client_request_id = Column(_REQUEST_ID, nullable=False)
     gmt_create = Column(DateTime, nullable=False, server_default=func.now())
     gmt_modified = Column(
@@ -383,6 +434,7 @@ class ForumPostModel(Base):
             display_name=self.author_display_name,
             avatar_url=self.author_avatar_url,
             body=self.body,
+            poll_selection=_poll_selection_from_row(self.poll_selection),
             created_at=self.gmt_create,
             updated_at=self.gmt_modified,
         )

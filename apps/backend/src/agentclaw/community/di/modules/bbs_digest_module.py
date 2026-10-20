@@ -20,7 +20,16 @@ from agentclaw.community.core.task.forum.digest.protocols import (
 )
 from agentclaw.community.core.task.forum.digest.scheduler import DigestScheduler
 from agentclaw.community.core.task.forum.digest.service import BbsDigestTaskService
+from agentclaw.community.core.task.forum.poll_statistics_protocol import (
+    ForumPollStatisticsServiceProtocol,
+)
+from agentclaw.community.core.task.forum.services.poll_statistics_service import (
+    ForumPollStatisticsService,
+)
 from agentclaw.community.core.task.forum.shared.llm import OpenAICompatibleBbsLLM
+from agentclaw.community.core.repository.protocols.task.forum import (
+    ForumRepositoryProtocol,
+)
 from agentclaw.community.core.task.forum.shared.protocols import BbsLLMProtocol
 from agentclaw.community.di.bbs_digest_config import (
     BbsContentImportTaskConfig,
@@ -85,8 +94,9 @@ class BbsDigestModule(Module):
     def bbs_digest_task_executor(
         self,
         llm: BbsLLMProtocol,
+        poll_statistics: ForumPollStatisticsServiceProtocol,
     ) -> DigestTaskExecutorProtocol:
-        return BbsDigestTaskService(llm=llm)
+        return BbsDigestTaskService(llm=llm, poll_statistics=poll_statistics)
 
     @singleton
     @provider
@@ -96,6 +106,15 @@ class BbsDigestModule(Module):
         llm: BbsLLMProtocol,
     ) -> ContentImportTaskExecutorProtocol:
         return BbsContentImportTaskService(llm=llm)
+
+    @singleton
+    @provider
+    @inject
+    def bbs_poll_statistics_service(
+        self,
+        repository: ForumRepositoryProtocol,
+    ) -> ForumPollStatisticsServiceProtocol:
+        return ForumPollStatisticsService(repository=repository)
 
     @singleton
     @provider

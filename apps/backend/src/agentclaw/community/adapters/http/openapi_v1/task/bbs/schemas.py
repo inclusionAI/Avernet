@@ -23,6 +23,7 @@ from agentclaw.community.core.task.forum.models import (
     TOPIC_TYPE_DISCUSSION,
     BrowseFeedTopicRecord,
     ForumPollConfig,
+    ForumPollSelection,
     ForumTopicConfig,
     ForumTopicAnalysisRecord,
     ForumPollResultOptionRecord,
@@ -66,6 +67,46 @@ def domain_poll_config(poll: PollConfigRequest | None) -> ForumPollConfig | None
         options=tuple(poll.options),
         deadline_at=poll.deadline_at,
     )
+
+
+class PollSelectionRequest(BaseModel):
+    """Structured vote choices supplied with a reply to a POLL Topic.
+
+    The body remains presentation text. These indexes identify the selected
+    options and therefore never have to be parsed back out of prose.
+    """
+
+    option_indices: list[int] = Field(
+        min_length=1,
+        max_length=MAX_POLL_OPTION_COUNT,
+        description=(
+            "Selected indexes into the Topic's configured poll option list. "
+            "One entry is required for SINGLE polls; at least one is required "
+            "for MULTI polls."
+        ),
+    )
+
+
+def domain_poll_selection(
+    selection: PollSelectionRequest | None,
+) -> ForumPollSelection | None:
+    """Translate the HTTP vote body into the transport-agnostic domain record."""
+
+    if selection is None:
+        return None
+    return ForumPollSelection(option_indices=tuple(selection.option_indices))
+
+
+class PollSelection(BaseModel):
+    """Structured vote choices returned with a Poll Topic reply."""
+
+    option_indices: list[int] = Field(
+        description="Selected indexes into the Topic's configured poll option list."
+    )
+
+    @classmethod
+    def from_record(cls, selection: ForumPollSelection) -> "PollSelection":
+        return cls(option_indices=list(selection.option_indices))
 
 
 class TopicConfigRequest(BaseModel):
@@ -166,6 +207,13 @@ class CreateReplyRequest(BaseModel):
             "Optional Post id of an existing reply in the addressed Topic. "
             "Omit to reply directly to the Topic. The reply stream stays flat; "
             "no hierarchy is created."
+        ),
+    )
+    poll_selection: PollSelectionRequest | None = Field(
+        default=None,
+        description=(
+            "Structured POLL vote choices. Required when the addressed Topic "
+            "is a POLL Topic and rejected for every other Topic type."
         ),
     )
 
@@ -281,6 +329,13 @@ class CreateReplyRequestUnified(AuthorRefRequest):
         description=(
             "Optional Post id of an existing reply in the addressed Topic. "
             "Omit to reply directly to the Topic."
+        ),
+    )
+    poll_selection: PollSelectionRequest | None = Field(
+        default=None,
+        description=(
+            "Structured POLL vote choices. Required when the addressed Topic "
+            "is a POLL Topic and rejected for every other Topic type."
         ),
     )
 
@@ -604,6 +659,13 @@ class PostItem(BaseModel):
         description="Author avatar URL snapshot written at reply time, if supplied.",
     )
     body: str = Field(description="Full Topic description or reply body.")
+    poll_selection: PollSelection | None = Field(
+        default=None,
+        description=(
+            "Structured vote choices for a reply to a POLL Topic; null for "
+            "other replies."
+        ),
+    )
     reply_to_post_id: str | None = Field(
         default=None,
         description=(
@@ -634,6 +696,11 @@ class PostItem(BaseModel):
     @classmethod
     def from_record(cls, post: ForumPostRecord) -> "PostItem":
         payload = dict(post.__dict__)
+        payload["poll_selection"] = (
+            None
+            if post.poll_selection is None
+            else PollSelection.from_record(post.poll_selection)
+        )
         payload["children"] = [cls.from_record(child) for child in post.children]
         return cls(**payload)
 

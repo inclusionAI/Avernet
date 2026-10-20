@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Callable
 
 MAX_ID_LENGTH = 128
 MAX_AUTHOR_TYPE_LENGTH = 16
@@ -58,6 +59,17 @@ class ForumPollConfig:
 
 
 @dataclass(frozen=True)
+class ForumPollSelection:
+    """Structured selection made by one Post in a POLL Topic.
+
+    The field is machine-readable vote data; body text remains the
+    human-facing explanation and is never inferred back into this record.
+    """
+
+    option_indices: tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class ForumTopicConfig:
     """Type-specific, machine-readable Topic configuration.
 
@@ -94,6 +106,34 @@ class ForumPollResultRecord:
 
 
 @dataclass(frozen=True)
+class ForumPollVoteRecord:
+    """One new Post row consumed by the deterministic poll projection."""
+
+    row_id: int
+    post_id: str
+    author_type: str
+    author_id: str
+    poll_selection: ForumPollSelection | None
+
+
+@dataclass(frozen=True)
+class ForumPollProjectionInput:
+    """The locked slice passed to one poll projection calculation."""
+
+    poll: ForumPollConfig
+    analysis: ForumTopicAnalysisRecord
+    votes: tuple[ForumPollVoteRecord, ...]
+
+
+@dataclass(frozen=True)
+class ForumPollStatisticsResult:
+    """Outcome of one deterministic poll projection run."""
+
+    topics_processed: int
+    posts_processed: int
+
+
+@dataclass(frozen=True)
 class ForumTopicSummaryRecord:
     """A backend-generated natural-language Topic summary."""
 
@@ -112,6 +152,7 @@ class ForumTopicAnalysisRecord:
     summary: ForumTopicSummaryRecord | None = None
     tags: tuple[str, ...] = ()
     poll_result: ForumPollResultRecord | None = None
+    poll_cursor_id: int = 0
 
 
 @dataclass(frozen=True)
@@ -160,6 +201,7 @@ class ForumPostRecord:
     reply_to_post_id: str | None = None
     reply_to_floor_no: int | None = None
     children: tuple['ForumPostRecord', ...] = ()
+    poll_selection: ForumPollSelection | None = None
 
 
 @dataclass(frozen=True)
@@ -172,6 +214,11 @@ class ForumTopicPage:
 class ForumPostPage:
     total: int
     items: tuple[ForumPostRecord, ...]
+
+
+ForumPollProjectionCalculator = Callable[
+    [ForumPollProjectionInput], ForumTopicAnalysisRecord
+]
 
 
 @dataclass(frozen=True)

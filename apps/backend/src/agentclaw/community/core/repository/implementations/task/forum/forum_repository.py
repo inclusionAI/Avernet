@@ -28,6 +28,11 @@ from agentclaw.community.core.task.forum.models import (
     ForumPollConfig,
     ForumPollResultOptionRecord,
     ForumPollResultRecord,
+    ForumPollSelection,
+    ForumPollProjectionCalculator,
+    ForumPollProjectionInput,
+    ForumPollVoteRecord,
+    ForumTopicAnalysisRecord,
     ForumPostPage,
     ForumReplyCreateResult,
     ForumTopicConfig,
@@ -36,6 +41,7 @@ from agentclaw.community.core.task.forum.models import (
     ForumTopicRecord,
 )
 from agentclaw.community.core.task.forum.repository.models import (
+    _poll_selection_from_row,
     ForumBrowseReportModel,
     ForumBrowseSubscriptionModel,
     ForumPostModel,
@@ -65,6 +71,40 @@ def _poll_to_row(poll: ForumPollConfig | None) -> dict[str, object] | None:
             poll.deadline_at.isoformat() if poll.deadline_at is not None else None
         ),
     }
+
+
+def _poll_selection_to_row(
+    selection: ForumPollSelection | None,
+) -> dict[str, object] | None:
+    """Encode one Post's structured vote selection as JSON storage."""
+
+    if selection is None:
+        return None
+    return {"option_indices": list(selection.option_indices)}
+
+
+def _analysis_to_row(analysis: ForumTopicAnalysisRecord) -> dict[str, object]:
+    """Encode the Topic-derived analysis projection for one JSON column."""
+
+    result: dict[str, object] = {}
+    if analysis.summary is not None:
+        result["summary"] = {"content": analysis.summary.content}
+    result["tags"] = list(analysis.tags)
+    if analysis.poll_result is not None:
+        result["poll_stats"] = {
+            "total_votes": analysis.poll_result.total_votes,
+            "participant_count": analysis.poll_result.participant_count,
+            "by_option": [
+                {
+                    "index": option.index,
+                    "votes": option.votes,
+                    "percent": option.percent,
+                }
+                for option in analysis.poll_result.options
+            ],
+        }
+    result["poll_cursor_id"] = analysis.poll_cursor_id
+    return result
 
 
 def _topic_config_to_row(config: ForumTopicConfig | None) -> dict[str, object] | None:
@@ -359,6 +399,7 @@ class ForumRepository(ForumRepositoryProtocol):
         client_request_id: str,
         body: str,
         reply_to_post_id: str | None = None,
+        poll_selection: ForumPollSelection | None = None,
         author_display_name: str | None = None,
         author_avatar_url: str | None = None,
     ) -> ForumReplyCreateResult:
@@ -430,6 +471,7 @@ class ForumRepository(ForumRepositoryProtocol):
                     author_display_name=author_display_name,
                     author_avatar_url=author_avatar_url,
                     body=body,
+                    poll_selection=_poll_selection_to_row(poll_selection),
                     client_request_id=client_request_id,
                     gmt_create=now,
                     gmt_modified=now,
@@ -482,6 +524,80 @@ class ForumRepository(ForumRepositoryProtocol):
             return replace(
                 record, analysis=replace(record.analysis, poll_result=empty_result)
             )
+
+    def advance_poll_projection(
+        self,
+        *,
+        topic_id: str,
+        calculator: "ForumPollProjectionCalculator",
+        batch_limit: int,
+    ) -> int:
+        """Advance one Topic's poll aggregate in one Topic-locked transaction.
+
+        Replies lock the Topic row on write, so taking the same lock here
+        serializes a batch against new vote Posts. The transaction consumes at
+        most ``batch_limit`` rows after the stored cursor, asks the core
+        calculator for a new projection, and commits both the projection and
+        advanced cursor together.
+        """
+
+        with self._transaction() as db:
+            topic = (
+                db.query(ForumTopicModel)
+                .filter(
+                    ForumTopicModel.topic_id == topic_id,
+                    ForumTopicModel.env == get_current_env(),
+                    ForumTopicModel.avernet_tenant
+                    == get_current_avernet_tenant(),
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if topic is None:
+                return 0
+            record = topic.to_record()
+            poll = (
+                None
+                if record.topic_config is None
+                else record.topic_config.poll
+            )
+            if (
+                record.topic_type != TOPIC_TYPE_POLL
+                or poll is None
+            ):
+                return 0
+
+            rows = (
+                db.query(ForumPostModel)
+                .filter(
+                    ForumPostModel.topic_id == topic_id,
+                    ForumPostModel.id > record.analysis.poll_cursor_id,
+                )
+                .order_by(ForumPostModel.id.asc())
+                .limit(batch_limit)
+                .all()
+            )
+            votes = tuple(
+                ForumPollVoteRecord(
+                    row_id=row.id,
+                    post_id=row.post_id,
+                    author_type=row.author_type,
+                    author_id=row.author_id,
+                    poll_selection=_poll_selection_from_row(row.poll_selection),
+                )
+                for row in rows
+            )
+            analysis = calculator(
+                ForumPollProjectionInput(
+                    poll=poll,
+                    analysis=record.analysis,
+                    votes=votes,
+                )
+            )
+            topic.analysis_result = _analysis_to_row(analysis)
+            topic.gmt_modified = datetime.now(timezone.utc)
+            db.flush()
+            return len(rows)
 
     def update_topic_status(
         self,

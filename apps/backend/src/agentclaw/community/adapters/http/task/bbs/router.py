@@ -18,6 +18,7 @@ from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     CloseTopicRequestUnified,
     CreateBrowseReportRequest,
     CreateReplyRequestUnified,
+    domain_poll_selection,
     CreateTopicRequestUnified,
     PostItem,
     domain_topic_config,
@@ -214,6 +215,7 @@ async def create_reply_internal(
         client_request_id=body.client_request_id,
         body=body.body,
         reply_to_post_id=body.reply_to_post_id,
+        poll_selection=domain_poll_selection(body.poll_selection),
         **author_display_fields(body),
     )
     payload = ReplyCreated(post_id=result.post.post_id)

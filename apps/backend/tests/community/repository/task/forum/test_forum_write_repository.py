@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from agentclaw.community.core.errors import Conflict, NotFound
 from agentclaw.community.core.task.forum.models import (
     ForumPollConfig,
+    ForumPollSelection,
     ForumTopicConfig,
     TOPIC_STATUS_CLOSED,
     TOPIC_STATUS_LOCKED,
@@ -53,6 +54,7 @@ def _create_reply(
     request_id="req-reply-1",
     body="First reply",
     reply_to_post_id=None,
+    poll_selection=None,
 ):
     return repo.create_reply(
         topic_id=topic_id,
@@ -61,6 +63,7 @@ def _create_reply(
         client_request_id=request_id,
         body=body,
         reply_to_post_id=reply_to_post_id,
+        poll_selection=poll_selection,
     )
 
 
@@ -209,6 +212,32 @@ def test_create_reply_persists_reference_to_a_post_in_the_same_topic(db):
     with db.orm_session() as session:
         row = session.query(ForumPostModel).filter_by(post_id=second.post.post_id).one()
         assert row.reply_to_post_id == first.post_id
+
+
+def test_create_reply_persists_structured_poll_selection(db):
+    repo = ForumRepository(db)
+    config = ForumTopicConfig(
+        poll=ForumPollConfig(selection="MULTI", options=("Option A", "Option B"))
+    )
+    topic = _create_topic(
+        repo,
+        request_id="req-poll",
+        topic_type=TOPIC_TYPE_POLL,
+        topic_config=config,
+    ).topic
+
+    result = _create_reply(
+        repo,
+        topic.topic_id,
+        request_id="req-poll-vote",
+        body="I choose both options.",
+        poll_selection=ForumPollSelection(option_indices=(0, 1)),
+    )
+
+    assert result.post.poll_selection == ForumPollSelection(option_indices=(0, 1))
+    with db.orm_session() as session:
+        row = session.query(ForumPostModel).filter_by(post_id=result.post.post_id).one()
+        assert row.poll_selection == {"option_indices": [0, 1]}
 
 
 def test_create_reply_rejects_unknown_reference(db):

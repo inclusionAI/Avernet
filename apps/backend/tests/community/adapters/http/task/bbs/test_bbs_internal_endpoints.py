@@ -19,6 +19,7 @@ from agentclaw.community.adapters.http.task.bbs.router import (
 from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     CloseTopicRequestUnified,
     CreateReplyRequestUnified,
+    PollSelectionRequest,
     CreateTopicRequestUnified,
     PollConfigRequest,
     TopicConfigRequest,
@@ -26,6 +27,7 @@ from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
 from agentclaw.community.adapters.http.openapi_v1.contracts import PageParams
 from agentclaw.community.core.errors import Conflict, Forbidden, NotFound
 from agentclaw.community.core.task.forum.models import (
+    ForumPollSelection,
     ForumPostPage,
     ForumPostRecord,
     ForumReplyCreateResult,
@@ -321,6 +323,7 @@ async def test_internal_reply_create_passes_body_author_as_bot_author():
                 "client_request_id": "request-2",
                 "body": "Reply body",
                 "reply_to_post_id": None,
+                "poll_selection": None,
             }
             return ForumReplyCreateResult(post=_post(), created=False)
 
@@ -340,6 +343,50 @@ async def test_internal_reply_create_passes_body_author_as_bot_author():
 
     assert response.status_code == 200
     assert payload.data is not None and payload.data.post_id == "post_1"
+
+
+@pytest.mark.asyncio
+async def test_internal_reply_create_forwards_structured_poll_selection():
+    class Service:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def create_reply(self, **kwargs):
+            self.calls.append({"op": "create_reply", **kwargs})
+            return ForumReplyCreateResult(post=_post(), created=True)
+
+    service = Service()
+    response = Response()
+
+    payload = await create_reply_internal(
+        body=CreateReplyRequestUnified(
+            author_type="BOT",
+            author_id="bot-a",
+            client_request_id="req-internal-poll-vote",
+            body="I choose option one.",
+            reply_to_post_id=None,
+            poll_selection=PollSelectionRequest(option_indices=[0]),
+        ),
+        topic_id="topic_1",
+        request=_request("POST", "/api/v1/collaboration/tasks/bbs/topics/topic_1/posts"),
+        response=response,
+        service=service,
+    )
+
+    assert response.status_code == 201
+    assert payload.data is not None and payload.data.post_id == "post_1"
+    assert service.calls == [
+        {
+            "op": "create_reply",
+            "topic_id": "topic_1",
+            "author_type": "BOT",
+            "author_id": "bot-a",
+            "client_request_id": "req-internal-poll-vote",
+            "body": "I choose option one.",
+            "reply_to_post_id": None,
+            "poll_selection": ForumPollSelection(option_indices=(0,)),
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -380,6 +427,7 @@ async def test_internal_reply_create_passes_body_author_as_human_author():
             "client_request_id": "req-internal-reply",
             "body": " Reply body ",
             "reply_to_post_id": None,
+            "poll_selection": None,
         }
     ]
 
@@ -407,6 +455,7 @@ async def test_internal_reply_create_passes_body_author_as_human_author():
         "client_request_id": "req-internal-referenced",
         "body": " Reply body ",
         "reply_to_post_id": " post_1 ",
+        "poll_selection": None,
     }
 
 

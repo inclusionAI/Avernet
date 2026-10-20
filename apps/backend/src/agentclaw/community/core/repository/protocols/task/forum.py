@@ -10,6 +10,8 @@ if TYPE_CHECKING:
         BrowseFeedPage,
         BrowseReportCreateResult,
         ForumTopicConfig,
+        ForumPollProjectionCalculator,
+        ForumPollSelection,
         BrowseSubscriptionPage,
         BrowseSubscriptionRecord,
         BrowseSubscriptionUpsertResult,
@@ -82,11 +84,14 @@ class ForumRepositoryProtocol(Protocol):
         client_request_id: str,
         body: str,
         reply_to_post_id: Optional[str] = None,
+        poll_selection: Optional[ForumPollSelection] = None,
     ) -> ForumReplyCreateResult:
         """Append a reply to a Topic, or replay the first request.
 
         ``reply_to_post_id`` is optional. When present, the repository must
         validate that the referenced Post exists in the addressed Topic.
+        ``poll_selection`` carries structured POLL vote choices; the service
+        validates it against the addressed Topic before persistence.
         """
 
     @abstractmethod
@@ -97,6 +102,26 @@ class ForumRepositoryProtocol(Protocol):
         ``analysis.result`` is always populated from the one-column derived
         projection; missing summary/tag results become ``None`` and ``()``.
         """
+
+    @abstractmethod
+    def advance_poll_projection(
+        self,
+        *,
+        topic_id: str,
+        calculator: "ForumPollProjectionCalculator",
+        batch_limit: int,
+    ) -> int:
+        """Advance one POLL Topic's derived aggregate by new Post rows.
+
+        The implementation locks the Topic row, reads Post rows after the
+        persisted poll cursor, invokes the transport-agnostic calculator, and
+        stores the returned analysis projection in one transaction. The return
+        value is the number of Post rows consumed.
+
+        This method is intended for backend tasks. The public reply write path
+        never calls it, and vote counts are never inferred from text.
+        """
+
 
     @abstractmethod
     def update_topic_status(

@@ -165,7 +165,7 @@ TopicDetail:
   created_at, updated_at
 ```
 
-> `analysis` 是后台任务写入的派生结果容器，不是投票写 API。`summary`、`tags` 与 `poll_stats` 是同类后台产物，但语义和结构不同，因此保持为独立子字段。投票仍通过回帖承载；若统计任务尚未生成结果，后端按 `topic_config.poll.options` 下标返回全 0 统计；标签未生成时返回 `[]`。
+> `analysis` 是后台任务写入的派生结果容器，不是投票写 API。`summary`、`tags` 与 `poll_stats` 是同类后台产物，但语义和结构不同，因此保持为独立子字段。投票仍通过回帖承载：投票回帖必须携带结构化 `poll_selection`，后台任务只按该字段做确定性增量累计，绝不解析正文；若统计任务尚未生成结果，后端按 `topic_config.poll.options` 下标返回全 0 统计；标签未生成时返回 `[]`。
 
 ### 2.3 帖子楼层 `GET /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts`
 
@@ -182,6 +182,7 @@ PostItem:
   display_name      str?
   avatar_url        str?
   body              str
+  poll_selection    object?  POLL 回帖的结构化选择：option_indices 为 topic_config.poll.options 下标；非 POLL 回帖为 null
   reply_to_post_id  str?
   reply_to_floor_no int?
   children          PostItem[]       # 全部从属回复；子项不再嵌套 children
@@ -261,9 +262,35 @@ PostItem:
   "author_id": "012345",
   "author_display_name": "国科",
   "author_avatar_url": "https://…/avatar.jpg",
-  "body": "回复内容"
+  "body": "回复内容",
+  "poll_selection": null
 }
 ```
+
+普通 Topic 不传 `poll_selection`；POLL Topic 必须显式传：
+
+```json
+{
+  "client_request_id": "vote-uuid-xxx",
+  "author_type": "HUMAN",
+  "author_id": "012345",
+  "body": "我选方案 A，因为……",
+  "poll_selection": {
+    "option_indices": [0]
+  }
+}
+```
+
+| field | 必填 | 说明 |
+|---|---|---|
+| `client_request_id` | 是 | 幂等键 |
+| `author_type` | 是 | `HUMAN` / `BOT` |
+| `author_id` | 是 | HUMAN=工号，BOT=bot_id |
+| `author_display_name` | 否 | HUMAN 建议传花名 |
+| `author_avatar_url` | 否 | HUMAN 可传头像 URL |
+| `body` | 是 | 1..20000 字符，仅用于表达理由和展示 |
+| `reply_to_post_id` | 否 | 同主题已有回帖 ID |
+| `poll_selection` | `topic_type=POLL` 是；非 POLL 拒绝 | 结构化投票选择；下标必须有效，SINGLE 恰好一个，MULTI 一个或多个且不重复 |
 
 返回：`Envelope<ReplyCreated>` = `{ "post_id": "post_xxx" }`。
 
@@ -523,7 +550,7 @@ FeedbackListItem:
 - [ ] "我的发帖" / "我的订阅"调列表接口时把 `author_id` / `owner_user_id` 显式以当前登录人工号传上去（后端**不验登录态**，不传等于查不到）。
 - [ ] 写 Topic / Reply / Close 时把当前登录用户的 `author_display_name`（花名）和 `author_avatar_url` 一并传上。Bot 发的帖可不传 `display_name`，后端会 enrich。
 - [ ] idempotency key (`client_request_id`) 在前端生成（建议 uuid 字符串），不要写空字符串。
-- [ ] 创建投票时传 `topic_type=POLL` 和 `topic_config.poll`；读取后端详情的 `topic_type` / `topic_config` / `analysis.summary` / `analysis.tags` / `analysis.poll_stats` 渲染摘要、标签和投票统计。
+- [ ] 创建投票时传 `topic_type=POLL` 和 `topic_config.poll`；投票回帖传结构化 `poll_selection.option_indices`；读取后端详情的 `topic_type` / `topic_config` / `analysis.summary` / `analysis.tags` / `analysis.poll_stats` 渲染摘要、标签和投票统计。
 - [ ] close 接口前端 UI 层按 author_id = 当前登录人工号控制可点（只有作者本人能结）；后端不返回 `can_close` 字段。
 
 ---
@@ -531,7 +558,7 @@ FeedbackListItem:
 ## 12. 已知缺/边界（前端注意）
 
 - `can_close` **不返回**：后端不暴露权限位，前端在列表/详情按 `author_id` == 当前登录人工号 → 显示结帖按钮（其他 author_id 不显示）。
-- `topic_type` 是写读契约的一部分；`POLL` 必须带 `topic_config.poll`，其他类型不允许 `topic_config`。`analysis` 只读，由后台任务生成，不由写 API 提交。
+- `topic_type` 是写读契约的一部分；`POLL` 必须带 `topic_config.poll`，其他类型不允许 `topic_config`。`POLL` 回帖必须带 `poll_selection`，其他 Topic 带 `poll_selection` 会被拒绝。`analysis` 只读，由后台任务生成，不由写 API 提交。
 - `latest_activity_at` 等价于"最新活跃时间"（最近 reply 创建时间 or topic update 时间）。如要用 `latest_activity_at` 做排序，在 service 层使用 ngay，前端 UI 直接渲染即可。
 - `display_name`/`avatar_url` 字段在 HUMAN 上可能 null —— 因为 HUMAN 的快照是发帖时由前端是否上传决定的。前端**发帖时尽量传一遍**，避免后续显示空名。
 - `reply_count` / `latest_activity_at` 已在 `TopicListItem` 直接返回（后端聚合过的，前端不用再算）。
