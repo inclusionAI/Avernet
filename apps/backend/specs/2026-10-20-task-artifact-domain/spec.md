@@ -293,11 +293,14 @@ CREATE TABLE IF NOT EXISTS `task_artifact` (
     `gmt_modify`      timestamp     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后修改时间(行不可变:恒等于 gmt_create,房型惯例列)',
     PRIMARY KEY (`id`) COMMENT '自增主键',
     UNIQUE KEY `uk_artifact_id` (`artifact_id`) COMMENT '产物全局唯一 ID 闸',
-    UNIQUE KEY `uk_dedupe` (`task_id`, `node_id`, `attempt`, `kind`, `content_hash`) COMMENT '回放去重幂等键(select-first 后撞键走图版本重放,spec §5.3)'
+    UNIQUE KEY `uk_dedupe` (`task_id`, `node_id`, `attempt`, `kind`, `content_hash`) COMMENT '回放去重幂等键(select-first 后撞键走图版本重放,spec §5.3);最左前缀同时服务 task_id / (task_id,node_id) 检索',
+    KEY `idx_scope_session` (`scope_session_id`, `gmt_create`) COMMENT '按会话列产物 + 时间序',
+    KEY `idx_task_kind` (`task_id`, `kind`, `gmt_create`) COMMENT '任务内按形态过滤 + 时间序',
+    KEY `idx_task_name` (`task_id`, `artifact_name`) COMMENT '任务内按业务名检索(LIKE 前缀可走,中缀 %x% 不走)'
 ) DEFAULT CHARSET = utf8mb4 COMMENT='task 产物不可变清单(spec 2026-10-20-task-artifact-domain)';
 ```
 
-要点备注:两道 `UNIQUE KEY` 即幂等机制本身(§5.3),不另建 `KEY`(查询 `(task_id, node_id)` 与 attempt 排序由 `uk_dedupe` 前缀覆盖);`content`/`artifact_name` 不建普通索引(读路径按任务/节点取,不需要按内容查);SQLite 单测不经此文件,由 ORM `Base.metadata.create_all` 同步建表。
+要点备注(索引设计,用户定稿检索维度:task_id / node_id / artifact_name / scope_session_id / kind):两道 `UNIQUE KEY` 兼任幂等机制(§5.3)与 `task_id`、`(task_id, node_id)` 检索(最左前缀,不重复建);三个二级索引补齐其余维度——会话(`scope_session_id`)、形态过滤(`task_id+kind`)、业务名检索(`task_id+artifact_name`,LIKE 前缀命中、`%中缀%` 不命中);等值列后追加 `gmt_create` 使"过滤后按时间倒序"直接走索引序;`content` 大文本不建索引;SQLite 单测不经此文件,由 ORM `Base.metadata.create_all` 同步建表。
 
 ---
 
