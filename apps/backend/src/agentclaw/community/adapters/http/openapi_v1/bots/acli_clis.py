@@ -285,7 +285,10 @@ async def list_cli_operations(
 @envelope_errors
 async def get_cli_operation(
     bot_id: BotIdPath,
-    operation_id: Annotated[str, Path(min_length=1, max_length=64)],
+    operation_id: Annotated[
+        str, Path(min_length=1, max_length=64,
+                  description="The operation id an add, remove or cancel answered with.")
+    ],
     request: Request,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,

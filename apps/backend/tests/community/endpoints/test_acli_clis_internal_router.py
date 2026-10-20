@@ -24,6 +24,7 @@ from tests.community.framework import (
     ExpectSuccess,
     endpoint_test,
 )
+from tests.community.endpoints.acli_seeds import seed_running_operation
 from tests.community.framework.device_seams import install_fake_resolver
 
 
@@ -294,3 +295,59 @@ def internal_remove_default_bot_cli():
 def _assert_default_listed(response, code: str) -> None:
     items = {item["cli_code"]: item for item in response.json()}
     assert items[code]["default"] is True, response.json()
+
+
+_RUNNING_ID = "2" * 32
+
+
+def _seed_running_install(world) -> None:
+    _seed_owner(world)
+    bot = make_bot(world, bot_id=_BOT_ID, owner_id=_OWNER_ID, bot_type="service",
+                   status="ACTIVE", active_engine="openclaw")
+    install_fake_resolver(world)
+    seed_running_operation(world, bot=bot, action="install", cli_code="yuque-cli",
+                           operation_id=_RUNNING_ID)
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/bots/{bot_id}/cli-operations/{operation_id}",
+    scenario="happy",
+    input=CaseInput(path_params={"bot_id": _BOT_ID, "operation_id": _RUNNING_ID},
+                    query_params=_ENTITY, headers=_HEADERS),
+    seed=_seed_running_install,
+    expect=ExpectSuccess(status=200, json_contains={
+        "operation_id": _RUNNING_ID, "status": "running", "step": "installing",
+    }),
+)
+def internal_get_cli_operation_happy():
+    """A running install reads back by its id."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/bots/{bot_id}/cli-operations",
+    scenario="error",
+    input=CaseInput(path_params={"bot_id": _BOT_ID}, headers=_HEADERS),
+    seed=_seed_bot,
+    expect=ExpectError(status=422),
+)
+def internal_list_cli_operations_requires_entity():
+    """``entity_id`` is required: the bot is never picked by id alone."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/bots/{bot_id}/clis/{cli_code}/{action}/cancel",
+    scenario="happy",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID, "cli_code": "yuque-cli", "action": "install"},
+        query_params=_ENTITY | {"async": "true"},
+        headers=_HEADERS,
+    ),
+    seed=_seed_running_install,
+    expect=ExpectSuccess(status=202, json_contains={"kind": "cancel", "status": "running"}),
+)
+def internal_cancel_happy():
+    """A running install's cancel is enqueued and answered at once."""
+

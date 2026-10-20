@@ -34,6 +34,7 @@ from tests.community.framework import (
     ExpectSuccess,
     endpoint_test,
 )
+from tests.community.endpoints.acli_seeds import seed_running_operation
 from tests.community.framework.device_seams import install_fake_resolver
 
 
@@ -81,10 +82,10 @@ def _seed_owner(world) -> None:
     make_staff_user(world, user_id=_OWNER_ID)
 
 
-def _seed_bot(world, *, clis: list[str] | None = None) -> None:
+def _seed_bot(world, *, clis: list[str] | None = None) -> dict:
     """An active openclaw service bot with a running container and these grants."""
     _seed_owner(world)
-    make_bot(
+    bot = make_bot(
         world,
         bot_id=_BOT_ID,
         owner_id=_OWNER_ID,
@@ -103,6 +104,7 @@ def _seed_bot(world, *, clis: list[str] | None = None) -> None:
         },
     )
     install_fake_resolver(world)
+    return bot
 
 
 def _seed_bot_with_added_cli(world) -> None:
@@ -371,3 +373,99 @@ def remove_bot_cli_happy():
 )
 def remove_default_bot_cli():
     """A default CLI is re-granted at every start, so removing it is refused."""
+
+
+_RUNNING_ID = "1" * 32
+
+
+def _seed_running_install(world) -> None:
+    bot = _seed_bot(world)
+    seed_running_operation(world, bot=bot, action="install", cli_code="yuque-cli",
+                           operation_id=_RUNNING_ID)
+
+
+def _seed_running_uninstall(world) -> None:
+    bot = _seed_bot(world)
+    seed_running_operation(world, bot=bot, action="uninstall", cli_code="yuque-cli")
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/{bot_id}/cli-operations/{operation_id}",
+    scenario="happy",
+    input=CaseInput(path_params={"bot_id": _BOT_ID, "operation_id": _RUNNING_ID},
+                    query_params=_QUERY, headers=_HEADERS),
+    seed=_seed_running_install,
+    expect=ExpectSuccess(status=200, json_contains={"data": {
+        "operation_id": _RUNNING_ID, "action": "install", "status": "running",
+        "step": "installing",
+    }}),
+)
+def get_cli_operation_happy():
+    """A running install reads back by its id."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/{bot_id}/cli-operations",
+    scenario="error",
+    input=CaseInput(path_params={"bot_id": _BOT_ID}, query_params=_QUERY | {"stage": "online"},
+                    headers=_HEADERS),
+    seed=_seed_personal_bot,
+    expect=ExpectError(status=422, json_contains={"message": "Only service bots take a stage"}),
+)
+def list_cli_operations_stage_on_personal_bot():
+    """A personal bot has one runtime."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/clis/{cli_code}/install/cancel",
+    scenario="happy",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID, "cli_code": "yuque-cli"},
+        query_params=_QUERY | {"async": "true"},
+        headers=_HEADERS,
+    ),
+    seed=_seed_running_install,
+    expect=ExpectSuccess(status=202, json_contains={"data": {
+        "kind": "cancel", "action": "install", "cli_code": "yuque-cli", "status": "running",
+    }}),
+)
+def cancel_bot_cli_install_happy():
+    """A running install's cancel is enqueued and answered at once."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/clis/{cli_code}/uninstall/cancel",
+    scenario="happy",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID, "cli_code": "yuque-cli"},
+        query_params=_QUERY | {"async": "true"},
+        headers=_HEADERS,
+    ),
+    seed=_seed_running_uninstall,
+    expect=ExpectSuccess(status=202, json_contains={"data": {
+        "kind": "cancel", "action": "uninstall", "status": "running",
+    }}),
+)
+def cancel_bot_cli_uninstall_happy():
+    """A running uninstall's cancel is enqueued and answered at once."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/clis/{cli_code}/uninstall/cancel",
+    scenario="error",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID, "cli_code": "yuque-cli"},
+        query_params=_QUERY,
+        headers=_HEADERS,
+    ),
+    seed=_seed_running_install,
+    expect=ExpectError(status=409, json_contains={"message": "No such CLI operation is running"}),
+)
+def cancel_bot_cli_uninstall_not_active():
+    """The running operation is an install, so there is no uninstall to cancel."""
+
