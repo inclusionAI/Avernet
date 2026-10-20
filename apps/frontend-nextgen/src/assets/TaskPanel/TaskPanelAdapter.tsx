@@ -19,7 +19,6 @@ type TaskPanelParams = {
   bcsBaseUrl?: string;
   userId?: string;
   taskId?: string;
-  initialTab?: 'info' | 'artifacts' | 'progress';
   onTogglePanelName?: string;
   taskInfoFallback?: TaskPanelProps['taskInfoFallback'];
 };
@@ -73,7 +72,6 @@ export function TaskPanelAdapter({
       userId={p.userId}
       taskId={p.taskId}
       taskInfoFallback={p.taskInfoFallback}
-      initialTab={p.initialTab}
       onOpenSubTask={(subTaskId) => {
         onInteraction({
           source: { type: 'panel', target: 'taskPanel.TaskLoopView' },
