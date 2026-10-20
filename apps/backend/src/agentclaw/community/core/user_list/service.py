@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from injector import inject
 
+from agentclaw.community.core.user_list.server_managed import (
+    RUNTIME_ARTIFACT_USER_LIST_TYPE, ServerManagedUserListError,
+)
+
 from agentclaw.community.core.repository.protocols.identity import UserListRepositoryProtocol
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.user_list.user_list_service_protocol import UserListServiceProtocol
@@ -41,6 +45,14 @@ class UserListService(UserListServiceProtocol):
         in_whitelist: bool,
         env: str | None = None,
     ) -> bool:
+        # COSEC: arbitrary authenticated corrections must not enable a
+        # server-side publication feature for themselves or the global scope.
+        if user_list_type == RUNTIME_ARTIFACT_USER_LIST_TYPE:
+            logger.warning(
+                "user_list.correction.denied actor_id=%s entity_id=%s user_list_type=%s env=%s reason=server_managed",
+                actor_id, entity_id, user_list_type, env or "runtime",
+            )
+            raise ServerManagedUserListError("This user list is server-managed and cannot be corrected through this API")
         self._repository.set_membership(
             entity_id=entity_id,
             user_list_type=user_list_type,

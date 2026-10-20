@@ -29,6 +29,8 @@ from injector import inject
 
 from agentclaw.community.core.channel.channel_service_protocol import ChannelServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.identity import UserListRepositoryProtocol
+from agentclaw.community.core.service_bot.services.runtime_artifact_policy import resolve_runtime_artifacts
 from agentclaw.community.core.repository.protocols.build_ignore import BuildIgnoreRepositoryProtocol
 from agentclaw.community.core.service_bot.services.build_ignore_rules import (
     extra_root_rules,
@@ -181,6 +183,7 @@ class BotBuildService:
         baas_template_resolver: "BaasTemplateResolverProtocol",
         teclaw_template_uuid: str,
         build_ignore_repository: BuildIgnoreRepositoryProtocol,
+        user_list_repository: UserListRepositoryProtocol,
         env: str,
     ):
         """初始化 BotBuildService。
@@ -207,6 +210,7 @@ class BotBuildService:
         self._baas_template_resolver = baas_template_resolver
         self._build_ignore_repository = build_ignore_repository
         self._env = env
+        self._user_list_repository = user_list_repository
 
     def _get_device_binding_repo(self):
         return self._device_binding_repo
@@ -298,6 +302,9 @@ class BotBuildService:
         entity_id = bot.get("entity_id", "")
         entity_type = bot.get("entity_type", "staff")
         device_id = bot.get("device_id")
+        include_runtime_artifacts = resolve_runtime_artifacts(
+            self._user_list_repository, bot_id=bot_id, entity_id=entity_id, env=self._env,
+        )
         provider = self._resolve_sandbox_provider(bot)
 
         # 从 bot.ext 解析 build_rsync_excludes 配置
@@ -413,6 +420,7 @@ class BotBuildService:
                     build_plan=build_plan,
                     provider=provider,
                     build_ignore_paths=build_ignore_paths,
+                    include_runtime_artifacts=include_runtime_artifacts,
                 )
             finally:
                 logger.info(
@@ -1359,6 +1367,7 @@ class BotBuildService:
         build_plan: EngineBuildPlan | None = None,
         provider: EngineSandboxProvider | None = None,
         build_ignore_paths: tuple[str, ...] = (),
+        include_runtime_artifacts: bool = False,
     ) -> bool:
         """Step 2.3: 执行 Bot 实例 rsync 迁移。
 
@@ -1450,6 +1459,7 @@ class BotBuildService:
                     version=version_str,
                     build_ignore_paths=build_ignore_paths,
                     run_command=self._run_local_command,
+                    enabled=include_runtime_artifacts,
                 )
 
                 sync_agentclaw_artifact(
@@ -1459,6 +1469,7 @@ class BotBuildService:
                     version=version_str,
                     build_ignore_paths=build_ignore_paths,
                     run_command=self._run_local_command,
+                    enabled=include_runtime_artifacts,
                 )
 
             # Device-side fallback for extra-include files that are unreadable
