@@ -470,7 +470,10 @@ async fn owner_lifecycle_walkthrough_transfers_immediate_management_rights() {
         body["items"][0]["collect_from"],
         json!({"userIds": ["张三"]})
     );
-    assert!(!body.to_string().contains("\"owners\""));
+    assert_eq!(
+        body["items"][0]["owners"],
+        json!({"userIds": ["admin"]})
+    );
 
     let (status, body) = post_json(
         &app,
