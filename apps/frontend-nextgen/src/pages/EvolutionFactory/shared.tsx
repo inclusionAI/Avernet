@@ -8,37 +8,47 @@ import { history } from '@umijs/max';
 import type { ReactElement, ReactNode } from 'react';
 import { useCallback, useEffect, useState } from 'react';
 
-export function EvolutionHeader({ tab, actions }: { tab: 'tasks' | 'templates' | 'versions'; actions?: ReactNode }) {
+export function EvolutionHeader({
+  tab,
+  actions,
+  showTabs = true,
+}: {
+  tab: 'tasks' | 'templates' | 'versions';
+  actions?: ReactNode;
+  showTabs?: boolean;
+}) {
   return (
     <div className="space-y-5">
       <header className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">智能进化</h1>
         {actions}
       </header>
-      <div role="tablist" aria-label="智能进化" className="flex gap-6 border-b border-border">
-        {(
-          [
-            ['tasks', '进化任务'],
-            ['templates', '评测模板'],
-            ['versions', '进化版本'],
-          ] as const
-        ).map(([value, label]) => (
-          <Button
-            variant="ghost"
-            style={{ height: 'auto', whiteSpace: 'normal' }}
-            key={value}
-            type="button"
-            role="tab"
-            aria-selected={tab === value}
-            className={`border-b-2 px-3 pb-3 text-sm ${
-              tab === value ? 'border-primary font-medium text-primary' : 'border-transparent text-muted-foreground'
-            }`}
-            onClick={() => history.push(`/evolution-factory${value === 'tasks' ? '' : `?tab=${value}`}`)}
-          >
-            {label}
-          </Button>
-        ))}
-      </div>
+      {showTabs && (
+        <div role="tablist" aria-label="智能进化" className="flex gap-6 border-b border-border">
+          {(
+            [
+              ['tasks', '进化任务'],
+              ['templates', '评测模板'],
+              ['versions', '进化版本'],
+            ] as const
+          ).map(([value, label]) => (
+            <Button
+              variant="ghost"
+              style={{ height: 'auto', whiteSpace: 'normal' }}
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={tab === value}
+              className={`border-b-2 px-3 pb-3 text-sm ${
+                tab === value ? 'border-primary font-medium text-primary' : 'border-transparent text-muted-foreground'
+              }`}
+              onClick={() => history.push(`/evolution-factory${value === 'tasks' ? '' : `?tab=${value}`}`)}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

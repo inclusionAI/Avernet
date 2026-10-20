@@ -54,7 +54,7 @@ function BenchRunDetailContent() {
   return (
     <main className="h-full overflow-y-auto bg-background p-4 sm:p-6 lg:px-10">
       <div className="w-full min-w-0 space-y-5">
-        <EvolutionHeader tab="templates" />
+        <EvolutionHeader tab="templates" showTabs={false} />
         <header className="flex flex-wrap items-center gap-3">
           <Button variant="ghost" size="icon" aria-label="返回 Domain" onClick={goBack}>
             <ArrowLeft size={18} />
