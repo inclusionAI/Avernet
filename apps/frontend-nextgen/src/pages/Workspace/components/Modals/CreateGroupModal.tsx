@@ -14,6 +14,7 @@ import { CollaborationFlowAside } from './CollaborationFlowAside';
 import { CollaborationTemplatePicker } from './CollaborationTemplatePicker';
 import { CreateGroupFooter } from './CreateGroupFooter';
 import { CreateGroupHeader } from './CreateGroupHeader';
+import { CreateGroupHumanNotifyMode, useCreateGroupHumanNotifyMode } from './CreateGroupHumanNotifyMode';
 import type { CreateGroupModalProps } from './CreateGroupModal.types';
 import { CreateGroupViewScope, useCreateGroupViewScope } from './CreateGroupViewScope';
 import { GroupConfigFields, type GroupStrategyKind } from './GroupConfigFields';
@@ -34,6 +35,7 @@ export function CreateGroupModal({
 }: CreateGroupModalProps) {
   const { run, friendlyError, creating, clearError } = useCreateGroup();
   const { viewScope, changeViewScope, applyViewScope } = useCreateGroupViewScope(open, clearError);
+  const humanNotify = useCreateGroupHumanNotifyMode(open, clearError);
   const picker = useGroupCollaborationPicker(activeIdentity?.id, open, activeIdentity?.kind === 'user', activeIdentity?.kind);
   const [kind, setKind] = useState<GroupStrategyKind>('free_chat');
   const [name, setName] = useState('');
@@ -143,8 +145,11 @@ export function CreateGroupModal({
     kind === 'task_dag' ? Object.values(binding.participantBindings).some(Boolean) : botUuids.length > 0;
   const hasLeader = kind === 'task_dag' ? true : kind === 'free_chat' ? Boolean(driverBotId) : Boolean(managerBotId);
   const canSubmit = hasParticipants && hasLeader && binding.canSubmitTaskDag && routing.ready;
+  const viaExecute = kind === 'task_dag' && enableTaskExecute;
+  const humanNotifySlot = viaExecute ? null : <CreateGroupHumanNotifyMode {...humanNotify} />;
   const bindingSlot: ReactNode = (
-    <BindingSlot visible={kind === 'task_dag' && supportsStateMachine} binding={binding} botNameResolver={allBotName} />
+    <BindingSlot visible={kind === 'task_dag' && supportsStateMachine} binding={binding}
+      botNameResolver={allBotName} summaryAction={humanNotifySlot} />
   );
   const showFlowAside = kind === 'task_dag' && binding.yamlValidation.isValidated;
   const yamlValidationError = kind === 'task_dag' ? binding.yamlValidation.validationError : undefined;
@@ -188,6 +193,7 @@ export function CreateGroupModal({
         name: name.trim() || formatAutoGroupName(participantIds, effectiveLeader, kind === 'task_dag', participantName),
         strategy: kind === 'free_chat' ? 'chat' : kind === 'task_master_slave' ? 'manager_worker' : 'state_machine',
         deliveryPolicy,
+        ...(!viaExecute ? { humanMentionNotifyMode: humanNotify.value } : {}),
         definitionYaml,
         driverBotUuid: effectiveLeader,
         originator: activeIdentity?.id ?? '',
@@ -237,19 +243,14 @@ export function CreateGroupModal({
               }}
               templateSlot={templateSlot}
               bindingSlot={bindingSlot}
+              humanNotifySlot={humanNotifySlot}
               onKindChange={switchKind}
               onNameChange={setField(setName)}
               onContextChange={setField(setContext)}
               canRecommend={Boolean(context.trim())}
               onRecommend={() => picker.recommendByGoal(context.trim())}
-              onDriverChange={(value) => {
-                clearError();
-                setDriverBotId(value);
-              }}
-              onManagerChange={(value) => {
-                clearError();
-                setManagerBotId(value);
-              }}
+              onDriverChange={setField(setDriverBotId)}
+              onManagerChange={setField(setManagerBotId)}
               onDeliveryChange={setDeliveryPolicy}
               onYamlChange={(value) => {
                 clearError();

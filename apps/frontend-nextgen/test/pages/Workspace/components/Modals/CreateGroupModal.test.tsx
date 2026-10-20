@@ -159,6 +159,7 @@ it('free_chat strategy posts delivery_policy on confirm', async () => {
     expect(gs.createGroup).toHaveBeenCalledWith(
       expect.objectContaining({
         strategy: 'chat',
+        humanMentionNotifyMode: 'all',
         name: '我的群',
         driverBotUuid: 'b1',
         originator: 'actor-1',
@@ -179,10 +180,13 @@ it('maps the auto-reply switch to the delivery policy and updates its helper tex
   expect(screen.getByTestId('free-chat-settings-grid')).toHaveClass('gap-3');
 
   const autoReply = screen.getByRole('switch', { name: '自动回复' });
+  const notifyField = screen.getByRole('button', { name: '@Human 通知来源' });
+  expect(screen.getByTestId('free-chat-settings-grid')).toContainElement(notifyField);
+  expect(autoReply.compareDocumentPosition(notifyField)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   expect(autoReply).toBeChecked();
-  expect(screen.getByText('群主 Bot 将默认回复每一条消息')).toHaveClass('lg:whitespace-nowrap');
+  expect(screen.getByText('群主 Bot 将默认回复每一条消息')).toHaveClass('text-muted-foreground');
   expect(screen.getByTestId('free-chat-settings-grid')).toHaveClass(
-    'grid-cols-[minmax(180px,0.75fr)_minmax(0,1.25fr)]',
+    'sm:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_minmax(0,1fr)]',
   );
 
   fireEvent.click(autoReply);
@@ -199,12 +203,73 @@ it('maps the auto-reply switch to the delivery policy and updates its helper tex
   );
 });
 
+it.each([
+  ['自由聊天', 'chat', '不通知', 'none'],
+  ['任务协作', 'manager_worker', '仅群主 Bot', 'driver_bot_only'],
+  ['自定义协作', 'state_machine', '不通知', 'none'],
+] as const)('%s 提交所选 @Human 通知来源', async (label, strategy, option, mode) => {
+  gs.createGroup.mockResolvedValue({ ok: true, data: { groupId: 'g-notify' } });
+  renderModal({ activeIdentity: botIdentity });
+  fireEvent.click(screen.getByRole('radio', { name: label }));
+  if (strategy === 'state_machine') {
+    fireEvent.change(screen.getByLabelText('协作定义 YAML'), { target: { value: 'participants: [assistant]' } });
+    fireEvent.click(screen.getByRole('button', { name: /校验 YAML/ }));
+    await screen.findByRole('button', { name: '重新编辑' });
+    fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
+  } else if (strategy === 'manager_worker') {
+    await selectLeader('主节点（Manager Bot）', /我 Bot/);
+  }
+  const field = screen.getByRole('button', { name: '@Human 通知来源' });
+  expect(field).toHaveTextContent('所有成员');
+  await selectLeader('@Human 通知来源', new RegExp(`^${option}$`));
+  await waitFor(() => expect(screen.getByRole('button', { name: '确认创建' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
+  await waitFor(() =>
+    expect(gs.createGroup).toHaveBeenCalledWith(expect.objectContaining({ strategy, humanMentionNotifyMode: mode })),
+  );
+});
+
+it('重新打开建群弹窗将通知来源重置为所有成员', async () => {
+  const props = { activeIdentity: botIdentity, onClose: jest.fn(), onCreated: jest.fn() };
+  const view = render(<CreateGroupModal open {...props} />);
+  await selectLeader('@Human 通知来源', /^不通知$/);
+  fireEvent.click(screen.getByRole('radio', { name: '任务协作' }));
+  expect(screen.getByRole('button', { name: '@Human 通知来源' })).toHaveTextContent('不通知');
+  view.rerender(<CreateGroupModal open={false} {...props} />);
+  view.rerender(<CreateGroupModal open {...props} />);
+  expect(screen.getByRole('button', { name: '@Human 通知来源' })).toHaveTextContent('所有成员');
+});
+
+it('任务执行建群隐藏通知来源且不提交该字段', async () => {
+  gs.createGroupViaExecute.mockReset().mockResolvedValue({ ok: true, data: { groupId: 'g-execute' } });
+  renderModal({ activeIdentity: botIdentity });
+  await selectLeader('@Human 通知来源', /^不通知$/);
+  fireEvent.click(screen.getByRole('radio', { name: '自定义协作' }));
+  expect(screen.queryByRole('button', { name: '@Human 通知来源' })).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('协作定义 YAML'), { target: { value: 'participants: [assistant]' } });
+  fireEvent.click(screen.getByRole('button', { name: /校验 YAML/ }));
+  await screen.findByRole('button', { name: '重新编辑' });
+  expect(screen.getByRole('button', { name: '@Human 通知来源' })).toHaveTextContent('不通知');
+  fireEvent.click(screen.getByRole('checkbox', { name: '是否以任务执行' }));
+  expect(screen.queryByRole('button', { name: '@Human 通知来源' })).not.toBeInTheDocument();
+  fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '确认创建' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
+  await waitFor(() => expect(gs.createGroupViaExecute).toHaveBeenCalled());
+  expect(gs.createGroupViaExecute.mock.calls[0][0]).not.toHaveProperty('humanMentionNotifyMode');
+  expect(gs.createGroup).not.toHaveBeenCalled();
+});
+
 it('task_master_slave uses the selected manager as driver_bot_uuid', async () => {
   gs.createGroup.mockResolvedValue({ ok: true, data: { groupId: 'g9' } });
   renderModal();
 
   fireEvent.click(screen.getByRole('radio', { name: '任务协作' }));
   expect(screen.queryByText('主节点统一推进任务，其余成员作为 Worker 配合执行。')).not.toBeInTheDocument();
+  const manager = screen.getByRole('button', { name: '主节点（Manager Bot）' });
+  const notifyField = screen.getByRole('button', { name: '@Human 通知来源' });
+  expect(manager.parentElement?.parentElement?.parentElement).toContainElement(notifyField);
+  expect(manager.compareDocumentPosition(notifyField)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
   await selectLeader('主节点（Manager Bot）', /Alpha/);
   await waitFor(() => expect(screen.getByRole('button', { name: '确认创建' })).toBeEnabled());
@@ -332,6 +397,13 @@ it('shows the collaboration flow preview aside after YAML validation', async () 
   expect(screen.getByTestId('create-group-modal-body')).toHaveClass('lg:overflow-y-auto');
   expect(screen.getByTestId('group-participant-list')).toHaveClass('max-h-[420px]', 'pb-2');
   expect(screen.getByText('协同剧本')).toHaveClass('text-xs', 'font-semibold');
+  const notifyField = screen.getByRole('button', { name: '@Human 通知来源' });
+  const scriptFrame = screen.getByText('协同剧本').parentElement?.parentElement;
+  expect(scriptFrame).toHaveClass('border');
+  expect(scriptFrame).not.toContainElement(notifyField);
+  expect(scriptFrame).toContainElement(screen.getByRole('button', { name: '重新编辑' }));
+  expect(scriptFrame?.parentElement).toHaveClass('grid', 'grid-cols-1', 'sm:grid-cols-2');
+  expect(scriptFrame?.nextElementSibling).toContainElement(notifyField);
   expect(screen.getByRole('button', { name: '重新编辑' })).toHaveClass('text-xs');
 });
 

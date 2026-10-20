@@ -1,6 +1,8 @@
+import { Badge } from '@/components/ui';
 import { MessageCopyAction, MessageInteractionToolbar } from '@/components/Workspace/MessageInteractionToolbar';
 import { MessageSenderLayout, MessageSenderMeta } from '@/components/Workspace/MessageSenderMeta';
 import type { GroupView, ParticipantView } from '@/domain/collaboration';
+import { isSameHumanIdentity } from '@/domain/userIdentity';
 import { getMessageText } from '@/pages/Workspace/hooks/useMessageInteractions';
 import type { ChatMessage } from '@tc-chat/core';
 import { Bubble } from '@tc-chat/ui/es/Bubble';
@@ -48,6 +50,10 @@ export function GroupChatBubble({
     return <SystemMessageItem message={message} />;
   }
   const sender = resolveSender(message, group, participants, userAvatarUrl, userIdentityId, userIdentityName);
+  const senderId = typeof message.extra?.senderId === 'string' ? message.extra.senderId : undefined;
+  // user 仅代表 human 消息；必须匹配当前登录用户，不能把其他群成员也排到右侧。
+  const isCurrentUser = message.role === 'user' && isSameHumanIdentity(senderId, userIdentityId, 'human');
+  const align = isCurrentUser ? 'right' : 'left';
   const messageText = getMessageText(message);
   // 多 Bot 并发输出时每条流式消息各自展示「…」/光标：streaming 态按消息自身 status 判定，
   // 不再用 isLastMessage 当代理（旧实现只认最后一条，并发中的其他 Bot 气泡不显示动画）。
@@ -70,13 +76,16 @@ export function GroupChatBubble({
       <div className="group relative">
         <MessageSenderLayout
           avatar={sender?.avatar}
-          align={message.role === 'user' ? 'right' : 'left'}
+          align={align}
           meta={
-            <div className={`flex min-w-0 items-center gap-1.5 ${message.role === 'user' ? 'justify-end' : ''}`}>
+            <div className={`flex min-w-0 items-center gap-1.5 ${isCurrentUser ? 'justify-end' : ''}`}>
               <MessageSenderMeta
                 name={sender?.name ?? (message.role === 'user' ? '未命名成员' : '未命名 Bot')}
+                nameBadge={!isCurrentUser && (message.role === 'user' || message.role === 'assistant') ? (
+                  <Badge tone="primary" className="shrink-0">{message.role === 'assistant' ? 'Bot' : '用户'}</Badge>
+                ) : undefined}
                 time={getMessageTime(message)}
-                align={message.role === 'user' ? 'right' : 'left'}
+                align={align}
               />
               {isStreamingMessage ? <ReplyProgressIndicator /> : null}
             </div>
@@ -86,7 +95,7 @@ export function GroupChatBubble({
             className="message-bubble-compact [--aix-markdown-font-size:14px] [--aix-font-size-base:14px]"
             sender={{
               role: message.role,
-              align: message.role === 'user' ? 'right' : 'left',
+              align,
               name: undefined,
               // dmore 用户气泡口径：与 chat 页一致（#F5F5F5 灰底 rx12，替代 v1 的 primary/0.1）。
               bubbleColor: message.role === 'user' ? 'hsl(var(--muted))' : undefined,
@@ -104,7 +113,7 @@ export function GroupChatBubble({
         {onCopy || (message.role === 'user' && isEditable && onEdit) ? (
           <MessageCopyAction
             testId={`message-copy-action-${message.id}`}
-            align={message.role === 'user' ? 'right' : 'left'}
+            align={align}
             onCopy={() => onCopy?.(messageText)}
             onEdit={onEdit}
             isEditable={message.role === 'user' && isEditable && Boolean(messageText.trim())}

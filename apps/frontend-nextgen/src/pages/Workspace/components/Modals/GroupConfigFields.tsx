@@ -30,6 +30,7 @@ export interface GroupConfigFieldsProps {
   yamlValidated: boolean;
   templateSlot?: ReactNode;
   bindingSlot?: ReactNode;
+  humanNotifySlot?: ReactNode;
   leaderOptions: GroupLeaderOption[];
   supportsStateMachine: boolean;
   /** 是否以任务执行(走 task execute 建群链路):仅 自定义协作(task_dag) 出现的勾选框值。 */
@@ -61,6 +62,7 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
     yamlValidated,
     templateSlot,
     bindingSlot,
+    humanNotifySlot,
     leaderOptions,
     supportsStateMachine,
     viaExecute,
@@ -194,7 +196,7 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
       {kind === 'free_chat' && (
         <div
           data-testid="free-chat-settings-grid"
-          className="grid min-w-0 grid-cols-[minmax(180px,0.75fr)_minmax(0,1.25fr)] gap-3"
+          className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_minmax(0,1fr)]"
         >
           <div className="min-w-0">
             <GroupLeaderSelect
@@ -215,18 +217,19 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
                 aria-label="自动回复"
                 onCheckedChange={(checked) => onDeliveryChange(checked ? 'send_to_driver' : 'inject_observers')}
               />
-              <p className="m-0 min-w-0 text-xs leading-5 text-muted-foreground lg:whitespace-nowrap">
+              <p className="m-0 min-w-0 text-xs leading-5 text-muted-foreground">
                 {deliveryPolicy === 'send_to_driver'
                   ? '群主 Bot 将默认回复每一条消息'
                   : '群主 Bot 仅在被 @ 时或上下文语境高度关联时答复'}
               </p>
             </div>
           </div>
+          <div className="min-w-0">{humanNotifySlot}</div>
         </div>
       )}
 
       {kind === 'task_master_slave' && (
-        <div>
+        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
           <GroupLeaderSelect
             id="create-group-manager"
             label="主节点（Manager Bot）"
@@ -235,6 +238,7 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
             placeholder="选择 Manager Bot"
             onChange={onManagerChange}
           />
+          <div className="min-w-0">{humanNotifySlot}</div>
         </div>
       )}
 

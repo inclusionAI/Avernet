@@ -509,7 +509,7 @@ describe('GroupChatBubble', () => {
 });
 
 describe('GroupChatBubble alignment and participant identity', () => {
-  it('human 消息右对齐并使用浅色背景，Bot 消息左对齐且不传背景色', () => {
+  it('其他 human 消息左对齐并使用浅色背景，Bot 消息左对齐且不传背景色', () => {
     mockBubbleRenders.length = 0;
     const participants = [
       {
@@ -556,7 +556,7 @@ describe('GroupChatBubble alignment and participant identity', () => {
         />
       </>,
     );
-    expect((mockBubbleRenders[0].sender as { align?: string }).align).toBe('right');
+    expect((mockBubbleRenders[0].sender as { align?: string }).align).toBe('left');
     expect((mockBubbleRenders[0].sender as { bubbleColor?: string }).bubbleColor).toBe('hsl(var(--muted))');
     expect((mockBubbleRenders[1].sender as { align?: string }).align).toBe('left');
     expect((mockBubbleRenders[1].sender as { bubbleColor?: string }).bubbleColor).toBeUndefined();
@@ -564,7 +564,7 @@ describe('GroupChatBubble alignment and participant identity', () => {
     expect(messageMeta).toHaveLength(2);
     expect(messageMeta[0]).toHaveTextContent('李四');
     expect(messageMeta[0]).toHaveTextContent('10:31');
-    expect(messageMeta[0]).toHaveClass('justify-end', 'text-right');
+    expect(messageMeta[0]).toHaveClass('justify-start', 'text-left');
     expect(messageMeta[1]).toHaveTextContent('Bot甲');
     expect(messageMeta[1]).toHaveTextContent('10:32');
     expect(messageMeta[1]).toHaveClass('justify-start', 'text-left');
@@ -581,7 +581,8 @@ describe('GroupChatBubble edit action', () => {
     const onEdit = jest.fn();
     render(
       <GroupChatBubble
-        message={{ id: 'm-user', role: 'user', content: '需要修改的问题', status: 'history' } as never}
+        message={{ id: 'm-user', role: 'user', content: '需要修改的问题', status: 'history', extra: { senderId: '123' } } as never}
+        userIdentityId="123"
         isLastMessage
         isRequesting={false}
         group={group}
@@ -626,7 +627,8 @@ describe('GroupChatBubble copy action reveal', () => {
     render(
       <>
         <GroupChatBubble
-          message={{ id: 'm-user-copy', role: 'user', content: '用户问题', status: 'history' } as never}
+          message={{ id: 'm-user-copy', role: 'user', content: '用户问题', status: 'history', extra: { senderId: '123' } } as never}
+          userIdentityId="123"
           isLastMessage={false}
           isRequesting={false}
           group={group}

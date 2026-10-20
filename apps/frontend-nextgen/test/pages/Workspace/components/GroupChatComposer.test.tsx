@@ -22,7 +22,7 @@ jest.mock('@tc-chat/ui/es/Sender', () => {
           className?: string;
           disabled?: boolean;
           placeholder?: string;
-          fileChip?: unknown;
+          fileChip?: { onPick: () => void };
           imageUpload?: { enabled?: boolean };
           onPasteFile?: (files: File[]) => void;
           onSubmit?: (content: string, context: { mentions: Array<{ id: string; name: string }> }) => void;
@@ -50,6 +50,7 @@ jest.mock('@tc-chat/ui/es/Sender', () => {
             data-image-upload={_props.imageUpload?.enabled ? 'enabled' : 'disabled'}
             data-placeholder={_props.placeholder}
           >
+            <button type="button" onClick={_props.fileChip?.onPick}>上传文件</button>
             <button
               type="button"
               data-testid="sender-paste-image"
@@ -107,11 +108,7 @@ jest.mock('@/pages/Workspace/hooks/useSessionFileUpload', () => ({
   }),
 }));
 jest.mock('@/pages/Workspace/components/GroupChatPane/UploadFilesModal', () => ({
-  UploadFilesModal: (props: { onAddToSession?: () => void }) => (
-    <button type="button" data-testid="add-uploaded-files" onClick={props.onAddToSession}>
-      add files
-    </button>
-  ),
+  UploadFilesModal: ({ open }: { open: boolean }) => open ? <div data-testid="upload-files-modal" /> : null,
 }));
 jest.mock('@/pages/Workspace/components/GroupChatPane/mentionHelpers', () => ({
   expandMentionIds: () => [],
@@ -202,7 +199,7 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     expect(mockAddFiles).toHaveBeenCalledWith([expect.objectContaining({ name: 'pasted.png', type: 'image/png' })]);
   });
 
-  it('添加已上传文件至会话输入区时插入 Sender 文件胶囊', () => {
+  it('文件入口仍可打开上传窗口', () => {
     const inputRef = React.createRef<SenderRef>();
     render(
       <GroupChatComposer
@@ -217,8 +214,10 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     );
 
     expect(screen.getByTestId('sender')).toHaveAttribute('data-file-chip', 'enabled');
-    fireEvent.click(screen.getByTestId('add-uploaded-files'));
-    expect(mockInsertFileChips).toHaveBeenCalledWith([{ resource_id: 'file-1', display_name: '需求说明.md' }]);
+    expect(screen.queryByTestId('upload-files-modal')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '上传文件' }));
+    expect(screen.getByTestId('upload-files-modal')).toBeInTheDocument();
+    expect(mockInsertFileChips).not.toHaveBeenCalled();
   });
 
   it('提交时把引用上下文拼入现有正文，不改变 onSend 参数结构', () => {

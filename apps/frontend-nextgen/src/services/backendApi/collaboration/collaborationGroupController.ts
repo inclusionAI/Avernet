@@ -85,6 +85,7 @@ export interface GroupDetailData {
 }
 export interface GroupCreateChatBody {
   group_kind: 'normal';
+  human_mention_notify_mode?: HumanMentionNotifyMode;
   name?: string;
   context?: string;
   participants: GroupParticipantInput[];
@@ -94,6 +95,7 @@ export interface GroupCreateChatBody {
 }
 export interface GroupCreateManagerWorkerBody {
   group_kind: 'normal';
+  human_mention_notify_mode?: HumanMentionNotifyMode;
   name?: string;
   context?: string;
   participants: GroupParticipantInput[];
@@ -103,6 +105,7 @@ export interface GroupCreateManagerWorkerBody {
 }
 export interface GroupCreateStateMachineBody {
   group_kind: 'normal';
+  human_mention_notify_mode?: HumanMentionNotifyMode;
   name?: string;
   context?: string;
   participants: GroupParticipantInput[];

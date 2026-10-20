@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui';
 import { cn } from '@/utils/cn';
+import type { ReactNode } from 'react';
 import type { UseParticipantBindingResult } from '../../hooks/useParticipantBinding';
 import { ParticipantBindingPanel } from './ParticipantBindingPanel';
 
@@ -7,6 +8,7 @@ export interface BindingSlotProps {
   visible: boolean;
   binding: UseParticipantBindingResult;
   botNameResolver?: (botId: string) => string | undefined;
+  summaryAction?: ReactNode;
 }
 
 export function YamlValidateButton({ yaml, binding }: { yaml: string; binding: UseParticipantBindingResult }) {
@@ -30,7 +32,7 @@ export function YamlValidateButton({ yaml, binding }: { yaml: string; binding: U
 }
 
 /** 「自定义协作」流程预览 / 角色绑定面板插槽。 */
-export function BindingSlot({ visible, binding, botNameResolver }: BindingSlotProps) {
+export function BindingSlot({ visible, binding, botNameResolver, summaryAction }: BindingSlotProps) {
   const {
     yamlValidation,
     participantBindings,
@@ -47,23 +49,26 @@ export function BindingSlot({ visible, binding, botNameResolver }: BindingSlotPr
     <div className="mt-3 space-y-3">
       {validated && (
         <>
-          <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 py-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="text-xs font-semibold text-foreground">协同剧本</span>
-              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">
-                已解析 {yamlValidation.participantDefinitions.length} 个角色
-              </span>
+          <div className={cn('grid grid-cols-1 gap-3', summaryAction && 'sm:grid-cols-2')}>
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 py-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold text-foreground">协同剧本</span>
+                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">
+                  已解析 {yamlValidation.participantDefinitions.length} 个角色
+                </span>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  binding.reset();
+                }}
+              >
+                重新编辑
+              </Button>
             </div>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                binding.reset();
-              }}
-            >
-              重新编辑
-            </Button>
+            {summaryAction && <div className="min-w-0">{summaryAction}</div>}
           </div>
           <span className="text-xs text-muted-foreground">
             已绑定 {boundCount} / {yamlValidation.participantDefinitions.length} 个角色

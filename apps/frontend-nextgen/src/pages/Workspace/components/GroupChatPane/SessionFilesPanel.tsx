@@ -228,15 +228,9 @@ export function SessionFilesPanel({
         open={uploadOpen}
         onClose={() => setUploadOpen(false)}
         queue={upload.queue}
-        isUploading={upload.isUploading}
         stageFiles={upload.stageFiles}
         submitStaged={async () => {
           await upload.submitStaged();
-        }}
-        onAddToSession={() => {
-          upload.clearCompleted();
-          setUploadOpen(false);
-          toast.success('文件已添加至会话');
         }}
         cancelTask={upload.cancelTask}
         retryTask={upload.retryTask}
