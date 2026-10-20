@@ -637,8 +637,8 @@ class BotRepository(
         ext: Dict[str, Any],
     ) -> Optional[Dict[str, Any]]:
         """Whole-column ``ext`` CAS scoped by owner, env, and live row."""
-        expected_json = json.dumps(expected_ext) if expected_ext is not None else None
-        ext_json = json.dumps(ext)
+        expected_json = json.dumps(expected_ext, ensure_ascii=False) if expected_ext is not None else None
+        ext_json = json.dumps(ext, ensure_ascii=False)
         with self._db.orm_session() as db:
             query = db.query(self.Model).filter(
                 self.Model.bot_id == bot_id,
@@ -649,7 +649,7 @@ class BotRepository(
             if expected_json is None:
                 query = query.filter(self.Model.ext.is_(None))
             else:
-                query = query.filter(self.Model.ext == expected_json)
+                query = query.filter(self.Model.ext.in_((expected_json, json.dumps(expected_ext))))
             affected = query.update(
                 {
                     self.Model.ext: ext_json,
@@ -657,6 +657,11 @@ class BotRepository(
                 },
                 synchronize_session=False,
             )
+        logger.info(
+            "[bot.ext_cas] operation=compare_and_set_ext bot_id=%s affected_rows=%s "
+            "expected_ext_is_null=%s serialization=unicode",
+            bot_id, affected, expected_ext is None,
+        )
         if affected == 0:
             return None
         return self.get_by_id_and_owner(bot_id, owner_id)
