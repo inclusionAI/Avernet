@@ -87,7 +87,6 @@ export const TaskNodePanelV2: React.FC<TaskNodePanelV2Props> = ({
 
   const present = node.present ?? node.status;
   const presentTone = PRESENT_TONES[present] ?? { label: present, color: C.textMuted };
-  const executorName = node.assigneeName || node.executor || '—';
   const groupEmbedEnabled = node.drillable === true && !!bcsBaseUrl;
   const goal = node.taskSpec?.instruction || node.taskSpec?.target || '';
 
@@ -110,7 +109,7 @@ export const TaskNodePanelV2: React.FC<TaskNodePanelV2Props> = ({
               lineHeight: '18px',
             }}
           >
-            {node.executor}
+            {node.assigneeName || node.executor || '—'}
           </span>
           <span style={{ ...badgeStyle(presentTone.color), display: 'inline-flex' }}>{presentTone.label}</span>
           {(node.attemptCount ?? 0) > 0 && <span style={badgeStyle(C.warning)}>第 {node.attemptCount} 次返工</span>}
