@@ -52,6 +52,15 @@ Registration gates existing preflight hooks and node execution. A failed or ambi
 
 History derives waiting/running/terminal state and output from the exact registered run. Message delivery is only **等待运行登记**. Lost responses preserve the original request and binding; there is no automatic redispatch, Bot substitution or latest-run/chat-based inference. Candidate revisions and publication state are unchanged by execution.
 
+For a pinned request awaiting registration (including old **结果未知** records), history offers
+**结束未启动请求**. The edit-authorized `POST /api/workflow-repairs/:taskId/trials/:trialId/stop`
+ends only that unregistered request, retaining its history and parameters. It uses the
+same workflow transaction lock as native run registration: if a run registered first,
+ending is rejected; if ending wins, a delayed old command cannot register or execute.
+This does not stop a running workflow or dispatch a replacement. The user may then
+explicitly start a new trial with the preserved form. Lost close responses are safe to
+repeat, and legacy saved-mode requests are not covered by this operation.
+
 ## Statistics isolation
 
 `@avernet/clawweb-shared/server/services/run-purpose` classifies exact `trial`/`trial_run` IDs. Use `productionRunSql` for formal health, success rates, issue frequency, version comparison and optimization scans, and `isTrialRun` for terminal analysis/notifications. Legacy runs with null/-1 versions remain formal. The workflow run page defaults to production with a separate trial filter. Automatic effect verification and manual formal sample selection exclude these rows.

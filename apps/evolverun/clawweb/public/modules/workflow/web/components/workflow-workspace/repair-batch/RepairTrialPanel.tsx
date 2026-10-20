@@ -111,6 +111,21 @@ export default function RepairTrialPanel({ taskId, revision, enabled, open, onCl
       setError(failedBeforeDispatch ? reason instanceof SyntaxError ? '参数 JSON 格式无效，请检查对象、逗号和引号。' : (reason as Error).message : repairReleaseError(reason)); setUncertain(!!request.current); await refresh()
     } finally { if (inFlight.current === mine) inFlight.current = null; if (current.current === mine) setBusy(false) }
   }
+  async function stop(row: TrialView) {
+    if (!enabled || inFlight.current === scope) return
+    const mine = scope
+    inFlight.current = mine; setBusy(true); setError('')
+    try {
+      await repairBatches.stopTrial(taskId, row.id)
+      if (current.current !== mine) return
+      if (!request.current || request.current.requestId === row.requestId) {
+        request.current = null; setUncertain(false); setSubmitted(false)
+      }
+      await refresh()
+    } catch (reason) {
+      if (current.current === mine) { setError(repairReleaseError(reason)); await refresh() }
+    } finally { if (inFlight.current === mine) inFlight.current = null; if (current.current === mine) setBusy(false) }
+  }
   const actions = <div className="flex flex-wrap gap-2">
     <button className={primary} disabled={!options || !!loadError || !targetId || !enabled || targetUnavailable || busy || submitted && !uncertain} onClick={() => void start()}>{busy ? '提交中…' : uncertain ? '核对并重试原请求' : submitted ? '试跑已提交' : '开始试跑'}</button>
     {submitted && !uncertain && records.some(row => row.revision === revision.revision && ['succeeded', 'failed'].includes(row.status)) && <button className={button} onClick={() => { setSubmitted(false); request.current = null }}>新建试跑</button>}
@@ -121,6 +136,10 @@ export default function RepairTrialPanel({ taskId, revision, enabled, open, onCl
     {row.mode === 'saved' && <p className="text-muted-foreground">未固定候选、仅供参考；此结果不代表已验证候选 v{row.revision}。</p>}
     <p className="mt-1 text-muted-foreground">{row.target.label} · {new Date(row.createdAtMs).toLocaleString()} {row.durationMs != null && `· ${row.durationMs} ms`}</p>
     {row.error && <p className="mt-2 text-destructive">{row.error}</p>}
+    {['dispatching', 'awaiting_run', 'unknown'].includes(row.status) && row.mode === 'pinned' && !row.flowId && <div className="mt-2 space-y-2">
+      <p>尚未登记运行。可以结束这条请求后重新试跑；不会自动重试，也不会停止已登记的运行。</p>
+      <button className={button} disabled={!enabled || busy} onClick={() => void stop(row)}>结束未启动请求</button>
+    </div>}
     {row.output && <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words">{row.output}</pre>}
     {row.flowId && <Link className="mt-2 inline-block text-primary underline" to={`/runs/${encodeURIComponent(row.flowId)}`}>运行详情、节点与日志</Link>}
     <details className="mt-2"><summary>参数（已脱敏）</summary><pre className="max-h-36 overflow-auto whitespace-pre-wrap">{JSON.stringify(row.input, null, 2)}</pre></details>

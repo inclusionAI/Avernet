@@ -15,6 +15,7 @@ export const repairBatches = {
   trials: (taskId: string, offset = 0) => readOnlyJson<{ configured: boolean; nextOffset?: number | null; trials: RepairTrial[] }>(`${base}/${segment(taskId)}/trials?offset=${offset}`),
   trialOptions: (taskId: string, revision: number) => readOnlyJson<RepairTrialOptions & { inputSchemaDigest: string; targets: RepairTrialTarget[] }>(`${base}/${segment(taskId)}/trials/options?revision=${revision}`),
   startTrial: (taskId: string, request: RepairTrialRequest) => post<RepairTrial>(`${base}/${segment(taskId)}/trials`, request),
+  stopTrial: (taskId: string, trialId: string) => post<RepairTrial>(`${base}/${segment(taskId)}/trials/${segment(trialId)}/stop`, {}),
   request: (workflowId: string, requestId: string) => readOnlyJson<{ revision: RepairRevision | null }>(`${base}/requests/lookup?${new URLSearchParams({ workflowId, requestId })}`),
   publish: (taskId: string, request: RepairConfirmRequest) => post<RepairDeployment>(`${base}/${segment(taskId)}/publish`, request),
   deploymentTargets: (taskId: string) => readOnlyJson<{ targets: RepairReleaseTarget[] }>(`${base}/${segment(taskId)}/deployment-targets`),

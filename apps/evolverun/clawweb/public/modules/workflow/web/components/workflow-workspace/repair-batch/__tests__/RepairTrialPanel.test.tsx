@@ -3,7 +3,7 @@ import { MemoryRouter } from 'react-router-dom'
 import userEvent from '@testing-library/user-event'
 import Ajv from 'ajv'
 import { beforeEach, expect, it, vi } from 'vitest'
-const api = vi.hoisted(() => ({ trials: vi.fn(), trialOptions: vi.fn(), startTrial: vi.fn() }))
+const api = vi.hoisted(() => ({ trials: vi.fn(), trialOptions: vi.fn(), startTrial: vi.fn(), stopTrial: vi.fn() }))
 vi.mock('../../../../api/repair-batches', () => ({ repairBatches: api }))
 import RepairTrialPanel from '../RepairTrialPanel'
 const revision = { revision: 1, phase: 'review', stateVersion: 1, draft: { candidateCommit: 'a'.repeat(40) } } as never
@@ -16,6 +16,33 @@ beforeEach(() => {
     inputSchemaDigest: 'schema', targets: [{ id: 'prod:owner:bot', label: 'Production Bot' }] })
 })
 const panel = (rev = revision) => <MemoryRouter><RepairTrialPanel taskId="task" revision={rev} enabled open onClose={() => {}} onTrials={() => {}} /></MemoryRouter>
+it('ends a historical unregistered trial explicitly without dispatching and preserves the current form', async () => {
+  const old = { ...trial, flowId: null, mode: 'pinned', status: 'unknown' }
+  api.trials.mockResolvedValue({ configured: true, trials: [old] })
+  api.stopTrial.mockImplementation(async () => {
+    api.trials.mockResolvedValue({ configured: true, trials: [{ ...old, status: 'failed', error: '已结束未启动请求' }] })
+  })
+  render(panel())
+  await userEvent.selectOptions(await screen.findByRole('combobox', { name: '执行 Bot' }), 'prod:owner:bot')
+  await userEvent.type(screen.getByRole('textbox', { name: 'query' }), 'redis')
+  await userEvent.click(await screen.findByRole('button', { name: '结束未启动请求' }))
+  expect(await screen.findByText('已结束未启动请求')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '结束未启动请求' })).not.toBeInTheDocument()
+  expect(api.stopTrial).toHaveBeenCalledWith('task', 'trial')
+  expect(api.startTrial).not.toHaveBeenCalled()
+  expect(screen.getByRole('textbox', { name: 'query' })).toHaveValue('redis')
+  expect(screen.getByRole('combobox', { name: '执行 Bot' })).toHaveValue('prod:owner:bot')
+  expect(screen.getByRole('button', { name: '开始试跑' })).toBeEnabled()
+})
+it.each([
+  { ...trial, mode: 'pinned', status: 'running' },
+  { ...trial, mode: 'saved', status: 'unknown', flowId: null },
+])('does not offer to end an already registered or legacy request', async row => {
+  api.trials.mockResolvedValue({ configured: true, trials: [row] })
+  render(panel())
+  await screen.findByText(/Production Bot ·/)
+  expect(screen.queryByRole('button', { name: '结束未启动请求' })).not.toBeInTheDocument()
+})
 it.each([false, true])('handles a removed selected Bot on reopen while preserving unknown-request reconciliation (uncertain=%s)', async uncertain => {
   api.startTrial.mockRejectedValueOnce(new Error('response lost')).mockResolvedValueOnce(trial)
   const view = render(panel())

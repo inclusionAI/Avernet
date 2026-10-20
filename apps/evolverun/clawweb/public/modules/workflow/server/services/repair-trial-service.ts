@@ -76,6 +76,23 @@ export function createRepairTrialService(input: { db: IDatabase; workbench: Repa
       const rows = await db.query<{ body_json: string }>("SELECT body_json FROM workflow_repair_release_records WHERE task_id = ? AND record_kind = 'trial' ORDER BY created_at_ms DESC, record_id DESC LIMIT 20 OFFSET ?", [taskId, offset]);
       return Promise.all(rows.map(row => view(JSON.parse(row.body_json))));
     },
+    async stop(taskId: string, id: string) {
+      const before = await find(id);
+      if (before.taskId !== taskId) conflict('试跑请求不属于当前任务');
+      const result = await db.transaction(async tx => {
+        const locked = await lock(tx, taskId), latest = await find(id, tx);
+        // The same workflow lock fences native registration. Closing first prevents
+        // late commands from registering; registration first must retain its run.
+        if (latest.mode !== 'pinned' || latest.flowId) conflict('该试跑已有运行或不支持结束，请查看原运行记录');
+        if (latest.status === 'failed') return latest;
+        if (!['dispatching', 'awaiting_run', 'unknown'].includes(latest.status)) conflict('当前试跑不能结束');
+        const stopped: RepairTrial = { ...latest, status: 'failed', error: '已结束未启动请求，可以重新发起试跑',
+          stateVersion: latest.stateVersion + 1, updatedAtMs: Date.now() };
+        await locked.records.update(stopped, latest.stateVersion);
+        return stopped;
+      });
+      return view(result);
+    },
     async start(actorId: string, taskId: string, request: RepairTrialRequest) {
       if (!request || typeof request.requestId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(request.requestId)
         || !Number.isSafeInteger(request.revision) || !Number.isSafeInteger(request.expectedStateVersion)) throw new RepairBatchError('INVALID_INPUT', '试跑请求身份无效');
@@ -103,7 +120,9 @@ export function createRepairTrialService(input: { db: IDatabase; workbench: Repa
           || selected.draft?.candidateCommit !== frozen.candidateCommit || selected.draft?.packDigest !== frozen.packDigest
           || fresh.find(r => r.draft !== null && r.phase !== 'no_change')?.revision !== request.revision) conflict('保存期间候选已变化，请重新审阅');
         const active = (await locked.records.list<RepairTrial>(taskId, 'trial')).find(t => t.revision === request.revision && ['dispatching', 'awaiting_run', 'unknown'].includes(t.status) && !t.flowId);
-        if (active) conflict('同一候选存在待核对的试跑，请先核对该请求');
+        if (active) conflict(active.mode === 'pinned'
+          ? '存在尚未登记运行的试跑，请在试跑记录中结束未启动请求后重试'
+          : '同一候选存在待核对的试跑，请先核对该请求');
         const id = randomUUID();
         const trial: RepairTrial = { ...frozen, mode: 'pinned', id, flowId: null, requestId: request.requestId, actorId, target,
           stateVersion: 1, status: 'dispatching', input: request.input, inputDigest: digestRepairJson(request.input), inputSchemaDigest: request.inputSchemaDigest,

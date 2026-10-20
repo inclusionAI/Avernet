@@ -194,6 +194,12 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
     if (!input.trials) throw new RepairBatchError('CAPABILITY_UNAVAILABLE', '试跑尚未接入');
     res.status(202).json(await input.trials.start(selected.actor.actorId, selected.task.taskId, req.body));
   }));
+  router.post('/:taskId/trials/:trialId/stop', handle(async (req, res) => {
+    const selected = await taskAccess(req, res, 'edit');
+    if (!selected) return;
+    if (!input.trials) throw new RepairBatchError('CAPABILITY_UNAVAILABLE', '试跑尚未接入');
+    res.json(await input.trials.stop(selected.task.taskId, text(req.params.trialId, 'trialId')));
+  }));
   router.get('/:taskId/deployment-targets', handle(async (req, res) => {
     const selected = await taskAccess(req, res, 'edit');
     if (selected) res.json({ targets: await release().targets(selected.actor.actorId, selected.task.taskId) });
