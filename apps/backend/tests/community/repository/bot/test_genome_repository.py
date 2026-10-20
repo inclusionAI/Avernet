@@ -5,6 +5,7 @@ import re
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine
@@ -252,3 +253,55 @@ def test_ddl_columns_match_the_orm(model) -> None:
     ddl = _ddl_columns()[model.__tablename__]
     orm = [column.name for column in model.__table__.columns]
     assert sorted(ddl) == sorted(orm), f"{model.__tablename__}: DDL {ddl} vs ORM {orm}"
+
+
+# -- review: transactions and LIKE escaping -------------------------------------------------------
+
+
+class AutocommitSqliteDB(InMemorySqliteDB):
+    """The production shape: ``orm_session`` commits every statement; ``transactional_orm_session`` is the real transaction."""
+
+    def __init__(self, engine):
+        super().__init__(engine)
+        self._autocommit = sessionmaker(bind=engine.execution_options(isolation_level="AUTOCOMMIT"), autoflush=False)
+
+    @contextmanager
+    def orm_session(self):
+        db = self._autocommit()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    transactional_orm_session = InMemorySqliteDB.orm_session
+
+
+def test_a_lost_pair_move_leaves_nothing_behind_under_autocommit(monkeypatch):
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    from agentclaw.community.core.base import Base
+
+    Base.metadata.create_all(engine)
+    repo = GenomeRefRepository(AutocommitSqliteDB(engine))
+    repo.move_pair(**BOT, revision_id=R1, expected_active=None, **_stamp())
+    repo.move_pair(**BOT, revision_id=R2, expected_active=R1, **_stamp())
+    # The "previous" CAS loses: the read of previous is stale (a concurrent mover changed it), so
+    # its conditional UPDATE matches nothing after the active UPDATE already ran.
+    real_row = GenomeRefRepository._row
+
+    def stale_previous(self, session, **kw):
+        row = real_row(self, session, **kw)
+        return SimpleNamespace(revision_id=R3) if kw["name"] == "previous" else row
+
+    monkeypatch.setattr(GenomeRefRepository, "_row", stale_previous)
+    assert repo.move_pair(**BOT, revision_id=R3, expected_active=R2, **_stamp()) is None
+    monkeypatch.undo()
+    assert repo.get(**BOT, name="active").revision_id == R2, "active did not move when previous could not"
+    assert [(e.from_revision_id, e.to_revision_id) for e in repo.events(**BOT, name="active")] == [(R1, R2), (None, R1)]
+
+
+def test_candidate_prefixes_are_matched_literally(db):
+    repo = GenomeRefRepository(db)
+    repo.move(**BOT, name="candidate/run_7/1", revision_id=R1, expected_revision_id=None, **_stamp())
+    repo.move(**BOT, name="candidate/runX7/1", revision_id=R2, expected_revision_id=None, **_stamp())
+    assert repo.candidate_count(**BOT, run_id="run_7") == 1
+    assert [r.name for r in repo.list(**BOT, name_prefix="candidate/run_7/")] == ["candidate/run_7/1"]

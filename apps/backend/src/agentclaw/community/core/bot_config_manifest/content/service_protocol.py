@@ -99,10 +99,12 @@ class ManifestContentServiceProtocol(Protocol):
         ``produced://<origin>`` as both URLs — ``origin`` is a short label
         such as ``genome/capture``, ``genome/patch`` or ``genome/upload``.
         The blob write is the same content-addressed, idempotent write
-        ``store`` makes. One row per bot and digest: when this bot already
-        holds a row for the digest, no second row is filed and the returned
-        record carries ``id=None`` (``is_reachable`` says which case the
-        caller is in).
+        ``store`` makes. One row per bot and digest, best effort: when this
+        bot already holds a row for the digest, no second row is filed and
+        the returned record carries ``id=None`` (``is_reachable`` says which
+        case the caller is in). Two concurrent stores of the same bytes can
+        both file a row; the log has no unique key, and a second row changes
+        no answer.
         """
         ...
 
