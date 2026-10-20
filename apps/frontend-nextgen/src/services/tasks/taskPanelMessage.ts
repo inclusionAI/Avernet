@@ -19,7 +19,8 @@ export function buildTaskPanelAixUI(taskId: string, title: string, params: Recor
   // 保留完整标题：副屏 SDK 侧负责「最多展示 10 个字符 + hover 展示全部」，
   // 这里只剔除会破坏 JSON / 单引号 HTML 属性的字符，不再截断。
   const safeTitle = (title ?? '').replace(/[<>'"`]/g, ' ').trim() || '任务';
-  const tab = JSON.stringify({ id: `task-${taskId}`, title: safeTitle, closable: true });
+  // defaultWidth: 420 = V2 副屏初始宽(spec §3.1-2);SDK 支持用户拖宽,420 为初始值。
+  const tab = JSON.stringify({ id: `task-${taskId}`, title: safeTitle, closable: true, defaultWidth: 420 });
   const paramsAttr = JSON.stringify(params);
   return `<AixUI type="panel" component="taskPanel.TaskLoopView" ` + `tab='${tab}' params='${paramsAttr}'></AixUI>`;
 }

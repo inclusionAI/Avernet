@@ -162,3 +162,12 @@ describe('buildTaskLaunchMessage', () => {
     );
   });
 });
+
+describe('buildTaskPanelAixUI defaultWidth(V2 副屏初始宽 420,spec §3.1-2)', () => {
+  it('tab 声明携带 defaultWidth: 420', () => {
+    const raw = buildTaskPanelAixUI('t-dw', '任务宽', { taskId: 't-dw' });
+    const tabMatch = raw.match(/tab='([^']+)'/);
+    expect(tabMatch).not.toBeNull();
+    expect(JSON.parse(tabMatch![1]).defaultWidth).toBe(420);
+  });
+});

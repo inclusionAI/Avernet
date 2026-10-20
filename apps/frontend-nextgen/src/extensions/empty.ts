@@ -1,6 +1,7 @@
 import { registerTaskPanel, TaskPanelAdapter } from '@/assets/TaskPanel';
 import { defaultCapabilities, getCapabilities } from '@/capabilities';
 import { TaskLoopCard } from '@/components/TaskCards';
+import { useTaskPanelNavBinding } from '@/hooks/taskPanelNavBinding';
 import { registerUmdPanelHandler } from '@/services/bcs/UmdPanel';
 import { TASK_READ_API_BASE } from '@/services/tasks/taskConfig';
 import { ensureReactGlobal } from '@/services/workspace';
@@ -35,13 +36,20 @@ const TaskPanelAdapterWithUser: ComponentType<PanelContentProps> = (props) => {
   const human = getCapabilities().getHumanIdentity();
   const loginUserId = human.status === 'available' ? human.value?.userId?.trim() || undefined : undefined;
   const incoming = props.params ?? {};
+  // V2 导航按 taskId 分片缝合 taskSidePanelStore(nav 不进 params:params 需可序列化落库,
+  // 且跨 tab 的选中/下钻态应由业务 store 统一持有,供 P4 会话联动消费)。hook 无条件调用。
+  const navBinding = useTaskPanelNavBinding(typeof incoming.taskId === 'string' ? incoming.taskId : '');
+  const nav = typeof incoming.taskId === 'string' && incoming.taskId ? navBinding : undefined;
   // userId：已带沿用，缺省回填登录人工号；taskApiBase：读公开面 /openapi/v1（gateway 鉴权），不随 capability 切内面。
   const params = {
     ...incoming,
     userId: incoming.userId ?? loginUserId,
     taskApiBase: TASK_READ_API_BASE,
   };
-  return React.createElement(TaskPanelAdapter, { ...props, params } as PanelContentProps);
+  return React.createElement(
+    TaskPanelAdapter,
+    { ...props, params, nav } as PanelContentProps & { nav?: typeof nav },
+  );
 };
 
 /**

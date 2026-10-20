@@ -2,6 +2,7 @@ import { TaskPanel } from '@/assets/TaskPanel';
 import { Drawer, DrawerContent } from '@/components/ui/Drawer';
 import { Empty } from '@/components/ui/Empty';
 import type { TaskListItem } from '@/domain/tasks/models';
+import { useTaskPanelNavBinding } from '@/hooks/taskPanelNavBinding';
 import type { ScheduledRoutineRecord, ScheduledRoutineRunRecord } from '@/services/scheduledTasks';
 import { TASK_API_BASE, TASK_READ_API_BASE } from '@/services/tasks/taskConfig';
 import { getBotDisplayName, getUserTaskSourceLabel, getUserTaskTypeLabel } from '../userTaskUtils';
@@ -47,6 +48,9 @@ export function MyTaskDrawers({
   onOpenRoutineFromHistory,
   botNameMap,
 }: MyTaskDrawersProps) {
+  // V2 导航按 taskId 分片缝合 taskSidePanelStore(抽屉/聊天两挂载点共享导航语义)。
+  const navBinding = useTaskPanelNavBinding(selectedTaskId ?? '');
+  const nav = selectedTaskId ? navBinding : undefined;
   const selectedTask = selectedTaskId ? taskRecords.find((record) => record.task_id === selectedTaskId) : null;
   const taskInfoFallback = selectedTask
     ? (() => {
@@ -87,6 +91,7 @@ export function MyTaskDrawers({
                 userId={ownerUserId}
                 taskId={selectedTaskId}
                 taskInfoFallback={taskInfoFallback}
+                nav={nav}
                 style={{ height: '100%', minHeight: 0 }}
               />
             ) : (
