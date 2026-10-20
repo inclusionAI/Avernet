@@ -243,3 +243,141 @@ describe("POST /:flowId/rerun — lifecycle_stage propagation", () => {
     expect(callArg.lifecycleStage).toBeUndefined();
   });
 });
+
+/**
+ * Command resolution on the clawweb re-run route.
+ *
+ * A cron/panel run records no input_json.command, so the route falls back to the
+ * facade binding. That binding holds only the workflow name, and a bare slash
+ * command makes the Bot answer with help text instead of starting a run, so the
+ * replayed trigger must always carry a task description.
+ */
+describe("POST /:flowId/rerun — command resolution", () => {
+  const raw = new Database(":memory:");
+  const db: IDatabase = {
+    dbType: "sqlite",
+    dialect: sqliteDialect,
+    query: async <T>(sql: string, params: unknown[] = []) =>
+      raw.prepare(sql).all(...params) as T[],
+    exec: async (sql, params = []) => {
+      const result = raw.prepare(sql).run(...params);
+      return { affectedRows: result.changes };
+    },
+    transaction: async (fn) => fn(db),
+    close: async () => raw.close(),
+  };
+
+  let server: Server;
+  let baseUrl: string;
+
+  beforeAll(async () => {
+    raw.exec(`CREATE TABLE flow_runs (
+      id INTEGER PRIMARY KEY, flow_id TEXT UNIQUE, workflow_id TEXT, workflow_title TEXT, status TEXT,
+      params_json TEXT, input_json TEXT, result_json TEXT, node_count INTEGER, succeeded_count INTEGER,
+      failed_count INTEGER, total_duration_ms INTEGER, total_token_usage INTEGER, triggered_by TEXT,
+      identity_key TEXT, current_phase TEXT, started_at INTEGER, completed_at INTEGER, credentials_json TEXT,
+      origin_session_key TEXT, origin_session_id TEXT, origin_bot_id TEXT, user_id TEXT, plugin_version TEXT,
+      engine TEXT, state_json TEXT, workflow_version INTEGER, workflow_deploy_number INTEGER,
+      gmt_create INTEGER, gmt_modified INTEGER, evolution_analysis_status TEXT
+    ); CREATE TABLE flow_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT, flow_id TEXT, workflow_id TEXT,
+      node_id TEXT, event_type TEXT, attempt INTEGER, time INTEGER, data_json TEXT,
+      error_text TEXT, gmt_create INTEGER, gmt_modified INTEGER
+    );`);
+
+    const flowRunRepo = new FlowRunRepository(db);
+    const eventRepo = new FlowEventRepository(db);
+    // facade_bindings stores the bare name; only ids-log-self-audit is bound here.
+    const facadeRepo = {
+      findByWorkflowId: async (workflowId: string) =>
+        workflowId === "ids-log-self-audit" ? [{ command: "ids-log-self-audit" }] : [],
+    };
+
+    const app = express();
+    app.use(express.json());
+    app.use("/runs", createRunsRouter(
+      flowRunRepo, null, eventRepo, null, null, null, null, null, null, facadeRepo as never,
+    ));
+    await new Promise<void>((resolve) => {
+      server = app.listen(0, "127.0.0.1", resolve);
+    });
+    baseUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    raw.close();
+  });
+
+  beforeEach(() => {
+    sendInterventionMock.mockReset();
+    sendInterventionMock.mockResolvedValue({ ok: true, messageId: "msg-new-1", sessionId: "session-new-1" });
+    raw.prepare("DELETE FROM flow_runs").run();
+    raw.prepare("DELETE FROM flow_events").run();
+  });
+
+  function insertRun(flowId: string, workflowId: string, inputJson: string | null) {
+    raw
+      .prepare(
+        `INSERT INTO flow_runs
+         (flow_id, workflow_id, workflow_title, status, input_json, credentials_json,
+          origin_bot_id, origin_session_key, started_at, gmt_create)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        flowId, workflowId, "Test Workflow", "completed", inputJson,
+        JSON.stringify({ BOT_TYPE: "personal", BOT_ID: "20260629_g3xxlxd3", OWNER_ID: "160855" }),
+        "test-bot:160855", "agent:main:cron:original",
+        Math.floor(Date.now() / 1000), Math.floor(Date.now() / 1000),
+      );
+  }
+
+  async function rerun(flowId: string) {
+    const res = await fetch(`${baseUrl}/runs/${flowId}/rerun`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    return { status: res.status, body: await res.json() as Record<string, unknown> };
+  }
+
+  function sentTrigger(): string {
+    const callArg = sendInterventionMock.mock.calls.at(-1)![0] as { message: string };
+    return callArg.message.split("\n").at(-1) as string;
+  }
+
+  it("replays the command recorded on the run, verbatim", async () => {
+    insertRun("flow-recorded", "social-appeal", JSON.stringify({ command: "/social-appeal 2088242692000193" }));
+
+    const { status } = await rerun("flow-recorded");
+    expect(status).toBe(200);
+    expect(sentTrigger()).toBe("/social-appeal 2088242692000193");
+  });
+
+  it("falls back to the facade binding and keeps a task description", async () => {
+    insertRun("flow-cron", "ids-log-self-audit", JSON.stringify({ message: null, params: { enable_yuque_sync: "true" } }));
+
+    const { status } = await rerun("flow-cron");
+    expect(status).toBe(200);
+    // Bare "/ids-log-self-audit" would make the Bot print help instead of running.
+    expect(sentTrigger()).toBe("/ids-log-self-audit 重新运行");
+  });
+
+  it("keeps the run's own message when the binding supplies the command", async () => {
+    insertRun("flow-cron-msg", "ids-log-self-audit", JSON.stringify({ message: "什么是tc?" }));
+
+    const { status } = await rerun("flow-cron-msg");
+    expect(status).toBe(200);
+    expect(sentTrigger()).toBe("/ids-log-self-audit 什么是tc?");
+  });
+
+  it("rejects a run whose workflow has no bound command", async () => {
+    insertRun("flow-unbound", "no-such-workflow", JSON.stringify({ message: null }));
+
+    const { status, body } = await rerun("flow-unbound");
+    expect(status).toBe(422);
+    expect(String(body.message)).toContain("无法重跑");
+    expect(sendInterventionMock).not.toHaveBeenCalled();
+  });
+});

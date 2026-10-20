@@ -63,8 +63,9 @@ describe("source-aware auto-heal run service", () => {
     const { command, commandLine } = sent();
     expect(command).toEqual({ botId: "default:owner-1", lifecycleStage: "draft", sessionId: null,
       sessionKey: expect.stringMatching(/^auto-heal-run:audit-workflow:/), message: expect.any(String) });
-    // facade_bindings stores the bare name ("audit-workflow"); the Bot needs the slash form.
-    expect(commandLine).toBe(`/${workflowId}`);
+    // facade_bindings stores the bare name ("audit-workflow"), so it needs the slash
+    // form plus a task description: a bare command makes the Bot answer with help text.
+    expect(commandLine).toBe(`/${workflowId} 自动修复重跑`);
     expect(JSON.stringify(command)).not.toMatch(/must-not-escape|old-cron|SECRET|credentials/);
   });
 
@@ -117,13 +118,24 @@ describe("source-aware auto-heal run service", () => {
   it("adds the leading slash that facade_bindings omits", async () => {
     findByWorkflowId.mockResolvedValue([{ command: "ids-log-self-audit" }]);
     await service.run(input);
-    expect(sent().commandLine).toBe("/ids-log-self-audit");
+    expect(sent().commandLine).toBe("/ids-log-self-audit 自动修复重跑");
   });
 
   it("does not double the slash when the binding already carries one", async () => {
     findByWorkflowId.mockResolvedValue([{ command: "/already-slash" }]);
     await service.run(input);
-    expect(sent().commandLine).toBe("/already-slash");
+    expect(sent().commandLine).toBe("/already-slash 自动修复重跑");
+  });
+
+  it("always carries a task description, so the Bot runs instead of printing help", async () => {
+    // Regression guard: `/ids-log-self-audit` alone made the Bot reply with the
+    // command's help text and start nothing.
+    findByWorkflowId.mockResolvedValue([{ command: "ids-log-self-audit" }]);
+    run.input_json = JSON.stringify({ message: null, params: { enable_yuque_sync: "true" } });
+    await service.run(input);
+    const commandLine = sent().commandLine;
+    expect(commandLine.startsWith("/ids-log-self-audit ")).toBe(true);
+    expect(commandLine.trim()).not.toBe("/ids-log-self-audit");
   });
 
   it.each([
@@ -136,7 +148,7 @@ describe("source-aware auto-heal run service", () => {
     if (inputJson === "{invalid") {
       // An unparseable input_json still resolves through the binding.
       await service.run(input);
-      expect(sent().commandLine).toBe(`/${workflowId}`);
+      expect(sent().commandLine).toBe(`/${workflowId} 自动修复重跑`);
       return;
     }
     await rejectWithoutSending("invalid_source");
@@ -175,7 +187,7 @@ describe("source-aware auto-heal run service", () => {
     expect(sent().command.botId).toBe("default:original-owner");
     // The actor is identified in the message header; the trigger itself is the bound command.
     expect(sent().command.message).toContain("admin(admin)");
-    expect(sent().commandLine).toBe(`/${workflowId}`);
+    expect(sent().commandLine).toBe(`/${workflowId} 自动修复重跑`);
   });
 
   it("accepts edit as well as execute permission", async () => {

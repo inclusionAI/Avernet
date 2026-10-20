@@ -667,6 +667,7 @@ export function createRunsRouter(
           const bindings = facadeRepo ? await facadeRepo.findByWorkflowId(run.workflow_id) : [];
           return bindings[0]?.command ?? null;
         },
+        fallbackMessage: "重新运行",
       });
 
       if (!command) {

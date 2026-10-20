@@ -36,15 +36,26 @@ function parseObject(json: string | null): Record<string, unknown> | null {
  *
  * `lookupBoundCommand` is invoked only when the run records no command, so a
  * facade-triggered run never pays for a binding query.
+ *
+ * A binding supplies only the workflow name. Sending it bare makes the Bot
+ * answer with the command's help text instead of starting a run, so the bound
+ * form always carries a task description.
  */
 export async function resolveRerunCommand(input: {
   inputJson: string | null;
   lookupBoundCommand: () => Promise<string | null | undefined>;
+  /** Task description used when the binding supplies the command but the run recorded no message. */
+  fallbackMessage: string;
 }): Promise<string | null> {
   const parsed = parseObject(input.inputJson);
   const recorded = typeof parsed?.command === "string" ? parsed.command.trim() : "";
   const message = typeof parsed?.message === "string" ? parsed.message.trim() : "";
-  const command = recorded || toSlashCommand(await input.lookupBoundCommand());
-  if (!command) return null;
-  return message ? `${command} ${message}` : command;
+
+  // A recorded command is the exact original invocation and already carries its
+  // own arguments, so it is replayed as-is.
+  if (recorded) return message ? `${recorded} ${message}` : recorded;
+
+  const bound = toSlashCommand(await input.lookupBoundCommand());
+  if (!bound) return null;
+  return `${bound} ${message || input.fallbackMessage}`;
 }

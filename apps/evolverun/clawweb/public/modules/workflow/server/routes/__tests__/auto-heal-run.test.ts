@@ -129,8 +129,10 @@ describe("POST /api/auto-heal/run", () => {
       sessionId: "cron-session", credentials: { STAGE: "online" }, params: {} });
     expect(sendIntervention).toHaveBeenCalledWith(expect.objectContaining({ botId: "default:owner-1",
       lifecycleStage: "draft", sessionId: null }));
-    // The trigger is the bound slash command, not a client-supplied payload.
-    expect(sendIntervention.mock.calls[0][0].message.split("\n").at(-1)).toBe(`/${body.workflowId}`);
+    // The trigger is the bound slash command plus a task description, not a
+    // client-supplied payload. A bare command would make the Bot print help.
+    expect(sendIntervention.mock.calls[0][0].message.split("\n").at(-1))
+      .toBe(`/${body.workflowId} 自动修复重跑`);
   });
 
   it.each([false, true])("preserves detailed BaaS failure, tokenExpired=%s, without retry", async tokenExpired => {

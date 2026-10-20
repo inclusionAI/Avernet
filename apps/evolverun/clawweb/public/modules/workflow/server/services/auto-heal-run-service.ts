@@ -135,6 +135,7 @@ export class AutoHealRunService {
         const bindings = facadeRepo ? await facadeRepo.findByWorkflowId(workflowId) : [];
         return bindings[0]?.command ?? null;
       },
+      fallbackMessage: "自动修复重跑",
     });
     if (!command) {
       throw new AutoHealRunError("invalid_source",
