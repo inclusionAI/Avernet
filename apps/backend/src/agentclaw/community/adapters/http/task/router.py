@@ -210,6 +210,7 @@ async def benchmark_execute_task_internal(
                 metadata={
                     "benchmark": True,
                     "sender_options": {"from": body.owner_user_id},
+                    "bot_options": {"lifecycle_stage": "draft"},
                 },
             )
         except Exception as exc:  # noqa: BLE001
@@ -279,6 +280,7 @@ async def benchmark_execute_task_internal(
                     "benchmark": True,
                     "session_id": session_id,
                     "sender_options": {"from": task_request.owner_user_id},
+                    "bot_options": {"lifecycle_stage": "draft"},
                 },
             )
     except Exception as exc:  # noqa: BLE001

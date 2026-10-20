@@ -227,11 +227,13 @@ class TestBenchmarkExecute:
         assert bot_port.send_calls[0]["metadata"] == {
             "benchmark": True,
             "sender_options": {"from": "owner-1"},
+            "bot_options": {"lifecycle_stage": "draft"},
         }
         assert bot_port.send_calls[1]["metadata"] == {
             "benchmark": True,
             "session_id": "benchmark-session-1",
             "sender_options": {"from": "owner-1"},
+            "bot_options": {"lifecycle_stage": "draft"},
         }
         launch = bot_port.send_calls[1]["message"]
         assert "taskPanel.TaskLoopView" in launch
