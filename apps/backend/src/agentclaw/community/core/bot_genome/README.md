@@ -121,6 +121,7 @@ internal_dependencies:
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_config_manifest.apply.entry_delivery  # acm-tree-v1 encode/decode
   - agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol  # last_apply, for applied_revision
+  - agentclaw.community.core.bot_config_manifest.capabilities  # ManifestCapabilities, for the Manifest's MCP entry rules
   - agentclaw.community.core.bot_config_manifest.content  # the content store Service API and scope
   - agentclaw.community.core.bot_config_manifest.fetch.limits  # the fetch-time caps the contract mirrors
   - agentclaw.community.core.bot_config_manifest.schema  # limits, legal_identity_types, placeholders, the MCP entry rules

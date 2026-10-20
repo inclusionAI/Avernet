@@ -27,8 +27,8 @@
 - **Goal:** Refuse at record time what apply would refuse, and diff two specs.
 - **Files:** `core/bot_genome/spec_checks.py`, `core/bot_genome/diff.py`; `tests/community/core/bot_genome/{test_spec_checks,test_diff}.py`
 - **Done when:**
-  - [ ] Every `examples/invalid` case that names `utf8`, `skill-package`, `admission`, `resource-paths`, `tree`, `order` or `canonical-path` is refused by the matching predicate; MCP URL/header rules, `check_mcp_permission_detail` and `validate_bot_override` are exercised with fakes; engine-legal persona types checked.
-  - [ ] `diff_specs` reports added/removed/modified per gene (repo skills by path), unified diffs for UTF-8 text (persona, file resources, tree members, memory items), `None` otherwise, and the diff's tier and rewrite flags.
+  - [x] Every `examples/invalid` case that names `utf8`, `skill-package`, `admission`, `resource-paths`, `tree`, `order` or `canonical-path` is refused by the matching predicate; MCP URL/header rules, `check_mcp_permission_detail` and `validate_bot_override` are exercised with fakes; engine-legal persona types checked.
+  - [x] `diff_specs` reports added/removed/modified per gene (repo skills by path), unified diffs for UTF-8 text (persona, file resources, tree members, memory items), `None` otherwise, and the diff's tier and rewrite flags.
 - **Depends on:** Task 2
 
 ## Task 4: Content store produced-content write path and reachability

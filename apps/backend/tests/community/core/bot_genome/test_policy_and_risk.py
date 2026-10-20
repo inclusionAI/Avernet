@@ -26,7 +26,7 @@ def test_shape_reports_schema_errors_with_their_location() -> None:
     assert reasons and reasons[0].code == "schema" and reasons[0].location == "ops[0]"
     reasons = shape_reasons(_patch({"op": "persona.remove", "type": "OKR.md"}, rationale="", evidence=["bad"]))
     assert [r.location for r in reasons] == ["evidence[0]", "rationale"]
-    assert {r.location for r in shape_reasons({"patch_schema": 2})} == {"$"}
+    assert {r.location for r in shape_reasons({"patch_schema": 2})} == {"$", "patch_schema"}
 
 
 def test_shape_reports_a_non_canonical_target() -> None:

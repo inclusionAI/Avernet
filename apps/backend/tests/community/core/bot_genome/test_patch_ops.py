@@ -12,47 +12,18 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import ca
 from agentclaw.community.core.bot_genome.canonical import canonicalize, revision_id, sha256_digest
 from agentclaw.community.core.bot_genome.errors import ContentNotReachable, PatchRejected
 from agentclaw.community.core.bot_genome.patch import apply_patch, shape_reasons
+from tests.community.core.bot_genome.example_blobs import (
+    EXAMPLES,
+    MEMORY_BOT,
+    SUPPORT_BOT,
+    SUPPORT_BOT_CANDIDATE,
+    BlobDir,
+    load_patch,
+    load_revisions,
+)
 
-EXAMPLES = Path(__file__).resolve().parents[4] / "api-contracts" / "genome" / "v1" / "examples"
-SUPPORT_BOT = "sha256:9e21ea360e6d4bdb63a151d280a7f1802402a8294b5033c92239731bd1e8d1fe"
-SUPPORT_BOT_CANDIDATE = "sha256:5deca3495156b975acac9f4138966c19ce2d535943ce2ad625c238880373183b"
-MEMORY_BOT = "sha256:22755f072e4c98e18595150e6ac125eb3300274ab668c37b731cc1bfd9cd3196"
-
-
-class BlobDir:
-    """The contract's ``examples/blobs`` plus anything a test adds."""
-
-    def __init__(self) -> None:
-        self.extra: dict[str, bytes] = {}
-
-    def put(self, data: bytes) -> str:
-        digest = sha256_digest(data)
-        self.extra[digest] = data
-        return digest
-
-    def read(self, digest: str) -> bytes:
-        if digest in self.extra:
-            return self.extra[digest]
-        path = EXAMPLES / "blobs" / digest.removeprefix("sha256:")
-        if not path.exists():
-            raise ContentNotReachable(digest)
-        return path.read_bytes()
-
-
-def _revisions() -> dict[str, dict[str, Any]]:
-    out = {}
-    for path in (EXAMPLES / "revisions").glob("*.json"):
-        record = json.loads(path.read_text(encoding="utf-8"))
-        out[record["revision"]["id"]] = record
-    return out
-
-
-REVISIONS = _revisions()
+REVISIONS = load_revisions()
 PATCHES = sorted((EXAMPLES / "patches").glob("*.json"))
-
-
-def _patch(name: str) -> dict[str, Any]:
-    return json.loads((EXAMPLES / "patches" / name).read_text(encoding="utf-8"))
 
 
 def _rejected(spec: dict[str, Any], ops: list[dict[str, Any]], blobs: BlobDir | None = None) -> PatchRejected:
@@ -81,7 +52,7 @@ def test_every_example_patch_applies_to_its_base(path: Path) -> None:
 
 
 def test_the_mixed_patch_reproduces_the_candidate_revision() -> None:
-    patch = _patch("00-mixed-r1-to-r2.json")
+    patch = load_patch("00-mixed-r1-to-r2.json")
     base, candidate = REVISIONS[SUPPORT_BOT], REVISIONS[SUPPORT_BOT_CANDIDATE]
     outcome = apply_patch(base["spec"], patch, BlobDir())
     assert outcome.spec == candidate["spec"]
@@ -92,7 +63,7 @@ def test_the_mixed_patch_reproduces_the_candidate_revision() -> None:
 
 
 def test_skill_update_rewrites_the_tree_with_deletes_adds_and_diffs() -> None:
-    patch = _patch("06-skill-update.json")
+    patch = load_patch("06-skill-update.json")
     outcome = apply_patch(REVISIONS[SUPPORT_BOT]["spec"], patch, BlobDir())
     entry = next(e for e in outcome.spec["skills"] if e["name"] == "quality-check")
     members = dict(decode_tree_bytes(dict(outcome.writes)[entry["digest"]]))
@@ -103,20 +74,20 @@ def test_skill_update_rewrites_the_tree_with_deletes_adds_and_diffs() -> None:
 
 
 def test_skill_update_description_only_is_detected_per_op() -> None:
-    outcome = apply_patch(REVISIONS[SUPPORT_BOT]["spec"], _patch("05-skill-update-description.json"), BlobDir())
+    outcome = apply_patch(REVISIONS[SUPPORT_BOT]["spec"], load_patch("05-skill-update-description.json"), BlobDir())
     assert outcome.touched[0].description_only is True
 
 
 def test_memory_ops_edit_the_stored_item_list() -> None:
     blobs = BlobDir()
     base = REVISIONS[MEMORY_BOT]["spec"]
-    added = apply_patch(base, _patch("10-memory-add.json"), blobs)
+    added = apply_patch(base, load_patch("10-memory-add.json"), blobs)
     items = json.loads(dict(added.writes)[added.spec["memory"]["items_digest"]])
     assert [item["key"] for item in items] == ["customer-tier-rules", "returns-window", "vip-contact"]
-    retired = apply_patch(base, _patch("12-memory-retire.json"), blobs)
+    retired = apply_patch(base, load_patch("12-memory-retire.json"), blobs)
     items = json.loads(dict(retired.writes)[retired.spec["memory"]["items_digest"]])
     assert [item["key"] for item in items] == ["returns-window"]
-    mode = apply_patch(base, _patch("13-memory-set-mode-replace.json"), blobs)
+    mode = apply_patch(base, load_patch("13-memory-set-mode-replace.json"), blobs)
     assert mode.spec["memory"]["mode"] == "replace" and mode.touched[0].mode == "replace"
 
 
