@@ -1,4 +1,4 @@
-import { a2aUrlsFromWsUrl } from '@/adapters/a2a/urls';
+import { a2aUrlsFromBaseUrl, a2aUrlsFromWsUrl } from '@/adapters/a2a/urls';
 
 describe('a2aUrlsFromWsUrl（spec §2 地址映射）', () => {
   it('直连 v3 ws url 派生根级 A2A 面（丢弃 /api/{engine}/ws 路径）', () => {
@@ -26,5 +26,39 @@ describe('a2aUrlsFromWsUrl（spec §2 地址映射）', () => {
   it('大写 WS scheme 归一后可派生（new URL 先归一）', () => {
     const urls = a2aUrlsFromWsUrl('WS://localhost:20003/api/claude_code/ws');
     expect(urls.cardUrl).toBe('http://localhost:20003/.well-known/agent-card.json');
+  });
+});
+describe('a2aUrlsFromBaseUrl（B17 服务端签发 base → A2A 面）', () => {
+  it('裸 origin base 派生 card/rpc（尾部斜杠剥除）', () => {
+    expect(a2aUrlsFromBaseUrl('http://arca-x-svc.stable.alipay.net:32196'))
+      .toEqual({
+        cardUrl: 'http://arca-x-svc.stable.alipay.net:32196/.well-known/agent-card.json',
+        rpcUrl: 'http://arca-x-svc.stable.alipay.net:32196/rpc',
+      });
+    expect(a2aUrlsFromBaseUrl('http://host:1/')).toEqual({
+      cardUrl: 'http://host:1/.well-known/agent-card.json',
+      rpcUrl: 'http://host:1/rpc',
+    });
+  });
+
+  it('带路径前缀的 base 照单全收（两路径挂其下，不否决未来拓扑）', () => {
+    const urls = a2aUrlsFromBaseUrl('http://gw.example/prefix');
+    expect(urls.cardUrl).toBe('http://gw.example/prefix/.well-known/agent-card.json');
+    expect(urls.rpcUrl).toBe('http://gw.example/prefix/rpc');
+  });
+
+  it('https base 派生 https 面', () => {
+    const urls = a2aUrlsFromBaseUrl('https://bot.example:20003');
+    expect(urls.rpcUrl).toBe('https://bot.example:20003/rpc');
+  });
+
+  it('非 http(s) scheme 拒绝（ws/畸形 base fail-fast，不静默产出坏 url）', () => {
+    expect(() => a2aUrlsFromBaseUrl('ws://host:1')).toThrow();
+    expect(() => a2aUrlsFromBaseUrl('not-a-url')).toThrow();
+  });
+
+  it('query/fragment 拒绝（追加路径会拼出结构性坏 url）', () => {
+    expect(() => a2aUrlsFromBaseUrl('http://host:1?x=1')).toThrow();
+    expect(() => a2aUrlsFromBaseUrl('http://host:1#f')).toThrow();
   });
 });

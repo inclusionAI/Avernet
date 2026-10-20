@@ -38,7 +38,7 @@ import { TransportChoiceCache } from './choiceCache';
 import { fetchCard, Scenario, validateScenarios } from './card';
 import { createSendBanRegistry, type SendBanRegistry } from './sendBan';
 import { isA2aClientEnabled } from './switch';
-import { a2aUrlsFromWsUrl, type A2aUrls } from './urls';
+import { a2aUrlsFromBaseUrl, a2aUrlsFromWsUrl, type A2aUrls } from './urls';
 import { LOCK_CANDIDATE_KINDS, type WireFailure } from './rpc';
 
 // ─── 输入类型（结构镜像，零 SDK 依赖——同 A2AProviderInput.ts 理由） ────────
@@ -47,6 +47,12 @@ import { LOCK_CANDIDATE_KINDS, type WireFailure } from './rpc';
 export interface A2aBootstrapConfig extends A2aOpenClawProviderConfig {
   /** 动态 IAM 凭证（每次 request/RPC 前取新，覆盖静态 xIAMToken） */
   iamTokenGetter?: () => Promise<string | undefined>;
+  /**
+   * B17 服务端签发的 A2A base（连接响应 sockets kind='a2a' 的 url，由 BaaS
+   * 沙箱层拼成浏览器可达形态）。在场即压过从 ws url 的推导——推导是站点
+   * 直连拓扑的兜底，网关 relay topo 下派生地址路由不到 card（404）。
+   */
+  a2aBaseUrl?: string;
 }
 
 /** 测试 seam / 组合注入口（全部可选；缺省 = app 单例 + 全局 fetch + 总开关） */
@@ -126,12 +132,27 @@ function buildA2AProvider(
   return provider;
 }
 
+// ─── A2A 面地址解析（服务端签发优先，ws 推导兜底） ─────────────────────────
+
+/**
+ * 连接材料 → A2A card/rpc 地址（单一解析口径，探测/缓存/禁令三面共用）：
+ * ``a2aBaseUrl`` 在场即服务端签发形态（B17，浏览器可达是签发方承诺）；
+ * 否则回退 v3 ws url 直连推导。两者解析失败都上抛——形状问题不是
+ * endpoint 的探测结论（不落缓存，六态决策表第 2 态）。
+ */
+export function resolveA2aUrls(providerConfig: A2aBootstrapConfig): A2aUrls {
+  return providerConfig.a2aBaseUrl
+    ? a2aUrlsFromBaseUrl(providerConfig.a2aBaseUrl)
+    : a2aUrlsFromWsUrl(providerConfig.url);
+}
+
 // ─── 异步正路：探测 → 校验 → 收敛 → 构造 ─────────────────────────────────
 
 /**
  * A2A 传输选择六态决策（决策表钉死在 __tests__/bootstrap.test.ts）：
  *   开关关 → null（缓存不动 + 零 fetch）；
- *   非 ws url → null（不落缓存——url 形状不是 endpoint 的探测结论）；
+ *   非 ws url 且无 a2aBaseUrl → null（不落缓存——url 形状不是 endpoint
+ *   的探测结论；B17 起服务端签发的 a2aBaseUrl 可豁免：签发即权威形状）；
  *   card 探测失败 → decide(false)=probe-v3 + null（可翻案，永不锁）；
  *   场景缺项（STREAM/RECOVERY 任一不过）→ probe-v3 + null；
  *   已 locked → 探测照跑但被锁吸收（decide 尊重 locked），null；
@@ -149,7 +170,7 @@ export async function maybeBuildA2AProvider(
   if (!switchOn()) return null;                 // 缓存不动 + 零 fetch
   let urls: A2aUrls;
   try {
-    urls = a2aUrlsFromWsUrl(providerConfig.url);
+    urls = resolveA2aUrls(providerConfig);
   } catch {
     return null;
   }
@@ -202,7 +223,7 @@ function prewarmA2AChoice(
 
 /**
  * 同步会话工厂入口（useMultiSessionChat 唯一调用的面）：
- *   开关关 / 非 ws url → null；
+ *   开关关 / 非 ws url（无服务端 a2aBaseUrl）→ null；
  *   缓存未决 / probe-v3 → 触发后台预热（probe-v3 即重探测，锁型不预热）→ null；
  *   locked-v3 → null（页内最高优先级，自动清除无效——不预热不翻案）；
  *   a2a → 同步构造返回（信任页级已决结论；connect 期探测失败由 onError 面上浮）。
@@ -218,7 +239,7 @@ export function takeCachedA2AProvider(
   if (!switchOn()) return null;
   let urls: A2aUrls;
   try {
-    urls = a2aUrlsFromWsUrl(providerConfig.url);
+    urls = resolveA2aUrls(providerConfig);
   } catch {
     return null;
   }
@@ -249,13 +270,23 @@ export function deriveEndpointBase(wsUrl: string): string | null {
  * (endpointBase, sessionKey) 命中禁令 → 拦截本次发送。sessionKey 与 provider
  * request 期核销的 contextId 同源（buildParams 直传同键）。非 A2A 面
  * （非 ws url）恒 false——v3 发送不受影响。
+ *
+ * B17：``a2aBaseUrl`` 在场时按签发 base 解析 endpointBase，与探测缓存/
+ * provider 注册禁令用的键同一口径（resolveA2aUrls 单源）——ws 推导在这条
+ * topo 下指向网关，和 provider 的真实 rpcUrl 永不相等，禁令会静默失效。
  */
 export function isSendBannedForSession(
   sessionKey: string,
   wsUrl: string,
+  a2aBaseUrl?: string,
   registry: SendBanRegistry = appSendBan,
 ): boolean {
-  const base = deriveEndpointBase(wsUrl);
+  let base: string | null;
+  try {
+    base = resolveA2aUrls({ url: wsUrl, a2aBaseUrl }).rpcUrl;
+  } catch {
+    base = null;
+  }
   return base !== null && registry.isBanned(base, sessionKey);
 }
 

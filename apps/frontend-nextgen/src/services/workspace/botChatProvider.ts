@@ -80,6 +80,10 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   private stateListeners = new Set<(state: BotChatState) => void>();
   /** A2A M2 bootstrap seam：最近一次连接信息里的 ws url——§3.1 发送禁令门按它派生 A2A endpointBase */
   private wsUrl: string | null = null;
+  /** B17 服务端签发面：连接响应 sockets kind='a2a' 的 base（无则 null——旧后端
+   * 不出该 socket，ws 推导行为逐字节保持）；A2A bootstrap 与发送禁令的门键均
+   * 以它为权威来源（见 bootstrap.ts resolveA2aUrls/isSendBannedForSession）。 */
+  private a2aBaseUrl: string | null = null;
   /** B12 取消四态的宿主订阅面（A2AProvider.onCancelOutcome → useBotChat toast 消费） */
   private readonly cancelOutcomeListeners = new Set<(outcome: CancelOutcome) => void>();
   private unsubscribeInnerConnection?: () => void;
@@ -131,7 +135,10 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
    * （尚无 ws url）/ 非 A2A 面（选择探测落 v3）恒 false——v3 发送不受影响。
    */
   isSendBanned(): boolean {
-    return this.wsUrl !== null && isSendBannedForSession(this.options.sessionId, this.wsUrl);
+    // B17：签发 base 在场时按它解析禁令键（与 provider 注册面同一 endpoint
+    // 口径），否则回退既有的 ws 推导——两态都是 bootstrap 单源函数。
+    return this.wsUrl !== null
+      && isSendBannedForSession(this.options.sessionId, this.wsUrl, this.a2aBaseUrl ?? undefined);
   }
 
   /** B12 取消终局播报订阅：A2AProvider.onCancelOutcome 经本类转发（含 provider 已 teardown 的迟到核销） */
@@ -152,7 +159,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     }
   }
 
-  private async getChatUrl(): Promise<string> {
+  private async getChatUrl(): Promise<{ url: string; a2aBaseUrl: string | null }> {
     const resp = await getBotConnection(
       this.options.bot.realBotId,
       withFriendBotRequestParams(this.options.bot, this.options.userId, {
@@ -164,7 +171,10 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     const socket = resp.data?.sockets?.find((s) => s.kind === 'chat');
     if (!socket?.url) throw new Error('Bot 连接信息为空,请稍后重试');
     this.directDesktop = resp.data?.transport_mode === 'direct';
-    return socket.url;
+    // B17：服务端签发的 A2A base 原样收下（签发方承诺浏览器可达）；
+    // 缺席 = null = 既有 ws 推导兜底，不做任何本地代填。
+    const a2aBase = resp.data?.sockets?.find((s) => s.kind === 'a2a')?.url;
+    return { url: socket.url, a2aBaseUrl: a2aBase ? String(a2aBase) : null };
   }
 
   private ensureInitialized(): Promise<OpenClawProvider> {
@@ -179,8 +189,9 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
 
   private async initialize(): Promise<OpenClawProvider> {
     this.setState({ phase: 'preparing', error: null });
-    const url = await this.getChatUrl();
+    const { url, a2aBaseUrl } = await this.getChatUrl();
     this.wsUrl = url;
+    this.a2aBaseUrl = a2aBaseUrl;
     // 连接凭证(URL query token,管 WS 握手)与请求身份凭证(x-iam-token,管 chat.send 帧)是两套:
     // URL 已内含握手凭证;此处须单独拉取 IAM token 并注入 SDK,否则发送会被服务端拒(身份不明)。
     this.iamToken = this.directDesktop
@@ -209,6 +220,9 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     });
     const inner = factory({
       url,
+      // B17：服务端签发的 A2A base 随 cfg 透传——A2A bootstrap 在场即权威，
+      // v3 OpenClawProvider 对多出的成员幂等忽略（ws 面不改一字）。
+      ...(this.a2aBaseUrl ? { a2aBaseUrl: this.a2aBaseUrl } : {}),
       sessionKey: this.options.sessionId,
       xIAMToken: this.iamToken,
       immediateConnect: true,

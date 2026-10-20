@@ -94,11 +94,25 @@ describe('botChatProvider A2A bootstrap 接缝钉板（B16 static guard）', () 
 
   it('发送门：provider 侧纯谓词（§3.1 同键喂 registry），hook 侧入口拦截 + toast', () => {
     expect(PROVIDER_SOURCE).toContain(
-      'return this.wsUrl !== null && isSendBannedForSession(this.options.sessionId, this.wsUrl);',
+      'return this.wsUrl !== null',
+    );
+    expect(PROVIDER_SOURCE).toContain(
+      'isSendBannedForSession(this.options.sessionId, this.wsUrl, this.a2aBaseUrl ?? undefined);',
     );
     expect(PROVIDER_SOURCE).toContain('this.wsUrl = url;');
     expect(HOOK_SOURCE).toContain('if (provider?.isSendBanned?.()) {');
     expect(HOOK_SOURCE).toContain('toast.error(SEND_BAN_UI_TEXT);');
+  });
+
+  it('B17 服务端签发 A2A 面：连接响应 kind=a2a socket → cfg.a2aBaseUrl 透传到 SDK 工厂', () => {
+    // 连接面读取：kind='a2a' 的 socket 原样收下；缺席时 a2aBaseUrl 恒 null
+    expect(PROVIDER_SOURCE).toContain("find((s) => s.kind === 'a2a')");
+    // 透传行：签发值进 factory cfg（v3 构造行保持零改动红线）
+    expect(PROVIDER_SOURCE).toContain(
+      '...(this.a2aBaseUrl ? { a2aBaseUrl: this.a2aBaseUrl } : {}),',
+    );
+    // 双锚初始化：wsUrl（§3.1 门）与 a2aBaseUrl（B17）同源同拍落位
+    expect(PROVIDER_SOURCE).toContain('this.a2aBaseUrl = a2aBaseUrl;');
   });
 
   it('发送门文案单源在 bootstrap.ts（spec 原文）；取消文案矩阵单源在 cancelOutcomes.ts', () => {
