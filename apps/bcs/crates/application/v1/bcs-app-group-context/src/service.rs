@@ -12,12 +12,13 @@ use bcs_service_api::application::v1::{
 use chrono::Utc;
 use ulid::Ulid;
 
-use crate::permissions::{actor_can_read, actor_can_write, permission_for};
+use crate::permissions::{actor_can_read, actor_can_write, actor_is_owner, permission_for};
 use crate::scope::{ResolvedScope, resolve_scope, resolve_scopes};
 
 pub const MAX_CONTENT_BYTES: usize = 4 * 1024;
 pub const MAX_NAME_CHARS: usize = 255;
 pub const MAX_POLICY_BYTES: usize = 4096;
+pub const MAX_OWNERS_BYTES: usize = 4096;
 pub const MAX_CREATOR_CHARS: usize = 255;
 
 const INVALID_PARAM: &str = "invalid_param";
@@ -53,6 +54,7 @@ impl GroupContextApplicationServiceImpl {
         validate_name(&name)?;
         validate_content(&content)?;
         validate_policies(&visible_to, &collect_from)?;
+        validate_owners(&owners)?;
         let now = Utc::now();
         self.repo
             .create_active(NewGroupContextEntry {
@@ -93,6 +95,7 @@ impl GroupContextApplicationServiceImpl {
         validate_name(&name)?;
         validate_content(&content)?;
         validate_policies(&visible_to, &collect_from)?;
+        validate_owners(&owners)?;
         let now = Utc::now();
         self.repo
             .supersede_active(
@@ -173,12 +176,31 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
             .await
             .map_err(map_store_error)?
             .ok_or_else(|| not_found(&command.name, &scope.scope))?;
-        if !actor_can_write(&old, &command.actor_id) {
-            return Err(permission_denied(format!(
-                "actor_id={} is not allowed to update {} in {}",
-                command.actor_id, command.name, scope.scope
-            )));
+        // Authorization uses only the active row read for this request. A new
+        // owners list is data, never evidence for the request that carries it.
+        let is_owner = actor_is_owner(&old, &command.actor_id);
+        if !is_owner {
+            if command.visible_to.is_some()
+                || command.collect_from.is_some()
+                || command.owners.is_some()
+            {
+                return Err(permission_denied(format!(
+                    "actor_id={} is not an owner and may only update content and validity for {} in {}",
+                    command.actor_id, command.name, scope.scope
+                )));
+            }
+            if !actor_can_write(&old, &command.actor_id) {
+                return Err(permission_denied(format!(
+                    "actor_id={} is not allowed to update {} in {}",
+                    command.actor_id, command.name, scope.scope
+                )));
+            }
         }
+        let owners = match command.owners {
+            Some(owners) => owners,
+            None => old.owners.clone(),
+        };
+        validate_owners(&owners)?;
         let content = command.content.unwrap_or_else(|| old.content.clone());
         let visible_to = command.visible_to.unwrap_or_else(|| old.visible_to.clone());
         let collect_from = command
@@ -197,7 +219,7 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
             command.actor_id.clone(),
             visible_to,
             collect_from,
-            command.owners.clone().unwrap_or_else(|| old.owners.clone()),
+            owners,
             command.change_reason,
             valid_from,
             valid_to,
@@ -389,6 +411,44 @@ fn validate_content(content: &str) -> Result<(), ApplicationError> {
     } else {
         Ok(())
     }
+}
+
+fn validate_owners(owners: &GroupContextOwners) -> Result<(), ApplicationError> {
+    let encoded = serde_json::to_vec(owners)
+        .map_err(|error| ApplicationError::internal(error.to_string()))?;
+    if encoded.len() > MAX_OWNERS_BYTES {
+        return Err(ApplicationError::payload_too_large(
+            PAYLOAD_TOO_LARGE,
+            format!("owners serialized JSON exceeds {MAX_OWNERS_BYTES} bytes"),
+        ));
+    }
+    if owners.is_empty() {
+        return Err(ApplicationError::invalid(
+            INVALID_PARAM,
+            "owners.userIds must not be empty",
+        ));
+    }
+    if owners
+        .user_ids
+        .iter()
+        .any(|user_id| user_id.trim().is_empty())
+    {
+        return Err(ApplicationError::invalid(
+            INVALID_PARAM,
+            "owners.userIds must not contain blank ids",
+        ));
+    }
+    if owners
+        .user_ids
+        .iter()
+        .any(|user_id| user_id.chars().count() > MAX_CREATOR_CHARS)
+    {
+        return Err(ApplicationError::payload_too_large(
+            PAYLOAD_TOO_LARGE,
+            format!("owners.userIds contains an id exceeding {MAX_CREATOR_CHARS} characters"),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_collect_from(policy: &GroupContextPolicy) -> Result<(), ApplicationError> {

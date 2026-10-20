@@ -42,28 +42,29 @@
 
 ## Task 3: Application 写入语义与默认 owners
 
+- [x] **Done:** Application owner write semantics
 - **Goal:** add/systemset 默认写入 owners，并隔离 owner 与 W-only 的可修改字段。
 - **Files:** `apps/bcs/crates/application/v1/bcs-app-group-context/src/service.rs`, `apps/bcs/crates/application/v1/bcs-app-group-context/src/permissions.rs`, `apps/bcs/crates/application/v1/bcs-app-group-context/tests/group_context_service.rs`
 - **Done when:**
-  - [ ] `add` 服务端默认写入 `owners.userIds=[actor_id]`。
-  - [ ] `add` 不读取调用方 owners；请求 body 中的未知 owners 不会生效。
-  - [ ] `systemset` 首次创建默认 `owners=["system"]`。
-  - [ ] `systemset` supersede 既有 context 时沿用 old owners。
-  - [ ] `systemset` 不执行 owner 或 `collect_from` 授权判断。
-  - [ ] update 授权顺序为先判断当前 active row owner，再对非 owner 判断 `collect_from`。
-  - [ ] update 传入 owners 时校验非空；未传时沿用 old owners。
-  - [ ] owner 可修改 `content`、`valid_from`、`valid_to`、`visible_to`、`collect_from`、`owners`。
-  - [ ] owner 不要求出现在 `collect_from`。
-  - [ ] 非 owner 必须满足现有 `collect_from` W 权限。
-  - [ ] 非 owner W 只能修改 `content`、`valid_from`、`valid_to`。
-  - [ ] 非 owner W 传入 `owners`、`visible_to` 或 `collect_from` 返回 `permission_denied`。
-  - [ ] `change_reason` 不能绕过上述边界。
-  - [ ] 授权只基于请求读取的当前 active row，不读取历史版本 owners；`command.owners` 不参与本次授权。
-  - [ ] 应用测试覆盖：非 owner W 在请求中把自己的 id 写入 owners 被拒绝。
-  - [ ] 应用测试覆盖：owner 不在 `collect_from` 时，可修改 content 与 `visible_to` / `collect_from` / `owners`。
-  - [ ] 应用测试覆盖：owner A 将 owners 移交给 B 后，B 是新 active row owner；A 立即失去 owner 权限，只能依据普通策略写。
-  - [ ] 应用测试覆盖：systemset supersede old owners 不为 `system` 的 context 时仍成功并沿用 old owners。
-  - [ ] 应用测试覆盖上述分支和 ownership 移交语义。
+  - [x] `add` 服务端默认写入 `owners.userIds=[actor_id]`。
+  - [x] `add` 不读取调用方 owners；请求 body 中的未知 owners 不会生效。
+  - [x] `systemset` 首次创建默认 `owners=["system"]`。
+  - [x] `systemset` supersede 既有 context 时沿用 old owners。
+  - [x] `systemset` 不执行 owner 或 `collect_from` 授权判断。
+  - [x] update 授权顺序为先判断当前 active row owner，再对非 owner 判断 `collect_from`。
+  - [x] update 传入 owners 时校验非空；未传时沿用 old owners。
+  - [x] owner 可修改 `content`、`valid_from`、`valid_to`、`visible_to`、`collect_from`、`owners`。
+  - [x] owner 不要求出现在 `collect_from`。
+  - [x] 非 owner 必须满足现有 `collect_from` W 权限。
+  - [x] 非 owner W 只能修改 `content`、`valid_from`、`valid_to`。
+  - [x] 非 owner W 传入 `owners`、`visible_to` 或 `collect_from` 返回 `permission_denied`。
+  - [x] `change_reason` 不能绕过上述边界。
+  - [x] 授权只基于请求读取的当前 active row，不读取历史版本 owners；`command.owners` 不参与本次授权。
+  - [x] 应用测试覆盖：非 owner W 在请求中把自己的 id 写入 owners 被拒绝。
+  - [x] 应用测试覆盖：owner 不在 `collect_from` 时，可修改 content 与 `visible_to` / `collect_from` / `owners`。
+  - [x] 应用测试覆盖：owner A 将 owners 移交给 B 后，B 是新 active row owner；A 立即失去 owner 权限，只能依据普通策略写。
+  - [x] 应用测试覆盖：systemset supersede old owners 不为 `system` 的 context 时仍成功并沿用 old owners。
+  - [x] 应用测试覆盖上述分支和 ownership 移交语义。
 - **Depends on:** Task 2
 
 ## Task 4: List / Get 的 owner 读权限
