@@ -90,7 +90,6 @@ describe('botSessionService', () => {
             status: 'ACTIVE',
             actions: ['engine_restart'],
             disabled_actions: { restart_publish: '仅发布 Bot 支持' },
-            runtime_stage: 'draft',
           },
           {
             bot_id: 'normal-empty:4',
@@ -143,6 +142,49 @@ describe('botSessionService', () => {
         templateType: 'generalCC',
       }),
     ]);
+  });
+
+  it('服务 Bot 的真实目录未返回阶段时仍保留草稿操作上下文', async () => {
+    ownedMocked.listBots.mockResolvedValue({
+      code: 200000,
+      data: {
+        items: [
+          {
+            bot_id: 'service-1',
+            bot_name: 'Service',
+            engine: 'OpenClaw',
+            bot_type: 'service',
+            owner_entity_id: 'owner-1',
+            status: 'ACTIVE',
+          },
+        ],
+        total: 1,
+      },
+    });
+    ownedMocked.listBotInventory.mockResolvedValue({
+      code: 200000,
+      data: {
+        items: [
+          {
+            bot_id: 'service-1',
+            owner_entity_id: 'owner-1',
+            actions: ['engine_restart'],
+          },
+        ],
+        total: 1,
+      },
+    });
+    expect(await botSessionService.listOwnedBots('viewer')).toMatchObject({
+      ok: true,
+      data: [
+        {
+          botType: 'service',
+          runtimeStage: 'draft',
+          actions: ['engine_restart'],
+          ownerId: 'owner-1',
+        },
+      ],
+    });
   });
 
   it('listOwnedBots 透传 bots 接口原始 status(视图侧判定 Bot 可用性)', async () => {
@@ -572,5 +614,4 @@ describe('owned chat engine permissions from inventory', () => {
     const result = await botSessionService.listOwnedBots('caller');
     expect(result.ok && result.data[0].actions).toEqual([]);
   });
-
 });

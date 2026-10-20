@@ -33,7 +33,7 @@ test('只为在线的本人或团队 Bot 单聊建立版本目标并保留权限
       actions: ['engine_restart'],
       disabledActions: undefined,
       serviceBot: false,
-      runtimeStage: undefined,
+      runtimeStage: 'draft',
     },
   });
   expect(buildChatEngineVersionTarget({ ...input, section: 'team' })).toMatchObject({ ownerId: 'owner-1' });
@@ -70,4 +70,13 @@ test('保留 Service 计算权限所需的后端动作与阶段字段', () => {
 
 test('仅按后端引擎支持边界判断，不额外排除 OpenClaw/Hermes 模板 Bot', () => {
   expect(buildChatEngineVersionTarget({ ...input, bot: { ...bot, isAgentCodingBot: true } })).not.toBeNull();
+});
+
+test('服务 Bot 目录没有阶段时使用草稿操作阶段', () => {
+  const target = buildChatEngineVersionTarget({ ...input, bot: { ...bot, botType: 'service' } });
+  expect(target?.restartPermission).toMatchObject({
+    serviceBot: true,
+    runtimeStage: 'draft',
+    actions: ['engine_restart'],
+  });
 });

@@ -248,7 +248,7 @@ function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
     engine: dto.engine_type ?? dto.engine,
     ...permissions,
     botType: dto.bot_type,
-    runtimeStage: dto.runtime_stage,
+    runtimeStage: 'draft',
     isAgentCodingBot: runtime.isAgentCodingBot,
     templateType: runtime.templateType,
     templateName: runtime.templateName,

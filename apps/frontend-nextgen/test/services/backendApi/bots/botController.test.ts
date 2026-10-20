@@ -48,6 +48,16 @@ describe('botController OpenAPI contracts', () => {
       expect.objectContaining({ method: 'GET' }),
     );
   });
+  test('inventory 保留团队空间及调用方取消信号', async () => {
+    const controller = new AbortController();
+    const spy = jest.spyOn(globalThis, 'fetch').mockImplementation(() => response({ total: 0, items: [] }));
+    await listBotInventory({ user_id: 'viewer', page: 1, page_size: 100 }, '42', controller.signal);
+    expect(spy).toHaveBeenCalledWith(
+      '/openapi/v1/bots/all?user_id=viewer&page=1&page_size=100',
+      expect.objectContaining({ signal: controller.signal, headers: expect.objectContaining({ 'X-Space-Id': '42' }) }),
+    );
+  });
+
   test('does not send placeholder identity me as user_id', async () => {
     useWorkspaceStore.setState({ activeIdentityId: 'me' });
     const spy = jest.spyOn(globalThis, 'fetch').mockImplementation(() => response({ total: 0, items: [] }));

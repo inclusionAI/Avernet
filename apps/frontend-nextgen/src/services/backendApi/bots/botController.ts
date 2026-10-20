@@ -31,7 +31,6 @@ export interface OwnedBotDto {
   owner_entity_id?: string;
   actions?: string[];
   disabled_actions?: Record<string, string>;
-  runtime_stage?: 'draft' | 'verify' | 'online';
   space_id?: string | number;
   space_name?: string;
 }
@@ -114,11 +113,12 @@ export function changeBotSpace(bot_id: string, space_id: number, user_id?: strin
   });
 }
 
-export function listBotInventory(params?: BackendUnknownRecord, spaceId?: string) {
+export function listBotInventory(params?: BackendUnknownRecord, spaceId?: string, signal?: AbortSignal) {
   return backendRequest<BackendApiEnvelope<BackendApiPage<BotDto>>>(BOT_ENDPOINTS.inventory, {
     method: 'GET',
     params: userScopedParams(params),
     headers: spaceId ? { 'X-Space-Id': spaceId } : undefined,
+    signal,
   });
 }
 

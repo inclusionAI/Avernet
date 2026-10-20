@@ -38,7 +38,8 @@ export function buildChatEngineVersionTarget(input: {
       actions: bot.actions ?? [],
       disabledActions: bot.disabledActions,
       serviceBot: bot.botType?.toLowerCase() === 'service',
-      runtimeStage: bot.runtimeStage,
+      // Chat engine inspection and restart address the draft runtime.
+      runtimeStage: bot.runtimeStage ?? 'draft',
     },
   };
 }

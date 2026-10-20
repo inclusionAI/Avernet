@@ -13,9 +13,6 @@ export interface CollaboratingBotDto {
   cluster_name: string;
   bot_type: string;
   status: string;
-  actions?: string[];
-  disabled_actions?: Record<string, string>;
-  runtime_stage?: 'draft' | 'verify' | 'online';
   template_type?: string | null;
   template_config?: Record<string, unknown> | null;
   bot_template_config?: Record<string, unknown> | null;
