@@ -52,7 +52,7 @@
   - [ ] Feature spec status reflects implementation.
 - **Depends on:** Task 2
 
-## Task 4: Verify against existing CI and acceptance criteria
+## Task 4: Verify against existing CI and acceptance criteria [x]
 - **Goal:** Run the repository's existing BCS gates without weakening or bypassing them and confirm every spec criterion.
 - **Files:**
   - `apps/bcs/specs/2026-09-09-group-context-api/tasks-04-authorizer-write-access.md`
