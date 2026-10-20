@@ -5,7 +5,8 @@
  * - apiBaseUrl 为 '' 时走相对路径，由当前环境代理转发；taskApiBase 缺省回退 /openapi/v1 读公开面（gateway spanner 鉴权）。
  * - 轮询：图级 status 非终态时 setTimeout 重排（默认 1000ms）；产品态 DONE/FAILED/REVIEWING/CANCELLED 停，兼容旧 HUNG。
  * - 取消：AbortController，切 taskId / 卸载时 abort。
- * - 日志：include_action_log 默认 false（日志抽屉打开时由上层单独请求，P0 常规轮询不携带）。
+ * - 日志：include_action_log 由上层传入(V2 TaskPanel 默认 true 全量轮询,rework/execDag 派生依赖;
+ *   旧 P0"日志抽屉按需请求"动机随 NodeDetailDrawer 退役作废)。
  */
 import { extractLoginUrl, isAceLoginResponse } from '@/services/backendApi/aceLoginBody';
 import { triggerAceLoginRedirect } from '@/services/backendApi/httpClient';

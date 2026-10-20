@@ -116,8 +116,9 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
                   {isGroup ? <Users size={11} /> : <Info size={11} />}
                   {executorName}
                 </span>
-                {(node.attemptCount ?? 0) > 0 && (
-                  <span style={badgeStyle(C.warning)}>第 {node.attemptCount} 次返工</span>
+                {/* 返工次数 = attemptCount-1(action_log 的 attempt 从 1 起算,首发不亮徽章) */}
+                {(node.attemptCount ?? 0) > 1 && (
+                  <span style={badgeStyle(C.warning)}>第 {(node.attemptCount ?? 0) - 1} 次返工</span>
                 )}
                 {node.needsHitl && present === 'running' && <span style={badgeStyle(C.warning)}>人工处理</span>}
               </div>

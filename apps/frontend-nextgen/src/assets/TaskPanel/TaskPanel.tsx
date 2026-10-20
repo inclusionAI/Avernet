@@ -25,6 +25,12 @@ export interface TaskPanelProps {
   >;
   /** 宿主注入导航(业务层 useTaskPanelNavBinding);缺省时组件内本地降级,副屏仍可用但不联动会话 */
   nav?: TaskPanelNav;
+  /**
+   * V2 默认 true:rework/attemptCount/execDag/stepTraces 全部派生自 action_log,
+   * 轮询不带日志则 V2 核心展示休眠(终审 C1)。旧 P0"常规轮询不携带日志"动机
+   * (日志抽屉按需拉取)随 NodeDetailDrawer 退役一并作废——载荷换取 L1/L2 全量派生。
+   */
+  includeActionLog?: boolean;
   /** 多任务切换条槽位(宿主注入 TaskSwitcherBar) */
   switcher?: React.ReactNode;
   onOpenSubTask?: (subTaskId: string) => void;
@@ -41,6 +47,7 @@ export const TaskPanel: React.FC<TaskPanelProps> = ({
   taskId,
   taskInfoFallback,
   nav: navProp,
+  includeActionLog = true,
   switcher,
   onOpenSubTask,
   onTogglePanel,
@@ -53,7 +60,13 @@ export const TaskPanel: React.FC<TaskPanelProps> = ({
 
   return (
     <>
-      <TaskPanelFetcher apiBaseUrl={apiBaseUrl} taskApiBase={taskApiBase} taskId={taskId} userId={userId}>
+      <TaskPanelFetcher
+        apiBaseUrl={apiBaseUrl}
+        taskApiBase={taskApiBase}
+        taskId={taskId}
+        userId={userId}
+        includeActionLog={includeActionLog}
+      >
         {({ task, loading, error, retry }) => {
           const resolvedTask = task
             ? {

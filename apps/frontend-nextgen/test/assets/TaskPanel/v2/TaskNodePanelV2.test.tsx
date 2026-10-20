@@ -99,7 +99,7 @@ describe('TaskNodePanelV2(L2)三区', () => {
     render(<TaskNodePanelV2 {...props()} />);
     expect(screen.getByText('并行调研执行')).toBeTruthy();
     expect(screen.getByText('返工中')).toBeTruthy();
-    expect(screen.getByText('第 2 次返工')).toBeTruthy();
+    expect(screen.getByText('第 1 次返工')).toBeTruthy(); // I2:attemptCount 2 = 返工 1 次
     expect(screen.getByText('人工处理')).toBeTruthy();
     expect(screen.getByText('对三家竞品做功能与定价对比')).toBeTruthy();
     expect(screen.getByText(/开始 2026-10-20 14:30/)).toBeTruthy();

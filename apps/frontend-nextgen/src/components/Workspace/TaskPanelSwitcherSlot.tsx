@@ -23,7 +23,9 @@ export const TaskPanelSwitcherSlot: React.FC<{
   const userId = human.status === 'available' ? human.value?.userId?.trim() || undefined : undefined;
   const { items } = useTaskSwitcherTasks(userId);
   const activeTaskId = useTaskSidePanelStore((s) => s.activeTaskId);
-  const effectiveActive = activeTaskId ?? currentTaskId;
+  // I4:横条「当前」以本面板实例的任务为准——全局 activeTaskId 只服务发起任务后的 tab
+  // 自动聚焦语义,不得让非活跃任务面板在自己的横条里显示别的任务为"当前"。
+  const effectiveActive = currentTaskId || activeTaskId || items[0]?.taskId || '';
   if (!items.length) return null;
 
   return (

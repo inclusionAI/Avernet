@@ -112,7 +112,10 @@ export const TaskNodePanelV2: React.FC<TaskNodePanelV2Props> = ({
             {node.assigneeName || node.executor || '—'}
           </span>
           <span style={{ ...badgeStyle(presentTone.color), display: 'inline-flex' }}>{presentTone.label}</span>
-          {(node.attemptCount ?? 0) > 0 && <span style={badgeStyle(C.warning)}>第 {node.attemptCount} 次返工</span>}
+          {/* 返工次数 = attemptCount-1(attempt 从 1 起算,首发不亮徽章) */}
+          {(node.attemptCount ?? 0) > 1 && (
+            <span style={badgeStyle(C.warning)}>第 {(node.attemptCount ?? 0) - 1} 次返工</span>
+          )}
           {node.needsHitl && <span style={badgeStyle(C.warning)}>人工处理</span>}
           {node.hasSubTask && node.subTaskId && onOpenSubTask && (
             <button

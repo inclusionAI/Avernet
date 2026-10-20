@@ -74,7 +74,7 @@ const task = {
       runMode: 'coop_group',
       drillable: true,
       needsHitl: true,
-      attemptCount: 1,
+      attemptCount: 2,
       sessionId: 'bcs_grp_902:round:2',
       groupId: 'g-902',
       startedAtMs: 1700000000000,
@@ -127,7 +127,10 @@ describe('TaskOverviewV2(L1)', () => {
     expect(screen.getByText('需求澄清与规划')).toBeTruthy();
     expect(screen.getByText('并行调研执行')).toBeTruthy();
     expect(screen.getByText('竞品研究员Group')).toBeTruthy();
+    // I2:返工次数 = attemptCount-1(action_log 的 attempt 从 1 起 = 首发);attemptCount=2 → 第 1 次返工
     expect(screen.getByText('第 1 次返工')).toBeTruthy();
+    // attemptCount 1(仅首发,无返工)不显示返工徽章
+    expect(screen.queryByText('第 0 次返工')).toBeNull();
     expect(screen.getByText('人工处理')).toBeTruthy();
     // demo 语义:完成态(present done/merged)节点标题划线
     const doneTitle = screen.getByText('需求澄清与规划');

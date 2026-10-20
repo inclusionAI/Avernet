@@ -61,7 +61,7 @@ describe('useTaskSessionNavigationObserver', () => {
     );
   });
 
-  it('Review Focus #2:capability 不可用 → 不导航不抛错,pending 已消费', () => {
+  it('capability 不可用 → 放弃跳转不抛错,pending 已消费(终审 I3 Ruling:Open Core 默认 capability 为纯路由,不校验会话存在性;目标会话不存在时由会话页空态承接,存在性校预留给 internal overlay 覆盖点)', () => {
     const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
     mockNavigate.mockImplementation(() => ({ status: 'unsupported', value: null, reason: '不支持' }));
     render(<Harness />);
