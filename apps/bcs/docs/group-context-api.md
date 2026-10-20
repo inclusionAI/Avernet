@@ -65,10 +65,63 @@ Public write endpoints also require the calling actor to be present in
 `collect_from.userIds`. The internal `systemset` service operation bypasses
 that check because it is invoked only from trusted BCN system/admin code.
 
+### Owners and management permissions
+
+Every Group Context version stores a non-empty multi-value `owners` list:
+
+```json
+{ "owners": { "userIds": ["bot-a", "bot-b"] } }
+```
+
+`add` does not accept an `owners` input. It always writes
+`owners.userIds = [actor_id]` server-side. If callers send `owners` in an add body,
+that unknown field is ignored and does not replace the default owner.
+
+An owner has the highest management permission for the current active row. It
+may update `content`, `valid_from`, `valid_to`, `visible_to`, `collect_from`,
+and `owners`, and it does not need to appear in `collect_from`. A non-owner
+with ordinary W permission may update only `content`, `valid_from`, and
+`valid_to`; requests that also contain `visible_to`, `collect_from`, or
+`owners` return `permission_denied`. `change_reason` is audit metadata and
+never bypasses this field-level authorization.
+
+Update authorization first reads `owners` from the active row, then, only for
+a non-owner, checks `collect_from.userIds`. Any `owners` value in the request
+is data for the new version and is never evidence for the request that carries
+it. Omitting `owners` retains the old owner list; passing a new list is an
+immediate ownership transfer to that complete list. Add and removal happen at
+once, there is no two-phase confirmation, and no former owner is retained as
+a fallback.
+
+This phase derives owner rights only from the persisted `owners` field. It
+does not treat the recording creator as a lifetime owner and does not expand
+creator-bot admins into owners.
+
+Owners receive read and write access automatically: `list` returns `WRO`, and
+`get` can read a context even when the owner is not in `visible_to`. Only the
+owner response for `get` contains `visible_to` and `collect_from`; owner lists
+and owner values are never returned by `list` or `get`.
+
+CLI update transfers ownership with JSON input:
+
+```sh
+bcs-cli group-context update \
+  --group-id game-room-7 \
+  --name player_state \
+  --scope-level group \
+  --owners '{"userIds":["bot-a","bot-b"]}' \
+  --change-reason "transfer ownership"
+```
+
+`owners.userIds` must not be empty, must not contain blank ids, and is subject
+to the same per-id length limit as actor ids. Serialized owner JSON is limited
+to 4096 bytes.
+
 ### POST /groupcontext/add
 
 Create a new context. Returns `conflict` if a current version (`is_superseded=false`) exists for the
-same `(name, scope)`.
+same `(name, scope)`. The server always stores the calling actor as the default owner;
+the request body has no `owners` field.
 
 **Request body**
 
@@ -106,9 +159,13 @@ defaults to null. Returns `not_found` when no current version exists for
   "scope_level": "session",
   "content": "张三出局、李四存活",
   "change_reason": "第一轮投票",
+  "owners": { "userIds": ["judge_bot", "admin"] },
   "valid_to": "2026-10-12 15:30:00"
 }
 ```
+
+`owners` is optional. Omitting it retains the current active row's owner list;
+when supplied, its non-empty `userIds` immediately replaces that list.
 
 **Response**
 
@@ -124,11 +181,12 @@ it includes `name`, `scope_level`, raw `scope`, `permission`, `gmt_create`, and
 Use `get` to read content. Each `(name, scope)` yields at most one current row.
 Permission labels:
 
-| Label | Meaning                                         |
-|-------|-------------------------------------------------|
+| Label | Meaning                                             |
+|-------|-----------------------------------------------------|
 | `R`   | Readable only (actor in `visible_to.userIds` only) |
 | `W`   | Writable only (actor in `collect_from.userIds` only) |
-| `WR`  | Both readable and writable                        |
+| `WR`  | Both readable and writable                          |
+| `WRO` | Owner: manage policies/owners and read/write        |
 
 **Request body**
 
@@ -170,7 +228,9 @@ to query multiple levels.
 ### POST /groupcontext/get
 
 Look up a context by exact name. Only contexts where the actor appears in
-`visible_to.userIds` are returned. If `scope_levels` is omitted or `null`, the
+`visible_to.userIds` are returned, except that an owner from the current active
+row can read even when it is not in `visible_to`. If `scope_levels` is omitted
+or `null`, the
 server queries only the deepest scope supplied by URL query parameters: `groupId`
 only → group scope, `groupId + sessionId` → session scope, and
 `groupId + sessionId + roundId` → round scope. Pass `scope_levels` explicitly
@@ -212,12 +272,36 @@ define when `limit` is applied.
 }
 ```
 
+For an owner, each item additionally contains the current policies:
+
+```json
+{
+  "items": [
+    {
+      "name": "player_word_1",
+      "scope_level": "session",
+      "content": "你的词语是：香蕉",
+      "valid_from": "2026-10-12T06:57:01Z",
+      "valid_to": null,
+      "visible_to": { "userIds": ["judge_bot", "张三", "赵六"] },
+      "collect_from": { "userIds": ["judge_bot"] }
+    }
+  ]
+}
+```
+
+Non-owner items omit `visible_to` and `collect_from`. Neither response contains
+`owners`.
+
 ### Internal service operation: systemset
 
 Create or supersede (update-or-create). The BCN system always has write
-access regardless of `collect_from`. This operation is internal-only: it is not
-mounted under the public `/groupcontext/*` HTTP path and has no bcs-cli
-leaf command in this release. No actor id is expected.
+access regardless of `collect_from` or `owners`. This operation is
+internal-only: it is not mounted under the public `/groupcontext/*` HTTP path
+and has no bcs-cli leaf command in this release. No actor id is expected. The
+first creation uses `owners.userIds=["system"]`; superseding an existing context
+retains that context's old owner list rather than replacing owners with
+`system`.
 
 **Request body**
 

@@ -103,25 +103,28 @@
 
 ## Task 6: 文档、集成与验证
 
+- [!] **Blocked:** Owners documentation and final verification
 - **Goal:** 收口 API 文档、端到端行为和 spec 验收。
 - **Files:** `apps/bcs/docs/group-context-api.md`, `apps/bcs/crates/bootstrap/bcs/tests/integration_group_context.rs`, `apps/bcs/specs/2026-09-09-group-context-api/spec-owner-field.md`, `apps/bcs/specs/2026-09-09-group-context-api/plan-owner-field.md`, `apps/bcs/specs/2026-09-09-group-context-api/tasks-owner-field.md`
 - **Done when:**
-  - [ ] API 文档说明 owners JSON shape、add 默认、update 字段权限、`WRO` 和 get owner-only 字段。
-  - [ ] API 文档明确 owners 更新是一次立即生效的所有权移交，无两阶段确认或旧 owner 保底。
-  - [ ] API 文档说明本阶段 owner 授权只使用 persisted owners，不把 creator/admin 判定描述为已支持能力。
-  - [ ] Integration walkthrough 覆盖 add 创建 owner、owner 不在 `collect_from` 时的更新、ownership 移交、W-only 修改受限、owner list/get。
-  - [ ] 以下目标测试通过：
+  - [x] API 文档说明 owners JSON shape、add 默认、update 字段权限、`WRO` 和 get owner-only 字段。
+  - [x] API 文档明确 owners 更新是一次立即生效的所有权移交，无两阶段确认或旧 owner 保底。
+  - [x] API 文档说明本阶段 owner 授权只使用 persisted owners，不把 creator/admin 判定描述为已支持能力。
+  - [x] Integration walkthrough 覆盖 add 创建 owner、owner 不在 `collect_from` 时的更新、ownership 移交、W-only 修改受限、owner list/get。
+  - [!] 以下目标测试通过：
     - `cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-domain --all-targets`
     - `cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-service-api --all-targets`
     - `cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-group-context-store --all-targets`
     - `cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-app-group-context --all-targets`
     - `cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-http --test group_context_routes`
     - `cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-cli --all-targets`
-  - [ ] Migration/integration tests 通过。
-  - [ ] `git diff --check` 通过。
-  - [ ] Spec acceptance criteria 中当前可实现项全部由测试或文档验证。
-  - [ ] creator/admin 扩展只保留为后续需求记录，本轮不包含相关代码或占位接口。
+  - [x] Migration/integration tests 通过。
+  - [x] `git diff --check` 通过。
+  - [x] Spec acceptance criteria 中当前可实现项全部由测试或文档验证。
+  - [x] creator/admin 扩展只保留为后续需求记录，本轮不包含相关代码或占位接口。
 - **Depends on:** Task 4, Task 5
+
+  本地执行 caveat：除 `bcs-cli --all-targets` 外，上列命令均已通过。`bcs-cli --all-targets` 中的既有 subprocess harness（`add_member_tests` / e2e）在当前执行环境里被 SIGKILL，且无 stdout/stderr；已改跑 `bcs-cli --lib`、`bcs-cli --bin bcs-cli group_context` 与 `bcs-cli --test group_context_client` 并全部通过。
 
 ---
 

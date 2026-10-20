@@ -349,3 +349,235 @@ async fn who_is_spy_walkthrough_passes_through_direct_bcs_http_router() {
         assert_eq!(body["status"], "permission_denied");
     }
 }
+
+#[tokio::test]
+async fn owner_lifecycle_walkthrough_transfers_immediate_management_rights() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = app_with_repo(repo.clone()).await;
+    let uri = "/groupcontext/add?groupId=game-room-7&sessionId=sess-owners";
+
+    let (status, body) = post_json(
+        &app,
+        uri,
+        "judge-token",
+        json!({
+            "name": "owner_state",
+            "scope_level": "session",
+            "content": "v1",
+            "visible_to": {"userIds": ["judge_bot"]},
+            "collect_from": {"userIds": ["judge_bot", "admin"]},
+            "owners": {"userIds": ["admin"]}
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "add owner_state: {body}");
+    assert_eq!(body, json!({"status": "ok", "error_msg": null}));
+    let active = repo
+        .get_active("owner_state", "sess-owners")
+        .await
+        .expect("active row")
+        .expect("owner_state");
+    assert_eq!(active.content, "v1");
+    assert_eq!(active.owners.user_ids, vec!["judge_bot"]);
+
+    let (status, body) = post_json(
+        &app,
+        "/groupcontext/update?groupId=game-room-7&sessionId=sess-owners",
+        "admin-token",
+        json!({
+            "name": "owner_state",
+            "scope_level": "session",
+            "content": "blocked",
+            "owners": {"userIds": ["admin"]}
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "W-only cannot add itself: {body}"
+    );
+    assert_eq!(body["status"], "permission_denied");
+
+    let (status, body) = post_json(
+        &app,
+        "/groupcontext/update?groupId=game-room-7&sessionId=sess-owners",
+        "admin-token",
+        json!({
+            "name": "owner_state",
+            "scope_level": "session",
+            "content": "v2 by W-only",
+            "change_reason": "ordinary writer"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "W-only content update: {body}");
+    let active = repo
+        .get_active("owner_state", "sess-owners")
+        .await
+        .expect("active row")
+        .expect("owner_state");
+    assert_eq!(active.content, "v2 by W-only");
+    assert_eq!(active.owners.user_ids, vec!["judge_bot"]);
+
+    let (status, body) = post_json(
+        &app,
+        "/groupcontext/update?groupId=game-room-7&sessionId=sess-owners",
+        "judge-token",
+        json!({
+            "name": "owner_state",
+            "scope_level": "session",
+            "content": "v3 transferred",
+            "visible_to": {"userIds": ["李四"]},
+            "collect_from": {"userIds": ["张三"]},
+            "owners": {"userIds": ["admin"]},
+            "change_reason": "transfer ownership"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "owner transfer: {body}");
+    let active = repo
+        .get_active("owner_state", "sess-owners")
+        .await
+        .expect("active row")
+        .expect("owner_state");
+    assert_eq!(active.content, "v3 transferred");
+    assert_eq!(active.owners.user_ids, vec!["admin"]);
+
+    let (status, body) = post_json(
+        &app,
+        "/groupcontext/list?groupId=game-room-7&sessionId=sess-owners",
+        "admin-token",
+        json!({"scope_levels": ["session"]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "new owner list: {body}");
+    assert_eq!(body["contexts"][0]["name"], "owner_state");
+    assert_eq!(body["contexts"][0]["permission"], "WRO");
+    assert!(!body.to_string().contains("\"owners\""));
+
+    let (status, body) = post_json(
+        &app,
+        "/groupcontext/get?groupId=game-room-7&sessionId=sess-owners",
+        "admin-token",
+        json!({"name": "owner_state", "scope_levels": ["session"]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "new owner get: {body}");
+    assert_eq!(body["items"][0]["content"], "v3 transferred");
+    assert_eq!(body["items"][0]["visible_to"], json!({"userIds": ["李四"]}));
+    assert_eq!(
+        body["items"][0]["collect_from"],
+        json!({"userIds": ["张三"]})
+    );
+    assert!(!body.to_string().contains("\"owners\""));
+
+    let (status, body) = post_json(
+        &app,
+        "/groupcontext/update?groupId=game-room-7&sessionId=sess-owners",
+        "admin-token",
+        json!({
+            "name": "owner_state",
+            "scope_level": "session",
+            "content": "v4 by owner outside policies",
+            "visible_to": {"userIds": ["李四"]},
+            "collect_from": {"userIds": ["judge_bot"]},
+            "owners": {"userIds": ["admin"]},
+            "change_reason": "retain ordinary writer"
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "owner updates outside collect_from: {body}"
+    );
+
+    let (status, body) = post_json(
+        &app,
+        "/groupcontext/list?groupId=game-room-7&sessionId=sess-owners",
+        "judge-token",
+        json!({"scope_levels": ["session"]}),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "former owner remains W-only: {body}"
+    );
+    assert_eq!(body["contexts"][0]["permission"], "W");
+
+    let (status, body) = post_json(
+        &app,
+        "/groupcontext/get?groupId=game-room-7&sessionId=sess-owners",
+        "judge-token",
+        json!({"name": "owner_state", "scope_levels": ["session"]}),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "former owner W has no read: {body}"
+    );
+    assert_eq!(body["status"], "permission_denied");
+
+    let (status, body) = post_json(
+        &app,
+        "/groupcontext/update?groupId=game-room-7&sessionId=sess-owners",
+        "judge-token",
+        json!({
+            "name": "owner_state",
+            "scope_level": "session",
+            "content": "v5 by retained W-only writer",
+            "change_reason": "content-only update"
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "former owner content update: {body}"
+    );
+
+    let (status, body) = post_json(
+        &app,
+        "/groupcontext/update?groupId=game-room-7&sessionId=sess-owners",
+        "judge-token",
+        json!({
+            "name": "owner_state",
+            "scope_level": "session",
+            "content": "blocked policy update",
+            "visible_to": {"userIds": ["judge_bot"]}
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "former owner policy update: {body}"
+    );
+    assert_eq!(body["status"], "permission_denied");
+
+    let active = repo
+        .get_active("owner_state", "sess-owners")
+        .await
+        .expect("active row")
+        .expect("owner_state");
+    assert_eq!(active.content, "v5 by retained W-only writer");
+    assert_eq!(active.owners.user_ids, vec!["admin"]);
+    let versions = repo
+        .list_versions(&active.context_id)
+        .await
+        .expect("versions");
+    assert_eq!(versions.len(), 5);
+    assert!(versions.iter().all(|entry| !entry.owners.is_empty()));
+    assert_eq!(
+        versions
+            .iter()
+            .find(|entry| !entry.is_superseded)
+            .expect("active")
+            .owners
+            .user_ids,
+        vec!["admin"]
+    );
+}
