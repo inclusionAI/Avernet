@@ -106,14 +106,14 @@ function TaskDetailContent() {
   if (created && task && !error)
     return (
       <main className="h-full overflow-y-auto bg-background p-4 sm:p-6 lg:px-10">
-        <EvolutionHeader tab="tasks" />
+        <EvolutionHeader tab="tasks" showTabs={false} />
         <CreateResult task={task} />
       </main>
     );
   return (
     <main className="h-full overflow-y-auto bg-background p-4 sm:p-6 lg:px-10">
       <div className="w-full min-w-0 space-y-5">
-        <EvolutionHeader tab="tasks" />
+        <EvolutionHeader tab="tasks" showTabs={false} />
         <header className="flex flex-wrap items-center gap-3">
           <Button
             variant="ghost"

@@ -88,6 +88,9 @@ beforeEach(() => {
 });
 it('offers exactly five Bot types and keeps the template Tab in the URL', async () => {
   render(<EvolutionFactory />);
+  expect(screen.getByRole('tablist', { name: '智能进化' })).toBeInTheDocument();
+  for (const name of ['进化任务', '评测模板', '进化版本'])
+    expect(screen.getByRole('tab', { name })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '发起进化' }));
   for (const name of ['Bot 诊断任务', 'Bench 诊断任务', 'Bench 优化任务', '诊断后优化任务', 'Bot 自进化'])
     expect(screen.getByRole('button', { name: new RegExp(name) })).toBeInTheDocument();
@@ -160,6 +163,9 @@ it('displays per-template publication failures rather than treating HTTP 200 as 
   api.runs.mockResolvedValue({ runs: [], total: 0 });
   api.publish.mockResolvedValue({ items: [{ templateName: 'case', success: false, reason: 'invalid template' }] });
   render(<DomainDetail />);
+  expect(screen.queryByRole('tablist', { name: '智能进化' })).not.toBeInTheDocument();
+  expect(screen.getByRole('tab', { name: '目标详情' })).toBeInTheDocument();
+  expect(screen.getByRole('tab', { name: '关联任务' })).toBeInTheDocument();
   fireEvent.click(await screen.findByRole('checkbox', { name: '选择模板 case' }));
   fireEvent.click(screen.getByRole('button', { name: '批量发布' }));
   await waitFor(() =>

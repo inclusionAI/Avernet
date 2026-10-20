@@ -74,11 +74,11 @@ beforeEach(() => {
   api.task.mockResolvedValue(task);
   api.tasks.mockResolvedValue({ tasks: [], page: 1, pageSize: 1, total: 0, totalPages: 1, canViewAll: false });
 });
-it('retains module Tabs and distinct PRD sections with real-step progress', async () => {
+it('hides list Tabs while retaining distinct detail sections and real-step progress', async () => {
   render(<TaskDetail />);
   await screen.findByRole('heading', { name: '目标进化演示' });
   expect(screen.getByRole('heading', { name: '智能进化' })).toBeInTheDocument();
-  expect(screen.getByRole('tab', { name: '进化任务' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.queryByRole('tablist', { name: '智能进化' })).not.toBeInTheDocument();
   for (const name of ['基本信息', '执行进度', '执行时间线', '产出物', '执行日志 · 优化'])
     expect(screen.getByRole('heading', { name })).toBeInTheDocument();
   expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '2');
