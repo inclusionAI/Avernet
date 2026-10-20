@@ -342,7 +342,7 @@ def test_whole_artifact_mcps_inherit_user_header_not_overridden_by_bot():
     inputs = _collector(skill_set_service=svc, mcp_config_service=config).mcps(_req())
 
     assert len(inputs) == 1
-    assert inputs[0].headers == {"X-Trace": "on", "x-region": "bot"}
+    assert inputs[0].headers == {"X-Trace": "on", "x-region": "bot", "X-TC-Bot-Id": "bot1"}
 
 
 @pytest.mark.unit

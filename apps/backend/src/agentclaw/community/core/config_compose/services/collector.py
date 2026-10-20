@@ -419,6 +419,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
             api_key, headers, endpoint_env, transport = (
                 self._mcp_config_service.build_mcp_sync_payload(
                     user_id=req.user_id,
+                    bot_id=req.bot_id,
                     mcp_data=md,
                     engine_type=req.engine_type,
                     bot_override=bot_override,
