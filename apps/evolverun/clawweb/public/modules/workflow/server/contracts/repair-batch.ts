@@ -48,8 +48,8 @@ export type RepairBatchInput = {
   parentCandidateCommit: string | null; feedback: string; previousReportRef: string | null; taskBranch: string;
 };
 export type RepairRevisionPhase = 'drafting' | 'review' | 'blocked' | 'publishing' | 'published' | 'no_change' | 'failed' | 'cancelled';
-/** Optional AIS result record. Core input is the exact application prompt; materials are an index, not file bodies. */
-export type RepairModelInput = { itemId: string; coreInput: string; materials: Record<string, unknown> };
+/** Optional AIS result record. Core input is the exact application prompt; materials are an index, not file bodies. An omitted phase is legacy generation. */
+export type RepairModelInput = { phase?: 'planning' | 'generation'; itemId: string; coreInput: string; materials: Record<string, unknown> };
 export type RepairRevision = {
   workflowId: string; taskId: string; revision: number; phase: RepairRevisionPhase; stateVersion: number;
   requestId: string; requestDigest: string; input: RepairBatchInput;
@@ -100,10 +100,16 @@ export function validateRepairModelInputs(value: unknown, input: RepairBatchInpu
   valid(Array.isArray(value), 'modelInputs');
   const itemIds = new Set(input.items.map(item => item.itemId));
   const seen = new Set<string>();
+  let hasPlanning = false;
   for (const entry of value) {
-    valid(object(entry) && text(entry.itemId, 64) && itemIds.has(entry.itemId) && !seen.has(entry.itemId)
+    valid(object(entry) && text(entry.itemId, 64) && itemIds.has(entry.itemId)
       && text(entry.coreInput, MAX_RESULT_BYTES), 'modelInputs record');
-    seen.add(entry.itemId);
+    valid(entry.phase === undefined || entry.phase === 'planning' || entry.phase === 'generation', 'modelInputs phase');
+    const phase = entry.phase ?? 'generation';
+    const key = `${phase}:${entry.itemId}`;
+    valid(!seen.has(key) && (phase !== 'planning' || !hasPlanning), 'modelInputs record');
+    seen.add(key);
+    if (phase === 'planning') hasPlanning = true;
     const materials = entry.materials;
     valid(object(materials) && materials.schemaVersion === 'repair-local-materials/v1'
       && materials.taskId === input.taskId && materials.revision === input.revision

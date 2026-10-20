@@ -385,6 +385,13 @@ describe('repair workbench control service', () => {
     ['missing item ID', entry => [Object.fromEntries(Object.entries(entry).filter(([key]) => key !== 'itemId'))]],
     ['unknown item ID', entry => [{ ...entry, itemId: 'not-selected' }]],
     ['duplicate item records', entry => [entry, entry]],
+    ['unknown model phase', entry => [{ ...entry, phase: 'review' }]],
+    ['null model phase', entry => [{ ...entry, phase: null }]],
+    ['duplicate generation records', entry => [{ ...entry, phase: 'generation' }, { ...entry, phase: 'generation' }]],
+    ['legacy and explicit generation records', entry => [entry, { ...entry, phase: 'generation' }]],
+    ['explicit and legacy generation records', entry => [{ ...entry, phase: 'generation' }, entry]],
+    ['duplicate planning records', entry => [{ ...entry, phase: 'planning' }, { ...entry, phase: 'planning' }]],
+    ['multiple task planning records', entry => [{ ...entry, phase: 'planning' }, { ...entry, phase: 'planning', itemId: 'item-1' }]],
     ['empty core prompt', entry => [{ ...entry, coreInput: '  ' }]],
     ['partially corrupt records', entry => [entry, null]],
     ['null material index', entry => [{ ...entry, materials: null }]],
@@ -414,13 +421,16 @@ describe('repair workbench control service', () => {
     expect(task.latestAttempt).toMatchObject({ phase: 'drafting', draft: null, checks: null, stateVersion: 0 });
     expect(task.execution?.status).toBe('dispatched');
   });
-  it.each(['omitted', 'empty', 'multiple', 'integrated'])('preserves %s model inputs through report validation and persistence', async mode => {
+  it.each(['omitted', 'empty', 'multiple', 'integrated', 'phases', 'planning-legacy', 'generation'])('preserves %s model inputs through report validation and persistence', async mode => {
     const f = await setup();
     const created = await f.service.create('human', f.request);
     const first = modelInput(created.taskId);
     first.materials.files[0].itemIds = ['item-0', 'item-1'];
     first.materials.files.push({ ...first.materials.files[0], kind: 'engine-reference', path: 'engine.json', itemIds: [] });
-    const records = mode === 'empty' ? [] : mode === 'multiple' ? [first, modelInput(created.taskId, 'item-1')] : [first];
+    const records = mode === 'empty' ? [] : mode === 'multiple' ? [first, modelInput(created.taskId, 'item-1')]
+      : mode === 'phases' ? [{ ...first, phase: 'planning' }, { ...first, phase: 'generation' }, { ...modelInput(created.taskId, 'item-1'), phase: 'generation' }]
+      : mode === 'planning-legacy' ? [{ ...first, phase: 'planning' }, first]
+      : mode === 'generation' ? [{ ...first, phase: 'generation' }] : [first];
     const draft = { candidateCommit: 'd'.repeat(40), parentCandidateCommit: created.input.baseline.packCommit, packDigest: 'e'.repeat(40),
       itemResults: f.items.map(item => ({ itemId: item.itemId, status: 'changed', reason: 'Fixed' })), ...(mode === 'omitted' ? {} : { modelInputs: records }) };
     const checks = { schemaVersion: 'workflow-repair-checks/v1', candidateCommit: draft.candidateCommit, packDigest: draft.packDigest,

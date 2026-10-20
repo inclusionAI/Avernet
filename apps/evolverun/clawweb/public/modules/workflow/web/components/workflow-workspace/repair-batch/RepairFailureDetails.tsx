@@ -1,5 +1,5 @@
 import type { RepairRevision } from '../../../../server/contracts/repair-batch'
-const stages:Record<string,string>={parse_model_output:'模型结果解析',model_execution:'调用模型',prepare_model_input:'准备模型输入',generating:'生成修改',checking:'检查候选',pushing:'保存候选'}
+const stages:Record<string,string>={planning:'全局修复评估',parse_model_output:'模型结果解析',model_execution:'调用模型',prepare_model_input:'准备模型输入',generating:'生成修改',checking:'检查候选',pushing:'保存候选'}
 const parserReasons:Record<string,string>={
  'Expecting property name enclosed in double quotes':'JSON 属性名必须使用双引号',
  'Expecting value':'JSON 中缺少合法的值',
