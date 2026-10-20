@@ -392,7 +392,7 @@ describe('B17 决策表补充行：a2aBaseUrl 在场（resolveA2aUrls 单源）'
 
   it('签发值在场时 ws url 形状不再裁决入口（观测到的旧缺口：relay url→404 派生）', async () => {
     const cache = new TransportChoiceCache();
-    const fetchImpl = jest.fn(async (_u: unknown) => okCardResponse());
+    const fetchImpl = jest.fn(async () => okCardResponse());
     const provider = await maybeBuildA2AProvider(SIGNED_CONFIG, {
       choiceCache: cache,
       switchOn: () => true,
@@ -430,7 +430,7 @@ describe('B17 决策表补充行：a2aBaseUrl 在场（resolveA2aUrls 单源）'
     const cache = new TransportChoiceCache();
     let settleFetch!: (r: Response) => void;
     const fetchImpl = jest.fn(
-      (_u: unknown) => new Promise<Response>((res) => { settleFetch = res; }),
+      () => new Promise<Response>((res) => { settleFetch = res; }),
     );
     const deps = (): A2aBootstrapDeps => ({
       choiceCache: cache,
