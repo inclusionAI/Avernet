@@ -29,6 +29,7 @@ from sqlalchemy.sql import func
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.task.domain.models import RelationType, Status
 from agentclaw.community.core.task.repository.types import (
+    TaskArtifactRecord,
     TaskCallbackCorrelationRecord,
     TaskCallbackRecord,
     TaskInfoRecord,
@@ -38,6 +39,7 @@ from agentclaw.community.core.task.repository.types import (
     TaskTrajectoryRecord,
     TrajectoryEventRecord,
 )
+from agentclaw.community.core.task.task_context.task_artifact import content_from_json
 
 # SQLite autoincrements only on INTEGER PRIMARY KEY; BigInteger renders BIGINT
 # and breaks SQLite autoincrement. with_variant keeps BIGINT on MySQL/OceanBase.
@@ -534,5 +536,75 @@ class TaskCallbackCorrelationModel(Base):
             task_id=self.task_id,
             node_id=self.node_id,
             retry=self.retry,
+            gmt_create=self.gmt_create,
+        )
+
+
+class TaskArtifactModel(Base):
+    """ORM for ``task_artifact`` — append-only immutable artifact manifest rows
+    (spec 2026-10-20-task-artifact-domain, one row per published artifact).
+
+    Written ONLY inside the ``save_graph`` transaction (inline write, same
+    ``TaskCallbackModel`` precedent) and read via ``TaskArtifactRepositoryProtocol``;
+    no repository offers an UPDATE path. ``content`` is kind-tagged canonical JSON
+    (parsed into the domain branch object on ``to_record``). ``storage`` is a
+    derived-consistency column: ``inline`` for non-file branches, the
+    ``FileContent.storage_type`` value for the file branch (enforced by the domain
+    constructors). ``gmt_create`` is ALWAYS supplied by the repo from the domain
+    int-ms ``created_at`` (DB DEFAULT kept only as a fallback, trajectory
+    precedent) and folded back to ``created_at`` on read. Unlike the trajectory
+    tables' historical drift, the Python attribute name here IS ``gmt_modify``
+    — matching the DDL column from day one.
+    """
+
+    __tablename__ = "task_artifact"
+
+    id = Column(
+        AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False
+    )
+    artifact_id = Column(_binary_string(32), nullable=False)
+    artifact_name = Column(String(255), nullable=True)
+    task_id = Column(_TASK_ID, nullable=False)
+    node_id = Column(_NODE_ID, nullable=True)  # 发布路径必填;NULL 仅为容错/人工修数留口
+    attempt = Column(Integer, nullable=True)
+    scope_session_id = Column(_binary_string(512), nullable=True)
+    kind = Column(String(64), nullable=False)
+    storage = Column(String(2048), nullable=True)
+    content = Column(
+        Text().with_variant(mysql.MEDIUMTEXT(), "mysql"), nullable=False
+    )
+    content_hash = Column(String(64), nullable=True)
+    creator = Column(String(128), nullable=True)
+    modifier = Column(String(128), nullable=True)
+    gmt_create = Column(DateTime, default=func.now(), nullable=False)
+    gmt_modify = Column(
+        DateTime, default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("idx_dedupe", "task_id", "node_id", "attempt", "kind", "content_hash"),
+        Index("idx_artifact_id", "artifact_id"),
+        Index("idx_scope_session", "scope_session_id", "gmt_create"),
+        Index("idx_task_kind", "task_id", "kind", "gmt_create"),
+        Index("idx_task_name", "task_id", "artifact_name"),
+    )
+
+    def to_record(self) -> TaskArtifactRecord:
+        return TaskArtifactRecord(
+            artifact_id=self.artifact_id,
+            artifact_name=self.artifact_name,
+            task_id=self.task_id,
+            node_id=self.node_id,
+            attempt=self.attempt,
+            scope_session_id=self.scope_session_id,
+            kind=self.kind,
+            storage=self.storage,
+            content=content_from_json(self.content),
+            content_hash=self.content_hash,
+            creator=self.creator,
+            modifier=self.modifier,
+            created_at=(
+                int(self.gmt_create.timestamp() * 1000) if self.gmt_create else 0
+            ),
             gmt_create=self.gmt_create,
         )
