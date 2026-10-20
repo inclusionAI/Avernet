@@ -17,7 +17,7 @@
   actor, authorizes Session membership and file mutations, enriches legacy
   file commands, and orchestrates best-effort completion notifications.
 - `GroupContextAddAccessGuard`, which resolves the Group/Session boundary,
-  verifies Group or current-Session membership, validates the
+  verifies current-Session membership for session/round writes and Group membership for group writes, validates the
   `{sessionId}:{round}` format, and delegates all Group Context operations to
   the underlying application service.
 

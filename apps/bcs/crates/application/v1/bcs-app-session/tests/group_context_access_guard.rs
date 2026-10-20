@@ -179,17 +179,28 @@ async fn group_add_requires_group_membership() {
 }
 
 #[tokio::test]
-async fn session_add_allows_group_or_current_session_membership() {
+async fn session_add_requires_current_session_membership() {
     let (guard, inner) = guard_with_group_member("group_member").await;
 
-    guard
+    let error = guard
         .add(add_command(
             "group_member",
             ScopeLevel::Session,
             request_context(None, Some(SESSION_ID), None),
         ))
         .await
-        .expect("group member may add session context");
+        .expect_err("Group-only member cannot add session context");
+    assert_eq!(error.code(), "permission_denied");
+    assert_eq!(add_count(&inner), 0);
+
+    guard
+        .add(add_command(
+            "session_member",
+            ScopeLevel::Session,
+            request_context(Some(GROUP_ID), Some(SESSION_ID), None),
+        ))
+        .await
+        .expect("current session member may add session context");
     let commands = inner.adds.lock().expect("adds lock");
     assert_eq!(
         commands
@@ -202,16 +213,6 @@ async fn session_add_allows_group_or_current_session_membership() {
     );
     drop(commands);
 
-    guard
-        .add(add_command(
-            "session_member",
-            ScopeLevel::Session,
-            request_context(Some(GROUP_ID), Some(SESSION_ID), None),
-        ))
-        .await
-        .expect("current session member may add session context");
-    assert_eq!(add_count(&inner), 2);
-
     let error = guard
         .add(add_command(
             "outsider",
@@ -221,7 +222,7 @@ async fn session_add_allows_group_or_current_session_membership() {
         .await
         .expect_err("outsider is denied");
     assert_eq!(error.code(), "permission_denied");
-    assert_eq!(add_count(&inner), 2);
+    assert_eq!(add_count(&inner), 1);
 }
 
 #[tokio::test]
@@ -298,15 +299,22 @@ async fn round_add_resolves_session_and_uses_session_membership_rule() {
         Some(round_id.as_str())
     );
 
-    let error = guard
-        .add(add_command(
-            "outsider",
-            ScopeLevel::Round,
-            request_context(Some(GROUP_ID), Some(SESSION_ID), Some(&round_id)),
-        ))
-        .await
-        .expect_err("outsider is denied");
-    assert_eq!(error.code(), "permission_denied");
+    for (actor_id, description) in [
+        ("group_member", "Group-only member"),
+        ("outsider", "outsider"),
+    ] {
+        let error = guard
+            .add(add_command(
+                actor_id,
+                ScopeLevel::Round,
+                request_context(Some(GROUP_ID), Some(SESSION_ID), Some(&round_id)),
+            ))
+            .await
+            .expect_err(description);
+        assert_eq!(error.code(), "permission_denied");
+    }
+    drop(commands);
+    assert_eq!(add_count(&inner), 1);
 
     for invalid_round_id in [
         "round-001",
@@ -325,8 +333,6 @@ async fn round_add_resolves_session_and_uses_session_membership_rule() {
             .expect_err("invalid roundId is rejected");
         assert_eq!(error.code(), "invalid_param");
     }
-
-    drop(commands);
 
     let error = guard
         .add(add_command(

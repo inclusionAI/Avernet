@@ -60,7 +60,7 @@ impl GroupContextAddAccessGuard {
                 )?;
                 let session = self.load_session(session_id).await?;
                 let group = self
-                    .authorize_group_or_session(&session, &command.actor_id)
+                    .authorize_session_and_load_group(&session, &command.actor_id)
                     .await?;
                 sync_group_id(
                     &mut command.request_context,
@@ -99,7 +99,7 @@ suffix when scope_level=round",
                     ));
                 }
                 let group = self
-                    .authorize_group_or_session(&session, &command.actor_id)
+                    .authorize_session_and_load_group(&session, &command.actor_id)
                     .await?;
                 command.request_context.session_id = Some(session.id.clone());
                 sync_group_id(
@@ -112,27 +112,13 @@ suffix when scope_level=round",
         Ok(())
     }
 
-    async fn authorize_group_or_session(
+    async fn authorize_session_and_load_group(
         &self,
         session: &Session,
         actor_id: &str,
     ) -> Result<Group, ApplicationError> {
-        let group = self.load_group(&session.group_id).await?;
-        let allowed = group
-            .participants
-            .iter()
-            .any(|participant| participant.bot_uuid == actor_id)
-            || session
-                .participants
-                .iter()
-                .any(|participant| participant.bot_uuid == actor_id);
-        if !allowed {
-            return Err(permission_denied(
-                actor_id,
-                "the parent Group or current Session",
-            ));
-        }
-        Ok(group)
+        ensure_participant(&session.participants, actor_id, "the current Session")?;
+        self.load_group(&session.group_id).await
     }
 
     async fn load_group(&self, group_id: &str) -> Result<Group, ApplicationError> {

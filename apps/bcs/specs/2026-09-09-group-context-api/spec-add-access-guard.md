@@ -7,7 +7,7 @@
 
 ## 概述
 
-Group Context `add` 必须根据 `scope_level` 选择的边界值解析请求作用域，校验 bot 自定义的 roundId，并在创建 context 之前确认当前 actor 是目标 Group 或 Session 的成员。
+Group Context `add` 必须根据 `scope_level` 选择的边界值解析请求作用域，校验 bot 自定义的 roundId，并在创建 context 之前确认当前 actor 是对应资源边界的成员。
 
 ## Scope 边界
 
@@ -42,14 +42,12 @@ BCS 目前没有独立的 round 实体设计。Group Context 通过 bot 自定�
    actor 必须是目标 Group 的成员。
 
 2. **`scope_level=session`**  
-   actor 必须满足以下条件之一：
-   - 是 parent Group 的成员；
-   - 是目标 Session 的当前参与者。
+   actor 必须是目标 Session 的当前参与者。即使 actor 是 parent Group 的成员，只要它不在当前 Session participants 中，也不能通过 `add` 的资源级校验。
 
 3. **`scope_level=round`**  
-   先从 `roundId` 解析出 sessionId，然后应用与 `scope_level=session` 相同的 Group 或 Session 成员规则。
+   先从 `roundId` 解析出 sessionId，然后应用与 `scope_level=session` 相同的 Session 当前成员规则。
 
-Session 成员必须基于当前持久化的 Session participants 判断，因此 session 启动后被动态邀请进来的参与者也可以通过该校验。
+Session 成员必须基于当前持久化的 Session participants 判断。parent Group 后续新增的成员不会自动获得已存在 Session 的 `add` 权限；Session 启动后被动态邀请进来的参与者可以通过该校验。
 
 这个资源级校验是在现有 Group Context 写入策略之上新增的校验；通过后，actor 仍然必须满足 `collect_from` 的限制。
 

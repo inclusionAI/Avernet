@@ -49,9 +49,10 @@ return `payload_too_large` before storage.
 
 Public add requests are resource-authorized before the Group Context service
 writes a row. For `scope_level=group`, the actor must be a participant of that
-Group. For `scope_level=session`, the actor must be a participant of the parent
-Group or of the current persisted Session. For `scope_level=round`, the actor
-uses the same Group-or-Session rule after the server resolves the Session.
+Group. For `scope_level=session`, the actor must be a participant of the current
+persisted Session; being a member of only the parent Group is not sufficient.
+For `scope_level=round`, the actor uses the same current-Session rule after the
+server resolves the Session.
 
 A round id must start with `{sessionId}:`, have a non-empty round suffix, and
 contain no whitespace or control characters.
