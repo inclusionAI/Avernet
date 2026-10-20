@@ -9,6 +9,7 @@ from injector import Binder, Module, singleton
 from agentclaw.community.plugin_api.eval_env import (
     EvalBcsCliTagProtocol,
     EvalBindingResolverProtocol,
+    EvalEnvBuildLifecycle,
     EvalEnvLifecycleProtocol,
     EvalMcpGatewayProtocol,
     EvalTagPropagationProtocol,
@@ -17,6 +18,7 @@ from agentclaw.community.plugin_api.eval_env import (
 from agentclaw.community.plugins.local.eval_env import (
     NoopEvalBcsCliTag,
     NoopEvalBindingResolver,
+    NoopEvalEnvBuildLifecycle,
     NoopEvalEnvLifecycle,
     NoopEvalMcpGateway,
     NoopEvalTagPropagation,
@@ -32,6 +34,7 @@ class TestEvalEnvModule(Module):
 
     def configure(self, binder: Binder) -> None:
         binder.bind(EvalEnvLifecycleProtocol, to=NoopEvalEnvLifecycle, scope=singleton)
+        binder.bind(EvalEnvBuildLifecycle, to=NoopEvalEnvBuildLifecycle, scope=singleton)
         binder.bind(EvalBindingResolverProtocol, to=NoopEvalBindingResolver, scope=singleton)
         binder.bind(EvalVersionSyncProtocol, to=NoopEvalVersionSync, scope=singleton)
         binder.bind(EvalTagPropagationProtocol, to=NoopEvalTagPropagation, scope=singleton)

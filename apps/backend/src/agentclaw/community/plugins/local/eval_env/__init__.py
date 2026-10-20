@@ -1,6 +1,7 @@
 """评测环境 Noop 本地实现 — 评测功能关闭时使用。"""
 
 from ._noop_lifecycle import NoopEvalEnvLifecycle
+from ._noop_build_lifecycle import NoopEvalEnvBuildLifecycle
 from ._noop_binding_resolver import NoopEvalBindingResolver
 from ._noop_version_sync import NoopEvalVersionSync
 from ._noop_tag_propagation import NoopEvalTagPropagation
@@ -9,6 +10,7 @@ from ._noop_bcs_cli_tag import NoopEvalBcsCliTag
 
 __all__ = [
     "NoopEvalEnvLifecycle",
+    "NoopEvalEnvBuildLifecycle",
     "NoopEvalBindingResolver",
     "NoopEvalVersionSync",
     "NoopEvalTagPropagation",
