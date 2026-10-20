@@ -801,6 +801,190 @@ class TestLocalK8sPluginResolve:
         assert conn.target == "10.96.42.7:8080"
 
 
+class TestLocalK8sPluginA2aBaseUrl:
+    """The A2A face address handed out beside the ws URL.
+
+    Empty string is the additive default: a deployment that configured no
+    template, a Service with no NodePort, or a discovery failure must degrade
+    to "no A2A address" — never break the chat connection, never guess a host.
+    """
+
+    _INCLUSTER_ENV = {
+        "LOCAL_K8S_KUBECONFIG": "in-cluster",
+        "LOCAL_K8S_NAMESPACE": "default",
+        "LOCAL_K8S_IMAGE": "bot-runtime:latest",
+        "LOCAL_K8S_CONTAINER_PORT": "8080",
+    }
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_nodeport_mode_derives_a2a_from_the_same_public_port(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """Out-of-cluster the ws URL already addresses the host machine, so
+        the A2A face sits on the identical host:port over plain HTTP —
+        no template required."""
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "LOCAL_K8S_NAMESPACE": "default",
+                    "LOCAL_K8S_IMAGE": "bot-runtime:latest",
+                    "LOCAL_K8S_CONTAINER_PORT": "8080",
+                },
+                clear=False,
+            ),
+            patch(
+                "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._use_incluster_config",
+                return_value=False,
+            ),
+            patch(
+                "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._resolve_kubeconfig",
+                return_value="apiVersion: v1\nkind: Config",
+            ),
+        ):
+            plugin = LocalK8sArcaSandboxPlugin(credentials=_make_credentials())
+            plugin._client_manager.get_client = lambda *a, **kw: mock_client
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_svc = MagicMock()
+            mock_svc.spec.ports = [MagicMock(node_port=30081)]
+            mock_core.read_namespaced_service.return_value = mock_svc
+
+            conn = plugin.resolve_ws_conn_info(
+                paas_device_id="tpl-test-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+
+        assert conn.ws_url == "ws://localhost:30081/api/openclaw/ws"
+        assert conn.a2a_base_url == "http://localhost:30081"
+
+    def _incluster_plugin(self, mock_client, mock_core_cls=None) -> LocalK8sArcaSandboxPlugin:
+        plugin = LocalK8sArcaSandboxPlugin(
+            credentials=_make_credentials(), arca_utils=MagicMock()
+        )
+        plugin._client_manager.get_client = lambda *a, **kw: mock_client
+        return plugin
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_incluster_without_template_publishes_no_a2a_address(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """In-cluster the template IS the deployment's host convention; its
+        absence means BaaS cannot promise any browser-reachable host, and an
+        empty string — not a guess — is the honest answer."""
+        with patch.dict(
+            os.environ,
+            {**self._INCLUSTER_ENV, "LOCAL_K8S_A2A_URL_TEMPLATE": ""},
+            clear=True,
+        ):
+            plugin = self._incluster_plugin(mock_client, mock_core_cls)
+            conn = plugin.resolve_ws_conn_info(
+                paas_device_id="tpl-test-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+
+        assert conn.a2a_base_url == ""
+        mock_core_cls.assert_not_called()
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_incluster_template_substitutes_discovered_nodeport(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """The NodePort comes from the kube api — the one place that knows
+        it — and the host part from the configured template, placeholders
+        filled with the real Service/namespace facts."""
+        with patch.dict(
+            os.environ,
+            {
+                **self._INCLUSTER_ENV,
+                "LOCAL_K8S_A2A_URL_TEMPLATE": (
+                    "http://{service_name}.stable.alipay.net:{node_port}"
+                ),
+            },
+            clear=True,
+        ):
+            plugin = self._incluster_plugin(mock_client, mock_core_cls)
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_svc = MagicMock()
+            mock_svc.spec.ports = [MagicMock(node_port=30082)]
+            mock_core.read_namespaced_service.return_value = mock_svc
+
+            conn = plugin.resolve_ws_conn_info(
+                paas_device_id="tpl-test-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+
+        assert conn.a2a_base_url == (
+            "http://tpl-test-abc-svc.stable.alipay.net:30082"
+        )
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_incluster_missing_nodeport_degrades_to_empty(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """A ClusterIP-shaped Service under a configured template is a
+        describable configuration state, answered with the empty string rather
+        than an exception that takes the chat connection down with it."""
+        with patch.dict(
+            os.environ,
+            {
+                **self._INCLUSTER_ENV,
+                "LOCAL_K8S_A2A_URL_TEMPLATE": (
+                    "http://{service_name}.stable.alipay.net:{node_port}"
+                ),
+            },
+            clear=True,
+        ):
+            plugin = self._incluster_plugin(mock_client, mock_core_cls)
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_svc = MagicMock()
+            mock_svc.spec.ports = [MagicMock(node_port=None)]
+            mock_core.read_namespaced_service.return_value = mock_svc
+
+            conn = plugin.resolve_ws_conn_info(
+                paas_device_id="tpl-test-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+
+        assert conn.a2a_base_url == ""
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_incluster_discovery_failure_degrades_to_empty(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """A kube api outage while resolving the A2A face must cost the A2A
+        socket alone; the ws side answers through its own path unchanged."""
+        with patch.dict(
+            os.environ,
+            {
+                **self._INCLUSTER_ENV,
+                "LOCAL_K8S_A2A_URL_TEMPLATE": (
+                    "http://{service_name}.stable.alipay.net:{node_port}"
+                ),
+            },
+            clear=True,
+        ):
+            plugin = self._incluster_plugin(mock_client, mock_core_cls)
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_core.read_namespaced_service.side_effect = RuntimeError("api down")
+
+            conn = plugin.resolve_ws_conn_info(
+                paas_device_id="tpl-test-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+
+        assert conn.a2a_base_url == ""
+        assert conn.ws_url
+
+
 class TestImagePullPolicy:
     """Tests for `_image_pull_policy` default behavior based on image tag."""
 
