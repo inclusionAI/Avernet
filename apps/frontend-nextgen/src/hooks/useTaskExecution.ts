@@ -18,6 +18,7 @@ import { composerSelectionKey } from '@/services/tasks/taskMapper';
 import { buildTaskLaunchMessage, buildTaskPanelAixUI } from '@/services/tasks/taskPanelMessage';
 import { executeTaskService, resolveWorkflowCommand, type WorkflowListItem } from '@/services/tasks/taskService';
 import { useTaskStore } from '@/stores/taskStore';
+import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import type { PanelHandle } from '@tc-chat/core';
 import { useCallback, useState } from 'react';
 import { toast } from 'sonner';
@@ -119,6 +120,8 @@ export function useTaskExecution({
         } else {
           submitPanelMessage(launchMessage.content);
         }
+        // V2 多任务切换(spec §3.2):发起任务即自动切换活跃任务(AixUI 面板消息落库后自动开该任务 tab)
+        useTaskSidePanelStore.getState().setActiveTask(record.task_id);
         return { ok: true, taskId: record.task_id } as const;
       } catch (err) {
         const msg = err instanceof Error ? err.message : '任务提交失败';

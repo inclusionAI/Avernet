@@ -1,6 +1,7 @@
 import { registerTaskPanel, TaskPanelAdapter } from '@/assets/TaskPanel';
 import { defaultCapabilities, getCapabilities } from '@/capabilities';
 import { TaskLoopCard } from '@/components/TaskCards';
+import { TaskPanelSwitcherSlot } from '@/components/Workspace/TaskPanelSwitcherSlot';
 import { useTaskPanelNavBinding } from '@/hooks/taskPanelNavBinding';
 import { registerUmdPanelHandler } from '@/services/bcs/UmdPanel';
 import { TASK_READ_API_BASE } from '@/services/tasks/taskConfig';
@@ -46,9 +47,14 @@ const TaskPanelAdapterWithUser: ComponentType<PanelContentProps> = (props) => {
     userId: incoming.userId ?? loginUserId,
     taskApiBase: TASK_READ_API_BASE,
   };
+  // V2 多任务切换条:listTasks 数据 + openPanelTab 幂等 upsert 切换(内部无任务时自渲染 null)
+  const switcher = React.createElement(TaskPanelSwitcherSlot, {
+    currentTaskId: typeof incoming.taskId === 'string' ? incoming.taskId : '',
+    params: incoming,
+  });
   return React.createElement(
     TaskPanelAdapter,
-    { ...props, params, nav } as PanelContentProps & { nav?: typeof nav },
+    { ...props, params, nav, switcher } as PanelContentProps & { nav?: typeof nav; switcher?: typeof switcher },
   );
 };
 
