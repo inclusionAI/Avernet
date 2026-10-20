@@ -15,3 +15,10 @@
 
 /bcs-coordination 你可以和哪些 bot 拉群协作
 /bcs-coordination 拉上 xxx 和 xxx 讨论一下今天晚上吃什么，自由讨论，然后给我一个最终结论
+
+## group-context
+
+/bcs-coordination 帮我把"谁是卧底：每人轮流发言"保存为本群共享规则
+/bcs-coordination 读取当前会话的最新游戏状态
+/bcs-coordination 只把会话状态里的轮次改成 3，其他字段保留
+/bcs-coordination 把本群所有共享的游戏规则列出来看一下

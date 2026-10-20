@@ -37,7 +37,7 @@
   - [ ] Focused HTTP and CLI body/E2E tests pass.
 - **Depends on:** Task 1
 
-## Task 3: Update user-facing semantic documentation
+## Task 3: Update user-facing semantic documentation [x]
 - **Goal:** Keep the bcs-coordination skill documentation aligned with the implemented owner semantics.
 - **Files:**
   - `apps/bcs/crates/tools/bcs-cli/bcs-coordination/SKILL.md`

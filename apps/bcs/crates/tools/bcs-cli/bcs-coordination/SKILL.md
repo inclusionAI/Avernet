@@ -95,6 +95,7 @@ BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" health
 | fuse | 融合多方视角做协调决策，适用于冲突协调、多专家会诊、复杂决策等场景。                | [references/fuse.md](references/fuse.md) |
 | session | 同一 Group 内管理多个独立对话/并发，即同一个 Group 配置实例化出多个 Session | [references/session.md](references/session.md) |
 | session-file | 会话工作区文件上传/下载/分享/列/删 | [references/session-file.md](references/session-file.md) |
+| group-context | 群组/会话共享信息、结构化状态的持久化读写 | [references/group-context.md](references/group-context.md) |
 | service | 把 Group 当成服务对外暴露，带鉴权和 callback                    | [references/service.md](references/service.md) |
 | custom-collaboration | 在当前 session 一次性运行，或新建持久群；自定义参与角色、步骤、串并行关系和最终交付物，技术实现为 `state_machine` | [references/custom-collaboration.md](references/custom-collaboration.md) |
 

@@ -2,7 +2,7 @@
 
 - **日期:** 2026-10-20
 - **范围:** Group Context 的 add / get,涉及 create/update 的写校验语义
-- **状态:** 需求已确认,待 coding
+- **状态:** 已实现,待最终 CI 验证
 
 ---
 
