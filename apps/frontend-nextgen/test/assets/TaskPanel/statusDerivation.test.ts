@@ -94,10 +94,10 @@ describe('deriveNodePresentation', () => {
 });
 
 const relations: TaskRelationDto[] = [
-  { src_id: 'n1', dst_id: 'n2' },
-  { src_id: 'n1', dst_id: 'n3' }, // outDegree(n1)=2 → split_work
-  { src_id: 'n2', dst_id: 'n4' }, // n4 attemptCount>1 → rework
-  { src_id: 'n3', dst_id: 'n5' }, // 普通 → none
+  { src_id: 'n1', dst_id: 'n2', type: 'DEPENDENCY' },
+  { src_id: 'n1', dst_id: 'n3', type: 'DEPENDENCY' }, // outDegree(n1)=2 → split_work
+  { src_id: 'n2', dst_id: 'n4', type: 'DEPENDENCY' }, // n4 attemptCount>1 → rework
+  { src_id: 'n3', dst_id: 'n5', type: 'DEPENDENCY' }, // 普通 → none
 ];
 
 describe('derivePresentEdges', () => {
@@ -129,8 +129,8 @@ describe('derivePresentEdges', () => {
   it('rework 与 split_work 同时命中时 rework 优先(返工事实 > 并行形态)', () => {
     const edges = derivePresentEdges({
       relations: [
-        { src_id: 'n1', dst_id: 'n2' },
-        { src_id: 'n1', dst_id: 'n3' },
+        { src_id: 'n1', dst_id: 'n2', type: 'DEPENDENCY' },
+        { src_id: 'n1', dst_id: 'n3', type: 'DEPENDENCY' },
       ],
       nodes: [
         { id: 'n1', presentation: { present: 'done', attemptCount: 1, needsHitl: false }, actionLog: [] },
@@ -145,7 +145,7 @@ describe('derivePresentEdges', () => {
 
   it('outDegree=1 不产 split_work', () => {
     const edges = derivePresentEdges({
-      relations: [{ src_id: 'a', dst_id: 'b' }],
+      relations: [{ src_id: 'a', dst_id: 'b', type: 'DEPENDENCY' }],
       nodes: [
         { id: 'a', presentation: { present: 'done', attemptCount: 1, needsHitl: false }, actionLog: [] },
         { id: 'b', presentation: { present: 'pending', attemptCount: 0, needsHitl: false }, actionLog: [] },

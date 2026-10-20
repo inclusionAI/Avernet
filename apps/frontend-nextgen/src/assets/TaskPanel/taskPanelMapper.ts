@@ -8,8 +8,12 @@
  */
 import { normalizeTaskStatus } from '@/shared/taskStatus';
 import type { TaskDashboardResponse, TaskNodeDto, TaskStatusCode, TaskType } from './contract';
+import { mergeArtifactLists } from './artifactDescriptor';
+import { deriveNodeExecDag, deriveNodePresentation, derivePresentEdges } from './statusDerivation';
+import { truncateText } from './text';
 import { renderableSource, unwrapHttpEnvelope } from './outputEnvelope';
 import { ARTIFACT_TYPE_LABELS, SOURCE_LABELS, TASK_STATUS_TONES, TASK_TYPE_LABELS } from './tokens';
+import type { NodeActionEventDto } from './contract';
 import type {
   DagEdgeView,
   DagNodeView,
@@ -496,6 +500,19 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
     ? null
     : resolveOutputRender(rootOutputSource, rootRunInfo?.output_summary);
 
+  // ── V2 派生输入(spec §3.3):下游消费集/出边表,供 present(merged)/边语义(split_work)判定 ──
+  const mappedStatusById = new Map(graphTasks.map((n) => [n.node_id, mapNodeStatus(n.status)]));
+  const outDegree: Record<string, number> = {};
+  const consumedUpstreamIds = new Set<string>();
+  for (const rel of graphRelations) {
+    outDegree[rel.src_id] = (outDegree[rel.src_id] ?? 0) + 1;
+    const dstStatus = mappedStatusById.get(rel.dst_id);
+    // 下游已开始/已完成 = 前驱输出已被消费(merged 判定)
+    if (dstStatus === 'done' || dstStatus === 'running') consumedUpstreamIds.add(rel.src_id);
+  }
+  // 派生 reason 需要 action_log 原始事件,节点视图不落原始日志,单独留映射
+  const actionLogById = new Map<string, NodeActionEventDto[] | null | undefined>();
+
   const nodes: TaskNodeView[] = graphTasks
     .slice()
     .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
@@ -566,11 +583,30 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
           (isRootNode ? rootGroupName : null) ??
           'BCS协作群'
         : null;
+      const nodeStatus = mapNodeStatus(n.status);
+      // V2 PRD 表现态派生(spec §3.3 全部规则收敛在 statusDerivation):rework/merged/attemptCount/HITL
+      const presentation = deriveNodePresentation({
+        runtimeStatus: nodeStatus,
+        actionLog: effectiveRunInfo.action_log,
+        acceptanceVerdict: effectiveRunInfo.acceptance_result?.verdict ?? null,
+        hasConsumedDownstream: consumedUpstreamIds.has(n.node_id),
+        // child_task 状态不在本响应内,未知即 null(merged 仅由下游消费判据支撑)
+        childTaskDone: null,
+        needsTaskAttention: !!d.needs_attention,
+      });
+      actionLogById.set(n.node_id, effectiveRunInfo.action_log);
       return {
         id: n.node_id,
         name: title,
         sequence: n.sequence ?? 0,
-        status: mapNodeStatus(n.status),
+        status: nodeStatus,
+        present: presentation.present,
+        attemptCount: presentation.attemptCount,
+        needsHitl: presentation.needsHitl,
+        drillable: isGroupNode,
+        execDag: deriveNodeExecDag(effectiveRunInfo.action_log),
+        startedAtMs: effectiveRunInfo.start_time ?? null,
+        endAtMs: effectiveRunInfo.end_time ?? null,
         executor: resolveNodeExecutor(effectiveRunInfo),
         executorColor: executorColor(effectiveRunMode),
         runMode: effectiveRunMode ?? null,
@@ -591,14 +627,8 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
         outputSummary: resolveOutputSummary(effectiveRunInfo.output, effectiveRunInfo.output_summary),
         outputRender: resolveOutputRender(effectiveRunInfo.output, effectiveRunInfo.output_summary),
         taskSpec: mapNodeTaskSpec(n.task_spec),
-        artifacts: (effectiveRunInfo.artifacts ?? []).map((a) => ({
-          id: a.artifact_id,
-          name: a.name,
-          type: a.type,
-          url: a.url ?? null,
-          summary: a.summary ?? null,
-          updatedAt: a.created_at,
-        })),
+        // 产物 V2:节点级 Descriptor(后端读侧富化)优先,与 run_info.artifacts legacy 口径按 id 去重
+        artifacts: mergeArtifactLists(n.artifacts, effectiveRunInfo.artifacts, n.node_id),
         hasSubTask: !!effectiveRunInfo.child_task_id,
         subTaskId: effectiveRunInfo.child_task_id ?? null,
         stepTraces: mapActionLog(effectiveRunInfo.action_log),
@@ -612,7 +642,35 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
       };
     });
 
-  const { dagNodes, dagEdges } = layoutDag(nodes, graphRelations);
+  const { dagNodes: rawDagNodes, dagEdges: rawDagEdges } = layoutDag(nodes, graphRelations);
+  // ── V2:DAG 视图模型enrich(展示态/下钻热区/短标题 + 边语义/reason,spec §3.3) ──
+  const nodeById = new Map(nodes.map((n) => [n.id, n]));
+  const presentEdges = derivePresentEdges({
+    relations: graphRelations,
+    nodes: nodes.map((n) => ({
+      id: n.id,
+      presentation: { present: n.present ?? n.status, attemptCount: n.attemptCount ?? 0, needsHitl: n.needsHitl ?? false },
+      actionLog: actionLogById.get(n.id) ?? null,
+    })),
+    outDegree,
+  });
+  const presentEdgeById = new Map(presentEdges.map((e) => [`${e.from}->${e.to}`, e]));
+  const dagNodes: DagNodeView[] = rawDagNodes.map((dn) => {
+    const nv = nodeById.get(dn.id);
+    return nv
+      ? {
+          ...dn,
+          present: nv.present,
+          drillable: nv.drillable,
+          needsHitl: nv.needsHitl,
+          short: truncateText(nv.name, 8),
+        }
+      : dn;
+  });
+  const dagEdges: DagEdgeView[] = rawDagEdges.map((de) => {
+    const p = presentEdgeById.get(`${de.from}->${de.to}`);
+    return p ? { ...de, semantics: p.semantics, reason: p.reason } : de;
+  });
   // OKR/多节点任务若存在已完成的「投放实施」节点，产物 Tab 绑定该节点 output；否则回退根节点 output。
   const implementationNode = nodes.find((node) => node.name.includes('投放实施') || node.name.includes('实施投放'));
   const selectedOutputNode = implementationNode?.status === 'done' ? implementationNode : undefined;
@@ -667,6 +725,9 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
     template,
     parentTaskId: d.parent_task_id ?? (execCfg.parent_task_id as string | null) ?? tcCtx?.parent_task_id ?? null,
     mainSessionName: d.main_session?.name ?? (execCfg.main_session_name as string) ?? tcCtx?.main_session_name ?? null,
+    mainSessionId: d.main_session?.session_id ?? null,
+    sourceGroupId: d.main_session?.source_group_id ?? null,
+    derivedSessionIds: d.derived_session_ids ?? [],
     progress: computeProgress(d, nodes),
     rootOutputRender,
     rootOutputDimensions,

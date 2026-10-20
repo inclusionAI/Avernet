@@ -892,3 +892,191 @@ describe('taskPanelMapper canonical TaskSpec', () => {
     expect(task.nodes[1]!.taskSpec!.target).toBe('下一棒目标');
   });
 });
+
+// ── Task 模块 V2 升级:派生接线(statusDerivation/artifactDescriptor/session 字段透传) ──
+
+describe('taskPanelMapper V2 derivation wiring', () => {
+  const buildDashboard = (overrides?: Partial<TaskDashboardResponse>): TaskDashboardResponse =>
+    ({
+      task_id: 'task-v2',
+      run_id: 1,
+      status: 'RUNNING',
+      needs_attention: true,
+      task_type: 'dynamic',
+      source_type: 'bot',
+      owner_user_id: 'user-1',
+      owner_bot_id: 'bot-owner',
+      task_spec: { metadata: { title: 'V2 任务' }, goal: { objective: '目标', acceptances: [] } },
+      main_session: { session_id: 'agent:main:session:s-main', name: '主单聊', source_type: 'bot', owner_bot_id: 'bot-owner', source_group_id: null },
+      derived_session_ids: [],
+      create_time: '2026-10-20T10:00:00+08:00',
+      finish_time: null,
+      loop_round: 1,
+      progress: { total: 3, pending: 1, planning: 0, running: 1, done: 1, failed: 0, hung: 0, skipped: 0, percent: 33 },
+      tasks: [],
+      relations: [],
+      ...overrides,
+    }) as TaskDashboardResponse;
+
+  it('节点 present/rework 派生:执行中+多 attempt+验收非 DONE', () => {
+    const task = mapDashboard(buildDashboard({
+      tasks: [
+        {
+          node_id: 'n-planner', task_id: 'task-v2', sequence: 1, status: 'DONE',
+          task_spec: { metadata: { title: '规划' }, goal: { objective: '', acceptances: [] } },
+          relations: [],
+        },
+        {
+          node_id: 'n-worker', task_id: 'task-v2', sequence: 2, status: 'RUNNING',
+          task_spec: { metadata: { title: '执行' }, goal: { objective: '', acceptances: [] } },
+          run_info: {
+            run_mode: 'coop_group',
+            action_log: [
+              { seq: 1, ts: 1700000000000, action: 'dispatch', attempt: 1 },
+              { seq: 2, ts: 1700000001000, action: 'rework', attempt: 2, status_to: 'REWORK_RERUN', payload: { description: 'Owner Bot 裁决 revise: 返工' } },
+            ],
+            acceptance_result: { verdict: 'FAILED', done_items: [], gap_items: ['缺定价对比'] },
+          },
+        },
+      ] as TaskDashboardResponse['tasks'],
+      relations: [
+        { src_id: 'n-planner', dst_id: 'n-worker', type: 'DEPENDENCY' },
+      ] as TaskDashboardResponse['relations'],
+    }));
+    const worker = task.nodes.find((n) => n.id === 'n-worker')!;
+    expect(worker.present).toBe('rework');
+    expect(worker.attemptCount).toBe(2);
+    expect(worker.needsHitl).toBe(true);
+    // planner DONE 且下游 worker 已在执行(消费其输出)→ merged;无下游的 DONE 节点 → done 见下例
+    expect(task.nodes.find((n) => n.id === 'n-planner')!.present).toBe('merged');
+  });
+
+  it('merged 派生:DONE 节点存在已完成的直接下游', () => {
+    const task = mapDashboard(buildDashboard({
+      tasks: [
+        { node_id: 'n-a', task_id: 'task-v2', sequence: 1, status: 'DONE', task_spec: { metadata: { title: 'A' }, goal: { objective: '', acceptances: [] } } },
+        { node_id: 'n-b', task_id: 'task-v2', sequence: 2, status: 'DONE', task_spec: { metadata: { title: 'B' }, goal: { objective: '', acceptances: [] } } },
+      ] as TaskDashboardResponse['tasks'],
+      relations: [{ src_id: 'n-a', dst_id: 'n-b', type: 'DEPENDENCY' }] as TaskDashboardResponse['relations'],
+    }));
+    expect(task.nodes.find((n) => n.id === 'n-a')!.present).toBe('merged');
+    expect(task.nodes.find((n) => n.id === 'n-b')!.present).toBe('done');
+    expect(task.dagNodes.find((n) => n.id === 'n-a')!.present).toBe('merged');
+  });
+
+  it('drillable:协作群节点 true,单聊节点 false', () => {
+    const task = mapDashboard(buildDashboard({
+      tasks: [
+        { node_id: 'n-solo', task_id: 'task-v2', sequence: 1, status: 'RUNNING', task_spec: { metadata: { title: '单聊' }, goal: { objective: '', acceptances: [] } } },
+        {
+          node_id: 'n-group', task_id: 'task-v2', sequence: 2, status: 'RUNNING',
+          task_spec: { metadata: { title: '群节点' }, goal: { objective: '', acceptances: [] } },
+          run_info: { run_mode: 'coop_group' },
+        },
+      ] as TaskDashboardResponse['tasks'],
+      relations: [{ src_id: 'n-solo', dst_id: 'n-group', type: 'DEPENDENCY' }] as TaskDashboardResponse['relations'],
+    }));
+    expect(task.nodes.find((n) => n.id === 'n-solo')!.drillable).toBe(false);
+    expect(task.nodes.find((n) => n.id === 'n-group')!.drillable).toBe(true);
+    expect(task.dagNodes.find((n) => n.id === 'n-group')!.drillable).toBe(true);
+  });
+
+  it('execDag 由 action_log 派生注入节点', () => {
+    const task = mapDashboard(buildDashboard({
+      tasks: [{
+        node_id: 'n-exec', task_id: 'task-v2', sequence: 1, status: 'RUNNING',
+        task_spec: { metadata: { title: 'E' }, goal: { objective: '', acceptances: [] } },
+        run_info: {
+          action_log: [
+            { seq: 1, ts: 1700000000000, action: 'accept_context', attempt: 1 },
+            { seq: 2, ts: 1700000001000, action: 'self_check', attempt: 1 },
+          ],
+        },
+      }] as TaskDashboardResponse['tasks'],
+    }));
+    const exec = task.nodes[0]!.execDag!;
+    expect(exec.nodes.map((n) => n.id)).toEqual(['ev-1', 'ev-2']);
+    expect(exec.edges).toEqual([{ from: 'ev-1', to: 'ev-2', semantics: 'none' }]);
+  });
+
+  it('dagEdges 语义/reason:fan-out → split_work;返工节点入边 → rework', () => {
+    const task = mapDashboard(buildDashboard({
+      tasks: [
+        { node_id: 'n1', task_id: 'task-v2', sequence: 1, status: 'DONE', task_spec: { metadata: { title: '一' }, goal: { objective: '', acceptances: [] } } },
+        { node_id: 'n2', task_id: 'task-v2', sequence: 2, status: 'DONE', task_spec: { metadata: { title: '二' }, goal: { objective: '', acceptances: [] } } },
+        {
+          node_id: 'n3', task_id: 'task-v2', sequence: 3, status: 'RUNNING',
+          task_spec: { metadata: { title: '三' }, goal: { objective: '', acceptances: [] } },
+          run_info: { action_log: [{ seq: 5, ts: 1700000003000, action: 'rework', attempt: 2, payload: { description: '第 2 次返工' } }], acceptance_result: { verdict: 'FAILED', done_items: [], gap_items: [] } },
+        },
+      ] as TaskDashboardResponse['tasks'],
+      relations: [
+        { src_id: 'n1', dst_id: 'n2', type: 'DEPENDENCY' },
+        { src_id: 'n1', dst_id: 'n3', type: 'DEPENDENCY' },
+      ] as TaskDashboardResponse['relations'],
+    }));
+    const byKey = new Map(task.dagEdges.map((e) => [`${e.from}->${e.to}`, e]));
+    expect(byKey.get('n1->n2')?.semantics).toBe('split_work');
+    expect(byKey.get('n1->n3')?.semantics).toBe('rework');
+    expect(byKey.get('n1->n3')?.reason).toBe('第 2 次返工');
+  });
+
+  it('工具节点 dagNodes.short 生成(名超 8 字截断加省略号)', () => {
+    const task = mapDashboard(buildDashboard({
+      tasks: [{
+        node_id: 'n-long', task_id: 'task-v2', sequence: 1, status: 'RUNNING',
+        task_spec: { context: { title: '这是一个名字特别长的节点标题要截断' }, goal: { objective: '', acceptances: [] } },
+      }] as TaskDashboardResponse['tasks'],
+    }));
+    const short = task.dagNodes.find((n) => n.id === 'n-long')?.short!;
+    expect(short.endsWith('…')).toBe(true);
+    expect(short.length).toBeLessThanOrEqual(9);
+  });
+
+  it('TaskView 透传 mainSessionId/sourceGroupId/derivedSessionIds + 节点原始时间戳', () => {
+    let task = mapDashboard(buildDashboard());
+    expect(task.mainSessionId).toBe('agent:main:session:s-main');
+    expect(task.sourceGroupId).toBeNull();
+    expect(task.derivedSessionIds).toEqual([]);
+
+    task = mapDashboard(buildDashboard({
+      main_session: { session_id: 's-main', name: '主', source_type: 'coop_group', owner_bot_id: 'bot-owner', source_group_id: 'g-902' },
+      derived_session_ids: ['bcs_grp_x:round:1', 'bcs_grp_y:round:1'],
+      tasks: [{
+        node_id: 'n1', task_id: 'task-v2', sequence: 1, status: 'RUNNING',
+        task_spec: { metadata: { title: 'T' }, goal: { objective: '', acceptances: [] } },
+        run_info: { start_time: 1700000000000, end_time: 1700000005000 },
+      }] as TaskDashboardResponse['tasks'],
+    }));
+    expect(task.sourceGroupId).toBe('g-902');
+    expect(task.derivedSessionIds).toEqual(['bcs_grp_x:round:1', 'bcs_grp_y:round:1']);
+    expect(task.nodes[0]!.startedAtMs).toBe(1700000000000);
+    expect(task.nodes[0]!.endAtMs).toBe(1700000005000);
+  });
+
+  it('节点产物 Descriptor(富化)与 legacy 合并去重', () => {
+    const task = mapDashboard(buildDashboard({
+      tasks: [{
+        node_id: 'n-art', task_id: 'task-v2', sequence: 1, status: 'DONE',
+        task_spec: { metadata: { title: 'A' }, goal: { objective: '', acceptances: [] } },
+        artifacts: [
+          {
+            artifact_id: 'd-1', artifact_name: '调研链接', kind: 'url_link',
+            content: { url: 'https://yuque.example/x', type: '文档' },
+            attempt: 1, creator: 'group-902', created_at: 1729400000000,
+          },
+        ],
+        run_info: {
+          artifacts: [
+            { artifact_id: 'd-1', name: '旧口径同名', type: 'link', url: 'https://old', created_at: '2026-10-01' },
+            { artifact_id: 'legacy-9', name: '旧口径独有', type: 'file', created_at: '2026-10-01' },
+          ],
+        },
+      }] as TaskDashboardResponse['tasks'],
+    }));
+    const artifacts = task.nodes[0]!.artifacts;
+    expect(artifacts).toHaveLength(2);
+    expect(artifacts.find((a) => a.id === 'd-1')?.kind).toBe('url_link'); // Descriptor 口径胜出
+    expect(artifacts.find((a) => a.id === 'legacy-9')?.name).toBe('旧口径独有');
+  });
+});
