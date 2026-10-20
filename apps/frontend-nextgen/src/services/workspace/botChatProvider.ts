@@ -1,3 +1,9 @@
+import {
+  isSendBannedForSession,
+  takeCachedA2AProvider,
+  type A2aBootstrapConfig,
+} from '@/adapters/a2a/bootstrap';
+import type { CancelOutcome } from '@/adapters/a2a/cancelOutcomes';
 import { getBotConnection } from '@/services/backendApi/bots/privateBotSessionController';
 import { getBotIamToken } from '@/services/backendApi/privateChat/iamTokenController';
 import { OpenClawProvider, type ConnectionStatusEvent, type OpenClawProviderConfig } from '@tc-chat/adapters';
@@ -72,6 +78,10 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   private manuallyDisconnected = false;
   private connectionListeners = new Set<(event: ConnectionStatusEvent) => void>();
   private stateListeners = new Set<(state: BotChatState) => void>();
+  /** A2A M2 bootstrap seam：最近一次连接信息里的 ws url——§3.1 发送禁令门按它派生 A2A endpointBase */
+  private wsUrl: string | null = null;
+  /** B12 取消四态的宿主订阅面（A2AProvider.onCancelOutcome → useBotChat toast 消费） */
+  private readonly cancelOutcomeListeners = new Set<(outcome: CancelOutcome) => void>();
   private unsubscribeInnerConnection?: () => void;
   private state: BotChatState = { phase: 'idle', error: null };
   private teardownFallback?: () => void;
@@ -112,6 +122,36 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     };
   }
 
+  // ─── A2A M2 bootstrap seam：§3.1 发送禁令门（纯谓词）+ B12 取消四态订阅面 ───
+
+  /**
+   * §3.1 context 级发送禁令门（spec 原文文案单源在 bootstrap.SEND_BAN_UI_TEXT，
+   * toast 消费面归 useBotChat.send）。禁令生命周期独立于 provider 实例
+   * （registry 是 (endpointBase, sessionKey) 键的 app 级单例）；未初始化
+   * （尚无 ws url）/ 非 A2A 面（选择探测落 v3）恒 false——v3 发送不受影响。
+   */
+  isSendBanned(): boolean {
+    return this.wsUrl != null && isSendBannedForSession(this.options.sessionId, this.wsUrl);
+  }
+
+  /** B12 取消终局播报订阅：A2AProvider.onCancelOutcome 经本类转发（含 provider 已 teardown 的迟到核销） */
+  subscribeToCancelOutcome(listener: (outcome: CancelOutcome) => void): () => void {
+    this.cancelOutcomeListeners.add(listener);
+    return () => {
+      this.cancelOutcomeListeners.delete(listener);
+    };
+  }
+
+  private emitCancelOutcome(outcome: CancelOutcome): void {
+    for (const listener of [...this.cancelOutcomeListeners]) {
+      try {
+        listener(outcome);
+      } catch {
+        /* 单订阅异常不中断其余（镜像订阅面通用容错） */
+      }
+    }
+  }
+
   private async getChatUrl(): Promise<string> {
     const resp = await getBotConnection(
       this.options.bot.realBotId,
@@ -140,6 +180,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   private async initialize(): Promise<OpenClawProvider> {
     this.setState({ phase: 'preparing', error: null });
     const url = await this.getChatUrl();
+    this.wsUrl = url;
     // 连接凭证(URL query token,管 WS 握手)与请求身份凭证(x-iam-token,管 chat.send 帧)是两套:
     // URL 已内含握手凭证;此处须单独拉取 IAM token 并注入 SDK,否则发送会被服务端拒(身份不明)。
     this.iamToken = this.directDesktop
@@ -150,7 +191,22 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
           this.options.bot.ownerId,
           resolveChatRuntimeStage(this.options.bot),
         );
-    const factory = this.options.createSdkProvider ?? ((cfg) => new OpenClawProvider(cfg));
+    // A2A M2 bootstrap seam：SDK 工厂两条候选——缓存命中同步换入 A2AProvider（两段式
+    // 传输选择：探测未决时 takeCachedA2AProvider 内部 fire-and-forget 后台预热、
+    // 本轮落回 v3；选择/锁定/禁令编排权威在 @/adapters/a2a/bootstrap.ts 单一编排点）。
+    // v3 构造行 `new OpenClawProvider(cfg)` 保持逐字不变（零改动红线，钉板
+    // test/services/workspace/botChatProvider.a2a.seam.test.ts）。
+    const factory = this.options.createSdkProvider ?? ((cfg) => {
+      const a2aProvider = takeCachedA2AProvider(cfg as A2aBootstrapConfig);
+      if (a2aProvider) {
+        // B12 取消四态播报转发（宿主 toast 消费面在 useBotChat；文案单源 CANCEL_UI_TEXT）。
+        // IAM 凭证刷新沿用本类既有通道：request() 的 updateProviderIamToken 直写
+        // config.xIAMToken，A2AProvider.resolveIamToken 每次请求重读——无需额外接线。
+        a2aProvider.onCancelOutcome = (outcome) => this.emitCancelOutcome(outcome);
+        return a2aProvider as unknown as OpenClawProvider;
+      }
+      return new OpenClawProvider(cfg);
+    });
     const inner = factory({
       url,
       sessionKey: this.options.sessionId,
