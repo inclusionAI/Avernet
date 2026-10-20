@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/Button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { BotActionAvailability, BotDomain } from '@/services/botWorkshop';
+import { isServiceVerification } from '@/services/botWorkshop/botPolicy';
 import { ArrowUpRight, ClipboardList, FileText, HeartPulse, MessageSquare, Pencil } from 'lucide-react';
 import React from 'react';
 
@@ -62,6 +63,7 @@ const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
 }) => {
   if (bot.lifecycle === 'deploying') return null;
   const isAgentCodingBot = bot.runtime.isAgentCodingBot;
+  const editLabel = isServiceVerification(bot) ? '预发验证' : '编辑';
   const lockedByOther = bot.lock?.status === 'other';
   // Coding Bot 在 Bot 管理页固定展示「去使用」和「任务实例」，
   // 不额外暴露查看/编辑/日志/健康检查等普通库存操作。
@@ -115,11 +117,11 @@ const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
     <Button
       variant="ghost"
       size="icon"
-      aria-label={`编辑 ${bot.name}`}
+      aria-label={`${editLabel} ${bot.name}`}
       disabled={!inventoryActions.edit?.enabled}
       onClick={() => onEdit?.(bot)}
     >
-      <Pencil className="size-3.5" />
+      {isServiceVerification(bot) ? <MessageSquare className="size-3.5" /> : <Pencil className="size-3.5" />}
     </Button>
   );
 
@@ -200,7 +202,7 @@ const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
       ) : null}
       {showEdit ? (
         <IconAction
-          label="编辑"
+          label={editLabel}
           disabled={!inventoryActions.edit?.enabled}
           disabledReason={inventoryActions.edit?.disabledReason}
         >
