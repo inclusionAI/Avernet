@@ -189,6 +189,7 @@ from .bots.cli_tools import router as cli_tools_router
 from .bots.config_manifest import router as config_manifest_router
 from .bots.config_manifest_apply import router as config_manifest_apply_router
 from .bots.create_with_manifest import router as create_with_manifest_router
+from .bots.genome import router as genome_router
 from .org import dept_router as org_dept_router
 from .org import router as org_router
 from .channels import router as channels_router
@@ -391,6 +392,9 @@ _ADDRESSED_BOT_SUBGROUPS = [
     # grant rather than the own-bot one.
     config_manifest_router,
     config_manifest_apply_router,
+    # The genome registry is collaborator-scoped on the manifest's bars
+    # (MEMBER to read, ADMIN to record) and addresses a shared bot the same way.
+    genome_router,
     # The startup script, data-init state, identity persona files and the
     # workspace resources/routines are collaborator-scoped on the manifest's
     # bars (MEMBER to read, ADMIN behind the lock to write), so they take the

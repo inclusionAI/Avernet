@@ -156,6 +156,21 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("post", "/openapi/v1/bots/{bot_id}/config-manifest/apply"),
     ("get", "/openapi/v1/bots/{bot_id}/config-manifest/last-apply"),
     ("get", "/openapi/v1/bots/{bot_id}/config-manifest/applies/{apply_id}"),
+    # The genome registry (RSI-03) addresses the same (owner, bot_id) pair as
+    # the manifest: a revision belongs to a bot, not to one of its runtimes.
+    ("get", "/openapi/v1/bots/{bot_id}/genome/revisions"),
+    ("post", "/openapi/v1/bots/{bot_id}/genome/revisions"),
+    ("post", "/openapi/v1/bots/{bot_id}/genome/revisions:capture"),
+    ("get", "/openapi/v1/bots/{bot_id}/genome/revisions/{rev}/diff"),
+    ("get", "/openapi/v1/bots/{bot_id}/genome/revisions/{rev}"),
+    ("put", "/openapi/v1/bots/{bot_id}/genome/policy"),
+    ("get", "/openapi/v1/bots/{bot_id}/genome/refs"),
+    ("put", "/openapi/v1/bots/{bot_id}/genome/refs/draft"),
+    ("get", "/openapi/v1/bots/{bot_id}/genome/content/{digest}"),
+    ("put", "/openapi/v1/bots/{bot_id}/genome/content"),
+    ("post", "/openapi/v1/bots/{bot_id}/genome/promotions"),
+    ("get", "/openapi/v1/bots/{bot_id}/genome/promotions"),
+    ("get", "/openapi/v1/bots/{bot_id}/genome/promotions/{promotion_id}"),
     # W9's CLI tools take the config-manifest group's bars, so they address a
     # bot that may be someone else's the same way. No ``stage`` for the same
     # reason: a tool is installed on the bot, not on one of its runtimes — and

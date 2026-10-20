@@ -91,9 +91,9 @@
 - **Goal:** The `/openapi/v1/bots/{bot_id}/genome` router with envelopes, bars, admission and error mapping.
 - **Files:** `adapters/http/openapi_v1/bots/{genome,schemas_genome}.py`, `adapters/http/openapi_v1/{errors_genome,authorization_rules_genome,admission_genome_routes}.py`, `adapters/http/openapi_v1/{__init__,responses,authorization_rules,admission_routes}.py` (merges); `tests/community/adapters/http/openapi_v1/test_genome_routes.py`, `tests/community/adapters/http/openapi_v1/test_config_manifest_apply_bars.py`
 - **Done when:**
-  - [ ] All thirteen operations of the plan's table are mounted with the stated levels and `GRANT_CHECKED_ADDRESSED_BOT`; `test_authorization_inventory` and the admission tests pass; the promotion row satisfies the apply-bars dominance test.
-  - [ ] `{rev:path}` routing serves `candidate/<run>/<n>` for get and diff and does not swallow `:capture` or `/diff`; content GET returns `application/octet-stream`; PUT content enforces the size cap before reading the whole body.
-  - [ ] Every `GenomeError` maps to its documented status with `data` carrying reasons or the current ref; 201 vs 200 on an existing revision/upload.
+  - [x] All thirteen operations of the plan's table are mounted with the stated levels and `GRANT_CHECKED_ADDRESSED_BOT`; `test_authorization_inventory` and the admission tests pass; the promotion row satisfies the apply-bars dominance test.
+  - [x] `{rev:path}` routing serves `candidate/<run>/<n>` for get and diff and does not swallow `:capture` or `/diff`; content GET returns `application/octet-stream`; PUT content enforces the size cap before reading the whole body.
+  - [x] Every `GenomeError` maps to its documented status with `data` carrying reasons or the current ref; 201 vs 200 on an existing revision/upload.
 - **Depends on:** Task 9
 
 ## Task 11: Contract, design docs and work items

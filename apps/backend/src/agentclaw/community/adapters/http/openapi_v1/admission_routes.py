@@ -2,6 +2,7 @@
 
 from .admission_modes import AdmissionMode
 from .admission_account_routes import ACCOUNT_ADMISSION
+from .admission_genome_routes import GENOME_ADMISSION
 from .admission_task_routes import (
     TASK_BBS_ADMISSION,
     TASK_PUBLIC_ADMISSION,
@@ -926,4 +927,5 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "/openapi/v1/bots/work-order-notifications/read-all",
     ): AdmissionMode.USER_GATED,
     **ACCOUNT_ADMISSION,
+    **GENOME_ADMISSION,
 }

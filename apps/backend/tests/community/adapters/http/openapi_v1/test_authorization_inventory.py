@@ -518,6 +518,8 @@ def test_edit_lock_operations_exactly_match_the_migrated_check_surface():
         ("PATCH", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"),
         ("PUT", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"),
         ("POST", "/openapi/v1/bots/{bot_id}/config-manifest/apply"),
+        # Promotion reaches the running bot the way apply does, so it takes apply's bar.
+        ("POST", "/openapi/v1/bots/{bot_id}/genome/promotions"),
         ("POST", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/lifecycle"),
         ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/advance"),

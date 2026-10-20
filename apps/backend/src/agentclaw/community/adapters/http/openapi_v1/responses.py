@@ -91,6 +91,7 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     UserIdMismatchError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_bot_create import BOT_CREATE_HTTP_ERRORS
+from agentclaw.community.adapters.http.openapi_v1.errors_genome import GENOME_ENVELOPE_ERRORS
 from agentclaw.community.adapters.http.openapi_v1.errors_source_credentials import (
     SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
 )
@@ -635,6 +636,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     RepositoryCatalogSyncFailedError: (502, "Repository synchronization failed"),
     **errors_skill_center.SKILL_CENTER_ENVELOPE_ERRORS,
     **SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
+    **GENOME_ENVELOPE_ERRORS,
     FileTooLargeError: (413, "File too large for preview"),
     # download-dir: one fixed message for all three caps (per-file / count / total).
     DirectoryTooLargeError: (413, "Directory too large to download"),
