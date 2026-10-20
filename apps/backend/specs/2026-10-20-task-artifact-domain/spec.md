@@ -83,8 +83,8 @@ class TaskArtifact:
     scope: ArtifactScope        # 归属(见 3.3)
     content: ArtifactContent    # 互斥内容表示(tagged union,见 3.4)
     content_hash: str           # sha256(规范序列化 content),幂等去重键成分
-    created_by: str             # 产出者 id:取发布时点节点 RuntimeInfo.assignee(bot_id/group_id);系统写入(控制信号等无 assignee)记 "system"
-    created_at: int             # 毫秒,与表内 created_at 同源
+    creator: str                # 产出者 id:取发布时点节点 RuntimeInfo.assignee(bot_id/group_id);系统写入(控制信号等无 assignee)记 "system";落表列名 creator
+    created_at: int             # 毫秒;落库由仓储折叠进 gmt_create(trajectory 同款先例),不占独立 bigint 列
 ```
 
 不可变性:发布后不提供任何原地修改入口;内容修订(未来的 `supersedes`)是新增 artifact_id,不是更新。
@@ -165,7 +165,7 @@ class CodeContent(ArtifactContent):
 
 ### 3.5 血缘 ——(方案取舍)本期只到"作用域 + 创建者"
 
-语雀文档的 `derived_from / source_message_ids` 在现有回调信号里同样没有来源,取舍:血缘信息隐含在 `scope`(run/node/attempt 归属)与 `created_by`(谁产出)里;派生关系(下游产物 ← 上游产物/消息)等回调或编排层能真实表达依赖时再加,不预埋自由 JSON。
+语雀文档的 `derived_from / source_message_ids` 在现有回调信号里同样没有来源,取舍:血缘信息隐含在 `scope`(run/node/attempt 归属)与 `creator`(谁产出)里;派生关系(下游产物 ← 上游产物/消息)等回调或编排层能真实表达依赖时再加,不预埋自由 JSON。
 
 ---
 
@@ -250,13 +250,54 @@ class CodeContent(ArtifactContent):
 
 ## 6. 持久化
 
-按 core/repository 四条纪律落地(README.md 治理,`protocols/task/` 与 `implementations/task/` 镜像):
+按 core/repository 四条纪律落地(README.md 治理,`protocols/task/` 与 `implementations/task/` 镜像)。
 
-- **SQL**:`core/task/sql/2026_10_20_task_artifact.sql`,命名随目录惯例;`CREATE TABLE IF NOT EXISTS task_artifact`,列:PK bigint 自增、`artifact_id`(binary_string,uk)、`artifact_name`(varchar,可空;不进幂等键)、`task_id`(idx,与 node_id 组成查询前缀)、`node_id`、`attempt` int、`scope_session_id`(varchar,来自 ArtifactScope,可空;不进幂等键)、`kind` varchar、`content` MEDIUMTEXT(kind-tagged JSON)、`content_hash`(binary_string)、`created_by` varchar、`created_at` bigint ms;`uk_dedupe(task_id, node_id, attempt, kind, content_hash)`;DDL 与 ORM 保持同步(singlebox SQLite bootstrap 以 `Base.metadata.create_all` 为准);
+**为什么独立建表、不复用 `task_node_run_info`(已评估的取舍)**:该表是"可变当前态"行(`gmt_modified onupdate` 原地更新,每次 `save_graph` 随图整体重写,uk 为 `(task_id, node_id, retry)`,见 `repository/models.py:199-228`),而产物是 append-only 不可变清单;一次 attempt 的产物是列表(≤64),并入单列只能是 blob——逐条身份与 `uk_dedupe` 无处落,回放去重退化为整 blob 比较;且 run_info 行已被 `output`/`acceptance_result`/`extend_props` 占用,再并产物会把"每次图保存重写全节点行"的写放大带给产物。独立表 + `save_graph` 同事务内嵌写,一致性机制不变,只多一次性的建表/注册劳动。
+
+- **SQL**:`core/task/sql/2026_10_20_task_artifact.sql`(权威 DDL 如下,plan 阶段照此落盘;标识符列的 utf8mb4_bin 由 ORM variant 承载,与 trajectory 同款先例——DDL 裸列、ORM 定义 collation);
 - **ORM/Record**:`TaskArtifactModel`(`core/task/repository/models.py`,house style:`to_record()` 返回 frozen record,不吐 ORM 对象)+ `TaskArtifactRecord`(`types.py`,table-faithful frozen dataclass,content 存解析后的领域对象);
 - **协议(方案取舍:读侧协议,不承担事务内写)**:写行由图仓储随 `save_graph(published_artifacts=...)` 内嵌完成(5.2,先例为 `TaskCallbackModel`);`TaskArtifactRepositoryProtocol` 只定义读契约(按 task_id / (task_id, node_id) 列产物,attempt 倒序),入 `core/repository/protocols/task/`(纯 Protocol、`@abstractmethod`、无运行时域导入),实现在 `implementations/task/task_artifact_repository.py`,共享 `orm_session()`/`flush()` 习惯;`TaskGraphRepositoryProtocol.save_graph` 签名变更(新增可选参,默认 None=行为不变)——所有现存实现与测试替身在该 commit 内同步;
 - **注册**:`core/repository/README.md` provides 表 + Boundary YAML 增补;`di/modules/task_persistence_module.py` `configure` 绑定 singleton;
 - **domain**:`core/task/domain/errors.py` 加 `TaskArtifactContentError`;`TaskArtifactPublishService`(capture 纯函数 + contextvar 暂存)挂 `task_context` 旁,`TaskModule` 经 `_resolve_optional_port` 同款 try/except 解析(未绑定 → 不发布,只_warning 一条,与 correlation registry 口径一致——注意:这是"可选端口未接线"的启动期语义,不是运行期持久化失败的降级)。
+
+**`task_artifact` DDL**(`2026_10_20_task_artifact.sql`):
+
+```sql
+-- task_artifact: 产物领域对象(TaskArtifact)的持久化,本 spec §3 领域模型的表形态。
+-- append-only 不可变清单:仓储不提供任何 UPDATE 路径;内容修订(未来 supersedes)以新行表达。
+-- 写入由 save_graph 事务内嵌完成(同 TaskCallbackModel 先例);读侧经 TaskArtifactRepositoryProtocol。
+-- 无外键(与 task_trajectory 同款约束:task 域表间不建 FK)。
+-- 幂等二道闸:select-first 后 INSERT,撞 uk_dedupe 让本事务失败走图版本重放(spec §5.3),
+-- 不做"冲突回滚再读"(prod plugin 无 SAVEPOINT)。
+-- creator/modifier/gmt_create/gmt_modify 为表结构房型列(用户定稿):行不可变,
+--   modifier 恒等于 creator、gmt_modify 恒等于 gmt_create,列保留纯为 schema 惯例兼容;
+-- gmt_create 由仓储以领域 created_at(ms)同事务双写,DB DEFAULT 仅为 fallback(trajectory 同款惯例)。
+-- 列名沿用已部署表的实际名 gmt_modify(非 gmt_modified,trajectory 部署形态同款命名)。
+-- content 取 MEDIUMTEXT(16MB) 而非 TEXT(64KB):TEXT 分支装 bot 全文交付物(报表类轻松超 64KB),
+-- 且 relay 上报的 text_content 不经 task_node_run_info.output(TEXT 档)没有天然截断保证;
+-- 变长按需占用,存 1KB 只占 1KB,不为此预付代价。
+CREATE TABLE IF NOT EXISTS `task_artifact` (
+    `id`              bigint(20)    NOT NULL AUTO_INCREMENT                       COMMENT '主键ID',
+    `artifact_id`     varchar(32)   NOT NULL                                      COMMENT '产物 ID(task-art-+uuid4hex16,全局唯一)',
+    `artifact_name`   varchar(255)  DEFAULT NULL                                  COMMENT '业务展示名(NULL=未提供;file 产物发布时回落 file_name)',
+    `task_id`         varchar(128)  NOT NULL                                      COMMENT '归属任务 ID(与报文定位交叉校验后落库)',
+    `node_id`         varchar(128)  NOT NULL                                      COMMENT '产出节点 ID',
+    `attempt`         int           NOT NULL DEFAULT 0                            COMMENT '节点 harness_retries 快照(0 起;与报文交叉校验)',
+    `scope_session_id` varchar(512) DEFAULT NULL                                  COMMENT '图绑定协作会话 ID(图绑定优先,未绑定采纳上报值;NULL=均无)',
+    `kind`            varchar(64)   NOT NULL                                      COMMENT '内容形态(text|file|url_link|code),governed 枚举',
+    `content`         mediumtext    NOT NULL                                      COMMENT '内容分支 JSON(kind-tagged,tag=分支判别;不含字节/临时凭证/存储 handle)',
+    `content_hash`    char(64)      NOT NULL                                      COMMENT 'sha256(canonical_json(content)),uk_dedupe 成分',
+    `creator`         varchar(128)  NOT NULL                                      COMMENT '产出者(bot_id/group_id;system=系统写入,如控制信号)',
+    `modifier`        varchar(128)  NOT NULL                                      COMMENT '修改者(行不可变:恒等于 creator,房型惯例列)',
+    `gmt_create`      timestamp     NOT NULL DEFAULT CURRENT_TIMESTAMP            COMMENT '发布时间(仓储以领域 created_at 毫秒值双写,DB 默认仅 fallback)',
+    `gmt_modify`      timestamp     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后修改时间(行不可变:恒等于 gmt_create,房型惯例列)',
+    PRIMARY KEY (`id`) COMMENT '自增主键',
+    UNIQUE KEY `uk_artifact_id` (`artifact_id`) COMMENT '产物全局唯一 ID 闸',
+    UNIQUE KEY `uk_dedupe` (`task_id`, `node_id`, `attempt`, `kind`, `content_hash`) COMMENT '回放去重幂等键(select-first 后撞键走图版本重放,spec §5.3)'
+) DEFAULT CHARSET = utf8mb4 COMMENT='task 产物不可变清单(spec 2026-10-20-task-artifact-domain)';
+```
+
+要点备注:两道 `UNIQUE KEY` 即幂等机制本身(§5.3),不另建 `KEY`(查询 `(task_id, node_id)` 与 attempt 排序由 `uk_dedupe` 前缀覆盖);`content`/`artifact_name` 不建普通索引(读路径按任务/节点取,不需要按内容查);SQLite 单测不经此文件,由 ORM `Base.metadata.create_all` 同步建表。
 
 ---
 
@@ -265,7 +306,7 @@ class CodeContent(ArtifactContent):
 原则:消费路径不切换(下游/Judge/OpenAPI 仍读 output dict),只让产物**可见**:
 
 - `TaskNodeDTO`(`adapters/http/task/schemas.py:305`)新增 optional `artifacts: list[TaskArtifactDescriptorDTO]`,由 dashboard 读路径按 `(task_id, node_id)` 读时富化(取该节点全部 attempt 的产物,attempt 倒序)——协议仍是"只转协议",富化在 service 层;
-- Descriptor 只含安全字段:`artifact_id / artifact_name / kind / content(kind-tagged 引用元数据:File 分支 storage_type+storage_id+file_name+file_id+file_type;UrlLink 分支 url+type;Code 分支 code_base_name+code_base_address+pr_link+pr_desc)/ attempt / created_by / created_at`;
+- Descriptor 只含安全字段:`artifact_id / artifact_name / kind / content(kind-tagged 引用元数据:File 分支 storage_type+storage_id+file_name+file_id+file_type;UrlLink 分支 url+type;Code 分支 code_base_name+code_base_address+pr_link+pr_desc)/ attempt / creator / created_at`;
 - 轨迹 HTML(`trajectory_html.py`)的「产物」块按 Descriptor 渲染文件名,不渲染任何 URL/下载链接(前端自拼);
 - **OpenAPI v1 面的精确口径(方案取舍)**:共享的 `graph_to_dto` 同时供内部看板路由与 `GET /openapi/v1/collaboration/tasks/dashboard`(`openapi_v1/task/router.py:111/:135`)使用,`TaskNodeDTO` 加字段即**自动**出现在公开 OpenAPI 响应模型中——本方案接受这一**附加可选字段**的公开可见(与"看板产物清单可见"是同一诉求),不加新端点、不改任何既有字段的语义;OpenAPI 导出快照与相关导出测试在**同一变更内**更新。若评审认为公开面必须零变更,则替代方案是给 openapi_v1 路由派生独立 DTO——本期不选,理由:使读侧工作量翻倍且两条演化路径在阶段二必然合流。
 
@@ -324,10 +365,11 @@ class CodeContent(ArtifactContent):
 | 18 | 产物上报只走 relay `/callback/report`,`ExecutionEventDTO` 顶层加 optional `artifacts` 列表(**用户定稿**);集中 push/pull 协议不动 | 接力链路是当前基线的主回调协议;`extra=forbid` 加可选字段兼容;集中通道后续按同构字段平移 |
 | 19 | 新增 `URL_LINK`/`CODE` 内容分支(**用户定稿**):url/type 与 code_base_name/address/pr_link/pr_desc;url 类是产物内容本身,不受"禁临时下载 URL"约束;type 开放字符串;上报列表上限 64 | 链接/代码是协作产出的常见形态;字典四形态,governed 加值即演进 |
 | 20 | 上报 item 为扁平自描述结构(**用户定稿**):artifact_name/artifact_kind/session_id/task_id/node_id/attempt + 恰好一个 content JSON 字符串;scope 四字段均可上报但全部交叉校验(attempt 不一致拒、session_id 图优先上报兜底) | 上报自描述、服务端校验不盲信;幂等键不被误导 |
+| 21 | 独立建 `task_artifact` 表,不复用 `task_node_run_info`(与用户评估后确认,见 §6 段首) | run_info 是可变当前态行,产物是 append-only 清单;blob 化丢 uk_dedupe 且带来写放大 |
 
 ## 11. 待确认决策(开放问题)
 
 1. `FileContent.file_type` 推断的扩展名映射表放领域层还是 adapters 层(倾向于领域层常量,单点维护);
 2. 前端拼下载链接需要的元数据,`TaskArtifactDescriptorDTO` 的 File 分支是否够用(需前端确认);——涉及具体前端协议,后期对齐
 3. 单 bot 工作区路径上报时,是否需要附带 `size`/摘要类字段(现读口不回这些,倾向于不加);
-4. `created_by`(str)对 group 场景的取值(assignee group_id vs 具体执行 bot)按写入点实际可得信息定,实现时对齐。
+4. `creator`(str)对 group 场景的取值(assignee group_id vs 具体执行 bot)按写入点实际可得信息定,实现时对齐;`modifier`/`gmt_modify` 恒等于 `creator`/`gmt_create`(行不可变),不构成开放问题。
