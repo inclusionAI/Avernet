@@ -59,7 +59,7 @@ async fn group_context_add_sends_full_body_and_context_query() {
         .arg("--session-id")
         .arg("sess-001")
         .arg("--round-id")
-        .arg("round-001")
+        .arg("sess-001:round-001")
         .arg("--name")
         .arg("game_rule")
         .arg("--scope-level")

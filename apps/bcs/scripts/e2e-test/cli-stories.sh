@@ -569,7 +569,7 @@ story_cli_operator_validates_channel_management() {
 #   - Get/list expose the active entry after mutation.
 story_cli_operator_manages_group_context() {
     info "Story: an operator manages Group Context through bcs-cli"
-    local group_id session_id ctx_name content updated session_content round_content list_has_item get_has_content get_has_updated
+    local group_id session_id round_id ctx_name content updated session_content round_content list_has_item get_has_content get_has_updated
 
     _cli_story_create_pm_group "CLI group-context workspace" || return
     group_id="$CLI_STORY_GROUP_ID"
@@ -584,6 +584,7 @@ story_cli_operator_manages_group_context() {
     updated="updated group context from cli e2e"
     session_content="session group context from cli e2e"
     round_content="round group context from cli e2e"
+    round_id="${session_id}:round-cli-e2e-$$"
 
     _cli_story_run "operator adds a group context entry" PM group-context add \
         --group-id "$group_id" \
@@ -613,7 +614,7 @@ story_cli_operator_manages_group_context() {
     _cli_story_run "operator adds a round context entry" PM group-context add \
         --group-id "$group_id" \
         --session-id "$session_id" \
-        --round-id "round-cli-e2e-$$" \
+        --round-id "$round_id" \
         --name "$ctx_name" \
         --scope-level round \
         --content "$round_content" \
@@ -650,7 +651,7 @@ story_cli_operator_manages_group_context() {
     _cli_story_run "operator lists group context entries" PM group-context list \
         --group-id "$group_id" \
         --session-id "$session_id" \
-        --round-id "round-cli-e2e-$$" \
+        --round-id "$round_id" \
         --scope-levels group,session,round || {
         api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
         return
