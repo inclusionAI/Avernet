@@ -16,6 +16,50 @@ describe('repair workbench control service', () => {
     const request = { workflowId: 'wf-1', itemIds: f.items.map(i => i.itemId), inputDigest: inbox.inputDigest, instructions: '', requestId: 'create-1' };
     return { ...f, service, inbox, request };
   }
+  it('reconciles all manually selected goals together without adding unselected suggestions', async () => {
+    const f = await setup(3);
+    const selected = ['item-0', 'item-2'];
+    const revision = await f.service.create('human', { ...f.request, itemIds: selected });
+    expect(revision.input.integration?.plans).toHaveLength(1);
+    expect(revision.input.integration?.plans[0].originalItemIds).toEqual(selected);
+    expect(revision.input.items.map(item => item.itemId)).toEqual(selected);
+    const legacyInput={...revision.input};delete legacyInput.integration;
+    await f.db.exec('UPDATE workflow_repair_revisions SET input_json = ? WHERE task_id = ? AND revision = 1',[JSON.stringify(legacyInput),revision.taskId]);
+    await f.service.report({ workflowId: 'wf-1', taskId: revision.taskId, revision: 1,
+      expectedStateVersion: revision.stateVersion, status: 'failed', error: { code: 'CANDIDATE_WRITE_FAILED' } });
+    f.setRemoteStatus({ status: 'failed', rawStatus: 'failed', errorMessage: null });
+    const retry = await f.service.retryGeneration('human', revision.taskId, { expectedRevision: 1, requestId: 'retry-joint' });
+    expect(retry.input.integration?.plans[0].originalItemIds).toEqual(selected);
+    expect(retry.input.baseline).toEqual(revision.input.baseline);
+    expect((await f.service.task(revision.taskId)).revisions.find(row=>row.revision===1)!.input.integration).toBeUndefined();
+  });
+  it('retains execution failure details instead of replacing them with AIS lifecycle errors', async () => {
+    const f = await setup(1);
+    const revision = await f.service.create('human', f.request);
+    const error = { code: 'CANDIDATE_WRITE_FAILED', message: '模型结果不是合法 JSON',
+      stage: 'parse_model_output', details: { reasonCode: 'MODEL_OUTPUT_INVALID_JSON', itemIds: ['item-0'], line: 1, column: 2 } };
+    f.setRemoteStatus({ status: 'failed', rawStatus: 'failed', errorMessage: 'container exited with code 1' });
+    f.setGeneratedResult({ status: 'failed', error });
+    await f.service.reconcile();
+    expect((await f.service.task(revision.taskId)).latestAttempt.error).toEqual(error);
+  });
+  it('groups node overlaps transitively while keeping a multi-node source atomic',async()=>{
+    const f=await setup(4);
+    const scopes=[['a'],['b'],['a','b'],['c']];
+    f.items.forEach((item,index)=>{item.proposal={operations:scopes[index].map(nodeId=>({nodeId,path:'/executor/prompt',op:'replace',value:'selected goal'}))};});
+    const inbox=await f.service.candidates('wf-1');
+    const revision=await f.service.create('human',{...f.request,inputDigest:inbox.inputDigest});
+    const groups=revision.input.integration!.plans.map(plan=>plan.originalItemIds).sort((a,b)=>a[0].localeCompare(b[0]));
+    expect(groups).toEqual([['item-0','item-1','item-2'],['item-3']]);
+  });
+  it('reviews workflow-level constraints together with selected node changes',async()=>{
+    const f=await setup(2);
+    f.items[0].proposal={operations:[{nodeId:'query',path:'/executor/prompt',op:'replace',value:'goal'}]};
+    f.items[1].proposal={operations:[{nodeId:'',path:'/inputs',op:'replace',value:{}}]};
+    const inbox=await f.service.candidates('wf-1');
+    const revision=await f.service.create('human',{...f.request,inputDigest:inbox.inputDigest});
+    expect(revision.input.integration?.plans.map(plan=>plan.originalItemIds)).toEqual([['item-0','item-1']]);
+  });
   it('fits large previews within the shared response budget without losing issue totals or full item data', async () => {
     const f = await repairFixture(7); fixtures.push(f);
     f.items.forEach((item, i) => {

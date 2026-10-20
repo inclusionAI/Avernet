@@ -40,6 +40,20 @@ function fixture() {
 }
 
 describe('Workflow Repair Git-backed AIS execution', () => {
+  it.each(['valid','wrong-execution','changed-tree'])('reads failure diagnostics without a candidate and rejects invalid binding: %s',async(mode)=>{
+    const f=fixture();
+    const identity={stepId:'step',attempt:1,executionId:'execution'};
+    const error={code:'CANDIDATE_WRITE_FAILED',message:'模型结果不是合法 JSON',stage:'parse_model_output',details:{line:1,column:2,itemIds:['item-1']}};
+    const payload={schemaVersion:'workflow-repair-result/v1',taskId:'task',revision:1,...identity,parentCandidateCommit:f.baseline,status:'failed',error};
+    if(mode==='wrong-execution')payload.executionId='other';
+    if(mode==='changed-tree'){writeFileSync(join(f.source,'workflows/wf.yaml'),'partial change');f.git(f.source,'add','.');}
+    f.git(f.source,'commit','--allow-empty','-qm','ClawMind workflow-repair-failure/v1\n'+JSON.stringify(payload));
+    f.git(f.source,'push','-q','origin','HEAD:refs/heads/repair-failure/task/1-execution');
+    const request={actorId:'owner',jobId:'job',identity,input:{taskId:'task',revision:1,taskBranch:'repair/wf/task',baseline:{packCommit:f.baseline}}} as never;
+    const result=new RepairGitStore(f.reader).result(request);
+    if(mode==='valid')await expect(result).resolves.toEqual({status:'failed',error});
+    else await expect(result).rejects.toThrow();
+  });
   it('declares its existing v1 integration transport for historical goal generation', () => {
     const adapter = createRepairAisExecution({} as IDatabase, {} as AistudioService, {} as RepairGitStore, 1, 'https://clawweb.example');
     expect(adapter.integrationVersion).toBe('workflow-proposal-plan/v1');
@@ -110,6 +124,10 @@ describe('Workflow Repair Git-backed AIS execution', () => {
     const request = { actorId: '123', identity: { stepId: 'WR-1-draft-2', attempt: 1, executionId: 'WRX-1' },
       input: { taskId: 'WR-1', revision: 2, parentCandidateCommit: null, taskBranch: branch, baseline } } as Parameters<typeof store.result>[0];
     expect(await store.result(request)).toMatchObject({ status: 'succeeded', draft });
+    const failure={...result,status:'failed',draft:undefined,checks:undefined,parentCandidateCommit:f.baseline,error:{code:'CANDIDATE_WRITE_FAILED',message:'late push error'}};
+    const failureCommit=f.git(f.source,'commit-tree',f.git(f.source,'rev-parse',`${f.baseline}^{tree}`),'-p',f.baseline,'-m','ClawMind workflow-repair-failure/v1\n'+JSON.stringify(failure));
+    f.git(f.source,'push','-q','origin',`${failureCommit}:refs/heads/repair-failure/WR-1/2-${request.identity.executionId}`);
+    expect(await store.result(request)).toMatchObject({status:'succeeded',draft});
     expect(await store.diff({ workflowId: 'wf', taskId: 'WR-1', revision: 1,
       baseCommit: f.baseline, candidateCommit: candidate })).toMatchObject({
         files: [{ path: 'workflows/wf.yaml', status: 'M', before: f.spec, after: 'id: wf\nnodes: [fixed]\n',
