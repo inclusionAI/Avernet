@@ -505,7 +505,23 @@ async def report_callback(
     if isinstance(raw_event, dict) and "relay_token" in raw_event:
         try:
             command = TaskReportCommandDTO.model_validate(raw_event).to_domain()
-        except ValidationError as exc:
+        except (ValidationError, ValueError) as exc:
+            # ValidationError ⊂ ValueError;捕获两者是因为 artifacts 列表的结构性
+            # 校验(§4 互斥/交叉/JSON 合法/上限)在 to_domain 的解析层以裸 ValueError
+            # 抛出——同样按 4xx 信封回执并留审计,不得落 500(评审修正)。
+            if not isinstance(exc, ValidationError):
+                _named = str(exc)
+                logger.warning(
+                    "[task_relay_report] artifact payload rejected: %s", _named
+                )
+                await persist_relay_report_audit(
+                    svc, raw=raw_event,
+                    error=f"invalid relay report payload: {_named}",
+                )
+                return error_response(
+                    422, f"Invalid relay report request: {_named}", request,
+                )
+            # —— 以下为 pydantic ValidationError 的既有 422 出口(行为不变)——
             # Manual parsing bypasses FastAPI's request validation, so surface
             # the caller's error as the endpoint's normal enveloped 422 instead
             # of letting Pydantic's exception become a 500. Loc/type/msg only:

@@ -1019,3 +1019,58 @@ class TestRouter:
         r = c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=evt)
         assert r.status_code == 200, r.text
         assert svc.callback.calls == []  # 非处理事件:不落库、不推进
+
+
+@pytest.mark.unit
+def test_relay_report_with_malformed_artifacts_gets_4xx_envelope(task_client):
+    """评审修正:artifact 解析失败(基 ValueError)必须落 4xx 错误信封,不得 500。"""
+
+    client, svc = task_client
+    body = {
+        "task_id": "task-1",
+        "node_id": "task-1",
+        "event_id": "exec-artifact-bad",
+        "relay_token": "run-1",
+        "event_type": "EXECUTION_RESULT",
+        "event": {
+            "execution_decision": "ACCEPTED",
+            "actual_goal": {"objective": "o", "acceptances": []},
+            "local_acceptance_result": {"verdict": "DONE", "done_items": [], "gap_items": []},
+            "output_patch": {},
+            "artifacts": [
+                {
+                    "artifact_kind": "file",
+                    "session_id": "sess-9",
+                    "task_id": "task-1",
+                    "node_id": "task-1",
+                    "attempt": 0,
+                    "text_content": None,
+                    "file_content": "not-json{",
+                    "url_link_content": None,
+                    "code_content": None,
+                }
+            ],
+        },
+    }
+    r = client.post("/api/v1/collaboration/tasks/callback/report", json=body)
+    assert r.status_code != 500, "malformed artifact report must not surface as 500"
+    assert 400 <= r.status_code < 500
+    assert "cache_id" not in r.text  # 保守:不回显原文 payload 的键
+
+
+@pytest.mark.unit
+def test_task_artifact_content_error_maps_to_4xx():
+    """评审修正:artifacts 契约违规(attempt 失配等)落 422,不得落 TaskError 500 兜底。"""
+
+    from agentclaw.community.adapters.http.openapi_v1.responses import (
+        mapped_error_response,
+    )
+    from agentclaw.community.core.task.domain.errors import TaskArtifactContentError
+    from fastapi import Request
+
+    scope = {"type": "http", "path": "/", "headers": [], "method": "POST", "query_string": b""}
+    request = Request(scope)
+    response = mapped_error_response(TaskArtifactContentError("attempt mismatch"), request)
+    assert response is not None, "TaskArtifactContentError 必须在信封映射表中"
+    assert response.status_code == 422
+    assert b"artifact" in response.body or response.status_code == 422

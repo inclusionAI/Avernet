@@ -82,23 +82,21 @@ def default_publish_service() -> TaskArtifactPublishService:
 
 
 def capture_write_point(graph, node, *, patch, now_ms: int) -> None:
-    """集中写点发布语义(spec §5.1):fold 之后捕获,attempt 纯递增复位写不发布。
+    """集中写点发布语义(spec §5.1):只有本次 mutation 真正 fold 了产物内容才发布。
 
-    中央通道 harness 复位不清 output(仅 relay 清),复位 mutation 若照 capture 会把
-    旧 attempt 的文本按新 attempt 归档(内容造假)。「本次 extend fold 重置 harness_retries
-    且未 fold 任何新内容(output/artifact_patch 均 absent)」的写点直接跳过发布。
+    集中通道的产物内容全部有明确来源:文本正文/控制信号经 ``output_patch`` 到达,
+    上报列表在 ``artifact_patch``;状态机翻转、harness 复位、派发等**零内容写不发布**。
+    理由:中央通道 harness 复位不清 output(仅 relay 清),残留旧内容若照 capture
+    会按新 attempt 误归档(内容造假)——且不止复位写本身,其后的 status-only 派发写
+    同样不得重录(评审修正);控制信号写入点(dispatcher)也走 output_patch,不受影响。
     """
 
     artifact_patch = getattr(patch, "artifact_patch", None)
-    attempt_reset_only = (
-        "harness_retries" in (getattr(patch, "extend_props_patch", None) or {})
-        and patch.output_patch is None
-        and artifact_patch is None
+    if patch.output_patch is None and artifact_patch is None:
+        return
+    default_publish_service().capture_node(
+        graph, node, artifact_patch=artifact_patch, now_ms=now_ms
     )
-    if not attempt_reset_only:
-        default_publish_service().capture_node(
-            graph, node, artifact_patch=artifact_patch, now_ms=now_ms
-        )
 
 
 class TaskArtifactPublishService:

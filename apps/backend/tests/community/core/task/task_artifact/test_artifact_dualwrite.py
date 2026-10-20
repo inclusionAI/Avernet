@@ -158,3 +158,60 @@ def test_node_output_business_dict_records_no_artifact(db):
         TaskNodePatch(task_id=task_id, node_id=task_id, output_patch={"data": {"rows": 1}}, assignee="bot-7")
     )
     assert _artifact_rows(db, task_id) == []
+
+def test_retry_then_status_only_patch_does_not_rearchive_old_content(db):
+    """评审修正:复位后的后续中央写(状态-only 派发/复位 patch)不得把残留旧
+    output 重新归档到新 attempt——派生产物只在本次 mutation 真正 fold 过内容时发布。"""
+
+    task_id = "T-RETRY2"
+    service = _service_with_repo(db, task_id)
+    service.update_task_node_info(
+        TaskNodePatch(task_id=task_id, node_id=task_id, output_patch={"output": "第一轮成果"}, assignee="bot-7")
+    )
+    service.update_task_node_info(
+        TaskNodePatch(
+            task_id=task_id,
+            node_id=task_id,
+            status=Status.PENDING,
+            extend_props_patch={"harness_retries": 1},
+        )
+    )
+    # 生产重试序列随后是状态-only 写:不得落任何 attempt=1 行
+    service.update_task_node_info(
+        TaskNodePatch(task_id=task_id, node_id=task_id, status=Status.RUNNING, assignee="bot-7")
+    )
+    rows = _artifact_rows(db, task_id)
+    assert {(r.attempt, r.content.text if r.kind == "text" else r.kind) for r in rows} == {
+        (0, "第一轮成果")
+    }
+
+
+def test_post_retry_control_signal_folds_capture_at_new_attempt(db):
+    """控制信号经 output_patch 到达时仍照常发布(新归属)——修守卫不误伤信号通道。"""
+
+    task_id = "T-SIGNAL"
+    service = _service_with_repo(db, task_id)
+    service.update_task_node_info(
+        TaskNodePatch(task_id=task_id, node_id=task_id, output_patch={"output": "第一轮成果"}, assignee="bot-7")
+    )
+    service.update_task_node_info(
+        TaskNodePatch(
+            task_id=task_id,
+            node_id=task_id,
+            status=Status.PENDING,
+            extend_props_patch={"harness_retries": 1},
+        )
+    )
+    service.update_task_node_info(
+        TaskNodePatch(
+            task_id=task_id,
+            node_id=task_id,
+            output_patch={"skipped": True, "reason": "no-capability"},
+        )
+    )
+    rows = _artifact_rows(db, task_id)
+    by_attempt_text = {
+        (r.attempt, r.kind): (r.content.text if r.kind == "text" else None) for r in rows
+    }
+    assert (1, "text") in by_attempt_text
+    assert "skipped" in by_attempt_text[(1, "text")]

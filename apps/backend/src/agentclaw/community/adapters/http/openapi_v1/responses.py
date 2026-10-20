@@ -294,6 +294,7 @@ from agentclaw.community.core.task.domain.errors import (
     GraphIntegrityError,
     NodeNotFoundError,
     TaskError,
+    TaskArtifactContentError,
     TaskNotFoundError,
     TaskStateError,
     TrajectoryAnalysisError,
@@ -813,6 +814,10 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # and ENVELOPE_ERRORS returns on the first isinstance match in insertion order.
     TrajectoryAnalysisNotConfiguredError: (503, "Trajectory analysis bot is not configured"),
     TrajectoryAnalysisError: (504, "Trajectory analysis failed"),
+    # Artifact report contract violations (spec 2026-10-20 §4): attempt 失配等在
+    # relay 回调解析/发布路径抛给客户端的是请求问题,落 422 而非 TaskError 500 兜底
+    # (列在 TaskError 基类之前,同上 trajectory leaves)。
+    TaskArtifactContentError: (422, "Invalid artifact report"),
     TaskError: (500, "Internal error"),
 }
 # Most public categories retain the ordinary ``xxx000`` business code.  A
