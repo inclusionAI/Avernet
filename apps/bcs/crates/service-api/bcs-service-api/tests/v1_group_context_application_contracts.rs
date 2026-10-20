@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use bcs_service_api::application::v1::{
     AddGroupContext, ApplicationError, GetGroupContext, GroupContextAck,
     GroupContextApplicationService, GroupContextEntry, GroupContextGetItem,
-    GroupContextGetResponse, GroupContextListItem, GroupContextListResponse,
+    GroupContextGetResponse, GroupContextListItem, GroupContextListResponse, GroupContextOwners,
     GroupContextPermission, GroupContextPolicy, GroupContextRequestContext, GroupContextStatus,
     ListGroupContexts, ScopeLevel, SystemSetGroupContext, UpdateGroupContext,
 };
@@ -171,6 +171,27 @@ fn permission_labels_are_the_spec_values() {
         serde_json::to_value(GroupContextPermission::WR).unwrap(),
         json!("WR")
     );
+    assert_eq!(
+        serde_json::to_value(GroupContextPermission::WRO).unwrap(),
+        json!("WRO")
+    );
+}
+
+#[test]
+fn owners_are_a_multi_value_json_object_with_stable_user_ids_field() {
+    let owners = GroupContextOwners::new(["creator-bot", "player-two"]);
+    let value = serde_json::to_value(&owners).expect("owners json");
+    assert_eq!(value, json!({ "userIds": ["creator-bot", "player-two"] }));
+
+    let decoded: GroupContextOwners = serde_json::from_value(value).expect("owners deserializes");
+    assert_eq!(decoded, owners);
+    assert!(decoded.contains("creator-bot"));
+    assert!(decoded.contains("player-two"));
+    assert!(!decoded.contains("player-three"));
+    assert!(!decoded.is_empty());
+
+    let empty = GroupContextOwners::new(Vec::<String>::new());
+    assert!(empty.is_empty());
 }
 
 #[test]
@@ -208,6 +229,7 @@ fn commands_cover_all_groupcontext_endpoints_without_body_actor_for_systemset() 
         change_reason: Some("第一轮投票".into()),
         visible_to: None,
         collect_from: None,
+        owners: Some(GroupContextOwners::new(["judge_bot"])),
         valid_from: None,
         valid_to: Some(time("2026-10-13T08:16:08Z")),
     };
@@ -240,6 +262,7 @@ fn entry_active_state_uses_superseded_marker_not_business_valid_to() {
         creator: "judge_bot".into(),
         visible_to: GroupContextPolicy::users(Vec::<String>::new()),
         collect_from: GroupContextPolicy::users(["judge_bot"]),
+        owners: GroupContextOwners::new(["judge_bot"]),
         supersedes: None,
         change_reason: None,
         valid_from: past,
@@ -304,6 +327,8 @@ fn get_item_serializes_content_and_business_validity() {
         content: "你的词语是：香蕉".into(),
         valid_from,
         valid_to: Some(valid_to),
+        visible_to: None,
+        collect_from: None,
     };
 
     let value = serde_json::to_value(&item).expect("get item serializes");
@@ -376,4 +401,34 @@ fn response_statuses_cover_spec_success_and_error_values() {
 fn group_context_service_is_object_safe() {
     fn accepts_service(_: &dyn GroupContextApplicationService) {}
     accepts_service(&NoopGroupContextService);
+}
+
+#[test]
+fn get_item_policy_fields_are_owner_only_and_omitted_when_missing() {
+    let valid_from = time("2026-10-12T08:16:08Z");
+    let non_owner = GroupContextGetItem {
+        name: "player_word_1".into(),
+        scope_level: ScopeLevel::Session,
+        content: "你的词语是：香蕉".into(),
+        valid_from,
+        valid_to: None,
+        visible_to: None,
+        collect_from: None,
+    };
+
+    let non_owner_json = serde_json::to_value(&non_owner).expect("non-owner get item serializes");
+    assert!(non_owner_json.get("visible_to").is_none());
+    assert!(non_owner_json.get("collect_from").is_none());
+
+    let owner = GroupContextGetItem {
+        visible_to: Some(GroupContextPolicy::users(Vec::<String>::new())),
+        collect_from: Some(GroupContextPolicy::users(["judge_bot"])),
+        ..non_owner
+    };
+    let owner_json = serde_json::to_value(&owner).expect("owner get item serializes");
+    assert_eq!(owner_json["visible_to"], json!({ "userIds": [] }));
+    assert_eq!(
+        owner_json["collect_from"],
+        json!({ "userIds": ["judge_bot"] })
+    );
 }

@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use super::ApplicationError;
 pub use bcs_domain::{
-    GroupContextEntry, GroupContextPermission, GroupContextPolicy, GroupContextTime, ScopeLevel,
+    GroupContextEntry, GroupContextOwners, GroupContextPermission, GroupContextPolicy,
+    GroupContextTime, ScopeLevel,
 };
 
 /// Spec-level statuses used by HTTP adapters when projecting application
@@ -72,6 +73,8 @@ pub struct UpdateGroupContext {
     pub change_reason: Option<String>,
     pub visible_to: Option<GroupContextPolicy>,
     pub collect_from: Option<GroupContextPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owners: Option<GroupContextOwners>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub valid_from: Option<GroupContextTime>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -174,6 +177,10 @@ pub struct GroupContextGetItem {
     pub valid_from: GroupContextTime,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub valid_to: Option<GroupContextTime>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visible_to: Option<GroupContextPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collect_from: Option<GroupContextPolicy>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

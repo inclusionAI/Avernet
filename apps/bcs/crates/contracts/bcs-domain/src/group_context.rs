@@ -60,12 +60,39 @@ impl GroupContextPolicy {
     }
 }
 
+/// Multi-value Group Context ownership.
+///
+/// Unlike `GroupContextPolicy`, an empty owner list is invalid. `userIds` is
+/// the stable wire field name and is not reused from the generic policy type.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GroupContextOwners {
+    #[serde(rename = "userIds")]
+    pub user_ids: Vec<String>,
+}
+
+impl GroupContextOwners {
+    pub fn new(user_ids: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self {
+            user_ids: user_ids.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    pub fn contains(&self, actor_id: &str) -> bool {
+        self.user_ids.iter().any(|id| id == actor_id)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.user_ids.is_empty()
+    }
+}
+
 /// Read/write permission label returned by list operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GroupContextPermission {
     R,
     W,
     WR,
+    WRO,
 }
 
 impl GroupContextPermission {
@@ -89,6 +116,7 @@ pub struct GroupContextEntryMeta {
     pub scope: String,
     pub visible_to: GroupContextPolicy,
     pub collect_from: GroupContextPolicy,
+    pub owners: GroupContextOwners,
     pub gmt_create: GroupContextTime,
     pub gmt_modified: GroupContextTime,
 }
@@ -110,6 +138,7 @@ pub struct GroupContextEntry {
     pub creator: String,
     pub visible_to: GroupContextPolicy,
     pub collect_from: GroupContextPolicy,
+    pub owners: GroupContextOwners,
     /// Physical `id` of the old version superseded by this row.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supersedes: Option<i64>,
