@@ -182,10 +182,8 @@ def _shared_pvc_size() -> str:
 def _apparmor_profile_name() -> str:
     """返回 bot runtime 使用的 host AppArmor profile 名。
 
-    Docker 自带的 ``docker-default`` 明确 ``deny mount``，会阻断 FUSE 挂载；
-    ``unconfined`` 又会破坏 admin/sudo PAM 路径。Simulator 在 Colima VM
-    注册 ``arca-fuse``：沿用 Docker 宽松的文件/网络/能力规则，但把
-    ``deny mount`` 改成允许 mount。
+    该 profile 需要允许 bot runtime 使用 ``/dev/fuse`` 完成 FUSE 挂载，
+    同时保持受限执行语义。
     """
     profile = _env(ENV_APPARMOR_PROFILE, "arca-fuse")
     if profile is None or not str(profile).strip():
@@ -596,10 +594,8 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
                 limits={"cpu": cpu_limit, "memory": memory_limit},
             ),
             # privileged grants /dev/fuse device-cgroup access needed by the
-            # bot runtime's FUSE mounts. Docker's docker-default profile
-            # explicitly denies mount, while unconfined breaks the runtime's
-            # admin/sudo PAM accounting path; use the simulator's arca-fuse
-            # localhost profile, which allows mount while staying enforced.
+            # bot runtime's FUSE mounts. The configured localhost profile
+            # must permit those mounts while remaining enforced.
             security_context=V1SecurityContext(
                 privileged=True,
                 app_armor_profile=V1AppArmorProfile(
