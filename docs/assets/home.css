@@ -487,7 +487,7 @@ h2 { font-size: clamp(30px, 3.7vw, 46px); line-height: 1.1; letter-spacing: -0.0
   position: relative; flex: none; width: 132px; height: 132px;
   overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--paper);
 }
-/* Scale 1005×1164 to 182×211 (~0.181); crop source x≈138,y≈99 through these variables. */
+/* Supplied GitHub image is 1005×1164; scale its 730px QR crop to 132px (~0.181), from source x≈138,y≈99. Recalculate if it changes. */
 .wechat-qr-crop img { position: absolute; top: var(--qr-image-top); left: var(--qr-image-left); width: var(--qr-image-width); height: var(--qr-image-height); max-width: none; }
 .wechat-qr figcaption strong { font: 500 18px/1.4 var(--font-display); color: var(--text); }
 .wechat-qr figcaption p { margin-top: 6px; font-size: 14px; color: var(--muted); }
