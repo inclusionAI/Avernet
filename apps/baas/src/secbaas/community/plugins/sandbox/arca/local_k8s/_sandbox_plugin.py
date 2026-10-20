@@ -116,6 +116,11 @@ ENV_SHARED_PVC_NAME = "LOCAL_K8S_SHARED_PVC_NAME"
 ENV_SHARED_PVC_SIZE = "LOCAL_K8S_SHARED_PVC_SIZE"
 ENV_SHARED_PVC_HOST_MOUNT_PATH = "LOCAL_K8S_SHARED_PVC_HOST_MOUNT_PATH"
 ENV_APPARMOR_PROFILE = "LOCAL_K8S_APPARMOR_PROFILE"
+# A2A 面（agent-card / rpc）的「浏览器可达」URL 模板，仅 out-of-cluster 之外的
+# in-cluster 部署需要（in-cluster 的 BaaS 自己只能看到 ClusterIP；NodePort 的
+# 端口号经 kube api 实查，host 形态是部署事实，不属于本插件的猜测范围）。
+# 占位符：{service_name}（如 ``<deployment>-svc``）、{namespace}、{node_port}。
+ENV_A2A_URL_TEMPLATE = "LOCAL_K8S_A2A_URL_TEMPLATE"
 
 _INCLUSTER_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 
@@ -941,6 +946,8 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
 
         in-cluster 模式下使用 ClusterIP + Service 端口供集群内部访问；
         out-of-cluster 模式下使用 localhost + NodePort。
+        两种模式都附带 ``a2a_base_url``（本插件是少数定义了「浏览器可达」
+        A2A 地址语义的平台；详见 :meth:`_resolve_a2a_base_url`）。
         """
         deployment_name = paas_device_id
         normalized_path = "/" + path.lstrip("/")
@@ -957,13 +964,71 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
                 ),
                 target=target,
                 expires_at=datetime.now(UTC) + timedelta(seconds=120),
+                a2a_base_url=self._resolve_a2a_base_url(deployment_name),
             )
         host, svc_port = self._resolve_public_port(deployment_name)
+        # out-of-cluster：NodePort 就映射在 BaaS 自己的机器上，ws url 用的
+        # 已经是浏览器可达地址，A2A 面同源直连（无凭据、根级路径）。
         return WsConnectionInfo(
             ws_url=f"ws://{host}:{svc_port}{normalized_path}",
             token="",
             target=f"{host}:{svc_port}",
             expires_at=datetime.now(UTC) + timedelta(hours=24),
+            a2a_base_url=f"http://{host}:{svc_port}",
+        )
+
+    def _resolve_a2a_base_url(self, deployment_name: str) -> str:
+        """in-cluster 部署下解析本设备 A2A 面的「浏览器可达」HTTP base。
+
+        A2A 面由引擎 Pod 的 20003 直接服务（根级 ``/.well-known/
+        agent-card.json`` 与 ``/rpc``），不经 agentclawproxy。它的调用方是
+        *用户浏览器*，而 in-cluster 的 BaaS 自己只看得到 ClusterIP，
+        ``ws_url`` 走 proxypass 是它的正路；A2A 面则要求部署显式给出
+        ``LOCAL_K8S_A2A_URL_TEMPLATE``（例如
+        ``http://{service_name}.stable.alipay.net:{node_port}``），host 部分
+        由 /etc/hosts 一类的部署约定补齐。端口号一律经 kube api 实查
+        Service 的 NodePort，不做猜测。
+
+        无模板、未配 NodePort、或 Service 查询失败时返回 **空串**（记日志），
+        绝不让 A2A 的配置缺陷炸掉整条 chat 连接：字段是加性的，空串语义
+        就是"本平台没有可交付的 A2A 地址"，调用方回落原行为。
+        out-of-cluster 的浏览器可达语义与 ws url 同址，由调用方拼装。
+        """
+        from kubernetes.client import CoreV1Api
+
+        namespace = _namespace()
+        service_name = _build_service_name(deployment_name)
+
+        template = str(_env(ENV_A2A_URL_TEMPLATE) or "").strip()
+        if not template:
+            return ""
+        try:
+            core_api = CoreV1Api(self._client())
+            svc = core_api.read_namespaced_service(
+                name=service_name, namespace=namespace
+            )
+            node_port = (
+                svc.spec.ports[0].node_port
+                if svc.spec and svc.spec.ports
+                else None
+            )
+        except Exception as exc:  # noqa: BLE001 — 拓扑查询失败必须降级为空串
+            logger.warning(
+                "local_k8s: a2a base url discovery failed for %s/%s: %s",
+                namespace, service_name, exc,
+            )
+            return ""
+        if not node_port:
+            logger.warning(
+                "local_k8s: service %s/%s has no NodePort; a2a base url omitted",
+                namespace, service_name,
+            )
+            return ""
+        return (
+            template
+            .replace("{service_name}", service_name)
+            .replace("{namespace}", namespace)
+            .replace("{node_port}", str(node_port))
         )
 
     def resolve_http_connection_info(

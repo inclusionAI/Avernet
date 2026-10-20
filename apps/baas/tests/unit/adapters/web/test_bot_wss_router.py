@@ -142,13 +142,44 @@ async def test_get_ws_info_response_fields_complete(mock_dispatcher):
 
     assert resp.status_code == 200
     data = resp.json()["data"]
-    assert set(data.keys()) == {"ws_url", "token", "target", "expires_at", "device_id"}
+    assert set(data.keys()) == {
+        "ws_url", "token", "target", "expires_at", "device_id", "a2a_base_url",
+    }
     assert isinstance(data["ws_url"], str)
     assert isinstance(data["token"], str)
     assert isinstance(data["target"], str)
     assert isinstance(data["expires_at"], str)
     assert isinstance(data["device_id"], str)
     assert data["device_id"] == "ARCA_device-xyz"
+    # The A2A face base rides the same answer; a provider that issued none
+    # publishes the empty string, and the key is present either way — the
+    # additive contract old callers can ignore and new callers can rely on.
+    assert data["a2a_base_url"] == ""
+
+
+@pytest.mark.asyncio
+async def test_get_ws_info_publishes_a2a_base_url_verbatim(mock_dispatcher):
+    """The A2A address a sandbox platform issued answers unchanged: the router
+    owns no second opinion about where a browser can reach the engine's A2A
+    face."""
+    now = datetime(2026, 5, 23, 12, 0, 0, tzinfo=UTC)
+    mock_dispatcher.dispatch_bot_ws_conn_info.return_value = WsConnectionInfo(
+        ws_url="wss://gw/proxypass/T:1/p",
+        token="tok",
+        target="T:1",
+        expires_at=now,
+        a2a_base_url="http://bot-a1b2-vc.stable.alipay.net:32196",
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            "/api/v1/bots/bot-1/ws-info?port=1&path=/p&tenant=t",
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["a2a_base_url"] == "http://bot-a1b2-vc.stable.alipay.net:32196"
 
 
 @pytest.mark.asyncio
