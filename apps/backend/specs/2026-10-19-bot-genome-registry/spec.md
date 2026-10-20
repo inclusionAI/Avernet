@@ -22,21 +22,19 @@ into.
 ### Terms used in this spec
 
 - **Base / parent.** Every revision except a bot's first has one parent: the
-  revision it was made from. For a patch that is the patch's `base`, and it
-  is required. For a Manifest document the document is the source of truth
-  for every category it declares; `base` matters only for what it does not
-  say: the categories it leaves out are copied from the base, and the base
-  becomes the parent so the history stays one tree. When recording a
-  document, `base` is optional: omitted, it defaults to the bot's `active`
-  revision, and for a bot with no revisions yet to "no parent", with
-  omitted categories captured from the bot's current state. A caller
-  editing an unpromoted draft names the draft as `base` so the history
-  records what the edit started from. Ids are content hashes, so recording
-  the same content again returns the existing revision and does not change
-  its parent.
+  revision it was made from. A patch names it as `base`, and it is required.
+  A Manifest document names no base: the document is the source of truth
+  for every category it declares, its parent is always the bot's `active`
+  revision (what the bot runs, so a diff against the parent shows exactly
+  what promoting the new revision would change), and any category the
+  document leaves out is copied from `active`. On a bot with no revisions
+  yet there is no parent, and omitted categories are captured from the
+  bot's current state. Ids are content hashes, so recording the same
+  content again returns the existing revision and does not change its
+  parent.
 - **When a whole document is recorded.** Recording a Manifest document
   means "this is the complete definition I want for the bot; record it as
-  its next revision, descending from `base`". A patch cannot do everything,
+  its next revision, descending from what it runs now". A patch cannot do everything,
   so this path exists for: the bot's first revision (a bot that already has
   a Manifest, or was set up in the console, needs a baseline before any
   patch can target it); owner changes no patch op can express, which by
@@ -120,11 +118,11 @@ Recording:
       contract schema and its id is the contract's hash.
 - [ ] A Manifest document may leave categories out (to the Manifest, an
       omitted category means "leave the bot as it is"), but a revision must
-      be total: every category present. So an omitted category is filled
-      from the `base` revision (the one the caller names, or `active` when
-      they name none; see *Terms*). A document that declares every category
-      is recorded as it is, and `base` then only sets the parent. For a
-      bot's first revision there is no base yet, so omitted categories are captured from
+      be total: every category present. So an omitted category is copied
+      from the bot's `active` revision, which is also the new revision's
+      parent (see *Terms*). A document that declares every category is
+      recorded as it is. For a bot's first revision there is no `active`
+      yet, so omitted categories are captured from
       what the bot has now (its identity files, skills, resources, MCP
       servers and script), which also covers bots that were set up through
       the console and never had a Manifest.

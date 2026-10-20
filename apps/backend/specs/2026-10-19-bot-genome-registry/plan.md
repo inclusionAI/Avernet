@@ -182,8 +182,8 @@ class GenomeRegistryProtocol(Protocol):
     async def record_patch(self, bot: BotRef, patch: dict, *, created_by: Provenance,
                            status: RevisionStatus, run: RunScope | None = None) -> RecordedRevision: ...
     @abstractmethod
-    async def record_manifest(self, bot: BotRef, document: str, *, created_by: Provenance,
-                              base: str | None) -> RecordedRevision: ...
+    async def record_manifest(self, bot: BotRef, document: str, *,
+                              created_by: Provenance) -> RecordedRevision: ...   # parent = active, or none
     @abstractmethod
     def set_status(self, bot: BotRef, revision_id: str, status: RevisionStatus,
                    *, actor: Provenance, reason: str) -> None: ...
@@ -313,9 +313,9 @@ the bot's whole configuration); the dominance test gains the promotion row.
 {"base": "sha256:a90b…", "status": "candidate",
  "run": {"run_id": "run_7f3", "binding_id": "bind_01", "allowed_genes": ["persona", "skills"]},
  "patch": {"patch_schema": 1, "base": "sha256:a90b…", "ops": [...], "rationale": "…", "evidence": ["episode:ep_91"]}}
-// (request, from a document; `base` optional here: defaults to the `active` revision, or to no parent on a
-//  bot with no revisions, whose omitted categories are then captured from current state)
-{"base": "sha256:a90b…", "status": "draft", "manifest": {"format": "yaml", "document": "schema_version: 1\n…"}}
+// (request, from a document; no `base`: the parent is the `active` revision, or none on a bot with no
+//  revisions, whose omitted categories are then captured from current state)
+{"status": "draft", "manifest": {"format": "yaml", "document": "schema_version: 1\n…"}}
 // 201 / 200
 {"id": "sha256:7c1e…", "seq": 42, "status": "candidate", "parent": "sha256:a90b…",
  "patch_digest": "sha256:c41e…", "risk_tier": "T2", "flags": [], "ref": "candidate/run_7f3/1"}

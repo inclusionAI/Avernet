@@ -99,7 +99,7 @@
 - **Goal:** Make the design docs say what shipped.
 - **Files:** `docs/bot-evolution/01-genome.md` (+ `zh-CN`), `docs/bot-evolution/work-items.md` (+ `zh-CN`), `api-contracts/genome/v1/README.md` and `manifest-v1-compatibility.md` (the `document_digest` rule), `core/bot_genome/README.md`
 - **Done when:**
-  - [ ] D-6 recorded as closed (DB + content store) with the table names; §11 matches the shipped Protocol (async record methods, `RunScope`, `RefMover`); §5.5/§12 note the apply-id join until RSI-04.
+  - [ ] D-6 recorded as closed (DB + content store) with the table names; §11 matches the shipped Protocol (async record methods, `RunScope`, `RefMover`, `record_manifest` without `base`); §12's document request drops `base` (parent is `active`); §5.5/§12 note the apply-id join until RSI-04.
   - [ ] RSI-03 status set with the deferred legs listed under RSI-04 (promotion becomes appliable; service-bot publish; teclaw platform-managed capture; repo skills).
   - [ ] English and zh-CN say the same.
 - **Depends on:** Task 10
