@@ -1,13 +1,21 @@
+from engine.community.core.acli.operations import (
+    AcliOperation,
+    AcliOperations,
+    OperationBusyError,
+    OperationNotActiveError,
+)
 from engine.community.core.acli.runner import (
     AcliError,
     AcliRunner,
     AcliTool,
-    AcliUninstallResult,
 )
 
 __all__ = [
     "AcliError",
+    "AcliOperation",
+    "AcliOperations",
     "AcliRunner",
     "AcliTool",
-    "AcliUninstallResult",
+    "OperationBusyError",
+    "OperationNotActiveError",
 ]

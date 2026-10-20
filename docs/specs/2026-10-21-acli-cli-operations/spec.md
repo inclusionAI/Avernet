@@ -81,6 +81,7 @@ still be read by id (storage: see *Running the operation*).
 | `POST /install/cancel` | `{name, async?}` | Cancel the install of `name`. |
 | `POST /uninstall/cancel` | `{name, async?}` | Cancel the uninstall of `name`. |
 | `GET /operations/{id}` | | That operation, or `404 operation_not_found`. |
+| `GET /tools` | | What acli has installed (`{tools: [{name, command, description, version}]}`); read-only, outside the slot. A failed listing is `200` with `success: false`, `list_failed`. |
 
 | Slot | Answer |
 | --- | --- |

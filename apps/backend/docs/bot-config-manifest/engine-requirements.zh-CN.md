@@ -189,20 +189,28 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
 届时按 `startup-ops` 独立契约版本化，probe 门控。
 
 - **A3（acli 市场工具，公开 API `/openapi/v1/bots/{bot_id}/clis` 使用）**：与 A2 的上传二进制
-  不同，这里由引擎在容器内调用 `acli` 安装市场上的工具。openclaw 与 claude_code 提供两个端点（市场搜索不需要容器，由 backend 直接调用市场 API），
-  约定与 A2 相同：参数非法返回 `400`，acli 拒绝返回 `200` + `success:false` + `error`，
-  `404` 只表示「引擎没有该端点」。
+  不同，这里由引擎在容器内调用 `acli` 安装市场上的工具（市场搜索不需要容器，由 backend 直接调用市场 API）。
+  每次安装或卸载是一个**操作**：引擎生成 `id`，同一容器同时最多一个操作、不排队；可同步等待（最多 30 秒），
+  也可 `async` 提交后按 id 查询；可取消并回滚。完整契约见
+  `docs/specs/2026-10-21-acli-cli-operations/spec.md`（引擎契约一节）。
 
   | 端点 | 请求 | 语义 |
   | --- | --- | --- |
-  | `POST /api/cli/acli/install` | `{name}` | `acli install <name> --install-dir <引擎安装目录> --yes --json`，返回 `{name, command, description, version}` |
-  | `POST /api/cli/acli/uninstall` | `{name}` | acli 有记录则 `acli tool uninstall <name> --yes --json`；没有记录也算成功（`uninstalled: false`） |
+  | `POST /api/cli/acli/install` | `{name, async?}` | 新的安装操作。已安装则立即结束（`already_installed: true`）；忙时 `409 engine_busy` 并返回正在运行的操作 |
+  | `POST /api/cli/acli/uninstall` | `{name, async?}` | 新的卸载操作。列一次 acli 记录，按市场名或命令名匹配；没有记录也算成功（`uninstalled: false`）；以 acli 退出码为准，不再二次列表确认 |
+  | `POST /api/cli/acli/install/cancel`、`/uninstall/cancel` | `{name, async?}` | 取消正在运行的操作：整组杀掉 acli，回滚到操作开始前的状态；没有对应操作 `409 not_active` |
+  | `GET /api/cli/acli/operations/{id}` | | 按 id 读取操作；查不到 `404` + `error: operation_not_found`（信封内） |
+  | `GET /api/cli/acli/tools` | | acli 已安装的工具，只读 |
+
+  状态码：操作已结束 `200`（`success` 表示是否成功，否则带 `error`），仍在运行 `202`，参数非法 `400`；
+  `404` 只表示「引擎没有该端点」（`operations/{id}` 的 `operation_not_found` 除外）。操作在 `data.operation` 中返回。
 
   **安装目录归引擎（与 A2 一致）**：平台只给出工具名，不下发也不知道安装目录。openclaw 与 claude_code
   共用固定目录 `/home/admin/.agentclaw/bin`（引擎常量 `ACLI_INSTALL_DIR`，不可配置：镜像只把这个目录放进
-  `PATH`，换目录会装出 agent 运行不了的工具），与启动时安装的默认 CLI 同目录、同一份 acli 记录。引擎以
-  `HOME=<安装目录的父目录>/acli-home` 运行 acli，使 acli 的安装记录与程序一起落在持久化存储上，重启后
-  仍能卸载；超时或请求取消时整组杀掉 acli 及其子进程。
+  `PATH`，换目录会装出 agent 运行不了的工具）。引擎以 `HOME=<安装目录的父目录>/acli-home` 运行 acli，
+  使 acli 的安装记录与程序一起落在持久化存储上，重启后仍能卸载。每个操作记录在
+  `acli-home/operations/<id>.json`，保留 24 小时（最多 200 个）；引擎重启时仍在运行的操作变为
+  `interrupted`，并整组杀掉遗留的 acli 进程。操作上限 30 分钟。
 
 ## 5. 开放问题（定稿前需要拍板）
 
