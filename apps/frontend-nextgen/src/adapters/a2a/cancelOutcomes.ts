@@ -30,11 +30,20 @@
  *   spec §3.1 原文：GetTask 查无任务…均不构成底层执行已停止的证明，不解除
  *   禁发。两行共用同一 UI 文案（用户面无差），禁令核销行不同
  *   （A2AProvider.applyCancelBanDisposition 五行表逐行钉）。
+ *
+ * task-outcome-unknown（§3 #2，非 CancelTask 四态——本 kind 无取消控制面）：
+ *   首帧前 abort、但请求已出站。引擎 open_run → dispatch 先于订阅回包
+ *   （router.py `_send_streaming`），用户点停时 run 可能已受理并执行，只是
+ *   客户端没 taskId 无从 CancelTask。语义 = **任务结果未知**（非"取消结局
+ *   未知"）；不挂禁令（无核销锚——GetTask 也要 taskId，挂禁即死锁），
+ *   用户显式重发 = 新幂等键（D14 合规路径）。真正的"未发送"（iam 签发窗口
+ *   前中止）才报 cancelled-clean。
  */
 import type { RpcError, WireFailure } from './rpc';
 
 export type CancelOutcomeKind = 'cancel-rejected' | 'cancel-rejected-unknown'
-  | 'cancelled-clean' | 'cancelled-unconfirmed' | 'cancel-unknown';
+  | 'cancelled-clean' | 'cancelled-unconfirmed' | 'cancel-unknown'
+  | 'task-outcome-unknown';
 
 export const CANCEL_UI_TEXT: Record<CancelOutcomeKind, string> = {
   'cancel-rejected': '取消未成功，保留已知任务状态',
@@ -43,6 +52,7 @@ export const CANCEL_UI_TEXT: Record<CancelOutcomeKind, string> = {
   'cancelled-clean': '已取消',
   'cancelled-unconfirmed': '已取消，底层执行停止未确认',
   'cancel-unknown': '取消结果未知，尝试查询任务状态',
+  'task-outcome-unknown': '已停止，任务结果未知，服务端可能仍在执行',
 };
 
 export interface CancelOutcome {

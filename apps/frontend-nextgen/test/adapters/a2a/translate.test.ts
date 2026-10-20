@@ -369,6 +369,43 @@ it('interaction.resolved → chat 透传帧（B8 approvalResolved 钉形），�
 
 // ─── 终态旁路 ─────────────────────────────────────────────────────────────
 
+it('R5-2 多审批部分决议：INPUT_REQUIRED + interaction.resolved → chat（不得误译成新审批请求）', () => {
+  // wire.py wire_interaction_resolved docstring（R5-2）：多 pending 部分决议后
+  // run 仍 INPUT_REQUIRED，帧状态是真实状态；"是否 resolved"只看 meta.kind，
+  // 不依赖帧状态。翻译顺序若先判状态，会把本帧误译成 exec.approval.requested
+  // ——真实 SDK 会新增 pending approval 并覆盖当前 pendingApproval。
+  const parser = newOracle();
+  // 先建 pending 审批（多 pending 场景中的一员已决议，剩余成员未决议）
+  const requested = translateEvent(statusUpdate('TASK_STATE_INPUT_REQUIRED', 30, {
+    interactionId: 'apr-1',
+    engine_frame: { ...JSON.parse(JSON.stringify(V3_FRAME_SHAPES.approvalRequested.frame)).payload,
+                    sessionKey: CTX.sessionKey },
+  }), CTX, rolling())!;
+  parser.handleMessage(requested.frame);
+  expect(parser.getResult().blocks).toEqual([
+    expect.objectContaining({ type: 'approval', approvalId: 'apr-1', status: 'pending' }),
+  ]);
+
+  // apr-2 决议完毕，但还有别的 pending → 帧状态仍 INPUT_REQUIRED
+  const resolvedEv = statusUpdate('TASK_STATE_INPUT_REQUIRED', 31, {
+    kind: 'interaction.resolved', interactionId: 'apr-2',
+    engine_frame: { runId: 't1', sessionKey: CTX.sessionKey, state: 'approval_resolved', approvalId: 'apr-2' },
+  });
+  const out = translateEvent(resolvedEv, CTX, rolling())!;
+  expect(out.kind).toBe('passthrough');
+  expect(out.frame).toEqual({
+    type: 'event', event: 'chat', seq: 31,
+    payload: { runId: 't1', sessionKey: CTX.sessionKey, state: 'approval_resolved', approvalId: 'apr-2' },
+  });
+  // 不产生新 pending approval：真实 SDK 收到 exec.approval.requested 会 append/覆盖
+  // pendingApproval —— resolved payload 缺 request.id 时还会生成残缺审批。
+  // pending 仍只有残留成员 apr-1；释放流程归 WORKING 分支既有测试，此处不复述。
+  expect(parser.handleMessage(out.frame)).toBe(false);
+  expect(parser.getResult().blocks).toEqual([
+    expect.objectContaining({ type: 'approval', approvalId: 'apr-1', status: 'pending' }),
+  ]);
+});
+
 it('CANCELED 终态 → kind final + chat aborted 帧：oracle 纯 no-op（不 onError/onComplete）', () => {
   const ev = statusUpdate('TASK_STATE_CANCELED', 40, { final: 'true', lastSeq: 40 });
   const state = rolling();

@@ -93,10 +93,10 @@ describe('classifyCancel — §4.3 四态归类', () => {
     })).toEqual({ kind: 'cancel-rejected', terminalState: 'TASK_STATE_FAILED' });
   });
 
-  it('CANCEL_UI_TEXT 单源：五键齐备且非空（B13 UI 复用面；F2 增 rejected-unknown 行）', () => {
+  it('CANCEL_UI_TEXT 单源：六键齐备且非空（B13 UI 复用面；F2 增 rejected-unknown 行；§3#2 增 task-outcome-unknown）', () => {
     expect(Object.keys(CANCEL_UI_TEXT).sort()).toEqual([
       'cancel-rejected', 'cancel-rejected-unknown', 'cancel-unknown',
-      'cancelled-clean', 'cancelled-unconfirmed',
+      'cancelled-clean', 'cancelled-unconfirmed', 'task-outcome-unknown',
     ]);
     for (const kind of Object.keys(CANCEL_UI_TEXT) as CancelOutcomeKind[]) {
       expect(typeof CANCEL_UI_TEXT[kind]).toBe('string');
