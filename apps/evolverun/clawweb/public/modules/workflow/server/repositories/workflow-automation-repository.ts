@@ -9,7 +9,7 @@ export type AutomationJob = {
   kind: AutomationKind; status: 'pending' | 'waiting' | 'dispatching' | 'retryable' | 'uncertain' | 'done' | 'blocked';
   attempts: number; nextAtMs: number; leaseToken: string | null; leaseUntilMs: number; reason: string | null; data: Record<string, any>;
 };
-const taskScope = (workflowId: string) => digestRepairJson(['automation-scope', workflowId]);
+export const taskScope = (workflowId: string) => digestRepairJson(['automation-scope', workflowId]);
 export class WorkflowAutomationRepository {
   constructor(readonly db: IDatabase) {}
   async get(id: string): Promise<AutomationJob | null> {

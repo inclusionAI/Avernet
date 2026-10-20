@@ -12,6 +12,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { getCurrentEnv } from "./env.js";
 import { migrations, sqliteTriggers, type DbType } from "./schema.js";
+import { automationHistoryMigration } from './schema-automation-history.js';
 import { workflowSnapshotMigrations } from "./schema-workflow-snapshot.js";
 import { dialectFor, sqliteDialect, type Dialect } from "./db/dialect.js";
 import { readYamlConfig, getEnv, envInt, repairEnvInteger, resolveDbConfig,
@@ -206,7 +207,7 @@ async function runMigrations(db: IDatabase, dbType: DbType): Promise<void> {
 
   const current = canDdl ? await getSchemaVersion(db) : 0;
 
-  for (const migration of [...migrations, ...workflowSnapshotMigrations]) {
+  for (const migration of [...migrations, ...workflowSnapshotMigrations, automationHistoryMigration]) {
     if (!canDdl && !migration.selfHealing) continue;
     // Self-healing repairs also run when the ledger reports them as applied.
     if (!migration.selfHealing && migration.version <= current) continue;

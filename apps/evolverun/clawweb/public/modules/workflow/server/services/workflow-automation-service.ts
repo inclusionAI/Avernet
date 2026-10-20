@@ -9,6 +9,7 @@ import { digestRepairJson } from '../contracts/repair-batch.js';
 import { WorkflowAutomationRepository, type AutomationJob } from '../repositories/workflow-automation-repository.js';
 import { runAutomaticRound } from './workflow-automation-round.js';
 import { previousShanghaiDay, selectAutomaticScope } from './workflow-automation-selection.js';
+import { WorkflowAutomationHistoryRepository } from '../repositories/workflow-automation-history-repository.js';
 const DAY = 86400000;
 export function automationDue(now: number, dailyTime: string) {
   const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(now));
@@ -280,6 +281,7 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
       const job = await repo.ensure(row.workflow_id, 'auto_run', event.flowId, { flowId: event.flowId, evidenceCutoffMs: now() }, now());
       await runAnalysis(job);
     },
+    records(workflowId, query) { return new WorkflowAutomationHistoryRepository(input.db).page(workflowId, query, now()); },
     async status(workflowId) {
       const jobs = await repo.recent(workflowId);
       return { schemaVersion: 'workflow-automation/v1', workflowId, coverage: await repo.coverage(workflowId), pauseReason: jobs.find(job => job.kind === 'auto_cycle')?.reason ?? null, lastScannedAtMs: jobs.find(job => job.kind === 'auto_cycle')?.data.scannedThroughMs ?? null,

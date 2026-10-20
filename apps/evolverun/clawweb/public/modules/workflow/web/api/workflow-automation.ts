@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { AutomationPolicyWrite, AutomationSnapshot, WorkflowAutomationPolicy } from '../../server/contracts/workflow-automation'
+import type { AutomationPolicyWrite, AutomationSnapshot, WorkflowAutomationPolicy, AutomationRecordPage, AutomationRecordQuery } from '../../server/contracts/workflow-automation'
 const base = (id: string) => `/api/task-guard/workflows/${encodeURIComponent(id)}`
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { credentials: 'same-origin', ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } })
@@ -17,5 +17,12 @@ export function useSaveAutomationPolicy(id: string) {
 }
 export function useAutomationStatus(id: string) {
   return useQuery({ queryKey: ['workflow-automation-status', id], queryFn: () => json<AutomationSnapshot>(`${base(id)}/automation-status`), retry: false, refetchInterval: 15000 })
+}
+export function useAutomationRecords(id: string, options: AutomationRecordQuery) {
+  const params = new URLSearchParams({ period: options.period ?? 'all', status: options.status ?? 'all', limit: String(options.limit ?? 8) })
+  if (options.cursor) params.set('cursor', options.cursor)
+  return useQuery({ queryKey: ['workflow-automation-records', id, params.toString()],
+    queryFn: () => json<AutomationRecordPage>(`${base(id)}/automation-records?${params}`), retry: false,
+    staleTime: 15000, refetchInterval: options.cursor ? false : 15000 })
 }
 export async function retryAutomationFailures(id: string) { return json<AutomationSnapshot>(`${base(id)}/automation-retry`, { method: 'POST', body: '{}' }) }

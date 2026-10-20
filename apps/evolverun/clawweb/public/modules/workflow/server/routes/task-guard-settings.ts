@@ -6,6 +6,8 @@ import type { AutoAnalysisSettings } from "../services/task-guard/auto-analysis-
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 import { requireWorkflowAccess, resolveWorkflowActorId } from "@avernet/clawweb-shared/server/services/workflow-access";
 
+import { automationRecordQuery, InvalidAutomationRecordQuery } from '../contracts/workflow-automation-history.js';
+
 export function createTaskGuardSettingsRouter(input: {
   settings: AutoAnalysisSettings;
   permissionRepo: BotWorkflowPermissionRepository | null;
@@ -55,6 +57,17 @@ export function createTaskGuardSettingsRouter(input: {
     const automation = input.automation?.();
     if (!automation) { res.status(503).json({ error: '自动分析调度尚未接入，手动功能仍可使用' }); return; }
     res.json(await automation.status(id));
+  }));
+  router.get('/workflows/:workflowId/automation-records', asyncHandler(async (req, res) => {
+    const id = String(req.params.workflowId);
+    if (!await access(req, res, id, 'view')) return;
+    const automation = input.automation?.();
+    if (!automation) { res.status(503).json({ error: '自动分析调度尚未接入' }); return; }
+    try { res.json(await automation.records(id, automationRecordQuery(req.query))); }
+    catch (error) {
+      if (error instanceof InvalidAutomationRecordQuery) { res.status(400).json({ error: error.message }); return; }
+      throw error;
+    }
   }));
   router.post('/workflows/:workflowId/automation-retry', asyncHandler(async (req, res) => {
     const id = String(req.params.workflowId);

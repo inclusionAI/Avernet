@@ -1,4 +1,5 @@
-import { render, screen, within } from '@testing-library/react'
+import { render as renderView, screen, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AutomationSnapshot, WorkflowAutomationPolicy } from '../../../../server/contracts/workflow-automation'
@@ -8,9 +9,11 @@ vi.mock('../../../api/workflow-automation', () => ({
   useAutomationPolicy: () => ({ data: mocks.policy, isLoading: false, isError: false, refetch: vi.fn() }),
   useSaveAutomationPolicy: () => ({ mutate: mocks.update, isPending: false }),
   useAutomationStatus: () => ({ data: mocks.snapshot, isError: false, refetch: mocks.refetch }),
+  useAutomationRecords: (_id: string, options: {limit: number}) => ({ data: {jobs: mocks.snapshot.jobs.slice(0, options.limit), nextCursor: null}, isFetching: false, isError: false, isPending: false }),
   retryAutomationFailures: mocks.retry,
 }))
 import AutoAnalysisPanel from '../AutoAnalysisPanel'
+function render(ui: React.ReactNode) { return renderView(<QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>) }
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.policy = { workflowId: 'wf-1', enabled: false, autoDraft: false, dailyTime: '09:00', version: 0, dailyConfigured: false, source: 'default', timezone: 'Asia/Shanghai', updatedAtMs: 0 }
@@ -85,4 +88,14 @@ describe('automatic analysis settings and execution records', () => {
     expect(screen.queryByRole('button', { name: '重试失败任务' })).not.toBeInTheDocument()
     expect(screen.getByText(/当前没有可重试的失败任务/)).toBeVisible()
   })
+})
+
+it('keeps retry targets outside history filters and pagination', async () => {
+  mocks.snapshot.retryableJobs = [{id:'failure',kind:'auto_run',status:'blocked',reason:'ANALYSIS_FAILED',flowId:'target-run',attempts:3}]
+  render(<AutoAnalysisPanel workflowId="wf-1" />)
+  await userEvent.click(screen.getByRole('button',{name:'查看全部记录'}))
+  await userEvent.selectOptions(screen.getByLabelText('执行记录时间范围'),'today')
+  await userEvent.selectOptions(screen.getByLabelText('执行记录状态'),'done')
+  expect(within(screen.getByRole('list',{name:'将重试的失败任务'})).getByText(/运行 target-run/)).toBeVisible()
+  expect(screen.getByRole('button',{name:'重试失败任务'})).toBeEnabled()
 })

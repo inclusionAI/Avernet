@@ -205,3 +205,44 @@ or enable a policy on render. “调整建议与要求” opens the existing sam
 revision editor, whose submit is “生成新版本”. Generation retry retains the
 selected suggestions, instructions and feedback; `GIT_RESULT_UNAVAILABLE` only
 reads the original candidate. Existing automatic-batch and publication guards apply.
+
+## Browsing execution history
+
+`GET /api/task-guard/workflows/:workflowId/automation-records` requires the existing
+workflow view permission. It reads history only: no coverage aggregation, policy,
+Owner, repair-task detail, or recovery eligibility reads run on this endpoint.
+It accepts `period=all|today|7d`, `status=all|pending|dispatching|waiting|retryable|uncertain|done|blocked`,
+`limit` (integer 1–20, default 8), and an opaque `cursor` of at most 512 characters.
+Invalid values return 400. Response: `{ jobs: AutomationJobSummary[], nextCursor: string | null }`.
+No exact total is calculated. The next cursor uses immutable creation time plus
+record ID and anchors the date window to the first page's time. “Today” starts at
+Shanghai midnight; “7d” includes today and the preceding six Shanghai calendar
+days. These are creation dates, not the original workflow run's occurrence date.
+
+Default UI shows eight newest records, regardless of task status. “查看全部记录”
+opens a 20-record page with date and status selectors and previous/next navigation.
+Changing a filter resets the cursor trail. Collapsing restores the unfiltered
+latest eight. Filters do not affect the independent retry-target list or its
+eligibility. Failed history reads can be retried without a business write.
+Only the first page polls; older pages load on demand and are briefly cached.
+Successful task-retry requests invalidate the history cache.
+
+Migration v146 adds a virtual status projection restricted to auto_run, auto_draft
+and auto_notice plus two compound indexes on task/kind/time/record ID and
+task/kind/status/time/record ID. JSON stays authoritative; historical statuses are
+available without rewriting journal bodies. ZDAS uses ALTER TABLE ADD INDEX,
+not the dialect's skipped standalone CREATE INDEX. Normal migration DDL authority
+is required before the new reader is deployed; a managed runtime without DDL
+permission must receive the schema through its existing migration process.
+Creating indexes can take time on existing large tables and is a deployment-time
+operation, never a request-time operation. No migration was run against a shared
+or production database during development.
+
+Each read performs three ordered index-range queries (one per displayed kind),
+returning at most limit+1 scalar projections each, then merges that bounded set.
+It never loads full request/model-input JSON, sorts the complete history, computes
+a total, or uses a deep OFFSET. The index key lengths remain below ZDAS's
+767-byte ceiling with utf8mb4. Regression tests seed 20,000 records and inspect
+SQLite query plans for both unfiltered and rare-status pages, including cursors.
+MySQL/OceanBase live query plans and index build times remain integration checks;
+DDL rendering tests do not establish deployed performance.

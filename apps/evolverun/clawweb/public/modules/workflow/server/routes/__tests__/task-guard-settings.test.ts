@@ -7,11 +7,13 @@ import { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/
 import { createTaskGuardSettingsRouter } from "../task-guard-settings.js";
 import { createAutoAnalysisSettings } from "../../services/task-guard/auto-analysis-settings.js";
 
+const records = vi.fn();
 let db: SqliteDatabase;
 let server: ReturnType<express.Application["listen"]> | null;
 let baseUrl: string;
 
 beforeEach(async () => {
+  records.mockReset().mockResolvedValue({jobs: [], nextCursor: null});
   db = new SqliteDatabase(new Database(":memory:"));
   await runMigrations(db, "sqlite");
   const permissionRepo = new BotWorkflowPermissionRepository(db);
@@ -29,7 +31,7 @@ beforeEach(async () => {
   });
   const app = express();
   app.use(express.json());
-  app.use("/api/task-guard", createTaskGuardSettingsRouter({ settings, permissionRepo }));
+  app.use("/api/task-guard", createTaskGuardSettingsRouter({ settings, permissionRepo, automation: () => ({ records }) as never }));
   server = await new Promise((resolve) => {
     const instance = app.listen(0, () => resolve(instance));
   });
@@ -92,4 +94,19 @@ it('saves one versioned daily policy and rejects stale or invalid writes', async
   expect((await fetch(url, { method: 'PUT', headers, body: JSON.stringify({ ...policy, dailyTime: '24:00', expectedVersion: 1 }) })).status).toBe(400);
   const off = await fetch(url, { method: 'PUT', headers, body: JSON.stringify({ ...policy, enabled: false, expectedVersion: 1 }) });
   expect(await off.json()).toMatchObject({ enabled: false, autoDraft: true, version: 2 });
+});
+
+it('authorizes history separately and validates bounded query parameters', async () => {
+  const url = `${baseUrl}/api/task-guard/workflows/wf-1/automation-records`;
+  expect((await fetch(url, { headers: { 'X-User-Id': 'viewer-1' } })).status).toBe(403);
+  expect(records).not.toHaveBeenCalled();
+  const headers = { 'X-User-Id': 'editor-1' };
+  for (const params of ['limit=100000', 'limit=0', 'limit=8&limit=20', 'status=invalid', 'period=invalid']) {
+    expect((await fetch(`${url}?${params}`, { headers })).status).toBe(400);
+  }
+  expect(records).not.toHaveBeenCalled();
+  const response = await fetch(`${url}?period=7d&status=blocked&limit=20`, { headers });
+  expect(response.status).toBe(200);
+  expect(records).toHaveBeenCalledWith('wf-1', { period: '7d', status: 'blocked', limit: 20 });
+  expect(await response.json()).toEqual({ jobs: [], nextCursor: null });
 });
