@@ -244,17 +244,16 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
   }
   // Status and recovery share eligibility; inspecting status never claims or dispatches work.
   async function draftRecoveries(workflowId: string, enforceAuthority = false) {
-    const failures = (await repo.failedDrafts(workflowId)).filter(job => job.leaseUntilMs <= now());
+    const policy = await input.settings.get(workflowId);
+    const failures = await repo.recoverableDrafts(workflowId, now(), policy.version);
     if (!failures.length) return [];
     let access;
     try { access = await authority(workflowId, true); }
     catch (error) { if (!enforceAuthority && error instanceof RepairAutomationDeniedError) return []; throw error; }
     const result: Array<{ job: AutomationJob; recovery: { expectedRevision: number; requestId: string } }> = [];
-    for (const job of failures) {
-      if (!job.data.batches || !job.data.realTaskId || job.data.request?.automation?.policyVersion !== access.policy.version) continue;
-      const task = await input.workbench.task(job.data.realTaskId);
-      if (task.latestAttempt.phase !== 'failed' || task.latestAttempt.requestId !== job.data.request.requestId) continue;
-      result.push({ job, recovery: { expectedRevision: task.latestAttempt.revision, requestId: `${job.id}:retry:${task.latestAttempt.revision}` } });
+    for (const { job, revision } of failures) {
+      if (job.data.request.automation.policyVersion !== access.policy.version) continue;
+      result.push({ job, recovery: { expectedRevision: revision, requestId: `${job.id}:retry:${revision}` } });
     }
     return result;
   }

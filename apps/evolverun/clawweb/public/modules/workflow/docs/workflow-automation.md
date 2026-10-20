@@ -246,3 +246,15 @@ a total, or uses a deep OFFSET. The index key lengths remain below ZDAS's
 SQLite query plans for both unfiltered and rare-status pages, including cursors.
 MySQL/OceanBase live query plans and index build times remain integration checks;
 DDL rendering tests do not establish deployed performance.
+
+### Bounded draft-recovery polling
+
+Status polling and recovery use one batched eligibility query against the current
+failed revision and its original request. Cancelled tasks, tasks with a newer
+revision, stale request IDs, other policy versions and active leases are excluded
+before the 50-draft batch limit. The task/revision primary key and v146 status/time
+index support the join and ordering. Polling never calls the full workbench task
+reader for each historical draft. Owner and current policy authority are still
+checked; recovery keeps the journal CAS/lease check and the subsequent generation
+checks. After recovering a batch, remaining eligible drafts appear in the next
+snapshot. The retry-target list and retry action share this same selector.

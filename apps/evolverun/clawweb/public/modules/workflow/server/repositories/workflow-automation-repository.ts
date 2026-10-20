@@ -51,8 +51,8 @@ export class WorkflowAutomationRepository {
       return next;
     });
   }
-  private json(field: string) {
-    const sql = `JSON_EXTRACT(body_json, '$.${field}')`;
+  private json(field: string, alias?: string) {
+    const sql = `JSON_EXTRACT(${alias ? `${alias}.` : ''}body_json, '$.${field}')`;
     return this.db.dialect.driver === 'better-sqlite3' ? sql : `JSON_UNQUOTE(${sql})`;
   }
   async ready(workflowId: string, kind: AutomationKind, now: number, limit = 20): Promise<AutomationJob[]> {
@@ -67,9 +67,21 @@ export class WorkflowAutomationRepository {
       AND CAST(${this.json('nextAtMs')} AS SIGNED) <= ? AND CAST(${this.json('leaseUntilMs')} AS SIGNED) <= ?
       ORDER BY updated_at_ms, record_id LIMIT ?`, [kind,scopeKey,now,now,limit])).map(row => JSON.parse(row.body_json));
   }
-  async failedDrafts(workflowId: string): Promise<AutomationJob[]> {
-    return (await this.db.query<{ body_json: string }>(`SELECT body_json FROM workflow_repair_release_records WHERE task_id = ? AND record_kind = 'auto_draft'
-      AND ${this.json('status')} = 'blocked' AND ${this.json('reason')} = 'DRAFT_REQUIRES_MANUAL_REVIEW' ORDER BY updated_at_ms`, [taskScope(workflowId)])).map(row => JSON.parse(row.body_json));
+  /** Filter current eligibility before the batch limit so historical tasks cannot starve recoverable drafts. */
+  async recoverableDrafts(workflowId: string, now: number, policyVersion: number): Promise<Array<{ job: AutomationJob; revision: number }>> {
+    const field = (name: string) => this.json(name, 'a');
+    const requestMatches = this.db.dialect.driver === 'better-sqlite3'
+      ? `r.request_id = ${field('data.request.requestId')}` : `BINARY r.request_id = BINARY ${field('data.request.requestId')}`;
+    const rows = await this.db.query<{ body_json: string; revision: number }>(`SELECT a.body_json, r.revision
+      FROM workflow_repair_release_records a JOIN workflow_repair_revisions r ON r.task_id = ${field('data.realTaskId')}
+      AND r.workflow_id = a.workflow_id AND r.phase = 'failed' AND ${requestMatches}
+      WHERE a.task_id = ? AND a.record_kind = 'auto_draft' AND a.record_status = 'blocked'
+      AND ${field('reason')} = 'DRAFT_REQUIRES_MANUAL_REVIEW' AND ${field('data.batches')} IS NOT NULL
+      AND CAST(${field('leaseUntilMs')} AS SIGNED) <= ? AND CAST(${field('data.request.automation.policyVersion')} AS SIGNED) = ?
+      AND NOT EXISTS (SELECT 1 FROM workflow_repair_revisions newer WHERE newer.task_id = r.task_id AND newer.revision > r.revision)
+      ORDER BY a.created_at_ms, a.record_id LIMIT 50`, [taskScope(workflowId), now, policyVersion]);
+    return rows.map(row => ({ job: JSON.parse(row.body_json) as AutomationJob, revision: Number(row.revision) }))
+      .filter(({ job }) => job.data.batches && job.data.request?.automation?.policyVersion === policyVersion);
   }
   async recoverDraft(job: AutomationJob, data: AutomationJob['data'], now: number) {
     await this.db.transaction(async tx => {
