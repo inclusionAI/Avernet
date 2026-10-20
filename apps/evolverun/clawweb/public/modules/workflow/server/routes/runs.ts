@@ -663,11 +663,11 @@ export function createRunsRouter(
       // Without that lookup every scheduled workflow was unrerunnable.
       const command = await resolveRerunCommand({
         inputJson: run.input_json,
+        workflowId: run.workflow_id,
         lookupBoundCommand: async () => {
           const bindings = facadeRepo ? await facadeRepo.findByWorkflowId(run.workflow_id) : [];
           return bindings[0]?.command ?? null;
         },
-        fallbackMessage: "重新运行",
       });
 
       if (!command) {

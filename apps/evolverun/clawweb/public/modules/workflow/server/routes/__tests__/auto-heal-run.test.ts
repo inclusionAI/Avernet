@@ -129,10 +129,11 @@ describe("POST /api/auto-heal/run", () => {
       sessionId: "cron-session", credentials: { STAGE: "online" }, params: {} });
     expect(sendIntervention).toHaveBeenCalledWith(expect.objectContaining({ botId: "default:owner-1",
       lifecycleStage: "draft", sessionId: null }));
-    // The trigger is the bound slash command plus a task description, not a
-    // client-supplied payload. A bare command would make the Bot print help.
+    // The trigger is resolved server-side, not taken from a client-supplied
+    // payload. This run records no message, so it uses the documented
+    // /workflow run form rather than a bare command that would print help.
     expect(sendIntervention.mock.calls[0][0].message.split("\n").at(-1))
-      .toBe(`/${body.workflowId} 自动修复重跑`);
+      .toBe(`/workflow run ${body.workflowId}`);
   });
 
   it.each([false, true])("preserves detailed BaaS failure, tokenExpired=%s, without retry", async tokenExpired => {

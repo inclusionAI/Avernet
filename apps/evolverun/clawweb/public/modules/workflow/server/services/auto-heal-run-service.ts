@@ -131,11 +131,11 @@ export class AutoHealRunService {
     const facadeRepo = this.deps.facadeRepo;
     const command = await resolveRerunCommand({
       inputJson: run.input_json,
+      workflowId,
       lookupBoundCommand: async () => {
         const bindings = facadeRepo ? await facadeRepo.findByWorkflowId(workflowId) : [];
         return bindings[0]?.command ?? null;
       },
-      fallbackMessage: "自动修复重跑",
     });
     if (!command) {
       throw new AutoHealRunError("invalid_source",

@@ -1,12 +1,20 @@
 /**
  * Resolve the slash command that re-triggers a run.
  *
- * A facade-triggered run records the command it received in input_json, e.g.
- * {"command":"/social-appeal 2088242692000193"}, so it can be replayed verbatim.
+ * Three sources, in priority order:
  *
- * A cron-, dashboard- or gateway-triggered run records no command at all — its
- * input_json only carries params — so the workflow's facade binding supplies the
- * command instead. Without that lookup every scheduled workflow was unrerunnable.
+ * 1. The command recorded on the run itself (`input_json.command`). A
+ *    facade-triggered run stores the exact invocation it received, e.g.
+ *    `{"command":"/social-appeal 2088242692000193"}`, so it replays verbatim.
+ * 2. The workflow's facade binding plus the run's message, as
+ *    `/<facade> <message>`. Cron, dashboard and gateway runs record no command,
+ *    only a message and params.
+ * 3. `/workflow run <workflowId>`, when the run records no message. This is the
+ *    Bot's own documented invocation and the only form that runs a workflow
+ *    without a task description.
+ *
+ * The distinction in (2) and (3) matters: a bare slash command is a help query
+ * to the Bot, so it replies with the command's usage text and starts nothing.
  */
 
 /** facade_bindings stores the bare name ("ids-log-self-audit"); the Bot expects a slash command. */
@@ -31,31 +39,32 @@ function parseObject(json: string | null): Record<string, unknown> | null {
 /**
  * Build the message body for a re-run.
  *
- * Returns null when neither the run nor its binding yields a command, so the
- * caller can report an actionable error instead of sending an empty trigger.
- *
- * `lookupBoundCommand` is invoked only when the run records no command, so a
- * facade-triggered run never pays for a binding query.
- *
- * A binding supplies only the workflow name. Sending it bare makes the Bot
- * answer with the command's help text instead of starting a run, so the bound
- * form always carries a task description.
+ * `lookupBoundCommand` is invoked only for a run that records a message but no
+ * command, so the other two branches never pay for a binding query.
  */
 export async function resolveRerunCommand(input: {
   inputJson: string | null;
+  workflowId: string;
   lookupBoundCommand: () => Promise<string | null | undefined>;
-  /** Task description used when the binding supplies the command but the run recorded no message. */
-  fallbackMessage: string;
 }): Promise<string | null> {
   const parsed = parseObject(input.inputJson);
   const recorded = typeof parsed?.command === "string" ? parsed.command.trim() : "";
-  const message = typeof parsed?.message === "string" ? parsed.message.trim() : "";
-
   // A recorded command is the exact original invocation and already carries its
   // own arguments, so it is replayed as-is.
-  if (recorded) return message ? `${recorded} ${message}` : recorded;
+  if (recorded) return recorded;
 
-  const bound = toSlashCommand(await input.lookupBoundCommand());
-  if (!bound) return null;
-  return `${bound} ${message || input.fallbackMessage}`;
+  // Without a workflow id there is nothing left to address, so the caller can
+  // report an actionable error instead of sending a malformed command.
+  const workflowId = input.workflowId?.trim() ?? "";
+  if (!workflowId) return null;
+
+  const message = typeof parsed?.message === "string" ? parsed.message.trim() : "";
+  if (message) {
+    const bound = toSlashCommand(await input.lookupBoundCommand());
+    // Without a binding the workflow is still addressable by id, and the
+    // documented form accepts a trailing task description.
+    return bound ? `${bound} ${message}` : `/workflow run ${workflowId} ${message}`;
+  }
+
+  return `/workflow run ${workflowId}`;
 }
