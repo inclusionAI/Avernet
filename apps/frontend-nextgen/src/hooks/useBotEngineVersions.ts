@@ -71,6 +71,7 @@ export function useBotEngineVersions(targets: EngineVersionTarget[]): UseBotEngi
   const [states, setStates] = useState<Record<string, BotEngineVersionState | undefined>>({});
   const activeRequests = useRef(new Map<string, AbortController>());
   const updateLocks = useRef(new Set<string>());
+  const previousTargets = useRef(targetByKey);
 
   const inspect = useCallback(
     async (key: string, deviceUuid?: string) => {
@@ -105,22 +106,39 @@ export function useBotEngineVersions(targets: EngineVersionTarget[]): UseBotEngi
   );
 
   useEffect(() => {
-    const nextStates: Record<string, BotEngineVersionState | undefined> = {};
-    for (const target of targetByKey.values()) {
-      nextStates[target.key] =
-        target.enabled && supportsEngineVersion(target.engine) ? { kind: 'loading' } : { kind: 'idle' };
+    const continuingUpdates = new Set<string>();
+    for (const key of updateLocks.current) {
+      const before = previousTargets.current.get(key);
+      const after = targetByKey.get(key);
+      if (before && after && before.botId === after.botId && before.userId === after.userId && before.ownerId === after.ownerId && before.engine === after.engine) {
+        continuingUpdates.add(key);
+      }
     }
-    setStates(nextStates);
+    for (const [key, controller] of activeRequests.current) {
+      if (!continuingUpdates.has(key)) {
+        controller.abort();
+        activeRequests.current.delete(key);
+      }
+    }
+    setStates((current) => {
+      const nextStates: Record<string, BotEngineVersionState | undefined> = {};
+      for (const target of targetByKey.values()) {
+        nextStates[target.key] = continuingUpdates.has(target.key)
+          ? current[target.key]
+          : target.enabled && supportsEngineVersion(target.engine) ? { kind: 'loading' } : { kind: 'idle' };
+      }
+      return nextStates;
+    });
+    previousTargets.current = targetByKey;
+    for (const target of targetByKey.values()) {
+      if (!continuingUpdates.has(target.key) && target.enabled && supportsEngineVersion(target.engine)) void inspect(target.key);
+    }
+  }, [signature, targetByKey, inspect]);
+
+  useEffect(() => () => {
     for (const controller of activeRequests.current.values()) controller.abort();
     activeRequests.current.clear();
-    for (const target of targetByKey.values()) {
-      if (target.enabled && supportsEngineVersion(target.engine)) void inspect(target.key);
-    }
-    return () => {
-      for (const controller of activeRequests.current.values()) controller.abort();
-      activeRequests.current.clear();
-    };
-  }, [signature, targetByKey, inspect]);
+  }, []);
 
   const selectInstance = useCallback((key: string, deviceUuid: string) => inspect(key, deviceUuid), [inspect]);
 

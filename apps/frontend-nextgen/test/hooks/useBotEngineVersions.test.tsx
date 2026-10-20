@@ -133,6 +133,39 @@ describe('useBotEngineVersions', () => {
     restart.mockRestore();
   });
 
+  test('continues the accepted restart across pending/list refresh but cancels a removed target', async () => {
+    jest.mocked(botController.getBotEngineVersion).mockResolvedValue({ code: 200000, data: version });
+    let finish: (value: typeof version) => void = () => undefined;
+    const restart = jest.spyOn(botEngineVersionService, 'restartAndConfirmUpdate').mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const { result, rerender } = renderHook(({ targets }: { targets: EngineVersionTarget[] }) => useBotEngineVersions(targets), { initialProps: { targets: [target] } });
+    await waitFor(() => expect(result.current.states[target.key]?.kind).toBe('ready'));
+    let pending!: Promise<boolean>;
+    act(() => { pending = result.current.update(target.key); });
+    const signal = restart.mock.calls[0][0].signal;
+    rerender({ targets: [{ ...target, enabled: false, restartPermission: { actions: [] } }] });
+    expect(signal?.aborted).toBe(false);
+    expect(result.current.states[target.key]?.kind).toBe('updating');
+    await act(async () => { finish({ ...version, context: { ...version.context, instance_id: 'new-device' } }); await pending; });
+    expect(result.current.states[target.key]).toMatchObject({ kind: 'ready', deviceUuid: 'new-device' });
+    restart.mockRestore();
+  });
+
+  test.each([['removed', []], ['changed Bot', [{ ...target, botId: 'another-bot' }]]])('cancels verification when target is %s', async (_name, nextTargets) => {
+    jest.mocked(botController.getBotEngineVersion).mockResolvedValue({ code: 200000, data: version });
+    let finish: (value: typeof version) => void = () => undefined;
+    const restart = jest.spyOn(botEngineVersionService, 'restartAndConfirmUpdate').mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const { result, rerender } = renderHook(({ targets }: { targets: EngineVersionTarget[] }) => useBotEngineVersions(targets), { initialProps: { targets: [target] } });
+    await waitFor(() => expect(result.current.states[target.key]?.kind).toBe('ready'));
+    let pending!: Promise<boolean>;
+    act(() => { pending = result.current.update(target.key); });
+    const signal = restart.mock.calls[0][0].signal;
+    rerender({ targets: nextTargets });
+    expect(signal?.aborted).toBe(true);
+    await act(async () => { finish(version); await pending; });
+    if (!nextTargets.length) expect(result.current.states[target.key]).toBeUndefined();
+    restart.mockRestore();
+  });
+
   test('requires explicit engine-restart permission before invoking update', async () => {
     jest.mocked(botController.getBotEngineVersion).mockResolvedValue({ code: 200000, data: version });
     const restartAndConfirm = jest.spyOn(botEngineVersionService, 'restartAndConfirmUpdate');
