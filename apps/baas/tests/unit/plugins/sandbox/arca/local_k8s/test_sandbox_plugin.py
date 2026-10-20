@@ -158,7 +158,12 @@ class TestLocalK8sPluginCreate:
         assert not sidecar.volume_mounts[0].sub_path
 
         bot_container = deployment.spec.template.spec.containers[0]
-        assert bot_container.security_context.capabilities.add == ["SYS_ADMIN"]
+        assert bot_container.security_context.privileged is True
+        assert bot_container.security_context.app_armor_profile.type == "Localhost"
+        assert (
+            bot_container.security_context.app_armor_profile.localhost_profile
+            == "arca-fuse"
+        )
         assert bot_container.volume_mounts[0].name == "fuse-device"
         assert bot_container.volume_mounts[0].mount_path == "/opt/dev/fuse"
 
@@ -400,7 +405,12 @@ class TestLocalK8sPluginCreate:
 
         # bot-runtime 容器以 storage_id 为 subPath 挂载到 /home/admin
         bot_container = deployment.spec.template.spec.containers[0]
-        assert bot_container.security_context.capabilities.add == ["SYS_ADMIN"]
+        assert bot_container.security_context.privileged is True
+        assert bot_container.security_context.app_armor_profile.type == "Localhost"
+        assert (
+            bot_container.security_context.app_armor_profile.localhost_profile
+            == "arca-fuse"
+        )
         assert bot_container.volume_mounts[0].name == "fuse-device"
         assert bot_container.volume_mounts[0].mount_path == "/opt/dev/fuse"
         assert bot_container.volume_mounts[1].name == "bot-data"

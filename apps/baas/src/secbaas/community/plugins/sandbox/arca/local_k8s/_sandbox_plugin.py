@@ -27,6 +27,7 @@ out-of-cluster 模式下通过 localhost + NodePort 访问。
 | LOCAL_K8S_SHARED_PVC_NAME | bot-shared-data | 否 | 共享 PVC 名称 |
 | LOCAL_K8S_SHARED_PVC_SIZE | 10Gi | 否 | 共享 PVC 总大小 |
 | LOCAL_K8S_SHARED_PVC_HOST_MOUNT_PATH | - | 否 | 插件 Pod 上共享 PVC 的挂载路径；配置后 delete_storage 会删除该 bot 的 subPath 目录 |
+| LOCAL_K8S_APPARMOR_PROFILE | arca-fuse | 否 | privileged bot runtime 使用的 host AppArmor profile；必须允许 FUSE mount 且保持 enforce |
 
 colima + k3s 最小示例（NodePort，无需额外映射端口）：
 ::
@@ -114,6 +115,7 @@ ENV_OUTBOUND_RULE = "LOCAL_K8S_OUTBOUND_RULE"
 ENV_SHARED_PVC_NAME = "LOCAL_K8S_SHARED_PVC_NAME"
 ENV_SHARED_PVC_SIZE = "LOCAL_K8S_SHARED_PVC_SIZE"
 ENV_SHARED_PVC_HOST_MOUNT_PATH = "LOCAL_K8S_SHARED_PVC_HOST_MOUNT_PATH"
+ENV_APPARMOR_PROFILE = "LOCAL_K8S_APPARMOR_PROFILE"
 
 _INCLUSTER_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 
@@ -175,6 +177,23 @@ def _shared_pvc_name() -> str:
 def _shared_pvc_size() -> str:
     """返回共享 PVC 大小，可通过环境变量覆盖。"""
     return _env(ENV_SHARED_PVC_SIZE) or _SHARED_BOT_DATA_PVC_SIZE
+
+
+def _apparmor_profile_name() -> str:
+    """返回 bot runtime 使用的 host AppArmor profile 名。
+
+    Docker 自带的 ``docker-default`` 明确 ``deny mount``，会阻断 FUSE 挂载；
+    ``unconfined`` 又会破坏 admin/sudo PAM 路径。Simulator 在 Colima VM
+    注册 ``arca-fuse``：沿用 Docker 宽松的文件/网络/能力规则，但把
+    ``deny mount`` 改成允许 mount。
+    """
+    profile = _env(ENV_APPARMOR_PROFILE, "arca-fuse")
+    if profile is None or not str(profile).strip():
+        raise ValueError(
+            "local_k8s: LOCAL_K8S_APPARMOR_PROFILE must not be empty. "
+            "Use arca-fuse or another AppArmor profile that permits mount."
+        )
+    return str(profile).strip()
 
 
 def _resolve_image(image_override: str | None) -> str:
@@ -520,10 +539,10 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         """创建包含 bot-runtime 与 envoy-sidecar 的双容器 Deployment。"""
         from kubernetes.client import (
             AppsV1Api,
+            V1AppArmorProfile,
             V1Capabilities,
             V1ConfigMapVolumeSource,
             V1Container,
-            V1Capabilities,
             V1Deployment,
             V1DeploymentSpec,
             V1EnvVar,
@@ -576,14 +595,16 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
                 requests={"cpu": cpu_request, "memory": memory_request},
                 limits={"cpu": cpu_limit, "memory": memory_limit},
             ),
-            # SYS_ADMIN (not privileged): FUSE mounts need CAP_SYS_ADMIN to
-            # mount the fuse device, and a host-path device alone does not
-            # grant device-cgroup access on k3s-on-Docker. Full privileged
-            # breaks the runtime's admin/sudo PAM path, so only the needed
-            # capability is added instead.
+            # privileged grants /dev/fuse device-cgroup access needed by the
+            # bot runtime's FUSE mounts. Docker's docker-default profile
+            # explicitly denies mount, while unconfined breaks the runtime's
+            # admin/sudo PAM accounting path; use the simulator's arca-fuse
+            # localhost profile, which allows mount while staying enforced.
             security_context=V1SecurityContext(
-                capabilities=V1Capabilities(
-                    add=["SYS_ADMIN"],
+                privileged=True,
+                app_armor_profile=V1AppArmorProfile(
+                    type="Localhost",
+                    localhost_profile=_apparmor_profile_name(),
                 ),
             ),
             volume_mounts=volume_mounts,
