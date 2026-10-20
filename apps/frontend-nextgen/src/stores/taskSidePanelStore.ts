@@ -1,0 +1,95 @@
+import { create } from 'zustand';
+
+/**
+ * 任务副屏 V2 导航 Store —— 面包屑两级栈 / 选中节点 / 待消费会话跳转。
+ * 状态按 task 分片（聊天内每任务一个面板 tab，共享单份下钻栈会串场）。
+ * src/assets 不直接 import 本文件：宿主（extensions / 抽屉）经 props 注入资产层
+ * （模式同 TaskPanelAdapterWithUser）。
+ * 守卫：Store ≤ 150 行。
+ */
+export interface TaskNavRecord {
+  /** 下钻栈：空 = Level1 任务总览；顶 = 当前 Level2 节点 */
+  drillStack: string[];
+  /** 总览层选中节点（高亮 + 跳转信号源），《drillInto 不改》 */
+  selectedNodeId: string | null;
+}
+
+/**
+ * 节点选中 / 下钻附带的会话跳转目标。
+ * kind/groupId/botId 供 P4 宿主消费（group 需先选群再选会话）；
+ * startTime/endTime 为节点执行时间窗（毫秒），消息定位用，允许 null。
+ */
+export interface TaskNavTarget {
+  taskId?: string;
+  sessionId: string;
+  kind: 'group' | 'bot' | 'friend' | 'unknown';
+  groupId?: string | null;
+  botId?: string | null;
+  nodeId?: string;
+  startTime?: number | null;
+  endTime?: number | null;
+}
+
+export interface TaskSidePanelState {
+  /** 当前活跃任务（多任务切换条的落点；聊天 tab 由 taskId 自带，不强依赖） */
+  activeTaskId: string | null;
+  /** 按 task 分片的导航状态 */
+  navByTask: Record<string, TaskNavRecord>;
+  /** 待宿主消费的会话跳转；消费方调 consumePendingNavigation 置空 */
+  pendingNavigation: TaskNavTarget | null;
+  /** 选中信号计数器（+1 = 消息流滚动定位一次），demo nodeScrollSignal 同源 */
+  nodeScrollSignal: number;
+  setActiveTask: (taskId: string) => void;
+  selectNode: (taskId: string, nodeId: string, target: TaskNavTarget | null) => void;
+  drillInto: (taskId: string, nodeId: string, target: TaskNavTarget | null) => void;
+  backToOverview: (taskId: string) => void;
+  consumePendingNavigation: () => void;
+  resetAll: () => void;
+}
+
+/** 下钻封顶 2 层（Level1 总览 + Level2 节点副屏；L2 无再下钻热区，此为防御） */
+const MAX_DRILL_DEPTH = 2;
+
+const emptyRecord: TaskNavRecord = { drillStack: [], selectedNodeId: null };
+
+const initial = {
+  activeTaskId: null,
+  navByTask: {} as Record<string, TaskNavRecord>,
+  pendingNavigation: null,
+  nodeScrollSignal: 0,
+};
+
+export const useTaskSidePanelStore = create<TaskSidePanelState>((set) => ({
+  ...initial,
+  setActiveTask: (taskId) => set({ activeTaskId: taskId, pendingNavigation: null }),
+  selectNode: (taskId, nodeId, target) =>
+    set((s) => {
+      const prev = s.navByTask[taskId] ?? emptyRecord;
+      return {
+        navByTask: { ...s.navByTask, [taskId]: { ...prev, selectedNodeId: nodeId } },
+        pendingNavigation: target ? { ...target, taskId } : null,
+        nodeScrollSignal: s.nodeScrollSignal + 1,
+      };
+    }),
+  drillInto: (taskId, nodeId, target) =>
+    set((s) => {
+      const prev = s.navByTask[taskId] ?? emptyRecord;
+      const drillStack = prev.drillStack.includes(nodeId)
+        ? prev.drillStack
+        : prev.drillStack.length >= MAX_DRILL_DEPTH
+          ? prev.drillStack
+          : [...prev.drillStack, nodeId];
+      return {
+        navByTask: { ...s.navByTask, [taskId]: { ...prev, drillStack } },
+        pendingNavigation: target ? { ...target, taskId } : null,
+        // demo 语义：下钻不额外触发消息滚动信号
+      };
+    }),
+  backToOverview: (taskId) =>
+    set((s) => {
+      const prev = s.navByTask[taskId] ?? emptyRecord;
+      return { navByTask: { ...s.navByTask, [taskId]: { ...prev, drillStack: [] } } };
+    }),
+  consumePendingNavigation: () => set({ pendingNavigation: null }),
+  resetAll: () => set(initial),
+}));
