@@ -91,28 +91,33 @@ endpoints.
 
 Recording:
 - [ ] A revision can be captured from a bot: persona files, skills (local
-      skills as stored file trees, Center skills as pinned versions),
-      resources (files and directory trees), MCP servers with the bot's
-      overrides, and the startup script. Every captured byte lands in the
-      content store by digest; the stored revision validates against the
-      contract schema and its id is the contract's hash.
+      skills as stored file trees, Center skills as pinned versions,
+      shared-repository skills by repository path), resources (files and
+      directory trees), MCP servers with the bot's overrides, and the
+      startup script. Every captured byte lands in the content store by
+      digest; the stored revision validates against the contract schema and
+      its id is the contract's hash.
+- [ ] Shared-repository skills (`git://…` memberships on the platform-synced
+      skills repository) are recorded as `origin: repo` with `repo_path`,
+      an additive extension of the RSI-02 schema (no version bump); they are
+      unpinned until the repository sync exposes a commit.
 - [ ] Capture applies the contract's normalisation (the platform-written
       AGENTS.md reference block is removed and trailing whitespace trimmed)
-      and refuses, naming the item, what genome v1 cannot represent: a
-      skill supplied from the shared skill repository, a resource whose
-      path the Manifest path rule rejects, and a platform-managed teclaw
-      bot.
+      and refuses, naming the item, what cannot be recorded: a resource
+      whose path the Manifest path rule rejects, and a platform-managed
+      teclaw bot.
 - [ ] A revision can be recorded from a patch against a base revision. All
       twelve ops apply as the contract defines; the contract's example
       patches applied to their example base give the example candidate
       revision, and the stored patch digest is the candidate id.
-- [ ] Recording a patch refuses, with the contract's reason codes
-      (`base_mismatch`, `gene_not_mutable`, `pinned_item`,
-      `gene_not_allowed`, `missing_rationale`, `schema`, `limit_exceeded`),
-      a patch whose base is not the parent, whose ops do not apply exactly,
-      that touches a gene outside `mutable_genes` or a run's `allowed_genes`,
-      that overlaps a pin, that lacks a rationale or required evidence, or
-      that exceeds the Manifest-mirrored limits.
+- [ ] The patch's own `base` names the revision it is applied to. An
+      unknown base (not a revision of this bot) is `not_found`; a patch is
+      refused with a reason code when its ops do not apply exactly to that
+      base (`does_not_apply`), touch a gene outside `mutable_genes` or a
+      run's `allowed_genes` (`gene_not_mutable`, `gene_not_allowed`),
+      overlap a pin (`pinned_item`), lack a rationale or required evidence
+      (`missing_rationale`), fail the schema (`schema`), or exceed the
+      Manifest-mirrored limits (`limit_exceeded`).
 - [ ] A recorded revision is always one that apply would accept: the checks
       Manifest apply runs before writing (persona UTF-8 and engine-legal
       type, local skill files form a valid package, resource admission and
@@ -158,9 +163,10 @@ Promotion and drift (Stage 1):
       its canonical JSON, independent of YAML formatting.
 - [ ] Promoting a revision moves `active` and `previous` in one
       compare-and-swap, marks the revision `promoted`, records a promotion
-      with actor, reason, the generated document and its digest, and starts
-      an apply of that generated document for a personal bot. The bot's own
-      stored Manifest is not read or written by a promotion.
+      with actor, reason, the generated document and its digest, saves the
+      generated document as the bot's Manifest, and starts the existing
+      Manifest apply for a personal bot. After a promotion the bot's stored
+      Manifest is the last promoted document.
 - [ ] The promotion is refused before any ref moves when the Manifest
       cannot accept the generated document (today: until RSI-04 lets apply
       read bytes from the content store and pin Center skills).
@@ -190,11 +196,10 @@ Surface and tests:
   validation, policy change, diff, risk tiers and rewrite detection, refs
   with CAS, content upload/read, compile, lineage queries, the drift check.
 - A promotion service and endpoint that moves refs, records the promotion
-  with the generated document, and hands that document to Manifest apply
-  through one narrow delivery seam (Stage 1).
-- A Manifest apply entry point that applies a supplied document instead of
-  the bot's stored one, so a promotion never overwrites the owner's
-  Manifest.
+  with the generated document, saves that document as the bot's Manifest
+  and starts the existing apply, through one narrow delivery seam (Stage 1).
+- The additive contract extension `origin: repo` for shared-repository
+  skills.
 - The produced-content write path of the manifest content store.
 - Tables, repositories, DI wiring, HTTP routes, authorization and admission
   rows, error mapping, tests, and the contract and design-doc updates that
@@ -221,12 +226,15 @@ Surface and tests:
   (RSI-12, RSI-16); **Experience, evaluations, the ledger** (RSI-10,
   RSI-11, RSI-21); **a shared `Idempotency-Key` store** (RSI-07); **bot
   callers and `inbox/*` refs** (DR-3, RSI-14).
-- Capturing platform-managed teclaw bots and shared-repository skills
-  (refused and named, see above).
+- Capturing platform-managed teclaw bots (refused and named, see above),
+  and pinning a shared-repository skill to a commit (the repository sync
+  exposes none yet).
 
 ## Open Questions
 
 - None. Decisions made during review and recorded above: capture replaces
-  recording from a Manifest document; a promotion applies a generated
-  document and leaves the bot's Manifest untouched; policy changes are an
-  operation of their own; Stage 2 is a follow-on item.
+  recording from a Manifest document; a promotion saves the generated
+  document as the bot's Manifest and reuses the existing apply; a patch's
+  own `base` is its only base; shared-repository skills are recorded by
+  path; policy changes are an operation of their own; Stage 2 is a
+  follow-on item.

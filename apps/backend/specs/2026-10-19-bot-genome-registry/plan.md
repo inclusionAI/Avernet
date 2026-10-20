@@ -17,13 +17,19 @@ checks), so a recorded revision is always appliable.
 Promotion (Stage 1) moves refs by CAS, records the promotion, compiles the
 revision into a **new** Manifest document kept on the promotion row, and
 hands that document to the Manifest apply engine through one narrow
-`RevisionApplier` seam. The apply engine gains one entry point for this: an
-apply of a supplied document, which never reads or writes the bot's own
-Manifest row. The generated document uses the content-store and Center
-sources the contract proposes for RSI-04; until the Manifest accepts them,
-the applier's preflight refuses the promotion as `not_appliable` before any
-ref moves. Stage 2 replaces the applier implementation with components that
-deliver a revision to the runtime directly; the registry does not change.
+`RevisionApplier` seam: the document is saved as the bot's Manifest with
+the existing `BotConfigManifestService.put` and applied with the existing
+`start_apply`, so after a promotion the bot's stored Manifest is the last
+promoted document. The generated document uses the content-store, Center
+and (new) repo sources the contract proposes for delivery; until the
+Manifest accepts them, the applier's preflight refuses the promotion as
+`not_appliable` before any ref moves. Stage 2 replaces the applier
+implementation with components that deliver a revision to the runtime
+directly; the registry does not change.
+
+One additive contract extension rides along: shared-repository skills
+(`git://…` memberships) get `origin: "repo"` with `repo_path` in
+`genome-revision.schema.json`, so capture can record every bot.
 
 Because apply reports carry no document digest yet, "which revision does
 this bot run" joins the bot's last apply to the promotion that started it
@@ -37,9 +43,8 @@ and its digest, so RSI-04 can switch the join without a migration.
   compile, the registry and promotion services, repository models and DDL.
 - `src/agentclaw/community/core/bot_config_manifest/content/` — gains
   `store_produced` and `is_reachable`.
-- `src/agentclaw/community/core/bot_config_manifest/services/config_manifest_apply_service.py`,
-  `…/bot_config_manifest_apply_service_protocol.py`, `apply/apply_task.py`
-  — `start_apply` accepts a supplied document carried in the task payload.
+- `api-contracts/genome/v1/genome-revision.schema.json`, `README.md` §4.2,
+  `examples/` — `origin: repo` + `repo_path` on a skill entry (additive).
 - `src/agentclaw/community/core/repository/{protocols,implementations}/bot/`
   — genome repository contracts and ORM; the content repository gains
   `has_digest`.
@@ -169,30 +174,14 @@ def is_reachable(self, scope: ContentScope, digest: str) -> bool:
 def has_digest(self, *, env: str, entity_id: str, bot_id: str, digest: str) -> bool: ...
 ```
 
-### Manifest apply: apply a supplied document
+### Contract extension: shared-repository skills
 
-```diff
-# core/bot_config_manifest/bot_config_manifest_apply_service_protocol.py:82 — start_apply
-     carry_from_apply_id: Optional[str] = None,
-+    document: Optional[str] = None,
- ) -> ApplyAccepted:
-+    """``document`` is a Manifest document to apply *instead of* the bot's stored one. It is
-+    validated here like the stored document, carried in the task payload, and the bot's
-+    ``ac_bot_config_manifest`` row is neither read nor written. ``None`` means the stored
-+    document, as today. A promotion passes the generated document with ``trigger="genome_promotion"``."""
+```jsonc
+// api-contracts/genome/v1/genome-revision.schema.json — skillEntry gains a third shape (additive, README §1)
+{"name": "weather", "origin": "repo", "repo_path": "team/weather"}      // the path after git://; no digest, no version
+// compile.py emits, for delivery (proposed spelling, fixed by the delivery item):
+// {"name": "weather", "source": {"protocol": "repo", "path": "team/weather"}}
 ```
-
-```diff
-# core/bot_config_manifest/services/config_manifest_apply_service.py:846 — _parsed_or_empty
--    def _parsed_or_empty(self, *, entity_id, bot_id, bot, engine_type, bot_type):
-+    def _parsed_or_empty(self, *, entity_id, bot_id, bot, engine_type, bot_type, document=None):
-+        # a supplied document is validated with the bot's capabilities and never stored
-# …/config_manifest_apply_service.py:512 — _rebuild reads payload["document"] when present
-```
-
-The lock, the `RUNNING` row, the task hand-off and the report are unchanged;
-`ApplyReport.trigger` reads `genome_promotion`, which `require_phase_matches_trigger`
-already admits with `phase=None`.
 
 ### Registry service (core Protocol, re-exported by `api/bot_genome_registry_service.py`)
 
@@ -258,12 +247,11 @@ class RefMover(StrEnum): OWNER = "owner"; PROMOTION = "promotion"; RUN = "run"
 class GenomeError(Exception): ...
 class RevisionNotFound(GenomeError): ...
 class RefConflict(GenomeError): ref: str; expected: str | None; current: str | None
-class BaseMismatch(GenomeError): ...
-class PatchRejected(GenomeError): reasons: tuple[Reason, ...]      # Reason(code, location, message)
+class PatchRejected(GenomeError): reasons: tuple[Reason, ...]      # Reason(code, location, message); does_not_apply, …
 class LimitExceeded(GenomeError): ...
 class MoverNotAllowed(GenomeError): ...
 class ContentNotReachable(GenomeError): ...
-class CaptureRefused(GenomeError): reasons: tuple[Reason, ...]      # repo skill, bad resource path, platform-managed teclaw
+class CaptureRefused(GenomeError): reasons: tuple[Reason, ...]      # bad resource path, platform-managed teclaw
 class Drifted(GenomeError): active: str; applied: str | None
 class NotPromotable(GenomeError): ...
 class NotAppliable(GenomeError): violations: tuple[Reason, ...]     # Manifest refused the generated document
@@ -293,9 +281,10 @@ class RevisionApplier(Protocol):
     def start(self, bot: BotRef, compiled: CompiledManifest, *, actor: Actor, reason: str) -> ApplyResult: ...
 
 class ManifestRevisionApplier(RevisionApplier):
-    """Stage 1, personal bots: ``BotConfigManifestService.validate`` in preflight;
-    ``start_apply(document=compiled.document_yaml, trigger="genome_promotion")`` in start.
-    The bot's stored Manifest is untouched. Service bots: ``preflight`` raises PromotionUnsupported."""
+    """Stage 1, personal bots: ``BotConfigManifestService.validate`` in preflight; in start,
+    ``BotConfigManifestService.put(document=compiled.document_yaml, modifier=…)`` (the bot's Manifest becomes
+    the generated document) then ``start_apply(trigger="genome_promotion")``, which applies the stored document
+    as today. Service bots: ``preflight`` raises PromotionUnsupported."""
 ```
 
 `promote` order (08-promotion.md §7.1, drift from §5.5): resolve target →
@@ -333,8 +322,8 @@ registered before `/revisions/{rev:path}`. Admission for every row is
 bounds what automation may do to the bot.
 
 ```jsonc
-// POST /openapi/v1/bots/bot_123/genome/revisions  (from a patch; base required)
-{"base": "sha256:a90b…", "status": "candidate",
+// POST /openapi/v1/bots/bot_123/genome/revisions  (from a patch; patch.base is the base)
+{"status": "candidate",
  "run": {"run_id": "run_7f3", "binding_id": "bind_01", "allowed_genes": ["persona", "skills"]},
  "patch": {"patch_schema": 1, "base": "sha256:a90b…", "ops": [...], "rationale": "…", "evidence": ["episode:ep_91"]}}
 // POST /openapi/v1/bots/bot_123/genome/revisions:capture   (no body; parent = active, or none)
@@ -352,7 +341,6 @@ source-credentials rows; `data` carries the reasons or the current ref):
 GENOME_ENVELOPE_ERRORS = {
     RevisionNotFound: (404, "Not found"), ContentNotReachable: (404, "Not found"),
     RefConflict: (409, "Ref moved: re-read and decide"),         # data: {ref, expected_revision, current_revision}
-    BaseMismatch: (409, "Patch base is not the current parent"),
     Drifted: (409, "Bot has drifted from its active revision"),
     PatchRejected: (422, "Patch rejected"),                      # data: {reasons: [{code, location, message}]}
     CaptureRefused: (422, "Current state cannot be captured"),
@@ -446,7 +434,7 @@ def patch_assessment(outcome: PatchOutcome, policy: dict, tiers: dict) -> tuple[
 
 ```python
 # core/bot_genome/capture/capture.py
-@dataclass(frozen=True) class CapturedSkill: name: str; origin: str; center_version: str | None; files: tuple[tuple[str, bytes], ...]
+@dataclass(frozen=True) class CapturedSkill: name: str; origin: str; center_version: str | None; repo_path: str | None; files: tuple[tuple[str, bytes], ...]
 @dataclass(frozen=True) class CapturedResource: path: str; files: tuple[tuple[str, bytes], ...]   # one member for a file
 
 class BotStateReader(Protocol):                          # narrow; one production implementation, fakes in tests
@@ -458,9 +446,9 @@ class BotStateReader(Protocol):                          # narrow; one productio
 
 async def capture_spec(reader: BotStateReader, bot: BotRef, *, validator: SkillPackageValidator) -> CapturedSpec:
     """README §7 normalisation: AGENTS.md reference block removed (IdentityService._remove_reference_section) and
-    rstrip()+"\n"; skill files through validate_directory; resource paths normalised; CaptureRefused names a
-    repo (git://) skill, a resource path the Manifest rule rejects, or a platform-managed teclaw bot.
-    Returns the spec and the produced blobs (digest, bytes) to file."""
+    rstrip()+"\n"; local skill files through validate_directory; git:// skills → origin repo with repo_path;
+    resource paths normalised; CaptureRefused names a resource path the Manifest rule rejects or a
+    platform-managed teclaw bot. Returns the spec and the produced blobs (digest, bytes) to file."""
 ```
 
 ```python
@@ -468,6 +456,7 @@ async def capture_spec(reader: BotStateReader, bot: BotRef, *, validator: SkillP
 # persona:   IdentityFilePort.list_bot_files / read_identity_file   (core/ports/identity_file_port.py)
 # skills:    BotCapabilityStateReaderProtocol.active_skill_assets  minus platform Default supply (mirror
 #            apply/materialisers/skills.py:320 plan()); center:// → (skill_uuid, sc_version_number);
+#            git://<path> → origin repo, repo_path=<path> (skill_set_service.py:1046);
 #            local:// → SkillServiceFactory.local_skill_package_storage(...).read_package_files() (factories.py:438, :229)
 # resources: ResourceService.list_resources + ResourceFileService.read_file / iter_directory_files
 #            (services/resource_file_service.py:416, :450)
@@ -480,7 +469,8 @@ async def capture_spec(reader: BotStateReader, bot: BotRef, *, validator: SkillP
 # core/bot_genome/compile.py
 def compile_spec(spec: dict, content: ContentReader) -> CompiledManifest:
     """identity/skills/resources → {protocol: content_store, digest}; center skills → {protocol: center, version};
-    mcp verbatim; script → {body: <stored body>} or null; memory omitted while null; no cli_tools/engine_config.
+    repo skills → {protocol: repo, path}; mcp verbatim; script → {body: <stored body>} or null; memory omitted
+    while null; no cli_tools/engine_config.
     document_digest = sha256_digest(canonicalize(document)); document_yaml = yaml.safe_dump(document, sort_keys=False)."""
 ```
 
@@ -499,7 +489,7 @@ async def capture(self, bot, *, created_by) -> RecordedRevision:
     # revision row (idempotent; parent = active or None) → RecordedRevision(created, risk_tier=None)
 
 async def record_patch(self, bot, patch, *, created_by, status, run=None) -> RecordedRevision:
-    # schema → base (BaseMismatch) → gene paths canonical → policy/allowed (PatchRejected) → apply_patch →
+    # schema → patch.base resolves (RevisionNotFound) → gene paths canonical → policy/allowed (PatchRejected) → apply_patch →
     # limits → spec_checks → risk → store_produced writes → patch row → revision row (idempotent) →
     # candidate ref for a run (next n, idempotent on (run, revision)) → RecordedRevision
 
@@ -588,10 +578,13 @@ None new. `jsonschema>=4.20` is already a runtime dependency
   content identity makes the duplicate path return the existing row; the
   seq collision retries inside the repository.
 - **Risk:** The 1,000-line cap. `responses.py` (954), `authorization_rules.py`
-  (944) and `admission_routes.py` (916) are near it; the apply service is
-  876.
+  (944) and `admission_routes.py` (916) are near it.
   **Mitigation:** genome rows live in their own files merged into the
-  tables; the apply-service change is a few lines on three functions.
+  tables.
+- **Risk:** The `origin: repo` extension touches the RSI-02 contract files.
+  **Mitigation:** additive by README §1 (existing records unchanged); one
+  example revision and the schema copy test cover it; owner sign-off on
+  the PR.
 - **Risk:** Contract copies in the package drift from `api-contracts/`.
   **Mitigation:** a test asserts byte equality of the three files.
 - **Risk:** Reading a 100 MiB upload into memory on `PUT …/content`.
@@ -608,10 +601,14 @@ None new. `jsonschema>=4.20` is already a runtime dependency
   categories, and a provenance YAML copy, and it tied revisions to the
   Manifest for no gain; an owner who manages a bot through Manifest
   documents applies the document as today and captures the result.
-- **Promote by overwriting the bot's Manifest row** so today's
-  `start_apply` can read it. Rejected: it would replace an owner's
-  git-sourced document with pinned digests. One `document` argument on
-  `start_apply` applies a generated document and leaves the row alone.
+- **A separate apply entry point for the generated document**, to leave
+  the bot's stored Manifest as the owner wrote it. Rejected after review:
+  with capture as the recording path the Manifest is only the Stage 1
+  delivery vehicle, so "the stored Manifest is the last promoted document"
+  is the right meaning, and `put` + `start_apply` need no change.
+- **Refuse shared-repository skills at capture.** Rejected: many bots have
+  them, and refusing would block their first revision; `origin: repo` is
+  an additive extension of the contract.
 - **A new delivery pipeline for Stage 2.** Rejected in favour of new
   components that feed the apply engine directly from a revision: the
   engine families, convergence, locking, the task queue and reports stay
@@ -629,7 +626,7 @@ None new. `jsonschema>=4.20` is already a runtime dependency
 ## Rollout
 
 New tables (`create_all` in local/test; the DDL file for OceanBase), new
-endpoints, one additive argument on `start_apply`, no change to existing
+endpoints, an additive contract extension, no change to existing
 behaviour: a bot with no revisions answers empty lists and 404s. The
 promotion endpoint refuses with `422 not_appliable` until RSI-04 lands. No
 flag. Stage 2 (direct delivery) is a separate work item recorded in
@@ -652,15 +649,14 @@ cd apps/backend && DEPLOY_PROFILE=test uv run pytest tests/community/core/bot_ge
 # tests/community/core/bot_genome/test_spec_checks.py                    — examples/invalid cases that name a §6.4 predicate; MCP checks with fakes
 # tests/community/core/bot_genome/test_diff.py                           — added/removed/modified, text diffs, tree members, tier
 # tests/community/core/bot_genome/test_capture.py                        — a fake reader seeded from the example revisions' blobs captures
-#                                                                           exactly those specs; AGENTS.md block, rstrip rule, each refusal
+#                                                                           exactly those specs; repo skills; AGENTS.md block, rstrip rule, refusals
 # tests/community/core/bot_genome/test_bot_state.py                      — PlatformBotStateReader over fakes of each service, per category
 # tests/community/core/bot_genome/test_compile.py                        — compiled.yaml cases; document_digest stable under YAML formatting
 # tests/community/core/bot_genome/test_registry_service.py               — in-memory SQLite repos: idempotent record, seq, refs CAS,
 #                                                                           candidate numbering, set_policy, reachability, applied_revision join
 # tests/community/core/bot_genome/test_promotion_service.py              — order of steps with a fake applier; NotAppliable leaves refs;
-#                                                                           drift rules per actor; apply_failed recording; document on the row
-# tests/community/core/bot_config_manifest/apply/test_apply_service_lifecycle.py — start_apply(document=…) validates and applies the
-#                                                                           supplied document and never touches the manifest row
+#                                                                           drift rules per actor; apply_failed recording; document on the row;
+#                                                                           the Manifest applier puts the document then starts the apply
 # tests/community/repository/bot/test_genome_repository.py               — uniqueness, CAS rowcount semantics, seq retry
 # tests/community/core/bot_config_manifest/content/test_content_store.py — store_produced + is_reachable
 # tests/community/adapters/http/openapi_v1/test_genome_routes.py         — bars, admission, error envelopes, {rev:path} and :capture routing,
