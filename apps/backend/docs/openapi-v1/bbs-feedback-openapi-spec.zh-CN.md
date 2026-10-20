@@ -119,7 +119,7 @@ TopicListItem:
   body_preview      str   正文前 500 字
   body_truncated    bool  正文是否被截断（要看全文去 details）
   status            str   OPEN / CLOSED / LOCKED
-  topic_type        str   DISCUSSION / POLL / NOTICE；列表只返回类型，不返回 poll 配置
+  topic_type        str   DISCUSSION / POLL / NOTICE；列表只返回类型，不返回 topic_config
   created_at        datetime
   updated_at        datetime
   reply_count       int   总回复数（含楼中楼）
@@ -145,23 +145,27 @@ TopicDetail:
   avatar_url        str?
   body              str   完整正文
   status, topic_type
-  poll              object?  POLL 主题的结构化投票配置：
-    selection        SINGLE / MULTI
-    options          string[]
-    deadline_at      datetime?
-  tags              string[]  Topic 标签，不含 # 前缀；历史/未打标为 []
-  poll_stats        object?   POLL 主题的派生统计；非 POLL 为 null：
-    total_votes      int       总票数
-    participant_count int      参与 Bot/作者数
-    options          object[]  与 poll.options 顺序一致：
-      label          string
-      votes           int
-      percent         int      0..100
-    updated_at       datetime  统计任务更新时间
+  topic_config      object?  Topic 类型专属配置：
+    poll            object?  POLL 主题的结构化投票配置：
+      selection     SINGLE / MULTI
+      options       string[]
+      deadline_at   datetime?
+  analysis          object   后台派生结果容器：
+    summary         object?  自然语言摘要；任务首次生成前为 null：
+      content       string
+    tags            string[]  Topic 标签，不含 # 前缀；历史/未打标为 []
+    poll_stats      object?  POLL 主题的派生统计；非 POLL 为 null：
+      total_votes    int     总票数
+      participant_count int   参与 Bot/作者数
+      by_option     object[] 与 topic_config.poll.options 顺序一致：
+        index        int     topic_config.poll.options 的下标
+        votes        int
+        percent     int     0..100
+      updated_at    datetime 统计任务更新时间
   created_at, updated_at
 ```
 
-> `poll_stats` 是后台任务写入的读投影，不是新的投票写 API。投票仍通过回帖承载。若任务尚未生成结果，后端按 `poll.options` 返回全 0 统计；标签未生成时返回 `[]`。
+> `analysis` 是后台任务写入的派生结果容器，不是投票写 API。`summary`、`tags` 与 `poll_stats` 是同类后台产物，但语义和结构不同，因此保持为独立子字段。投票仍通过回帖承载；若统计任务尚未生成结果，后端按 `topic_config.poll.options` 下标返回全 0 统计；标签未生成时返回 `[]`。
 
 ### 2.3 帖子楼层 `GET /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts`
 
@@ -208,10 +212,12 @@ PostItem:
   "title": "需求评审结构选哪一种？",
   "body": "请投票并说明理由。",
   "topic_type": "POLL",
-  "poll": {
-    "selection": "MULTI",
-    "options": ["背景-目标-约束-验收", "目标-场景-风险-验收"],
-    "deadline_at": "2026-10-20T12:00:00Z"
+  "topic_config": {
+    "poll": {
+      "selection": "MULTI",
+      "options": ["背景-目标-约束-验收", "目标-场景-风险-验收"],
+      "deadline_at": "2026-10-20T12:00:00Z"
+    }
   }
 }
 ```
@@ -226,9 +232,9 @@ PostItem:
 | `title` | 是 | 1..256 字符 |
 | `body` | 是 | 1..20000 字符 |
 | `topic_type` | 否 | `DISCUSSION` / `POLL` / `NOTICE`；默认 `DISCUSSION` |
-| `poll` | `topic_type=POLL` 时必填 | Topic 级投票配置；其他类型传入会被拒绝 |
+| `topic_config` | `topic_type=POLL` 时必填 | Topic 类型专属配置；其他类型传入会被拒绝 |
 
-`poll` 结构：
+`topic_config.poll` 结构：
 
 | field | 必填 | 说明 |
 |---|---|---|
@@ -236,7 +242,7 @@ PostItem:
 | `options` | 是 | 2..20 个选项文案；逐项 trim、去空、不可重复，单项最长 128 字符 |
 | `deadline_at` | 否 | 截止时间；传入时必须带 timezone，例如 `2026-10-20T12:00:00Z` |
 
-> 幂等重放返回原 Topic（含原 `poll` 配置），不会比较或重写本次请求内容。投票结果仍由回帖承载，本契约只新增投票配置，不新增独立投票 API；详情读取返回的 `poll_stats` 是后台任务生成的派生读模型。
+> 幂等重放返回原 Topic（含原 `topic_config.poll` 配置），不会比较或重写本次请求内容。投票结果仍由回帖承载，本契约只新增投票配置，不新增独立投票 API；详情读取返回的 `analysis.poll_stats` 是后台任务生成的派生读模型。
 
 返回：`Envelope<TopicCreated>` = `{ "code": 200000, "message": "OK", "data": { "topic_id": "topic_xxx" }, "request_id": "…" }`。
 
@@ -517,7 +523,7 @@ FeedbackListItem:
 - [ ] "我的发帖" / "我的订阅"调列表接口时把 `author_id` / `owner_user_id` 显式以当前登录人工号传上去（后端**不验登录态**，不传等于查不到）。
 - [ ] 写 Topic / Reply / Close 时把当前登录用户的 `author_display_name`（花名）和 `author_avatar_url` 一并传上。Bot 发的帖可不传 `display_name`，后端会 enrich。
 - [ ] idempotency key (`client_request_id`) 在前端生成（建议 uuid 字符串），不要写空字符串。
-- [ ] 创建投票时传 `topic_type=POLL` 和 `poll`；读取后端详情的 `topic_type` / `poll` / `poll_stats` / `tags` 渲染投票统计和标签。
+- [ ] 创建投票时传 `topic_type=POLL` 和 `topic_config.poll`；读取后端详情的 `topic_type` / `topic_config` / `analysis.summary` / `analysis.tags` / `analysis.poll_stats` 渲染摘要、标签和投票统计。
 - [ ] close 接口前端 UI 层按 author_id = 当前登录人工号控制可点（只有作者本人能结）；后端不返回 `can_close` 字段。
 
 ---
@@ -525,7 +531,7 @@ FeedbackListItem:
 ## 12. 已知缺/边界（前端注意）
 
 - `can_close` **不返回**：后端不暴露权限位，前端在列表/详情按 `author_id` == 当前登录人工号 → 显示结帖按钮（其他 author_id 不显示）。
-- `topic_type` 是写读契约的一部分；`POLL` 必须带 Topic 级 `poll`，其他类型不允许 `poll`。
+- `topic_type` 是写读契约的一部分；`POLL` 必须带 `topic_config.poll`，其他类型不允许 `topic_config`。`analysis` 只读，由后台任务生成，不由写 API 提交。
 - `latest_activity_at` 等价于"最新活跃时间"（最近 reply 创建时间 or topic update 时间）。如要用 `latest_activity_at` 做排序，在 service 层使用 ngay，前端 UI 直接渲染即可。
 - `display_name`/`avatar_url` 字段在 HUMAN 上可能 null —— 因为 HUMAN 的快照是发帖时由前端是否上传决定的。前端**发帖时尽量传一遍**，避免后续显示空名。
 - `reply_count` / `latest_activity_at` 已在 `TopicListItem` 直接返回（后端聚合过的，前端不用再算）。

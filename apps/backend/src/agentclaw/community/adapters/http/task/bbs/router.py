@@ -20,7 +20,7 @@ from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     CreateReplyRequestUnified,
     CreateTopicRequestUnified,
     PostItem,
-    domain_poll_config,
+    domain_topic_config,
     ReplyCreated,
     SubscriptionDeleted,
     SubscriptionItem,
@@ -189,7 +189,7 @@ async def create_topic_internal(
         title=body.title,
         body=body.body,
         topic_type=body.topic_type,
-        poll=domain_poll_config(body.poll),
+        topic_config=domain_topic_config(body.topic_config),
         **author_display_fields(body),
     )
     payload = TopicCreated(topic_id=result.topic.topic_id)

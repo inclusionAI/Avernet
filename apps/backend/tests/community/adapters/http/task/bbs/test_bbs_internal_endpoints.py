@@ -21,6 +21,7 @@ from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     CreateReplyRequestUnified,
     CreateTopicRequestUnified,
     PollConfigRequest,
+    TopicConfigRequest,
 )
 from agentclaw.community.adapters.http.openapi_v1.contracts import PageParams
 from agentclaw.community.core.errors import Conflict, Forbidden, NotFound
@@ -31,6 +32,7 @@ from agentclaw.community.core.task.forum.models import (
     ForumTopicCreateResult,
     ForumTopicPage,
     ForumTopicRecord,
+    ForumTopicAnalysisRecord,
 )
 
 
@@ -49,6 +51,7 @@ def _topic() -> ForumTopicRecord:
         title="Topic title",
         body="Topic description",
         status="OPEN",
+        analysis=ForumTopicAnalysisRecord(),
         created_at=now,
         updated_at=now,
     )
@@ -176,7 +179,7 @@ async def test_internal_topic_create_passes_body_author_as_bot_author():
                 "title": "Topic title",
                 "body": "Topic description",
                 "topic_type": "DISCUSSION",
-                "poll": None,
+                "topic_config": None,
             }
             return ForumTopicCreateResult(topic=_topic(), created=True)
 
@@ -238,13 +241,13 @@ async def test_internal_topic_create_passes_body_author_as_human_author():
             "title": " Topic title ",
             "body": " Topic description ",
             "topic_type": "DISCUSSION",
-            "poll": None,
+            "topic_config": None,
         }
     ]
 
 
 @pytest.mark.asyncio
-async def test_internal_topic_create_forwards_poll_configuration():
+async def test_internal_topic_create_forwards_topic_config():
     class Service:
         def __init__(self) -> None:
             self.calls: list[dict] = []
@@ -262,10 +265,12 @@ async def test_internal_topic_create_forwards_poll_configuration():
             title="Poll",
             body="Choose",
             topic_type="POLL",
-            poll=PollConfigRequest(
-                selection="SINGLE",
-                options=["A", "B"],
-                deadline_at=datetime(2026, 10, 20, 8, 0, tzinfo=timezone.utc),
+            topic_config=TopicConfigRequest(
+                poll=PollConfigRequest(
+                    selection="SINGLE",
+                    options=["A", "B"],
+                    deadline_at=datetime(2026, 10, 20, 8, 0, tzinfo=timezone.utc),
+                )
             ),
         ),
         request=_request("POST", "/api/v1/collaboration/tasks/bbs/topics"),
@@ -274,8 +279,9 @@ async def test_internal_topic_create_forwards_poll_configuration():
     )
 
     assert service.calls[0]["topic_type"] == "POLL"
-    assert service.calls[0]["poll"] is not None
-    assert service.calls[0]["poll"].options == ("A", "B")
+    assert service.calls[0]["topic_config"] is not None
+    assert service.calls[0]["topic_config"].poll is not None
+    assert service.calls[0]["topic_config"].poll.options == ("A", "B")
 
 
 @pytest.mark.asyncio

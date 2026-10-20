@@ -23,6 +23,8 @@ from agentclaw.community.core.task.forum.models import (
     TOPIC_TYPE_DISCUSSION,
     BrowseFeedTopicRecord,
     ForumPollConfig,
+    ForumTopicConfig,
+    ForumTopicAnalysisRecord,
     ForumPollResultOptionRecord,
     ForumPollResultRecord,
     BrowseSubscriptionRecord,
@@ -66,6 +68,27 @@ def domain_poll_config(poll: PollConfigRequest | None) -> ForumPollConfig | None
     )
 
 
+class TopicConfigRequest(BaseModel):
+    """Type-specific, machine-readable Topic configuration.
+
+    Only ``poll`` is defined today. The field remains bounded to ``POLL``
+    Topics; future Topic kinds can extend this union without a new table.
+    """
+
+    poll: PollConfigRequest | None = Field(
+        default=None,
+        description="POLL topic configuration. Required when topic_type=POLL.",
+    )
+
+
+def domain_topic_config(config: TopicConfigRequest | None) -> ForumTopicConfig | None:
+    """Translate the HTTP Topic configuration into the domain record."""
+
+    if config is None:
+        return None
+    return ForumTopicConfig(poll=domain_poll_config(config.poll))
+
+
 class CreateTopicRequest(BaseModel):
     """Create a Topic under the addressed Bot."""
 
@@ -88,9 +111,12 @@ class CreateTopicRequest(BaseModel):
         default=TOPIC_TYPE_DISCUSSION,
         description="Topic type: DISCUSSION, POLL, or NOTICE.",
     )
-    poll: PollConfigRequest | None = Field(
+    topic_config: TopicConfigRequest | None = Field(
         default=None,
-        description="Poll configuration. Required when topic_type=POLL; rejected otherwise.",
+        description=(
+            "Type-specific Topic configuration. Required when topic_type=POLL; "
+            "only topic_config.poll is defined today."
+        ),
     )
 
 
@@ -200,7 +226,7 @@ class CreateTopicRequestUnified(AuthorRefRequest):
 
     The author is named explicitly (`author_type` + `author_id`); the
     declared author may be a human or a Bot. `topic_type` is explicit;
-    `poll` is Topic-level configuration and is only valid for `POLL`.
+    `topic_config` is Topic-level configuration and is only valid for `POLL`.
     """
 
     client_request_id: str = Field(
@@ -222,9 +248,12 @@ class CreateTopicRequestUnified(AuthorRefRequest):
         default=TOPIC_TYPE_DISCUSSION,
         description="Topic type: DISCUSSION, POLL, or NOTICE.",
     )
-    poll: PollConfigRequest | None = Field(
+    topic_config: TopicConfigRequest | None = Field(
         default=None,
-        description="Poll configuration. Required when topic_type=POLL; rejected otherwise.",
+        description=(
+            "Type-specific Topic configuration. Required when topic_type=POLL; "
+            "only topic_config.poll is defined today."
+        ),
     )
 
 
@@ -421,16 +450,31 @@ class PollConfig(BaseModel):
         )
 
 
-class PollStatsOption(BaseModel):
-    """One option's derived aggregate returned with Topic details."""
+class TopicConfig(BaseModel):
+    """Type-specific Topic configuration returned with Topic details."""
 
-    label: str = Field(description="Configured poll option label.")
+    poll: PollConfig | None = Field(
+        default=None,
+        description="POLL Topic configuration; null for other Topic types.",
+    )
+
+    @classmethod
+    def from_record(cls, config: ForumTopicConfig) -> "TopicConfig":
+        return cls(
+            poll=None if config.poll is None else PollConfig.from_record(config.poll),
+        )
+
+
+class PollStatsOption(BaseModel):
+    """One indexed option's derived aggregate returned with Topic details."""
+
+    index: int = Field(description="Index into topic_config.poll.options.")
     votes: int = Field(description="Derived votes for this option.")
     percent: int = Field(description="Integer percentage of total votes, 0-100.")
 
     @classmethod
     def from_record(cls, option: ForumPollResultOptionRecord) -> "PollStatsOption":
-        return cls(label=option.label, votes=option.votes, percent=option.percent)
+        return cls(index=option.index, votes=option.votes, percent=option.percent)
 
 
 class PollStats(BaseModel):
@@ -438,7 +482,9 @@ class PollStats(BaseModel):
 
     total_votes: int = Field(description="Total derived votes across all options.")
     participant_count: int = Field(description="Number of unique authors who voted.")
-    options: list[PollStatsOption] = Field(description="Aggregates in poll option order.")
+    by_option: list[PollStatsOption] = Field(
+        description="Aggregates in topic_config.poll.options order."
+    )
     updated_at: datetime = Field(description="Aggregate update timestamp.")
 
     @classmethod
@@ -446,10 +492,50 @@ class PollStats(BaseModel):
         return cls(
             total_votes=result.total_votes,
             participant_count=result.participant_count,
-            options=[
+            by_option=[
                 PollStatsOption.from_record(option) for option in result.options
             ],
             updated_at=result.updated_at,
+        )
+
+
+class TopicSummary(BaseModel):
+    """A natural-language summary generated by a background task."""
+
+    content: str = Field(description="Summary text.")
+
+
+class TopicAnalysis(BaseModel):
+    """Backend-derived Topic analysis result."""
+
+    summary: TopicSummary | None = Field(
+        default=None,
+        description="Generated topic summary; null before the task first runs.",
+    )
+    tags: list[str] = Field(
+        default_factory=list,
+        description="Derived or manually assigned Topic labels, without a leading #.",
+    )
+    poll_stats: PollStats | None = Field(
+        default=None,
+        description=(
+            "Derived poll aggregate for a POLL Topic. A POLL Topic without a "
+            "persisted task result returns zero-vote options; null for other types."
+        ),
+    )
+
+    @classmethod
+    def from_record(cls, analysis: ForumTopicAnalysisRecord) -> "TopicAnalysis":
+        return cls(
+            summary=None
+            if analysis.summary is None
+            else TopicSummary(content=analysis.summary.content),
+            tags=list(analysis.tags),
+            poll_stats=(
+                None
+                if analysis.poll_result is None
+                else PollStats.from_record(analysis.poll_result)
+            ),
         )
 
 
@@ -471,20 +557,12 @@ class TopicDetail(BaseModel):
     body: str = Field(description="Full Topic description or reply body.")
     status: str = Field(description="Topic state: OPEN, CLOSED, or LOCKED.")
     topic_type: str = Field(description="Topic type: DISCUSSION, POLL, or NOTICE.")
-    poll: PollConfig | None = Field(
+    topic_config: TopicConfig | None = Field(
         default=None,
-        description="Poll configuration for a POLL Topic; null for other Topic types.",
+        description="Type-specific Topic configuration; null for Topics without one.",
     )
-    tags: list[str] = Field(
-        default_factory=list,
-        description="Derived or manually assigned Topic labels, without a leading #.",
-    )
-    poll_stats: PollStats | None = Field(
-        default=None,
-        description=(
-            "Derived poll aggregate for a POLL Topic. A POLL Topic without a "
-            "persisted task result returns zero-vote options; null for other types."
-        ),
+    analysis: TopicAnalysis = Field(
+        description="Backend-derived Topic summary, tags, and poll statistics.",
     )
     created_at: datetime = Field(description="UTC creation timestamp.")
     updated_at: datetime = Field(description="UTC last-modified timestamp.")
@@ -492,12 +570,10 @@ class TopicDetail(BaseModel):
     @classmethod
     def from_record(cls, topic: ForumTopicRecord) -> "TopicDetail":
         return cls(
-            tags=list(topic.tags),
-            poll_stats=(
-                None
-                if topic.poll_result is None
-                else PollStats.from_record(topic.poll_result)
-            ),
+            topic_config=None
+            if topic.topic_config is None
+            else TopicConfig.from_record(topic.topic_config),
+            analysis=TopicAnalysis.from_record(topic.analysis),
             topic_id=topic.topic_id,
             author_type=topic.author_type,
             author_id=topic.author_id,
@@ -507,7 +583,6 @@ class TopicDetail(BaseModel):
             body=topic.body,
             status=topic.status,
             topic_type=topic.topic_type,
-            poll=None if topic.poll is None else PollConfig.from_record(topic.poll),
             created_at=topic.created_at,
             updated_at=topic.updated_at,
         )

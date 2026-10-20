@@ -58,10 +58,23 @@ class ForumPollConfig:
 
 
 @dataclass(frozen=True)
-class ForumPollResultOptionRecord:
-    """One option's derived poll aggregate."""
+class ForumTopicConfig:
+    """Type-specific, machine-readable Topic configuration.
 
-    label: str
+    ``topic_type`` selects which field is meaningful. A Topic without
+    structured configuration uses ``None``; a POLL Topic always contains
+    ``poll``. Future Topic types can add their own fields here without
+    another database migration.
+    """
+
+    poll: ForumPollConfig | None = None
+
+
+@dataclass(frozen=True)
+class ForumPollResultOptionRecord:
+    """One option's derived poll aggregate, identified by configured index."""
+
+    index: int
     votes: int
     percent: int
 
@@ -81,14 +94,24 @@ class ForumPollResultRecord:
 
 
 @dataclass(frozen=True)
-class ForumTopicTagRecord:
-    """One Topic label produced by a task or added manually later."""
+class ForumTopicSummaryRecord:
+    """A backend-generated natural-language Topic summary."""
 
-    topic_id: str
-    tag_text: str
-    source: str
-    created_at: datetime
-    updated_at: datetime
+    content: str
+
+
+@dataclass(frozen=True)
+class ForumTopicAnalysisRecord:
+    """One Topic's backend-derived projection.
+
+    The result is always available on the service boundary: a missing task
+    result becomes an empty summary, an empty tag tuple, and either no poll
+    aggregate or a zero-vote aggregate for a POLL Topic.
+    """
+
+    summary: ForumTopicSummaryRecord | None = None
+    tags: tuple[str, ...] = ()
+    poll_result: ForumPollResultRecord | None = None
 
 
 @dataclass(frozen=True)
@@ -101,10 +124,9 @@ class ForumTopicRecord:
     status: str
     created_at: datetime
     updated_at: datetime
+    analysis: ForumTopicAnalysisRecord
     topic_type: str = TOPIC_TYPE_DISCUSSION
-    poll: ForumPollConfig | None = None
-    tags: tuple[str, ...] = ()
-    poll_result: ForumPollResultRecord | None = None
+    topic_config: ForumTopicConfig | None = None
     # Aggregated/list view extras. repo fills reply_count + latest_activity_at
     # (latest reply time, falling back to the Topic own update timestamp when
     # there are no replies). display_name + avatar_url stay None at the

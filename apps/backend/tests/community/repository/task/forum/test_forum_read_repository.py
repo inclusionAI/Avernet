@@ -10,14 +10,15 @@ from agentclaw.community.core.task.forum.models import (
     TOPIC_TYPE_NOTICE,
     TOPIC_TYPE_POLL,
     ForumPollConfig,
+    ForumPollResultOptionRecord,
+    ForumTopicSummaryRecord,
+    ForumTopicConfig,
 )
 from agentclaw.community.core.task.forum.repository.models import (
-    ForumPollResultModel,
     ForumPostModel,
     ForumTopicModel,
-    ForumTopicTagModel,
 )
-from agentclaw.community.core.repository.implementations.task.forum.forum_repository import (
+from agentclaw.community.core.repository.implementations.task.forum import (
     ForumRepository,
 )
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
@@ -153,36 +154,40 @@ def test_get_topic_returns_persisted_tags_and_poll_result(db):
         title="poll",
         body="Choose one",
         topic_type=TOPIC_TYPE_POLL,
-        poll=ForumPollConfig(selection="SINGLE", options=("Option A", "Option B")),
+        topic_config=ForumTopicConfig(
+            poll=ForumPollConfig(selection="SINGLE", options=("Option A", "Option B"))
+        ),
     ).topic
 
     with db.orm_session() as session:
-        session.add(
-            ForumPollResultModel(
-                topic_id=topic.topic_id,
-                total_votes=3,
-                participant_count=3,
-                options_result=[
-                    {"label": "Option A", "votes": 2, "percent": 67},
-                    {"label": "Option B", "votes": 1, "percent": 33},
+        row = session.query(ForumTopicModel).filter_by(topic_id=topic.topic_id).one()
+        row.analysis_result = {
+            "summary": {"content": "The topic asks participants to choose one option."},
+            "tags": ["AI治理", "投票"],
+            "poll_stats": {
+                "total_votes": 3,
+                "participant_count": 3,
+                "by_option": [
+                    {"index": 0, "votes": 2, "percent": 67},
+                    {"index": 1, "votes": 1, "percent": 33},
                 ],
-            )
-        )
-        session.add(ForumTopicTagModel(topic_id=topic.topic_id, tag_text="AI治理"))
-        session.add(ForumTopicTagModel(topic_id=topic.topic_id, tag_text="投票"))
+            },
+        }
 
     result = repo.get_topic(topic.topic_id)
 
     assert result is not None
-    assert result.tags == ("AI治理", "投票")
-    assert result.poll_result is not None
-    assert result.poll_result.total_votes == 3
-    assert result.poll_result.participant_count == 3
-    assert [
-        (option.label, option.votes, option.percent)
-        for option in result.poll_result.options
-    ] == [("Option A", 2, 67), ("Option B", 1, 33)]
-
+    assert result.analysis.tags == ("AI治理", "投票")
+    assert result.analysis.summary == ForumTopicSummaryRecord(
+        content="The topic asks participants to choose one option."
+    )
+    assert result.analysis.poll_result is not None
+    assert result.analysis.poll_result.total_votes == 3
+    assert result.analysis.poll_result.participant_count == 3
+    assert result.analysis.poll_result.options == (
+        ForumPollResultOptionRecord(index=0, votes=2, percent=67),
+        ForumPollResultOptionRecord(index=1, votes=1, percent=33),
+    )
 
 def test_get_topic_returns_zero_vote_poll_result_before_task_writes_projection(db):
     repo = ForumRepository(db)
@@ -193,21 +198,24 @@ def test_get_topic_returns_zero_vote_poll_result_before_task_writes_projection(d
         title="poll",
         body="Choose one",
         topic_type=TOPIC_TYPE_POLL,
-        poll=ForumPollConfig(selection="MULTI", options=("A", "B")),
+        topic_config=ForumTopicConfig(
+            poll=ForumPollConfig(selection="MULTI", options=("A", "B"))
+        ),
     ).topic
 
     result = repo.get_topic(topic.topic_id)
 
     assert result is not None
-    assert result.tags == ()
-    assert result.poll_result is not None
-    assert result.poll_result.total_votes == 0
-    assert result.poll_result.participant_count == 0
-    assert [(option.label, option.votes, option.percent) for option in result.poll_result.options] == [
-        ("A", 0, 0),
-        ("B", 0, 0),
-    ]
-
+    assert result.analysis is not None
+    assert result.analysis.summary is None
+    assert result.analysis.tags == ()
+    assert result.analysis.poll_result is not None
+    assert result.analysis.poll_result.total_votes == 0
+    assert result.analysis.poll_result.participant_count == 0
+    assert result.analysis.poll_result.options == (
+        ForumPollResultOptionRecord(index=0, votes=0, percent=0),
+        ForumPollResultOptionRecord(index=1, votes=0, percent=0),
+    )
 
 def test_list_posts_orders_chronologically_and_keeps_total_on_empty_page(db):
     repo = ForumRepository(db)

@@ -13,6 +13,7 @@ from agentclaw.community.core.task.forum.models import (
     AUTHOR_TYPE_HUMAN,
     ForumPostRecord,
     ForumTopicRecord,
+    ForumTopicAnalysisRecord,
 )
 
 _NOW = datetime(2026, 9, 20, 8, 0, tzinfo=timezone.utc)
@@ -59,6 +60,7 @@ def _topic(author_type, author_id, *, display_name=None, avatar_url=None):
         title="t",
         body="b",
         status="OPEN",
+        analysis=ForumTopicAnalysisRecord(),
         created_at=_NOW,
         updated_at=_NOW,
         display_name=display_name,

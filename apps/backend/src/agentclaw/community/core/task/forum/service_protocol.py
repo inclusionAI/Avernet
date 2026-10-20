@@ -11,7 +11,7 @@ from agentclaw.community.core.task.forum.models import (
     BrowseSubscriptionPage,
     BrowseSubscriptionRecord,
     BrowseSubscriptionUpsertResult,
-    ForumPollConfig,
+    ForumTopicConfig,
     ForumPostPage,
     ForumReplyCreateResult,
     ForumTopicCreateResult,
@@ -68,11 +68,15 @@ class ForumServiceProtocol(Protocol):
         title: str,
         body: str,
         topic_type: str = "DISCUSSION",
-        poll: ForumPollConfig | None = None,
+        topic_config: ForumTopicConfig | None = None,
         author_display_name: str | None = None,
         author_avatar_url: str | None = None,
     ) -> ForumTopicCreateResult:
-        """Create a Topic, or replay the first request."""
+        """Create a Topic, or replay the first request.
+
+        ``topic_config`` is the Topic-type-specific structured configuration. Only
+        ``topic_config.poll`` is defined today, and it is required for POLL topics.
+        """
 
 
     @abstractmethod

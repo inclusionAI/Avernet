@@ -16,6 +16,24 @@ export interface CommunityAuthorDto {
   avatar_url?: string | null;
 }
 
+export interface CommunityTopicConfigDto {
+  poll?: CommunityPollDto | null;
+  [key: string]: unknown;
+}
+
+export interface CommunityTopicSummaryDto {
+  content?: string | null;
+  [key: string]: unknown;
+}
+
+export interface CommunityTopicAnalysisDto {
+  summary?: CommunityTopicSummaryDto | null;
+  tags?: string[] | null;
+  poll_stats?: CommunityPollStatsDto | null;
+
+  [key: string]: unknown;
+}
+
 export interface CommunityTopicDto {
   topic_id?: string;
   title?: string;
@@ -24,9 +42,8 @@ export interface CommunityTopicDto {
   body_truncated?: boolean;
   status?: string;
   topic_type?: string;
-  poll?: CommunityPollDto | null;
-  poll_stats?: CommunityPollStatsDto | null;
-  tags?: string[] | null;
+  topic_config?: CommunityTopicConfigDto | null;
+  analysis?: CommunityTopicAnalysisDto | null;
   author_type?: string;
   author_id?: string;
   author?: CommunityAuthorDto;
@@ -73,7 +90,7 @@ function asAuthorDto(dto: {
 }
 
 export interface CommunityPollStatsOptionDto {
-  label?: string | null;
+  index?: number | null;
   votes?: number | null;
   percent?: number | null;
   [key: string]: unknown;
@@ -82,7 +99,7 @@ export interface CommunityPollStatsOptionDto {
 export interface CommunityPollStatsDto {
   total_votes?: number | null;
   participant_count?: number | null;
-  options?: CommunityPollStatsOptionDto[] | null;
+  by_option?: CommunityPollStatsOptionDto[] | null;
   updated_at?: string | null;
   [key: string]: unknown;
 }
@@ -118,22 +135,31 @@ function mapPoll(value: CommunityPollDto | null | undefined): CommunityPoll | un
 
 function mapPollStats(
   value: CommunityPollStatsDto | null | undefined,
+  configuredOptions: string[],
 ): CommunityPollStats | undefined {
   if (!value) return undefined;
   if (typeof value.total_votes !== 'number' || typeof value.participant_count !== 'number') {
     return undefined;
   }
-  const rawOptions = Array.isArray(value.options) ? value.options : [];
+  const rawOptions = Array.isArray(value.by_option) ? value.by_option : [];
   const options: CommunityPollStatsOption[] = rawOptions.flatMap((option) => {
     if (
-      typeof option.label !== 'string' ||
-      !option.label.trim() ||
+      typeof option.index !== 'number' ||
+      !Number.isInteger(option.index) ||
+      option.index < 0 ||
+      option.index >= configuredOptions.length ||
       typeof option.votes !== 'number' ||
       typeof option.percent !== 'number'
     ) {
       return [];
     }
-    return [{ label: option.label.trim(), votes: option.votes, percent: option.percent }];
+    return [
+      {
+        label: configuredOptions[option.index].trim(),
+        votes: option.votes,
+        percent: option.percent,
+      },
+    ];
   });
   if (!options.length) return undefined;
   return {
@@ -148,6 +174,29 @@ function mapTags(value: string[] | null | undefined): string[] {
   return (Array.isArray(value) ? value : [])
     .map((tag) => tag.trim())
     .filter(Boolean);
+}
+
+function mapTopicConfig(value: CommunityTopicConfigDto | null | undefined) {
+  if (!value) return undefined;
+  return { poll: mapPoll(value.poll) };
+}
+
+function mapTopicSummary(value: CommunityTopicSummaryDto | null | undefined) {
+  const content = value?.content?.trim();
+  if (!content) return undefined;
+  return { content };
+}
+
+function mapTopicAnalysis(
+  value: CommunityTopicAnalysisDto | null | undefined,
+  configuredOptions: string[],
+) {
+  if (!value) return undefined;
+  return {
+    summary: mapTopicSummary(value.summary),
+    tags: mapTags(value.tags),
+    pollStats: mapPollStats(value.poll_stats, configuredOptions),
+  };
 }
 
 function mapAuthor(author: CommunityAuthorDto | undefined): CommunityAuthor {
@@ -165,15 +214,19 @@ function mapAuthor(author: CommunityAuthorDto | undefined): CommunityAuthor {
 export function mapCommunityTopicDto(dto: CommunityTopicDto): CommunityTopic {
   const body = dto.body ?? dto.body_preview ?? '';
   const latestActivityAt = dto.latest_activity_at ?? dto.updated_at ?? dto.created_at ?? undefined;
+  const topicConfig = mapTopicConfig(dto.topic_config);
+  const analysis = mapTopicAnalysis(
+    dto.analysis,
+    topicConfig?.poll?.options ?? [],
+  );
   return {
     id: dto.topic_id?.trim() || '',
     title: dto.title?.trim() || '未命名主题',
     body,
     status: dto.status?.toUpperCase() === 'OPEN' ? 'open' : 'closed',
     topicType: mapTopicType(dto.topic_type),
-    poll: mapPoll(dto.poll),
-    pollStats: mapPollStats(dto.poll_stats),
-    tags: mapTags(dto.tags),
+    topicConfig,
+    analysis,
     author: mapAuthor(asAuthorDto(dto)),
     replyCount: typeof dto.reply_count === 'number' ? dto.reply_count : undefined,
     latestActivityAt,

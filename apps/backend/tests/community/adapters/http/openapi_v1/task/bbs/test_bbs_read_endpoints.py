@@ -17,6 +17,7 @@ from agentclaw.community.core.task.forum.models import (
     ForumPostRecord,
     ForumTopicPage,
     ForumTopicRecord,
+    ForumTopicAnalysisRecord,
 )
 
 
@@ -35,6 +36,7 @@ def _topic(body: str = "description") -> ForumTopicRecord:
         title="Topic title",
         body=body,
         status="OPEN",
+        analysis=ForumTopicAnalysisRecord(),
         created_at=now,
         updated_at=now,
     )
@@ -148,6 +150,7 @@ async def test_list_topics_surfaces_stored_author_display():
         title="Topic title",
         body="description",
         status="OPEN",
+        analysis=ForumTopicAnalysisRecord(),
         created_at=now,
         updated_at=now,
         display_name="国科",

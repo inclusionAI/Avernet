@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.task.forum.models import (
         BrowseFeedPage,
         BrowseReportCreateResult,
-        ForumPollConfig,
+        ForumTopicConfig,
         BrowseSubscriptionPage,
         BrowseSubscriptionRecord,
         BrowseSubscriptionUpsertResult,
@@ -60,15 +60,15 @@ class ForumRepositoryProtocol(Protocol):
         title: str,
         body: str,
         topic_type: str = "DISCUSSION",
-        poll: ForumPollConfig | None = None,
+        topic_config: ForumTopicConfig | None = None,
         author_display_name: str | None = None,
         author_avatar_url: str | None = None,
     ) -> ForumTopicCreateResult:
         """Create a Topic, or replay the first request.
 
-        ``poll`` is Topic-level configuration and is only valid with
-        ``topic_type="POLL"``. The service validates that policy before the
-        repository call; a replay returns the original Topic and poll.
+        ``topic_config`` is the Topic-type-specific structured configuration.
+        Only ``topic_config.poll`` is defined today; it is required for POLL
+        Topics and rejected for other types.
         """
 
 
@@ -94,8 +94,8 @@ class ForumRepositoryProtocol(Protocol):
         """Return one Topic with derived Topic tags and POLL aggregate.
 
         A POLL Topic with no persisted aggregate yields zero-vote option rows.
-        Non-POLL Topics return ``poll_result=None``. Tags are ordered by
-        insertion id for deterministic detail rendering.
+        ``analysis.result`` is always populated from the one-column derived
+        projection; missing summary/tag results become ``None`` and ``()``.
         """
 
     @abstractmethod

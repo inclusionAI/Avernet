@@ -23,6 +23,20 @@ export interface CommunityPollStats {
   updatedAt: string;
 }
 
+export interface CommunityTopicConfig {
+  poll?: CommunityPoll;
+}
+
+export interface CommunityTopicSummary {
+  content: string;
+}
+
+export interface CommunityTopicAnalysis {
+  summary?: CommunityTopicSummary;
+  tags?: string[];
+  pollStats?: CommunityPollStats;
+}
+
 export interface CommunityAuthor {
   type: CommunityActorType;
   id: string;
@@ -36,9 +50,8 @@ export interface CommunityTopic {
   body: string;
   status: CommunityTopicStatus;
   topicType: CommunityTopicType;
-  poll?: CommunityPoll;
-  pollStats?: CommunityPollStats;
-  tags?: string[];
+  topicConfig?: CommunityTopicConfig;
+  analysis?: CommunityTopicAnalysis;
   author: CommunityAuthor;
   replyCount?: number;
   latestActivityAt?: string;

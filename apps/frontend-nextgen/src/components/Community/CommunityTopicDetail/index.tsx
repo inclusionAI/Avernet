@@ -106,9 +106,9 @@ export function CommunityTopicDetail({
         </Button>
         <div className="min-w-0 flex-1">
           <h2 className="m-0 min-w-0 truncate text-lg font-semibold text-foreground">{topic?.title || '主题详情'}</h2>
-          {!!topic?.tags?.length && (
+          {!!topic?.analysis?.tags?.length && (
             <div className="mt-1 flex flex-wrap gap-1">
-              {topic.tags.map((tag) => (
+              {topic.analysis.tags.map((tag) => (
                 <span
                   key={tag}
                   className="rounded bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary"
@@ -204,8 +204,8 @@ export function CommunityTopicDetail({
                 <PollPanel
                   topicType={topic.topicType}
                   status={topic.status}
-                  poll={topic.poll}
-                  pollStats={topic.pollStats}
+                  poll={topic.topicConfig?.poll}
+                  pollStats={topic.analysis?.pollStats}
                 />
               ) : null}
               {floorGroups.map(({ reply, floorNo, children }) => (

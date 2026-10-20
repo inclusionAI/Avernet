@@ -29,7 +29,8 @@ describe('community mapper', () => {
       canClose: true,
       topicType: 'poll',
     });
-    expect(topic.poll).toBeUndefined();
+    expect(topic.topicConfig).toBeUndefined();
+  expect(topic.analysis).toBeUndefined();
   });
 
   test('maps bot replies and normalizes unknown topic status to closed', () => {
@@ -60,17 +61,19 @@ describe('community mapper', () => {
   });
 });
 
-test('maps topic type and structured poll DTO', () => {
+test('maps topic type and structured topic_config', () => {
   const topic = mapCommunityTopicDto({
     topic_id: 'topic-1',
     title: '投票',
     body: '请选择',
     status: 'OPEN',
     topic_type: 'POLL',
-    poll: {
-      selection: 'multi',
-      options: [' 方案 A ', '', '方案 B'],
-      deadline_at: '2026-10-20T12:00:00Z',
+    topic_config: {
+      poll: {
+        selection: 'multi',
+        options: [' 方案 A ', '', '方案 B'],
+        deadline_at: '2026-10-20T12:00:00Z',
+      },
     },
     author_type: 'HUMAN',
     author_id: 'u1',
@@ -78,45 +81,53 @@ test('maps topic type and structured poll DTO', () => {
   });
 
   expect(topic.topicType).toBe('poll');
-  expect(topic.poll).toEqual({
-    selection: 'multi',
-    options: ['方案 A', '方案 B'],
-    deadlineAt: '2026-10-20T12:00:00Z',
+  expect(topic.topicConfig).toEqual({
+    poll: {
+      selection: 'multi',
+      options: ['方案 A', '方案 B'],
+      deadlineAt: '2026-10-20T12:00:00Z',
+    },
   });
 });
 
-test('maps derived poll stats and topic tags', () => {
+test('maps the topic_config and analysis containers', () => {
   const topic = mapCommunityTopicDto({
     topic_id: 'topic-1',
     title: '投票',
     body: '请选择',
     status: 'OPEN',
     topic_type: 'POLL',
-    tags: [' AI治理 ', '', '投票'],
-    poll: { selection: 'single', options: ['方案 A', '方案 B'] },
-    poll_stats: {
-      total_votes: 3,
-      participant_count: 3,
-      updated_at: '2026-10-19T10:00:00Z',
-      options: [
-        { label: '方案 A', votes: 2, percent: 67 },
-        { label: '方案 B', votes: 1, percent: 33 },
-        { label: '', votes: 0, percent: 0 },
-      ],
+    topic_config: { poll: { selection: 'single', options: ['方案 A', '方案 B'] } },
+    analysis: {
+      summary: { content: ' 主题要求参与者选择一种方案并说明理由。' },
+      tags: [' AI治理 ', '', '投票'],
+      poll_stats: {
+        total_votes: 3,
+        participant_count: 3,
+        updated_at: '2026-10-19T10:00:00Z',
+        by_option: [
+          { index: 0, votes: 2, percent: 67 },
+          { index: 1, votes: 1, percent: 33 },
+          { index: 2, votes: 0, percent: 0 },
+        ],
+      },
     },
     author: { actor_type: 'HUMAN', actor_id: 'user-1', display_name: '顾客' },
     created_at: '2026-10-01T00:00:00Z',
   });
 
-  expect(topic.tags).toEqual(['AI治理', '投票']);
-  expect(topic.pollStats).toEqual({
-    totalVotes: 3,
-    participantCount: 3,
-    options: [
-      { label: '方案 A', votes: 2, percent: 67 },
-      { label: '方案 B', votes: 1, percent: 33 },
-    ],
-    updatedAt: '2026-10-19T10:00:00Z',
+  expect(topic.analysis).toEqual({
+    summary: { content: '主题要求参与者选择一种方案并说明理由。' },
+    tags: ['AI治理', '投票'],
+    pollStats: {
+      totalVotes: 3,
+      participantCount: 3,
+      options: [
+        { label: '方案 A', votes: 2, percent: 67 },
+        { label: '方案 B', votes: 1, percent: 33 },
+      ],
+      updatedAt: '2026-10-19T10:00:00Z',
+    },
   });
 });
 
@@ -124,7 +135,8 @@ test('defaults legacy topics to discussion and omits poll', () => {
   const topic = mapCommunityTopicDto({ topic_id: 'topic-1', title: '讨论', status: 'OPEN' });
 
   expect(topic.topicType).toBe('discussion');
-  expect(topic.poll).toBeUndefined();
+  expect(topic.topicConfig).toBeUndefined();
+  expect(topic.analysis).toBeUndefined();
 });
 
 test('maps the real backend flattened BBS DTO (no nested author, no reply count/name/avatar)', () => {
@@ -145,7 +157,8 @@ test('maps the real backend flattened BBS DTO (no nested author, no reply count/
   expect(topic.body).toBe('正文前 500 字');
   expect(topic.latestActivityAt).toBe('2026-10-06T12:00:00Z');
   expect(topic.topicType).toBe('discussion');
-  expect(topic.poll).toBeUndefined();
+  expect(topic.topicConfig).toBeUndefined();
+  expect(topic.analysis).toBeUndefined();
   expect(topic.author).toEqual({ type: 'human', id: '900003', displayName: '900003', avatarUrl: undefined });
   expect(topic.replyCount).toBeUndefined();
   expect(topic.isMine).toBe(false);

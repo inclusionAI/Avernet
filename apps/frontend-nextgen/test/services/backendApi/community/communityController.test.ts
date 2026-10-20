@@ -136,7 +136,7 @@ describe('communityController', () => {
     });
   });
 
-  test('创建投票主题下发 topic_type=POLL 和结构化 poll 配置', async () => {
+  test('创建投票主题下发 topic_type=POLL 和 topic_config.poll 配置', async () => {
     await createCommunityTopic({
       title: '投票主题',
       body: '请选择',
@@ -152,10 +152,12 @@ describe('communityController', () => {
 
     expect(mockedRequest.mock.calls[0][1].data).toMatchObject({
       topic_type: 'POLL',
-      poll: {
-        selection: 'MULTI',
-        options: ['方案 A', '方案 B'],
-        deadline_at: '2026-10-20T12:00:00Z',
+      topic_config: {
+        poll: {
+          selection: 'MULTI',
+          options: ['方案 A', '方案 B'],
+          deadline_at: '2026-10-20T12:00:00Z',
+        },
       },
     });
   });

@@ -15,7 +15,17 @@ type MockTopic = {
   body: string;
   status: 'OPEN' | 'CLOSED';
   topic_type: 'DISCUSSION' | 'POLL' | 'NOTICE';
-  poll?: MockPoll;
+  topic_config?: { poll?: MockPoll };
+  analysis: {
+    summary?: { content: string };
+    tags: string[];
+    poll_stats?: {
+      total_votes: number;
+      participant_count: number;
+      updated_at: string;
+      by_option: Array<{ index: number; votes: number; percent: number }>;
+    };
+  };
   author: { actor_type: 'HUMAN' | 'BOT'; actor_id: string; display_name: string; avatar_url?: string };
   reply_count: number;
   latest_activity_at: string;
@@ -27,6 +37,7 @@ type MockTopic = {
 const topics: MockTopic[] = [
   {
     topic_id: 'community-topic-001',
+    analysis: { tags: [] },
     title: '怎样让 Bot 更自然地参与团队协作？',
     body: '我们正在尝试让 Bot 不只是被动回答问题，而是能在合适的时机补充资料、总结共识。大家有哪些实践经验？',
     status: 'OPEN',
@@ -44,10 +55,24 @@ const topics: MockTopic[] = [
     body: '请选择你认为更适合的需求评审结构，并在回复中说明理由。',
     status: 'OPEN',
     topic_type: 'POLL',
-    poll: {
-      selection: 'SINGLE',
-      options: ['背景-目标-约束-验收', '目标-场景-风险-验收'],
-      deadline_at: '2026-10-20T12:00:00Z',
+    topic_config: {
+      poll: {
+        selection: 'SINGLE',
+        options: ['背景-目标-约束-验收', '目标-场景-风险-验收'],
+        deadline_at: '2026-10-20T12:00:00Z',
+      },
+    },
+    analysis: {
+      tags: ['提示词结构'],
+      poll_stats: {
+        total_votes: 4,
+        participant_count: 4,
+        updated_at: '2026-10-19T12:00:00Z',
+        by_option: [
+          { index: 0, votes: 2, percent: 50 },
+          { index: 1, votes: 2, percent: 50 },
+        ],
+      },
     },
     author: { actor_type: 'BOT', actor_id: 'product-helper', display_name: '产品协作助手' },
     reply_count: 2,
@@ -58,6 +83,7 @@ const topics: MockTopic[] = [
   },
   {
     topic_id: 'community-topic-003',
+    analysis: { tags: [] },
     title: '社区内容应该如何沉淀为团队知识？',
     body: '讨论结束后，希望能把高质量内容转成团队知识条目。哪些信息值得保留？',
     status: 'CLOSED',
@@ -163,7 +189,7 @@ export default {
         author_display_name?: string;
         author_avatar_url?: string;
         topic_type?: 'DISCUSSION' | 'POLL' | 'NOTICE';
-        poll?: Partial<MockPoll>;
+        topic_config?: { poll?: Partial<MockPoll> };
       };
     },
     response: MockResponse,
@@ -175,14 +201,17 @@ export default {
       body: request.body?.body?.trim() || '',
       status: 'OPEN',
       topic_type: request.body?.topic_type === 'POLL' ? 'POLL' : 'DISCUSSION',
-      poll:
+      topic_config:
         request.body?.topic_type === 'POLL'
           ? {
-              selection: request.body?.poll?.selection === 'MULTI' ? 'MULTI' : 'SINGLE',
-              options: request.body?.poll?.options ?? ['方案A', '方案B'],
-              deadline_at: request.body?.poll?.deadline_at,
+              poll: {
+                selection: request.body?.topic_config?.poll?.selection === 'MULTI' ? 'MULTI' : 'SINGLE',
+                options: request.body?.topic_config?.poll?.options ?? ['方案A', '方案B'],
+                deadline_at: request.body?.topic_config?.poll?.deadline_at,
+              },
             }
           : undefined,
+      analysis: { tags: [] },
       author: {
         actor_type: 'HUMAN',
         actor_id: request.body?.author_id || '900003',

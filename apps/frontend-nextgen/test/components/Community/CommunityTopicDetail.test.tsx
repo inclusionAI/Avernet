@@ -75,21 +75,25 @@ describe('CommunityTopicDetail', () => {
       topic: {
         ...topic,
         topicType: 'poll',
-        tags: ['AI治理', '投票'],
-        poll: {
-          selection: 'single',
-          options: ['方案 A', '方案 B', '方案 C'],
-          deadlineAt: '2026-10-20T12:00:00Z',
+        topicConfig: {
+          poll: {
+            selection: 'single',
+            options: ['方案 A', '方案 B', '方案 C'],
+            deadlineAt: '2026-10-20T12:00:00Z',
+          },
         },
-        pollStats: {
-          totalVotes: 3,
-          participantCount: 3,
-          options: [
-            { label: '方案 A', votes: 2, percent: 67 },
-            { label: '方案 B', votes: 1, percent: 33 },
-            { label: '方案 C', votes: 0, percent: 0 },
-          ],
-          updatedAt: '2026-10-19T12:00:00Z',
+        analysis: {
+          tags: ['AI治理', '投票'],
+          pollStats: {
+            totalVotes: 3,
+            participantCount: 3,
+            options: [
+              { label: '方案 A', votes: 2, percent: 67 },
+              { label: '方案 B', votes: 1, percent: 33 },
+              { label: '方案 C', votes: 0, percent: 0 },
+            ],
+            updatedAt: '2026-10-19T12:00:00Z',
+          },
         },
       },
     });

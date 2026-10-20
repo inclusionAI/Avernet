@@ -15,6 +15,7 @@ from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     CreateReplyRequestUnified,
     CreateTopicRequestUnified,
     PollConfigRequest,
+    TopicConfigRequest,
     TopicDetail,
 )
 from agentclaw.community.core.errors import Conflict, Forbidden, NotFound
@@ -26,6 +27,9 @@ from agentclaw.community.core.task.forum.models import (
     ForumReplyCreateResult,
     ForumTopicCreateResult,
     ForumTopicRecord,
+    ForumTopicAnalysisRecord,
+    ForumTopicConfig,
+    ForumTopicSummaryRecord,
 )
 
 _NOW = datetime(2026, 9, 20, 8, 0, tzinfo=timezone.utc)
@@ -51,6 +55,7 @@ def _topic(
         title="Topic title",
         body="Topic description",
         status=status,
+        analysis=ForumTopicAnalysisRecord(),
         created_at=_NOW,
         updated_at=_NOW,
     )
@@ -124,7 +129,7 @@ async def test_create_topic_unified_records_declared_human_author():
             "title": "t",
             "body": "b",
             "topic_type": "DISCUSSION",
-            "poll": None,
+            "topic_config": None,
         }
     ]
     assert payload.data is not None and payload.data.topic_id == "topic_1"
@@ -156,7 +161,7 @@ async def test_create_topic_unified_records_declared_bot_author():
             "title": "t",
             "body": "b",
             "topic_type": "DISCUSSION",
-            "poll": None,
+            "topic_config": None,
         }
     ]
 
@@ -184,7 +189,7 @@ async def test_create_topic_unified_passes_author_type_through_verbatim():
 
 
 @pytest.mark.asyncio
-async def test_create_topic_unified_translates_poll_configuration():
+async def test_create_topic_unified_translates_topic_config():
     service = _write_service(_topic_result(True))
 
     await create_topic_unified(
@@ -195,10 +200,12 @@ async def test_create_topic_unified_translates_poll_configuration():
             title="poll",
             body="Choose",
             topic_type="POLL",
-            poll=PollConfigRequest(
-                selection=" single ",
-                options=[" Option A ", "Option B"],
-                deadline_at=_NOW,
+            topic_config=TopicConfigRequest(
+                poll=PollConfigRequest(
+                    selection=" single ",
+                    options=[" Option A ", "Option B"],
+                    deadline_at=_NOW,
+                )
             ),
         ),
         request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics"),
@@ -207,14 +214,16 @@ async def test_create_topic_unified_translates_poll_configuration():
     )
 
     assert service.calls[0]["topic_type"] == "POLL"
-    assert service.calls[0]["poll"] == ForumPollConfig(
-        selection=" single ",
-        options=(" Option A ", "Option B"),
-        deadline_at=_NOW,
+    assert service.calls[0]["topic_config"] == ForumTopicConfig(
+        poll=ForumPollConfig(
+            selection=" single ",
+            options=(" Option A ", "Option B"),
+            deadline_at=_NOW,
+        )
     )
 
 
-def test_topic_detail_returns_structured_poll_configuration():
+def test_topic_detail_returns_topic_config_and_analysis():
     payload = TopicDetail.from_record(
         ForumTopicRecord(
             topic_id="topic_1",
@@ -223,41 +232,53 @@ def test_topic_detail_returns_structured_poll_configuration():
             title="Poll",
             body="Choose",
             status="OPEN",
-            topic_type="POLL",
-            poll=ForumPollConfig(
-                selection="MULTI",
-                options=("A", "B"),
-                deadline_at=_NOW,
-            ),
-            tags=("AI治理", "投票"),
-            poll_result=ForumPollResultRecord(
-                options=(
-                    ForumPollResultOptionRecord("A", 2, 67),
-                    ForumPollResultOptionRecord("B", 1, 33),
+            analysis=ForumTopicAnalysisRecord(
+                summary=ForumTopicSummaryRecord(
+                    content="The topic asks participants to choose one option."
                 ),
-                total_votes=3,
-                participant_count=3,
-                updated_at=_NOW,
+                tags=("AI治理", "投票"),
+                poll_result=ForumPollResultRecord(
+                    options=(
+                        ForumPollResultOptionRecord(index=0, votes=2, percent=67),
+                        ForumPollResultOptionRecord(index=1, votes=1, percent=33),
+                    ),
+                    total_votes=3,
+                    participant_count=3,
+                    updated_at=_NOW,
+                ),
+            ),
+            topic_type="POLL",
+            topic_config=ForumTopicConfig(
+                poll=ForumPollConfig(
+                    selection="MULTI",
+                    options=("A", "B"),
+                    deadline_at=_NOW,
+                )
             ),
             created_at=_NOW,
             updated_at=_NOW,
         )
     )
 
-    assert payload.poll is not None
-    assert payload.poll.model_dump() == {
+    assert payload.topic_config is not None
+    assert payload.topic_config.poll is not None
+    assert payload.topic_config.poll.model_dump() == {
         "selection": "MULTI",
         "options": ["A", "B"],
         "deadline_at": _NOW,
     }
-    assert payload.tags == ["AI治理", "投票"]
-    assert payload.poll_stats is not None
-    assert payload.poll_stats.model_dump() == {
+    assert payload.analysis.summary is not None
+    assert payload.analysis.summary.content == (
+        "The topic asks participants to choose one option."
+    )
+    assert payload.analysis.tags == ["AI治理", "投票"]
+    assert payload.analysis.poll_stats is not None
+    assert payload.analysis.poll_stats.model_dump() == {
         "total_votes": 3,
         "participant_count": 3,
-        "options": [
-            {"label": "A", "votes": 2, "percent": 67},
-            {"label": "B", "votes": 1, "percent": 33},
+        "by_option": [
+            {"index": 0, "votes": 2, "percent": 67},
+            {"index": 1, "votes": 1, "percent": 33},
         ],
         "updated_at": _NOW,
     }
@@ -616,7 +637,7 @@ async def test_create_topic_unified_passes_optional_author_display_when_supplied
         "title": "t",
         "body": "b",
         "topic_type": "DISCUSSION",
-        "poll": None,
+        "topic_config": None,
         "author_display_name": "国科",
         "author_avatar_url": "https://av/nk",
     }
@@ -649,5 +670,5 @@ async def test_create_topic_unified_omits_author_display_when_not_supplied():
         "title": "t",
         "body": "b",
         "topic_type": "DISCUSSION",
-        "poll": None,
+        "topic_config": None,
     }

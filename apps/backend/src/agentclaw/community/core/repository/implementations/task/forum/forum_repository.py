@@ -30,6 +30,7 @@ from agentclaw.community.core.task.forum.models import (
     ForumPollResultRecord,
     ForumPostPage,
     ForumReplyCreateResult,
+    ForumTopicConfig,
     ForumTopicCreateResult,
     ForumTopicPage,
     ForumTopicRecord,
@@ -37,10 +38,8 @@ from agentclaw.community.core.task.forum.models import (
 from agentclaw.community.core.task.forum.repository.models import (
     ForumBrowseReportModel,
     ForumBrowseSubscriptionModel,
-    ForumPollResultModel,
     ForumPostModel,
     ForumTopicModel,
-    ForumTopicTagModel,
 )
 from agentclaw.community.core.repository.protocols.task.forum import (
     ForumRepositoryProtocol,
@@ -55,7 +54,7 @@ _BROWSE_REPORT_REQUEST_INDEX = "uk_forum_browse_report_request"
 
 
 def _poll_to_row(poll: ForumPollConfig | None) -> dict[str, object] | None:
-    """Encode the canonical Topic-level poll record as JSON storage."""
+    """Encode one Topic configuration section as JSON storage."""
 
     if poll is None:
         return None
@@ -66,6 +65,14 @@ def _poll_to_row(poll: ForumPollConfig | None) -> dict[str, object] | None:
             poll.deadline_at.isoformat() if poll.deadline_at is not None else None
         ),
     }
+
+
+def _topic_config_to_row(config: ForumTopicConfig | None) -> dict[str, object] | None:
+    """Encode the type-specific Topic configuration as one JSON object."""
+
+    if config is None:
+        return None
+    return {"poll": _poll_to_row(config.poll)}
 
 
 def _is_unique_conflict(
@@ -304,7 +311,7 @@ class ForumRepository(ForumRepositoryProtocol):
         title: str,
         body: str,
         topic_type: str = TOPIC_TYPE_DISCUSSION,
-        poll: ForumPollConfig | None = None,
+        topic_config: ForumTopicConfig | None = None,
         author_display_name: str | None = None,
         author_avatar_url: str | None = None,
     ) -> ForumTopicCreateResult:
@@ -324,7 +331,7 @@ class ForumRepository(ForumRepositoryProtocol):
                     title=title,
                     body=body,
                     topic_type=topic_type,
-                    poll_config=_poll_to_row(poll),
+                    topic_config=_topic_config_to_row(topic_config),
                     client_request_id=client_request_id,
                     status=TOPIC_STATUS_OPEN,
                     env=get_current_env(),
@@ -453,49 +460,28 @@ class ForumRepository(ForumRepositoryProtocol):
             )
             if row is None:
                 return None
-
-            tags = (
-                db.query(ForumTopicTagModel.tag_text)
-                .filter(
-                    ForumTopicTagModel.topic_id == topic_id,
-                    ForumTopicTagModel.env == get_current_env(),
-                    ForumTopicTagModel.avernet_tenant
-                    == get_current_avernet_tenant(),
-                )
-                .order_by(ForumTopicTagModel.id.asc())
-                .all()
-            )
-            record = replace(row.to_record(), tags=tuple(item[0] for item in tags))
-
-            if row.topic_type != TOPIC_TYPE_POLL or row.poll_config is None:
+            record = row.to_record()
+            if (
+                record.topic_type != TOPIC_TYPE_POLL
+                or record.topic_config is None
+                or record.topic_config.poll is None
+                or record.analysis.poll_result is not None
+            ):
                 return record
 
-            result_row = (
-                db.query(ForumPollResultModel)
-                .filter(
-                    ForumPollResultModel.topic_id == topic_id,
-                    ForumPollResultModel.env == get_current_env(),
-                    ForumPollResultModel.avernet_tenant
-                    == get_current_avernet_tenant(),
-                )
-                .one_or_none()
-            )
-            if result_row is not None:
-                return replace(record, poll_result=result_row.to_record())
-
-            poll = record.poll
-            if poll is None:
-                return record
+            poll = record.topic_config.poll
             empty_result = ForumPollResultRecord(
                 options=tuple(
-                    ForumPollResultOptionRecord(label=option, votes=0, percent=0)
-                    for option in poll.options
+                    ForumPollResultOptionRecord(index=index, votes=0, percent=0)
+                    for index in range(len(poll.options))
                 ),
                 total_votes=0,
                 participant_count=0,
-                updated_at=row.gmt_modified,
+                updated_at=record.updated_at,
             )
-            return replace(record, poll_result=empty_result)
+            return replace(
+                record, analysis=replace(record.analysis, poll_result=empty_result)
+            )
 
     def update_topic_status(
         self,

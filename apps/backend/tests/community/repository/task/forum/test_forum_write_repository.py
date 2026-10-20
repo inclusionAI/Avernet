@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from agentclaw.community.core.errors import Conflict, NotFound
 from agentclaw.community.core.task.forum.models import (
     ForumPollConfig,
+    ForumTopicConfig,
     TOPIC_STATUS_CLOSED,
     TOPIC_STATUS_LOCKED,
     TOPIC_TYPE_NOTICE,
@@ -30,7 +31,7 @@ def _create_topic(
     author_id="bot-a",
     request_id="req-topic",
     topic_type="DISCUSSION",
-    poll=None,
+    topic_config=None,
 ):
     return repo.create_topic(
         author_type=author_type,
@@ -39,7 +40,7 @@ def _create_topic(
         title="Topic title",
         body="Topic description",
         topic_type=topic_type,
-        poll=poll,
+        topic_config=topic_config,
     )
 
 
@@ -82,53 +83,62 @@ def test_create_topic_persists_topic_description_without_root_post(db):
 def test_create_topic_persists_and_returns_poll_configuration(db):
     repo = ForumRepository(db)
     deadline = datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc)
-    poll = ForumPollConfig(
-        selection="MULTI",
-        options=("Option A", "Option B"),
-        deadline_at=deadline,
+    config = ForumTopicConfig(
+        poll=ForumPollConfig(
+            selection="MULTI",
+            options=("Option A", "Option B"),
+            deadline_at=deadline,
+        )
     )
 
     result = _create_topic(
-        repo, request_id="req-poll", topic_type=TOPIC_TYPE_POLL, poll=poll
+        repo,
+        request_id="req-poll",
+        topic_type=TOPIC_TYPE_POLL,
+        topic_config=config,
     )
 
-    expected = ForumPollConfig(
-        selection=poll.selection,
-        options=("Option A", "Option B"),
-        deadline_at=deadline,
-    )
-    assert result.topic.poll == expected
-    assert repo.get_topic(result.topic.topic_id).poll == expected
+    assert result.topic.topic_config == config
+    assert repo.get_topic(result.topic.topic_id).topic_config == config
     listed = repo.list_topics(
         keyword=None, status=None, topic_type=TOPIC_TYPE_POLL, offset=0, limit=10
     )
-    assert listed.items[0].poll == expected
+    assert listed.items[0].topic_config == config
 
     with db.orm_session() as session:
         row = session.query(ForumTopicModel).filter_by(
             topic_id=result.topic.topic_id
         ).one()
-        assert row.poll_config == {
-            "selection": "MULTI",
-            "options": ["Option A", "Option B"],
-            "deadline_at": deadline.isoformat(),
+        assert row.topic_config == {
+            "poll": {
+                "selection": "MULTI",
+                "options": ["Option A", "Option B"],
+                "deadline_at": deadline.isoformat(),
+            }
         }
 
 
 def test_create_topic_poll_replay_returns_original_configuration(db):
     repo = ForumRepository(db)
     poll = ForumPollConfig(selection="SINGLE", options=("A", "B"))
+    topic_config = ForumTopicConfig(poll=poll)
     first = _create_topic(
-        repo, request_id="req-poll", topic_type=TOPIC_TYPE_POLL, poll=poll
+        repo,
+        request_id="req-poll",
+        topic_type=TOPIC_TYPE_POLL,
+        topic_config=topic_config,
     )
 
     replay = _create_topic(
-        repo, request_id="req-poll", topic_type=TOPIC_TYPE_POLL, poll=None
+        repo,
+        request_id="req-poll",
+        topic_type=TOPIC_TYPE_POLL,
+        topic_config=None,
     )
 
     assert replay.created is False
     assert replay.topic.topic_id == first.topic.topic_id
-    assert replay.topic.poll == poll
+    assert replay.topic.topic_config.poll == poll
 
 
 def test_create_topic_is_idempotent_without_comparing_content(db):

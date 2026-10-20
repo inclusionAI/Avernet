@@ -1,13 +1,11 @@
--- BBS Topic-level poll configuration (2026-10-19).
+-- Topic-level structured configuration (2026-10-19).
 --
--- This stores presentation and voting-rule configuration only. Voting itself
--- remains reply-backed: one Post expresses one author's vote and reasoning.
--- No option ids, user-vote rows, counters, or hierarchy are persisted here.
---
--- Additive only: nullable JSON, no index, no constraint change. Historic
--- discussion rows and existing POLL rows without configuration stay NULL.
+-- ``topic_config`` is a generic Topic field selected by ``topic_type``. The
+-- current contract only defines its ``poll`` section, but future Topic kinds
+-- can add new sections without another migration. Voting remains reply-backed:
+-- no vote rows, counters, or user selections are stored here.
 
 ALTER TABLE `ac_forum_topic`
-    ADD COLUMN `poll_config` json NULL
-    COMMENT 'Topic-level poll configuration; NULL means no poll configuration'
+    ADD COLUMN `topic_config` json NULL
+    COMMENT 'Type-specific Topic configuration; NULL means no structured configuration'
     AFTER `topic_type`;

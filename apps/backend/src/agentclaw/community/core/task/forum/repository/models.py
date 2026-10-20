@@ -12,7 +12,6 @@ from agentclaw.community.core.base import Base
 from agentclaw.community.core.task.forum.models import (
     BROWSE_MODE_FRAMEWORK,
     TOPIC_STATUS_OPEN,
-    TOPIC_TAG_SOURCE_LLM,
     TOPIC_TYPE_DISCUSSION,
     BrowseReportRecord,
     BrowseSubscriptionRecord,
@@ -20,7 +19,10 @@ from agentclaw.community.core.task.forum.models import (
     ForumPollResultOptionRecord,
     ForumPollResultRecord,
     ForumPostRecord,
+    ForumTopicConfig,
     ForumTopicRecord,
+    ForumTopicAnalysisRecord,
+    ForumTopicSummaryRecord,
 )
 from agentclaw.community.utils.avernet_tenant_guard import (
     register_avernet_tenant_guard,
@@ -45,7 +47,7 @@ _AUTHOR_ID = String(256)
 
 
 def _poll_from_row(value: object | None) -> ForumPollConfig | None:
-    """Decode the canonical Topic-level JSON poll column.
+    """Decode the nested poll section of the Topic configuration column.
 
     Writes are validated by ForumService before reaching storage. This reader
     still rejects a malformed row instead of silently presenting partial poll
@@ -55,18 +57,18 @@ def _poll_from_row(value: object | None) -> ForumPollConfig | None:
     if value is None:
         return None
     if not isinstance(value, dict):
-        raise ValueError("ac_forum_topic.poll_config must be a JSON object or null")
+        raise ValueError("topic_config.poll must be a JSON object or null")
     selection = value.get("selection")
     options = value.get("options")
     deadline = value.get("deadline_at")
     if not isinstance(selection, str):
-        raise ValueError("ac_forum_topic.poll_config.selection must be a string")
+        raise ValueError("topic_config.poll.selection must be a string")
     if not isinstance(options, list) or not all(
         isinstance(option, str) for option in options
     ):
-        raise ValueError("ac_forum_topic.poll_config.options must be a string array")
+        raise ValueError("topic_config.poll.options must be a string array")
     if deadline is not None and not isinstance(deadline, str):
-        raise ValueError("ac_forum_topic.poll_config.deadline_at must be a string or null")
+        raise ValueError("topic_config.poll.deadline_at must be a string or null")
     return ForumPollConfig(
         selection=selection,
         options=tuple(options),
@@ -74,36 +76,139 @@ def _poll_from_row(value: object | None) -> ForumPollConfig | None:
     )
 
 
-def _poll_result_options_from_row(value: object) -> tuple[ForumPollResultOptionRecord, ...]:
-    """Decode the poll aggregate projection, rejecting malformed rows."""
+def _poll_result_options_from_row(
+    value: object,
+) -> tuple[ForumPollResultOptionRecord, ...]:
+    """Decode ``poll_stats.by_option`` entries by configured option index."""
 
     if not isinstance(value, list):
-        raise ValueError("ac_forum_topic_poll_result.options_result must be a JSON array")
+        raise ValueError(
+            "ac_forum_topic.analysis_result.poll_stats.by_option must be a JSON array"
+        )
     options: list[ForumPollResultOptionRecord] = []
     for item in value:
         if not isinstance(item, dict):
             raise ValueError(
-                "ac_forum_topic_poll_result.options_result entries must be JSON objects"
+                "ac_forum_topic.analysis_result.poll_stats.by_option entries "
+                "must be JSON objects"
             )
-        label = item.get("label")
+        index = item.get("index")
         votes = item.get("votes")
         percent = item.get("percent")
-        if not isinstance(label, str):
+        if not isinstance(index, int) or isinstance(index, bool) or index < 0:
             raise ValueError(
-                "ac_forum_topic_poll_result.options_result.label must be a string"
+                "ac_forum_topic.analysis_result.poll_stats.by_option.index "
+                "must be a non-negative integer"
             )
         if not isinstance(votes, int) or isinstance(votes, bool) or votes < 0:
             raise ValueError(
-                "ac_forum_topic_poll_result.options_result.votes must be a non-negative integer"
+                "ac_forum_topic.analysis_result.poll_stats.by_option.votes "
+                "must be a non-negative integer"
             )
-        if not isinstance(percent, int) or isinstance(percent, bool) or not 0 <= percent <= 100:
+        if (
+            not isinstance(percent, int)
+            or isinstance(percent, bool)
+            or not 0 <= percent <= 100
+        ):
             raise ValueError(
-                "ac_forum_topic_poll_result.options_result.percent must be an integer from 0 to 100"
+                "ac_forum_topic.analysis_result.poll_stats.by_option.percent "
+                "must be an integer from 0 to 100"
             )
         options.append(
-            ForumPollResultOptionRecord(label=label, votes=votes, percent=percent)
+            ForumPollResultOptionRecord(index=index, votes=votes, percent=percent)
         )
     return tuple(options)
+
+
+def _topic_config_from_row(value: object | None) -> ForumTopicConfig | None:
+    """Decode the generic Topic configuration JSON.
+
+    ``topic_type`` selects which configuration section is meaningful. The
+    current contract only defines ``poll``; future Topic types can add other
+    keys to this object without another migration.
+    """
+
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("ac_forum_topic.topic_config must be a JSON object or null")
+    return ForumTopicConfig(poll=_poll_from_row(value.get("poll")))
+
+
+def _analysis_from_row(
+    value: object | None, updated_at: datetime
+) -> ForumTopicAnalysisRecord:
+    """Decode the Topic-derived analysis projection from one JSON field.
+
+    A missing projection is a valid state until the background task first
+    runs; the repository later fills the stable public contract with zero
+    values where appropriate.
+    """
+
+    if value is None:
+        return ForumTopicAnalysisRecord(summary=None, tags=(), poll_result=None)
+    if not isinstance(value, dict):
+        raise ValueError("ac_forum_topic.analysis_result must be a JSON object or null")
+
+    summary_row = value.get("summary")
+    if summary_row is None:
+        summary = None
+    else:
+        if not isinstance(summary_row, dict) or not isinstance(
+            summary_row.get("content"), str
+        ):
+            raise ValueError(
+                "ac_forum_topic.analysis_result.summary.content must be a string"
+            )
+        summary = ForumTopicSummaryRecord(content=summary_row["content"])
+
+    tag_row = value.get("tags", [])
+    if tag_row is None:
+        tag_row = []
+    if not isinstance(tag_row, list) or not all(
+        isinstance(tag, str) for tag in tag_row
+    ):
+        raise ValueError("ac_forum_topic.analysis_result.tags must be a string array")
+    tags = tuple(tag_row)
+
+    stats_row = value.get("poll_stats")
+    if stats_row is None:
+        poll_result = None
+    else:
+        if not isinstance(stats_row, dict):
+            raise ValueError(
+                "ac_forum_topic.analysis_result.poll_stats must be a JSON "
+                "object or null"
+            )
+        total_votes = stats_row.get("total_votes")
+        participant_count = stats_row.get("participant_count")
+        by_option = stats_row.get("by_option")
+        if (
+            not isinstance(total_votes, int)
+            or isinstance(total_votes, bool)
+            or total_votes < 0
+        ):
+            raise ValueError(
+                "ac_forum_topic.analysis_result.poll_stats.total_votes "
+                "must be a non-negative integer"
+            )
+        if (
+            not isinstance(participant_count, int)
+            or isinstance(participant_count, bool)
+            or participant_count < 0
+        ):
+            raise ValueError(
+                "ac_forum_topic.analysis_result.poll_stats.participant_count "
+                "must be a non-negative integer"
+            )
+        poll_result = ForumPollResultRecord(
+            options=_poll_result_options_from_row(by_option),
+            total_votes=total_votes,
+            participant_count=participant_count,
+            updated_at=updated_at,
+        )
+
+    return ForumTopicAnalysisRecord(summary=summary, tags=tags, poll_result=poll_result)
 
 
 class ForumTopicModel(Base):
@@ -129,7 +234,8 @@ class ForumTopicModel(Base):
         default=TOPIC_TYPE_DISCUSSION,
         server_default=TOPIC_TYPE_DISCUSSION,
     )
-    poll_config = Column(JSON, nullable=True)
+    topic_config = Column(JSON, nullable=True)
+    analysis_result = Column(JSON, nullable=True)
     status = Column(
         String(16),
         nullable=False,
@@ -203,7 +309,8 @@ class ForumTopicModel(Base):
             created_at=self.gmt_create,
             updated_at=self.gmt_modified,
             topic_type=self.topic_type,
-            poll=_poll_from_row(self.poll_config),
+            analysis=_analysis_from_row(self.analysis_result, self.gmt_modified),
+            topic_config=_topic_config_from_row(self.topic_config),
         )
 
 
@@ -275,107 +382,6 @@ class ForumPostModel(Base):
 
 
 register_avernet_tenant_guard(ForumTopicModel)
-
-
-class ForumPollResultModel(Base):
-    """Persisted derived aggregate for one POLL Topic.
-
-    The row is written by a backend aggregation task, not by the public vote
-    write path. ``options_result`` keeps each configured option's label, vote
-    count, and 0--100 integer percentage so the read API remains stable while
-    later tasks can add incremental bookkeeping.
-    """
-
-    __tablename__ = "ac_forum_topic_poll_result"
-
-    id = Column(
-        AutoIncrementBigInteger,
-        primary_key=True,
-        autoincrement=True,
-        nullable=False,
-    )
-    topic_id = Column(_TOPIC_ID, nullable=False)
-    total_votes = Column(Integer, nullable=False, default=0, server_default="0")
-    participant_count = Column(
-        Integer,
-        nullable=False,
-        default=0,
-        server_default="0",
-    )
-    options_result = Column(JSON, nullable=False)
-    env = Column(String(20), nullable=False, default=get_current_env)
-    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
-    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
-    gmt_modified = Column(
-        DateTime,
-        nullable=False,
-        server_default=func.now(),
-        onupdate=func.now(),
-    )
-
-    __table_args__ = (
-        Index(
-            "uk_forum_topic_poll_result",
-            "avernet_tenant",
-            "env",
-            "topic_id",
-            unique=True,
-        ),
-    )
-
-    def to_record(self) -> ForumPollResultRecord:
-        return ForumPollResultRecord(
-            options=_poll_result_options_from_row(self.options_result),
-            total_votes=self.total_votes,
-            participant_count=self.participant_count,
-            updated_at=self.gmt_modified,
-        )
-
-
-class ForumTopicTagModel(Base):
-    """One derived or manually assigned label attached to a Topic."""
-
-    __tablename__ = "ac_forum_topic_tag"
-
-    id = Column(
-        AutoIncrementBigInteger,
-        primary_key=True,
-        autoincrement=True,
-        nullable=False,
-    )
-    topic_id = Column(_TOPIC_ID, nullable=False)
-    tag_text = Column(String(64), nullable=False)
-    source = Column(String(16), nullable=False, server_default=TOPIC_TAG_SOURCE_LLM)
-    env = Column(String(20), nullable=False, default=get_current_env)
-    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
-    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
-    gmt_modified = Column(
-        DateTime,
-        nullable=False,
-        server_default=func.now(),
-        onupdate=func.now(),
-    )
-
-    __table_args__ = (
-        Index(
-            "uk_forum_topic_tag",
-            "avernet_tenant",
-            "env",
-            "topic_id",
-            "tag_text",
-            unique=True,
-        ),
-        Index(
-            "idx_forum_topic_tag_text",
-            "avernet_tenant",
-            "env",
-            "tag_text",
-        ),
-    )
-
-
-register_avernet_tenant_guard(ForumPollResultModel)
-register_avernet_tenant_guard(ForumTopicTagModel)
 
 
 class ForumBrowseSubscriptionModel(Base):

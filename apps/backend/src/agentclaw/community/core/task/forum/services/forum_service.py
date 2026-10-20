@@ -38,6 +38,7 @@ from agentclaw.community.core.task.forum.models import (
     TOPIC_TYPE_POLL,
     TOPIC_TYPES,
     ForumPollConfig,
+    ForumTopicConfig,
     ForumPostPage,
     ForumReplyCreateResult,
     ForumTopicCreateResult,
@@ -118,7 +119,7 @@ class ForumService(ForumServiceProtocol):
         title: str,
         body: str,
         topic_type: str | None = None,
-        poll: ForumPollConfig | None = None,
+        topic_config: ForumTopicConfig | None = None,
         author_display_name: str | None = None,
         author_avatar_url: str | None = None,
     ) -> ForumTopicCreateResult:
@@ -132,11 +133,17 @@ class ForumService(ForumServiceProtocol):
         normalized_title = self._required_text(title, "title", MAX_TITLE_LENGTH)
         normalized_body = self._required_text(body, "body", MAX_BODY_LENGTH)
         normalized_topic_type = self._topic_type(topic_type) or "DISCUSSION"
-        normalized_poll = self._poll_config(poll)
-        if normalized_topic_type == TOPIC_TYPE_POLL and normalized_poll is None:
-            raise ValidationError("poll is required when topic_type is POLL")
-        if normalized_topic_type != TOPIC_TYPE_POLL and normalized_poll is not None:
-            raise ValidationError("poll is only allowed when topic_type is POLL")
+        normalized_config = self._topic_config(topic_config)
+        if normalized_topic_type == TOPIC_TYPE_POLL and (
+            normalized_config is None or normalized_config.poll is None
+        ):
+            raise ValidationError(
+                "topic_config.poll is required when topic_type is POLL"
+            )
+        if normalized_topic_type != TOPIC_TYPE_POLL and normalized_config is not None:
+            raise ValidationError(
+                "topic_config is only allowed when topic_type is POLL"
+            )
         normalized_display_name = self._optional_text(
             author_display_name, "author_display_name",
             MAX_AUTHOR_DISPLAY_NAME_LENGTH,
@@ -152,7 +159,7 @@ class ForumService(ForumServiceProtocol):
             title=normalized_title,
             body=normalized_body,
             topic_type=normalized_topic_type,
-            poll=normalized_poll,
+            topic_config=normalized_config,
             author_display_name=normalized_display_name,
             author_avatar_url=normalized_avatar,
         )
@@ -239,6 +246,16 @@ class ForumService(ForumServiceProtocol):
                 f"{field} must contain no more than {max_length} characters"
             )
         return normalized
+
+    @classmethod
+    def _topic_config(cls, value: ForumTopicConfig | None) -> ForumTopicConfig | None:
+        if value is None:
+            return None
+        if not isinstance(value, ForumTopicConfig):
+            raise ValidationError("topic_config must be a topic configuration object")
+        if set(value.__dict__) - {"poll"}:
+            raise ValidationError("topic_config contains unsupported fields")
+        return ForumTopicConfig(poll=cls._poll_config(value.poll))
 
     @classmethod
     def _poll_config(cls, value: ForumPollConfig | None) -> ForumPollConfig | None:

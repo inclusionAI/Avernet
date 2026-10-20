@@ -9,6 +9,8 @@ import pytest
 from agentclaw.community.core.errors import Conflict, NotFound, ValidationError
 from agentclaw.community.core.task.forum.models import (
     ForumPollConfig,
+    ForumTopicAnalysisRecord,
+    ForumTopicConfig,
     ForumPostRecord,
     ForumTopicPage,
     ForumReplyCreateResult,
@@ -33,6 +35,7 @@ class FakeForumRepository:
                 title=kwargs["title"],
                 body=kwargs["body"],
                 status="OPEN",
+                analysis=ForumTopicAnalysisRecord(),
                 created_at=now,
                 updated_at=now,
             ),
@@ -79,7 +82,7 @@ def test_create_topic_normalizes_input_and_author_identity():
             "title": "Topic title",
             "body": "Topic description",
             "topic_type": "DISCUSSION",
-            "poll": None,
+            "topic_config": None,
             "author_display_name": None,
             "author_avatar_url": None,
         }
@@ -101,7 +104,7 @@ def test_create_topic_normalizes_explicit_notice_topic_type():
     assert repo.calls[0]["topic_type"] == "NOTICE"
 
 
-def test_create_topic_normalizes_and_forwards_poll_configuration():
+def test_create_topic_normalizes_and_forwards_topic_config():
     repo = FakeForumRepository()
     deadline = datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc)
 
@@ -112,25 +115,29 @@ def test_create_topic_normalizes_and_forwards_poll_configuration():
         title="Poll",
         body="Choose options",
         topic_type=" poll ",
-        poll=ForumPollConfig(
-            selection=" single ",
-            options=(" Option A ", "Option B"),
-            deadline_at=deadline,
+        topic_config=ForumTopicConfig(
+            poll=ForumPollConfig(
+                selection=" single ",
+                options=(" Option A ", "Option B"),
+                deadline_at=deadline,
+            )
         ),
     )
 
     assert repo.calls[0]["topic_type"] == "POLL"
-    assert repo.calls[0]["poll"] == ForumPollConfig(
-        selection="SINGLE",
-        options=("Option A", "Option B"),
-        deadline_at=deadline,
+    assert repo.calls[0]["topic_config"] == ForumTopicConfig(
+        poll=ForumPollConfig(
+            selection="SINGLE",
+            options=("Option A", "Option B"),
+            deadline_at=deadline,
+        )
     )
 
 
-def test_create_topic_requires_poll_for_poll_topic():
+def test_create_topic_requires_topic_config_for_poll_topic():
     repo = FakeForumRepository()
 
-    with pytest.raises(ValidationError, match="poll is required"):
+    with pytest.raises(ValidationError, match="topic_config.poll is required"):
         ForumService(repo).create_topic(
             author_type="BOT",
             author_id="bot-a",
@@ -138,17 +145,36 @@ def test_create_topic_requires_poll_for_poll_topic():
             title="Poll",
             body="Choose",
             topic_type="POLL",
-            poll=None,
+            topic_config=None,
         )
 
     assert repo.calls == []
 
 
-def test_create_topic_rejects_poll_for_non_poll_topic():
+def test_create_topic_requires_poll_section_for_poll_topic():
     repo = FakeForumRepository()
-    poll = ForumPollConfig(selection="SINGLE", options=("A", "B"))
 
-    with pytest.raises(ValidationError, match="poll is only allowed"):
+    with pytest.raises(ValidationError, match="topic_config.poll is required"):
+        ForumService(repo).create_topic(
+            author_type="BOT",
+            author_id="bot-a",
+            client_request_id="req-poll",
+            title="Poll",
+            body="Choose",
+            topic_type="POLL",
+            topic_config=ForumTopicConfig(),
+        )
+
+    assert repo.calls == []
+
+
+def test_create_topic_rejects_topic_config_for_non_poll_topic():
+    repo = FakeForumRepository()
+    topic_config = ForumTopicConfig(
+        poll=ForumPollConfig(selection="SINGLE", options=("A", "B"))
+    )
+
+    with pytest.raises(ValidationError, match="topic_config is only allowed"):
         ForumService(repo).create_topic(
             author_type="BOT",
             author_id="bot-a",
@@ -156,7 +182,7 @@ def test_create_topic_rejects_poll_for_non_poll_topic():
             title="Discussion",
             body="Description",
             topic_type="DISCUSSION",
-            poll=poll,
+            topic_config=topic_config,
         )
 
     assert repo.calls == []
@@ -173,7 +199,9 @@ def test_create_topic_rejects_poll_for_non_poll_topic():
 )
 def test_create_topic_rejects_invalid_poll_options(options):
     repo = FakeForumRepository()
-    poll = ForumPollConfig(selection="SINGLE", options=options)
+    topic_config = ForumTopicConfig(
+        poll=ForumPollConfig(selection="SINGLE", options=options)
+    )
 
     with pytest.raises(ValidationError, match="poll.options"):
         ForumService(repo).create_topic(
@@ -183,7 +211,7 @@ def test_create_topic_rejects_invalid_poll_options(options):
             title="Poll",
             body="Choose",
             topic_type="POLL",
-            poll=poll,
+            topic_config=topic_config,
         )
 
     assert repo.calls == []
@@ -191,10 +219,12 @@ def test_create_topic_rejects_invalid_poll_options(options):
 
 def test_create_topic_rejects_naive_poll_deadline():
     repo = FakeForumRepository()
-    poll = ForumPollConfig(
-        selection="SINGLE",
-        options=("A", "B"),
-        deadline_at=datetime(2026, 10, 20, 12, 0),
+    topic_config = ForumTopicConfig(
+        poll=ForumPollConfig(
+            selection="SINGLE",
+            options=("A", "B"),
+            deadline_at=datetime(2026, 10, 20, 12, 0),
+        )
     )
 
     with pytest.raises(ValidationError, match="poll.deadline_at"):
@@ -205,7 +235,7 @@ def test_create_topic_rejects_naive_poll_deadline():
             title="Poll",
             body="Choose",
             topic_type="POLL",
-            poll=poll,
+            topic_config=topic_config,
         )
 
     assert repo.calls == []
@@ -412,6 +442,7 @@ def _close_test_topic(
         title="Topic title",
         body="Topic description",
         status=status,
+        analysis=ForumTopicAnalysisRecord(),
         created_at=now,
         updated_at=now,
     )
