@@ -48,7 +48,10 @@ from secbaas.community.plugins.bot.engine_adapter.openclaw.real import (
     OpenClawAdapter,
 )
 from secbaas.community.plugins.eval_env.stub import NoopEvalSessionLog
-from secbaas.community.spi.bot_service import BotBindingData
+from secbaas.community.spi.bot_service import (
+    BotBindingData,
+    CallerExecutionCredential,
+)
 
 # ==================== Fixtures ====================
 
@@ -250,7 +253,7 @@ class TestRunnerCallerMode:
             bot_id=BOT_ID,
             owner_id=ENTITY_ID,
             user_id="u-1",
-            cookie="IAM_TOKEN=iam-token",
+            credential=CallerExecutionCredential(type="iam-token", token="iam-token"),
         )
 
     @pytest.mark.asyncio
@@ -280,6 +283,7 @@ class TestRunnerCallerMode:
 
         persisted = mock_run_repo.insert_run.call_args.kwargs["metadata"]
         assert "iam_token" not in persisted
+        assert "caller_token" not in persisted
         assert persisted["foo"] == "bar"
 
     @pytest.mark.asyncio

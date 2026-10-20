@@ -3,9 +3,9 @@
 参考: BCN Bot 下行连接接入方案 (内部文档)
 """
 
-from typing import Any, Literal
+from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from secbaas.community.api.bcn import (
     Attachment as DomainAttachment,
@@ -136,6 +136,55 @@ class Attachment(BaseModel):
         )
 
 
+# ─────────────────────────── Caller 身份扩展 ───────────────────────────
+
+
+class CallerSubject(BaseModel):
+    """caller_context.subject — subject.ref 是调用方可信用户标识"""
+
+    model_config = ConfigDict(extra="allow")
+
+    kind: str
+    ref: str
+
+
+class CallerContext(BaseModel):
+    """caller_context — AgentPaaS/BCN 传入的调用方上下文"""
+
+    model_config = ConfigDict(extra="allow")
+
+    subject: CallerSubject
+
+
+class CallerExecutionToken(BaseModel):
+    """caller_execution_token — 短时执行凭据；token 只进入内存链路"""
+
+    model_config = ConfigDict(extra="allow")
+
+    type: Literal["iam-token", "agentpaas"]
+    token: str
+    version: str | None = None
+    format: str | None = None
+    expires_at_ms: int | None = None
+
+
+class ChatSendExtensions(BaseModel):
+    """chat.send extensions 的已知字段；其余业务扩展字段原样保留"""
+
+    model_config = ConfigDict(extra="allow")
+
+    caller_context: CallerContext | None = None
+    caller_execution_token: CallerExecutionToken | None = None
+
+    @model_validator(mode="after")
+    def _caller_fields_come_together(self) -> "ChatSendExtensions":
+        if (self.caller_context is None) != (self.caller_execution_token is None):
+            raise ValueError(
+                "caller_context and caller_execution_token must be provided together"
+            )
+        return self
+
+
 # ─────────────────────────── Request ───────────────────────────
 
 
@@ -160,7 +209,9 @@ class ChatSendRequest(BaseModel):
     timeout_ms: int = Field(
         default=60000, description="BCN 等待 final 回调的最长时间 (毫秒)"
     )
-    extensions: dict[str, Any] | None = Field(default=None, description="扩展信息")
+    extensions: ChatSendExtensions | None = Field(
+        default=None, description="扩展信息（caller 身份字段为强类型）"
+    )
     attachments: list[Attachment] | None = Field(default=None, description="附件列表")
 
     model_config = {"populate_by_name": True}

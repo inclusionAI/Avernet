@@ -44,10 +44,12 @@ from secbaas.community.spi.eval_env import EvalSessionLog
 from ..config import SystemConfigKey
 from ._binding_resolver import BotBindingResolver
 from ._bot_run_utils import (
+    CALLER_METADATA_TOKEN_KEY,
     build_caller_binding,
     build_chat_metadata,
     extract_session_id_from_record,
     is_caller_mode,
+    normalize_caller_identity_metadata,
     parse_wait_result,
     plan_session_id,
     resolve_bot_id,
@@ -158,12 +160,15 @@ class BotRunner:
         Returns:
             Tuple of (message_id, session_id)
         """
+        metadata = normalize_caller_identity_metadata(metadata)
+
         logger.info(
-            "[runner.inject_message] Injecting message: message_id=%s, bot_id=%s, api_key_prefix=%s, metadata=%s",
+            "[runner.inject_message] Injecting message: message_id=%s, bot_id=%s, "
+            "api_key_prefix=%s, metadata_keys=%s",
             message_id,
             bot_id,
             context.api_key_prefix,
-            metadata,
+            sorted(metadata.keys()),
         )
 
         # 1. 幂等检查
@@ -177,7 +182,7 @@ class BotRunner:
                 )
             return message_id, actual_session_id
 
-        # 2. DB-first: 入库（iam_token 等敏感凭据剥离——原 metadata 只留内存链路）
+        # 2. DB-first: 入库（统一 caller token 剥离，原 metadata 只留内存链路）
         self._insert_run(
             run_id=message_id,
             bot_id=bot_id,
@@ -192,10 +197,10 @@ class BotRunner:
             caller_mode = is_caller_mode(metadata, route.binding_info)
             logger.info(
                 "[runner.inject_message] caller mode check: bot_id=%s, engine_type=%s, "
-                "has_iam_token=%s, has_user_id=%s, result=%s",
+                "has_caller_credential=%s, has_user_id=%s, result=%s",
                 route.binding_info.bot_id,
                 route.binding_info.engine_type,
-                bool(metadata.get("iam_token")),
+                bool(metadata.get(CALLER_METADATA_TOKEN_KEY)),
                 bool(metadata.get("user_id")),
                 caller_mode,
             )
@@ -293,18 +298,21 @@ class BotRunner:
         Returns:
             Tuple of (message_id, session_id)
         """
+        metadata = normalize_caller_identity_metadata(metadata)
+
         timeout: float = float(metadata.get("timeout") or self._default_request_timeout)
 
         if message_id is None:
             message_id = str(uuid.uuid4())
 
         logger.info(
-            "[runner.deliver_message] Delivering message: message_id=%s, bot_id=%s, api_key_prefix=%s, message=%s, metadata=%s",
+            "[runner.deliver_message] Delivering message: message_id=%s, bot_id=%s, "
+            "api_key_prefix=%s, message=%s, metadata_keys=%s",
             message_id,
             bot_id,
             context.api_key_prefix,
             message[:10],
-            metadata,
+            sorted(metadata.keys()),
         )
 
         raw_session_id = metadata.get("session_id")
@@ -320,7 +328,7 @@ class BotRunner:
                 )
             return message_id, actual_session_id
 
-        # 2. DB-first: 入库（iam_token 等敏感凭据剥离——原 metadata 只留内存链路）
+        # 2. DB-first: 入库（统一 caller token 剥离，原 metadata 只留内存链路）
         self._insert_run(
             run_id=message_id,
             bot_id=bot_id,
@@ -335,10 +343,10 @@ class BotRunner:
             caller_mode = is_caller_mode(metadata, route.binding_info)
             logger.info(
                 "[runner] caller mode check: bot_id=%s, engine_type=%s, "
-                "has_iam_token=%s, has_user_id=%s, result=%s",
+                "has_caller_credential=%s, has_user_id=%s, result=%s",
                 route.binding_info.bot_id,
                 route.binding_info.engine_type,
-                bool(metadata.get("iam_token")),
+                bool(metadata.get(CALLER_METADATA_TOKEN_KEY)),
                 bool(metadata.get("user_id")),
                 caller_mode,
             )
@@ -466,16 +474,19 @@ class BotRunner:
         Returns:
             Tuple of (message_id, session_id, AsyncIterator[StreamChunk])
         """
+        metadata = normalize_caller_identity_metadata(metadata)
+
         timeout: float = float(metadata.get("timeout") or self._default_request_timeout)
 
         if message_id is None:
             message_id = str(uuid.uuid4())
 
         logger.info(
-            "[runner.deliver_message_stream] message_id=%s, bot_id=%s, metadata=%s",
+            "[runner.deliver_message_stream] message_id=%s, bot_id=%s, "
+            "metadata_keys=%s",
             message_id,
             bot_id,
-            metadata,
+            sorted(metadata.keys()),
         )
 
         # 流式模式不做幂等：重复 run_id 直接拒绝
@@ -488,10 +499,10 @@ class BotRunner:
         caller_mode = is_caller_mode(metadata, route.binding_info)
         logger.info(
             "[runner.deliver_message_stream] caller mode check: bot_id=%s, engine_type=%s, "
-            "has_iam_token=%s, has_user_id=%s, result=%s",
+            "has_caller_credential=%s, has_user_id=%s, result=%s",
             route.binding_info.bot_id,
             route.binding_info.engine_type,
-            bool(metadata.get("iam_token")),
+            bool(metadata.get(CALLER_METADATA_TOKEN_KEY)),
             bool(metadata.get("user_id")),
             caller_mode,
         )
@@ -600,7 +611,7 @@ class BotRunner:
         session_id: str | None = None,
     ) -> list[MessageInfo]:
         """获取会话中的消息列表（会自动创建会话）"""
-        logger.info("[runner.get_messages] metadata=%s", metadata)
+        logger.info("[runner.get_messages] metadata_keys=%s", sorted(metadata.keys()))
         if session_id is None:
             session_id = metadata.get("session_id")
 
@@ -629,7 +640,9 @@ class BotRunner:
         metadata: dict[str, Any],
     ) -> SessionInfo:
         """查询会话信息（只读）"""
-        logger.info("[runner.get_session_info] metadata=%s", metadata)
+        logger.info(
+            "[runner.get_session_info] metadata_keys=%s", sorted(metadata.keys())
+        )
         route = await self._resolve_bot_route(bot_id, metadata)
         return await route.bot_service.get_session(
             session_id=session_id,
@@ -646,7 +659,9 @@ class BotRunner:
         metadata: dict[str, Any],
     ) -> list[MessageInfo]:
         """获取会话消息列表（只读）"""
-        logger.info("[runner.get_session_messages] metadata=%s", metadata)
+        logger.info(
+            "[runner.get_session_messages] metadata_keys=%s", sorted(metadata.keys())
+        )
         route = await self._resolve_bot_route(bot_id, metadata)
         return await route.bot_service.get_messages(
             session_id=session_id,
@@ -664,7 +679,7 @@ class BotRunner:
         offset: int = 0,
     ) -> list[SessionInfo]:
         """List sessions for a given bot (read-only)."""
-        logger.info("[runner.list_sessions] metadata=%s", metadata)
+        logger.info("[runner.list_sessions] metadata_keys=%s", sorted(metadata.keys()))
         route = await self._resolve_bot_route(bot_id, metadata)
         return await route.bot_service.list_sessions(
             binding_info=route.binding_info,
@@ -1101,9 +1116,9 @@ class BotRunner:
         attachments: list[Any] | None = None,
         session_pending: bool = False,
     ) -> None:
-        """caller 模式 dispatch 后台化：拉容器（分钟级）+ IAM 刷新 → 入队。
+        """caller 模式 dispatch 后台化：拉容器（分钟级）+ 运行时凭据安装 → 入队。
 
-        iam_token 留在任务闭包（内存），落库的 queue meta 只带 sandbox_id；
+        统一 caller token 留在任务闭包（内存），落库的 queue meta 只带 sandbox_id；
         失败由任务内部落 run 记录（FAILED），不再上抛。
         """
         task = asyncio.create_task(

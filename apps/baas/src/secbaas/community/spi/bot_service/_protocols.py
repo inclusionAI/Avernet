@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from ._models import BotBindingData, LogRelationPayload
+from ._models import BotBindingData, CallerExecutionCredential, LogRelationPayload
 
 
 class BotServicePlugin(Protocol):
@@ -52,20 +52,19 @@ class BotServicePlugin(Protocol):
         bot_id: str,
         owner_id: str,
         user_id: str,
-        cookie: str,
+        credential: CallerExecutionCredential,
     ) -> str:
-        """caller 模式：按 (bot_id, owner_id, user_id) 拉起一个新容器，返回 sandbox_id。
+        """caller 模式：按 (bot_id, owner_id, user_id) 拉起容器并安装调用方凭据。
 
-        依赖外部 caller-connection 接口；Principal 不经参数传入——real 实现用
-        共享密钥（经 SecretStorePlugin）自行签发 app principal 并置于
-        ``X-Avernet-Principal``。实例就绪后用 ``cookie`` 单次调用
-        /api/v1/token/iam 刷新 Caller 执行凭据（副作用在服务端完成）。
+        沙箱拉起/轮询是公共逻辑。就绪后按 credential.type 分支：
+        ``iam-token`` 继续单次调用 /api/v1/token/iam；``agentpaas``
+        通过 BaaS outbound-rule append 安装 ``x-caller-token``。
 
         Args:
             bot_id: Bot 标识（bare，不含 entity 后缀）。
             owner_id: 容器归属实体。
             user_id: 使用者标识。
-            cookie: 调用方登录态 Cookie（含 IAM_TOKEN），就绪后用于刷新凭据。
+            credential: 调用方短时执行凭据；实现内部不得持久化或记录其值。
 
         Returns:
             新建容器的 sandbox_id。

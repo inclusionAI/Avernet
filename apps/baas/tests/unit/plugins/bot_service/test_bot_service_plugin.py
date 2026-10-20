@@ -19,7 +19,11 @@ import aiohttp
 import jwt
 import pytest
 
-from secbaas.community.api.device_manage import ErrorCode, PaasError
+from secbaas.community.api.device_manage import (
+    ErrorCode,
+    OutBoundOperationRuleUpdatedMode,
+    PaasError,
+)
 from secbaas.community.plugins.bot_service import (
     AiohttpBotServicePlugin,
     CallerPrincipalConfig,
@@ -31,7 +35,11 @@ from secbaas.community.plugins.bot_service.real._plugin import (
     _CLAUDE_CODE_NORMAL_TEMPLATE,
     resolve_claude_code_engine,
 )
-from secbaas.community.spi.bot_service import BotBindingData, LogRelationPayload
+from secbaas.community.spi.bot_service import (
+    BotBindingData,
+    CallerExecutionCredential,
+    LogRelationPayload,
+)
 
 # ==================== Tests: AiohttpBotServicePlugin construction ==============
 
@@ -1334,7 +1342,9 @@ def _caller_poll_body() -> dict:
 
 _CALLER_PRINCIPAL_SECRET_NAME = "other_manual_teamclawgw_principal_signing_key"
 _CALLER_PRINCIPAL_KEY = "unit-test-principal-signing-key-0123456789abcdef"
-_CALLER_COOKIE = "IAM_TOKEN=iam-value; session=abc"
+_CALLER_IAM_TOKEN = "iam-value"
+_CALLER_COOKIE = f"IAM_TOKEN={_CALLER_IAM_TOKEN}"
+_CALLER_AGENTPAAS_TOKEN = "agentpaas-caller-token"
 
 
 class _FakeSecretStore:
@@ -1356,7 +1366,16 @@ class TestAiohttpBotServicePluginGetCallerConnection:
 
     _MODULE = "secbaas.community.plugins.bot_service.real._plugin"
 
-    def _make_plugin(self, post, get=None) -> AiohttpBotServicePlugin:
+    def _make_plugin(
+        self,
+        post,
+        get=None,
+        paas_service_facade=None,
+        caller_token_domains=(
+            "caller-gateway.example.test",
+            "caller-tools.example.test",
+        ),
+    ) -> AiohttpBotServicePlugin:
         session = MagicMock()
         session.closed = False
         session.close = AsyncMock()
@@ -1372,16 +1391,26 @@ class TestAiohttpBotServicePluginGetCallerConnection:
         plugin = AiohttpBotServicePlugin(
             base_url="https://agentclaw.example.com",
             principal_signer=_caller_principal_signer(),
+            paas_service_facade=paas_service_facade,
+            caller_token_domains=caller_token_domains,
         )
         plugin._session = session
         return plugin
 
-    async def _call(self, plugin: AiohttpBotServicePlugin) -> str:
+    async def _call(
+        self,
+        plugin: AiohttpBotServicePlugin,
+        credential: CallerExecutionCredential | None = None,
+    ) -> str:
         return await plugin.get_caller_connection(
             bot_id="bot_001",
             owner_id="20881234",
             user_id="u_001",
-            cookie=_CALLER_COOKIE,
+            credential=credential
+            or CallerExecutionCredential(
+                type="iam-token",
+                token=_CALLER_IAM_TOKEN,
+            ),
         )
 
     @pytest.mark.asyncio
@@ -1428,7 +1457,7 @@ class TestAiohttpBotServicePluginGetCallerConnection:
         assert "principals" not in claims
         assert "X-Request-ID" in headers
 
-        # 就绪后单次 IAM 刷新：Cookie 身份 + bot_id query，不带 Principal
+        # 就绪后单次 IAM 刷新：Cookie 恰在刷新函数内构造，不带 Principal
         mock_get.assert_called_once()
         get_args = mock_get.call_args
         assert get_args[0][0] == "https://agentclaw.example.com/api/v1/token/iam"
@@ -1437,6 +1466,98 @@ class TestAiohttpBotServicePluginGetCallerConnection:
             "is_test_exchange": "false",
         }
         assert get_args[1]["headers"]["Cookie"] == _CALLER_COOKIE
+
+        await plugin.close()
+
+    @pytest.mark.asyncio
+    async def test_agentpaas_success_appends_x_caller_token_rule(self):
+        """AgentPaaS 凭据就绪后 append x-caller-token，不调用 IAM 刷新。"""
+        mock_post = MagicMock(
+            return_value=_mock_caller_response(_caller_ready_body("sbx-agentpaas"))
+        )
+        mock_get = MagicMock()
+        mock_facade = MagicMock()
+        mock_facade.update_outbound_operation_rule = AsyncMock(return_value=True)
+        plugin = self._make_plugin(
+            mock_post,
+            get=mock_get,
+            paas_service_facade=mock_facade,
+        )
+        credential = CallerExecutionCredential(
+            type="agentpaas",
+            token=_CALLER_AGENTPAAS_TOKEN,
+        )
+
+        result = await self._call(plugin, credential)
+
+        assert result == "sbx-agentpaas"
+        mock_get.assert_not_called()
+        mock_facade.update_outbound_operation_rule.assert_awaited_once_with(
+            paas_device_id="<paas-device-id>",
+            outbound_operation_rule=(
+                mock_facade.update_outbound_operation_rule.await_args.kwargs[
+                    "outbound_operation_rule"
+                ]
+            ),
+            mode=OutBoundOperationRuleUpdatedMode.APPEND,
+        )
+        rule = mock_facade.update_outbound_operation_rule.await_args.kwargs[
+            "outbound_operation_rule"
+        ]
+        assert len(rule.header_operation_rules) == 1
+        operation = rule.header_operation_rules[0]
+        assert operation.header_name == "x-caller-token"
+        assert operation.action == "set"
+        assert operation.value == _CALLER_AGENTPAAS_TOKEN
+        assert operation.domains == [
+            "caller-gateway.example.test",
+            "caller-tools.example.test",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_agentpaas_without_domains_fails_closed_before_provisioning(self):
+        """AgentPaaS credentials require an operator-provided domain allowlist."""
+        mock_post = MagicMock()
+        mock_get = MagicMock()
+        mock_facade = MagicMock()
+        plugin = self._make_plugin(
+            mock_post,
+            get=mock_get,
+            paas_service_facade=mock_facade,
+            caller_token_domains=(),
+        )
+
+        with pytest.raises(PaasError) as exc_info:
+            await self._call(
+                plugin,
+                CallerExecutionCredential(
+                    type="agentpaas",
+                    token=_CALLER_AGENTPAAS_TOKEN,
+                ),
+            )
+
+        assert exc_info.value.code == ErrorCode.CONFIG_INVALID
+        mock_post.assert_not_called()
+
+        await plugin.close()
+
+    @pytest.mark.asyncio
+    async def test_agentpaas_without_facade_fails_closed_before_provisioning(self):
+        mock_post = MagicMock()
+        mock_get = MagicMock()
+        plugin = self._make_plugin(mock_post, get=mock_get)
+
+        with pytest.raises(PaasError) as exc_info:
+            await self._call(
+                plugin,
+                CallerExecutionCredential(
+                    type="agentpaas",
+                    token=_CALLER_AGENTPAAS_TOKEN,
+                ),
+            )
+
+        assert exc_info.value.code == ErrorCode.CONFIG_INVALID
+        mock_post.assert_not_called()
 
         await plugin.close()
 
@@ -1553,8 +1674,8 @@ class TestAiohttpBotServicePluginGetCallerConnection:
         assert exc_info.value.code == ErrorCode.CONFIG_INVALID
 
     @pytest.mark.asyncio
-    async def test_empty_cookie_raises_config_invalid(self):
-        """空 cookie（metadata 无 cookie）本地 fail closed，不发任何请求。"""
+    async def test_empty_credential_raises_config_invalid(self):
+        """空 caller credential 本地 fail closed，不发任何请求。"""
         mock_post = MagicMock()
         mock_get = MagicMock()
         plugin = self._make_plugin(mock_post, mock_get)
@@ -1564,7 +1685,7 @@ class TestAiohttpBotServicePluginGetCallerConnection:
                 bot_id="bot_001",
                 owner_id="20881234",
                 user_id="u_001",
-                cookie="",
+                credential=CallerExecutionCredential(type="iam-token", token=""),
             )
 
         assert exc_info.value.code == ErrorCode.CONFIG_INVALID

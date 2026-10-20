@@ -36,8 +36,15 @@ from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.repository.api_gateway import APIKeyRepository
 from secbaas.community.core.repository.bot_run import BotRunRepository
 from secbaas.community.core.service.bcn.uplink import BcnUplinkCallback, UplinkClient
-from secbaas.community.core.service.bot_run import BotRunAbortSurface
+from secbaas.community.core.service.bot_run import (
+    BotRunAbortSurface,
+    build_caller_identity_metadata,
+)
 from secbaas.community.logger import get_logger
+from secbaas.community.spi.bot_service import (
+    CALLER_CREDENTIAL_TYPE_AGENTPAAS,
+    CALLER_CREDENTIAL_TYPE_IAM_TOKEN,
+)
 
 logger = get_logger("core-service")
 
@@ -60,6 +67,54 @@ def _extract_message_text(message: DownlinkMessage) -> str:
         if block.type == "text" and block.text is not None:
             parts.append(block.text)
     return "\n".join(parts)
+
+
+def _extract_caller_identity_metadata(
+    extensions: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Convert trusted caller identity extensions into in-memory runner keys.
+
+    The Pydantic request model validates the normal BCN path. Keep this small
+    defensive parser here so the domain service remains safe when tests or an
+    internal caller construct :class:`ChatSendInput` directly. The caller protocol
+    is converted to the canonical runner metadata keys here; lower layers must
+    not understand BCN extensions. Token values are never copied to logs and the
+    raw extensions themselves are not persisted.
+    """
+    if not extensions:
+        return {}
+    if not (
+        isinstance(extensions.get("caller_context"), dict)
+        and isinstance(extensions.get("caller_execution_token"), dict)
+    ):
+        return {}
+
+    context = extensions["caller_context"]
+    token = extensions["caller_execution_token"]
+    subject = context.get("subject")
+    if not isinstance(subject, dict):
+        raise ValueError("caller_context.subject must be an object")
+    user_id = str(subject.get("ref") or "")
+    token_value = str(token.get("token") or "")
+    token_type = str(token.get("type") or "")
+    if not user_id or not token_value:
+        raise ValueError(
+            "caller context requires subject.ref and caller_execution_token.token"
+        )
+
+    if token_type == CALLER_CREDENTIAL_TYPE_IAM_TOKEN:
+        return build_caller_identity_metadata(
+            user_id=user_id,
+            token=token_value,
+            token_type=token_type,
+        )
+    if token_type == CALLER_CREDENTIAL_TYPE_AGENTPAAS:
+        return build_caller_identity_metadata(
+            user_id=user_id,
+            token=token_value,
+            token_type=token_type,
+        )
+    raise ValueError(f"unsupported caller execution token type: {token_type}")
 
 
 def _normalize_interaction_resolution(
@@ -269,27 +324,14 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
             chat_send_input.timeout_ms,
         )
 
-        ignore_result = False
-        if (
-            chat_send_input.extensions
-            and chat_send_input.extensions.get("caller_wait_mode") == "detached"
-        ):
-            ignore_result = True
-            logger.info(
-                "[chat.send] run_id=%s session_id=%s provider_id=%s, ignore result",
-                chat_send_input.run_id,
-                chat_send_input.session_id,
-                chat_send_input.to_bot.provider_id,
-            )
-
         # 构造 context、metadata、消息
         context = self._build_chat_context()
         metadata = self._build_bcn_metadata(
             chat_send_input.session_id,
             chat_send_input.bcn_group_id,
             chat_send_input.to_bot.tags,
-            ignore_result,
-            "chat",
+            request_type="chat",
+            extensions=chat_send_input.extensions,
         )
         metadata["timeout"] = chat_send_input.timeout_ms / 1000
         message_text = _extract_message_text(chat_send_input.message)
@@ -354,6 +396,7 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
             chat_send_input.bcn_group_id,
             chat_send_input.to_bot.tags,
             request_type="chat",
+            extensions=chat_send_input.extensions,
         )
         metadata["timeout"] = chat_send_input.timeout_ms / 1000
         metadata["stream"] = "true"
@@ -541,8 +584,8 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
         session_id: str,
         bcn_group_id: str,
         tags: list[str] | None = None,
-        ignore_result: bool = False,
         request_type: str = "",
+        extensions: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """构造 BCN 场景的 metadata
 
@@ -550,9 +593,12 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
             session_id: 会话 ID
             bcn_group_id: BCN group ID
             tags: Bot 标签列表，用于提取 lifecycle_stage
+            extensions: 已验证的 chat.send 扩展字段；caller 凭据只在内存 metadata 流转
 
         Returns:
             metadata 字典
+        Raises:
+            ValueError: caller 身份扩展结构不完整或类型不受支持。
         """
         # 从 tags 中提取 lifecycle_stage（仅接受 online / verify / draft）
         valid_stages = {"online", "verify", "draft"}
@@ -564,10 +610,15 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
                     lifecycle_stage = tag
                     break
 
-        return {
+        ignore_result = bool(
+            extensions and extensions.get("caller_wait_mode") == "detached"
+        )
+        metadata = {
             "session_id": session_id,
             "bcn_group_id": bcn_group_id,
             "ignore_result": "true" if ignore_result else "false",
             "bot_options": {"lifecycle_stage": lifecycle_stage, "from_bcn": "true"},
             "request_type": request_type,
         }
+        metadata.update(_extract_caller_identity_metadata(extensions))
+        return metadata

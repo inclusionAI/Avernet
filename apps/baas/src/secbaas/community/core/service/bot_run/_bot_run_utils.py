@@ -6,7 +6,11 @@ import aiohttp
 
 from secbaas.community.api.bot_runtime import BotBindingInfo
 from secbaas.community.logger import get_logger
-from secbaas.community.spi.bot_service import BotBindingData
+from secbaas.community.spi.bot_service import (
+    CALLER_CREDENTIAL_TYPE_AGENTPAAS,
+    CALLER_CREDENTIAL_TYPE_IAM_TOKEN,
+    BotBindingData,
+)
 from secbaas.community.spi.eval_env import EvalSessionLog
 
 if TYPE_CHECKING:
@@ -31,12 +35,21 @@ BAAS_DEVICE_PROVIDERS = frozenset({"baas", "teclaw"})
 #: caller 模式的 device_provider 标记（BotServiceSelector 据此路由到 CallerBotService）。
 CALLER_DEVICE_PROVIDER = "caller"
 
+# BotRunner 及其下方链路统一使用的 caller 身份 metadata 键。入口 adapter
+# 可以接收自己的请求协议，但进入 service 后必须转换到这组键。
+CALLER_METADATA_TOKEN_KEY = "caller_token"
+CALLER_METADATA_TYPE_KEY = "type"
+CALLER_METADATA_USER_ID_KEY = "user_id"
+
+# OpenAPI 的历史 IAM 凭据键只允许在 runner 入口被转换，继续向下透传。
+_OPENAPI_IAM_TOKEN_METADATA_KEY = "iam_token"
+
 #: 队列 meta 中承载 caller 容器 sandbox_id 的 key（入队时写入，worker 复用）。
 CALLER_SANDBOX_META_KEY = "caller_sandbox_id"
 
 
 def normalize_engine_type(
-        active_engine: str | None, template_type: str | None = None
+    active_engine: str | None, template_type: str | None = None
 ) -> str:
     """解析 engine_type,先按 template_type+active_engine 的特定组合归一化,再校验白名单。
 
@@ -61,10 +74,10 @@ def normalize_engine_type(
 
 
 def resolve_user_id(
-        metadata: dict[str, Any],
-        binding_info: BotBindingInfo | None,
-        context: "BotChatContext | None",
-        bot_id: str,
+    metadata: dict[str, Any],
+    binding_info: BotBindingInfo | None,
+    context: "BotChatContext | None",
+    bot_id: str,
 ) -> str:
     """从 metadata 中解析 user_id
 
@@ -146,7 +159,7 @@ def extract_lifecycle_stage(metadata: dict[str, Any] | None) -> str:
 
 
 def extract_session_id_from_record(
-        record: "BotRunRecord",
+    record: "BotRunRecord",
 ) -> str | None:
     """从运行记录中提取 session_id
 
@@ -211,20 +224,74 @@ def binding_data_to_info(data: BotBindingData) -> BotBindingInfo:
     )
 
 
-def is_caller_mode(
-        metadata: dict[str, Any] | None,
-        binding_info: BotBindingInfo | None,
-) -> bool:
-    """caller 模式判定：metadata 双键 + 引擎非 teclaw。
+def build_caller_identity_metadata(
+    *,
+    user_id: str,
+    token: str,
+    token_type: str,
+) -> dict[str, Any]:
+    """Build the canonical caller identity keys used below BotRunner.
 
-    metadata 需同时携带 ``iam_token``（拉容器的 IAM 凭据）与 ``user_id``
-    （caller-connection 使用者标识），缺一按普通模式解析；binding 引擎
+    Entry adapters may accept protocol-specific fields, but they must call this
+    helper (or explicitly produce these keys) at the service boundary. The
+    resolver and bot-service plugin do not understand the original protocols.
+    """
+    if not user_id:
+        raise ValueError("caller identity requires user_id")
+    if not token:
+        raise ValueError("caller identity requires token")
+    if not token_type:
+        raise ValueError("caller identity requires type")
+    if token_type not in {
+        CALLER_CREDENTIAL_TYPE_IAM_TOKEN,
+        CALLER_CREDENTIAL_TYPE_AGENTPAAS,
+    }:
+        raise ValueError(f"unsupported caller execution token type: {token_type}")
+    return {
+        CALLER_METADATA_USER_ID_KEY: user_id,
+        CALLER_METADATA_TOKEN_KEY: token,
+        CALLER_METADATA_TYPE_KEY: token_type,
+    }
+
+
+def normalize_caller_identity_metadata(
+    metadata: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Normalize the OpenAPI caller identity at the BotRunner boundary.
+
+    BCN already writes the canonical ``caller_token`` / ``type`` / ``user_id`` keys.
+    OpenAPI only maps its ``iam_token`` credential key to the same canonical shape.
+    ``BotChatContext`` is intentionally not a credential source here; it carries
+    unrelated request-context state and must not be mixed with metadata.
+    """
+    normalized = dict(metadata or {})
+
+    token = str(normalized.pop(_OPENAPI_IAM_TOKEN_METADATA_KEY, "") or "")
+
+    if token and normalized.get(CALLER_METADATA_USER_ID_KEY):
+        normalized[CALLER_METADATA_TOKEN_KEY] = token
+        normalized[CALLER_METADATA_TYPE_KEY] = CALLER_CREDENTIAL_TYPE_IAM_TOKEN
+
+    return normalized
+
+
+def is_caller_mode(
+    metadata: dict[str, Any] | None,
+    binding_info: BotBindingInfo | None,
+) -> bool:
+    """caller 模式判定：统一凭据 + 引擎非 teclaw。
+
+    metadata 需同时携带统一后的 ``caller_token`` 与 ``user_id``
+    （caller-connection 使用者标识）；``type`` 在 resolver 中校验并 fail closed，
+    缺一按普通模式解析；binding 引擎
     类型为 ``teclaw`` 时不支持 caller 容器（teclaw 走物化/session 语义），
     同样按普通模式。binding_info 缺失时无法确认引擎，保守判 False。
     凭据只允许存在于内存请求链路（runner 入口 → 后台 dispatch 闭包 /
     流式 iterator），落库前必须经 :func:`strip_sensitive_metadata` 剥离。
     """
-    if not (metadata and metadata.get("iam_token") and metadata.get("user_id")):
+    if not (metadata and metadata.get("user_id")):
+        return False
+    if not metadata.get(CALLER_METADATA_TOKEN_KEY):
         return False
     if binding_info is None:
         return False
@@ -232,15 +299,16 @@ def is_caller_mode(
 
 
 def strip_sensitive_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
-    """落库副本：剥离敏感凭据（iam_token），其余键原样保留。
+    """落库副本：剥离敏感 caller 凭据，其余键原样保留。
 
-    run 记录 / queue meta 等持久化处一律使用本函数的返回值；原始
-    ``metadata``（含 iam_token）只在内存链路（resolver 拉容器、后台任务
-    闭包）流转。
+    剥离统一键 ``caller_token``（仍在入口处兜底剥离 legacy 凭据值）；
+    run 记录 / queue meta 等持久化处一律使用本函数的返回值。原始
+    ``metadata``（含凭据）只在内存链路（resolver 拉容器、后台任务闭包）流转。
     """
-    if "iam_token" not in metadata:
+    sensitive_keys = {"token", "iam_token", "caller_token"}
+    if not sensitive_keys.intersection(metadata):
         return metadata
-    return {k: v for k, v in metadata.items() if k != "iam_token"}
+    return {k: v for k, v in metadata.items() if k not in sensitive_keys}
 
 
 def build_caller_binding(bot_id: str, sandbox_id: str) -> BotBindingInfo:
@@ -256,9 +324,9 @@ def build_caller_binding(bot_id: str, sandbox_id: str) -> BotBindingInfo:
 
 
 def build_chat_metadata(
-        metadata: dict[str, Any] | None,
-        run_id: str,
-        eval_session_log: EvalSessionLog,
+    metadata: dict[str, Any] | None,
+    run_id: str,
+    eval_session_log: EvalSessionLog,
 ) -> dict[str, Any]:
     """从 metadata 中构造 chat_metadata，用于透传到 WS chat 请求。
 
@@ -324,11 +392,11 @@ class _DefaultEngineAdapter:
     engine_type = ""
 
     def session_consistency_key(
-            self,
-            *,
-            tc_bot_id: str,
-            user_id: str,
-            run_id: str,
+        self,
+        *,
+        tc_bot_id: str,
+        user_id: str,
+        run_id: str,
     ) -> str:
         return f"agent:{tc_bot_id}:session:{run_id}:user:{user_id}"
 
@@ -337,12 +405,12 @@ _DEFAULT_ENGINE_ADAPTER = _DefaultEngineAdapter()
 
 
 def plan_session_id(
-        *,
-        tc_bot_id: str,
-        user_id: str,
-        run_id: str,
-        eval_id: str | None = None,
-        adapter: "BotEngineAdapter | None" = None,
+    *,
+    tc_bot_id: str,
+    user_id: str,
+    run_id: str,
+    eval_id: str | None = None,
+    adapter: "BotEngineAdapter | None" = None,
 ) -> str:
     key = eval_id or run_id
     effective = adapter if adapter is not None else _DEFAULT_ENGINE_ADAPTER
@@ -363,7 +431,7 @@ def strip_agent_main_prefix(session_id: str) -> str:
     使两种形式哈希到同一设备。循环剥离以对重复前缀幂等。
     """
     while session_id.startswith(_AGENT_MAIN_PREFIX):
-        session_id = session_id[len(_AGENT_MAIN_PREFIX):]
+        session_id = session_id[len(_AGENT_MAIN_PREFIX) :]
     return session_id
 
 

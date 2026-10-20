@@ -22,6 +22,7 @@ from ._binding_resolver import BotBindingResolver
 from ._bot_concurrency import BotConcurrencyManager
 from ._bot_run_utils import (
     binding_data_to_info,
+    build_caller_identity_metadata,
     extract_lifecycle_stage,
     extract_session_id_from_record,
     parse_bot_id,
@@ -66,6 +67,7 @@ __all__ = [
     "BotSessionError",
     "ConcurrentSessionError",
     "NotConnectedError",
+    "build_caller_identity_metadata",
     "binding_data_to_info",
     "BotRunner",
     "BotService",

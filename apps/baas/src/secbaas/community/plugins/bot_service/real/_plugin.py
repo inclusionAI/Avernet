@@ -23,21 +23,31 @@ Reference: RFC 0002 atomic commit 1
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 import uuid
+from collections.abc import Sequence
 from typing import Any
 
 import aiohttp
 from pydantic import ValidationError
 
-from secbaas.community.api.device_manage import ErrorCode, PaasError
+from secbaas.community.api.device_manage import (
+    ErrorCode,
+    HeaderOperationRule,
+    OutBoundOperationRule,
+    OutBoundOperationRuleUpdatedMode,
+    PaasError,
+)
+from secbaas.community.api.device_manage import (
+    PaasServiceFacade as PaasServiceFacadeProtocol,
+)
 from secbaas.community.http_header import get_http_header_plugin
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.bot_service import (
     BotBindingData,
     BotServicePlugin,
     CallerConnectionData,
+    CallerExecutionCredential,
     IamTokenData,
     LogRelationPayload,
     Result,
@@ -96,6 +106,40 @@ def _validation_error_to_paas(e: ValidationError) -> PaasError:
     )
 
 
+async def _raise_for_http_error(
+    response: aiohttp.ClientResponse,
+) -> None:
+    """Map HTTP status to PaasError. Raises on 4xx / 5xx."""
+    if response.status < 400:
+        return
+    try:
+        body: dict[str, Any] = await response.json()
+        message = body.get("message", body.get("error", ""))
+    except Exception:
+        message = await response.text()
+
+    if response.status in (401, 403):
+        raise PaasError(
+            ErrorCode.AUTH_FAILED,
+            f"auth failed (HTTP {response.status}): {message}",
+        )
+    if response.status == 429:
+        raise PaasError(
+            ErrorCode.RATE_LIMITED,
+            f"rate limited: {message}",
+        )
+    if 400 <= response.status < 500:
+        raise PaasError(
+            ErrorCode.CONFIG_INVALID,
+            f"client error (HTTP {response.status}): {message}",
+        )
+    if response.status >= 500:
+        raise PaasError(
+            ErrorCode.PLATFORM_ERROR,
+            f"server error (HTTP {response.status}): {message}",
+        )
+
+
 class AiohttpBotServicePlugin(BotServicePlugin):
     """Aiohttp-based BotService plugin — production HTTP implementation.
 
@@ -129,10 +173,14 @@ class AiohttpBotServicePlugin(BotServicePlugin):
         base_url: str = "",
         timeout: float = 10.0,
         principal_signer: CallerPrincipalSigner | None = None,
+        paas_service_facade: PaasServiceFacadeProtocol | None = None,
+        caller_token_domains: Sequence[str] = (),
     ) -> None:
         self._base_url = base_url
         self._timeout = timeout
         self._principal_signer = principal_signer
+        self._paas_service_facade = paas_service_facade
+        self._caller_token_domains = tuple(caller_token_domains)
         self._session: aiohttp.ClientSession | None = None
 
     # ───────────────────────── report (fire-and-forget) ─────────────────────────
@@ -177,40 +225,6 @@ class AiohttpBotServicePlugin(BotServicePlugin):
             )
 
     # ───────────────────────── get_binding (error-propagating) ──────────────────
-
-    async def _raise_for_http_error(
-        self,
-        response: aiohttp.ClientResponse,
-    ) -> None:
-        """Map HTTP status to PaasError. Raises on 4xx / 5xx."""
-        if response.status < 400:
-            return
-        try:
-            body: dict[str, Any] = await response.json()
-            message = body.get("message", body.get("error", ""))
-        except Exception:
-            message = await response.text()
-
-        if response.status in (401, 403):
-            raise PaasError(
-                ErrorCode.AUTH_FAILED,
-                f"auth failed (HTTP {response.status}): {message}",
-            )
-        if response.status == 429:
-            raise PaasError(
-                ErrorCode.RATE_LIMITED,
-                f"rate limited: {message}",
-            )
-        if 400 <= response.status < 500:
-            raise PaasError(
-                ErrorCode.CONFIG_INVALID,
-                f"client error (HTTP {response.status}): {message}",
-            )
-        if response.status >= 500:
-            raise PaasError(
-                ErrorCode.PLATFORM_ERROR,
-                f"server error (HTTP {response.status}): {message}",
-            )
 
     @staticmethod
     def _check_binding_envelope(result: Result[BotBindingData]) -> BotBindingData:
@@ -277,7 +291,7 @@ class AiohttpBotServicePlugin(BotServicePlugin):
             try:
                 session = await self._get_session()
                 async with session.get(url, params=params, headers=headers) as resp:
-                    await self._raise_for_http_error(resp)
+                    await _raise_for_http_error(resp)
                     raw: Any = await resp.json()
                     logger.debug(
                         "[bot-service] get_binding url=%s params=%s status=%d",
@@ -452,7 +466,7 @@ class AiohttpBotServicePlugin(BotServicePlugin):
         bot_id: str,
         owner_id: str,
         user_id: str,
-        cookie: str,
+        credential: CallerExecutionCredential,
     ) -> str:
         """POST /api/v1/expert-chats/app-caller-connection (self-minted Principal).
 
@@ -467,10 +481,14 @@ class AiohttpBotServicePlugin(BotServicePlugin):
         upgrade server-side); PaasError from HTTP status or envelope checks
         still fails fast.
 
-        Once the instance is ready, the caller's ``cookie`` is used for a
-        single GET /api/v1/token/iam call that refreshes the Caller
-        execution credentials server-side; failures propagate and are never
-        retried.
+        Once the instance is ready, the credential-specific runtime update
+        runs exactly once and is never retried on failure:
+
+        - ``iam-token``: GET /api/v1/token/iam with the IAM-token cookie;
+        - ``agentpaas``: append an outbound ``x-caller-token`` rule
+          to the ready sandbox through the BaaS PaasServiceFacade. The operator
+          must provide the immutable domain allowlist in deployment config;
+          request data cannot enlarge it.
 
         Returns ``connection.target`` — the ready instance's sandbox
         id — for use as the caller binding's connection target.
@@ -479,8 +497,8 @@ class AiohttpBotServicePlugin(BotServicePlugin):
             bot_id: Bot identifier (bare, without the entity suffix).
             owner_id: Owner entity identifier.
             user_id: Caller user identifier.
-            cookie: Caller login-state cookie string (carries ``IAM_TOKEN``),
-                used only for the credential refresh.
+            credential: Opaque caller execution credential. Its value is never
+                logged or persisted.
 
         Returns:
             The ready instance's sandbox_id (``connection.target``).
@@ -501,11 +519,25 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                 "caller-connection requires a principal signer "
                 "(shared signing key + app identity)",
             )
-        if not cookie:
+        if not credential.token:
             raise PaasError(
                 ErrorCode.CONFIG_INVALID,
-                "caller-connection requires a non-empty cookie for the IAM "
-                "credential refresh (metadata cookie)",
+                "caller-connection requires a non-empty execution credential",
+            )
+        if not (credential.is_iam_token or credential.is_agentpaas):
+            raise PaasError(
+                ErrorCode.CONFIG_INVALID,
+                f"caller-connection received an unsupported credential type: {credential.type}",
+            )
+        if credential.is_agentpaas and self._paas_service_facade is None:
+            raise PaasError(
+                ErrorCode.CONFIG_INVALID,
+                "AgentPaaS caller credential requires a PaasServiceFacade",
+            )
+        if credential.is_agentpaas and not self._caller_token_domains:
+            raise PaasError(
+                ErrorCode.CONFIG_INVALID,
+                "AgentPaaS caller credential requires configured caller domains",
             )
 
         url = f"{self._base_url.rstrip('/')}/api/v1/expert-chats/app-caller-connection"
@@ -533,13 +565,14 @@ class AiohttpBotServicePlugin(BotServicePlugin):
             try:
                 session = await self._get_session()
                 async with session.post(url, params=params, headers=headers) as resp:
-                    await self._raise_for_http_error(resp)
+                    await _raise_for_http_error(resp)
                     raw = await resp.json()
                     logger.info(
-                        "[bot-service] caller-connection request_id=%s status=%d, raw=%s",
+                        "[bot-service] caller-connection request_id=%s status=%d "
+                        "response_type=%s",
                         request_id,
                         resp.status,
-                        json.dumps(raw),
+                        type(raw).__name__,
                     )
             except (TimeoutError, aiohttp.ClientError, ValueError) as e:
                 last_transport_error = e
@@ -562,18 +595,38 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                     raise _validation_error_to_paas(e) from e
                 caller_data = self._check_caller_envelope(result)
                 if not caller_data.need_poll:
+                    connection = caller_data.connection
+                    if connection is None:
+                        raise PaasError(
+                            ErrorCode.PLATFORM_ERROR,
+                            "caller-connection response has no connection "
+                            f"(request_id={request_id})",
+                        )
                     sandbox_id = self._extract_caller_sandbox_id(
                         caller_data, request_id
                     )
-                    # 就绪后单次刷新 Caller 执行凭据（副作用在服务端完成，失败不重试）
-                    await self._refresh_caller_iam_token(bot_id=bot_id, cookie=cookie)
+                    # 沙箱已就绪：按凭据类型单次安装 Caller 运行时身份，失败不重试。
+                    if credential.is_iam_token:
+                        await self._refresh_caller_iam_token(
+                            bot_id=bot_id,
+                            cookie=f"IAM_TOKEN={credential.token}",
+                        )
+                    else:
+                        paas_device_id = self._extract_caller_paas_device_id(
+                            caller_data, request_id
+                        )
+                        await self._append_agentpaas_caller_token(
+                            credential=credential,
+                            paas_device_id=paas_device_id,
+                        )
                     logger.info(
                         "[bot-service] caller-connection ready: request_id=%s "
-                        "bot_id=%s owner_id=%s user_id=%s",
+                        "bot_id=%s owner_id=%s user_id=%s credential_type=%s",
                         request_id,
                         bot_id,
                         owner_id,
                         user_id,
+                        credential.type,
                     )
                     return sandbox_id
                 instance_status = (
@@ -670,6 +723,75 @@ class AiohttpBotServicePlugin(BotServicePlugin):
         return result.data
 
     @staticmethod
+    def _extract_caller_paas_device_id(
+        data: CallerConnectionData, request_id: str
+    ) -> str:
+        """Extract the PaaS device ID required by the outbound-rule append API."""
+        connection = data.connection
+        paas_device_id = connection.paas_device_id if connection is not None else None
+        if not paas_device_id:
+            raise PaasError(
+                ErrorCode.PLATFORM_ERROR,
+                "caller-connection response missing connection.paas_device_id "
+                f"(request_id={request_id})",
+            )
+        return paas_device_id
+
+    async def _append_agentpaas_caller_token(
+        self,
+        *,
+        credential: CallerExecutionCredential,
+        paas_device_id: str,
+    ) -> None:
+        """Append ``x-caller-token`` to the ready sandbox via BaaS outbound rule.
+
+        Uses the existing update-outbound-rule path with ``mode=append`` so
+        plugin/issuer rules are preserved. The raw token is only placed in the
+        outbound rule payload and never copied into a log line.
+        """
+        assert self._paas_service_facade is not None
+        rule = OutBoundOperationRule(
+            header_operation_rules=[
+                HeaderOperationRule(
+                    domains=list(self._caller_token_domains),
+                    action="set",
+                    header_name="x-caller-token",
+                    value=credential.token,
+                )
+            ]
+        )
+        try:
+            updated = await self._paas_service_facade.update_outbound_operation_rule(
+                paas_device_id=paas_device_id,
+                outbound_operation_rule=rule,
+                mode=OutBoundOperationRuleUpdatedMode.APPEND,
+            )
+        except Exception as e:
+            logger.warning(
+                "[bot-service] AgentPaaS caller outbound-rule append failed: "
+                "paas_device_id=%s credential_type=%s error_type=%s",
+                paas_device_id,
+                credential.type,
+                type(e).__name__,
+            )
+            raise PaasError(
+                ErrorCode.PLATFORM_ERROR,
+                "AgentPaaS caller outbound-rule append failed",
+            ) from e
+        if not updated:
+            raise PaasError(
+                ErrorCode.PLATFORM_ERROR,
+                "AgentPaaS caller outbound-rule append returned failure",
+            )
+        logger.info(
+            "[bot-service] AgentPaaS caller outbound-rule appended: "
+            "paas_device_id=%s credential_type=%s domains=%d",
+            paas_device_id,
+            credential.type,
+            len(self._caller_token_domains),
+        )
+
+    @staticmethod
     def _extract_caller_sandbox_id(data: CallerConnectionData, request_id: str) -> str:
         """Extract ``connection.target`` from a ready (need_poll=false) response."""
         connection = data.connection
@@ -712,7 +834,7 @@ class AiohttpBotServicePlugin(BotServicePlugin):
         try:
             session = await self._get_session()
             async with session.get(url, params=params, headers=headers) as resp:
-                await self._raise_for_http_error(resp)
+                await _raise_for_http_error(resp)
                 raw = await resp.json()
         except (TimeoutError, aiohttp.ClientError, ValueError) as e:
             raise PaasError(

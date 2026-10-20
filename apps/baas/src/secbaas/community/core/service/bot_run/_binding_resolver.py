@@ -12,8 +12,12 @@ from typing import TYPE_CHECKING, Any
 from secbaas.community.api.bot_runtime import BotBindingInfo
 from secbaas.community.api.device_manage import ErrorCode, PaasError
 from secbaas.community.logger import get_logger
+from secbaas.community.spi.bot_service import CallerExecutionCredential
 
 from ._bot_run_utils import (
+    CALLER_METADATA_TOKEN_KEY,
+    CALLER_METADATA_TYPE_KEY,
+    CALLER_METADATA_USER_ID_KEY,
     binding_data_to_info,
     build_caller_binding,
     extract_lifecycle_stage,
@@ -97,23 +101,41 @@ class BotBindingResolver:
         ``CallerBotService``，并把返回的 sandbox_id 作为连接目标（不参与 device affinity 选设备）。
 
         拉起含 need_poll 轮询（分钟级），只应由 runner 的后台 dispatch 调用；
-        metadata 的 ``iam_token``（IAM 凭据）只存在于内存请求链路，不落库。
+        metadata 的统一 caller 凭据（caller_token/type）只存在于内存请求链路，不落库。
         Principal 由 bot_service 插件用共享密钥自签。
         """
         real_bot_id, entity_id = parse_bot_id(bot_id)
-        user_id = str(metadata.get("user_id") or "")
-        iam_token = str(metadata.get("iam_token") or "")
+        user_id = str(metadata.get(CALLER_METADATA_USER_ID_KEY) or "")
+        credential_type = str(metadata.get(CALLER_METADATA_TYPE_KEY) or "")
+        credential_value = str(metadata.get(CALLER_METADATA_TOKEN_KEY) or "")
+        if not credential_type or not credential_value:
+            raise PaasError(
+                ErrorCode.CONFIG_INVALID,
+                f"caller binding requires a supported execution credential: "
+                f"bot_id={real_bot_id}",
+            )
+        credential = CallerExecutionCredential(
+            type=credential_type, token=credential_value
+        )
+        if not (credential.is_iam_token or credential.is_agentpaas):
+            raise PaasError(
+                ErrorCode.CONFIG_INVALID,
+                f"caller binding requires a supported execution credential: "
+                f"bot_id={real_bot_id}",
+            )
         sandbox_id = await self._bot_service_plugin.get_caller_connection(
             bot_id=real_bot_id,
             owner_id=entity_id,
             user_id=user_id,
-            cookie=f"IAM_TOKEN={iam_token}",
+            credential=credential,
         )
         logger.info(
-            "[resolve_caller_binding] bot_id=%s owner_id=%s user_id=%s sandbox_id=%s",
+            "[resolve_caller_binding] bot_id=%s owner_id=%s user_id=%s "
+            "credential_type=%s sandbox_id=%s",
             real_bot_id,
             entity_id,
             user_id,
+            credential_type,
             sandbox_id,
         )
         return build_caller_binding(bot_id, sandbox_id)

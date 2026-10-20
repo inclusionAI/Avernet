@@ -86,7 +86,7 @@ class LocalBotServicePlugin(BotServicePlugin):
         bot_id: str,
         owner_id: str,
         user_id: str,
-        cookie: str,
+        credential: object,
     ) -> str:
         """Not available in local mode — raises PaasError.
 

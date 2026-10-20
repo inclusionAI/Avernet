@@ -2,6 +2,9 @@ from collections.abc import Awaitable, Callable
 
 from dependency_injector import containers, providers
 
+from secbaas.community.api.device_manage import (
+    PaasServiceFacade as PaasServiceFacadeProtocol,
+)
 from secbaas.community.api.health_check.bot import BotHealthCheckerConfig
 from secbaas.community.core.service.api_gateway import (
     DefaultAPIKeyService,
@@ -97,6 +100,8 @@ def _real_bot_service_plugin(
     base_url: str = "",
     timeout: float = 10.0,
     principal_signer=None,
+    paas_service_facade: PaasServiceFacadeProtocol | None = None,
+    caller_token_domains=None,
 ):
     from secbaas.community.plugins.bot_service import AiohttpBotServicePlugin
 
@@ -104,6 +109,8 @@ def _real_bot_service_plugin(
         base_url=base_url,
         timeout=timeout,
         principal_signer=principal_signer,
+        paas_service_facade=paas_service_facade,
+        caller_token_domains=caller_token_domains or (),
     )
 
 
@@ -660,6 +667,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
             _real_bot_service_plugin,
             base_url=config.bot_chat_log_relation.base_url,
             timeout=config.bot_chat_log_relation.timeout,
+            caller_token_domains=config.bot_service.caller_token_domains,
             principal_signer=providers.Singleton(
                 _caller_principal_signer,
                 secret_plugin=secret_plugin,
@@ -668,6 +676,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
                 audience=config.bot_chat_log_relation.principal.audience,
                 ttl_seconds=config.bot_chat_log_relation.principal.ttl_seconds,
             ),
+            paas_service_facade=paas_facade,
         ),
         local=providers.Singleton(_local_bot_service_plugin),
         stub=providers.Singleton(_stub_bot_service_plugin),

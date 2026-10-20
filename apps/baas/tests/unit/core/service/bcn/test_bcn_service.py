@@ -510,6 +510,44 @@ async def test_handle_chat_send_detached(service, mock_bot_runner):
     assert result.ok is True
     await asyncio.sleep(0.01)
 
+    metadata = mock_bot_runner.deliver_message.await_args.kwargs["metadata"]
+    assert metadata["ignore_result"] == "true"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("token_type", ["iam-token", "agentpaas"])
+async def test_handle_chat_send_extracts_trusted_caller_identity(
+    service,
+    mock_bot_runner,
+    token_type,
+):
+    inp = _make_chat_send_input(
+        extensions={
+            "caller_context": {
+                "subject": {"kind": "human", "ref": "workno-agent"},
+            },
+            "caller_execution_token": {
+                "version": "1.0",
+                "format": "jwt",
+                "token": "caller-secret",
+                "expires_at_ms": 1_800_000_000_000,
+                "type": token_type,
+            },
+            "caller_wait_mode": "detached",
+        }
+    )
+    result = await service.handle_chat_send(inp)
+    assert result.ok is True
+    await asyncio.sleep(0.05)
+
+    metadata = mock_bot_runner.deliver_message.await_args.kwargs["metadata"]
+    assert metadata["user_id"] == "workno-agent"
+    assert metadata["caller_token"] == "caller-secret"
+    assert metadata["type"] == token_type
+    assert "iam_token" not in metadata
+    assert "token" not in metadata
+    assert "caller_token_type" not in metadata
+
 
 @pytest.mark.asyncio
 async def test_handle_chat_send_deliver_fails(
@@ -704,8 +742,12 @@ def test_build_bcn_metadata_with_draft_tag(service):
     assert meta["bot_options"]["lifecycle_stage"] == "draft"
 
 
-def test_build_bcn_metadata_ignore_result(service):
-    meta = service._build_bcn_metadata("sess-1", "group-1", ignore_result=True)
+def test_build_bcn_metadata_derives_ignore_result_from_extensions(service):
+    meta = service._build_bcn_metadata(
+        "sess-1",
+        "group-1",
+        extensions={"caller_wait_mode": "detached"},
+    )
     assert meta["ignore_result"] == "true"
 
 

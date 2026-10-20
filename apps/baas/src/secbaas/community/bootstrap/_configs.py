@@ -50,6 +50,7 @@ class ConfigKey(StrEnum):
     BOT_SERVICE_CONNECT_TIMEOUT = "bot_service.connect_timeout"
     BOT_SERVICE_REQUEST_TIMEOUT = "bot_service.request_timeout"
     BOT_SERVICE_WS_PATH = "bot_service.ws_path"
+    BOT_SERVICE_CALLER_TOKEN_DOMAINS = "bot_service.caller_token_domains"
 
     # Bot Health Checker
     HEALTH_CHECK_TIMEOUT = "bot_health_checker.health_check.timeout_seconds"
@@ -325,6 +326,7 @@ class BotServiceConfig(ConfigSchema):
     connect_timeout: float = Field(default=10.0, gt=0)
     request_timeout: float = Field(default=30.0, gt=0)
     ws_path: str = "/ws"
+    caller_token_domains: list[str] = Field(default_factory=list)
 
 
 class HealthCheckSettings(BaseSettings):

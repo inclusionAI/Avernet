@@ -39,6 +39,26 @@ class BotBindingData:
     active_runtime_engine_type: str | None = None
 
 
+CALLER_CREDENTIAL_TYPE_IAM_TOKEN = "iam-token"
+CALLER_CREDENTIAL_TYPE_AGENTPAAS = "agentpaas"
+
+
+@dataclass(frozen=True, slots=True)
+class CallerExecutionCredential:
+    """Caller execution credential used only in the in-memory provisioning path."""
+
+    type: str
+    token: str
+
+    @property
+    def is_iam_token(self) -> bool:
+        return self.type == CALLER_CREDENTIAL_TYPE_IAM_TOKEN
+
+    @property
+    def is_agentpaas(self) -> bool:
+        return self.type == CALLER_CREDENTIAL_TYPE_AGENTPAAS
+
+
 @dataclass
 class LogRelationPayload:
     """POST /api/bot-chat/log-relations 请求体"""

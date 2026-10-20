@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from secbaas.community.api.bot_runtime import BotBindingInfo
+from secbaas.community.api.device_manage import ErrorCode, PaasError
 from secbaas.community.core.service.bot_run import (
     BotBindingResolver,
     binding_data_to_info,
@@ -28,10 +29,15 @@ from secbaas.community.core.service.bot_run._bot_run_utils import (
     build_caller_binding,
     build_chat_metadata,
     is_caller_mode,
+    normalize_caller_identity_metadata,
+    strip_sensitive_metadata,
 )
 from secbaas.community.plugins.eval_env.stub import NoopEvalSessionLog
 from secbaas.community.spi.bot.engine_adapter import extract_session_key_from_planned_id
-from secbaas.community.spi.bot_service import BotBindingData
+from secbaas.community.spi.bot_service import (
+    BotBindingData,
+    CallerExecutionCredential,
+)
 
 BOT_ID = "test-bot-000001"
 ENTITY_ID = "test-entity-001"
@@ -744,13 +750,9 @@ class TestBuildCallerBinding:
 
 
 class TestResolveCallerBinding:
-    """测试 BotBindingResolver.resolve_caller_binding：调 caller-connection 拉容器。
+    """测试 BotBindingResolver.resolve_caller_binding：公共拉起 + typed 凭据。"""
 
-    metadata 的 ``iam_token`` 是裸 IAM token 值；resolver 包装成 Cookie 头格式
-    ``IAM_TOKEN=<值>`` 传给插件。
-    """
-
-    async def test_resolves_sandbox_via_caller_connection(self):
+    async def test_resolves_sandbox_via_iam_credential(self):
         plugin = MagicMock()
         plugin.get_caller_connection = AsyncMock(return_value="sbx-9")
         resolver = BotBindingResolver(plugin)
@@ -758,27 +760,51 @@ class TestResolveCallerBinding:
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
             metadata={
                 "user_id": "u-9",
-                "iam_token": "test-value",
+                "caller_token": "test-value",
+                "type": "iam-token",
             },
         )
         plugin.get_caller_connection.assert_awaited_once_with(
             bot_id=BOT_ID,
             owner_id=ENTITY_ID,
             user_id="u-9",
-            cookie="IAM_TOKEN=test-value",
+            credential=CallerExecutionCredential(type="iam-token", token="test-value"),
         )
         assert info.sandbox_id == "sbx-9"
         assert info.device_provider == "caller"
 
-    async def test_user_id_defaults_to_empty_string(self):
-        """metadata 无 user_id 时直接传空串（无兜底推导）；cookie 空值包装。"""
+    async def test_resolves_sandbox_via_agentpaas_credential(self):
+        plugin = MagicMock()
+        plugin.get_caller_connection = AsyncMock(return_value="sbx-agent")
+        resolver = BotBindingResolver(plugin)
+        info = await resolver.resolve_caller_binding(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            metadata={
+                "user_id": "workno-agent",
+                "caller_token": "agentpaas-token",
+                "type": "agentpaas",
+            },
+        )
+        plugin.get_caller_connection.assert_awaited_once_with(
+            bot_id=BOT_ID,
+            owner_id=ENTITY_ID,
+            user_id="workno-agent",
+            credential=CallerExecutionCredential(
+                type="agentpaas",
+                token="agentpaas-token",
+            ),
+        )
+        assert info.sandbox_id == "sbx-agent"
+
+    async def test_missing_credential_fails_closed(self):
+        """无 supported credential 时不构造空凭据，也不调用插件。"""
         plugin = MagicMock()
         plugin.get_caller_connection = AsyncMock(return_value="sbx-8")
         resolver = BotBindingResolver(plugin)
-        await resolver.resolve_caller_binding(bot_id=BOT_ID, metadata={})
-        plugin.get_caller_connection.assert_awaited_once_with(
-            bot_id=BOT_ID, owner_id="", user_id="", cookie="IAM_TOKEN="
-        )
+        with pytest.raises(PaasError) as exc_info:
+            await resolver.resolve_caller_binding(bot_id=BOT_ID, metadata={})
+        assert exc_info.value.code == ErrorCode.CONFIG_INVALID
+        plugin.get_caller_connection.assert_not_awaited()
 
 
 class TestResolveBindingNormalOnly:
@@ -804,7 +830,7 @@ class TestResolveBindingNormalOnly:
         resolver = BotBindingResolver(plugin)
         info = await resolver.resolve_binding(
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
-            metadata={"iam_token": "iam-value", "user_id": "u-1"},
+            metadata={"caller_token": "iam-value", "type": "iam-token", "user_id": "u-1"},
         )
         assert info is not None
         assert info.device_provider == "teclaw"
@@ -823,13 +849,162 @@ class TestResolveBindingNormalOnly:
 
 
 class TestIsCallerMode:
-    """is_caller_mode 判定：metadata 双键 + binding 引擎条件。"""
+    """is_caller_mode 判定：metadata caller 键 + binding 引擎条件。"""
 
     def test_missing_binding_info_returns_false(self):
         """binding_info 缺失时无法确认引擎，保守判 False（不拉容器）。"""
         assert (
-            is_caller_mode({"iam_token": "iam-value", "user_id": "u-1"}, None) is False
+            is_caller_mode(
+                {"caller_token": "iam-value", "type": "iam-token", "user_id": "u-1"}, None
+            )
+            is False
         )
+
+    def test_agentpaas_credential_enables_caller_mode(self):
+        binding = BotBindingInfo(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            sandbox_id=None,
+            device_id=None,
+            device_provider="baas",
+            binding_id=1,
+            device_props={},
+            bot_type="service",
+            engine_type="openclaw",
+            baas_session_id=None,
+        )
+        metadata = {
+            "user_id": "workno-agent",
+            "caller_token": "agentpaas-token",
+            "type": "agentpaas",
+        }
+        assert is_caller_mode(metadata, binding) is True
+
+    def test_token_without_type_stays_in_caller_mode(self):
+        """token 缺 type 时仍进入 caller 链路，由 resolver fail closed。"""
+        binding = BotBindingInfo(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            sandbox_id=None,
+            device_id=None,
+            device_provider="baas",
+            binding_id=1,
+            device_props={},
+            bot_type="service",
+            engine_type="openclaw",
+            baas_session_id=None,
+        )
+        metadata = normalize_caller_identity_metadata(
+            {"user_id": "u-1", "caller_token": "agentpaas-token"}
+        )
+        assert metadata == {
+            "user_id": "u-1",
+            "caller_token": "agentpaas-token",
+        }
+        assert is_caller_mode(metadata, binding) is True
+
+    async def test_unsupported_agentpaas_credential_type_fails_closed(self):
+        plugin = MagicMock()
+        plugin.get_caller_connection = AsyncMock()
+        resolver = BotBindingResolver(plugin)
+        with pytest.raises(PaasError) as exc_info:
+            await resolver.resolve_caller_binding(
+                bot_id=BOT_ID,
+                metadata={
+                    "user_id": "u-1",
+                    "caller_token": "agentpaas-token",
+                    "type": "unsupported",
+                },
+            )
+        assert exc_info.value.code == ErrorCode.CONFIG_INVALID
+        plugin.get_caller_connection.assert_not_awaited()
+
+
+class TestStripSensitiveMetadata:
+    def test_strips_unified_caller_token(self):
+        result = strip_sensitive_metadata(
+            {
+                "caller_token": "agentpaas-token",
+                "user_id": "u-1",
+                "type": "agentpaas",
+                "foo": "bar",
+            }
+        )
+
+        assert "caller_token" not in result
+        assert result["type"] == "agentpaas"
+        assert result["user_id"] == "u-1"
+        assert result["foo"] == "bar"
+
+
+class TestNormalizeCallerIdentityMetadata:
+    """OpenAPI 入口在 BotRunner 边界统一 caller identity。"""
+
+    def test_openapi_iam_token_key_becomes_canonical(self):
+        result = normalize_caller_identity_metadata(
+            {"iam_token": "iam-value", "user_id": "u-1", "foo": "bar"}
+        )
+
+        assert result == {
+            "foo": "bar",
+            "user_id": "u-1",
+            "caller_token": "iam-value",
+            "type": "iam-token",
+        }
+
+    def test_openapi_iam_token_without_user_id_stays_non_caller(self):
+        result = normalize_caller_identity_metadata(
+            {"iam_token": "iam-value", "foo": "bar"}
+        )
+
+        assert result == {"foo": "bar"}
+
+    def test_openapi_iam_type_is_not_a_credential_key(self):
+        metadata = {"iam-token": "type-only-value", "user_id": "u-1"}
+        assert normalize_caller_identity_metadata(metadata) == metadata
+
+    def test_bcn_canonical_keys_pass_through_unchanged(self):
+        metadata = {
+            "user_id": "workno-agent",
+            "caller_token": "agentpaas-token",
+            "type": "agentpaas",
+        }
+        assert normalize_caller_identity_metadata(metadata) == metadata
+
+    def test_bcn_protocol_keys_are_not_openapi_credentials(self):
+        result = normalize_caller_identity_metadata(
+            {
+                "user_id": "u-1",
+                "caller_execution_token": "agentpaas-token",
+                "caller_execution_token_type": "agentpaas",
+            }
+        )
+
+        assert "caller_token" not in result
+        assert "type" not in result
+        assert result["user_id"] == "u-1"
+
+    def test_user_id_without_credential_stays_non_caller(self):
+        result = normalize_caller_identity_metadata({"user_id": "u-1"})
+        assert "caller_token" not in result
+        assert "type" not in result
+        assert result["user_id"] == "u-1"
+
+
+class TestStripSensitiveMetadataLegacy:
+    def test_strips_openapi_and_agentpaas_credential_values(self):
+        metadata = {
+            "user_id": "u-1",
+            "iam_token": "iam-token-value",
+            "caller_token": "agentpaas-token",
+            "caller_token_type": "agentpaas",
+            "foo": "bar",
+        }
+        result = strip_sensitive_metadata(metadata)
+        assert "iam_token" not in result
+        assert "caller_token" not in result
+        assert result["caller_token_type"] == "agentpaas"
+        assert result["foo"] == "bar"
 
 
 # ==================== Tests: extract_session_key_from_planned_id ====================

@@ -119,6 +119,58 @@ def test_interaction_resolve_is_registered_on_json_downlink() -> None:
     assert dispatcher is _dispatch_interaction_resolve
 
 
+def _chat_send_body():
+    return {
+        "type": "req",
+        "id": "run-1",
+        "session_id": "session-1",
+        "bcn_group_id": "group-1",
+        "to_bot": {"provider_id": "baas", "provider_bot_ref": "bot-1"},
+        "from": {"kind": "human", "name": "caller"},
+        "message": {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+        "extensions": {
+            "caller_context": {
+                "subject": {"kind": "human", "ref": "workno-agent"},
+            },
+            "caller_execution_token": {
+                "version": "1.0",
+                "format": "jwt",
+                "token": "caller-secret",
+                "expires_at_ms": 1_800_000_000_000,
+                "type": "agentpaas",
+            },
+        },
+    }
+
+
+def test_chat_send_request_parses_caller_identity_extensions() -> None:
+    request = ChatSendRequest.model_validate(_chat_send_body())
+
+    assert request.extensions is not None
+    assert request.extensions.caller_context is not None
+    assert request.extensions.caller_context.subject.ref == "workno-agent"
+    assert request.extensions.caller_execution_token is not None
+    assert request.extensions.caller_execution_token.type == "agentpaas"
+    assert request.extensions.caller_execution_token.version == "1.0"
+    assert request.extensions.caller_execution_token.expires_at_ms == 1_800_000_000_000
+
+
+def test_chat_send_request_pairs_caller_identity_fields() -> None:
+    body = _chat_send_body()
+    del body["extensions"]["caller_execution_token"]
+
+    with pytest.raises(ValidationError, match="provided together"):
+        ChatSendRequest.model_validate(body)
+
+
+def test_chat_send_request_rejects_unknown_caller_token_type() -> None:
+    body = _chat_send_body()
+    body["extensions"]["caller_execution_token"]["type"] = "unknown-token"
+
+    with pytest.raises(ValidationError, match="unknown-token"):
+        ChatSendRequest.model_validate(body)
+
+
 @pytest.mark.asyncio
 async def test_dispatch_interaction_resolve_preserves_full_request() -> None:
     captured = {}

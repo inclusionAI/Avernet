@@ -907,9 +907,7 @@ class TestLoadSensitiveBypassKeys:
 
         pool = AsyncChatClientPool()
         service = MagicMock()
-        service.get_config.return_value = MagicMock(
-            conf_value="abc, def\nghi,,"
-        )
+        service.get_config.return_value = MagicMock(conf_value="abc, def\nghi,,")
         assert pool._load_sensitive_bypass_keys(service) == (
             "abc",
             "def",
