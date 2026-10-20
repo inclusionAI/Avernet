@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use bcs_config_api::mysql::MysqlConnectionConfig;
 use bcs_config_api::{MysqlDbConfig, StatementProtocol};
-use bcs_db_api::{DbPlugin, DbStatement};
+use bcs_db_api::{DbPlugin, DbStatement, db_get_column};
 use bcs_db_mysql::{MysqlDbManager, MysqlDbPlugin};
 use bcs_domain::{GroupContextOwners, GroupContextPolicy, ScopeLevel};
 use bcs_group_context_store::{GroupContextRepo, NewGroupContextEntry, SqlGroupContextStore};
@@ -52,7 +52,35 @@ async fn mysql_group_context_timestamps_roundtrip_in_utc_and_non_utc_sessions() 
 }
 
 async fn apply_mysql_group_context_migration(db: &dyn DbPlugin) {
-    let migration = include_str!("../../../../migrations/mysql/033_group_context.sql");
+    execute_group_context_migration(
+        db,
+        include_str!("../../../../migrations/mysql/033_group_context.sql"),
+    )
+    .await;
+
+    let columns = db
+        .query(DbStatement::new(
+            "SELECT COUNT(*) AS owner_columns FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'bcs_group_contexts' AND column_name = 'owners_json'",
+        ))
+        .await
+        .expect("check for the MySQL group context owners column");
+    let owner_columns = db_get_column::<i64>(
+        columns
+            .first()
+            .expect("MySQL information_schema returns one count row"),
+        "owner_columns",
+    )
+    .expect("read the MySQL group context owners column count");
+    if owner_columns == 0 {
+        execute_group_context_migration(
+            db,
+            include_str!("../../../../migrations/mysql/034_group_context_owners.sql"),
+        )
+        .await;
+    }
+}
+
+async fn execute_group_context_migration(db: &dyn DbPlugin, migration: &'static str) {
     for statement in migration
         .split(';')
         .map(str::trim)
