@@ -58,6 +58,7 @@ export interface BotConnectionDto {
 
 export interface BotRequestParams {
   user_id: string;
+  stage?: 'draft' | 'verify' | 'online';
   owner_id?: string;
   f_user_id?: string;
 }

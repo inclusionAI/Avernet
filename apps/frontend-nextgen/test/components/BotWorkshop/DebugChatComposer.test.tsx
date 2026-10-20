@@ -37,6 +37,7 @@ it('上传完成后以文件引用发送调试消息', async () => {
       sessionId="session-1"
       userId="user-1"
       ownerId="owner-1"
+      runtimeStage="verify"
       isRequesting={false}
       onSend={onSend}
       onStop={jest.fn()}
@@ -46,6 +47,7 @@ it('上传完成后以文件引用发送调试消息', async () => {
   fireEvent.change(screen.getByLabelText('选择调试会话文件'), { target: { files: [file] } });
   await waitFor(() => expect(screen.getByText('需求说明.md')).toBeInTheDocument());
   expect(stageFiles).toHaveBeenCalledWith([file]);
+  expect(mockedUpload).toHaveBeenCalledWith('bot-1', 'session-1', 'user-1', 'owner-1', 'verify');
 
   fireEvent.click(screen.getByRole('button', { name: '发送' }));
   expect(onSend).toHaveBeenCalledWith('<file-ref insert_id="debug_file_1"></file-ref>', {

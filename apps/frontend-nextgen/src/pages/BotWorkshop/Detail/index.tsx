@@ -267,6 +267,7 @@ const BotWorkshopDetailPage: React.FC = () => {
             )}
           >
             <DebugChatPanel
+              key={`${bot.id}:${verifying ? 'verify' : runtimeStage ?? bot.lifecycle}`}
               bot={bot}
               runtimeStage={verifying ? 'verify' : runtimeStage}
               ownerId={addressedOwnerId}

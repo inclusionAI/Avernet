@@ -87,6 +87,22 @@ it('切换 session 触发 connect + loadHistory', async () => {
   await waitFor(() => expect(mockProvider.loadHistory).toHaveBeenCalled());
 });
 
+it('同一 sessionId 切换运行环境时断开旧连接并重新拉取历史', async () => {
+  mockedFactory.mockImplementation(() => ({ ...mockProvider }));
+  const target: ChatBotView = { ...bot, botType: 'service', runtimeStage: 'draft' };
+  const { rerender } = renderHook(({ selectedBot }: { selectedBot: ChatBotView }) => useBotChat(selectedBot, session), {
+    initialProps: { selectedBot: target },
+  });
+  await waitFor(() => expect(mockProvider.connect).toHaveBeenCalledTimes(1));
+  rerender({ selectedBot: { ...target, runtimeStage: 'verify' } });
+  await waitFor(() => expect(mockProvider.connect).toHaveBeenCalledTimes(2));
+  expect(mockProvider.disconnect).toHaveBeenCalledTimes(1);
+  expect(mockProvider.loadHistory).toHaveBeenCalledTimes(2);
+  expect(mockedFactory).toHaveBeenLastCalledWith({
+    bot: expect.objectContaining({ runtimeStage: 'verify' }), userId: 'human-1', sessionId: 's1',
+  });
+});
+
 it('切换到新会话(sessionId 变化)先清空副屏再 connect,避免旧会话副屏内容叠加(对齐 useGroupChat connect effect)', async () => {
   const closePanelForce = jest.fn();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

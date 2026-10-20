@@ -41,7 +41,7 @@ export interface ChatBotView {
   templateName?: string;
   spaceId?: string;
   spaceName?: string;
-  /** 当前对话所连接的运行阶段；普通工作台会话缺省使用 online。 */
+  /** 服务 Bot 的运行阶段；个人 Bot 和好友会话仅使用 draft。 */
   runtimeStage?: BotIamTokenStage;
   /** 标记来自当前用户好友关系，而非当前用户管理的 Bot。 */
   isFriendBot?: boolean;
@@ -96,16 +96,22 @@ export function resolveUserId(userId: string): string {
   return resolveOpenApiUserId(userId);
 }
 
-/** 好友请求补 f_user_id；团队请求仅补实体 owner_id，不混入好友身份。 */
-export function withFriendBotRequestParams<T extends { user_id: string; owner_id?: string }>(
+/** 连接和会话请求共用运行环境，避免 Token 与实际实例选址不一致。 */
+export function resolveChatRuntimeStage(bot: ChatBotView): BotIamTokenStage {
+  if (bot.isFriendBot || bot.botType === 'personal') return 'draft';
+  return bot.runtimeStage ?? (bot.botType === 'service' ? 'online' : 'draft');
+}
+
+/** 所有单聊请求补运行环境；好友补 f_user_id，团队补实体 owner。 */
+export function withFriendBotRequestParams<T extends { user_id: string; owner_id?: string; stage?: BotIamTokenStage }>(
   bot: ChatBotView,
   userId: string,
   params: T,
-): T & { f_user_id?: string } {
-  if (!bot.isFriendBot && !bot.isTeamBot) return params;
+): T & { stage: BotIamTokenStage; f_user_id?: string } {
   return {
     ...params,
-    ...(bot.ownerId ? { owner_id: bot.ownerId } : {}),
+    stage: bot.isFriendBot || bot.botType === 'personal' ? 'draft' : params.stage ?? resolveChatRuntimeStage(bot),
+    ...((bot.isFriendBot || bot.isTeamBot) && bot.ownerId ? { owner_id: bot.ownerId } : {}),
     ...(bot.isFriendBot ? { f_user_id: resolveUserId(userId) } : {}),
   };
 }

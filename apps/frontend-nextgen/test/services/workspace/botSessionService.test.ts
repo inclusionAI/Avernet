@@ -213,6 +213,7 @@ describe('botSessionService', () => {
     expect(mocked.listBotSessions).toHaveBeenCalledWith('20260402_ab', {
       user_id: '900003',
       owner_id: '2088',
+      stage: 'draft',
       page: 1,
       page_size: 50,
     });
@@ -241,7 +242,7 @@ describe('botSessionService', () => {
     const res = await botSessionService.createSession(bot, 'human_900003', '新');
     expect(mocked.createBotSession).toHaveBeenCalledWith(
       '20260402_ab',
-      { user_id: '900003', owner_id: '2088' },
+      { user_id: '900003', owner_id: '2088', stage: 'draft' },
       { title: '新' },
     );
     expect((res as any).data.sessionId).toBe('sid-new');
@@ -267,7 +268,7 @@ describe('botSessionService', () => {
 
     expect(mocked.createBotSession).toHaveBeenCalledWith(
       '20260402_ab',
-      { user_id: '900003', owner_id: '2088' },
+      { user_id: '900003', owner_id: '2088', stage: 'draft' },
       { title: '新会话' },
     );
   });
@@ -283,6 +284,7 @@ describe('botSessionService', () => {
     expect(mocked.deleteBotSession).toHaveBeenCalledWith('20260402_ab', 'sid-9', {
       user_id: '900003',
       owner_id: '2088',
+      stage: 'draft',
     });
     expect(res.ok).toBe(true);
   });
@@ -310,6 +312,7 @@ describe('botSessionService', () => {
     expect(mocked.listBotSessionMessages).toHaveBeenCalledWith('20260402_ab', 's', {
       user_id: '2088',
       owner_id: '2088',
+      stage: 'draft',
       page: 1,
       page_size: 50,
     });
@@ -328,6 +331,7 @@ describe('botSessionService', () => {
     expect(mocked.listBotSessionMessages).toHaveBeenCalledWith('20260402_ab', 's', {
       user_id: '900003',
       owner_id: '2088',
+      stage: 'draft',
       page: 1,
       page_size: 50,
     });
@@ -350,6 +354,7 @@ describe('botSessionService', () => {
     expect(mocked.listBotModels).toHaveBeenCalledWith('20260402_ab', {
       user_id: '900003',
       owner_id: '2088',
+      stage: 'draft',
       page: 1,
       page_size: 50,
     });
@@ -375,7 +380,7 @@ describe('botSessionService', () => {
     expect(mocked.updateBotSession).toHaveBeenCalledWith(
       '20260402_ab',
       's1',
-      { user_id: '900003' },
+      { user_id: '900003', stage: 'draft' },
       { model: 'openai/gpt-5.3' },
     );
     expect(res.ok && res.data.model).toBe('openai/gpt-5.3');
@@ -393,7 +398,7 @@ describe('botSessionService', () => {
     };
     const messageDto = { message_id: 'm1', session_id: 's1', role: 'user', content: 'q', gmt_create: '' };
     const friendBot = { ...bot, isFriendBot: true };
-    const baseParams = { user_id: '900003', owner_id: '2088', f_user_id: '900003' };
+    const baseParams = { user_id: '900003', owner_id: '2088', f_user_id: '900003', stage: 'draft' };
 
     mocked.listBotSessions.mockResolvedValue({ data: { items: [], total: 0 } });
     mocked.createBotSession.mockResolvedValue({ data: sessionDto });
@@ -465,6 +470,7 @@ describe('botSessionService', () => {
     expect(mocked.listBotSessions).toHaveBeenLastCalledWith('20260402_ab', {
       user_id: '900003',
       owner_id: '2088',
+      stage: 'draft',
       page: 1,
       page_size: 10,
     });
@@ -501,6 +507,7 @@ it('listSessionsPage 与收藏分页复用统一标题映射并透传分页参�
   expect(mocked.listBotSessions).toHaveBeenCalledWith('20260402_ab', {
     user_id: '900003',
     owner_id: '2088',
+    stage: 'draft',
     page: 2,
     page_size: 10,
   });
