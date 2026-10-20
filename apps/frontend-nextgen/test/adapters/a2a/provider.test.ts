@@ -312,6 +312,73 @@ describe('parserFactory 注入缝（公共/宿主解耦契约）', () => {
   });
 });
 
+describe('请求隔离度线 — generation 状态栅栏 + 出站代次绑定（review R2-1/2-2）', () => {
+  it('R2-1 交错：取消A(未出站) → B启动出站 → A 延迟退出不得清 B 的在途态 → 取消 B 正常播报', async () => {
+    const gates: Array<(t: string) => void> = [];
+    const iamTokenGetter = () => new Promise<string>((r) => { gates.push(r); });
+    let deferred!: DeferredSse;
+    const fetchImpl = routingFetch((_req, call) => {
+      const signal = (call.init as any).signal as AbortSignal;
+      if (signal.aborted) throw new TypeError('aborted');   // 真fetch语义：预中止即拒
+      deferred = deferredSse(signal);
+      return deferred.response;
+    });
+    const { provider, spies } = newProvider({ fetchImpl, iamTokenGetter });
+    const outcomes: CancelOutcome[] = [];
+    provider.onCancelOutcome = (o) => outcomes.push(o);
+    await provider.connect();
+
+    // A 启动 → 停在 iam 窗口（未出站）→ abort：cancelled-clean
+    const inFlightA = provider.request({ query: 'a', sessionKey: SESSION });
+    await until(() => gates.length === 1);
+    provider.abort();
+    expect(outcomes).toEqual([{ kind: 'cancelled-clean' }]);
+
+    // B 启动 → 出站（无事件流，未收首帧）——B 是当前在途请求
+    const inFlightB = provider.request({ query: 'b', sessionKey: SESSION });
+    await until(() => gates.length === 2);
+    gates[1]('tok-b');
+    await until(() => rpcCallOf(fetchImpl) !== undefined);      // B 已 POST
+
+    // A 的旧请求此刻才收回 token 延迟退出——**不得**触碰 B 的 isRequesting
+    gates[0]('tok-a');
+    await inFlightA;
+
+    // 取消 B：必须仍被视为在途（bug 下 A 的让位写把它清成空闲 → no-op 零播报）
+    provider.abort();
+    await until(() => outcomes.length === 2);
+    expect(outcomes[1]).toEqual({ kind: 'task-outcome-unknown' });   // B 已出站首帧前
+    await inFlightB;                                                // B 静默收尾：无 error 播报
+    expect(spies.onError).not.toHaveBeenCalled();
+  });
+
+  it('R2-2 复用：上一请求曾出站后，新请求停在 iam 窗口中止 → 仍是 cancelled-clean（出站标记不跨请求残留）', async () => {
+    const gates: Array<(t: string) => void> = [];
+    const iamTokenGetter = () => new Promise<string>((r) => { gates.push(r); });
+    // 第一请求正常收口：fixture 全流 → COMPLETED 终局
+    const fetchImpl = routingFetch((req) =>
+      sseResponse([toSse(reId(snapshotEnvelopes, req.id))]));
+    const { provider, spies } = newProvider({ fetchImpl, iamTokenGetter });
+    const outcomes: CancelOutcome[] = [];
+    provider.onCancelOutcome = (o) => outcomes.push(o);
+    await provider.connect();
+
+    const first = provider.request({ query: '一梭', sessionKey: SESSION });
+    await until(() => gates.length === 1);
+    gates[0]('tok-1');
+    await first;                                            // 出站过（rpcDispatched 曾置位）
+    expect(spies.onComplete).toHaveBeenCalledTimes(1);
+
+    // 复用同 provider：第二请求停在 iam 窗口（确定未出站）→ abort 应 clean
+    const second = provider.request({ query: '二梭', sessionKey: SESSION });
+    await until(() => gates.length === 2);
+    provider.abort();
+    expect(outcomes).toEqual([{ kind: 'cancelled-clean' }]);   // bug：残留 true → unknown
+    gates[1]('tok-2');                                       // 让延迟收口不悬挂
+    await second;
+  });
+});
+
 describe('connect() — card probe + scenario gate before connection state', () => {
   it('探测成功：isConnected=true，状态订阅 connecting→connected；只发一次探测', async () => {
     const fetchImpl = routingFetch(() => { throw new Error('no rpc expected'); });

@@ -311,10 +311,12 @@ export class A2AProvider {
     | null = null;
   /** 终帧/错误帧是否已入账（manualRecover 的"无事可恢复"判据；request 开局清零） */
   private runSettled = false;
-  /** 本次请求的 SendStreamingMessage 是否已出站（iam 签发后、try 前置位）——
-   * pre-task abort 的 clean/unknown 分界：出站前中止 = 服务端零 run（clean）；
-   * 出站后首帧前中止 = run 可能已受理并执行（router.py open_run 先于订阅回包）*/
-  private rpcDispatched = false;
+  /** 已出站的请求代次（该代次的 SendStreamingMessage 已 POST；null=尚无请求出站）。
+   * 代次绑定而非布尔：布尔跨请求残留——上一请求置位后，复用 provider 的下一
+   * 请求在 iam 签发窗口中止会被误判 task-outcome-unknown（review R2-2）。
+   * abort 度线 = "当前在途代次是否曾出站"（dispatchedGeneration === 在途代次）。
+   */
+  private dispatchedGeneration: number | null = null;
   private parseResultListeners: Array<(result: SdkParseResult) => void> = [];
   private connectionStatusListeners:
     Array<(event: A2aConnectionStatusEvent) => void> = [];
@@ -343,6 +345,13 @@ export class A2AProvider {
   }
 
   // ─── ChatProvider 接口 ───────────────────────────────────────────────
+
+  /**
+   * 宿主可识别标记（review R2-3）：发送边界按"当下传输选择"重估——宿主
+   * （botChatProvider）据此识别 inner 是否 A2A，对开关关/locked-v3 做新任务
+   * 回滚。duck-typing 面而非接口强制（对位 v3 无此成员 = false 语义）。
+   */
+  readonly isA2aProvider = true as const;
 
   /** card 探测 + 分场景能力门，然后才置连接态（B13 factory 捕获此异常回退 v3） */
   async connect(): Promise<void> {
@@ -449,7 +458,11 @@ export class A2AProvider {
       outcome: null, runFailure: null, terminalApplied: false,
     };
     const iamToken = await this.resolveIamToken();
-    this.rpcDispatched = true;       // 度线：此后中止即"已出站首帧前"→ 结果未知
+    // 出站位=代次记账（gate 于代次流通：被中止/让位的旧代次不得在延迟归还后
+    // 污染新请求的出状态——旧代次的 ctrl 已 abort，其流静默收尾无 POV）
+    if (generation === this.generation) {
+      this.dispatchedGeneration = generation;
+    }
 
     try {
       for await (const ev of streamRpc(this.config.a2aUrls.rpcUrl, rpcRequest, {
@@ -462,9 +475,11 @@ export class A2AProvider {
       }
     } catch (err) {
       // abort()/disconnect()/新 request 让位：M1 语义（主动取消非失败），静默收尾
-      // （UI 完成播报已在 abort() 的 onComplete([]) 发过）
+      // （UI 完成播报已在 abort() 的 onComplete([]) 发过）。
+      // ⚠️ 让位子**零实例写**（review R2-1）：请求槽归当前代次（中止方/新请求）
+      // 所有——旧代次在此写 isRequesting=false 会清掉新请求的在途态，令新任务
+      // 的 abort 被误判空闲 no-op（跳过取消播报与 CancelTask）。
       if (generation !== this.generation) {
-        this.isRequesting = false;
         return;
       }
       const typed = (err as { failure?: WireFailure }).failure;
@@ -504,15 +519,17 @@ export class A2AProvider {
       throw error;
     }
 
-    this.isRequesting = false;
     if (generation !== this.generation) {
-      return;                     // 被让位的旧 run：静默 resolve，不动 UI
-    }
+      return;                     // 被让位的旧 run：静默 resolve，不动 UI 也不动
+    }                             // 请求槽（isRequesting 归中止方/新代所有，R2-1）
+    this.isRequesting = false;
     this.settleRun(bag);
     // completed / resumed：parser.onComplete 钩子已驱动 UI（钉板 #7）；request 就此 resolve
   }
 
   abort(): void {
+    const inFlightGen = this.generation;  // 在途请求的车票（若有）——本次自增前取值
+    const dispatched = this.dispatchedGeneration === inFlightGen;
     this.generation += 1;               // 栅栏：旧迭代器逃逸帧拦截
     const inFlight = this.isRequesting;
     this.currentAbort?.abort();         // M1 语义：断流=非失败（streamRpc 静默 return）
@@ -525,8 +542,9 @@ export class A2AProvider {
       // known-taskId 在途（含恢复轮——request 槽在恢复期仍持有，同走此路）：
       // dispatch wire CancelTask + 乐观挂禁；控制面落地后核销（§3.1）。
       this.fireWireCancel(anchor.taskRunId, anchor.sessionKey);
-    } else if (this.rpcDispatched) {
-      // 首帧前中止且请求已出站：引擎 open_run→dispatch 先于订阅回包（router.py
+    } else if (dispatched) {
+      // 首帧前中止且请求已出站（**当前在途代次**曾出站——代次绑定防上一请求
+      // 残留）：引擎 open_run→dispatch 先于订阅回包（router.py
       // `_send_streaming`），run 可能已受理并执行——但客户端无 taskId，wire
       // 取消无从构造。按 spec §3 #2 报**任务结果未知**（非 clean 谎报已停）；
       // 不挂禁令（无核销锚——GetTask 也要 taskId，挂禁即死锁），用户显式
