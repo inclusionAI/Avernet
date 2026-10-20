@@ -131,7 +131,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
    * （尚无 ws url）/ 非 A2A 面（选择探测落 v3）恒 false——v3 发送不受影响。
    */
   isSendBanned(): boolean {
-    return this.wsUrl != null && isSendBannedForSession(this.options.sessionId, this.wsUrl);
+    return this.wsUrl !== null && isSendBannedForSession(this.options.sessionId, this.wsUrl);
   }
 
   /** B12 取消终局播报订阅：A2AProvider.onCancelOutcome 经本类转发（含 provider 已 teardown 的迟到核销） */

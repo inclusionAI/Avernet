@@ -108,7 +108,7 @@ describe('rpcOnce — 单信封响应面', () => {
     const ctrl = new AbortController();
     ctrl.abort();
     expect(ctrl.signal.aborted).toBe(true);
-    const abortedFetch: any = (_u: string, init?: RequestInit) =>
+    const abortedFetch: any = () =>
       Promise.reject(new DOMException('aborted', 'AbortError'))
         .catch((e: unknown) => { throw e; });
     const p = rpcOnce('http://x/rpc', req,

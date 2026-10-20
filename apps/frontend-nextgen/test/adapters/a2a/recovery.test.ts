@@ -56,8 +56,9 @@ async function* genOf(events: WireEvent[]): AsyncGenerator<WireEvent> {
 }
 
 /** 首次 next() 即挂死的生成器（per-call 超时靶子） */
+// eslint-disable-next-line require-yield -- 蓄意零 yield：首次 next() 永挂（per-call 超时靶子）
 async function* hangGen(): AsyncGenerator<WireEvent> {
-  await new Promise<never>(() => undefined);
+  await new Promise<never>(() => {});
 }
 
 /** 首次 next() 即抛 typed 失败的生成器（replay 拒绝口径） */
@@ -254,7 +255,7 @@ describe('per-call 超时（不越过剩余预算）', () => {
   it('(e) 挂死的 getTask（分诊链内）：同 1 attempt 计，超时后整链重来', async () => {
     const { engine, calls } = scriptEngine({
       replay: () => rejectWith(refusalError('cache_limit')),
-      getTask: () => new Promise(() => undefined),      // 挂死
+      getTask: () => new Promise(() => { /* 挂死 */ }),      // 挂死
     });
     const { clock, sleeps } = makeClock(() => 1);
     const result = await new RecoveryRunner(

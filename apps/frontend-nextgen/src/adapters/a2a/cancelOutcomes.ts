@@ -78,12 +78,12 @@ function strOf(v: unknown): string | undefined {
 
 /** 成功信封 {task:{status:{state}}, engineAbort} 的成员检索 */
 function readResult(result: any): { state?: string; engineAbort?: string } {
-  if (result == null || typeof result !== 'object') return {};
+  if (typeof result !== 'object' || result === null) return {};
   const task = (result as Record<string, unknown>).task;
-  if (task == null || typeof task !== 'object') return {};
+  if (typeof task !== 'object' || task === null) return {};
   const status = (task as Record<string, unknown>).status;
   return {
-    state: (status != null && typeof status === 'object')
+    state: (typeof status === 'object' && status !== null)
       ? strOf((status as Record<string, unknown>).state) : undefined,
     engineAbort: strOf((result as Record<string, unknown>).engineAbort),
   };
@@ -124,7 +124,7 @@ export function classifyCancel(input: CancelClassifyInput): CancelOutcome {
   if (input.failure) {
     return { kind: 'cancel-unknown' };
   }
-  if (input.result == null || typeof input.result !== 'object') {
+  if (typeof input.result !== 'object' || input.result === null) {
     return { kind: 'cancel-unknown' };
   }
   const { state, engineAbort } = readResult(input.result);

@@ -106,9 +106,9 @@ const defaultClock = (): RecoveryClock => ({
 });
 
 function isTypedFailure(err: unknown): err is { failure: WireFailure } {
-  return err != null && typeof err === 'object'
-    && typeof (err as { failure?: unknown }).failure === 'object'
-    && (err as { failure?: unknown }).failure != null;
+  const failure = (err as { failure?: unknown } | null | undefined)?.failure;
+  return typeof err === 'object' && err !== null
+    && typeof failure === 'object' && failure !== null;
 }
 
 /**

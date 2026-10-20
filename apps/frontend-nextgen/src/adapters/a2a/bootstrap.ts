@@ -91,7 +91,7 @@ export const SEND_BAN_UI_TEXT = '该会话暂不可发送（底层执行停止�
  */
 export function isLockCandidateError(err: unknown): boolean {
   const failure = (err as { failure?: WireFailure } | null | undefined)?.failure;
-  return failure != null && LOCK_CANDIDATE_KINDS.has(failure.kind);
+  return failure !== undefined && LOCK_CANDIDATE_KINDS.has(failure.kind);
 }
 
 // ─── 构造 + 运行期锁定订阅 ────────────────────────────────────────────────
