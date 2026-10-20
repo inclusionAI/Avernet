@@ -71,9 +71,12 @@ def actions_for(
             disabled[BotAction.ENGINE_RESTART.value] = "activate first"
             return ((BotAction.VIEW, BotAction.ACTIVATE, BotAction.DELETE), disabled)
         if display_state is DisplayState.FAILED:
-            disabled[BotAction.RESTART.value] = "bot provisioning failed"
+            # Provisioning failed, so the container never came up: an engine
+            # restart has no live daemon to relay through. The container
+            # re-provision RESTART stays available — ``restart_bot`` admits
+            # FAILED — as the card's recovery action next to DELETE.
             disabled[BotAction.ENGINE_RESTART.value] = "bot provisioning failed"
-            return ((BotAction.VIEW, BotAction.DELETE), disabled)
+            return ((BotAction.VIEW, BotAction.RESTART, BotAction.DELETE), disabled)
         disabled[BotAction.CHAT.value] = "bot not ready"
         disabled[BotAction.EDIT.value] = "bot not ready"
         disabled[BotAction.RESTART.value] = "bot not ready"
