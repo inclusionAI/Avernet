@@ -98,7 +98,9 @@ async def test_list_returns_every_grant() -> None:
         ("dataphin", "owner", True),
         ("adev-cli", "caller", False),
     ]
-    service.list_bot_clis.assert_called_once_with(bot_id="bot-1", entity_id="owner")
+    service.list_bot_clis.assert_called_once_with(
+        bot_id="bot-1", entity_id="owner", actor_id="owner"
+    )
 
 
 async def test_market_search_is_not_bot_scoped_and_passes_paging() -> None:

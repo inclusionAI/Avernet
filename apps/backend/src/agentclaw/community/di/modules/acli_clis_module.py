@@ -9,6 +9,9 @@ from agentclaw.community.api.acli_cli_service import AcliCliServiceProtocol
 from agentclaw.community.core.acli_clis.arca_port import ArcaAcliPort
 from agentclaw.community.core.acli_clis.market import AcliMarketSearch
 from agentclaw.community.core.acli_clis.service import AcliCliService
+from agentclaw.community.core.bot_collaborator.protocols import (
+    CollaboratorServiceProtocol,
+)
 from agentclaw.community.core.mcp.services.cli_capabilities import (
     CliCapabilityManifestResolver,
 )
@@ -54,6 +57,7 @@ class AcliClisModule(Module):
         transport: DeviceAdapterTransport,
         market_config: cfg.AcliMarketConfig,
         http_client: Annotated[HttpClient, QUALIFIER_GENERAL],
+        collaborators: CollaboratorServiceProtocol,
         injector: Injector,
     ) -> AcliCliServiceProtocol:
         # Resolved here rather than injected: importing the resolver at module
@@ -81,6 +85,7 @@ class AcliClisModule(Module):
             market=AcliMarketSearch(
                 http_client=http_client, search_url=market_config.search_url
             ),
+            collaborators=collaborators,
         )
 
 

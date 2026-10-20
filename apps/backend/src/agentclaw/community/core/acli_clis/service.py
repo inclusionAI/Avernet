@@ -48,6 +48,11 @@ from agentclaw.community.core.caller_identity.contracts import (
     CallerIdentityPermissionError,
     CallerLockEpochError,
 )
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+from agentclaw.community.core.bot_collaborator.protocols import (
+    CollaboratorServiceProtocol,
+    resolve_operable_permission_level,
+)
 from agentclaw.community.core.caller_identity.guard import load_bot, lock_epoch_matches
 from agentclaw.community.core.errors import DomainError
 from agentclaw.community.core.mcp.services.cli_capabilities import (
@@ -84,6 +89,7 @@ class AcliCliService(AcliCliServiceProtocol):
         manifest_resolver: CliCapabilityManifestResolver,
         port: AcliPort,
         market: AcliMarketSearch,
+        collaborators: CollaboratorServiceProtocol,
     ) -> None:
         self._bots = bot_repository
         self._locks = lock_repository
@@ -92,6 +98,7 @@ class AcliCliService(AcliCliServiceProtocol):
         self._manifest = manifest_resolver
         self._port = port
         self._market = market
+        self._collaborators = collaborators
         # One add/remove at a time per bot: each spans Passport and container
         # steps with awaits between them, and the owner's edit lock is
         # reentrant, so two of the owner's requests could otherwise interleave.
@@ -101,9 +108,22 @@ class AcliCliService(AcliCliServiceProtocol):
 
     # ── reads ────────────────────────────────────────────────────────────
 
-    def list_bot_clis(self, *, bot_id: str, entity_id: str) -> list[BotCli]:
-        """Every CLI in the bot's Passport grant, however it got there."""
+    def list_bot_clis(self, *, bot_id: str, entity_id: str, actor_id: str) -> list[BotCli]:
+        """Every CLI in the bot's Passport grant, however it got there.
+
+        ``actor_id`` must be at least a member of the bot, as for any other read
+        of its configuration; ``entity_id`` only locates the bot.
+        """
         bot = load_bot(self._bots, bot_id=bot_id, entity_id=entity_id)
+        # COSEC: locating a bot does not authorize reading it.
+        level = resolve_operable_permission_level(
+            self._collaborators,
+            bot=bot,
+            user_id=actor_id,
+            owner_id=str(bot.get("owner_id") or ""),
+        )
+        if level < PermissionLevel.MEMBER:
+            raise CallerIdentityPermissionError
         defaults = self._default_codes(bot)
         overrides = self._identities.list_draft_cli_call_types(
             int(bot["id"]), str(bot["active_engine"])

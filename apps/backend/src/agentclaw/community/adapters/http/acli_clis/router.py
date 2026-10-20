@@ -3,7 +3,8 @@
 The same operations as the public ``/openapi/v1/bots/{bot_id}/clis`` API, for
 callers authenticated by ``get_current_user``. The actor is always the
 authenticated user; ``entity_id`` only locates the bot. The service enforces
-ownership, the active-bot rule and the edit lock, and its domain errors reach
+membership for the list, and ownership, the active-bot rule and the edit lock
+for add and remove; its domain errors reach
 the client through the app-level status map (``acli_cli_status.py``).
 """
 
@@ -66,7 +67,10 @@ async def list_bot_clis(
     service: AcliCliServiceProtocol = Injected(AcliCliServiceProtocol),
 ) -> list[BotCliItem]:
     """Every CLI the bot is granted, with its identity mode and default flag."""
-    items = await asyncio.to_thread(service.list_bot_clis, bot_id=bot_id, entity_id=entity_id)
+    # COSEC: the service refuses an actor who is not at least a member of the bot.
+    items = await asyncio.to_thread(
+        service.list_bot_clis, bot_id=bot_id, entity_id=entity_id, actor_id=user.staffId
+    )
     return [
         BotCliItem(
             cli_code=item.cli_code,

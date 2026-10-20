@@ -37,6 +37,7 @@ from agentclaw.community.core.caller_identity.contracts import (
     CallerIdentityPermissionError,
     CallerLockEpochError,
 )
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.caller_identity.models import McpCallType
 
 pytestmark = pytest.mark.asyncio
@@ -175,6 +176,16 @@ class _Market:
         return AcliMarketPage(matches, len(matches), False)
 
 
+class _Collaborators:
+    """Collaborator levels per user; the owner is always OWNER."""
+
+    def __init__(self, levels: dict[str, PermissionLevel] | None = None) -> None:
+        self.levels = levels or {}
+
+    def get_operable_permission_level(self, *, bot, user_id, env=None):
+        return self.levels.get(user_id, PermissionLevel.NONE)
+
+
 def _service(
     *,
     bot: dict[str, Any] | None = None,
@@ -182,6 +193,7 @@ def _service(
     container: _Container | None = None,
     identities: _Identities | None = None,
     lock: Any = None,
+    collaborators: _Collaborators | None = None,
 ):
     agentpass = _AgentPass(["dataphin"] if granted is None else granted)
     container = container or _Container()
@@ -194,6 +206,7 @@ def _service(
         manifest_resolver=_Manifest(),  # type: ignore[arg-type]
         port=container,  # type: ignore[arg-type]
         market=_Market(),  # type: ignore[arg-type]
+        collaborators=collaborators or _Collaborators(),  # type: ignore[arg-type]
     )
     return service, agentpass, container, identities
 
@@ -231,13 +244,29 @@ def test_list_returns_every_grant_with_identity_and_default_flag() -> None:
         granted=["dataphin", "adev-cli"], identities=_Identities({"adev-cli": "caller"})
     )
 
-    listed = service.list_bot_clis(bot_id="bot-1", entity_id=OWNER)
+    listed = service.list_bot_clis(bot_id="bot-1", entity_id=OWNER, actor_id=OWNER)
 
     assert [(c.cli_code, c.identity_mode, c.default) for c in listed] == [
         ("dataphin", "owner", True),
         ("adev-cli", "caller", False),
     ]
     assert listed[1].cli_desc == "adev-cli desc"
+
+
+def test_a_member_may_list_a_bot_s_clis() -> None:
+    service, *_ = _service(collaborators=_Collaborators({"member-1": PermissionLevel.MEMBER}))
+
+    listed = service.list_bot_clis(bot_id="bot-1", entity_id=OWNER, actor_id="member-1")
+
+    assert [c.cli_code for c in listed] == ["dataphin"]
+
+
+def test_someone_with_no_role_on_the_bot_cannot_list_its_clis() -> None:
+    """Locating a bot by its owner's entity is not permission to read it."""
+    service, *_ = _service()
+
+    with pytest.raises(CallerIdentityPermissionError):
+        service.list_bot_clis(bot_id="bot-1", entity_id=OWNER, actor_id="stranger")
 
 
 # ── add ──────────────────────────────────────────────────────────────────

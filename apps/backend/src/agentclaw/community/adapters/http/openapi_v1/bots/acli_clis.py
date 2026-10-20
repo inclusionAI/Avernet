@@ -76,7 +76,9 @@ async def list_bot_clis(
     service: AcliCliServiceProtocol = Injected(AcliCliServiceProtocol),
 ) -> Envelope[list[BotCliItem]]:
     """Every CLI the bot is granted, whether or not it was added here."""
-    items = await asyncio.to_thread(service.list_bot_clis, bot_id=bot_id, entity_id=owner_id)
+    items = await asyncio.to_thread(
+        service.list_bot_clis, bot_id=bot_id, entity_id=owner_id, actor_id=user_id
+    )
     return envelope(
         [
             BotCliItem(

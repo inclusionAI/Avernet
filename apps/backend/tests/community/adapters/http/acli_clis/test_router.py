@@ -54,7 +54,9 @@ async def test_list_maps_every_grant() -> None:
 
     items = await list_bot_clis("bot-1", "entity-1", _USER, service)
 
-    service.list_bot_clis.assert_called_once_with(bot_id="bot-1", entity_id="entity-1")
+    service.list_bot_clis.assert_called_once_with(
+        bot_id="bot-1", entity_id="entity-1", actor_id="owner-1"
+    )
     assert [(i.cli_code, i.identity_mode, i.default) for i in items] == [("dataphin", "owner", True)]
 
 

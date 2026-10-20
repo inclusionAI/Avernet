@@ -151,6 +151,27 @@ def internal_list_bot_clis_requires_entity():
     """``entity_id`` is required: the bot is never picked by id alone."""
 
 
+def _seed_bot_and_stranger(world) -> None:
+    _seed_bot(world)
+    make_staff_user(world, user_id="acli_internal_stranger")
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/bots/{bot_id}/clis",
+    scenario="not_a_member",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params=_ENTITY,
+        headers={"x-user-id": "acli_internal_stranger"},
+    ),
+    seed=_seed_bot_and_stranger,
+    expect=ExpectError(status=403),
+)
+def internal_list_bot_clis_refuses_a_non_member():
+    """Knowing a bot's id and owner is not permission to read its CLIs."""
+
+
 @endpoint_test(
     method="POST",
     path="/api/bots/{bot_id}/clis",

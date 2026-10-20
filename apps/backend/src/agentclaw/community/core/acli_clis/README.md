@@ -37,6 +37,7 @@ consumes:
   - "CliCapabilityManifestResolver (core.mcp) — which CLIs are a bot's defaults"
   - "core.caller_identity guard — bot lookup and the edit-lock check shared with the identity switch"
   - "BotRepository, BotCollabLockRepositoryProtocol, CallerIdentityRepositoryProtocol (core.repository)"
+  - "CollaboratorServiceProtocol (core.bot_collaborator) — who may read a bot's CLIs"
   - "DeviceAdapterTransport (plugin_api) — the hop to the engine's /api/cli/acli/* endpoints"
   - "HttpClient (plugin_api) — the general client, for the market's search API"
 consumed_by:

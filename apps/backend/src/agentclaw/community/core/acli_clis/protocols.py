@@ -51,7 +51,7 @@ class BotCli:
 @runtime_checkable
 class AcliCliServiceProtocol(Protocol):
     @abstractmethod
-    def list_bot_clis(self, *, bot_id: str, entity_id: str) -> list[BotCli]: ...
+    def list_bot_clis(self, *, bot_id: str, entity_id: str, actor_id: str) -> list[BotCli]: ...
 
     @abstractmethod
     async def search_market(

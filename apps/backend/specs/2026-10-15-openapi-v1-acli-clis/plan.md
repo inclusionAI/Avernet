@@ -172,7 +172,9 @@ device modules.
 
 The same four operations on `/api/bots`, for users authenticated by
 `get_current_user` (added 2026-10-20). The actor is always `user.staffId`;
-`entity_id` is a required query parameter that only locates the bot. Following
+`entity_id` is a required query parameter that only locates the bot; the
+service refuses a list to anyone below MEMBER on the bot, the same bar as the
+`/openapi/v1` list route. Following
 the internal caller-identity routes, the client sends its edit-lock epoch:
 `lock_epoch` in the `POST` body and as a query parameter on `DELETE`.
 
