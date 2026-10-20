@@ -63,7 +63,7 @@ export const TaskPanelV2: React.FC<TaskPanelV2Props> = ({
           flexShrink: 0,
           borderBottom: `1px solid ${C.border}`,
           fontSize: 14,
-          color: C.text,
+          color: C.textPrimary,
         }}
       >
         {currentNodeId == null ? (

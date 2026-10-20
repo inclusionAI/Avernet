@@ -24,7 +24,7 @@ export interface TaskNodePanelV2Props {
 
 export const TaskNodePanelV2: React.FC<TaskNodePanelV2Props> = ({ node, nav }) =>
   node ? (
-    <div data-testid="task-node-panel-v2" style={{ padding: 16, color: C.text, fontSize: 13 }}>
+    <div data-testid="task-node-panel-v2" style={{ padding: 16, color: C.textPrimary, fontSize: 13 }}>
       节点副屏占位(P3 实施):{node.name}
     </div>
   ) : (
