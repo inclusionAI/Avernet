@@ -69,6 +69,12 @@ class _FakeRepository:
         ]
         return list(reversed(matched))[:max(0, limit)]
 
+    def has_digest(self, *, env, entity_id, bot_id, digest):
+        return any(
+            (r.env, r.entity_id, r.bot_id, r.digest) == (env, entity_id, bot_id, digest)
+            for r in self.rows
+        )
+
     def latest_for(self, *, env, entity_id, bot_id, source_url):
         matched = [
             r
@@ -636,3 +642,55 @@ def test_latest_receipt_keys_the_url_the_rows_were_filed_under(tmp_path):
     assert service.latest_receipt(
         scope=SCOPE, source_url="https://content.example/other.bin"
     ) is None
+
+
+# --- produced bytes (the Genome Registry's write path) -------------------------
+
+
+def test_store_produced_files_a_produced_row_and_the_blob_once(tmp_path):
+    service, repo = _service(tmp_path)
+    data = b"# Soul\nBe brief.\n"
+    digest = "sha256:" + hashlib.sha256(data).hexdigest()
+    record = service.store_produced(
+        data, scope=SCOPE, origin="genome/capture", modifier="u1",
+        category="persona", entry_identity="SOUL.md",
+    )
+    assert record.id == 1 and record.digest == digest
+    assert (record.source_url, record.fetched_url) == ("produced://genome/capture", "produced://genome/capture")
+    assert (record.category, record.entry_identity, record.modifier) == ("persona", "SOUL.md", "u1")
+    assert record.credential_name is None and record.content_type is None and record.size_bytes == len(data)
+    assert record.fetched_at.tzinfo is None
+    assert service.read(digest) == data
+    assert _blob_file(tmp_path, digest).read_bytes() == data
+
+
+def test_store_produced_is_idempotent_per_bot_and_digest(tmp_path):
+    service, repo = _service(tmp_path)
+    data = b"same bytes"
+    first = service.store_produced(data, scope=SCOPE, origin="genome/patch")
+    again = service.store_produced(data, scope=SCOPE, origin="genome/upload")
+    assert first.id == 1 and again.id is None and len(repo.rows) == 1
+    other = ContentScope(env="dev", entity_id="ent_b", bot_id="bot_2")
+    assert service.store_produced(data, scope=other, origin="genome/upload").id == 2
+    assert len(repo.rows) == 2
+
+
+def test_is_reachable_answers_per_bot(tmp_path):
+    service, _ = _service(tmp_path)
+    data = b"reachable?"
+    digest = "sha256:" + hashlib.sha256(data).hexdigest()
+    assert service.is_reachable(SCOPE, digest) is False
+    service.store_produced(data, scope=SCOPE, origin="genome/capture")
+    assert service.is_reachable(SCOPE, digest) is True
+    assert service.is_reachable(ContentScope(env="dev", entity_id="ent_b", bot_id="bot_2"), digest) is False
+    assert service.is_reachable(ContentScope(env="prod", entity_id="ent_a", bot_id="bot_1"), digest) is False
+    with pytest.raises(ContentStoreError):
+        service.is_reachable(SCOPE, "sha256:nope")
+
+
+def test_store_produced_refuses_an_overwide_column_before_the_blob(tmp_path):
+    service, repo = _service(tmp_path)
+    data = b"never written"
+    with pytest.raises(ContentStoreError):
+        service.store_produced(data, scope=SCOPE, origin="genome/capture", entry_identity="x" * 257)
+    assert repo.rows == [] and not _blob_file(tmp_path, "sha256:" + hashlib.sha256(data).hexdigest()).exists()

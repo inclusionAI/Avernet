@@ -36,7 +36,7 @@ import hashlib
 import os
 import tempfile
 import time
-from datetime import timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -301,6 +301,58 @@ class ManifestContentService(ManifestContentServiceProtocol):
             fetched.size_bytes,
         )
         return stored
+
+    def store_produced(
+        self,
+        data: bytes,
+        *,
+        scope: ContentScope,
+        origin: str,
+        modifier: str = "",
+        category: Optional[str] = None,
+        entry_identity: Optional[str] = None,
+    ) -> StoredContentRecord:
+        """Persist produced bytes: the digest is computed here, the URL is the origin label.
+
+        Same order as ``store``: every column-width refusal happens before
+        the blob write, the blob lands durably before the row, and a row the
+        bot already holds for the digest is not filed twice.
+        """
+        digest = "sha256:" + hashlib.sha256(data).hexdigest()
+        url = _require_fits("source_url", _sanitized_url(f"produced://{origin}"), _URL_MAX)
+        stored_modifier = _require_fits("modifier", modifier, _MODIFIER_MAX)
+        stored_category = _require_fits("category", category, _CATEGORY_MAX)
+        stored_identity = _require_fits(
+            "entry_identity", entry_identity, _ENTRY_IDENTITY_MAX
+        )
+        record = StoredContentRecord(
+            env=scope.env,
+            entity_id=scope.entity_id,
+            bot_id=scope.bot_id,
+            digest=digest,
+            source_url=url,
+            fetched_url=url,
+            credential_name=None,
+            content_type=None,
+            size_bytes=len(data),
+            fetched_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            category=stored_category,
+            entry_identity=stored_identity,
+            modifier=stored_modifier,
+        )
+        self._write_blob(digest, data)
+        if self.is_reachable(scope, digest):
+            return record
+        return self._repository.add(record)
+
+    def is_reachable(self, scope: ContentScope, digest: str) -> bool:
+        """A provenance row for this bot and digest exists."""
+        return self._repository.has_digest(
+            env=scope.env,
+            entity_id=scope.entity_id,
+            bot_id=scope.bot_id,
+            digest=_require_valid_digest(digest),
+        )
 
     def read(self, digest: str) -> bytes:
         """The one read path, shared by delivery and audit (§2.8).

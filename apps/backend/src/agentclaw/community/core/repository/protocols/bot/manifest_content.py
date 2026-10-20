@@ -65,6 +65,23 @@ class ManifestContentRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
+    def has_digest(
+        self,
+        *,
+        env: str,
+        entity_id: str,
+        bot_id: str,
+        digest: str,
+    ) -> bool:
+        """Whether one bot holds at least one provenance row for ``digest``.
+
+        The reachability read the Genome Registry makes before it hands
+        bytes to a caller: a digest another bot stored is not this bot's.
+        Exact-equality on the digest, tenant via the model guard.
+        """
+        ...
+
+    @abstractmethod
     def latest_for(
         self,
         *,

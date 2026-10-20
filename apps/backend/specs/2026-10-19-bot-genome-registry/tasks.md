@@ -35,8 +35,8 @@
 - **Goal:** Let the registry file produced bytes with genome provenance and answer whether a digest belongs to a bot.
 - **Files:** `core/bot_config_manifest/content/{service_protocol,service}.py`, `core/repository/protocols/bot/manifest_content.py`, `core/repository/implementations/bot/manifest_content.py`; `tests/community/core/bot_config_manifest/content/test_content_store.py`, the content repository's test file
 - **Done when:**
-  - [ ] `store_produced` writes the blob once, files a row with `produced://<origin>` URLs and the category/entry linkage, and is idempotent by digest.
-  - [ ] `is_reachable` / `has_digest` answer true only for the bot that holds a row for the digest.
+  - [x] `store_produced` writes the blob once, files a row with `produced://<origin>` URLs and the category/entry linkage, and is idempotent by digest.
+  - [x] `is_reachable` / `has_digest` answer true only for the bot that holds a row for the digest.
 - **Depends on:** —
 
 ## Task 5: Tables, ORM, repositories

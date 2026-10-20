@@ -247,3 +247,13 @@ def test_two_tenants_sharing_a_bot_id_read_only_their_own_receipts(tmp_path):
         assert [r.modifier for r in receipts] == ["tenant-a-op"]
     with avernet_tenant_scope("tenant-b"):
         assert [r.modifier for r in repo.records_for(**shared)] == ["tenant-b-op"]
+
+
+def test_has_digest_is_true_only_for_the_bot_that_holds_a_row(repo):
+    digest = "sha256:" + "cd" * 32
+    assert repo.has_digest(env="dev", entity_id="ent_a", bot_id="bot_1", digest=digest) is False
+    repo.add(_record(digest=digest))
+    assert repo.has_digest(env="dev", entity_id="ent_a", bot_id="bot_1", digest=digest) is True
+    assert repo.has_digest(env="dev", entity_id="ent_a", bot_id="bot_2", digest=digest) is False
+    assert repo.has_digest(env="pre", entity_id="ent_a", bot_id="bot_1", digest=digest) is False
+    assert repo.has_digest(env="dev", entity_id="ent_a", bot_id="bot_1", digest="sha256:" + "ef" * 32) is False

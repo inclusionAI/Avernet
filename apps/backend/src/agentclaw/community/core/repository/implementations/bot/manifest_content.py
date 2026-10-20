@@ -108,6 +108,28 @@ class ManifestContentRepository(ManifestContentRepositoryProtocol):
             )
             return [row.to_record() for row in rows]
 
+    def has_digest(
+        self,
+        *,
+        env: str,
+        entity_id: str,
+        bot_id: str,
+        digest: str,
+    ) -> bool:
+        """One bot's rows for one digest: an existence read on the bot's index."""
+        with self._db.orm_session() as session:
+            row = (
+                session.query(self._Manifest.id)
+                .filter(
+                    self._Manifest.env == env,
+                    self._Manifest.entity_id == entity_id,
+                    self._Manifest.bot_id == bot_id,
+                    self._Manifest.digest == digest,
+                )
+                .first()
+            )
+            return row is not None
+
     def latest_for(
         self,
         *,
