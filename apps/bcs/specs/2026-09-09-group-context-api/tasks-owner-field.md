@@ -97,8 +97,10 @@
   - [x] GET 响应对 owner 输出策略字段，对非 owner 省略字段。
   - [x] list 响应可输出 `"WRO"`。
   - [x] CLI update 支持 `--owners '{"userIds":["bot-a","bot-b"]}'`。
+  - [x] CLI owners 解析显式校验 `userIds` 是非空字符串数组，裸 JSON object 不再透传。
   - [x] CLI add 不提供 owners 参数。
   - [x] CLI 通用 `group_context_request` 保持 body JSON 透传。
+  - [x] CLI group-context add/update/list/get 对非 group scope 不强制 `--group-id`，查询仅在 `groupId` 存在且非空时输出。
   - [x] HTTP/CLI tests 覆盖 update、add 不支持、owner-only get 字段和 `WRO`。
 - **Depends on:** Task 3, Task 4
 
@@ -120,13 +122,15 @@
     - `cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-app-group-context --all-targets`
     - `cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-http --test group_context_routes`
     - `cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-cli --all-targets`
-  - [x] Migration/integration tests 通过。
+  - [x] MySQL migration chain 期望已更新到 version 34，且不依赖外部 DB 的 migration static gate 已通过。
+  - [ ] CI 使用 disposable MySQL 数据完整执行 `full_mysql_migration_chain_applies_and_preserves_history`（本地缺 `BCS_TEST_MYSQL_URL`，该测试被跳过）。
+  - [x] Integration/CLI 相关目标测试已按最后代码状态重新验证。
   - [x] `git diff --check` 通过。
   - [x] Spec acceptance criteria 中当前可实现项全部由测试或文档验证。
   - [x] creator/admin 扩展只保留为后续需求记录，本轮不包含相关代码或占位接口。
 - **Depends on:** Task 4, Task 5
 
-  本地执行 caveat：除 `bcs-cli --all-targets` 外，上列命令均已通过。`bcs-cli --all-targets` 中的既有 subprocess harness（`add_member_tests` / e2e）在当前执行环境里被 SIGKILL，且无 stdout/stderr；已改跑 `bcs-cli --lib`、`bcs-cli --bin bcs-cli group_context` 与 `bcs-cli --test group_context_client` 并全部通过。
+  本地执行 caveat：除 `bcs-cli --all-targets` 外，上列命令均已通过。`bcs-cli --all-targets` 中的既有 subprocess harness（`add_member_tests` / e2e）在当前执行环境里可能被 SIGKILL，且无 stdout/stderr；已改跑 `bcs-cli --lib`、`bcs-cli --bin bcs-cli group_context`、`bcs-cli --test group_context_client`，并定向执行 e2e 中新增的 group-context session/round query tests；这些目标测试均通过。GitHub CI 是 merge 前的最终全量验证。
 
 ---
 
