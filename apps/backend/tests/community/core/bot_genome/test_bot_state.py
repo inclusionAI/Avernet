@@ -106,6 +106,7 @@ def _reader(**overrides: Any) -> PlatformBotStateReader:
         activation=FakeActivation(set(), set()),
         mcp_config=FakeMcpConfig({}),
         scripts=FakeScripts(""),
+        is_teclaw=lambda engine: engine == "teclaw",
         teclaw_platform_managed=False,
     )
     deps.update(overrides)
@@ -113,7 +114,7 @@ def _reader(**overrides: Any) -> PlatformBotStateReader:
 
 
 def test_platform_managed_teclaw_is_refused_and_nothing_else_is() -> None:
-    teclaw = BotRef(owner_id="u1", bot_id="b", entity_id="e", engine_type="teclaw", bot_type="teclaw")
+    teclaw = BotRef(owner_id="u1", bot_id="b", entity_id="e", engine_type="teclaw", bot_type="personal")
     assert _reader(teclaw_platform_managed=True).refusal(teclaw) is not None
     assert _reader(teclaw_platform_managed=False).refusal(teclaw) is None
     assert _reader(teclaw_platform_managed=True).refusal(BOT) is None

@@ -83,8 +83,8 @@
 - **Goal:** One module binds repositories, services and the applier; the composition root installs it.
 - **Files:** `di/modules/bot_genome_module.py`, `di/container.py`; `tests/community/di/test_bot_genome_module_wiring.py`
 - **Done when:**
-  - [ ] `build_injector(profile=TEST)` resolves `GenomeRegistryProtocol` and `GenomePromotionServiceProtocol`; the state reader is a thunk so boot's lifecycle walk builds no device graph.
-  - [ ] Architecture gates pass: `test_build_injector_composition_root_only`, `test_no_user_config_outside_di`, `test_lifecycle_discovery`.
+  - [x] `build_injector(profile=TEST)` resolves `GenomeRegistryProtocol` and `GenomePromotionServiceProtocol`; the state reader is a thunk so boot's lifecycle walk builds no device graph.
+  - [x] Architecture gates pass: `test_build_injector_composition_root_only`, `test_no_user_config_outside_di`, `test_lifecycle_discovery`.
 - **Depends on:** Tasks 7, 8
 
 ## Task 10: HTTP surface

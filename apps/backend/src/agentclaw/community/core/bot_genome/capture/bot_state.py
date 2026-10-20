@@ -15,12 +15,14 @@ and the compose collector read through, so capture sees what apply sees:
 - script: ``BotStartupScriptServiceProtocol.get_body`` with the ``${BOT_*}``
   substitution apply performs.
 
-A platform-managed teclaw bot has no device to read: its state is composed
-from platform rows (``managed_files``), and capturing it is RSI-04's to
-define, so the reader refuses it by name.
+A platform-managed teclaw bot (a teclaw engine on a deployment whose
+teclaw delivery mode is ``platform``) has no device to read: its state is
+composed from platform rows (``managed_files``), and capturing it is
+RSI-04's to define, so the reader refuses it by name.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from agentclaw.community.core.bot_config_manifest.schema import placeholders
@@ -71,6 +73,7 @@ class PlatformBotStateReader(BotStateReader):
         activation: DirectActivationServiceProtocol,
         mcp_config: MCPConfigServiceProtocol,
         scripts: BotStartupScriptServiceProtocol,
+        is_teclaw: Callable[[str | None], bool],
         teclaw_platform_managed: bool,
     ) -> None:
         self._identity = identity
@@ -81,10 +84,11 @@ class PlatformBotStateReader(BotStateReader):
         self._activation = activation
         self._mcp_config = mcp_config
         self._scripts = scripts
+        self._is_teclaw = is_teclaw  # teclaw is an engine family, not a bot type (bot_service.is_teclaw_bot)
         self._teclaw_platform_managed = teclaw_platform_managed
 
     def refusal(self, bot: BotRef) -> str | None:
-        if bot.bot_type == "teclaw" and self._teclaw_platform_managed:
+        if self._teclaw_platform_managed and self._is_teclaw(bot.engine_type):
             return "a platform-managed teclaw bot has no device to read; its state is composed from platform rows (RSI-04)"
         return None
 
@@ -113,7 +117,7 @@ class PlatformBotStateReader(BotStateReader):
                     engine_type=bot.engine_type,
                     entity_type=bot.entity_type,
                     is_desktop=bot.bot_type == "desktop",
-                    is_teclaw=bot.bot_type == "teclaw",
+                    is_teclaw=self._is_teclaw(bot.engine_type),
                     locator=locator,
                     skill_name=asset.name,
                 )

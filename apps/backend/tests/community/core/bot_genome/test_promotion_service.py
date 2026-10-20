@@ -14,7 +14,7 @@ from agentclaw.community.core.bot_genome.errors import (
 )
 from agentclaw.community.core.bot_genome.models import BotRef, RevisionStatus
 from agentclaw.community.core.bot_genome.promotion.applier import PendingDeliveryApplier
-from tests.community.core.bot_genome.example_blobs import SUPPORT_BOT, SUPPORT_BOT_CANDIDATE, BlobDir, load_patch, load_revisions
+from tests.community.core.bot_genome.example_blobs import SUPPORT_BOT, BlobDir, load_patch, load_revisions
 from tests.community.core.bot_genome.service_fixtures import BOT, OWNER, RUN, World
 from tests.community.core.bot_genome.test_capture import FakeReader
 
