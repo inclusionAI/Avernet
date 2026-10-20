@@ -2276,6 +2276,28 @@ fn parse_group_context_policy(raw: &str, flag: &str) -> Result<serde_json::Value
     Ok(value)
 }
 
+fn parse_group_context_owners(raw: &str) -> Result<serde_json::Value> {
+    let value = parse_group_context_policy(raw, "owners")?;
+    let invalid_shape =
+        || anyhow!("--owners must be a JSON object containing a non-empty userIds array");
+    let user_ids = value
+        .get("userIds")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(invalid_shape)?;
+    if user_ids.is_empty() {
+        return Err(anyhow!("--owners.userIds must not be empty"));
+    }
+    if user_ids
+        .iter()
+        .any(|user_id| user_id.as_str().is_none_or(|value| value.trim().is_empty()))
+    {
+        return Err(anyhow!(
+            "--owners.userIds must contain non-empty string actor ids"
+        ));
+    }
+    Ok(value)
+}
+
 fn group_context_query(
     group_id: &str,
     session_id: Option<&str>,
@@ -2394,10 +2416,7 @@ fn group_context_update_body(
         );
     }
     if let Some(owners) = owners {
-        body.insert(
-            "owners".to_string(),
-            parse_group_context_policy(&owners, "owners")?,
-        );
+        body.insert("owners".to_string(), parse_group_context_owners(&owners)?);
     }
     group_context_insert_optional_timestamp(&mut body, "valid_from", valid_from);
     group_context_insert_optional_timestamp(&mut body, "valid_to", valid_to);
@@ -5879,20 +5898,45 @@ mod tests {
     }
 
     #[test]
-    fn group_context_update_rejects_non_object_owners_json() {
-        let error = group_context_update_body(
-            "player_state".to_string(),
-            "session".to_string(),
-            None,
-            None,
-            None,
-            Some("[]".to_string()),
-            None,
-            None,
-            Some("transfer ownership".to_string()),
-        )
-        .unwrap_err();
-        assert!(error.to_string().contains("--owners must be a JSON object"));
+    fn group_context_update_rejects_invalid_owners_shapes() {
+        for (raw, expected_error) in [
+            ("[]", "--owners must be a JSON object"),
+            (
+                r#"{"foo":"bar"}"#,
+                "--owners must be a JSON object containing a non-empty userIds array",
+            ),
+            (
+                r#"{"userIds":"bot-a"}"#,
+                "--owners must be a JSON object containing a non-empty userIds array",
+            ),
+            (r#"{"userIds":[]}"#, "--owners.userIds must not be empty"),
+            (
+                r#"{"userIds":["", " "]}"#,
+                "--owners.userIds must contain non-empty string actor ids",
+            ),
+            (
+                r#"{"userIds":[1]}"#,
+                "--owners.userIds must contain non-empty string actor ids",
+            ),
+        ] {
+            let error = group_context_update_body(
+                "player_state".to_string(),
+                "session".to_string(),
+                None,
+                None,
+                None,
+                Some(raw.to_string()),
+                None,
+                None,
+                Some("transfer ownership".to_string()),
+            )
+            .unwrap_err();
+            let error = error.to_string();
+            assert!(
+                error.contains(expected_error),
+                "owners={raw}, expected {expected_error}, got {error}"
+            );
+        }
     }
 
     fn write_session_file(temp_dir: &TempDir, value: serde_json::Value) {
