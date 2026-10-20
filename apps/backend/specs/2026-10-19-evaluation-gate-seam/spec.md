@@ -56,7 +56,7 @@
 
 - gate seam 未绑定（`None`）或决策 `allowed=True` → 不拦截。
 - 决策阻断 → 把决策摘要写入发布单 `ext.gate`（`status / checked_at / hit_type / mode / policy_name / reason / failure_summary / report_url / operator`），返回草稿态 `PublishFlowResult`（`data={"gate": gate_summary}`），不做任何状态推进。
-- 决策接口异常 → fail-closed（PRD §14 不默认放行）：构造 `GatePublishDecision(allowed=False, status=GATE_ERROR, reason=...)`，同阻断路径返回。
+- 决策接口抛异常（非预期崩溃）→ fail-open：灰度期门禁平台抖动不应卡住发布主流程，记录 warning 后放行（`return None`，不落 `ext.gate`）。真正的"是否拦截"由 corp 侧 DRM 总开关 + 门禁名单两层控制（见 §6）；本层只兜底非预期异常。plugin 自身 handled 错误（如 corp `ProdEvaluationGate` 把 HTTP 错误转成 `GATE_ERROR` 决策返回）仍按其返回的阻断决策阻断——不在本 fail-open 分支。
 - `ext.gate` 落库失败（`mutate_publish_ext` 抛异常）→ warning 吞掉，但阻断结果照常返回（摘要仍在 `result.data.gate`，避免有人误把落库失败回退成放行）。
 - 推进点之前解析 `space_id`（`bot_service.get_bot`）；解析失败不阻断门禁判定（`space_id=""` 传给 gate）。
 
@@ -84,7 +84,7 @@
 | 放行推进 | `test_gate_allowed_decision_advances` | `allowed=True` → 推进、`mutate_publish_ext` 不被调用、gate 拿到 space/bot/platform |
 | 正式模式阻断 | `test_gate_blocked_enforce_stops_draft_advance` | `allowed=False` enforce → CAS 不推进、`ext.gate` 落摘要、返回 draft |
 | 评测中 | `test_gate_evaluating_blocks_and_records_ext` | `evaluating` → 不推进、`ext.gate` 落『评测中』摘要 |
-| 实现异常 fail-closed | `test_gate_crash_fails_closed` | seam 抛异常 → `status=GATE_ERROR` 阻断 |
+| 实现异常 fail-open | `test_publish_flow_gate.py::test_gate_crash_does_not_block_main_flow` | seam 抛异常 → 主流程照常推进 DRAFT→BUILDING、不落 `ext.gate`（灰度期不卡发布；真正拦截靠 corp DRM + 名单） |
 | space 解析失败不绕门禁 | `test_gate_space_resolve_failure_does_not_skip_gate` | `bot_service.get_bot` 异常 → `space_id=""` 仍判门禁 |
 | 非草稿态不查门禁 | `test_gate_not_consulted_for_non_draft_status` | BUILDING → `gate.calls` 为空、`mutate_publish_ext` 不被调用（防回归） |
 | 摘要落库失败仍阻断 | `test_gate_ext_record_failure_does_not_unblock` | `mutate_publish_ext` 抛异常 → 仍阻断、`result.data.gate` 照常返回 |

@@ -5,7 +5,8 @@
 - gate seam 存在但决策放行 → 照常推进。
 - 门禁阻断（正式模式不通过 / 评测中）→ 不做 CAS 推进，status 保持 draft，
   决策摘要写入发布单 ext.gate，结果 message 带阻断文案。
-- gate 实现异常 → fail-closed（不默认放行，PRD §14）。
+- gate 实现异常 → fail-open（不阻断主流程，灰度期门禁平台抖动不应卡发布）。
+  真正的拦截由 corp DRM 总开关 + 名单命中两层控制；本层只兜底非预期崩溃。
 """
 
 from unittest.mock import AsyncMock, Mock
@@ -15,7 +16,6 @@ import pytest
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
 from agentclaw.community.plugin_api.evaluation_gate import (
-    GATE_ERROR,
     GATE_EVAL_FAILED_ENFORCE,
     GATE_EVALUATING,
     GatePublishDecision,
@@ -146,17 +146,21 @@ async def test_gate_blocked_enforce_stops_draft_advance():
 
 
 @pytest.mark.asyncio
-async def test_gate_crash_fails_closed():
-    """seam 实现异常 → fail-closed（PRD §14：不建议默认放行）。"""
+async def test_gate_crash_does_not_block_main_flow():
+    """seam 实现异常 → fail-open（不阻断主流程）。
+
+    灰度期门禁平台抖动不应卡住发布；本层只兜底非预期崩溃，放行推进
+    DRAFT→BUILDING，不落 ext.gate。真正的拦截由 corp DRM 总开关 + 名单命中
+    两层控制（见 apps/backend/specs/2026-10-19-evaluation-gate-seam/spec.md §6）。
+    """
     gate = _FakeGate(error=RuntimeError("gate platform 500"))
     svc, publish_service, record = _mk_service(gate)
 
     result = await svc.process(publish_id=1, operator="u1")
 
-    svc._advance_status.assert_not_called()
-    assert result.status == PublishStatus.DRAFT.value
-    assert result.data["gate"]["status"] == GATE_ERROR
-    publish_service.mutate_publish_ext.assert_called_once()
+    svc._advance_status.assert_called_once()  # 主流程照常推进
+    assert result.status == PublishStatus.BUILDING.value
+    publish_service.mutate_publish_ext.assert_not_called()  # 不落门禁摘要
 
 
 @pytest.mark.asyncio

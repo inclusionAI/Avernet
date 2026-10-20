@@ -9,9 +9,7 @@ from typing import TYPE_CHECKING, Optional
 
 from injector import inject
 from agentclaw.community.plugin_api.evaluation_gate import (
-    GATE_ERROR,
     EvaluationGatePlugin,
-    GatePublishDecision,
     PLATFORM_TEAMCLAW,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.release_phase_mixin import ReleasePhaseMixin
@@ -339,7 +337,10 @@ class PublishFlowService(
         - gate seam 未绑定（None）或决策 allowed → 返回 None，不拦截。
         - 决策 blocked → 把门禁摘要写入发布单 ``ext.gate``（供前端摘要与
           运维阻断原因查询），并返回草稿态结果；不做任何状态推进。
-        - 决策接口异常 → fail-closed（PRD §14：不建议默认放行），阻断并提示。
+        - 决策接口抛异常（非预期崩溃）→ fail-open：灰度期门禁平台抖动不应卡住
+          发布主流程，记录 warning 后放行。真正的"是否拦截"由 corp 侧 DRM 总
+          开关 + 门禁名单两层控制（spec §6）；本层只兜底非预期异常。plugin
+          自身 handled 错误仍按其返回的 GATE_ERROR 决策阻断（不在此分支）。
         """
         gate = self._evaluation_gate
         if gate is None:
@@ -368,15 +369,12 @@ class PublishFlowService(
                 owner_id=publish_record.owner_id,
                 operator=operator,
             )
-        except Exception as exc:  # noqa: BLE001 — seam 实现异常 fail-closed
-            logger.error(
-                "[PublishFlowService] evaluation gate check crashed: %s", exc
+        except Exception as exc:  # noqa: BLE001 — 非预期崩溃 fail-open，不阻断主流程
+            logger.warning(
+                "[PublishFlowService] evaluation gate check crashed, fail-open: %s",
+                exc,
             )
-            decision = GatePublishDecision(
-                allowed=False,
-                status=GATE_ERROR,
-                reason="Evaluation gate policy query failed, please retry later",
-            )
+            return None
 
         if decision.allowed:
             return None
