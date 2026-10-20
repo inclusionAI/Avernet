@@ -3,7 +3,7 @@
 import BotEngineVersionDialogs from '@/components/BotWorkshop/BotEngineVersionDialogs';
 import type { BotEngineVersionState } from '@/hooks/useBotEngineVersions';
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 
 const observation = {
   detection: { status: 'known' as const },
@@ -61,4 +61,28 @@ describe('BotEngineVersionDialogs', () => {
     fireEvent.click(screen.getByRole('button', { name: /device-b/ }));
     expect(defaults.onSelectInstance).toHaveBeenCalledWith('device-b');
   });
+  test('keeps the dialog open when no restart request was accepted', async () => {
+    const onConfirmUpdate = jest.fn<() => Promise<boolean>>().mockResolvedValue(false);
+    render(<BotEngineVersionDialogs {...defaults} infoOpen={false} updateOpen onConfirmUpdate={onConfirmUpdate} />);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '更新并重启 Bot' })); });
+    expect(defaults.onCloseUpdate).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '取消' })).toBeTruthy();
+  });
+
+  test('closes on restart submission without waiting for version verification', async () => {
+    let submitted: () => void = () => undefined;
+    let finish: (result: boolean) => void = () => undefined;
+    const onConfirmUpdate = jest.fn((onSubmitted: () => void) => {
+      submitted = onSubmitted;
+      return new Promise<boolean>((resolve) => { finish = resolve; });
+    });
+    render(<BotEngineVersionDialogs {...defaults} infoOpen={false} updateOpen onConfirmUpdate={onConfirmUpdate} />);
+    fireEvent.click(screen.getByRole('button', { name: '更新并重启 Bot' }));
+    expect(defaults.onCloseUpdate).not.toHaveBeenCalled();
+    await act(async () => { submitted(); });
+    expect(defaults.onCloseUpdate).toHaveBeenCalledTimes(1);
+    await act(async () => { finish(true); });
+    expect(defaults.onCloseUpdate).toHaveBeenCalledTimes(1);
+  });
+
 });

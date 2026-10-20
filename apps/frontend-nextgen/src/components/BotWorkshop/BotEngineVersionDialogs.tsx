@@ -20,7 +20,7 @@ export interface BotEngineVersionDialogsProps {
   onCloseUpdate: () => void;
   onSelectInstance: (deviceUuid: string) => void;
   onRequestUpdate: () => void;
-  onConfirmUpdate: () => Promise<boolean>;
+  onConfirmUpdate: (onRestartSubmitted: () => void) => Promise<boolean>;
 }
 
 function statusDescription(state: BotEngineVersionState): string {
@@ -133,7 +133,7 @@ export default function BotEngineVersionDialogs({
         confirmText="更新并重启 Bot"
         onCancel={onCloseUpdate}
         onConfirm={async () => {
-          if (await onConfirmUpdate()) onCloseUpdate();
+          await onConfirmUpdate(onCloseUpdate);
         }}
       />
     </>

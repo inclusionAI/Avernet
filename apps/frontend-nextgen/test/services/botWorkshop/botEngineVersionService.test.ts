@@ -114,6 +114,23 @@ describe('botEngineVersionService.restartAndConfirmUpdate', () => {
       .mocked(botController.getBotEngineStatus)
       .mockResolvedValue({ code: 200000, data: { engine: 'openclaw', active_connections: 0, running: true } });
   });
+  test('notifies submission before waiting for readiness and does not notify on a failed restart', async () => {
+    let finishStatus: (value: { code: number; data: { status: string; is_ready: boolean } }) => void = () => undefined;
+    jest.mocked(botController.getBotRestartStatus).mockImplementationOnce(() => new Promise((resolve) => { finishStatus = resolve; }));
+    const submitted = jest.fn();
+    const pending = botEngineVersionService.restartAndConfirmUpdate(target, observation, submitted);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(submitted).toHaveBeenCalledTimes(1);
+    expect(botController.getBotEngineStatus).not.toHaveBeenCalled();
+    finishStatus({ code: 200000, data: { status: 'FAILED', is_ready: false } });
+    await expect(pending).rejects.toThrow('Bot 重启失败');
+    submitted.mockClear();
+    jest.mocked(botController.restartBot).mockRejectedValueOnce(new Error('request rejected'));
+    await expect(botEngineVersionService.restartAndConfirmUpdate(target, observation, submitted)).rejects.toThrow('request rejected');
+    expect(submitted).not.toHaveBeenCalled();
+  });
+
   test('does not restart without a Backend update recommendation', async () => {
     await expect(
       botEngineVersionService.restartAndConfirmUpdate(target, {

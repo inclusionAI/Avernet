@@ -10,6 +10,7 @@ import {
   type EngineVersionInspectionTarget,
 } from '@/services/botWorkshop/botEngineVersionService';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 
 export type BotEngineVersionState =
   | { kind: 'idle' }
@@ -29,7 +30,7 @@ interface UseBotEngineVersionsResult {
   states: Record<string, BotEngineVersionState | undefined>;
   inspect: (key: string) => Promise<void>;
   selectInstance: (key: string, deviceUuid: string) => Promise<void>;
-  update: (key: string) => Promise<boolean>;
+  update: (key: string, onRestartSubmitted?: () => void) => Promise<boolean>;
 }
 
 function errorMessage(error: unknown): string {
@@ -143,7 +144,7 @@ export function useBotEngineVersions(targets: EngineVersionTarget[]): UseBotEngi
   const selectInstance = useCallback((key: string, deviceUuid: string) => inspect(key, deviceUuid), [inspect]);
 
   const update = useCallback(
-    async (key: string): Promise<boolean> => {
+    async (key: string, onRestartSubmitted?: () => void): Promise<boolean> => {
       const target = targetByKey.get(key);
       const state = states[key];
       const restartPermission = target
@@ -170,19 +171,27 @@ export function useBotEngineVersions(targets: EngineVersionTarget[]): UseBotEngi
       activeRequests.current.set(key, controller);
       updateLocks.current.add(key);
       setStates((current) => ({ ...current, [key]: { kind: 'updating', observation: state.observation, deviceUuid } }));
+      let submitted = false;
       try {
         const observation = await botEngineVersionService.restartAndConfirmUpdate(
           { ...inspectionTarget(target, deviceUuid, controller.signal), restartPermission: target.restartPermission },
           state.observation,
+          () => {
+            submitted = true;
+            toast.success('重启请求已提交');
+            onRestartSubmitted?.();
+          },
         );
         if (controller.signal.aborted) return false;
         setStates((current) => ({
           ...current,
           [key]: { kind: 'ready', observation, deviceUuid: observation.context.instance_id },
         }));
+        toast.success('引擎版本已更新');
         return true;
       } catch (error) {
         if (controller.signal.aborted) return false;
+        if (submitted) toast.error(`重启请求已提交，但尚未确认引擎更新：${errorMessage(error)}`);
         setStates((current) => ({
           ...current,
           [key]: { kind: 'ready', observation: state.observation, deviceUuid, updateError: errorMessage(error) },

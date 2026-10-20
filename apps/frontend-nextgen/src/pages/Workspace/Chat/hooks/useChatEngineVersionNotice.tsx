@@ -58,7 +58,7 @@ export function useChatEngineVersionNotice(input: {
         onCloseUpdate={() => setUpdateOpen(false)}
         onSelectInstance={(deviceUuid) => void versions.selectInstance(target.key, deviceUuid)}
         onRequestUpdate={() => setUpdateOpen(true)}
-        onConfirmUpdate={() => versions.update(target.key)}
+        onConfirmUpdate={(onRestartSubmitted) => versions.update(target.key, onRestartSubmitted)}
       />
     ) : null;
 
