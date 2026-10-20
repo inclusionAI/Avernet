@@ -228,15 +228,6 @@ function translateEngineFrame(
   if (typeof metadata.original_event === 'string' && metadata.original_event) {
     // wire_agent_progress：agent / mode_transition.* 等
     eventName = metadata.original_event;
-  } else if (memberState === STATE_INPUT_REQUIRED) {
-    // wire_interaction_requested（钉板 #6）：审批 v3 payload 全量 in engine_frame；
-    // event 名按钉板 #6 = 'exec.approval.requested'。
-    eventName = 'exec.approval.requested';
-    if (!isPlainObject(engineFrame.request)) {
-      // 钉板 #4：审批帧 request 缺失时 parser handleApprovalRequest 直接 throw
-      // ——engine 侧破了约就兜底合成，保下游不炸。
-      payload = { ...engineFrame, request: synthRequest(ctx) };
-    }
   } else if (metadata.kind === 'interaction.resolved') {
     // wire_interaction_resolved：engine 把决议重包成 chat 事件（gateway_client
     // on_approval_resolved → EventFrame(event='chat')，engine_frame 内含
@@ -244,7 +235,21 @@ function translateEngineFrame(
     // ⚠️ 该帧**释放不了** pending approval（被 shouldBlockMessage 拦下后回放仍旧
     // return false）——真释放是 B10 的两步 parser API：
     // updateApprovalStatus(id, status) + clearPendingApproval()。
+    // 判定顺序：R5-2（wire_interaction_resolved docstring）多 pending 部分决议后
+    // run 仍是 INPUT_REQUIRED——"是否 resolved"只看 meta.kind，不依赖帧状态，
+    // 必须先于状态分支命中；否则该帧被误译成 exec.approval.requested，
+    // 真实 SDK 会新增 pending approval 并覆盖当前 pendingApproval。
     eventName = 'chat';
+  } else if (memberState === STATE_INPUT_REQUIRED) {
+    // wire_interaction_requested（钉板 #6）：审批 v3 payload 全量 in engine_frame；
+    // event 名按钉板 #6 = 'exec.approval.requested'。requested 帧无 kind 字段，
+    // 不会误入上面的 resolved 分支。
+    eventName = 'exec.approval.requested';
+    if (!isPlainObject(engineFrame.request)) {
+      // 钉板 #4：审批帧 request 缺失时 parser handleApprovalRequest 直接 throw
+      // ——engine 侧破了约就兜底合成，保下游不炸。
+      payload = { ...engineFrame, request: synthRequest(ctx) };
+    }
   } else {
     // 兜底：engine_frame 存在但无路由名——按 wire_agent_progress 默认事件名 'agent'
     eventName = 'agent';

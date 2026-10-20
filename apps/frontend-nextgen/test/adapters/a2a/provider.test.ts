@@ -23,6 +23,7 @@ import {
   A2AProvider,
   A2A_APPROVAL_ANSWERS_REQUIRED_MESSAGE,
   A2A_APPROVAL_UNSUPPORTED_MESSAGE,
+  A2A_FILE_REFS_UNSUPPORTED_MESSAGE,
   RECOVERY_INCOMPLETE_MESSAGE,
   RECOVERY_STOPPED_MESSAGE,
   OUTCOME_UNKNOWN_MESSAGE,
@@ -396,6 +397,32 @@ describe('request() — A2A wire → 真 parser 的主回路', () => {
     await inFlight;
     expect(spies.onComplete).toHaveBeenCalledTimes(1);
   });
+
+  it('会话文件引用：A2A wire 无承载契约——提交前 typed 拒绝（不静默丢引用），状态不粘滞',
+    async () => {
+      const fetchImpl = routingFetch(() => { throw new Error('no rpc expected'); });
+      const { provider, spies } = newProvider({ fetchImpl });
+      await provider.connect();
+
+      // v3 buildRequest 会把两字段发上 wire（engine ws_server.py 消费）；
+      // A2A 面 parts 只承载文本——必须在出站前显式拒绝，不得静默丢
+      await expect(provider.request({
+        query: 'q <file-ref insert_id="1">', sessionKey: SESSION,
+        resourceReferences: [{ refId: '1' }] as any,
+      })).rejects.toThrow(A2A_FILE_REFS_UNSUPPORTED_MESSAGE);
+      await expect(provider.request({
+        query: 'q', sessionKey: SESSION, promptFileRefs: [{ no: 1 }] as any,
+      })).rejects.toThrow(A2A_FILE_REFS_UNSUPPORTED_MESSAGE);
+      // onError 上行 + typed failure（宿主 toast 消费面）；无 onComplete 假完成
+      expect(spies.onError).toHaveBeenCalledTimes(2);
+      expect((spies.onError.mock.calls[0][0] as any).failure)
+        .toEqual({ kind: 'rpc', reason: 'file_refs_unsupported' });
+      expect(spies.onComplete).not.toHaveBeenCalled();
+      // 零 wire 出站：card 探测之外无任何 POST
+      expect(fetchImpl.calls.filter((c) => c.url === A2A_URLS.rpcUrl)).toHaveLength(0);
+      // 状态不粘滞：isRequesting 未占用——纯文本请求照常工作
+      expect(provider.isConnected).toBe(true);
+    });
 
   it('取消终态（CANCELED）：request 正常 resolve + transport 层补发 onComplete([])；无 onError',
     async () => {
@@ -1137,7 +1164,8 @@ describe('B12 abort() — CancelTask wire 面 + 四态禁令核销（§4.3/§3.1
     expect(CANCEL_UI_TEXT['cancel-unknown']).toBe('取消结果未知，尝试查询任务状态');
   });
 
-  it('(e) pre-task abort：服务端零 run——零 wire 取消面、onComplete([]) 恰一次、clean 终局播报',
+  it('(e) 首帧前 abort：请求已出站、首 Task 未收 —— 服务端可能已 dispatch（router.py'
+    + ' open_run 先于订阅回包），无 taskId 无法 wire 取消 → task-outcome-unknown（非 clean）',
     async () => {
       const registry = createSendBanRegistry();
       const outcomes: CancelOutcome[] = [];
@@ -1151,19 +1179,60 @@ describe('B12 abort() — CancelTask wire 面 + 四态禁令核销（§4.3/§3.1
       await provider.connect();
 
       const inFlight = provider.request({ query: 'q', sessionKey: SESSION });
-      await until(() => rpcCallOf(fetchImpl) !== undefined);   // 连接已开、零事件（无 Task 锚）
+      await until(() => rpcCallOf(fetchImpl) !== undefined);   // POST 已出站、零事件（无 Task 锚）
       provider.abort();
       await inFlight;
 
       expect(spies.onComplete).toHaveBeenCalledTimes(1);
       expect(spies.onComplete).toHaveBeenCalledWith([]);
       expect(spies.onError).not.toHaveBeenCalled();
-      // 零 wire 调用：唯一 POST 就是 SendStreamingMessage（无 CancelTask）
+      // 零 wire 取消面：唯一 POST 就是 SendStreamingMessage（无 CancelTask——
+      // 无 taskId，CancelTask 无从构造）
       const rpcCalls = fetchImpl.calls.filter((c) => c.url === A2A_URLS.rpcUrl);
       expect(rpcCalls).toHaveLength(1);
       expect(JSON.parse(String(rpcCalls[0].init.body)).method).toBe('SendStreamingMessage');
+      // §3#2：结果未知不挂禁令（无核销锚——GetTask 也要 taskId；挂禁即死锁。
+      // 用户显式重发 = 新幂等键，D14 合规路径）
       expect(registry.isBanned(A2A_URLS.rpcUrl, SESSION)).toBe(false);
-      expect(outcomes).toEqual([{ kind: 'cancelled-clean' }]);   // 无底层执行可停
+      expect(outcomes).toEqual([{ kind: 'task-outcome-unknown' }]);
+      expect(CANCEL_UI_TEXT['task-outcome-unknown'])
+        .toBe('已停止，任务结果未知，服务端可能仍在执行');
+    });
+
+  it('(e2) 出站前 abort（iam 签发窗口）：确定未发送——服务端零 run，cancelled-clean 成立',
+    async () => {
+      const registry = createSendBanRegistry();
+      const outcomes: CancelOutcome[] = [];
+      // 真 fetch 语义：signal 已 aborted → 请求拒绝（并未出站）；未 aborted 才回流
+      const fetchImpl = routingFetch((_req, call) => {
+        const signal = (call.init as any).signal as AbortSignal;
+        if (signal.aborted) throw new TypeError('aborted');
+        return deferredSse(signal).response;
+      });
+      // iam 签发窗口受控：request() 在 resolveIamToken 处停摆，fetch 尚未出站
+      let releaseToken!: (v: string) => void;
+      const iamTokenGetter = () => new Promise<string>((r) => { releaseToken = r; });
+      const { provider, spies } = newProvider({ fetchImpl, sendBan: registry, iamTokenGetter });
+      provider.onCancelOutcome = (o) => outcomes.push(o);
+      await provider.connect();
+
+      const inFlight = provider.request({ query: 'q', sessionKey: SESSION });
+      // request 协程推进到 iam 窗口（此时 isRequesting=true、abort 生效）后停摆
+      await until(() => releaseToken !== undefined);
+      provider.abort();                     // 停在 iam 窗口：RPC 未出站
+      releaseToken('tok');
+
+      // 出站即拒（abort signal）→ streamRpc 判定主动取消静默收尾（rpc.ts
+      // classifyFailure 前的 aborted 检查）——不 onError、无 typed 拒绝
+      await inFlight;
+      expect(spies.onComplete).toHaveBeenCalledTimes(1);
+      expect(spies.onComplete).toHaveBeenCalledWith([]);
+      expect(spies.onError).not.toHaveBeenCalled();
+      const rpcCalls = fetchImpl.calls.filter((c) => c.url === A2A_URLS.rpcUrl);
+      expect(rpcCalls).toHaveLength(1);
+      expect((rpcCalls[0].init as any).signal.aborted).toBe(true);
+      expect(registry.isBanned(A2A_URLS.rpcUrl, SESSION)).toBe(false);
+      expect(outcomes).toEqual([{ kind: 'cancelled-clean' }]);   // 真未发送：零 wire 面
     });
 
   it('§3.1 禁令生命周期：context 级横跨 provider 实例；disconnect 不清禁令；'

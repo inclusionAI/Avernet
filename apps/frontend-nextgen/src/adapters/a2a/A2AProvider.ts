@@ -38,7 +38,8 @@
  *   · abort() 四态机整替 throwaway：known-taskId 在途 → wire CancelTask 控制
  *     面（fire-and-forget，10s 门）+ 乐观挂 context 级 send-ban（§3.1）；
  *     落地结果按 classifyCancel 四态核销禁令（only confirmed releases）+
- *     onCancelOutcome 上行 UI；pre-task abort 零 wire 面（服务端无 run）。
+ *     onCancelOutcome 上行 UI；pre-task abort 分界按出站与否：未出站=服务端
+ *     零 run（clean）；已出站首帧前=结果未知 task-outcome-unknown（§3 #2）。
  *   · resolveApproval 真接入：ResolveInteraction 单信封 + 两步 parser 释放；
  *     resolve_unsupported → typed 拒绝、pending 保持（§5）。
  */
@@ -78,6 +79,15 @@ export const A2A_APPROVAL_UNSUPPORTED_MESSAGE =
  * selected_options）——v3 decision 枚举无载荷面，B13+ UI 供答案后放开。 */
 export const A2A_APPROVAL_ANSWERS_REQUIRED_MESSAGE =
   'a2a approval answers require input';
+
+/** 会话文件引用（resourceReferences/promptFileRefs，REL20260728 §4.4）：v3
+ * buildRequest 会把两字段随 chat.send 上 wire（engine ws_server.py 消费）；
+ * A2A wire 的 message.parts 只承载文本、引擎 _message_text 无引用消费面——
+ * 在字段送入请求前显式拒绝（typed file_refs_unsupported），不静默丢引用。
+ * 端到端承载契约（engine A2A 面的引用消费逻辑）落地前，本拒绝是缺能力的
+ * 诚实边界；届时本守卫与常量一并移除。 */
+export const A2A_FILE_REFS_UNSUPPORTED_MESSAGE =
+  '当前 A2A 传输暂不支持会话文件引用，请移除引用后重试';
 
 /** B12：CancelTask 控制面单信封的兜底时限（对位引擎侧 chat.abort 10s RPC 窗；
  * 超时=取消结局不可知 → cancel-unknown 核销，禁令保持）。 */
@@ -296,6 +306,10 @@ export class A2AProvider {
     | null = null;
   /** 终帧/错误帧是否已入账（manualRecover 的"无事可恢复"判据；request 开局清零） */
   private runSettled = false;
+  /** 本次请求的 SendStreamingMessage 是否已出站（iam 签发后、try 前置位）——
+   * pre-task abort 的 clean/unknown 分界：出站前中止 = 服务端零 run（clean）；
+   * 出站后首帧前中止 = run 可能已受理并执行（router.py open_run 先于订阅回包）*/
+  private rpcDispatched = false;
   private parseResultListeners: Array<(result: SdkParseResult) => void> = [];
   private connectionStatusListeners:
     Array<(event: A2aConnectionStatusEvent) => void> = [];
@@ -330,7 +344,7 @@ export class A2AProvider {
       throw new Error(`a2a probe failed: ${probe.reason ?? 'unknown'}`);
     }
     const failed = validateScenarios(probe.card, [
-      Scenario.STREAM, Scenario.RECOVERY,
+      Scenario.STREAM, Scenario.RECOVERY, Scenario.HITL,
     ]).filter((r) => !r.ok);
     if (failed.length > 0) {
       throw new Error(
@@ -368,6 +382,19 @@ export class A2AProvider {
   }
 
   async request(params: A2aOpenClawInput, messageId?: string): Promise<void> {
+    // 会话文件引用的门（A2A_FILE_REFS_UNSUPPORTED_MESSAGE 头注）：在最前面——
+    // 未消费 parser/未占请求槽，拒绝后 provider 全量可用
+    const fileRefs: unknown[] = [
+      ...(Array.isArray(params.resourceReferences) ? params.resourceReferences : []),
+      ...(Array.isArray(params.promptFileRefs) ? params.promptFileRefs : []),
+    ];
+    if (fileRefs.length > 0) {
+      const error = Object.assign(new Error(A2A_FILE_REFS_UNSUPPORTED_MESSAGE), {
+        failure: { kind: 'rpc', reason: 'file_refs_unsupported' } as WireFailure,
+      });
+      this.onError?.(error);
+      throw error;
+    }
     const parser = await this.ensureParser();
     if (this.isRequesting) {
       // 对位 OpenClawProvider.js:222-226
@@ -409,6 +436,7 @@ export class A2AProvider {
       outcome: null, runFailure: null, terminalApplied: false,
     };
     const iamToken = await this.resolveIamToken();
+    this.rpcDispatched = true;       // 度线：此后中止即"已出站首帧前"→ 结果未知
 
     try {
       for await (const ev of streamRpc(this.config.a2aUrls.rpcUrl, rpcRequest, {
@@ -484,9 +512,16 @@ export class A2AProvider {
       // known-taskId 在途（含恢复轮——request 槽在恢复期仍持有，同走此路）：
       // dispatch wire CancelTask + 乐观挂禁；控制面落地后核销（§3.1）。
       this.fireWireCancel(anchor.taskRunId, anchor.sessionKey);
+    } else if (this.rpcDispatched) {
+      // 首帧前中止且请求已出站：引擎 open_run→dispatch 先于订阅回包（router.py
+      // `_send_streaming`），run 可能已受理并执行——但客户端无 taskId，wire
+      // 取消无从构造。按 spec §3 #2 报**任务结果未知**（非 clean 谎报已停）；
+      // 不挂禁令（无核销锚——GetTask 也要 taskId，挂禁即死锁），用户显式
+      // 重发 = 新幂等键（D14 合规路径）。
+      this.onCancelOutcome?.({ kind: 'task-outcome-unknown' });
     } else {
-      // pre-task abort：服务端尚无 run（首 Task 类事件未到）——零 wire 面，
-      // 无"底层执行"可停；clean 终局播报，无禁令。
+      // 出站前中止（iam 签发窗口等）：确定未发送，服务端零 run——
+      // 零 wire 面，无"底层执行"可停；clean 终局播报，无禁令。
       this.onCancelOutcome?.({ kind: 'cancelled-clean' });
     }
     // v3 钉板 OpenClawProvider.js:291-299：abort = _isRequesting=false +

@@ -184,19 +184,22 @@ describe('maybeBuildA2AProvider 六态决策表', () => {
     expect((provider as any).sendBan).toBe(getSendBanRegistry());
   });
 
-  it('⑦ HITL 蓄意不参与启用：缺 resolve 声明照样启用（审批面运行期兜）', async () => {
+  it('⑦ 缺 HITL/resolve 声明 → probe-v3 + null（spec §3#4/§5：能力覆盖不了的会话发送前留 v3）', async () => {
+    // 普通聊天可中途触发 HITL，能力校验不得等审批出现才改判——HITL 是
+    // 启用前置条件，非运行期兜底（运行期 resolve_unsupported 只是"声明了
+    // 但实际不支持"的失败面上浮，不替代发送前的传输选择）。
     const cache = new TransportChoiceCache();
     const fetchImpl = jest.fn(async () => new Response(
       JSON.stringify(makeEngineCard({ resolve: false })), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       }));
-    const provider = await maybeBuildA2AProvider(CONFIG, {
+    await expect(maybeBuildA2AProvider(CONFIG, {
       choiceCache: cache,
       switchOn: () => true,
       fetchImpl: fetchImpl as unknown as typeof fetch,
-    });
-    expect(provider).toBeInstanceOf(A2AProvider);
+    })).resolves.toBeNull();
+    expectProbeV3(cache);
   });
 });
 

@@ -20,10 +20,11 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { maybeBuildA2AProvider } from '@/adapters/a2a/bootstrap';
+import { A2A_FILE_REFS_UNSUPPORTED_MESSAGE } from '@/adapters/a2a/A2AProvider';
 import { A2A_SWITCH_KEY } from '@/adapters/a2a/switch';
 import * as ctrl from '@/services/backendApi/bots/privateBotSessionController';
 import { getBotIamToken } from '@/services/backendApi/privateChat/iamTokenController';
-import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { afterAll, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 jest.mock('@/services/backendApi/bots/privateBotSessionController');
 jest.mock('@/services/backendApi/privateChat/iamTokenController');
@@ -34,6 +35,11 @@ import type { BotChatRequest } from '@/services/workspace/botChatProvider';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 
 // ─── switch 所需的最小 window shim(node env 无 jsdom;switch.ts 只读 localStorage) ───
+
+// 原值留存:node-env 套件写在 globalThis 的桩会活过文件边界,泄漏进同 worker
+// 的后续套件(曾见 jsdom 页面套件撞上本文件的假 fetch 而串台)——afterAll 恢复
+const RAW_WINDOW = (globalThis as any).window;
+const RAW_FETCH = (globalThis as any).fetch;
 
 const storage = new Map<string, string>();
 (globalThis as any).window = {
@@ -164,6 +170,14 @@ beforeEach(() => {
   mockedGetIamToken.mockResolvedValue('iam-1');
 });
 
+/** 文件收尾恢复 worker 全局(桩不得活过文件边界——见 shim 处留存注) */
+afterAll(() => {
+  if (RAW_WINDOW === undefined) delete (globalThis as any).window;
+  else (globalThis as any).window = RAW_WINDOW;
+  if (RAW_FETCH === undefined) delete (globalThis as any).fetch;
+  else (globalThis as any).fetch = RAW_FETCH;
+});
+
 describe('BotChatProvider A2A 接缝活体集成（B16）', () => {
   it('探测收敛 → 工厂命中 A2AProvider:card 探测连接 + fixture 全流 onComplete 全文 + RPC 头带请求级刷新的 IAM token', async () => {
     // 异步正路先决出 appChoiceCache='a2a'（与工厂同缓存、同 endpointBase 派生）
@@ -252,5 +266,37 @@ describe('BotChatProvider A2A 接缝活体集成（B16）', () => {
       .filter((b) => b?.method === 'CancelTask');
     expect(cancelBodies).toHaveLength(1);
     expect(cancelBodies[0].params.taskId).toBe(TASK_ID);
+  });
+
+  it('会话文件引用经 BotChatProvider → A2A 链路：提交前 typed 拒绝（不静默丢引用）'
+    + ' + onError 上行 + 零 wire 出站', async () => {
+    // v3 buildRequest 会把 resourceReferences/promptFileRefs 随 chat.send 上 wire
+    // （engine ws_server.py 消费）；A2A 面 parts 只承载文本——缝上必须显式拒绝，
+    // 否则 <file-ref insert_id> 留在正文里而映射静默丢失（PR#2934 review #2）。
+    const built = await maybeBuildA2AProvider({ url: WS_URL, xIAMToken: 'iam-1' });
+    expect(built).not.toBeNull();
+
+    const { provider, onComplete } = buildProvider({});
+    const onError = jest.fn();
+    provider.onError = onError;
+    await provider.connect();
+
+    await expect(provider.request({
+      content: '看下这个文件 <file-ref insert_id="1"/>', sessionId: 'sess-1',
+      resourceReferences: [{ refId: '1' } as any],
+    } satisfies BotChatRequest)).rejects.toThrow(A2A_FILE_REFS_UNSUPPORTED_MESSAGE);
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect((onError.mock.calls[0][0] as any).failure)
+      .toEqual({ kind: 'rpc', reason: 'file_refs_unsupported' });
+    // 未假完成、未出站：card 探测之外零 RPC POST
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(calls.filter((c) => c.url === RPC_URL)).toHaveLength(0);
+    // 状态不粘滞：后续纯文本请求照常工作（fixture 全流收口）
+    sseFactory = (reqId) => sseResponse(
+      snapshotEnvelopes.map((e) => ({ ...e, id: reqId })),
+    );
+    await provider.request({ content: '你好', sessionId: 'sess-1' } satisfies BotChatRequest);
+    expect(onComplete).toHaveBeenCalledTimes(1);
   });
 });

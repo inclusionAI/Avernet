@@ -25,9 +25,11 @@
  * (auth/protocol) 收敛为 markLocked。探测失败与场景缺项一律 probe-v3（可由后续
  * 探测翻案），**永不**因探测锁定；transport/rpc 级失败走 B11 恢复正路不锁。
  *
- * 【HITL 不是启用条件】：stream+recovery 过即启用（expert-chat first slice）；
- * 审批运行期由 A2AProvider 审批面（resolveApproval/pending）承载，引擎 resolve
- * 缺口以 typed 拒绝上浮（§5），不做启用门。
+ * 【HITL 是启用前置条件】(spec §3 #4 / §5)：普通聊天可中途触发审批——能力
+ * 校验按"该会话可能产生的交互"预判，不得等审批出现才改判。card 缺 resolve
+ * 声明 → 发送前留 v3（可与 stream+recovery 同判 probe-v3，永不锁）。运行期
+ * 出现"声明了但 resolve_unsupported"由 A2AProvider 审批面 typed 拒绝上浮
+ * （§5 失败面兜底）——它不替代发送前的传输选择。
  *
  * 【已知边界（页级缓存命中率先行）】首个会话在探测落定前构造必然落 v3；
  * 探测落定后新开会话（Chat 新建/重建）即走 A2A。页面刷新重新探测（缓存不持久化）。
@@ -154,10 +156,10 @@ export function resolveA2aUrls(providerConfig: A2aBootstrapConfig): A2aUrls {
  *   非 ws url 且无 a2aBaseUrl → null（不落缓存——url 形状不是 endpoint
  *   的探测结论；B17 起服务端签发的 a2aBaseUrl 可豁免：签发即权威形状）；
  *   card 探测失败 → decide(false)=probe-v3 + null（可翻案，永不锁）；
- *   场景缺项（STREAM/RECOVERY 任一不过）→ probe-v3 + null；
+ *   场景缺项（STREAM/RECOVERY/HITL 任一不过）→ probe-v3 + null；
  *   已 locked → 探测照跑但被锁吸收（decide 尊重 locked），null；
  *   全过 → decide(true)，返回注入 sendBan/锁定订阅的 A2AProvider。
- * HITL 蓄意不参与启用判定（文件头）。
+ * HITL 是启用前置条件之一（spec §3 #4，依据见文件头）。
  */
 export async function maybeBuildA2AProvider(
   providerConfig: A2aBootstrapConfig,
@@ -182,7 +184,7 @@ export async function maybeBuildA2AProvider(
     return null;
   }
   const failed = validateScenarios(
-    probe.card, [Scenario.STREAM, Scenario.RECOVERY],
+    probe.card, [Scenario.STREAM, Scenario.RECOVERY, Scenario.HITL],
   ).filter((r) => !r.ok);
   if (failed.length > 0) {
     // 场景缺项是 probe-v3 面（spec §3.3：locked 只来自运行期硬失败）
