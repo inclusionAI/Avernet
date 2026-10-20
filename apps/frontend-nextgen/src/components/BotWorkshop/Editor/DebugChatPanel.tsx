@@ -81,9 +81,10 @@ export function DebugChatPanel({
       displayName: bot.name,
       online: bot.lifecycle === 'running',
       chatable: true,
-      runtimeStage: runtimeStage ?? resolveBotRuntimeStage(bot.lifecycle),
+      botType: bot.serviceMode === 'service' ? 'service' : 'personal',
+      runtimeStage: bot.serviceMode === 'service' ? runtimeStage ?? resolveBotRuntimeStage(bot.lifecycle) : 'draft',
     }),
-    [bot.id, bot.lifecycle, bot.name, bot.ownerId, ownerId, runtimeStage],
+    [bot.id, bot.lifecycle, bot.name, bot.ownerId, bot.serviceMode, ownerId, runtimeStage],
   );
   const registerRenderScreenLibraries = useCallback(
     (botId: string) => botEditorService.registerRenderScreenLibraries(botId, ownerId ?? bot.ownerId),
@@ -239,6 +240,7 @@ export function DebugChatPanel({
         )}
       </div>
       <DebugChatComposer
+        runtimeStage={chatBot.runtimeStage}
         key={session?.sessionId ?? 'no-session'}
         botId={chatBot.realBotId}
         sessionId={session?.sessionId ?? null}

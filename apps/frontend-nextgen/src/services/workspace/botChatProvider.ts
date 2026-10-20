@@ -6,6 +6,7 @@ import { installCompleteFallback } from './botChatCompleteFallback';
 import {
   BOT_MESSAGE_PAGE_SIZE,
   botSessionService,
+  resolveChatRuntimeStage,
   resolveUserId,
   withFriendBotRequestParams,
   type ChatBotView,
@@ -147,7 +148,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
           this.options.bot.realBotId,
           resolveUserId(this.options.userId),
           this.options.bot.ownerId,
-          this.options.bot.runtimeStage ?? 'online',
+          resolveChatRuntimeStage(this.options.bot),
         );
     const factory = this.options.createSdkProvider ?? ((cfg) => new OpenClawProvider(cfg));
     const inner = factory({
@@ -170,7 +171,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
           this.options.bot.realBotId,
           resolveUserId(this.options.userId),
           this.options.bot.ownerId,
-          this.options.bot.runtimeStage ?? 'online',
+          resolveChatRuntimeStage(this.options.bot),
         );
         this.iamToken = refreshed;
         return { xIAMToken: refreshed };
@@ -263,7 +264,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
           this.options.bot.realBotId,
           resolveUserId(this.options.userId),
           this.options.bot.ownerId,
-          this.options.bot.runtimeStage ?? 'online',
+          resolveChatRuntimeStage(this.options.bot),
         );
     this.iamToken = freshIamToken;
     updateProviderIamToken(inner, freshIamToken);

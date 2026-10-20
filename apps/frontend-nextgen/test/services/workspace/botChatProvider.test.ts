@@ -64,6 +64,27 @@ const bot = {
 };
 
 describe('botChatProvider', () => {
+  it.each(['draft', 'verify', 'online'] as const)('%s 连接地址与 IAM token 使用同一个 stage', async (stage) => {
+    mockedGetConnection.mockImplementation(async (_id: string, params: { stage: string }) => ({
+      data: { sockets: [{ kind: 'chat', url: `wss://gw/${params.stage}/ws` }] },
+    }));
+    const target = { ...bot, botType: 'service', runtimeStage: stage };
+    const provider = createBotChatProvider({ bot: target, userId: 'u', sessionId: 'same-session-id' });
+    await provider.connect();
+    expect(mockedGetConnection).toHaveBeenCalledWith('b', { user_id: 'u', owner_id: '2088', stage });
+    expect(mockedGetIamToken).toHaveBeenCalledWith('b', 'u', '2088', stage);
+    expect(adapters.OpenClawProvider).toHaveBeenCalledWith(expect.objectContaining({ url: `wss://gw/${stage}/ws` }));
+    const config = (adapters.OpenClawProvider as jest.Mock<any>).mock.calls[0][0];
+    await config.credentialProvider();
+    mockSdk.isConnected = true;
+    await provider.request({ content: '验证', sessionId: 'same-session-id' });
+    expect(mockedGetIamToken).toHaveBeenCalledTimes(3);
+    for (const call of [1, 2, 3]) {
+      expect(mockedGetIamToken).toHaveBeenNthCalledWith(call, 'b', 'u', '2088', stage);
+    }
+    await provider.disconnect();
+  });
+
   it('initialize 调用 getBotConnection 并把 sockets[chat].url 传给 SDK,sessionKey=sessionId', async () => {
     mockedGetConnection.mockResolvedValue({
       code: 200000,
@@ -73,7 +94,7 @@ describe('botChatProvider', () => {
     });
     const p = createBotChatProvider({ bot, userId: 'u', sessionId: 'sid-1' });
     await p.connect();
-    expect(mockedGetConnection).toHaveBeenCalledWith('b', { user_id: 'u', owner_id: '2088' });
+    expect(mockedGetConnection).toHaveBeenCalledWith('b', { user_id: 'u', owner_id: '2088', stage: 'online' });
     const cfg = (adapters.OpenClawProvider as jest.Mock<any>).mock.calls[0][0] as {
       url: string;
       sessionKey: string;
@@ -139,7 +160,7 @@ describe('botChatProvider', () => {
     });
     const p = createBotChatProvider({ bot, userId: 'human_900003', sessionId: 'sid-1' });
     await p.connect();
-    expect(mockedGetConnection).toHaveBeenCalledWith('b', { user_id: '900003', owner_id: '2088' });
+    expect(mockedGetConnection).toHaveBeenCalledWith('b', { user_id: '900003', owner_id: '2088', stage: 'online' });
   });
 
   it('好友 Bot 的 connection 携带 f_user_id', async () => {
@@ -157,6 +178,7 @@ describe('botChatProvider', () => {
       owner_id: '2088',
       f_user_id: '900003',
       session_id: 'sid-1',
+      stage: 'draft',
     });
   });
 
@@ -376,7 +398,7 @@ it('团队连接、IAM 和消息历史使用登录用户与 entity owner，不�
   const provider = createBotChatProvider({ bot: teamBot, userId: 'human_viewer', sessionId: 'team-session' });
   await provider.connect();
   await provider.loadHistory();
-  expect(mockedGetConnection).toHaveBeenCalledWith('shared', { user_id: 'viewer', owner_id: 'team-entity' });
+  expect(mockedGetConnection).toHaveBeenCalledWith('shared', { user_id: 'viewer', owner_id: 'team-entity', stage: 'online' });
   expect(mockedGetIamToken).toHaveBeenCalledWith('shared', 'viewer', 'team-entity', 'online');
   expect(botSessionService.botSessionService.listMessagesPage).toHaveBeenCalledWith(
     teamBot,

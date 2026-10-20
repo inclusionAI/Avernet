@@ -5,6 +5,7 @@ import type { BotTableProps } from '@/components/BotWorkshop/BotCard/BotTable';
 import * as botController from '@/services/backendApi/bots/botController';
 import type { BotDomain } from '@/services/botWorkshop';
 import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { getInventoryActionAvailability } from '@/services/botWorkshop/botPolicy';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
@@ -63,6 +64,27 @@ function containersCell() {
 
 describe('BotTable 表格结构', () => {
   const bot = mapBotDto({ bot_id: 'b1', bot_name: 'Openclaw Bot', engine: 'openclaw', status: 'ACTIVE' }).item;
+
+  test('预发服务 Bot 使用预发验证按钮打开详情，而不是进入对话协作', () => {
+    const serviceBot = mapBotDto({
+      bot_id: 'verify-bot', bot_name: '验证 Bot', engine: 'openclaw', bot_type: 'service',
+      status: 'ACTIVE', publish: { id: 1, status: 'VALIDATING', version: 1 },
+      actions: ['view', 'publish_online', 'restart_publish', 'cancel_staging'],
+    }).item;
+    const onEdit = jest.fn();
+    const onConversation = jest.fn();
+    renderTable(serviceBot, {
+      onEdit, onConversation,
+      getInventoryActions: (item) => ({
+        view: getInventoryActionAvailability(item, 'view'),
+        edit: getInventoryActionAvailability(item, 'edit'),
+        chat: getInventoryActionAvailability(item, 'chat'),
+      }),
+    });
+    fireEvent.click(screen.getByRole('button', { name: '预发验证 验证 Bot' }));
+    expect(onEdit).toHaveBeenCalledWith(serviceBot);
+    expect(onConversation).not.toHaveBeenCalled();
+  });
 
   test('短描述收进 Bot 信息，容器信息仍独立于 Bot 标签', () => {
     renderTable(bot);

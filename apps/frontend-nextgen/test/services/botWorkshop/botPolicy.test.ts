@@ -5,9 +5,24 @@ import {
   getBotEntryAvailability,
   getGeneralConfigAvailability,
   getInventoryActionAvailability,
+  canEnterBotDetail,
 } from '@/services/botWorkshop/botPolicy';
 
 describe('botPolicy', () => {
+  test('预发服务 Bot 的运维人员可以进入只读验证；普通查看者不获得编辑入口', () => {
+    const bot = mapBotDto({
+      bot_id: 'verify-bot', bot_type: 'service', kind: 'service', engine: 'openclaw',
+      status: 'ACTIVE', publish: { id: 1, status: 'VALIDATING', version: 1 },
+      actions: ['view', 'publish_online', 'restart_publish', 'cancel_staging'],
+    }).item;
+    expect(getBotEntryAvailability(bot).enabled).toBe(true);
+    expect(getInventoryActionAvailability(bot, 'edit')).toMatchObject({ visible: true, enabled: true });
+    expect(canEnterBotDetail(bot, 'collaborator')).toBe(true);
+    const viewer = { ...bot, actions: ['view'] };
+    expect(getInventoryActionAvailability(viewer, 'edit').enabled).toBe(false);
+    expect(canEnterBotDetail(viewer, 'visitor')).toBe(false);
+    expect(getInventoryActionAvailability(bot, 'chat').enabled).toBe(false);
+  });
   test('部署中禁止进入、编辑和对话，但保留日志排障', () => {
     const bot = mapBotDto({ bot_id: 'b-1', status: 'PENDING', bot_type: 'service' }).item;
     const actions = getBotActionAvailability(bot, { canEdit: true });

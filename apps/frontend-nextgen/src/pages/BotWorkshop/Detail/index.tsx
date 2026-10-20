@@ -20,6 +20,7 @@ import { useBotWorkshopEditorIdentity } from '@/hooks/useBotWorkshopEditorIdenti
 import { useDesktopFolder } from '@/hooks/useDesktopFolder';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
 import { desktopCapabilityPolicy } from '@/services/botWorkshop/desktopCapabilityPolicy';
+import { isServiceVerification } from '@/services/botWorkshop/botPolicy';
 import { cn } from '@/utils/cn';
 import { useLocation } from '@umijs/max';
 import React, { useEffect, useState } from 'react';
@@ -32,7 +33,7 @@ const BotWorkshopDetailPage: React.FC = () => {
   const id = params.get('id');
   const openDesktopFolder = useDesktopFolder(id);
   const ownerId = params.get('owner_id')?.trim() || undefined;
-  const editable = params.get('type') === 'edit';
+  const requestedEditable = params.get('type') === 'edit';
   const runtimeStageParam = params.get('runtime_stage');
   const runtimeStage: BotRuntimeStage | undefined =
     runtimeStageParam === 'draft' || runtimeStageParam === 'verify' || runtimeStageParam === 'online'
@@ -40,7 +41,10 @@ const BotWorkshopDetailPage: React.FC = () => {
       : undefined;
   const currentSpaceId = useSpaceContext((state) => state.currentSpaceId);
   const requestIdentity = useBotWorkshopEditorIdentity();
-  const detail = useBotWorkshopDetail(id, editable, requestIdentity.ready, ownerId, requestIdentity.userId);
+  const detail = useBotWorkshopDetail(id, requestedEditable, requestIdentity.ready, ownerId, requestIdentity.userId);
+  const verifying = !!detail.bot && detail.bot.serviceMode === 'service' &&
+    (runtimeStage === 'verify' || isServiceVerification(detail.bot));
+  const editable = requestedEditable && !verifying;
   const addressedOwnerId = ownerId ?? detail.bot?.ownerId;
   const isOwner = isSameHumanIdentity(addressedOwnerId, requestIdentity.userId);
   const editor = useBotEditor(
@@ -148,6 +152,8 @@ const BotWorkshopDetailPage: React.FC = () => {
             debugFullscreen && 'hidden',
           )}
         >
+          {verifying ? <p className="border-b border-border bg-muted px-6 py-3 text-sm text-muted-foreground">预发验证中，配置已锁定；请在右侧对话区验证 Bot。</p> : null}
+          <fieldset disabled={verifying} className={cn('min-w-0 border-0 p-0', verifying && 'pointer-events-none opacity-50')}>
           {editor.loading ? (
             <Spin tip="加载编辑配置…" />
           ) : more === 'md' ? (
@@ -214,7 +220,7 @@ const BotWorkshopDetailPage: React.FC = () => {
               candidatesLoading={editor.candidatesLoading}
               onMcp={editor.setSkillSetMcp}
               mcpCallTypes={editor.mcpCallTypes}
-              callerContextEditable={editor.callerContextEditable}
+              callerContextEditable={editable && editor.callerContextEditable}
               mcpIdentityDisabledReason={
                 bot.serviceMode === 'service' ? undefined : '个人 Bot 固定使用 Owner 模式，不支持切换 MCP 访问方式'
               }
@@ -251,6 +257,7 @@ const BotWorkshopDetailPage: React.FC = () => {
           ) : (
             <TaskEscort bot={bot} />
           )}
+          </fieldset>
         </section>
         {debugOpen ? (
           <div
@@ -260,8 +267,9 @@ const BotWorkshopDetailPage: React.FC = () => {
             )}
           >
             <DebugChatPanel
+              key={`${bot.id}:${verifying ? 'verify' : runtimeStage ?? bot.lifecycle}`}
               bot={bot}
-              runtimeStage={runtimeStage}
+              runtimeStage={verifying ? 'verify' : runtimeStage}
               ownerId={addressedOwnerId}
               fullscreen={debugFullscreen}
               onClose={() => {

@@ -7,13 +7,22 @@ export interface BotPolicyContext {
   apiReady?: Partial<Record<BotAction, boolean>>;
 }
 
+export function isServiceVerification(bot: BotDomain): boolean {
+  return bot.serviceMode === 'service' && bot.lifecycle === 'prestable';
+}
+
+function canValidateServiceBot(bot: BotDomain): boolean {
+  return isServiceVerification(bot) &&
+    ['edit', 'publish_online', 'cancel_staging', 'restart_publish'].some((action) => bot.actions.includes(action));
+}
+
 /**
  * 进入编辑/查询详情页必须是 Owner 或后端明确授予 edit 的协作者。
  * 单独的 view action 只允许查看列表基础信息，不能触发详情页的子资源请求。
  */
 export function canEnterBotDetail(bot: BotDomain, currentUserId?: string): boolean {
   if (!currentUserId) return false;
-  return bot.ownerId === currentUserId || bot.actions.includes('edit');
+  return bot.ownerId === currentUserId || bot.actions.includes('edit') || canValidateServiceBot(bot);
 }
 const actions: BotAction[] = [
   'view',
@@ -39,7 +48,7 @@ const blockedEntryReasons: Partial<Record<BotDomain['lifecycle'], string>> = {
 };
 
 export function getBotEntryAvailability(bot: BotDomain): BotActionAvailability {
-  const disabledReason = blockedEntryReasons[bot.lifecycle];
+  const disabledReason = isServiceVerification(bot) ? undefined : blockedEntryReasons[bot.lifecycle];
   return {
     action: 'view',
     visible: true,
@@ -105,6 +114,10 @@ export function getBotActionAvailability(bot: BotDomain, context: BotPolicyConte
 }
 
 export function getInventoryActionAvailability(bot: BotDomain, action: BotInventoryAction): BotActionAvailability {
+  // The validation entry opens a read-only editor; it does not grant config writes.
+  if (action === 'edit' && canValidateServiceBot(bot)) {
+    return { action: 'edit', visible: true, enabled: true };
+  }
   const backendReason = bot.disabledActions[action];
   const declaredEnabled = bot.actions.includes(action);
   const visible = declaredEnabled || Boolean(backendReason);
