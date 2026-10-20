@@ -656,7 +656,7 @@ story_cli_operator_manages_group_context() {
         api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
         return
     }
-    list_has_item=$(_cli_json_array_has_object "$BCS_CLI_STDOUT" "contexts" "name" "$ctx_name" "permission" "WR")
+    list_has_item=$(_cli_json_array_has_object "$BCS_CLI_STDOUT" "contexts" "name" "$ctx_name" "permission" "WRO")
     assert_eq "CLI group-context list returns the updated metadata" "$list_has_item" "1"
 
     _cli_story_run "operator gets the updated group context entry" PM group-context get \
