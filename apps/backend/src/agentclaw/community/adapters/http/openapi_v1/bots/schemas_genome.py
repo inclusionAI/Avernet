@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 _REV_DESCRIPTION = "A revision id (`sha256:<hex64>`), `r<seq>`, or a ref name such as `active`, `previous`, `draft` or `candidate/<run>/<n>`."
 _STATUS_DESCRIPTION = (
@@ -78,7 +78,7 @@ class RevisionRecorded(BaseModel):
 class RunScopePayload(BaseModel):
     """The evolution run a candidate is recorded for, and what it may change."""
 
-    run_id: str = Field(min_length=1, max_length=64, description="The run's id; names the candidate ref.")
+    run_id: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,64}$", description="The run's id; names the candidate ref `candidate/<run_id>/<n>`, so it is one ref segment: `[A-Za-z0-9_.-]`, 1 to 64 characters.")
     binding_id: str = Field(min_length=1, max_length=64, description="The strategy binding the run executes.")
     allowed_genes: list[str] = Field(description="Gene paths the run may change; every op must be covered by one.")
 
@@ -87,8 +87,14 @@ class RecordPatchRequest(BaseModel):
     """Record a revision by applying a Genome Patch to its own `base`."""
 
     status: Literal["draft", "candidate"] = Field(description="`draft` for an owner's edit, `candidate` for a run's proposal.")
-    run: RunScopePayload | None = Field(default=None, description="Required with `candidate`: the run, which names the candidate ref.")
+    run: RunScopePayload | None = Field(default=None, description="Required with `candidate` and refused with `draft`: the run, which bounds the genes and names the candidate ref.")
     patch: dict[str, Any] = Field(description="A Genome Patch (contract §6); `patch.base` is the revision it applies to.")
+
+    @model_validator(mode="after")
+    def _run_matches_status(self) -> "RecordPatchRequest":
+        if (self.status == "candidate") != (self.run is not None):
+            raise ValueError("`run` is required with status `candidate` and not allowed with `draft`")
+        return self
 
 
 class PolicyRequest(BaseModel):

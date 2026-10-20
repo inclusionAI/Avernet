@@ -135,6 +135,12 @@ async def test_record_patch_refusals_leave_nothing_behind(world: World) -> None:
     assert [r.code for r in caught.value.reasons] == ["admission"]
     with pytest.raises(ValueError):
         await world.registry.record_patch(BOT, patch, created_by=OWNER, status=RevisionStatus.PROMOTED)
+    with pytest.raises(ValueError):  # a candidate is a run's proposal: no run, no candidate
+        await world.registry.record_patch(BOT, patch, created_by=OWNER, status=RevisionStatus.CANDIDATE)
+    with pytest.raises(ValueError):  # and a draft is the owner's: a run has no business on it
+        await world.registry.record_patch(BOT, patch, created_by=RUN, status=RevisionStatus.DRAFT, run=RunScope("run_1", "b", ("persona",)))
+    with pytest.raises(ValueError):  # a run id is one ref segment, or candidate/<run>/<n> cannot be parsed back
+        RunScope("a/b", "b", ("persona",))
     assert world.registry.list_revisions(BOT).total == 1
     assert world.registry.list_refs(BOT) == []
 

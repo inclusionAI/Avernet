@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import FastAPI, Response
+from pydantic import ValidationError
 from starlette.requests import Request
 
 from agentclaw.community.adapters.http.openapi_v1.admission import ADMISSION, ActingCaller
@@ -185,6 +186,20 @@ async def test_record_patch_answers_201_then_200_and_threads_the_run() -> None:
     out = await genome.record_genome_patch("bot_1", RecordPatchRequest(status="draft", patch={}), _request("POST"), response, "u1", "u1", HUMAN, _bot_service(), registry)
     assert response.status_code == 200 and out.data.created is False
     assert registry.record_patch.await_args.kwargs["created_by"] == OWNER
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"status": "candidate", "patch": {}},
+        {"status": "draft", "run": {"run_id": "run_7", "binding_id": "b1", "allowed_genes": ["persona"]}, "patch": {}},
+        {"status": "candidate", "run": {"run_id": "a/b", "binding_id": "b1", "allowed_genes": ["persona"]}, "patch": {}},
+        {"status": "candidate", "run": {"run_id": "run 7", "binding_id": "b1", "allowed_genes": ["persona"]}, "patch": {}},
+    ],
+)
+def test_a_candidate_needs_its_run_and_a_run_id_is_one_ref_segment(body: dict) -> None:
+    with pytest.raises(ValidationError):
+        RecordPatchRequest.model_validate(body)
 
 
 def test_an_application_caller_is_recorded_as_itself_acting_for_the_user() -> None:

@@ -7,6 +7,8 @@ a new ``GenomeRef``.
 """
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -92,6 +94,10 @@ class Provenance:
         return out
 
 
+#: A run id is one ref segment: ``candidate/<run_id>/<n>`` must parse back into three parts.
+RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+
+
 @dataclass(frozen=True)
 class RunScope:
     """The evolution run a candidate is recorded for, and the genes it may touch."""
@@ -99,6 +105,12 @@ class RunScope:
     run_id: str
     binding_id: str
     allowed_genes: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not RUN_ID_PATTERN.match(self.run_id):
+            raise ValueError(f"run_id {self.run_id!r} is not one ref segment ([A-Za-z0-9_.-], 1-64)")
+        if not self.binding_id:
+            raise ValueError("binding_id is required")
 
 
 @dataclass(frozen=True)

@@ -314,6 +314,9 @@ class GenomeRegistryService(GenomeRegistryProtocol):
     ) -> RecordedRevision:
         if status not in (RevisionStatus.DRAFT, RevisionStatus.CANDIDATE):
             raise ValueError(f"a recorded patch is draft or candidate, not {status.value}")
+        if (status is RevisionStatus.CANDIDATE) != (run is not None):
+            # A candidate is a run's proposal: the run bounds its genes and names its ref. A draft is the owner's.
+            raise ValueError("a candidate is recorded with its run, a draft without one")
         reasons = shape_reasons(patch)
         if reasons:
             raise PatchRejected(reasons)

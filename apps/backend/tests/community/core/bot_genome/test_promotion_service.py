@@ -12,7 +12,7 @@ from agentclaw.community.core.bot_genome.errors import (
     RefConflict,
     RevisionNotFound,
 )
-from agentclaw.community.core.bot_genome.models import BotRef, Provenance, ProvenanceKind, RevisionStatus
+from agentclaw.community.core.bot_genome.models import BotRef, Provenance, ProvenanceKind, RevisionStatus, RunScope
 from agentclaw.community.core.bot_genome.promotion.applier import PendingDeliveryApplier
 from tests.community.core.bot_genome.example_blobs import SUPPORT_BOT, BlobDir, load_patch, load_revisions
 from tests.community.core.bot_genome.service_fixtures import BOT, OWNER, RUN, World
@@ -77,7 +77,7 @@ async def test_going_back_is_a_promotion_of_a_promoted_revision(world: World) ->
 @pytest.mark.asyncio
 async def test_refusals_before_the_move_leave_refs_and_statuses_untouched(world: World) -> None:
     r1, r2 = await _two_revisions(world)
-    candidate = await world.registry.record_patch(BOT, load_patch("01-file-edit.json"), created_by=RUN, status=RevisionStatus.CANDIDATE)
+    candidate = await world.registry.record_patch(BOT, load_patch("01-file-edit.json"), created_by=RUN, status=RevisionStatus.CANDIDATE, run=RunScope("run_7f3", "b1", ("persona", "skills", "resources")))
     with pytest.raises(NotPromotable):
         await world.promotion.promote(BOT, revision=candidate.revision.revision.id, ref="active", expected_revision=None, actor=OWNER, reason="x")
     with pytest.raises(RevisionNotFound):
@@ -91,7 +91,7 @@ async def test_refusals_before_the_move_leave_refs_and_statuses_untouched(world:
     with pytest.raises(RefConflict) as caught:
         await world.promotion.promote(BOT, revision=r1, ref="active", expected_revision=r2, actor=OWNER, reason="x")
     assert caught.value.current is None
-    assert _refs(world) == {} and world.promotion.list_promotions(BOT).total == 0
+    assert _refs(world) == {candidate.ref: candidate.revision.revision.id} and world.promotion.list_promotions(BOT).total == 0
     assert world.registry.get_revision(BOT, r1).revision.status == RevisionStatus.DRAFT
     assert world.applier.starts == []
 
