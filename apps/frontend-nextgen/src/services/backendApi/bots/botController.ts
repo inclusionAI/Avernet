@@ -3,6 +3,12 @@ import { normalizeOpenApiUserId } from '@/domain/userIdentity';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope, BackendApiPage, BackendUnknownRecord } from '../types';
+import type {
+  BotEngineRestartResultDto,
+  BotEngineRuntimeRequestOptions,
+  BotEngineRuntimeStatusDto,
+  BotEngineVersionDto,
+} from './botEngineVersionDtos';
 
 export type BotDto = BackendUnknownRecord;
 export type MutateBotRequest = BackendUnknownRecord;
@@ -23,6 +29,8 @@ export interface OwnedBotDto {
   bot_type?: string;
   status?: string;
   owner_entity_id?: string;
+  actions?: string[];
+  disabled_actions?: Record<string, string>;
   space_id?: string | number;
   space_name?: string;
   /** 归属空间(2026-10-21 对齐线上实际返回的嵌套形态;bots 接口实测 space_id/name/kind)。 */
@@ -88,6 +96,8 @@ export const BOT_ENDPOINTS = {
   status: (bot_id: string) => `/openapi/v1/bots/${bot_id}/status`,
   restart: (bot_id: string) => `/openapi/v1/bots/${bot_id}/restart`,
   restartEngine: (bot_id: string) => `/openapi/v1/bots/${bot_id}/engine/restart`,
+  engineStatus: (bot_id: string) => `/openapi/v1/bots/${encodeURIComponent(bot_id)}/engine/status`,
+  engineVersion: (bot_id: string) => `/openapi/v1/bots/${encodeURIComponent(bot_id)}/engine-version`,
   refetchEngine: (bot_id: string) => `/openapi/v1/bots/${bot_id}/engine/refetch`,
   upgradeService: (bot_id: string) => `/openapi/v1/bots/${bot_id}/lifecycle/upgrade`,
   lifecycle: (bot_id: string) => `/openapi/v1/bots/${bot_id}/lifecycle`,
@@ -105,11 +115,12 @@ export function changeBotSpace(bot_id: string, space_id: number, user_id?: strin
   });
 }
 
-export function listBotInventory(params?: BackendUnknownRecord, spaceId?: string) {
+export function listBotInventory(params?: BackendUnknownRecord, spaceId?: string, signal?: AbortSignal) {
   return backendRequest<BackendApiEnvelope<BackendApiPage<BotDto>>>(BOT_ENDPOINTS.inventory, {
     method: 'GET',
     params: userScopedParams(params),
     headers: spaceId ? { 'X-Space-Id': spaceId } : undefined,
+    signal,
   });
 }
 
@@ -174,17 +185,61 @@ export function deleteBot(bot_id: string) {
 }
 
 // 重启 Bot。
-export function restartBot(bot_id: string) {
+export function restartBot(bot_id: string, target?: BotEngineRuntimeRequestOptions) {
   return backendRequest<BackendApiEnvelope<BotDto>>(BOT_ENDPOINTS.restart(bot_id), {
     method: 'POST',
-    params: userScopedParams(),
+    params: target ? userScopedParams({ user_id: target.userId, entity_id: target.ownerId }) : userScopedParams(),
+    signal: target?.signal,
   });
 }
 
-export function restartBotEngine(bot_id: string) {
-  return backendRequest<BackendApiEnvelope<BackendUnknownRecord>>(BOT_ENDPOINTS.restartEngine(bot_id), {
+/** Poll the Bot-level restart lifecycle; readiness alone is not version confirmation. */
+export function getBotRestartStatus(bot_id: string, target: BotEngineRuntimeRequestOptions) {
+  return backendRequest<BackendApiEnvelope<{ status: string; is_ready: boolean; device_id?: string | null }>>(
+    BOT_ENDPOINTS.status(bot_id),
+    {
+      method: 'GET',
+      params: userScopedParams({ user_id: target.userId, entity_id: target.ownerId }),
+      signal: target.signal,
+    },
+  );
+}
+
+function engineRuntimeParams(target?: BotEngineRuntimeRequestOptions): BackendUnknownRecord {
+  if (!target) return userScopedParams();
+  return userScopedParams({
+    user_id: target.userId,
+    ...(target.ownerId ? { entity_id: target.ownerId } : {}),
+    stage: target.stage ?? 'draft',
+    ...(target.deviceUuid ? { device_uuid: target.deviceUuid } : {}),
+  });
+}
+
+/** Read the Backend's existing advisory contract; this does not grant restart permission. */
+export function getBotEngineVersion(bot_id: string, target: BotEngineRuntimeRequestOptions) {
+  return backendRequest<BackendApiEnvelope<BotEngineVersionDto>>(BOT_ENDPOINTS.engineVersion(bot_id), {
+    method: 'GET',
+    params: engineRuntimeParams(target),
+    signal: target.signal,
+  });
+}
+
+/** Read the selected draft engine's running state after an engine restart request. */
+export function getBotEngineStatus(bot_id: string, target: BotEngineRuntimeRequestOptions) {
+  return backendRequest<BackendApiEnvelope<BotEngineRuntimeStatusDto>>(BOT_ENDPOINTS.engineStatus(bot_id), {
+    method: 'GET',
+    params: engineRuntimeParams(target),
+    signal: target.signal,
+  });
+}
+
+export function restartBotEngine(bot_id: string, target?: BotEngineRuntimeRequestOptions) {
+  return backendRequest<BackendApiEnvelope<BotEngineRestartResultDto>>(BOT_ENDPOINTS.restartEngine(bot_id), {
     method: 'POST',
-    params: userScopedParams(),
+    params: engineRuntimeParams(target),
+    // The existing Backend relay expects a JSON request even though force is not exposed to callers.
+    data: { force: false },
+    signal: target?.signal,
   });
 }
 

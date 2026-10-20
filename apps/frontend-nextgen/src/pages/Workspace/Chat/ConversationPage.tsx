@@ -10,7 +10,6 @@ import type { ConversationBotSection } from '@/domain/conversation/types';
 import { isManagedConversationSection } from '@/domain/conversation/types';
 import { buildSingleChatBridgeRequest } from '@/hooks/singleChatBridgeRequest';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
-import { useMinWidth } from '@/hooks/useMediaQuery';
 import { buildBotChatTarget } from '@/hooks/workspaceIdentityMapper';
 import { buildAgentCodingChatPath } from '@/services/workspace';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
@@ -20,22 +19,24 @@ import { useChatBridge } from '@tc-chat/adapters';
 import type { BridgeInputRef, PanelHandle } from '@tc-chat/core';
 import type { SenderRef } from '@tc-chat/ui/es/Sender';
 import { history } from '@umijs/max';
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, type RefObject } from 'react';
 import { ReadOnlyConversationPanel } from '../components/ReadOnlyConversationPanel';
 import { useBotChat } from '../hooks/useBotChat';
 import { ChatHeaderActions } from './components/ChatHeaderActions';
 import { ChatHeaderRightPanel, SessionDetailPanel } from './components/ChatHeaderRightPanel';
+import { ConversationMobileSidebarDrawer } from './components/ConversationMobileSidebarDrawer';
 import { ConversationSessionPlaceholder } from './components/ConversationSessionPlaceholder';
 import { ConversationSidebar, type ConversationSidebarProps } from './components/ConversationSidebar';
-import { ConversationMobileSidebarDrawer } from './components/ConversationMobileSidebarDrawer';
 import { SessionHistorySearchPanel } from './components/SessionHistorySearchPanel';
 import { ConversationInteractiveStage } from './ConversationInteractiveStage';
+import { useChatEngineVersionNotice } from './hooks/useChatEngineVersionNotice';
 import { useChatHeaderPanels } from './hooks/useChatHeaderPanels';
 import { useConversationDeepLinkSessionHydration } from './hooks/useConversationDeepLinkSessionHydration';
 import { useConversationDirectory } from './hooks/useConversationDirectory';
 import { useConversationHistory } from './hooks/useConversationHistory';
 import { useConversationIdentityReset } from './hooks/useConversationIdentityReset';
 import { useConversationInteractiveChat } from './hooks/useConversationInteractiveChat';
+import { useConversationMobileSidebar } from './hooks/useConversationMobileSidebar';
 import { useConversationSelection } from './hooks/useConversationSelection';
 import { useConversationSessionEdits } from './hooks/useConversationSessionEdits';
 import { useConversationSessionPlaceholder } from './hooks/useConversationSessionPlaceholder';
@@ -96,6 +97,13 @@ export default function ConversationPage(): JSX.Element {
   // 登录用户切换瞬间不再装载旧用户会话(identityChanged 防串话,expand-selection 竞态保护)。
   const interactiveBot = identityChanged || !userId ? null : interactive.bot;
   const selectedSession = interactive.session;
+  const engineVersionNotice = useChatEngineVersionNotice({
+    bot: interactiveBot,
+    section: store.selectedSection,
+    origin,
+    sessionId: selectedSession?.sessionId ?? null,
+    userId: identityChanged ? null : userId,
+  });
   const target = useMemo(
     () => (interactiveBot ? buildBotChatTarget(interactiveBot, selectedSession) : null),
     [interactiveBot, selectedSession],
@@ -158,11 +166,7 @@ export default function ConversationPage(): JSX.Element {
   });
 
   // <lg 二级会话列表抽屉开关(桌面收起,对齐旧页行为)。
-  const [mobileListOpen, setMobileListOpen] = useState(false);
-  const isDesktop = useMinWidth(1024);
-  useEffect(() => {
-    if (isDesktop) setMobileListOpen(false);
-  }, [isDesktop]);
+  const { open: mobileListOpen, setOpen: setMobileListOpen } = useConversationMobileSidebar();
 
   const handleOpenSession = (
     botId: string,
@@ -170,12 +174,10 @@ export default function ConversationPage(): JSX.Element {
     sessionId: string,
     friendUserId?: string,
   ) => {
-    if (isManagedConversationSection(section) && friendUserId) {
-      selectReadonlySession(botId, sessionId, friendUserId);
-      return;
-    }
-    if (section === 'friend') sessions.selectFriendBotSession(botId, sessionId);
-    else sessions.selectMineSession(botId, sessionId);
+    if (isManagedConversationSection(section) && friendUserId)
+      return selectReadonlySession(botId, sessionId, friendUserId);
+    if (section === 'friend') return sessions.selectFriendBotSession(botId, sessionId);
+    sessions.selectMineSession(botId, sessionId);
   };
   // AgentCoding Bot 行点击直达专用 coding 对话页(与 Bot 工坊「去使用」一致;spec 2026-10-09 G2)。
   const openAgentCodingBot = (bot: ChatBotView) =>
@@ -235,6 +237,7 @@ export default function ConversationPage(): JSX.Element {
       sidePaneOpen={headerPanels.sidePaneOpen}
       sidePaneDisabled={headerPanels.sidePaneDisabled}
       onToggleSidePane={headerPanels.toggleSidePane}
+      notice={engineVersionNotice.notice}
     />
   );
   const headerRightPanels =
@@ -295,6 +298,7 @@ export default function ConversationPage(): JSX.Element {
           />
         )}
       </div>
+      {engineVersionNotice.dialogs}
     </div>
   );
 }

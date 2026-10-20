@@ -3,9 +3,9 @@ import { BotAccessModal } from '@/components/BotWorkshop/BotAccessModal';
 import { BotBasicInfoDrawer } from '@/components/BotWorkshop/BotBasicInfoDrawer';
 import BotTable from '@/components/BotWorkshop/BotCard';
 import BotTableSkeleton from '@/components/BotWorkshop/BotCard/BotTableSkeleton';
-import { ContainerInstancesModal } from '@/components/BotWorkshop/ContainerInstancesModal';
 import { BotManagementTabs, type BotManagementTab } from '@/components/BotWorkshop/BotManagementTabs';
 import BotWorkshopToolbar from '@/components/BotWorkshop/BotWorkshopToolbar';
+import { ContainerInstancesModal } from '@/components/BotWorkshop/ContainerInstancesModal';
 import CreateBotModal from '@/components/BotWorkshop/CreateBotModal';
 import { ExternalBotPanel } from '@/components/BotWorkshop/ExternalBotPanel';
 import { ServicePublicationDrawer } from '@/components/BotWorkshop/ServicePublicationDrawer';
@@ -107,6 +107,7 @@ const BotWorkshopPage: React.FC = () => {
                     onOpenContainers={setContainerBot}
                     canViewContainers={workshop.canViewContainers}
                     containerUserId={workshop.containerUserId}
+                    onEngineVersionUpdated={() => workshop.retry({ silent: true })}
                     onChangeSpace={(bot) => {
                       if (workshop.canChangeSpace(bot)) workshop.openSpaceChange(bot);
                     }}

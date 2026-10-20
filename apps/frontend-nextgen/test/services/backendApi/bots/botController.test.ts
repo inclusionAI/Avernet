@@ -2,6 +2,9 @@ import {
   changeBotSpace,
   deleteBot,
   getBot,
+  getBotEngineStatus,
+  getBotEngineVersion,
+  getBotRestartStatus,
   listBotInventory,
   listBots,
   refetchBotEngine,
@@ -46,6 +49,16 @@ describe('botController OpenAPI contracts', () => {
       expect.objectContaining({ method: 'GET' }),
     );
   });
+  test('inventory 保留团队空间及调用方取消信号', async () => {
+    const controller = new AbortController();
+    const spy = jest.spyOn(globalThis, 'fetch').mockImplementation(() => response({ total: 0, items: [] }));
+    await listBotInventory({ user_id: 'viewer', page: 1, page_size: 100 }, '42', controller.signal);
+    expect(spy).toHaveBeenCalledWith(
+      '/openapi/v1/bots/all?user_id=viewer&page=1&page_size=100',
+      expect.objectContaining({ signal: controller.signal, headers: expect.objectContaining({ 'X-Space-Id': '42' }) }),
+    );
+  });
+
   test('does not send placeholder identity me as user_id', async () => {
     useWorkspaceStore.setState({ activeIdentityId: 'me' });
     const spy = jest.spyOn(globalThis, 'fetch').mockImplementation(() => response({ total: 0, items: [] }));
@@ -79,6 +92,58 @@ describe('botController OpenAPI contracts', () => {
     expect(spy).toHaveBeenCalledWith(
       '/openapi/v1/bots/bot-1/engine/refetch',
       expect.objectContaining({ method: 'POST', body: JSON.stringify({ force: true }) }),
+    );
+  });
+
+  test('engine-version inspection carries the caller, owner, draft stage and selected device', async () => {
+    const spy = jest.spyOn(globalThis, 'fetch').mockImplementation(() => response({ comparison: 'older' }));
+
+    await getBotEngineVersion('bot-1', {
+      userId: '900001',
+      ownerId: 'owner-1',
+      deviceUuid: 'device-1',
+    });
+
+    expect(spy).toHaveBeenCalledWith(
+      '/openapi/v1/bots/bot-1/engine-version?user_id=900001&entity_id=owner-1&stage=draft&device_uuid=device-1',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
+  test('engine status and restart keep the same explicit draft instance identity', async () => {
+    const spy = jest.spyOn(globalThis, 'fetch').mockImplementation(() => response({ running: true }));
+    const target = { userId: '900001', ownerId: 'owner-1', deviceUuid: 'device-1' };
+
+    await getBotEngineStatus('bot-1', target);
+    await restartBotEngine('bot-1', target);
+
+    expect(spy).toHaveBeenNthCalledWith(
+      1,
+      '/openapi/v1/bots/bot-1/engine/status?user_id=900001&entity_id=owner-1&stage=draft&device_uuid=device-1',
+      expect.objectContaining({ method: 'GET' }),
+    );
+    expect(spy).toHaveBeenNthCalledWith(
+      2,
+      '/openapi/v1/bots/bot-1/engine/restart?user_id=900001&entity_id=owner-1&stage=draft&device_uuid=device-1',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ force: false }) }),
+    );
+  });
+
+  test('Bot restart and lifecycle poll preserve caller/owner without stale device or engine-process semantics', async () => {
+    const spy = jest.spyOn(globalThis, 'fetch').mockImplementation(() => response({ status: 'PENDING' }));
+    const controller = new AbortController();
+    const target = { userId: 'caller', ownerId: 'owner', deviceUuid: 'old-device', signal: controller.signal };
+    await restartBot('bot-1', target);
+    await getBotRestartStatus('bot-1', target);
+    expect(spy).toHaveBeenNthCalledWith(
+      1,
+      '/openapi/v1/bots/bot-1/restart?user_id=caller&entity_id=owner',
+      expect.objectContaining({ method: 'POST', signal: controller.signal }),
+    );
+    expect(spy).toHaveBeenNthCalledWith(
+      2,
+      '/openapi/v1/bots/bot-1/status?user_id=caller&entity_id=owner',
+      expect.objectContaining({ method: 'GET', signal: controller.signal }),
     );
   });
 

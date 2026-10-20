@@ -88,6 +88,8 @@ describe('botSessionService', () => {
             template_type: 'normalCC',
             owner_entity_id: '3',
             status: 'ACTIVE',
+            actions: ['restart'],
+            disabled_actions: { restart_publish: '仅发布 Bot 支持' },
           },
           {
             bot_id: 'normal-empty:4',
@@ -125,6 +127,9 @@ describe('botSessionService', () => {
         displayName: '普通 CC',
         isAgentCodingBot: false,
         templateType: 'normalCC',
+        actions: ['restart'],
+        disabledActions: { restart_publish: '仅发布 Bot 支持' },
+        runtimeStage: 'draft',
       }),
       expect.objectContaining({
         displayName: '无模板 CC',
@@ -137,6 +142,50 @@ describe('botSessionService', () => {
         templateType: 'generalCC',
       }),
     ]);
+  });
+
+  it('服务 Bot 的真实目录未返回阶段时仍保留草稿操作上下文', async () => {
+    ownedMocked.listBots.mockResolvedValue({
+      code: 200000,
+      data: {
+        items: [
+          {
+            bot_id: 'service-1',
+            bot_name: 'Service',
+            engine: 'OpenClaw',
+            bot_type: 'service',
+            owner_entity_id: 'owner-1',
+            status: 'ACTIVE',
+          },
+        ],
+        total: 1,
+      },
+    });
+    ownedMocked.listBotInventory.mockResolvedValue({
+      code: 200000,
+      data: {
+        items: [
+          {
+            bot_id: 'service-1',
+            display_state: 'service_draft',
+            owner_entity_id: 'owner-1',
+            actions: ['restart'],
+          },
+        ],
+        total: 1,
+      },
+    });
+    expect(await botSessionService.listOwnedBots('viewer')).toMatchObject({
+      ok: true,
+      data: [
+        {
+          botType: 'service',
+          runtimeStage: 'draft',
+          actions: ['restart'],
+          ownerId: 'owner-1',
+        },
+      ],
+    });
   });
 
   it('listOwnedBots 透传 bots 接口原始 status(视图侧判定 Bot 可用性)', async () => {
@@ -517,5 +566,53 @@ it('listSessionsPage 与收藏分页复用统一标题映射并透传分页参�
   expect(favorites).toMatchObject({
     ok: true,
     data: { total: 1, items: [{ sessionId: 'sid-f', title: '收藏标题', favorite: true }] },
+  });
+});
+
+describe('owned chat engine permissions from inventory', () => {
+  const dto = {
+    bot_id: 'bot-permission',
+    bot_name: 'permission',
+    owner_entity_id: 'owner',
+    status: 'ACTIVE',
+    engine: 'openclaw',
+  };
+  it('uses authoritative permissions for the same Bot and owner', async () => {
+    ownedMocked.listBots.mockResolvedValue({ data: { items: [dto] } });
+    ownedMocked.listBotInventory.mockResolvedValue({
+      success: true,
+      data: { items: [{ ...dto, actions: ['restart'], disabled_actions: { restart: 'locked' } }], total: 1 },
+    });
+    const result = await botSessionService.listOwnedBots('caller');
+    expect(result.ok && result.data[0]).toMatchObject({
+      actions: ['restart'],
+      disabledActions: { restart: 'locked' },
+    });
+    expect(ownedMocked.listBotInventory).toHaveBeenLastCalledWith({ user_id: 'caller', page: 1, page_size: 100 });
+  });
+  it('does not reuse permissions from a different owner', async () => {
+    ownedMocked.listBots.mockResolvedValue({ data: { items: [dto] } });
+    ownedMocked.listBotInventory.mockResolvedValue({
+      success: true,
+      data: { items: [{ ...dto, owner_entity_id: 'other', actions: ['restart'] }], total: 1 },
+    });
+    const result = await botSessionService.listOwnedBots('caller');
+    expect(result.ok && result.data[0].actions).toEqual([]);
+  });
+  it('keeps directory readable and fails closed if inventory is unavailable', async () => {
+    ownedMocked.listBots.mockResolvedValue({ data: { items: [dto] } });
+    ownedMocked.listBotInventory.mockRejectedValue(new Error('unavailable'));
+    const result = await botSessionService.listOwnedBots('caller');
+    expect(result.ok && result.data[0].actions).toEqual([]);
+  });
+  it('does not trust permission data in a business failure envelope', async () => {
+    ownedMocked.listBots.mockResolvedValue({ data: { items: [dto] } });
+    ownedMocked.listBotInventory.mockResolvedValue({
+      success: false,
+      code: 403000,
+      data: { items: [{ ...dto, actions: ['restart'] }], total: 1 },
+    });
+    const result = await botSessionService.listOwnedBots('caller');
+    expect(result.ok && result.data[0].actions).toEqual([]);
   });
 });

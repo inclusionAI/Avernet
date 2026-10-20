@@ -1,5 +1,8 @@
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
+import { listBotInventory } from '@/services/backendApi/bots/botController';
 import { listCollaboratingBots, type CollaboratingBotDto } from '@/services/backendApi/bots/collaboratingBotController';
+import { isEnvelopeFailure } from '@/services/backendApi/types';
+import { mapBotActionPermissions } from './botActionPermissionMapper';
 import { resolveUserId, type ChatBotView } from './botSessionService';
 import type { DomainResult } from './identityService';
 
@@ -29,7 +32,10 @@ function readTemplateType(dto: CollaboratingBotDto): string | undefined {
 /** 历史引擎按工坊契约归一模板副维度；例如 aicoding 缺省对应 personalCoding。 */
 function normalizeTemplateType(engine: string, templateType: string | undefined) {
   if (templateType) return templateType;
-  const normalizedEngine = engine.trim().toLowerCase().replace(/[\s_-]/g, '');
+  const normalizedEngine = engine
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]/g, '');
   if (normalizedEngine === 'aicoding') return 'personalCoding';
   if (normalizedEngine === 'applicationcoding') return 'applicationCoding';
   return undefined;
@@ -60,6 +66,7 @@ function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
   const declaredTemplateType = readTemplateType(dto);
   const templateType = normalizeTemplateType(dto.engine, declaredTemplateType);
   const templateName = readTemplateName(dto, templateType);
+  const permissions = mapBotActionPermissions(undefined, undefined);
   const runtime = resolveBotRuntime({
     botId: realBotId,
     engine: dto.engine,
@@ -71,6 +78,7 @@ function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
     botId,
     realBotId,
     ownerId,
+    engineOwnerId: dto.owner_id?.trim() || undefined,
     isTeamBot: true,
     displayName: dto.bot_name?.trim() || realBotId,
     engine: dto.engine,
@@ -80,6 +88,9 @@ function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
     status: dto.status,
     reachability: 'reachable',
     chatable: Boolean(realBotId && ownerId),
+    ...permissions,
+    runtimeStage: 'draft',
+    spaceId: dto.space?.kind === 'team' ? dto.space.space_id : undefined,
     isAgentCodingBot: runtime.isAgentCodingBot,
     templateType: runtime.templateType,
     templateName: runtime.templateName,
@@ -115,6 +126,47 @@ export const teamBotConversationService = {
         }
         if (!data.items.length || page * PAGE_SIZE >= data.total) break;
       }
+      // Collaboration summaries omit permissions; inventory is authoritative.
+      const spaces = new Set(
+        [...bots.values()]
+          .filter((bot) => bot.ownerId && bot.engineOwnerId)
+          .map((bot) => bot.spaceId)
+          .filter((id): id is string => Boolean(id)),
+      );
+      for (const spaceId of spaces) {
+        const targets = new Map(
+          [...bots.values()]
+            .filter((bot) => bot.spaceId === spaceId && bot.ownerId && bot.engineOwnerId)
+            .map((bot) => [`${bot.realBotId}:${bot.engineOwnerId}`, bot]),
+        );
+        const pending = new Set([...targets.values()].map((bot) => bot.botId));
+        try {
+          for (let page = 1; ; page += 1) {
+            if (signal?.aborted) throw new Error('请求已取消');
+            const inventory = await listBotInventory(
+              { user_id: requester, page, page_size: PAGE_SIZE },
+              spaceId,
+              signal,
+            );
+            if (isEnvelopeFailure(inventory)) break;
+            const rows = inventory.data?.items ?? [];
+            for (const row of rows) {
+              const ownerId = row.owner_entity_id;
+              if (typeof row.bot_id !== 'string' || typeof ownerId !== 'string') continue;
+              const bot = targets.get(`${row.bot_id}:${ownerId}`);
+              if (!bot || bot.spaceId !== spaceId) continue;
+              // A published service card cannot authorize a draft operation.
+              if (bot.botType?.toLowerCase() === 'service' && row.display_state !== 'service_draft') continue;
+              Object.assign(bot, mapBotActionPermissions(row.actions, row.disabled_actions));
+              pending.delete(bot.botId);
+            }
+            if (!pending.size || !rows.length || page * PAGE_SIZE >= (inventory.data?.total ?? 0)) break;
+          }
+        } catch {
+          // Management endpoint failure must not prevent chatting.
+        }
+      }
+      if (signal?.aborted) throw new Error('请求已取消');
       return { ok: true, data: [...bots.values()] };
     } catch {
       return {
