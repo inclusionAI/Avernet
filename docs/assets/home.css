@@ -480,7 +480,7 @@ h2 { font-size: clamp(30px, 3.7vw, 46px); line-height: 1.1; letter-spacing: -0.0
 .join a:hover { color: var(--blue); }
 .wechat-qr { display: flex; align-items: center; gap: 18px; margin: 32px 0 0; }
 .wechat-qr-crop { position: relative; flex: none; width: 132px; height: 132px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
-/* Render a QR-centered 730px crop of the 1005×1164 source, including quiet space. */
+/* Scale 1005×1164 to 182×211 (~0.181); crop from source x≈138,y≈99 via -25px,-18px. */
 .wechat-qr-crop img { position: absolute; top: -18px; left: -25px; width: 182px; height: 211px; max-width: none; }
 .wechat-qr figcaption strong { font: 500 18px/1.4 var(--font-display); color: var(--text); }
 .wechat-qr figcaption p { margin-top: 6px; font-size: 14px; color: var(--muted); }
