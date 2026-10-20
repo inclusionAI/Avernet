@@ -1,11 +1,12 @@
 /**
  * B10 — A2AProvider 的对 SDK 配套类型的结构镜像。
  * ============================================================================
- * 为什么不直接 import '@tc-chat/adapters' 的类型：A2A 模块零 SDK 运行时依赖
- * （parser 走 sdkParser.ts 动态加载器），类型直依赖会把 SDK 类型面固化进
+ * 为什么不直接 import 聊天 SDK 适配器包的类型：A2A 模块零 SDK 运行时依赖
+ * （parser 由宿主经注入缝提供），类型直依赖会把 SDK 类型面固化进
  * 本模块的编译闭包——SDK 升 minor 改 d.ts 时错误劈面全树。SDK 的 d.ts 形状
- * 在此结构化镜像（字段与 @tc-chat/adapters@2.1.0 OpenClawProvider.d.ts 逐一对齐，
+ * 在此结构化镜像（字段与官方 OpenClawProvider.d.ts 的 2.1.0 档案逐一对齐，
  * 缺省性与 d.ts 一致）；新字段在真 app 构建下经结构化兼容自然互通。
+ * 宿主字样禁入公共文件（hostIsolation 钉板）——包名级档案见 testing 契约注。
  */
 
 /** OpenClawProvider.d.ts:3-15 OpenClawInput 镜像 */
@@ -38,7 +39,7 @@ export interface A2aOpenClawProviderConfig {
   [key: string]: any;
 }
 
-/** @tc-chat/core ChatMessage 结构镜像（Provider 输出面） */
+/** 聊天 SDK core 的 ChatMessage 结构镜像（Provider 输出面） */
 export interface A2aChatMessage {
   id: string;
   role: string;

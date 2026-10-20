@@ -306,7 +306,7 @@ export function translateEvent(
 
   // message 成员（SubscribeToContext 推送 / wire_inject_message）：context 级
   // fanout，不经本 run 流；v3 的 inject 帧是 runId='inject-*' 的独立作用域
-  // （B8 injectChat 钉条），由 B10 的 context 订阅通道消费——documented out-of-scope。
+  // （B8 injectChat 钉条），由 B10 的 context 订阅通道另行消费——超出本层范围。
   if (ev.type === 'message') return null;
 
   if (ev.type === 'artifactUpdate') return translateArtifact(ev, ctx, state);
