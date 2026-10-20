@@ -64,10 +64,11 @@ into.
 - **In-process interface.** A Python service interface other Backend code
   calls directly (the way promotion calls the registry), as opposed to the
   HTTP endpoints external callers use.
-- **Fixture.** A test file checked into the repository that stands in for
-  something external; here, the contract ships the git and OSS bytes its
-  Manifest examples refer to under `examples/manifest-v1/sources/`, so a
-  test can serve them in place of a real repository or bucket.
+- **Fixture.** A file checked in for tests to use in place of something
+  real. Here: the example Manifests in the contract name git repositories
+  and OSS objects that do not exist, so RSI-02 shipped the files they
+  would contain, and the tests hand those files to the recorder instead of
+  fetching anything.
 - **Produced content.** Bytes that did not come from fetching a git or OSS
   source: a file a patch edits or adds, a file uploaded for a patch, or a
   file captured from the bot's current state. The manifest content store
@@ -127,11 +128,13 @@ Recording:
       what the bot has now (its identity files, skills, resources, MCP
       servers and script), which also covers bots that were set up through
       the console and never had a Manifest.
-- [ ] Every Manifest v1 round-trip case in the contract
-      (`examples/manifest-v1/*`) records to exactly its `revision.json`
-      when the git and OSS bytes it refers to are served from the contract's
-      fixture files, and the two refused cases are refused for their stated
-      reasons.
+- [ ] Test, using the RSI-02 examples: for each example Manifest document in
+      `api-contracts/genome/v1/examples/manifest-v1/`, recording it produces
+      exactly the revision the example says it should (`revision.json`),
+      and the two examples marked as refused are refused for the stated
+      reasons. The examples name git repositories and OSS objects that do
+      not exist; the test serves the files RSI-02 shipped for them instead
+      of fetching anything over the network.
 - [ ] A revision can be recorded from a patch against a base revision. All
       twelve ops apply as the contract defines; the contract's example
       patches, applied to their example base, give the example candidate
