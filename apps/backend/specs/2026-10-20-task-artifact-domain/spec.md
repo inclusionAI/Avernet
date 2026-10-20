@@ -255,7 +255,7 @@ class CodeContent(ArtifactContent):
 **为什么独立建表、不复用 `task_node_run_info`(已评估的取舍)**:该表是"可变当前态"行(`gmt_modified onupdate` 原地更新,每次 `save_graph` 随图整体重写,uk 为 `(task_id, node_id, retry)`,见 `repository/models.py:199-228`),而产物是 append-only 不可变清单;一次 attempt 的产物是列表(≤64),并入单列只能是 blob——逐条身份与 `uk_dedupe` 无处落,回放去重退化为整 blob 比较;且 run_info 行已被 `output`/`acceptance_result`/`extend_props` 占用,再并产物会把"每次图保存重写全节点行"的写放大带给产物。独立表 + `save_graph` 同事务内嵌写,一致性机制不变,只多一次性的建表/注册劳动。
 
 - **SQL**:`core/task/sql/2026_10_20_task_artifact.sql`(权威 DDL 如下,plan 阶段照此落盘;标识符列的 utf8mb4_bin 由 ORM variant 承载,与 trajectory 同款先例——DDL 裸列、ORM 定义 collation);
-- **ORM/Record**:`TaskArtifactModel`(`core/task/repository/models.py`,house style:`to_record()` 返回 frozen record,不吐 ORM 对象)+ `TaskArtifactRecord`(`types.py`,table-faithful frozen dataclass,content 存解析后的领域对象);
+- **ORM/Record**:`TaskArtifactModel`(`core/task/repository/models.py`,house style:`to_record()` 返回 frozen record,不吐 ORM 对象)+ `TaskArtifactRecord`(`types.py`,table-faithful frozen dataclass,content 存解析后的领域对象;`storage` 列为派生一致性列——非 file 分支持 `inline`、file 分支与 `FileContent.storage_type` 同值,domain 构造器派生强校验,ORM 侧照表存列);
 - **协议(方案取舍:读侧协议,不承担事务内写)**:写行由图仓储随 `save_graph(published_artifacts=...)` 内嵌完成(5.2,先例为 `TaskCallbackModel`);`TaskArtifactRepositoryProtocol` 只定义读契约(按 task_id / (task_id, node_id) 列产物,attempt 倒序),入 `core/repository/protocols/task/`(纯 Protocol、`@abstractmethod`、无运行时域导入),实现在 `implementations/task/task_artifact_repository.py`,共享 `orm_session()`/`flush()` 习惯;`TaskGraphRepositoryProtocol.save_graph` 签名变更(新增可选参,默认 None=行为不变)——所有现存实现与测试替身在该 commit 内同步;
 - **注册**:`core/repository/README.md` provides 表 + Boundary YAML 增补;`di/modules/task_persistence_module.py` `configure` 绑定 singleton;
 - **domain**:`core/task/domain/errors.py` 加 `TaskArtifactContentError`;`TaskArtifactPublishService`(capture 纯函数 + contextvar 暂存)挂 `task_context` 旁,`TaskModule` 经 `_resolve_optional_port` 同款 try/except 解析(未绑定 → 不发布,只_warning 一条,与 correlation registry 口径一致——注意:这是"可选端口未接线"的启动期语义,不是运行期持久化失败的降级)。
@@ -272,6 +272,10 @@ class CodeContent(ArtifactContent):
 -- content/content_hash/creator/modifier 列可空(用户定稿)但发布路径必填:NULL 仅为 schema 容错/
 -- 人工修数留口;content_hash 为 NULL 的行不被 uk_dedupe 判重(MySQL 唯一索引 NULL 互不相等),
 -- 意味着这类行回放即重复——故领域构造器与发布校验(§3/§4)不放宽,仍强制 content+hash+creator。
+-- storage 为存储介质元信息列(用户定稿,置于 content 前,可空、varchar(2048)):非 file 分支持恒为 inline,
+-- file 分支必须与 FileContent.storage_type 同值——由构造器从 content 派生并强校验,不构成第二首领;
+-- 发布路径必填,NULL 仅为容错/人工修数留口;2048 长度为介质元信息 JSON 化预留(当前只放介质名)。
+-- 查询价值:inline 粗筛"内容自带"产物、外部介质产物分开运营,不用反序列化 content。
 -- creator/modifier/gmt_create/gmt_modify 为表结构房型列(用户定稿):行不可变,
 --   modifier 恒等于 creator、gmt_modify 恒等于 gmt_create,列保留纯为 schema 惯例兼容;
 -- gmt_create 由仓储以领域 created_at(ms)同事务双写,DB DEFAULT 仅为 fallback(trajectory 同款惯例)。
@@ -288,6 +292,7 @@ CREATE TABLE IF NOT EXISTS `task_artifact` (
     `attempt`         int           NOT NULL DEFAULT 0                            COMMENT '节点 harness_retries 快照(0 起;与报文交叉校验)',
     `scope_session_id` varchar(512) DEFAULT NULL                                  COMMENT '图绑定协作会话 ID(图绑定优先,未绑定采纳上报值;NULL=均无)',
     `kind`            varchar(64)   NOT NULL                                      COMMENT '内容形态(text|file|url_link|code),governed 枚举',
+    `storage`         varchar(2048) DEFAULT NULL                                  COMMENT '存储介质元信息:inline=内容本体在 content 列(text/url_link/code);bot_workspace|session_file=字节在外部介质,content 仅为引用(与 FileContent.storage_type 强一致,构造器推导校验;发布路径必填,NULL 仅为容错/人工修数留口,长度冗余预留给介质 JSON 化)',
     `content`         mediumtext    DEFAULT NULL                                  COMMENT '内容分支 JSON(kind-tagged,tag=分支判别;不含字节/临时凭证/存储 handle;发布路径必填,NULL 仅为 schema 容错/人工修数留口)',
     `content_hash`    char(64)      DEFAULT NULL                                  COMMENT 'sha256(canonical_json(content)),uk_dedupe 成分;发布路径必填——NULL 行绕过幂等闸(MySQL 唯一索引 NULL 不判重)',
     `creator`         varchar(128)  DEFAULT NULL                                  COMMENT '产出者(bot_id/group_id;system=系统写入,如控制信号;NULL=未记录)',
