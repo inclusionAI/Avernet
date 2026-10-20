@@ -74,6 +74,8 @@ export type SdkParserCtor = new (config?: SdkParserConfig) => SdkParser;
 
 /** 显式覆盖入口（node/jest 兜底；浏览器因无 require 天然短路） */
 const ENV_OVERRIDE_KEY = 'A2A_OPENCLAW_PARSER_PATH';
+/** 包安装位的 dist 真身子路径（node/jest 兜底直取位） */
+const PACKAGE_DIST_ID = '@tc-chat/adapters/dist/openclaw/OpenClawParser.js';
 
 /**
  * eval('require')：躲开 webpack/打包器静态分析（浏览器 bundle 无 require → catch）。
@@ -106,6 +108,12 @@ function loadFromPackage(): Promise<SdkParserCtor | null> {
 export async function loadOpenClawParser(): Promise<SdkParserCtor> {
   const viaRelay = await loadFromPackage();
   if (viaRelay) return viaRelay;
+  // node/jest 兜底：jest 的 CJS 转译下动态 import() 对包内子路径不可达
+  //（被 .catch 吞因），eval('require') 直取包安装位——@tc-chat/adapters 是
+  // 本 app 硬依赖，node 环境恒在；浏览器构建 eval 取不到 require，落到 throw。
+  const viaRequire = nodeRequire(PACKAGE_DIST_ID) as
+    { OpenClawParser?: SdkParserCtor } | undefined;
+  if (viaRequire && viaRequire.OpenClawParser) return viaRequire.OpenClawParser;
   const envPath = typeof process !== 'undefined'
     ? process.env[ENV_OVERRIDE_KEY] : undefined;
   if (envPath) {
