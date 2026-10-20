@@ -28,8 +28,8 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskNodeUpdateDTO, TaskOpResultDTO,
     TaskRevokeRequestDTO, TaskRevokeResultDTO, TaskSettingRequestDTO,
     TaskSettingStateDTO, TaskTrajectoryDTO, acceptance_result_from_dto,
-    graph_to_dto, op_result_to_dto, task_info_request_from_dto,
-    trajectory_to_dto,
+    graph_to_dto, group_artifacts_by_node, op_result_to_dto,
+    task_info_request_from_dto, trajectory_to_dto,
 )
 from agentclaw.community.adapters.http.task.relay_routes import router as relay_api_router
 from agentclaw.community.adapters.http.task.bbs_routes import router as bbs_api_router
@@ -50,6 +50,9 @@ from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
 from agentclaw.community.api.task.task_grant_service import TaskClaimGrantServiceProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.api.task.task_context_service import TaskContextServiceProtocol
+from agentclaw.community.core.repository.protocols.task import (
+    TaskArtifactRepositoryProtocol,
+)
 from agentclaw.community.core.errors import InternalError
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.task.domain.errors import TaskStateError
@@ -313,6 +316,7 @@ async def get_task_trajectory_internal(
         Query(description="展示形式:html=返回人类可读的 HTML 轨迹页;省略或其它值=默认 JSON envelope"),
     ] = None,
     service: TaskContextServiceProtocol = Injected(TaskContextServiceProtocol),  # noqa: B008
+    artifact_repo: TaskArtifactRepositoryProtocol = Injected(TaskArtifactRepositoryProtocol),  # noqa: B008
 ) -> Envelope[TaskTrajectoryDTO]:
     """读取任务轨迹(内部副本;与公开面 ``adapters/http/openapi_v1/task/router.py`` 同一委托,逻辑一致,改其一须同步)。
 
@@ -330,7 +334,10 @@ async def get_task_trajectory_internal(
     )
     dto = trajectory_to_dto(trajectory)
     if display == "html":
-        return HTMLResponse(render_trajectory_html(dto, do_analysis=do_analysis))
+        artifact_rows = artifact_repo.list_by_task(task_id)
+        return HTMLResponse(
+            render_trajectory_html(dto, do_analysis=do_analysis, artifact_rows=artifact_rows)
+        )
     return envelope(dto, request)
 
 
@@ -920,8 +927,15 @@ async def get_task_internal(
     request: Request,
     user: AuthenticatedUser = Depends(get_current_user),
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+    artifact_repo: TaskArtifactRepositoryProtocol = Injected(TaskArtifactRepositoryProtocol),  # noqa: B008
 ) -> Envelope[TaskExecutionGraphDTO]:
     """Return one task dashboard for authenticated Goal clients."""
     del user
     graph = service.get_task_dashboard(task_id)
-    return envelope(graph_to_dto(graph), request)
+    return envelope(
+        graph_to_dto(
+            graph,
+            artifacts_by_node=group_artifacts_by_node(artifact_repo.list_by_task(task_id)),
+        ),
+        request,
+    )

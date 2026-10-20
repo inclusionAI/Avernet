@@ -15,6 +15,9 @@ from agentclaw.community.adapters.http.task.auth import (
 from agentclaw.community.adapters.http.task.router import router, task_callback_router
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
+from agentclaw.community.core.repository.protocols.task import (
+    TaskArtifactRepositoryProtocol,
+)
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.errors import NotFound
 from agentclaw.community.core.task.domain.errors import (
@@ -276,6 +279,18 @@ class _StubTaskModule(Module):
         return CallbackDataEnricher(
             BcsTokenProviderImpl(base_url="http://bcs"), http_client=None
         )
+
+    @singleton
+    @provider
+    def artifact_repo(self) -> TaskArtifactRepositoryProtocol:
+        class _EmptyArtifactRepo:
+            def list_by_task(self, task_id, *, limit=200):
+                return []
+
+            def list_by_task_node(self, task_id, node_id, *, limit=100):
+                return []
+
+        return _EmptyArtifactRepo()
 
 
 @pytest.fixture
