@@ -25,18 +25,19 @@
 
 ## Task 2: Store 持久化与三 dialect migration
 
+- [x] **Done:** Store owners and migrations
 - **Goal:** 在 SQL、memory store 和历史版本行中持久化 owners。
 - **Files:** `apps/bcs/crates/services/bcs-group-context-store/src/store.rs`, `apps/bcs/crates/services/bcs-group-context-store/src/memory.rs`, `apps/bcs/crates/services/bcs-group-context-store/tests/common/mod.rs`, `apps/bcs/crates/services/bcs-group-context-store/tests/conformance_group_context_repo.rs`, `apps/bcs/crates/services/bcs-group-context-store/tests/conformance_group_context_repo_mysql.rs`, `apps/bcs/migrations/sqlite/035_group_context_owners.sql`, `apps/bcs/migrations/mysql/034_group_context_owners.sql`, `apps/bcs/migrations/oceanbase/032_group_context_owners.sql`, `apps/bcs/crates/bootstrap/bcs/src/migrations.rs`, `apps/bcs/crates/bootstrap/bcs/src/migrations/tests/`（新增 migration regression）
 - **Done when:**
-  - [ ] `NewGroupContextEntry.owners` 贯穿 memory 和 SQL 的 create/supersede。
-  - [ ] SQL select/meta select 包含 `owners_json`，row 映射能反序列化。
-  - [ ] `GroupContextEntryMeta` list 查询能读 owners。
-  - [ ] memory repo 的 `row_from_new` / `meta_from_entry` 完整映射 owners。
-  - [ ] 新版本行使用请求指定或服务端计算的 owners；历史版本不被改写。
-  - [ ] 三个 dialect 均新增 additive migration，`owners_json` 非空并完成回填。
-  - [ ] 存量 active/history row 按各自 `creator` 回填为 `{"userIds":[row.creator]}`。
-  - [ ] SQLite registry / runner 追加 version 35 且包含 migration 分支。
-  - [ ] Migration tests 证明应用前后的 schema、数据回填、账本记录和 checksum 正确。
+  - [x] `NewGroupContextEntry.owners` 贯穿 memory 和 SQL 的 create/supersede。
+  - [x] SQL select/meta select 包含 `owners_json`，row 映射能反序列化。
+  - [x] `GroupContextEntryMeta` list 查询能读 owners。
+  - [x] memory repo 的 `row_from_new` / `meta_from_entry` 完整映射 owners。
+  - [x] 新版本行使用请求指定或服务端计算的 owners；历史版本不被改写。
+  - [x] 三个 dialect 均新增 additive migration，`owners_json` 非空并完成回填。
+  - [x] 存量 active/history row 按各自 `creator` 回填为 `{"userIds":[row.creator]}`。
+  - [x] SQLite registry / runner 追加 version 35 且包含 migration 分支。
+  - [x] Migration tests 证明应用前后的 schema、数据回填、账本记录和 checksum 正确。
 - **Depends on:** Task 1
 
 ## Task 3: Application 写入语义与默认 owners

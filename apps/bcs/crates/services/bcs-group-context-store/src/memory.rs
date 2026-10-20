@@ -149,6 +149,7 @@ fn row_from_new(id: i64, params: NewGroupContextEntry) -> GroupContextEntry {
         creator: params.creator,
         visible_to: params.visible_to,
         collect_from: params.collect_from,
+        owners: params.owners,
         supersedes: params.supersedes,
         change_reason: params.change_reason,
         valid_from: params.valid_from,
@@ -168,6 +169,7 @@ fn meta_from_entry(entry: &GroupContextEntry) -> GroupContextEntryMeta {
         scope: entry.scope.clone(),
         visible_to: entry.visible_to.clone(),
         collect_from: entry.collect_from.clone(),
+        owners: entry.owners.clone(),
         gmt_create: entry.gmt_create,
         gmt_modified: entry.gmt_modified,
     }

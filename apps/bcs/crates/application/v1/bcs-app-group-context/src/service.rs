@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bcs_domain::{GroupContextEntry, GroupContextPolicy, ScopeLevel};
+use bcs_domain::{GroupContextEntry, GroupContextOwners, GroupContextPolicy, ScopeLevel};
 use bcs_group_context_store::{GroupContextRepo, GroupContextStoreError, NewGroupContextEntry};
 use bcs_service_api::application::v1::{
     AddGroupContext, ApplicationError, GetGroupContext, GroupContextAck,
@@ -45,6 +45,7 @@ impl GroupContextApplicationServiceImpl {
         creator: String,
         visible_to: GroupContextPolicy,
         collect_from: GroupContextPolicy,
+        owners: GroupContextOwners,
         change_reason: Option<String>,
         valid_from: Option<bcs_domain::GroupContextTime>,
         valid_to: Option<bcs_domain::GroupContextTime>,
@@ -63,6 +64,7 @@ impl GroupContextApplicationServiceImpl {
                 creator,
                 visible_to,
                 collect_from,
+                owners,
                 supersedes: None,
                 change_reason,
                 valid_from: valid_from.unwrap_or(now),
@@ -83,6 +85,7 @@ impl GroupContextApplicationServiceImpl {
         creator: String,
         visible_to: GroupContextPolicy,
         collect_from: GroupContextPolicy,
+        owners: GroupContextOwners,
         change_reason: Option<String>,
         valid_from: bcs_domain::GroupContextTime,
         valid_to: Option<bcs_domain::GroupContextTime>,
@@ -105,6 +108,7 @@ impl GroupContextApplicationServiceImpl {
                     creator,
                     visible_to,
                     collect_from,
+                    owners,
                     supersedes: Some(old.id),
                     change_reason,
                     valid_from,
@@ -138,6 +142,7 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
             command.actor_id.clone(),
             command.visible_to,
             command.collect_from,
+            GroupContextOwners::new([command.actor_id.clone()]),
             None,
             command.valid_from,
             command.valid_to,
@@ -192,6 +197,7 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
             command.actor_id.clone(),
             visible_to,
             collect_from,
+            command.owners.clone().unwrap_or_else(|| old.owners.clone()),
             command.change_reason,
             valid_from,
             valid_to,
@@ -246,7 +252,11 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
             .get_active_by_name_and_scopes(&query.name, &scopes)
             .await
             .map_err(map_store_error)?;
-        if !rows.is_empty() && !rows.iter().any(|entry| actor_can_read(entry, &query.actor_id)) {
+        if !rows.is_empty()
+            && !rows
+                .iter()
+                .any(|entry| actor_can_read(entry, &query.actor_id))
+        {
             return Err(permission_denied(format!(
                 "actor_id={} is not allowed to read {}",
                 query.actor_id, query.name
@@ -262,6 +272,8 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
                 content: entry.content,
                 valid_from: entry.valid_from,
                 valid_to: entry.valid_to,
+                visible_to: None,
+                collect_from: None,
             })
             .collect();
         Ok(GroupContextGetResponse { items })
@@ -292,6 +304,7 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
                     SYSTEM_CREATOR.to_string(),
                     command.visible_to,
                     command.collect_from,
+                    old.owners.clone(),
                     None,
                     command.valid_from.unwrap_or_else(Utc::now),
                     command.valid_to,
@@ -306,6 +319,7 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
                     SYSTEM_CREATOR.to_string(),
                     command.visible_to,
                     command.collect_from,
+                    GroupContextOwners::new([SYSTEM_CREATOR]),
                     None,
                     command.valid_from,
                     command.valid_to,
@@ -335,10 +349,7 @@ fn validate_actor(actor_id: &str) -> Result<(), ApplicationError> {
 
 fn validate_name(name: &str) -> Result<(), ApplicationError> {
     if name.trim().is_empty() {
-        return Err(ApplicationError::invalid(
-            INVALID_PARAM,
-            "name is required",
-        ));
+        return Err(ApplicationError::invalid(INVALID_PARAM, "name is required"));
     }
     if name.chars().count() > MAX_NAME_CHARS {
         return Err(ApplicationError::payload_too_large(
@@ -363,9 +374,7 @@ fn validate_policy(field: &str, policy: &GroupContextPolicy) -> Result<(), Appli
     if encoded.len() > MAX_POLICY_BYTES {
         return Err(ApplicationError::payload_too_large(
             PAYLOAD_TOO_LARGE,
-            format!(
-                "{field} serialized JSON exceeds {MAX_POLICY_BYTES} bytes"
-            ),
+            format!("{field} serialized JSON exceeds {MAX_POLICY_BYTES} bytes"),
         ));
     }
     Ok(())

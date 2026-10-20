@@ -12,14 +12,19 @@ async fn sqlite_repo() -> SqlGroupContextStore {
 }
 
 async fn apply_sqlite_group_context_migration(db: &dyn DbPlugin) {
-    for sql in include_str!("../../../../migrations/sqlite/034_group_context.sql")
-        .split(';')
-        .map(str::trim)
-        .filter(|sql| !sql.is_empty())
-    {
-        db.execute(DbStatement::new(sql))
-            .await
-            .expect("migration sql");
+    for migration in [
+        include_str!("../../../../migrations/sqlite/034_group_context.sql"),
+        include_str!("../../../../migrations/sqlite/035_group_context_owners.sql"),
+    ] {
+        for sql in migration
+            .split(';')
+            .map(str::trim)
+            .filter(|sql| !sql.is_empty())
+        {
+            db.execute(DbStatement::new(sql))
+                .await
+                .expect("migration sql");
+        }
     }
 }
 
@@ -46,6 +51,11 @@ async fn memory_supersede_stale_id_returns_conflict() {
 #[tokio::test]
 async fn memory_lists_active_by_multiple_scopes() {
     common::list_active_by_multiple_scopes(&MemoryGroupContextRepo::new()).await;
+}
+
+#[tokio::test]
+async fn memory_persists_owners_for_each_version() {
+    common::owners_are_persisted_per_version(&MemoryGroupContextRepo::new()).await;
 }
 
 #[tokio::test]
@@ -81,6 +91,12 @@ async fn sqlite_supersede_stale_id_returns_conflict() {
 async fn sqlite_lists_active_by_multiple_scopes() {
     let repo = sqlite_repo().await;
     common::list_active_by_multiple_scopes(&repo).await;
+}
+
+#[tokio::test]
+async fn sqlite_persists_owners_for_each_version() {
+    let repo = sqlite_repo().await;
+    common::owners_are_persisted_per_version(&repo).await;
 }
 
 #[tokio::test]

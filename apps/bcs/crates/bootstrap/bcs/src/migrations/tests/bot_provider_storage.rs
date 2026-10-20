@@ -6,7 +6,7 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
         .iter()
         .map(|migration| migration.version)
         .collect::<Vec<_>>();
-    assert_eq!(sqlite, (1..=34).collect::<Vec<_>>());
+    assert_eq!(sqlite, (1..=35).collect::<Vec<_>>());
     assert_eq!(SQLITE_VERSIONED_MIGRATIONS[28].name, "fixed_loop_runtime");
     assert_eq!(SQLITE_VERSIONED_MIGRATIONS[29].name, "bot_provider_storage");
     // The new Group migration owns SQLite version 31 (Provider storage keeps
@@ -33,7 +33,7 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
         .collect::<Vec<_>>();
     // MySQL Provider storage remains version 029; the new Group migration is
     // MySQL version 030.
-    assert_eq!(versions, (1..=33).collect::<Vec<_>>());
+    assert_eq!(versions, (1..=34).collect::<Vec<_>>());
     assert_eq!(mysql[27], "028_fixed_loop_runtime.sql");
     assert_eq!(mysql[28], "029_bot_provider_storage.sql");
     assert_eq!(mysql[29], "030_group_human_mention_notify_mode.sql");
@@ -65,7 +65,7 @@ async fn bot_provider_storage_upgrades_29_without_new_tables_or_rewriting_histor
             .iter()
             .map(|migration| migration.version)
             .collect::<Vec<_>>(),
-        vec![30, 31, 32, 33, 34]
+        vec![30, 31, 32, 33, 34, 35]
     );
 
     run_sqlite_migrations(&db).await?;

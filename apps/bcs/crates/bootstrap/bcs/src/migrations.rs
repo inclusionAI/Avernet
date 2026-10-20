@@ -151,6 +151,7 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 32, name: "session_registry" },
     SqliteMigration { version: 33, name: "provider_slug" },
     SqliteMigration { version: 34, name: "group_context" },
+    SqliteMigration { version: 35, name: "group_context_owners" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -482,6 +483,23 @@ async fn apply_sqlite_migration_body(
                 .map(str::trim)
                 .filter(|sql| !sql.is_empty())
             {
+                db.execute(DbStatement::new(sql)).await?;
+            }
+            Ok(())
+        }
+        35 => {
+            let columns = sqlite_table_columns(db, "bcs_group_contexts").await?;
+            for (index, sql) in include_str!(
+                "../../../../migrations/sqlite/035_group_context_owners.sql"
+            )
+            .split(';')
+            .map(str::trim)
+            .filter(|sql| !sql.is_empty())
+            .enumerate()
+            {
+                if index == 0 && columns.iter().any(|column| column == "owners_json") {
+                    continue;
+                }
                 db.execute(DbStatement::new(sql)).await?;
             }
             Ok(())

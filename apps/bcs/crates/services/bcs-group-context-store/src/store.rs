@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use bcs_db_api::{
     DbError, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbTransactionStep, DbTransactionStepResult, DbValue, db_get_column, db_get_column_opt,
 };
-use bcs_domain::{GroupContextEntry, GroupContextEntryMeta, GroupContextPolicy, GroupContextTime, ScopeLevel};
+use bcs_domain::{GroupContextEntry, GroupContextEntryMeta, GroupContextOwners, GroupContextPolicy, GroupContextTime, ScopeLevel};
 use chrono::{NaiveDateTime, TimeZone, Utc};
 
 const TIMESTAMP_PARAM_MARKER: &str = "__bcs_group_context_timestamp_ms__";
@@ -39,6 +39,7 @@ pub struct NewGroupContextEntry {
     pub creator: String,
     pub visible_to: GroupContextPolicy,
     pub collect_from: GroupContextPolicy,
+    pub owners: GroupContextOwners,
     pub supersedes: Option<i64>,
     pub change_reason: Option<String>,
     pub valid_from: GroupContextTime,
@@ -133,7 +134,7 @@ impl SqlGroupContextStore {
 
     fn select_cols(&self) -> String {
         let base = "id, context_id, name, scope_level, scope, content, creator, visible_to_json, \
-                    collect_from_json, supersedes, change_reason, valid_from, valid_to, \
+                    collect_from_json, owners_json, supersedes, change_reason, valid_from, valid_to, \
                     is_superseded, gmt_superseded, tx_time, gmt_create, gmt_modified";
         format!(
             "{base}, {vfm}, {vtm}, {gsm}, {ttm}, {gcm}, {gmm}",
@@ -148,7 +149,7 @@ impl SqlGroupContextStore {
     }
 
     fn select_meta_cols(&self) -> String {
-        let base = "name, scope_level, scope, visible_to_json, collect_from_json";
+        let base = "name, scope_level, scope, visible_to_json, collect_from_json, owners_json";
         format!(
             "{base}, {gcm}, {gmm}",
             base = base,
@@ -200,6 +201,8 @@ impl SqlGroupContextStore {
             db_get_column(row, "visible_to_json").map_err(GroupContextStoreError::backend)?;
         let collect_raw: String =
             db_get_column(row, "collect_from_json").map_err(GroupContextStoreError::backend)?;
+        let owners_raw: String =
+            db_get_column(row, "owners_json").map_err(GroupContextStoreError::backend)?;
         let valid_to_ms: Option<i64> =
             db_get_column_opt(row, "valid_to_ms").map_err(GroupContextStoreError::backend)?;
         let gmt_superseded_ms: Option<i64> =
@@ -216,6 +219,8 @@ impl SqlGroupContextStore {
             visible_to: serde_json::from_str(&visible_raw)
                 .map_err(GroupContextStoreError::backend)?,
             collect_from: serde_json::from_str(&collect_raw)
+                .map_err(GroupContextStoreError::backend)?,
+            owners: serde_json::from_str(&owners_raw)
                 .map_err(GroupContextStoreError::backend)?,
             supersedes: db_get_column_opt(row, "supersedes")
                 .map_err(GroupContextStoreError::backend)?,
@@ -241,6 +246,8 @@ impl SqlGroupContextStore {
             db_get_column(row, "visible_to_json").map_err(GroupContextStoreError::backend)?;
         let collect_raw: String =
             db_get_column(row, "collect_from_json").map_err(GroupContextStoreError::backend)?;
+        let owners_raw: String =
+            db_get_column(row, "owners_json").map_err(GroupContextStoreError::backend)?;
         Ok(GroupContextEntryMeta {
             name: db_get_column(row, "name").map_err(GroupContextStoreError::backend)?,
             scope_level,
@@ -248,6 +255,8 @@ impl SqlGroupContextStore {
             visible_to: serde_json::from_str(&visible_raw)
                 .map_err(GroupContextStoreError::backend)?,
             collect_from: serde_json::from_str(&collect_raw)
+                .map_err(GroupContextStoreError::backend)?,
+            owners: serde_json::from_str(&owners_raw)
                 .map_err(GroupContextStoreError::backend)?,
             gmt_create: millis_column(row, "gmt_create_ms")?,
             gmt_modified: millis_column(row, "gmt_modified_ms")?,
@@ -262,6 +271,8 @@ impl GroupContextRepo for SqlGroupContextStore {
             serde_json::to_string(&params.visible_to).map_err(GroupContextStoreError::backend)?;
         let collect =
             serde_json::to_string(&params.collect_from).map_err(GroupContextStoreError::backend)?;
+        let owners =
+            serde_json::to_string(&params.owners).map_err(GroupContextStoreError::backend)?;
         let scope_level = serde_json::to_value(params.scope_level)
             .map_err(GroupContextStoreError::backend)?
             .as_str()
@@ -270,8 +281,8 @@ impl GroupContextRepo for SqlGroupContextStore {
         let sql = self.sql_with_timestamp_params(
             "INSERT INTO bcs_group_contexts \
              (context_id, name, scope_level, scope, content, creator, visible_to_json, collect_from_json, \
-              supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, __bcs_group_context_timestamp_ms__, \
+              owners_json, supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, __bcs_group_context_timestamp_ms__, \
                      __bcs_group_context_timestamp_ms__, FALSE, NULL, __bcs_group_context_timestamp_ms__)",
         );
         let result = self
@@ -287,6 +298,7 @@ impl GroupContextRepo for SqlGroupContextStore {
                     DbValue::from(params.creator.as_str()),
                     DbValue::from(visible.as_str()),
                     DbValue::from(collect.as_str()),
+                    DbValue::from(owners.as_str()),
                     params
                         .supersedes
                         .map(DbValue::from)
@@ -330,6 +342,8 @@ impl GroupContextRepo for SqlGroupContextStore {
             serde_json::to_string(&params.visible_to).map_err(GroupContextStoreError::backend)?;
         let collect =
             serde_json::to_string(&params.collect_from).map_err(GroupContextStoreError::backend)?;
+        let owners =
+            serde_json::to_string(&params.owners).map_err(GroupContextStoreError::backend)?;
         let scope_level = serde_json::to_value(params.scope_level)
             .map_err(GroupContextStoreError::backend)?
             .as_str()
@@ -344,8 +358,8 @@ impl GroupContextRepo for SqlGroupContextStore {
         let insert_sql = self.sql_with_timestamp_params(
             "INSERT INTO bcs_group_contexts \
              (context_id, name, scope_level, scope, content, creator, visible_to_json, collect_from_json, \
-              supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, __bcs_group_context_timestamp_ms__, \
+              owners_json, supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, __bcs_group_context_timestamp_ms__, \
                      __bcs_group_context_timestamp_ms__, FALSE, NULL, __bcs_group_context_timestamp_ms__)",
         );
 
@@ -387,6 +401,7 @@ impl GroupContextRepo for SqlGroupContextStore {
                     DbValue::from(params.creator.as_str()),
                     DbValue::from(visible.as_str()),
                     DbValue::from(collect.as_str()),
+                    DbValue::from(owners.as_str()),
                     DbValue::from(expected_active_id),
                     DbValue::from(params.change_reason.as_deref()),
                     valid_from,
@@ -561,6 +576,23 @@ mod tests {
         Arc::new(bcs_db_local::LocalSqliteDbPlugin::new().expect("sqlite plugin for unit tests"))
     }
 
+    async fn apply_group_context_migrations(db: &dyn DbPlugin) {
+        for migration in [
+            include_str!("../../../../migrations/sqlite/034_group_context.sql"),
+            include_str!("../../../../migrations/sqlite/035_group_context_owners.sql"),
+        ] {
+            for sql in migration
+                .split(';')
+                .map(str::trim)
+                .filter(|sql| !sql.is_empty())
+            {
+                db.execute(DbStatement::new(sql))
+                    .await
+                    .expect("migration sql");
+            }
+        }
+    }
+
     #[test]
     fn mysql_binds_epoch_inside_from_unixtime() {
         let store = SqlGroupContextStore::with_flavor(dummy_plugin(), DbSqlFlavor::Mysql);
@@ -636,6 +668,7 @@ mod tests {
                 "scope",
                 "visible_to_json",
                 "collect_from_json",
+                "owners_json",
                 "gmt_create_ms",
                 "gmt_modified_ms",
             ] {
@@ -661,6 +694,7 @@ mod tests {
                 "content",
                 "visible_to_json",
                 "collect_from_json",
+                "owners_json",
                 "supersedes",
                 "change_reason",
                 "valid_from",
@@ -703,13 +737,7 @@ mod tests {
     #[tokio::test]
     async fn sqlite_load_by_id_returns_the_created_active_row() {
         let db = dummy_plugin();
-        for sql in include_str!("../../../../migrations/sqlite/034_group_context.sql")
-            .split(';')
-            .map(str::trim)
-            .filter(|sql| !sql.is_empty())
-        {
-            db.execute(DbStatement::new(sql)).await.expect("migration sql");
-        }
+        apply_group_context_migrations(db.as_ref()).await;
         let store = SqlGroupContextStore::sqlite(db);
         let now = Utc
             .timestamp_millis_opt(1_728_374_400_000)
@@ -725,6 +753,7 @@ mod tests {
                 creator: "judge_bot".into(),
                 visible_to: GroupContextPolicy::users(["judge_bot"]),
                 collect_from: GroupContextPolicy::users(["judge_bot"]),
+                owners: GroupContextOwners::new(["judge_bot"]),
                 supersedes: None,
                 change_reason: None,
                 valid_from: now,
@@ -741,13 +770,7 @@ mod tests {
     #[tokio::test]
     async fn sqlite_get_active_by_name_and_scopes_matches_exact_name_and_requested_scopes() {
         let db = dummy_plugin();
-        for sql in include_str!("../../../../migrations/sqlite/034_group_context.sql")
-            .split(';')
-            .map(str::trim)
-            .filter(|sql| !sql.is_empty())
-        {
-            db.execute(DbStatement::new(sql)).await.expect("migration sql");
-        }
+        apply_group_context_migrations(db.as_ref()).await;
         let store = SqlGroupContextStore::sqlite(db);
         let now = Utc
             .timestamp_millis_opt(1_728_374_400_000)
@@ -769,6 +792,7 @@ mod tests {
                     creator: "judge_bot".into(),
                     visible_to: GroupContextPolicy::users(["judge_bot"]),
                     collect_from: GroupContextPolicy::users(["judge_bot"]),
+                    owners: GroupContextOwners::new(["judge_bot"]),
                     supersedes: None,
                     change_reason: None,
                     valid_from: now,

@@ -143,6 +143,7 @@ pub(crate) async fn update(
             change_reason: body.change_reason,
             visible_to: body.visible_to,
             collect_from: body.collect_from,
+            owners: None,
             valid_from: body.valid_from,
             valid_to: body.valid_to,
         })

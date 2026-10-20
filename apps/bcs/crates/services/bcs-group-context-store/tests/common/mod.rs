@@ -1,4 +1,4 @@
-use bcs_domain::{GroupContextPolicy, ScopeLevel};
+use bcs_domain::{GroupContextOwners, GroupContextPolicy, ScopeLevel};
 use bcs_group_context_store::{GroupContextRepo, GroupContextStoreError, NewGroupContextEntry};
 use chrono::{TimeZone, Utc};
 
@@ -16,6 +16,7 @@ pub fn entry(context_id: &str, name: &str, scope: &str, content: &str) -> NewGro
         content: content.into(),
         visible_to: GroupContextPolicy::users(["judge_bot"]),
         collect_from: GroupContextPolicy::users(["judge_bot"]),
+        owners: GroupContextOwners::new(["judge_bot"]),
         supersedes: None,
         change_reason: None,
         valid_from: now,
@@ -57,6 +58,7 @@ pub async fn supersede_preserves_history(repo: &dyn GroupContextRepo) {
                 content: "张三出局".into(),
                 visible_to: GroupContextPolicy::users(Vec::<String>::new()),
                 collect_from: GroupContextPolicy::users(["judge_bot"]),
+                owners: GroupContextOwners::new(["judge_bot"]),
                 supersedes: Some(first.id),
                 change_reason: Some("第一轮投票".into()),
                 valid_from: Utc
@@ -121,6 +123,7 @@ pub async fn supersede_preserves_multiple_history_versions(repo: &dyn GroupConte
                 content: "v2".into(),
                 visible_to: GroupContextPolicy::users(["judge_bot"]),
                 collect_from: GroupContextPolicy::users(["judge_bot"]),
+                owners: GroupContextOwners::new(["judge_bot"]),
                 supersedes: Some(first.id),
                 change_reason: Some("first update".into()),
                 valid_from: Utc
@@ -151,6 +154,7 @@ pub async fn supersede_preserves_multiple_history_versions(repo: &dyn GroupConte
                 content: "v3".into(),
                 visible_to: GroupContextPolicy::users(["judge_bot"]),
                 collect_from: GroupContextPolicy::users(["judge_bot"]),
+                owners: GroupContextOwners::new(["judge_bot"]),
                 supersedes: Some(second.id),
                 change_reason: Some("second update".into()),
                 valid_from: Utc
@@ -209,6 +213,7 @@ pub async fn supersede_stale_id_returns_conflict(repo: &dyn GroupContextRepo) {
         content: "v2".into(),
         visible_to: GroupContextPolicy::users(["judge_bot"]),
         collect_from: GroupContextPolicy::users(["judge_bot"]),
+        owners: GroupContextOwners::new(["judge_bot"]),
         supersedes: Some(first.id),
         change_reason: Some("CAS v2".into()),
         valid_from: Utc
@@ -239,6 +244,7 @@ pub async fn supersede_stale_id_returns_conflict(repo: &dyn GroupContextRepo) {
         content: "stale-v3".into(),
         visible_to: GroupContextPolicy::users(["judge_bot"]),
         collect_from: GroupContextPolicy::users(["judge_bot"]),
+        owners: GroupContextOwners::new(["judge_bot"]),
         supersedes: Some(first.id),
         change_reason: Some("stale CAS".into()),
         valid_from: Utc
@@ -294,6 +300,38 @@ pub async fn creator_is_persisted_for_each_version(repo: &dyn GroupContextRepo) 
     );
 }
 
+pub async fn owners_are_persisted_per_version(repo: &dyn GroupContextRepo) {
+    let mut first_params = entry("ctx-owners", "owner_history", "sess-owners", "v1");
+    first_params.creator = "writer-a".into();
+    first_params.owners = GroupContextOwners::new(["writer-a"]);
+    let first = repo.create_active(first_params).await.expect("create v1");
+
+    let mut second_params = entry("ctx-owners", "owner_history", "sess-owners", "v2");
+    second_params.creator = "writer-b".into();
+    second_params.owners = GroupContextOwners::new(["delegate_bot"]);
+    second_params.supersedes = Some(first.id);
+    let second = repo
+        .supersede_active("owner_history", "sess-owners", first.id, second_params)
+        .await
+        .expect("supersede v1 while changing owners");
+    assert_eq!(second.owners, GroupContextOwners::new(["delegate_bot"]));
+
+    let versions = repo
+        .list_versions(&first.context_id)
+        .await
+        .expect("list owners history");
+    assert_eq!(
+        versions
+            .iter()
+            .map(|entry| (entry.id, entry.creator.as_str(), entry.owners.user_ids.clone()))
+            .collect::<Vec<_>>(),
+        vec![
+            (first.id, "writer-a", vec!["writer-a".to_string()]),
+            (second.id, "writer-b", vec!["delegate_bot".to_string()]),
+        ]
+    );
+}
+
 pub async fn list_active_by_multiple_scopes(repo: &dyn GroupContextRepo) {
     repo.create_active(entry("ctx-g", "game_rule", "game-room-7", "规则"))
         .await
@@ -307,6 +345,7 @@ pub async fn list_active_by_multiple_scopes(repo: &dyn GroupContextRepo) {
 
     let scopes = vec!["game-room-7".to_string(), "sess-001".to_string()];
     let rows = repo.list_active_meta_by_scopes(&scopes).await.unwrap();
+    assert!(rows.iter().all(|row| row.owners.contains("judge_bot")));
     let names = rows.into_iter().map(|row| row.name).collect::<Vec<_>>();
     assert_eq!(names.len(), 2);
     assert!(names.iter().any(|name| name == "game_rule"));
