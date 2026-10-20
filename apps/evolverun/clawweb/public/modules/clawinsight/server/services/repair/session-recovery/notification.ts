@@ -1,6 +1,7 @@
 import type { DingTalkNotificationSender } from "../../notifications/dingtalk-sender.js";
 import type { RecoveryTaskNotifier } from "./task-service.js";
 import { redactPersistableText } from "@avernet/clawweb-shared/server/services/redaction";
+import { fromMarkdown } from "mdast-util-from-markdown";
 import type { RecoveryActionNotifier } from "./contracts.js";
 import type { RecoveryStoredTask, RecoveryTaskStore, RecoveryTimelineEvent } from "./task-contracts.js";
 import { resolveTaskControlPlaneEnvironment, type AgentControlPlaneEnvironment } from "../common/task-control-plane.js";
@@ -34,51 +35,91 @@ function webhookConfig(raw: string): WebhookConfig {
   return value;
 }
 
+type MarkdownNode = { type: string; value?: string; children?: MarkdownNode[] };
+function plainText(node: MarkdownNode): string {
+  // Full commands, raw HTML and images belong in the linked task, not in a short notification.
+  if (["code", "html", "image", "imageReference"].includes(node.type)) return "";
+  if (typeof node.value === "string") return node.value;
+  const separator = ["root", "blockquote", "list", "listItem"].includes(node.type) ? " " : "";
+  return node.children?.map(plainText).join(separator) ?? "";
+}
+function escapeMarkdown(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/[\\`*_[\]{}()#+.!|~-]/g, "\\$&");
+}
 function clip(value: string, limit: number): string {
-  const text = redactPersistableText(value, limit + 100);
-  if (text.length <= limit) return text;
-  const prefix = text.slice(0, limit);
-  const boundary = prefix.lastIndexOf("\n");
-  return `${prefix.slice(0, boundary > limit / 2 ? boundary : limit).trimEnd()}…`;
+  // Redact the complete, already bounded source before presentation trimming. A byte slice can split UTF-8.
+  const text = plainText(fromMarkdown(redactPersistableText(value, Number.MAX_SAFE_INTEGER))).replace(/\s+/g, " ").trim();
+  if (!text) return value.trim() ? "详细内容请查看任务页。" : "";
+  if (Array.from(text).length <= limit) return escapeMarkdown(text);
+  let prefix = "";
+  for (const { segment } of new Intl.Segmenter("zh", { granularity: "sentence" }).segment(text)) {
+    if (Array.from(prefix + segment).length > limit) break;
+    prefix += segment;
+  }
+  return prefix.trim() ? `${escapeMarkdown(prefix.trim())}（完整内容见任务页）` : "内容较长，请查看完整任务。";
 }
 
 function notificationContent(task: RecoveryStoredTask, event: RecoveryTimelineEvent, kind: GroupNotification["kind"], baseUrl: string) {
   let title: string;
   const sections: string[] = [];
-  const section = (label: string, value: string, limit = 700) => {
-    if (value.trim()) sections.push(`**${label}**\n\n${clip(value, limit)}`);
+  const section = (label: string, value: string, limit = 240) => {
+    const text = clip(value, limit);
+    if (text) sections.push(`**【${label}】**\n\n${text}`);
+  };
+  const list = (label: string, values: string[]) => {
+    if (values.length) sections.push(`**【${label}】**\n\n${values.slice(0, 5).map(value => `- ${clip(value, 120)}`).join("\n")}`
+      + (values.length > 5 ? "\n\n其余事项见任务页。" : ""));
+  };
+  const intervention = () => {
+    const purposes = task.timeline.flatMap(item => {
+      const request = item.payload.request as Record<string, unknown> | undefined;
+      const result = item.payload.result as Record<string, unknown> | undefined;
+      if (item.kind !== "operation" || result?.dry_run === true || !request
+        || typeof request.message !== "string" && typeof request.actionId !== "string") return [];
+      const action = typeof request.actionId === "string" ? task.plan?.actions.find(value => value.actionId === request.actionId) : null;
+      return [action?.summary ?? (typeof request.purpose === "string" ? request.purpose : item.summary)];
+    });
+    const unique = [...new Set(purposes.filter(value => value.trim()))];
+    if (unique.length > 1) list("本次干预", unique);
+    else section("本次干预", unique[0] ?? (task.level === "debug" ? "仅分析，未实际干预。" : "未记录可确认的干预动作，详情见任务页。"), 180);
   };
   if (kind === "message") {
-    const request = event.payload.request as Record<string, unknown> | undefined;
     const status = event.payload.status;
     title = status === "failed" ? "恢复消息发送失败" : status === "unknown" ? "恢复消息投递未确认" : "已提交恢复消息";
-    section("处理目的", event.summary, 300);
-    section("恢复消息", String(request?.message ?? ""), 800);
+    section("本次干预", event.summary, 180);
     section("当前结果", status === "failed" ? "发送调用失败，详见任务中的实际回执。"
       : status === "unknown" ? "发送结果未知，需核对原会话；不会因此重新执行业务动作。"
-      : "消息调用已完成，触达和恢复效果仍需结合原会话验证。", 300);
+      : "恢复消息已提交，触达和恢复效果尚待验证。");
   } else if (kind === "plan") {
     const plan = event.payload.plan as RecoveryStoredTask["plan"];
     title = "已形成修复方案";
     section("方案", plan?.summary ?? event.summary);
-    section("主要动作", plan?.actions.map(action => `- ${clip(action.summary, 180)}`).slice(0, 5).join("\n") ?? "");
-    section("需要配合", plan?.owner_cooperation.map(item => `- ${clip(item.request, 180)}`).slice(0, 5).join("\n") ?? "");
+    list("主要动作", plan?.actions.map(action => action.summary) ?? []);
+    list("需要配合", plan?.owner_cooperation.map(item => item.request) ?? []);
     section("当前状态", task.level === "debug" ? "仅分析，未实际干预。"
       : task.status === "waiting_owner" ? "等待 Owner 完成配合事项并确认方案。" : "按任务已有授权继续处理。", 200);
   } else if (kind === "execution") {
     title = event.payload.success === true ? "修复方案执行完成" : "修复方案执行未完成";
-    section("执行结果", event.summary, 1000);
+    section("执行结果", event.summary);
     if (event.payload.success === true) section("后续处理", "继续核对原任务的执行效果，方案执行完成不代表业务已恢复。", 200);
   } else {
-    title = task.status === "completed" ? "自愈任务已完成" : task.status === "failed" ? "自愈任务执行失败" : "自愈任务已停止";
-    section("处理结论", event.summary || task.judgment?.summary || "", 1000);
+    title = task.status === "completed" ? "任务已完成" : task.status === "failed" ? "任务执行失败" : "任务已停止";
+    intervention();
+    const delivery = task.judgment?.delivery === "confirmed" ? "**消息已触达**：恢复指引已确认出现在原会话中。"
+      : "**消息触达未确认**：尚无证据确认恢复指引进入原会话。";
+    const response = { acted: "**Bot 已采取行动**：已采纳指引并实际执行。", replied: "**Bot 已回复**：尚未确认实际采取恢复行动。",
+      none: "**尚未观察到 Bot 响应**。", unknown: "**Bot 响应无法判断**。" };
+    sections.push(`**【已验证的情况】**\n\n- ${delivery}\n- ${response[task.judgment?.response ?? "unknown"]}`);
     const effects = { recovered: "原任务已恢复", not_recovered: "原任务未恢复", unknown: "恢复效果尚未确认", not_intervened: "未实际干预" };
-    section("恢复效果", effects[task.judgment?.effect ?? "unknown"], 200);
+    const effect = task.judgment?.effect ?? "unknown";
+    sections.push(`**【恢复结论】**\n\n${effect === "recovered" ? `<font color="#16803C">${effects[effect]}</font>` : effects[effect]}`);
+    if (task.status === "failed" || task.status === "canceled") section("结束说明", event.summary);
   }
   const url = new URL("/insight", baseUrl);
   url.searchParams.set("module", "monitoring"); url.searchParams.set("recoveryTaskId", task.taskId);
-  const context = `**Bot**：${clip(task.request.target.bot_id, 150)}\n\n**问题**：${clip(task.request.diagnosis, 450)}`;
-  return { title: `会话自愈｜${title}`, text: `## ${title}\n\n${clip([context, ...sections].join("\n\n"), 3000)}\n\n[查看完整任务与处理记录](${url.href})` };
+  const context = `**Bot**：${clip(task.request.target.bot_id, 150)}`;
+  return { title: `会话自愈｜${title}`, text: `## 会话自愈｜${title}\n\n${[context, ...sections].join("\n\n")}\n\n[查看完整任务与处理记录](${url.href})` };
 }
 
 /** One optional group channel; no task state, approvals or Agent output depend on delivery. */

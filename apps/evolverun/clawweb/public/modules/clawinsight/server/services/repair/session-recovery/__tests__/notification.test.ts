@@ -28,7 +28,7 @@ it("delivers asynchronously once across repeated callbacks and separate notifier
   expect(sender.send).toHaveBeenCalledOnce();
   expect(config.findByKey).toHaveBeenCalledWith(SESSION_RECOVERY_NOTIFICATIONS_KEY);
   expect(sender.send.mock.calls[0][0]).toMatchObject({ timeoutSeconds: 10, title: "会话自愈｜已提交恢复消息" });
-  expect(sender.send.mock.calls[0][0].text).toContain("触达和恢复效果仍需");
+  expect(sender.send.mock.calls[0][0].text).toContain("触达和恢复效果尚待验证");
   expect(sender.send.mock.calls[0][0].text).toContain("recoveryTaskId=SR-notification");
   expect(task.version).toBe(7); expect(task.status).toBe("running");
   expect(JSON.stringify(events)).not.toContain("https://robot.invalid");
@@ -66,4 +66,97 @@ it("formats an automatic plan without Owner cooperation and bounds long content 
   expect(sent.title).toContain("已形成修复方案"); expect(sent.text).toContain("主要动作");
   expect(sent.text).not.toContain("需要配合"); expect(sent.text).toContain("[查看完整任务与处理记录]");
   expect(Buffer.byteLength(sent.text)).toBeLessThan(12000);
+});
+
+it("keeps nested Markdown, commands and long diagnosis out of the message notification", async () => {
+  const { notifier, task, sender, events } = setup();
+  task.request.diagnosis = "中文诊断😀".repeat(2000);
+  task.timeline[0].summary = "**纠正调用方式**，请参考[工具说明](https://docs.invalid)和 `mcporter`。";
+  (task.timeline[0].payload.request as { message: string }).message = "### 恢复步骤\n```bash\n" + "mcporter call ".repeat(1000);
+  notifier.after(message);
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const text = sender.send.mock.calls[0][0].text;
+  expect(text).toContain("**【本次干预】**\n\n纠正调用方式，请参考工具说明和 mcporter。");
+  expect(text).toContain("**【当前结果】**");
+  expect(text).not.toMatch(/\[TRUNCATED\]|\uFFFD|```|### 恢复步骤|mcporter call|中文诊断/);
+  expect(text).not.toContain("https://docs.invalid");
+});
+
+it.each([
+  ["completed", "recovered", "任务已完成", "<font color=\"#16803C\">原任务已恢复</font>"],
+  ["completed", "unknown", "任务已完成", "恢复效果尚未确认"],
+  ["failed", "not_recovered", "任务执行失败", "原任务未恢复"],
+  ["canceled", "unknown", "任务已停止", "恢复效果尚未确认"],
+] as const)("uses structured verification fields for %s/%s instead of the long judgment", async (status, effect, title, conclusion) => {
+  const { notifier, task, sender, events } = setup();
+  task.status = status;
+  task.judgment = { delivery: "confirmed", response: "acted", effect, summary: "不应复制的长篇判断\n```bash\n".repeat(1000), evidence_ids: [] };
+  task.timeline.push({ event_id: "result-1", kind: status === "canceled" ? "termination" : "observation", actor: "service", at_ms: 2,
+    summary: status === "completed" ? task.judgment.summary : "**停止或失败原因**：现场已记录。", payload: {} });
+  notifier.after({ ...message, eventId: "result-1", kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const sent = sender.send.mock.calls[0][0];
+  expect(sent.title).toBe(`会话自愈｜${title}`);
+  expect(sent.text).toContain("**【本次干预】**\n\n纠正调用方式");
+  expect(sent.text).toContain("**消息已触达**：恢复指引已确认出现在原会话中。");
+  expect(sent.text).toContain("**Bot 已采取行动**：已采纳指引并实际执行。");
+  expect(sent.text).toContain(`**【恢复结论】**\n\n${conclusion}`);
+  expect(sent.text).not.toMatch(/不应复制|\[TRUNCATED\]|\uFFFD|```/);
+  if (effect !== "recovered") expect(sent.text).not.toContain("<font");
+  if (status !== "completed") expect(sent.text).toContain("停止或失败原因：现场已记录。");
+});
+
+it("does not turn missing delivery, a reply or an ended task into confirmed recovery", async () => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed";
+  task.judgment = { delivery: "unconfirmed", response: "replied", effect: "unknown", summary: "只有回复", evidence_ids: [] };
+  task.timeline[0].payload.status = "failed";
+  notifier.after({ ...message, kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const text = sender.send.mock.calls[0][0].text;
+  expect(text).toContain("消息触达未确认"); expect(text).toContain("Bot 已回复");
+  expect(text).toContain("恢复效果尚未确认"); expect(text).not.toContain("<font");
+});
+
+it("shows the business summary of an audited plan action without claiming unexecuted actions", async () => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed";
+  task.plan = { summary: "清理错误配置", actions: [{ actionId: "a1", summary: "删除错误定时任务" }, { actionId: "a2", summary: "未执行的另一动作" }] } as RecoveryStoredTask["plan"];
+  task.timeline[0].payload.request = { actionId: "a1", purpose: "调用底层接口执行命令" };
+  notifier.after({ ...message, kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const text = sender.send.mock.calls[0][0].text;
+  expect(text).toContain("删除错误定时任务");
+  expect(text).not.toContain("未执行的另一动作"); expect(text).not.toContain("调用底层接口执行命令");
+});
+
+it("omits an oversized command as a whole and escapes injected formatting in plan values", async () => {
+  const { notifier, task, sender, events } = setup();
+  const purpose = "mcporter_call_".repeat(400);
+  task.timeline = [{ event_id: "plan-1", kind: "plan", at_ms: 2, actor: "agent", summary: "修复配置", payload: {
+    plan: { summary: "## 修复说明\n\n**修复** `配置`，参考[文档](https://docs.invalid)。\n\n```bash\n" + purpose + "\n```",
+      actions: [{ summary: purpose }], owner_cooperation: [{ request: "确认 *权限* <font color=\"red\">后</font>继续。" }] } } }];
+  notifier.after({ ...message, eventId: "plan-1", kind: "plan" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const text = sender.send.mock.calls[0][0].text;
+  expect(text).toContain("修复说明 修复 配置，参考文档。");
+  expect(text).toContain("内容较长，请查看完整任务");
+  expect(text).toContain("确认 权限 后继续。");
+  expect(text).not.toMatch(/mcporter_call_|```|<font|\[TRUNCATED\]|\uFFFD/);
+  expect(text).toContain("**【当前状态】**");
+});
+
+it("shortens Chinese and emoji only at sentence boundaries and treats inline Markdown as literal text", async () => {
+  const { notifier, task, sender, events } = setup();
+  task.timeline[0].summary = "已确认目标😀。" + "下一句中文😀".repeat(80);
+  notifier.after(message);
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const text = sender.send.mock.calls[0][0].text;
+  expect(text).toContain("已确认目标😀。（完整内容见任务页）");
+  expect(text).not.toMatch(/下一句|\[TRUNCATED\]|\uFFFD/);
+  const other = setup();
+  other.task.timeline[0].summary = "说明：`**不要加粗** [不要变链接](https://docs.invalid)`。";
+  other.notifier.after(message);
+  await vi.waitFor(() => expect(other.events.some(event => event.payload.sent === true)).toBe(true));
+  expect(other.sender.send.mock.calls[0][0].text).toContain("\\*\\*不要加粗\\*\\* \\[不要变链接\\]\\(https://docs\\.invalid\\)");
 });
