@@ -241,6 +241,7 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
         action_events: list[NodeActionEvent],
         instance_id: str | None = None,
         callback_audit=None,
+        published_artifacts: list | None = None,
     ) -> int:
         with self._transaction() as db:
             info = db.query(TaskInfoModel).filter(TaskInfoModel.task_id == graph.task_id).with_for_update().first()
@@ -266,8 +267,66 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
             self._insert_action_rows(db, graph.task_id, action_events, instance_id)
             if callback_audit is not None:
                 self._upsert_callback_audit(db, callback_audit)
+            if published_artifacts:
+                self._insert_published_artifacts(db, published_artifacts)
             db.flush()
             return info.graph_version
+
+    def _insert_published_artifacts(self, db, records) -> None:
+        """Append the immutable artifact manifest rows inside the current
+        transaction (spec 2026-10-20-task-artifact-domain §5.2/§5.3).
+
+        select-first dedupe on ``(task_id, node_id, attempt, kind, content_hash)``
+        absorbs version-conflict replays; any NULL key short-circuits the lookup
+        (SQL NULL never participates in equality — a tolerance row just inserts,
+        it is never "matched"). Write failures propagate: the whole graph
+        mutation rolls back, no swallowing, no downgrade."""
+        from datetime import datetime
+
+        from agentclaw.community.core.task.repository.models import TaskArtifactModel
+        from agentclaw.community.core.task.task_context.task_artifact import (
+            content_to_json,
+        )
+
+        for record in records:
+            keys = (
+                record.task_id,
+                record.node_id,
+                record.attempt,
+                record.kind,
+                record.content_hash,
+            )
+            if all(key is not None for key in keys):
+                existing = (
+                    db.query(TaskArtifactModel)
+                    .filter(
+                        TaskArtifactModel.task_id == record.task_id,
+                        TaskArtifactModel.node_id == record.node_id,
+                        TaskArtifactModel.attempt == record.attempt,
+                        TaskArtifactModel.kind == record.kind,
+                        TaskArtifactModel.content_hash == record.content_hash,
+                    )
+                    .first()
+                )
+                if existing is not None:
+                    continue
+            moment = datetime.fromtimestamp(record.created_at / 1000)
+            db.add(TaskArtifactModel(
+                artifact_id=record.artifact_id,
+                artifact_name=record.artifact_name,
+                task_id=record.task_id,
+                node_id=record.node_id,
+                attempt=record.attempt,
+                scope_session_id=record.scope_session_id,
+                kind=record.kind,
+                storage=record.storage,
+                content=content_to_json(record.content),
+                content_hash=record.content_hash,
+                creator=record.creator,
+                modifier=record.creator,  # 行不可变:modifier 恒等于 creator
+                gmt_create=moment,
+                gmt_modify=moment,
+            ))
 
     def _ensure_relay_delivery_intents(self, db, graph) -> None:
         if not graph.is_relay:

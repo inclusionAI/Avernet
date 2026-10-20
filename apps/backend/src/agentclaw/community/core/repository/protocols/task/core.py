@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.task.domain.models import Status
     from agentclaw.community.core.task.repository.types import (
         BbsTaskOverviewRecord,
+        TaskArtifactRecord,
         TaskCallbackCorrelationRecord,
         TaskActionLogRecord,
         TaskCallbackRecord,
@@ -341,13 +342,20 @@ class TaskGraphRepositoryProtocol(Protocol):
         action_events: list,
         instance_id: str | None = None,
         callback_audit: "TaskCallbackRecord | None" = None,
+        published_artifacts: "list[TaskArtifactRecord] | None" = None,
     ) -> int:
         """Persist graph state and action events with optimistic concurrency.
 
         When ``callback_audit`` is supplied, the inbound callback audit row is
         written (``process_status='PROCESSED'``) in the **same** transaction as
         the graph mutation, so the audit and the graph effect commit atomically
-        and an already-processed ``event_id`` is never re-applied."""
+        and an already-processed ``event_id`` is never re-applied.
+
+        When ``published_artifacts`` is supplied, the immutable artifact
+        manifest rows are inserted in the same transaction (spec
+        2026-10-20-task-artifact-domain §5.2): any write failure rolls the
+        whole graph mutation back; ``None`` keeps the pre-existing surface
+        byte-for-byte."""
         ...
 
     @abstractmethod

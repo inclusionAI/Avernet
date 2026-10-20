@@ -271,3 +271,211 @@ def test_removed_graph_node_is_logically_deleted_and_not_hard_deleted(db):
     restored = repo.load_graph(task_id)
     assert restored is not None
     assert {node.node_id for node in restored.tasks} == {task_id}
+
+
+# ---------------------------------------------------------------------------
+# task_artifact: save_graph 同事务内嵌写(spec 2026-10-20-task-artifact-domain §5.2)
+
+
+def _artifact_record(
+    *,
+    task_id="T-ART",
+    node_id="T-ART",
+    attempt=0,
+    content=None,
+    content_hash="auto",
+    storage="inline",
+    kind="text",
+):
+    from agentclaw.community.core.task.repository.types import TaskArtifactRecord
+    from agentclaw.community.core.task.task_context.task_artifact import (
+        TextContent,
+        artifact_content_hash,
+        new_artifact_id,
+    )
+
+    text = content or TextContent(text="done")
+    return TaskArtifactRecord(
+        artifact_id=new_artifact_id(),
+        artifact_name=None,
+        task_id=task_id,
+        node_id=node_id,
+        attempt=attempt,
+        scope_session_id="sess-1",
+        kind=kind,
+        storage=storage,
+        content=text,
+        content_hash=(
+            artifact_content_hash(text) if content_hash == "auto" else content_hash
+        ),
+        creator="bot-1",
+        modifier=None,
+        created_at=1730000000000,
+        gmt_create=None,
+    )
+
+
+def _artifact_setup(db, task_id="T-ART"):
+    TaskInfoRepository(db).insert(
+        TaskInfoRecord(
+            id=0,
+            task_id=task_id,
+            source_type="bot",
+            owner_user_id="U-1",
+            owner_bot_id="B-1",
+            execution_config={},
+            task_spec={"metadata": {"task_id": task_id}},
+            status=Status.PENDING,
+        )
+    )
+    repo = TaskGraphRepository(db)
+    graph = _graph(task_id)
+    repo.create_graph(graph, runtime_status=Status.PENDING)
+    return repo, graph
+
+
+def _artifact_rows(db, task_id="T-ART"):
+    from agentclaw.community.core.task.repository.models import TaskArtifactModel
+
+    with db.orm_session() as session:
+        rows = (
+            session.query(TaskArtifactModel)
+            .filter(TaskArtifactModel.task_id == task_id)
+            .order_by(TaskArtifactModel.id)
+            .all()
+        )
+        return [row.to_record() for row in rows]
+
+
+def test_save_graph_persists_published_artifacts_in_same_transaction(db):
+    repo, graph = _artifact_setup(db)
+    record = _artifact_record()
+    assert repo.save_graph(
+        graph,
+        expected_version=1,
+        runtime_status=Status.PENDING,
+        action_events=[],
+        published_artifacts=[record],
+    ) == 2
+    rows = _artifact_rows(db)
+    assert len(rows) == 1
+    stored = rows[0]
+    assert stored.artifact_id == record.artifact_id
+    assert stored.creator == "bot-1"
+    # modifier 恒等于 creator(行不可变,房型惯例列)
+    assert stored.modifier == record.creator
+    assert stored.modifier == "bot-1"
+    assert stored.content == record.content
+    assert stored.content_hash == record.content_hash
+    assert stored.attempt == 0
+    assert stored.scope_session_id == "sess-1"
+    from datetime import datetime
+
+    assert stored.gmt_create == datetime.fromtimestamp(record.created_at / 1000)
+    assert stored.created_at == record.created_at
+
+
+def test_save_graph_select_first_dedupes_identical_key(db):
+    repo, graph = _artifact_setup(db)
+    record = _artifact_record()
+    repo.save_graph(
+        graph,
+        expected_version=1,
+        runtime_status=Status.PENDING,
+        action_events=[],
+        published_artifacts=[record],
+    )
+    graph.output["again"] = "x"
+    # 同五元键重放:第二次不重复插入
+    repo.save_graph(
+        graph,
+        expected_version=2,
+        runtime_status=Status.PENDING,
+        action_events=[],
+        published_artifacts=[record],
+    )
+    assert len(_artifact_rows(db)) == 1
+
+
+def test_save_graph_null_content_hash_bypasses_dedupe(db):
+    """查重键含 NULL(人工修数残留/容错行)——不崩溃、不误判重,直接落新行。"""
+
+    repo, graph = _artifact_setup(db)
+    first = _artifact_record(content_hash=None)
+    second = _artifact_record(content_hash=None)
+    repo.save_graph(
+        graph,
+        expected_version=1,
+        runtime_status=Status.PENDING,
+        action_events=[],
+        published_artifacts=[first],
+    )
+    graph.output["again"] = "x"
+    repo.save_graph(
+        graph,
+        expected_version=2,
+        runtime_status=Status.PENDING,
+        action_events=[],
+        published_artifacts=[second],
+    )
+    assert len(_artifact_rows(db)) == 2
+
+
+def test_save_graph_artifact_write_failure_rolls_back_whole_transaction(db):
+    from agentclaw.community.core.task.domain.errors import TaskArtifactContentError
+    from agentclaw.community.core.task.task_context.task_artifact import (
+        ArtifactContent,
+        new_artifact_id,
+    )
+
+    repo, graph = _artifact_setup(db)
+
+    class _Unserializable(ArtifactContent):
+        pass
+
+    from agentclaw.community.core.task.repository.types import TaskArtifactRecord
+
+    boom = TaskArtifactRecord(
+        artifact_id=new_artifact_id(),
+        artifact_name=None,
+        task_id="T-ART",
+        node_id="T-ART",
+        attempt=0,
+        scope_session_id="sess-1",
+        kind="text",
+        storage="inline",
+        content=_Unserializable(),
+        content_hash="deadbeef" * 8,
+        creator="bot-1",
+        modifier=None,
+        created_at=1730000000000,
+        gmt_create=None,
+    )
+    import pytest
+
+    with pytest.raises(TaskArtifactContentError):
+        repo.save_graph(
+            graph,
+            expected_version=1,
+            runtime_status=Status.PENDING,
+            action_events=[],
+            published_artifacts=[boom],
+        )
+    # 图版本未推进、产物无行、任务仍可读——整体回滚,不吞不降级
+    assert repo.get_version("T-ART") == 1
+    assert _artifact_rows(db) == []
+    assert repo.load_graph("T-ART") is not None
+
+
+def test_save_graph_without_artifacts_keeps_existing_surface(db):
+    """不传 published_artifacts(存量调用):行为与改前一致,零产物行。"""
+
+    repo, graph = _artifact_setup(db)
+    graph.output["plain"] = True
+    assert repo.save_graph(
+        graph,
+        expected_version=1,
+        runtime_status=Status.PENDING,
+        action_events=[],
+    ) == 2
+    assert _artifact_rows(db) == []
