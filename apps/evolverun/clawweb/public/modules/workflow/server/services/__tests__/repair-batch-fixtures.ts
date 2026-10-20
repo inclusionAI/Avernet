@@ -27,6 +27,7 @@ export async function repairFixture(count = 2) {
   let remoteStatus: Awaited<ReturnType<RepairExecutionPort['status']>> = { status: 'running', rawStatus: 'running', errorMessage: null };
   let generatedResult: RepairGeneratedResult | null = null;
   const executionPort: RepairExecutionPort = {
+    materialDeliveryVersion:'repair-material-download/v1',
     async resolveBaseline(workflowId) { return { workflowId, packId: 'pack', releaseRevision: 0, activeDeployNumber: null,
       repoId: 'managed', specDigest: 'a'.repeat(64), specPath: 'workflows/wf-1.yaml', packCommit: 'b'.repeat(40), packDigest: 'c'.repeat(40) }; },
     async dispatch(input) { calls.push(input); return { jobId: 'job-1' }; },

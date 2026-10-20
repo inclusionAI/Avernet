@@ -302,8 +302,31 @@ MySQL/ZDAS 仅有 DDL 渲染契约检查；真实目标数据库迁移、事务�
 所属工作流的 view 授权，只返回该修订明确选择的冻结原始项。页面展开
 “原始建议与证据”才读取，不用实时材料填补读取失败。
 
-派发前服务端读回并校验完整冻结材料，还原现有 AIS 输入；材料引用不会要求
-旧 AIS 消费者回查数据库。现有 AIS/TaskGuard 继续将完整材料落成本地可选文件，
-只向模型传核心输入。此版本不修改 AIS envelope、TaskGuard 调度或业务执行。
-完整材料的 AIS 传输大于核心包；线上 AIS 参数接收能力仍需独立集成验证，
-本地桩测试不代表真实 AIS 已接受或执行。
+派发前服务端校验冻结材料，但不再把完整材料装回 AIS 参数。核心仍包含完整
+修改目标、用户约束、来源身份、代表诊断事实和关键错误摘录；完整报告作为参考。
+下载失败不能抹去核心依据，也不能把无法核实的目标宣称为已解决。
+
+支持 `repair-material-download/v1` 的执行端收到核心输入及逐条索引
+`materialAccess: {schemaVersion, token, files: [{itemId, bytes, sha256}]}`。
+Host 添加配置中的服务 baseUrl，以 `generate_candidate_materials_v1` 或
+`integrate_candidate_materials_v1` 动作派发；旧消费者会拒绝未知动作，不静默忽略材料。
+不支持下载的 Host 明确拒绝大材料任务，不回退为传完整报告。旧内联历史输入仍兼容。
+
+一次执行的随机只读凭证仅以摘要保存到现有记录表（repair_material_access），
+绑定 task/revision/executionId，最长两小时；执行结束、取消或被重试替换即失效。
+凭证仅供 Python 下载层使用，不进入模型 Prompt、文件索引或日志。
+`GET /api/workflow-repairs/material-download/:taskId/:revision/:itemId?offset=N`
+使用 Authorization Bearer 凭证，只读本次执行的冻结选择；每块至多 64 KiB，返回
+base64 字节、offset/nextOffset/totalBytes/sha256，不提供任意 flowId 或实时数据查询。
+响应设置 no-store；页面查看材料仍使用原 view 授权接口。
+
+TaskGuard 构建当前建议或聚合方案的 Prompt 前，仅下载其原始 itemIds 的材料。
+校验各块身份、顺序、大小及最终 SHA-256，再使用既有本地材料机制脱敏、保存、
+建立 README/manifest，并向 Prompt 说明路径、用途、可用状态及缺失材料的判断限制。
+缓存命中仍验证完整哈希，不下载其他未处理建议；重定向、损坏、超限和越界均拒绝。
+下载失败保留核心输入并标注 unavailable，必要原文缺失时要求报告 unresolved。
+日志记录 start/complete/cache_hit/failed、执行/建议/方案身份、字节、哈希、耗时及
+安全失败分类；不输出凭证、完整报告或上游原始错误。
+
+需要 public Workflow、Host 和 TaskGuard 消费者配套上线。离线 HTTP 回放不代表
+真实 AIS 网络、参数注入或业务执行已经验证；不新增存储服务、队列或业务工具。

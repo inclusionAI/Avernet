@@ -88,6 +88,16 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
     const actor = await access(request, response, task.workflowId, mode);
     return actor ? { task, actor } : null;
   }
+  // Machine read capability is restricted to immutable material and its active execution.
+  router.get('/material-download/:taskId/:revision/:itemId',handle(async(req,res)=>{
+    res.setHeader('Cache-Control','no-store');
+    if(!service.materialChunk)throw new RepairBatchError('CAPABILITY_UNAVAILABLE','Material download unavailable');
+    const offset=req.query.offset===undefined?0:Number(req.query.offset);
+    const token=/^Bearer ([A-Za-z0-9_-]{43})$/.exec(req.get('Authorization')??'')?.[1]??'';
+    const chunk=await service.materialChunk(text(req.params.taskId,'taskId'),revision(req.params.revision),text(req.params.itemId,'itemId'),token,offset);
+    if(!chunk){res.status(401).json({code:'MATERIAL_ACCESS_DENIED'});return;}
+    res.json(chunk);
+  }));
   router.post('/proposal-integration/retry', handle(async (req, res) => {
     const workflowId = text(req.body?.workflowId, 'workflowId');
     if (!await access(req, res, workflowId, 'edit')) return;

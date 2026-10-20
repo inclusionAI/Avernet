@@ -20,7 +20,8 @@ it('freezes all large evidence separately, dispatches every original and reads i
  expect(revision.input.instructions).toBe(request.instructions);
  const dispatched=fixture.calls[0] as {input:typeof revision.input};
  expect(dispatched.input.items).toHaveLength(18);
- expect(JSON.stringify(dispatched.input.items[0].context)).toContain('x'.repeat(300000));
+ expect(JSON.stringify(dispatched.input.items[0].context)).not.toContain('x'.repeat(300000));
+ expect(dispatched.input.materials).toBeDefined();
  fixture.items[0].context={replacement:'new live source'};
  const material=await service.material(revision.taskId,1,'item-0');
  expect(JSON.stringify(material.context)).toContain('x'.repeat(300000));

@@ -79,7 +79,9 @@ export interface RepairSourcePort {
   readVersion?(db: IDatabase, workflowId: string): Promise<string>;
 }
 export type RepairExecutionIdentity = { stepId: string; attempt: number; executionId: string };
-export type RepairDispatchRequest = { actorId: string; identity: RepairExecutionIdentity; input: RepairBatchInput };
+export type RepairMaterialAccess = {schemaVersion:'repair-material-download/v1';token:string;files:Array<{itemId:string;bytes:number;sha256:string}>};
+export type RepairMaterialChunk = {schemaVersion:'repair-material-chunk/v1';itemId:string;offset:number;nextOffset:number|null;totalBytes:number;sha256:string;base64:string};
+export type RepairDispatchRequest = { actorId: string; identity: RepairExecutionIdentity; input: RepairBatchInput; materialAccess?:RepairMaterialAccess };
 export type RepairGeneratedResult =
   | { status: 'succeeded' | 'blocked' | 'no_change'; draft: Record<string, unknown>; checks: Record<string, unknown> }
   | { status: 'failed'; error: Record<string, unknown> };
@@ -89,6 +91,7 @@ export type RepairExecutionReadRequest = RepairDispatchRequest & { jobId: string
  * read from the exact task repair branch after success; no browser callback or OSS artifact is used.
  */
 export interface RepairExecutionPort {
+  materialDeliveryVersion?: 'repair-material-download/v1';
   integrationVersion?: 'workflow-proposal-plan/v1';
   resolveBaseline(workflowId: string, purpose?: 'draft'): Promise<RepairBaseline>;
   dispatch(input: RepairDispatchRequest): Promise<{ jobId: string }>;
@@ -102,6 +105,7 @@ export interface RepairWorkbenchService {
   candidates(workflowId: string, query?: RepairCandidatesQuery): Promise<Omit<RepairCandidatesResponse, 'canEdit'>>;
   item(workflowId: string, itemId: string, originalOnly?: boolean): Promise<RepairInboxItem>;
   task(taskId: string): Promise<RepairTaskDetail>;
+  materialChunk?(taskId:string,revision:number,itemId:string,token:string,offset:number):Promise<RepairMaterialChunk|null>;
   material?(taskId:string,revision:number,itemId:string):Promise<RepairItem>;
   items(workflowId: string, itemIds: string[]): Promise<RepairInboxItem[]>;
   request(workflowId: string, requestId: string): Promise<RepairRevision | null>;

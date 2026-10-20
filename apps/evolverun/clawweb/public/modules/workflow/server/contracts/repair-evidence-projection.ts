@@ -3,7 +3,7 @@ const records=(value:unknown):Record<string,any>[]=>Array.isArray(value)?value.f
 const excerpt=(value:unknown,limit:number)=>typeof value==='string'&&value.length>limit?value.slice(0,limit)+'…':value;
 function payload(value:unknown){
  const json=canonicalRepairJson(value);
- return Buffer.byteLength(json)<=1200?value:{excerpt:Buffer.from(json).subarray(0,1000).toString('utf8'),truncated:true,bytes:Buffer.byteLength(json),sha256:digestRepairJson(value)};
+ return Buffer.byteLength(json)<=1200?value:{keyErrors:typeof value==='object'&&value?Object.fromEntries(['error','errorText','message','code','status'].filter(key=>key in value).map(key=>[key,excerpt(typeof (value as Record<string,unknown>)[key]==='object'?canonicalRepairJson((value as Record<string,unknown>)[key]):(value as Record<string,unknown>)[key],600)])):{},excerpt:Buffer.from(json).subarray(0,1000).toString('utf8'),truncated:true,bytes:Buffer.byteLength(json),sha256:digestRepairJson(value)};
 }
 /** A bounded reading aid, never a replacement for the separately retained originals. */
 export function projectRepairEvidence<T extends RepairItem>(item:T,forAggregation=false):T{

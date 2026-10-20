@@ -1,3 +1,4 @@
+import { RepairMaterialDownload } from '../repositories/repair-material-download.js';
 import { RepairMaterialRepository } from '../repositories/repair-material-repository.js';
 import { repairTaskPresentation } from '../contracts/repair-task-presentation.js';
 import {historicalReference,reviewVersionSelection,freezeReference,historicalIntegration} from './repair-historical-reference.js';
@@ -428,6 +429,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       return item;
     });
   }
+  materialChunk(taskId:string,revision:number,itemId:string,token:string,offset:number){return new RepairMaterialDownload(this.db).read(taskId,revision,itemId,token,offset);}
   async material(taskId:string,revision:number,itemId:string):Promise<RepairItem>{
     const workflowId=await new RepairBatchRepository(this.db).taskWorkflow(taskId);
     if(!workflowId)fail('TASK_NOT_FOUND','Repair task does not exist');
@@ -587,18 +589,24 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
   }
   private async dispatch(revision: RepairRevision, actorId?: string): Promise<void> {
     if (!this.execution || revision.phase !== 'drafting') return;
-    const executionInput=await new RepairMaterialRepository(this.db).expand(revision.input);
+    // Validate stored originals, but never put them back into the AIS parameters.
+    await new RepairMaterialRepository(this.db).expand(revision.input);
+    const executionInput=revision.input;
+    if(executionInput.materials&&this.execution.materialDeliveryVersion!=='repair-material-download/v1')fail('CAPABILITY_UNAVAILABLE','Execution provider does not support material downloads');
     const executionId = randomUUID();
     const claimed = await this.tx(async tx => {
       const current = await new RepairBatchRepository(tx).getRevision(revision.workflowId, revision.taskId, revision.revision);
       if (current?.phase !== 'drafting') return false;
-      return new RepairTaskRepository(tx).claimDispatch(revision.taskId, revision.revision, executionId);
+      const claim=await new RepairTaskRepository(tx).claimDispatch(revision.taskId, revision.revision, executionId);
+      if(!claim)return false;
+      const materialAccess=executionInput.materials?await new RepairMaterialDownload(tx).issue(executionInput,claim):undefined;
+      return {...claim,materialAccess};
     });
     if (!claimed) return;
     let failure: 'rejected' | 'uncertain' | null = null; let jobId: string | null = null;
     try {
       const identity = { stepId: claimed.stepId, attempt: claimed.attempt, executionId: claimed.executionId };
-      const receipt = await this.execution.dispatch({ input: executionInput, actorId: actorId ?? claimed.actorId, identity });
+      const receipt = await this.execution.dispatch({ input: executionInput, ...(claimed.materialAccess?{materialAccess:claimed.materialAccess}:{}), actorId: actorId ?? claimed.actorId, identity });
       if (!receipt?.jobId?.trim() || receipt.jobId.length > 255) throw new Error('Invalid AIS job id');
       jobId = receipt.jobId;
     } catch (error) {
