@@ -129,6 +129,9 @@ async function routingFetch(input: any, init?: any): Promise<Response> {
   const req = JSON.parse(String((init as RequestInit).body));
   if (req.method === 'SendStreamingMessage' && sseFactory) return sseFactory(req.id);
   if (req.method === 'CancelTask') return jsonBody(cancelConfirmed(req.id));
+  // R2-3 第二补丁：ReplayEvents 一律打网络级拒（typed transport）——恢复轮的
+  // 每次尝试都确定性失败，预算耗尽即 RECOVERY_STOPPED（不依赖引擎语义）
+  if (req.method === 'ReplayEvents') throw new TypeError('reset');
   return jsonBody(jrpcOk(req.id, {}));
 }
 
@@ -348,5 +351,83 @@ describe('BotChatProvider A2A 接缝活体集成（B16）', () => {
     await provider.request({ content: '第三条', sessionId: 'sess-1' } satisfies BotChatRequest);
     expect(creations).toEqual(['a2a', 'v3']);
     expect(disconnects).toEqual(['a2a']);
+  });
+
+  it('R2-3 第二补丁：未终结旧任务在换轨后保留处理器——恢复锚/入口存活，'
+    + '终局落定后按 §3.1 释放', async () => {
+    // 场景（reviewer 复核指定）：已知 taskId → 断流进入恢复 → 预算耗尽未终结
+    // → 开关关 → 新发送走 v3 的同时旧任务处理器保留，manualRecover 仍可驱动。
+    const built = await maybeBuildA2AProvider({ url: WS_URL, xIAMToken: 'iam-1' });
+    expect(built).not.toBeNull();
+
+    // 微预算（真实时钟亦可确定）：1 次尝试即耗尽 → RECOVERY_STOPPED
+    const TINY_RECOVERY = {
+      maxAttempts: 1, backoffCapsMs: [1], perCallTimeoutMs: 500, totalBudgetMs: 2000,
+    } as const;
+    let oldA2a: any = null;
+    const provider = createBotChatProvider({
+      bot: BOT, userId: '2088', sessionId: 'sess-1',
+      createSdkProvider: (cfg: any) => {
+        const a2a = takeCachedA2AProvider({ ...cfg, recovery: TINY_RECOVERY });
+        if (a2a) { oldA2a = a2a; return a2a as unknown as any; }
+        return ({                                    // v3 stub：不真连 ws
+          isConnected: true,
+          connect: () => Promise.resolve(),
+          request: () => Promise.resolve(),
+          disconnect: () => undefined,
+          subscribeToConnectionStatus: () => () => undefined,
+        });
+      },
+    } as any);
+    await provider.connect();
+    expect(oldA2a).not.toBeNull();
+
+    // 第 1 段：A2A 出站拿 taskId（首 Task 事件锚定）→ 断流 → 自动恢复预算耗尽
+    let sse1!: DeferredSse;
+    sseFactory = (reqId) => {
+      sse1 = deferredSse();
+      sse1.push(`data: ${JSON.stringify({
+        jsonrpc: '2.0', id: reqId,
+        result: {
+          task: { id: TASK_ID, contextId: 'sess-1',
+            status: { state: 'TASK_STATE_WORKING' }, metadata: {} },
+        },
+      })}\n\n`);
+      return sse1.response;
+    };
+    const first = provider.request({ content: '长任务', sessionId: 'sess-1' } satisfies BotChatRequest);
+    await new Promise((r) => { setTimeout(r, 0); });   // task 事件消费，恢复锚建立
+    sse1.cut();                                        // typed transport 断流
+    await expect(first).rejects.toThrow('恢复已停止');
+    // 前端发送位空闲 ✚ 引擎任务未终结——不得以前者证明可销毁后者
+    expect(oldA2a.hasUnterminatedRecovery).toBe(true);
+
+    // 第 2 段：开关关 → 新发送落 v3；旧任务处理器保留（未断连、引用在场）
+    storage.set(A2A_SWITCH_KEY, '0');
+    await provider.request({ content: '第二条', sessionId: 'sess-1' } satisfies BotChatRequest);
+    expect((provider as any).retiredA2aHandler).toBe(oldA2a);
+    expect(oldA2a.isConnected).toBe(true);          // 保留≠断连退役
+    expect(oldA2a.hasUnterminatedRecovery).toBe(true);
+
+    // 第 3 段：保留中的旧任务入口可驱动（manualRecover 开只读轮，ReplayEvents
+    // 打真 POST——预算耗尽重复原命运，但"恢复能力在"得到网络级实证）
+    const replaysBefore = calls.filter((c) => {
+      try { return JSON.parse(String(c.init.body)).method === 'ReplayEvents'; } catch { return false; }
+    }).length;
+    const outcome = await oldA2a.manualRecover();
+    const replaysAfter = calls.filter((c) => {
+      try { return JSON.parse(String(c.init.body)).method === 'ReplayEvents'; } catch { return false; }
+    }).length;
+    expect(replaysAfter).toBeGreaterThan(replaysBefore);   // 旧任务仍在发恢复面调用
+    expect(outcome).toEqual({ outcome: 'budget-exhausted' });  // 微预算同命运（确定性）
+    expect((provider as any).retiredA2aHandler).toBe(oldA2a);  // 仍未终结——保留
+
+    // 第 4 段：§3.1 释放条件核销——终局落定（迟到终态/GetTask 收账后 runSettled
+    // 翻位的生产路径在此以等价态模拟）→ 下一发送边界惰性释放
+    (oldA2a as any).runSettled = true;
+    expect(oldA2a.hasUnterminatedRecovery).toBe(false);
+    await provider.request({ content: '第三条', sessionId: 'sess-1' } satisfies BotChatRequest);
+    expect((provider as any).retiredA2aHandler).toBeNull();   // 已释放
+    expect(oldA2a.isConnected).toBe(false);                  // 释放=断连
   });
 });
