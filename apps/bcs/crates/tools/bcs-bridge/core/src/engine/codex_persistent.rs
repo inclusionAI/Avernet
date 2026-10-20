@@ -163,11 +163,22 @@ struct Router {
     loaded: HashSet<String>,
     next_id: u64,
     interrupts: HashMap<u64, InterruptWaiter>,
+    server_requests: HashMap<String, (u64, Value)>,
 }
 
 impl Router {
     async fn write(&mut self, cli: &mut CodexConnection, lease: u64, mut value: Value) -> io::Result<()> {
         if !self.clients.contains_key(&lease) { return Ok(()); }
+        if value.get("method").is_none() {
+            // Responses to server requests retain the engine's original RPC id.
+            // A different lease (or a stale reply after closure) cannot answer.
+            let key = value["id"].to_string();
+            if self.server_requests.get(&key).is_some_and(|(owner, _)| *owner == lease) {
+                self.server_requests.remove(&key);
+                return write_line(cli, &value.to_string()).await;
+            }
+            return Ok(());
+        }
         if let Some(id) = value.get("id").cloned() {
             let wire_id = self.next_id;
             self.next_id += 1;
@@ -206,7 +217,25 @@ impl Router {
 
     async fn message(&mut self, cli: &mut CodexConnection, mut value: Value) -> io::Result<()> {
         if value.get("method").is_some() && value.get("id").is_some() {
-            // Reject unsupported approval/HITL calls even while no turn is attached.
+            // Only forward questions with an exact active thread/turn owner.
+            if value["method"] == "item/tool/requestUserInput" {
+                let owner = self.clients.iter().find_map(|(lease, client)| {
+                    match (&client.thread, &client.turn) {
+                        (Some(thread), Some(turn)) if super::codex_app_server::matches_turn(&value, thread, turn, true)
+                            && !client.messages.is_closed() => Some(*lease),
+                        _ => None,
+                    }
+                });
+                if let Some(lease) = owner {
+                    let key = value["id"].to_string();
+                    if !self.server_requests.contains_key(&key) {
+                        self.server_requests.insert(key, (lease, value["id"].clone()));
+                        self.deliver(lease, &value)?;
+                    }
+                    return Ok(());
+                }
+            }
+            // Unsupported or unowned requests never reach another conversation.
             return write_line(cli, &json!({"jsonrpc":"2.0", "id":value["id"],
                 "error":{"code":-32000,"message":"bridge-provider does not support app-server server requests"}}).to_string()).await;
         }
@@ -237,6 +266,13 @@ impl Router {
                 }
                 value["id"] = pending.id;
                 self.deliver(pending.lease, &value)?;
+            }
+            return Ok(());
+        }
+        if value["method"] == "serverRequest/resolved" {
+            let key = value["params"]["requestId"].to_string();
+            if let Some((lease, _)) = self.server_requests.remove(&key) {
+                self.deliver(lease, &value)?;
             }
             return Ok(());
         }
@@ -272,7 +308,7 @@ impl Router {
 }
 
 async fn serve(mut cli: CodexConnection, mut commands: mpsc::UnboundedReceiver<Command>, mut backlog: VecDeque<Value>) {
-    let mut router = Router { clients: HashMap::new(), pending: HashMap::new(), loaded: HashSet::new(), next_id: 10, interrupts: HashMap::new() };
+    let mut router = Router { clients: HashMap::new(), pending: HashMap::new(), loaded: HashSet::new(), next_id: 10, interrupts: HashMap::new(), server_requests: HashMap::new() };
     let result: io::Result<()> = async {
         loop {
             if let Some(value) = backlog.pop_front() {
@@ -293,6 +329,13 @@ async fn serve(mut cli: CodexConnection, mut commands: mpsc::UnboundedReceiver<C
                     }
                     Some(Command::Write { lease, value }) => router.write(&mut cli, lease, value).await?,
                     Some(Command::Close { lease, done }) => {
+                        let abandoned: Vec<_> = router.server_requests.iter()
+                            .filter(|(_, (owner, _))| *owner == lease).map(|(key, (_, id))| (key.clone(), id.clone())).collect();
+                        for (key, id) in abandoned {
+                            router.server_requests.remove(&key);
+                            write_line(&mut cli, &json!({"jsonrpc":"2.0", "id":id,
+                                "error":{"code":-32000,"message":"Bridge turn closed before user input"}}).to_string()).await?;
+                        }
                         if let Some(client) = router.clients.remove(&lease)
                             && let (Some(thread), Some(turn)) = (client.thread, client.turn) {
                             router.interrupt(&mut cli, &thread, &turn, done).await?;

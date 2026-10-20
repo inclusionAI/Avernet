@@ -291,3 +291,162 @@ async fn delayed_interrupted_completion_cannot_finish_followup_on_same_thread() 
         }
     }
 }
+
+async fn asked_turn(engine: Arc<CodexAppServer>, prompt: &str, abort: CancellationToken)
+    -> (bcs_bridge_core::interaction::InteractionRegistry,
+        tokio::sync::mpsc::Receiver<bcs_protocol::stream::StreamEvent>,
+        tokio::task::JoinHandle<Result<TurnOutcome, TurnError>>) {
+    let req = TurnRequest::new(uuid::Uuid::new_v4().to_string(), prompt, "/tmp", Arc::new(Observer));
+    let registry = req.interactions.clone();
+    let (tx, rx) = tokio::sync::mpsc::channel(128);
+    let handle = tokio::spawn(async move { engine.run_turn(req, tx, abort).await });
+    (registry, rx, handle)
+}
+
+async fn question_event(rx: &mut tokio::sync::mpsc::Receiver<bcs_protocol::stream::StreamEvent>, phase: bcs_protocol::stream::InteractionPhase)
+    -> bcs_protocol::stream::InteractionEvent {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match rx.recv().await.expect("turn ended before interaction") {
+                bcs_protocol::stream::StreamEvent::Interaction(event) if event.phase == phase => return event,
+                _ => {},
+            }
+        }
+    }).await.unwrap()
+}
+
+#[tokio::test]
+async fn questions_roundtrip_custom_text_skip_and_cancel_without_blocking_other_threads() {
+    use bcs_protocol::stream::InteractionPhase;
+    use serde_json::json;
+    let temp = tempfile::tempdir().unwrap();
+    let log = temp.path().join("rpc.jsonl");
+    let engine = engine(&log);
+    for cancel in [false, true] {
+        let (registry, mut rx, handle) = asked_turn(engine.clone(), "ask-roundtrip", CancellationToken::new()).await;
+        let requested = question_event(&mut rx, InteractionPhase::Requested).await;
+        assert_eq!(requested.raw["questions"][0]["questionId"], "choice");
+        assert_eq!(requested.raw["questions"][0]["options"][0]["description"], "first");
+        assert!(!handle.is_finished());
+        // Another conversation remains usable while this one is waiting.
+        let other = turn(&engine, "other", None, CancellationToken::new()).await.unwrap();
+        assert!(other.final_text.unwrap().ends_with(":other"));
+        let answer = if cancel { json!({"action":"cancel"}) } else {
+            json!({"action":"submit","answers":{"choice":{"values":["custom"]},"text":{"values":[]}}})
+        };
+        assert_eq!(registry.resolve(&requested.interaction_id,"answer-1",answer.clone()),
+            bcs_bridge_core::interaction::ResolveOutcome::Delivered);
+        assert_eq!(registry.resolve(&requested.interaction_id,"answer-1",answer),
+            bcs_bridge_core::interaction::ResolveOutcome::Duplicate);
+        question_event(&mut rx, InteractionPhase::Resolved).await;
+        let outcome = tokio::time::timeout(Duration::from_secs(5), handle).await.unwrap().unwrap().unwrap();
+        let result: Value = serde_json::from_str(outcome.final_text.as_deref().unwrap()).unwrap();
+        assert_eq!(result, if cancel { json!({"answers":{}}) } else {
+            json!({"answers":{"choice":{"answers":["custom"]},"text":{"answers":[]}}}) });
+    }
+    let replies: Vec<_> = requests(&log).into_iter().filter(|v| v.get("method").is_none()).collect();
+    assert_eq!(replies.len(), 2, "each question gets exactly one native RPC response");
+}
+
+#[tokio::test]
+async fn pending_questions_close_on_abort_crash_or_engine_resolution_and_ignore_late_answers() {
+    use bcs_protocol::stream::InteractionPhase;
+    use serde_json::json;
+    let temp = tempfile::tempdir().unwrap();
+    let log = temp.path().join("rpc.jsonl");
+    let engine = engine(&log);
+    for prompt in ["ask-roundtrip", "async-request", "ask-crash", "ask-engine-close"] {
+        let abort = CancellationToken::new();
+        let (registry, mut rx, handle) = asked_turn(engine.clone(), prompt, abort.clone()).await;
+        let requested = question_event(&mut rx, InteractionPhase::Requested).await;
+        if matches!(prompt,"ask-roundtrip" | "async-request") { abort.cancel(); }
+        let result = tokio::time::timeout(Duration::from_secs(5), handle).await.unwrap().unwrap();
+        if prompt == "ask-engine-close" { assert!(result.is_ok()); } else { assert!(result.is_err()); }
+        question_event(&mut rx, InteractionPhase::Resolved).await;
+        assert_eq!(registry.resolve(&requested.interaction_id,"late",json!({"action":"submit","answers":{}})),
+            bcs_bridge_core::interaction::ResolveOutcome::Duplicate);
+    }
+}
+
+#[tokio::test]
+async fn secret_and_wrong_turn_requests_are_rejected_without_exposing_a_form() {
+    let temp = tempfile::tempdir().unwrap();
+    let log = temp.path().join("rpc.jsonl");
+    let engine = engine(&log);
+    for prompt in ["ask-secret", "ask-wrong-turn"] {
+        let (_, mut rx, handle) = asked_turn(engine.clone(), prompt, CancellationToken::new()).await;
+        let result = tokio::time::timeout(Duration::from_secs(5),handle).await.unwrap().unwrap().unwrap();
+        assert!(result.final_text.unwrap().contains("-32000"));
+        while let Some(event) = rx.recv().await {
+            assert!(!matches!(event, bcs_protocol::stream::StreamEvent::Interaction(_)));
+        }
+    }
+}
+
+#[tokio::test]
+async fn simultaneous_questions_return_only_to_their_own_codex_threads() {
+    use bcs_protocol::stream::InteractionPhase;
+    use serde_json::json;
+    let temp = tempfile::tempdir().unwrap();
+    let engine = engine(&temp.path().join("rpc.jsonl"));
+    let (reg_a, mut rx_a, task_a) = asked_turn(engine.clone(), "ask-a", CancellationToken::new()).await;
+    let (reg_b, mut rx_b, task_b) = asked_turn(engine.clone(), "ask-b", CancellationToken::new()).await;
+    let a = question_event(&mut rx_a, InteractionPhase::Requested).await;
+    let b = question_event(&mut rx_b, InteractionPhase::Requested).await;
+    assert_ne!(a.interaction_id, b.interaction_id);
+    assert_eq!(reg_a.resolve(&b.interaction_id,"wrong",json!({"action":"cancel"})),
+        bcs_bridge_core::interaction::ResolveOutcome::Unknown);
+    for (reg, iid, answer) in [(&reg_b, &b.interaction_id, "B"), (&reg_a, &a.interaction_id, "A")] {
+        reg.resolve(iid,"answer",json!({"action":"submit","answers":{
+            "choice":{"values":[answer]},"text":{"values":[]}}}));
+    }
+    for (task, expected) in [(task_a,"A"),(task_b,"B")] {
+        let result = tokio::time::timeout(Duration::from_secs(5),task).await.unwrap().unwrap().unwrap();
+        let response: Value = serde_json::from_str(result.final_text.as_deref().unwrap()).unwrap();
+        assert_eq!(response["answers"]["choice"]["answers"],json!([expected]));
+    }
+}
+
+#[tokio::test]
+async fn async_question_metadata_survives_turn_completion_and_answers_resume_the_same_thread() {
+    use bcs_protocol::stream::InteractionPhase;
+    use serde_json::json;
+    let temp = tempfile::tempdir().unwrap();
+    let log = temp.path().join("rpc.jsonl");
+    let engine = engine(&log);
+    for prompt in ["async-request", "async-snapshot-only"] {
+        let (registry, mut rx, handle) = asked_turn(engine.clone(), prompt, CancellationToken::new()).await;
+        let requested = question_event(&mut rx, InteractionPhase::Requested).await;
+        assert_eq!(requested.raw["questions"][0]["question"],"你今天更想喝什么？");
+        assert_eq!(requested.raw["questions"][0]["options"][1]["value"],"茶");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!handle.is_finished(),"BCN run must stay open after the native turn ends");
+        registry.resolve(&requested.interaction_id,"answer",json!({"action":"submit","answers":{
+            "question_1":{"values":["茶"]}}}));
+        question_event(&mut rx, InteractionPhase::Resolved).await;
+        let result = tokio::time::timeout(Duration::from_secs(5),handle).await.unwrap().unwrap().unwrap();
+        let text = result.final_text.unwrap();
+        assert!(text.contains("用户已回答") && text.contains("茶"),"{text}");
+        assert!(!text.contains("Question sent."),"old final must not replace the follow-up answer");
+        let starts: Vec<_> = requests(&log).into_iter().filter(|v| v["method"]=="turn/start").collect();
+        let last = starts.len()-1;
+        assert_eq!(starts[last]["params"]["threadId"], starts[last-1]["params"]["threadId"]);
+    }
+    assert!(requests(&log).iter().all(|v| v.get("method").is_some()),
+        "async questions have no native RPC request to respond to");
+}
+
+#[tokio::test]
+async fn cancelling_an_async_question_finishes_without_starting_an_answer_turn() {
+    use bcs_protocol::stream::InteractionPhase;
+    use serde_json::json;
+    let temp = tempfile::tempdir().unwrap();
+    let log = temp.path().join("rpc.jsonl");
+    let engine = engine(&log);
+    let (registry, mut rx, handle) = asked_turn(engine,"async-request",CancellationToken::new()).await;
+    let requested = question_event(&mut rx,InteractionPhase::Requested).await;
+    registry.resolve(&requested.interaction_id,"cancel",json!({"action":"cancel"}));
+    let result = tokio::time::timeout(Duration::from_secs(5),handle).await.unwrap().unwrap().unwrap();
+    assert_eq!(result.final_text.as_deref(),Some("Question sent."));
+    assert_eq!(requests(&log).iter().filter(|v| v["method"]=="turn/start").count(),1);
+}

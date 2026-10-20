@@ -897,3 +897,34 @@ async fn oversize_single_frame_becomes_chat_error() {
     // The error frame carries the "frame too large" diagnostic from push_frame.
     assert!(text.contains("\"errorMessage\":\"frame too large\""), "error cause: {text}");
 }
+
+#[tokio::test]
+async fn codex_web_search_final_snapshot_emits_matching_results_before_final() {
+    let url = support::spawn_app_with_mock("mock_codex_app_server.py", "codex").await;
+    let response = reqwest::Client::builder().no_proxy().build().unwrap()
+        .post(format!("{url}/webhook"))
+        .bearer_auth("tok-b2p")
+        .header("X-BCN-Protocol-Version", "2.0")
+        .json(&json!({"type":"req", "id":"web-search-run", "method":"chat.send",
+            "session_id":"web-search-session",
+            "to_bot":{"provider_id":"bridge-1", "provider_bot_ref":"worker-1"},
+            "message":{"role":"user", "content":[{"type":"text", "text":"WEB_SEARCH_FINAL:"}]}}))
+        .send().await.unwrap();
+    assert!(response.status().is_success());
+    let text = response.text().await.unwrap();
+    let frames: Vec<serde_json::Value> = text.lines().filter_map(|line| {
+        line.strip_prefix("data: ").and_then(|value| serde_json::from_str(value).ok())
+    }).collect();
+    for index in 0..3 {
+        let id = format!("web-{index}");
+        let events: Vec<_> = frames.iter().filter(|f| f["stream"] == "tool" && f["toolCallId"] == id).collect();
+        assert_eq!(events.len(), 2, "expected start/result pair: {text}");
+        assert_eq!(events[0]["phase"], "start");
+        assert_eq!(events[1]["phase"], "result");
+        assert_eq!(events[1]["result"]["query"], "Codex events");
+        assert_eq!(events[1]["isError"], false);
+    }
+    let result_pos = text.rfind("\"phase\":\"result\"").unwrap();
+    let final_pos = text.rfind("\"state\":\"final\"").unwrap();
+    assert!(result_pos < final_pos, "tool results must precede final: {text}");
+}

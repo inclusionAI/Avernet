@@ -13,6 +13,7 @@ counter = 0
 ignore_interrupts = set()
 delayed_turns = set()
 delayed_completions = {}
+questions = {}
 
 
 def send(value):
@@ -29,6 +30,13 @@ for raw in sys.stdin:
     if MOCK_DELAY:
         time.sleep(MOCK_DELAY)
     response = {}
+    if method is None and request.get("id") in questions:
+        thread, turn = questions.pop(request["id"])
+        send({"method":"item/agentMessage/delta", "params":{"threadId":thread,"turnId":turn,
+            "delta":json.dumps(request.get("result", request.get("error")))}})
+        send({"method":"turn/completed", "params":{"threadId":thread,"turnId":turn,
+            "turn":{"id":turn,"status":"completed"}}})
+        continue
     if method == "initialize":
         response = {"capabilities": {}}
     elif method == "initialized":
@@ -82,6 +90,37 @@ for raw in sys.stdin:
         send({"id": request["id"], "result": {"turn": {"id": turn}}})
         if stale and phase == "after-ack":
             stale_completion()
+        if prompt.startswith("async-"):
+            item = {"type":"agentMessage","id":"async-item-"+turn,"delivery":"async","text":"Choose a drink?",
+                "questions":[{"title":"你今天更想喝什么？","options":["咖啡","茶","白水"]}]}
+            if prompt != "async-snapshot-only":
+                send({"method":"item/completed","params":{"threadId":thread,"turnId":turn,"item":item}})
+            send({"method":"item/agentMessage/delta","params":{"threadId":thread,"turnId":turn,"delta":"Question sent."}})
+            send({"method":"turn/completed","params":{"threadId":thread,"turnId":turn,
+                "turn":{"id":turn,"status":"completed","items":[item,{"type":"agentMessage","id":"final-"+turn,
+                    "phase":"final_answer","text":"Question sent."}]}}})
+            continue
+        if prompt.startswith("ask-"):
+            rpc_id = "question-" + turn
+            questions[rpc_id] = (thread, turn)
+            form = {"threadId":thread,"turnId":turn,"itemId":"item-"+turn,"isBlocking":True,
+                "questions":[{"id":"choice","header":"Choice","question":"Pick one?","isOther":True,
+                    "options":[{"label":"A","description":"first"},{"label":"B","description":"second"}]},
+                    {"id":"text","header":"Text","question":"Details?","options":None}]}
+            if prompt == "ask-secret":
+                form["questions"][0]["isSecret"] = True
+            if prompt == "ask-wrong-turn":
+                form["turnId"] = "not-the-active-turn"
+            send({"id":rpc_id,"method":"item/tool/requestUserInput","params":form})
+            if prompt == "ask-engine-close":
+                send({"method":"serverRequest/resolved","params":{"threadId":thread,"requestId":rpc_id}})
+                questions.pop(rpc_id)
+                send({"method":"turn/completed","params":{"threadId":thread,"turnId":turn,
+                    "turn":{"id":turn,"status":"completed"}}})
+            if prompt == "ask-crash":
+                time.sleep(0.05)
+                os._exit(2)
+            continue
         if prompt == "fail":
             send({"method": "turn/completed", "params": {
                 "threadId": thread, "turnId": turn,

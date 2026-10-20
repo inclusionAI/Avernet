@@ -22,17 +22,24 @@
 //! terminal boundary.
 
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use bcs_protocol::stream::{StreamEvent, ToolData, ToolPhase};
+use bcs_protocol::stream::StreamEvent;
 use serde_json::{Value, json};
 use tokio::sync::mpsc::Sender;
+use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 
 use crate::engine::codex_transport::CodexConnection;
 use crate::engine::{Engine, TurnError, TurnOutcome, TurnRequest};
 use crate::sse;
+
+#[path = "codex_tool_events.rs"]
+mod tool_events;
+use tool_events::{ToolEvents, map_tool_output_delta, map_mcp_progress};
+#[path = "codex_questions.rs"]
+mod questions;
 
 /// Codex engine sandbox mode, forwarded into every `thread/*` and`turn/start`
 /// wire parameter. `workspace-write` is the bridge default: the bot works
@@ -92,8 +99,8 @@ impl CodexSandbox {
 }
 
 /// Codex approval policy, decides whether the engine may request approvals at all.
-/// `never` (bridge default) means no approval channel: operations outside the
-/// sandbox are denied outright instead of prompting.
+/// `on-request` (bridge default) allows approval requests. `never` closes the
+/// approval channel and denies operations that require approval.
 ///
 /// Verified against a live cfuse codex 0.161 app-server (2026-10-18): the wire
 /// enum accepts `never | on-request | untrusted | granular`; the legacy
@@ -102,8 +109,8 @@ impl CodexSandbox {
 /// until its per-command semantics are reviewed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum CodexApprovalPolicy {
-    #[default]
     Never,
+    #[default]
     OnRequest,
     Untrusted,
 }
@@ -128,14 +135,14 @@ impl CodexApprovalPolicy {
 }
 
 /// Who answers codex approval requests when `approval_policy` enables them.
-/// - `user` (default): a human reviewer via BCS HITL (requires the codex HITL
+/// - `user`: a human reviewer via BCS HITL (requires the codex HITL
 ///   wiring; not yet available in this driver).
-/// - `auto`: cfuse `auto_review`, the engine's programmatic policy engine
-///   (TUI parity: escalations are approved without human involvement).
+/// - `auto` (default): cfuse `auto_review`, the engine's automatic reviewer,
+///   which can approve or reject requests without human involvement.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum CodexApprovalReview {
-    #[default]
     User,
+    #[default]
     Auto,
 }
 
@@ -156,8 +163,8 @@ impl CodexApprovalReview {
 }
 
 /// Per-bot Codex engine policy, parsed from `bot.engine_options`.
-/// Defaults (policy decision 2026-10-18): `workspace-write` sandbox,
-/// outbound network allowed, approvals never requested, and no reasoning
+/// Defaults: `workspace-write` sandbox, outbound network allowed,
+/// `on-request` approvals with the engine automatic reviewer, and no reasoning
 /// effort override (the engine's config-level default applies).
 #[derive(Clone, Copy, Debug)]
 pub struct CodexOptions {
@@ -173,7 +180,7 @@ pub struct CodexOptions {
 impl Default for CodexOptions {
     fn default() -> Self {
         Self { sandbox: CodexSandbox::WorkspaceWrite, network_access: true,
-            approval_policy: CodexApprovalPolicy::Never, approval_review: CodexApprovalReview::User,
+            approval_policy: CodexApprovalPolicy::OnRequest, approval_review: CodexApprovalReview::Auto,
             reasoning_effort: None }
     }
 }
@@ -189,9 +196,7 @@ impl CodexOptions {
     const EFFORTS: [&'static str; 5] = ["minimal", "low", "medium", "high", "xhigh"];
 
     fn parse(options: &toml::Table) -> Result<Self, String> {
-        let mut parsed = Self { sandbox: CodexSandbox::WorkspaceWrite,
-            network_access: true, approval_policy: CodexApprovalPolicy::Never,
-            approval_review: CodexApprovalReview::User, reasoning_effort: None };
+        let mut parsed = Self::default();
         for (key, value) in options {
             match (key.as_str(), value) {
                 (Self::KEY_SANDBOX, toml::Value::String(sandbox)) => {
@@ -216,6 +221,10 @@ impl CodexOptions {
                 _ => return Err(format!("unsupported engine_options key '{key}'")),
             }
         }
+        // Preserve explicit never-only configurations: no reviewer is needed.
+        if !parsed.approval_policy.asks_approvals() && !options.contains_key(Self::KEY_APPROVAL_REVIEW) {
+            parsed.approval_review = CodexApprovalReview::User;
+        }
         match (parsed.approval_policy.asks_approvals(), parsed.approval_review) {
             // `never` closes the approval channel entirely; an auto reviewer
             // never fires. The combo usually means the author wanted engine-side
@@ -232,7 +241,7 @@ impl CodexOptions {
         }
         if parsed.approval_review == CodexApprovalReview::Auto {
             tracing::warn!(target: "bcs_bridge_core::engine",
-                "bot grants escalated unsandboxed execution via engine auto-review (cfuse auto_review); escalations may leave the declared sandbox without human approval");
+                "bot uses engine automatic approval review (auto_review); the reviewer may approve or reject escalation requests");
         }
         tracing::warn!(target: "bcs_bridge_core::engine",
             sandbox = parsed.sandbox.wire(), network_access = parsed.network_access,
@@ -258,9 +267,9 @@ impl CodexOptions {
 
 /// Codex app-server JSON-RPC driver.
 ///
-/// Known limitation: threads default to `approvalPolicy: never` with no HITL
-/// approval routing (app-server server requests are rejected rather than routed
-/// to interactions), while the sandbox/network posture is now configurable per
+/// User questions route to BCN interactions. Human execution approval requests
+/// remain unsupported; the default automatic reviewer handles execution approvals.
+/// The sandbox/network posture is configurable per
 /// bot via `bot.engine_options` (see [`CodexOptions`]; default
 /// `workspace-write` + `network_access: true`), replacing the previous hardcoded
 /// read-only/no-network lockdown.
@@ -482,18 +491,31 @@ impl Engine for CodexAppServer {
             tokio::time::timeout(std::time::Duration::from_secs(30), start).await
                 .map_err(|_| TurnError::Protocol("turn/start timed out; outcome may be unknown, inspect the saved Codex thread before retrying".into()))??
         } else { start.await? };
-        let turn_id = extract_turn_id(&turn).ok_or_else(|| {
+        let mut turn_id = extract_turn_id(&turn).ok_or_else(|| {
             TurnError::Protocol(format!("app-server turn response missing turn.id: {turn}"))
         })?;
 
         let mut deltas = String::new();
+        let mut tools = ToolEvents::default();
+        let mut questions = questions::Questions::new(&req, events.clone());
         // Same-dumpgarnered thinking snapshots were previously concatenated
         // per delta into `thinking` and re-sent inside every event; that
         // made retention quadratic (N² copies of the same tail). Emit only
         // the fresh fragment (mirrors the Claude driver), retaining linear
         // thinking history.
         loop {
-            let value = tokio::select! {
+            let value = if let Some(completed) = questions.ready_completion() {
+                if let Some(prompt) = questions.take_followup() {
+                    let mut params = turn_start_params(&req, &thread_id, self.options);
+                    params["input"] = json!([{"type":"text", "text":prompt}]);
+                    let turn = rpc_call(&mut cli, &mut next_id, &mut backlog, "turn/start", params, &abort).await?;
+                    turn_id = extract_turn_id(&turn).ok_or_else(|| TurnError::Protocol("answer turn lacks id".into()))?;
+                    deltas.clear();
+                    tools = ToolEvents::default();
+                    continue;
+                }
+                completed
+            } else { tokio::select! {
                 _ = abort.cancelled() => {
                     self.abort_turn(&mut cli, &thread_id, &turn_id).await?;
                     return Err(TurnError::Aborted);
@@ -502,11 +524,25 @@ impl Engine for CodexAppServer {
                     self.abort_turn(&mut cli, &thread_id, &turn_id).await?;
                     return Err(TurnError::Aborted);
                 }
+                Some((iid, resolution)) = questions.waits.next(), if !questions.waits.is_empty() => {
+                    questions.answer(&mut cli, &iid, resolution).await?;
+                    continue;
+                }
                 value = next_message(&mut cli, &mut backlog) => value?,
-            };
+            }};
 
             if is_server_request(&value) {
-                respond_server_request(&mut cli, &value).await?;
+                if value["method"] == "item/tool/requestUserInput"
+                    && matches_turn(&value, &thread_id, &turn_id, true) {
+                    questions.request(&mut cli, &value).await?;
+                } else {
+                    respond_server_request(&mut cli, &value).await?;
+                }
+                continue;
+            }
+            if value["method"] == "serverRequest/resolved"
+                && value["params"]["threadId"] == thread_id {
+                questions.engine_resolved(&value["params"]["requestId"]);
                 continue;
             }
             if !matches_turn(&value, &thread_id, &turn_id, self.desktop) {
@@ -532,14 +568,15 @@ impl Engine for CodexAppServer {
                     }
                 }
                 "item/started" => {
-                    if let Some(event) = map_item_started(&value, &req.run_id, &req.cwd)
+                    if let Some(event) = tools.started(&value, &req.run_id, &req.cwd)
                         && send_event(&events, event).await {
                         self.abort_turn(&mut cli, &thread_id, &turn_id).await?;
                         return Err(TurnError::Aborted);
                     }
                 }
                 "item/completed" => {
-                    if let Some(event) = map_item_completed(&value, &req.run_id, &req.cwd)
+                    if let Some(item) = value.pointer("/params/item") { questions.observe_item(item).await?; }
+                    if let Some(event) = tools.completed(&value, &req.run_id, &req.cwd)
                         && send_event(&events, event).await {
                         self.abort_turn(&mut cli, &thread_id, &turn_id).await?;
                         return Err(TurnError::Aborted);
@@ -562,6 +599,17 @@ impl Engine for CodexAppServer {
                 "turn/completed" | "agent/turn_completed" => {
                     if let Some(message) = completed_failure_message(&value) {
                         return Err(TurnError::EngineExited(message));
+                    }
+                    // Some app-server tools only expose completion in the final snapshot.
+                    for event in tools.finish(&value, &req.run_id, &req.cwd) {
+                        if send_event(&events, event).await {
+                            return Err(TurnError::Aborted);
+                        }
+                    }
+                    questions.observe_completion(&value).await?;
+                    if questions.has_async_work() {
+                        questions.completion = Some(value);
+                        continue;
                     }
                     // The completed turn's own structured items are the
                     // authoritative final message — a preceding streamed
@@ -598,152 +646,6 @@ async fn send_event(
     events.send(event).await.is_err()
 }
 
-fn map_item_started(value: &Value, run_id: &str, cwd: &Path) -> Option<StreamEvent> {
-    let item = value.get("params")?.get("item")?;
-    let item_type = item.get("type").and_then(Value::as_str)?;
-    let tool_call_id = item.get("id").and_then(Value::as_str)?.to_string();
-    let name = tool_item_name(item, item_type)?;
-    Some(sse::agent_tool(
-        run_id,
-        ToolData {
-            phase: ToolPhase::Start,
-            name: Some(name),
-            tool_call_id: Some(tool_call_id),
-            is_error: None,
-            exit_code: None,
-            duration_ms: None,
-            cwd: Some(item_string(item, "cwd").unwrap_or_else(|| cwd.to_string_lossy().into_owned())),
-            args: Some(tool_item_args(item, item_type, cwd)),
-            result: None,
-            partial_result: None,
-        },
-    ))
-}
-
-fn map_item_completed(value: &Value, run_id: &str, cwd: &Path) -> Option<StreamEvent> {
-    let item = value.get("params")?.get("item")?;
-    let item_type = item.get("type").and_then(Value::as_str)?;
-    let tool_call_id = item.get("id").and_then(Value::as_str)?.to_string();
-    let status = item.get("status").and_then(Value::as_str);
-    let is_error = status.is_some_and(|value| value != "completed")
-        || item
-            .get("exitCode")
-            .and_then(Value::as_i64)
-            .is_some_and(|value| value != 0)
-        || item.get("success").and_then(Value::as_bool) == Some(false);
-    let name = tool_item_name(item, item_type)?;
-    let result = if item_type == "commandExecution" {
-        item.get("aggregatedOutput")
-            .cloned()
-            .unwrap_or(Value::String(String::new()))
-    } else {
-        item.get("result")
-            .cloned()
-            .or_else(|| item.get("contentItems").cloned())
-            .or_else(|| item.get("error").cloned())
-            .unwrap_or(Value::Null)
-    };
-    Some(sse::agent_tool(
-        run_id,
-        ToolData {
-            phase: ToolPhase::Result,
-            name: Some(name),
-            tool_call_id: Some(tool_call_id),
-            is_error: Some(is_error),
-            exit_code: item.get("exitCode").and_then(Value::as_i64),
-            duration_ms: item.get("durationMs").and_then(Value::as_u64),
-            cwd: item_string(item, "cwd"),
-            args: Some(tool_item_args(item, item_type, cwd)),
-            result: Some(result),
-            partial_result: None,
-        },
-    ))
-}
-
-fn map_tool_output_delta(value: &Value, run_id: &str) -> Option<StreamEvent> {
-    let params = value.get("params")?;
-    let delta = params.get("delta").and_then(Value::as_str)?;
-    Some(sse::agent_tool(
-        run_id,
-        ToolData {
-            phase: ToolPhase::Update,
-            name: None,
-            tool_call_id: params
-                .get("itemId")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-            is_error: Some(false),
-            exit_code: None,
-            duration_ms: None,
-            cwd: None,
-            args: None,
-            result: None,
-            partial_result: Some(Value::String(delta.to_string())),
-        },
-    ))
-}
-
-fn map_mcp_progress(value: &Value, run_id: &str) -> Option<StreamEvent> {
-    let params = value.get("params")?;
-    let partial = params
-        .get("message")
-        .cloned()
-        .or_else(|| params.get("delta").cloned())
-        .unwrap_or_else(|| params.clone());
-    Some(sse::agent_tool(
-        run_id,
-        ToolData {
-            phase: ToolPhase::Update,
-            name: None,
-            tool_call_id: params
-                .get("itemId")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-            is_error: Some(false),
-            exit_code: None,
-            duration_ms: None,
-            cwd: None,
-            args: None,
-            result: None,
-            partial_result: Some(partial),
-        },
-    ))
-}
-
-fn item_string(item: &Value, key: &str) -> Option<String> {
-    item.get(key).and_then(Value::as_str).map(str::to_string)
-}
-
-fn mcp_tool_name(item: &Value) -> String {
-    let server = item_string(item, "server").unwrap_or_else(|| "mcp".into());
-    let tool = item_string(item, "tool").unwrap_or_else(|| "tool".into());
-    format!("mcp__{server}__{tool}")
-}
-
-fn tool_item_name(item: &Value, item_type: &str) -> Option<String> {
-    match item_type {
-        "commandExecution" => Some("Bash".into()),
-        "mcpToolCall" => Some(mcp_tool_name(item)),
-        "dynamicToolCall" => Some("dynamicTool".into()),
-        "fileChange" => Some("FileChange".into()),
-        "webSearch" => Some("WebSearch".into()),
-        _ => None,
-    }
-}
-
-fn tool_item_args(item: &Value, item_type: &str, cwd: &Path) -> Value {
-    match item_type {
-        "commandExecution" => json!({
-            "command": item.get("command").cloned().unwrap_or(Value::Null),
-            "cwd": item.get("cwd").cloned().unwrap_or_else(|| json!(cwd)),
-        }),
-        "mcpToolCall" | "dynamicToolCall" => item
-            .get("arguments")
-            .cloned()
-            .unwrap_or(Value::Null),
-        _ => item.clone(),
-    }
-}
 
 async fn rpc_call(
     cli: &mut CodexConnection,
@@ -788,7 +690,7 @@ async fn rpc_call(
             _ = abort.cancelled() => return Err(TurnError::Aborted),
             value = next_live_message(cli) => value?,
         };
-        if value.get("id").and_then(Value::as_u64) == Some(id) {
+        if !is_server_request(&value) && value.get("id").and_then(Value::as_u64) == Some(id) {
             return decode_rpc_response(value, method);
         }
         if value.get("method").is_some() {
@@ -1068,312 +970,5 @@ fn sanitize_message(message: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn extracts_app_server_ids() {
-        assert_eq!(
-            extract_thread_id(&json!({"thread": {"id": "t-1"}})).as_deref(),
-            Some("t-1")
-        );
-        assert_eq!(
-            extract_turn_id(&json!({"turn": {"id": "turn-1"}})).as_deref(),
-            Some("turn-1")
-        );
-    }
-
-    #[test]
-    fn extracts_streaming_delta_shapes() {
-        assert_eq!(
-            extract_delta(&json!({"params": {"delta": "hello"}})).as_deref(),
-            Some("hello")
-        );
-        assert_eq!(
-            extract_delta(&json!({"params": {"text": "world"}})).as_deref(),
-            Some("world")
-        );
-    }
-
-    #[test]
-    fn matches_only_the_active_turn() {
-        let value = json!({
-            "params": {"threadId": "t-1", "turnId": "turn-1"}
-        });
-        for shared in [false, true] {
-            assert!(matches_turn(&value, "t-1", "turn-1", shared));
-            assert!(!matches_turn(&value, "t-2", "turn-1", shared));
-            assert!(!matches_turn(&value, "t-1", "turn-2", shared));
-        }
-    }
-
-    #[test]
-    fn shared_events_require_positive_ownership_but_cli_keeps_legacy_shapes() {
-        for method in ["agent/output_chunk", "agent/turn_completed", "agent/turn_failed"] {
-            let value = json!({"method":method,"params":{"text":"foreign"}});
-            assert!(!matches_turn(&value, "t-1", "turn-1", true));
-            assert!(matches_turn(&value, "t-1", "turn-1", false));
-        }
-        for params in [
-            json!({"threadId":"t-1"}),
-            json!({"turnId":"turn-1"}),
-            json!({"threadId":"t-1","turnId":null}),
-            json!({"threadId":null,"turnId":"turn-1"}),
-        ] {
-            assert!(!matches_turn(&json!({"params":params}), "t-1", "turn-1", true));
-        }
-    }
-
-    #[test]
-    fn thinking_deltas_stay_delta_only_never_carry_accumulated_snapshot() {
-        // Regression guard for the retention overflow seen 2026-10-18 in run
-        // 7e63c047: previously every reasoning delta was re-emitted with
-        // the full accumulated thinking text attached (`Some(delta)` +
-        // `Some(thinking.clone())`), amplifying retained thinking bytes
-        // quadratically (~31MB accumulated from 22KB of unique text). Emit
-        // only the fresh fragment, matching the Claude driver; this also
-        // keeps per-event retained size linear instead of O(N^2).
-        let run = "run-think";
-        let mut accumulated = String::new();
-        let mut emitted_bytes = 0usize;
-        for i in 0..500usize {
-            let delta = format!("d{i}-");
-            accumulated.push_str(&delta);
-            let event = sse::agent_thinking(run, Some(delta.clone()), None);
-            let StreamEvent::Agent(agent) = event else { panic!("expected Agent event"); };
-            let bcs_protocol::stream::AgentData::Thinking(thinking) = agent.data else {
-                panic!("agent_thinking must yield ThinkingData");
-            };
-            assert!(thinking.text.is_none(),
-                "must not embed the accumulated snapshot ({})",
-                accumulated.len());
-            assert_eq!(thinking.delta.as_deref(), Some(delta.as_str()));
-            emitted_bytes += thinking.delta.as_deref().unwrap().len()
-                + thinking.delta.as_deref().unwrap().len(); // shallow approximation
-        }
-        // rough linear sanity: emitted total is a small multiple of the unique stream
-        let unique = accumulated.len();
-        assert!(unique > 0);
-        assert!(emitted_bytes < unique * 8,
-            "emitted thinking stays near-linear, not quadratic (emitted={emitted_bytes}, unique={unique})");
-    }
-
-    #[test]
-    fn completions_check_all_supplied_turn_ids_for_native_and_shared_connections() {
-        for shared in [false, true] {
-            for method in ["turn/completed", "agent/turn_completed", "agent/turn_failed"] {
-                let mut value = json!({"method":method,"params":{
-                    "threadId":"t-1","turn":{"id":"turn-1"}}});
-                assert!(matches_turn(&value, "t-1", "turn-1", shared));
-                assert!(!matches_turn(&value, "t-1", "turn-2", shared));
-                value["params"]["turnId"] = json!("other-turn");
-                assert!(!matches_turn(&value, "t-1", "turn-1", shared));
-                assert!(!matches_turn(&value, "t-1", "other-turn", shared));
-                value["params"]["turnId"] = Value::Null;
-                assert!(!matches_turn(&value, "t-1", "turn-1", shared));
-            }
-        }
-    }
-
-    fn table(pairs: &[(&str, toml::Value)]) -> toml::Table {
-        pairs.iter().cloned().map(|(k, v)| (k.to_owned(), v)).collect()
-    }
-
-    #[test]
-    fn completed_text_reads_agent_message_items_before_any_legacy_fallback() {
-        // The real wire shape (verified from a live bridge-side engine trace):
-        // the final answer lives in params.turn.items[] as
-        // {type:"agentMessage", phase:"final_answer", text:"..."}.
-        let wire = json!({"method":"turn/completed","params":{
-            "threadId":"t-1",
-            "turn":{
-                "completedAt":1792320351,"durationMs":95592,"error":null,
-                "id":"turn-1","status":"completed",
-                "items":[
-                    {"type":"reasoning","id":"rs-1"},
-                    {"type":"agentMessage","phase":"thinking","text":"对不起，还在中间分析。"},
-                    {"type":"agentMessage","phase":"final_answer","text":"已将完整 Review 发布到 PR。"},
-                ],
-            },
-        }});
-        assert_eq!(completed_text(&wire).as_deref(), Some("已将完整 Review 发布到 PR。"));
-        // Without a final_answer entry, take the last agentMessage with text.
-        let wire = json!({"params":{"turn":{"items":[
-            {"type":"agentMessage","text":"first"},
-            {"type":"agentMessage","text":"second"},
-        ]}}});
-        assert_eq!(completed_text(&wire).as_deref(), Some("second"));
-        // agentMessage with empty text counts as absent.
-        let wire = json!({"params":{"turn":{"items":[
-            {"type":"agentMessage","phase":"final_answer","text":"  "},
-        ]}}});
-        assert_eq!(completed_text(&wire), None);
-    }
-
-    #[test]
-    fn completed_text_keeps_journal_shape_as_legacy_fallback() {
-        let value = json!({"method":"turn/completed","params":{
-            "threadId":"t-1","turnId":"turn-1",
-            "last_agent_message":"review done"
-        }});
-        assert_eq!(completed_text(&value).as_deref(), Some("review done"));
-        let legacy = json!({"method":"turn/completed","params":{
-            "text":"legacy fallback never delivered by this engine",
-            "finalText":"also unverified",
-            "final_text":"ditto"
-        }});
-        assert_eq!(completed_text(&legacy), None,
-            "speculative legacy keys must stay unread, matching the verified wire contract");
-        let empty = json!({"method":"turn/completed","params":{
-            "last_agent_message":"   "
-        }});
-        assert_eq!(completed_text(&empty), None, "whitespace-only tail text is not a real final");
-        // Wire-shape items win over any legacy key.
-        let both = json!({"params":{
-            "last_agent_message":"journal text",
-            "turn":{"items":[{"type":"agentMessage","phase":"final_answer","text":"wire text"}]},
-        }});
-        assert_eq!(completed_text(&both).as_deref(), Some("wire text"));
-    }
-
-    #[test]
-    fn codex_options_default_to_workspace_write_network_never() {
-        let options = CodexOptions::parse(&toml::Table::new()).unwrap();
-        assert_eq!(options.sandbox, CodexSandbox::WorkspaceWrite);
-        assert!(options.network_access);
-        assert_eq!(options.approval_policy, CodexApprovalPolicy::Never);
-        assert_eq!(options.approval_review, CodexApprovalReview::User);
-        assert_eq!(options.wire_thread_sandbox(), "workspace-write");
-        assert_eq!(options.wire_approval_policy(), "never");
-        assert_eq!(options.wire_approvals_reviewer(), "user");
-        assert_eq!(options.wire_sandbox_policy(),
-            json!({"type": "workspaceWrite", "networkAccess": true}));
-    }
-
-    #[test]
-    fn codex_options_parse_each_supported_key_and_reject_others() {
-        let options = CodexOptions::parse(&table(&[
-            ("sandbox", "read-only".into()),
-            ("network_access", false.into()),
-            ("approval_policy", "on-request".into()),
-            ("approval_review", "auto".into()),
-        ])).unwrap();
-        assert_eq!(options.sandbox, CodexSandbox::ReadOnly);
-        assert!(!options.network_access);
-        assert_eq!(options.approval_policy, CodexApprovalPolicy::OnRequest);
-        assert_eq!(options.approval_review, CodexApprovalReview::Auto);
-        assert_eq!(options.wire_approvals_reviewer(), "auto_review");
-        assert_eq!(options.wire_sandbox_policy(),
-            json!({"type": "readOnly", "networkAccess": false}));
-        for invalid in [
-            table(&[("bogus", "x".into())]),
-            table(&[("sandbox", "bogus".into())]),
-            table(&[("sandbox", 1.into())]),
-            table(&[("network_access", "true".into())]),
-            table(&[("approval_policy", "auto".into())]),
-            table(&[("approval_review", "everyone".into())]),
-            table(&[("reasoning_effort", "bogus".into())]),
-            table(&[("reasoning_effort", 3.into())]),
-        ] {
-            assert!(CodexOptions::parse(&invalid).is_err(), "accepted {invalid:?}");
-        }
-    }
-
-    #[test]
-    fn codex_options_reasoning_effort_only_sends_when_set() {
-        let options = CodexOptions::parse(&toml::Table::new()).unwrap();
-        assert_eq!(options.reasoning_effort, None, "defaults leave the engine-level effort untouched");
-        for (value, expected) in [
-            ("minimal", "minimal"), ("low", "low"), ("medium", "medium"),
-            ("high", "high"), ("xhigh", "xhigh"),
-        ] {
-            let parsed = CodexOptions::parse(&table(&[("reasoning_effort", value.into())])).unwrap();
-            assert_eq!(parsed.reasoning_effort, Some(expected));
-        }
-        let parsed = CodexOptions::parse(&table(&[("reasoning_effort", " high ".into())])).unwrap();
-        assert_eq!(parsed.reasoning_effort, Some("high"), "surrounding whitespace is trimmed");
-    }
-
-    #[test]
-    fn codex_options_reject_dead_approval_combinations() {
-        let auto_never = table(&[("approval_policy", "never".into()),
-            ("approval_review", "auto".into())]);
-        let error = CodexOptions::parse(&auto_never).unwrap_err();
-        assert!(error.contains("approval_review='auto' requires") && error.contains("never"), "{error}");
-        let user_asks = table(&[("approval_policy", "on-request".into()),
-            ("approval_review", "user".into())]);
-        let error = CodexOptions::parse(&user_asks).unwrap_err();
-        assert!(error.contains("HITL") && error.contains("does not implement"), "{error}");
-        // unset review on a non-never policy defaults to user and must fail the same way
-        let unset_review = table(&[("approval_policy", "on-request".into())]);
-        let error = CodexOptions::parse(&unset_review).unwrap_err();
-        assert!(error.contains("HITL"), "{error}");
-        assert!(CodexOptions::parse(&table(&[
-            ("approval_policy", "on-request".into()), ("approval_review", "auto".into()),
-        ])).is_ok());
-    }
-
-    #[test]
-    fn codex_options_danger_full_access_wire_omits_network() {
-        let options = CodexOptions::parse(&table(&[("sandbox", "danger-full-access".into())])).unwrap();
-        assert_eq!(options.sandbox, CodexSandbox::DangerFullAccess);
-        assert_eq!(options.wire_sandbox_policy(), json!({"type": "dangerFullAccess"}));
-        assert!(CodexOptions::parse(&table(&[
-            ("sandbox", "danger-full-access".into()), ("network_access", false.into()),
-        ])).is_ok(), "explicit network_access normalizes with a warning");
-    }
-
-    fn options_req(cwd: &str) -> TurnRequest {
-        struct TestObserver;
-        #[async_trait::async_trait]
-        impl crate::engine::SessionObserver for TestObserver {
-            async fn established(&self, _: &str) -> Result<(), String> { Ok(()) }
-        }
-        TurnRequest::new("run-1", "prompt", cwd, Arc::new(TestObserver))
-    }
-
-    #[test]
-    fn wire_params_follow_resolved_options_and_keep_bridge_identifiers() {
-        let options = CodexOptions::parse(&toml::Table::new()).unwrap();
-        let req = options_req("/tmp/x");
-        let thread = thread_start_params(&req, options);
-        assert_eq!(thread["sandbox"], "workspace-write");
-        assert_eq!(thread["approvalPolicy"], "never");
-        assert_eq!(thread["approvalsReviewer"], "user");
-        assert_eq!(thread["threadSource"], "bridge-provider");
-        assert_eq!(thread["ephemeral"], false);
-        assert!(thread.get("model").is_none());
-        let resume = thread_resume_params(&req, "t-1", options);
-        assert_eq!(resume["sandbox"], "workspace-write");
-        assert_eq!(resume["threadId"], "t-1");
-        let turn = turn_start_params(&req, "t-1", options);
-        assert_eq!(turn["sandboxPolicy"], json!({"type": "workspaceWrite", "networkAccess": true}));
-        assert_eq!(turn["approvalPolicy"], "never");
-        assert_eq!(turn["clientUserMessageId"], "run-1");
-        let read_only = CodexOptions::parse(&table(&[("sandbox", "read-only".into()),
-            ("network_access", false.into())])).unwrap();
-        let turn = turn_start_params(&req, "t-1", read_only);
-        assert_eq!(turn["sandboxPolicy"], json!({"type": "readOnly", "networkAccess": false}));
-        let banned = CodexOptions::parse(&table(&[("sandbox", "danger-full-access".into())])).unwrap();
-        assert_eq!(turn_start_params(&req, "t-1", banned)["sandboxPolicy"],
-            json!({"type": "dangerFullAccess"}));
-        assert_eq!(thread_start_params(&req, banned)["sandbox"], "danger-full-access");
-    }
-
-    #[test]
-    fn wire_params_carry_reasoning_effort_only_when_configured() {
-        let defaults = CodexOptions::parse(&toml::Table::new()).unwrap();
-        let req = options_req("/tmp/x");
-        for params in [thread_start_params(&req, defaults),
-            thread_resume_params(&req, "t-1", defaults), turn_start_params(&req, "t-1", defaults)] {
-            assert!(params.get("effort").is_none(), "no effort key without an override: {params}");
-        }
-        let with_effort = CodexOptions::parse(&table(&[
-            ("reasoning_effort", "medium".into()),
-        ])).unwrap();
-        for params in [thread_start_params(&req, with_effort),
-            thread_resume_params(&req, "t-1", with_effort), turn_start_params(&req, "t-1", with_effort)] {
-            assert_eq!(params["effort"], "medium");
-        }
-    }
-}
+#[path = "codex_app_server_tests.rs"]
+mod tests;

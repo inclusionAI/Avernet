@@ -182,11 +182,36 @@ such engines. Existing factories and configurations keep their behavior.
 
 ### Known limitations
 
-- The Codex driver runs threads with `approvalPolicy: never`, a read-only sandbox
-  and no network access, and rejects app-server requests instead of routing them
-  to HITL interactions. Codex can read and explain code but cannot modify files.
+- The Codex driver supports user questions, but does not yet route human
+  execution approval requests to BCN. Its default execution policy is
+  `on-request` with `auto_review`; sandbox and network settings are configurable.
 - The engine id is stored with each persisted session: changing a Bot's engine
   starts new engine sessions.
+
+### Codex user questions
+
+Codex `item/tool/requestUserInput` server requests are forwarded as BCN
+`interaction` events with `kind: ask_user`. The existing workbench question
+panel can submit selected options, free text, or cancel. Bridge maps question
+IDs and submitted values back to Codex's `{answers: {id: {answers: [...]}}}`
+response. Cancelling returns an empty answer map; skipped questions retain an
+empty answer list. Secret-marked questions are rejected without broadcasting
+a form. No additional provider configuration or chat SDK change is required.
+
+Codex `request_user_input_async` instead emits `agentMessage.questions`
+metadata and immediately returns `accepted: true` to the model. Bridge also
+converts these forms (including completion-only snapshots). It keeps the BCN
+run open after the native turn completes, then starts a follow-up turn on the
+same Codex thread with the submitted answers. Cancelling closes the form
+without starting a follow-up turn. The engine's async question item is deduplicated
+between live notifications and completion snapshots.
+
+Questions are scoped to the exact active thread and turn. Other conversations
+continue while a question awaits an answer. Engine-side request cleanup, turn
+completion for blocking RPC requests, interruption, and connection loss close
+pending forms; late answers
+do not resume a closed turn. Execution approvals remain on their configured
+review policy and are separate from user questions.
 
 ## Event retention and delivery guarantees
 
