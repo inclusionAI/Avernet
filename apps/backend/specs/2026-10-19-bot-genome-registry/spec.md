@@ -118,7 +118,7 @@ Recording:
       base (`does_not_apply`), touch a gene outside `mutable_genes` or a
       run's `allowed_genes` (`gene_not_mutable`, `gene_not_allowed`),
       overlap a pin (`pinned_item`), lack a rationale or required evidence
-      (`missing_rationale`), fail the schema (`schema`), or exceed the
+      (`missing_rationale`, `missing_evidence`), fail the schema (`schema`), or exceed the
       Manifest-mirrored limits (`limit_exceeded`).
 - [ ] A recorded revision is always one that apply would accept: the checks
       Manifest apply runs before writing (persona UTF-8 and engine-legal

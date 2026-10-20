@@ -17,10 +17,10 @@
 - **Goal:** Apply a patch to its base spec exactly as the contract defines, and assess it.
 - **Files:** `core/bot_genome/text_edits.py`, `core/bot_genome/patch/{__init__,ops,policy,risk}.py`; `tests/community/core/bot_genome/{test_text_edits,test_patch_ops,test_policy_and_risk}.py`
 - **Done when:**
-  - [ ] `replace_section`, `insert_after` and the strict unified-diff kind behave per README §6.2 (fenced headings skipped, exactly-one anchor, no fuzz, `\ No newline at end of file`).
-  - [ ] Every `examples/patches/*.json` applies to its base; `00-mixed-r1-to-r2.json` reproduces `02-support-bot-candidate.json`'s spec; ops that do not apply exactly are `does_not_apply`; `delete-skill-md`, `unknown-op`, `op-on-mcp`, memory ops on `memory: null` are refused with their codes.
-  - [ ] Policy checks yield `gene_not_mutable`, `pinned_item`, `gene_not_allowed`; `missing_rationale` and missing evidence per op kind.
-  - [ ] Risk: every rule in `risk-tiers.json`, `description_only`, the rewrite raise measured base→result once per file, replacement (remove+add) flagged, overrides by overlap raise only.
+  - [x] `replace_section`, `insert_after` and the strict unified-diff kind behave per README §6.2 (fenced headings skipped, exactly-one anchor, no fuzz, `\ No newline at end of file`).
+  - [x] Every `examples/patches/*.json` applies to its base; `00-mixed-r1-to-r2.json` reproduces `02-support-bot-candidate.json`'s spec; ops that do not apply exactly are `does_not_apply`; `delete-skill-md`, `unknown-op`, `op-on-mcp`, memory ops on `memory: null` are refused with their codes.
+  - [x] Policy checks yield `gene_not_mutable`, `pinned_item`, `gene_not_allowed`; `missing_rationale` and missing evidence per op kind.
+  - [x] Risk: every rule in `risk-tiers.json`, `description_only`, the rewrite raise measured base→result once per file, replacement (remove+add) flagged, overrides by overlap raise only.
 - **Depends on:** Task 1
 
 ## Task 3: Spec checks and diff

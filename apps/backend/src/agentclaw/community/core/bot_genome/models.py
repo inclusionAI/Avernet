@@ -10,7 +10,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Protocol
+
+
+class ContentReader(Protocol):
+    """How patch application, checks, diff and compile read the bytes a digest names.
+
+    The registry binds it to the manifest content store scoped to the bot;
+    tests bind it to a directory of blobs. ``read`` raises
+    :class:`~agentclaw.community.core.bot_genome.errors.ContentNotReachable`
+    for a digest the bot cannot reach.
+    """
+
+    def read(self, digest: str) -> bytes: ...
 
 
 class RevisionStatus(StrEnum):
