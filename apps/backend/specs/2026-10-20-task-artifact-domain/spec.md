@@ -231,15 +231,16 @@ class CodeContent(ArtifactContent):
 - **落表通道(方案取舍)**:`save_graph` 的事务在 `TaskGraphRepository` 内部开启且不外泄 session(`task_graph_repository.py:245` `with self._transaction()`),因此产物行**作为 `save_graph` 的新增可选参数 `published_artifacts` 随图一并提交**,由图仓储在自己的事务里内嵌写入——先例:`save_graph` 已经在自家事务里内嵌写 `TaskCallbackModel` 行(尽管存在独立的 `task_callback_repository.py`)。`TaskArtifactRepositoryProtocol` 只承担**读侧查询**(按 task/node 列产物),不承担事务内写;
 - 异常语义:产物写入异常 → 整个事务回滚、图变更一并失败、上抛——**不吞、不降 WARNING**(语雀文档不变量:持久化失败不得返回成功);
 - **graph 仓储缺席态**(内存-only 部署,`_persist_locked` 提前返回):不发布(contextvar 暂存随闭包丢弃,记一条 debug 日志)——与取舍 #10"未接线不发布"同语义;
-- 版本重放扇出(同一次逻辑产出在重放/重试回调里重复来到)由唯一幂等键吸收(5.3)。
+- 版本重放扇出(同一次逻辑产出在重放/重试回调里重复来到)由 select-first 查重吸收(5.3)。
 
 **(方案取舍)不采用"提交后异步补写"**(relay trace rows 的 post-commit 模式,`task_service_relay.py:96`):那是有意 best-effort 的旁路;产物是审计对象,选择强一致、宁可让变更重放。
 
 ### 5.3 幂等键
 
-- 表级唯一键 `uk_dedupe(task_id, node_id, attempt, kind, content_hash)`,`content_hash = sha256(canonical_json(content))`;
-- **写入策略(方案取舍)select-first、唯一键兜底,不做事务内"冲突后回滚再读"**:图仓储写产物前先按 `uk_dedupe` 键 SELECT(`save_graph` 已对 `task_info` 行 `with_for_update` 预锁,同任务写入串行,SELECT-first 之后竞态几乎不可达);仍撞唯一键则**让本事务失败走版本重放**,下一轮 SELECT-first 命中即幂等返回。不采用"IntegrityError → rollback → 回读"配方的原因:部分后端(PG)约束冲突后事务即废;而本代码库 prod plugin 的 `orm_session()` 不支持 `begin_nested` SAVEPOINT(skill_center/skill.py:2551-2558 已记录),事务内回滚读在该 profile 上不可实现。此口径的验收针对 SQLite(singlebox/测试)与 MySQL/OceanBase(prod)两个 profile 定义;
-- 到达层已有的事件级幂等(callback `event_id` PROCESSED 门、relay receipt/fingerprint)不变,产物级幂等键是最后一道闸。
+- **表上不建唯一键(用户定稿,撤销原 uk_dedupe 兜底)**:幂等完全依赖 **select-first 同事务查重**——按 `(task_id, node_id, attempt, kind, content_hash)` 在写库前先 SELECT,命中即幂等返回,查重路径由普通索引 `idx_dedupe` 支撑(否则全表扫);
+- 并发论证:同任务写入由 `save_graph` 对 `task_info` 行 `with_for_update` 预锁**串行化**,产物行又在同一事务写入——select-first 之后到 COMMIT 前,不可能有同任务并发写入者插入同键行,残余竞态只剩跨任务/跨实例维度,由到达层幂等抑制;
+- **无 DB 级兜底的诚实代价**:极端场景(select-first 未命中 + 锁序异常 + 事务交错)可能插出重复行,去重的最后防线让位于回调重放的可重入语义——重复行不破坏读侧正确性(列表展示两条同内容 Descriptor),只在审计计数上产生噪声,可按幂等键归并清理;
+- 到达层已有的事件级幂等(callback `event_id` PROCESSED 门、relay receipt/fingerprint)不变,是同批次不重复触发发布闭包的主闸;`artifact_id` 不再由唯一索引锁定全局唯一,由生成器(uuid4)保证碰撞概率可忽略,检索路径由 `idx_artifact_id` 支撑。
 
 ### 5.4 重试与覆盖
 
@@ -252,7 +253,7 @@ class CodeContent(ArtifactContent):
 
 按 core/repository 四条纪律落地(README.md 治理,`protocols/task/` 与 `implementations/task/` 镜像)。
 
-**为什么独立建表、不复用 `task_node_run_info`(已评估的取舍)**:该表是"可变当前态"行(`gmt_modified onupdate` 原地更新,每次 `save_graph` 随图整体重写,uk 为 `(task_id, node_id, retry)`,见 `repository/models.py:199-228`),而产物是 append-only 不可变清单;一次 attempt 的产物是列表(≤64),并入单列只能是 blob——逐条身份与 `uk_dedupe` 无处落,回放去重退化为整 blob 比较;且 run_info 行已被 `output`/`acceptance_result`/`extend_props` 占用,再并产物会把"每次图保存重写全节点行"的写放大带给产物。独立表 + `save_graph` 同事务内嵌写,一致性机制不变,只多一次性的建表/注册劳动。
+**为什么独立建表、不复用 `task_node_run_info`(已评估的取舍)**:该表是"可变当前态"行(`gmt_modified onupdate` 原地更新,每次 `save_graph` 随图整体重写,uk 为 `(task_id, node_id, retry)`,见 `repository/models.py:199-228`),而产物是 append-only 不可变清单;一次 attempt 的产物是列表(≤64),并入单列只能是 blob——逐条身份与幂等查重键无处落,回放去重退化为整 blob 比较;且 run_info 行已被 `output`/`acceptance_result`/`extend_props` 占用,再并产物会把"每次图保存重写全节点行"的写放大带给产物。独立表 + `save_graph` 同事务内嵌写,一致性机制不变,只多一次性的建表/注册劳动。
 
 - **SQL**:`core/task/sql/2026_10_20_task_artifact.sql`(权威 DDL 如下,plan 阶段照此落盘;标识符列的 utf8mb4_bin 由 ORM variant 承载,与 trajectory 同款先例——DDL 裸列、ORM 定义 collation);
 - **ORM/Record**:`TaskArtifactModel`(`core/task/repository/models.py`,house style:`to_record()` 返回 frozen record,不吐 ORM 对象)+ `TaskArtifactRecord`(`types.py`,table-faithful frozen dataclass,content 存解析后的领域对象;`storage` 列为派生一致性列——非 file 分支持 `inline`、file 分支与 `FileContent.storage_type` 同值,domain 构造器派生强校验,ORM 侧照表存列);
@@ -267,22 +268,22 @@ class CodeContent(ArtifactContent):
 -- append-only 不可变清单:仓储不提供任何 UPDATE 路径;内容修订(未来 supersedes)以新行表达。
 -- 写入由 save_graph 事务内嵌完成(同 TaskCallbackModel 先例);读侧经 TaskArtifactRepositoryProtocol。
 -- 无外键(与 task_trajectory 同款约束:task 域表间不建 FK)。
--- 幂等二道闸:select-first 后 INSERT,撞 uk_dedupe 让本事务失败走图版本重放(spec §5.3),
--- 不做"冲突回滚再读"(prod plugin 无 SAVEPOINT)。
+-- 幂等(无唯一键,用户定稿):select-first 同事务查重(spec §5.3),查重路径由 idx_dedupe 支撑;
+-- 同任务写入经 task_info 行 FOR UPDATE 预锁串行化,残余竞态由到达层事件级幂等抑制。
 -- 索引语义(不带索引级 COMMENT——内部 SQL 审核解析器不识别,且 trajectory 同款无索引注释先例;
--- 语义收拢于此):uk_artifact_id=产物全局唯一 ID 闸;uk_dedupe=回放去重幂等键,最左前缀同时
--- 服务 task_id / (task_id,node_id) 检索;idx_scope_session=按会话列产物+时间序;
--- idx_task_kind=任务内按形态过滤+时间序;idx_task_name=任务内按业务名检索
--- (LIKE 'x%' 前缀走索引,'%x%' 中缀不走)。
+-- 语义收拢于此):idx_artifact_id=按产物 ID 取行(唯一性由生成器 uuid4 保证,不由索引锁定);
+-- idx_dedupe=幂等查重键,最左前缀同时服务 task_id / (task_id,node_id) 检索;
+-- idx_scope_session=按会话列产物+时间序;idx_task_kind=任务内按形态过滤+时间序;
+-- idx_task_name=任务内按业务名检索(LIKE 'x%' 前缀走索引,'%x%' 中缀不走)。
 -- 可空性统一以裸 NULL 声明(无 DEFAULT NULL,用户定稿):content 为 TEXT 家族禁显式 DEFAULT,
 -- 其余可空列与隐式行为等价,统一写法消除混排。
 -- 除 artifact_name/scope_session_id/storage(真可空:未提供语义)外,node_id/attempt/
 -- content_hash/creator/modifier 为"列可空、发布必填":NULL 仅为 schema 容错/人工修数留口;
 -- task_id/content(连同 id/artifact_id/kind 与两条 time 房型列)为列级 NOT NULL 强制:
--- task_id 是主检索维度与 uk_dedupe 首列、产物本体 content 亦不容悬空。
--- 关键后果:uk_dedupe 中可空的 node_id/attempt/content_hash 任一为 NULL,该行豁免
--- 唯一索引判重(MySQL NULL 互不相等)——空值行回放即重复、且脱离主检索维度;故领域构造器与
--- 发布校验(§3/§4)不放宽,仍强制 task_id+node_id+attempt+content+hash+creator。
+-- task_id 是主检索维度与 idx_dedupe 首列、产物本体 content 亦不容悬空。
+-- "列可空、发布必填"组的 node_id/attempt/content_hash 任一为 NULL 时,select-first 查重
+-- 失配(SQL NULL 不参与等值比较)——空值行回放即可能重复;故领域构造器与发布校验(§3/§4)
+-- 不放宽,仍强制 task_id+node_id+attempt+content+hash+creator。
 -- storage 为存储介质元信息列(用户定稿,置于 content 前,可空、varchar(2048)):非 file 分支持恒为 inline,
 -- file 分支必须与 FileContent.storage_type 同值——由构造器从 content 派生并强校验,不构成第二首领;
 -- 发布路径必填,NULL 仅为容错/人工修数留口;2048 长度为介质元信息 JSON 化预留(当前只放介质名)。
@@ -296,23 +297,23 @@ class CodeContent(ArtifactContent):
 -- 变长按需占用,存 1KB 只占 1KB,不为此预付代价。
 CREATE TABLE IF NOT EXISTS `task_artifact` (
     `id`              bigint(20)    NOT NULL AUTO_INCREMENT                       COMMENT '主键ID',
-    `artifact_id`     varchar(32)   NOT NULL                                      COMMENT '产物 ID(task-art-+uuid4hex16,全局唯一)',
+    `artifact_id`     varchar(32)   NOT NULL                                      COMMENT '产物 ID(task-art-+uuid4hex16;唯一性由生成器保证,非索引锁定)',
     `artifact_name`   varchar(255)  NULL                                          COMMENT '业务展示名(NULL=未提供;file 产物发布时回落 file_name)',
-    `task_id`         varchar(128)  NOT NULL                                      COMMENT '归属任务 ID(与报文定位交叉校验后落库;列级强制非空——主检索维度与 uk_dedupe 首列不许悬空)',
+    `task_id`         varchar(128)  NOT NULL                                      COMMENT '归属任务 ID(与报文定位交叉校验后落库;列级强制非空——主检索维度与 idx_dedupe 首列不许悬空)',
     `node_id`         varchar(128)  NULL                                         COMMENT '产出节点 ID(发布路径必填,NULL 仅为容错/人工修数留口;同 task_id 的空值豁免后果)',
-    `attempt`         int           NULL                                         COMMENT '节点 harness_retries 快照(0 起;与报文交叉校验;发布路径必填,NULL 仅为容错——空值行豁免 uk_dedupe 判重)',
+    `attempt`         int           NULL                                         COMMENT '节点 harness_retries 快照(0 起;与报文交叉校验;发布路径必填,NULL 仅为容错——空值行使 select-first 查重失配)',
     `scope_session_id` varchar(512) NULL                                         COMMENT '图绑定协作会话 ID(图绑定优先,未绑定采纳上报值;NULL=均无)',
     `kind`            varchar(64)   NOT NULL                                      COMMENT '内容形态(text|file|url_link|code),governed 枚举',
     `storage`         varchar(2048) NULL                                         COMMENT '存储介质元信息:inline=内容本体在 content 列(text/url_link/code);bot_workspace|session_file=字节在外部介质,content 仅为引用(与 FileContent.storage_type 强一致,构造器推导校验;发布路径必填,NULL 仅为容错/人工修数留口,长度冗余预留给介质 JSON 化)',
     `content`         mediumtext    NOT NULL                                      COMMENT '内容分支 JSON(kind-tagged,tag=分支判别;不含字节/临时凭证/存储 handle;产物本体,列级强制非空;TEXT 家族禁显式 DEFAULT',
-    `content_hash`    char(64)      NULL                                         COMMENT 'sha256(canonical_json(content)),uk_dedupe 成分;发布路径必填——NULL 行绕过幂等闸(MySQL 唯一索引 NULL 不判重)',
+    `content_hash`    char(64)      NULL                                         COMMENT 'sha256(canonical_json(content)),idx_dedupe 幂等查重成分;发布路径必填——NULL 使查重失配',
     `creator`         varchar(128)  NULL                                         COMMENT '产出者(bot_id/group_id;system=系统写入,如控制信号;NULL=未记录)',
     `modifier`        varchar(128)  NULL                                         COMMENT '修改者(行不可变:恒等于 creator,房型惯例列;NULL=未记录)',
     `gmt_create`      timestamp     NOT NULL DEFAULT CURRENT_TIMESTAMP            COMMENT '发布时间(仓储以领域 created_at 毫秒值双写,DB 默认仅 fallback)',
     `gmt_modify`      timestamp     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后修改时间(行不可变:恒等于 gmt_create,房型惯例列)',
     PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_artifact_id` (`artifact_id`),
-    UNIQUE KEY `uk_dedupe` (`task_id`, `node_id`, `attempt`, `kind`, `content_hash`),
+    KEY `idx_dedupe` (`task_id`, `node_id`, `attempt`, `kind`, `content_hash`),
+    KEY `idx_artifact_id` (`artifact_id`),
     KEY `idx_scope_session` (`scope_session_id`, `gmt_create`),
     KEY `idx_task_kind` (`task_id`, `kind`, `gmt_create`),
     KEY `idx_task_name` (`task_id`, `artifact_name`)
@@ -350,7 +351,7 @@ CREATE TABLE IF NOT EXISTS `task_artifact` (
 
 - [ ] 回调契约:relay `ExecutionEventDTO.artifacts` 列表解析——扁平 item(恰好一个 content 字段/artifact_kind 一致/content JSON 合法/task_id·node_id·session_id·attempt 交叉校验/路径逃逸/非 http(s) 链接/超 64 条/DECLINED 携带)契约测试;非法整体拒绝不部分接受;集中 push/pull 报文无 artifacts 字段、行为逐字节不变;
 - [ ] 领域:模型构造互斥校验、未知 kind fail-loud、不可变性、content_hash 稳定性;
-- [ ] 双轨:文本/文件产物在集中/relay 写入点发布;重试后上一 attempt 产物仍在;版本冲突重放不产生重复行(幂等键);
+- [ ] 双轨:文本/文件产物在集中/relay 写入点发布;重试后上一 attempt 产物仍在;版本冲突重放不产生重复行(select-first 查重,§5.3);
 - [ ] 事务:产物写失败 → 图变更整体失败(需构造 repo 异常注入的测试);contextvar 暂存跨重放正确清理;
 - [ ] 持久化:SQL 与 ORM 同步(singlebox 可建表)、repository 契约测试、README provides/Boundary 增补、DI 绑定;
 - [ ] 读侧:`TaskNodeDTO.artifacts` 富化 + HTML 产物块无 URL;OpenAPI 导出快照同步更新(附加可选字段);
@@ -378,7 +379,7 @@ CREATE TABLE IF NOT EXISTS `task_artifact` (
 | 9 | 产物 ID `"task-art-" + uuid4().hex[:16]`(**用户定稿**) | 遵循目录内前缀风格(tis-/bbs-),task- 前缀标明域归属 |
 | 10 | 可选端口未接线 → 启动期不发布+警告;运行期持久化失败 → 上抛 | 区分"未启用"与"启用后失败"两个语义 |
 | 11 | 产物行由图仓储在 `save_graph(published_artifacts=...)` 事务内嵌写入;TaskArtifactRepository 只读 | 事务不外泄;先例 `TaskCallbackModel` 内嵌写 |
-| 12 | 幂等 select-first + 唯一键兜底(撞键走版本重放),非"冲突回滚再读" | prod plugin 无 SAVEPOINT,PG 冲突即废事务 |
+| 12 | 幂等 = select-first 同事务查重,**无唯一键**(用户定稿撤销 uk_dedupe,改普通索引 idx_dedupe 支撑查重与检索)" | 同任务写入经 task_info 行锁串行化;无 SAVEPOINT 不适用"冲突回滚再读";残余竞态由到达层事件级幂等抑制,重复行不破坏读侧 |
 | 13 | 文本归约器含 `output` 键、与 relay 投影为超集分叉 | 三大主通道文本都在 `{"output": str}`,不含则双轨落空 |
 | 14 | 控制信号记为 TEXT 产物(text=canonical JSON 整 dict) | 信号值是 bool/嵌套 dict,非"单键字符串"可作为;审计链保留 | 
 | 15 | 上报引用结构校验但不做归属核验(信任已鉴权回调方) | 字节读口有参与者 ACL;归属核验列为后续加固 |
@@ -387,7 +388,7 @@ CREATE TABLE IF NOT EXISTS `task_artifact` (
 | 18 | 产物上报只走 relay `/callback/report`,`ExecutionEventDTO` 顶层加 optional `artifacts` 列表(**用户定稿**);集中 push/pull 协议不动 | 接力链路是当前基线的主回调协议;`extra=forbid` 加可选字段兼容;集中通道后续按同构字段平移 |
 | 19 | 新增 `URL_LINK`/`CODE` 内容分支(**用户定稿**):url/type 与 code_base_name/address/pr_link/pr_desc;url 类是产物内容本身,不受"禁临时下载 URL"约束;type 开放字符串;上报列表上限 64 | 链接/代码是协作产出的常见形态;字典四形态,governed 加值即演进 |
 | 20 | 上报 item 为扁平自描述结构(**用户定稿**):artifact_name/artifact_kind/session_id/task_id/node_id/attempt + 恰好一个 content JSON 字符串;scope 四字段均可上报但全部交叉校验(attempt 不一致拒、session_id 图优先上报兜底) | 上报自描述、服务端校验不盲信;幂等键不被误导 |
-| 21 | 独立建 `task_artifact` 表,不复用 `task_node_run_info`(与用户评估后确认,见 §6 段首) | run_info 是可变当前态行,产物是 append-only 清单;blob 化丢 uk_dedupe 且带来写放大 |
+| 21 | 独立建 `task_artifact` 表,不复用 `task_node_run_info`(与用户评估后确认,见 §6 段首) | run_info 是可变当前态行,产物是 append-only 清单;blob 化丢幂等查重键且带来写放大 |
 
 ## 11. 待确认决策(开放问题)
 
