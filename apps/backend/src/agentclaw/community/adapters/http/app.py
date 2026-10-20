@@ -156,6 +156,7 @@ from agentclaw.community.adapters.http.aicoding.architect_rebind_router import r
 from agentclaw.community.adapters.http.bot_management import router as bot_management_router  # noqa: E402
 from agentclaw.community.adapters.http.digital_employee import router as digital_employee_router  # noqa: E402
 from agentclaw.community.adapters.http.caller_identity.router import router as caller_identity_router  # noqa: E402
+from agentclaw.community.adapters.http.acli_clis.router import router as acli_clis_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_dormant import router as bot_dormant_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_dormant.router import internal_router as bot_dormant_internal_router  # noqa: E402
 from agentclaw.community.adapters.http.spaces_internal import router as spaces_internal_router  # noqa: E402
@@ -955,6 +956,7 @@ app.include_router(architect_rebind_router)
 app.include_router(bot_management_router.router)
 app.include_router(digital_employee_router)
 app.include_router(caller_identity_router)
+app.include_router(acli_clis_router)
 app.include_router(bot_dormant_router.router)
 app.include_router(bot_dormant_internal_router)
 app.include_router(spaces_internal_router)

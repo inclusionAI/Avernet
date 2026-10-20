@@ -168,6 +168,26 @@ owner write), `admission_routes.py`, inventories, the shared status map,
 schema snapshots; DI wiring beside `CliPassportScopeReconciler` in the four
 device modules.
 
+### Backend — internal router (`adapters/http/acli_clis/router.py` + `schemas.py`)
+
+The same four operations on `/api/bots`, for users authenticated by
+`get_current_user` (added 2026-10-20). The actor is always `user.staffId`;
+`entity_id` is a required query parameter that only locates the bot. Following
+the internal caller-identity routes, the client sends its edit-lock epoch:
+`lock_epoch` in the `POST` body and as a query parameter on `DELETE`.
+
+| Method | Path | Input | Answer |
+| --- | --- | --- | --- |
+| GET | `/api/bots/market/clis` | `keyword`, `page_no`, `page_size` | `{items, total, has_more}` |
+| GET | `/api/bots/{bot_id}/clis` | `entity_id` | `[{cli_code, cli_name, cli_desc, identity_mode, default}]` |
+| POST | `/api/bots/{bot_id}/clis` | `entity_id`; body `{cli_code, lock_epoch}` | `{cli_code, command, version}` |
+| DELETE | `/api/bots/{bot_id}/clis/{cli_code}` | `entity_id`, `lock_epoch` | `{cli_code, deleted}` |
+
+Answers are plain models, as on the other internal routes. Errors are the same
+domain errors with the same statuses, through the app-level map
+(`adapters/http/acli_cli_status.py`). The market route is declared before the
+`{bot_id}` routes.
+
 ### Docs
 
 - `apps/backend/docs/bot-config-manifest/engine-requirements.zh-CN.md` §4: the
