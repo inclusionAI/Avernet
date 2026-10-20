@@ -2,7 +2,11 @@ import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import type { IdentityView } from '@/domain/collaboration';
 import type { ConversationSessionRequestRange } from '@/domain/conversation/types';
 import { resolveOpenApiUserId } from '@/domain/userIdentity';
-import { listBots as listOwnedBotsApi, type OwnedBotDto } from '@/services/backendApi/bots/botController';
+import {
+  listBotInventory,
+  listBots as listOwnedBotsApi,
+  type OwnedBotDto,
+} from '@/services/backendApi/bots/botController';
 import {
   createBotSession,
   deleteBotSession,
@@ -20,6 +24,7 @@ import {
 } from '@/services/backendApi/bots/privateBotSessionController';
 import type { ChatMessage } from '@tc-chat/core';
 import type { BotIamTokenStage } from '../backendApi/privateChat/iamTokenController';
+import { mapBotActionPermissions } from './botActionPermissionMapper';
 import { mapBotSessionMessages } from './botSessionMessageMapper';
 import type { DomainError, DomainResult } from './identityService';
 
@@ -35,6 +40,8 @@ export interface ChatBotView {
   reachability?: 'reachable' | 'unreachable';
   chatable: boolean;
   engine?: string;
+  actions?: string[];
+  disabledActions?: Record<string, string>;
   botType?: string;
   isAgentCodingBot?: boolean;
   templateType?: string;
@@ -220,6 +227,7 @@ function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
   const { realBotId, ownerId } = splitBotId(botId);
   const templateType = readTemplateType(dto);
   const templateName = readTemplateName(dto, templateType);
+  const permissions = mapBotActionPermissions(dto.actions, dto.disabled_actions);
   const runtime = resolveBotRuntime({
     engine: dto.engine_type ?? dto.engine,
     templateType,
@@ -237,7 +245,9 @@ function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
     reachability: 'reachable',
     chatable: COMPOUND_ID_RE.test(botId),
     engine: dto.engine_type ?? dto.engine,
+    ...permissions,
     botType: dto.bot_type,
+    runtimeStage: dto.runtime_stage,
     isAgentCodingBot: runtime.isAgentCodingBot,
     templateType: runtime.templateType,
     templateName: runtime.templateName,
@@ -253,7 +263,36 @@ async function fetchOwnedBots(
     const resp = await listOwnedBotsApi({ user_id: resolveUserId(userId), page: 1, page_size: 100 });
     // 对话页的「已管理 Bot」目录保留全部可用 Bot。AgentCoding Bot 的行点击
     // 由对话页直接进入 coding-chat；普通 CC 仍由运行时分类保留，不误判。
-    const items = (resp.data?.items ?? []).map(toOwnedBotView);
+    const owned = resp.data?.items ?? [];
+    // The chat directory omits action permissions. Reuse the authoritative
+    // inventory contract, matching both Bot and owner; missing data fails closed.
+    const missingPermissions = owned.filter((bot) => !Array.isArray(bot.actions));
+    const permissions = new Map<string, ReturnType<typeof mapBotActionPermissions>>();
+    if (missingPermissions.length) {
+      try {
+        for (let page = 1; ; page += 1) {
+          const inventory = await listBotInventory({ user_id: resolveUserId(userId), page, page_size: 100 });
+          const rows = inventory.data?.items ?? [];
+          for (const row of rows) {
+            const ownerId = row.owner_entity_id ?? row.owner_id;
+            if (typeof row.bot_id === 'string' && ownerId !== undefined && ownerId !== null) {
+              permissions.set(
+                `${row.bot_id}:${String(ownerId)}`,
+                mapBotActionPermissions(row.actions, row.disabled_actions),
+              );
+            }
+          }
+          if (rows.length < 100 || page * 100 >= (inventory.data?.total ?? 0)) break;
+        }
+      } catch {
+        // Directory access must survive an unavailable management endpoint.
+      }
+    }
+    const items = owned.map((dto) => {
+      const bot = toOwnedBotView(dto);
+      const permission = !Array.isArray(dto.actions) ? permissions.get(`${bot.realBotId}:${bot.ownerId}`) : undefined;
+      return permission ? { ...bot, ...permission } : bot;
+    });
     return {
       ok: true,
       data: {

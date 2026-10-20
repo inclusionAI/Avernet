@@ -70,6 +70,32 @@ test('团队 Coding Bot 保留模板分类字段，避免行标签退化为 Agen
   });
 });
 
+test('团队目录仅透传显式的引擎重启权限和草稿运行阶段', async () => {
+  list.mockResolvedValue({
+    code: 200000,
+    data: {
+      items: [
+        dto({
+          engine: 'openclaw',
+          actions: ['engine_restart'],
+          disabled_actions: { restart_publish: '无权发布' },
+          runtime_stage: 'draft',
+        }),
+      ],
+      total: 1,
+    },
+  });
+
+  const result = await teamBotConversationService.listBots('viewer');
+
+  expect(result.ok && result.data[0]).toMatchObject({
+    actions: ['engine_restart'],
+    disabledActions: { restart_publish: '无权发布' },
+    runtimeStage: 'draft',
+    ownerId: 'team-entity',
+  });
+});
+
 test('团队 Coding Bot 从 template_config 读取模板名，与管理 Bot 目录一致', async () => {
   list.mockResolvedValue({
     code: 200000,

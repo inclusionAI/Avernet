@@ -88,6 +88,9 @@ describe('botSessionService', () => {
             template_type: 'normalCC',
             owner_entity_id: '3',
             status: 'ACTIVE',
+            actions: ['engine_restart'],
+            disabled_actions: { restart_publish: '仅发布 Bot 支持' },
+            runtime_stage: 'draft',
           },
           {
             bot_id: 'normal-empty:4',
@@ -125,6 +128,9 @@ describe('botSessionService', () => {
         displayName: '普通 CC',
         isAgentCodingBot: false,
         templateType: 'normalCC',
+        actions: ['engine_restart'],
+        disabledActions: { restart_publish: '仅发布 Bot 支持' },
+        runtimeStage: 'draft',
       }),
       expect.objectContaining({
         displayName: '无模板 CC',
@@ -517,5 +523,41 @@ it('listSessionsPage 与收藏分页复用统一标题映射并透传分页参�
   expect(favorites).toMatchObject({
     ok: true,
     data: { total: 1, items: [{ sessionId: 'sid-f', title: '收藏标题', favorite: true }] },
+  });
+});
+
+describe('owned chat engine permissions from inventory', () => {
+  const dto = {
+    bot_id: 'bot-permission',
+    bot_name: 'permission',
+    owner_entity_id: 'owner',
+    status: 'ACTIVE',
+    engine: 'openclaw',
+  };
+  it('uses authoritative permissions for the same Bot and owner', async () => {
+    ownedMocked.listBots.mockResolvedValue({ data: { items: [dto] } });
+    ownedMocked.listBotInventory.mockResolvedValue({
+      data: { items: [{ ...dto, actions: ['engine_restart'], disabled_actions: { restart: 'locked' } }], total: 1 },
+    });
+    const result = await botSessionService.listOwnedBots('caller');
+    expect(result.ok && result.data[0]).toMatchObject({
+      actions: ['engine_restart'],
+      disabledActions: { restart: 'locked' },
+    });
+    expect(ownedMocked.listBotInventory).toHaveBeenLastCalledWith({ user_id: 'caller', page: 1, page_size: 100 });
+  });
+  it('does not reuse permissions from a different owner', async () => {
+    ownedMocked.listBots.mockResolvedValue({ data: { items: [dto] } });
+    ownedMocked.listBotInventory.mockResolvedValue({
+      data: { items: [{ ...dto, owner_entity_id: 'other', actions: ['engine_restart'] }], total: 1 },
+    });
+    const result = await botSessionService.listOwnedBots('caller');
+    expect(result.ok && result.data[0].actions).toEqual([]);
+  });
+  it('keeps directory readable and fails closed if inventory is unavailable', async () => {
+    ownedMocked.listBots.mockResolvedValue({ data: { items: [dto] } });
+    ownedMocked.listBotInventory.mockRejectedValue(new Error('unavailable'));
+    const result = await botSessionService.listOwnedBots('caller');
+    expect(result.ok && result.data[0].actions).toEqual([]);
   });
 });

@@ -4,12 +4,14 @@
 //   (不调 useWorkspace),页内不出现二级身份/视图切换 tab;
 // - 选中 origin=others 时渲染真实只读面板,不渲染交互舞台(Task 7 review 约定);
 // - CollaborationPage 承接旧协作群分支,GroupWorkspaceArea 保持挂载。
+import * as botController from '@/services/backendApi/bots/botController';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { conversationInitialState, useConversationStore } from '@/stores/conversationStore';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
 
 const managedBot: ChatBotView = {
   botId: 'bot-a:1',
@@ -116,7 +118,9 @@ jest.mock('@/pages/Workspace/hooks/useBotChat', () => ({
 
 // 交互舞台只替换接收端(保持传参装配的真实性);只读面板走真实组件。
 jest.mock('@/pages/Workspace/Chat/ConversationInteractiveStage', () => ({
-  ConversationInteractiveStage: () => <div data-testid="interactive-stage" />,
+  ConversationInteractiveStage: ({ headerActions }: { headerActions?: ReactNode }) => (
+    <div data-testid="interactive-stage">{headerActions}</div>
+  ),
 }));
 
 // GroupWorkspaceArea 的重 Hook/叶子桩件(沿用 GroupWorkspaceAreaDrawer.test 的桩件面)。
@@ -283,6 +287,84 @@ describe('ConversationPage(Task 8 组合页)', () => {
 
     expect(await screen.findByTestId('interactive-stage')).toBeInTheDocument();
     expect(screen.queryByText('请选择一个好友用户会话')).not.toBeInTheDocument();
+  });
+
+  it('对当前在线 managed 单聊读取版本，关闭提示后切换会话重新检查', async () => {
+    const eligibleBot: ChatBotView = {
+      ...managedBot,
+      engine: 'openclaw',
+      actions: ['engine_restart'],
+    };
+    const getVersion = jest.spyOn(botController, 'getBotEngineVersion').mockResolvedValue({
+      code: 200000,
+      data: {
+        detection: { status: 'known' },
+        current: { raw_version: '1.2.0' },
+        release_target: { status: 'available', release_id: 'REL-2' },
+        comparison: 'older',
+        restart_hint: 'recommended',
+        context: { bot_id: 'bot-a', stage: 'draft', checked_at: '2026-10-20T00:00:00Z' },
+      },
+    } as never);
+    const conversationServiceMock = require('@/services/workspace/conversationService').conversationService as {
+      listDirectory: jest.Mock;
+    };
+    conversationServiceMock.listDirectory.mockResolvedValueOnce({
+      ok: true,
+      data: { managedBots: [eligibleBot], friendBots: [] },
+    });
+    useConversationStore.setState({
+      ...conversationInitialState,
+      expandedBotIds: { 'bot-a:1': true },
+      originByManagedBotId: { 'bot-a:1': 'mine' },
+      selectedBotId: 'bot-a:1',
+      selectedSection: 'managed',
+      selectedOrigin: 'mine',
+      selectedScope: 'all',
+      selectedSessionId: 's1',
+      sessionsByBotId: {
+        'bot-a:1': {
+          botId: 'bot-a:1',
+          origin: 'mine',
+          scope: 'all',
+          sessions: {
+            ...emptyList,
+            items: ['s1', 's2'].map((sessionId) => ({
+              sessionId,
+              botId: 'bot-a:1',
+              title: sessionId,
+              messageCount: 1,
+              gmtModified: '',
+              gmtCreate: '',
+            })),
+          },
+          friendDirectory: { items: [], loading: false, error: null },
+          friendGroups: {},
+        },
+      },
+    });
+
+    const view = render(<ConversationPage />);
+    try {
+      expect(await screen.findByRole('button', { name: '引擎有更新' })).toBeInTheDocument();
+      expect(getVersion).toHaveBeenCalledWith(
+        'bot-a',
+        expect.objectContaining({
+          userId: '101',
+          ownerId: '1',
+          stage: 'draft',
+        }),
+      );
+      fireEvent.click(screen.getByRole('button', { name: '关闭当前会话的引擎更新提示' }));
+      expect(screen.queryByTestId('chat-engine-version-notice')).not.toBeInTheDocument();
+
+      act(() => useConversationStore.setState({ selectedSessionId: 's2' }));
+      expect(await screen.findByRole('button', { name: '引擎有更新' })).toBeInTheDocument();
+      await waitFor(() => expect(getVersion).toHaveBeenCalledTimes(2));
+    } finally {
+      view.unmount();
+      getVersion.mockRestore();
+    }
   });
 
   it.each(['managed', 'team'] as const)('%s origin=others 选中好友会话:只读、零写接口和实时连接', async (section) => {

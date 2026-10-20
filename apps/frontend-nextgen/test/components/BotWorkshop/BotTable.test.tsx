@@ -2,6 +2,7 @@
 
 import BotTable from '@/components/BotWorkshop/BotCard';
 import type { BotTableProps } from '@/components/BotWorkshop/BotCard/BotTable';
+import * as botController from '@/services/backendApi/bots/botController';
 import type { BotDomain } from '@/services/botWorkshop';
 import { mapBotDto } from '@/services/botWorkshop/botMapper';
 import '@testing-library/jest-dom';
@@ -80,7 +81,10 @@ describe('BotTable 表格结构', () => {
   });
 
   test('长描述保留独立列，避免重要信息被截短', () => {
-    const longDescriptionBot = { ...bot, description: '用于承接跨团队知识问答与自动化任务处理的服务机器人，包含完整的业务上下文。' };
+    const longDescriptionBot = {
+      ...bot,
+      description: '用于承接跨团队知识问答与自动化任务处理的服务机器人，包含完整的业务上下文。',
+    };
     renderTable(longDescriptionBot);
 
     expect(screen.getByRole('columnheader', { name: '描述' })).toBeInTheDocument();
@@ -278,8 +282,18 @@ describe('BotTable conversation action', () => {
   });
 
   test('同一 Bot 的不同卡片也只展开触发的一个更多操作菜单', () => {
-    const first = mapBotDto({ bot_id: 'same-bot', card_id: 'service:same-bot:1', bot_name: 'First Bot', actions: ['view'] }).item;
-    const second = mapBotDto({ bot_id: 'same-bot', card_id: 'service:same-bot:2', bot_name: 'Second Bot', actions: ['view'] }).item;
+    const first = mapBotDto({
+      bot_id: 'same-bot',
+      card_id: 'service:same-bot:1',
+      bot_name: 'First Bot',
+      actions: ['view'],
+    }).item;
+    const second = mapBotDto({
+      bot_id: 'same-bot',
+      card_id: 'service:same-bot:2',
+      bot_name: 'Second Bot',
+      actions: ['view'],
+    }).item;
     render(<BotTable bots={[first, second]} onView={noop} onAction={async () => undefined} />);
 
     const [firstTrigger, secondTrigger] = screen.getAllByRole('button', { name: /管理 .* Bot/ });
@@ -317,6 +331,57 @@ describe('BotTable conversation action', () => {
     renderTable(bot);
     expect(screen.getByRole('columnheader', { name: 'Owner' })).toBeInTheDocument();
     expect(screen.getByText('小华')).toBeInTheDocument();
+  });
+});
+
+describe('BotTable engine version entry points', () => {
+  test('shows a confirmed update badge and separates version update from ordinary restart', async () => {
+    const bot = mapBotDto({
+      bot_id: 'engine-bot',
+      bot_name: 'Engine Bot',
+      owner_entity_id: 'owner-1',
+      engine: 'openclaw',
+      status: 'ACTIVE',
+      actions: ['engine_restart', 'restart'],
+    }).item;
+    const getVersion = jest.spyOn(botController, 'getBotEngineVersion').mockResolvedValue({
+      code: 200000,
+      data: {
+        detection: { status: 'known' },
+        current: { raw_version: '1.2.0' },
+        release_target: { status: 'available', release_id: 'REL-2' },
+        comparison: 'older',
+        restart_hint: 'recommended',
+        context: { bot_id: 'engine-bot', stage: 'draft', checked_at: '2026-10-20T00:00:00Z' },
+      },
+    } as never);
+    try {
+      renderTable(bot, {
+        containerUserId: 'caller-1',
+        onAction: async () => undefined,
+      });
+
+      fireEvent.click(await screen.findByRole('button', { name: /引擎有更新/ }));
+      expect(await screen.findByText('1.2.0')).toBeInTheDocument();
+      expect(screen.getByText('REL-2')).toBeInTheDocument();
+      expect(getVersion).toHaveBeenCalledWith(
+        'engine-bot',
+        expect.objectContaining({
+          userId: 'caller-1',
+          ownerId: 'owner-1',
+          stage: 'draft',
+        }),
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+      fireEvent.click(screen.getByRole('button', { name: '管理 Engine Bot' }));
+      expect(await screen.findByRole('button', { name: '引擎信息' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '更新引擎版本' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /重启 Bot/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /重启引擎/ })).toBeInTheDocument();
+    } finally {
+      getVersion.mockRestore();
+    }
   });
 });
 
@@ -923,7 +988,14 @@ describe('BotTable 管理菜单重启词表（服务卡三动词分裂）', () =
       actions: ['view', 'publish_staging'],
     }).item;
     const onView = jest.fn();
-    render(<BotTable bots={[bot]} onView={onView} onManagePublication={jest.fn()} onAction={jest.fn().mockResolvedValue(undefined)} />);
+    render(
+      <BotTable
+        bots={[bot]}
+        onView={onView}
+        onManagePublication={jest.fn()}
+        onAction={jest.fn().mockResolvedValue(undefined)}
+      />,
+    );
 
     expect(screen.queryByRole('group', { name: '部署中服务 Bot 主要操作' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '管理 部署中服务 Bot' })).not.toBeInTheDocument();

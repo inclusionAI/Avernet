@@ -1,5 +1,6 @@
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import { listCollaboratingBots, type CollaboratingBotDto } from '@/services/backendApi/bots/collaboratingBotController';
+import { mapBotActionPermissions } from './botActionPermissionMapper';
 import { resolveUserId, type ChatBotView } from './botSessionService';
 import type { DomainResult } from './identityService';
 
@@ -29,7 +30,10 @@ function readTemplateType(dto: CollaboratingBotDto): string | undefined {
 /** 历史引擎按工坊契约归一模板副维度；例如 aicoding 缺省对应 personalCoding。 */
 function normalizeTemplateType(engine: string, templateType: string | undefined) {
   if (templateType) return templateType;
-  const normalizedEngine = engine.trim().toLowerCase().replace(/[\s_-]/g, '');
+  const normalizedEngine = engine
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]/g, '');
   if (normalizedEngine === 'aicoding') return 'personalCoding';
   if (normalizedEngine === 'applicationcoding') return 'applicationCoding';
   return undefined;
@@ -60,6 +64,7 @@ function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
   const declaredTemplateType = readTemplateType(dto);
   const templateType = normalizeTemplateType(dto.engine, declaredTemplateType);
   const templateName = readTemplateName(dto, templateType);
+  const permissions = mapBotActionPermissions(dto.actions, dto.disabled_actions);
   const runtime = resolveBotRuntime({
     botId: realBotId,
     engine: dto.engine,
@@ -78,6 +83,8 @@ function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
     online: dto.status === 'ACTIVE' || dto.status === 'online',
     reachability: 'reachable',
     chatable: Boolean(realBotId && ownerId),
+    ...permissions,
+    runtimeStage: dto.runtime_stage,
     isAgentCodingBot: runtime.isAgentCodingBot,
     templateType: runtime.templateType,
     templateName: runtime.templateName,

@@ -1,11 +1,12 @@
 import { Button } from '@/components/ui/Button';
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
-import { restartPublishStageLabel, restartPublishStageOf } from '@/domain/botWorkshop';
-import type { BotDomain } from '@/services/botWorkshop';
-import { ArrowUpRight, MapPin, MoreHorizontal, ShieldCheck, Users } from 'lucide-react';
+import type { EngineVersionUpdateAvailability } from '@/domain/botEngineVersion';
+import type { BotDomain } from '@/domain/botWorkshop';
+import { MapPin, MoreHorizontal, ShieldCheck, Users } from 'lucide-react';
 import { useState } from 'react';
-import { canRestartFailedServiceBot, failedServiceDeleteReason, publicationManagementAvailability } from './botManagementPolicy';
+import { BotEngineVersionMenuItems } from './BotEngineVersionMenuItems';
+import { BotManagementConfirmDialog } from './BotManagementConfirmDialog';
+import { BotManagementRuntimeItems } from './BotManagementRuntimeItems';
 import { actionIcon, actionLabel, type BotCardManagementAction } from './config';
 import { ActionHelp, MenuSection } from './menuPrimitives';
 interface BotManagementMenuProps {
@@ -21,6 +22,9 @@ interface BotManagementMenuProps {
   canGeneralConfig?: boolean;
   generalConfigDisabledReason?: string;
   onGeneralConfig?: (bot: BotDomain) => void;
+  engineVersionUpdateAvailability?: EngineVersionUpdateAvailability;
+  onOpenEngineInfo?: (bot: BotDomain) => void;
+  onUpdateEngineVersion?: (bot: BotDomain) => void;
 }
 export function BotManagementMenu(props: BotManagementMenuProps) {
   const {
@@ -34,30 +38,15 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
     canGeneralConfig,
     generalConfigDisabledReason,
     onGeneralConfig,
+    engineVersionUpdateAvailability,
+    onOpenEngineInfo,
+    onUpdateEngineVersion,
   } = props;
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = props.open ?? uncontrolledOpen;
   const setOpen = props.onOpenChange ?? setUncontrolledOpen;
   const [confirmAction, setConfirmAction] = useState<BotCardManagementAction>();
-  const [confirming, setConfirming] = useState(false);
   if (bot.lifecycle === 'deploying') return null;
-  const isAgentCodingBot = bot.runtime.isAgentCodingBot;
-  const isServiceBot = bot.serviceMode === 'service';
-  const restartUnsupported = bot.runtime.engine === 'teclaw';
-  const restartDeclared = bot.actions.includes('restart') || Boolean(bot.disabledActions.restart) || canRestartFailedServiceBot(bot);
-  const restartPublishDeclared =
-    bot.actions.includes('restart_publish') || Boolean(bot.disabledActions.restart_publish);
-  const restartPublishDisabledReason = bot.disabledActions.restart_publish;
-  const restartDisabledReason = bot.disabledActions.restart;
-  const engineRestartDeclared = bot.actions.includes('engine_restart') || Boolean(bot.disabledActions.engine_restart);
-  const showEngineRestart =
-    !isAgentCodingBot && (restartUnsupported || !isServiceBot || engineRestartDeclared);
-  const engineRestartEnabled = bot.actions.includes('engine_restart');
-  const engineRestartDisabledReason = bot.disabledActions.engine_restart;
-  const restartPublishStage = confirmAction === 'restart_publish' ? restartPublishStageOf(bot.lifecycle) : undefined;
-  const publication = publicationManagementAvailability(bot);
-  const restartEnabled = bot.actions.includes('restart') || canRestartFailedServiceBot(bot);
-  const deleteReason = failedServiceDeleteReason(bot);
   return (
     <>
       <Popover open={open} onOpenChange={setOpen}>
@@ -150,149 +139,41 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
               </Button>
             ) : null}
           </MenuSection>
-          {/* 发布与运维（流程与运行态操作 · 需二次确认或受锁保护） */}
-          <MenuSection divider>
-            {bot.serviceMode === 'service' && publication.visible && onManagePublication ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                leftIcon={<ArrowUpRight className="size-4" />}
-                disabled={lockedByOther || !publication.enabled}
-                onClick={() => {
-                  setOpen(false);
-                  onManagePublication(bot);
-                }}
-              >
-                {publication.enabled ? '发布与阶段推进' : <ActionHelp description={publication.disabledReason!}>发布与阶段推进</ActionHelp>}
-              </Button>
-            ) : null}
-            {restartUnsupported || !isServiceBot || restartDeclared ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                leftIcon={actionIcon.restart}
-                disabled={restartUnsupported || lockedByOther || !restartEnabled}
-                onClick={() => {
-                  setOpen(false);
-                  setConfirmAction('restart');
-                }}
-              >
-                <ActionHelp
-                  description={
-                    restartUnsupported
-                      ? 'TeClaw 暂不支持重启容器'
-                      : restartDisabledReason && !bot.actions.includes('restart')
-                      ? restartDisabledReason
-                      : '指重新启动当前 Bot 实例，重新加载当前会话状态、配置或运行流程。'
+          <BotEngineVersionMenuItems
+            bot={bot}
+            availability={engineVersionUpdateAvailability}
+            onOpenInfo={
+              onOpenEngineInfo
+                ? (selected) => {
+                    setOpen(false);
+                    onOpenEngineInfo(selected);
                   }
-                >
-                  {actionLabel.restart}
-                </ActionHelp>
-              </Button>
-            ) : null}
-            {restartPublishDeclared ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                leftIcon={actionIcon.restart_publish}
-                disabled={restartUnsupported || lockedByOther || !bot.actions.includes('restart_publish')}
-                onClick={() => {
-                  setOpen(false);
-                  setConfirmAction('restart_publish');
-                }}
-              >
-                <ActionHelp
-                  description={
-                    restartUnsupported
-                      ? 'TeClaw 暂不支持重启发布'
-                      : restartPublishDisabledReason && !bot.actions.includes('restart_publish')
-                      ? restartPublishDisabledReason
-                      : '指重新启动该服务已发布环境（预发/线上）的运行时，不影响草稿机器。'
+                : undefined
+            }
+            onUpdate={
+              onUpdateEngineVersion
+                ? (selected) => {
+                    setOpen(false);
+                    onUpdateEngineVersion(selected);
                   }
-                >
-                  {actionLabel.restart_publish}
-                </ActionHelp>
-              </Button>
-            ) : null}
-            {showEngineRestart ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                leftIcon={actionIcon.engine_restart}
-                disabled={restartUnsupported || lockedByOther || !engineRestartEnabled}
-                onClick={() => {
-                  setOpen(false);
-                  setConfirmAction('engine_restart');
-                }}
-              >
-                <ActionHelp
-                  description={
-                    restartUnsupported
-                      ? 'TeClaw 暂不支持重启引擎'
-                      : engineRestartDisabledReason && !engineRestartEnabled
-                      ? engineRestartDisabledReason
-                      : '指重新启动 Bot 所依赖的底层运行引擎（如 OpenClaw、ClaudeCode 等）。'
-                  }
-                >
-                  {actionLabel.engine_restart}
-                </ActionHelp>
-              </Button>
-            ) : null}
-          </MenuSection>
-          {/* 危险区（高风险垫底） */}
-          <MenuSection divider>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full justify-start text-destructive"
-              leftIcon={actionIcon.delete}
-              disabled={lockedByOther || !bot.actions.includes('delete')}
-              onClick={() => {
-                setOpen(false);
-                setConfirmAction('delete');
-              }}
-            >
-              {deleteReason ? <ActionHelp description={deleteReason}>{actionLabel.delete}</ActionHelp> : actionLabel.delete}
-            </Button>
-          </MenuSection>
+                : undefined
+            }
+          />
+          {/* 发布与运行态操作：按相同的权限和实例规则集中处理。 */}
+          <BotManagementRuntimeItems
+            bot={bot}
+            lockedByOther={lockedByOther}
+            onClose={() => setOpen(false)}
+            onConfirm={setConfirmAction}
+            onManagePublication={onManagePublication}
+          />
         </PopoverContent>
       </Popover>
-      <ConfirmDialog
-        open={Boolean(confirmAction)}
-        loading={confirming}
-        title={confirmAction === 'delete' ? '确认删除 Bot' : confirmAction ? actionLabel[confirmAction] : '确认'}
-        description={
-          confirmAction === 'delete'
-            ? `删除「${bot.name}」后无法恢复。`
-            : confirmAction === 'upgrade'
-            ? '开启后不可逆，确认将此 Bot 转换为服务 Bot？'
-            : confirmAction === 'engine_restart'
-            ? '仅重启引擎进程，不重建容器。'
-            : confirmAction === 'restart_publish'
-            ? restartPublishStage
-              ? `将重启该服务在${restartPublishStageLabel[restartPublishStage]}环境发布的运行时，进行中的服务会话可能短暂中断；草稿机器与草稿数据不受影响。`
-              : '当前发布状态不支持重启发布，请刷新 Bot 列表后重试。'
-            : '将重新拉起整个 Bot 容器，现有会话可能中断。'
-        }
-        confirmText={confirmAction === 'delete' ? '删除' : '确认'}
-        confirmVariant={confirmAction === 'delete' ? 'destructive' : 'primary'}
+      <BotManagementConfirmDialog
+        bot={bot}
+        action={confirmAction}
+        onAction={onAction}
         onCancel={() => setConfirmAction(undefined)}
-        onConfirm={async () => {
-          if (!confirmAction) return;
-          setConfirming(true);
-          try {
-            await onAction(confirmAction, bot);
-            setConfirmAction(undefined);
-          } catch {
-            // 失败提示已由 Hook toast 统一负责；保留弹窗供用户取消或重试，同时避免 rethrow 变成未处理拒绝。
-          } finally {
-            setConfirming(false);
-          }
-        }}
       />
     </>
   );
