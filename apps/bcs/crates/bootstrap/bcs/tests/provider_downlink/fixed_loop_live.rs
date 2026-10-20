@@ -243,8 +243,25 @@ impl LiveStory {
 
     async fn respond(&self, pending: &Value, text: &str) {
         assert_eq!(pending["response_ref"], format!("{}/{}", self.run_id, pending["node_id"].as_str().unwrap()));
-        checked(self.client.post(format!("http://{}/state-machine-runs/{}/nodes/{}/respond", self.addr, self.run_id,
-            pending["node_id"].as_str().unwrap())).header("X-Mock-User-Id", HUMAN).json(&json!({"content": text}))).await;
+        let response = self.raw_response(pending, text).await;
+        let status = response.status();
+        let body: Value = response.json().await.unwrap();
+        assert!(status.is_success() || status == reqwest::StatusCode::CONFLICT,
+            "HTTP {status}: {body}");
+        if status == reqwest::StatusCode::CONFLICT {
+            // Recovery can complete our accepted output before the request's
+            // completion CAS. A 409 alone is not evidence of acceptance.
+            assert!(body["message"].as_str().unwrap_or_default()
+                .contains("state-machine transition changed concurrently"), "{body}");
+        }
+        let current = self.get(&format!("/state-machine-runs/{}/nodes/{}", self.run_id,
+            pending["node_id"].as_str().unwrap())).await;
+        assert_eq!(current["node"]["run_id"], self.run_id);
+        assert_eq!(current["node"]["node_id"], pending["node_id"]);
+        assert_eq!(current["execution"], pending["execution"]);
+        assert_eq!(current["node"]["status"], "completed", "HTTP {status}: {body}; {current}");
+        assert_eq!(current["node"]["artifact_text"], text);
+        assert_eq!(current["node"]["responded_by"], format!("human_{HUMAN}"));
     }
 
     async fn notification(&self, pending: &Value) -> Value {
