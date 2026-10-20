@@ -326,6 +326,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   }
 
   async request(params: BotChatRequest, messageId?: string): Promise<void> {
+    await this.rollbackTransportForNewRun();          // 发送边界重估（review R2-3）
     const inner = await this.ensureInitialized();
     // 发送前刷新 IAM token,确保 WS 请求帧携带最新身份凭证(与 supportProvider / open-claw 一致)。
     const freshIamToken = this.directDesktop
@@ -352,6 +353,34 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
 
   abort(): void {
     this.inner?.abort();
+  }
+
+  /**
+   * A2A 传输回滚（review R2-3，spec §7 回滚语义）：开关关 / locked-v3 只在
+   * 构造期生效是不够的——会话已有 A2A inner 时，后续发送会一直复用它，新
+   * 任务继续以 A2A 创建。发送边界重估"当下选择"：
+   *   · inner 非 A2A（v3/未建）→ 直接放行；
+   *   · inner 是 A2A 且当下 takeCachedA2AProvider 仍取得到（选择成立）→ 放行；
+   *   · inner 是 A2A 但当下取不到（开关关/锁定/未决）→ 退役旧实例**只断连**
+   *     （不播 onComplete、不清 context 级 send-ban——禁令由 registry 持有、
+   *     与实例无关），重走 initialize 工厂按当下选择重建（此处即落 v3）。
+   * 不自动重发原任务；在途旧 run 由 isRequesting 互斥保证不与换轨并发
+   *（能走到发送边界的会话必然空闲）。
+   */
+  private async rollbackTransportForNewRun(): Promise<void> {
+    const current = this.inner as { isA2aProvider?: boolean } | null;
+    if (!current?.isA2aProvider || !this.wsUrl) return;
+    const probeCfg = {
+      url: this.wsUrl,
+      ...(this.a2aBaseUrl ? { a2aBaseUrl: this.a2aBaseUrl } : {}),
+      sessionKey: this.options.sessionId,
+    } as A2aBootstrapConfig;
+    if (takeCachedA2AProvider(probeCfg)) return;    // 当下选择仍 A2A——复用
+    const retired = this.inner as OpenClawProvider;
+    this.disconnectInner(retired);                   // 拆订阅/兜底 + 仅断连静默退役
+    this.inner = null;
+    this.initializePromise = null;
+    await this.initialize();                        // 工厂重走：当下选择 → v3
   }
   stop(): void {
     this.abort();
