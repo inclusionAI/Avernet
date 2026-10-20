@@ -19,7 +19,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { maybeBuildA2AProvider } from '@/adapters/a2a/bootstrap';
+import { maybeBuildA2AProvider, takeCachedA2AProvider } from '@/adapters/a2a/bootstrap';
 import { A2A_FILE_REFS_UNSUPPORTED_MESSAGE } from '@/adapters/a2a/A2AProvider';
 import { A2A_SWITCH_KEY } from '@/adapters/a2a/switch';
 import * as ctrl from '@/services/backendApi/bots/privateBotSessionController';
@@ -298,5 +298,55 @@ describe('BotChatProvider A2A 接缝活体集成（B16）', () => {
     );
     await provider.request({ content: '你好', sessionId: 'sess-1' } satisfies BotChatRequest);
     expect(onComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it('R2-3 传输回滚：会话已用 A2A → 开关关 → 同会话新发送经发送边界重估回 v3'
+    + '（新任务不得继续创建 A2A；旧实例只断连静默退役）', async () => {
+    // Stage 1：异步正路先决出 appChoiceCache='a2a'（会话第一段以 A2A 建立）
+    const built = await maybeBuildA2AProvider({ url: WS_URL, xIAMToken: 'iam-1' });
+    expect(built).not.toBeNull();
+
+    // SDK 工厂 stub：镜像缺省工厂的两条候选（takeCached 命中→a2a，缺席→v3），
+    // 记录创建/退役/发送轨迹——边界逻辑可精确断言（v3 stub 不真连 ws）
+    const creations: string[] = [];
+    const disconnects: string[] = [];
+    const sendings: string[] = [];
+    const stubFor = (kind: string): any => ({
+      isA2aProvider: kind === 'a2a',
+      isConnected: true,
+      connect: () => Promise.resolve(),
+      request: () => { sendings.push(kind); return Promise.resolve(); },
+      disconnect: () => { disconnects.push(kind); },
+      subscribeToConnectionStatus: () => () => undefined,
+    });
+    const provider = createBotChatProvider({
+      bot: BOT, userId: '2088', sessionId: 'sess-1',
+      createSdkProvider: (cfg: any) => {
+        const kind = takeCachedA2AProvider(cfg) ? 'a2a' : 'v3';
+        creations.push(kind);
+        return stubFor(kind);
+      },
+    } as any);
+
+    await provider.connect();
+    await provider.request({ content: '第一条', sessionId: 'sess-1' } satisfies BotChatRequest);
+    expect(creations).toEqual(['a2a']);            // 会话以 A2A 建立
+    expect(sendings).toEqual(['a2a']);
+
+    // Stage 2：现场关开关（spec §7 回滚语义入口）——发送边界重估须令
+    // 新任务回 v3，而不是继续复用既有 A2A inner
+    storage.set(A2A_SWITCH_KEY, '0');
+    await provider.request({ content: '第二条', sessionId: 'sess-1' } satisfies BotChatRequest);
+
+    expect(creations).toEqual(['a2a', 'v3']);      // 重走工厂：当下选择落 v3
+    expect(sendings).toEqual(['a2a', 'v3']);       // 新任务经 v3 发送
+    expect(disconnects).toEqual(['a2a']);         // 旧 A2A 实例只断连退役一次
+
+    // Stage 3：开关再开——缓存仍 'a2a'，当下选择回 A2A；inner 已是 v3（非 A2A
+    // 面不触发回滚门）——Up-换轨不是本 finding 义务面，只钉行为不误伤
+    storage.set(A2A_SWITCH_KEY, '1');
+    await provider.request({ content: '第三条', sessionId: 'sess-1' } satisfies BotChatRequest);
+    expect(creations).toEqual(['a2a', 'v3']);
+    expect(disconnects).toEqual(['a2a']);
   });
 });
