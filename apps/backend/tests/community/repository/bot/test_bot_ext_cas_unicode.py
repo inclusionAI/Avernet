@@ -108,7 +108,7 @@ def test_null_snapshot_writes_unicode_and_rejects_non_null_current_ext(repo, db)
 
 
 def test_cas_logs_only_business_identity_and_result(repo, caplog):
-    secret = "private-cas-test-sentinel"
+    secret = "not-a-real-token"
     snapshot = {"secret": secret}
     repo.insert(_data(ext=snapshot))
 
