@@ -76,12 +76,16 @@ def test_correction_forwards_explicit_environment():
     assert repository.calls == [("target", "caller_identity", True, "prod")]
 
 
-def test_server_owned_runtime_artifact_list_cannot_be_corrected():
-    import pytest
+def test_runtime_artifact_list_can_be_corrected_after_boundary_authorization():
     repository = _Repository()
     service = UserListService(repository=repository)
     for enabled in (True, False):
-        with pytest.raises(PermissionError, match="server-managed"):
-            service.correct_membership(actor_id="any_actor", entity_id="*",
-                user_list_type="service_bot_runtime_artifact", in_whitelist=enabled, env="prod")
-    assert repository.calls == []
+        result = service.correct_membership(
+            actor_id="operator", entity_id="*",
+            user_list_type="service_bot_runtime_artifact", in_whitelist=enabled, env="prod",
+        )
+        assert result is enabled
+    assert repository.calls == [
+        ("*", "service_bot_runtime_artifact", True, "prod"),
+        ("*", "service_bot_runtime_artifact", False, "prod"),
+    ]

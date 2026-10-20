@@ -165,8 +165,11 @@ or changing either source or target; any existing versioned snapshot is retained
 Disabled `.local/bin` retries still clear existing versioned bin snapshots without
 reading draft CLI directories or creating missing snapshots.
 
-This list is server-managed. The authenticated frontend correction API rejects
-writes to this type with HTTP 403; operations must manage it through the database.
+The `PUT /api/v1/user-lists/correct` API requires operator authorization for all
+list types. Operators can add or remove this rollout type for an owner or `*`,
+with `env` selecting the environment. Ordinary authenticated users receive
+HTTP 403 without changing membership. Membership checks still require only login.
+The database remains an alternative for operations.
 The following examples are documentation only and must not run as a migration.
 Replace `pre` and `OWNER_ENTITY_ID` deliberately for the intended environment/user.
 
