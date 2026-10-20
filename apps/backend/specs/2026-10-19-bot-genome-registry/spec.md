@@ -92,27 +92,27 @@ endpoints.
 ## Acceptance Criteria
 
 Recording:
-- [ ] A revision can be captured from a bot: persona files, skills (local
+- [x] A revision can be captured from a bot: persona files, skills (local
       skills as stored file trees, Center skills as pinned versions,
       shared-repository skills by repository path), resources (files and
       directory trees), MCP servers with the bot's overrides, and the
       startup script. Every captured byte lands in the content store by
       digest; the stored revision validates against the contract schema and
       its id is the contract's hash.
-- [ ] Shared-repository skills (`git://…` memberships on the platform-synced
+- [x] Shared-repository skills (`git://…` memberships on the platform-synced
       skills repository) are recorded as `origin: repo` with `repo_path`,
       an additive extension of the RSI-02 schema (no version bump); they are
       unpinned until the repository sync exposes a commit.
-- [ ] Capture applies the contract's normalisation (the platform-written
+- [x] Capture applies the contract's normalisation (the platform-written
       AGENTS.md reference block is removed and trailing whitespace trimmed)
       and refuses, naming the item, what cannot be recorded: a resource
       whose path the Manifest path rule rejects, and a platform-managed
       teclaw bot.
-- [ ] A revision can be recorded from a patch against a base revision. All
+- [x] A revision can be recorded from a patch against a base revision. All
       twelve ops apply as the contract defines; the contract's example
       patches applied to their example base give the example candidate
       revision, and the stored patch digest is the candidate id.
-- [ ] The patch's own `base` names the revision it is applied to. An
+- [x] The patch's own `base` names the revision it is applied to. An
       unknown base (not a revision of this bot) is `not_found`; a patch is
       refused with a reason code when its ops do not apply exactly to that
       base (`does_not_apply`), touch a gene outside `mutable_genes` or a
@@ -120,73 +120,73 @@ Recording:
       overlap a pin (`pinned_item`), lack a rationale or required evidence
       (`missing_rationale`, `missing_evidence`), fail the schema (`schema`), or exceed the
       Manifest-mirrored limits (`limit_exceeded`).
-- [ ] A recorded revision is always one that apply would accept: the checks
+- [x] A recorded revision is always one that apply would accept: the checks
       Manifest apply runs before writing (persona UTF-8 and engine-legal
       type, local skill files form a valid package, resource admission and
       path rules, MCP URL/header rules, MCP permission and bot-override
       validity in the recording bot's context) run on the new revision's
       content; every `examples/invalid` case that names one of them is
       refused by it.
-- [ ] Recording content that already exists returns the existing revision
+- [x] Recording content that already exists returns the existing revision
       unchanged (same id, sequence number and parent). Going back is the
       same idea for refs: in A → B → C → D, promoting B again records
       nothing and leaves B's parent as A; only `active` and `previous`
       move.
-- [ ] Each recorded patch reports its risk tier and `rewrite` flags by the
+- [x] Each recorded patch reports its risk tier and `rewrite` flags by the
       contract's rules; the published canonical-JSON and rewrite vectors
       are the oracle.
-- [ ] An owner can set a bot's policy; that records a new revision with the
+- [x] An owner can set a bot's policy; that records a new revision with the
       same content and the new policy, parent `active`.
 
 Refs and lineage:
-- [ ] Refs `active`, `previous`, `canary`, `draft` and `candidate/<run>/<n>`
+- [x] Refs `active`, `previous`, `canary`, `draft` and `candidate/<run>/<n>`
       exist per bot; every move is compare-and-swap, a lost race answers a
       conflict naming the current revision, and every move adds a ref event.
-- [ ] Only the designated mover may move each ref: owners move `draft`;
+- [x] Only the designated mover may move each ref: owners move `draft`;
       `active`, `previous` and `canary` move only through promotion;
       candidate refs are created when a run candidate is recorded and never
       moved.
-- [ ] Revisions list per bot newest first, filtered by status and parent; a
+- [x] Revisions list per bot newest first, filtered by status and parent; a
       revision is retrievable by id, by `r<seq>`, or by ref name.
-- [ ] A diff between any two revisions of the same bot lists each changed
+- [x] A diff between any two revisions of the same bot lists each changed
       gene as added, removed or modified, carries a unified diff for
       modified text files, and reports a risk tier and rewrite flags.
 
 Content:
-- [ ] Bytes can be uploaded for a bot and read back by digest, only when
+- [x] Bytes can be uploaded for a bot and read back by digest, only when
       the digest is reachable from that bot's revisions or uploads; a read
       re-verifies the hash.
 
 Promotion and drift:
-- [ ] A revision compiles to a complete, Manifest-shaped desired-state
+- [x] A revision compiles to a complete, Manifest-shaped desired-state
       document whose file entries point at the content store by digest and
       whose Center and repo skills are pinned by version or path. Compiling
       each contract example's `revision.json` reproduces its
       `compiled.yaml`. The document's digest is the digest of its canonical
       JSON.
-- [ ] Promoting a revision moves `active` and `previous` in one
+- [x] Promoting a revision moves `active` and `previous` in one
       compare-and-swap, marks the revision `promoted`, records a promotion
       with actor, reason, the compiled document and its digest, and hands
       the compiled revision to the delivery seam.
-- [ ] Until RSI-04 provides direct delivery, the seam's preflight refuses
+- [x] Until RSI-04 provides direct delivery, the seam's preflight refuses
       every promotion as `not_appliable` before any ref moves, naming
       RSI-04; service bots are refused as unsupported the same way.
-- [ ] The registry answers which revision a bot runs by joining the bot's
+- [x] The registry answers which revision a bot runs by joining the bot's
       last apply to the promotion that started it, and reports drift when
       the last apply was not started by a promotion or its revision differs
       from `active`. Owner promotions on a drifted bot are allowed;
       automated ones are refused.
 
 Surface and tests:
-- [ ] The HTTP endpoints exist under `/openapi/v1/bots/{bot_id}/genome/`
+- [x] The HTTP endpoints exist under `/openapi/v1/bots/{bot_id}/genome/`
       with the standard envelope, authorization rows, admission modes and
       documented error statuses: list/get/diff revisions, capture, record a
       patch, set policy, refs, content, promotions.
-- [ ] Unit tests cover every module; the contract test keeps the vectors
+- [x] Unit tests cover every module; the contract test keeps the vectors
       and examples as the oracle for canonicalisation, the rewrite measure,
       patch application and compile; repository, DI wiring and HTTP bars
       are tested like the Manifest's.
-- [ ] The singlebox story "capture → patch → diff → move draft → promote"
+- [x] The singlebox story "capture → patch → diff → move draft → promote"
       runs end to end up to the delivery hand-off, where promotion is
       refused as `not_appliable`; the "deliver → go back two revisions" leg
       completes with RSI-04.
