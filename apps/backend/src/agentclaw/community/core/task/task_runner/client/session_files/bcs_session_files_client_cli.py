@@ -45,11 +45,36 @@ from agentclaw.community.core.task.task_runner.client.bcs_token_provider import 
     BcsTokenProvider,
 )
 from agentclaw.community.core.task.task_runner.client.session_files.bcs_session_files_client import (  # noqa: E402
-    BcsSessionFilesClient,
+    BcsSessionFilesClient, SessionFileContent,
 )
 
 
 logger = logging.getLogger("bcs_session_files_cli")
+
+# read 文本直出判定:mime 前缀/精确命中,或文件名扩展名在白名单;两者皆无 → 落盘。
+# BCS 的 mime_type 是 upload 端自由传入的字符串,不能全信,故最终以 utf-8 可解码为准——
+# 解不开就按二进制处理(宁落盘不把乱码刷上终端)。
+_TEXT_MIME_PREFIXES = ("text/",)
+_TEXT_MIME_EXACT = {
+    "application/json", "application/xml", "application/yaml", "application/toml",
+}
+_TEXT_EXTS = {
+    ".md", ".markdown", ".txt", ".text", ".log", ".csv", ".json", ".yaml", ".yml",
+    ".xml", ".html", ".htm", ".toml", ".ini", ".cfg",
+}
+
+
+def _decode_text_content(got: "SessionFileContent") -> str | None:
+    """文本类型且可 utf-8 解码 → 返回解码文本;否则 ``None``(调用方落盘)。"""
+    mime = (got.content_type or "").split(";", 1)[0].strip().lower()
+    ext = Path(got.file_name or "").suffix.lower()
+    if not (mime.startswith(_TEXT_MIME_PREFIXES) or mime in _TEXT_MIME_EXACT
+            or ext in _TEXT_EXTS):
+        return None
+    try:
+        return got.content.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
 
 
 def _read_secret_file(path: str) -> str:
@@ -158,10 +183,26 @@ async def _cmd_read(client: BcsSessionFilesClient, args) -> int:
         args.session_id, args.file_id,
         show=args.show, caller_bearer=bearer or None, extra_headers=extra,
     )
+    meta = (f"status=200 bytes={len(got.content)} file_name={got.file_name!r} "
+            f"content_type={got.content_type!r}")
+    # 输出三分支:--out - 字节进 stdout(可管道);未指定 --out 且判定为文本 → 原文直出;
+    # 其余(二进制/显式 --out)落盘。
+    if args.out == "-":
+        sys.stdout.buffer.write(got.content)
+        sys.stdout.buffer.flush()
+        print(meta, file=sys.stderr)
+        return 0
+    if args.out is None:
+        text = _decode_text_content(got)
+        if text is not None:
+            print(meta + " → stdout(文本直出)", file=sys.stderr)
+            sys.stdout.write(text)
+            if not text.endswith("\n"):
+                sys.stdout.write("\n")
+            return 0
     out = Path(args.out or got.file_name or f"{args.file_id}.bin").expanduser()
     out.write_bytes(got.content)
-    print(f"status=200 bytes={len(got.content)} file_name={got.file_name!r} "
-          f"content_type={got.content_type!r} → {out}")
+    print(f"{meta} → {out}")
     return 0
 
 
@@ -188,7 +229,8 @@ def main(argv: list[str] | None = None) -> int:
     _connect_args(p_read)
     p_read.add_argument("--file-id", required=True, help="list 拿到的 file_id")
     p_read.add_argument("--out", default=None,
-                        help="落盘路径(默认响应 Content-Disposition 文件名/临时名)")
+                        help="落盘路径;``-`` 输出到 stdout;缺省时文本类型(.md/.txt 等)"
+                             "原文直出 stdout、二进制按响应文件名落盘")
     p_read.add_argument("--show", action="store_true",
                         help="BCS 以 inline 输出(语义透传)")
     p_read.set_defaults(func=_cmd_read)
