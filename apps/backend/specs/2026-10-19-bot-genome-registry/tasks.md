@@ -110,7 +110,7 @@
 - **Goal:** Ensure the work meets every spec acceptance criterion.
 - **Done when:**
   - [ ] `DEPLOY_PROFILE=test uv run pytest tests/community -q` passes; architecture tests pass; every touched source file is under 1,000 lines.
-  - [ ] The singlebox story (capture → patch → diff → move `draft` → promote) is run against a local backend and the promotion is refused as `not_appliable` naming RSI-04, refs untouched; the result is recorded in the PR's Validation section.
+  - [x] The singlebox story (capture → patch → diff → move `draft` → promote) is run against a local backend and the promotion is refused as `not_appliable` naming RSI-04, refs untouched; the result is recorded in the PR's Validation section.
   - [ ] Every acceptance criterion in `spec.md` checks off, with the RSI-04-dependent leg stated.
 - **Depends on:** Task 11
 
