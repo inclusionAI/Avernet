@@ -93,6 +93,9 @@ from agentclaw.community.api.bot_config_manifest_apply_service import (
 from agentclaw.community.api.bot_config_manifest_service import (
     BotConfigManifestServiceProtocol,
 )
+from agentclaw.community.api.bot_genome_registry_service import (
+    GenomeRegistryProtocol,
+)
 from agentclaw.community.api.source_credential_service import (
     SourceCredentialServiceProtocol,
 )
@@ -229,6 +232,7 @@ from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply
 from agentclaw.community.core.bot_config_manifest.services.config_manifest_service import (
     BotConfigManifestService,
 )
+from agentclaw.community.core.bot_genome.registry import GenomeRegistryService
 from agentclaw.community.core.bot_config_manifest.credentials.service import (
     SourceCredentialService,
 )
@@ -347,6 +351,7 @@ _PAIRS = [
     (BotConfigManifestServiceProtocol, BotConfigManifestService),
     (SourceCredentialServiceProtocol, SourceCredentialService),
     (BotConfigManifestApplyServiceProtocol, BotConfigManifestApplyService),
+    (GenomeRegistryProtocol, GenomeRegistryService),
     (BotCliToolServiceProtocol, BotCliToolService),
     (BotSpaceServiceProtocol, BotSpaceService),
     (LocalBotWorkflowServiceProtocol, LocalBotWorkflowService),

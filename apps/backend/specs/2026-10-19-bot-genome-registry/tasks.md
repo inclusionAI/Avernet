@@ -63,11 +63,11 @@
 - **Goal:** The in-process `GenomeRegistryProtocol` implementation tying capture, patch, policy, checks, content and repositories together.
 - **Files:** `core/bot_genome/genome_registry_protocol.py`, `core/bot_genome/registry.py`, `api/bot_genome_registry_service.py`; `tests/community/core/bot_genome/test_registry_service.py`; `tests/community/architecture/test_service_api_conformance.py` (pair registered)
 - **Done when:**
-  - [ ] `capture` records a total revision with parent `active` (or none), copies `active`'s policy (the contract default for a first revision), files every blob, and is idempotent.
-  - [ ] `record_patch` applies the patch to `patch.base` (`RevisionNotFound` when it is not this bot's), runs the README §6.4 order, stores produced blobs, the patch and the revision atomically, is idempotent (same revision, same seq), and names `candidate/<run>/<n>` for run candidates (idempotent on retry).
-  - [ ] `set_policy` records a revision with `active`'s spec and the new policy; `get_revision` resolves id, `r<seq>` and ref names; `list_revisions` pages; `set_status` updates metadata only.
-  - [ ] `move_ref` enforces the mover table (`MoverNotAllowed`), CAS (`RefConflict` with the current revision), and logs events; `read_content` is reachability-checked and hash-verified; `put_content` returns the digest and whether it existed, refusing over the limit.
-  - [ ] `compile` returns the compiled document; `applied_revision` joins `last_apply` to the promotion that started it and is `None` otherwise.
+  - [x] `capture` records a total revision with parent `active` (or none), copies `active`'s policy (the contract default for a first revision), files every blob, and is idempotent.
+  - [x] `record_patch` applies the patch to `patch.base` (`RevisionNotFound` when it is not this bot's), runs the README §6.4 order, stores produced blobs, the patch and the revision atomically, is idempotent (same revision, same seq), and names `candidate/<run>/<n>` for run candidates (idempotent on retry).
+  - [x] `set_policy` records a revision with `active`'s spec and the new policy; `get_revision` resolves id, `r<seq>` and ref names; `list_revisions` pages; `set_status` updates metadata only.
+  - [x] `move_ref` enforces the mover table (`MoverNotAllowed`), CAS (`RefConflict` with the current revision), and logs events; `read_content` is reachability-checked and hash-verified; `put_content` returns the digest and whether it existed, refusing over the limit.
+  - [x] `compile` returns the compiled document; `applied_revision` joins `last_apply` to the promotion that started it and is `None` otherwise.
 - **Depends on:** Tasks 5, 6
 
 ## Task 8: Promotion service and applier seam

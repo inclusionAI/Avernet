@@ -52,6 +52,10 @@ class PatchRejected(GenomeError):
         super().__init__("; ".join(f"{r.location}: {r.message}" for r in self.reasons) or "patch rejected")
 
 
+class PolicyRejected(PatchRejected):
+    """A policy cannot be recorded (schema, order, or a gene path not in its canonical spelling)."""
+
+
 class CaptureRefused(GenomeError):
     """The bot's current state cannot be recorded as a revision; ``reasons`` names each item."""
 
