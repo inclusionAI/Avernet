@@ -48,10 +48,7 @@ from agentclaw.community.core.task.domain.models import (
 )
 from agentclaw.community.core.task.repository.types import BbsTaskOverviewRecord
 from agentclaw.community.core.task.task_context import task_graph_support
-from agentclaw.community.core.task.task_context.task_artifact.artifact_publish import (
-    TaskArtifactPublishService,
-    drain_published,
-)
+from agentclaw.community.core.task.task_context.task_artifact.artifact_publish import capture_write_point, discard_published, drain_published
 
 _LOG = logging.getLogger(__name__)
 
@@ -119,11 +116,6 @@ def _pending_callback_audit(task_id: str):
     if record is None or getattr(record, "run_id", None) != task_id:
         return None
     return record
-
-
-# 产物发布 capture 服务(纯构造 + contextvar,spec 2026-10-20-task-artifact-domain §5.1);
-# 无依赖、无状态,模块级单例即可——DI 绑定供未来装配面消费,缺席态语义在 _persist_locked。
-_ARTIFACT_PUBLISH = TaskArtifactPublishService()
 
 
 def _clear_pending_callback_audit(record) -> None:
@@ -214,24 +206,14 @@ class TaskGraphService:
                 self._task_info_repo.update_status(
                     graph.task_id, graph.effective_status
                 )
-            # 缺席态(内存-only):不发布——暂存的产物行随闭包丢弃,记 debug 一条
-            # (spec §5.2;与取舍 #10「未接线不发布」同语义,不吞运行期错误)。
-            discarded = drain_published()
-            if discarded:
-                _LOG.debug(
-                    "[task-artifact] graph repo 未接线,丢弃 %d 条产物暂存 (task=%s)",
-                    len(discarded),
-                    graph.task_id,
-                )
+            discard_published(graph)  # 缺席态不发布:暂存随闭包丢弃(§5.2/取舍 #10)
             return
         expected = self._graph_versions.get(graph.task_id, 0)
         # 乙' c+R2:图级有效态只读派生根态(与既有 root 派生等价,单源化)。
         runtime_status = graph.effective_status
         # Attach the inbound callback audit to this mutation's transaction (spec §12).
         callback_audit = _pending_callback_audit(graph.task_id)
-        # 产物行同事务消费(§5.2,与 callback audit 同生命周期):drain 在提交前、
-        # 随 save_graph(published_artifacts=...) 一并写入。版本冲突重放时 mutation
-        # 闭包会重新 capture,重复行由 select-first 查重吸收(§5.3)。
+        # 产物行同事务消费(§5.3 查重吸收重放;§5.2 不吞失败)。
         published = drain_published()
         try:
             version = self._graph_repo.save_graph(
@@ -604,9 +586,6 @@ class TaskGraphService:
         def mutation(graph):
             node = self._require_node(graph, patch.node_id)
             prev_status = node.status
-            # 产物归属口径:extend fold 前的 harness_retries 快照(供发布点甄别
-            # 「attempt 纯递增且无新内容」的复位写,避免旧内容按新 attempt 误归档)。
-            _retries_before = int(node.run_info.extend_props.get("harness_retries", 0) or 0)
             relay_mode = (
                 graph.extend_props.get("execution_config", {}) or {}
             ).get("orchestration_mode") == "relay"
@@ -769,23 +748,7 @@ class TaskGraphService:
                 node.run_info.end_time = None
             if new_status is not None:
                 node.status = new_status
-            # 产物发布点:fold 之后、闭包提交之前,构造并 stage 产物行(§5.1);
-            # 重放安全:闭包随版本冲突整体重跑,重复行由 select-first 查重吸收。
-            # attempt 纯递增且本次未 fold 任何新内容(harness 复位写)→ 不发布:
-            # 中央通道不清 output,旧 attempt 的文本不属于新 attempt,按新档归档即造假。
-            _retries_after = int(node.run_info.extend_props.get("harness_retries", 0) or 0)
-            _attempt_reset_only = (
-                _retries_after > _retries_before
-                and patch.output_patch is None
-                and patch.artifact_patch is None
-            )
-            if not _attempt_reset_only:
-                _ARTIFACT_PUBLISH.capture_node(
-                    graph,
-                    node,
-                    artifact_patch=patch.artifact_patch,
-                    now_ms=int(time.time() * 1000),
-                )
+            capture_write_point(graph, node, patch=patch, now_ms=int(time.time() * 1000))  # 产物发布点(§5.1)
             return (
                 NodeOpResult(
                     task_id=patch.task_id,

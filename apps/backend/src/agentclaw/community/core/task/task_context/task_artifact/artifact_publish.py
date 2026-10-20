@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from contextvars import ContextVar
+from functools import lru_cache
 from typing import TYPE_CHECKING
 
 from agentclaw.community.core.task.domain.errors import TaskArtifactContentError
@@ -59,6 +60,45 @@ def drain_published() -> list[TaskArtifactRecord]:
         return []
     logger.debug("[task-artifact] drain %d 条产物行随图提交", len(pending))
     return list(pending)
+
+
+def discard_published(graph) -> None:
+    """缺席态(内存-only,graph 仓储未接线):不发布,暂存随闭包丢弃并记 debug(§5.2)。"""
+
+    discarded = drain_published()
+    if discarded:
+        logger.debug(
+            "[task-artifact] graph repo 未接线,丢弃 %d 条产物暂存 (task=%s)",
+            len(discarded),
+            getattr(graph, "task_id", "?"),
+        )
+
+
+@lru_cache(maxsize=1)
+def default_publish_service() -> TaskArtifactPublishService:
+    """无状态发布服务的惰性取用器(模块级服务实例被架构守卫禁止;lr 惰性等同单例)。"""
+
+    return TaskArtifactPublishService()
+
+
+def capture_write_point(graph, node, *, patch, now_ms: int) -> None:
+    """集中写点发布语义(spec §5.1):fold 之后捕获,attempt 纯递增复位写不发布。
+
+    中央通道 harness 复位不清 output(仅 relay 清),复位 mutation 若照 capture 会把
+    旧 attempt 的文本按新 attempt 归档(内容造假)。「本次 extend fold 重置 harness_retries
+    且未 fold 任何新内容(output/artifact_patch 均 absent)」的写点直接跳过发布。
+    """
+
+    artifact_patch = getattr(patch, "artifact_patch", None)
+    attempt_reset_only = (
+        "harness_retries" in (getattr(patch, "extend_props_patch", None) or {})
+        and patch.output_patch is None
+        and artifact_patch is None
+    )
+    if not attempt_reset_only:
+        default_publish_service().capture_node(
+            graph, node, artifact_patch=artifact_patch, now_ms=now_ms
+        )
 
 
 class TaskArtifactPublishService:

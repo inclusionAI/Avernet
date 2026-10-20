@@ -6,10 +6,13 @@
 
 from __future__ import annotations
 
-import json
-from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any, Literal
+
+from agentclaw.community.adapters.http.task.schemas_artifact import (  # noqa: E501
+    TaskArtifactDescriptorDTO,
+    artifact_record_to_descriptor,
+)
 
 from pydantic import BaseModel, ConfigDict, Field
 from agentclaw.community.adapters.http.task.schemas_relay_dispatch import (
@@ -304,27 +307,6 @@ class RuntimeInfoDTO(BaseModel):
     )
 
 
-class TaskArtifactDescriptorDTO(BaseModel):
-    """产物读侧 Descriptor:只含安全字段(spec 2026-10-20-task-artifact-domain §7)。
-
-    content 为 kind-tagged 引用元数据 wire 形(File 分支 storage_type/storage_id/
-    file_name/file_id/file_type;UrlLink 分支 url/type;Code 分支四字段)——不含任何
-    临时下载凭证/字节 handle,前端自行基于既有读口拼链接。
-    """
-
-    artifact_id: str = Field(..., description="产物ID")
-    artifact_name: str | None = Field(
-        None, description="业务展示名(file 产物回落 file_name;未提供为 null)"
-    )
-    kind: str = Field(..., description="内容形态:text|file|url_link|code")
-    content: dict[str, Any] = Field(
-        default_factory=dict, description="kind-tagged 引用元数据(JSON object)"
-    )
-    attempt: int | None = Field(None, description="归属 attempt(harness_retries 快照)")
-    creator: str | None = Field(None, description="产出者(bot_id/group_id;system=系统写入)")
-    created_at: int = Field(..., description="发布时间(ms epoch)")
-
-
 class TaskNodeDTO(BaseModel):
     """分解树中的单个任务节点(规格 + 运行时信息)。"""
 
@@ -338,10 +320,7 @@ class TaskNodeDTO(BaseModel):
     run_info: RuntimeInfoDTO = Field(
         default_factory=RuntimeInfoDTO, description="节点运行时信息"
     )
-    artifacts: list[TaskArtifactDescriptorDTO] | None = Field(
-        None,
-        description="节点产物清单(读侧富化;null=未富化,读取方视为空列表)",
-    )
+    artifacts: list[TaskArtifactDescriptorDTO] | None = Field(None, description="节点产物清单(读侧富化;null=未富化)")
 
 
 class TaskInfoRecordDTO(BaseModel):
@@ -714,38 +693,8 @@ _INTERNAL_GRAPH_EXT_PROPS = frozenset({"execution_config", "runtime_profile"})
 _INTERNAL_NODE_EXT_PROPS = frozenset({"dispatching", "dispatching_at"})
 
 
-def artifact_record_to_descriptor(record) -> TaskArtifactDescriptorDTO:
-    """TaskArtifactRecord → Descriptor DTO(§7 安全字段;仅协议翻译,无业务判断)。"""
-
-    from agentclaw.community.core.task.task_context.task_artifact import content_to_json
-
-    return TaskArtifactDescriptorDTO(
-        artifact_id=record.artifact_id,
-        artifact_name=record.artifact_name,
-        kind=record.kind,
-        content=json.loads(content_to_json(record.content)),
-        attempt=record.attempt,
-        creator=record.creator,
-        created_at=record.created_at,
-    )
-
-
-def group_artifacts_by_node(records) -> dict[str, list]:
-    """读侧产物按 node 分组(仓储已经给出 attempt/gmt_create 倒序,只分组不重排)。"""
-
-    mapping: dict[str, list] = {}
-    for record in records:
-        mapping.setdefault(record.node_id, []).append(record)
-    return mapping
-
-
-def graph_to_dto(
-    graph,
-    *,
-    include_action_log: bool = False,
-    artifacts_by_node: "Mapping[str, Sequence] | None" = None,
-) -> TaskExecutionGraphDTO:
-    """领域图 → DTO;``artifacts_by_node`` 为 None 时零行为变化(不富化产物)。"""
+def graph_to_dto(graph, *, include_action_log: bool = False, artifacts_by_node: "dict[str, list] | None" = None) -> TaskExecutionGraphDTO:
+    """领域图 → DTO。``artifacts_by_node`` 非 None 时富化节点产物,None 时零行为变化(§7)。"""
 
     nodes: list[TaskNodeDTO] = []
     for n in graph.tasks:
@@ -761,10 +710,8 @@ def graph_to_dto(
         )
         node_artifacts = None
         if artifacts_by_node is not None:
-            node_artifacts = [
-                artifact_record_to_descriptor(record)
-                for record in artifacts_by_node.get(n.node_id, [])
-            ]
+            node_artifacts = [artifact_record_to_descriptor(record)  # noqa: E501
+                              for record in artifacts_by_node.get(n.node_id, [])]
         nodes.append(
             TaskNodeDTO(
                 node_id=n.node_id,

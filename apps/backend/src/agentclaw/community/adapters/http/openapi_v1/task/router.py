@@ -31,6 +31,9 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     page as page_envelope,
 )
 from agentclaw.community.adapters.http.task.trajectory_html import render_trajectory_html
+from agentclaw.community.adapters.http.task.schemas_artifact import (
+    group_artifacts_by_node,
+)
 from agentclaw.community.adapters.http.task.schemas import (
     BbsTaskItemDTO,
     TaskExecutionGraphDTO,
@@ -44,7 +47,6 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskTrajectoryDTO,
     bbs_task_overview_to_dto,
     graph_to_dto,
-    group_artifacts_by_node,
     op_result_to_dto,
     task_info_record_to_dto,
     task_info_request_from_dto,

@@ -1,13 +1,18 @@
 # task 模块产物领域对象(Artifact Domain)设计
 
 - 日期:2026-10-20
-- 状态:DRAFT(方案评审中,未实现)
+- 状态:**已实现待评审**(2026-10-20 按 plan.md 9 任务全量落地于 branch `dev_task_cli_1015`,基线 `b6d6b12f7` → 实现 head `b0324aa3a`)
 - 参与模块:`core/task`(domain / task_context / task_runner / repository)、`core/repository`(protocols/implementations)、`adapters/http/task`
 - 本地代码:branch `dev_task_cli_1015`,基线 `b6d6b12f7`
 - 输入:语雀《产物领域对象》(yuque `mad/enxdbg/gfap3r7tgc2aeptr`,2026-09-17 建议稿)作为设计参考;仓库现状代码勘察(2026-10-20)
 - 约束:遵循 `AGENTS.md` / `CONTEXT-MAP.md` / `docs/arch`(Rule 22:HTTP adapter 只转协议;core/repository 四条注册纪律)
 - 关联决定:本方案为**全新设计**,不以任何历史分支上的实现为前提
-- 验证状态:未验证(仅设计;实现后补充测试证据)
+- 验证状态:**已验证**(2026-10-20,uv 0.9.21 / Python 3.12):
+  - 领域与序列化(task_artifact 78 项)、建模/上报解析/发布/双轨写/relay 写/读侧 各 suite 全绿;
+  - 全量门禁 `tests/community/core/task tests/community/repository/task tests/community/adapters/http/task tests/community/architecture -q` → **2192 passed, 27 skipped**,唯一失败 `test_shipped_python_has_no_corp_identifiers` 为基线上既有存量(干净 HEAD 复跑同样失败,非本变更引入);
+  - 架构守卫(repository_contracts / task_module_responsibility_guards / oversized / module-instances / schema-docs)全绿;
+  - 反目标自查:产物 content 面无 presign/token/object_handle/宿主机路径;集中 push/pull(callback_adapter/callback_routes/bbs_routes)与 `_relay_output_value`/`_relay_graph_output` 零 diff;
+  - ruff:本计划 changed files 清洁(基线存量 3 处 F811/F401 之外的零新增)。
 
 > 本文所有标注 **(方案取舍)** 的条目是设计者在本次讨论中自行拍板的实现取舍,用户未逐条确认;有异议请直接推翻。
 

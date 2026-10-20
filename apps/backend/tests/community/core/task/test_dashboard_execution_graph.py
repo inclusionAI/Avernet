@@ -17,6 +17,7 @@ from agentclaw.community.adapters.http.openapi_v1.principal import require_user_
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.core.repository.protocols.task import (
+    TaskArtifactRepositoryProtocol,
     TaskCallbackRepositoryProtocol, TaskInfoRepositoryProtocol,
 )
 from agentclaw.community.core.task.domain.models import (
@@ -74,6 +75,18 @@ class _StubModule(Module):
             def search_public_bots_by_keyword(self, **kw):
                 return {"total": 0, "items": []}
         return _B()
+
+    @singleton
+    @provider
+    def artifact_repo(self) -> "TaskArtifactRepositoryProtocol":
+        class _EmptyArtifactRepo:
+            def list_by_task(self, task_id, *, limit=200):
+                return []
+
+            def list_by_task_node(self, task_id, node_id, *, limit=100):
+                return []
+
+        return _EmptyArtifactRepo()
 
     @provider
     def task_info_repo(self) -> TaskInfoRepositoryProtocol:

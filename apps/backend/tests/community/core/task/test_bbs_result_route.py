@@ -21,6 +21,7 @@ from agentclaw.community.adapters.http.task.router import router as task_interna
 from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
+from agentclaw.community.core.repository.protocols.task import TaskArtifactRepositoryProtocol
 from agentclaw.community.core.repository.protocols.task import TaskInfoRepositoryProtocol
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
@@ -54,6 +55,18 @@ class _StubDiscoverModule(Module):
                 return {"total": 0, "items": []}
 
         return _B()  # type: ignore[return-value]
+
+    @singleton
+    @provider
+    def artifact_repo(self) -> "TaskArtifactRepositoryProtocol":
+        class _EmptyArtifactRepo:
+            def list_by_task(self, task_id, *, limit=200):
+                return []
+
+            def list_by_task_node(self, task_id, node_id, *, limit=100):
+                return []
+
+        return _EmptyArtifactRepo()
 
     @provider
     def task_info_repo(self) -> TaskInfoRepositoryProtocol:

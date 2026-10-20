@@ -22,13 +22,16 @@ from agentclaw.community.adapters.http.task.schemas_relay_report import (
     TaskReportCommandDTO, report_result_to_dto,
 )
 from agentclaw.community.adapters.http.task.trajectory_html import render_trajectory_html
+from agentclaw.community.adapters.http.task.schemas_artifact import (
+    group_artifacts_by_node,
+)
 from agentclaw.community.adapters.http.task.schemas import (
     TaskCallbackRequest, TaskExecutionGraphDTO,
     TaskGrantRequestDTO, TaskGrantResultDTO, TaskInfoRequestDTO,
     TaskNodeUpdateDTO, TaskOpResultDTO,
     TaskRevokeRequestDTO, TaskRevokeResultDTO, TaskSettingRequestDTO,
     TaskSettingStateDTO, TaskTrajectoryDTO, acceptance_result_from_dto,
-    graph_to_dto, group_artifacts_by_node, op_result_to_dto,
+    graph_to_dto, op_result_to_dto,
     task_info_request_from_dto, trajectory_to_dto,
 )
 from agentclaw.community.adapters.http.task.relay_routes import router as relay_api_router
