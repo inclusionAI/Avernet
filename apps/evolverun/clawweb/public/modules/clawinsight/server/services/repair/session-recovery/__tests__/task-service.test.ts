@@ -18,6 +18,7 @@ function setup(callbackFails = false) {
       const changed = change(structuredClone(value)); records.set(id, structuredClone(changed)); return changed;
     },
     acknowledgeResult: async (id, version) => { const value = records.get(id)!; value.pending_results = value.pending_results.filter(item => item.result_version !== version); },
+    appendNotification: async (id, event) => { const value = records.get(id)!; if (value.timeline.some(item => item.event_id === event.event_id)) return false; value.timeline.push(event); return true; },
   };
   const delivery = { create: vi.fn().mockResolvedValue({ event_id: "evt", delivery_key: "send1", status: "accepted" }) };
   const agent = { start: vi.fn().mockResolvedValue(undefined), release: vi.fn().mockResolvedValue(undefined), listExecutions: vi.fn().mockResolvedValue([]) };

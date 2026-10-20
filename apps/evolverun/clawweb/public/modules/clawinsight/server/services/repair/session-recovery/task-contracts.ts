@@ -93,6 +93,8 @@ export interface RecoveryTaskStore {
   find(taskId: string): Promise<RecoveryStoredTask | null>;
   listForEvent(eventId: string, ownerId: string): Promise<RecoveryStoredTask[]>;
   update(taskId: string, expectedVersion: number, change: (current: RecoveryStoredTask) => RecoveryStoredTask): Promise<RecoveryStoredTask | null>;
+  /** Append a notification fact atomically without changing the Agent's business-state version. */
+  appendNotification(taskId: string, event: RecoveryTimelineEvent): Promise<boolean>;
   failResult?(taskId: string, resultVersion: number): Promise<void>;
   acknowledgeResult(taskId: string, resultVersion: number): Promise<void>;
   listForReporting?(limit: number, afterTaskId: string, controlPlaneEnvironment: import("../common/task-control-plane.js").AgentControlPlaneEnvironment): Promise<RecoveryStoredTask[]>;

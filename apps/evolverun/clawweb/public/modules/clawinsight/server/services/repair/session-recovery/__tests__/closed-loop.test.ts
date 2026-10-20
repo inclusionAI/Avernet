@@ -14,6 +14,7 @@ import { AgentToolCallRepository } from "../../../../repositories/repair/agent-t
 import { SessionRecoveryTaskService } from "../task-service.js";
 import { SessionRecoveryAgentService, recoveryTargetSnapshot } from "../agent-service.js";
 import { RecoverySessionReader } from "../session-reader.js";
+import { SessionRecoveryGroupNotifier } from "../notification.js";
 import { createSessionRecoveryRouter } from "../../../../routes/session-recovery.js";
 import { reconcileAgentExecutions } from "../../common/agent-execution-monitor.js";
 import type { RecoveryTaskResult, RecoveryPlan, RecoveryStoredTask } from "../task-contracts.js";
@@ -24,7 +25,7 @@ const request = { event_id: "event-fixture", tc_fault_label: "TC.MCP.PERMISSION"
 const plan: RecoveryPlan = { summary: "修正局部配置并重试", basis: "原工具调用失败，引用原会话证据", scope: "本任务目标的局部配置", verification: "原先失败的 MCP 操作成功并继续原任务",
   actions: [{ actionId: "fix", type: "container_command", operationScope: { operation: "file.write", target: "/workspace/memory.md" }, command: "printf repaired", summary: "修正配置", risk: "局部修改", rollback: "恢复原值", verification: "读取配置确认" }], owner_cooperation: [] };
 let db: SqliteDatabase, repo: EvolveRepository, tasks: SessionRecoveryTaskRepository, service: SessionRecoveryTaskService, agent: SessionRecoveryAgentService,
-  runtime: BotRuntime, directory: string, sessionFile: string, now: number, target: ResolvedBotTarget, submissions: any[], callbacks: RecoveryTaskResult[], ais: any, notifier: any, reporter: { report: (result: RecoveryTaskResult) => Promise<void> };
+  runtime: BotRuntime, directory: string, sessionFile: string, now: number, target: ResolvedBotTarget, submissions: any[], callbacks: RecoveryTaskResult[], ais: any, notifier: any, actionNotifier: { after: ReturnType<typeof vi.fn> }, reporter: { report: (result: RecoveryTaskResult) => Promise<void> };
 let artifactStore: ConstructorParameters<typeof SessionRecoveryTaskRepository>[2];
 const current = async (id: string): Promise<RecoveryStoredTask> => (await tasks.find(id))!;
 async function create(level = "approval", patch = {}) {
@@ -64,9 +65,34 @@ beforeEach(async () => {
   }) };
   const targets = { resolve: vi.fn(async () => target) };
   ais = { execute: vi.fn(async (_owner, params) => { submissions.push(JSON.parse(params["${clawevolve_params}"])); return `job-${submissions.length}`; }), getJobStatusDetail: vi.fn(async () => ({ status: "running", rawStatus: "RUNNING", errorMessage: null })), stopExecution: vi.fn(), getJobStatus: vi.fn() }; notifier = { notify: vi.fn() };
-  agent = new SessionRecoveryAgentService({ controlPlaneEnvironment: "pre", tasks, repo, audit: new AgentToolCallRepository(db, "session_recovery"), ais, runtime, targets, business: () => service, publicBaseUrl: "https://service.invalid", snapshotId: 1, nasRoots: [directory], leaseSeconds: 120, launchGraceSeconds: 1800, observationMs: 3600000, now: () => now });
+  actionNotifier = { after: vi.fn() };
+  agent = new SessionRecoveryAgentService({ controlPlaneEnvironment: "pre", tasks, repo, audit: new AgentToolCallRepository(db, "session_recovery"), ais, runtime, targets, business: () => service, publicBaseUrl: "https://service.invalid", snapshotId: 1, nasRoots: [directory], leaseSeconds: 120, launchGraceSeconds: 1800, observationMs: 3600000, now: () => now, actionNotifier });
   reporter = { report: async result => { callbacks.push(result); } };
-  service = new SessionRecoveryTaskService({ controlPlaneEnvironment: "pre", tasks, agent, notifier, reporter, observationMs: 3600000, now: () => now, resolveTarget: async () => recoveryTargetSnapshot(target) });
+  service = new SessionRecoveryTaskService({ controlPlaneEnvironment: "pre", tasks, agent, notifier, reporter, observationMs: 3600000, now: () => now, resolveTarget: async () => recoveryTargetSnapshot(target), actionNotifier });
+});
+it("persists deduplicated group delivery facts without changing the business version or exposing them to the Agent", async () => {
+  const task = await create();
+  const sent = await agent.retryMessage(task, { clientRequestId: "group-advice", purpose: "纠正原操作", message: "请按真实工具参数继续" });
+  expect(actionNotifier.after).toHaveBeenCalledWith({ taskId: task.taskId, eventId: sent.toolCallId, kind: "message" });
+  const before = await current(task.taskId);
+  let finish!: () => void;
+  const sender = { send: vi.fn(() => new Promise<void>(resolve => { finish = resolve; })) };
+  const deps = { controlPlaneEnvironment: "pre" as const, tasks, sender, publicBaseUrl: "https://service.invalid",
+    config: { findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ webhook: "https://robot.invalid/send", timeout_seconds: 10 }) }) } };
+  const notice = { taskId: task.taskId, eventId: sent.toolCallId, kind: "message" as const };
+  new SessionRecoveryGroupNotifier(deps).after(notice);
+  new SessionRecoveryGroupNotifier(deps).after(notice);
+  await vi.waitFor(() => expect(sender.send).toHaveBeenCalledOnce());
+  expect((await current(task.taskId)).version).toBe(before.version);
+  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "message",
+    summary: "已有现场证据，已发出指引", evidence_ids: [sent.evidenceId] });
+  expect((await current(task.taskId)).phase).toBe("observe");
+  finish();
+  await vi.waitFor(async () => expect((await current(task.taskId)).timeline.some(event => event.payload.channel === "group_webhook" && event.payload.sent === true)).toBe(true));
+  const after = await current(task.taskId);
+  expect(after.version).toBe(before.version + 1);
+  expect((await agent.bootstrap(after)).task.timeline.some(event => event.payload.channel === "group_webhook")).toBe(false);
+  expect((await repo.findTask(task.taskId))!.config_json).not.toContain("https://robot.invalid");
 });
 it("persists sharing and authorizes read-only task links without granting Owner actions", async () => {
   const task = await create();
@@ -130,6 +156,7 @@ it("Agent-first MCP sends one targeted message without an environment approval a
   const observed = await inspect(await current(task.taskId), "read-agent-first-effect");
   await agent.report(await current(task.taskId), { kind: "observation", phase: "observe", judgment: { delivery: "confirmed", response: "acted", effect: "recovered", summary: "原失败步骤已成功", evidence_ids: [observed.evidenceId] } });
   expect((await current(task.taskId)).status).toBe("completed"); expect(notifier.notify).not.toHaveBeenCalled();
+  expect(actionNotifier.after).toHaveBeenCalledWith(expect.objectContaining({ taskId: task.taskId, kind: "result" }));
   await service.reportResults(); expect(callbacks.at(-1)).toMatchObject({ effect: "recovered", delivery: { delivery_key: request.delivery_key } });
 });
 it("non-MCP goes to one environment plan without any initial retry message", async () => {
@@ -139,6 +166,7 @@ it("non-MCP goes to one environment plan without any initial retry message", asy
   task = await current(task.taskId); expect(task.phase).toBe("plan"); expect(runtime.sendMessage).not.toHaveBeenCalled();
   await agent.report(task, { kind: "plan", phase: "plan", plan }); task = await current(task.taskId);
   expect(task.status).toBe("waiting_owner"); expect(notifier.notify).toHaveBeenCalledTimes(1);
+  expect(actionNotifier.after).toHaveBeenCalledWith(expect.objectContaining({ taskId: task.taskId, kind: "plan" }));
   await service.decide(task.taskId, task.plan!.digest, true, actor);
   await agent.apply(await current(task.taskId), { actionId: "fix", clientRequestId: "fix-skill", purpose: "执行获批环境修复" });
   await agent.retryMessage(await current(task.taskId), { clientRequestId: "retry-skill", purpose: "修复后继续原任务", message: "局部错误已修正，请继续原任务" });

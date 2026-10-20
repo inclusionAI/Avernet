@@ -57,6 +57,16 @@ A separate 20-second reporting loop retries saved versions in order without bloc
 
 Database definitions use the existing shared migration registry. Version 141 is reserved without altering shared columns; the unshipped v142 result-table migration is removed. This change requires no new table or column expansion. Existing widened columns are not shrunk. Legacy task JSON is converted on subsequent updates, including pending result delivery; legacy progress-only snapshots are excluded from callbacks. SQLite runs canonical migrations; MySQL/ZDAS provisioning follows the existing external migration process. Requests perform no DDL. The API contract is `session-recovery-api.md` in this directory.
 
+## Optional group notifications
+
+Group delivery is a backend after-hook for saved recovery-message receipts, complete plans, execution summaries and terminal task results. It does not add Agent tools, output fields, model calls or waiting stages. Group notification events are omitted from the Agent bootstrap context.
+
+One application-wide `ce_app_config` row, `session_recovery_notifications`, controls this channel. The existing `enabled` column is the switch. Its JSON value contains `webhook` and `timeout_seconds` (integer 1–60, normally 10). Missing or disabled configuration means no group notification. An unavailable config table, invalid configuration, timeout or rejected robot response is isolated from task execution. No Bot list, control-plane environment selector, administrator list or mentions are added.
+
+The notification formatter uses existing diagnosis, plan, action and judgment fields, retains the task link and bounds Markdown content. The Webhook transport posts a Markdown message directly and checks both HTTP status and the robot result. Actual Webhooks stay in application configuration and are never passed to the Agent or saved in task evidence. Existing Owner approval notifications remain unchanged.
+
+Notification claims and outcomes append to the existing phase timeline under the Task repository lock. The source event ID and notification kind identify a single notification attempt across repeated callbacks and workers. These facts do not increment the business-state version or enqueue an upstream task result. The after-hook performs no automatic resend of an uncertain delivery and never repeats a Bot message or repair action. A process interrupted during notification may leave an unconfirmed attempt; this optional channel does not introduce a durable message queue.
+
 ## Validation boundary
 
 Local tests use real temporary SQLite, real session JSONL and the actual relay parsing program. Bot, AIS, model and DingTalk services are controlled fixtures. Independently packaged imports, MCP catalogs, business continuation, timeout recovery, callbacks and UI decisions are tested locally. Real Bot behavior, deployed AIS and notification delivery require the subsequent acceptance run.

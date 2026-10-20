@@ -109,6 +109,19 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
   async acknowledgeResult(taskId: string, resultVersion: number): Promise<void> {
     await this.updateDelivery(taskId, resultVersion, true);
   }
+  async appendNotification(taskId: string, event: RecoveryTimelineEvent): Promise<boolean> {
+    if (event.kind !== "notification" || containsSecret(JSON.stringify(event))) throw new Error("Invalid recovery notification event");
+    return this.db.transaction(async tx => {
+      const raw = await this.lock(tx, taskId);
+      if (!raw) throw new Error("Recovery task not found during notification");
+      const task = await this.hydrate(tx, raw);
+      if (task.timeline.some(item => item.event_id === event.event_id)) return false;
+      const stored = JSON.parse(raw);
+      if (stored.artifactStorage !== 2) throw new Error("Recovery task requires artifact storage before notification");
+      await this.savePhase(tx, task, stored.detailsRef, [event]);
+      return true;
+    });
+  }
   async failResult(taskId: string, resultVersion: number): Promise<void> {
     await this.updateDelivery(taskId, resultVersion, false);
   }

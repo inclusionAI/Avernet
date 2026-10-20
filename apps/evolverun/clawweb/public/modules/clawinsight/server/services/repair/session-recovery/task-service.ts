@@ -6,7 +6,7 @@ import { SessionRecoveryError } from "./errors.js";
 import { parseRequest } from "./validation.js";
 import { recoveryHandbook } from "./handbook.js";
 import { decideRecoveryPlan, observeRecovery, recoveryTaskResult, resumeRecoveryObservation, submitRecoveryPlan } from "./task-state.js";
-import type { RecoveryActor, RecoveryAcknowledgment, RecoveryExecutionView, RecoveryRequest, RecoveryResult, RecoveryTaskView, SessionRecoveryTaskApi } from "./contracts.js";
+import type { RecoveryActionNotifier, RecoveryActor, RecoveryAcknowledgment, RecoveryExecutionView, RecoveryRequest, RecoveryResult, RecoveryTaskView, SessionRecoveryTaskApi } from "./contracts.js";
 import type { RecoveryEvidence, RecoveryJudgment, RecoveryLevel, RecoveryPlan, RecoveryTaskResult, RecoveryTimelineEvent, RecoveryStoredTask, RecoveryTaskStore } from "./task-contracts.js";
 
 const EXECUTION_RETRY_DELAYS_MS = [20000, 60000] as const;
@@ -29,6 +29,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     tasks: RecoveryTaskStore;
     agent: RecoveryAgentExecutor;
     notifier: RecoveryTaskNotifier;
+    actionNotifier?: RecoveryActionNotifier;
     reporter: RecoveryTaskReporter;
     observationMs: number;
     now?: () => number;
@@ -102,6 +103,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         timeline: [...value.timeline, this.event("assessment", "agent", input.summary, input)] };
     });
     if (task.status === "completed") await this.deps.agent.release(task);
+    if (task.status === "completed") this.notifyGroup(task, "result");
   }
 
   async observe(taskId: string, version: number, judgment: RecoveryJudgment, evidence: RecoveryEvidence[]): Promise<void> {
@@ -116,13 +118,16 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         timeline: [...value.timeline, this.event("observation", "agent", judgment.summary, { judgment, evidence })] };
     });
     if (["completed", "failed", "waiting_effect"].includes(task.status)) await this.deps.agent.release(task);
+    if (["completed", "failed"].includes(task.status)) this.notifyGroup(task, "result");
   }
 
   async plan(taskId: string, version: number, plan: RecoveryPlan): Promise<void> {
     const task = await this.mutate(taskId, version, value => ({ ...value, ...submitRecoveryPlan(value, plan, this.now()),
       timeline: [...value.timeline, this.event("plan", "agent", plan.summary, { plan })] }));
+    this.notifyGroup(task, "plan");
     if (task.status === "waiting_owner") await this.notify(task, "plan", plan.summary);
     if (task.status === "completed") await this.deps.agent.release(task);
+    if (task.status === "completed") this.notifyGroup(task, "result");
   }
 
   async decide(taskId: string, digest: string, approved: boolean, actor: RecoveryActor, cooperationDone = false, feedback = ""): Promise<void> {
@@ -139,6 +144,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       timeline: [...value.timeline, this.event("owner_decision", "owner", approved ? "确认方案并完成配合事项" : "拒绝方案", { digest, approved, cooperation_done: cooperationDone, feedback })] }));
     if (approved) await this.deps.agent.start(task);
     else await this.deps.agent.release(task);
+    if (!approved) this.notifyGroup(task, "result");
   }
 
   async resume(taskId: string): Promise<void> {
@@ -192,6 +198,8 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         timeline: [...value.timeline, this.event("operation", "agent", input.summary, { applicable: input.applicable, success: input.success })] };
     });
     if (task.status === "failed") await this.deps.agent.release(task);
+    this.notifyGroup(task, "execution");
+    if (task.status === "failed") this.notifyGroup(task, "result");
   }
 
   async executionFailure(taskId: string, reason: string, executionId?: string, retryable = false): Promise<void> {
@@ -212,6 +220,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         timeline: [...value.timeline, this.event("execution", "service", summary, { execution_id: executionId, retryable, failures, retry_at_ms: delay !== undefined ? this.now() + delay : null })] };
     });
     await this.deps.agent.release(task);
+    if (task.status === "failed") this.notifyGroup(task, "result");
   }
 
   private failureJudgment(task: RecoveryStoredTask, summary: string): RecoveryJudgment {
@@ -255,6 +264,12 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     const current = await this.required(task.taskId);
     await this.mutate(task.taskId, current.version, value => ({ ...value, version: value.version + 1,
       timeline: [...value.timeline, this.event("notification", "service", sent ? "钉钉通知已发送" : "钉钉通知未确认，请在任务页面处理", { kind, sent })] }));
+  }
+  private notifyGroup(task: RecoveryStoredTask, kind: Parameters<RecoveryActionNotifier["after"]>[0]["kind"]): void {
+    const event = task.timeline.at(-1);
+    if (!event) return;
+    try { this.deps.actionNotifier?.after({ taskId: task.taskId, eventId: event.event_id, kind }); }
+    catch { console.error("[session-recovery] group notification hook failed", task.taskId, kind); }
   }
 
   private async mutate(taskId: string, version: number, change: (value: RecoveryStoredTask) => RecoveryStoredTask): Promise<RecoveryStoredTask> {

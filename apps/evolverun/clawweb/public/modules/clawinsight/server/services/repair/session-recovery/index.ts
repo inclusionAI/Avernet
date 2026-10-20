@@ -1,5 +1,7 @@
 import { getCurrentEnv } from "@avernet/clawweb-shared/server/env";
-import { SessionRecoveryNotifier } from "./notification.js";
+import { SessionRecoveryGroupNotifier, SessionRecoveryNotifier } from "./notification.js";
+import { DingTalkWebhookSender } from "../../notifications/dingtalk-webhook-sender.js";
+import { AppConfigRepository } from "@avernet/clawevolve/server/repositories/app-config-repository";
 import { type IDatabase } from "@avernet/clawweb-shared/server/db";
 import type { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve-repository";
 import type { AisExecutor } from "@avernet/clawevolve/server/contracts/ais-executor";
@@ -35,6 +37,8 @@ export function createSessionRecoveryRuntime(options: {
   const observationMs = options.observationMs ?? 3600000;
   if (!Number.isSafeInteger(observationMs) || observationMs < 20000) throw new Error("Invalid self-healing waiting deadline");
   const store = new SessionRecoveryTaskRepository(options.db, options.repo, options.artifactStore);
+  const actionNotifier = new SessionRecoveryGroupNotifier({ controlPlaneEnvironment, tasks: store,
+    config: new AppConfigRepository(options.db), sender: new DingTalkWebhookSender(), publicBaseUrl: options.publicBaseUrl });
   const reporter = new HttpRecoveryResultReporter({ baseUrl: options.publicBaseUrl });
   let tasks: SessionRecoveryTaskService;
   const notifier = new SessionRecoveryNotifier(options.notificationSender, options.publicBaseUrl);
@@ -42,8 +46,8 @@ export function createSessionRecoveryRuntime(options: {
     audit: new AgentToolCallRepository(options.db, "session_recovery"), ais: options.ais, runtime: options.runtime,
     targets: options.targets, trajectory: options.trajectory, logs: options.logs, runtimeTool: options.runtimeTool, business: () => tasks, publicBaseUrl: options.publicBaseUrl,
     snapshotId: options.snapshotId, nasRoots: options.nasRoots, leaseSeconds: options.leaseSeconds ?? 120,
-    launchGraceSeconds: options.launchGraceSeconds ?? 1800, observationMs });
-  tasks = new SessionRecoveryTaskService({ controlPlaneEnvironment, tasks: store, agent, notifier, reporter, observationMs,
+    launchGraceSeconds: options.launchGraceSeconds ?? 1800, observationMs, actionNotifier });
+  tasks = new SessionRecoveryTaskService({ controlPlaneEnvironment, tasks: store, agent, notifier, reporter, observationMs, actionNotifier,
     resolveTarget: async request => {
       const expected = { OC: "openclaw", CC: "claude_code", TE: "teclaw" }[request.target.engine];
       const target = await options.targets.resolve({ environment: request.target.env, ownerId: request.target.entity_id, botId: request.target.bot_id });

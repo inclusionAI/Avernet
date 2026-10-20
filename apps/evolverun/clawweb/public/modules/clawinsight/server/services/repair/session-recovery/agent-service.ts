@@ -19,7 +19,7 @@ import { RecoverySessionReader } from "./session-reader.js";
 import { savedRecoveryHandbook } from "./handbook.js";
 import { recoveryResult } from "./result.js";
 import type { RecoveryAgentExecutor } from "./task-service.js";
-import type { RecoveryExecutionView, SessionRecoveryTaskApi, SessionRecoveryAgentApi } from "./contracts.js";
+import type { RecoveryActionNotifier, RecoveryExecutionView, SessionRecoveryTaskApi, SessionRecoveryAgentApi } from "./contracts.js";
 import type { RecoveryStoredTask, RecoveryTaskStore, RecoveryJudgment, RecoveryPlan } from "./task-contracts.js";
 
 function fail(status: number, message: string): never { throw new SessionRecoveryError(status, "recovery_execution_conflict", message); }
@@ -46,6 +46,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     ais: AisExecutor; runtime: BotRuntime; targets: BotTargetResolver; trajectory?: RecoveryTrajectoryReader; logs?: AgentLogTool; runtimeTool?: AgentRuntimeTool;
     business: () => SessionRecoveryTaskApi; publicBaseUrl: string; snapshotId: number;
     packageId?: string; nasRoots?: readonly string[]; leaseSeconds: number; launchGraceSeconds: number; observationMs: number;
+    actionNotifier?: RecoveryActionNotifier;
     now?: () => number;
   }) {
     this.now = deps.now ?? Date.now;
@@ -162,7 +163,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     const { pending_results: _pending, execution: rawExecution, aisExecution: _ais, ...business } = task;
     const { ticketDigest: _digest, ...execution } = rawExecution!;
     return { taskId: task.taskId, stepId: task.current!.stepId, executionId: execution.executionId, deliveryKey: this.latestDeliveryKey(task), task: { ...business, execution,
-        timeline: business.timeline.slice(-60).map(event => ({ ...event, payload: event.kind === "operation" ? { tool_call_id: event.payload.tool_call_id, status: event.payload.status, evidence_id: event.payload.evidence_id } : event.payload })),
+        timeline: business.timeline.filter(event => event.payload.channel !== "group_webhook").slice(-60).map(event => ({ ...event, payload: event.kind === "operation" ? { tool_call_id: event.payload.tool_call_id, status: event.payload.status, evidence_id: event.payload.evidence_id } : event.payload })),
         evidence: business.evidence.map(item => ({ ...item, excerpt: item.excerpt.slice(0, 1500) })),
       }, handbook: savedRecoveryHandbook(task),
       timings: { heartbeatSeconds: 20, decisionPollSeconds: 20 }, planProtocol: {
@@ -441,6 +442,10 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     const latestInitial = [...current.timeline].reverse().find(event => event.kind === "operation" && (event.payload.result as Record<string, unknown>)?.initial_message === true);
     if (initialDelivery && latestInitial?.payload.tool_call_id === callId && JSON.stringify(initialDelivery) !== JSON.stringify(current.delivery)) await this.save(current, value => ({ ...value,
       delivery: initialDelivery, observationDeadlineAt: initialDelivery.delivery.finished_at_ms + this.deps.observationMs }));
+    if (name === "retry_message" && receipt.dry_run !== true) {
+      try { this.deps.actionNotifier?.after({ taskId, eventId: callId, kind: "message" }); }
+      catch { console.error("[session-recovery] group notification hook failed", taskId, "message"); }
+    }
     return evidenceId;
   }
   private context(task: RecoveryStoredTask): AgentToolContext {
