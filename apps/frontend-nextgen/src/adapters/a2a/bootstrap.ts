@@ -40,6 +40,7 @@ import { TransportChoiceCache } from './choiceCache';
 import { fetchCard, Scenario, validateScenarios } from './card';
 import { createSendBanRegistry, type SendBanRegistry } from './sendBan';
 import { isA2aClientEnabled } from './switch';
+import { createTcChatParserFactory } from './tcChatParser';
 import { a2aUrlsFromBaseUrl, a2aUrlsFromWsUrl, type A2aUrls } from './urls';
 import { LOCK_CANDIDATE_KINDS, type WireFailure } from './rpc';
 
@@ -121,6 +122,9 @@ function buildA2AProvider(
     ...providerConfig,
     ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
     a2aUrls: urls,
+    // parserFactory：nextgen 宿主适配（@tc-chat 加载链在 tcChatParser.ts，
+    // 公共注入缝的本地实现；OCB 消费时替换为其内部 SDK 同形工厂）
+    parserFactory: createTcChatParserFactory(),
     // app 级单例注入：禁令与发送门/本模块 getSendBanRegistry() 同源
     sendBan: getSendBanRegistry(),
   });

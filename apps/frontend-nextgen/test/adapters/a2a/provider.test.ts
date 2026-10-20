@@ -31,7 +31,9 @@ import {
 } from '@/adapters/a2a/A2AProvider';
 import { CANCEL_UI_TEXT, type CancelOutcome } from '@/adapters/a2a/cancelOutcomes';
 import { createSendBanRegistry } from '@/adapters/a2a/sendBan';
-import { loadOpenClawParser } from '@/adapters/a2a/sdkParser';
+import { loadOpenClawParser, createTcChatParserFactory } from '@/adapters/a2a/tcChatParser';
+import { A2aParserFactoryMissingError, type SdkParser, type SdkParserConfig }
+  from '@/adapters/a2a/sdkParser';
 import type { WireEvent } from '@/adapters/a2a/stream';
 import { a2aUrlsFromWsUrl } from '@/adapters/a2a/urls';
 import { makeEngineCard } from './helpers';
@@ -228,6 +230,7 @@ function newProvider(overrides: Partial<A2AProviderConfig> = {}) {
     url: 'ws://127.0.0.1:20003/api/a2a/ws',
     a2aUrls: A2A_URLS,
     sessionKey: SESSION,
+    parserFactory: createTcChatParserFactory(),           // 宿主注入默认 @tc-chat 适配
     ...overrides,
   });
   const spies = {
@@ -248,6 +251,66 @@ const reqIdOf = (call: CapturedCall) =>
   (JSON.parse(String(call.init.body)) as { id: number }).id;
 
 // ─── connect：card 探测门 + 分场景能力门 ────────────────────────────────
+
+describe('parserFactory 注入缝（公共/宿主解耦契约）', () => {
+  const bareConfig = () => ({
+    url: 'ws://127.0.0.1:20003/api/a2a/ws',
+    a2aUrls: A2A_URLS,
+    sessionKey: SESSION,
+  });
+
+  it('缺注入（js 调用方空洞）：构造不炸，首个入口飞 typed A2aParserFactoryMissingError', async () => {
+    // connect() 首行即 ensureParser——缺工厂必在此炸，且不给"手搓兜底 parser"
+    //（B8 钉板：真 parser 就是 oracle）
+    const provider = new A2AProvider(bareConfig() as any);
+    const err = await provider.connect().then(
+      () => { throw new Error('expected rejection'); }, (e) => e);
+    expect(err).toBeInstanceOf(A2aParserFactoryMissingError);
+    expect((err as any).failure)
+      .toEqual({ kind: 'protocol', reason: 'parser_factory_missing' });
+    // 构造静默原则不破坏：无 unhandled rejection（构造期 catch 位），不发连接态广播
+    const statuses: any[] = [];
+    provider.subscribeToConnectionStatus((e) => statuses.push(e.status));
+    await provider.request({ query: 'q', sessionKey: SESSION }).then(
+      () => { throw new Error('expected rejection'); }, (e) => e);
+    expect(statuses).toEqual([]);
+  });
+
+  it('factory 同步抛/异步拒都原样传播进 ensureParser 面（不吞不换型）', async () => {
+    const provider = new A2AProvider({
+      ...bareConfig(),
+      parserFactory: (() => { throw new Error('boom-sync'); }) as any,
+    });
+    await expect(provider.connect()).rejects.toThrow('boom-sync');
+
+    const provider2 = new A2AProvider({
+      ...bareConfig(),
+      parserFactory: async () => { throw new Error('boom-async'); },
+    });
+    await expect(provider2.connect()).rejects.toThrow('boom-async');
+  });
+
+  it('注入工厂收到 enableThinking/xIAMToken 构造参数（对位原构造面）', async () => {
+    const seen: SdkParserConfig[] = [];
+    const fakeParser = () => ({
+      setSessionKey: () => undefined, reset: () => undefined,
+      handleMessage: () => false, getResult: () =>
+        ({ blocks: [], content: '', done: false, toolCalls: [], isApproval: false }),
+    }) as unknown as SdkParser;
+    const provider = new A2AProvider({
+      ...bareConfig(),
+      enableThinkingTag: true,
+      xIAMToken: 'tok-1',
+      parserFactory: (cfg) => {
+        seen.push(cfg);
+        return fakeParser();
+      },
+    });
+    // connect 走 ensureParser → 工厂被调；card 探测必然失败，但工厂断言不受影响
+    await provider.connect().then(() => undefined, () => undefined);
+    expect(seen).toEqual([{ enableThinking: true, xIAMToken: 'tok-1' }]);
+  });
+});
 
 describe('connect() — card probe + scenario gate before connection state', () => {
   it('探测成功：isConnected=true，状态订阅 connecting→connected；只发一次探测', async () => {
@@ -1266,8 +1329,12 @@ describe('B12 abort() — CancelTask wire 面 + 四态禁令核销（§4.3/§3.1
 
 describe('subscribeToParseResult / getParseResult（对位 v3 :380-447）', () => {
   it('订阅收累计快照增量，退订后不再收；parser 未就绪 getParseResult 返回空快照', async () => {
-    // parser 就绪前：空快照（不炸、不吊）
-    const early = new A2AProvider({ url: 'wss://x/ws', a2aUrls: A2A_URLS });
+    // parser 就绪前：空快照（不炸、不吊）——工厂给永不决议的 pending，
+    // "未就绪"语义比原裸构造（当场开始真加载）更精确
+    const early = new A2AProvider({
+      url: 'wss://x/ws', a2aUrls: A2A_URLS,
+      parserFactory: (() => { /* 永不决议：钉"未就绪"语义 */ }) as any,
+    });
     expect(early.getParseResult()).toEqual({
       blocks: [], content: '', done: false, toolCalls: [], isApproval: false,
     });

@@ -58,7 +58,8 @@ import { classifyCancel, type CancelOutcome } from './cancelOutcomes';
 import { createSendBanRegistry, type SendBanRegistry } from './sendBan';
 import type { A2aUrls } from './urls';
 import {
-  loadOpenClawParser,
+  A2aParserFactoryMissingError,
+  type SdkParserFactory,
   type SdkParseResult,
   type SdkParser,
   type SdkPendingApproval,
@@ -163,6 +164,10 @@ interface A2aApprovalFailure extends WireFailure {
 export interface A2AProviderConfig extends A2aOpenClawProviderConfig {
   /** A2A 面地址（由 ws url 派生，见 urls.ts） */
   a2aUrls: A2aUrls;
+  /** 宿主注入的 parser 工厂（公共/宿主解耦缝）：构造好的 SdkParser 实例——
+   * 各宿主提供自家聊天 SDK 的同形适配（nextgen 的开源 SDK 适配在宿主胶水
+   * 层，OCB 注内部 SDK 等价物）。必填；缺注入 typed parser_factory_missing 拒。 */
+  parserFactory: SdkParserFactory;
   /** 动态 IAM 凭证（每次 request 前取新，覆盖静态 xIAMToken） */
   iamTokenGetter?: () => Promise<string | undefined>;
   /** fetch 注入口（测试 seam；缺省全局 fetch） */
@@ -317,11 +322,19 @@ export class A2AProvider {
   constructor(config: A2AProviderConfig) {
     this.config = config;
     this.sendBan = config.sendBan ?? DEFAULT_SEND_BAN_REGISTRY;
-    this.parserReady = loadOpenClawParser().then((Ctor) => {
-      const parser = new Ctor({
-        enableThinking: config.enableThinkingTag,
-        xIAMToken: config.xIAMToken,
-      });
+    // parserFactory 注入缝（B10 公共/宿主解耦）：宿主给"构造好的实例工厂"——
+    // Promise.resolve().then(...) 推迟调用，兼容同步/异步两种宿主并保住
+    // "构造期零同步抛"（对位原 loadOpenClawParser 的 async 恒拒绝语义）：
+    // 同步抛/异步拒都折算为 parserReady 拒绝，一切 await 消费点（ensureParser
+    // 等）语义零变化。缺注入（js 空洞）→ typed 拒绝，绝不手搓兜底 parser
+    //（B8 钉板：真 parser 就是 oracle）。
+    this.parserReady = (config.parserFactory
+      ? Promise.resolve().then(() => config.parserFactory!({
+          enableThinking: config.enableThinkingTag,
+          xIAMToken: config.xIAMToken,
+        }))
+      : Promise.reject(new A2aParserFactoryMissingError())
+    ).then((parser) => {
       this.wireParser(parser);
       this.parser = parser;
     });
