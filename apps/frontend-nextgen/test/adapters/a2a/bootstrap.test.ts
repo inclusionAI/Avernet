@@ -59,7 +59,10 @@ const expectProbeV3 = (
 describe('maybeBuildA2AProvider 六态决策表', () => {
   it('① 开关关 → null + 零 fetch + 缓存不动', async () => {
     const cache = new TransportChoiceCache();
-    const fetchImpl = jest.fn(async () => okCardResponse());
+    const fetchImpl = jest.fn(async (...args: Parameters<typeof fetch>) => {
+      void args; // 仅为 mock.calls 元组类型——供下文 mock.calls[0][0] 索引
+      return okCardResponse();
+    });
     const provider = await maybeBuildA2AProvider(CONFIG, {
       choiceCache: cache,
       switchOn: () => false,
@@ -152,7 +155,10 @@ describe('maybeBuildA2AProvider 六态决策表', () => {
   it('⑤ 已 locked → 探测照跑但被锁吸收 → null（锁高于探测）', async () => {
     const cache = new TransportChoiceCache();
     cache.markLocked(A2A_CHOICE_SESSION_KEY, URLS.rpcUrl);
-    const fetchImpl = jest.fn(async () => okCardResponse());
+    const fetchImpl = jest.fn(async (...args: Parameters<typeof fetch>) => {
+      void args; // 仅为 mock.calls 元组类型——供下文 mock.calls[0][0] 索引
+      return okCardResponse();
+    });
     await expect(maybeBuildA2AProvider(CONFIG, {
       choiceCache: cache,
       switchOn: () => true,
@@ -201,7 +207,10 @@ describe('takeCachedA2AProvider（同步工厂捷径）', () => {
     const cache = new TransportChoiceCache();
     let settleFetch!: (r: Response) => void;
     const fetchImpl = jest.fn(
-      () => new Promise<Response>((res) => { settleFetch = res; }),
+      (...args: Parameters<typeof fetch>) => {
+        void args; // 仅为 mock.calls 元组类型——供下文 mock.calls[0][0] 索引
+        return new Promise<Response>((res) => { settleFetch = res; });
+      },
     );
     const deps = (): A2aBootstrapDeps => ({
       choiceCache: cache,
@@ -229,7 +238,10 @@ describe('takeCachedA2AProvider（同步工厂捷径）', () => {
   it('probe-v3 命中 → null + 重探测翻案（重探测唯一触发点）', async () => {
     const cache = new TransportChoiceCache();
     cache.set(A2A_CHOICE_SESSION_KEY, URLS.rpcUrl, 'probe-v3');
-    const fetchImpl = jest.fn(async () => okCardResponse());
+    const fetchImpl = jest.fn(async (...args: Parameters<typeof fetch>) => {
+      void args; // 仅为 mock.calls 元组类型——供下文 mock.calls[0][0] 索引
+      return okCardResponse();
+    });
     expect(takeCachedA2AProvider(CONFIG, {
       choiceCache: cache,
       switchOn: () => true,
@@ -243,7 +255,10 @@ describe('takeCachedA2AProvider（同步工厂捷径）', () => {
   it('locked-v3 命中 → null 且不发探测（页内最高优先级）', () => {
     const cache = new TransportChoiceCache();
     cache.markLocked(A2A_CHOICE_SESSION_KEY, URLS.rpcUrl);
-    const fetchImpl = jest.fn(async () => okCardResponse());
+    const fetchImpl = jest.fn(async (...args: Parameters<typeof fetch>) => {
+      void args; // 仅为 mock.calls 元组类型——供下文 mock.calls[0][0] 索引
+      return okCardResponse();
+    });
     expect(takeCachedA2AProvider(CONFIG, {
       choiceCache: cache,
       switchOn: () => true,
@@ -253,7 +268,10 @@ describe('takeCachedA2AProvider（同步工厂捷径）', () => {
   });
 
   it('开关关（缺省）→ null + 零探测', () => {
-    const fetchImpl = jest.fn(async () => okCardResponse());
+    const fetchImpl = jest.fn(async (...args: Parameters<typeof fetch>) => {
+      void args; // 仅为 mock.calls 元组类型——供下文 mock.calls[0][0] 索引
+      return okCardResponse();
+    });
     expect(takeCachedA2AProvider(CONFIG)).toBeNull();
     expect(fetchImpl).not.toHaveBeenCalled();
   });
@@ -392,7 +410,10 @@ describe('B17 决策表补充行：a2aBaseUrl 在场（resolveA2aUrls 单源）'
 
   it('签发值在场时 ws url 形状不再裁决入口（观测到的旧缺口：relay url→404 派生）', async () => {
     const cache = new TransportChoiceCache();
-    const fetchImpl = jest.fn(async () => okCardResponse());
+    const fetchImpl = jest.fn(async (...args: Parameters<typeof fetch>) => {
+      void args; // 仅为 mock.calls 元组类型——供下文 mock.calls[0][0] 索引
+      return okCardResponse();
+    });
     const provider = await maybeBuildA2AProvider(SIGNED_CONFIG, {
       choiceCache: cache,
       switchOn: () => true,
@@ -430,7 +451,10 @@ describe('B17 决策表补充行：a2aBaseUrl 在场（resolveA2aUrls 单源）'
     const cache = new TransportChoiceCache();
     let settleFetch!: (r: Response) => void;
     const fetchImpl = jest.fn(
-      () => new Promise<Response>((res) => { settleFetch = res; }),
+      (...args: Parameters<typeof fetch>) => {
+        void args; // 仅为 mock.calls 元组类型——供下文 mock.calls[0][0] 索引
+        return new Promise<Response>((res) => { settleFetch = res; });
+      },
     );
     const deps = (): A2aBootstrapDeps => ({
       choiceCache: cache,
