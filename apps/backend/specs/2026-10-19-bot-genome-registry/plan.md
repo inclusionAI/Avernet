@@ -252,7 +252,7 @@ class ContentNotReachable(GenomeError): ...
 class CaptureRefused(GenomeError): reasons: tuple[Reason, ...]      # bad resource path, platform-managed teclaw
 class Drifted(GenomeError): active: str; applied: str | None
 class NotPromotable(GenomeError): ...
-class NotAppliable(GenomeError): violations: tuple[Reason, ...]     # Manifest refused the generated document
+class NotAppliable(GenomeError): violations: tuple[Reason, ...]     # the delivery seam refused the compiled revision
 class PromotionUnsupported(GenomeError): ...                        # service bots, this item
 ```
 

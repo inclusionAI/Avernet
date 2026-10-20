@@ -67,7 +67,7 @@
   - [ ] `record_patch` applies the patch to `patch.base` (`RevisionNotFound` when it is not this bot's), runs the README §6.4 order, stores produced blobs, the patch and the revision atomically, is idempotent (same revision, same seq), and names `candidate/<run>/<n>` for run candidates (idempotent on retry).
   - [ ] `set_policy` records a revision with `active`'s spec and the new policy; `get_revision` resolves id, `r<seq>` and ref names; `list_revisions` pages; `set_status` updates metadata only.
   - [ ] `move_ref` enforces the mover table (`MoverNotAllowed`), CAS (`RefConflict` with the current revision), and logs events; `read_content` is reachability-checked and hash-verified; `put_content` returns the digest and whether it existed, refusing over the limit.
-  - [ ] `compile` returns the generated document; `applied_revision` joins `last_apply` to the promotion that started it and is `None` otherwise.
+  - [ ] `compile` returns the compiled document; `applied_revision` joins `last_apply` to the promotion that started it and is `None` otherwise.
 - **Depends on:** Tasks 5, 6
 
 ## Task 8: Promotion service and applier seam
@@ -100,7 +100,7 @@
 - **Goal:** Make the contract and design docs say what shipped.
 - **Files:** `api-contracts/genome/v1/README.md`, `api-contracts/genome/v1/manifest-v1-compatibility.md`, `docs/bot-evolution/01-genome.md` (+ `zh-CN`), `docs/bot-evolution/work-items.md` (+ `zh-CN`), `core/bot_genome/README.md`
 - **Done when:**
-  - [ ] Contract README §7 states that revisions are captured from the bot or recorded from a patch, keeps the Manifest v1 → revision field mapping and the capture normalisation rules, and states the `document_digest` rule for the generated document; §6.4's "base must match" becomes "the patch's own base, which must be a revision of the bot".
+  - [ ] Contract README §7 states that revisions are captured from the bot or recorded from a patch, keeps the Manifest v1 → revision field mapping and the capture normalisation rules, and states the `document_digest` rule for the compiled document; §6.4's "base must match" becomes "the patch's own base, which must be a revision of the bot".
   - [ ] `01-genome.md`: §4.1 item 5 and §12 replace document recording with capture (`POST …/revisions:capture`), drop the request-level `base`, and add the policy operation; D-6 closed (DB + content store, table names); §11 matches the shipped Protocol; §5.5/§12 note the apply-id join until RSI-04; §8 says delivery is direct (RSI-04) and the Manifest grammar gains no sources.
   - [ ] `work-items.md`: RSI-03 marked done with what RSI-04 (already redefined as direct delivery) still owes: delivery itself, service-bot publish, repo skill commit pins; teclaw platform-managed capture noted as a follow-up.
   - [ ] English and zh-CN say the same.
