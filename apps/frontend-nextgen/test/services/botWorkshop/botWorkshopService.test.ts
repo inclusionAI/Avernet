@@ -148,6 +148,26 @@ describe('botWorkshopService', () => {
     expect(mockedGetAvatar).not.toHaveBeenCalled();
   });
 
+  test('Owner 身份编码不同时仍读取头像资源', async () => {
+    mockedGetBot.mockResolvedValue({
+      code: 200000,
+      data: {
+        bot_id: 'bot-1',
+        bot_name: '头像 Bot',
+        owner_entity_id: 'owner-1',
+        engine: 'openclaw',
+        status: 'ACTIVE',
+      },
+    });
+    mockedGetAvatar.mockResolvedValue('data:image/svg+xml;base64,avatar');
+
+    await expect(botWorkshopService.detail('bot-1', 'owner-1', 'human_owner-1')).resolves.toMatchObject({
+      id: 'bot-1',
+      avatarUrl: 'data:image/svg+xml;base64,avatar',
+    });
+    expect(mockedGetAvatar).toHaveBeenCalledWith('bot-1');
+  });
+
   test('refuses local creation without a selected device and resolved directory', async () => {
     await expect(
       botWorkshopService.create({
