@@ -70,7 +70,7 @@ ended, …) and what every endpoint below returns, in `data.operation`:
 `result` is `{name, command, description, version, already_installed}` for
 install and `{name, uninstalled}` for uninstall. At most one operation is
 active; finished ones are kept for 24 h (at most the last 200) so they can
-still be read by id.
+still be read by id (storage: see *Running the operation*).
 
 ### Endpoints
 
@@ -132,10 +132,14 @@ Then:
   Killing that group stops all of them at once, so a cancel or timeout
   never leaves an orphaned npm writing into the install directory, and never
   signals the engine itself.
-- The active operation is saved to a file under `acli-home` (persisted
-  volume), with acli's process-group id. On engine start, a `running` or
-  `cancelling` operation becomes `interrupted` and that group is killed if it
-  is still alive.
+- Every operation is a file `acli-home/operations/<id>.json` (persisted
+  volume), written on each state change (write to a temp file, then rename,
+  so a reader never sees half a record). The active one also carries acli's
+  process-group id. `GET /operations/{id}` reads that file;
+  `GET /operation` reads the newest one. Files past 24 h, and beyond the
+  newest 200, are deleted when an operation starts.
+- On engine start, an operation file still `running` or `cancelling`
+  becomes `interrupted`, and its process group is killed if still alive.
 - Uninstall lists once to find the tool by name or command (acli
   uninstalls by name, and a market name may be recorded under its command),
   then uninstalls it. acli's exit status is trusted: there is no second list
