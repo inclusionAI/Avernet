@@ -207,7 +207,10 @@ async def benchmark_execute_task_internal(
             sent = await bot_port.send_message(
                 bot_id=bot_identity,
                 message=prompt,
-                metadata={"benchmark": True},
+                metadata={
+                    "benchmark": True,
+                    "sender_options": {"from": body.owner_user_id},
+                },
             )
         except Exception as exc:  # noqa: BLE001
             return envelope(op_result_to_dto(_send_failed(exc)), request)
@@ -272,7 +275,11 @@ async def benchmark_execute_task_internal(
             launch_sent = await bot_port.send_message(
                 bot_id=bot_identity,
                 message=launch_message,
-                metadata={"benchmark": True, "session_id": session_id},
+                metadata={
+                    "benchmark": True,
+                    "session_id": session_id,
+                    "sender_options": {"from": task_request.owner_user_id},
+                },
             )
     except Exception as exc:  # noqa: BLE001
         result = replace(
