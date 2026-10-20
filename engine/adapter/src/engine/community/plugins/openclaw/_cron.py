@@ -19,7 +19,8 @@ class _CronPortMixin:
 
         Relocated from `engines/openclaw/cron.py:list_jobs` up to the
         raw-payload extraction; the dict→CronJob DTO build moved to
-        `core/adapters/openclaw/cron.py`.  Returns `[]` on error or bad shape.
+        `core/adapters/openclaw/cron.py`. Only a successful empty result means
+        no jobs; transport, RPC and malformed-response failures must propagate.
         """
         client = await self._pooled_client(token)
         try:
@@ -28,23 +29,24 @@ class _CronPortMixin:
             )
         except ConnectionError as e:
             log.error(f"[cron_list] connection failed: {e}")
-            return []
+            raise
         except Exception as e:
             log.exception(f"[cron_list] unexpected error: {e}")
-            return []
+            raise
 
         if not response.ok:
             error_msg = response.error.message if response.error else "Unknown error"
             log.error(f"[cron_list] cron.list failed: {error_msg}")
-            return []
+            raise RuntimeError(f"Failed to list jobs: {error_msg}")
 
-        jobs_data = response.payload or []
+        jobs_data = response.payload
         if isinstance(jobs_data, dict):
-            jobs_data = jobs_data.get("jobs") or jobs_data.get("entries") or []
-        if not isinstance(jobs_data, list):
-            log.warning(f"[cron_list] unexpected payload shape: {type(jobs_data).__name__}")
-            return []
-        return [j for j in jobs_data if isinstance(j, dict)]
+            jobs_data = jobs_data.get("jobs", jobs_data.get("entries"))
+        if not isinstance(jobs_data, list) or any(
+            not isinstance(job, dict) for job in jobs_data
+        ):
+            raise RuntimeError("cron.list returned an invalid job list")
+        return jobs_data
 
     async def cron_get(
         self,

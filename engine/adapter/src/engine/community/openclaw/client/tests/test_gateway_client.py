@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 
 import pytest
 
-from engine.community.openclaw.client import gateway_client as gateway_client_module
+from engine.community.openclaw.client import gateway_connection as gateway_client_module
 from engine.community.openclaw.client.gateway_client import OpenClawGatewayClient
 from engine.community.openclaw.config import OpenClawConfig
 from engine.community.openclaw.protocol import (
