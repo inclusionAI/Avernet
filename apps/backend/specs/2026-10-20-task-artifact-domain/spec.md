@@ -269,6 +269,12 @@ class CodeContent(ArtifactContent):
 -- 无外键(与 task_trajectory 同款约束:task 域表间不建 FK)。
 -- 幂等二道闸:select-first 后 INSERT,撞 uk_dedupe 让本事务失败走图版本重放(spec §5.3),
 -- 不做"冲突回滚再读"(prod plugin 无 SAVEPOINT)。
+-- 索引语义(不带索引级 COMMENT——内部 SQL 审核解析器不识别,且 trajectory 同款无索引注释先例;
+-- 语义收拢于此):uk_artifact_id=产物全局唯一 ID 闸;uk_dedupe=回放去重幂等键,最左前缀同时
+-- 服务 task_id / (task_id,node_id) 检索;idx_scope_session=按会话列产物+时间序;
+-- idx_task_kind=任务内按形态过滤+时间序;idx_task_name=任务内按业务名检索
+-- (LIKE 'x%' 前缀走索引,'%x%' 中缀不走)。
+-- content 列为 TEXT 家族,MySQL 禁止显式 DEFAULT——可空性以裸 NULL 声明(无 DEFAULT NULL)。
 -- content/content_hash/creator/modifier 列可空(用户定稿)但发布路径必填:NULL 仅为 schema 容错/
 -- 人工修数留口;content_hash 为 NULL 的行不被 uk_dedupe 判重(MySQL 唯一索引 NULL 互不相等),
 -- 意味着这类行回放即重复——故领域构造器与发布校验(§3/§4)不放宽,仍强制 content+hash+creator。
@@ -293,18 +299,18 @@ CREATE TABLE IF NOT EXISTS `task_artifact` (
     `scope_session_id` varchar(512) DEFAULT NULL                                  COMMENT '图绑定协作会话 ID(图绑定优先,未绑定采纳上报值;NULL=均无)',
     `kind`            varchar(64)   NOT NULL                                      COMMENT '内容形态(text|file|url_link|code),governed 枚举',
     `storage`         varchar(2048) DEFAULT NULL                                  COMMENT '存储介质元信息:inline=内容本体在 content 列(text/url_link/code);bot_workspace|session_file=字节在外部介质,content 仅为引用(与 FileContent.storage_type 强一致,构造器推导校验;发布路径必填,NULL 仅为容错/人工修数留口,长度冗余预留给介质 JSON 化)',
-    `content`         mediumtext    DEFAULT NULL                                  COMMENT '内容分支 JSON(kind-tagged,tag=分支判别;不含字节/临时凭证/存储 handle;发布路径必填,NULL 仅为 schema 容错/人工修数留口)',
+    `content`         mediumtext    NULL                                         COMMENT '内容分支 JSON(kind-tagged,tag=分支判别;不含字节/临时凭证/存储 handle;发布路径必填,NULL 仅为 schema 容错/人工修数留口;TEXT 家族禁显式 DEFAULT,可空性由 NULL 声明)',
     `content_hash`    char(64)      DEFAULT NULL                                  COMMENT 'sha256(canonical_json(content)),uk_dedupe 成分;发布路径必填——NULL 行绕过幂等闸(MySQL 唯一索引 NULL 不判重)',
     `creator`         varchar(128)  DEFAULT NULL                                  COMMENT '产出者(bot_id/group_id;system=系统写入,如控制信号;NULL=未记录)',
     `modifier`        varchar(128)  DEFAULT NULL                                  COMMENT '修改者(行不可变:恒等于 creator,房型惯例列;NULL=未记录)',
     `gmt_create`      timestamp     NOT NULL DEFAULT CURRENT_TIMESTAMP            COMMENT '发布时间(仓储以领域 created_at 毫秒值双写,DB 默认仅 fallback)',
     `gmt_modify`      timestamp     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后修改时间(行不可变:恒等于 gmt_create,房型惯例列)',
-    PRIMARY KEY (`id`) COMMENT '自增主键',
-    UNIQUE KEY `uk_artifact_id` (`artifact_id`) COMMENT '产物全局唯一 ID 闸',
-    UNIQUE KEY `uk_dedupe` (`task_id`, `node_id`, `attempt`, `kind`, `content_hash`) COMMENT '回放去重幂等键(select-first 后撞键走图版本重放,spec §5.3);最左前缀同时服务 task_id / (task_id,node_id) 检索',
-    KEY `idx_scope_session` (`scope_session_id`, `gmt_create`) COMMENT '按会话列产物 + 时间序',
-    KEY `idx_task_kind` (`task_id`, `kind`, `gmt_create`) COMMENT '任务内按形态过滤 + 时间序',
-    KEY `idx_task_name` (`task_id`, `artifact_name`) COMMENT '任务内按业务名检索(LIKE 前缀可走,中缀 %x% 不走)'
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_artifact_id` (`artifact_id`),
+    UNIQUE KEY `uk_dedupe` (`task_id`, `node_id`, `attempt`, `kind`, `content_hash`),
+    KEY `idx_scope_session` (`scope_session_id`, `gmt_create`),
+    KEY `idx_task_kind` (`task_id`, `kind`, `gmt_create`),
+    KEY `idx_task_name` (`task_id`, `artifact_name`)
 ) DEFAULT CHARSET = utf8mb4 COMMENT='task 产物不可变清单(spec 2026-10-20-task-artifact-domain)';
 ```
 
