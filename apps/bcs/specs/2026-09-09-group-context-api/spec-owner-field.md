@@ -32,6 +32,8 @@ Group Context 新增一个多值 `owners` 字段。`owners` 是一个 JSON objec
 
 调用方不能在 `add` 请求中传入或覆盖 owner。
 
+存量数据升级只新增 nullable `owners_json` 列，不按 `creator` 回填、不改写任何历史行。老行的 NULL/empty owners 不授予 owner 权限；update 未传 owners 时沿用该空状态，传入 owners 时仍必须提供非空 `userIds`。
+
 ## Motivation
 
 现有 `R/W/WR` 只能表达读写范围，无法表达 Context 的最高管理权。业务上希望 creator bot 及其管理关系中的 owner/管理员都能维护 Context；但“查询 creator bot 及其 owner/管理员”的现有能力尚未 merge。因此本需求先持久化一个可扩展的多 owner 字段，把默认 owner 固定为 creator，同时不在 `owners` 中持久化管理员列表。
@@ -46,9 +48,13 @@ Group Context 新增一个多值 `owners` 字段。`owners` 是一个 JSON objec
 ## Acceptance Criteria
 
 - [x] `owners` 是多值字段，使用 JSON object 表达，且 `userIds` 中可以包含多个 owner actor UUID。
-- [x] 每条 Context 的 `owners.userIds` 非空。
+- [x] 通过本功能 add/systemset 首建的 Context 版本中，`owners.userIds` 非空。
+- [x] 迁移新增的 `owners_json` 可为 NULL；不回填、不改写存量 active/history rows。
+- [x] NULL/empty owners 表示 legacy 无 owner 状态，不授予 owner 权限。
 - [x] `add` 请求不接收 `owners` 输入；服务端默认写入 creator actor id。
 - [x] 首次创建的 Context 版本中，`owners.userIds` 首个值等于 `creator`。
+- [x] update 未传 owners 时沿用当前 owners；沿用 legacy NULL/empty owners 不触发校验失败。
+- [x] update 传入 owners 时仍要求 `userIds` 非空。
 - [x] `owner` 权限隐含 `W` 和 `R`，`list` 对 owner 返回 `WRO`。
 - [x] owner 可以修改 `content`、`valid_from`、`valid_to`、`visible_to`、`collect_from`、`owners`。
 - [x] 非 owner 的 `W` 权限只能修改 `content`、`valid_from`、`valid_to`。

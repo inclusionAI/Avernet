@@ -67,7 +67,7 @@ that check because it is invoked only from trusted BCN system/admin code.
 
 ### Owners and management permissions
 
-Every Group Context version stores a non-empty multi-value `owners` list:
+Rows created by this feature store a non-empty multi-value `owners` list:
 
 ```json
 { "owners": { "userIds": ["bot-a", "bot-b"] } }
@@ -76,6 +76,12 @@ Every Group Context version stores a non-empty multi-value `owners` list:
 `add` does not accept an `owners` input. It always writes
 `owners.userIds = [actor_id]` server-side. If callers send `owners` in an add body,
 that unknown field is ignored and does not replace the default owner.
+
+The owners migration only adds a nullable `owners_json` column. It never rewrites
+existing rows or derives an owner from their recording creator. A legacy
+`NULL`/empty value means "no owners" and grants no owner permission. Update and
+`systemset` preserve that state when superseding an existing row unless the update
+explicitly supplies a new, non-empty owner list.
 
 An owner has the highest management permission for the current active row. It
 may update `content`, `valid_from`, `valid_to`, `visible_to`, `collect_from`,
@@ -164,8 +170,9 @@ defaults to null. Returns `not_found` when no current version exists for
 }
 ```
 
-`owners` is optional. Omitting it retains the current active row's owner list;
-when supplied, its non-empty `userIds` immediately replaces that list.
+`owners` is optional. Omitting it retains the current active row's owner state,
+including a legacy empty/NULL owner list; when supplied, its non-empty `userIds`
+immediately replaces that list.
 
 **Response**
 

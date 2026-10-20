@@ -34,10 +34,10 @@
   - [x] `GroupContextEntryMeta` list 查询能读 owners。
   - [x] memory repo 的 `row_from_new` / `meta_from_entry` 完整映射 owners。
   - [x] 新版本行使用请求指定或服务端计算的 owners；历史版本不被改写。
-  - [x] 三个 dialect 均新增 additive migration，`owners_json` 非空并完成回填。
-  - [x] 存量 active/history row 按各自 `creator` 回填为 `{"userIds":[row.creator]}`。
+  - [x] 三个 dialect 均新增 additive nullable `owners_json` column。
+  - [x] Migration 不包含历史行 `UPDATE` / creator backfill；存量 active/history rows 保持 NULL。
   - [x] SQLite registry / runner 追加 version 35 且包含 migration 分支。
-  - [x] Migration tests 证明应用前后的 schema、数据回填、账本记录和 checksum 正确。
+  - [x] Migration tests 证明应用前后的 schema、NULL 保留、账本记录和 checksum 正确。
 - **Depends on:** Task 1
 
 ## Task 3: Application 写入语义与默认 owners
@@ -52,8 +52,9 @@
   - [x] `systemset` supersede 既有 context 时沿用 old owners。
   - [x] `systemset` 不执行 owner 或 `collect_from` 授权判断。
   - [x] update 授权顺序为先判断当前 active row owner，再对非 owner 判断 `collect_from`。
-  - [x] update 传入 owners 时校验非空；未传时沿用 old owners。
+  - [x] update 传入 owners 时校验非空；未传时沿用 old owners，legacy NULL/empty owners 不触发校验失败。
   - [x] owner 可修改 `content`、`valid_from`、`valid_to`、`visible_to`、`collect_from`、`owners`。
+  - [x] update/systemset supersede legacy empty owners 后继续保留 empty 语义。
   - [x] owner 不要求出现在 `collect_from`。
   - [x] 非 owner 必须满足现有 `collect_from` W 权限。
   - [x] 非 owner W 只能修改 `content`、`valid_from`、`valid_to`。
@@ -110,6 +111,7 @@
   - [x] API 文档说明 owners JSON shape、add 默认、update 字段权限、`WRO` 和 get owner-only 字段。
   - [x] API 文档明确 owners 更新是一次立即生效的所有权移交，无两阶段确认或旧 owner 保底。
   - [x] API 文档说明本阶段 owner 授权只使用 persisted owners，不把 creator/admin 判定描述为已支持能力。
+  - [x] API 文档说明迁移不回填存量 rows，legacy NULL/empty owners 不授予 owner 权限。
   - [x] Integration walkthrough 覆盖 add 创建 owner、owner 不在 `collect_from` 时的更新、ownership 移交、W-only 修改受限、owner list/get。
   - [!] 以下目标测试通过：
     - `cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-domain --all-targets`

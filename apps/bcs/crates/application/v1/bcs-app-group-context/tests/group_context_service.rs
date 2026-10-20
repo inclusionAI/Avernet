@@ -1301,6 +1301,93 @@ async fn update_validates_requested_owners() {
 }
 
 #[tokio::test]
+async fn update_and_systemset_preserve_legacy_empty_owners() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = service(repo.clone());
+    let now = Utc
+        .timestamp_millis_opt(1_728_374_400_000)
+        .single()
+        .unwrap();
+    repo.create_active(NewGroupContextEntry {
+        context_id: "ctx-legacy-empty-owners".into(),
+        name: "legacy_empty_owners".into(),
+        scope_level: ScopeLevel::Session,
+        scope: "sess-001".into(),
+        content: "v1".into(),
+        creator: "writer-a".into(),
+        visible_to: policy(&[]),
+        collect_from: policy(&["writer-a"]),
+        owners: owners(Vec::<String>::new()),
+        supersedes: None,
+        change_reason: None,
+        valid_from: now,
+        valid_to: None,
+        tx_time: now,
+    })
+    .await
+    .expect("seed migrated row with NULL owners");
+
+    let before_update = app
+        .list(ListGroupContexts {
+            actor_id: "writer-a".into(),
+            request_context: ctx(),
+            scope_levels: Some(vec![ScopeLevel::Session]),
+        })
+        .await
+        .expect("list legacy empty owners");
+    assert_eq!(before_update.contexts.len(), 1);
+    assert_eq!(
+        before_update.contexts[0].permission,
+        GroupContextPermission::WR
+    );
+
+    app.update(UpdateGroupContext {
+        actor_id: "writer-a".into(),
+        request_context: ctx(),
+        name: "legacy_empty_owners".into(),
+        scope_level: ScopeLevel::Session,
+        content: Some("v2".into()),
+        change_reason: None,
+        visible_to: None,
+        collect_from: None,
+        owners: None,
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("update preserves legacy empty owners");
+
+    let after_update = repo
+        .get_active("legacy_empty_owners", "sess-001")
+        .await
+        .expect("store ok")
+        .expect("active row");
+    assert_eq!(after_update.content, "v2");
+    assert_eq!(after_update.owners, owners(Vec::<String>::new()));
+
+    app.systemset(SystemSetGroupContext {
+        request_context: ctx(),
+        name: "legacy_empty_owners".into(),
+        scope_level: ScopeLevel::Session,
+        content: "v3".into(),
+        visible_to: policy(&[]),
+        collect_from: policy(&["writer-a"]),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("systemset preserves legacy empty owners");
+
+    let after_systemset = repo
+        .get_active("legacy_empty_owners", "sess-001")
+        .await
+        .expect("store ok")
+        .expect("active row");
+    assert_eq!(after_systemset.content, "v3");
+    assert_eq!(after_systemset.owners, owners(Vec::<String>::new()));
+}
+
+#[tokio::test]
 async fn systemset_preserves_existing_owners_and_defaults_new_owner_to_system() {
     let repo = Arc::new(MemoryGroupContextRepo::new());
     let app = service(repo.clone());

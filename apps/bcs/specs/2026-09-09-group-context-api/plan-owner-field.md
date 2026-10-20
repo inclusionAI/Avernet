@@ -54,15 +54,15 @@
 `bcs_group_contexts` 新增：
 
 ```text
-owners_json NOT NULL
+owners_json NULL
 ```
 
 - 每个版本行复制写入自己的 `owners`；授权只读当前 active row。
-- `update` 未传 `owners` 时，新版本沿用 old active row 的 owners。
-- `update` 传入新 owners 时，新 active row 使用新列表，历史版本保持旧列表；owner 变更是一次立即生效的所有权移交。
+- `update` 未传 `owners` 时，新版本沿用 old active row 的 owners；legacy rows 的 NULL/empty owners 也沿用，且不因空列表校验失败。
+- `update` 传入新 owners 时，新 active row 使用新列表，历史版本保持旧列表；owner 变更是一次立即生效的所有权移交，请求传入列表必须非空。
 - 公开 `add` 默认 `owners.userIds = [actor_id]`。
-- `systemset` 是内部系统通道：不执行 owner 或 `collect_from` 授权判断；首次创建默认 `owners.userIds = ["system"]`，supersede 既有系统 context 时沿用 old owners，避免内部系统更新剥离原 owner。
-- 存量数据按每一行自己的 `creator` 回填为 `{"userIds":[row.creator]}`。授权只看 active row，回填不改变历史行本身的版本数据。
+- `systemset` 是内部系统通道：不执行 owner 或 `collect_from` 授权判断；首次创建默认 `owners.userIds = ["system"]`，supersede 既有系统 context 时沿用 old owners（包括 legacy empty/null），避免内部系统更新剥离原 owner。
+- 迁移不为存量数据提供 creator-derived owners。老 active/history rows 保持 `owners_json=NULL`；store 读取时映射为 empty owners，代表“没有 owner 权限”，而非“creator 是 owner”。
 
 ### Migrations
 
@@ -72,7 +72,7 @@ owners_json NOT NULL
 - `apps/bcs/migrations/mysql/034_group_context_owners.sql`
 - `apps/bcs/migrations/oceanbase/032_group_context_owners.sql`
 
-三个 dialect 的 JSON 语法和数据类型不同，先核对当前 DB abstraction 语法，再实现 ALTER、backfill 和约束。SQLite 需要在 `migrations.rs` 注册 version 35 并添加执行分支；MySQL/OceanBase 按现有发布路径接入。
+三个 dialect 各自只执行 additive `ALTER TABLE ... ADD COLUMN ... NULL`，不包含 `UPDATE`，也不追加 `NOT NULL` 约束。SQLite 需要在 `migrations.rs` 注册 version 35 并添加执行分支；MySQL/OceanBase 按现有发布路径接入。
 
 ## API / Interface Changes
 
@@ -98,6 +98,7 @@ owners_json NOT NULL
 - 授权依据是请求读取到的 old active row；`command.owners` 只写新版本，不参与本次授权。
 - owner 可修改：`content`、`valid_from`、`valid_to`、`visible_to`、`collect_from`、`owners`。
 - owner 不要求出现在 `collect_from`。
+- 未传 owners 时沿用 old owners，包括 legacy NULL/empty owners；传入 owners 时必须非空。
 - 非 owner 必须满足现有 `collect_from` 写权限。
 - 非 owner 的 `W` 只能修改：`content`、`valid_from`、`valid_to`。
 - 非 owner 的 `W` 传入 `owners`、`visible_to` 或 `collect_from` 时返回 `permission_denied`。
@@ -167,8 +168,8 @@ owners_json NOT NULL
 - **Risk：当前 `creator` 是版本写入者，不是稳定原始 creator，容易被误用作授权 anchor。**
   现有 domain 注释和 `update/systemset` 逻辑 (`service.rs:108-110`、`:186-198`、`:270-317`) 都把写入者写入版本行。
   **Mitigation：** 本轮 owner 授权只读取 persisted owners，不依据 `creator` 判定权限。
-- **Risk：`owners_json NOT NULL` 的 ALTER/backfill 在三种 dialect 上不一致。**
-  **Mitigation：** 每种 dialect 单独实现并写 migration 测试；应用 schema migration 后验证 active 与历史行均能读出非空 owners。
+- **Risk：把存量 creator 误推成 owner 会造成历史授权数据被迁移改写。**
+  **Mitigation：** migration 只新增 nullable `owners_json`，不执行历史行 `UPDATE`；store 将 NULL 映射为 empty owners，empty owners 不授予 owner 权限。
 - **Risk：owner 更新 owners 属于立即生效且不可自行撤销的所有权移交，移交者可能失去管理权。**
   **Mitigation：** 明确这是产品语义而非异常：列表非空即可成立，提交后以新 active row 为准；文档和测试显式说明旧 owner 会被移除，不提供两阶段确认或旧 owner 保底。
 - **Risk：add body 传 `owners` 可能被调用方误解为已生效。**
@@ -184,15 +185,15 @@ owners_json NOT NULL
 ## Rollout
 
 - 新增 column 然后发布应用，不使用 feature flag。
-- 旧请求不含 `owners` 时：add 使用默认值；update 沿用 old owners。
-- 新列是 additive，但 `NOT NULL` 回填必须在应用写入前完成。
+- 旧请求不含 `owners` 时：add 使用默认值；update 沿用 old owners（legacy NULL/empty 状态也被沿用）。
+- 新列是 nullable additive column，不承载历史数据变更。
 - 回滚应用时旧代码不会读新列；如需要数据库层完整回滚，按 dialect 显式删除新增列或恢复备份，不做自动 down migration。
 
 ## Test Strategy
 
 - Domain/service API contract：JSON shape、`WRO`、add 不暴露 owner、get optional policy 字段。
 - Store conformance：create/supersede 保留版本 owners；memory 与 SQLite/MySQL 语义一致。
-- Migration：三种 dialect 建列、回填 active/history、checksum/runner。
+- Migration：三种 dialect 建 nullable column、保持 active/history rows 为 NULL、checksum/runner。
 - Application：
   - add 默认 creator owner。
   - owner 可改全部管理字段和 owners。

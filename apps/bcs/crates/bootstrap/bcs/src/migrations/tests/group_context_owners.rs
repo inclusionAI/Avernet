@@ -2,7 +2,8 @@
 use super::*;
 
 #[tokio::test]
-async fn sqlite_group_context_owners_upgrade_backfills_active_and_history_rows() -> DbResult<()> {
+async fn sqlite_group_context_owners_upgrade_adds_nullable_column_without_rewriting_rows()
+-> DbResult<()> {
     let db = LocalSqliteDbPlugin::new()?;
     run_sqlite_bootstrap_tables(&db).await?;
     for migration in SQLITE_VERSIONED_MIGRATIONS
@@ -44,23 +45,27 @@ VALUES ('ctx-owners-upgrade', 'owner_upgrade', 'session', 'sess-upgrade', 'v1', 
                 .unwrap_or(false)
         })
         .expect("owners_json column metadata");
-    assert_eq!(db_get_column::<i64>(owners_column, "notnull")?, 1);
+    assert_eq!(db_get_column::<i64>(owners_column, "notnull")?, 0);
+    assert_eq!(
+        bcs_db_api::db_get_column_opt::<String>(owners_column, "dflt_value")?,
+        None
+    );
 
     let rows = db
         .query(DbStatement::new(
-            "SELECT id, creator, owners_json FROM bcs_group_contexts ORDER BY id",
+            "SELECT creator, owners_json FROM bcs_group_contexts ORDER BY id",
         ))
         .await?;
     assert_eq!(rows.len(), 2);
     assert_eq!(db_get_column::<String>(&rows[0], "creator")?, "writer-a");
     assert_eq!(
-        db_get_column::<String>(&rows[0], "owners_json")?,
-        r#"{"userIds":["writer-a"]}"#
+        bcs_db_api::db_get_column_opt::<String>(&rows[0], "owners_json")?,
+        None
     );
     assert_eq!(db_get_column::<String>(&rows[1], "creator")?, "writer-b");
     assert_eq!(
-        db_get_column::<String>(&rows[1], "owners_json")?,
-        r#"{"userIds":["writer-b"]}"#
+        bcs_db_api::db_get_column_opt::<String>(&rows[1], "owners_json")?,
+        None
     );
 
     let expected_checksum = sqlite_migration_checksum(SQLITE_VERSIONED_MIGRATIONS.last().unwrap());
@@ -88,18 +93,20 @@ VALUES ('ctx-owners-upgrade', 'owner_upgrade', 'session', 'sess-upgrade', 'v1', 
 }
 
 #[test]
-fn mysql_group_context_owners_migration_backfills_each_row_creator() {
+fn mysql_group_context_owners_migration_adds_nullable_column_without_backfill() {
     let migration = include_str!("../../../../../../migrations/mysql/034_group_context_owners.sql");
-    assert!(migration.contains("ADD COLUMN owners_json"));
-    assert!(migration.contains("JSON_OBJECT('userIds', JSON_ARRAY(creator))"));
-    assert!(migration.contains("MODIFY COLUMN owners_json VARCHAR(4096) NOT NULL"));
+    assert_eq!(
+        migration.trim(),
+        "ALTER TABLE bcs_group_contexts\n    ADD COLUMN owners_json VARCHAR(4096) NULL;"
+    );
 }
 
 #[test]
-fn oceanbase_group_context_owners_migration_backfills_each_row_creator() {
+fn oceanbase_group_context_owners_migration_adds_nullable_column_without_backfill() {
     let migration =
         include_str!("../../../../../../migrations/oceanbase/032_group_context_owners.sql");
-    assert!(migration.contains("ADD COLUMN owners_json"));
-    assert!(migration.contains("JSON_OBJECT('userIds', JSON_ARRAY(creator))"));
-    assert!(migration.contains("MODIFY COLUMN owners_json JSON NOT NULL"));
+    assert_eq!(
+        migration.trim(),
+        "ALTER TABLE bcs_group_contexts\n    ADD COLUMN owners_json JSON NULL;"
+    );
 }

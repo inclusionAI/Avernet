@@ -54,7 +54,7 @@ impl GroupContextApplicationServiceImpl {
         validate_name(&name)?;
         validate_content(&content)?;
         validate_policies(&visible_to, &collect_from)?;
-        validate_owners(&owners)?;
+        validate_required_owners(&owners)?;
         let now = Utc::now();
         self.repo
             .create_active(NewGroupContextEntry {
@@ -95,7 +95,7 @@ impl GroupContextApplicationServiceImpl {
         validate_name(&name)?;
         validate_content(&content)?;
         validate_policies(&visible_to, &collect_from)?;
-        validate_owners(&owners)?;
+        validate_persistable_owners(&owners)?;
         let now = Utc::now();
         self.repo
             .supersede_active(
@@ -197,10 +197,14 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
             }
         }
         let owners = match command.owners {
-            Some(owners) => owners,
+            Some(owners) => {
+                validate_required_owners(&owners)?;
+                owners
+            }
+            // Legacy rows can have no owners (SQL NULL, represented in Rust as
+            // an empty list). Preserve it when the request does not set owners.
             None => old.owners.clone(),
         };
-        validate_owners(&owners)?;
         let content = command.content.unwrap_or_else(|| old.content.clone());
         let visible_to = command.visible_to.unwrap_or_else(|| old.visible_to.clone());
         let collect_from = command
@@ -418,19 +422,23 @@ fn validate_content(content: &str) -> Result<(), ApplicationError> {
     }
 }
 
-fn validate_owners(owners: &GroupContextOwners) -> Result<(), ApplicationError> {
+fn validate_required_owners(owners: &GroupContextOwners) -> Result<(), ApplicationError> {
+    if owners.is_empty() {
+        return Err(ApplicationError::invalid(
+            INVALID_PARAM,
+            "owners.userIds must not be empty",
+        ));
+    }
+    validate_persistable_owners(owners)
+}
+
+fn validate_persistable_owners(owners: &GroupContextOwners) -> Result<(), ApplicationError> {
     let encoded = serde_json::to_vec(owners)
         .map_err(|error| ApplicationError::internal(error.to_string()))?;
     if encoded.len() > MAX_OWNERS_BYTES {
         return Err(ApplicationError::payload_too_large(
             PAYLOAD_TOO_LARGE,
             format!("owners serialized JSON exceeds {MAX_OWNERS_BYTES} bytes"),
-        ));
-    }
-    if owners.is_empty() {
-        return Err(ApplicationError::invalid(
-            INVALID_PARAM,
-            "owners.userIds must not be empty",
         ));
     }
     if owners

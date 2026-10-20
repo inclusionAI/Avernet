@@ -62,8 +62,11 @@ impl GroupContextPolicy {
 
 /// Multi-value Group Context ownership.
 ///
-/// Unlike `GroupContextPolicy`, an empty owner list is invalid. `userIds` is
-/// the stable wire field name and is not reused from the generic policy type.
+/// Newly created and API-supplied owner lists must be non-empty. Rows that
+/// predate this field can have no owners: SQL stores that legacy state as
+/// `NULL`, and the store maps it to an empty list here. Empty lists never
+/// grant owner permissions. `userIds` is the stable wire field name and is
+/// not reused from the generic policy type.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GroupContextOwners {
     #[serde(rename = "userIds")]

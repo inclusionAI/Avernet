@@ -201,8 +201,7 @@ impl SqlGroupContextStore {
             db_get_column(row, "visible_to_json").map_err(GroupContextStoreError::backend)?;
         let collect_raw: String =
             db_get_column(row, "collect_from_json").map_err(GroupContextStoreError::backend)?;
-        let owners_raw: String =
-            db_get_column(row, "owners_json").map_err(GroupContextStoreError::backend)?;
+        let owners = row_to_owners(row)?;
         let valid_to_ms: Option<i64> =
             db_get_column_opt(row, "valid_to_ms").map_err(GroupContextStoreError::backend)?;
         let gmt_superseded_ms: Option<i64> =
@@ -220,8 +219,7 @@ impl SqlGroupContextStore {
                 .map_err(GroupContextStoreError::backend)?,
             collect_from: serde_json::from_str(&collect_raw)
                 .map_err(GroupContextStoreError::backend)?,
-            owners: serde_json::from_str(&owners_raw)
-                .map_err(GroupContextStoreError::backend)?,
+            owners,
             supersedes: db_get_column_opt(row, "supersedes")
                 .map_err(GroupContextStoreError::backend)?,
             change_reason: db_get_column_opt(row, "change_reason")
@@ -246,8 +244,7 @@ impl SqlGroupContextStore {
             db_get_column(row, "visible_to_json").map_err(GroupContextStoreError::backend)?;
         let collect_raw: String =
             db_get_column(row, "collect_from_json").map_err(GroupContextStoreError::backend)?;
-        let owners_raw: String =
-            db_get_column(row, "owners_json").map_err(GroupContextStoreError::backend)?;
+        let owners = row_to_owners(row)?;
         Ok(GroupContextEntryMeta {
             name: db_get_column(row, "name").map_err(GroupContextStoreError::backend)?,
             scope_level,
@@ -256,8 +253,7 @@ impl SqlGroupContextStore {
                 .map_err(GroupContextStoreError::backend)?,
             collect_from: serde_json::from_str(&collect_raw)
                 .map_err(GroupContextStoreError::backend)?,
-            owners: serde_json::from_str(&owners_raw)
-                .map_err(GroupContextStoreError::backend)?,
+            owners,
             gmt_create: millis_column(row, "gmt_create_ms")?,
             gmt_modified: millis_column(row, "gmt_modified_ms")?,
         })
@@ -271,8 +267,7 @@ impl GroupContextRepo for SqlGroupContextStore {
             serde_json::to_string(&params.visible_to).map_err(GroupContextStoreError::backend)?;
         let collect =
             serde_json::to_string(&params.collect_from).map_err(GroupContextStoreError::backend)?;
-        let owners =
-            serde_json::to_string(&params.owners).map_err(GroupContextStoreError::backend)?;
+        let owners = owners_db_value(&params.owners)?;
         let scope_level = serde_json::to_value(params.scope_level)
             .map_err(GroupContextStoreError::backend)?
             .as_str()
@@ -298,7 +293,7 @@ impl GroupContextRepo for SqlGroupContextStore {
                     DbValue::from(params.creator.as_str()),
                     DbValue::from(visible.as_str()),
                     DbValue::from(collect.as_str()),
-                    DbValue::from(owners.as_str()),
+                    owners,
                     params
                         .supersedes
                         .map(DbValue::from)
@@ -342,8 +337,7 @@ impl GroupContextRepo for SqlGroupContextStore {
             serde_json::to_string(&params.visible_to).map_err(GroupContextStoreError::backend)?;
         let collect =
             serde_json::to_string(&params.collect_from).map_err(GroupContextStoreError::backend)?;
-        let owners =
-            serde_json::to_string(&params.owners).map_err(GroupContextStoreError::backend)?;
+        let owners = owners_db_value(&params.owners)?;
         let scope_level = serde_json::to_value(params.scope_level)
             .map_err(GroupContextStoreError::backend)?
             .as_str()
@@ -401,7 +395,7 @@ impl GroupContextRepo for SqlGroupContextStore {
                     DbValue::from(params.creator.as_str()),
                     DbValue::from(visible.as_str()),
                     DbValue::from(collect.as_str()),
-                    DbValue::from(owners.as_str()),
+                    owners,
                     DbValue::from(expected_active_id),
                     DbValue::from(params.change_reason.as_deref()),
                     valid_from,
@@ -543,6 +537,23 @@ impl GroupContextRepo for SqlGroupContextStore {
             .map(|row| self.row_to_entry(&row))
             .collect()
     }
+}
+
+fn row_to_owners(row: &DbRow) -> StoreResult<GroupContextOwners> {
+    match db_get_column_opt::<String>(row, "owners_json")
+        .map_err(GroupContextStoreError::backend)?
+    {
+        Some(raw) => serde_json::from_str(&raw).map_err(GroupContextStoreError::backend),
+        None => Ok(GroupContextOwners::new(Vec::<String>::new())),
+    }
+}
+
+fn owners_db_value(owners: &GroupContextOwners) -> StoreResult<DbValue> {
+    if owners.is_empty() {
+        return Ok(DbValue::Null);
+    }
+    let encoded = serde_json::to_string(owners).map_err(GroupContextStoreError::backend)?;
+    Ok(DbValue::from(encoded.as_str()))
 }
 
 fn format_db_time(time: GroupContextTime) -> String {
