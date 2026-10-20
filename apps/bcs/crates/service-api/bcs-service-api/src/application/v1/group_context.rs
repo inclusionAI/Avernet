@@ -56,7 +56,8 @@ pub struct AddGroupContext {
     pub scope_level: ScopeLevel,
     pub content: String,
     pub visible_to: GroupContextPolicy,
-    pub collect_from: GroupContextPolicy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collect_from: Option<GroupContextPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub valid_from: Option<GroupContextTime>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -181,6 +182,8 @@ pub struct GroupContextGetItem {
     pub visible_to: Option<GroupContextPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collect_from: Option<GroupContextPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owners: Option<GroupContextOwners>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

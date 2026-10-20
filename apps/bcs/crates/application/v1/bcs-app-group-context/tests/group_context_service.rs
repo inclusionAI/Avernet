@@ -101,7 +101,7 @@ async fn add_resolves_raw_scope_and_rejects_duplicate_active() {
         scope_level: ScopeLevel::Session,
         content: "张三出局".into(),
         visible_to: policy(&[]),
-        collect_from: policy(&["judge_bot"]),
+        collect_from: Some(policy(&["judge_bot"])),
         valid_from: None,
         valid_to: None,
     })
@@ -124,7 +124,7 @@ async fn add_resolves_raw_scope_and_rejects_duplicate_active() {
             scope_level: ScopeLevel::Session,
             content: "李四出局".into(),
             visible_to: policy(&[]),
-            collect_from: policy(&["judge_bot"]),
+            collect_from: Some(policy(&["judge_bot"])),
             valid_from: None,
             valid_to: None,
         })
@@ -152,7 +152,7 @@ async fn add_session_and_round_scope_do_not_require_group_id() {
             scope_level,
             content: "ok".into(),
             visible_to: policy(&[]),
-            collect_from: policy(&["judge_bot"]),
+            collect_from: Some(policy(&["judge_bot"])),
             valid_from: None,
             valid_to: None,
         })
@@ -167,6 +167,103 @@ async fn add_session_and_round_scope_do_not_require_group_id() {
         assert_eq!(active.scope_level, scope_level);
         assert_eq!(active.scope, expected_scope);
     }
+}
+
+#[tokio::test]
+async fn add_collect_from_is_optional_empty_and_independent_of_owner_authority() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = service(repo.clone());
+
+    for (name, collect_from) in [
+        ("missing_collect", None),
+        ("empty_collect", Some(policy(&[]))),
+    ] {
+        app.add(AddGroupContext {
+            actor_id: "judge_bot".into(),
+            request_context: ctx(),
+            name: name.into(),
+            scope_level: ScopeLevel::Group,
+            content: "owner-only v1".into(),
+            visible_to: policy(&[]),
+            collect_from,
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect("add does not require the creator in collect_from");
+
+        let active = repo
+            .get_active(name, "game-room-7")
+            .await
+            .expect("store ok")
+            .expect("active row");
+        assert_eq!(active.collect_from, policy(&[]));
+        assert_eq!(active.owners, owners(["judge_bot"]));
+
+        app.update(UpdateGroupContext {
+            actor_id: "judge_bot".into(),
+            request_context: ctx(),
+            name: name.into(),
+            scope_level: ScopeLevel::Group,
+            content: Some("owner-only v2".into()),
+            change_reason: None,
+            visible_to: None,
+            collect_from: None,
+            owners: None,
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect("owner remains writable without collect_from membership");
+
+        let active = repo
+            .get_active(name, "game-room-7")
+            .await
+            .expect("store ok")
+            .expect("updated row");
+        assert_eq!(active.collect_from, policy(&[]));
+        assert_eq!(active.owners, owners(["judge_bot"]));
+        assert_eq!(active.content, "owner-only v2");
+    }
+
+    app.add(AddGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "delegated_writer".into(),
+        scope_level: ScopeLevel::Group,
+        content: "delegated v1".into(),
+        visible_to: policy(&[]),
+        collect_from: Some(policy(&["other_bot"])),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("creator may add while delegating collect_from to another bot");
+
+    app.update(UpdateGroupContext {
+        actor_id: "other_bot".into(),
+        request_context: ctx(),
+        name: "delegated_writer".into(),
+        scope_level: ScopeLevel::Group,
+        content: Some("delegated v2".into()),
+        change_reason: Some("listed writer".into()),
+        visible_to: None,
+        collect_from: None,
+        owners: None,
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("explicit collect_from member keeps write access");
+
+    let delegated = repo
+        .get_active("delegated_writer", "game-room-7")
+        .await
+        .expect("store ok")
+        .expect("delegated row");
+    assert_eq!(delegated.content, "delegated v2");
+    assert_eq!(delegated.collect_from, policy(&["other_bot"]));
+    assert_eq!(delegated.owners, owners(["judge_bot"]));
 }
 
 #[tokio::test]
@@ -208,7 +305,7 @@ async fn add_reports_missing_scope_boundary_with_scope_level() {
                 scope_level,
                 content: "ok".into(),
                 visible_to: policy(&[]),
-                collect_from: policy(&["judge_bot"]),
+                collect_from: Some(policy(&["judge_bot"])),
                 valid_from: None,
                 valid_to: None,
             })
@@ -306,7 +403,7 @@ async fn update_list_and_get_use_selected_scope_without_group_id() {
 }
 
 #[tokio::test]
-async fn add_validates_content_collect_from_actor_and_required_scope_params() {
+async fn add_validates_content_and_required_scope_params() {
     let app = service(Arc::new(MemoryGroupContextRepo::new()));
 
     let error = app
@@ -317,45 +414,13 @@ async fn add_validates_content_collect_from_actor_and_required_scope_params() {
             scope_level: ScopeLevel::Group,
             content: "x".repeat(4097),
             visible_to: policy(&[]),
-            collect_from: policy(&["judge_bot"]),
+            collect_from: Some(policy(&["judge_bot"])),
             valid_from: None,
             valid_to: None,
         })
         .await
         .expect_err("oversize rejected");
     assert_code(error, "payload_too_large");
-
-    let error = app
-        .add(AddGroupContext {
-            actor_id: "judge_bot".into(),
-            request_context: ctx(),
-            name: "empty_collect".into(),
-            scope_level: ScopeLevel::Group,
-            content: "ok".into(),
-            visible_to: policy(&[]),
-            collect_from: policy(&[]),
-            valid_from: None,
-            valid_to: None,
-        })
-        .await
-        .expect_err("empty collect_from rejected");
-    assert_code(error, "invalid_param");
-
-    let error = app
-        .add(AddGroupContext {
-            actor_id: "other_bot".into(),
-            request_context: ctx(),
-            name: "not_writer".into(),
-            scope_level: ScopeLevel::Group,
-            content: "ok".into(),
-            visible_to: policy(&[]),
-            collect_from: policy(&["judge_bot"]),
-            valid_from: None,
-            valid_to: None,
-        })
-        .await
-        .expect_err("actor must be collect_from member");
-    assert_code(error, "permission_denied");
 
     let error = app
         .add(AddGroupContext {
@@ -369,7 +434,7 @@ async fn add_validates_content_collect_from_actor_and_required_scope_params() {
             scope_level: ScopeLevel::Session,
             content: "ok".into(),
             visible_to: policy(&[]),
-            collect_from: policy(&["judge_bot"]),
+            collect_from: Some(policy(&["judge_bot"])),
             valid_from: None,
             valid_to: None,
         })
@@ -396,7 +461,7 @@ fn add_for_validation(
         scope_level: ScopeLevel::Group,
         content: "ok".into(),
         visible_to,
-        collect_from,
+        collect_from: Some(collect_from),
         valid_from: None,
         valid_to: None,
     }
@@ -547,7 +612,7 @@ async fn update_supersedes_preserves_omitted_fields_and_uses_old_writer_policy()
         scope_level: ScopeLevel::Session,
         content: "第一轮".into(),
         visible_to: policy(&["张三"]),
-        collect_from: policy(&["judge_bot"]),
+        collect_from: Some(policy(&["judge_bot"])),
         valid_from: None,
         valid_to: None,
     })
@@ -613,7 +678,7 @@ async fn add_defaults_validity_and_preserves_explicit_validity() {
         scope_level: ScopeLevel::Session,
         content: "默认有效期".into(),
         visible_to: policy(&[]),
-        collect_from: policy(&["judge_bot"]),
+        collect_from: Some(policy(&["judge_bot"])),
         valid_from: None,
         valid_to: None,
     })
@@ -638,7 +703,7 @@ async fn add_defaults_validity_and_preserves_explicit_validity() {
         scope_level: ScopeLevel::Session,
         content: "显式有效期".into(),
         visible_to: policy(&[]),
-        collect_from: policy(&["judge_bot"]),
+        collect_from: Some(policy(&["judge_bot"])),
         valid_from: Some(explicit_from),
         valid_to: Some(explicit_to),
     })
@@ -668,7 +733,7 @@ async fn update_defaults_omitted_validity_to_new_effective_time_and_can_change_v
         scope_level: ScopeLevel::Session,
         content: "原内容".into(),
         visible_to: policy(&["张三"]),
-        collect_from: policy(&["judge_bot"]),
+        collect_from: Some(policy(&["judge_bot"])),
         valid_from: Some(original_from),
         valid_to: Some(original_to),
     })
@@ -745,7 +810,7 @@ async fn get_and_list_do_not_filter_by_business_valid_to() {
         scope_level: ScopeLevel::Session,
         content: "业务有效期已过但仍是当前版本".into(),
         visible_to: policy(&["张三"]),
-        collect_from: policy(&["judge_bot"]),
+        collect_from: Some(policy(&["judge_bot"])),
         valid_from: Some(past_from),
         valid_to: Some(past_to),
     })
@@ -811,7 +876,7 @@ async fn update_maps_missing_permission_and_stale_supersede() {
         scope_level: ScopeLevel::Session,
         content: "old".into(),
         visible_to: policy(&[]),
-        collect_from: policy(&["judge_bot"]),
+        collect_from: Some(policy(&["judge_bot"])),
         valid_from: None,
         valid_to: None,
     })
@@ -845,7 +910,7 @@ async fn update_maps_missing_permission_and_stale_supersede() {
             scope_level: ScopeLevel::Session,
             content: "old".into(),
             visible_to: policy(&[]),
-            collect_from: policy(&["judge_bot"]),
+            collect_from: Some(policy(&["judge_bot"])),
             valid_from: None,
             valid_to: None,
         })
@@ -882,7 +947,7 @@ async fn add_update_and_systemset_record_version_creators() {
         scope_level: ScopeLevel::Session,
         content: "v1".into(),
         visible_to: policy(&[]),
-        collect_from: policy(&["judge_bot", "admin"]),
+        collect_from: Some(policy(&["judge_bot", "admin"])),
         valid_from: None,
         valid_to: None,
     })
@@ -986,7 +1051,7 @@ async fn owner_can_update_all_fields_without_collect_from_membership() {
         scope_level: ScopeLevel::Session,
         content: "v1".into(),
         visible_to: policy(&["张三"]),
-        collect_from: policy(&["judge_bot"]),
+        collect_from: Some(policy(&["judge_bot"])),
         valid_from: None,
         valid_to: None,
     })
@@ -1051,7 +1116,7 @@ async fn w_only_non_owner_updates_content_and_validity_but_not_management_fields
         scope_level: ScopeLevel::Session,
         content: "v1".into(),
         visible_to: policy(&["judge_bot"]),
-        collect_from: policy(&["judge_bot", "other_bot"]),
+        collect_from: Some(policy(&["judge_bot", "other_bot"])),
         valid_from: None,
         valid_to: None,
     })
@@ -1152,7 +1217,7 @@ async fn ownership_transfer_takes_effect_immediately() {
         scope_level: ScopeLevel::Session,
         content: "v1".into(),
         visible_to: policy(&[]),
-        collect_from: policy(&["judge_bot"]),
+        collect_from: Some(policy(&["judge_bot"])),
         valid_from: None,
         valid_to: None,
     })
@@ -1254,7 +1319,7 @@ async fn update_validates_requested_owners() {
         scope_level: ScopeLevel::Session,
         content: "v1".into(),
         visible_to: policy(&[]),
-        collect_from: policy(&["judge_bot"]),
+        collect_from: Some(policy(&["judge_bot"])),
         valid_from: None,
         valid_to: None,
     })
@@ -1437,7 +1502,7 @@ async fn systemset_preserves_existing_owners_and_defaults_new_owner_to_system() 
         scope_level: ScopeLevel::Group,
         content: "human v1".into(),
         visible_to: policy(&[]),
-        collect_from: policy(&["judge_bot"]),
+        collect_from: Some(policy(&["judge_bot"])),
         valid_from: None,
         valid_to: None,
     })
@@ -1613,7 +1678,7 @@ async fn owner_list_and_get_bypass_policies_and_get_exposes_policy_to_owner_only
         scope_level: ScopeLevel::Session,
         content: "owner-managed state".into(),
         visible_to: policy(&["张三"]),
-        collect_from: policy(&["judge_bot"]),
+        collect_from: Some(policy(&["judge_bot"])),
         valid_from: None,
         valid_to: None,
     })
@@ -1666,8 +1731,12 @@ async fn owner_list_and_get_bypass_policies_and_get_exposes_policy_to_owner_only
     assert_eq!(owner_get.items[0].content, "owner-managed state");
     assert_eq!(owner_get.items[0].visible_to, Some(policy(&["张三"])));
     assert_eq!(owner_get.items[0].collect_from, Some(policy(&["张三"])));
+    assert_eq!(owner_get.items[0].owners, Some(owners(["judge_bot"])));
     let encoded_owner_get = serde_json::to_value(&owner_get).expect("owner get serializes");
-    assert!(!encoded_owner_get.to_string().contains("\"owners\""));
+    assert_eq!(
+        encoded_owner_get["items"][0]["owners"],
+        serde_json::json!({"userIds": ["judge_bot"]})
+    );
 
     let reader_get = app
         .get(GetGroupContext {
@@ -1682,8 +1751,9 @@ async fn owner_list_and_get_bypass_policies_and_get_exposes_policy_to_owner_only
     assert_eq!(reader_get.items.len(), 1);
     assert_eq!(reader_get.items[0].visible_to, None);
     assert_eq!(reader_get.items[0].collect_from, None);
+    assert_eq!(reader_get.items[0].owners, None);
     let encoded_reader_get = serde_json::to_value(&reader_get).expect("reader get serializes");
-    assert!(!encoded_reader_get.to_string().contains("\"owners\""));
+    assert!(encoded_reader_get.to_string().find("\"owners\"").is_none());
 }
 
 #[tokio::test]

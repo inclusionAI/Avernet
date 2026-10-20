@@ -131,7 +131,7 @@ fn add_command(
             user_ids: Vec::new(),
             extra: serde_json::Map::new(),
         },
-        collect_from: GroupContextPolicy::users([actor_id]),
+        collect_from: Some(GroupContextPolicy::users([actor_id])),
         valid_from: None,
         valid_to: None,
     }
@@ -145,14 +145,16 @@ fn add_count(inner: &RecordingGroupContextService) -> usize {
 async fn group_add_requires_group_membership() {
     let (guard, inner) = guard_with_group_member("group_member").await;
 
+    let mut command = add_command(
+        "group_member",
+        ScopeLevel::Group,
+        request_context(Some(GROUP_ID), None, None),
+    );
+    command.collect_from = None;
     guard
-        .add(add_command(
-            "group_member",
-            ScopeLevel::Group,
-            request_context(Some(GROUP_ID), None, None),
-        ))
+        .add(command)
         .await
-        .expect("group member may add");
+        .expect("group member may add without collect_from");
     assert_eq!(add_count(&inner), 1);
     let commands = inner.adds.lock().expect("adds lock");
     assert_eq!(
@@ -163,6 +165,11 @@ async fn group_add_requires_group_membership() {
             .group_id
             .as_deref(),
         Some(GROUP_ID)
+    );
+    assert_eq!(
+        commands.last().expect("inner add").collect_from,
+        None,
+        "guard must preserve the omitted add policy"
     );
     drop(commands);
 

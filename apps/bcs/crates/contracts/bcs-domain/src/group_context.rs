@@ -53,8 +53,8 @@ impl GroupContextPolicy {
         self.user_ids.is_empty() || self.user_ids.iter().any(|id| id == actor_id)
     }
 
-    /// `collect_from.userIds` is a membership list; empty is invalid at the
-    /// application boundary and never means everyone.
+    /// `collect_from.userIds` is a membership list. Empty means there are no
+    /// additional policy writers; it never means everyone.
     pub fn contains_user(&self, actor_id: &str) -> bool {
         self.user_ids.iter().any(|id| id == actor_id)
     }

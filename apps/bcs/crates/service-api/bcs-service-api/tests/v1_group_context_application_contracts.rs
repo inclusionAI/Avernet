@@ -214,7 +214,7 @@ fn commands_cover_all_groupcontext_endpoints_without_body_actor_for_systemset() 
         scope_level: ScopeLevel::Session,
         content: "张三存活".into(),
         visible_to: GroupContextPolicy::users(Vec::<String>::new()),
-        collect_from: GroupContextPolicy::users(["judge_bot"]),
+        collect_from: Some(GroupContextPolicy::users(["judge_bot"])),
         valid_from: Some(time("2026-10-12T08:16:08Z")),
         valid_to: None,
     };
@@ -329,12 +329,59 @@ fn get_item_serializes_content_and_business_validity() {
         valid_to: Some(valid_to),
         visible_to: None,
         collect_from: None,
+        owners: None,
     };
 
     let value = serde_json::to_value(&item).expect("get item serializes");
     assert_eq!(value["content"], json!("你的词语是：香蕉"));
     assert_eq!(value["valid_from"], json!("2026-10-12T08:16:08Z"));
     assert_eq!(value["valid_to"], json!("2026-10-13T08:16:08Z"));
+}
+
+#[test]
+fn add_collect_from_is_optional_and_null_decodes_to_none() {
+    let mut add = AddGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: request_context(),
+        name: "player_state".into(),
+        scope_level: ScopeLevel::Session,
+        content: "张三存活".into(),
+        visible_to: GroupContextPolicy::users(Vec::<String>::new()),
+        collect_from: None,
+        valid_from: None,
+        valid_to: None,
+    };
+
+    let value = serde_json::to_value(&add).expect("add command serializes");
+    assert!(value.get("collect_from").is_none());
+    let decoded: AddGroupContext = serde_json::from_value(value).expect("omitted policy deserializes");
+    assert_eq!(decoded.collect_from, None);
+
+    let json = json!({
+        "actor_id": "judge_bot",
+        "request_context": request_context(),
+        "name": "player_state",
+        "scope_level": "session",
+        "content": "张三存活",
+        "visible_to": {"userIds": []},
+        "collect_from": null,
+        "valid_from": null,
+        "valid_to": null
+    });
+    let decoded: AddGroupContext = serde_json::from_value(json).expect("null policy deserializes");
+    assert_eq!(decoded.collect_from, None);
+
+    add.collect_from = Some(GroupContextPolicy::users(["other_bot"]));
+    let value = serde_json::to_value(&add).expect("add command serializes supplied policy");
+    assert_eq!(
+        value["collect_from"],
+        json!({"userIds": ["other_bot"]})
+    );
+    let decoded: AddGroupContext = serde_json::from_value(value).expect("supplied policy deserializes");
+    assert_eq!(
+        decoded.collect_from,
+        Some(GroupContextPolicy::users(["other_bot"]))
+    );
 }
 
 #[test]
@@ -347,7 +394,7 @@ fn commands_serialize_optional_business_validity_fields() {
         scope_level: ScopeLevel::Session,
         content: "张三存活".into(),
         visible_to: GroupContextPolicy::users(Vec::<String>::new()),
-        collect_from: GroupContextPolicy::users(["judge_bot"]),
+        collect_from: None,
         valid_from: Some(valid_from),
         valid_to: None,
     };
@@ -355,10 +402,12 @@ fn commands_serialize_optional_business_validity_fields() {
     let value = serde_json::to_value(&add).expect("add command serializes");
     assert_eq!(value["valid_from"], json!("2026-10-12T08:16:08Z"));
     assert!(value.get("valid_to").is_none());
+    assert!(value.get("collect_from").is_none());
 
     let decoded: AddGroupContext = serde_json::from_value(value).expect("add command deserializes");
     assert_eq!(decoded.valid_from, Some(valid_from));
     assert_eq!(decoded.valid_to, None);
+    assert_eq!(decoded.collect_from, None);
 }
 
 #[test]
@@ -404,7 +453,7 @@ fn group_context_service_is_object_safe() {
 }
 
 #[test]
-fn get_item_policy_fields_are_owner_only_and_omitted_when_missing() {
+fn get_item_management_fields_are_owner_only_and_omitted_when_missing() {
     let valid_from = time("2026-10-12T08:16:08Z");
     let non_owner = GroupContextGetItem {
         name: "player_word_1".into(),
@@ -414,21 +463,28 @@ fn get_item_policy_fields_are_owner_only_and_omitted_when_missing() {
         valid_to: None,
         visible_to: None,
         collect_from: None,
+        owners: None,
     };
 
     let non_owner_json = serde_json::to_value(&non_owner).expect("non-owner get item serializes");
     assert!(non_owner_json.get("visible_to").is_none());
     assert!(non_owner_json.get("collect_from").is_none());
+    assert!(non_owner_json.get("owners").is_none());
 
     let owner = GroupContextGetItem {
         visible_to: Some(GroupContextPolicy::users(Vec::<String>::new())),
         collect_from: Some(GroupContextPolicy::users(["judge_bot"])),
+        owners: Some(GroupContextOwners::new(["judge_bot"])),
         ..non_owner
     };
     let owner_json = serde_json::to_value(&owner).expect("owner get item serializes");
     assert_eq!(owner_json["visible_to"], json!({ "userIds": [] }));
     assert_eq!(
         owner_json["collect_from"],
+        json!({ "userIds": ["judge_bot"] })
+    );
+    assert_eq!(
+        owner_json["owners"],
         json!({ "userIds": ["judge_bot"] })
     );
 }

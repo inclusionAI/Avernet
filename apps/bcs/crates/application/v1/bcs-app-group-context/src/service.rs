@@ -45,15 +45,17 @@ impl GroupContextApplicationServiceImpl {
         content: String,
         creator: String,
         visible_to: GroupContextPolicy,
-        collect_from: GroupContextPolicy,
+        collect_from: Option<GroupContextPolicy>,
         owners: GroupContextOwners,
         change_reason: Option<String>,
         valid_from: Option<bcs_domain::GroupContextTime>,
         valid_to: Option<bcs_domain::GroupContextTime>,
     ) -> Result<GroupContextEntry, ApplicationError> {
+        let collect_from = collect_from.unwrap_or_else(|| GroupContextPolicy::users(Vec::<String>::new()));
         validate_name(&name)?;
         validate_content(&content)?;
-        validate_policies(&visible_to, &collect_from)?;
+        validate_policy("visible_to", &visible_to)?;
+        validate_policy("collect_from", &collect_from)?;
         validate_required_owners(&owners)?;
         let now = Utc::now();
         self.repo
@@ -94,7 +96,8 @@ impl GroupContextApplicationServiceImpl {
     ) -> Result<GroupContextEntry, ApplicationError> {
         validate_name(&name)?;
         validate_content(&content)?;
-        validate_policies(&visible_to, &collect_from)?;
+        validate_policy("visible_to", &visible_to)?;
+        validate_policy("collect_from", &collect_from)?;
         validate_persistable_owners(&owners)?;
         let now = Utc::now();
         self.repo
@@ -131,12 +134,8 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
         validate_actor(&command.actor_id)?;
         validate_name(&command.name)?;
         validate_content(&command.content)?;
-        validate_policies(&command.visible_to, &command.collect_from)?;
-        if !command.collect_from.contains_user(&command.actor_id) {
-            return Err(permission_denied(format!(
-                "actor_id={} is not allowed to write {} in {}",
-                command.actor_id, command.name, scope.scope
-            )));
+        if let Some(collect_from) = command.collect_from.as_ref() {
+            validate_policy("collect_from", collect_from)?;
         }
         self.create(
             scope,
@@ -296,6 +295,7 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
                 let is_owner = actor_is_owner(&entry, &query.actor_id);
                 let visible_to = is_owner.then(|| entry.visible_to.clone());
                 let collect_from = is_owner.then(|| entry.collect_from.clone());
+                let owners = is_owner.then(|| entry.owners.clone());
                 GroupContextGetItem {
                     name: entry.name,
                     scope_level: entry.scope_level,
@@ -304,6 +304,7 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
                     valid_to: entry.valid_to,
                     visible_to,
                     collect_from,
+                    owners,
                 }
             })
             .collect();
@@ -317,7 +318,7 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
         let scope = resolve_scope(&command.request_context, command.scope_level)?;
         validate_name(&command.name)?;
         validate_content(&command.content)?;
-        validate_policies(&command.visible_to, &command.collect_from)?;
+        validate_systemset_policies(&command.visible_to, &command.collect_from)?;
         let existing = self
             .repo
             .get_active(&command.name, &scope.scope)
@@ -349,7 +350,7 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
                     command.content,
                     SYSTEM_CREATOR.to_string(),
                     command.visible_to,
-                    command.collect_from,
+                    Some(command.collect_from),
                     GroupContextOwners::new([SYSTEM_CREATOR]),
                     None,
                     command.valid_from,
@@ -391,7 +392,7 @@ fn validate_name(name: &str) -> Result<(), ApplicationError> {
     Ok(())
 }
 
-fn validate_policies(
+fn validate_systemset_policies(
     visible_to: &GroupContextPolicy,
     collect_from: &GroupContextPolicy,
 ) -> Result<(), ApplicationError> {
