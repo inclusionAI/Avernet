@@ -691,6 +691,20 @@ export class A2AProvider {
   }
 
   /**
+   * 未终结任务的取消入口（review R2-3 第四轮：宿主 parked 位驱动）——旧任务
+   * 的请求已退出（sentinel：无在途请求），abort() 的 in-flight 门触不到它。
+   * 与 abort 的 anchored 分流同面：wire CancelTask + 乐观挂禁 + 控制面核销
+   *（§4.3 四态机全生效）。generation 栅栏自增废止在飞中的手工恢复轮
+   *（晚到帧一律拒）。§3.1 语义：取消 = 用户明确放弃——宿主随即释放引用。
+   */
+  cancelUnterminatedTask(): void {
+    const anchor = this.recoveryAnchor;
+    if (!anchor || this.runSettled || this.isRequesting) return;
+    this.generation += 1;
+    this.fireWireCancel(anchor.taskRunId, anchor.sessionKey);
+  }
+
+  /**
    * 手工恢复入口（B13/UI 接线；B11 只立 API 不进 UI）。
    * 开一轮**只读**恢复（不做 execute 重发）：fresh per-round 预算（spec：手工轮
    * 自成预算），事件走同一 translate→parser 管线与代际栅栏。

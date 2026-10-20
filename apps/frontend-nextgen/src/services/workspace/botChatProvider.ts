@@ -64,6 +64,12 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   public onMessage?: (message: ChatMessage) => void;
   public onComplete?: (messages: ChatMessage[]) => void;
   public onError?: (error: Error) => void;
+  /** R2-3 第四轮——未终结旧任务的隔离播报面（parking 重接，见
+   * parkOrDisposeRetiredA2a）：旧任务的完成/失败不再冒充当前发送的
+   * 完成/失败；UI 接线归 M3（同 manualRecover 的 B13 预留口径）。 */
+  public onRetiredTaskMessage?: (message: unknown) => void;
+  public onRetiredTaskComplete?: (messages: Array<unknown>) => void;
+  public onRetiredTaskError?: (error: Error) => void;
 
   private readonly options: BotChatProviderOptions;
   private inner: OpenClawProvider | null = null;
@@ -409,10 +415,54 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
    */
   private parkOrDisposeRetiredA2a(retired: OpenClawProvider): void {
     if ((retired as { hasUnterminatedRecovery?: boolean }).hasUnterminatedRecovery) {
-      this.retiredA2aHandler = retired;             // 只让出发送位，处理器全保留
+      // 回调隔离（review R2-3 第四轮 #2）：旧任务后续事件重接到专用
+      // retired_*面——不得冒充当前会话新发送的完成/失败（宿主 onMessage/
+      // onComplete/onError 保持专属于当下发送位）。旧任务的迟到恢复终局、
+      // 播报从 onRetiredTask* 走；取消核销仍走 onCancelOutcome（文案自带
+      // 归属，不歧义）。连接状态订阅一并剪除——旧任务恢复期不再发会话级
+      // 状态（错误面经 onRetiredTaskError 上浮，宿主选择是否展示）。
+      const isolated = retired as unknown as {
+        onMessage?: (m: unknown) => void;
+        onComplete?: (msgs: Array<unknown>) => void;
+        onError?: (e: Error) => void;
+      };
+      isolated.onMessage = (m) => this.onRetiredTaskMessage?.(m);
+      isolated.onComplete = (msgs) => this.onRetiredTaskComplete?.(msgs);
+      isolated.onError = (e) => this.onRetiredTaskError?.(e);
+      this.unsubscribeInnerConnection?.();
+      this.unsubscribeInnerConnection = undefined;
+      this.retiredA2aHandler = retired;             // 处理器全保留（锚/恢复/核销）
       return;
     }
     this.disconnectInner(retired);
+  }
+
+  /**
+   * 未终结旧任务的生产驱动面——恢复入口（review R2-3 第四轮 #1）：经宿主
+   * 可达（parked 处理器的 manualRecover 只读轮；真实终局事件回流的唯一
+   * 生产通道）。终局落定后由下一发送边界惰性释放（releaseSettledA2aHandler）。
+   * UI 按钮接线归 M3；本面先立可达性（§3.1"独立生命周期"的主干道）。
+   */
+  async recoverRetiredA2aTask(): Promise<{ outcome: string; state?: string } | null> {
+    const parked = this.retiredA2aHandler;
+    if (!parked) return null;
+    return (parked as unknown as {
+      manualRecover(): Promise<{ outcome: string; state?: string } | null>;
+    }).manualRecover();
+  }
+
+  /**
+   * 未终结旧任务的生产驱动面——取消入口（§3.1"用户明确放弃"经宿主显式
+   * 触发）：wire CancelTask 控制面（四态核销 + context 级 send-ban 照 §3.1
+   * 迟到规则落地——registry 与实例无关，引用释放不影响核销），随后立即
+   * 释放处理器（用户已明确放弃，恢复入口随之作废）。
+   */
+  cancelRetiredA2aTask(): void {
+    const parked = this.retiredA2aHandler;
+    if (!parked) return;
+    (parked as unknown as { cancelUnterminatedTask?(): void }).cancelUnterminatedTask?.();
+    this.retiredA2aHandler = null;
+    this.disconnectInner(parked);
   }
 
   /**

@@ -120,6 +120,9 @@ interface Captured { url: string; init: RequestInit }
 
 /** SendStreamingMessage 面的可编程产流位:按真请求 id 重打信封后产 Response */
 let sseFactory: ((reqId: number) => Response) | undefined;
+/** Review 第四轮：ReplayEvents 可编程回真事件流（SSE Response——replay 与主
+ * 请求同走 streamRpc；旧任务恢复的终局回流生产位） */
+let replayFactory: ((reqId: number) => Response) | undefined;
 let calls: Captured[] = [];
 
 async function routingFetch(input: any, init?: any): Promise<Response> {
@@ -129,9 +132,14 @@ async function routingFetch(input: any, init?: any): Promise<Response> {
   const req = JSON.parse(String((init as RequestInit).body));
   if (req.method === 'SendStreamingMessage' && sseFactory) return sseFactory(req.id);
   if (req.method === 'CancelTask') return jsonBody(cancelConfirmed(req.id));
-  // R2-3 第二补丁：ReplayEvents 一律打网络级拒（typed transport）——恢复轮的
-  // 每次尝试都确定性失败，预算耗尽即 RECOVERY_STOPPED（不依赖引擎语义）
-  if (req.method === 'ReplayEvents') throw new TypeError('reset');
+  if (req.method === 'GetTask') return jsonBody(jrpcOk(req.id, { task: { id: TASK_ID, contextId: 'sess-1', status: { state: 'TASK_STATE_COMPLETED' }, metadata: { seq: 2, lastSeq: 2 } } }));
+  // R2-3 第二补丁：ReplayEvents 缺省打网络级拒（typed transport）——恢复轮的
+  // 每次尝试都确定性失败，预算耗尽即 RECOVERY_STOPPED（不依赖引擎语义）；
+  // 第四轮起 replayFactory 可编程回真事件（宿主入口恢复旧任务的终局回流）
+  if (req.method === 'ReplayEvents') {
+    if (replayFactory) return replayFactory(req.id);
+    throw new TypeError('reset');
+  }
   return jsonBody(jrpcOk(req.id, {}));
 }
 
@@ -164,6 +172,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   calls = [];
   sseFactory = undefined;
+  replayFactory = undefined;
   storage.clear();
   storage.set(A2A_SWITCH_KEY, '1');
   (globalThis as any).fetch = routingFetch;
@@ -353,36 +362,46 @@ describe('BotChatProvider A2A 接缝活体集成（B16）', () => {
     expect(disconnects).toEqual(['a2a']);
   });
 
-  it('R2-3 第二补丁：未终结旧任务在换轨后保留处理器——恢复锚/入口存活，'
-    + '终局落定后按 §3.1 释放', async () => {
-    // 场景（reviewer 复核指定）：已知 taskId → 断流进入恢复 → 预算耗尽未终结
-    // → 开关关 → 新发送走 v3 的同时旧任务处理器保留，manualRecover 仍可驱动。
+  it('R2-3 第四轮：未终结旧任务经宿主入口驱动——parked 恢复回流真终局、'
+    + '回调隔离不冒充新请求完成、释放经 §3.1 有机核销（零内部触碰）', async () => {
+    // 场景（reviewer 指定）：已知 taskId → 断流 → 预算耗尽未终结 → 开关关
+    // → 新发送走 v3 且进行中 → 经 BotChatProvider 生产入口恢复旧任务 →
+    // 真实终局事件回流 → 旧任务释放、新任务状态不受影响。
     const built = await maybeBuildA2AProvider({ url: WS_URL, xIAMToken: 'iam-1' });
     expect(built).not.toBeNull();
 
-    // 微预算（真实时钟亦可确定）：1 次尝试即耗尽 → RECOVERY_STOPPED
+    // 微预算（预算耗尽确定性复现）：1 次尝试即耗尽 → RECOVERY_STOPPED
     const TINY_RECOVERY = {
       maxAttempts: 1, backoffCapsMs: [1], perCallTimeoutMs: 500, totalBudgetMs: 2000,
     } as const;
-    let oldA2a: any = null;
+    let oldA2a: any = null;              // 仅用于断言身份与状态——驱动一律走宿主入口
+    const v3Releases: Array<() => void> = [];   // v3 stub 请求放行队列（按序放行）
+    let v3Inner: any = null;
     const provider = createBotChatProvider({
       bot: BOT, userId: '2088', sessionId: 'sess-1',
       createSdkProvider: (cfg: any) => {
         const a2a = takeCachedA2AProvider({ ...cfg, recovery: TINY_RECOVERY });
         if (a2a) { oldA2a = a2a; return a2a as unknown as any; }
-        return ({                                    // v3 stub：不真连 ws
+        v3Inner = {
           isConnected: true,
           connect: () => Promise.resolve(),
-          request: () => Promise.resolve(),
+          request: () => new Promise<void>((res) => { v3Releases.push(res); }),
           disconnect: () => undefined,
           subscribeToConnectionStatus: () => () => undefined,
-        });
+        };
+        return v3Inner;
       },
     } as any);
+    const primaryComplete = jest.fn();
+    const retiredCompletes: unknown[][] = [];
+    const retiredErrors: Error[] = [];
+    provider.onComplete = primaryComplete;
+    provider.onRetiredTaskComplete = (msgs) => retiredCompletes.push(msgs);
+    provider.onRetiredTaskError = (e) => { retiredErrors.push(e); console.log('ZZZZ-ERR', (e as any)?.failure, (e as Error).message); };
     await provider.connect();
     expect(oldA2a).not.toBeNull();
 
-    // 第 1 段：A2A 出站拿 taskId（首 Task 事件锚定）→ 断流 → 自动恢复预算耗尽
+    // 第 1 段：A2A 出站拿 taskId → 断流 → 恢复预算耗尽（任务未终结）
     let sse1!: DeferredSse;
     sseFactory = (reqId) => {
       sse1 = deferredSse();
@@ -392,42 +411,145 @@ describe('BotChatProvider A2A 接缝活体集成（B16）', () => {
           task: { id: TASK_ID, contextId: 'sess-1',
             status: { state: 'TASK_STATE_WORKING' }, metadata: {} },
         },
-      })}\n\n`);
+      })}
+
+`);
       return sse1.response;
     };
     const first = provider.request({ content: '长任务', sessionId: 'sess-1' } satisfies BotChatRequest);
-    await new Promise((r) => { setTimeout(r, 0); });   // task 事件消费，恢复锚建立
-    sse1.cut();                                        // typed transport 断流
+    await new Promise((r) => { setTimeout(r, 0); });
+    sse1.cut();
     await expect(first).rejects.toThrow('恢复已停止');
-    // 前端发送位空闲 ✚ 引擎任务未终结——不得以前者证明可销毁后者
     expect(oldA2a.hasUnterminatedRecovery).toBe(true);
 
-    // 第 2 段：开关关 → 新发送落 v3；旧任务处理器保留（未断连、引用在场）
+    // 第 2 段：开关关 → 新发送落 v3 **进行中**（挂起）；旧任务处理器保留
+    storage.set(A2A_SWITCH_KEY, '0');
+    const send2 = provider.request({ content: '第二条', sessionId: 'sess-1' } satisfies BotChatRequest);
+    for (let i = 0; i < 200
+      && ((provider as any).retiredA2aHandler ?? oldA2a) !== oldA2a; i += 1) {
+      await new Promise((r) => { setTimeout(r, 1); });   // 换轨到位
+    }
+    for (let i = 0; i < 200 && v3Releases.length < 1; i += 1) {
+      await new Promise((r) => { setTimeout(r, 1); });   // v3 请求出站入队
+    }
+    expect((provider as any).retiredA2aHandler).toBe(oldA2a);
+    expect(oldA2a.isConnected).toBe(true);              // 保留≠断连退役
+
+    // 第 3 段：**宿主生产入口**驱动旧任务恢复——ReplayEvents 回真终局流
+    // sseResponse 收 envelope 对象数组（内部自行 data: 格式化）——终局两连发
+    replayFactory = (reqId) => sseResponse([
+      { jsonrpc: '2.0', id: reqId, result: {
+        statusUpdate: { taskId: TASK_ID, contextId: 'sess-1',
+          status: { state: 'TASK_STATE_COMPLETED' },
+          metadata: { seq: 2, lastSeq: 2 } },
+      } },
+      { jsonrpc: '2.0', id: reqId, result: {
+        statusUpdate: { taskId: TASK_ID, contextId: 'sess-1',
+          status: { state: 'TASK_STATE_COMPLETED' },
+          metadata: { seq: 2, final: 'true', lastSeq: 2 } },
+      } },
+    ]);
+    const outcome = await provider.recoverRetiredA2aTask();
+    expect(outcome).toMatchObject({ outcome: 'terminal', state: 'TASK_STATE_COMPLETED' });
+    // 回调隔离（review 第四轮 #2）：旧任务终局走专用面，不冒充新请求完成
+    expect(retiredCompletes).toHaveLength(1);
+    expect(retiredErrors).toHaveLength(0);
+    expect(primaryComplete).not.toHaveBeenCalled();    // 主 onComplete 归新 v3 请求独占
+    expect((provider as any).retiredA2aHandler).toBe(oldA2a);   // 终局虽落仍持至下一边界
+
+    // 第 4 段：新 v3 请求收尾——主面由新任务自己完成（未受旧任务污染）
+    v3Inner?.onComplete?.([{ id: 'v3-msg', role: 'assistant', content: 'v3 答' }]);
+    v3Releases[0]();                       // 放行第二条（第一只挂起的 v3 请求）
+    await send2;
+    expect(primaryComplete).toHaveBeenCalledTimes(1);
+
+    // 第 5 段：§3.1 有机释放——runSettled 由真终局翻位（终局消费即核销），
+    // 下一发送边界惰性断连释放，零内部触碰
+    const send3 = provider.request({ content: '第三条', sessionId: 'sess-1' } satisfies BotChatRequest);
+    for (let i = 0; i < 200 && (provider as any).retiredA2aHandler !== null; i += 1) {
+      await new Promise((r) => { setTimeout(r, 1); });   // 边界惰性释放 settled parked
+    }
+    expect((provider as any).retiredA2aHandler).toBeNull();
+    expect(oldA2a.isConnected).toBe(false);
+    for (let i = 0; i < 200 && v3Releases.length < 2; i += 1) {
+      await new Promise((r) => { setTimeout(r, 1); });   // request3 推进到 stub 请求入队
+    }
+    expect(v3Releases.length).toBeGreaterThanOrEqual(2);
+    v3Releases[1]();             // 放行第三条（第二个挂起的 v3 请求）
+    await send3;
+  });
+
+  it('R2-3 第四轮（取消入口）：cancelRetiredA2aTask = §3.1 用户明确放弃——'
+    + 'WireCancelTask 真发、四态核销照常、引用即时释放', async () => {
+    const built = await maybeBuildA2AProvider({ url: WS_URL, xIAMToken: 'iam-1' });
+    expect(built).not.toBeNull();
+    const TINY_RECOVERY = {
+      maxAttempts: 1, backoffCapsMs: [1], perCallTimeoutMs: 500, totalBudgetMs: 2000,
+    } as const;
+    let oldA2a: any = null;
+    const cancelOutcomes: string[] = [];
+    const provider = createBotChatProvider({
+      bot: BOT, userId: '2088', sessionId: 'sess-1',
+      createSdkProvider: (cfg: any) => {
+        const a2a = takeCachedA2AProvider({ ...cfg, recovery: TINY_RECOVERY });
+        // 自定义 factory 绕过缺省 factory 的 A2A wiring（B12 onCancelOutcome
+        // 转发）——补齐等价接线；emitCancelOutcome 的转发宿主 subscribe 面不走
+        if (a2a) {
+          oldA2a = a2a;
+          a2a.onCancelOutcome = (o: { kind: string }) => cancelOutcomes.push(o.kind);
+          return a2a as unknown as any;
+        }
+        return ({
+          isConnected: true,
+          connect: () => Promise.resolve(),
+          request: () => Promise.resolve(),
+          disconnect: () => undefined,
+          subscribeToConnectionStatus: () => () => undefined,
+        });
+      },
+    } as any);
+    const outcomes: string[] = [];
+    provider.subscribeToCancelOutcome((o) => outcomes.push(o.kind));
+    await provider.connect();
+
+    let sse1!: DeferredSse;
+    sseFactory = (reqId) => {
+      sse1 = deferredSse();
+      sse1.push(`data: ${JSON.stringify({
+        jsonrpc: '2.0', id: reqId,
+        result: {
+          task: { id: TASK_ID, contextId: 'sess-1',
+            status: { state: 'TASK_STATE_WORKING' }, metadata: {} },
+        },
+      })}
+
+`);
+      return sse1.response;
+    };
+    const first = provider.request({ content: '长任务', sessionId: 'sess-1' } satisfies BotChatRequest);
+    await new Promise((r) => { setTimeout(r, 0); });
+    sse1.cut();
+    await expect(first).rejects.toThrow('恢复已停止');
+
     storage.set(A2A_SWITCH_KEY, '0');
     await provider.request({ content: '第二条', sessionId: 'sess-1' } satisfies BotChatRequest);
     expect((provider as any).retiredA2aHandler).toBe(oldA2a);
-    expect(oldA2a.isConnected).toBe(true);          // 保留≠断连退役
-    expect(oldA2a.hasUnterminatedRecovery).toBe(true);
 
-    // 第 3 段：保留中的旧任务入口可驱动（manualRecover 开只读轮，ReplayEvents
-    // 打真 POST——预算耗尽重复原命运，但"恢复能力在"得到网络级实证）
-    const replaysBefore = calls.filter((c) => {
-      try { return JSON.parse(String(c.init.body)).method === 'ReplayEvents'; } catch { return false; }
-    }).length;
-    const outcome = await oldA2a.manualRecover();
-    const replaysAfter = calls.filter((c) => {
-      try { return JSON.parse(String(c.init.body)).method === 'ReplayEvents'; } catch { return false; }
-    }).length;
-    expect(replaysAfter).toBeGreaterThan(replaysBefore);   // 旧任务仍在发恢复面调用
-    expect(outcome).toEqual({ outcome: 'budget-exhausted' });  // 微预算同命运（确定性）
-    expect((provider as any).retiredA2aHandler).toBe(oldA2a);  // 仍未终结——保留
-
-    // 第 4 段：§3.1 释放条件核销——终局落定（迟到终态/GetTask 收账后 runSettled
-    // 翻位的生产路径在此以等价态模拟）→ 下一发送边界惰性释放
-    (oldA2a as any).runSettled = true;
-    expect(oldA2a.hasUnterminatedRecovery).toBe(false);
-    await provider.request({ content: '第三条', sessionId: 'sess-1' } satisfies BotChatRequest);
-    expect((provider as any).retiredA2aHandler).toBeNull();   // 已释放
-    expect(oldA2a.isConnected).toBe(false);                  // 释放=断连
+    // 宿主取消入口：明确放弃——wire CancelTask 真发 + 引用即时释放
+    provider.cancelRetiredA2aTask();
+    await new Promise((r) => { setTimeout(r, 0); });   // CancelTask 控制面异步出站
+    const cancelBodies = calls.map((c) => {
+      try { return JSON.parse(String(c.init.body)); } catch { return null; }
+    }).filter((b) => b?.method === 'CancelTask');
+    expect(cancelBodies).toHaveLength(1);
+    expect(cancelBodies[0].params.taskId).toBe(TASK_ID);
+    expect((provider as any).retiredA2aHandler).toBeNull();
+    expect(oldA2a.isConnected).toBe(false);
+    // 释放后核销链仍在（控制面 promise 自洽 + onCancelOutcome 闭路照播）
+    for (let i = 0; i < 200 && cancelOutcomes.length === 0; i += 1) {
+      await new Promise((r) => { setTimeout(r, 1); });   // CancelTask 控制面落地核销
+    }
+    expect(cancelOutcomes).toEqual(['cancelled-clean']);
   });
+
 });
