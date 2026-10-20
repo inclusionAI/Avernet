@@ -883,6 +883,9 @@ class BaasDeviceService(DeviceService):
             bot_uuid=ws_info.bot_uuid,
             tenant=ws_info.tenant,
             engine_port=ws_info.engine_port,
+            # A2A 面 base 与 ws_conn_mode 无关：它描述的是设备自己的 http 面，
+            # 不是某条 ws 链路的形状。BaaS 未签发即空串，透传空串。
+            a2a_base_url=ws_info.a2a_base_url,
             # 服务端签发；ttl 入参本层忽略，caller 自行推算必然与真 token 不符。
             # 本链路 token 就是 ws token，故不另填 ws_*（留空即"用 token"）。
             expires_at=ws_info.expires_at,
