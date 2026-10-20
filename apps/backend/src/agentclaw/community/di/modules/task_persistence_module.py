@@ -28,6 +28,9 @@ from injector import Binder, Injector, Module, provider, singleton
 from agentclaw.community.core.repository.implementations.task.task_action_log_repository import (
     TaskActionLogRepository,
 )
+from agentclaw.community.core.repository.implementations.task.task_artifact_repository import (
+    TaskArtifactRepository,
+)
 from agentclaw.community.core.repository.implementations.task.task_callback_correlation_repository import (
     TaskCallbackCorrelationRepository,
 )
@@ -54,6 +57,7 @@ from agentclaw.community.core.repository.implementations.task.task_trajectory_re
 )
 from agentclaw.community.core.repository.protocols.task import (
     TaskActionLogRepositoryProtocol,
+    TaskArtifactRepositoryProtocol,
     TaskCallbackCorrelationRepositoryProtocol,
     TaskCallbackRepositoryProtocol,
     TaskGraphRepositoryProtocol,
@@ -134,6 +138,14 @@ class TaskPersistenceModule(Module):
         binder.bind(
             TaskCallbackCorrelationRepositoryProtocol,
             to=TaskCallbackCorrelationRepository,
+            scope=singleton,
+        )
+        # Artifact manifest read side (spec 2026-10-20-task-artifact-domain):
+        # rows are written inline in the save_graph transaction; this binding
+        # serves ONLY the read queries (dashboard enrichment / trajectory HTML).
+        binder.bind(
+            TaskArtifactRepositoryProtocol,
+            to=TaskArtifactRepository,
             scope=singleton,
         )
 

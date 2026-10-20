@@ -6,6 +6,9 @@ re-exported here so existing ``...repository.protocols.task`` imports remain
 stable.
 """
 
+from agentclaw.community.core.repository.protocols.task.artifact import (
+    TaskArtifactRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.task.core import (
     TaskActionLogRepositoryProtocol,
     TaskCallbackCorrelationRepositoryProtocol,
@@ -21,6 +24,7 @@ from agentclaw.community.core.repository.protocols.task.core import (
 
 __all__ = [
     "TaskActionLogRepositoryProtocol",
+    "TaskArtifactRepositoryProtocol",
     "TaskCallbackCorrelationRepositoryProtocol",
     "TaskCallbackRepositoryProtocol",
     "TaskDiscoveryLockRepositoryProtocol",
