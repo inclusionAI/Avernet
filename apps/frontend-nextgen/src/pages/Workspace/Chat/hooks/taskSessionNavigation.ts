@@ -36,7 +36,7 @@ export function useTaskSessionNavigationObserver(): void {
       return;
     }
 
-    if (target.startTime == null && target.endTime == null) return;
+    if ((target.startTime ?? null) === null && (target.endTime ?? null) === null) return;
     // 引出即脱离(fire-and-forget):消费 pendingNavigation 会让 target 变 null 触发 effect 重跑,
     // 带清理函数的 probe 会在导航刚发生时被自取消;一次性 setTimeout 只读 DOM,无需清理。
     window.setTimeout(() => {

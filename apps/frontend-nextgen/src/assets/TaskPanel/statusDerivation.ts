@@ -79,9 +79,11 @@ export function deriveNodePresentation(input: {
   const attemptCount = log.length ? Math.max(...log.map(eventAttempt)) : 0;
 
   let present: PresentNodeStatus;
+  // verdict 非 DONE 且非空 = 'FAILED'(联合类型收敛),rework/needsHitl 据此判定,避免宽松等号
+  const verdictFailed = acceptanceVerdict === 'FAILED';
   switch (runtimeStatus) {
     case 'running':
-      present = attemptCount > 1 && acceptanceVerdict != null && acceptanceVerdict !== 'DONE' ? 'rework' : 'running';
+      present = attemptCount > 1 && verdictFailed ? 'rework' : 'running';
       break;
     case 'done':
       present = hasConsumedDownstream || childTaskDone === true ? 'merged' : 'done';
@@ -91,7 +93,8 @@ export function deriveNodePresentation(input: {
       present = runtimeStatus;
   }
 
-  const needsHitl = needsTaskAttention && runtimeStatus === 'running' && acceptanceVerdict != null;
+  const hasVerdict = acceptanceVerdict === 'DONE' || acceptanceVerdict === 'FAILED';
+  const needsHitl = needsTaskAttention && runtimeStatus === 'running' && hasVerdict;
 
   return { present, attemptCount, needsHitl };
 }
@@ -161,7 +164,7 @@ export function deriveNodeExecDag(actionLog: NodeActionEventDto[] | null | undef
 
     if (prevId) {
       const attempt = eventAttempt(e);
-      const crossAttempt = prevAttempt != null && attempt > prevAttempt;
+      const crossAttempt = prevAttempt !== null && attempt > prevAttempt;
       edges.push({ from: prevId, to: id, semantics: crossAttempt ? 'rework' : 'none' });
       prevAttempt = attempt;
     } else {

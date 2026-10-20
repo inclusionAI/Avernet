@@ -12,6 +12,7 @@ import { ArtifactsSection } from './ArtifactsSection';
 import { DagViewV2 } from './DagViewV2';
 import { NodeListViewV2 } from './NodeListViewV2';
 import { TaskInfoSection } from './TaskInfoSection';
+import { TaskOutputSection } from './TaskOutputSection';
 import type { TaskPanelNav } from './taskPanelNav';
 
 export interface TaskOverviewV2Props {
@@ -110,6 +111,7 @@ export const TaskOverviewV2: React.FC<TaskOverviewV2Props> = ({ task, nav, apiBa
           </div>
         )}
       </section>
+      <TaskOutputSection task={task} />
       <ArtifactsSection artifacts={aggregatedArtifacts} apiBaseUrl={apiBaseUrl} />
       <TaskInfoSection task={task} />
     </div>

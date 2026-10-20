@@ -3,12 +3,11 @@
 // capability 的 URL 构建测在 defaultCapabilities.test.ts;此处以注入的 mock capability 断言联动协议。
 import { getCapabilities } from '@/capabilities';
 import { useTaskSessionNavigationObserver } from '@/pages/Workspace/Chat/hooks/taskSessionNavigation';
-import type { TaskSessionJumpTarget } from '@/capabilities/types';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { act, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
-const mockNavigate = jest.fn((target: TaskSessionJumpTarget) => ({ status: 'available', value: null }));
+const mockNavigate = jest.fn((): { status: 'available'; value: null } => ({ status: 'available', value: null }));
 
 const Harness = () => {
   useTaskSessionNavigationObserver();

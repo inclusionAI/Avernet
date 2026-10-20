@@ -37,7 +37,7 @@ export function resolveNodeSessionTarget(node: TaskNodeView, view: TaskView): Re
 
   // ① 节点自带会话
   if (node.sessionId) {
-    const isGroup = node.groupId != null || isGroupSessionId(node.sessionId);
+    const isGroup = node.groupId !== null && node.groupId !== undefined ? true : isGroupSessionId(node.sessionId);
     return {
       sessionId: node.sessionId,
       kind: isGroup ? 'group' : 'bot',

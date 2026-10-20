@@ -11,17 +11,20 @@ export function locateMessageWindowTimestamp(
   startTime: number | null,
   endTime: number | null,
 ): number | null {
-  if (startTime == null && endTime == null) return null;
+  const start = startTime ?? null;
+  const end = endTime ?? null;
+  if (start === null && end === null) return null;
   if (!messages.length) return null;
 
-  if (startTime != null && endTime != null) {
-    const inWindow = messages.filter((m) => m.ts >= startTime && m.ts <= endTime);
+  if (start !== null && end !== null) {
+    const inWindow = messages.filter((m) => m.ts >= start && m.ts <= end);
     if (inWindow.length) return inWindow[inWindow.length - 1].ts;
     // 窗口空 → 起点之前最近一条(节点开始前的最后上下文)
-    const before = messages.filter((m) => m.ts <= startTime);
+    const before = messages.filter((m) => m.ts <= start);
     return before.length ? before[before.length - 1].ts : null;
   }
-  const bound = startTime ?? endTime!;
+  const bound = start !== null ? start : end;
+  if (bound === null) return null; // 前面已保证二者必有其一,此行为收窄辅助
   const upTo = messages.filter((m) => m.ts <= bound);
   return upTo.length ? upTo[upTo.length - 1].ts : null;
 }
@@ -39,7 +42,7 @@ function collectMessageCandidates(root: ParentNode): MessageDomCandidate[] {
   for (const attr of TS_ATTRS) {
     for (const el of Array.from(root.querySelectorAll(`[${attr}]`))) {
       const raw = el.getAttribute(attr);
-      const ts = raw != null ? Number(raw) : NaN;
+      const ts = raw !== null ? Number(raw) : NaN;
       if (!Number.isNaN(ts)) candidates.push({ ts, el });
     }
   }
@@ -55,14 +58,14 @@ export function scrollToMessageTimestampWindow(
   startTime: number | null,
   endTime: number | null,
 ): boolean {
-  if (startTime == null && endTime == null) return false;
+  if ((startTime ?? null) === null && (endTime ?? null) === null) return false;
   const candidates = collectMessageCandidates(root);
   if (!candidates.length) return false;
 
   const targetTs = locateMessageWindowTimestamp(candidates, startTime, endTime);
-  if (targetTs == null) return false;
+  if (targetTs === null) return false;
 
   const hit = candidates.filter((c) => c.ts === targetTs);
   hit[hit.length - 1].el.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
-  return hit.length > 0;
+  return true;
 }

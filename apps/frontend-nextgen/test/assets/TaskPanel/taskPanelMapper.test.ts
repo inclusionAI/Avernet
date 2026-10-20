@@ -1028,9 +1028,10 @@ describe('taskPanelMapper V2 derivation wiring', () => {
         task_spec: { context: { title: '这是一个名字特别长的节点标题要截断' }, goal: { objective: '', acceptances: [] } },
       }] as TaskDashboardResponse['tasks'],
     }));
-    const short = task.dagNodes.find((n) => n.id === 'n-long')?.short!;
-    expect(short.endsWith('…')).toBe(true);
-    expect(short.length).toBeLessThanOrEqual(9);
+    const short = task.dagNodes.find((n) => n.id === 'n-long')?.short;
+    expect(short).toBeDefined();
+    expect(short?.endsWith('…')).toBe(true);
+    expect(short?.length ?? 0).toBeLessThanOrEqual(9);
   });
 
   it('TaskView 透传 mainSessionId/sourceGroupId/derivedSessionIds + 节点原始时间戳', () => {

@@ -1,6 +1,6 @@
 # Task 模块 V2 升级总体方案 —— 协同任务副屏 · 下钻（方案A）
 
-Status: draft（评审中；两项决策已定，见 §4：后端契约保持不变，产物清单接口新增且前端先 mock）
+Status: **implemented**（2026-10-21 前端落地完成,实施计划与逐任务记录见本目录 plan.md;P1–P5 全部按 §5 验收通过,`check:open-core && npm run ci` 全绿）
 
 PRD 基准：`/Users/jian.jiangj/Git/frontend/TeamClaw-demo` 中最新的 task 产品原型
 `src/pages/Collaboration/components/CoopTaskV2/`（协同任务副屏·下钻方案，"方案A：跳转/下钻
@@ -218,15 +218,23 @@ TaskPanelV2（壳：面包屑两级栈 + 收起/展开 + 多任务切换条；�
 - 后端 `task-artifact-domain` spec 定稿后，产物 controller 从 mock 切真实接口（改动
   限定在 service 层）。
 
-## 8. 附录：PRD 组件 ↔ 现有代码映射
+## 8. 附录：PRD 组件 ↔ 现有代码映射（2026-10-21 实施后回写）
 
-| demo（CoopTaskV2） | 对应/吸收目标 |
-|--------------------|--------------|
-| `CoopTaskContext.tsx` | `src/stores/taskSidePanelStore.ts`（新） |
-| `CoopTaskPanel.tsx` | `src/assets/TaskPanel/TaskPanel.tsx` 壳层重构（+`useResizableRail`） |
-| `TaskOverview.tsx` | `TaskProgressTab` + `TaskArtifactsTab` → `TaskOverviewV2` |
-| `DagGraph.tsx` | `DagView.tsx`（升级边语义/热区） |
-| `TaskNodePanel.tsx` | `GroupDrillDown` + `TaskSubTaskPanel` + `NodeDetailDrawer` → `TaskNodePanelV2` |
-| `TaskSwitcherBar/Float` | 新组件（数据源 `taskController.listTasks`） |
-| `coopTaskDemoV2.ts`（数据模型） | `contract.ts`（DTO）+ `taskPanelMapper.ts` 扩展 |
-| `CoopV2SessionMain.tsx`（会话侧） | Workspace 会话区联动 hook（P4，依赖契约） |
+| demo（CoopTaskV2） | 落地位置 |
+|--------------------|----------|
+| `CoopTaskContext.tsx` | `src/stores/taskSidePanelStore.ts`（按 task 分片 navByTask）+ `src/hooks/taskPanelNavBinding.ts`（业务层缝合） |
+| `CoopTaskPanel.tsx` | `src/assets/TaskPanel/TaskPanel.tsx`（改造为 Fetcher + V2 壳装配）+ `v2/TaskPanelV2.tsx`（面包屑两级栈/收起/切换条槽） |
+| `TaskOverview.tsx` | `v2/TaskOverviewV2.tsx`（双视图步骤区 + 产物区 + 任务产出 + 折叠任务信息） |
+| `DagGraph.tsx` | `v2/DagViewV2.tsx`（interactive 复用升级版 `DagView.tsx`:边语义/reason/下钻热区;readonly-exec 渲染 execDag） |
+| `TaskNodePanel.tsx` | `v2/TaskNodePanelV2.tsx`（三区 + 内嵌 `GroupSessionView` 吸收 grp 群下钻;子任务走既有 onOpenSubTask） |
+| `TaskSwitcherBar` / `TaskSwitcherFloat` | `v2/TaskSwitcherBar.tsx`(产品化);Float 演示脚手架不落地(spec §6) |
+| `coopTaskDemoV2.ts`（数据模型） | `contract.ts`（+产物 Descriptor 契约）+ `taskPanelMapper.ts`（接线）+ `statusDerivation.ts` / `artifactDescriptor.ts` / `sessionResolution.ts`（派生收口） |
+| `CoopV2SessionMain.tsx`（会话侧） | capability `navigateToConversation`（站内会话路由）+ `src/pages/Workspace/Chat/hooks/taskSessionNavigation.ts`（rootContainer 全局观察者）+ `messageWindowLocate.ts`（时间窗定位） |
+
+退役（P3/P5 清理）:`TaskProgressTab` / `NodeDetailDrawer` / `TaskSubTaskPanel` / `TaskArtifactsTab` / `TaskPanelHeader` / `NodeListView` / `useResizableRail` / `GroupDrillDownPanel`。
+
+实施裁决摘录（全量见 plan.md Rulings 与执行 ledger）:
+1. 产物接口不建独立 controller mock——对齐后端 `task-artifact-domain` 已实现的读侧契约（dashboard 节点级富化 Descriptor，kind-tagged content），mapper 双兼容归一，后端落地零切换动作。
+2. 导航态按 task 分片（聊天多 tab 人任务并存共享单份下钻栈会串场）。
+3. "生命周期系统消息展示"为 no-op（真实系统消息走既有消息渲染；面板侧由 L2 步骤追踪承载）。
+4. 时间窗定位允许降级（消息 DOM 无时间戳锚点时仅完成跳转，不报错）。

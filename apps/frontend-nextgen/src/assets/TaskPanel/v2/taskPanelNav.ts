@@ -37,11 +37,13 @@ const emptyRecord: TaskNavRecord = { drillStack: [], selectedNodeId: null };
 export function useLocalTaskPanelNav(): TaskPanelNav {
   const [record, setRecord] = useState<TaskNavRecord>(emptyRecord);
 
-  const selectNode = useCallback((nodeId: string, _target: ResolvedSessionTarget | null) => {
+  const selectNode = useCallback((nodeId: string, target: ResolvedSessionTarget | null) => {
+    void target; // 本地降级无宿主消费跳转,target 仅保形
     setRecord((r) => ({ ...r, selectedNodeId: nodeId }));
   }, []);
 
-  const drillInto = useCallback((nodeId: string, _target: ResolvedSessionTarget | null) => {
+  const drillInto = useCallback((nodeId: string, target: ResolvedSessionTarget | null) => {
+    void target;
     setRecord((r) => ({
       ...r,
       drillStack: r.drillStack.includes(nodeId)

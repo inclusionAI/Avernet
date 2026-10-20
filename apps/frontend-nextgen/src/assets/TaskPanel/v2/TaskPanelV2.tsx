@@ -66,7 +66,7 @@ export const TaskPanelV2: React.FC<TaskPanelV2Props> = ({
           color: C.textPrimary,
         }}
       >
-        {currentNodeId == null ? (
+        {currentNodeId === null ? (
           <span style={{ fontWeight: 600 }}>任务总览</span>
         ) : (
           <>
@@ -116,7 +116,7 @@ export const TaskPanelV2: React.FC<TaskPanelV2Props> = ({
         )}
       </header>
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-        {currentNodeId == null ? (
+        {currentNodeId === null ? (
           <TaskOverviewV2
             task={task}
             nav={nav}

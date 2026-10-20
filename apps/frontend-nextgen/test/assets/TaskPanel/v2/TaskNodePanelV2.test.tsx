@@ -17,7 +17,10 @@ const makeNav = (): TaskPanelNav & { calls: { select: string[]; drill: string[];
     selectedNodeId: null,
     drillStack: [],
     calls,
-    selectNode: (id: string, _t: ResolvedSessionTarget | null) => calls.select.push(id),
+    selectNode: (id: string, target: ResolvedSessionTarget | null) => {
+      void target;
+      calls.select.push(id);
+    },
     drillInto: (id: string) => calls.drill.push(id),
     backToOverview: () => calls.back.push(1),
   } as unknown as TaskPanelNav & { calls: typeof calls };

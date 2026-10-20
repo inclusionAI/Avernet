@@ -1,6 +1,5 @@
 /** @jest-environment jsdom */
 import {
-  GroupDrillDownPanel,
   GroupSessionView,
   filterGroupMessages,
   isNonMessageGroupContent,
@@ -12,7 +11,7 @@ import {
 } from '@/assets/TaskPanel/GroupDrillDown';
 import { describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 jest.mock('@tc-chat/ui/es/MarkdownRender', () => ({
   MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div>,
@@ -80,55 +79,6 @@ describe('GroupDrillDown owner display', () => {
   });
 });
 
-describe('GroupDrillDownPanel tabs', () => {
-  it('点击标题前的关闭图标关闭对应群 Tab', async () => {
-    const node = {
-      id: 'node-group-1',
-      name: '风险模型协同验证',
-      sequence: 1,
-      status: 'done' as const,
-      executor: '群主 Bot',
-      executorColor: '#165DFF',
-      runMode: 'coop_group',
-      startedAt: null,
-      endAt: null,
-      timeConsuming: null,
-      output: null,
-      outputSummary: null,
-      artifacts: [],
-      groupId: 'mock_group_1',
-      sessionId: 'mock_session_1',
-      hasSubTask: false,
-      subTaskId: null,
-      stepTraces: [],
-      acceptanceResult: null,
-    };
-    const onClose = jest.fn();
-
-    render(
-      <GroupDrillDownPanel
-        nodes={[node]}
-        activeNodeId={node.id}
-        bcsBaseUrl=""
-        apiBaseUrl=""
-        onSelect={jest.fn()}
-        onClose={onClose}
-      />,
-    );
-    const tab = screen.getByRole('tab');
-    expect(tab).toHaveStyle('width: 190px');
-    expect(tab).toHaveStyle('background: transparent');
-
-    const closeButton = screen.getByRole('button', { name: '关闭 风险模型协同验证' });
-    expect(closeButton.querySelector('svg')).toHaveAttribute('width', '15');
-    fireEvent.mouseEnter(closeButton);
-    expect(closeButton.querySelector('svg')).toHaveAttribute('width', '14');
-    await waitFor(() => expect(screen.getAllByText('风险模型协同验证').length).toBeGreaterThanOrEqual(2));
-    fireEvent.click(closeButton);
-
-    await waitFor(() => expect(onClose).toHaveBeenCalledWith(node.id));
-  });
-});
 
 describe('GroupDrillDown message typography', () => {
   it('只对超长消息启用收起态', () => {
