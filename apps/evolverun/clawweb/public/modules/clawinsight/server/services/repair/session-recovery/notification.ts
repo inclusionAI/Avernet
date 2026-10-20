@@ -6,17 +6,24 @@ import type { RecoveryActionNotifier } from "./contracts.js";
 import type { RecoveryStoredTask, RecoveryTaskStore, RecoveryTimelineEvent } from "./task-contracts.js";
 import { resolveTaskControlPlaneEnvironment, type AgentControlPlaneEnvironment } from "../common/task-control-plane.js";
 
+export const SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY = "session_recovery_owner_notifications";
+type NotificationConfigStore = { findByKey(key: string): Promise<{ enabled: number; config_json: string } | null> };
+
 export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
   constructor(private readonly sender: Pick<DingTalkNotificationSender, "sendNotification"> | null | undefined,
-    private readonly publicBaseUrl: string) {}
+    private readonly publicBaseUrl: string, private readonly config: NotificationConfigStore) {}
 
-  async notify(input: Parameters<RecoveryTaskNotifier["notify"]>[0]): Promise<void> {
+  async notify(input: Parameters<RecoveryTaskNotifier["notify"]>[0]): Promise<boolean> {
+    const row = await this.config.findByKey(SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY);
+    if (!row || row.enabled === 0) return false;
+    if (row.enabled !== 1) throw new Error("Invalid recovery owner notification state");
     if (!this.sender) throw new Error("Notification unavailable");
     const title = input.kind === "plan" ? "会话自愈方案待确认" : "会话自愈需要人工处理";
     const url = new URL("/insight", this.publicBaseUrl);
     url.searchParams.set("module", "monitoring"); url.searchParams.set("recoveryTaskId", input.taskId);
     await this.sender.sendNotification({ recipientUserId: input.ownerId, title,
       text: `${input.summary}\n\n[查看完整方案、证据及任务时间线](${url.href})` });
+    return true;
   }
 }
 
@@ -127,7 +134,7 @@ export class SessionRecoveryGroupNotifier implements RecoveryActionNotifier {
   constructor(private readonly deps: {
     controlPlaneEnvironment: AgentControlPlaneEnvironment;
     tasks: Pick<RecoveryTaskStore, "find" | "appendNotification">;
-    config: { findByKey(key: string): Promise<{ enabled: number; config_json: string } | null> };
+    config: NotificationConfigStore;
     sender: { send(input: { webhook: string; timeoutSeconds: number; title: string; text: string }): Promise<void> };
     publicBaseUrl: string;
   }) {}

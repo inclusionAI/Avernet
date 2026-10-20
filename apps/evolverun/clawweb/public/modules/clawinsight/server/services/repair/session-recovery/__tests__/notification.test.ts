@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { SessionRecoveryGroupNotifier, SESSION_RECOVERY_NOTIFICATIONS_KEY } from "../notification.js";
+import { SessionRecoveryGroupNotifier, SessionRecoveryNotifier, SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY, SESSION_RECOVERY_NOTIFICATIONS_KEY } from "../notification.js";
 import type { RecoveryStoredTask, RecoveryTimelineEvent } from "../task-contracts.js";
 
 function setup() {
@@ -159,4 +159,23 @@ it("shortens Chinese and emoji only at sentence boundaries and treats inline Mar
   other.notifier.after(message);
   await vi.waitFor(() => expect(other.events.some(event => event.payload.sent === true)).toBe(true));
   expect(other.sender.send.mock.calls[0][0].text).toContain("\\*\\*不要加粗\\*\\* \\[不要变链接\\]\\(https://docs\\.invalid\\)");
+});
+
+it("checks the independent Owner notification switch on each send", async () => {
+  const config = { findByKey: vi.fn<() => Promise<{ enabled: number; config_json: string } | null>>().mockResolvedValue(null) };
+  const sender = { sendNotification: vi.fn().mockResolvedValue(undefined) };
+  const notifier = new SessionRecoveryNotifier(sender, "https://service.invalid", config);
+  const input = { ownerId: "owner", taskId: "SR-owner", kind: "plan" as const, summary: "需要确认方案" };
+  expect(await notifier.notify(input)).toBe(false);
+  config.findByKey.mockResolvedValue({ enabled: 0, config_json: "{}" });
+  expect(await notifier.notify(input)).toBe(false);
+  expect(sender.sendNotification).not.toHaveBeenCalled();
+  config.findByKey.mockResolvedValue({ enabled: 1, config_json: "{}" });
+  expect(await notifier.notify(input)).toBe(true);
+  expect(config.findByKey).toHaveBeenLastCalledWith(SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY);
+  expect(sender.sendNotification).toHaveBeenCalledOnce();
+  expect(sender.sendNotification.mock.calls[0][0]).toMatchObject({ recipientUserId: "owner", title: "会话自愈方案待确认" });
+  config.findByKey.mockResolvedValue({ enabled: 0, config_json: "{}" });
+  expect(await notifier.notify(input)).toBe(false);
+  expect(sender.sendNotification).toHaveBeenCalledOnce();
 });

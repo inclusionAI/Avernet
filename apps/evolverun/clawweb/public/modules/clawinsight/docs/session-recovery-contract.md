@@ -112,3 +112,18 @@ Execution-scoped updates validate the execution identity inside each retried ato
 Engine actions bind the business operation and resource, derived from a reference request or `operationScope: { operation, target? }`. For example, `cron.delete` with a cron ID cannot change to `mcp.update` or another cron. Request content and auxiliary parameters may change. An action without a reference Engine request must declare this scope before approval if it will use Engine APIs. Arbitrary Shell remains governed by the approved plan and audited execution; the service does not claim to infer its business semantics from command text.
 
 Pre-dispatch failures are `failed` with `dispatched: false`, and do not block a later attempt. After a possible dispatch, an uncertain outcome stays `unknown`. `reconcile_write` requires the original call ID, an `applied` or `not_applied` conclusion, and successful subsequent read calls from the current execution. It appends an audit record, preserves the original unknown record, permits continuation after verification, and never automatically replays an operation. Contradictory reconciliation is rejected.
+
+
+## Owner notification switch and linked task visibility
+
+Owner DingTalk notifications use the independent `ce_app_config` key
+`session_recovery_owner_notifications`. Its existing `enabled` column controls
+sending; `config_json` is `{}`. Missing or disabled configuration skips Owner
+notifications without recording a successful send. Enable the row to resume
+notifications on subsequent notification events; skipped notifications are not
+replayed. This does not affect group webhooks (`session_recovery_notifications`),
+Agent execution, plan approval, or Owner feedback through the task page.
+
+Administrators can list all tasks linked to a diagnosis event, including private
+tasks. Other users still see only their own tasks or tasks explicitly shared by
+the Owner. Task detail and operation authorization remain unchanged.

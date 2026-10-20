@@ -79,6 +79,17 @@ it("queries private event tasks for administrators while preserving Owner and sh
   expect(await service.list(request.event_id, { userId: "reader", isAdmin: false })).toHaveLength(1);
 });
 
+it("continues Owner confirmation without recording a sent notification when disabled", async () => {
+  let task = await toPlan(await create());
+  notifier.notify.mockResolvedValue(false);
+  await service.plan(task.taskId, task.version, plan);
+  task = await current(task.taskId);
+  expect(task.status).toBe("waiting_owner");
+  expect(task.timeline.filter(event => event.kind === "notification")).toEqual([]);
+  await service.decide(task.taskId, task.plan!.digest, true, actor);
+  expect((await current(task.taskId)).phase).toBe("apply");
+});
+
 it("persists deduplicated group delivery facts without changing the business version or exposing them to the Agent", async () => {
   const task = await create();
   const sent = await agent.retryMessage(task, { clientRequestId: "group-advice", purpose: "纠正原操作", message: "请按真实工具参数继续" });

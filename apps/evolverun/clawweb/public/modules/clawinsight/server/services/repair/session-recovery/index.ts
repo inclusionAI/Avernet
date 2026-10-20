@@ -37,11 +37,12 @@ export function createSessionRecoveryRuntime(options: {
   const observationMs = options.observationMs ?? 3600000;
   if (!Number.isSafeInteger(observationMs) || observationMs < 20000) throw new Error("Invalid self-healing waiting deadline");
   const store = new SessionRecoveryTaskRepository(options.db, options.repo, options.artifactStore);
+  const notificationConfig = new AppConfigRepository(options.db);
   const actionNotifier = new SessionRecoveryGroupNotifier({ controlPlaneEnvironment, tasks: store,
-    config: new AppConfigRepository(options.db), sender: new DingTalkWebhookSender(), publicBaseUrl: options.publicBaseUrl });
+    config: notificationConfig, sender: new DingTalkWebhookSender(), publicBaseUrl: options.publicBaseUrl });
   const reporter = new HttpRecoveryResultReporter({ baseUrl: options.publicBaseUrl });
   let tasks: SessionRecoveryTaskService;
-  const notifier = new SessionRecoveryNotifier(options.notificationSender, options.publicBaseUrl);
+  const notifier = new SessionRecoveryNotifier(options.notificationSender, options.publicBaseUrl, notificationConfig);
   const agent = new SessionRecoveryAgentService({ controlPlaneEnvironment, tasks: store, repo: options.repo,
     audit: new AgentToolCallRepository(options.db, "session_recovery"), ais: options.ais, runtime: options.runtime,
     targets: options.targets, trajectory: options.trajectory, logs: options.logs, runtimeTool: options.runtimeTool, business: () => tasks, publicBaseUrl: options.publicBaseUrl,

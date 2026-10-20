@@ -18,7 +18,8 @@ export interface RecoveryAgentExecutor {
   listExecutions(taskId: string): Promise<RecoveryExecutionView[]>;
 }
 export interface RecoveryTaskNotifier {
-  notify(input: { ownerId: string; taskId: string; kind: "plan" | "result"; summary: string }): Promise<void>;
+  /** False means notification is disabled; do not record a delivery attempt. */
+  notify(input: { ownerId: string; taskId: string; kind: "plan" | "result"; summary: string }): Promise<boolean>;
 }
 export interface RecoveryTaskReporter { report(result: RecoveryTaskResult): Promise<void> }
 
@@ -283,7 +284,11 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
   private async notify(task: RecoveryStoredTask, kind: "plan" | "result", summary: string): Promise<void> {
     // Notification completion is a timeline fact, independent of Owner approval.
     let sent = false;
-    try { await this.deps.notifier.notify({ ownerId: task.request.target.entity_id, taskId: task.taskId, kind, summary }); sent = true; }
+    try {
+      const result = await this.deps.notifier.notify({ ownerId: task.request.target.entity_id, taskId: task.taskId, kind, summary });
+      if (result === false) return;
+      sent = true;
+    }
     catch { console.error("[session-recovery] notification not confirmed", task.taskId, kind); }
     const current = await this.required(task.taskId);
     await this.mutate(task.taskId, current.version, value => ({ ...value, version: value.version + 1,
