@@ -34,6 +34,17 @@ into.
   records what the edit started from. Ids are content hashes, so recording
   the same content again returns the existing revision and does not change
   its parent.
+- **When a whole document is recorded.** Recording a Manifest document
+  means "this is the complete definition I want for the bot; record it as
+  its next revision, descending from `base`". A patch cannot do everything,
+  so this path exists for: the bot's first revision (a bot that already has
+  a Manifest, or was set up in the console, needs a baseline before any
+  patch can target it); owner changes no patch op can express, which by
+  the contract are the MCP servers, the startup script, a Center skill's
+  pinned version and the policy (§6.1: those change "only when an owner
+  records a whole Manifest document"); reconciling drift by recording what
+  the bot runs now and promoting it; and owners who keep their bot's
+  Manifest in git and want history without writing patches.
 - **Compare-and-swap (CAS).** A ref move carries the revision the caller
   believes the ref points at now; the move happens only if that is still
   true, otherwise it is refused with the current value. This is what stops
