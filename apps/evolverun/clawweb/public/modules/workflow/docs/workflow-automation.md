@@ -176,3 +176,32 @@ itemCount`。超限记录 `SCOPE_TOO_LARGE`，模型异常记录既有失败分�
 
 核心投影的缓存指纹与扫描版本更新为 core-v1，旧的超限 blocked 结果不会阻止
 新投影重新排队。既有请求预算、租约和来源变化核对继续生效。
+
+## Execution record presentation
+
+`AutomationSnapshot.jobs` includes optional `createdAtMs`, `flowId`, `analysisId`,
+`complete`, and the existing `taskId`. Missing historical fields do not imply
+complete evidence or authorize fabricated links. Run records link to the existing
+`/runs/:flowId` view, with `analysisId` when available; draft/notice task records
+reuse the repair workspace. Records without a locator expose their recorded ID,
+status, reason and attempt count inline. `waiting` analysis jobs await the analysis
+result; `done` means analysis ended, and `complete=false` or `PARTIAL_ANALYSIS`
+means evidence is incomplete. None of these states establishes problem resolution.
+Daily scan progress is separate from failure-event analysis history.
+
+The optional `retryableJobs` is a read-only list using the same recovery selectors
+as `retryFailures`, independent of the recent-history limit. Analysis/notice jobs
+must be blocked with one of the existing recoverable reasons and no live lease;
+the existing 50-record selection limit applies. Drafts must satisfy the current
+Owner/policy, batch, original request, failed revision and lease checks. The UI
+lists each target and its type before offering retry; missing or empty lists offer
+no retry action. Recovery rechecks current conditions; a concurrent state change
+can remove eligibility. In-flight and unknown-outcome requests keep reconciling
+their original identities. Status reads do not claim jobs or submit business work.
+
+The settings panel distinguishes failure-event enablement from daily scheduling.
+“保存设置” submits the existing time/impact policy write; labels do not migrate
+or enable a policy on render. “调整建议与要求” opens the existing same-task
+revision editor, whose submit is “生成新版本”. Generation retry retains the
+selected suggestions, instructions and feedback; `GIT_RESULT_UNAVAILABLE` only
+reads the original candidate. Existing automatic-batch and publication guards apply.

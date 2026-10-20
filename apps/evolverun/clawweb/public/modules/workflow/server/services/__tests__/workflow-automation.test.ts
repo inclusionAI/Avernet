@@ -255,6 +255,12 @@ it('recovers a confirmed failed automatic batch using a durable request key afte
   f.setRemoteStatus({ status: 'failed', rawStatus: 'failed', errorMessage: 'controlled failure' });
   await f.workbench.report({ workflowId: 'wf-1', taskId: task.taskId, revision: 1, expectedStateVersion: 0, status: 'failed', error: { code: 'AIS_FAILED' } });
   f.advance(); await f.service.tick();
+  const before = await f.service.status('wf-1');
+  expect(before.retryableJobs?.filter(row => row.kind === 'auto_draft')).toEqual([expect.objectContaining({ id: job.id, taskId: task.taskId })]);
+  f.setOwner(null);
+  expect((await f.service.status('wf-1')).retryableJobs?.some(row => row.kind === 'auto_draft')).toBe(false);
+  await expect(f.service.retryFailures('wf-1')).rejects.toThrow('OWNER_MISSING');
+  f.setOwner('owner');
   await f.service.retryFailures('wf-1'); f.advance(); await f.restart().tick();
   const retried = await f.workbench.task(task.taskId);
   expect(retried.latestAttempt.revision).toBe(2);
@@ -405,4 +411,71 @@ it('also pauses a previously queued new automatic task while another draft await
  expect(f.calls).toHaveLength(1);
  expect(await repo.get(queued.id)).toMatchObject({reason:'DRAFT_IN_PROGRESS'});
  expect((await f.workbench.candidates('wf-1')).tasks.map(t=>t.taskId)).toEqual([task.taskId]);
+});
+
+it('projects run locators and evidence completeness without submitting any work', async () => {
+  const f = await fixture();
+  const repo = new WorkflowAutomationRepository(f.db);
+  const now = Date.parse('2026-11-01T02:00:00Z');
+  const waiting = await repo.ensure('wf-1', 'auto_run', 'waiting', { flowId: 'waiting-flow' }, now);
+  const partial = await repo.ensure('wf-1', 'auto_run', 'partial', { flowId: 'partial-flow' }, now);
+  await repo.patch((await repo.claim(waiting.id, now))!, { status: 'waiting' }, now, true);
+  await repo.patch((await repo.claim(partial.id, now))!, { status: 'done', reason: 'PARTIAL_ANALYSIS', data: { flowId: 'partial-flow', analysisId: 'analysis-1', complete: false } }, now, true);
+  const before = await repo.recent('wf-1');
+  const state = await f.service.status('wf-1');
+  expect(state.jobs).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: waiting.id, flowId: 'waiting-flow', status: 'waiting', createdAtMs: now }),
+    expect.objectContaining({ id: partial.id, flowId: 'partial-flow', analysisId: 'analysis-1', complete: false, reason: 'PARTIAL_ANALYSIS' }),
+  ]));
+  expect(state.retryableJobs).toEqual([]);
+  expect(await repo.recent('wf-1')).toEqual(before);
+  expect(f.ports.analysis.start).not.toHaveBeenCalled();
+  expect(f.ports.notify).not.toHaveBeenCalled();
+  expect(f.calls).toHaveLength(0);
+});
+it('lists exactly the analysis and notice jobs recovery can change, excluding active leases and unknown outcomes', async () => {
+  const f = await fixture();
+  const repo = new WorkflowAutomationRepository(f.db);
+  const now = Date.parse('2026-11-01T02:00:00Z');
+  async function job(key: string, kind: 'auto_run' | 'auto_notice', status: 'blocked' | 'uncertain' | 'waiting', reason: string, leased = false) {
+    const record = await repo.ensure('wf-1', kind, key, { flowId: key }, now);
+    await repo.patch((await repo.claim(record.id, now))!, { status, reason }, now, !leased);
+    return record.id;
+  }
+  const analysis = await job('failed-analysis', 'auto_run', 'blocked', 'ANALYSIS_FAILED');
+  const notice = await job('failed-notice', 'auto_notice', 'blocked', 'NOTIFICATION_REJECTED');
+  const owner = await job('missing-owner', 'auto_run', 'blocked', 'OWNER_MISSING');
+  const denied = await job('denied-owner', 'auto_notice', 'blocked', 'OWNER_PERMISSION_DENIED');
+  await job('leased', 'auto_run', 'blocked', 'ANALYSIS_FAILED', true);
+  await job('unknown', 'auto_run', 'uncertain', 'ANALYSIS_OUTCOME_UNKNOWN');
+  await job('running', 'auto_run', 'waiting', '');
+  await job('stale', 'auto_notice', 'blocked', 'CANDIDATE_SUPERSEDED');
+  const before = await repo.recent('wf-1');
+  const state = await f.service.status('wf-1');
+  const ids = state.retryableJobs!.map(row => row.id).sort();
+  expect(ids).toEqual([analysis, notice, owner, denied].sort());
+  expect(await repo.recent('wf-1')).toEqual(before);
+  await f.service.retryFailures('wf-1');
+  const changed = (await repo.recent('wf-1')).filter(row => row.status !== before.find(old => old.id === row.id)!.status);
+  expect(changed.map(row => row.id).sort()).toEqual(ids);
+  expect((await f.service.status('wf-1')).retryableJobs).toEqual([]);
+  expect(f.ports.analysis.start).not.toHaveBeenCalled();
+  expect(f.ports.notify).not.toHaveBeenCalled();
+});
+it('uses the same fifty-job recovery limit even when recent records are truncated', async () => {
+  const f = await fixture();
+  const repo = new WorkflowAutomationRepository(f.db);
+  const now = Date.parse('2026-11-01T02:00:00Z');
+  const records = [];
+  for (let i = 0; i < 55; i++) {
+    const record = await repo.ensure('wf-1', 'auto_run', `failure-${i}`, { flowId: `flow-${i}` }, now);
+    await repo.patch((await repo.claim(record.id, now))!, { status: 'blocked', reason: 'ANALYSIS_FAILED' }, now, true);
+    records.push(record);
+  }
+  const state = await f.service.status('wf-1');
+  expect(state.retryableJobs).toHaveLength(50);
+  await f.service.retryFailures('wf-1');
+  const recovered = (await Promise.all(records.map(row => repo.get(row.id)))).filter(row => row!.status === 'retryable');
+  expect(recovered.map(row => row!.id).sort()).toEqual(state.retryableJobs!.map(row => row.id).sort());
+  expect((await f.service.status('wf-1')).retryableJobs).toHaveLength(5);
 });

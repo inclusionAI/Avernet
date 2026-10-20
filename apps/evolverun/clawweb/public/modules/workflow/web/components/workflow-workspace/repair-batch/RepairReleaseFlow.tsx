@@ -90,7 +90,7 @@ export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, o
     <h3 className="text-base font-semibold">{title}</h3>
     <p className="mt-2 text-sm leading-6 text-muted-foreground">{succeeded ? '在发布后效果页查看对应版本的样本与判定；下一轮将基于最新生效版本创建独立任务。'
       : pending ? '先核对同一个发布请求，结果未明确前不重复发布。'
-      : '可以补充反馈重新优化、取消本次任务，或确认发布此版本。'}</p>
+      : '可以调整建议与要求、补充反馈生成新版本，取消任务，或确认发布此版本。'}</p>
     {automatic && !automaticReady && !succeeded && <p className="mt-3 text-sm text-muted-foreground">本轮尚未完整校验，暂不可发布；保留各项进度与结果。</p>}
     {!isCurrent && !succeeded && <p className="mt-3 text-sm text-muted-foreground">当前查看的是历史候选，请切回最新可用候选。</p>}
     {!detail.capabilities.publication && <p role="alert">发布能力未启用，请检查宿主配置。</p>}

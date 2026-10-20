@@ -131,18 +131,18 @@ export class WorkflowAutomationRepository {
     }
     return result;
   }
+  async retryableFailures(workflowId: string, now: number): Promise<AutomationJob[]> {
+    const rows = await this.db.query<{ body_json: string }>(`SELECT body_json FROM workflow_repair_release_records
+      WHERE task_id = ? AND record_kind IN ('auto_run', 'auto_notice') AND ${this.json('status')} = 'blocked'
+      AND ${this.json('reason')} IN ('ANALYSIS_FAILED', 'NOTIFICATION_REJECTED', 'OWNER_MISSING', 'OWNER_PERMISSION_DENIED')
+      ORDER BY updated_at_ms, record_id LIMIT 50`, [taskScope(workflowId)]);
+    return rows.map(row => JSON.parse(row.body_json) as AutomationJob).filter(job => job.leaseUntilMs <= now);
+  }
   async retryFailures(workflowId: string, now: number) {
     await this.db.transaction(async tx => {
       await new RepairBatchRepository(tx).lockWorkflow(tx, workflowId);
       const repo = new WorkflowAutomationRepository(tx);
-      const rows = await tx.query<{ body_json: string }>(`SELECT body_json FROM workflow_repair_release_records
-        WHERE task_id = ? AND record_kind IN ('auto_run', 'auto_notice') AND ${repo.json('status')} = 'blocked'
-        AND ${repo.json('reason')} IN ('ANALYSIS_FAILED', 'NOTIFICATION_REJECTED', 'OWNER_MISSING', 'OWNER_PERMISSION_DENIED')
-        ORDER BY updated_at_ms, record_id LIMIT 50`, [taskScope(workflowId)]);
-      for (const row of rows) {
-        const job: AutomationJob = JSON.parse(row.body_json);
-        if (job.status !== 'blocked' || !['ANALYSIS_FAILED', 'NOTIFICATION_REJECTED', 'OWNER_MISSING', 'OWNER_PERMISSION_DENIED'].includes(job.reason ?? '')) continue;
-        if (job.leaseUntilMs > now) continue;
+      for (const job of await repo.retryableFailures(workflowId, now)) {
         const next: AutomationJob = { ...job, status: 'retryable', attempts: 0, nextAtMs: now, stateVersion: job.stateVersion + 1 };
         await new RepairReleaseRepository(tx).update(next, job.stateVersion);
       }

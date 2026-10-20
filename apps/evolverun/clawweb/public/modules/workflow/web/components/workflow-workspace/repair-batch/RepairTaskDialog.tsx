@@ -237,7 +237,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
       : feedbackCandidatesError || !feedbackCandidates ? '建议读取失败，请重试后生成。'
       : !feedbackItemIds.length ? '请至少保留一条建议。' : feedbackItemIds.length>maxItems ? `单次最多 ${maxItems} 条建议，请明确调整本版范围；历史版本保留。` : ''
 
-    return <RepairWorkspace navigation={false} stage={1} title="调整范围与要求，生成下一轮候选" subtitle={`${workflowId} · 沿用冻结基线，保留原始问题与证据`} onBack={() => { if (!busy) inspectCandidate() }} backLabel="返回审核 Pack" onSelect={openSelection} onReview={() => setMode('detail')} busy={busy}>
+    return <RepairWorkspace navigation={false} stage={1} title="调整建议与要求" subtitle={`${workflowId} · 沿用冻结基线，保留原始问题与证据`} onBack={() => { if (!busy) inspectCandidate() }} backLabel="返回审核 Pack" onSelect={openSelection} onReview={() => setMode('detail')} busy={busy}>
     <p className="text-xs leading-5 text-muted-foreground">选择建议即可生成；修复要求与修改反馈均为选填。新候选保留原任务基线，不会应用或部署。</p>
     <p className="text-xs text-muted-foreground">{detail.latestSuccessful ? `下一轮从最新成功候选 v${detail.latestSuccessful.revision} 继续；查看历史版本不会改变生成基准。` : '当前尚无成功候选，下一轮从原任务基线开始。'}</p>
     <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_19rem]"><fieldset className="rounded-lg border border-input bg-card p-5">
@@ -273,7 +273,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     <footer className="sticky bottom-4 z-20 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-input bg-card px-5 py-4 shadow-sm">
       <div><p className="text-sm font-semibold text-foreground">本轮已选 {feedbackItemIds.length} 条 · 生成后进入审核</p>
         <p id="repair-generation-help" role={error ? 'alert' : 'status'} className={`mt-1 text-xs ${error ? 'text-destructive' : 'text-muted-foreground'}`}>{error || blocker || notice || '修复要求与反馈选填，留空将沿用所选建议。'}</p>
-      </div><div className="flex flex-wrap gap-2">{recoveryButton}<button type="button" className={primary} aria-describedby="repair-generation-help" disabled={!!blocker} onClick={() => void revise()}>{busy ? '处理中…' : '确认生成下一版'}</button></div>
+      </div><div className="flex flex-wrap gap-2">{recoveryButton}<button type="button" className={primary} aria-describedby="repair-generation-help" disabled={!!blocker} onClick={() => void revise()}>{busy ? '处理中…' : '生成新版本'}</button></div>
     </footer>
   </RepairWorkspace>
   }

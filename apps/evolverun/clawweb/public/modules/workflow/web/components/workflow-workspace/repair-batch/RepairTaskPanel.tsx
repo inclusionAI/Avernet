@@ -47,11 +47,12 @@ export default function RepairTaskPanel({detail,canEdit,onFeedback,onNextRound,o
  const feedbackPhase=['review','blocked','no_change'].includes(latest.phase)||latest.phase==='failed'&&!automatic
  const canCancel=!alreadyPublished&&['drafting','review','blocked','failed','no_change'].includes(latest.phase)
  const taskActions=alreadyPublished?(publishedRevision!==undefined&&onNextRound?<button type="button" className={primary} disabled={!canEdit||busy} onClick={()=>onNextRound(publishedRevision)}>开始下一轮优化</button>:null):<>
-  {latest.phase==='failed'&&<button type="button" className={button} disabled={!canGenerate} onClick={onRetryGeneration}>{latest.error?.code==='GIT_RESULT_UNAVAILABLE'?'重新读取候选':'重试生成'}</button>}
+  {latest.phase==='failed'&&<p className="w-full text-xs leading-5 text-muted-foreground">{latest.error?.code==='GIT_RESULT_UNAVAILABLE'?'只读取原候选，不会重复生成。':automatic?'重试生成沿用本次建议、修复要求与反馈，在同一任务下继续失败的自动批次。':'重试生成沿用本次建议、修复要求与反馈，在同一任务下生成新版本；修改建议、要求或反馈，请选择“调整建议与要求”。'}</p>}
+  {latest.phase==='failed'&&<button type="button" className={primary} disabled={!canGenerate} onClick={onRetryGeneration}>{latest.error?.code==='GIT_RESULT_UNAVAILABLE'?'重新读取候选':'重试生成'}</button>}
   {latest.phase==='drafting'&&detail.execution&&['created','dispatch_failed'].includes(detail.execution.status)&&<button type="button" className={button} disabled={!canGenerate} onClick={onRetryDispatch}>重试派发</button>}
   {latest.phase==='drafting'&&detail.execution?.status==='dispatch_uncertain'&&<button type="button" className={button} disabled={busy} onClick={onRefresh}>核对任务状态</button>}
-  {feedbackPhase&&<button type="button" className={button} disabled={!canGenerate||automatic&&!completeAutomatic||latest.error?.code==='GIT_RESULT_UNAVAILABLE'} onClick={onFeedback}>重新优化</button>}
-  {canCancel&&<button type="button" className={button} disabled={!canEdit||busy} onClick={onCancel}>取消本次任务</button>}
+  {feedbackPhase&&<button type="button" className={button} disabled={!canGenerate||automatic&&!completeAutomatic||latest.error?.code==='GIT_RESULT_UNAVAILABLE'} onClick={onFeedback}>调整建议与要求</button>}
+  {canCancel&&<button type="button" className="px-3 py-2 text-sm text-muted-foreground hover:underline disabled:opacity-50" disabled={!canEdit||busy} onClick={onCancel}>取消任务</button>}
  </>
  const presentation=repairTaskPresentation([...known.current.values()].sort((a,b)=>a.revision-b.revision)[0].input)
  const source=(detail.source??presentation.source)==='automatic'?'自动任务':'手动任务'
