@@ -2,142 +2,110 @@
 
 > Work item: `apps/backend/docs/bot-evolution/work-items.md` → RSI-03.
 > Builds on the RSI-02 contract in
-> [`apps/backend/api-contracts/genome/v1/`](../../api-contracts/genome/v1/README.md),
-> which wins over this spec and over `01-genome.md` where they differ.
+> [`apps/backend/api-contracts/genome/v1/`](../../api-contracts/genome/v1/README.md)
+> for the format of a revision and a patch. Where this spec changes how a
+> revision is *recorded* (from the bot, not from a Manifest document), the
+> contract and `01-genome.md` are updated by this work item.
 
 ## Summary
 
 Give every bot an immutable, content-addressed history of its definition:
-**Genome Revisions**. A revision is recorded in one of two ways: from a whole
-Bot Config Manifest document, or by applying a typed **Genome Patch** (a list
-of small edits) to an existing revision, the patch's **base**, which becomes
-the new revision's parent. Named **refs** (`active`, `draft`, …) point at
-revisions and move only by compare-and-swap (explained under *Terms* below).
-The registry can diff any two revisions, and a promotion operation moves
-`active` and hands the promoted revision to the bot's delivery path. Owners
-get versioned bots and a way back to any earlier revision; later evolution
-work (runs, verification, the gate) gets the store it records candidates
-into.
+**Genome Revisions**. A revision is recorded in one of two ways: by
+**capturing** the bot as it is now (its persona files, skills, resources,
+MCP servers and startup script), or by applying a typed **Genome Patch** to
+an existing revision, the patch's **base**, which becomes the new revision's
+parent. Named **refs** (`active`, `draft`, …) point at revisions and move
+only by compare-and-swap. The registry can diff any two revisions, and a
+**promotion** moves `active` and delivers the promoted revision to the bot.
 
-### Terms used in this spec
+Delivery is staged. **Stage 1 (this item):** a promotion generates a new
+Manifest document from the revision and hands it to the existing Manifest
+apply engine, without changing the bot's own stored Manifest. **Stage 2
+(later):** new components deliver a revision to the bot runtime directly,
+with no Manifest document in between. A revision is not tied to the
+Manifest; the Manifest is only the delivery vehicle in Stage 1.
 
-- **Base / parent.** Every revision except a bot's first has one parent: the
-  revision it was made from. A patch names it as `base`, and it is required.
-  A Manifest document names no base: the document is the source of truth
-  for every category it declares, its parent is always the bot's `active`
-  revision (what the bot runs, so a diff against the parent shows exactly
-  what promoting the new revision would change), and any category the
-  document leaves out is copied from `active`. On a bot with no revisions
-  yet there is no parent, and omitted categories are captured from the
-  bot's current state. Ids are content hashes, so recording the same
-  content again returns the existing revision and does not change its
-  parent.
-- **When a whole document is recorded.** Recording a Manifest document
-  means "this is the complete definition I want for the bot; record it as
-  its next revision, descending from what it runs now". A patch cannot do everything,
-  so this path exists for: the bot's first revision (a bot that already has
-  a Manifest, or was set up in the console, needs a baseline before any
-  patch can target it); owner changes no patch op can express, which by
-  the contract are the MCP servers, the startup script, a Center skill's
-  pinned version and the policy (§6.1: those change "only when an owner
-  records a whole Manifest document"); reconciling drift by recording what
-  the bot runs now and promoting it; and owners who keep their bot's
-  Manifest in git and want history without writing patches.
+### Terms
+
+- **Capture.** Reading what the bot has now and recording it as a
+  revision. Always total: every category present. The parent is the bot's
+  `active` revision, or none for the bot's first revision.
+- **Base / parent.** Every revision except a bot's first has one parent. A
+  patch names it as `base` (required); a capture's parent is `active`. Ids
+  are content hashes, so recording the same content again returns the
+  existing revision and never changes its parent.
 - **Compare-and-swap (CAS).** A ref move carries the revision the caller
-  believes the ref points at now; the move happens only if that is still
-  true, otherwise it is refused with the current value. This is what stops
-  two editors silently overwriting each other.
-- **Ref event.** Every ref move is also written to an append-only log (the
-  ref's name, from, to, who, why, when). Rows are only ever added, never
-  changed or deleted, so the history of every move is kept.
+  believes the ref points at now; it happens only if that is still true,
+  otherwise it is refused with the current value.
+- **Ref event.** Every ref move adds one row to an append-only log (ref
+  name, from, to, who, why, when). Rows are never changed or deleted.
 - **Run, candidate.** An evolution run (RSI-08) is one execution of a
-  strategy for one bot; it may submit several candidate patches. Each is
-  recorded as a revision named `candidate/<run id>/<n>`, where `n` counts
-  the run's candidates from 1 in submission order.
-- **Drift.** A bot has drifted when what it actually runs is not what its
-  `active` ref says, usually because someone wrote the Manifest directly
-  (`PUT /config-manifest`, which records no revision) after the last
-  promotion. Drift is detected, not prevented; the owner reconciles by
-  promoting again.
-- **In-process interface.** A Python service interface other Backend code
-  calls directly (the way promotion calls the registry), as opposed to the
-  HTTP endpoints external callers use.
-- **Fixture.** A file checked in for tests to use in place of something
-  real. Here: the example Manifests in the contract name git repositories
-  and OSS objects that do not exist, so RSI-02 shipped the files they
-  would contain, and the tests hand those files to the recorder instead of
-  fetching anything.
-- **Produced content.** Bytes that did not come from fetching a git or OSS
-  source: a file a patch edits or adds, a file uploaded for a patch, or a
-  file captured from the bot's current state. The manifest content store
-  today only accepts fetched bytes with a source URL, so a write path for
-  produced bytes is needed.
+  strategy for one bot; it may submit several candidate patches. Each is a
+  revision named `candidate/<run id>/<n>`, `n` counting from 1 in
+  submission order.
+- **Policy.** The owner's rules in every revision (`mutable_genes`, `pins`,
+  `risk_overrides`). It is not bot state, so it is not captured: a capture
+  copies the policy of `active` (the contract default for a first
+  revision), and the owner changes it with its own operation, which records
+  a new revision with the same content and the new policy.
+- **Drift.** The bot runs something other than what `active` says, usually
+  because someone changed the bot directly after the last promotion.
+  Detected, not prevented; the owner reconciles by capturing and promoting.
+- **Produced content.** Bytes the registry stores itself rather than the
+  Manifest fetch pipeline: captured files, files a patch writes, uploads.
+  The content store today only accepts fetched bytes with a source URL, so
+  it gains a write path for these.
 
 ## Motivation
 
 RSI-02 fixed the format of a revision and a patch but shipped no runtime
-code. Nothing in Backend can yet record a revision, check a patch against a
-policy, store a bot's content by digest for good, or tell which revision a
-bot runs. RSI-03 is the next step on the critical path
-RSI-01 → RSI-02 → RSI-03 → RSI-04 ("versioned bots that can go back to any
-earlier revision"), and RSI-04 (Manifest content-store and Center sources,
-the applied-document digest) and RSI-08 (the evolution service) both build
-on the registry's service interface and its HTTP endpoints.
+code. Nothing in Backend can record a revision, check a patch against a
+policy, keep a bot's content by digest for good, or say which revision a bot
+runs. RSI-03 is the next step on the critical path
+RSI-01 → RSI-02 → RSI-03 → RSI-04 (versioned bots that can go back to any
+earlier revision), and RSI-04 and RSI-08 build on its service interface and
+endpoints.
 
 ## User Stories
 
-- As a **bot owner**, I want each edit I make through the genome API to be
-  recorded as a revision with who, when and from what, so that I can see my
-  bot's history and go back to any earlier revision.
+- As a **bot owner**, I want to capture my bot as a revision at any time
+  and see its history, so that I can go back to any earlier revision.
 - As a **bot owner**, I want to edit my bot as a small, itemized patch
-  against a named base revision, so that two people (or a person and an
-  automated actor) editing at the same time cannot silently overwrite each
-  other.
+  against a named base revision, so that two editors cannot silently
+  overwrite each other.
 - As a **bot owner or tenant admin**, I want the policy recorded with every
   revision to be enforced when a patch is recorded, so that nothing
   automated can touch a pinned file or a gene I have not opened up.
 - As a **reviewer**, I want a per-gene diff between any two revisions, with
-  text files shown as unified diffs and a risk tier for the change, so that
-  I can judge a change without reading whole files.
+  text files as unified diffs and a risk tier, so that I can judge a change
+  without reading whole files.
 - As an **engineer building the evolution service (RSI-08)**, I want a
   registry I can call from Backend code and the same operations as HTTP
-  endpoints, so that a run can record each candidate patch as a revision
-  named `candidate/<run id>/<n>`, and can ask whether the bot has drifted
-  before it starts, without reaching into Backend tables.
-- As an **engineer building RSI-04**, I want revisions compiled into a
-  Manifest document that points at the content store by digest, so that the
-  Manifest change I add has a producer to test against.
+  endpoints, so that a run can record each candidate patch as
+  `candidate/<run id>/<n>` and ask whether the bot has drifted.
+- As an **engineer building Stage 2 / RSI-04**, I want promotion to go
+  through one narrow delivery seam, so that the direct route replaces the
+  generated Manifest without touching the registry.
 
 ## Acceptance Criteria
 
 Recording:
-- [ ] A revision can be recorded from a Bot Config Manifest v1 document. The
-      document is validated with the Manifest's own validator; every source
-      is fetched once and stored in the manifest content store; the original
-      YAML is kept as provenance; the stored revision validates against the
+- [ ] A revision can be captured from a bot: persona files, skills (local
+      skills as stored file trees, Center skills as pinned versions),
+      resources (files and directory trees), MCP servers with the bot's
+      overrides, and the startup script. Every captured byte lands in the
+      content store by digest; the stored revision validates against the
       contract schema and its id is the contract's hash.
-- [ ] A Manifest document may leave categories out (to the Manifest, an
-      omitted category means "leave the bot as it is"), but a revision must
-      be total: every category present. So an omitted category is copied
-      from the bot's `active` revision, which is also the new revision's
-      parent (see *Terms*). A document that declares every category is
-      recorded as it is. For a bot's first revision there is no `active`
-      yet, so omitted categories are captured from
-      what the bot has now (its identity files, skills, resources, MCP
-      servers and script), which also covers bots that were set up through
-      the console and never had a Manifest.
-- [ ] Test, using the RSI-02 examples: for each example Manifest document in
-      `api-contracts/genome/v1/examples/manifest-v1/`, recording it produces
-      exactly the revision the example says it should (`revision.json`),
-      and the two examples marked as refused are refused for the stated
-      reasons. The examples name git repositories and OSS objects that do
-      not exist; the test serves the files RSI-02 shipped for them instead
-      of fetching anything over the network.
+- [ ] Capture applies the contract's normalisation (the platform-written
+      AGENTS.md reference block is removed and trailing whitespace trimmed)
+      and refuses, naming the item, what genome v1 cannot represent: a
+      skill supplied from the shared skill repository, a resource whose
+      path the Manifest path rule rejects, and a platform-managed teclaw
+      bot.
 - [ ] A revision can be recorded from a patch against a base revision. All
       twelve ops apply as the contract defines; the contract's example
-      patches, applied to their example base, give the example candidate
-      revision (`02-support-bot-candidate.json`) and the stored patch digest
-      is the candidate id.
+      patches applied to their example base give the example candidate
+      revision, and the stored patch digest is the candidate id.
 - [ ] Recording a patch refuses, with the contract's reason codes
       (`base_mismatch`, `gene_not_mutable`, `pinned_item`,
       `gene_not_allowed`, `missing_rationale`, `schema`, `limit_exceeded`),
@@ -145,134 +113,120 @@ Recording:
       that touches a gene outside `mutable_genes` or a run's `allowed_genes`,
       that overlaps a pin, that lacks a rationale or required evidence, or
       that exceeds the Manifest-mirrored limits.
-- [ ] Anything apply would refuse is refused when recording, so a recorded
-      revision is always one that could be applied. Concretely, the same
-      checks Manifest apply runs before writing to a bot are run on the
-      content of the new revision at record time: a persona file is valid
-      UTF-8 and of a type the bot's engine accepts; a local skill's files
-      form a valid skill package; every resource file has an allowed
-      extension and size and the resource paths do not collide; an MCP
-      entry's URL and headers are well formed, the tenant may enable that
-      server, and its bot-level config is valid for the bot's engine. The
-      contract README §6.4 lists them; every `examples/invalid` case that
-      names one of them is refused by it.
+- [ ] A recorded revision is always one that apply would accept: the checks
+      Manifest apply runs before writing (persona UTF-8 and engine-legal
+      type, local skill files form a valid package, resource admission and
+      path rules, MCP URL/header rules, MCP permission and bot-override
+      validity in the recording bot's context) run on the new revision's
+      content; every `examples/invalid` case that names one of them is
+      refused by it.
 - [ ] Recording content that already exists returns the existing revision
-      unchanged: same id, same sequence number, same parent; no duplicate
-      row. Going back is the same idea at the ref level: in the history
-      A → B → C → D, promoting B again creates nothing and changes nothing
-      on B (its parent stays A); only the `active` ref moves to B and
-      `previous` to D, and the ref event log records that move.
-- [ ] Each recorded revision reports its risk tier and `rewrite` flags by the
-      contract's rules (risk-tiers data, the exact LCS measure, replacement
-      detection, policy overrides); the published canonical-JSON and rewrite
-      vectors are the oracle.
+      unchanged (same id, sequence number and parent). Going back is the
+      same idea for refs: in A → B → C → D, promoting B again records
+      nothing and leaves B's parent as A; only `active` and `previous`
+      move.
+- [ ] Each recorded patch reports its risk tier and `rewrite` flags by the
+      contract's rules; the published canonical-JSON and rewrite vectors
+      are the oracle.
+- [ ] An owner can set a bot's policy; that records a new revision with the
+      same content and the new policy, parent `active`.
 
 Refs and lineage:
 - [ ] Refs `active`, `previous`, `canary`, `draft` and `candidate/<run>/<n>`
-      exist per bot; every move is compare-and-swap on the expected
-      revision, a lost race answers a conflict naming the current revision,
-      and every move adds one row to the append-only ref event log with the
-      actor and reason.
-- [ ] Only the designated mover may move each ref kind: owners move `draft`;
+      exist per bot; every move is compare-and-swap, a lost race answers a
+      conflict naming the current revision, and every move adds a ref event.
+- [ ] Only the designated mover may move each ref: owners move `draft`;
       `active`, `previous` and `canary` move only through promotion;
-      candidate refs are created by recording a run candidate and never
-      moved afterwards.
-- [ ] Revisions can be listed per bot newest first, filtered by status and by
-      parent; a revision is retrievable by id, by `r<seq>`, or by ref name.
+      candidate refs are created when a run candidate is recorded and never
+      moved.
+- [ ] Revisions list per bot newest first, filtered by status and parent; a
+      revision is retrievable by id, by `r<seq>`, or by ref name.
 - [ ] A diff between any two revisions of the same bot lists each changed
-      gene as added, removed or modified, carries a unified diff for modified
-      text files, and reports the change's risk tier and rewrite flags.
+      gene as added, removed or modified, carries a unified diff for
+      modified text files, and reports a risk tier and rewrite flags.
 
 Content:
-- [ ] Bytes can be uploaded for a bot and are returned by digest, and bytes
-      can be read by digest only when the digest is reachable from that bot's
-      revisions or uploads; a read re-verifies the hash.
+- [ ] Bytes can be uploaded for a bot and read back by digest, only when
+      the digest is reachable from that bot's revisions or uploads; a read
+      re-verifies the hash.
 
-Promotion and drift:
-- [ ] A revision compiles to a Manifest document whose file entries point at
-      the content store by digest and whose Center skills are pinned by
-      version, in the spelling the contract proposes for RSI-04. Each
-      contract case under `examples/manifest-v1/` ships the expected result
-      of that compilation as `compiled.yaml` (the document M′ of the
-      round-trip definition); compiling the case's revision reproduces it.
-      The document's digest is recorded with the revision.
-- [ ] Promoting a revision moves `active` (and `previous`) in one
+Promotion and drift (Stage 1):
+- [ ] A revision compiles to a new Manifest document whose file entries
+      point at the content store by digest and whose Center skills are
+      pinned by version. Compiling each contract example's `revision.json`
+      reproduces its `compiled.yaml`. The document's digest is the digest of
+      its canonical JSON, independent of YAML formatting.
+- [ ] Promoting a revision moves `active` and `previous` in one
       compare-and-swap, marks the revision `promoted`, records a promotion
-      with actor, reason, the compiled document digest and the apply
-      reference, and starts the apply of the compiled document for a
-      personal bot. The promotion is refused before any ref moves when the
-      bot's Manifest cannot accept the compiled document (today: until
-      RSI-04 adds the content-store and Center sources).
-- [ ] The registry answers which revision a bot runs: it looks up the bot's
-      last Manifest apply and the promotion that started that apply, if any.
-      If the last apply was not started by a promotion (someone wrote the
-      Manifest directly, so the promoted content has been overwritten), or
-      its revision differs from `active`, the bot has drifted. Owner
-      promotions on a drifted bot are allowed, because promoting is how the
-      owner reconciles; automated promotions are refused.
+      with actor, reason, the generated document and its digest, and starts
+      an apply of that generated document for a personal bot. The bot's own
+      stored Manifest is not read or written by a promotion.
+- [ ] The promotion is refused before any ref moves when the Manifest
+      cannot accept the generated document (today: until RSI-04 lets apply
+      read bytes from the content store and pin Center skills).
+- [ ] The registry answers which revision a bot runs by joining the bot's
+      last apply to the promotion that started it, and reports drift when
+      the last apply was not started by a promotion or its revision differs
+      from `active`. Owner promotions on a drifted bot are allowed;
+      automated ones are refused.
 
 Surface and tests:
-- [ ] The HTTP endpoints of `01-genome.md` §12 and the promotion endpoint of
-      `08-promotion.md` §10.1 exist under `/openapi/v1/bots/{bot_id}/genome/`
-      with the standard envelope, authorization rows and admission modes,
-      and the documented error statuses.
-- [ ] Unit tests cover every module; the contract test keeps the vectors and
-      examples as the oracle for the registry's canonicalisation, rewrite
-      measure, recording and compile; the repository, DI wiring and HTTP
-      bars are tested like the Manifest's.
-- [ ] The singlebox story "edit → revision → diff → move draft → promote"
+- [ ] The HTTP endpoints exist under `/openapi/v1/bots/{bot_id}/genome/`
+      with the standard envelope, authorization rows, admission modes and
+      documented error statuses: list/get/diff revisions, capture, record a
+      patch, set policy, refs, content, promotions.
+- [ ] Unit tests cover every module; the contract test keeps the vectors
+      and examples as the oracle for canonicalisation, the rewrite measure,
+      patch application and compile; repository, DI wiring and HTTP bars
+      are tested like the Manifest's.
+- [ ] The singlebox story "capture → patch → diff → move draft → promote"
       runs end to end up to the apply hand-off; the "apply → go back two
-      revisions" leg is exercised once RSI-04 lets the Manifest accept a
-      compiled document (see Out of Scope).
+      revisions" leg completes once RSI-04 lets apply consume a generated
+      document.
 
 ## In Scope
 
-- A Genome Registry core package in Backend with revisions, refs moved by
-  compare-and-swap, patch recording and validation, Manifest recording with
-  source pinning and first-revision capture, diff, risk tiers and rewrite
-  detection, content upload/read, compile, lineage queries, and the drift
-  check.
+- A Genome Registry core package in Backend: capture, patch recording and
+  validation, policy change, diff, risk tiers and rewrite detection, refs
+  with CAS, content upload/read, compile, lineage queries, the drift check.
 - A promotion service and endpoint that moves refs, records the promotion
-  and hands the compiled document to Manifest apply through one narrow
-  applier seam.
-- A write path in the manifest content store for produced content (bytes a
-  patch wrote, an upload, or a capture of the bot's current state; see
-  *Terms*), recorded with genome provenance instead of a source URL
-  (`01-genome.md` §9.1 extension 1). Fetched sources need nothing new: the
-  fetch pipeline already stores their bytes under the bot.
+  with the generated document, and hands that document to Manifest apply
+  through one narrow delivery seam (Stage 1).
+- A Manifest apply entry point that applies a supplied document instead of
+  the bot's stored one, so a promotion never overwrites the owner's
+  Manifest.
+- The produced-content write path of the manifest content store.
 - Tables, repositories, DI wiring, HTTP routes, authorization and admission
-  rows, error mapping, docs and tests for all of the above.
+  rows, error mapping, tests, and the contract and design-doc updates that
+  record capture as the way revisions are recorded.
 - Moving the test-only canonical-JSON and rewrite reference implementations
-  into the core package, with the contract test pointed at them.
+  into the core package.
 
 ## Out of Scope
 
-- **Manifest changes (RSI-04):** the content-store and Center-skill sources,
-  the applied-document digest on apply reports and publish records,
-  resource removal (#2162), `script: null` (#2862), `memory` delivery
-  (RSI-05), `engine_config` (#2858). Until RSI-04 lands, a compiled document
-  is not accepted by the Manifest, so promotion is refused before moving
-  refs; the applier seam needs no change afterwards.
-- **Service-bot promotion through the publish flow.** The seam carries the
-  bot kind; the publish implementation lands with RSI-04/RSI-16, and a
-  service-bot promotion is refused as unsupported until then.
+- **Stage 2:** components that deliver a revision to the bot runtime
+  without a Manifest document. The delivery seam here is shaped so Stage 2
+  replaces the generated-Manifest implementation only.
+- **Recording a revision from a Manifest document.** Revisions come from
+  the bot or from patches; an owner who manages a bot through Manifest
+  documents applies the document as today and captures the result.
+- **Manifest changes (RSI-04):** apply reading bytes from the content
+  store, pinned Center skills, the applied-document digest, resource
+  removal (#2162), `script: null` (#2862), `memory` delivery (RSI-05),
+  `engine_config` (#2858). Until then a promotion is refused before moving
+  refs.
+- **Service-bot promotion through the publish flow.** Refused as
+  unsupported behind the same seam until Stage 2 / RSI-16.
 - **The gate, review queue, approvals, canary rollout, kill switches**
-  (RSI-12, RSI-16). Promotion here is the owner/tenant-admin path and the
-  internal move RSI-12 will call.
-- **Experience, evaluations, the ledger** (RSI-10, RSI-11, RSI-21): the
-  revision metadata carries `evidence` and `evaluations` ids but nothing
-  here writes evaluations.
-- **A shared `Idempotency-Key` store** (RSI-07): the header is accepted;
-  revisions are idempotent by content and promotions by compare-and-swap.
-- **Bot callers, `inbox/*` refs** (DR-3, RSI-14): postponed.
-- **Capturing current state of platform-managed teclaw bots** and of skills
-  supplied from the shared skill repository (`git://`), which genome v1
-  cannot represent: capture refuses and names them.
-- A git export of a bot's history (`01-genome.md` §9.2, proposed).
+  (RSI-12, RSI-16); **Experience, evaluations, the ledger** (RSI-10,
+  RSI-11, RSI-21); **a shared `Idempotency-Key` store** (RSI-07); **bot
+  callers and `inbox/*` refs** (DR-3, RSI-14).
+- Capturing platform-managed teclaw bots and shared-repository skills
+  (refused and named, see above).
 
 ## Open Questions
 
-- None blocking. Settled during planning and flagged at the review gate:
-  the promotion-before-RSI-04 behaviour, service-bot promotion deferred,
-  the join used for "which revision runs" until the applied digest exists
-  (apply id recorded on the promotion), and repo-skill capture refused.
+- None. Decisions made during review and recorded above: capture replaces
+  recording from a Manifest document; a promotion applies a generated
+  document and leaves the bot's Manifest untouched; policy changes are an
+  operation of their own; Stage 2 is a follow-on item.
