@@ -537,6 +537,7 @@ describe('owned chat engine permissions from inventory', () => {
   it('uses authoritative permissions for the same Bot and owner', async () => {
     ownedMocked.listBots.mockResolvedValue({ data: { items: [dto] } });
     ownedMocked.listBotInventory.mockResolvedValue({
+      success: true,
       data: { items: [{ ...dto, actions: ['engine_restart'], disabled_actions: { restart: 'locked' } }], total: 1 },
     });
     const result = await botSessionService.listOwnedBots('caller');
@@ -549,6 +550,7 @@ describe('owned chat engine permissions from inventory', () => {
   it('does not reuse permissions from a different owner', async () => {
     ownedMocked.listBots.mockResolvedValue({ data: { items: [dto] } });
     ownedMocked.listBotInventory.mockResolvedValue({
+      success: true,
       data: { items: [{ ...dto, owner_entity_id: 'other', actions: ['engine_restart'] }], total: 1 },
     });
     const result = await botSessionService.listOwnedBots('caller');
@@ -560,4 +562,15 @@ describe('owned chat engine permissions from inventory', () => {
     const result = await botSessionService.listOwnedBots('caller');
     expect(result.ok && result.data[0].actions).toEqual([]);
   });
+  it('does not trust permission data in a business failure envelope', async () => {
+    ownedMocked.listBots.mockResolvedValue({ data: { items: [dto] } });
+    ownedMocked.listBotInventory.mockResolvedValue({
+      success: false,
+      code: 403000,
+      data: { items: [{ ...dto, actions: ['engine_restart'] }], total: 1 },
+    });
+    const result = await botSessionService.listOwnedBots('caller');
+    expect(result.ok && result.data[0].actions).toEqual([]);
+  });
+
 });

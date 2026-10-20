@@ -22,6 +22,7 @@ import {
   type BotMessageDto,
   type BotModelDto,
 } from '@/services/backendApi/bots/privateBotSessionController';
+import { isEnvelopeFailure } from '@/services/backendApi/types';
 import type { ChatMessage } from '@tc-chat/core';
 import type { BotIamTokenStage } from '../backendApi/privateChat/iamTokenController';
 import { mapBotActionPermissions } from './botActionPermissionMapper';
@@ -272,6 +273,7 @@ async function fetchOwnedBots(
       try {
         for (let page = 1; ; page += 1) {
           const inventory = await listBotInventory({ user_id: resolveUserId(userId), page, page_size: 100 });
+          if (isEnvelopeFailure(inventory)) break;
           const rows = inventory.data?.items ?? [];
           for (const row of rows) {
             const ownerId = row.owner_entity_id ?? row.owner_id;
