@@ -3,6 +3,13 @@
 DeepSeek Harness channel bundle for connecting a DSH Bot to the Avernet Bot
 Collaboration Network (BCN).
 
+## 0.2.1
+
+Fix approval and question routing for BCN-owned Agents when the DSH Web UI is
+also enabled. BCN interaction handlers now run before the Web UI fallback, so
+pending requests reach BCN instead of waiting only in the native Web UI.
+Other Agents retain their existing interaction handlers.
+
 ## Compatibility
 
 - DeepSeek Harness declared compatibility: `>=0.2.0-rc.2 <=0.2.1-alpha.2`
@@ -172,13 +179,13 @@ To exercise the exact prebuilt artifact that will be published:
 ```bash
 mkdir -p /tmp/dsh-bcn-pack
 npm pack --pack-destination /tmp/dsh-bcn-pack
-dsh plugin --profile bcn-tarball add /tmp/dsh-bcn-pack/avernet-plugin-deepseek-harness-channel-bcn-0.2.0.tgz
+dsh plugin --profile bcn-tarball add /tmp/dsh-bcn-pack/avernet-plugin-deepseek-harness-channel-bcn-0.2.1.tgz
 ```
 
 After publication, the installation command will be:
 
 ```bash
-dsh plugin --profile <profile> add @avernet-plugin/deepseek-harness-channel-bcn@0.2.0
+dsh plugin --profile <profile> add @avernet-plugin/deepseek-harness-channel-bcn@0.2.1
 ```
 
 The bundle patch adds the plugin in a disabled state, so installing it never
