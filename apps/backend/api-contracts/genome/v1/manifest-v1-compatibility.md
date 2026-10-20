@@ -2,31 +2,43 @@
 
 How every field of a Bot Config Manifest v1 document
 (`docs/bot-config-manifest/manifest-schema.zh-CN.md`,
-`core/bot_config_manifest/schema/`) is handled when a revision is recorded
-from the document, and what compiling the revision back produces. Recording
-rules: [README §7](README.md#7-recording-a-revision-from-a-manifest-document).
-Worked cases: [`examples/manifest-v1/`](examples/manifest-v1/).
+`core/bot_config_manifest/schema/`) ends up in the revision a bot yields
+once the document has been applied and the bot captured, and what compiling
+the revision back produces. Recording rules:
+[README §7](README.md#7-recording-a-revision). Worked cases:
+[`examples/manifest-v1/`](examples/manifest-v1/).
+
+The registry never reads a Manifest document. The path is: `PUT
+/config-manifest` applies **M** to the bot as today; `POST
+…/genome/revisions:capture` records the bot's state as a revision; the
+revision compiles to **M′**. This table reads as if M were recorded
+directly, because apply then capture gives exactly the revision the rows
+describe (the "resolved" outcomes happen in apply, the "normalized" ones in
+capture).
 
 ## Round-trip
 
-Record a Manifest document **M** as a revision, then compile the revision to a
-Manifest document **M′**. The round-trip holds when **applying M′ gives the
-same bot that applying M gave when the revision was recorded**. M and M′ are
-not textually equal: M′ points at the content store by digest where M named
-git or OSS sources.
+Apply a Manifest document **M**, capture the bot as a revision, then compile
+the revision to a document **M′**. The round-trip holds when **delivering M′
+gives the same bot that applying M gave when the revision was captured**. M
+and M′ are not textually equal: M′ points at the content store by digest
+where M named git or OSS sources.
 
-M′ uses two Manifest source kinds that do not exist yet. Their spelling below
-is **proposed**; RSI-04 fixes it:
+M′ uses three source spellings that are not Manifest grammar and never
+reach `PUT /config-manifest`; they are consumed by direct delivery (RSI-04):
 
 ```yaml
 source: {protocol: content_store, digest: "sha256:<hex64>"}   # bytes from the manifest content store; no fetch
 source: {protocol: center, version: "v7"}                     # a pinned Skill Center version
+source: {protocol: repo, path: "team/refund-policy"}          # a shared-repository skill, by path
 ```
 
-Until RSI-04 lands, the round-trip is checked on paper: every case's M is
-accepted by the real Manifest validator (or refused, where stated), its
-revision validates against the schema with real digests and id, and M′ is
-derived from the revision field by field as below.
+M′ is derived from the revision by `compile_spec`
+(`core/bot_genome/compile.py`), which is also what produces every case's
+`compiled.yaml`; the contract tests check both. Until RSI-04 lands, the
+delivery leg of the round-trip is checked on paper: every case's M is
+accepted by the real Manifest validator (or refused, where stated), and its
+revision validates against the schema with real digests and id.
 
 ## Outcomes
 
@@ -37,7 +49,7 @@ derived from the revision field by field as below.
 | **resolved** | Used at record time to fetch or compute bytes; the revision keeps only the result (a digest) |
 | **provenance** | Not needed after recording; kept only in the stored copy of M |
 | **ignored** | Not part of genome v1; M′ omits it, so apply leaves the bot's state as it is |
-| **refused** | Recording fails. Usually `PUT /config-manifest` refuses it too; rows marked *recording only* are accepted by the Manifest but cannot be recorded |
+| **refused** | Recording fails. Usually `PUT /config-manifest` refuses it too; rows marked *recording only* are accepted by the Manifest, so the bot can hold such state, but capture refuses to record it (`CaptureRefused`, naming the entry) |
 
 ## Top level
 
@@ -47,7 +59,7 @@ derived from the revision field by field as below.
 | `sources` (named sources) | resolved | Each entry using one is fetched; M′ has no `sources` |
 | `manifest` | maps | Its categories, below |
 | `script` | maps | `spec.script`, below |
-| an absent category | resolved | Filled from the parent revision, or the bot's current state for a first revision (README §7); M′ always lists every category |
+| an absent category | resolved | Apply leaves the bot's state for it; capture records that state, so the revision is total (README §7); M′ always lists every category |
 | `apply_once` (reserved) | refused | Refused by the Manifest validator |
 
 ## Sources and per-entry fetch fields
@@ -83,7 +95,8 @@ derived from the revision field by field as below.
 | a skill whose files are not a valid package | refused (*recording only*) | Missing or invalid `SKILL.md` front matter, a metadata name different from the entry name, or over the package limits (README §4.2); apply would refuse it too |
 | the skill's files (git directory or unpacked OSS zip) | resolved | `origin: local`, `digest` of the `acm-tree-v1` tree of the files `SkillPackageValidator` keeps (wrapper directory stripped, ignored paths dropped; README §4.2); M′: `source: {protocol: content_store, …}`, from which apply builds the skill package zip |
 | `unpack` | resolved | |
-| a Skill Center skill | maps | `origin: center`, `center_version`. Manifest v1 cannot declare one; it comes from capturing a bot's current state. M′: `source: {protocol: center, …}` (RSI-04) |
+| a Skill Center skill | maps | `origin: center`, `center_version`. Manifest v1 cannot declare one; it comes from capturing a bot's current state. M′: `source: {protocol: center, …}` |
+| a shared-repository skill (`git://` row) | maps | `origin: repo`, `repo_path`. Manifest v1 cannot declare one either; captured from the bot. M′: `source: {protocol: repo, …}`. The repository commit is not pinned yet (RSI-04) |
 
 ## `manifest.resources`
 
@@ -132,7 +145,7 @@ derived from the revision field by field as below.
 | Manifest field | Outcome | Revision / M′ |
 | --- | --- | --- |
 | `body` | resolved | Placeholders substituted as apply would, then `spec.script.digest`; M′: `script: {body: …}` with the stored body |
-| `script` absent | resolved | Filled like any omitted category: from the parent revision, or the bot's current state for a first revision |
+| `script` absent | resolved | Like any omitted category: apply leaves the bot's script, and capture records it |
 | `script: null` | maps | `spec.script: null` (no script); M′ `script: null`. Apply reads `null` as "absent" today, so M′ cannot remove an existing script ([#2862](https://github.com/inclusionAI/Avernet/issues/2862)) |
 
 ## Revision fields with no Manifest counterpart
@@ -141,7 +154,7 @@ derived from the revision field by field as below.
 | --- | --- |
 | `spec.memory` | Omitted while `null`. A `memory` category is added to the Manifest by RSI-04 with the engine memory projection (RSI-05) |
 | `policy` | Omitted: the policy governs evolution, not apply |
-| `revision` metadata | Omitted. Promotion records which revision compiled to the applied document's digest (01-genome.md §5.5) |
+| `revision` metadata | Omitted. Promotion records the revision id next to the compiled document's digest (README §7, 01-genome.md §5.5) |
 
 ## Cases
 

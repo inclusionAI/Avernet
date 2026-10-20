@@ -109,21 +109,34 @@ the rest.
 
 ## P1 — Versioned bots (useful independently of RSI)
 
-### RSI-03 Genome Registry in Backend
+### RSI-03 Genome Registry in Backend — done
 - **Module**: backend
 - **Goal**: Revisions table, refs with CAS, patch apply/validate, diff,
-  pinned source resolution into the content store, lineage queries.
-  Promotion API that moves `active` and invokes Manifest apply (personal
-  bots) or publishes the revision as the next published version (service
-  bots). The
-  applied-digest → revision mapping and the drift check
+  captured and produced content in the content store, lineage queries.
+  Promotion API that moves `active` by CAS, records the compiled document
+  and its digest, and hands the revision to a `RevisionApplier` seam. The
+  applied → revision mapping and the drift check
   ([01-genome.md](01-genome.md) §5.5).
 - **Depends on**: RSI-02.
 - **Read first**: [01-genome.md](01-genome.md); `core/bot_config_manifest/`.
-- **Done when**: create revision from manifest, from patch; diff any two;
-  move refs with conflict detection; conformance + unit tests; singlebox
-  acceptance story "edit → revision → apply → go back two revisions by
-  promoting an earlier one".
+- **Shipped** (`apps/backend/specs/2026-10-19-bot-genome-registry/`):
+  `core/bot_genome/` with the five tables, capture of a bot's current state
+  (`POST …/genome/revisions:capture`), patches applied to their own base
+  (`POST …/genome/revisions`), the policy operation (`PUT …/genome/policy`),
+  diff, `draft` by CAS, content read/upload, promotions, and the
+  `/openapi/v1/bots/{bot_id}/genome` surface; conformance, repository,
+  wiring and route tests. Promotion's only applier refuses every delivery as
+  `not_appliable` naming RSI-04, before any ref moves, so the singlebox
+  story stops at the refusal.
+- **Left to RSI-04**: delivery itself (personal bots), service-bot publish,
+  pinning the commit of a shared-repository skill (`origin: repo` records
+  the path only), and the apply report carrying `document_digest`. Until
+  then `applied_revision` joins the bot's last Manifest apply to the
+  promotion that started it by apply id.
+- **Follow-up**: capture refuses a platform-managed teclaw bot (teclaw
+  delivery mode `platform`, `CaptureRefused`): it has no device to read, so
+  capturing it means composing its state from the platform's own rows, the
+  way that delivery mode does.
 
 ### RSI-04 Direct delivery of a compiled revision (Stage 2)
 - **Module**: backend
@@ -357,5 +370,5 @@ evolution run, `V-` verification, `P-` promotion, `A-` API, `O-` meta-evolution.
 | DS-2 (was D-3) | ClawBench as platform default grader | 04-default-strategies.md → RSI-11 |
 | DS-3 (was D-4) | Workflow YAML as gene or separate artifact | 04-default-strategies.md |
 | DS-4 (was D-5) | ClawMind analyzer contract; dormant analyzers wire-or-remove | 04-default-strategies.md |
-| D-6 | Genome storage: DB + content store (recommended) vs git repo per bot | 01-genome.md; RSI-03 |
+| D-6 | Genome storage: DB + content store vs git repo per bot | **Closed (RSI-03):** DB + content store; 01-genome.md §9.2 |
 | A-n | Evolution API open decisions (event delivery; bot run requests postponed) | 09-evolution-api.md |

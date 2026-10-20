@@ -97,17 +97,29 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 
 ## P1 — 版本化 Bot（独立于 RSI 也有价值）
 
-### RSI-03 Backend 中的基因组注册表
+### RSI-03 Backend 中的基因组注册表 — 已完成
 - **模块**：backend
-- **目标**：修订版表、带 CAS 的引用（ref）、补丁应用/校验、diff、将钉住的源
-  解析进内容存储、谱系查询。提供晋升 API：移动 `active` 并调用 Manifest apply
-  （个人 Bot），或把修订版作为下一个发布版本发布（服务型 Bot）。已应用摘要 →
-  修订版的映射，以及漂移检查（[01-genome.zh-CN.md](01-genome.zh-CN.md) §5.5）。
+- **目标**：修订版表、带 CAS 的引用（ref）、补丁应用/校验、diff、把捕获的内容和
+  产出型内容存入内容存储、谱系查询。提供晋升 API：以 CAS 移动 `active`，记录
+  已编译文档及其摘要，并把修订版交给 `RevisionApplier` 接缝。已应用 → 修订版的
+  映射，以及漂移检查（[01-genome.zh-CN.md](01-genome.zh-CN.md) §5.5）。
 - **依赖**：RSI-02。
 - **先读**：[01-genome.zh-CN.md](01-genome.zh-CN.md)；`core/bot_config_manifest/`。
-- **完成标准**：可从 manifest、从补丁创建修订版；可对任意两个修订版做 diff；
-  移动引用时能检测冲突；一致性测试 + 单元测试；singlebox 验收故事「编辑 →
-  修订版 → apply → 通过晋升一个更早的修订版回到两个修订版之前」。
+- **已交付**（`apps/backend/specs/2026-10-19-bot-genome-registry/`）：
+  `core/bot_genome/` 及其五张表、捕获 Bot 的当前状态
+  （`POST …/genome/revisions:capture`）、应用到补丁自身 base 上的补丁
+  （`POST …/genome/revisions`）、策略配置操作（`PUT …/genome/policy`）、diff、
+  以 CAS 移动 `draft`、内容读取/上传、晋升，以及
+  `/openapi/v1/bots/{bot_id}/genome` 接口面；一致性、仓储、装配和路由测试。晋升
+  唯一的 applier 会在移动任何引用之前以 `not_appliable` 拒绝每一次投递并指明
+  RSI-04，因此 singlebox 故事止步于这次拒绝。
+- **留给 RSI-04**：投递本身（个人 Bot）、服务型 Bot 发布、钉住共享仓库技能的
+  提交（`origin: repo` 只记录路径），以及 apply 报告携带 `document_digest`。在此
+  之前，`applied_revision` 按 apply id 把 Bot 最近一次 Manifest apply 关联到发起它
+  的那次晋升。
+- **后续**：捕获会拒绝由平台管理的 teclaw Bot（teclaw 投递模式 `platform`，
+  `CaptureRefused`）：它没有可读取的设备，因此捕获它意味着像该投递模式那样，
+  从平台自己的数据行组合出它的状态。
 
 ### RSI-04 已编译修订版的直接投递（第二阶段）
 - **模块**：backend
@@ -311,5 +323,5 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 | DS-2（原 D-3） | 将 ClawBench 作为平台默认评分器 | 04-default-strategies.md → RSI-11 |
 | DS-3（原 D-4） | Workflow YAML 作为基因还是独立 artifact | 04-default-strategies.md |
 | DS-4（原 D-5） | ClawMind 分析器契约；休眠的分析器要么接入要么移除 | 04-default-strategies.md |
-| D-6 | 基因组存储：DB + 内容存储（推荐）还是每个 Bot 一个 git 仓库 | 01-genome.md；RSI-03 |
+| D-6 | 基因组存储：DB + 内容存储还是每个 Bot 一个 git 仓库 | **已关闭（RSI-03）：** DB + 内容存储；01-genome.md §9.2 |
 | A-n | 进化 API 的待定决策（事件投递；Bot 运行请求已推迟） | 09-evolution-api.md |
