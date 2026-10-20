@@ -299,7 +299,7 @@ CREATE TABLE IF NOT EXISTS `task_artifact` (
     `scope_session_id` varchar(512) DEFAULT NULL                                  COMMENT '图绑定协作会话 ID(图绑定优先,未绑定采纳上报值;NULL=均无)',
     `kind`            varchar(64)   NOT NULL                                      COMMENT '内容形态(text|file|url_link|code),governed 枚举',
     `storage`         varchar(2048) DEFAULT NULL                                  COMMENT '存储介质元信息:inline=内容本体在 content 列(text/url_link/code);bot_workspace|session_file=字节在外部介质,content 仅为引用(与 FileContent.storage_type 强一致,构造器推导校验;发布路径必填,NULL 仅为容错/人工修数留口,长度冗余预留给介质 JSON 化)',
-    `content`         mediumtext    NULL                                         COMMENT '内容分支 JSON(kind-tagged,tag=分支判别;不含字节/临时凭证/存储 handle;发布路径必填,NULL 仅为 schema 容错/人工修数留口;TEXT 家族禁显式 DEFAULT,可空性由 NULL 声明)',
+    `content`         mediumtext    NULL                                          COMMENT '内容分支 JSON(kind-tagged,tag=分支判别;不含字节/临时凭证/存储 handle;发布路径必填,NULL 仅为 schema 容错/人工修数留口;TEXT 家族禁显式 DEFAULT,可空性由 NULL 声明)',
     `content_hash`    char(64)      DEFAULT NULL                                  COMMENT 'sha256(canonical_json(content)),uk_dedupe 成分;发布路径必填——NULL 行绕过幂等闸(MySQL 唯一索引 NULL 不判重)',
     `creator`         varchar(128)  DEFAULT NULL                                  COMMENT '产出者(bot_id/group_id;system=系统写入,如控制信号;NULL=未记录)',
     `modifier`        varchar(128)  DEFAULT NULL                                  COMMENT '修改者(行不可变:恒等于 creator,房型惯例列;NULL=未记录)',
