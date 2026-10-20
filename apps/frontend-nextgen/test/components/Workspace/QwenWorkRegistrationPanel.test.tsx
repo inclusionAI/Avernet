@@ -9,7 +9,7 @@ let mockDisplayName: string | null = null;
 jest.mock('@/hooks/useHumanIdentity', () => ({
   useHumanIdentity: () => ({ identity: mockDisplayName ? { displayName: mockDisplayName } : null }),
 }));
-let mockInstallation: { installCommand: string; binary: string; profiles?: boolean; guideUrl?: string; personalizeBotName?: boolean } | null = null;
+let mockInstallation: { installCommand: string; binary: string; profiles?: boolean; guideUrl?: string; personalizeBotName?: boolean; buildOnboardingCommand?: (input: any) => string } | null = null;
 
 jest.mock('@/capabilities', () => ({
   getCapabilities: () => ({
@@ -58,8 +58,8 @@ it('provides a pinned installer download and separate installation before regist
 it('uses deployment installation and executable throughout the onboarding flow', () => {
   mockInstallation = { installCommand: 'deployment-package-manager install bridge', binary: 'bcs-bridge' };
   render(<QwenWorkRegistrationPanel open />);
-  expect(screen.getByRole('button', { name: '复制安装命令' })).toBeEnabled();
-  expect(screen.getByText(mockInstallation.installCommand)).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '复制安装命令' })).not.toBeInTheDocument();
+  expect(screen.getByText(/deployment-package-manager install bridge/)).toBeInTheDocument();
   expect(screen.queryByRole('link', { name: '下载安装脚本' })).not.toBeInTheDocument();
   expect(screen.queryByRole('link', { name: '查看其他发布版本' })).not.toBeInTheDocument();
   expect(screen.queryByText(/0.1.4-beta.2 已包含 init/)).not.toBeInTheDocument();
@@ -68,7 +68,7 @@ it('uses deployment installation and executable throughout the onboarding flow',
   expect(screen.getByText(/if bcs-bridge init --help/)).toBeInTheDocument();
   expect(screen.getByText(/bcs-bridge --config.*start --daemon/)).toBeInTheDocument();
   expect(screen.getByText('bcs-bridge stop')).toBeInTheDocument();
-  expect(screen.queryByText(/\$HOME\/\.local\/bin\/bcs-bridge/)).not.toBeInTheDocument();
+  expect(screen.getByText(/command -v bcs-bridge/)).toBeInTheDocument();
   mockInstallation = null;
 });
 
@@ -106,11 +106,13 @@ it('replaces detailed instructions with the deployment-provided guide link', () 
     guideUrl: 'https://docs.example.com/qwenwork-onboarding',
   };
   render(<QwenWorkRegistrationPanel open />);
-  expect(screen.getByRole('link', { name: '查看千问办公接入指南' })).toHaveAttribute('href', mockInstallation.guideUrl);
+  expect(screen.getByRole('link', { name: '千问办公渠道配置指南' })).toHaveAttribute('href', mockInstallation.guideUrl);
   expect(screen.getAllByRole('heading', { level: 3 }).map((node) => node.textContent)).toEqual([
-    '1. 安装 Bridge', '2. 接入千问 Bot', '3. 配置千问办公渠道',
+    '1. 接入千问 Bot', '2. 配置千问办公渠道',
   ]);
-  expect(screen.getByText(/必须按指南在千问办公中配置并启用渠道/)).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: '千问办公渠道配置指南' }).closest('p')).toHaveTextContent(
+    '执行接入命令后，请按照千问办公渠道配置指南在千问办公中配置并启用渠道，完成本步骤后才能连接 Bot。',
+  );
   expect(screen.queryByText(/复制接入命令，在终端执行一次/)).not.toBeInTheDocument();
   expect(screen.queryByText(/填写命令输出的 WebSocket URL/)).not.toBeInTheDocument();
   expect(screen.queryByText('数据库无法自动识别时')).not.toBeInTheDocument();
@@ -141,4 +143,15 @@ it('keeps the public default Bot name even when a user identity is available', (
   render(<QwenWorkRegistrationPanel open />);
   expect(screen.getByLabelText('Bot 名称')).toHaveValue('我的千问办公');
   mockDisplayName = null;
+});
+
+it('uses a deployment-owned onboarding command when provided', () => {
+  const buildOnboardingCommand = jest.fn(() => 'bash verified-onboarding-script --engine qwenwork');
+  mockInstallation = { installCommand: 'package-manager install bridge', binary: 'bcs-bridge', profiles: true, buildOnboardingCommand };
+  try {
+    render(<QwenWorkRegistrationPanel open />);
+    expect(screen.getByText(/bash verified-onboarding-script/)).toBeInTheDocument();
+    expect(buildOnboardingCommand).toHaveBeenCalledWith(expect.objectContaining({ token: 'test-token', environment: 'PRE', profile: 'pre', apiUrl: 'https://bcs.example.com' }));
+    expect(screen.queryByText(/--profile pre register/)).not.toBeInTheDocument();
+  } finally { mockInstallation = null; }
 });

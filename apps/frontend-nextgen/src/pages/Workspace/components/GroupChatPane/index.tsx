@@ -17,6 +17,7 @@ import { GroupChatComposer } from './GroupChatComposer';
 import { GroupChatMessageArea } from './GroupChatMessageArea';
 import type { GroupChatPaneProps } from './GroupChatPane.types';
 import { GroupChatPlaceholder } from './GroupChatPlaceholder';
+import { GroupExecApprovalPanel } from './GroupExecApprovalPanel';
 import { GroupQuestionPanel } from './GroupQuestionPanel';
 import { buildGroupMentionConfig, isHumanOnlyMention } from './mentionHelpers';
 import { resolveSender } from './messageHelpers';
@@ -35,6 +36,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     updateMemberScope,
     chat,
     questions,
+    execApprovals,
     supportState,
     connectionStatus,
     groupBootstrapProcessing = false,
@@ -212,6 +214,9 @@ export function GroupChatPane(props: GroupChatPaneProps) {
         {/* ask_user 问答面板：仅 Human 视角挂载（Bot 不代答）。不参与 composerVisible 的
             humanAbsentOnly 条件——Human 未加入但其拥有的 Bot 仍在会话内时仍可作答，授权由 BCS 校验。
             Spec：面板位于输入区域上方，不替代、也不随问答待处理禁用普通聊天输入框。 */}
+        {session && activeIdentity?.kind === 'user' && execApprovals ? (
+          <GroupExecApprovalPanel model={execApprovals} participants={session.participants} />
+        ) : null}
         {session && activeIdentity?.kind === 'user' && questions ? (
           <GroupQuestionPanel model={questions} participants={session.participants} />
         ) : null}

@@ -210,6 +210,7 @@ export const defaultCapabilities: AppCapabilities = {
     value: true,
   }),
   getAdditionalBotRegistrationPanels: () => ({ status: 'available', value: [] }),
+  getDeepSeekHarnessOnboardingCommand: () => ({ status: 'available', value: null }),
   getDeepSeekHarnessRegistrationEnabled: () => ({ status: 'available', value: true }),
   getDeepSeekHarnessRegistrationGuideUrl: () => {
     const runtime =

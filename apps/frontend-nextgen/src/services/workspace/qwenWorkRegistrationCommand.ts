@@ -1,3 +1,4 @@
+import { withBridgeInstallation } from './bridgeInstallationCommand';
 import { getBotRegistrationNameError, quoteShellArg } from './botRegistrationCommand';
 import type { BridgeRelease } from './bridgeReleaseService';
 
@@ -94,9 +95,10 @@ export function buildQwenWorkRegistrationCommand({
 }
 
 export function buildQwenWorkOnboardingCommand(
-  input: Parameters<typeof buildQwenWorkRegistrationCommand>[0],
+  input: Parameters<typeof buildQwenWorkRegistrationCommand>[0] & { installCommand?: string; prepareCommand?: string },
 ): string {
   const registration = buildQwenWorkRegistrationCommand(input);
   if (!registration) return '';
-  return `${registration} &&\n(\n${buildQwenWorkInitCommand(input.binary, input.profile)}\n) &&\n${buildQwenWorkStartCommand(input.binary, input.profile)}`;
+  const command = `${registration} &&\n(\n${buildQwenWorkInitCommand(input.binary, input.profile)}\n) &&\n${buildQwenWorkStartCommand(input.binary, input.profile)}`;
+  return input.installCommand ? withBridgeInstallation(command, input.installCommand, input.prepareCommand) : command;
 }

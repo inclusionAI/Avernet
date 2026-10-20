@@ -63,66 +63,64 @@ export function QwenWorkRegistrationPanel({ open }: { open: boolean }) {
   const botName = editedBotName ?? (displayName ? `${displayName.slice(0, 59)}的千问办公` : '我的千问办公');
   const command =
     token && endpoint && capability.status === 'available'
-      ? buildQwenWorkOnboardingCommand({
+      ? installation?.buildOnboardingCommand
+        ? installation.buildOnboardingCommand({ token, botName, apiUrl: capability.value.apiUrl, bcsEndpoint: endpoint, environment, profile })
+        : buildQwenWorkOnboardingCommand({
           token,
           botName,
           apiUrl: capability.value.apiUrl,
           bcsEndpoint: endpoint,
           binary: installation?.binary,
+          installCommand: installation?.installCommand,
+          prepareCommand: installation?.prepareCommand,
           profile,
         })
       : '';
   return (
     <div className="space-y-4 text-xs leading-5">
       <p>
-        千问办公通过 bcs-bridge 接入协作网络。请先在千问办公所在设备的终端安装 Bridge，再填写 Bot
-        信息并执行接入命令，完成注册与启动。
+        千问办公通过 bcs-bridge 接入协作网络。填写 Bot 信息后，在千问办公所在设备的终端执行接入命令，完成注册与启动。
       </p>
       <p>支持 macOS 13+（Apple Silicon / Intel）。先安装并打开千问办公；Bridge 运行期间请保持桌面端在线。</p>
-      <section className="space-y-2" aria-label="安装 Bridge">
-        <h3 className="font-medium">1. 安装 Bridge</h3>
-        {installation ? (
-          <>
-            <p>在千问办公所在的 Mac 终端中执行以下命令，安装后确认 bcs-bridge 可在终端中运行。</p>
-            <Command label="安装命令" value={installation.installCommand} />
-          </>
-        ) : (
-          <>
-            <p>
-              推荐版本：{VERIFIED_BRIDGE_BETA.version}（Beta）。先下载安装脚本和校验文件，再执行安装脚本；无需安装
-              Rust。
-            </p>
-            <div className="flex flex-wrap gap-3">
-              <a
-                href={VERIFIED_BRIDGE_BETA.installerUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary underline"
-              >
-                下载安装脚本
-              </a>
-              <a
-                href={VERIFIED_BRIDGE_BETA.checksumUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline"
-              >
-                下载校验文件
-              </a>
-              <a href={BRIDGE_RELEASES_URL} target="_blank" rel="noopener noreferrer" className="underline">
-                查看其他发布版本
-              </a>
-            </div>
-            <p>
-              在千问办公所在的 Mac 终端中依次执行以下命令。脚本会选择 Apple Silicon 或 Intel 制品，安装到 ~/.local/bin。
-            </p>
-            <Command label="下载命令" value={buildBridgeDownloadCommand(VERIFIED_BRIDGE_BETA)} />
-            <Command label="校验与安装命令" value={buildBridgeInstallCommand(VERIFIED_BRIDGE_BETA)} />
-          </>
-        )}
-      </section>
+      {installation ? (
+        <p>接入命令会复用已有 Bridge；未安装时自动安装，请确保 acli 已加入 PATH。</p>
+      ) : (
+        <section className="space-y-2" aria-label="安装 Bridge">
+          <h3 className="font-medium">1. 安装 Bridge</h3>
+          <p>
+            推荐版本：{VERIFIED_BRIDGE_BETA.version}（Beta）。先下载安装脚本和校验文件，再执行安装脚本；无需安装
+            Rust。
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <a
+              href={VERIFIED_BRIDGE_BETA.installerUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary underline"
+            >
+              下载安装脚本
+            </a>
+            <a
+              href={VERIFIED_BRIDGE_BETA.checksumUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline"
+            >
+              下载校验文件
+            </a>
+            <a href={BRIDGE_RELEASES_URL} target="_blank" rel="noopener noreferrer" className="underline">
+              查看其他发布版本
+            </a>
+          </div>
+          <p>
+            在千问办公所在的 Mac 终端中依次执行以下命令。脚本会选择 Apple Silicon 或 Intel 制品，安装到 ~/.local/bin。
+          </p>
+          <Command label="下载命令" value={buildBridgeDownloadCommand(VERIFIED_BRIDGE_BETA)} />
+          <Command label="校验与安装命令" value={buildBridgeInstallCommand(VERIFIED_BRIDGE_BETA)} />
+        </section>
+      )}
       <section className="space-y-2" aria-label="接入千问 Bot">
-        <h3 className="font-medium">2. 接入千问 Bot</h3>
+        <h3 className="font-medium">{installation ? '1. 接入千问 Bot' : '2. 接入千问 Bot'}</h3>
         <label className="block">
           Bot 名称
           <Input value={botName} maxLength={64} onChange={(e) => setBotName(e.target.value)} />
@@ -202,11 +200,18 @@ export function QwenWorkRegistrationPanel({ open }: { open: boolean }) {
       </section>
       {installation?.guideUrl && (
         <section className="space-y-2" aria-label="配置千问办公渠道">
-          <h3 className="font-medium">3. 配置千问办公渠道</h3>
-          <p>执行接入命令后，必须按指南在千问办公中配置并启用渠道，才能完成连接。</p>
-          <a href={installation.guideUrl} target="_blank" rel="noopener noreferrer" className="text-primary underline">
-            查看千问办公接入指南
-          </a>
+          <h3 className="font-medium">2. 配置千问办公渠道</h3>
+          <p className="text-muted-foreground">
+            请选择千问办公的「企业微信」渠道。Bridge 复用该渠道的 Bot 通信协议，通过本机 WebSocket
+            连接千问办公并转接 BCN 消息，无需准备企业微信账号或创建企业微信机器人。
+          </p>
+          <p>
+            执行接入命令后，请按照
+            <a href={installation.guideUrl} target="_blank" rel="noopener noreferrer" className="text-primary underline">
+              千问办公渠道配置指南
+            </a>
+            在千问办公中配置并启用渠道，完成本步骤后才能连接 Bot。
+          </p>
         </section>
       )}
     </div>

@@ -479,6 +479,10 @@ export interface AppCapabilities {
   getDeepSeekHarnessRegistrationEnabled: () => CapabilityResult<boolean>;
   /** Deployment-owned DSH guide link; null hides the optional link, preserving inline steps. */
   getDeepSeekHarnessRegistrationGuideUrl: () => CapabilityResult<string | null>;
+  /** Optional deployment-owned complete DSH onboarding command. */
+  getDeepSeekHarnessOnboardingCommand: () => CapabilityResult<((input: {
+    token: string; botName: string; profile: string; bcsEndpoint: string; environment: string;
+  }) => string) | null>;
   /** Additional deployment-owned onboarding panels; public deployments default to none. */
   getAdditionalBotRegistrationPanels: () => CapabilityResult<
     {
@@ -491,6 +495,17 @@ export interface AppCapabilities {
   /** Optional deployment-managed installer and executable; null uses the public release installer. */
   getQwenWorkBridgeInstallation: () => CapabilityResult<{
     installCommand: string;
+    /** Optional deployment preflight that locates/installs Bridge and updates this shell's PATH. */
+    prepareCommand?: string;
+    /** Deployment-owned complete onboarding command; default uses the shared Bridge flow. */
+    buildOnboardingCommand?: (input: {
+      token: string;
+      botName: string;
+      apiUrl: string;
+      bcsEndpoint: string;
+      environment: string;
+      profile?: string;
+    }) => string;
     binary: string;
     profiles?: boolean;
     guideUrl?: string;

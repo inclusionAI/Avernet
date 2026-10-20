@@ -54,8 +54,12 @@ export function DeepSeekHarnessRegistrationPanel({ open }: { open: boolean }) {
       : '我的Deepseek harness');
   const [profile, setProfile] = useState('web');
   const inputError = getDeepSeekHarnessInputError({ botName, profile });
-  const command =
-    token && bcsEndpoint ? buildDeepSeekHarnessRegistrationCommand({ token, bcsEndpoint, botName, profile }) : '';
+  const scriptBuilder = getCapabilities().getDeepSeekHarnessOnboardingCommand?.().value;
+  const command = token && bcsEndpoint && !inputError
+    ? scriptBuilder
+      ? scriptBuilder({ token, bcsEndpoint, botName, profile, environment: getCapabilities().getRuntimeEnvironment().value })
+      : buildDeepSeekHarnessRegistrationCommand({ token, bcsEndpoint, botName, profile })
+    : '';
 
   return (
     <div className="space-y-4 text-xs leading-5">

@@ -1,3 +1,4 @@
+import { useGroupChatExecApprovals } from './useGroupChatExecApprovals';
 import type { SessionView } from '@/domain/collaboration';
 import { useTaskPreflightAssistant } from '@/hooks/useTaskPreflightAssistant';
 import { chatBridge } from '@/services/workspace/chatBridge';
@@ -110,6 +111,7 @@ export function useGroupChat(session: SessionView | null) {
 
   // ask_user 问答编排（快照订阅 / 草稿 / 提交态），随 Provider 重建自动隔离旧会话状态。
   const questions = useGroupChatQuestions(provider);
+  const execApprovals = useGroupChatExecApprovals(provider);
 
   // 切换会话时清理旧会话副屏；连接、history hydration 与 WS 暂存由
   // useManifestHistoryLoader 作为同一个可取消初始化流程统一管理。
@@ -245,6 +247,7 @@ export function useGroupChat(session: SessionView | null) {
     loadMoreHistory,
     groupBootstrapProcessing,
     questions,
+    execApprovals,
     ...runControl,
   };
 }

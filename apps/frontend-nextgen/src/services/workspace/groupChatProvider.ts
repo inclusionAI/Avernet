@@ -1,3 +1,5 @@
+import type { GroupExecResolution } from '@/domain/collaboration/groupExecApprovals';
+import { GroupExecApprovalService, type GroupExecApprovalSnapshot } from './groupExecApprovalService';
 import type { GroupQuestionResolution } from '@/domain/collaboration/groupQuestions';
 import {
   createSessionToken,
@@ -110,6 +112,7 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
    * 组件只经 subscribeToQuestions/resolveQuestion 消费，不接触 transport 或协议帧。
    */
   private readonly questionService: GroupQuestionService;
+  private readonly execApprovalService: GroupExecApprovalService;
   /**
    * 拥有问答状态的连接周期（inner 身份校验）：只有当前周期的 inner 能驱动 questionService。
    * 断开、替换或异步初始化被 disconnect 废弃时置 null——旧回调迟到也不更新新连接状态。
@@ -140,6 +143,12 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
       bcsSessionId: options.sessionId,
       // 动态发送：经当前 inner 的 transport 出站（替换后即刻切到新连接）；真实连接状态 getter，
       // 不使用 UI 展示状态（displayStatus），断线下 resolve 在 service 层立即拒绝。
+      send: (frame) => this.sendQuestionFrame(frame),
+      isConnected: () => this.isConnected,
+    });
+    this.execApprovalService = new GroupExecApprovalService({
+      groupId: options.groupId,
+      bcsSessionId: options.sessionId,
       send: (frame) => this.sendQuestionFrame(frame),
       isConnected: () => this.isConnected,
     });
@@ -202,6 +211,14 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
    * 订阅当前群/会话的 ask_user 交互快照（委托 questionService，订阅即回放当前状态）。
    * reason 区分 update/terminal/reset：reset 表示连接周期重置，业务侧暂存草稿等待重放。
    */
+  subscribeToExecApprovals(listener: (snapshot: GroupExecApprovalSnapshot) => void): () => void {
+    return this.execApprovalService.subscribe(listener);
+  }
+
+  resolveExecApproval(key: string, resolution: GroupExecResolution): Promise<void> {
+    return this.execApprovalService.resolve(key, resolution);
+  }
+
   subscribeToQuestions(listener: (snapshot: GroupQuestionSnapshot) => void): () => void {
     return this.questionService.subscribe(listener);
   }
@@ -287,6 +304,7 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
       // connect ACK 后服务端重放的 Pending 必须保留（协议 §7.3），快照重建只发生在下一次真实握手。
       if (event.status === 'disconnected' && this.questionScopeInner === inner) {
         this.questionService.resetConnection();
+        this.execApprovalService.resetConnection();
       }
       this.emitConnection(event);
     });
@@ -316,6 +334,7 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
         !!frame && typeof frame === 'object' && (frame as SessionFrame).method === 'connect';
       if (isConnectHandshake && this.questionScopeInner === inner) {
         this.questionService.resetConnection();
+        this.execApprovalService.resetConnection();
       }
       if (!frame || typeof frame !== 'object') return originalSend(frame);
       const target = frame as SessionFrame;
@@ -340,7 +359,7 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     if (!transport || typeof transport.onMessage !== 'function') return;
     const originalOnMessage = transport.onMessage.bind(transport);
     transport.onMessage = (msg: unknown) => {
-      if (this.questionScopeInner === inner && this.questionService.handleFrame(msg)) {
+      if (this.questionScopeInner === inner && (this.questionService.handleFrame(msg) || this.execApprovalService.handleFrame(msg))) {
         return;
       }
       if (isViewScopeChangedFrame(msg)) {
@@ -380,6 +399,7 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     this.lifecycleSeq += 1;
     this.questionScopeInner = null;
     this.questionService.resetConnection();
+    this.execApprovalService.resetConnection();
     this.inner?.disconnect();
     this.emitConnection({ status: 'disconnected', retryCount: 0 });
   }
@@ -491,6 +511,7 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     // 新快照由新 connect 握手后服务端重放的 Pending 重建。
     this.questionScopeInner = null;
     this.questionService.resetConnection();
+    this.execApprovalService.resetConnection();
     this.inner?.disconnect();
     this.inner = null;
     this.initializePromise = null;
