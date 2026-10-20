@@ -1,0 +1,162 @@
+"""``PlatformBotStateReader``: a device-delivered bot's state through the services that own it.
+
+Each category is read through the same service the Manifest materialisers
+and the compose collector read through, so capture sees what apply sees:
+
+- persona: ``IdentityFilePort`` (``list_bot_files`` / ``read_identity_file``);
+- skills: ``BotCapabilityStateReaderProtocol.active_skill_assets``, classified
+  by locator prefix as the skill set service records them (``local://`` files
+  via the factory's package storage, ``center://`` by pinned version,
+  ``git://<path>`` as a shared-repository skill);
+- resources: the bot's ``ac_resource`` file rows (what the compose collector
+  lists), bytes through ``ResourceFileService.read_file``;
+- MCP: ``DirectActivationServiceProtocol.list_installed_mcps`` minus the
+  platform defaults, the bot override from ``MCPConfigServiceProtocol``;
+- script: ``BotStartupScriptServiceProtocol.get_body`` with the ``${BOT_*}``
+  substitution apply performs.
+
+A platform-managed teclaw bot has no device to read: its state is composed
+from platform rows (``managed_files``), and capturing it is RSI-04's to
+define, so the reader refuses it by name.
+"""
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+from agentclaw.community.core.bot_config_manifest.schema import placeholders
+from agentclaw.community.core.bot_genome.capture.capture import (
+    BotStateReader,
+    CapturedResource,
+    CapturedSkill,
+)
+from agentclaw.community.core.bot_genome.errors import CaptureRefused, Reason
+from agentclaw.community.core.bot_genome.models import BotRef
+from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
+    BotStartupScriptServiceProtocol,
+)
+from agentclaw.community.core.mcp.mcp_config_service_protocol import MCPConfigServiceProtocol
+from agentclaw.community.core.ports.identity_file_port import IdentityFilePort
+from agentclaw.community.core.resources.resource_service_protocol import ResourceServiceFactoryProtocol
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
+)
+from agentclaw.community.core.skill_center.direct_activation_service_protocol import (
+    DirectActivationServiceProtocol,
+)
+from agentclaw.community.core.skill_center.skill_service_factory_protocol import (
+    SkillServiceFactoryProtocol,
+)
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
+from agentclaw.community.utils.env_utils import get_current_env
+
+if TYPE_CHECKING:  # the module reaches the device dispatcher at import time
+    from agentclaw.community.core.services.resource_file_service import ResourceFileService
+
+__all__ = ["PlatformBotStateReader"]
+
+LOCAL_PREFIX = "local://"
+CENTER_PREFIX = "center://"
+REPO_PREFIX = "git://"
+
+
+class PlatformBotStateReader(BotStateReader):
+    def __init__(
+        self,
+        *,
+        identity: IdentityFilePort,
+        capabilities: BotCapabilityStateReaderProtocol,
+        skill_factory: SkillServiceFactoryProtocol,
+        resource_services: ResourceServiceFactoryProtocol,
+        resource_files: "ResourceFileService",
+        activation: DirectActivationServiceProtocol,
+        mcp_config: MCPConfigServiceProtocol,
+        scripts: BotStartupScriptServiceProtocol,
+        teclaw_platform_managed: bool,
+    ) -> None:
+        self._identity = identity
+        self._capabilities = capabilities
+        self._skill_factory = skill_factory
+        self._resource_services = resource_services
+        self._resource_files = resource_files
+        self._activation = activation
+        self._mcp_config = mcp_config
+        self._scripts = scripts
+        self._teclaw_platform_managed = teclaw_platform_managed
+
+    def refusal(self, bot: BotRef) -> str | None:
+        if bot.bot_type == "teclaw" and self._teclaw_platform_managed:
+            return "a platform-managed teclaw bot has no device to read; its state is composed from platform rows (RSI-04)"
+        return None
+
+    async def persona_files(self, bot: BotRef) -> dict[str, str]:
+        listed = await self._identity.list_bot_files(
+            bot.entity_type, bot.entity_id, bot.bot_id, bot.owner_id, engine_type=bot.engine_type
+        )
+        out: dict[str, str] = {}
+        for file_type, exists in listed:
+            if not exists:
+                continue
+            out[file_type] = await self._identity.read_identity_file(
+                bot.entity_type, bot.entity_id, bot.bot_id, file_type, bot.owner_id, engine_type=bot.engine_type
+            )
+        return out
+
+    async def skills(self, bot: BotRef) -> tuple[CapturedSkill, ...]:
+        captured: list[CapturedSkill] = []
+        for asset in self._capabilities.active_skill_assets(bot_id=bot.bot_id, owner_id=bot.owner_id):
+            locator = str(asset.git_path or "")
+            if locator.startswith(LOCAL_PREFIX):
+                _, storage = self._skill_factory.local_skill_package_storage_for_locator(
+                    entity_id=bot.entity_id,
+                    owner_id=bot.owner_id,
+                    bot_id=bot.bot_id,
+                    engine_type=bot.engine_type,
+                    entity_type=bot.entity_type,
+                    is_desktop=bot.bot_type == "desktop",
+                    is_teclaw=bot.bot_type == "teclaw",
+                    locator=locator,
+                    skill_name=asset.name,
+                )
+                files = await storage.read_package_files()
+                captured.append(CapturedSkill(asset.name, "local", files=tuple(files)))
+            elif locator.startswith(CENTER_PREFIX):
+                captured.append(CapturedSkill(asset.name, "center", center_version=asset.sc_version_number))
+            elif locator.startswith(REPO_PREFIX):
+                captured.append(CapturedSkill(asset.name, "repo", repo_path=locator[len(REPO_PREFIX) :]))
+            else:
+                raise CaptureRefused([Reason("skill_package", f"skills/{asset.name}", f"unknown skill locator {locator!r}")])
+        return tuple(captured)
+
+    async def resources(self, bot: BotRef) -> tuple[CapturedResource, ...]:
+        service = self._resource_services.create(bot_id=bot.bot_id)
+        captured: list[CapturedResource] = []
+        for resource in service.list_resources(user_id=bot.owner_id):
+            path = resource.path
+            if not path:
+                continue  # URL, link and node resources are not workspace files
+            data = await self._resource_files.read_file(
+                entity_type=bot.entity_type, entity_id=bot.entity_id, bot_id=bot.bot_id,
+                engine_type=bot.engine_type, path=path,
+            )
+            if data is None:
+                raise CaptureRefused([Reason("resource_unreadable", f"resources/{path}", f"{path!r} is listed but cannot be read from the bot")])
+            captured.append(CapturedResource(path, ((path.rsplit("/", 1)[-1], data),)))
+        return tuple(captured)
+
+    def mcp_servers(self, bot: BotRef) -> tuple[dict[str, Any], ...]:
+        who = dict(bot_id=bot.bot_id, owner_id=bot.owner_id, actor_id=bot.owner_id)
+        codes = set(self._activation.list_installed_mcps(**who)) - set(self._activation.platform_default_mcp_codes(**who))
+        servers = []
+        for code in sorted(codes):
+            entry: dict[str, Any] = {"server_code": code}
+            override = self._mcp_config.get_bot_override(bot_id=bot.bot_id, owner_id=bot.owner_id, server_code=code)
+            if override:
+                entry["config"] = override
+            servers.append(entry)
+        return tuple(servers)
+
+    def script_body(self, bot: BotRef) -> str | None:
+        body = self._scripts.get_body(entity_id=bot.entity_id, bot_id=bot.bot_id)
+        if not body:
+            return None
+        return placeholders.resolve(body, engine_type=bot.engine_type, env=get_current_env(), tenant=get_current_avernet_tenant())

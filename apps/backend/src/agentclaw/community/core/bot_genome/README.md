@@ -131,12 +131,12 @@ internal_dependencies:
   - agentclaw.community.core.ports.identity_file_port  # the identity files capture reads
   - agentclaw.community.core.repository
   - agentclaw.community.core.resources.services.file_service  # admission_refusal
-  - agentclaw.community.core.resources.services.resource_service  # the resource rows capture lists (TYPE_CHECKING)
+  - agentclaw.community.core.resources.resource_service_protocol  # the per-bot resource service factory capture lists rows through
   - agentclaw.community.core.services.identity  # _remove_reference_section, VALID_IDENTITY_FILES (lazy import; the module reaches the device dispatcher)
   - agentclaw.community.core.services.resource_file_service  # resource file bytes capture reads (TYPE_CHECKING)
   - agentclaw.community.core.skill_center.capability_state_contract  # the active skill set
   - agentclaw.community.core.skill_center.direct_activation_service_protocol  # installed MCP codes
-  - agentclaw.community.core.skill_center.factories  # local skill package storage (TYPE_CHECKING)
+  - agentclaw.community.core.skill_center.skill_service_factory_protocol  # local skill package storage by locator
   - agentclaw.community.core.skill_center.skill_package  # SkillPackageValidator
   - agentclaw.community.log
   - agentclaw.community.plugin_api.database

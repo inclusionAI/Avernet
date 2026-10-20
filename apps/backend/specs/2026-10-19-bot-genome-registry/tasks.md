@@ -54,9 +54,9 @@
 - **Goal:** Record a revision from the bot's current state, and compile a revision into a complete desired-state document for delivery.
 - **Files:** `core/bot_genome/capture/{__init__,capture,bot_state}.py`, `core/bot_genome/compile.py`; `tests/community/core/bot_genome/{test_capture,test_bot_state,test_compile}.py`
 - **Done when:**
-  - [ ] `capture_spec` over a fake reader seeded from the contract example revisions' blobs produces exactly those specs; `git://` skills become `origin: repo`; the AGENTS.md reference block is removed and `rstrip()+"\n"` applied; a non-Manifest-path resource and a platform-managed teclaw bot raise `CaptureRefused` naming the item.
-  - [ ] `PlatformBotStateReader` reads persona, skills (local files via package storage, Center versions, repo paths, platform defaults excluded), resources, MCP servers with bot overrides, and the script through the named services, with a fake-driven unit test per category.
-  - [ ] `compile_spec` reproduces every `compiled.yaml` (compared as parsed values) and emits `{protocol: repo, path}` for repo skills; `document_digest` is the digest of the canonical JSON of the document.
+  - [x] `capture_spec` over a fake reader seeded from the contract example revisions' blobs produces exactly those specs; `git://` skills become `origin: repo`; the AGENTS.md reference block is removed and `rstrip()+"\n"` applied; a non-Manifest-path resource and a platform-managed teclaw bot raise `CaptureRefused` naming the item.
+  - [x] `PlatformBotStateReader` reads persona, skills (local files via package storage, Center versions, repo paths, platform defaults excluded), resources, MCP servers with bot overrides, and the script through the named services, with a fake-driven unit test per category.
+  - [x] `compile_spec` reproduces every `compiled.yaml` (compared as parsed values) and emits `{protocol: repo, path}` for repo skills; `document_digest` is the digest of the canonical JSON of the document.
 - **Depends on:** Tasks 3, 4
 
 ## Task 7: Registry service
