@@ -177,20 +177,56 @@ class CodeContent(ArtifactContent):
 {
   "artifacts": [
     {
-      "artifact_name": "分析报告",          // 可选(见 3.6);file 产物缺省回落 file_content.file_name
+      "artifact_name": "数据分析报告",        // 可选(见 3.6);file 产物缺省回落 file_content.file_name
       "artifact_kind": "file",             // text / file / url_link / code,须与非空 content 字段一致
       "session_id": "sess-xxx",            // 图绑定的协作会话,与 3.3 scope.session_id 交叉校验
       "task_id": "t-a1b2",                  // 与报文级 task_id 交叉校验
       "node_id": "relay-ab12cd34",           // 与报文级 node_id 交叉校验
       "attempt": 1,                          // 与图上 harness_retries 快照交叉校验
       "text_content": null,                 // text 分支 JSON 字符串,如 "{\"text\": \"...\"}"
-      "file_content": "{\"storage_type\":\"session_file\",\"storage_id\":\"sess-xxx\",\"file_type\":\"application/pdf\",\"file_name\":\"analysis-report.pdf\",\"file_id\":\"f-987\"}",
+      "file_content": "{
+        \"storage_type\": \"bot_workspace\",
+        \"storage_id\": \"/home/admin/.openclaw/workspace/\",
+        \"file_type\": \"markdown\",
+        \"file_name\": \"analysis-report.md\",
+        \"file_id\": null
+      }",                                 // BOT_WORKSPACE:storage_id=工作区相对路径,file_id 恒 null
       "url_link_content": null,             // url_link 分支 JSON 字符串,如 "{\"url\":\"https://...\",\"type\":\"dima需求\"}"
       "code_content": null                  // code 分支 JSON 字符串,如 "{\"code_base_name\":\"avernet\",...}"
+    },
+    {
+      "artifact_name": "分析报告 PDF 版",
+      "artifact_kind": "file",
+      "session_id": "sess-xxx",
+      "task_id": "t-a1b2",
+      "node_id": "relay-ab12cd34",
+      "attempt": 1,
+      "text_content": null,
+      "file_content": "{
+        \"storage_type\": \"session_file\",
+        \"storage_id\": \"sess-xxx\",
+        \"file_type\": \"markdown\",
+        \"file_name\": \"analysis-report.md\",
+        \"file_id\": \"f987\"
+      }",                                 // SESSION_FILE:storage_id=群聊会话 id,file_id 必填
+      "url_link_content": null,
+      "code_content": null
     }
   ]
 }
 ```
+
+> **可读性说明**:示例中 `file_content` 为排版展开;线上报文里它是**不含换行的单行 JSON 字符串**(JSON 字符串字面量不允许裸换行,序列化侧输出压缩单行,解析侧对空白无感)。
+
+`file_content` 两种形态对照(BOT_WORKSPACE:`storage_id`=工作区相对路径、`file_id` 恒 null;SESSION_FILE:`storage_id`=群聊会话 id、`file_id` 必填):
+
+| | BOT_WORKSPACE(单 bot 工作区) | SESSION_FILE(协作群会话文件) |
+|---|---|---|
+| `storage_type` | `"bot_workspace"` | `"session_file"` |
+| `storage_id` | `"reports/analysis-report.md"`(工作区相对路径,读口 `GET /api/resources/files/preview?path={storage_id}`) | `"sess-xxx"`(文件所在会话 id,读口 `GET /sessions/{storage_id}/files/{file_id}/content`) |
+| `file_id` | `null`(工作区按路径寻址,无文件 id) | `"f-987"`(BCS session file 的 file_id,必填) |
+| `file_type` | 按扩展名推断(`.md`→`text/markdown`) | 缺省按 `file_name` 扩展名推断(`.pdf`→`application/pdf`,推不出为 `application/octet-stream`) |
+| `file_name` | `"analysis-report.md"`(物理文件名,同时是 artifact_name 的回落值) | `"analysis-report.pdf"` |
 
 | 通道 | 行为 |
 |---|---|
