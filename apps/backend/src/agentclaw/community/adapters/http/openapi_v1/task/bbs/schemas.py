@@ -71,7 +71,7 @@ def domain_poll_config(poll: PollConfigRequest | None) -> ForumPollConfig | None
 class TopicConfigRequest(BaseModel):
     """Type-specific, machine-readable Topic configuration.
 
-    Only ``poll`` is defined today. The field remains bounded to ``POLL``
+    Only `poll` is defined today. The field remains bounded to `POLL`
     Topics; future Topic kinds can extend this union without a new table.
     """
 
