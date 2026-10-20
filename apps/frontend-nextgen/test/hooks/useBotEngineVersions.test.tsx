@@ -19,7 +19,7 @@ const target: EngineVersionTarget = {
   ownerId: 'owner-1',
   engine: 'openclaw',
   enabled: true,
-  restartPermission: { actions: ['engine_restart'] },
+  restartPermission: { actions: ['restart'] },
 };
 
 const version = {
@@ -114,6 +114,23 @@ describe('useBotEngineVersions', () => {
     await waitFor(() => expect(result.current.states[nextTarget.key]?.kind).toBe('ready'));
 
     expect(botController.getBotEngineVersion).toHaveBeenCalledTimes(2);
+  });
+
+  test('keeps the replacement device identity after a successful Bot restart', async () => {
+    jest.mocked(botController.getBotEngineVersion).mockResolvedValue({ code: 200000, data: version });
+    const restart = jest.spyOn(botEngineVersionService, 'restartAndConfirmUpdate').mockResolvedValue({
+      ...version,
+      comparison: 'same',
+      restart_hint: 'none',
+      context: { ...version.context, instance_id: 'replacement-2' },
+    });
+    const { result } = renderHook(() => useBotEngineVersions([target]));
+    await waitFor(() => expect(result.current.states[target.key]?.kind).toBe('ready'));
+    await act(async () => {
+      await result.current.update(target.key);
+    });
+    expect(result.current.states[target.key]).toMatchObject({ kind: 'ready', deviceUuid: 'replacement-2' });
+    restart.mockRestore();
   });
 
   test('requires explicit engine-restart permission before invoking update', async () => {

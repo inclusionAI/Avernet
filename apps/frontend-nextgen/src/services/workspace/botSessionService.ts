@@ -279,6 +279,8 @@ async function fetchOwnedBots(
           const rows = inventory.data?.items ?? [];
           for (const row of rows) {
             const ownerId = row.owner_entity_id ?? row.owner_id;
+            const source = owned.find((bot) => bot.bot_id === row.bot_id && bot.owner_entity_id === ownerId);
+            if (source?.bot_type?.toLowerCase() === 'service' && row.display_state !== 'service_draft') continue;
             if (typeof row.bot_id === 'string' && ownerId !== undefined && ownerId !== null) {
               permissions.set(
                 `${row.bot_id}:${String(ownerId)}`,

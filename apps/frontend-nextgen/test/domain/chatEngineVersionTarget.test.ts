@@ -10,7 +10,7 @@ const bot: ChatBotView = {
   status: 'ACTIVE',
   chatable: true,
   engine: 'OpenClaw',
-  actions: ['engine_restart'],
+  actions: ['restart'],
 };
 
 const input = {
@@ -30,7 +30,7 @@ test('只为在线的本人或团队 Bot 单聊建立版本目标并保留权限
     engine: 'OpenClaw',
     enabled: true,
     restartPermission: {
-      actions: ['engine_restart'],
+      actions: ['restart'],
       disabledActions: undefined,
       serviceBot: false,
       runtimeStage: 'draft',
@@ -77,7 +77,7 @@ test('服务 Bot 目录没有阶段时使用草稿操作阶段', () => {
   expect(target?.restartPermission).toMatchObject({
     serviceBot: true,
     runtimeStage: 'draft',
-    actions: ['engine_restart'],
+    actions: ['restart'],
   });
 });
 

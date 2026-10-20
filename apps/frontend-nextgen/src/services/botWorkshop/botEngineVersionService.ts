@@ -7,7 +7,12 @@ import {
   type EngineVersionUpdateAvailability,
 } from '@/domain/botEngineVersion';
 import type { BotDomain } from '@/domain/botWorkshop';
-import { getBotEngineStatus, getBotEngineVersion, restartBotEngine } from '@/services/backendApi/bots/botController';
+import {
+  getBotEngineStatus,
+  getBotEngineVersion,
+  getBotRestartStatus,
+  restartBot,
+} from '@/services/backendApi/bots/botController';
 import type {
   BotEngineRuntimeRequestOptions,
   BotEngineVersionDto,
@@ -77,11 +82,11 @@ function getRestartPermission(input: EngineRestartPermissionInput): EngineRestar
   if (input.lockedByOther) {
     return { allowed: false, disabledReason: 'Bot 正由其他协作者编辑' };
   }
-  if (input.disabledActions?.engine_restart) {
-    return { allowed: false, disabledReason: input.disabledActions.engine_restart };
+  if (input.disabledActions?.restart) {
+    return { allowed: false, disabledReason: input.disabledActions.restart };
   }
-  if (!input.actions.includes('engine_restart')) {
-    return { allowed: false, disabledReason: '当前账号没有引擎重启权限' };
+  if (!input.actions.includes('restart')) {
+    return { allowed: false, disabledReason: '当前账号没有 Bot 重启权限' };
   }
   if (input.serviceBot && input.runtimeStage !== 'draft') {
     return { allowed: false, disabledReason: '服务 Bot 仅支持在草稿阶段更新引擎版本。' };
@@ -170,7 +175,7 @@ export const botEngineVersionService = {
     current: EngineVersionObservation,
   ): Promise<EngineVersionObservation> {
     const permission = getRestartPermission(target.restartPermission);
-    if (!permission.allowed) throw new Error(permission.disabledReason || '当前账号没有引擎重启权限');
+    if (!permission.allowed) throw new Error(permission.disabledReason || '当前账号没有 Bot 重启权限');
     if (engineVersionUiState(current) !== 'updatable') {
       throw new Error('当前实例没有可执行的引擎更新');
     }
@@ -186,15 +191,44 @@ export const botEngineVersionService = {
       signal: target.signal,
     };
 
-    const restart = await restartBotEngine(target.botId, requestTarget);
-    if (isEnvelopeFailure(restart)) throw new Error(restart.message || '引擎重启请求失败');
+    // The restart endpoint acts on the Bot, not an arbitrary selected device.
+    // Require the canonical draft to agree before starting a replacement.
+    const canonicalTarget = { ...requestTarget, deviceUuid: undefined };
+    const before = await getBotEngineVersion(target.botId, canonicalTarget);
+    if (isEnvelopeFailure(before) || !before.data || before.data.context.instance_id !== deviceUuid) {
+      throw new Error('当前草稿实例已变化，请刷新版本信息后重试');
+    }
+    if (engineVersionUiState(toEngineVersionObservation(before.data)) !== 'updatable') {
+      throw new Error('当前实例没有可执行的引擎更新');
+    }
+    if (target.signal?.aborted) throw target.signal.reason ?? new Error('引擎更新已取消');
+    const restart = await restartBot(target.botId, {
+      userId: target.userId,
+      ownerId,
+      signal: target.signal,
+    });
+    if (isEnvelopeFailure(restart)) throw new Error(restart.message || 'Bot 重启请求失败');
 
     const deadline = Date.now() + RESTART_TIMEOUT_MS;
     while (Date.now() < deadline) {
       if (target.signal?.aborted) throw target.signal.reason ?? new Error('引擎更新已取消');
+      let botStatus;
+      try {
+        botStatus = await getBotRestartStatus(target.botId, canonicalTarget);
+      } catch (error) {
+        if (!retryableTransportFailure(error)) throw error;
+        await sleep(RESTART_POLL_INTERVAL_MS);
+        continue;
+      }
+      if (isEnvelopeFailure(botStatus)) throw new Error(botStatus.message || 'Bot 重启状态查询失败');
+      if (botStatus.data?.status === 'FAILED') throw new Error('Bot 重启失败，请稍后重试');
+      if (!botStatus.data?.is_ready) {
+        await sleep(RESTART_POLL_INTERVAL_MS);
+        continue;
+      }
       let statusResponse;
       try {
-        statusResponse = await getBotEngineStatus(target.botId, requestTarget);
+        statusResponse = await getBotEngineStatus(target.botId, canonicalTarget);
       } catch (error) {
         if (!retryableTransportFailure(error)) throw error;
         await sleep(RESTART_POLL_INTERVAL_MS);
@@ -207,7 +241,7 @@ export const botEngineVersionService = {
       if (statusResponse.data?.running) {
         let versionResponse;
         try {
-          versionResponse = await getBotEngineVersion(target.botId, requestTarget);
+          versionResponse = await getBotEngineVersion(target.botId, canonicalTarget);
         } catch (error) {
           if (!retryableTransportFailure(error)) throw error;
           await sleep(RESTART_POLL_INTERVAL_MS);

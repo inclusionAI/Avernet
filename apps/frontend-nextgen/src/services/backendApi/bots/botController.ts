@@ -183,11 +183,24 @@ export function deleteBot(bot_id: string) {
 }
 
 // 重启 Bot。
-export function restartBot(bot_id: string) {
+export function restartBot(bot_id: string, target?: BotEngineRuntimeRequestOptions) {
   return backendRequest<BackendApiEnvelope<BotDto>>(BOT_ENDPOINTS.restart(bot_id), {
     method: 'POST',
-    params: userScopedParams(),
+    params: target ? userScopedParams({ user_id: target.userId, entity_id: target.ownerId }) : userScopedParams(),
+    signal: target?.signal,
   });
+}
+
+/** Poll the Bot-level restart lifecycle; readiness alone is not version confirmation. */
+export function getBotRestartStatus(bot_id: string, target: BotEngineRuntimeRequestOptions) {
+  return backendRequest<BackendApiEnvelope<{ status: string; is_ready: boolean; device_id?: string | null }>>(
+    BOT_ENDPOINTS.status(bot_id),
+    {
+      method: 'GET',
+      params: userScopedParams({ user_id: target.userId, entity_id: target.ownerId }),
+      signal: target.signal,
+    },
+  );
 }
 
 function engineRuntimeParams(target?: BotEngineRuntimeRequestOptions): BackendUnknownRecord {

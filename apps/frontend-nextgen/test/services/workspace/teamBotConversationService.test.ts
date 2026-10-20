@@ -90,7 +90,7 @@ test('从所属团队空间的权威目录读取同 Bot 和实体 owner 的权�
         {
           bot_id: 'shared',
           owner_entity_id: 'different-owner',
-          actions: ['engine_restart'],
+          actions: ['restart'],
           disabled_actions: { restart_publish: '无权发布' },
         },
       ],
@@ -100,7 +100,7 @@ test('从所属团队空间的权威目录读取同 Bot 和实体 owner 的权�
   const result = await teamBotConversationService.listBots('human_viewer');
   expect(inventory).toHaveBeenCalledWith({ user_id: 'viewer', page: 1, page_size: 100 }, '42', undefined);
   expect(result.ok && result.data[0]).toMatchObject({
-    actions: ['engine_restart'],
+    actions: ['restart'],
     disabledActions: { restart_publish: '无权发布' },
     runtimeStage: 'draft',
     ownerId: 'team-entity',
@@ -114,7 +114,7 @@ test.each([
     {
       code: 200000,
       data: {
-        items: [{ bot_id: 'shared', owner_entity_id: 'unrelated-owner', actions: ['engine_restart'] }],
+        items: [{ bot_id: 'shared', owner_entity_id: 'unrelated-owner', actions: ['restart'] }],
         total: 1,
       },
     },
@@ -123,7 +123,7 @@ test.each([
     '业务失败携带权限',
     {
       code: 500000,
-      data: { items: [{ bot_id: 'shared', owner_entity_id: 'different-owner', actions: ['engine_restart'] }], total: 1 },
+      data: { items: [{ bot_id: 'shared', owner_entity_id: 'different-owner', actions: ['restart'] }], total: 1 },
     },
   ],
 ])('权限来源%s时保留聊天且禁用更新', async (_name, response) => {
@@ -338,7 +338,7 @@ test('服务 Bot 只从草稿卡读取权限，发布卡不能覆盖', async () 
           bot_id: 'shared',
           owner_entity_id: 'different-owner',
           display_state: 'service_draft',
-          actions: ['engine_restart'],
+          actions: ['restart'],
         },
         { bot_id: 'shared', owner_entity_id: 'different-owner', display_state: 'service_online', actions: [] },
       ],
@@ -347,7 +347,7 @@ test('服务 Bot 只从草稿卡读取权限，发布卡不能覆盖', async () 
   });
   expect(await teamBotConversationService.listBots('viewer')).toMatchObject({
     ok: true,
-    data: [{ actions: ['engine_restart'] }],
+    data: [{ actions: ['restart'] }],
   });
 });
 
@@ -366,7 +366,7 @@ test('跨空间的同名 Bot 不能借用权限', async () => {
     code: 200000,
     data: {
       items:
-        spaceId === '43' ? [{ bot_id: 'shared', owner_entity_id: 'different-owner', actions: ['engine_restart'] }] : [],
+        spaceId === '43' ? [{ bot_id: 'shared', owner_entity_id: 'different-owner', actions: ['restart'] }] : [],
       total: spaceId === '43' ? 1 : 0,
     },
   }));
@@ -387,7 +387,7 @@ test('传递取消信号并在目标全部匹配后停止分页', async () => {
   list.mockResolvedValue({ code: 200000, data: { items: [dto()], total: 1 } });
   inventory.mockResolvedValue({
     code: 200000,
-    data: { items: [{ bot_id: 'shared', owner_entity_id: 'different-owner', actions: ['engine_restart'] }], total: 200 },
+    data: { items: [{ bot_id: 'shared', owner_entity_id: 'different-owner', actions: ['restart'] }], total: 200 },
   });
   await teamBotConversationService.listBots('viewer', signal);
   expect(inventory).toHaveBeenCalledTimes(1);

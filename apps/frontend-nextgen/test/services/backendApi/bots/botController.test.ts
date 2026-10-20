@@ -4,6 +4,7 @@ import {
   getBot,
   getBotEngineStatus,
   getBotEngineVersion,
+  getBotRestartStatus,
   listBotInventory,
   listBots,
   refetchBotEngine,
@@ -125,6 +126,24 @@ describe('botController OpenAPI contracts', () => {
       2,
       '/openapi/v1/bots/bot-1/engine/restart?user_id=900001&entity_id=owner-1&stage=draft&device_uuid=device-1',
       expect.objectContaining({ method: 'POST', body: JSON.stringify({ force: false }) }),
+    );
+  });
+
+  test('Bot restart and lifecycle poll preserve caller/owner without stale device or engine-process semantics', async () => {
+    const spy = jest.spyOn(globalThis, 'fetch').mockImplementation(() => response({ status: 'PENDING' }));
+    const controller = new AbortController();
+    const target = { userId: 'caller', ownerId: 'owner', deviceUuid: 'old-device', signal: controller.signal };
+    await restartBot('bot-1', target);
+    await getBotRestartStatus('bot-1', target);
+    expect(spy).toHaveBeenNthCalledWith(
+      1,
+      '/openapi/v1/bots/bot-1/restart?user_id=caller&entity_id=owner',
+      expect.objectContaining({ method: 'POST', signal: controller.signal }),
+    );
+    expect(spy).toHaveBeenNthCalledWith(
+      2,
+      '/openapi/v1/bots/bot-1/status?user_id=caller&entity_id=owner',
+      expect.objectContaining({ method: 'GET', signal: controller.signal }),
     );
   });
 

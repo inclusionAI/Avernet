@@ -21,7 +21,8 @@ const observation: EngineVersionObservation = {
 beforeEach(() => {
   jest.mocked(botController.getBotEngineVersion).mockReset();
   jest.mocked(botController.getBotEngineStatus).mockReset();
-  jest.mocked(botController.restartBotEngine).mockReset();
+  jest.mocked(botController.restartBot).mockReset();
+  jest.mocked(botController.getBotRestartStatus).mockReset();
   jest.mocked(botContainerService.botContainerService.list).mockReset();
 });
 
@@ -94,10 +95,26 @@ describe('botEngineVersionService.restartAndConfirmUpdate', () => {
     userId: 'caller-1',
     ownerId: 'owner-1',
     deviceUuid: 'device-1',
-    restartPermission: { actions: ['engine_restart'] },
+    restartPermission: { actions: ['restart'], serviceBot: true, runtimeStage: 'draft' as const },
   };
-
-  test('does not restart when the selected instance has no Backend update recommendation', async () => {
+  const canonical = {
+    userId: 'caller-1',
+    ownerId: 'owner-1',
+    stage: 'draft' as const,
+    deviceUuid: undefined,
+    signal: undefined,
+  };
+  beforeEach(() => {
+    jest.mocked(botController.getBotEngineVersion).mockResolvedValue({ code: 200000, data: observation });
+    jest.mocked(botController.restartBot).mockResolvedValue({ code: 200000, data: { status: 'PENDING' } });
+    jest
+      .mocked(botController.getBotRestartStatus)
+      .mockResolvedValue({ code: 200000, data: { status: 'ACTIVE', is_ready: true } });
+    jest
+      .mocked(botController.getBotEngineStatus)
+      .mockResolvedValue({ code: 200000, data: { engine: 'openclaw', active_connections: 0, running: true } });
+  });
+  test('does not restart without a Backend update recommendation', async () => {
     await expect(
       botEngineVersionService.restartAndConfirmUpdate(target, {
         ...observation,
@@ -105,78 +122,84 @@ describe('botEngineVersionService.restartAndConfirmUpdate', () => {
         restart_hint: 'none',
       }),
     ).rejects.toThrow('当前实例没有可执行的引擎更新');
-
-    expect(botController.restartBotEngine).not.toHaveBeenCalled();
+    expect(botController.restartBot).not.toHaveBeenCalled();
   });
-
-  test('does not restart without explicit engine-restart permission', async () => {
+  test('uses restart permission and does not promote engine-only permission', async () => {
     await expect(
-      botEngineVersionService.restartAndConfirmUpdate({ ...target, restartPermission: { actions: [] } }, observation),
-    ).rejects.toThrow('当前账号没有引擎重启权限');
-    expect(botController.restartBotEngine).not.toHaveBeenCalled();
+      botEngineVersionService.restartAndConfirmUpdate(
+        { ...target, restartPermission: { actions: ['engine_restart'] } },
+        observation,
+      ),
+    ).rejects.toThrow('Bot 重启权限');
+    expect(botController.restartBot).not.toHaveBeenCalled();
   });
-
-  test('waits for the selected engine to run and re-reads that same device before success', async () => {
+  test('waits for Bot readiness then reads the replacement instance before success', async () => {
     jest.useFakeTimers();
-    jest.mocked(botController.restartBotEngine).mockResolvedValue({
-      code: 200000,
-      data: { bot_id: 'bot-1', status: 'restarting' },
-    });
     jest
-      .mocked(botController.getBotEngineStatus)
-      .mockResolvedValueOnce({ code: 200000, data: { engine: 'openclaw', active_connections: 0, running: false } })
-      .mockResolvedValueOnce({ code: 200000, data: { engine: 'openclaw', active_connections: 0, running: true } })
-      .mockResolvedValueOnce({ code: 200000, data: { engine: 'openclaw', active_connections: 1, running: true } });
+      .mocked(botController.getBotRestartStatus)
+      .mockResolvedValueOnce({ code: 200000, data: { status: 'PENDING', is_ready: false } })
+      .mockResolvedValue({ code: 200000, data: { status: 'ACTIVE', is_ready: true } });
     jest
       .mocked(botController.getBotEngineVersion)
       .mockResolvedValueOnce({ code: 200000, data: observation })
-      .mockResolvedValueOnce({ code: 200000, data: { ...observation, comparison: 'same', restart_hint: 'none' } });
-
+      .mockResolvedValueOnce({ code: 200000, data: observation })
+      .mockResolvedValue({
+        code: 200000,
+        data: {
+          ...observation,
+          comparison: 'same',
+          restart_hint: 'none',
+          context: { ...observation.context, instance_id: 'replacement-2' },
+        },
+      });
     const result = botEngineVersionService.restartAndConfirmUpdate(target, observation);
     await jest.advanceTimersByTimeAsync(4_500);
-    await expect(result).resolves.toMatchObject({ comparison: 'same', context: { instance_id: 'device-1' } });
-
-    expect(botController.restartBotEngine).toHaveBeenCalledWith('bot-1', {
+    await expect(result).resolves.toMatchObject({ comparison: 'same', context: { instance_id: 'replacement-2' } });
+    expect(botController.restartBot).toHaveBeenCalledWith('bot-1', {
       userId: 'caller-1',
       ownerId: 'owner-1',
-      stage: 'draft',
-      deviceUuid: 'device-1',
+      signal: undefined,
     });
-    expect(botController.getBotEngineStatus).toHaveBeenCalledTimes(3);
-    expect(botController.getBotEngineStatus).toHaveBeenCalledWith('bot-1', {
-      userId: 'caller-1',
-      ownerId: 'owner-1',
-      stage: 'draft',
-      deviceUuid: 'device-1',
-    });
-    expect(botController.getBotEngineVersion).toHaveBeenNthCalledWith(2, 'bot-1', {
-      userId: 'caller-1',
-      ownerId: 'owner-1',
-      stage: 'draft',
-      deviceUuid: 'device-1',
-    });
-    jest.useRealTimers();
+    expect(botController.restartBotEngine).not.toHaveBeenCalled();
+    expect(botController.getBotEngineStatus).toHaveBeenCalledWith('bot-1', canonical);
+    expect(botController.getBotEngineVersion).toHaveBeenNthCalledWith(3, 'bot-1', canonical);
   });
-
-  test('does not call an in-flight restart or stale version read a completed update', async () => {
+  test('does not call pending allocation a completed update', async () => {
     jest.useFakeTimers();
-    jest.mocked(botController.restartBotEngine).mockResolvedValue({
-      code: 200000,
-      data: { bot_id: 'bot-1', status: 'restarting' },
-    });
-    jest.mocked(botController.getBotEngineStatus).mockResolvedValue({
-      code: 200000,
-      data: { engine: 'openclaw', active_connections: 0, running: false },
-    });
-
-    const result = botEngineVersionService.restartAndConfirmUpdate(target, observation);
-    const rejection = result.catch((error: unknown) => error);
+    jest
+      .mocked(botController.getBotRestartStatus)
+      .mockResolvedValue({ code: 200000, data: { status: 'PENDING', is_ready: false } });
+    const result = botEngineVersionService
+      .restartAndConfirmUpdate(target, observation)
+      .catch((error: unknown) => error);
     await jest.advanceTimersByTimeAsync(90_000);
-    expect(await rejection).toMatchObject({ message: '无法确认引擎更新已完成，请稍后重试' });
-
-    expect(botController.restartBotEngine).toHaveBeenCalledTimes(1);
-    expect(botController.getBotEngineVersion).not.toHaveBeenCalled();
-    jest.useRealTimers();
+    expect(await result).toMatchObject({ message: '无法确认引擎更新已完成，请稍后重试' });
+    expect(botController.restartBot).toHaveBeenCalledTimes(1);
+    expect(botController.getBotEngineStatus).not.toHaveBeenCalled();
+  });
+  test('rejects a changed or ambiguous draft before Bot-level restart', async () => {
+    jest
+      .mocked(botController.getBotEngineVersion)
+      .mockResolvedValue({
+        code: 200000,
+        data: { ...observation, context: { ...observation.context, instance_id: 'other' } },
+      });
+    await expect(botEngineVersionService.restartAndConfirmUpdate(target, observation)).rejects.toThrow(
+      '草稿实例已变化',
+    );
+    expect(botController.restartBot).not.toHaveBeenCalled();
+    jest
+      .mocked(botController.getBotEngineVersion)
+      .mockRejectedValue(new BackendRequestError('请选择实例', { status: 409, apiPath: '/engine-version' }));
+    await expect(botEngineVersionService.restartAndConfirmUpdate(target, observation)).rejects.toThrow('请选择实例');
+    expect(botController.restartBot).not.toHaveBeenCalled();
+  });
+  test('reports terminal Bot failure rather than polling an old engine', async () => {
+    jest
+      .mocked(botController.getBotRestartStatus)
+      .mockResolvedValue({ code: 200000, data: { status: 'FAILED', is_ready: false } });
+    await expect(botEngineVersionService.restartAndConfirmUpdate(target, observation)).rejects.toThrow('Bot 重启失败');
+    expect(botController.getBotEngineStatus).not.toHaveBeenCalled();
   });
 });
 
@@ -186,11 +209,11 @@ describe('botEngineVersionService.getUpdateAvailability', () => {
     bot_name: 'Openclaw Bot',
     engine: 'openclaw',
     status: 'ACTIVE',
-    actions: ['engine_restart'],
+    actions: ['restart'],
   }).item;
 
   test('reports permission and collaboration-lock reasons before version state', () => {
-    const restricted = { ...bot, actions: [], disabledActions: { engine_restart: '需要先申请权限' } };
+    const restricted = { ...bot, actions: [], disabledActions: { restart: '需要先申请权限' } };
     expect(botEngineVersionService.getUpdateAvailability(restricted, { kind: 'loading' })).toEqual({
       enabled: false,
       disabledReason: '需要先申请权限',
@@ -226,7 +249,7 @@ describe('botEngineVersionService.getUpdateAvailability', () => {
   test('blocks service Bot mutation outside draft stage', () => {
     expect(
       botEngineVersionService.getUpdateAvailability(
-        { actions: ['engine_restart'], serviceBot: true, runtimeStage: 'online' },
+        { actions: ['restart'], serviceBot: true, runtimeStage: 'online' },
         { kind: 'ready', observation },
       ),
     ).toEqual({ enabled: false, disabledReason: '服务 Bot 仅支持在草稿阶段更新引擎版本。' });

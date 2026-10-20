@@ -88,7 +88,7 @@ describe('botSessionService', () => {
             template_type: 'normalCC',
             owner_entity_id: '3',
             status: 'ACTIVE',
-            actions: ['engine_restart'],
+            actions: ['restart'],
             disabled_actions: { restart_publish: '仅发布 Bot 支持' },
           },
           {
@@ -127,7 +127,7 @@ describe('botSessionService', () => {
         displayName: '普通 CC',
         isAgentCodingBot: false,
         templateType: 'normalCC',
-        actions: ['engine_restart'],
+        actions: ['restart'],
         disabledActions: { restart_publish: '仅发布 Bot 支持' },
         runtimeStage: 'draft',
       }),
@@ -167,8 +167,9 @@ describe('botSessionService', () => {
         items: [
           {
             bot_id: 'service-1',
+            display_state: 'service_draft',
             owner_entity_id: 'owner-1',
-            actions: ['engine_restart'],
+            actions: ['restart'],
           },
         ],
         total: 1,
@@ -180,7 +181,7 @@ describe('botSessionService', () => {
         {
           botType: 'service',
           runtimeStage: 'draft',
-          actions: ['engine_restart'],
+          actions: ['restart'],
           ownerId: 'owner-1',
         },
       ],
@@ -580,11 +581,11 @@ describe('owned chat engine permissions from inventory', () => {
     ownedMocked.listBots.mockResolvedValue({ data: { items: [dto] } });
     ownedMocked.listBotInventory.mockResolvedValue({
       success: true,
-      data: { items: [{ ...dto, actions: ['engine_restart'], disabled_actions: { restart: 'locked' } }], total: 1 },
+      data: { items: [{ ...dto, actions: ['restart'], disabled_actions: { restart: 'locked' } }], total: 1 },
     });
     const result = await botSessionService.listOwnedBots('caller');
     expect(result.ok && result.data[0]).toMatchObject({
-      actions: ['engine_restart'],
+      actions: ['restart'],
       disabledActions: { restart: 'locked' },
     });
     expect(ownedMocked.listBotInventory).toHaveBeenLastCalledWith({ user_id: 'caller', page: 1, page_size: 100 });
@@ -593,7 +594,7 @@ describe('owned chat engine permissions from inventory', () => {
     ownedMocked.listBots.mockResolvedValue({ data: { items: [dto] } });
     ownedMocked.listBotInventory.mockResolvedValue({
       success: true,
-      data: { items: [{ ...dto, owner_entity_id: 'other', actions: ['engine_restart'] }], total: 1 },
+      data: { items: [{ ...dto, owner_entity_id: 'other', actions: ['restart'] }], total: 1 },
     });
     const result = await botSessionService.listOwnedBots('caller');
     expect(result.ok && result.data[0].actions).toEqual([]);
@@ -609,7 +610,7 @@ describe('owned chat engine permissions from inventory', () => {
     ownedMocked.listBotInventory.mockResolvedValue({
       success: false,
       code: 403000,
-      data: { items: [{ ...dto, actions: ['engine_restart'] }], total: 1 },
+      data: { items: [{ ...dto, actions: ['restart'] }], total: 1 },
     });
     const result = await botSessionService.listOwnedBots('caller');
     expect(result.ok && result.data[0].actions).toEqual([]);

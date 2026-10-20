@@ -158,7 +158,10 @@ export function useBotEngineVersions(targets: EngineVersionTarget[]): UseBotEngi
           state.observation,
         );
         if (controller.signal.aborted) return false;
-        setStates((current) => ({ ...current, [key]: { kind: 'ready', observation, deviceUuid } }));
+        setStates((current) => ({
+          ...current,
+          [key]: { kind: 'ready', observation, deviceUuid: observation.context.instance_id },
+        }));
         return true;
       } catch (error) {
         if (controller.signal.aborted) return false;

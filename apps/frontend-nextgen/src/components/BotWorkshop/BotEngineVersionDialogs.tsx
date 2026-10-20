@@ -33,7 +33,7 @@ function statusDescription(state: BotEngineVersionState): string {
   if (state.kind === 'ready' && state.updateError) return state.updateError;
 
   const uiState = engineVersionUiState(state.observation);
-  if (uiState === 'updatable') return '检测到可更新版本。更新会重启草稿引擎进程。';
+  if (uiState === 'updatable') return '检测到可更新版本。更新会重启 Bot 并加载最新引擎。';
   if (uiState === 'no_update') return engineVersionNoUpdateMessage(state.observation);
   if (state.observation.detection.status === 'read_failed') return '暂时无法读取当前版本，请稍后重试。';
   if (state.observation.release_target.status === 'unavailable') return '目标引擎版本尚未配置。';
@@ -68,7 +68,7 @@ export default function BotEngineVersionDialogs({
           </ModalHeader>
           {updateAvailable && !canRestart ? (
             <p className="mt-3 text-sm text-muted-foreground">
-              {updateDisabledReason || '当前账号没有重启引擎权限，无法执行版本更新。'}
+              {updateDisabledReason || '当前账号没有 Bot 重启权限，无法执行版本更新。'}
             </p>
           ) : null}
 
@@ -126,9 +126,11 @@ export default function BotEngineVersionDialogs({
         description={
           state.kind === 'ready' && state.updateError
             ? state.updateError
-            : `将草稿引擎从 ${currentVersion ?? '当前版本'} 更新至 ${targetVersion ?? '目标版本'}，并重启该引擎进程。`
+            : `将草稿引擎从 ${currentVersion ?? '当前版本'} 更新至 ${
+                targetVersion ?? '目标版本'
+              }，将重启 Bot 并加载最新引擎，运行中的会话连接会中断。`
         }
-        confirmText="更新并重启引擎"
+        confirmText="更新并重启 Bot"
         onCancel={onCloseUpdate}
         onConfirm={async () => {
           if (await onConfirmUpdate()) onCloseUpdate();
