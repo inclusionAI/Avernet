@@ -98,11 +98,18 @@ class RecordPatchRequest(BaseModel):
 
 
 class PolicyRequest(BaseModel):
-    """The owner's policy: what automation may change on this bot (contract §5)."""
+    """The owner's policy: what automation may change on this bot (contract §5).
+
+    Exactly the contract's three fields, all required and nothing else: a
+    misspelled or missing `risk_overrides` must not be recorded as "no
+    overrides", which would silently drop a tier the owner meant to raise.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     mutable_genes: list[str] = Field(description="Sorted, unique gene paths patches may change; everything else is off limits.")
     pins: list[str] = Field(description="Sorted, unique gene paths no patch may touch, even inside a mutable gene.")
-    risk_overrides: dict[str, str] = Field(default_factory=dict, description="Gene path → tier (`T0`–`T3`); an override can only raise an op's tier.")
+    risk_overrides: dict[str, str] = Field(description="Gene path → tier (`T0`–`T3`); an override can only raise an op's tier. Required, `{}` for none.")
 
 
 class GeneChangePayload(BaseModel):

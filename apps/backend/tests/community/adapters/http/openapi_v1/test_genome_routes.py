@@ -202,6 +202,20 @@ def test_a_candidate_needs_its_run_and_a_run_id_is_one_ref_segment(body: dict) -
         RecordPatchRequest.model_validate(body)
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"mutable_genes": ["persona"], "pins": []},
+        {"mutable_genes": ["persona"], "pins": [], "risk_overides": {"persona": "T3"}},
+        {"mutable_genes": ["persona"], "pins": [], "risk_overrides": {}, "locked_genes": []},
+    ],
+)
+def test_a_policy_is_exactly_the_contracts_three_fields(body: dict) -> None:
+    with pytest.raises(ValidationError):
+        PolicyRequest.model_validate(body)
+    assert PolicyRequest.model_validate({"mutable_genes": ["persona"], "pins": [], "risk_overrides": {}}).model_dump() == {"mutable_genes": ["persona"], "pins": [], "risk_overrides": {}}
+
+
 def test_an_application_caller_is_recorded_as_itself_acting_for_the_user() -> None:
     assert genome._actor("u1", HUMAN) == OWNER and OWNER.audit == "u1"
     delegated = genome._actor("u1", APP)
@@ -219,7 +233,7 @@ async def test_capture_policy_and_lookups() -> None:
     assert response.status_code == 201
     registry.set_policy = Mock(return_value=RecordedRevision(_revision(), False))
     response = Response()
-    out = await genome.set_genome_policy("bot_1", PolicyRequest(mutable_genes=["persona"], pins=[]), _request("PUT"), response, "u1", "u1", HUMAN, _bot_service(), registry)
+    out = await genome.set_genome_policy("bot_1", PolicyRequest(mutable_genes=["persona"], pins=[], risk_overrides={}), _request("PUT"), response, "u1", "u1", HUMAN, _bot_service(), registry)
     assert response.status_code == 200 and registry.set_policy.call_args.args[1] == {"mutable_genes": ["persona"], "pins": [], "risk_overrides": {}}
     registry.get_revision = Mock(return_value=_revision())
     out = await genome.get_genome_revision("bot_1", "r1", _request(), "u1", "u1", _bot_service(), registry)
