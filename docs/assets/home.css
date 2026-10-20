@@ -478,6 +478,9 @@ h2 { font-size: clamp(30px, 3.7vw, 46px); line-height: 1.1; letter-spacing: -0.0
 .join li:last-child { border-bottom: 1px solid var(--line); }
 .join a { display: block; padding: 14px 0; font: 500 17px/1.4 var(--font-display); color: var(--text); text-decoration: none; }
 .join a:hover { color: var(--blue); }
+.wechat-qr { margin: 32px 0 0; }
+.wechat-qr img { display: block; width: min(100%, 200px); height: auto; border-radius: 8px; }
+.wechat-qr figcaption { margin-top: 10px; font-size: 14px; color: var(--muted); }
 .news { padding: 28px 28px 10px; border-radius: 16px; background: var(--paper); }
 .news h3 { font-size: 22px; }
 .news-list { margin: 14px 0 0; padding: 0; list-style: none; }
