@@ -580,6 +580,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
           taskBranch: `repair/${request.workflowId}/${id}` };
         const created = await repo.createRevision(tx, { input, requestId: request.requestId, requestDigest: digest,
           expectedAttemptRevision: 'expectedAttemptRevision' in request ? request.expectedAttemptRevision : 0 });
+        this.requireMaterialDelivery(created.input);
         await new RepairTaskRepository(tx).append(created, actorId);
         return created;
       });
@@ -587,12 +588,15 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     await this.dispatch(revision, actorId);
     return (await this.task(revision.taskId)).revisions.find(r => r.revision === revision!.revision)!;
   }
+  private requireMaterialDelivery(input:RepairBatchInput):void {
+    if(input.materials&&this.execution?.materialDeliveryVersion!=='repair-material-download/v1')fail('CAPABILITY_UNAVAILABLE','Execution provider does not support material downloads');
+  }
   private async dispatch(revision: RepairRevision, actorId?: string): Promise<void> {
     if (!this.execution || revision.phase !== 'drafting') return;
     // Validate stored originals, but never put them back into the AIS parameters.
     await new RepairMaterialRepository(this.db).expand(revision.input);
     const executionInput=revision.input;
-    if(executionInput.materials&&this.execution.materialDeliveryVersion!=='repair-material-download/v1')fail('CAPABILITY_UNAVAILABLE','Execution provider does not support material downloads');
+    this.requireMaterialDelivery(executionInput);
     const executionId = randomUUID();
     const claimed = await this.tx(async tx => {
       const current = await new RepairBatchRepository(tx).getRevision(revision.workflowId, revision.taskId, revision.revision);
@@ -689,6 +693,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
           previousReportRef: task.latestSuccessful ? `${taskId}/revisions/${task.latestSuccessful.revision}` : null };
         const created = await repo.createRevision(tx, { input, requestId: request.requestId, requestDigest: digest,
           expectedAttemptRevision: request.expectedRevision });
+        this.requireMaterialDelivery(created.input);
         await new RepairTaskRepository(tx).append(created, actorId);
         return created;
       });

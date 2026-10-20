@@ -36,6 +36,7 @@ import {
 import { adminAuthMiddleware } from "@avernet/clawweb-shared/server/middleware/admin-auth";
 import { AdminUserRepository } from "@avernet/clawweb-shared/server/repositories/admin-user-repository";
 import { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
+import { getClawWebPublicBaseUrl } from "@avernet/clawweb-shared/server/env";
 import type { ClawWebBootstrap } from "./bootstrap.js";
 import { createAuthMeHandler, resolveAuthMeIdentity } from "./auth-me.js";
 import { createWorkflowRepairRuntime } from "./repair-workbench-runtime.js";
@@ -85,7 +86,7 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       });
       app.use("/api/evolve", clawevolve.publicRouter);
       const repairExecution = repairConfig
-        ? createRepairAisExecution(db, new AistudioService(aisConfig), repairConfig.gitStore, repairConfig.snapshotId)
+        ? createRepairAisExecution(db, new AistudioService(aisConfig), repairConfig.gitStore, repairConfig.snapshotId, getClawWebPublicBaseUrl())
         : undefined;
       const repairRuntime = createWorkflowRepairRuntime(db, {
         environment: context.environment,

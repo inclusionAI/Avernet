@@ -208,9 +208,17 @@ Promise<{ snapshotId: number; gitStore: RepairGitStore } | undefined> {
 }
 
 export function createRepairAisExecution(db: IDatabase, ais: AistudioService,
-  git: RepairGitStore, snapshotId: number): RepairExecutionPort {
+  git: RepairGitStore, snapshotId: number, publicBaseUrl: string): RepairExecutionPort {
+  const base = new URL(publicBaseUrl);
+  const localHttp = base.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(base.hostname);
+  if ((base.protocol !== 'https:' && !localHttp) || base.username || base.password
+    || base.pathname !== '/' || base.search || base.hash) {
+    throw new Error('Workflow Repair material service requires an HTTPS origin or local HTTP origin');
+  }
+  const materialBaseUrl = `${base.origin}/api/workflow-repairs/material-download`;
   return {
     integrationVersion: 'workflow-proposal-plan/v1',
+    materialDeliveryVersion: 'repair-material-download/v1',
     async resolveBaseline(workflowId, purpose) {
       const row = await new WorkflowDeployHistoryRepository(db).findActiveByWorkflowId(workflowId);
       if (!row) throw new Error('Workflow has no active deployment');
@@ -218,10 +226,15 @@ export function createRepairAisExecution(db: IDatabase, ais: AistudioService,
         deployNumber: row.deploy_number, tagName: row.tag_name, specJson: row.spec_json }, purpose);
     },
     async dispatch(request) {
+      if (request.input.materials && !request.materialAccess) throw new Error('AIS executeSnapshot 失败: Frozen material access is required');
+      const materialAccess = request.materialAccess ? { ...request.materialAccess, baseUrl: materialBaseUrl } : undefined;
+      const action = materialAccess
+        ? (request.input.integration ? 'integrate_candidate_materials_v1' : 'generate_candidate_materials_v1')
+        : (request.input.integration ? 'integrate_candidate_v1' : 'generate_candidate');
       const envelope = { schemaVersion: 'clawevolve-task/v1', taskType: 'workflow_repair',
         taskId: request.input.taskId, stepId: request.identity.stepId, attempt: request.identity.attempt,
-        execution: { executor: 'ais', executionId: request.identity.executionId, action: request.input.integration ? 'integrate_candidate_v1' : 'generate_candidate' },
-        input: request.input };
+        execution: { executor: 'ais', executionId: request.identity.executionId, action },
+        input: request.input, ...(materialAccess ? { materialAccess } : {}) };
       const jobId = await ais.execute(request.actorId, { '${clawevolve_params}': JSON.stringify(envelope) }, snapshotId);
       return { jobId };
     },

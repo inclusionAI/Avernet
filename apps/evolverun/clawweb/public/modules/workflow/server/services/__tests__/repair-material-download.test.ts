@@ -21,7 +21,7 @@ async function setup(delivery=true){
  const service=createRepairWorkbenchService(f.db,f.sourcePort,port);
  const rev=await service.create('human',{workflowId:'wf-1',itemIds:f.items.map(x=>x.itemId),inputDigest:(await service.candidates('wf-1')).inputDigest,instructions:'keep output goals',requestId:'download-case'});
  const sent=f.calls[0] as any;
- return {service,rev,sent};
+ return {service,rev,sent,port};
 }
 it('dispatches core evidence and a scoped index without any full report',async()=>{
  const {sent}=await setup();
@@ -57,6 +57,9 @@ it('downloads bounded frozen bytes only with the current execution credential, a
 it('refuses an execution provider that cannot download materials without sending full evidence',async()=>{
  await expect(setup(false)).rejects.toMatchObject({code:'CAPABILITY_UNAVAILABLE'});
  expect(f.calls).toHaveLength(0);
+ expect(await f.db.query('SELECT * FROM workflow_repair_revisions')).toHaveLength(0);
+ expect(await f.db.query('SELECT * FROM ce_tasks')).toHaveLength(0);
+ expect(await f.db.query("SELECT * FROM workflow_repair_release_records WHERE record_kind='repair_material'")).toHaveLength(0);
 });
 it('stores no raw credential and expires the read capability',async()=>{
  const {service,rev,sent}=await setup();
@@ -71,4 +74,15 @@ it('keeps structured error excerpts bounded in the core projection',async()=>{
  const {projectRepairEvidence}=await import('../../contracts/repair-evidence-projection.js');
  const projected=projectRepairEvidence({itemId:'item',groupKey:'group',proposalKey:'key',contentRevision:1,previousItemId:null,proposal:null,instruction:'keep goal',sources:[],context:{diagnoses:[{evidence:[{eventId:'event',payload:{error:{stack:'trace'.repeat(300000)}}}]}]}});
  expect(Buffer.byteLength(JSON.stringify(projected))).toBeLessThan(10000);
+});
+
+it('rolls back an unsupported generation retry without a new revision or execution claim',async()=>{
+ const {service,rev,port}=await setup();
+ await service.report({workflowId:'wf-1',taskId:rev.taskId,revision:1,expectedStateVersion:0,status:'failed',error:{code:'AIS_FAILED'}});
+ f.setRemoteStatus({status:'failed',rawStatus:'failed',errorMessage:'controlled failure'});
+ port.materialDeliveryVersion=undefined;
+ await expect(service.retryGeneration('human',rev.taskId,{expectedRevision:1,requestId:'unsupported-retry'})).rejects.toMatchObject({code:'CAPABILITY_UNAVAILABLE'});
+ expect(f.calls).toHaveLength(1);
+ expect((await service.task(rev.taskId)).revisions).toHaveLength(1);
+ expect(await f.db.query('SELECT * FROM ce_steps')).toHaveLength(1);
 });

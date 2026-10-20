@@ -330,3 +330,9 @@ TaskGuard 构建当前建议或聚合方案的 Prompt 前，仅下载其原始 i
 
 需要 public Workflow、Host 和 TaskGuard 消费者配套上线。离线 HTTP 回放不代表
 真实 AIS 网络、参数注入或业务执行已经验证；不新增存储服务、队列或业务工具。
+
+Public ClawWeb 的 `createRepairAisExecution` 和 OCB Host 均装配上述下载协议。
+Public bootstrap 传入既有 `getClawWebPublicBaseUrl()` 的配置来源；远程地址必须为
+HTTPS origin，本地 HTTP 仅允许 loopback。无需把用户 Cookie 或凭据写入 URL。
+创建、反馈修订及失败重试在事务提交前检查执行端支持；不支持时回滚新修订、
+任务及材料写入，不留不可派发的新版本。派发时仍保留防御检查。
