@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { runMigrations, type IDatabase } from '../db.js';
 import { dialectFor } from '../db/dialect.js';
 import { migrations } from '../schema.js';
-import { automationHistoryMigration } from '../schema-automation-history.js';
 import { workflowSnapshotMigrations } from '../schema-workflow-snapshot.js';
 
 type Migration = (typeof migrations)[number];
@@ -118,14 +117,14 @@ describe.each(['mysql', 'zdas'] as const)('runMigrations on %s', dbType => {
     expect(query.mock.calls.some(([sql]) => sql.includes('schema_version'))).toBe(false);
   });
 
-  it.each([0, 1, 2, 145, 200])('preserves version gating at %i when DDL is available', async current => {
+  it.each([0, 1, 2, 145, 146, 200])('preserves version gating at %i when DDL is available', async current => {
     const { db, exec, query } = createDb(dbType, { canDdl: true, current });
 
     await runMigrations(db, dbType);
 
     expect(query).toHaveBeenCalledWith('SELECT MAX(version) as v FROM schema_version');
     expect(exec.mock.calls.filter(([sql]) => sql === ledgerInsert).map(([, params]) => params)).toEqual(
-      [...migrations, ...workflowSnapshotMigrations, automationHistoryMigration].filter(m => m.selfHealing || m.version > current).map(m => [m.version, m.description]),
+      [...migrations, ...workflowSnapshotMigrations].filter(m => m.selfHealing || m.version > current).map(m => [m.version, m.description]),
     );
     const firstDdl = db.dialect.renderDdl(migrations[0].sql[0]);
     expect(exec.mock.calls.some(([sql]) => sql === firstDdl)).toBe(current < 1);
@@ -152,4 +151,10 @@ describe.each(['mysql', 'zdas'] as const)('runMigrations on %s', dbType => {
     expect(exec).toHaveBeenCalledWith(sqlPrefix);
     expect(exec).not.toHaveBeenCalledWith(ledgerInsert, [version, expect.any(String)]);
   });
+});
+
+it.each(['mysql', 'zdas'] as const)('does not add automation history columns or indexes on %s', async dbType => {
+  const { db, exec } = createDb(dbType, { canDdl: true, current: 145 });
+  await runMigrations(db, dbType);
+  expect(exec.mock.calls.some(([sql]) => /ALTER TABLE workflow_repair_release_records/i.test(sql))).toBe(false);
 });

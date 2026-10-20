@@ -1,7 +1,6 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from 'vitest';
 import { repairFixture } from './repair-batch-fixtures.js';
-import { automationHistoryMigration } from '@avernet/clawweb-shared/server/schema-automation-history';
 import { repairReleaseMigrations } from '@avernet/clawweb-shared/server/schema-repair-release';
 import { AppConfigRepository } from '../../repositories/app-config-repository.js';
 import { createAutoAnalysisSettings } from '../task-guard/auto-analysis-settings.js';
@@ -17,8 +16,6 @@ afterEach(async () => { for (const f of fixtures.splice(0)) await f.db.close(); 
 async function fixture(autoDraft = false, count = 3, full = false) {
   const f = await repairFixture(count); fixtures.push(f);
   for (const m of repairReleaseMigrations) for (const sql of m.sql) await f.db.exec(f.db.dialect.renderDdl(sql));
-  await automationHistoryMigration.migrate!(f.db);
-  for (const sql of automationHistoryMigration.sql) await f.db.exec(f.db.dialect.renderDdl(sql));
   f.raw.exec(`CREATE TABLE cm_app_config (id INTEGER PRIMARY KEY, config_key TEXT UNIQUE, config_yaml TEXT, version INTEGER, enabled INTEGER,
     description TEXT, updated_by TEXT, gmt_create INTEGER, gmt_modified INTEGER);
     CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, flow_id TEXT UNIQUE, workflow_id TEXT, status TEXT, started_at INTEGER,
@@ -494,7 +491,7 @@ it('polls draft recovery with bounded reads despite many cancelled historical dr
   const revision = f.raw.prepare('SELECT * FROM workflow_repair_revisions WHERE task_id=? AND revision=1').get(task.taskId) as Record<string, unknown>;
   const journal = f.raw.prepare('SELECT * FROM workflow_repair_release_records WHERE record_id=?').get(job.id) as Record<string, unknown>;
   function insert(table: string, row: Record<string, unknown>) {
-    const entries = Object.entries(row).filter(([key]) => key !== 'record_status');
+    const entries = Object.entries(row);
     f.raw.prepare(`INSERT INTO ${table} (${entries.map(([key]) => key).join(',')}) VALUES (${entries.map(() => '?').join(',')})`).run(...entries.map(([, value]) => value));
   }
   function seed(i: number, phase: string, policyVersion?: number, leased = false, staleRequest = false) {
@@ -524,8 +521,7 @@ it('polls draft recovery with bounded reads despite many cancelled historical dr
   }
   const recoveryQuery = query.mock.calls.find(([sql]) => sql.includes('SELECT a.body_json, r.revision'))!;
   const plan = f.raw.prepare(`EXPLAIN QUERY PLAN ${recoveryQuery[0]}`).all(...recoveryQuery[1]!) as { detail: string }[];
-  expect(plan.some(row => row.detail.includes('idx_repair_history_status'))).toBe(true);
-  expect(plan.some(row => /TEMP B-TREE/.test(row.detail))).toBe(false);
+  expect(plan.some(row => row.detail.includes('idx_repair_release_task'))).toBe(true);
   const eligible = [job.id];
   f.raw.transaction(() => { for (let i = 200; i < 250; i++) eligible.push(seed(i, 'failed')); })();
   const targets = (await f.service.status('wf-1')).retryableJobs!.filter(row => row.kind === 'auto_draft');
@@ -536,4 +532,14 @@ it('polls draft recovery with bounded reads despite many cancelled historical dr
   expect(remaining).toHaveLength(1);
   expect(readTask).not.toHaveBeenCalled();
   expect(f.calls).toHaveLength(dispatched);
+});
+
+it('reads status and paged history on the original journal schema without executing writes', async () => {
+  const f = await fixture();
+  const repo = new WorkflowAutomationRepository(f.db);
+  const job = await repo.ensure('wf-1', 'auto_run', 'legacy-run', { flowId: 'legacy-run' }, Date.parse('2026-11-01T01:00:00Z'));
+  const write = vi.spyOn(f.db, 'exec');
+  expect((await f.service.status('wf-1')).jobs).toEqual(expect.arrayContaining([expect.objectContaining({ id: job.id, status: 'pending' })]));
+  expect(await f.service.records('wf-1', { limit: 8 })).toMatchObject({ jobs: [expect.objectContaining({ id: job.id, flowId: 'legacy-run', status: 'pending' })], nextCursor: null });
+  expect(write).not.toHaveBeenCalled();
 });

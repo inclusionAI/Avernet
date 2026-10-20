@@ -23,6 +23,6 @@ export function useAutomationRecords(id: string, options: AutomationRecordQuery)
   if (options.cursor) params.set('cursor', options.cursor)
   return useQuery({ queryKey: ['workflow-automation-records', id, params.toString()],
     queryFn: () => json<AutomationRecordPage>(`${base(id)}/automation-records?${params}`), retry: false,
-    staleTime: 15000, refetchInterval: options.cursor ? false : 15000 })
+    staleTime: 15000, refetchInterval: false, refetchOnWindowFocus: false })
 }
 export async function retryAutomationFailures(id: string) { return json<AutomationSnapshot>(`${base(id)}/automation-retry`, { method: 'POST', body: '{}' }) }

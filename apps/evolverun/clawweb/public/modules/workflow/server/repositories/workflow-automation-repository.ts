@@ -72,10 +72,11 @@ export class WorkflowAutomationRepository {
     const field = (name: string) => this.json(name, 'a');
     const requestMatches = this.db.dialect.driver === 'better-sqlite3'
       ? `r.request_id = ${field('data.request.requestId')}` : `BINARY r.request_id = BINARY ${field('data.request.requestId')}`;
+    // Start MySQL with scoped jobs; a reverse nested-loop join can rescan job JSON per failed revision.
     const rows = await this.db.query<{ body_json: string; revision: number }>(`SELECT a.body_json, r.revision
-      FROM workflow_repair_release_records a JOIN workflow_repair_revisions r ON r.task_id = ${field('data.realTaskId')}
+      FROM workflow_repair_release_records a ${this.db.dialect.driver === 'better-sqlite3' ? 'JOIN' : 'STRAIGHT_JOIN'} workflow_repair_revisions r ON r.task_id = ${field('data.realTaskId')}
       AND r.workflow_id = a.workflow_id AND r.phase = 'failed' AND ${requestMatches}
-      WHERE a.task_id = ? AND a.record_kind = 'auto_draft' AND a.record_status = 'blocked'
+      WHERE a.task_id = ? AND a.record_kind = 'auto_draft' AND ${field('status')} = 'blocked'
       AND ${field('reason')} = 'DRAFT_REQUIRES_MANUAL_REVIEW' AND ${field('data.batches')} IS NOT NULL
       AND CAST(${field('leaseUntilMs')} AS SIGNED) <= ? AND CAST(${field('data.request.automation.policyVersion')} AS SIGNED) = ?
       AND NOT EXISTS (SELECT 1 FROM workflow_repair_revisions newer WHERE newer.task_id = r.task_id AND newer.revision > r.revision)
