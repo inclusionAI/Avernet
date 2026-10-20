@@ -252,6 +252,26 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
         "tests/community/endpoints/test_openapi_config_manifest_apply.py. "
         "Drain this when singlebox fronts the backend with a gateway."
     ),
+    "bot_genome": (
+        "Blocked on the same missing minter as _GATEWAY_PRINCIPAL_EXEMPT_REASON "
+        "above — every route in the group is /openapi/v1/bots/{bot_id}/genome "
+        "and needs a gateway-signed principal, which singlebox has no way to "
+        "produce; and the one flow worth driving (capture a bot, patch it, diff, "
+        "move draft, promote) needs a persona file on the bot's device first, "
+        "which a FlowStep cannot seed. Covered meanwhile by "
+        "tests/community/e2e/test_genome_flows.py, which runs exactly that story "
+        "through the assembled app with a forged principal and a local device "
+        "binding up to the delivery seam (promotion refused as not_appliable "
+        "until RSI-04), by tests/community/core/bot_genome/ (canonical JSON, "
+        "patches, policy and risk, the apply-time predicates, capture, compile, "
+        "the registry and promotion services over fakes and the real "
+        "repositories), tests/community/repository/bot/test_genome_repository.py "
+        "(the five tables over a real database, CAS included), "
+        "tests/community/di/test_bot_genome_module_wiring.py and "
+        "tests/community/adapters/http/openapi_v1/test_genome_routes.py (bars, "
+        "admission, envelopes). Drain this when singlebox fronts the backend "
+        "with a gateway and RSI-04 gives promotion something to deliver to."
+    ),
     "bot_startup_script": (
         "The script's effect is only observable inside a provisioned container: "
         "it is appended to the start sequence the backend composes and runs "

@@ -68,6 +68,10 @@ _NON_ENDPOINT_FILES: frozenset[str] = frozenset({
     # at the 1000-line module cap. Same keystroke — policy rows only, no HTTP
     # stack; concrete-service imports remain checked.
     "authorization_rules_task.py",
+    # The genome-registry half of that table, split from authorization_rules
+    # at the 1000-line module cap. Same keystroke — policy rows only, no HTTP
+    # stack; concrete-service imports remain checked.
+    "authorization_rules_genome.py",
     "__init__.py",
 })
 
