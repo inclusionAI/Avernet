@@ -124,6 +124,7 @@ it("persists sharing and authorizes read-only task links without granting Owner 
       ["/share", "PATCH", { shared: false }],
       ["/decision", "POST", { plan_digest: "digest", approved: true, cooperation_done: true }],
       ["/annotations", "POST", { layer: "effect", correct: true, reason: "read only", evidence_ids: [] }],
+      ["/terminate", "POST", { reason: "read only" }],
     ] as const) expect((await call(scope + suffix, method, body)).status).toBe(403);
     principal = null;
     expect((await call(scope)).status).toBe(401);
@@ -158,6 +159,62 @@ it("Agent-first MCP sends one targeted message without an environment approval a
   expect((await current(task.taskId)).status).toBe("completed"); expect(notifier.notify).not.toHaveBeenCalled();
   expect(actionNotifier.after).toHaveBeenCalledWith(expect.objectContaining({ taskId: task.taskId, kind: "result" }));
   await service.reportResults(); expect(callbacks.at(-1)).toMatchObject({ effect: "recovered", delivery: { delivery_key: request.delivery_key } });
+});
+it("authorizes a terminal stop, invalidates tools, retries only the remote stop and reports cancellation once", async () => {
+  const task = await create();
+  await expect(service.terminate(task.taskId, { userId: "reader", isAdmin: false })).rejects.toMatchObject({ status: 403 });
+  ais.stopExecution.mockRejectedValueOnce(new Error("offline"));
+  const app = express(); app.use(createSessionRecoveryRouter({ service, tasks: service, agent, resolveActor: async () => actor }));
+  const server = await new Promise<ReturnType<typeof app.listen>>(resolve => { const opened = app.listen(0, "127.0.0.1", () => resolve(opened)); });
+  try {
+    const response = await fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}/monitoring/session-recoveries/${task.taskId}/terminate`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: "暂停观察" }) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: "canceled", termination: { status: "remote_stop_failed", aisJobId: "job-1" } });
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+  const stopped = await current(task.taskId), version = stopped.version;
+  expect(stopped.execution).toMatchObject({ state: "ended", invalidatedAt: Math.floor(now / 1000) });
+  expect(stopped.timeline.find(event => event.kind === "termination")!.payload.actor_id).toBe("owner");
+  const ticket = submissions[0].input.credentials.executionTicket;
+  await expect(agent.verify(task.taskId, task.execution!.executionId, ticket)).rejects.toMatchObject({ status: 409 });
+  expect(await agent.heartbeat(stopped)).toEqual({ state: "ended" });
+  await expect(agent.retryMessage(task, { clientRequestId: "stopped-send", purpose: "继续", message: "继续" })).rejects.toMatchObject({ reason: "task_state" });
+  expect(await service.terminate(task.taskId, { userId: "admin", isAdmin: true })).toMatchObject({ status: "canceled", termination: { status: "remote_stopped" } });
+  expect((await current(task.taskId)).version).toBe(version);
+  await service.maintenance(); expect(ais.execute).toHaveBeenCalledOnce(); expect(runtime.sendMessage).not.toHaveBeenCalled();
+  await agent.handleAisStatus({ task: (await repo.findTask(task.taskId))!, step: (await repo.findStep(task.aisExecution!.stepId))!, report: { status: "failed", retryable: true } });
+  await expect(service.resume(task.taskId)).rejects.toMatchObject({ status: 409 });
+  expect((await current(task.taskId)).status).toBe("canceled");
+  await service.reportResults(); await service.reportResults();
+  expect(callbacks).toHaveLength(1); expect(callbacks[0]).toMatchObject({ status: "canceled", effect: "unknown", result_text: expect.stringContaining("暂停观察") });
+});
+it("stops a late AIS dispatch receipt instead of leaving a new Agent running", async () => {
+  let finish!: (id: string) => void;
+  ais.execute.mockImplementationOnce(async (_owner, params) => {
+    submissions.push(JSON.parse(params["${clawevolve_params}"]));
+    return new Promise<string>(resolve => { finish = resolve; });
+  });
+  const ack = await service.create(request, actor);
+  await vi.waitFor(() => expect(submissions).toHaveLength(1));
+  expect(await service.terminate(ack.task_id, actor)).toMatchObject({ status: "canceled", termination: { status: "stop_pending" } });
+  finish("late-job");
+  await vi.waitFor(() => expect(ais.stopExecution).toHaveBeenCalledWith("late-job"));
+  await vi.waitFor(async () => expect((await service.detail(ack.task_id, actor)).termination?.status).toBe("remote_stopped"));
+  expect((await current(ack.task_id)).status).toBe("canceled");
+  expect((await repo.findStep((await current(ack.task_id)).aisExecution!.stepId))!.status).toBe("canceled");
+});
+it("retains an in-flight write as unknown after stopping without replay or task revival", async () => {
+  const task = await create();
+  let finish!: (result: { status: "accepted"; platformMessageId: string }) => void;
+  vi.mocked(runtime.sendMessage).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const pending = agent.retryMessage(task, { clientRequestId: "in-flight", purpose: "纠正原操作", message: "继续原任务" });
+  await vi.waitFor(() => expect(runtime.sendMessage).toHaveBeenCalledOnce());
+  await service.terminate(task.taskId, actor);
+  finish({ status: "accepted", platformMessageId: "late" });
+  expect(await pending).toMatchObject({ status: "unknown" });
+  expect((await current(task.taskId)).status).toBe("canceled");
+  expect((await current(task.taskId)).timeline.some(event => event.kind === "operation" && event.payload.status === "unknown")).toBe(true);
+  await service.maintenance(); expect(runtime.sendMessage).toHaveBeenCalledOnce();
 });
 it("non-MCP goes to one environment plan without any initial retry message", async () => {
   let task = await create("approval", { tc_fault_label: "TC.SKILL.EXECUTION" });

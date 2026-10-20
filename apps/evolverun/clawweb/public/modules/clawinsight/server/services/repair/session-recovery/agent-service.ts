@@ -19,7 +19,7 @@ import { RecoverySessionReader } from "./session-reader.js";
 import { savedRecoveryHandbook } from "./handbook.js";
 import { recoveryResult } from "./result.js";
 import type { RecoveryAgentExecutor } from "./task-service.js";
-import type { RecoveryActionNotifier, RecoveryExecutionView, SessionRecoveryTaskApi, SessionRecoveryAgentApi } from "./contracts.js";
+import type { RecoveryActionNotifier, RecoveryExecutionView, RecoveryTermination, SessionRecoveryTaskApi, SessionRecoveryAgentApi } from "./contracts.js";
 import type { RecoveryStoredTask, RecoveryTaskStore, RecoveryJudgment, RecoveryPlan } from "./task-contracts.js";
 
 function fail(status: number, message: string): never { throw new SessionRecoveryError(status, "recovery_execution_conflict", message); }
@@ -83,6 +83,10 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     task = reserved;
     try { await createAgentExecutionStep(this.deps.repo, identity); }
     catch (error) { await this.deps.business().executionFailure(task.taskId, "自愈执行登记失败", issued.execution.executionId); throw error; }
+    const beforeDispatch = await this.required(task.taskId);
+    if (beforeDispatch.status === "canceled") {
+      await this.stopTerminatedExecution(contract.stepId, null); return;
+    }
     const envelope = { taskType: "session_recovery", taskId: task.taskId, stepId: contract.stepId, attempt: executionNo,
       input: { taskId: task.taskId, executionId: issued.execution.executionId,
         toolsBaseUrl: `${this.deps.publicBaseUrl}/api/insight/v1/internal/monitoring/session-recoveries/${encodeURIComponent(task.taskId)}/executions/${issued.execution.executionId}`,
@@ -98,11 +102,13 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     }
     await this.deps.repo.markExternalDispatched(contract.stepId, jobId, { executionId: issued.execution.executionId, jobId });
     const latest = await this.required(task.taskId);
+    if (latest.status === "canceled") { await this.stopTerminatedExecution(contract.stepId, jobId); return; }
     if (latest.execution?.executionId !== issued.execution.executionId || latest.execution.state === "ended") {
       await this.deps.ais.stopExecution(jobId); return;
     }
     const saved = await this.save(latest, value => ({ ...value, execution: { ...value.execution!, jobId } }), issued.execution.executionId);
-    if (saved.execution?.executionId !== issued.execution.executionId || saved.execution.state === "ended") await this.deps.ais.stopExecution(jobId);
+    if (saved.status === "canceled") await this.stopTerminatedExecution(contract.stepId, jobId);
+    else if (saved.execution?.executionId !== issued.execution.executionId || saved.execution.state === "ended") await this.deps.ais.stopExecution(jobId);
   }
   async release(input: RecoveryStoredTask, onlyWaitingOwner = false): Promise<void> {
     const task = await this.required(input.taskId);
@@ -122,9 +128,63 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     return steps.filter(step => step.step_type === "agent_execution").flatMap(step => {
       const executionId = JSON.parse(step.ext_json ?? "{}").executionId;
       if (typeof executionId !== "string") return [];
+      const cancellation = JSON.parse(step.bot_response_json ?? "{}").evolve_cancel;
       return [{ executionId, attempt: -step.step_no, status: step.status, jobId: step.bot_run_id,
-        jobUrl: step.bot_run_id ? this.deps.ais.jobUrl?.(step.bot_run_id) ?? null : null }];
+        jobUrl: step.bot_run_id ? this.deps.ais.jobUrl?.(step.bot_run_id) ?? null : null,
+        ...(cancellation?.status === "remote_stopped" || cancellation?.status === "remote_stop_failed"
+          ? { termination: { status: cancellation.status, aisJobId: step.bot_run_id } } : {}) }];
     }).sort((left, right) => left.attempt - right.attempt);
+  }
+  async terminate(input: RecoveryStoredTask): Promise<RecoveryTermination> {
+    let task = await this.required(input.taskId);
+    if (task.status !== "canceled" || resolveTaskControlPlaneEnvironment(task) !== this.deps.controlPlaneEnvironment) fail(409, "任务尚未停止或不属于当前环境");
+    if (task.execution && task.execution.state !== "ended") {
+      task = await this.save(task, value => ({ ...value, execution: this.executions.end(value.execution!) }), task.execution.executionId);
+    }
+    const stepId = task.aisExecution?.stepId;
+    const step = stepId ? await this.deps.repo.findStep(stepId) : null;
+    const jobId = task.execution?.jobId ?? step?.bot_run_id ?? null;
+    const termination = stepId ? await this.stopTerminatedExecution(stepId, jobId) : { status: "stop_pending" as const, aisJobId: null };
+    // Retain interrupted writes as unknown; cancellation never claims to roll back a dispatched operation.
+    for (;;) {
+      const calls = await this.deps.audit.listActiveToolCalls(task.taskId, 500);
+      if (!calls.length) break;
+      for (const call of calls) {
+        const result = { dispatched: call.status === "executing", recorded_at_ms: this.now(),
+          error: { code: "RECOVERY_TERMINATED_BY_USER", message: "用户停止自愈任务，已发出的操作需核对实际结果" } };
+        try {
+          if (call.status === "pending") await this.deps.audit.cancelPendingToolCall(call.callId, call.executionId, call.authorizationScopeDigest, result);
+          else await this.deps.audit.completeToolCall({ callId: call.callId, executionId: call.executionId,
+            authorizationScopeDigest: call.authorizationScopeDigest, leaseOwner: call.leaseOwner ?? undefined,
+            status: call.isWrite ? "unknown" : "failed", result });
+        } catch (error) {
+          const latest = await this.deps.audit.findToolCall(call.callId);
+          if (!latest || ["pending", "executing"].includes(latest.status)) throw error;
+        }
+      }
+    }
+    return termination;
+  }
+  private async stopTerminatedExecution(stepId: string, jobId: string | null): Promise<RecoveryTermination> {
+    const step = await this.deps.repo.findStep(stepId);
+    if (step && !["succeeded", "failed", "canceled"].includes(step.status)) {
+      await this.deps.repo.updateStepStatus(stepId, { status: "canceled", retryable: false,
+        errorCode: "RECOVERY_TERMINATED_BY_USER", errorMessage: "用户停止本次自愈任务",
+        expectedStep: { status: step.status, output_json: step.output_json } });
+    }
+    if (!jobId) return { status: "stop_pending", aisJobId: null };
+    let status: "remote_stopped" | "remote_stop_failed" = "remote_stopped";
+    try { await this.deps.ais.stopExecution(jobId); }
+    catch {
+      status = "remote_stop_failed";
+      try {
+        const remote = await this.deps.ais.getJobStatusDetail(jobId);
+        if (remote.status !== "running" && remote.rawStatus !== "notfound") status = "remote_stopped";
+      } catch { /* Keep the failed stop visible when remote state is unavailable. */ }
+    }
+    await this.deps.repo.recordCancellationAttempt(stepId, { status,
+      ...(status === "remote_stop_failed" ? { error: "AIS stopExecution failed" } : {}) });
+    return { status, aisJobId: jobId };
   }
   private async settleInterruptedTools(task: RecoveryStoredTask): Promise<boolean> {
     // An interrupted HTTP request may still finish. Wait for its existing lease before
@@ -150,6 +210,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
   }
   async verify(taskId: string, executionId: string, ticket: string, control = false): Promise<RecoveryStoredTask> {
     const task = await this.required(taskId);
+    if (!control && task.status === "canceled") fail(409, "任务已停止");
     if (!task.execution || task.execution.executionId !== executionId) fail(401, "执行身份已失效");
     try {
       if (control && task.execution.state === "ended") {
@@ -161,7 +222,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
   }
   async bootstrap(task: RecoveryStoredTask) {
     const { pending_results: _pending, execution: rawExecution, aisExecution: _ais, ...business } = task;
-    const { ticketDigest: _digest, ...execution } = rawExecution!;
+    const { ticketDigest: _digest, ...execution } = task.status === "canceled" ? this.executions.end(rawExecution!) : rawExecution!;
     return { taskId: task.taskId, stepId: task.current!.stepId, executionId: execution.executionId, deliveryKey: this.latestDeliveryKey(task), task: { ...business, execution,
         timeline: business.timeline.filter(event => event.payload.channel !== "group_webhook").slice(-60).map(event => ({ ...event, payload: event.kind === "operation" ? { tool_call_id: event.payload.tool_call_id, status: event.payload.status, evidence_id: event.payload.evidence_id } : event.payload })),
         evidence: business.evidence.map(item => ({ ...item, excerpt: item.excerpt.slice(0, 1500) })),
@@ -173,7 +234,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         runtime_inspect: true, session_read: true, supportedActionTypes: task.request.target.engine === "TE" ? ["engine_operation"] : ["container_command", "engine_operation"], engine: BotEngineOperations.capabilities(task.runtimeTarget!.target.activeEngine), trajectory_read: !!this.deps.trajectory, nasSessionRead: task.request.target.engine !== "TE", nasRoots: this.deps.nasRoots ?? [], ocb_operation: false, apply_action: task.plan?.approvedAt != null, retry_message: true, reconcile_write: true } };
   }
   async heartbeat(task: RecoveryStoredTask, sessionId?: string) {
-    if (task.execution?.state === "ended") return { state: "ended" };
+    if (task.status === "canceled" || task.execution?.state === "ended") return { state: "ended" };
     if (sessionId !== undefined && (typeof sessionId !== "string" || !/^[A-Za-z0-9_.:-]{1,255}$/.test(sessionId))) fail(422, "观察会话 ID 无效");
     const saved = await this.save(task, value => { if (value.execution?.executionId !== task.execution!.executionId) fail(401, "旧执行不能更新新执行心跳"); return { ...value, execution: this.executions.heartbeat(value.execution!, sessionId) }; });
     return { state: saved.execution!.state, leaseExpiresAt: saved.execution!.leaseExpiresAt };
@@ -361,6 +422,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     const owner = resolveTaskControlPlaneEnvironment(task);
     if (owner && owner !== this.deps.controlPlaneEnvironment) return { applied: false };
     if (step.step_type !== "agent_execution" || step.task_id !== task.taskId) return { applied: false };
+    if (task.status === "canceled" || step.status === "canceled") return { applied: false };
     const currentExecution = task.execution?.state !== "ended" && task.aisExecution?.stepId === step.step_id && task.aisExecution.aisBase.executionId === task.execution?.executionId;
     if (["succeeded", "failed"].includes(step.status)) {
       const identical = sameAgentExecutionReport(step, report);
@@ -388,7 +450,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       toolName: name, operation: String(body.operation ?? name), actionId: typeof body.actionId === "string" ? body.actionId : null,
       request: recoveryToolRequest(body), isWrite: write, toolCallLedgerGuard: (calls, locked) => {
         const config = locked.taskConfig as RecoveryStoredTask | undefined;
-        if (!config || config.execution?.executionId !== execution.executionId || config.execution.state === "ended"
+        if (!config || config.status === "canceled" || config.execution?.executionId !== execution.executionId || config.execution.state === "ended"
           || config.execution.leaseExpiresAt <= Math.floor(this.now() / 1000)) fail(409, "执行授权已变化");
         if (name === "reconcile_write" && calls.some(item => item.toolName === "reconcile_write" && item.status === "succeeded"
           && (item.result as Record<string, unknown>)?.sourceToolCallId === body.sourceToolCallId
@@ -419,6 +481,8 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     let dispatched = false;
     let result: unknown, status: "succeeded" | "failed" | "unknown" = "succeeded";
     try {
+      const current = await this.required(task.taskId);
+      if (current.status === "canceled" || current.execution?.executionId !== execution.executionId || current.execution.state === "ended") fail(409, "执行授权已变化");
       result = redactEvidenceValue(await run(() => { dispatched = true; }));
       if ((result as Record<string, unknown>)?.status === "failed") status = "failed";
       else if ((result as Record<string, unknown>)?.status === "unknown") status = "unknown";
@@ -428,8 +492,14 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         : { code: "controlled_operation_unconfirmed", message: "受控操作未确认，需核对现场与审计" } };
     }
     result = { ...result as Record<string, unknown>, recorded_at_ms: this.now() };
-    await this.deps.audit.completeToolCall({ callId: call.callId, executionId: execution.executionId, authorizationScopeDigest: scope,
-      status, leaseOwner, result });
+    try {
+      await this.deps.audit.completeToolCall({ callId: call.callId, executionId: execution.executionId, authorizationScopeDigest: scope,
+        status, leaseOwner, result });
+    } catch (error) {
+      const current = await this.required(task.taskId), settled = await this.deps.audit.findToolCall(call.callId);
+      if (current.status !== "canceled" || !settled || ["pending", "executing"].includes(settled.status)) throw error;
+      return { toolCallId: settled.callId, status: settled.status, result: settled.result };
+    }
     const evidenceId = await this.recordToolEvidence(task.taskId, call.callId, name, body, status, result);
     return { toolCallId: call.callId, status, result, evidenceId };
   }

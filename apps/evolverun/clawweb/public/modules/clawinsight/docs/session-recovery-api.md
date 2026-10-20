@@ -110,7 +110,7 @@ HTTP `202`：
 | --- | --- |
 | `event_id`、`task_id` | 关联原诊断事件与自愈任务。 |
 | `result_version` | 已保存的结果版本。接收方按 `task_id + result_version` 幂等处理，旧版本不覆盖新版本。 |
-| `status` | `waiting_effect` 效果等待超时、任务可继续；`completed` 任务结束；`failed` 执行或方案失败、任务结束。 |
+| `status` | `waiting_effect` 效果等待超时、任务可继续；`completed` 任务结束；`failed` 执行或方案失败、任务结束；`canceled` 用户手动停止、任务结束。 |
 | `phase` | `assess` Agent 判断初始干预方式；`observe` 观察消息或已有进展；`plan` 分析并形成方案；`apply` 执行完整方案；`verify` 验证原任务恢复。 |
 | `waiting_reason` | 效果等待超时为 `effect`；任务结束为 `null`。 |
 | `effect` | `recovered` 原故障已解除；`not_recovered` 有证据表明未解除；`unknown` 无法判断；`not_intervened` Debug 未实际干预。 |
@@ -189,9 +189,16 @@ PATCH /api/insight/v1/monitoring/session-recoveries/:taskId/share
 GET  /api/insight/v1/monitoring/session-recoveries/:taskId/tool-calls/:toolCallId
 POST /api/insight/v1/monitoring/session-recoveries/:taskId/decision
 POST /api/insight/v1/monitoring/session-recoveries/:taskId/annotations
+POST /api/insight/v1/monitoring/session-recoveries/:taskId/terminate
 ```
 
 分享设置请求：`{ "shared": true }`（关闭为 `false`），返回更新后的任务详情。仅布尔值合法；重复设置同一状态幂等。
+
+停止请求：`{ "reason": "用户手动停止任务" }`，仅 Owner 或管理员可调用。原因可省略；提供时须为 1–500 字符的非空文本。允许停止 `running / waiting_owner / waiting_effect`；已完成或失败的任务返回 `409`。
+
+服务先保存 `canceled`、停止人、时间和原因，阻止后续干预与自动重试，再结束执行票据并停止 AIS。返回更新后的详情及 `termination: { status, aisJobId }`。状态为 `remote_stopped`（AIS 已结束）、`remote_stop_failed`（停止未确认，可再次调用）或 `stop_pending`（尚未取得作业编号；迟到派发回执返回后补停）。详情及对应 `executions` 也保留实际 AIS 停止状态。
+
+重复停止同一已停止任务不会重新执行业务动作或追加最终回传，只重试停止 AIS。任务停止不自动撤销已完成操作；已有调查、方案、工具审计和效果判断保留，进行中的写操作按结果未知留档。迟到的 Agent／AIS 回报不能推进任务。人工停止以 `canceled` 回传一次终态；上游继续接口不恢复已停止任务。
 
 方案确认请求：`{ "plan_digest": "…", "approved": true, "cooperation_done": true, "feedback": "已处理所需配合事项" }`。配合事项不为空时必须确认完成；决策绑定完整方案摘要，不能改写已确认的决策。
 

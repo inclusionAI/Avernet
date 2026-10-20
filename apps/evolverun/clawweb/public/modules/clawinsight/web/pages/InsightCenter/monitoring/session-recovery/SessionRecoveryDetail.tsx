@@ -14,6 +14,7 @@ const statusLabels: Record<SessionRecoveryTask['status'], string> = {
   waiting_effect: '等待效果',
   completed: '已完成',
   failed: '执行失败',
+  canceled: '已停止',
 };
 
 const effectLabels: Record<NonNullable<SessionRecoveryTask['judgment']>['effect'], string> = {
@@ -483,6 +484,7 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [sharingBusy, setSharingBusy] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [revision, setRevision] = useState(0);
   const [annotationLayer, setAnnotationLayer] = useState<'delivery' | 'response' | 'effect'>('effect');
   const [annotationCorrect, setAnnotationCorrect] = useState('true');
@@ -595,6 +597,7 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
   const stageSummary = task ? {
     completed: effect === 'recovered' ? '原任务已恢复，可查看下方处理过程和判断依据。' : '本次自愈处理已结束，恢复情况请查看效果判断。',
     failed: '本次自愈未完成，请查看失败说明和相关操作记录。',
+    canceled: '用户已停止本次自愈，后续处理已取消。',
     waiting_owner: !task.canOperate ? '等待 Owner 处理配合事项并确认修复方案。' : task.plan?.owner_cooperation.length ? '请先处理方案中的配合事项，再确认完整方案。' : '请核对完整修复方案，确认后 Agent 将继续执行。',
     waiting_effect: '恢复效果尚未确定，等待原会话出现新的执行结果。',
     running: lastEvent?.summary || '等待任务执行记录。',
@@ -608,6 +611,17 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
       setRevision(value => value + 1);
     } catch (failure) { setError(monitoringErrorText(failure)); }
     finally { setSharingBusy(false); }
+  };
+  const terminate = async () => {
+    if (!task?.canOperate || stopping) return;
+    if (!window.confirm('确定停止本次自愈任务吗？\n\n将停止自愈 Agent 并取消后续处理，已经完成的操作不会撤销。')) return;
+    setStopping(true);
+    try {
+      const updated = await sessionRecoveryApi.terminate(taskId, '用户手动停止任务');
+      setLoaded({ taskId, task: updated });
+      setRevision(value => value + 1);
+    } catch (failure) { setError(monitoringErrorText(failure)); }
+    finally { setStopping(false); }
   };
   const viewPlan = () => {
     setPhaseSelection({ taskId, phase: 'plan' });
@@ -625,6 +639,9 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
       <div className="sr-hero-actions">
         {task?.shared && <StatusPill status="completed">已公开分享</StatusPill>}
         {task?.canManageShare && <button type="button" className="sr-button" disabled={sharingBusy} onClick={() => void toggleSharing()}>{sharingBusy ? '更新中…' : task.shared ? '关闭分享' : '分享'}</button>}
+        {task?.canOperate && (['running', 'waiting_owner', 'waiting_effect'].includes(task.status)
+          || task.status === 'canceled' && task.termination?.status !== 'remote_stopped') && <button type="button" className="sr-button" disabled={stopping}
+          onClick={() => void terminate()}>{stopping ? '停止中…' : task.status === 'canceled' ? '重试停止 AIS' : '停止任务'}</button>}
         <button type="button" className="sr-button" onClick={() => setRevision((value) => value + 1)}><MonitoringIcon name="refresh" />刷新任务</button>
       </div>
     </header>
@@ -636,6 +653,11 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
 
     {!task ? <div role="status" className="sr-empty large">{error ? '任务未能加载，请重试。' : '正在读取任务…'}</div> : <>
       {!task.canOperate && <section role="status" className="sr-alert"><MonitoringIcon name="user" /><div><strong>共享的只读自愈任务</strong><p>可查看方案、执行过程与恢复结果；方案确认、配合事项和人工标注仅任务 Owner 可操作。</p></div></section>}
+      {task.status === 'canceled' && <section role={task.termination?.status === 'remote_stop_failed' ? 'alert' : 'status'} className="sr-alert">
+        <div><strong>本次自愈已停止</strong><p>{task.termination?.status === 'remote_stopped' ? 'AIS 已停止，后续自愈处理已取消。'
+          : task.termination?.status === 'remote_stop_failed' ? '后续干预已禁止，但 AIS 停止请求未成功，可重试停止 AIS。'
+          : '后续干预已禁止；AIS 尚未返回作业编号，派发回执返回后会补停。'}已完成的操作和调查记录保留。</p></div>
+      </section>}
       {task.status === 'failed' && <section role="alert" className="sr-alert danger"><MonitoringIcon name="alert" /><div><strong>自愈执行失败</strong><div className="sr-failure-preview"><PlanMarkdown text={failureSummary} /></div><details className="sr-disclosure"><summary>查看完整失败说明</summary><PlanMarkdown text={failureSummary} /></details></div><button type="button" className="sr-button" onClick={() => {
         setPhaseSelection({ taskId, phase: currentPhaseKey });
         window.requestAnimationFrame(() => document.getElementById('recovery-stage-process')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
@@ -657,7 +679,7 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
               <span className="sr-judgment-hint">{judgment.hint}</span>
             </div>)}
           </div>
-          {!task.judgment?.summary && <p className="sr-summary-pending">等待 Agent 提交效果判断和证据。</p>}
+          {!task.judgment?.summary && <p className="sr-summary-pending">{task.status === 'canceled' ? '任务已停止，尚无恢复效果结论。' : '等待 Agent 提交效果判断和证据。'}</p>}
           {task.judgment?.summary && <details className="sr-disclosure sr-summary-details"><summary>查看完整判断与依据</summary><PlanMarkdown text={task.judgment.summary} /></details>}
         </article>
       </section>
@@ -668,7 +690,7 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
         <div className="sr-main">
           <RecoveryWorkflow task={task} currentPhase={currentPhaseKey} selected={selectedPhase} onSelect={(phase) => setPhaseSelection({ taskId, phase })} grouped={grouped} rawEvidence={rawEvidence} loadEvidence={(id) => void loadEvidence(id)}
             actions={task.plan && selectedPhase === 'verify' && review && <button type="button" className="sr-button" onClick={viewPlan}>查看修复方案</button>}>
-            {selectedPhase === 'plan' && <RecoveryPlan task={task} busy={busy} ownerFeedback={ownerFeedback} cooperationDone={cooperationDone} onFeedback={setOwnerFeedback} onCooperation={setCooperationDone} onDecide={(approved) => void decide(approved)} />}
+            {selectedPhase === 'plan' && <RecoveryPlan task={task} busy={busy || stopping} ownerFeedback={ownerFeedback} cooperationDone={cooperationDone} onFeedback={setOwnerFeedback} onCooperation={setCooperationDone} onDecide={(approved) => void decide(approved)} />}
           </RecoveryWorkflow>
         </div>
         <aside className="sr-side">

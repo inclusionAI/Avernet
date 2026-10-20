@@ -3,10 +3,10 @@ import { Link } from 'react-router-dom';
 import { sessionRecoveryApi } from '../../../../api/session-recovery';
 import type { SessionRecoverySummary } from '../../../../types/session-recovery';
 const statusLabels: Record<SessionRecoverySummary['status'], string> = {
-  running: '执行中', waiting_owner: '等待方案确认', waiting_effect: '等待效果', completed: '已完成', failed: '执行失败',
+  running: '执行中', waiting_owner: '等待方案确认', waiting_effect: '等待效果', completed: '已完成', failed: '执行失败', canceled: '已停止',
 };
 const statusClasses: Record<SessionRecoverySummary['status'], string> = {
-  running: 'running', waiting_owner: 'unknown', waiting_effect: 'unknown', completed: '', failed: 'error',
+  running: 'running', waiting_owner: 'unknown', waiting_effect: 'unknown', completed: '', failed: 'error', canceled: 'unknown',
 };
 export function RecoveryTaskLinks({ eventId }: { eventId: string }) {
   const [revision, setRevision] = useState(0);

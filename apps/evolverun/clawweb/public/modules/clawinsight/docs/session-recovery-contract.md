@@ -49,13 +49,21 @@ Base owns package startup, the outer hard timeout and its three archives. Busine
 
 Creation stores the exact event/delivery identity and request fingerprint in the existing task. Same-key changed requests return 409. Initial and subsequent sends use the existing tool audit claims; an unknown outcome cannot authorize blind replay. Bot message idempotency remains in the tool ledger. Task result delivery uses compact pending references in the existing Task configuration.
 
-Only transitions into `waiting_effect`, `completed` or `failed` create an immutable result snapshot. Owner waiting (including expiry), approvals, notifications, annotations and other phase changes do not generate callbacks. Repeated annotations after task completion do not create another final result.
+Only transitions into `waiting_effect`, `completed`, `failed` or `canceled` create an immutable result snapshot. Owner waiting (including expiry), approvals, notifications, annotations and other phase changes do not generate callbacks. Repeated annotations after task completion do not create another final result.
 
 `ce_tasks.config_json.resultDelivery` stores each pending snapshot's result version, object key, digest, attempt count and retry time, without its full payload. These references are saved in the same database transaction as the business state and Step report references. Phase reports retain snapshot references and successful delivery events. No record or result-delivery table is added.
 
 A separate 20-second reporting loop retries saved versions in order without blocking state transitions or deadline handling. A failed first result delays only that task's later results. Success removes the corresponding pending reference and appends an acknowledgment to the phase report atomically. Resuming a task and generating later results cannot replace unacknowledged snapshots; restarting the service uses the same persisted references. Monitoring deduplicates by task ID and result version. Callbacks never repeat the initial message or plan actions.
 
 Database definitions use the existing shared migration registry. Version 141 is reserved without altering shared columns; the unshipped v142 result-table migration is removed. This change requires no new table or column expansion. Existing widened columns are not shrunk. Legacy task JSON is converted on subsequent updates, including pending result delivery; legacy progress-only snapshots are excluded from callbacks. SQLite runs canonical migrations; MySQL/ZDAS provisioning follows the existing external migration process. Requests perform no DDL. The API contract is `session-recovery-api.md` in this directory.
+
+## Manual termination
+
+Owners and administrators can stop a running, Owner-waiting or effect-waiting recovery task through the existing task page. The service first persists `canceled`, the actor and reason, clears waiting/retry deadlines and rejects further Agent operations. The existing execution service invalidates the workload ticket; the AIS executor stops the current job. Task and execution records remain available through the same Task/Step storage.
+
+The termination response and task detail distinguish `remote_stopped`, `remote_stop_failed` and `stop_pending`. Repeating termination retries only the remote stop and its audit, without repeating business actions or final result delivery. An AIS job ID received after cancellation is stopped and recorded against that exact execution. Late reports cannot revive the task. Already dispatched operations are not rolled back; interrupted write receipts remain unknown until independently verified.
+
+Cancellation generates one terminal result with `status: canceled`, the existing effect/evidence and the stop reason. It does not fabricate a recovery claim or a repair failure. The monitoring receiver accepts this status using the same deduplication and delivery contract. The manual stop follows the task's existing control-plane ownership guard.
 
 ## Optional group notifications
 

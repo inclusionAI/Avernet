@@ -20,8 +20,9 @@ export interface RecoveryActionNotifier {
   after(input: { taskId: string; eventId: string; kind: "message" | "plan" | "execution" | "result" }): void;
 }
 /** Read-only projection of existing auxiliary Steps; never contains workload credentials. */
-export type RecoveryExecutionView = { executionId: string; attempt: number; status: string; jobId: string | null; jobUrl: string | null };
-export type RecoveryTaskView = RecoveryStoredTask & { shared: boolean; canOperate: boolean; canManageShare: boolean; executions: RecoveryExecutionView[] };
+export type RecoveryTermination = { status: "remote_stopped" | "remote_stop_failed" | "stop_pending"; aisJobId: string | null };
+export type RecoveryExecutionView = { executionId: string; attempt: number; status: string; jobId: string | null; jobUrl: string | null; termination?: RecoveryTermination };
+export type RecoveryTaskView = RecoveryStoredTask & { shared: boolean; canOperate: boolean; canManageShare: boolean; executions: RecoveryExecutionView[]; termination?: RecoveryTermination };
 export interface SessionRecoveryApi { create(body: unknown, actor: RecoveryActor): Promise<RecoveryAcknowledgment> }
 /** Task Service API, independent of the HTTP delivery adapter and implementation. */
 export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
@@ -29,6 +30,7 @@ export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
   list(eventId: string, actor: RecoveryActor): Promise<Array<{ task_id: string; status: RecoveryStoredTask["status"]; phase: RecoveryStoredTask["phase"]; effect: RecoveryJudgment["effect"] }>>;
   detail(taskId: string, actor: RecoveryActor): Promise<RecoveryTaskView>;
   setTaskShared(taskId: string, shared: boolean, actor: RecoveryActor): Promise<RecoveryTaskView>;
+  terminate(taskId: string, actor: RecoveryActor, reason?: unknown): Promise<RecoveryTaskView & { termination: RecoveryTermination }>;
   decide(taskId: string, digest: string, approved: boolean, actor: RecoveryActor, cooperationDone?: boolean, feedback?: string): Promise<void>;
   annotate(taskId: string, actor: RecoveryActor, input: { layer: "delivery" | "response" | "effect"; correct: boolean | null; reason: string; evidence_ids: string[] }): Promise<void>;
   resume(taskId: string): Promise<void>;

@@ -6,7 +6,7 @@ import type { AgentPlanAction } from "../common/agent-tools/contracts.js";
 import type { RecoveryRequest } from "./contracts.js";
 
 export type RecoveryLevel = "debug" | "approval" | "automatic";
-export type RecoveryTaskStatus = "running" | "waiting_owner" | "waiting_effect" | "completed" | "failed";
+export type RecoveryTaskStatus = "running" | "waiting_owner" | "waiting_effect" | "completed" | "failed" | "canceled";
 export type RecoveryPhase = "assess" | "observe" | "plan" | "apply" | "verify";
 export type RecoveryEffect = "recovered" | "not_recovered" | "unknown" | "not_intervened";
 export type RecoveryEvidence = {
@@ -36,7 +36,7 @@ export type RecoveryPlan = {
 export type RecoveryTimelineEvent = {
   event_id: string;
   at_ms: number;
-  kind: "created" | "handbook" | "assessment" | "message" | "observation" | "plan" | "owner_decision" | "operation" | "waiting" | "resumed" | "execution" | "notification" | "result" | "annotation";
+  kind: "created" | "handbook" | "assessment" | "message" | "observation" | "plan" | "owner_decision" | "operation" | "waiting" | "resumed" | "execution" | "notification" | "result" | "annotation" | "termination";
   actor: "service" | "agent" | "owner";
   summary: string;
   payload: Record<string, unknown>;
@@ -73,7 +73,7 @@ export type RecoveryTaskResult = {
   event_id: string;
   task_id: string;
   result_version: number;
-  status: "waiting_effect" | "completed" | "failed";
+  status: "waiting_effect" | "completed" | "failed" | "canceled";
   phase: RecoveryPhase;
   waiting_reason: "effect" | null;
   effect: RecoveryEffect;

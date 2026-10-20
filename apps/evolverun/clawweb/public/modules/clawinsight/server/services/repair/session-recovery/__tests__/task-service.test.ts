@@ -21,7 +21,8 @@ function setup(callbackFails = false) {
     appendNotification: async (id, event) => { const value = records.get(id)!; if (value.timeline.some(item => item.event_id === event.event_id)) return false; value.timeline.push(event); return true; },
   };
   const delivery = { create: vi.fn().mockResolvedValue({ event_id: "evt", delivery_key: "send1", status: "accepted" }) };
-  const agent = { start: vi.fn().mockResolvedValue(undefined), release: vi.fn().mockResolvedValue(undefined), listExecutions: vi.fn().mockResolvedValue([]) };
+  const agent = { start: vi.fn().mockResolvedValue(undefined), release: vi.fn().mockResolvedValue(undefined), listExecutions: vi.fn().mockResolvedValue([]),
+    terminate: vi.fn().mockResolvedValue({ status: "remote_stopped", aisJobId: "job" }) };
   const notifier = { notify: vi.fn().mockResolvedValue(undefined) };
   const reporter = { report: callbackFails ? vi.fn().mockRejectedValue(new Error("callback offline")) : vi.fn().mockResolvedValue(undefined) };
   const deps = { controlPlaneEnvironment: "pre" as const, tasks: store, agent, notifier, reporter,
@@ -133,4 +134,14 @@ it("terminal annotations and repeated failure reports do not enqueue another res
   await service.reportResults();
   expect(reporter.report).toHaveBeenCalledOnce();
   expect(records.get(ack.task_id)!.pending_results).toEqual([]);
+});
+it("makes concurrent stop requests idempotent without a duplicate final result", async () => {
+  const { service, records } = setup();
+  const ack = await service.create(request, actor); await flush();
+  const responses = await Promise.all([service.terminate(ack.task_id, actor), service.terminate(ack.task_id, actor)]);
+  expect(responses.every(value => value.status === "canceled")).toBe(true);
+  const saved = records.get(ack.task_id)!;
+  expect(saved.timeline.filter(event => event.kind === "termination")).toHaveLength(1);
+  expect(saved.pending_results).toHaveLength(1);
+  expect(saved.pending_results[0].status).toBe("canceled");
 });

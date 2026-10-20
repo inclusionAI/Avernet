@@ -1,4 +1,4 @@
-import { AgentToolCallIdempotencyConflictError } from "../repositories/repair/agent-tool-call-record.js";
+import { AgentToolCallIdempotencyConflictError, AgentToolCallWorkloadConflictError } from "../repositories/repair/agent-tool-call-record.js";
 import { resolveRepairRequestActor } from "../services/repair/common/request-actor.js";
 import { parseAgentExecutionTicket } from "../services/repair/common/agent-execution.js";
 import { AgentToolError } from "../services/repair/common/agent-tools/errors.js";
@@ -27,7 +27,7 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
   });
   const actor = async (req: Request): Promise<RecoveryActor> => {
     const resolved = supplied?.resolveActor ? await supplied.resolveActor(req)
-      : await resolveRepairRequestActor(req).then(value => value ? { userId: value.userId, isAdmin: false } : null);
+      : await resolveRepairRequestActor(req).then(value => value ? { userId: value.userId, isAdmin: req.isAdmin === true } : null);
     if (!resolved) throw new SessionRecoveryError(401, "recovery_login_required", "需要登录");
     return resolved;
   };
@@ -45,6 +45,10 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
   });
   router.patch("/monitoring/session-recoveries/:taskId/share", json({ limit: "8kb", inflate: false }), async (req, res, next) => {
     try { res.set("Cache-Control", "no-store").json(await tasks().setTaskShared(String(req.params.taskId), req.body?.shared, await actor(req))); }
+    catch (error) { next(error); }
+  });
+  router.post("/monitoring/session-recoveries/:taskId/terminate", json({ limit: "8kb", inflate: false }), async (req, res, next) => {
+    try { res.set("Cache-Control", "no-store").json(await tasks().terminate(String(req.params.taskId), await actor(req), req.body?.reason)); }
     catch (error) { next(error); }
   });
   router.get("/monitoring/session-recoveries/:taskId/tool-calls/:toolCallId", async (req, res, next) => {
@@ -98,6 +102,7 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
     if (!/^\/(?:internal\/)?monitoring\/session-recoveries(?:\/|$)/.test(req.path)) { next(error); return; }
     const failure = error instanceof SessionRecoveryError || error instanceof BotRuntimeError || error instanceof AgentToolError ? error
       : error instanceof AgentToolCallIdempotencyConflictError ? new SessionRecoveryError(409, "recovery_request_conflict", "同一工具请求标识不能用于不同内容")
+      : error instanceof AgentToolCallWorkloadConflictError ? new SessionRecoveryError(409, "recovery_execution_conflict", "执行授权已变化，不能继续当前操作")
       : (error as { type?: string })?.type === "entity.too.large" ? new SessionRecoveryError(413, "invalid_session_recovery", "请求过大")
       : (error as { type?: string })?.type === "entity.parse.failed" ? new SessionRecoveryError(422, "invalid_session_recovery", "JSON 格式无效")
       : new SessionRecoveryError(503, "recovery_unavailable", "自愈发送服务暂不可用；发送结果可能未知");

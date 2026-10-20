@@ -5,7 +5,7 @@ import SessionRecoveryDetail from '../SessionRecoveryDetail';
 import { api } from '@avernet/clawweb-shared/web/api/client';
 vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { evolve: { listTaskLogArchives: vi.fn(), getTaskLogArchiveDownloadUrl: vi.fn() } } }));
 import { sessionRecoveryApi } from '../../../../../api/session-recovery';
-vi.mock('../../../../../api/session-recovery', () => ({ sessionRecoveryApi: { detail: vi.fn(), decide: vi.fn(), annotate: vi.fn(), toolCall: vi.fn(), setTaskShared: vi.fn() } }));
+vi.mock('../../../../../api/session-recovery', () => ({ sessionRecoveryApi: { detail: vi.fn(), decide: vi.fn(), annotate: vi.fn(), toolCall: vi.fn(), setTaskShared: vi.fn(), terminate: vi.fn() } }));
 const task = { taskId: 'task', shared: false, canOperate: true, canManageShare: true, status: 'waiting_owner', phase: 'apply', request: { diagnosis: '原任务失败', target: { bot_id: 'default' }, session_key: 'original' },
   judgment: { effect: 'not_recovered', summary: '原问题仍存在' }, plan: { digest: 'plan-digest', approvedAt: null, summary: '完整修复方案', basis: '原失败证据', scope: '当前目标', verification: '原操作成功', actions: [{ actionId: 'fix', summary: '修正配置', risk: '局部变更', verification: '读取配置', command: 'printf fixture', rollback: '恢复原值' }], owner_cooperation: [{ request: '确认权限已开放', basis: '权限缺失' }] },
   timeline: [{ event_id: 'event', at_ms: 1, kind: 'plan', actor: 'agent', summary: '提出方案', payload: { evidence_ids: ['evidence'] } }], evidence: [{ evidence_id: 'evidence', tool_call_id: 'call', source: 'session', location: 'line:1', excerpt: '原失败消息' }] };
@@ -18,6 +18,34 @@ beforeEach(() => {
   vi.mocked(sessionRecoveryApi.decide).mockResolvedValue({ ok: true });
   vi.mocked(sessionRecoveryApi.annotate).mockResolvedValue({ ok: true });
   vi.mocked(sessionRecoveryApi.setTaskShared).mockResolvedValue(task as never);
+  vi.mocked(sessionRecoveryApi.terminate).mockResolvedValue({ ...task, status: 'canceled', termination: { status: 'remote_stopped', aisJobId: 'job' } } as never);
+});
+it('confirms stopping the task and then removes all continuation controls', async () => {
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  try {
+    render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+    const stop = await screen.findByRole('button', { name: '停止任务' });
+    fireEvent.click(stop); expect(sessionRecoveryApi.terminate).not.toHaveBeenCalled();
+    confirm.mockReturnValue(true);
+    vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'canceled', termination: { status: 'remote_stopped', aisJobId: 'job' } } as never);
+    fireEvent.click(stop);
+    await waitFor(() => expect(sessionRecoveryApi.terminate).toHaveBeenCalledWith('task', '用户手动停止任务'));
+    await screen.findByText('本次自愈已停止');
+    expect(screen.getByText(/AIS 已停止/)).toBeVisible();
+    expect(screen.queryByRole('button', { name: /停止任务|确认完整方案|拒绝方案|重试停止 AIS/ })).toBeNull();
+  } finally { confirm.mockRestore(); }
+});
+it('keeps a failed AIS stop visible and lets the Owner retry stopping the same task', async () => {
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValueOnce({ ...task, status: 'canceled', termination: { status: 'remote_stop_failed', aisJobId: 'job' } } as never)
+    .mockResolvedValue({ ...task, status: 'canceled', termination: { status: 'remote_stopped', aisJobId: 'job' } } as never);
+  try {
+    render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('AIS 停止请求未成功');
+    fireEvent.click(screen.getByRole('button', { name: '重试停止 AIS' }));
+    await waitFor(() => expect(sessionRecoveryApi.terminate).toHaveBeenCalledOnce());
+    await screen.findByText(/AIS 已停止/);
+  } finally { confirm.mockRestore(); }
 });
 it('lets the Owner open and close sharing using the existing task controls', async () => {
   vi.mocked(sessionRecoveryApi.detail).mockResolvedValueOnce(task as never).mockResolvedValue({ ...task, shared: true } as never);
@@ -35,7 +63,7 @@ it('shows shared tasks read-only without approval, Owner cooperation, annotation
   render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
   await screen.findByText('共享的只读自愈任务');
   expect(screen.getByText('完整修复方案')).toBeVisible();
-  expect(screen.queryByRole('button', { name: /确认完整方案|拒绝方案|关闭分享|^分享$/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /确认完整方案|拒绝方案|关闭分享|^分享$|停止任务|重试停止 AIS/ })).not.toBeInTheDocument();
   expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   expect(api.evolve.listTaskLogArchives).not.toHaveBeenCalled();

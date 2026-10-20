@@ -387,7 +387,8 @@ describe("diagnosis report -> allowlist -> durable recovery task", () => {
       getObject: async (key: string) => ({ content: objects.get(key)!, etag: null, contentType: "application/json" }),
     };
     const tasks = new SessionRecoveryTaskRepository(db, new EvolveRepository(db), artifacts);
-    const agent = { start: vi.fn().mockResolvedValue(undefined), release: vi.fn().mockResolvedValue(undefined), listExecutions: vi.fn().mockResolvedValue([]) };
+    const agent = { start: vi.fn().mockResolvedValue(undefined), release: vi.fn().mockResolvedValue(undefined), listExecutions: vi.fn().mockResolvedValue([]),
+      terminate: vi.fn().mockResolvedValue({ status: "remote_stopped", aisJobId: "job" }) };
     const service = new SessionRecoveryTaskService({ controlPlaneEnvironment: "pre", tasks, agent,
       notifier: { notify: vi.fn() }, reporter: { report: vi.fn() }, observationMs: 3600000 });
     recovery = createMonitoringRecoveryTrigger({ config, service });

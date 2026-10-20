@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decideRecoveryPlan, observeRecovery, recoveryTaskResult, resumeRecoveryObservation, submitRecoveryPlan } from "../task-state.js";
+import { decideRecoveryPlan, observeRecovery, recoveryTaskResult, resumeRecoveryObservation, submitRecoveryPlan, terminateRecoveryTask } from "../task-state.js";
 import type { RecoveryPlan, RecoveryTaskState } from "../task-contracts.js";
 
 function state(): RecoveryTaskState {
@@ -63,4 +63,14 @@ it("approves primary adjustments without requiring technical execution details",
 it("does not expose running or Owner-waiting states as upstream results", () => {
   expect(() => recoveryTaskResult(state())).toThrow();
   expect(() => recoveryTaskResult({ ...state(), status: "waiting_owner" })).toThrow();
+});
+it.each(["running", "waiting_owner", "waiting_effect"] as const)("terminates %s without changing evidence or authorizing continuation", status => {
+  const before = { ...state(), status, executionRetry: { failures: 1, retryAt: 1000 }, judgment: unknown };
+  const stopped = terminateRecoveryTask(before);
+  expect(stopped).toMatchObject({ status: "canceled", observationDeadlineAt: null, ownerDeadlineAt: null, executionRetry: { retryAt: 0 } });
+  expect(stopped.evidence).toEqual(before.evidence);
+  expect(stopped.judgment).toEqual(before.judgment);
+  expect(recoveryTaskResult(stopped)).toMatchObject({ status: "canceled", waiting_reason: null, effect: "unknown", result_text: expect.stringContaining("用户停止") });
+  expect(() => resumeRecoveryObservation(stopped)).toThrow();
+  expect(() => observeRecovery(stopped, unknown, 1000)).toThrow();
 });

@@ -83,7 +83,7 @@ describe("recovery callback durable append contract", () => {
 });
 
 describe("existing sender/receiver compatibility", () => {
-  it.each(["waiting_effect", "completed", "failed"] as const)("accepts real generated %s with optional delivery/evidence", async status => {
+  it.each(["waiting_effect", "completed", "failed", "canceled"] as const)("accepts real generated %s with optional delivery/evidence", async status => {
     const evidence = { evidence_id: "e1", tool_call_id: "call1", source: "session", location: "current", excerpt: "执行结果" };
     const state: RecoveryTaskState = {
       schemaVersion: "session-recovery-task/v1", taskId: "SR-generated", version: 5, status, phase: "verify", level: "approval",

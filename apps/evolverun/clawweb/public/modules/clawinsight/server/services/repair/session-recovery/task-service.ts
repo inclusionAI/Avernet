@@ -5,8 +5,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { SessionRecoveryError } from "./errors.js";
 import { parseRequest } from "./validation.js";
 import { recoveryHandbook } from "./handbook.js";
-import { decideRecoveryPlan, observeRecovery, recoveryTaskResult, resumeRecoveryObservation, submitRecoveryPlan } from "./task-state.js";
-import type { RecoveryActionNotifier, RecoveryActor, RecoveryAcknowledgment, RecoveryExecutionView, RecoveryRequest, RecoveryResult, RecoveryTaskView, SessionRecoveryTaskApi } from "./contracts.js";
+import { decideRecoveryPlan, observeRecovery, recoveryTaskResult, resumeRecoveryObservation, submitRecoveryPlan, terminateRecoveryTask } from "./task-state.js";
+import type { RecoveryActionNotifier, RecoveryActor, RecoveryAcknowledgment, RecoveryExecutionView, RecoveryRequest, RecoveryResult, RecoveryTaskView, RecoveryTermination, SessionRecoveryTaskApi } from "./contracts.js";
 import type { RecoveryEvidence, RecoveryJudgment, RecoveryLevel, RecoveryPlan, RecoveryTaskResult, RecoveryTimelineEvent, RecoveryStoredTask, RecoveryTaskStore } from "./task-contracts.js";
 
 const EXECUTION_RETRY_DELAYS_MS = [20000, 60000] as const;
@@ -14,6 +14,7 @@ const EXECUTION_RETRY_DELAYS_MS = [20000, 60000] as const;
 export interface RecoveryAgentExecutor {
   start(task: RecoveryStoredTask): Promise<void>;
   release(task: RecoveryStoredTask): Promise<void>;
+  terminate(task: RecoveryStoredTask): Promise<RecoveryTermination>;
   listExecutions(taskId: string): Promise<RecoveryExecutionView[]>;
 }
 export interface RecoveryTaskNotifier {
@@ -165,14 +166,37 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     const canOperate = this.canOperate(task, actor);
     if (!canOperate && task.shared !== true) this.fail(403, "权限不足，请联系任务 Owner 开启分享");
     const { pending_results: _pending, execution: _execution, authorizationScopeDigest: _scope, aisExecution: _ais, ...view } = task;
+    const executions = await this.deps.agent.listExecutions(taskId);
     return { ...view, pending_results: [], shared: task.shared === true, canOperate, canManageShare: canOperate,
-      executions: await this.deps.agent.listExecutions(taskId) };
+      executions, ...(task.status === "canceled" ? { termination: executions.at(-1)?.termination ?? { status: "stop_pending" as const, aisJobId: executions.at(-1)?.jobId ?? null } } : {}) };
   }
   async setTaskShared(taskId: string, shared: boolean, actor: RecoveryActor): Promise<RecoveryTaskView> {
     if (typeof shared !== "boolean") this.fail(422, "shared 必须为布尔值");
     const task = await this.required(taskId); this.owner(task, actor);
     if (task.shared !== shared) await this.mutate(taskId, task.version, value => ({ ...value, shared, version: value.version + 1 }));
     return this.detail(taskId, actor);
+  }
+
+  async terminate(taskId: string, actor: RecoveryActor, reason: unknown = "用户手动停止任务"): Promise<RecoveryTaskView & { termination: RecoveryTermination }> {
+    const previous = await this.required(taskId); this.owner(previous, actor);
+    if (!this.ownsTask(previous)) this.fail(409, "请在任务所属的 ClawWeb 环境停止任务");
+    if (typeof reason !== "string" || !reason.trim() || reason.length > 500 || containsSecret(reason)) this.fail(422, "停止原因格式无效");
+    let task = previous;
+    if (previous.status !== "canceled") {
+      try {
+        task = await this.mutate(taskId, previous.version, value => ({ ...value, ...terminateRecoveryTask(value),
+          timeline: [...value.timeline, this.event("termination", actor.isAdmin ? "service" : "owner",
+            `${actor.isAdmin ? "管理员" : "Owner"}停止本次自愈：${reason.trim()}`, { actor_id: actor.userId, actor_role: actor.isAdmin ? "admin" : "owner",
+              reason: reason.trim(), phase: value.phase, execution_id: value.execution?.executionId })] }));
+        this.notifyGroup(task, "result");
+      } catch (error) {
+        if (!(error instanceof SessionRecoveryError) || error.status !== 409) throw error;
+        task = await this.required(taskId);
+        if (task.status !== "canceled") throw error;
+      }
+    }
+    const termination = await this.deps.agent.terminate(task);
+    return { ...await this.detail(taskId, actor), termination };
   }
 
   async annotate(taskId: string, actor: RecoveryActor, input: {
@@ -277,9 +301,10 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       const updated = await this.deps.tasks.update(taskId, version, value => {
         const changed = change(value);
         const reportable = changed.status !== value.status
-          && ["waiting_effect", "completed", "failed"].includes(changed.status);
+          && ["waiting_effect", "completed", "failed", "canceled"].includes(changed.status);
         return { ...changed, pending_results: reportable
-          ? [...value.pending_results, recoveryTaskResult(changed)] : value.pending_results };
+          ? [...value.pending_results, recoveryTaskResult(changed, changed.status === "canceled"
+            ? [...changed.timeline].reverse().find(event => event.kind === "termination")?.summary : undefined)] : value.pending_results };
       });
       if (updated) return updated;
       version = (await this.required(taskId)).version;

@@ -25,7 +25,7 @@ export function parseRecoveryResult(input: unknown): MonitoringRecoveryResult {
   requireValue(text(result.event_id) && /^[A-Za-z0-9_.:-]{1,128}$/.test(result.event_id));
   requireValue(text(result.task_id) && result.task_id.trim().length > 0);
   requireValue(integer(result.result_version, 1));
-  requireValue(["waiting_effect", "completed", "failed"].includes(result.status as string) && text(result.status));
+  requireValue(["waiting_effect", "completed", "failed", "canceled"].includes(result.status as string) && text(result.status));
   requireValue(["assess", "observe", "plan", "apply", "verify"].includes(result.phase as string) && text(result.phase));
   requireValue(result.waiting_reason === (result.status === "waiting_effect" ? "effect" : null));
   requireValue(["recovered", "not_recovered", "unknown", "not_intervened"].includes(result.effect as string) && text(result.effect));

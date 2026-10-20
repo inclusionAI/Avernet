@@ -8,6 +8,9 @@ export const sessionRecoveryApi = {
   setTaskShared: (id: string, shared: boolean) => fetchJson<SessionRecoveryTask>(`${BASE}/${encodeURIComponent(id)}/share`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shared }),
   }),
+  terminate: (id: string, reason: string) => fetchJson<SessionRecoveryTask>(`${BASE}/${encodeURIComponent(id)}/terminate`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }),
+  }),
   annotate: (id: string, input: { layer: 'delivery' | 'response' | 'effect'; correct: boolean | null; reason: string; evidence_ids: string[] }) => fetchJson<{ ok: true }>(`${BASE}/${encodeURIComponent(id)}/annotations`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
   }),

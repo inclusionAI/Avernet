@@ -95,7 +95,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       const deliveries: ResultDelivery[] = stored.resultDelivery ?? [];
       const added: ResultDelivery[] = [];
       for (const result of updated.pending_results) {
-        if (!["waiting_effect", "completed", "failed"].includes(result.status)
+        if (!["waiting_effect", "completed", "failed", "canceled"].includes(result.status)
           || deliveries.some(item => item.resultVersion === result.result_version)) continue;
         added.push({ ...await this.put(taskId, result), resultVersion: result.result_version, attempts: 0, retryAfterMs: 0 });
       }
@@ -174,7 +174,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
     const status = value.status === "completed" ? "succeeded" : value.status === "failed" ? "failed" : value.status;
     await tx.exec("UPDATE ce_steps SET output_json = ?, summary = ?, status = ?, gmt_modified = ? WHERE step_id = ?",
       [JSON.stringify(report), value.judgment?.summary ?? value.plan?.summary ?? null, status, nowForDb(tx.dbType), stepId]);
-    await tx.exec("UPDATE ce_steps SET status = 'succeeded' WHERE task_id = ? AND step_no > 0 AND step_no < ? AND status NOT IN ('succeeded','failed')", [value.taskId, stepNo]);
+    await tx.exec("UPDATE ce_steps SET status = 'succeeded' WHERE task_id = ? AND step_no > 0 AND step_no < ? AND status NOT IN ('succeeded','failed','canceled')", [value.taskId, stepNo]);
   }
   private async hydrate(db: IDatabase, raw: string): Promise<RecoveryStoredTask> {
     const value = JSON.parse(raw);
@@ -193,7 +193,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       const calls = await audit.listToolCalls(value.taskId, { ...(afterId ? { afterId } : {}), limit: 500 });
       for (const call of calls) {
         afterId = call.id;
-        if (!["succeeded", "failed", "unknown"].includes(call.status)) continue;
+        if (!["succeeded", "failed", "unknown", "canceled"].includes(call.status)) continue;
         const result = (call.result ?? {}) as Record<string, unknown>, request = (call.request ?? {}) as Record<string, unknown>;
         const evidenceId = `evidence-${call.callId}`;
         if (!task.evidence.some(item => item.evidence_id === evidenceId)) task.evidence.push({ evidence_id: evidenceId, tool_call_id: call.callId, source: call.toolName, location: typeof result.source === "string" ? result.source : `tool-call:${call.callId}`, excerpt: JSON.stringify(result).slice(0, 2000) });
