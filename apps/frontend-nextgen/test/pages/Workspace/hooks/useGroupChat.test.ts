@@ -1,8 +1,10 @@
 /** @jest-environment jsdom */
 import type { SessionView } from '@/domain/collaboration';
+import type { GroupExecApproval } from '@/domain/collaboration/groupExecApprovals';
 import type { GroupQuestionInteraction, GroupQuestionResolution } from '@/domain/collaboration/groupQuestions';
 import { useGroupChat } from '@/pages/Workspace/hooks/useGroupChat';
 import { createGroupChatProvider } from '@/services/workspace/groupChatProvider';
+import type { GroupExecApprovalSnapshot } from '@/services/workspace/groupExecApprovalService';
 import type { GroupQuestionSnapshot } from '@/services/workspace/groupQuestionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { beforeEach, expect, it, jest } from '@jest/globals';
@@ -142,6 +144,8 @@ beforeEach(() => {
     isConnected: false,
     subscribeToQuestions: jest.fn<any>(() => jest.fn<any>()),
     resolveQuestion: jest.fn<any>(() => Promise.resolve(undefined)),
+    subscribeToExecApprovals: jest.fn<any>(() => jest.fn<any>()),
+    resolveExecApproval: jest.fn<any>(() => Promise.resolve(undefined)),
   };
   mockedProviderFactory.mockReturnValue(mockProvider);
 
@@ -555,4 +559,39 @@ it('isConnected=false 时 questions.connected 初始为 false（真实连接状�
   expect(result.current.questions).toBeDefined();
   expect(result.current.questions.connected).toBe(false);
   expect(result.current.questions.interactions).toEqual([]);
+});
+
+it('wires execution approval snapshots and decisions through the main chat hook and cleans up on unmount', async () => {
+  let publish: (snapshot: GroupExecApprovalSnapshot) => void = () => {};
+  const unsubscribe = jest.fn();
+  mockProvider.subscribeToExecApprovals.mockImplementation((listener: typeof publish) => {
+    publish = listener;
+    return unsubscribe;
+  });
+  mockProvider.isConnected = true;
+  const approval: GroupExecApproval = {
+    key: JSON.stringify(['run-1', 'approval-1']),
+    runId: 'run-1',
+    interactionId: 'approval-1',
+    botId: 'bot-a',
+    toolName: 'bash',
+    command: 'pwd',
+    options: [{ decision: 'allow_once', label: 'Allow once' }],
+  };
+  const { result, unmount } = renderHook(() => useGroupChat(session));
+  expect(mockProvider.subscribeToExecApprovals).toHaveBeenCalledTimes(1);
+  act(() => publish({ reason: 'update', interactions: [approval] }));
+  expect(result.current.execApprovals.interactions).toEqual([approval]);
+  expect(result.current.execApprovals.connected).toBe(true);
+  expect(result.current.questions.interactions).toEqual([]);
+  let accepted: boolean | undefined;
+  await act(async () => {
+    accepted = await result.current.execApprovals.resolve(approval.key, 'allow_once');
+  });
+  expect(accepted).toBe(true);
+  expect(mockProvider.resolveExecApproval).toHaveBeenCalledWith(approval.key, { decision: 'allow_once' });
+  act(() => publish({ reason: 'update', interactions: [] }));
+  expect(result.current.execApprovals.interactions).toEqual([]);
+  unmount();
+  expect(unsubscribe).toHaveBeenCalledTimes(1);
 });
