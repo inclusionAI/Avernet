@@ -46,6 +46,7 @@ consumed_by:
   - "adapters/http/acli_clis/router.py — the internal /api/bots routes for the same operations"
 internal_dependencies:
   - agentclaw.community.core.acli_clis
+  - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.caller_identity
   - agentclaw.community.core.errors
   - agentclaw.community.core.mcp
