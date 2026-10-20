@@ -276,9 +276,13 @@ class CodeContent(ArtifactContent):
 -- (LIKE 'x%' 前缀走索引,'%x%' 中缀不走)。
 -- 可空性统一以裸 NULL 声明(无 DEFAULT NULL,用户定稿):content 为 TEXT 家族禁显式 DEFAULT,
 -- 其余可空列与隐式行为等价,统一写法消除混排。
--- content/content_hash/creator/modifier 列可空(用户定稿)但发布路径必填:NULL 仅为 schema 容错/
--- 人工修数留口;content_hash 为 NULL 的行不被 uk_dedupe 判重(MySQL 唯一索引 NULL 互不相等),
--- 意味着这类行回放即重复——故领域构造器与发布校验(§3/§4)不放宽,仍强制 content+hash+creator。
+-- 除 artifact_name/scope_session_id/storage(真可空:未提供语义)外,node_id/attempt/
+-- content_hash/creator/modifier 为"列可空、发布必填":NULL 仅为 schema 容错/人工修数留口;
+-- task_id/content(连同 id/artifact_id/kind 与两条 time 房型列)为列级 NOT NULL 强制:
+-- task_id 是主检索维度与 uk_dedupe 首列、产物本体 content 亦不容悬空。
+-- 关键后果:uk_dedupe 中可空的 node_id/attempt/content_hash 任一为 NULL,该行豁免
+-- 唯一索引判重(MySQL NULL 互不相等)——空值行回放即重复、且脱离主检索维度;故领域构造器与
+-- 发布校验(§3/§4)不放宽,仍强制 task_id+node_id+attempt+content+hash+creator。
 -- storage 为存储介质元信息列(用户定稿,置于 content 前,可空、varchar(2048)):非 file 分支持恒为 inline,
 -- file 分支必须与 FileContent.storage_type 同值——由构造器从 content 派生并强校验,不构成第二首领;
 -- 发布路径必填,NULL 仅为容错/人工修数留口;2048 长度为介质元信息 JSON 化预留(当前只放介质名)。
@@ -293,14 +297,14 @@ class CodeContent(ArtifactContent):
 CREATE TABLE IF NOT EXISTS `task_artifact` (
     `id`              bigint(20)    NOT NULL AUTO_INCREMENT                       COMMENT '主键ID',
     `artifact_id`     varchar(32)   NOT NULL                                      COMMENT '产物 ID(task-art-+uuid4hex16,全局唯一)',
-    `artifact_name`   varchar(255)  NULL                                         COMMENT '业务展示名(NULL=未提供;file 产物发布时回落 file_name)',
-    `task_id`         varchar(128)  NOT NULL                                      COMMENT '归属任务 ID(与报文定位交叉校验后落库)',
-    `node_id`         varchar(128)  NOT NULL                                      COMMENT '产出节点 ID',
-    `attempt`         int           NOT NULL DEFAULT 0                            COMMENT '节点 harness_retries 快照(0 起;与报文交叉校验)',
+    `artifact_name`   varchar(255)  NULL                                          COMMENT '业务展示名(NULL=未提供;file 产物发布时回落 file_name)',
+    `task_id`         varchar(128)  NOT NULL                                      COMMENT '归属任务 ID(与报文定位交叉校验后落库;列级强制非空——主检索维度与 uk_dedupe 首列不许悬空)',
+    `node_id`         varchar(128)  NULL                                         COMMENT '产出节点 ID(发布路径必填,NULL 仅为容错/人工修数留口;同 task_id 的空值豁免后果)',
+    `attempt`         int           NULL                                         COMMENT '节点 harness_retries 快照(0 起;与报文交叉校验;发布路径必填,NULL 仅为容错——空值行豁免 uk_dedupe 判重)',
     `scope_session_id` varchar(512) NULL                                         COMMENT '图绑定协作会话 ID(图绑定优先,未绑定采纳上报值;NULL=均无)',
     `kind`            varchar(64)   NOT NULL                                      COMMENT '内容形态(text|file|url_link|code),governed 枚举',
     `storage`         varchar(2048) NULL                                         COMMENT '存储介质元信息:inline=内容本体在 content 列(text/url_link/code);bot_workspace|session_file=字节在外部介质,content 仅为引用(与 FileContent.storage_type 强一致,构造器推导校验;发布路径必填,NULL 仅为容错/人工修数留口,长度冗余预留给介质 JSON 化)',
-    `content`         mediumtext    NULL                                          COMMENT '内容分支 JSON(kind-tagged,tag=分支判别;不含字节/临时凭证/存储 handle;发布路径必填,NULL 仅为 schema 容错/人工修数留口;TEXT 家族禁显式 DEFAULT,可空性由 NULL 声明)',
+    `content`         mediumtext    NOT NULL                                      COMMENT '内容分支 JSON(kind-tagged,tag=分支判别;不含字节/临时凭证/存储 handle;产物本体,列级强制非空;TEXT 家族禁显式 DEFAULT',
     `content_hash`    char(64)      NULL                                         COMMENT 'sha256(canonical_json(content)),uk_dedupe 成分;发布路径必填——NULL 行绕过幂等闸(MySQL 唯一索引 NULL 不判重)',
     `creator`         varchar(128)  NULL                                         COMMENT '产出者(bot_id/group_id;system=系统写入,如控制信号;NULL=未记录)',
     `modifier`        varchar(128)  NULL                                         COMMENT '修改者(行不可变:恒等于 creator,房型惯例列;NULL=未记录)',
