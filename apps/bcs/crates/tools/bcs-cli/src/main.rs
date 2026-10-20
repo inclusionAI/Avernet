@@ -1572,6 +1572,9 @@ enum GroupContextCommands {
         visible_to: Option<String>,
         #[arg(long)]
         collect_from: Option<String>,
+        /// Owner actor ids transferred to the new active version.
+        #[arg(long)]
+        owners: Option<String>,
         #[arg(long)]
         valid_from: Option<String>,
         #[arg(long)]
@@ -2366,6 +2369,7 @@ fn group_context_update_body(
     content: Option<String>,
     visible_to: Option<String>,
     collect_from: Option<String>,
+    owners: Option<String>,
     valid_from: Option<String>,
     valid_to: Option<String>,
     change_reason: Option<String>,
@@ -2389,12 +2393,17 @@ fn group_context_update_body(
             parse_group_context_policy(&collect_from, "collect-from")?,
         );
     }
+    if let Some(owners) = owners {
+        body.insert(
+            "owners".to_string(),
+            parse_group_context_policy(&owners, "owners")?,
+        );
+    }
     group_context_insert_optional_timestamp(&mut body, "valid_from", valid_from);
     group_context_insert_optional_timestamp(&mut body, "valid_to", valid_to);
     group_context_insert_optional_string(&mut body, "change_reason", change_reason);
     Ok(serde_json::Value::Object(body))
 }
-
 
 /// Binary entry. Delegates to [`run`] so the internal overlay can reuse this
 /// module (`#[path]`) and call `run()` directly under its own runtime.
@@ -4375,6 +4384,7 @@ pub async fn run() -> Result<()> {
                     content,
                     visible_to,
                     collect_from,
+                    owners,
                     valid_from,
                     valid_to,
                     change_reason,
@@ -4389,6 +4399,7 @@ pub async fn run() -> Result<()> {
                         content,
                         visible_to,
                         collect_from,
+                        owners,
                         valid_from,
                         valid_to,
                         Some(change_reason),
@@ -5769,6 +5780,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             Some("2026-10-12 14:56:08".to_string()),
             None,
             Some("extend validity".to_string()),
@@ -5780,7 +5792,107 @@ mod tests {
         assert!(!object.contains_key("content"));
         assert!(!object.contains_key("visible_to"));
         assert!(!object.contains_key("collect_from"));
+        assert!(!object.contains_key("owners"));
         assert!(!object.contains_key("valid_to"));
+    }
+
+    #[test]
+    fn group_context_update_body_includes_owners_when_provided() {
+        let body = group_context_update_body(
+            "player_state".to_string(),
+            "session".to_string(),
+            Some("v2".to_string()),
+            None,
+            None,
+            Some(r#"{"userIds":["bot-a","bot-b"]}"#.to_string()),
+            None,
+            None,
+            Some("transfer ownership".to_string()),
+        )
+        .unwrap();
+        assert_eq!(
+            body["owners"],
+            serde_json::json!({"userIds": ["bot-a", "bot-b"]})
+        );
+    }
+
+    #[test]
+    fn group_context_add_rejects_owners_flag() {
+        let err = match Cli::try_parse_from([
+            "bcs-cli",
+            "group-context",
+            "add",
+            "--group-id",
+            "game-room-7",
+            "--name",
+            "game_rule",
+            "--scope-level",
+            "group",
+            "--content",
+            "rules",
+            "--collect-from",
+            r#"{"userIds":["judge_bot"]}"#,
+            "--owners",
+            r#"{"userIds":["judge_bot"]}"#,
+        ]) {
+            Ok(_) => panic!("expected parse error"),
+            Err(err) => err,
+        };
+        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn group_context_update_parses_owners_flag() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "group-context",
+            "update",
+            "--group-id",
+            "game-room-7",
+            "--name",
+            "player_state",
+            "--scope-level",
+            "session",
+            "--content",
+            "v2",
+            "--owners",
+            r#"{"userIds":["bot-a","bot-b"]}"#,
+            "--change-reason",
+            "transfer ownership",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::GroupContext {
+                command:
+                    GroupContextCommands::Update {
+                        owners,
+                        change_reason,
+                        ..
+                    },
+                ..
+            } => {
+                assert_eq!(owners.as_deref(), Some(r#"{"userIds":["bot-a","bot-b"]}"#));
+                assert_eq!(change_reason, "transfer ownership");
+            }
+            _ => panic!("expected group-context update command"),
+        }
+    }
+
+    #[test]
+    fn group_context_update_rejects_non_object_owners_json() {
+        let error = group_context_update_body(
+            "player_state".to_string(),
+            "session".to_string(),
+            None,
+            None,
+            None,
+            Some("[]".to_string()),
+            None,
+            None,
+            Some("transfer ownership".to_string()),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("--owners must be a JSON object"));
     }
 
     fn write_session_file(temp_dir: &TempDir, value: serde_json::Value) {

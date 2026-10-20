@@ -87,17 +87,18 @@
 
 ## Task 5: HTTP 与 CLI 暴露
 
+- [x] **Done:** HTTP and CLI owners support
 - **Goal:** 通过 HTTP 和 CLI 暴露 update owners，并保持 add 输入关闭。
 - **Files:** `apps/bcs/crates/adapters/http/bcs-http/src/routes/group_context.rs`, `apps/bcs/crates/adapters/http/bcs-http/tests/group_context_routes.rs`, `apps/bcs/crates/tools/bcs-cli/src/main.rs`, `apps/bcs/crates/tools/bcs-cli/src/client.rs`, `apps/bcs/crates/tools/bcs-cli/tests/e2e/group_context_test.rs`, `apps/bcs/crates/tools/bcs-cli/tests/`
 - **Done when:**
-  - [ ] `UpdateRequest` 支持 `owners`，update handler 原样传递给 service API。
-  - [ ] `AddRequest` 不增加 `owners`，add 构建 request 时不会读取该字段。
-  - [ ] GET 响应对 owner 输出策略字段，对非 owner 省略字段。
-  - [ ] list 响应可输出 `"WRO"`。
-  - [ ] CLI update 支持 `--owners '{"userIds":["bot-a","bot-b"]}'`。
-  - [ ] CLI add 不提供 owners 参数。
-  - [ ] CLI 通用 `group_context_request` 保持 body JSON 透传。
-  - [ ] HTTP/CLI tests 覆盖 update、add 不支持、owner-only get 字段和 `WRO`。
+  - [x] `UpdateRequest` 支持 `owners`，update handler 原样传递给 service API。
+  - [x] `AddRequest` 不增加 `owners`，add 构建 request 时不会读取该字段。
+  - [x] GET 响应对 owner 输出策略字段，对非 owner 省略字段。
+  - [x] list 响应可输出 `"WRO"`。
+  - [x] CLI update 支持 `--owners '{"userIds":["bot-a","bot-b"]}'`。
+  - [x] CLI add 不提供 owners 参数。
+  - [x] CLI 通用 `group_context_request` 保持 body JSON 透传。
+  - [x] HTTP/CLI tests 覆盖 update、add 不支持、owner-only get 字段和 `WRO`。
 - **Depends on:** Task 3, Task 4
 
 ## Task 6: 文档、集成与验证
