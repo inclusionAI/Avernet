@@ -162,7 +162,7 @@ describe('useBotEngineVersions', () => {
     rerender({ targets: nextTargets });
     expect(signal?.aborted).toBe(true);
     await act(async () => { finish(version); await pending; });
-    if (!nextTargets.length) expect(result.current.states[target.key]).toBeUndefined();
+    expect(result.current.states[target.key]?.kind).not.toBe('updating');
     restart.mockRestore();
   });
 
