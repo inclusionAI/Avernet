@@ -10,8 +10,8 @@ Avernet 自有前端（nextgen）并预留供其他前端仓（如内部 OCB）�
 
 | 类别 | 文件 | 约束 |
 | --- | --- | --- |
-| **公共核心**（提取时整体带走） | rpc / rpcOnce / stream / card / translate / cancelOutcomes / sendBan / choiceCache / urls / recovery / A2AProviderInput / A2AProvider / sdkParser(类型段) / index / testing / v3FrameShapes | 零 SDK 运行时依赖、零浏览器窗口面、零构建期常量。由 `test/adapters/a2a/hostIsolation.test.ts` 逐文件 grep 钉死（该钉板即未来提取 PR 的**打包装清单**）。对外符号一律经 `index.ts` 单入口。 |
-| **宿主装配面**（各前端自备等价物） | switch（总开关读取）/ bootstrap（app 级 choiceCache/sendBan 单例 + 五段装配）/ tcChatParser（开源 SDK 加载链 + parserFactory） | 触碰 window/localStorage/构建期 define/具体 SDK 包名是**允许且有据的**。 |
+| **公共核心**（提取时整体带走） | rpc / rpcOnce / stream / card / translate / cancelOutcomes / sendBan / choiceCache / urls / recovery / A2AProviderInput / A2AProvider / sdkParser(类型段) / policy(传输选择策略纯函数) / index / testing / v3FrameShapes | 零 SDK 运行时依赖、零浏览器窗口面、零构建期常量。由 `test/adapters/a2a/hostIsolation.test.ts` 逐文件 grep **加传递 import 图检查**双钉死（该钉板即未来提取 PR 的**打包装清单**；图检查保证经 `index.ts` 的静态依赖闭包不达宿主装配面）。对外符号一律经 `index.ts` 单入口。 |
+| **宿主装配面**（各前端自备等价物） | switch（总开关读取）/ bootstrap（app 级 choiceCache/sendBan 单例 + 五段装配 + policy 的历史 re-export）/ tcChatParser（开源 SDK 加载链 + parserFactory） | 触碰 window/localStorage/构建期 define/具体 SDK 包名是**允许且有据的**。 |
 
 ## 消费契约（第二前端接入义务，四件）
 
@@ -31,7 +31,7 @@ Avernet 自有前端（nextgen）并预留供其他前端仓（如内部 OCB）�
 
 ## 提取路径（当第二个消费者真实承诺 submodule 消费时）
 
-届时提取是机械动作，一日量级：`git mv` 公共核心 16 文件（清单=hostIsolation 钉板）→ 消费端三行 alias 接线（tsconfig / umi config / jest mapper）→ bootstrap 的四个纯函数（resolveA2aUrls / deriveEndpointBase / isLockCandidateError / isSendBannedForSession）随行迁出、bootstrap 瘦身为 glue（既有 import 面不变）→ 宿主三件各留各家。
+届时提取是机械动作，一日量级：`git mv` 公共核心 17 文件（清单=hostIsolation 钉板；传输选择策略纯函数已在 review R2-4 中迁入公共核心的 policy.ts，bootstrap 只余 re-export）→ 消费端三行 alias 接线（tsconfig / umi config / jest mapper）→ bootstrap 瘦身为纯 glue（既有 import 面不变）→ 宿主三件各留各家。
 
 **为何现在不提取**（2026-10 决策，spec 补节有全文）：
 - frontend-nextgen 是内部导出产物（OPEN_CORE_MANIFEST），目录出仓会让 nextgen 依赖导出集外资产，内部基线下次 export 后无法构建——而内部回灌通道由另一组织运维，本仓不可验证；

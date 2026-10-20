@@ -336,11 +336,16 @@ PR#2934 评审后调整交付边界：从"nextgen 专属实现"改为"Avernet �
   parser 消费面收口的断言，fixture=钉形表 `v3FrameShapes.ts`）。nextgen 对开源
   SDK 跑绿的接线在 `contract.tc-chat.test.ts`；第二前端接入须对其内部 SDK 跑
   同套件全绿——不凭 TS 类型兼容即认定行为一致。
-- **公共/宿主分类钉板**：`hostIsolation.test.ts` 枚举 16 个公共核心文件逐文件
+- **公共/宿主分类钉板**：`hostIsolation.test.ts` 枚举 17 个公共核心文件逐文件
   grep（零 window/define/SDK 字样、不 import 宿主三件），并做目录完整性对账
-  （新公共文件不入表即红）。该钉板即未来提取 PR 的打包清单。
+  （新公共文件不入表即红），外加**传递 import 图检查**（经 index.ts 的静态
+  依赖闭包不得达宿主装配面——review R2-4）。该钉板即未来提取 PR 的打包清单。
 - **单入口**：公共核心对外符号经 `index.ts` 收口；宿主面（开关/SDK 适配/app
-  单例）不入出口。既有消费方 import 面零改动（seam 钉板不破）。
+  单例/isSendBannedForSession 便利封装）不入出口。传输选择策略纯函数
+  （resolveA2aUrls / deriveEndpointBase / isLockCandidateError / 禁令纯判据
+  isSessionBanned + 两常量 + A2aBootstrapConfig）在 `policy.ts`（review R2-4：
+  公共入口不得传递依赖宿主装配面）；bootstrap 持历史 re-export 维持消费面。
+  既有消费方 import 面零改动（seam 钉板更新有据）。
 - **消费契约文档**：模块 README（接入四义务、四坑、提取路径预告）。
 
 **不提取独立包的两个决策依据**：
@@ -351,5 +356,5 @@ PR#2934 评审后调整交付边界：从"nextgen 专属实现"改为"Avernet �
    真实承诺（YAGNI）——为假想消费者建共享基建不成比例。
 
 **触发再评估的条件**：第二前端正式承诺 submodule 消费 → 提取为机械 PR
-（git mv 钉板清单 16 文件 + 三行 alias；bootstrap 的四个纯函数随行迁出、
-宿主 glue 保留 import 面）。届时本节更新为提取实况。
+（git mv 钉板清单 17 文件 + 三行 alias；策略纯函数已在 policy.ts，bootstrap
+余下 re-export 瘦身为纯 glue，消费面不变）。届时本节更新为提取实况。

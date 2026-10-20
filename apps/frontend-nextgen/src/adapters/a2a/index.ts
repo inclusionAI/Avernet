@@ -2,18 +2,15 @@
  * B16 — 公共核心单入口（公共化边界·原地版）。
  * ============================================================================
  * 本文件是"未来公共包出口面"的先行钉板：公共核心的对外符号一律由这里出。
- * 现状（原地版，不搬目录）：
- *   · 纯协议/生命周期文件（rpc/stream/rpcOnce/card/translate/cancelOutcomes/
- *     sendBan/choiceCache/urls/recovery/A2AProviderInput/sdkParser 类型段/
- *     v3FrameShapes/testing）零宿主耦合；
- *   · bootstrap.ts 尚含宿主装配（app 单例 + 开关缺省）——resolveA2aUrls/
- *     deriveEndpointBase/isLockCandidateError/isSendBannedForSession 与两常量
- *     虽是纯函数但地理上住在 bootstrap；公共化提取时它们随核心迁出，bootstrap
- *     瘦身为宿主 glue（消费方 import 面不变）。提取前经本入口引用它们是过渡
- *     姿态——宿主开关文件的窗口/构建期常量访问全部在调用期守卫内，import 无害。
+ * 依赖图闭合（review R2-4）：本入口的静态 import 图**只**覆盖公共核心文件
+ *（hostIsolation 的传递图检查钉死）——不达 bootstrap/switch/tcChatParser，
+ * 因此 OCB 经此入口消费时既不会解析宿主 SDK 的动态注入位、也不会引入
+ * nextgen 的 app 单例。传输选择策略纯函数在 policy.ts（宿主 bootstrap 保
+ * 有它们的历史 re-export 以维持消费面）。
  *
- * 宿主面（总开关函数/键、SDK 适配器、app 单例）**不在出口**——OCB 按 README
- * 消费契约自带开关面与 parserFactory。
+ * 宿主面（总开关函数/键、SDK 适配器、app 单例、isSendBannedForSession 便利
+ * 封装）**不在出口**——OCB 按 README 消费契约自带开关面与 parserFactory；
+ * 发送门判据出口是显式收 registry 的 isSessionBanned 纯函数版。
  */
 export { A2AProvider } from './A2AProvider';
 // —— 协议底座 ——
@@ -69,8 +66,9 @@ export type {
   A2AProviderConfig,
   A2aConnectionStatusEvent,
 } from './A2AProvider';
-// —— 过渡位：纯函数现住 bootstrap（提取时迁出，见文件头），import 期无害 ——
+// —— 传输选择策略纯函数（policy.ts 单源；宿主 bootstrap 仅保历史 re-export）——
 export {
-  resolveA2aUrls, deriveEndpointBase, isLockCandidateError,
-  isSendBannedForSession, A2A_CHOICE_SESSION_KEY, SEND_BAN_UI_TEXT,
-} from './bootstrap';
+  resolveA2aUrls, deriveEndpointBase, isLockCandidateError, isSessionBanned,
+  A2A_CHOICE_SESSION_KEY, SEND_BAN_UI_TEXT,
+  type A2aBootstrapConfig,
+} from './policy';
