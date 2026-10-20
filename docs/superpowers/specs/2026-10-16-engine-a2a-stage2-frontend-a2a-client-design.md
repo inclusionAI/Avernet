@@ -322,3 +322,34 @@ context 的禁发**。
 5. §7 停止放量条件——本轮复审通过（六类处置、立即回滚、恢复放量证据明确）。
 
 首版范围不再扩大；桌面/BCS/GRT 维持排除。
+## 9. 公共化边界（原地版，2026-10-20 追加）
+
+PR#2934 评审后调整交付边界：从"nextgen 专属实现"改为"Avernet 拥有、可被第二
+前端消费的公共实现"。**经三轮探讨（包全套 → 轻量出仓 → 原地）决定本次不搬
+目录、不建独立包**，交付"代码层边界"：
+
+- **parserFactory 注入缝**：A2AProvider 构造不再直调任何 SDK 加载器，
+  `A2AProviderConfig.parserFactory` 必填（缺注入 typed `parser_factory_missing`
+  拒）。nextgen 的开源 SDK 加载链移入宿主适配器 `tcChatParser.ts`；第二前端的
+  接入义务 = 提供同形工厂（结构契约 `sdkParser.ts`）。
+- **双 SDK 行为契约**：`testing.ts` 的 `createParserContractSuite`（8 组按
+  parser 消费面收口的断言，fixture=钉形表 `v3FrameShapes.ts`）。nextgen 对开源
+  SDK 跑绿的接线在 `contract.tc-chat.test.ts`；第二前端接入须对其内部 SDK 跑
+  同套件全绿——不凭 TS 类型兼容即认定行为一致。
+- **公共/宿主分类钉板**：`hostIsolation.test.ts` 枚举 16 个公共核心文件逐文件
+  grep（零 window/define/SDK 字样、不 import 宿主三件），并做目录完整性对账
+  （新公共文件不入表即红）。该钉板即未来提取 PR 的打包清单。
+- **单入口**：公共核心对外符号经 `index.ts` 收口；宿主面（开关/SDK 适配/app
+  单例）不入出口。既有消费方 import 面零改动（seam 钉板不破）。
+- **消费契约文档**：模块 README（接入四义务、四坑、提取路径预告）。
+
+**不提取独立包的两个决策依据**：
+1. frontend-nextgen 是内部导出产物（OPEN_CORE_MANIFEST）：目录出仓使 nextgen
+   依赖导出集外资产，内部基线下次 export 后无法构建，而回灌通道归另一组织
+   运维、本仓不可验证（TeamClaw 导出对称性风险）；
+2. 第二消费者（内部 OCB）的 a2a 副本在未合入分支，"走 submodule 消费"从未被
+   真实承诺（YAGNI）——为假想消费者建共享基建不成比例。
+
+**触发再评估的条件**：第二前端正式承诺 submodule 消费 → 提取为机械 PR
+（git mv 钉板清单 16 文件 + 三行 alias；bootstrap 的四个纯函数随行迁出、
+宿主 glue 保留 import 面）。届时本节更新为提取实况。
