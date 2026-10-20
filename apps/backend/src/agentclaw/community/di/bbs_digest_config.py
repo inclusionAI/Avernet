@@ -38,6 +38,22 @@ class BbsContentImportTaskConfig(BbsTaskConfig):
 
 
 @dataclass(frozen=True)
+class BbsDingTalkConfig:
+    """BBS-specific DingTalk application and digest-card configuration.
+
+    ``ak_secret_name`` is a named secret reference, not a credential value.
+    ``ak_id``, ``robot_code`` and ``card_template_id`` are account structure
+    identifiers owned by this feature. An all-empty block intentionally
+    disables real card delivery.
+    """
+
+    ak_id: str = ""
+    ak_secret_name: str = ""
+    robot_code: str = ""
+    card_template_id: str = ""
+
+
+@dataclass(frozen=True)
 class BbsLLMConfig:
     """BBS-specific OpenAI-compatible model settings.
 
@@ -55,6 +71,7 @@ class BbsLLMConfig:
 
 __all__ = [
     "BbsContentImportTaskConfig",
+    "BbsDingTalkConfig",
     "BbsDigestTaskConfig",
     "BbsLLMConfig",
     "BbsTaskConfig",

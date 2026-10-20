@@ -33,6 +33,9 @@ from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
     TaskSettingsServiceProtocol,
 )
 from agentclaw.community.api.task.feedback_service import FeedbackServiceProtocol
+from agentclaw.community.api.task.forum_digest_service import (
+    ForumDigestReportServiceProtocol,
+)
 from agentclaw.community.api.task.forum_service import ForumServiceProtocol
 from agentclaw.community.api.task.task_grant_service import (
     TaskClaimGrantService,
@@ -44,6 +47,7 @@ from agentclaw.community.core.repository.implementations.task.feedback import (
     FeedbackRepository,
 )
 from agentclaw.community.core.repository.implementations.task.forum import (
+    ForumDigestReportRepository,
     ForumRepository,
 )
 from agentclaw.community.core.repository.protocols.task import (
@@ -59,6 +63,9 @@ from agentclaw.community.core.repository.protocols.task.feedback import (
 )
 from agentclaw.community.core.repository.protocols.task.forum import (
     ForumRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.task.forum_digest import (
+    ForumDigestReportRepositoryProtocol,
 )
 from agentclaw.community.api.task.task_context_service import TaskContextServiceProtocol
 from agentclaw.community.core.task.task_center.task_service import TaskService
@@ -77,6 +84,9 @@ from agentclaw.community.core.task.forum.browsing import (
     BbsBrowseLoopScheduler,
 )
 from agentclaw.community.core.task.forum.browsing.cron_setup import BbsBrowseCronManager
+from agentclaw.community.core.task.forum.digest.report_service import (
+    BbsDigestReportService,
+)
 from agentclaw.community.core.task.forum.services.forum_service import ForumService
 from agentclaw.community.core.task.task_harness.harness import TaskHarness
 from agentclaw.community.core.task.task_context.task_graph_service import (
@@ -96,6 +106,12 @@ from agentclaw.community.core.bot_management.services.bcn_service import BcnServ
 from agentclaw.community.core.task.task_runner.client.ports import (
     BcsClientPort,
     OpenApiBotPort,
+)
+from agentclaw.community.core.task.task_discovery.frontend_url import (
+    ConfigFrontendUrlProvider,
+)
+from agentclaw.community.plugin_api.bbs_digest_notify import (
+    BbsDigestNotifyProvider,
 )
 from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 from agentclaw.community.di.config import TaskDispatchConfig
@@ -149,6 +165,11 @@ class TaskModule(Module):
         binder.bind(TaskGraphService, to=TaskGraphService, scope=singleton)
         binder.bind(ForumRepositoryProtocol, to=ForumRepository, scope=singleton)
         binder.bind(ForumServiceProtocol, to=ForumService, scope=singleton)
+        binder.bind(
+            ForumDigestReportRepositoryProtocol,
+            to=ForumDigestReportRepository,
+            scope=singleton,
+        )
         binder.bind(FeedbackRepositoryProtocol, to=FeedbackRepository, scope=singleton)
         binder.bind(FeedbackServiceProtocol, to=FeedbackService, scope=singleton)
         # BBS Browse Loop — runner (push seam), scheduler (framework cron), and the
@@ -162,6 +183,27 @@ class TaskModule(Module):
         # 不在此直绑,否则无参构造会漏掉 repo 注入。
         binder.bind(
             NoopCallbackAuthenticator, to=NoopCallbackAuthenticator, scope=singleton
+        )
+
+    @singleton
+    @provider
+    @inject
+    def bbs_digest_report_service(
+        self,
+        repository: ForumDigestReportRepositoryProtocol,
+        bot_service: BotServiceProtocol,
+        openapi_bot: OpenApiBotPort,
+        notify_sender: BbsDigestNotifyProvider,
+        frontend_url_provider: ConfigFrontendUrlProvider,
+    ) -> ForumDigestReportServiceProtocol:
+        """Build the batch digest service from deployment-owned delivery ports."""
+
+        return BbsDigestReportService(
+            repository=repository,
+            bot_service=bot_service,
+            openapi_bot=openapi_bot,
+            notify_sender=notify_sender,
+            frontend_url_provider=frontend_url_provider,
         )
 
     @singleton

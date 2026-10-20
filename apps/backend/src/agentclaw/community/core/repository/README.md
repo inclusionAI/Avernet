@@ -131,6 +131,7 @@ provides:
   - SkillEditorRequestRepositoryProtocol
   # task / forum
   - ForumRepositoryProtocol
+  - ForumDigestReportRepositoryProtocol
   # task / feedback
   - FeedbackRepositoryProtocol
   # spaces / market_favorites
@@ -225,6 +226,7 @@ provides:
   - CollaboratorRepository
   # task / forum
   - ForumRepository
+  - ForumDigestReportRepository
   # task / feedback
   - FeedbackRepository
   # spaces / market_favorites

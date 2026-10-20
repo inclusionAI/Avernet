@@ -9,6 +9,13 @@ from sqlalchemy.dialects import mysql
 from sqlalchemy.sql import func
 
 from agentclaw.community.core.base import Base
+from agentclaw.community.core.task.forum.digest.models import (
+    DIGEST_NOTIFICATION_STATUS_PENDING,
+    DIGEST_REPORT_STATUS_PENDING_CONFIRMATION,
+    ForumDigestReportBrief,
+    ForumDigestReportItem,
+    ForumDigestReportRecord,
+)
 from agentclaw.community.core.task.forum.models import (
     BROWSE_MODE_FRAMEWORK,
     TOPIC_STATUS_OPEN,
@@ -508,3 +515,164 @@ class ForumBrowseReportModel(Base):
 
 
 register_avernet_tenant_guard(ForumBrowseReportModel)
+
+
+
+def _digest_brief_from_row(value: object) -> ForumDigestReportBrief:
+    """Decode the Bot-reported whole-batch brief from ``brief_json``."""
+
+    if not isinstance(value, dict):
+        raise ValueError("ac_forum_digest_report.brief_json must be a JSON object")
+    summary = value.get("summary")
+    highlights = value.get("highlights")
+    if not isinstance(summary, str) or not summary:
+        raise ValueError("digest report brief summary must be a non-empty string")
+    if (
+        not isinstance(highlights, list)
+        or not highlights
+        or not all(
+            isinstance(highlight, str) and highlight
+            for highlight in highlights
+        )
+    ):
+        raise ValueError(
+            "digest report brief highlights must be a non-empty string array"
+        )
+    return ForumDigestReportBrief(
+        summary=summary,
+        highlights=tuple(highlights),
+    )
+
+
+def _digest_required_text(item: dict[str, object], field: str) -> str:
+    value = item.get(field)
+    if not isinstance(value, str) or not value:
+        raise ValueError(
+            f"ac_forum_digest_report.items_json entries must contain a non-empty string {field}"
+        )
+    return value
+
+
+def _digest_items_from_row(value: object) -> tuple[ForumDigestReportItem, ...]:
+    """Decode one digest batch's JSON item projection.
+
+    Writes are validated by the service before storage. The reader still fails
+    on malformed persistence rather than silently constructing partial items.
+    """
+
+    if not isinstance(value, list):
+        raise ValueError("ac_forum_digest_report.items_json must be a JSON array")
+
+    items: list[ForumDigestReportItem] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError(
+                "ac_forum_digest_report.items_json entries must be JSON objects"
+            )
+        tags = item.get("tags")
+        if not isinstance(tags, list) or not all(
+            isinstance(tag, str) and tag for tag in tags
+        ):
+            raise ValueError("digest report item tags must be a non-empty string array")
+        post_id = item.get("post_id")
+        if post_id is not None and not isinstance(post_id, str):
+            raise ValueError("digest report item post_id must be a string or null")
+        items.append(
+            ForumDigestReportItem(
+                source=_digest_required_text(item, "source"),
+                topic_id=_digest_required_text(item, "topic_id"),
+                post_id=post_id,
+                title=_digest_required_text(item, "title"),
+                content=_digest_required_text(item, "content"),
+                reason=_digest_required_text(item, "reason"),
+                tags=tuple(tags),
+                retention_target=_digest_required_text(item, "retention_target"),
+            )
+        )
+    return tuple(items)
+
+
+class ForumDigestReportModel(Base):
+    """One Bot-submitted, batch-level BBS digest confirmation report."""
+
+    __tablename__ = "ac_forum_digest_report"
+
+    id = Column(
+        AutoIncrementBigInteger,
+        primary_key=True,
+        autoincrement=True,
+        nullable=False,
+    )
+    digest_id = Column(_binary_string(128), nullable=False)
+    bot_id = Column(_binary_string(128), nullable=False)
+    owner_user_id = Column(String(64), nullable=False)
+    client_request_id = Column(_REQUEST_ID, nullable=False)
+    brief_json = Column(JSON, nullable=False)
+    items_json = Column(JSON, nullable=False)
+    status = Column(
+        String(32),
+        nullable=False,
+        default=DIGEST_REPORT_STATUS_PENDING_CONFIRMATION,
+        server_default=DIGEST_REPORT_STATUS_PENDING_CONFIRMATION,
+    )
+    notification_status = Column(
+        String(16),
+        nullable=False,
+        default=DIGEST_NOTIFICATION_STATUS_PENDING,
+        server_default=DIGEST_NOTIFICATION_STATUS_PENDING,
+    )
+    session_id = Column(_binary_string(256), nullable=True)
+    session_url = Column(String(2048), nullable=True)
+    decision_client_request_id = Column(_REQUEST_ID, nullable=True)
+    decided_at = Column(DateTime, nullable=True)
+    env = Column(String(20), nullable=False, default=get_current_env)
+    avernet_tenant = Column(
+        String(64), nullable=False, server_default="teamclaw"
+    )
+    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
+    gmt_modified = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        Index("uk_forum_digest_report_id", "digest_id", unique=True),
+        Index(
+            "uk_forum_digest_report_request",
+            "avernet_tenant",
+            "env",
+            "bot_id",
+            "client_request_id",
+            unique=True,
+        ),
+        Index(
+            "idx_forum_digest_report_bot",
+            "avernet_tenant",
+            "env",
+            "bot_id",
+            "gmt_create",
+        ),
+    )
+
+    def to_record(self) -> ForumDigestReportRecord:
+        return ForumDigestReportRecord(
+            digest_id=self.digest_id,
+            bot_id=self.bot_id,
+            owner_user_id=self.owner_user_id,
+            client_request_id=self.client_request_id,
+            brief=_digest_brief_from_row(self.brief_json),
+            items=_digest_items_from_row(self.items_json),
+            status=self.status,
+            notification_status=self.notification_status,
+            session_id=self.session_id,
+            session_url=self.session_url,
+            decision_client_request_id=self.decision_client_request_id,
+            decided_at=self.decided_at,
+            created_at=self.gmt_create,
+            updated_at=self.gmt_modified,
+        )
+
+
+register_avernet_tenant_guard(ForumDigestReportModel)

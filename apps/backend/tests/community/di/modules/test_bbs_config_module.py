@@ -10,6 +10,7 @@ from agentclaw.community.di.modules import bbs_config_module
 from agentclaw.community.di.bbs_digest_config import (
     BbsContentImportTaskConfig,
     BbsDigestTaskConfig,
+    BbsDingTalkConfig,
     BbsLLMConfig,
 )
 from agentclaw.community.di.modules.bbs_config_module import BbsConfigModule
@@ -80,6 +81,45 @@ def test_bbs_config_module_requires_heartbeat_shorter_than_lock(
 
     with pytest.raises(ValueError, match=r"heartbeat must be less than lock_ttl"):
         BbsConfigModule().bbs_content_import_task()
+
+
+def test_bbs_dingtalk_config_is_parsed_without_a_literal_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_block(
+        monkeypatch,
+        {
+            "dingtalk": {
+                "ak_id": "bbs-ak-id",
+                "ak_secret_name": "bbs_dingtalk_ak_secret",
+                "robot_code": "bbs-robot-code",
+                "card_template_id": "bbs-card-template.schema",
+            }
+        },
+    )
+
+    assert BbsConfigModule().bbs_dingtalk() == BbsDingTalkConfig(
+        ak_id="bbs-ak-id",
+        ak_secret_name="bbs_dingtalk_ak_secret",
+        robot_code="bbs-robot-code",
+        card_template_id="bbs-card-template.schema",
+    )
+
+
+def test_bbs_dingtalk_config_rejects_partial_card_account(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_block(
+        monkeypatch,
+        {
+            "dingtalk": {
+                "ak_id": "bbs-ak-id",
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="partially configured"):
+        BbsConfigModule().bbs_dingtalk()
 
 
 def test_bbs_llm_config_keeps_bbs_secret_separate_from_health_check(

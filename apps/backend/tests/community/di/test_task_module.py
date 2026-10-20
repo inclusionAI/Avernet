@@ -7,11 +7,19 @@ from agentclaw.community.adapters.http.task.auth import (
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
+from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.task.forum_digest_service import (
+    ForumDigestReportServiceProtocol,
+)
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.forum.browsing.cron_setup import (
     BbsBrowseCronManager,
 )
 from agentclaw.community.di.config import TaskDispatchConfig
+from agentclaw.community.plugin_api.bbs_digest_notify import (
+    BbsDigestNotifyProvider,
+)
+from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry,
     InMemoryCallbackCorrelationRegistry,
@@ -19,6 +27,10 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
 from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
     TaskSettingsServiceProtocol,
 )
+from agentclaw.community.core.task.task_discovery.frontend_url import (
+    ConfigFrontendUrlProvider,
+)
+from agentclaw.community.core.task.task_runner.client.ports import OpenApiBotPort
 from agentclaw.community.di.modules.task_module import TaskModule
 
 from agentclaw.community.di.modules.task_module import _resolve_harness_enabled
@@ -49,6 +61,48 @@ class _StubDiscoverModule(Module):
                 return {"total": 0, "items": []}
 
         return _BP()  # type: ignore[return-value]
+
+
+class _StubBbsDigestModule(Module):
+    """Fixture-only deployment bindings for the BBS digest report service."""
+
+    @singleton
+    @provider
+    def database(self) -> DatabasePlugin:
+        return object()  # type: ignore[return-value]
+
+    @singleton
+    @provider
+    def bot_service(self) -> BotServiceProtocol:
+        class _BotService:
+            def get_bot_by_id(self, bot_id: str):
+                return {"bot_id": bot_id, "owner_id": "111111"}
+
+        return _BotService()  # type: ignore[return-value]
+
+    @singleton
+    @provider
+    def openapi_bot(self) -> OpenApiBotPort:
+        class _OpenApiBot:
+            @property
+            def api_key_prefix(self) -> str:
+                return "test-prefix"
+
+        return _OpenApiBot()  # type: ignore[return-value]
+
+    @singleton
+    @provider
+    def notify_messages(self) -> BbsDigestNotifyProvider:
+        class _NotifyMessages:
+            def send(self, message, *, channel="tc_card"):
+                return "notify-1"
+
+        return _NotifyMessages()  # type: ignore[return-value]
+
+    @singleton
+    @provider
+    def frontend_url(self) -> ConfigFrontendUrlProvider:
+        return ConfigFrontendUrlProvider("http://frontend.example")
 
 
 class _StubBbsCronModule(Module):
@@ -184,3 +238,11 @@ def test_task_service_degrades_when_merchant_bindings_are_not_registered(monkeyp
     )
     assert isinstance(svc, module.TaskService)
     assert svc._api_base_url == "https://backend.example"
+
+
+def test_task_module_wires_bbs_digest_report_service_singleton():
+    injector = Injector(
+        [TaskModule(), _StubDiscoverModule(), _StubBbsCronModule(), _StubBbsDigestModule()]
+    )
+    service = injector.get(ForumDigestReportServiceProtocol)
+    assert service is injector.get(ForumDigestReportServiceProtocol)

@@ -25,7 +25,11 @@ from agentclaw.community.core.task.forum.shared.protocols import BbsLLMProtocol
 from agentclaw.community.di.bbs_digest_config import (
     BbsContentImportTaskConfig,
     BbsDigestTaskConfig,
+    BbsDingTalkConfig,
     BbsLLMConfig,
+)
+from agentclaw.community.plugin_api.bbs_digest_notify import (
+    BbsDigestNotifyProvider,
 )
 from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.plugin_api.http_client import (
@@ -37,6 +41,25 @@ from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 
 class BbsDigestModule(Module):
     """Composition root for the BBS digest and content-import runtime slices."""
+
+    @singleton
+    @provider
+    @inject
+    def bbs_digest_notify_provider(
+        self,
+        config: BbsDingTalkConfig,
+        secret_resolver: SecretResolver,
+    ) -> BbsDigestNotifyProvider:
+        """Bind the BBS-owned card sender; discovery account holders stay unused."""
+
+        from agentclaw.community.plugins.community.bbs_digest_notify import (
+            BbsDingTalkNotifyProvider,
+        )
+
+        return BbsDingTalkNotifyProvider(
+            config=config,
+            secret_resolver=secret_resolver,
+        )
 
     @singleton
     @provider

@@ -10,6 +10,7 @@ from injector import Module, provider, singleton
 from agentclaw.community.di.bbs_digest_config import (
     BbsContentImportTaskConfig,
     BbsDigestTaskConfig,
+    BbsDingTalkConfig,
     BbsLLMConfig,
     BbsTaskConfig,
 )
@@ -17,7 +18,8 @@ from agentclaw.community.di.modules.config_module import _as_bool, _as_int, _blo
 
 _TASK_KEYS = frozenset(field.name for field in fields(BbsTaskConfig))
 _LLM_KEYS = frozenset(field.name for field in fields(BbsLLMConfig))
-_BBS_KEYS = frozenset({"digest_task", "content_import_task", "llm"})
+_DINGTALK_KEYS = frozenset(field.name for field in fields(BbsDingTalkConfig))
+_BBS_KEYS = frozenset({"digest_task", "content_import_task", "llm", "dingtalk"})
 
 
 def reject_unknown_keys(
@@ -47,6 +49,33 @@ class BbsConfigModule(Module):
             BbsContentImportTaskConfig,
             block_name="content_import_task",
         )
+
+    @singleton
+    @provider
+    def bbs_dingtalk(self) -> BbsDingTalkConfig:
+        default = BbsDingTalkConfig()
+        bbs_block = _as_mapping(_block("bbs"), where="bbs")
+        reject_unknown_keys(bbs_block, where="bbs", allowed=_BBS_KEYS)
+        raw_block = _mapping(bbs_block, key="dingtalk", where="bbs.dingtalk")
+        reject_unknown_keys(raw_block, where="bbs.dingtalk", allowed=_DINGTALK_KEYS)
+
+        values = {
+            key: _required_block_string(raw_block, key, "bbs.dingtalk")
+            for key in _DINGTALK_KEYS
+        }
+        configured = [key for key, value in values.items() if value]
+        if configured and len(configured) != len(values):
+            missing = ", ".join(
+                key for key in sorted(values) if not values[key]
+            )
+            raise ValueError(
+                "bbs.dingtalk is partially configured; missing "
+                f"{missing}. Configure all account fields, or remove the "
+                "block to disable BBS card delivery"
+            )
+        if not configured:
+            return default
+        return BbsDingTalkConfig(**values)
 
     @singleton
     @provider
@@ -182,6 +211,17 @@ def _string(block: dict[str, Any], key: str, fallback: str, where: str) -> str:
     if not isinstance(value, str):
         raise ValueError(f"{where}.{key} must be a string")
     return value
+
+
+def _required_block_string(
+    block: dict[str, Any], key: str, where: str
+) -> str:
+    if key not in block:
+        return ""
+    value = _string(block, key, "", where)
+    if not value.strip():
+        raise ValueError(f"{where}.{key} must be a non-empty string")
+    return value.strip()
 
 
 __all__ = ["BbsConfigModule", "reject_unknown_keys"]
