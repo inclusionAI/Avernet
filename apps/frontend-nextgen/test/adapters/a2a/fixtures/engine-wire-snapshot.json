@@ -1,0 +1,138 @@
+{
+  "_header": "ENGINE-GENERATED SNAPSHOT — DO NOT HAND-EDIT. Regenerate via __tests__/scripts/gen-engine-wire-snapshot.py (cd <Avernet>/engine/adapter && PYTHONPATH=src python3 <script> --out <this file>). Sequence = real A2aKernel publish order of one completed chat run (engine_bridge.execute_and_stream isomorphic drive): task snapshot, TASK_STATE_WORKING status, delta(你), delta(好), final(你好！ full-replacement), then complete_run's state-change statusUpdate(COMPLETED)@N+1 (non-final) followed by the SAME-SEQ terminal marker (kernel.complete_run:156-180). Consumer note: the run id inside members is kernel-generated (12 hex) — derive it from this file, never hardcode.",
+  "envelopes": [
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "task": {
+          "id": "a7821a80a3e7",
+          "contextId": "c1",
+          "status": {
+            "state": "TASK_STATE_SUBMITTED"
+          },
+          "metadata": {}
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "statusUpdate": {
+          "taskId": "a7821a80a3e7",
+          "contextId": "c1",
+          "status": {
+            "state": "TASK_STATE_WORKING"
+          },
+          "metadata": {
+            "seq": 2
+          }
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "artifactUpdate": {
+          "taskId": "a7821a80a3e7",
+          "contextId": "c1",
+          "artifact": {
+            "artifactId": "text-a7821a80a3e7",
+            "parts": [
+              {
+                "text": "你"
+              }
+            ]
+          },
+          "append": false,
+          "lastChunk": false,
+          "metadata": {
+            "seq": 3
+          }
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "artifactUpdate": {
+          "taskId": "a7821a80a3e7",
+          "contextId": "c1",
+          "artifact": {
+            "artifactId": "text-a7821a80a3e7",
+            "parts": [
+              {
+                "text": "好"
+              }
+            ]
+          },
+          "append": true,
+          "lastChunk": false,
+          "metadata": {
+            "seq": 4
+          }
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "artifactUpdate": {
+          "taskId": "a7821a80a3e7",
+          "contextId": "c1",
+          "artifact": {
+            "artifactId": "text-a7821a80a3e7",
+            "parts": [
+              {
+                "text": "你好！"
+              }
+            ]
+          },
+          "append": false,
+          "lastChunk": true,
+          "metadata": {
+            "seq": 5
+          }
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "statusUpdate": {
+          "taskId": "a7821a80a3e7",
+          "contextId": "c1",
+          "status": {
+            "state": "TASK_STATE_COMPLETED"
+          },
+          "metadata": {
+            "seq": 6
+          }
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "statusUpdate": {
+          "taskId": "a7821a80a3e7",
+          "contextId": "c1",
+          "status": {
+            "state": "TASK_STATE_COMPLETED"
+          },
+          "metadata": {
+            "seq": 6,
+            "final": "true",
+            "lastSeq": 6
+          }
+        }
+      }
+    }
+  ]
+}
