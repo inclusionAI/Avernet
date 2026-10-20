@@ -35,28 +35,27 @@
  * 探测落定后新开会话（Chat 新建/重建）即走 A2A。页面刷新重新探测（缓存不持久化）。
  */
 import { A2AProvider } from './A2AProvider';
-import type { A2aOpenClawProviderConfig } from './A2AProviderInput';
 import { TransportChoiceCache } from './choiceCache';
 import { fetchCard, Scenario, validateScenarios } from './card';
 import { createSendBanRegistry, type SendBanRegistry } from './sendBan';
 import { isA2aClientEnabled } from './switch';
 import { createTcChatParserFactory } from './tcChatParser';
-import { a2aUrlsFromBaseUrl, a2aUrlsFromWsUrl, type A2aUrls } from './urls';
-import { LOCK_CANDIDATE_KINDS, type WireFailure } from './rpc';
+// ─── 公共策略纯函数与类型（policy.ts 单源；此处 re-export 保消费面） ──────
 
-// ─── 输入类型（结构镜像，零 SDK 依赖——同 A2AProviderInput.ts 理由） ────────
-
-/** v3 providerConfig 的子集 + A2A 消费面成员（url 必填，其余可选透传） */
-export interface A2aBootstrapConfig extends A2aOpenClawProviderConfig {
-  /** 动态 IAM 凭证（每次 request/RPC 前取新，覆盖静态 xIAMToken） */
-  iamTokenGetter?: () => Promise<string | undefined>;
-  /**
-   * B17 服务端签发的 A2A base（连接响应 sockets kind='a2a' 的 url，由 BaaS
-   * 沙箱层拼成浏览器可达形态）。在场即压过从 ws url 的推导——推导是站点
-   * 直连拓扑的兜底，网关 relay topo 下派生地址路由不到 card（404）。
-   */
-  a2aBaseUrl?: string;
-}
+// review R2-4：这组成员曾是本文件内联定义——index.ts 经 re-export 转出时把
+// switch/tcChatParser/app 单例拖进公共依赖图。外提到 policy.ts 后本文件只剩
+// 宿主装配；既有消费方（botChatProvider/useBotChat/测试）import 面不变。
+export {
+  resolveA2aUrls, deriveEndpointBase, isLockCandidateError, isSessionBanned,
+  A2A_CHOICE_SESSION_KEY, SEND_BAN_UI_TEXT,
+  type A2aBootstrapConfig,
+} from './policy';
+import {
+  resolveA2aUrls, isSessionBanned, isLockCandidateError,
+  A2A_CHOICE_SESSION_KEY,
+  type A2aBootstrapConfig,
+} from './policy';
+import type { A2aUrls } from './urls';
 
 /** 测试 seam / 组合注入口（全部可选；缺省 = app 单例 + 全局 fetch + 总开关） */
 export interface A2aBootstrapDeps {
@@ -81,26 +80,6 @@ const appSendBan = createSendBanRegistry();
  */
 export function getSendBanRegistry(): SendBanRegistry {
   return appSendBan;
-}
-
-// ─── 常量（UI/键位单源） ──────────────────────────────────────────────────
-
-/** 选择缓存的页级会话键（决策见文件头） */
-export const A2A_CHOICE_SESSION_KEY = 'default';
-
-/** §3.1 send-ban 的 UI 门文案（spec 原文；唯一来源，hook 侧勿另抄） */
-export const SEND_BAN_UI_TEXT = '该会话暂不可发送（底层执行停止未确认）';
-
-// ─── 锁定分类（纯函数，单独导出供测试） ────────────────────────────────────
-
-/**
- * spec §3.3 锁候选判定：typed failure 且 kind ∈ LOCK_CANDIDATE_KINDS
- * (auth/protocol)。transport/rpc/无 typed 的错误（含 'a2a probe failed'
- * 探测失败——不携带 .failure）一律不锁。
- */
-export function isLockCandidateError(err: unknown): boolean {
-  const failure = (err as { failure?: WireFailure } | null | undefined)?.failure;
-  return failure !== undefined && LOCK_CANDIDATE_KINDS.has(failure.kind);
 }
 
 // ─── 构造 + 运行期锁定订阅 ────────────────────────────────────────────────
@@ -136,20 +115,6 @@ function buildA2AProvider(
     }
   });
   return provider;
-}
-
-// ─── A2A 面地址解析（服务端签发优先，ws 推导兜底） ─────────────────────────
-
-/**
- * 连接材料 → A2A card/rpc 地址（单一解析口径，探测/缓存/禁令三面共用）：
- * ``a2aBaseUrl`` 在场即服务端签发形态（B17，浏览器可达是签发方承诺）；
- * 否则回退 v3 ws url 直连推导。两者解析失败都上抛——形状问题不是
- * endpoint 的探测结论（不落缓存，六态决策表第 2 态）。
- */
-export function resolveA2aUrls(providerConfig: A2aBootstrapConfig): A2aUrls {
-  return providerConfig.a2aBaseUrl
-    ? a2aUrlsFromBaseUrl(providerConfig.a2aBaseUrl)
-    : a2aUrlsFromWsUrl(providerConfig.url);
 }
 
 // ─── 异步正路：探测 → 校验 → 收敛 → 构造 ─────────────────────────────────
@@ -260,26 +225,12 @@ export function takeCachedA2AProvider(
   });
 }
 
-// ─── §3.1 send-ban 消费门（纯函数，hook 侧入口） ──────────────────────────
-
-/** ws url → A2A endpointBase（rpc url）；非 ws url → null */
-export function deriveEndpointBase(wsUrl: string): string | null {
-  try {
-    return a2aUrlsFromWsUrl(wsUrl).rpcUrl;
-  } catch {
-    return null;
-  }
-}
+// ─── §3.1 send-ban 消费门（宿主便利封装；判据纯函数在 policy.ts） ────────
 
 /**
- * 发送门前（hook sendMessageWithAttachments 顶部调用）：
- * (endpointBase, sessionKey) 命中禁令 → 拦截本次发送。sessionKey 与 provider
- * request 期核销的 contextId 同源（buildParams 直传同键）。非 A2A 面
- * （非 ws url）恒 false——v3 发送不受影响。
- *
- * B17：``a2aBaseUrl`` 在场时按签发 base 解析 endpointBase，与探测缓存/
- * provider 注册禁令用的键同一口径（resolveA2aUrls 单源）——ws 推导在这条
- * topo 下指向网关，和 provider 的真实 rpcUrl 永不相等，禁令会静默失效。
+ * 发送门（hook 侧入口）：isSessionBanned 的 nextgen 便利封装——registry 缺省
+ * app 单例（判据/键位口径与文档见 policy.isSessionBanned；语义注释随真身迁去，
+ * 此处不在公共面——公共入口导出显式收 registry 的纯判据版）。
  */
 export function isSendBannedForSession(
   sessionKey: string,
@@ -287,13 +238,7 @@ export function isSendBannedForSession(
   a2aBaseUrl?: string,
   registry: SendBanRegistry = appSendBan,
 ): boolean {
-  let base: string | null;
-  try {
-    base = resolveA2aUrls({ url: wsUrl, a2aBaseUrl }).rpcUrl;
-  } catch {
-    base = null;
-  }
-  return base !== null && registry.isBanned(base, sessionKey);
+  return isSessionBanned(registry, sessionKey, wsUrl, a2aBaseUrl);
 }
 
 // A2A M2 bootstrap seam: 取消结果 UI 文案单源转出（spec §4.3 表）——

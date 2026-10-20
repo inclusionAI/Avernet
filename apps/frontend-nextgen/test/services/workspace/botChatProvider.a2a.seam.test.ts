@@ -36,6 +36,10 @@ const CANCEL_OUTCOMES_SOURCE = readFileSync(
   join(__dirname, '..', '..', '..', 'src', 'adapters', 'a2a', 'cancelOutcomes.ts'),
   'utf8',
 );
+const POLICY_SOURCE = readFileSync(
+  join(__dirname, '..', '..', '..', 'src', 'adapters', 'a2a', 'policy.ts'),
+  'utf8',
+);
 
 const V3_LINE = 'return new OpenClawProvider(cfg);';
 
@@ -115,9 +119,14 @@ describe('botChatProvider A2A bootstrap 接缝钉板（B16 static guard）', () 
     expect(PROVIDER_SOURCE).toContain('this.a2aBaseUrl = a2aBaseUrl;');
   });
 
-  it('发送门文案单源在 bootstrap.ts（spec 原文）；取消文案矩阵单源在 cancelOutcomes.ts', () => {
-    expect(BOOTSTRAP_SOURCE).toContain(
+  it('发送门文案单源在 policy.ts（review R2-4 外提），bootstrap 持 re-export 维持消费面；取消文案矩阵单源在 cancelOutcomes.ts', () => {
+    // R2-4：策略纯函数/常量自 bootstrap 外提 policy.ts（公共入口不得传递依赖
+    // 宿主装配面）——文案字面量的"唯一来源"随迁，bootstrap 只被允许 re-export
+    expect(POLICY_SOURCE).toContain(
       "export const SEND_BAN_UI_TEXT = '该会话暂不可发送（底层执行停止未确认）';",
+    );
+    expect(BOOTSTRAP_SOURCE).toContain(
+      "A2A_CHOICE_SESSION_KEY, SEND_BAN_UI_TEXT,\n  type A2aBootstrapConfig,\n} from './policy';",
     );
     expect(CANCEL_OUTCOMES_SOURCE).toContain(
       'export const CANCEL_UI_TEXT: Record<CancelOutcomeKind, string> = {',

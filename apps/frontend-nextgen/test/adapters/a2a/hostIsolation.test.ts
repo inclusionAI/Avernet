@@ -17,7 +17,7 @@ const SRC = join(__dirname, '..', '..', '..', 'src', 'adapters', 'a2a');
 const COMMON_FILES = [
   'rpc.ts', 'rpcOnce.ts', 'stream.ts', 'card.ts', 'translate.ts',
   'cancelOutcomes.ts', 'sendBan.ts', 'choiceCache.ts', 'urls.ts', 'recovery.ts',
-  'A2AProviderInput.ts', 'A2AProvider.ts', 'sdkParser.ts',
+  'A2AProviderInput.ts', 'A2AProvider.ts', 'sdkParser.ts', 'policy.ts',
   'index.ts', 'testing.ts', 'v3FrameShapes.ts',
 ] as const;
 
@@ -52,6 +52,55 @@ describe('hostIsolation — 公共核心零宿主字样（提取 PR 的打包清
       const hits = FORBIDDEN.filter((needle) => src.includes(needle));
       expect(hits).toEqual([]);
     });
+  }
+});
+
+// ─── 传递依赖图闭合（review R2-4：单文件 grep 抓不到，须按 import 图走）───
+
+/** 收集一个 TS 文件对同目录 './x' 相对模块的静态 import/re-export 引用 */
+function relativeImports(fileName: string): string[] {
+  const src = readFileSync(join(SRC, fileName), 'utf8');
+  const hits = [...src.matchAll(/from\s+['"]\.\/([\w-]+)['"]/g)];
+  return [...new Set(hits.map((m) => `${m[1]}.ts`))];
+}
+
+it('公共入口的静态 import 图不达宿主装配面（bootstrap/switch/tcChatParser）', () => {
+  const hostSet = new Set<string>(HOST_FILES);
+  // BFS：从 index.ts 起沿同目录相对 import 全图展开
+  const seen = new Set<string>(['index.ts']);
+  const queue = ['index.ts'];
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    for (const dep of relativeImports(cur)) {
+      expect(new Set<string>([...COMMON, ...HOST_FILES])).toContain(dep);
+      if (!seen.has(dep)) {
+        seen.add(dep);
+        queue.push(dep);
+      }
+    }
+  }
+  const reachedHost = [...seen].filter((f) => hostSet.has(f));
+  expect(reachedHost).toEqual([]);      // 经公共入口看不见任何宿主文件
+});
+
+it('公共核心任意文件的静态 import 图均不达宿主装配面（防新文件绕过入口）', () => {
+  const hostSet = new Set<string>(HOST_FILES);
+  for (const file of COMMON) {
+    const seen = new Set<string>([file]);
+    const queue = [file];
+    while (queue.length > 0) {
+      const cur = queue.shift()!;
+      for (const dep of relativeImports(cur)) {
+        if (hostSet.has(dep)) {
+          throw new Error(`${file} 经 import 链达宿主文件 ${dep}` +
+            `（路径：${[...seen].join(' → ')} → ${dep}）`);
+        }
+        if (!seen.has(dep) && COMMON.includes(dep)) {
+          seen.add(dep);
+          queue.push(dep);
+        }
+      }
+    }
   }
 });
 
