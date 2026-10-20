@@ -40,15 +40,17 @@ def sync_agentclaw_artifact(
     started = time.monotonic()
     fields = "device_id=%s version=%s source=%s target=%s"
     context = (device_id, version, source, target)
+    if not enabled:
+        logger.info("service_bot.agentclaw.skip " + fields + " reason=feature_disabled elapsed_ms=%s",
+                    *context, round((time.monotonic() - started) * 1000))
+        return
     logger.info("service_bot.agentclaw.request " + fields + " symlink_policy=preserve", *context)
     try:
         _validate_directories(target_dir.parent)
-        reason = "feature_disabled" if not enabled else ""
-        if not reason:
-            _validate_directories(source_home)
-            reason = "excluded" if is_excluded(".agentclaw", build_ignore_paths) else ""
-            if not reason and not source.exists():
-                reason = "source_missing"
+        _validate_directories(source_home)
+        reason = "excluded" if is_excluded(".agentclaw", build_ignore_paths) else ""
+        if not reason and not source.exists():
+            reason = "source_missing"
         if reason:
             if target.exists():
                 logger.info("service_bot.agentclaw.cleanup.request " + fields + " reason=%s", *context, reason)

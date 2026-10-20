@@ -160,8 +160,10 @@ An exact owner entry enables that user; `entity_id='*'` enables all owners in
 that environment. Missing owners, missing entries, and read failures disable
 both snapshots. This decision is fixed for the build, independently of the
 publishing actor. Engine files, historical artifact restoration, and runtime
-ownership are unchanged. Disabled retries clear only existing versioned CLI
-snapshots without reading draft CLI directories or creating missing snapshots.
+ownership are unchanged. When disabled, `.agentclaw` returns without inspecting
+or changing either source or target; any existing versioned snapshot is retained.
+Disabled `.local/bin` retries still clear existing versioned bin snapshots without
+reading draft CLI directories or creating missing snapshots.
 
 This list is server-managed. The authenticated frontend correction API rejects
 writes to this type with HTTP 403; operations must manage it through the database.
