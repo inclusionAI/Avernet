@@ -30,6 +30,8 @@ import { mapBotSessionMessages } from './botSessionMessageMapper';
 import type { DomainError, DomainResult } from './identityService';
 
 export interface ChatBotView {
+  /** Runtime APIs address the owning user; team chat ownerId may be a record entity. */
+  engineOwnerId?: string;
   botId: string; // mine 原始 bot_id(可能复合)
   realBotId: string; // 拆分 head
   ownerId?: string; // 拆分 tail(staffNo)

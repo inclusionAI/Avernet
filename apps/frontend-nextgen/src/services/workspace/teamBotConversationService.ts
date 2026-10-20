@@ -78,6 +78,7 @@ function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
     botId,
     realBotId,
     ownerId,
+    engineOwnerId: dto.owner_id?.trim() || undefined,
     isTeamBot: true,
     displayName: dto.bot_name?.trim() || realBotId,
     engine: dto.engine,
@@ -124,14 +125,17 @@ export const teamBotConversationService = {
       // Collaboration summaries omit permissions; inventory is authoritative.
       const spaces = new Set(
         [...bots.values()]
-          .filter((bot) => bot.ownerId)
+          .filter((bot) => bot.ownerId && bot.engineOwnerId)
           .map((bot) => bot.spaceId)
           .filter((id): id is string => Boolean(id)),
       );
       for (const spaceId of spaces) {
-        const pending = new Set(
-          [...bots.values()].filter((bot) => bot.spaceId === spaceId && bot.ownerId).map((bot) => bot.botId),
+        const targets = new Map(
+          [...bots.values()]
+            .filter((bot) => bot.spaceId === spaceId && bot.ownerId && bot.engineOwnerId)
+            .map((bot) => [`${bot.realBotId}:${bot.engineOwnerId}`, bot]),
         );
+        const pending = new Set([...targets.values()].map((bot) => bot.botId));
         try {
           for (let page = 1; ; page += 1) {
             if (signal?.aborted) throw new Error('请求已取消');
@@ -145,7 +149,7 @@ export const teamBotConversationService = {
             for (const row of rows) {
               const ownerId = row.owner_entity_id;
               if (typeof row.bot_id !== 'string' || typeof ownerId !== 'string') continue;
-              const bot = bots.get(`${row.bot_id}:${ownerId}`);
+              const bot = targets.get(`${row.bot_id}:${ownerId}`);
               if (!bot || bot.spaceId !== spaceId) continue;
               // A published service card cannot authorize a draft operation.
               if (bot.botType?.toLowerCase() === 'service' && row.display_state !== 'service_draft') continue;

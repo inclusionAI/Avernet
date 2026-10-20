@@ -20,7 +20,8 @@ export function buildChatEngineVersionTarget(input: {
     !bot.online ||
     bot.status?.toLowerCase() === 'hidden' ||
     !bot.chatable ||
-    !bot.ownerId
+    !bot.ownerId ||
+    (bot.isTeamBot && !bot.engineOwnerId)
   )
     return null;
 
@@ -31,7 +32,7 @@ export function buildChatEngineVersionTarget(input: {
     key: `chat:${userId}:${section}:${bot.botId}:${sessionId}`,
     botId: bot.realBotId,
     userId,
-    ownerId: bot.ownerId,
+    ownerId: bot.engineOwnerId ?? bot.ownerId,
     engine,
     enabled: true,
     restartPermission: {

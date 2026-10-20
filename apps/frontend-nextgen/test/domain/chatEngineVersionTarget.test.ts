@@ -80,3 +80,10 @@ test('服务 Bot 目录没有阶段时使用草稿操作阶段', () => {
     actions: ['engine_restart'],
   });
 });
+
+test('团队引擎请求使用真实 Bot owner，保留实体 ID 作为聊天身份', () => {
+  const teamBot = { ...bot, isTeamBot: true, ownerId: 'record-entity', engineOwnerId: 'bot-owner' };
+  expect(buildChatEngineVersionTarget({ ...input, section: 'team', bot: teamBot })).toMatchObject({ ownerId: 'bot-owner', botId: 'bot-1', userId: 'caller-1' });
+  expect(teamBot.ownerId).toBe('record-entity');
+  expect(buildChatEngineVersionTarget({ ...input, section: 'team', bot: { ...teamBot, engineOwnerId: undefined } })).toBeNull();
+});
