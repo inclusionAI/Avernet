@@ -527,7 +527,7 @@ class DeviceServiceRouter(DeviceProviderRouterMixin, DeviceService):
         return service.exec_shell(device_id, shell_cmd)
 
     @override
-    def exec_shell_new(self, device_id: str, shell_cmd: str):
+    def exec_shell_new(self, device_id: str, shell_cmd: str, *, timeout_seconds: int | None = None):
         """在设备上执行 shell 命令 - 根据 device_id 路由.
 
         Args:
@@ -538,6 +538,8 @@ class DeviceServiceRouter(DeviceProviderRouterMixin, DeviceService):
             命令执行结果
         """
         service = self._get_provider_for_device_id(device_id)
+        if timeout_seconds is not None:
+            return service.exec_shell_new(device_id, shell_cmd, timeout_seconds=timeout_seconds)
         return service.exec_shell_new(device_id, shell_cmd)
 
     @override

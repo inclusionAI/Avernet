@@ -38,6 +38,7 @@ def _make_service(
     whitelist_service.is_bot_feature_enabled.return_value = False
     return BotBuildService(
         user_list_repository=MagicMock(exists=MagicMock(return_value=False)),
+        fastdisk_publisher=MagicMock(try_publish=MagicMock(return_value=False)),
         build_ignore_repository=MagicMock(get=MagicMock(return_value=None)),
         env="test",
         device_service=device_service,

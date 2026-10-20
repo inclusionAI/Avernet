@@ -193,7 +193,7 @@ class DeviceService:
         """Execute shell command on device (hook — subclasses override)."""
         return f"Command executed on {device.device_id}: {shell_cmd}"
 
-    def _exec_shell_new(self, device: AllocatedDevice, shell_cmd: str):
+    def _exec_shell_new(self, device: AllocatedDevice, shell_cmd: str, *, timeout_seconds: int | None = None):
         """Execute shell command on device and return CommandResult (hook — subclasses override).
 
         Returns:
@@ -1557,7 +1557,7 @@ class DeviceService:
             f"{type(self).__name__} does not support multi-instance restart"
         )
 
-    def exec_shell_new(self, device_id: str, shell_cmd: str):
+    def exec_shell_new(self, device_id: str, shell_cmd: str, *, timeout_seconds: int | None = None):
         """Execute shell command on device and return CommandResult.
 
         Args:
@@ -1588,6 +1588,10 @@ class DeviceService:
             device_provider=current.device_provider,
             device_props=current.device_props,
         )
+        if timeout_seconds is not None:
+            if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int) or timeout_seconds <= 0:
+                raise ValueError("timeout_seconds must be a positive integer")
+            return self._exec_shell_new(device=allocated_device, shell_cmd=shell_cmd, timeout_seconds=timeout_seconds)
         return self._exec_shell_new(device=allocated_device, shell_cmd=shell_cmd)
 
     def batch_set_env(self, *, binding_ids: list[int], env: str) -> tuple[int, list[int]]:

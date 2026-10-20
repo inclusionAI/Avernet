@@ -206,6 +206,7 @@ def test_bot_build_service_upgrade_returns_structured_result_for_bot_not_found()
     )
     svc = BotBuildService(
         user_list_repository=Mock(exists=Mock(return_value=False)),
+        fastdisk_publisher=Mock(try_publish=Mock(return_value=False)),
         build_ignore_repository=Mock(get=Mock(return_value=None)),
         env="test",
         device_service=Mock(),
@@ -242,6 +243,7 @@ def test_bot_build_service_upgrade_raises_for_other_errors():
     baas_service.upgrade_bot.side_effect = Exception('boom')
     svc = BotBuildService(
         user_list_repository=Mock(exists=Mock(return_value=False)),
+        fastdisk_publisher=Mock(try_publish=Mock(return_value=False)),
         build_ignore_repository=Mock(get=Mock(return_value=None)),
         env="test",
         device_service=Mock(),

@@ -41,6 +41,7 @@ from agentclaw.community.core.service_bot.services.agentclaw_artifact import (
     restore_agentclaw_artifact,
     sync_agentclaw_artifact,
 )
+from agentclaw.community.core.service_bot.services.fastdisk_publish import FastdiskPublisher
 from agentclaw.community.core.service_bot.services.local_bin_artifact import (
     restore_local_bin_artifact,
     sync_local_bin_artifact,
@@ -185,6 +186,7 @@ class BotBuildService:
         build_ignore_repository: BuildIgnoreRepositoryProtocol,
         user_list_repository: UserListRepositoryProtocol,
         env: str,
+        fastdisk_publisher: FastdiskPublisher,
     ):
         """初始化 BotBuildService。
 
@@ -211,6 +213,7 @@ class BotBuildService:
         self._build_ignore_repository = build_ignore_repository
         self._env = env
         self._user_list_repository = user_list_repository
+        self._fastdisk_publisher = fastdisk_publisher
 
     def _get_device_binding_repo(self):
         return self._device_binding_repo
@@ -370,9 +373,9 @@ class BotBuildService:
         )
 
         try:
-            # ============================================================
-            # Step 1: 计算源目录和目标目录（统一走 NAS 存储）
-            # ============================================================
+            # =====================================================
+            # Step 1: 计算原 NAS 源目录和统一的产物目标目录
+            # =====================================================
             source_nas_engine_type = bot.get("active_engine") or engine_type
             nas_storage_id = get_bot_nas_dir(
                 entity_id=entity_id,
@@ -382,7 +385,7 @@ class BotBuildService:
             )
             source_dir = nas_storage_id / build_plan.source_root_name
             logger.info(
-                f"[BotBuildService.build] using NAS source_dir={source_dir}"
+                f"[BotBuildService.build] legacy NAS source_dir={source_dir}"
             )
 
             target_dir = get_bot_dir(
@@ -403,25 +406,35 @@ class BotBuildService:
                 f"source_dir={source_dir}, target_dir={target_dir}"
             )
 
-            # ============================================================
+            # =====================================================
             # Step 2: Bot 实例迁移
-            # ============================================================
-            # 2.1 执行 rsync 迁移
+            # =====================================================
+            # 2.1 快盘容器直传；非快盘保留原 NAS rsync 迁移
             transfer_started = time.monotonic()
             migration_success = False
             try:
-                migration_success = self._migrate_bot_instance(
-                    device_id=device_id,
-                    source_dir=source_dir,
-                    target_dir=target_dir,
-                    version_str=version_str,
-                    is_nas=True,
-                    nas_storage_id=nas_storage_id,
-                    build_plan=build_plan,
-                    provider=provider,
-                    build_ignore_paths=build_ignore_paths,
-                    include_runtime_artifacts=include_runtime_artifacts,
-                )
+                if build_plan.engine_type in ("aicoding", "claude_code"):
+                    migration_success = self._fastdisk_publisher.try_publish(
+                        device_id=device_id,
+                        plan=build_plan,
+                        source_root=str(provider.get_base_path()),
+                        target_dir=target_dir,
+                        ignore_paths=build_ignore_paths,
+                        normalize_extra=self._normalize_extra_include_file,
+                    )
+                if not migration_success:
+                    migration_success = self._migrate_bot_instance(
+                        device_id=device_id,
+                        source_dir=source_dir,
+                        target_dir=target_dir,
+                        version_str=version_str,
+                        is_nas=True,
+                        nas_storage_id=nas_storage_id,
+                        build_plan=build_plan,
+                        provider=provider,
+                        build_ignore_paths=build_ignore_paths,
+                        include_runtime_artifacts=include_runtime_artifacts,
+                    )
             finally:
                 logger.info(
                     "build_ignore.transfer bot_id=%s entity_id=%s version=%s "
@@ -432,12 +445,9 @@ class BotBuildService:
                     int((time.monotonic() - transfer_started) * 1000),
                 )
 
-            # The host-side engine-root rsync is the sole writer of the
-            # versioned artifact. It preserves active symlinks and local Skill
-            # payloads while each engine build plan excludes mounted repo
-            # corpora. Do not make the Draft runtime write this target again:
-            # published NFS paths are not writable from every sandbox, and the
-            # Claude Code active root is already covered by extra_sync.
+            # Transfer is exclusive: legacy NAS rsync OR fastdisk OSS direct
+            # upload. Both produce the same versioned artifact before the
+            # unchanged configuration-generation / Skills validation steps.
 
             # 2.2 生成 MCP 配置（使用 bot 的 device_id）
             mcp_success = True
@@ -1923,6 +1933,27 @@ class BotBuildService:
             entity_type=entity_type,
         )
         draft_dir = draft_nas_dir / build_plan.source_root_name
+        # Fastdisk restores happen in the existing draft container, before any
+        # host-side stat/chmod/rsync. The DB path is never used as a copy source.
+        if build_plan.engine_type in ("aicoding", "claude_code"):
+            device_id = bot.get("device_id")
+            if not device_id:
+                raise BotBuildMigrationError("恢复草稿缺少当前草稿设备 ID")
+            if not isinstance(source_version, int) or isinstance(source_version, bool) or source_version < 1:
+                raise BotBuildMigrationError("无效的历史版本")
+            runtime_root = str(provider.get_base_path())
+            runtime_artifact = (
+                f"{self._get_migration_path_base(owner_id=entity_id, bot_id=bot_id)}"
+                f"/{source_version}/{build_plan.migration_subpath}"
+            )
+            if self._fastdisk_publisher.try_restore(
+                device_id=device_id, plan=build_plan, source_root=runtime_root,
+                artifact_path=runtime_artifact,
+                remaining_timeout=remaining_timeout,
+                normalize_extra=self._normalize_extra_include_file,
+            ):
+                return {"restore_type": "migration_path",
+                        "artifact_path": str(artifact_dir), "draft_path": runtime_root}
         if not artifact_dir.exists():
             raise BotBuildMigrationError(f"历史构造物目录不存在: {artifact_dir}")
 

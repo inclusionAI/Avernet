@@ -504,12 +504,13 @@ class BaasDeviceService(DeviceService):
         return template_uid.strip()
 
     @override
-    def _exec_shell_new(self, device: AllocatedDevice, shell_cmd: str):
+    def _exec_shell_new(self, device: AllocatedDevice, shell_cmd: str, *, timeout_seconds: int | None = None):
         """在 BaaS Bot 容器内执行命令。"""
         return execute_baas_shell_command(
             baas_service=self._baas_service,
             device=device,
             shell_cmd=shell_cmd,
+            timeout_seconds=30 if timeout_seconds is None else timeout_seconds,
         )
 
     def poll_publish_once(self, *, publish_id: int) -> str | None:

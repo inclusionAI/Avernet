@@ -84,6 +84,8 @@ def test_restore_legacy_artifact_preserves_draft_runtime_tasks(tmp_path, monkeyp
     baas.resolve_container_provider.return_value = "baas"
     service = BotBuildService(
         user_list_repository=MagicMock(exists=MagicMock(return_value=False)),
+        fastdisk_publisher=MagicMock(try_publish=MagicMock(return_value=False),
+                                    try_restore=MagicMock(return_value=False)),
         build_ignore_repository=MagicMock(), env="test",
         device_service=MagicMock(), baas_service=baas,
         path_factory=MagicMock(), passport_plugin=MagicMock(),
@@ -98,7 +100,7 @@ def test_restore_legacy_artifact_preserves_draft_runtime_tasks(tmp_path, monkeyp
 
     result = service.restore_draft(
         bot={"bot_id": "b1", "entity_id": "owner", "entity_type": "staff",
-             "active_engine": plan.engine_type},
+             "active_engine": plan.engine_type, "device_id": "draft-device"},
         source_version=3,
         artifact_ext={"migration_path": str(artifact)},
     )

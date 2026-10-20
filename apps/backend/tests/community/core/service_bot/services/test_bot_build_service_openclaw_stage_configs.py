@@ -19,6 +19,7 @@ _UNSET = object()
 
 def _make_service(channel_service: object = _UNSET) -> BotBuildService:
     service = BotBuildService.__new__(BotBuildService)
+    service._fastdisk_publisher = MagicMock(try_publish=MagicMock(return_value=False))
     service._build_ignore_repository = MagicMock(get=MagicMock(return_value=None))
     service._env = "test"
     service._user_list_repository = MagicMock(exists=MagicMock(return_value=False))
@@ -146,6 +147,9 @@ class TestGenerateOpenClawStageConfigs:
     def test_build_invokes_openclaw_config_generation_after_mcp(self, tmp_path: Path):
         @dataclass
         class DummyProvider:
+            def get_base_path(self):
+                return Path("/home/admin/.aicoding")
+
             plan: EngineBuildPlan
 
             def get_build_plan(self, build_rsync_excludes_append=None, bot=None, **kwargs) -> EngineBuildPlan:
@@ -204,6 +208,9 @@ class TestGenerateOpenClawStageConfigs:
     def test_build_marks_failure_when_openclaw_config_generation_fails(self, tmp_path: Path):
         @dataclass
         class DummyProvider:
+            def get_base_path(self):
+                return Path("/home/admin/.aicoding")
+
             plan: EngineBuildPlan
 
             def get_build_plan(self, build_rsync_excludes_append=None, bot=None, **kwargs) -> EngineBuildPlan:
@@ -256,6 +263,9 @@ class TestGenerateOpenClawStageConfigs:
     ):
         @dataclass
         class DummyProvider:
+            def get_base_path(self):
+                return Path("/home/admin/.aicoding")
+
             plan: EngineBuildPlan
 
             def get_build_plan(self, build_rsync_excludes_append=None, bot=None, **kwargs) -> EngineBuildPlan:
@@ -316,6 +326,9 @@ class TestBuildMigrationPathWhitelist:
     ):
         @dataclass
         class DummyProvider:
+            def get_base_path(self):
+                return Path("/home/admin/.aicoding")
+
             plan: EngineBuildPlan
 
             def get_build_plan(self, build_rsync_excludes_append=None, bot=None, **kwargs) -> EngineBuildPlan:
