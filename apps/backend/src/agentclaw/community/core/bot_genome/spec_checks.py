@@ -16,6 +16,7 @@ Codes: ``schema``, ``order``, ``not_canonical``, ``not_utf8``,
 from __future__ import annotations
 
 import copy
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -66,6 +67,7 @@ __all__ = [
 ]
 
 _SORTED = (("persona", "type"), ("skills", "name"), ("resources", "path"))
+_DRIVE_LETTER = re.compile(r"^[A-Za-z]:")
 
 
 @dataclass(frozen=True)
@@ -128,7 +130,7 @@ def policy_path_reasons(policy: dict[str, Any]) -> list[Reason]:
 
 def _segments_ok(path: str) -> str | None:
     """Why a tree member or resource path cannot be written, or ``None``."""
-    if path.startswith("/") or "\\" in path or path.endswith("/"):
+    if path.startswith("/") or "\\" in path or path.endswith("/") or _DRIVE_LETTER.match(path):
         return "a path is relative, '/'-separated and names a file"
     if any(ord(c) < 32 or c == "\x7f" for c in path):
         return "a path must not contain a control character"
@@ -304,6 +306,10 @@ def memory_reasons(spec: dict[str, Any], content: ContentReader) -> list[Reason]
         keys = [item["key"] for item in items]
         if len(keys) != len(set(keys)) or keys != sorted(keys):
             reasons.append(Reason("order", "spec.memory.items_digest", "items must be sorted by key and unique"))
+        for item in items:
+            for field in ("tags", "source"):
+                if item[field] != sorted(item[field]):
+                    reasons.append(Reason("order", f"spec.memory.items_digest:{item['key']}.{field}", f"{field} must be sorted"))
     return reasons
 
 

@@ -230,3 +230,55 @@ def test_a_file_edited_twice_is_tracked_once_from_base_to_result() -> None:
     change = outcome.changed_files["persona/SOUL.md"]
     assert change.before == before and b"one\ntwo\n" in change.after
     assert len(outcome.changed_files) == 1
+
+
+# -- review round 1: measuring rules ---------------------------------------------------------------
+
+
+def test_skill_update_that_also_adds_or_deletes_a_file_is_not_description_only() -> None:
+    spec = REVISIONS[SUPPORT_BOT]["spec"]
+    tweak = "@@ -1,4 +1,4 @@\n ---\n name: quality-check\n-description: Check a reply against the service rules before sending it.\n+description: Check every draft.\n ---\n"
+    for files in ({"evil.py": "import os\n"}, {"scripts/check.py": None}):
+        outcome = apply_patch(spec, {"ops": [{"op": "skill.update", "name": "quality-check", "file_diffs": [{"path": "SKILL.md", "diff": tweak}], "files": files}]}, BlobDir())
+        assert outcome.touched[0].description_only is False
+
+
+def test_an_edit_then_remove_then_add_is_measured_from_the_base() -> None:
+    blobs = BlobDir()
+    spec = REVISIONS[SUPPORT_BOT]["spec"]
+    base = blobs.read(next(e["digest"] for e in spec["persona"] if e["type"] == "SOUL.md"))
+    ops = [
+        {"op": "file.edit", "target": "persona/SOUL.md", "edits": [{"kind": "insert_after", "anchor": "## Tone", "content": "one"}]},
+        {"op": "persona.remove", "type": "SOUL.md"},
+        {"op": "persona.add", "type": "SOUL.md", "content": "# Soul\nRewritten.\n"},
+    ]
+    outcome = apply_patch(spec, {"ops": ops}, blobs)
+    change = outcome.changed_files["persona/SOUL.md"]
+    assert (change.before, change.after, change.text) == (base, b"# Soul\nRewritten.\n", True)
+
+
+def test_a_replacement_across_kinds_stays_flagged_after_a_later_edit() -> None:
+    blobs = BlobDir()
+    ops = [
+        {"op": "resource.remove", "path": "data/kb/"},
+        {"op": "resource.add", "path": "data/kb", "content": "# KB\n"},
+        {"op": "file.edit", "target": "resources/data/kb", "edits": [{"kind": "insert_after", "anchor": "# KB", "content": "x"}]},
+    ]
+    outcome = apply_patch(REVISIONS[SUPPORT_BOT]["spec"], {"ops": ops}, blobs)
+    assert outcome.changed_files["resources/data/kb"].text is False
+
+
+def test_files_the_patch_itself_adds_are_not_measured() -> None:
+    blobs = BlobDir()
+    ops = [
+        {"op": "resource.add", "path": "data/y.md", "content": "a\n"},
+        {"op": "file.edit", "target": "resources/data/y.md", "edits": [{"kind": "insert_after", "anchor": "a", "content": "b\nc\nd\n"}]},
+        {"op": "skill.add", "name": "fresh", "files": {"SKILL.md": "---\nname: fresh\ndescription: d\n---\nx\n"}},
+        {"op": "file.edit", "target": "skills/fresh/SKILL.md", "edits": [{"kind": "insert_after", "anchor": "x", "content": "y\nz\nw\n"}]},
+        {"op": "skill.update", "name": "quality-check", "files": {"new.md": "n\n"}},
+        {"op": "file.edit", "target": "skills/quality-check/new.md", "edits": [{"kind": "insert_after", "anchor": "n", "content": "m\no\np\n"}]},
+        {"op": "resource.remove", "path": "data/y.md"},  # removing what the patch added is not a replacement either
+        {"op": "resource.add", "path": "data/y.md", "content": "again\n"},
+    ]
+    outcome = apply_patch(REVISIONS[SUPPORT_BOT]["spec"], {"ops": ops}, blobs)
+    assert outcome.changed_files == {} and outcome.replaced == frozenset()

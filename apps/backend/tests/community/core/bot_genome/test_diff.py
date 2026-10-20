@@ -145,3 +145,21 @@ def test_human_only_genes_are_t3_and_overrides_raise() -> None:
     c["resources"].append({"path": "data/new.md", "digest": blobs.put(b"# New\n")})
     assert _diff(a, c, blobs).risk_tier == "T1"
     assert _diff(a, c, blobs, policy={"risk_overrides": {"resources/data": "T2"}}).risk_tier == "T2"
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [("x\na", "y\na\n"), ("x\na\n", "y\na"), ("a\nb\nc\nd\ne\nf\ng\nh\ni\nj", "X\nb\nc\nd\ne\nf\ng\nh\ni\nj\n")],
+)
+def test_a_trailing_newline_flip_on_a_context_line_round_trips(before: str, after: str) -> None:
+    assert apply_unified_diff(before, unified_diff(before, after)) == after
+
+
+def test_a_skill_that_gains_a_file_beside_a_description_tweak_is_not_description_only() -> None:
+    blobs = BlobDir()
+    a = _spec(SUPPORT_BOT)
+    tweaked = b"---\nname: quality-check\ndescription: Check every reply against the service rules before sending it.\n---\nRead RULES.md, then check the draft reply line by line.\n"
+    check_py = b"import sys\n\nprint('ok' if sys.stdin.read().strip() else 'empty')\n"
+    b = copy.deepcopy(a)
+    b["skills"][0]["digest"] = blobs.put(canonical_tree_bytes([("SKILL.md", tweaked), ("scripts/check.py", check_py), ("evil.py", b"import os\n")]))
+    assert _diff(a, b, blobs).risk_tier == "T2"

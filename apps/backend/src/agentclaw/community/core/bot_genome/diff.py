@@ -34,6 +34,7 @@ from agentclaw.community.core.bot_genome.text_edits import description_only
 __all__ = ["diff_specs", "unified_diff"]
 
 _NO_NEWLINE = "\\ No newline at end of file"
+_SENTINEL = "\x00<no newline>"
 
 
 def unified_diff(before: str, after: str) -> str:
@@ -45,32 +46,18 @@ def unified_diff(before: str, after: str) -> str:
     """
     old, old_nl = _split(before)
     new, new_nl = _split(after)
-    if old == new and old_nl != new_nl:
-        # Same lines, only the final newline differs: difflib sees no change, the contract does.
-        last = old[-1]
-        return "\n".join(
-            [f"@@ -{len(old)} +{len(old)} @@", "-" + last, *([] if old_nl else [_NO_NEWLINE]), "+" + last, *([] if new_nl else [_NO_NEWLINE])]
-        ) + "\n"
-    lines = list(difflib.unified_diff(old, new, lineterm="", n=3))[2:]
+    # A missing final newline is part of the last line's identity (README §6.3 "lines"): marking it
+    # makes difflib treat a flip of that state as a changed line instead of an unchanged one, and the
+    # marker comes out as the contract's "\ No newline at end of file" line.
+    old_marked = old[:-1] + [old[-1] + _SENTINEL] if old and not old_nl else list(old)
+    new_marked = new[:-1] + [new[-1] + _SENTINEL] if new and not new_nl else list(new)
     out: list[str] = []
-    old_at = new_at = 0
-    for line in lines:
-        out.append(line)
-        if line.startswith("@@"):
-            header = line.split()
-            old_at = int(header[1][1:].split(",")[0]) - (0 if header[1].endswith(",0") else 1)
-            new_at = int(header[2][1:].split(",")[0]) - (0 if header[2].endswith(",0") else 1)
-            continue
-        tag = line[:1]
-        marker = False
-        if tag in (" ", "-"):
-            old_at += 1
-            marker |= not old_nl and old_at == len(old)
-        if tag in (" ", "+"):
-            new_at += 1
-            marker |= not new_nl and new_at == len(new)
-        if marker:
+    for line in list(difflib.unified_diff(old_marked, new_marked, lineterm="", n=3))[2:]:
+        if line.endswith(_SENTINEL) and not line.startswith("@@"):
+            out.append(line[: -len(_SENTINEL)])
             out.append(_NO_NEWLINE)
+        else:
+            out.append(line)
     return "\n".join(out) + "\n" if out else ""
 
 
@@ -112,11 +99,12 @@ class _Differ:
         self.changes.append(GeneChange(gene, "modified", self._text_diff(before, after)))
         self.files[gene] = FileChange(before, after)
 
-    def _members(self, gene: str, before: bytes, after: bytes) -> list[str]:
-        """Member-level changes of two trees; returns the gene paths of the text members changed."""
+    def _members(self, gene: str, before: bytes, after: bytes) -> tuple[list[str], list[str]]:
+        """Member-level changes of two trees: ``(modified members, every member touched)`` as gene paths."""
         old = dict(decode_tree_bytes(before) or [])
         new = dict(decode_tree_bytes(after) or [])
-        changed: list[str] = []
+        modified: list[str] = []
+        touched: list[str] = []
         for path in sorted(set(old) | set(new)):
             member = gene + "/" + gene_paths.join("skills", path).split("/", 1)[1]
             if path not in old:
@@ -125,8 +113,11 @@ class _Differ:
                 self.changes.append(GeneChange(member, "removed"))
             elif old[path] != new[path]:
                 self._file(member, old[path], new[path])
-                changed.append(member)
-        return changed
+                modified.append(member)
+            else:
+                continue
+            touched.append(member)
+        return modified, touched
 
     # -- categories ---------------------------------------------------------------------------
 
@@ -161,9 +152,9 @@ class _Differ:
                 before, after = old[name], new[name]
                 if before["origin"] == "local" and after["origin"] == "local":
                     old_blob, new_blob = self.content.read(before["digest"]), self.content.read(after["digest"])
-                    changed = self._members(gene, old_blob, new_blob)
+                    changed, touched = self._members(gene, old_blob, new_blob)
                     skill_md = gene_paths.skill_path(name, "SKILL.md")
-                    only_description = changed == [skill_md] and description_only(
+                    only_description = touched == [skill_md] and description_only(
                         self.files[skill_md].before or b"", self.files[skill_md].after or b""
                     )
                     self.touched.append(OpTouch("skill.update", gene, tuple(changed), description_only=only_description))
@@ -187,7 +178,7 @@ class _Differ:
                 old_blob, new_blob = self.content.read(before["digest"]), self.content.read(after["digest"])
                 if old_dir and new_dir:
                     self.changes.append(GeneChange(gene, "modified"))
-                    changed = self._members(gene, old_blob, new_blob)
+                    changed, _ = self._members(gene, old_blob, new_blob)
                     self.touched.append(OpTouch("file.edit", gene, tuple(changed)))
                 elif old_dir or new_dir:
                     self.changes.append(GeneChange(gene, "modified"))

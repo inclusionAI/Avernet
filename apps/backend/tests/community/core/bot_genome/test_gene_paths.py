@@ -30,6 +30,7 @@ def test_builders_use_the_contract_spellings() -> None:
     assert memory_path("returns-window") == "memory/returns-window"
     assert mcp_path() == "tools/mcp"
     assert mcp_path("mcp:x") == "tools/mcp/mcp%3Ax"
+    assert mcp_path("a/b") == "tools/mcp/a%2Fb"
 
 
 def test_split_decodes_segments() -> None:

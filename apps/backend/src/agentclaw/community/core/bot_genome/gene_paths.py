@@ -105,7 +105,8 @@ def memory_path(key: str | None = None) -> str:
 
 
 def mcp_path(server_code: str | None = None) -> str:
-    return "tools/mcp" if server_code is None else join("tools", "mcp", server_code)
+    """``tools/mcp`` or ``tools/mcp/<code>``; a server code is one segment, whatever it contains."""
+    return "tools/mcp" if server_code is None else "tools/mcp/" + encode_segment(server_code)
 
 
 def op_gene_path(op: dict[str, Any]) -> str:

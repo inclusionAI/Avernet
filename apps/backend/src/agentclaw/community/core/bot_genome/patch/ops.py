@@ -100,6 +100,8 @@ class _Applier:
         self.touched: list[OpTouch] = []
         self.changed: dict[str, FileChange] = {}
         self.replaced: set[str] = set()
+        # gene paths this patch added (entries and skill members): not in the base, so never measured
+        self.added: set[str] = set()
         # gene path → (digest or None, is a tree) for entries removed earlier in this patch
         self.removed: dict[str, tuple[str | None, bool]] = {}
 
@@ -131,21 +133,37 @@ class _Applier:
             raise _Reject("not_utf8", f"{what} is not UTF-8 text") from exc
 
     def _record_change(self, gene: str, before: bytes, after: bytes) -> None:
+        """Measured once, base → result: the first record's base side (and kind) is kept."""
+        if any(gene_paths.covers(added, gene) for added in self.added):
+            return  # not in the base: README §6.3 measures only files that exist there
         earlier = self.changed.get(gene)
-        self.changed[gene] = FileChange(earlier.before if earlier else before, after)
+        if earlier is None:
+            self.changed[gene] = FileChange(before, after)
+        elif earlier.text:
+            self.changed[gene] = FileChange(earlier.before, after)
+        # a replacement across kinds stays flagged whatever happens to the file afterwards
 
     def _mark_add(self, gene: str, *, new_digest: str | None, new_is_tree: bool) -> None:
         """README §6.3 replacement: an add after a remove of the same key is judged as a change."""
         old = self.removed.pop(gene, None)
         if old is None:
+            self.added.add(gene)
             return
         old_digest, old_is_tree = old
         self.replaced.add(gene)
-        if old_digest is None or new_digest is None or old_is_tree or new_is_tree:
+        earlier = self.changed.get(gene)  # the entry was edited before it was removed: its base side wins
+        if old_digest is None or new_digest is None or old_is_tree or new_is_tree or (earlier is not None and not earlier.text):
             self.changed[gene] = FileChange(None, None, text=False)
             return
-        before, after = self._read(old_digest), self._read(new_digest)
-        self.changed[gene] = FileChange(before, after)
+        before = earlier.before if earlier is not None else self._read(old_digest)
+        self.changed[gene] = FileChange(before, self._read(new_digest))
+
+    def _mark_remove(self, gene: str, digest: str | None, is_tree: bool) -> None:
+        """Remember a removed base entry for the replacement rule; an entry this patch added just goes."""
+        if gene in self.added:
+            self.added.discard(gene)
+            return
+        self.removed[gene] = (digest, is_tree)
 
     def _entries(self, category: str) -> list[dict[str, Any]]:
         return self.spec[category]
@@ -268,7 +286,7 @@ class _Applier:
         if entry is None:
             raise _Reject("does_not_apply", f"{location}: the bot has no persona file {op['type']!r}")
         self._entries("persona").remove(entry)
-        self.removed[gene] = (entry["digest"], False)
+        self._mark_remove(gene, entry["digest"], False)
         return OpTouch("persona.remove", gene)
 
     # -- skills -------------------------------------------------------------------------------
@@ -322,13 +340,16 @@ class _Applier:
             members[path] = after
             if before is not None:
                 changed[path] = (before, after)
+            else:
+                self.added.add(gene_paths.skill_path(name, path))
         measured: list[str] = []
         for path, (before, after) in changed.items():
             if before != after and _is_text(before) and _is_text(after):
                 file_gene = gene_paths.skill_path(name, path)
                 self._record_change(file_gene, before, after)
                 measured.append(file_gene)
-        only_description = list(changed) == ["SKILL.md"] and description_only(*changed["SKILL.md"])
+        touched = set(diff_paths) | set(files)
+        only_description = touched == {"SKILL.md"} and "SKILL.md" in changed and description_only(*changed["SKILL.md"])
         entry["digest"] = self._store(canonical_tree_bytes(list(members.items())))
         return OpTouch("skill.update", gene, tuple(measured), description_only=only_description)
 
@@ -339,7 +360,7 @@ class _Applier:
         if entry is None:
             raise _Reject("does_not_apply", f"{location}: the bot has no skill {name!r}")
         self._entries("skills").remove(entry)
-        self.removed[gene] = (entry.get("digest"), True)
+        self._mark_remove(gene, entry.get("digest"), True)
         return OpTouch("skill.remove", gene)
 
     # -- resources ----------------------------------------------------------------------------
@@ -372,7 +393,7 @@ class _Applier:
         if entry is None:
             raise _Reject("does_not_apply", f"{location}: the bot has no resource {path!r}")
         self._entries("resources").remove(entry)
-        self.removed[gene] = (entry["digest"], path.endswith("/"))
+        self._mark_remove(gene, entry["digest"], path.endswith("/"))
         return OpTouch("resource.remove", gene)
 
     # -- memory -------------------------------------------------------------------------------

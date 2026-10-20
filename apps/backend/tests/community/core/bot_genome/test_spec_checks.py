@@ -269,3 +269,16 @@ def test_script_must_be_utf8() -> None:
     blobs = BlobDir()
     spec, policy = _record({"script": {"digest": blobs.put(b"\xff\xfe")}})
     assert [(r.code, r.location) for r in _checks().reasons(spec, policy, blobs, CTX)] == [("not_utf8", "spec.script")]
+
+
+def test_memory_item_tags_and_sources_must_be_sorted() -> None:
+    blobs = BlobDir()
+    spec, policy = _record()
+    spec["memory"] = {"mode": "seed", "items_digest": blobs.put(b'[{"key":"a","source":["feedback:f","episode:e"],"tags":["b","a"],"text":"t"}]')}
+    reasons = _checks().reasons(spec, policy, blobs, CTX)
+    assert [(r.code, r.location) for r in reasons] == [("order", "spec.memory.items_digest:a.tags"), ("order", "spec.memory.items_digest:a.source")]
+
+
+def test_a_drive_letter_is_not_a_tree_member() -> None:
+    reasons, _ = tree_reasons("here", b"acm-tree-v1\n6:C:/x.md1:x")
+    assert reasons and reasons[0].code == "tree"
