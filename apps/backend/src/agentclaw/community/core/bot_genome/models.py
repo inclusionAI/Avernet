@@ -107,7 +107,7 @@ class RunScope:
     allowed_genes: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        if not RUN_ID_PATTERN.match(self.run_id):
+        if not RUN_ID_PATTERN.fullmatch(self.run_id):
             raise ValueError(f"run_id {self.run_id!r} is not one ref segment ([A-Za-z0-9_.-], 1-64)")
         if not self.binding_id:
             raise ValueError("binding_id is required")
