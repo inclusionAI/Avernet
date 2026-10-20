@@ -119,9 +119,15 @@ class GenomePromotionService(GenomePromotionServiceProtocol):
                 created_at=now,
             ),
             expected_active=expected_revision,
+            expected_statuses=tuple(s.value for s in PROMOTABLE),
             moved_at=now,
         )
         if row is None:
+            # Either the ref moved under us or the revision's status did (verification can reject
+            # an accepted candidate while we compile); the re-read says which.
+            now_status = self._registry.get_revision(bot, target.revision.id).revision.status
+            if now_status not in PROMOTABLE:
+                raise NotPromotable(f"revision {target.revision.id} became {now_status.value} while promoting")
             current = self._refs.get(**self._axes(bot), name="active")
             raise RefConflict("active", expected=expected_revision, current=current.revision_id if current else None)
         try:

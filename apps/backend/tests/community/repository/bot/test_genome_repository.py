@@ -320,15 +320,19 @@ def test_promotion_start_moves_marks_and_files_in_one_transaction(db):
             document_json="{}", actor_kind="user", actor_id="u1", reason="r", status="applying", apply_kind="pending", created_at=NOW,
         )
 
-    first = promotions.start(_row(R1, "a" * 32), expected_active=None, moved_at=NOW)
+    promotable = ("draft", "accepted", "promoted")
+    first = promotions.start(_row(R1, "a" * 32), expected_active=None, expected_statuses=promotable, moved_at=NOW)
     assert first is not None and refs.get(**BOT, name="active").revision_id == R1
     assert revisions.get(**BOT, revision_id=R1).status == "promoted"
-    assert promotions.start(_row(R2, "b" * 32), expected_active=R3, moved_at=NOW) is None, "a lost CAS"
+    assert promotions.start(_row(R2, "b" * 32), expected_active=R3, expected_statuses=promotable, moved_at=NOW) is None, "a lost CAS"
     assert refs.get(**BOT, name="active").revision_id == R1 and promotions.get(**BOT, promotion_id="b" * 32) is None
     assert revisions.get(**BOT, revision_id=R2).status == "draft"
-    second = promotions.start(_row(R2, "c" * 32), expected_active=R1, moved_at=NOW)
+    assert promotions.start(_row(R2, "s" * 32), expected_active=R1, expected_statuses=("accepted",), moved_at=NOW) is None, "status moved out of the expected set"
+    assert refs.get(**BOT, name="active").revision_id == R1 and revisions.get(**BOT, revision_id=R2).status == "draft"
+    assert promotions.get(**BOT, promotion_id="s" * 32) is None
+    second = promotions.start(_row(R2, "c" * 32), expected_active=R1, expected_statuses=promotable, moved_at=NOW)
     assert second is not None and {r.name: r.revision_id for r in refs.list(**BOT)} == {"active": R2, "previous": R1}
-    assert promotions.start(_row("sha256:" + "f" * 64, "d" * 32), expected_active=R2, moved_at=NOW) is None, "not this bot's revision"
+    assert promotions.start(_row("sha256:" + "f" * 64, "d" * 32), expected_active=R2, expected_statuses=promotable, moved_at=NOW) is None, "not this bot's revision"
     assert {r.name: r.revision_id for r in refs.list(**BOT)} == {"active": R2, "previous": R1}
-    again = promotions.start(_row(R2, "e" * 32), expected_active=R2, moved_at=NOW)
+    again = promotions.start(_row(R2, "e" * 32), expected_active=R2, expected_statuses=promotable, moved_at=NOW)
     assert again is not None and {r.name: r.revision_id for r in refs.list(**BOT)} == {"active": R2, "previous": R1}

@@ -1880,7 +1880,7 @@ and gets the candidate id back ([03-strategy.md](03-strategy.md)).
 bot = BotRef(owner_id="user_owner_5", bot_id="bot_123", entity_id="user_owner_5", engine_type="openclaw", bot_type="personal")
 compiled = registry.compile(bot, "sha256:7c1e…")       # the document and its document_digest
 applier.preflight(bot, compiled)                       # the delivery seam refuses here, before any ref moves
-promotions.start(row, expected_active=current_active, moved_at=now)   # one transaction: previous <- active,
+promotions.start(row, expected_active=current_active, expected_statuses=PROMOTABLE, moved_at=now)   # one transaction: previous <- active,
                                                        # active <- r42 (CAS), r42 promoted, the promotion row
 await applier.start(bot, compiled, actor=actor, reason=reason)       # direct delivery (RSI-04); its apply id is the
                                                        # row's apply_reference, which applied_revision joins on

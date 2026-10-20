@@ -372,12 +372,14 @@ class GenomePromotionRepository(GenomePromotionRepositoryProtocol):
         row: GenomePromotionRow,
         *,
         expected_active: Optional[str],
+        expected_statuses: tuple[str, ...],
         moved_at: datetime,
     ) -> Optional[GenomePromotionRow]:
         """The promotion's one write: move the ``active``/``previous`` pair, mark the revision, file the row.
 
-        One transaction, so a lost compare-and-swap or a failed write leaves
-        no ref moved, no status changed and no row. ``None`` on conflict.
+        One transaction, so a lost compare-and-swap, a status that moved out
+        of ``expected_statuses`` since the caller read it, or a failed write
+        leaves no ref moved, no status changed and no row. ``None`` on conflict.
         """
         axes = dict(env=row.env, entity_id=row.entity_id, bot_id=row.bot_id)
         stamp = dict(moved_kind=row.actor_kind, moved_actor=row.actor_id, run_id=None, reason=row.reason, moved_at=moved_at)
@@ -388,10 +390,12 @@ class GenomePromotionRepository(GenomePromotionRepositoryProtocol):
                     session.query(GenomeRevisionModel)
                     .filter(*_bot(GenomeRevisionModel, **axes))
                     .filter(GenomeRevisionModel.revision_id == row.revision_id)
+                    .filter(GenomeRevisionModel.status.in_(expected_statuses))
                     .update({"status": "promoted"}, synchronize_session=False)
                 )
                 if updated != 1:
-                    raise _Conflict(row.revision_id)  # the target is not this bot's revision
+                    # Not this bot's revision, or its status changed under us (verification rejected it).
+                    raise _Conflict(row.revision_id)
                 orm = GenomePromotionModel(**row.model_dump(exclude={"id", "gmt_create", "gmt_modified"}))
                 session.add(orm)
                 session.flush()

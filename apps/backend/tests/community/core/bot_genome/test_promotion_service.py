@@ -148,6 +148,16 @@ async def test_the_promotion_row_names_the_application_acting_for_the_user(world
 
 
 @pytest.mark.asyncio
+async def test_a_status_change_during_promotion_is_a_refusal_not_an_overwrite(world: World) -> None:
+    r1, _ = await _two_revisions(world)
+    world.applier.on_preflight = lambda: world.registry.set_status(BOT, r1, RevisionStatus.REJECTED, actor=OWNER, reason="verification said no")
+    with pytest.raises(NotPromotable):
+        await world.promotion.promote(BOT, revision=r1, ref="active", expected_revision=None, actor=OWNER, reason="x")
+    assert world.registry.get_revision(BOT, r1).revision.status == RevisionStatus.REJECTED, "the newer status wins"
+    assert _refs(world) == {} and world.promotion.list_promotions(BOT).total == 0 and world.applier.starts == []
+
+
+@pytest.mark.asyncio
 async def test_re_promoting_the_current_active_keeps_previous(world: World) -> None:
     r1, r2 = await _two_revisions(world)
     await world.promotion.promote(BOT, revision=r1, ref="active", expected_revision=None, actor=OWNER, reason="a")

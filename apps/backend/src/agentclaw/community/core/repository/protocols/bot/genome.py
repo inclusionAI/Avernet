@@ -185,12 +185,14 @@ class GenomePromotionRepositoryProtocol(Protocol):
         row: GenomePromotionRow,
         *,
         expected_active: Optional[str],
+        expected_statuses: tuple[str, ...],
         moved_at: datetime,
     ) -> Optional[GenomePromotionRow]:
         """Move ``active``/``previous`` to ``row.revision_id`` by compare-and-swap, mark it ``promoted``, file ``row``.
 
-        One transaction: a lost compare-and-swap (``None``) or a failed
-        write leaves no ref moved, no status changed and no row.
+        One transaction: a lost compare-and-swap, a revision whose status is
+        no longer one of ``expected_statuses`` (``None`` either way) or a
+        failed write leaves no ref moved, no status changed and no row.
         Re-promoting the current ``active`` leaves ``previous`` untouched.
         """
         ...

@@ -72,6 +72,7 @@ class FakeApplier:
 
     def __init__(self) -> None:
         self.refuse: Exception | None = None
+        self.on_preflight = None
         self.fail: Exception | None = None
         self.preflights: list = []
         self.starts: list = []
@@ -79,6 +80,8 @@ class FakeApplier:
 
     def preflight(self, bot, compiled) -> None:
         self.preflights.append((bot, compiled))
+        if self.on_preflight is not None:
+            self.on_preflight()  # something that happens while the service is between its read and its write
         if self.refuse is not None:
             raise self.refuse
 
