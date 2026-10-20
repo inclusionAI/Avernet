@@ -68,3 +68,11 @@ class TrajectoryAnalysisNotConfiguredError(TaskError):
     ——与 ``TrajectoryAnalysisError`` 的 504 bot 超时区分:503 = 修配置,504 = bot 挂了/慢)。``do_analysis=false``
     纯读路径不触发此错(无需 bot)。不回填(本就没执行分析)。
     """
+
+
+class TaskArtifactContentError(TaskError):
+    """产物内容非法:未知 kind tag / 分支互斥破坏 / 路径逃逸 / 非 http(s) 链接 / 字段失配等。
+
+    spec 2026-10-20-task-artifact-domain §3.4:内容分支校验 fail-loud,不静默丢弃、不猜分支;
+    上报解析失败走既有回调错误信封(§4),写侧发布失败上抛回滚整个事务(§5.2)。
+    """
