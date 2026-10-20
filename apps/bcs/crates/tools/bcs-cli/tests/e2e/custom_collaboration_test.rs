@@ -356,6 +356,7 @@ async fn assert_collaboration_create(no_session: bool, server_creates_session: b
             "topic": "Article workflow",
             "group_strategy": "state_machine",
             "create_initial_session": !no_session,
+            "human_mention_notify_mode": "all",
             "originator": "bot-driver",
             "collaboration_definition_yaml": WORKFLOW_YAML,
             "auto_start_on_service_invocation": false
