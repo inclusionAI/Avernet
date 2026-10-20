@@ -180,6 +180,22 @@ class GenomePromotionRepositoryProtocol(Protocol):
     def insert(self, row: GenomePromotionRow) -> GenomePromotionRow: ...
 
     @abstractmethod
+    def start(
+        self,
+        row: GenomePromotionRow,
+        *,
+        expected_active: Optional[str],
+        moved_at: datetime,
+    ) -> Optional[GenomePromotionRow]:
+        """Move ``active``/``previous`` to ``row.revision_id`` by compare-and-swap, mark it ``promoted``, file ``row``.
+
+        One transaction: a lost compare-and-swap (``None``) or a failed
+        write leaves no ref moved, no status changed and no row.
+        Re-promoting the current ``active`` leaves ``previous`` untouched.
+        """
+        ...
+
+    @abstractmethod
     def get(
         self, *, env: str, entity_id: str, bot_id: str, promotion_id: str
     ) -> Optional[GenomePromotionRow]: ...

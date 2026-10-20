@@ -9,7 +9,9 @@ and the compose collector read through, so capture sees what apply sees:
   via the factory's package storage, ``center://`` by pinned version,
   ``git://<path>`` as a shared-repository skill);
 - resources: the bot's ``ac_resource`` file rows (what the compose collector
-  lists), bytes through ``ResourceFileService.read_file``;
+  lists), at ``data/<row path>`` in the workspace, bytes through
+  ``ResourceFileService.read_file``; files Manifest apply wrote outside those
+  rows are not captured (noted for RSI-04, which fixes the resources road);
 - MCP: ``DirectActivationServiceProtocol.list_installed_mcps`` minus the
   platform defaults, the bot override from ``MCPConfigServiceProtocol``;
 - script: ``BotStartupScriptServiceProtocol.get_body`` with the ``${BOT_*}``
@@ -57,6 +59,8 @@ if TYPE_CHECKING:  # the module reaches the device dispatcher at import time
 __all__ = ["PlatformBotStateReader"]
 
 LOCAL_PREFIX = "local://"
+#: Where ``ac_resource`` file rows live, workspace-relative (``ResourceService.data_dir``).
+RESOURCE_DATA_DIR = "data/"
 CENTER_PREFIX = "center://"
 REPO_PREFIX = "git://"
 
@@ -135,9 +139,11 @@ class PlatformBotStateReader(BotStateReader):
         service = self._resource_services.create(bot_id=bot.bot_id)
         captured: list[CapturedResource] = []
         for resource in service.list_resources(user_id=bot.owner_id):
-            path = resource.path
-            if not path:
-                continue  # URL, link and node resources are not workspace files
+            if not resource.path or resource.is_directory:
+                continue  # URL, link and node resources are not workspace files; a folder row has no bytes
+            # A row's path is relative to the bot's data directory (``workspace/data``, the compose
+            # collector's join); the workspace-relative path apply writes and a revision names has it in front.
+            path = RESOURCE_DATA_DIR + resource.path.lstrip("/")
             data = await self._resource_files.read_file(
                 entity_type=bot.entity_type, entity_id=bot.entity_id, bot_id=bot.bot_id,
                 engine_type=bot.engine_type, path=path,

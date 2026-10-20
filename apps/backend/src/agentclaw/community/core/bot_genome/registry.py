@@ -202,7 +202,12 @@ class GenomeRegistryService(GenomeRegistryProtocol):
 
     def _active(self, bot: BotRef) -> GenomeRevisionRow | None:
         ref = self._refs.get(**self._axes(bot), name="active")
-        return None if ref is None else self._revisions.get(**self._axes(bot), revision_id=ref.revision_id)
+        if ref is None:
+            return None
+        row = self._revisions.get(**self._axes(bot), revision_id=ref.revision_id)
+        if row is None:
+            raise RuntimeError(f"ref 'active' of bot {bot.bot_id} points at {ref.revision_id}, which is not one of its revisions")
+        return row
 
     def _record(
         self,
@@ -259,7 +264,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
             name = candidate_ref(run.run_id, self._refs.candidate_count(**axes, run_id=run.run_id) + 1)
             moved = self._refs.move(
                 **axes, name=name, revision_id=rev_id, expected_revision_id=None,
-                moved_kind=ProvenanceKind.STRATEGY_RUN.value, moved_actor=created_by.actor,
+                moved_kind=created_by.kind.value, moved_actor=created_by.actor,
                 run_id=run.run_id, reason=None, moved_at=_now(),
             )
             if moved is not None:

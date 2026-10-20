@@ -1,10 +1,11 @@
 """``GenomePromotionService``: the 08-promotion.md §7.1 steps over the registry, the refs and the seam.
 
 Order: resolve the target → refuse a candidate the gate has not accepted →
-compile → drift (automated actors only) → ``applier.preflight`` → the
-``active``/``previous`` compare-and-swap → revision ``promoted`` → the
-promotion row with the compiled document → ``applier.start`` → the row's
-delivery answer. Everything before the compare-and-swap leaves no trace.
+compile → drift (automated actors only) → ``applier.preflight`` → one
+transaction holding the ``active``/``previous`` compare-and-swap, the
+revision's ``promoted`` status and the promotion row with the compiled
+document → ``applier.start`` → the row's delivery answer. Everything before
+that transaction leaves no trace, and the transaction leaves all or nothing.
 """
 from __future__ import annotations
 
@@ -99,16 +100,8 @@ class GenomePromotionService(GenomePromotionServiceProtocol):
                 raise Drifted(active=active.revision_id, applied=applied)
         self._applier.preflight(bot, compiled)
 
-        moved = self._refs.move_pair(
-            **self._axes(bot), revision_id=target.revision.id, expected_active=expected_revision,
-            moved_kind=actor.kind.value, moved_actor=actor.actor, run_id=actor.run_id, reason=reason, moved_at=_now(),
-        )
-        if moved is None:
-            current = self._refs.get(**self._axes(bot), name="active")
-            raise RefConflict("active", expected=expected_revision, current=current.revision_id if current else None)
-        new_active, _ = moved
-        self._revisions.update_metadata(**self._axes(bot), revision_id=target.revision.id, status=RevisionStatus.PROMOTED.value)
-        row = self._promotions.insert(
+        now = _now()
+        row = self._promotions.start(
             GenomePromotionRow(
                 **self._axes(bot),
                 promotion_id=uuid.uuid4().hex,
@@ -117,20 +110,27 @@ class GenomePromotionService(GenomePromotionServiceProtocol):
                 from_revision_id=expected_revision,
                 document_digest=compiled.document_digest,
                 document_json=canonicalize(compiled.document).decode("utf-8"),
-                going_back=status is RevisionStatus.PROMOTED,
+                going_back=status is RevisionStatus.PROMOTED and expected_revision != target.revision.id,
                 actor_kind=actor.kind.value,
                 actor_id=actor.actor,
                 reason=reason,
                 status="applying",
                 apply_kind=self._applier.kind,
-                created_at=new_active.moved_at,
-            )
+                created_at=now,
+            ),
+            expected_active=expected_revision,
+            moved_at=now,
         )
+        if row is None:
+            current = self._refs.get(**self._axes(bot), name="active")
+            raise RefConflict("active", expected=expected_revision, current=current.revision_id if current else None)
         try:
             result = await self._applier.start(bot, compiled, actor=actor, reason=reason)
         except Exception as exc:  # noqa: BLE001 - the refs moved; the failure is the promotion's record, not the caller's crash
             logger.warning("[genome.promotion] delivery did not start promotion=%s bot=%s: %s", row.promotion_id, bot.bot_id, exc)
-            finished = self._promotions.finish(**self._axes(bot), promotion_id=row.promotion_id, status="apply_failed", apply_reference=None, apply_detail=str(exc)[:1024])
+            # The type only: delivery errors can quote headers or paths, and the row is never deleted.
+            detail = f"delivery did not start ({type(exc).__name__}); see the server log for promotion {row.promotion_id}"
+            finished = self._promotions.finish(**self._axes(bot), promotion_id=row.promotion_id, status="apply_failed", apply_reference=None, apply_detail=detail)
         else:
             finished = self._promotions.finish(
                 **self._axes(bot), promotion_id=row.promotion_id, status="applied", apply_reference=result.reference, apply_detail=result.detail[:1024]

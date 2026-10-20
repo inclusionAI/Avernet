@@ -157,16 +157,21 @@ async def test_an_unknown_skill_locator_is_refused() -> None:
 
 @pytest.mark.asyncio
 async def test_resources_are_the_bots_file_rows_read_from_the_device() -> None:
-    rows = [SimpleNamespace(path="data/faq.csv"), SimpleNamespace(path=None), SimpleNamespace(path="notes.md")]
-    files = FakeResourceFiles({"data/faq.csv": b"q,a\n", "notes.md": b"# n\n"})
+    rows = [
+        SimpleNamespace(path="faq.csv", is_directory=False),
+        SimpleNamespace(path=None, is_directory=False),  # a URL resource
+        SimpleNamespace(path="kb", is_directory=True),  # a folder row has no bytes
+        SimpleNamespace(path="kb/notes.md", is_directory=False),
+    ]
+    files = FakeResourceFiles({"data/faq.csv": b"q,a\n", "data/kb/notes.md": b"# n\n"})
     resources = await _reader(resource_services=FakeResourceServices(rows), resource_files=files).resources(BOT)
-    assert [(r.path, r.files) for r in resources] == [("data/faq.csv", (("faq.csv", b"q,a\n"),)), ("notes.md", (("notes.md", b"# n\n"),))]
+    assert [(r.path, r.files) for r in resources] == [("data/faq.csv", (("faq.csv", b"q,a\n"),)), ("data/kb/notes.md", (("notes.md", b"# n\n"),))]
     assert files.calls[0] == {"entity_type": "staff", "entity_id": "ent_1", "bot_id": "bot_1", "engine_type": "openclaw", "path": "data/faq.csv"}
 
 
 @pytest.mark.asyncio
 async def test_a_listed_file_that_cannot_be_read_is_refused() -> None:
-    rows = [SimpleNamespace(path="gone.md")]
+    rows = [SimpleNamespace(path="gone.md", is_directory=False)]
     with pytest.raises(CaptureRefused) as caught:
         await _reader(resource_services=FakeResourceServices(rows), resource_files=FakeResourceFiles({})).resources(BOT)
     assert caught.value.reasons[0].code == "resource_unreadable"

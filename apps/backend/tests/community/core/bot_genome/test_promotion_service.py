@@ -117,7 +117,8 @@ async def test_a_failed_start_is_recorded_with_the_refs_moved(world: World) -> N
     r1, _ = await _two_revisions(world)
     world.applier.fail = RuntimeError("device unreachable")
     failed = await world.promotion.promote(BOT, revision=r1, ref="active", expected_revision=None, actor=OWNER, reason="x")
-    assert (failed.status, failed.apply_reference, failed.apply_detail) == ("apply_failed", None, "device unreachable")
+    assert (failed.status, failed.apply_reference) == ("apply_failed", None)
+    assert "RuntimeError" in failed.apply_detail and "device unreachable" not in failed.apply_detail, "no exception text on the row"
     assert _refs(world) == {"active": r1} and world.registry.get_revision(BOT, r1).revision.status == RevisionStatus.PROMOTED
     row = world.promotions.get(env="dev", entity_id=BOT.entity_id, bot_id=BOT.bot_id, promotion_id=failed.id)
     assert row.document_json == canonicalize(world.registry.compile(BOT, r1).document).decode()
@@ -136,3 +137,28 @@ async def test_the_pending_seam_refuses_everything_before_any_ref_moves(world: W
     assert _refs(world) == {} and world.promotion.list_promotions(BOT).total == 0
     with pytest.raises(AssertionError):
         await PendingDeliveryApplier().start(BOT, world.registry.compile(BOT, r1), actor=OWNER, reason="x")
+
+
+@pytest.mark.asyncio
+async def test_re_promoting_the_current_active_keeps_previous(world: World) -> None:
+    r1, r2 = await _two_revisions(world)
+    await world.promotion.promote(BOT, revision=r1, ref="active", expected_revision=None, actor=OWNER, reason="a")
+    await world.promotion.promote(BOT, revision=r2, ref="active", expected_revision=r1, actor=OWNER, reason="b")
+    again = await world.promotion.promote(BOT, revision=r2, ref="active", expected_revision=r2, actor=OWNER, reason="overwrite my direct edit")
+    assert again.going_back is False and _refs(world) == {"active": r2, "previous": r1}
+    assert len(world.refs.events(env="dev", entity_id=BOT.entity_id, bot_id=BOT.bot_id, name="active")) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_write_failure_after_the_move_rolls_the_move_back(world: World, monkeypatch) -> None:
+    r1, _ = await _two_revisions(world)
+    from agentclaw.community.core.repository.implementations.bot import genome as repo_module
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("row insert failed")
+
+    monkeypatch.setattr(repo_module, "GenomePromotionModel", boom)
+    with pytest.raises(RuntimeError):
+        await world.promotion.promote(BOT, revision=r1, ref="active", expected_revision=None, actor=OWNER, reason="x")
+    assert _refs(world) == {} and world.registry.get_revision(BOT, r1).revision.status == RevisionStatus.DRAFT
+    assert world.applier.starts == []

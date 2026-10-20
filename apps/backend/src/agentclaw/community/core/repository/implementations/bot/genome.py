@@ -220,17 +220,11 @@ class GenomeRefRepository(GenomeRefRepositoryProtocol):
         moved_at: datetime,
     ) -> Optional[tuple[GenomeRefRow, Optional[GenomeRefRow]]]:
         stamp = dict(moved_kind=moved_kind, moved_actor=moved_actor, run_id=run_id, reason=reason, moved_at=moved_at)
-        axes = dict(env=env, entity_id=entity_id, bot_id=bot_id)
         try:
             with _transaction(self._db) as session:
-                active = self._cas(session, **axes, name="active", revision_id=revision_id, expected=expected_active, **stamp)
-                previous = None
-                if expected_active is not None:
-                    current = self._row(session, **axes, name="previous")
-                    previous = self._cas(
-                        session, **axes, name="previous", revision_id=expected_active,
-                        expected=current.revision_id if current is not None else None, **stamp,
-                    )
+                active, previous = _move_pair(
+                    session, env=env, entity_id=entity_id, bot_id=bot_id, revision_id=revision_id, expected_active=expected_active, **stamp
+                )
                 session.flush()
                 session.refresh(active)
                 if previous is not None:
@@ -239,42 +233,11 @@ class GenomeRefRepository(GenomeRefRepositoryProtocol):
         except (_Conflict, IntegrityError):
             return None  # nothing moved: the transaction rolled back
 
-    def _row(self, session, *, env: str, entity_id: str, bot_id: str, name: str) -> Optional[GenomeRefModel]:
-        return (
-            session.query(GenomeRefModel)
-            .filter(*_bot(GenomeRefModel, env=env, entity_id=entity_id, bot_id=bot_id))
-            .filter(GenomeRefModel.name == name)
-            .one_or_none()
-        )
+    def _row(self, session, **kw) -> Optional[GenomeRefModel]:
+        return _ref_row(session, **kw)
 
-    def _cas(
-        self, session, *, env: str, entity_id: str, bot_id: str, name: str, revision_id: str,
-        expected: Optional[str], moved_kind: str, moved_actor: str, run_id: Optional[str],
-        reason: Optional[str], moved_at: datetime,
-    ) -> GenomeRefModel:
-        """One conditional move inside the caller's transaction; raises ``_Conflict`` when the CAS matches nothing."""
-        axes = dict(env=env, entity_id=entity_id, bot_id=bot_id)
-        stamp = dict(moved_kind=moved_kind, moved_actor=moved_actor, run_id=run_id, reason=reason, moved_at=moved_at)
-        if expected is None:
-            row = GenomeRefModel(**axes, name=name, revision_id=revision_id, version=1, **stamp)
-            session.add(row)
-            session.flush()  # uk_bot_ref decides who created it
-        else:
-            updated = (
-                session.query(GenomeRefModel)
-                .filter(*_bot(GenomeRefModel, **axes))
-                .filter(GenomeRefModel.name == name, GenomeRefModel.revision_id == expected)
-                .update(
-                    {"revision_id": revision_id, "version": GenomeRefModel.version + 1, **stamp},
-                    synchronize_session=False,
-                )
-            )
-            if updated != 1:
-                raise _Conflict(name)
-            row = self._row(session, **axes, name=name)
-        session.add(GenomeRefEventModel(**axes, name=name, from_revision_id=expected, to_revision_id=revision_id, **stamp))
-        session.flush()  # the event lands in the same transaction as the move, or neither does
-        return row
+    def _cas(self, session, **kw) -> GenomeRefModel:
+        return _cas_move(session, **kw)
 
     def candidate_count(self, *, env: str, entity_id: str, bot_id: str, run_id: str) -> int:
         with self._db.orm_session() as session:
@@ -298,6 +261,63 @@ class GenomeRefRepository(GenomeRefRepositoryProtocol):
                 .all()
             )
             return [row.to_record() for row in rows]
+
+
+def _ref_row(session, *, env: str, entity_id: str, bot_id: str, name: str) -> Optional[GenomeRefModel]:
+    return (
+        session.query(GenomeRefModel)
+        .filter(*_bot(GenomeRefModel, env=env, entity_id=entity_id, bot_id=bot_id))
+        .filter(GenomeRefModel.name == name)
+        .one_or_none()
+    )
+
+
+def _cas_move(
+    session, *, env: str, entity_id: str, bot_id: str, name: str, revision_id: str,
+    expected: Optional[str], moved_kind: str, moved_actor: str, run_id: Optional[str],
+    reason: Optional[str], moved_at: datetime,
+) -> GenomeRefModel:
+    """One conditional move inside the caller's transaction; raises ``_Conflict`` when the CAS matches nothing."""
+    axes = dict(env=env, entity_id=entity_id, bot_id=bot_id)
+    stamp = dict(moved_kind=moved_kind, moved_actor=moved_actor, run_id=run_id, reason=reason, moved_at=moved_at)
+    if expected is None:
+        row = GenomeRefModel(**axes, name=name, revision_id=revision_id, version=1, **stamp)
+        session.add(row)
+        session.flush()  # uk_bot_ref decides who created it
+    else:
+        updated = (
+            session.query(GenomeRefModel)
+            .filter(*_bot(GenomeRefModel, **axes))
+            .filter(GenomeRefModel.name == name, GenomeRefModel.revision_id == expected)
+            .update(
+                {"revision_id": revision_id, "version": GenomeRefModel.version + 1, **stamp},
+                synchronize_session=False,
+            )
+        )
+        if updated != 1:
+            raise _Conflict(name)
+        row = _ref_row(session, **axes, name=name)
+    session.add(GenomeRefEventModel(**axes, name=name, from_revision_id=expected, to_revision_id=revision_id, **stamp))
+    session.flush()  # the event lands in the same transaction as the move, or neither does
+    return row
+
+
+def _move_pair(session, *, env: str, entity_id: str, bot_id: str, revision_id: str, expected_active: Optional[str], **stamp) -> tuple[GenomeRefModel, Optional[GenomeRefModel]]:
+    """``active`` → ``revision_id`` by CAS and ``previous`` → the old ``active``, inside the caller's transaction.
+
+    Re-promoting the revision ``active`` already points at (``revision_id == expected_active``) moves
+    ``active`` onto itself (a logged, versioned move) and leaves ``previous`` as the one step back.
+    """
+    axes = dict(env=env, entity_id=entity_id, bot_id=bot_id)
+    active = _cas_move(session, **axes, name="active", revision_id=revision_id, expected=expected_active, **stamp)
+    previous = None
+    if expected_active is not None and expected_active != revision_id:
+        current = _ref_row(session, **axes, name="previous")
+        previous = _cas_move(
+            session, **axes, name="previous", revision_id=expected_active,
+            expected=current.revision_id if current is not None else None, **stamp,
+        )
+    return active, previous
 
 
 class GenomePatchRepository(GenomePatchRepositoryProtocol):
@@ -346,6 +366,39 @@ class GenomePromotionRepository(GenomePromotionRepositoryProtocol):
             session.flush()
             session.refresh(orm)
             return orm.to_record()
+
+    def start(
+        self,
+        row: GenomePromotionRow,
+        *,
+        expected_active: Optional[str],
+        moved_at: datetime,
+    ) -> Optional[GenomePromotionRow]:
+        """The promotion's one write: move the ``active``/``previous`` pair, mark the revision, file the row.
+
+        One transaction, so a lost compare-and-swap or a failed write leaves
+        no ref moved, no status changed and no row. ``None`` on conflict.
+        """
+        axes = dict(env=row.env, entity_id=row.entity_id, bot_id=row.bot_id)
+        stamp = dict(moved_kind=row.actor_kind, moved_actor=row.actor_id, run_id=None, reason=row.reason, moved_at=moved_at)
+        try:
+            with _transaction(self._db) as session:
+                _move_pair(session, **axes, revision_id=row.revision_id, expected_active=expected_active, **stamp)
+                updated = (
+                    session.query(GenomeRevisionModel)
+                    .filter(*_bot(GenomeRevisionModel, **axes))
+                    .filter(GenomeRevisionModel.revision_id == row.revision_id)
+                    .update({"status": "promoted"}, synchronize_session=False)
+                )
+                if updated != 1:
+                    raise _Conflict(row.revision_id)  # the target is not this bot's revision
+                orm = GenomePromotionModel(**row.model_dump(exclude={"id", "gmt_create", "gmt_modified"}))
+                session.add(orm)
+                session.flush()
+                session.refresh(orm)
+                return orm.to_record()
+        except (_Conflict, IntegrityError):
+            return None
 
     def _one(self, session, *, env: str, entity_id: str, bot_id: str, promotion_id: str) -> Optional[GenomePromotionModel]:
         return (

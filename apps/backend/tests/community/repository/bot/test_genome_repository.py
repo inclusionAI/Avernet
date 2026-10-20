@@ -286,13 +286,15 @@ def test_a_lost_pair_move_leaves_nothing_behind_under_autocommit(monkeypatch):
     repo.move_pair(**BOT, revision_id=R2, expected_active=R1, **_stamp())
     # The "previous" CAS loses: the read of previous is stale (a concurrent mover changed it), so
     # its conditional UPDATE matches nothing after the active UPDATE already ran.
-    real_row = GenomeRefRepository._row
+    from agentclaw.community.core.repository.implementations.bot import genome as repo_module
 
-    def stale_previous(self, session, **kw):
-        row = real_row(self, session, **kw)
+    real_row = repo_module._ref_row
+
+    def stale_previous(session, **kw):
+        row = real_row(session, **kw)
         return SimpleNamespace(revision_id=R3) if kw["name"] == "previous" else row
 
-    monkeypatch.setattr(GenomeRefRepository, "_row", stale_previous)
+    monkeypatch.setattr(repo_module, "_ref_row", stale_previous)
     assert repo.move_pair(**BOT, revision_id=R3, expected_active=R2, **_stamp()) is None
     monkeypatch.undo()
     assert repo.get(**BOT, name="active").revision_id == R2, "active did not move when previous could not"
@@ -305,3 +307,28 @@ def test_candidate_prefixes_are_matched_literally(db):
     repo.move(**BOT, name="candidate/runX7/1", revision_id=R2, expected_revision_id=None, **_stamp())
     assert repo.candidate_count(**BOT, run_id="run_7") == 1
     assert [r.name for r in repo.list(**BOT, name_prefix="candidate/run_7/")] == ["candidate/run_7/1"]
+
+
+def test_promotion_start_moves_marks_and_files_in_one_transaction(db):
+    revisions, refs, promotions = GenomeRevisionRepository(db), GenomeRefRepository(db), GenomePromotionRepository(db)
+    revisions.insert(_revision(R1))
+    revisions.insert(_revision(R2))
+
+    def _row(revision_id: str, promotion_id: str) -> GenomePromotionRow:
+        return GenomePromotionRow(
+            **BOT, promotion_id=promotion_id, ref="active", revision_id=revision_id, from_revision_id=None, document_digest=R3,
+            document_json="{}", actor_kind="user", actor_id="u1", reason="r", status="applying", apply_kind="pending", created_at=NOW,
+        )
+
+    first = promotions.start(_row(R1, "a" * 32), expected_active=None, moved_at=NOW)
+    assert first is not None and refs.get(**BOT, name="active").revision_id == R1
+    assert revisions.get(**BOT, revision_id=R1).status == "promoted"
+    assert promotions.start(_row(R2, "b" * 32), expected_active=R3, moved_at=NOW) is None, "a lost CAS"
+    assert refs.get(**BOT, name="active").revision_id == R1 and promotions.get(**BOT, promotion_id="b" * 32) is None
+    assert revisions.get(**BOT, revision_id=R2).status == "draft"
+    second = promotions.start(_row(R2, "c" * 32), expected_active=R1, moved_at=NOW)
+    assert second is not None and {r.name: r.revision_id for r in refs.list(**BOT)} == {"active": R2, "previous": R1}
+    assert promotions.start(_row("sha256:" + "f" * 64, "d" * 32), expected_active=R2, moved_at=NOW) is None, "not this bot's revision"
+    assert {r.name: r.revision_id for r in refs.list(**BOT)} == {"active": R2, "previous": R1}
+    again = promotions.start(_row(R2, "e" * 32), expected_active=R2, moved_at=NOW)
+    assert again is not None and {r.name: r.revision_id for r in refs.list(**BOT)} == {"active": R2, "previous": R1}
