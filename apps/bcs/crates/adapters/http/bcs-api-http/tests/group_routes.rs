@@ -536,3 +536,6 @@ mod existing;
 
 #[path = "group_routes/driver_metadata.rs"]
 mod driver_metadata;
+
+#[path = "group_routes/create_notify_mode.rs"]
+mod create_notify_mode;

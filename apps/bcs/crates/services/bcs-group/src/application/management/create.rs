@@ -207,6 +207,7 @@ impl GroupManagement {
             }
         };
         group.context = cmd.context.clone();
+        group.human_mention_notify_mode = cmd.human_mention_notify_mode;
         group.opening_message = cmd.opening_message;
         group.routing_policy = cmd.routing_policy;
         group.group_kind = cmd.group_kind.unwrap_or(GroupKind::Normal);

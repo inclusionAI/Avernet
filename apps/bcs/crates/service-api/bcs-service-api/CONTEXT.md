@@ -304,6 +304,12 @@ MessageFlowService exposes Human-only environment-wide delivery-policy read/repl
 
 - Application, core, and port trait contracts for BCS.
 - Group human-mention notify mode is part of the Group patch contract.
+  Normal creation also carries the concrete `HumanMentionNotifyMode` through
+  `CreateCollaborationGroup` and `GroupCreateCommand`. Both HTTP adapters default
+  omitted values to `all` and reject explicit null or unknown values. Management
+  sets it before the first Group upsert, including inline provisioning and
+  creation without an initial Session; no follow-up patch or extra write is
+  needed. DM creation/reuse contracts and notification routing are unchanged.
   Both HTTP adapters translate the wire field into
   `application::v1::GroupPatch::human_mention_notify_mode` (`null` and unknown
   values are rejected at the adapter boundary); the V1 Group application copies

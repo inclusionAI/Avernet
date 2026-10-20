@@ -18,6 +18,7 @@ use bcs_test_support::{
 #[test]
 fn group_create_command_carries_caller_and_members() {
     let cmd = GroupCreateCommand {
+        human_mention_notify_mode: Default::default(),
         create_initial_session: true,
         group_id: Some("group-explicit".to_string()),
         caller_actor_id: Some("human_123".to_string()),
@@ -321,6 +322,7 @@ async fn noop_group_management_service_fails_closed() {
 
     let created = service
         .create_group(GroupCreateCommand {
+            human_mention_notify_mode: Default::default(),
             create_initial_session: true,
             group_id: None,
             caller_actor_id: None,

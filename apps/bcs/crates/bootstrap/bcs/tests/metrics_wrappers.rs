@@ -595,6 +595,7 @@ fn participant_view(bot_uuid: &str) -> GroupParticipantView {
 
 fn group_create_cmd() -> GroupCreateCommand {
     GroupCreateCommand {
+        human_mention_notify_mode: Default::default(),
         create_initial_session: true,
         group_id: Some("group-wrapper".to_string()),
         caller_actor_id: None,

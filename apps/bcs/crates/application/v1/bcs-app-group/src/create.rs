@@ -168,6 +168,7 @@ impl GroupServiceImpl {
         let created = self
             .management
             .create_group(GroupCreateCommand {
+                human_mention_notify_mode: request.human_mention_notify_mode,
                 create_initial_session: true,
                 group_id,
                 caller_actor_id: Some(principal_actor_id.clone()),

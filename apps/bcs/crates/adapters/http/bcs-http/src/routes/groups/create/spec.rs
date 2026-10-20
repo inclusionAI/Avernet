@@ -185,6 +185,7 @@ pub(crate) fn legacy_create_group_spec(
         .or_else(|| req.label.clone());
 
     Ok(CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+        human_mention_notify_mode: req.human_mention_notify_mode,
         name,
         context: req.context.clone(),
         opening_message: req.opening_message.clone(),

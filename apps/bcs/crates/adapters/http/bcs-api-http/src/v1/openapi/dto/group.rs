@@ -212,6 +212,8 @@ impl From<CollaborationRequest> for CollaborationConfiguration {
 #[serde(tag = "group_kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CreateGroupRequest {
     Normal {
+        #[serde(default)]
+        human_mention_notify_mode: HumanMentionNotifyMode,
         name: Option<String>,
         context: Option<String>,
         #[serde(default)]
@@ -240,6 +242,7 @@ impl CreateGroupRequest {
     ) -> Result<(CreateGroupSpec, Vec<InlineGroupEventSubscriptionRequest>), ApplicationError> {
         Ok(match self {
             CreateGroupRequest::Normal {
+                human_mention_notify_mode,
                 name,
                 context,
                 opening_message,
@@ -250,6 +253,7 @@ impl CreateGroupRequest {
                 event_subscriptions,
             } => (
                 CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                    human_mention_notify_mode,
                     name,
                     context,
                     opening_message,

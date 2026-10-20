@@ -24,6 +24,8 @@ pub struct GroupCreateCommand {
     /// Whether to create and initialize the first Session. False is supported
     /// only for non-provisional normal Groups, including StateMachine, and is not persisted.
     pub create_initial_session: bool,
+    /// Normal Group notification policy, persisted with the initial Group write.
+    pub human_mention_notify_mode: HumanMentionNotifyMode,
     pub routing_policy: Option<RoutingPolicy>,
     pub participants: Vec<GroupCreateParticipantCommand>,
     /// Backward-compatible flat member list for callers that do not provide roles.

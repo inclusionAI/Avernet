@@ -168,6 +168,7 @@ pub(crate) async fn create_group_without_inline_subscriptions(
         None
     };
     let cmd = GroupCreateCommand {
+        human_mention_notify_mode: req.human_mention_notify_mode,
         create_initial_session: req.create_initial_session,
         group_id: req.id,
         caller_actor_id: caller_actor_id.clone(),

@@ -307,6 +307,8 @@ pub struct CreateParticipant {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateCollaborationGroup {
+    /// External Human-mention notification policy selected at creation.
+    pub human_mention_notify_mode: HumanMentionNotifyMode,
     pub name: Option<String>,
     pub context: Option<String>,
     pub opening_message: Option<OpeningMessage>,

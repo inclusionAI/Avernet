@@ -593,6 +593,12 @@ CreateCollaborationGroup:
     - participants
     - collaboration
   properties:
+    human_mention_notify_mode:
+      $ref: ../domain-models.yaml#/HumanMentionNotifyMode
+      default: all
+      description: >-
+        Optional external Human-mention notification policy for normal Groups.
+        Defaults to all when omitted; explicit null is not accepted.
     group_kind:
       const: normal
     name:

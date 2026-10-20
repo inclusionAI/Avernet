@@ -9,6 +9,11 @@
   its bootstrap delivery for non-provisional normal Groups, including StateMachine. False
   preserves Group authorization, validation, quota and persistence, with no
   Session call or initialization message. The choice is not persisted.
+- `GroupCreateCommand.human_mention_notify_mode` is a required concrete enum
+  supplied by callers (HTTP omission resolves to `all`). Normal creation assigns
+  it before the first Group upsert, including sessionless and provisional
+  creation, without an additional persistence operation. DM creation and reuse
+  use the separate, unchanged `DmCreateCommand`.
 
 ## Consumes
 

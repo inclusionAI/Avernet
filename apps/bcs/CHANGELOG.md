@@ -8,6 +8,16 @@ All notable BCS changes are documented here. Items follow
 
 ### Added
 
+- Normal Group creation through `POST /groups` and
+  `POST /openapi/v1/collaboration/groups` accepts `human_mention_notify_mode`:
+  `all`, `driver_bot_only`, or `none`. Omission defaults to `all`; null and
+  unknown values are rejected. The policy is persisted with the initial Group
+  write, including inline event-subscription provisioning and creation without
+  an initial Session. DM creation and reuse policy are unchanged: the legacy
+  shared request DTO validates this field but DM ignores valid values, while
+  the V1 DM request rejects the field entirely. Legacy DM requests that used
+  to carry an ignored invalid value now fail request validation.
+
 - **Bot WebSocket V3 canonical uplink events.** V3 Bot connections now use
   the Provider Run Event envelope for `agent` and `chat` events, with required
   `runId`, `sessionId`, `seq`, and `ts`. BCS validates the event against its

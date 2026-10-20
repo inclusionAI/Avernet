@@ -1686,6 +1686,7 @@ impl BcsClient {
     ) -> Result<CreateGroupResponse> {
         let url = format!("{}/groups", self.base_url);
         let payload = CreateGroupRequest {
+            human_mention_notify_mode: Default::default(),
             create_initial_session,
             id: options.id,
             label: None,
@@ -1741,6 +1742,7 @@ impl BcsClient {
         let url = format!("{}/groups", self.base_url);
 
         let payload = CreateGroupRequest {
+            human_mention_notify_mode: Default::default(),
             create_initial_session: true,
             mode: Some(mode.to_string()),
             driver_bot: Some(driver_bot.to_string()),
@@ -1838,6 +1840,7 @@ impl BcsClient {
         let url = format!("{}/groups", self.base_url);
 
         let payload = CreateGroupRequest {
+            human_mention_notify_mode: Default::default(),
             create_initial_session,
             mode: None,
             driver_bot: Some(driver_bot.to_string()),

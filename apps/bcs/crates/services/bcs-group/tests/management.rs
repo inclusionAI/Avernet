@@ -2938,6 +2938,7 @@ fn create_cmd(
     participants: Vec<GroupCreateParticipantCommand>,
 ) -> GroupCreateCommand {
     GroupCreateCommand {
+        human_mention_notify_mode: Default::default(),
         create_initial_session: true,
         group_id: Some("group-under-test".to_string()),
         caller_actor_id: caller_actor_id.map(str::to_string),
@@ -4058,6 +4059,7 @@ async fn list_groups_filters_by_visibility() {
 
     // Create a public group
     let cmd2 = GroupCreateCommand {
+        human_mention_notify_mode: Default::default(),
         create_initial_session: true,
         group_id: Some("public-group".to_string()),
         caller_actor_id: Some("bot_b".to_string()),

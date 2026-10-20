@@ -42,6 +42,9 @@ use bcs_test_support::NoopSystemMessageService;
 
 use bcs_app_group::{GroupProvisioningReconciler, GroupServiceConfig, GroupServiceImpl};
 
+#[path = "v1_group_service/create_notify_mode.rs"]
+mod create_notify_mode;
+
 struct Fixture {
     service: GroupServiceImpl,
     groups: Arc<GroupCore>,
@@ -751,6 +754,7 @@ fn collaboration_create_command() -> CreateGroup {
     CreateGroup {
         caller: bot_principal("alice"),
         group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            human_mention_notify_mode: Default::default(),
             originator: None,
             name: Some("Provisioned Group".to_string()),
             context: None,
@@ -1389,6 +1393,7 @@ async fn create_uses_the_authenticated_human_as_originator() {
         .create(CreateGroup {
             caller: bot_principal("requester"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("Planning".into()),
                 context: Some("Plan the release".into()),
@@ -1443,11 +1448,16 @@ async fn inline_subscription_create_uses_provisioning_and_finalizes_initial_sess
     fixture.add_public_bot("driver").await;
     let provisioner = Arc::new(RecordingGroupProvisioner::new(fixture.groups.clone()));
     let fixture = fixture.with_event_subscription_provisioner(provisioner.clone());
+    let mut command = collaboration_create_command();
+    let CreateGroupSpec::Collaboration(input) = &mut command.group else {
+        panic!("expected normal Group");
+    };
+    input.human_mention_notify_mode = bcs_service_api::HumanMentionNotifyMode::None;
 
     let outcome = fixture
         .service
         .create_with_event_subscriptions(
-            collaboration_create_command(),
+            command,
             vec![inline_group_subscription()],
         )
         .await
@@ -1474,6 +1484,7 @@ async fn inline_subscription_create_uses_provisioning_and_finalizes_initial_sess
         .expect("load Group")
         .expect("created Group");
     assert_eq!(group.record_status, "active");
+    assert_eq!(group.human_mention_notify_mode, bcs_service_api::HumanMentionNotifyMode::None);
     let sessions = fixture
         .sessions
         .list_by_group(&group_id, None, 0, 10, None, None)
@@ -2080,6 +2091,7 @@ async fn human_originator_can_create_with_owned_protected_participant() {
         .create(CreateGroup {
             caller: human_principal_with_profile("staff-1", "alice-login", Some("Alice"), None),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("Protected collaboration".into()),
                 context: None,
@@ -2136,6 +2148,7 @@ async fn human_originator_rejects_non_owned_protected_participant() {
         .create(CreateGroup {
             caller: human_principal_with_profile("staff-1", "alice-login", Some("Alice"), None),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: None,
                 context: None,
@@ -2283,6 +2296,7 @@ async fn create_group_propagates_quota_lookup_database_failure() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 driver_bot_uuid: "driver".into(),
                 name: Some("quota lookup failure".into()),
@@ -2318,6 +2332,7 @@ async fn create_group_propagates_non_driver_registry_database_failure() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 driver_bot_uuid: "driver".into(),
                 name: Some("registry failure".into()),
@@ -2415,6 +2430,7 @@ async fn create_rejects_non_bot_driver_and_dm_target_with_declared_code() {
         .create(CreateGroup {
             caller: bot_principal("requester"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: None,
                 context: None,
@@ -2467,6 +2483,7 @@ async fn state_machine_create_without_runtime_fails_before_persisting_group() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("State machine".into()),
                 context: None,
@@ -2516,6 +2533,7 @@ async fn state_machine_create_rejects_duplicate_participant_binding_names() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("State machine".into()),
                 context: None,
@@ -2576,6 +2594,7 @@ async fn state_machine_runtime_failure_rolls_back_created_group() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("State machine".into()),
                 context: None,
@@ -2623,6 +2642,7 @@ async fn state_machine_create_configures_runtime_and_returns_typed_detail() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("State machine".into()),
                 context: Some("Execute the workflow".into()),
@@ -2725,6 +2745,7 @@ async fn state_machine_create_with_inline_yaml_returns_persisted_definition_ref(
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("State machine".into()),
                 context: None,
@@ -2789,6 +2810,7 @@ async fn state_machine_create_defers_initial_run_until_required_channel_is_bound
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("Human review".into()),
                 context: None,
@@ -2839,6 +2861,7 @@ async fn state_machine_create_rejects_human_actors_in_bot_bindings() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("State machine".into()),
                 context: None,
@@ -2893,6 +2916,7 @@ async fn state_machine_create_preserves_authenticated_human_in_audit_and_start()
         .create(CreateGroup {
             caller: human_principal_with_profile("staff-1", "alice", Some("Alice"), None),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("State machine".into()),
                 context: Some("Review the release".into()),
@@ -2965,6 +2989,7 @@ async fn state_machine_create_does_not_reread_runtime_for_its_response() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("State machine".into()),
                 context: None,
@@ -3009,6 +3034,7 @@ async fn state_machine_start_failure_removes_runtime_session_and_group() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("State machine".into()),
                 context: None,
@@ -3080,6 +3106,7 @@ async fn deleting_state_machine_group_cancels_runs_and_removes_runtime_state() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("State machine".into()),
                 context: None,
@@ -3312,6 +3339,7 @@ async fn tenant_metadata_does_not_restrict_bot_collaboration() {
         .create(CreateGroup {
             caller: bot_principal_in_tenant("driver", "tenant-b"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("Cross-tenant collaboration".into()),
                 context: None,
@@ -3432,6 +3460,7 @@ async fn state_machine_patch_failure_does_not_commit_requested_changes() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("Before".into()),
                 context: None,
@@ -3512,6 +3541,7 @@ async fn create_gates_driver_against_bot_originator_by_friendship() {
         .create(CreateGroup {
             caller: authenticated_bot_principal("requester", "requester"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: None,
                 context: None,
@@ -3545,6 +3575,7 @@ async fn bot_originator_rejects_non_friend_protected_participant() {
         .create(CreateGroup {
             caller: authenticated_bot_principal("requester", "requester"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: None,
                 context: None,
@@ -3581,6 +3612,7 @@ async fn create_propagates_protected_participant_friendship_lookup_failure() {
         .create(CreateGroup {
             caller: authenticated_bot_principal("driver", "driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: None,
                 context: None,
@@ -3662,6 +3694,7 @@ async fn update_opening_message_preserves_patch_states_and_strategy_scopes() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("StateMachine".into()),
                 context: None,
@@ -3829,6 +3862,7 @@ async fn create_rejects_duplicate_participant_actor_ids() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: None,
                 context: None,
@@ -3876,6 +3910,7 @@ async fn create_rejects_roles_that_do_not_match_the_strategy_lead() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: None,
                 context: None,
@@ -3906,6 +3941,7 @@ async fn create_rejects_roles_that_do_not_match_the_strategy_lead() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: None,
                 context: None,
@@ -4074,6 +4110,7 @@ async fn client_caused_group_errors_map_to_documented_4xx_classes() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: None,
                 context: None,
@@ -4237,6 +4274,7 @@ mod originator_v1_policy {
         CreateGroup {
             caller: human_principal_with_profile("staff-1", "alice", Some("Alice"), None),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                human_mention_notify_mode: Default::default(),
                 name: Some("Planning".into()),
                 context: None,
                 opening_message: None,

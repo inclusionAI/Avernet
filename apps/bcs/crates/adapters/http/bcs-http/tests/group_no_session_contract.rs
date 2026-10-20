@@ -131,7 +131,7 @@ impl Fixture {
             .with_bot_registry(registry.clone())
             .with_message_repo(Arc::new(MemoryMessageRepo::new())),
         );
-        services.group_management = Arc::new(GroupManagement::new(
+        let management = Arc::new(GroupManagement::new(
             groups.clone(),
             registry.clone(),
             services.friend.clone(),
@@ -140,6 +140,8 @@ impl Fixture {
             sessions.clone(),
             notifications.clone(),
         ));
+        services.group_management = management.clone();
+        services.group_query = management;
         services.session_launch = Arc::new(SessionLaunchApplication::new(
             registry,
             groups.clone(),
@@ -196,6 +198,71 @@ fn group_request(strategy: &str) -> Value {
         ],
         "create_initial_session": false
     })
+}
+
+#[tokio::test]
+async fn create_notify_mode_is_persisted_with_or_without_initial_session() {
+    for strategy in ["chat", "manager_worker"] {
+        for initial_session in [false, true] {
+            for mode in [None, Some("all"), Some("driver_bot_only"), Some("none")] {
+                let fixture = Fixture::new().await;
+                let mut request = group_request(strategy);
+                request["create_initial_session"] = json!(initial_session);
+                if let Some(mode) = mode {
+                    request["human_mention_notify_mode"] = json!(mode);
+                }
+                let (status, created) = fixture.request("POST", "/groups", request).await;
+                assert_eq!(status, StatusCode::OK, "{created}");
+                let expected = json!(mode.unwrap_or("all"));
+                assert_eq!(created["human_mention_notify_mode"], expected);
+                let saved = fixture.groups.get("new-group").await.unwrap();
+                assert_eq!(serde_json::to_value(saved.human_mention_notify_mode).unwrap(), expected);
+                let (status, detail) = fixture.request("GET", "/groups/new-group", Value::Null).await;
+                assert_eq!(status, StatusCode::OK, "{detail}");
+                assert_eq!(detail["human_mention_notify_mode"], expected);
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn create_notify_mode_rejects_invalid_legacy_requests_before_persistence() {
+    for group_kind in ["normal", "dm"] {
+        for mode in [Value::Null, json!("invalid"), json!(1), json!(false), json!([]), json!({})] {
+            let fixture = Fixture::new().await;
+            let mut request = group_request("chat");
+            request["group_kind"] = json!(group_kind);
+            request["human_mention_notify_mode"] = mode;
+            let response = fixture.app.clone().oneshot(
+                Request::builder().method("POST").uri("/groups")
+                    .header("authorization", "Bearer lead-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(request.to_string())).unwrap(),
+            ).await.unwrap();
+            let status = response.status();
+            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            // Axum preserves serde_json's syntax/data rejection distinction.
+            assert!(matches!(status, StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY),
+                "{request}: {}", String::from_utf8_lossy(&body));
+            assert!(String::from_utf8_lossy(&body).contains("human_mention_notify_mode"));
+            assert!(fixture.groups.get("new-group").await.is_none());
+            assert!(fixture.notifications.0.lock().await.is_empty());
+        }
+    }
+}
+
+#[tokio::test]
+async fn create_notify_mode_is_ignored_for_legacy_dm() {
+    for mode in ["all", "driver_bot_only", "none"] {
+        let fixture = Fixture::new().await;
+        let (status, created) = fixture.request("POST", "/groups", json!({
+            "group_kind": "dm", "target_actor_id": "member-bot",
+            "human_mention_notify_mode": mode
+        })).await;
+        assert_eq!(status, StatusCode::OK, "{created}");
+        let saved = fixture.groups.get(created["id"].as_str().unwrap()).await.unwrap();
+        assert_eq!(serde_json::to_value(saved.human_mention_notify_mode).unwrap(), "all");
+    }
 }
 
 async fn assert_group_only_then_explicit_session(strategy: &str) {
