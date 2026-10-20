@@ -1516,6 +1516,90 @@ async fn list_filters_visible_or_writable_and_labels_permissions() {
 }
 
 #[tokio::test]
+async fn owner_list_and_get_bypass_policies_and_get_exposes_policy_to_owner_only() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = service(repo.clone());
+    app.add(AddGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "player_state".into(),
+        scope_level: ScopeLevel::Session,
+        content: "owner-managed state".into(),
+        visible_to: policy(&["张三"]),
+        collect_from: policy(&["judge_bot"]),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("add succeeds");
+    app.update(UpdateGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "player_state".into(),
+        scope_level: ScopeLevel::Session,
+        content: Some("owner-managed state".into()),
+        change_reason: None,
+        visible_to: Some(policy(&["张三"])),
+        collect_from: Some(policy(&["张三"])),
+        owners: None,
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("owner updates policy without being listed in it");
+
+    let owner_list = app
+        .list(ListGroupContexts {
+            actor_id: "judge_bot".into(),
+            request_context: ctx(),
+            scope_levels: Some(vec![ScopeLevel::Session]),
+        })
+        .await
+        .expect("owner list succeeds");
+    let owner_context = owner_list
+        .contexts
+        .iter()
+        .find(|item| item.name == "player_state")
+        .expect("owner is not filtered by visible_to or collect_from");
+    assert_eq!(owner_context.permission, GroupContextPermission::WRO);
+    let encoded_list = serde_json::to_value(&owner_list).expect("list response serializes");
+    assert!(!encoded_list.to_string().contains("\"owners\""));
+
+    let owner_get = app
+        .get(GetGroupContext {
+            actor_id: "judge_bot".into(),
+            request_context: ctx(),
+            name: "player_state".into(),
+            scope_levels: Some(vec![ScopeLevel::Session]),
+            limit: None,
+        })
+        .await
+        .expect("owner get bypasses visible_to");
+    assert_eq!(owner_get.items.len(), 1);
+    assert_eq!(owner_get.items[0].content, "owner-managed state");
+    assert_eq!(owner_get.items[0].visible_to, Some(policy(&["张三"])));
+    assert_eq!(owner_get.items[0].collect_from, Some(policy(&["张三"])));
+    let encoded_owner_get = serde_json::to_value(&owner_get).expect("owner get serializes");
+    assert!(!encoded_owner_get.to_string().contains("\"owners\""));
+
+    let reader_get = app
+        .get(GetGroupContext {
+            actor_id: "张三".into(),
+            request_context: ctx(),
+            name: "player_state".into(),
+            scope_levels: Some(vec![ScopeLevel::Session]),
+            limit: None,
+        })
+        .await
+        .expect("ordinary reader succeeds");
+    assert_eq!(reader_get.items.len(), 1);
+    assert_eq!(reader_get.items[0].visible_to, None);
+    assert_eq!(reader_get.items[0].collect_from, None);
+    let encoded_reader_get = serde_json::to_value(&reader_get).expect("reader get serializes");
+    assert!(!encoded_reader_get.to_string().contains("\"owners\""));
+}
+
+#[tokio::test]
 async fn get_without_scope_levels_queries_only_deepest_supplied_scope() {
     let app = service(Arc::new(MemoryGroupContextRepo::new()));
     for (scope_level, content) in [

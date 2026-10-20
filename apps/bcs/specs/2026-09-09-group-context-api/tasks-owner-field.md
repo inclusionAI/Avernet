@@ -69,19 +69,20 @@
 
 ## Task 4: List / Get 的 owner 读权限
 
+- [x] **Done:** Owner list/get read semantics
 - **Goal:** owner 隐含 R/W，输出 `WRO`，并只对 owner 暴露策略字段。
 - **Files:** `apps/bcs/crates/application/v1/bcs-app-group-context/src/permissions.rs`, `apps/bcs/crates/application/v1/bcs-app-group-context/src/service.rs`, `apps/bcs/crates/application/v1/bcs-app-group-context/tests/group_context_service.rs`
 - **Done when:**
-  - [ ] owner 无需出现在 `visible_to` 或 `collect_from`。
-  - [ ] owner 判定优先于 `visible_to` / `collect_from`，不在任一策略中的 owner 返回 `WRO`。
-  - [ ] list 对 owner 返回 `permission="WRO"`。
-  - [ ] 非 owner 保持现有 `R/W/WR` 输出和过滤行为。
-  - [ ] get 中 owner 可读取不在 `visible_to` 的 context。
-  - [ ] get 对 owner 额外返回 `visible_to` 和 `collect_from`。
-  - [ ] get 对非 owner 不返回 `visible_to` 和 `collect_from`。
-  - [ ] list/get 不返回 owners 本身。
-  - [ ] owner 判定只使用 persisted owners，不引入 creator/admin 判定。
-  - [ ] 测试覆盖 owner、W-only、R-only 和无权限 actor。
+  - [x] owner 无需出现在 `visible_to` 或 `collect_from`。
+  - [x] owner 判定优先于 `visible_to` / `collect_from`，不在任一策略中的 owner 返回 `WRO`。
+  - [x] list 对 owner 返回 `permission="WRO"`。
+  - [x] 非 owner 保持现有 `R/W/WR` 输出和过滤行为。
+  - [x] get 中 owner 可读取不在 `visible_to` 的 context。
+  - [x] get 对 owner 额外返回 `visible_to` 和 `collect_from`。
+  - [x] get 对非 owner 不返回 `visible_to` 和 `collect_from`。
+  - [x] list/get 不返回 owners 本身。
+  - [x] owner 判定只使用 persisted owners，不引入 creator/admin 判定。
+  - [x] 测试覆盖 owner、W-only、R-only 和无权限 actor。
 - **Depends on:** Task 3
 
 ## Task 5: HTTP 与 CLI 暴露

@@ -288,14 +288,19 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
         rows.sort_by_key(|entry| specificity_rank(entry.scope_level));
         let items = rows
             .into_iter()
-            .map(|entry| GroupContextGetItem {
-                name: entry.name,
-                scope_level: entry.scope_level,
-                content: entry.content,
-                valid_from: entry.valid_from,
-                valid_to: entry.valid_to,
-                visible_to: None,
-                collect_from: None,
+            .map(|entry| {
+                let is_owner = actor_is_owner(&entry, &query.actor_id);
+                let visible_to = is_owner.then(|| entry.visible_to.clone());
+                let collect_from = is_owner.then(|| entry.collect_from.clone());
+                GroupContextGetItem {
+                    name: entry.name,
+                    scope_level: entry.scope_level,
+                    content: entry.content,
+                    valid_from: entry.valid_from,
+                    valid_to: entry.valid_to,
+                    visible_to,
+                    collect_from,
+                }
             })
             .collect();
         Ok(GroupContextGetResponse { items })
