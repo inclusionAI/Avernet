@@ -6,6 +6,7 @@ Replaces:
 """
 from __future__ import annotations
 
+from time import perf_counter
 from typing import Annotated, Callable
 
 from fastapi import APIRouter, Depends, Path, Query
@@ -173,13 +174,28 @@ async def correct_user_list(
     service: UserListServiceProtocol = Injected(UserListServiceProtocol),
 ) -> ApiResponse[UserListCheckData]:
     """Apply one operator-authorized user-list correction in the selected environment."""
+    started = perf_counter()
     correction_env = env or get_current_env()
-    in_whitelist = service.correct_membership(
-        actor_id=user.staffId,
-        entity_id=request.entity_id,
-        user_list_type=request.user_list_type,
-        in_whitelist=request.in_whitelist,
-        env=correction_env,
+    fields = "method=PUT route=/api/v1/user-lists/correct actor_id=%s entity_id=%s user_list_type=%s env=%s in_whitelist=%s"
+    context = (user.staffId, request.entity_id, request.user_list_type, correction_env, request.in_whitelist)
+    logger.info("user_list.correction.request " + fields, *context)
+    try:
+        in_whitelist = service.correct_membership(
+            actor_id=user.staffId,
+            entity_id=request.entity_id,
+            user_list_type=request.user_list_type,
+            in_whitelist=request.in_whitelist,
+            env=correction_env,
+        )
+    except Exception as exc:
+        logger.error(
+            "user_list.correction.failed " + fields + " error_type=%s elapsed_ms=%.2f",
+            *context, type(exc).__name__, (perf_counter() - started) * 1000,
+        )
+        raise
+    logger.info(
+        "user_list.correction.success " + fields + " status=200 result=%s elapsed_ms=%.2f",
+        *context, in_whitelist, (perf_counter() - started) * 1000,
     )
     return ApiResponse(
         success=True,

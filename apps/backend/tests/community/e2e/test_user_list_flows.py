@@ -20,7 +20,7 @@ def test_user_list_flow(case, app_with_testing_modules, world):
 @pytest.mark.parametrize("user_list_type", ["caller_identity", "service_bot_runtime_artifact"])
 @pytest.mark.parametrize("enabled", [True, False])
 def test_user_list_correction_operator_boundary(
-    app_with_testing_modules, world, is_operator, entity_id, user_list_type, enabled,
+    app_with_testing_modules, world, caplog, is_operator, entity_id, user_list_type, enabled,
 ):
     from fastapi.testclient import TestClient
     from sqlalchemy import select
@@ -39,12 +39,23 @@ def test_user_list_correction_operator_boundary(
             session.add(EntityUserListModel(entity_id=entity_id, user_list_type=user_list_type, env="prod"))
 
     client = TestClient(app_with_testing_modules)
-    headers = {"x-user-id": "correction_actor"}
+    caplog.set_level("INFO")
+    headers = {"x-user-id": "correction_actor", "Authorization": "Bearer private-test-auth-value"}
     response = client.put(
         "/api/v1/user-lists/correct", params={"env": "prod"}, headers=headers,
         json={"entity_id": entity_id, "user_list_type": user_list_type, "in_whitelist": enabled},
     )
     assert response.status_code == (200 if is_operator else 403)
+    if is_operator:
+        assert "user_list.correction.request" in caplog.text
+        assert "user_list.correction.success" in caplog.text
+        for field in ("actor_id=correction_actor", f"entity_id={entity_id}",
+                      f"user_list_type={user_list_type}", "env=prod", f"in_whitelist={enabled}", "elapsed_ms="):
+            assert field in caplog.text
+    else:
+        assert "[DomainError 403] Forbidden on PUT /api/v1/user-lists/correct" in caplog.text
+        assert "user_list.correction.success" not in caplog.text
+    assert "private-test-auth-value" not in caplog.text
     if is_operator:
         assert response.json()["data"]["in_whitelist"] is enabled
     with database.orm_session() as session:
@@ -63,3 +74,30 @@ def test_user_list_correction_operator_boundary(
     )
     assert check.status_code == 200
     assert check.json()["data"]["in_whitelist"] is expected_enabled
+
+
+def test_user_list_correction_logs_write_failure(app_with_testing_modules, world, caplog):
+    from fastapi.testclient import TestClient
+
+    from agentclaw.community.core.repository.protocols.identity import UserListRepositoryProtocol
+    from tests.community.factories.access import make_staff_user
+    from tests.community.framework import bind_failing_method
+
+    make_staff_user(world, user_id="correction_operator")
+    bind_failing_method(
+        world, UserListRepositoryProtocol, "set_membership", RuntimeError("synthetic persistence unavailable"),
+    )
+    caplog.set_level("INFO")
+    client = TestClient(app_with_testing_modules, raise_server_exceptions=False)
+    response = client.put(
+        "/api/v1/user-lists/correct", params={"env": "prod"},
+        headers={"x-user-id": "correction_operator", "Authorization": "Bearer private-test-auth-value"},
+        json={"entity_id": "*", "user_list_type": "service_bot_runtime_artifact", "in_whitelist": True},
+    )
+    assert response.status_code == 500
+    assert "user_list.correction.request" in caplog.text
+    assert "user_list.correction.failed" in caplog.text
+    for field in ("actor_id=correction_operator", "entity_id=*", "env=prod", "error_type=RuntimeError", "elapsed_ms="):
+        assert field in caplog.text
+    assert "user_list.correction.success" not in caplog.text
+    assert "private-test-auth-value" not in caplog.text
