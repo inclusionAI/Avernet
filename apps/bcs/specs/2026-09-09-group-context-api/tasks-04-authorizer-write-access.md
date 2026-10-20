@@ -21,7 +21,7 @@
   - [ ] Focused service-api, application, and access-guard tests pass.
 - **Depends on:** —
 
-## Task 2: Sync HTTP and CLI transport surfaces
+## Task 2: Sync HTTP and CLI transport surfaces [x]
 - **Goal:** Use the new optional add contract at both deliveries without introducing domain validation into the adapters.
 - **Files:**
   - `apps/bcs/crates/adapters/http/bcs-http/src/routes/group_context.rs`

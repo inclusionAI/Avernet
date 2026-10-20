@@ -47,7 +47,8 @@ pub(crate) struct AddRequest {
     scope_level: ScopeLevel,
     content: String,
     visible_to: GroupContextPolicy,
-    collect_from: GroupContextPolicy,
+    #[serde(default)]
+    collect_from: Option<GroupContextPolicy>,
     #[serde(default, deserialize_with = "deserialize_optional_group_context_time")]
     valid_from: Option<GroupContextTime>,
     #[serde(default, deserialize_with = "deserialize_optional_group_context_time")]

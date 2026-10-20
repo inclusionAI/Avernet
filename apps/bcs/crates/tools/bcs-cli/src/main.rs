@@ -1548,7 +1548,7 @@ enum GroupContextCommands {
         #[arg(long, default_value = r#"{"userIds":[]}"#)]
         visible_to: String,
         #[arg(long)]
-        collect_from: String,
+        collect_from: Option<String>,
         #[arg(long)]
         valid_from: Option<String>,
         #[arg(long)]
@@ -2366,7 +2366,7 @@ fn group_context_add_body(
     scope_level: String,
     content: String,
     visible_to: String,
-    collect_from: String,
+    collect_from: Option<String>,
     valid_from: Option<String>,
     valid_to: Option<String>,
 ) -> Result<serde_json::Value> {
@@ -2381,10 +2381,12 @@ fn group_context_add_body(
         "visible_to".to_string(),
         parse_group_context_policy(&visible_to, "visible-to")?,
     );
-    body.insert(
-        "collect_from".to_string(),
-        parse_group_context_policy(&collect_from, "collect-from")?,
-    );
+    if let Some(collect_from) = collect_from {
+        body.insert(
+            "collect_from".to_string(),
+            parse_group_context_policy(&collect_from, "collect-from")?,
+        );
+    }
     group_context_insert_optional_timestamp(&mut body, "valid_from", valid_from);
     group_context_insert_optional_timestamp(&mut body, "valid_to", valid_to);
     Ok(serde_json::Value::Object(body))
@@ -5873,7 +5875,7 @@ mod tests {
             "group".to_string(),
             "rules".to_string(),
             r#"{"userIds":[]}"#.to_string(),
-            r#"{"userIds":["judge_bot"]}"#.to_string(),
+            Some(r#"{"userIds":["judge_bot"]}"#.to_string()),
             Some("2026-10-12T14:56:08+08:00".to_string()),
             Some("1791797768000".to_string()),
         )
@@ -5886,7 +5888,7 @@ mod tests {
             "group".to_string(),
             "rules".to_string(),
             r#"{"userIds":[]}"#.to_string(),
-            r#"{"userIds":["judge_bot"]}"#.to_string(),
+            Some(r#"{"userIds":["judge_bot"]}"#.to_string()),
             None,
             None,
         )
@@ -5894,6 +5896,47 @@ mod tests {
         let object = without_valid.as_object().unwrap();
         assert!(!object.contains_key("valid_from"));
         assert!(!object.contains_key("valid_to"));
+
+        let without_collect_from = group_context_add_body(
+            "game_rule".to_string(),
+            "group".to_string(),
+            "rules".to_string(),
+            r#"{"userIds":[]}"#.to_string(),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let object = without_collect_from.as_object().unwrap();
+        assert!(!object.contains_key("collect_from"));
+        assert!(!object.contains_key("valid_from"));
+        assert!(!object.contains_key("valid_to"));
+    }
+
+    #[test]
+    fn group_context_add_cli_accepts_missing_collect_from() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "group-context",
+            "add",
+            "--group-id",
+            "game-room-7",
+            "--name",
+            "game_rule",
+            "--scope-level",
+            "group",
+            "--content",
+            "rules",
+        ])
+        .expect("collect_from is optional");
+
+        match cli.command {
+            Commands::GroupContext {
+                command: GroupContextCommands::Add { collect_from, .. },
+                ..
+            } => assert_eq!(collect_from, None),
+            _ => panic!("expected group-context add command"),
+        }
     }
 
     #[test]
@@ -8159,7 +8202,7 @@ mod tests {
             "session".into(),
             "content".into(),
             r#"{"userIds":["bot1"]}"#.into(),
-            r#"{"userIds":["bot2"]}"#.into(),
+            Some(r#"{"userIds":["bot2"]}"#.to_string()),
             Some("1791797768".into()),
             Some("2026-10-12T14:56:08+08:00".into()),
         )

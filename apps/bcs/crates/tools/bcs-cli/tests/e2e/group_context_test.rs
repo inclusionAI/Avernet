@@ -100,6 +100,41 @@ async fn group_context_add_sends_full_body_and_context_query() {
 }
 
 #[tokio::test]
+async fn group_context_add_omits_optional_collect_from_when_missing() {
+    let ctx = TestContext::new()
+        .await
+        .expect("Failed to create test context");
+    let capture = new_body_capture();
+    mount_group_context(&ctx, "add", capture.clone()).await;
+
+    let output = ctx
+        .cmd()
+        .arg("group-context")
+        .arg("--auth")
+        .arg("e2e-token")
+        .arg("add")
+        .arg("--group-id")
+        .arg("game-room-7")
+        .arg("--name")
+        .arg("game_rule")
+        .arg("--scope-level")
+        .arg("group")
+        .arg("--content")
+        .arg("rules")
+        .output()
+        .expect("Failed to execute group-context add without collect-from");
+
+    assert_success(&output);
+    assert_eq!(response_json(&output)["operation"], "add");
+
+    let body = capture.lock().unwrap().take().unwrap();
+    assert_eq!(body["name"], "game_rule");
+    assert_eq!(body["scope_level"], "group");
+    assert_eq!(body["content"], "rules");
+    assert!(body.as_object().unwrap().get("collect_from").is_none());
+}
+
+#[tokio::test]
 async fn group_context_update_omits_patch_fields_not_provided() {
     let ctx = TestContext::new()
         .await
