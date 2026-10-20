@@ -14,18 +14,15 @@ writing are reused at record time (`SkillPackageValidator`,
 `admission_refusal`, `legal_identity_types`, the MCP permission and override
 checks), so a recorded revision is always appliable.
 
-Promotion (Stage 1) moves refs by CAS, records the promotion, compiles the
-revision into a **new** Manifest document kept on the promotion row, and
-hands that document to the Manifest apply engine through one narrow
-`RevisionApplier` seam: the document is saved as the bot's Manifest with
-the existing `BotConfigManifestService.put` and applied with the existing
-`start_apply`, so after a promotion the bot's stored Manifest is the last
-promoted document. The generated document uses the content-store, Center
-and (new) repo sources the contract proposes for delivery; until the
-Manifest accepts them, the applier's preflight refuses the promotion as
-`not_appliable` before any ref moves. Stage 2 replaces the applier
-implementation with components that deliver a revision to the runtime
-directly; the registry does not change.
+Promotion moves refs by CAS, records the promotion with the compiled
+document (a complete, Manifest-shaped desired-state document kept on the
+promotion row as canonical JSON, with its digest), and hands the compiled
+revision to one narrow `RevisionApplier` seam. This item ships one
+implementation of the seam, a placeholder whose preflight refuses every
+promotion as `not_appliable` naming RSI-04, so no ref moves until delivery
+exists. RSI-04 (Stage 2) replaces it with components that feed the apply
+engine directly from the compiled revision; the registry does not change.
+No Manifest document is written anywhere.
 
 One additive contract extension rides along: shared-repository skills
 (`git://…` memberships) get `origin: "repo"` with `repo_path` in
@@ -62,7 +59,8 @@ and its digest, so RSI-04 can switch the join without a migration.
 - `api-contracts/genome/v1/README.md` §7 and
   `manifest-v1-compatibility.md`; `docs/bot-evolution/01-genome.md` (+ zh-CN),
   `work-items.md` (+ zh-CN) — capture replaces document recording; D-6
-  closed; Stage 2 recorded.
+  closed; RSI-03 status (RSI-04 is already redefined as direct delivery in
+  this PR).
 
 ## Data Model Changes
 
@@ -123,8 +121,8 @@ CREATE TABLE `ac_genome_patch` (  -- content-addressed; digest = candidate id
 CREATE TABLE `ac_genome_promotion` (
   …bot axes…, `promotion_id` char(32) NOT NULL, `ref` varchar(16) NOT NULL,
   `revision_id` char(71) NOT NULL, `from_revision_id` char(71) DEFAULT NULL,
-  `document_digest` char(71) NOT NULL COMMENT 'sha256 of JCS(generated document)',
-  `document_yaml` mediumtext NOT NULL COMMENT 'the generated Manifest document handed to apply',
+  `document_digest` char(71) NOT NULL COMMENT 'sha256 of JCS(compiled document)',
+  `document_json` mediumtext NOT NULL COMMENT 'the compiled document handed to the delivery seam, canonical JSON',
   `going_back` tinyint(1) NOT NULL,
   `actor_kind` varchar(16) NOT NULL, `actor_id` varchar(256) NOT NULL, `reason` varchar(1024) NOT NULL,
   `status` varchar(16) NOT NULL COMMENT 'applying/applied/apply_failed',
@@ -239,7 +237,7 @@ class ProvenanceKind(StrEnum): USER, STRATEGY_RUN
 class RefMover(StrEnum): OWNER = "owner"; PROMOTION = "promotion"; RUN = "run"
 @dataclass(frozen=True) class GeneChange: gene: str; kind: str; diff: str | None
 @dataclass(frozen=True) class GenomeDiff: revision: str; against: str; changes: tuple[GeneChange, ...]; risk_tier: str; rewrite_flags: tuple[str, ...]
-@dataclass(frozen=True) class CompiledManifest: revision_id: str; document: dict; document_yaml: str; document_digest: str
+@dataclass(frozen=True) class CompiledManifest: revision_id: str; document: dict; document_digest: str
 ```
 
 ```python
@@ -272,7 +270,7 @@ class GenomePromotionServiceProtocol(Protocol):
     @abstractmethod
     def list_promotions(self, bot: BotRef, *, page: int = 1, page_size: int = 20) -> PromotionPage: ...
 
-# core/bot_genome/promotion/applier.py — the one seam to the delivery path (Stage 2 swaps the implementation)
+# core/bot_genome/promotion/applier.py — the one seam to the delivery path (RSI-04 swaps the implementation)
 class RevisionApplier(Protocol):
     @abstractmethod
     def preflight(self, bot: BotRef, compiled: CompiledManifest) -> None:
@@ -280,11 +278,10 @@ class RevisionApplier(Protocol):
     @abstractmethod
     def start(self, bot: BotRef, compiled: CompiledManifest, *, actor: Actor, reason: str) -> ApplyResult: ...
 
-class ManifestRevisionApplier(RevisionApplier):
-    """Stage 1, personal bots: ``BotConfigManifestService.validate`` in preflight; in start,
-    ``BotConfigManifestService.put(document=compiled.document_yaml, modifier=…)`` (the bot's Manifest becomes
-    the generated document) then ``start_apply(trigger="genome_promotion")``, which applies the stored document
-    as today. Service bots: ``preflight`` raises PromotionUnsupported."""
+class PendingDeliveryApplier(RevisionApplier):
+    """This item's only implementation. ``preflight`` raises PromotionUnsupported for a service bot and
+    NotAppliable("direct delivery lands with RSI-04") for everything else; ``start`` is never reached here.
+    RSI-04 binds its direct-delivery applier in place of this class and nothing else changes."""
 ```
 
 `promote` order (08-promotion.md §7.1, drift from §5.5): resolve target →
@@ -312,7 +309,7 @@ promoting `previous`).
 | `PUT /content` | `put_content` | ADMIN | 201 `{digest, size}`; 200 if it existed |
 | `POST /promotions` | `promote` | OWNER + EDIT_LOCK | 201 `PromotionPayload` |
 | `GET /promotions` | `list_promotions` | MEMBER | 200 `Page[PromotionPayload]` |
-| `GET /promotions/{promotion_id}` | `get_promotion` | MEMBER | 200 `PromotionPayload` (with the generated document) |
+| `GET /promotions/{promotion_id}` | `get_promotion` | MEMBER | 200 `PromotionPayload` (with the compiled document) |
 
 The diff route is registered before the get route so `{rev:path}` (needed
 for `candidate/<run>/<n>`) cannot swallow `/diff`; `:capture` is a literal
@@ -344,7 +341,7 @@ GENOME_ENVELOPE_ERRORS = {
     Drifted: (409, "Bot has drifted from its active revision"),
     PatchRejected: (422, "Patch rejected"),                      # data: {reasons: [{code, location, message}]}
     CaptureRefused: (422, "Current state cannot be captured"),
-    NotAppliable: (422, "Generated document is not appliable to this bot"),
+    NotAppliable: (422, "Revision cannot be delivered to this bot yet"),   # data: {reasons: [...]}
     NotPromotable: (422, "Revision is not promotable"),
     PromotionUnsupported: (422, "Promotion is not supported for this bot type"),
     LimitExceeded: (413, "Limit exceeded"), MoverNotAllowed: (403, "Forbidden"),
@@ -470,13 +467,13 @@ async def capture_spec(reader: BotStateReader, bot: BotRef, *, validator: SkillP
 def compile_spec(spec: dict, content: ContentReader) -> CompiledManifest:
     """identity/skills/resources → {protocol: content_store, digest}; center skills → {protocol: center, version};
     repo skills → {protocol: repo, path}; mcp verbatim; script → {body: <stored body>} or null; memory omitted
-    while null; no cli_tools/engine_config.
-    document_digest = sha256_digest(canonicalize(document)); document_yaml = yaml.safe_dump(document, sort_keys=False)."""
+    while null; no cli_tools/engine_config. document_digest = sha256_digest(canonicalize(document)).
+    The contract's compiled.yaml oracles are compared as parsed values."""
 ```
 
-The `document_digest` rule (digest of the canonical JSON of the parsed
-document, not of the YAML bytes) is what RSI-04's apply report must record;
-stated in the README and the compatibility doc so the two sides agree.
+The `document_digest` rule (digest of the canonical JSON of the compiled
+document) is what RSI-04's apply report must record; stated in the README
+and the compatibility doc so the two sides agree.
 
 ```python
 # core/bot_genome/registry.py — GenomeRegistryService(GenomeRegistryProtocol)
@@ -507,9 +504,9 @@ class BotGenomeModule(Module):
     def genome_registry(self, …) -> GenomeRegistryProtocol: ...
     @singleton @provider @inject
     def genome_promotion(self, registry: GenomeRegistryProtocol, applier: RevisionApplier, …) -> GenomePromotionServiceProtocol: ...
-    @singleton @provider @inject
-    def revision_applier(self, manifests: BotConfigManifestServiceProtocol,
-                         applies: BotConfigManifestApplyServiceProtocol) -> RevisionApplier: ...
+    @singleton @provider
+    def revision_applier(self) -> RevisionApplier:
+        return PendingDeliveryApplier()          # RSI-04 rebinds this provider
     # repositories bound with binder.bind(Protocol, to=Impl, scope=singleton); the state reader is a thunk
     # (Callable[[], BotStateReader]) for the boot-walk reason manifest_delivery_module documents.
 ```
@@ -558,13 +555,12 @@ None new. `jsonschema>=4.20` is already a runtime dependency
 
 ## Risks & Mitigations
 
-- **Risk:** A generated document cannot be applied until RSI-04, so the
-  item's acceptance story cannot complete end to end here.
-  **Mitigation:** the applier validates before any ref moves
-  (`NotAppliable`), so nothing is left half-promoted; the seam, the
-  generated document and the `document_digest` rule are fixed here so
-  RSI-04 only teaches apply to read the store, and Stage 2 only swaps the
-  applier. Stated in the spec.
+- **Risk:** Nothing can be delivered until RSI-04, so the item's
+  acceptance story stops at the delivery hand-off.
+  **Mitigation:** the seam refuses before any ref moves, so nothing is
+  left half-promoted; the seam, the compiled document and the
+  `document_digest` rule are fixed here so RSI-04 only binds its applier.
+  Stated in the spec.
 - **Risk:** Capture reads live device state (identity files, local skill
   packages, resource files) through async services; a wrong read records a
   wrong revision, and it needs the bot's device reachable.
@@ -601,11 +597,12 @@ None new. `jsonschema>=4.20` is already a runtime dependency
   categories, and a provenance YAML copy, and it tied revisions to the
   Manifest for no gain; an owner who manages a bot through Manifest
   documents applies the document as today and captures the result.
-- **A separate apply entry point for the generated document**, to leave
-  the bot's stored Manifest as the owner wrote it. Rejected after review:
-  with capture as the recording path the Manifest is only the Stage 1
-  delivery vehicle, so "the stored Manifest is the last promoted document"
-  is the right meaning, and `put` + `start_apply` need no change.
+- **Deliver through a generated Manifest document in this item** (save it
+  as the bot's Manifest, or apply it through a new entry point). Dropped
+  after review: RSI-04 is now direct delivery, so the Manifest grammar
+  never gains the content-store, Center or repo sources and that path
+  would never run; a placeholder applier that refuses is the honest
+  Stage 1.
 - **Refuse shared-repository skills at capture.** Rejected: many bots have
   them, and refusing would block their first revision; `origin: repo` is
   an additive extension of the contract.
@@ -628,9 +625,8 @@ None new. `jsonschema>=4.20` is already a runtime dependency
 New tables (`create_all` in local/test; the DDL file for OceanBase), new
 endpoints, an additive contract extension, no change to existing
 behaviour: a bot with no revisions answers empty lists and 404s. The
-promotion endpoint refuses with `422 not_appliable` until RSI-04 lands. No
-flag. Stage 2 (direct delivery) is a separate work item recorded in
-`work-items.md` next to RSI-04.
+promotion endpoint refuses with `422 not_appliable` until RSI-04 (direct
+delivery) lands. No flag.
 
 ```bash
 # order: DDL applied out of band on OceanBase before the deploy that mounts the router
@@ -656,7 +652,7 @@ cd apps/backend && DEPLOY_PROFILE=test uv run pytest tests/community/core/bot_ge
 #                                                                           candidate numbering, set_policy, reachability, applied_revision join
 # tests/community/core/bot_genome/test_promotion_service.py              — order of steps with a fake applier; NotAppliable leaves refs;
 #                                                                           drift rules per actor; apply_failed recording; document on the row;
-#                                                                           the Manifest applier puts the document then starts the apply
+#                                                                           PendingDeliveryApplier refuses every promotion naming RSI-04
 # tests/community/repository/bot/test_genome_repository.py               — uniqueness, CAS rowcount semantics, seq retry
 # tests/community/core/bot_config_manifest/content/test_content_store.py — store_produced + is_reachable
 # tests/community/adapters/http/openapi_v1/test_genome_routes.py         — bars, admission, error envelopes, {rev:path} and :capture routing,

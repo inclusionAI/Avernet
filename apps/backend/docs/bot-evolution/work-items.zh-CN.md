@@ -109,33 +109,28 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
   移动引用时能检测冲突；一致性测试 + 单元测试；singlebox 验收故事「编辑 →
   修订版 → apply → 通过晋升一个更早的修订版回到两个修订版之前」。
 
-### RSI-04 面向基因组的 Manifest 变更
+### RSI-04 已编译修订版的直接投递（第二阶段）
 - **模块**：backend
-- **目标**：Manifest 保持对修订版无感知；它只获得以下格式特性以及一项自身的事实
-  （[01-genome.zh-CN.md](01-genome.zh-CN.md) §8）：
-  1. 内容存储源：条目可以指向 manifest 内容存储中的某个摘要；apply 从存储中读取
-     字节，并跳过拉取；
-  2. `engine_config` 生效：为允许列表中的键提供物化器（待定决策 G-4；可能在
-     P3/P4 落地）；
-  3. `memory` 类别：策展条目加一种模式，由 apply 交给引擎适配器
-     （`EngineMemoryProjection`；在 RSI-05 之后落地）；
-  4. 内容存储的产出内容写入路径（由补丁创建、而非拉取的内容）；
-  5. 已应用文档摘要：apply 报告记录它所应用的确切文档的摘要；对服务型 Bot，
-     发布记录记录所发布文档的摘要；
-  6. Center 技能源：条目可以指定一个固定的 Skill Center 版本（Manifest v1 无法
-     声明 Center 技能，而 apply 会删除 `skills` 部分中省略的每个技能，否则已编译
-     的修订版会删除 Bot 的 Center 技能）。
-  已编译的修订版还必须能删除修订版中省略的内容，因此本项依赖两个 Manifest 修复：
-  资源删除（[#2162](https://github.com/inclusionAI/Avernet/issues/2162)）和
-  `script: null`（[#2862](https://github.com/inclusionAI/Avernet/issues/2862)）。内容
-  存储源和 Center 源的提议写法见
-  [`manifest-v1-compatibility.md`](../../api-contracts/genome/v1/manifest-v1-compatibility.md)。
-  Manifest 中没有修订版表、引用或 `revision_id`；`/config-manifest` 端点保持
-  不变。现有的服务型 Bot 回滚功能不做改变。
-- **依赖**：RSI-03。
-- **完成标准**：所有现有 manifest 测试无需修改即通过；新增测试表明，使用内容
-  存储源的文档在应用时无需任何拉取，并且 apply 报告和发布记录携带所应用文档的
-  摘要；`engine_config` 和 `memory` 的测试随各自条目一起落地。
+- **目标**：通过现有的 apply 引擎把已编译的修订版直接投递到 Bot 运行时，中间
+  不再经过 Manifest 文档。新组件接收已编译的修订版（每个类别都存在；文件条目
+  以内容存储摘要表示，Center 技能以固定版本表示，共享技能仓库的技能以路径
+  表示），直接喂给 apply 引擎的各物化器：从内容存储读取字节，解析 Center 与
+  仓库技能；它们接入 RSI-03 留下的 `RevisionApplier` 接缝。Manifest 语法不新增
+  任何源类型。apply 报告记录它所应用的已编译文档的摘要
+  （[01-genome.zh-CN.md](01-genome.zh-CN.md) §8 第 5 项）；对服务型 Bot，发布
+  记录记录所发布文档的摘要。已编译的修订版还必须能删除修订版中省略的内容，
+  因此本项包含两个完整性修复：资源删除
+  （[#2162](https://github.com/inclusionAI/Avernet/issues/2162)）和
+  `script: null`（[#2862](https://github.com/inclusionAI/Avernet/issues/2862)）。
+  仍属于 Manifest、随各自条目落地的工作：`engine_config`（待定决策 G-4，
+  [#2858](https://github.com/inclusionAI/Avernet/issues/2858)）和 `memory`
+  类别（在 RSI-05 之后）。Manifest 中没有修订版表、引用或 `revision_id`；
+  `/config-manifest` 端点保持不变。现有的服务型 Bot 回滚功能不做改变。
+- **依赖**：RSI-03（接缝与已编译文档）、#2162、#2862。
+- **完成标准**：所有现有 manifest 测试无需修改即通过；在 singlebox 中晋升一个
+  修订版即可把它投递到个人 Bot，无需任何拉取、也不写 Manifest，apply 报告携带
+  已编译文档的摘要且 `GenomeRegistry.applied_revision` 能映射回修订版；通过
+  晋升更早的修订版回退两个版本能恢复 Bot，包括被删除的资源和脚本。
 
 ## P2 — 进化核心
 

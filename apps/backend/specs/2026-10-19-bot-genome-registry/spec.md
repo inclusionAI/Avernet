@@ -18,12 +18,14 @@ parent. Named **refs** (`active`, `draft`, …) point at revisions and move
 only by compare-and-swap. The registry can diff any two revisions, and a
 **promotion** moves `active` and delivers the promoted revision to the bot.
 
-Delivery is staged. **Stage 1 (this item):** a promotion generates a new
-Manifest document from the revision and hands it to the existing Manifest
-apply engine, without changing the bot's own stored Manifest. **Stage 2
-(later):** new components deliver a revision to the bot runtime directly,
-with no Manifest document in between. A revision is not tied to the
-Manifest; the Manifest is only the delivery vehicle in Stage 1.
+Delivery is a separate item. This item records promotions and hands the
+compiled revision to one narrow delivery seam; RSI-04 (redefined as
+**Stage 2**) builds the components that deliver a compiled revision to the
+bot runtime directly, through the existing apply engine, with no Manifest
+document in between. Until RSI-04 lands a promotion is refused before any
+ref moves. A revision is not tied to the Manifest: the Manifest's own
+`/config-manifest` endpoints keep working as today and are not used by the
+registry.
 
 ### Terms
 
@@ -83,9 +85,9 @@ endpoints.
   registry I can call from Backend code and the same operations as HTTP
   endpoints, so that a run can record each candidate patch as
   `candidate/<run id>/<n>` and ask whether the bot has drifted.
-- As an **engineer building Stage 2 / RSI-04**, I want promotion to go
-  through one narrow delivery seam, so that the direct route replaces the
-  generated Manifest without touching the registry.
+- As an **engineer building RSI-04 (Stage 2)**, I want promotion to go
+  through one narrow delivery seam that hands me the compiled revision, so
+  that direct delivery plugs in without touching the registry.
 
 ## Acceptance Criteria
 
@@ -155,21 +157,20 @@ Content:
       the digest is reachable from that bot's revisions or uploads; a read
       re-verifies the hash.
 
-Promotion and drift (Stage 1):
-- [ ] A revision compiles to a new Manifest document whose file entries
-      point at the content store by digest and whose Center skills are
-      pinned by version. Compiling each contract example's `revision.json`
-      reproduces its `compiled.yaml`. The document's digest is the digest of
-      its canonical JSON, independent of YAML formatting.
+Promotion and drift:
+- [ ] A revision compiles to a complete, Manifest-shaped desired-state
+      document whose file entries point at the content store by digest and
+      whose Center and repo skills are pinned by version or path. Compiling
+      each contract example's `revision.json` reproduces its
+      `compiled.yaml`. The document's digest is the digest of its canonical
+      JSON.
 - [ ] Promoting a revision moves `active` and `previous` in one
       compare-and-swap, marks the revision `promoted`, records a promotion
-      with actor, reason, the generated document and its digest, saves the
-      generated document as the bot's Manifest, and starts the existing
-      Manifest apply for a personal bot. After a promotion the bot's stored
-      Manifest is the last promoted document.
-- [ ] The promotion is refused before any ref moves when the Manifest
-      cannot accept the generated document (today: until RSI-04 lets apply
-      read bytes from the content store and pin Center skills).
+      with actor, reason, the compiled document and its digest, and hands
+      the compiled revision to the delivery seam.
+- [ ] Until RSI-04 provides direct delivery, the seam's preflight refuses
+      every promotion as `not_appliable` before any ref moves, naming
+      RSI-04; service bots are refused as unsupported the same way.
 - [ ] The registry answers which revision a bot runs by joining the bot's
       last apply to the promotion that started it, and reports drift when
       the last apply was not started by a promotion or its revision differs
@@ -186,9 +187,9 @@ Surface and tests:
       patch application and compile; repository, DI wiring and HTTP bars
       are tested like the Manifest's.
 - [ ] The singlebox story "capture → patch → diff → move draft → promote"
-      runs end to end up to the apply hand-off; the "apply → go back two
-      revisions" leg completes once RSI-04 lets apply consume a generated
-      document.
+      runs end to end up to the delivery hand-off, where promotion is
+      refused as `not_appliable`; the "deliver → go back two revisions" leg
+      completes with RSI-04.
 
 ## In Scope
 
@@ -196,8 +197,8 @@ Surface and tests:
   validation, policy change, diff, risk tiers and rewrite detection, refs
   with CAS, content upload/read, compile, lineage queries, the drift check.
 - A promotion service and endpoint that moves refs, records the promotion
-  with the generated document, saves that document as the bot's Manifest
-  and starts the existing apply, through one narrow delivery seam (Stage 1).
+  with the compiled document, and hands the compiled revision to one narrow
+  delivery seam, whose only implementation here refuses until RSI-04.
 - The additive contract extension `origin: repo` for shared-repository
   skills.
 - The produced-content write path of the manifest content store.
@@ -209,19 +210,17 @@ Surface and tests:
 
 ## Out of Scope
 
-- **Stage 2:** components that deliver a revision to the bot runtime
-  without a Manifest document. The delivery seam here is shaped so Stage 2
-  replaces the generated-Manifest implementation only.
+- **Delivery (RSI-04, redefined as Stage 2):** components that take a
+  compiled revision into the existing apply engine directly, reading bytes
+  from the content store and resolving Center and repo skills, plus the
+  applied-document digest and the totality fixes (#2162, #2862). Until then
+  a promotion is refused before moving refs. `memory` delivery (RSI-05) and
+  `engine_config` (#2858) stay where they are.
 - **Recording a revision from a Manifest document.** Revisions come from
   the bot or from patches; an owner who manages a bot through Manifest
   documents applies the document as today and captures the result.
-- **Manifest changes (RSI-04):** apply reading bytes from the content
-  store, pinned Center skills, the applied-document digest, resource
-  removal (#2162), `script: null` (#2862), `memory` delivery (RSI-05),
-  `engine_config` (#2858). Until then a promotion is refused before moving
-  refs.
 - **Service-bot promotion through the publish flow.** Refused as
-  unsupported behind the same seam until Stage 2 / RSI-16.
+  unsupported behind the same seam until RSI-04 / RSI-16.
 - **The gate, review queue, approvals, canary rollout, kill switches**
   (RSI-12, RSI-16); **Experience, evaluations, the ledger** (RSI-10,
   RSI-11, RSI-21); **a shared `Idempotency-Key` store** (RSI-07); **bot
@@ -233,8 +232,8 @@ Surface and tests:
 ## Open Questions
 
 - None. Decisions made during review and recorded above: capture replaces
-  recording from a Manifest document; a promotion saves the generated
-  document as the bot's Manifest and reuses the existing apply; a patch's
-  own `base` is its only base; shared-repository skills are recorded by
-  path; policy changes are an operation of their own; Stage 2 is a
-  follow-on item.
+  recording from a Manifest document; a promotion hands the compiled
+  revision to a delivery seam and writes no Manifest; a patch's own `base`
+  is its only base; shared-repository skills are recorded by path; policy
+  changes are an operation of their own; RSI-04 is redefined as direct
+  delivery (Stage 2) and precedes any further Manifest work.

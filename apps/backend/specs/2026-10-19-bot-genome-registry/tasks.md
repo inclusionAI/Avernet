@@ -43,7 +43,7 @@
 - **Goal:** Persistence for revisions, refs (CAS), ref events, patches and promotions.
 - **Files:** `core/bot_genome/sql/2026_10_19_bot_genome.sql`, `core/bot_genome/repository/{__init__,models}.py`, `core/repository/protocols/bot/genome.py` (+ `__init__` exports), `core/repository/implementations/bot/genome.py`, `core/schema.py`; `tests/community/repository/bot/test_genome_repository.py`
 - **Done when:**
-  - [ ] The five tables are created by `create_all`; the DDL matches the ORM; the promotion row holds the generated document and its digest.
+  - [ ] The five tables are created by `create_all`; the DDL matches the ORM; the promotion row holds the compiled document (canonical JSON) and its digest.
   - [ ] Inserting an existing `revision_id` returns the existing row without a new `seq`; a `seq` collision retries; `list` filters by status/parent newest-seq-first with totals.
   - [ ] `move` is CAS on the expected revision (rowcount semantics), `move_pair` moves `active`+`previous` in one transaction, each move appends an event; `candidate_count(run)` supports numbering.
   - [ ] Promotion rows round-trip; `by_apply_reference` finds the promotion for an apply id.
@@ -51,12 +51,12 @@
 - **Depends on:** Task 1
 
 ## Task 6: Capture and compile
-- **Goal:** Record a revision from the bot's current state, and compile a revision into a new Manifest document.
+- **Goal:** Record a revision from the bot's current state, and compile a revision into a complete desired-state document for delivery.
 - **Files:** `core/bot_genome/capture/{__init__,capture,bot_state}.py`, `core/bot_genome/compile.py`; `tests/community/core/bot_genome/{test_capture,test_bot_state,test_compile}.py`
 - **Done when:**
   - [ ] `capture_spec` over a fake reader seeded from the contract example revisions' blobs produces exactly those specs; `git://` skills become `origin: repo`; the AGENTS.md reference block is removed and `rstrip()+"\n"` applied; a non-Manifest-path resource and a platform-managed teclaw bot raise `CaptureRefused` naming the item.
   - [ ] `PlatformBotStateReader` reads persona, skills (local files via package storage, Center versions, repo paths, platform defaults excluded), resources, MCP servers with bot overrides, and the script through the named services, with a fake-driven unit test per category.
-  - [ ] `compile_spec` reproduces every `compiled.yaml` and emits `{protocol: repo, path}` for repo skills; `document_digest` is the digest of the canonical JSON of the document and is unchanged by YAML formatting.
+  - [ ] `compile_spec` reproduces every `compiled.yaml` (compared as parsed values) and emits `{protocol: repo, path}` for repo skills; `document_digest` is the digest of the canonical JSON of the document.
 - **Depends on:** Tasks 3, 4
 
 ## Task 7: Registry service
@@ -71,11 +71,11 @@
 - **Depends on:** Tasks 5, 6
 
 ## Task 8: Promotion service and applier seam
-- **Goal:** Move `active`/`previous`, record the promotion with its generated document, save the document as the bot's Manifest and start the apply.
+- **Goal:** Move `active`/`previous`, record the promotion with its compiled document, and hand the compiled revision to the delivery seam.
 - **Files:** `core/bot_genome/promotion/{__init__,promotion_service_protocol,applier,service}.py`, `api/bot_genome_promotion_service.py`; `tests/community/core/bot_genome/test_promotion_service.py`; conformance pair registered
 - **Done when:**
-  - [ ] `promote` follows the planned order; `NotAppliable`/`PromotionUnsupported` from `preflight` leaves refs and statuses untouched; `Drifted` refuses non-owner actors only; `going_back` is set when the target was promoted before; a failed `start` records `apply_failed` with refs moved; the row carries the document and digest.
-  - [ ] `ManifestRevisionApplier` validates through `BotConfigManifestService.validate`, saves the document through `put` and starts `start_apply(trigger="genome_promotion")`; the service-bot path raises `PromotionUnsupported`.
+  - [ ] `promote` follows the planned order (tested with a fake applier that accepts): `NotAppliable`/`PromotionUnsupported` from `preflight` leaves refs and statuses untouched; `Drifted` refuses non-owner actors only; `going_back` is set when the target was promoted before; a failed `start` records `apply_failed` with refs moved; the row carries the compiled document and digest.
+  - [ ] `PendingDeliveryApplier`, the only bound implementation, refuses a service bot as `PromotionUnsupported` and everything else as `NotAppliable` naming RSI-04; no Manifest is read or written anywhere on the promotion path.
   - [ ] `get_promotion` / `list_promotions` read back rows, document included.
 - **Depends on:** Task 7
 
@@ -101,8 +101,8 @@
 - **Files:** `api-contracts/genome/v1/README.md`, `api-contracts/genome/v1/manifest-v1-compatibility.md`, `docs/bot-evolution/01-genome.md` (+ `zh-CN`), `docs/bot-evolution/work-items.md` (+ `zh-CN`), `core/bot_genome/README.md`
 - **Done when:**
   - [ ] Contract README §7 states that revisions are captured from the bot or recorded from a patch, keeps the Manifest v1 → revision field mapping and the capture normalisation rules, and states the `document_digest` rule for the generated document; §6.4's "base must match" becomes "the patch's own base, which must be a revision of the bot".
-  - [ ] `01-genome.md`: §4.1 item 5 and §12 replace document recording with capture (`POST …/revisions:capture`), drop the request-level `base`, and add the policy operation; D-6 closed (DB + content store, table names); §11 matches the shipped Protocol; §5.5/§12 note the apply-id join until RSI-04; §8 notes that a promotion saves the generated document as the bot's Manifest.
-  - [ ] `work-items.md`: RSI-03 status with the deferred legs listed under RSI-04 (apply reads the content store, pins Center skills, resolves repo skills; service-bot publish; teclaw platform-managed capture; repo skill commit pins), and a new Stage 2 item (direct revision-to-runtime delivery components replacing the generated Manifest).
+  - [ ] `01-genome.md`: §4.1 item 5 and §12 replace document recording with capture (`POST …/revisions:capture`), drop the request-level `base`, and add the policy operation; D-6 closed (DB + content store, table names); §11 matches the shipped Protocol; §5.5/§12 note the apply-id join until RSI-04; §8 says delivery is direct (RSI-04) and the Manifest grammar gains no sources.
+  - [ ] `work-items.md`: RSI-03 marked done with what RSI-04 (already redefined as direct delivery) still owes: delivery itself, service-bot publish, repo skill commit pins; teclaw platform-managed capture noted as a follow-up.
   - [ ] English and zh-CN say the same.
 - **Depends on:** Task 10
 
@@ -110,7 +110,7 @@
 - **Goal:** Ensure the work meets every spec acceptance criterion.
 - **Done when:**
   - [ ] `DEPLOY_PROFILE=test uv run pytest tests/community -q` passes; architecture tests pass; every touched source file is under 1,000 lines.
-  - [ ] The singlebox story (capture → patch → diff → move `draft` → promote) is run against a local backend and the promotion is refused as `not_appliable` with the Manifest's reasons, refs untouched; the result is recorded in the PR's Validation section.
+  - [ ] The singlebox story (capture → patch → diff → move `draft` → promote) is run against a local backend and the promotion is refused as `not_appliable` naming RSI-04, refs untouched; the result is recorded in the PR's Validation section.
   - [ ] Every acceptance criterion in `spec.md` checks off, with the RSI-04-dependent leg stated.
 - **Depends on:** Task 11
 

@@ -125,41 +125,35 @@ the rest.
   acceptance story "edit → revision → apply → go back two revisions by
   promoting an earlier one".
 
-### RSI-04 Manifest changes for the genome
+### RSI-04 Direct delivery of a compiled revision (Stage 2)
 - **Module**: backend
-- **Goal**: The Manifest stays revision-unaware; it gains only these
-  format features and one fact of its own
-  ([01-genome.md](01-genome.md) §8):
-  1. content-store source: an entry may point at a digest in the manifest
-     content store; apply reads the bytes from the store and skips the
-     fetch;
-  2. `engine_config` applies: a materialiser for an allowlist of keys
-     (open decision G-4; may land in P3/P4);
-  3. `memory` category: curated items plus a mode, handed by apply to the
-     engine adapter (`EngineMemoryProjection`; lands after RSI-05);
-  4. produced-content write path for the content store (content created by
-     a patch, not fetched);
-  5. applied-document digest: the apply report records the digest of the
-     exact document it applied; for service bots, the publish record
-     records the digest of the published document;
-  6. Center-skill source: an entry may name a pinned Skill Center version
-     (Manifest v1 cannot declare one, and apply removes every skill a
-     `skills` section omits, so a compiled revision would otherwise remove
-     the bot's Center skills).
-  Compiled revisions must also be able to remove what a revision omits, so
-  this item depends on two Manifest fixes: resource removal
+- **Goal**: Deliver a compiled revision to the bot runtime through the
+  existing apply engine with no Manifest document in between. New
+  components take the compiled revision (every category present, file
+  entries by content-store digest, Center skills by pinned version,
+  shared-repository skills by path) and feed the apply engine's
+  materialisers directly, reading bytes from the content store and
+  resolving Center and repo skills; they plug into the `RevisionApplier`
+  seam RSI-03 leaves. The Manifest grammar gains no new source kinds. The
+  apply report records the digest of the compiled document it applied
+  ([01-genome.md](01-genome.md) §8 item 5); for service bots the publish
+  record records the digest of the published document. A compiled revision
+  must also remove what the revision omits, so this item includes the two
+  totality fixes: resource removal
   ([#2162](https://github.com/inclusionAI/Avernet/issues/2162)) and
   `script: null` ([#2862](https://github.com/inclusionAI/Avernet/issues/2862)).
-  The proposed spellings of the content-store and Center sources are in
-  [`manifest-v1-compatibility.md`](../../api-contracts/genome/v1/manifest-v1-compatibility.md).
-  No revision table, refs, or `revision_id` in the Manifest; the
-  `/config-manifest` endpoints are unchanged. The existing service-bot
-  rollback feature is not changed.
-- **Depends on**: RSI-03.
-- **Done when**: all existing manifest tests pass unchanged; new tests show
-  that a document using content-store sources applies without any fetch and
-  that apply reports and publish records carry the applied document digest;
-  `engine_config` and `memory` tests land with their items.
+  Still Manifest work, landing with their own items: `engine_config`
+  (open decision G-4, [#2858](https://github.com/inclusionAI/Avernet/issues/2858))
+  and the `memory` category (after RSI-05). No revision table, refs, or
+  `revision_id` in the Manifest; the `/config-manifest` endpoints are
+  unchanged. The existing service-bot rollback feature is not changed.
+- **Depends on**: RSI-03 (the seam and the compiled document), #2162, #2862.
+- **Done when**: all existing manifest tests pass unchanged; promoting a
+  revision in singlebox delivers it to a personal bot with no fetch and no
+  Manifest write, the apply report carries the compiled document's digest
+  and `GenomeRegistry.applied_revision` maps it back; going back two
+  revisions by promoting an earlier one restores the bot, removed
+  resources and script included.
 
 ## P2 — Evolution core
 
