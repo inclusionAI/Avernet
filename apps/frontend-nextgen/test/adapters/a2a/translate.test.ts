@@ -9,7 +9,8 @@ import type { WireEvent } from '@/adapters/a2a/stream';
 import {
   translateEvent, type TranslateCtx,
 } from '@/adapters/a2a/translate';
-import { V3_FRAME_SHAPES, loadOpenClawParser } from './v3-frame-shapes.test';
+import { V3_FRAME_SHAPES } from '@/adapters/a2a/v3FrameShapes';
+import { loadOpenClawParser } from './v3-frame-shapes.test';
 
 const OpenClawParser = loadOpenClawParser();
 
