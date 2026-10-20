@@ -13,3 +13,53 @@ def test_user_list_flow(case, app_with_testing_modules, world):
     """Run the membership write/read lifecycle through the HTTP application."""
     ctx = run_flow(case, app_with_testing_modules, world)
     assert ctx is not None
+
+
+@pytest.mark.parametrize("is_operator", [True, False])
+@pytest.mark.parametrize("entity_id", ["rollout_owner", "*"])
+@pytest.mark.parametrize("user_list_type", ["caller_identity", "service_bot_runtime_artifact"])
+@pytest.mark.parametrize("enabled", [True, False])
+def test_user_list_correction_operator_boundary(
+    app_with_testing_modules, world, is_operator, entity_id, user_list_type, enabled,
+):
+    from fastapi.testclient import TestClient
+    from sqlalchemy import select
+
+    from agentclaw.community.core.user_list.models import EntityUserListModel
+    from agentclaw.community.plugin_api.auth import AuthPlugin
+    from agentclaw.community.plugin_api.database import DatabasePlugin
+    from tests.community.factories.access import make_staff_user
+
+    make_staff_user(world, user_id="correction_actor")
+    world.get(AuthPlugin).set_response("is_operator_allowed", is_operator)
+    database = world.get(DatabasePlugin)
+    with database.orm_session() as session:
+        session.add(EntityUserListModel(entity_id=entity_id, user_list_type=user_list_type, env="pre"))
+        if not enabled:
+            session.add(EntityUserListModel(entity_id=entity_id, user_list_type=user_list_type, env="prod"))
+
+    client = TestClient(app_with_testing_modules)
+    headers = {"x-user-id": "correction_actor"}
+    response = client.put(
+        "/api/v1/user-lists/correct", params={"env": "prod"}, headers=headers,
+        json={"entity_id": entity_id, "user_list_type": user_list_type, "in_whitelist": enabled},
+    )
+    assert response.status_code == (200 if is_operator else 403)
+    if is_operator:
+        assert response.json()["data"]["in_whitelist"] is enabled
+    with database.orm_session() as session:
+        environments = set(session.scalars(select(EntityUserListModel.env).where(
+            EntityUserListModel.entity_id == entity_id,
+            EntityUserListModel.user_list_type == user_list_type,
+        )).all())
+    expected_enabled = enabled if is_operator else not enabled
+    assert environments == ({"pre", "prod"} if expected_enabled else {"pre"})
+
+    # Membership reads remain available to ordinary authenticated users.
+    world.get(AuthPlugin).set_response("is_operator_allowed", False)
+    check = client.get(
+        "/api/v1/user-lists/check", headers=headers,
+        params={"entity_id": entity_id, "user_list_type": user_list_type, "env": "prod"},
+    )
+    assert check.status_code == 200
+    assert check.json()["data"]["in_whitelist"] is expected_enabled

@@ -26,9 +26,9 @@ class UserListServiceProtocol(Protocol):
         in_whitelist: bool,
         env: str | None = None,
     ) -> bool:
-        """Correct frontend lists; server-managed types raise ServerManagedUserListError.
+        """Correct membership after the caller has passed operator authorization.
 
-        HTTP adapters expose this denial as 403 without modifying persistence.
+        HTTP adapters must reject non-operators before invoking this write.
         """
         ...
 
