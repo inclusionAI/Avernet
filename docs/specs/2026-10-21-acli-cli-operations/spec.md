@@ -23,13 +23,13 @@ Status: DRAFT for review. Builds on the acli CLI API
 
 | # | Decision |
 | --- | --- |
-| D1 | One set of endpoints. An optional `async` parameter: omitted = sync, `true` = async. Same on engine and backend. |
-| D2 | Sync calls wait for the operation to end, returning as soon as it does, for at most **30 s**; then they answer "still running". |
+| D1 | One set of endpoints. An optional `async` parameter: omitted = sync, `true` = async. Same on engine and backend, for operations and for cancel. |
+| D2 | Sync calls wait for the operation to end, returning as soon as it does, for at most **30 s**; then they answer "still running" (`202`). |
 | D3 | The engine runs **at most one acli operation per container** (acli cannot run in parallel). No queue. |
-| D4 | Idempotency is on the operation: the same action on the same CLI joins the operation in progress. A different operation while one is in progress is a conflict (409). |
+| D4 | Every operation has an **id**, and the id is its idempotency key. A request carrying a known id returns that operation (running or finished) and never runs acli again. After a `202`, callers **poll by id**; they never resubmit to learn the outcome. A new request while another operation is in progress is a conflict (409) that names the operation in progress. |
 | D5 | Cancellation, per action: `install/cancel` and `uninstall/cancel`, keyed by CLI name (there is at most one operation). A running operation is killed and its effect reverted, so the container ends as it was before the operation. |
-| D6 | Backend runs every add and remove as a task-queue task, idempotency key `acli:{bot_pk}:{stage}`: at most one active operation per bot runtime. The task payload is fixed at enqueue. |
-| D7 | `stage` parameter: `draft`, `verify`, `online` for service bots, default `draft`. Personal (non-service) bots must omit it; passing it is a 422. |
+| D6 | Backend runs every add and remove as a task-queue task, idempotency key `acli:op:{bot_pk}:{stage}`: at most one active operation per bot runtime. Cancels are tasks with their own key, `acli:cancel:{bot_pk}:{stage}`, so a cancel can be enqueued while the operation is live. Payloads are fixed at enqueue. |
+| D7 | `stage` parameter: `draft`, `verify`, `online` for service bots, default `draft`. Personal (non-service) bots must omit it; passing it is a 422. A personal bot has one runtime, its draft binding, so its keys use `draft`. |
 | D8 | The engine is the source of truth for what is installed. Listing a stage's CLIs asks that stage's engine; a stage without a running container is `409 not_running`. |
 | D9 | **Grants are never revoked by remove.** Add grants before it installs. The invariant is: installed in any stage ⇒ granted. Known limitation: a removed CLI keeps its Passport grant. |
 | D10 | The task runs the operation regardless of the caller; the API's sync mode only decides how long the HTTP call waits. |
@@ -41,10 +41,13 @@ envelope. `404` still means only "this engine build has no such endpoint".
 
 ### Operation
 
-At most one per container, kept with the last finished one:
+The engine's record of one install or uninstall. It is both what the engine
+uses to know the container's state (an install is running, an uninstall
+ended, …) and what every endpoint below returns, in `data.operation`:
 
 ```json
 {
+  "id": "…",
   "action": "install",
   "name": "deepinsight-cli",
   "state": "running",
@@ -62,41 +65,48 @@ At most one per container, kept with the last finished one:
 | `succeeded` | done; `result` set |
 | `failed` | definite failure; `error = {code, message}` |
 | `cancelled` | stopped and reverted |
-| `interrupted` | the engine restarted mid-operation; outcome unknown, safe to submit again |
+| `interrupted` | the engine restarted mid-operation; outcome unknown |
 
 `result` is `{name, command, description, version, already_installed}` for
-install and `{name, uninstalled}` for uninstall.
+install and `{name, uninstalled}` for uninstall. At most one operation is
+active; finished ones are kept for 24 h (at most the last 200) so they can
+still be read by id.
 
 ### Endpoints
 
 | Endpoint | Body | Behaviour |
 | --- | --- | --- |
-| `POST /install` | `{name, async?}` | Start or join (see table below). |
-| `POST /uninstall` | `{name, async?}` | Same. |
-| `POST /install/cancel` | `{name}` | Cancel the install of `name` (sync only). |
-| `POST /uninstall/cancel` | `{name}` | Cancel the uninstall of `name` (sync only). |
-| `GET /operation` | | The current operation, else the last finished one, else `null`. |
+| `POST /install` | `{name, id?, async?}` | Start, or return operation `id` (see below). |
+| `POST /uninstall` | `{name, id?, async?}` | Same. |
+| `POST /install/cancel` | `{name, async?}` | Cancel the install of `name`. |
+| `POST /uninstall/cancel` | `{name, async?}` | Cancel the uninstall of `name`. |
+| `GET /operations/{id}` | | That operation, or `404 operation_not_found`. |
+| `GET /operation` | | The active operation, or `null`. |
 
-Start or join:
+`id` is optional and chosen by the caller (the backend passes its task id);
+when omitted the engine generates one. Either way it comes back in the
+response.
 
-| Slot | Request | Answer |
+| Request | Slot | Answer |
 | --- | --- | --- |
-| empty | install or uninstall | start it |
-| busy with the same action on the same `name` | same | join it (no new acli run) |
-| busy with anything else | any | `409 engine_busy` + the current operation |
-| — | invalid `name` | `400`, nothing started |
+| `id` of a known operation | any | that operation (wait for it if sync); no new acli run. A different `action`/`name` for that `id` is `400`. |
+| new or no `id` | empty | start it |
+| new or no `id` | busy | `409 engine_busy` + the active operation |
+| invalid `name` | — | `400`, nothing started |
 
 Then:
 
 - **Sync** (`async` omitted): wait for the operation to end, at most 30 s,
   returning as soon as it ends. Ended: `200`, `success` true with `result`,
-  or false with `error` and the operation. Still running: `202` with the
-  operation.
+  or false with `error`. Still running: `202`. Both carry the operation.
 - **Async** (`async: true`): `202` with the operation immediately.
-- Calling again joins, so a sync call after a `202` keeps waiting. Once the
-  slot is empty, the installed list is authoritative: installing a tool that
-  is installed returns at once with `already_installed: true` and runs no
-  acli.
+- After a `202`, poll `GET /operations/{id}`, or resubmit with the same
+  `id` to wait again. Submitting without the id (or with a new one) is a new
+  request: if the earlier operation failed, that runs acli again, which is
+  what the caller asked for, not a hidden retry.
+- Installing a tool that is already installed returns at once with
+  `already_installed: true` and runs no acli; uninstalling a tool that is
+  not installed returns `uninstalled: false`.
 
 ### Cancellation
 
@@ -104,7 +114,7 @@ Then:
 | --- | --- | --- |
 | install of `name` running | kill acli's process group → `cancelling` → revert → `cancelled` | `409 not_active` |
 | uninstall of `name` running | `409 not_active` | mirror |
-| `cancelling` for `name` | join and wait | join and wait |
+| `cancelling` for `name` | return it (wait if sync) | return it (wait if sync) |
 | empty, or another tool | `409 not_active` | `409 not_active` |
 
 - **Revert** restores what the engine recorded when the operation started
@@ -113,20 +123,29 @@ Then:
   reinstalled (the market's current version).
 - A revert that fails ends `failed` with `revert_failed`, and the tool's
   actual state is reported.
-- Cancel is sync: it waits for `cancelled`, at most 30 s, else `202` with
-  `cancelling`; calling it again keeps waiting.
+- Sync cancel waits for the operation to end, at most 30 s, else `202` with
+  the `cancelling` operation. Async cancel answers `202` at once. Either way
+  the outcome is read with `GET /operations/{id}`.
 
 ### Running the operation
 
 - The operation runs to its end or its own limit (**30 min**), whoever is
   watching. A caller disconnecting never stops it.
-- acli runs with a fixed argument list, in its own process group, with
-  `HOME=<parent of install dir>/acli-home`, as today.
-- The slot is saved to a file under `acli-home` (persisted volume). On
-  engine start, a `running` or `cancelling` operation becomes `interrupted`
-  and its stored process group is killed if it is still alive.
-- Uninstall keeps today's behaviour: match by name or command, uninstall,
-  list again to confirm.
+- acli runs with a fixed argument list, with
+  `HOME=<parent of install dir>/acli-home`, as today, in its **own process
+  group**: acli and every process it starts (npm, a package's install
+  scripts, a downloader) share one group id, distinct from the engine's.
+  Killing that group stops all of them at once, so a cancel or timeout
+  never leaves an orphaned npm writing into the install directory, and never
+  signals the engine itself.
+- The active operation is saved to a file under `acli-home` (persisted
+  volume), with acli's process-group id. On engine start, a `running` or
+  `cancelling` operation becomes `interrupted` and that group is killed if it
+  is still alive.
+- Uninstall lists once to find the tool by name or command (acli
+  uninstalls by name, and a market name may be recorded under its command),
+  then uninstalls it. acli's exit status is trusted: there is no second list
+  to confirm, and so no "ran but could not be confirmed" outcome.
 
 ## Backend contract
 
@@ -137,45 +156,64 @@ The same routes on `/openapi/v1/bots/…` and the internal `/api/bots/…`.
 | GET | `…/{bot_id}/clis?stage=` | Installed CLIs of that stage, from its engine, with `identity_mode` from Passport and the `default` flag. `409 not_running` if the stage has no running container. |
 | POST | `…/{bot_id}/clis?stage=&async=` | Add: body `{cli_code}`. |
 | DELETE | `…/{bot_id}/clis/{cli_code}?stage=&async=` | Remove. Default CLIs still refused. |
-| POST | `…/{bot_id}/clis/{cli_code}/install/cancel?stage=` | Forwarded to the stage's engine. |
-| POST | `…/{bot_id}/clis/{cli_code}/uninstall/cancel?stage=` | Same. |
-| GET | `…/{bot_id}/cli-operations?stage=` | The stage's current or last operation. |
+| POST | `…/{bot_id}/clis/{cli_code}/install/cancel?stage=&async=` | Cancel the add in progress. |
+| POST | `…/{bot_id}/clis/{cli_code}/uninstall/cancel?stage=&async=` | Cancel the remove in progress. |
+| GET | `…/{bot_id}/cli-operations/{operation_id}` | One operation (add, remove or cancel), live or finished. |
+| GET | `…/{bot_id}/cli-operations?stage=` | The stage's live operations (at most one add/remove and one cancel). |
 | GET | `…/market/clis` | Unchanged. |
 
 `stage` (D7): service bots `draft` (default) / `verify` / `online`; any
 `stage` on a personal bot is `422`. The stage resolves to its container the
 same way the existing engine-runtime routes do (`RuntimeStage`,
-`resolve_for_binding`). Access rules are unchanged: list needs MEMBER; add,
+`resolve_for_binding`). Access rules are unchanged: reads need MEMBER; add,
 remove and cancel need the owner and the edit lock.
 
 ### Operation task
 
 - `TaskQueueService.enqueue(task_type="acli_clis.operation",
-  idempotency_key=f"acli:{bot_pk}:{stage}", payload=…)`.
+  idempotency_key=f"acli:op:{bot_pk}:{stage}", payload=…)`.
 - Payload, fixed at enqueue: `{action, cli_code, bot_id, owner_id, stage,
-  actor_id, identity_mode}`.
-- `created=False` (a task is live for this runtime):
-  - same action and `cli_code` → join it;
-  - otherwise → `409 operation_conflict` with the live task's
-    `{action, cli_code}`.
+  actor_id, identity_mode}`. The task id is the operation id, and is also
+  the `id` sent to the engine, so the engine operation is found again by it.
+- `created=False` (an add or remove is already live for this runtime,
+  whatever its action and CLI): nothing new is enqueued; the answer is
+  `409 operation_in_progress` with the live operation, meaning "this one is
+  in progress, try again later". The caller polls it by id.
 - Handler:
   - **add**: grant `cli_code` if not granted (read back) → submit the
-    install to the engine with `async` → `Reschedule(~3 s)` while the
-    engine operation is running → end.
-  - **remove**: submit the uninstall with `async` → reschedule until it
+    install to the engine with `id = task id` and `async` →
+    `Reschedule(2 s)`, reading `GET /operations/{id}`, until it ends.
+  - **remove**: submit the uninstall the same way → reschedule until it
     ends. No revoke (D9).
+  - Because the engine id is the task id, a handler re-run (lost lease,
+    restart) finds the same engine operation instead of starting another.
   - The engine's terminal state decides the task's: `succeeded` →
     `Complete`; `failed`, `cancelled`, `interrupted` → `Fail("<code>:
-    <message>")`. An `interrupted` engine operation is resubmitted once
-    (the engine operations are idempotent) before failing.
-  - `deadline_at` ≈ 40 min (above the engine's 30). Every step checks
-    actual state first, so a re-run after a lost lease converges.
+    <message>")`. No automatic resubmit: an `interrupted` operation fails the
+    task, and the caller decides whether to ask again.
+  - `deadline_at` ≈ 40 min (above the engine's 30).
+
+### Cancel task
+
+- `task_type="acli_clis.cancel"`, key `acli:cancel:{bot_pk}:{stage}`,
+  payload `{action, cli_code, operation_id, stage, actor_id}`, where
+  `operation_id` is the live operation task's id read at enqueue.
+- Enqueue refuses with `409 not_active` when no add/remove of `cli_code`
+  with that action is live. `created=False` (a cancel is already live)
+  answers with that cancel.
+- Handler: while the operation task has not reached the engine yet (the
+  brief `granting` step; `GET /operations/{id}` is `404`), reschedule 2 s;
+  then forward the cancel to the engine with `async` and reschedule 2 s
+  until the engine operation ends. The operation task then ends `cancelled`
+  on its own. The grant is kept (D9).
 
 ### API responses
 
-`operation` here is `{action, cli_code, stage, status, step, error?}`:
+`operation` here is `{id, kind, action, cli_code, stage, status, step,
+error?}`:
 
-- `status`: `running`, `succeeded`, `failed`, `cancelled`.
+- `kind`: `operation` or `cancel`. `status`: `running`, `succeeded`,
+  `failed`, `cancelled`.
 - `step`: `granting`, `installing`, `uninstalling`, `cancelling`. Derived:
   from the engine's operation while it is active, otherwise from the
   task's progress.
@@ -183,14 +221,13 @@ remove and cancel need the owner and the edit lock.
 | Case | Answer |
 | --- | --- |
 | Sync, ended within 30 s | `200` with today's data (`{cli_code, command, version}` / `{deleted}`), or the mapped error |
-| Sync after 30 s, or `async=true` | `202` with `operation` |
-| Another operation live for this runtime | `409 operation_conflict` |
+| Sync after 30 s, or `async=true` | `202` with `operation`; poll `cli-operations/{id}` |
+| An add or remove already live for this runtime | `409 operation_in_progress` with the live `operation` |
 | Add of a CLI already granted and installed in that stage | `200` |
 | Remove of a CLI not installed in that stage | `200` |
-
-Cancel: forwarded to the stage's engine, then waits up to 30 s for the task
-to end. A cancel that reaches the task before the engine operation has
-started (the brief `granting` step) is `409 not_active`.
+| Cancel, sync, ended within 30 s | `200` with the cancelled `operation` |
+| Cancel after 30 s, or `async=true` | `202` with the cancel `operation` |
+| Cancel with nothing of that action and CLI live | `409 not_active` |
 
 ## Out of scope
 
@@ -202,8 +239,8 @@ started (the brief `granting` step) is `409 not_active`.
 
 Against `REL20261021`:
 
-1. Engine: operation slot, async flag, cancel with revert, `GET /operation`,
-   restart handling.
-2. Backend: stage parameter, operation task, async flag, cancel, operation
-   status, list from the engine, on both APIs.
+1. Engine: operation ids, async flag, cancel (sync/async) with revert,
+   `GET /operations/{id}` and `GET /operation`, restart handling.
+2. Backend: stage parameter, operation and cancel tasks, async flag,
+   operation status by id and live list, list from the engine, on both APIs.
 3. Docs: API docs (EN/ZH), acli spec/plan, teclaw engine contract page.
