@@ -1,4 +1,3 @@
-import { useGroupChatExecApprovals } from './useGroupChatExecApprovals';
 import type { SessionView } from '@/domain/collaboration';
 import { useTaskPreflightAssistant } from '@/hooks/useTaskPreflightAssistant';
 import { chatBridge } from '@/services/workspace/chatBridge';
@@ -21,7 +20,7 @@ import {
 import { useGroupBootstrapProcessing } from './useGroupBootstrapProcessing';
 import { useGroupChatDisplayStatus } from './useGroupChatDisplayStatus';
 import { useGroupChatHistorySync } from './useGroupChatHistorySync';
-import { useGroupChatQuestions } from './useGroupChatQuestions';
+import { useGroupChatInteractions } from './useGroupChatInteractions';
 import { useGroupChatRunControl } from './useGroupChatRunControl';
 import { useProviderStateSubscriptions } from './useProviderStateSubscriptions';
 import { useViewScopeChangedNotice } from './useViewScopeChangedNotice';
@@ -109,9 +108,8 @@ export function useGroupChat(session: SessionView | null) {
   // 订阅 Provider 阶段状态 + WebSocket 连接状态（拆至 useProviderStateSubscriptions，行为不变）。
   useProviderStateSubscriptions(provider, setSupportState, setConnectionStatus);
 
-  // ask_user 问答编排（快照订阅 / 草稿 / 提交态），随 Provider 重建自动隔离旧会话状态。
-  const questions = useGroupChatQuestions(provider);
-  const execApprovals = useGroupChatExecApprovals(provider);
+  // 问答及执行审批编排，随 Provider 重建自动隔离旧会话状态。
+  const interactions = useGroupChatInteractions(provider);
 
   // 切换会话时清理旧会话副屏；连接、history hydration 与 WS 暂存由
   // useManifestHistoryLoader 作为同一个可取消初始化流程统一管理。
@@ -246,8 +244,7 @@ export function useGroupChat(session: SessionView | null) {
     isLoadingMoreHistory,
     loadMoreHistory,
     groupBootstrapProcessing,
-    questions,
-    execApprovals,
+    ...interactions,
     ...runControl,
   };
 }
