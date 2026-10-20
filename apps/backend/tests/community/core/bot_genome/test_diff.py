@@ -149,7 +149,12 @@ def test_human_only_genes_are_t3_and_overrides_raise() -> None:
 
 @pytest.mark.parametrize(
     ("before", "after"),
-    [("x\na", "y\na\n"), ("x\na\n", "y\na"), ("a\nb\nc\nd\ne\nf\ng\nh\ni\nj", "X\nb\nc\nd\ne\nf\ng\nh\ni\nj\n")],
+    [
+        ("x\na", "y\na\n"),
+        ("x\na\n", "y\na"),
+        ("a\nb\nc\nd\ne\nf\ng\nh\ni\nj", "X\nb\nc\nd\ne\nf\ng\nh\ni\nj\n"),
+        ("a\x00<no newline>\nq\n", "a\x00<no newline>\nq"),  # a line may contain anything but a newline
+    ],
 )
 def test_a_trailing_newline_flip_on_a_context_line_round_trips(before: str, after: str) -> None:
     assert apply_unified_diff(before, unified_diff(before, after)) == after

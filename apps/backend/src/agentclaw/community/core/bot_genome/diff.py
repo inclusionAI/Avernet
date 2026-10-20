@@ -34,7 +34,7 @@ from agentclaw.community.core.bot_genome.text_edits import description_only
 __all__ = ["diff_specs", "unified_diff"]
 
 _NO_NEWLINE = "\\ No newline at end of file"
-_SENTINEL = "\x00<no newline>"
+_SENTINEL = "\n"  # a line from _split never contains one, so the suffix is unambiguous
 
 
 def unified_diff(before: str, after: str) -> str:
