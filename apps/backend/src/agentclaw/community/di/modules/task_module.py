@@ -95,6 +95,9 @@ from agentclaw.community.core.task.task_harness.runtime_probe import (
 from agentclaw.community.core.task.task_context.task_graph_service import (
     TaskGraphService,
 )
+from agentclaw.community.core.task.task_context.task_artifact.artifact_publish import (
+    TaskArtifactPublishService,
+)
 from agentclaw.community.core.task.task_runner.client.bcs_token_provider import (
     BcsTokenProvider,
 )
@@ -166,6 +169,11 @@ class TaskModule(Module):
         # injectors. The full composition root attaches the graph repository in
         # the task_service provider below.
         binder.bind(TaskGraphService, to=TaskGraphService, scope=singleton)
+        # Capture service for artifact staging (spec 2026-10-20-task-artifact-domain §5.1):
+        # pure construction + contextvar staging, no repository, no IO; the write
+        # itself rides the graph transaction. "未接线不发布" refers to the
+        # graph-repo-absent case handled in _persist_locked, not this binding.
+        binder.bind(TaskArtifactPublishService, to=TaskArtifactPublishService, scope=singleton)
         binder.bind(ForumRepositoryProtocol, to=ForumRepository, scope=singleton)
         binder.bind(ForumServiceProtocol, to=ForumService, scope=singleton)
         binder.bind(
