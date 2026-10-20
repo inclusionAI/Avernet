@@ -48,23 +48,28 @@ fields. The mandatory AI label cannot be removed via the optional suffix.
 
 ## Split Rollout
 
-Backend and Gateway may ship independently of Engine and frontend. Provision
-`DWS_MANAGEMENT_MASTER_KEY` (at least 32 bytes) through the Backend secret store,
-separately per environment. Without it, owner requests return 503 before relay.
-The new paths are not usable on an old Adapter; configuring the Backend key
-alone neither upgrades containers nor starts hosting. No database migration,
-image, gitlink or runtime installation is included in this change.
+Backend and Gateway may ship independently of Engine and frontend. Signing
+reuses the existing boot-resolved Gateway principal secret and its boot policy;
+there is no DWS-specific secret to configure or distribute. Missing platform
+configuration fails closed. No database migration, image, gitlink or runtime
+installation is included in this change.
 
 The relay sends only `POST /api/dws-hosting/command`, with `payload` (compact
 UTF-8 JSON string) and `signature`. Payload fields: `bot_id`, `actor_id`, fixed
 `operation`, validated `data`, `timestamp_ms`, and fresh `nonce`. The signature
 is HMAC-SHA256 of the exact payload bytes using a per-Bot/Owner key. Derive that
 key as ASCII hex HMAC-SHA256 of compact, unescaped-Unicode JSON
-`["dws-management-v1", bot_id, owner_id]` with the master key. Only the derived
-key belongs in the matching container; never distribute the master key.
+`["dws-management-v1", bot_id, owner_id]` with the existing principal secret.
+Both root and derived keys stay exclusively in Backend.
 
-The separately deployed receiver must validate the signature, Bot/Owner scope,
-timestamp freshness and one-use nonce before executing. It returns command data
+The separately deployed receiver validates the exact signed body via
+`POST /internal/dws-hosting/verify-command` on its trusted configured Backend
+(TLS, no redirects, five-second timeout). The proof is the credential; the
+verification route only returns `{"verified":true}` and cannot issue proofs.
+Adapter also checks local Bot/Owner scope, timestamp freshness and one-use nonce
+before executing. Network/authentication failures must not fail open.
+The old per-container-key Adapter must be updated with this protocol; Backend
+deployment alone does not upgrade it or start hosting. It returns command data
 or `management_error` (mapped to HTTP 409). Other transport errors retain the
 existing relay/error-envelope behavior. Live acceptance requires a provisioned
 test container and remains separate from these offline contract tests.

@@ -58,7 +58,7 @@ class OwnerEndpoint:
             return error_response(
                 409, "DWS hosting requires a personal OpenClaw Bot", request
             )
-        if len(self.config.key) < 32:
+        if not self.config.key:
             return error_response(503, "DWS hosting is not configured", request)
         # COSEC: sign only server-resolved identity and a fixed operation; never
         # forward a browser-supplied identity, destination, command or credential.

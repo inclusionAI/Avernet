@@ -99,6 +99,7 @@ _set_openclaw_config_path()  # noqa: FLA010 — composition root, must run at im
 from agentclaw.community.adapters.http.token_exchange import router as token_exchange_router  # noqa: E402
 from agentclaw.community.adapters.http.yuque import router as yuque_router  # noqa: E402
 from agentclaw.community.adapters.http.devices.router import router as device_router  # noqa: E402
+from agentclaw.community.adapters.http.dws_hosting.router import router as dws_proof_router  # noqa: E402
 from agentclaw.community.adapters.http.access.router import access_router as whitelist_router  # noqa: E402
 from agentclaw.community.adapters.http.access.router import user_list_router  # noqa: E402
 from agentclaw.community.adapters.http.access.router import user_router  # noqa: E402
@@ -889,6 +890,7 @@ async def health_check():
 # Router registration
 # =============================================================================
 # 1. AgentClaw 自有路由
+app.include_router(dws_proof_router)
 app.include_router(token_exchange_router)
 app.include_router(yuque_router)
 app.include_router(device_router)

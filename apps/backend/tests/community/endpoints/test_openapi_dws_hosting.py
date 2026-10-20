@@ -29,7 +29,7 @@ _SIGNING_KEY = "dws-framework-principal-signing-key-for-offline-tests"
 
 
 def management_config():
-    return DwsManagementConfig(b"dws-framework-management-key-for-offline-tests")
+    return DwsManagementConfig(_SIGNING_KEY.encode())
 
 
 class _Secret:

@@ -1,10 +1,13 @@
-"""Optional deployment credential; never accepted from an HTTP caller."""
+"""DWS command signing reuses the existing, boot-resolved principal secret."""
 
-import os
 import hashlib
 import hmac
 import json
 from dataclasses import dataclass, field
+
+from agentclaw.community.utils.gateway_principal_config import (
+    get_principal_verifier_config,
+)
 
 
 @dataclass(frozen=True)
@@ -12,8 +15,8 @@ class DwsManagementConfig:
     key: bytes = field(repr=False)
 
     def bot_key(self, bot_id: str, owner_id: str) -> bytes:
-        # COSEC: only the derived per-owner/bot key may be provisioned to a
-        # container. Never distribute the backend master key to Bot workloads.
+        # COSEC: domain-separate command signatures from principal JWTs.
+        # Neither the root secret nor derived keys leave Backend.
         context = json.dumps(
             ["dws-management-v1", bot_id, owner_id],
             separators=(",", ":"),
@@ -23,5 +26,4 @@ class DwsManagementConfig:
 
 
 def get_dws_management_config() -> DwsManagementConfig:
-    # Provision independently per environment via the deployment secret store.
-    return DwsManagementConfig(os.environ.get("DWS_MANAGEMENT_MASTER_KEY", "").encode())
+    return DwsManagementConfig(get_principal_verifier_config().signing_key.encode())
