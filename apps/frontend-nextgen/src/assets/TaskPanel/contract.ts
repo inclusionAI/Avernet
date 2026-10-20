@@ -36,6 +36,23 @@ export interface TaskRelationDto {
   extend_props?: Record<string, unknown>;
 }
 
+/**
+ * 产物 V2 读侧 Descriptor —— 与后端 task-artifact-domain 读侧契约逐字段对齐
+ * (apps/backend .../adapters/http/task/schemas.py TaskArtifactDescriptorDTO,2026-10-20 spec §7):
+ * 只含安全引用元数据,不含任何临时下载凭证/字节 handle。
+ * content 为 kind-tagged 引用元数据:text→{text};file→{storage_type,storage_id,file_name,file_id,file_type};
+ * url_link→{url,type};code→{code_base_name,code_base_address,pr_link,pr_desc}。
+ */
+export interface TaskArtifactDescriptorDto {
+  artifact_id: string;
+  artifact_name: string | null; // file 产物缺省回落 content.file_name
+  kind: 'text' | 'file' | 'url_link' | 'code';
+  content: Record<string, unknown>;
+  attempt?: number | null; // 归属 attempt(harness_retries 快照)
+  creator?: string | null; // 产出者 bot_id/group_id;system=系统写入
+  created_at: number; // 发布时间(ms epoch)
+}
+
 export interface NodeActionEventDto {
   seq: number;
   ts: number;
@@ -70,6 +87,8 @@ export interface TaskNodeDto {
   sequence: number;
   status: TaskStatusCode | 'SKIPPED';
   task_spec?: TaskSpecDto;
+  /** 节点级产物清单(读侧富化,null/缺省=后端未富化,消费方视为空列表并回落 run_info.artifacts legacy 口径) */
+  artifacts?: TaskArtifactDescriptorDto[] | null;
   run_info?: {
     run_mode?: 'single_bot' | 'coop_group' | 'bbs' | null;
     assignee?: string | { type?: string; binding?: string } | null;

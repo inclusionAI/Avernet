@@ -13,9 +13,22 @@ export interface TaskArtifactView {
   id: string;
   name: string;
   type: 'document' | 'report' | 'link' | 'file' | 'other';
+  /** V2 产物形态(Descriptor 口径);legacy 产物为 null */
+  kind?: 'text' | 'file' | 'url_link' | 'code' | null;
   url?: string | null;
   summary?: string | null;
+  /** 归属节点(产物区按 node 过滤用);legacy 回落入参 nodeId */
+  nodeId?: string | null;
+  /** 产出者(Descriptor.creator);legacy 为 null */
+  owner?: string | null;
   updatedAt: string; // ISO 或格式化后的展示串
+  /** file 形态的存储寻址(前端自行拼预览链接,后端不给现成 URL) */
+  fileRef?: {
+    storageType: 'BOT_WORKSPACE' | 'SESSION_FILE';
+    storageId: string;
+    fileId?: string | null;
+    fileType?: string | null;
+  } | null;
 }
 
 export interface StepTraceView {
