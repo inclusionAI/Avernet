@@ -35,7 +35,18 @@ export function expandProposalCards(items: RepairInboxItem[]): RepairInboxItem[]
 export function proposalConflicts(items: RepairInboxItem[]): ProposalConflict[] {
   const ids = new Set(items.map(i => i.itemId));
   const explicit = items.flatMap(i => i.aggregation?.conflicts ?? []).filter(c => c.itemIds.every(id => ids.has(id)));
-  const legacy = selectionConflicts(items.filter(i => !i.aggregation)).map(c => ({ ...c, reason: '所选修改要求不同取值' }));
+  const representatives = new Map<string, RepairInboxItem>(), members = new Map<string, string[]>();
+  for (const item of items) {
+    // Legacy semantic plans retain their own conflict/pending checks. Compare
+    // one representative per exact card, then map conflicts back to all originals.
+    if (item.aggregation && item.aggregation.relation !== 'exact') continue;
+    const key = item.aggregation ? `plan:${item.aggregation.id}` : `item:${item.itemId}`;
+    const representative = representatives.get(key) ?? item;
+    representatives.set(key, representative);
+    const group = members.get(representative.itemId) ?? []; group.push(item.itemId); members.set(representative.itemId, group);
+  }
+  const legacy = selectionConflicts([...representatives.values()]).map(c => ({ ...c,
+    itemIds: [...new Set(c.itemIds.flatMap(id => members.get(id) ?? [id]))].sort(), reason: '所选修改要求不同取值' }));
   return [...new Map([...explicit, ...legacy].map(c => [JSON.stringify(c.itemIds), c])).values()];
 }
 export function proposalPending(items: RepairInboxItem[]): boolean {

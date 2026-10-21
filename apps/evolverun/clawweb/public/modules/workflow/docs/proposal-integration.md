@@ -1,6 +1,37 @@
 # Service-owned proposal integration
 
-## Ownership and lifecycle
+## Current default: original goals with exact display folding
+
+The shared ClawWeb Host no longer creates or ticks the AI proposal coordinator.
+`proposalModel` remains a deprecated Host option for source compatibility, but is
+not used. Reads use an in-memory, deterministic projection: only available pending
+items with equal version, issue signature, node, failure mode, complete proposal
+and instruction fold together. Different values or targets stay separate. A card
+keeps every original ID and source; large duplicate sets use the existing maximum
+original-item count per card, so folding cannot create an unselectable choice.
+Cross-card conflicts still participate in automatic selection checks.
+
+Default candidate reads cover the last seven days. Explicit history, active work
+and awaiting-verification records remain available; no historical rows are deleted
+or rewritten. Lists and task selection do not wait for model classification.
+Manual and automatic generation use the existing selected-goal integration path:
+AIS receives the selected original goals, original evidence and frozen baseline,
+not a prerequisite AI classification result. Automatic selection continues to defer
+conflicting or unsupported originals rather than guessing a resolution.
+
+Evidence preparation is independent of the optional legacy coordinator. Frozen
+items retain diagnosis/run/event references and complete redacted evidence. Existing
+task inputs, material downloads, retry/report collection, review, trial, publication
+and observation keep their existing contracts and are not backfilled or regenerated.
+
+The coordinator implementation and journal records described below are retained
+for legacy integrations and historical compatibility. They are **not the default
+Host lifecycle**, and their old queued status does not block current selection.
+Explicit legacy Service callers may still supply a coordinator; new generation
+never calls its `prepare()` as a prerequisite. No new table, queue or configuration
+is introduced.
+
+## Legacy ownership and lifecycle
 
 Formal run → Bot single-case analysis → original diagnosis/proposal/evidence storage
 → ClawWeb durable background cause/goal grouping → one shared plan selection for

@@ -9,6 +9,21 @@ import {
 } from "@avernet/clawweb-shared/server/services/redaction";
 
 describe("Repair redaction", () => {
+  it("redacts long diagnostic tokens within a linear CPU budget without clipping their evidence", () => {
+    const input = "x".repeat(50000);
+    const start = process.cpuUsage();
+    const result = redactPersistableText(input, 100000, { preserveBusinessBody: true });
+    const used = process.cpuUsage(start);
+    expect(result).toBe(input);
+    expect(used.user + used.system).toBeLessThan(500000);
+    expect(containsRepairSecret(input)).toBe(false);
+  });
+  it("retains prefixed credential labels while removing their complete assigned values", () => {
+    for (const key of ["prefixSecret", "OPENAI_API_KEY", "abc_access-token", "_password", '"mysecret"']) {
+      const result = redactText(`${key}=private-canary-value`);
+      expect(result).toBe(`${key}=[REDACTED]`);
+    }
+  });
   it("preserves Owner-scoped source evidence while removing credential fields and inline values", () => {
     const body = "原工具失败的消息原文".repeat(600);
     const result = redactEvidenceValue({ messages: [{ record: { message: { role: "assistant", content: body } } }],

@@ -31,7 +31,7 @@ export function prepareProposalEvidence<T extends RepairItem>(items:T[], strict=
         version:diagnosis.observedDeployNumber??diagnosis.flowId??null,analysisContext:diagnosis.analysisContext??null,
         evidence:refs.map(e=>({payload:e.payload,eventType:e.eventType??null,nodeId:e.nodeId??null,missing:!!e.missing,occurredAtMs:e.occurredAtMs??null}))});
       let representative=seen.get(key);
-      if(representative===undefined){representative=examples.length;seen.set(key,representative);examples.push({...diagnosis,evidence:refs});}
+      if(representative===undefined){representative=examples.length;seen.set(key,representative);examples.push({...diagnosis,...('evidence' in diagnosis?{evidence:refs}:{})});}
       sourceIndex.push({analysisId:diagnosis.analysisId??null,diagnosisId:diagnosis.diagnosisId??null,flowId:diagnosis.flowId??null,
         observedDeployNumber:diagnosis.observedDeployNumber??null,representative,
         evidence:refs.map(e=>({eventId:e.eventId??null,payloadDigest:e.payloadDigest??null,missing:!!e.missing}))});

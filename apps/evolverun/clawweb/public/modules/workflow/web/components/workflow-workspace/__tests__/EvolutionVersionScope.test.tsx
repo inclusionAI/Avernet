@@ -6,6 +6,17 @@ import { render, repairApi, repairItem, repairPage } from './evolution-issue-fix
 import EvolutionTab from '../EvolutionTab'
 import { workflowSnapshotKey } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot'
 
+it('labels the seven-day default and explicitly expands older history', async () => {
+  const active = { kind: 'deployment' as const, workflowId: 'wf-1', workflowVersion: 40, deployNumber: 35, configDigest: 'a'.repeat(64) }
+  repairApi.candidates.mockResolvedValue({ ...repairPage(), activeLookbackDays: 7, activeSnapshot: { status: 'resolved', snapshot: active }, versionScope: 'current' })
+  render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+  await screen.findByText('包含更早记录（7天前）')
+  const history = screen.getByRole('checkbox', { name: '包含历史未复现' })
+  expect(history).not.toBeChecked()
+  await userEvent.click(history)
+  await waitFor(() => expect(repairApi.candidates).toHaveBeenCalledWith('wf-1', expect.objectContaining({ includeHistorical: true })))
+})
+
 it('submits explicitly selected historical originals against one visible current target', async () => {
   const active = { kind: 'deployment' as const, workflowId: 'wf-1', workflowVersion: 40, deployNumber: 35, configDigest: 'a'.repeat(64) }
   const old = { ...repairItem('historical', '历史约束'), state: 'verified', selectionDigest: 'd'.repeat(64), context: { signature: 'timeout:fetch-data', sourceSnapshot: { status: 'resolved', snapshot: { ...active, workflowVersion: 39, deployNumber: 34 } } } }

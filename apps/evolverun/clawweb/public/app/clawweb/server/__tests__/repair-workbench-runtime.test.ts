@@ -13,7 +13,7 @@ import type { RepairDispatchRequest } from '@avernet/workflow/server/contracts/r
 
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
-async function fixture(dispatch?: (input: RepairDispatchRequest) => Promise<{ jobId: string }>, bound = true) {
+async function fixture(dispatch?: (input: RepairDispatchRequest) => Promise<{ jobId: string }>, bound = true, environment?: string) {
   const raw = new Database(':memory:');
   const db = new SqliteDatabase(raw);
   cleanup.push(() => db.close());
@@ -34,7 +34,7 @@ async function fixture(dispatch?: (input: RepairDispatchRequest) => Promise<{ jo
     await db.exec('INSERT INTO workflow_healing_suggestions (workflow_id,failure_signature,fix_spec,status,proposal_json,impact_run_ids) VALUES (?,?,?,?,?,?)',
       ['wf', `timeout-${index}`, `修复 ${index}`, index === 0 ? 'applied_unverified' : 'pending', bound ? JSON.stringify({schemaVersion:'workflow-patch/v1',workflowId:'wf',baseSpecDigest:configDigest,summary:`修复 ${index}`,operations:[{op:'replace',nodeId:`fetch-${index}`,path:'/executor/timeoutMs',value:90}]}) : null, bound ? JSON.stringify([`run-${index}`]) : null]);
   }
-  const runtime = createWorkflowRepairRuntime(db, { principal: async () => ({ actorId: 'editor', isAdmin: true }),
+  const runtime = createWorkflowRepairRuntime(db, { environment, principal: async () => ({ actorId: 'editor', isAdmin: true }),
     ...(dispatch ? { execution: {
       dispatch,
       async resolveBaseline() { return { workflowId: 'wf', packId: 'pack', repoId: 'managed', specPath: 'workflows/wf.yaml',
@@ -49,6 +49,18 @@ async function fixture(dispatch?: (input: RepairDispatchRequest) => Promise<{ jo
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/workflow-repairs`;
   return { db, runtime, base };
 }
+
+it('serves suggestions and reconciles tasks without starting an AI aggregation worker', async () => {
+  const { db, runtime } = await fixture(async () => ({ jobId: 'controlled-job' }), true, 'prod');
+  const query = vi.spyOn(db, 'query');
+  try {
+    const page = await runtime.service.candidates('wf', { pageSize: 100 });
+    expect(page.items).toHaveLength(39);
+    await runtime.monitor.reconcile();
+    expect(query.mock.calls.some(([sql]) => sql.includes("record_kind = 'proposal_scan'"))).toBe(false);
+    expect(await db.query("SELECT * FROM workflow_repair_release_records WHERE record_kind IN ('proposal_scan','proposal_group')")).toHaveLength(0);
+  } finally { query.mockRestore(); }
+});
 
 it('drains an unrelated manual completion even if background result reconciliation throws', async () => {
   const { db } = await fixture();

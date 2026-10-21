@@ -1,8 +1,6 @@
 import { WorkflowSnapshotRepository } from '@avernet/clawweb-shared/server/services/workflow-snapshot';
 import { repairSourceSnapshot } from '@avernet/workflow/server/services/repair-source-snapshot';
-import { resolveAnalysisConfig } from '@avernet/clawweb-shared/server/db';
-import { createProposalModel } from './repair-proposal-model.js';
-import { createProposalCoordinator, type ProposalModelPort } from '@avernet/workflow/server/services/repair-proposal-integration';
+import type { ProposalModelPort } from '@avernet/workflow/server/services/repair-proposal-integration';
 import { createRepairTrialService } from '@avernet/workflow/server/services/repair-trial-service';
 import type { RepairTrialPort } from '@avernet/workflow/server/contracts/repair-trial';
 /** Shared composition root for the public and internal ClawWeb Hosts.
@@ -32,6 +30,7 @@ import type { AutoAnalysisSettings } from '@avernet/workflow/server/services/tas
 export function createWorkflowRepairRuntime(db: IDatabase, options: {
   principal: RepairPrincipalResolver;
   environment?: string;
+  /** @deprecated Retained for host compatibility; suggestion reads no longer run an AI coordinator. */
   proposalModel?: ProposalModelPort;
   execution?: RepairExecutionPort;
   publication?: RepairPublicationPort;
@@ -91,16 +90,7 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
     }
     return options.execution!.dispatch(request);
   } } : undefined;
-  const proposals = execution && options.environment ? createProposalCoordinator({ db, scopeKey: options.environment, hydrate: async (workflowId, items) => {
-    const hydrated = sources.hydrate ? await sources.hydrate(db, workflowId, items) : items;
-    for (const item of hydrated) for (const diagnosis of (Array.isArray(item.context?.diagnoses) ? item.context.diagnoses : []) as Array<Record<string, unknown>>) {
-      const row = (await db.query<{workflow_deploy_number:number}>('SELECT workflow_deploy_number FROM flow_runs WHERE workflow_id = ? AND flow_id = ?', [workflowId,diagnosis.flowId]))[0];
-      diagnosis.observedDeployNumber = row?.workflow_deploy_number ?? null;
-    }
-    return hydrated as import('@avernet/workflow/server/contracts/repair-workbench').RepairInboxItem[];
-  }, read: workflowId => service.proposalSnapshot(workflowId),
-    model: options.proposalModel ?? createProposalModel(resolveAnalysisConfig()) }) : undefined;
-  const service = createRepairWorkbenchService(db, sources, execution, proposals, queueRepairCompletion);
+  const service = createRepairWorkbenchService(db, sources, execution, undefined, queueRepairCompletion);
   if (options.automation) automation = createWorkflowAutomation({ db, workbench: service, ...options.automation, environment: options.environment });
   const drainNotifications = !automation && options.notifications
     ? createWorkflowNotificationDrain({ db, workbench: service, ...options.notifications, environment: options.environment }) : undefined;
@@ -111,8 +101,6 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
   const authorize = createRepairAuthorizer(options.principal, new BotWorkflowPermissionRepository(db));
   const verification = createRepairVerificationService(db, options.publication);
   const monitor = { async reconcile() {
-    // Aggregation is an independent durable worker, never part of single-case dispatch.
-    void proposals?.tick().catch(() => console.warn('[workflow-repair] proposal aggregation worker will retry'));
     let count = 0;
     try {
       count = await service.reconcile();

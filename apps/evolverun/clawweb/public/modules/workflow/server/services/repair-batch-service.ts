@@ -6,6 +6,7 @@ import { inVersionScope, itemSnapshotKey } from '../contracts/repair-version-sco
 import { workflowSnapshotKey } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot';
 import { inboxSummary, inboxPages } from './repair-inbox-projection.js';
 import { prepareProposalEvidence } from './repair-proposal-evidence.js';
+import { presentExactProposals } from './repair-rule-projection.js';
 import type { ProposalCoordinator } from './repair-proposal-integration.js';
 import { selectedContentDigest, reviewSelected, assertProposalBaseline } from './repair-selection-review.js';
 import { automaticChain, isAutomaticBatch, retainedFeedbackCandidate } from '../contracts/repair-automatic-chain.js';
@@ -272,7 +273,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       const activeSnapshot = await this.sources.activeSnapshot?.(this.db, workflowId);
       const hasHistory = activeSnapshot?.status === 'resolved' && snapshot.items.some(item => itemIds.includes(item.itemId) && itemSnapshotKey(item) !== workflowSnapshotKey(activeSnapshot.snapshot));
       const digest = activeSnapshot === undefined ? snapshot.inputDigest : versionDigest(hasHistory ? snapshot.items : snapshot.items.filter(item => inVersionScope(item, activeSnapshot, 'current')));
-      const cards = this.proposals && this.execution ? await this.proposals.present(workflowId, snapshot.items, this.sources.activeSnapshot?undefined:await this.execution.resolveBaseline(workflowId)) : [];
+      const cards = this.proposals && this.execution ? await this.proposals.present(workflowId, snapshot.items, this.sources.activeSnapshot?undefined:await this.execution.resolveBaseline(workflowId)) : presentExactProposals(snapshot.items);
       const result = { inputDigest: digest, ...(activeSnapshot !== undefined ? { activeSnapshot } : {}), items: snapshot.items.filter(item => itemIds.includes(item.itemId)).map(inboxSummary),
         missing: itemIds.filter(id => !snapshot.items.some(item => item.itemId === id)),
         plans: cards.filter(card => card.aggregation?.itemIds.some(id => itemIds.includes(id))).map(card => {
@@ -316,9 +317,9 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       const versionItems=snapshot.items.filter(item=>inVersionScope(item,activeSnapshot,versionScope) && (query.snapshotKey === undefined || (itemSnapshotKey(item) ?? 'unresolved') === query.snapshotKey));
       const versionInputDigest=activeSnapshot===undefined?snapshot.inputDigest:versionDigest(versionItems);
       // Preserve the full model work unit; signature filters apply to presented cards.
-      let presentation = versionItems;
+      let presentation = query.rawItems ? versionItems : presentExactProposals(versionItems);
       if (!query.rawItems && this.proposals && this.execution) {
-        try { presentation = await this.proposals.present(workflowId, presentation, this.sources.activeSnapshot?undefined:await this.execution.resolveBaseline(workflowId)); }
+        try { presentation = await this.proposals.present(workflowId, versionItems, this.sources.activeSnapshot?undefined:await this.execution.resolveBaseline(workflowId)); }
         catch { /* A failed aggregation/read never removes original suggestions or breaks the issue list. */ }
       }
       const visibleItems = presentation.filter(item => matchesScope(item, { signature: query.signature }) && (includeHistorical ||
@@ -529,7 +530,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       if(hasReferences&&this.execution?.integrationVersion!=='workflow-proposal-plan/v1')fail('CAPABILITY_UNAVAILABLE','生成器尚未支持历史建议参考',{reasonCode:'HISTORICAL_REFERENCE_UNSUPPORTED'});
       // Manual goals are reconciled during drafting; automatic batches retain patch validation.
       if (request.automation) assertProposalBaseline(frozenSelected, baseline);
-      const integrated = hasReferences?{instructions:'',integration:historicalIntegration(frozenSelected,baseline)}:!request.automation&&frozenSelected.length>1?{instructions:'',integration:manualIntegration(frozenSelected,baseline)}:request.automation && this.proposals ? await this.proposals.prepare(request.workflowId, selected, baseline) : { instructions: '', integration: undefined };
+      const integrated = hasReferences?{instructions:'',integration:historicalIntegration(frozenSelected,baseline)}:frozenSelected.length>1?{instructions:'',integration:manualIntegration(frozenSelected,baseline)}:{ instructions: '', integration: undefined };
       // Full-file source patches are reference goals, not replacements for current Git files.
       if (!integrated.integration && frozenSelected.some(item => Array.isArray(item.proposal?.patches) && item.proposal.patches.length)) {
         integrated.integration = manualIntegration(frozenSelected, baseline);
@@ -578,7 +579,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
           .flatMap(item => item.sources).sort((a, b) => canonicalRepairJson(a).localeCompare(canonicalRepairJson(b)));
         const input: RepairBatchInput = { schemaVersion: 'workflow-repair/v2', taskId: id,
           // A manual joint plan does not change the existing evidence preparation policy.
-          revision: (previous?.latestAttempt.revision ?? 0) + 1, baseline, items: this.proposals || hasReferences ? prepareProposalEvidence(selected, !!request.automation,{complete:true}) : selected,
+          revision: (previous?.latestAttempt.revision ?? 0) + 1, baseline, items: prepareProposalEvidence(selected, !!request.automation,{complete:true}),
           excludedSources: { count: excludedSourceRefs.length, digest: digestRepairJson(excludedSourceRefs) },
           ...(request.automation ? { automation: request.automation } : {}),
           ...('integration' in integrated && integrated.integration ? { integration: integrated.integration } : {}),

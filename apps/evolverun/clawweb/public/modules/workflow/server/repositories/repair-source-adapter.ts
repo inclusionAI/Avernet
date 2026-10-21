@@ -33,7 +33,7 @@ export interface RepairSourceReaders {
   suggestions(db: IDatabase, workflowId: string, options?: { sinceMs?: number }): Promise<RepairSuggestionSource[]>;
   evidence(db: IDatabase, workflowId: string, eventIds: string[]): Promise<RepairEvidenceSource[]>;
 }
-export const REPAIR_ACTIVE_LOOKBACK_DAYS = 30;
+export const REPAIR_ACTIVE_LOOKBACK_DAYS = 7;
 const ACTIVE_LOOKBACK_MS = REPAIR_ACTIVE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
 type SourceItem = Awaited<ReturnType<RepairSourcePort['load']>>[number];
 function parsed(raw: string, label: string): unknown {

@@ -14,6 +14,22 @@ const readers = (overrides: Partial<RepairSourceReaders> = {}): RepairSourceRead
 });
 
 describe('trusted workflow repair source adapter', () => {
+  it('shows only the last seven days of pending suggestions while retaining explicit history and active work', async () => {
+    const now = Date.now(), day = 24 * 60 * 60 * 1000;
+    const groups = vi.fn(async () => []);
+    const suggestions = async () => [
+      { id: 1, workflow_id: 'wf', failure_signature: 'timeout', fix_spec: 'recent', status: 'pending', gmt_modified: now - 6 * day },
+      { id: 2, workflow_id: 'wf', failure_signature: 'timeout', fix_spec: 'older', status: 'pending', gmt_modified: now - 8 * day },
+      { id: 3, workflow_id: 'wf', failure_signature: 'timeout', fix_spec: 'in-flight', status: 'applying', gmt_modified: now - 40 * day },
+    ];
+    const source = createRepairSourcePort(readers({ groups, suggestions }));
+    const recent = await source.load(db, 'wf', 'summary');
+    expect(recent.map(row => row.item.instruction).sort()).toEqual(['in-flight', 'recent']);
+    const cutoff = (groups.mock.calls[0] as unknown as [IDatabase, string, { sinceMs: number }])[2].sinceMs;
+    expect(cutoff).toBeGreaterThanOrEqual(now - 7 * day);
+    expect(cutoff).toBeLessThan(now - 7 * day + 1000);
+    expect(await source.load(db, 'wf', 'summary', { includeHistorical: true })).toHaveLength(3);
+  });
   it('retains group filter metadata for legacy suggestions without attaching uncited diagnoses', async () => {
     const result = await createRepairSourcePort(readers({ suggestions: async () => [{ id: 9, workflow_id: 'wf',
       failure_signature: 'output-contract|llm', fix_spec: 'Legacy suggestion', status: 'pending' }] })).load(db, 'wf', 'summary');
