@@ -4,11 +4,19 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import signal
 import subprocess
 
 from configure import ENGINES
+
+
+def diagnostic_excerpt(text: str, key: str) -> str:
+    text = text.replace(key, "[REDACTED]")
+    text = re.sub(r"(?i)(?:sk-|ghp_|github_pat_)[a-z0-9_-]+", "[REDACTED]", text)
+    text = re.sub(r"(?i)bearer\s+\S+", "Bearer [REDACTED]", text)
+    return text[-4000:]
 
 
 def command(engine: str, prompt: str, root: Path) -> list[str]:
@@ -80,8 +88,11 @@ def main() -> int:
             diagnostic = (stdout + stderr).lower()
             if any(s in diagnostic for s in ("401", "403", "429", "quota", "rate_limit")):
                 report.update(status="UNKNOWN", reason="provider_auth_or_quota")
+            print(json.dumps({"diagnostic": diagnostic_excerpt(stderr, key)}))
         elif marker not in answer(args.engine, stdout, root):
             report.update(status="FAIL", reason="file_content_not_returned")
+            print(json.dumps({"diagnostic": diagnostic_excerpt(
+                stderr + "\nFinal answer: " + answer(args.engine, stdout, root), key)}))
         else:
             report.update(status="PASS", reason="random_file_content_returned")
     except (ValueError, OSError) as error:

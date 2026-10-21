@@ -7,10 +7,17 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from configure import configure
-from smoke import main
+from smoke import diagnostic_excerpt, main
 
 
 class BailianConfigTest(unittest.TestCase):
+    def test_diagnostic_redacts_before_truncating(self):
+        result = diagnostic_excerpt("x" * 5000 + " private-key Bearer token sk-example", "private-key")
+        self.assertLessEqual(len(result), 4000)
+        self.assertNotIn("private-key", result)
+        self.assertNotIn("Bearer token", result)
+        self.assertNotIn("sk-example", result)
+
     def test_protocols_and_credentials(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "profiles"

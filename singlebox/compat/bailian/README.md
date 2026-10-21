@@ -49,7 +49,9 @@ configuration, setup errors, timeouts and detected auth/quota errors are
 `UNKNOWN`; other engine failures are `FAIL`. Neither is silently skipped.
 Error classification is diagnostic, not proof of an engine regression.
 Artifacts contain only scoped result metadata and resolved versions, not raw
-engine logs, sessions, prompts or configuration. Runtime state is deleted.
+engine logs, sessions, prompts or configuration. A failed invocation prints a
+bounded diagnostic excerpt to the job log after redacting the configured key
+and common token formats. Runtime state is deleted.
 An execution timeout is not a hard monetary limit: provider retries and model
 reasoning can still incur costs; use the provider's account limits as needed.
 
