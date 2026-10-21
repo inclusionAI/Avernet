@@ -65,15 +65,33 @@ export const defaultCapabilities: AppCapabilities = {
     if (!target.sessionId) {
       return unsupported(null, '会话跳转目标缺少 sessionId');
     }
-    const url =
-      target.kind === 'group'
-        ? getCollaborationGroupConversationUrl(target.groupId ?? null, target.sessionId)
-        : getCollaborationBotConversationUrl(target.botId ?? '', target.sessionId);
+    // PRD 方案A 语义:点副屏节点 = 左右联动——左侧会话区原地切换到该节点关联会话,不整页跳转。
+    // 按当前所在会话宿主分流:同宿主目标原地切换;跨宿主(两页分离的架构约束)或宿主外(抽屉)才走路由。
+    const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
+    const inGroupHost = pathname.startsWith('/workspace/collaboration');
+    const inChatHost = pathname.startsWith('/workspace/chat');
     // 懒 require umi history:静态 import 会把 @umijs/max 拉进 jest 依赖图(esbuild 环境不变量崩),
     // 且 capability 求值频率低;只在真正发生跳转时取模块。
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const umiHistory = (require('@umijs/max') as { history: { push: (url: string) => void } }).history;
-    umiHistory.push(url);
+    const umiHistory = (require('@umijs/max') as { history: { push: (url: string) => void; replace: (url: string) => void } }).history;
+
+    // 协作群页内点群节点:workspaceStore 原地选群+选会话,零路由变化。
+    if (target.kind === 'group' && inGroupHost) {
+      const ws = useWorkspaceStore.getState();
+      ws.selectGroup(target.groupId ?? null);
+      ws.selectSession(target.sessionId);
+      return { status: 'available', value: null };
+    }
+    const isChatTarget = target.kind !== 'group';
+    const chatUrl = getCollaborationBotConversationUrl(target.botId ?? '', target.sessionId);
+    const groupUrl = getCollaborationGroupConversationUrl(target.groupId ?? null, target.sessionId);
+    // 对话页内点单聊/好友节点:同页 replace(query 联动,页面 hydrate 原地切换会话)。
+    if (isChatTarget && inChatHost) {
+      umiHistory.replace(chatUrl);
+      return { status: 'available', value: null };
+    }
+    // 跨宿主 / 会话宿主之外:路由进入对应会话页。
+    umiHistory.push(isChatTarget ? chatUrl : groupUrl);
     return { status: 'available', value: null };
   },
   // Open Core 默认路由重定向：当前无收敛项——/space-admin、/ticket-center 由页面级 getAdminSections

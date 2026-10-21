@@ -1,6 +1,6 @@
 // @asset-migrated: teamclaw 自研资产
 /**
- * TaskOverviewV2 —— Level1 任务总览:步骤区(节点视图/DAG 视图双切换)+ 产物区 + 折叠任务信息。
+ * TaskOverviewV2 —— Level1 任务总览,PRD 两区结构:步骤区(节点视图/DAG 视图双切换)+ 产物区。
  * 交互语义(PRD 方案A):点节点 = 跳转选中(不进第二层);下钻按钮 = 选中 + 进栈。
  */
 import React, { useMemo, useState } from 'react';
@@ -11,8 +11,6 @@ import type { TaskView } from '../types';
 import { ArtifactsSection } from './ArtifactsSection';
 import { DagViewV2 } from './DagViewV2';
 import { NodeListViewV2 } from './NodeListViewV2';
-import { TaskInfoSection } from './TaskInfoSection';
-import { TaskOutputSection } from './TaskOutputSection';
 import type { TaskPanelNav } from './taskPanelNav';
 
 export interface TaskOverviewV2Props {
@@ -111,9 +109,7 @@ export const TaskOverviewV2: React.FC<TaskOverviewV2Props> = ({ task, nav, apiBa
           </div>
         )}
       </section>
-      <TaskOutputSection task={task} />
       <ArtifactsSection artifacts={aggregatedArtifacts} apiBaseUrl={apiBaseUrl} />
-      <TaskInfoSection task={task} />
     </div>
   );
 };

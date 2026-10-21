@@ -188,13 +188,13 @@ describe('TaskOverviewV2(L1)', () => {
     expect(screen.getByTitle('打开产物:需求说明书').getAttribute('href')).toBe('https://yuque.example/doc1');
   });
 
-  it('任务信息区默认折叠,展开可见目标/验收', () => {
+  it('PRD 两区结构:只有步骤与产物,无「任务产出」「任务信息」区', () => {
     render(<TaskOverviewV2 {...props()} />);
-    const details = document.querySelector('details[data-testid="task-info-section"]') as HTMLDetailsElement | null;
-    expect(details).not.toBeNull();
-    expect(details!.open).toBe(false);
-    fireEvent.click(screen.getByText('任务信息'));
-    expect(screen.getByText('任务背景描述')).toBeTruthy();
+    expect(screen.getByText('步骤')).toBeTruthy();
+    expect(screen.getByText('产物')).toBeTruthy();
+    expect(screen.queryByText('任务产出')).toBeNull();
+    expect(screen.queryByText('任务信息')).toBeNull();
+    expect(screen.queryByText('任务背景描述')).toBeNull();
   });
 });
 

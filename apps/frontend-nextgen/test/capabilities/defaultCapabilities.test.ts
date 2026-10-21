@@ -1,5 +1,7 @@
+/** @jest-environment jsdom */
 import { defaultCapabilities } from '@/capabilities/defaultCapabilities';
 import { useExternalAuthStore } from '@/stores/externalAuthStore';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { Bot, Terminal } from 'lucide-react';
 
 describe('Open Core default capabilities', () => {
@@ -229,13 +231,46 @@ describe('Open Core default capabilities', () => {
 });
 
 // ── 任务副屏 V2 会话联动(P4):Open Core 默认站内会话路由(URL 构建与跳转) ──
-jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
+jest.mock('@umijs/max', () => ({ history: { push: jest.fn(), replace: jest.fn() } }));
 import { history as mockHistory } from '@umijs/max';
 
 describe('defaultCapabilities.navigateToConversation', () => {
   const pushMock = mockHistory.push as unknown as jest.Mock;
+  const replaceMock = (mockHistory as unknown as { replace?: jest.Mock }).replace as jest.Mock | undefined;
 
-  it('群会话目标 → /workspace/collaboration?…&group=&session=', () => {
+  const setPath = (pathname: string) => {
+    window.history.pushState({}, '', pathname);
+  };
+
+  it('协作群页内点群节点 → 左右联动:workspaceStore 原地选群选会话,不动路由', () => {
+    setPath('/workspace/collaboration');
+    const selectSpy = jest.spyOn(useWorkspaceStore.getState(), 'selectGroup');
+    const sessionSpy = jest.spyOn(useWorkspaceStore.getState(), 'selectSession');
+    const result = defaultCapabilities.navigateToConversation({
+      sessionId: 'bcs_grp_902:round:2',
+      kind: 'group',
+      groupId: 'g-902',
+    });
+    expect(result.status).toBe('available');
+    expect(selectSpy).toHaveBeenCalledWith('g-902');
+    expect(sessionSpy).toHaveBeenCalledWith('bcs_grp_902:round:2');
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it('对话页内点单聊节点 → 左右联动:同页 replace 更新会话参数,不整页跳转', () => {
+    setPath('/workspace/chat');
+    defaultCapabilities.navigateToConversation({ sessionId: 'agent:main:session:s-1', kind: 'bot', botId: 'bot-9' });
+    expect(replaceMock).toHaveBeenCalled();
+    const url = (replaceMock as jest.Mock).mock.calls[0][0] as string;
+    expect(url.startsWith('/workspace/chat?')).toBe(true);
+    expect(url).toContain('bot=bot-9');
+    expect(url).toContain('session=');
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it('会话宿主之外(如抽屉)→ 整页路由进入会话页', () => {
+    setPath('/work/my-task');
     const result = defaultCapabilities.navigateToConversation({
       sessionId: 'bcs_grp_902:round:2',
       kind: 'group',
@@ -248,17 +283,20 @@ describe('defaultCapabilities.navigateToConversation', () => {
     expect(url).toContain('group=');
   });
 
-  it('单聊目标 → /workspace/chat?bot=&session=', () => {
+  it('跨宿主(协作群页点单聊节点 / 对话页点群节点)→ 路由到对应会话页', () => {
+    setPath('/workspace/collaboration');
     defaultCapabilities.navigateToConversation({ sessionId: 'agent:main:session:s-1', kind: 'bot', botId: 'bot-9' });
-    const url = pushMock.mock.calls[1][0] as string;
+    let url = pushMock.mock.calls[pushMock.mock.calls.length - 1][0] as string;
     expect(url.startsWith('/workspace/chat?')).toBe(true);
-    expect(url).toContain('bot=bot-9');
-    expect(url).toContain('session=');
+
+    setPath('/workspace/chat');
+    defaultCapabilities.navigateToConversation({ sessionId: 'bcs_grp_x:round:1', kind: 'group', groupId: 'g-x' });
+    url = pushMock.mock.calls[pushMock.mock.calls.length - 1][0] as string;
+    expect(url.startsWith('/workspace/collaboration?')).toBe(true);
   });
 
   it('sessionId 缺失 → unsupported,不触发跳转', () => {
     const result = defaultCapabilities.navigateToConversation({ sessionId: '', kind: 'unknown' });
     expect(result.status).toBe('unsupported');
-    expect(pushMock).toHaveBeenCalledTimes(2); // 不变
   });
 });
