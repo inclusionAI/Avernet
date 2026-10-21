@@ -169,6 +169,10 @@ class Harness:
             return next((item for item in rows if item['name'] == name and item['is_online']), None)
         connected = self.wait(online, 180)
         self.bot_id = connected['bot_uuid']
+        # The synthetic caller is a distinct Bot. Exercise the normal owner API
+        # to permit A2A access; sharing an owner does not imply Bot friendship.
+        self.api('/bots/' + quote(self.bot_id, safe='') + '/visibility',
+                 {'visibility': 'public'}, method='PUT')
         self.report['bot_id'] = self.bot_id
         self.report['cases'].append({'name': 'registration_and_connection', 'status': 'PASS'})
 

@@ -103,3 +103,11 @@ The daily schedule runs at 01:17 UTC (09:17 China time) once this workflow is on
 the repository's default branch. GitHub may delay scheduled runs. A runtime/plugin
 version rejection is a compatibility failure, not a successful skip; the workflow
 does not grant DSH version exemptions or silently pin an older engine.
+
+The final `readiness` job produces a single summary table and the
+`bailian-readiness` artifact (JSON and Markdown). `READY` requires both the real
+model/tool smoke and BCS E2E to pass on this run, plus successful harness tests
+and BCS build. Explicit failures produce `NOT_READY`; missing evidence stays
+`UNKNOWN`. The table lists exact versions and the blocking stage, and a
+non-ready result fails the final job. This reports compatibility signals, not
+a guarantee of every BCS capability.
