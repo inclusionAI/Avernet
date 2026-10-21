@@ -218,9 +218,9 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
     }
   }
   // Status and recovery share eligibility; inspecting status never claims or dispatches work.
-  async function draftRecoveries(workflowId: string, enforceAuthority = false) {
+  async function draftRecoveries(workflowId: string, enforceAuthority = false, jobId?: string) {
     const policy = await input.settings.get(workflowId);
-    const failures = await repo.recoverableDrafts(workflowId, now(), policy.version);
+    const failures = await repo.recoverableDrafts(workflowId, now(), policy.version, jobId);
     if (!failures.length) return [];
     let access;
     try { access = await authority(workflowId, true); }
@@ -266,9 +266,11 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
         jobs: jobs.map(summarize),
         retryableJobs: [...await repo.retryableFailures(workflowId, now()), ...(await draftRecoveries(workflowId)).map(entry => entry.job)].map(summarize) };
     },
-    async retryFailures(workflowId) {
-      await repo.retryFailures(workflowId, now());
-      for (const { job, recovery } of await draftRecoveries(workflowId, true)) {
+    async retryFailures(workflowId, jobId) {
+      const retried = await repo.retryFailures(workflowId, now(), jobId);
+      const drafts = await draftRecoveries(workflowId, true, jobId);
+      if (jobId && !retried && !drafts.length) throw new RepairAutomationDeniedError('TASK_NOT_RETRYABLE');
+      for (const { job, recovery } of drafts) {
         await repo.recoverDraft(job, { ...job.data, recovery, request: { ...job.data.request, requestId: recovery.requestId } }, now());
       }
     },

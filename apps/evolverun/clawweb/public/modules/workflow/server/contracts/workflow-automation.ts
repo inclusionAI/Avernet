@@ -43,7 +43,7 @@ export interface WorkflowAutomationService {
   onRunTerminal(input: { flowId: string; status: string }): Promise<void>;
   records(workflowId: string, query?: AutomationRecordQuery): Promise<AutomationRecordPage>;
   status(workflowId: string): Promise<AutomationSnapshot>;
-  retryFailures(workflowId: string): Promise<void>;
+  retryFailures(workflowId: string, jobId?: string): Promise<void>;
   authorizeDraft(input: { workflowId: string; actorId: string; taskId: string; origin: AutomationOrigin; itemIds: string[] }): Promise<void>;
 }
 export type AutomatedSelection = RepairSelectionRequest & { automation: AutomationOrigin };

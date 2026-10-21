@@ -7,7 +7,7 @@ export const reasons: Record<string, string> = {
   ANALYSIS_FAILED: '分析失败，可重试该运行的分析', PARTIAL_ANALYSIS: '分析包含未知项，未视为完整覆盖',
   ANALYSIS_OUTCOME_UNKNOWN: '原分析请求结果未知，先核对原请求', DRAFT_REQUEST_REQUIRES_LOOKUP: '正在核对原草稿请求',
   NOTIFICATION_OUTCOME_UNKNOWN: '通知结果未知，请管理员核对；不会自动重发', NOTIFICATION_REJECTED: '通知未送达，只重试通知',
-  DRAFT_REQUIRES_MANUAL_REVIEW: '草稿需要处理，请查看原优化任务；可重试对象列在下方', CANDIDATE_SUPERSEDED: '候选已变化，旧通知已停用',
+  DRAFT_REQUIRES_MANUAL_REVIEW: '草稿需要处理，请查看原优化任务；符合条件时可重试本条生成', CANDIDATE_SUPERSEDED: '候选已变化，旧通知已停用',
 }
 const kinds: Record<string, string> = { auto_cycle: '每日扫描', auto_run: '运行分析', auto_draft: '优化草稿', auto_notice: '任务通知' }
 const statuses: Record<string, string> = { pending: '待处理', dispatching: '正在提交', waiting: '等待结果', retryable: '等待重试', uncertain: '待核对', done: '已结束', blocked: '需要处理' }
@@ -20,7 +20,10 @@ function jobStatus(job: AutomationJobSummary) {
   }
   return statuses[job.status] ?? job.status
 }
-export default function JobRecord({ job, workflowId }: { job: AutomationJobSummary; workflowId: string }) {
+export type AutomationRetryActions = { jobs: AutomationJobSummary[]; pendingId: string; onRetry(job: AutomationJobSummary): void }
+export default function JobRecord({ job, workflowId, retry }: { job: AutomationJobSummary; workflowId: string; retry?: AutomationRetryActions }) {
+  const canRetry = job.status === 'blocked' && retry?.jobs.some(candidate => candidate.id === job.id)
+  const retryLabel = job.kind === 'auto_run' ? '重试分析' : job.kind === 'auto_draft' ? '重试生成' : '重发通知'
   const taskLink = job.taskId ? `/workflows/workspace?workflowId=${encodeURIComponent(workflowId)}&tab=evolution&repairTaskId=${encodeURIComponent(job.taskId)}` : null
   const analysisLink = job.flowId ? `/runs/${encodeURIComponent(job.flowId)}${job.analysisId ? `?analysisId=${encodeURIComponent(job.analysisId)}` : ''}` : null
   return <>
@@ -29,6 +32,8 @@ export default function JobRecord({ job, workflowId }: { job: AutomationJobSumma
     {job.reason && <p className="mt-1 text-xs text-muted-foreground">{reasons[job.reason] ?? '请核对当前策略、负责人和原任务状态'}</p>}
     {analysisLink ? <a className="mt-1 inline-block text-primary underline" href={analysisLink}>查看分析</a>
       : taskLink ? <a className="mt-1 inline-block text-primary underline" href={taskLink}>查看原优化任务</a> : null}
+    {canRetry && <button type="button" disabled={!!retry?.pendingId} aria-busy={retry?.pendingId === job.id}
+      className="ml-3 text-primary underline disabled:opacity-50" onClick={() => retry?.onRetry(job)}>{retry?.pendingId === job.id ? '提交中…' : retryLabel}</button>}
     <details className="mt-1 text-xs text-muted-foreground"><summary className="cursor-pointer text-primary">查看详情</summary>
       <p className="mt-1 break-all">任务编号：{job.id}；尝试次数：{job.attempts}{job.analysisId ? `；分析编号：${job.analysisId}` : ''}</p>
       {job.flowId && <p className="break-all">运行编号：{job.flowId}</p>}{job.taskId && <p className="break-all">优化任务编号：{job.taskId}</p>}

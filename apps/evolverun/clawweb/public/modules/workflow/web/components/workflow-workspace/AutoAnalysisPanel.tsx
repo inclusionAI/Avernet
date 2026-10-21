@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import type { AutomationPolicyWrite, WorkflowAutomationPolicy } from '../../../server/contracts/workflow-automation'
+import type { AutomationPolicyWrite, WorkflowAutomationPolicy, AutomationJobSummary } from '../../../server/contracts/workflow-automation'
 import { useQueryClient } from '@tanstack/react-query'
-import JobRecord, { reasons } from './AutomationJobRecord'
+import { reasons } from './AutomationJobRecord'
 import AutomationHistory, { NotificationAttention } from './AutomationHistory'
 import { retryAutomationFailures, useAutomationPolicy, useAutomationStatus, useSaveAutomationPolicy } from '../../api/workflow-automation'
 export default function AutoAnalysisPanel({ workflowId }: { workflowId: string }) {
   const queryClient = useQueryClient()
   const setting = useAutomationPolicy(workflowId), update = useSaveAutomationPolicy(workflowId), status = useAutomationStatus(workflowId)
   const [impact, setImpact] = useState<'medium' | 'high'>('medium')
-  const [time, setTime] = useState('09:00'), [message, setMessage] = useState(''), [retrying, setRetrying] = useState(false)
+  const [time, setTime] = useState('09:00'), [message, setMessage] = useState(''), [retrying, setRetrying] = useState('')
+  const retryBusy = useRef(false)
   const [recipients, setRecipients] = useState(''), [saving, setSaving] = useState('')
   const [pendingChanges, setPendingChanges] = useState<Partial<AutomationPolicyWrite>>({})
   const busy = useRef(false), previous = useRef<WorkflowAutomationPolicy | undefined>(undefined)
@@ -37,6 +38,16 @@ export default function AutoAnalysisPanel({ workflowId }: { workflowId: string }
         onError: error => { setMessage(error.message); void setting.refetch() }, onSettled: () => { busy.current = false; setSaving(''); setPendingChanges({}) } })
   }
   const switchStyle = 'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-wait disabled:opacity-60'
+  const retry = { jobs: status.isError ? [] : status.data?.retryableJobs ?? [], pendingId: retrying, async onRetry(job: AutomationJobSummary) {
+    if (retryBusy.current) return
+    retryBusy.current = true; setRetrying(job.id); setMessage('正在提交本条重试…')
+    try { await retryAutomationFailures(workflowId, job.id); setMessage('本条任务已加入重试队列，请在对应记录查看进度') }
+    catch (error) { setMessage(error instanceof Error ? error.message : '本条任务重试未提交') }
+    finally {
+      await Promise.allSettled([status.refetch(), queryClient.invalidateQueries({ queryKey: ['workflow-automation-records', workflowId] })])
+      setRetrying(''); retryBusy.current = false
+    }
+  } }
   return <div className="space-y-5">
     <section aria-label="自动分析设置" className="space-y-4 rounded-xl border border-input bg-card p-5">
     <div className="flex items-start justify-between gap-5">
@@ -92,20 +103,8 @@ export default function AutoAnalysisPanel({ workflowId }: { workflowId: string }
         <p className="mt-2 text-muted-foreground">{status.data?.lastScannedAtMs ? `扫描进度：${new Date(status.data.lastScannedAtMs).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}` : '每日扫描尚无记录；失败事件触发的分析单独记录在下方。'}</p>
         {status.data?.coverage && <p className="mt-2 text-xs leading-5 text-muted-foreground">分析记录 {status.data.coverage.total}；待完成 {status.data.coverage.pending}，明确失败 {status.data.coverage.failed}，部分覆盖 {status.data.coverage.partial}，结果未知 {status.data.coverage.unknown}。扫描完成不代表分析覆盖完整。</p>}
       </>}
-      <AutomationHistory key={workflowId} workflowId={workflowId} />
-      <NotificationAttention key={`notification:${workflowId}`} workflowId={workflowId} />
-      {!status.isError && status.data && <section aria-label="失败任务重试" className="mt-5 border-t border-border pt-4">
-        <h4 className="mb-3 font-medium">失败任务重试</h4>
-        {status.data.retryableJobs?.length ? <>
-          <p className="text-muted-foreground">将重试以下 {status.data.retryableJobs.length} 个失败任务；分析重试仅针对列出的运行，草稿重试沿用原优化任务，通知重试只重新发送通知。</p>
-          <ul aria-label="将重试的失败任务" className="mt-2 space-y-2">{status.data.retryableJobs.map(job => <li key={job.id} className="rounded-md border border-border p-3"><JobRecord job={job} workflowId={workflowId} /></li>)}</ul>
-          <p className="mt-2 text-xs text-muted-foreground">运行中或结果未知的请求继续核对原请求。执行前会重新检查状态和权限。</p>
-          <button className="mt-3 text-primary underline disabled:opacity-50" disabled={retrying} onClick={async () => {
-            setRetrying(true); try { await retryAutomationFailures(workflowId); await Promise.all([status.refetch(), queryClient.invalidateQueries({ queryKey: ['workflow-automation-records', workflowId] })]); setMessage('已提交失败任务重试；实际进度请查看执行记录') }
-            catch (error) { setMessage(error instanceof Error ? error.message : '重试未完成') } finally { setRetrying(false) }
-          }}>{retrying ? '提交中…' : '重试失败任务'}</button>
-        </> : <p className="text-xs text-muted-foreground">{status.data.retryableJobs ? '当前没有可重试的失败任务；运行中或结果未知的请求继续核对原请求。' : '暂未获取可重试对象，请刷新后核对。'}</p>}
-      </section>}
+      <AutomationHistory key={workflowId} workflowId={workflowId} retry={retry} />
+      <NotificationAttention key={`notification:${workflowId}`} workflowId={workflowId} retry={retry} />
     </section>
   </div>
 }

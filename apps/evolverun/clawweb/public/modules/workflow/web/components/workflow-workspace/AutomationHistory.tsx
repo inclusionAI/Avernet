@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import type { AutomationRecordQuery } from '../../../server/contracts/workflow-automation'
 import { useAutomationRecords } from '../../api/workflow-automation'
-import JobRecord from './AutomationJobRecord'
-export default function AutomationHistory({ workflowId }: { workflowId: string }) {
+import JobRecord, { type AutomationRetryActions } from './AutomationJobRecord'
+export default function AutomationHistory({ workflowId, retry }: { workflowId: string; retry?: AutomationRetryActions }) {
   const [kind, setKind] = useState<'analysis' | 'optimization'>('analysis')
   const [all, setAll] = useState(false)
   const [period, setPeriod] = useState<AutomationRecordQuery['period']>('all')
@@ -39,7 +39,7 @@ export default function AutomationHistory({ workflowId }: { workflowId: string }
     {records.isPending && <p role="status" className="text-muted-foreground">正在读取执行记录…</p>}
     {records.isError && <p role="alert" className="text-destructive">执行记录读取失败。<button type="button" className="ml-2 underline" onClick={() => void records.refetch()}>重试读取记录</button></p>}
     {!records.isError && records.data && <>
-      {records.data.jobs.length ? <ul className="space-y-2">{records.data.jobs.map(job => <li key={job.id} className="rounded-md border border-border p-3"><JobRecord job={job} workflowId={workflowId} /></li>)}</ul>
+      {records.data.jobs.length ? <ul className="space-y-2">{records.data.jobs.map(job => <li key={job.id} className="rounded-md border border-border p-3"><JobRecord job={job} workflowId={workflowId} retry={retry} /></li>)}</ul>
         : <p className="text-muted-foreground">{all ? '没有符合筛选条件的记录。' : kind === 'analysis' ? '暂无自动分析记录。' : '暂无自动优化记录。'}</p>}
       {all && <nav aria-label="执行记录分页" className="flex flex-wrap items-center justify-between gap-2">
         <button type="button" disabled={cursors.length === 1 || records.isFetching} className="text-primary underline disabled:opacity-50" onClick={() => setCursors(current => current.slice(0, -1))}>上一页</button>
@@ -50,7 +50,7 @@ export default function AutomationHistory({ workflowId }: { workflowId: string }
   </section>
 }
 
-export function NotificationAttention({ workflowId }: { workflowId: string }) {
+export function NotificationAttention({ workflowId, retry }: { workflowId: string; retry?: AutomationRetryActions }) {
   const [cursors, setCursors] = useState<string[]>([''])
   const [open, setOpen] = useState(false)
   const records = useAutomationRecords(workflowId, { kind: 'notification', status: 'attention', limit: 8, ...(cursors.at(-1) ? { cursor: cursors.at(-1) } : {}) })
@@ -60,7 +60,7 @@ export function NotificationAttention({ workflowId }: { workflowId: string }) {
     <summary className="cursor-pointer font-medium">通知发送异常，需处理</summary>
     <p className="mt-2 text-xs text-muted-foreground">仅展示未送达或结果待核对的通知；成功通知不占用任务记录。这里不会重新生成草稿或重复执行工作流。</p>
     <button type="button" disabled={records.isFetching} className="mt-2 text-primary underline disabled:opacity-50" onClick={() => void records.refetch()}>{records.isFetching ? '读取中…' : '刷新通知异常'}</button>
-    <ul className="mt-3 space-y-2">{records.data?.jobs.map(job => <li key={job.id} className="rounded-md border border-border p-3"><JobRecord job={job} workflowId={workflowId} /></li>)}</ul>
+    <ul className="mt-3 space-y-2">{records.data?.jobs.map(job => <li key={job.id} className="rounded-md border border-border p-3"><JobRecord job={job} workflowId={workflowId} retry={retry} /></li>)}</ul>
     {records.data && !records.data.jobs.length && <p className="mt-2 text-muted-foreground">本页暂无通知异常。</p>}
     {(cursors.length > 1 || records.data?.nextCursor) && <nav aria-label="通知异常分页" className="mt-3 flex items-center justify-between gap-3">
       <button type="button" disabled={cursors.length === 1 || records.isFetching} className="text-primary underline disabled:opacity-50" onClick={() => setCursors(value => value.slice(0, -1))}>上一页</button>

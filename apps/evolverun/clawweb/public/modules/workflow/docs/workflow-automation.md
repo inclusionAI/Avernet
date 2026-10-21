@@ -251,8 +251,13 @@ as `retryFailures`, independent of the recent-history limit. Analysis/notice job
 must be blocked with one of the existing recoverable reasons and no live lease;
 the existing 50-record selection limit applies. Drafts must satisfy the current
 Owner/policy, batch, original request, failed revision and lease checks. The UI
-lists each target and its type before offering retry; missing or empty lists offer
-no retry action. Recovery rechecks current conditions; a concurrent state change
+offers “重试分析”, “重试生成” or “重发通知” only beside the corresponding eligible
+blocked record. There is no permanent empty recovery section or mixed bulk button.
+`POST automation-retry` accepts optional `{ jobId }`; a target is filtered in SQL
+before the existing selection limit and can requeue only that record. Invalid
+target parameters return 400 and a no-longer-eligible target returns 409. Older
+callers omitting the target retain the existing bounded bulk recovery behavior.
+Recovery rechecks current conditions; a concurrent state change
 can remove eligibility. In-flight and unknown-outcome requests keep reconciling
 their original identities. Status reads do not claim jobs or submit business work.
 
@@ -284,11 +289,14 @@ records, not a complete manual evolution history; manual execution is shown in
 the corresponding evolution task. “查看全部记录”
 opens a 20-record page with date and status selectors and previous/next navigation.
 Changing a filter resets the cursor trail. Collapsing restores the unfiltered
-latest eight. Filters do not affect the independent retry-target list or its
-eligibility. Failed history reads can be retried without a business write.
+latest eight. Filters do not change recovery eligibility, but a filtered-out record
+leaves no detached action elsewhere on the page. Failed history reads can be retried without a business write.
 History pages load on demand and are briefly cached; they do not poll or refresh
 on window focus. The refresh button explicitly reloads the current page.
-Successful task-retry requests invalidate the history cache.
+Task-retry responses refresh status and history, including rejected retries. Pending
+requests show immediate feedback and prevent duplicate submissions; success means
+the selected record was requeued, not that execution completed. Scheduling and
+execution concurrency are unchanged.
 
 Successful notification journals remain stored but are not displayed in the main
 task list. A collapsed “通知发送异常，需处理” section queries only notifications with
@@ -297,7 +305,8 @@ Its eight-record cursor pages expose every exception without a history cutoff.
 Task rows show time, result, a shortened target reference and the existing detail
 link; full technical IDs and attempt counts are available under “查看详情”. Neither
 display filtering nor paging changes notification delivery, retry eligibility or
-business execution. The independent retry list still names every actual target.
+business execution. The status eligibility list remains read-only; no missing or
+unknown eligibility is guessed from an error label alone.
 
 History reads require only the existing v142 journal schema. Status is read from
 body_json; no generated column, new index, backfill or DDL permission is required.

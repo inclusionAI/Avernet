@@ -6,14 +6,17 @@ import { AppConfigRepository } from "../../repositories/app-config-repository.js
 import { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { createTaskGuardSettingsRouter } from "../task-guard-settings.js";
 import { createAutoAnalysisSettings } from "../../services/task-guard/auto-analysis-settings.js";
+import { RepairAutomationDeniedError } from '../../contracts/workflow-automation.js';
 
 const records = vi.fn();
+const retry = vi.fn(), status = vi.fn();
 let db: SqliteDatabase;
 let server: ReturnType<express.Application["listen"]> | null;
 let baseUrl: string;
 
 beforeEach(async () => {
   records.mockReset().mockResolvedValue({jobs: [], nextCursor: null});
+  retry.mockReset().mockResolvedValue(undefined); status.mockReset().mockResolvedValue({jobs:[],retryableJobs:[]});
   db = new SqliteDatabase(new Database(":memory:"));
   await runMigrations(db, "sqlite");
   const permissionRepo = new BotWorkflowPermissionRepository(db);
@@ -31,7 +34,7 @@ beforeEach(async () => {
   });
   const app = express();
   app.use(express.json());
-  app.use("/api/task-guard", createTaskGuardSettingsRouter({ settings, permissionRepo, automation: () => ({ records }) as never }));
+  app.use("/api/task-guard", createTaskGuardSettingsRouter({ settings, permissionRepo, automation: () => ({ records, retryFailures: retry, status }) as never }));
   server = await new Promise((resolve) => {
     const instance = app.listen(0, () => resolve(instance));
   });
@@ -140,4 +143,18 @@ it('authorizes history separately and validates bounded query parameters', async
   expect(await response.json()).toEqual({ jobs: [], nextCursor: null });
   expect((await fetch(`${url}?kind=notification&status=attention`, { headers })).status).toBe(200);
   expect(records).toHaveBeenLastCalledWith('wf-1', { kind: 'notification', period: 'all', status: 'attention', limit: 8 });
+});
+
+it('authorizes targeted retries and never forwards a malformed target as a bulk retry', async () => {
+  const url = `${baseUrl}/api/task-guard/workflows/wf-1/automation-retry`;
+  const post = (body: object, user = 'editor-1') => fetch(url, {method:'POST',headers:{'Content-Type':'application/json','X-User-Id':user},body:JSON.stringify(body)});
+  expect((await post({jobId:'chosen'},'viewer-1')).status).toBe(403);
+  for (const jobId of [null, '', [], 123, 'x'.repeat(129)]) expect((await post({jobId})).status).toBe(400);
+  expect(retry).not.toHaveBeenCalled();
+  expect((await post({jobId:'chosen'})).status).toBe(200);
+  expect(retry).toHaveBeenLastCalledWith('wf-1','chosen');
+  retry.mockRejectedValueOnce(new RepairAutomationDeniedError('TASK_NOT_RETRYABLE'));
+  expect((await post({jobId:'stale'})).status).toBe(409);
+  expect((await post({})).status).toBe(200);
+  expect(retry).toHaveBeenLastCalledWith('wf-1',undefined);
 });

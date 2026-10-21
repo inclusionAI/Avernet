@@ -74,7 +74,7 @@ export class WorkflowAutomationRepository {
       ORDER BY updated_at_ms, record_id LIMIT ?`, [now, now, limit])).map(row => JSON.parse(row.body_json));
   }
   /** Filter current eligibility before the batch limit so historical tasks cannot starve recoverable drafts. */
-  async recoverableDrafts(workflowId: string, now: number, policyVersion: number): Promise<Array<{ job: AutomationJob; revision: number }>> {
+  async recoverableDrafts(workflowId: string, now: number, policyVersion: number, jobId?: string): Promise<Array<{ job: AutomationJob; revision: number }>> {
     const field = (name: string) => this.json(name, 'a');
     const requestMatches = this.db.dialect.driver === 'better-sqlite3'
       ? `r.request_id = ${field('data.request.requestId')}` : `BINARY r.request_id = BINARY ${field('data.request.requestId')}`;
@@ -85,8 +85,9 @@ export class WorkflowAutomationRepository {
       WHERE a.task_id = ? AND a.record_kind = 'auto_draft' AND ${field('status')} = 'blocked'
       AND ${field('reason')} = 'DRAFT_REQUIRES_MANUAL_REVIEW' AND ${field('data.batches')} IS NOT NULL
       AND CAST(${field('leaseUntilMs')} AS SIGNED) <= ? AND CAST(${field('data.request.automation.policyVersion')} AS SIGNED) = ?
+      ${jobId ? 'AND a.record_id = ?' : ''}
       AND NOT EXISTS (SELECT 1 FROM workflow_repair_revisions newer WHERE newer.task_id = r.task_id AND newer.revision > r.revision)
-      ORDER BY a.created_at_ms, a.record_id LIMIT 50`, [taskScope(workflowId), now, policyVersion]);
+      ORDER BY a.created_at_ms, a.record_id LIMIT 50`, [taskScope(workflowId), now, policyVersion, ...(jobId ? [jobId] : [])]);
     return rows.map(row => ({ job: JSON.parse(row.body_json) as AutomationJob, revision: Number(row.revision) }))
       .filter(({ job }) => job.data.batches && job.data.request?.automation?.policyVersion === policyVersion);
   }
@@ -150,21 +151,24 @@ export class WorkflowAutomationRepository {
     }
     return result;
   }
-  async retryableFailures(workflowId: string, now: number): Promise<AutomationJob[]> {
+  async retryableFailures(workflowId: string, now: number, jobId?: string): Promise<AutomationJob[]> {
     const rows = await this.db.query<{ body_json: string }>(`SELECT body_json FROM workflow_repair_release_records
       WHERE task_id = ? AND record_kind IN ('auto_run', 'auto_notice') AND ${this.json('status')} = 'blocked'
       AND ${this.json('reason')} IN ('ANALYSIS_FAILED', 'NOTIFICATION_REJECTED', 'OWNER_MISSING', 'OWNER_PERMISSION_DENIED')
-      ORDER BY updated_at_ms, record_id LIMIT 50`, [taskScope(workflowId)]);
+      ${jobId ? 'AND record_id = ?' : ''}
+      ORDER BY updated_at_ms, record_id LIMIT 50`, [taskScope(workflowId), ...(jobId ? [jobId] : [])]);
     return rows.map(row => JSON.parse(row.body_json) as AutomationJob).filter(job => job.leaseUntilMs <= now);
   }
-  async retryFailures(workflowId: string, now: number) {
-    await this.db.transaction(async tx => {
+  async retryFailures(workflowId: string, now: number, jobId?: string) {
+    return this.db.transaction(async tx => {
       await new RepairBatchRepository(tx).lockWorkflow(tx, workflowId);
       const repo = new WorkflowAutomationRepository(tx);
-      for (const job of await repo.retryableFailures(workflowId, now)) {
+      const jobs = await repo.retryableFailures(workflowId, now, jobId);
+      for (const job of jobs) {
         const next: AutomationJob = { ...job, status: 'retryable', attempts: 0, nextAtMs: now, stateVersion: job.stateVersion + 1 };
         await new RepairReleaseRepository(tx).update(next, job.stateVersion);
       }
+      return jobs.length;
     });
   }
 }

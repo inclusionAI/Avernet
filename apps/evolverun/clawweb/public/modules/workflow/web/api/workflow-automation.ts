@@ -26,4 +26,4 @@ export function useAutomationRecords(id: string, options: AutomationRecordQuery)
     queryFn: () => json<AutomationRecordPage>(`${base(id)}/automation-records?${params}`), retry: false,
     staleTime: 15000, refetchInterval: false, refetchOnWindowFocus: false })
 }
-export async function retryAutomationFailures(id: string) { return json<AutomationSnapshot>(`${base(id)}/automation-retry`, { method: 'POST', body: '{}' }) }
+export async function retryAutomationFailures(id: string, jobId?: string) { return json<AutomationSnapshot>(`${base(id)}/automation-retry`, { method: 'POST', body: JSON.stringify(jobId === undefined ? {} : { jobId }) }) }

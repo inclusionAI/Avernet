@@ -590,6 +590,42 @@ it('lists exactly the analysis and notice jobs recovery can change, excluding ac
   expect(f.ports.analysis.start).not.toHaveBeenCalled();
   expect(f.ports.notify).not.toHaveBeenCalled();
 });
+it('requeues only the requested failure and leaves other failures and unknown outcomes untouched', async () => {
+  const f = await fixture(); const repo = new WorkflowAutomationRepository(f.db);
+  const now = Date.parse('2026-11-01T02:00:00Z');
+  const jobs = [];
+  for (const [kind, key, status, reason] of [
+    ['auto_run', 'chosen', 'blocked', 'ANALYSIS_FAILED'], ['auto_notice', 'other', 'blocked', 'NOTIFICATION_REJECTED'],
+    ['auto_run', 'unknown', 'uncertain', 'ANALYSIS_OUTCOME_UNKNOWN'],
+  ] as const) {
+    const job = await repo.ensure('wf-1', kind, key, { flowId: key }, now);
+    await repo.patch((await repo.claim(job.id, now))!, { status, reason }, now, true); jobs.push(job);
+  }
+  await f.service.retryFailures('wf-1', jobs[0].id);
+  expect((await repo.get(jobs[0].id))?.status).toBe('retryable');
+  expect((await repo.get(jobs[1].id))?.status).toBe('blocked');
+  expect((await repo.get(jobs[2].id))?.status).toBe('uncertain');
+  await expect(f.service.retryFailures('wf-1', jobs[2].id)).rejects.toThrow('TASK_NOT_RETRYABLE');
+  await expect(f.service.retryFailures('wf-2', jobs[1].id)).rejects.toThrow('TASK_NOT_RETRYABLE');
+  expect(f.ports.analysis.start).not.toHaveBeenCalled(); expect(f.ports.notify).not.toHaveBeenCalled();
+});
+it('retries a targeted automatic draft without resetting unrelated failed notifications', async () => {
+  const f = await fixture(true, 1, true);
+  await f.service.tick(); f.advance(); await f.service.tick();
+  const job = (await f.service.status('wf-1')).jobs.find(row => row.kind === 'auto_draft')!;
+  const task = await f.workbench.task(job.taskId!);
+  f.setRemoteStatus({ status: 'failed', rawStatus: 'failed', errorMessage: 'controlled failure' });
+  await f.workbench.report({ workflowId: 'wf-1', taskId: task.taskId, revision: 1, expectedStateVersion: 0, status: 'failed', error: { code: 'AIS_FAILED' } });
+  f.advance(); await f.service.tick();
+  const repo = new WorkflowAutomationRepository(f.db), now = Date.parse('2026-11-01T02:03:00Z');
+  const notice = await repo.ensure('wf-1', 'auto_notice', 'unrelated-failure', { kind: 'completion' }, now);
+  await repo.patch((await repo.claim(notice.id, now))!, { status: 'blocked', reason: 'NOTIFICATION_REJECTED' }, now, true);
+  const dispatched = f.calls.length;
+  await f.service.retryFailures('wf-1', job.id);
+  expect((await repo.get(job.id))?.status).toBe('pending');
+  expect((await repo.get(notice.id))?.status).toBe('blocked');
+  expect(f.calls).toHaveLength(dispatched);
+});
 it('uses the same fifty-job recovery limit even when recent records are truncated', async () => {
   const f = await fixture();
   const repo = new WorkflowAutomationRepository(f.db);

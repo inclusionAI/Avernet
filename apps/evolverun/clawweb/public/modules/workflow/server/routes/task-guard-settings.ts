@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import type { Request as AccessRequest } from 'express';
-import type { WorkflowAutomationService } from '../contracts/workflow-automation.js';
+import { RepairAutomationDeniedError, type WorkflowAutomationService } from '../contracts/workflow-automation.js';
 import type { AutoAnalysisSettings } from "../services/task-guard/auto-analysis-settings.js";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 import { requireWorkflowAccess, resolveWorkflowActorId } from "@avernet/clawweb-shared/server/services/workflow-access";
@@ -75,7 +75,17 @@ export function createTaskGuardSettingsRouter(input: {
     if (!await access(req, res, id, 'edit')) return;
     const automation = input.automation?.();
     if (!automation) { res.status(503).json({ error: '自动分析调度尚未接入' }); return; }
-    await automation.retryFailures(id);
+    const jobId = req.body?.jobId;
+    if (jobId !== undefined && (typeof jobId !== 'string' || !jobId.trim() || jobId.length > 128)) {
+      res.status(400).json({ error: '重试任务编号无效' }); return;
+    }
+    try { await automation.retryFailures(id, jobId); }
+    catch (error) {
+      if (error instanceof RepairAutomationDeniedError && error.message === 'TASK_NOT_RETRYABLE') {
+        res.status(409).json({ error: '该任务当前不可重试，请查看更新后的记录' }); return;
+      }
+      throw error;
+    }
     res.json(await automation.status(id));
   }));
   return router;
