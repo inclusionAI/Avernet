@@ -109,3 +109,104 @@ jobs:
       - name: Remove runtime state
         if: always()
         run: rm -rf -- "$RUNNER_TEMP/bailian-profile"
+
+  build-bcs:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/bcs
+          key: bailian-e2e
+      - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Build real BCS and bridge
+        working-directory: apps/bcs
+        env:
+          CARGO_PROFILE_DEV_DEBUG: '0'
+        run: cargo build --locked -p bcs -p bcs-bridge-cli
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bailian-bcs-binaries
+          path: |
+            apps/bcs/target/debug/bcs
+            apps/bcs/target/debug/bcs-bridge
+          retention-days: 2
+
+  e2e:
+    needs: build-bcs
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - engine: openclaw
+            package: openclaw
+            plugin: '@avernet-plugin/openclaw-channel-bcn'
+          - engine: deepseek-harness
+            package: '@deepseek-ai/dsh'
+            plugin: '@avernet-plugin/deepseek-harness-channel-bcn'
+          - engine: claude-code
+            package: '@anthropic-ai/claude-code'
+            plugin: ''
+          - engine: codex
+            package: '@openai/codex'
+            plugin: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: bailian-bcs-binaries
+          path: .bailian-bin
+      - run: |
+          chmod +x .bailian-bin/*
+          python -m pip install tomli-w PyYAML
+      - name: Generate isolated configuration
+        env:
+          BAILIAN_OPENAI_BASE_URL: ${{ vars.BAILIAN_OPENAI_BASE_URL }}
+        run: |
+          python singlebox/compat/bailian/configure.py --output "$RUNNER_TEMP/bailian-e2e" \
+            --base-url "$BAILIAN_OPENAI_BASE_URL" --model qwen3.8-flash
+      - name: Install latest engine and published plugin
+        env:
+          ENGINE: ${{ matrix.engine }}
+          ENGINE_PACKAGE: ${{ matrix.package }}
+          PLUGIN_PACKAGE: ${{ matrix.plugin }}
+        run: |
+          python singlebox/compat/bailian/install.py --profile "$RUNNER_TEMP/bailian-e2e" \
+            --report reports/versions.json
+      - name: Real BCS E2E cases
+        env:
+          BAILIAN_API_KEY: ${{ secrets.BAILIAN_API_KEY }}
+          ENGINE: ${{ matrix.engine }}
+        run: |
+          python singlebox/compat/bailian/e2e.py --engine "$ENGINE" \
+            --profile "$RUNNER_TEMP/bailian-e2e" --binaries .bailian-bin --report reports/e2e.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bailian-e2e-${{ matrix.engine }}
+          path: reports/*.json
+          retention-days: 7
+      - name: Publish E2E report
+        if: always()
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          p = Path('reports/e2e.json')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write('```json\n' + (p.read_text() if p.exists() else '{"status":"UNKNOWN","reason":"setup_failed"}') + '\n```\n')
+          PY
+      - name: Remove runtime state
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/bailian-e2e"

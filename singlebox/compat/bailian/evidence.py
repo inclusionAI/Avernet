@@ -12,7 +12,7 @@ def marker_evidence(text: str, marker: str) -> dict:
 
 def openclaw_evidence(root: Path, marker: str, final: str) -> dict:
     rows = []
-    for path in sorted((root / "openclaw/agents").glob("*/sessions/*.jsonl")):
+    for path in sorted(root.rglob("*.jsonl")):
         for line in path.read_text(encoding="utf-8").splitlines():
             try:
                 entry = json.loads(line)
@@ -34,4 +34,5 @@ def openclaw_evidence(root: Path, marker: str, final: str) -> dict:
                     # Tool arguments and hidden reasoning are deliberately excluded.
                     rows.append({"role": role, "tool_call": True})
     return {"expected_probe": marker, "native_messages": rows,
+            "transcript_files": [str(p.relative_to(root)) for p in root.rglob("*.jsonl")],
             "cli_final": marker_evidence(final, marker)}

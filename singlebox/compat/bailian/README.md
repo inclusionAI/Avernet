@@ -67,3 +67,28 @@ Sources: [Bailian Claude Code](https://help.aliyun.com/zh/model-studio/claude-co
 [Bailian Codex](https://help.aliyun.com/zh/model-studio/codex),
 [Codex configuration](https://developers.openai.com/codex/config-advanced/),
 [DSH providers](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/guide/providers.md).
+
+## Real BCS E2E
+
+The workflow also builds the current commit's real BCS server and `bcs-bridge`
+on GitHub-hosted Ubuntu 22.04. Each engine runs against an isolated loopback BCS
+with SQLite and public local authentication. No production BCS is contacted.
+
+OpenClaw and DeepSeek Harness resolve their published BCN package's npm `latest`
+once and install that exact version; unpublished repository plugin changes are
+not substituted. Claude Code and Codex connect through the real `bcs-bridge`
+plugin WebSocket transport. `versions.json` records exact engine/plugin versions
+and the BCS/bridge commit.
+
+Cases cover registration and online connection, a BCS-dispatched random file
+read with the complete content returned to BCS, same-session recall after the
+file is deleted, absence of that secret in a new session, and recall after the
+engine connection process restarts. Every case must pass; partial completion
+is never reported as ready. These cases do not yet certify group routing,
+manager/worker tasks, cancellation, or every interactive permission flow.
+
+`e2e.json` records stage, case, run/session IDs and allowlisted probe evidence.
+Native OpenClaw tool-result and assistant text are compared using synthetic
+probe tokens only; reasoning, arguments, credentials and full transcripts are
+not uploaded. An absent native transcript is an evidence gap, not proof of a
+model or renderer defect. All runtime state is removed at job completion.
