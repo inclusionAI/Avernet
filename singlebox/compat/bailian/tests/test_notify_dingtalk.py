@@ -11,7 +11,7 @@ from urllib.parse import parse_qs, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from configure import ENGINES
-from notify_dingtalk import main, payload, read_rows, send, signed_url
+from notify_dingtalk import DeliveryError, main, payload, read_rows, send, signed_url
 
 
 class DingTalkTest(unittest.TestCase):
@@ -36,7 +36,7 @@ class DingTalkTest(unittest.TestCase):
             signed_url(self.webhook, 'test-signing-key', 124)).query)['sign'])
         for invalid in (self.webhook.replace('https:', 'http:'),
                         self.webhook.replace('oapi.dingtalk.com', 'example.test')):
-            with self.assertRaises(ValueError):
+            with self.assertRaises(DeliveryError):
                 signed_url(invalid, '', 123)
 
     def test_success_version_changes_and_failure_gates(self):
@@ -63,8 +63,8 @@ class DingTalkTest(unittest.TestCase):
 
     @patch('notify_dingtalk.build_opener')
     def test_application_error_is_failure_even_with_http_success(self, opener):
-        opener.return_value.open.return_value.__enter__.return_value = io.StringIO('{"errcode":310000}')
-        with self.assertRaises(ValueError):
+        opener.return_value.open.return_value.__enter__.return_value = io.StringIO('{"errcode":310000,"errmsg":"keywords not in content secret-placeholder"}')
+        with self.assertRaisesRegex(DeliveryError, '^api_310000_keyword$'):
             send(self.webhook, '', self.report())
         opener.return_value.open.return_value.__enter__.return_value = io.StringIO('{"errcode":0}')
         send(self.webhook, '', self.report())

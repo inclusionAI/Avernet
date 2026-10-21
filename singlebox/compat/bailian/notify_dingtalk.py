@@ -9,9 +9,14 @@ import os
 from pathlib import Path
 import time
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from configure import ENGINES
+
+
+class DeliveryError(Exception):
+    """Only bounded, locally constructed diagnostic codes are allowed here."""
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -26,7 +31,7 @@ def signed_url(webhook, secret, timestamp):
             or url.port not in (None, 443) or url.path != '/robot/send'
             or url.username or url.password or url.fragment
             or not query.get('access_token')):
-        raise ValueError('Invalid DingTalk configuration')
+        raise DeliveryError('invalid_webhook_configuration')
     if not secret:
         return webhook
     message = f'{timestamp}\n{secret}'.encode()
@@ -93,7 +98,13 @@ def send(webhook, secret, body):
     with build_opener(NoRedirect()).open(request, timeout=20) as response:
         result = json.load(response)
     if not isinstance(result, dict) or result.get('errcode') != 0:
-        raise ValueError('DingTalk rejected notification')
+        code = result.get('errcode') if isinstance(result, dict) else None
+        code = str(code) if type(code) is int and abs(code) < 1000000000 else 'unknown'
+        message = str(result.get('errmsg', '')).lower() if isinstance(result, dict) else ''
+        category = next((label for needle, label in (
+            ('keyword', 'keyword'), ('sign', 'signature'), ('ip ', 'ip_allowlist'),
+            ('token', 'token')) if needle in message), 'rejected')
+        raise DeliveryError(f'api_{code}_{category}')
 
 
 def main():
@@ -109,9 +120,17 @@ def main():
                        os.environ['GITHUB_RUN_ATTEMPT'], datetime.now(timezone(timedelta(hours=8))))
         send(os.environ['BCS_ENGINE_COMPAT_DINGTALK_WEBHOOK'],
              os.environ.get('BCS_ENGINE_COMPAT_DINGTALK_SIGN_SECRET', ''), body)
-    except Exception:
-        # Exception/response text can contain a credential-bearing URL. Never log it.
-        print('::error::DingTalk notification failed. Check BCS_ENGINE_COMPAT_DINGTALK_* Secrets, robot security settings and connectivity. Delivery is unconfirmed.')
+    except Exception as error:
+        # Only locally constructed codes or numeric HTTP status; never remote text/URLs.
+        if isinstance(error, DeliveryError):
+            category = str(error)
+        elif isinstance(error, HTTPError):
+            category = f'http_{error.code}'
+        elif isinstance(error, (URLError, OSError)):
+            category = 'transport_error'
+        else:
+            category = 'invalid_input_or_response'
+        print(f'::error::DingTalk notification failed ({category}). Check BCS_ENGINE_COMPAT_DINGTALK_* Secrets and robot security settings. Delivery is unconfirmed.')
         return 1
     print('DingTalk accepted the compatibility report.')
     return 0
