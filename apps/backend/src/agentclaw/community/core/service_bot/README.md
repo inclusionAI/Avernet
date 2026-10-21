@@ -37,11 +37,14 @@ consumes:
   - "RuntimeLayoutProbeServiceProtocol"
   - "SystemConfig"
   - "PassportPlugin"
+  - "UserListRepositoryProtocol"
 internal_dependencies:
   - agentclaw.community.kernel.file_count
   - agentclaw.community.plugin_api.file_count_runtime
   - agentclaw.community.core.base
   - agentclaw.community.kernel.build_ignore
+  - agentclaw.community.core.repository.protocols.identity
+  - agentclaw.community.core.user_list
   - agentclaw.community.core.repository.protocols.build_ignore
   - agentclaw.community.core.runtime_binding
   - agentclaw.community.core.engine_runtime.errors
@@ -146,3 +149,52 @@ bounded orphan that the in-flight `PENDING` op makes observable.
 there is no client-side approve call in this pipeline. Approval workflows for
 publish/unpublish (owner `should_approval`) are a separate concern handled by
 `PublishApprovalService`, whose AGREED callback enqueues a durable trigger task.
+
+
+## Runtime CLI artifact rollout
+
+Home `.agentclaw` and `.local/bin` snapshots are disabled by default. A build
+resolves the source Bot owner's `entity_id` against `ac_entity_user_list` using
+`user_list_type='service_bot_runtime_artifact'` and the backend runtime `env`.
+An exact owner entry enables that user; `entity_id='*'` enables all owners in
+that environment. Missing owners, missing entries, and read failures disable
+both snapshots. This decision is fixed for the build, independently of the
+publishing actor. Engine files, historical artifact restoration, and runtime
+ownership are unchanged. Disabled retries clear only existing versioned CLI
+snapshots without reading draft CLI directories or creating missing snapshots.
+
+This list is server-managed. The authenticated frontend correction API rejects
+writes to this type with HTTP 403; operations must manage it through the database.
+The following examples are documentation only and must not run as a migration.
+Replace `pre` and `OWNER_ENTITY_ID` deliberately for the intended environment/user.
+
+```sql
+-- Inspect before changing rollout state.
+SELECT entity_id, user_list_type, env FROM ac_entity_user_list
+WHERE user_list_type = 'service_bot_runtime_artifact' AND env = 'pre';
+
+-- Enable one Bot owner (run instead of the global example).
+INSERT INTO ac_entity_user_list (entity_id, user_list_type, env)
+VALUES ('OWNER_ENTITY_ID', 'service_bot_runtime_artifact', 'pre');
+
+-- Enable all Bot owners in one environment only when rollout is intended.
+INSERT INTO ac_entity_user_list (entity_id, user_list_type, env)
+VALUES ('*', 'service_bot_runtime_artifact', 'pre');
+
+-- Disable one owner; a global row still takes precedence while present.
+DELETE FROM ac_entity_user_list
+WHERE entity_id = 'OWNER_ENTITY_ID'
+  AND user_list_type = 'service_bot_runtime_artifact' AND env = 'pre';
+
+-- Disable the global opt-in; individually listed owners remain enabled.
+DELETE FROM ac_entity_user_list
+WHERE entity_id = '*'
+  AND user_list_type = 'service_bot_runtime_artifact' AND env = 'pre';
+
+-- Fully stop new CLI snapshots for the selected environment.
+DELETE FROM ac_entity_user_list
+WHERE user_list_type = 'service_bot_runtime_artifact' AND env = 'pre';
+```
+
+Turning the list off affects new builds; it does not remove CLI files from
+already deployed containers or rewrite historical versions.

@@ -39,6 +39,7 @@ def _svc(
     baas.create_bot.return_value = {"bot_uuid": "BOT-a", "publish_id": 7}
     baas.upgrade_bot.return_value = {"bot_uuid": "BOT-a", "publish_id": 8}
     svc = BotBuildService(
+        user_list_repository=MagicMock(exists=MagicMock(return_value=False)),
         build_ignore_repository=MagicMock(get=MagicMock(return_value=None)),
         env="test",
         device_service=MagicMock(),

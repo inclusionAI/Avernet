@@ -88,6 +88,7 @@ def build_service(tmp_path, monkeypatch, record):
     import agentclaw.community.core.service_bot.services.bot_build_service as module
     service = BotBuildService.__new__(BotBuildService)
     service._env = "test"
+    service._user_list_repository = MagicMock(exists=MagicMock(return_value=False))
     service._build_ignore_repository = MagicMock(get=MagicMock(return_value=record))
     service._resolve_sandbox_provider = MagicMock(return_value=MagicMock(
         get_build_plan=MagicMock(return_value=plan()),
@@ -191,3 +192,14 @@ def test_producer_pins_only_successful_snapshot(success):
     )
     assert artifact.success is success
     assert artifact.ext.get("publish_ignore") == (snapshot if success else None)
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_build_resolves_owner_list_once_and_passes_fixed_decision(tmp_path, monkeypatch, enabled):
+    service = build_service(tmp_path, monkeypatch, None)
+    service._user_list_repository.exists.side_effect = lambda **kw: enabled and kw["entity_id"] == "owner"
+    service.build({"bot_id": "b", "entity_id": "owner"}, version=3)
+    assert service._migrate_bot_instance.call_args.kwargs["include_runtime_artifacts"] is enabled
+    assert service._user_list_repository.exists.call_count == 2
+    assert all(call.kwargs["env"] == "test" for call in service._user_list_repository.exists.call_args_list)
+    assert service._user_list_repository.exists.call_args.kwargs["entity_id"] == "owner"

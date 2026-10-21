@@ -34,6 +34,7 @@ from agentclaw.community.api.file_count_service import FileCountServiceProtocol
 from agentclaw.community.plugin_api.file_count_runtime import FileCountRuntime
 from agentclaw.community.api.build_ignore_service import BuildIgnoreServiceProtocol
 from agentclaw.community.core.repository.protocols.build_ignore import BuildIgnoreRepositoryProtocol
+from agentclaw.community.core.repository.protocols.identity import UserListRepositoryProtocol
 from agentclaw.community.plugin_api.publish_ignore_runtime import PublishIgnoreRuntime
 
 from injector import Binder, Injector, Module, inject, provider, singleton
@@ -410,6 +411,7 @@ class ServiceBotModule(Module):
     def bot_build_service(
         self,
         build_ignore_repository: BuildIgnoreRepositoryProtocol,
+        user_list_repository: UserListRepositoryProtocol,
         device_service: DeviceService,
         baas_service: BaasService,
         path_factory: WorkspacePathFactory,
@@ -425,6 +427,7 @@ class ServiceBotModule(Module):
         """Construct ``BotBuildService`` with sandbox registry support."""
         return BotBuildService(
             build_ignore_repository=build_ignore_repository,
+            user_list_repository=user_list_repository,
             env=env_utils.get_current_env(),
             device_service=device_service,
             baas_service=baas_service,

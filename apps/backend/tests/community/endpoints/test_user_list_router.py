@@ -417,3 +417,17 @@ def user_list_correction_allows_every_authenticated_user():
 )
 def user_list_correction_rejects_extra_request_fields():
     """The correction write schema remains strict."""
+
+
+@endpoint_test(
+    method="PUT", path="/api/v1/user-lists/correct",
+    scenario="server_managed_runtime_artifacts_cannot_be_enabled",
+    input=CaseInput(
+        headers={"x-user-id": _ENTITY_ID},
+        json_body={"entity_id": "*", "user_list_type": "service_bot_runtime_artifact", "in_whitelist": True},
+    ),
+    seed=_seed_non_correction_user,
+    expect=ExpectError(status=403),
+)
+def user_list_correction_rejects_server_managed_runtime_artifact_type():
+    """An ordinary login cannot opt all users into a server-side build feature."""
