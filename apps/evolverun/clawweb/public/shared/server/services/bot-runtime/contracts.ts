@@ -1,8 +1,11 @@
 export type BotEnvironment = "dev" | "pre" | "prod";
-export type BotTarget = { environment: BotEnvironment; ownerId: string; botId: string };
+export type BotRuntimeIdentity = { stage: "draft" | "verify" | "online"; deviceUuid?: string; version?: string };
+export type BotTarget = { environment: BotEnvironment; ownerId: string; botId: string; runtimeIdentity?: BotRuntimeIdentity };
 /** Provider metadata is an internal routing contract, not an HTTP request schema. */
 export type ResolvedBotTarget = BotTarget & {
   provider: string; bindingId: string; deviceId: string;
+  /** Exact BaaS instance, validated against the Bot binding by the host. */
+  deviceUuid?: string; providerDeviceId?: string;
   entityId?: string; entityType?: string; sandboxId?: string; arcaInstanceId?: string; botType?: string; activeEngine?: string;
 };
 export interface BotSessionTrajectoryReader {

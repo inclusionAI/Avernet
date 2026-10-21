@@ -1,3 +1,4 @@
+import { sendEngineMessage } from "../internal/engine-message.js";
 import { runtimeHttpBody } from "../internal/http-body.js";
 import { runtimeResponse } from "../../http-response.js";
 import type { ResolvedBaasConfig } from "../../../db.js";
@@ -7,13 +8,14 @@ import { executeBaasCommand, resolveBaasCommandTarget, baasRequestHeaders } from
 
 /** Public BaaS protocol implementation; endpoints and credentials come from the host. */
 export class BaasRuntimeProvider implements BotRuntimeProvider {
-  constructor(private readonly config: ResolvedBaasConfig) {}
+  constructor(private readonly config: ResolvedBaasConfig, private readonly options: { prepareMessageCommand?: (command: string) => string } = {}) {}
   async executeShell(input: ResolvedShellInput): Promise<ShellResult> {
     const config = resolveBaasCommandTarget(this.config, input.target.environment);
+    if (input.target.deviceUuid && !input.target.providerDeviceId) throw new BotRuntimeError(409, "missing_instance_target", "Exact instance command target is unavailable");
     const timeoutMs = input.timeoutMs ?? (this.config.commandTimeoutSeconds || 30) * 1000;
     try {
       const { response, body } = await executeBaasCommand({ config, tenant: this.config.commandTenant,
-        deviceId: input.target.deviceId, deviceAffinity: input.deviceAffinity ?? input.target.ownerId,
+        deviceId: input.target.deviceId, providerDeviceId: input.target.deviceUuid ? input.target.providerDeviceId : undefined, deviceAffinity: input.deviceAffinity ?? input.target.ownerId,
         cmd: input.command, timeoutSeconds: Math.ceil(timeoutMs / 1000), signal: AbortSignal.timeout(timeoutMs + 5000) });
       const data = body.data ?? {}, code = data.exit_code ?? data.result?.exit_code ?? null;
       const rejected = !response.ok || (body.code != null && Number(body.code) !== 0)
@@ -34,6 +36,7 @@ export class BaasRuntimeProvider implements BotRuntimeProvider {
       requestHeaders = headers;
     } else {
       const query = new URLSearchParams({ tenant: this.config.commandTenant, port: String(input.port ?? 20003), path: input.path, device_affinity: input.target.ownerId });
+      if (input.target.deviceUuid) { query.delete("device_affinity"); query.set("device_uuid", input.target.deviceUuid); }
       const response = await fetch(`${config.baseUrl}/api/v1/bots/${encodeURIComponent(input.target.deviceId)}/http-info?${query}`, { headers, signal, redirect: "error" });
       const info = await response.json();
       if (!response.ok || Number(info.code) !== 0 || typeof info.data?.http_url !== "string" || typeof info.data?.token !== "string" || !info.data.token) {
@@ -57,11 +60,22 @@ export class BaasRuntimeProvider implements BotRuntimeProvider {
   }
   async sendMessage(input: ResolvedMessageInput): Promise<MessageReceipt> {
     const config = resolveBaasCommandTarget(this.config, input.target.environment);
+    if (input.target.deviceUuid && input.target.activeEngine !== "teclaw") {
+      if (!["openclaw", "claude_code"].includes(input.target.activeEngine ?? "") || config.apiKey.length < 8) {
+        throw new BotRuntimeError(422, "unsupported_instance_message", "Exact instance message requires a supported Adapter and application identity");
+      }
+      return sendEngineMessage(input, {
+        engineUrl: input.target.activeEngine === "claude_code" ? "ws://127.0.0.1:20003/api/claude_code/ws" : "ws://127.0.0.1:20003/ws",
+        engineAuthToken: `OPEN_API:app:${config.apiKey.slice(0, 8)}`,
+        execute: command => this.executeShell({ target: input.target, command: this.options.prepareMessageCommand?.(command) ?? command, timeoutMs: 35000 }),
+      });
+    }
     const suffix = `:${input.target.ownerId}`, botId = input.target.botId.endsWith(suffix) ? input.target.botId : input.target.botId + suffix;
     try {
       const response = await fetch(`${config.baseUrl}/openapi/v1/messages`, { method: "POST", headers: baasRequestHeaders(config), redirect: "error",
         body: JSON.stringify({ bot_id: botId, message: input.message, message_id: input.deliveryKey,
-          metadata: { session_id: input.sessionKey, sender_options: { from: "owner" } } }), signal: AbortSignal.timeout(60000) });
+          metadata: { session_id: input.sessionKey, sender_options: { from: "owner" },
+            ...(input.target.runtimeIdentity ? { bot_options: { lifecycle_stage: input.target.runtimeIdentity.stage } } : {}) } }), signal: AbortSignal.timeout(60000) });
       const body = await response.json().catch(() => null);
       if (!response.ok || (body?.code != null && ![0, "0"].includes(body.code))
         || (body?.buserviceErrorCode != null && ![0, "0", ""].includes(body.buserviceErrorCode))) {

@@ -5,3 +5,5 @@ export { BotRuntimeError } from "./errors.js";
 export { BaasRuntimeProvider } from "./providers/baas.js";
 export { BotEngineOperations, type EngineOperation } from "./engine-operations.js";
 export { runtimeHttpBody } from "./internal/http-body.js";
+export { parseBotRuntimeIdentity } from "./runtime-identity.js";
+export { sendEngineMessage } from "./internal/engine-message.js";
