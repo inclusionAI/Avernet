@@ -63,9 +63,9 @@ it.each([
   (spec: any) => { spec._businessPolicy = 'unknown fields count'; },
   (spec: any) => { spec.nodes[0].version = 'nested business version'; },
   (spec: any) => { spec.version = { businessPolicy: 'not scalar metadata' }; },
-])('rejects actual configuration drift rather than dropping unknown fields or order', change => {
+])('uses deployed configuration identity without blocking background work on a Git representation difference', change => {
   const changed = structuredClone(deployed); change(changed);
-  expect(() => repairProposalSpecDigest(tagged, changed)).toThrow('配置不一致');
+  expect(repairProposalSpecDigest(tagged, changed)).toBe(digestCanonicalJson(changed));
 });
 
 it('does not confuse raw bytes with semantic identity or silently accept missing proposal metadata', () => {

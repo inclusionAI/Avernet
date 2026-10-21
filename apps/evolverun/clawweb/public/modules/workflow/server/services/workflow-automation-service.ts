@@ -23,15 +23,17 @@ async function bounded<T>(action: Promise<T>): Promise<T> {
   try { return await Promise.race([action, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('AUTOMATION_OUTCOME_UNKNOWN')), 20000); })]); }
   finally { if (timer) clearTimeout(timer); }
 }
-export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoAnalysisSettings; ports: WorkflowAutomationPorts;
+export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoAnalysisSettings; ports: WorkflowAutomationPorts; environment?: string;
   workbench: AutomationWorkbench; now?: () => number }): WorkflowAutomationService {
   const now = input.now ?? Date.now;
   const repo = new WorkflowAutomationRepository(input.db);
   const drainNotifications = createWorkflowNotificationDrain(input);
   const issues = new IssueAggregationRepository(input.db);
   let roundRobin = 0;
+  const environment = input.environment ?? 'prod';
   async function authority(workflowId: string, draft = false) {
     const policy = await input.settings.get(workflowId);
+    if ((policy.executionEnvironment ?? 'prod') !== environment) throw new RepairAutomationDeniedError('EXECUTION_ENVIRONMENT_MISMATCH');
     if (!policy.enabled || draft && (!policy.autoDraft || !policy.dailyConfigured)) throw new RepairAutomationDeniedError('AUTOMATION_DISABLED');
     const actorId = await input.ports.owner(workflowId);
     if (!actorId) throw new RepairAutomationDeniedError('OWNER_MISSING');
@@ -241,9 +243,14 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
   }
   return {
     async tick() {
-      const policies = await input.settings.list();
+      const policies = (await input.settings.list()).filter(policy => (policy.executionEnvironment ?? 'prod') === environment);
       const count = Math.min(10, policies.length);
-      for (let i = 0; i < count; i++) await workflow(policies[(roundRobin + i) % policies.length]);
+      for (let i = 0; i < count; i++) {
+        const policy = policies[(roundRobin + i) % policies.length];
+        try { await workflow(policy); }
+        catch (error) { console.warn('[workflow-automation] reconcile failed', { workflowId: policy.workflowId, environment,
+          code: error instanceof RepairAutomationDeniedError ? error.message : 'AUTOMATION_RECONCILE_FAILED' }); }
+      }
       if (policies.length) roundRobin = (roundRobin + count) % policies.length;
       // Manual completions and in-flight automatic results notify even with automation disabled/unconfigured.
       await drainNotifications();

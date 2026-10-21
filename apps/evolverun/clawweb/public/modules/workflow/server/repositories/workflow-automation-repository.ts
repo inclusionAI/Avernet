@@ -67,11 +67,13 @@ export class WorkflowAutomationRepository {
       AND CAST(${this.json('nextAtMs')} AS SIGNED) <= ? AND CAST(${this.json('leaseUntilMs')} AS SIGNED) <= ?
       ORDER BY updated_at_ms, record_id LIMIT ?`, [kind,scopeKey,now,now,limit])).map(row => JSON.parse(row.body_json));
   }
-  async readyNotifications(now: number, limit = 20): Promise<AutomationJob[]> {
+  async readyNotifications(now: number, limit = 20, scope?: { workflowIds: string[]; exclude: boolean }): Promise<AutomationJob[]> {
+    if (scope && !scope.exclude && !scope.workflowIds.length) return [];
+    const filter = scope?.workflowIds.length ? ` AND workflow_id ${scope.exclude ? 'NOT IN' : 'IN'} (${scope.workflowIds.map(() => '?').join(',')})` : '';
     return (await this.db.query<{ body_json: string }>(`SELECT body_json FROM workflow_repair_release_records
       WHERE record_kind = 'auto_notice' AND ${this.json('status')} IN ('pending','retryable','dispatching')
       AND CAST(${this.json('nextAtMs')} AS SIGNED) <= ? AND CAST(${this.json('leaseUntilMs')} AS SIGNED) <= ?
-      ORDER BY updated_at_ms, record_id LIMIT ?`, [now, now, limit])).map(row => JSON.parse(row.body_json));
+      ${filter} ORDER BY updated_at_ms, record_id LIMIT ?`, [now, now, ...(scope?.workflowIds ?? []), limit])).map(row => JSON.parse(row.body_json));
   }
   /** Filter current eligibility before the batch limit so historical tasks cannot starve recoverable drafts. */
   async recoverableDrafts(workflowId: string, now: number, policyVersion: number, jobId?: string): Promise<Array<{ job: AutomationJob; revision: number }>> {

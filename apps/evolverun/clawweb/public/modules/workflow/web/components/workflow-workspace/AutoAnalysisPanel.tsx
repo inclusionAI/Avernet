@@ -49,6 +49,16 @@ export default function AutoAnalysisPanel({ workflowId }: { workflowId: string }
     }
   } }
   return <div className="space-y-5">
+    <section aria-label="自动任务执行环境" className="space-y-3 rounded-xl border border-input bg-card p-5">
+      <label className="block text-sm font-medium">自动任务执行环境
+        <select aria-label="自动任务执行环境" value={pendingChanges.executionEnvironment ?? policy.executionEnvironment ?? 'prod'} disabled={pending}
+          onChange={event => save({ executionEnvironment: event.target.value as 'pre' | 'prod' }, '执行环境保存中…', '执行环境已保存')}
+          className="mt-2 block rounded-md border border-input bg-background px-3 py-2 text-foreground">
+          <option value="pre">预发</option><option value="prod">生产</option>
+        </select>
+      </label>
+      <p className="text-xs leading-5 text-muted-foreground">自动分析、自动优化和通知仅由所选环境处理，同环境多实例自动抢占。选择后立即保存；手动操作不受影响。</p>
+    </section>
     <section aria-label="自动分析设置" className="space-y-4 rounded-xl border border-input bg-card p-5">
     <div className="flex items-start justify-between gap-5">
       <div><h3 className="font-medium text-foreground">1. 自动分析</h3><p className="mt-1 text-sm leading-6 text-muted-foreground">自动分析运行问题，产出诊断和修复建议，不修改工作流。</p></div>

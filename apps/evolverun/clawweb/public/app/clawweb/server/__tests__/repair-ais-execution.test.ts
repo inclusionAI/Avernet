@@ -80,7 +80,7 @@ describe('Workflow Repair Git-backed AIS execution', () => {
       packDigest: 'c'.repeat(40), summary: '修复建议', itemResults: [] }))
       .toBe('441d2670ec7322879c1dd954da12c3ca2b98ef4c0b58cdb6262c9a621229903c');
   });
-  it('forwards draft purpose through the public adapter without weakening default baseline or Pack checks', async () => {
+  it('reads both draft and background baselines without a configuration-equality gate and retains Pack identity checks', async () => {
     const f = fixture();
     const deployedSpec = { id: 'wf', nodes: [{ id: 'changed-in-history' }] };
     const row = { pack_id: 'pack', version: 4, deploy_number: 1, tag_name: 'deploy/wf/#1', spec_json: JSON.stringify(deployedSpec) };
@@ -93,7 +93,10 @@ describe('Workflow Repair Git-backed AIS execution', () => {
       packDigest: f.git(f.source, 'rev-parse', 'HEAD^{tree}'), specPath: 'workflows/wf.yaml',
       specDigest: createHash('sha256').update(f.spec).digest('hex'), proposalSpecDigest: digestRepairJson(deployedSpec),
     });
-    await expect(adapter.resolveBaseline('wf')).rejects.toMatchObject({ code: 'SOURCE_CHANGED', details: { reasonCode: 'BASELINE_CONTENT_MISMATCH' } });
+    await expect(adapter.resolveBaseline('wf')).resolves.toMatchObject({
+      workflowId: 'wf', packCommit: f.baseline, proposalSpecDigest: digestRepairJson(deployedSpec),
+      specDigest: createHash('sha256').update(f.spec).digest('hex'),
+    });
     row.pack_id = 'wrong-pack';
     await expect(adapter.resolveBaseline('wf', 'draft')).rejects.toThrow('expected Pack workflow');
     expect(execute).not.toHaveBeenCalled();

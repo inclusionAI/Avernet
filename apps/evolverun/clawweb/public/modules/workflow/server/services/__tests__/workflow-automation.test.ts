@@ -13,7 +13,7 @@ import { createWorkflowAutomation, automationDue } from '../workflow-automation-
 import { WorkflowAutomationRepository } from '../../repositories/workflow-automation-repository.js';
 import type { WorkflowAutomationPorts, WorkflowAutomationService, AnalysisObservation } from '../../contracts/workflow-automation.js';
 const fixtures: Awaited<ReturnType<typeof repairFixture>>[] = [];
-afterEach(async () => { for (const f of fixtures.splice(0)) await f.db.close(); });
+afterEach(async () => { for (const f of fixtures.splice(0)) await f.db.close(); vi.restoreAllMocks(); });
 async function fixture(autoDraft = false, count = 3, full = false) {
   const f = await repairFixture(count); fixtures.push(f);
   for (const m of repairReleaseMigrations) for (const sql of m.sql) await f.db.exec(f.db.dialect.renderDdl(sql));
@@ -69,15 +69,88 @@ async function fixture(autoDraft = false, count = 3, full = false) {
       taskId: request.input.taskId, origin: request.input.automation, itemIds: request.input.items.map(item => item.itemId) });
     return f.executionPort.dispatch(request);
   } }, undefined, queueRepairCompletion);
-  const create = () => createWorkflowAutomation({ db: f.db, settings, ports, workbench, now: () => clock });
+  const create = (environment = 'prod', hostPorts = ports) => createWorkflowAutomation({ db: f.db, settings, ports: hostPorts, workbench, environment, now: () => clock });
   service = create();
   return { ...f, settings, ports, baseline, observations, analyze, workbench, get service() { return service; },
-    restart() { service = create(); return service; }, advance(ms = 60000) { clock += ms; }, setOwner(value: string | null) { owner = value; },
+    host: create, restart(environment = 'prod') { service = create(environment); return service; }, advance(ms = 60000) { clock += ms; }, setOwner(value: string | null) { owner = value; },
     setPermission(value: boolean) { permitted = value; }, disableAtDispatch() { disableBeforeDispatch = true; } };
 }
 it('uses Shanghai daily boundaries and merges missed days', () => {
   expect(automationDue(Date.parse('2026-11-01T00:59:00Z'), '09:00').key).toBe('2026-10-31');
   expect(automationDue(Date.parse('2026-11-01T01:00:00Z'), '09:00').key).toBe('2026-11-01');
+});
+
+it('persists the selected environment without enabling analysis or configuring a daily plan', async () => {
+  const f = await fixture();
+  await f.db.exec('DELETE FROM cm_app_config');
+  expect((await f.settings.get('wf-1')).executionEnvironment).toBe('prod');
+  const saved = await f.settings.save('wf-1', { enabled: false, autoDraft: false, dailyTime: '09:00', dailyConfigured: false,
+    executionEnvironment: 'pre', expectedVersion: 0 }, 'owner');
+  expect(saved).toMatchObject({ executionEnvironment: 'pre', enabled: false, dailyConfigured: false });
+  await expect(f.settings.save('wf-1', { enabled: false, autoDraft: false, dailyTime: '09:00', expectedVersion: saved.version,
+    executionEnvironment: 'other' as any }, 'owner')).rejects.toThrow('INVALID_AUTOMATION_POLICY');
+  const toggled = await f.settings.set('wf-1', true, 'owner');
+  expect(toggled).toMatchObject({ executionEnvironment: 'pre', dailyConfigured: false });
+});
+
+it('leaves a pre workflow unclaimed by prod and dispatches once across two pre hosts sharing its database', async () => {
+  const f = await fixture(true);
+  const policy = await f.settings.get('wf-1');
+  await f.settings.save('wf-1', { enabled: policy.enabled, autoDraft: policy.autoDraft, dailyTime: policy.dailyTime, expectedVersion: policy.version, executionEnvironment: 'pre' }, 'owner');
+  await f.service.tick();
+  expect(f.ports.analysis.start).not.toHaveBeenCalled();
+  expect(await f.db.query("SELECT record_id FROM workflow_repair_release_records WHERE record_kind='auto_cycle'")).toEqual([]);
+  const pre = f.restart('pre'), pre2 = f.host('pre');
+  await Promise.all([pre.tick(), pre2.tick()]);
+  expect(f.ports.analysis.start).toHaveBeenCalledTimes(1);
+  f.advance(); await Promise.all([pre.tick(), pre2.tick()]);
+  expect(f.calls).toHaveLength(1);
+});
+
+it('only the chosen environment handles failed-run events', async () => {
+  const f = await fixture();
+  await f.host('pre').onRunTerminal({ flowId: 'late-run', status: 'failed' });
+  expect(f.ports.analysis.start).not.toHaveBeenCalled();
+  await f.host('prod').onRunTerminal({ flowId: 'late-run', status: 'failed' });
+  expect(f.ports.analysis.start).toHaveBeenCalledTimes(1);
+});
+
+it('does not let older prod notifications starve a pre completion, and keeps manual no-change delivery once-only', async () => {
+  const logs = vi.spyOn(console, 'info').mockImplementation(() => {});
+  const f = await fixture();
+  const policy = await f.settings.get('wf-1');
+  await f.settings.save('wf-1', { enabled: false, autoDraft: false, dailyTime: policy.dailyTime, executionEnvironment: 'pre', expectedVersion: policy.version }, 'owner');
+  await f.db.exec("INSERT INTO workflow_specs VALUES ('prod-wf')");
+  const repo = new WorkflowAutomationRepository(f.db);
+  for (let i = 0; i < 7; i++) await repo.ensure('prod-wf', 'auto_notice', `older-${i}`,
+    { kind: 'completion', title: 'prod completion', text: 'private body', path: '/task' }, 0);
+  const inbox = await f.workbench.candidates('wf-1');
+  const task = await f.workbench.create('human', { workflowId: 'wf-1', itemIds: ['item-0'], inputDigest: inbox.inputDigest, instructions: '', requestId: 'manual-no-change' });
+  const draft = { candidateCommit: task.input.baseline.packCommit, parentCandidateCommit: task.input.baseline.packCommit,
+    packDigest: task.input.baseline.packDigest, itemResults: [{ itemId: 'item-0', status: 'not_needed', reason: 'already satisfied' }] };
+  await f.workbench.report({ workflowId: 'wf-1', taskId: task.taskId, revision: 1, expectedStateVersion: 0, status: 'no_change', draft,
+    checks: { schemaVersion: 'workflow-repair-checks/v1', candidateCommit: draft.candidateCommit, packDigest: draft.packDigest,
+      candidateDigest: digestRepairJson(draft), static: { status: 'passed' }, mock: { status: 'not_covered' }, coverage: [{ itemId: 'item-0' }] } });
+  const preNotify = vi.fn(async () => ({ status: 'sent' as const, receipt: 'provider-receipt' }));
+  const pre = f.host('pre', { ...f.ports, notify: preNotify });
+  await Promise.all([pre.tick(), f.host('pre', { ...f.ports, notify: preNotify }).tick()]);
+  expect(preNotify).toHaveBeenCalledTimes(1);
+  expect(preNotify).toHaveBeenCalledWith(expect.objectContaining({ workflowId: 'wf-1', title: '优化任务已完成，无需修改', path: expect.stringContaining(task.taskId) }));
+  await pre.tick(); expect(preNotify).toHaveBeenCalledTimes(1);
+  const rows = await f.db.query<{body_json: string}>("SELECT body_json FROM workflow_repair_release_records WHERE record_kind='auto_notice'");
+  expect(rows.map(r => JSON.parse(r.body_json)).filter(r => r.workflowId === 'prod-wf').every(r => r.status === 'pending' && r.attempts === 0)).toBe(true);
+  expect(rows.map(r => JSON.parse(r.body_json)).find(r => r.workflowId === 'wf-1')).toMatchObject({ status: 'done', data: { receipt: 'provider-receipt' } });
+  expect(logs).toHaveBeenCalledWith('[workflow-notification]', expect.objectContaining({ event: 'accepted', taskId: task.taskId, environment: 'pre', receipt: 'provider-receipt' }));
+  expect(JSON.stringify(logs.mock.calls)).not.toContain('private body');
+});
+
+it('still delivers completion notifications when automatic planning fails', async () => {
+  const f = await fixture(true, 0);
+  f.ports.baseline = async () => { throw new Error('baseline unavailable'); };
+  const repo = new WorkflowAutomationRepository(f.db);
+  await repo.ensure('wf-1', 'auto_notice', 'completed', { kind: 'completion', title: 'completed', text: 'result', path: '/task' }, 0);
+  await f.service.tick();
+  expect(f.ports.notify).toHaveBeenCalledTimes(1);
 });
 
 it('notifies manual draft completion even with automatic analysis disabled, once across hosts', async () => {

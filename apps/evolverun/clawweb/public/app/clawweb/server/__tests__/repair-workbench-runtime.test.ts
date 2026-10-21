@@ -5,6 +5,9 @@ import express from 'express';
 import { SqliteDatabase, runMigrations } from '@avernet/clawweb-shared/server/db';
 import { createWorkflowRepairRuntime } from '../repair-workbench-runtime.js';
 import { RepairReleaseRepository } from '@avernet/workflow/server/repositories/repair-release-repository';
+import { WorkflowAutomationRepository } from '@avernet/workflow/server/repositories/workflow-automation-repository';
+import { AppConfigRepository } from '@avernet/workflow/server/repositories/app-config-repository';
+import { createAutoAnalysisSettings } from '@avernet/workflow/server/services/task-guard/auto-analysis-settings';
 import type { RepairDeployment } from '@avernet/workflow/server/contracts/repair-release';
 import type { RepairDispatchRequest } from '@avernet/workflow/server/contracts/repair-workbench';
 
@@ -46,6 +49,24 @@ async function fixture(dispatch?: (input: RepairDispatchRequest) => Promise<{ jo
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/workflow-repairs`;
   return { db, runtime, base };
 }
+
+it('drains an unrelated manual completion even if background result reconciliation throws', async () => {
+  const { db } = await fixture();
+  const notify = vi.fn(async () => ({ status: 'sent' as const, receipt: 'accepted-by-provider' }));
+  const runtime = createWorkflowRepairRuntime(db, { environment: 'prod', principal: async () => ({ actorId: 'editor', isAdmin: true }),
+    notifications: { settings: createAutoAnalysisSettings({ repo: new AppConfigRepository(db), environmentDefault: '' }),
+      ports: { owner: async () => 'editor', canEdit: async () => true, notify } } });
+  const repo = new WorkflowAutomationRepository(db);
+  const notice = await repo.ensure('wf', 'auto_notice', 'manual-no-change', { kind: 'completion', taskId: 'finished-task', revision: 2,
+    title: '优化任务已完成，无需修改', text: '已完成', path: '/task/finished-task' }, 0);
+  const broken = vi.spyOn(runtime.service, 'reconcile').mockRejectedValue(new Error('background baseline unavailable'));
+  try {
+    await expect(runtime.monitor.reconcile()).rejects.toThrow('background baseline unavailable');
+    expect((await repo.get(notice.id))?.status).toBe('done');
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: '优化任务已完成，无需修改', recipientId: 'editor' }));
+  } finally { broken.mockRestore(); }
+});
 
 describe('real repair Host composition', () => {
   it('queues manual AIS completion through the real Host even without automatic-analysis configuration', async () => {

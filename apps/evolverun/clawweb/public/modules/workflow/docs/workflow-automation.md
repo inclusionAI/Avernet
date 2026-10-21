@@ -13,6 +13,21 @@ concurrency. Defaults are off; existing environment/legacy failure-event setting
 remain compatible, but do not acquire a daily schedule until explicitly saved.
 There are no new environment variables or tables.
 
+`executionEnvironment` selects `pre` or `prod` in this same policy row, defaulting
+to `prod` for existing policies. The management page saves this selector immediately,
+even while analysis is off; changing it does not enable analysis or configure a daily
+plan. The Host injects its normalized environment into the shared runtime. Only the
+selected environment scans, handles failed-run events, dispatches automatic drafts,
+or consumes notifications. Within that environment, existing database claims and
+leases still arbitrate all instances. Manual generation and result collection remain
+available in either environment. Development Hosts do not consume shared automatic
+jobs. Notification queries filter environment ownership before their bounded batch
+limit, so another environment's backlog cannot starve eligible deliveries.
+
+When pre-production and production share a database, update all instances to this
+version before selecting `pre`: old consumers do not understand this field and can
+still claim the shared queue. Environment ownership is not a new queue or schema.
+
 `notificationRecipients` is an optional list of up to 20 account IDs. Empty or
 absent means the current workflow Owner; a configured list replaces that default.
 IDs are trimmed and deduplicated. They are stored in a separate
@@ -34,6 +49,18 @@ unrelated local edits. Errors retain local input, and success requires the API
 response rather than an optimistic success message.
 
 ## Evolution-task completion notices
+
+Completion delivery runs even if generation reconciliation, effect observation, or
+one workflow's automatic planning fails. The deployed configuration supplies proposal
+identity without requiring equality with Git's YAML representation; independent Git
+commit, tree, and reviewed-file checks are unchanged.
+
+Search `[workflow-notification]` for per-delivery diagnostics. Structured fields
+include event (`dispatching`, `accepted`, `retryable`, `uncertain`), workflow/task/
+revision, notice ID, execution environment, recipient ID, attempts, and provider
+receipt when available. `accepted` means the sender accepted the request, not that
+the recipient read it. Notification text, workflow inputs, and credentials are not
+logged. Unknown transport outcomes retain their existing no-blind-resend behavior.
 
 The shared Host wires `queueRepairCompletion` through the workbench's optional
 transactional completion observer. Both manual generation and its retries/feedback

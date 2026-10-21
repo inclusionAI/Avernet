@@ -38,7 +38,7 @@ it('drains a manual completion through the public bootstrap timer without AIS or
     if(delay===15000)polls.push(callback);return setIntervalOriginal(callback,delay);
   }) as typeof setInterval);
   vi.stubEnv('PORT','0');vi.stubEnv('CLAWWEB_PUBLIC_BASE_URL','http://127.0.0.1:5189');
-  lifecycle=await createClawWebBootstrap().start({environment:'dev',profile:'public',config:{},configSources:[]});
+  lifecycle=await createClawWebBootstrap().start({environment:'prod',profile:'public',config:{},configSources:[]});
   expect(polls).toHaveLength(1);
   await polls[0]();
   await vi.waitFor(async()=>expect((await repo.get(job.id))?.status).toBe('done'));

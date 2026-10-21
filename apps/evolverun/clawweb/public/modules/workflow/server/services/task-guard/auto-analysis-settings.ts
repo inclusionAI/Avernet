@@ -32,7 +32,8 @@ export function createAutoAnalysisSettings(input: { repo: AutoAnalysisConfigRepo
       const dailyConfigured = raw?.schemaVersion === 'workflow-automation/v1' && raw.dailyConfigured !== false;
       if (raw?.schemaVersion === 'workflow-automation/v1' && (typeof raw.autoDraft !== 'boolean' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(raw.dailyTime))) throw new Error('INVALID_AUTOMATION_POLICY');
       if (raw?.minimumImpact !== undefined && !['medium', 'high'].includes(raw.minimumImpact)) throw new Error('INVALID_AUTOMATION_POLICY');
-      return { notificationRecipients: recipients(noticeConfig?.recipients ?? []), notificationVersion: notice?.version ?? 0, minimumImpact: raw?.minimumImpact ?? 'medium', scopeVersion: raw?.minimumImpact ? 'all-qualified/v1' : 'legacy', workflowId: id, enabled: row ? row.enabled === 1 : inherited.has('*') || inherited.has(id),
+      if (raw?.executionEnvironment !== undefined && !['pre', 'prod'].includes(raw.executionEnvironment)) throw new Error('INVALID_AUTOMATION_POLICY');
+      return { executionEnvironment: raw?.executionEnvironment ?? 'prod', notificationRecipients: recipients(noticeConfig?.recipients ?? []), notificationVersion: notice?.version ?? 0, minimumImpact: raw?.minimumImpact ?? 'medium', scopeVersion: raw?.minimumImpact ? 'all-qualified/v1' : 'legacy', workflowId: id, enabled: row ? row.enabled === 1 : inherited.has('*') || inherited.has(id),
         autoDraft: raw?.schemaVersion === 'workflow-automation/v1' ? raw.autoDraft : false, dailyTime: raw?.schemaVersion === 'workflow-automation/v1' ? raw.dailyTime : '09:00', timezone: 'Asia/Shanghai',
         updatedAtMs: Number(raw?.updatedAtMs ?? 0), version: row?.version ?? 0, dailyConfigured, source: row ? 'database' : inherited.has('*') || inherited.has(id) ? 'environment' : 'default' };
     },
@@ -41,6 +42,7 @@ export function createAutoAnalysisSettings(input: { repo: AutoAnalysisConfigRepo
       const id = workflowId.trim();
       if (value.minimumImpact !== undefined && !['medium', 'high'].includes(value.minimumImpact)) throw new Error('INVALID_AUTOMATION_POLICY');
       if (value.dailyConfigured !== undefined && typeof value.dailyConfigured !== 'boolean') throw new Error('INVALID_AUTOMATION_POLICY');
+      if (value.executionEnvironment !== undefined && !['pre', 'prod'].includes(value.executionEnvironment)) throw new Error('INVALID_AUTOMATION_POLICY');
       if (!id || typeof value.enabled !== 'boolean' || typeof value.autoDraft !== 'boolean'
         || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value.dailyTime) || !Number.isSafeInteger(value.expectedVersion) || value.expectedVersion < 0) throw new Error('INVALID_AUTOMATION_POLICY');
       const prior = await this.get(id);
@@ -51,14 +53,15 @@ export function createAutoAnalysisSettings(input: { repo: AutoAnalysisConfigRepo
         // Saving recipients cannot silently change scheduling or invalidate in-flight automatic requests.
         if (value.enabled !== prior.enabled || value.autoDraft !== prior.autoDraft || value.dailyTime !== prior.dailyTime
           || value.dailyConfigured !== undefined && value.dailyConfigured !== prior.dailyConfigured
-          || value.minimumImpact !== undefined && value.minimumImpact !== prior.minimumImpact) throw new Error('INVALID_AUTOMATION_POLICY');
+          || value.minimumImpact !== undefined && value.minimumImpact !== prior.minimumImpact
+          || value.executionEnvironment !== undefined && value.executionEnvironment !== prior.executionEnvironment) throw new Error('INVALID_AUTOMATION_POLICY');
         await input.repo.compareAndSet(notificationKey(id), { configYaml: JSON.stringify({ workflowId: id, recipients: notificationRecipients }),
           enabled: true, expectedVersion: value.expectedNotificationVersion!, updatedBy: actor });
         return this.get(id);
       }
       const minimumImpact = value.minimumImpact ?? (prior.scopeVersion === 'all-qualified/v1' ? prior.minimumImpact : undefined);
       await input.repo.compareAndSet(configKey(id), { configYaml: JSON.stringify({ schemaVersion: 'workflow-automation/v1',
-        workflowId: id, dailyConfigured: value.dailyConfigured ?? true, ...(minimumImpact ? { minimumImpact } : {}), updatedAtMs: Date.now(), autoDraft: value.autoDraft, dailyTime: value.dailyTime, timezone: 'Asia/Shanghai' }),
+        workflowId: id, executionEnvironment: value.executionEnvironment ?? prior.executionEnvironment ?? 'prod', dailyConfigured: value.dailyConfigured ?? true, ...(minimumImpact ? { minimumImpact } : {}), updatedAtMs: Date.now(), autoDraft: value.autoDraft, dailyTime: value.dailyTime, timezone: 'Asia/Shanghai' }),
         enabled: value.enabled, expectedVersion: value.expectedVersion, updatedBy: actor });
       return this.get(id);
     },

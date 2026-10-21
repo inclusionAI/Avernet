@@ -20,6 +20,15 @@ beforeEach(() => {
   mocks.snapshot = { schemaVersion: 'workflow-automation/v1', workflowId: 'wf-1', jobs: [], retryableJobs: [], lastScannedAtMs: null, pauseReason: null, coverage: { total: 0, pending: 0, failed: 0, partial: 0, unknown: 0 } }
 })
 describe('automatic analysis settings and execution records', () => {
+  it('saves the execution environment immediately while analysis is off and keeps the switch off', async () => {
+    render(<AutoAnalysisPanel workflowId="wf-1" />)
+    const select = screen.getByRole('combobox', { name: '自动任务执行环境' })
+    expect(select).toHaveValue('prod')
+    await userEvent.selectOptions(select, 'pre')
+    expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ executionEnvironment: 'pre', enabled: false, dailyConfigured: false }), expect.any(Object))
+    expect(screen.getByRole('status')).toHaveTextContent('执行环境保存中')
+    expect(select).toBeDisabled()
+  })
   it('hides successful notification traffic and folds only delivery exceptions separately', async () => {
     mocks.snapshot.jobs = [
       {id:'sent-notice',kind:'auto_notice',status:'done',attempts:1,reason:null},

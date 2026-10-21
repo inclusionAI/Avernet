@@ -101,9 +101,9 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
   }, read: workflowId => service.proposalSnapshot(workflowId),
     model: options.proposalModel ?? createProposalModel(resolveAnalysisConfig()) }) : undefined;
   const service = createRepairWorkbenchService(db, sources, execution, proposals, queueRepairCompletion);
-  if (options.automation) automation = createWorkflowAutomation({ db, workbench: service, ...options.automation });
+  if (options.automation) automation = createWorkflowAutomation({ db, workbench: service, ...options.automation, environment: options.environment });
   const drainNotifications = !automation && options.notifications
-    ? createWorkflowNotificationDrain({ db, workbench: service, ...options.notifications }) : undefined;
+    ? createWorkflowNotificationDrain({ db, workbench: service, ...options.notifications, environment: options.environment }) : undefined;
   const release = createRepairReleaseService({ db, workbench: service, publisher: options.publication });
   const trials = createRepairTrialService({ db, workbench: service, port: options.trial });
   const authorize = createRepairAuthorizer(options.principal, new BotWorkflowPermissionRepository(db));
@@ -111,27 +111,32 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
   const monitor = { async reconcile() {
     // Aggregation is an independent durable worker, never part of single-case dispatch.
     void proposals?.tick().catch(() => console.warn('[workflow-repair] proposal aggregation worker will retry'));
-    const count = await service.reconcile();
-    let after = '';
-    const status = db.dialect.driver === 'better-sqlite3' ? "JSON_EXTRACT(body_json, '$.status')"
-      : "JSON_UNQUOTE(JSON_EXTRACT(body_json, '$.status'))";
-    for (;;) {
-      const pending = await db.query<{ record_id: string; body_json: string }>(`SELECT record_id, body_json FROM workflow_repair_release_records
-        WHERE record_kind = 'deployment' AND ${status} IN ('dispatching', 'running', 'uncertain')
-        AND record_id > ? ORDER BY record_id LIMIT 100`, [after]);
-      if (!pending.length) break;
-      for (const row of pending) {
-        const deployment = JSON.parse(row.body_json);
-        if (['dispatching', 'running', 'uncertain'].includes(deployment.status)) {
-          try { await release.reconcile(deployment.actorId, deployment.taskId, deployment.id); }
-          catch { console.warn('[workflow-repair] publication reconciliation requires attention', { deploymentId: deployment.id }); }
+    let count = 0;
+    try {
+      count = await service.reconcile();
+      let after = '';
+      const status = db.dialect.driver === 'better-sqlite3' ? "JSON_EXTRACT(body_json, '$.status')"
+        : "JSON_UNQUOTE(JSON_EXTRACT(body_json, '$.status'))";
+      for (;;) {
+        const pending = await db.query<{ record_id: string; body_json: string }>(`SELECT record_id, body_json FROM workflow_repair_release_records
+          WHERE record_kind = 'deployment' AND ${status} IN ('dispatching', 'running', 'uncertain')
+          AND record_id > ? ORDER BY record_id LIMIT 100`, [after]);
+        if (!pending.length) break;
+        for (const row of pending) {
+          const deployment = JSON.parse(row.body_json);
+          if (['dispatching', 'running', 'uncertain'].includes(deployment.status)) {
+            try { await release.reconcile(deployment.actorId, deployment.taskId, deployment.id); }
+            catch { console.warn('[workflow-repair] publication reconciliation requires attention', { deploymentId: deployment.id }); }
+          }
         }
+        after = pending.at(-1)!.record_id;
       }
-      after = pending.at(-1)!.record_id;
+      await verification.automatic.reconcile();
+    } finally {
+      // Generation/verification failures must not prevent independent completion notices.
+      await automation?.tick();
+      await drainNotifications?.();
     }
-    await verification.automatic.reconcile();
-    await automation?.tick();
-    await drainNotifications?.();
     return count;
   } };
   return { service, release, trials, monitor, automation, router: createRepairBatchesRouter({ service, authorize, release, trials, verification }) };
