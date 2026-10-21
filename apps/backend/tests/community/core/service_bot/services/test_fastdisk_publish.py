@@ -124,7 +124,7 @@ def test_request_uses_mist_name_not_backend_credentials():
     p = publisher([result(), result(), result()])
     publish(p)
     req = json.loads(base64.b64decode(shlex.split(p.executor.exec_shell_new.call_args.kwargs['shell_cmd'])[-1]))
-    assert req['schema_version'] == 4
+    assert req['schema_version'] == 5
     assert req['credential'] == {'provider': 'mist', 'secret_name': 'test-secret-name', 'concat_env': True}
     assert 'agentclaw' not in req
 
@@ -132,6 +132,7 @@ def test_request_uses_mist_name_not_backend_credentials():
 def restore(p):
     return p.try_restore(device_id='draft-device', plan=_AICODING_BUILD_PLAN,
         source_root='/home/admin/.aicoding', artifact_path='/opt/nfs/bot-data/3/aicoding',
+        artifact_dir=Path('/aidesktop/aidesktop_prod/bolt_data/staff_u/b/3/aicoding'),
         remaining_timeout=lambda: 1800,
         normalize_extra=BotBuildService._normalize_extra_include_file)
 
@@ -148,7 +149,8 @@ def test_fastdisk_restore_uses_existing_draft_device_and_long_timeout():
     assert req['artifact_path'] == '/opt/nfs/bot-data/3/aicoding'
     assert 'extra_sync' not in req
     assert req['additional_excludes'] == []
-    assert 'credential' not in req
+    assert req['credential']['provider'] == 'mist'
+    assert req['version_prefix'] == 'aidesktop/aidesktop_prod/bolt_data/staff_u/b/3'
     assert 'object_prefix' not in req
     assert req['chown'] == '1000:1000'
 
@@ -169,7 +171,7 @@ def test_failed_restore_stops_without_nas_fallback():
 @pytest.mark.parametrize('content,expected_error', [
     (None, 'missing'),
     ('raise RuntimeError("must not execute old script")', 'incompatible'),
-    ('SERVICE_PUBLISH_SCHEMA = 4\nraise RuntimeError("probe must not execute script")', None),
+    ('SERVICE_PUBLISH_SCHEMA = 5\nraise RuntimeError("probe must not execute script")', None),
 ])
 def test_probe_inspects_version_without_executing_script(monkeypatch, tmp_path, content, expected_error):
     import subprocess
@@ -189,10 +191,10 @@ def test_probe_inspects_version_without_executing_script(monkeypatch, tmp_path, 
     p.executor.exec_shell_new.side_effect = execute
     if expected_error:
         with pytest.raises(FastdiskPublishError, match=expected_error):
-            p._invoke('device', 'upload', {'schema_version': 4}, None)
+            p._invoke('device', 'upload', {'schema_version': 5}, None)
         assert len(calls) == 1
     else:
-        p._invoke('device', 'upload', {'schema_version': 4}, None)
+        p._invoke('device', 'upload', {'schema_version': 5}, None)
         assert len(calls) == 2
         assert 'TemporaryDirectory' not in calls[-1]['shell_cmd']
 
@@ -208,6 +210,7 @@ def test_restore_detection_uses_remaining_operation_budget():
     p = publisher([result(status='skip_no_fastdisk')])
     assert p.try_restore(device_id='draft', plan=_AICODING_BUILD_PLAN,
         source_root='/home/admin/.aicoding', artifact_path='/opt/nfs/bot-data/3/aicoding',
+        artifact_dir=Path('/aidesktop/aidesktop_prod/bolt_data/staff_u/b/3/aicoding'),
         remaining_timeout=lambda: 4.2,
         normalize_extra=BotBuildService._normalize_extra_include_file) is False
     assert p.executor.exec_shell_new.call_args.kwargs['timeout_seconds'] == 5
@@ -265,10 +268,49 @@ def test_only_dynamic_rules_cross_container_boundary():
     assert 'extra_include' not in request
 
 
-def test_schema4_fixed_policy_matches_container_contract():
+def test_schema5_fixed_policy_matches_container_contract():
     import hashlib
     from agentclaw.community.core.workspace.engines.aicoding import _AICODING_RSYNC_EXCLUDES
     from agentclaw.community.core.workspace.engines.claude_code import _CLAUDE_CODE_RSYNC_EXCLUDES
     # Also pinned by container test_publish_policy; drift needs a coordinated upgrade.
     policy = {'aicoding': _AICODING_RSYNC_EXCLUDES, 'claude_code': _CLAUDE_CODE_RSYNC_EXCLUDES}
     assert hashlib.sha256(json.dumps(policy, sort_keys=True, separators=(',', ':')).encode()).hexdigest() == '079b6126d384fe48639c72de19bfcd3034e52b6c488fd956a0dbf1991c71cdaf'
+
+
+@pytest.mark.parametrize('engine', ['aicoding', 'claude_code'])
+@pytest.mark.parametrize('env_folder', ['aidesktop_pre', 'aidesktop_prod'])
+def test_upload_and_restore_keep_same_bot_version_and_engine(engine, env_folder):
+    from dataclasses import replace
+    from agentclaw.community.core.workspace.engines.claude_code import _CLAUDE_CODE_BUILD_PLAN
+    from agentclaw.community.core.service_bot.services.fastdisk_publish import build_request
+    plan = _AICODING_BUILD_PLAN if engine == 'aicoding' else _CLAUDE_CODE_BUILD_PLAN
+    home = '/home/admin/.' + engine
+    prefix = f'aidesktop/{env_folder}/bolt_data/staff_owner/bot-example/17/{engine}'
+    request = build_request(plan=plan, source_root=home, object_prefix=prefix,
+        ignore_paths=(), normalize_extra=BotBuildService._normalize_extra_include_file,
+        layout={'home': home, 'storage': '/opt/fastdisk'},
+        config=FastdiskPublishConfig(mist_secret_name='test'), bucket='test',
+        endpoint='https://oss.example.test')
+    assert request['version_prefix'] + '/' + request['engine_path'] == prefix
+    assert request['source_root'] == request['fastdisk']['home'] == home
+    assert request['version_prefix'] + '/.local/bin' == prefix.rsplit('/', 1)[0] + '/.local/bin'
+    detected = SimpleNamespace(exit_code=0, stdout=json.dumps({
+        'status': 'run', 'home': home, 'storage': '/opt/fastdisk'}))
+    p = publisher([detected, result(), result()])
+    mounted_artifact = '/opt/nfs/bot-data/17/' + engine
+    assert p.try_restore(device_id='draft-device', plan=plan, source_root=home,
+        artifact_path=mounted_artifact,
+        artifact_dir=Path('/aidesktop') / Path(prefix).relative_to('aidesktop'), remaining_timeout=lambda: 1800,
+        normalize_extra=BotBuildService._normalize_extra_include_file)
+    restored = json.loads(base64.b64decode(shlex.split(
+        p.executor.exec_shell_new.call_args.kwargs['shell_cmd'])[-1]))
+    assert restored['version_prefix'] + '/' + restored['engine_path'] == prefix
+    assert restored['credential']['provider'] == 'mist'
+    assert restored['artifact_path'] == mounted_artifact
+    assert restored['source_root'] == home
+    assert restored['fastdisk'] == request['fastdisk']
+    with pytest.raises(FastdiskPublishError, match='does not match'):
+        build_request(plan=replace(plan, migration_subpath='wrong-engine'), source_root=home,
+            object_prefix=prefix, ignore_paths=(), normalize_extra=None,
+            layout={'home': home, 'storage': '/opt/fastdisk'},
+            config=FastdiskPublishConfig(), bucket='test', endpoint='https://oss.example.test')

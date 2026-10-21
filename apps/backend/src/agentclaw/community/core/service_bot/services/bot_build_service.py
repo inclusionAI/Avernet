@@ -1889,8 +1889,8 @@ class BotBuildService:
     ) -> Dict[str, Any]:
         """Restore an ARCA/BAAS mounted draft from a historical artifact.
 
-        The historical version is restored host-side with ``rsync --delete``
-        into the draft NAS workspace; runtime/session exclusions are preserved.
+        Fastdisk containers download OSS files directly into mapped draft paths;
+        other drafts retain host-side NAS rsync. Runtime/session exclusions stay.
         Only versioned ``migration_path`` artifacts participate in this operation.
         """
         provider = self._resolve_sandbox_provider(bot)
@@ -1948,7 +1948,7 @@ class BotBuildService:
             )
             if self._fastdisk_publisher.try_restore(
                 device_id=device_id, plan=build_plan, source_root=runtime_root,
-                artifact_path=runtime_artifact,
+                artifact_path=runtime_artifact, artifact_dir=artifact_dir,
                 remaining_timeout=remaining_timeout,
                 normalize_extra=self._normalize_extra_include_file,
             ):

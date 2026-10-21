@@ -220,15 +220,18 @@ existing architecture allowlist; this fix reduces the service file size.
 `FastdiskPublisher` consumes the existing build plan and a command executor. It
 embeds only read-only mount detection so legacy containers need no detector
 installation. Non-fastdisk bots retain host-side NAS transfer. Detector failure
-is not a non-fastdisk result. Fastdisk bots require schema-4
+is not a non-fastdisk result. Fastdisk bots require schema-5
 `/home/admin/bin/service_publish.py`; missing/incompatible scripts fail with a
 logged error, without uploading a fallback implementation.
 
 Publication passes the existing version prefix and per-bot dynamic exclusions
 for direct OSS upload. Fixed file selection and extra-root mappings are owned by
-the installed container policy, not expanded into Backend requests. Draft restore passes the reconstructed versioned OSS mount
-path, ownership and remaining operation budget for container-side rsync. Restore
-does not pass credentials or call the object-store SDK. The startup tar merge is
+the installed container policy, not expanded into Backend requests. Draft restore passes the identity/version-derived OSS prefix, logical artifact
+path, Mist credential name (not keys), ownership and remaining operation budget.
+The container downloads directly into mapped runtime paths, without whole-tree
+staging or a second local rsync. Exclusions and CLI merge behavior are retained;
+engine/Claude stale-file cleanup starts only after required downloads succeed.
+Completed file replacements remain on failure; there is no transactional rollback. The startup tar merge is
 not substituted for restore's delete semantics.
 
 Command transport stages only invocation parameters and execution control in

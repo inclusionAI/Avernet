@@ -155,7 +155,7 @@ class FastdiskPublisher:
             "tree=ast.parse(p.read_text()); "
             "supported=any(isinstance(n,ast.Assign) and "
             "any(isinstance(t,ast.Name) and t.id=='SERVICE_PUBLISH_SCHEMA' for t in n.targets) "
-            "and isinstance(n.value,ast.Constant) and n.value.value==4 for n in tree.body); "
+            "and isinstance(n.value,ast.Constant) and n.value.value==5 for n in tree.body); "
             "sys.exit(0 if supported else 45)"
         )
         probe_budget = self.config.detect_timeout_seconds
@@ -185,16 +185,31 @@ class FastdiskPublisher:
             raise FastdiskPublishError(f'fastdisk {action} failed') from error
 
     def try_restore(self, *, device_id: str, plan: EngineBuildPlan,
-                    source_root: str, artifact_path: str, remaining_timeout: Callable[[], float], normalize_extra: Any) -> bool:
+                    source_root: str, artifact_path: str, artifact_dir: Path, remaining_timeout: Callable[[], float], normalize_extra: Any) -> bool:
         if plan.engine_type not in ('aicoding', 'claude_code'):
             return False
         layout = self.detect(device_id, timeout_seconds=remaining_timeout())
         if layout['status'] == 'skip_no_fastdisk':
             return False
         root = PurePosixPath(source_root)
+        # Same identity/version-derived OSS prefix as publication, never inferred
+        # from the container mount path or accepted as an arbitrary DB path.
+        try:
+            # artifact_path is the Bot-scoped container view; source identity is
+            # supplied explicitly by the caller as the Backend artifact directory.
+            relative = artifact_dir.relative_to(self.oss_mount_root)
+        except ValueError as error:
+            raise FastdiskPublishError('restore target is outside the configured OSS mount') from error
+        if relative.name != plan.migration_subpath:
+            raise FastdiskPublishError('restore artifact engine does not match plan')
+        version_prefix = str(PurePosixPath('aidesktop') / relative.parent.as_posix())
         request = {
-            'schema_version': 4, 'operation_id': uuid.uuid4().hex,
+            'schema_version': 5, 'operation_id': uuid.uuid4().hex,
             'artifact_path': artifact_path, 'source_root': str(root),
+            'version_prefix': version_prefix, 'engine_path': plan.migration_subpath,
+            'bucket': self.bucket, 'endpoint': self.endpoint,
+            'credential': {'provider': 'mist', 'secret_name': self.config.mist_secret_name, 'concat_env': True},
+            'request_timeout_seconds': self.config.request_timeout_seconds,
             'fastdisk': {k: layout[k] for k in ('home', 'storage')},
             'additional_excludes': additional_excludes(plan),
             'chown': '1000:1000',
@@ -211,7 +226,7 @@ def build_request(*, plan, source_root, object_prefix, ignore_paths, normalize_e
     if target.name != plan.migration_subpath:
         raise FastdiskPublishError('artifact prefix does not match engine plan')
     return {
-        'schema_version': 4, 'operation_id': uuid.uuid4().hex,
+        'schema_version': 5, 'operation_id': uuid.uuid4().hex,
         'bucket': bucket, 'endpoint': endpoint,
         'credential': {'provider': 'mist', 'secret_name': config.mist_secret_name, 'concat_env': True},
         'version_prefix': str(target.parent), 'engine_path': target.name,
