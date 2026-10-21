@@ -81,7 +81,7 @@ export function BotManagementRuntimeItems({
                   ? 'TeClaw 暂不支持重启容器'
                   : restartDisabledReason && !bot.actions.includes('restart')
                   ? restartDisabledReason
-                  : '指重新启动当前 Bot 实例，重新加载当前会话状态、配置或运行流程。'
+                  : 'Bot 卡住或没有响应时，可以尝试重启。不改变 Bot 已保存的配置和发布版本'
               }
             >
               {actionLabel.restart}
@@ -131,7 +131,7 @@ export function BotManagementRuntimeItems({
                   ? 'TeClaw 暂不支持重启引擎'
                   : engineRestartDisabledReason && !engineRestartEnabled
                   ? engineRestartDisabledReason
-                  : '指重新启动 Bot 所依赖的底层运行引擎（如 OpenClaw、ClaudeCode 等）。'
+                  : '将 Bot 使用的引擎更新到最新版本，并重新启动。不改变 Bot 已保存的配置和发布版本'
               }
             >
               {actionLabel.engine_restart}
