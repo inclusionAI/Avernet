@@ -250,10 +250,10 @@ async def test_other_engines_return_not_applicable_without_device_access(
         "reason": "engine_not_supported",
     }
     assert result["comparison"] == "unknown"
-    assert result["restart_hint"] == "restricted"
+    assert result["restart_hint"] == "none"
     assert "current" not in result
     assert "instance_id" not in result["context"]
-    assert result["restart_reason"] == "engine_not_supported"
+    assert "restart_reason" not in result
     bindings.get_active_by_bot_and_owner.assert_not_called()
     resolver.resolve_for_binding_invoke.assert_not_called()
     inventory.assert_not_called()

@@ -151,10 +151,10 @@ def test_http_other_engines_are_not_applicable_without_probe(
         "status": "not_applicable",
         "reason": "engine_not_supported",
     }
-    assert data["restart_hint"] == "restricted"
+    assert data["restart_hint"] == "none"
     assert data["comparison"] == "unknown"
     assert "current" not in data
-    assert data["restart_reason"] == "engine_not_supported"
+    assert "restart_reason" not in data
     bindings.get_active_by_bot_and_owner.assert_not_called()
     transport.invoke.assert_not_called()
 

@@ -112,7 +112,13 @@ class EngineVersionService(EngineVersionServiceProtocol):
         if bot.get("bot_type") not in {"personal", "service"}:
             return restricted("bot_type_not_supported")
         if bot.get("active_engine") not in {"openclaw", "hermes"}:
-            return restricted("engine_not_supported")
+            return {
+                "detection": {"status": "not_applicable", "reason": "engine_not_supported"},
+                "release_target": target,
+                "comparison": "unknown",
+                "restart_hint": "none",
+                "context": context,
+            }
         if bot.get("status") not in {"ACTIVE", "FAILED"}:
             return restricted("bot_not_ready")
         if bot.get("bot_type") == "service":
