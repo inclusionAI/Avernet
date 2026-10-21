@@ -37,7 +37,7 @@ from agentclaw.community.core.service_bot.services.build_ignore_rules import (
     is_excluded,
     validate_required_paths,
 )
-from agentclaw.community.core.service_bot.artifact_transfer import ArtifactTransferStrategy
+from agentclaw.community.core.bot_management.engines.aicoding.artifact_contract import ArtifactTransferStrategy
 from agentclaw.community.core.service_bot.services.agentclaw_artifact import (
     restore_agentclaw_artifact,
     sync_agentclaw_artifact,

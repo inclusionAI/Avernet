@@ -26,7 +26,9 @@ bindings exist so production routes can use ``Injected(...)``.
 """
 from __future__ import annotations
 
-from agentclaw.community.core.bot_management.engines.aicoding.artifact_transfer import AicodingArtifactTransferStrategy, FastdiskPublishConfig
+from agentclaw.community.core.bot_management.engines.aicoding.artifact_transfer import AicodingArtifactTransferStrategy
+from agentclaw.community.core.bot_management.engines.aicoding.artifact_config import parse_fastdisk_publish_config
+from agentclaw.community.di.modules.config_module import read_user_config
 
 from agentclaw.community.core.digital_employee.contracts import DigitalEmployeePublicationProtocol
 
@@ -427,12 +429,12 @@ class ServiceBotModule(Module):
         system_config_service: SystemConfigService,
         object_storage: cfg.ObjectStorageConfig,
         mount_config: cfg.OssToNasConfig,
-        fastdisk_publish: FastdiskPublishConfig,
     ) -> BotBuildService:
         """Construct ``BotBuildService`` with sandbox registry support."""
         return BotBuildService(
             artifact_transfer=AicodingArtifactTransferStrategy(
-                device_service, fastdisk_publish, bucket=object_storage.bucket_name,
+                device_service, parse_fastdisk_publish_config(read_user_config().get("fastdisk_publish")),
+                bucket=object_storage.bucket_name,
                 endpoint=object_storage.endpoint, oss_mount_root=mount_config.oss_root,
                 bindings=device_binding_repo,
             ),

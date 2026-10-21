@@ -64,9 +64,6 @@ from agentclaw.community.di.modules.economy_governance_module import (
 from agentclaw.community.di.modules.engine_version_module import EngineVersionModule
 from agentclaw.community.di.modules.engine_config_module import EngineConfigModule
 from agentclaw.community.di.modules.engine_runtime_module import EngineRuntimeModule
-from agentclaw.community.di.modules.fastdisk_publish_config_module import (
-    FastdiskPublishConfigModule,
-)
 from agentclaw.community.di.modules.expert_chat_module import ExpertChatModule
 from agentclaw.community.di.modules.execution_identity_module import (
     ExecutionIdentityModule,
@@ -165,7 +162,6 @@ def build_injector(
     """
     modules: list[Module] = [
         ConfigModule(),
-        FastdiskPublishConfigModule(),
         McpRuntimeCredentialsConfigModule(),
         DesktopSkillRecoveryConfigModule(),
         # Trajectory analysis config (REQ-9 决策 #10): read the

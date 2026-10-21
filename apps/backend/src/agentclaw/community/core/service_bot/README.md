@@ -32,7 +32,6 @@ provides:
   - "ServiceBot SQLAlchemy models"
 consumes:
   - "BotManagement"
-  - "ArtifactTransferStrategy"
   - "DeviceService + repo"
   - "SkillsPool layout state"
   - "RuntimeLayoutProbeServiceProtocol"
@@ -237,8 +236,10 @@ version paths, configuration keys, script schema and timeout values are unchange
 
 The strategy, `artifact_command.py` execution control and `fastdisk_detection/`
 embedded detector are colocated under `core/bot_management/engines/aicoding/`.
-Their unit tests mirror this engine directory. Only the engine-neutral transfer
-contract stays in `service_bot`; DI/configuration wiring stays in composition roots.
+Their unit tests mirror this engine directory. The transfer contract (`artifact_contract.py`) and pure configuration parser
+(`artifact_config.py`) live there too. The contract does not import the concrete
+strategy. DI reads the configuration block and assembles the strategy in the
+existing `ServiceBotModule`; no dedicated public configuration module is needed.
 
 The AICoding strategy consumes the existing build plan and a command executor. It
 embeds only read-only mount detection so legacy containers need no detector

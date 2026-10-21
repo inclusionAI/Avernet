@@ -13,7 +13,7 @@ import zlib
 import time
 import math
 from .artifact_command import run_artifact_command
-from dataclasses import dataclass
+from .artifact_config import FastdiskPublishConfig
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Protocol
 
@@ -32,24 +32,6 @@ class PublishCommandExecutor(Protocol):
     def exec_shell_new(self, device_id: str, shell_cmd: str, *, timeout_seconds: int | None = None) -> CommandResult:
         """Execute in the bound source container; None preserves provider default."""
         ...
-
-
-@dataclass(frozen=True)
-class FastdiskPublishConfig:
-    detect_timeout_seconds: int = 30
-    upload_timeout_seconds: int | None = None
-    request_timeout_seconds: int = 30
-    mist_secret_name: str = ""
-    endpoint: str = ""
-
-    def __post_init__(self):
-        for value in (self.detect_timeout_seconds, self.request_timeout_seconds):
-            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-                raise ValueError('fastdisk publish timeouts must be positive integers')
-        if self.upload_timeout_seconds is not None and (type(self.upload_timeout_seconds) is not int or self.upload_timeout_seconds <= 0):
-            raise ValueError('upload timeout must be positive or None')
-        if not isinstance(self.mist_secret_name, str) or self.mist_secret_name != self.mist_secret_name.strip():
-            raise ValueError('invalid deployment credential name')
 
 
 class FastdiskPublishError(RuntimeError):
