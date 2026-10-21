@@ -1,4 +1,4 @@
-"""Runtime trees stay excluded except AICoding's explicit task-file snapshot."""
+"""Published artifacts omit runtime tasks; draft restore preserves local tasks."""
 from pathlib import Path
 import subprocess
 from unittest.mock import MagicMock
@@ -29,7 +29,7 @@ def run_without_privilege(*, cmd, **kwargs):
 
 
 @pytest.mark.parametrize("plan", PLANS, ids=lambda plan: plan.engine_type)
-def test_publish_retry_excludes_runtime_trees_except_aicoding_task_file(tmp_path, plan):
+def test_publish_retry_removes_old_cron_and_never_imports_source_tasks(tmp_path, plan):
     source, target = tmp_path / "source", tmp_path / "artifact"
     for name in ("cron/jobs.json", "cron/jobs.json.bak", "cron/runs/run.jsonl",
                  "sessions/cron-tasks.json", "sessions/cron-runs.json"):
@@ -52,10 +52,7 @@ def test_publish_retry_excludes_runtime_trees_except_aicoding_task_file(tmp_path
     )
     assert not (target / "cron").exists()
     if plan.engine_type != "openclaw":
-        if plan.engine_type == "aicoding":
-            assert (target / "sessions/cron-tasks.json").read_text() == "source-task"
-        else:
-            assert not (target / "sessions/cron-tasks.json").exists()
+        assert not (target / "sessions/cron-tasks.json").exists()
         assert not (target / "sessions/cron-runs.json").exists()
     assert (target / "workspace/app.py").read_text() == "published-code"
     assert (target / "workspace/cron/example.txt").exists()
@@ -66,7 +63,7 @@ def test_publish_retry_excludes_runtime_trees_except_aicoding_task_file(tmp_path
 
 
 @pytest.mark.parametrize("plan", PLANS, ids=lambda plan: plan.engine_type)
-def test_restore_preserves_runtime_state_except_explicit_aicoding_task_file(tmp_path, monkeypatch, plan):
+def test_restore_legacy_artifact_preserves_draft_runtime_tasks(tmp_path, monkeypatch, plan):
     bot_root, nas_root = tmp_path / "bot-data", tmp_path / "nas"
     artifact = bot_root / "3" / plan.migration_subpath
     draft = nas_root / plan.source_root_name
@@ -110,8 +107,7 @@ def test_restore_preserves_runtime_state_except_explicit_aicoding_task_file(tmp_
     assert result["restore_type"] == "migration_path"
     assert (draft / "cron/jobs.json").read_text() == "draft-only-task"
     if plan.engine_type != "openclaw":
-        expected = "legacy-published-task" if plan.engine_type == "aicoding" else "draft-only-task"
-        assert (draft / "sessions/cron-tasks.json").read_text() == expected
+        assert (draft / "sessions/cron-tasks.json").read_text() == "draft-only-task"
         assert (draft / "sessions/cron-runs.json").read_text() == "draft-only-task"
     assert (draft / "workspace/app.py").read_text() == "restored-code"
     if plan.engine_type == "aicoding":

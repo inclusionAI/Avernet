@@ -54,8 +54,7 @@ _AICODING_RSYNC_EXCLUDES = [
     "canvas/",
     "update-check.json",
     "session_user_map.json",
-    # Exclude runtime trees in the main sync; the task file is explicitly
-    # included below without publishing session history or cron runs.
+    # Cron tasks belong to runtime instances, not published artifacts.
     "/cron/",
     "/sessions/cron-tasks.json",
     "/sessions/cron-runs.json",
@@ -93,7 +92,6 @@ def _make_aicoding_build_plan(rsync_excludes: list[str]) -> EngineBuildPlan:
         extra_sync_target_relpath="claude",
         rsync_excludes=rsync_excludes,
         extra_include_files=[
-            "sessions/cron-tasks.json",
             # This is a scoped container-home path. BotBuildService copies it
             # from source_dir.parent/.codefuse/... (the mounted draft home)
             # into artifact/aicoding/home/.codefuse/... during build and reverses
