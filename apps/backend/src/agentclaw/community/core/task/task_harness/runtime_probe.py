@@ -263,6 +263,9 @@ class TaskRuntimeLivenessProbe:
         run_id = str(props.get("run_id") or "").strip() or None
         session_id = str(props.get("session_id") or "").strip() or None
         group_id = str(props.get("group_id") or "").strip() or None
+        lifecycle_stage = (
+            str(props.get("lifecycle_stage") or "").strip() or None
+        )
         bot_id = _bot_identity_from_node(node)
 
         # Single-bot can be turned into a manager-worker group. The authoritative
@@ -280,12 +283,14 @@ class TaskRuntimeLivenessProbe:
                 session_id=session_id,
                 previous_cursor=previous_cursor,
                 bot_id=bot_id,
+                lifecycle_stage=lifecycle_stage,
             )
         if session_id:
             return await self._probe_session_messages(
                 session_id=session_id,
                 previous_cursor=previous_cursor,
                 bot_id=bot_id,
+                lifecycle_stage=lifecycle_stage,
             )
         return RuntimeProbeResult(
             state="unknown",
@@ -299,6 +304,7 @@ class TaskRuntimeLivenessProbe:
         session_id: str,
         previous_cursor: str | None,
         bot_id: str | None,
+        lifecycle_stage: str | None,
     ) -> RuntimeProbeResult:
         """Probe a root execution conversation when only a session id exists.
 
@@ -313,7 +319,10 @@ class TaskRuntimeLivenessProbe:
             )
         try:
             messages = await self._bot.get_session_messages(
-                session_id, limit=20, bot_id=bot_id
+                session_id,
+                limit=20,
+                bot_id=bot_id,
+                lifecycle_stage=lifecycle_stage,
             )
         except Exception as exc:  # noqa: BLE001
             return RuntimeProbeResult(
@@ -323,6 +332,7 @@ class TaskRuntimeLivenessProbe:
                 detail={
                     "session_id": session_id,
                     "bot_id_missing": not bot_id,
+                    "lifecycle_stage": lifecycle_stage,
                 },
             )
         cursor = _join_cursors(
@@ -334,7 +344,10 @@ class TaskRuntimeLivenessProbe:
             status="active",
             cursor=cursor,
             previous_cursor=previous_cursor,
-            detail={"session_id": session_id},
+            detail={
+                "session_id": session_id,
+                "lifecycle_stage": lifecycle_stage,
+            },
         )
 
     def _active_result(
@@ -363,6 +376,7 @@ class TaskRuntimeLivenessProbe:
         session_id: str | None,
         previous_cursor: str | None,
         bot_id: str | None,
+        lifecycle_stage: str | None,
     ) -> RuntimeProbeResult:
         if self._bot is None:
             return RuntimeProbeResult(
@@ -399,7 +413,10 @@ class TaskRuntimeLivenessProbe:
         if session_id:
             try:
                 messages = await self._bot.get_session_messages(
-                    session_id, limit=20, bot_id=bot_id
+                    session_id,
+                    limit=20,
+                    bot_id=bot_id,
+                    lifecycle_stage=lifecycle_stage,
                 )
                 cursor_value = (
                     cursor_value,
@@ -416,6 +433,7 @@ class TaskRuntimeLivenessProbe:
             detail={
                 "run_id": run_id,
                 "session_id": session_id,
+                "lifecycle_stage": lifecycle_stage,
                 "message_probe_error": message_error,
             },
         )

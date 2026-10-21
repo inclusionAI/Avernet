@@ -242,6 +242,11 @@ async def benchmark_execute_task_internal(
 
     execution_config = dict(task_request.execution_config)
     execution_config["main_session_id"] = session_id
+    if not a2a:
+        # Both benchmark messages target the draft runtime binding. Persist that
+        # fact with the root node so liveness probing and harness resume use the
+        # same runtime history that the user is inspecting.
+        execution_config["lifecycle_stage"] = "draft"
     task_request = replace(task_request, execution_config=execution_config)
 
     result = await service.execute(task_request)

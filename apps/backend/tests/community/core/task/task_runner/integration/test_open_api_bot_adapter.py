@@ -426,6 +426,21 @@ def test_get_session_messages_encodes_path_and_forwards_query_headers():
     assert msgs == [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "done"}]
 
 
+def test_get_session_messages_forwards_lifecycle_stage_when_present():
+    """评测 draft 会话读回同 stage 历史;未传时保持既有 online 默认语义。"""
+    seen: dict = {}
+
+    def h(req):
+        seen["params"] = dict(req.url.params)
+        return httpx.Response(200, json={"code": 0, "data": {"messages": []}})
+
+    _run(_adapter(h).get_session_messages(_SID, lifecycle_stage="draft"))
+    assert seen["params"]["lifecycle_stage"] == "draft"
+
+    _run(_adapter(h).get_session_messages(_SID, lifecycle_stage=""))
+    assert seen["params"] == {"limit": "50"}
+
+
 def test_get_session_messages_omits_bot_id_when_none():
     seen: dict = {}
 

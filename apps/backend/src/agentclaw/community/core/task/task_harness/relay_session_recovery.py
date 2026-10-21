@@ -103,10 +103,15 @@ class RelaySessionRecovery:
             raise RelaySessionRecoveryError(
                 "relay node has no assignee for the existing session"
             )
+        lifecycle_stage = str(props.get("lifecycle_stage") or "").strip()
+        metadata: dict[str, Any] = {"session_id": session_id}
+        if lifecycle_stage:
+            metadata["bot_options"] = {"lifecycle_stage": lifecycle_stage}
+
         sent = await self._bot.send_message(
             bot_id=compose_bot_identity(assignee, props.get("assignee_owner_id")),
             message=RELAY_HARNESS_RESUME_PROMPT,
-            metadata={"session_id": session_id},
+            metadata=metadata,
         )
         logger.info(
             "[task][harness][relay-resume] openapi message sent task=%s node=%s "

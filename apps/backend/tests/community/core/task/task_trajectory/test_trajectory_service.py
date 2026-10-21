@@ -831,10 +831,13 @@ class _FakeOpenApiBot:
         self._messages = messages_by_session or {}
         self._raise = raise_exc
         self.calls: list[tuple[str, int, "str | None"]] = []
+        self.lifecycle_stages: list["str | None"] = []
 
     async def get_session_messages(self, session_id: str, *, limit: int = 50,
-                                   bot_id: str | None = None) -> list:
+                                   bot_id: str | None = None,
+                                   lifecycle_stage: str | None = None) -> list:
         self.calls.append((session_id, limit, bot_id))
+        self.lifecycle_stages.append(lifecycle_stage)
         if self._raise is not None:
             raise self._raise
         return self._messages.get(session_id, [])
@@ -1617,6 +1620,28 @@ async def test_pure_read_engine_session_id_dispatches_to_baas_channel_no_persist
     assert str(getattr(result.timeline[-1].action_type, "value", result.timeline[-1].action_type)) == RESULT_DISPLAY_ACTION
     assert repo.merge_calls == []
     assert repo.backfill_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_engine_session_read_preserves_lifecycle_stage():
+    """节点记录 draft runtime 时,轨迹下钻也读取同一份 draft 会话历史。"""
+    graph = _FakeGraph([
+        _FakeNode(node_id="n-draft", status=Status.RUNNING,
+                  extend_props={"session_id": _ENGINE_SID, "lifecycle_stage": "draft"},
+                  start_time=500),
+    ])
+    openapi = _FakeOpenApiBot(messages_by_session={_ENGINE_SID: _LIVE_MSGS})
+    timeline = [_make_event(node_id="n-draft", gmt_create=1000)]
+    svc = TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory(timeline=timeline)), _FakeRepo(),
+        _FakeAnalyzer(), None, graph=graph, bcs=_FakeBcs(), openapi_bot=openapi,
+    )
+
+    result = await svc.get_trajectory("t1", do_analysis=False, session_detail=True)
+
+    assert openapi.lifecycle_stages == ["draft"]
+    assert result.timeline[-1].session_msgs == _LIVE_MSGS
 
 
 @pytest.mark.asyncio

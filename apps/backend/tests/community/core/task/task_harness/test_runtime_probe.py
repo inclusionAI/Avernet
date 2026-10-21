@@ -12,12 +12,16 @@ class _FakeBot:
         self.run = {"status": "RUNNING", "version": 1}
         self.messages = []
         self.session_bot_ids = []
+        self.session_stages = []
 
     async def get_run(self, run_id):
         return dict(self.run)
 
-    async def get_session_messages(self, session_id, limit=20, bot_id=None):
+    async def get_session_messages(
+        self, session_id, limit=20, bot_id=None, lifecycle_stage=None
+    ):
         self.session_bot_ids.append(bot_id)
+        self.session_stages.append(lifecycle_stage)
         return list(self.messages)
 
 
@@ -49,6 +53,7 @@ class _Node:
         group_id=None,
         assignee=None,
         assignee_owner_id=None,
+        lifecycle_stage=None,
     ):
         from agentclaw.community.core.task.domain.models import RuntimeInfo
 
@@ -61,6 +66,7 @@ class _Node:
                     "session_id": session_id,
                     "group_id": group_id,
                     "assignee_owner_id": assignee_owner_id,
+                    "lifecycle_stage": lifecycle_stage,
                 }.items()
                 if value
             },
@@ -126,6 +132,39 @@ class TestTaskRuntimeLivenessProbe(unittest.IsolatedAsyncioTestCase):
         await probe.probe(node)
 
         self.assertEqual(bot.session_bot_ids, ["b1:u1"])
+        self.assertEqual(bot.session_stages, [None])
+
+    async def test_session_probe_uses_persisted_lifecycle_stage(self):
+        bot = _FakeBot()
+        probe = TaskRuntimeLivenessProbe(bot=bot)
+        node = _Node(session_id="s1", lifecycle_stage="draft")
+
+        result = await probe.probe(node)
+
+        self.assertEqual(bot.session_stages, ["draft"])
+        self.assertEqual(result.detail, {
+            "session_id": "s1",
+            "lifecycle_stage": "draft",
+        })
+
+    async def test_run_heartbeat_uses_persisted_lifecycle_stage(self):
+        bot = _FakeBot()
+        probe = TaskRuntimeLivenessProbe(bot=bot)
+        node = _Node(run_id="r1", session_id="s1", lifecycle_stage="draft")
+
+        result = await probe.probe(node)
+
+        self.assertEqual(bot.session_stages, ["draft"])
+        self.assertEqual(result.detail["lifecycle_stage"], "draft")
+
+    async def test_blank_lifecycle_stage_uses_default_runtime_stage(self):
+        bot = _FakeBot()
+        probe = TaskRuntimeLivenessProbe(bot=bot)
+        node = _Node(session_id="s1", lifecycle_stage=" ")
+
+        await probe.probe(node)
+
+        self.assertEqual(bot.session_stages, [None])
 
     async def test_group_terminal_success_is_reported(self):
         bcs = _FakeBcs()

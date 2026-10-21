@@ -104,10 +104,13 @@ def _build_initial_graph(self, task_info: TaskInfo) -> TaskExecutionGraph:
     # PENDING, while its start_time records initialization time.
     started_at = int(time.time() * 1000)
     main_session_id = task_info.execution_config.get("main_session_id")
+    lifecycle_stage = str(task_info.execution_config.get("lifecycle_stage") or "").strip()
     relay_mode = task_info.execution_config.get("orchestration_mode") == "relay"
     root_extend_props: dict[str, Any] = {}
     if isinstance(main_session_id, str) and main_session_id.strip():
         root_extend_props["session_id"] = main_session_id
+        if lifecycle_stage:
+            root_extend_props["lifecycle_stage"] = lifecycle_stage
     if relay_mode:
         root_extend_props["relay_root"] = True
         root_extend_props["relay_token"] = uuid.uuid4().hex

@@ -23,7 +23,9 @@ class _FakeOpenApiBot:
             },
         ]
 
-    async def get_session_messages(self, session_id, limit=20, bot_id=None):
+    async def get_session_messages(
+        self, session_id, limit=20, bot_id=None, lifecycle_stage=None
+    ):
         return list(self.messages)
 
     async def send_message(self, *, bot_id, message, metadata, message_id=None):
@@ -61,7 +63,10 @@ class _FakeTokens:
 
 
 class _Node:
-    def __init__(self, *, assignee=None, owner_id=None, group_id=None, session_id=None):
+    def __init__(
+        self, *, assignee=None, owner_id=None, group_id=None, session_id=None,
+        lifecycle_stage=None,
+    ):
         from agentclaw.community.core.task.domain.models import RuntimeInfo
 
         props = {}
@@ -71,6 +76,8 @@ class _Node:
             props["session_id"] = session_id
         if owner_id:
             props["assignee_owner_id"] = owner_id
+        if lifecycle_stage:
+            props["lifecycle_stage"] = lifecycle_stage
         self.run_info = RuntimeInfo(assignee=assignee, extend_props=props)
         self.task_id = "t1"
         self.node_id = "n1"
@@ -99,6 +106,26 @@ class RelaySessionRecoveryTest(unittest.IsolatedAsyncioTestCase):
                     "metadata": {"session_id": "engine-session"},
                 }
             ],
+        )
+
+    async def test_openapi_resume_preserves_draft_lifecycle_stage(self):
+        bot = _FakeOpenApiBot()
+        recovery = RelaySessionRecovery(bot=bot)
+        node = _Node(
+            assignee="bot1",
+            owner_id="146836",
+            session_id="engine-session",
+            lifecycle_stage="draft",
+        )
+
+        await recovery.resume(node)
+
+        self.assertEqual(
+            bot.calls[0]["metadata"],
+            {
+                "session_id": "engine-session",
+                "bot_options": {"lifecycle_stage": "draft"},
+            },
         )
 
     async def test_bcs_resume_posts_to_existing_group_session(self):

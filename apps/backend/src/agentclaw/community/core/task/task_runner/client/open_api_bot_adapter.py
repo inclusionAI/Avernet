@@ -330,14 +330,16 @@ class OpenApiBotAdapter(
         return payload.get("data") or {}
 
     async def get_session_messages(
-        self, session_id: str, *, limit: int = 50, bot_id: str | None = None
+        self, session_id: str, *, limit: int = 50, bot_id: str | None = None,
+        lifecycle_stage: str | None = None,
     ) -> list[Any]:
         """读引擎侧会话(OpenClaw 等)消息:BaaS ``GET /openapi/v1/sessions/{sid}/messages``。
 
         与 ``send_message`` 同款 Bearer api_key(会话即派发链创建,鉴权面=派发面);``bot_id``
         复合 ``bot_id:owner_id`` 寻址,``None`` → BaaS 按 api_key 默认解析。返回 ``data.messages``
-        原始 dict 列表(role/content 由服务端 excerpt builder 统一裁形)。lifecycle_stage 不传
-        (BaaS 默认 online,与生产派发一致)。「最近 N 条」方向性以引擎实际排序为准(联调验证项)。
+        原始 dict 列表(role/content 由服务端 excerpt builder 统一裁形)。``lifecycle_stage`` 可选;
+        不传或为空时沿用 BaaS 默认 online 语义,评测 draft 会话显式传 ``draft`` 以读取同一份
+        运行时历史。「最近 N 条」方向性以引擎实际排序为准(联调验证项)。
         """
         # BaaS Query 校验 ge=1 le=1000(session_router.py limit 定义),越界会 422
         # None → 默认 50;0/负数 → 钳到 1(不被 `or` 吞成默认值)
@@ -351,12 +353,16 @@ class OpenApiBotAdapter(
         params: dict[str, Any] = {"limit": clamped}
         if bot_id:
             params["bot_id"] = bot_id
+        if lifecycle_stage:
+            params["lifecycle_stage"] = lifecycle_stage
         logger.info(
-            "[task][openapi_bot] >>> get_session_messages GET %s base_url=%s limit=%s bot_id_set=%s",
+            "[task][openapi_bot] >>> get_session_messages GET %s base_url=%s limit=%s "
+            "bot_id_set=%s lifecycle_stage=%s",
             path,
             self._k.base_url,
             clamped,
             bool(bot_id),
+            lifecycle_stage or "<default>",
         )
         async with self._client_for_current_loop() as client:
             r = await client.get(path, params=params, headers=self._headers())

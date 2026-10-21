@@ -219,6 +219,7 @@ class TestBenchmarkExecute:
 
         assert len(service.requests) == 1
         assert service.requests[0].execution_config["main_session_id"] == "benchmark-session-1"
+        assert service.requests[0].execution_config["lifecycle_stage"] == "draft"
         assert service.requests[0].owner_bot_id == "bot-1"
         assert service.requests[0].owner_user_id == "owner-1"
 
@@ -285,6 +286,7 @@ class TestBenchmarkExecute:
         assert service.requests[0].owner_bot_id == "target-bot"
         assert service.requests[0].owner_user_id == "target-user"
         assert service.requests[0].execution_config["main_session_id"] == first["session_id"]
+        assert "lifecycle_stage" not in service.requests[0].execution_config
 
     def test_centralized_task_sends_panel_without_fake_root_instruction(self):
         service = _StubService(

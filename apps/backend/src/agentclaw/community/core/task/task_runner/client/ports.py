@@ -43,6 +43,7 @@ class OpenApiBotPort(Protocol):
         *,
         limit: int = 50,
         bot_id: str | None = None,
+        lifecycle_stage: str | None = None,
     ) -> list[Any]:
         """读引擎侧会话(OpenClaw 等)的消息列表。
 

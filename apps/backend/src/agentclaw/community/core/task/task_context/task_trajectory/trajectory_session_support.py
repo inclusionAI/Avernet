@@ -247,13 +247,17 @@ class TrajectorySessionSupport:
                 assignee = getattr(node.run_info, "assignee", None)
                 bot_id = compose_bot_identity(assignee, ep.get("assignee_owner_id")) \
                     if assignee else None
+                lifecycle_stage = str(ep.get("lifecycle_stage") or "").strip() or None
                 logger.info(
                     "[task][trajectory] session_msgs 引擎通道拉取 begin task=%s node=%s"
-                    " holder_bot=%s", task_id, getattr(node, "node_id", None),
+                    " holder_bot=%s lifecycle_stage=%s", task_id,
+                    getattr(node, "node_id", None),
                     bot_id or "<api-key-default>",
+                    lifecycle_stage or "<default>",
                 )
                 msgs = await self._openapi_bot.get_session_messages(
                     sid, limit=limit, bot_id=bot_id,
+                    lifecycle_stage=lifecycle_stage,
                 )
                 logger.info("[task][trajectory] session_msgs 引擎通道拉取 finish")
             else:

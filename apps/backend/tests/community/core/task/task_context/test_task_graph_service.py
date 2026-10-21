@@ -143,12 +143,33 @@ class TestInitializeGraph:
 
         assert graph.tasks[0].run_info.extend_props["session_id"] == "session-initial"
 
+    def test_main_session_seeds_root_lifecycle_stage(self, svc: TaskGraphService):
+        info = _task_info("t-session-stage")
+        info.execution_config["main_session_id"] = "session-initial"
+        info.execution_config["lifecycle_stage"] = "draft"
+
+        graph = svc.initialize_graph(info)
+
+        assert graph.tasks[0].run_info.extend_props["lifecycle_stage"] == "draft"
+
     def test_missing_main_session_does_not_create_root_session(
         self, svc: TaskGraphService
     ):
         graph = svc.initialize_graph(_task_info("t-no-session"))
 
         assert "session_id" not in graph.tasks[0].run_info.extend_props
+        assert "lifecycle_stage" not in graph.tasks[0].run_info.extend_props
+
+    def test_blank_lifecycle_stage_does_not_create_root_stage(
+        self, svc: TaskGraphService
+    ):
+        info = _task_info("t-session-no-stage")
+        info.execution_config["main_session_id"] = "session-initial"
+        info.execution_config["lifecycle_stage"] = " "
+
+        graph = svc.initialize_graph(info)
+
+        assert "lifecycle_stage" not in graph.tasks[0].run_info.extend_props
 
     def test_report_can_override_initial_root_session(self, svc: TaskGraphService):
         info = _task_info("t-session-override")
