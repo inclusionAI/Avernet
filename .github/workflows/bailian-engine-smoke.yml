@@ -1,0 +1,107 @@
+name: Bailian Engine Smoke
+
+on:
+  workflow_dispatch:
+  # Allows the initial workflow to run before it exists on the default branch.
+  push:
+    branches: [codex/bailian-engine-smoke]
+    paths:
+      - .github/workflows/bailian-engine-smoke.yml
+      - singlebox/compat/bailian/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bailian-engine-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: ${{ matrix.engine }} / qwen3.8-flash
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - engine: openclaw
+            package: openclaw
+          - engine: deepseek-harness
+            package: '@deepseek-ai/dsh'
+          - engine: claude-code
+            package: '@anthropic-ai/claude-code'
+          - engine: codex
+            package: '@openai/codex'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check required provider configuration
+        env:
+          BAILIAN_API_KEY: ${{ secrets.BAILIAN_API_KEY }}
+          BAILIAN_OPENAI_BASE_URL: ${{ vars.BAILIAN_OPENAI_BASE_URL }}
+        run: |
+          if [ -z "$BAILIAN_API_KEY" ] || [ -z "$BAILIAN_OPENAI_BASE_URL" ]; then
+            echo '::error::UNKNOWN: configure Secret BAILIAN_API_KEY and Variable BAILIAN_OPENAI_BASE_URL'
+            exit 1
+          fi
+      - name: Resolve and install exact latest engine version
+        env:
+          ENGINE_PACKAGE: ${{ matrix.package }}
+        run: |
+          version="$(npm view "$ENGINE_PACKAGE@latest" version)"
+          npm install --global "$ENGINE_PACKAGE@$version"
+          mkdir -p reports
+          ENGINE_VERSION="$version" python - <<'PY'
+          import json, os
+          from pathlib import Path
+          Path('reports/version.json').write_text(json.dumps({
+              'package': os.environ['ENGINE_PACKAGE'],
+              'version': os.environ['ENGINE_VERSION'],
+              'commit': os.environ['GITHUB_SHA'],
+          }, indent=2))
+          PY
+      - name: Generate isolated provider configuration
+        env:
+          BAILIAN_OPENAI_BASE_URL: ${{ vars.BAILIAN_OPENAI_BASE_URL }}
+        run: |
+          python singlebox/compat/bailian/configure.py \
+            --output "$RUNNER_TEMP/bailian-profile" \
+            --base-url "$BAILIAN_OPENAI_BASE_URL" --model qwen3.8-flash
+      - name: Verify real model and file tool round trip
+        env:
+          BAILIAN_API_KEY: ${{ secrets.BAILIAN_API_KEY }}
+          ENGINE: ${{ matrix.engine }}
+        run: |
+          python singlebox/compat/bailian/smoke.py --engine "$ENGINE" \
+            --profile "$RUNNER_TEMP/bailian-profile" --report reports/result.json
+      - name: Publish scoped result
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path('reports/result.json')
+          result = json.loads(path.read_text()) if path.exists() else {
+              'status': 'UNKNOWN', 'reason': 'setup_failed', 'bcs_certified': False,
+          }
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write('Engine/model smoke only; BCS integration is not certified.\n\n')
+              summary.write('```json\n' + json.dumps(result, indent=2) + '\n```\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bailian-${{ matrix.engine }}
+          path: reports/*.json
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Remove runtime state
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/bailian-profile"
