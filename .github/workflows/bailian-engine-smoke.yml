@@ -1,7 +1,9 @@
-name: Bailian Engine Smoke
+name: Bailian Engine Compatibility
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '17 1 * * *'
   # Allows the initial workflow to run before it exists on the default branch.
   push:
     branches: [codex/bailian-engine-smoke]
@@ -217,6 +219,8 @@ jobs:
           import os
           from pathlib import Path
           p = Path('reports/e2e.json')
+          if not p.exists():
+              p = Path('reports/install.json')
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
               f.write('```json\n' + (p.read_text() if p.exists() else '{"status":"UNKNOWN","reason":"setup_failed"}') + '\n```\n')
           PY

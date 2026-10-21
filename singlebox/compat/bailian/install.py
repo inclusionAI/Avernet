@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 
@@ -27,26 +28,44 @@ def main():
         return
     plugin = packages['plugin']
     spec = plugin['package'] + '@' + plugin['version']
+    def install_plugin(command, env):
+        result = subprocess.run(command, env=env, text=True, capture_output=True)
+        output = result.stdout + result.stderr
+        print(output, flush=True)  # Installation has no runtime credentials.
+        status = {'status': 'PASS' if result.returncode == 0 else 'FAIL',
+                  'reason': 'installed' if result.returncode == 0 else 'plugin_install_failed'}
+        if 'is incompatible with dsh' in output:
+            status['reason'] = 'published_plugin_incompatible_with_latest_engine'
+        args.report.with_name('install.json').write_text(json.dumps(status, indent=2))
+        result.check_returncode()
+
     env = os.environ.copy()
     if os.environ['ENGINE'] == 'openclaw':
-        # Install into a separate profile: production profile contains an env-key
-        # reference and installation must never receive the model API key.
-        env['OPENCLAW_STATE_DIR'] = str(args.profile / 'plugin-install')
-        env['OPENCLAW_CONFIG_PATH'] = str(args.profile / 'plugin-install/openclaw.json')
-        # The user selected this Avernet-owned npm plugin explicitly; latest
-        # OpenClaw requires noninteractive acknowledgement for non-ClawHub sources.
-        subprocess.run(['openclaw', 'plugins', 'install', '--force', 'npm:' + spec], env=env, check=True)
-        plugin_dir = args.profile / 'plugin-install/extensions/openclaw-channel-bcn'
-        if not plugin_dir.is_dir():
-            raise RuntimeError('Published plugin installation directory missing')
+        # Install in the runtime profile so OpenClaw owns its version-specific
+        # npm layout and capability-consent records. This placeholder only allows
+        # config parsing; installation never receives the real model credential.
+        env['OPENCLAW_STATE_DIR'] = str(args.profile / 'openclaw')
+        env['OPENCLAW_CONFIG_PATH'] = str(args.profile / 'openclaw/openclaw.json')
+        env['BAILIAN_API_KEY'] = 'ci-install-placeholder'
+        install_plugin(['openclaw', 'plugins', 'install', '--force', '--accept-capabilities',
+                        'npm:' + spec], env)
         path = args.profile / 'openclaw/openclaw.json'
         config = json.loads(path.read_text())
-        config['plugins'] = {'allow': ['openclaw-channel-bcn'], 'load': {'paths': [str(plugin_dir)]},
-                             'entries': {'openclaw-channel-bcn': {'enabled': True}}}
+        config['models']['providers']['bailian']['apiKey'] = '${BAILIAN_API_KEY}'
+        config.setdefault('plugins', {}).setdefault('entries', {}).setdefault(
+            'openclaw-channel-bcn', {})['enabled'] = True
         path.write_text(json.dumps(config))
     else:
         env['DSH_HOME'] = str(args.profile / 'dsh')
-        subprocess.run(['dsh', 'plugin', '--profile', 'web', 'add', spec], env=env, check=True)
+        try:
+            install_plugin(['dsh', 'plugin', '--profile', 'web', 'add', spec], env)
+        except subprocess.CalledProcessError:
+            # This install phase has no model or BCS credentials. Surface bounded
+            # package-manager diagnostics rather than losing the underlying error.
+            for log in (args.profile / 'dsh').rglob('pnpm.log'):
+                text = re.sub(r'[A-Za-z0-9_+/=-]{24,}', '[REDACTED]', log.read_text(errors='replace'))
+                print(text[-6000:], flush=True)
+            raise
 
 
 if __name__ == '__main__':

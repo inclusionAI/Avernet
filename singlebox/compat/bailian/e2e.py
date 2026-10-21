@@ -146,7 +146,7 @@ class Harness:
         else:
             provider = self.api('/providers', {'name': name, 'auth': {'mode': 'static_bearer'},
                                                'protocol_version': '2.0',
-                                               'coordination': {'mode': 'native_mcp'}})
+                                               'coordination': {'mode': 'native_mcp', 'mcp_server': 'bcs'}})
             self.env['BRIDGE_REGISTER_TOKEN'] = self.api('/register/token?' + urlencode(
                 {'provider_id': provider['provider_id']}))['token']
             self.run([str(self.binaries / 'bcs-bridge'), 'register', '--bot-name', name,
