@@ -113,7 +113,11 @@ describe('WorkspaceIdentitySelector 能力入口与 Popover 交互', () => {
     fireEvent.click(screen.getByRole('button', { name: 'OpenClaw' }));
     await waitFor(() => expect(getRegistrationTokenMock).toHaveBeenCalledTimes(2));
     expect(screen.getByRole('button', { name: /在终端执行/ })).toHaveAttribute('aria-pressed', 'true');
-    expect(dialog).toHaveTextContent('install.sh --token token-1 --bcs-endpoint http://127.0.0.1:21000');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Bot 名称' }), { target: { value: '' } });
+    expect(dialog).toHaveTextContent('请输入 Bot 名称');
+    expect(screen.getByRole('button', { name: '复制命令' })).toBeDisabled();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Bot 名称' }), { target: { value: 'ExampleBot' } });
+    expect(dialog).toHaveTextContent('install.sh --token token-1 --bcs-endpoint http://127.0.0.1:21000 --bot-name ExampleBot');
     expect(dialog).not.toHaveTextContent('Use this token for bot registration within 6 hours');
     expect(dialog).toHaveTextContent(/Token 有效期至：/);
 
@@ -124,7 +128,7 @@ describe('WorkspaceIdentitySelector 能力入口与 Popover 交互', () => {
 
     await waitFor(() =>
       expect(writeText).toHaveBeenCalledWith(
-        'Follow the instructions in https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/crates/plugins/openclaw-channel-bcn/install-instructions/install.md to join BCN (Bot Coordination Network), your TOKEN is token-1 and BCS_ENDPOINT is http://127.0.0.1:21000.',
+        "Follow the instructions in https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/apps/bcs/crates/plugins/openclaw-channel-bcn/install-instructions/install.md to join BCN (Bot Coordination Network), your NAME is 'ExampleBot', your TOKEN is token-1 and BCS_ENDPOINT is http://127.0.0.1:21000.",
       ),
     );
     // 切换 Bot 类型会取新的 Token；OpenClaw 内切换终端/指引模式复用该 Token。

@@ -74,10 +74,10 @@ describe('BotRegistrationDialog Poolab Tab 门控', () => {
 
     expect(screen.getByRole('button', { name: 'Poolab' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Poolab' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.queryByText(/如何接入 OpenClaw/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'OpenClaw 接入方式' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'OpenClaw' }));
-    expect(screen.getByText(/如何接入 OpenClaw/)).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'OpenClaw 接入方式' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Poolab' }));
     // PoolabRegistrationPanel 标记文本
@@ -103,7 +103,7 @@ describe('BotRegistrationDialog Poolab Tab 门控', () => {
     expect(screen.getByText('1. 安装 bcs-bridge')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'OpenClaw' }));
-    expect(screen.getByText(/如何接入 OpenClaw/)).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'OpenClaw 接入方式' })).toBeInTheDocument();
     expect(screen.queryByText('1. 安装 bcs-bridge')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '千问办公' }));
@@ -130,7 +130,7 @@ describe('BotRegistrationDialog Poolab Tab 门控', () => {
     expect(screen.getByRole('button', { name: 'Poolab' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByText('1. 安装 bcs-bridge')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'OpenClaw' }));
-    expect(screen.getByText(/如何接入 OpenClaw/)).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'OpenClaw 接入方式' })).toBeInTheDocument();
     expect(screen.queryByText('1. 安装 bcs-bridge')).not.toBeInTheDocument();
   });
 
@@ -150,6 +150,6 @@ describe('BotRegistrationDialog Poolab Tab 门控', () => {
     expect(screen.getByText('Example onboarding: true')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'OpenClaw' }));
     expect(screen.queryByText('Example onboarding: true')).not.toBeInTheDocument();
-    expect(screen.getByText(/如何接入 OpenClaw/)).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'OpenClaw 接入方式' })).toBeInTheDocument();
   });
 });

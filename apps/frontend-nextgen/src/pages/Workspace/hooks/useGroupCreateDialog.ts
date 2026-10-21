@@ -35,7 +35,14 @@ export function useGroupCreateDialog({
           run: initialRun,
         });
       }
-      // 先让新群进入当前 membership 的群列表，再写入选中态。若先选中新群，
+      // 创建者是固定群成员，先切换视角并清掉旧临时群选中，避免兜底逻辑切回旧筛选。
+      const store = useWorkspaceStore.getState();
+      store.setGroupSearchText('');
+      if (store.membership !== 'direct') {
+        store.selectGroup(null);
+        store.setMembership('direct');
+      }
+      // 先让新群进入固定成员列表，再写入选中态。若先选中新群，
       // useSelectedGroupDetail 会把“列表暂未包含新群”误判成 session_only 深链，
       // 导致刷新结果、URL 与侧栏选中态发生竞态。
       await refreshGroups();

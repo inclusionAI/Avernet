@@ -12,9 +12,8 @@ import type { SessionMessageAttachment } from '@/services/workspace/groupChatAtt
 import { cn } from '@/utils/cn';
 import type { ProviderConnectionStatus } from '@tc-chat/adapters';
 import type { MentionConfig, SubmitContext } from '@tc-chat/ui';
-import { Sender, type PendingFileChip, type SenderRef } from '@tc-chat/ui/es/Sender';
+import { Sender, type SenderRef } from '@tc-chat/ui/es/Sender';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
-import { toast } from 'sonner';
 import { GroupImagePreview } from './GroupImagePreview';
 import { expandMentionIds } from './mentionHelpers';
 import { UploadFilesModal } from './UploadFilesModal';
@@ -46,34 +45,18 @@ function ChatFileUploadModal({
   sessionId,
   open,
   onClose,
-  onAddToSession,
 }: {
   sessionId: string | null;
   open: boolean;
   onClose: () => void;
-  onAddToSession: (files: PendingFileChip[]) => void;
 }) {
   const upload = useSessionFileUpload(sessionId, () => {});
-
-  const handleAddToSession = useCallback(() => {
-    const files = upload.queue
-      .filter((task) => task.phase === 'ready' && task.fileId)
-      .map((task) => ({ resource_id: task.fileId as string, display_name: task.name }));
-    if (files.length === 0) {
-      toast.warning('暂无已完成上传的文件可添加');
-      return;
-    }
-    onAddToSession(files);
-    upload.clearCompleted();
-    onClose();
-  }, [onAddToSession, onClose, upload.clearCompleted, upload.queue]);
 
   return (
     <UploadFilesModal
       open={open}
       onClose={onClose}
       queue={upload.queue}
-      isUploading={upload.isUploading}
       stageFiles={upload.stageFiles}
       submitStaged={upload.submitStaged}
       cancelTask={upload.cancelTask}
@@ -81,7 +64,6 @@ function ChatFileUploadModal({
       discardAll={upload.discardAll}
       clearCompleted={upload.clearCompleted}
       hasPending={upload.hasPending}
-      onAddToSession={handleAddToSession}
     />
   );
 }
@@ -138,15 +120,6 @@ export function GroupChatComposer({
       onRemove: () => {},
     }),
     [],
-  );
-
-  const addUploadedFilesToSession = useCallback(
-    (files: PendingFileChip[]) => {
-      inputRef?.current?.insertFileChips?.(files);
-      inputRef?.current?.focus?.();
-      toast.success(`已添加 ${files.length} 个文件至会话`);
-    },
-    [inputRef],
   );
 
   const submit = useCallback(
@@ -262,7 +235,6 @@ export function GroupChatComposer({
         sessionId={session?.sessionId ?? null}
         open={uploadFilesOpen}
         onClose={() => setUploadFilesOpen(false)}
-        onAddToSession={addUploadedFilesToSession}
       />
     </div>
   );
