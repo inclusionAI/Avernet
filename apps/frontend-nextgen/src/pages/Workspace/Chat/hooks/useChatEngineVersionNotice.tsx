@@ -22,7 +22,9 @@ export function useChatEngineVersionNotice(input: {
   const versions = useBotEngineVersions(targets);
   const state = target ? versions.states[target.key] : undefined;
   const permission = target
-    ? botEngineVersionService.getRestartPermission(target.restartPermission)
+    ? botEngineVersionService.getRestartPermission({ ...target.restartPermission,
+        backendObservation: state && (state.kind === 'ready' || state.kind === 'updating') ? state.observation : undefined,
+      })
     : { allowed: false, disabledReason: undefined };
   const [dismissedKey, setDismissedKey] = useState<string>();
   const [infoOpen, setInfoOpen] = useState(false);

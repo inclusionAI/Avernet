@@ -1,6 +1,8 @@
 """Release branch identity, missing metadata and command failures are distinct."""
 
 from functools import partial
+from types import SimpleNamespace
+from agentclaw.community.core.bot_inventory.types import BotAction, DisplayState
 from agentclaw.community.adapters.engine_release_probe import probe_engine_release
 from unittest.mock import MagicMock
 
@@ -43,6 +45,7 @@ async def test_release_identity_is_the_complete_branch(
     bots, bindings, resolver, transport = dependencies
     transport.invoke.return_value["data"]["stdout"] = current + "\n"
     service = EngineVersionService(
+        lifecycle=MagicMock(),
         bots=bots,
         bindings=bindings,
         resolver=resolver,
@@ -86,6 +89,7 @@ async def test_failed_probe_is_never_a_legacy_bot(dependencies, response):
         collaborators=MagicMock(),
         list_devices=MagicMock(),
         config=EngineVersionConfig("REL20261014"),
+        lifecycle=SimpleNamespace(cards_for_bots=lambda **_: {"bot-1": [SimpleNamespace(display_state=DisplayState.SERVICE_DRAFT, actions=[BotAction.RESTART])]}),
     )
     result = await service.inspect(bot_id="bot-1", owner_id="owner", caller_id="owner")
     assert result["detection"]["status"] == "read_failed"
@@ -127,6 +131,7 @@ async def test_hints_depend_on_release_facts_not_provider_or_image_pin(
         collaborators=MagicMock(),
         list_devices=MagicMock(return_value=[{"device_uuid": "one"}]),
         config=EngineVersionConfig("REL20261014"),
+        lifecycle=SimpleNamespace(cards_for_bots=lambda **_: {"bot-1": [SimpleNamespace(display_state=DisplayState.SERVICE_DRAFT, actions=[BotAction.RESTART])]}),
     )
     result = await service.inspect(bot_id="bot-1", owner_id="owner", caller_id="owner")
     assert result["comparison"] == comparison

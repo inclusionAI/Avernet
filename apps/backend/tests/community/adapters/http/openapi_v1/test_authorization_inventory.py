@@ -331,6 +331,8 @@ def test_scaffolding_burn_down_is_reported():
 #: operation cannot be renamed to escape.
 _DEFERRED_OPERATIONS = frozenset(
     {
+        # Advisory needs visibility + non-raising restart eligibility in core.
+        ("GET", "/openapi/v1/bots/{bot_id}/engine-version"),
         # Not a structural limit: these routes do carry {bot_id} on the path.
         # Each also carries an entity_id the gate would not adjudicate — from
         # the body for apply/diagnose/preview/rollback, from the query string

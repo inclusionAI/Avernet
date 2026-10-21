@@ -41,6 +41,8 @@ export interface EngineVersionObservation {
 }
 
 export interface EngineRestartPermissionInput {
+  /** Trusted advisory response for chat; never sent as authorization on the wire. */
+  backendObservation?: EngineVersionObservation;
   actions: string[];
   disabledActions?: Record<string, string>;
   lockedByOther?: boolean;
@@ -54,6 +56,7 @@ export interface EngineVersionUpdateAvailability {
 }
 
 export interface EngineVersionTarget {
+  permissionSource?: 'backend';
   key: string;
   botId: string;
   userId: string;

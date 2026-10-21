@@ -20,7 +20,6 @@ export function isChatEngineVersionCandidate(input: ChatEngineVersionInput): boo
     origin !== 'mine' ||
     bot.isFriendBot ||
     bot.botType?.trim().toLowerCase() === 'desktop' ||
-    (bot.botType?.trim().toLowerCase() === 'service' && bot.runtimeStage !== 'draft') ||
     !bot.online ||
     bot.status?.toLowerCase() === 'hidden' ||
     !bot.chatable ||
@@ -34,12 +33,12 @@ export function isChatEngineVersionCandidate(input: ChatEngineVersionInput): boo
 
 export function buildChatEngineVersionTarget(input: ChatEngineVersionInput): EngineVersionTarget | null {
   const { bot, section, sessionId, userId } = input;
-  if (!bot || !bot.ownerId || !userId || !sessionId || !isChatEngineVersionCandidate(input) ||
-      (bot.botType?.trim().toLowerCase() === 'service' && bot.serviceLifecycle !== 'draft')) return null;
+  if (!bot || !bot.ownerId || !userId || !sessionId || !isChatEngineVersionCandidate(input)) return null;
   const engine = bot.engine?.trim() ?? '';
   if (!supportsEngineVersion(engine)) return null;
 
   return {
+    permissionSource: 'backend',
     key: `chat:${userId}:${section}:${bot.botId}:${sessionId}`,
     botId: bot.realBotId,
     userId,

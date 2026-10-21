@@ -23,6 +23,7 @@ const input = {
 
 test('只为在线的本人或团队 Bot 单聊建立版本目标并保留权限依据', () => {
   expect(buildChatEngineVersionTarget(input)).toEqual({
+    permissionSource: 'backend',
     key: 'chat:caller-1:managed:bot-1:owner-1:session-1',
     botId: 'bot-1',
     userId: 'caller-1',
@@ -62,7 +63,7 @@ test('保留 Service 计算权限所需的后端动作与阶段字段', () => {
     ...input,
     bot: { ...bot, botType: 'service', runtimeStage: 'online' },
   });
-  expect(onlineService).toBeNull();
+  expect(onlineService?.permissionSource).toBe('backend');
 
   const draftService = buildChatEngineVersionTarget({
     ...input,
@@ -75,9 +76,9 @@ test('仅按后端引擎支持边界判断，不额外排除 OpenClaw/Hermes 模
   expect(buildChatEngineVersionTarget({ ...input, bot: { ...bot, isAgentCodingBot: true } })).not.toBeNull();
 });
 
-test.each(['service', 'SERVICE', ' Service '])('服务 Bot %s 没有可信草稿阶段时不建立版本目标', (botType) => {
-  expect(buildChatEngineVersionTarget({ ...input, bot: { ...bot, botType } })).toBeNull();
-  expect(buildChatEngineVersionTarget({ ...input, bot: { ...bot, botType, runtimeStage: 'verify' } })).toBeNull();
+test.each(['service', 'SERVICE', ' Service '])('服务 Bot %s 没有可信草稿阶段时由后端判定', (botType) => {
+  expect(buildChatEngineVersionTarget({ ...input, bot: { ...bot, botType } })?.permissionSource).toBe('backend');
+  expect(buildChatEngineVersionTarget({ ...input, bot: { ...bot, botType, runtimeStage: 'verify' } })?.permissionSource).toBe('backend');
 });
 
 test('团队引擎请求使用真实 Bot owner，保留实体 ID 作为聊天身份', () => {

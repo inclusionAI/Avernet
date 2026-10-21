@@ -327,3 +327,15 @@ test('the global notification observer does not display an inspection 404', asyn
     jest.useRealTimers();
   }
 });
+
+test('backend-adjudicated chat checks without directory actions and passes the advisory into the existing restart chain', async () => {
+  jest.mocked(botController.getBotEngineVersion).mockResolvedValue({ code: 200000, data: version });
+  const restart = jest.spyOn(botEngineVersionService, 'restartAndConfirmUpdate').mockResolvedValue({ ...version, comparison: 'same', restart_hint: 'none' });
+  const chatTarget = { ...target, permissionSource: 'backend' as const, restartPermission: { actions: [] } };
+  const { result } = renderHook(() => useBotEngineVersions([chatTarget]));
+  try {
+    await waitFor(() => expect(result.current.states[target.key]?.kind).toBe('ready'));
+    await act(async () => { expect(await result.current.update(target.key)).toBe(true); });
+    expect(restart).toHaveBeenCalledWith(expect.objectContaining({ restartPermission: { actions: [], backendObservation: version } }), version, expect.any(Function));
+  } finally { restart.mockRestore(); }
+});
