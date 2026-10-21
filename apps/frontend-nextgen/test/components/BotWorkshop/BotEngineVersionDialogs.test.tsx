@@ -64,9 +64,23 @@ describe('BotEngineVersionDialogs', () => {
   test('keeps the dialog open when no restart request was accepted', async () => {
     const onConfirmUpdate = jest.fn<() => Promise<boolean>>().mockResolvedValue(false);
     render(<BotEngineVersionDialogs {...defaults} infoOpen={false} updateOpen onConfirmUpdate={onConfirmUpdate} />);
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '更新并重启 Bot' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '重启并更新' })); });
     expect(defaults.onCloseUpdate).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: '取消' })).toBeTruthy();
+  });
+
+  test('update dialog shows the designed version transition, update notes and restart warning', () => {
+    render(<BotEngineVersionDialogs {...defaults} infoOpen={false} updateOpen />);
+
+    expect(screen.getByText('确认目标版本后重启更新，不改变 Bot 配置的发布版本。')).toBeTruthy();
+    expect(screen.getByText('当前版本')).toBeTruthy();
+    expect(screen.getByText('最新版本')).toBeTruthy();
+    expect(screen.getByText('1.2.0')).toBeTruthy();
+    expect(screen.getByText('REL-2')).toBeTruthy();
+    expect(screen.getByText('更新内容')).toBeTruthy();
+    expect(screen.getByText(/重启将短暂中断 Bot 服务，请确认当前任务可中断。/)).toBeTruthy();
+    expect(screen.getByText('测试 Bot')).toBeTruthy();
+    expect((screen.getByRole('button', { name: '重启并更新' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   test('closes on restart submission without waiting for version verification', async () => {
@@ -77,7 +91,7 @@ describe('BotEngineVersionDialogs', () => {
       return new Promise<boolean>((resolve) => { finish = resolve; });
     });
     render(<BotEngineVersionDialogs {...defaults} infoOpen={false} updateOpen onConfirmUpdate={onConfirmUpdate} />);
-    fireEvent.click(screen.getByRole('button', { name: '更新并重启 Bot' }));
+    fireEvent.click(screen.getByRole('button', { name: '重启并更新' }));
     expect(defaults.onCloseUpdate).not.toHaveBeenCalled();
     await act(async () => { submitted(); });
     expect(defaults.onCloseUpdate).toHaveBeenCalledTimes(1);

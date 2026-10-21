@@ -54,7 +54,15 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
         id: 'info',
         header: 'Bot信息',
         width: 'w-[clamp(192px,16vw,240px)]',
-        cell: (bot) => <BotInfoCell bot={bot} onClaimLock={onClaimLock} onReleaseLock={onReleaseLock} />,
+        cell: (bot) => (
+          <BotInfoCell
+            bot={bot}
+            onClaimLock={onClaimLock}
+            onReleaseLock={onReleaseLock}
+            engineVersionState={engineVersionStates[botTableEngineVersionKey(bot)]}
+            onOpenEngineUpdate={onUpdateEngineVersion}
+          />
+        ),
       },
       {
         id: 'description',

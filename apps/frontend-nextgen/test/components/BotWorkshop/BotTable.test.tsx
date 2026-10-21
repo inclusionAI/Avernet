@@ -394,6 +394,8 @@ describe('BotTable engine version entry points', () => {
       fireEvent.click(await screen.findByRole('button', { name: /引擎有更新/ }));
       expect(await screen.findByText('1.2.0')).toBeInTheDocument();
       expect(screen.getByText('REL-2')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '取消' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '重启并更新' })).toBeInTheDocument();
       expect(getVersion).toHaveBeenCalledWith(
         'engine-bot',
         expect.objectContaining({
@@ -403,7 +405,7 @@ describe('BotTable engine version entry points', () => {
         }),
       );
 
-      fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+      fireEvent.click(screen.getByRole('button', { name: '取消' }));
       fireEvent.click(screen.getByRole('button', { name: '管理 Engine Bot' }));
       expect(await screen.findByRole('button', { name: '引擎信息' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: '更新引擎版本' })).toBeInTheDocument();

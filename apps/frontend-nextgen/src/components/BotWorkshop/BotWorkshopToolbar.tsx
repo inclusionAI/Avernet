@@ -1,10 +1,11 @@
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { useBotEngineOptions } from '@/hooks/useBotEngineOptions';
 import type { BotDeployment, BotServiceMode } from '@/services/botWorkshop';
-import { Cloud, Search } from 'lucide-react';
+import { Cloud, Plus, Search } from 'lucide-react';
 import React from 'react';
 
 interface BotWorkshopToolbarProps {
@@ -43,6 +44,7 @@ const BotWorkshopToolbar: React.FC<BotWorkshopToolbarProps> = ({
   // 故 value 用哨兵值 'all' 而非 undefined：这样下拉首项「全部」呈现选中态，框内文案
   // 与之一致。三个框靠左侧标题区分，不靠框内文案——去掉标题就会退化成三个「全部」。
   const engineOptions = useBotEngineOptions();
+  const [createOpen, setCreateOpen] = React.useState(false);
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-3">
       <div className="relative w-full sm:w-[240px] sm:shrink-0">
@@ -115,29 +117,68 @@ const BotWorkshopToolbar: React.FC<BotWorkshopToolbarProps> = ({
             重置
           </Button>
         ) : null}
+        {/* 创建入口合并为「创建Bot」主按钮（dmore 稿 artboard-059）：点击弹出气泡选择云端/本地。
+          item 悬停底色按稿取 --selected（#EBEBEB 胶囊）；本地不可创建时置灰并悬停展示原因。 */}
         {onCreateLocal ? (
-          localCreateDisabledReason ? (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex" tabIndex={0}>
-                    <Button variant="outline" disabled aria-describedby="local-create-disabled-reason">
-                      创建本地 Bot
-                    </Button>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent id="local-create-disabled-reason">{localCreateDisabledReason}</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          ) : (
-            <Button variant="outline" onClick={onCreateLocal}>
-              创建本地 Bot
-            </Button>
-          )
-        ) : null}
-        <Button leftIcon={<Cloud className="size-4" />} onClick={onCreateCloud} className="w-full sm:w-auto">
-          创建云端 Bot
-        </Button>
+          <Popover open={createOpen} onOpenChange={setCreateOpen}>
+            <PopoverTrigger asChild>
+              <Button className="w-full sm:w-auto" leftIcon={<Plus aria-hidden className="size-3.5" />}>
+                创建Bot
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-32 rounded-lg p-1.5" aria-label="选择 Bot 创建方式">
+              <div className="space-y-1" role="menu" aria-label="Bot 创建方式">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  role="menuitem"
+                  className="w-full justify-start px-3 hover:bg-selected"
+                  onClick={() => {
+                    setCreateOpen(false);
+                    onCreateCloud();
+                  }}
+                >
+                  创建云端Bot
+                </Button>
+                {localCreateDisabledReason ? (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="block" tabIndex={0} aria-describedby="local-create-disabled-reason">
+                          <Button variant="ghost" size="sm" role="menuitem" disabled className="w-full justify-start px-3">
+                            创建本地Bot
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent id="local-create-disabled-reason">{localCreateDisabledReason}</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    role="menuitem"
+                    className="w-full justify-start px-3 hover:bg-selected"
+                    onClick={() => {
+                      setCreateOpen(false);
+                      onCreateLocal();
+                    }}
+                  >
+                    创建本地Bot
+                  </Button>
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
+        ) : (
+          <Button
+            leftIcon={<Cloud aria-hidden className="size-4" />}
+            onClick={onCreateCloud}
+            className="w-full sm:w-auto"
+          >
+            创建云端 Bot
+          </Button>
+        )}
       </div>
     </div>
   );
