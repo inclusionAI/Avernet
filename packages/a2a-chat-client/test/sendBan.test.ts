@@ -8,7 +8,7 @@
  *   · context 级生命周期：与 provider 实例无关（registry 不持 provider 引用，
  *     两处代码共享同一实例即同键同状态——provider 级断言见 provider.test.ts B12 块）。
  */
-import { createSendBanRegistry } from '@avernet/a2a-chat-client';
+import { createSendBanRegistry } from '../src/index';
 
 describe('SendBanRegistry — §3.1 规则行核销', () => {
   const EP = 'https://eng.example/rpc';

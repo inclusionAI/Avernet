@@ -28,14 +28,14 @@ import {
   RECOVERY_STOPPED_MESSAGE,
   OUTCOME_UNKNOWN_MESSAGE,
   type A2AProviderConfig,
-} from '@avernet/a2a-chat-client';
-import { CANCEL_UI_TEXT, type CancelOutcome } from '@avernet/a2a-chat-client';
-import { createSendBanRegistry } from '@avernet/a2a-chat-client';
-import { loadOpenClawParser, createTcChatParserFactory } from '@/adapters/a2a/tcChatParser';
+} from '../src/index';
+import { CANCEL_UI_TEXT, type CancelOutcome } from '../src/index';
+import { createSendBanRegistry } from '../src/index';
+import { loadOpenClawParser, createOracleParserFactory } from './helpers/oracleLoader';
 import { A2aParserFactoryMissingError, type SdkParser, type SdkParserConfig }
-  from '@avernet/a2a-chat-client';
-import type { WireEvent } from '@avernet/a2a-chat-client';
-import { a2aUrlsFromWsUrl } from '@avernet/a2a-chat-client';
+  from '../src/index';
+import type { WireEvent } from '../src/index';
+import { a2aUrlsFromWsUrl } from '../src/index';
 import { makeEngineCard } from './helpers';
 
 // ─── wire 构造件 ─────────────────────────────────────────────────────────
@@ -230,7 +230,7 @@ function newProvider(overrides: Partial<A2AProviderConfig> = {}) {
     url: 'ws://127.0.0.1:20003/api/a2a/ws',
     a2aUrls: A2A_URLS,
     sessionKey: SESSION,
-    parserFactory: createTcChatParserFactory(),           // 宿主注入默认 @tc-chat 适配
+    parserFactory: createOracleParserFactory(),           // 宿主注入默认 @tc-chat 适配
     ...overrides,
   });
   const spies = {

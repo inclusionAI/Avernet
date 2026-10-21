@@ -3,9 +3,9 @@
  * http://127.0.0.1:20003）时才执行。验证 M1 探测/校验/wire 对真实引擎面。
  * 用例改造时勿脱离引擎实发格式——内联注释引用 wire.py/kernel_event_to_wire。
  */
-import { fetchCard, validateScenarios, Scenario } from '@avernet/a2a-chat-client';
-import { buildRpcRequest } from '@avernet/a2a-chat-client';
-import { streamRpc } from '@avernet/a2a-chat-client';
+import { fetchCard, validateScenarios, Scenario } from '../src/index';
+import { buildRpcRequest } from '../src/index';
+import { streamRpc } from '../src/index';
 
 const TARGET = process.env.A2A_LIVE_TARGET ?? '';
 const d = TARGET ? describe : describe.skip;

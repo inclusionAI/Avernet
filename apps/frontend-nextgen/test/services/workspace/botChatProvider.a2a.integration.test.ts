@@ -58,7 +58,7 @@ const TASK_ID = 'a7821a80a3e7';
 
 /** fixture:真引擎 wire 快照(task → working → 你/好/你好！ → COMPLETED 共 seq 终态对) */
 const snapshotEnvelopes: any[] = (JSON.parse(readFileSync(
-  join(__dirname, '..', '..', 'adapters', 'a2a', 'fixtures', 'engine-wire-snapshot.json'),
+  join(__dirname, '..', '..', '..', '..', '..', 'packages', 'a2a-chat-client', 'test', 'fixtures', 'engine-wire-snapshot.json'),
   'utf8',
 )) as { envelopes: any[] }).envelopes;
 

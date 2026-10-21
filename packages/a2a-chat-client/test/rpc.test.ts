@@ -1,4 +1,4 @@
-import { buildRpcRequest, parseRpcMessage, classifyFailure } from '@avernet/a2a-chat-client';
+import { buildRpcRequest, parseRpcMessage, classifyFailure } from '../src/index';
 
 describe('JSON-RPC 信封（engine sse.py 口径：data 行=完整响应信封）', () => {
   it('请求信封带递增 id', () => {
