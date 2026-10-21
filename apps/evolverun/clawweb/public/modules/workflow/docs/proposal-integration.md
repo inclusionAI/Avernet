@@ -106,8 +106,8 @@ context. The Host dispatches `execution.action=integrate_candidate_v1`. The pair
 TaskGuard schema requires action/input agreement and rejects unknown versions,
 wrong baselines, omitted/duplicate original IDs. Older TaskGuard versions reject
 this new action clearly; they cannot silently ignore the plan and sequentially
-apply the old full Prompt replacements. Single original legacy inputs retain
-`generate_candidate`. Deploy paired producer/consumer revisions before enabling
+apply the old full Prompt replacements. Single original inputs without full-file
+patches retain `generate_candidate`. Deploy paired producer/consumer revisions before enabling
 integrated generation; this change does not build or activate a Snapshot.
 
 ### Compare deployment configuration and Git integrity separately
@@ -115,25 +115,27 @@ integrated generation; this change does not build or activate a Snapshot.
 `baseline.specDigest` remains SHA-256 of the exact tagged Git file bytes;
 `packCommit` and `packDigest` retain commit/tree integrity. The optional
 `baseline.proposalSpecDigest` is canonical JSON SHA-256 of the existing active
-deployment's stored spec. Before producing it, the Host verifies that stored
-configuration against the actual tagged YAML. Only scalar root `version` and
-`updatedAt` metadata follow the existing deployment-history serialization rule;
-unknown fields, nested metadata, business values and array order remain significant.
-The original stored JSON is hashed unchanged, matching analysis input identity.
+deployment's stored spec, hashed unchanged to match analysis input identity.
+These identities serve different purposes: analysis refers to the deployed
+configuration, while generation reads and edits the frozen Git files. A difference
+between those representations does not block drafting or background reconciliation.
 
 New Host adapters provide both identities. Legacy frozen inputs without the
 optional field preserve their prior digest interpretation. This additive metadata
-does not change TaskGuard actions, prompts, input schema or Git verification.
-Original `proposal.baseSpecDigest` is never rewritten. A matching fresh proposal
-uses the existing generation path, including a single original without integration.
+does not introduce TaskGuard actions, prompts, input schema or Git verification.
+Original `proposal.baseSpecDigest` and evidence are never rewritten. Full-file
+`proposal.patches`, even from a single selected original, use the existing integrated
+generation action: reconcile the selected goals against the frozen current files,
+not direct replacement with old file content. Ordinary single structured goals
+retain the existing single-original generation path. Regenerating a failed attempt
+applies the same routing without rewriting already-dispatched inputs.
 A genuinely different or unknown structured proposal baseline is rejected before
 task creation/dispatch with `PROPOSAL_BASELINE_CHANGED` or
 `BASELINE_IDENTITY_UNKNOWN`; classification/model output cannot override this.
 The earlier automatic historical-reevaluation fallback is removed.
 
-`BASELINE_CONTENT_MISMATCH` distinguishes a deployment-record/Git content mismatch.
-The UI retains the specific baseline error and reviewed selection/requirements.
-It also recognizes the exact legacy `SOURCE_CHANGED` baseline error from existing
+The UI still recognizes `BASELINE_CONTENT_MISMATCH` and the exact legacy
+`SOURCE_CHANGED` baseline error from existing
 servers without treating it as list mutation. A baseline changing during
 preparation still rejects before freezing a new task. Evidence, byte limits,
 candidate checks and publication binding retain their existing enforcement.

@@ -80,6 +80,67 @@ it('uses Shanghai daily boundaries and merges missed days', () => {
   expect(automationDue(Date.parse('2026-11-01T01:00:00Z'), '09:00').key).toBe('2026-11-01');
 });
 
+it.each(['policy-yaml', 'notification-yaml', 'policy-null', 'notification-null', 'environment'])('isolates an unrelated invalid %s without losing healthy notifications', async invalid => {
+  const f = await fixture(false, 0);
+  const config = new AppConfigRepository(f.db);
+  await f.settings.save('wf-2', { enabled: false, autoDraft: false, dailyConfigured: false, dailyTime: '09:00', executionEnvironment: 'pre', expectedVersion: 0 }, 'owner');
+  await f.settings.save('wf-2', { enabled: false, autoDraft: false, dailyConfigured: false, dailyTime: '09:00', expectedVersion: 1,
+    notificationRecipients: ['account'], expectedNotificationVersion: 0 }, 'owner');
+  const row = (await config.listAll()).find(row => JSON.parse(row.config_yaml).workflowId === 'wf-2'
+    && row.config_key.startsWith(invalid.startsWith('notification-') ? 'workflow_repair_notify_' : 'task_guard_auto_analyze_'))!;
+  await f.db.exec('UPDATE cm_app_config SET config_yaml = ? WHERE config_key = ?', [invalid === 'environment'
+    ? JSON.stringify({ ...JSON.parse(row.config_yaml), executionEnvironment: 'unknown' }) : invalid.endsWith('-null') ? 'null' : 'broken: [', row.config_key]);
+  const notices = new WorkflowAutomationRepository(f.db);
+  const bad = await notices.ensure('wf-2', 'auto_notice', 'bad-settings', { kind: 'completion', title: 'must not send', text: 'private', path: '/bad' }, 0);
+  const good = await notices.ensure('wf-1', 'auto_notice', 'healthy', { kind: 'completion', title: 'healthy', text: 'ok', path: '/good' }, 0);
+  await expect(f.service.tick()).resolves.toBeGreaterThanOrEqual(0);
+  expect((await notices.get(good.id))?.status).toBe('done');
+  expect(f.ports.notify).toHaveBeenCalledTimes(1);
+  expect(f.ports.notify).toHaveBeenCalledWith(expect.objectContaining({ workflowId: 'wf-1' }));
+  expect(await notices.get(bad.id)).toMatchObject({ status: 'retryable', reason: 'NOTIFICATION_SETTINGS_INVALID', attempts: 0 });
+  await expect(f.settings.get('wf-2')).rejects.toThrow();
+  expect((await createAutoAnalysisSettings({ repo: config, environmentDefault: '*' }).list()).map(policy => policy.workflowId)).toEqual(['wf-1']);
+  await expect(f.host('pre').tick()).resolves.toBeGreaterThanOrEqual(0);
+  expect(f.ports.notify).toHaveBeenCalledTimes(1);
+  await f.db.exec('UPDATE cm_app_config SET config_yaml = ? WHERE config_key = ?', [row.config_yaml, row.config_key]);
+  f.advance(); await f.service.tick();
+  expect(f.ports.notify).toHaveBeenCalledTimes(1);
+  await f.host('pre').tick();
+  expect(await notices.get(bad.id)).toMatchObject({ status: 'done', attempts: 0 });
+  await f.host('pre').tick(); // Persisted recipient children use the next bounded batch.
+  expect(f.ports.notify).toHaveBeenCalledTimes(2);
+  expect(f.ports.notify).toHaveBeenLastCalledWith(expect.objectContaining({ workflowId: 'wf-2', recipientId: 'account' }));
+});
+
+it('defers a batch of invalid settings instead of starving the next healthy notice or retrying unknown sends', async () => {
+  const f = await fixture(false, 0);
+  const config = new AppConfigRepository(f.db), notices = new WorkflowAutomationRepository(f.db);
+  await f.settings.save('wf-2', { enabled: false, autoDraft: false, dailyConfigured: false, dailyTime: '09:00', expectedVersion: 0 }, 'owner');
+  const row = (await config.listByPrefix('task_guard_auto_analyze_')).find(row => JSON.parse(row.config_yaml).workflowId === 'wf-2')!;
+  await f.db.exec('UPDATE cm_app_config SET config_yaml = ? WHERE config_key = ?', ['secret: [', row.config_key]);
+  const logs = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  for (let i = 0; i < 5; i++) await notices.ensure('wf-2', 'auto_notice', `bad-${i}`, { kind: 'completion', title: 'private body', text: 'private body', path: '/bad' }, 0);
+  const good = await notices.ensure('wf-1', 'auto_notice', 'healthy', { kind: 'completion', title: 'healthy', text: 'ok', path: '/good' }, 1);
+  await f.service.tick(); await f.service.tick();
+  expect((await notices.get(good.id))?.status).toBe('done');
+  expect(f.ports.notify).toHaveBeenCalledTimes(1);
+  const unknown = await notices.ensure('wf-2', 'auto_notice', 'interrupted-send', { kind: 'completion', title: 'unknown', text: 'private body', path: '/old' }, 0);
+  const claimed = (await notices.claim(unknown.id, 0))!;
+  await notices.patch(claimed, { status: 'dispatching', attempts: 1 }, 0, true);
+  await f.service.tick();
+  expect((await notices.get(unknown.id))?.status).toBe('uncertain');
+  expect(f.ports.notify).toHaveBeenCalledTimes(1);
+  expect(JSON.stringify(logs.mock.calls)).not.toContain('secret: [');
+  expect(JSON.stringify(logs.mock.calls)).not.toContain('private body');
+});
+
+it('propagates storage outages instead of treating them as malformed configuration', async () => {
+  const f = await fixture(false, 0);
+  const query = vi.spyOn(f.db, 'query').mockRejectedValue(new Error('storage unavailable'));
+  await expect(f.settings.list()).rejects.toThrow('storage unavailable');
+  query.mockRestore();
+});
+
 it('persists the selected environment without enabling analysis or configuring a daily plan', async () => {
   const f = await fixture();
   await f.db.exec('DELETE FROM cm_app_config');

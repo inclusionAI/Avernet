@@ -28,6 +28,15 @@ When pre-production and production share a database, update all instances to thi
 version before selecting `pre`: old consumers do not understand this field and can
 still claim the shared queue. Environment ownership is not a new queue or schema.
 
+Policy discovery skips individually malformed policy/recipient YAML or invalid
+settings, logging `[workflow-automation] invalid settings` without raw contents.
+Direct settings reads remain strict; invalid settings never imply production
+ownership. A notice with invalid settings is deferred for one minute in the existing
+queue (`NOTIFICATION_SETTINGS_INVALID`), without sending or increasing attempts,
+so a malformed workflow cannot occupy every bounded batch. Interrupted sends still
+become uncertain and are never automatically resent. Database failures are not
+classified as invalid settings and remain visible to the caller.
+
 `notificationRecipients` is an optional list of up to 20 account IDs. Empty or
 absent means the current workflow Owner; a configured list replaces that default.
 IDs are trimmed and deduplicated. They are stored in a separate

@@ -7,6 +7,7 @@ export const reasons: Record<string, string> = {
   ANALYSIS_FAILED: '分析失败，可重试该运行的分析', PARTIAL_ANALYSIS: '分析包含未知项，未视为完整覆盖',
   ANALYSIS_OUTCOME_UNKNOWN: '原分析请求结果未知，先核对原请求', DRAFT_REQUEST_REQUIRES_LOOKUP: '正在核对原草稿请求',
   NOTIFICATION_OUTCOME_UNKNOWN: '通知结果未知，请管理员核对；不会自动重发', NOTIFICATION_REJECTED: '通知未送达，只重试通知',
+  NOTIFICATION_SETTINGS_INVALID: '通知配置格式有误，尚未发送；请管理员修正配置，修正后自动继续',
   DRAFT_REQUIRES_MANUAL_REVIEW: '草稿需要处理，请查看原优化任务；符合条件时可重试本条生成', CANDIDATE_SUPERSEDED: '候选已变化，旧通知已停用',
 }
 const kinds: Record<string, string> = { auto_cycle: '每日扫描', auto_run: '运行分析', auto_draft: '优化草稿', auto_notice: '任务通知' }

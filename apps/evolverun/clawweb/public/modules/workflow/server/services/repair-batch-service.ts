@@ -529,6 +529,10 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       // Manual goals are reconciled during drafting; automatic batches retain patch validation.
       if (request.automation) assertProposalBaseline(frozenSelected, baseline);
       const integrated = hasReferences?{instructions:'',integration:historicalIntegration(frozenSelected,baseline)}:!request.automation&&frozenSelected.length>1?{instructions:'',integration:manualIntegration(frozenSelected,baseline)}:request.automation && this.proposals ? await this.proposals.prepare(request.workflowId, selected, baseline) : { instructions: '', integration: undefined };
+      // Full-file source patches are reference goals, not replacements for current Git files.
+      if (!integrated.integration && frozenSelected.some(item => Array.isArray(item.proposal?.patches) && item.proposal.patches.length)) {
+        integrated.integration = manualIntegration(frozenSelected, baseline);
+      }
       const frozenInstructions = [request.instructions, integrated.instructions].filter(Boolean).join('\n\n');
       if (frozenInstructions.length > MAX_INSTRUCTIONS_CHARS) fail('PAYLOAD_TOO_LARGE', '整合目标与说明过长，请缩小本次选择范围');
       if (request.automation && !taskId && canonicalRepairJson(await this.generationBaseline(request.workflowId)) !== canonicalRepairJson(baseline)) fail('STATE_CONFLICT', '生效版本在准备期间再次变化，选择与要求保留', { reasonCode: 'BASELINE_STALE' });
@@ -691,7 +695,8 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         const committed = await repo.findRequest(task.workflowId, request.requestId, digest);
         if (committed) return committed;
         const input = { ...task.latestAttempt.input, revision: request.expectedRevision + 1,
-          ...(!task.latestAttempt.input.automation&&!task.latestAttempt.input.integration&&task.latestAttempt.input.items.length>1
+          ...(!task.latestAttempt.input.integration&&(!task.latestAttempt.input.automation&&task.latestAttempt.input.items.length>1
+            ||task.latestAttempt.input.items.some(item=>Array.isArray(item.proposal?.patches)&&item.proposal.patches.length))
             ?{integration:manualIntegration(task.latestAttempt.input.items,task.latestAttempt.input.baseline)}:{}),
           parentCandidateCommit: typeof task.latestSuccessful?.draft?.candidateCommit === 'string' ? task.latestSuccessful.draft.candidateCommit : null,
           previousReportRef: task.latestSuccessful ? `${taskId}/revisions/${task.latestSuccessful.revision}` : null };

@@ -1,5 +1,5 @@
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
-import type { AutoAnalysisSettings } from './task-guard/auto-analysis-settings.js';
+import { isInvalidAutoAnalysisSettings, type AutoAnalysisSettings } from './task-guard/auto-analysis-settings.js';
 import { RepairAutomationDeniedError, type AutomationWorkbench, type WorkflowAutomationPorts } from '../contracts/workflow-automation.js';
 import { WorkflowAutomationRepository, type AutomationJob } from '../repositories/workflow-automation-repository.js';
 
@@ -12,7 +12,12 @@ export function createWorkflowNotificationDrain(input: {
   const repo = new WorkflowAutomationRepository(input.db);
   const environment = input.environment ?? 'prod';
   async function notify(record: AutomationJob) {
-    if (((await input.settings.get(record.workflowId)).executionEnvironment ?? 'prod') !== environment) return;
+    try {
+      if (((await input.settings.get(record.workflowId)).executionEnvironment ?? 'prod') !== environment) return;
+    } catch (error) {
+      // Claim only to defer this record, never infer an environment from invalid settings.
+      if (!isInvalidAutoAnalysisSettings(error)) throw error;
+    }
     let job = await repo.claim(record.id, now()); if (!job) return;
     const log = (event: string, reason?: string, receipt?: string) => console.info('[workflow-notification]', {
       event, workflowId: job.workflowId, taskId: job.data.taskId ?? null, revision: job.data.revision ?? null,
@@ -41,6 +46,10 @@ export function createWorkflowNotificationDrain(input: {
       actorId = recipientId;
       if (!job.data.fixedRecipient && !await input.ports.canEdit(job.workflowId, actorId)) throw new RepairAutomationDeniedError('OWNER_PERMISSION_DENIED');
     } catch (error) {
+      if (isInvalidAutoAnalysisSettings(error)) {
+        await repo.patch(job, { status: 'retryable', reason: 'NOTIFICATION_SETTINGS_INVALID', nextAtMs: now() + 60000 }, now(), true);
+        log('retryable', 'NOTIFICATION_SETTINGS_INVALID'); return;
+      }
       if (!(error instanceof RepairAutomationDeniedError)) throw error;
       await repo.patch(job, { status: 'retryable', reason: error.message, nextAtMs: now() + 30000 }, now(), true);
       log('retryable', error.message); return;

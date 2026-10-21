@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import YAML from 'yaml';
+import YAML, { YAMLParseError } from 'yaml';
 import type { AppConfigRepository } from '../../repositories/app-config-repository.js';
 import type { AutomationPolicyWrite, WorkflowAutomationPolicy } from '../../contracts/workflow-automation.js';
 export type AutoAnalysisSetting = WorkflowAutomationPolicy;
@@ -12,6 +12,11 @@ export type AutoAnalysisSettings = {
 };
 export type AutoAnalysisConfigRepository = Pick<AppConfigRepository, 'findByKey' | 'compareAndSet' | 'listByPrefix' | 'listWorkflowIds'>;
 const PREFIX = 'task_guard_auto_analyze_';
+export function isInvalidAutoAnalysisSettings(error: unknown): error is Error {
+  return error instanceof YAMLParseError || error instanceof Error && [
+    'INVALID_AUTOMATION_POLICY', 'INVALID_NOTIFICATION_RECIPIENTS', 'AUTOMATION_POLICY_IDENTITY_MISMATCH',
+  ].includes(error.message);
+}
 function configKey(id: string) { return PREFIX + createHash('sha256').update(id).digest('hex').slice(0, 32); }
 function notificationKey(id: string) { return 'workflow_repair_notify_' + createHash('sha256').update(id).digest('hex').slice(0, 32); }
 function recipients(value: unknown): string[] {
@@ -26,9 +31,9 @@ export function createAutoAnalysisSettings(input: { repo: AutoAnalysisConfigRepo
       const row = input.repo ? await input.repo.findByKey(configKey(id)) : null;
       const notice = input.repo ? await input.repo.findByKey(notificationKey(id)) : null;
       const noticeConfig = notice ? YAML.parse(notice.config_yaml) : null;
-      if (noticeConfig && noticeConfig.workflowId !== id) throw new Error('AUTOMATION_POLICY_IDENTITY_MISMATCH');
+      if (notice && (!noticeConfig || noticeConfig.workflowId !== id)) throw new Error('AUTOMATION_POLICY_IDENTITY_MISMATCH');
       const raw = row ? YAML.parse(row.config_yaml) : null;
-      if (raw && raw.workflowId !== id) throw new Error('AUTOMATION_POLICY_IDENTITY_MISMATCH');
+      if (row && (!raw || raw.workflowId !== id)) throw new Error('AUTOMATION_POLICY_IDENTITY_MISMATCH');
       const dailyConfigured = raw?.schemaVersion === 'workflow-automation/v1' && raw.dailyConfigured !== false;
       if (raw?.schemaVersion === 'workflow-automation/v1' && (typeof raw.autoDraft !== 'boolean' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(raw.dailyTime))) throw new Error('INVALID_AUTOMATION_POLICY');
       if (raw?.minimumImpact !== undefined && !['medium', 'high'].includes(raw.minimumImpact)) throw new Error('INVALID_AUTOMATION_POLICY');
@@ -72,12 +77,21 @@ export function createAutoAnalysisSettings(input: { repo: AutoAnalysisConfigRepo
     async list() {
       if (!input.repo) return [];
       const policies: AutoAnalysisSetting[] = [];
+      const invalid = (error: unknown, key: string) => {
+        if (!isInvalidAutoAnalysisSettings(error)) throw error;
+        console.warn('[workflow-automation] invalid settings', { configKey: key,
+          reason: error instanceof YAMLParseError ? 'INVALID_SETTINGS_YAML' : error.message });
+      };
       for (const row of await input.repo.listByPrefix(PREFIX)) {
-        const raw = YAML.parse(row.config_yaml);
-        if (typeof raw?.workflowId === 'string') policies.push(await this.get(raw.workflowId));
+        try {
+          const raw = YAML.parse(row.config_yaml);
+          if (typeof raw?.workflowId === 'string') policies.push(await this.get(raw.workflowId));
+        } catch (error) { invalid(error, row.config_key); }
       }
       const ids = inherited.has('*') ? await input.repo.listWorkflowIds() : [...inherited];
-      for (const id of ids) if (!policies.some(policy => policy.workflowId === id)) policies.push(await this.get(id));
+      for (const id of ids) if (!policies.some(policy => policy.workflowId === id)) {
+        try { policies.push(await this.get(id)); } catch (error) { invalid(error, configKey(id)); }
+      }
       return policies;
     },
     async isEnabled(id) { return (await this.get(id)).enabled; },
