@@ -70,7 +70,16 @@ class TestDeviceApi:
         props_data = props_resp.json()["data"]
         assert props_data["provider_device_id"] == provider_device_id
         assert props_data["status"] == device["status"]
-        assert props_data["provider_device_props"] == device["provider_device_props"]
+        # `device` comes from the public query endpoint
+        # `GET /api/v1/devices/{device_uuid}` (device_router.get_device_info),
+        # which now masks `provider_device_props` to None for security
+        # redaction. The record-level
+        # `GET /api/v1/devices/provider-device/{provider_device_id}/props`
+        # endpoint is deliberately preserved and still returns the stored
+        # provider_device_props, so assert the masked vs unmasked contract
+        # separately instead of cross-comparing the two responses.
+        assert device["provider_device_props"] is None
+        assert props_data["provider_device_props"]
 
     @pytest.mark.asyncio
     async def test_get_device_by_bot_device_uuid(self, api, created_bot):
