@@ -1,8 +1,5 @@
-import { resolveServiceEngineLifecycle } from '@/services/botWorkshop/botLifecycleResolver';
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
-import { listBotInventory } from '@/services/backendApi/bots/botController';
 import { listCollaboratingBots, type CollaboratingBotDto } from '@/services/backendApi/bots/collaboratingBotController';
-import { isEnvelopeFailure } from '@/services/backendApi/types';
 import { mapBotActionPermissions } from './botActionPermissionMapper';
 import { resolveUserId, type ChatBotView } from './botSessionService';
 import type { DomainResult } from './identityService';
@@ -122,59 +119,6 @@ export const teamBotConversationService = {
           if (!bots.has(bot.botId)) bots.set(bot.botId, bot);
         }
         if (!data.items.length || page * PAGE_SIZE >= data.total) break;
-      }
-      // Collaboration summaries omit permissions; inventory is authoritative.
-      const spaces = new Set(
-        [...bots.values()]
-          .filter((bot) => bot.ownerId && bot.engineOwnerId)
-          .map((bot) => bot.spaceId)
-          .filter((id): id is string => Boolean(id)),
-      );
-      for (const spaceId of spaces) {
-        const targets = new Map(
-          [...bots.values()]
-            .filter((bot) => bot.spaceId === spaceId && bot.ownerId && bot.engineOwnerId)
-            .map((bot) => [`${bot.realBotId}:${bot.engineOwnerId}`, bot]),
-        );
-        const pending = new Set([...targets.values()].map((bot) => bot.botId));
-        try {
-          for (let page = 1; ; page += 1) {
-            if (signal?.aborted) throw new Error('请求已取消');
-            const inventory = await listBotInventory(
-              { user_id: requester, page, page_size: PAGE_SIZE },
-              spaceId,
-              signal,
-            );
-            if (isEnvelopeFailure(inventory)) throw new Error('Bot inventory unavailable');
-            const rows = inventory.data?.items;
-            const total = inventory.data?.total;
-            if (!Array.isArray(rows) || typeof total !== 'number' || !Number.isFinite(total) || total < 0) {
-              throw new Error('Bot inventory page is incomplete');
-            }
-            const hasServiceBots = [...targets.values()].some((bot) => bot.botType?.trim().toLowerCase() === 'service');
-            if (hasServiceBots && rows.length !== Math.min(PAGE_SIZE, Math.max(0, total - (page - 1) * PAGE_SIZE))) {
-              throw new Error('Bot inventory page count is inconsistent');
-            }
-            for (const row of rows) {
-              const ownerId = row.owner_entity_id;
-              if (typeof row.bot_id !== 'string' || typeof ownerId !== 'string') continue;
-              const bot = targets.get(`${row.bot_id}:${ownerId}`);
-              if (!bot || bot.spaceId !== spaceId) continue;
-              // A published service card cannot authorize a draft operation.
-              if (bot.botType?.trim().toLowerCase() === 'service') {
-                const lifecycle = resolveServiceEngineLifecycle(row);
-                bot.serviceLifecycle = bot.serviceLifecycle && bot.serviceLifecycle !== lifecycle ? 'unknown' : lifecycle;
-                if (lifecycle !== 'draft') continue;
-              }
-              Object.assign(bot, mapBotActionPermissions(row.actions, row.disabled_actions));
-              pending.delete(bot.botId);
-            }
-            if ((!pending.size && !hasServiceBots) || !rows.length || page * PAGE_SIZE >= total) break;
-          }
-        } catch {
-          for (const bot of targets.values()) bot.serviceLifecycle = undefined;
-          // Management endpoint failure must not prevent chatting.
-        }
       }
       if (signal?.aborted) throw new Error('请求已取消');
       return { ok: true, data: [...bots.values()] };

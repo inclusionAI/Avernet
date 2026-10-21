@@ -78,70 +78,14 @@ test('团队 Coding Bot 保留模板分类字段，避免行标签退化为 Agen
   });
 });
 
-test('从所属团队空间的权威目录读取同 Bot 和实体 owner 的权限', async () => {
-  list.mockResolvedValue({
-    code: 200000,
-    data: { items: [dto({ engine: 'openclaw', space: { space_id: '42', name: 'Team', kind: 'team' } })], total: 1 },
-  });
-  inventory.mockResolvedValue({
-    code: 200000,
-    data: {
-      items: [
-        {
-          bot_id: 'shared',
-          owner_entity_id: 'different-owner',
-          actions: ['restart'],
-          disabled_actions: { restart_publish: '无权发布' },
-        },
-      ],
-      total: 1,
-    },
-  });
+test('目录加载仅返回协作摘要，不扫描任何空间库存', async () => {
+  list.mockResolvedValue({ code: 200000, data: { items: [dto(), dto({ bot_id: 'service', bot_type: 'service', space: { space_id: '43', name: 'Other', kind: 'team' } })], total: 2 } });
   const result = await teamBotConversationService.listBots('human_viewer');
-  expect(inventory).toHaveBeenCalledWith({ user_id: 'viewer', page: 1, page_size: 100 }, '42', undefined);
-  expect(result.ok && result.data[0]).toMatchObject({
-    actions: ['restart'],
-    disabledActions: { restart_publish: '无权发布' },
-    runtimeStage: 'draft',
-    ownerId: 'team-entity',
-    engineOwnerId: 'different-owner',
-  });
-});
-
-test.each([
-  [
-    '错误 owner',
-    {
-      code: 200000,
-      data: {
-        items: [{ bot_id: 'shared', owner_entity_id: 'unrelated-owner', actions: ['restart'] }],
-        total: 1,
-      },
-    },
-  ],
-  [
-    '业务失败携带权限',
-    {
-      code: 500000,
-      data: { items: [{ bot_id: 'shared', owner_entity_id: 'different-owner', actions: ['restart'] }], total: 1 },
-    },
-  ],
-])('权限来源%s时保留聊天且禁用更新', async (_name, response) => {
-  list.mockResolvedValue({ code: 200000, data: { items: [dto()], total: 1 } });
-  inventory.mockResolvedValue(response);
-  expect(await teamBotConversationService.listBots('viewer')).toMatchObject({
-    ok: true,
-    data: [{ actions: [], chatable: true }],
-  });
-});
-
-test('权限请求失败不影响团队聊天', async () => {
-  list.mockResolvedValue({ code: 200000, data: { items: [dto()], total: 1 } });
-  inventory.mockRejectedValue(new Error('unavailable'));
-  expect(await teamBotConversationService.listBots('viewer')).toMatchObject({
-    ok: true,
-    data: [{ actions: [], chatable: true }],
-  });
+  expect(inventory).not.toHaveBeenCalled();
+  expect(result).toMatchObject({ ok: true, data: [
+    { actions: [], chatable: true, ownerId: 'team-entity', engineOwnerId: 'different-owner' },
+    { actions: [], chatable: true, botType: 'service' },
+  ] });
 });
 
 test('团队 Coding Bot 从 template_config 读取模板名，与管理 Bot 目录一致', async () => {
@@ -328,116 +272,10 @@ test('空列表成功、网络失败可重试、未登录不请求', async () =>
   expect(list).not.toHaveBeenCalled();
 });
 
-test('服务 Bot 只从草稿卡读取权限，发布卡不能覆盖', async () => {
-  list.mockResolvedValue({ code: 200000, data: { items: [dto({ bot_type: 'service' })], total: 1 } });
-  inventory.mockResolvedValue({
-    code: 200000,
-    data: {
-      items: [
-        {
-          bot_id: 'shared',
-          owner_entity_id: 'different-owner',
-          display_state: 'service_draft',
-          actions: ['restart'],
-        },
-        { bot_id: 'shared', owner_entity_id: 'different-owner', display_state: 'service_online', actions: [] },
-      ],
-      total: 2,
-    },
-  });
-  expect(await teamBotConversationService.listBots('viewer')).toMatchObject({
-    ok: true,
-    data: [{ actions: ['restart'] }],
-  });
-});
-
-test('跨空间的同名 Bot 不能借用权限', async () => {
-  list.mockResolvedValue({
-    code: 200000,
-    data: {
-      items: [
-        dto({ space: { space_id: '42', name: 'A', kind: 'team' } }),
-        dto({ bot_id: 'other', space: { space_id: '43', name: 'B', kind: 'team' } }),
-      ],
-      total: 2,
-    },
-  });
-  inventory.mockImplementation(async (_params, spaceId) => ({
-    code: 200000,
-    data: {
-      items:
-        spaceId === '43' ? [{ bot_id: 'shared', owner_entity_id: 'different-owner', actions: ['restart'] }] : [],
-      total: spaceId === '43' ? 1 : 0,
-    },
-  }));
-  expect(await teamBotConversationService.listBots('viewer')).toMatchObject({
-    ok: true,
-    data: [{ actions: [] }, { actions: [] }],
-  });
-});
-
-test('未知空间不回退到个人空间权限', async () => {
-  list.mockResolvedValue({ code: 200000, data: { items: [dto({ space: undefined })], total: 1 } });
-  expect(await teamBotConversationService.listBots('viewer')).toMatchObject({ ok: true, data: [{ actions: [] }] });
+test('取消目录加载不读取库存', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const result = await teamBotConversationService.listBots('viewer', controller.signal);
+  expect(result.ok).toBe(false);
   expect(inventory).not.toHaveBeenCalled();
-});
-
-test('传递取消信号并在目标全部匹配后停止分页', async () => {
-  const signal = new AbortController().signal;
-  list.mockResolvedValue({ code: 200000, data: { items: [dto()], total: 1 } });
-  inventory.mockResolvedValue({
-    code: 200000,
-    data: { items: [{ bot_id: 'shared', owner_entity_id: 'different-owner', actions: ['restart'] }], total: 200 },
-  });
-  await teamBotConversationService.listBots('viewer', signal);
-  expect(inventory).toHaveBeenCalledTimes(1);
-  expect(inventory).toHaveBeenCalledWith({ user_id: 'viewer', page: 1, page_size: 100 }, '42', signal);
-});
-
-test('缺少实体 owner 的不可聊天记录不触发权限扫描', async () => {
-  list.mockResolvedValue({ code: 200000, data: { items: [dto({ entity_id: '' })], total: 1 } });
-  expect(await teamBotConversationService.listBots('viewer')).toMatchObject({
-    ok: true,
-    data: [{ chatable: false, actions: [] }],
-  });
-  expect(inventory).not.toHaveBeenCalled();
-});
-
-test('缺少真实 Bot owner 时保留会话但不加载引擎权限', async () => {
-  list.mockResolvedValue({ code: 200000, data: { items: [dto({ owner_id: '' })], total: 1 } });
-  expect(await teamBotConversationService.listBots('viewer')).toMatchObject({ ok: true, data: [{ ownerId: 'team-entity', actions: [] }] });
-  expect(inventory).not.toHaveBeenCalled();
-});
-
-
-test.each([
-  ['service_draft', 'draft'], ['service_online', 'running'], ['service_prestable', 'prestable'], [undefined, 'unknown'],
-])('team Service engine eligibility uses inventory %s, not the chat request stage', async (display_state, expected) => {
-  list.mockResolvedValue({ code: 200000, data: { items: [dto({ bot_type: 'service' })], total: 1 } });
-  inventory.mockResolvedValue({ code: 200000, data: { items: [{
-    bot_id: 'shared', owner_entity_id: 'different-owner', display_state, actions: ['restart'],
-  }], total: 1 } });
-  const result = await teamBotConversationService.listBots('viewer');
-  expect(result.ok && result.data[0].serviceLifecycle).toBe(expected);
-  expect(result.ok && result.data[0].runtimeStage).toBe('draft');
-});
-
-test('mixed Service cards do not establish a draft lifecycle for chat detection', async () => {
-  list.mockResolvedValue({ code: 200000, data: { items: [dto({ bot_type: 'service' })], total: 1 } });
-  inventory.mockResolvedValue({ code: 200000, data: { items: [
-    { bot_id: 'shared', owner_entity_id: 'different-owner', display_state: 'service_draft', actions: ['restart'] },
-    { bot_id: 'shared', owner_entity_id: 'different-owner', display_state: 'service_online', actions: [] },
-  ], total: 2 } });
-  const result = await teamBotConversationService.listBots('viewer');
-  expect(result.ok && result.data[0].serviceLifecycle).toBe('unknown');
-});
-
-
-test.each([{ code: 500000, success: false, data: { items: [], total: 101 } }, { code: 200000, data: {} }, { code: 200000, data: { items: [], total: 101 } }])('drops partial team Service evidence for invalid later page %j', async (failure) => {
-  list.mockResolvedValue({ code: 200000, data: { items: [dto({ bot_type: 'service' })], total: 1 } });
-  inventory.mockResolvedValueOnce({ code: 200000, data: { items: Array.from({ length: 100 }, () => ({
-    bot_id: 'shared', owner_entity_id: 'different-owner', display_state: 'service_draft', actions: ['restart'],
-  })), total: 101 } }).mockResolvedValueOnce(failure as never);
-  const result = await teamBotConversationService.listBots('viewer');
-  expect(result.ok && result.data[0].serviceLifecycle).toBeUndefined();
 });

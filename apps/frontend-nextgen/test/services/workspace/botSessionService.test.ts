@@ -181,7 +181,7 @@ describe('botSessionService', () => {
         {
           botType: 'service',
           runtimeStage: 'draft',
-          actions: ['restart'],
+          actions: [],
           ownerId: 'owner-1',
         },
       ],
@@ -576,90 +576,12 @@ it('listSessionsPage 与收藏分页复用统一标题映射并透传分页参�
   });
 });
 
-describe('owned chat engine permissions from inventory', () => {
-  const dto = {
-    bot_id: 'bot-permission',
-    bot_name: 'permission',
-    owner_entity_id: 'owner',
-    status: 'ACTIVE',
-    engine: 'openclaw',
-  };
-  it('uses authoritative permissions for the same Bot and owner', async () => {
-    ownedMocked.listBots.mockResolvedValue({ data: { items: [dto] } });
-    ownedMocked.listBotInventory.mockResolvedValue({
-      success: true,
-      data: { items: [{ ...dto, actions: ['restart'], disabled_actions: { restart: 'locked' } }], total: 1 },
-    });
+describe('owned directory engine context stays deferred', () => {
+  it.each(['personal', 'service'])('does not scan inventory for %s directory rows', async (bot_type) => {
+    ownedMocked.listBots.mockResolvedValue({ data: { items: [{ bot_id: 'deferred', bot_name: 'Bot', owner_entity_id: 'owner', bot_type, status: 'ACTIVE', engine: 'openclaw' }] } });
+    ownedMocked.listBotInventory.mockClear();
     const result = await botSessionService.listOwnedBots('caller');
-    expect(result.ok && result.data[0]).toMatchObject({
-      actions: ['restart'],
-      disabledActions: { restart: 'locked' },
-    });
-    expect(ownedMocked.listBotInventory).toHaveBeenLastCalledWith({ user_id: 'caller', page: 1, page_size: 100 });
+    expect(result).toMatchObject({ ok: true, data: [{ actions: [], chatable: true, runtimeStage: 'draft' }] });
+    expect(ownedMocked.listBotInventory).not.toHaveBeenCalled();
   });
-  it('does not reuse permissions from a different owner', async () => {
-    ownedMocked.listBots.mockResolvedValue({ data: { items: [dto] } });
-    ownedMocked.listBotInventory.mockResolvedValue({
-      success: true,
-      data: { items: [{ ...dto, owner_entity_id: 'other', actions: ['restart'] }], total: 1 },
-    });
-    const result = await botSessionService.listOwnedBots('caller');
-    expect(result.ok && result.data[0].actions).toEqual([]);
-  });
-  it('keeps directory readable and fails closed if inventory is unavailable', async () => {
-    ownedMocked.listBots.mockResolvedValue({ data: { items: [dto] } });
-    ownedMocked.listBotInventory.mockRejectedValue(new Error('unavailable'));
-    const result = await botSessionService.listOwnedBots('caller');
-    expect(result.ok && result.data[0].actions).toEqual([]);
-  });
-  it('does not trust permission data in a business failure envelope', async () => {
-    ownedMocked.listBots.mockResolvedValue({ data: { items: [dto] } });
-    ownedMocked.listBotInventory.mockResolvedValue({
-      success: false,
-      code: 403000,
-      data: { items: [{ ...dto, actions: ['restart'] }], total: 1 },
-    });
-    const result = await botSessionService.listOwnedBots('caller');
-    expect(result.ok && result.data[0].actions).toEqual([]);
-  });
-});
-
-
-describe('service chat lifecycle evidence', () => {
-  const source = { bot_id: 'service-evidence', bot_name: 'Service', owner_entity_id: 'owner',
-    bot_type: 'service', engine: 'openclaw', status: 'ACTIVE', actions: ['restart'] };
-  it.each([
-    ['service_draft', 'draft'], ['service_online', 'running'], ['service_prestable', 'prestable'], [undefined, 'unknown'],
-  ])('reads %s from inventory even when directory declares restart', async (display_state, expected) => {
-    ownedMocked.listBots.mockResolvedValue({ data: { items: [source] } });
-    ownedMocked.listBotInventory.mockResolvedValue({ code: 200000, data: {
-      items: [{ ...source, display_state }], total: 1,
-    } });
-    const result = await botSessionService.listOwnedBots('caller');
-    expect(result.ok && result.data[0].serviceLifecycle).toBe(expected);
-    expect(result.ok && result.data[0].runtimeStage).toBe('draft');
-  });
-  it('does not infer a draft from a mixed published/draft directory or missing inventory', async () => {
-    ownedMocked.listBots.mockResolvedValue({ data: { items: [source] } });
-    ownedMocked.listBotInventory.mockResolvedValue({ code: 200000, data: {
-      items: [{ ...source, display_state: 'service_draft' }, { ...source, display_state: 'service_online' }], total: 2,
-    } });
-    const result = await botSessionService.listOwnedBots('caller');
-    expect(result.ok && result.data[0].serviceLifecycle).toBe('unknown');
-    ownedMocked.listBotInventory.mockRejectedValue(new Error('unavailable'));
-    const unavailable = await botSessionService.listOwnedBots('caller');
-    expect(unavailable.ok && unavailable.data[0].serviceLifecycle).toBe('unknown');
-  });
-});
-
-
-it.each([{ code: 500000, success: false, data: { items: [], total: 101 } }, { code: 200000, data: {} }, { code: 200000, data: { items: [], total: 101 } }])('drops partial owned Service evidence for invalid later page %j', async (failure) => {
-  const source = { bot_id: 'paged-service', bot_name: 'Service', owner_entity_id: 'owner',
-    bot_type: 'service', engine: 'openclaw', status: 'ACTIVE', actions: ['restart'] };
-  ownedMocked.listBots.mockResolvedValue({ data: { items: [source] } });
-  ownedMocked.listBotInventory.mockResolvedValueOnce({ code: 200000, data: {
-    items: Array.from({ length: 100 }, () => ({ ...source, display_state: 'service_draft' })), total: 101,
-  } }).mockResolvedValueOnce(failure);
-  const result = await botSessionService.listOwnedBots('caller');
-  expect(result.ok && result.data[0].serviceLifecycle).toBe('unknown');
 });

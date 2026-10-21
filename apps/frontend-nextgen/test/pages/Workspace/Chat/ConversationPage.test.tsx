@@ -46,6 +46,10 @@ const emptyList = {
   loadMoreError: null,
 };
 
+jest.mock('@/services/workspace/chatEngineContextService', () => ({
+  loadChatEngineContext: jest.fn(async (bot: ChatBotView) => bot),
+}));
+
 jest.mock('@/hooks/useHumanIdentity', () => ({
   useHumanIdentity: () => ({
     identity: { userId: '101', displayName: '张三', online: true },

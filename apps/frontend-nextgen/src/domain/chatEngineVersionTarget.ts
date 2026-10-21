@@ -2,13 +2,15 @@ import { supportsEngineVersion, type EngineVersionTarget } from '@/domain/botEng
 import type { ConversationBotSection } from '@/domain/conversation/types';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 
-export function buildChatEngineVersionTarget(input: {
+export interface ChatEngineVersionInput {
   bot: ChatBotView | null;
   section: ConversationBotSection | null;
   origin: 'mine' | 'others';
   sessionId: string | null;
   userId: string | null;
-}): EngineVersionTarget | null {
+}
+
+export function isChatEngineVersionCandidate(input: ChatEngineVersionInput): boolean {
   const { bot, section, origin, sessionId, userId } = input;
   if (
     !bot ||
@@ -18,16 +20,22 @@ export function buildChatEngineVersionTarget(input: {
     origin !== 'mine' ||
     bot.isFriendBot ||
     bot.botType?.trim().toLowerCase() === 'desktop' ||
-    (bot.botType?.trim().toLowerCase() === 'service' &&
-      (bot.serviceLifecycle !== 'draft' || bot.runtimeStage !== 'draft')) ||
+    (bot.botType?.trim().toLowerCase() === 'service' && bot.runtimeStage !== 'draft') ||
     !bot.online ||
     bot.status?.toLowerCase() === 'hidden' ||
     !bot.chatable ||
     !bot.ownerId ||
     (bot.isTeamBot && !bot.engineOwnerId)
   )
-    return null;
+    return false;
 
+  return supportsEngineVersion(bot.engine?.trim() ?? '');
+}
+
+export function buildChatEngineVersionTarget(input: ChatEngineVersionInput): EngineVersionTarget | null {
+  const { bot, section, sessionId, userId } = input;
+  if (!bot || !bot.ownerId || !userId || !sessionId || !isChatEngineVersionCandidate(input) ||
+      (bot.botType?.trim().toLowerCase() === 'service' && bot.serviceLifecycle !== 'draft')) return null;
   const engine = bot.engine?.trim() ?? '';
   if (!supportsEngineVersion(engine)) return null;
 
