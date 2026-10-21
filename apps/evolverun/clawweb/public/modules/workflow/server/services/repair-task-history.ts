@@ -1,4 +1,4 @@
-import { boundedRepairJson, RepairBatchError, type RepairRevision } from '../contracts/repair-batch.js';
+import { RepairBatchError, type RepairRevision } from '../contracts/repair-batch.js';
 import type { RepairTaskDetail } from '../contracts/repair-workbench.js';
 const HISTORY_BYTES = 6 * 1024 * 1024;
 export const MAX_TASK_HTTP_BYTES = 8 * 1024 * 1024;
@@ -18,7 +18,9 @@ export function projectTaskHistory(task: RepairTaskDetail, page = 1, pageSize = 
     const visible = new Set([task.latestAttempt.revision, task.latestSuccessful?.revision, ...projection.revisions.map(row => row.revision)]);
     projection.executions = Object.fromEntries(Object.entries(task.executions).filter(([revision]) => visible.has(Number(revision))));
   }
-  const response = JSON.parse(JSON.stringify(projection)) as RepairTaskDetail;
-  boundedRepairJson(response, MAX_TASK_HTTP_BYTES);
-  return response;
+  // This is an HTTP view, not a signed write identity: bound the actual JSON bytes
+  // without recursively canonicalizing the entire multi-megabyte body again.
+  const json = JSON.stringify(projection), actualBytes = Buffer.byteLength(json, 'utf8');
+  if (actualBytes > MAX_TASK_HTTP_BYTES) throw new RepairBatchError('PAYLOAD_TOO_LARGE', 'Repair payload exceeds its byte limit', { limit: MAX_TASK_HTTP_BYTES, actualBytes });
+  return JSON.parse(json) as RepairTaskDetail;
 }

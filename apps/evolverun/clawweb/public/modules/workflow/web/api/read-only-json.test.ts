@@ -62,4 +62,12 @@ describe('bounded repair reads', () => {
     vi.stubGlobal('fetch',vi.fn(async(url:string)=>({ok:true,json:async()=>page(url.includes('metadataPage=2')?2:1,url.includes('metadataPage=2')?'changed':'same')})))
     await expect(repairBatches.candidates('wf-1')).rejects.toThrow('建议来源已变化')
   })
+  it('returns an explicitly requested candidate page without waiting for unrelated metadata pages', async () => {
+    const urls:string[]=[];
+    vi.stubGlobal('fetch',vi.fn(async(url:string)=>{urls.push(url);return {ok:true,json:async()=>({items:[{itemId:'current-page'}],page:{page:2,totalPages:3},metadata:{page:1,totalPages:20}})}}));
+    const result=await repairBatches.candidates('wf-1',{page:2,metadataPage:1});
+    expect(result.items.map(item=>item.itemId)).toEqual(['current-page']);
+    expect(result.page.page).toBe(2);expect(urls).toHaveLength(1);
+    expect(urls[0]).toContain('metadataPage=1');expect(urls[0]).toContain('page=2');
+  })
 })

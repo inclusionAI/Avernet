@@ -79,6 +79,34 @@ it('shows one primary action, durable failed deployment status and Git links ins
 beforeEach(() => { sessionStorage.clear(); Object.values(repairApi).forEach(mock => mock.mockReset()); repairApi.diff.mockResolvedValue({ files: [], truncated: false }) })
 afterEach(() => vi.useRealTimers())
 
+it('requests only the displayed candidate page when adjusting scope, not all workflow metadata pages', async () => {
+  repairApi.task.mockResolvedValue(taskDetail('review', '候选', ['item-1'])); repairApi.candidates.mockResolvedValue(candidates());
+  render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit onClose={() => {}} onChanged={() => {}} />);
+  await userEvent.click(await screen.findByRole('button', { name: '调整建议与要求', exact: true }));
+  await screen.findByRole('checkbox', { name: '选择修订项 新出现的修复建议' });
+  expect(repairApi.candidates).toHaveBeenCalledWith('wf-1', expect.objectContaining({ page: 1, pageSize: 20, metadataPage: 1 }));
+});
+
+it('allows editing frozen choices while suggestions load and preserves edits when the response arrives', async () => {
+  repairApi.task.mockResolvedValue(taskDetail('review', '候选', ['item-1', 'item-2']));
+  let finish!: (value: ReturnType<typeof candidates>) => void;
+  repairApi.candidates.mockImplementation(() => new Promise(resolve => { finish = resolve }));
+  render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit onClose={() => {}} onChanged={() => {}} />);
+  await userEvent.click(await screen.findByRole('button', { name: '调整建议与要求', exact: true }));
+  const original = screen.getByRole('checkbox', { name: '选择修订项 修复建议 1' });
+  expect(original).toBeEnabled();
+  await userEvent.click(original);
+  await userEvent.type(screen.getByRole('textbox', { name: '修改反馈' }), '保留已有约束');
+  expect(screen.getByRole('button', { name: '生成新版本' })).toBeDisabled();
+  await act(async () => { finish(candidates()) });
+  expect(original).not.toBeChecked();
+  expect(screen.getByRole('checkbox', { name: '选择修订项 修复建议 2' })).toBeChecked();
+  expect(screen.getByRole('checkbox', { name: '选择修订项 新出现的修复建议' })).not.toBeChecked();
+  expect(screen.getByRole('textbox', { name: '修改反馈' })).toHaveValue('保留已有约束');
+  expect(screen.getByRole('button', { name: '生成新版本' })).toBeEnabled();
+  expect(repairApi.revise).not.toHaveBeenCalled();
+});
+
 it('shows no execution record for a historical failure when only the latest execution is available', async () => {
   const detail = taskDetail('review', '最新成功候选')
   detail.latestAttempt.revision = 6

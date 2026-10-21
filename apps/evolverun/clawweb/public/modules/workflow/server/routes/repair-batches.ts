@@ -84,7 +84,7 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
     return actor;
   }
   async function taskAccess(request: Request, response: Response, mode: 'view' | 'edit') {
-    const task = await service.task(text(request.params.taskId, 'taskId'));
+    const task = await repairStage('task_detail', () => service.task(text(request.params.taskId, 'taskId')));
     const actor = await access(request, response, task.workflowId, mode);
     return actor ? { task, actor } : null;
   }
@@ -171,7 +171,7 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
   router.get('/:taskId', handle(async (req, res) => {
     const selected = await taskAccess(req, res, 'view');
     if (selected) res.json(projectTaskHistory({ ...selected.task,
-      ...(input.release ? { release: await input.release.detail(selected.task.taskId),
+      ...(input.release ? { release: await repairStage('release_detail', () => input.release!.detail(selected.task.taskId, selected.task.latestSuccessful?.revision ?? null)),
         capabilities: { ...selected.task.capabilities, publication: input.release.configured && selected.actor.canEdit } } : {}) }, positive(req.query.revisionPage, 'revisionPage', 1), positive(req.query.revisionPageSize, 'revisionPageSize', 20, 20)));
   }));
   function release() {

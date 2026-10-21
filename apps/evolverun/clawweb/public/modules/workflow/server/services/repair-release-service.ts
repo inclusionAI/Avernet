@@ -33,10 +33,10 @@ export function createRepairReleaseService(input: {
     if (!input.publisher) throw new RepairBatchError('CAPABILITY_UNAVAILABLE', '当前宿主尚未接入精确候选部署能力');
     return input.publisher;
   }
-  async function detail(taskId: string) {
-    const task = await workbench.task(taskId);
+  async function detail(taskId: string, latestSuccessfulRevision?: number | null) {
+    const revision = latestSuccessfulRevision === undefined ? (await workbench.task(taskId)).latestSuccessful?.revision : latestSuccessfulRevision;
     const approvals = await repo.list<RepairApproval>(taskId, 'approval');
-    const selected = approvals.filter(a => a.revision === task.latestSuccessful?.revision)
+    const selected = approvals.filter(a => a.revision === revision)
       .sort((a, b) => b.stateVersion - a.stateVersion)[0];
     return { approval: selected ?? null, deployments: await repo.list<RepairDeployment>(taskId, 'deployment'),
       repositoryWebUrl: input.publisher?.repositoryWebUrl?.() };

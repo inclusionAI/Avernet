@@ -77,7 +77,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     let current = true
     setFeedbackCandidatesLoading(true)
     setFeedbackCandidatesError('')
-    repairBatches.candidates(workflowId, { ...(detail?.latestAttempt.input.items[0]?.context?.targetSnapshot ? { versionScope: 'all' as const } : {}), state: 'pending', page: feedbackPage, pageSize: 20, includeHistorical: detail?.latestAttempt.input.items[0]?.context?.targetSnapshot ? true : includeHistorical })
+    repairBatches.candidates(workflowId, { metadataPage: 1, ...(detail?.latestAttempt.input.items[0]?.context?.targetSnapshot ? { versionScope: 'all' as const } : {}), state: 'pending', page: feedbackPage, pageSize: 20, includeHistorical: detail?.latestAttempt.input.items[0]?.context?.targetSnapshot ? true : includeHistorical })
       .then(async result => {
         if (!current || !detail) return
         const key=`${taskId}:${detail.latestAttempt.revision}`
@@ -122,6 +122,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
       setInstructions(detail.latestAttempt.input.instructions)
       setFeedback(detail.latestAttempt.phase === 'failed' ? detail.latestAttempt.input.feedback : '')
       const originals=feedbackItems(detail);setFrozenFeedbackItems(originals);setFeedbackItemIds(originals.map(item=>item.itemId))
+      loadedFeedbackScope.current=!detail.latestAttempt.input.automation?.roundId||originals.length>=(detail.scopeItemCount??0)?key:''
       setFeedbackPage(1); setFeedbackCandidates(null); setFeedbackCandidatesError('')
       requestId.current = ''; requestPayloadKey.current = ''
     }
@@ -248,7 +249,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
         const title = frozenItemTitle(item)
         return <label key={item.itemId} className="flex items-start gap-3 rounded-lg border border-input/50 p-3 text-xs text-muted-foreground">
           <input type="checkbox" aria-label={`选择修订项 ${title}`} checked={feedbackItemIds.includes(item.itemId)}
-            disabled={busy || readOnly || feedbackCandidatesLoading || (!feedbackItemIds.includes(item.itemId) && feedbackItemIds.length >= maxItems)}
+            disabled={busy || readOnly || feedbackCandidatesLoading && (!frozenIds.has(item.itemId) || loadedFeedbackScope.current !== editorRevision.current) || (!feedbackItemIds.includes(item.itemId) && feedbackItemIds.length >= maxItems)}
             onChange={() => setFeedbackItemIds(current => current.includes(item.itemId)
               ? current.filter(id => id !== item.itemId) : [...current, item.itemId])}
             className="mt-0.5 h-4 w-4 rounded border-input accent-primary" />

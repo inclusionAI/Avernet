@@ -1,6 +1,6 @@
 import {repairReleaseMigrations} from '@avernet/clawweb-shared/server/schema-repair-release';
 // @vitest-environment node
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import type { Server } from 'node:http';
 import { gzipSync } from 'node:zlib';
@@ -9,15 +9,18 @@ import { createRepairBatchesRouter } from '../repair-batches.js';
 import { repairFixture } from '../../services/__tests__/repair-batch-fixtures.js';
 import { createRepairSourcePort } from '../../repositories/repair-source-adapter.js';
 import { digestRepairJson } from '../../contracts/repair-batch.js';
+import { createRepairReleaseService } from '../../services/repair-release-service.js';
 
 describe('repair workbench HTTP authorization and lifecycle', () => {
   const close: Array<() => Promise<void>> = [];
   afterEach(async () => { for (const fn of close.splice(0)) await fn(); });
-  async function setup(enabled = true) {
+  async function setup(enabled = true, withRelease = false) {
     const f = await repairFixture();
     const service = createRepairWorkbenchService(f.db, f.sourcePort, enabled ? f.executionPort : undefined);
+    if (withRelease) for (const migration of repairReleaseMigrations) for (const sql of migration.sql) await f.db.exec(f.db.dialect.renderDdl(sql));
     const app = express(); app.use(express.json({ limit: '10mb' }));
     app.use('/api/workflow-repairs', createRepairBatchesRouter({ service,
+      ...(withRelease ? { release: createRepairReleaseService({ db: f.db, workbench: service }) } : {}),
       async authorize(req, workflowId) {
         // A test composition root; production uses the separately tested verified principal resolver.
         const role = req.get('x-test-role');
@@ -38,6 +41,19 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     }
     return { ...f, service, request };
   }
+  it('reads frozen task history only once when serving task and release details together', async () => {
+    const f = await setup(true, true);
+    const inbox = await f.request('/candidates?workflowId=wf-1');
+    const created = await f.request('/', { workflowId: 'wf-1', inputDigest: inbox.body.inputDigest,
+      itemIds: ['item-0'], instructions: '', requestId: 'one-task-read' });
+    const query = vi.spyOn(f.db, 'query');
+    const result = await f.request(`/${created.body.taskId}`);
+    const reads = query.mock.calls.filter(([sql]) => sql.startsWith('SELECT * FROM workflow_repair_revisions WHERE workflow_id = ? AND task_id = ? ORDER BY revision DESC'));
+    query.mockRestore();
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ latestAttempt: { revision: 1 }, release: { approval: null, deployments: [] } });
+    expect(reads).toHaveLength(1);
+  });
   it('returns a definite pre-creation failure instead of an unknown write result when the deployed pack cannot be read', async () => {
     const f = await setup();
     const inbox = await f.request('/candidates?workflowId=wf-1');

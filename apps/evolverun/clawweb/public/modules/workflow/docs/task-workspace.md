@@ -33,6 +33,19 @@ retains execution metadata with previously loaded revision pages. Legacy
 used as a fallback for a selected historical revision. No schema or execution-state
 transition changes are required.
 
+Task HTTP reads reuse the already-read successful revision for release details,
+rather than loading the complete frozen history twice. Transport byte limits use
+the actual JSON body, not the write-identity canonicalizer. Write digests and the
+existing response limit are unchanged. Existing request diagnostics separate
+`task_detail` and `release_detail` timing.
+
+Scope adjustment requests only the current candidate page, not all metadata pages
+used by the issue browser. Complete frozen choices and requirement/feedback fields
+are editable while pending suggestions load; generation still waits for the fresh
+read. Response arrival never resets edits or silently selects new suggestions.
+Automatic scopes spanning multiple history pages still finish loading their full
+original scope before enabling its choices. No persistent cache is introduced.
+
 ## Starting another optimization task
 
 After a confirmed publication, **开始下一轮优化** opens the existing problem and

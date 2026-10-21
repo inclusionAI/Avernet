@@ -2,13 +2,22 @@
 import { afterEach, expect, it } from 'vitest';
 import { repairFixture } from './repair-batch-fixtures.js';
 import { createRepairWorkbenchService } from '../repair-batch-service.js';
-import { projectTaskHistory } from '../repair-task-history.js';
+import { projectTaskHistory, MAX_TASK_HTTP_BYTES } from '../repair-task-history.js';
 import { createRepairBatchesRouter } from '../../routes/repair-batches.js';
 import { RepairTaskRepository } from '../../repositories/repair-task-repository.js';
 import express from 'express';
 import type { Server } from 'node:http';
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0)) await close(); });
+it('keeps the HTTP JSON byte limit and optional-field behavior without canonicalizing the view',async()=>{
+ const f=await repairFixture(1);cleanup.push(()=>f.db.close());
+ const service=createRepairWorkbenchService(f.db,f.sourcePort,f.executionPort);
+ const first=await service.create('owner',{workflowId:'wf-1',itemIds:['item-0'],inputDigest:(await service.candidates('wf-1')).inputDigest,requestId:'http-bytes',instructions:''});
+ const task=await service.task(first.taskId);
+ expect(projectTaskHistory({...task,title:undefined})).not.toHaveProperty('title');
+ try { projectTaskHistory({...task,title:'界'.repeat(Math.ceil(MAX_TASK_HTTP_BYTES/3))});expect.fail('oversized HTTP response must fail'); }
+ catch(error){expect(error).toMatchObject({code:'PAYLOAD_TOO_LARGE',details:{limit:MAX_TASK_HTTP_BYTES}});expect((error as any).details.actualBytes).toBeGreaterThan(MAX_TASK_HTTP_BYTES);}
+});
 it('keeps an internal task larger than 8MiB and pages its complete frozen history over bounded HTTP', async () => {
   const f = await repairFixture(1); cleanup.push(() => f.db.close());
   const service = createRepairWorkbenchService(f.db, f.sourcePort, f.executionPort);
