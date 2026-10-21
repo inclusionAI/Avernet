@@ -38,6 +38,8 @@ const version = {
 };
 
 beforeEach(() => {
+  jest.mocked(toast.error).mockClear();
+  jest.mocked(toast.success).mockClear();
   jest.mocked(botController.getBotEngineVersion).mockReset();
   jest.mocked(botController.getBotEngineStatus).mockReset();
   jest.mocked(botController.restartBotEngine).mockReset();
@@ -167,6 +169,7 @@ describe('useBotEngineVersions', () => {
     const signal = restart.mock.calls[0][0].signal;
     rerender({ targets: nextTargets });
     expect(signal?.aborted).toBe(true);
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('已停止引擎版本确认'));
     await act(async () => { finish(version); await pending; });
     expect(result.current.states[target.key]?.kind).not.toBe('updating');
     restart.mockRestore();
@@ -220,4 +223,27 @@ describe('useBotEngineVersions', () => {
     expect(restartAndConfirm).not.toHaveBeenCalled();
     restartAndConfirm.mockRestore();
   });
+});
+
+
+test('stops service version verification when the card leaves draft', async () => {
+  jest.mocked(botController.getBotEngineVersion).mockResolvedValue({ code: 200000, data: version });
+  const service: EngineVersionTarget = { ...target, restartPermission: { actions: ['restart'], serviceBot: true, runtimeStage: 'draft' } };
+  let finish: (value: typeof version) => void = () => undefined;
+  const restart = jest.spyOn(botEngineVersionService, 'restartAndConfirmUpdate').mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+  try {
+    const { result, rerender } = renderHook(({ targets }: { targets: EngineVersionTarget[] }) => useBotEngineVersions(targets), { initialProps: { targets: [service] } });
+    await waitFor(() => expect(result.current.states[target.key]?.kind).toBe('ready'));
+    let pending!: Promise<boolean>;
+    act(() => { pending = result.current.update(target.key); });
+    const signal = restart.mock.calls[0][0].signal;
+    rerender({ targets: [{ ...service, enabled: false, restartPermission: { ...service.restartPermission, runtimeStage: undefined } }] });
+    expect(signal?.aborted).toBe(true);
+    expect(result.current.states[target.key]?.kind).toBe('idle');
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('已停止引擎版本确认'));
+    await act(async () => { finish(version); await pending; });
+    expect(botController.getBotEngineVersion).toHaveBeenCalledTimes(1);
+  } finally {
+    restart.mockRestore();
+  }
 });

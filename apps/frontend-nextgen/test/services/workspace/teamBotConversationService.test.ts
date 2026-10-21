@@ -429,3 +429,36 @@ test('缺少真实 Bot owner 时保留会话但不加载引擎权限', async () 
   expect(await teamBotConversationService.listBots('viewer')).toMatchObject({ ok: true, data: [{ ownerId: 'team-entity', actions: [] }] });
   expect(inventory).not.toHaveBeenCalled();
 });
+
+
+test.each([
+  ['service_draft', 'draft'], ['service_online', 'running'], ['service_prestable', 'prestable'], [undefined, 'unknown'],
+])('team Service engine eligibility uses inventory %s, not the chat request stage', async (display_state, expected) => {
+  list.mockResolvedValue({ code: 200000, data: { items: [dto({ bot_type: 'service' })], total: 1 } });
+  inventory.mockResolvedValue({ code: 200000, data: { items: [{
+    bot_id: 'shared', owner_entity_id: 'different-owner', display_state, actions: ['restart'],
+  }], total: 1 } });
+  const result = await teamBotConversationService.listBots('viewer');
+  expect(result.ok && result.data[0].serviceLifecycle).toBe(expected);
+  expect(result.ok && result.data[0].runtimeStage).toBe('draft');
+});
+
+test('mixed Service cards do not establish a draft lifecycle for chat detection', async () => {
+  list.mockResolvedValue({ code: 200000, data: { items: [dto({ bot_type: 'service' })], total: 1 } });
+  inventory.mockResolvedValue({ code: 200000, data: { items: [
+    { bot_id: 'shared', owner_entity_id: 'different-owner', display_state: 'service_draft', actions: ['restart'] },
+    { bot_id: 'shared', owner_entity_id: 'different-owner', display_state: 'service_online', actions: [] },
+  ], total: 2 } });
+  const result = await teamBotConversationService.listBots('viewer');
+  expect(result.ok && result.data[0].serviceLifecycle).toBe('unknown');
+});
+
+
+test.each([{ code: 500000, success: false, data: { items: [], total: 101 } }, { code: 200000, data: {} }, { code: 200000, data: { items: [], total: 101 } }])('drops partial team Service evidence for invalid later page %j', async (failure) => {
+  list.mockResolvedValue({ code: 200000, data: { items: [dto({ bot_type: 'service' })], total: 1 } });
+  inventory.mockResolvedValueOnce({ code: 200000, data: { items: Array.from({ length: 100 }, () => ({
+    bot_id: 'shared', owner_entity_id: 'different-owner', display_state: 'service_draft', actions: ['restart'],
+  })), total: 101 } }).mockResolvedValueOnce(failure as never);
+  const result = await teamBotConversationService.listBots('viewer');
+  expect(result.ok && result.data[0].serviceLifecycle).toBeUndefined();
+});

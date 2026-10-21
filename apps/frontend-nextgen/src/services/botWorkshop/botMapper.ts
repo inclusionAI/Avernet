@@ -169,6 +169,7 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, cu
     canUpgradeToService,
     lifecycle: lifecycle(dto, warnings),
     rawStatus: asString(dto.status),
+    rawDisplayState: asString(dto.display_state),
     rawPublishStatus: asString(asRecord(dto.publish).status) ?? asString(dto.publish_status),
     runtime,
     harnessContext: entityId

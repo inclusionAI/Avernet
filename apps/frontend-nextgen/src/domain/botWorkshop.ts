@@ -49,6 +49,7 @@ export interface BotDomain {
   lifecycle: BotLifecycle;
   rawStatus?: string;
   rawPublishStatus?: string;
+  rawDisplayState?: string;
   runtime: BotRuntimeDomain;
   harnessContext?: BotHarnessContext;
   healthScore?: number;

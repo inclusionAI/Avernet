@@ -111,12 +111,15 @@ export function useBotEngineVersions(targets: EngineVersionTarget[]): UseBotEngi
     for (const key of updateLocks.current) {
       const before = previousTargets.current.get(key);
       const after = targetByKey.get(key);
-      if (before && after && before.botId === after.botId && before.userId === after.userId && before.ownerId === after.ownerId && before.engine === after.engine) {
+      if (before && after && (!after.restartPermission.serviceBot || after.restartPermission.runtimeStage === 'draft') && before.botId === after.botId && before.userId === after.userId && before.ownerId === after.ownerId && before.engine === after.engine) {
         continuingUpdates.add(key);
       }
     }
     for (const [key, controller] of activeRequests.current) {
       if (!continuingUpdates.has(key)) {
+        if (updateLocks.current.has(key)) {
+          toast.error('当前 Bot 已不满足版本检查条件，已停止引擎版本确认，请刷新查看运行状态');
+        }
         controller.abort();
         activeRequests.current.delete(key);
       }

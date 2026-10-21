@@ -272,12 +272,12 @@ describe('botEngineVersionService.getUpdateAvailability', () => {
     ).toEqual({ enabled: false, disabledReason: '服务 Bot 仅支持在草稿阶段更新引擎版本。' });
   });
 
-  test('maps list lifecycle through the shared runtime-stage resolver', () => {
+  test('does not treat an offline service as a restartable draft', () => {
     const offlineService = { ...bot, serviceMode: 'service' as const, lifecycle: 'offline' as const };
-    expect(botEngineVersionService.getRestartPermissionInput(offlineService).runtimeStage).toBe('draft');
+    expect(botEngineVersionService.getRestartPermissionInput(offlineService).runtimeStage).toBeUndefined();
     expect(
       botEngineVersionService.getRestartPermission(botEngineVersionService.getRestartPermissionInput(offlineService))
         .allowed,
-    ).toBe(true);
+    ).toBe(false);
   });
 });
