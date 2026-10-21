@@ -1,6 +1,8 @@
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import type { IdentityView } from '@/domain/collaboration';
 import type { ConversationSessionRequestRange } from '@/domain/conversation/types';
+import type { BotLifecycle } from '@/domain/botWorkshop';
+import { resolveServiceEngineLifecycle } from '@/services/botWorkshop/botLifecycleResolver';
 import { resolveOpenApiUserId } from '@/domain/userIdentity';
 import {
   listBotInventory,
@@ -46,6 +48,8 @@ export interface ChatBotView {
   actions?: string[];
   disabledActions?: Record<string, string>;
   botType?: string;
+  /** Inventory-backed lifecycle for service engine checks; request stage is not lifecycle proof. */
+  serviceLifecycle?: BotLifecycle;
   isAgentCodingBot?: boolean;
   templateType?: string;
   templateName?: string;
@@ -277,16 +281,31 @@ async function fetchOwnedBots(
     // inventory contract, matching both Bot and owner; missing data fails closed.
     const missingPermissions = owned.filter((bot) => !Array.isArray(bot.actions));
     const permissions = new Map<string, ReturnType<typeof mapBotActionPermissions>>();
-    if (missingPermissions.length) {
+    const serviceLifecycles = new Map<string, BotLifecycle>();
+    const hasServiceBots = owned.some((bot) => bot.bot_type?.trim().toLowerCase() === 'service');
+    if (missingPermissions.length || hasServiceBots) {
       try {
         for (let page = 1; ; page += 1) {
           const inventory = await listBotInventory({ user_id: resolveUserId(userId), page, page_size: 100 });
-          if (isEnvelopeFailure(inventory)) break;
-          const rows = inventory.data?.items ?? [];
+          if (isEnvelopeFailure(inventory)) throw new Error('Bot inventory unavailable');
+          const rows = inventory.data?.items;
+            const total = inventory.data?.total;
+            if (!Array.isArray(rows) || typeof total !== 'number' || !Number.isFinite(total) || total < 0) {
+              throw new Error('Bot inventory page is incomplete');
+            }
+            if (hasServiceBots && rows.length !== Math.min(100, Math.max(0, total - (page - 1) * 100))) {
+              throw new Error('Bot inventory page count is inconsistent');
+            }
           for (const row of rows) {
             const ownerId = row.owner_entity_id ?? row.owner_id;
             const source = owned.find((bot) => bot.bot_id === row.bot_id && bot.owner_entity_id === ownerId);
-            if (source?.bot_type?.toLowerCase() === 'service' && row.display_state !== 'service_draft') continue;
+            if (source?.bot_type?.trim().toLowerCase() === 'service') {
+              const key = `${row.bot_id}:${String(ownerId)}`;
+              const lifecycle = resolveServiceEngineLifecycle(row);
+              const previous = serviceLifecycles.get(key);
+              serviceLifecycles.set(key, previous && previous !== lifecycle ? 'unknown' : lifecycle);
+              if (lifecycle !== 'draft') continue;
+            }
             if (typeof row.bot_id === 'string' && ownerId !== undefined && ownerId !== null) {
               permissions.set(
                 `${row.bot_id}:${String(ownerId)}`,
@@ -294,16 +313,21 @@ async function fetchOwnedBots(
               );
             }
           }
-          if (rows.length < 100 || page * 100 >= (inventory.data?.total ?? 0)) break;
+          if (rows.length < 100 || page * 100 >= total) break;
         }
       } catch {
+        serviceLifecycles.clear();
         // Directory access must survive an unavailable management endpoint.
       }
     }
     const items = owned.map((dto) => {
       const bot = toOwnedBotView(dto);
       const permission = !Array.isArray(dto.actions) ? permissions.get(`${bot.realBotId}:${bot.ownerId}`) : undefined;
-      return permission ? { ...bot, ...permission } : bot;
+      return { ...bot, ...permission,
+        ...(bot.botType?.trim().toLowerCase() === 'service'
+          ? { serviceLifecycle: serviceLifecycles.get(`${bot.realBotId}:${bot.ownerId}`) ?? 'unknown' as const }
+          : {}),
+      };
     });
     return {
       ok: true,

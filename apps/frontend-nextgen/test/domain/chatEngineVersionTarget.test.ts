@@ -62,11 +62,11 @@ test('保留 Service 计算权限所需的后端动作与阶段字段', () => {
     ...input,
     bot: { ...bot, botType: 'service', runtimeStage: 'online' },
   });
-  expect(onlineService?.restartPermission).toMatchObject({ serviceBot: true, runtimeStage: 'online' });
+  expect(onlineService).toBeNull();
 
   const draftService = buildChatEngineVersionTarget({
     ...input,
-    bot: { ...bot, botType: 'service', runtimeStage: 'draft' },
+    bot: { ...bot, botType: 'service', serviceLifecycle: 'draft', runtimeStage: 'draft' },
   });
   expect(draftService?.restartPermission).toMatchObject({ serviceBot: true, runtimeStage: 'draft' });
 });
@@ -75,13 +75,9 @@ test('仅按后端引擎支持边界判断，不额外排除 OpenClaw/Hermes 模
   expect(buildChatEngineVersionTarget({ ...input, bot: { ...bot, isAgentCodingBot: true } })).not.toBeNull();
 });
 
-test('服务 Bot 目录没有阶段时使用草稿操作阶段', () => {
-  const target = buildChatEngineVersionTarget({ ...input, bot: { ...bot, botType: 'service' } });
-  expect(target?.restartPermission).toMatchObject({
-    serviceBot: true,
-    runtimeStage: 'draft',
-    actions: ['restart'],
-  });
+test.each(['service', 'SERVICE', ' Service '])('服务 Bot %s 没有可信草稿阶段时不建立版本目标', (botType) => {
+  expect(buildChatEngineVersionTarget({ ...input, bot: { ...bot, botType } })).toBeNull();
+  expect(buildChatEngineVersionTarget({ ...input, bot: { ...bot, botType, runtimeStage: 'verify' } })).toBeNull();
 });
 
 test('团队引擎请求使用真实 Bot owner，保留实体 ID 作为聊天身份', () => {

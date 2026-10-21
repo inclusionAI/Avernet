@@ -18,6 +18,8 @@ export function buildChatEngineVersionTarget(input: {
     origin !== 'mine' ||
     bot.isFriendBot ||
     bot.botType?.trim().toLowerCase() === 'desktop' ||
+    (bot.botType?.trim().toLowerCase() === 'service' &&
+      (bot.serviceLifecycle !== 'draft' || bot.runtimeStage !== 'draft')) ||
     !bot.online ||
     bot.status?.toLowerCase() === 'hidden' ||
     !bot.chatable ||
@@ -39,7 +41,7 @@ export function buildChatEngineVersionTarget(input: {
     restartPermission: {
       actions: bot.actions ?? [],
       disabledActions: bot.disabledActions,
-      serviceBot: bot.botType?.toLowerCase() === 'service',
+      serviceBot: bot.botType?.trim().toLowerCase() === 'service',
       // Chat engine inspection and restart address the draft runtime.
       runtimeStage: bot.runtimeStage ?? 'draft',
     },

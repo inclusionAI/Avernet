@@ -1,5 +1,5 @@
 import BotEngineVersionDialogs from '@/components/BotWorkshop/BotEngineVersionDialogs';
-import type { EngineVersionTarget } from '@/domain/botEngineVersion';
+import { isBotEngineVersionApplicable, type EngineVersionTarget } from '@/domain/botEngineVersion';
 import { useBotEngineVersions } from '@/hooks/useBotEngineVersions';
 import type { BotDomain } from '@/services/botWorkshop';
 import { botEngineVersionService } from '@/services/botWorkshop/botEngineVersionService';
@@ -23,7 +23,7 @@ export function useBotTableEngineVersions(options: {
         userId: userId ?? '',
         ownerId: bot.ownerId ?? '',
         engine: bot.runtime.engine,
-        enabled: bot.deployment !== 'local' && Boolean(userId && bot.ownerId) && bot.lifecycle !== 'deploying',
+        enabled: isBotEngineVersionApplicable(bot) && Boolean(userId && bot.ownerId) && bot.lifecycle !== 'deploying',
         restartPermission: botEngineVersionService.getRestartPermissionInput(bot),
       })),
     [bots, userId],

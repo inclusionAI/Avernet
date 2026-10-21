@@ -1,4 +1,4 @@
-import type { BotRuntimeStage } from '@/domain/botWorkshop';
+import type { BotDomain, BotLifecycle, BotRuntimeStage } from '@/domain/botWorkshop';
 
 export type EngineVersionDetectionStatus = 'known' | 'legacy' | 'read_failed' | 'not_applicable';
 export type EngineVersionComparison = 'older' | 'same' | 'newer' | 'legacy' | 'unknown';
@@ -65,6 +65,18 @@ export interface EngineVersionTarget {
 
 export type EngineVersionUiState = 'updatable' | 'no_update' | 'unknown' | 'not_applicable';
 const SUPPORTED_ENGINE_VERSION_ENGINES = new Set(['openclaw', 'hermes']);
+
+export function hasServiceDraftEvidence(lifecycle: BotLifecycle, publishStatus?: string, displayState?: string): boolean {
+  return lifecycle === 'draft' &&
+    (publishStatus?.trim().toLowerCase() === 'draft' || displayState?.trim().toLowerCase() === 'service_draft');
+}
+
+export function isBotEngineVersionApplicable(
+  bot: Pick<BotDomain, 'deployment' | 'serviceMode' | 'lifecycle' | 'rawPublishStatus' | 'rawDisplayState'>,
+): boolean {
+  return bot.deployment !== 'local' && (bot.serviceMode !== 'service' ||
+    hasServiceDraftEvidence(bot.lifecycle, bot.rawPublishStatus, bot.rawDisplayState));
+}
 
 export function supportsEngineVersion(engine: string): boolean {
   return SUPPORTED_ENGINE_VERSION_ENGINES.has(engine.trim().toLowerCase());

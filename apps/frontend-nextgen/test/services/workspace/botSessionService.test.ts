@@ -623,3 +623,43 @@ describe('owned chat engine permissions from inventory', () => {
     expect(result.ok && result.data[0].actions).toEqual([]);
   });
 });
+
+
+describe('service chat lifecycle evidence', () => {
+  const source = { bot_id: 'service-evidence', bot_name: 'Service', owner_entity_id: 'owner',
+    bot_type: 'service', engine: 'openclaw', status: 'ACTIVE', actions: ['restart'] };
+  it.each([
+    ['service_draft', 'draft'], ['service_online', 'running'], ['service_prestable', 'prestable'], [undefined, 'unknown'],
+  ])('reads %s from inventory even when directory declares restart', async (display_state, expected) => {
+    ownedMocked.listBots.mockResolvedValue({ data: { items: [source] } });
+    ownedMocked.listBotInventory.mockResolvedValue({ code: 200000, data: {
+      items: [{ ...source, display_state }], total: 1,
+    } });
+    const result = await botSessionService.listOwnedBots('caller');
+    expect(result.ok && result.data[0].serviceLifecycle).toBe(expected);
+    expect(result.ok && result.data[0].runtimeStage).toBe('draft');
+  });
+  it('does not infer a draft from a mixed published/draft directory or missing inventory', async () => {
+    ownedMocked.listBots.mockResolvedValue({ data: { items: [source] } });
+    ownedMocked.listBotInventory.mockResolvedValue({ code: 200000, data: {
+      items: [{ ...source, display_state: 'service_draft' }, { ...source, display_state: 'service_online' }], total: 2,
+    } });
+    const result = await botSessionService.listOwnedBots('caller');
+    expect(result.ok && result.data[0].serviceLifecycle).toBe('unknown');
+    ownedMocked.listBotInventory.mockRejectedValue(new Error('unavailable'));
+    const unavailable = await botSessionService.listOwnedBots('caller');
+    expect(unavailable.ok && unavailable.data[0].serviceLifecycle).toBe('unknown');
+  });
+});
+
+
+it.each([{ code: 500000, success: false, data: { items: [], total: 101 } }, { code: 200000, data: {} }, { code: 200000, data: { items: [], total: 101 } }])('drops partial owned Service evidence for invalid later page %j', async (failure) => {
+  const source = { bot_id: 'paged-service', bot_name: 'Service', owner_entity_id: 'owner',
+    bot_type: 'service', engine: 'openclaw', status: 'ACTIVE', actions: ['restart'] };
+  ownedMocked.listBots.mockResolvedValue({ data: { items: [source] } });
+  ownedMocked.listBotInventory.mockResolvedValueOnce({ code: 200000, data: {
+    items: Array.from({ length: 100 }, () => ({ ...source, display_state: 'service_draft' })), total: 101,
+  } }).mockResolvedValueOnce(failure);
+  const result = await botSessionService.listOwnedBots('caller');
+  expect(result.ok && result.data[0].serviceLifecycle).toBe('unknown');
+});

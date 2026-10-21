@@ -1,3 +1,4 @@
+import { resolveServiceEngineLifecycle } from '@/services/botWorkshop/botLifecycleResolver';
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import { listBotInventory } from '@/services/backendApi/bots/botController';
 import { listCollaboratingBots, type CollaboratingBotDto } from '@/services/backendApi/bots/collaboratingBotController';
@@ -144,21 +145,34 @@ export const teamBotConversationService = {
               spaceId,
               signal,
             );
-            if (isEnvelopeFailure(inventory)) break;
-            const rows = inventory.data?.items ?? [];
+            if (isEnvelopeFailure(inventory)) throw new Error('Bot inventory unavailable');
+            const rows = inventory.data?.items;
+            const total = inventory.data?.total;
+            if (!Array.isArray(rows) || typeof total !== 'number' || !Number.isFinite(total) || total < 0) {
+              throw new Error('Bot inventory page is incomplete');
+            }
+            const hasServiceBots = [...targets.values()].some((bot) => bot.botType?.trim().toLowerCase() === 'service');
+            if (hasServiceBots && rows.length !== Math.min(PAGE_SIZE, Math.max(0, total - (page - 1) * PAGE_SIZE))) {
+              throw new Error('Bot inventory page count is inconsistent');
+            }
             for (const row of rows) {
               const ownerId = row.owner_entity_id;
               if (typeof row.bot_id !== 'string' || typeof ownerId !== 'string') continue;
               const bot = targets.get(`${row.bot_id}:${ownerId}`);
               if (!bot || bot.spaceId !== spaceId) continue;
               // A published service card cannot authorize a draft operation.
-              if (bot.botType?.toLowerCase() === 'service' && row.display_state !== 'service_draft') continue;
+              if (bot.botType?.trim().toLowerCase() === 'service') {
+                const lifecycle = resolveServiceEngineLifecycle(row);
+                bot.serviceLifecycle = bot.serviceLifecycle && bot.serviceLifecycle !== lifecycle ? 'unknown' : lifecycle;
+                if (lifecycle !== 'draft') continue;
+              }
               Object.assign(bot, mapBotActionPermissions(row.actions, row.disabled_actions));
               pending.delete(bot.botId);
             }
-            if (!pending.size || !rows.length || page * PAGE_SIZE >= (inventory.data?.total ?? 0)) break;
+            if ((!pending.size && !hasServiceBots) || !rows.length || page * PAGE_SIZE >= total) break;
           }
         } catch {
+          for (const bot of targets.values()) bot.serviceLifecycle = undefined;
           // Management endpoint failure must not prevent chatting.
         }
       }

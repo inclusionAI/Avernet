@@ -43,3 +43,34 @@ test.each(['openclaw', 'hermes'].flatMap((engine) => ['desktop', 'DESKTOP', ' De
   />);
   expect(container.childElementCount).toBe(0);
 });
+
+
+test.each(['draft', 'deploying', 'prestable', 'running', 'offline', 'failed', 'unknown'] as const)(
+  'Service %s only inspects engines and enables version updates when draft', async (lifecycle) => {
+    const bot = { ...mapBotDto({
+      bot_id: 'service', bot_name: 'Service', bot_type: 'service', engine: 'openclaw', display_state: 'service_draft',
+      status: 'ACTIVE', owner_entity_id: 'owner', actions: ['restart'],
+    }).item, lifecycle };
+    const inspect = jest.spyOn(botEngineVersionService, 'inspect').mockResolvedValue({ kind: 'ready', observation });
+    const { result } = renderHook(() => useBotTableEngineVersions({ bots: [bot], userId: 'caller' }));
+    await waitFor(() => expect(result.current.states[bot.entityKey]?.kind).toBe(lifecycle === 'draft' ? 'ready' : 'idle'));
+    expect(inspect).toHaveBeenCalledTimes(lifecycle === 'draft' ? 1 : 0);
+    const permission = botEngineVersionService.getRestartPermissionInput(bot);
+    expect(botEngineVersionService.getRestartPermission(permission).allowed).toBe(lifecycle === 'draft');
+    const { container } = render(<BotEngineVersionMenuItems
+      bot={bot} availability={result.current.updateAvailability[bot.entityKey]} onOpenInfo={jest.fn()} onUpdate={jest.fn()}
+    />);
+    expect(container.childElementCount).toBeGreaterThan(0);
+    expect((container.querySelectorAll('button')[1] as HTMLButtonElement).disabled).toBe(lifecycle !== 'draft');
+  },
+);
+
+
+test('does not infer service draft eligibility from ACTIVE with no publication state', async () => {
+  const bot = mapBotDto({ bot_id: 'unknown-service', bot_type: 'service', engine: 'openclaw',
+    status: 'ACTIVE', owner_entity_id: 'owner', actions: ['restart'] }).item;
+  const inspect = jest.spyOn(botEngineVersionService, 'inspect');
+  const { result } = renderHook(() => useBotTableEngineVersions({ bots: [bot], userId: 'caller' }));
+  await waitFor(() => expect(result.current.states[bot.entityKey]?.kind).toBe('idle'));
+  expect(inspect).not.toHaveBeenCalled();
+});

@@ -1,5 +1,6 @@
 import {
   engineVersionNoUpdateMessage,
+  isBotEngineVersionApplicable,
   engineVersionUiState,
   isEngineVersionUpdated,
   type EngineRestartPermissionInput,
@@ -127,7 +128,9 @@ export const botEngineVersionService = {
       disabledActions: bot.disabledActions,
       lockedByOther: bot.lock?.status === 'other',
       serviceBot: bot.serviceMode === 'service',
-      runtimeStage: resolveBotRuntimeStage(bot.lifecycle),
+      runtimeStage: bot.serviceMode === 'service' && !isBotEngineVersionApplicable(bot)
+        ? undefined
+        : resolveBotRuntimeStage(bot.lifecycle),
     };
   },
 
