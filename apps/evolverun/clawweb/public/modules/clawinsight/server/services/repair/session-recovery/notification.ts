@@ -29,15 +29,32 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
 
 export const SESSION_RECOVERY_NOTIFICATIONS_KEY = "session_recovery_notifications";
 type GroupNotification = Parameters<RecoveryActionNotifier["after"]>[0];
-type WebhookConfig = { webhook: string; timeout_seconds: number };
+type BotWebhook = { bot_id: string; entity_id: string; webhook: string };
+type WebhookConfig = { webhook: string; timeout_seconds: number; bot_webhooks?: BotWebhook[] };
 
 function webhookConfig(raw: string): WebhookConfig {
   const value = JSON.parse(raw);
   if (!value || typeof value !== "object" || Array.isArray(value)
-    || Object.keys(value).some(key => !["webhook", "timeout_seconds"].includes(key))
+    || Object.keys(value).some(key => !["webhook", "timeout_seconds", "bot_webhooks"].includes(key))
     || typeof value.webhook !== "string" || new URL(value.webhook).protocol !== "https:"
     || !Number.isSafeInteger(value.timeout_seconds) || value.timeout_seconds < 1 || value.timeout_seconds > 60) {
     throw new Error("Invalid recovery notification configuration");
+  }
+  if (value.bot_webhooks !== undefined) {
+    if (!Array.isArray(value.bot_webhooks)) throw new Error("Invalid recovery Bot notification configuration");
+    const targets = new Set<string>();
+    for (const item of value.bot_webhooks) {
+      if (!item || typeof item !== "object" || Array.isArray(item)
+        || Object.keys(item).some(key => !["bot_id", "entity_id", "webhook"].includes(key))
+        || typeof item.bot_id !== "string" || !item.bot_id.trim() || item.bot_id !== item.bot_id.trim()
+        || typeof item.entity_id !== "string" || !item.entity_id.trim() || item.entity_id !== item.entity_id.trim()
+        || typeof item.webhook !== "string" || new URL(item.webhook).protocol !== "https:") {
+        throw new Error("Invalid recovery Bot notification configuration");
+      }
+      const target = JSON.stringify([item.bot_id, item.entity_id]);
+      if (targets.has(target)) throw new Error("Duplicate recovery Bot notification target");
+      targets.add(target);
+    }
   }
   return value;
 }
@@ -151,6 +168,8 @@ export class SessionRecoveryGroupNotifier implements RecoveryActionNotifier {
     const config = webhookConfig(row.config_json);
     const task = await this.deps.tasks.find(input.taskId);
     if (!task || resolveTaskControlPlaneEnvironment(task) !== this.deps.controlPlaneEnvironment) return;
+    const target = task.request.target;
+    const webhook = config.bot_webhooks?.find(item => item.bot_id === target.bot_id && item.entity_id === target.entity_id)?.webhook ?? config.webhook;
     const source = task.timeline.find(event => event.event_id === input.eventId);
     if (!source) return;
     const id = `notification-${input.kind}-${input.eventId}`;
@@ -163,7 +182,7 @@ export class SessionRecoveryGroupNotifier implements RecoveryActionNotifier {
     if (!claimed) return;
     let sent = false;
     try {
-      await this.deps.sender.send({ webhook: config.webhook, timeoutSeconds: config.timeout_seconds,
+      await this.deps.sender.send({ webhook, timeoutSeconds: config.timeout_seconds,
         ...notificationContent(task, source, input.kind, this.deps.publicBaseUrl) });
       sent = true;
     } catch {

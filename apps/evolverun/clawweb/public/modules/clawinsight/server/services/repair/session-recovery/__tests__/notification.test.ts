@@ -20,6 +20,50 @@ function setup() {
 }
 const message = { taskId: "SR-notification", eventId: "call-1", kind: "message" as const };
 
+it.each(["message", "plan", "execution", "result"] as const)("routes %s to the exact Bot and Owner override only", async kind => {
+  const { notifier, config, sender, task, events } = setup();
+  task.request.target.bot_id = "default";
+  config.findByKey.mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ webhook: "https://business.invalid/send", timeout_seconds: 10,
+    bot_webhooks: [{ bot_id: "default", entity_id: "another-owner", webhook: "https://another.invalid/send" },
+      { bot_id: "default", entity_id: "owner", webhook: "https://test.invalid/send" }] }) });
+  notifier.after({ ...message, kind });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  expect(sender.send).toHaveBeenCalledOnce();
+  expect(sender.send.mock.calls[0][0]).toMatchObject({ webhook: "https://test.invalid/send", timeoutSeconds: 10 });
+  expect(JSON.stringify(events)).not.toMatch(/https:\/\/(test|business|another)\.invalid/);
+});
+it.each([["bot", "another-owner"], ["another-bot", "owner"]])("retains the default group for unmatched target %s/%s", async (bot_id, entity_id) => {
+  const { notifier, config, sender, events } = setup();
+  config.findByKey.mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ webhook: "https://business.invalid/send", timeout_seconds: 10,
+    bot_webhooks: [{ bot_id, entity_id, webhook: "https://test.invalid/send" }] }) });
+  notifier.after(message);
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  expect(sender.send).toHaveBeenCalledOnce();
+  expect(sender.send.mock.calls[0][0].webhook).toBe("https://business.invalid/send");
+});
+it.each([
+  [{ bot_id: "bot", webhook: "https://test.invalid/send" }],
+  [{ bot_id: "bot", entity_id: "owner", webhook: "http://test.invalid/send" }],
+  [{ bot_id: "bot", entity_id: "owner", webhook: "https://test.invalid/send" },
+    { bot_id: "bot", entity_id: "owner", webhook: "https://another.invalid/send" }],
+])("isolates invalid or ambiguous Bot routes without sending to the default group", async (...routes) => {
+  const { notifier, config, sender, tasks, task } = setup();
+  config.findByKey.mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ webhook: "https://business.invalid/send", timeout_seconds: 10, bot_webhooks: routes }) });
+  notifier.after(message); await new Promise(resolve => setImmediate(resolve));
+  expect(sender.send).not.toHaveBeenCalled(); expect(tasks.appendNotification).not.toHaveBeenCalled();
+  expect(task).toMatchObject({ version: 7, status: "running", phase: "assess" });
+});
+it("does not leak a failed Bot-specific notification into the default business group", async () => {
+  const { notifier, config, sender, events } = setup();
+  config.findByKey.mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ webhook: "https://business.invalid/send", timeout_seconds: 10,
+    bot_webhooks: [{ bot_id: "bot", entity_id: "owner", webhook: "https://test.invalid/send" }] }) });
+  sender.send.mockRejectedValue(new Error("transport offline"));
+  notifier.after(message);
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === false)).toBe(true));
+  expect(sender.send).toHaveBeenCalledOnce();
+  expect(sender.send.mock.calls[0][0].webhook).toBe("https://test.invalid/send");
+});
+
 it("delivers asynchronously once across repeated callbacks and separate notifier instances", async () => {
   const { notifier, deps, sender, task, events, config } = setup();
   notifier.after(message); notifier.after(message); new SessionRecoveryGroupNotifier(deps).after(message);
