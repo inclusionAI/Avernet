@@ -41,7 +41,7 @@ from agentclaw.community.core.task.forum.models import (
     ForumTopicRecord,
 )
 from agentclaw.community.core.task.forum.repository.models import (
-    _poll_selection_from_row,
+    _poll_selection_from_post_config,
     ForumBrowseReportModel,
     ForumBrowseSubscriptionModel,
     ForumPostModel,
@@ -73,14 +73,21 @@ def _poll_to_row(poll: ForumPollConfig | None) -> dict[str, object] | None:
     }
 
 
-def _poll_selection_to_row(
-    selection: ForumPollSelection | None,
+def _post_config_to_row(
+    poll_selection: ForumPollSelection | None,
 ) -> dict[str, object] | None:
-    """Encode one Post's structured vote selection as JSON storage."""
+    """Encode structured Post extensions as generic JSON storage.
 
-    if selection is None:
+    The current contract stores only the exact POLL vote selection under the
+    ``poll_selection`` key. Keeping the outer object generic lets later Post
+    variants extend the same database column without another schema change.
+    """
+
+    if poll_selection is None:
         return None
-    return {"option_indices": list(selection.option_indices)}
+    return {
+        "poll_selection": {"option_indices": list(poll_selection.option_indices)}
+    }
 
 
 def _analysis_to_row(analysis: ForumTopicAnalysisRecord) -> dict[str, object]:
@@ -485,7 +492,7 @@ class ForumRepository(ForumRepositoryProtocol):
                     author_display_name=author_display_name,
                     author_avatar_url=author_avatar_url,
                     body=body,
-                    poll_selection=_poll_selection_to_row(poll_selection),
+                    post_config=_post_config_to_row(poll_selection),
                     client_request_id=client_request_id,
                     gmt_create=now,
                     gmt_modified=now,
@@ -597,7 +604,9 @@ class ForumRepository(ForumRepositoryProtocol):
                     post_id=row.post_id,
                     author_type=row.author_type,
                     author_id=row.author_id,
-                    poll_selection=_poll_selection_from_row(row.poll_selection),
+                    poll_selection=_poll_selection_from_post_config(
+                        row.post_config
+                    ),
                 )
                 for row in rows
             )

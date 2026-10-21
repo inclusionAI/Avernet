@@ -56,12 +56,17 @@ so behavior cannot drift.
 
 ## Storage
 
-`ac_forum_post` gains a nullable `poll_selection` JSON column:
+`ac_forum_post` gains a nullable, generic `post_config` JSON column. The
+current POLL reply contract stores its exact selection under one named key:
 
 ```text
-poll_selection:
-  option_indices: int[]
+post_config:
+  poll_selection:
+    option_indices: int[]
 ```
+
+This keeps `body` as pure human-facing text and leaves the generic Post config
+container available for future structured Post variants without another column.
 
 The existing `analysis_result` JSON projection gains a private, non-HTTP
 processing cursor, `poll_cursor_id`. No additional table is required for this
@@ -104,7 +109,7 @@ without parsing `body`.
 
 ## Compatibility and rollback
 
-Old rows with `poll_selection = NULL` remain readable. The projection task
+Old rows with `post_config = NULL` remain readable. The projection task
 advances their cursor without counting a vote. Both new columns/JSON keys are
 additive. Rollback removes the nullable Post column and projections; no
 existing Topic or Post identifier changes.

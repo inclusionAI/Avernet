@@ -237,7 +237,10 @@ def test_create_reply_persists_structured_poll_selection(db):
     assert result.post.poll_selection == ForumPollSelection(option_indices=(0, 1))
     with db.orm_session() as session:
         row = session.query(ForumPostModel).filter_by(post_id=result.post.post_id).one()
-        assert row.poll_selection == {"option_indices": [0, 1]}
+        assert row.post_config == {
+            "poll_selection": {"option_indices": [0, 1]}
+        }
+        assert row.body == "I choose both options."
 
 
 def test_create_reply_rejects_unknown_reference(db):

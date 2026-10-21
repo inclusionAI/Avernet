@@ -128,14 +128,31 @@ def _poll_result_options_from_row(
     return tuple(options)
 
 
-def _poll_selection_from_row(value: object | None) -> ForumPollSelection | None:
-    """Decode one Post's structured vote selection from JSON storage."""
+def _poll_selection_from_post_config(
+    value: object | None,
+) -> ForumPollSelection | None:
+    """Decode one Post's structured vote selection from its generic config.
+
+    ``post_config`` is the storage-level extension container. The reply
+    contract currently defines only the ``poll_selection`` key; future
+    structured Post variants can add further keys without another column.
+    """
 
     if value is None:
         return None
     if not isinstance(value, dict):
-        raise ValueError("ac_forum_post.poll_selection must be a JSON object or null")
-    indices = value.get("option_indices")
+        raise ValueError("ac_forum_post.post_config must be a JSON object or null")
+    if set(value) != {"poll_selection"}:
+        raise ValueError(
+            "ac_forum_post.post_config may contain only poll_selection"
+        )
+
+    selection = value.get("poll_selection")
+    if not isinstance(selection, dict):
+        raise ValueError(
+            "ac_forum_post.post_config.poll_selection must be a JSON object"
+        )
+    indices = selection.get("option_indices")
     if (
         not isinstance(indices, list)
         or not indices
@@ -147,16 +164,18 @@ def _poll_selection_from_row(value: object | None) -> ForumPollSelection | None:
         )
     ):
         raise ValueError(
-            "ac_forum_post.poll_selection.option_indices must be a "
-            "non-empty non-negative integer array"
+            "ac_forum_post.post_config.poll_selection.option_indices must "
+            "be a non-empty non-negative integer array"
         )
-    if set(value) != {"option_indices"}:
+    if set(selection) != {"option_indices"}:
         raise ValueError(
-            "ac_forum_post.poll_selection may contain only option_indices"
+            "ac_forum_post.post_config.poll_selection may contain only "
+            "option_indices"
         )
     if len(indices) != len(set(indices)):
         raise ValueError(
-            "ac_forum_post.poll_selection.option_indices must not contain duplicates"
+            "ac_forum_post.post_config.poll_selection.option_indices must not "
+            "contain duplicates"
         )
     return ForumPollSelection(option_indices=tuple(indices))
 
@@ -390,7 +409,7 @@ class ForumPostModel(Base):
     author_display_name = Column(String(256), nullable=True)
     author_avatar_url = Column(String(1024), nullable=True)
     body = Column(Text, nullable=False)
-    poll_selection = Column(JSON, nullable=True)
+    post_config = Column(JSON, nullable=True)
     client_request_id = Column(_REQUEST_ID, nullable=False)
     gmt_create = Column(DateTime, nullable=False, server_default=func.now())
     gmt_modified = Column(
@@ -434,7 +453,7 @@ class ForumPostModel(Base):
             display_name=self.author_display_name,
             avatar_url=self.author_avatar_url,
             body=self.body,
-            poll_selection=_poll_selection_from_row(self.poll_selection),
+            poll_selection=_poll_selection_from_post_config(self.post_config),
             created_at=self.gmt_create,
             updated_at=self.gmt_modified,
         )
