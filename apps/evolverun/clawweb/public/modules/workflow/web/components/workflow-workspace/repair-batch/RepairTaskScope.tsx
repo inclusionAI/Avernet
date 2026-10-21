@@ -7,6 +7,18 @@ function impact(items:RepairItem[]) {
  const values=items.flatMap(item=>(Array.isArray(item.context?.diagnoses)?item.context.diagnoses:[]).flatMap(row=>labels[String(row?.severity)]?[labels[String(row.severity)]]:[]))
  return [...new Set([...values,...summaryLabels])].join('、')||'未知'
 }
+function relatedNodes(items:RepairItem[]) {
+ const nodes=items.flatMap(item=>[
+  item.context?.nodeId,
+  ...(Array.isArray(item.proposal?.operations)?item.proposal.operations:[]).map(operation=>operation?.nodeId),
+  ...(Array.isArray(item.context?.diagnoses)?item.context.diagnoses:[]).map(diagnosis=>diagnosis?.nodeId),
+ ])
+ return [...new Set(nodes.filter((node):node is string=>typeof node==='string'&&!!node.trim()))].join('、')||'未知'
+}
+function selectedGoal(item:RepairItem) {
+ const summary=item.proposal?.summary
+ return typeof summary==='string'&&summary.trim()?summary:item.instruction.trim()||'待补充优化目标'
+}
 export default function RepairTaskScope({revision}:{revision:RepairRevision}) {
  const flows=new Set(revision.input.items.flatMap(item=>[
   ...item.sources.flatMap(source=>source.kind==='diagnosis_candidate'?[source.flowId]:[]),
@@ -21,14 +33,17 @@ export default function RepairTaskScope({revision}:{revision:RepairRevision}) {
   <h3 className="text-base font-semibold">本版优化目标</h3>
   {revision.input.materials&&<p className="mt-2 text-xs text-muted-foreground">完整原始材料已独立冻结（{(revision.input.materials.bytes/1024/1024).toFixed(2)} MiB）；展开下方原始建议按需查看。</p>}
   <p className="mt-2 text-sm text-muted-foreground">{revision.input.items.length} 项原始建议 · {flows.size ? `依据覆盖 ${flows.size} 个运行` : '来源运行数未知'}</p>
-  {plans?.length ? <div className="mt-4 space-y-3">{plans.map((plan,index)=><article key={plan.id} className="rounded-lg border border-input p-4">
-   <h4 className="text-sm font-medium">方案 {index+1} · {plan.originalItemIds.length} 项来源</h4>
-   <p className="mt-1 text-xs text-muted-foreground">诊断影响：{impact(revision.input.items.filter(item=>plan.originalItemIds.includes(item.itemId)))}</p>
-   {!plan.goals.length&&<p className="mt-2 text-sm">{String(revision.input.items.find(item=>plan.originalItemIds.includes(item.itemId))?.proposal?.summary||'待补充优化目标')}</p>}
-   <ul className="mt-2 list-inside list-disc text-sm">{plan.goals.map((goal,i)=><li key={i}>{goal}</li>)}</ul>
+  {plans?.length ? <div className="mt-4 space-y-3">{plans.map((plan,index)=>{
+   const items=revision.input.items.filter(item=>plan.originalItemIds.includes(item.itemId))
+   return <article key={plan.id} className="rounded-lg border border-input p-4">
+   <h4 className="text-sm font-medium">目标组 {index+1} · {items.length} 条建议</h4>
+   <ul className="mt-2 list-inside list-disc space-y-1 text-sm">{items.map(item=><li key={item.itemId} className="whitespace-pre-wrap break-words">{selectedGoal(item)}</li>)}</ul>
+   <p className="mt-2 text-xs text-muted-foreground">相关节点：{relatedNodes(items)}</p>
+   <p className="mt-1 text-xs text-muted-foreground">诊断影响：{impact(items)}</p>
    {(plan.causes?.length||plan.unknowns?.length)?<details className="mt-2 text-xs text-muted-foreground"><summary>原因与依据</summary>{plan.causes?.map((cause,i)=><p key={i} className="mt-2">{{supported:'证据支持',hypothesis:'推测',unknown:'未知'}[cause.certainty]}：{cause.title}</p>)}{plan.unknowns?.map((unknown,i)=><p key={i} className="mt-2">待确认：{unknown}</p>)}</details>:null}
-   <details className="mt-2 text-xs text-muted-foreground"><summary>来源建议与依据</summary>{revision.input.items.filter(item=>plan.originalItemIds.includes(item.itemId)).map(item=><p key={item.itemId} className="mt-2">{String(item.proposal?.summary||item.instruction||'原始建议')}</p>)}{revision.input.materials?revision.input.items.filter(item=>plan.originalItemIds.includes(item.itemId)).map(item=><FrozenRepairEvidence key={`${revision.revision}:${item.itemId}`} revision={revision} item={item}/>):<JsonDetails title="完整来源与证据" value={revision.input.items.filter(item=>plan.originalItemIds.includes(item.itemId))}/>}</details>
-  </article>)}</div> : <ul className="mt-4 space-y-3">{revision.input.items.map(item=><li key={item.itemId} className="rounded-lg border border-input p-4 text-sm">
+   <details className="mt-2 text-xs text-muted-foreground"><summary>来源建议与依据</summary>{revision.input.materials?items.map(item=><FrozenRepairEvidence key={`${revision.revision}:${item.itemId}`} revision={revision} item={item}/>):<JsonDetails title="完整来源与证据" value={items}/>}</details>
+   <JsonDetails title="分组技术详情" value={plan}/>
+  </article>})}</div> : <ul className="mt-4 space-y-3">{revision.input.items.map(item=><li key={item.itemId} className="rounded-lg border border-input p-4 text-sm">
     <p className="font-medium">{String(item.proposal?.summary||(item.instruction.startsWith('当前生效 Pack 已变化')?'重新评估原修改的适用性':item.instruction)||'本版优化项')}</p>
     {item.instruction.startsWith('当前生效 Pack 已变化')&&<p className="mt-2 rounded bg-warning/10 p-2 text-xs text-warning-foreground">基线变化提醒：{item.instruction}</p>}
     <p className="mt-1 text-xs text-muted-foreground">诊断影响：{impact([item])}</p>
