@@ -3,16 +3,18 @@
 ########## Builder ##########
 FROM node:22-bookworm-slim AS build
 
-WORKDIR /app
+# Monorepo 布局镜像内同构（review R6-1）：/repo 下保持源码仓目录几何——
+# config/tsconfig 里的 '@avernet/a2a-chat-client' alias 用路径上引（../../../
+# 和 ../../）跨出 app 目录指 packages/，若镜像把 app 摊平到 /app 而包复制在
+# /app/packages，alias 会解析到差一层的不存在路径（构建必然失败）。∴ app
+# 留在其完整层级 apps/frontend-nextgen/，packages/ 与之间距与源码仓一致。
+WORKDIR /repo
 
-# Build context is the repository root, as required by docker/build-image.sh.
-# @avernet/a2a-chat-client 经 umi/tsconfig alias 直连 packages/ 源码——包目录
-# 必须先于构建在场（在仓库根 /packages 下）。
 COPY packages/a2a-chat-client/ ./packages/a2a-chat-client/
-COPY apps/frontend-nextgen/package.json apps/frontend-nextgen/package-lock.json ./
+COPY apps/frontend-nextgen/package.json apps/frontend-nextgen/package-lock.json ./apps/frontend-nextgen/
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 RUN --mount=type=cache,id=frontend-nextgen-npm,target=/root/.npm,sharing=locked \
-    npm ci \
+    cd apps/frontend-nextgen && npm ci \
       --registry="${NPM_REGISTRY}" \
       --replace-registry-host=always \
       --prefer-offline \
@@ -23,8 +25,8 @@ RUN --mount=type=cache,id=frontend-nextgen-npm,target=/root/.npm,sharing=locked 
       --fetch-retry-maxtimeout=120000 \
       --fetch-timeout=300000
 
-COPY apps/frontend-nextgen/ ./
-RUN npm run build
+COPY apps/frontend-nextgen/ ./apps/frontend-nextgen/
+RUN cd apps/frontend-nextgen && npm run build
 
 ########## Runtime ##########
 FROM nginx:1.27-alpine
@@ -36,7 +38,7 @@ RUN apk add --no-cache iputils
 
 COPY apps/frontend-nextgen/deploy/nginx/default.conf.template /etc/nginx/templates/default.conf.template
 COPY apps/frontend-nextgen/deploy/docker-entrypoint.sh /docker-entrypoint.d/20-validate-teamclaw-env.sh
-COPY --from=build /app/dist /usr/share/nginx/html
+COPY --from=build /repo/apps/frontend-nextgen/dist /usr/share/nginx/html
 
 EXPOSE 8080
 
