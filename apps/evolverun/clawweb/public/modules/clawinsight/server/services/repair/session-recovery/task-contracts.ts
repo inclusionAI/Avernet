@@ -9,6 +9,7 @@ export type RecoveryLevel = "debug" | "approval" | "automatic";
 export type RecoveryTaskStatus = "running" | "waiting_owner" | "waiting_effect" | "completed" | "failed" | "canceled";
 export type RecoveryPhase = "assess" | "observe" | "plan" | "apply" | "verify";
 export type RecoveryEffect = "recovered" | "not_recovered" | "unknown" | "not_intervened";
+export type RecoveryInterventionStatus = "none" | "performed" | "unknown";
 export type RecoveryEvidence = {
   evidence_id: string;
   tool_call_id: string;
@@ -77,6 +78,8 @@ export type RecoveryTaskResult = {
   phase: RecoveryPhase;
   waiting_reason: "effect" | null;
   effect: RecoveryEffect;
+  /** Whether any intervention is confirmed; independent of business recovery. Omitted by legacy senders. */
+  intervention_status?: RecoveryInterventionStatus;
   result_text: string;
   evidence_ids: string[];
   delivery?: RecoveryResult["delivery"];
@@ -85,6 +88,8 @@ export type RecoveryTaskResult = {
 };
 
 export type RecoveryStoredTask = RecoveryTaskState & {
+  /** Transient projection of the complete tool ledger; never persisted or supplied by the Agent. */
+  interventionStatus?: RecoveryInterventionStatus;
   timeline: RecoveryTimelineEvent[];
   pending_results: RecoveryTaskResult[];
 };

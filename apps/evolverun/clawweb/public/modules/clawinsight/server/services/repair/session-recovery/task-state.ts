@@ -2,7 +2,7 @@ import { validateRecoveryAction } from "./action-scope.js";
 import { createHash } from "node:crypto";
 import { containsSecret } from "@avernet/clawweb-shared/server/services/redaction";
 import { SessionRecoveryError } from "./errors.js";
-import type { RecoveryJudgment, RecoveryPlan, RecoveryTaskResult, RecoveryTaskState } from "./task-contracts.js";
+import type { RecoveryJudgment, RecoveryPlan, RecoveryStoredTask, RecoveryTaskResult, RecoveryTaskState } from "./task-contracts.js";
 
 function conflict(message: string): never {
   throw new SessionRecoveryError(409, "recovery_state_conflict", message);
@@ -85,14 +85,15 @@ export function terminateRecoveryTask(state: RecoveryTaskState): RecoveryTaskSta
     ...(state.executionRetry ? { executionRetry: { ...state.executionRetry, retryAt: 0 } } : {}) });
 }
 
-export function recoveryTaskResult(state: RecoveryTaskState, terminationReason?: string): RecoveryTaskResult {
+export function recoveryTaskResult(state: RecoveryTaskState & Pick<RecoveryStoredTask, "interventionStatus">, terminationReason?: string): RecoveryTaskResult {
   if (state.status !== "waiting_effect" && state.status !== "completed" && state.status !== "failed" && state.status !== "canceled") {
     conflict("只有效果等待超时或任务结束才回传上游");
   }
   return { event_id: state.request.event_id, task_id: state.taskId, result_version: state.version,
     status: state.status, phase: state.phase,
     waiting_reason: state.status === "waiting_effect" ? "effect" : null,
-    effect: state.judgment?.effect ?? "unknown", result_text: state.status === "canceled" ? terminationReason ?? "用户停止本次自愈任务" : state.judgment?.summary ?? "",
+    effect: state.judgment?.effect ?? "unknown", intervention_status: state.level === "debug" ? "none" : state.interventionStatus ?? "unknown",
+    result_text: state.status === "canceled" ? terminationReason ?? "用户停止本次自愈任务" : state.judgment?.summary ?? "",
     evidence_ids: state.judgment?.evidence_ids ?? [], evidence: state.evidence.filter(item => state.judgment?.evidence_ids.includes(item.evidence_id)),
     ...(state.delivery ? { delivery: state.delivery.delivery } : {}) };
 }

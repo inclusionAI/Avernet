@@ -6,7 +6,8 @@ import { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve
 import type { ObjectStore } from "../../services/object-storage/oss-object-store.js";
 import type { RecoveryStoredTask, RecoveryTaskStore, RecoveryTimelineEvent } from "../../services/repair/session-recovery/task-contracts.js";
 import { containsSecret } from "@avernet/clawweb-shared/server/services/redaction";
-import { AgentToolCallRepository } from "./agent-tool-call-repository.js";
+import { AgentToolCallRepository, type AgentToolCall } from "./agent-tool-call-repository.js";
+import { recoveryInterventionStatus } from "../../services/repair/session-recovery/result.js";
 
 export type { RecoveryStoredTask } from "../../services/repair/session-recovery/task-contracts.js";
 export type RecoveryArtifactStore = Required<Pick<ObjectStore, "getObject" | "putObject">>;
@@ -155,7 +156,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
     return { plan: value.plan, judgment: value.judgment, evidence: value.evidence.filter(item => !auditedEvidence.has(item.evidence_id)), ...(value.delivery ? { delivery: value.delivery } : {}) };
   }
   private config(value: RecoveryStoredTask, detailsRef: ArtifactRef, resultDelivery: ResultDelivery[] = []): string {
-    const { timeline: _timeline, evidence: _evidence, pending_results: _results, plan, delivery: _delivery, judgment: _judgment, ...state } = value;
+    const { timeline: _timeline, evidence: _evidence, pending_results: _results, interventionStatus: _intervention, plan, delivery: _delivery, judgment: _judgment, ...state } = value;
     const json = JSON.stringify({ ...state, artifactStorage: 2, detailsRef, resultDelivery, plan: plan ? { digest: plan.digest, approvedAt: plan.approvedAt, actions: plan.actions.map(action => ({ actionId: action.actionId })) } : null });
     this.validateConfig(json);
     return json;
@@ -188,9 +189,11 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       if (ref.objectKey) task.timeline.push(...(await this.get(ref) as { events: RecoveryTimelineEvent[] }).events);
     }
     const audit = new AgentToolCallRepository(db, "session_recovery");
+    const interventionCalls: AgentToolCall[] = [];
     let afterId = 0;
     for (;;) {
       const calls = await audit.listToolCalls(value.taskId, { ...(afterId ? { afterId } : {}), limit: 500 });
+      interventionCalls.push(...calls);
       for (const call of calls) {
         afterId = call.id;
         if (!["succeeded", "failed", "unknown", "canceled"].includes(call.status)) continue;
@@ -204,6 +207,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       }
       if (calls.length < 500) break;
     }
+    task.interventionStatus = recoveryInterventionStatus(interventionCalls, task.delivery?.delivery);
     for (const result of (resultDelivery ?? []) as ResultDelivery[]) {
       task.pending_results.push(await this.get(result) as RecoveryStoredTask["pending_results"][number]);
     }

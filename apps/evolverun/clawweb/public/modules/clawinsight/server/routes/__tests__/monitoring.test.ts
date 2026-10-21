@@ -445,6 +445,16 @@ describe("recovery result receiver HTTP contract", () => {
   const result = { event_id: alert.eventId, task_id: "SR-http", result_version: 3,
     status: "completed", phase: "verify", waiting_reason: null, effect: "recovered", result_text: "已恢复", evidence_ids: [] };
   const report = (body: Record<string, unknown>) => post(body, "session-recovery-results");
+  it.each(["none", "performed", "unknown"])("accepts and stores intervention_status=%s over HTTP with legacy results", async intervention_status => {
+    await post(alert);
+    expect((await report(result)).status).toBe(200);
+    const updated = { ...result, result_version: 4, intervention_status };
+    expect(await report(updated)).toMatchObject({ status: 200, body: { accepted: true, duplicate: false } });
+    expect(await report(updated)).toMatchObject({ status: 200, body: { duplicate: true } });
+    const [row] = await db.query("SELECT self_healing_results FROM insight_monitoring_diagnose WHERE event_id = ?", [alert.eventId]);
+    expect(JSON.parse(String(row.self_healing_results))).toEqual([result, updated]);
+    expect((await report({ ...updated, result_version: 5, intervention_status: true })).status).toBe(422);
+  });
   it("persists and acknowledges identical replay without requiring an extra token", async () => {
     await post(alert);
     expect(await report(result)).toMatchObject({ status: 200, body: { accepted: true, eventId: alert.eventId, taskId: "SR-http", resultVersion: 3, duplicate: false } });

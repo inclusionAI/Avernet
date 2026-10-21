@@ -91,6 +91,7 @@ HTTP `202`：
   "phase": "observe",
   "waiting_reason": "effect",
   "effect": "unknown",
+  "intervention_status": "unknown",
   "result_text": "观察期限已到，尚未确认恢复，保存进度等待上游继续。",
   "evidence_ids": ["evidence-tc-example"],
   "evidence": [{ "evidence_id": "evidence-tc-example", "tool_call_id": "tc-example", "source": "session_read", "location": "原会话文件及消息位置", "excerpt": "原失败及重试回执的脱敏摘要" }],
@@ -114,6 +115,7 @@ HTTP `202`：
 | `phase` | `assess` Agent 判断初始干预方式；`observe` 观察消息或已有进展；`plan` 分析并形成方案；`apply` 执行完整方案；`verify` 验证原任务恢复。 |
 | `waiting_reason` | 效果等待超时为 `effect`；任务结束为 `null`。 |
 | `effect` | `recovered` 原故障已解除；`not_recovered` 有证据表明未解除；`unknown` 无法判断；`not_intervened` Debug 未实际干预。 |
+| `intervention_status` | `none` 完整操作审计确认未实际干预；`performed` 至少一次干预已由实际回执或后续现场核实；`unknown` 无法确认是否发生过干预。新发送器始终提供；旧发送器和历史结果可省略，省略不等于 `none`。 |
 | `result_text` | 本次等待结论、最终效果或执行中断原因，供展示。 |
 | `evidence_ids` | 当前结论引用的已留存证据。 |
 | `evidence` | 上述证据的来源、原文位置及脱敏摘要；完整原文由任务页面按审计引用读取。 |
@@ -129,6 +131,8 @@ HTTP `202`：
 Owner 等待（包括到期释放容器）、阶段变化、审批、通知和人工标注只记录在任务内，不触发回传。
 
 服务先保存事实与结果，再异步回报。回报失败重送原版本，不重发建议、不重做操作。同一任务可多次效果等待超时，每次生成独立结果版本；恢复和最终完成不会覆盖尚未送达的旧结果，按版本顺序回传。`completed + not_intervened` 是 Debug 演练结束；执行异常可以是 `failed + unknown`。
+
+`intervention_status` 由控制面按整条任务的工具审计生成，累计所有 AIS 执行和重试，与 `status`、`effect` 独立。恢复消息须由受控原会话或轨迹读取确认本次投递键的实际消息；通道 `accepted` 只证明受理，尚未确认时为 `unknown`。环境操作须有成功执行回执或经现有 `reconcile_write` 核实为 `applied`。超时、回执缺失、执行中的操作以及可能部分执行的失败均保留为 `unknown`；下发前拒绝、未领取操作或核实为 `not_applied` 不计实际干预。只有读取、方案、通知或 Owner 配合也不计干预，Debug 为 `none`。只要已有一次确认干预，后续失败不抹除该事实；`performed` 不代表全部动作成功或原任务恢复。无法读取审计时不得推断 `none`。回传快照固定生成时的结论，不重写旧版本或补写历史字段。
 
 结果回传使用 ClawWeb 已有服务地址和上述固定接口路径。接收端每次接收一个结果对象，按 `event_id` 找到原诊断行，将对象追加到 `self_healing_results`（MEDIUMTEXT 中的 JSON 数组；SQL NULL 视为空数组）。不创建空诊断行，不改变原诊断结论、`handler_name` 或原接收时间，也不读写闲置的数据库 `task_completed` 列。
 
@@ -150,7 +154,7 @@ HTTP `200`（新结果或重复投递）：
 | 413 | 沿用请求体中间件 | 超过 128 KiB 请求体限制，不截断证据。 |
 | 503 | `MONITORING_NOT_READY` | 数据库或表结构不可用、存量损坏、容量超限或并发重试耗尽。 |
 
-非 JSON、语法错误和压缩请求沿用现有路由规则。结果对象不接受未知字段；`delivery`、`evidence`、`error` 可省略，其他顶层字段必需。`result_version` 是正整数。没有新增证据条数限制，但总请求体必须满足上述大小限制。
+非 JSON、语法错误和压缩请求沿用现有路由规则。结果对象不接受未知字段；`delivery`、`evidence`、`error`、`intervention_status` 可省略，其他顶层字段必需。`intervention_status` 提供时只能为 `none`、`performed` 或 `unknown`，接收端原样保留在 `self_healing_results` 中，不根据该字段改变诊断决策。旧结果与新结果可混存，历史缺省值不自动补齐。`result_version` 是正整数。没有新增证据条数限制，但总请求体必须满足上述大小限制。
 
 接收接口尚未部署或回传失败时，任务仍可创建、执行并在任务页面查看；结果保留为待回传，成功响应后才记录为已回传。非 2xx（含 404/409/422）会持续重试，需修复拒收原因。部署须确认内部路径已有访问限制，接收端不单独增加发送方未提供的 Token。生产表需已存在可空的 `self_healing_results MEDIUMTEXT`；应用仅校验，不自动执行生产 DDL。联调需确认真实结果体大小、目标数据库兼容性以及内部访问控制。
 

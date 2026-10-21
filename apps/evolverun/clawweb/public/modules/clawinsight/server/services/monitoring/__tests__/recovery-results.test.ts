@@ -83,6 +83,16 @@ describe("recovery callback durable append contract", () => {
 });
 
 describe("existing sender/receiver compatibility", () => {
+  it.each(["none", "performed", "unknown"] as const)("preserves intervention_status=%s alongside legacy history", async intervention_status => {
+    await repo.appendRecoveryResult(result);
+    const input = { ...result, result_version: 4, intervention_status };
+    expect(parseRecoveryResult(input)).toEqual(input);
+    expect(await repo.appendRecoveryResult(input)).toBe(true);
+    expect(await history()).toEqual([result, input]);
+    expect(await repo.appendRecoveryResult(result)).toBe(false);
+    expect(await repo.appendRecoveryResult(input)).toBe(false);
+    await expect(repo.appendRecoveryResult({ ...input, intervention_status: intervention_status === "none" ? "unknown" : "none" })).rejects.toMatchObject({ code: "RESULT_CONFLICT" });
+  });
   it.each(["waiting_effect", "completed", "failed", "canceled"] as const)("accepts real generated %s with optional delivery/evidence", async status => {
     const evidence = { evidence_id: "e1", tool_call_id: "call1", source: "session", location: "current", excerpt: "执行结果" };
     const state: RecoveryTaskState = {
@@ -104,7 +114,8 @@ describe("existing sender/receiver compatibility", () => {
     expect(parseRecoveryResult(input)).toEqual(input);
   });
   it.each([{ result_version: 0 }, { result_version: 1.1 }, { result_version: true }, { status: ["completed"] },
-    { status: "running" }, { waiting_reason: null }, { evidence_ids: [1] }, { evidence: [{}] }, { delivery: {} }, { error: 1 }])("rejects invalid patch %j", patch => {
+    { status: "running" }, { waiting_reason: null }, { evidence_ids: [1] }, { evidence: [{}] }, { delivery: {} }, { error: 1 },
+    { intervention_status: true }, { intervention_status: null }, { intervention_status: "accepted" }, { intervention_status: ["none"] }, { unrecognized: "none" }])("rejects invalid patch %j", patch => {
     expect(() => parseRecoveryResult({ ...result, ...patch })).toThrowError(expect.objectContaining({ code: "INVALID_RESULT" }));
   });
 });

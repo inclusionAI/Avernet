@@ -89,6 +89,11 @@ it("does not expose running or Owner-waiting states as upstream results", () => 
   expect(() => recoveryTaskResult(state())).toThrow();
   expect(() => recoveryTaskResult({ ...state(), status: "waiting_owner" })).toThrow();
 });
+it("does not infer intervention from recovery effect or unavailable audit", () => {
+  const task = { ...state(), status: "completed" as const, judgment: { ...unknown, effect: "recovered" as const } };
+  expect(recoveryTaskResult(task)).toMatchObject({ effect: "recovered", intervention_status: "unknown" });
+  expect(recoveryTaskResult({ ...task, level: "debug" })).toMatchObject({ intervention_status: "none" });
+});
 it.each(["running", "waiting_owner", "waiting_effect"] as const)("terminates %s without changing evidence or authorizing continuation", status => {
   const before = { ...state(), status, executionRetry: { failures: 1, retryAt: 1000 }, judgment: unknown };
   const stopped = terminateRecoveryTask(before);
