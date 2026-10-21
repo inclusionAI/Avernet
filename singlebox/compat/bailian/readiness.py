@@ -24,7 +24,7 @@ def summarize(directory):
         reason = (install.get('reason') if install.get('status') == 'FAIL' else
                   e2e.get('stage') if e2e.get('status') == 'FAIL' else
                   smoke.get('reason') if smoke.get('status') != 'PASS' else None)
-        rows.append({'engine': engine, 'engine_version': versions.get('engine', {}).get('version', 'unknown'),
+        rows.append({'engine': engine, 'selection': versions.get('engine', {}).get('selection', 'unknown'), 'engine_version': versions.get('engine', {}).get('version', 'unknown'),
                      'plugin_version': versions.get('plugin', {}).get('version', 'bcs-bridge'),
                      'commit': versions.get('commit', ''),
                      'smoke': smoke.get('status', 'UNKNOWN'), 'e2e': e2e.get('status', 'UNKNOWN'),
@@ -46,13 +46,13 @@ def main():
                     row.update(readiness='UNKNOWN', reason=gate.lower() + '_not_successful')
     args.output.mkdir(parents=True, exist_ok=True)
     (args.output / 'readiness.json').write_text(json.dumps(rows, indent=2) + '\n')
-    lines = ['| Engine | Version | Plugin / bridge | Model smoke | BCS E2E | Ready | Reason |',
-             '| --- | --- | --- | --- | --- | --- | --- |']
+    lines = ['| Engine | Version | Selection | Plugin / bridge | Model smoke | BCS E2E | Ready | Reason |',
+             '| --- | --- | --- | --- | --- | --- | --- | --- |']
     for row in rows:
         lines.append('| ' + ' | '.join(str(row[key]) for key in (
-            'engine', 'engine_version', 'plugin_version', 'smoke', 'e2e', 'readiness', 'reason')) + ' |')
-    lines += ['', 'READY covers connection, file tools, session recall/isolation and restart recovery only.',
-              'Group routing, manager/worker tasks and cancellation are outside this case set.']
+            'engine', 'engine_version', 'selection', 'plugin_version', 'smoke', 'e2e', 'readiness', 'reason')) + ' |')
+    lines += ['', 'READY covers connection, file tools, session recall/isolation, restart recovery, tool-event parsing and cancellation.',
+              'Group routing and manager/worker tasks are outside this case set. Fixed selections do not certify latest engines.']
     markdown = '\n'.join(lines) + '\n'
     (args.output / 'readiness.md').write_text(markdown)
     if os.environ.get('GITHUB_STEP_SUMMARY'):

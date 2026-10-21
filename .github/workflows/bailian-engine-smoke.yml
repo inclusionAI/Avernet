@@ -27,6 +27,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - run: python -m pip install aiohttp
       - run: python -m unittest discover -s singlebox/compat/bailian/tests
 
   smoke:
@@ -42,8 +43,10 @@ jobs:
         include:
           - engine: openclaw
             package: openclaw
+            version: '2026.5.12'
           - engine: deepseek-harness
             package: '@deepseek-ai/dsh'
+            version: '0.2.1-alpha.2'
           - engine: claude-code
             package: '@anthropic-ai/claude-code'
           - engine: codex
@@ -65,11 +68,12 @@ jobs:
             echo '::error::UNKNOWN: configure Secret BAILIAN_API_KEY and Variable BAILIAN_OPENAI_BASE_URL'
             exit 1
           fi
-      - name: Resolve and install exact latest engine version
+      - name: Resolve and install selected engine version
         env:
           ENGINE_PACKAGE: ${{ matrix.package }}
+          ENGINE_VERSION_SPEC: ${{ matrix.version || 'latest' }}
         run: |
-          version="$(npm view "$ENGINE_PACKAGE@latest" version)"
+          version="$(npm view "$ENGINE_PACKAGE@$ENGINE_VERSION_SPEC" version)"
           mkdir -p reports
           ENGINE_VERSION="$version" python - <<'PY'
           import json, os
@@ -77,6 +81,7 @@ jobs:
           Path('reports/version.json').write_text(json.dumps({
               'package': os.environ['ENGINE_PACKAGE'],
               'version': os.environ['ENGINE_VERSION'],
+              'selection': os.environ['ENGINE_VERSION_SPEC'],
               'commit': os.environ['GITHUB_SHA'],
           }, indent=2))
           PY
@@ -157,9 +162,11 @@ jobs:
         include:
           - engine: openclaw
             package: openclaw
+            version: '2026.5.12'
             plugin: '@avernet-plugin/openclaw-channel-bcn'
           - engine: deepseek-harness
             package: '@deepseek-ai/dsh'
+            version: '0.2.1-alpha.2'
             plugin: '@avernet-plugin/deepseek-harness-channel-bcn'
           - engine: claude-code
             package: '@anthropic-ai/claude-code'
@@ -184,17 +191,18 @@ jobs:
           path: .bailian-bin
       - run: |
           chmod +x .bailian-bin/*
-          python -m pip install tomli-w PyYAML
+          python -m pip install tomli-w PyYAML aiohttp
       - name: Generate isolated configuration
         env:
           BAILIAN_OPENAI_BASE_URL: ${{ vars.BAILIAN_OPENAI_BASE_URL }}
         run: |
           python singlebox/compat/bailian/configure.py --output "$RUNNER_TEMP/bailian-e2e" \
             --base-url "$BAILIAN_OPENAI_BASE_URL" --model qwen3.8-flash
-      - name: Install latest engine and published plugin
+      - name: Install selected engine and latest published plugin
         env:
           ENGINE: ${{ matrix.engine }}
           ENGINE_PACKAGE: ${{ matrix.package }}
+          ENGINE_VERSION_SPEC: ${{ matrix.version || 'latest' }}
           PLUGIN_PACKAGE: ${{ matrix.plugin }}
         run: |
           python singlebox/compat/bailian/install.py --profile "$RUNNER_TEMP/bailian-e2e" \

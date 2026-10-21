@@ -15,6 +15,8 @@ from urllib.request import Request, urlopen
 
 from evidence import marker_evidence, openclaw_evidence
 from smoke import diagnostic_excerpt
+from wire_probe import WireProbe
+from extra_cases import tool_call_case, cancellation_case
 
 
 class Harness:
@@ -36,6 +38,7 @@ class Harness:
         self.env.pop('ANTHROPIC_API_KEY', None)
         self.model = json.loads((root / 'profile.json').read_text())['model']
         self.stage = 'setup'
+        self.wire = None
 
     def api(self, path, body=None, token=None, method=None):
         headers = {'Content-Type': 'application/json', 'X-Mock-User-Id': '001',
@@ -113,6 +116,10 @@ class Harness:
 
     def connection(self):
         self.stage = 'engine_connection_setup'
+        self.wire = WireProbe()
+        port = self.wire.start()
+        self.base = f'http://127.0.0.1:{port}'
+        self.ws = f'ws://127.0.0.1:{port}/ws/bot'
         name = 'Bailian ' + self.engine
         if self.engine == 'openclaw':
             bot = self.register(name)
@@ -159,7 +166,7 @@ class Harness:
             if self.engine == 'claude-code':
                 path = self.root / 'claude/settings.json'
                 settings = json.loads(path.read_text())
-                settings['permissions'] = {'allow': ['Read']}
+                settings['permissions'] = {'allow': ['Read', 'Bash(python3 ci_wait.py)']}
                 path.write_text(json.dumps(settings))
             self.engine_command = [str(self.binaries / 'bcs-bridge'), 'start']
         self.engine_process = self.start(self.engine_command, 'engine')
@@ -228,9 +235,14 @@ class Harness:
         self.chat('restart_session_recovery', 'Repeat the complete file content from earlier in this '
                   'conversation without using tools.', marker, session)
 
+        tool_call_case(self)
+        cancellation_case(self)
+
     def close(self):
         for process in reversed(self.processes):
             self.stop(process)
+        if self.wire:
+            self.wire.close()
         for handle in self.handles:
             handle.close()
 
@@ -256,6 +268,8 @@ def main():
     except Exception as error:
         report.update(status='FAIL', stage=harness.stage if harness else 'runner_guard',
                       error_type=type(error).__name__)
+        if isinstance(error, AssertionError) and re.fullmatch(r'[a-z_]+', str(error)):
+            report['reason'] = str(error)
         if isinstance(error, HTTPError):
             report['http_status'] = error.code
         if harness:

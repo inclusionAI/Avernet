@@ -1,4 +1,4 @@
-"""Resolve latest once, install exact versions without model credentials."""
+"""Resolve selected versions once, install without model credentials."""
 import argparse
 import json
 import os
@@ -18,8 +18,9 @@ def main():
     for kind in ('ENGINE', 'PLUGIN'):
         package = os.environ.get(kind + '_PACKAGE')
         if package:
-            version = subprocess.check_output(['npm', 'view', package + '@latest', 'version'], text=True).strip()
-            packages[kind.lower()] = {'package': package, 'version': version}
+            selection = os.environ.get('ENGINE_VERSION_SPEC', 'latest') if kind == 'ENGINE' else 'latest'
+            version = subprocess.check_output(['npm', 'view', package + '@' + selection, 'version'], text=True).strip()
+            packages[kind.lower()] = {'package': package, 'version': version, 'selection': selection}
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps({'commit': os.environ['GITHUB_SHA'], **packages}, indent=2))
     engine = packages['engine']
@@ -47,8 +48,13 @@ def main():
         env['OPENCLAW_STATE_DIR'] = str(args.profile / 'openclaw')
         env['OPENCLAW_CONFIG_PATH'] = str(args.profile / 'openclaw/openclaw.json')
         env['BAILIAN_API_KEY'] = 'ci-install-placeholder'
-        install_plugin(['openclaw', 'plugins', 'install', '--force', '--accept-capabilities',
-                        'npm:' + spec], env)
+        # 2026.5.12 predates capability-consent flags and accepts plain npm specs.
+        command = ['openclaw', 'plugins', 'install', '--force']
+        if engine['version'] != '2026.5.12':
+            command += ['--accept-capabilities', 'npm:' + spec]
+        else:
+            command += [spec]
+        install_plugin(command, env)
         path = args.profile / 'openclaw/openclaw.json'
         config = json.loads(path.read_text())
         config['models']['providers']['bailian']['apiKey'] = '${BAILIAN_API_KEY}'

@@ -27,9 +27,13 @@ be dispatched until GitHub knows it on the default branch.
 
 ## What is checked
 
-Each matrix job resolves npm's `latest` tag once, installs that exact version,
+Each matrix job resolves its explicit version selection once, installs that exact version,
 and records the package/version and repository commit. Prereleases are tested
-only when the publisher assigns them to `latest`. No existing engine profile
+when selected explicitly or when the publisher assigns them to `latest`.
+OpenClaw temporarily uses `2026.5.12` as requested.
+DSH temporarily uses `0.2.1-alpha.2`, the latest published version within plugin
+0.2.1's declared compatibility range. Reports record the selection separately
+from the resolved version; a fixed-version PASS does not certify newer releases. No existing engine profile
 is reused. The jobs use Node 24 and Python 3.12 on Ubuntu, two at a time.
 
 OpenClaw and DeepSeek Harness use Chat Completions, Claude Code uses Anthropic
@@ -84,7 +88,20 @@ read with the complete content returned to BCS, same-session recall after the
 file is deleted, absence of that secret in a new session, and recall after the
 engine connection process restarts. Every case must pass; partial completion
 is never reported as ready. These cases do not yet certify group routing,
-manager/worker tasks, cancellation, or every interactive permission flow.
+manager/worker tasks or every interactive permission flow.
+
+Additional cases exercise tool arguments containing Unicode, spaces and quotes,
+and require observed tool start/result events with matching call/run/session IDs,
+JSON object arguments and the expected file result. An in-memory transparent
+WebSocket observer forwards unchanged frames to the real BCS parser; raw frames
+are never uploaded. This is live valid-format coverage, not exhaustive malformed
+provider-stream or chunk-boundary coverage.
+
+Cancellation starts a 30-second shell tool, waits for its start event, cancels
+via BCS, requires a downstream chat.abort acknowledgement and cancelled run,
+and observes for 35 seconds to reject late tool output/state changes. A following
+request must work in the same session. A BCS-only state change without a downstream
+acknowledgement fails. This does not prove that the model provider stopped billing.
 
 `e2e.json` records stage, case, run/session IDs and allowlisted probe evidence.
 Native OpenClaw tool-result and assistant text are compared using synthetic
@@ -102,7 +119,8 @@ recurs; a passing sample does not retrospectively explain an earlier failure.
 The daily schedule runs at 01:17 UTC (09:17 China time) once this workflow is on
 the repository's default branch. GitHub may delay scheduled runs. A runtime/plugin
 version rejection is a compatibility failure, not a successful skip; the workflow
-does not grant DSH version exemptions or silently pin an older engine.
+does not grant DSH version exemptions. Temporary fixed versions are explicit
+in the workflow matrix and readiness report.
 
 The final `readiness` job produces a single summary table and the
 `bailian-readiness` artifact (JSON and Markdown). `READY` requires both the real
