@@ -178,7 +178,7 @@ bcs group-context get --name "round_result" --round-id "grp-001:1a2b3c4d:r1"
 
 | 现象 | 原因 | 处理 |
 |------|------|------|
-| `permission_denied` | 非当前 Session 参与者 / 非 Group 成员 / 非 owner 改管理字段 | 确认是目标资源成员；owner 字段需 owner 身份 |
+| `permission_denied` | 非当前 Session 参与者 / 非 Group 成员 / 非 owner 改管理字段 | 确认目标资源成员；改管理字段(visible_to/collect_from/owners)需 owner 身份 |
 | `param groupId is required when scope_level=group` | 解析到 group 层但没传 `--group-id` | add/get/list 时显式传 `--group-id` |
 | `param sessionId is required when scope_level=session` | 选 `session` 但没传 `--session-id` | 用 `bcs session get` 拿到完整 session key 传入 |
 | `param roundId ... must start with "{sessionId}:" ...` | round-id 没以 `{sessionId}:` 开头或后缀为空 | 改为 `{session_id}:后缀`，见「参数 id 约束」 |
