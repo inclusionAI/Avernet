@@ -1,27 +1,30 @@
-"""Engine-owned artifact transfer extension used by build and draft restore.
+"""Engine-owned transfer hooks; the caller retains legacy NAS fallback.
 
-Unsupported plans and confirmed non-fastdisk storage retain the existing NAS
-path. A transfer error must propagate: it must never select the NAS fallback.
+Publish returns False / restore returns None only when not applicable. Errors
+propagate without fallback. Implementations must reject unsupported engines
+before reading runtime paths, checking devices or consuming timeout budgets.
 """
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
-from agentclaw.community.core.workspace.engine_sandbox import EngineBuildPlan
+from agentclaw.community.core.workspace.engine_sandbox import (
+    EngineBuildPlan, EngineSandboxProvider,
+)
 
 
 class ArtifactTransferStrategy(Protocol):
-    def supports(self, plan: EngineBuildPlan) -> bool:
-        """Pure engine-scope check; must not execute commands or access storage."""
+    def publish(self, *, device_id: str, plan: EngineBuildPlan,
+                provider: EngineSandboxProvider, target_dir: Path,
+                ignore_paths: tuple[str, ...]) -> bool:
+        """True only after the strategy completes publication transfer."""
         ...
 
-    def try_publish(self, *, device_id: str, plan: EngineBuildPlan,
-                    source_root: str, target_dir: Path, ignore_paths: tuple[str, ...],
-                    normalize_extra: Any) -> bool:
-        """True after completed upload; False only when not applicable."""
-        ...
+    def restore(self, *, bot: dict[str, Any], source_version: int,
+                plan: EngineBuildPlan, provider: EngineSandboxProvider,
+                artifact_dir: Path, migration_path_base: Callable[..., str],
+                remaining_timeout: Callable[[], float]) -> dict[str, str] | None:
+        """Return the existing restore result, or None to use legacy NAS.
 
-    def try_restore(self, *, device_id: str, plan: EngineBuildPlan,
-                    source_root: str, artifact_path: str, artifact_dir: Path,
-                    remaining_timeout: Callable[[], float], normalize_extra: Any) -> bool:
-        """True after completed restore; False only when not applicable."""
+        migration_path_base is lazy: an unsupported engine must not resolve it.
+        """
         ...

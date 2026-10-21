@@ -19,7 +19,8 @@ from typing import Any, Callable, Protocol
 
 from agentclaw.community.core.workspace.engines.aicoding import _AICODING_RSYNC_EXCLUDES
 from agentclaw.community.core.workspace.engines.claude_code import _CLAUDE_CODE_RSYNC_EXCLUDES
-from agentclaw.community.core.workspace.engine_sandbox import EngineBuildPlan
+from agentclaw.community.core.workspace.engine_sandbox import EngineBuildPlan, EngineSandboxProvider
+from agentclaw.community.core.service_bot.build_errors import BotBuildMigrationError
 from agentclaw.community.kernel.device_dto import CommandResult
 from agentclaw.community.log import get_logger
 
@@ -94,6 +95,41 @@ class AicodingArtifactTransferStrategy:
         endpoint = config.endpoint or endpoint
         self.endpoint = endpoint if not endpoint or '://' in endpoint else 'https://' + endpoint
         self.oss_mount_root = Path(oss_mount_root)
+
+    def publish(self, *, device_id: str, plan: EngineBuildPlan,
+                provider: EngineSandboxProvider, target_dir: Path,
+                ignore_paths: tuple[str, ...]) -> bool:
+        if not self.supports(plan):
+            return False
+        return self.try_publish(
+            device_id=device_id, plan=plan, source_root=str(provider.get_base_path()),
+            target_dir=target_dir, ignore_paths=ignore_paths, normalize_extra=None,
+        )
+
+    def restore(self, *, bot: dict[str, Any], source_version: int,
+                plan: EngineBuildPlan, provider: EngineSandboxProvider,
+                artifact_dir: Path, migration_path_base: Callable[..., str],
+                remaining_timeout: Callable[[], float]) -> dict[str, str] | None:
+        if not self.supports(plan):
+            return None
+        device_id = bot.get("device_id")
+        if not device_id:
+            raise BotBuildMigrationError("恢复草稿缺少当前草稿设备 ID")
+        if type(source_version) is not int or source_version < 1:
+            raise BotBuildMigrationError("无效的历史版本")
+        runtime_root = str(provider.get_base_path())
+        runtime_artifact = (
+            f"{migration_path_base(owner_id=bot['entity_id'], bot_id=bot['bot_id'])}"
+            f"/{source_version}/{plan.migration_subpath}"
+        )
+        if not self.try_restore(
+            device_id=device_id, plan=plan, source_root=runtime_root,
+            artifact_path=runtime_artifact, artifact_dir=artifact_dir,
+            remaining_timeout=remaining_timeout, normalize_extra=None,
+        ):
+            return None
+        return {"restore_type": "migration_path",
+                "artifact_path": str(artifact_dir), "draft_path": runtime_root}
 
     def _exec(self, device_id: str, command: str, timeout: int) -> CommandResult:
         return self.executor.exec_shell_new(device_id=device_id, shell_cmd=command, timeout_seconds=timeout)

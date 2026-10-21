@@ -88,7 +88,7 @@ def test_excluded_extra_include_does_not_probe_or_fallback(tmp_path, monkeypatch
 def build_service(tmp_path, monkeypatch, record):
     import agentclaw.community.core.service_bot.services.bot_build_service as module
     service = BotBuildService.__new__(BotBuildService)
-    service._artifact_transfer = MagicMock(supports=AicodingArtifactTransferStrategy.supports, try_publish=MagicMock(return_value=False))
+    service._artifact_transfer = MagicMock(publish=MagicMock(return_value=False), restore=MagicMock(return_value=None))
     service._env = "test"
     service._user_list_repository = MagicMock(exists=MagicMock(return_value=False))
     service._build_ignore_repository = MagicMock(get=MagicMock(return_value=record))
@@ -211,10 +211,10 @@ def test_fastdisk_upload_is_exclusive_and_keeps_existing_build_steps(tmp_path, m
     from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildServiceError
 
     service = build_service(tmp_path, monkeypatch, None)
-    service._artifact_transfer.try_publish.return_value = True
+    service._artifact_transfer.publish.return_value = True
     service._generate_mcp_config = MagicMock(return_value=True)
     if failure:
-        service._artifact_transfer.try_publish.side_effect = FastdiskPublishError('upload failed')
+        service._artifact_transfer.publish.side_effect = FastdiskPublishError('upload failed')
         with pytest.raises(BotBuildServiceError, match='upload failed'):
             service.build({'bot_id': 'b', 'entity_id': 'e', 'device_id': 'draft'}, version=3)
         service._generate_mcp_config.assert_not_called()
@@ -227,6 +227,8 @@ def test_fastdisk_upload_is_exclusive_and_keeps_existing_build_steps(tmp_path, m
 @pytest.mark.parametrize('engine', ['openclaw', 'teclaw', 'hermes', 'deepseek_harness'])
 def test_other_engine_build_never_calls_container_transfer(tmp_path, monkeypatch, engine):
     service = build_service(tmp_path, monkeypatch, None)
+    service._artifact_transfer = object.__new__(AicodingArtifactTransferStrategy)
+    service._artifact_transfer.try_publish = MagicMock(side_effect=AssertionError('unexpected transfer'))
     service._resolve_sandbox_provider.return_value.get_build_plan.return_value = plan(engine_type=engine)
     service._generate_openclaw_stage_configs = MagicMock(return_value=True)
     assert service.build({'bot_id': 'b', 'entity_id': 'e'}, version=3)['success']

@@ -223,9 +223,15 @@ The composition root injects `AicodingArtifactTransferStrategy` from
 `core/bot_management/engines/aicoding/artifact_transfer.py`. The strategy owns
 engine eligibility (`aicoding` and `claude_code` only), read-only detection and
 container-script invocation. Other engines never enter detection or script
-execution and retain the existing NAS build/restore path. `supports` is a pure
-scope check; transfer methods return false only when not applicable, and errors
-propagate without a NAS fallback. This is an internal ownership refactor: API,
+execution and retain the existing NAS build/restore path. The common orchestration
+has exactly two transfer hooks: `publish` and `restore`. Engine eligibility,
+draft-device/version checks, runtime path resolution and restore-result assembly
+are internal to the AICoding strategy; the caller does not use `supports` or
+assemble a container-script request. Publication returns false and restoration
+returns None only when not applicable; errors propagate without a NAS fallback.
+The path resolver is passed lazily, so other engines do not evaluate it.
+Build errors live in `build_errors.py` and remain importable from the original
+build-service module; the strategy never imports the orchestration implementation. This is an internal ownership refactor: API,
 version paths, configuration keys, script schema and timeout values are unchanged.
 
 The AICoding strategy consumes the existing build plan and a command executor. It

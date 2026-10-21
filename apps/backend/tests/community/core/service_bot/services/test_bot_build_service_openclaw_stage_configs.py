@@ -1,6 +1,5 @@
 """BotBuildService 生成多阶段 OpenClaw 配置文件的单测。"""
 from __future__ import annotations
-from agentclaw.community.core.bot_management.engines.aicoding.artifact_transfer import AicodingArtifactTransferStrategy
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,7 +19,7 @@ _UNSET = object()
 
 def _make_service(channel_service: object = _UNSET) -> BotBuildService:
     service = BotBuildService.__new__(BotBuildService)
-    service._artifact_transfer = MagicMock(supports=AicodingArtifactTransferStrategy.supports, try_publish=MagicMock(return_value=False))
+    service._artifact_transfer = MagicMock(publish=MagicMock(return_value=False), restore=MagicMock(return_value=None))
     service._build_ignore_repository = MagicMock(get=MagicMock(return_value=None))
     service._env = "test"
     service._user_list_repository = MagicMock(exists=MagicMock(return_value=False))

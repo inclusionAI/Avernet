@@ -6,7 +6,6 @@ for ARCA it keeps the existing create_bot / upgrade_bot (migration_path) path,
 byte-for-byte unchanged. Provider is resolved by querying baas.
 """
 from __future__ import annotations
-from agentclaw.community.core.bot_management.engines.aicoding.artifact_transfer import AicodingArtifactTransferStrategy
 
 from unittest.mock import MagicMock
 
@@ -41,7 +40,7 @@ def _svc(
     baas.upgrade_bot.return_value = {"bot_uuid": "BOT-a", "publish_id": 8}
     svc = BotBuildService(
         user_list_repository=MagicMock(exists=MagicMock(return_value=False)),
-        artifact_transfer=MagicMock(supports=AicodingArtifactTransferStrategy.supports, try_publish=MagicMock(return_value=False)),
+        artifact_transfer=MagicMock(publish=MagicMock(return_value=False), restore=MagicMock(return_value=None)),
         build_ignore_repository=MagicMock(get=MagicMock(return_value=None)),
         env="test",
         device_service=MagicMock(),

@@ -194,7 +194,7 @@ def _restore_service(monkeypatch, artifact, target_home):
         rsync_excludes=[],
     )
     service = BotBuildService.__new__(BotBuildService)
-    service._artifact_transfer = MagicMock(supports=MagicMock(return_value=False))
+    service._artifact_transfer = MagicMock(publish=MagicMock(return_value=False), restore=MagicMock(return_value=None))
     service._resolve_sandbox_provider = MagicMock(
         return_value=MagicMock(get_build_plan=MagicMock(return_value=plan)),
     )

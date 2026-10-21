@@ -42,6 +42,9 @@ from agentclaw.community.core.service_bot.services.agentclaw_artifact import (
     sync_agentclaw_artifact,
 )
 from agentclaw.community.core.service_bot.artifact_transfer import ArtifactTransferStrategy
+from agentclaw.community.core.service_bot.build_errors import (
+    BotBuildServiceError, BotSourceNotFoundError, BotBuildMigrationError,
+)
 from agentclaw.community.core.service_bot.services.local_bin_artifact import (
     restore_local_bin_artifact,
     sync_local_bin_artifact,
@@ -137,21 +140,6 @@ class _NormalizedExtraIncludeFile:
 
     artifact_relpath: str
     source_home_relpath: str = ""
-
-
-class BotBuildServiceError(Exception):
-    """Bot build service error."""
-    pass
-
-
-class BotSourceNotFoundError(BotBuildServiceError):
-    """Source bot not found error."""
-    pass
-
-
-class BotBuildMigrationError(BotBuildServiceError):
-    """Bot migration error."""
-    pass
 
 
 DEVICE_COUNT_CONFIG_BUSINESS_CODE = "service_bot_device_count"
@@ -413,15 +401,10 @@ class BotBuildService:
             transfer_started = time.monotonic()
             migration_success = False
             try:
-                if self._artifact_transfer.supports(build_plan):
-                    migration_success = self._artifact_transfer.try_publish(
-                        device_id=device_id,
-                        plan=build_plan,
-                        source_root=str(provider.get_base_path()),
-                        target_dir=target_dir,
-                        ignore_paths=build_ignore_paths,
-                        normalize_extra=self._normalize_extra_include_file,
-                    )
+                migration_success = self._artifact_transfer.publish(
+                    device_id=device_id, plan=build_plan, provider=provider,
+                    target_dir=target_dir, ignore_paths=build_ignore_paths,
+                )
                 if not migration_success:
                     migration_success = self._migrate_bot_instance(
                         device_id=device_id,
@@ -1933,27 +1916,14 @@ class BotBuildService:
             entity_type=entity_type,
         )
         draft_dir = draft_nas_dir / build_plan.source_root_name
-        # Fastdisk restores happen in the existing draft container, before any
-        # host-side stat/chmod/rsync. The DB path is never used as a copy source.
-        if self._artifact_transfer.supports(build_plan):
-            device_id = bot.get("device_id")
-            if not device_id:
-                raise BotBuildMigrationError("恢复草稿缺少当前草稿设备 ID")
-            if not isinstance(source_version, int) or isinstance(source_version, bool) or source_version < 1:
-                raise BotBuildMigrationError("无效的历史版本")
-            runtime_root = str(provider.get_base_path())
-            runtime_artifact = (
-                f"{self._get_migration_path_base(owner_id=entity_id, bot_id=bot_id)}"
-                f"/{source_version}/{build_plan.migration_subpath}"
-            )
-            if self._artifact_transfer.try_restore(
-                device_id=device_id, plan=build_plan, source_root=runtime_root,
-                artifact_path=runtime_artifact, artifact_dir=artifact_dir,
-                remaining_timeout=remaining_timeout,
-                normalize_extra=self._normalize_extra_include_file,
-            ):
-                return {"restore_type": "migration_path",
-                        "artifact_path": str(artifact_dir), "draft_path": runtime_root}
+        restored = self._artifact_transfer.restore(
+            bot=bot, source_version=source_version, plan=build_plan,
+            provider=provider, artifact_dir=artifact_dir,
+            migration_path_base=self._get_migration_path_base,
+            remaining_timeout=remaining_timeout,
+        )
+        if restored is not None:
+            return restored
         if not artifact_dir.exists():
             raise BotBuildMigrationError(f"历史构造物目录不存在: {artifact_dir}")
 

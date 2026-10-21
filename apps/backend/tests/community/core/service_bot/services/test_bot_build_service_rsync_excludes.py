@@ -6,7 +6,6 @@
 - 将解析结果传递给 provider.get_build_plan(build_rsync_excludes_append=...)
 """
 from __future__ import annotations
-from agentclaw.community.core.bot_management.engines.aicoding.artifact_transfer import AicodingArtifactTransferStrategy
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -29,7 +28,7 @@ def _make_service() -> BotBuildService:
     只设置 build 方法直接依赖的字段。
     """
     service = BotBuildService.__new__(BotBuildService)
-    service._artifact_transfer = MagicMock(supports=AicodingArtifactTransferStrategy.supports, try_publish=MagicMock(return_value=False))
+    service._artifact_transfer = MagicMock(publish=MagicMock(return_value=False), restore=MagicMock(return_value=None))
     service._device_service = MagicMock()
     service._build_ignore_repository = MagicMock(get=MagicMock(return_value=None))
     service._env = "test"
@@ -443,7 +442,7 @@ class TestBotBuildServiceRsyncExcludesConfig:
 
 def test_resolve_sandbox_provider_retries_repo_resolved_engine_before_default():
     service = BotBuildService.__new__(BotBuildService)
-    service._artifact_transfer = MagicMock(supports=AicodingArtifactTransferStrategy.supports, try_publish=MagicMock(return_value=False))
+    service._artifact_transfer = MagicMock(publish=MagicMock(return_value=False), restore=MagicMock(return_value=None))
     service._bot_repository = MagicMock()
     service._bot_repository.get_by_id_and_owner.return_value = {
         "bot_id": "bot-1",
@@ -474,7 +473,7 @@ def test_resolve_sandbox_provider_retries_repo_resolved_engine_before_default():
 
 def test_resolve_sandbox_provider_falls_back_to_default_when_retry_fails():
     service = BotBuildService.__new__(BotBuildService)
-    service._artifact_transfer = MagicMock(supports=AicodingArtifactTransferStrategy.supports, try_publish=MagicMock(return_value=False))
+    service._artifact_transfer = MagicMock(publish=MagicMock(return_value=False), restore=MagicMock(return_value=None))
     service._bot_repository = MagicMock()
     service._bot_repository.get_by_id_and_owner.side_effect = RuntimeError("repo unavailable")
     service._bot_repository.get_by_id.side_effect = RuntimeError("repo unavailable")
@@ -501,7 +500,7 @@ def test_resolve_sandbox_provider_falls_back_to_default_when_retry_fails():
 
 def test_known_hermes_provider_never_falls_back_to_openclaw():
     service = BotBuildService.__new__(BotBuildService)
-    service._artifact_transfer = MagicMock(supports=AicodingArtifactTransferStrategy.supports, try_publish=MagicMock(return_value=False))
+    service._artifact_transfer = MagicMock(publish=MagicMock(return_value=False), restore=MagicMock(return_value=None))
     service._bot_repository = None
     service._sandbox_registry = MagicMock()
     service._sandbox_registry.resolve.side_effect = RuntimeError("hermes missing")
@@ -590,7 +589,7 @@ class TestBotBuildServiceBotParamForwarding:
         )
         mock_provider.get_build_plan.return_value = mock_build_plan
         service = BotBuildService.__new__(BotBuildService)
-        service._artifact_transfer = MagicMock(supports=AicodingArtifactTransferStrategy.supports, try_publish=MagicMock(return_value=False))
+        service._artifact_transfer = MagicMock(publish=MagicMock(return_value=False), restore=MagicMock(return_value=None))
         service._device_service = MagicMock()
         service._build_ignore_repository = MagicMock(get=MagicMock(return_value=None))
         service._env = "test"
