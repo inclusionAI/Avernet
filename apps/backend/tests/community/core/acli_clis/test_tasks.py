@@ -253,6 +253,7 @@ def test_the_lifecycle_registers_both_types(world) -> None:
 
 @pytest.mark.asyncio
 async def test_an_install_that_resolved_an_alias_fails_with_the_market_name(world) -> None:
+    """What landed is granted too, so installed ⇒ granted still holds."""
     store, engine, _, operation, _ = world
     store.create(_row(engine_operation_id="e" * 32))
     engine.ops["e" * 32] = EngineOperation(
@@ -264,3 +265,19 @@ async def test_an_install_that_resolved_an_alias_fails_with_the_market_name(worl
 
     assert isinstance(outcome, Fail)
     assert outcome.error == "name_mismatch: 'di' is a command; use 'deepinsight-cli'"
+    assert operation._reconciler.codes == ["deepinsight-cli"]
+
+
+@pytest.mark.asyncio
+async def test_an_alias_install_whose_market_name_cannot_be_granted_says_so(world) -> None:
+    store, engine, _, operation, _ = world
+    operation._reconciler.drops_writes = True
+    store.create(_row(engine_operation_id="e" * 32))
+    engine.ops["e" * 32] = EngineOperation(
+        id="e" * 32, action="install", name="di", state="succeeded",
+        result={"name": "deepinsight-cli", "command": "di"},
+    )
+
+    outcome = await operation._step(_payload(cli_code="di"))
+
+    assert isinstance(outcome, Fail) and outcome.error.startswith("grant_failed:")

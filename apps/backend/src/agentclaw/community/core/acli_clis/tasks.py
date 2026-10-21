@@ -61,20 +61,16 @@ _TRANSIENT_CODES = frozenset({"timeout", "engine_unreachable", "engine_busy"})
 RECORD_GRACE_SECONDS = 60.0
 
 
-def _outcome(op: EngineOperation, payload: OperationPayload) -> TaskOutcome:
-    """The task's outcome once its engine operation is known."""
-    if op.active:
-        return Reschedule(POLL_SECONDS)
-    if op.state != "succeeded":
-        return Fail(task_error(op.error_code, op.error_message))
+def _resolved_name(op: EngineOperation, payload: OperationPayload) -> str | None:
+    """The market name acli installed, when it is not the code that was asked for.
+
+    That happens when ``cli_code`` was a command alias the market could not be
+    asked about before the submit.
+    """
+    if payload.action != INSTALL or op.state != "succeeded":
+        return None
     installed = str((op.result or {}).get("name") or payload.cli_code)
-    if payload.action == INSTALL and installed != payload.cli_code:
-        # acli resolved a command alias the market could not be asked about.
-        # Passport codes are market names, so the caller is told which to use.
-        return Fail(task_error(
-            "name_mismatch", f"{payload.cli_code!r} is a command; use {installed!r}"
-        ))
-    return Complete()
+    return installed if installed != payload.cli_code else None
 
 
 def _unrecorded(payload: OperationPayload) -> TaskOutcome:
@@ -148,7 +144,7 @@ class AcliOperationTaskHandler:
             "acli_operation_submitted operation_id=%s engine_operation_id=%s %s %s",
             payload.operation_id, op.id, payload.action, payload.cli_code,
         )
-        return _outcome(op, payload)
+        return await self._outcome(op, payload)
 
     async def _poll(self, payload: OperationPayload, engine_operation_id: str) -> TaskOutcome:
         try:
@@ -161,35 +157,61 @@ class AcliOperationTaskHandler:
             return Fail(task_error(
                 "operation_lost", "the engine no longer has a record of the operation"
             ))
-        return _outcome(op, payload)
+        return await self._outcome(op, payload)
 
-    def _ensure_granted(self, payload: OperationPayload) -> TaskOutcome | None:
-        """Grant the CLI before installing it; ``Fail`` if the grant does not hold.
+    async def _outcome(self, op: EngineOperation, payload: OperationPayload) -> TaskOutcome:
+        """The task's outcome once its engine operation is known."""
+        if op.active:
+            return Reschedule(POLL_SECONDS)
+        if op.state != "succeeded":
+            return Fail(task_error(op.error_code, op.error_message))
+        resolved = _resolved_name(op, payload)
+        if resolved is None:
+            return Complete()
+        # The tool is installed under its market name, so grant that name too:
+        # installed ⇒ granted holds, and a retry with the market name finds it
+        # installed and granted. The alias's own grant stays (D9).
+        refused = await asyncio.to_thread(self._ensure_granted, payload, resolved)
+        if refused is not None:
+            return refused
+        logger.warning(
+            "acli_operation_name_mismatch operation_id=%s cli_code=%s installed=%s",
+            payload.operation_id, payload.cli_code, resolved,
+        )
+        return Fail(task_error(
+            "name_mismatch", f"{payload.cli_code!r} is a command; use {resolved!r}"
+        ))
+
+    def _ensure_granted(
+        self, payload: OperationPayload, cli_code: str | None = None
+    ) -> TaskOutcome | None:
+        """Grant ``cli_code`` (default: the payload's); ``Fail`` if the grant does not hold.
 
         Every grant is read back: a Passport can accept a write it does not keep.
         A grant that is already there is left as it is.
         """
+        cli_code = cli_code or payload.cli_code
         bot = load_bot(self._bots, bot_id=payload.bot_id, entity_id=payload.entity_id)
-        if payload.cli_code in self._granted(bot):
+        if cli_code in self._granted(bot):
             return None
         write_error: Exception | None = None
         try:
             self._reconciler.add_cli(
                 bot=bot,
                 item={
-                    "cli_code": payload.cli_code,
-                    "cli_name": payload.cli_code,
+                    "cli_code": cli_code,
+                    "cli_name": cli_code,
                     "cli_desc": payload.cli_desc or "",
                     "identity_mode": payload.identity_mode or "owner",
                 },
             )
         except Exception as error:  # noqa: BLE001 — judged by the read-back
             write_error = error
-        if payload.cli_code in self._granted(bot):
+        if cli_code in self._granted(bot):
             return None
         logger.error(
             "acli_operation_grant_failed operation_id=%s cli_code=%s error_type=%s",
-            payload.operation_id, payload.cli_code,
+            payload.operation_id, cli_code,
             type(write_error).__name__ if write_error else None,
         )
         return Fail(task_error("grant_failed", "the CLI grant could not be written"))

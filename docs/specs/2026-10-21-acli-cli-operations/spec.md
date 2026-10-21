@@ -192,7 +192,10 @@ remove and cancel need the owner and the edit lock.
     (`already_installed` / `uninstalled: false`). Any other `engine_busy`
     means something else holds the container: retry until the deadline.
   - An install whose engine result names another tool (acli resolved a
-    command alias the market could not be asked about) fails `name_mismatch`.
+    command alias the market could not be asked about) fails `name_mismatch`,
+    after granting the installed market name too, so installed ⇒ granted
+    holds and a retry with that name finds it installed. The alias's own
+    grant is left (D9).
   - The engine's terminal state decides the task's: `succeeded` →
     `Complete`; `failed`, `cancelled`, `interrupted` → `Fail("<code>:
     <message>")`. No automatic resubmit: an `interrupted` operation fails the
