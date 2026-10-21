@@ -163,3 +163,28 @@ def abort_acknowledged(frames, run_id):
                and frame.get('id') in requests and frame.get('ok') is True
                and run_id in frame.get('payload', {}).get('aborted_run_ids', [])
                for direction, frame in frames)
+
+
+def active_wait_tool(frames):
+    events = tool_events(frames)
+    finished = {(event.get('runId'), event.get('toolCallId')) for event in events
+                if event.get('phase') == 'result'}
+    for event in events:
+        if event.get('phase') != 'start' or str(event.get('name', event.get('toolName', ''))).lower() not in ('bash', 'exec', 'shell'):
+            continue
+        args = event.get('args', {})
+        command = args.get('command', args.get('cmd', '')) if isinstance(args, dict) else ''
+        if isinstance(command, list):
+            command = ' '.join(command)
+        if not isinstance(command, str) or 'python3' not in command or 'ci_wait.py' not in command:
+            continue
+        if (event.get('runId'), event.get('toolCallId')) not in finished:
+            return event
+    return None
+
+
+def late_wait_output(frames, event, marker):
+    return any(tool.get('runId') == event['runId']
+               and tool.get('toolCallId') == event['toolCallId']
+               and contains_text(tool.get('result', tool.get('partialResult')), marker)
+               for tool in tool_events(frames))

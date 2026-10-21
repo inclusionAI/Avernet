@@ -4,7 +4,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from wire_probe import abort_acknowledged, validate_tools
+from wire_probe import active_wait_tool, late_wait_output, abort_acknowledged, validate_tools
 
 
 class WireEvidenceTest(unittest.TestCase):
@@ -35,3 +35,15 @@ class WireEvidenceTest(unittest.TestCase):
         self.assertFalse(abort_acknowledged([request, response], 'unrelated'))
         response[1]['payload']['aborted_run_ids'] = []
         self.assertFalse(abort_acknowledged([request, response], 'run'))
+
+    def test_cancel_wait_ignores_reads_and_already_finished_commands(self):
+        frames = self.frames({'path': 'ci_wait.py'})
+        self.assertIsNone(active_wait_tool(frames))
+        start = frames[0][1]['payload']
+        start.update(name='Bash', args={'command': 'python3 ci_wait.py'})
+        self.assertIsNone(active_wait_tool(frames))
+        self.assertEqual(active_wait_tool(frames[:1])['toolCallId'], 'call-1')
+        self.assertFalse(late_wait_output([], start, 'TOKEN'))
+        self.assertTrue(late_wait_output(frames[1:], start, 'TOKEN'))
+        other = dict(start, runId='other')
+        self.assertFalse(late_wait_output(frames[1:], other, 'TOKEN'))

@@ -4,7 +4,7 @@ import secrets
 import time
 from urllib.parse import quote
 
-from wire_probe import abort_acknowledged, contains_argument, contains_text, tool_events, validate_tools
+from wire_probe import active_wait_tool, late_wait_output, abort_acknowledged, contains_argument, contains_text, tool_events, validate_tools
 
 
 def tool_call_case(harness):
@@ -56,10 +56,11 @@ def cancellation_case(harness):
     def active_tool():
         if harness.terminal(run_id):
             raise AssertionError('run_completed_before_cancellation')
-        return next((event for event in tool_events(harness.wire.frames[offset:])
-                     if event.get('phase') == 'start' and 'ci_wait.py' in json.dumps(event.get('args', {}))), None)
+        return active_wait_tool(harness.wire.frames[offset:])
     harness.stage = 'cancel_wait_active_tool'
     event = harness.wait(active_tool, 90)
+    row['active_tool'] = {'name': event.get('name'), 'call_id': event['toolCallId'], 'run_id': event['runId']}
+    cancel_offset = len(harness.wire.frames)
     harness.stage = 'cancel_terminal'
     harness.api('/chat/runs/' + quote(run_id, safe='') + '/cancel', {}, harness.caller['bot_token'])
     result = harness.wait(lambda: harness.terminal(run_id), 45)
@@ -76,8 +77,7 @@ def cancellation_case(harness):
         result = harness.terminal(run_id)
         if not result or result['state'] != 'cancelled' or marker in json.dumps(result):
             raise AssertionError('cancelled_run_changed_or_late_content')
-        for tool in tool_events(harness.wire.frames[offset:]):
-            if tool.get('toolCallId') == event.get('toolCallId') and marker in json.dumps(tool.get('result')):
-                raise AssertionError('engine_continued_cancelled_tool')
+        if late_wait_output(harness.wire.frames[cancel_offset:], event, marker):
+            raise AssertionError('engine_continued_cancelled_tool')
     row.update(status='PASS', terminal_state='cancelled', downstream_abort=True, late_output_absent=True)
     harness.chat('post_cancel_recovery', 'Reply with exactly RECOVERED.', 'RECOVERED', accepted['session_id'])
