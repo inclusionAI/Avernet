@@ -181,6 +181,8 @@ class AicodingArtifactTransferStrategy:
 
     def _invoke(self, device_id: str, action: str, request: dict, timeout: float | None) -> None:
         started = time.monotonic()
+        logger.info('fastdisk.%s.started device_id=%s operation_id=%s version_prefix=%s timeout_seconds=%s',
+                    action, device_id, request.get('operation_id'), request.get('version_prefix'), timeout)
         # Inspect the version WITHOUT running upload. Old v1 scripts use the
         # old credential files and lack restore; they cannot accept this contract.
         probe_code = (
@@ -208,16 +210,21 @@ class AicodingArtifactTransferStrategy:
             reason = {44: 'container artifact script is missing',
                       45: 'container artifact script version is incompatible'}.get(
                           probe.exit_code, 'cannot probe container artifact script')
-            logger.error("fastdisk.%s.failed device_id=%s reason=%s", action, device_id, reason)
+            logger.error("fastdisk.%s.failed device_id=%s operation_id=%s version_prefix=%s reason=%s",
+                         action, device_id, request.get('operation_id'), request.get('version_prefix'), reason)
             raise FastdiskPublishError(reason)
         command = f'python3 {shlex.quote(ENTRY)} {action} --request-b64 {shlex.quote(encoded)}'
 
         try:
             run_artifact_command(self.executor, device_id, command, timeout_seconds=remaining)
         except Exception as error:
-            logger.error('fastdisk.%s.failed device_id=%s error_type=%s',
-                         action, device_id, type(error).__name__)
+            logger.error('fastdisk.%s.failed device_id=%s operation_id=%s version_prefix=%s error_type=%s',
+                         action, device_id, request.get('operation_id'), request.get('version_prefix'),
+                         type(error).__name__)
             raise FastdiskPublishError(f'fastdisk {action} failed') from error
+        logger.info('fastdisk.%s.completed device_id=%s operation_id=%s version_prefix=%s elapsed_ms=%s',
+                    action, device_id, request.get('operation_id'), request.get('version_prefix'),
+                    round((time.monotonic() - started) * 1000))
 
     def try_restore(self, *, device_id: str, plan: EngineBuildPlan,
                     source_root: str, artifact_path: str, artifact_dir: Path, remaining_timeout: Callable[[], float], normalize_extra: Any) -> bool:

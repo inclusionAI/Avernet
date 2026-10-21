@@ -333,3 +333,17 @@ def test_engine_scope_is_owned_by_aicoding_strategy(engine):
                              remaining_timeout=budget, normalize_extra=None) is False
         p.executor.exec_shell_new.assert_not_called()
         budget.assert_not_called()
+
+
+def test_transfer_failure_logs_operation_identity_without_request_secrets(monkeypatch):
+    from agentclaw.community.core.bot_management.engines.aicoding import artifact_transfer as module
+    logger = Mock()
+    monkeypatch.setattr(module, 'logger', logger)
+    p = publisher([result(), result(), result(1)])
+    with pytest.raises(FastdiskPublishError):
+        publish(p)
+    request = json.loads(base64.b64decode(shlex.split(p.executor.exec_shell_new.call_args.kwargs['shell_cmd'])[-1]))
+    messages = [call.args[0] % call.args[1:] for call in logger.error.call_args_list]
+    assert any(request['operation_id'] in message and request['version_prefix'] in message
+               for message in messages)
+    assert all('test-secret-name' not in message for message in messages)
