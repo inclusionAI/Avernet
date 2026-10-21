@@ -17,6 +17,7 @@ export function buildChatEngineVersionTarget(input: {
     (section !== 'managed' && section !== 'team') ||
     origin !== 'mine' ||
     bot.isFriendBot ||
+    bot.botType?.trim().toLowerCase() === 'desktop' ||
     !bot.online ||
     bot.status?.toLowerCase() === 'hidden' ||
     !bot.chatable ||
