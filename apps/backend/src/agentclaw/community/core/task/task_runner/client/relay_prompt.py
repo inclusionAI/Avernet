@@ -52,6 +52,10 @@ def format_relay_execution_instruction(
         " local_acceptance_result；verdict 只能是 DONE 或 FAILED，禁止 PASS/FAIL，"
         "done_items/gap_items 对象必须为 {id,passed,summary}，"
         "二者 id 并集必须逐项且仅一次覆盖 actual_goal.acceptances。",
+        "S4a 预算硬边界：wall_seconds=600、max_tool_calls=30、"
+        "max_consecutive_failures=5；到达任一上限立即停止业务调用，"
+        "形成明确的 DECLINED 或诚实 FAILED 验收事实，并继续 S4b 上报，"
+        "禁止卡住不切下一步。",
         f"S4b POST {report_path}：event_type=EXECUTION_RESULT，"
         "event 为 {execution_decision, actual_goal, output_patch, local_acceptance_result, failure_reason}。"
         "ACCEPTED 必须带 actual_goal 和 local_acceptance_result；"

@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal
 
+from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.domain.models import TaskNode
 
 logger = logging.getLogger("task.harness.runtime_probe")
@@ -223,6 +224,27 @@ def _group_cursor(group: dict[str, Any]) -> Any:
     }
 
 
+def _bot_identity_from_node(node: TaskNode) -> str | None:
+    """Resolve the bot-addressed identity used by runtime session message reads.
+
+    The Probe owns session-level heartbeats, but ``OpenApiBotAdapter`` must
+    address the same runtime handle as the dispatch path. Single-bot
+    successors store ``assignee`` and (for newer rows) ``assignee_owner_id``;
+    root Relay nodes may already persist the historical composite address.
+    ``compose_bot_identity`` preserves that single identity convention
+    instead of inventing a second bot-addressing protocol.
+
+    Returns ``None`` only when the node truly has no assignee; callers may
+    surface a probe error rather than silently falling back to a default.
+    """
+    props = getattr(node.run_info, "extend_props", {}) or {}
+    assignee = str(getattr(node.run_info, "assignee", "") or "").strip()
+    if not assignee:
+        return None
+    owner_id = str(props.get("assignee_owner_id") or "").strip()
+    return compose_bot_identity(assignee, owner_id or None)
+
+
 class TaskRuntimeLivenessProbe:
     """Read runtime status and heartbeats through existing internal ports."""
 
@@ -241,6 +263,7 @@ class TaskRuntimeLivenessProbe:
         run_id = str(props.get("run_id") or "").strip() or None
         session_id = str(props.get("session_id") or "").strip() or None
         group_id = str(props.get("group_id") or "").strip() or None
+        bot_id = _bot_identity_from_node(node)
 
         # Single-bot can be turned into a manager-worker group. The authoritative
         # runtime handle decides the probe, not only the persisted run_mode.
@@ -256,11 +279,13 @@ class TaskRuntimeLivenessProbe:
                 run_id=run_id,
                 session_id=session_id,
                 previous_cursor=previous_cursor,
+                bot_id=bot_id,
             )
         if session_id:
             return await self._probe_session_messages(
                 session_id=session_id,
                 previous_cursor=previous_cursor,
+                bot_id=bot_id,
             )
         return RuntimeProbeResult(
             state="unknown",
@@ -273,6 +298,7 @@ class TaskRuntimeLivenessProbe:
         *,
         session_id: str,
         previous_cursor: str | None,
+        bot_id: str | None,
     ) -> RuntimeProbeResult:
         """Probe a root execution conversation when only a session id exists.
 
@@ -286,13 +312,18 @@ class TaskRuntimeLivenessProbe:
                 detail={"reason": "port_missing"},
             )
         try:
-            messages = await self._bot.get_session_messages(session_id, limit=20)
+            messages = await self._bot.get_session_messages(
+                session_id, limit=20, bot_id=bot_id
+            )
         except Exception as exc:  # noqa: BLE001
             return RuntimeProbeResult(
                 state="unknown",
                 source="openapi_bot.session",
                 error=f"{type(exc).__name__}: {exc}"[:500],
-                detail={"session_id": session_id},
+                detail={
+                    "session_id": session_id,
+                    "bot_id_missing": not bot_id,
+                },
             )
         cursor = _join_cursors(
             {"session_id": session_id, "count": len(messages) if isinstance(messages, list) else None},
@@ -331,6 +362,7 @@ class TaskRuntimeLivenessProbe:
         run_id: str,
         session_id: str | None,
         previous_cursor: str | None,
+        bot_id: str | None,
     ) -> RuntimeProbeResult:
         if self._bot is None:
             return RuntimeProbeResult(
@@ -366,7 +398,9 @@ class TaskRuntimeLivenessProbe:
         message_error: str | None = None
         if session_id:
             try:
-                messages = await self._bot.get_session_messages(session_id, limit=20)
+                messages = await self._bot.get_session_messages(
+                    session_id, limit=20, bot_id=bot_id
+                )
                 cursor_value = (
                     cursor_value,
                     _last_message_cursor(messages),
