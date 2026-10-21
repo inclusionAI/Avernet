@@ -47,6 +47,7 @@ export function createTaskGuardSettingsRouter(input: {
       const message = error instanceof Error ? error.message : '';
       if (message === 'SETTINGS_CONFLICT') { res.status(409).json({ error: '配置已变化，请刷新后保存' }); return; }
       if (message === 'INVALID_AUTOMATION_POLICY') { res.status(400).json({ error: '自动分析策略无效，请检查时间和版本' }); return; }
+      if (message === 'INVALID_NOTIFICATION_RECIPIENTS') { res.status(400).json({ error: '通知人请填写有效账号 ID，最多 20 人；留空通知工作流负责人' }); return; }
       throw error;
     }
   }));

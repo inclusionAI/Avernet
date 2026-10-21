@@ -188,11 +188,26 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
     if (job.status === 'dispatching' || job.status === 'uncertain') {
       await repo.patch(job, { status: 'uncertain', reason: 'NOTIFICATION_OUTCOME_UNKNOWN', nextAtMs: now() + 300000 }, now(), true); return;
     }
-    let access;
-    try { access = await authority(job.workflowId); }
+    let actorId: string;
+    try {
+      const policy = await input.settings.get(job.workflowId);
+      if (job.data.kind === 'issue' && !policy.enabled) throw new RepairAutomationDeniedError('AUTOMATION_DISABLED');
+      const recipients = job.data.kind === 'issue' ? [] : policy.notificationRecipients ?? [];
+      if (!job.data.fixedRecipient && recipients.length) {
+        const deliveries = [];
+        for (const recipientId of recipients) deliveries.push(await repo.ensure(job.workflowId, 'auto_notice', `${job.id}:${recipientId}`, { ...job.data, recipientId, fixedRecipient: true }, now()));
+        await repo.patch(job, { status: 'done', data: { ...job.data, recipients } }, now(), true);
+        for (const delivery of deliveries) await notify(delivery);
+        return;
+      }
+      const owner = job.data.fixedRecipient ? null : await input.ports.owner(job.workflowId);
+      const recipientId = job.data.fixedRecipient ? job.data.recipientId : owner;
+      if (typeof recipientId !== 'string' || !recipientId) throw new RepairAutomationDeniedError('OWNER_MISSING');
+      actorId = recipientId;
+      if (!job.data.fixedRecipient && !await input.ports.canEdit(job.workflowId, actorId)) throw new RepairAutomationDeniedError('OWNER_PERMISSION_DENIED');
+    }
     catch (error) { if (!(error instanceof RepairAutomationDeniedError)) throw error;
       await repo.patch(job, { status: 'retryable', reason: error.message, nextAtMs: now() + 30000 }, now(), true); return; }
-    const { actorId } = access;
     if (job.data.kind === 'draft') {
       const task = await input.workbench.task(job.data.taskId);
       const reviewable = task.latestAttempt.phase === 'review'
@@ -202,7 +217,7 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
       }
     }
     if (job.attempts >= 3) { await repo.patch(job, { status: 'blocked', reason: 'NOTIFICATION_REJECTED' }, now(), true); return; }
-    job = await repo.patch(job, { status: 'dispatching', attempts: job.attempts + 1, data: { ...job.data, recipientId: actorId } }, now());
+    job = await repo.patch(job, { status: 'dispatching', attempts: job.attempts + 1, data: { ...job.data, lastRecipientId: actorId } }, now());
     let result: Awaited<ReturnType<WorkflowAutomationPorts['notify']>>;
     try { result = await bounded(input.ports.notify({ key: job.id, workflowId: job.workflowId, recipientId: actorId, title: job.data.title, text: job.data.text, path: job.data.path })); }
     catch { result = { status: 'uncertain' }; }
@@ -234,7 +249,6 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
           if (current.autoDraft) cycle = await planDraft(cycle);
           if (cycle.reason !== 'DRAFT_IN_PROGRESS') cycle = await repo.patch(cycle, { data: { ...cycle.data, evaluated, blockingTaskId: null } }, now());
         }
-        for (const job of await repo.ready(policy.workflowId, 'auto_notice', now(), 3)) await notify(job);
       }
       await repo.patch(cycle, { nextAtMs: now() + 10000 }, now(), true);
     } catch (error) {
@@ -266,10 +280,12 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
   }
   return {
     async tick() {
-      const policies = await input.settings.list(); if (!policies.length) return 0;
+      const policies = await input.settings.list();
       const count = Math.min(10, policies.length);
       for (let i = 0; i < count; i++) await workflow(policies[(roundRobin + i) % policies.length]);
-      roundRobin = (roundRobin + count) % policies.length;
+      if (policies.length) roundRobin = (roundRobin + count) % policies.length;
+      // Manual completions and in-flight automatic results notify even with automation disabled/unconfigured.
+      for (const job of await repo.readyNotifications(now())) await notify(job);
       return count;
     },
     async onRunTerminal(event) {

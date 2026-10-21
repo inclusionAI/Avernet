@@ -114,7 +114,8 @@ export type TrustedRepairReport = {
 
 class WorkflowRepairWorkbench implements RepairWorkbenchService {
   private readonly readSnapshots = new Map<string, { version: string; at: number; value: Awaited<ReturnType<WorkflowRepairWorkbench['snapshot']>> }>();
-  constructor(private readonly db: IDatabase, private readonly sources: RepairSourcePort, private readonly execution?: RepairExecutionPort, private readonly proposals?: ProposalCoordinator) {}
+  constructor(private readonly db: IDatabase, private readonly sources: RepairSourcePort, private readonly execution?: RepairExecutionPort, private readonly proposals?: ProposalCoordinator,
+    private readonly onCompleted?: (tx: IDatabase, revision: RepairRevision) => Promise<void>) {}
   private capabilities(): RepairCapabilities {
     return { generation: !!this.execution, diff: !!this.execution?.diff, publication: false,
       reason: this.execution ? null : 'Repair generation provider is unavailable' };
@@ -864,11 +865,13 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
           : input.status === 'no_change' ? 'no_change' : 'review' });
       }
       await new RepairTaskRepository(tx).settle(settled);
+      await this.onCompleted?.(tx, settled);
       return settled;
     });
   }
 }
 
-export function createRepairWorkbenchService(db: IDatabase, sourcePort: RepairSourcePort, executionPort?: RepairExecutionPort, proposals?: ProposalCoordinator): RepairWorkbenchService & { report(input: TrustedRepairReport): Promise<RepairRevision>; proposalSnapshot(workflowId: string): Promise<import('./repair-proposal-integration.js').ProposalSnapshot>; retryProposalIntegration(workflowId: string): Promise<void> } {
-  return new WorkflowRepairWorkbench(db, sourcePort, executionPort, proposals);
+export function createRepairWorkbenchService(db: IDatabase, sourcePort: RepairSourcePort, executionPort?: RepairExecutionPort, proposals?: ProposalCoordinator,
+  onCompleted?: (tx: IDatabase, revision: RepairRevision) => Promise<void>): RepairWorkbenchService & { report(input: TrustedRepairReport): Promise<RepairRevision>; proposalSnapshot(workflowId: string): Promise<import('./repair-proposal-integration.js').ProposalSnapshot>; retryProposalIntegration(workflowId: string): Promise<void> } {
+  return new WorkflowRepairWorkbench(db, sourcePort, executionPort, proposals, onCompleted);
 }

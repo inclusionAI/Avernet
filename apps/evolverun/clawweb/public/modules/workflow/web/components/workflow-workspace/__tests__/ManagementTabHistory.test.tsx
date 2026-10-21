@@ -56,7 +56,7 @@ describe('workflow management version history', () => {
     })
     render(<ManagementTab workflowId="wf-1" workflowTitle="Workflow 1" onDeleted={vi.fn()} />)
 
-    await userEvent.click(screen.getByRole('button', { name: '自动分析' }))
+    await userEvent.click(screen.getByRole('button', { name: '自动化设置' }))
 
     expect(screen.getByText('自动分析设置')).toBeInTheDocument()
   })

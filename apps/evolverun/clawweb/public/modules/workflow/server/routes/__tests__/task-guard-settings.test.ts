@@ -46,6 +46,35 @@ afterEach(async () => {
 });
 
 describe("Task Guard automatic analysis settings", () => {
+  it('persists notification recipients without enabling analysis or configuring a daily schedule', async () => {
+    const response = await fetch(`${baseUrl}/api/task-guard/workflows/wf-1/auto-analysis`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-User-Id': 'editor-1' },
+      body: JSON.stringify({ enabled: false, autoDraft: false, dailyTime: '09:00', dailyConfigured: false, expectedVersion: 0, expectedNotificationVersion: 0, notificationRecipients: [' alice ', 'bob', 'alice'] }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ enabled: false, version: 0, notificationVersion: 1, dailyConfigured: false, notificationRecipients: ['alice', 'bob'] });
+    const read = await fetch(`${baseUrl}/api/task-guard/workflows/wf-1/auto-analysis`, { headers: { 'X-User-Id': 'editor-1' } });
+    expect(await read.json()).toMatchObject({ notificationRecipients: ['alice', 'bob'], dailyConfigured: false });
+    const stale = await fetch(`${baseUrl}/api/task-guard/workflows/wf-1/auto-analysis`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-User-Id': 'editor-1' },
+      body: JSON.stringify({ enabled: false, autoDraft: false, dailyTime: '09:00', expectedVersion: 0, expectedNotificationVersion: 0, notificationRecipients: ['different-person'] }),
+    });
+    expect(stale.status).toBe(409);
+    const toggle = await fetch(`${baseUrl}/api/task-guard/workflows/wf-1/auto-analysis`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-User-Id': 'editor-1' }, body: JSON.stringify({ enabled: true }),
+    });
+    expect(await toggle.json()).toMatchObject({ enabled: true, notificationRecipients: ['alice', 'bob'], dailyConfigured: false });
+  });
+
+  it.each([{ notificationRecipients: ['bad/id'] }, { notificationRecipients: Array.from({ length: 21 }, (_, i) => `person-${i}`) }, { notificationRecipients: 'not-an-array' }])("rejects malformed recipients without changing persisted policy: %j", async ({ notificationRecipients }) => {
+    const response = await fetch(`${baseUrl}/api/task-guard/workflows/wf-1/auto-analysis`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-User-Id': 'editor-1' },
+      body: JSON.stringify({ enabled: false, autoDraft: false, dailyTime: '09:00', expectedVersion: 0, expectedNotificationVersion: 0, notificationRecipients }),
+    });
+    expect(response.status).toBe(400);
+    const stored = await new AppConfigRepository(db).listAll();
+    expect(stored).toHaveLength(0);
+  });
   it("persists a per-workflow switch and returns the database value without a restart", async () => {
     const update = await fetch(`${baseUrl}/api/task-guard/workflows/wf-1/auto-analysis`, {
       method: "PUT",

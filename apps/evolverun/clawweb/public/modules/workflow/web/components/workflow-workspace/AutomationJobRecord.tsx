@@ -9,7 +9,7 @@ export const reasons: Record<string, string> = {
   NOTIFICATION_OUTCOME_UNKNOWN: '通知结果未知，请管理员核对；不会自动重发', NOTIFICATION_REJECTED: '通知未送达，只重试通知',
   DRAFT_REQUIRES_MANUAL_REVIEW: '草稿需要处理，请查看原优化任务；可重试对象列在下方', CANDIDATE_SUPERSEDED: '候选已变化，旧通知已停用',
 }
-const kinds: Record<string, string> = { auto_cycle: '每日扫描', auto_run: '运行分析', auto_draft: '优化草稿', auto_notice: '负责人通知' }
+const kinds: Record<string, string> = { auto_cycle: '每日扫描', auto_run: '运行分析', auto_draft: '优化草稿', auto_notice: '任务通知' }
 const statuses: Record<string, string> = { pending: '待处理', dispatching: '正在提交', waiting: '等待结果', retryable: '等待重试', uncertain: '待核对', done: '已结束', blocked: '需要处理' }
 function jobStatus(job: AutomationJobSummary) {
   if (job.kind === 'auto_run') {

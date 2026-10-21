@@ -5,6 +5,7 @@ import { repairReleaseMigrations } from '@avernet/clawweb-shared/server/schema-r
 import { AppConfigRepository } from '../../repositories/app-config-repository.js';
 import { createAutoAnalysisSettings } from '../task-guard/auto-analysis-settings.js';
 import { createRepairWorkbenchService } from '../repair-batch-service.js';
+import { queueRepairCompletion } from '../repair-completion-notification.js';
 import { createRepairReleaseService } from '../repair-release-service.js';
 import { digestRepairJson } from '../../contracts/repair-batch.js';
 import type { RepairPublicationPort } from '../../contracts/repair-release.js';
@@ -67,7 +68,7 @@ async function fixture(autoDraft = false, count = 3, full = false) {
     if (request.input.automation) await service.authorizeDraft({ workflowId: 'wf-1', actorId: request.actorId,
       taskId: request.input.taskId, origin: request.input.automation, itemIds: request.input.items.map(item => item.itemId) });
     return f.executionPort.dispatch(request);
-  } });
+  } }, undefined, queueRepairCompletion);
   const create = () => createWorkflowAutomation({ db: f.db, settings, ports, workbench, now: () => clock });
   service = create();
   return { ...f, settings, ports, baseline, observations, analyze, workbench, get service() { return service; },
@@ -77,6 +78,72 @@ async function fixture(autoDraft = false, count = 3, full = false) {
 it('uses Shanghai daily boundaries and merges missed days', () => {
   expect(automationDue(Date.parse('2026-11-01T00:59:00Z'), '09:00').key).toBe('2026-10-31');
   expect(automationDue(Date.parse('2026-11-01T01:00:00Z'), '09:00').key).toBe('2026-11-01');
+});
+
+it('notifies manual draft completion even with automatic analysis disabled, once across hosts', async () => {
+  const f = await fixture();
+  await f.settings.set('wf-1', false, 'owner');
+  const inbox = await f.workbench.candidates('wf-1');
+  const task = await f.workbench.create('human', { workflowId: 'wf-1', itemIds: ['item-0'], inputDigest: inbox.inputDigest, instructions: '', requestId: 'manual-notice' });
+  await f.workbench.report({ workflowId: 'wf-1', taskId: task.taskId, revision: 1, expectedStateVersion: 0, status: 'failed', error: { code: 'AIS_FAILED' } });
+  await f.service.tick();
+  expect(f.ports.notify).toHaveBeenCalledWith(expect.objectContaining({ recipientId: 'owner', path: expect.stringContaining(task.taskId), title: expect.stringContaining('失败') }));
+  const sent = vi.mocked(f.ports.notify).mock.calls.length;
+  f.advance(); await f.restart().tick();
+  expect(f.ports.notify).toHaveBeenCalledTimes(sent);
+});
+
+it('sends configured recipients independently and does not resend successful deliveries', async () => {
+  const f = await fixture();
+  await f.settings.set('wf-1', false, 'owner');
+  await f.settings.save('wf-1', { enabled: false, autoDraft: false, dailyTime: '09:00', expectedVersion: 2, expectedNotificationVersion: 0, notificationRecipients: ['alice', 'bob'] }, 'owner');
+  const repo = new WorkflowAutomationRepository(f.db);
+  await repo.ensure('wf-1', 'auto_notice', 'manual-completed', { kind: 'completion', title: '优化草稿已可审阅', text: '请审阅', path: '/task' }, 0);
+  vi.mocked(f.ports.notify).mockImplementation(async notice => ({ status: notice.recipientId === 'bob' ? 'retryable' : 'sent' }));
+  await f.service.tick();
+  expect(vi.mocked(f.ports.notify).mock.calls.map(([notice]) => notice.recipientId)).toEqual(['alice', 'bob']);
+  vi.mocked(f.ports.notify).mockResolvedValue({ status: 'sent' });
+  f.advance(); await f.restart().tick();
+  expect(vi.mocked(f.ports.notify).mock.calls.map(([notice]) => notice.recipientId)).toEqual(['alice', 'bob', 'bob']);
+});
+
+it('changing recipients leaves the automatic policy version and already-planned draft dispatch intact', async () => {
+  const f = await fixture(true);
+  await f.service.tick();
+  const prior = await f.settings.get('wf-1');
+  const changed = await f.settings.save('wf-1', { enabled: true, autoDraft: true, dailyTime: prior.dailyTime, expectedVersion: prior.version,
+    expectedNotificationVersion: 0, notificationRecipients: ['reviewer'] }, 'owner');
+  expect(changed.version).toBe(prior.version);
+  expect(changed.notificationVersion).toBe(1);
+  f.advance(); await f.service.tick();
+  expect(f.calls).toHaveLength(1);
+});
+
+it('notifies a successful manual draft with no automation settings and deduplicates repeated result reports', async () => {
+  const f = await fixture();
+  await f.db.exec('DELETE FROM cm_app_config');
+  const inbox = await f.workbench.candidates('wf-1');
+  const task = await f.workbench.create('human', { workflowId: 'wf-1', itemIds: ['item-0'], inputDigest: inbox.inputDigest, instructions: '', requestId: 'manual-success' });
+  const draft = { candidateCommit: 'd'.repeat(40), parentCandidateCommit: task.input.baseline.packCommit, packDigest: 'e'.repeat(40), itemResults: [{ itemId: 'item-0', status: 'changed', reason: 'fixed' }] };
+  const report = { workflowId: 'wf-1', taskId: task.taskId, revision: 1, expectedStateVersion: 0, status: 'succeeded' as const, draft,
+    checks: { schemaVersion: 'workflow-repair-checks/v1', candidateCommit: draft.candidateCommit, packDigest: draft.packDigest, candidateDigest: digestRepairJson(draft), static: { status: 'passed' }, mock: { status: 'not_covered' }, coverage: [{ itemId: 'item-0' }] } };
+  await f.workbench.report(report);
+  await f.workbench.report(report);
+  await Promise.all([f.service.tick(), f.restart().tick()]);
+  expect(f.ports.notify).toHaveBeenCalledTimes(1);
+  expect(f.ports.notify).toHaveBeenCalledWith(expect.objectContaining({ title: '优化草稿已可审阅', recipientId: 'owner', path: expect.stringContaining(task.taskId) }));
+  expect((await f.workbench.task(task.taskId)).latestAttempt.phase).toBe('review');
+  expect(f.ports.analysis.start).not.toHaveBeenCalled();
+});
+
+it('keeps generation in drafting if its completion notification cannot be persisted', async () => {
+  const f = await fixture();
+  const inbox = await f.workbench.candidates('wf-1');
+  const task = await f.workbench.create('human', { workflowId: 'wf-1', itemIds: ['item-0'], inputDigest: inbox.inputDigest, instructions: '', requestId: 'notice-write-failure' });
+  f.raw.exec("CREATE TRIGGER reject_notice BEFORE INSERT ON workflow_repair_release_records WHEN NEW.record_kind = 'auto_notice' BEGIN SELECT RAISE(ABORT, 'notice write failed'); END");
+  await expect(f.workbench.report({ workflowId: 'wf-1', taskId: task.taskId, revision: 1, expectedStateVersion: 0, status: 'failed', error: { code: 'AIS_FAILED' } })).rejects.toThrow('notice write failed');
+  expect((await f.workbench.task(task.taskId)).latestAttempt.phase).toBe('drafting');
+  expect(f.ports.notify).not.toHaveBeenCalled();
 });
 it('claims one daily scan across hosts, analyzes late arrivals once and preserves frozen draft scope', async () => {
   const f = await fixture(true);
@@ -140,6 +207,15 @@ async function readyDraft(f: Awaited<ReturnType<typeof fixture>>) {
       candidateDigest: digestRepairJson(draft), static: { status: 'passed' }, mock: { status: 'not_covered' }, coverage: task.latestAttempt.input.items.map(item => ({ itemId: item.itemId })) } });
   return f.workbench.task(task.taskId);
 }
+it('notifies already-dispatched automatic drafts after the switch is turned off', async () => {
+  const f = await fixture(true); await f.service.tick();
+  const task = await readyDraft(f);
+  await f.settings.set('wf-1', false, 'owner');
+  f.advance(); await f.service.tick();
+  const notices = vi.mocked(f.ports.notify).mock.calls.filter(([notice]) => notice.path.includes(task.taskId));
+  expect(notices).toHaveLength(1);
+  expect(notices[0][0]).toMatchObject({ recipientId: 'owner', title: '自动优化草稿已可审阅' });
+});
 it('notifies only a genuinely reviewable candidate and does not recreate it on notification retry', async () => {
   const f = await fixture(true); await f.service.tick();
   expect(vi.mocked(f.ports.notify).mock.calls.some(([notice]) => notice.title.includes('草稿'))).toBe(false);
@@ -311,6 +387,7 @@ it.each([true, false])('notifies a final no_change round only when prior batches
   // Issue notices may precede the round notice in the durable queue.
   for (let i = 0; i < 40 && !notices().length; i++) { f.advance(); await f.restart().tick(); }
   expect(notices()).toHaveLength(priorChanged ? 1 : 0);
+  if (!priorChanged) expect(vi.mocked(f.ports.notify).mock.calls.filter(([notice]) => notice.title === '优化任务已完成，无需修改')).toHaveLength(1);
   if (priorChanged) expect(notices()[0][0].path).toContain(`repairTaskId=${id}`);
   f.advance(); await f.restart().tick();
   expect(notices()).toHaveLength(priorChanged ? 1 : 0);

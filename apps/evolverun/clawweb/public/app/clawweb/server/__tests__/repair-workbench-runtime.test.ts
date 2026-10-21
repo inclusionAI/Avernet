@@ -48,6 +48,19 @@ async function fixture(dispatch?: (input: RepairDispatchRequest) => Promise<{ jo
 }
 
 describe('real repair Host composition', () => {
+  it('queues manual AIS completion through the real Host even without automatic-analysis configuration', async () => {
+    const { base, db, runtime } = await fixture(async () => ({ jobId: 'controlled-ais' }));
+    const candidates = await (await fetch(`${base}/candidates?workflowId=wf&pageSize=100`)).json();
+    const itemId = candidates.items.find((item: { state: string }) => item.state === 'pending').itemId;
+    const created = await fetch(base, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workflowId: 'wf', itemIds: [itemId], inputDigest: candidates.inputDigest, instructions: '', requestId: 'manual-completion-host' }) });
+    expect(created.status).toBe(202);
+    const task = await created.json();
+    await runtime.service.report({ workflowId: 'wf', taskId: task.taskId, revision: 1, expectedStateVersion: 0, status: 'failed', error: { code: 'AIS_FAILED' } });
+    const notices = await db.query<{ body_json: string }>("SELECT body_json FROM workflow_repair_release_records WHERE record_kind = 'auto_notice'");
+    expect(notices).toHaveLength(1);
+    expect(JSON.parse(notices[0].body_json)).toMatchObject({ status: 'pending', data: { taskId: task.taskId, revision: 1, title: '优化任务生成失败' } });
+    expect((await (await fetch(`${base}/${task.taskId}`)).json()).latestAttempt.phase).toBe('failed');
+  });
   it('reuses read projections across pages and invalidates them when sources change', async () => {
     const { db, runtime } = await fixture();
     const query = vi.spyOn(db, 'query');

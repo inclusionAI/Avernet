@@ -4,9 +4,10 @@ export type MinimumImpact = 'medium' | 'high';
 export type WorkflowAutomationPolicy = {
   workflowId: string; enabled: boolean; autoDraft: boolean; dailyTime: string; timezone: 'Asia/Shanghai';
   minimumImpact?: MinimumImpact; scopeVersion?: 'legacy' | 'all-qualified/v1';
+  notificationRecipients?: string[]; notificationVersion?: number;
   updatedAtMs: number; version: number; dailyConfigured: boolean; source: 'database' | 'environment' | 'default';
 };
-export type AutomationPolicyWrite = { enabled: boolean; autoDraft: boolean; dailyTime: string; expectedVersion: number; minimumImpact?: MinimumImpact };
+export type AutomationPolicyWrite = { enabled: boolean; autoDraft: boolean; dailyTime: string; expectedVersion: number; minimumImpact?: MinimumImpact; dailyConfigured?: boolean; notificationRecipients?: string[]; expectedNotificationVersion?: number };
 export type AutomationOrigin = { kind: 'daily'; intentId: string; policyVersion: number; evidenceCutoffMs: number; roundId?: string; batchIndex?: number; batchCount?: number; totalItems?: number };
 export type AnalysisObservation = { status: 'absent' | 'running' | 'completed' | 'failed' | 'uncertain'; analysisId?: string; complete?: boolean };
 export type AutomationNotification = { key: string; workflowId: string; recipientId: string; title: string; text: string; path: string };

@@ -13,6 +13,47 @@ concurrency. Defaults are off; existing environment/legacy failure-event setting
 remain compatible, but do not acquire a daily schedule until explicitly saved.
 There are no new environment variables or tables.
 
+`notificationRecipients` is an optional list of up to 20 account IDs. Empty or
+absent means the current workflow Owner; a configured list replaces that default.
+IDs are trimmed and deduplicated. They are stored in a separate
+`workflow_repair_notify_<workflow hash>` row in the existing `cm_app_config` table.
+Recipient-only PUTs use `expectedNotificationVersion` and return `notificationVersion`;
+they preserve the scheduling policy and its version, so editing recipients cannot
+invalidate an in-flight automatic dispatch. Mixed recipient/scheduling writes are
+rejected; the UI submits each named section separately. Existing scheduling writes
+do not alter recipients. The optional `dailyConfigured` write explicitly preserves an
+unconfigured schedule when changing a switch or recipients; older v1 policies
+without the field retain their existing configured schedule. Notification-only
+edits neither enable analysis nor activate a daily schedule.
+
+The management page separates automatic analysis, the dependent automatic draft
+step, and evolution-task notifications. Switches save immediately; the analysis
+plan and recipients have separately named save actions. Pending writes show an
+immediate progress message, prevent duplicate submissions, and do not save
+unrelated local edits. Errors retain local input, and success requires the API
+response rather than an optimistic success message.
+
+## Evolution-task completion notices
+
+The shared Host wires `queueRepairCompletion` through the workbench's optional
+transactional completion observer. Both manual generation and its retries/feedback
+queue one notice per task revision on successful reviewable output, no-change,
+failed generation or failed checks. Queue persistence commits with the result;
+remote notification delivery is not part of the result transaction. Historical
+results are not backfilled. Automatic successful batches keep their existing
+coordinator notification, once the complete chain is reviewable; intermediate
+batches do not generate repeated success notices. Automatic failures also notify.
+
+The existing monitor drains `auto_notice` independently of automatic-analysis
+enablement or daily configuration, including workflows with no saved policy.
+Owner resolution remains current for default notices. Configured recipients use
+individual deterministic journal records and existing leases, so a confirmed
+success is not repeated when another recipient needs a retry. Unknown outcomes
+remain unknown, without blind resend. The existing Host notification port and
+DingTalk provider are reused; no new notification channel, table, or migration
+is introduced. Missing provider configuration remains visible in the existing
+notification/retry records and does not trigger AIS again.
+
 Avernet owns policy, state, selection, recovery, contracts, and UI. The OCB
 composition adapter resolves the current Owner, checks edit permission, invokes
 the existing run-analysis starter and Git baseline service, and sends through the

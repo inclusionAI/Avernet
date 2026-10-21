@@ -16,6 +16,7 @@ import { IssueAggregationRepository } from '@avernet/clawevolve/server/repositor
 import { WorkflowEvolutionRepository } from '@avernet/clawevolve/server/repositories/workflow-evolution-repository';
 import { createRepairSourcePort, type RepairSuggestionSource } from '@avernet/workflow/server/repositories/repair-source-adapter';
 import { createRepairWorkbenchService } from '@avernet/workflow/server/services/repair-batch-service';
+import { queueRepairCompletion } from '@avernet/workflow/server/services/repair-completion-notification';
 import { createRepairBatchesRouter } from '@avernet/workflow/server/routes/repair-batches';
 import { createRepairAuthorizer, type RepairPrincipalResolver } from '@avernet/workflow/server/routes/repair-authorization';
 import { RepairBatchError } from '@avernet/workflow/server/contracts/repair-batch';
@@ -96,7 +97,7 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
     return hydrated as import('@avernet/workflow/server/contracts/repair-workbench').RepairInboxItem[];
   }, read: workflowId => service.proposalSnapshot(workflowId),
     model: options.proposalModel ?? createProposalModel(resolveAnalysisConfig()) }) : undefined;
-  const service = createRepairWorkbenchService(db, sources, execution, proposals);
+  const service = createRepairWorkbenchService(db, sources, execution, proposals, queueRepairCompletion);
   if (options.automation) automation = createWorkflowAutomation({ db, workbench: service, ...options.automation });
   const release = createRepairReleaseService({ db, workbench: service, publisher: options.publication });
   const trials = createRepairTrialService({ db, workbench: service, port: options.trial });

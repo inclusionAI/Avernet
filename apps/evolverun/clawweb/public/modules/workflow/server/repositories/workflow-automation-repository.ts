@@ -67,6 +67,12 @@ export class WorkflowAutomationRepository {
       AND CAST(${this.json('nextAtMs')} AS SIGNED) <= ? AND CAST(${this.json('leaseUntilMs')} AS SIGNED) <= ?
       ORDER BY updated_at_ms, record_id LIMIT ?`, [kind,scopeKey,now,now,limit])).map(row => JSON.parse(row.body_json));
   }
+  async readyNotifications(now: number): Promise<AutomationJob[]> {
+    return (await this.db.query<{ body_json: string }>(`SELECT body_json FROM workflow_repair_release_records
+      WHERE record_kind = 'auto_notice' AND ${this.json('status')} IN ('pending','retryable','dispatching')
+      AND CAST(${this.json('nextAtMs')} AS SIGNED) <= ? AND CAST(${this.json('leaseUntilMs')} AS SIGNED) <= ?
+      ORDER BY updated_at_ms, record_id LIMIT 20`, [now, now])).map(row => JSON.parse(row.body_json));
+  }
   /** Filter current eligibility before the batch limit so historical tasks cannot starve recoverable drafts. */
   async recoverableDrafts(workflowId: string, now: number, policyVersion: number): Promise<Array<{ job: AutomationJob; revision: number }>> {
     const field = (name: string) => this.json(name, 'a');
