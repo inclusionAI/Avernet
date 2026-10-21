@@ -25,6 +25,10 @@ from agentclaw.community.core.bot_inventory.protocols import (
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.core.bot_inventory.services.local_bot_workflow import LocalBotWorkflowService
+from agentclaw.community.core.service_bot.baas_service_errors import (
+    BaasServiceError,
+    BaasTransientServiceError,
+)
 
 
 LOCAL = {
@@ -100,6 +104,18 @@ def _ok(resp):
     assert resp.status_code == 200, body
     assert body["code"] == 200000
     return body["data"]
+
+
+@pytest.mark.parametrize("error_type", [BaasServiceError, BaasTransientServiceError])
+def test_restart_baas_failure_returns_upstream_error(client, desktop_service, error_type):
+    desktop_service.restart.side_effect = error_type("private upstream detail")
+
+    response = client.post("/openapi/v1/bots/l1/local/restart")
+
+    assert response.status_code == 502
+    assert "private upstream detail" not in response.text
+    desktop_service.verify_ownership.assert_called_once_with(bot_id="l1", user_id="u1")
+    desktop_service.restart.assert_called_once_with(bot_id="l1", user_id="u1")
 
 
 def test_list_local_bots(client):

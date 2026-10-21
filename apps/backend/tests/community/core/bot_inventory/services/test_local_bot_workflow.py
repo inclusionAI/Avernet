@@ -44,3 +44,22 @@ def test_grant_filter_precedes_local_pagination_and_total() -> None:
 
     assert total == 3
     assert [row["bot_id"] for row in rows] == ["l4"]
+
+
+@pytest.mark.unit
+def test_restart_does_not_reclassify_unexpected_errors() -> None:
+    desktop = MagicMock()
+    error = RuntimeError("unexpected implementation failure")
+    desktop.restart.side_effect = error
+    workflow = LocalBotWorkflowService(
+        desktop_service=desktop,
+        business_space=NoopBusinessSpaceContext(),
+        passport_plugin=MagicMock(),
+        auth_relationship_plugin=MagicMock(),
+    )
+
+    with pytest.raises(RuntimeError) as caught:
+        workflow.restart(owner_id="u1", header_space_id=None, bot_id="l1")
+
+    assert caught.value is error
+    desktop.verify_ownership.assert_called_once_with(bot_id="l1", user_id="u1")

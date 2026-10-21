@@ -22,6 +22,7 @@ consumes:
 internal_dependencies:
   - agentclaw.community.core.bot_inventory
   - agentclaw.community.core.errors
+  - agentclaw.community.core.service_bot.baas_service_errors
   - agentclaw.community.core.workspace
   - agentclaw.community.plugin_api
 ```
@@ -34,6 +35,12 @@ Bot services.  The module does not own business-space membership, storage, or
 CRUD; replacing the fallback space context with the business-space owner's
 Service API changes filtering/visibility behavior without changing this core
 boundary.
+
+Local restart translates the BaaS lifecycle service's `BaasServiceError`
+(including transient failures) into `BotInventoryUpstreamError`, which the
+public HTTP adapter renders as 502. Existing personal-space and ownership
+checks still run before restart; unrelated programming errors are not
+reclassified as upstream failures.
 
 ## Inventory status contract
 

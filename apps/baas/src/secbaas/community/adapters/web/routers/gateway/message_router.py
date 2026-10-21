@@ -64,7 +64,7 @@ router = APIRouter(prefix="/openapi/v1/chat", tags=["Chat / Messages"])
         401: {"description": "Authentication failed"},
         403: {"description": "Bot access denied"},
         404: {"description": "Bot not found"},
-        503: {"description": "Bot unavailable"},
+        503: {"description": "Bot or authentication service unavailable"},
         500: {"description": "Internal server error"},
     },
 )
@@ -172,7 +172,7 @@ async def deliver_message(
         403: {"description": "Bot access denied"},
         404: {"description": "Bot not found"},
         429: {"description": "Too many requests"},
-        503: {"description": "Bot unavailable"},
+        503: {"description": "Bot or authentication service unavailable"},
         500: {"description": "Internal server error"},
     },
 )
