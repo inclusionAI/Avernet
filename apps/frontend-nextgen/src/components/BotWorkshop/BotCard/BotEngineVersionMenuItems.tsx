@@ -12,7 +12,7 @@ interface BotEngineVersionMenuItemsProps {
 }
 
 export function BotEngineVersionMenuItems({ bot, availability, onOpenInfo, onUpdate }: BotEngineVersionMenuItemsProps) {
-  if (!supportsEngineVersion(bot.runtime.engine) || (!onOpenInfo && !onUpdate)) return null;
+  if (bot.deployment === 'local' || !supportsEngineVersion(bot.runtime.engine) || (!onOpenInfo && !onUpdate)) return null;
 
   const canUpdate = availability?.enabled === true;
   const disabledReason = availability?.disabledReason ?? '当前版本状态不可确认';

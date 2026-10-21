@@ -124,7 +124,7 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, cu
     entityType === 'proj' || entityType === 'team' || spaceKind === 'team' ? ('team' as const) : ('personal' as const);
   const runtime = runtimeFrom(dto, warnings);
   const templateType = templateTypeFrom(dto);
-  const deployment = botType === 'desktop' ? ('local' as const) : ('cloud' as const);
+  const deployment = botType.trim().toLowerCase() === 'desktop' ? ('local' as const) : ('cloud' as const);
   // kind/bot_type 契约未约束大小写；与 lifecycle() 的防御口径保持一致，避免 'SERVICE' 被误判为 non-service。
   const serviceMode =
     inventoryKind?.toLowerCase() === 'service' || botType?.toLowerCase() === 'service'

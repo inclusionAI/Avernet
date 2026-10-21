@@ -23,7 +23,7 @@ export function useBotTableEngineVersions(options: {
         userId: userId ?? '',
         ownerId: bot.ownerId ?? '',
         engine: bot.runtime.engine,
-        enabled: Boolean(userId && bot.ownerId) && bot.lifecycle !== 'deploying',
+        enabled: bot.deployment !== 'local' && Boolean(userId && bot.ownerId) && bot.lifecycle !== 'deploying',
         restartPermission: botEngineVersionService.getRestartPermissionInput(bot),
       })),
     [bots, userId],

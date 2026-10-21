@@ -40,6 +40,9 @@ test('只为在线的本人或团队 Bot 单聊建立版本目标并保留权限
 });
 
 test.each([
+  ['desktop OpenClaw Bot', { bot: { ...bot, botType: 'desktop', engine: 'openclaw' } }],
+  ['desktop Hermes Bot', { bot: { ...bot, botType: 'desktop', engine: 'hermes' } }],
+  ['uppercase padded Desktop Bot', { bot: { ...bot, botType: ' DESKTOP ' } }],
   ['friend Bot', { bot: { ...bot, isFriendBot: true } }],
   ['offline Bot', { bot: { ...bot, online: false } }],
   ['hidden Bot', { bot: { ...bot, status: 'HIDDEN' } }],
