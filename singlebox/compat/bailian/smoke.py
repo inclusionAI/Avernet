@@ -28,7 +28,10 @@ def command(engine: str, prompt: str, root: Path) -> list[str]:
     if engine == "claude-code":
         return ["claude", "-p", prompt, "--output-format", "text", "--max-turns", "4",
                 "--allowedTools", "Read"]
-    return ["codex", "exec", "--skip-git-repo-check", "--sandbox", "read-only",
+    # Hosted runners reject bwrap's private loopback setup. Keep filesystem
+    # sandboxing while allowing networking rather than disabling the sandbox.
+    return ["codex", "exec", "--skip-git-repo-check", "--sandbox", "workspace-write",
+            "-c", "sandbox_workspace_write.network_access=true",
             "--output-last-message", str(root / "final.txt"), prompt]
 
 
