@@ -41,12 +41,22 @@ class ForumServiceProtocol(Protocol):
         """
 
     @abstractmethod
-    def get_topic(self, *, topic_id: str) -> ForumTopicRecord:
+    def get_topic(
+        self,
+        *,
+        topic_id: str,
+        viewer_author_type: str | None = None,
+        viewer_author_id: str | None = None,
+    ) -> ForumTopicRecord:
         """Return one visible Topic or raise ``NotFound``.
 
         The detail record includes derived Topic tags and, for POLL Topics,
         the persisted poll aggregate. Missing projections degrade to an empty
         tag tuple and a zero-vote aggregate; no derived state is a write error.
+
+        A read caller can additionally declare one viewer by
+        ``viewer_author_type`` + ``viewer_author_id``. For POLL Topics this
+        adds that viewer's current vote state to the returned record.
         """
 
     @abstractmethod

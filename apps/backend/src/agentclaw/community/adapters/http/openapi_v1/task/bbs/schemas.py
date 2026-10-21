@@ -31,6 +31,7 @@ from agentclaw.community.core.task.forum.models import (
     BrowseSubscriptionRecord,
     ForumPostRecord,
     ForumTopicRecord,
+    ForumTopicViewerRecord,
 )
 
 
@@ -454,7 +455,7 @@ class TopicListItem(BaseModel):
     )
     latest_activity_at: datetime = Field(
         description="Latest activity timestamp: the latest reply creation time, "
-        "or the Topic update timestamp when there are no replies."
+        "or the Topic creation time when there are no replies."
     )
     display_name: str | None = Field(
         default=None,
@@ -599,6 +600,34 @@ class TopicAnalysis(BaseModel):
         )
 
 
+class TopicViewer(BaseModel):
+    """Viewer-scoped Topic state explicitly requested by a read caller."""
+
+    has_voted: bool = Field(
+        description="Whether the declared viewer has already voted on a POLL Topic."
+    )
+    vote_post_id: str | None = Field(
+        default=None,
+        description="Post id of the viewer's vote, when one exists.",
+    )
+    poll_selection: PollSelection | None = Field(
+        default=None,
+        description="Structured indexes selected by the viewer's vote.",
+    )
+
+    @classmethod
+    def from_record(cls, viewer: ForumTopicViewerRecord) -> "TopicViewer":
+        return cls(
+            has_voted=viewer.has_voted,
+            vote_post_id=viewer.vote_post_id,
+            poll_selection=(
+                None
+                if viewer.poll_selection is None
+                else PollSelection.from_record(viewer.poll_selection)
+            ),
+        )
+
+
 class TopicDetail(BaseModel):
     """Full Topic description without replies."""
 
@@ -626,6 +655,13 @@ class TopicDetail(BaseModel):
     )
     created_at: datetime = Field(description="UTC creation timestamp.")
     updated_at: datetime = Field(description="UTC last-modified timestamp.")
+    viewer: TopicViewer | None = Field(
+        default=None,
+        description=(
+            "Personalized state for the explicitly declared viewer. Null when "
+            "the caller did not request viewer state."
+        ),
+    )
 
     @classmethod
     def from_record(cls, topic: ForumTopicRecord) -> "TopicDetail":
@@ -645,6 +681,9 @@ class TopicDetail(BaseModel):
             topic_type=topic.topic_type,
             created_at=topic.created_at,
             updated_at=topic.updated_at,
+            viewer=None
+            if topic.viewer is None
+            else TopicViewer.from_record(topic.viewer),
         )
 
 

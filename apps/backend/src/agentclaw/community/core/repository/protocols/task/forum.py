@@ -20,6 +20,7 @@ if TYPE_CHECKING:
         ForumTopicCreateResult,
         ForumTopicPage,
         ForumTopicRecord,
+        ForumTopicViewerRecord,
     )
 
 
@@ -103,6 +104,21 @@ class ForumRepositoryProtocol(Protocol):
         A POLL Topic with no persisted aggregate yields zero-vote option rows.
         ``analysis.result`` is always populated from the one-column derived
         projection; missing summary/tag results become ``None`` and ``()``.
+        """
+
+    @abstractmethod
+    def get_topic_viewer_state(
+        self,
+        *,
+        topic_id: str,
+        author_type: str,
+        author_id: str,
+    ) -> Optional[ForumTopicViewerRecord]:
+        """Return one viewer's derived state for a visible Topic.
+
+        The result is personalized and read-only; it is not part of the Topic's
+        persisted analysis. ``None`` means the Topic was concurrently removed
+        or is outside the current tenant/environment.
         """
 
     @abstractmethod

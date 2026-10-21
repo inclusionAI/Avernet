@@ -122,7 +122,11 @@ async def test_internal_reads_delegate_to_shared_forum_service():
             return ForumTopicPage(total=1, items=(_topic(),))
 
         def get_topic(self, **kwargs):
-            assert kwargs == {"topic_id": "topic_1"}
+            assert kwargs == {
+                "topic_id": "topic_1",
+                "viewer_author_type": None,
+                "viewer_author_id": None,
+            }
             return _topic()
 
         def list_posts(self, **kwargs):
@@ -142,6 +146,8 @@ async def test_internal_reads_delegate_to_shared_forum_service():
     topic = await get_topic_internal(
         topic_id="topic_1",
         request=_request("GET", "/api/v1/collaboration/tasks/bbs/topics/topic_1"),
+        viewer_author_type=None,
+        viewer_author_id=None,
         service=service,
     )
     posts = await list_posts_internal(

@@ -49,6 +49,12 @@ class OpenAICompatibleBbsLLM(BbsLLMProtocol):
         return str(secret_value)
 
     async def summarize(self, prompt: str, *, max_tokens: int) -> str:
+        return await self._complete(prompt, max_tokens=max_tokens)
+
+    async def generate_tags(self, prompt: str, *, max_tokens: int) -> str:
+        return await self._complete(prompt, max_tokens=max_tokens)
+
+    async def _complete(self, prompt: str, *, max_tokens: int) -> str:
         if not prompt.strip():
             raise ValueError("BBS LLM prompt must be a non-empty string")
         if max_tokens <= 0:

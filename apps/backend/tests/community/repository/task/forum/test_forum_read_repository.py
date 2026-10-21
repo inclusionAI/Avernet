@@ -11,6 +11,8 @@ from agentclaw.community.core.task.forum.models import (
     TOPIC_TYPE_POLL,
     ForumPollConfig,
     ForumPollResultOptionRecord,
+    ForumPollSelection,
+    ForumTopicViewerRecord,
     ForumTopicSummaryRecord,
     ForumTopicConfig,
 )
@@ -274,6 +276,95 @@ def test_list_posts_returns_reference_and_two_level_floor_groups(db):
     assert second_page.items[0].children == ()
     assert beyond.total == 2
     assert beyond.items == ()
+
+
+def test_list_topics_orders_by_latest_reply_activity(db):
+    repo = ForumRepository(db)
+    first = _topic(repo, "req-active-1", title="first")
+    second = _topic(repo, "req-active-2", title="second")
+    _reply(repo, first.topic_id, "req-active-reply", "reply revives first")
+
+    with db.orm_session() as session:
+        first_row = session.query(ForumTopicModel).filter_by(
+            topic_id=first.topic_id
+        ).one()
+        second_row = session.query(ForumTopicModel).filter_by(
+            topic_id=second.topic_id
+        ).one()
+        first_row.gmt_create = datetime(2026, 9, 20, 8, 0, tzinfo=timezone.utc)
+        second_row.gmt_create = datetime(2026, 9, 20, 8, 10, tzinfo=timezone.utc)
+        session.query(ForumPostModel).filter_by(topic_id=first.topic_id).update(
+            {ForumPostModel.gmt_create: datetime(2026, 9, 20, 8, 20, tzinfo=timezone.utc)}
+        )
+
+    result = repo.list_topics(keyword=None, status=None, offset=0, limit=20)
+
+    assert [item.topic_id for item in result.items] == [first.topic_id, second.topic_id]
+    assert result.items[0].latest_activity_at is not None
+    assert result.items[1].latest_activity_at is not None
+
+
+def test_get_topic_viewer_state_reports_current_vote_without_page_dependency(db):
+    repo = ForumRepository(db)
+    poll = repo.create_topic(
+        author_type="HUMAN",
+        author_id="author-human",
+        client_request_id="viewer-poll-topic",
+        title="Choose",
+        body="Vote once",
+        topic_type=TOPIC_TYPE_POLL,
+        topic_config=ForumTopicConfig(
+            poll=ForumPollConfig(selection="SINGLE", options=("Option A", "Option B"))
+        ),
+    ).topic
+    vote = repo.create_reply(
+        topic_id=poll.topic_id,
+        author_type="HUMAN",
+        author_id="user-a",
+        client_request_id="viewer-vote",
+        body="I choose A",
+        poll_selection=ForumPollSelection(option_indices=(0,)),
+    ).post
+
+    voted = repo.get_topic_viewer_state(
+        topic_id=poll.topic_id, author_type="HUMAN", author_id="user-a"
+    )
+    not_voted = repo.get_topic_viewer_state(
+        topic_id=poll.topic_id, author_type="HUMAN", author_id="user-b"
+    )
+
+    assert voted == ForumTopicViewerRecord(
+        has_voted=True,
+        vote_post_id=vote.post_id,
+        poll_selection=ForumPollSelection(option_indices=(0,)),
+    )
+    assert not_voted == ForumTopicViewerRecord(has_voted=False)
+
+
+def test_update_topic_tags_preserves_other_analysis_projection(db):
+    from agentclaw.community.core.repository.implementations.task.forum import (
+        ForumTopicTagRepository,
+    )
+
+    repo = ForumRepository(db)
+    topic = _topic(repo, "tag-topic", title="tag topic")
+    with db.orm_session() as session:
+        row = session.query(ForumTopicModel).filter_by(topic_id=topic.topic_id).one()
+        row.analysis_result = {
+            "summary": {"content": "Existing summary"},
+            "tags": [],
+            "poll_cursor_id": 7,
+        }
+
+    updated = ForumTopicTagRepository(db).update_topic_tags(
+        topic_id=topic.topic_id, tags=("工程", "架构")
+    )
+
+    assert updated is not None
+    assert updated.analysis.tags == ("工程", "架构")
+    assert updated.analysis.summary == ForumTopicSummaryRecord(content="Existing summary")
+    assert updated.analysis.poll_result is None
+    assert updated.analysis.poll_cursor_id == 7
 
 
 def test_list_topics_counts_nested_replies_and_latest_child_activity(db):

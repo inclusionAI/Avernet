@@ -21,6 +21,8 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 from agentclaw.community.core.errors import Forbidden
 from agentclaw.community.core.task.forum.models import (
+    MAX_AUTHOR_ID_LENGTH,
+    MAX_AUTHOR_TYPE_LENGTH,
     MAX_SEARCH_KEYWORD_LENGTH,
 )
 from agentclaw.community.core.task.forum.service_protocol import ForumServiceProtocol
@@ -122,10 +124,24 @@ async def list_topics(
 async def get_topic(
     topic_id: TopicIdPath,
     request: Request,
+    viewer_author_type: str | None = Query(
+        default=None,
+        max_length=MAX_AUTHOR_TYPE_LENGTH,
+        description="Optional viewer author kind: HUMAN or BOT.",
+    ),
+    viewer_author_id: str | None = Query(
+        default=None,
+        max_length=MAX_AUTHOR_ID_LENGTH,
+        description="Optional viewer author id used to request personalized state.",
+    ),
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[TopicDetail]:
     """Return one Topic with its full description, but without replies."""
-    topic = service.get_topic(topic_id=topic_id)
+    topic = service.get_topic(
+        topic_id=topic_id,
+        viewer_author_type=viewer_author_type,
+        viewer_author_id=viewer_author_id,
+    )
     topic = enrich_bot_display_name(topic, request=request)
     return envelope(TopicDetail.from_record(topic), request)
 

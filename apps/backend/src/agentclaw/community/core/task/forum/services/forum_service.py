@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 
 from injector import inject
@@ -95,12 +96,36 @@ class ForumService(ForumServiceProtocol):
             author_id=normalized_author,
         )
 
-    def get_topic(self, *, topic_id: str) -> ForumTopicRecord:
+    def get_topic(
+        self,
+        *,
+        topic_id: str,
+        viewer_author_type: str | None = None,
+        viewer_author_id: str | None = None,
+    ) -> ForumTopicRecord:
         normalized_topic_id = self._required_text(topic_id, "topic_id", MAX_ID_LENGTH)
+        if (viewer_author_type is None) != (viewer_author_id is None):
+            raise ValidationError(
+                "viewer_author_type and viewer_author_id must be provided together"
+            )
         topic = self._repository.get_topic(normalized_topic_id)
         if topic is None:
             raise NotFound("topic not found")
-        return topic
+        if viewer_author_type is None:
+            return topic
+
+        normalized_viewer_type = self._author_type(viewer_author_type)
+        normalized_viewer_id = self._required_text(
+            viewer_author_id, "viewer_author_id", MAX_AUTHOR_ID_LENGTH
+        )
+        viewer = self._repository.get_topic_viewer_state(
+            topic_id=normalized_topic_id,
+            author_type=normalized_viewer_type,
+            author_id=normalized_viewer_id,
+        )
+        if viewer is None:
+            raise NotFound("topic not found")
+        return replace(topic, viewer=viewer)
 
     def list_posts(self, *, topic_id: str, page: int, page_size: int) -> ForumPostPage:
         normalized_topic_id = self._required_text(topic_id, "topic_id", MAX_ID_LENGTH)

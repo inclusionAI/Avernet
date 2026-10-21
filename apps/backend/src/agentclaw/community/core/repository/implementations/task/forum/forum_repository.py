@@ -39,6 +39,7 @@ from agentclaw.community.core.task.forum.models import (
     ForumTopicCreateResult,
     ForumTopicPage,
     ForumTopicRecord,
+    ForumTopicViewerRecord,
 )
 from agentclaw.community.core.task.forum.repository.models import (
     _poll_selection_from_post_config,
@@ -46,6 +47,9 @@ from agentclaw.community.core.task.forum.repository.models import (
     ForumBrowseSubscriptionModel,
     ForumPostModel,
     ForumTopicModel,
+)
+from agentclaw.community.core.repository.implementations.task.forum.analysis_row import (
+    analysis_to_row,
 )
 from agentclaw.community.core.repository.protocols.task.forum import (
     ForumRepositoryProtocol,
@@ -88,30 +92,6 @@ def _post_config_to_row(
     return {
         "poll_selection": {"option_indices": list(poll_selection.option_indices)}
     }
-
-
-def _analysis_to_row(analysis: ForumTopicAnalysisRecord) -> dict[str, object]:
-    """Encode the Topic-derived analysis projection for one JSON column."""
-
-    result: dict[str, object] = {}
-    if analysis.summary is not None:
-        result["summary"] = {"content": analysis.summary.content}
-    result["tags"] = list(analysis.tags)
-    if analysis.poll_result is not None:
-        result["poll_stats"] = {
-            "total_votes": analysis.poll_result.total_votes,
-            "participant_count": analysis.poll_result.participant_count,
-            "by_option": [
-                {
-                    "index": option.index,
-                    "votes": option.votes,
-                    "percent": option.percent,
-                }
-                for option in analysis.poll_result.options
-            ],
-        }
-    result["poll_cursor_id"] = analysis.poll_cursor_id
-    return result
 
 
 def _topic_config_to_row(config: ForumTopicConfig | None) -> dict[str, object] | None:
@@ -240,10 +220,18 @@ class ForumRepository(ForumRepositoryProtocol):
                 )
             if author_id is not None:
                 query = query.filter(ForumTopicModel.author_id == author_id)
+            # Catalogue ordering follows user-visible activity, not any
+            # maintenance timestamp. Derived analysis updates must not make a
+            # Topic bubble to the top when nobody replied.
+            latest_activity_at = func.coalesce(
+                post_stats.c.latest_post_at,
+                ForumTopicModel.gmt_create,
+            )
             total = query.count()
             rows = (
                 query.order_by(
-                    ForumTopicModel.gmt_create.desc(), ForumTopicModel.id.desc()
+                    latest_activity_at.desc(),
+                    ForumTopicModel.id.desc(),
                 )
                 .offset(offset)
                 .limit(limit)
@@ -254,7 +242,7 @@ class ForumRepository(ForumRepositoryProtocol):
                     row[0].to_record(),
                     reply_count=int(row[1] or 0),
                     latest_activity_at=(
-                        row[2] if row[2] is not None else row[0].gmt_modified
+                        row[2] if row[2] is not None else row[0].gmt_create
                     ),
                 )
                 for row in rows
@@ -510,6 +498,47 @@ class ForumRepository(ForumRepositoryProtocol):
                 raise
             return ForumReplyCreateResult(post=replay, created=False)
 
+    def get_topic_viewer_state(
+        self,
+        *,
+        topic_id: str,
+        author_type: str,
+        author_id: str,
+    ) -> ForumTopicViewerRecord | None:
+        with self._db.orm_session() as db:
+            topic = (
+                db.query(ForumTopicModel.topic_type)
+                .filter(
+                    ForumTopicModel.topic_id == topic_id,
+                    ForumTopicModel.env == get_current_env(),
+                    ForumTopicModel.avernet_tenant
+                    == get_current_avernet_tenant(),
+                )
+                .one_or_none()
+            )
+            if topic is None:
+                return None
+            if topic[0] != TOPIC_TYPE_POLL:
+                return ForumTopicViewerRecord(has_voted=False)
+
+            post = (
+                db.query(ForumPostModel)
+                .filter(
+                    ForumPostModel.topic_id == topic_id,
+                    ForumPostModel.author_type == author_type,
+                    ForumPostModel.author_id == author_id,
+                )
+                .order_by(ForumPostModel.id.asc())
+                .first()
+            )
+            if post is None:
+                return ForumTopicViewerRecord(has_voted=False)
+            return ForumTopicViewerRecord(
+                has_voted=True,
+                vote_post_id=post.post_id,
+                poll_selection=_poll_selection_from_post_config(post.post_config),
+            )
+
     def get_topic(self, topic_id: str) -> ForumTopicRecord | None:
         with self._db.orm_session() as db:
             row = (
@@ -617,7 +646,7 @@ class ForumRepository(ForumRepositoryProtocol):
                     votes=votes,
                 )
             )
-            topic.analysis_result = _analysis_to_row(analysis)
+            topic.analysis_result = analysis_to_row(analysis)
             topic.gmt_modified = datetime.now(timezone.utc)
             db.flush()
             return len(rows)

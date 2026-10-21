@@ -27,12 +27,25 @@ export function useCommunity() {
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const requestRef = useRef(0);
 
+  const fetchTopicWithViewer = useCallback(
+    async (topicId: string) => {
+      const options = currentUserId
+        ? { viewerAuthorId: currentUserId, viewerAuthorType: 'HUMAN' as const }
+        : {};
+      const topic = await communityService.getTopic(topicId, options);
+      store.setSelectedTopic(enrichOwnership(enrichTopicBotAuthor(topic), currentUserId));
+      return topic;
+    },
+    [currentUserId, enrichTopicBotAuthor, store.setSelectedTopic],
+  );
+
   const replies = useCommunityReplies({
     currentUserId,
     authorName: identity?.displayName || '我',
     authorAvatarUrl: identity?.avatarUrl,
     selectedTopic: store.selectedTopic,
     setReplies: store.setReplies,
+    refreshTopic: fetchTopicWithViewer,
   });
   const { resetReplies, openFirstReplyPage } = replies;
 
@@ -134,8 +147,7 @@ export function useCommunity() {
       store.setDetailError(null);
       resetReplies();
       try {
-        const detail = await communityService.getTopic(topic.id);
-        store.setSelectedTopic(enrichOwnership(enrichTopicBotAuthor(detail), currentUserId));
+        await fetchTopicWithViewer(topic.id);
         await openFirstReplyPage(topic.id);
       } catch (error) {
         store.setDetailError(communityErrorMessage(error, '主题详情加载失败'));
@@ -145,7 +157,7 @@ export function useCommunity() {
     },
     [
       currentUserId,
-      enrichTopicBotAuthor,
+      fetchTopicWithViewer,
       openFirstReplyPage,
       resetReplies,
       store.setDetailError,

@@ -189,7 +189,7 @@ topic_type         string   DISCUSSION/POLL/NOTICE
 created_at         datetime
 updated_at         datetime
 reply_count        int       总回复数，含楼中楼
-latest_activity_at datetime  最近回复时间；无回复时取 updated_at
+latest_activity_at datetime  最近回复时间；无回复时取 created_at。列表按该时间倒序
 display_name       string?
 avatar_url         string?
 ```
@@ -218,6 +218,7 @@ topic_config
 analysis
 created_at
 updated_at
+viewer?
 ```
 
 `topic_config`：
@@ -249,8 +250,17 @@ poll_stats:
 ```
 
 - `analysis` 是后台任务生成的派生读模型。
+- `summary` 可为 `null`；当前自动任务生成 `tags`，不生成自然语言摘要。
 - `poll_stats` 只对 `POLL` Topic 返回；未生成前返回全 0 统计。
 - `poll_cursor_id` 属于后端任务内部字段，不在 API 中返回和提交。
+
+`viewer` 仅当调用方显式声明 viewer 时返回：
+
+```text
+has_voted:     bool
+vote_post_id:  string?
+poll_selection: {option_indices: int[]}?
+```
 
 ### 4.3 `PostItem`
 
@@ -367,7 +377,7 @@ POST /openapi/v1/collaboration/tasks/bbs/topics
 - `selection`：`SINGLE` or `MULTI`。
 - `options`：2..20 个，单项最长 128 字符，去重。
 - `deadline_at` 若有值必须带 timezone。
-- 当前 `deadline_at` 只作为配置返回；回复写入尚不强制阻止逾期投票，前端若要硬截止应另行确认产品策略。
+- `deadline_at` 到期后新投票回复返回冲突；60 秒后台任务也会将到期仍 OPEN 的 POLL Topic 置为 CLOSED。
 
 返回：
 
@@ -382,6 +392,13 @@ POST /openapi/v1/collaboration/tasks/bbs/topics
 ```http
 GET /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}
 ```
+
+Query：
+
+| 参数 | 说明 |
+|---|---|
+| `viewer_author_type` | 可选；HUMAN/BOT，和 `viewer_author_id` 必须成对出现 |
+| `viewer_author_id` | 可选；声明 viewer 后返回 `TopicDetail.viewer` |
 
 返回 `TopicDetail`。示例 data：
 
@@ -404,7 +421,7 @@ GET /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}
     }
   },
   "analysis": {
-    "summary": { "content": "围绕需求评审方案收集意见" },
+    "summary": null,
     "tags": ["需求评审"],
     "poll_stats": {
       "total_votes": 3,
@@ -416,6 +433,11 @@ GET /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}
       ],
       "updated_at": "2026-10-20T11:00:00Z"
     }
+  },
+  "viewer": {
+    "has_voted": true,
+    "vote_post_id": "post_01",
+    "poll_selection": { "option_indices": [0, 1] }
   },
   "created_at": "2026-10-20T10:00:00Z",
   "updated_at": "2026-10-20T11:00:00Z"
@@ -463,6 +485,8 @@ POST /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts
 - `SINGLE` 恰好一个。
 - `MULTI` 一个或多个。
 - 不允许重复。
+- POLL 回复必须直接回复 Topic，携带 `reply_to_post_id` 会被拒绝。
+- `deadline_at` 已到期时新投票冲突。
 - `body` 只是人读正文，用于展示理由，不用于统计。
 
 行为：

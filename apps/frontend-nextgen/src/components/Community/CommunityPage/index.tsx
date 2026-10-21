@@ -13,11 +13,7 @@ export function CommunityPage() {
   const community = useCommunity();
   const [publishOpen, setPublishOpen] = useState(false);
   const hasFilter = !!community.query.trim() || community.scope === 'mine';
-  const hasVoted =
-    community.selectedTopic?.topicType === 'poll' &&
-    community.replies.some(
-      (reply) => reply.author.type === 'human' && reply.author.id === community.currentUserId,
-    );
+  const hasVoted = community.selectedTopic?.viewer?.hasVoted === true;
   const scrollRootRef = useRef<HTMLElement>(null);
 
   if (community.selectedTopic) {

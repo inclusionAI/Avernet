@@ -17,6 +17,7 @@ from agentclaw.community.core.task.forum.models import (
     ForumReplyCreateResult,
     ForumTopicCreateResult,
     ForumTopicRecord,
+    ForumTopicViewerRecord,
 )
 from agentclaw.community.core.task.forum.services.forum_service import ForumService
 
@@ -64,6 +65,23 @@ class FakeForumRepository:
     def get_topic(self, topic_id):
         self.calls.append({"operation": "get_topic", "topic_id": topic_id})
         return self._default_topic if self.topic is None else self.topic
+
+    def get_topic_viewer_state(
+        self, *, topic_id: str, author_type: str, author_id: str
+    ):
+        self.calls.append(
+            {
+                "operation": "get_topic_viewer_state",
+                "topic_id": topic_id,
+                "author_type": author_type,
+                "author_id": author_id,
+            }
+        )
+        return ForumTopicViewerRecord(
+            has_voted=True,
+            vote_post_id="post-vote",
+            poll_selection=ForumPollSelection(option_indices=(0,)),
+        )
 
 
 def _topic_record(
@@ -554,6 +572,40 @@ def test_get_topic_raises_not_found_for_invisible_topic():
 
     with pytest.raises(NotFound, match="topic not found"):
         ForumService(repo).get_topic(topic_id=" missing ")
+
+
+def test_get_topic_attaches_viewer_state_when_viewer_is_declared():
+    repo = FakeForumRepository()
+    viewer = ForumTopicViewerRecord(
+        has_voted=True,
+        vote_post_id="post-vote",
+        poll_selection=ForumPollSelection(option_indices=(0,)),
+    )
+
+    result = ForumService(repo).get_topic(
+        topic_id=" topic-1 ",
+        viewer_author_type=" human ",
+        viewer_author_id=" user-1 ",
+    )
+
+    assert result.viewer == viewer
+    assert repo.calls[-1] == {
+        "operation": "get_topic_viewer_state",
+        "topic_id": "topic-1",
+        "author_type": "HUMAN",
+        "author_id": "user-1",
+    }
+
+
+def test_get_topic_requires_viewer_type_and_viewer_id_to_be_declared_together():
+    repo = FakeForumRepository()
+
+    with pytest.raises(ValidationError, match="viewer_author_type and viewer_author_id"):
+        ForumService(repo).get_topic(
+            topic_id="topic-1", viewer_author_type="HUMAN", viewer_author_id=None
+        )
+
+    assert repo.calls == []
 
 
 def test_list_posts_validates_pagination_before_repository_call():

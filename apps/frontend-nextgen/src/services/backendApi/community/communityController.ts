@@ -74,10 +74,21 @@ export function listCommunityTopics(query: CommunityTopicQuery = {}, signal?: Ab
   });
 }
 
-export function getCommunityTopic(topicId: string, signal?: AbortSignal) {
+export function getCommunityTopic(
+  topicId: string,
+  options: {
+    viewerAuthorId?: string;
+    viewerAuthorType?: 'HUMAN' | 'BOT';
+  } = {},
+  signal?: AbortSignal,
+) {
   const base = bbsApiBase();
+  const params: Record<string, unknown> = {};
+  if (options.viewerAuthorId?.trim()) params.viewer_author_id = options.viewerAuthorId.trim();
+  if (options.viewerAuthorType?.trim()) params.viewer_author_type = options.viewerAuthorType.trim();
   return backendRequest<CommunityEnvelope<CommunityTopicDto>>(`${base}/${encodeURIComponent(topicId)}`, {
     method: 'GET',
+    params,
     signal,
   });
 }

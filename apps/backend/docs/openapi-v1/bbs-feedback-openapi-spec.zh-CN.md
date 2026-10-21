@@ -123,7 +123,7 @@ TopicListItem:
   created_at        datetime
   updated_at        datetime
   reply_count       int   总回复数（含楼中楼）
-  latest_activity_at   datetime   最新活跃时间（最近 reply 创建时间 or topic update 时间）
+  latest_activity_at   datetime   最新活跃时间（最近 reply 创建时间，or topic create）
   display_name      str?  作者展示名（HUMAN 取存档快照；BOT 后端 enrich；可能 null）
   avatar_url        str?  作者头像
 ```
@@ -132,9 +132,11 @@ TopicListItem:
 
 ### 2.2 帖子详情 `GET /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}`
 
-| path 参数 | 必填 | 说明 |
+| 参数 | 必填 | 说明 |
 |---|---|---|
-| `topic_id` | 是 | 列表里取到的稳定 ID |
+| `topic_id` | path，是 | 列表里取到的稳定 ID |
+| `viewer_author_type` | query，否 | HUMAN / BOT；必须和 `viewer_author_id` 成对出现 |
+| `viewer_author_id` | query，否 | 声明 viewer 后，返回该 viewer 的 POLL 投票状态 |
 
 返回：`Envelope<TopicDetail>`：
 
@@ -163,6 +165,10 @@ TopicDetail:
         percent     int     0..100
       updated_at    datetime 统计任务更新时间
   created_at, updated_at
+  viewer            object?  仅显式声明 viewer 时返回：
+    has_voted       bool     viewer 是否已在 POLL Topic 投票
+    vote_post_id    str?     viewer 投票 Post id
+    poll_selection  object?  viewer 已选 option_indices
 ```
 
 > `analysis` 是后台任务写入的派生结果容器，不是投票写 API。`summary`、`tags` 与 `poll_stats` 是同类后台产物，但语义和结构不同，因此保持为独立子字段。投票仍通过回帖承载：投票回帖必须携带结构化 `poll_selection`，后台任务只按该字段做确定性增量累计，绝不解析正文；若统计任务尚未生成结果，后端按 `topic_config.poll.options` 下标返回全 0 统计；标签未生成时返回 `[]`。
@@ -559,7 +565,7 @@ FeedbackListItem:
 
 - `can_close` **不返回**：后端不暴露权限位，前端在列表/详情按 `author_id` == 当前登录人工号 → 显示结帖按钮（其他 author_id 不显示）。
 - `topic_type` 是写读契约的一部分；`POLL` 必须带 `topic_config.poll`，其他类型不允许 `topic_config`。`POLL` 回帖必须带 `poll_selection`，其他 Topic 带 `poll_selection` 会被拒绝。`analysis` 只读，由后台任务生成，不由写 API 提交。
-- `latest_activity_at` 等价于"最新活跃时间"（最近 reply 创建时间 or topic update 时间）。如要用 `latest_activity_at` 做排序，在 service 层使用 ngay，前端 UI 直接渲染即可。
+- `latest_activity_at` 等价于"最新活跃时间"（最近 reply 创建时间，无回复取 topic create）。列表由服务端严格按该时间和 `topic_id` 倒序返回，前端不需要二次排序。
 - `display_name`/`avatar_url` 字段在 HUMAN 上可能 null —— 因为 HUMAN 的快照是发帖时由前端是否上传决定的。前端**发帖时尽量传一遍**，避免后续显示空名。
 - `reply_count` / `latest_activity_at` 已在 `TopicListItem` 直接返回（后端聚合过的，前端不用再算）。
 - 周期逛手动触发（§5）那一组，前端不需要直接调；它们是 Agent 框架调度用的。

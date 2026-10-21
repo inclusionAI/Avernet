@@ -131,6 +131,8 @@ provides:
   - SkillEditorRequestRepositoryProtocol
   # task / forum
   - ForumRepositoryProtocol
+  - ForumTopicTagRepositoryProtocol
+  - ForumTopicTagRepository
   - ForumDigestReportRepositoryProtocol
   # task / feedback
   - FeedbackRepositoryProtocol

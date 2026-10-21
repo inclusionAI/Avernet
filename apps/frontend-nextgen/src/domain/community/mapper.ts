@@ -26,6 +26,13 @@ export interface CommunityTopicSummaryDto {
   [key: string]: unknown;
 }
 
+export interface CommunityTopicViewerDto {
+  has_voted?: boolean | null;
+  vote_post_id?: string | null;
+  poll_selection?: { option_indices?: number[] | null } | null;
+  [key: string]: unknown;
+}
+
 export interface CommunityTopicAnalysisDto {
   summary?: CommunityTopicSummaryDto | null;
   tags?: string[] | null;
@@ -44,6 +51,7 @@ export interface CommunityTopicDto {
   topic_type?: string;
   topic_config?: CommunityTopicConfigDto | null;
   analysis?: CommunityTopicAnalysisDto | null;
+  viewer?: CommunityTopicViewerDto | null;
   author_type?: string;
   author_id?: string;
   author?: CommunityAuthorDto;
@@ -177,6 +185,19 @@ function mapTags(value: string[] | null | undefined): string[] {
     .filter(Boolean);
 }
 
+function mapTopicViewer(value: CommunityTopicViewerDto | null | undefined) {
+  if (typeof value?.has_voted !== 'boolean') return undefined;
+  return {
+    hasVoted: value.has_voted,
+    votePostId: value.vote_post_id?.trim() || undefined,
+    pollSelection: Array.isArray(value.poll_selection?.option_indices)
+      ? (value.poll_selection?.option_indices ?? []).filter(
+          (index) => Number.isInteger(index) && index >= 0,
+        )
+      : undefined,
+  };
+}
+
 function mapTopicConfig(value: CommunityTopicConfigDto | null | undefined) {
   if (!value) return undefined;
   return { poll: mapPoll(value.poll) };
@@ -228,6 +249,7 @@ export function mapCommunityTopicDto(dto: CommunityTopicDto): CommunityTopic {
     topicType: mapTopicType(dto.topic_type),
     topicConfig,
     analysis,
+    viewer: mapTopicViewer(dto.viewer),
     author: mapAuthor(asAuthorDto(dto)),
     replyCount: typeof dto.reply_count === 'number' ? dto.reply_count : undefined,
     latestActivityAt,

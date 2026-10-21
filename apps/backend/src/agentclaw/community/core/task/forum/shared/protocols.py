@@ -21,5 +21,9 @@ class BbsLLMProtocol(Protocol):
     async def summarize(self, prompt: str, *, max_tokens: int) -> str:
         """Return one model-completion string, or the clear disabled sentinel."""
 
+    @abstractmethod
+    async def generate_tags(self, prompt: str, *, max_tokens: int) -> str:
+        """Return a model-completion string holding the requested tag JSON."""
+
 
 __all__ = ["BbsLLMProtocol", "BbsTaskExecutorProtocol"]

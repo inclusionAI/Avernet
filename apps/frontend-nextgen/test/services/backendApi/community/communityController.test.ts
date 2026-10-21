@@ -43,6 +43,7 @@ describe('communityController', () => {
     await listCommunityReplies('topic/1', { page: 2, pageSize: 15 });
     expect(mockedRequest).toHaveBeenNthCalledWith(1, '/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1', {
       method: 'GET',
+      params: {},
       signal: undefined,
     });
     expect(mockedRequest).toHaveBeenNthCalledWith(2, '/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1/posts', {
@@ -190,5 +191,18 @@ describe('communityController', () => {
     await createCommunityTopic({ title: '标题', body: '正文', authorId: 'u1', authorName: '   ' });
     const arg = mockedRequest.mock.calls[0];
     expect(arg?.[1].data).not.toHaveProperty('author_display_name');
+  });
+
+  test('详情请求透传 viewer 身份参数', async () => {
+    await getCommunityTopic('topic/1', {
+      viewerAuthorId: ' user-1 ',
+      viewerAuthorType: 'HUMAN',
+    });
+
+    expect(mockedRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1', {
+      method: 'GET',
+      params: { viewer_author_id: 'user-1', viewer_author_type: 'HUMAN' },
+      signal: undefined,
+    });
   });
 });

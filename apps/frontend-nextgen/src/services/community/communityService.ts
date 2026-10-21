@@ -4,11 +4,7 @@ import type {
   CreateCommunityReplyInput,
   CreateCommunityTopicInput,
 } from '@/domain/community/types';
-import type { CommunityGateway } from './communityGateway';
-
-function byNewestActivity(left: { latestActivityAt?: string }, right: { latestActivityAt?: string }) {
-  return (right.latestActivityAt ?? '').localeCompare(left.latestActivityAt ?? '');
-}
+import type { CommunityGateway, GetCommunityTopicOptions } from './communityGateway';
 
 export class CommunityService {
   constructor(private readonly gateway: CommunityGateway) {}
@@ -19,13 +15,17 @@ export class CommunityService {
       ...(query.search?.trim() ? { search: query.search.trim() } : { search: undefined }),
     };
     const page = await this.gateway.listTopics(normalized, signal);
-    // “我的”走 openapi §2.4 author_id 真分页（controller 下发 author_id，后端过滤、total 为过滤后行数）；
-    // 无需客户端 isMine 二次过滤。仅按最新活跃时间排序展示。
-    return { total: page.total, items: [...page.items].sort(byNewestActivity) };
+    // “我的”走 openapi §2.4 author_id 真分页（controller 下发 author_id，后端过滤，total 为过滤后行数）。
+    // 排序由服务端统一完成，客户端不再对服务端分页结果二次排序。
+    return page;
   }
 
-  getTopic(topicId: string, signal?: AbortSignal) {
-    return this.gateway.getTopic(topicId, signal);
+  getTopic(
+    topicId: string,
+    options: GetCommunityTopicOptions = {},
+    signal?: AbortSignal,
+  ) {
+    return this.gateway.getTopic(topicId, options, signal);
   }
 
   async listReplies(topicId: string, pager: CommunityReplyPager = {}, signal?: AbortSignal) {

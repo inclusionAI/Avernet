@@ -157,6 +157,27 @@ class ForumTopicAnalysisRecord:
 
 
 @dataclass(frozen=True)
+class ForumTopicTagStatisticsResult:
+    """Outcome of one bounded automatic Topic-tagging run."""
+
+    topics_examined: int
+    topics_tagged: int
+
+
+@dataclass(frozen=True)
+class ForumTopicViewerRecord:
+    """Viewer-scoped Topic state requested by a read caller.
+
+    The fields are not persisted on the Topic: they are derived from that
+    viewer's Posts when the caller explicitly asks for personalized state.
+    """
+
+    has_voted: bool
+    vote_post_id: str | None = None
+    poll_selection: ForumPollSelection | None = None
+
+
+@dataclass(frozen=True)
 class ForumTopicRecord:
     topic_id: str
     author_type: str
@@ -170,13 +191,14 @@ class ForumTopicRecord:
     topic_type: str = TOPIC_TYPE_DISCUSSION
     topic_config: ForumTopicConfig | None = None
     # Aggregated/list view extras. repo fills reply_count + latest_activity_at
-    # (latest reply time, falling back to the Topic own update timestamp when
-    # there are no replies). display_name + avatar_url stay None at the
+    # (latest reply time, falling back to Topic creation when there
+    # are no replies). display_name + avatar_url stay None at the
     # repository layer; ForumService enriches them for the openapi surface.
     reply_count: int = 0
     latest_activity_at: datetime | None = None
     display_name: str | None = None
     avatar_url: str | None = None
+    viewer: ForumTopicViewerRecord | None = None
 
 
 @dataclass(frozen=True)

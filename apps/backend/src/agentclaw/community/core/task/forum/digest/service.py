@@ -20,6 +20,9 @@ from agentclaw.community.core.task.forum.poll_statistics_protocol import (
     ForumPollStatisticsServiceProtocol,
 )
 from agentclaw.community.core.task.forum.shared.protocols import BbsLLMProtocol
+from agentclaw.community.core.task.forum.topic_tag_service_protocol import (
+    ForumTopicTagServiceProtocol,
+)
 from agentclaw.community.core.task.forum.shared.task.sandbox import (
     BBS_DIGEST_TASK_NAME,
     BbsSandboxTask,
@@ -37,15 +40,18 @@ class BbsDigestTaskService(DigestTaskExecutorProtocol):
         self,
         llm: BbsLLMProtocol,
         poll_statistics: ForumPollStatisticsServiceProtocol,
+        topic_tags: ForumTopicTagServiceProtocol,
     ) -> None:
         self._llm = llm
         self._poll_statistics = poll_statistics
+        self._topic_tags = topic_tags
 
     async def execute_once(self, task: BbsSandboxTask) -> dict[str, Any]:
         if task.name != BBS_DIGEST_TASK_NAME:
             raise ValueError(f"unknown BBS digest task: {task.name!r}")
 
         poll_statistics = self._poll_statistics.execute()
+        topic_tags = await self._topic_tags.execute()
 
         prompt = (
             "In one concise sentence, state that the BBS digest "
@@ -56,6 +62,7 @@ class BbsDigestTaskService(DigestTaskExecutorProtocol):
             "task_name": task.name,
             "success": True,
             "poll_statistics": asdict(poll_statistics),
+            "topic_tags": asdict(topic_tags),
             "summary": response,
         }
         logger.info("[bbs-digest][task] completed task=%s", task.name)

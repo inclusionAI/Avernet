@@ -7,6 +7,7 @@ import { useCallback, useState } from 'react';
 
 interface UseCommunityRepliesOptions {
   currentUserId: string;
+  refreshTopic: (topicId: string) => Promise<CommunityTopic>;
   authorName: string;
   authorAvatarUrl?: string;
   selectedTopic: CommunityTopic | null;
@@ -19,6 +20,7 @@ export function useCommunityReplies({
   authorAvatarUrl,
   selectedTopic,
   setReplies,
+  refreshTopic,
 }: UseCommunityRepliesOptions) {
   const [replyPage, setReplyPage] = useState(1);
   const [replyTotal, setReplyTotal] = useState(0);
@@ -139,6 +141,7 @@ export function useCommunityReplies({
         });
         setReplyTargetPostId(null);
         await fetchReplies(topic.id, replyPage);
+        if (currentUserId) await refreshTopic(topic.id);
         notifySuccess('投票成功');
         return true;
       } catch (error) {
@@ -153,6 +156,7 @@ export function useCommunityReplies({
       authorName,
       currentUserId,
       fetchReplies,
+      refreshTopic,
       replyPage,
       selectedTopic,
     ],

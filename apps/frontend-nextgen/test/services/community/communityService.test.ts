@@ -48,23 +48,10 @@ function reply(id: string, createdAt: string) {
 }
 
 describe('CommunityService', () => {
-  test('forwards search/scope pagination and sorts latest activity first', async () => {
+  test('forwards search/scope pagination and preserves server-side activity order', async () => {
     const listTopics = jest.fn(async () => ({
       total: 2,
       items: [
-        {
-          id: 'old',
-          title: '旧',
-          body: '',
-          status: 'open' as const,
-          topicType: 'discussion' as const,
-          author: { type: 'human' as const, id: 'u', displayName: 'U' },
-          replyCount: 0,
-          latestActivityAt: '2026-10-01T00:00:00Z',
-          createdAt: '',
-          isMine: true,
-          canClose: false,
-        },
         {
           id: 'new',
           title: '新',
@@ -74,6 +61,19 @@ describe('CommunityService', () => {
           author: { type: 'bot' as const, id: 'b', displayName: 'B' },
           replyCount: 1,
           latestActivityAt: '2026-10-06T00:00:00Z',
+          createdAt: '',
+          isMine: true,
+          canClose: false,
+        },
+        {
+          id: 'old',
+          title: '旧',
+          body: '',
+          status: 'open' as const,
+          topicType: 'discussion' as const,
+          author: { type: 'human' as const, id: 'u', displayName: 'U' },
+          replyCount: 0,
+          latestActivityAt: '2026-10-01T00:00:00Z',
           createdAt: '',
           isMine: true,
           canClose: false,
@@ -157,28 +157,15 @@ describe('CommunityService', () => {
     const result = await service.listTopics({ scope: 'mine', authorId: 'me' });
 
     expect(listTopics).toHaveBeenCalledWith({ scope: 'mine', authorId: 'me', search: undefined }, undefined);
-    // 不再本地 isMine 过滤，仅按最新活跃时间倒序（mine 10-06 → other 10-05 → mine2 10-04）。
+    // 不再本地 isMine 过滤，也不再客户端重排；服务端已按最新活跃时间返回。
     expect(result.items.map((item) => item.id)).toEqual(['mine', 'other', 'mine2']);
     expect(result.total).toBe(3);
   });
 
-  test('缺少 latestActivityAt 时排序不抛错', async () => {
+  test('缺少 latestActivityAt 时保留服务端顺序', async () => {
     const listTopics = jest.fn(async () => ({
       total: 2,
       items: [
-        {
-          id: 'a',
-          title: 'A',
-          body: '',
-          status: 'open' as const,
-          topicType: 'discussion' as const,
-          author: { type: 'human' as const, id: 'u', displayName: 'U' },
-          replyCount: undefined,
-          latestActivityAt: undefined,
-          createdAt: '2026-10-01T00:00:00Z',
-          isMine: false,
-          canClose: false,
-        },
         {
           id: 'b',
           title: 'B',
@@ -189,6 +176,19 @@ describe('CommunityService', () => {
           replyCount: undefined,
           latestActivityAt: '2026-10-06T00:00:00Z',
           createdAt: '2026-10-05T00:00:00Z',
+          isMine: false,
+          canClose: false,
+        },
+        {
+          id: 'a',
+          title: 'A',
+          body: '',
+          status: 'open' as const,
+          topicType: 'discussion' as const,
+          author: { type: 'human' as const, id: 'u', displayName: 'U' },
+          replyCount: undefined,
+          latestActivityAt: undefined,
+          createdAt: '2026-10-01T00:00:00Z',
           isMine: false,
           canClose: false,
         },
@@ -232,5 +232,33 @@ describe('CommunityService', () => {
     const service = new CommunityService(gateway({ closeTopic }));
     await service.closeTopic('topic-1', 'u1');
     expect(closeTopic).toHaveBeenCalledWith('topic-1', 'u1', undefined);
+  });
+
+  test('getTopic 透传 viewer 身份参数且不改写网关结果', async () => {
+    const topic = {
+      id: 'topic-1',
+      title: '主题',
+      body: '正文',
+      status: 'open' as const,
+      topicType: 'poll' as const,
+      author: { type: 'human' as const, id: 'u1', displayName: '我' },
+      replyCount: 0,
+      latestActivityAt: '',
+      createdAt: '',
+      isMine: true,
+      canClose: true,
+      viewer: { hasVoted: true, votePostId: 'post-vote', pollSelection: [0] },
+    };
+    const getTopic = jest.fn(async () => topic);
+    const service = new CommunityService(gateway({ getTopic }));
+
+    await expect(
+      service.getTopic('topic-1', { viewerAuthorId: 'u1', viewerAuthorType: 'HUMAN' }),
+    ).resolves.toEqual(topic);
+    expect(getTopic).toHaveBeenCalledWith(
+      'topic-1',
+      { viewerAuthorId: 'u1', viewerAuthorType: 'HUMAN' },
+      undefined,
+    );
   });
 });

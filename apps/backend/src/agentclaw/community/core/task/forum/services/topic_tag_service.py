@@ -1,0 +1,161 @@
+"""Bounded automatic tagging for BBS Topic analysis projections."""
+
+from __future__ import annotations
+
+import json
+from injector import inject
+
+from agentclaw.community.core.repository.protocols.task.forum import (
+    ForumRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.task.forum_topic_tag import (
+    ForumTopicTagRepositoryProtocol,
+)
+from agentclaw.community.core.task.forum.models import (
+    ForumTopicRecord,
+    ForumTopicTagStatisticsResult,
+)
+from agentclaw.community.core.task.forum.shared.protocols import BbsLLMProtocol
+from agentclaw.community.core.task.forum.topic_tag_service_protocol import (
+    ForumTopicTagServiceProtocol,
+)
+
+TOPIC_TAG_VOCABULARY = (
+    "产品",
+    "设计",
+    "工程",
+    "AI",
+    "协作",
+    "投票",
+    "公告",
+    "趣味",
+    "反馈",
+    "风险",
+    "架构",
+    "效率",
+)
+
+
+class ForumTopicTagService(ForumTopicTagServiceProtocol):
+    """Classify untagged Topics into a fixed vocabulary.
+
+    Classification may read Topic and reply text because tags are an editorial
+    projection. It must not change poll statistics or generate a summary.
+    """
+
+    _TOPIC_PAGE_SIZE = 100
+    _TOPICS_PER_RUN = 20
+    _REPLY_CONTEXT_LIMIT = 20
+    _REPLY_BODY_LIMIT = 1000
+    _MAX_TAGS_PER_TOPIC = 5
+    _LLM_MAX_TOKENS = 128
+
+    @inject
+    def __init__(
+        self,
+        repository: ForumRepositoryProtocol,
+        tag_repository: ForumTopicTagRepositoryProtocol,
+        llm: BbsLLMProtocol,
+    ) -> None:
+        self._repository = repository
+        self._tag_repository = tag_repository
+        self._llm = llm
+
+    async def execute(self) -> ForumTopicTagStatisticsResult:
+        page = self._repository.list_topics(
+            keyword=None,
+            status=None,
+            offset=0,
+            limit=self._TOPIC_PAGE_SIZE,
+        )
+        topics_examined = 0
+        topics_tagged = 0
+
+        for topic in page.items:
+            if topic.analysis.tags:
+                continue
+            if topics_examined >= self._TOPICS_PER_RUN:
+                break
+            topics_examined += 1
+            prompt = self._build_prompt(topic)
+            response = await self._llm.generate_tags(
+                prompt, max_tokens=self._LLM_MAX_TOKENS
+            )
+            tags = self._parse_tags(response)
+            if not tags:
+                continue
+            updated = self._tag_repository.update_topic_tags(
+                topic_id=topic.topic_id,
+                tags=tags,
+            )
+            if updated is not None:
+                topics_tagged += 1
+
+        return ForumTopicTagStatisticsResult(
+            topics_examined=topics_examined,
+            topics_tagged=topics_tagged,
+        )
+
+    def _build_prompt(self, topic: ForumTopicRecord) -> str:
+        replies = self._repository.list_posts(
+            topic_id=topic.topic_id,
+            offset=0,
+            limit=self._REPLY_CONTEXT_LIMIT,
+        )
+        reply_bodies: list[str] = []
+        for post in replies.items:
+            if len(reply_bodies) >= self._REPLY_CONTEXT_LIMIT:
+                break
+            reply_bodies.append(self._reply_body(post.body))
+            for child in post.children:
+                if len(reply_bodies) >= self._REPLY_CONTEXT_LIMIT:
+                    break
+                reply_bodies.append(self._reply_body(child.body))
+
+        context = {
+            "title": topic.title,
+            "body": self._reply_body(topic.body),
+            "replies": reply_bodies,
+        }
+        vocabulary = ", ".join(TOPIC_TAG_VOCABULARY)
+        return (
+            "为 BBS Topic 从固定标签库中选择最贴切的标签。"
+            f"标签库：{vocabulary}。"
+            "只输出一个 JSON 字符串数组，最多 5 个标签，不要解释。"
+            f"输入：{json.dumps(context, ensure_ascii=False)}"
+        )
+
+    @classmethod
+    def _reply_body(cls, body: str) -> str:
+        if len(body) <= cls._REPLY_BODY_LIMIT:
+            return body
+        return body[: cls._REPLY_BODY_LIMIT] + "…"
+
+    @classmethod
+    def _parse_tags(cls, response: str) -> tuple[str, ...]:
+        start = response.find("[")
+        end = response.rfind("]")
+        if start == -1 or end <= start:
+            return ()
+        try:
+            values = json.loads(response[start : end + 1])
+        except json.JSONDecodeError:
+            return ()
+        if not isinstance(values, list):
+            return ()
+
+        allowed = set(TOPIC_TAG_VOCABULARY)
+        tags: list[str] = []
+        for value in values:
+            if not isinstance(value, str):
+                continue
+            tag = value.strip()
+            if tag not in allowed or tag in tags:
+                continue
+            tags.append(tag)
+            if len(tags) == cls._MAX_TAGS_PER_TOPIC:
+                break
+        return tuple(tags)
+
+
+__all__ = ["TOPIC_TAG_VOCABULARY", "ForumTopicTagService"]

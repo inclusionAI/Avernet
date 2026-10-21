@@ -27,10 +27,22 @@ from agentclaw.community.core.task.forum.services.poll_statistics_service import
     ForumPollStatisticsService,
 )
 from agentclaw.community.core.task.forum.shared.llm import OpenAICompatibleBbsLLM
+from agentclaw.community.core.repository.implementations.task.forum import (
+    ForumTopicTagRepository,
+)
 from agentclaw.community.core.repository.protocols.task.forum import (
     ForumRepositoryProtocol,
 )
+from agentclaw.community.core.repository.protocols.task.forum_topic_tag import (
+    ForumTopicTagRepositoryProtocol,
+)
+from agentclaw.community.core.task.forum.services.topic_tag_service import (
+    ForumTopicTagService,
+)
 from agentclaw.community.core.task.forum.shared.protocols import BbsLLMProtocol
+from agentclaw.community.core.task.forum.topic_tag_service_protocol import (
+    ForumTopicTagServiceProtocol,
+)
 from agentclaw.community.di.bbs_digest_config import (
     BbsContentImportTaskConfig,
     BbsDigestTaskConfig,
@@ -41,6 +53,7 @@ from agentclaw.community.plugin_api.bbs_digest_notify import (
     BbsDigestNotifyProvider,
 )
 from agentclaw.community.plugin_api.cache import CachePlugin
+from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.http_client import (
     QUALIFIER_GENERAL,
     HttpClient,
@@ -91,12 +104,41 @@ class BbsDigestModule(Module):
     @singleton
     @provider
     @inject
+    def bbs_topic_tag_repository(
+        self,
+        db: DatabasePlugin,
+    ) -> ForumTopicTagRepositoryProtocol:
+        return ForumTopicTagRepository(db=db)
+
+    @singleton
+    @provider
+    @inject
+    def bbs_topic_tag_service(
+        self,
+        repository: ForumRepositoryProtocol,
+        tag_repository: ForumTopicTagRepositoryProtocol,
+        llm: BbsLLMProtocol,
+    ) -> ForumTopicTagServiceProtocol:
+        return ForumTopicTagService(
+            repository=repository,
+            tag_repository=tag_repository,
+            llm=llm,
+        )
+
+    @singleton
+    @provider
+    @inject
     def bbs_digest_task_executor(
         self,
         llm: BbsLLMProtocol,
         poll_statistics: ForumPollStatisticsServiceProtocol,
+        topic_tags: ForumTopicTagServiceProtocol,
     ) -> DigestTaskExecutorProtocol:
-        return BbsDigestTaskService(llm=llm, poll_statistics=poll_statistics)
+        return BbsDigestTaskService(
+            llm=llm,
+            poll_statistics=poll_statistics,
+            topic_tags=topic_tags,
+        )
 
     @singleton
     @provider

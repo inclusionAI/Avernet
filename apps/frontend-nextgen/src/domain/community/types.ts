@@ -31,6 +31,12 @@ export interface CommunityTopicSummary {
   content: string;
 }
 
+export interface CommunityTopicViewer {
+  hasVoted: boolean;
+  votePostId?: string;
+  pollSelection?: number[];
+}
+
 export interface CommunityTopicAnalysis {
   summary?: CommunityTopicSummary;
   tags?: string[];
@@ -52,6 +58,7 @@ export interface CommunityTopic {
   topicType: CommunityTopicType;
   topicConfig?: CommunityTopicConfig;
   analysis?: CommunityTopicAnalysis;
+  viewer?: CommunityTopicViewer;
   author: CommunityAuthor;
   replyCount?: number;
   latestActivityAt?: string;
