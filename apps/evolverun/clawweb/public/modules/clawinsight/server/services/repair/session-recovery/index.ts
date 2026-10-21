@@ -51,7 +51,7 @@ export function createSessionRecoveryRuntime(options: {
   tasks = new SessionRecoveryTaskService({ controlPlaneEnvironment, tasks: store, agent, notifier, reporter, observationMs, actionNotifier,
     resolveTarget: async request => {
       const expected = { OC: "openclaw", CC: "claude_code", TE: "teclaw" }[request.target.engine];
-      const target = await options.targets.resolve({ environment: request.target.env, ownerId: request.target.entity_id, botId: request.target.bot_id });
+      const target = await options.targets.resolve({ environment: request.target.env, ownerId: request.target.entity_id, botId: request.target.bot_id, ...(request.target.runtime_identity ? { runtimeIdentity: request.target.runtime_identity } : {}) });
       if (target.environment !== request.target.env || target.ownerId !== request.target.entity_id || target.botId !== request.target.bot_id || target.activeEngine !== expected) throw new SessionRecoveryError(422, "invalid_recovery_target", "目标快照与请求身份或引擎不一致");
       return recoveryTargetSnapshot(target);
     } });

@@ -28,10 +28,11 @@ function recoveryToolRequest(body: Record<string, unknown>): Record<string, unkn
     requestDigest: createHash("sha256").update(comparableRequestPayload(body)).digest("hex") };
 }
 export function recoveryTargetSnapshot(target: ResolvedBotTarget): AgentRuntimeTargetSnapshot {
-  const fingerprint = createHash("sha256").update(JSON.stringify([target.environment, target.ownerId, target.botId,
-    target.provider, target.bindingId, target.deviceId, target.sandboxId ?? null, target.activeEngine ?? null])).digest("hex");
+  const identity = [target.environment, target.ownerId, target.botId, target.provider, target.bindingId, target.deviceId, target.sandboxId ?? null, target.activeEngine ?? null];
+  if (target.deviceUuid || target.runtimeIdentity) identity.push(target.deviceUuid ?? null, target.providerDeviceId ?? null, JSON.stringify(target.runtimeIdentity ?? null));
+  const fingerprint = createHash("sha256").update(JSON.stringify(identity)).digest("hex");
   return { version: 1, fingerprint, reason: "task_created", target: { ...target, environment: target.environment as "pre" | "prod",
-    botType: "personal", botStatus: null, bindingStatus: null, observedAt: new Date().toISOString(), source: "clawweb_runtime_catalog" } };
+    botType: target.botType === "service" ? "service" : "personal", botStatus: null, bindingStatus: null, observedAt: new Date().toISOString(), source: "clawweb_runtime_catalog" } };
 }
 
 /** Business adapter over existing AIS dispatch, workload tickets, tool ledger and Bot runtime. */
@@ -345,7 +346,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       actualAction = shellAction;
       actualRequest = { ...body, command: actualCommand };
     }
-    const current = await this.deps.targets.resolve({ environment: task.request.target.env, ownerId: task.request.target.entity_id, botId: task.request.target.bot_id });
+    const current = await this.deps.targets.resolve({ environment: task.request.target.env, ownerId: task.request.target.entity_id, botId: task.request.target.bot_id, ...(task.request.target.runtime_identity ? { runtimeIdentity: task.request.target.runtime_identity } : {}) });
     if (recoveryTargetSnapshot(current).fingerprint !== task.runtimeTarget!.fingerprint) fail(409, "目标现场已变化，需上报方案不再适用");
     // Approval identifies the business action; actual transport details are audited, not equality-fenced.
     return this.tool(task, actualRequest, "apply_action", true, markDispatched => { markDispatched(); return this.runtimeTool.applyApprovedAction(this.context(task), actualAction); });
@@ -360,7 +361,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     const key = initial ? task.request.delivery_key : `retry-${createHash("sha256").update(`${task.taskId}:${String(body.clientRequestId)}`).digest("hex").slice(0, 48)}`;
     return this.tool(task, body, "retry_message", task.level !== "debug", async markDispatched => {
       if (task.level === "debug") return { status: "not_intervened", dry_run: true, delivery_key: key, message: body.message, initial_message: initial };
-      const currentTarget = await this.deps.targets.resolve({ environment: task.request.target.env, ownerId: task.request.target.entity_id, botId: task.request.target.bot_id });
+      const currentTarget = await this.deps.targets.resolve({ environment: task.request.target.env, ownerId: task.request.target.entity_id, botId: task.request.target.bot_id, ...(task.request.target.runtime_identity ? { runtimeIdentity: task.request.target.runtime_identity } : {}) });
       if (recoveryTargetSnapshot(currentTarget).fingerprint !== task.runtimeTarget!.fingerprint) fail(409, "目标运行位置已变化，不能投递旧方案的重试消息");
       const originalId = this.originalSessionId(task);
       if (originalId && task.request.target.engine !== "TE") await this.reader.read({ target: task.runtimeTarget!.target, sessionKey: task.request.session_key,

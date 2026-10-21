@@ -1,3 +1,4 @@
+import { parseBotRuntimeIdentity } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import { SessionRecoveryError } from "./errors.js";
 import { containsSecret } from "@avernet/clawweb-shared/server/services/redaction";
 import type { RecoveryRequest } from "./contracts.js";
@@ -15,9 +16,11 @@ function text(value: unknown, field: string, max: number): string {
 export function parseRequest(raw: unknown): RecoveryRequest {
   const body = object(raw), target = object(body.target);
   for (const key of Object.keys(body)) if (!["event_id", "tc_fault_label", "diagnosis", "target", "session_key", "delivery_key", "error_location", "execution_level"].includes(key)) invalid(`未知字段 ${key}`);
-  for (const key of Object.keys(target)) if (!["bot_id", "entity_id", "env", "engine"].includes(key)) invalid(`未知 target 字段 ${key}`);
+  for (const key of Object.keys(target)) if (!["bot_id", "entity_id", "env", "engine", "runtime_identity"].includes(key)) invalid(`未知 target 字段 ${key}`);
   if (target.env !== "pre" && target.env !== "prod") invalid("target.env 必须是 pre 或 prod");
   if (target.engine !== "OC" && target.engine !== "CC" && target.engine !== "TE") invalid("target.engine 必须是 OC、CC 或 TE");
+  let runtimeIdentity;
+  try { runtimeIdentity = parseBotRuntimeIdentity(target.runtime_identity); } catch { invalid("target.runtime_identity 无效"); }
   const botId = text(target.bot_id, "target.bot_id", 128), entityId = text(target.entity_id, "target.entity_id", 128);
   if (!/^[A-Za-z0-9_-]+$/.test(botId) || !/^[A-Za-z0-9_.@+-]+$/.test(entityId) || entityId.includes("..")) invalid("Bot 身份无效");
   const label = body.tc_fault_label === null ? null : text(body.tc_fault_label, "tc_fault_label", 128);
@@ -32,5 +35,5 @@ export function parseRequest(raw: unknown): RecoveryRequest {
   return { ...(errorLocation === undefined ? {} : { error_location: errorLocation }),
     ...(level === undefined ? {} : { execution_level: level }), event_id: text(body.event_id, "event_id", 128), tc_fault_label: label, delivery_key: deliveryKey,
     diagnosis: text(body.diagnosis, "diagnosis", 8000),
-    target: { bot_id: botId, entity_id: entityId, env: target.env, engine: target.engine }, session_key: sessionKey };
+    target: { bot_id: botId, entity_id: entityId, env: target.env, engine: target.engine, ...(runtimeIdentity ? { runtime_identity: runtimeIdentity } : {}) }, session_key: sessionKey };
 }

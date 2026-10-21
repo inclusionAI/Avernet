@@ -1,10 +1,11 @@
+import type { BotRuntimeIdentity } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import type { AisStatusHandler } from "@avernet/clawevolve/server/services/ais/status-handler";
 import type { RecoveryStoredTask, RecoveryJudgment, RecoveryPlan, RecoveryEvidence } from "./task-contracts.js";
 import type { AgentToolCall } from "../../../repositories/repair/agent-tool-call-record.js";
 export type RecoveryRequest = {
   event_id: string;
   tc_fault_label: string | null;
-  target: { bot_id: string; entity_id: string; env: "pre" | "prod"; engine: "OC" | "CC" | "TE" };
+  target: { bot_id: string; entity_id: string; env: "pre" | "prod"; engine: "OC" | "CC" | "TE"; runtime_identity?: BotRuntimeIdentity };
   session_key: string;
   delivery_key: string;
   diagnosis: string;

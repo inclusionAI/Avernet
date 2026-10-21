@@ -2,7 +2,9 @@ export type AgentTarget = {
   environment: "pre" | "prod";
   ownerId: string;
   botId: string;
-  botType: "personal";
+  botType: "personal" | "service";
+  runtimeIdentity?: import("@avernet/clawweb-shared/server/services/bot-runtime").BotRuntimeIdentity;
+  deviceUuid?: string; providerDeviceId?: string;
   botStatus: string | null;
   bindingId: string;
   bindingStatus: string | null;

@@ -1,6 +1,8 @@
+import { recoveryTargetSnapshot } from "../agent-service.js";
 import { describe, expect, it, vi } from "vitest";
 import type { RecoveryStoredTask, RecoveryTaskStore } from "../task-contracts.js";
 import { SessionRecoveryTaskService } from "../task-service.js";
+import { parseRequest } from "../validation.js";
 const request = { event_id: "evt", tc_fault_label: "TC.MCP.CALL", delivery_key: "send1", diagnosis: "操作失败",
   session_key: "agent:main:session:original", target: { bot_id: "default", entity_id: "owner", env: "prod", engine: "OC" } };
 const actor = { userId: "owner", isAdmin: false };
@@ -150,4 +152,37 @@ it("makes concurrent stop requests idempotent without a duplicate final result",
   expect(saved.timeline.filter(event => event.kind === "termination")).toHaveLength(1);
   expect(saved.pending_results).toHaveLength(1);
   expect(saved.pending_results[0].status).toBe("canceled");
+});
+
+it("validates runtime identity only through the recovery creation contract", () => {
+  const runtime_identity = { stage: "online", deviceUuid: "DEVICE-" + "a".repeat(32), version: "V16" };
+  expect(parseRequest({ ...request, target: { ...request.target, runtime_identity } }).target.runtime_identity).toEqual(runtime_identity);
+  for (const patch of [{ stage: "unknown" }, { deviceUuid: "BOT-wrong" }, { version: "16" }, { STAGE: "verify" }]) {
+    expect(() => parseRequest({ ...request, target: { ...request.target, runtime_identity: { ...runtime_identity, ...patch } } })).toThrow();
+  }
+  const completeIdentity = { TOKEN: runtime_identity.deviceUuid, CLIENT_ID: runtime_identity.deviceUuid,
+    OWNER_ID: "owner", BOT_ID: "default", ENTITY_ID: "owner", ENTITY_TYPE: "staff", BOT_TYPE: "service",
+    AGENT_CODE: "example-service", ADMINS: "", STAGE: "online", VERSION: "V16", future_metadata: { supported: true } };
+  expect(parseRequest({ ...request, target: { ...request.target, runtime_identity: completeIdentity } }).target.runtime_identity).toEqual(runtime_identity);
+  expect(parseRequest({ ...request, target: { ...request.target, runtime_identity: { ...completeIdentity, ...runtime_identity } } }).target.runtime_identity).toEqual(runtime_identity);
+  expect(parseRequest({ ...request, target: { ...request.target, runtime_identity: { ...completeIdentity, STAGE: "draft" } } }).target.runtime_identity)
+    .toEqual({ stage: "draft", deviceUuid: runtime_identity.deviceUuid });
+});
+
+it("persists the service instance identity and fences later requests from switching devices", async () => {
+  const { deps } = setup();
+  const runtimeIdentity = { stage: "online" as const, version: "V16", deviceUuid: "DEVICE-" + "a".repeat(32) };
+  const target = { environment: "prod" as const, ownerId: "owner", botId: "default", provider: "baas", bindingId: "20",
+    deviceId: "BOT-online", deviceUuid: runtimeIdentity.deviceUuid, providerDeviceId: "ARCA-SANDBOX-original@0", activeEngine: "openclaw", botType: "service", runtimeIdentity };
+  const resolveTarget = vi.fn().mockResolvedValue(recoveryTargetSnapshot(target));
+  const service = new SessionRecoveryTaskService({ ...deps, resolveTarget });
+  const input = { ...request, target: { ...request.target, runtime_identity: runtimeIdentity } };
+  const ack = await service.create(input, actor); await flush();
+  const task = await service.detail(ack.task_id, actor);
+  expect(task.request.target.runtime_identity).toEqual(runtimeIdentity);
+  expect(task.runtimeTarget?.target).toMatchObject({ botType: "service", deviceUuid: runtimeIdentity.deviceUuid, runtimeIdentity });
+  expect(await service.create(input, actor)).toEqual(ack);
+  expect(resolveTarget).toHaveBeenCalledOnce();
+  await expect(service.create({ ...input, target: { ...input.target, runtime_identity: { ...runtimeIdentity, deviceUuid: "DEVICE-" + "b".repeat(32) } } }, actor)).rejects.toMatchObject({ status: 409 });
+  expect(recoveryTargetSnapshot({ ...target, deviceUuid: "DEVICE-" + "b".repeat(32) }).fingerprint).not.toBe(task.runtimeTarget!.fingerprint);
 });
