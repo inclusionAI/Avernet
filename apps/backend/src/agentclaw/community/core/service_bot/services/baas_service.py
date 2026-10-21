@@ -26,6 +26,10 @@ import time
 import uuid
 
 import httpx
+from agentclaw.community.core.service_bot.services.baas_api_response import (
+    BaasApiResponseError,
+    read_baas_bot_api_envelope,
+)
 from agentclaw.community.core.service_bot.baas_service_errors import (
     BaasNoActiveDevicesError,
     BaasServiceError,
@@ -528,9 +532,15 @@ class BaasService:  # pragma: no cover
             BaaS 层返回的 data 字段
 
         Raises:
-            BaasServiceError: API 返回非零 code
+            BaasServiceError: API 返回非零 code，或响应 JSON/结构无效
         """
-        return self._post_bots_api(path=path, payload=payload, action=action)
+        try:
+            result = self._post_bots_api(path=path, payload=payload, action=action)
+        except BaasApiResponseError as exc:
+            raise BaasServiceError("BaaS API returned an invalid response") from exc
+        if not isinstance(result, dict):
+            raise BaasServiceError("BaaS API returned invalid response data")
+        return result
 
     def _get_bots_api(
         self,
@@ -591,25 +601,9 @@ class BaasService:  # pragma: no cover
         )
         response.raise_for_status()
 
-        response_data = response.json()
-
-        logger.info(
-            f"[BaasService.{action}] BaaS raw response: %s",
-            response_data,
-        )
-
-        if response_data.get("code") != 0:
-            raise BaasServiceError(
-                f"BaaS API error: {response_data.get('message', 'Unknown error')}"
-            )
-
+        response_data = read_baas_bot_api_envelope(response.json, action=action)
         result = response_data.get("data", {})
-
-        logger.info(
-            f"[BaasService.{action}] "
-            f"Success: {result}"
-        )
-
+        logger.info("[BaasService.%s] Success: %s", action, result)
         return result
 
     @staticmethod

@@ -9,11 +9,25 @@ from agentclaw.community.core.desktop_bot.errors import DesktopBotServiceError
 from agentclaw.community.core.desktop_bot.services.desktop_bot_service import (
     DesktopBotService,
 )
+from agentclaw.community.core.service_bot.baas_service_errors import BaasServiceError
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.di.modules.bot_inventory_module import BotInventoryModule
 
 
-@pytest.mark.parametrize("failure", [503, 500, "timeout", "connection"])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        503,
+        500,
+        "timeout",
+        "connection",
+        "json",
+        "top-list",
+        "top-null",
+        "data-list",
+        "data-null",
+    ],
+)
 def test_pool_restart_normalizes_real_baas_transport_failures(failure):
     requests = []
 
@@ -23,6 +37,16 @@ def test_pool_restart_normalizes_real_baas_transport_failures(failure):
             raise httpx.ReadTimeout("private timeout detail", request=request)
         if failure == "connection":
             raise httpx.ConnectError("private connection detail", request=request)
+        if failure == "json":
+            return httpx.Response(200, text="private malformed JSON")
+        if failure == "top-list":
+            return httpx.Response(200, json=[])
+        if failure == "top-null":
+            return httpx.Response(200, content=b"null")
+        if failure == "data-list":
+            return httpx.Response(200, json={"code": 0, "data": []})
+        if failure == "data-null":
+            return httpx.Response(200, json={"code": 0, "data": None})
         return httpx.Response(failure, text="private upstream detail")
 
     with httpx.Client(
@@ -54,5 +78,10 @@ def test_pool_restart_normalizes_real_baas_transport_failures(failure):
 
     assert len(requests) == 1
     assert requests[0].url.path == "/api/v1/bots/device1/update"
-    assert isinstance(caught.value.__cause__, httpx.HTTPError)
+    expected = (
+        httpx.HTTPError
+        if failure in (503, 500, "timeout", "connection")
+        else BaasServiceError
+    )
+    assert isinstance(caught.value.__cause__, expected)
     assert "private" not in str(caught.value)
