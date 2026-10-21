@@ -2,7 +2,6 @@ import { Button } from '@/components/ui/Button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { BotActionAvailability, BotDomain } from '@/services/botWorkshop';
 import { isServiceVerification } from '@/services/botWorkshop/botPolicy';
-import { ArrowUpRight, ClipboardList, FileText, HeartPulse, MessageSquare, Pencil } from 'lucide-react';
 import React from 'react';
 
 export interface BotPrimaryActionsCellProps {
@@ -13,11 +12,7 @@ export interface BotPrimaryActionsCellProps {
   onView: (bot: BotDomain) => void;
   onEdit?: (bot: BotDomain) => void;
   onOpenLogs?: (bot: BotDomain) => void;
-  onOpenTaskInstances?: (bot: BotDomain) => void;
-  canOpenTaskInstances?: (bot: BotDomain) => boolean;
-  onHealthCheck?: (bot: BotDomain) => void;
   inventoryActions?: Partial<Record<'view' | 'chat' | 'edit', BotActionAvailability>>;
-  healthCheckAvailability?: BotActionAvailability;
   logAction?: BotActionAvailability;
 }
 
@@ -46,6 +41,14 @@ function IconAction({ label, disabledReason, disabled, children }: IconActionPro
   );
 }
 
+/**
+ * 核心操作（对话/查看/编辑/日志）按 dmore 稿以蓝色文字链接呈现（13px）；
+ * 任务实例/健康检查/管理类操作统一收口到行尾「三个点」气泡菜单
+ * （见 BotManagementMenu，设计稿 artboard-087）。
+ * linkClass 需覆盖 ghost 默认 hover 色，显式回落 primary。
+ */
+const linkClass = 'h-7 rounded-md px-1.5 text-[13px] font-normal text-primary hover:bg-primary/10 hover:text-primary';
+
 const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
   bot,
   onConversation,
@@ -54,19 +57,14 @@ const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
   onView,
   onEdit,
   onOpenLogs,
-  onOpenTaskInstances,
-  canOpenTaskInstances,
-  onHealthCheck,
   inventoryActions = {},
-  healthCheckAvailability,
   logAction,
 }) => {
   if (bot.lifecycle === 'deploying') return null;
   const isAgentCodingBot = bot.runtime.isAgentCodingBot;
   const editLabel = isServiceVerification(bot) ? '预发验证' : '编辑';
-  const lockedByOther = bot.lock?.status === 'other';
-  // Coding Bot 在 Bot 管理页固定展示「去使用」和「任务实例」，
-  // 不额外暴露查看/编辑/日志/健康检查等普通库存操作。
+  // Coding Bot 在 Bot 管理页固定展示「去使用」；任务实例随管理类操作
+  // 收口在「三个点」气泡菜单，普通库存操作（查看/编辑/日志）不展示。
   const showInventoryActions = !isAgentCodingBot;
 
   // Agent Coding Bot 的「去使用」固定展示。显式协作者/Owner 进入 Coding Chat;
@@ -86,7 +84,7 @@ const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
   const chatButton = (
     <Button
       variant="ghost"
-      size="icon"
+      className={linkClass}
       aria-label={isAgentCodingBot ? `去使用 ${bot.name}` : `与 ${bot.name} 对话`}
       disabled={chatDisabled}
       onClick={() => {
@@ -97,90 +95,61 @@ const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
         onConversation?.(bot);
       }}
     >
-      <MessageSquare className="size-3.5" />
+      {isAgentCodingBot ? '去使用' : '对话'}
     </Button>
   );
 
   const viewButton = (
     <Button
       variant="ghost"
-      size="icon"
+      className={linkClass}
       aria-label={`查看 ${bot.name} 详情`}
       disabled={!inventoryActions.view?.enabled}
       onClick={() => onView(bot)}
     >
-      <ArrowUpRight className="size-3.5" />
+      查看
     </Button>
   );
 
   const editButton = (
     <Button
       variant="ghost"
-      size="icon"
+      className={linkClass}
       aria-label={`${editLabel} ${bot.name}`}
       disabled={!inventoryActions.edit?.enabled}
       onClick={() => onEdit?.(bot)}
     >
-      {isServiceVerification(bot) ? <MessageSquare className="size-3.5" /> : <Pencil className="size-3.5" />}
+      {editLabel}
     </Button>
   );
 
   const logButton = (
     <Button
       variant="ghost"
-      size="icon"
+      className={linkClass}
       aria-label={`查看 ${bot.name} 日志`}
       disabled={!logAction?.enabled}
       onClick={() => onOpenLogs?.(bot)}
     >
-      <FileText className="size-3.5" />
-    </Button>
-  );
-
-  const healthButton = (
-    <Button
-      variant="ghost"
-      size="icon"
-      aria-label={`${bot.name} 健康检查`}
-      disabled={!healthCheckAvailability?.enabled || lockedByOther}
-      onClick={() => onHealthCheck?.(bot)}
-    >
-      <HeartPulse className="size-3.5" />
-    </Button>
-  );
-
-  const taskInstancesButton = (
-    <Button
-      variant="ghost"
-      size="icon"
-      aria-label={`查看 ${bot.name} 任务实例`}
-      onClick={() => onOpenTaskInstances?.(bot)}
-    >
-      <ClipboardList className="size-3.5" />
+      日志
     </Button>
   );
 
   const showChat = isAgentCodingBot
     ? Boolean(onConversation)
     : Boolean(inventoryActions.chat?.visible && onConversation);
-  // Coding Bot 固定展示任务实例入口；普通 Bot 的编辑、日志、任务实例
-  // 与健康检查仍按后端 actions / disabled_actions 与本地能力策略渲染。
+  // 编辑与日志仍按后端 actions / disabled_actions 渲染；任务实例/健康检查
+  // 已随管理类操作收口至「三个点」气泡菜单。
   const showView = showInventoryActions && Boolean(inventoryActions.view?.visible);
   const showEdit = showInventoryActions && Boolean(inventoryActions.edit?.visible);
   const showLog = showInventoryActions && Boolean(logAction?.visible && onOpenLogs);
-  // 后端 routines 端点以 MEMBER 权限校验；普通 Bot 仅 Owner / 显式协作者展示。
-  // Coding Bot 按产品口径固定展示，最终读取与操作仍由服务端权限兜底。
-  const showTaskInstances = isAgentCodingBot
-    ? Boolean(onOpenTaskInstances)
-    : showInventoryActions && Boolean(onOpenTaskInstances && canOpenTaskInstances?.(bot));
-  const showHealth = showInventoryActions && Boolean(healthCheckAvailability?.visible && onHealthCheck);
 
   return (
     <div
-      className="flex items-center justify-end gap-1"
+      className="flex items-center justify-end gap-0.5"
       onClick={(event) => event.stopPropagation()}
       role="group"
-      aria-label={`${bot.name} 主要操作`}
+      aria-label={`${bot.name} 操作`}
     >
       {showChat ? (
         <IconAction
@@ -212,16 +181,6 @@ const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
       {showLog ? (
         <IconAction label="日志" disabled={!logAction?.enabled} disabledReason={logAction?.disabledReason}>
           {logButton}
-        </IconAction>
-      ) : null}
-      {showTaskInstances ? <IconAction label="任务实例">{taskInstancesButton}</IconAction> : null}
-      {showHealth ? (
-        <IconAction
-          label="健康检查"
-          disabled={!healthCheckAvailability?.enabled || lockedByOther}
-          disabledReason={lockedByOther ? '该 Bot 正被他人编辑，请先抢锁' : healthCheckAvailability?.disabledReason}
-        >
-          {healthButton}
         </IconAction>
       ) : null}
     </div>

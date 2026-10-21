@@ -6,15 +6,21 @@ export interface BotDescriptionCellProps {
   bot: BotDomain;
 }
 
+/**
+ * 描述列 cell —— dmore 稿（10/19 Bot管理首页）+ 验收口径：
+ * 软灰底块内最多两行，超出省略；hover 经深色 Tooltip 展示完整描述。
+ */
 const BotDescriptionCell: React.FC<BotDescriptionCellProps> = ({ bot }) => {
   const text = bot.description?.trim() || '暂无描述';
   return (
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <p className="m-0 line-clamp-2 max-w-full text-xs leading-5 text-muted-foreground">{text}</p>
+          <span className="line-clamp-2 min-w-0 max-w-full whitespace-normal break-words rounded-md bg-muted/50 px-2.5 py-1.5 text-xs leading-5 text-muted-foreground">
+            {text}
+          </span>
         </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-sm whitespace-normal break-words text-left leading-5">
+        <TooltipContent side="top" className="max-w-sm whitespace-normal break-words text-left leading-5 bg-foreground text-background">
           {text}
         </TooltipContent>
       </Tooltip>

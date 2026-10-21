@@ -2,7 +2,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import React from 'react';
 
 /** 列宽须与 BotTable 列顺序一致；团队空间额外显示 Owner 列。 */
-const COLUMN_WIDTHS = ['w-[280px]', '', 'w-[96px]', 'w-[80px]', 'w-[220px]', 'w-[140px]', 'w-[360px]', 'w-[72px]'];
+const COLUMN_WIDTHS = ['w-[280px]', '', 'w-[96px]', 'w-[80px]', 'w-[220px]', 'w-[140px]', 'w-[412px]'];
 
 export interface BotTableSkeletonProps {
   rows?: number;
@@ -14,10 +14,10 @@ const BotTableSkeleton: React.FC<BotTableSkeletonProps> = ({ rows = 6, showOwner
   return (
     <div role="status" aria-label="Bot 列表加载中" className="w-full overflow-x-auto">
       <table aria-hidden className="w-full table-fixed border-collapse text-sm">
-        <thead className="bg-muted/30">
+        <thead className="bg-muted/50">
           <tr>
             {widths.map((width, index) => (
-              <th key={index} className={`h-10 px-4 ${width}`}>
+              <th key={index} className={`h-11 px-4 ${width}`}>
                 <Skeleton.Line className="w-14" />
               </th>
             ))}
@@ -25,12 +25,12 @@ const BotTableSkeleton: React.FC<BotTableSkeletonProps> = ({ rows = 6, showOwner
         </thead>
         <tbody>
           {Array.from({ length: rows }, (_, rowIndex) => (
-            <tr key={rowIndex} className="h-16 border-b border-border">
+            <tr key={rowIndex} className="h-18 border-b border-border/60">
               {widths.map((width, columnIndex) => (
                 <td key={columnIndex} className={`px-4 ${width}`}>
                   {columnIndex === 0 ? (
                     <div className="flex items-center gap-3">
-                      <Skeleton.Block className="h-5 w-5 shrink-0 rounded-full" />
+                      <Skeleton.Block className="size-10 shrink-0 rounded-full" />
                       <div className="min-w-0 flex-1 space-y-2">
                         <Skeleton.Line className="w-2/3" />
                         <Skeleton.Line className="w-1/3" />

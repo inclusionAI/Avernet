@@ -1,8 +1,8 @@
 import { Button } from '@/components/ui/Button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import type { EngineVersionUpdateAvailability } from '@/domain/botEngineVersion';
-import type { BotDomain } from '@/domain/botWorkshop';
-import { MapPin, MoreHorizontal, ShieldCheck, Users } from 'lucide-react';
+import type { BotActionAvailability, BotDomain } from '@/services/botWorkshop';
+import { ClipboardList, HeartPulse, MapPin, MoreVertical, ShieldCheck, Users } from 'lucide-react';
 import { useState } from 'react';
 import { BotEngineVersionMenuItems } from './BotEngineVersionMenuItems';
 import { BotManagementConfirmDialog } from './BotManagementConfirmDialog';
@@ -17,6 +17,11 @@ interface BotManagementMenuProps {
   lockedByOther: boolean;
   onAction: (action: BotCardManagementAction, bot: BotDomain) => Promise<void>;
   onManagePublication?: (bot: BotDomain) => void;
+  /** 以下两项与任务实例原为行内图标按钮，按 dmore 稿 087 收口进「三个点」气泡。 */
+  onHealthCheck?: (bot: BotDomain) => void;
+  healthCheckAvailability?: BotActionAvailability;
+  onOpenTaskInstances?: (bot: BotDomain) => void;
+  canOpenTaskInstances?: boolean;
   onChangeSpace?: (bot: BotDomain) => void;
   onAuthorize?: (bot: BotDomain) => void;
   canGeneralConfig?: boolean;
@@ -33,6 +38,10 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
     lockedByOther,
     onAction,
     onManagePublication,
+    onHealthCheck,
+    healthCheckAvailability,
+    onOpenTaskInstances,
+    canOpenTaskInstances,
     onChangeSpace,
     onAuthorize,
     canGeneralConfig,
@@ -46,6 +55,7 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
   const open = props.open ?? uncontrolledOpen;
   const setOpen = props.onOpenChange ?? setUncontrolledOpen;
   const [confirmAction, setConfirmAction] = useState<BotCardManagementAction>();
+  const isAgentCodingBot = bot.runtime.isAgentCodingBot;
   if (bot.lifecycle === 'deploying') return null;
   return (
     <>
@@ -55,7 +65,8 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
             variant="ghost"
             size="icon"
             aria-label={`管理 ${bot.name}`}
-            leftIcon={<MoreHorizontal className="size-4" />}
+            className="h-7 w-7 text-primary hover:bg-primary/10 hover:text-primary"
+            leftIcon={<MoreVertical className="size-4" />}
           />
         </PopoverTrigger>
         <PopoverContent align="end" className="w-52 space-y-1 p-2">
@@ -123,6 +134,45 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
                 }}
               >
                 {collaborationMode === 'authorize' ? '授权' : '申请操作权限'}
+              </Button>
+            ) : null}
+            {onOpenTaskInstances && (isAgentCodingBot || canOpenTaskInstances) ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start"
+                leftIcon={<ClipboardList className="size-4" />}
+                aria-label={`查看 ${bot.name} 任务实例`}
+                onClick={() => {
+                  setOpen(false);
+                  onOpenTaskInstances(bot);
+                }}
+              >
+                任务实例
+              </Button>
+            ) : null}
+            {healthCheckAvailability?.visible && onHealthCheck ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start"
+                leftIcon={<HeartPulse className="size-4" />}
+                aria-label={`${bot.name} 健康检查`}
+                disabled={lockedByOther || !healthCheckAvailability.enabled}
+                onClick={() => {
+                  setOpen(false);
+                  onHealthCheck(bot);
+                }}
+              >
+                <ActionHelp
+                  description={
+                    lockedByOther
+                      ? '该 Bot 正被他人编辑，请先抢锁'
+                      : healthCheckAvailability.disabledReason ?? '对该 Bot 的引擎与协作链路执行一次集成健康检查。'
+                  }
+                >
+                  健康检查
+                </ActionHelp>
               </Button>
             ) : null}
             {bot.deployment === 'local' && bot.actions.includes('open_folder') ? (

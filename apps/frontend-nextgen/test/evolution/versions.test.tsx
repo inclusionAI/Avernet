@@ -167,6 +167,7 @@ it.each([
   mockSearch = `?tab=versions&space_id=${space}&botOwner=author&botId=bot`;
   api.versions.mockResolvedValue({ items: [item(), item({ versionId: 'other', botId: 'another-bot' })] });
   render(<VersionList />);
-  expect(await screen.findByText(`共 ${count} 条 · 第 1 页`)).toBeInTheDocument();
+  expect(await screen.findByText(`共 ${count} 条`)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '第 1 页' })).toHaveAttribute('aria-current', 'page');
   expect(Boolean(screen.queryByText('another-bot', { selector: 'td' }))).toBe(otherVisible);
 });

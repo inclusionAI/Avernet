@@ -13,6 +13,8 @@ export interface DataTableColumn<Row> {
   align?: DataTableAlign;
   headerAlign?: DataTableAlign;
   className?: string;
+  /** 仅作用于表头单元格（如 sticky 列需与表头底色对齐）。 */
+  headerClassName?: string;
 }
 
 export interface DataTableProps<Row> {
@@ -24,7 +26,7 @@ export interface DataTableProps<Row> {
   renderExpandedRow?: (row: Row, rowIndex: number) => ReactNode;
   empty?: ReactNode;
   ariaLabel?: string;
-  rowHeight?: 'h-14' | 'h-16' | 'h-20';
+  rowHeight?: 'h-14' | 'h-16' | 'h-18' | 'h-20';
   /** 宽表在窄容器中横向滚动，避免固定列挤压内容列。 */
   minWidth?: string;
 }

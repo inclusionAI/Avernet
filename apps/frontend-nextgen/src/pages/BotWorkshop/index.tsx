@@ -32,116 +32,132 @@ const BotWorkshopPage: React.FC = () => {
     else setBasicInfoBot(bot);
   };
   return (
-    <main className="app-scrollbar h-full overflow-y-auto">
-      <div className="mx-auto w-full max-w-[1600px] space-y-5 p-4 sm:p-6 2xl:p-8">
+    <main className="app-scrollbar h-full overflow-y-auto bg-muted">
+      <div className="w-full p-5 sm:p-6">
         <PageHeader title="Bot 管理" description="创建、接入、配置和运维当前空间内的 Bot" />
-        {workshop.currentSpaceKind === 'personal' ? (
-          <BotManagementTabs value={activeTab} onChange={setActiveTab} />
-        ) : null}
-        {effectiveTab === 'external' ? (
-          <ExternalBotPanel active />
-        ) : (
-          <>
-            <div className="py-3">
-              <BotWorkshopToolbar
-                keyword={workshop.keyword}
-                engine={workshop.engine}
-                deployment={workshop.deployment}
-                serviceMode={workshop.serviceMode}
-                onKeywordChange={workshop.setKeyword}
-                onEngineChange={workshop.setEngine}
-                onDeploymentChange={workshop.setDeployment}
-                onServiceModeChange={workshop.setServiceMode}
-                onCreateCloud={workshop.openCreateCloud}
-                onCreateLocal={workshop.openCreateLocal}
-                localCreateDisabledReason={workshop.localCreateDisabledReason}
-                total={workshop.total}
-                onReset={() => {
-                  workshop.setKeyword('');
-                  workshop.setEngine('');
-                  workshop.setDeployment(undefined);
-                  workshop.setServiceMode(undefined);
-                }}
-              />
-            </div>
-            {workshop.loading ? (
-              <BotTableSkeleton showOwner={workshop.currentSpaceKind === 'team'} />
-            ) : workshop.error ? (
-              <Empty
-                title="Bot 列表加载失败"
-                description={workshop.error}
-                action={
-                  <Button variant="secondary" onClick={() => void workshop.retry()}>
-                    重试
-                  </Button>
-                }
-              />
-            ) : workshop.items.length === 0 ? (
-              <Empty
-                title={workshop.keyword || workshop.engine ? '没有符合条件的 Bot' : '当前空间暂无 Bot'}
-                description={
-                  workshop.keyword || workshop.engine || workshop.deployment || workshop.serviceMode
-                    ? '尝试清除搜索词或调整筛选条件。'
-                    : '创建一个 Bot，开始配置它的能力和运行方式。'
-                }
-                action={<Button onClick={workshop.openCreateCloud}>创建云端 Bot</Button>}
-              />
-            ) : (
-              <>
-                <div data-testid="bot-workshop-table">
-                  <BotTable
-                    bots={workshop.items}
-                    onView={handleView}
-                    onEdit={(bot) =>
-                      workshop.canEnterDetail(bot) ? workshop.openDetail(bot, 'edit') : setBasicInfoBot(bot)
+        {/*
+          dmore 稿（10/19 Bot管理首页）：灰底画布（#F8F8F8 ≈ bg-muted）+ 单张白色 r12 卡片，
+          卡内自上而下为 Tabs → 筛选行 → 结果面板 → 分页。
+        */}
+        <section className="mt-5 rounded-xl border border-border/60 bg-card p-4 sm:p-6">
+          {workshop.currentSpaceKind === 'personal' ? (
+            <BotManagementTabs value={activeTab} onChange={setActiveTab} className="mb-4" />
+          ) : null}
+          {effectiveTab === 'external' ? (
+            <ExternalBotPanel active />
+          ) : (
+            <>
+              <div className="mb-4">
+                <BotWorkshopToolbar
+                  keyword={workshop.keyword}
+                  engine={workshop.engine}
+                  deployment={workshop.deployment}
+                  serviceMode={workshop.serviceMode}
+                  onKeywordChange={workshop.setKeyword}
+                  onEngineChange={workshop.setEngine}
+                  onDeploymentChange={workshop.setDeployment}
+                  onServiceModeChange={workshop.setServiceMode}
+                  onCreateCloud={workshop.openCreateCloud}
+                  onCreateLocal={workshop.openCreateLocal}
+                  localCreateDisabledReason={workshop.localCreateDisabledReason}
+                  onReset={() => {
+                    workshop.setKeyword('');
+                    workshop.setEngine('');
+                    workshop.setDeployment(undefined);
+                    workshop.setServiceMode(undefined);
+                  }}
+                />
+              </div>
+              {/* 结果面板：数据视图为白底 + 灰蓝表头条；空态/错误态为 2% 灰底的居中留白面板。 */}
+              {workshop.loading ? (
+                <div className="overflow-hidden rounded-[10px] border border-border/60 bg-card">
+                  <BotTableSkeleton showOwner={workshop.currentSpaceKind === 'team'} />
+                </div>
+              ) : workshop.error ? (
+                <div className="rounded-[10px] bg-muted/40">
+                  <Empty
+                    title="Bot 列表加载失败"
+                    description={workshop.error}
+                    action={
+                      <Button variant="secondary" onClick={() => void workshop.retry()}>
+                        重试
+                      </Button>
                     }
-                    canEnterDetail={workshop.canEnterDetail}
-                    onConversation={workshop.openConversation}
-                    canOpenConversation={workshop.canOpenConversation}
-                    onHealthCheck={workshop.openHealthCheck}
-                    getHealthCheckAvailability={workshop.getHealthCheckAvailability}
-                    onOpenLogs={showBotLogs ? workshop.openLogs : undefined}
-                    getLogAction={showBotLogs ? workshop.logActionFor : undefined}
-                    onOpenTaskInstances={workshop.openTaskInstances}
-                    canOpenTaskInstances={workshop.canOpenTaskInstances}
-                    onOpenContainers={setContainerBot}
-                    canViewContainers={workshop.canViewContainers}
-                    containerUserId={workshop.containerUserId}
-                    onEngineVersionUpdated={() => workshop.retry({ silent: true })}
-                    onChangeSpace={(bot) => {
-                      if (workshop.canChangeSpace(bot)) workshop.openSpaceChange(bot);
-                    }}
-                    onAuthorize={workshop.openAuthorize}
-                    getCollaborationMode={workshop.collaborationModeFor}
-                    getGeneralConfigAvailability={(bot) =>
-                      getGeneralConfigAvailability(workshop.canChangeSpace(bot), bot.lock?.status === 'other')
-                    }
-                    onGeneralConfig={setGeneralConfigBot}
-                    onManagePublication={setPublicationBot}
-                    onAction={workshop.runAction}
-                    onClaimLock={workshop.claimLock}
-                    onReleaseLock={workshop.releaseLock}
-                    getInventoryActions={(bot) => ({
-                      view: workshop.inventoryActionFor(bot, 'view'),
-                      chat: workshop.inventoryActionFor(bot, 'chat'),
-                      edit: workshop.inventoryActionFor(bot, 'edit'),
-                    })}
                   />
                 </div>
-                {workshop.total !== undefined ? (
-                  <Pagination
-                    current={workshop.page}
-                    pageSize={workshop.pageSize}
-                    total={workshop.total}
-                    onChange={workshop.setPage}
-                    onPageSizeChange={workshop.setPageSize}
-                    className="justify-end"
+              ) : workshop.items.length === 0 ? (
+                <div className="rounded-[10px] bg-muted/40">
+                  <Empty
+                    title={workshop.keyword || workshop.engine ? '没有符合条件的 Bot' : '当前空间暂无 Bot'}
+                    description={
+                      workshop.keyword || workshop.engine || workshop.deployment || workshop.serviceMode
+                        ? '尝试清除搜索词或调整筛选条件。'
+                        : '创建一个 Bot，开始配置它的能力和运行方式。'
+                    }
+                    action={<Button onClick={workshop.openCreateCloud}>创建云端 Bot</Button>}
                   />
-                ) : null}
-              </>
-            )}
-          </>
-        )}
+                </div>
+              ) : (
+                <>
+                  <div
+                    data-testid="bot-workshop-table"
+                    className="overflow-hidden rounded-[10px] border border-border/60 bg-card"
+                  >
+                    <BotTable
+                      bots={workshop.items}
+                      onView={handleView}
+                      onEdit={(bot) =>
+                        workshop.canEnterDetail(bot) ? workshop.openDetail(bot, 'edit') : setBasicInfoBot(bot)
+                      }
+                      canEnterDetail={workshop.canEnterDetail}
+                      onConversation={workshop.openConversation}
+                      canOpenConversation={workshop.canOpenConversation}
+                      onHealthCheck={workshop.openHealthCheck}
+                      getHealthCheckAvailability={workshop.getHealthCheckAvailability}
+                      onOpenLogs={showBotLogs ? workshop.openLogs : undefined}
+                      getLogAction={showBotLogs ? workshop.logActionFor : undefined}
+                      onOpenTaskInstances={workshop.openTaskInstances}
+                      canOpenTaskInstances={workshop.canOpenTaskInstances}
+                      onOpenContainers={setContainerBot}
+                      canViewContainers={workshop.canViewContainers}
+                      containerUserId={workshop.containerUserId}
+                      onEngineVersionUpdated={() => workshop.retry({ silent: true })}
+                      onChangeSpace={(bot) => {
+                        if (workshop.canChangeSpace(bot)) workshop.openSpaceChange(bot);
+                      }}
+                      onAuthorize={workshop.openAuthorize}
+                      getCollaborationMode={workshop.collaborationModeFor}
+                      getGeneralConfigAvailability={(bot) =>
+                        getGeneralConfigAvailability(workshop.canChangeSpace(bot), bot.lock?.status === 'other')
+                      }
+                      onGeneralConfig={setGeneralConfigBot}
+                      onManagePublication={setPublicationBot}
+                      onAction={workshop.runAction}
+                      onClaimLock={workshop.claimLock}
+                      onReleaseLock={workshop.releaseLock}
+                      getInventoryActions={(bot) => ({
+                        view: workshop.inventoryActionFor(bot, 'view'),
+                        chat: workshop.inventoryActionFor(bot, 'chat'),
+                        edit: workshop.inventoryActionFor(bot, 'edit'),
+                      })}
+                    />
+                  </div>
+                  {workshop.total !== undefined ? (
+                    <Pagination
+                      current={workshop.page}
+                      pageSize={workshop.pageSize}
+                      total={workshop.total}
+                      onChange={workshop.setPage}
+                      onPageSizeChange={workshop.setPageSize}
+                      layout="between"
+                      className="mt-4"
+                    />
+                  ) : null}
+                </>
+              )}
+            </>
+          )}
+        </section>
         <CreateBotModal
           scenario={workshop.createScenario}
           spaces={workshop.createSpaces}

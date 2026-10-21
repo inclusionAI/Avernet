@@ -10,13 +10,34 @@ describe('Pagination', () => {
     expect(container.querySelector('input')).toBeNull();
   });
 
-  it('渲染信息文案与上/下一页按钮', () => {
+  it('渲染信息文案、数字页码与上/下一页按钮', () => {
     const { container, getByLabelText } = render(
       <Pagination current={2} pageSize={10} total={100} onChange={() => {}} />,
     );
-    expect(container.textContent).toContain('共 100 条 · 第 2/10 页');
+    expect(container.textContent).toContain('共 100 条');
+    expect(getByLabelText('第 1 页')).toBeInTheDocument();
+    expect(getByLabelText('第 2 页')).toHaveAttribute('aria-current', 'page');
     expect(getByLabelText('上一页')).toBeEnabled();
     expect(getByLabelText('下一页')).toBeEnabled();
+  });
+
+  it('点击数字页码触发 onChange，当前页点击不重复触发', () => {
+    const onChange = jest.fn();
+    const { getByLabelText } = render(<Pagination current={2} pageSize={10} total={30} onChange={onChange} />);
+    fireEvent.click(getByLabelText('第 3 页'));
+    expect(onChange).toHaveBeenCalledWith(3);
+    fireEvent.click(getByLabelText('第 2 页'));
+    expect(onChange).not.toHaveBeenCalledWith(2);
+  });
+
+  it('长列表折叠中间页码为省略号', () => {
+    const { getByLabelText, getByText, queryByLabelText } = render(
+      <Pagination current={1} pageSize={10} total={1000} onChange={() => {}} />,
+    );
+    expect(getByLabelText('第 1 页')).toBeInTheDocument();
+    expect(getByLabelText('第 100 页')).toBeInTheDocument();
+    expect(getByText('…')).toBeInTheDocument();
+    expect(queryByLabelText('第 50 页')).not.toBeInTheDocument();
   });
 
   it('翻页按钮带手型，禁用态退回 not-allowed', () => {

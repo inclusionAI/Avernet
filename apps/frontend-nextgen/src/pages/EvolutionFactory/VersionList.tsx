@@ -1,13 +1,18 @@
 import { Button } from '@/components/ui/Button';
+import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
+import { Empty } from '@/components/ui/Empty';
 import { Input } from '@/components/ui/Input';
+import { Pagination } from '@/components/ui/Pagination';
 import { Spin } from '@/components/ui/Spin';
 import type { EvolutionVersion } from '@/domain/evolution/types';
 import { activeStatus, formatTime, type Task } from '@/domain/evolution/types';
 import { history, useLocation } from '@umijs/max';
+import { Package, RefreshCw, Search } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Choice, ErrorBox, useResource } from './shared';
+import { ErrorBox, FilterSelect, ListSkeleton, PlaceholderPanel, TablePanel, useResource } from './shared';
 import { useEvolutionContext } from './useEvolutionContext';
 import { Comparison, stableVersion, VersionActions, versionLabel, versionStatus } from './VersionActions';
+import { buildVersionColumns, COLUMN_WIDTHS } from './VersionListColumns';
 import { VersionReview } from './VersionReview';
 export { stableVersion, versionStatus } from './VersionActions';
 
@@ -147,142 +152,124 @@ export default function VersionList({ task, revision = 0 }: { task?: Task; revis
         {reviewModal}
       </aside>
     );
+  const hasActiveFilter = Boolean(query) || filter !== 'all' || botFilter !== 'all';
+  // 位于 task 早退分支之后，不能用 hook —— 直接随渲染推导。
+  const botOptions = [
+    { value: 'all', label: '全部' },
+    ...[...new Map(
+      (result.data?.items ?? []).map((v) => [
+        JSON.stringify([v.userId, v.botId]),
+        { value: JSON.stringify([v.userId, v.botId]), label: `${v.botId} / ${v.userId}` },
+      ]),
+    ).values()] as { value: string; label: string }[],
+  ];
+  // viewDiff 每渲染重建（依赖 refs 与 setState），故列定义不做 memo，直接随渲染生成。
+  const columns: DataTableColumn<EvolutionVersion>[] = buildVersionColumns((v) => void viewDiff(v));
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-3">
-        <Input
-          className="max-w-[440px]"
-          value={query}
-          placeholder="版本、Bot、任务或 SHA"
-          onChange={(e) => {
-            setQuery(e.target.value);
+    <div className="min-w-0">
+      {/* 筛选行：搜索 + 带 Bot / 版本类型下拉 + 右侧刷新与创建 Pack，与 Bot 管理工具行同 idiom。 */}
+      <div className="mb-4 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-3">
+        <div className="relative w-full sm:w-[240px] sm:shrink-0">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            className="pl-9"
+            aria-label="搜索进化版本"
+            placeholder="版本、Bot、任务或 SHA"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setPage(1);
+            }}
+          />
+        </div>
+        <FilterSelect
+          label="筛选 Bot"
+          value={botFilter}
+          onChange={(v) => {
+            setBotFilter(v);
             setPage(1);
           }}
+          options={botOptions}
+          triggerClassName="w-full sm:w-[180px]"
         />
-        <div className="w-full sm:w-[240px]">
-          <Choice
-            label="筛选 Bot"
-            value={botFilter}
-            onChange={(value) => {
-              setBotFilter(value);
-              setPage(1);
-            }}
-            options={[
-              { value: 'all', label: '全部 Bot' },
-              ...[
-                ...new Map(
-                  (result.data?.items ?? []).map((v) => [
-                    JSON.stringify([v.userId, v.botId]),
-                    { value: JSON.stringify([v.userId, v.botId]), label: `${v.botId} / ${v.userId}` },
-                  ]),
-                ).values(),
-              ],
-            ]}
-          />
+        <FilterSelect
+          label="版本类型"
+          value={filter}
+          onChange={(value) => {
+            setFilter(value);
+            setPage(1);
+          }}
+          options={[
+            { value: 'all', label: '全部' },
+            { value: 'initial', label: '初始版本' },
+            { value: 'accepted', label: '已接受' },
+            { value: 'rejected', label: '未接受' },
+            { value: 'snapshot', label: '主动快照' },
+          ]}
+        />
+        <div className="ml-auto flex w-full items-center justify-end gap-2.5 sm:w-auto">
+          <Button type="button" variant="outline" size="sm" leftIcon={<RefreshCw size={14} />} onClick={result.reload}>
+            刷新
+          </Button>
+          <Button
+            type="button"
+            leftIcon={<Package size={14} />}
+            onClick={() => history.push('/evolution-factory/new?type=pack')}
+          >
+            创建 Pack
+          </Button>
         </div>
-        <div className="w-full sm:w-[160px]">
-          <Choice
-            label="版本类型"
-            value={filter}
-            onChange={(value) => {
-              setFilter(value);
-              setPage(1);
-            }}
-            options={[
-              { value: 'all', label: '全部版本' },
-              { value: 'initial', label: '初始版本' },
-              { value: 'accepted', label: '已接受' },
-              { value: 'rejected', label: '未接受' },
-              { value: 'snapshot', label: '主动快照' },
-            ]}
-          />
-        </div>
-        <Button className="ml-auto" variant="outline" onClick={result.reload}>
-          刷新
-        </Button>
-        <Button onClick={() => history.push('/evolution-factory/new?type=pack')}>创建 Pack</Button>
       </div>
       <ErrorBox message={context.error || result.error} retry={result.reload} />
-      {result.loading ? (
-        <Spin tip="加载进化版本…" />
-      ) : (
-        <div className="overflow-x-auto rounded-xl border border-border">
-          <table className="w-full min-w-[1000px] text-left text-sm">
-            <thead className="bg-muted/40">
-              <tr>
-                {['版本', 'Bot / Owner', '来源任务', '状态', 'Test Bench', 'Review / Spec', 'Pack', '时间', '操作'].map(
-                  (t) => (
-                    <th className={`whitespace-nowrap p-3 ${t === '操作' ? 'sticky right-0 bg-muted' : ''}`} key={t}>
-                      {t}
-                    </th>
-                  ),
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {items.slice((page - 1) * pageSize, page * pageSize).map((v) => (
-                <tr key={v.versionId} className="border-t border-border">
-                  <td className="p-3">{versionLabel(v)}</td>
-                  <td className="max-w-[200px] break-all p-3">
-                    {v.botId}
-                    <p className="text-xs text-muted-foreground">{v.userId}</p>
-                  </td>
-                  <td className="max-w-[240px] break-all p-3">
-                    <Button
-                      variant="ghost"
-                      style={{ height: 'auto', whiteSpace: 'normal' }}
-                      className="text-primary"
-                      onClick={() => history.push(`/evolution-factory/tasks/${encodeURIComponent(v.taskId)}`)}
-                    >
-                      {String(v.taskName || v.taskId)}
-                    </Button>
-                  </td>
-                  <td className="whitespace-nowrap p-3">{versionStatus(v)}</td>
-                  <td className="p-3">
-                    <Comparison version={v} />
-                  </td>
-                  <td className="p-3">
-                    {v.reviewStatus || '—'} / {v.specVersion || '—'}
-                  </td>
-                  <td className="max-w-[140px] break-all p-3 text-xs">{v.pack?.packId || '未登记'}</td>
-                  <td className="whitespace-nowrap p-3 text-xs">{formatTime(v.createdAt)}</td>
-                  <td className="sticky right-0 min-w-[180px] bg-card p-3">
-                    <VersionActions version={v} onDiff={(v) => void viewDiff(v)} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!items.length && !result.error && <p className="p-6 text-center text-muted-foreground">暂无进化版本</p>}
-        </div>
-      )}
-      <div className="flex flex-wrap items-center justify-end gap-3 text-xs text-muted-foreground">
-        <span>
-          共 {items.length} 条 · 第 {page} 页
-        </span>
-        <div className="w-[110px]">
-          <Choice
-            label="每页条数"
-            value={String(pageSize)}
-            onChange={(v) => {
-              setPageSize(Number(v));
+      {result.loading || context.loading ? (
+        <TablePanel>
+          <ListSkeleton widths={COLUMN_WIDTHS} ariaLabel="进化版本加载中" />
+        </TablePanel>
+      ) : result.error ? (
+        <PlaceholderPanel>
+          <Empty
+            title="进化版本加载失败"
+            description={result.error}
+            action={
+              <Button type="button" variant="secondary" onClick={result.reload}>
+                重试
+              </Button>
+            }
+          />
+        </PlaceholderPanel>
+      ) : items.length ? (
+        <>
+          <TablePanel>
+            <DataTable
+              columns={columns}
+              rows={items.slice((page - 1) * pageSize, page * pageSize)}
+              getRowKey={(v) => v.versionId}
+              rowHeight="h-18"
+              ariaLabel="进化版本列表"
+              minWidth="min-w-[1370px]"
+            />
+          </TablePanel>
+          <Pagination
+            current={page}
+            pageSize={pageSize}
+            total={items.length}
+            onChange={setPage}
+            onPageSizeChange={(value) => {
+              setPageSize(value);
               setPage(1);
             }}
-            options={[10, 20, 50].map((n) => ({ value: String(n), label: `${n}条/页` }))}
+            layout="between"
+            className="mt-4"
           />
-        </div>
-        <Button size="sm" variant="outline" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>
-          上一页
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={page * pageSize >= items.length}
-          onClick={() => setPage((p) => p + 1)}
-        >
-          下一页
-        </Button>
-      </div>
+        </>
+      ) : (
+        <PlaceholderPanel>
+          <Empty
+            title={hasActiveFilter ? '没有符合条件的进化版本' : '暂无进化版本'}
+            description={hasActiveFilter ? '尝试清除搜索词或调整筛选条件。' : '发起一次进化任务，验证通过后即可沉淀稳定版本。'}
+          />
+        </PlaceholderPanel>
+      )}
       {reviewModal}
     </div>
   );
