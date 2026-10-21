@@ -72,14 +72,14 @@ describe('ConversationBotItem 操作区', () => {
     expect(title?.parentElement).toHaveClass('pr-[122px]');
   });
 
-  it('「更多操作」入口随操作区渲染:点击弹菜单(菜单项按条件渲染)', () => {
-    renderBotItem();
-    const moreButton = screen.getByRole('button', { name: '更多操作' });
-    // 入口常居操作区末位(hover 显隐与操作区共用)。
-    expect(moreButton.parentElement).toHaveClass('gap-0.5');
-    // 点击弹出菜单:Radix Popover 内容层出现(默认 fixture 无空间信息,菜单项不渲染)。
-    fireEvent.click(moreButton);
-    expect(document.querySelector('[data-radix-popper-content-wrapper]')).toBeTruthy();
+  it('「更多操作」入口统一按菜单项渲染(2026-10-21 收紧):无菜单项不显示入口', () => {
+    // 无 onOpenBotManagement 回调(好友 Bot 口径):入口不渲染。
+    const first = renderBotItem();
+    expect(screen.queryByRole('button', { name: '更多操作' })).not.toBeInTheDocument();
+    first.unmount();
+    // 有回调但空间信息缺失:入口同样不渲染(无空壳占位)。
+    renderBotItem({ onOpenBotManagement: jest.fn() });
+    expect(screen.queryByRole('button', { name: '更多操作' })).not.toBeInTheDocument();
   });
 });
 
@@ -370,13 +370,15 @@ describe('ConversationBotItem 「Bot 管理」菜单项', () => {
 
   it('好友 Bot(未提供回调)不渲染「Bot 管理」菜单项', () => {
     renderBotItem();
-    fireEvent.click(screen.getByRole('button', { name: '更多操作' }));
+    // 统一收紧(2026-10-21):无菜单项不放空壳入口,「…」整体不渲染。
+    expect(screen.queryByRole('button', { name: '更多操作' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Bot 管理/ })).not.toBeInTheDocument();
   });
 
   it('空间信息缺失(接口未返回 space)不渲染「Bot 管理」菜单项', () => {
     renderBotItem({ onOpenBotManagement: jest.fn() });
-    fireEvent.click(screen.getByRole('button', { name: '更多操作' }));
+    // 空间信息缺失:菜单项条件不满足,入口同样不渲染(无空壳)。
+    expect(screen.queryByRole('button', { name: '更多操作' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Bot 管理/ })).not.toBeInTheDocument();
   });
 });

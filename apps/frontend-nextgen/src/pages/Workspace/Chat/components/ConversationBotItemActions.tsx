@@ -131,10 +131,10 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
         />
       )}
       {/* 「更多操作」入口(2026-10-20 设计稿还原):hover 随操作区显隐,常居操作区末位;
-          菜单首项「Bot 管理」跳转该 Bot 所属空间的 Bot 管理页(2026-10-21,我的/团队 Bot 且有空间信息);
-          isOthers 只读视角不提供整个入口(同新建按钮口径);
-          不可用 Bot 需有「Bot 管理」菜单项才渲染(无项不放空壳),且入口常驻(见容器显隐)。 */}
-      {!isOthers && (!unavailable || (onOpenBotManagement && bot.spaceId)) && (
+          统一"有菜单项才显示入口"(2026-10-21 验收收紧,取消可用 Bot 空壳占位):
+          有「Bot 管理」菜单项(回调+空间信息)才渲染,好友 Bot/空间信息缺失/只读视角不显示;
+          不可用 Bot 入口常驻(见容器显隐)。 */}
+      {!isOthers && onOpenBotManagement && bot.spaceId && (
         <Popover open={moreOpen} onOpenChange={setMoreOpen}>
           <PopoverTrigger asChild>
             <IconButton
