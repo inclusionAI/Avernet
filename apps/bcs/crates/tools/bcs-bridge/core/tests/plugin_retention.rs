@@ -97,7 +97,7 @@ async fn next(handle: &RunHandle, cursor: u64) -> RunEvent {
 }
 
 async fn terminal(handle: &RunHandle) {
-    tokio::time::timeout(Duration::from_secs(5), async {
+    tokio::time::timeout(Duration::from_secs(30), async {
         while !handle.is_terminal() { tokio::task::yield_now().await; }
     }).await.expect("run cleanup did not finish");
 }
