@@ -39,6 +39,8 @@ test('entity_id 而不是 owner_id 作为会话 owner 上下文，mine 不标记
         displayName: '团队助手',
         engine: 'teclaw',
         chatable: true,
+        spaceId: '42',
+        spaceName: 'Team',
       },
     ],
   });

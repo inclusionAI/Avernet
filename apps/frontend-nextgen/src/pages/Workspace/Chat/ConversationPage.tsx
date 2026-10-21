@@ -18,7 +18,7 @@ import { useChatBridge } from '@tc-chat/adapters';
 import type { BridgeInputRef, PanelHandle } from '@tc-chat/core';
 import type { SenderRef } from '@tc-chat/ui/es/Sender';
 import { history } from '@umijs/max';
-import { useEffect, useMemo, useRef, type RefObject } from 'react';
+import { useMemo, useRef, type RefObject } from 'react';
 import { ReadOnlyConversationPanel } from '../components/ReadOnlyConversationPanel';
 import { useBotChat } from '../hooks/useBotChat';
 import { ChatHeaderActions } from './components/ChatHeaderActions';

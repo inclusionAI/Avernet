@@ -88,7 +88,6 @@ function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
     chatable: Boolean(realBotId && ownerId),
     ...permissions,
     runtimeStage: 'draft',
-    spaceId: dto.space?.kind === 'team' ? dto.space.space_id : undefined,
     isAgentCodingBot: runtime.isAgentCodingBot,
     templateType: runtime.templateType,
     templateName: runtime.templateName,
