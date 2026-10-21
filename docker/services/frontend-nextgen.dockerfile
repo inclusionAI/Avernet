@@ -6,6 +6,9 @@ FROM node:22-bookworm-slim AS build
 WORKDIR /app
 
 # Build context is the repository root, as required by docker/build-image.sh.
+# @avernet/a2a-chat-client 经 umi/tsconfig alias 直连 packages/ 源码——包目录
+# 必须先于构建在场（在仓库根 /packages 下）。
+COPY packages/a2a-chat-client/ ./packages/a2a-chat-client/
 COPY apps/frontend-nextgen/package.json apps/frontend-nextgen/package-lock.json ./
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 RUN --mount=type=cache,id=frontend-nextgen-npm,target=/root/.npm,sharing=locked \
