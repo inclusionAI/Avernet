@@ -34,7 +34,8 @@ Path-layout changes ripple to every consumer (engine, device, skill_center, reso
 
 Service Bot artifacts exclude the engine-root `cron/` directory. Claude Code
 and AICoding also exclude legacy `sessions/cron-tasks.json` and
-`sessions/cron-runs.json`; AICoding no longer explicitly includes the task file.
-Cron configuration and history belong to the selected runtime instance. Artifact
-rebuilds remove stale excluded files, while draft restore keeps existing runtime
-tasks. Installation must also reject task state from older artifacts.
+`sessions/cron-runs.json` in the main directory sync. AICoding explicitly copies
+`sessions/cron-tasks.json` as a single-file extra include; this snapshot is published and restored, while all other session files
+and cron runs remain excluded. A missing historical task snapshot preserves the
+current draft task file. Claude Code keeps the task file excluded. This policy
+does not change runtime scheduling ownership or container startup behavior.
