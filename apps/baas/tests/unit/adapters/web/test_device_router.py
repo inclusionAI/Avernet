@@ -20,6 +20,8 @@ from secbaas.community.adapters.web.routers.paas_service.device_router import (
 )
 from secbaas.community.api import ApiResponse
 from secbaas.community.api.device_manage import (
+    DeployConfig,
+    DeviceConfig,
     DeviceResponse,
     ProviderDevicePropsResponse,
 )
@@ -182,7 +184,13 @@ class TestGetDeviceInfo:
 
     @pytest.mark.asyncio
     async def test_device_with_all_fields(self) -> None:
-        """Test that a device with all fields populated returns correctly."""
+        """Test that a device with all fields populated returns correctly.
+
+        AC-1 / AC-2: query endpoint must mask ``provider_device_props`` and
+        ``extra_config.deploy_config`` while preserving the rest of the
+        contract (``template_uuid`` here stands in for the other
+        ``DeviceConfig`` fields that must survive the redaction).
+        """
         now = datetime.now(tz=UTC)
         expected = DeviceResponse(
             id=42,
@@ -194,7 +202,15 @@ class TestGetDeviceInfo:
             provider_type="ARCA",
             provider_device_id="sandbox-full",
             provider_device_props={"sandbox_id": "sb-full", "region": "cn-shanghai"},
-            extra_config=None,
+            extra_config=DeviceConfig(
+                template_uuid="tpl-full",
+                deploy_config=DeployConfig(
+                    docker_image="test-image:v1",
+                    ttl_in_minutes=1440,
+                    envs={"PROVIDER_KEY": "secret_value"},
+                ),
+                metadata={"k": "v"},
+            ),
             err_msg=None,
             creator="admin",
             modifier="admin",
@@ -216,10 +232,14 @@ class TestGetDeviceInfo:
         assert result.data.env == "production"
         assert result.data.domain == "api"
         assert result.data.provider_device_id == "sandbox-full"
-        assert result.data.provider_device_props == {
-            "sandbox_id": "sb-full",
-            "region": "cn-shanghai",
-        }
+        # AC-1: provider_device_props must be masked to None.
+        assert result.data.provider_device_props is None
+        # AC-2: extra_config.deploy_config must be masked to None.
+        assert result.data.extra_config is not None
+        assert result.data.extra_config.deploy_config is None
+        # PRES-4: non-sensitive extra_config fields survive the redaction.
+        assert result.data.extra_config.template_uuid == "tpl-full"
+        assert result.data.extra_config.metadata == {"k": "v"}
 
     @pytest.mark.asyncio
     async def test_device_failed_status(self) -> None:

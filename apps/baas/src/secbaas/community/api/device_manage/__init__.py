@@ -77,6 +77,7 @@ from ._device_info import (
     SigmaDeviceInfo,
     TeClawDeviceInfo,
 )
+from ._device_public_view import to_public_device_response
 from ._encryptable_header_rule import (
     EncryptableHeaderRule,
     EncryptableOutBoundRule,
@@ -187,4 +188,5 @@ __all__ = [
     "TeClawCredentials",
     "TeClawDeviceConfig",
     "TeClawDeviceInfo",
+    "to_public_device_response",
 ]
