@@ -41,7 +41,7 @@ class Harness:
         self.wire = None
 
     def api(self, path, body=None, token=None, method=None):
-        headers = {'Content-Type': 'application/json', 'X-Mock-User-Id': '001',
+        headers = {'Content-Type': 'application/json', 'X-BCS-CHAT-VERSION': '3', 'X-Mock-User-Id': '001',
                    'X-Mock-Nick-Name': 'admin'}
         if token:
             headers['X-BCS-Bot-Token'] = token

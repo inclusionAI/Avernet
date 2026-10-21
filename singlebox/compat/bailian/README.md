@@ -97,7 +97,9 @@ WebSocket observer forwards unchanged frames to the real BCS parser; raw frames
 are never uploaded. This is live valid-format coverage, not exhaustive malformed
 provider-stream or chunk-boundary coverage.
 
-Cancellation starts a 30-second shell tool, waits for its start event, cancels
+Cancellation explicitly enables managed direct-A2A delivery for the target Bot
+through the local policy API and requires a delivery ID. Legacy direct cancellation
+only marks BCS state and does not certify an engine abort. The case starts a 30-second shell tool, waits for its start event, cancels
 via BCS, requires a downstream chat.abort acknowledgement and cancelled run,
 and observes for 35 seconds to reject late tool output/state changes. A following
 request must work in the same session. A BCS-only state change without a downstream

@@ -17,7 +17,8 @@ class WireEvidenceTest(unittest.TestCase):
                 frame('result', toolCallId=call_id, sessionId=session, result='TOKEN', isError=False)]
 
     def test_unicode_quotes_and_json_argument_string(self):
-        for args in ({'path': 'a "引号".txt'}, json.dumps({'path': 'a "引号".txt'})):
+        for args in ({'path': 'a "引号".txt'}, json.dumps({'path': 'a "引号".txt'}),
+                     {'command': r'cat "a \"引号\".txt"'}):
             self.assertTrue(validate_tools(self.frames(args), 'a "引号".txt', 'TOKEN')['arguments_object'])
 
     def test_rejects_malformed_json_unpaired_id_wrong_session_and_missing_events(self):

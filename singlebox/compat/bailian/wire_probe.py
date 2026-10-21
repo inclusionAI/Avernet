@@ -1,6 +1,7 @@
 """Transparent runner-only BCS wire observer. Raw frames stay in memory."""
 import asyncio
 import json
+import shlex
 from threading import Event, Thread
 
 
@@ -98,6 +99,21 @@ def tool_events(frames):
     return events
 
 
+def contains_argument(value, text):
+    if isinstance(value, str):
+        if text in value:
+            return True
+        try:
+            return any(text in word for word in shlex.split(value))
+        except ValueError:
+            return False
+    if isinstance(value, dict):
+        return any(contains_argument(item, text) for item in value.values())
+    if isinstance(value, list):
+        return any(contains_argument(item, text) for item in value)
+    return False
+
+
 def contains_text(value, text):
     if isinstance(value, str):
         return text in value
@@ -131,7 +147,7 @@ def validate_tools(frames, filename, marker):
             args, session = starts[key]
             if session != event.get('sessionId'):
                 raise AssertionError('tool_result_session_mismatch')
-            if contains_text(args, filename) and contains_text(event.get('result'), marker):
+            if contains_argument(args, filename) and contains_text(event.get('result'), marker):
                 if event.get('isError') is True:
                     raise AssertionError('tool_result_error')
                 return {'matched_call_id': call_id, 'arguments_object': True,

@@ -7,6 +7,19 @@ from pathlib import Path
 import subprocess
 
 
+def install_openclaw_profile(path, install):
+    # Install into a fresh config, then merge provider settings. Published BCN's
+    # setup entry otherwise races the old CLI's optimistic config save.
+    provider = json.loads(path.read_text())
+    path.unlink()
+    try:
+        install()
+    finally:
+        installed = json.loads(path.read_text()) if path.exists() else {}
+        installed.update(provider)
+        path.write_text(json.dumps(installed))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--profile', type=Path, required=True)
@@ -54,8 +67,11 @@ def main():
             command += ['--accept-capabilities', 'npm:' + spec]
         else:
             command += [spec]
-        install_plugin(command, env)
         path = args.profile / 'openclaw/openclaw.json'
+        if engine['version'] == '2026.5.12':
+            install_openclaw_profile(path, lambda: install_plugin(command, env))
+        else:
+            install_plugin(command, env)
         config = json.loads(path.read_text())
         config['models']['providers']['bailian']['apiKey'] = '${BAILIAN_API_KEY}'
         config.setdefault('plugins', {}).setdefault('entries', {}).setdefault(
