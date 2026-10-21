@@ -3,36 +3,39 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
-from fastapi import FastAPI
-from fastapi_injector import attach_injector
-from injector import Injector, Module
-
-from tests.community.adapters.http.openapi_v1.conftest import (
-    mount_public_error_handlers,
-    user_scoped_client,
+from agentclaw.community.adapters.desktop_inventory import (
+    DesktopInventoryAdapter,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.local.router import router
-from agentclaw.community.api.local_bot_workflow_service import LocalBotWorkflowServiceProtocol
+from agentclaw.community.api.local_bot_workflow_service import (
+    LocalBotWorkflowServiceProtocol,
+)
 from agentclaw.community.core.bot_inventory.adapters.noop_business_space import (
     NoopBusinessSpaceContext,
-)
-from agentclaw.community.core.bot_inventory.adapters.desktop_inventory import (
-    DesktopInventoryAdapter,
 )
 from agentclaw.community.core.bot_inventory.protocols import (
     BusinessSpaceContextProtocol,
     DesktopBotInventoryPort,
 )
-from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
-from agentclaw.community.plugin_api.passport import PassportPlugin
-from agentclaw.community.core.bot_inventory.services.local_bot_workflow import LocalBotWorkflowService
+from agentclaw.community.core.bot_inventory.services.local_bot_workflow import (
+    LocalBotWorkflowService,
+)
 from agentclaw.community.core.service_bot.baas_service_errors import (
     BaasServiceError,
     BaasTransientServiceError,
 )
-
+from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
+from agentclaw.community.plugin_api.passport import PassportPlugin
+from fastapi import FastAPI
+from fastapi_injector import attach_injector
+from injector import Injector, Module
+from tests.community.adapters.http.openapi_v1.conftest import (
+    mount_public_error_handlers,
+    user_scoped_client,
+)
 
 LOCAL = {
     "bot_id": "l1",
@@ -119,6 +122,24 @@ def test_restart_baas_failure_returns_upstream_error(client, desktop_service, er
     assert "private upstream detail" not in response.text
     desktop_service.verify_ownership.assert_called_once_with(bot_id="l1", user_id="u1")
     desktop_service.restart.assert_called_once_with(bot_id="l1", user_id="u1")
+
+
+@pytest.mark.parametrize("failure", ["status", "timeout"])
+def test_restart_transport_failure_returns_upstream_error(client, desktop_service, failure):
+    request = httpx.Request("POST", "https://baas.test/api/v1/bots/device1/update")
+    if failure == "status":
+        error = httpx.HTTPStatusError(
+            "private upstream detail", request=request,
+            response=httpx.Response(503, request=request),
+        )
+    else:
+        error = httpx.ReadTimeout("private upstream detail", request=request)
+    desktop_service.restart.side_effect = error
+
+    response = client.post("/openapi/v1/bots/l1/local/restart")
+
+    assert response.status_code == 502
+    assert "private upstream detail" not in response.text
 
 
 def test_list_local_bots(client):

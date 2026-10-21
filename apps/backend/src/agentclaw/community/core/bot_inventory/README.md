@@ -12,7 +12,6 @@ provides:
   - BotInventoryService
   - BotLifecycleView
   - LocalBotWorkflowService
-  - DesktopInventoryAdapter
   - BusinessSpaceContextProtocol
   - ServiceLifecyclePort
 consumes:
@@ -24,7 +23,6 @@ internal_dependencies:
   - agentclaw.community.core.bot_inventory
   - agentclaw.community.core.errors
   - agentclaw.community.core.desktop_bot.errors
-  - agentclaw.community.core.service_bot.baas_service_errors
   - agentclaw.community.core.workspace
   - agentclaw.community.plugin_api
 ```
@@ -39,7 +37,8 @@ Service API changes filtering/visibility behavior without changing this core
 boundary.
 
 The composition root binds `DesktopInventoryAdapter` to the desktop port.
-The adapter translates BaaS restart errors (including transient failures) into
+The delivery adapter translates BaaS restart errors (including HTTP status and
+transport failures from the pool update path) into
 the port's `DesktopBotServiceError` contract. The local workflow maps that
 provider-neutral error, including subclasses, to `BotInventoryUpstreamError`,
 which the HTTP adapter renders as 502. Personal-space and ownership checks

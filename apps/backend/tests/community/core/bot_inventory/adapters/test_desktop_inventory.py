@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock
 
 import pytest
-from agentclaw.community.core.bot_inventory.adapters.desktop_inventory import (
+from agentclaw.community.adapters.desktop_inventory import (
     DesktopInventoryAdapter,
 )
 from agentclaw.community.core.desktop_bot.errors import DesktopBotServiceError

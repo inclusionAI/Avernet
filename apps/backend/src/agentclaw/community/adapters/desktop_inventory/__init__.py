@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 from agentclaw.community.core.bot_inventory.protocols import DesktopBotInventoryPort
 from agentclaw.community.core.desktop_bot.errors import DesktopBotServiceError
 from agentclaw.community.core.service_bot.baas_service_errors import BaasServiceError
@@ -78,7 +79,7 @@ class DesktopInventoryAdapter(DesktopBotInventoryPort):
     def restart(self, bot_id: str, user_id: str) -> dict[str, Any]:
         try:
             return self._desktop.restart(bot_id=bot_id, user_id=user_id)
-        except BaasServiceError as exc:
+        except (BaasServiceError, httpx.HTTPError) as exc:
             raise DesktopBotServiceError("desktop restart upstream failed") from exc
 
     def delete(self, bot_id: str, user_id: str) -> dict[str, Any]:
