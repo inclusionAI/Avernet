@@ -4,7 +4,6 @@ import {
   type EngineVersionObservation,
   type EngineVersionTarget,
 } from '@/domain/botEngineVersion';
-import { BackendRequestError } from '@/services/backendApi/httpClient';
 import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import type { ContainerInstance } from '@/services/botWorkshop/botContainerService';
 import {
@@ -106,8 +105,9 @@ export function useBotEngineVersions(targets: EngineVersionTarget[]): UseBotEngi
       } catch (error) {
         // Permissions can be revoked after inventory was loaded. Background
         // inspection must not turn that expected race into a page-wide error.
-        if (error instanceof BackendRequestError && error.status === 404) {
-          if (error.toastKey) useErrorNotifyStore.getState().cancel(error.toastKey);
+        const refusal = botEngineVersionService.getInspectionRefusal(error);
+        if (refusal) {
+          if (refusal.notificationKey) useErrorNotifyStore.getState().cancel(refusal.notificationKey);
           if (!controller.signal.aborted) setStates((current) => ({ ...current, [key]: { kind: 'idle' } }));
           return;
         }
