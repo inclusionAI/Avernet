@@ -1701,7 +1701,7 @@ Lets a caller manage the command-line tools a bot runtime runs from the internal
 acli market. **The runtime's container is the record** of what is installed;
 **the acli market is the only catalog** (no platform list, so a newly published
 tool needs no release). Specs: `apps/backend/specs/2026-10-15-openapi-v1-acli-clis/`
-and `docs/specs/2026-10-21-acli-cli-operations/spec.md`.
+and `apps/backend/specs/2026-10-21-acli-cli-operations/spec.md`.
 
 | Method | Path | Bar | Purpose |
 |---|---|---|---|

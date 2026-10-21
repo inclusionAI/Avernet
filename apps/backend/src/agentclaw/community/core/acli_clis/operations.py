@@ -1,7 +1,7 @@
 """acli operations: what a bot's CLI add, remove or cancel is while it runs.
 
 Every add and remove of a bot's acli CLI is a task-queue task, and so is every
-cancel (spec ``docs/specs/2026-10-21-acli-cli-operations/spec.md``, D6):
+cancel (spec ``apps/backend/specs/2026-10-21-acli-cli-operations/spec.md``, D6):
 
 * add and remove of one runtime share the key ``acli:op:{bot_pk}:{stage}``, so
   a runtime runs at most one at a time;

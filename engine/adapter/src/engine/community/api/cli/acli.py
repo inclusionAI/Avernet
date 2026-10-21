@@ -1,6 +1,6 @@
 """``/api/cli/acli/*`` — acli market tools, as operations.
 
-Contract: ``docs/specs/2026-10-21-acli-cli-operations/spec.md`` (engine
+Contract: ``apps/backend/specs/2026-10-21-acli-cli-operations/spec.md`` (engine
 contract). Caller: the platform's ``ArcaAcliPort``.
 
 Every install and uninstall is an operation (``AcliOperations``), returned in

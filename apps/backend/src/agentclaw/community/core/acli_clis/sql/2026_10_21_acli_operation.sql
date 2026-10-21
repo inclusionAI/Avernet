@@ -1,4 +1,4 @@
--- acli operations (docs/specs/2026-10-21-acli-cli-operations/spec.md).
+-- acli operations (apps/backend/specs/2026-10-21-acli-cli-operations/spec.md).
 --
 -- One row per acli add, remove or cancel of a bot runtime's CLI. Each runs as
 -- an ac_task_queue task; this row links the operation id the API returns to

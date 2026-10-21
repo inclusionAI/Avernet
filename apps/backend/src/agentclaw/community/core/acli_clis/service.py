@@ -1,6 +1,6 @@
 """List, search, add, remove and cancel a bot runtime's acli market CLIs.
 
-Spec: ``docs/specs/2026-10-21-acli-cli-operations/spec.md``.
+Spec: ``apps/backend/specs/2026-10-21-acli-cli-operations/spec.md``.
 
 * **Every add, remove and cancel is a task-queue task** (``tasks.py``). The
   API enqueues it and, unless ``async`` was asked for, waits up to 30 s for it

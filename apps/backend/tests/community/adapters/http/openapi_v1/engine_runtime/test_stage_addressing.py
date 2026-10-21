@@ -90,7 +90,7 @@ _STAGE_ADDRESSED_ELSEWHERE = {
     ("get", "/openapi/v1/bots/{bot_id}/identity/{file_type}"),
     ("put", "/openapi/v1/bots/{bot_id}/identity/{file_type}"),
     # acli CLIs address one runtime of a bot: a service bot's stage, omitted
-    # for every other bot (docs/specs/2026-10-21-acli-cli-operations, D7).
+    # for every other bot (apps/backend/specs/2026-10-21-acli-cli-operations, D7).
     ("get", "/openapi/v1/bots/{bot_id}/clis"),
     ("post", "/openapi/v1/bots/{bot_id}/clis"),
     ("delete", "/openapi/v1/bots/{bot_id}/clis/{cli_code}"),

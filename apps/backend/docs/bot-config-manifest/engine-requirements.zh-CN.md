@@ -192,7 +192,7 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
   不同，这里由引擎在容器内调用 `acli` 安装市场上的工具（市场搜索不需要容器，由 backend 直接调用市场 API）。
   每次安装或卸载是一个**操作**：引擎生成 `id`，同一容器同时最多一个操作、不排队；可同步等待（最多 30 秒），
   也可 `async` 提交后按 id 查询；可取消并回滚。完整契约见
-  `docs/specs/2026-10-21-acli-cli-operations/spec.md`（引擎契约一节）。
+  `apps/backend/specs/2026-10-21-acli-cli-operations/spec.md`（引擎契约一节）。
 
   | 端点 | 请求 | 语义 |
   | --- | --- | --- |

@@ -955,7 +955,7 @@ _已定案的决策（PR #610）：路径保持嵌套（`/openapi/v1/bots/mcp/..
 ### ✅ Bot 运行时的 acli CLI（8 个端点）· `openapi_v1/bots/acli_clis.py` —— **已实现（2026-10-15，操作化 2026-10-21）**
 管理 bot 运行时从内部 acli 市场安装的命令行工具。**运行时的容器是已安装工具的记录**；
 **acli 市场是唯一的目录**（平台不维护清单，新发布的工具无需发版即可添加）。
-Spec：`apps/backend/specs/2026-10-15-openapi-v1-acli-clis/` 与 `docs/specs/2026-10-21-acli-cli-operations/spec.md`。
+Spec：`apps/backend/specs/2026-10-15-openapi-v1-acli-clis/` 与 `apps/backend/specs/2026-10-21-acli-cli-operations/spec.md`。
 
 | 方法 | 路径 | 权限 | 用途 |
 |---|---|---|---|

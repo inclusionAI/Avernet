@@ -3,7 +3,7 @@
 Manage the acli market CLIs a bot runtime runs, through `/openapi/v1/bots/{bot_id}/clis`,
 `/openapi/v1/bots/{bot_id}/cli-operations` and `/openapi/v1/bots/market/clis`, and
 the same operations on the internal `/api/bots/...` routes for authenticated users.
-Spec: `docs/specs/2026-10-21-acli-cli-operations/spec.md` (builds on
+Spec: `apps/backend/specs/2026-10-21-acli-cli-operations/spec.md` (builds on
 `apps/backend/specs/2026-10-15-openapi-v1-acli-clis/`).
 
 - **Every add, remove and cancel is a task-queue task** (`tasks.py`). The API
