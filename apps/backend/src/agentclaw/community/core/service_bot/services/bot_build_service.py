@@ -37,13 +37,10 @@ from agentclaw.community.core.service_bot.services.build_ignore_rules import (
     is_excluded,
     validate_required_paths,
 )
+from agentclaw.community.core.service_bot.artifact_transfer import ArtifactTransferStrategy
 from agentclaw.community.core.service_bot.services.agentclaw_artifact import (
     restore_agentclaw_artifact,
     sync_agentclaw_artifact,
-)
-from agentclaw.community.core.service_bot.artifact_transfer import ArtifactTransferStrategy
-from agentclaw.community.core.service_bot.build_errors import (
-    BotBuildServiceError, BotSourceNotFoundError, BotBuildMigrationError,
 )
 from agentclaw.community.core.service_bot.services.local_bin_artifact import (
     restore_local_bin_artifact,
@@ -140,6 +137,21 @@ class _NormalizedExtraIncludeFile:
 
     artifact_relpath: str
     source_home_relpath: str = ""
+
+
+class BotBuildServiceError(Exception):
+    """Bot build service error."""
+    pass
+
+
+class BotSourceNotFoundError(BotBuildServiceError):
+    """Source bot not found error."""
+    pass
+
+
+class BotBuildMigrationError(BotBuildServiceError):
+    """Bot migration error."""
+    pass
 
 
 DEVICE_COUNT_CONFIG_BUSINESS_CODE = "service_bot_device_count"
@@ -361,9 +373,9 @@ class BotBuildService:
         )
 
         try:
-            # =====================================================
-            # Step 1: 计算原 NAS 源目录和统一的产物目标目录
-            # =====================================================
+            # ============================================================
+            # Step 1: 计算源目录和目标目录
+            # ============================================================
             source_nas_engine_type = bot.get("active_engine") or engine_type
             nas_storage_id = get_bot_nas_dir(
                 entity_id=entity_id,
@@ -373,7 +385,7 @@ class BotBuildService:
             )
             source_dir = nas_storage_id / build_plan.source_root_name
             logger.info(
-                f"[BotBuildService.build] legacy NAS source_dir={source_dir}"
+                f"[BotBuildService.build] using NAS source_dir={source_dir}"
             )
 
             target_dir = get_bot_dir(
@@ -394,30 +406,28 @@ class BotBuildService:
                 f"source_dir={source_dir}, target_dir={target_dir}"
             )
 
-            # =====================================================
+            # ============================================================
             # Step 2: Bot 实例迁移
-            # =====================================================
-            # 2.1 快盘容器直传；非快盘保留原 NAS rsync 迁移
+            # ============================================================
+            # 2.1 执行 rsync 迁移
             transfer_started = time.monotonic()
             migration_success = False
             try:
                 migration_success = self._artifact_transfer.publish(
                     device_id=device_id, plan=build_plan, provider=provider,
                     target_dir=target_dir, ignore_paths=build_ignore_paths,
+                ) or self._migrate_bot_instance(
+                    device_id=device_id,
+                    source_dir=source_dir,
+                    target_dir=target_dir,
+                    version_str=version_str,
+                    is_nas=True,
+                    nas_storage_id=nas_storage_id,
+                    build_plan=build_plan,
+                    provider=provider,
+                    build_ignore_paths=build_ignore_paths,
+                    include_runtime_artifacts=include_runtime_artifacts,
                 )
-                if not migration_success:
-                    migration_success = self._migrate_bot_instance(
-                        device_id=device_id,
-                        source_dir=source_dir,
-                        target_dir=target_dir,
-                        version_str=version_str,
-                        is_nas=True,
-                        nas_storage_id=nas_storage_id,
-                        build_plan=build_plan,
-                        provider=provider,
-                        build_ignore_paths=build_ignore_paths,
-                        include_runtime_artifacts=include_runtime_artifacts,
-                    )
             finally:
                 logger.info(
                     "build_ignore.transfer bot_id=%s entity_id=%s version=%s "
@@ -428,9 +438,12 @@ class BotBuildService:
                     int((time.monotonic() - transfer_started) * 1000),
                 )
 
-            # Transfer is exclusive: legacy NAS rsync OR fastdisk OSS direct
-            # upload. Both produce the same versioned artifact before the
-            # unchanged configuration-generation / Skills validation steps.
+            # Unless handled by the engine transfer strategy, host-side rsync writes the
+            # versioned artifact. It preserves active symlinks and local Skill
+            # payloads while each engine build plan excludes mounted repo
+            # corpora. Do not make the Draft runtime write this target again:
+            # published NFS paths are not writable from every sandbox, and the
+            # Claude Code active root is already covered by extra_sync.
 
             # 2.2 生成 MCP 配置（使用 bot 的 device_id）
             mcp_success = True
@@ -1872,8 +1885,8 @@ class BotBuildService:
     ) -> Dict[str, Any]:
         """Restore an ARCA/BAAS mounted draft from a historical artifact.
 
-        Fastdisk containers download OSS files directly into mapped draft paths;
-        other drafts retain host-side NAS rsync. Runtime/session exclusions stay.
+        Unless handled by the engine strategy, restore with host-side ``rsync --delete``
+        into the draft NAS workspace; runtime/session exclusions are preserved.
         Only versioned ``migration_path`` artifacts participate in this operation.
         """
         provider = self._resolve_sandbox_provider(bot)
@@ -1920,7 +1933,7 @@ class BotBuildService:
             bot=bot, source_version=source_version, plan=build_plan,
             provider=provider, artifact_dir=artifact_dir,
             migration_path_base=self._get_migration_path_base,
-            remaining_timeout=remaining_timeout,
+            remaining_timeout=remaining_timeout, migration_error=BotBuildMigrationError,
         )
         if restored is not None:
             return restored

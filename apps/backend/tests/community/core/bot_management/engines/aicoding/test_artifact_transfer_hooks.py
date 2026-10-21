@@ -8,7 +8,7 @@ import pytest
 from agentclaw.community.core.bot_management.engines.aicoding.artifact_transfer import (
     AicodingArtifactTransferStrategy, FastdiskPublishError,
 )
-from agentclaw.community.core.service_bot.build_errors import BotBuildMigrationError
+from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildMigrationError
 from agentclaw.community.core.workspace.engines.aicoding import _AICODING_BUILD_PLAN
 
 
@@ -23,7 +23,7 @@ def fixture(engine):
         source_version=17, plan=plan, provider=provider,
         artifact_dir=Path(f'/aidesktop/env/bolt_data/staff_owner/bot/17/{engine}'),
         migration_path_base=Mock(return_value='/opt/nfs/bot-data'),
-        remaining_timeout=Mock(return_value=1234),
+        remaining_timeout=Mock(return_value=1234), migration_error=BotBuildMigrationError,
     )
 
 

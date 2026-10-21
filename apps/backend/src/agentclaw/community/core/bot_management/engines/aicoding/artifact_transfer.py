@@ -12,7 +12,7 @@ import uuid
 import zlib
 import time
 import math
-from agentclaw.community.core.service_bot.services.artifact_command import run_artifact_command
+from .artifact_command import run_artifact_command
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Protocol
@@ -20,7 +20,6 @@ from typing import Any, Callable, Protocol
 from agentclaw.community.core.workspace.engines.aicoding import _AICODING_RSYNC_EXCLUDES
 from agentclaw.community.core.workspace.engines.claude_code import _CLAUDE_CODE_RSYNC_EXCLUDES
 from agentclaw.community.core.workspace.engine_sandbox import EngineBuildPlan, EngineSandboxProvider
-from agentclaw.community.core.service_bot.build_errors import BotBuildMigrationError
 from agentclaw.community.kernel.device_dto import CommandResult
 from agentclaw.community.log import get_logger
 
@@ -58,7 +57,7 @@ class FastdiskPublishError(RuntimeError):
 # Only the detector is embedded in Backend. Business transfer scripts are
 # installed by the container scripts repository and are never sent as fallback.
 ENTRY = '/home/admin/bin/service_publish.py'
-DETECTION = Path(__file__).parents[4] / 'resources' / 'fastdisk_detection'
+DETECTION = Path(__file__).parent / 'fastdisk_detection'
 
 
 def detection_command() -> str:
@@ -109,14 +108,15 @@ class AicodingArtifactTransferStrategy:
     def restore(self, *, bot: dict[str, Any], source_version: int,
                 plan: EngineBuildPlan, provider: EngineSandboxProvider,
                 artifact_dir: Path, migration_path_base: Callable[..., str],
-                remaining_timeout: Callable[[], float]) -> dict[str, str] | None:
+                remaining_timeout: Callable[[], float],
+                migration_error: type[Exception]) -> dict[str, str] | None:
         if not self.supports(plan):
             return None
         device_id = bot.get("device_id")
         if not device_id:
-            raise BotBuildMigrationError("恢复草稿缺少当前草稿设备 ID")
+            raise migration_error("恢复草稿缺少当前草稿设备 ID")
         if type(source_version) is not int or source_version < 1:
-            raise BotBuildMigrationError("无效的历史版本")
+            raise migration_error("无效的历史版本")
         runtime_root = str(provider.get_base_path())
         runtime_artifact = (
             f"{migration_path_base(owner_id=bot['entity_id'], bot_id=bot['bot_id'])}"

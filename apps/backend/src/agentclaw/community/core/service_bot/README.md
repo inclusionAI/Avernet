@@ -230,9 +230,15 @@ are internal to the AICoding strategy; the caller does not use `supports` or
 assemble a container-script request. Publication returns false and restoration
 returns None only when not applicable; errors propagate without a NAS fallback.
 The path resolver is passed lazily, so other engines do not evaluate it.
-Build errors live in `build_errors.py` and remain importable from the original
-build-service module; the strategy never imports the orchestration implementation. This is an internal ownership refactor: API,
+Build errors remain in their original module. The restore hook receives the
+existing migration-error type, preserving error handling without making the
+strategy import the orchestration implementation. This is an internal ownership refactor: API,
 version paths, configuration keys, script schema and timeout values are unchanged.
+
+The strategy, `artifact_command.py` execution control and `fastdisk_detection/`
+embedded detector are colocated under `core/bot_management/engines/aicoding/`.
+Their unit tests mirror this engine directory. Only the engine-neutral transfer
+contract stays in `service_bot`; DI/configuration wiring stays in composition roots.
 
 The AICoding strategy consumes the existing build plan and a command executor. It
 embeds only read-only mount detection so legacy containers need no detector

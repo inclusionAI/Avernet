@@ -17,7 +17,7 @@ from agentclaw.community.core.workspace.engines.aicoding import _AICODING_BUILD_
 @pytest.fixture(autouse=True)
 def transport(monkeypatch):
     from agentclaw.community.core.bot_management.engines.aicoding import artifact_transfer as module
-    from agentclaw.community.core.service_bot.services.artifact_command import ArtifactCommandError
+    from agentclaw.community.core.bot_management.engines.aicoding.artifact_command import ArtifactCommandError
     def run(executor, device_id, command, *, timeout_seconds):
         result = executor.exec_shell_new(device_id=device_id, shell_cmd=command,
                                          timeout_seconds=timeout_seconds)

@@ -9,7 +9,9 @@ from types import SimpleNamespace
 
 import pytest
 
-SOURCE = next(p for p in Path(__file__).resolve().parents if (p / 'src/agentclaw/community/resources').is_dir()) / 'src/agentclaw/community/resources/fastdisk_detection/runtime_layout.py'
+from agentclaw.community.core.bot_management.engines.aicoding.artifact_transfer import DETECTION
+
+SOURCE = DETECTION / 'runtime_layout.py'
 
 
 @pytest.fixture

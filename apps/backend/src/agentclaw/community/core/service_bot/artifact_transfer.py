@@ -22,7 +22,8 @@ class ArtifactTransferStrategy(Protocol):
     def restore(self, *, bot: dict[str, Any], source_version: int,
                 plan: EngineBuildPlan, provider: EngineSandboxProvider,
                 artifact_dir: Path, migration_path_base: Callable[..., str],
-                remaining_timeout: Callable[[], float]) -> dict[str, str] | None:
+                remaining_timeout: Callable[[], float],
+                migration_error: type[Exception]) -> dict[str, str] | None:
         """Return the existing restore result, or None to use legacy NAS.
 
         migration_path_base is lazy: an unsupported engine must not resolve it.

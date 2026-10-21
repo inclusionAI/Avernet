@@ -4,7 +4,7 @@ import subprocess
 from types import SimpleNamespace
 import pytest
 
-from agentclaw.community.core.service_bot.services import artifact_command as module
+from agentclaw.community.core.bot_management.engines.aicoding import artifact_command as module
 
 class LocalExecutor:
     def exec_shell_new(self, *, device_id, shell_cmd, timeout_seconds):
