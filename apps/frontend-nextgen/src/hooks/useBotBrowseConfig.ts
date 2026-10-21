@@ -40,7 +40,9 @@ export function useBotBrowseConfig(): UseBotBrowseConfigResult {
   const ownerUserId = identity?.userId.trim() ?? '';
   const { activeIdentityKind } = useWorkIdentityAccess();
   const gated = activeIdentityKind === 'bot';
-  const { chatBots } = useOwnedBots(ownerUserId || null, activeIdentityKind === 'user' && Boolean(ownerUserId));
+  // 模块级 human 身份已就绪即可拉取；全局工作身份可能尚未选择（null），不能因此拦掉 /bots。
+  const shouldLoadOwnedBots = activeIdentityKind !== 'bot' && Boolean(ownerUserId);
+  const { chatBots } = useOwnedBots(ownerUserId || null, shouldLoadOwnedBots);
 
   const [subs, setSubs] = useState<BrowseSubscription[]>([]);
   const [meta, setMeta] = useState<Record<string, { saving: boolean }>>({});
