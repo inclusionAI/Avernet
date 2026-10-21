@@ -66,10 +66,11 @@ class ProviderProbe:
                                 delta = choice.get('delta', {})
                                 assistant += delta.get('content') or ''
                                 tool_calls += len(delta.get('tool_calls') or [])
-                        self.wfile.write(b'0\r\n\r\n')
-                        self.wfile.flush()
+                        # Publish evidence before HTTP EOF lets the reader finish.
                         row['assistant'] = marker_evidence(assistant, marker)
                         row['tool_call_deltas'] = tool_calls
+                        self.wfile.write(b'0\r\n\r\n')
+                        self.wfile.flush()
                         self.close_connection = True
                 except Exception as error:
                     row['error_type'] = type(error).__name__
