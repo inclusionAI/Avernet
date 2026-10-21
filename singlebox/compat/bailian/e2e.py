@@ -78,6 +78,9 @@ class Harness:
                 result = check()
                 if result:
                     return result
+            except HTTPError as error:
+                if error.code < 500:
+                    raise
             except (URLError, ConnectionError):
                 pass
             time.sleep(2)
@@ -102,7 +105,8 @@ class Harness:
         self.env.update(SERVER_ENV='local', BCS_DATA_DIR=str(directory), BCS_CONFIG_DIR=str(directory),
                         MOLTIS_BCS_CONFIG=str(path), BCS_AUTH_MOCK='1', BCS_MOCK_USER_ID='001',
                         BCS_MOCK_USER_NICK_NAME='admin', BCS_MOCK_USER_CHANNEL='mock',
-                        AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE=secrets.token_hex(32))
+                        AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE=secrets.token_hex(32),
+                        BCS_SECRET_BCN_GROUP_SESSION_WS_JWT=secrets.token_hex(32))
         self.start([str(self.binaries / 'bcs'), '--config-dir', str(directory)], 'bcs', directory)
         self.wait(lambda: self.api('/me/ensure-human', {}))
         self.caller = self.register('CI caller')
@@ -170,6 +174,7 @@ class Harness:
 
     def chat(self, name, prompt, expected=None, session=None, forbidden=None):
         self.stage = name
+        print(json.dumps({'case_started': name}), flush=True)
         body = {'message': prompt, 'timeout_ms': 180000, 'response_mode': 'after-last-tool-call'}
         if session:
             body['session_id'] = session
