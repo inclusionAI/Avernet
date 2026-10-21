@@ -42,11 +42,17 @@ class TestServedOpenAPI:
     ) -> None:
         paths = app_no_lifespan.openapi().get("paths", {})
         assert "/openapi/v1/collaboration/bots/mine" in paths
+        # Segment-aware: the backend's current /openapi/v1/bots/collaborations
+        # (list collaborating bots) is a bots-domain surface, not the retired
+        # /openapi/v1/bots/collaboration/** namespace.
         for retired_prefix in (
             "/openapi/v1/bots/collaboration",
             "/openapi/v1/group-sessions",
         ):
-            assert not any(path.startswith(retired_prefix) for path in paths)
+            assert not any(
+                path == retired_prefix or path.startswith(retired_prefix + "/")
+                for path in paths
+            )
 
     def test_schema_has_required_fields(self, app_no_lifespan: FastAPI) -> None:
         from fastapi.testclient import TestClient
