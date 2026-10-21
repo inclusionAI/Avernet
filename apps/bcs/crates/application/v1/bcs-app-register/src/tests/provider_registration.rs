@@ -22,7 +22,7 @@ impl ProviderRegistrationCoreService for FakeProviderRegistration {
         &self,
         provider: &str,
         owner: &str,
-    ) -> Result<Vec<ProviderRegistrationMode>, ServiceError> {
+    ) -> Result<bcs_service_api::core::provider_registration::ProviderRegistrationAuthorization, ServiceError> {
         self.authorized
             .lock()
             .unwrap()
@@ -30,10 +30,10 @@ impl ProviderRegistrationCoreService for FakeProviderRegistration {
         if let Some(error) = self.issue_error.lock().unwrap().take() {
             return Err(error);
         }
-        Ok(vec![
-            ProviderRegistrationMode::Plugin,
-            ProviderRegistrationMode::Gateway,
-        ])
+        Ok(bcs_service_api::core::provider_registration::ProviderRegistrationAuthorization {
+            allowed_modes: vec![ProviderRegistrationMode::Plugin, ProviderRegistrationMode::Gateway],
+            auth_mode: bcs_domain::ProviderAuthMode::StaticBearer,
+        })
     }
 
     async fn register(
@@ -89,6 +89,7 @@ pub(super) fn scoped_service() -> (
 
 pub(super) fn scoped_payload() -> ProviderRegisterTokenPayload {
     ProviderRegisterTokenPayload {
+        auth_mode: None,
         v: 2,
         purpose: "provider_bot_registration".into(),
         id: "human_human_staff-1".into(),
@@ -200,6 +201,7 @@ async fn provider_issuance_authorizes_human_and_signs_six_hour_scope() {
     assert_eq!(payload.purpose, "provider_bot_registration");
     assert_eq!(payload.id, "human_human_staff-1");
     assert_eq!(payload.provider_id, "provider-a");
+    assert_eq!(payload.auth_mode, Some(bcs_domain::ProviderAuthMode::StaticBearer));
     assert!(payload.exp >= now_secs() + REGISTER_TOKEN_TTL_SECONDS - 5);
     assert_eq!(view.expires_at, payload.exp * 1000);
     assert_eq!(
@@ -269,6 +271,7 @@ async fn scoped_registration_uses_token_identity_and_maps_only_public_result() {
         let command = calls.last().unwrap();
         assert_eq!(command.provider_id, "provider-a");
         assert_eq!(command.owner, "human_staff-1");
+        assert_eq!(command.token_auth_mode, None, "historical v2 tokens remain usable");
         assert_eq!(
             command.mode,
             mode.unwrap_or(ProviderRegistrationMode::Plugin)

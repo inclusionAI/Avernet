@@ -130,13 +130,14 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
         &self,
         provider_id: &str,
         owner: &str,
-    ) -> ServiceResult<Vec<ProviderRegistrationMode>> {
-        self.authorized_provider(provider_id, owner).await?;
+    ) -> ServiceResult<ProviderRegistrationAuthorization> {
+        let provider = self.authorized_provider(provider_id, owner).await?;
+        let auth_mode = parse_downlink_config(&provider.config)?.auth_mode;
         // Endpoint readiness is checked at registration, never at issuance.
-        Ok(vec![
-            ProviderRegistrationMode::Plugin,
-            ProviderRegistrationMode::Gateway,
-        ])
+        Ok(ProviderRegistrationAuthorization {
+            allowed_modes: vec![ProviderRegistrationMode::Plugin, ProviderRegistrationMode::Gateway],
+            auth_mode,
+        })
     }
 
     async fn register(
@@ -155,6 +156,9 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
             ));
         }
         let downlink = parse_downlink_config(&provider.config)?;
+        if command.token_auth_mode.is_some_and(|mode| mode != downlink.auth_mode) {
+            return Err(invalid("registration token auth_mode no longer matches Provider; obtain a new token"));
+        }
         let identity = bcs_service_api::types::provider_identity::normalize(downlink.auth_mode, &command.provider_bot_ref).map_err(invalid)?;
         let effective_webhook_url = self.endpoint(&provider, &downlink, &command).await?;
         // No reservation journal and no credential replay. The database enforces

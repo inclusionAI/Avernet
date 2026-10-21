@@ -87,6 +87,7 @@ impl RegisterServiceImpl {
         let owner = payload.id.strip_prefix("human_")
             .ok_or(ApplicationError::Unauthenticated)?;
         let result = self.provider_registration()?.register(RegisterProviderBot {
+            token_auth_mode: payload.auth_mode,
             provider_id: payload.provider_id,
             provider_bot_ref: provider_bot_ref.to_string(),
             owner: owner.to_string(),
@@ -154,14 +155,15 @@ impl RegisterService for RegisterServiceImpl {
             if provider_id.trim().is_empty() {
                 return Err(ApplicationError::invalid("invalid_request", "provider_id must not be blank"));
             }
-            let allowed_modes = self.provider_registration()?
+            let authorization = self.provider_registration()?
                 .authorize(&provider_id, &user.id).await.map_err(provider_registration_error)?;
             let payload = ProviderRegisterTokenPayload {
                 v: 2,
                 purpose: "provider_bot_registration".to_string(),
                 id: format!("human_{}", user.id),
                 provider_id: provider_id.clone(),
-                allowed_modes: allowed_modes.clone(),
+                allowed_modes: authorization.allowed_modes.clone(),
+                auth_mode: Some(authorization.auth_mode),
                 exp: now_secs() + REGISTER_TOKEN_TTL_SECONDS,
             };
             return Ok(RegisterTokenView {
@@ -171,7 +173,7 @@ impl RegisterService for RegisterServiceImpl {
                 registration: Some(RegisterTokenScope {
                     token_version: 2,
                     provider_id,
-                    allowed_modes,
+                    allowed_modes: authorization.allowed_modes,
                 }),
             });
         }

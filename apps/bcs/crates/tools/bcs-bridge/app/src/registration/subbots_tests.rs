@@ -1,16 +1,5 @@
 use super::*;
 
-#[test]
-fn generated_slug_survives_retry_and_changes_only_after_completion() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("bridge.toml");
-    let first = pending::prepare(&path, "same-request", None).unwrap();
-    assert_eq!(first, pending::prepare(&path, "same-request", None).unwrap());
-    pending::submitted(&path).unwrap();
-    assert!(pending::prepare(&path, "different-request", None).is_err());
-    pending::complete(&path).unwrap();
-    assert_ne!(first, pending::prepare(&path, "same-request", None).unwrap());
-}
 
 #[test]
 fn only_subbot_configs_can_append() {
@@ -21,16 +10,6 @@ fn only_subbot_configs_can_append() {
     assert!(config::read_for_registration(&path, "agentpass", "p", "plugin").is_err());
     assert!(config::read_for_registration(&path, "agentpass-subbots", "other", "plugin").is_err());
     assert!(config::read_for_registration(&path, "agentpass-subbots", "p", "gateway").is_err());
-}
-
-#[test]
-fn pre_post_attempt_can_be_replaced_but_submitted_attempt_cannot() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("bridge.toml");
-    pending::prepare(&path, "request-a", Some("a")).unwrap();
-    assert_eq!(pending::prepare(&path, "request-b", Some("b")).unwrap(), "b");
-    pending::submitted(&path).unwrap();
-    assert!(pending::prepare(&path, "request-c", Some("c")).is_err());
 }
 
 
@@ -79,17 +58,4 @@ fn complete_ref_validation_preserves_ordinary_refs_and_checks_boundaries() {
         assert!(client::composed_ref("parent", Some(slug)).is_err());
     }
     assert!(client::composed_ref("bad/parent", Some("a")).is_err());
-}
-
-#[test]
-fn basename_relative_config_can_persist_pending_registration() {
-    let path = PathBuf::from(format!("relative-{}.toml", uuid::Uuid::new_v4()));
-    let result = (|| -> anyhow::Result<()> {
-        assert_eq!(pending::prepare(&path, "relative-request", Some("reviewer"))?, "reviewer");
-        pending::submitted(&path)?;
-        assert_eq!(pending::prepare(&path, "relative-request", None)?, "reviewer");
-        Ok(())
-    })();
-    let _ = pending::complete(&path);
-    result.unwrap();
 }

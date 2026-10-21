@@ -28,7 +28,7 @@ impl Api {
             if duplicate { return (StatusCode::CONFLICT, axum::Json(json!({"error":"duplicate binding"}))); }
             let bot_uuid = if calls.len() == 1 { "bot_new".to_owned() } else { format!("bot_new_{}", calls.len()) };
             let body = json!({"code":20100,"message":"Created","data":{"bot_uuid":bot_uuid,"bot_token":BOT_TOKEN,
-                "registration":{"provider_id":"prv_test","provider_bot_ref":query["provider_bot_ref"],"mode":query["mode"]}}});
+                "registration":{"provider_id":"prv_test","auth_mode":"static_bearer","provider_bot_ref":query["provider_bot_ref"],"mode":query["mode"]}}});
             (StatusCode::CREATED, axum::Json(body))
         }
         async fn patch_webhook(State(patches): State<Calls>, headers: HeaderMap, axum::Json(body): axum::Json<serde_json::Value>) -> impl IntoResponse {
@@ -38,7 +38,7 @@ impl Api {
             if auth != "Bearer test-admin" || webhook.ends_with("/fail") {
                 return (StatusCode::FORBIDDEN, axum::Json(json!({"error":"forbidden"})));
             }
-            (StatusCode::OK, axum::Json(json!({"bot_uuid":"bot_new","provider_id":"prv_test","provider_bot_ref":"worker-a","webhook_url":webhook})))
+            (StatusCode::OK, axum::Json(json!({"bot_uuid":"bot_new","provider_id":"prv_test","auth_mode":"static_bearer","provider_bot_ref":"worker-a","webhook_url":webhook})))
         }
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}{PREFIX}", listener.local_addr().unwrap());
@@ -52,9 +52,9 @@ impl Api {
 }
 
 /// v2 registration token with a synthetic signature; the API owns verification.
-fn token() -> String {
+fn token_with_auth(auth_mode: &str) -> String {
     let mut bytes = serde_json::to_vec(&json!({"v":2,"purpose":"provider_bot_registration","id":"human_test",
-        "provider_id":"prv_test","allowed_modes":["plugin","gateway"],"exp":4102444800u64})).unwrap();
+        "provider_id":"prv_test","auth_mode":auth_mode,"allowed_modes":["plugin","gateway"],"exp":4102444800u64})).unwrap();
     bytes.extend_from_slice(&[0; 32]);
     URL_SAFE_NO_PAD.encode(bytes)
 }
@@ -69,7 +69,9 @@ fn install_engine(home: &Path, name: &str) {
     }
 }
 
-fn register(home: &Path, args: &[&str]) -> Command {
+fn register(home: &Path, args: &[&str]) -> Command { register_as(home, args, "static_bearer") }
+
+fn register_as(home: &Path, args: &[&str], auth_mode: &str) -> Command {
     for name in ["claude", "codex"] { install_engine(home, name); }
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_bcs-bridge"));
     cmd.env("HOME", home).current_dir(home).env("PATH", home.join("bin"))
@@ -77,7 +79,7 @@ fn register(home: &Path, args: &[&str]) -> Command {
         .env("BCS_BRIDGE_PROVIDER_TOKENS", json!({"prv_test": WEBHOOK_TOKEN}).to_string())
         .env("NO_PROXY", "127.0.0.1,localhost").env("no_proxy", "127.0.0.1,localhost");
     for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"] { cmd.env_remove(key); }
-    cmd.args(["register", "--token", &token(), "--bot-name", "Test Bot"]).args(args);
+    cmd.args(["register", "--token", &token_with_auth(auth_mode), "--bot-name", "Test Bot"]).args(args);
     cmd
 }
 
@@ -202,7 +204,7 @@ async fn missing_explicit_inputs_are_rejected_before_registration() {
         (vec!["--api-url", &api.base], "--upstream-url"),
         (vec!["--mode", "gateway", "--api-url", &api.base, "--webhook-url", "https://hook.example/webhook", "--provider-bot-ref", "bad ref"], "--provider-bot-ref"),
         (vec!["--mode", "gateway", "--api-url", &api.base, "--webhook-url", "https://hook.example/webhook", "--engine", "bogus"], "claude-code, codex"),
-        (vec!["--mode", "gateway", "--api-url", &api.base, "--webhook-url", "https://hook.example/webhook", "--provider-auth", "unknown-auth"], "static-bearer"),
+        (vec!["--mode", "gateway", "--api-url", &api.base, "--webhook-url", "https://hook.example/webhook", "--provider-auth", "unknown-auth"], "unexpected argument"),
     ] {
         let home = tempfile::tempdir().unwrap();
         let output = register(home.path(), &args).output().await.unwrap();
@@ -220,7 +222,7 @@ async fn help_lists_the_open_source_defaults() {
         .args(["register", "--help"]).output().await.unwrap();
     assert!(output.status.success());
     let help = diagnostic(&output);
-    for expected in ["--provider-auth", "static-bearer", "--engine", "claude-code", "--engine-bin", "--api-url"] {
+    for expected in ["--engine", "claude-code", "--engine-bin", "--api-url"] {
         assert!(help.contains(expected), "missing {expected}: {help}");
     }
 }
@@ -782,4 +784,16 @@ async fn replacement_registration_still_refuses_a_running_instance_before_networ
     assert!(diagnostic(&output).contains("bcs-bridge stop"), "{}", diagnostic(&output));
     assert_eq!(api.calls().len(), 1);
     assert_eq!(std::fs::read(config_path(home.path())).unwrap(), original);
+}
+
+#[tokio::test]
+async fn provider_admin_token_preserves_plain_registration_compatibility() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    let output = register_as(home.path(), &["--api-url", &api.base,
+        "--upstream-url", "ws://127.0.0.1:21000/ws/bot"], "provider_admin")
+        .output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    assert_eq!(api.calls().len(), 1);
+    assert_eq!(saved(home.path())["registration"]["provider_auth"].as_str(), Some("static-bearer"));
 }

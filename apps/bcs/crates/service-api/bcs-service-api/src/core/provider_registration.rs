@@ -16,6 +16,15 @@ pub struct RegisterProviderBot {
     pub mode: ProviderRegistrationMode,
     pub bot_name: String,
     pub webhook_url: Option<String>,
+    /// Mode from a verified registration token, never from an HTTP request field.
+    /// Historical tokens omit it and retain their existing registration semantics.
+    pub token_auth_mode: Option<bcs_domain::ProviderAuthMode>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderRegistrationAuthorization {
+    pub allowed_modes: Vec<ProviderRegistrationMode>,
+    pub auth_mode: bcs_domain::ProviderAuthMode,
 }
 
 pub struct ProviderRegistrationResult {
@@ -33,7 +42,7 @@ pub trait ProviderRegistrationCoreService: Send + Sync {
         &self,
         provider_id: &str,
         owner: &str,
-    ) -> ServiceResult<Vec<ProviderRegistrationMode>>;
+    ) -> ServiceResult<ProviderRegistrationAuthorization>;
 
     /// Reauthorizes and creates a scoped Bot. Duplicate Provider/ref conflicts;
     /// no credentials are replayed. Human/owner-edge failures propagate and may

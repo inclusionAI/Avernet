@@ -18,6 +18,8 @@ struct RegistrationScope {
     provider_id: String,
     allowed_modes: Vec<Mode>,
     exp: u64,
+    #[serde(default)]
+    auth_mode: Option<String>,
 }
 
 /// Delivery mode of a registered Bot; matches the BCS registration wire values.
@@ -37,7 +39,16 @@ impl Mode {
 /// Read unverified metadata solely to select a locally supported Provider.
 /// BCS must authenticate the original token; webhook credentials are not its
 /// signing keys. This function does not grant registration authorization.
+pub struct RegistrationIdentity {
+    pub provider_id: String,
+    pub auth_mode: String,
+}
+
 pub fn registration_provider(token: &str, required: Mode) -> Result<String> {
+    Ok(registration_identity(token, required)?.provider_id)
+}
+
+pub fn registration_identity(token: &str, required: Mode) -> Result<RegistrationIdentity> {
     if token.len() > MAX_TOKEN_BYTES {
         bail!("Registration token exceeds the 16 KiB size limit");
     }
@@ -69,7 +80,12 @@ pub fn registration_provider(token: &str, required: Mode) -> Result<String> {
     if payload.exp <= now {
         bail!("Registration token has expired");
     }
-    Ok(payload.provider_id)
+    let auth_mode = payload.auth_mode
+        .ok_or_else(|| anyhow!("Obtain a new registration token with Provider auth_mode metadata"))?;
+    if !matches!(auth_mode.as_str(), "static_bearer" | "agentpass" | "agentpass-subbots" | "provider_admin") {
+        bail!("Registration token contains an unsupported Provider auth_mode");
+    }
+    Ok(RegistrationIdentity { provider_id: payload.provider_id, auth_mode })
 }
 
 #[cfg(test)]
@@ -85,6 +101,7 @@ mod tests {
             "purpose": "provider_bot_registration",
             "id": "human_test",
             "provider_id": "prv_test",
+            "auth_mode": "static_bearer",
             "allowed_modes": ["plugin", "gateway"],
             "exp": u64::MAX,
         })
@@ -103,9 +120,18 @@ mod tests {
     }
 
     #[test]
+    fn legacy_token_requires_refresh_for_automatic_identity_selection() {
+        let mut legacy = payload();
+        legacy.as_object_mut().unwrap().remove("auth_mode");
+        let error = registration_provider(&token(&legacy), Mode::Plugin).unwrap_err();
+        assert!(error.to_string().contains("new registration token"));
+    }
+
+    #[test]
     fn reads_provider_from_unverified_v2_selection_metadata() {
         assert_eq!(registration_provider(&token(&payload()), Mode::Gateway).unwrap(), "prv_test");
         assert_eq!(registration_provider(&token(&payload()), Mode::Plugin).unwrap(), "prv_test");
+        assert_eq!(registration_identity(&token(&payload()), Mode::Plugin).unwrap().auth_mode, "static_bearer");
     }
 
     #[test]
@@ -125,6 +151,7 @@ mod tests {
     #[test]
     fn validates_registration_version_purpose_human_and_provider() {
         for (field, invalid_values) in [
+            ("auth_mode", vec![json!(""), json!("agentpass-local"), json!("static-bearer"), json!("unsupported"), json!(12)]),
             ("v", vec![json!(0), json!(1), json!(3), json!("2")]),
             ("purpose", vec![json!(""), json!("bot_registration"), json!("provider_bot_registration ")]),
             ("id", vec![json!(""), json!("human_"), json!("human_ \t"), json!("bot_test"), json!(" human_test")]),

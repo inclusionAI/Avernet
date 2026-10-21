@@ -33,6 +33,9 @@ pub struct ProviderRegisterTokenPayload {
     pub provider_id: String,
     pub allowed_modes: Vec<ProviderRegistrationMode>,
     pub exp: u64,
+    /// Provider mode at issuance; absent in historical v2 tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_mode: Option<crate::ProviderAuthMode>,
 }
 
 /// Sign the payload as supplied; semantic validation is performed on decode.
@@ -144,6 +147,7 @@ mod tests {
 
     fn payload() -> ProviderRegisterTokenPayload {
         ProviderRegisterTokenPayload {
+            auth_mode: None,
             v: 2,
             purpose: "provider_bot_registration".to_string(),
             id: "human_user123".to_string(),
@@ -222,6 +226,23 @@ mod tests {
         let expected = payload();
         let token = sign_json(&serde_json::to_value(&expected).unwrap());
         assert_eq!(decode_and_verify(&token, SECRET).unwrap(), expected);
+    }
+
+    #[test]
+    fn signed_auth_mode_roundtrips_without_changing_v2_or_legacy_tokens() {
+        let legacy = serde_json::to_value(payload()).unwrap();
+        assert!(legacy.get("auth_mode").is_none());
+        assert!(decode_and_verify(&sign_json(&legacy), SECRET).is_ok());
+        for mode in ["static_bearer", "agentpass", "agentpass-subbots", "provider_admin"] {
+            let mut value = legacy.clone();
+            value["auth_mode"] = json!(mode);
+            let decoded = decode_and_verify(&sign_json(&value), SECRET).unwrap();
+            assert_eq!(decoded.v, 2);
+            assert_eq!(serde_json::to_value(decoded).unwrap()["auth_mode"], mode);
+        }
+        let mut invalid = legacy;
+        invalid["auth_mode"] = json!("unknown-mode");
+        assert!(decode_and_verify(&sign_json(&invalid), SECRET).is_err());
     }
 
     #[test]

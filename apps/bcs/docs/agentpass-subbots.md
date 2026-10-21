@@ -25,8 +25,8 @@ the full ref unchanged. The full ref must be at most 128 bytes. A parent may
 itself contain colons: `poolab:region:P:reviewer` resolves to parent
 `poolab:region:P`. Other modes preserve the entire ref without parsing a suffix.
 
-Slug is only a bridge argument/local configuration field. Bridge composes the
-ref before requesting registration; neither registration request accepts a
+Bridge generates a random suffix for each subbot registration invocation and
+composes the ref in memory before requesting registration; neither registration request accepts a
 separate `bot_slug` or `expected_auth_mode` parameter. Response `bot_slug` remains
 derived metadata, not a database column. Removed/unknown request fields do not
 change the supplied ref; an incomplete ref still fails registration.
@@ -37,8 +37,12 @@ references, return 409. The existing environment/Provider/reference unique
 constraint protects concurrent creation. There is no registration-check API.
 Ordinary capability updates retain the stored parent and cannot replace it.
 
-Registration derives its authentication mode solely from the Provider's stored
-configuration. Clients supply the complete Provider Bot reference.
+Registration derives its authentication mode from the Provider's stored
+configuration. Newly issued v2 registration Tokens also carry that mode in the
+signed `auth_mode` claim; redemption requires a present claim to match the
+current configuration before any Bot is created. Historical v2 Tokens without
+the claim remain accepted. The v2 encoding, signature algorithm and public
+request parameters are unchanged. Clients supply the complete Provider Bot reference.
 Existing scoped/admin registration tokens remain the registration proof. Mandatory
 live AgentPass proof during registration is a separate enhancement. SQL Bot
 creation and gateway projection are atomic; subsequent owner-edge failures still
@@ -113,3 +117,26 @@ errors, bounded discovery, signed-state checks, Provider events and WS identity.
 Real enterprise SDK/Poolab traffic is validated in the OCB integration PRs.
 Strong isolation between siblings sharing the parent credential and host-wide
 engine scheduling are outside this server change.
+
+## Bridge mode selection and retry semantics
+
+New bridge versions select the identity resolver from the registration Token's
+`auth_mode`; `--provider-auth` and `--bot-slug` are no longer CLI options. The
+client reads unverified selection metadata; only server-side signature and
+Provider checks grant registration authority. An unsupported mode fails locally,
+without falling back to another identity. Old bridge versions ignore the added
+Token field. New bridge versions require it and ask users to obtain a new Token
+when given an older Token. Existing saved runtime identities remain usable.
+
+For `agentpass-subbots`, the bridge generates a 32-character random hexadecimal
+suffix per invocation. The display name is independent of identity. Repeating
+registration with the same name creates another Bot. Only successful registration
+appends credentials and the complete ref to the formal bridge configuration.
+There is no pending registration file or retry identity; historical `.pending.json`
+files are ignored and left untouched. Failures preserve the existing configuration.
+
+The bridge never automatically retries a creation request. A lost response or
+server-side failure may leave a remote Bot even when no local credentials were
+saved. Inspect `agents/me` and reconcile before deciding to register again; a new
+invocation uses a new ref and can create an additional Bot. Registration does not
+provide credential recovery or exactly-once creation across invocations.

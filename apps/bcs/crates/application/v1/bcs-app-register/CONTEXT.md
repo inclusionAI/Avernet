@@ -41,6 +41,10 @@ The facade validates names, verifies v1 first, and only tries v2 after
 `UnsupportedVersion`. Legacy tokens cannot request Provider or gateway fields.
 Scoped owner and Provider identities come only from the signed token; the selected
 mode must be in its allowlist and `provider_bot_ref` must be nonblank.
+Issuance includes the authorized Provider auth mode as signed `auth_mode` in the
+unchanged v2 Token format. Redemption forwards this optional verified claim to
+core for comparison with current configuration. Historical Tokens lacking the
+claim remain valid. Response selection metadata and HTTP request fields do not change.
 
 Both v1 and v2 tokens are interchangeable between legacy and OpenAPI HTTP
 surfaces. V2 tokens remain purpose-bound Provider capabilities. Legacy HTTP

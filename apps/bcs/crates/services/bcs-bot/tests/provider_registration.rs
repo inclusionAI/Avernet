@@ -303,7 +303,7 @@ async fn disabled_downlink_preserves_issuance_and_upstream_registration() {
         disable_downlink(&f).await;
 
         assert_eq!(
-            f.core.authorize(&f.provider, "alice").await.unwrap(),
+            f.core.authorize(&f.provider, "alice").await.unwrap().allowed_modes,
             vec![ProviderRegistrationMode::Plugin, ProviderRegistrationMode::Gateway]
         );
         let registered = f
@@ -402,6 +402,7 @@ async fn issuance_and_upstream_do_not_read_downlink_credentials() {
 
 fn request(f: &Fixture, mode: ProviderRegistrationMode) -> RegisterProviderBot {
     RegisterProviderBot {
+        token_auth_mode: None,
         provider_id: f.provider.clone(),
         provider_bot_ref: "stable-ref".into(),
         owner: "alice".into(),
@@ -737,4 +738,19 @@ async fn concurrent_duplicates_conflict_but_distinct_refs_can_register() {
     another.provider_bot_ref = "another-ref".into();
     f.core.register(another).await.unwrap();
     assert_eq!(f.membership.list_provider_bot_metadata(Some(&f.provider)).await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn signed_mode_mismatch_is_rejected_before_creating_a_bot() {
+    for mode in [ProviderRegistrationMode::Plugin, ProviderRegistrationMode::Gateway] {
+        let f = fixture(Some("https://shared.example.com/hook"), false).await;
+        let authorization = f.core.authorize(&f.provider, "alice").await.unwrap();
+        assert_eq!(authorization.auth_mode, ProviderAuthMode::StaticBearer);
+        let mut command = request(&f, mode);
+        command.token_auth_mode = Some(ProviderAuthMode::AgentPassSubbots);
+        assert!(matches!(f.core.register(command.clone()).await, Err(ServiceError::InvalidOperation { .. })));
+        assert!(f.membership.list_provider_bot_metadata(Some(&f.provider)).await.unwrap().is_empty());
+        command.token_auth_mode = Some(authorization.auth_mode);
+        assert!(f.core.register(command).await.is_ok());
+    }
 }

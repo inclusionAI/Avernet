@@ -9,7 +9,10 @@ RegisterTokenResult:
     token:
       type: string
       minLength: 1
-      description: HMAC register token signed with the deployment invite secret.
+      description: >-
+        HMAC register token signed with the deployment invite secret. Newly issued
+        Provider-scoped v2 payloads include auth_mode from Provider configuration.
+        Historical v2 payloads without this claim remain accepted by the server.
     expires_at:
       type: integer
       description: Absolute token expiry in milliseconds since the Unix epoch.
@@ -91,7 +94,8 @@ RegisterTokenPath:
       Without provider_id this preserves the legacy v1 token and response.
       With provider_id, the caller must own the enabled Provider or the Provider
       must be explicitly approved for self-service registration by server config.
-      A v2 token fixes Provider and Human ownership and allowed modes; it can
+      A v2 token fixes Provider and Human ownership, allowed connection modes and
+      Provider auth_mode at issuance; it can
       also be consumed by legacy POST /register, which preserves HTTP 200 and
       bare JSON. Legacy GET /register/token supports the same optional
       provider_id through its configured Human authentication boundary.
@@ -162,7 +166,10 @@ RegisterPath:
       A v1 token cannot register gateway or Provider
       options. A v2 token requires provider_bot_ref; Provider/owner cannot be
       overridden by request parameters. Provider authorization is checked again
-      on redemption. Plugin saves membership without HTTP delivery binding.
+      on redemption. When the signed auth_mode claim is present, it must match
+      the current Provider configuration before creation; a mismatch is invalid_request.
+      Historical v2 tokens without this claim use the current Provider configuration.
+      Plugin saves membership without HTTP delivery binding.
       Both modes support static_bearer, provider_admin and agentpass Providers.
       agentpass-subbots requires a complete provider_bot_ref in parent:slug form.
       BCS splits the last colon, validates both parts, stores the parent as

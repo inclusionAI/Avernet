@@ -448,6 +448,12 @@ conflict without credential replay; different refs may share a valid register to
 Shared receipt DTOs live in types (no repo-to-core dependency). Core and repository
 contracts have shared conformance harnesses, including Memory/SQLite implementations.
 No Plugin API changes. Token v2 purpose and mode claims cannot be widened during redemption.
+Authorization returns `ProviderRegistrationAuthorization` containing allowed
+connection modes and the Provider auth mode. `RegisterProviderBot.token_auth_mode`
+is an internal optional claim copied only from a verified Token, not an HTTP
+parameter. The core checks a present value against current Provider configuration
+before mutations; None preserves historical v2 compatibility. Consumers and test
+fakes must rebuild against 0.4.0 for these Rust source-contract changes; no database change is needed.
 
 ProviderBotCoreService also owns authorized deletion by Bot Provider/ref metadata
 for both modes. ProviderManagement invokes this core operation before its legacy

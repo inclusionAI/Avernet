@@ -8,7 +8,6 @@ mod client;
 mod token;
 mod replacement;
 mod desktop;
-mod pending;
 #[cfg(test)]
 mod subbots_tests;
 
@@ -22,7 +21,7 @@ pub use client::RegistrationClient;
 /// Registration route and success format selected by the distribution.
 #[derive(Clone, Copy, Default)]
 pub enum RegistrationApi { #[default] OpenApi, Root }
-pub use token::{Mode, registration_provider};
+pub use token::{Mode, RegistrationIdentity, registration_identity, registration_provider};
 
 use crate::app::BridgeApp;
 use crate::config::{self, PreparedConfig};
@@ -47,15 +46,9 @@ pub struct RegisterArgs {
     /// BCS register API), or gateway webhook delivery
     #[arg(long, value_enum, default_value = "plugin")]
     mode: Mode,
-    /// How the Provider authenticates its Bots; selects how the Bot identity is obtained
-    #[arg(long)]
-    provider_auth: String,
     /// Bot identity within its Provider, for Provider types that take it explicitly
     #[arg(long)]
     provider_bot_ref: Option<String>,
-    /// Stable identifier under the AgentPass parent; generated and saved when omitted.
-    #[arg(long)]
-    bot_slug: Option<String>,
     /// Registration API prefix (default: [registration] api_url, then the deploy profile)
     #[arg(long)]
     api_url: Option<String>,
@@ -92,10 +85,15 @@ pub struct RegisterArgs {
 impl RegisterArgs {
     /// A repeated profile command keeps the existing identity and never contacts registration.
     pub(crate) fn reuse_profile(&self, path: &Path, app: &BridgeApp) -> anyhow::Result<bool> {
-        if self.provider_auth == "agentpass-subbots" || self.replace_existing || !path.try_exists().context("Cannot inspect profile configuration")? { return Ok(false); }
+        let scope = registration_identity(&self.token, self.mode)?;
+        let identity = app.registration_identity(&scope.auth_mode)?;
+        if scope.auth_mode == "agentpass-subbots" || self.replace_existing || !path.try_exists().context("Cannot inspect profile configuration")? { return Ok(false); }
         let source = config::read_registration_source(path, true)?;
         let Some(previous) = source.previous else { return Ok(false); };
-        let provider_id = registration_provider(&self.token, self.mode)?;
+        let provider_id = scope.provider_id;
+        if source.settings.provider_auth.as_deref().is_some_and(|saved| saved != identity.runtime_auth()) {
+            bail!("Profile identity policy differs from the registration token; choose another profile");
+        }
         let bots = previous.get("bot").and_then(toml::Value::as_array).context("Profile has no Bots")?;
         let matches = previous.get("provider_id").and_then(toml::Value::as_str) == Some(provider_id.as_str())
             && previous.get("mode").and_then(toml::Value::as_str) == Some(self.mode.name())
@@ -167,18 +165,19 @@ fn valid_provider_bot_ref(value: &str) -> bool {
 }
 
 pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyhow::Result<()> {
-    let identity = app.identity(&args.provider_auth)?;
+    let scope = registration_identity(&args.token, args.mode)?;
+    let identity = app.registration_identity(&scope.auth_mode)?;
+    let provider_auth = identity.runtime_auth();
     identity.preflight()?;
     let bootstrap = if args.replace_existing {
-        if args.provider_auth == "agentpass-subbots" {
+        if provider_auth == "agentpass-subbots" {
             bail!("Subbot registration appends Bots; --replace-existing is unsupported for this mode");
         }
         config::read_registration_source(path, true)?
     } else {
-        let provider = registration_provider(&args.token, args.mode)?;
-        config::read_for_registration(path, &args.provider_auth, &provider, args.mode.name())?
+        config::read_for_registration(path, provider_auth, &scope.provider_id, args.mode.name())?
     };
-    let provider_id = registration_provider(&args.token, args.mode)?;
+    let provider_id = scope.provider_id;
     let api_url = match args.api_url.clone().or(bootstrap.settings.api_url.clone()) {
         Some(url) => url,
         None => app.profile().default_api_url()?,
@@ -190,7 +189,7 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     let saved_bin = saved_bot.and_then(|bot| bot.get("engine_bin")).and_then(toml::Value::as_str).map(Path::new);
     let factory = app.engines().get(&args.engine).with_context(|| format!(
         "Unknown engine '{}'; available engines: {}", args.engine, app.engines().ids().collect::<Vec<_>>().join(", ")))?;
-    if args.provider_auth == "agentpass-subbots" && !factory.supports_caller_env() {
+    if provider_auth == "agentpass-subbots" && !factory.supports_caller_env() {
         bail!("Engine '{}' cannot propagate subbot identity", args.engine);
     }
     let engine_bin = if factory.requires_bin() {
@@ -309,7 +308,7 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     } else {
         document.entry("state_path").or_insert("bridge-state.sqlite3".into());
     }
-    document.insert("provider_auth".into(), args.provider_auth.clone().into());
+    document.insert("provider_auth".into(), provider_auth.to_owned().into());
     document.insert("api_url".into(), api_url.clone().into());
     match args.mode {
         Mode::Gateway => { if !append { document.insert("listen".into(), args.listen.to_string().into()); } }
@@ -324,7 +323,7 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     document.insert("bot".into(), toml::Value::Array(vec![toml::Value::Table(bot.clone())]));
     // The plugin document cannot fully validate until the Bot identity is known
     // (plugin bots require bot_id); its URL was validated above.
-    if webhook_token.is_some() && args.provider_auth != "agentpass-subbots" { config::runtime(&document, path, webhook_token.as_deref())?; }
+    if webhook_token.is_some() && provider_auth != "agentpass-subbots" { config::runtime(&document, path, webhook_token.as_deref())?; }
     let replacing = bootstrap.previous.is_some();
     let prepared = PreparedConfig::new(path, bootstrap.original.clone())?;
     // Appending changes an existing runtime configuration. A new profile only
@@ -348,22 +347,9 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     if append && existing_bots.iter().any(|item| item.get("agent_code").and_then(toml::Value::as_str) != Some(provider_bot_ref.as_str())) {
         bail!("Appending a Bot requires the same AgentPass parent");
     }
-    let subbots = args.provider_auth == "agentpass-subbots";
-    let slug = if subbots {
-        let request = serde_json::to_string(&serde_json::json!({
-            "provider_id":provider_id, "parent":provider_bot_ref, "api_url":api_url,
-            "mode":args.mode.name(), "name":args.bot_name.trim(), "bot":bot,
-            "webhook":webhook_url,
-        }))?;
-        Some(pending::prepare(path, &request, args.bot_slug.as_deref())?)
-    } else { None };
-    let complete_ref = client::composed_ref(&provider_bot_ref, slug.as_deref())?;
-    if subbots {
-        if existing_bots.iter().any(|item| item.get("provider_bot_ref").and_then(toml::Value::as_str) == Some(complete_ref.as_str())) {
-            bail!("This Bot is already present in the local bridge configuration");
-        }
-    }
-    if subbots { pending::submitted(path)?; }
+    let subbots = provider_auth == "agentpass-subbots";
+    // Every invocation creates a new Bot. Never persist or replay a registration intent.
+    let slug = subbots.then(|| uuid::Uuid::new_v4().simple().to_string());
     let registration = client.register(&args.token, args.bot_name.trim(), &provider_bot_ref, args.mode.name(), webhook_url, &provider_id, slug.as_deref()).await?;
     document.insert("provider_id".into(), registration.registration.provider_id.into());
     bot.insert("provider_bot_ref".into(), registration.registration.provider_bot_ref.into());
@@ -383,7 +369,6 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
         return prepared.save_recovery(&text, "runtime configuration validation failed");
     }
     prepared.save(&text)?;
-    if subbots { pending::complete(path)?; }
     println!("Bot registered in {} mode. Configuration saved to {}. Start with bcs-bridge start --config {}", args.mode.name(), path.display(), path.display());
     Ok(())
 }

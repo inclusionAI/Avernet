@@ -84,6 +84,7 @@ async fn scoped_http_registration_uses_signed_owner_and_provider_anonymously() {
             let commands = core.registered.lock().unwrap();
             assert_eq!(commands[0].owner, "staff-1");
             assert_eq!(commands[0].provider_id, "provider-a");
+            assert_eq!(commands[0].token_auth_mode, Some(bcs_domain::ProviderAuthMode::StaticBearer));
             assert!(management.connected.lock().unwrap().is_empty());
             assert!(onboarding.onboarded.lock().unwrap().is_empty());
         }

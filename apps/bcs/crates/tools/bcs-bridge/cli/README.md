@@ -56,9 +56,13 @@ bcs-bridge stop
 
 - The registration token comes from `GET /openapi/v1/collaboration/register/token`;
   the bridge reads its unverified v2 metadata only to select the Provider and
-  check the requested mode. BCS verifies it on registration.
-- `--provider-auth static-bearer` (default): gateway Bots need `--provider-bot-ref`;
+  check the requested connection mode and select the identity resolver from
+  `auth_mode`. BCS verifies the signature and current Provider mode on registration.
+  Older Tokens missing `auth_mode` must be refreshed for this bridge version;
+  the server still accepts them from older clients. Unsupported modes fail locally.
+- For `static_bearer` or `provider_admin` Providers, gateway Bots need `--provider-bot-ref`;
   plugin Bots get a generated `bridge-<uuid>` reference when it is omitted.
+  There is no `--provider-auth` override; Provider configuration determines identity.
 - `--engine claude-code|codex` (default `claude-code`) looks up `claude` / `codex`
   on `PATH` unless `--engine-bin` is given; `--model` and `--cwd` (default
   `~/workspace`) are optional.
@@ -133,8 +137,9 @@ fn main() -> std::process::ExitCode {
         .engine(MyEngineFactory)          // add or replace engines
         .profile(MyProfile)               // endpoint defaults
         .credentials(MyCredentials)       // gateway webhook credentials
-        .identity(MyIdentity)             // Bot identity at registration
-        .defaults(CliDefaults { about: "...", engine: "my-engine", model: None, provider_auth: "my-auth" })
+        .identity(MyIdentity)             // identity resolver with id "my-auth"
+        .registration_identity("agentpass", "my-auth") // wire mode -> local resolver
+        .defaults(CliDefaults { about: "...", engine: "my-engine", model: None })
         .build()
         .main()
 }
@@ -145,7 +150,7 @@ fn main() -> std::process::ExitCode {
 | `engine::EngineFactory` | core | `claude-code`, `codex` | Create the engine for `engine = "<id>"`; validate `engine_options` |
 | `profile::DeployProfile` | app | `ExplicitProfile` (no built-in endpoints) | Default registration API and Bot WebSocket endpoints |
 | `credentials::CredentialSource` | app | `EnvCredentials` | Webhook Bearer token per Provider (gateway mode) |
-| `identity::IdentityResolver` | app | `StaticBearer` | `provider_bot_ref` for `--provider-auth <id>`, with an optional preflight |
+| `identity::IdentityResolver` | app | `StaticBearer` | `provider_bot_ref` for the Token-selected Provider mode, with an optional preflight |
 
 Distributions can call `.registration_permission_mode("my-engine", "<mode>")`
 on the application builder to write `permission_mode` into newly registered
@@ -340,13 +345,14 @@ New bindings still require an explicit webhook URL.
 ### AgentPass sibling Bots
 
 Distributions that provide an `agentpass-subbots` identity resolver can register
-multiple Bots under one verified parent. Use `--provider-auth agentpass-subbots`
-and optionally `--bot-slug reviewer`. When omitted, the bridge generates a slug
-and persists it before the first POST so retries keep the same identity.
+multiple Bots under one verified parent. A Token issued for an `agentpass-subbots`
+Provider selects this resolver automatically. Each invocation generates a new
+32-character random hexadecimal suffix in memory; there is no `--bot-slug`
+option. Use `--bot-name` for a descriptive label, which need not be unique.
 
 The bridge sends a complete `provider_bot_ref=<parent>:<slug>` on both scoped
 registration routes. It sends neither `bot_slug` nor `expected_auth_mode` as a
-request parameter. The server selects behavior from its Provider configuration,
+request parameter. The server checks any signed auth-mode claim against its Provider configuration,
 parses the last colon and preserves the full ref. Slugs must match
 `[a-z0-9][a-z0-9_-]{0,31}`; the complete ref is limited to 128 bytes.
 
@@ -354,3 +360,9 @@ Successful registration appends a Bot with its own UUID and Static Token to the
 same bridge config. Runtime child processes receive a per-Bot caller context;
 `bcs-cli` forwards its `X-BCN-Actor-Bot-Id`. A Static Token selects its own Bot,
 while a parent AgentPass token requires an explicit Actor for subbots.
+
+Registration does not persist pending state. Old `.pending.json` files are ignored.
+Failures preserve the existing configuration and are not automatically retried.
+If the result is unknown, a remote Bot may already exist: inspect `agents/me`
+before registering again. A new invocation generates a new suffix and can create
+another Bot with the same display name. Saved runtime configurations remain usable.

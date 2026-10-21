@@ -60,8 +60,7 @@ pub fn parse(app: &BridgeApp) -> Cli {
     let defaults = app.defaults();
     let mut command = Cli::command().about(defaults.about).mut_subcommand("register", |register| {
         let register = register
-            .mut_arg("engine", |arg| arg.required(false).default_value(defaults.engine))
-            .mut_arg("provider_auth", |arg| arg.required(false).default_value(defaults.provider_auth));
+            .mut_arg("engine", |arg| arg.required(false).default_value(defaults.engine));
         match defaults.model {
             Some(model) => register.mut_arg("model", |arg| arg.default_value(model)),
             None => register,
@@ -211,7 +210,7 @@ mod tests {
                 register.mut_arg("model", |arg| arg.default_value("deployment-model"))
             });
             let mut args = vec!["bcs-bridge", "register", "--token", "test-token", "--bot-name", "Test",
-                "--engine", engine, "--provider-auth", "static-bearer"];
+                "--engine", engine];
             if let Some(model) = explicit { args.extend(["--model", model]); }
             let matches = command.clone().try_get_matches_from(args).unwrap();
             let cli = from_matches(&app, &mut command, &matches);

@@ -94,7 +94,7 @@ impl RegistrationClient {
         if let Some(webhook) = webhook { pairs.push(("webhook_url", webhook)); }
         url.query_pairs_mut().extend_pairs(pairs);
         let response = self.client.post(url).headers(self.headers.clone()).send().await
-            .map_err(|_| anyhow::anyhow!("Registration request failed; its outcome may be unknown. Check registration status before retrying"))?;
+            .map_err(|_| anyhow::anyhow!("Registration outcome is unknown; a Bot may already exist. Check agents/me before creating another Bot"))?;
         let bytes = body(response, "Registration").await?;
         #[derive(Deserialize)]
         struct Envelope { code: u32, data: Option<serde_json::Value> }
@@ -123,11 +123,14 @@ impl RegistrationClient {
     }
 }
 
-/// Compose and validate before marking the pending registration as submitted.
+/// Compose the stable Provider reference used for this registration request.
 pub(super) fn composed_ref(parent: &str, slug: Option<&str>) -> anyhow::Result<String> {
     if !super::valid_provider_bot_ref(parent) { bail!("Invalid Provider identity"); }
     let reference = if let Some(slug) = slug {
-        super::pending::validate_slug(slug)?;
+        if slug.is_empty() || slug.len() > 32 || !slug.as_bytes()[0].is_ascii_alphanumeric()
+            || slug.bytes().any(|b| !(b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')) {
+            bail!("Invalid generated Bot suffix");
+        }
         format!("{parent}:{slug}")
     } else { parent.to_owned() };
     if reference.len() > 128 { bail!("Composed provider_bot_ref exceeds 128 bytes"); }
