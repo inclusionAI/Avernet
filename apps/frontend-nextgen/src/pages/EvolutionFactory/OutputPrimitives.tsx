@@ -1,4 +1,5 @@
 import { sanitizeMarkdownHtml } from '@/assets/TaskPanel/sanitizeHtml';
+import { SafeHtml } from '@/assets/TaskPanel/SafeHtml';
 import { Button } from '@/components/ui/Button';
 import type { JsonObject } from '@/domain/evolution/types';
 import { history } from '@umijs/max';
@@ -12,9 +13,9 @@ const markdown = new MarkdownIt({ html: false, breaks: true, linkify: true });
 export function MarkdownReport({ content }: { content: string }) {
   const html = useMemo(() => sanitizeMarkdownHtml(markdown.render(content)), [content]);
   return (
-    <div
+    <SafeHtml
       className="prose prose-sm max-w-none overflow-x-auto break-words dark:prose-invert"
-      dangerouslySetInnerHTML={{ __html: html }}
+      html={html}
     />
   );
 }
