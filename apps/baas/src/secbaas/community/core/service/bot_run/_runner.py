@@ -40,8 +40,6 @@ from secbaas.community.core.repository.bot_run import BotRunRecord, BotRunReposi
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.bot_service import BotServicePlugin, LogRelationPayload
 from secbaas.community.spi.eval_env import EvalSessionLog
-
-from ..config import SystemConfigKey
 from ._binding_resolver import BotBindingResolver
 from ._bot_run_utils import (
     CALLER_METADATA_TOKEN_KEY,
@@ -59,6 +57,7 @@ from ._bot_run_utils import (
 from ._bot_service_selector import BotServiceSelector
 from ._engine_adapter_registry import BotEngineAdapterRegistry
 from ._internal_protocols import BotService, MessageDispatcher
+from ..config import SystemConfigKey
 
 if TYPE_CHECKING:
     from secbaas.community.api.config_manage import SystemConfigManageService
@@ -483,10 +482,11 @@ class BotRunner:
 
         logger.info(
             "[runner.deliver_message_stream] message_id=%s, bot_id=%s, "
-            "metadata_keys=%s",
+            "metadata_keys=%s, timeout=%s",
             message_id,
             bot_id,
             sorted(metadata.keys()),
+            timeout,
         )
 
         # 流式模式不做幂等：重复 run_id 直接拒绝
@@ -922,6 +922,7 @@ class BotRunner:
         if method:
             keys.append(f"{SystemConfigKey.DISPATCHER_ROUTE}.{bot_id}:{method}")
         keys.append(f"{SystemConfigKey.DISPATCHER_ROUTE}.{bot_id}")
+        keys.append(f"{SystemConfigKey.DISPATCHER_ROUTE}.{engine_type}")
         keys.append(f"{SystemConfigKey.DISPATCHER_ROUTE}.default")
         for key in keys:
             try:

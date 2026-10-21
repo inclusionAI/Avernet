@@ -61,40 +61,32 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
     def discover_active_bots(self, limit: int = 50) -> list[ActiveBot]:
         """发现有 PENDING 工作项的 bot 摘要（确定性顺序，避免活锁）。
 
-        每个 bot 只读取最早一条 PENDING 工作项的 queue meta 提取 engine_type。
-        这样保留 ``status/env/bot_id/gmt_create`` 查询语义，同时让 Worker 在 QPM
-        解析时能区分 teclaw 与 openclaw/unknown。旧行缺 meta 字段时 engine_type
-        为 None，仍走既有通配回退。
+        拆成两条简单查询（有意避免 join/子查询/开窗等单条复杂 SQL）：
+        1. GROUP BY bot_id 取每个 bot 最新一条 PENDING 的 id（MAX(id)），
+           按 bot_id 排序 + LIMIT；
+        2. 按主键 IN 批量取这几行的 meta，解析 engine_type。
+        业务上保证同一 bot_id 的 engine_type 一致，取最新一条即可；
+        旧行缺 meta 字段时 engine_type 为 None，仍走既有通配回退。
         """
         env = get_current_env()
-        rank = (
-            func.row_number()
-            .over(
-                partition_by=BotRunQueueModel.bot_id,
-                order_by=[
-                    BotRunQueueModel.gmt_create.asc(),
-                    BotRunQueueModel.id.asc(),
-                ],
-            )
-            .label("rank")
-        )
-        subquery = (
-            self._session.query(
-                BotRunQueueModel.bot_id.label("bot_id"),
-                BotRunQueueModel.meta.label("meta"),
-                rank,
-            )
+        latest_ids = [
+            row[0]
+            for row in self._session.query(func.max(BotRunQueueModel.id))
             .filter(
                 BotRunQueueModel.status == "PENDING",
                 BotRunQueueModel.env == env,
             )
-            .subquery()
-        )
-        rows = (
-            self._session.query(subquery.c.bot_id, subquery.c.meta)
-            .filter(subquery.c.rank == 1)
-            .order_by(subquery.c.bot_id.asc())
+            .group_by(BotRunQueueModel.bot_id)
+            .order_by(BotRunQueueModel.bot_id.asc())
             .limit(limit)
+            .all()
+        ]
+        if not latest_ids:
+            return []
+        rows = (
+            self._session.query(BotRunQueueModel.bot_id, BotRunQueueModel.meta)
+            .filter(BotRunQueueModel.id.in_(latest_ids))
+            .order_by(BotRunQueueModel.bot_id.asc())
             .all()
         )
         return [self._to_active_bot(row) for row in rows]

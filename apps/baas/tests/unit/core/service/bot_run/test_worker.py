@@ -115,7 +115,11 @@ def _qpm(bot_qpm: int = 600) -> BotConcurrencyManager:
 
 
 def _qpm_with_configs(configs: dict[str, int]) -> BotConcurrencyManager:
-    return BotConcurrencyManager(_ConfigQpmRepo(configs), refresh_interval_seconds=999)
+    manager = BotConcurrencyManager(
+        _ConfigQpmRepo(configs), refresh_interval_seconds=999
+    )
+    manager.refresh()
+    return manager
 
 
 class _CompletingExecutor:

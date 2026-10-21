@@ -41,7 +41,7 @@ def _parse_meta_json(raw: str | None) -> dict:
 class ActiveBot:
     """一个有 PENDING 工作项的 bot 摘要。
 
-    ``engine_type`` 来自该 bot 最早 PENDING 工作项的 queue meta，用于 Worker
+    ``engine_type`` 来自该 bot 最新 PENDING 工作项的 queue meta，用于 Worker
     解析 engine-aware QPM 默认值；旧队列行缺字段时为 ``None``。
     """
 

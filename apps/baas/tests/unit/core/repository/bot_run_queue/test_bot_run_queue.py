@@ -152,14 +152,13 @@ def test_discover_active_bots_distinct_sorted(repo: OrmBotRunQueueRepository):
     assert all(b.engine_type is None for b in discovered)
 
 
-def test_discover_extracts_engine_type_from_earliest_pending(
+def test_discover_extracts_engine_type_from_latest_pending(
     repo: OrmBotRunQueueRepository,
 ):
     _insert(repo, "bot-1", meta={"engine_type": "teclaw"})
-    time.sleep(0.01)
     _insert(repo, "bot-1", meta={"engine_type": "openclaw"})
     assert repo.discover_active_bots() == [
-        ActiveBot(bot_id="bot-1", engine_type="teclaw")
+        ActiveBot(bot_id="bot-1", engine_type="openclaw")
     ]
 
 
