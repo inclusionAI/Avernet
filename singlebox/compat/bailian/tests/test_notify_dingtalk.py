@@ -18,7 +18,7 @@ class DingTalkTest(unittest.TestCase):
     def setUp(self):
         self.webhook = 'https://oapi.dingtalk.com/robot/send?access_token=test-placeholder'
         self.rows = [dict(engine=e, readiness='READY', engine_version='1.2',
-                          plugin_version='2.0', selection='latest', smoke='PASS', e2e='PASS')
+                          plugin_version='2.0', selection='latest', smoke='PASS', e2e='PASS', commit='a' * 40)
                      for e in ENGINES]
         self.jobs = dict.fromkeys(('harness-tests', 'smoke', 'build-bcs', 'e2e', 'readiness'), 'success')
 
@@ -48,6 +48,15 @@ class DingTalkTest(unittest.TestCase):
         result = self.report()['markdown']
         self.assertIn('需要关注', result['title'])
         self.assertIn('build-bcs=failure', result['text'])
+
+    def test_bridge_revision_changes_without_package_release(self):
+        for engine in ('claude-code', 'codex'):
+            current = dict(self.rows[0], engine=engine, plugin_version='bcs-bridge')
+            previous = dict(current, commit='b' * 40)
+            body = self.report(rows=[current], previous=[previous])['markdown']['text']
+            self.assertIn('BCS/bridge 提交：' + 'a' * 40, body)
+            self.assertIn('BCS/bridge 提交 ' + 'b' * 40 + ' → ' + 'a' * 40, body)
+            self.assertNotIn('版本未变化', body)
 
     def test_missing_or_malformed_evidence_is_not_success(self):
         with tempfile.TemporaryDirectory() as directory:

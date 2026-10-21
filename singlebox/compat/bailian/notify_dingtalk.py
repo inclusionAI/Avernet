@@ -68,6 +68,7 @@ def payload(rows, previous, jobs, run_url, attempt, now):
         plugin = text(row.get('plugin_version', 'unknown'))
         lines += [f'### {engine}',
                   f'- 引擎：{version}；插件/桥接：{plugin}',
+                  f'- BCS/bridge 提交：{text(row.get("commit") or "unknown")}',
                   f'- 版本选择：{text(row.get("selection", "unknown"))}',
                   f'- 模型 smoke：{text(row.get("smoke", "UNKNOWN"))}；BCS E2E：{text(row.get("e2e", "UNKNOWN"))}',
                   f'- 结论：{text(row.get("readiness", "UNKNOWN"))}']
@@ -75,7 +76,8 @@ def payload(rows, previous, jobs, run_url, attempt, now):
             lines.append('- 阻塞阶段：' + text(row.get('reason', 'missing_evidence')))
         if old and row:
             changes = [f'{label} {text(old.get(key, "unknown"))} → {text(row.get(key, "unknown"))}'
-                       for key, label in (('engine_version', '引擎'), ('plugin_version', '插件'))
+                       for key, label in (('engine_version', '引擎'), ('plugin_version', '插件'),
+                                          ('commit', 'BCS/bridge 提交'))
                        if old.get(key) != row.get(key)]
             lines.append('- 对比上次定时报告：' + ('；'.join(changes) or '版本未变化'))
         else:

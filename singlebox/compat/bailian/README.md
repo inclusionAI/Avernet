@@ -136,9 +136,9 @@ a guarantee of every BCS capability.
 
 Scheduled and manually dispatched runs send one Markdown report after
 all compatibility jobs finish, on both success and failure. Push runs do not
-send group messages. The report includes exact engine/plugin versions, fixed
+send group messages. The report includes exact engine/plugin versions and tested BCS/bridge commit, fixed
 versus latest selection, smoke/E2E readiness, blocking stages, unsuccessful
-jobs and the Actions run link. Version changes compare with the most recent
+jobs and the Actions run link. Package versions and the BCS/bridge commit compare with the most recent
 prior completed scheduled run on the same branch (not necessarily yesterday).
 Missing/expired previous artifacts are labelled as no baseline. Missing current
 evidence is UNKNOWN, never a successful result.
