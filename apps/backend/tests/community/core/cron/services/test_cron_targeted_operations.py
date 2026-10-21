@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agentclaw.community.core.engine_runtime.errors import EngineStageNotLiveError
 from agentclaw.community.core.cron.errors import CronRelayError
 from agentclaw.community.core.cron.services.cron_relay import CronRelayService
 from agentclaw.community.core.runtime_binding.models import (
@@ -459,3 +460,32 @@ async def test_create_adapter_rejects_non_object_body():
     assert result.success is False
     assert result.error_code == 400
     svc.create_cron.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stage,message",
+    [
+        ("verify", "预发运行环境当前不可用，请先发布到预发，待实例就绪后重试。"),
+        ("online", "生产运行环境当前不可用，请先发布到生产，待实例就绪后重试。"),
+    ],
+)
+async def test_unavailable_stage_returns_actionable_business_error(stage, message, caplog):
+    svc = service()
+    cause = EngineStageNotLiveError(f"no live {stage} runtime for bot=bot env=pre")
+    svc._runtime_bindings.resolve.side_effect = cause
+    with pytest.raises(CronRelayError) as caught:
+        await svc.create_cron(
+            bot_id="bot",
+            user_id="owner",
+            nick_name="Owner",
+            body={"name": "Daily"},
+            runtime_stage=stage,
+            authenticated_user_id="owner",
+        )
+    assert caught.value.error_code == 409
+    assert str(caught.value) == message
+    assert caught.value.__cause__ is cause
+    svc._transport.invoke.assert_not_awaited()
+    assert "cron.target.runtime_unavailable" in caplog.text
+    assert str(cause) in caplog.text

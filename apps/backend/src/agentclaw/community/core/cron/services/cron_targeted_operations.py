@@ -11,6 +11,7 @@ from agentclaw.community.core.cron.services.cron_runtime_targets import (
     CronRuntimeTarget,
     MULTI_INSTANCE_DEVICE_PROVIDERS,
 )
+from agentclaw.community.core.engine_runtime.errors import EngineStageNotLiveError
 from agentclaw.community.core.runtime_binding.errors import (
     RuntimeBindingResolutionError,
 )
@@ -112,6 +113,18 @@ class CronTargetedOperationsMixin:
                     stage=runtime_stage,
                 )
             )
+        except EngineStageNotLiveError as exc:
+            logger.warning(
+                "cron.target.runtime_unavailable bot_id=%s stage=%s error=%s",
+                bot_id,
+                runtime_stage,
+                exc,
+            )
+            stage_name = {"verify": "预发", "online": "生产"}.get(runtime_stage, "草稿")
+            raise CronRelayError(
+                f"{stage_name}运行环境当前不可用，请先发布到{stage_name}，待实例就绪后重试。",
+                error_code=409,
+            ) from exc
         except RuntimeBindingResolutionError as exc:
             raise CronRelayError(str(exc), error_code=409) from exc
         target = CronRuntimeTarget(
