@@ -17,6 +17,7 @@ import { WorkflowEvolutionRepository } from '@avernet/clawevolve/server/reposito
 import { createRepairSourcePort, type RepairSuggestionSource } from '@avernet/workflow/server/repositories/repair-source-adapter';
 import { createRepairWorkbenchService } from '@avernet/workflow/server/services/repair-batch-service';
 import { queueRepairCompletion } from '@avernet/workflow/server/services/repair-completion-notification';
+import { createWorkflowNotificationDrain } from '@avernet/workflow/server/services/workflow-notification-delivery';
 import { createRepairBatchesRouter } from '@avernet/workflow/server/routes/repair-batches';
 import { createRepairAuthorizer, type RepairPrincipalResolver } from '@avernet/workflow/server/routes/repair-authorization';
 import { RepairBatchError } from '@avernet/workflow/server/contracts/repair-batch';
@@ -36,6 +37,8 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
   publication?: RepairPublicationPort;
   trial?: RepairTrialPort;
   automation?: { settings: AutoAnalysisSettings; ports: WorkflowAutomationPorts; now?: () => number };
+  /** Notification-only Hosts do not need to enable automatic analysis or draft scheduling. */
+  notifications?: Omit<Parameters<typeof createWorkflowNotificationDrain>[0], 'db' | 'workbench'>;
 }): { service: ReturnType<typeof createRepairWorkbenchService>; release: ReturnType<typeof createRepairReleaseService>; trials: ReturnType<typeof createRepairTrialService>; router: Router; automation: WorkflowAutomationService | undefined; monitor: { reconcile(): Promise<number> } } {
   const sources = createRepairSourcePort({
     snapshot: repairSourceSnapshot,
@@ -99,6 +102,8 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
     model: options.proposalModel ?? createProposalModel(resolveAnalysisConfig()) }) : undefined;
   const service = createRepairWorkbenchService(db, sources, execution, proposals, queueRepairCompletion);
   if (options.automation) automation = createWorkflowAutomation({ db, workbench: service, ...options.automation });
+  const drainNotifications = !automation && options.notifications
+    ? createWorkflowNotificationDrain({ db, workbench: service, ...options.notifications }) : undefined;
   const release = createRepairReleaseService({ db, workbench: service, publisher: options.publication });
   const trials = createRepairTrialService({ db, workbench: service, port: options.trial });
   const authorize = createRepairAuthorizer(options.principal, new BotWorkflowPermissionRepository(db));
@@ -126,6 +131,7 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
     }
     await verification.automatic.reconcile();
     await automation?.tick();
+    await drainNotifications?.();
     return count;
   } };
   return { service, release, trials, monitor, automation, router: createRepairBatchesRouter({ service, authorize, release, trials, verification }) };

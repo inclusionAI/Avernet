@@ -10,6 +10,7 @@ import { WorkflowAutomationRepository, type AutomationJob } from '../repositorie
 import { runAutomaticRound } from './workflow-automation-round.js';
 import { previousShanghaiDay, selectAutomaticScope } from './workflow-automation-selection.js';
 import { WorkflowAutomationHistoryRepository } from '../repositories/workflow-automation-history-repository.js';
+import { createWorkflowNotificationDrain } from './workflow-notification-delivery.js';
 const DAY = 86400000;
 export function automationDue(now: number, dailyTime: string) {
   const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(now));
@@ -26,6 +27,7 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
   workbench: AutomationWorkbench; now?: () => number }): WorkflowAutomationService {
   const now = input.now ?? Date.now;
   const repo = new WorkflowAutomationRepository(input.db);
+  const drainNotifications = createWorkflowNotificationDrain(input);
   const issues = new IssueAggregationRepository(input.db);
   let roundRobin = 0;
   async function authority(workflowId: string, draft = false) {
@@ -183,47 +185,6 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
     const terminal = ['failed', 'blocked', 'cancelled', 'no_change', 'published'].includes(revision.phase);
     await repo.patch(job, { status: terminal ? 'blocked' : 'waiting', reason: terminal ? 'DRAFT_REQUIRES_MANUAL_REVIEW' : null, data, nextAtMs: now() + 30000 }, now(), true);
   }
-  async function notify(record: AutomationJob) {
-    let job = await repo.claim(record.id, now()); if (!job) return;
-    if (job.status === 'dispatching' || job.status === 'uncertain') {
-      await repo.patch(job, { status: 'uncertain', reason: 'NOTIFICATION_OUTCOME_UNKNOWN', nextAtMs: now() + 300000 }, now(), true); return;
-    }
-    let actorId: string;
-    try {
-      const policy = await input.settings.get(job.workflowId);
-      if (job.data.kind === 'issue' && !policy.enabled) throw new RepairAutomationDeniedError('AUTOMATION_DISABLED');
-      const recipients = job.data.kind === 'issue' ? [] : policy.notificationRecipients ?? [];
-      if (!job.data.fixedRecipient && recipients.length) {
-        const deliveries = [];
-        for (const recipientId of recipients) deliveries.push(await repo.ensure(job.workflowId, 'auto_notice', `${job.id}:${recipientId}`, { ...job.data, recipientId, fixedRecipient: true }, now()));
-        await repo.patch(job, { status: 'done', data: { ...job.data, recipients } }, now(), true);
-        for (const delivery of deliveries) await notify(delivery);
-        return;
-      }
-      const owner = job.data.fixedRecipient ? null : await input.ports.owner(job.workflowId);
-      const recipientId = job.data.fixedRecipient ? job.data.recipientId : owner;
-      if (typeof recipientId !== 'string' || !recipientId) throw new RepairAutomationDeniedError('OWNER_MISSING');
-      actorId = recipientId;
-      if (!job.data.fixedRecipient && !await input.ports.canEdit(job.workflowId, actorId)) throw new RepairAutomationDeniedError('OWNER_PERMISSION_DENIED');
-    }
-    catch (error) { if (!(error instanceof RepairAutomationDeniedError)) throw error;
-      await repo.patch(job, { status: 'retryable', reason: error.message, nextAtMs: now() + 30000 }, now(), true); return; }
-    if (job.data.kind === 'draft') {
-      const task = await input.workbench.task(job.data.taskId);
-      const reviewable = task.latestAttempt.phase === 'review'
-        || task.latestAttempt.phase === 'no_change' && task.automaticProgress?.publishable === true;
-      if (task.latestAttempt.revision !== job.data.revision || !reviewable) {
-        await repo.patch(job, { status: 'done', reason: 'CANDIDATE_SUPERSEDED' }, now(), true); return;
-      }
-    }
-    if (job.attempts >= 3) { await repo.patch(job, { status: 'blocked', reason: 'NOTIFICATION_REJECTED' }, now(), true); return; }
-    job = await repo.patch(job, { status: 'dispatching', attempts: job.attempts + 1, data: { ...job.data, lastRecipientId: actorId } }, now());
-    let result: Awaited<ReturnType<WorkflowAutomationPorts['notify']>>;
-    try { result = await bounded(input.ports.notify({ key: job.id, workflowId: job.workflowId, recipientId: actorId, title: job.data.title, text: job.data.text, path: job.data.path })); }
-    catch { result = { status: 'uncertain' }; }
-    await repo.patch(job, { status: result.status === 'sent' ? 'done' : result.status, reason: result.status === 'sent' ? null : result.status === 'uncertain' ? 'NOTIFICATION_OUTCOME_UNKNOWN' : 'NOTIFICATION_REJECTED',
-      nextAtMs: now() + 60000, data: { ...job.data, receipt: result.receipt ?? null } }, now(), true);
-  }
   async function workflow(policy: WorkflowAutomationPolicy) {
     const initial = await repo.ensure(policy.workflowId, 'auto_cycle', 'state', { scanFromMs: policy.scopeVersion === 'all-qualified/v1' ? previousShanghaiDay(now()).fromMs : now() - DAY, scannedThroughMs: null, completedDue: null }, now());
     let cycle = await repo.claim(initial.id, now()); if (!cycle) return;
@@ -285,7 +246,7 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
       for (let i = 0; i < count; i++) await workflow(policies[(roundRobin + i) % policies.length]);
       if (policies.length) roundRobin = (roundRobin + count) % policies.length;
       // Manual completions and in-flight automatic results notify even with automation disabled/unconfigured.
-      for (const job of await repo.readyNotifications(now())) await notify(job);
+      await drainNotifications();
       return count;
     },
     async onRunTerminal(event) {

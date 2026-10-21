@@ -101,10 +101,61 @@ it('sends configured recipients independently and does not resend successful del
   await repo.ensure('wf-1', 'auto_notice', 'manual-completed', { kind: 'completion', title: '优化草稿已可审阅', text: '请审阅', path: '/task' }, 0);
   vi.mocked(f.ports.notify).mockImplementation(async notice => ({ status: notice.recipientId === 'bob' ? 'retryable' : 'sent' }));
   await f.service.tick();
-  expect(vi.mocked(f.ports.notify).mock.calls.map(([notice]) => notice.recipientId)).toEqual(['alice', 'bob']);
+  expect(f.ports.notify).not.toHaveBeenCalled();
+  await f.service.tick();
+  expect(vi.mocked(f.ports.notify).mock.calls.map(([notice]) => notice.recipientId).sort()).toEqual(['alice', 'bob']);
   vi.mocked(f.ports.notify).mockResolvedValue({ status: 'sent' });
   f.advance(); await f.restart().tick();
-  expect(vi.mocked(f.ports.notify).mock.calls.map(([notice]) => notice.recipientId)).toEqual(['alice', 'bob', 'bob']);
+  const deliveries = vi.mocked(f.ports.notify).mock.calls.map(([notice]) => notice.recipientId);
+  expect(deliveries.slice(0, 2).sort()).toEqual(['alice', 'bob']);
+  expect(deliveries.slice(2)).toEqual(['bob']);
+});
+
+it('persists recipient deliveries without recursively sending them in the parent tick', async () => {
+  const f = await fixture();
+  await f.settings.set('wf-1', false, 'owner');
+  await f.settings.save('wf-1', { enabled: false, autoDraft: false, dailyTime: '09:00', expectedVersion: 2,
+    expectedNotificationVersion: 0, notificationRecipients: Array.from({ length: 20 }, (_, i) => `recipient-${i}`) }, 'owner');
+  const repo = new WorkflowAutomationRepository(f.db);
+  for (const key of ['completed-a', 'completed-b']) await repo.ensure('wf-1', 'auto_notice', key,
+    { kind: 'completion', title: '草稿可审阅', text: '请审阅', path: '/task' }, 0);
+  await f.service.tick();
+  expect(f.ports.notify).not.toHaveBeenCalled();
+  const rows = await f.db.query<{ body_json: string }>("SELECT body_json FROM workflow_repair_release_records WHERE record_kind = 'auto_notice'");
+  const jobs = rows.map(row => JSON.parse(row.body_json));
+  expect(jobs.filter(job => job.data.fixedRecipient && job.status === 'pending')).toHaveLength(40);
+  expect(jobs.filter(job => !job.data.fixedRecipient && job.status === 'done')).toHaveLength(2);
+  for (let i = 0; i < 8; i++) {
+    const before = vi.mocked(f.ports.notify).mock.calls.length;
+    await f.restart().tick();
+    expect(vi.mocked(f.ports.notify).mock.calls.length - before).toBeLessThanOrEqual(5);
+  }
+  expect(f.ports.notify).toHaveBeenCalledTimes(40);
+  expect(new Set(vi.mocked(f.ports.notify).mock.calls.map(([notice]) => notice.key)).size).toBe(40);
+  const completed = await f.db.query<{ body_json: string }>("SELECT body_json FROM workflow_repair_release_records WHERE record_kind = 'auto_notice'");
+  expect(completed.every(row => JSON.parse(row.body_json).status === 'done')).toBe(true);
+});
+
+it('bounds a hung notification batch to five concurrent deliveries and one existing timeout window', async () => {
+  const f = await fixture();
+  await f.settings.set('wf-1', false, 'owner');
+  const repo = new WorkflowAutomationRepository(f.db);
+  for (let i = 0; i < 20; i++) await repo.ensure('wf-1', 'auto_notice', `queued-${i}`,
+    { kind: 'completion', fixedRecipient: true, recipientId: `recipient-${i}`, title: '草稿可审阅', text: '请审阅', path: '/task' }, 0);
+  vi.mocked(f.ports.notify).mockImplementation(() => new Promise(() => {}));
+  vi.useFakeTimers();
+  const tick = f.service.tick(); let finished = false; void tick.then(() => { finished = true; });
+  try {
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.ports.notify).toHaveBeenCalledTimes(5);
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(finished).toBe(true);
+    await tick;
+    const rows = await f.db.query<{ body_json: string }>("SELECT body_json FROM workflow_repair_release_records WHERE record_kind = 'auto_notice'");
+    const states = rows.map(row => JSON.parse(row.body_json).status);
+    expect(states.filter(status => status === 'uncertain')).toHaveLength(5);
+    expect(states.filter(status => status === 'pending')).toHaveLength(15);
+  } finally { await vi.runAllTimersAsync(); await tick; vi.useRealTimers(); }
 });
 
 it('changing recipients leaves the automatic policy version and already-planned draft dispatch intact', async () => {

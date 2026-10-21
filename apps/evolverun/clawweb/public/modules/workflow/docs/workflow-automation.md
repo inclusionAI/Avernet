@@ -54,6 +54,22 @@ DingTalk provider are reused; no new notification channel, table, or migration
 is introduced. Missing provider configuration remains visible in the existing
 notification/retry records and does not trigger AIS again.
 
+Public ClawWeb passes notification-only settings/ports to the shared runtime and
+its existing 15-second timer calls `monitor.reconcile()`, including when no AIS
+execution adapter is configured. It uses the existing Insight notification sender,
+current Owner and workflow permission repositories. This does not install or enable
+automatic analysis/draft scheduling. OCB continues to supply full automation ports;
+the shared monitor chooses that existing automation consumer or the notification-only
+consumer, never both. Shutdown clears the existing timer; no second scheduler is added.
+
+The same queue consumer serves both Hosts. Expanding a configured recipient list
+only persists deterministic child records; it does not recursively send them.
+Each drain selects at most five due records and processes them concurrently, with
+the existing 20-second timeout per provider call. Thus provider waiting consumes
+one timeout window per batch, not one window per recipient and parent. This is a
+transport-wait bound, not a database-latency guarantee. Pending children survive
+restart; successful children and unknown outcomes are not blindly sent again.
+
 Avernet owns policy, state, selection, recovery, contracts, and UI. The OCB
 composition adapter resolves the current Owner, checks edit permission, invokes
 the existing run-analysis starter and Git baseline service, and sends through the
