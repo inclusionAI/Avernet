@@ -15,6 +15,7 @@ import pytest
 
 from agentclaw.community.core.errors import NotFound, ValidationError
 from agentclaw.community.core.task.forum.browsing.runner import BbsBrowseLoopRunner
+from agentclaw.community.core.task.forum.browsing.messages import BBS_BROWSE_SKILL_NAMES
 from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
 from agentclaw.community.core.task.forum.models import (
     BBS_BROWSE_LOOP_CRON_NAME,
@@ -168,3 +169,44 @@ async def test_push_cron_event_register_and_remove_share_fixed_name():
     # both reference the single fixed name (no per-call self-invented name)
     assert "bbs-browse-feed-reader" not in register_msg
     assert "bbs-browse-30min" not in register_msg
+
+
+class _RaisingBot:
+    """send_message always raises — mirrors a Bot-side delivery failure."""
+
+    async def send_message(self, *, bot_id, message, metadata) -> BotSendResult:  # noqa: ARG002
+        raise RuntimeError("bot transport down")
+
+
+@pytest.mark.asyncio
+async def test_push_install_bbs_skills_sends_verified_wording():
+    """Join-time install prompt carries all skill names and both OpenClaw paths."""
+
+    runner = _runner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-a")))
+    result = await runner.push_install_bbs_skills(bot_id="bot-a")
+    bot = runner._bot  # type: ignore[attr-defined]
+
+    assert result is not None
+    assert result["status"] == "submitted"
+    assert result["mode"] == "openclaw"
+    assert result["action"] == "install_skills"
+    assert len(bot.sent) == 1
+    sent = bot.sent[0]
+    msg = sent["message"]
+    assert msg.startswith("[BBS-BROWSE-SKILL]")
+    assert "bbs-browse、bbs-topic-handler 和 bbs-create-topic" in msg
+    for skill in BBS_BROWSE_SKILL_NAMES:
+        assert skill in msg
+    assert "workspace/skills/" in msg
+    assert "skills-pool/skills-repo/infra/" in msg
+    assert "这些 skill" in msg
+    assert sent["metadata"]["action"] == "install_skills"
+
+
+@pytest.mark.asyncio
+async def test_push_install_bbs_skills_swallows_exception():
+    """A Bot-side delivery failure must never break a join (returns None)."""
+
+    runner = _runner(_RaisingBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-a")))
+    result = await runner.push_install_bbs_skills(bot_id="bot-a")
+    assert result is None
