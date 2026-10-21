@@ -75,14 +75,17 @@ export const defaultCapabilities: AppCapabilities = {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const umiHistory = (require('@umijs/max') as { history: { push: (url: string) => void; replace: (url: string) => void } }).history;
 
+    // 群会话形态判别以 session id 为准(与 sessionResolution 同一契约):
+    // sessionResolution 的派生会话分支可能产出 kind='unknown',此处兜底避免误判成单聊目标而整页跳走。
+    const isGroupTarget = target.kind === 'group' || target.sessionId.startsWith('bcs_grp_');
     // 协作群页内点群节点:workspaceStore 原地选群+选会话,零路由变化。
-    if (target.kind === 'group' && inGroupHost) {
+    if (isGroupTarget && inGroupHost) {
       const ws = useWorkspaceStore.getState();
       ws.selectGroup(target.groupId ?? null);
       ws.selectSession(target.sessionId);
       return { status: 'available', value: null };
     }
-    const isChatTarget = target.kind !== 'group';
+    const isChatTarget = !isGroupTarget;
     const chatUrl = getCollaborationBotConversationUrl(target.botId ?? '', target.sessionId);
     const groupUrl = getCollaborationGroupConversationUrl(target.groupId ?? null, target.sessionId);
     // 对话页内点单聊/好友节点:同页 replace(query 联动,页面 hydrate 原地切换会话)。

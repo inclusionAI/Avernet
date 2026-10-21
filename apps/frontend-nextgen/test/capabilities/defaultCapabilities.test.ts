@@ -295,6 +295,17 @@ describe('defaultCapabilities.navigateToConversation', () => {
     expect(url.startsWith('/workspace/collaboration?')).toBe(true);
   });
 
+  it('kind=unknown 但会话 id 为 bcs_grp_ 群形态(sessionResolution 派生分支) → 协作群页内仍原地联动', () => {
+    pushMock.mockClear();
+    (replaceMock as jest.Mock | undefined)?.mockClear?.();
+    setPath('/workspace/collaboration');
+    const sessionSpy = jest.spyOn(useWorkspaceStore.getState(), 'selectSession');
+    defaultCapabilities.navigateToConversation({ sessionId: 'bcs_grp_902:round:2', kind: 'unknown' });
+    expect(sessionSpy).toHaveBeenCalledWith('bcs_grp_902:round:2');
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
   it('sessionId 缺失 → unsupported,不触发跳转', () => {
     const result = defaultCapabilities.navigateToConversation({ sessionId: '', kind: 'unknown' });
     expect(result.status).toBe('unsupported');
