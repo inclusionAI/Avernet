@@ -63,10 +63,9 @@ export interface RequestJoinBody {
 }
 
 // 查询平台空间列表。
-export function listSpaces(params: SpaceListParams, signal?: AbortSignal) {
+export function listSpaces(params: SpaceListParams) {
   return backendRequest<BackendApiEnvelope<BackendApiPage<SpaceDto>>>(SPACE_ENDPOINTS.list, {
     method: 'GET',
-    signal,
     params,
   });
 }

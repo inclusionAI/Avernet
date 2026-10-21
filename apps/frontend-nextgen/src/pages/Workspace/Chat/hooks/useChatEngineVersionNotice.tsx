@@ -4,7 +4,6 @@ import { useBotEngineVersions } from '@/hooks/useBotEngineVersions';
 import { botEngineVersionService } from '@/services/botWorkshop/botEngineVersionService';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { useEffect, useMemo, useState } from 'react';
-import { useSelectedChatEngineContext } from './useSelectedChatEngineContext';
 import { ChatEngineVersionNotice } from '../components/ChatEngineVersionNotice';
 
 export function useChatEngineVersionNotice(input: {
@@ -15,10 +14,9 @@ export function useChatEngineVersionNotice(input: {
   userId: string | null;
 }) {
   const { bot, section, origin, sessionId, userId } = input;
-  const engineBot = useSelectedChatEngineContext(input);
   const target = useMemo(
-    () => buildChatEngineVersionTarget({ bot: engineBot, section, origin, sessionId, userId }),
-    [engineBot, section, origin, sessionId, userId],
+    () => buildChatEngineVersionTarget({ bot, section, origin, sessionId, userId }),
+    [bot, section, origin, sessionId, userId],
   );
   const targets = useMemo(() => (target ? [target] : []), [target]);
   const versions = useBotEngineVersions(targets);
