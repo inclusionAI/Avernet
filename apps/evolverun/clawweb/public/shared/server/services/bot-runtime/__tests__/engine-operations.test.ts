@@ -19,7 +19,7 @@ it.each(["/api/engine/restart", "/api/v1/file/../bot/apply", "/api/v1/bot/apply?
 it("reports unknown writes and explicit business failures without retrying", async () => {
   const request = vi.fn().mockResolvedValueOnce({ status: 504, body: "timeout" }).mockResolvedValueOnce({ status: 200, body: { success: false } });
   const tool = new BotEngineOperations({ request });
-  expect(await tool.execute(target, { method: "POST", path: "/api/v1/file/remove" }, true)).toMatchObject({ status: "unknown" });
+  expect(await tool.execute(target, { method: "POST", path: "/api/v1/file/remove", body: { target_path: "/workspace/obsolete.txt" } }, true)).toMatchObject({ status: "unknown" });
   expect(await tool.execute(target, { method: "POST", path: "/api/v1/file/read" }, false)).toMatchObject({ status: "failed" });
   expect(request).toHaveBeenCalledTimes(2);
 });
@@ -40,4 +40,58 @@ it.each([['POST', '/api/mcp/call-tool'], ['DELETE', '/api/mcp/server/start'], ['
   const request = vi.fn();
   await expect(new BotEngineOperations({ request }).execute({ ...target, activeEngine: "openclaw" }, { method: method as 'POST', path }, true)).rejects.toThrow();
   expect(request).not.toHaveBeenCalled();
+});
+
+it.each(["openclaw", "claude_code"])("does not advertise or dispatch unimplemented MCP lifecycle for %s", async activeEngine => {
+  expect(BotEngineOperations.capabilities(activeEngine).writes.join(" ")).not.toMatch(/mcp\/\{code\}\/start/);
+  const request = vi.fn();
+  await expect(new BotEngineOperations({ request }).execute({ ...target, activeEngine }, { method: "POST", path: "/api/mcp/server/start" }, true)).rejects.toMatchObject({ status: 403 });
+  expect(request).not.toHaveBeenCalled();
+});
+it("preserves bounded cron query parameters and uses the TE enable endpoint", async () => {
+  const request = vi.fn().mockResolvedValue({ status: 200, body: { success: true } });
+  const tool = new BotEngineOperations({ request });
+  await tool.execute(target, { method: "GET", path: "/api/v1/bot/cron/job/runs", query: { limit: 40 } }, false);
+  expect(request).toHaveBeenLastCalledWith(expect.objectContaining({ path: "/api/v1/bot/cron/job/runs?limit=40" }));
+  await tool.execute(target, { method: "POST", path: "/api/v1/bot/cron/job/run", query: { force: true } }, true);
+  expect(request).toHaveBeenLastCalledWith(expect.objectContaining({ path: "/api/v1/bot/cron/job/run?force=true" }));
+  await tool.execute(target, { method: "POST", path: "/api/v1/bot/cron/job/disable" }, true);
+  await expect(tool.execute(target, { method: "PUT", path: "/api/v1/bot/cron/job", body: { enabled: false } }, true)).rejects.toMatchObject({ code: "invalid_cron_body" });
+  await expect(tool.execute(target, { method: "POST", path: "/api/v1/bot/cron", body: { schedule: { kind: "cron" }, payload: {} } }, true)).rejects.toMatchObject({ code: "invalid_cron_body" });
+  await expect(tool.execute(target, { method: "GET", path: "/api/v1/file/read", query: { limit: 40 } }, false)).rejects.toThrow();
+});
+
+it.each(["openclaw", "claude_code", "teclaw"])("keeps MCP/Skill reads and Cron writes while denying managed mutations for %s", async activeEngine => {
+  const request = vi.fn().mockResolvedValue({ status: 200, body: { success: true } });
+  const tool = new BotEngineOperations({ request }), te = activeEngine === "teclaw";
+  const prefix = te ? "/api/v1" : "/api";
+  const current = { ...target, activeEngine };
+  expect(BotEngineOperations.capabilities(activeEngine).writes.join(" ")).not.toMatch(/mcp|skills|skill-package|bot\/apply/);
+  for (const file_path of ["/workspace/skills/review/SKILL.md", "/home/admin/.mcporter/mcporter.json"]) {
+    await expect(tool.execute(current, { method: "POST", path: prefix + "/file/read", body: { file_path } }, false)).resolves.toMatchObject({ status: "success" });
+  }
+  await tool.execute(current, { method: "POST", path: prefix + "/file/list", body: { dir_path: "/workspace/skills" } }, false);
+  if (!te) {
+    await tool.execute(current, { method: "GET", path: "/api/mcp" }, false);
+    await tool.execute(current, { method: "GET", path: "/api/mcp/server" }, false);
+  }
+  const cron = prefix + (te ? "/bot" : "") + "/cron";
+  for (const operation of [
+    { method: "GET", path: cron }, { method: "POST", path: cron, body: { name: "daily", schedule: "0 8 * * *", command: "report" } },
+    { method: "PUT", path: cron + "/job", body: te ? { name: "updated" } : { enabled: false } },
+    { method: "DELETE", path: cron + "/job" }, { method: "POST", path: cron + "/job/run" },
+  ] as const) await tool.execute(current, operation, operation.method !== "GET");
+  request.mockClear();
+  for (const operation of [
+    { method: "POST", path: "/api/mcp" }, { method: "PUT", path: "/api/mcp/server" }, { method: "DELETE", path: "/api/mcp/server" },
+    { method: "POST", path: "/api/skills/local/apply" }, { method: "POST", path: "/api/skills/mappings/apply" },
+    { method: "POST", path: "/api/v1/file/skill-package" }, { method: "POST", path: "/api/v1/bot/apply" },
+    { method: "GET", path: "/api/engine/capabilities" },
+  ] as const) await expect(tool.execute(current, operation, operation.method !== "GET")).rejects.toMatchObject({ status: 403 });
+  for (const target_path of ["/workspace/skills/review/SKILL.md", "/home/admin/.mcporter/mcporter.json", "/config/teclaw.json", "/home/admin/.openclaw/cron/jobs.json"]) {
+    await expect(tool.execute(current, { method: "POST", path: prefix + "/file/remove", body: { target_path } }, true)).rejects.toMatchObject({ code: "managed_runtime_file" });
+    await expect(tool.execute(current, { method: "POST", path: prefix + "/file/upload", upload: { targetPath: target_path, content: "replacement" } }, true)).rejects.toMatchObject({ code: "managed_runtime_file" });
+  }
+  expect(request).not.toHaveBeenCalled();
+  await expect(tool.execute(current, { method: "POST", path: prefix + "/file/upload", upload: { targetPath: "/workspace/memory.md", content: "remember" } }, true)).resolves.toMatchObject({ status: "success" });
 });

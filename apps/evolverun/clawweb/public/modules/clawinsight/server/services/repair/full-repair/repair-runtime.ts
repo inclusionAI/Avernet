@@ -80,7 +80,7 @@ import {
 } from "./ocb-gateway.js";
 import type { RepairTargetResolver } from "./repository-target-resolver.js";
 import { containsSecret as containsRepairSecret, redactPersistableText, redactText, redactValue } from "@avernet/clawweb-shared/server/services/redaction";
-import { buildAgentRuntimeCommand, type AgentRuntimeTool } from "../common/agent-tools/runtime-tool.js";
+import { assertAgentContainerCommand, buildAgentRuntimeCommand, type AgentRuntimeTool } from "../common/agent-tools/runtime-tool.js";
 import type { ImprovementDetail } from "../../insight/contracts.js";
 import { sameAgentExecutionReport, AgentExecutionService, createAgentExecutionStep } from "../common/agent-execution.js";
 import type { AisStatusHandler } from "@avernet/clawevolve/server/services/ais/status-handler";
@@ -1177,7 +1177,7 @@ function validatePlanBody(
         if (operation === "engine_config_replace") {
           repairValidation(
             "unsafe_engine_config_replace",
-            "Repair 不再通过 OCB 修改引擎配置；请先确认目标容器中的真实配置接口，再提交受审计的 container_command",
+            "Repair 不再通过 OCB 整配置替换修改引擎；其他支持的调整使用已声明的 engine_operation，MCP／用户 Skill 配置变更交给 Owner 经平台完成",
           );
         }
         repairValidation("invalid_repair_plan", `不支持的 OCB 写操作: ${operation}`);
@@ -1191,7 +1191,10 @@ function validatePlanBody(
     } else {
       repairValidation("invalid_repair_plan", "action.type 不受支持");
     }
-    if (!options.allowHistoricalUnsafeProcessActions) assertNoUnsafeRawProcessAction(action);
+    if (!options.allowHistoricalUnsafeProcessActions) {
+      assertNoUnsafeRawProcessAction(action);
+      if (action.type === "container_command") assertAgentContainerCommand(action.command!);
+    }
     assertExecutablePayloadSecretFree(action);
   }
   for (const action of plan.actions) {

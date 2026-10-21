@@ -54,6 +54,19 @@ function boundedText(value: unknown, field: string, maxLength: number): string {
   return text;
 }
 
+function assertAdapterToolAccess(command: string): void {
+  const normalized = command.replace(/\\\r?\n/g, "").replace(/['"]/g, "");
+  if (/\bopenclaw\s+(?:cron|gateway|config|skills|mcp|plugins)\b|\bmcporter\s+config\s+(?:add|remove|delete|set|import)\b|\/api\/(?:mcp|skills|cron|engine|file)(?:[\/\s?'"]|$)|\/api\/v1\/(?:bot\/(?:apply|cron)|file\/(?:read|list|upload|remove|skill-package))(?:[\/\s?'"]|$)/i.test(normalized)) {
+    agentToolValidation("adapter_tool_required", "引擎操作必须使用已声明的接口工具；MCP 和用户 Skill 变更交给 Owner，不能用 Shell、CLI 或直接 HTTP 绕过");
+  }
+}
+
+/** Reject explicit management bypasses, not a general-purpose Shell parser. */
+export function assertAgentContainerCommand(command: string): void {
+  assertAdapterToolAccess(command);
+  if (BotEngineOperations.isManagedPath(command)) agentToolValidation("managed_runtime_file", "Shell 动作不能变更 MCP、用户 Skill 或 Cron 管理文件；读取请使用调查工具");
+}
+
 export function buildAgentRuntimeCommand(request: AgentRuntimeInspectInput, frameMarker = "REPAIR_EVIDENCE_PREVIEW"): string {
   if (!/^[A-Za-z0-9_-]+$/.test(frameMarker)) agentToolValidation("invalid_runtime_frame", "读取回执标识无效");
   const unsafe = request as AgentRuntimeInspectInput & {
@@ -120,6 +133,7 @@ END { printf "\\n${frameMarker}\\t{\\"kind\\":\\"fs_search\\",\\"count\\":%d,\\"
       if (!path.startsWith("/") || path.startsWith("//") || path.includes("://")) {
         agentToolValidation("invalid_loopback_path", "http_get 只允许 loopback 绝对 URL path");
       }
+      assertAdapterToolAccess(path);
       return `curl -fsS --max-time 10 -- ${shellQuote(`http://127.0.0.1:${port}${path}`)}`;
     }
     case "shell_exec": {
@@ -127,6 +141,7 @@ END { printf "\\n${frameMarker}\\t{\\"kind\\":\\"fs_search\\",\\"count\\":%d,\\"
         || request.command.length > 16_384 || request.command.includes("\0")) {
         agentToolValidation("invalid_runtime_command", "command 必须是 1..16384 字符且不含 NUL 的 shell 命令");
       }
+      assertAdapterToolAccess(request.command);
       const encoded = Buffer.from(request.command, "utf8").toString("base64");
       return `cd /home/admin 2>/dev/null || cd /; printf %s ${shellQuote(encoded)} | base64 -d | bash --noprofile --norc`;
     }
@@ -261,6 +276,7 @@ export class AgentRuntimeTool {
     if (action.command.length > 16_384 || action.command.includes("\0")) {
       agentToolValidation("invalid_approved_command", "获批 command 格式不合法");
     }
+    assertAgentContainerCommand(action.command);
     const encoded = Buffer.from(action.command, "utf8").toString("base64");
     return this.execute(
       context,

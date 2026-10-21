@@ -103,7 +103,7 @@ describe("buildAgentRuntimeCommand", () => {
 });
 
 describe("AgentRuntimeTool", () => {
-  it("executes an approved container-local Engine API call through the generic command transport", async () => {
+  it("executes an approved ordinary-file action through the generic command transport", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       code: 0,
       data: {
@@ -114,14 +114,14 @@ describe("AgentRuntimeTool", () => {
       },
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
-    const command = "curl -fsS -X POST http://127.0.0.1:18789/api/engine/action";
+    const command = "printf repaired > /home/admin/.openclaw/workspace/memory.md";
 
     await expect(new AgentRuntimeTool(new BotRuntimeClient({ providers: { baas: new BaasRuntimeProvider(baasConfig()) } })).applyApprovedAction(
       runtimeContext(),
       {
-        actionId: "call-container-engine-api",
+        actionId: "update-memory",
         type: "container_command",
-        summary: "调用容器内 Engine 接口",
+        summary: "更新普通记忆文件",
         risk: "接口参数错误会导致操作失败",
         verification: "通过原始业务路径验证结果",
         rollback: null,
@@ -283,4 +283,26 @@ describe("AgentRuntimeTool", () => {
       command: expect.stringContaining("ps -ef"),
     }));
   });
+});
+
+
+it.each([
+  "mcporter config remove duplicate", "openclaw cron remove duplicate", "openclaw gateway call cron.remove --params '{}'",
+  "curl -X DELETE http://127.0.0.1:20003/api/cron/duplicate", "printf changed > /workspace/skills/review/SKILL.md",
+  "printf '{}' > /home/admin/.mcporter/mcporter.json", "rm /home/admin/.openclaw/cron/jobs.json",
+])("rejects an approved Shell bypass before dispatch: %s", async command => {
+  const executeShell = vi.fn();
+  const tool = new AgentRuntimeTool({ executeShell });
+  await expect(tool.applyApprovedAction(runtimeContext(), {
+    actionId: "change", type: "container_command", command,
+    summary: "调整环境", risk: "局部", verification: "核对", rollback: null,
+  })).rejects.toThrow();
+  expect(executeShell).not.toHaveBeenCalled();
+});
+it("does not permit the deep-diagnostic Shell to perform interface operations", async () => {
+  const executeShell = vi.fn();
+  await expect(new AgentRuntimeTool({ executeShell }).inspect(runtimeContext(), {
+    operation: "shell_exec", command: "openclaw cron list",
+  })).rejects.toMatchObject({ code: "adapter_tool_required" });
+  expect(executeShell).not.toHaveBeenCalled();
 });
