@@ -26,6 +26,7 @@ from agentclaw.community.core.bot_inventory.types import (
     LocalBotCreateCommand,
 )
 from agentclaw.community.core.errors import NotFound
+from agentclaw.community.core.desktop_bot.errors import DesktopBotServiceError
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.core.bot_inventory.local_bot_workflow_service_protocol import LocalBotWorkflowServiceProtocol
@@ -304,5 +305,5 @@ class LocalBotWorkflowService(LocalBotWorkflowServiceProtocol):
 
 
 def _raise_if_desktop_service_error(exc: Exception) -> None:
-    if exc.__class__.__name__ in {"DesktopBotServiceError", "DesktopBotOrphanError"}:
+    if isinstance(exc, DesktopBotServiceError):
         raise BotInventoryUpstreamError("desktop service failed") from exc

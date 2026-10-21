@@ -203,3 +203,15 @@ WHERE user_list_type = 'service_bot_runtime_artifact' AND env = 'pre';
 
 Turning the list off affects new builds; it does not remove CLI files from
 already deployed containers or rewrite historical versions.
+
+## BaaS Bot POST responses
+
+The public `post_bots_api` method requires an object envelope and object `data` (missing `data`
+retains the existing empty-object default). JSON decoding failures and invalid
+envelope/data shapes raise `BaasServiceError`, so pool-layout restart failures
+use the same upstream error contract as transport and business-code failures.
+Other private POST callers retain their existing success-data behavior.
+Response parsing lives in `services/baas_api_response.py`; the existing oversized
+`BaasService` keeps its current size-gate exemption and delegates this parsing.
+The broader service split remains a separate refactor, as recorded by the
+existing architecture allowlist; this fix reduces the service file size.

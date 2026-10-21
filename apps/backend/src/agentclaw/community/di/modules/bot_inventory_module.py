@@ -5,6 +5,9 @@ from __future__ import annotations
 from agentclaw.community.adapters.bot_space_context import (
     SpaceServiceBotSpaceContext,
 )
+from agentclaw.community.adapters.desktop_inventory import (
+    DesktopInventoryAdapter,
+)
 from agentclaw.community.api.baas_service import BaasServiceProtocol
 from agentclaw.community.api.bot_inventory_service import BotInventoryServiceProtocol
 from agentclaw.community.api.local_bot_workflow_service import (
@@ -111,7 +114,7 @@ class BotInventoryModule(Module):
     def desktop_inventory_port(
         self, service: DesktopBotService
     ) -> DesktopBotInventoryPort:
-        return service
+        return DesktopInventoryAdapter(service)
 
     @singleton
     @provider
