@@ -50,6 +50,16 @@ it('keeps meaningful aggregation goals in details and uses instructions when a s
  expect(screen.getByText(/保证报告输出可被下游解析/)).toBeVisible()
 })
 
+it('includes known nodes from legacy text suggestions without operations or matching diagnoses', () => {
+ const value=revision()
+ for(const item of value.input.items)item.proposal=null
+ value.input.items[0].context={suggestions:[{nodeId:'report'},{nodeId:'search'},null,{nodeId:''},{nodeId:42}]}
+ value.input.items[1].context={suggestions:[{nodeId:'report'}]}
+ render(<RepairTaskScope revision={value}/>);
+ expect(screen.getByText('相关节点：report、search')).toBeVisible()
+ expect(screen.queryByText('相关节点：未知')).not.toBeInTheDocument()
+})
+
 it('displays frozen core summaries without downloading optional originals until evidence is expanded', async () => {
  const value=revision();value.input.materials={schemaVersion:'repair-frozen-materials/v1',recordId:'materials',sha256:'f'.repeat(64),bytes:6973030}
  api.material.mockReset();api.material.mockResolvedValue({...value.input.items[0],instruction:'完整冻结证据'})

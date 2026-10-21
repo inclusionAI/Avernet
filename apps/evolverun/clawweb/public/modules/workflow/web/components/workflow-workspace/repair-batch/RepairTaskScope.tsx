@@ -12,6 +12,7 @@ function relatedNodes(items:RepairItem[]) {
   item.context?.nodeId,
   ...(Array.isArray(item.proposal?.operations)?item.proposal.operations:[]).map(operation=>operation?.nodeId),
   ...(Array.isArray(item.context?.diagnoses)?item.context.diagnoses:[]).map(diagnosis=>diagnosis?.nodeId),
+  ...(Array.isArray(item.context?.suggestions)?item.context.suggestions:[]).map(suggestion=>suggestion?.nodeId),
  ])
  return [...new Set(nodes.filter((node):node is string=>typeof node==='string'&&!!node.trim()))].join('、')||'未知'
 }
