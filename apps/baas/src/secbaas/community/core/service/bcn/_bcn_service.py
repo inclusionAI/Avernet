@@ -290,6 +290,7 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
             chat_send_input.to_bot.tags,
             ignore_result,
             "chat",
+            chat_send_input.extensions,
         )
         metadata["timeout"] = chat_send_input.timeout_ms / 1000
         message_text = _extract_message_text(chat_send_input.message)
@@ -354,6 +355,7 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
             chat_send_input.bcn_group_id,
             chat_send_input.to_bot.tags,
             request_type="chat",
+            extensions=chat_send_input.extensions,
         )
         metadata["timeout"] = chat_send_input.timeout_ms / 1000
         metadata["stream"] = "true"
@@ -537,12 +539,58 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
         )
 
     @staticmethod
+    def _runtime_binding_metadata(
+        extensions: dict[str, Any] | None,
+        session_id: str,
+        bcn_group_id: str,
+    ) -> dict[str, Any] | None:
+        binding = (extensions or {}).get("teamclawRuntimeBinding")
+        if not isinstance(binding, dict):
+            return None
+        version = binding.get("version")
+        source = binding.get("source")
+        conversation_id = binding.get("openConversationId")
+        if (
+            isinstance(version, bool)
+            or version != 1
+            or not isinstance(source, str)
+            or source.strip() != "dingtalk"
+            or not isinstance(conversation_id, str)
+            or not conversation_id.strip()
+        ):
+            return None
+
+        runtime_binding: dict[str, Any] = {
+            "version": 1,
+            "source": "dingtalk",
+            "openConversationId": conversation_id.strip(),
+            "bcsSessionId": session_id,
+            "bcsGroupId": bcn_group_id,
+        }
+        binding_id = binding.get("bindingId")
+        if isinstance(binding_id, str) and binding_id.strip():
+            runtime_binding["bindingId"] = binding_id.strip()
+
+        initiator = binding.get("initiator")
+        if isinstance(initiator, dict):
+            staff_id = initiator.get("staffId")
+            if isinstance(staff_id, str) and staff_id.strip():
+                projected = {"staffId": staff_id.strip()}
+                for key in ("actorId", "name"):
+                    value = initiator.get(key)
+                    if isinstance(value, str) and value.strip():
+                        projected[key] = value.strip()
+                runtime_binding["initiator"] = projected
+        return runtime_binding
+
+    @staticmethod
     def _build_bcn_metadata(
         session_id: str,
         bcn_group_id: str,
         tags: list[str] | None = None,
         ignore_result: bool = False,
         request_type: str = "",
+        extensions: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """构造 BCN 场景的 metadata
 
@@ -550,6 +598,7 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
             session_id: 会话 ID
             bcn_group_id: BCN group ID
             tags: Bot 标签列表，用于提取 lifecycle_stage
+            extensions: Provider 扩展；合法的钉群关联上下文会被规范化后透传
 
         Returns:
             metadata 字典
@@ -564,10 +613,16 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
                     lifecycle_stage = tag
                     break
 
-        return {
+        metadata = {
             "session_id": session_id,
             "bcn_group_id": bcn_group_id,
             "ignore_result": "true" if ignore_result else "false",
             "bot_options": {"lifecycle_stage": lifecycle_stage, "from_bcn": "true"},
             "request_type": request_type,
         }
+        runtime_binding = DefaultBcnDownlinkService._runtime_binding_metadata(
+            extensions, session_id, bcn_group_id
+        )
+        if runtime_binding:
+            metadata["teamclaw_runtime_binding"] = runtime_binding
+        return metadata

@@ -714,6 +714,63 @@ def test_build_bcn_metadata_request_type(service):
     assert meta["request_type"] == "chat"
 
 
+def test_build_bcn_metadata_projects_runtime_binding(service):
+    meta = service._build_bcn_metadata(
+        "sess-authoritative",
+        "group-authoritative",
+        extensions={
+            "teamclawRuntimeBinding": {
+                "version": 1,
+                "source": " dingtalk ",
+                "bindingId": " binding-1 ",
+                "openConversationId": " cid-1 ",
+                "bcsSessionId": "untrusted-session",
+                "bcsGroupId": "untrusted-group",
+                "initiator": {
+                    "staffId": " 136677 ",
+                    "actorId": " human-136677 ",
+                    "name": " 张三 ",
+                },
+            }
+        },
+    )
+
+    assert meta["teamclaw_runtime_binding"] == {
+        "version": 1,
+        "source": "dingtalk",
+        "bindingId": "binding-1",
+        "openConversationId": "cid-1",
+        "bcsSessionId": "sess-authoritative",
+        "bcsGroupId": "group-authoritative",
+        "initiator": {
+            "staffId": "136677",
+            "actorId": "human-136677",
+            "name": "张三",
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    "binding",
+    [
+        None,
+        "invalid",
+        {"version": True, "source": "dingtalk", "openConversationId": "cid-1"},
+        {"version": 2, "source": "dingtalk", "openConversationId": "cid-1"},
+        {"version": 1, "source": "webui", "openConversationId": "cid-1"},
+        {"version": 1, "source": "dingtalk", "openConversationId": "   "},
+    ],
+)
+def test_build_bcn_metadata_ignores_invalid_runtime_binding(service, binding):
+    meta = service._build_bcn_metadata(
+        "sess-1",
+        "group-1",
+        extensions={"teamclawRuntimeBinding": binding},
+    )
+
+    assert "teamclaw_runtime_binding" not in meta
+
+
 # ==================== attachment passthrough tests ====================
 
 
