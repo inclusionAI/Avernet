@@ -9,7 +9,17 @@ import { candidateLabel, repairGitLinks } from './repair-release-view'
 const message = (value: unknown) => value instanceof Error ? value.message : String(value)
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 const records = (value: unknown) => Array.isArray(value) ? value.map(record) : []
-const reportLabel = (value: unknown, fallback: string) => ({ changed: '已生成修改', not_needed: '无需修改', unresolved: '未解决', passed: '通过', failed: '失败', not_covered: '未覆盖', mock: 'Mock', none: '未覆盖', external_resources: '外部资源', pack_script_execution: 'Pack 脚本执行' }[String(value)] ?? (value == null ? fallback : String(value)))
+const reportLabel = (value: unknown, fallback: string) => ({ changed: '已生成修改', not_needed: '未采纳', unresolved: '待确认', passed: '通过', failed: '失败', not_covered: '未覆盖', mock: 'Mock', none: '未覆盖', external_resources: '外部资源', pack_script_execution: 'Pack 脚本执行' }[String(value)] ?? (value == null ? fallback : String(value)))
+function coverageLabel(covered: Record<string, unknown> | undefined, checks: RepairRevision['checks']) {
+  if (!covered || ['none', 'not_covered'].includes(String(covered.mode))) return '未覆盖'
+  const mock = record(checks?.mock)
+  if (covered.mode !== 'mock' || !['passed', 'failed'].includes(String(mock.status))
+    || mock.caseCount === 0 || mock.assertionCount === 0
+    || Array.isArray(checks?.cases) && !checks.cases.length
+    || !(Number(covered.assertionCount) > 0) || !Array.isArray(covered.caseNames) || !covered.caseNames.length) return '未验证'
+  // Historical coverage records do not establish a link to executed case assertions.
+  return '未验证（仅有覆盖记录）'
+}
 
 export default function RepairCandidateReview({detail,revision,active}:{detail:RepairTaskDetail;revision:RepairRevision;active:boolean}) {
   const [base, setBase] = useState<'baseline' | 'parent'>('baseline')
@@ -47,7 +57,7 @@ export default function RepairCandidateReview({detail,revision,active}:{detail:R
         <p className="font-medium">{typeof item.proposal?.summary === 'string' ? item.proposal.summary : item.instruction.startsWith('当前生效 Pack 已变化') ? '重新评估原修改的适用性' : item.instruction || item.itemId}</p>
         <p className="mt-1 text-muted-foreground">处理结论：{outcome ? reportLabel(outcome.status, '未提供状态') : '尚未提供逐项结论'}</p>
         {outcome?.reason != null && <p className="mt-1 text-muted-foreground">{String(outcome.reason)}</p>}
-        <p className="mt-1 text-muted-foreground">验证覆盖：{covered ? `${reportLabel(covered.mode, '未覆盖')} · ${String(covered.assertionCount ?? 0)} 条断言` : '未覆盖'}</p>
+        <p className="mt-1 text-muted-foreground">验证覆盖：{coverageLabel(covered, checks)}</p>
       </div>
   }
   const selectedFailure = revision.phase === 'failed'
@@ -71,7 +81,7 @@ export default function RepairCandidateReview({detail,revision,active}:{detail:R
       {revision.input.items.length>3&&<details className="text-xs text-muted-foreground"><summary>更多目标处理结果（{revision.input.items.length-3} 项）</summary><div className="mt-2 space-y-2">{revision.input.items.slice(3).map(renderOutcome)}</div></details>}
     </div>}
         <div aria-label="候选检查摘要" className="mt-4 space-y-2 text-sm">
-          <p className="font-medium">{outcomes.length ? `已生成修改 ${outcomes.filter(row=>row.status==='changed').length} 项 · 无需修改 ${outcomes.filter(row=>row.status==='not_needed').length} 项 · 未解决 ${outcomes.filter(row=>row.status==='unresolved').length} 项` : '尚未返回逐项处理结果'}</p>
+          <p className="font-medium">{outcomes.length ? `已生成修改 ${outcomes.filter(row=>row.status==='changed').length} 项 · 未采纳 ${outcomes.filter(row=>row.status==='not_needed').length} 项 · 待确认 ${outcomes.filter(row=>row.status==='unresolved').length} 项` : '尚未返回逐项处理结果'}</p>
           {revision.input.items.length>outcomes.length&&<p className="text-warning-foreground">缺少 {revision.input.items.length-outcomes.length} 项处理结果，请先核对候选。</p>}
           <p>静态检查：{reportLabel(record(checks?.static).status,'尚未执行')} · Mock 检查：{reportLabel(record(checks?.mock).status,'尚未执行')}</p>
           <p className="text-xs text-muted-foreground">{Array.isArray(checks?.uncoveredChecks)&&checks.uncoveredChecks.length ? `尚未验证：${checks.uncoveredChecks.map(value=>reportLabel(value,'未知')).join('、')}` : !checks ? '尚未提供检查覆盖情况。' : '业务效果仍需发布后观察。'} · Mock 结果不代表业务效果。</p>

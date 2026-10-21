@@ -84,7 +84,7 @@ it('explains an intermediate automatic no-change batch without claiming the roun
 });
 it('summarizes real checks and outcomes before folded reports and retains diff retry',async()=>{
  api.diff.mockRejectedValueOnce(new Error('controlled diff unavailable')).mockResolvedValue({files:[],truncated:false});mount();
- expect(screen.getByText('已生成修改 1 项 · 无需修改 0 项 · 未解决 0 项')).toBeVisible();
+ expect(screen.getByText('已生成修改 1 项 · 未采纳 0 项 · 待确认 0 项')).toBeVisible();
  expect(screen.getByText(/静态检查：通过/)).toBeVisible();expect(screen.getByText(/Mock 检查：未覆盖/)).toBeVisible();
  expect(screen.queryByText('workflow repair candidate: 1/1 items changed')).not.toBeVisible();
  await userEvent.click(await screen.findByRole('button',{name:'重试差异'}));
@@ -182,7 +182,7 @@ it('distinguishes planning and generation calls while preserving legacy input re
  mount(detail);const user=userEvent.setup();await user.click(screen.getByRole('tab',{name:'优化目标'}));
  await user.click(screen.getByText('模型输入与材料',{selector:'summary'}));
  expect(screen.getByText('第 1 次模型调用 · 全局规划')).toBeVisible();
- expect(screen.getByText('第 2 次模型调用 · 分组生成')).toBeVisible();
+ expect(screen.getByText('第 2 次模型调用 · 生成修改')).toBeVisible();
  expect(screen.getByText('第 3 次模型调用',{exact:true})).toBeVisible();
  for(const core of screen.getAllByText('模型核心输入',{selector:'summary'}))await user.click(core);
  for(const prompt of ['Global planning prompt','Grouped generation prompt','Legacy generation prompt'])expect(screen.getByText(prompt)).toBeVisible();

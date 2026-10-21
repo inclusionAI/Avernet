@@ -55,7 +55,7 @@ export default function RepairTaskScope({revision}:{revision:RepairRevision}) {
   <details className="mt-4 border-t border-input pt-3 text-sm">
    <summary className="cursor-pointer text-xs text-muted-foreground">模型输入与材料</summary>
    {modelInputs.length?<><p className="mt-1 text-xs text-muted-foreground">材料路径对应模型调用时的 AIS 本地文件；此处仅展示索引。</p>{modelInputs.map((entry,index)=><article key={index} className="mt-3">
-    <p className="text-xs text-muted-foreground">第 {index+1} 次模型调用{entry.phase==='planning'?' · 全局规划':entry.phase==='generation'?' · 分组生成':''}</p>
+    <p className="text-xs text-muted-foreground">第 {index+1} 次模型调用{entry.phase==='planning'?' · 全局规划':entry.phase==='generation'?' · 生成修改':''}</p>
     <details className="mt-2 text-xs"><summary className="cursor-pointer text-muted-foreground">模型核心输入</summary><pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted/50 p-3 text-[11px]">{entry.coreInput}</pre></details>
     <JsonDetails title="可选材料索引" value={entry.materials}/>
    </article>)}</>:<p className="mt-2 text-xs text-muted-foreground">暂无实际模型输入记录；该次结果尚未回传记录、使用旧版生成器，或未调用模型。</p>}
