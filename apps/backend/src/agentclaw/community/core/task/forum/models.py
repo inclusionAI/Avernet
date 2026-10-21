@@ -131,6 +131,7 @@ class ForumPollStatisticsResult:
 
     topics_processed: int
     posts_processed: int
+    topics_closed: int = 0
 
 
 @dataclass(frozen=True)

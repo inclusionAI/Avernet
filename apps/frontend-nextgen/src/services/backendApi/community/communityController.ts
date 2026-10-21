@@ -157,6 +157,7 @@ export function createCommunityReply(input: CreateCommunityReplyInput, signal?: 
     author_id: string;
     body: string;
     reply_to_post_id?: string;
+    poll_selection?: { option_indices: number[] };
     author_display_name?: string;
     author_avatar_url?: string;
   } = {
@@ -166,6 +167,7 @@ export function createCommunityReply(input: CreateCommunityReplyInput, signal?: 
     body: input.body,
   };
   if (replyToPostId) data.reply_to_post_id = replyToPostId;
+  if (input.pollSelection) data.poll_selection = { option_indices: [...input.pollSelection] };
   if (displayName) data.author_display_name = displayName;
   if (input.authorAvatarUrl) data.author_avatar_url = input.authorAvatarUrl;
 

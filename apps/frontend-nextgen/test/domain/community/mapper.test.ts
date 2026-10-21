@@ -201,6 +201,21 @@ test('maps flat reply reference fields without adding a tree edge', () => {
   expect(reply).not.toHaveProperty('replies');
 });
 
+test('maps structured POLL vote selections on replies', () => {
+  const reply = mapCommunityReplyDto({
+    post_id: 'post-vote',
+    topic_id: 'topic-1',
+    body: '投票选择：方案 A',
+    author_type: 'HUMAN',
+    author_id: 'user-1',
+    display_name: '顾客',
+    created_at: '2026-10-20T08:00:00Z',
+    poll_selection: { option_indices: [0, 1] },
+  });
+
+  expect(reply.pollSelection).toEqual([0, 1]);
+});
+
 test('maps first-level replies with their two-level child reply group', () => {
   const reply = mapCommunityReplyDto({
     post_id: 'post-1',

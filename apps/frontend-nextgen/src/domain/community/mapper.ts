@@ -62,6 +62,7 @@ export interface CommunityReplyDto {
   body?: string;
   reply_to_post_id?: string | null;
   reply_to_floor_no?: number | null;
+  poll_selection?: { option_indices?: number[] | null } | null;
   children?: CommunityReplyDto[] | null;
   author_type?: string;
   author_id?: string;
@@ -245,6 +246,11 @@ export function mapCommunityReplyDto(dto: CommunityReplyDto): CommunityReply {
     createdAt: dto.created_at ?? '',
     replyToPostId: dto.reply_to_post_id?.trim() || undefined,
     replyToFloorNo: typeof dto.reply_to_floor_no === 'number' ? dto.reply_to_floor_no : undefined,
+    pollSelection: Array.isArray(dto.poll_selection?.option_indices)
+      ? (dto.poll_selection?.option_indices ?? []).filter(
+          (index) => Number.isInteger(index) && index >= 0,
+        )
+      : undefined,
     childReplies: (dto.children ?? []).map(mapCommunityReplyDto),
   };
 }

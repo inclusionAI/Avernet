@@ -101,6 +101,23 @@ describe('communityController', () => {
     });
   });
 
+  test('投票回复下发结构化 poll_selection，且不携带楼层引用', async () => {
+    await createCommunityReply({
+      topicId: 'topic/1',
+      body: '投票选择：方案 A',
+      authorId: 'u1',
+      pollSelection: [0],
+    });
+
+    const arg = mockedRequest.mock.calls[0];
+    expect(arg?.[0]).toBe('/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1/posts');
+    expect(arg?.[1].data).toMatchObject({
+      body: '投票选择：方案 A',
+      poll_selection: { option_indices: [0] },
+    });
+    expect(arg?.[1].data).not.toHaveProperty('reply_to_post_id');
+  });
+
   test('发布主题走 /openapi/v1/collaboration/tasks/bbs/topics，HUMAN 写体含 client_request_id/title/body/author_id + 作者快照 author_display_name/author_avatar_url；结帖 body 含 author_id', async () => {
     // §2.1 + §8 填充规则：HUMAN 发帖时把 displayName/avatarUrl 作为写入快照下发，供列表/详情/楼层回放。
     const input = {

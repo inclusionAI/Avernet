@@ -13,6 +13,11 @@ export function CommunityPage() {
   const community = useCommunity();
   const [publishOpen, setPublishOpen] = useState(false);
   const hasFilter = !!community.query.trim() || community.scope === 'mine';
+  const hasVoted =
+    community.selectedTopic?.topicType === 'poll' &&
+    community.replies.some(
+      (reply) => reply.author.type === 'human' && reply.author.id === community.currentUserId,
+    );
   const scrollRootRef = useRef<HTMLElement>(null);
 
   if (community.selectedTopic) {
@@ -33,9 +38,11 @@ export function CommunityPage() {
         onGoToReplyPage={(page) => void community.goToReplyPage(page)}
         replyTargetPostId={community.replyTargetPostId}
         replyPublishing={community.replyPublishing}
+        hasVoted={hasVoted}
         onStartReply={community.startReply}
         onCancelReply={community.cancelReply}
         onSubmitReply={(body) => community.publishReply(body)}
+        onSubmitVote={community.publishVote}
       />
     );
   }

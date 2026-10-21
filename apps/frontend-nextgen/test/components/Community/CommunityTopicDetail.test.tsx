@@ -47,9 +47,11 @@ function renderDetail(overrides: Partial<DetailProps> = {}) {
     onGoToReplyPage: jest.fn(),
     replyTargetPostId: null,
     replyPublishing: false,
+    hasVoted: false,
     onStartReply: jest.fn(),
     onCancelReply: jest.fn(),
     onSubmitReply: jest.fn(async () => true),
+    onSubmitVote: jest.fn(async () => true),
     ...overrides,
   };
   return { props, ...render(<CommunityTopicDetail {...props} />) };
@@ -70,8 +72,9 @@ describe('CommunityTopicDetail', () => {
     expect(props.onBack).toHaveBeenCalledTimes(1);
   });
 
-  test('投票主题渲染配置、统计和标签并保持选项右侧对齐', () => {
-    renderDetail({
+  test('投票主题只提供结构化投票入口，不展示讨论回帖框', async () => {
+    const user = userEvent.setup();
+    const { props } = renderDetail({
       topic: {
         ...topic,
         topicType: 'poll',
@@ -79,7 +82,7 @@ describe('CommunityTopicDetail', () => {
           poll: {
             selection: 'single',
             options: ['方案 A', '方案 B', '方案 C'],
-            deadlineAt: '2026-10-20T12:00:00Z',
+            deadlineAt: '2999-10-20T12:00:00Z',
           },
         },
         analysis: {
@@ -105,10 +108,35 @@ describe('CommunityTopicDetail', () => {
     expect(screen.getByText('2票 · 67%')).toBeInTheDocument();
     expect(screen.getByText('1票 · 33%')).toBeInTheDocument();
     expect(screen.getByText('0票 · 0%')).toBeInTheDocument();
-    expect(screen.getByText('单选 • 3 Bot参与 • 共3票')).toBeInTheDocument();
+    expect(screen.getByText('单选 • 3 位参与者 • 共3票')).toBeInTheDocument();
     expect(screen.getByText('#AI治理')).toBeInTheDocument();
     expect(screen.getByText('#投票')).toBeInTheDocument();
     expect(screen.getByText(/进行中，截止/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /方案 A/ }));
+    await user.click(screen.getByRole('button', { name: '提交投票' }));
+    await waitFor(() => expect(props.onSubmitVote).toHaveBeenCalledWith([0]));
+
+    expect(screen.queryByRole('textbox', { name: '回复正文' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '投票理由' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '发送回复' })).not.toBeInTheDocument();
+  });
+
+  test('已投票的 POLL 主题禁用继续投票入口', () => {
+    renderDetail({
+      hasVoted: true,
+      topic: {
+        ...topic,
+        topicType: 'poll',
+        topicConfig: { poll: { selection: 'multi', options: ['方案 A', '方案 B'] } },
+      },
+      replies: [],
+    });
+
+    expect(screen.queryByRole('button', { name: '提交投票' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /方案 A/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /方案 B/ })).toBeDisabled();
+    expect(screen.getByText('你已投过票，投票主题不允许继续回复。')).toBeInTheDocument();
   });
 
   test('加载中显示骨架占位、不渲染楼层', () => {

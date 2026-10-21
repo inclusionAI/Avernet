@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy.exc import IntegrityError
 
@@ -249,6 +249,99 @@ def test_create_reply_rejects_unknown_reference(db):
 
     with db.orm_session() as session:
         assert session.query(ForumPostModel).count() == 0
+
+
+def test_poll_reply_rejects_floor_reference_before_validation(db):
+    repo = ForumRepository(db)
+    topic = _create_topic(
+        repo,
+        topic_type=TOPIC_TYPE_POLL,
+        topic_config=ForumTopicConfig(
+            poll=ForumPollConfig(selection="SINGLE", options=("A", "B"))
+        ),
+    ).topic
+
+    with pytest.raises(Conflict, match="POLL replies must target the Topic"):
+        _create_reply(
+            repo,
+            topic.topic_id,
+            reply_to_post_id="missing-post",
+            poll_selection=ForumPollSelection(option_indices=(0,)),
+        )
+
+    with db.orm_session() as session:
+        assert session.query(ForumPostModel).count() == 0
+
+
+def test_poll_reply_rejects_new_vote_after_deadline(db):
+    repo = ForumRepository(db)
+    expired = datetime.now(timezone.utc) - timedelta(seconds=1)
+    topic = _create_topic(
+        repo,
+        topic_type=TOPIC_TYPE_POLL,
+        topic_config=ForumTopicConfig(
+            poll=ForumPollConfig(
+                selection="SINGLE",
+                options=("A", "B"),
+                deadline_at=expired,
+            )
+        ),
+    ).topic
+
+    with pytest.raises(Conflict, match="poll deadline has passed"):
+        _create_reply(
+            repo,
+            topic.topic_id,
+            poll_selection=ForumPollSelection(option_indices=(0,)),
+        )
+
+    with db.orm_session() as session:
+        assert session.query(ForumPostModel).count() == 0
+
+
+def test_poll_deadline_does_not_break_idempotent_reply_replay(db):
+    repo = ForumRepository(db)
+    future = datetime.now(timezone.utc) + timedelta(days=1)
+    topic = _create_topic(
+        repo,
+        topic_type=TOPIC_TYPE_POLL,
+        topic_config=ForumTopicConfig(
+            poll=ForumPollConfig(
+                selection="SINGLE",
+                options=("A", "B"),
+                deadline_at=future,
+            )
+        ),
+    ).topic
+    first = _create_reply(
+        repo,
+        topic.topic_id,
+        poll_selection=ForumPollSelection(option_indices=(0,)),
+    ).post
+
+    expired = datetime.now(timezone.utc) - timedelta(seconds=1)
+    with db.orm_session() as session:
+        row = session.query(ForumTopicModel).filter_by(
+            topic_id=topic.topic_id
+        ).one()
+        row.topic_config = {
+            "poll": {
+                "selection": "SINGLE",
+                "options": ["A", "B"],
+                "deadline_at": expired.isoformat(),
+            }
+        }
+
+    replay = _create_reply(
+        repo,
+        topic.topic_id,
+        body="ignored",
+        reply_to_post_id="missing-post",
+        poll_selection=ForumPollSelection(option_indices=(0,)),
+    )
+
+    assert replay.created is False
+    assert replay.post.post_id == first.post_id
 
 
 def test_create_reply_rejects_reference_from_another_topic(db):

@@ -316,6 +316,30 @@ def test_create_reply_forwards_structured_poll_selection():
     assert repo.calls[-1]["poll_selection"] == selection
 
 
+def test_create_reply_rejects_floor_reply_for_poll_topic():
+    repo = FakeForumRepository(
+        topic=_topic_record(
+            topic_type="POLL",
+            topic_config=ForumTopicConfig(
+                poll=ForumPollConfig(selection="SINGLE", options=("A", "B"))
+            ),
+        )
+    )
+
+    with pytest.raises(ValidationError, match="POLL replies must target the Topic"):
+        ForumService(repo).create_reply(
+            topic_id="topic-1",
+            author_type="BOT",
+            author_id="bot-a",
+            client_request_id="req-vote",
+            body="Floor votes are unsupported",
+            reply_to_post_id="post-1",
+            poll_selection=ForumPollSelection(option_indices=(0,)),
+        )
+
+    assert repo.calls == [{"operation": "get_topic", "topic_id": "topic-1"}]
+
+
 @pytest.mark.parametrize(
     ("selection_rule", "option_indices", "message"),
     [

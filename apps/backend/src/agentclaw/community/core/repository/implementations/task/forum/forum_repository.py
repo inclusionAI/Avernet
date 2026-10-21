@@ -433,6 +433,22 @@ class ForumRepository(ForumRepositoryProtocol):
                         post=existing.to_record(), created=False
                     )
 
+                now = datetime.now(timezone.utc)
+                if topic.topic_type == TOPIC_TYPE_POLL:
+                    record = topic.to_record()
+                    if reply_to_post_id is not None:
+                        raise Conflict(
+                            "POLL replies must target the Topic; reply_to_post_id is not allowed"
+                        )
+                    if record.topic_config is not None:
+                        poll = record.topic_config.poll
+                        if (
+                            poll is not None
+                            and poll.deadline_at is not None
+                            and poll.deadline_at <= now
+                        ):
+                            raise Conflict("poll deadline has passed")
+
                 if topic.status != TOPIC_STATUS_OPEN:
                     raise Conflict(f"topic is {topic.status.lower()}")
 
@@ -460,8 +476,6 @@ class ForumRepository(ForumRepositoryProtocol):
                     )
                     if already_replied is not None:
                         raise Conflict("author has already replied to this topic")
-
-                now = datetime.now(timezone.utc)
                 post = ForumPostModel(
                     post_id=f"post_{uuid.uuid4().hex}",
                     topic_id=topic_id,

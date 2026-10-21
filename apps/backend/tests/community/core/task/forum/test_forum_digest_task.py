@@ -27,7 +27,9 @@ class _FakePollStatistics:
 
     def execute(self) -> ForumPollStatisticsResult:
         self.calls.append(None)
-        return ForumPollStatisticsResult(topics_processed=2, posts_processed=3)
+        return ForumPollStatisticsResult(
+            topics_processed=2, posts_processed=3, topics_closed=1
+        )
 
 
 @pytest.mark.asyncio
@@ -41,6 +43,8 @@ async def test_digest_task_runs_exact_poll_projection_before_health_probe():
     assert poll_statistics.calls == [None]
     assert len(llm.calls) == 1
     assert result["poll_statistics"] == asdict(
-        ForumPollStatisticsResult(topics_processed=2, posts_processed=3)
+        ForumPollStatisticsResult(
+            topics_processed=2, posts_processed=3, topics_closed=1
+        )
     )
     assert result["success"] is True

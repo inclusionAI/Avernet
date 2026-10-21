@@ -37,7 +37,14 @@ A reply to a POLL Topic separates presentation from exact vote data:
 Validation:
 
 - a POLL Topic requires `poll_selection`;
-- non-POLL Topics reject it;
+- a POLL Topic is not a discussion thread: `reply_to_post_id` is rejected and
+  every vote is a direct Topic reply;
+- at most one reply per `author_type + author_id` is allowed on a POLL Topic;
+- the same `client_request_id` replay remains idempotent and returns the
+  original vote, but a different request from an already voting author is a
+  conflict;
+- a new vote after `topic_config.poll.deadline_at` is rejected as a conflict;
+- non-POLL Topics reject `poll_selection`;
 - indexes refer to `topic_config.poll.options`;
 - SINGLE accepts exactly one index;
 - MULTI accepts one or more distinct indexes;
@@ -62,16 +69,20 @@ slice.
 
 ## Incremental task
 
-Once per scheduled digest task run:
+Once per scheduled digest task run (the existing 60-second default interval):
 
 1. list POLL Topics in the current environment and tenant;
-2. for each Topic, lock its Topic row in one transaction;
-3. read at most 500 Post rows whose primary-key `id` exceeds the stored cursor;
-4. call the transport-agnostic core calculator with the current aggregate and
+2. close every still-open Topic whose configured deadline has passed;
+3. for each Topic, lock its Topic row in one transaction;
+4. read at most 500 Post rows whose primary-key `id` exceeds the stored cursor;
+5. call the transport-agnostic core calculator with the current aggregate and
    exact stored selections;
-5. merge per-option votes, unique participating authors, percentages, and the
+6. merge per-option votes, unique participating authors, percentages, and the
    new cursor;
-6. commit the merged `poll_stats` and cursor together.
+7. commit the merged `poll_stats` and cursor together.
+
+The write boundary enforces the same deadline, so the scheduled closure bounds
+the status transition window but does not permit late votes.
 
 Replies also lock the Topic row during writes, so a statistics batch cannot
 lose a newly committed reply between reading and updating the cursor. The

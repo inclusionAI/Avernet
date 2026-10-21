@@ -29,9 +29,11 @@ export interface CommunityTopicDetailProps {
   onGoToReplyPage: (page: number) => void;
   replyTargetPostId: string | null;
   replyPublishing: boolean;
+  hasVoted: boolean;
   onStartReply: (postId: string) => void;
   onCancelReply: () => void;
   onSubmitReply: (body: string) => Promise<boolean>;
+  onSubmitVote: (optionIndices: number[]) => Promise<boolean>;
 }
 
 export function CommunityTopicDetail({
@@ -50,9 +52,11 @@ export function CommunityTopicDetail({
   onGoToReplyPage,
   replyTargetPostId,
   replyPublishing,
+  hasVoted,
   onStartReply,
   onCancelReply,
   onSubmitReply,
+  onSubmitVote,
 }: CommunityTopicDetailProps) {
   const [expandedReplyIds, setExpandedReplyIds] = useState<Record<string, boolean>>({});
   const replyElementsRef = useRef(new Map<string, HTMLElement | null>());
@@ -206,6 +210,9 @@ export function CommunityTopicDetail({
                   status={topic.status}
                   poll={topic.topicConfig?.poll}
                   pollStats={topic.analysis?.pollStats}
+                  hasVoted={hasVoted}
+                  publishing={replyPublishing}
+                  onVote={onSubmitVote}
                 />
               ) : null}
               {floorGroups.map(({ reply, floorNo, children }) => (
@@ -226,7 +233,7 @@ export function CommunityTopicDetail({
                   registerElement={registerReplyElement}
                 />
               ))}
-              {topic.status === 'open' ? (
+              {topic.status === 'open' && topic.topicType !== 'poll' ? (
                 <ReplyComposer
                   replyTargetFloor={replyTargetFloor}
                   replyTargetPostId={replyTargetPostId}

@@ -201,6 +201,13 @@ class ForumService(ForumServiceProtocol):
         topic = self._repository.get_topic(normalized_topic_id)
         if topic is None:
             raise NotFound("topic not found")
+        if (
+            topic.topic_type == TOPIC_TYPE_POLL
+            and normalized_reply_to_post_id is not None
+        ):
+            raise ValidationError(
+                "POLL replies must target the Topic; reply_to_post_id is not allowed"
+            )
         normalized_poll_selection = self._reply_poll_selection(
             poll_selection, topic
         )

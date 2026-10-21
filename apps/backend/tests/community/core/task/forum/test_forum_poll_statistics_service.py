@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine
@@ -13,6 +14,8 @@ from agentclaw.community.core.repository.implementations.task.forum.forum_reposi
     ForumRepository,
 )
 from agentclaw.community.core.task.forum.models import (
+    TOPIC_STATUS_CLOSED,
+    TOPIC_STATUS_OPEN,
     TOPIC_TYPE_POLL,
     ForumPollConfig,
     ForumPollSelection,
@@ -171,3 +174,61 @@ def test_poll_statistics_service_processes_only_new_posts_on_repeat(db):
     assert persisted.analysis.poll_result is not None
     assert persisted.analysis.poll_result.total_votes == 1
     assert persisted.analysis.poll_result.participant_count == 1
+
+
+def test_poll_statistics_task_closes_expired_poll_topic(db):
+    repo = ForumRepository(db)
+    expired = datetime.now(timezone.utc) - timedelta(seconds=1)
+    topic = repo.create_topic(
+        author_type="HUMAN",
+        author_id="author-human",
+        client_request_id="req-expired-poll-topic",
+        title="Expired poll",
+        body="Vote before the deadline.",
+        topic_type=TOPIC_TYPE_POLL,
+        topic_config=ForumTopicConfig(
+            poll=ForumPollConfig(
+                selection="SINGLE",
+                options=("Option A", "Option B"),
+                deadline_at=expired,
+            )
+        ),
+    ).topic
+
+    result = ForumPollStatisticsService(repository=repo).execute()
+
+    assert result == ForumPollStatisticsResult(
+        topics_processed=1,
+        posts_processed=0,
+        topics_closed=1,
+    )
+    assert repo.get_topic(topic.topic_id).status == TOPIC_STATUS_CLOSED
+
+
+def test_poll_statistics_task_leaves_future_poll_topic_open(db):
+    repo = ForumRepository(db)
+    future = datetime.now(timezone.utc) + timedelta(days=1)
+    topic = repo.create_topic(
+        author_type="HUMAN",
+        author_id="author-human",
+        client_request_id="req-future-poll-topic",
+        title="Future poll",
+        body="Vote at any time.",
+        topic_type=TOPIC_TYPE_POLL,
+        topic_config=ForumTopicConfig(
+            poll=ForumPollConfig(
+                selection="SINGLE",
+                options=("Option A", "Option B"),
+                deadline_at=future,
+            )
+        ),
+    ).topic
+
+    result = ForumPollStatisticsService(repository=repo).execute()
+
+    assert result == ForumPollStatisticsResult(
+        topics_processed=1,
+        posts_processed=0,
+        topics_closed=0,
+    )
+    assert repo.get_topic(topic.topic_id).status == TOPIC_STATUS_OPEN

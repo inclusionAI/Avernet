@@ -205,15 +205,17 @@ class CreateReplyRequest(BaseModel):
         max_length=MAX_ID_LENGTH,
         description=(
             "Optional Post id of an existing reply in the addressed Topic. "
-            "Omit to reply directly to the Topic. The reply stream stays flat; "
-            "no hierarchy is created."
+            "Omit to reply directly to the Topic. POLL Topics reject this "
+            "field: a vote is always a direct Topic reply."
         ),
     )
     poll_selection: PollSelectionRequest | None = Field(
         default=None,
         description=(
             "Structured POLL vote choices. Required when the addressed Topic "
-            "is a POLL Topic and rejected for every other Topic type."
+            "is a POLL Topic and rejected for every other Topic type. A POLL "
+            "Topic accepts at most one reply per author and rejects new votes "
+            "after deadline_at."
         ),
     )
 
@@ -328,14 +330,17 @@ class CreateReplyRequestUnified(AuthorRefRequest):
         max_length=MAX_ID_LENGTH,
         description=(
             "Optional Post id of an existing reply in the addressed Topic. "
-            "Omit to reply directly to the Topic."
+            "Omit to reply directly to the Topic. POLL Topics reject this "
+            "field: a vote is always a direct Topic reply."
         ),
     )
     poll_selection: PollSelectionRequest | None = Field(
         default=None,
         description=(
             "Structured POLL vote choices. Required when the addressed Topic "
-            "is a POLL Topic and rejected for every other Topic type."
+            "is a POLL Topic and rejected for every other Topic type. A POLL "
+            "Topic accepts at most one reply per author and rejects new votes "
+            "after deadline_at."
         ),
     )
 

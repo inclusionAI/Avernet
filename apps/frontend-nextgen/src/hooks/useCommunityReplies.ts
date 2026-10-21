@@ -115,6 +115,49 @@ export function useCommunityReplies({
     ],
   );
 
+  const publishVote = useCallback(
+    async (optionIndices: number[]) => {
+      const topic = selectedTopic;
+      if (!topic || topic.topicType !== 'poll') return false;
+      const poll = topic.topicConfig?.poll;
+      if (!poll) return false;
+      const uniqueIndices = [...new Set(optionIndices)].sort((left, right) => left - right);
+      const labels = uniqueIndices.map((index) => poll.options[index]);
+      const selectionIsComplete =
+        uniqueIndices.length === optionIndices.length && labels.every((label) => !!label);
+      if (!uniqueIndices.length || !selectionIsComplete) return false;
+
+      setReplyPublishing(true);
+      try {
+        await communityService.createReply({
+          topicId: topic.id,
+          body: `投票选择：${labels.join('、')}`,
+          authorId: currentUserId || 'current-user',
+          authorName,
+          authorAvatarUrl,
+          pollSelection: uniqueIndices,
+        });
+        setReplyTargetPostId(null);
+        await fetchReplies(topic.id, replyPage);
+        notifySuccess('投票成功');
+        return true;
+      } catch (error) {
+        notifyError(communityErrorMessage(error, '投票发布失败'), { title: '投票失败' });
+        return false;
+      } finally {
+        setReplyPublishing(false);
+      }
+    },
+    [
+      authorAvatarUrl,
+      authorName,
+      currentUserId,
+      fetchReplies,
+      replyPage,
+      selectedTopic,
+    ],
+  );
+
   const replyPageCount = Math.max(1, Math.ceil(Math.max(0, replyTotal) / COMMUNITY_REPLY_PAGE_SIZE));
 
   return {
@@ -131,5 +174,6 @@ export function useCommunityReplies({
     startReply,
     cancelReply,
     publishReply,
+    publishVote,
   };
 }

@@ -68,6 +68,8 @@ export interface CommunityReply {
   createdAt: string;
   /** Optional Post being referenced. The list remains flat; this is not a tree edge. */
   replyToPostId?: string;
+  /** Structured vote indexes for POLL replies. */
+  pollSelection?: number[];
   /** Read-only floor number derived by the backend from first-level reply order. */
   replyToFloorNo?: number;
   /**
@@ -129,4 +131,5 @@ export interface CreateCommunityReplyInput {
   authorName?: string;
   authorAvatarUrl?: string;
   replyToPostId?: string;
+  pollSelection?: number[];
 }

@@ -11,11 +11,14 @@ from agentclaw.community.core.repository.protocols.task.forum import (
     ForumRepositoryProtocol,
 )
 from agentclaw.community.core.task.forum.models import (
+    TOPIC_STATUS_CLOSED,
+    TOPIC_STATUS_OPEN,
     ForumPollProjectionInput,
     ForumPollResultOptionRecord,
     ForumPollResultRecord,
     ForumPollStatisticsResult,
     ForumTopicAnalysisRecord,
+    ForumTopicRecord,
 )
 from agentclaw.community.core.task.forum.poll_statistics_protocol import (
     ForumPollStatisticsServiceProtocol,
@@ -40,6 +43,7 @@ class ForumPollStatisticsService(ForumPollStatisticsServiceProtocol):
     def execute(self) -> ForumPollStatisticsResult:
         topics_processed = 0
         posts_processed = 0
+        topics_closed = 0
         offset = 0
 
         while True:
@@ -52,6 +56,7 @@ class ForumPollStatisticsService(ForumPollStatisticsServiceProtocol):
             )
             for topic in page.items:
                 topics_processed += 1
+                topics_closed += int(self._close_if_expired(topic))
                 posts_processed += self._advance_topic(topic.topic_id)
             if len(page.items) < self._TOPIC_PAGE_SIZE:
                 break
@@ -60,7 +65,24 @@ class ForumPollStatisticsService(ForumPollStatisticsServiceProtocol):
         return ForumPollStatisticsResult(
             topics_processed=topics_processed,
             posts_processed=posts_processed,
+            topics_closed=topics_closed,
         )
+
+    def _close_if_expired(self, topic: ForumTopicRecord) -> bool:
+        """Close one expired Poll through the 60-second digest task."""
+        poll = None if topic.topic_config is None else topic.topic_config.poll
+        if (
+            topic.status != TOPIC_STATUS_OPEN
+            or poll is None
+            or poll.deadline_at is None
+            or poll.deadline_at > datetime.now(timezone.utc)
+        ):
+            return False
+        updated = self._repository.update_topic_status(
+            topic_id=topic.topic_id,
+            status=TOPIC_STATUS_CLOSED,
+        )
+        return updated is not None and updated.status == TOPIC_STATUS_CLOSED
 
     def _advance_topic(self, topic_id: str) -> int:
         processed_posts = 0

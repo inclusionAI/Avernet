@@ -213,6 +213,7 @@ describe('CommunityService', () => {
       body: '  回复内容  ',
       authorId: 'u',
       replyToPostId: 'post-1',
+      pollSelection: [0],
     });
     expect(createReply).toHaveBeenCalledWith(
       {
@@ -220,6 +221,7 @@ describe('CommunityService', () => {
         body: '回复内容',
         authorId: 'u',
         replyToPostId: 'post-1',
+        pollSelection: [0],
       },
       undefined,
     );

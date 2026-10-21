@@ -209,6 +209,7 @@ export function useCommunity() {
   return {
     ...store,
     ...replies,
+    currentUserId,
     load,
     loadMore,
     hasMore,
