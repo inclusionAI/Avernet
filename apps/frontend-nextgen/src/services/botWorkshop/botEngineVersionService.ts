@@ -122,6 +122,12 @@ function getUpdateAvailability(
 }
 
 export const botEngineVersionService = {
+  getInspectionRefusal(error: unknown): { notificationKey?: string } | undefined {
+    return error instanceof BackendRequestError && error.status === 404
+      ? { notificationKey: error.toastKey }
+      : undefined;
+  },
+
   getRestartPermissionInput(bot: BotDomain): EngineRestartPermissionInput {
     return {
       actions: bot.actions,

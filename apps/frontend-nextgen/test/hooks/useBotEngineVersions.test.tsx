@@ -9,6 +9,11 @@ import { botEngineVersionService } from '@/services/botWorkshop/botEngineVersion
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { toast } from 'sonner';
+import { useErrorNotifyObserver } from '@/hooks/useErrorNotifyObserver';
+import { notifyError } from '@/components/ui/notify';
+import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
+
+jest.mock('@/components/ui/notify');
 
 jest.mock('sonner', () => {
   const { jest: mockJest } = require('@jest/globals');
@@ -202,7 +207,7 @@ describe('useBotEngineVersions', () => {
     restart.mockRestore();
   });
 
-  test('requires explicit engine-restart permission before invoking update', async () => {
+  test('requires restart permission before inspecting or invoking update', async () => {
     jest.mocked(botController.getBotEngineVersion).mockResolvedValue({ code: 200000, data: version });
     const restartAndConfirm = jest.spyOn(botEngineVersionService, 'restartAndConfirmUpdate');
     restartAndConfirm.mockResolvedValue({
@@ -213,7 +218,7 @@ describe('useBotEngineVersions', () => {
     const unauthorizedTarget = { ...target, restartPermission: { actions: [] } };
     const { result } = renderHook(() => useBotEngineVersions([unauthorizedTarget]));
 
-    await waitFor(() => expect(result.current.states[target.key]?.kind).toBe('ready'));
+    await waitFor(() => expect(result.current.states[target.key]?.kind).toBe('idle'));
     let updated = true;
     await act(async () => {
       updated = await result.current.update(target.key);
@@ -245,5 +250,80 @@ test('stops service version verification when the card leaves draft', async () =
     expect(botController.getBotEngineVersion).toHaveBeenCalledTimes(1);
   } finally {
     restart.mockRestore();
+  }
+});
+
+
+test.each([
+  { actions: ['view', 'chat'] },
+  { actions: ['engine_restart'] },
+  { actions: [] },
+  { actions: ['restart'], disabledActions: { restart: 'Bot editor permission required' } },
+  { actions: ['restart'], lockedByOther: true },
+])('does not inspect without usable restart permission: %j', async (restartPermission) => {
+  const { result } = renderHook(() => useBotEngineVersions([{ ...target, restartPermission }]));
+  await waitFor(() => expect(result.current.states[target.key]?.kind).toBe('idle'));
+  expect(botController.getBotEngineVersion).not.toHaveBeenCalled();
+  await act(async () => result.current.inspect(target.key));
+  expect(botController.getBotEngineVersion).not.toHaveBeenCalled();
+  expect(toast.error).not.toHaveBeenCalled();
+});
+
+test('silently clears the badge and cancels the default notification for inspection 404', async () => {
+  useErrorNotifyStore.getState().reset();
+  useErrorNotifyStore.getState().enqueue({ toastKey: 'inspection-404', message: 'Not found' });
+  jest.mocked(botController.getBotEngineVersion).mockRejectedValue(new BackendRequestError('Not found', {
+    status: 404, apiPath: '/openapi/v1/bots/bot-1/engine-version', toastKey: 'inspection-404',
+  }));
+  const { result } = renderHook(() => useBotEngineVersions([target]));
+  await waitFor(() => expect(result.current.states[target.key]?.kind).toBe('idle'));
+  expect(useErrorNotifyStore.getState().queue[0]?.cancelled).toBe(true);
+  expect(toast.error).not.toHaveBeenCalled();
+  useErrorNotifyStore.getState().reset();
+});
+
+test('clears an existing version observation when restart permission is removed', async () => {
+  jest.mocked(botController.getBotEngineVersion).mockResolvedValue({ code: 200000, data: version });
+  const { result, rerender } = renderHook(({ targets }) => useBotEngineVersions(targets), { initialProps: { targets: [target] } });
+  await waitFor(() => expect(result.current.states[target.key]?.kind).toBe('ready'));
+  rerender({ targets: [{ ...target, restartPermission: { actions: ['view', 'chat'] } }] });
+  await waitFor(() => expect(result.current.states[target.key]?.kind).toBe('idle'));
+  expect(botController.getBotEngineVersion).toHaveBeenCalledTimes(1);
+});
+
+
+test('aborts pending inspection and ignores its late response after permission revocation', async () => {
+  let resolve!: (value: { code: number; data: typeof version }) => void;
+  jest.mocked(botController.getBotEngineVersion).mockImplementation(() => new Promise((done) => { resolve = done; }));
+  const { result, rerender } = renderHook(({ targets }) => useBotEngineVersions(targets), { initialProps: { targets: [target] } });
+  await waitFor(() => expect(botController.getBotEngineVersion).toHaveBeenCalledTimes(1));
+  const signal = jest.mocked(botController.getBotEngineVersion).mock.calls[0][1].signal;
+  rerender({ targets: [{ ...target, restartPermission: { actions: [] } }] });
+  expect(signal?.aborted).toBe(true);
+  await act(async () => resolve({ code: 200000, data: version }));
+  expect(result.current.states[target.key]?.kind).toBe('idle');
+});
+
+test('the global notification observer does not display an inspection 404', async () => {
+  jest.useFakeTimers();
+  useErrorNotifyStore.getState().reset();
+  jest.mocked(notifyError).mockClear();
+  jest.mocked(botController.getBotEngineVersion).mockImplementation(async () => {
+    useErrorNotifyStore.getState().enqueue({ toastKey: 'race-404', message: 'Not found' });
+    throw new BackendRequestError('Not found', { status: 404, apiPath: '/openapi/v1/bots/bot-1/engine-version', toastKey: 'race-404' });
+  });
+  const hook = renderHook(() => {
+    useErrorNotifyObserver();
+    return useBotEngineVersions([target]);
+  });
+  try {
+    await act(async () => { await Promise.resolve(); });
+    act(() => { jest.runOnlyPendingTimers(); });
+    expect(hook.result.current.states[target.key]?.kind).toBe('idle');
+    expect(notifyError).not.toHaveBeenCalled();
+  } finally {
+    hook.unmount();
+    useErrorNotifyStore.getState().reset();
+    jest.useRealTimers();
   }
 });

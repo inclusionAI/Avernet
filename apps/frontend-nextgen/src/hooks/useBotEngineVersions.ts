@@ -4,6 +4,7 @@ import {
   type EngineVersionObservation,
   type EngineVersionTarget,
 } from '@/domain/botEngineVersion';
+import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import type { ContainerInstance } from '@/services/botWorkshop/botContainerService';
 import {
   botEngineVersionService,
@@ -35,6 +36,11 @@ interface UseBotEngineVersionsResult {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error && error.message.trim() ? error.message : '引擎版本查询失败';
+}
+
+function canInspect(target: EngineVersionTarget): boolean {
+  return target.enabled && supportsEngineVersion(target.engine)
+    && botEngineVersionService.getRestartPermission(target.restartPermission).allowed;
 }
 
 function targetSignature(targets: EngineVersionTarget[]): string {
@@ -77,7 +83,7 @@ export function useBotEngineVersions(targets: EngineVersionTarget[]): UseBotEngi
   const inspect = useCallback(
     async (key: string, deviceUuid?: string) => {
       const target = targetByKey.get(key);
-      if (!target || !target.enabled || !supportsEngineVersion(target.engine)) {
+      if (!target || !canInspect(target)) {
         setStates((current) => ({ ...current, [key]: { kind: 'idle' } }));
         return;
       }
@@ -97,6 +103,14 @@ export function useBotEngineVersions(targets: EngineVersionTarget[]): UseBotEngi
           setStates((current) => ({ ...current, [key]: result }));
         }
       } catch (error) {
+        // Permissions can be revoked after inventory was loaded. Background
+        // inspection must not turn that expected race into a page-wide error.
+        const refusal = botEngineVersionService.getInspectionRefusal(error);
+        if (refusal) {
+          if (refusal.notificationKey) useErrorNotifyStore.getState().cancel(refusal.notificationKey);
+          if (!controller.signal.aborted) setStates((current) => ({ ...current, [key]: { kind: 'idle' } }));
+          return;
+        }
         if (controller.signal.aborted) return;
         setStates((current) => ({ ...current, [key]: { kind: 'error', message: errorMessage(error) } }));
       } finally {
@@ -129,13 +143,13 @@ export function useBotEngineVersions(targets: EngineVersionTarget[]): UseBotEngi
       for (const target of targetByKey.values()) {
         nextStates[target.key] = continuingUpdates.has(target.key)
           ? current[target.key]
-          : target.enabled && supportsEngineVersion(target.engine) ? { kind: 'loading' } : { kind: 'idle' };
+          : canInspect(target) ? { kind: 'loading' } : { kind: 'idle' };
       }
       return nextStates;
     });
     previousTargets.current = targetByKey;
     for (const target of targetByKey.values()) {
-      if (!continuingUpdates.has(target.key) && target.enabled && supportsEngineVersion(target.engine)) void inspect(target.key);
+      if (!continuingUpdates.has(target.key) && canInspect(target)) void inspect(target.key);
     }
   }, [signature, targetByKey, inspect]);
 

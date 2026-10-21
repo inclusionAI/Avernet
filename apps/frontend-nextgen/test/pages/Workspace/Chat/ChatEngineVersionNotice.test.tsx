@@ -14,7 +14,7 @@ const observation = {
   context: { bot_id: 'bot-1', stage: 'draft', checked_at: '2026-10-20T00:00:00Z' },
 };
 
-test('renders only a confirmed update or an explicit instance choice and scopes dismissal through its owner', () => {
+test('renders only a confirmed update and scopes dismissal through its owner', () => {
   const onOpen = jest.fn();
   const onDismiss = jest.fn();
   const { rerender } = render(
@@ -38,4 +38,15 @@ test('renders only a confirmed update or an explicit instance choice and scopes 
     />,
   );
   expect(screen.queryByTestId('chat-engine-version-notice')).toBeNull();
+});
+
+
+test.each([
+  { kind: 'idle' }, { kind: 'loading' }, { kind: 'not_applicable' },
+  { kind: 'error', message: 'Not found' }, { kind: 'select_instance', instances: [] },
+  { kind: 'ready', observation: { ...observation, comparison: 'same', restart_hint: 'none' } },
+  { kind: 'ready', observation: { ...observation, comparison: 'unknown' } },
+])('does not prompt for an unconfirmed upgrade: %j', (state) => {
+  const { container } = render(<ChatEngineVersionNotice state={state as BotEngineVersionState} onOpen={jest.fn()} onDismiss={jest.fn()} />);
+  expect(container.childElementCount).toBe(0);
 });
