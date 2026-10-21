@@ -10,7 +10,11 @@ export function projectRepairEvidence<T extends RepairItem>(item:T,forAggregatio
  const context=item.context??{},diagnoses=records(context.diagnoses),sources=item.sources;
  const projected:Record<string,unknown>={};
  for(const key of ['signature','nodeId','failureMode','sourceSnapshot','targetSnapshot','referenceOnly'])if(context[key]!==undefined)projected[key]=context[key];
- projected.evidenceSummary={diagnosisCount:diagnoses.length,sourceCount:sources.length,flowIds:repairEvidenceFlows(item),...repairEvidenceFacts(item),excerpted:true,originals:forAggregation?'Original suggestions retain complete reports; this aggregation request contains excerpts only, which do not prove resolution.':'Frozen materials retain complete reports and evidence; excerpts do not prove resolution.'};
+ const flows=repairEvidenceFlows(item),facts=repairEvidenceFacts(item);
+ projected.evidenceSummary={diagnosisCount:diagnoses.length,sourceCount:sources.length,
+  ...(!forAggregation?{sourceRefsSha256:digestRepairJson(sources)}:{}),
+  flowCount:flows.length,flowIds:forAggregation?flows:flows.slice(0,3),severity:facts.severity,eventCount:facts.eventIds.length,eventIds:forAggregation?facts.eventIds:facts.eventIds.slice(0,3),
+  excerpted:true,originals:forAggregation?'Original suggestions retain complete reports; this aggregation request contains excerpts only, which do not prove resolution.':'Frozen materials retain complete source references, reports and evidence; inline identities are samples, not the full scope. Excerpts do not prove resolution.'};
  projected.diagnoses=diagnoses.slice(0,2).map(row=>{
   const result:Record<string,unknown>={};
   for(const key of ['analysisId','diagnosisId','flowId','nodeId','failureMode','severity','completedAtMs'])if(row[key]!==undefined)result[key]=row[key];
@@ -30,5 +34,5 @@ export function projectRepairEvidence<T extends RepairItem>(item:T,forAggregatio
   });
   return result;
  });
- return {...item,sources:forAggregation?sources.slice(0,3):sources,context:projected};
+ return {...item,sources:sources.slice(0,3),context:projected};
 }

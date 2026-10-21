@@ -71,3 +71,11 @@ it('displays frozen core summaries without downloading optional originals until 
  expect(await screen.findByText(/完整冻结证据/)).toBeVisible()
  expect(api.material).toHaveBeenCalledExactlyOnceWith('task',4,'a'.repeat(64))
 })
+
+it('shows the full batch run count when inline source and flow identities are samples',()=>{
+ const value=revision();value.input.materials={schemaVersion:'repair-frozen-materials/v1',recordId:'materials',sha256:'f'.repeat(64),bytes:3477398,flowCount:418}
+ value.input.items[0].context={evidenceSummary:{flowIds:['run-0','run-1','run-2'],flowCount:418}}
+ render(<RepairTaskScope revision={value}/>);
+ expect(screen.getByText('2 项原始建议 · 依据覆盖 418 个运行')).toBeVisible()
+ expect(screen.queryByText(/依据覆盖 3 个运行/)).not.toBeInTheDocument()
+});

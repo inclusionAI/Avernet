@@ -42,7 +42,7 @@ export type RepairBaseline = {
 export type RepairBatchInput = {
   schemaVersion: typeof REPAIR_BATCH_SCHEMA; taskId: string; revision: number; baseline: RepairBaseline;
   items: RepairItem[]; excludedSources: { count: number; digest: string }; instructions: string;
-  materials?: {schemaVersion:'repair-frozen-materials/v1';recordId:string;sha256:string;bytes:number};
+  materials?: {schemaVersion:'repair-frozen-materials/v1';recordId:string;sha256:string;bytes:number;flowCount?:number};
   automation?: AutomationOrigin;
   integration?: { schemaVersion: 'workflow-proposal-plan/v1'; baselineSpecDigest: string; plans: Array<{ id: string; originalItemIds: string[]; goals: string[]; relation: string; causes?: import('./repair-proposal.js').ProposalCause[]; unknowns?: string[] }> };
   parentCandidateCommit: string | null; feedback: string; previousReportRef: string | null; taskBranch: string;
@@ -182,7 +182,7 @@ export function validateRepairBatchInput(value: unknown): RepairBatchInput {
   valid(gitIdentity(value.taskId, 64) && integer(value.revision, 1), 'revision identity');
   valid(Array.isArray(value.items) && value.items.length > 0 && value.items.length <= MAX_ITEMS, 'items');
   value.items.forEach(validateRepairItem);
-  if(value.materials!==undefined){const ref=value.materials;valid(object(ref)&&ref.schemaVersion==='repair-frozen-materials/v1'&&digest(ref.recordId)&&digest(ref.sha256)&&integer(ref.bytes,1)&&Number(ref.bytes)<=MAX_MATERIAL_BYTES,'frozen materials');}
+  if(value.materials!==undefined){const ref=value.materials;valid(object(ref)&&ref.schemaVersion==='repair-frozen-materials/v1'&&digest(ref.recordId)&&digest(ref.sha256)&&integer(ref.bytes,1)&&Number(ref.bytes)<=MAX_MATERIAL_BYTES&&(ref.flowCount===undefined||integer(ref.flowCount)),'frozen materials');}
   if (value.automation !== undefined) validateAutomationOrigin(value.automation);
   if (value.integration !== undefined) {
     const integration = value.integration;

@@ -33,7 +33,7 @@ export default function RepairTaskScope({revision}:{revision:RepairRevision}) {
  return <section aria-label="所选版本处理范围" className="rounded-lg border border-input bg-card p-5">
   <h3 className="text-base font-semibold">本版优化目标</h3>
   {revision.input.materials&&<p className="mt-2 text-xs text-muted-foreground">完整原始材料已独立冻结（{(revision.input.materials.bytes/1024/1024).toFixed(2)} MiB）；展开下方原始建议按需查看。</p>}
-  <p className="mt-2 text-sm text-muted-foreground">{revision.input.items.length} 项原始建议 · {flows.size ? `依据覆盖 ${flows.size} 个运行` : '来源运行数未知'}</p>
+  <p className="mt-2 text-sm text-muted-foreground">{revision.input.items.length} 项原始建议 · {(revision.input.materials?.flowCount??flows.size) ? `依据覆盖 ${revision.input.materials?.flowCount??flows.size} 个运行` : '来源运行数未知'}</p>
   {plans?.length ? <div className="mt-4 space-y-3">{plans.map((plan,index)=>{
    const items=revision.input.items.filter(item=>plan.originalItemIds.includes(item.itemId))
    return <article key={plan.id} className="rounded-lg border border-input p-4">

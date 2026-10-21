@@ -26,6 +26,12 @@ export function repairActionFailure(error: unknown): { message: string; action: 
   if (body.reasonCode === 'PLAN_NOT_READY') return { message: '重叠修改尚待整合，请等待整理或只选择一项原建议；原选择与要求保留。', action: null }
   if (body.reasonCode === 'EVIDENCE_INCOMPLETE') return { message: '原始证据缺失、被裁剪或校验失败，请补充完整证据；选择与要求保留，刷新列表不会修复证据。', action: null }
   if (body.reasonCode === 'SOURCE_READ_UNAVAILABLE') return { message: '原始建议或证据读取失败，选择与要求保留。请重试核对；本次未创建新任务。', action: 'refresh-sources' }
+  if (body.code === 'PAYLOAD_TOO_LARGE' && ['frozen_batch','frozen_materials','source_material'].includes(String(body.stage))) {
+    const stage=body.stage==='frozen_batch'?'冻结后的核心输入':'完整原始材料'
+    const sizes=Number.isSafeInteger(body.actualBytes)&&Number.isSafeInteger(body.limit)?`（${Number(body.actualBytes).toLocaleString('en-US')} 字节，上限 ${Number(body.limit).toLocaleString('en-US')} 字节）`:''
+    const request=typeof body.requestId==='string'&&/^[a-zA-Z0-9-]{1,64}$/.test(body.requestId)?` 请求编号：${body.requestId}。`:''
+    return {message:`${stage}超过大小上限${sizes}，未派发生成。选择与要求保留，请联系维护人员核对输入大小。${request}`,action:null}
+  }
   if (body.code === 'PAYLOAD_TOO_LARGE') return { message: body.reasonCode === 'REPAIR_FROZEN_ITEM_TOO_LARGE' ? '单条原始建议或证据超过安全冻结上限，无法生成。选择与要求保留，请先整理原始证据。' : '请求或冻结证据超过大小上限，请缩小范围或缩短说明；选择与要求保留。', action: null }
   if (body.code === 'SOURCE_CHANGED' || body.code === 'ITEM_BUSY' || body.code === 'ITEM_NOT_FOUND') return { message: '正在逐项核对已选建议，只需重新确认受影响条目；其余选择与文字要求保留。', action: 'refresh-sources' }
   if (failure.status === 401 || failure.status === 403) return { message: '当前身份没有确认修改权限，请核对登录与工作流权限。', action: 'refresh-task' }

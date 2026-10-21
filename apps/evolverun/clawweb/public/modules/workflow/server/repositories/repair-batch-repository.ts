@@ -104,7 +104,7 @@ export class RepairBatchRepository {
         || canonicalRepairJson(content(itemFromRow(existing))) !== canonicalRepairJson(content(item))) conflict('CONTENT_MISMATCH', 'An immutable content identity cannot be replaced');
       const sources = [...new Map([...JSON.parse(existing.source_refs_json), ...item.sources].map(source => [canonicalRepairJson(source), source])).values()];
       await tx.exec('UPDATE workflow_repair_items SET source_refs_json = ?, content_json = ?, updated_at_ms = ? WHERE item_id = ?',
-        [boundedRepairJson(sources, MAX_FROZEN_BYTES), contentJson, Date.now(), existing.item_id]);
+        [boundedRepairJson(sources, MAX_MATERIAL_BYTES), contentJson, Date.now(), existing.item_id]);
       return (await this.readItem(tx, input.workflowId, existing.item_id))!;
     }
     const now = Date.now();
@@ -113,7 +113,7 @@ export class RepairBatchRepository {
        content_json, source_refs_json, state, state_version, updated_at_ms)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?)`,
     [item.itemId, input.workflowId, item.groupKey, item.proposalKey, input.episodeKey, identityDigest,
-      item.contentRevision, item.previousItemId, contentJson, boundedRepairJson(item.sources, MAX_FROZEN_BYTES), now]);
+      item.contentRevision, item.previousItemId, contentJson, boundedRepairJson(item.sources, MAX_MATERIAL_BYTES), now]);
     return (await this.readItem(tx, input.workflowId, item.itemId))!;
   }
 
@@ -186,8 +186,9 @@ export class RepairBatchRepository {
   /** Caller holds the workflow lock. Task records fence read-only historical
    * references without taking ownership of the original items. */
   async assertHistoricalScopeAvailable(tx: IDatabase, input: RepairBatchInput, publication = false): Promise<void> {
-    const scope = historicalScope(input);
-    if (!scope) return;
+    if (!input.items.some(historicalReference)) return;
+    const materials = new RepairMaterialRepository(tx);
+    const scope = historicalScope(await materials.expand(input));
     const lock = tx.dbType === 'mysql' || tx.dbType === 'zdas' ? ' FOR UPDATE' : '';
     const revisions = (await tx.query<Row>(
       `SELECT * FROM workflow_repair_revisions WHERE workflow_id = ? ORDER BY revision DESC${lock}`, [input.baseline.workflowId],
@@ -198,7 +199,7 @@ export class RepairBatchRepository {
       seen.add(other.taskId);
       if (other.taskId === input.taskId || (publication ? !['publishing', 'published'].includes(other.phase)
         : ['cancelled', 'no_change'].includes(other.phase))) continue;
-      if (historicalScope(other.input) === scope) throw new RepairBatchError('ITEM_BUSY',
+      if (other.input.items.some(historicalReference) && historicalScope(await materials.expand(other.input)) === scope) throw new RepairBatchError('ITEM_BUSY',
         '这些历史建议已用于其他迭代，请查看对应任务或取消后重新生成',
         { reasonCode: 'HISTORICAL_TASK_EXISTS', taskId: other.taskId });
     }
@@ -227,7 +228,8 @@ export class RepairBatchRepository {
     if (input.parentCandidateCommit !== (successful?.draft?.candidateCommit ?? null)) conflict('CONTENT_MISMATCH', 'Parent must be the task last successful candidate');
     await this.assertHistoricalScopeAvailable(tx, input);
     const claims = [];
-    for (const frozenItem of input.items) {
+    // Claims must validate every retained original source, not just inline samples.
+    for (const frozenItem of (await new RepairMaterialRepository(tx).expand(input)).items) {
       if(historicalReference(frozenItem)){if(!input.integration)conflict('INVALID_INPUT','Historical references require goal integration');continue;}
       const stored = await this.readItem(tx, workflowId, frozenItem.itemId);
       if (!stored) conflict('ITEM_NOT_FOUND', 'Selected item does not exist in this workflow');

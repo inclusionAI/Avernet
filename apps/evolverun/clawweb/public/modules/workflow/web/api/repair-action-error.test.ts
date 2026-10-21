@@ -36,3 +36,13 @@ it('preserves the real baseline error without treating it as source mutation', (
   expect(result.message).toContain('原建议基线已变化')
   expect(result.message).toContain('保留')
 })
+
+it('identifies frozen core size errors with safe sizes and request identity',()=>{
+ const result=repairActionFailure({status:413,body:JSON.stringify({code:'PAYLOAD_TOO_LARGE',stage:'frozen_batch',limit:1048576,actualBytes:1112074,requestId:'1dd0fc30-37da-49bd-b65c-599f704d2eb4',error:'private payload'})});
+ expect(result.message).toContain('核心输入');
+ expect(result.message).toContain('1,112,074');
+ expect(result.message).toContain('1,048,576');
+ expect(result.message).toContain('1dd0fc30-37da-49bd-b65c-599f704d2eb4');
+ expect(result.message).not.toContain('缩小范围');
+ expect(result.message).not.toContain('private payload');
+});

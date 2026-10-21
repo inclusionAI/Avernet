@@ -287,12 +287,17 @@ MySQL/ZDAS 仅有 DDL 渲染契约检查；真实目标数据库迁移、事务�
 `workflow-repair/v2` 输入仍限制为 1 MiB。完整来源及单次冻结材料另有
 `16 MiB - 4 KiB` 上限，适配现有 MEDIUMTEXT 记录存储；不是无界放大核心包。
 
-当完整输入超过核心预算时，同一事务将完整建议、诊断、报告与事件证据写入
+当完整输入超过 256 KiB 且证据投影能减小输入时，同一事务将完整建议、诊断、报告与事件证据写入
 现有 `workflow_repair_release_records`（`record_kind=repair_material`），核心
-输入仅保留完整 proposal/instruction/source 身份、代表证据摘要及
-`materials: {schemaVersion: 'repair-frozen-materials/v1', recordId, sha256, bytes}`。
-核心摘要保留完整运行集合和最高诊断影响，不能据此宣称目标已满足。小输入及
-历史版本仍可内联，旧任务无需迁移。凭据/PII 脱敏继续执行，生成材料不再沿用
+输入仅保留完整 proposal/instruction、前三个来源样本、代表证据摘要及
+`materials: {schemaVersion: 'repair-frozen-materials/v1', recordId, sha256, bytes, flowCount}`。
+不等到 1 MiB 才处理；核心总上限仍为 1 MiB。纯目标内容若投影无收益且仍在上限内，则保持内联。
+`context.evidenceSummary` 的 `sourceCount/sourceRefsSha256` 绑定完整来源数组
+（规范 JSON 的 SHA-256），`flowCount/eventCount` 保留总数，运行和事件编号各仅
+内联前三个样本。完整索引随原始材料保存；批次 `materials.flowCount` 是跨建议去重
+的运行总数，页面不能将样本数量误作覆盖范围。必要目标及操作不裁剪，超限错误
+返回各字段字节统计；日志每批只记录一条大小摘要，不输出材料正文。
+凭据/PII 脱敏继续执行，生成材料不再沿用
 聚合预览的文本/集合裁剪预算；完整材料超限会明确拒绝，不静默裁剪原文。
 
 记录与修订创建、建议占用原子提交，写入失败全部回滚。材料按任务/来源版本
@@ -304,14 +309,15 @@ MySQL/ZDAS 仅有 DDL 渲染契约检查；真实目标数据库迁移、事务�
 “原始建议与证据”才读取，不用实时材料填补读取失败。
 
 派发前服务端校验冻结材料，但不再把完整材料装回 AIS 参数。核心仍包含完整
-修改目标、用户约束、来源身份、代表诊断事实和关键错误摘录；完整报告作为参考。
+修改目标、用户约束、来源身份样本及完整索引摘要、代表诊断事实和关键错误摘录；完整报告作为参考。
 下载失败不能抹去核心依据，也不能把无法核实的目标宣称为已解决。
 
 支持 `repair-material-download/v1` 的执行端收到核心输入及逐条索引
 `materialAccess: {schemaVersion, token, files: [{itemId, bytes, sha256}]}`。
 Host 添加配置中的服务 baseUrl，以 `generate_candidate_materials_v1` 或
 `integrate_candidate_materials_v1` 动作派发；旧消费者会拒绝未知动作，不静默忽略材料。
-不支持下载的 Host 明确拒绝大材料任务，不回退为传完整报告。旧内联历史输入仍兼容。
+不支持下载的 Host 明确拒绝大材料任务，不回退为传完整报告。
+生产者与 TaskGuard 下载端需一同更新来源索引语义；本次不迁移旧冻结任务。
 
 一次执行的随机只读凭证仅以摘要保存到现有记录表（repair_material_access），
 绑定 task/revision/executionId，最长两小时；执行结束、取消或被重试替换即失效。
