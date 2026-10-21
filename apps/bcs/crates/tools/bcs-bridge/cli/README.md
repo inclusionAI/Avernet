@@ -69,7 +69,7 @@ bcs-bridge stop
   server Provider configuration or adds an authentication-mode request parameter.
 - `--engine claude-code|codex` (default `claude-code`) looks up `claude` / `codex`
   on `PATH` unless `--engine-bin` is given; `--model` and `--cwd` (default
-  `~/workspace`) are optional.
+  `~/workspace`, or `~/.bcn-bridge/bots/<bot_uuid>` for subbots) are optional.
 - Configuration is written atomically to `~/.bcn-bridge/bridge.toml` (0600), or to
   `--config` / `BRIDGE_CONFIG`. Gateway webhook tokens are never written to it;
   `start` reads them from `BCS_BRIDGE_PROVIDER_TOKENS` (a JSON object of Provider
@@ -353,7 +353,7 @@ New bindings still require an explicit webhook URL.
 Distributions that provide an `agentpass-subbots` identity resolver can register
 multiple Bots under one verified parent. A Token issued for an `agentpass-subbots`
 Provider selects this resolver automatically. Each invocation generates a new
-32-character random hexadecimal suffix in memory; there is no `--bot-slug`
+5-character random lowercase-alphanumeric suffix in memory; there is no `--bot-slug`
 option. Use `--bot-name` for a descriptive label, which need not be unique.
 
 The bridge sends a complete `provider_bot_ref=<parent>:<slug>` on both scoped
@@ -363,12 +363,30 @@ parses the last colon and preserves the full ref. Slugs must match
 `[a-z0-9][a-z0-9_-]{0,31}`; the complete ref is limited to 128 bytes.
 
 Successful registration appends a Bot with its own UUID and Static Token to the
-same bridge config. Runtime child processes receive a per-Bot caller context;
+same bridge config. Without `--cwd`, each new subbot gets a private workspace at
+`~/.bcn-bridge/bots/<full-bot-uuid>`; the short slug is not the directory key.
+The root is checked for writability before registration, and the Bot directory is
+created exclusively after the validated response supplies its UUID. Existing
+files, directories and symlinks at that destination are never reused or overwritten.
+An explicit `--cwd` must exist and must not resolve to another Bot's working
+directory in the same configuration (including symlink aliases). Existing Bots'
+slugs, workspaces, files and conversations are not migrated. Non-subbots retain
+`~/workspace` as their default. This is working-directory separation, not an OS sandbox.
+If workspace creation or configuration persistence fails after registration, a
+private recovery configuration retains the returned credentials and intended
+`cwd`; resolve the failure before starting it, rather than registering again.
+
+Runtime child processes receive a per-Bot caller context;
 `bcs-cli` forwards its `X-BCN-Actor-Bot-Id`. A Static Token selects its own Bot,
 while a parent AgentPass token requires an explicit Actor for subbots.
 
 Registration does not persist pending state. Old `.pending.json` files are ignored.
-Failures preserve the existing configuration and are not automatically retried.
+Saved suffixes and suffixes attempted by the current invocation are skipped
+locally. Only an HTTP 409 with the structured `registration_conflict` error code
+permits another random suffix, with at most three registration requests total.
+There is no additional parent lookup per retry. Other failures (including generic
+409s, timeouts, transport failures, 5xx responses and malformed success responses)
+are never automatically retried, and failures preserve the existing configuration.
 If the result is unknown, a remote Bot may already exist: inspect `agents/me`
 before registering again. A new invocation generates a new suffix and can create
 another Bot with the same display name. Saved runtime configurations remain usable.

@@ -8,6 +8,9 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde_json::json;
 use tokio::{net::TcpListener, process::Command, task::JoinHandle};
 
+#[path = "register/subbots.rs"]
+mod subbots;
+
 const WEBHOOK_TOKEN: &str = "provider-webhook-secret";
 const BOT_TOKEN: &str = "returned-bot-secret";
 const PREFIX: &str = "/bcs";

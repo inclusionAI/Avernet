@@ -59,3 +59,34 @@ fn complete_ref_validation_preserves_ordinary_refs_and_checks_boundaries() {
     }
     assert!(client::composed_ref("bad/parent", Some("a")).is_err());
 }
+
+
+#[tokio::test]
+async fn only_structured_registration_conflicts_are_retryable_on_either_route() {
+    use axum::{http::StatusCode, routing::post, Router};
+    for legacy in [false, true] {
+        for confirmed in [false, true] {
+            let response = if legacy {
+                serde_json::json!({"error": if confirmed { "registration_conflict" } else { "unrelated_conflict" }})
+            } else {
+                serde_json::json!({"code":40900,"data":{"error_code": if confirmed { "registration_conflict" } else { "unrelated_conflict" }}})
+            };
+            let route = if legacy { "/register" } else { "/openapi/v1/collaboration/register" };
+            let router = Router::new().route(route, post(move || {
+                let response = response.clone();
+                async move { (StatusCode::CONFLICT, axum::Json(response)) }
+            }));
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap(); });
+            let client = RegistrationClient::new(&format!("http://{address}")).unwrap();
+            let client = if legacy { client.with_legacy_registration() } else { client };
+            for slug in [Some("abc12"), None] {
+                let error = client.register("test-token", "Test Bot", "parent", "plugin", None, "provider", slug).await.err().unwrap();
+                assert_eq!(error.is::<client::RegistrationConflict>(), confirmed && slug.is_some());
+                assert!(error.to_string().contains("HTTP 409"));
+            }
+            server.abort();
+        }
+    }
+}

@@ -8,6 +8,8 @@ mod client;
 mod token;
 mod replacement;
 mod desktop;
+mod subbots;
+mod workspace;
 #[cfg(test)]
 mod subbots_tests;
 
@@ -69,7 +71,7 @@ pub struct RegisterArgs {
     /// Engine id
     #[arg(long)]
     engine: String,
-    /// Engine working directory (default: ~/workspace; created if missing)
+    /// Engine working directory (default: ~/.bcn-bridge/bots/<bot_uuid> for subbots, ~/workspace otherwise)
     #[arg(long)]
     cwd: Option<PathBuf>,
     /// Model passed to the engine
@@ -181,6 +183,7 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     // Historical Tokens have no mode metadata, so retain the selected resolver policy.
     let provider_auth = scope.auth_mode.as_deref().unwrap_or_else(|| identity.runtime_auth());
     identity.preflight()?;
+    let subbots = provider_auth == "agentpass-subbots";
     let bootstrap = if args.replace_existing {
         if provider_auth == "agentpass-subbots" {
             bail!("Subbot registration appends Bots; --replace-existing is unsupported for this mode");
@@ -254,15 +257,9 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
             (None, Some(url))
         }
     };
-    let cwd = match args.cwd.clone() {
-        Some(cwd) => cwd,
-        None => {
-            let workspace = dirs::home_dir().context("Cannot locate home directory; specify --cwd")?.join("workspace");
-            std::fs::create_dir_all(&workspace).context("Cannot create default engine working directory")?;
-            workspace
-        }
-    }.canonicalize().context("Cannot resolve engine working directory")?;
-    if !cwd.is_dir() { bail!("Engine working directory must be a directory"); }
+    let workspace = workspace::Workspace::prepare(args.cwd.as_deref(), subbots)?;
+    if subbots { workspace.check_explicit(&bootstrap.document, path)?; }
+    let cwd = workspace.identity_cwd();
     #[cfg(unix)]
     let _runtime_reservation = if bootstrap.previous.is_some() {
         let directory = dirs::home_dir().context("Cannot locate home directory")?.join(".bcn-bridge");
@@ -359,10 +356,20 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     if append && existing_bots.iter().any(|item| item.get("agent_code").and_then(toml::Value::as_str) != Some(provider_bot_ref.as_str())) {
         bail!("Appending a Bot requires the same AgentPass parent");
     }
-    let subbots = provider_auth == "agentpass-subbots";
-    // Every invocation creates a new Bot. Never persist or replay a registration intent.
-    let slug = subbots.then(|| uuid::Uuid::new_v4().simple().to_string());
-    let registration = client.register(&args.token, args.bot_name.trim(), &provider_bot_ref, args.mode.name(), webhook_url, &provider_id, slug.as_deref()).await?;
+    // Only a confirmed duplicate ref permits another attempt; unknown outcomes never replay.
+    let mut slugs = subbots.then(|| subbots::Slugs::new(&existing_bots));
+    let mut attempts = 0;
+    let (slug, registration) = loop {
+        let slug = slugs.as_mut().map(subbots::Slugs::next).transpose()?;
+        attempts += 1;
+        match client.register(&args.token, args.bot_name.trim(), &provider_bot_ref, args.mode.name(), webhook_url, &provider_id, slug.as_deref()).await {
+            Ok(registration) => break (slug, registration),
+            Err(error) if subbots && error.is::<client::RegistrationConflict>() && attempts < subbots::REGISTRATION_ATTEMPTS => continue,
+            Err(error) => return Err(error),
+        }
+    };
+    let assigned_cwd = workspace.assigned_cwd(&registration.bot_uuid);
+    bot.insert("cwd".into(), assigned_cwd.to_str().context("Engine working directory must be UTF-8")?.into());
     document.insert("provider_id".into(), registration.registration.provider_id.into());
     bot.insert("provider_bot_ref".into(), registration.registration.provider_bot_ref.into());
     if let Some(slug) = &slug {
@@ -377,6 +384,11 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     let resolved = config::RegistrationSettings { api_url: Some(api_url), webhook_url: webhook_url.map(str::to_owned), provider_auth: Some(identity.runtime_auth().to_owned()) };
     document.insert("registration".into(), toml::Value::try_from(resolved).context("Cannot encode API settings")?);
     let text = toml::to_string_pretty(&document).context("Cannot encode registered bridge configuration")?;
+    if subbots {
+        if let Err(error) = workspace.create_assigned(&assigned_cwd, &bootstrap.document, path) {
+            return prepared.save_recovery(&text, &format!("cannot prepare the exclusive Bot workspace: {error:#}; resolve the saved cwd before starting"));
+        }
+    }
     if config::runtime(&document, path, webhook_token.as_deref()).is_err() {
         return prepared.save_recovery(&text, "runtime configuration validation failed");
     }
