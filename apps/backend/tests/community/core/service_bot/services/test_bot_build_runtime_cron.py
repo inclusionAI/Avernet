@@ -84,7 +84,7 @@ def test_restore_legacy_artifact_preserves_draft_runtime_tasks(tmp_path, monkeyp
     baas.resolve_container_provider.return_value = "baas"
     service = BotBuildService(
         user_list_repository=MagicMock(exists=MagicMock(return_value=False)),
-        fastdisk_publisher=MagicMock(try_publish=MagicMock(return_value=False),
+        artifact_transfer=MagicMock(try_publish=MagicMock(return_value=False),
                                     try_restore=MagicMock(return_value=False)),
         build_ignore_repository=MagicMock(), env="test",
         device_service=MagicMock(), baas_service=baas,

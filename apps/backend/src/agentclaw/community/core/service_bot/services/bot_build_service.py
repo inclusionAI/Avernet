@@ -41,7 +41,7 @@ from agentclaw.community.core.service_bot.services.agentclaw_artifact import (
     restore_agentclaw_artifact,
     sync_agentclaw_artifact,
 )
-from agentclaw.community.core.service_bot.services.fastdisk_publish import FastdiskPublisher
+from agentclaw.community.core.service_bot.artifact_transfer import ArtifactTransferStrategy
 from agentclaw.community.core.service_bot.services.local_bin_artifact import (
     restore_local_bin_artifact,
     sync_local_bin_artifact,
@@ -186,7 +186,7 @@ class BotBuildService:
         build_ignore_repository: BuildIgnoreRepositoryProtocol,
         user_list_repository: UserListRepositoryProtocol,
         env: str,
-        fastdisk_publisher: FastdiskPublisher,
+        artifact_transfer: ArtifactTransferStrategy,
     ):
         """初始化 BotBuildService。
 
@@ -213,7 +213,7 @@ class BotBuildService:
         self._build_ignore_repository = build_ignore_repository
         self._env = env
         self._user_list_repository = user_list_repository
-        self._fastdisk_publisher = fastdisk_publisher
+        self._artifact_transfer = artifact_transfer
 
     def _get_device_binding_repo(self):
         return self._device_binding_repo
@@ -413,8 +413,8 @@ class BotBuildService:
             transfer_started = time.monotonic()
             migration_success = False
             try:
-                if build_plan.engine_type in ("aicoding", "claude_code"):
-                    migration_success = self._fastdisk_publisher.try_publish(
+                if self._artifact_transfer.supports(build_plan):
+                    migration_success = self._artifact_transfer.try_publish(
                         device_id=device_id,
                         plan=build_plan,
                         source_root=str(provider.get_base_path()),
@@ -1935,7 +1935,7 @@ class BotBuildService:
         draft_dir = draft_nas_dir / build_plan.source_root_name
         # Fastdisk restores happen in the existing draft container, before any
         # host-side stat/chmod/rsync. The DB path is never used as a copy source.
-        if build_plan.engine_type in ("aicoding", "claude_code"):
+        if self._artifact_transfer.supports(build_plan):
             device_id = bot.get("device_id")
             if not device_id:
                 raise BotBuildMigrationError("恢复草稿缺少当前草稿设备 ID")
@@ -1946,7 +1946,7 @@ class BotBuildService:
                 f"{self._get_migration_path_base(owner_id=entity_id, bot_id=bot_id)}"
                 f"/{source_version}/{build_plan.migration_subpath}"
             )
-            if self._fastdisk_publisher.try_restore(
+            if self._artifact_transfer.try_restore(
                 device_id=device_id, plan=build_plan, source_root=runtime_root,
                 artifact_path=runtime_artifact, artifact_dir=artifact_dir,
                 remaining_timeout=remaining_timeout,

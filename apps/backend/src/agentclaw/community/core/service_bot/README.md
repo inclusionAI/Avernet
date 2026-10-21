@@ -32,6 +32,7 @@ provides:
   - "ServiceBot SQLAlchemy models"
 consumes:
   - "BotManagement"
+  - "ArtifactTransferStrategy"
   - "DeviceService + repo"
   - "SkillsPool layout state"
   - "RuntimeLayoutProbeServiceProtocol"
@@ -217,7 +218,17 @@ The broader service split remains a separate refactor, as recorded by the
 existing architecture allowlist; this fix reduces the service file size.
 ## Fastdisk artifact transfer
 
-`FastdiskPublisher` consumes the existing build plan and a command executor. It
+`BotBuildService` depends only on the neutral `ArtifactTransferStrategy` contract.
+The composition root injects `AicodingArtifactTransferStrategy` from
+`core/bot_management/engines/aicoding/artifact_transfer.py`. The strategy owns
+engine eligibility (`aicoding` and `claude_code` only), read-only detection and
+container-script invocation. Other engines never enter detection or script
+execution and retain the existing NAS build/restore path. `supports` is a pure
+scope check; transfer methods return false only when not applicable, and errors
+propagate without a NAS fallback. This is an internal ownership refactor: API,
+version paths, configuration keys, script schema and timeout values are unchanged.
+
+The AICoding strategy consumes the existing build plan and a command executor. It
 embeds only read-only mount detection so legacy containers need no detector
 installation. Non-fastdisk bots retain host-side NAS transfer. Detector failure
 is not a non-fastdisk result. Fastdisk bots require schema-5

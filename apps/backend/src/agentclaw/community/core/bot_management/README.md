@@ -18,6 +18,7 @@ provides:
   - "TeclawProvisionService"
   - "TeclawPublishTaskLifecycle"
   - "AicodingRestartLifecycle"
+  - "AicodingArtifactTransferStrategy"
   - "CreateBotForOthersService"
   - "DefaultBotPassportRepairService"
   - "BotQuotaService and BotQuotaScope"

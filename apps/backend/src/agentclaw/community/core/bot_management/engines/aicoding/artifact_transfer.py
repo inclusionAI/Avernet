@@ -12,7 +12,7 @@ import uuid
 import zlib
 import time
 import math
-from .artifact_command import run_artifact_command
+from agentclaw.community.core.service_bot.services.artifact_command import run_artifact_command
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Protocol
@@ -57,7 +57,7 @@ class FastdiskPublishError(RuntimeError):
 # Only the detector is embedded in Backend. Business transfer scripts are
 # installed by the container scripts repository and are never sent as fallback.
 ENTRY = '/home/admin/bin/service_publish.py'
-DETECTION = Path(__file__).parents[3] / 'resources' / 'fastdisk_detection'
+DETECTION = Path(__file__).parents[4] / 'resources' / 'fastdisk_detection'
 
 
 def detection_command() -> str:
@@ -80,7 +80,12 @@ def detection_command() -> str:
     return command
 
 
-class FastdiskPublisher:
+class AicodingArtifactTransferStrategy:
+    @staticmethod
+    def supports(plan: EngineBuildPlan) -> bool:
+        """Only coding engines own this container transfer policy."""
+        return plan.engine_type in ('aicoding', 'claude_code')
+
     def __init__(self, executor: PublishCommandExecutor, config: FastdiskPublishConfig,
                  *, bucket: str, endpoint: str, oss_mount_root: str):
         self.executor = executor
@@ -125,7 +130,7 @@ class FastdiskPublisher:
     def try_publish(self, *, device_id: str, plan: EngineBuildPlan,
                     source_root: str, target_dir: Path, ignore_paths: tuple[str, ...],
                     normalize_extra: Any) -> bool:
-        if plan.engine_type not in ('aicoding', 'claude_code'):
+        if not self.supports(plan):
             return False
         layout = self.detect(device_id)
         if layout['status'] == 'skip_no_fastdisk':
@@ -186,7 +191,7 @@ class FastdiskPublisher:
 
     def try_restore(self, *, device_id: str, plan: EngineBuildPlan,
                     source_root: str, artifact_path: str, artifact_dir: Path, remaining_timeout: Callable[[], float], normalize_extra: Any) -> bool:
-        if plan.engine_type not in ('aicoding', 'claude_code'):
+        if not self.supports(plan):
             return False
         layout = self.detect(device_id, timeout_seconds=remaining_timeout())
         if layout['status'] == 'skip_no_fastdisk':

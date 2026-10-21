@@ -1,6 +1,7 @@
 """Service Bot 构建冻结 Skills 文件制品的行为测试。"""
 
 from __future__ import annotations
+from agentclaw.community.core.bot_management.engines.aicoding.artifact_transfer import AicodingArtifactTransferStrategy
 
 import os
 from pathlib import Path
@@ -38,7 +39,7 @@ def _make_service(
     whitelist_service.is_bot_feature_enabled.return_value = False
     return BotBuildService(
         user_list_repository=MagicMock(exists=MagicMock(return_value=False)),
-        fastdisk_publisher=MagicMock(try_publish=MagicMock(return_value=False)),
+        artifact_transfer=MagicMock(supports=AicodingArtifactTransferStrategy.supports, try_publish=MagicMock(return_value=False)),
         build_ignore_repository=MagicMock(get=MagicMock(return_value=None)),
         env="test",
         device_service=device_service,

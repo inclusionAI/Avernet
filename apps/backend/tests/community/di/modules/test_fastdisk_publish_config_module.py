@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.core.service_bot.services.fastdisk_publish import (
+from agentclaw.community.core.bot_management.engines.aicoding.artifact_transfer import (
     FastdiskPublishConfig,
 )
 from agentclaw.community.di.modules import config_module

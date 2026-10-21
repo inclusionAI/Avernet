@@ -7,8 +7,8 @@ import shlex
 
 import pytest
 
-from agentclaw.community.core.service_bot.services.fastdisk_publish import (
-    DETECTION, detection_command, FastdiskPublishConfig, FastdiskPublisher, FastdiskPublishError,
+from agentclaw.community.core.bot_management.engines.aicoding.artifact_transfer import (
+    DETECTION, detection_command, FastdiskPublishConfig, AicodingArtifactTransferStrategy, FastdiskPublishError,
 )
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
 from agentclaw.community.core.workspace.engines.aicoding import _AICODING_BUILD_PLAN
@@ -16,7 +16,7 @@ from agentclaw.community.core.workspace.engines.aicoding import _AICODING_BUILD_
 
 @pytest.fixture(autouse=True)
 def transport(monkeypatch):
-    from agentclaw.community.core.service_bot.services import fastdisk_publish as module
+    from agentclaw.community.core.bot_management.engines.aicoding import artifact_transfer as module
     from agentclaw.community.core.service_bot.services.artifact_command import ArtifactCommandError
     def run(executor, device_id, command, *, timeout_seconds):
         result = executor.exec_shell_new(device_id=device_id, shell_cmd=command,
@@ -35,7 +35,7 @@ def result(code=0, status='run'):
 def publisher(results):
     executor = Mock()
     executor.exec_shell_new.side_effect = results
-    return FastdiskPublisher(executor, FastdiskPublishConfig(mist_secret_name="test-secret-name"), bucket='test',
+    return AicodingArtifactTransferStrategy(executor, FastdiskPublishConfig(mist_secret_name="test-secret-name"), bucket='test',
                              endpoint='https://oss.example.test', oss_mount_root='/aidesktop')
 
 
@@ -175,7 +175,7 @@ def test_failed_restore_stops_without_nas_fallback():
 ])
 def test_probe_inspects_version_without_executing_script(monkeypatch, tmp_path, content, expected_error):
     import subprocess
-    from agentclaw.community.core.service_bot.services import fastdisk_publish as module
+    from agentclaw.community.core.bot_management.engines.aicoding import artifact_transfer as module
     entry = tmp_path / 'service_publish.py'
     if content is not None:
         entry.write_text(content)
@@ -239,7 +239,7 @@ def test_embedded_detector_does_not_import_container_scripts(tmp_path):
 
 
 def test_restore_failure_is_logged_and_never_runs_nas(monkeypatch):
-    from agentclaw.community.core.service_bot.services import fastdisk_publish as module
+    from agentclaw.community.core.bot_management.engines.aicoding import artifact_transfer as module
     logger = Mock()
     monkeypatch.setattr(module, 'logger', logger)
     p = publisher([result(), result(44)])
@@ -282,7 +282,7 @@ def test_schema5_fixed_policy_matches_container_contract():
 def test_upload_and_restore_keep_same_bot_version_and_engine(engine, env_folder):
     from dataclasses import replace
     from agentclaw.community.core.workspace.engines.claude_code import _CLAUDE_CODE_BUILD_PLAN
-    from agentclaw.community.core.service_bot.services.fastdisk_publish import build_request
+    from agentclaw.community.core.bot_management.engines.aicoding.artifact_transfer import build_request
     plan = _AICODING_BUILD_PLAN if engine == 'aicoding' else _CLAUDE_CODE_BUILD_PLAN
     home = '/home/admin/.' + engine
     prefix = f'aidesktop/{env_folder}/bolt_data/staff_owner/bot-example/17/{engine}'
@@ -314,3 +314,22 @@ def test_upload_and_restore_keep_same_bot_version_and_engine(engine, env_folder)
             object_prefix=prefix, ignore_paths=(), normalize_extra=None,
             layout={'home': home, 'storage': '/opt/fastdisk'},
             config=FastdiskPublishConfig(), bucket='test', endpoint='https://oss.example.test')
+
+
+@pytest.mark.parametrize('engine', ['aicoding', 'claude_code', 'openclaw', 'teclaw', 'hermes', 'deepseek_harness', 'future_engine'])
+def test_engine_scope_is_owned_by_aicoding_strategy(engine):
+    from dataclasses import replace
+    plan = replace(_AICODING_BUILD_PLAN, engine_type=engine)
+    p = publisher([])
+    supported = engine in ('aicoding', 'claude_code')
+    assert p.supports(plan) is supported
+    p.executor.exec_shell_new.assert_not_called()
+    if not supported:
+        assert p.try_publish(device_id='unused', plan=plan, source_root='unused',
+                             target_dir=Path('/unused'), ignore_paths=(), normalize_extra=None) is False
+        budget = Mock(side_effect=AssertionError('unsupported engine consumed timeout'))
+        assert p.try_restore(device_id='unused', plan=plan, source_root='unused',
+                             artifact_path='unused', artifact_dir=Path('/unused'),
+                             remaining_timeout=budget, normalize_extra=None) is False
+        p.executor.exec_shell_new.assert_not_called()
+        budget.assert_not_called()

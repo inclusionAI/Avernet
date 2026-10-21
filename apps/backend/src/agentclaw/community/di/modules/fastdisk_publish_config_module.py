@@ -12,7 +12,7 @@ from typing import Any
 
 from injector import Module, provider, singleton
 
-from agentclaw.community.core.service_bot.services.fastdisk_publish import (
+from agentclaw.community.core.bot_management.engines.aicoding.artifact_transfer import (
     FastdiskPublishConfig,
 )
 from agentclaw.community.di.modules import config_module
