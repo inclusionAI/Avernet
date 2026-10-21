@@ -266,7 +266,7 @@ For connections to an existing desktop host, see
 [Codex desktop host integration](docs/codex-desktop.md). The `codex-desktop`
 engine uses the host's Unix WebSocket and requires no engine executable.
 
-`IdentityResolver::registration_ref` receives the selected engine, canonical workspace
+`IdentityResolver::registration_ref` receives the selected engine, canonical pre-registration directory
 and optional `--provider-bot-ref`. The default preserves the explicit reference;
 distributions can discover an existing local identity. Resolved references are
 validated before `registration_client` prepares authentication for both identity
@@ -347,6 +347,11 @@ same Provider, API endpoint, reference, engine and gateway mode. Local listener
 updates retain that endpoint without administrator authentication or network calls.
 New bindings still require an explicit webhook URL.
 
+
+For subbots without an explicit `--cwd`, the pre-registration directory passed
+to the identity hook is `~/.bcn-bridge/bots`, not the eventual Bot workspace: the
+server assigns the full Bot UUID only after registration. Engines never run in
+that shared root. An explicit `--cwd` is passed through as its canonical path.
 
 ### AgentPass sibling Bots
 

@@ -96,6 +96,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let workspace = Workspace::managed(&home.path().join("bots")).unwrap();
         let config = home.path().join("bridge.toml");
+        assert_eq!(workspace.identity_cwd(), home.path().join("bots").canonicalize().unwrap());
         let id = format!("bot_{}", uuid::Uuid::new_v4());
         let cwd = workspace.assigned_cwd(&id);
         assert_eq!(cwd.file_name().unwrap(), id.as_str());

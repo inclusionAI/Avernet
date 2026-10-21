@@ -26,7 +26,9 @@ pub trait IdentityResolver: Send + Sync {
     fn id(&self) -> &str;
     /// Environment checks run before any configuration or network access.
     fn preflight(&self) -> Result<()> { Ok(()) }
-    /// Resolve a local identity from the selected engine and canonical workspace.
+    /// Resolve a local identity from the selected engine and canonical pre-registration directory.
+    /// For a managed subbot workspace this is the workspace root: the final Bot UUID
+    /// and directory are not known until registration succeeds. Explicit --cwd is unchanged.
     /// Distributions may discover an existing identity; the default preserves CLI input.
     async fn registration_ref(&self, explicit_ref: Option<&str>, _engine: &str, _cwd: &std::path::Path) -> Result<Option<String>> {
         Ok(explicit_ref.map(str::to_owned))
