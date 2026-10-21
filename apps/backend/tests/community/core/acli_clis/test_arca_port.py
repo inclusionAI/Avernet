@@ -1,6 +1,7 @@
-"""``ArcaAcliPort`` — every engine answer becomes a result or an ``AcliPortError``."""
+"""``ArcaAcliPort`` — every engine answer becomes an operation, a listing or an ``AcliPortError``."""
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import Any
 
@@ -8,10 +9,13 @@ import pytest
 
 from agentclaw.community.core.acli_clis.arca_port import (
     INSTALL_PATH,
+    TOOLS_PATH,
     UNINSTALL_PATH,
     ArcaAcliPort,
 )
+from agentclaw.community.core.acli_clis.operations import AcliAction, AcliRuntime
 from agentclaw.community.core.acli_clis.port import AcliPortError
+from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError,
     DeviceAdapterHTTPStatusError,
@@ -21,14 +25,20 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
 pytestmark = pytest.mark.asyncio
 
 CONN = {"url": "http://engine"}
+RUNTIME = AcliRuntime(bot_id="bot-1", owner_id="owner-1", stage=PublishStage.VERIFY)
+OP = {
+    "id": "e" * 32, "action": "install", "name": "deepinsight-cli", "state": "running",
+    "started_at": "2026-10-21T00:00:00Z", "finished_at": None, "result": None, "error": None,
+}
 
 
-class _Resolver:
+class _Contexts:
     def __init__(self, error: Exception | None = None) -> None:
         self.error = error
+        self.calls: list[dict] = []
 
-    def resolve_for_bot(self, bot_id: str, user_id: str) -> Any:
-        assert (bot_id, user_id) == ("bot-1", "owner-1")
+    def resolve(self, **kwargs: Any) -> Any:
+        self.calls.append(kwargs)
         if self.error:
             raise self.error
         return SimpleNamespace(conn_info=CONN)
@@ -41,112 +51,184 @@ class _Transport:
         self.calls: list[tuple] = []
 
     async def invoke(self, conn_info, method, path, body=None, params=None, *, timeout=None):
-        self.calls.append((conn_info, method, path, body, params, timeout))
+        self.calls.append((conn_info, method, path, body, timeout))
         if self.error:
             raise self.error
         return self.response
 
 
-def _port(transport: _Transport, resolver: _Resolver | None = None) -> ArcaAcliPort:
-    return ArcaAcliPort(resolver=resolver or _Resolver(), transport=transport)  # type: ignore[arg-type]
+def _port(transport: _Transport, contexts: _Contexts | None = None) -> ArcaAcliPort:
+    return ArcaAcliPort(contexts=contexts or _Contexts(), transport=transport)  # type: ignore[arg-type]
 
 
-async def test_install_posts_name_and_dir_and_reads_the_tool() -> None:
-    transport = _Transport({"success": True, "data": {
-        "name": "deepinsight-cli", "command": "di", "description": "DI", "version": "1.0.9",
-    }})
+def _envelope(op: dict | None = OP, **fields: Any) -> dict:
+    return {"success": True, "data": {"operation": op} if op else None, **fields}
 
-    tool = await _port(transport).install(
-        bot_id="bot-1", owner_id="owner-1", name="deepinsight-cli"
+
+async def test_submit_posts_async_to_the_stage_and_returns_the_operation() -> None:
+    transport = _Transport(_envelope())
+    contexts = _Contexts()
+
+    op = await _port(transport, contexts).submit(RUNTIME, action=AcliAction.INSTALL, name="deepinsight-cli")
+
+    assert (op.id, op.state, op.active) == ("e" * 32, "running", True)
+    [(conn, method, path, body, timeout)] = transport.calls
+    assert (conn, method, path, body) == (
+        CONN, "POST", INSTALL_PATH, {"name": "deepinsight-cli", "async": True},
     )
-
-    assert (tool.name, tool.command, tool.description, tool.version) == (
-        "deepinsight-cli", "di", "DI", "1.0.9",
-    )
-    [(conn, method, path, body, params, timeout)] = transport.calls
-    assert (conn, method, path, body, params) == (
-        CONN, "POST", INSTALL_PATH, {"name": "deepinsight-cli"}, None,
-    )
-    assert timeout > 300
+    assert timeout <= 30
+    assert contexts.calls == [{"bot_id": "bot-1", "owner_id": "owner-1", "stage": "verify"}]
 
 
-async def test_uninstall_reports_whether_anything_was_removed() -> None:
-    transport = _Transport({"success": True, "data": {"name": "x", "uninstalled": False}})
+async def test_uninstall_and_cancel_paths() -> None:
+    transport = _Transport(_envelope())
+    port = _port(transport)
 
-    removed = await _port(transport).uninstall(
-        bot_id="bot-1", owner_id="owner-1", name="x"
-    )
+    await port.submit(RUNTIME, action=AcliAction.UNINSTALL, name="x")
+    await port.cancel(RUNTIME, action=AcliAction.INSTALL, name="x")
+    await port.cancel(RUNTIME, action=AcliAction.UNINSTALL, name="x")
 
-    assert removed is False
-    assert transport.calls[0][2] == UNINSTALL_PATH
-    # The engine may take 30 s + 300 s + 30 s (list, uninstall, confirm).
-    assert transport.calls[0][5] > 360
+    assert [c[2] for c in transport.calls] == [
+        UNINSTALL_PATH, f"{INSTALL_PATH}/cancel", f"{UNINSTALL_PATH}/cancel",
+    ]
 
 
-@pytest.mark.parametrize(
-    ("resolver_error", "transport", "code"),
-    [
-        (RuntimeError("no binding"), _Transport(), "not_running"),
-        (None, _Transport(error=DeviceAdapterEndpointNotFoundError(
-            '{"detail":"Not Found"}', standard_route_missing=True)), "engine_outdated"),
-        (None, _Transport(error=DeviceAdapterEndpointNotFoundError("gateway: no route")),
-         "engine_unreachable"),
-        (None, _Transport(error=DeviceAdapterHTTPStatusError(501, "x")), "engine_unsupported"),
-        (None, _Transport(error=DeviceAdapterHTTPStatusError(400, "x")), "invalid_input"),
-        (None, _Transport(error=DeviceAdapterHTTPStatusError(503, "x")), "engine_unreachable"),
-        (None, _Transport(error=DeviceAdapterTimeoutError("slow")), "timeout"),
-        (None, _Transport(error=ValueError("socket")), "engine_unreachable"),
-        (None, _Transport(response="not-a-dict"), "engine_unreachable"),
-        (None, _Transport({"success": False, "error": "install_failed", "message": "no such cli"}),
-         "install_failed"),
-        (None, _Transport({"success": False}), "engine_refused"),
-    ],
-)
-async def test_every_failure_becomes_a_coded_port_error(resolver_error, transport, code) -> None:
+async def test_an_ended_failed_operation_is_returned_not_raised() -> None:
+    failed = {**OP, "state": "failed", "error": {"code": "install_failed", "message": "nope"}}
+    transport = _Transport({"success": False, "error": "install_failed",
+                            "data": {"operation": failed}})
+
+    op = await _port(transport).get_operation(RUNTIME, "e" * 32)
+
+    assert (op.state, op.error_code, op.error_message) == ("failed", "install_failed", "nope")
+    assert transport.calls[0][1:3] == ("GET", f"/api/cli/acli/operations/{'e' * 32}")
+
+
+async def test_a_refusal_without_an_operation_raises_its_code() -> None:
+    transport = _Transport({"success": False, "error": "install_failed",
+                            "message": "cannot record", "data": None})
+
     with pytest.raises(AcliPortError) as caught:
-        await _port(transport, _Resolver(resolver_error)).install(
-            bot_id="bot-1", owner_id="owner-1", name="x"
+        await _port(transport).submit(RUNTIME, action=AcliAction.INSTALL, name="x")
+
+    assert (caught.value.code, caught.value.message) == ("install_failed", "cannot record")
+
+
+async def test_success_without_an_operation_is_bad_output() -> None:
+    with pytest.raises(AcliPortError) as caught:
+        await _port(_Transport({"success": True, "data": {}})).submit(
+            RUNTIME, action=AcliAction.INSTALL, name="x"
         )
-
-    assert caught.value.code == code
-    if resolver_error is not None:
-        assert transport.calls == []
-
-
-async def test_engine_message_is_carried_through() -> None:
-    transport = _Transport({"success": False, "error": "install_failed", "message": "no such cli"})
-
-    with pytest.raises(AcliPortError) as caught:
-        await _port(transport).install(bot_id="bot-1", owner_id="owner-1", name="x")
-
-    assert caught.value.message == "no such cli"
-
-
-@pytest.mark.parametrize(
-    ("operation", "reply"),
-    [
-        ("uninstall", {"success": True}),
-        ("uninstall", {"success": True, "data": None}),
-        ("uninstall", {"success": True, "data": {}}),
-        ("uninstall", {"success": True, "data": {"uninstalled": "yes"}}),
-        ("install", {"success": True}),
-        ("install", {"success": True, "data": {"name": "x"}}),
-        ("install", {"success": True, "data": {"command": "x"}}),
-    ],
-)
-async def test_a_success_without_the_needed_fields_is_bad_output(operation, reply) -> None:
-    """A malformed success must not pass for "not installed" or for an install."""
-    port = _port(_Transport(reply))
-
-    with pytest.raises(AcliPortError) as caught:
-        await getattr(port, operation)(bot_id="bot-1", owner_id="owner-1", name="x")
 
     assert caught.value.code == "bad_output"
 
 
-async def test_uninstall_of_a_tool_acli_never_installed_is_false() -> None:
-    transport = _Transport({"success": True, "data": {"name": "x", "uninstalled": False}})
+async def test_engine_busy_carries_the_active_operation() -> None:
+    body = json.dumps({"success": False, "error": "engine_busy", "message": "busy",
+                       "data": {"operation": OP}})
+    transport = _Transport(error=DeviceAdapterHTTPStatusError(409, body))
 
-    removed = await _port(transport).uninstall(bot_id="bot-1", owner_id="owner-1", name="x")
+    with pytest.raises(AcliPortError) as caught:
+        await _port(transport).submit(RUNTIME, action=AcliAction.UNINSTALL, name="x")
 
-    assert removed is False
+    assert caught.value.code == "engine_busy"
+    assert caught.value.operation.name == "deepinsight-cli"
+
+
+async def test_not_active_is_its_own_code() -> None:
+    body = json.dumps({"success": False, "error": "not_active", "message": "nothing", "data": None})
+    transport = _Transport(error=DeviceAdapterHTTPStatusError(409, body))
+
+    with pytest.raises(AcliPortError) as caught:
+        await _port(transport).cancel(RUNTIME, action=AcliAction.INSTALL, name="x")
+
+    assert (caught.value.code, caught.value.operation) == ("not_active", None)
+
+
+async def test_an_unknown_operation_reads_as_none() -> None:
+    body = json.dumps({"success": False, "error": "operation_not_found", "data": None})
+    transport = _Transport(error=DeviceAdapterEndpointNotFoundError(body))
+
+    assert await _port(transport).get_operation(RUNTIME, "f" * 32) is None
+
+
+async def test_list_tools_reads_the_listing() -> None:
+    transport = _Transport({"success": True, "data": {"tools": [
+        {"name": "deepinsight-cli", "command": "di", "description": "d", "version": "1.0.9"},
+        {"name": "yuntu-cli"},
+    ]}})
+
+    tools = await _port(transport).list_tools(RUNTIME)
+
+    assert [(t.name, t.command) for t in tools] == [("deepinsight-cli", "di"), ("yuntu-cli", "")]
+    assert transport.calls[0][1:3] == ("GET", TOOLS_PATH)
+
+
+@pytest.mark.parametrize("data", [None, {}, {"tools": "x"}, {"tools": [{"name": ""}]}])
+async def test_an_unreadable_listing_is_bad_output(data) -> None:
+    with pytest.raises(AcliPortError) as caught:
+        await _port(_Transport({"success": True, "data": data})).list_tools(RUNTIME)
+
+    assert caught.value.code == "bad_output"
+
+
+async def test_a_failed_listing_raises_its_code() -> None:
+    transport = _Transport({"success": False, "error": "list_failed", "message": "busy"})
+
+    with pytest.raises(AcliPortError) as caught:
+        await _port(transport).list_tools(RUNTIME)
+
+    assert caught.value.code == "list_failed"
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        (DeviceAdapterEndpointNotFoundError('{"detail":"Not Found"}', standard_route_missing=True),
+         "engine_outdated"),
+        (DeviceAdapterEndpointNotFoundError("gateway says no"), "engine_unreachable"),
+        (DeviceAdapterEndpointNotFoundError('{"success": false, "error": "other"}'),
+         "engine_unreachable"),
+        (DeviceAdapterHTTPStatusError(501, ""), "engine_unsupported"),
+        (DeviceAdapterHTTPStatusError(400, "bad"), "invalid_input"),
+        (DeviceAdapterHTTPStatusError(409, "not json"), "engine_unreachable"),
+        (DeviceAdapterHTTPStatusError(502, ""), "engine_unreachable"),
+        (DeviceAdapterTimeoutError(), "timeout"),
+        (RuntimeError("boom"), "engine_unreachable"),
+    ],
+)
+async def test_transport_failures_map_to_codes(error: Exception, code: str) -> None:
+    with pytest.raises(AcliPortError) as caught:
+        await _port(_Transport(error=error)).submit(RUNTIME, action=AcliAction.INSTALL, name="x")
+
+    assert caught.value.code == code
+
+
+async def test_no_container_is_not_running() -> None:
+    transport = _Transport(_envelope())
+
+    with pytest.raises(AcliPortError) as caught:
+        await _port(transport, _Contexts(error=LookupError("no binding"))).submit(
+            RUNTIME, action=AcliAction.INSTALL, name="x"
+        )
+
+    assert caught.value.code == "not_running"
+    assert transport.calls == []
+
+
+async def test_a_non_mapping_answer_is_unreachable() -> None:
+    with pytest.raises(AcliPortError) as caught:
+        await _port(_Transport(["not", "an", "envelope"])).submit(
+            RUNTIME, action=AcliAction.INSTALL, name="x"
+        )
+
+    assert caught.value.code == "engine_unreachable"
+
+
+async def test_a_malformed_operation_is_bad_output() -> None:
+    with pytest.raises(AcliPortError) as caught:
+        await _port(_Transport(_envelope({"id": "x"}))).submit(
+            RUNTIME, action=AcliAction.INSTALL, name="x"
+        )
+
+    assert caught.value.code == "bad_output"

@@ -1,11 +1,12 @@
 """Endpoint coverage for ``/openapi/v1/bots/{bot_id}/clis``.
 
-The cases run the real router, service, Passport scope writer and engine port.
-The bot's container is the in-memory adapter's simulated acli install target,
-reached through a fake device resolver; Passport is the test profile's
-recording fake. The market search reaches the test profile's stubbed HTTP
-client at a configured URL.
-Ordering, rollback and every failure branch are pinned by the service tests in
+The cases run the real router, service, task queue, Passport scope writer and
+engine port. The bot's container is the in-memory adapter's simulated acli
+install target, reached through a fake device resolver; Passport is the test
+profile's recording fake. The market search reaches the test profile's stubbed
+HTTP client at a configured URL. The test world runs no task worker, so writes
+are asked for ``async`` and answered with the operation they enqueued; running
+operations to their end is pinned by the service tests in
 ``tests/community/core/acli_clis``.
 """
 
@@ -33,6 +34,7 @@ from tests.community.framework import (
     ExpectSuccess,
     endpoint_test,
 )
+from tests.community.endpoints.acli_seeds import seed_running_operation
 from tests.community.framework.device_seams import install_fake_resolver
 
 
@@ -80,10 +82,10 @@ def _seed_owner(world) -> None:
     make_staff_user(world, user_id=_OWNER_ID)
 
 
-def _seed_bot(world, *, clis: list[str] | None = None) -> None:
+def _seed_bot(world, *, clis: list[str] | None = None) -> dict:
     """An active openclaw service bot with a running container and these grants."""
     _seed_owner(world)
-    make_bot(
+    bot = make_bot(
         world,
         bot_id=_BOT_ID,
         owner_id=_OWNER_ID,
@@ -102,6 +104,7 @@ def _seed_bot(world, *, clis: list[str] | None = None) -> None:
         },
     )
     install_fake_resolver(world)
+    return bot
 
 
 def _seed_bot_with_added_cli(world) -> None:
@@ -136,21 +139,37 @@ def _seed_bot_with_stateful_passport(world, codes: tuple[str, ...] = ("dataphin"
     scenario="happy",
     input=CaseInput(path_params={"bot_id": _BOT_ID}, query_params=_QUERY, headers=_HEADERS),
     seed=_seed_bot_with_added_cli,
-    expect=ExpectSuccess(
-        status=200,
-        json_contains={
-            "code": 200000,
-            "data": [
-                {"cli_code": "dataphin", "cli_name": "dataphin", "cli_desc": "",
-                 "identity_mode": "owner", "default": True},
-                {"cli_code": "yuque-cli", "cli_name": "yuque-cli", "cli_desc": "",
-                 "identity_mode": "owner", "default": False},
-            ],
-        },
-    ),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
+    extra_assertions=(lambda response, _world: _assert_default_listed(response, "dataphin"),),
 )
 def list_bot_clis_happy():
-    """Every grant is listed; the default profile's CLI is flagged."""
+    """The container's tools plus the bot's defaults, flagged."""
+
+
+def _assert_default_listed(response, code: str) -> None:
+    items = {item["cli_code"]: item for item in response.json()["data"]}
+    assert items[code] == {"cli_code": code, "cli_name": code, "cli_desc": "",
+                           "identity_mode": "owner", "default": True}, response.json()
+
+
+def _seed_personal_bot(world) -> None:
+    _seed_owner(world)
+    make_bot(world, bot_id=_BOT_ID, owner_id=_OWNER_ID, bot_type="personal",
+             status="ACTIVE", active_engine="openclaw")
+    install_fake_resolver(world)
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/{bot_id}/clis",
+    scenario="stage_on_personal_bot",
+    input=CaseInput(path_params={"bot_id": _BOT_ID}, query_params=_QUERY | {"stage": "draft"},
+                    headers=_HEADERS),
+    seed=_seed_personal_bot,
+    expect=ExpectError(status=422, json_contains={"message": "Only service bots take a stage"}),
+)
+def list_bot_clis_stage_on_personal_bot():
+    """A personal bot has one runtime; naming a stage for it is refused."""
 
 
 @endpoint_test(
@@ -187,6 +206,11 @@ def _seed_market(world) -> None:
             request=httpx.Request("GET", _MARKET_URL),
         ),
     )
+
+
+def _seed_bot_and_market(world) -> None:
+    _seed_market(world)
+    _seed_bot(world)
 
 
 @endpoint_test(
@@ -232,21 +256,62 @@ def search_acli_market_not_configured():
     scenario="happy",
     input=CaseInput(
         path_params={"bot_id": _BOT_ID},
-        query_params=_QUERY,
+        query_params=_QUERY | {"async": "true"},
         headers=_HEADERS,
         json_body={"cli_code": "deepinsight-cli"},
     ),
     seed=_seed_bot_with_stateful_passport,
     expect=ExpectSuccess(
-        status=200,
+        status=202,
         json_contains={
-            "code": 200000,
-            "data": {"cli_code": "deepinsight-cli", "command": "di", "version": "1.0.0"},
+            "data": {"kind": "operation", "action": "install", "cli_code": "deepinsight-cli",
+                     "stage": "draft", "status": "running", "step": "granting"},
         },
     ),
 )
 def add_bot_cli_happy():
-    """Installed in the container, then granted."""
+    """Enqueued: the operation answers at once, about to grant and then install."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/clis/{cli_code}/install/cancel",
+    scenario="error",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID, "cli_code": "deepinsight-cli"},
+        query_params=_QUERY,
+        headers=_HEADERS,
+    ),
+    seed=_seed_bot,
+    expect=ExpectError(status=409, json_contains={"message": "No such CLI operation is running"}),
+)
+def cancel_bot_cli_install_not_active():
+    """Nothing is running to cancel."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/{bot_id}/cli-operations",
+    scenario="happy",
+    input=CaseInput(path_params={"bot_id": _BOT_ID}, query_params=_QUERY, headers=_HEADERS),
+    seed=_seed_bot,
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": None}),
+)
+def list_cli_operations_happy():
+    """No add or remove is running in the runtime."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/{bot_id}/cli-operations/{operation_id}",
+    scenario="error",
+    input=CaseInput(path_params={"bot_id": _BOT_ID, "operation_id": "0" * 32},
+                    query_params=_QUERY, headers=_HEADERS),
+    seed=_seed_bot,
+    expect=ExpectError(status=404, json_contains={"message": "Not found", "data": None}),
+)
+def get_cli_operation_unknown():
+    """An operation id this bot never had reads as the standard 404."""
 
 
 @endpoint_test(
@@ -259,7 +324,7 @@ def add_bot_cli_happy():
         headers=_HEADERS,
         json_body={"cli_code": "di"},
     ),
-    seed=_seed_bot,
+    seed=_seed_bot_and_market,
     expect=ExpectError(
         status=422,
         json_contains={
@@ -278,14 +343,18 @@ def add_bot_cli_alias():
     scenario="happy",
     input=CaseInput(
         path_params={"bot_id": _BOT_ID, "cli_code": "yuque-cli"},
-        query_params=_QUERY,
+        query_params=_QUERY | {"async": "true", "stage": "verify"},
         headers=_HEADERS,
     ),
     seed=_seed_stateful_bot_with_added_cli,
-    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"deleted": True}}),
+    expect=ExpectSuccess(
+        status=202,
+        json_contains={"data": {"action": "uninstall", "cli_code": "yuque-cli",
+                                "stage": "verify", "status": "running"}},
+    ),
 )
 def remove_bot_cli_happy():
-    """Revoked, then uninstalled."""
+    """Enqueued for the verify runtime; the grant is never revoked."""
 
 
 @endpoint_test(
@@ -304,3 +373,99 @@ def remove_bot_cli_happy():
 )
 def remove_default_bot_cli():
     """A default CLI is re-granted at every start, so removing it is refused."""
+
+
+_RUNNING_ID = "1" * 32
+
+
+def _seed_running_install(world) -> None:
+    bot = _seed_bot(world)
+    seed_running_operation(world, bot=bot, action="install", cli_code="yuque-cli",
+                           operation_id=_RUNNING_ID)
+
+
+def _seed_running_uninstall(world) -> None:
+    bot = _seed_bot(world)
+    seed_running_operation(world, bot=bot, action="uninstall", cli_code="yuque-cli")
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/{bot_id}/cli-operations/{operation_id}",
+    scenario="happy",
+    input=CaseInput(path_params={"bot_id": _BOT_ID, "operation_id": _RUNNING_ID},
+                    query_params=_QUERY, headers=_HEADERS),
+    seed=_seed_running_install,
+    expect=ExpectSuccess(status=200, json_contains={"data": {
+        "operation_id": _RUNNING_ID, "action": "install", "status": "running",
+        "step": "installing",
+    }}),
+)
+def get_cli_operation_happy():
+    """A running install reads back by its id."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/{bot_id}/cli-operations",
+    scenario="error",
+    input=CaseInput(path_params={"bot_id": _BOT_ID}, query_params=_QUERY | {"stage": "online"},
+                    headers=_HEADERS),
+    seed=_seed_personal_bot,
+    expect=ExpectError(status=422, json_contains={"message": "Only service bots take a stage"}),
+)
+def list_cli_operations_stage_on_personal_bot():
+    """A personal bot has one runtime."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/clis/{cli_code}/install/cancel",
+    scenario="happy",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID, "cli_code": "yuque-cli"},
+        query_params=_QUERY | {"async": "true"},
+        headers=_HEADERS,
+    ),
+    seed=_seed_running_install,
+    expect=ExpectSuccess(status=202, json_contains={"data": {
+        "kind": "cancel", "action": "install", "cli_code": "yuque-cli", "status": "running",
+    }}),
+)
+def cancel_bot_cli_install_happy():
+    """A running install's cancel is enqueued and answered at once."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/clis/{cli_code}/uninstall/cancel",
+    scenario="happy",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID, "cli_code": "yuque-cli"},
+        query_params=_QUERY | {"async": "true"},
+        headers=_HEADERS,
+    ),
+    seed=_seed_running_uninstall,
+    expect=ExpectSuccess(status=202, json_contains={"data": {
+        "kind": "cancel", "action": "uninstall", "status": "running",
+    }}),
+)
+def cancel_bot_cli_uninstall_happy():
+    """A running uninstall's cancel is enqueued and answered at once."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/clis/{cli_code}/uninstall/cancel",
+    scenario="error",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID, "cli_code": "yuque-cli"},
+        query_params=_QUERY,
+        headers=_HEADERS,
+    ),
+    seed=_seed_running_install,
+    expect=ExpectError(status=409, json_contains={"message": "No such CLI operation is running"}),
+)
+def cancel_bot_cli_uninstall_not_active():
+    """The running operation is an install, so there is no uninstall to cancel."""
+

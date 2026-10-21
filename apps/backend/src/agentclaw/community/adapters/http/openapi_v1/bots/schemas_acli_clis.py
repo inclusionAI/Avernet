@@ -6,6 +6,69 @@ from pydantic import BaseModel, ConfigDict, Field
 from agentclaw.community.adapters.http.openapi_v1.caller_identity.schemas import (
     CallerCallType,
 )
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
+from agentclaw.community.adapters.http.openapi_v1.enums import _DocumentedEnum
+
+
+# The four enums below mirror the closed sets in core/acli_clis/operations.py
+# value for value; the adapter converts by value, so a member added there must
+# be published here too.
+
+
+class CliOperationKind(_DocumentedEnum):
+    """Whether a CLI operation is an add or remove, or a cancel of one."""
+
+    OPERATION = "operation"
+    CANCEL = "cancel"
+
+    __descriptions__ = {
+        "operation": "An add (`install`) or a remove (`uninstall`) of a CLI.",
+        "cancel": "A cancel of the running add or remove named by `action`.",
+    }
+
+
+class CliOperationAction(_DocumentedEnum):
+    """What a CLI operation does to the tool."""
+
+    INSTALL = "install"
+    UNINSTALL = "uninstall"
+
+    __descriptions__ = {
+        "install": "Add: grant the CLI, then install it in the runtime.",
+        "uninstall": "Remove: uninstall the CLI from the runtime; the grant is kept.",
+    }
+
+
+class CliOperationStatus(_DocumentedEnum):
+    """Where a CLI operation stands."""
+
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+    __descriptions__ = {
+        "running": "Still in progress; read it again later.",
+        "succeeded": "Done; the runtime has the change.",
+        "failed": "Ended without the change; `error_code` and `error_message` say why.",
+        "cancelled": "Stopped by a cancel; the runtime is as it was before.",
+    }
+
+
+class CliOperationStep(_DocumentedEnum):
+    """What a running CLI operation is doing now."""
+
+    GRANTING = "granting"
+    INSTALLING = "installing"
+    UNINSTALLING = "uninstalling"
+    CANCELLING = "cancelling"
+
+    __descriptions__ = {
+        "granting": "Granting the CLI to the bot, before installing it.",
+        "installing": "Installing the CLI in the runtime.",
+        "uninstalling": "Uninstalling the CLI from the runtime.",
+        "cancelling": "Stopping the operation and restoring the runtime.",
+    }
 
 
 class BotCliItem(BaseModel):
@@ -55,6 +118,24 @@ class AddBotCli(BaseModel):
     )
 
 
+class AcliCliOperation(BaseModel):
+    """One add, remove or cancel of a bot runtime's CLI."""
+
+    operation_id: str = Field(description="Read it back at `GET …/cli-operations/{operation_id}`.")
+    kind: CliOperationKind = Field(description="An add or remove, or a cancel of one.")
+    action: CliOperationAction = Field(
+        description="What the operation does; for a cancel, the action it cancels."
+    )
+    cli_code: str = Field(description="The CLI's acli market name.")
+    stage: RuntimeStage = Field(description="The runtime: `draft`, `verify` or `online`.")
+    status: CliOperationStatus = Field(description="Where the operation stands.")
+    step: CliOperationStep | None = Field(
+        description="What a running operation is doing now; `null` once it has ended."
+    )
+    error_code: str | None = Field(description="Why it failed, e.g. `install_failed`.")
+    error_message: str | None = Field(description="The reason, for people.")
+
+
 class AddedBotCli(BaseModel):
     """The tool installed and granted."""
 
@@ -66,6 +147,11 @@ class AddedBotCli(BaseModel):
 __all__ = [
     "AcliMarketItem",
     "AcliMarketPageResult",
+    "AcliCliOperation",
+    "CliOperationAction",
+    "CliOperationKind",
+    "CliOperationStatus",
+    "CliOperationStep",
     "AddBotCli",
     "AddedBotCli",
     "BotCliItem",

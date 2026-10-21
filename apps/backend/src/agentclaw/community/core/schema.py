@@ -61,6 +61,7 @@ def import_all_models() -> None:
     import agentclaw.community.core.bot_chat.models  # noqa: F401  bot_chat private-Base tables
     import agentclaw.community.core.bot_dormant.sqlite_models  # noqa: F401  ac_bot_dormant_*
     import agentclaw.community.core.task_queue.repository.models  # noqa: F401  ac_task_queue
+    import agentclaw.community.core.acli_clis.repository.models  # noqa: F401  ac_acli_operation
     import agentclaw.community.core.task.repository.models  # noqa: F401  task_info / task_node / task_node_run_info / task_node_relation / task_callback
     import agentclaw.community.core.task.forum.repository.models  # noqa: F401  ac_forum_topic / ac_forum_post
     import agentclaw.community.core.task.task_discovery.discovered_task_models  # noqa: F401  ac_discovered_tasks

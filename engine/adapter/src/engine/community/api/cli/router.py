@@ -1,5 +1,7 @@
 """CLI tools router — the five endpoints the platform's apply engine calls.
 
+The acli market endpoints are in ``engine.community.api.cli.acli``.
+
 Marshals HTTP↔service and nothing else; placement lives in the engine's
 ``CliToolsService``. Contract:
 ``apps/backend/docs/bot-config-manifest/engine-requirements.zh-CN.md`` §4 A2.
@@ -25,19 +27,15 @@ from __future__ import annotations
 import base64
 import binascii
 import logging
-import os
 
 from engine.community.api.caps import check_capability
+from engine.community.api.cli.acli import router as acli_router
 from engine.community.api.cli.schemas import (
-    AcliInstallRequest,
-    AcliUninstallRequest,
     DeleteRequest,
     InstallRequest,
     ReplaceRequest,
 )
 from engine.community.api.response import ApiResponse
-from engine.community.config import ACLI_INSTALL_DIR
-from engine.community.core.acli.runner import AcliError, AcliRunner
 from engine.community.core.cli_tools.models import CliToolPayload
 from engine.community.core.cli_tools.service import InvalidCliToolNameError
 from engine.community.core.engine.capability import Capability
@@ -206,62 +204,8 @@ async def download_cli_tool(name: str = Query(...)) -> ApiResponse:
     )
 
 
-# ── acli market tools ─────────────────────────────────────────────────────
-#
-# Same conventions as above: bad input is a 400, anything acli refused is a
-# 200 with ``success: false`` and ``error`` set to the runner's code, and 404
-# stays reserved for "this engine build has no such endpoint".
-
-# This module wires the runner: it hands acli the process environment and the
-# engine's install directory, so neither is chosen by core code or by a caller.
-_ACLI_RUNNER = AcliRunner(environ=os.environ, install_dir=ACLI_INSTALL_DIR)
-
-
-def _acli() -> AcliRunner:
-    return _ACLI_RUNNER
-
-
-def _acli_refusal(error: AcliError, warning: str | None) -> ApiResponse:
-    if error.code == "invalid_input":
-        raise HTTPException(status_code=400, detail=error.message) from error
-    return ApiResponse(
-        success=False, error=error.code, message=error.message, warning=warning
-    )
-
-
-@router.post("/acli/install", response_model=ApiResponse)
-async def install_acli_tool(request: AcliInstallRequest) -> ApiResponse:
-    """Install one acli market tool into the engine's install directory."""
-    warning = check_capability(Capability.CLI_ACLI_INSTALL)
-    try:
-        tool = await _acli().install(request.name)
-    except AcliError as error:
-        return _acli_refusal(error, warning)
-    return ApiResponse(
-        success=True,
-        data={
-            "name": tool.name,
-            "command": tool.command,
-            "description": tool.description,
-            "version": tool.version,
-        },
-        warning=warning,
-    )
-
-
-@router.post("/acli/uninstall", response_model=ApiResponse)
-async def uninstall_acli_tool(request: AcliUninstallRequest) -> ApiResponse:
-    """Uninstall an acli tool. One acli never installed here is success."""
-    warning = check_capability(Capability.CLI_ACLI_UNINSTALL)
-    try:
-        result = await _acli().uninstall(request.name)
-    except AcliError as error:
-        return _acli_refusal(error, warning)
-    return ApiResponse(
-        success=True,
-        data={"name": result.name, "uninstalled": result.uninstalled},
-        warning=warning,
-    )
+# acli market tools live in their own module, under the same prefix.
+router.include_router(acli_router)
 
 
 __all__ = ["router"]

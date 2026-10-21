@@ -89,6 +89,14 @@ _STAGE_ADDRESSED_ELSEWHERE = {
     ("get", "/openapi/v1/bots/{bot_id}/identity"),
     ("get", "/openapi/v1/bots/{bot_id}/identity/{file_type}"),
     ("put", "/openapi/v1/bots/{bot_id}/identity/{file_type}"),
+    # acli CLIs address one runtime of a bot: a service bot's stage, omitted
+    # for every other bot (apps/backend/specs/2026-10-21-acli-cli-operations, D7).
+    ("get", "/openapi/v1/bots/{bot_id}/clis"),
+    ("post", "/openapi/v1/bots/{bot_id}/clis"),
+    ("delete", "/openapi/v1/bots/{bot_id}/clis/{cli_code}"),
+    ("post", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/install/cancel"),
+    ("post", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/uninstall/cancel"),
+    ("get", "/openapi/v1/bots/{bot_id}/cli-operations"),
 }
 
 #: The other operations that address a bot by ``(owner, bot_id)``.
@@ -108,6 +116,10 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("get", "/openapi/v1/bots/{bot_id}/clis"),
     ("post", "/openapi/v1/bots/{bot_id}/clis"),
     ("delete", "/openapi/v1/bots/{bot_id}/clis/{cli_code}"),
+    ("post", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/install/cancel"),
+    ("post", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/uninstall/cancel"),
+    ("get", "/openapi/v1/bots/{bot_id}/cli-operations"),
+    ("get", "/openapi/v1/bots/{bot_id}/cli-operations/{operation_id}"),
     ("get", "/openapi/v1/bots/{bot_id}/authorized-apps"),
     ("post", "/openapi/v1/bots/{bot_id}/authorized-apps"),
     ("delete", "/openapi/v1/bots/{bot_id}/authorized-apps/{app_id}"),

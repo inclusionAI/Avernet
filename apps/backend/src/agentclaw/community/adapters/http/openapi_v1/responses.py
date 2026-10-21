@@ -170,18 +170,20 @@ from agentclaw.community.core.cron.errors import (
 )
 from agentclaw.community.api.acli_cli_service import (
     AcliBotNotRunningError,
-    AcliCliAlreadyGrantedError,
     AcliCliNameMismatchError,
-    AcliCliNotGrantedError,
     AcliDefaultCliError,
     AcliEngineOutdatedError,
     AcliEngineUnsupportedError,
     AcliGrantSyncError,
     AcliMarketNotConfiguredError,
     AcliMarketUnavailableError,
+    AcliOperationCancelledError,
     AcliOperationFailedError,
+    AcliOperationInProgressError,
+    AcliOperationNotActiveError,
+    AcliOperationNotFoundError,
     AcliRequestRejectedError,
-    AcliRollbackFailedError,
+    AcliStageNotAllowedError,
 )
 from agentclaw.community.core.caller_identity.contracts import (
     CallerCallTypeInvalidError,
@@ -388,10 +390,13 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     CallerMcpNotFoundError: (404, "Not found"),
     CallerMcpSyncError: (502, "Caller identity synchronization failed"),
     CallerCallTypeInvalidError: (500, "Internal error"),
-    AcliCliAlreadyGrantedError: (409, "CLI is already granted to this bot"),
-    AcliCliNotGrantedError: (404, "Not found"),
     AcliDefaultCliError: (409, "Default CLIs cannot be removed"),
     AcliCliNameMismatchError: (422, "Use the tool's acli market name"),
+    AcliStageNotAllowedError: (422, "Only service bots take a stage"),
+    AcliOperationInProgressError: (409, "Another CLI operation is in progress; try again later"),
+    AcliOperationNotActiveError: (409, "No such CLI operation is running"),
+    AcliOperationCancelledError: (409, "The CLI operation was cancelled"),
+    AcliOperationNotFoundError: (404, "Not found"),
     AcliEngineUnsupportedError: (501, "This bot's engine does not support acli CLIs"),
     AcliBotNotRunningError: (409, "The bot has no running container"),
     AcliEngineOutdatedError: (
@@ -402,7 +407,6 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     AcliGrantSyncError: (502, "The CLI grant could not be synchronized"),
     AcliMarketNotConfiguredError: (501, "The acli market is not configured"),
     AcliMarketUnavailableError: (502, "The acli market is unavailable"),
-    AcliRollbackFailedError: (500, "The change could not be rolled back"),
     MissingPrincipalError: (401, "Unauthorized"),
     # Byte-identical to the line above, deliberately. "You sent no principal" and
     # "your principal did not verify" must be indistinguishable, or the response

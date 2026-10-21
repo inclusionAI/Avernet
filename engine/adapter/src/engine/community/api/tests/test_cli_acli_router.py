@@ -1,8 +1,10 @@
 """``/api/cli/acli/*`` — the wire contract ``ArcaAcliPort`` reads.
 
-The runner is replaced by a fake: what is pinned here is the HTTP shape — a
-refusal is ``200`` + ``success: false`` + ``error``, bad input is ``400``, and
-``501`` means the engine does not offer the capability.
+The operation slot is replaced by a fake: what is pinned here is the HTTP
+shape — an ended operation is ``200`` (``success`` false with ``error`` when
+it did not succeed), a running one ``202``, ``409`` for ``engine_busy`` and
+``not_active``, bad input ``400``, and ``501`` when the engine does not offer
+the capability.
 """
 from __future__ import annotations
 
@@ -11,11 +13,12 @@ from unittest.mock import MagicMock
 
 import pytest
 from engine.community.api.cli import router
-from engine.community.core.acli.runner import (
-    AcliError,
-    AcliTool,
-    AcliUninstallResult,
+from engine.community.core.acli.operations import (
+    AcliOperation,
+    OperationBusyError,
+    OperationNotActiveError,
 )
+from engine.community.core.acli.runner import AcliError, AcliTool
 from engine.community.core.engine.base import BaseEngine
 from engine.community.core.engine.capability import Capability, EngineCapabilities
 from engine.community.core.engine.registry import EngineRegistry
@@ -24,31 +27,51 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 ACLI_CAPS = {
+    Capability.CLI_ACLI_LIST,
     Capability.CLI_ACLI_INSTALL,
     Capability.CLI_ACLI_UNINSTALL,
+    Capability.CLI_ACLI_CANCEL,
+    Capability.CLI_ACLI_OPERATION_GET,
 }
-#: The module, not the ``router`` object the package re-exports under that name.
-router_module = importlib.import_module("engine.community.api.cli.router")
+acli_module = importlib.import_module("engine.community.api.cli.acli")
+OP_ID = "c" * 32
 
 
-class _FakeRunner:
+def _op(state: str = "succeeded", *, action: str = "install", **fields) -> AcliOperation:
+    op = AcliOperation(
+        id=OP_ID, action=action, name="deepinsight-cli", state=state,
+        started_at="2026-10-21T00:00:00Z", **fields,
+    )
+    if not op.active:
+        op._done.set()
+    return op
+
+
+class _FakeOperations:
     def __init__(self) -> None:
-        self.error: AcliError | None = None
+        self.next: AcliOperation = _op(result={
+            "name": "deepinsight-cli", "command": "di", "description": "desc",
+            "version": "1.0.9", "already_installed": False,
+        })
+        self.error: Exception | None = None
         self.calls: list[tuple] = []
+        self.stored: dict[str, AcliOperation] = {}
 
-    async def install(self, name: str) -> AcliTool:
-        self.calls.append(("install", name))
+    def submit(self, action: str, name: str) -> AcliOperation:
+        self.calls.append((action, name))
         if self.error:
             raise self.error
-        return AcliTool(name=name, command="di", description="desc", version="1.0.9")
+        return self.next
 
-    async def uninstall(self, name: str) -> AcliUninstallResult:
-        self.calls.append(("uninstall", name))
+    def cancel(self, action: str, name: str) -> AcliOperation:
+        self.calls.append((f"cancel-{action}", name))
         if self.error:
             raise self.error
-        return AcliUninstallResult(name=name, uninstalled=True)
+        return self.next
 
-
+    def get(self, op_id: str) -> AcliOperation | None:
+        self.calls.append(("get", op_id))
+        return self.stored.get(op_id)
 
 
 def _engine_class(caps: set[Capability]):
@@ -83,9 +106,10 @@ def _client(caps: set[Capability]) -> TestClient:
 
 
 @pytest.fixture
-def runner(monkeypatch) -> _FakeRunner:
-    fake = _FakeRunner()
-    monkeypatch.setattr(router_module, "_ACLI_RUNNER", fake)
+def ops(monkeypatch) -> _FakeOperations:
+    fake = _FakeOperations()
+    monkeypatch.setattr(acli_module, "_ACLI_OPERATIONS", fake)
+    monkeypatch.setattr(acli_module, "SYNC_WAIT_SECONDS", 0.05)
     return fake
 
 
@@ -98,85 +122,174 @@ def client():
         EngineManager.reset_instance()
 
 
-def test_install_returns_what_acli_installed(client, runner):
-    body = client.post(
-        "/api/cli/acli/install", json={"name": "deepinsight-cli"}
-    ).json()
-
-    assert body["success"] is True
-    assert body["data"] == {
-        "name": "deepinsight-cli", "command": "di", "description": "desc", "version": "1.0.9",
-    }
-    assert runner.calls == [("install", "deepinsight-cli")]
-
-
-def test_install_refusal_is_200_with_error_code(client, runner):
-    runner.error = AcliError("install_failed", "no such cli")
-
-    response = client.post(
-        "/api/cli/acli/install", json={"name": "nope"}
-    )
+def test_an_ended_install_is_200_with_the_operation(client, ops):
+    response = client.post("/api/cli/acli/install", json={"name": "deepinsight-cli"})
 
     assert response.status_code == 200
-    assert response.json() | {"warning": None} == {
-        "success": False, "data": None, "message": "no such cli", "warning": None,
-        "total": None, "error": "install_failed",
+    body = response.json()
+    assert body["success"] is True
+    assert body["data"]["operation"] == {
+        "id": OP_ID, "action": "install", "name": "deepinsight-cli", "state": "succeeded",
+        "started_at": "2026-10-21T00:00:00Z", "finished_at": None,
+        "result": {"name": "deepinsight-cli", "command": "di", "description": "desc",
+                   "version": "1.0.9", "already_installed": False},
+        "error": None,
     }
+    assert ops.calls == [("install", "deepinsight-cli")]
 
 
-def test_invalid_input_is_400(client, runner):
-    runner.error = AcliError("invalid_input", "bad name")
+def test_a_failed_operation_is_200_with_its_error(client, ops):
+    ops.next = _op("failed", error={"code": "install_failed", "message": "no such cli"})
+
+    response = client.post("/api/cli/acli/install", json={"name": "nope"})
+
+    body = response.json()
+    assert response.status_code == 200
+    assert (body["success"], body["error"], body["message"]) == (
+        False, "install_failed", "no such cli",
+    )
+    assert body["data"]["operation"]["state"] == "failed"
+
+
+def test_a_cancelled_operation_reads_as_not_succeeded(client, ops):
+    ops.stored[OP_ID] = _op("cancelled")
+
+    body = client.get(f"/api/cli/acli/operations/{OP_ID}").json()
+
+    assert (body["success"], body["error"]) == (False, "cancelled")
+
+
+@pytest.mark.parametrize("run_async", [True, False])
+def test_a_running_operation_is_202(client, ops, run_async):
+    ops.next = _op("running")
 
     response = client.post(
-        "/api/cli/acli/install", json={"name": "-x"}
+        "/api/cli/acli/uninstall", json={"name": "deepinsight-cli", "async": run_async}
     )
 
-    assert response.status_code == 400
-
-
-def test_uninstall_reports_whether_anything_was_removed(client, runner):
-    body = client.post(
-        "/api/cli/acli/uninstall", json={"name": "dataphin"}
-    ).json()
-
+    assert response.status_code == 202
+    body = response.json()
     assert body["success"] is True
-    assert body["data"] == {"name": "dataphin", "uninstalled": True}
+    assert body["data"]["operation"]["state"] == "running"
+    assert ops.calls == [("uninstall", "deepinsight-cli")]
 
 
-def test_uninstall_refusal(client, runner):
-    runner.error = AcliError("uninstall_failed", "busy")
+def test_a_busy_engine_is_409_with_the_active_operation(client, ops):
+    ops.error = OperationBusyError(_op("running", action="uninstall"))
 
-    body = client.post(
-        "/api/cli/acli/uninstall", json={"name": "dataphin"}
-    ).json()
+    response = client.post("/api/cli/acli/install", json={"name": "dataphin"})
 
-    assert (body["success"], body["error"], body["message"]) == (False, "uninstall_failed", "busy")
+    assert response.status_code == 409
+    body = response.json()
+    assert (body["success"], body["error"]) == (False, "engine_busy")
+    assert body["data"]["operation"]["action"] == "uninstall"
 
 
-def test_engine_without_the_capability_refuses_with_501(runner):
+def test_invalid_input_is_400(client, ops):
+    ops.error = AcliError("invalid_input", "bad name")
+
+    assert client.post("/api/cli/acli/install", json={"name": "-x"}).status_code == 400
+
+
+def test_an_operation_that_could_not_start_is_200_refusal(client, ops):
+    ops.error = AcliError("install_failed", "cannot record the acli operation")
+
+    body = client.post("/api/cli/acli/install", json={"name": "dataphin"}).json()
+
+    assert (body["success"], body["error"], body["data"]) == (False, "install_failed", None)
+
+
+@pytest.mark.parametrize("action", ["install", "uninstall"])
+def test_cancel_returns_the_operation(client, ops, action):
+    ops.next = _op("cancelling", action=action)
+
+    response = client.post(f"/api/cli/acli/{action}/cancel", json={"name": "deepinsight-cli"})
+
+    assert response.status_code == 202
+    assert response.json()["data"]["operation"]["state"] == "cancelling"
+    assert ops.calls == [(f"cancel-{action}", "deepinsight-cli")]
+
+
+def test_cancel_with_nothing_running_is_409_not_active(client, ops):
+    ops.error = OperationNotActiveError("no install of x is running")
+
+    response = client.post("/api/cli/acli/install/cancel", json={"name": "x", "async": True})
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "not_active"
+
+
+def test_get_operation(client, ops):
+    ops.stored[OP_ID] = _op("running")
+
+    response = client.get(f"/api/cli/acli/operations/{OP_ID}")
+
+    assert response.status_code == 202
+    assert response.json()["data"]["operation"]["id"] == OP_ID
+
+
+def test_an_unknown_operation_is_404_inside_the_envelope(client, ops):
+    response = client.get(f"/api/cli/acli/operations/{'d' * 32}")
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "operation_not_found"
+
+
+class _ListingRunner:
+    def __init__(self, error: AcliError | None = None) -> None:
+        self.error = error
+
+    async def list_tools(self) -> list[AcliTool]:
+        if self.error:
+            raise self.error
+        return [AcliTool(name="deepinsight-cli", command="di", description="d", version="1.0.9")]
+
+
+def test_tools_lists_what_acli_installed(client, monkeypatch):
+    monkeypatch.setattr(acli_module, "_ACLI_RUNNER", _ListingRunner())
+
+    response = client.get("/api/cli/acli/tools")
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {"tools": [
+        {"name": "deepinsight-cli", "command": "di", "description": "d", "version": "1.0.9"},
+    ]}
+
+
+def test_a_failed_listing_is_a_200_refusal(client, monkeypatch):
+    monkeypatch.setattr(
+        acli_module, "_ACLI_RUNNER", _ListingRunner(AcliError("list_failed", "registry busy"))
+    )
+
+    body = client.get("/api/cli/acli/tools").json()
+
+    assert (body["success"], body["error"], body["message"]) == (
+        False, "list_failed", "registry busy",
+    )
+
+
+def test_engine_without_the_capability_refuses_with_501(ops):
     client = _client(set())
     try:
         for method, path, kwargs in (
-            ("post", "/api/cli/acli/install",
-             {"json": {"name": "x"}}),
-            ("post", "/api/cli/acli/uninstall",
-             {"json": {"name": "x"}}),
+            ("post", "/api/cli/acli/install", {"json": {"name": "x"}}),
+            ("post", "/api/cli/acli/uninstall", {"json": {"name": "x"}}),
+            ("post", "/api/cli/acli/install/cancel", {"json": {"name": "x"}}),
+            ("post", "/api/cli/acli/uninstall/cancel", {"json": {"name": "x"}}),
+            ("get", f"/api/cli/acli/operations/{OP_ID}", {}),
+            ("get", "/api/cli/acli/tools", {}),
         ):
             assert getattr(client, method)(path, **kwargs).status_code == 501, path
-        assert runner.calls == []
+        assert ops.calls == []
     finally:
         EngineManager.reset_instance()
 
 
-def test_default_runner_is_the_shared_instance():
-    assert router_module._acli() is router_module._ACLI_RUNNER
-
-
-def test_callers_cannot_choose_the_install_directory(client, runner):
+def test_callers_cannot_choose_the_install_directory(client, ops):
     """The engine owns placement; an ``install_dir`` in the body is ignored."""
     client.post("/api/cli/acli/install", json={"name": "dataphin", "install_dir": "/tmp/bin"})
 
-    assert runner.calls == [("install", "dataphin")]
+    assert ops.calls == [("install", "dataphin")]
 
 
 def test_the_runner_installs_into_the_fixed_engine_directory():
@@ -184,4 +297,5 @@ def test_the_runner_installs_into_the_fixed_engine_directory():
     from engine.community.config import ACLI_INSTALL_DIR
 
     assert ACLI_INSTALL_DIR == "/home/admin/.agentclaw/bin"
-    assert str(router_module._ACLI_RUNNER._install_dir) == ACLI_INSTALL_DIR
+    assert str(acli_module._ACLI_RUNNER._install_dir) == ACLI_INSTALL_DIR
+    assert acli_module._operations() is acli_module._ACLI_OPERATIONS

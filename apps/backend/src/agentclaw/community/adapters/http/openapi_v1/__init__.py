@@ -183,6 +183,7 @@ from .collaborating_bots import router as collaborating_bots_router
 from .task import task_router
 from .bots.engine_version import router as engine_version_router
 from .bots.engine_config import router as engine_config_router
+from .bots.acli_clis import operations_router as acli_cli_operations_router
 from .bots.acli_clis import router as acli_clis_router
 from .bots.cli_tools import router as cli_tools_router
 from .bots.config_manifest import router as config_manifest_router
@@ -415,6 +416,7 @@ _ADDRESSED_BOT_SUBGROUPS = [
     # acli market CLIs: MEMBER reads, owner-only writes behind the edit
     # lock — the bars of the identity switch above.
     acli_clis_router,
+    acli_cli_operations_router,
     skill_sets_router,
     skill_center_references_router,
     bot_mcp_router,

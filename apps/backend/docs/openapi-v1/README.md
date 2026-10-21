@@ -1696,52 +1696,68 @@ strict enums (`PROD`/`PRE`, `SSE`/`STREAMABLE_HTTP`). **Preserved fail-open:** a
 marketplace outage still reports the caller as permitted (advisory endpoint; the
 MCP server enforces) — pinned by a test so it reads as a decision, not a bug._
 
-### ✅ acli CLIs on a bot (4 endpoints) · `openapi_v1/bots/acli_clis.py` — **IMPLEMENTED (2026-10-15)**
-Lets a caller manage the command-line tools a bot runs from the internal acli
-market. **AgentPass is the only record** of what a bot has; **the acli market is
-the only catalog** (no platform list, so a newly published tool needs no
-release). Spec: `apps/backend/specs/2026-10-15-openapi-v1-acli-clis/`.
+### ✅ acli CLIs on a bot runtime (8 endpoints) · `openapi_v1/bots/acli_clis.py` — **IMPLEMENTED (2026-10-15, operations 2026-10-21)**
+Lets a caller manage the command-line tools a bot runtime runs from the internal
+acli market. **The runtime's container is the record** of what is installed;
+**the acli market is the only catalog** (no platform list, so a newly published
+tool needs no release). Specs: `apps/backend/specs/2026-10-15-openapi-v1-acli-clis/`
+and `apps/backend/specs/2026-10-21-acli-cli-operations/spec.md`.
 
 | Method | Path | Bar | Purpose |
 |---|---|---|---|
-| GET | `/openapi/v1/bots/{bot_id}/clis` | MEMBER | Every CLI in the bot's grant: `cli_code`, `cli_name`, `cli_desc`, `identity_mode`, `default` |
+| GET | `/openapi/v1/bots/{bot_id}/clis?stage=` | MEMBER | The CLIs installed in the runtime, from its container, plus the bot's default CLIs: `cli_code`, `cli_name`, `cli_desc`, `identity_mode`, `default` |
 | GET | `/openapi/v1/bots/market/clis` | Any caller | Search the acli market (`keyword`, `page_no`, `page_size`). Not tied to a bot: the backend calls the market API at the configured `acli_market.search_url`; with none configured the answer is `501`, and an unreachable market is `502`. |
-| POST | `/openapi/v1/bots/{bot_id}/clis` | OWNER + edit lock | `{cli_code}` (the **market name**, e.g. `deepinsight-cli`, not `di`): install, then grant as `owner` |
-| DELETE | `/openapi/v1/bots/{bot_id}/clis/{cli_code}` | OWNER + edit lock | Revoke, then uninstall |
+| POST | `/openapi/v1/bots/{bot_id}/clis?stage=&async=` | OWNER + edit lock | `{cli_code}` (the **market name**, e.g. `deepinsight-cli`, not `di`): grant, then install |
+| DELETE | `/openapi/v1/bots/{bot_id}/clis/{cli_code}?stage=&async=` | OWNER + edit lock | Uninstall; the grant is kept |
+| POST | `/openapi/v1/bots/{bot_id}/clis/{cli_code}/install/cancel?stage=&async=` | OWNER + edit lock | Cancel the running add; whatever it installed is removed |
+| POST | `/openapi/v1/bots/{bot_id}/clis/{cli_code}/uninstall/cancel?stage=&async=` | OWNER + edit lock | Cancel the running remove; the tool is reinstalled if it was already removed |
+| GET | `/openapi/v1/bots/{bot_id}/cli-operations?stage=` | MEMBER | The runtime's running add or remove (at most one), or `null`; a cancel in progress shows as its `cancelling` step |
+| GET | `/openapi/v1/bots/{bot_id}/cli-operations/{operation_id}` | MEMBER | One operation, running or ended |
 | PATCH | `/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type` | OWNER + edit lock | Unchanged: switch `owner`/`caller` |
 
-Add and remove work on any bot type, personal or service: they need an `ACTIVE`
-bot, its owner and an acli engine, and involve no caller identity. Only the
-`call-type` switch is limited to service bots, the bots other people call.
+**Runtimes.** `stage` is `draft` (default), `verify` or `online` for a service
+bot; any other bot has one runtime and must omit it (`422`). A stage without a
+running container answers `409` with `code: not_running`.
 
-**All-or-nothing.** Add installs first and grants second; a failed grant
-uninstalls again. Remove revokes first and uninstalls second; a failed uninstall
-re-grants with the same identity. When the undo fails too — or an uninstall's
-answer never arrives — the call answers `500` with `data.state` naming where the
-bot was left: `installed_not_granted`, `install_unknown_not_granted`,
-`grant_unknown_installed`, `revoked_still_installed`, `revoked_install_unknown`,
-or `revoke_unknown_installed`. An install whose answer never arrives is
-uninstalled again before the error is returned; a Passport write that reports an
-error but landed counts as done.
+**Operations.** Every add, remove and cancel is an operation, run by a durable
+backend task whether or not the caller waits. Without `async` the call waits up
+to 30 s: an operation that ends in that time answers as before (`200` with
+`{cli_code, command, version}` / `deleted`, or the mapped error); one still
+running answers `202` with the operation. With `async=true` the answer is `202`
+at once. Poll `…/cli-operations/{operation_id}` for the outcome; never resubmit
+to learn it — a resubmit is a new request. An operation is
+`{operation_id, kind, action, cli_code, stage, status, step, error_code, error_message}`
+with `status` `running` / `succeeded` / `failed` / `cancelled` and, while
+running, `step` `granting` / `installing` / `uninstalling` / `cancelling`.
+
+**One add or remove per runtime.** A second one while one is running answers
+`409` "Another CLI operation is in progress; try again later" with
+`data.operation` naming the running one. A cancel while its operation runs is
+accepted; a second cancel of the same operation answers with the first.
+
+**Grants are never revoked.** Add grants (read back) before it installs; remove
+only uninstalls. So anything installed in any stage is granted.
 
 | Status | When | `data` |
 |---|---|---|
-| 404 | Removing a CLI the bot does not have | — |
-| 409 | Already granted; removing a default CLI; the bot is not `ACTIVE` or has no running container (`not_running`); the bot's engine build predates acli and needs an update or restart (`engine_outdated`) | `{code, reason}` for the bot/container cases |
+| 202 | Still running (`async`, or past the 30 s wait) | the operation |
+| 404 | An operation id this bot never had | — |
+| 409 | Another operation is running in the runtime | `{operation}` |
+| 409 | Removing a default CLI; nothing of that kind to cancel; the operation was cancelled (`cancelled`); the bot is not `ACTIVE` or the runtime has no running container (`not_running`); the engine build predates these endpoints (`engine_outdated`) | `{code, reason}` for the container cases |
 | 422 | Passing an alias (`di`) | `{market_name}` |
-| 422 | acli rejected the request (usually an unknown name) | `{code, reason}` |
+| 422 | A `stage` on a bot that is not a service bot | — |
+| 422 | acli rejected the request (usually an unknown name; `install_failed`, `name_mismatch`) | `{code, reason}` |
 | 423 | Edit lock not held | — |
 | 501 | The bot's engine type has no acli (only openclaw and claude_code do), or the engine answered `501` | — |
-| 502 | acli or the container hop failed (a `404` from the gateway rather than the engine is `engine_unreachable`); the Passport write failed or did not persist | `{code, reason}` for acli |
+| 502 | acli or the container hop failed; the Passport grant did not hold (`grant_failed`) | `{code, reason}` |
 
 Where tools are installed is the engine's choice (`/home/admin/.agentclaw/bin`
 in both engines), on persisted storage and on the engine's `PATH`, so tools
 survive restarts and need none; the platform names only the tool. A removed
 CLI's caller/owner choice is kept, so re-adding it restores the identity the
 owner last set. Default CLIs are re-granted at every start and cannot be
-removed. The open-source image ships no acli: there, add, remove and search
-answer `502` with `code: acli_unavailable`.
-Adds and removes on one bot run one at a time within a backend instance.
+removed. The open-source image ships no acli: there, an add or remove fails
+with `code: acli_unavailable`.
 
 ### 🟩 lucas-xzp · P1 — resources (7 endpoints) · `openapi_v1/resources/router.py`
 The bot's workspace files and folders; storage location never exposed. Every
@@ -2025,6 +2041,12 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 
 ## Changelog (append a dated line whenever you move the board)
 
+- **2026-10-21** — **acli CLI operations.** Add, remove and the new install/uninstall
+  cancels are operations run by backend tasks: optional `async`, a 30 s sync wait
+  then `202`, `GET …/cli-operations[/{operation_id}]` to read them, one add/remove
+  per runtime (`409` with the running one). `stage` addresses a service bot's
+  draft/verify/online runtime; listing reads the runtime's container; grants are
+  written before installs and never revoked.
 - **2026-10-15** — **acli CLIs on a bot.** `GET`/`POST /openapi/v1/bots/{bot_id}/clis`,
   `GET /openapi/v1/bots/market/clis` and `DELETE …/clis/{cli_code}`: search the acli market,
   add (install, then grant) and remove (revoke, then uninstall) a bot's tools,
