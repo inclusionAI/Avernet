@@ -15,7 +15,6 @@ import { buildBotChatTarget } from '@/hooks/workspaceIdentityMapper';
 import { buildAgentCodingChatPath } from '@/services/workspace';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { chatBridge } from '@/services/workspace/chatBridge';
-import { useConversationStore } from '@/stores/conversationStore';
 import { useSpaceContextStore } from '@/stores/spaceContextStore';
 import { useChatBridge } from '@tc-chat/adapters';
 import type { BridgeInputRef, PanelHandle } from '@tc-chat/core';
@@ -35,6 +34,7 @@ import { useChatHeaderPanels } from './hooks/useChatHeaderPanels';
 import { useConversationDeepLinkSessionHydration } from './hooks/useConversationDeepLinkSessionHydration';
 import { useConversationDirectory } from './hooks/useConversationDirectory';
 import { useConversationHistory } from './hooks/useConversationHistory';
+import { useConversationIdentityReset } from './hooks/useConversationIdentityReset';
 import { useConversationInteractiveChat } from './hooks/useConversationInteractiveChat';
 import { useConversationSelection } from './hooks/useConversationSelection';
 import { useConversationSessionEdits } from './hooks/useConversationSessionEdits';
@@ -42,6 +42,7 @@ import { useConversationSessionPlaceholder } from './hooks/useConversationSessio
 import { useConversationSessions } from './hooks/useConversationSessions';
 import { useConversationUrlSync } from './hooks/useConversationUrlSync';
 import { useManagedBotOthers } from './hooks/useManagedBotOthers';
+import { useSessionSwitchReset } from './hooks/useSessionSwitchReset';
 
 export default function ConversationPage(): JSX.Element {
   const { identity: human } = useHumanIdentity();
@@ -49,16 +50,8 @@ export default function ConversationPage(): JSX.Element {
   const panelRef = useRef<PanelHandle | null>(null);
   const inputRef = useRef<SenderRef | null>(null);
 
-  // 登录用户变化才整仓重置(不随挂载/重渲染触发);首次出现不算切换。
-  const previousUserIdRef = useRef<string | null>(null);
-  const identityChanged = previousUserIdRef.current !== null && previousUserIdRef.current !== userId;
-  useEffect(() => {
-    const previousUserId = previousUserIdRef.current;
-    previousUserIdRef.current = userId;
-    if (previousUserId !== null && previousUserId !== userId) {
-      useConversationStore.getState().reset();
-    }
-  }, [userId]);
+  // 登录用户变化才整仓重置;identityChanged 供切换瞬间停用旧用户会话装配(详见 hook)。
+  const { identityChanged } = useConversationIdentityReset(userId);
 
   const directory = useConversationDirectory(userId);
   // 团队 Bot 独立目录(section=team)与会话模型合并消费:
@@ -153,38 +146,8 @@ export default function ConversationPage(): JSX.Element {
     buildRequestParams: (content) => buildSingleChatBridgeRequest(target?.id ?? null, content),
   });
 
-  // /file 等面板唤起后切会话(2026-10-21):输入框清空、未发送文件 chip 全部失效;
-  // subConfig 子面板(如 /file 文件清单)的显隐是 SDK 内部状态,clear 清空输入不足以关闭——
-  // 经原生输入元素派发 Escape(SDK 退出方式:子级退回根级、根级关闭)。第二次 Escape 须延至
-  // 下一宏任务派发:同步连发会读到旧导航深度,两次都执行"退回上一级"而漏掉根级关闭。
-  // 首次挂载不触发(仅会话间切换);清理器清掉未派发的挂起 Escape(快速连切由新会话的派发接管)。
-  const prevSessionSwitchRef = useRef<string | null>(null);
-  const sessionSwitchEscapeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    const prev = prevSessionSwitchRef.current;
-    const current = selectedSession?.sessionId ?? null;
-    prevSessionSwitchRef.current = current;
-    if (prev === null || prev === current) return;
-    const sender = interactiveModel.fileFeature.senderRef.current;
-    sender?.clear();
-    sender?.invalidateFileChips();
-    const native = sender?.nativeElement;
-    if (native) {
-      native.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      sessionSwitchEscapeTimerRef.current = setTimeout(() => {
-        native.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      }, 0);
-    }
-  }, [selectedSession, interactiveModel.fileFeature.senderRef]);
-  useEffect(
-    () => () => {
-      if (sessionSwitchEscapeTimerRef.current) {
-        clearTimeout(sessionSwitchEscapeTimerRef.current);
-        sessionSwitchEscapeTimerRef.current = null;
-      }
-    },
-    [],
-  );
+  // /file 等面板唤起后切会话:输入清空/失效 chip/Escape 收起子面板(详见 useSessionSwitchReset)。
+  useSessionSwitchReset(selectedSession?.sessionId ?? null, interactiveModel.fileFeature.senderRef);
 
   // 只读(others)装配:三元组不完整时 Hook 内部只清态不发请求。
   const selectionIsReadonly = origin === 'others' && store.selectedBotId !== null;
