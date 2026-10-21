@@ -240,14 +240,19 @@ class TestDingTalkNotifySender:
         self._install_fake_dingtalk_sdk(monkeypatch, ret_code)
 
         sender = DingTalkNotifySender(CommunityNotifySender())
-        sender._send_dingtalk_card(
+        result = sender._send_dingtalk_card(
             NotifyMessage(
                 title="Task",
                 body="Body",
                 recipient="owner-1",
-                extra={"card_data": "{\"key\":\"value\"}"},
+                extra={
+                    "card_biz_id": "biz-123",
+                    "card_data": "{\"key\":\"value\"}",
+                },
             )
         )
+
+        assert result == ("biz-123" if ret_code == "0" else None)
 
 
     def test_resolve_prefers_yaml_holder_over_env(self, monkeypatch):

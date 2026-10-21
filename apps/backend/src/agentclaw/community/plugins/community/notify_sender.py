@@ -215,7 +215,12 @@ class DingTalkNotifySender(NotifySenderPlugin):
     def _configured(cls) -> bool:
         return all(cls._resolve(k, e1, e2) for k, e1, e2 in cls._CRED_KEYS)
 
-    def _send_dingtalk_card(self, message: NotifyMessage) -> None:
+    def _recipient_account_id(self, message: NotifyMessage) -> str:
+        """Resolve the DingTalk recipient account for the task-discovery sender."""
+        return _env("TASK_DISCOVERY_DINGTALK_ACCOUNT_ID") or message.recipient
+
+    def _send_dingtalk_card(self, message: NotifyMessage) -> str | None:
+        """Send one interactive card and return its business ID on success."""
         log.info("[task_discovery] → DingTalkNotifySender._send_dingtalk_card()")
         if not self._configured():
             # 诊断：逐个检出哪个凭证缺失及其来源
@@ -239,7 +244,7 @@ class DingTalkNotifySender(NotifySenderPlugin):
                 message.recipient,
                 message.title[:80],
             )
-            return
+            return None
         ak_id = self._resolve("ak_id", "TASK_DISCOVERY_DINGTALK_AK_ID", "")
         ak_secret = self._resolve("ak_secret", "TASK_DISCOVERY_DINGTALK_AK_SECRET", "")
         robot_code = self._resolve(
@@ -249,8 +254,7 @@ class DingTalkNotifySender(NotifySenderPlugin):
             "card_template_id", "TASK_DISCOVERY_CARD_TEMPLATE_ID", ""
         )
         extra = message.extra or {}
-        # account_id 默认用 recipient（owner），可用 env 单独覆盖
-        account_id = _env("TASK_DISCOVERY_DINGTALK_ACCOUNT_ID") or message.recipient
+        account_id = self._recipient_account_id(message)
         card_biz_id = extra.get("card_biz_id") or f"discover_things_{int(time.time())}"
         # card_data 由 _send_notification 填好（已含 click/session_url/workitem_*…）
         card_data = extra.get("card_data")
@@ -263,7 +267,7 @@ class DingTalkNotifySender(NotifySenderPlugin):
                 message.title[:80],
                 sorted(extra.keys()) if extra else "[]",
             )
-            return
+            return None
 
         # 惰性导入 corp 钉钉 SDK
         log.info(
@@ -328,13 +332,14 @@ class DingTalkNotifySender(NotifySenderPlugin):
                 card_biz_id,
                 json.dumps(resp_map, ensure_ascii=False),
             )
-        else:
-            log.info(
-                "[DingTalkNotifySender] card sent OK (recipient=%s, template=%s, "
-                "robot=%s, card_biz_id=%s) -> %s",
-                account_id,
-                template_id,
-                robot_code,
-                card_biz_id,
-                json.dumps(resp_map, ensure_ascii=False),
-            )
+            return None
+        log.info(
+            "[DingTalkNotifySender] card sent OK (recipient=%s, template=%s, "
+            "robot=%s, card_biz_id=%s) -> %s",
+            account_id,
+            template_id,
+            robot_code,
+            card_biz_id,
+            json.dumps(resp_map, ensure_ascii=False),
+        )
+        return str(card_biz_id)

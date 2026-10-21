@@ -55,3 +55,40 @@ def test_configured_bbs_dingtalk_sender_resolves_its_named_secret() -> None:
 
     assert provider._sender._configured() is True
     assert resolver.calls == ["bbs_dingtalk_ak_secret"]
+
+
+def test_bbs_sender_uses_owner_over_task_discovery_recipient(monkeypatch) -> None:
+    config = BbsDingTalkConfig(
+        ak_id="bbs-ak-id",
+        ak_secret_name="bbs_dingtalk_ak_secret",
+        robot_code="bbs-robot-code",
+        card_template_id="bbs-template.schema",
+    )
+    provider = BbsDingTalkNotifyProvider(
+        config,
+        FakeSecretResolver(Secret("", "bbs-secret")),
+    )
+    monkeypatch.setenv("TASK_DISCOVERY_DINGTALK_ACCOUNT_ID", "task-discovery-user")
+
+    assert provider._sender._recipient_account_id(_message()) == "111111"
+
+
+def test_configured_bbs_dingtalk_sender_returns_card_result(monkeypatch) -> None:
+    config = BbsDingTalkConfig(
+        ak_id="bbs-ak-id",
+        ak_secret_name="bbs_dingtalk_ak_secret",
+        robot_code="bbs-robot-code",
+        card_template_id="bbs-template.schema",
+    )
+    provider = BbsDingTalkNotifyProvider(
+        config,
+        FakeSecretResolver(Secret("", "bbs-secret")),
+    )
+
+    monkeypatch.setattr(
+        provider._sender,
+        "_send_dingtalk_card",
+        lambda _message: "bbs-card-123",
+    )
+
+    assert provider.send(_message()) == "bbs-card-123"

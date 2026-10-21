@@ -3,8 +3,7 @@
 This sender intentionally does not read the task-discovery holders or
 environment names. The BBS robot and card template are captured from
 ``user_config.bbs.dingtalk``; only the AK secret is resolved lazily through
-``SecretResolver``. An absent block disables the card and leaves the log
-fallback active.
+``SecretResolver``. An absent block disables the card and returns ``None``.
 """
 
 from __future__ import annotations
@@ -41,6 +40,32 @@ class BbsDingTalkCardSender(DingTalkNotifySender):
         }
         self._secret_name = config.ak_secret_name
         self._secret_resolver = secret_resolver
+
+    def send(
+        self,
+        message: NotifyMessage,
+        *,
+        channel: str = "tc_card",
+    ) -> str | None:
+        """Depend only on the BBS card result; never fall back to a log sender."""
+        if channel != "tc_card":
+            logger.warning(
+                "[bbs-digest-notify] unsupported channel=%s; supported=tc_card",
+                channel,
+            )
+            return None
+        try:
+            return self._send_dingtalk_card(message)
+        except Exception as exc:  # noqa: BLE001 - the Plugin port never raises.
+            logger.warning(
+                "[bbs-digest-notify] DingTalk card dispatch failed: %s",
+                exc,
+            )
+            return None
+
+    def _recipient_account_id(self, message: NotifyMessage) -> str:
+        """Use the digest owner directly; never read task-discovery overrides."""
+        return message.recipient
 
     def _resolve_secret(self) -> str:
         try:
