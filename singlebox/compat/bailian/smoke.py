@@ -10,6 +10,7 @@ import signal
 import subprocess
 
 from configure import ENGINES
+from evidence import openclaw_evidence
 
 
 def diagnostic_excerpt(text: str, key: str) -> str:
@@ -82,6 +83,8 @@ def main() -> int:
                 proc.communicate()
                 raise ValueError("Engine exceeded 240-second timeout") from None
         report["exit_code"] = proc.returncode
+        if args.engine == "openclaw":
+            report["probe_evidence"] = openclaw_evidence(root, marker, answer(args.engine, stdout, root))
         if proc.returncode:
             # Persist no raw engine logs: upstream diagnostics can contain credentials.
             report.update(status="FAIL", reason="engine_exit_nonzero")
