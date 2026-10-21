@@ -120,13 +120,22 @@ engine scheduling are outside this server change.
 
 ## Bridge mode selection and retry semantics
 
-New bridge versions select the identity resolver from the registration Token's
-`auth_mode`; `--provider-auth` and `--bot-slug` are no longer CLI options. The
-client reads unverified selection metadata; only server-side signature and
-Provider checks grant registration authority. An unsupported mode fails locally,
-without falling back to another identity. Old bridge versions ignore the added
-Token field. New bridge versions require it and ask users to obtain a new Token
-when given an older Token. Existing saved runtime identities remain usable.
+Bridge selects the identity resolver from the registration Token's `auth_mode`
+unless `--provider-auth <resolver-id>` explicitly selects one. Resolver IDs and
+Provider modes are different concepts and are not compared for equality on the
+client. A historical v2 Token without `auth_mode` uses the selected resolver or
+its distribution's legacy default (public `static-bearer`, internal `agentpass`).
+Malformed Tokens and unsupported mode metadata still fail locally. The client
+only reads unverified metadata; server-side signature and Provider checks grant
+registration authority. Old clients ignore the added Token field.
+
+When present, Token `auth_mode` controls subbot suffixes, append behavior and
+Actor environment propagation independently of the selected identity resolver.
+Without mode metadata, the selected resolver's runtime policy supplies the legacy
+behavior. `[registration].provider_auth` continues to store the actual runtime
+resolver policy, such as `agentpass-local` or `static-bearer`. No separate
+`provider_auth`, `auth_mode` or `expected_auth_mode` registration parameter is
+sent. `--bot-slug` remains removed; existing saved runtime identities remain usable.
 
 For `agentpass-subbots`, the bridge generates a 32-character random hexadecimal
 suffix per invocation. The display name is independent of identity. Repeating

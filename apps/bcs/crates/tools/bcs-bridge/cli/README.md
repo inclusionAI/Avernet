@@ -56,13 +56,17 @@ bcs-bridge stop
 
 - The registration token comes from `GET /openapi/v1/collaboration/register/token`;
   the bridge reads its unverified v2 metadata only to select the Provider and
-  check the requested connection mode and select the identity resolver from
-  `auth_mode`. BCS verifies the signature and current Provider mode on registration.
-  Older Tokens missing `auth_mode` must be refreshed for this bridge version;
-  the server still accepts them from older clients. Unsupported modes fail locally.
+  check the requested connection mode. Without `--provider-auth`, `auth_mode`
+  selects the identity resolver. Historical v2 Tokens without that field use the
+  distribution's legacy resolver (`static-bearer` in the public binary).
+  `--provider-auth <resolver-id>` explicitly selects a local resolver; its name is
+  not compared with the Token's Provider mode. BCS verifies the original Token
+  signature and checks a present mode claim against the current Provider config.
+  Malformed Tokens and unsupported mode metadata still fail locally.
 - For `static_bearer` or `provider_admin` Providers, gateway Bots need `--provider-bot-ref`;
   plugin Bots get a generated `bridge-<uuid>` reference when it is omitted.
-  There is no `--provider-auth` override; Provider configuration determines identity.
+  Resolver selection changes local identity acquisition; it never changes the
+  server Provider configuration or adds an authentication-mode request parameter.
 - `--engine claude-code|codex` (default `claude-code`) looks up `claude` / `codex`
   on `PATH` unless `--engine-bin` is given; `--model` and `--cwd` (default
   `~/workspace`) are optional.
@@ -139,7 +143,7 @@ fn main() -> std::process::ExitCode {
         .credentials(MyCredentials)       // gateway webhook credentials
         .identity(MyIdentity)             // identity resolver with id "my-auth"
         .registration_identity("agentpass", "my-auth") // wire mode -> local resolver
-        .defaults(CliDefaults { about: "...", engine: "my-engine", model: None })
+        .defaults(CliDefaults { about: "...", engine: "my-engine", model: None, provider_auth: "static-bearer" })
         .build()
         .main()
 }

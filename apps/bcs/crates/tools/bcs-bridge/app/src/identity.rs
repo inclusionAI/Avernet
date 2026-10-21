@@ -1,6 +1,7 @@
 //! Provider identity: how `register` obtains the Bot's `provider_bot_ref`.
 //!
-//! The resolver is selected from registration Token auth_mode metadata.
+//! An explicit --provider-auth selects the resolver; otherwise Token auth_mode
+//! selects it, with a distribution default for historical Tokens without metadata.
 //! Distributions map that mode to their credential source. The `static-bearer`
 //! resolver uses `--provider-bot-ref`; distributions add resolvers for other
 //! Provider types (for example one that reads a trusted agent identity).

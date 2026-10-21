@@ -25,7 +25,7 @@ pub use token::{Mode, RegistrationIdentity, registration_identity, registration_
 
 use crate::app::BridgeApp;
 use crate::config::{self, PreparedConfig};
-use crate::identity::IdentityContext;
+use crate::identity::{IdentityContext, IdentityResolver};
 use crate::utils;
 
 #[derive(Args)]
@@ -46,6 +46,9 @@ pub struct RegisterArgs {
     /// BCS register API), or gateway webhook delivery
     #[arg(long, value_enum, default_value = "plugin")]
     mode: Mode,
+    /// Identity resolver override (default: Token auth_mode, then the distribution legacy resolver)
+    #[arg(long)]
+    provider_auth: Option<String>,
     /// Bot identity within its Provider, for Provider types that take it explicitly
     #[arg(long)]
     provider_bot_ref: Option<String>,
@@ -83,16 +86,24 @@ pub struct RegisterArgs {
 }
 
 impl RegisterArgs {
+    fn identity<'a>(&self, app: &'a BridgeApp, scope: &RegistrationIdentity) -> anyhow::Result<&'a dyn IdentityResolver> {
+        match (self.provider_auth.as_deref(), scope.auth_mode.as_deref()) {
+            (Some(id), _) => app.identity(id),
+            (None, Some(mode)) => app.registration_identity(mode),
+            (None, None) => app.identity(app.defaults().provider_auth),
+        }
+    }
+
     /// A repeated profile command keeps the existing identity and never contacts registration.
     pub(crate) fn reuse_profile(&self, path: &Path, app: &BridgeApp) -> anyhow::Result<bool> {
         let scope = registration_identity(&self.token, self.mode)?;
-        let identity = app.registration_identity(&scope.auth_mode)?;
-        if scope.auth_mode == "agentpass-subbots" || self.replace_existing || !path.try_exists().context("Cannot inspect profile configuration")? { return Ok(false); }
+        let identity = self.identity(app, &scope)?;
+        if scope.auth_mode.as_deref().unwrap_or_else(|| identity.runtime_auth()) == "agentpass-subbots" || self.replace_existing || !path.try_exists().context("Cannot inspect profile configuration")? { return Ok(false); }
         let source = config::read_registration_source(path, true)?;
         let Some(previous) = source.previous else { return Ok(false); };
         let provider_id = scope.provider_id;
         if source.settings.provider_auth.as_deref().is_some_and(|saved| saved != identity.runtime_auth()) {
-            bail!("Profile identity policy differs from the registration token; choose another profile");
+            bail!("Profile identity policy differs from the selected resolver; choose another profile");
         }
         let bots = previous.get("bot").and_then(toml::Value::as_array).context("Profile has no Bots")?;
         let matches = previous.get("provider_id").and_then(toml::Value::as_str) == Some(provider_id.as_str())
@@ -166,8 +177,10 @@ fn valid_provider_bot_ref(value: &str) -> bool {
 
 pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyhow::Result<()> {
     let scope = registration_identity(&args.token, args.mode)?;
-    let identity = app.registration_identity(&scope.auth_mode)?;
-    let provider_auth = identity.runtime_auth();
+    let identity = args.identity(app, &scope)?;
+    // Provider mode controls registration semantics; the resolver supplies identity and credentials.
+    // Historical Tokens have no mode metadata, so retain the selected resolver policy.
+    let provider_auth = scope.auth_mode.as_deref().unwrap_or_else(|| identity.runtime_auth());
     identity.preflight()?;
     let bootstrap = if args.replace_existing {
         if provider_auth == "agentpass-subbots" {

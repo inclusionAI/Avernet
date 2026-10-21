@@ -41,7 +41,7 @@ impl Mode {
 /// signing keys. This function does not grant registration authorization.
 pub struct RegistrationIdentity {
     pub provider_id: String,
-    pub auth_mode: String,
+    pub auth_mode: Option<String>,
 }
 
 pub fn registration_provider(token: &str, required: Mode) -> Result<String> {
@@ -80,9 +80,8 @@ pub fn registration_identity(token: &str, required: Mode) -> Result<Registration
     if payload.exp <= now {
         bail!("Registration token has expired");
     }
-    let auth_mode = payload.auth_mode
-        .ok_or_else(|| anyhow!("Obtain a new registration token with Provider auth_mode metadata"))?;
-    if !matches!(auth_mode.as_str(), "static_bearer" | "agentpass" | "agentpass-subbots" | "provider_admin") {
+    let auth_mode = payload.auth_mode;
+    if auth_mode.as_deref().is_some_and(|mode| !matches!(mode, "static_bearer" | "agentpass" | "agentpass-subbots" | "provider_admin")) {
         bail!("Registration token contains an unsupported Provider auth_mode");
     }
     Ok(RegistrationIdentity { provider_id: payload.provider_id, auth_mode })
@@ -120,18 +119,17 @@ mod tests {
     }
 
     #[test]
-    fn legacy_token_requires_refresh_for_automatic_identity_selection() {
+    fn legacy_token_without_auth_mode_still_identifies_the_provider() {
         let mut legacy = payload();
         legacy.as_object_mut().unwrap().remove("auth_mode");
-        let error = registration_provider(&token(&legacy), Mode::Plugin).unwrap_err();
-        assert!(error.to_string().contains("new registration token"));
+        assert_eq!(registration_provider(&token(&legacy), Mode::Plugin).unwrap(), "prv_test");
     }
 
     #[test]
     fn reads_provider_from_unverified_v2_selection_metadata() {
         assert_eq!(registration_provider(&token(&payload()), Mode::Gateway).unwrap(), "prv_test");
         assert_eq!(registration_provider(&token(&payload()), Mode::Plugin).unwrap(), "prv_test");
-        assert_eq!(registration_identity(&token(&payload()), Mode::Plugin).unwrap().auth_mode, "static_bearer");
+        assert_eq!(registration_identity(&token(&payload()), Mode::Plugin).unwrap().auth_mode.as_deref(), Some("static_bearer"));
     }
 
     #[test]

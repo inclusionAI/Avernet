@@ -25,6 +25,8 @@ pub struct CliDefaults {
     pub engine: &'static str,
     /// Default `register --model`; none leaves the model to the engine.
     pub model: Option<&'static str>,
+    /// Legacy registration resolver used only when both CLI override and Token auth_mode are absent.
+    pub provider_auth: &'static str,
 }
 
 impl Default for CliDefaults {
@@ -33,6 +35,7 @@ impl Default for CliDefaults {
             about: "Register a BCS Bot and bridge it to a local coding-agent engine",
             engine: "claude-code",
             model: None,
+            provider_auth: "static-bearer",
         }
     }
 }
