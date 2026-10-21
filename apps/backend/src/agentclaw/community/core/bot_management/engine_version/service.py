@@ -124,9 +124,11 @@ class EngineVersionService(EngineVersionServiceProtocol):
         if bot.get("bot_type") == "service":
             cards = await asyncio.to_thread(self._lifecycle.cards_for_bots, bots=[bot])
             matches = cards.get(bot_id, ())
-            if not matches or any(
-                card.display_state != DisplayState.SERVICE_DRAFT
-                or BotAction.RESTART not in card.actions for card in matches
+            # This endpoint addresses the draft runtime. Historical or online
+            # publication cards do not revoke an independently restartable draft.
+            if not any(
+                card.display_state == DisplayState.SERVICE_DRAFT
+                and BotAction.RESTART in card.actions for card in matches
             ):
                 return restricted("service_not_draft")
         detection: Detection = {"status": "read_failed", "reason": "probe_unavailable"}

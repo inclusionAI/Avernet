@@ -303,3 +303,22 @@ async def test_service_requires_existing_draft_restart_action(dependencies, card
     result = await service.inspect(bot_id='bot-1', owner_id='owner', caller_id='owner')
     assert result['restart_hint'] == ('recommended' if allowed else 'restricted')
     assert transport.invoke.await_count == int(allowed)
+
+
+@pytest.mark.asyncio
+async def test_service_draft_can_be_inspected_alongside_published_history(dependencies):
+    from agentclaw.community.core.bot_inventory.types import BotAction, DisplayState
+    bots, bindings, resolver, transport = dependencies
+    bots.get_by_id_and_owner.return_value['bot_type'] = 'service'
+    lifecycle = SimpleNamespace(cards_for_bots=lambda **kwargs: {'bot-1': [
+        SimpleNamespace(display_state=DisplayState.SERVICE_ONLINE, actions=[BotAction.RESTART_PUBLISH]),
+        SimpleNamespace(display_state=DisplayState.SERVICE_DRAFT, actions=[BotAction.RESTART]),
+        SimpleNamespace(display_state=DisplayState.SERVICE_OFFLINE, actions=[]),
+    ]})
+    service = EngineVersionService(bots=bots, bindings=bindings, resolver=resolver,
+        probe=partial(probe_engine_release, transport), collaborators=MagicMock(), lifecycle=lifecycle,
+        list_devices=MagicMock(), config=EngineVersionConfig('REL20261014'))
+    result = await service.inspect(bot_id='bot-1', owner_id='owner', caller_id='owner')
+    assert result['restart_hint'] == 'recommended'
+    assert result['context']['instance_id'] == 'instance-1'
+    transport.invoke.assert_awaited_once()
