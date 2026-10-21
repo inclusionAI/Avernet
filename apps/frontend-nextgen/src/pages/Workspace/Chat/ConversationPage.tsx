@@ -5,7 +5,6 @@
 // (Bot 身份只读好友分支由 /workspace/chat 单一 Human 语义整体取代,旧分支 Task 10 退休)。
 // 登录用户变化(非首次出现)时重置会话 Store:缓存按 botId 记忆、无用户来源,
 // 防止上一用户的缓存/选中串号(控制器裁定,不在每次挂载时重置)。
-import type { IdentityView } from '@/domain/collaboration/types';
 import type { ConversationBotSection } from '@/domain/conversation/types';
 import { isManagedConversationSection } from '@/domain/conversation/types';
 import { buildSingleChatBridgeRequest } from '@/hooks/singleChatBridgeRequest';
@@ -42,6 +41,7 @@ import { useConversationSessionEdits } from './hooks/useConversationSessionEdits
 import { useConversationSessionPlaceholder } from './hooks/useConversationSessionPlaceholder';
 import { useConversationSessions } from './hooks/useConversationSessions';
 import { useConversationUrlSync } from './hooks/useConversationUrlSync';
+import { useConversationViewer } from './hooks/useConversationViewer';
 import { useManagedBotOthers } from './hooks/useManagedBotOthers';
 import { useSessionSwitchReset } from './hooks/useSessionSwitchReset';
 
@@ -110,20 +110,7 @@ export default function ConversationPage(): JSX.Element {
   );
   const botChat = useBotChat(interactiveBot, selectedSession, panelRef, undefined, userId);
   const sessionEdits = useConversationSessionEdits(userId);
-  // viewer:登录 Human 的身份视图(kind 恒 user,是「查看者」而非可选身份)。
-  const viewer = useMemo<IdentityView | null>(
-    () =>
-      human
-        ? {
-            id: human.userId,
-            kind: 'user',
-            displayName: human.displayName,
-            avatarUrl: human.avatarUrl,
-            online: human.online,
-          }
-        : null,
-    [human],
-  );
+  const viewer = useConversationViewer(human);
   const chatBots = useMemo(
     () => [...managedAndTeamBots.map((view) => view.bot), ...directory.friendBots.map((view) => view.bot)],
     [managedAndTeamBots, directory.friendBots],
