@@ -56,10 +56,15 @@ class SessionFileContent:
 
 
 class BcsSessionFilesClient:  # pragma: no cover — live BCS HTTP client (与 BcsHttpAdapter 同款,联调覆盖)
-    def __init__(self, token: BcsTokenProvider, *, http_client: httpx.AsyncClient | None = None) -> None:
-        self._t = token
+    def __init__(
+        self,
+        token_provider: BcsTokenProvider,
+        *,
+        http_client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self._t = token_provider
         self._owns_client = http_client is None
-        self._client = http_client or httpx.AsyncClient(base_url=token.base_url)
+        self._client = http_client or httpx.AsyncClient(base_url=token_provider.base_url)
         # Shared across asyncio event loops is unsafe. Keep the owned client pinned
         # to the first loop and spin a short-lived client for other loops (Web-Worker
         # 线程与 FastAPI loop 并存会换 loop,见 BcsHttpAdapter 同机制注释)。
