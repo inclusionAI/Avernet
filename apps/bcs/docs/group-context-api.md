@@ -62,9 +62,12 @@ from the first two round-id colon segments is stable. If an explicit
 if `groupId` is supplied with a session/round write, it must match the
 Session's persisted parent Group.
 
-Public write endpoints also require the calling actor to be present in
-`collect_from.userIds`. The internal `systemset` service operation bypasses
-that check because it is invoked only from trusted BCN system/admin code.
+Public `add` does not require the authenticated creator to appear in
+`collect_from`: the server stores the creator as the sole owner. Public
+`update` accepts an owner independently of `collect_from`; a non-owner must be
+present in the current row's `collect_from.userIds` to update content and
+validity. The internal `systemset` operation bypasses this public-path
+authorization because it is invoked only from trusted BCN system/admin code.
 
 ### Owners and management permissions
 
@@ -105,9 +108,9 @@ does not treat the recording creator as a lifetime owner and does not expand
 creator-bot admins into owners.
 
 Owners receive read and write access automatically: `list` returns `WRO`, and
-`get` can read a context even when the owner is not in `visible_to`. Only the
-owner response for `get` contains `visible_to` and `collect_from`; owner lists
-and owner values are never returned by `list` or `get`.
+`get` can read a context even when the owner is not in `visible_to`. The owner
+`get` response additionally returns `visible_to`, `collect_from`, and `owners`;
+`list` and non-owner `get` items omit all three management fields.
 
 CLI update transfers ownership with JSON input:
 
@@ -280,7 +283,7 @@ define when `limit` is applied.
 }
 ```
 
-For an owner, each item additionally contains the current policies:
+For an owner, each item additionally contains the management fields:
 
 ```json
 {
@@ -292,14 +295,16 @@ For an owner, each item additionally contains the current policies:
       "valid_from": "2026-10-12T06:57:01Z",
       "valid_to": null,
       "visible_to": { "userIds": ["judge_bot", "张三", "赵六"] },
-      "collect_from": { "userIds": ["judge_bot"] }
+      "collect_from": { "userIds": ["judge_bot"] },
+      "owners": { "userIds": ["judge_bot"] }
     }
   ]
 }
 ```
 
-Non-owner items omit `visible_to` and `collect_from`. Neither response contains
-`owners`.
+Owner `get` items include `owners`. Non-owner `get` items omit `visible_to`,
+`collect_from`, and `owners`; `list` never returns any of those three
+management fields.
 
 ### Internal service operation: systemset
 
