@@ -119,6 +119,14 @@ export const routeMetaList: RouteMeta[] = [
     openCore: true,
   },
   {
+    // 实验室「任务」体验页:跨Bot跨群协同任务列表(状态类别筛选 + V2 详情副屏)。
+    path: '/lab/tasks',
+    title: '任务',
+    section: 'collab',
+    navKey: 'lab',
+    openCore: true,
+  },
+  {
     path: '/evolution-factory',
     title: '智能进化',
     section: 'bot',

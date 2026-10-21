@@ -35,6 +35,14 @@ function unsupported<T>(value: T, reason: string): CapabilityResult<T> {
   return { status: 'unsupported', value, reason };
 }
 
+const DEFAULT_TASK_API_BASE = '/openapi/v1/collaboration/tasks';
+
+function configuredTaskApiBase(): string {
+  return typeof TEAMCLAW_TASK_API_BASE !== 'undefined' && TEAMCLAW_TASK_API_BASE
+    ? TEAMCLAW_TASK_API_BASE
+    : DEFAULT_TASK_API_BASE;
+}
+
 export const defaultCapabilities: AppCapabilities = {
   // Open Core 固定展示体验环境提示；Internal overlay 覆盖为 null。
   getOpenSourceExperienceNotice: (): CapabilityResult<OpenSourceExperienceNoticeSpec | null> => ({
@@ -162,7 +170,13 @@ export const defaultCapabilities: AppCapabilities = {
   // 真实 URL 拼接只在 internal overlay（src/extensions/internal.ts，.internal-paths 剥离）。
   getMemberAvatarUrl: (): CapabilityResult<string | null> => ({ status: 'available', value: null }),
   // Open Core 默认走外部 OAuth provider 登录（开源部署 = 外部用户，无 ACE）；internal overlay 覆盖为 'ace-gateway'（员工）。
-  getLoginStrategy: (): CapabilityResult<LoginStrategy> => ({ status: 'available', value: 'oauth-provider' }),
+  getLoginStrategy: (): CapabilityResult<LoginStrategy> => ({
+    status: 'available',
+    value:
+      typeof TEAMCLAW_LOGIN_STRATEGY !== 'undefined' && TEAMCLAW_LOGIN_STRATEGY === 'ace-gateway'
+        ? 'ace-gateway'
+        : 'oauth-provider',
+  }),
   // Open Core 默认按构建变量识别运行环境；变量缺失时沿用 PRE，不在公开源码写入部署域名。
   getRuntimeEnvironment: (): CapabilityResult<RuntimeEnvironment> => ({
     status: 'available',
@@ -171,16 +185,16 @@ export const defaultCapabilities: AppCapabilities = {
   // Open Core（=阿里云外部生产形态）默认激活邀请码门禁——gate 为产品对外准入控制（登录后未绑码则弹不可关闭输入弹窗）。
   // internal overlay 覆盖为 'disabled'（员工形态，ACE 后端无邀请码端点）。门禁生效性由 getLoginStrategy + 本 capability 双门控。
   getInviteCodeGatePolicy: (): CapabilityResult<InviteCodeGatePolicy> => ({ status: 'available', value: 'enabled' }),
-  // Open Core（开源部署）task 接口走 openapi 公开面 /openapi/v1/collaboration/tasks/*（后端 openapi_v1/task router + gateway spanner 鉴权）。
-  // internal overlay 覆盖为内面 /api/v1/collaboration/tasks（不经 spanner，内部网关直连 task 引擎）。
-  getTaskApiBase: (): CapabilityResult<string> => ({ status: 'available', value: '/openapi/v1/collaboration/tasks' }),
+  // Open Core 默认走 openapi 公开面；本地排障可通过 TEAMCLAW_TASK_API_BASE 切到 /api/v1 直连 Task Engine。
+  // internal overlay 仍可覆盖本 capability，生产默认行为不变。
+  getTaskApiBase: (): CapabilityResult<string> => ({ status: 'available', value: configuredTaskApiBase() }),
   // 社区 BBS 已发布到 collaboration task 公开面：
   // Topic 前缀为 /openapi/v1/collaboration/tasks/bbs/topics；订阅列表为
   // /openapi/v1/collaboration/tasks/bbs/browse-subscriptions；单 Bot CRUD 为
   // /openapi/v1/collaboration/tasks/bots/{id}/bbs/browse-subscription。
   getBbsApiBase: (): CapabilityResult<string> => ({
     status: 'available',
-    value: '/openapi/v1/collaboration/tasks/bbs/topics',
+    value: `${configuredTaskApiBase()}/bbs/topics`,
   }),
   // Open Core / 开源部署:api-key 直发消息,无 secbaas per-bot 授权闭环 → grant/revoke 短路 no-op,开关只写 BCS task_claim_mode。
   // internal overlay 覆盖为 'secbaas-relay'(经 secbaas 透传人类 Cookie 授权 api-key 调某 bot)。

@@ -22,11 +22,16 @@ describe('LabLandingPage', () => {
     toastInfo.mockClear();
   });
 
-  test('渲染实验室落地页：hero 标题 + 单张社区功能卡（齿轮配置 + 开始体验 + 我要反馈）', () => {
+  test('渲染实验室落地页：hero 标题 + 社区/任务两张功能卡', () => {
     render(<LabLandingPage />);
     expect(screen.getByRole('heading', { name: '实验室' })).toBeInTheDocument();
+    // PRD(TeamClaw-demo /lab)：社区 + 任务 两卡。
     const cards = screen.getAllByRole('article');
-    expect(cards).toHaveLength(1);
+    expect(cards).toHaveLength(2);
+    expect(within(cards[0]).getByRole('heading', { name: '社区' })).toBeInTheDocument();
+    expect(within(cards[1]).getByRole('heading', { name: '任务' })).toBeInTheDocument();
+    expect(within(cards[1]).getByText(/查看跨Bot、跨群的协同任务/)).toBeInTheDocument();
+
     const card = within(cards[0]);
     expect(card.getByRole('heading', { name: '社区' })).toHaveClass('text-base');
     // 齿轮「Bot 访问社区配置」位于社区卡右上角（进入社区前可见）。
@@ -40,19 +45,26 @@ describe('LabLandingPage', () => {
     expect(actions?.className).toContain('justify-between');
     expect(actions?.lastElementChild).toBe(feedbackButton);
     expect(feedbackButton.querySelector('svg')).toBeNull();
-    // 暂不展示任务卡。
-    expect(screen.queryByRole('heading', { name: '任务' })).not.toBeInTheDocument();
   });
 
   test('点社区「开始体验」跳 /lab/community', () => {
     render(<LabLandingPage />);
-    fireEvent.click(screen.getByRole('button', { name: '开始体验' }));
+    const community = within(screen.getByRole('article', { name: '社区' }));
+    fireEvent.click(community.getByRole('button', { name: '开始体验' }));
     expect(push).toHaveBeenLastCalledWith('/lab/community');
   });
 
-  test('点「我要反馈」打开反馈弹窗（不跳转，不弹 toast 占位）', () => {
+  test('点任务卡「开始体验」跳任务列表页（任务类别）', () => {
     render(<LabLandingPage />);
-    fireEvent.click(screen.getByRole('button', { name: /我要反馈/ }));
+    const tasks = within(screen.getByRole('article', { name: '任务' }));
+    fireEvent.click(tasks.getByRole('button', { name: '开始体验' }));
+    expect(push).toHaveBeenLastCalledWith('/lab/tasks');
+  });
+
+  test('点社区卡「我要反馈」打开反馈弹窗（不跳转，不弹 toast 占位）', () => {
+    render(<LabLandingPage />);
+    const community = within(screen.getByRole('article', { name: '社区' }));
+    fireEvent.click(community.getByRole('button', { name: /我要反馈/ }));
     // 反馈弹窗渲染标题/提交按钮（FeedbackModal 走 /openapi/v1/collaboration/tasks/feedback §5.2.1）。Toast 占位已下线。
     expect(screen.getByRole('button', { name: '提交反馈' })).toBeInTheDocument();
     expect(screen.getByText('反馈关于实验性功能（社区等）的体验与建议，我们会持续优化。')).toBeInTheDocument();

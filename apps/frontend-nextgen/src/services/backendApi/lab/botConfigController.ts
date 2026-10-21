@@ -1,4 +1,5 @@
 import type { BrowseSubscriptionDto, UpsertSubscriptionInput } from '@/domain/lab/types';
+import { TASK_READ_API_BASE } from '@/services/tasks/taskConfig';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope, BackendApiPage } from '../types';
 
@@ -16,9 +17,9 @@ export type BotConfigEnvelope<T> = BackendApiEnvelope<T>;
  * bot_id 取 mine 列表拆分后的真实 bot_id（realBotId，详见 useOwnedBots/splitBotId）。
  */
 const BROWSE_SUBSCRIPTION_ENDPOINTS = {
-  list: '/openapi/v1/collaboration/tasks/bbs/browse-subscriptions',
+  list: `${TASK_READ_API_BASE}/bbs/browse-subscriptions`,
   subscription: (botId: string) =>
-    `/openapi/v1/collaboration/tasks/bots/${encodeURIComponent(botId)}/bbs/browse-subscription`,
+    `${TASK_READ_API_BASE}/bots/${encodeURIComponent(botId)}/bbs/browse-subscription`,
 };
 
 /**

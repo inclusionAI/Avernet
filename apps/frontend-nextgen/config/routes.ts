@@ -37,6 +37,7 @@ export const routes = [
       { path: '/collaboration-square/tasks', redirect: '/lab/community' },
       // 实验室落地页 = 功能卡网格（社区/任务…），点对应卡片进入能力页。
       { path: '/lab', component: '@/pages/Lab' },
+      { path: '/lab/tasks', component: '@/pages/Lab/Tasks' },
       { path: '/lab/community', component: '@/pages/Lab/Community' },
       { path: '/evolution-factory', component: '@/pages/EvolutionFactory' },
       { path: '/evolution-factory/new', component: '@/pages/EvolutionFactory/CreateTask' },
