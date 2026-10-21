@@ -16,7 +16,9 @@ from dataclasses import dataclass
 from sqlalchemy import BigInteger, Column, DateTime, Index, Integer, String, UniqueConstraint
 from sqlalchemy.sql import func
 
+from agentclaw.community.core.acli_clis.operations import AcliAction, OperationKind
 from agentclaw.community.core.base import Base
+from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.utils.env_utils import get_current_env
 
 # SQLite only auto-increments columns declared as exactly "INTEGER PRIMARY KEY";
@@ -30,11 +32,11 @@ class AcliOperationRecord:
 
     operation_id: str
     task_id: int
-    kind: str
-    action: str
+    kind: OperationKind
+    action: AcliAction
     cli_code: str
     bot_pk: int
-    stage: str
+    stage: PublishStage
     #: The operation a cancel targets; ``None`` for an add or remove.
     target_operation_id: str | None = None
     #: The engine operation the task started; ``None`` until the engine accepted it.
@@ -70,11 +72,11 @@ class AcliOperationModel(Base):
         return AcliOperationRecord(
             operation_id=self.operation_id,
             task_id=int(self.task_id),
-            kind=self.kind,
-            action=self.action,
+            kind=OperationKind(self.kind),
+            action=AcliAction(self.action),
             cli_code=self.cli_code,
             bot_pk=int(self.bot_pk),
-            stage=self.stage,
+            stage=PublishStage(self.stage),
             target_operation_id=self.target_operation_id,
             engine_operation_id=self.engine_operation_id,
         )

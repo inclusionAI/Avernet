@@ -28,6 +28,10 @@ from agentclaw.community.core.acli_clis.protocols import (
     AcliStageNotAllowedError,
     AcliTool,
     BotCli,
+    AcliAction,
+    OperationKind,
+    OperationStatus,
+    OperationStep,
 )
 
 __all__ = [
@@ -53,4 +57,8 @@ __all__ = [
     "AcliStageNotAllowedError",
     "AcliTool",
     "BotCli",
+    "AcliAction",
+    "OperationKind",
+    "OperationStatus",
+    "OperationStep",
 ]

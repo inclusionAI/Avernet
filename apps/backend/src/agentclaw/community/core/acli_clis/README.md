@@ -56,6 +56,7 @@ internal_dependencies:
   - agentclaw.community.core.errors
   - agentclaw.community.core.mcp
   - agentclaw.community.core.repository
+  - agentclaw.community.core.service_bot
   - agentclaw.community.core.task_queue
   - agentclaw.community.kernel
   - agentclaw.community.log

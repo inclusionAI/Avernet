@@ -19,7 +19,7 @@ from agentclaw.community.adapters.http.openapi_v1.bots.acli_clis import (
     cancel_bot_cli_uninstall,
     get_cli_operation,
     list_bot_clis,
-    list_cli_operations,
+    get_live_cli_operation,
     operations_router,
     remove_bot_cli,
     router,
@@ -31,6 +31,7 @@ from agentclaw.community.adapters.http.openapi_v1.market.acli_clis import (
 )
 from agentclaw.community.adapters.http.openapi_v1.bots.schemas_acli_clis import AddBotCli
 from agentclaw.community.api.acli_cli_service import (
+    AcliAction,
     AcliBotNotRunningError,
     AcliCliNameMismatchError,
     AcliDefaultCliError,
@@ -51,8 +52,12 @@ from agentclaw.community.api.acli_cli_service import (
     AcliStageNotAllowedError,
     AcliTool,
     BotCli,
+    OperationKind,
+    OperationStatus,
+    OperationStep,
 )
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+from agentclaw.community.core.service_bot.types import PublishStage
 
 pytestmark = pytest.mark.asyncio
 
@@ -76,11 +81,18 @@ def _body(response) -> dict:
 
 
 def _op(status: str = "succeeded", **fields) -> AcliOperation:
-    return AcliOperation(**{
+    values = {
         "id": "a" * 32, "kind": "operation", "action": "install", "cli_code": "deepinsight-cli",
         "stage": "draft", "status": status, "step": "installing" if status == "running" else None,
         **fields,
-    })
+    }
+    return AcliOperation(
+        id=values["id"], kind=OperationKind(values["kind"]), action=AcliAction(values["action"]),
+        cli_code=values["cli_code"], stage=PublishStage(values["stage"]),
+        status=OperationStatus(values["status"]),
+        step=OperationStep(values["step"]) if values["step"] else None,
+        error_code=values.get("error_code"), error_message=values.get("error_message"),
+    )
 
 
 _OP_JSON = {
@@ -257,7 +269,7 @@ async def test_cancel_answers_with_the_cancel_operation(handler, action) -> None
     )
 
     assert (response.data.kind, response.data.status) == ("cancel", "succeeded")
-    assert service.cancel.await_args.kwargs["action"] == action
+    assert service.cancel.await_args.kwargs["action"] == AcliAction(action)
     service.cancel.return_value = AcliOutcome(operation=_op("running", kind="cancel"))
     response = await handler(
         "bot-1", "yuque-cli", _request(), "owner", "owner", None, True, service, _locks(4)
@@ -269,17 +281,17 @@ async def test_operations_read_back() -> None:
     service = AsyncMock()
     service.get_operation.return_value = _op("failed", error_code="install_failed",
                                              error_message="no such cli")
-    service.live_operations.return_value = [_op("running")]
+    service.live_operation.return_value = _op("running")
 
     one = await get_cli_operation("bot-1", "a" * 32, _request(), "owner", "owner", service)
-    live = await list_cli_operations("bot-1", _request(), "owner", "owner", None, service)
+    live = await get_live_cli_operation("bot-1", _request(), "owner", "owner", None, service)
 
     assert (one.data.status, one.data.error_code) == ("failed", "install_failed")
-    assert [op.operation_id for op in live.data] == ["a" * 32]
+    assert live.data.operation_id == "a" * 32
     service.get_operation.assert_awaited_once_with(
         bot_id="bot-1", entity_id="owner", actor_id="owner", operation_id="a" * 32
     )
-    service.live_operations.assert_awaited_once_with(
+    service.live_operation.assert_awaited_once_with(
         bot_id="bot-1", entity_id="owner", actor_id="owner", stage=None
     )
 

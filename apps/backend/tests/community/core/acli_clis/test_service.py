@@ -29,6 +29,7 @@ from agentclaw.community.core.acli_clis.errors import (
     AcliRequestRejectedError,
     AcliStageNotAllowedError,
 )
+from agentclaw.community.core.acli_clis.operations import OperationStep
 from agentclaw.community.core.acli_clis.port import AcliPortError
 from agentclaw.community.core.acli_clis.service import AcliCliService
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
@@ -468,17 +469,27 @@ async def test_a_cancel_that_arrives_after_the_end_is_not_active() -> None:
 # ── reading operations ───────────────────────────────────────────────────
 
 
-async def test_live_operations_lists_what_is_running_in_the_stage() -> None:
+async def test_the_live_operation_is_the_running_add_and_shows_its_cancel() -> None:
     world = _World()
     world.engine.autorun = None
+    assert await world.call("live_operation") is None
     add = await world.call("add", cli_code="yuque-cli", run_async=True)
     await world.worker.step()
-    cancel = await world.call("cancel", cli_code="yuque-cli", action="install", run_async=True)
 
-    live = await world.call("live_operations")
+    live = await world.call("live_operation")
+    assert (live.id, live.step) == (add.operation.id, OperationStep.INSTALLING)
 
-    assert [op.id for op in live] == [add.operation.id, cancel.operation.id]
-    assert await world.call("live_operations", stage="online") == []
+    await world.call("cancel", cli_code="yuque-cli", action="install", run_async=True)
+    live = await world.call("live_operation")
+    assert (live.id, live.step) == (add.operation.id, OperationStep.CANCELLING)
+    assert await world.call("live_operation", stage="online") is None
+
+
+async def test_an_ended_operation_is_not_live() -> None:
+    world = _World()
+    await world.run("add", cli_code="yuque-cli")
+
+    assert await world.call("live_operation") is None
 
 
 async def test_an_operation_of_another_bot_is_not_found() -> None:

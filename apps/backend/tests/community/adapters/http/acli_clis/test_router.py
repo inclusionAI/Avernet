@@ -11,19 +11,23 @@ from agentclaw.community.adapters.http.acli_clis.router import (
     cancel_bot_cli_operation,
     get_cli_operation,
     list_bot_clis,
-    list_cli_operations,
+    get_live_cli_operation,
     remove_bot_cli,
     router,
 )
 from agentclaw.community.adapters.http.acli_clis.schemas import AddBotCliRequest
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.api.acli_cli_service import (
+    AcliAction,
     AcliOperation,
     AcliOperationInProgressError,
     AcliOutcome,
     AcliTool,
     BotCli,
+    OperationKind,
+    OperationStatus,
 )
+from agentclaw.community.core.service_bot.types import PublishStage
 
 pytestmark = pytest.mark.asyncio
 
@@ -31,10 +35,12 @@ _USER = AuthenticatedUser(id="owner-1", staffId="owner-1", operatorName="owner-1
 
 
 def _op(status: str = "succeeded", **fields) -> AcliOperation:
-    return AcliOperation(**{
-        "id": "a" * 32, "kind": "operation", "action": "install", "cli_code": "deepinsight-cli",
-        "stage": "draft", "status": status, "step": None, **fields,
-    })
+    values = {"kind": "operation", "action": "install", **fields}
+    return AcliOperation(
+        id="a" * 32, kind=OperationKind(values["kind"]), action=AcliAction(values["action"]),
+        cli_code="deepinsight-cli", stage=PublishStage.DRAFT,
+        status=OperationStatus(status), step=None,
+    )
 
 
 async def test_add_passes_the_authenticated_actor_and_the_entity() -> None:
@@ -97,32 +103,32 @@ async def test_cancel_passes_the_action() -> None:
     service.cancel = AsyncMock(return_value=AcliOutcome(operation=_op(kind="cancel")))
 
     op = await cancel_bot_cli_operation(
-        "bot-1", "yuque-cli", "uninstall", "entity-1", 3, None, False, _USER, service
+        "bot-1", "yuque-cli", AcliAction.UNINSTALL, "entity-1", 3, None, False, _USER, service
     )
 
     assert op.kind == "cancel"
     assert service.cancel.await_args.kwargs["action"] == "uninstall"
     service.cancel = AsyncMock(return_value=AcliOutcome(operation=_op("running")))
     assert (await cancel_bot_cli_operation(
-        "bot-1", "yuque-cli", "install", "entity-1", 3, None, True, _USER, service
+        "bot-1", "yuque-cli", AcliAction.INSTALL, "entity-1", 3, None, True, _USER, service
     )).status_code == 202
 
 
 async def test_list_and_operations() -> None:
     service = MagicMock()
     service.list_bot_clis = AsyncMock(return_value=[BotCli("dataphin", "Dataphin", "", "owner", True)])
-    service.live_operations = AsyncMock(return_value=[_op("running")])
+    service.live_operation = AsyncMock(return_value=_op("running"))
     service.get_operation = AsyncMock(return_value=_op())
 
     items = await list_bot_clis("bot-1", "entity-1", None, _USER, service)
-    live = await list_cli_operations("bot-1", "entity-1", "online", _USER, service)
+    live = await get_live_cli_operation("bot-1", "entity-1", "online", _USER, service)
     one = await get_cli_operation("bot-1", "a" * 32, "entity-1", _USER, service)
 
     service.list_bot_clis.assert_awaited_once_with(
         bot_id="bot-1", entity_id="entity-1", actor_id="owner-1", stage=None
     )
     assert [(i.cli_code, i.identity_mode, i.default) for i in items] == [("dataphin", "owner", True)]
-    assert [o.status for o in live] == ["running"]
+    assert live.status == "running"
     assert one.operation_id == "a" * 32
 
 

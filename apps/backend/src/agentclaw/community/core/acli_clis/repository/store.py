@@ -13,6 +13,8 @@ from agentclaw.community.core.acli_clis.repository.models import (
     AcliOperationModel,
     AcliOperationRecord,
 )
+from agentclaw.community.core.acli_clis.operations import OperationKind
+from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -27,7 +29,9 @@ class AcliOperationStore(Protocol):
 
     def get(self, operation_id: str) -> AcliOperationRecord | None: ...
 
-    def latest(self, *, bot_pk: int, stage: str, kind: str) -> AcliOperationRecord | None: ...
+    def latest(
+        self, *, bot_pk: int, stage: PublishStage, kind: OperationKind
+    ) -> AcliOperationRecord | None: ...
 
     def set_engine_operation_id(self, operation_id: str, engine_operation_id: str) -> None: ...
 
@@ -42,11 +46,11 @@ class SqlAcliOperationStore(AcliOperationStore):
                 env=get_current_env(),
                 operation_id=record.operation_id,
                 task_id=record.task_id,
-                kind=record.kind,
-                action=record.action,
+                kind=record.kind.value,
+                action=record.action.value,
                 cli_code=record.cli_code,
                 bot_pk=record.bot_pk,
-                stage=record.stage,
+                stage=record.stage.value,
                 target_operation_id=record.target_operation_id,
                 engine_operation_id=record.engine_operation_id,
             ))
@@ -63,15 +67,17 @@ class SqlAcliOperationStore(AcliOperationStore):
             )
             return row.to_record() if row is not None else None
 
-    def latest(self, *, bot_pk: int, stage: str, kind: str) -> AcliOperationRecord | None:
+    def latest(
+        self, *, bot_pk: int, stage: PublishStage, kind: OperationKind
+    ) -> AcliOperationRecord | None:
         with self._db.orm_session() as db:
             row = (
                 db.query(AcliOperationModel)
                 .filter(
                     AcliOperationModel.env == get_current_env(),
                     AcliOperationModel.bot_pk == bot_pk,
-                    AcliOperationModel.stage == stage,
-                    AcliOperationModel.kind == kind,
+                    AcliOperationModel.stage == stage.value,
+                    AcliOperationModel.kind == kind.value,
                 )
                 .order_by(AcliOperationModel.id.desc())
                 .first()

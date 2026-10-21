@@ -157,7 +157,7 @@ The same routes on `/openapi/v1/bots/…` and the internal `/api/bots/…`.
 | POST | `…/{bot_id}/clis/{cli_code}/install/cancel?stage=&async=` | Cancel the add in progress. |
 | POST | `…/{bot_id}/clis/{cli_code}/uninstall/cancel?stage=&async=` | Cancel the remove in progress. |
 | GET | `…/{bot_id}/cli-operations/{operation_id}` | One operation (add, remove or cancel), live or finished. |
-| GET | `…/{bot_id}/cli-operations?stage=` | The stage's live operations (at most one add/remove and one cancel). |
+| GET | `…/{bot_id}/cli-operations?stage=` | The stage's running add or remove (at most one), or `null`. A cancel in progress shows as its `cancelling` step. |
 | GET | `…/market/clis` | Unchanged. |
 
 `stage` (D7): service bots `draft` (default) / `verify` / `online`; any

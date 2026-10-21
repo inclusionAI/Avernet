@@ -8,12 +8,16 @@ import pytest
 
 from agentclaw.community.core.acli_clis import tasks as tasks_module
 from agentclaw.community.core.acli_clis.operations import (
+    AcliAction,
+    EngineState,
+    OperationKind,
     EngineOperation,
     OperationPayload,
 )
 from agentclaw.community.core.acli_clis.port import AcliPortError
 from agentclaw.community.core.acli_clis.repository.models import AcliOperationRecord
 from agentclaw.community.core.acli_clis.tasks import AcliTaskLifecycle
+from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.types import Complete, Fail, Reschedule
 
@@ -24,7 +28,7 @@ TARGET_ID = "b" * 32
 
 
 def _payload(**fields) -> dict:
-    return OperationPayload(**{
+    return OperationPayload.from_dict({
         "operation_id": OP_ID, "kind": "operation", "action": "install",
         "cli_code": "yuque-cli", "bot_pk": 7, "bot_id": "bot-1", "entity_id": "owner-1",
         "owner_id": "owner-1", "stage": "draft", "actor_id": "owner-1",
@@ -34,8 +38,9 @@ def _payload(**fields) -> dict:
 
 def _row(op_id: str = OP_ID, *, kind: str = "operation", **fields) -> AcliOperationRecord:
     return AcliOperationRecord(
-        operation_id=op_id, task_id=fields.pop("task_id", 1), kind=kind, action="install",
-        cli_code="yuque-cli", bot_pk=7, stage="draft", **fields,
+        operation_id=op_id, task_id=fields.pop("task_id", 1), kind=OperationKind(kind),
+        action=AcliAction.INSTALL, cli_code="yuque-cli", bot_pk=7, stage=PublishStage.DRAFT,
+        **fields,
     )
 
 
@@ -67,7 +72,7 @@ async def test_a_lost_submit_is_found_again_by_its_busy_answer(world) -> None:
     store.create(_row())
     # The first run submitted, and its lease was lost before the id was written.
     earlier = await engine.submit(
-        OperationPayload.from_dict(_payload()).runtime, action="install", name="yuque-cli"
+        OperationPayload.from_dict(_payload()).runtime, action=AcliAction.INSTALL, name="yuque-cli"
     )
 
     outcome = await operation._step(_payload())
@@ -82,7 +87,7 @@ async def test_someone_else_s_busy_operation_is_waited_out(world) -> None:
     engine.autorun = None
     store.create(_row())
     await engine.submit(
-        OperationPayload.from_dict(_payload()).runtime, action="uninstall", name="other-cli"
+        OperationPayload.from_dict(_payload()).runtime, action=AcliAction.UNINSTALL, name="other-cli"
     )
 
     assert isinstance(await operation._step(_payload()), Reschedule)
@@ -177,7 +182,7 @@ async def test_a_cancel_that_reached_another_operation_is_not_active(world) -> N
     _, engine, _, cancel, payload = _cancel_world(world, target_engine_id="f" * 32)
     engine.autorun = None
     await engine.submit(
-        OperationPayload.from_dict(payload).runtime, action="install", name="yuque-cli"
+        OperationPayload.from_dict(payload).runtime, action=AcliAction.INSTALL, name="yuque-cli"
     )
 
     outcome = await cancel._step(payload)
@@ -200,7 +205,7 @@ async def test_a_forwarded_cancel_ends_with_the_engine_operation(
 ) -> None:
     _, engine, _, cancel, payload = _cancel_world(world, own_engine_id="e" * 32)
     engine.ops["e" * 32] = EngineOperation(
-        id="e" * 32, action="install", name="yuque-cli", state=state,
+        id="e" * 32, action=AcliAction.INSTALL, name="yuque-cli", state=EngineState(state),
         error={"code": "revert_failed", "message": "x"} if state == "failed" else None,
     )
 
@@ -257,7 +262,7 @@ async def test_an_install_that_resolved_an_alias_fails_with_the_market_name(worl
     store, engine, _, operation, _ = world
     store.create(_row(engine_operation_id="e" * 32))
     engine.ops["e" * 32] = EngineOperation(
-        id="e" * 32, action="install", name="di", state="succeeded",
+        id="e" * 32, action=AcliAction.INSTALL, name="di", state=EngineState.SUCCEEDED,
         result={"name": "deepinsight-cli", "command": "di"},
     )
 
@@ -274,7 +279,7 @@ async def test_an_alias_install_whose_market_name_cannot_be_granted_says_so(worl
     operation._reconciler.drops_writes = True
     store.create(_row(engine_operation_id="e" * 32))
     engine.ops["e" * 32] = EngineOperation(
-        id="e" * 32, action="install", name="di", state="succeeded",
+        id="e" * 32, action=AcliAction.INSTALL, name="di", state=EngineState.SUCCEEDED,
         result={"name": "deepinsight-cli", "command": "di"},
     )
 

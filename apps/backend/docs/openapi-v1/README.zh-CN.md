@@ -965,7 +965,7 @@ Spec：`apps/backend/specs/2026-10-15-openapi-v1-acli-clis/` 与 `docs/specs/202
 | DELETE | `/openapi/v1/bots/{bot_id}/clis/{cli_code}?stage=&async=` | OWNER + 编辑锁 | 卸载；授权保留 |
 | POST | `/openapi/v1/bots/{bot_id}/clis/{cli_code}/install/cancel?stage=&async=` | OWNER + 编辑锁 | 取消正在进行的添加，已装上的会被卸载 |
 | POST | `/openapi/v1/bots/{bot_id}/clis/{cli_code}/uninstall/cancel?stage=&async=` | OWNER + 编辑锁 | 取消正在进行的删除，已卸掉的会重新安装 |
-| GET | `/openapi/v1/bots/{bot_id}/cli-operations?stage=` | MEMBER | 运行时正在进行的操作（最多一个添加/删除和一个取消） |
+| GET | `/openapi/v1/bots/{bot_id}/cli-operations?stage=` | MEMBER | 运行时正在进行的添加或删除（最多一个），没有则为 `null`；取消进行中时其 `step` 为 `cancelling` |
 | GET | `/openapi/v1/bots/{bot_id}/cli-operations/{operation_id}` | MEMBER | 单个操作，进行中或已结束 |
 | PATCH | `/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type` | OWNER + 编辑锁 | 不变：切换 `owner`/`caller` |
 

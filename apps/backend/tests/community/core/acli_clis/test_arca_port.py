@@ -13,8 +13,9 @@ from agentclaw.community.core.acli_clis.arca_port import (
     UNINSTALL_PATH,
     ArcaAcliPort,
 )
-from agentclaw.community.core.acli_clis.operations import AcliRuntime
+from agentclaw.community.core.acli_clis.operations import AcliAction, AcliRuntime
 from agentclaw.community.core.acli_clis.port import AcliPortError
+from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError,
     DeviceAdapterHTTPStatusError,
@@ -24,7 +25,7 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
 pytestmark = pytest.mark.asyncio
 
 CONN = {"url": "http://engine"}
-RUNTIME = AcliRuntime(bot_id="bot-1", owner_id="owner-1", stage="verify")
+RUNTIME = AcliRuntime(bot_id="bot-1", owner_id="owner-1", stage=PublishStage.VERIFY)
 OP = {
     "id": "e" * 32, "action": "install", "name": "deepinsight-cli", "state": "running",
     "started_at": "2026-10-21T00:00:00Z", "finished_at": None, "result": None, "error": None,
@@ -68,7 +69,7 @@ async def test_submit_posts_async_to_the_stage_and_returns_the_operation() -> No
     transport = _Transport(_envelope())
     contexts = _Contexts()
 
-    op = await _port(transport, contexts).submit(RUNTIME, action="install", name="deepinsight-cli")
+    op = await _port(transport, contexts).submit(RUNTIME, action=AcliAction.INSTALL, name="deepinsight-cli")
 
     assert (op.id, op.state, op.active) == ("e" * 32, "running", True)
     [(conn, method, path, body, timeout)] = transport.calls
@@ -83,9 +84,9 @@ async def test_uninstall_and_cancel_paths() -> None:
     transport = _Transport(_envelope())
     port = _port(transport)
 
-    await port.submit(RUNTIME, action="uninstall", name="x")
-    await port.cancel(RUNTIME, action="install", name="x")
-    await port.cancel(RUNTIME, action="uninstall", name="x")
+    await port.submit(RUNTIME, action=AcliAction.UNINSTALL, name="x")
+    await port.cancel(RUNTIME, action=AcliAction.INSTALL, name="x")
+    await port.cancel(RUNTIME, action=AcliAction.UNINSTALL, name="x")
 
     assert [c[2] for c in transport.calls] == [
         UNINSTALL_PATH, f"{INSTALL_PATH}/cancel", f"{UNINSTALL_PATH}/cancel",
@@ -108,7 +109,7 @@ async def test_a_refusal_without_an_operation_raises_its_code() -> None:
                             "message": "cannot record", "data": None})
 
     with pytest.raises(AcliPortError) as caught:
-        await _port(transport).submit(RUNTIME, action="install", name="x")
+        await _port(transport).submit(RUNTIME, action=AcliAction.INSTALL, name="x")
 
     assert (caught.value.code, caught.value.message) == ("install_failed", "cannot record")
 
@@ -116,7 +117,7 @@ async def test_a_refusal_without_an_operation_raises_its_code() -> None:
 async def test_success_without_an_operation_is_bad_output() -> None:
     with pytest.raises(AcliPortError) as caught:
         await _port(_Transport({"success": True, "data": {}})).submit(
-            RUNTIME, action="install", name="x"
+            RUNTIME, action=AcliAction.INSTALL, name="x"
         )
 
     assert caught.value.code == "bad_output"
@@ -128,7 +129,7 @@ async def test_engine_busy_carries_the_active_operation() -> None:
     transport = _Transport(error=DeviceAdapterHTTPStatusError(409, body))
 
     with pytest.raises(AcliPortError) as caught:
-        await _port(transport).submit(RUNTIME, action="uninstall", name="x")
+        await _port(transport).submit(RUNTIME, action=AcliAction.UNINSTALL, name="x")
 
     assert caught.value.code == "engine_busy"
     assert caught.value.operation.name == "deepinsight-cli"
@@ -139,7 +140,7 @@ async def test_not_active_is_its_own_code() -> None:
     transport = _Transport(error=DeviceAdapterHTTPStatusError(409, body))
 
     with pytest.raises(AcliPortError) as caught:
-        await _port(transport).cancel(RUNTIME, action="install", name="x")
+        await _port(transport).cancel(RUNTIME, action=AcliAction.INSTALL, name="x")
 
     assert (caught.value.code, caught.value.operation) == ("not_active", None)
 
@@ -198,7 +199,7 @@ async def test_a_failed_listing_raises_its_code() -> None:
 )
 async def test_transport_failures_map_to_codes(error: Exception, code: str) -> None:
     with pytest.raises(AcliPortError) as caught:
-        await _port(_Transport(error=error)).submit(RUNTIME, action="install", name="x")
+        await _port(_Transport(error=error)).submit(RUNTIME, action=AcliAction.INSTALL, name="x")
 
     assert caught.value.code == code
 
@@ -208,7 +209,7 @@ async def test_no_container_is_not_running() -> None:
 
     with pytest.raises(AcliPortError) as caught:
         await _port(transport, _Contexts(error=LookupError("no binding"))).submit(
-            RUNTIME, action="install", name="x"
+            RUNTIME, action=AcliAction.INSTALL, name="x"
         )
 
     assert caught.value.code == "not_running"
@@ -218,7 +219,7 @@ async def test_no_container_is_not_running() -> None:
 async def test_a_non_mapping_answer_is_unreachable() -> None:
     with pytest.raises(AcliPortError) as caught:
         await _port(_Transport(["not", "an", "envelope"])).submit(
-            RUNTIME, action="install", name="x"
+            RUNTIME, action=AcliAction.INSTALL, name="x"
         )
 
     assert caught.value.code == "engine_unreachable"
@@ -227,7 +228,7 @@ async def test_a_non_mapping_answer_is_unreachable() -> None:
 async def test_a_malformed_operation_is_bad_output() -> None:
     with pytest.raises(AcliPortError) as caught:
         await _port(_Transport(_envelope({"id": "x"}))).submit(
-            RUNTIME, action="install", name="x"
+            RUNTIME, action=AcliAction.INSTALL, name="x"
         )
 
     assert caught.value.code == "bad_output"

@@ -23,7 +23,11 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from agentclaw.community.core.acli_clis.operations import AcliRuntime, EngineOperation
+from agentclaw.community.core.acli_clis.operations import (
+    AcliAction,
+    AcliRuntime,
+    EngineOperation,
+)
 
 
 class AcliPortError(Exception):
@@ -80,7 +84,9 @@ class AcliPort(Protocol):
     """acli operations in one bot runtime's container."""
 
     @abstractmethod
-    async def submit(self, runtime: AcliRuntime, *, action: str, name: str) -> EngineOperation:
+    async def submit(
+        self, runtime: AcliRuntime, *, action: AcliAction, name: str
+    ) -> EngineOperation:
         """Start an ``install`` or ``uninstall`` of ``name`` without waiting for it."""
         ...
 
@@ -92,7 +98,9 @@ class AcliPort(Protocol):
         ...
 
     @abstractmethod
-    async def cancel(self, runtime: AcliRuntime, *, action: str, name: str) -> EngineOperation:
+    async def cancel(
+        self, runtime: AcliRuntime, *, action: AcliAction, name: str
+    ) -> EngineOperation:
         """Ask the engine to cancel the running ``action`` of ``name``, without waiting."""
         ...
 

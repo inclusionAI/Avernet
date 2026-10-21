@@ -1711,7 +1711,7 @@ and `docs/specs/2026-10-21-acli-cli-operations/spec.md`.
 | DELETE | `/openapi/v1/bots/{bot_id}/clis/{cli_code}?stage=&async=` | OWNER + edit lock | Uninstall; the grant is kept |
 | POST | `/openapi/v1/bots/{bot_id}/clis/{cli_code}/install/cancel?stage=&async=` | OWNER + edit lock | Cancel the running add; whatever it installed is removed |
 | POST | `/openapi/v1/bots/{bot_id}/clis/{cli_code}/uninstall/cancel?stage=&async=` | OWNER + edit lock | Cancel the running remove; the tool is reinstalled if it was already removed |
-| GET | `/openapi/v1/bots/{bot_id}/cli-operations?stage=` | MEMBER | The runtime's running operations (at most one add/remove and one cancel) |
+| GET | `/openapi/v1/bots/{bot_id}/cli-operations?stage=` | MEMBER | The runtime's running add or remove (at most one), or `null`; a cancel in progress shows as its `cancelling` step |
 | GET | `/openapi/v1/bots/{bot_id}/cli-operations/{operation_id}` | MEMBER | One operation, running or ended |
 | PATCH | `/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type` | OWNER + edit lock | Unchanged: switch `owner`/`caller` |
 

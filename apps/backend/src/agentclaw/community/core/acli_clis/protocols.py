@@ -27,7 +27,13 @@ from agentclaw.community.core.acli_clis.errors import (
     AcliRequestRejectedError,
     AcliStageNotAllowedError,
 )
-from agentclaw.community.core.acli_clis.operations import AcliOperation
+from agentclaw.community.core.acli_clis.operations import (
+    AcliAction,
+    AcliOperation,
+    OperationKind,
+    OperationStatus,
+    OperationStep,
+)
 from agentclaw.community.core.acli_clis.port import AcliMarketPage, AcliTool
 
 
@@ -84,9 +90,11 @@ class AcliCliServiceProtocol(Protocol):
     ) -> AcliOperation: ...
 
     @abstractmethod
-    async def live_operations(
+    async def live_operation(
         self, *, bot_id: str, entity_id: str, actor_id: str, stage: str | None = None
-    ) -> list[AcliOperation]: ...
+    ) -> AcliOperation | None:
+        """The runtime's running add or remove; ``None`` when nothing runs."""
+        ...
 
     @abstractmethod
     async def add(
@@ -122,7 +130,7 @@ class AcliCliServiceProtocol(Protocol):
         entity_id: str,
         actor_id: str,
         cli_code: str,
-        action: str,
+        action: AcliAction,
         lock_epoch: int | None,
         stage: str | None = None,
         run_async: bool = False,
@@ -141,6 +149,7 @@ __all__ = [
     "AcliMarketNotConfiguredError",
     "AcliMarketPage",
     "AcliMarketUnavailableError",
+    "AcliAction",
     "AcliOperation",
     "AcliOperationCancelledError",
     "AcliOperationFailedError",
@@ -152,4 +161,7 @@ __all__ = [
     "AcliStageNotAllowedError",
     "AcliTool",
     "BotCli",
+    "OperationKind",
+    "OperationStatus",
+    "OperationStep",
 ]

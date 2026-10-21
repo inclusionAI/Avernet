@@ -61,6 +61,14 @@ def _envelope(
     status: int, *, success: bool, op: AcliOperation | None = None,
     error: str | None = None, message: str | None = None, warning: str | None = None,
 ) -> JSONResponse:
+    """The ``ApiResponse`` envelope at ``status``, with ``op`` in ``data.operation``.
+
+    ``op`` is ``None`` exactly when the request concerns no operation, so
+    ``data`` is ``null``: a submit refused before one was created (acli's
+    record could not be written), a cancel that found nothing running
+    (``not_active``), and an id the engine has no record of
+    (``operation_not_found``). Every other answer carries the operation.
+    """
     body = ApiResponse(
         success=success,
         data={"operation": op.public()} if op is not None else None,

@@ -185,7 +185,16 @@ class AcliOperations:
     # ── public ───────────────────────────────────────────────────────────
 
     def submit(self, action: str, name: str) -> AcliOperation:
-        """Start a new operation, or refuse with the one that is active."""
+        """Start a new operation, or refuse with the one that is active.
+
+        Atomic, and it has to be: two submits racing must not both pass the
+        busy check. It is a plain function with no ``await`` between the check
+        and taking the slot (``self._active = op``), and every caller runs on
+        the engine's one event loop, so no other submit can run in between.
+        The record write in between is synchronous for the same reason.
+        Keep it that way: an ``await`` added before the slot is taken would
+        need an ``asyncio.Lock`` around both.
+        """
         if action not in (INSTALL, UNINSTALL):
             raise ValueError(f"unknown acli action {action!r}")
         validate_name(name)

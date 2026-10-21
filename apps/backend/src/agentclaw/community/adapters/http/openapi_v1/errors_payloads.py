@@ -47,12 +47,12 @@ def acli_operation_payload(op: AcliOperation) -> dict[str, object]:
     """An acli operation as the public API publishes it."""
     return {
         "operation_id": op.id,
-        "kind": op.kind,
-        "action": op.action,
+        "kind": op.kind.value,
+        "action": op.action.value,
         "cli_code": op.cli_code,
-        "stage": op.stage,
-        "status": op.status,
-        "step": op.step,
+        "stage": op.stage.value,
+        "status": op.status.value,
+        "step": op.step.value if op.step is not None else None,
         "error_code": op.error_code,
         "error_message": op.error_message,
     }

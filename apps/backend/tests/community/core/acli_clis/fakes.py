@@ -13,7 +13,12 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
-from agentclaw.community.core.acli_clis.operations import AcliRuntime, EngineOperation
+from agentclaw.community.core.acli_clis.operations import (
+    AcliAction,
+    AcliRuntime,
+    EngineOperation,
+    EngineState,
+)
 from agentclaw.community.core.acli_clis.port import AcliMarketPage, AcliPortError, AcliTool
 from agentclaw.community.core.acli_clis.repository.models import AcliOperationRecord
 from agentclaw.community.core.acli_clis.tasks import (
@@ -159,7 +164,9 @@ class Engine:
         active = self.active.get(runtime.stage)
         if active is not None:
             raise AcliPortError("engine_busy", "busy", operation=self.ops[active])
-        op = EngineOperation(id=next(self._ids), action=action, name=name, state="running")
+        op = EngineOperation(
+            id=next(self._ids), action=AcliAction(action), name=name, state=EngineState.RUNNING
+        )
         self.ops[op.id] = op
         self.active[runtime.stage] = op.id
         self.op_stage[op.id] = runtime.stage
@@ -179,7 +186,7 @@ class Engine:
         op = self.ops.get(active) if active else None
         if op is None or op.action != action or op.name != name:
             raise AcliPortError("not_active", "nothing to cancel")
-        self.ops[op.id] = replace(op, state="cancelling")
+        self.ops[op.id] = replace(op, state=EngineState.CANCELLING)
         return self.ops[op.id]
 
     async def list_tools(self, runtime: AcliRuntime) -> list[AcliTool]:
@@ -206,7 +213,7 @@ class Engine:
                 tools.discard(op.name)
         elif state == "failed":
             error = {"code": f"{op.action}_failed", "message": "acli said no"}
-        self.ops[op_id] = replace(op, state=state, result=result, error=error)
+        self.ops[op_id] = replace(op, state=EngineState(state), result=result, error=error)
         if self.active.get(stage) == op_id:
             del self.active[stage]
 

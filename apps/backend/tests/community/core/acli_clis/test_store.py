@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from agentclaw.community.core.acli_clis.operations import AcliAction, OperationKind
 from agentclaw.community.core.acli_clis.repository.models import (
     AcliOperationModel,
     AcliOperationRecord,
@@ -19,6 +20,7 @@ from agentclaw.community.core.acli_clis.repository.store import (
     SqlAcliOperationStore,
 )
 from agentclaw.community.core.base import Base
+from agentclaw.community.core.service_bot.types import PublishStage
 
 
 class _DB:
@@ -49,8 +51,9 @@ def store() -> SqlAcliOperationStore:
 
 def _record(op_id: str, *, kind: str = "operation", stage: str = "draft", **fields):
     return AcliOperationRecord(
-        operation_id=op_id, task_id=fields.pop("task_id", 1), kind=kind, action="install",
-        cli_code="yuque-cli", bot_pk=fields.pop("bot_pk", 7), stage=stage, **fields,
+        operation_id=op_id, task_id=fields.pop("task_id", 1), kind=OperationKind(kind),
+        action=AcliAction.INSTALL, cli_code="yuque-cli", bot_pk=fields.pop("bot_pk", 7),
+        stage=PublishStage(stage), **fields,
     )
 
 
@@ -82,9 +85,15 @@ def test_latest_is_per_runtime_and_kind(store) -> None:
     store.create(_record("4" * 32, stage="online"))
     store.create(_record("5" * 32, bot_pk=8))
 
-    assert store.latest(bot_pk=7, stage="draft", kind="operation").operation_id == "2" * 32
-    assert store.latest(bot_pk=7, stage="draft", kind="cancel").target_operation_id == "2" * 32
-    assert store.latest(bot_pk=7, stage="verify", kind="operation") is None
+    draft, verify = PublishStage.DRAFT, PublishStage.VERIFY
+    latest_op = store.latest(bot_pk=7, stage=draft, kind=OperationKind.OPERATION)
+    assert latest_op.operation_id == "2" * 32
+    assert (latest_op.kind, latest_op.action, latest_op.stage) == (
+        OperationKind.OPERATION, AcliAction.INSTALL, draft,
+    )
+    cancel = store.latest(bot_pk=7, stage=draft, kind=OperationKind.CANCEL)
+    assert cancel.target_operation_id == "2" * 32
+    assert store.latest(bot_pk=7, stage=verify, kind=OperationKind.OPERATION) is None
 
 
 def test_the_ddl_declares_every_model_column() -> None:

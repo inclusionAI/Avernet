@@ -43,19 +43,15 @@ from agentclaw.community.core.acli_clis.market import AcliMarketSearch
 from agentclaw.community.core.acli_clis.operations import (
     CANCEL_TASK_DEADLINE_SECONDS,
     CANCEL_TASK_TYPE,
-    CANCELLED,
-    FAILED,
-    INSTALL,
-    KIND_CANCEL,
-    KIND_OPERATION,
     OPERATION_TASK_DEADLINE_SECONDS,
     OPERATION_TASK_TYPE,
-    RUNNING,
-    SUCCEEDED,
-    UNINSTALL,
+    AcliAction,
     AcliOperation,
     AcliRuntime,
+    OperationKind,
     OperationPayload,
+    OperationStatus,
+    OperationStep,
     cancel_key,
     operation_key,
     parse_task_error,
@@ -100,6 +96,7 @@ from agentclaw.community.core.repository.protocols.identity import (
 from agentclaw.community.core.repository.protocols.platform import (
     TaskQueueRepositoryProtocol,
 )
+from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 from agentclaw.community.core.task_queue.types import TaskRecord, TaskStatus
 from agentclaw.community.log import get_logger
@@ -109,7 +106,6 @@ logger = get_logger()
 #: Engines whose containers ship acli and the ``/api/cli/acli/*`` endpoints.
 ACLI_ENGINES = frozenset({"openclaw", "claude_code"})
 SERVICE_BOT_TYPE = "service"
-DRAFT = "draft"
 #: How long a sync call waits for its operation (D2), and how often it looks.
 SYNC_WAIT_SECONDS = 30.0
 WAIT_POLL_SECONDS = 1.0
@@ -206,23 +202,24 @@ class AcliCliService(AcliCliServiceProtocol):
             raise AcliOperationNotFoundError(operation_id)
         return await asyncio.to_thread(self._view, record)
 
-    async def live_operations(
+    async def live_operation(
         self, *, bot_id: str, entity_id: str, actor_id: str, stage: str | None = None
-    ) -> list[AcliOperation]:
-        """The stage's running add/remove and cancel, if any."""
+    ) -> AcliOperation | None:
+        """The stage's running add or remove, if any (there is at most one).
+
+        A cancel in progress shows as its ``cancelling`` step; the cancel
+        itself reads back by the id its request answered with.
+        """
         bot = await asyncio.to_thread(self._readable_bot, bot_id, entity_id, actor_id)
         runtime = self._runtime(bot, stage)
-        found: list[AcliOperation] = []
-        for kind in (KIND_OPERATION, KIND_CANCEL):
-            record = await asyncio.to_thread(
-                self._store.latest, bot_pk=int(bot["id"]), stage=runtime.stage, kind=kind
-            )
-            if record is None:
-                continue
-            view = await asyncio.to_thread(self._view, record)
-            if view.running:
-                found.append(view)
-        return found
+        record = await asyncio.to_thread(
+            self._store.latest, bot_pk=int(bot["id"]), stage=runtime.stage,
+            kind=OperationKind.OPERATION,
+        )
+        if record is None:
+            return None
+        view = await asyncio.to_thread(self._view, record)
+        return view if view.running else None
 
     # ── writes ───────────────────────────────────────────────────────────
 
@@ -245,8 +242,8 @@ class AcliCliService(AcliCliServiceProtocol):
         listed = await self._market_entry(cli_code)
         identity_mode = await asyncio.to_thread(self._kept_identity, bot, cli_code)
         payload = self._payload(
-            bot, runtime, entity_id=entity_id, actor_id=actor_id, kind=KIND_OPERATION,
-            action=INSTALL, cli_code=cli_code, identity_mode=identity_mode,
+            bot, runtime, entity_id=entity_id, actor_id=actor_id, kind=OperationKind.OPERATION,
+            action=AcliAction.INSTALL, cli_code=cli_code, identity_mode=identity_mode,
             cli_desc=listed.description if listed is not None else None,
         )
         return await self._run(payload, run_async=run_async)
@@ -270,8 +267,8 @@ class AcliCliService(AcliCliServiceProtocol):
         if cli_code in self._default_codes(bot):
             raise AcliDefaultCliError(cli_code)
         payload = self._payload(
-            bot, runtime, entity_id=entity_id, actor_id=actor_id, kind=KIND_OPERATION,
-            action=UNINSTALL, cli_code=cli_code,
+            bot, runtime, entity_id=entity_id, actor_id=actor_id, kind=OperationKind.OPERATION,
+            action=AcliAction.UNINSTALL, cli_code=cli_code,
         )
         return await self._run(payload, run_async=run_async)
 
@@ -282,25 +279,27 @@ class AcliCliService(AcliCliServiceProtocol):
         entity_id: str,
         actor_id: str,
         cli_code: str,
-        action: str,
+        action: AcliAction,
         lock_epoch: int | None,
         stage: str | None = None,
         run_async: bool = False,
     ) -> AcliOutcome:
         """Cancel the running ``action`` of ``cli_code``; the engine reverts it."""
+        action = AcliAction(action)
         bot = await asyncio.to_thread(
             self._writable_bot, bot_id, entity_id, actor_id, lock_epoch
         )
         runtime = self._runtime(bot, stage)
         target = await asyncio.to_thread(
-            self._store.latest, bot_pk=int(bot["id"]), stage=runtime.stage, kind=KIND_OPERATION
+            self._store.latest, bot_pk=int(bot["id"]), stage=runtime.stage,
+            kind=OperationKind.OPERATION,
         )
         if target is None or target.action != action or target.cli_code != cli_code or not (
             await asyncio.to_thread(self._view, target)
         ).running:
             raise AcliOperationNotActiveError(f"no {action} of {cli_code!r} is running")
         payload = self._payload(
-            bot, runtime, entity_id=entity_id, actor_id=actor_id, kind=KIND_CANCEL,
+            bot, runtime, entity_id=entity_id, actor_id=actor_id, kind=OperationKind.CANCEL,
             action=action, cli_code=cli_code, target_operation_id=target.operation_id,
         )
         return await self._run(payload, run_async=run_async)
@@ -309,7 +308,7 @@ class AcliCliService(AcliCliServiceProtocol):
 
     async def _run(self, payload: OperationPayload, *, run_async: bool) -> AcliOutcome:
         """Enqueue ``payload`` and answer for it: at once, or once it ends (≤ 30 s)."""
-        cancel = payload.kind == KIND_CANCEL
+        cancel = payload.kind == OperationKind.CANCEL
         result = await asyncio.to_thread(
             self._tasks.enqueue,
             CANCEL_TASK_TYPE if cancel else OPERATION_TASK_TYPE,
@@ -357,12 +356,14 @@ class AcliCliService(AcliCliServiceProtocol):
             view = await asyncio.to_thread(self._view_of_id, view.id)
         if view.running:
             return AcliOutcome(operation=view)
-        if view.status == SUCCEEDED:
+        if view.status == OperationStatus.SUCCEEDED:
             tool = None
-            if view.kind == KIND_OPERATION and view.action == INSTALL:
+            if view.kind == OperationKind.OPERATION and view.action == AcliAction.INSTALL:
                 tool = await self._installed_tool(view, runtime)
             return AcliOutcome(operation=view, tool=tool)
-        raise _container_error(view.error_code or FAILED, view.error_message or "")
+        raise _container_error(
+            view.error_code or OperationStatus.FAILED.value, view.error_message or ""
+        )
 
     async def _installed_tool(self, view: AcliOperation, runtime: AcliRuntime) -> AcliTool:
         """What the engine reported installing; the code alone if it no longer says."""
@@ -398,33 +399,50 @@ class AcliCliService(AcliCliServiceProtocol):
         status = task.status if task is not None else TaskStatus.FAILED
         error_code = error_message = None
         if status in (TaskStatus.PENDING, TaskStatus.RUNNING):
-            state = RUNNING
+            state = OperationStatus.RUNNING
         elif status == TaskStatus.SUCCEEDED:
-            state = SUCCEEDED
+            state = OperationStatus.SUCCEEDED
         else:
             error_code, error_message = parse_task_error(
                 task.last_error if task is not None else "lost: the operation's task is gone"
             )
-            if status == TaskStatus.TIMED_OUT and error_code == FAILED:
+            if status == TaskStatus.TIMED_OUT and error_code == OperationStatus.FAILED:
                 error_code, error_message = "timeout", "the operation did not finish in time"
-            state = CANCELLED if error_code == CANCELLED else FAILED
-        step = None
-        if state == RUNNING:
-            if record.kind == KIND_CANCEL:
-                step = "cancelling"
-            elif record.engine_operation_id is None and record.action == INSTALL:
-                step = "granting"
-            else:
-                step = "installing" if record.action == INSTALL else "uninstalling"
+            state = (
+                OperationStatus.CANCELLED if error_code == OperationStatus.CANCELLED
+                else OperationStatus.FAILED
+            )
         return AcliOperation(
             id=record.operation_id, kind=record.kind, action=record.action,
-            cli_code=record.cli_code, stage=record.stage, status=state, step=step,
+            cli_code=record.cli_code, stage=record.stage, status=state,
+            step=self._step(record) if state == OperationStatus.RUNNING else None,
             error_code=error_code, error_message=error_message,
         )
 
+    def _step(self, record: AcliOperationRecord) -> OperationStep:
+        """What a running operation is doing now."""
+        if record.kind == OperationKind.CANCEL or self._being_cancelled(record):
+            return OperationStep.CANCELLING
+        if record.engine_operation_id is None and record.action == AcliAction.INSTALL:
+            return OperationStep.GRANTING
+        if record.action == AcliAction.INSTALL:
+            return OperationStep.INSTALLING
+        return OperationStep.UNINSTALLING
+
+    def _being_cancelled(self, record: AcliOperationRecord) -> bool:
+        """Whether a running cancel targets this add or remove."""
+        cancel = self._store.latest(
+            bot_pk=record.bot_pk, stage=record.stage, kind=OperationKind.CANCEL
+        )
+        if cancel is None or cancel.target_operation_id != record.operation_id:
+            return False
+        task = self._task_repo.get_by_id(cancel.task_id)
+        return task is not None and task.status in (TaskStatus.PENDING, TaskStatus.RUNNING)
+
     def _payload(
         self, bot: Mapping[str, Any], runtime: AcliRuntime, *, entity_id: str, actor_id: str,
-        kind: str, action: str, cli_code: str, identity_mode: str | None = None,
+        kind: OperationKind, action: AcliAction, cli_code: str,
+        identity_mode: str | None = None,
         cli_desc: str | None = None, target_operation_id: str | None = None,
     ) -> OperationPayload:
         return OperationPayload(
@@ -443,7 +461,8 @@ class AcliCliService(AcliCliServiceProtocol):
         if stage is not None and str(bot.get("bot_type") or "") != SERVICE_BOT_TYPE:
             raise AcliStageNotAllowedError
         return AcliRuntime(
-            bot_id=str(bot["bot_id"]), owner_id=str(bot["owner_id"]), stage=stage or DRAFT
+            bot_id=str(bot["bot_id"]), owner_id=str(bot["owner_id"]),
+            stage=PublishStage(stage) if stage is not None else PublishStage.DRAFT,
         )
 
     def _readable_bot(self, bot_id: str, entity_id: str, actor_id: str) -> Mapping[str, Any]:
@@ -555,7 +574,7 @@ def _container_error(code: str, message: str) -> DomainError:
         return AcliBotNotRunningError(code, message)
     if code == "engine_outdated":
         return AcliEngineOutdatedError(code, message)
-    if code == CANCELLED:
+    if code == OperationStatus.CANCELLED:
         return AcliOperationCancelledError(code, message)
     if code == "not_active":
         return AcliOperationNotActiveError(message)

@@ -12,7 +12,12 @@ import asyncio
 import json
 from typing import Any, Mapping, Protocol, runtime_checkable
 
-from agentclaw.community.core.acli_clis.operations import AcliRuntime, EngineOperation
+from agentclaw.community.core.acli_clis.operations import (
+    AcliAction,
+    AcliRuntime,
+    EngineOperation,
+    EngineState,
+)
 from agentclaw.community.core.acli_clis.port import (
     AcliPort,
     AcliPortError,
@@ -44,7 +49,7 @@ INSTALL_PATH = "/api/cli/acli/install"
 UNINSTALL_PATH = "/api/cli/acli/uninstall"
 OPERATION_PATH = "/api/cli/acli/operations/{id}"
 TOOLS_PATH = "/api/cli/acli/tools"
-_SUBMIT_PATHS = {"install": INSTALL_PATH, "uninstall": UNINSTALL_PATH}
+_SUBMIT_PATHS = {AcliAction.INSTALL: INSTALL_PATH, AcliAction.UNINSTALL: UNINSTALL_PATH}
 
 #: Submitting and cancelling are ``async`` on the engine, so they answer at
 #: once; reading an operation is a local file read there. The listing runs
@@ -63,7 +68,9 @@ class ArcaAcliPort(AcliPort):
         self._contexts = contexts
         self._transport = transport
 
-    async def submit(self, runtime: AcliRuntime, *, action: str, name: str) -> EngineOperation:
+    async def submit(
+        self, runtime: AcliRuntime, *, action: AcliAction, name: str
+    ) -> EngineOperation:
         envelope = await self._invoke(
             runtime, "POST", _SUBMIT_PATHS[action],
             body={"name": name, "async": True}, timeout=SUBMIT_TIMEOUT_SECONDS,
@@ -84,7 +91,9 @@ class ArcaAcliPort(AcliPort):
             raise
         return _operation_of(envelope)
 
-    async def cancel(self, runtime: AcliRuntime, *, action: str, name: str) -> EngineOperation:
+    async def cancel(
+        self, runtime: AcliRuntime, *, action: AcliAction, name: str
+    ) -> EngineOperation:
         envelope = await self._invoke(
             runtime, "POST", f"{_SUBMIT_PATHS[action]}/cancel",
             body={"name": name, "async": True}, timeout=SUBMIT_TIMEOUT_SECONDS,
@@ -125,7 +134,7 @@ class ArcaAcliPort(AcliPort):
             # runs off the event loop, as the engine relay's does.
             context = await asyncio.to_thread(
                 self._contexts.resolve,
-                bot_id=runtime.bot_id, owner_id=runtime.owner_id, stage=runtime.stage,
+                bot_id=runtime.bot_id, owner_id=runtime.owner_id, stage=runtime.stage.value,
             )
         except Exception as error:
             # No binding, an offline device, a stage with no live runtime, or no
@@ -206,9 +215,14 @@ def _parse_operation(data: Any) -> EngineOperation | None:
     fields = {k: op.get(k) for k in ("id", "action", "name", "state")}
     if not all(isinstance(v, str) and v for v in fields.values()):
         return None
+    try:
+        action, state = AcliAction(fields["action"]), EngineState(fields["state"])
+    except ValueError:
+        # An action or state this contract does not name: unreadable.
+        return None
     result, error = op.get("result"), op.get("error")
     return EngineOperation(
-        id=fields["id"], action=fields["action"], name=fields["name"], state=fields["state"],
+        id=fields["id"], action=action, name=fields["name"], state=state,
         result=result if isinstance(result, Mapping) else None,
         error=error if isinstance(error, Mapping) else None,
     )

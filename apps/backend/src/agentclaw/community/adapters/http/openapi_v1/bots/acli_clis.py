@@ -35,7 +35,11 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
 )
-from agentclaw.community.api.acli_cli_service import AcliCliServiceProtocol, AcliOperation
+from agentclaw.community.api.acli_cli_service import (
+    AcliAction,
+    AcliCliServiceProtocol,
+    AcliOperation,
+)
 from agentclaw.community.api.collaborator_lock_service import (
     CollaboratorLockServiceProtocol,
 )
@@ -96,8 +100,12 @@ def _operation(op: AcliOperation) -> AcliCliOperation:
 
 
 def _still_running(op: AcliOperation, request: Request) -> JSONResponse:
+    # Still enveloped (``accepted`` builds the standard ``Envelope``). A
+    # ``JSONResponse`` only because a handler's own return value always answers
+    # with its route's status, 200; ``202`` has to be set on the response
+    # itself, as bot creation does for its pending answer.
     return JSONResponse(
-        status_code=202, content=accepted(_operation(op), request).model_dump()
+        status_code=202, content=accepted(_operation(op), request).model_dump(mode="json")
     )
 
 
@@ -201,7 +209,7 @@ async def remove_bot_cli(
 
 
 async def _cancel(
-    action: str, *, bot_id: str, cli_code: str, request: Request, user_id: str,
+    action: AcliAction, *, bot_id: str, cli_code: str, request: Request, user_id: str,
     owner_id: str, stage: RuntimeStage | None, run_async: bool,
     service: AcliCliServiceProtocol, locks: CollaboratorLockServiceProtocol,
 ) -> Envelope[AcliCliOperation] | JSONResponse:
@@ -237,7 +245,7 @@ async def cancel_bot_cli_install(
 ) -> Envelope[AcliCliOperation] | JSONResponse:
     """Cancel the running add of the CLI; whatever it installed is removed. The grant stays."""
     return await _cancel(
-        "install", bot_id=bot_id, cli_code=cli_code, request=request, user_id=user_id,
+        AcliAction.INSTALL, bot_id=bot_id, cli_code=cli_code, request=request, user_id=user_id,
         owner_id=owner_id, stage=stage, run_async=run_async, service=service, locks=locks,
     )
 
@@ -259,26 +267,30 @@ async def cancel_bot_cli_uninstall(
 ) -> Envelope[AcliCliOperation] | JSONResponse:
     """Cancel the running remove of the CLI; it is reinstalled if it was already removed."""
     return await _cancel(
-        "uninstall", bot_id=bot_id, cli_code=cli_code, request=request, user_id=user_id,
+        AcliAction.UNINSTALL, bot_id=bot_id, cli_code=cli_code, request=request, user_id=user_id,
         owner_id=owner_id, stage=stage, run_async=run_async, service=service, locks=locks,
     )
 
 
-@operations_router.get("", response_model=Envelope[list[AcliCliOperation]])
+@operations_router.get("", response_model=Envelope[AcliCliOperation | None])
 @envelope_errors
-async def list_cli_operations(
+async def get_live_cli_operation(
     bot_id: BotIdPath,
     request: Request,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     stage: StageParam = None,
     service: AcliCliServiceProtocol = Injected(AcliCliServiceProtocol),
-) -> Envelope[list[AcliCliOperation]]:
-    """The runtime's running operations: at most one add or remove and one cancel."""
-    ops = await service.live_operations(
+) -> Envelope[AcliCliOperation | None]:
+    """The runtime's running add or remove (there is at most one), or `null`.
+
+    A cancel in progress shows as the operation's `cancelling` step; the cancel
+    itself reads back at `…/cli-operations/{operation_id}`.
+    """
+    op = await service.live_operation(
         bot_id=bot_id, entity_id=owner_id, actor_id=user_id, stage=_stage(stage)
     )
-    return envelope([_operation(op) for op in ops], request)
+    return envelope(_operation(op) if op is not None else None, request)
 
 
 @operations_router.get("/{operation_id}", response_model=Envelope[AcliCliOperation])

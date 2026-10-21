@@ -295,10 +295,10 @@ def cancel_bot_cli_install_not_active():
     scenario="happy",
     input=CaseInput(path_params={"bot_id": _BOT_ID}, query_params=_QUERY, headers=_HEADERS),
     seed=_seed_bot,
-    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": []}),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": None}),
 )
 def list_cli_operations_happy():
-    """No operation is running in the runtime."""
+    """No add or remove is running in the runtime."""
 
 
 @endpoint_test(

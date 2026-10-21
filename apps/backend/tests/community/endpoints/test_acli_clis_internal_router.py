@@ -241,7 +241,7 @@ def internal_remove_bot_cli_happy():
     scenario="happy",
     input=CaseInput(path_params={"bot_id": _BOT_ID}, query_params=_ENTITY, headers=_HEADERS),
     seed=_seed_bot,
-    expect=ExpectSuccess(status=200, json_equals=[]),
+    expect=ExpectSuccess(status=200, json_equals=None),
 )
 def internal_list_cli_operations_happy():
     """Nothing is running in the runtime."""

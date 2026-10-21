@@ -23,7 +23,8 @@ from typing import Any, Mapping
 
 from agentclaw.community.core.acli_clis.operations import (
     CANCEL_TASK_TYPE,
-    INSTALL,
+    AcliAction,
+    EngineState,
     OPERATION_TASK_TYPE,
     POLL_SECONDS,
     EngineOperation,
@@ -67,7 +68,7 @@ def _resolved_name(op: EngineOperation, payload: OperationPayload) -> str | None
     That happens when ``cli_code`` was a command alias the market could not be
     asked about before the submit.
     """
-    if payload.action != INSTALL or op.state != "succeeded":
+    if payload.action != AcliAction.INSTALL or op.state != EngineState.SUCCEEDED:
         return None
     installed = str((op.result or {}).get("name") or payload.cli_code)
     return installed if installed != payload.cli_code else None
@@ -114,7 +115,7 @@ class AcliOperationTaskHandler:
         if record.engine_operation_id is not None:
             return await self._poll(payload, record.engine_operation_id)
 
-        if payload.action == INSTALL:
+        if payload.action == AcliAction.INSTALL:
             refused = await asyncio.to_thread(self._ensure_granted, payload)
             if refused is not None:
                 return refused
@@ -163,7 +164,7 @@ class AcliOperationTaskHandler:
         """The task's outcome once its engine operation is known."""
         if op.active:
             return Reschedule(POLL_SECONDS)
-        if op.state != "succeeded":
+        if op.state != EngineState.SUCCEEDED:
             return Fail(task_error(op.error_code, op.error_message))
         resolved = _resolved_name(op, payload)
         if resolved is None:
@@ -296,9 +297,9 @@ class AcliCancelTaskHandler:
                 ))
         if op.active:
             return Reschedule(POLL_SECONDS)
-        if op.state == "cancelled":
+        if op.state == EngineState.CANCELLED:
             return Complete()
-        if op.state == "succeeded":
+        if op.state == EngineState.SUCCEEDED:
             return Fail(task_error("not_active", "the operation finished before it was cancelled"))
         return Fail(task_error(op.error_code, op.error_message))
 

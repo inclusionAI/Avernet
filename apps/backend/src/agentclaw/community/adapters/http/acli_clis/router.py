@@ -29,6 +29,7 @@ from agentclaw.community.adapters.http.acli_clis.schemas import (
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.api.acli_cli_service import (
+    AcliAction,
     AcliCliServiceProtocol,
     AcliOperation,
     AcliOperationInProgressError,
@@ -52,13 +53,13 @@ RunAsync = Annotated[bool, Query(alias="async", description="Answer at once with
 def _operation(op: AcliOperation) -> CliOperation:
     return CliOperation(
         operation_id=op.id, kind=op.kind, action=op.action, cli_code=op.cli_code,
-        stage=op.stage, status=op.status, step=op.step,
+        stage=op.stage.value, status=op.status, step=op.step,
         error_code=op.error_code, error_message=op.error_message,
     )
 
 
 def _still_running(op: AcliOperation) -> JSONResponse:
-    return JSONResponse(status_code=202, content=_operation(op).model_dump())
+    return JSONResponse(status_code=202, content=_operation(op).model_dump(mode="json"))
 
 
 async def _write(call) -> AcliOutcome | JSONResponse:
@@ -71,7 +72,10 @@ async def _write(call) -> AcliOutcome | JSONResponse:
             status_code=409,
             content={
                 "detail": error.detail,
-                "operation": _operation(op).model_dump() if isinstance(op, AcliOperation) else None,
+                "operation": (
+                    _operation(op).model_dump(mode="json")
+                    if isinstance(op, AcliOperation) else None
+                ),
             },
         )
 
@@ -195,7 +199,7 @@ async def remove_bot_cli(
 async def cancel_bot_cli_operation(
     bot_id: str,
     cli_code: str,
-    action: Annotated[Literal["install", "uninstall"], Path()],
+    action: Annotated[AcliAction, Path(description="`install` (an add) or `uninstall` (a remove).")],
     entity_id: EntityId,
     lock_epoch: Annotated[int | None, Query(gt=0)] = None,
     stage: Stage = None,
@@ -222,19 +226,22 @@ async def cancel_bot_cli_operation(
     return _operation(outcome.operation)
 
 
-@router.get("/{bot_id}/cli-operations", response_model=list[CliOperation])
-async def list_cli_operations(
+@router.get("/{bot_id}/cli-operations", response_model=CliOperation | None)
+async def get_live_cli_operation(
     bot_id: str,
     entity_id: EntityId,
     stage: Stage = None,
     user: AuthenticatedUser = Depends(get_current_user),
     service: AcliCliServiceProtocol = Injected(AcliCliServiceProtocol),
-) -> list[CliOperation]:
-    """The runtime's running operations."""
-    ops = await service.live_operations(
+) -> CliOperation | None:
+    """The runtime's running add or remove (at most one), or ``null``.
+
+    A cancel in progress shows as the operation's ``cancelling`` step.
+    """
+    op = await service.live_operation(
         bot_id=bot_id, entity_id=entity_id, actor_id=user.staffId, stage=stage
     )
-    return [_operation(op) for op in ops]
+    return _operation(op) if op is not None else None
 
 
 @router.get("/{bot_id}/cli-operations/{operation_id}", response_model=CliOperation)
