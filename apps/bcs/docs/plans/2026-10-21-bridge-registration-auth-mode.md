@@ -70,7 +70,10 @@ Live Poolab/AntFamily traffic and deployed end-to-end verification remain separa
   the selected resolver's actual runtime policy.
 - Restored internal `agentpass-auto` covers pre/prepub static registration,
   production SDK detection, absent SDK fallback and configured SDK failure.
-- Fresh verification: public bridge app/CLI 89 tests, internal bridge 83 tests,
+- Existing profiles retain their saved identity policy when `agentpass-auto`
+  detects a newly installed SDK; reuse neither registers another Bot nor calls
+  the SDK to change the saved identity.
+- Fresh verification: public bridge app/CLI 89 tests, internal bridge 84 tests,
   onboarding script 18 tests. Tests include explicit resolver precedence,
   historical Tokens, profile reuse and subbot Actor propagation.
 - Internal architecture boundary checks pass; the full offline Cargo metadata

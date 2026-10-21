@@ -102,9 +102,8 @@ impl RegisterArgs {
         let source = config::read_registration_source(path, true)?;
         let Some(previous) = source.previous else { return Ok(false); };
         let provider_id = scope.provider_id;
-        if source.settings.provider_auth.as_deref().is_some_and(|saved| saved != identity.runtime_auth()) {
-            bail!("Profile identity policy differs from the selected resolver; choose another profile");
-        }
+        // Reuse keeps the saved identity policy; automatic resolver detection may
+        // change after local credentials are installed without changing this Bot.
         let bots = previous.get("bot").and_then(toml::Value::as_array).context("Profile has no Bots")?;
         let matches = previous.get("provider_id").and_then(toml::Value::as_str) == Some(provider_id.as_str())
             && previous.get("mode").and_then(toml::Value::as_str) == Some(self.mode.name())

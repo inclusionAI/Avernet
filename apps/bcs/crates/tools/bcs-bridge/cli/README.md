@@ -289,6 +289,8 @@ combined with `--profile`.
 
 Repeated registration of an existing profile verifies provider, engine and
 endpoints and reuses the stored Bot without a network registration request.
+Reuse preserves the saved identity policy even if an automatic resolver now
+detects newly installed local credentials.
 Explicitly conflicting workspace/model options are rejected. New profiles may
 reuse local engine options from a verified active instance of the same engine.
 When QwenWork is stopped, saved regular TOML configs directly in ~/.bcn-bridge
