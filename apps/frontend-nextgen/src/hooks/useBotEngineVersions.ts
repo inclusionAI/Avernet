@@ -40,12 +40,12 @@ function errorMessage(error: unknown): string {
 
 function canInspect(target: EngineVersionTarget): boolean {
   return target.enabled && supportsEngineVersion(target.engine)
-    && botEngineVersionService.getRestartPermission(target.restartPermission).allowed;
+    && (target.permissionSource === 'backend' || botEngineVersionService.getRestartPermission(target.restartPermission).allowed);
 }
 
 function targetSignature(targets: EngineVersionTarget[]): string {
   return JSON.stringify(
-    targets.map(({ key, botId, userId, ownerId, engine, enabled, restartPermission }) => [
+    targets.map(({ key, botId, userId, ownerId, engine, enabled, restartPermission, permissionSource }) => [
       key,
       botId,
       userId,
@@ -53,6 +53,7 @@ function targetSignature(targets: EngineVersionTarget[]): string {
       engine,
       enabled,
       restartPermission,
+      permissionSource,
     ]),
   );
 }
@@ -164,8 +165,11 @@ export function useBotEngineVersions(targets: EngineVersionTarget[]): UseBotEngi
     async (key: string, onRestartSubmitted?: () => void): Promise<boolean> => {
       const target = targetByKey.get(key);
       const state = states[key];
-      const restartPermission = target
-        ? botEngineVersionService.getRestartPermission(target.restartPermission)
+      const permissionInput = target ? { ...target.restartPermission,
+        ...(target.permissionSource === 'backend' ? { backendObservation: state && (state.kind === 'ready' || state.kind === 'updating') ? state.observation : undefined } : {}),
+      } : undefined;
+      const restartPermission = permissionInput
+        ? botEngineVersionService.getRestartPermission(permissionInput)
         : undefined;
       if (
         !target ||
@@ -191,7 +195,7 @@ export function useBotEngineVersions(targets: EngineVersionTarget[]): UseBotEngi
       let submitted = false;
       try {
         const observation = await botEngineVersionService.restartAndConfirmUpdate(
-          { ...inspectionTarget(target, deviceUuid, controller.signal), restartPermission: target.restartPermission },
+          { ...inspectionTarget(target, deviceUuid, controller.signal), restartPermission: permissionInput! },
           state.observation,
           () => {
             submitted = true;

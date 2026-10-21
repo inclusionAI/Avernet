@@ -86,6 +86,9 @@ function getRestartPermission(input: EngineRestartPermissionInput): EngineRestar
   if (input.disabledActions?.restart) {
     return { allowed: false, disabledReason: input.disabledActions.restart };
   }
+  if (input.backendObservation) {
+    return { allowed: engineVersionUiState(input.backendObservation) === 'updatable' };
+  }
   if (!input.actions.includes('restart')) {
     return { allowed: false, disabledReason: '当前账号没有 Bot 重启权限' };
   }

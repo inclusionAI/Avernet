@@ -2,10 +2,8 @@ import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import type { IdentityView } from '@/domain/collaboration';
 import type { ConversationSessionRequestRange } from '@/domain/conversation/types';
 import type { BotLifecycle } from '@/domain/botWorkshop';
-import { resolveServiceEngineLifecycle } from '@/services/botWorkshop/botLifecycleResolver';
 import { resolveOpenApiUserId } from '@/domain/userIdentity';
 import {
-  listBotInventory,
   listBots as listOwnedBotsApi,
   type OwnedBotDto,
 } from '@/services/backendApi/bots/botController';
@@ -24,7 +22,6 @@ import {
   type BotMessageDto,
   type BotModelDto,
 } from '@/services/backendApi/bots/privateBotSessionController';
-import { isEnvelopeFailure } from '@/services/backendApi/types';
 import type { ChatMessage } from '@tc-chat/core';
 import type { BotIamTokenStage } from '../backendApi/privateChat/iamTokenController';
 import { mapBotActionPermissions } from './botActionPermissionMapper';
@@ -277,58 +274,8 @@ async function fetchOwnedBots(
     // 对话页的「已管理 Bot」目录保留全部可用 Bot。AgentCoding Bot 的行点击
     // 由对话页直接进入 coding-chat；普通 CC 仍由运行时分类保留，不误判。
     const owned = resp.data?.items ?? [];
-    // The chat directory omits action permissions. Reuse the authoritative
-    // inventory contract, matching both Bot and owner; missing data fails closed.
-    const missingPermissions = owned.filter((bot) => !Array.isArray(bot.actions));
-    const permissions = new Map<string, ReturnType<typeof mapBotActionPermissions>>();
-    const serviceLifecycles = new Map<string, BotLifecycle>();
-    const hasServiceBots = owned.some((bot) => bot.bot_type?.trim().toLowerCase() === 'service');
-    if (missingPermissions.length || hasServiceBots) {
-      try {
-        for (let page = 1; ; page += 1) {
-          const inventory = await listBotInventory({ user_id: resolveUserId(userId), page, page_size: 100 });
-          if (isEnvelopeFailure(inventory)) throw new Error('Bot inventory unavailable');
-          const rows = inventory.data?.items;
-            const total = inventory.data?.total;
-            if (!Array.isArray(rows) || typeof total !== 'number' || !Number.isFinite(total) || total < 0) {
-              throw new Error('Bot inventory page is incomplete');
-            }
-            if (hasServiceBots && rows.length !== Math.min(100, Math.max(0, total - (page - 1) * 100))) {
-              throw new Error('Bot inventory page count is inconsistent');
-            }
-          for (const row of rows) {
-            const ownerId = row.owner_entity_id ?? row.owner_id;
-            const source = owned.find((bot) => bot.bot_id === row.bot_id && bot.owner_entity_id === ownerId);
-            if (source?.bot_type?.trim().toLowerCase() === 'service') {
-              const key = `${row.bot_id}:${String(ownerId)}`;
-              const lifecycle = resolveServiceEngineLifecycle(row);
-              const previous = serviceLifecycles.get(key);
-              serviceLifecycles.set(key, previous && previous !== lifecycle ? 'unknown' : lifecycle);
-              if (lifecycle !== 'draft') continue;
-            }
-            if (typeof row.bot_id === 'string' && ownerId !== undefined && ownerId !== null) {
-              permissions.set(
-                `${row.bot_id}:${String(ownerId)}`,
-                mapBotActionPermissions(row.actions, row.disabled_actions),
-              );
-            }
-          }
-          if (rows.length < 100 || page * 100 >= total) break;
-        }
-      } catch {
-        serviceLifecycles.clear();
-        // Directory access must survive an unavailable management endpoint.
-      }
-    }
-    const items = owned.map((dto) => {
-      const bot = toOwnedBotView(dto);
-      const permission = !Array.isArray(dto.actions) ? permissions.get(`${bot.realBotId}:${bot.ownerId}`) : undefined;
-      return { ...bot, ...permission,
-        ...(bot.botType?.trim().toLowerCase() === 'service'
-          ? { serviceLifecycle: serviceLifecycles.get(`${bot.realBotId}:${bot.ownerId}`) ?? 'unknown' as const }
-          : {}),
-      };
-    });
+    // Engine metadata is resolved only for the selected conversation.
+    const items = owned.map(toOwnedBotView);
     return {
       ok: true,
       data: {

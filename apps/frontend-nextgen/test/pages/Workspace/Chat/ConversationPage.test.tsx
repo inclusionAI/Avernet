@@ -46,6 +46,7 @@ const emptyList = {
   loadMoreError: null,
 };
 
+
 jest.mock('@/hooks/useHumanIdentity', () => ({
   useHumanIdentity: () => ({
     identity: { userId: '101', displayName: '张三', online: true },

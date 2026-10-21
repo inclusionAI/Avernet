@@ -41,6 +41,13 @@ from tests.community.core.engine_version.test_engine_version_service import (
 
 class Collaborators:
     level = PermissionLevel.NONE
+    visible_level = PermissionLevel.NONE
+
+    def get_permission_level(self, *args):
+        return self.visible_level
+
+    def get_operable_permission_level(self, **kwargs):
+        return max(self.level, self.visible_level)
 
     def get_explicit_permission_level(self, *, bot, user_id, env=None):
         return self.level
@@ -54,6 +61,7 @@ def version_client(dependencies):
     bots, bindings, resolver, transport = dependencies
     collaborators = Collaborators()
     service = EngineVersionService(
+        lifecycle=MagicMock(),
         bots=bots,
         bindings=bindings,
         resolver=resolver,
@@ -164,3 +172,24 @@ def test_http_teclaw_still_requires_authorization_and_draft_scope(
     assert response.status_code == status, response.text
     bindings.get_active_by_bot_and_owner.assert_not_called()
     transport.invoke.assert_not_called()
+
+
+def test_visible_space_member_without_explicit_restart_gets_normal_advisory(version_client, signing_key):
+    client, transport, collaborators = version_client
+    collaborators.visible_level = PermissionLevel.MEMBER
+    response = get(client, caller="space-member")
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["detection"] == {"status": "not_applicable", "reason": "restart_not_permitted"}
+    assert data["restart_hint"] == "restricted"
+    assert data["comparison"] == "unknown"
+    assert "current" not in data
+    assert "instance_id" not in data["context"]
+    transport.invoke.assert_not_called()
+
+
+def test_missing_bot_is_still_404(version_client, dependencies, signing_key):
+    dependencies[0].get_by_id_and_owner.return_value = None
+    response = get(version_client[0])
+    assert response.status_code == 404
+    version_client[1].invoke.assert_not_called()
