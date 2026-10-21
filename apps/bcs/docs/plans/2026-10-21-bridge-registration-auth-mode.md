@@ -46,7 +46,7 @@ Update canonical Token/API contracts, bridge usage and AgentPass subbot design d
 Implemented on 2026-10-21. ProviderAdmin retains plain registration through the
 static resolver; a regression test reproduced the missing mapping before the fix.
 The Service API advances to 0.4.0 for changed Rust authorization/command contracts.
-The internal frontend omits resolver overrides for automatic Token selection. Existing commands may continue passing a resolver ID, including internal `agentpass-auto`; no client-side Provider/resolver equality check is added.
+Existing onboarding scripts and frontend commands remain unchanged and continue passing a resolver ID, including internal `agentpass-auto`. Direct Bridge commands may omit the override for automatic Token selection; no client-side Provider/resolver equality check is added.
 
 Focused verification covers the domain codec (24 tests), registration application
 (22), Provider registration core (29), OpenAPI routes (9), bridge app (32 including
@@ -73,10 +73,18 @@ Live Poolab/AntFamily traffic and deployed end-to-end verification remain separa
 - Existing profiles retain their saved identity policy when `agentpass-auto`
   detects a newly installed SDK; reuse neither registers another Bot nor calls
   the SDK to change the saved identity.
-- Fresh verification: public bridge app/CLI 89 tests, internal bridge 84 tests,
-  onboarding script 18 tests. Tests include explicit resolver precedence,
+- Fresh verification: public bridge app/CLI 89 tests, internal bridge 84 tests.
+  Tests include explicit resolver precedence,
   historical Tokens, profile reuse and subbot Actor propagation.
 - Internal architecture boundary checks pass; the full offline Cargo metadata
   phase is blocked by missing `windows v0.52.0`. An attempted locked fetch timed
   out. No dependency lockfiles or validation gates were changed. Live enterprise
   acceptance and artifact publication were not performed.
+
+## Onboarding compatibility scope (2026-10-21)
+
+Keep the existing onboarding script, its 1.1.1 version and frontend unchanged.
+Their explicit resolver arguments are supported by the Bridge compatibility
+implementation above. No Token-capability check or script publication is needed.
+The restored onboarding suite has 17 tests; frontend command/component tests
+continue validating the existing flow.
