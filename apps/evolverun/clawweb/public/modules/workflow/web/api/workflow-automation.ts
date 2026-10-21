@@ -20,6 +20,7 @@ export function useAutomationStatus(id: string) {
 }
 export function useAutomationRecords(id: string, options: AutomationRecordQuery) {
   const params = new URLSearchParams({ period: options.period ?? 'all', status: options.status ?? 'all', limit: String(options.limit ?? 8) })
+  if (options.kind) params.set('kind', options.kind)
   if (options.cursor) params.set('cursor', options.cursor)
   return useQuery({ queryKey: ['workflow-automation-records', id, params.toString()],
     queryFn: () => json<AutomationRecordPage>(`${base(id)}/automation-records?${params}`), retry: false,

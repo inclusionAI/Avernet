@@ -130,7 +130,7 @@ it('authorizes history separately and validates bounded query parameters', async
   expect((await fetch(url, { headers: { 'X-User-Id': 'viewer-1' } })).status).toBe(403);
   expect(records).not.toHaveBeenCalled();
   const headers = { 'X-User-Id': 'editor-1' };
-  for (const params of ['limit=100000', 'limit=0', 'limit=8&limit=20', 'status=invalid', 'period=invalid']) {
+  for (const params of ['limit=100000', 'limit=0', 'limit=8&limit=20', 'status=invalid', 'period=invalid', 'kind=invalid']) {
     expect((await fetch(`${url}?${params}`, { headers })).status).toBe(400);
   }
   expect(records).not.toHaveBeenCalled();
@@ -138,4 +138,6 @@ it('authorizes history separately and validates bounded query parameters', async
   expect(response.status).toBe(200);
   expect(records).toHaveBeenCalledWith('wf-1', { period: '7d', status: 'blocked', limit: 20 });
   expect(await response.json()).toEqual({ jobs: [], nextCursor: null });
+  expect((await fetch(`${url}?kind=notification&status=attention`, { headers })).status).toBe(200);
+  expect(records).toHaveBeenLastCalledWith('wf-1', { kind: 'notification', period: 'all', status: 'attention', limit: 8 });
 });

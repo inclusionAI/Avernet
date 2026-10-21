@@ -252,7 +252,8 @@ reads the original candidate. Existing automatic-batch and publication guards ap
 `GET /api/task-guard/workflows/:workflowId/automation-records` requires the existing
 workflow view permission. It reads history only: no coverage aggregation, policy,
 Owner, repair-task detail, or recovery eligibility reads run on this endpoint.
-It accepts `period=all|today|7d`, `status=all|pending|dispatching|waiting|retryable|uncertain|done|blocked`,
+It accepts `period=all|today|7d`, `kind=all|analysis|optimization|notification` (omitted means all, for older callers),
+`status=all|pending|dispatching|waiting|retryable|uncertain|done|blocked|attention`,
 `limit` (integer 1–20, default 8), and an opaque `cursor` of at most 512 characters.
 Invalid values return 400. Response: `{ jobs: AutomationJobSummary[], nextCursor: string | null }`.
 No exact total is calculated. The next cursor uses immutable creation time plus
@@ -260,7 +261,11 @@ record ID and anchors the date window to the first page's time. “Today” star
 Shanghai midnight; “7d” includes today and the preceding six Shanghai calendar
 days. These are creation dates, not the original workflow run's occurrence date.
 
-Default UI shows eight newest records, regardless of task status. “查看全部记录”
+The settings UI separates “自动分析” and “自动优化” task records. Each shows eight
+newest records, regardless of task status. Kind filtering happens in SQL before
+paging, so notification traffic cannot hide real tasks. These are automatic-task
+records, not a complete manual evolution history; manual execution is shown in
+the corresponding evolution task. “查看全部记录”
 opens a 20-record page with date and status selectors and previous/next navigation.
 Changing a filter resets the cursor trail. Collapsing restores the unfiltered
 latest eight. Filters do not affect the independent retry-target list or its
@@ -268,6 +273,15 @@ eligibility. Failed history reads can be retried without a business write.
 History pages load on demand and are briefly cached; they do not poll or refresh
 on window focus. The refresh button explicitly reloads the current page.
 Successful task-retry requests invalidate the history cache.
+
+Successful notification journals remain stored but are not displayed in the main
+task list. A collapsed “通知发送异常，需处理” section queries only notifications with
+`status=attention` (retryable, uncertain or blocked; a query filter, not a new state).
+Its eight-record cursor pages expose every exception without a history cutoff.
+Task rows show time, result, a shortened target reference and the existing detail
+link; full technical IDs and attempt counts are available under “查看详情”. Neither
+display filtering nor paging changes notification delivery, retry eligibility or
+business execution. The independent retry list still names every actual target.
 
 History reads require only the existing v142 journal schema. Status is read from
 body_json; no generated column, new index, backfill or DDL permission is required.

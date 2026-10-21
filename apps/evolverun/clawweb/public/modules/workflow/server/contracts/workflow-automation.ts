@@ -35,7 +35,7 @@ export type AutomationSnapshot = {
   /** Same eligibility and batch limit as retryFailures; independent of the recent-record limit. */
   retryableJobs?: AutomationJobSummary[];
 };
-export type AutomationRecordQuery = { period?: 'all' | 'today' | '7d'; status?: 'all' | 'pending' | 'dispatching' | 'waiting' | 'retryable' | 'uncertain' | 'done' | 'blocked'; limit?: number; cursor?: string };
+export type AutomationRecordQuery = { kind?: 'all' | 'analysis' | 'optimization' | 'notification'; period?: 'all' | 'today' | '7d'; status?: 'all' | 'pending' | 'dispatching' | 'waiting' | 'retryable' | 'uncertain' | 'done' | 'blocked' | 'attention'; limit?: number; cursor?: string };
 export type AutomationRecordPage = { jobs: AutomationJobSummary[]; nextCursor: string | null };
 /** Service API for trusted scheduler/event adapters; browser delivery never invokes automatic publication. */
 export interface WorkflowAutomationService {

@@ -11,6 +11,7 @@ export const reasons: Record<string, string> = {
 }
 const kinds: Record<string, string> = { auto_cycle: '每日扫描', auto_run: '运行分析', auto_draft: '优化草稿', auto_notice: '任务通知' }
 const statuses: Record<string, string> = { pending: '待处理', dispatching: '正在提交', waiting: '等待结果', retryable: '等待重试', uncertain: '待核对', done: '已结束', blocked: '需要处理' }
+const shortId = (id: string) => id.length > 16 ? `${id.slice(0, 8)}…` : id
 function jobStatus(job: AutomationJobSummary) {
   if (job.kind === 'auto_run') {
     if (job.status === 'waiting') return '分析中，等待分析结果'
@@ -24,10 +25,14 @@ export default function JobRecord({ job, workflowId }: { job: AutomationJobSumma
   const analysisLink = job.flowId ? `/runs/${encodeURIComponent(job.flowId)}${job.analysisId ? `?analysisId=${encodeURIComponent(job.analysisId)}` : ''}` : null
   return <>
     <span>{kinds[job.kind] ?? '自动任务'} · {jobStatus(job)}</span>
-    <p className="mt-1 break-all text-xs text-muted-foreground">{job.createdAtMs ? new Date(job.createdAtMs).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '时间未记录'} · {job.flowId ? `运行 ${job.flowId}` : job.taskId ? `优化任务 ${job.taskId}` : `任务 ${job.id}`}</p>
+    <p className="mt-1 break-all text-xs text-muted-foreground">{job.createdAtMs ? new Date(job.createdAtMs).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '时间未记录'}{job.flowId ? ` · 运行 ${shortId(job.flowId)}` : job.taskId ? ` · 优化任务 ${shortId(job.taskId)}` : ''}</p>
     {job.reason && <p className="mt-1 text-xs text-muted-foreground">{reasons[job.reason] ?? '请核对当前策略、负责人和原任务状态'}</p>}
     {analysisLink ? <a className="mt-1 inline-block text-primary underline" href={analysisLink}>查看分析</a>
-      : taskLink ? <a className="mt-1 inline-block text-primary underline" href={taskLink}>查看原优化任务</a>
-      : <details className="mt-1 text-xs text-muted-foreground"><summary className="cursor-pointer text-primary">查看详情</summary><p className="mt-1 break-all">任务编号：{job.id}；尝试次数：{job.attempts}{job.analysisId ? `；分析编号：${job.analysisId}` : ''}</p><p>该记录未关联可跳转的运行或优化任务。</p></details>}
+      : taskLink ? <a className="mt-1 inline-block text-primary underline" href={taskLink}>查看原优化任务</a> : null}
+    <details className="mt-1 text-xs text-muted-foreground"><summary className="cursor-pointer text-primary">查看详情</summary>
+      <p className="mt-1 break-all">任务编号：{job.id}；尝试次数：{job.attempts}{job.analysisId ? `；分析编号：${job.analysisId}` : ''}</p>
+      {job.flowId && <p className="break-all">运行编号：{job.flowId}</p>}{job.taskId && <p className="break-all">优化任务编号：{job.taskId}</p>}
+      {!analysisLink && !taskLink && <p>该记录未关联可跳转的运行或优化任务。</p>}
+    </details>
   </>
 }

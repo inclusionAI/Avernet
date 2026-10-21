@@ -22,9 +22,14 @@ export class WorkflowAutomationHistoryRepository {
     // the existing task/kind index scopes the remaining database filtering and sorting.
     const where = ["task_id = ?", "record_kind IN ('auto_run', 'auto_draft', 'auto_notice')"];
     const params: unknown[] = [taskScope(workflowId)];
+    if (query.kind && query.kind !== 'all') {
+      where.push('record_kind = ?');
+      params.push({ analysis: 'auto_run', optimization: 'auto_draft', notification: 'auto_notice' }[query.kind]);
+    }
     const field = (name: string) => this.db.dialect.driver === 'better-sqlite3'
       ? `JSON_EXTRACT(body_json, '$.${name}')` : `JSON_UNQUOTE(JSON_EXTRACT(body_json, '$.${name}'))`;
-    if (query.status !== 'all') { where.push(`${field('status')} = ?`); params.push(query.status); }
+    if (query.status === 'attention') where.push(`${field('status')} IN ('retryable', 'uncertain', 'blocked')`);
+    else if (query.status !== 'all') { where.push(`${field('status')} = ?`); params.push(query.status); }
     where.push('created_at_ms >= ?', 'created_at_ms <= ?'); params.push(from, cursor?.time ?? at);
     if (cursor) { where.push('(created_at_ms < ? OR (created_at_ms = ? AND record_id < ?))'); params.push(cursor.time, cursor.time, cursor.id); }
     const page = await this.db.query<AutomationJobSummary & { realTaskId?: string }>(`SELECT record.record_id AS id, record.record_kind AS kind,

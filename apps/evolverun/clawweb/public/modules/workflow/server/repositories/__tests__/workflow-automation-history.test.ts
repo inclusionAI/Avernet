@@ -22,6 +22,23 @@ function insert(i: number, time: number, kind = 'auto_run', status = 'done', wor
       data: { flowId: `flow-${i}`, analysisId: `analysis-${i}`, complete, request: { privateModelInput: 'must not return full journals' } } }), time, now + i);
   return id;
 }
+it('filters record kind before pagination so successful notification traffic cannot hide real work', async () => {
+  insert(1, now - 100, 'auto_run'); insert(2, now - 100, 'auto_draft');
+  for (let i = 3; i <= 40; i++) insert(i, now - i, 'auto_notice');
+  expect((await repo.page('wf', { kind: 'analysis' }, now)).jobs.map(job => job.id)).toEqual(['0'.repeat(63) + '1']);
+  expect((await repo.page('wf', { kind: 'optimization' }, now)).jobs.map(job => job.kind)).toEqual(['auto_draft']);
+});
+it('shows only actionable notification outcomes and can page through every exception', async () => {
+  insert(1, now, 'auto_notice', 'done'); insert(2, now, 'auto_notice', 'pending'); insert(3, now, 'auto_run', 'blocked');
+  for (let i = 4; i <= 28; i++) insert(i, now - i, 'auto_notice', ['retryable','uncertain','blocked'][i % 3]);
+  let cursor: string | undefined; const ids: string[] = [];
+  do {
+    const page = await repo.page('wf', { kind: 'notification', status: 'attention', limit: 8, cursor }, now);
+    expect(page.jobs.every(job => job.kind === 'auto_notice' && ['retryable','uncertain','blocked'].includes(job.status))).toBe(true);
+    ids.push(...page.jobs.map(job => job.id)); cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  expect(new Set(ids).size).toBe(25);
+});
 it('pages across all three kinds beyond fifty records, with equal timestamps and workflow isolation', async () => {
   for (let i = 1; i <= 65; i++) insert(i, now - Math.floor(i / 5), ['auto_run', 'auto_draft', 'auto_notice'][i % 3], i % 2 ? 'done' : 'waiting');
   insert(100, now, 'auto_cycle'); insert(101, now, 'proposal_group'); insert(102, now, 'auto_run', 'done', 'other');
@@ -47,7 +64,7 @@ it('filters creation dates by Shanghai calendar days and status in SQL, preservi
 });
 it('rejects oversized pages, invalid filters and invalid cursors before any database read', async () => {
   const read = vi.spyOn(db, 'query');
-  for (const input of [{ limit: 1000 }, { limit: 0 }, { period: 'yesterday' }, { status: "done' OR 1=1" }, { cursor: 'invalid' }, { cursor: Buffer.from('{"at":1,"time":1,"id":"x"}').toString('base64url') }]) {
+  for (const input of [{ limit: 1000 }, { limit: 0 }, { period: 'yesterday' }, { kind: 'invalid' }, { status: "done' OR 1=1" }, { cursor: 'invalid' }, { cursor: Buffer.from('{"at":1,"time":1,"id":"x"}').toString('base64url') }]) {
     await expect(repo.page('wf', input as never, now)).rejects.toThrow('执行记录筛选或分页参数无效');
   }
   expect(read).not.toHaveBeenCalled();

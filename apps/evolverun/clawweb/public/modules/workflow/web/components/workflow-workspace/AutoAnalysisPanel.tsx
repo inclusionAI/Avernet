@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { AutomationPolicyWrite, WorkflowAutomationPolicy } from '../../../server/contracts/workflow-automation'
 import { useQueryClient } from '@tanstack/react-query'
 import JobRecord, { reasons } from './AutomationJobRecord'
-import AutomationHistory from './AutomationHistory'
+import AutomationHistory, { NotificationAttention } from './AutomationHistory'
 import { retryAutomationFailures, useAutomationPolicy, useAutomationStatus, useSaveAutomationPolicy } from '../../api/workflow-automation'
 export default function AutoAnalysisPanel({ workflowId }: { workflowId: string }) {
   const queryClient = useQueryClient()
@@ -85,7 +85,7 @@ export default function AutoAnalysisPanel({ workflowId }: { workflowId: string }
     </section>
     {(saving || message) && <p role="status" aria-live="polite" className="sticky bottom-3 z-10 rounded-lg border border-border bg-background px-4 py-3 text-sm shadow-sm">{saving || message}</p>}
     <section aria-label="自动分析执行状态" className="rounded-xl border border-input bg-card p-5 text-sm">
-      <h4 className="font-medium text-foreground">执行记录</h4>
+      <h4 className="font-medium text-foreground">自动任务记录</h4>
       {status.data?.round && <p className="mt-2 text-muted-foreground">本轮纳入 {status.data.round.total} 项；已完成 {status.data.round.completedBatches}/{status.data.round.batches} 批。保留待处理 {Object.values(status.data.round.deferred).reduce((a, b) => a + b, 0)} 项。<span className="block text-xs">按运行发生时间纳入前一自然日及历史未处理项；证据截至 {new Date(status.data.round.evidenceCutoffMs).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。</span></p>}
       {status.data?.pauseReason && <p className="mt-2 text-muted-foreground">{reasons[status.data.pauseReason] ?? '请核对策略和当前负责人'}</p>}
       {status.isError ? <p className="mt-2 text-muted-foreground">{status.error.message}</p> : <>
@@ -93,6 +93,7 @@ export default function AutoAnalysisPanel({ workflowId }: { workflowId: string }
         {status.data?.coverage && <p className="mt-2 text-xs leading-5 text-muted-foreground">分析记录 {status.data.coverage.total}；待完成 {status.data.coverage.pending}，明确失败 {status.data.coverage.failed}，部分覆盖 {status.data.coverage.partial}，结果未知 {status.data.coverage.unknown}。扫描完成不代表分析覆盖完整。</p>}
       </>}
       <AutomationHistory key={workflowId} workflowId={workflowId} />
+      <NotificationAttention key={`notification:${workflowId}`} workflowId={workflowId} />
       {!status.isError && status.data && <section aria-label="失败任务重试" className="mt-5 border-t border-border pt-4">
         <h4 className="mb-3 font-medium">失败任务重试</h4>
         {status.data.retryableJobs?.length ? <>
