@@ -6,6 +6,7 @@ import { AppConfigRepository } from '../../repositories/app-config-repository.js
 import { createAutoAnalysisSettings } from '../task-guard/auto-analysis-settings.js';
 import { createRepairWorkbenchService } from '../repair-batch-service.js';
 import { queueRepairCompletion } from '../repair-completion-notification.js';
+import { createWorkflowNotificationDrain } from '../workflow-notification-delivery.js';
 import { createRepairReleaseService } from '../repair-release-service.js';
 import { digestRepairJson } from '../../contracts/repair-batch.js';
 import type { RepairPublicationPort } from '../../contracts/repair-release.js';
@@ -78,6 +79,44 @@ async function fixture(autoDraft = false, count = 3, full = false) {
 it('uses Shanghai daily boundaries and merges missed days', () => {
   expect(automationDue(Date.parse('2026-11-01T00:59:00Z'), '09:00').key).toBe('2026-10-31');
   expect(automationDue(Date.parse('2026-11-01T01:00:00Z'), '09:00').key).toBe('2026-11-01');
+});
+
+it('logs worker entry and its first empty environment-scoped batch once, not every poll', async () => {
+  const f = await fixture();
+  const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+  const drain = createWorkflowNotificationDrain({ db: f.db, settings: f.settings, workbench: f.workbench, ports: f.ports, environment: 'pre' });
+  await drain(); await drain();
+  const lines = info.mock.calls.map(([line]) => String(line));
+  expect(lines.filter(line => line.includes('"event":"worker_started"'))).toHaveLength(1);
+  expect(lines.filter(line => line.includes('"event":"batch_ready"'))).toHaveLength(1);
+  expect(lines).toContainEqual(expect.stringContaining('"environment":"pre"'));
+  expect(lines).toContainEqual(expect.stringContaining('"eligibleCount":0'));
+});
+
+it('logs queue preparation once with correlation IDs, without notification content', async () => {
+  const f = await fixture();
+  const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+  const repo = new WorkflowAutomationRepository(f.db);
+  const data = { kind: 'completion', taskId: 'task-log', revision: 2, title: 'private-title', text: 'private-body', path: '/private' };
+  const job = await repo.ensure('wf-1', 'auto_notice', 'log-once', data, 0);
+  await repo.ensure('wf-1', 'auto_notice', 'log-once', data, 0);
+  expect(info).toHaveBeenCalledOnce();
+  const line = String(info.mock.calls[0][0]);
+  expect(line.startsWith('[workflow-notification] ')).toBe(true);
+  expect(JSON.parse(line.slice('[workflow-notification] '.length))).toMatchObject({ event: 'enqueue_prepared', transactionPending: true, workflowId: 'wf-1', taskId: 'task-log', revision: 2, noticeId: job.id });
+  expect(line).not.toMatch(/private-title|private-body|\/private/);
+});
+
+it('logs a sanitized queue-discovery failure and still rejects it to the monitor', async () => {
+  const f = await fixture();
+  vi.spyOn(f.settings, 'list').mockRejectedValue(new Error('private-provider-secret'));
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const drain = createWorkflowNotificationDrain({ db: f.db, settings: f.settings, workbench: f.workbench, ports: f.ports, environment: 'prod' });
+  await expect(drain()).rejects.toThrow('private-provider-secret');
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining('"event":"drain_failed"'));
+  expect(warn.mock.calls.map(([line]) => String(line)).join('')).toContain('"stage":"settings_scan"');
+  expect(warn.mock.calls.map(([line]) => String(line)).join('')).not.toContain('private-provider-secret');
+  expect(f.ports.notify).not.toHaveBeenCalled();
 });
 
 it.each(['policy-yaml', 'notification-yaml', 'policy-null', 'notification-null', 'environment'])('isolates an unrelated invalid %s without losing healthy notifications', async invalid => {
@@ -201,7 +240,9 @@ it('does not let older prod notifications starve a pre completion, and keeps man
   const rows = await f.db.query<{body_json: string}>("SELECT body_json FROM workflow_repair_release_records WHERE record_kind='auto_notice'");
   expect(rows.map(r => JSON.parse(r.body_json)).filter(r => r.workflowId === 'prod-wf').every(r => r.status === 'pending' && r.attempts === 0)).toBe(true);
   expect(rows.map(r => JSON.parse(r.body_json)).find(r => r.workflowId === 'wf-1')).toMatchObject({ status: 'done', data: { receipt: 'provider-receipt' } });
-  expect(logs).toHaveBeenCalledWith('[workflow-notification]', expect.objectContaining({ event: 'accepted', taskId: task.taskId, environment: 'pre', receipt: 'provider-receipt' }));
+  const events = logs.mock.calls.filter(([line]) => String(line).startsWith('[workflow-notification] '))
+    .map(([line]) => JSON.parse(String(line).slice('[workflow-notification] '.length)));
+  expect(events).toContainEqual(expect.objectContaining({ event: 'accepted', taskId: task.taskId, environment: 'pre', receipt: 'provider-receipt' }));
   expect(JSON.stringify(logs.mock.calls)).not.toContain('private body');
 });
 
@@ -306,6 +347,7 @@ it('changing recipients leaves the automatic policy version and already-planned 
 
 it('notifies a successful manual draft with no automation settings and deduplicates repeated result reports', async () => {
   const f = await fixture();
+  const info = vi.spyOn(console, 'info').mockImplementation(() => {});
   await f.db.exec('DELETE FROM cm_app_config');
   const inbox = await f.workbench.candidates('wf-1');
   const task = await f.workbench.create('human', { workflowId: 'wf-1', itemIds: ['item-0'], inputDigest: inbox.inputDigest, instructions: '', requestId: 'manual-success' });
@@ -314,6 +356,7 @@ it('notifies a successful manual draft with no automation settings and deduplica
     checks: { schemaVersion: 'workflow-repair-checks/v1', candidateCommit: draft.candidateCommit, packDigest: draft.packDigest, candidateDigest: digestRepairJson(draft), static: { status: 'passed' }, mock: { status: 'not_covered' }, coverage: [{ itemId: 'item-0' }] } };
   await f.workbench.report(report);
   await f.workbench.report(report);
+  expect(info).toHaveBeenCalledWith(expect.stringContaining('"event":"completion_observed"'));
   await Promise.all([f.service.tick(), f.restart().tick()]);
   expect(f.ports.notify).toHaveBeenCalledTimes(1);
   expect(f.ports.notify).toHaveBeenCalledWith(expect.objectContaining({ title: '优化草稿已可审阅', recipientId: 'owner', path: expect.stringContaining(task.taskId) }));
@@ -323,10 +366,12 @@ it('notifies a successful manual draft with no automation settings and deduplica
 
 it('keeps generation in drafting if its completion notification cannot be persisted', async () => {
   const f = await fixture();
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   const inbox = await f.workbench.candidates('wf-1');
   const task = await f.workbench.create('human', { workflowId: 'wf-1', itemIds: ['item-0'], inputDigest: inbox.inputDigest, instructions: '', requestId: 'notice-write-failure' });
   f.raw.exec("CREATE TRIGGER reject_notice BEFORE INSERT ON workflow_repair_release_records WHEN NEW.record_kind = 'auto_notice' BEGIN SELECT RAISE(ABORT, 'notice write failed'); END");
   await expect(f.workbench.report({ workflowId: 'wf-1', taskId: task.taskId, revision: 1, expectedStateVersion: 0, status: 'failed', error: { code: 'AIS_FAILED' } })).rejects.toThrow('notice write failed');
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining('"event":"enqueue_failed"'));
   expect((await f.workbench.task(task.taskId)).latestAttempt.phase).toBe('drafting');
   expect(f.ports.notify).not.toHaveBeenCalled();
 });

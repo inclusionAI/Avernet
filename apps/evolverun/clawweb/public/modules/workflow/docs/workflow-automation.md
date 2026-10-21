@@ -64,7 +64,30 @@ one workflow's automatic planning fails. The deployed configuration supplies pro
 identity without requiring equality with Git's YAML representation; independent Git
 commit, tree, and reviewed-file checks are unchanged.
 
-Search `[workflow-notification]` for per-delivery diagnostics. Structured fields
+Search `workflow-notification` (without brackets) for notification diagnostics.
+Every entry is a single line containing the prefix and JSON fields, so log search
+does not separate the keyword from its reason and correlation IDs. Startup emits
+`consumer_configured` (automation / notification_only / none); the public Host also
+emits `provider_configured` with sender and public-URL presence booleans, never
+their values. `worker_started` identifies the first drain invocation and environment.
+`batch_ready` records the first eligible count, including zero, and later nonempty
+batches; empty polls do not log every 15 seconds. Counts are environment-scoped,
+not a claim that the shared database has no notices.
+
+`completion_observed` means the result observer was reached. `enqueue_prepared`
+means the queue insert was prepared inside the result transaction, not that the
+outer transaction committed or a message was delivered. `enqueue_failed` preserves
+the write error. `recipients_queued`, `skipped` with its reason, `blocked`,
+`provider_unavailable`, `provider_failed`, `delivery_failed`, and `drain_failed` expose failures and exits;
+provider failures distinguish missing configuration, known HTTP rejection (with
+status), and unknown transport outcomes without logging raw provider errors;
+the last includes the stage (settings_scan / queue_read / delivery). Exceptions
+still propagate, and diagnostic failures contain stable reasons rather than raw
+provider errors, credentials, or payloads. Historical results are not replayed for
+diagnostics. These entries require deploying the updated consumer instances; no
+matching keyword in older logs cannot establish whether a notice was queued.
+
+Per-delivery structured fields
 include event (`dispatching`, `accepted`, `retryable`, `uncertain`), workflow/task/
 revision, notice ID, execution environment, recipient ID, attempts, and provider
 receipt when available. `accepted` means the sender accepted the request, not that

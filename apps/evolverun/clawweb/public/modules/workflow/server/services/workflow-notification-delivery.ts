@@ -11,19 +11,23 @@ export function createWorkflowNotificationDrain(input: {
   const now = input.now ?? Date.now;
   const repo = new WorkflowAutomationRepository(input.db);
   const environment = input.environment ?? 'prod';
+  let firstPoll = true;
   async function notify(record: AutomationJob) {
+    let job = record;
+    const log = (event: string, reason?: string, receipt?: string) => console.info('[workflow-notification] ' + JSON.stringify({
+      event, workflowId: job.workflowId, taskId: job.data.taskId ?? null, revision: job.data.revision ?? null,
+      noticeId: job.id, environment, recipientId: job.data.lastRecipientId ?? job.data.recipientId ?? null,
+      attempts: job.attempts, ...(reason ? { reason } : {}), ...(receipt ? { receipt } : {}),
+    }));
     try {
-      if (((await input.settings.get(record.workflowId)).executionEnvironment ?? 'prod') !== environment) return;
+      if (((await input.settings.get(record.workflowId)).executionEnvironment ?? 'prod') !== environment) { log('skipped', 'ENVIRONMENT_MISMATCH'); return; }
     } catch (error) {
       // Claim only to defer this record, never infer an environment from invalid settings.
       if (!isInvalidAutoAnalysisSettings(error)) throw error;
     }
-    let job = await repo.claim(record.id, now()); if (!job) return;
-    const log = (event: string, reason?: string, receipt?: string) => console.info('[workflow-notification]', {
-      event, workflowId: job.workflowId, taskId: job.data.taskId ?? null, revision: job.data.revision ?? null,
-      noticeId: job.id, environment, recipientId: job.data.lastRecipientId ?? job.data.recipientId ?? null,
-      attempts: job.attempts, ...(reason ? { reason } : {}), ...(receipt ? { receipt } : {}),
-    });
+    const claimed = await repo.claim(record.id, now());
+    if (!claimed) { log('skipped', 'NOTIFICATION_NOT_CLAIMED'); return; }
+    job = claimed;
     if (job.status === 'dispatching' || job.status === 'uncertain') {
       await repo.patch(job, { status: 'uncertain', reason: 'NOTIFICATION_OUTCOME_UNKNOWN', nextAtMs: now() + 300000 }, now(), true);
       log('uncertain', 'NOTIFICATION_OUTCOME_UNKNOWN'); return;
@@ -31,12 +35,13 @@ export function createWorkflowNotificationDrain(input: {
     let actorId: string;
     try {
       const policy = await input.settings.get(job.workflowId);
-      if ((policy.executionEnvironment ?? 'prod') !== environment) { await repo.patch(job, {}, now(), true); return; }
+      if ((policy.executionEnvironment ?? 'prod') !== environment) { await repo.patch(job, {}, now(), true); log('skipped', 'ENVIRONMENT_MISMATCH'); return; }
       if (job.data.kind === 'issue' && !policy.enabled) throw new RepairAutomationDeniedError('AUTOMATION_DISABLED');
       const recipients = job.data.kind === 'issue' ? [] : policy.notificationRecipients ?? [];
       if (!job.data.fixedRecipient && recipients.length) {
         for (const recipientId of recipients) await repo.ensure(job.workflowId, 'auto_notice', `${job.id}:${recipientId}`, { ...job.data, recipientId, fixedRecipient: true }, now());
         await repo.patch(job, { status: 'done', data: { ...job.data, recipients } }, now(), true);
+        log('recipients_queued');
         // Child records are drained by later bounded batches, never recursively here.
         return;
       }
@@ -59,10 +64,10 @@ export function createWorkflowNotificationDrain(input: {
       const reviewable = task.latestAttempt.phase === 'review'
         || task.latestAttempt.phase === 'no_change' && task.automaticProgress?.publishable === true;
       if (task.latestAttempt.revision !== job.data.revision || !reviewable) {
-        await repo.patch(job, { status: 'done', reason: 'CANDIDATE_SUPERSEDED' }, now(), true); return;
+        await repo.patch(job, { status: 'done', reason: 'CANDIDATE_SUPERSEDED' }, now(), true); log('skipped', 'CANDIDATE_SUPERSEDED'); return;
       }
     }
-    if (job.attempts >= 3) { await repo.patch(job, { status: 'blocked', reason: 'NOTIFICATION_REJECTED' }, now(), true); return; }
+    if (job.attempts >= 3) { await repo.patch(job, { status: 'blocked', reason: 'NOTIFICATION_REJECTED' }, now(), true); log('blocked', 'NOTIFICATION_REJECTED'); return; }
     job = await repo.patch(job, { status: 'dispatching', attempts: job.attempts + 1, data: { ...job.data, lastRecipientId: actorId } }, now());
     log('dispatching');
     let result: Awaited<ReturnType<WorkflowAutomationPorts['notify']>>;
@@ -78,10 +83,27 @@ export function createWorkflowNotificationDrain(input: {
       result.status === 'sent' ? undefined : result.status === 'uncertain' ? 'NOTIFICATION_OUTCOME_UNKNOWN' : 'NOTIFICATION_REJECTED', result.receipt);
   }
   return async () => {
-    if (environment !== 'pre' && environment !== 'prod') return;
-    const preWorkflows = (await input.settings.list()).filter(policy => policy.executionEnvironment === 'pre').map(policy => policy.workflowId);
-    // Five actual queue records per tick, in parallel: slow transports consume one
-    // existing 20-second timeout window, not recipients × parents × 20 seconds.
-    await Promise.all((await repo.readyNotifications(now(), 5, { workflowIds: preWorkflows, exclude: environment === 'prod' })).map(notify));
+    const first = firstPoll; firstPoll = false;
+    const enabled = environment === 'pre' || environment === 'prod';
+    if (first) console.info('[workflow-notification] ' + JSON.stringify({ event: 'worker_started', environment, enabled }));
+    if (!enabled) return;
+    let stage = 'settings_scan';
+    try {
+      const preWorkflows = (await input.settings.list()).filter(policy => policy.executionEnvironment === 'pre').map(policy => policy.workflowId);
+      stage = 'queue_read';
+      const ready = await repo.readyNotifications(now(), 5, { workflowIds: preWorkflows, exclude: environment === 'prod' });
+      if (first || ready.length) console.info('[workflow-notification] ' + JSON.stringify({ event: 'batch_ready', environment,
+        eligibleCount: ready.length, preWorkflowCount: preWorkflows.length }));
+      stage = 'delivery';
+      // Five records in parallel, with the existing timeout and claims unchanged.
+      await Promise.all(ready.map(record => notify(record).catch(error => {
+        console.warn('[workflow-notification] ' + JSON.stringify({ event: 'delivery_failed', environment, workflowId: record.workflowId,
+          noticeId: record.id, taskId: record.data.taskId ?? null, revision: record.data.revision ?? null, reason: 'NOTIFICATION_DELIVERY_FAILED' }));
+        throw error;
+      })));
+    } catch (error) {
+      console.warn('[workflow-notification] ' + JSON.stringify({ event: 'drain_failed', environment, stage, reason: 'NOTIFICATION_DRAIN_FAILED' }));
+      throw error;
+    }
   };
 }

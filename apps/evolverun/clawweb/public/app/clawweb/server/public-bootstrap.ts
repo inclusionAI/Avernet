@@ -95,6 +95,8 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       const deployHistoryRepo = new WorkflowDeployHistoryRepository(db);
       const workflowSpecRepo = new WorkflowSpecRepository(db, deployHistoryRepo);
       const publicBaseUrl = getClawWebPublicBaseUrl();
+      console.info('[workflow-notification] ' + JSON.stringify({ event: 'provider_configured', environment: context.environment,
+        senderConfigured: !!insight.notificationSender, publicBaseUrlConfigured: !!publicBaseUrl }));
       const repairRuntime = createWorkflowRepairRuntime(db, {
         environment: context.environment,
         principal: async request => {
@@ -113,7 +115,11 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
             },
             canEdit: (workflowId, actorId) => botPermRepo.hasEditPermission(workflowId, actorId),
             async notify(notice) {
-              if (!insight.notificationSender || !publicBaseUrl) return { status: 'retryable' };
+              if (!insight.notificationSender || !publicBaseUrl) {
+                console.warn('[workflow-notification] ' + JSON.stringify({ event: 'provider_unavailable', noticeId: notice.key,
+                  workflowId: notice.workflowId, reason: !insight.notificationSender ? 'NOTIFICATION_SENDER_MISSING' : 'NOTIFICATION_PUBLIC_URL_MISSING' }));
+                return { status: 'retryable' };
+              }
               try {
                 const link = new URL(notice.path, publicBaseUrl).toString();
                 const sent = await insight.notificationSender.sendNotification({ recipientUserId: notice.recipientId,
@@ -121,8 +127,13 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
                 return { status: 'sent', ...(sent.processQueryKey ? { receipt: sent.processQueryKey } : {}) };
               } catch (error) {
                 const message = error instanceof Error ? error.message : '';
+                const httpStatus = message.match(/HTTP (400|401|403|404|422|429)\b/)?.[1];
+                const missingConfiguration = message.includes('not configured');
+                console.warn('[workflow-notification] ' + JSON.stringify({ event: 'provider_failed', noticeId: notice.key,
+                  workflowId: notice.workflowId, httpStatus: httpStatus ?? null,
+                  reason: missingConfiguration ? 'NOTIFICATION_PROVIDER_NOT_CONFIGURED' : httpStatus ? 'NOTIFICATION_HTTP_REJECTED' : 'NOTIFICATION_TRANSPORT_UNKNOWN' }));
                 // Preserve unknown transport outcomes; the legacy sender has no idempotency key.
-                return { status: message.includes('not configured') || /HTTP (400|401|403|404|422|429)\b/.test(message) ? 'retryable' : 'uncertain' };
+                return { status: missingConfiguration || httpStatus ? 'retryable' : 'uncertain' };
               }
             },
           },

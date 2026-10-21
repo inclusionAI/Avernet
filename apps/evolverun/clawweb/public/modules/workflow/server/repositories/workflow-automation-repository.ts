@@ -25,7 +25,15 @@ export class WorkflowAutomationRepository {
       const job: AutomationJob = { id, workflowId, taskId: taskScope(workflowId), revision: 0, stateVersion: 0, createdAtMs: now,
         kind, status: 'pending', attempts: 0, nextAtMs: now, leaseToken: null, leaseUntilMs: 0, reason: null, data: { ...data } };
       await new RepairReleaseRepository(tx).insert(kind, { requestId: id }, job);
+      // A surrounding result transaction may still roll back; this is not a delivery receipt.
+      if (kind === 'auto_notice') console.info('[workflow-notification] ' + JSON.stringify({ event: 'enqueue_prepared', transactionPending: true,
+        workflowId, noticeId: id, taskId: job.data.taskId ?? null, revision: job.data.revision ?? null,
+        kind: job.data.kind ?? null, recipientId: job.data.recipientId ?? null }));
       return job;
+    }).catch(error => {
+      if (kind === 'auto_notice') console.warn('[workflow-notification] ' + JSON.stringify({ event: 'enqueue_failed', workflowId,
+        noticeId: id, reason: 'NOTIFICATION_QUEUE_WRITE_FAILED' }));
+      throw error;
     });
   }
   async claim(id: string, now: number): Promise<AutomationJob | null> {

@@ -5,6 +5,8 @@ import { RepairBatchRepository } from '../repositories/repair-batch-repository.j
 
 /** Enqueue in the result transaction; remote delivery never delays AIS completion. */
 export async function queueRepairCompletion(tx: IDatabase, revision: RepairRevision) {
+  console.info('[workflow-notification] ' + JSON.stringify({ event: 'completion_observed', workflowId: revision.workflowId,
+    taskId: revision.taskId, revision: revision.revision, phase: revision.phase, mode: revision.input.automation ? 'automatic' : 'manual' }));
   // Automatic success is announced once its complete batch chain is checked by the coordinator.
   const origin = revision.input.automation;
   if (origin && ['review', 'no_change'].includes(revision.phase)) {

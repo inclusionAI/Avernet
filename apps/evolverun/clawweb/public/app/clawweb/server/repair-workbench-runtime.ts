@@ -104,6 +104,8 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
   if (options.automation) automation = createWorkflowAutomation({ db, workbench: service, ...options.automation, environment: options.environment });
   const drainNotifications = !automation && options.notifications
     ? createWorkflowNotificationDrain({ db, workbench: service, ...options.notifications, environment: options.environment }) : undefined;
+  console.info('[workflow-notification] ' + JSON.stringify({ event: 'consumer_configured', environment: options.environment ?? 'prod',
+    consumer: automation ? 'automation' : drainNotifications ? 'notification_only' : 'none', completionObserverConfigured: true }));
   const release = createRepairReleaseService({ db, workbench: service, publisher: options.publication });
   const trials = createRepairTrialService({ db, workbench: service, port: options.trial });
   const authorize = createRepairAuthorizer(options.principal, new BotWorkflowPermissionRepository(db));
