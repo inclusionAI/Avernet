@@ -34,28 +34,27 @@
  * 【已知边界（页级缓存命中率先行）】首个会话在探测落定前构造必然落 v3；
  * 探测落定后新开会话（Chat 新建/重建）即走 A2A。页面刷新重新探测（缓存不持久化）。
  */
-import { A2AProvider } from './A2AProvider';
-import { TransportChoiceCache } from './choiceCache';
-import { fetchCard, Scenario, validateScenarios } from './card';
-import { createSendBanRegistry, type SendBanRegistry } from './sendBan';
+import {
+  A2AProvider, TransportChoiceCache, createSendBanRegistry,
+  fetchCard, Scenario, validateScenarios,
+  resolveA2aUrls, isSessionBanned, isLockCandidateError,
+  A2A_CHOICE_SESSION_KEY,
+  type SendBanRegistry, type A2aUrls, type A2aBootstrapConfig,
+} from '@avernet/a2a-chat-client';
+// 公共核心已提取为包 @avernet/a2a-chat-client（src 17 文件 git mv 保留历史）；
+// 本文件是 nextgen 宿主 glue：app 单例 + 开关注入 + SDK 工厂组装。
 import { isA2aClientEnabled } from './switch';
 import { createTcChatParserFactory } from './tcChatParser';
-// ─── 公共策略纯函数与类型（policy.ts 单源；此处 re-export 保消费面） ──────
+// ─── 包符号 re-export（保消费面：botChatProvider/useBotChat/seam 钉板零改动） ──
 
 // review R2-4：这组成员曾是本文件内联定义——index.ts 经 re-export 转出时把
-// switch/tcChatParser/app 单例拖进公共依赖图。外提到 policy.ts 后本文件只剩
+// switch/tcChatParser/app 单例拖进公共依赖图。外提到 policy→随包后本文件只剩
 // 宿主装配；既有消费方（botChatProvider/useBotChat/测试）import 面不变。
 export {
   resolveA2aUrls, deriveEndpointBase, isLockCandidateError, isSessionBanned,
   A2A_CHOICE_SESSION_KEY, SEND_BAN_UI_TEXT,
   type A2aBootstrapConfig,
-} from './policy';
-import {
-  resolveA2aUrls, isSessionBanned, isLockCandidateError,
-  A2A_CHOICE_SESSION_KEY,
-  type A2aBootstrapConfig,
-} from './policy';
-import type { A2aUrls } from './urls';
+} from '@avernet/a2a-chat-client';
 
 /** 测试 seam / 组合注入口（全部可选；缺省 = app 单例 + 全局 fetch + 总开关） */
 export interface A2aBootstrapDeps {
@@ -243,4 +242,4 @@ export function isSendBannedForSession(
 
 // A2A M2 bootstrap seam: 取消结果 UI 文案单源转出（spec §4.3 表）——
 // useMultiSessionChat 的 toast 消费与 cancelOutcomes 保持单一来源。
-export { CANCEL_UI_TEXT } from './cancelOutcomes';
+export { CANCEL_UI_TEXT } from '@avernet/a2a-chat-client';

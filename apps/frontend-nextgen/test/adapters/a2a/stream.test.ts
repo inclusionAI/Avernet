@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { streamRpc, MAX_PENDING_BYTES } from '@/adapters/a2a/stream';
-import { buildRpcRequest, type RpcRequest } from '@/adapters/a2a/rpc';
+import { streamRpc, MAX_PENDING_BYTES } from '@avernet/a2a-chat-client';
+import { buildRpcRequest, type RpcRequest } from '@avernet/a2a-chat-client';
 
 const enc = new TextEncoder();
 function sseResponse(chunks: string[], status = 200): Response {

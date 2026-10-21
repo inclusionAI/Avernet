@@ -29,7 +29,7 @@
  */
 import type {
   SdkParser, SdkParserCtor, SdkParserFactory,
-} from './sdkParser';
+} from '@avernet/a2a-chat-client';
 
 /** 显式覆盖入口（node/jest 兜底；浏览器因无 require 天然短路） */
 const ENV_OVERRIDE_KEY = 'A2A_OPENCLAW_PARSER_PATH';

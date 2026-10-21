@@ -20,9 +20,9 @@ import {
   DEFAULT_BACKOFF_CAPS_MS,
   DEFAULT_PER_CALL_TIMEOUT_MS,
   type RecoveryEngine,
-} from '@/adapters/a2a/recovery';
-import type { WireEvent } from '@/adapters/a2a/stream';
-import type { WireFailure } from '@/adapters/a2a/rpc';
+} from '@avernet/a2a-chat-client';
+import type { WireEvent } from '@avernet/a2a-chat-client';
+import type { WireFailure } from '@avernet/a2a-chat-client';
 
 // ─── 注入 clock 与 wire 构造件 ───────────────────────────────────────────
 

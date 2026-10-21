@@ -28,14 +28,14 @@ import {
   RECOVERY_STOPPED_MESSAGE,
   OUTCOME_UNKNOWN_MESSAGE,
   type A2AProviderConfig,
-} from '@/adapters/a2a/A2AProvider';
-import { CANCEL_UI_TEXT, type CancelOutcome } from '@/adapters/a2a/cancelOutcomes';
-import { createSendBanRegistry } from '@/adapters/a2a/sendBan';
+} from '@avernet/a2a-chat-client';
+import { CANCEL_UI_TEXT, type CancelOutcome } from '@avernet/a2a-chat-client';
+import { createSendBanRegistry } from '@avernet/a2a-chat-client';
 import { loadOpenClawParser, createTcChatParserFactory } from '@/adapters/a2a/tcChatParser';
 import { A2aParserFactoryMissingError, type SdkParser, type SdkParserConfig }
-  from '@/adapters/a2a/sdkParser';
-import type { WireEvent } from '@/adapters/a2a/stream';
-import { a2aUrlsFromWsUrl } from '@/adapters/a2a/urls';
+  from '@avernet/a2a-chat-client';
+import type { WireEvent } from '@avernet/a2a-chat-client';
+import { a2aUrlsFromWsUrl } from '@avernet/a2a-chat-client';
 import { makeEngineCard } from './helpers';
 
 // ─── wire 构造件 ─────────────────────────────────────────────────────────

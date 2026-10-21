@@ -20,7 +20,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { maybeBuildA2AProvider, takeCachedA2AProvider } from '@/adapters/a2a/bootstrap';
-import { A2A_FILE_REFS_UNSUPPORTED_MESSAGE } from '@/adapters/a2a/A2AProvider';
+import { A2A_FILE_REFS_UNSUPPORTED_MESSAGE } from '@avernet/a2a-chat-client';
 import { A2A_SWITCH_KEY } from '@/adapters/a2a/switch';
 import * as ctrl from '@/services/backendApi/bots/privateBotSessionController';
 import { getBotIamToken } from '@/services/backendApi/privateChat/iamTokenController';

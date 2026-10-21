@@ -21,10 +21,10 @@ import {
   type A2aBootstrapConfig,
   type A2aBootstrapDeps,
 } from '@/adapters/a2a/bootstrap';
-import { A2AProvider } from '@/adapters/a2a/A2AProvider';
-import { TransportChoiceCache } from '@/adapters/a2a/choiceCache';
-import { createSendBanRegistry } from '@/adapters/a2a/sendBan';
-import { a2aUrlsFromBaseUrl, a2aUrlsFromWsUrl } from '@/adapters/a2a/urls';
+import { A2AProvider } from '@avernet/a2a-chat-client';
+import { TransportChoiceCache } from '@avernet/a2a-chat-client';
+import { createSendBanRegistry } from '@avernet/a2a-chat-client';
+import { a2aUrlsFromBaseUrl, a2aUrlsFromWsUrl } from '@avernet/a2a-chat-client';
 import { makeEngineCard } from './helpers';
 
 // ─── 通用件 ───────────────────────────────────────────────────────────────

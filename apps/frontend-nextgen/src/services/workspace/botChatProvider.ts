@@ -3,7 +3,7 @@ import {
   takeCachedA2AProvider,
   type A2aBootstrapConfig,
 } from '@/adapters/a2a/bootstrap';
-import type { CancelOutcome } from '@/adapters/a2a/cancelOutcomes';
+import type { CancelOutcome } from '@avernet/a2a-chat-client';
 import { getBotConnection } from '@/services/backendApi/bots/privateBotSessionController';
 import { getBotIamToken } from '@/services/backendApi/privateChat/iamTokenController';
 import { OpenClawProvider, type ConnectionStatusEvent, type OpenClawProviderConfig } from '@tc-chat/adapters';

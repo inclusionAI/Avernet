@@ -33,11 +33,11 @@ const BOOTSTRAP_SOURCE = readFileSync(
   'utf8',
 );
 const CANCEL_OUTCOMES_SOURCE = readFileSync(
-  join(__dirname, '..', '..', '..', 'src', 'adapters', 'a2a', 'cancelOutcomes.ts'),
+  join(__dirname, '..', '..', '..', '..', '..', 'packages', 'a2a-chat-client', 'src', 'cancelOutcomes.ts'),
   'utf8',
 );
 const POLICY_SOURCE = readFileSync(
-  join(__dirname, '..', '..', '..', 'src', 'adapters', 'a2a', 'policy.ts'),
+  join(__dirname, '..', '..', '..', '..', '..', 'packages', 'a2a-chat-client', 'src', 'policy.ts'),
   'utf8',
 );
 
@@ -126,7 +126,7 @@ describe('botChatProvider A2A bootstrap 接缝钉板（B16 static guard）', () 
       "export const SEND_BAN_UI_TEXT = '该会话暂不可发送（底层执行停止未确认）';",
     );
     expect(BOOTSTRAP_SOURCE).toContain(
-      "A2A_CHOICE_SESSION_KEY, SEND_BAN_UI_TEXT,\n  type A2aBootstrapConfig,\n} from './policy';",
+      "A2A_CHOICE_SESSION_KEY, SEND_BAN_UI_TEXT,\n  type A2aBootstrapConfig,\n} from '@avernet/a2a-chat-client';",
     );
     expect(CANCEL_OUTCOMES_SOURCE).toContain(
       'export const CANCEL_UI_TEXT: Record<CancelOutcomeKind, string> = {',
