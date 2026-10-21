@@ -15,6 +15,7 @@ consumes:
   - "RuntimeBindingResolutionService"
   - "CollaboratorService"
 internal_dependencies:
+  - agentclaw.community.core.engine_runtime.errors    # translate unavailable runtime states into actionable Cron errors
   - agentclaw.community.core.runtime_binding
   - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.access
