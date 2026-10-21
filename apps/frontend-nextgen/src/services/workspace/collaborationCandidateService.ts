@@ -22,6 +22,9 @@ export interface CollaborationBotView {
   summary?: string;
   online: boolean;
   status: IdentityStatus;
+  /** Bot 实例运行状态(ACTIVE/PENDING/FAILED 等原始字符串,2026-10-21):仅 metadata 详情路映射,
+   *  与身份级 status(online/hidden) 分离;供对话菜单行级禁用与悬停提示感知,缺省视为可用。 */
+  botStatus?: string;
   reachability: IdentityReachability;
   visibility: 'public' | 'protected' | 'private';
   isFriend?: boolean;
@@ -81,6 +84,8 @@ function mapBotMetadata(dto: BotMetadataDto, id: string): CollaborationBotView {
     name: dto.bot_name || dto.bot_id,
     online: dto.status === 'ACTIVE' || dto.status === 'online',
     status: 'online',
+    // 实例运行状态透传(2026-10-21):不再在视图层丢弃,FAILED/PENDING 供行级禁用与悬停提示感知。
+    botStatus: dto.status,
     reachability: 'reachable',
     visibility: 'private',
     isFriend: true,

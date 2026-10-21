@@ -45,15 +45,14 @@ export function useBotSessionFiles(
   }, [botId, sessionId, userId, ownerId, setIsLoadingList, setReadyFiles]);
 
   useEffect(() => {
-    // /file 与文件面板共享列表:进入会话即加载,不依赖先打开面板。
-    // refresh 只依赖身份参数和稳定的 Store action,列表更新不会触发重复请求。
+    // 懒加载(2026-10-21):进入会话不再默认调 file 接口(选会话≠有查看文件清单的诉求);
+    // /file 唤起与资源管理面板打开时才拉取(每次唤起都刷新)。身份/会话切换仍清缓存并作废在途请求。
     resetForSession();
-    void refresh();
     return () => {
       requestIdRef.current++;
       setIsLoadingList(false);
     };
-  }, [refresh, resetForSession, setIsLoadingList]);
+  }, [botId, sessionId, userId, resetForSession, setIsLoadingList]);
 
   const deleteFile = useCallback(
     async (file: BotSessionFileView) => {

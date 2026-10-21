@@ -11,6 +11,7 @@ import { useBotSessionFileUpload } from '@/pages/Workspace/hooks/useBotSessionFi
 import { useBotSessionFiles } from '@/pages/Workspace/hooks/useBotSessionFiles';
 import { useBotSkills } from '@/pages/Workspace/hooks/useBotSkills';
 import type { BotSessionFileView } from '@/services/workspace/botSessionFileService';
+import { useBotSessionFileStore } from '@/stores/botSessionFileStore';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import type { CommandConfig, CommandItem, FileChipConfig, PendingFileChip, SenderRef } from '@tc-chat/ui/es/Sender';
 import { FileIcon, Zap } from 'lucide-react';
@@ -110,9 +111,17 @@ export function useBotSessionFilesFeature(
     [enabled],
   );
 
-  const fileSubItems = useMemo<CommandItem[]>(
-    () =>
-      files.readyFiles.map((f) => ({
+  // /file 子面板动态拉取(2026-10-21 懒加载):每次唤起都刷新最新清单(数据最新鲜);
+  // query 为 /file 后的过滤词(空串=刚唤起)。refresh 后从 store 读最新列表(闭包快照滞后)。
+  const onSearchFiles = useCallback(
+    async (query: string): Promise<CommandItem[]> => {
+      await files.refresh();
+      const { readyFiles } = useBotSessionFileStore.getState();
+      const keyword = query.trim().toLowerCase();
+      const matched = keyword
+        ? readyFiles.filter((f) => f.displayName.toLowerCase().includes(keyword))
+        : readyFiles;
+      return matched.map((f) => ({
         id: `__file__${f.resourceId}`,
         name: f.displayName,
         description: '引用到输入框',
@@ -120,8 +129,9 @@ export function useBotSessionFilesFeature(
         data: { resource_id: f.resourceId, display_name: f.displayName },
         preventInsert: true,
         onSelect: () => handleReference(f),
-      })),
-    [files.readyFiles, handleReference],
+      }));
+    },
+    [files, handleReference],
   );
 
   const skillItems = useMemo<CommandItem[]>(
@@ -142,13 +152,13 @@ export function useBotSessionFilesFeature(
       buildBotSessionCommandItems({
         canUseSkills,
         skillItems,
-        fileSubItems,
+        onSearchFiles,
         skillsLoading: skillsState.isLoading,
         filesLoading: files.isLoadingList,
         onClear,
         onSelectSkill: handleSelectSkill,
       }),
-    [canUseSkills, skillItems, fileSubItems, skillsState.isLoading, files.isLoadingList, onClear, handleSelectSkill],
+    [canUseSkills, skillItems, onSearchFiles, skillsState.isLoading, files.isLoadingList, onClear, handleSelectSkill],
   );
 
   const command = useMemo<CommandConfig>(

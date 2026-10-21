@@ -6,7 +6,7 @@
 // 幂等+并发单飞，与 AppShell bot 路由 effect / 气泡打开的同帧触发共享同一次请求）。
 // 打开气泡时再按节流窗 refreshSpaceContext 重拉，成员变更最迟一个窗口后可见。
 // 视觉对齐 PRD（Teamclaw_PRD_new/src/components/Layout/Sidebar.tsx V1.7）：
-//   - compact 触发器：图标+当前空间名（≤4em 截断）+下拉箭头；折叠态 Users icon + tooltip 带当前空间名
+//   - compact 触发器：图标+当前空间名（≤6em 截断,2026-10-21 由 4em 放宽:容纳 5 字+省略号,5 字空间名完整展示）+下拉箭头；折叠态 Users icon + tooltip 带当前空间名
 //   - 默认形态触发器：浅色填充圆角卡片 + border（展开时 border-primary）
 //   - 下拉标题「空间切换」；列表项 图标+空间名，当前项 accent 高亮+primary 文字+右侧 CheckCircle 勾选
 //   - 列表仅展示已加入空间，个人空间置顶，团队按 gmtModified 倒序
@@ -169,7 +169,7 @@ export function SpaceSwitcher({ compact = false, collapsed = false }: { compact?
                 className="h-6 gap-1 rounded-md px-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
               >
                 <Users className="h-3.5 w-3.5" aria-hidden />
-                <span className="max-w-[4em] truncate">{displayText}</span>
+                <span className="max-w-[6em] truncate">{displayText}</span>
                 <ChevronDown
                   className={cn('h-3 w-3 shrink-0 transition-transform', open && 'rotate-180')}
                   aria-hidden

@@ -76,11 +76,15 @@ function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
     engine: dto.engine,
     botType: dto.bot_type,
     online: dto.status === 'ACTIVE' || dto.status === 'online',
+    // 实例运行状态透传(2026-10-21):FAILED/PENDING 供行级禁用与悬停提示感知,团队成员不再对不可用 Bot 盲操作。
+    status: dto.status,
     reachability: 'reachable',
     chatable: Boolean(realBotId && ownerId),
     isAgentCodingBot: runtime.isAgentCodingBot,
     templateType: runtime.templateType,
     templateName: runtime.templateName,
+    spaceId: dto.space?.space_id,
+    spaceName: dto.space?.name,
   };
 }
 

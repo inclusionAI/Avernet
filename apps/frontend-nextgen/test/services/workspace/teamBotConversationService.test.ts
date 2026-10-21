@@ -37,6 +37,27 @@ test('entity_id 而不是 owner_id 作为会话 owner 上下文，mine 不标记
   expect(result.ok && result.data[0].isFriendBot).not.toBe(true);
 });
 
+test('实例运行状态透传:FAILED/PENDING 供行级禁用与悬停提示感知(2026-10-21)', async () => {
+  list.mockResolvedValue({
+    code: 200000,
+    data: {
+      items: [
+        dto({ bot_id: 'team-failed', entity_id: 'entity-1', status: 'FAILED' }),
+        dto({ bot_id: 'team-pending', entity_id: 'entity-1', status: 'PENDING' }),
+      ],
+      total: 2,
+    },
+  });
+  const result = await teamBotConversationService.listBots('viewer');
+  expect(result).toMatchObject({
+    ok: true,
+    data: [
+      { botId: 'team-failed:entity-1', status: 'FAILED', online: false },
+      { botId: 'team-pending:entity-1', status: 'PENDING', online: false },
+    ],
+  });
+});
+
 test('团队 Coding Bot 保留模板分类字段，避免行标签退化为 AgentCoding', async () => {
   list.mockResolvedValue({
     code: 200000,

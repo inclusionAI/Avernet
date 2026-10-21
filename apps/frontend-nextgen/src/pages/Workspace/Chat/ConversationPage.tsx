@@ -16,6 +16,7 @@ import { buildAgentCodingChatPath } from '@/services/workspace';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { chatBridge } from '@/services/workspace/chatBridge';
 import { useConversationStore } from '@/stores/conversationStore';
+import { useSpaceContextStore } from '@/stores/spaceContextStore';
 import { useChatBridge } from '@tc-chat/adapters';
 import type { BridgeInputRef, PanelHandle } from '@tc-chat/core';
 import type { SenderRef } from '@tc-chat/ui/es/Sender';
@@ -152,6 +153,39 @@ export default function ConversationPage(): JSX.Element {
     buildRequestParams: (content) => buildSingleChatBridgeRequest(target?.id ?? null, content),
   });
 
+  // /file 等面板唤起后切会话(2026-10-21):输入框清空、未发送文件 chip 全部失效;
+  // subConfig 子面板(如 /file 文件清单)的显隐是 SDK 内部状态,clear 清空输入不足以关闭——
+  // 经原生输入元素派发 Escape(SDK 退出方式:子级退回根级、根级关闭)。第二次 Escape 须延至
+  // 下一宏任务派发:同步连发会读到旧导航深度,两次都执行"退回上一级"而漏掉根级关闭。
+  // 首次挂载不触发(仅会话间切换);清理器清掉未派发的挂起 Escape(快速连切由新会话的派发接管)。
+  const prevSessionSwitchRef = useRef<string | null>(null);
+  const sessionSwitchEscapeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const prev = prevSessionSwitchRef.current;
+    const current = selectedSession?.sessionId ?? null;
+    prevSessionSwitchRef.current = current;
+    if (prev === null || prev === current) return;
+    const sender = interactiveModel.fileFeature.senderRef.current;
+    sender?.clear();
+    sender?.invalidateFileChips();
+    const native = sender?.nativeElement;
+    if (native) {
+      native.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      sessionSwitchEscapeTimerRef.current = setTimeout(() => {
+        native.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      }, 0);
+    }
+  }, [selectedSession, interactiveModel.fileFeature.senderRef]);
+  useEffect(
+    () => () => {
+      if (sessionSwitchEscapeTimerRef.current) {
+        clearTimeout(sessionSwitchEscapeTimerRef.current);
+        sessionSwitchEscapeTimerRef.current = null;
+      }
+    },
+    [],
+  );
+
   // 只读(others)装配:三元组不完整时 Hook 内部只清态不发请求。
   const selectionIsReadonly = origin === 'others' && store.selectedBotId !== null;
   const readonlyHistory = useConversationHistory({
@@ -197,6 +231,14 @@ export default function ConversationPage(): JSX.Element {
     // 我的 Bot 空态文案内「Bot 管理」链接:跳 Bot 管理页创建 Bot。
     onOpenBotWorkshop: () => history.push('/bot-workshop'),
     onOpenAgentCodingBot: openAgentCodingBot,
+    // 「Bot 管理」菜单项(2026-10-21):带该 Bot 所属空间上下文跳转 Bot 管理页,打开即定位该空间。
+    onOpenBotManagement: (bot) => {
+      const spaceId = bot.spaceId ? Number(bot.spaceId) : undefined;
+      if (spaceId !== undefined) useSpaceContextStore.getState().setCurrentSpaceId(spaceId);
+      history.push('/bot-workshop');
+    },
+    // Bot 正在回复中(2026-10-21):仅当前打开的会话,会话行标题左侧渲染 loading。
+    replyingSessionId: botChat.chat.isRequesting ? (selectedSession?.sessionId ?? null) : null,
   };
 
   // 头部五图标域编排（chat-header-panels）：收藏会话/会话管理/历史消息/资源管理/副屏。

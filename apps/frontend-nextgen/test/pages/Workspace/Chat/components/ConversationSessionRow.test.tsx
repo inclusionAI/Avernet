@@ -32,10 +32,23 @@ describe('ConversationSessionRow 平齐化与热区分级（dmore 1:1）', () =>
     // 稿二级行:无前置消息图标、右余部无「N 条」列。
     expect(container.querySelector('svg.lucide-message-square')).toBeNull();
     expect(screen.queryByText('21 条')).not.toBeInTheDocument();
-    // 文字 13px/18px，与一级名称同色；选中仅由背景区分，不再加黑加粗。
+    // 文字 13px/18px，与一级名称同色；选中态 Medium(500)为设计稿字体还原(2026-10-20)，未选中 Regular。
     const title = screen.getByText('对话会话');
     expect(title).toHaveClass('text-[13px]', 'leading-[18px]');
-    expect(title).toHaveClass('font-normal', 'text-content-strong');
+    expect(title).toHaveClass(selected ? 'font-medium' : 'font-normal', 'text-content-strong');
+  });
+
+  it('Bot 回复中:replyingSessionId 匹配行标题左侧渲染旋转 loading;未传(回复结束)时消失(2026-10-21)', () => {
+    const { rerender } = render(
+      <ConversationSessionRow session={session} selected={false} onSelect={jest.fn()} replyingSessionId="session-1" />,
+    );
+    const status = screen.getByRole('status');
+    expect(status).toHaveAttribute('aria-label', 'Bot 正在回复');
+    // 绝对定位于标题左侧缩进区,不占 flex 流(标题起点不随 loading 出现跳动)。
+    expect(status).toHaveClass('animate-spin', 'text-muted-foreground', 'absolute');
+    // 未传(回复结束)时 loading 消失。
+    rerender(<ConversationSessionRow session={session} selected={false} onSelect={jest.fn()} />);
+    expect(screen.queryByRole('status')).toBeNull();
   });
 
   it('标题对齐一级名称：固定头像槽后起排；非收藏行右缘内缩，收藏行右缘到边', () => {

@@ -19,7 +19,7 @@
 import { Badge, Button, IconButton } from '@/components/ui';
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
 import { cn } from '@/utils/cn';
-import { Star } from 'lucide-react';
+import { Loader2, Star } from 'lucide-react';
 import React from 'react';
 import type { ConversationSessionRowActions } from '../hooks/useConversationSessionMenu';
 import { ConversationSessionActions } from './ConversationSessionActions';
@@ -32,6 +32,8 @@ export interface ConversationSessionRowProps {
   onSelect(): void;
   onToggleFavorite?(): void;
   favoritePending?: boolean;
+  /** Bot 正在回复中的会话 id(2026-10-21):仅当前打开的会话;标题左侧渲染 loading 旋转指示。 */
+  replyingSessionId?: string | null;
   /** 恢复的单聊会话操作(编辑标题/清除上下文/删除会话);只读行不传。 */
   actions?: ConversationSessionRowActions;
 }
@@ -43,6 +45,7 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
   onSelect,
   onToggleFavorite,
   favoritePending = false,
+  replyingSessionId,
   actions,
 }: ConversationSessionRowProps) {
   const favorite = session.favorite === true;
@@ -59,6 +62,15 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
             : 'bg-muted/60 opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:opacity-100',
         )}
       />
+      {/* Bot 正在回复中(2026-10-21):仅当前会话行,标题左侧缩进区渲染旋转指示;
+          绝对定位不占 flex 流,标题起点不随 loading 出现跳动(用户验收修正)。 */}
+      {replyingSessionId === session.sessionId && (
+        <Loader2
+          role="status"
+          aria-label="Bot 正在回复"
+          className="absolute left-[40px] top-1/2 z-10 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-muted-foreground"
+        />
+      )}
       <Button
         variant="ghost"
         aria-current={selected ? 'page' : undefined}
@@ -84,7 +96,13 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
           ],
         )}
       >
-        <span className="min-w-0 flex-1 truncate text-[13px] font-normal leading-[18px] text-content-strong">
+        <span
+          className={cn(
+            'min-w-0 flex-1 truncate text-[13px] leading-[18px] tracking-[-0.08px] text-content-strong',
+            // 2026-10-20 设计稿还原:会话名称选中态 Medium(500),未选中 Regular(400)。
+            selected ? 'font-medium' : 'font-normal',
+          )}
+        >
           {session.title}
         </span>
         {readOnly && (

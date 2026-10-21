@@ -1,8 +1,9 @@
 // 收起侧栏（56px）的「Bot 泊位」竖轨：整栏收起不留盲区，收起条仍回答
 // 「有谁 / 开着哪个」。分组以「界珠」短分隔打结，选中 Bot 亮出
-// 泊位缺口（primary 左刻 + 底），好友 Bot 头像带在线信号点——所有图形都承载
-// 信息，不做纯装饰。头像是干净的一列：不留任何贯穿线（首版细轨从半透明头像
-// 中间穿过，读成故障线，已撤）。
+// 泊位缺口（primary 左刻 + 底）——所有图形都承载信息，不做纯装饰。
+// 头像是干净的一列：不留任何贯穿线（首版细轨从半透明头像中间穿过，读成故障线，已撤）。
+// 好友在线信号点已移除(2026-10-21):metadata status 对已删除 Bot 仍残留 ACTIVE,
+// 绿点失真误导;死 Bot 好友关系/元数据同步问题另行立项推动后端修复。
 // 交互与展开态同口径：头像直达打开会话（不强迫展开侧栏）；AgentCoding Bot
 // 走专用 coding 对话；不可聊 Bot 保持降权占位（与分组「泊位」一致）；
 // +N 溢出 / 空位虚线占位各有语义，均请求展开完整侧栏
@@ -45,16 +46,6 @@ function SectionKnot() {
   );
 }
 
-/** 在线信号点：仅好友 Bot 佩戴（管理/团队 Bot 无好友在线语义）。 */
-function OnlineDot() {
-  return (
-    <span
-      aria-hidden="true"
-      className="absolute bottom-0.5 right-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-background"
-    />
-  );
-}
-
 /** 直达头像：选中 = 泊位缺口（primary 左刻 + bg-selected 底），与分组泊位的选中语义一致。 */
 function BotTile({
   view,
@@ -91,7 +82,6 @@ function BotTile({
           {selected && (
             <span aria-hidden="true" className="absolute -left-1 top-1/2 h-3.5 w-1 -translate-y-1/2 rounded-full bg-primary" />
           )}
-          {view.section === 'friend' && bot.online === true && <OnlineDot />}
         </Button>
       </TooltipTrigger>
       <TooltipContent side="right">{tooltip}</TooltipContent>

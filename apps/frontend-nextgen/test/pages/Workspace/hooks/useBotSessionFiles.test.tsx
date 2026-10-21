@@ -38,16 +38,25 @@ describe('useBotSessionFiles（单聊会话文件 hook）', () => {
     useBotSessionFileStore.setState({ isLoadingList: false });
   });
 
-  it('进入会话即加载文件,无需先打开文件面板;缓存变化不重复请求,仍支持手动刷新', async () => {
-    mockLoadReady.mockResolvedValueOnce({ ok: true, data: { items: [makeFile('r1', 'a.json')], total: 1 } });
+  it('懒加载(2026-10-21):进入会话不再默认调 file 接口,refresh(/file 唤起或面板打开)才加载;缓存变化不重复请求', async () => {
     const { result } = renderHook(({ sid }: { sid: string }) => useBotSessionFiles('bot-1', sid, 'u1', 'owner-1'), {
       initialProps: { sid: 's1' },
     });
-    await waitFor(() => expect(result.current.readyFiles.map((file) => file.resourceId)).toEqual(['r1']));
+    // 懒加载:挂载/进入会话不自动调 file 接口。
+    expect(mockLoadReady).not.toHaveBeenCalled();
+    expect(result.current.readyFiles).toEqual([]);
+    // 手动 refresh 才拉取。
+    mockLoadReady.mockResolvedValueOnce({ ok: true, data: { items: [makeFile('r1', 'a.json')], total: 1 } });
+    await act(async () => {
+      await result.current.refresh();
+    });
     expect(mockLoadReady).toHaveBeenCalledTimes(1);
     expect(mockLoadReady).toHaveBeenCalledWith('bot-1', 's1', 'u1', 'owner-1');
+    expect(result.current.readyFiles.map((file) => file.resourceId)).toEqual(['r1']);
+    // 本地缓存变化(上传就绪)不触发请求。
     act(() => result.current.addReadyFile(makeFile('uploaded', 'new.txt')));
     expect(mockLoadReady).toHaveBeenCalledTimes(1);
+    // 再次手动刷新拉最新清单。
     mockLoadReady.mockResolvedValueOnce({ ok: true, data: { items: [makeFile('r2', 'b.json')], total: 1 } });
     await act(async () => {
       await result.current.refresh();
@@ -75,13 +84,19 @@ describe('useBotSessionFiles（单聊会话文件 hook）', () => {
           }),
       );
 
-    const { rerender } = renderHook(({ sid }: { sid: string }) => useBotSessionFiles('bot-1', sid, 'u1'), {
+    const { result, rerender } = renderHook(({ sid }: { sid: string }) => useBotSessionFiles('bot-1', sid, 'u1'), {
       initialProps: { sid: 's1' },
     });
 
-    // 进入 s1 自动发起慢请求;切到 s2 自动清空旧列表并发起第二请求。
+    // 懒加载(2026-10-21):s1 手动 refresh 发起慢请求;切到 s2(cleanup 作废在途)后再手动发起第二请求。
+    act(() => {
+      void result.current.refresh();
+    });
     expect(mockLoadReady).toHaveBeenCalledTimes(1);
     rerender({ sid: 's2' });
+    act(() => {
+      void result.current.refresh();
+    });
     expect(mockLoadReady).toHaveBeenCalledTimes(2);
 
     // s2 先返回 → store 列表为 s2 的文件。
@@ -108,11 +123,14 @@ describe('useBotSessionFiles（单聊会话文件 hook）', () => {
         }),
     );
 
-    const { rerender } = renderHook(({ sid }: { sid: string | null }) => useBotSessionFiles('bot-1', sid, 'u1'), {
+    const { result, rerender } = renderHook(({ sid }: { sid: string | null }) => useBotSessionFiles('bot-1', sid, 'u1'), {
       initialProps: { sid: 's1' as string | null },
     });
 
-    // 退出会话应自动作废在途请求,不依赖手动刷新。
+    // 懒加载(2026-10-21):手动 refresh 发起慢请求;退出会话自动作废在途请求并收尾加载态。
+    act(() => {
+      void result.current.refresh();
+    });
     rerender({ sid: null });
     expect(mockLoadReady).toHaveBeenCalledTimes(1);
     expect(useBotSessionFileStore.getState().isLoadingList).toBe(false);
@@ -134,9 +152,16 @@ describe('useBotSessionFiles（单聊会话文件 hook）', () => {
         }),
     );
     const old = renderHook(() => useBotSessionFiles('bot-1', 's1', 'u1'));
+    // 懒加载(2026-10-21):手动 refresh 发起慢请求,卸载 cleanup 作废在途。
+    act(() => {
+      void old.result.current.refresh();
+    });
     old.unmount();
     mockLoadReady.mockResolvedValueOnce({ ok: true, data: { items: [makeFile('new', 'new.txt')], total: 1 } });
-    renderHook(() => useBotSessionFiles('bot-1', 's2', 'u1'));
+    const next = renderHook(() => useBotSessionFiles('bot-1', 's2', 'u1'));
+    await act(async () => {
+      await next.result.current.refresh();
+    });
     await waitFor(() => expect(readyFiles()).toEqual(['new']));
     await act(async () => resolveOld({ ok: true, data: { items: [makeFile('old', 'old.txt')], total: 1 } }));
     expect(readyFiles()).toEqual(['new']);

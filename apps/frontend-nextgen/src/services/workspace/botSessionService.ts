@@ -241,8 +241,8 @@ function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
     isAgentCodingBot: runtime.isAgentCodingBot,
     templateType: runtime.templateType,
     templateName: runtime.templateName,
-    spaceId: dto.space_id === undefined ? undefined : String(dto.space_id),
-    spaceName: dto.space_name,
+    spaceId: dto.space?.space_id,
+    spaceName: dto.space?.name,
   };
 }
 
