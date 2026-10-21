@@ -30,7 +30,7 @@ be dispatched until GitHub knows it on the default branch.
 Each matrix job resolves npm's `latest` tag once, installs that exact version,
 and records the package/version and repository commit. Prereleases are tested
 only when the publisher assigns them to `latest`. No existing engine profile
-is reused. The jobs use Node 22 and Python 3.12 on Ubuntu, two at a time.
+is reused. The jobs use Node 24 and Python 3.12 on Ubuntu, two at a time.
 
 OpenClaw and DeepSeek Harness use Chat Completions, Claude Code uses Anthropic
 Messages, and Codex uses Responses. Only the engine invocation receives the

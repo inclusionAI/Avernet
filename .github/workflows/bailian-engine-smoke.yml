@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -56,7 +56,6 @@ jobs:
           ENGINE_PACKAGE: ${{ matrix.package }}
         run: |
           version="$(npm view "$ENGINE_PACKAGE@latest" version)"
-          npm install --global "$ENGINE_PACKAGE@$version"
           mkdir -p reports
           ENGINE_VERSION="$version" python - <<'PY'
           import json, os
@@ -67,6 +66,7 @@ jobs:
               'commit': os.environ['GITHUB_SHA'],
           }, indent=2))
           PY
+          npm install --global "$ENGINE_PACKAGE@$version"
       - name: Generate isolated provider configuration
         env:
           BAILIAN_OPENAI_BASE_URL: ${{ vars.BAILIAN_OPENAI_BASE_URL }}
@@ -91,6 +91,8 @@ jobs:
           result = json.loads(path.read_text()) if path.exists() else {
               'status': 'UNKNOWN', 'reason': 'setup_failed', 'bcs_certified': False,
           }
+          path.parent.mkdir(parents=True, exist_ok=True)
+          path.write_text(json.dumps(result, indent=2) + '\n')
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
               summary.write('Engine/model smoke only; BCS integration is not certified.\n\n')
               summary.write('```json\n' + json.dumps(result, indent=2) + '\n```\n')
