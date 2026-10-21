@@ -181,7 +181,7 @@ async fn mysql_coercion_cannot_turn_malformed_legacy_identity_into_registration(
 async fn actor_static_and_implicit_identity_reads_are_bounded() {
     use bcs_service_api::types::agent_registration::AgentBotQuery;
     let (db,count,repo)=fixture().await;
-    db.execute(DbStatement::new("ALTER TABLE bcs_providers ADD COLUMN config TEXT DEFAULT '{\"downlink\":{\"auth_mode\":\"agentpass\"}}'")).await.unwrap();
+    db.execute(DbStatement::with_params("UPDATE bcs_providers SET config = ?", vec![r#"{"downlink":{"auth_mode":"agentpass"}}"#.into()])).await.unwrap();
     db.execute(DbStatement::new("ALTER TABLE bcs_providers ADD COLUMN disabled INTEGER DEFAULT 0")).await.unwrap();
     for i in 0..25 { insert(db.as_ref(),&format!("bot-{i:02}"),"parent",&bcs_config::resolve_env_str()).await; }
     db.execute(DbStatement::new("UPDATE bcs_bots SET session_token='static' WHERE bot_uuid='bot-00'")).await.unwrap();
@@ -202,7 +202,6 @@ async fn actor_static_and_implicit_identity_reads_are_bounded() {
 #[tokio::test]
 async fn pending_ws_token_lookup_has_bounded_reads_and_no_writes() {
     let (db, count, repo) = fixture().await;
-    db.execute(DbStatement::new("ALTER TABLE bcs_providers ADD COLUMN config TEXT")).await.unwrap();
     db.execute(DbStatement::new("ALTER TABLE bcs_providers ADD COLUMN disabled INTEGER DEFAULT 0")).await.unwrap();
     let token = repo.connect_or_promote_streaming("pending".into()).await.unwrap();
     count.queries.store(0, Ordering::SeqCst);
