@@ -127,7 +127,7 @@ Owner-only field; unrelated legacy updates keep their current behavior.
 the applicant must be an active member of the Team Space, must not be the
 Owner or an existing editor, and must have no pending request for this Bot.
 The policy is evaluated inside the creation transaction under the same Bot row
-lock. If enabled, creation atomically writes an APPROVED order, a MEMBER
+lock. If enabled, creation atomically writes an APPROVED order, an ADMIN
 collaborator relation, and a result NOTICE to the applicant. It creates no
 pending approver or Owner approval notification. `biz_data.approval_mode="auto"`
 and the review remark identify a policy decision; `reviewer_user_id` is null,
@@ -140,7 +140,12 @@ The existing response shape is unchanged (`work_order_id`, `work_order_no`,
 orders remain pending when enabled, and disabling the policy does not revoke
 any granted access. Repeated applications continue to return the existing
 already-pending/already-editor errors. Manual review and other work-order
-business types are unchanged.
+business types keep their existing workflows.
+
+Bot editor applications request ADMIN access. Manual approval, policy auto-approval
+and generic AUTO completion grant ADMIN when creating a collaborator relation.
+Existing collaborator relations and Space member roles are not rewritten; direct
+editor CRUD defaults are unchanged.
 
 ## Stable enum contract
 

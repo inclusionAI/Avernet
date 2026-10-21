@@ -138,6 +138,7 @@ def test_auto_space_join_commits_membership_status_and_notice_together(setup):
         assert order.status == WorkOrderStatus.APPROVED.value
         assert order.reviewer_user_id == "SYSTEM"
         assert member.created_by == "SYSTEM"
+        assert member.role == SpaceRole.MEMBER.value
         assert session.query(WorkOrderApproverModel).count() == 0
         assert (
             session.get(WorkOrderNotificationModel, notice_ids[0]).recipient_user_id
@@ -178,7 +179,8 @@ def test_auto_space_join_notice_failure_rolls_back_membership_and_approval(setup
         assert session.query(WorkOrderNotificationModel).count() == 0
 
 
-def test_auto_bot_completion_requires_policy_and_commits_result(setup):
+@pytest.mark.parametrize("existing_role", [None, "member", "admin"])
+def test_auto_bot_completion_requires_policy_and_commits_result(setup, existing_role):
     db, repo, space_id, bot_pk, _ = setup
     with db.orm_session() as session:
         session.get(BotModel, bot_pk).ext = json.dumps(
@@ -196,6 +198,21 @@ def test_auto_bot_completion_requires_policy_and_commits_result(setup):
         },
     )
 
+    if existing_role is not None:
+        with db.orm_session() as session:
+            session.add(
+                BotCollaboratorModel(
+                    bot_pk=bot_pk,
+                    bot_id="auto-bot",
+                    owner_id="owner",
+                    user_id="alice",
+                    user_name="Alice",
+                    role=existing_role,
+                    operator_id="owner",
+                    env="dev",
+                )
+            )
+
     notice_ids = repo.complete_auto_approval(
         work_order_id=result.work_order_id,
         recipient_user_ids=["alice"],
@@ -211,7 +228,14 @@ def test_auto_bot_completion_requires_policy_and_commits_result(setup):
             .one()
         )
         assert order.status == WorkOrderStatus.APPROVED.value
-        assert collaborator.operator_id == "SYSTEM"
+        assert collaborator.role == (existing_role or "admin")
+        assert collaborator.operator_id == ("owner" if existing_role else "SYSTEM")
+        member = (
+            session.query(SpaceMemberModel)
+            .filter_by(space_id=space_id, user_id="alice", env="dev")
+            .one()
+        )
+        assert member.role == SpaceRole.MEMBER.value
         assert (
             session.get(WorkOrderNotificationModel, notice_ids[0]).recipient_user_id
             == "alice"
