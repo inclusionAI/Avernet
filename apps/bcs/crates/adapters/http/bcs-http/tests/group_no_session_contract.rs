@@ -126,7 +126,8 @@ impl Fixture {
         let group_repo = Arc::new(MemoryGroupRepo::new());
         if scoped {
             providers.insert_provider(ProviderRecord {
-                provider_id: "local".into(), name: "Local".into(), config: "{}".into(), slug: None,
+                provider_id: "local".into(), name: "Local".into(),
+                config: json!({"downlink": {"enabled": true, "auth_mode": "static_bearer", "protocol_version": "2.0"}}).to_string(), slug: None,
                 disabled: false, created_by: "alice".into(), owners: "[]".into(), created_at: 1, updated_at: 1,
             }).await.unwrap();
             metadata.attach_provider_bot(BotProviderRecord {
@@ -680,8 +681,11 @@ runtime:
     }).await.unwrap();
     let sid = started.view.run.session_id;
     fixture.sessions.add_participant(&sid, Participant::human("human_bob", bcs_service_api::ParticipantRole::Observer)).await.unwrap();
-    fixture.providers.as_ref().unwrap().update_provider_metadata("local", None,
-        Some(r#"{"collaboration_scope":"same_owner"}"#), None, 2).await.unwrap();
+    let providers = fixture.providers.as_ref().unwrap();
+    let mut config: Value = serde_json::from_str(&providers.get_provider("local").await.unwrap().unwrap().config).unwrap();
+    config["collaboration_scope"] = json!("same_owner");
+    providers.update_provider_metadata("local", None,
+        Some(&config.to_string()), None, 2).await.unwrap();
     let before = StateMachineRunRepoPort::get_run(&*fixture.collaboration, &started.view.run.run_id).await.unwrap().unwrap();
     assert!(matches!(fixture.runtime.handle_session_human_input(HandleSessionHumanInputCommand {
         group_id: "new-group".into(), session_id: Some(sid.clone()), caller_actor_id: "human_bob".into(),
