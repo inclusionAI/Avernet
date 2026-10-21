@@ -147,7 +147,7 @@ def test_policy_requires_available_team_space(setup, change):
         repo.update_bot_editor_request_policy(**policy, auto_approve=True)
 
 
-def test_auto_approval_atomically_grants_member_and_notifies_applicant(setup):
+def test_auto_approval_atomically_grants_admin_and_notifies_applicant(setup):
     db, repo, request, policy = setup
     repo.update_bot_editor_request_policy(**policy, auto_approve=True)
     result = repo.create_bot_editor_request(**request)
@@ -155,6 +155,7 @@ def test_auto_approval_atomically_grants_member_and_notifies_applicant(setup):
     assert result.reviewer_user_id is None
     assert result.reviewed_at is not None
     assert json.loads(result.biz_data)["approval_mode"] == "auto"
+    assert json.loads(result.biz_data)["requested_role"] == "admin"
     assert (
         repo.get_detail(
             work_order_id=result.id, actor_id="alice", env="dev"
@@ -165,10 +166,16 @@ def test_auto_approval_atomically_grants_member_and_notifies_applicant(setup):
         relation = session.query(BotCollaboratorModel).one()
         assert (relation.user_id, relation.role, relation.operator_id) == (
             "alice",
-            "member",
+            "admin",
             "owner",
         )
         assert session.query(WorkOrderApproverModel).count() == 0
+        member = (
+            session.query(SpaceMemberModel)
+            .filter_by(space_id=request["space_id"], user_id="alice", env="dev")
+            .one()
+        )
+        assert member.role == SpaceRole.MEMBER.value
         notice = session.query(WorkOrderNotificationModel).one()
         assert (notice.recipient_user_id, notice.notification_category) == (
             "alice",

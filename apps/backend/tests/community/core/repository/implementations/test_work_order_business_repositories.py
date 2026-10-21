@@ -428,7 +428,10 @@ def test_skill_editor_approval_rechecks_active_membership_and_rolls_back(db) -> 
     assert manager is None
 
 
-def test_bot_editor_request_approval_creates_member_collaborator(db) -> None:
+@pytest.mark.parametrize("existing_role", [None, "member", "admin"])
+def test_bot_editor_request_approval_grants_admin_without_changing_existing_roles(
+    db, existing_role
+) -> None:
     spaces = SpaceRepository(db)
     team = _team(spaces)
     spaces.add_member(
@@ -469,7 +472,7 @@ def test_bot_editor_request_approval_creates_member_collaborator(db) -> None:
         env="dev",
     )
     data = json.loads(record.biz_data)
-    assert data["requested_role"] == "member"
+    assert data["requested_role"] == "admin"
     assert data["space_id"] == team.id
 
     with pytest.raises(WorkOrderAlreadyPendingError):
@@ -484,6 +487,21 @@ def test_bot_editor_request_approval_creates_member_collaborator(db) -> None:
             apply_reason="again",
             env="dev",
         )
+
+    if existing_role is not None:
+        with db.orm_session() as session:
+            session.add(
+                BotCollaboratorModel(
+                    bot_pk=bot_pk,
+                    bot_id="bot-editor-1",
+                    owner_id="owner-1",
+                    user_id="applicant-1",
+                    user_name="Applicant",
+                    role=existing_role,
+                    operator_id="owner-1",
+                    env="dev",
+                )
+            )
 
     result = repository.review_bot_editor_request(
         work_order_id=record.id,
@@ -506,8 +524,14 @@ def test_bot_editor_request_approval_creates_member_collaborator(db) -> None:
             )
             .one()
         )
-        assert collaborator.role == "member"
+        assert collaborator.role == (existing_role or "admin")
         assert collaborator.operator_id == "owner-1"
+        member = (
+            session.query(SpaceMemberModel)
+            .filter_by(space_id=team.id, user_id="applicant-1", env="dev")
+            .one()
+        )
+        assert member.role == SpaceRole.MEMBER.value
 
     total, items = repository.list_items(
         actor_id="applicant-1",
