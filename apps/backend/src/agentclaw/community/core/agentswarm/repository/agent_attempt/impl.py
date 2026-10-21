@@ -19,7 +19,7 @@ from agentclaw.community.core.agentswarm.repository.agent_attempt import model a
 from agentclaw.community.core.agentswarm.repository.run_dispatch import model as om_dispatch
 from agentclaw.community.log import get_logger
 
-_logger = get_logger(__name__)
+_logger = get_logger("agentswarm")
 from agentclaw.community.core.agentswarm.repository.agent_attempt.protocol import (
     AgentAttemptRepositoryProtocol,
 )

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
+from agentclaw.community.log import get_logger
 import time
 import uuid
 
@@ -31,7 +31,7 @@ from agentclaw.community.core.agentswarm.service.protocols import (
     SubmitRunRequest, TenantRunLimitExceeded,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger("agentswarm")
 
 class AgentSwarmService(AgentSwarmServiceProtocol):
 

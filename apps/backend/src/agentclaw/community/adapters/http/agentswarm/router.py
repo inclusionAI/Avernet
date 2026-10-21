@@ -36,7 +36,7 @@ import asyncio
 import dataclasses
 import html
 import json
-import logging
+from agentclaw.community.log import get_logger
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
@@ -64,7 +64,7 @@ from agentclaw.community.adapters.http.agentswarm.schemas import (
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 
-logger = logging.getLogger(__name__)
+logger = get_logger("agentswarm")
 
 API_VERSION = "v1"
 

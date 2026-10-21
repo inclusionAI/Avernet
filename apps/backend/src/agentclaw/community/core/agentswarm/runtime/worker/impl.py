@@ -20,7 +20,7 @@ from agentclaw.community.core.agentswarm.runtime.handler import SwarmRunHandler
 from agentclaw.community.core.agentswarm.runtime.offload import run_blocking
 from agentclaw.community.log import get_logger
 
-logger = get_logger(__name__)
+logger = get_logger("agentswarm")
 
 # 12.2: join-window cap after drain grace expires; see shutdown().
 _ABORT_JOIN_MAX_SECONDS = 5.0

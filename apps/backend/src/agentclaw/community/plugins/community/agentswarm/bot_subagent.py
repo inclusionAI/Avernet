@@ -35,7 +35,7 @@ from agentclaw.community.core.agentswarm.domain.models import (
 from agentclaw.community.plugin_api.agentswarm.bot import BotPlatform
 from agentclaw.community.log import get_logger
 
-logger = get_logger(__name__)
+logger = get_logger("agentswarm")
 
 _TERMINAL_FAILURE = frozenset({
     BotState.AUTHORIZATION_REJECTED.value,

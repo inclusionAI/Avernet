@@ -22,7 +22,7 @@ from agentclaw.community.core.agentswarm.runtime.offload import run_blocking
 from agentclaw.community.core.agentswarm.runtime.slice_lost import SliceLost
 from agentclaw.community.log import get_logger
 
-logger = get_logger(__name__)
+logger = get_logger("agentswarm")
 
 # The pool's error string for a FAILED completion produced by a lost claim
 # (a reclaimed slice). Not a dead branch: rehydrate respawns it.

@@ -25,7 +25,7 @@ call ``sweep()`` at the configured interval until then.
 """
 from __future__ import annotations
 
-import logging
+from agentclaw.community.log import get_logger
 import re
 import time
 from dataclasses import dataclass
@@ -39,7 +39,7 @@ from agentclaw.community.plugin_api.agentswarm.artifact import (
     RetentionScanner,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger("agentswarm")
 
 _DAY_SECONDS = 86400.0
 

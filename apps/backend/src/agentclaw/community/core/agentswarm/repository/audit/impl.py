@@ -31,7 +31,7 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
 
-log = get_logger(__name__)
+log = get_logger("agentswarm")
 
 _MAX_READ_ROWS = 500
 

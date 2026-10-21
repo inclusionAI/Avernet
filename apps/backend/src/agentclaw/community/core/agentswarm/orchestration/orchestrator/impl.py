@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-import logging
+from agentclaw.community.log import get_logger
 import time
 import uuid
 from typing import Any
@@ -17,7 +17,7 @@ from agentclaw.community.core.agentswarm.orchestration.decision_parser import De
 from agentclaw.community.core.agentswarm.orchestration.guards import GuardService
 from agentclaw.community.core.agentswarm.orchestration.state import RunState
 
-logger = logging.getLogger(__name__)
+logger = get_logger("agentswarm")
 
 _REJECTION_NOTES_PER_RUN = 5
 _TRACKED_RUNS = 64
