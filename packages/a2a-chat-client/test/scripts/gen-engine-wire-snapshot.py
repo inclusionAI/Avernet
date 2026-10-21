@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Regenerate __tests__/fixtures/engine-wire-snapshot.json from the REAL engine kernel.
+"""Regenerate test/fixtures/engine-wire-snapshot.json from the REAL engine kernel.
 
 用法（在 Avernet 引擎 adapter 仓运行，本脚本自身不 import 引擎之外的任何东西）：
 
     cd <Avernet>/engine/adapter
-    PYTHONPATH=src python3 <ocb>/apps/frontend/src/adapters/a2a/__tests__/scripts/gen-engine-wire-snapshot.py \
-        --out <ocb>/apps/frontend/src/adapters/a2a/__tests__/fixtures/engine-wire-snapshot.json
+    PYTHONPATH=src python3 <Avernet>/packages/a2a-chat-client/test/scripts/gen-engine-wire-snapshot.py \
+        --out <Avernet>/packages/a2a-chat-client/test/fixtures/engine-wire-snapshot.json
 
 产出 = 真引擎 A2aKernel 的一次完整 chat run 的**真实发布序**（engine_bridge
 execute_and_stream 同构驱动）：
@@ -44,7 +44,7 @@ FINAL_TEXT = "你好！"
 
 FIXTURE_HEADER = (
     "ENGINE-GENERATED SNAPSHOT — DO NOT HAND-EDIT. Regenerate via "
-    "__tests__/scripts/gen-engine-wire-snapshot.py "
+    "packages/a2a-chat-client/test/scripts/gen-engine-wire-snapshot.py "
     "(cd <Avernet>/engine/adapter && PYTHONPATH=src python3 <script> --out <this file>). "
     "Sequence = real A2aKernel publish order of one completed chat run "
     "(engine_bridge.execute_and_stream isomorphic drive): task snapshot, "

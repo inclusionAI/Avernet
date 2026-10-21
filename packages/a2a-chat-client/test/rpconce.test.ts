@@ -3,8 +3,8 @@
  * 失败分类复用 rpc.ts classifyFailure 口径（鉴权走 error 信封 reason 分支，
  * 非 HTTP 401/403——对拍 stream.test.ts 同源事实）。
  */
-import { rpcOnce } from '@avernet/a2a-chat-client';
-import { buildRpcRequest } from '@avernet/a2a-chat-client';
+import { rpcOnce } from '../src/index';
+import { buildRpcRequest } from '../src/index';
 
 function jsonResponse(body: string, status = 200): Response {
   return new Response(body, { status, headers: { 'content-type': 'application/json' } });

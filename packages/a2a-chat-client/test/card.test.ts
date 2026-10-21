@@ -1,4 +1,4 @@
-import { fetchCard, validateScenarios, Scenario } from '@avernet/a2a-chat-client';
+import { fetchCard, validateScenarios, Scenario } from '../src/index';
 import { makeEngineCard } from './helpers';
 
 describe('card 探测（spec §2/§5：card 通过=基础面；场景缺项→该场景 v3）', () => {

@@ -5,11 +5,11 @@
  */
 import * as fsmod from 'fs';
 import * as path from 'path';
-import type { WireEvent } from '@avernet/a2a-chat-client';
+import type { WireEvent } from '../src/index';
 import {
   translateEvent, type TranslateCtx,
-} from '@avernet/a2a-chat-client';
-import { V3_FRAME_SHAPES } from '@avernet/a2a-chat-client/testing';
+} from '../src/index';
+import { V3_FRAME_SHAPES } from '../src/testing';
 import { loadOpenClawParser } from './v3-frame-shapes.test';
 
 const OpenClawParser = loadOpenClawParser();
