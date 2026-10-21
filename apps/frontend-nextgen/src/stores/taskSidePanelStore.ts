@@ -30,6 +30,12 @@ export interface TaskNavTarget {
   endTime?: number | null;
 }
 
+/** 跨域联动视图目标:对话页主区的群会话覆盖层(PRD 左右联动,页面不跳转)。 */
+export interface TaskLinkedGroupSession {
+  groupId: string | null;
+  sessionId: string;
+}
+
 export interface TaskSidePanelState {
   /** 当前活跃任务（多任务切换条的落点；聊天 tab 由 taskId 自带，不强依赖） */
   activeTaskId: string | null;
@@ -39,11 +45,15 @@ export interface TaskSidePanelState {
   pendingNavigation: TaskNavTarget | null;
   /** 选中信号计数器（+1 = 消息流滚动定位一次），demo nodeScrollSignal 同源 */
   nodeScrollSignal: number;
+  /** 对话页左侧的联动群会话覆盖层(跨域目标);null = 未打开 */
+  linkedGroupSession: TaskLinkedGroupSession | null;
   setActiveTask: (taskId: string) => void;
   selectNode: (taskId: string, nodeId: string, target: TaskNavTarget | null) => void;
   drillInto: (taskId: string, nodeId: string, target: TaskNavTarget | null) => void;
   backToOverview: (taskId: string) => void;
   consumePendingNavigation: () => void;
+  openLinkedGroupSession: (target: TaskLinkedGroupSession) => void;
+  closeLinkedGroupSession: () => void;
   resetAll: () => void;
 }
 
@@ -57,6 +67,7 @@ const initial = {
   navByTask: {} as Record<string, TaskNavRecord>,
   pendingNavigation: null,
   nodeScrollSignal: 0,
+  linkedGroupSession: null as TaskLinkedGroupSession | null,
 };
 
 export const useTaskSidePanelStore = create<TaskSidePanelState>((set) => ({
@@ -91,5 +102,7 @@ export const useTaskSidePanelStore = create<TaskSidePanelState>((set) => ({
       return { navByTask: { ...s.navByTask, [taskId]: { ...prev, drillStack: [] } } };
     }),
   consumePendingNavigation: () => set({ pendingNavigation: null }),
+  openLinkedGroupSession: (target) => set({ linkedGroupSession: target }),
+  closeLinkedGroupSession: () => set({ linkedGroupSession: null }),
   resetAll: () => set(initial),
 }));

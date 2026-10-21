@@ -135,3 +135,23 @@ describe('taskSidePanelStore', () => {
     expect(s.nodeScrollSignal).toBe(0);
   });
 });
+describe('taskSidePanelStore.linkedGroupSession(跨域联动视图态)', () => {
+  beforeEach(() => useTaskSidePanelStore.getState().resetAll());
+
+  it('openLinkedGroupSession 记录目标;closeLinkedGroupSession 清除', () => {
+    const s = useTaskSidePanelStore.getState();
+    s.openLinkedGroupSession({ groupId: 'g-902', sessionId: 'bcs_grp_902:round:2' });
+    let after = useTaskSidePanelStore.getState();
+    expect(after.linkedGroupSession).toEqual({ groupId: 'g-902', sessionId: 'bcs_grp_902:round:2' });
+
+    after.closeLinkedGroupSession();
+    after = useTaskSidePanelStore.getState();
+    expect(after.linkedGroupSession).toBeNull();
+  });
+
+  it('resetAll 清除联动视图态', () => {
+    useTaskSidePanelStore.getState().openLinkedGroupSession({ groupId: null, sessionId: 'bcs_grp_x:1' });
+    useTaskSidePanelStore.getState().resetAll();
+    expect(useTaskSidePanelStore.getState().linkedGroupSession).toBeNull();
+  });
+});

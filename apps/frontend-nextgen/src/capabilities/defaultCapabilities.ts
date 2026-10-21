@@ -1,5 +1,6 @@
 import { normalizeOpenApiUserId, resolveOpenApiUserId } from '@/domain/userIdentity';
 import { useExternalAuthStore } from '@/stores/externalAuthStore';
+import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import {
   getCollaborationBotConversationUrl,
@@ -88,8 +89,18 @@ export const defaultCapabilities: AppCapabilities = {
     const isChatTarget = !isGroupTarget;
     const chatUrl = getCollaborationBotConversationUrl(target.botId ?? '', target.sessionId);
     const groupUrl = getCollaborationGroupConversationUrl(target.groupId ?? null, target.sessionId);
-    // 对话页内点单聊/好友节点:同页 replace(query 联动,页面 hydrate 原地切换会话)。
+    // 对话页内点群节点(跨域):打开主区联动群会话视图(覆盖层),页面零跳转 —— PRD 左右联动。
+    if (isGroupTarget && inChatHost) {
+      useTaskSidePanelStore.getState().openLinkedGroupSession({
+        groupId: target.groupId ?? null,
+        sessionId: target.sessionId,
+      });
+      return { status: 'available', value: null };
+    }
+    // 对话页内点单聊/好友节点:同页 replace(query 联动,页面 hydrate 原地切换会话);
+    // 同时收起联动群会话覆盖层(回到当前单聊)。
     if (isChatTarget && inChatHost) {
+      useTaskSidePanelStore.getState().closeLinkedGroupSession();
       umiHistory.replace(chatUrl);
       return { status: 'available', value: null };
     }

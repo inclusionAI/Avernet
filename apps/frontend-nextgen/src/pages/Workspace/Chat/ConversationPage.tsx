@@ -22,6 +22,7 @@ import type { SenderRef } from '@tc-chat/ui/es/Sender';
 import { history } from '@umijs/max';
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { ReadOnlyConversationPanel } from '../components/ReadOnlyConversationPanel';
+import { TaskLinkedGroupSessionLayer } from './components/TaskLinkedGroupSessionLayer';
 import { useBotChat } from '../hooks/useBotChat';
 import { ChatHeaderActions } from './components/ChatHeaderActions';
 import { ChatHeaderRightPanel, SessionDetailPanel } from './components/ChatHeaderRightPanel';
@@ -262,6 +263,7 @@ export default function ConversationPage(): JSX.Element {
             setMobileListOpen(false);
           }}
         />
+        <div className="relative flex h-full min-h-0 flex-1">
         {selectionIsReadonly ? (
           <ReadOnlyConversationPanel
             bot={readonly.bot}
@@ -294,6 +296,8 @@ export default function ConversationPage(): JSX.Element {
             onSidePaneIsOpenChange={headerPanels.onSidePaneIsOpenChange}
           />
         )}
+        <TaskLinkedGroupSessionLayer />
+        </div>
       </div>
     </div>
   );
