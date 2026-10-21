@@ -107,7 +107,7 @@ from agentclaw.community.core.task_queue.types import (
 )
 from agentclaw.community.log import get_logger
 
-logger = get_logger(__name__)
+logger = get_logger("agentswarm")
 
 # The publicly creatable engine registry minus the internal one (aicoding);
 # the cluster bijection and the claude_code identity-file rule are deployment

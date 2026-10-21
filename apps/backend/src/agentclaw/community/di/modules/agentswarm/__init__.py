@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import logging
+from agentclaw.community.log import get_logger
 
 from injector import Binder, Injector, Module, inject, provider, singleton
 
@@ -54,7 +54,7 @@ from agentclaw.community.plugin_api.agentswarm.llm import LLMProvider
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 
-logger = logging.getLogger(__name__)
+logger = get_logger("agentswarm")
 
 
 def _resolve_llm_api_key(secret_name: str, resolver: SecretResolver) -> str:

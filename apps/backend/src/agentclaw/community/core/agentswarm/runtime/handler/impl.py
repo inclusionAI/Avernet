@@ -29,7 +29,7 @@ from agentclaw.community.core.agentswarm.runtime.slice_lost import SliceLost
 from agentclaw.community.core.agentswarm.runtime.store import SliceStore
 from agentclaw.community.log import get_logger
 
-logger = get_logger(__name__)
+logger = get_logger("agentswarm")
 
 
 # Back-compat alias: the lost-claim signal moved to runtime/slice_lost.py
