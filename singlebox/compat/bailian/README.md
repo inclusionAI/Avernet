@@ -38,10 +38,10 @@ model credential (apart from a presence check); package installation does not.
 
 One paid task asks the engine to read a file containing a random marker that
 is absent from the prompt and return its content. The invocation has a
-240-second process-group timeout. This checks a real model/tool round trip;
-Codex uses a workspace-write filesystem sandbox with network access enabled:
-GitHub runners can reject the private loopback setup used by its offline sandbox.
-it does not certify BCS onboarding, BCN events, routing, cancellation, or
+240-second process-group timeout. Codex uses Ubuntu 22.04 and its read-only
+sandbox because newer hosted Ubuntu images can reject bwrap's uid-map setup.
+This checks a real model/tool round trip; it does not certify BCS onboarding,
+BCN events, routing, cancellation, or
 multi-turn sessions. Reports explicitly set `bcs_certified: false`. Add BCS
 end-to-end cases and a known-good engine comparison before using these results
 as a daily BCS readiness gate. No daily schedule is enabled at this stage.

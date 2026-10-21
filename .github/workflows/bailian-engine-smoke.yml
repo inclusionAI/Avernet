@@ -19,7 +19,9 @@ concurrency:
 jobs:
   smoke:
     name: ${{ matrix.engine }} / qwen3.8-flash
-    runs-on: ubuntu-latest
+    # Codex's bwrap sandbox needs unprivileged user namespaces; newer Ubuntu
+    # hosted images can reject its uid-map setup through AppArmor policy.
+    runs-on: ${{ matrix.engine == 'codex' && 'ubuntu-22.04' || 'ubuntu-latest' }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
