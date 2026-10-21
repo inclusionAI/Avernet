@@ -124,6 +124,7 @@ class QueueTaskMessageDispatcher:
             meta["attachments"] = [dataclasses.asdict(a) for a in attachments]
         if session_pending:
             meta["session_pending"] = True
+        self._stamp_queue_engine_type(meta, binding_info)
         self._stamp_caller_sandbox(meta, binding_info)
         self._enqueue_work(run_id, bot_id, session_id, meta=meta)
         logger.info(
@@ -160,6 +161,7 @@ class QueueTaskMessageDispatcher:
             meta["attachments"] = [dataclasses.asdict(a) for a in attachments]
         if session_pending:
             meta["session_pending"] = True
+        self._stamp_queue_engine_type(meta, binding_info)
         self._stamp_caller_sandbox(meta, binding_info)
         self._enqueue_work(run_id, bot_id, session_id, meta=meta)
         logger.info(
@@ -204,6 +206,7 @@ class QueueTaskMessageDispatcher:
             meta["attachments"] = [dataclasses.asdict(a) for a in attachments]
         if session_pending:
             meta["session_pending"] = True
+        self._stamp_queue_engine_type(meta, binding_info)
         self._stamp_caller_sandbox(meta, binding_info)
         self._enqueue_work(run_id, bot_id, session_id, meta=meta)
 
@@ -404,6 +407,14 @@ class QueueTaskMessageDispatcher:
             raise TooManyRequestsError(
                 bot_id=bot_id, active=depth, limit=self._max_queue_depth
             )
+
+    @staticmethod
+    def _stamp_queue_engine_type(
+        meta: dict[str, Any], binding_info: BotBindingInfo | None
+    ) -> None:
+        """把本次消息的 engine identity 写入 queue meta，供 Worker 解析 QPM。"""
+        if binding_info is not None and binding_info.engine_type:
+            meta["engine_type"] = binding_info.engine_type
 
     @staticmethod
     def _stamp_caller_sandbox(

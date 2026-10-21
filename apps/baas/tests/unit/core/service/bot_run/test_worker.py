@@ -65,6 +65,26 @@ def queue(db: DatabaseManager) -> OrmBotRunQueueRepository:
     return OrmBotRunQueueRepository(database=db)
 
 
+class _ConfigQpmRepo:
+    def __init__(self, configs: dict[str, int]):
+        self._configs = configs
+
+    def list_all(self):
+        from secbaas.community.core.repository.bot_qpm import BotQpmRecord
+
+        return [
+            BotQpmRecord(
+                id=i,
+                bot_id=bot_id,
+                qpm=qpm,
+                env=None,
+                gmt_create=None,
+                gmt_modified=None,
+            )
+            for i, (bot_id, qpm) in enumerate(self._configs.items())
+        ]
+
+
 class _QpmRepo:
     def __init__(self, bot_qpm: int = 600):
         self._bot_qpm = bot_qpm
@@ -92,6 +112,10 @@ def _qpm(bot_qpm: int = 600) -> BotConcurrencyManager:
     # 预设 _configs，避免依赖 refresh() 的 import 时序
     mgr._configs = {"bot-1": bot_qpm}
     return mgr
+
+
+def _qpm_with_configs(configs: dict[str, int]) -> BotConcurrencyManager:
+    return BotConcurrencyManager(_ConfigQpmRepo(configs), refresh_interval_seconds=999)
 
 
 class _CompletingExecutor:
@@ -174,7 +198,11 @@ class _CancellableBlockingExecutor:
 
 
 def _insert(
-    repo: OrmBotRunRepository, queue: OrmBotRunQueueRepository, bot_id: str
+    repo: OrmBotRunRepository,
+    queue: OrmBotRunQueueRepository,
+    bot_id: str,
+    *,
+    meta: dict | None = None,
 ) -> str:
     """双写：结果行（baas_bot_run）+ 队列工作项（baas_bot_run_queue）。"""
     run_id = uuid4().hex
@@ -185,7 +213,7 @@ def _insert(
         message_long="m",
         metadata=None,
     )
-    queue.insert_queue(run_id=run_id, bot_id=bot_id)
+    queue.insert_queue(run_id=run_id, bot_id=bot_id, meta=meta)
     return run_id
 
 
@@ -1134,6 +1162,48 @@ async def test_tick_enforces_global_concurrency_cap(repo, queue):
     assert worker.active_count == 0
     # 在途释放后恢复派发
     assert await worker._tick() == 2
+
+
+async def test_tick_passes_teclaw_engine_to_teclaw_default(repo, queue):
+    """teclaw exact miss uses 5000 instead of the wildcard row."""
+    _insert(repo, queue, "bot-1", meta={"engine_type": "teclaw"})
+    ex = _CompletingExecutor(repo)
+    worker = BotRequestWorker(
+        queue_repository=queue,
+        qpm_manager=_qpm_with_configs({"*": 60}),
+        executor=ex,
+        run_repository=repo,
+        lock_service=_LOCK_SERVICE,
+        post_run_callback_factories={},
+        config=BotRequestWorkerConfig(),
+    )
+
+    spy = MagicMock(wraps=queue.claim_pending_by_bot)
+    with patch.object(worker._queue, "claim_pending_by_bot", spy):
+        assert await worker._tick() == 1
+
+    assert spy.call_args.kwargs["max_running"] == 5000
+
+
+async def test_tick_passes_non_teclaw_engine_to_wildcard(repo, queue):
+    """openclaw exact miss keeps the existing wildcard concurrency."""
+    _insert(repo, queue, "bot-1", meta={"engine_type": "openclaw"})
+    ex = _CompletingExecutor(repo)
+    worker = BotRequestWorker(
+        queue_repository=queue,
+        qpm_manager=_qpm_with_configs({"*": 60}),
+        executor=ex,
+        run_repository=repo,
+        lock_service=_LOCK_SERVICE,
+        post_run_callback_factories={},
+        config=BotRequestWorkerConfig(),
+    )
+
+    spy = MagicMock(wraps=queue.claim_pending_by_bot)
+    with patch.object(worker._queue, "claim_pending_by_bot", spy):
+        assert await worker._tick() == 1
+
+    assert spy.call_args.kwargs["max_running"] == 60
 
 
 @pytest.mark.xfail(strict=False, reason="flaky in CI — resolve later")

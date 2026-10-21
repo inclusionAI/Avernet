@@ -9,7 +9,7 @@ from secbaas.community.logger import get_logger
 
 from ._orm_model import BotRunQueueModel
 from ._protocol import BotRunQueueRepository
-from ._record import BotRunQueueRecord
+from ._record import ActiveBot, BotRunQueueRecord, _parse_meta_json
 
 log = get_logger("orm")
 
@@ -58,21 +58,54 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
         return row.to_record() if row else None
 
     @with_orm_session
-    def discover_active_bots(self, limit: int = 50) -> list[str]:
-        """发现有 PENDING 工作项的 bot_id 列表（确定性顺序，避免活锁）。"""
+    def discover_active_bots(self, limit: int = 50) -> list[ActiveBot]:
+        """发现有 PENDING 工作项的 bot 摘要（确定性顺序，避免活锁）。
+
+        每个 bot 只读取最早一条 PENDING 工作项的 queue meta 提取 engine_type。
+        这样保留 ``status/env/bot_id/gmt_create`` 查询语义，同时让 Worker 在 QPM
+        解析时能区分 teclaw 与 openclaw/unknown。旧行缺 meta 字段时 engine_type
+        为 None，仍走既有通配回退。
+        """
         env = get_current_env()
-        rows = (
-            self._session.query(BotRunQueueModel.bot_id)
+        rank = (
+            func.row_number()
+            .over(
+                partition_by=BotRunQueueModel.bot_id,
+                order_by=[
+                    BotRunQueueModel.gmt_create.asc(),
+                    BotRunQueueModel.id.asc(),
+                ],
+            )
+            .label("rank")
+        )
+        subquery = (
+            self._session.query(
+                BotRunQueueModel.bot_id.label("bot_id"),
+                BotRunQueueModel.meta.label("meta"),
+                rank,
+            )
             .filter(
                 BotRunQueueModel.status == "PENDING",
                 BotRunQueueModel.env == env,
             )
-            .distinct()
-            .order_by(BotRunQueueModel.bot_id.asc())
+            .subquery()
+        )
+        rows = (
+            self._session.query(subquery.c.bot_id, subquery.c.meta)
+            .filter(subquery.c.rank == 1)
+            .order_by(subquery.c.bot_id.asc())
             .limit(limit)
             .all()
         )
-        return [r[0] for r in rows]
+        return [self._to_active_bot(row) for row in rows]
+
+    @staticmethod
+    def _to_active_bot(row) -> ActiveBot:
+        bot_id, raw_meta = row
+        engine_type = _parse_meta_json(raw_meta).get("engine_type")
+        if not isinstance(engine_type, str) or not engine_type:
+            engine_type = None
+        return ActiveBot(bot_id=bot_id, engine_type=engine_type)
 
     def _count_running(self, bot_id: str, env: str | None) -> int:
         """统计某 bot 当前 RUNNING（在途）工作项数（供全局并发上限判断）。"""

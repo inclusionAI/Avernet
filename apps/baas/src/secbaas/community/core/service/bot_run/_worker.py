@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 
 from secbaas.community.core.repository.bot_run import BotRunRepository
 from secbaas.community.core.repository.bot_run_queue import (
+    ActiveBot,
     BotRunQueueRecord,
     BotRunQueueRepository,
 )
@@ -389,8 +390,9 @@ class BotRequestWorker:
 
         bots = self._queue.discover_active_bots(self._config.discover_limit)
         dispatched = 0
-        idle_bots: list[str] = []
-        for bot_id in bots:
+        idle_bots: list[ActiveBot | str] = []
+        for item in bots:
+            bot_id, engine_type = self._active_bot_parts(item)
             if self._active >= self._config.max_concurrent:
                 logger.info(
                     "[BotRequestWorker] active bots(%s) > max concurrent(%s), skip %s",
@@ -400,7 +402,7 @@ class BotRequestWorker:
                 )
                 break
 
-            max_running = self._qpm.get_concurrency_num(bot_id)
+            max_running = self._qpm.get_concurrency_num(bot_id, engine_type=engine_type)
             if max_running is None:
                 logger.error(
                     "[BotRequestWorker] bot has no concurrency limit configured, "
@@ -433,7 +435,14 @@ class BotRequestWorker:
         self._maybe_log_cap(idle_bots)
         return dispatched
 
-    def _maybe_log_cap(self, idle_bots: list[str]) -> list[str]:
+    @staticmethod
+    def _active_bot_parts(item: ActiveBot | str) -> tuple[str, str | None]:
+        """适配 run 内的新旧 discover 返回值，保留 initialization/test seam。"""
+        if isinstance(item, ActiveBot):
+            return item.bot_id, item.engine_type
+        return item, None
+
+    def _maybe_log_cap(self, idle_bots: list[ActiveBot | str]) -> list[str]:
         """观测性：本轮「有 PENDING 但一个都没认领到」的 bot 中，若确实是被全局并发
         上限拦住的，按节流打一条 INFO，便于区分「被限流」与「没活了」。
 
@@ -449,8 +458,9 @@ class BotRequestWorker:
             return []
         self._last_cap_warn = now
         capped: list[str] = []
-        for bot_id in idle_bots:
-            max_running = self._qpm.get_concurrency_num(bot_id)
+        for item in idle_bots:
+            bot_id, engine_type = self._active_bot_parts(item)
+            max_running = self._qpm.get_concurrency_num(bot_id, engine_type=engine_type)
             if max_running is None:
                 continue
             try:

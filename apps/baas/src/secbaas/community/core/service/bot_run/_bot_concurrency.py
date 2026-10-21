@@ -21,6 +21,10 @@ from secbaas.community.logger import get_logger
 
 logger = get_logger("core-bot-run")
 
+#: teclaw 队列工作项在无 exact QPM 行时的全局并发默认值。
+#: 该值只影响已经由既有配置/BCN 链路进入队列的 teclaw，不改变路由选择。
+TECLAW_DEFAULT_CONCURRENCY = 5000
+
 
 class BotConcurrencyManager:
     """Bot QPM 配置管理器：缓存 + 定期全量刷新。
@@ -40,17 +44,27 @@ class BotConcurrencyManager:
         self._last_refresh = 0.0
         self._refresh_lock = threading.Lock()
 
-    def get_concurrency_num(self, bot_id: str) -> int | None:
-        """返回某 bot 的全局并发限制（未配置时返回 None）。
+    def get_concurrency_num(
+        self, bot_id: str, *, engine_type: str | None = None
+    ) -> int | None:
+        """返回某 bot 的全局并发限制（未配置时按引擎回退）。
+
+        解析顺序：
+        1. exact ``bot_id`` 行存在则立即返回，包括 ``0``（暂停语义）；
+        2. exact 未配置且 engine_type 为 teclaw，返回 teclaw 默认 5000，
+           不读取 ``*`` 通配，避免系统全局通配覆盖 teclaw 默认值；
+        3. 非 teclaw/unknown 继续沿用既有 ``*`` 通配回退。
 
         ``0`` 是合法的并发上限（用于暂停该 bot），必须与"未配置"区分，
         因此不能用 ``or`` 兜底到通配 ``*``。
         """
         self._maybe_refresh()
         num = self._configs.get(bot_id)
-        if num is None:
-            num = self._configs.get("*")
-        return num
+        if num is not None:
+            return num
+        if engine_type == "teclaw":
+            return TECLAW_DEFAULT_CONCURRENCY
+        return self._configs.get("*")
 
     def _maybe_refresh(self) -> None:
         now = time.monotonic()
