@@ -3,7 +3,7 @@
  */
 import { ChatLayoutPanelSlot } from '@/components/Workspace/ChatLayoutPanelSlot';
 import { PANEL_WIDTH_STORAGE_KEY } from '@/services/workspace/panelWidthMemory';
-import { describe, expect, it, jest } from '@jest/globals';
+import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom/jest-globals';
 import { render } from '@testing-library/react';
 import React from 'react';
@@ -32,13 +32,27 @@ jest.mock('@tc-chat/ui/es/ChatLayout', () => {
 });
 
 describe('ChatLayoutPanelSlot', () => {
+  beforeEach(() => {
+    mockPanelRenders = [];
+    localStorage.clear();
+  });
+
   it('displayName 为 "ChatLayout.Panel"，使 ChatLayoutRoot 识别插槽并 cloneElement 注入真实开合态', () => {
     // Root 以 child.type.displayName === 'ChatLayout.Panel' 扫描 child 识别副屏插槽。
     expect(ChatLayoutPanelSlot.displayName).toBe('ChatLayout.Panel');
   });
 
+  it('SDK 尚未测得 containerWidth 时直接以 TaskPanel 的 420px 初始宽回退', () => {
+    render(<ChatLayoutPanelSlot {...asRootInjected({ bridge: 'bridge', containerWidth: null })} />);
+    expect(mockPanelRenders.at(-1)?.panelWidth).toBe(420);
+  });
+
+  it('调用方显式提供 panelWidth 时仍优先使用调用方宽度', () => {
+    render(<ChatLayoutPanelSlot {...asRootInjected({ bridge: 'bridge', panelWidth: 500 })} />);
+    expect(mockPanelRenders.at(-1)?.panelWidth).toBe(500);
+  });
+
   it('组合分发 onIsOpenChange：Root 注入的 setter 原样透传，App 侧 onOpenStateChange 串联其后', () => {
-    mockPanelRenders = [];
     // Root 经 cloneElement 注入的 setIsPanelOpen（ResizeHandle 开合镜像）。
     const rootIsOpenChange = jest.fn();
     // App 侧真实开合态观察口。
@@ -72,7 +86,6 @@ describe('ChatLayoutPanelSlot', () => {
   });
 
   it('未注入 Root setter 时（面板独立渲染等）仅通知 App 侧观察口', () => {
-    mockPanelRenders = [];
     const onOpenStateChange = jest.fn();
     render(<ChatLayoutPanelSlot {...asRootInjected({ bridge: 'bridge', onOpenStateChange })} />);
     (mockPanelRenders.at(-1)?.onIsOpenChange as (open: boolean) => void)?.(true);

@@ -60,52 +60,37 @@ export const defaultCapabilities: AppCapabilities = {
   getLegacyVersionSwitch: (): CapabilityResult<LegacyVersionSwitchSpec | null> =>
     unsupported(null, '当前部署形态不提供版本切换'),
   openExternal: () => unsupported(null, '当前运行环境暂不支持打开外部链接'),
-  // 任务副屏 V2 会话联动(P4,spec §3.2):Open Core 默认 = 站内会话路由——群会话 /workspace/collaboration,
-  // 单聊 /workspace/chat(bot 目标 + section 由对话页按目录归属解析)。sessionId 缺失显式 unsupported。
+  // 任务副屏 V2 会话联动(P4,spec §3.2):会话宿主内只替换左侧 ChatArea，
+  // 不切真实会话/路由，避免 ChatLayout.Panel 被会话切换副作用强制关闭。
+  // 会话宿主外（如我的任务抽屉）仍按目标类型路由进入对应页面。
   navigateToConversation: (target: TaskSessionJumpTarget): CapabilityResult<null> => {
     if (!target.sessionId) {
       return unsupported(null, '会话跳转目标缺少 sessionId');
     }
-    // PRD 方案A 语义:点副屏节点 = 左右联动——左侧会话区原地切换到该节点关联会话,不整页跳转。
-    // 按当前所在会话宿主分流:同宿主目标原地切换;跨宿主(两页分离的架构约束)或宿主外(抽屉)才走路由。
     const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
-    const inGroupHost = pathname.startsWith('/workspace/collaboration');
-    const inChatHost = pathname.startsWith('/workspace/chat');
-    // 懒 require umi history:静态 import 会把 @umijs/max 拉进 jest 依赖图(esbuild 环境不变量崩),
-    // 且 capability 求值频率低;只在真正发生跳转时取模块。
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const umiHistory = (require('@umijs/max') as { history: { push: (url: string) => void; replace: (url: string) => void } }).history;
-
+    const inConversationHost =
+      pathname.startsWith('/workspace/collaboration') || pathname.startsWith('/workspace/chat');
     // 群会话形态判别以 session id 为准(与 sessionResolution 同一契约):
-    // sessionResolution 的派生会话分支可能产出 kind='unknown',此处兜底避免误判成单聊目标而整页跳走。
+    // 派生会话分支可能产出 kind='unknown',此处仍需识别 bcs_grp_ 物理形态。
     const isGroupTarget = target.kind === 'group' || target.sessionId.startsWith('bcs_grp_');
-    // 协作群页内点群节点:workspaceStore 原地选群+选会话,零路由变化。
-    if (isGroupTarget && inGroupHost) {
-      const ws = useWorkspaceStore.getState();
-      ws.selectGroup(target.groupId ?? null);
-      ws.selectSession(target.sessionId);
-      return { status: 'available', value: null };
-    }
-    const isChatTarget = !isGroupTarget;
-    const chatUrl = getCollaborationBotConversationUrl(target.botId ?? '', target.sessionId);
-    const groupUrl = getCollaborationGroupConversationUrl(target.groupId ?? null, target.sessionId);
-    // 对话页内点群节点(跨域):打开主区联动群会话视图(覆盖层),页面零跳转 —— PRD 左右联动。
-    if (isGroupTarget && inChatHost) {
-      useTaskSidePanelStore.getState().openLinkedGroupSession({
-        groupId: target.groupId ?? null,
+
+    if (inConversationHost) {
+      useTaskSidePanelStore.getState().openLinkedSession({
         sessionId: target.sessionId,
+        kind: isGroupTarget ? 'group' : target.kind,
+        groupId: isGroupTarget ? target.groupId ?? null : null,
+        botId: isGroupTarget ? null : target.botId ?? null,
       });
       return { status: 'available', value: null };
     }
-    // 对话页内点单聊/好友节点:同页 replace(query 联动,页面 hydrate 原地切换会话);
-    // 同时收起联动群会话覆盖层(回到当前单聊)。
-    if (isChatTarget && inChatHost) {
-      useTaskSidePanelStore.getState().closeLinkedGroupSession();
-      umiHistory.replace(chatUrl);
-      return { status: 'available', value: null };
-    }
-    // 跨宿主 / 会话宿主之外:路由进入对应会话页。
-    umiHistory.push(isChatTarget ? chatUrl : groupUrl);
+
+    const chatUrl = getCollaborationBotConversationUrl(target.botId ?? '', target.sessionId);
+    const groupUrl = getCollaborationGroupConversationUrl(target.groupId ?? null, target.sessionId);
+    // 懒 require umi history:静态 import 会把 @umijs/max 拉进 jest 依赖图(esbuild 环境不变量崩),
+    // 且 capability 求值频率低;只在真正发生路由跳转时取模块。
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const umiHistory = (require('@umijs/max') as { history: { push: (url: string) => void } }).history;
+    umiHistory.push(isGroupTarget ? groupUrl : chatUrl);
     return { status: 'available', value: null };
   },
   // Open Core 默认路由重定向：当前无收敛项——/space-admin、/ticket-center 由页面级 getAdminSections

@@ -19,6 +19,7 @@ describe('taskSidePanelStore', () => {
     expect(s.navByTask).toEqual({});
     expect(s.pendingNavigation).toBeNull();
     expect(s.nodeScrollSignal).toBe(0);
+    expect(s.linkedSession).toBeNull();
   });
 
   it('selectNode 更新选中、发出跳转并 +1 滚动信号', () => {
@@ -33,13 +34,17 @@ describe('taskSidePanelStore', () => {
   });
 
   it('selectNode 携带 Row1 字段(kind/groupId/botId/时间窗)透传进 pendingNavigation', () => {
-    useTaskSidePanelStore.getState().selectNode('t1', 'n3', target('sess-grp', {
-      kind: 'group',
-      groupId: 'g902',
-      nodeId: 'n3',
-      startTime: 1700000000000,
-      endTime: 1700000005000,
-    }));
+    useTaskSidePanelStore.getState().selectNode(
+      't1',
+      'n3',
+      target('sess-grp', {
+        kind: 'group',
+        groupId: 'g902',
+        nodeId: 'n3',
+        startTime: 1700000000000,
+        endTime: 1700000005000,
+      }),
+    );
 
     const nav = useTaskSidePanelStore.getState().pendingNavigation;
     expect(nav).toMatchObject({
@@ -135,23 +140,52 @@ describe('taskSidePanelStore', () => {
     expect(s.nodeScrollSignal).toBe(0);
   });
 });
-describe('taskSidePanelStore.linkedGroupSession(跨域联动视图态)', () => {
+describe('taskSidePanelStore.linkedSession(任务节点会话联动态)', () => {
   beforeEach(() => useTaskSidePanelStore.getState().resetAll());
 
-  it('openLinkedGroupSession 记录目标;closeLinkedGroupSession 清除', () => {
-    const s = useTaskSidePanelStore.getState();
-    s.openLinkedGroupSession({ groupId: 'g-902', sessionId: 'bcs_grp_902:round:2' });
-    let after = useTaskSidePanelStore.getState();
-    expect(after.linkedGroupSession).toEqual({ groupId: 'g-902', sessionId: 'bcs_grp_902:round:2' });
+  it('openLinkedSession 记录群会话目标;closeLinkedSession 清除', () => {
+    const store = useTaskSidePanelStore.getState();
+    store.openLinkedSession({
+      sessionId: 'bcs_grp_902:round:2',
+      kind: 'group',
+      groupId: 'g-902',
+      botId: null,
+    });
 
-    after.closeLinkedGroupSession();
-    after = useTaskSidePanelStore.getState();
-    expect(after.linkedGroupSession).toBeNull();
+    expect(useTaskSidePanelStore.getState().linkedSession).toEqual({
+      sessionId: 'bcs_grp_902:round:2',
+      kind: 'group',
+      groupId: 'g-902',
+      botId: null,
+    });
+
+    useTaskSidePanelStore.getState().closeLinkedSession();
+    expect(useTaskSidePanelStore.getState().linkedSession).toBeNull();
   });
 
-  it('resetAll 清除联动视图态', () => {
-    useTaskSidePanelStore.getState().openLinkedGroupSession({ groupId: null, sessionId: 'bcs_grp_x:1' });
+  it('openLinkedSession 记录 Bot 会话目标', () => {
+    useTaskSidePanelStore.getState().openLinkedSession({
+      sessionId: 'agent:main:session:s-1',
+      kind: 'bot',
+      groupId: null,
+      botId: 'bot-9',
+    });
+
+    expect(useTaskSidePanelStore.getState().linkedSession).toEqual({
+      sessionId: 'agent:main:session:s-1',
+      kind: 'bot',
+      groupId: null,
+      botId: 'bot-9',
+    });
+  });
+
+  it('resetAll 清除联动会话', () => {
+    useTaskSidePanelStore.getState().openLinkedSession({
+      sessionId: 'bcs_grp_x:1',
+      kind: 'group',
+      groupId: null,
+    });
     useTaskSidePanelStore.getState().resetAll();
-    expect(useTaskSidePanelStore.getState().linkedGroupSession).toBeNull();
+    expect(useTaskSidePanelStore.getState().linkedSession).toBeNull();
   });
 });

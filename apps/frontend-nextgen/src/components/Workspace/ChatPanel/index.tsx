@@ -4,6 +4,7 @@ import { ChatMessageSkeleton } from '@/components/Workspace/ChatPanel/ChatMessag
 import { ChatPanelHeader } from '@/components/Workspace/ChatPanel/ChatPanelHeader';
 import { ChatLayoutPanelSlot } from '@/components/Workspace/ChatLayoutPanelSlot';
 import { SidePanelCollapseButton } from '@/components/Workspace/SidePanelCollapseButton';
+import { TaskLinkedSession } from '@/components/Workspace/TaskLinkedSession';
 import { MessageEditBar, MessageQuoteBar } from '@/components/Workspace/MessageInteractionToolbar';
 import { useMessageAreaSkeleton } from '@/pages/Workspace/hooks/useMessageAreaSkeleton';
 import { useMessageEdit } from '@/pages/Workspace/hooks/useMessageEdit';
@@ -12,6 +13,7 @@ import {
   buildQuotePrompt,
   useMessageInteractions,
 } from '@/pages/Workspace/hooks/useMessageInteractions';
+import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import type { SubmitContext } from '@tc-chat/ui/es/Sender';
 import type { SenderRef } from '@tc-chat/ui/es/Sender';
@@ -63,6 +65,8 @@ export function ChatPanel({
   onToggleSidePane,
   onSidePaneIsOpenChange,
 }: ChatPanelProps) {
+  const linkedSession = useTaskSidePanelStore((state) => state.linkedSession);
+  const closeLinkedSession = useTaskSidePanelStore((state) => state.closeLinkedSession);
   const messageInteractions = useMessageInteractions({
     sessionId: target?.id,
     messages,
@@ -173,6 +177,14 @@ export function ChatPanel({
     // relative 供副屏右上「收起」悬浮钮绝对定位（SidePanelCollapseButton）。
     <section className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-background">
       <ChatLayout className="min-h-0 flex-1">
+        {linkedSession ? (
+          <TaskLinkedSession
+            target={linkedSession}
+            userId={authenticatedUserId ?? undefined}
+            onClose={closeLinkedSession}
+          />
+        ) : (
+          <>
         <ChatPanelHeader
           target={target}
           sessionTitle={sessionTitle}
@@ -258,6 +270,8 @@ export function ChatPanel({
             }}
           />
         </div>
+          </>
+        )}
 
         <ChatLayoutPanelSlot
           ref={panelRef}

@@ -337,8 +337,12 @@ const ChatBubble: React.FC<{ msg: GroupMessage }> = ({ msg }) => {
   const collapsed = collapsible && !expanded;
   const renderedContent = renderableSource(msg.content) ?? msg.content;
   const displayContent = collapsed ? truncateText(renderedContent, MESSAGE_DISPLAY_CHAR_LIMIT) : renderedContent;
+  const timestampMs = new Date(msg.timestamp).getTime();
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '2px 0' }}>
+    <div
+      data-ts={Number.isNaN(timestampMs) ? undefined : timestampMs}
+      style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '2px 0' }}
+    >
       <div
         style={{
           width: 28,
@@ -468,7 +472,8 @@ export const GroupSessionView: React.FC<{
   apiBaseUrl: string;
   userId?: string;
   onBack: () => void;
-}> = ({ node, bcsBaseUrl, apiBaseUrl, userId, onBack }) => {
+  backLabel?: string;
+}> = ({ node, bcsBaseUrl, apiBaseUrl, userId, onBack, backLabel = '返回任务节点' }) => {
   const groupId = node.groupId;
   const sessionId = node.sessionId;
   // 下钻通道按物理 session 形态判定:协作群 session_id 形如 bcs_grp_xxx:round 或存在 groupId。
@@ -616,7 +621,7 @@ export const GroupSessionView: React.FC<{
       >
         <button
           type="button"
-          aria-label="返回任务节点"
+          aria-label={backLabel}
           onClick={onBack}
           style={{
             display: 'inline-flex',

@@ -1,11 +1,13 @@
 import { ChatLayoutPanelSlot } from '@/components/Workspace/ChatLayoutPanelSlot';
 import { SidePanelCollapseButton } from '@/components/Workspace/SidePanelCollapseButton';
+import { TaskLinkedSession } from '@/components/Workspace/TaskLinkedSession';
 import { filterVisibleGroupMessages } from '@/pages/Workspace/hooks/groupChatHistoryUtils';
 import { useCollabPanel } from '@/pages/Workspace/hooks/useCollabPanel';
 import { useGroupTaskExecution } from '@/pages/Workspace/hooks/useGroupTaskExecution';
 import { useMessageAreaSkeleton } from '@/pages/Workspace/hooks/useMessageAreaSkeleton';
 import { useMessageEdit } from '@/pages/Workspace/hooks/useMessageEdit';
 import { useMessageInteractions } from '@/pages/Workspace/hooks/useMessageInteractions';
+import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import type { MentionConfig } from '@tc-chat/ui';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import { useEffect, useMemo, useState } from 'react';
@@ -72,6 +74,8 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     userIdentityId,
     userIdentityName,
   } = props;
+  const linkedSession = useTaskSidePanelStore((state) => state.linkedSession);
+  const closeLinkedSession = useTaskSidePanelStore((state) => state.closeLinkedSession);
 
   const collabPanel = useCollabPanel(
     session,
@@ -158,6 +162,10 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     // relative 供副屏右上「收起」悬浮钮绝对定位（SidePanelCollapseButton）。
     <section className="relative flex min-w-0 flex-1 flex-col bg-background">
       <ChatLayout className="min-h-0 flex-1">
+        {linkedSession ? (
+          <TaskLinkedSession target={linkedSession} userId={userIdentityId ?? undefined} onClose={closeLinkedSession} />
+        ) : (
+          <>
         <GroupHeader
           selectedGroup={group}
           selectedSession={session}
@@ -256,6 +264,8 @@ export function GroupChatPane(props: GroupChatPaneProps) {
             />
           </div>
         ) : null}
+          </>
+        )}
         {/* 协作群副屏口径：加宽至 480（不动 WORKSPACE_RIGHT_PANEL_LAYOUT 共用宽度）；
             不随点外收起，仅顶栏「副屏」钮/悬浮「收起」钮关闭。 */}
         <ChatLayoutPanelSlot

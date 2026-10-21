@@ -30,10 +30,17 @@ export interface TaskNavTarget {
   endTime?: number | null;
 }
 
-/** 跨域联动视图目标:对话页主区的群会话覆盖层(PRD 左右联动,页面不跳转)。 */
-export interface TaskLinkedGroupSession {
-  groupId: string | null;
+/**
+ * 任务节点对应的联动会话目标。
+ *
+ * 会话宿主只替换 ChatArea 内容，不切真实路由/会话，因此右侧 TaskPanel 的 tab、
+ * 下钻栈与宽度都保持不变。kind 以 sessionId 的 bcs_grp_ 形态作群聊兜底。
+ */
+export interface TaskLinkedSessionTarget {
   sessionId: string;
+  kind: 'group' | 'bot' | 'friend' | 'unknown';
+  groupId?: string | null;
+  botId?: string | null;
 }
 
 export interface TaskSidePanelState {
@@ -45,15 +52,15 @@ export interface TaskSidePanelState {
   pendingNavigation: TaskNavTarget | null;
   /** 选中信号计数器（+1 = 消息流滚动定位一次），demo nodeScrollSignal 同源 */
   nodeScrollSignal: number;
-  /** 对话页左侧的联动群会话覆盖层(跨域目标);null = 未打开 */
-  linkedGroupSession: TaskLinkedGroupSession | null;
+  /** 会话宿主左侧 ChatArea 的联动会话；null = 展示宿主当前真实会话 */
+  linkedSession: TaskLinkedSessionTarget | null;
   setActiveTask: (taskId: string) => void;
   selectNode: (taskId: string, nodeId: string, target: TaskNavTarget | null) => void;
   drillInto: (taskId: string, nodeId: string, target: TaskNavTarget | null) => void;
   backToOverview: (taskId: string) => void;
   consumePendingNavigation: () => void;
-  openLinkedGroupSession: (target: TaskLinkedGroupSession) => void;
-  closeLinkedGroupSession: () => void;
+  openLinkedSession: (target: TaskLinkedSessionTarget) => void;
+  closeLinkedSession: () => void;
   resetAll: () => void;
 }
 
@@ -67,7 +74,7 @@ const initial = {
   navByTask: {} as Record<string, TaskNavRecord>,
   pendingNavigation: null,
   nodeScrollSignal: 0,
-  linkedGroupSession: null as TaskLinkedGroupSession | null,
+  linkedSession: null as TaskLinkedSessionTarget | null,
 };
 
 export const useTaskSidePanelStore = create<TaskSidePanelState>((set) => ({
@@ -102,7 +109,7 @@ export const useTaskSidePanelStore = create<TaskSidePanelState>((set) => ({
       return { navByTask: { ...s.navByTask, [taskId]: { ...prev, drillStack: [] } } };
     }),
   consumePendingNavigation: () => set({ pendingNavigation: null }),
-  openLinkedGroupSession: (target) => set({ linkedGroupSession: target }),
-  closeLinkedGroupSession: () => set({ linkedGroupSession: null }),
+  openLinkedSession: (target) => set({ linkedSession: target }),
+  closeLinkedSession: () => set({ linkedSession: null }),
   resetAll: () => set(initial),
 }));

@@ -57,8 +57,8 @@ export interface HelpLink {
 
 /**
  * 任务副屏 V2 会话联动目标(P4,spec §3.2):节点 → 关联会话跳转。
- * kind=group 需带 groupId(协作群页直选);kind=bot/friend 走 bot 会话路由。
- * Open Core 默认实现 = 站内会话路由;内部 overlay 可覆盖为平台级导航。
+ * kind=group 应尽量带 groupId；kind=bot/friend 应尽量带 botId。
+ * Open Core 默认实现:在会话宿主内原位联动左侧会话内容，宿主外再走站内路由。
  */
 export interface TaskSessionJumpTarget {
   sessionId: string;

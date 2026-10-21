@@ -6,11 +6,10 @@
 // - CollaborationPage 承接旧协作群分支,GroupWorkspaceArea 保持挂载。
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { conversationInitialState, useConversationStore } from '@/stores/conversationStore';
-import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const managedBot: ChatBotView = {
   botId: 'bot-a:1',
@@ -407,30 +406,6 @@ describe('ConversationPage(Task 8 组合页)', () => {
     // 只读面板(真实组件)接管:暂无选中可读会话的空态;交互舞台的 ChatPanel 不出现。
     expect(await screen.findByText('请选择一个好友用户会话')).toBeInTheDocument();
     expect(screen.queryByTestId('interactive-stage')).not.toBeInTheDocument();
-  });
-
-  it('任务联动:副屏点群节点后主区原位渲染群会话覆盖层,关闭返回当前会话(页面不跳转)', async () => {
-    useTaskSidePanelStore.getState().resetAll();
-    useTaskSidePanelStore.getState().openLinkedGroupSession({
-      groupId: 'g-902',
-      sessionId: 'bcs_grp_902:round:2',
-    });
-    // 覆盖层内 GroupSessionView 走 raw fetch:空信封落(成员兜底 + 空消息)
-    (globalThis as unknown as { fetch: jest.Mock }).fetch = jest.fn(() =>
-      Promise.resolve({
-        ok: true,
-        json: async () => ({ code: 0, message: 'ok', data: null, request_id: 'r' }),
-      }),
-    );
-
-    render(<ConversationPage />);
-    expect(screen.getByText(/任务联动 · 群会话/)).toBeInTheDocument();
-
-    act(() => {
-      useTaskSidePanelStore.getState().closeLinkedGroupSession();
-    });
-    await waitFor(() => expect(screen.queryByText(/任务联动 · 群会话/)).toBeNull());
-    useTaskSidePanelStore.getState().resetAll();
   });
 });
 

@@ -6,7 +6,8 @@ import { GroupChatPane, resolveSender } from '@/pages/Workspace/components/Group
 import { GroupChatBubble, ThinkingBubble } from '@/pages/Workspace/components/GroupChatPane/GroupChatBubble';
 import type { GroupChatQuestionsModel } from '@/pages/Workspace/hooks/useGroupChatQuestions';
 import type { GroupChatState } from '@/services/workspace/groupChatProvider';
-import { describe, expect, it, jest } from '@jest/globals';
+import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
+import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import type { PanelHandle } from '@tc-chat/core';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
@@ -17,6 +18,7 @@ import { MemoryRouter } from 'react-router-dom';
 // Stub SDK UI primitives: tests focus on GroupChatPane header/empty dispatch + Sender presence,
 // not on SDK bubble/markdown rendering. Stubs avoid pulling ESM @tc-chat/ui into jsdom.
 let mockBubbleRenders: Array<Record<string, unknown>> = [];
+let mockPanelRenderCount = 0;
 jest.mock('@tc-chat/ui/es/Bubble', () => ({
   Bubble: (props: Record<string, unknown>) => {
     mockBubbleRenders.push(props);
@@ -96,8 +98,13 @@ jest.mock('@tc-chat/ui/es/SystemNotice', () => ({
 // 与 test/services/admin/* 同款写法：仅满足模块解析，不触发真实 Provider。
 jest.mock('@tc-chat/adapters', () => ({}));
 jest.mock('@tc-chat/ui/es/ChatLayout', () => {
+  const { forwardRef } = require('react');
   const ChatLayout = ({ children }: { children?: React.ReactNode }) => <div>{children}</div>;
-  ChatLayout.Panel = () => null;
+  ChatLayout.Panel = forwardRef((_props: Record<string, unknown>, ref: unknown) => {
+    void ref;
+    mockPanelRenderCount += 1;
+    return <div data-testid="panel-slot" />;
+  });
   return { ChatLayout };
 });
 jest.mock('@tc-chat/ui/es/MarkdownRender', () => ({ aixUiPlugin: {}, fileRefPlugin: {} }));
@@ -107,6 +114,21 @@ jest.mock('@/components/ui/Tooltip', () => ({
   TooltipTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   TooltipContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
+jest.mock('@/components/Workspace/TaskLinkedSession', () => ({
+  TaskLinkedSession: ({ target, onClose }: { target: { sessionId: string }; onClose: () => void }) => (
+    <div data-testid="task-linked-session">
+      {target.sessionId}
+      <button type="button" onClick={onClose}>
+        close-linked
+      </button>
+    </div>
+  ),
+}));
+
+beforeEach(() => {
+  useTaskSidePanelStore.getState().resetAll();
+  mockPanelRenderCount = 0;
+});
 
 const supportState: GroupChatState = { phase: 'ready', error: null };
 
@@ -298,6 +320,27 @@ describe('GroupChatPane ask_user 问答入口', () => {
 });
 
 describe('GroupChatPane', () => {
+  it('任务节点联动只替换左侧群会话内容，右侧 ChatLayout.Panel 保持挂载', () => {
+    useTaskSidePanelStore.getState().openLinkedSession({
+      sessionId: 'bcs_grp_902:round:2',
+      kind: 'group',
+      groupId: 'g-902',
+      botId: null,
+    });
+
+    renderPane();
+
+    expect(screen.getByTestId('task-linked-session')).toHaveTextContent('bcs_grp_902:round:2');
+    expect(screen.queryByRole('group', { name: /主站协作群/ })).not.toBeInTheDocument();
+    expect(screen.getByTestId('panel-slot')).toBeInTheDocument();
+    expect(mockPanelRenderCount).toBeGreaterThan(0);
+    const linkedPanelRenderCount = mockPanelRenderCount;
+
+    fireEvent.click(screen.getByRole('button', { name: 'close-linked' }));
+    expect(screen.queryByTestId('task-linked-session')).not.toBeInTheDocument();
+    expect(screen.getByRole('group', { name: /主站协作群/ })).toBeInTheDocument();
+    expect(mockPanelRenderCount).toBeGreaterThan(linkedPanelRenderCount);
+  });
   it('header 呈现群身份 chip（群名），不显会话标题（artboard-010 口径，会话由 Key 胶囊表达）', () => {
     renderPane();
     expect(screen.getByRole('group', { name: /主站协作群/ })).toBeInTheDocument();

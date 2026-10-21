@@ -9,12 +9,12 @@
  *  - 空标题兜底为「任务」。
  */
 import type { TaskRecord } from '@/domain/tasks/models';
-import { PANEL_WIDTH_STORAGE_KEY } from '@/services/workspace/panelWidthMemory';
 import {
   buildRelayRootExecutionMessage,
   buildTaskLaunchMessage,
   buildTaskPanelAixUI,
 } from '@/services/tasks/taskPanelMessage';
+import { PANEL_WIDTH_STORAGE_KEY } from '@/services/workspace/panelWidthMemory';
 
 const backendRelayInstruction = [
   '[task-execute]',
@@ -132,8 +132,8 @@ describe('buildTaskLaunchMessage', () => {
                 root_execution_instruction: backendRelayInstruction,
               }
             : mode
-              ? { orchestration_mode: mode }
-              : {},
+            ? { orchestration_mode: mode }
+            : {},
       },
     } as TaskRecord);
 
@@ -158,9 +158,7 @@ describe('buildTaskLaunchMessage', () => {
       task_info: { execution_config: { orchestration_mode: 'relay', root_node_id: 'root-1' } },
     } as TaskRecord;
 
-    expect(() => buildTaskLaunchMessage('<AixUI-panel/>', invalid)).toThrow(
-      'Backend 未返回 relay 根节点执行指令',
-    );
+    expect(() => buildTaskLaunchMessage('<AixUI-panel/>', invalid)).toThrow('Backend 未返回 relay 根节点执行指令');
   });
 });
 
@@ -169,6 +167,14 @@ describe('buildTaskPanelAixUI defaultWidth(V2 副屏初始宽 420,拖宽记忆�
 
   it('无拖宽记忆:tab 声明携带 defaultWidth: 420(PRD 初始宽,spec §3.1-2)', () => {
     const raw = buildTaskPanelAixUI('t-dw', '任务宽', { taskId: 't-dw' });
+    const tabMatch = raw.match(/tab='([^']+)'/);
+    expect(tabMatch).not.toBeNull();
+    expect(JSON.parse(tabMatch![1]).defaultWidth).toBe(420);
+  });
+
+  it('共享右侧面板记忆为 350 时,任务 tab 仍使用 PRD 默认宽 420', () => {
+    localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, '350');
+    const raw = buildTaskPanelAixUI('t-dw-narrow', '任务宽', { taskId: 't-dw-narrow' });
     const tabMatch = raw.match(/tab='([^']+)'/);
     expect(tabMatch).not.toBeNull();
     expect(JSON.parse(tabMatch![1]).defaultWidth).toBe(420);

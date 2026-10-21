@@ -41,9 +41,10 @@ describe('panelWidthMemory(副屏拖拽宽度记忆)', () => {
     expect(resolveTaskPanelDefaultWidth()).toBe(560);
   });
 
-  it('用户拖窄(如 350)同样被记忆,不强制抬回 420', () => {
+  it('共享宽度记忆小于 420 时仍按 TaskPanel 的 PRD 默认宽打开', () => {
     persistPanelWidthPercent('35%', 1000);
-    expect(resolveTaskPanelDefaultWidth()).toBe(350);
+    expect(readPersistedPanelWidthPx()).toBe(350);
+    expect(resolveTaskPanelDefaultWidth()).toBe(420);
   });
 
   it('非法输入:百分比/容器宽无效时忽略,不清掉既有记忆', () => {

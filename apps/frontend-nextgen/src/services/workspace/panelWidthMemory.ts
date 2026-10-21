@@ -44,7 +44,13 @@ export function persistPanelWidthPercent(percent: unknown, containerWidth: unkno
   window.localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(clampRange((parsed / 100) * container)));
 }
 
-/** 任务 tab openTab 时的 defaultWidth:有拖宽记忆恢复记忆值,无记忆回落初始 420。 */
+/**
+ * 任务 tab openTab 时的 defaultWidth。
+ *
+ * 存储 key 也被文件/详情等普通右侧面板复用，它们允许收窄到 320px；不能把这类
+ * 较窄记忆直接套到 TaskPanel，否则会覆盖 PRD 的 420px 默认宽。已主动扩宽的记忆
+ * 仍继续恢复，避免切任务后丢失用户的扩宽结果。
+ */
 export function resolveTaskPanelDefaultWidth(): number {
-  return readPersistedPanelWidthPx() ?? TASK_PANEL_INITIAL_WIDTH;
+  return Math.max(readPersistedPanelWidthPx() ?? TASK_PANEL_INITIAL_WIDTH, TASK_PANEL_INITIAL_WIDTH);
 }

@@ -1,7 +1,8 @@
 /** @jest-environment jsdom */
 import { ChatPanel, resolveSingleSender } from '@/components/Workspace/ChatPanel/index';
 import type { ConversationTarget } from '@/services/workspace/workspaceModel';
-import { describe, expect, it, jest } from '@jest/globals';
+import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
+import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import type { ChatBridge } from '@tc-chat/core';
 import type { CommandConfig, SenderRef } from '@tc-chat/ui/es/Sender';
 import '@testing-library/jest-dom';
@@ -93,6 +94,16 @@ jest.mock('@tc-chat/ui/es/Sender', () => {
 jest.mock('@tc-chat/ui/es/SystemNotice', () => ({
   SystemNotice: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
 }));
+jest.mock('@/components/Workspace/TaskLinkedSession', () => ({
+  TaskLinkedSession: ({ target, onClose }: { target: { sessionId: string }; onClose: () => void }) => (
+    <div data-testid="task-linked-session">
+      {target.sessionId}
+      <button type="button" onClick={onClose}>
+        close-linked
+      </button>
+    </div>
+  ),
+}));
 
 const demoTarget: ConversationTarget = {
   id: 'octopus',
@@ -124,6 +135,46 @@ const baseProps = {
 };
 
 describe('ChatPanel interactive', () => {
+  beforeEach(() => {
+    useTaskSidePanelStore.getState().resetAll();
+    mockPanelRenders.length = 0;
+  });
+
+  it('任务节点联动只替换左侧会话内容，右侧 ChatLayout.Panel 保持挂载', () => {
+    useTaskSidePanelStore.getState().openLinkedSession({
+      sessionId: 'agent:main:session:s-1',
+      kind: 'bot',
+      groupId: null,
+      botId: 'bot-9',
+    });
+
+    render(
+      <ChatPanel
+        target={botModeTarget as any}
+        mode="bot"
+        interactive
+        connectionStatus="connected"
+        messages={[]}
+        isRequesting={false}
+        isLoadingMessages={false}
+        retryCount={0}
+        supportState={{ phase: 'ready', error: null }}
+        onSend={() => {}}
+        onStop={() => {}}
+        onReconnect={() => {}}
+        {...baseProps}
+      />,
+    );
+
+    expect(screen.getByTestId('task-linked-session')).toHaveTextContent('agent:main:session:s-1');
+    expect(screen.queryByTestId('sender')).not.toBeInTheDocument();
+    expect(mockPanelRenders).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'close-linked' }));
+    expect(screen.queryByTestId('task-linked-session')).not.toBeInTheDocument();
+    expect(screen.getByTestId('sender')).toBeInTheDocument();
+    expect(mockPanelRenders.length).toBeGreaterThanOrEqual(2);
+  });
   it('副屏镜像开时渲染右上「收起」悬浮钮并触发 toggle；未开或未提供 toggle 时不渲染', () => {
     const onToggleSidePane = jest.fn();
     const { rerender } = render(

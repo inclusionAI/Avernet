@@ -17,12 +17,11 @@
  * 收起、仅显式信号关闭；转发 SDK 前剥离。
  */
 import { useWorkspacePanelDismiss } from '@/hooks/useWorkspacePanelDismiss';
-import { persistPanelWidthPercent } from '@/services/workspace/panelWidthMemory';
+import { persistPanelWidthPercent, TASK_PANEL_INITIAL_WIDTH } from '@/services/workspace/panelWidthMemory';
 import type { PanelHandle } from '@tc-chat/core';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import type { ChatLayoutPanelProps } from '@tc-chat/ui/es/ChatLayout/types';
 import { forwardRef, useCallback, useEffect, useId, useRef, useState } from 'react';
-import { WORKSPACE_RIGHT_PANEL_LAYOUT } from './workspacePanelLayout';
 
 /** Root cloneElement 注入的内部 props（公开类型未声明，运行时存在）。 */
 type ChatLayoutPanelInjectedProps = {
@@ -86,10 +85,14 @@ export const ChatLayoutPanelSlot = forwardRef<PanelHandle, ChatLayoutPanelSlotPr
     },
     [rootIsOpenChange, onOpenStateChange],
   );
+  // containerWidth 尚未由 SDK ResizeObserver 测得时，SDK 会忽略 active tab 的
+  // defaultWidth，直接使用 panelWidth 回退。这里必须同步使用 TaskPanel 的 420px
+  // 初始宽，否则面板会先以通用 380px 打开，直到主会话变化触发重新测量才变宽。
+  const fallbackPanelWidth = injected.panelWidth ?? TASK_PANEL_INITIAL_WIDTH;
   return (
     <ChatLayoutPanelWithInjectedProps
       {...injected}
-      panelWidth={injected.panelWidth ?? WORKSPACE_RIGHT_PANEL_LAYOUT.defaultWidth}
+      panelWidth={fallbackPanelWidth}
       ref={setHandle}
       className={[injected.className, 'workspace-sdk-panel', panelClass].filter(Boolean).join(' ')}
       onIsOpenChange={handleIsOpenChange}

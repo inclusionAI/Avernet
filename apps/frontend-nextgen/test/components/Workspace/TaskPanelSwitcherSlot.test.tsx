@@ -3,11 +3,11 @@
 // 全局 activeTaskId 不得让非活跃任务面板显示别的任务为"当前"。
 // 拖宽记忆验收:切任务 openTab 的 defaultWidth 恢复用户拖过的宽度,无记忆回落 420。
 import { TaskPanelSwitcherSlot } from '@/components/Workspace/TaskPanelSwitcherSlot';
-import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
-import { persistPanelWidthPercent } from '@/services/workspace/panelWidthMemory';
 import { chatBridge } from '@/services/workspace/chatBridge';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { persistPanelWidthPercent } from '@/services/workspace/panelWidthMemory';
+import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 
 // chatBridge.openPanelTab 用实例 spyOn(模块 mock factory 引用非全局 jest 会 TDZ,见既有备忘)。
 jest.mock('@/hooks/useTaskSwitcherTasks', () => ({
@@ -37,7 +37,9 @@ describe('TaskPanelSwitcherSlot(I4)', () => {
   });
 
   it('切走本 tab 任务后,由宿主以新 params 重挂(currentTaskId 跟随面板实例)', () => {
-    const { rerender } = render(<TaskPanelSwitcherSlot currentTaskId="task-current" params={{ taskId: 'task-current' }} />);
+    const { rerender } = render(
+      <TaskPanelSwitcherSlot currentTaskId="task-current" params={{ taskId: 'task-current' }} />,
+    );
     rerender(<TaskPanelSwitcherSlot currentTaskId="task-switched" params={{ taskId: 'task-switched' }} />);
     // 横条跟随面板实例的 taskId,而非全局 activeTaskId
     expect(screen.queryByText('别的面板的任务')).toBeNull();
@@ -58,6 +60,15 @@ describe('TaskPanelSwitcherSlot 切任务 openTab 宽度(拖宽记忆)', () => {
   };
 
   it('无拖宽记忆时,openTab defaultWidth 回落 PRD 初始宽 420', () => {
+    render(<TaskPanelSwitcherSlot currentTaskId="task-current" params={{ taskId: 'task-current' }} />);
+    switchToOtherTask();
+    expect(openPanelTabMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'task-task-other', defaultWidth: 420 }),
+    );
+  });
+
+  it('共享右侧面板曾收窄至 350 时,任务 tab 仍按 PRD 默认宽 420 打开', () => {
+    persistPanelWidthPercent('35%', 1000);
     render(<TaskPanelSwitcherSlot currentTaskId="task-current" params={{ taskId: 'task-current' }} />);
     switchToOtherTask();
     expect(openPanelTabMock).toHaveBeenCalledWith(
