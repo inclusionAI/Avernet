@@ -1,0 +1,26 @@
+// @vitest-environment node
+import express from "express";
+import { expect, it, vi } from "vitest";
+import { createSessionRecoveryRouter } from "../session-recovery.js";
+
+it("logs a redacted creation failure while keeping the HTTP response generic", async () => {
+  const fixtureValue = ["recovery", "fixture", "private", "credential", "123456"].join("-");
+  const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const service = { create: vi.fn().mockRejectedValue(new Error(`OSS PutObject failed: Authorization: Bearer ${fixtureValue}`)) };
+  const app = express(); app.use(createSessionRecoveryRouter({ service: service as never }));
+  const server = await new Promise<ReturnType<typeof app.listen>>(resolve => { const opened = app.listen(0, "127.0.0.1", () => resolve(opened)); });
+  try {
+    const response = await fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}/internal/monitoring/session-recoveries`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ event_id: "event-fixture" }),
+    });
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body.error).toBe("recovery_unavailable");
+    expect(JSON.stringify(body)).not.toContain("OSS PutObject");
+    expect(log).toHaveBeenCalledOnce();
+    const record = JSON.parse(log.mock.calls[0][1]);
+    expect(record).toMatchObject({ method: "POST", path: "/internal/monitoring/session-recoveries" });
+    expect(record.error).toContain("OSS PutObject failed");
+    expect(record.error).not.toContain(fixtureValue);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); log.mockRestore(); }
+});

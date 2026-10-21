@@ -630,31 +630,9 @@ it("creates recovery tasks using the existing evolution-scoped artifact credenti
   expect(task.timeline.some(event => event.kind === "created")).toBe(true);
 });
 
-it("logs a redacted creation failure while keeping the HTTP response generic", async () => {
-  const fixtureValue = ["recovery", "fixture", "private", "credential", "123456"].join("-");
-  const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
-  artifactStore.putObject = async () => { throw new Error(`OSS PutObject failed: Authorization: Bearer ${fixtureValue}`); };
-  const app = express(); app.use(createSessionRecoveryRouter({ service }));
-  const server = await new Promise<ReturnType<typeof app.listen>>(resolve => { const opened = app.listen(0, "127.0.0.1", () => resolve(opened)); });
-  try {
-    const response = await fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}/internal/monitoring/session-recoveries`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request),
-    });
-    expect(response.status).toBe(503);
-    const body = await response.json();
-    expect(body.error).toBe("recovery_unavailable");
-    expect(JSON.stringify(body)).not.toContain("OSS PutObject");
-    expect(log).toHaveBeenCalledOnce();
-    const record = JSON.parse(log.mock.calls[0][1]);
-    expect(record).toMatchObject({ method: "POST", path: "/internal/monitoring/session-recoveries" });
-    expect(record.error).toContain("OSS PutObject failed");
-    expect(record.error).not.toContain(fixtureValue);
-  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); log.mockRestore(); }
-});
-
 it("allows an approved business action without a prewritten command, and audits each actual step", async () => {
   let task = await toPlan(await create());
-  const actionPlan: RecoveryPlan = { ...plan, actions: [{ actionId: "fix", summary: "修正本任务配置", risk: "局部修改", verification: "读取配置确认", rollback: "恢复原值" }] };
+  const actionPlan: RecoveryPlan = { ...plan, actions: [{ actionId: "fix", operationScope: { operation: "file.write", target: "/workspace/memory.md" }, summary: "修正本任务配置", risk: "局部修改", verification: "读取配置确认", rollback: "恢复原值" }] };
   await agent.report(task, { kind: "plan", phase: "plan", plan: actionPlan });
   task = await current(task.taskId);
   const operation = { clientRequestId: "actual-shell-1", purpose: "落实获批配置调整", actionId: "fix", command: "printf first-step" };
@@ -691,6 +669,7 @@ it("accepts actual Engine parameters independent of the saved execution referenc
     ...actual, upload: { ...actual.upload, content: actual.upload.content },
   } });
   expect((await current(task.taskId)).plan!.actions[0].engineOperation).toEqual(reference);
+  expect(await agent.apply(await current(task.taskId), { clientRequestId: "shell-fallback", purpose: "通过受控Shell落实同一文件调整", actionId: "fix", command: "printf repaired > /workspace/memory.md" })).toMatchObject({ status: "succeeded" });
 });
 it("lets an approved adjustment use an Engine request instead of the reference Shell", async () => {
   let task = await toPlan(await create()); await agent.report(task, { kind: "plan", phase: "plan", plan });
@@ -988,4 +967,30 @@ it("leaves unmarked legacy recovery tasks unclaimed rather than guessing from th
   await reconcileAgentExecutions({ controlPlaneEnvironment: "pre", db, repo, handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais }, nowSeconds: () => Math.floor(now / 1000) });
   expect(ais.getJobStatusDetail).not.toHaveBeenCalled(); expect(ais.stopExecution).not.toHaveBeenCalled();
   expect((await current(task.taskId)).execution).toEqual(task.execution);
+});
+
+it.each([true, false])("accepts AIVision delivery from the current actual receipt, initial=%s", async initial => {
+  target = { ...target, provider: "teclaw", activeEngine: "teclaw" };
+  let task = await create("automatic", { target: { ...request.target, engine: "TE" } });
+  const read = vi.fn().mockResolvedValue({ traces: [] });
+  (agent as any).deps.trajectory = { read };
+  if (initial) task = await toObserve(task);
+  else {
+    const basis = await agent.trajectoryRead(task, { clientRequestId: "te-assess", purpose: "读取原任务的环境阻塞证据" });
+    await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "environment", summary: "需要先解决环境阻塞", evidence_ids: [basis.evidenceId] });
+    task = await current(task.taskId);
+    await agent.report(task, { kind: "plan", phase: "plan", plan: { ...plan, actions: [], owner_cooperation: [] } });
+    now += 1000;
+    await agent.retryMessage(await current(task.taskId), { clientRequestId: "after-fix", purpose: "环境处理后继续原任务", message: "请继续原任务" });
+    await agent.report(await current(task.taskId), { kind: "apply", phase: "apply", applicable: true, success: true, summary: "环境已核实，已发送继续指引" });
+    task = await current(task.taskId); expect(task.delivery).toBeUndefined();
+  }
+  const sent = [...task.timeline].reverse().find(event => typeof (event.payload.result as any)?.initial_message === "boolean")!;
+  const receipt = (await agent.toolGet(task, String(sent.payload.tool_call_id))).result as any;
+  read.mockResolvedValue({ delivery_confirmed: true, delivery: { location: "trace.input", marker: "verified" }, traces: [] });
+  const evidence = await agent.trajectoryRead(task, { clientRequestId: "te-observe", purpose: "从真实用户轨迹核实触达" });
+  expect(read).toHaveBeenCalledWith(expect.objectContaining({ messageMarker: `[会话自愈：${receipt.delivery_key}]\n`, notBeforeMs: receipt.started_at_ms }));
+  await agent.report(await current(task.taskId), { kind: "observation", phase: initial ? "observe" : "verify", judgment: {
+    delivery: "confirmed", response: "acted", effect: "recovered", summary: "完整轨迹确认执行恢复", evidence_ids: [evidence.evidenceId] } });
+  expect((await current(task.taskId)).status).toBe("completed");
 });

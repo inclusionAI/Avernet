@@ -18,3 +18,9 @@ it("does not confirm delivery from a quoted marker or infer failure from missing
   const result = await new RecoverySessionReader({ request, executeShell: vi.fn() }).read({ target, sessionKey: "original", deliveryKey: "send-1" });
   expect(result).toMatchObject({ delivery_confirmed: false, missing_message_is_failure: false, coverage: "api_window" });
 });
+
+it("preserves the real TE session 404 instead of disguising it as a service outage", async () => {
+  const request = vi.fn().mockResolvedValue({ status: 404, body: { detail: "Session not found" } });
+  await expect(new RecoverySessionReader({ request, executeShell: vi.fn() }).read({ target, sessionKey: "missing", deliveryKey: "send" }))
+    .rejects.toMatchObject({ status: 404, code: "original_session_not_found", message: expect.stringContaining("Session not found") });
+});

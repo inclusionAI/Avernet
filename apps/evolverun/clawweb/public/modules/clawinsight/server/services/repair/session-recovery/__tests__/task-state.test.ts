@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { decideRecoveryPlan, observeRecovery, recoveryTaskResult, resumeRecoveryObservation, submitRecoveryPlan, terminateRecoveryTask } from "../task-state.js";
 import type { RecoveryPlan, RecoveryTaskState } from "../task-contracts.js";
+import { assertActionScope, engineActionScope } from "../action-scope.js";
 
 function state(): RecoveryTaskState {
   return { schemaVersion: "session-recovery-task/v1", taskId: "SR-1", level: "approval", status: "running",
@@ -53,7 +54,7 @@ describe("session recovery business lifecycle", () => {
 });
 
 it("approves primary adjustments without requiring technical execution details", () => {
-  const abstract: RecoveryPlan = { ...plan, actions: [{ actionId: "delete-duplicate", summary: "删除指定重复任务", risk: "保留正常任务", verification: "确认重复项已不存在", rollback: "恢复原配置" }] };
+  const abstract: RecoveryPlan = { ...plan, actions: [{ actionId: "delete-duplicate", operationScope: { operation: "cron.delete", target: "duplicate" }, summary: "删除指定重复任务", risk: "保留正常任务", verification: "确认重复项已不存在", rollback: "恢复原配置" }] };
   const value = submitRecoveryPlan({ ...state(), phase: "plan" }, abstract, 100);
   expect(value.status).toBe("waiting_owner");
   expect(value.plan!.actions).toEqual(abstract.actions);
@@ -73,4 +74,44 @@ it.each(["running", "waiting_owner", "waiting_effect"] as const)("terminates %s 
   expect(recoveryTaskResult(stopped)).toMatchObject({ status: "canceled", waiting_reason: null, effect: "unknown", result_text: expect.stringContaining("用户停止") });
   expect(() => resumeRecoveryObservation(stopped)).toThrow();
   expect(() => observeRecovery(stopped, unknown, 1000)).toThrow();
+});
+
+
+it.each([
+  { operation: "mcp.create" }, { operation: "mcp.update", target: "server" }, { operation: "mcp.delete", target: "server" }, { operation: "skill.install" }, { operation: "skill.configure" }, { operation: "bot.configure" },
+  { operation: "file.write", target: "/workspace/skills/review/SKILL.md" },
+  { operation: "file.delete", target: "/workspace/skills-pool/skills-local/review" },
+  { operation: "file.write", target: "/config/teclaw.json" },
+])("requires Owner handling for protected changes %j", operationScope => {
+  const action = { actionId: "change", operationScope, summary: "调整能力", risk: "影响任务", rollback: "撤销本次变更", verification: "读取并验证" };
+  expect(() => submitRecoveryPlan({ ...state(), phase: "plan" }, { ...plan, actions: [action] }, 100)).toThrow();
+  expect(submitRecoveryPlan({ ...state(), phase: "plan" }, { ...plan, actions: [] }, 100).status).toBe("waiting_owner");
+});
+it("rejects a prose-only action before approval rather than at execution", () => {
+  expect(() => submitRecoveryPlan({ ...state(), phase: "plan" }, { ...plan,
+    actions: [{ actionId: "change", summary: "修改参数", risk: "局部", verification: "确认生效", rollback: "恢复" }] }, 100)).toThrow(/operationScope/);
+});
+it("does not let a Shell MCP registration masquerade as an ordinary-file action", () => {
+  const action = { actionId: "change", operationScope: { operation: "file.write", target: "/workspace/memory.md" },
+    command: "mcporter config add maga https://example.invalid/mcp", summary: "调整工具", risk: "局部", verification: "核对配置", rollback: "撤销本次变更" };
+  expect(() => submitRecoveryPlan({ ...state(), phase: "plan" }, { ...plan, actions: [action] }, 100)).toThrow(/Shell/);
+});
+it("does not approve existing-MCP deletion through Shell", () => {
+  const action = { actionId: "delete", operationScope: { operation: "mcp.delete", target: "duplicate" }, command: "mcporter config remove duplicate",
+    summary: "删除重复服务", risk: "保留其他服务", verification: "核对目标已删除", rollback: "恢复原配置" };
+  expect(() => submitRecoveryPlan({ ...state(), phase: "plan" }, { ...plan, actions: [action] }, 100)).toThrow(/Owner/);
+});
+it("checks actual target_path when classifying and authorizing file deletion", () => {
+  const action = { actionId: "delete", operationScope: { operation: "file.delete", target: "/workspace/duplicate.txt" },
+    summary: "删除重复文件", risk: "仅目标文件", verification: "核对已删除" };
+  const request = { method: "POST" as const, path: "/api/file/remove", body: { target_path: "/workspace/duplicate.txt" } };
+  expect(engineActionScope(request)).toEqual(action.operationScope);
+  expect(() => assertActionScope(action, request)).not.toThrow();
+  expect(() => assertActionScope(action, { ...request, body: { target_path: "/workspace/skills/review" } })).toThrow();
+});
+
+it("requires Cron actions to use the adapter tool even when their business scope is approved", () => {
+  const action = { actionId: "delete", operationScope: { operation: "cron.delete", target: "duplicate" }, command: "true",
+    summary: "删除重复任务", risk: "保留其他任务", verification: "读取任务列表", rollback: "恢复原定义" };
+  expect(() => submitRecoveryPlan({ ...state(), phase: "plan" }, { ...plan, actions: [action] }, 100)).toThrow(/Cron/);
 });

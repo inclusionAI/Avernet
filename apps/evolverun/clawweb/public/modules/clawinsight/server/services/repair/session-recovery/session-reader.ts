@@ -57,9 +57,12 @@ const OC_PROGRAM = String.raw`  const match=/^agent:([A-Za-z0-9_-]+):.+/.exec(in
   console.log(JSON.stringify({session_id:sessionId,source:file,delivery:located,messages,
     failure_context:input.fromLine?[]:before,next_line:line+1,delivery_confirmed:!!located,delivery_matches:matches}));
 `;
-const FOOTER = String.raw`})().catch(()=>{console.error('original session unavailable or changed');process.exitCode=1});
+const FOOTER = String.raw`})().catch(error=>{console.error(String(error.code||'')+': '+String(error.message||'original session unavailable or changed'));process.exitCode=1});
 `;
 function quote(value: string): string { return `'${value.replaceAll("'", `'"'"'`)}'`; }
+function unavailable(detail: unknown): SessionRecoveryError {
+  return new SessionRecoveryError(503, "original_session_unavailable", `原会话暂不可读或已变化，不能判断效果：${String(redactEvidenceValue(detail)).slice(0, 500)}`);
+}
 /** Original-session reads and delivery matching run inside the target through the controlled relay. */
 export class RecoverySessionReader {
   constructor(private readonly runtime: Pick<BotRuntime, "executeShell"> & Partial<Pick<BotRuntime, "request">>) {}
@@ -74,8 +77,8 @@ export class RecoverySessionReader {
     // Compress the fixed read-only program so runtime-user wrapping stays within BaaS's command limit.
     const loader = `eval(require("node:zlib").gunzipSync(Buffer.from("${gzipSync(HEADER + (input.target.activeEngine === "claude_code" ? CC_PROGRAM : OC_PROGRAM) + FOOTER).toString("base64")}","base64")).toString())`;
     const result = await this.runtime.executeShell({ target: input.target, command: `node -e ${quote(loader)} ${quote(encoded)}`, timeoutMs: 30000 })
-      .catch(() => { throw new SessionRecoveryError(503, "original_session_unavailable", "原会话暂不可读或已变化，不能判断效果"); });
-    if (result.status !== "success" || result.exitCode !== 0) throw new SessionRecoveryError(503, "original_session_unavailable", "原会话暂不可读或已变化，不能判断效果");
+      .catch((error: unknown) => { const cause = error as { stderr?: string; code?: string }; throw unavailable(cause?.stderr || cause?.code || "受控 Shell 请求失败"); });
+    if (result.status !== "success" || result.exitCode !== 0) throw unavailable(result.stderr || `Shell exit=${result.exitCode}, status=${result.status}`);
     try { return redactEvidenceValue(JSON.parse(result.stdout)) as Record<string, unknown>; }
     catch { throw new SessionRecoveryError(503, "original_session_unavailable", "原会话记录格式无效"); }
   }
@@ -86,8 +89,13 @@ export class RecoverySessionReader {
     const encoded = Buffer.from(input.sessionKey).toString("base64url");
     const response = await this.runtime.request({ target: input.target, method: "GET",
       path: `/api/sessions/${encodeURIComponent(encoded)}/messages?engine=teclaw&limit=${limit}&offset=${offset}`, timeoutMs: 30000 });
-    const body = response.body as { success?: boolean; data?: unknown; total?: number };
-    if (response.status !== 200 || !body || body.success === false || !Array.isArray(body.data)) throw new SessionRecoveryError(503, "original_session_unavailable", "TE 会话原文未取得，不能判断触达或效果");
+    const body = response.body as { success?: boolean; data?: unknown; total?: number; detail?: unknown };
+    if (response.status !== 200 || !body || body.success === false || !Array.isArray(body.data)) {
+      const detail = typeof body?.detail === "string" ? String(redactEvidenceValue(body.detail)).slice(0, 300) : "响应不符合 success/data 消息数组合同";
+      throw new SessionRecoveryError(response.status >= 400 ? response.status : 502,
+        response.status === 404 ? "original_session_not_found" : "original_session_unavailable",
+        `TE 会话查询 HTTP ${response.status}：${detail}；使用 AIVision 轨迹调查，当前接口缺失会话不证明任务未执行`);
+    }
     if (input.expectedSessionId && input.expectedSessionId !== input.sessionKey || body.data.some((record: Record<string, unknown>) => record.session_id && record.session_id !== input.sessionKey)) throw new SessionRecoveryError(409, "original_session_changed", "TE 返回的会话身份已变化");
     const marker = `[会话自愈：${input.deliveryKey}]`;
     const records = body.data as Array<Record<string, unknown>>;
