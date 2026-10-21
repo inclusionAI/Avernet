@@ -173,6 +173,7 @@ export const botEngineVersionService = {
   async restartAndConfirmUpdate(
     target: EngineVersionMutationTarget,
     current: EngineVersionObservation,
+    onRestartSubmitted?: () => void,
   ): Promise<EngineVersionObservation> {
     const permission = getRestartPermission(target.restartPermission);
     if (!permission.allowed) throw new Error(permission.disabledReason || '当前账号没有 Bot 重启权限');
@@ -208,6 +209,8 @@ export const botEngineVersionService = {
       signal: target.signal,
     });
     if (isEnvelopeFailure(restart)) throw new Error(restart.message || 'Bot 重启请求失败');
+    if (target.signal?.aborted) throw target.signal.reason ?? new Error('引擎更新验证已取消');
+    onRestartSubmitted?.();
 
     const deadline = Date.now() + RESTART_TIMEOUT_MS;
     while (Date.now() < deadline) {

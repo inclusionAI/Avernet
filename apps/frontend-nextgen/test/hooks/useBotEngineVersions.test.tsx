@@ -8,6 +8,12 @@ import * as botContainerService from '@/services/botWorkshop/botContainerService
 import { botEngineVersionService } from '@/services/botWorkshop/botEngineVersionService';
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { toast } from 'sonner';
+
+jest.mock('sonner', () => {
+  const { jest: mockJest } = require('@jest/globals');
+  return { toast: { success: mockJest.fn(), error: mockJest.fn() } };
+});
 
 jest.mock('@/services/backendApi/bots/botController');
 jest.mock('@/services/botWorkshop/botContainerService');
@@ -163,6 +169,33 @@ describe('useBotEngineVersions', () => {
     expect(signal?.aborted).toBe(true);
     await act(async () => { finish(version); await pending; });
     expect(result.current.states[target.key]?.kind).not.toBe('updating');
+    restart.mockRestore();
+  });
+
+  test('releases the confirmation on submission, blocks duplicates and reports verification failure without resubmitting', async () => {
+    jest.mocked(botController.getBotEngineVersion).mockResolvedValue({ code: 200000, data: version });
+    let accept: () => void = () => undefined;
+    let rejectVerification: (error: Error) => void = () => undefined;
+    const restart = jest.spyOn(botEngineVersionService, 'restartAndConfirmUpdate').mockImplementation((...args: Parameters<typeof botEngineVersionService.restartAndConfirmUpdate>) => {
+      const onSubmitted = args[2];
+      accept = () => onSubmitted?.();
+      return new Promise((_resolve, reject) => { rejectVerification = reject; });
+    });
+    const { result } = renderHook(() => useBotEngineVersions([target]));
+    await waitFor(() => expect(result.current.states[target.key]?.kind).toBe('ready'));
+    const onSubmitted = jest.fn();
+    let pending!: Promise<boolean>;
+    act(() => { pending = result.current.update(target.key, onSubmitted); });
+    expect(onSubmitted).not.toHaveBeenCalled();
+    act(() => { accept(); });
+    expect(onSubmitted).toHaveBeenCalledTimes(1);
+    expect(toast.success).toHaveBeenCalledWith('重启请求已提交');
+    await act(async () => { expect(await result.current.update(target.key)).toBe(false); });
+    expect(restart).toHaveBeenCalledTimes(1);
+    await act(async () => { rejectVerification(new Error('version not confirmed')); await pending; });
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('version not confirmed'));
+    expect(result.current.states[target.key]).toMatchObject({ kind: 'ready', updateError: 'version not confirmed' });
+    expect(onSubmitted).toHaveBeenCalledTimes(1);
     restart.mockRestore();
   });
 

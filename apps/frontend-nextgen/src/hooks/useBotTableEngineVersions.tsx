@@ -80,8 +80,11 @@ export function useBotTableEngineVersions(options: {
         onCloseUpdate={() => setUpdateOpen(false)}
         onSelectInstance={(deviceUuid) => void versions.selectInstance(selectedKey, deviceUuid)}
         onRequestUpdate={() => setUpdateOpen(true)}
-        onConfirmUpdate={async () => {
-          const updated = await versions.update(selectedKey);
+        onConfirmUpdate={async (onRestartSubmitted) => {
+          const updated = await versions.update(selectedKey, () => {
+            onRestartSubmitted();
+            void Promise.resolve(onUpdated?.(selectedBot)).catch(() => undefined);
+          });
           if (updated) void Promise.resolve(onUpdated?.(selectedBot)).catch(() => undefined);
           return updated;
         }}
