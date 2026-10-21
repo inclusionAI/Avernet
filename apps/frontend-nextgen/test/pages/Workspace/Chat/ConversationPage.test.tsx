@@ -293,7 +293,7 @@ describe('ConversationPage(Task 8 组合页)', () => {
     const eligibleBot: ChatBotView = {
       ...managedBot,
       engine: 'openclaw',
-      actions: ['engine_restart'],
+      actions: ['restart'],
     };
     const getVersion = jest.spyOn(botController, 'getBotEngineVersion').mockResolvedValue({
       code: 200000,

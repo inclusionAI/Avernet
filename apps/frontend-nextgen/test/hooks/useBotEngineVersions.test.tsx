@@ -256,6 +256,7 @@ test('stops service version verification when the card leaves draft', async () =
 
 test.each([
   { actions: ['view', 'chat'] },
+  { actions: ['engine_restart'] },
   { actions: [] },
   { actions: ['restart'], disabledActions: { restart: 'Bot editor permission required' } },
   { actions: ['restart'], lockedByOther: true },
