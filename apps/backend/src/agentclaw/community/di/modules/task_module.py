@@ -89,6 +89,9 @@ from agentclaw.community.core.task.forum.digest.report_service import (
 )
 from agentclaw.community.core.task.forum.services.forum_service import ForumService
 from agentclaw.community.core.task.task_harness.harness import TaskHarness
+from agentclaw.community.core.task.task_harness.relay_session_recovery import (
+    RelaySessionRecovery,
+)
 from agentclaw.community.core.task.task_harness.runtime_probe import (
     TaskRuntimeLivenessProbe,
 )
@@ -329,16 +332,48 @@ class TaskModule(Module):
                 exc,
             )
             task_settings = None
+        from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
+            BcsBotTokenProvider,
+            NullBcsBotTokenProvider,
+        )
+
+        try:
+            bot_token_provider = injector.get(BcsBotTokenProvider)
+        except Exception as exc:  # noqa: BLE101 未绑定时降级为无 token provider
+            logger.info(
+                "[task][task-module] BcsBotTokenProvider 未绑定 → 使用空实现:%s: %s",
+                type(exc).__name__,
+                exc,
+            )
+            bot_token_provider = NullBcsBotTokenProvider()
         # harness 旁路常驻巡检(SLA 超时复位 / FAILED 重派重试 / PENDING 派发超时重搜推);
         # 可配置开关,默认开启(tasks/settings `harness_poller`):旁路巡检常驻兜底(SLA 超时复位/FAILED
         # 重派/PENDING 派发超时重搜推);harness=None(未绑且 env 关)时不启动 daemon 巡检线程。
         # 优先读 tasks/settings(harness_poller,KV 跨副本热改),未绑/读异常回退 env OCB_TASK_HARNESS_ENABLED。
         if _resolve_harness_enabled(task_settings):
             runtime_probe = TaskRuntimeLivenessProbe(bot=bot, bcs=bcs)
-            harness = TaskHarness(graph, runtime_probe=runtime_probe)
+            # Relay no-progress is a same-session continuation, never a central
+            # RUNNING→PENDING reset. Resolve the optional collaborators here so
+            # production never falls back to the graph-retry semantics.
+            relay_bot_tokens = bot_token_provider
+            try:
+                relay_task_context = injector.get(TaskContextServiceProtocol)
+            except Exception:  # noqa: BLE001
+                relay_task_context = None
+            relay_recovery = RelaySessionRecovery(
+                bot=bot,
+                bcs=bcs,
+                bot_tokens=relay_bot_tokens,
+            )
+            harness = TaskHarness(
+                graph,
+                runtime_probe=runtime_probe,
+                relay_recovery=relay_recovery,
+                task_context_service=relay_task_context,
+            )
             logger.info(
                 "[task][task-module] TaskHarness 旁路巡检已启用 runtime_probe=on "
-                "bot_port=%s bcs_port=%s",
+                "relay_resume=on bot_port=%s bcs_port=%s",
                 type(bot).__name__ if bot is not None else "None",
                 type(bcs).__name__ if bcs is not None else "None",
             )
@@ -404,15 +439,6 @@ class TaskModule(Module):
             staff_dept = injector.get(StaffDeptPlugin)
         except Exception:  # noqa: BLE101 未绑定 → list 不附加 owner_user_name
             staff_dept = None
-        from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
-            BcsBotTokenProvider,
-            NullBcsBotTokenProvider,
-        )
-
-        try:
-            bot_token_provider = injector.get(BcsBotTokenProvider)
-        except Exception:  # noqa: BLE101 未绑定时降级为无 token provider
-            bot_token_provider = NullBcsBotTokenProvider()
         intake_handler = None
         if intake_repo is not None and bot is not None and bot_service is not None:
             intake_handler = TaskIntakeHandler(

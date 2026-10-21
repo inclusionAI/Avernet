@@ -688,7 +688,7 @@ PLAN_RESULT(event=TaskNode, run_mode=bbs) + APPLIED -> target_node_id 非空且 
 PLAN_RESULT(event=TaskNode, run_mode=single_bot/coop_group) + APPLIED -> target_node_id 非空，可进入 S6
 ```
 
-`report` 是节点状态迁移，不是可任意追加的事件流：每次有效执行尝试的 `EXECUTION_RESULT` 和每个节点最终的 `PLAN_RESULT` 各只能接纳一次。Backend 在首派前生成 `relay_token`，同一 `node_id` 的 Harness 重试在图谱事务中轮换该值；Bot 使用派发指令中的代次值调用节点级 context/report/dispatch，旧执行持旧值的迟到请求被拒绝。Relay Skill 只调用生产内网白名单保护的 `/api/v1/collaboration/tasks/**`，不携带用户或 Bot 认证凭证；`relay_token` 仅是节点执行代次栅栏，不是通用身份凭证。`event_id` 由 Bot 调用层为每个上报事件生成，同一 HTTP 请求重试必须复用；Backend 将事件 ID、规范化内容指纹和原 `TaskReportResult` 与图谱迁移同事务保存。相同事件重试返回原结果（包括 `target_node_id`），相同 ID 不同内容或同一阶段不同内容返回冲突；并发由图谱版本和唯一后继关系兜底。Bot 不生成 `relay_token`，也不传 graph_version、attempt 或自报身份；不修改 BaaS/OpenClaw 插件。
+`report` 是节点状态迁移，不是可任意追加的事件流：每次有效执行尝试的 `EXECUTION_RESULT` 和每个节点最终的 `PLAN_RESULT` 各只能接纳一次。Backend 在首派前生成 `relay_token`；只有开启新的执行代次并重新 prepare/dispatch 时才轮换该值。Relay 运行时无进展的 same-session harness 恢复不轮换 token，只在既有会话发送自然语言续跑消息。Bot 使用派发指令中的代次值调用节点级 context/report/dispatch，旧执行代次持旧值的迟到请求被拒绝。Relay Skill 只调用生产内网白名单保护的 `/api/v1/collaboration/tasks/**`，不携带用户或 Bot 认证凭证；`relay_token` 仅是节点执行代次栅栏，不是通用身份凭证。`event_id` 由 Bot 调用层为每个上报事件生成，同一 HTTP 请求重试必须复用；Backend 将事件 ID、规范化内容指纹和原 `TaskReportResult` 与图谱迁移同事务保存。相同事件重试返回原结果（包括 `target_node_id`），相同 ID 不同内容或同一阶段不同内容返回冲突；并发由图谱版本和唯一后继关系兜底。Bot 不生成 `relay_token`，也不传 graph_version、attempt 或自报身份；不修改 BaaS/OpenClaw 插件。
 
 `trace` 是使 Bot 本地推理过程在后端可观测的唯一补充载荷，不参与状态机分支。`EXECUTION_RESULT.trace` 必须按顺序覆盖 S1、S2、S3、S4a、S4b 的执行检查点；`PLAN_RESULT.trace` 必须按顺序覆盖 S5.1～S5.5 的检查点。`trace` 是 HTTP 可选字段；一旦提供，`trace.steps` 必须存在，每个 step 必须是扁平七字段 `action_type/action_input/action_result/status_from/status_to/boost_reason/error_msg`，不允许 `step/status/detail` 旧结构或额外一级字段。`action_type` 直接使用该步骤的 S 码，不能使用 `execute/plan` 等旧事件名；`action_input` 只能是字符串或 `None`，记录该步骤输入，结构化内容必须序列化为 JSON 文本；`action_result` 必须是非空字符串，记录该步骤推理输出/产出摘要，且必须是可解析的 JSON object 字符串，包含非空 `status` 字段与至少一个实际输出字段；`completed/failed/ready/not_applicable` 等状态值只能作为 JSON 内的 `status` 字段；`boost_reason` 记录执行过程证据：为什么推进、为什么选择等等维度信息；`error_msg` 记录失败原因；`status_from/status_to` 记录本步骤前后节点状态。每个 `TaskReportTraceStep` 只包含该步骤的事实和必要摘要，不包含 `relay_token`、原始凭证或可被请求方伪造的图谱版本。Backend 在接纳报告时把每个 trace step 独立写入 `task_trajectory_events`；后续同事件的幂等重试不重复追加。trace 变化视作同一 `event_id` 的内容变化，服务端返回冲突。S6 由 dispatch API 的服务端动作日志和 dispatch 轨迹事件记录，不要求 Bot 事后补一条第三个 report 事件；S6 服务端记录同样沿用七字段语义，`action_result` 记录实际派发输出 JSON（包含 `status` 与派发结果字段），不是 delivered/failed 裸状态词，失败原因保存在 `error_msg`。
 
@@ -1444,9 +1444,9 @@ local_acceptance_result: AcceptanceResult = AcceptanceResult(
 ### 14.1 EXECUTION_RESULT
 
 - Backend 以内部 `(task_id, node_id, attempt, EXECUTION_RESULT)` 识别当前尝试唯一的执行结果；同一尝试重复请求不重复写节点事实，同键不同内容返回冲突。
-- 接纳 `exec_error` 时记录该 attempt 失败并停止 S5，不能把错误 patch 当成已完成业务事实。Harness 在重试预算内以图谱状态条件更新开启下一 attempt，并轮换 `relay_token` 后再投递同一节点；预算耗尽则进入 HUNG/待干预，不无限重试。
+- 接纳 `exec_error` 时记录该 attempt 失败并停止 S5，不能把错误 patch 当成已完成业务事实。只有新的执行代次重投才轮换 `relay_token`；运行时无进展 harness 采用 same-session 续跑，不推进 attempt、不轮换 token。same-session 续跑预算耗尽则进入 HUNG/待干预，不无限重试。
 - S1 只投影当前 attempt 已接纳的执行 patch；旧失败 attempt 保留为审计轨迹，旧绑定的迟到 context/report/dispatch 不得推进当前节点。成功尝试接纳后才允许该节点唯一的 `PLAN_RESULT`。
-- `relay_token` 由 Backend 首派前签发、重试时轮换，Bot 只原样携带；`event_id` 由 Bot 调用层生成并在同一事件重试时复用。两者不是身份凭证；Bot 不填写 attempt 或图谱版本。
+- `relay_token` 由 Backend 首派前签发，仅新的执行代次重投时轮换；same-session harness 续跑不轮换。Bot 只原样携带；`event_id` 由 Bot 调用层生成并在同一事件重试时复用。两者不是身份凭证；Bot 不填写 attempt 或图谱版本。
 
 ### 14.2 PLAN_RESULT
 
@@ -1463,8 +1463,17 @@ local_acceptance_result: AcceptanceResult = AcceptanceResult(
 
 ### 14.4 harness 恢复
 
-- harness 使用 `task_id + node_id` 获取最新 `TaskContext`。
-- 若当前 attempt 的执行错误已接纳，harness 先原子推进至下一 attempt 并轮换 `relay_token`，再唤起同一节点；若执行或规划报告已成功接纳但响应丢失，则不递增 attempt，只按 S1 投影的原报告续跑。
+Runtime liveness 连续无进展、连续未知/无响应，或终态成功但未上报时，Relay harness 执行以下 **same-session** 恢复：
+
+- 节点保持 `RUNNING`；不重置 `PENDING`，不重新 prepare，不重新 dispatch，不轮换 `relay_token`，不改变 `run_mode`、`assignee`、群/会话或任务标识。
+- 单 Bot/OpenAPI 节点向原始 session 发送：`继续执行当前未完成的 task-loop S1~S6。不要新建任务、不要重新澄清、不要重新提交 execute。如果当前步骤无法完成，请输出明确失败原因，并继续执行后续步骤。`
+- BCS 协作群节点通过既有 `POST /sessions/{sid}/chat` 会话口发送同一条自然语言消息，调用者使用原群内参与者 Bot 身份，不新建群/会话。
+- same-session 续跑次数持久化在节点 `relay_harness_resume_attempts` 中，不写入 `harness_retries`，不参与报告幂等键。默认最多 2 次；最后一次仍无有效进展则节点显式置 `HUNG`，原因是 `relay_harness_resume_exhausted`。该终态不隐式升级 BBS，也不改变执行模态。
+- Bot 继续执行时仍按当前 `relay_token` 调用 S1/context、S4b/report、S5/report 和 S6/dispatch；不新增第三个 report event 或恢复专用标记。
+- 独立的新执行代次重投（例如节点已执行失败且重新 prepare/dispatch）仍由后端状态机控制并可轮换 `relay_token`，与 same-session 续跑是两种不同恢复。
+
+### 14.5 本棒已接纳事实与恢复读取
+
 - 恢复读取与正常派发使用同一份 Task Module 上下文构造逻辑。
 - 无论本棒 `EXECUTION_RESULT` 是否已持久化，恢复后的 `all_done_output` 都不得包含当前节点事实；它始终只含本棒之前的已接纳前序事实。
 - 本棒已接纳的 `TaskNodePatch` 和 `TaskReportResult` 分别从图谱投影到 `accepted_execution_patch`、`accepted_plan_report`，使 Runtime 能跳过已完成阶段并取回原 `target_node_id`。图谱的上报接纳标记必须能区分未上报与已上报但 `output_patch={}` 的情况。

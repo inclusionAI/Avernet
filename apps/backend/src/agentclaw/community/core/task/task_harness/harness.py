@@ -8,6 +8,7 @@ Avernet:in-memory 巡检(注入 clock);prod 接真实定时器/崩溃探针不�
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import random
@@ -26,6 +27,11 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodePatch,
     TaskNodeQueryCriteria,
     effective_run_mode,
+)
+from agentclaw.community.core.task.task_harness.relay_session_recovery import (
+    RELAY_HARNESS_RESUME_PROMPT,
+    RelaySessionRecovery,
+    RelaySessionRecoveryError,
 )
 from agentclaw.community.core.task.task_harness.runtime_probe import (
     RuntimeProbeResult,
@@ -67,6 +73,9 @@ class TaskHarness:
         runtime_probe: TaskRuntimeLivenessProbe | None = None,
         runtime_probe_threshold: float = 120.0,
         runtime_retry_threshold: int = 3,
+        relay_recovery: RelaySessionRecovery | None = None,
+        relay_resume_max_attempts: int = 2,
+        task_context_service: Any | None = None,
     ) -> None:
         """graph: TaskGraphService(只读查询 RUNNING + execution_config);on_harness_fn: 编排核复位入口。
         sla_timeout:RUNNING 卡死 backstop(>poller execute SLA);pending_timeout:PENDING 派发异常重搜推。"""
@@ -86,6 +95,9 @@ class TaskHarness:
         self._runtime_probe = runtime_probe
         self._runtime_probe_threshold = runtime_probe_threshold
         self._runtime_retry_threshold = runtime_retry_threshold
+        self._relay_recovery = relay_recovery
+        self._relay_resume_max_attempts = max(1, int(relay_resume_max_attempts))
+        self._task_context_service = task_context_service
         self._runtime_seen: dict[tuple[str, str], dict[str, Any]] = {}
         self._pending_seen_at: dict[
             tuple[str, str], float
@@ -181,6 +193,7 @@ class TaskHarness:
                 "unknown": 0,
                 "no_progress": 0,
                 "success_unreported": 0,
+                "resume_attempts": 0,
             },
         )
         try:
@@ -245,17 +258,81 @@ class TaskHarness:
             return None
 
         logger.warning(
-            "[task][harness] runtime harness retry task=%s node=%s reason=%s state=%s "
+            "[task][harness] relay runtime recovery task=%s node=%s reason=%s state=%s "
             "status=%s source=%s elapsed=%.0fs sla=%.0fs",
             task_id, node.node_id, reason, result.state, result.status,
             result.source, elapsed, sla,
         )
+        attempts = self._next_relay_resume_attempts(node, current)
+        if attempts < self._relay_resume_max_attempts:
+            error_msg = None
+            channel = None
+            try:
+                if self._relay_recovery is None:
+                    raise RelaySessionRecoveryError("relay recovery service is not configured")
+                resumed = await self._relay_recovery.resume(node)
+                channel = resumed.channel
+            except Exception as exc:  # noqa: BLE001 - recoverable transport error
+                error_msg = f"{type(exc).__name__}: {exc}"[:500]
+                logger.warning(
+                    "[task][harness] relay session resume failed task=%s node=%s "
+                    "attempts=%d/%d error=%s",
+                    task_id, node.node_id, attempts + 1,
+                    self._relay_resume_max_attempts, error_msg,
+                )
+            current["resume_attempts"] = attempts + 1
+            self._report_node_patch(
+                TaskNodePatch(
+                    task_id=task_id,
+                    node_id=node.node_id,
+                    extend_props_patch={
+                        "relay_harness_resume_attempts": attempts + 1,
+                        "harness_probe": {
+                            **detail,
+                            "reason": reason,
+                            "elapsed_seconds": elapsed,
+                            "sla_seconds": sla,
+                            "unknown_count": current.get("unknown", 0),
+                            "no_progress_count": current.get("no_progress", 0),
+                            "success_unreported_count": current.get(
+                                "success_unreported", 0
+                            ),
+                            "resume_attempts": attempts + 1,
+                            "resume_channel": channel,
+                            "resume_error": error_msg,
+                        },
+                    },
+                )
+            )
+            self._emit_relay_resume_trajectory(
+                task_id,
+                node,
+                attempt=attempts + 1,
+                reason=reason,
+                channel=channel,
+                error_msg=error_msg,
+                terminal=False,
+            )
+            if error_msg is None:
+                current["unknown"] = 0
+                current["no_progress"] = 0
+                current["success_unreported"] = 0
+            return None
+
+        terminal_reason = f"relay_harness_resume_exhausted: {reason}"
+        logger.error(
+            "[task][harness] relay session resume exhausted task=%s node=%s "
+            "reason=%s attempts=%d/%d",
+            task_id, node.node_id, reason, attempts,
+            self._relay_resume_max_attempts,
+        )
         return TaskNodePatch(
             task_id=task_id,
             node_id=node.node_id,
-            exec_error=reason,
-            failure_reason=result.error,
+            status=Status.HUNG,
+            failure_reason=terminal_reason,
             extend_props_patch={
+                "relay_harness_resume_attempts": attempts,
                 "harness_probe": {
                     **detail,
                     "reason": reason,
@@ -266,9 +343,77 @@ class TaskHarness:
                     "success_unreported_count": current.get(
                         "success_unreported", 0
                     ),
-                }
+                    "resume_attempts": attempts,
+                    "terminal_reason": terminal_reason,
+                },
             },
         )
+
+    def _next_relay_resume_attempts(self, node: TaskNode, current: dict[str, Any]) -> int:
+        persisted = getattr(node.run_info, "extend_props", {}).get(
+            "relay_harness_resume_attempts"
+        )
+        if persisted is not None:
+            try:
+                return int(persisted)
+            except (TypeError, ValueError):
+                pass
+        try:
+            return int(current.get("resume_attempts") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _emit_relay_resume_trajectory(
+        self,
+        task_id: str,
+        node: TaskNode,
+        *,
+        attempt: int,
+        reason: str,
+        channel: str | None,
+        error_msg: str | None,
+        terminal: bool,
+    ) -> None:
+        if self._task_context_service is None:
+            return
+        status_value = "completed" if error_msg is None and not terminal else "failed"
+        action_payload = {
+            "status": status_value,
+            "outcome": (
+                "same_session_resume_sent" if status_value == "completed"
+                else "same_session_resume_failed_or_exhausted"
+            ),
+            "reason": reason,
+            "attempts": attempt,
+            "channel": channel,
+            "terminal": terminal,
+        }
+        try:
+            action_result = json.dumps(action_payload, ensure_ascii=False)
+        except Exception:  # noqa: BLE001 - observation must not replace recovery
+            action_result = str(action_payload)
+        status_to = Status.HUNG if terminal else Status.RUNNING
+        try:
+            self._task_context_service.emit_trajectory_event(
+                task_id,
+                node.node_id,
+                "harness-engine-relay-resume",
+                action_result=action_result,
+                action_input=RELAY_HARNESS_RESUME_PROMPT,
+                status_from=Status.RUNNING,
+                status_to=status_to,
+                attempt=attempt,
+                boost_reason=(
+                    "Relay harness 仅在既有执行会话中发送自然语言续跑消息；"
+                    "不重新 prepare、不重新 dispatch、不轮换 relay_token。"
+                ),
+                error_msg=error_msg or ("relay_harness_resume_exhausted" if terminal else None),
+            )
+        except Exception as exc:  # noqa: BLE001 - trajectory is observability-only
+            logger.warning(
+                "[task][harness] relay resume trajectory emission failed task=%s node=%s error=%s",
+                task_id, node.node_id, str(exc)[:500],
+            )
 
     def _await_runtime_harness(
         self, task_id: str, node: TaskNode, *, elapsed: float, sla: float
@@ -297,6 +442,7 @@ class TaskHarness:
         if self._on_harness_fn is None:
             return []
         resets: list[TaskNodePatch] = []
+        relay_patches: list[TaskNodePatch] = []
         seen: set[tuple[str, str]] = set()
         with self._lock:
             task_ids = list(self._registered)
@@ -316,7 +462,6 @@ class TaskHarness:
                 n
                 for n in nodes
                 if effective_run_mode(n) in _EXEC_MODES
-                and not self._is_relay_root(task_graph, n)
             ]
             now = self._clock()
             for n in nodes:
@@ -335,7 +480,23 @@ class TaskHarness:
                         task_id, n, elapsed=elapsed, sla=sla
                     )
                     if runtime_patch is not None:
-                        resets.append(runtime_patch)
+                        self._report_node_patch(runtime_patch)
+                        self._emit_relay_resume_trajectory(
+                            task_id,
+                            n,
+                            attempt=self._next_relay_resume_attempts(
+                                n, self._runtime_seen.get((task_id, n.node_id), {})
+                            ),
+                            reason=str(
+                                (runtime_patch.extend_props_patch or {}).get(
+                                    "harness_probe", {}
+                                ).get("reason") or runtime_patch.failure_reason or ""
+                            ),
+                            channel=None,
+                            error_msg=runtime_patch.failure_reason,
+                            terminal=True,
+                        )
+                        relay_patches.append(runtime_patch)
                     continue
                 if now - t0 > sla:
                     if effective_run_mode(n) == "bbs" and not task_graph.is_relay:
@@ -382,7 +543,7 @@ class TaskHarness:
             self._runtime_seen = {
                 k: v for k, v in self._runtime_seen.items() if k in seen
             }
-            for patch in resets:
+            for patch in (*resets, *relay_patches):
                 self._dispatched_at.pop((patch.task_id, patch.node_id), None)
                 self._runtime_seen.pop((patch.task_id, patch.node_id), None)
         # Scan②:扫描 status=FAILED(执行层失败:terminal_invalid/exec 报错等)真执行叶子 → harness
@@ -474,7 +635,7 @@ class TaskHarness:
             res = self._on_harness_fn(p)
             if asyncio.iscoroutine(res):
                 asyncio.run(res)
-        return resets
+        return [*resets, *relay_patches]
 
     def run_poll_loop(self, stop_event: threading.Event | None = None) -> None:
         """周期巡检直到 stop_event.set()(未传则永不停止;编排核主链事件驱动续推,本循环仅旁路复位)。

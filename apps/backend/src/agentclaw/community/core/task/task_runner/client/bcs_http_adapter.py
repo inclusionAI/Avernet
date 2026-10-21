@@ -282,6 +282,42 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
         r = await self._req("GET", f"/state-machine-runs/{run_id}")
         return r.json()
 
+    async def send_session_chat(
+        self,
+        session_id: str,
+        *,
+        message: str,
+        caller_bearer: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Continue an existing BCS session via ``POST /sessions/{sid}/chat``.
+
+        ``session_id`` comes from the original dispatch fact. The endpoint fails
+        closed unless the Bearer caller is already a session participant; no
+        implicit group/session creation is attempted here.
+        """
+        path = f"/sessions/{session_id}/chat"
+        extra_headers: dict[str, str] | None = None
+        if caller_bearer:
+            extra_headers = {"Authorization": f"Bearer {caller_bearer}"}
+        else:
+            logger.warning(
+                "[task][bcs_http] send_session_chat 无 caller_bearer(仅 HMAC 匿名)— "
+                "该接口要求会话参与者身份 session=%s",
+                session_id,
+            )
+        r = await self._req(
+            "POST",
+            path,
+            json={"message": message},
+            idempotency_key=idempotency_key or uuid.uuid4().hex,
+            extra_headers=extra_headers,
+        )
+        data = r.json()
+        if not isinstance(data, dict):
+            raise BcsClientError("session chat response is not an object")
+        return data
+
     async def send_message_a2a(
         self,
         *,

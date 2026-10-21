@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from agentclaw.community.core.task.domain.models import TaskNode
@@ -90,10 +91,86 @@ def _digest(value: Any) -> str:
     return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
 
 
-def _last_message_cursor(messages: Any) -> Any:
+def _message_order_value(value: Any) -> tuple[int, Any, str, int]:
+    """Return a comparable, type-safe ordering tuple.
+
+    Runtime APIs do not guarantee message ordering (TeamClaw returns newest
+    first in at least one production path). Numeric and RFC3339-like fields are
+    compared field by field; their source position is only a tie-breaker for
+    otherwise equal ordering fields.
+    """
+    if isinstance(value, bool):
+        return (1, 0, "", 0)
+    if isinstance(value, (int, float)):
+        num = int(value) if float(value).is_integer() else float(value)
+        return (1, num, "", 0)
+    if value is None:
+        return (0, 0, "", 0)
+    text = str(value).strip()
+    if not text:
+        return (0, 0, "", 0)
+    try:
+        number = float(text)
+    except ValueError:
+        number = None
+    if number is not None:
+        n = int(number) if number.is_integer() else number
+        return (1, n, "", 0)
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        parsed = None
+    if parsed is not None:
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return (1, parsed.timestamp(), text, 0)
+    return (0, 0, text, 0)
+
+
+def _message_sort_key(entry: tuple[int, dict[str, Any]]) -> tuple[Any, ...]:
+    index, message = entry
+    best = (0, 0, "", 0)
+    source = ""
+    for key in (
+        "seq", "gmt_seq", "version", "updated_at", "gmt_modified",
+        "created_at", "gmt_create", "message_id", "id",
+    ):
+        value = _message_order_value(message.get(key))
+        # Prefer the highest independently comparable field. Multiple equal
+        # timestamps must still be deterministic, so retain the field name and
+        # source position only as later tuple components.
+        if value > best:
+            best = value
+            source = key
+        elif value == best and key < source:
+            source = key
+    # Numeric/temporal fields dominate; lexical identifiers are included with a
+    # lower rank so records without timestamps remain stable when possible.
+    lexical = str(
+        message.get("message_id")
+        or message.get("id")
+        or ""
+    )
+    return (*best, source, lexical, index)
+
+
+def _last_message(messages: Any) -> Any | None:
     if not isinstance(messages, list) or not messages:
         return None
-    last = messages[-1]
+    records = [
+        (index, message)
+        for index, message in enumerate(messages)
+        if isinstance(message, dict)
+    ]
+    if not records:
+        return messages[-1]
+    return max(records, key=_message_sort_key)[1]
+
+
+def _last_message_cursor(messages: Any) -> Any:
+    last = _last_message(messages)
+    if last is None:
+        return None
     if not isinstance(last, dict):
         return {"last": str(last), "count": len(messages)}
     selected = {
@@ -180,10 +257,53 @@ class TaskRuntimeLivenessProbe:
                 session_id=session_id,
                 previous_cursor=previous_cursor,
             )
+        if session_id:
+            return await self._probe_session_messages(
+                session_id=session_id,
+                previous_cursor=previous_cursor,
+            )
         return RuntimeProbeResult(
             state="unknown",
             source="node",
             detail={"reason": "no_dispatch_handle"},
+        )
+
+    async def _probe_session_messages(
+        self,
+        *,
+        session_id: str,
+        previous_cursor: str | None,
+    ) -> RuntimeProbeResult:
+        """Probe a root execution conversation when only a session id exists.
+
+        The task node remains RUNNING, so message growth is the liveness
+        signal. No run handle is inferred and no conversation is created.
+        """
+        if self._bot is None:
+            return RuntimeProbeResult(
+                state="unknown",
+                source="openapi_bot.session",
+                detail={"reason": "port_missing"},
+            )
+        try:
+            messages = await self._bot.get_session_messages(session_id, limit=20)
+        except Exception as exc:  # noqa: BLE001
+            return RuntimeProbeResult(
+                state="unknown",
+                source="openapi_bot.session",
+                error=f"{type(exc).__name__}: {exc}"[:500],
+                detail={"session_id": session_id},
+            )
+        cursor = _join_cursors(
+            {"session_id": session_id, "count": len(messages) if isinstance(messages, list) else None},
+            _last_message_cursor(messages),
+        )
+        return self._active_result(
+            source="openapi_bot.session",
+            status="active",
+            cursor=cursor,
+            previous_cursor=previous_cursor,
+            detail={"session_id": session_id},
         )
 
     def _active_result(

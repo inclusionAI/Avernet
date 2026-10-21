@@ -107,6 +107,21 @@ class BcsClientPort(Protocol):
     ) -> str: ...
     async def get_state_machine_run(self, run_id: str) -> dict[str, Any]: ...
     async def validate_definition(self, definition_yaml: str) -> None: ...
+    async def send_session_chat(
+        self,
+        session_id: str,
+        *,
+        message: str,
+        caller_bearer: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Send one continuation message into an existing BCS session.
+
+        The session id and membership stay authoritative; this port never creates
+        a group or session and never rewrites the task node identity.
+        """
+        ...
+
     async def send_message_a2a(
         self,
         *,
