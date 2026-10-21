@@ -3,15 +3,22 @@ import { cn } from '@/utils/cn';
 
 export type BotManagementTab = 'tc' | 'external';
 
+/**
+ * 「Bot 管理」页顶部的 TC Bot / 外部 Bot 分类切换。
+ * dmore 稿（10/19 Bot管理首页）：胶囊式激活态（primary 12% 蓝底 + 蓝字 13px/500），
+ * 未激活为灰字，不再使用底部下划线式 tab。
+ */
 export function BotManagementTabs({
   value,
   onChange,
+  className,
 }: {
   value: BotManagementTab;
   onChange: (tab: BotManagementTab) => void;
+  className?: string;
 }) {
   return (
-    <div className="flex border-b border-border" role="tablist" aria-label="Bot 类型">
+    <div className={cn('flex items-center gap-1', className)} role="tablist" aria-label="Bot 类型">
       {(
         [
           ['tc', 'TC Bot'],
@@ -20,12 +27,15 @@ export function BotManagementTabs({
       ).map(([tab, label]) => (
         <Button
           key={tab}
-          role="tab"
-          aria-selected={value === tab}
           variant="ghost"
+          role="tab"
+          type="button"
+          aria-selected={value === tab}
           className={cn(
-            'relative rounded-none px-4 text-muted-foreground hover:bg-transparent hover:text-foreground',
-            value === tab && 'text-primary after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:bg-primary',
+            'inline-flex h-8 items-center rounded-md px-3 text-[13px] transition-colors cursor-pointer',
+            value === tab
+              ? 'bg-primary/10 font-medium text-primary'
+              : 'font-normal text-muted-foreground hover:bg-muted hover:text-foreground',
           )}
           onClick={() => onChange(tab)}
         >

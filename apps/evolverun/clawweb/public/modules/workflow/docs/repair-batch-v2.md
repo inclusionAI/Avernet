@@ -336,3 +336,34 @@ Public bootstrap 传入既有 `getClawWebPublicBaseUrl()` 的配置来源；远�
 HTTPS origin，本地 HTTP 仅允许 loopback。无需把用户 Cookie 或凭据写入 URL。
 创建、反馈修订及失败重试在事务提交前检查执行端支持；不支持时回滚新修订、
 任务及材料写入，不留不可派发的新版本。派发时仍保留防御检查。
+
+
+### Manual joint generation and failure diagnostics
+
+Manual multi-selection is frozen as the existing `workflow-proposal-plan/v1` plan input.
+Suggestions with overlapping node scopes are reviewed together; multi-node sources stay
+atomic and connect their affected scopes. Unspecified/full-file scopes are reviewed
+with the other selected goals. Unselected originals are never added. Independent groups
+can generate separately, followed by the existing whole-candidate checks. Source and
+integrated-goal outcomes remain mandatory; conflicts or incomplete coverage remain
+unresolved. Retrying an older failed manual multi-selection adds this plan only to the
+new revision, preserving the original revision, baseline, goals and materials.
+
+The compatible optional `error.details` object carries safe parse reason/position,
+item IDs, item index/count and plan ID. Model preparation, invocation, parsing, checks
+and push errors identify their stage. The task page displays these details directly;
+raw Prompt/output files remain optional diagnostic evidence, not a prerequisite for
+understanding a failure. Historical errors without details remain readable.
+
+After checkout, TaskGuard may persist a <=32 KiB failure receipt as commit metadata:
+`refs/heads/repair-failure/<taskId>/<revision>-<executionId>`, with header
+`ClawMind workflow-repair-failure/v1\n`. It contains the failed
+`workflow-repair-result/v1` plus `parentCandidateCommit`; its sole parent and tree
+must match the requested semantic parent candidate or baseline. It is create-only,
+contains no candidate/files/Prompt/raw response, and never advances the task branch.
+Readers validate every execution identity field and prefer an already valid checked
+candidate result, including after an ambiguous push. Only confirmed result absence
+permits reading the failure receipt. Reconciliation retains the receipt's error when
+AIS reports failure. Older writers or Git transport failure retain the existing AIS
+error fallback; no new callback, credentials, DB schema or business execution is added.
+Failure refs follow the repository's diagnostic retention policy.

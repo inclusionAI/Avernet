@@ -224,37 +224,40 @@ opens a 20-record page with date and status selectors and previous/next navigati
 Changing a filter resets the cursor trail. Collapsing restores the unfiltered
 latest eight. Filters do not affect the independent retry-target list or its
 eligibility. Failed history reads can be retried without a business write.
-Only the first page polls; older pages load on demand and are briefly cached.
+History pages load on demand and are briefly cached; they do not poll or refresh
+on window focus. The refresh button explicitly reloads the current page.
 Successful task-retry requests invalidate the history cache.
 
-Migration v146 adds a virtual status projection restricted to auto_run, auto_draft
-and auto_notice plus two compound indexes on task/kind/time/record ID and
-task/kind/status/time/record ID. JSON stays authoritative; historical statuses are
-available without rewriting journal bodies. ZDAS uses ALTER TABLE ADD INDEX,
-not the dialect's skipped standalone CREATE INDEX. Normal migration DDL authority
-is required before the new reader is deployed; a managed runtime without DDL
-permission must receive the schema through its existing migration process.
-Creating indexes can take time on existing large tables and is a deployment-time
-operation, never a request-time operation. No migration was run against a shared
-or production database during development.
+History reads require only the existing v142 journal schema. Status is read from
+body_json; no generated column, new index, backfill or DDL permission is required.
+The v146 automation-history migration is retired; its version must not be reused.
+Environments that previously applied it can keep the unused column/indexes: this
+repair does not issue DROP statements or modify migration ledger entries.
 
-Each read performs three ordered index-range queries (one per displayed kind),
-returning at most limit+1 scalar projections each, then merges that bounded set.
-It never loads full request/model-input JSON, sorts the complete history, computes
-a total, or uses a deep OFFSET. The index key lengths remain below ZDAS's
-767-byte ceiling with utf8mb4. Regression tests seed 20,000 records and inspect
-SQLite query plans for both unfiltered and rare-status pages, including cursors.
-MySQL/OceanBase live query plans and index build times remain integration checks;
-DDL rendering tests do not establish deployed performance.
+Each read uses one query scoped by task_id and the displayed record kinds, using
+the existing (task_id, record_kind) index where selected by the database planner.
+A limited derived table selects at most limit+1 record IDs and creation times;
+primary-key lookups then extract display JSON only for those page records. It never transfers full request/model-input JSON,
+computes a total, uses a deep OFFSET or loads all history into the application.
+Date/status filtering and creation-time sorting run in the database. Existing
+indexes do not cover time or JSON status, so LIMIT bounds returned rows, not rows
+examined. Rare-status and deep-history queries can still inspect the workflow's
+history and sort qualifying rows. No arbitrary record/date cutoff is imposed;
+limits to result coverage require measured benefit before adoption. SQLite
+regressions inspect existing-index use; local timings do not establish deployed
+MySQL/OceanBase performance.
 
 ### Bounded draft-recovery polling
 
 Status polling and recovery use one batched eligibility query against the current
 failed revision and its original request. Cancelled tasks, tasks with a newer
 revision, stale request IDs, other policy versions and active leases are excluded
-before the 50-draft batch limit. The task/revision primary key and v146 status/time
-index support the join and ordering. Polling never calls the full workbench task
-reader for each historical draft. Owner and current policy authority are still
+before the 50-draft batch limit. The existing task/kind index scopes journal reads;
+the task/revision primary key supports excluding newer revisions. MySQL uses
+STRAIGHT_JOIN to start with scoped journal rows, avoiding a reverse nested-loop
+plan that rescans JSON per failed revision. Status comes from JSON; sorting is
+performed by the database. Polling never calls the full workbench task reader for
+each historical draft. Owner and current policy authority are still
 checked; recovery keeps the journal CAS/lease check and the subsequent generation
 checks. After recovering a batch, remaining eligible drafts appear in the next
 snapshot. The retry-target list and retry action share this same selector.

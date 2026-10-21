@@ -355,13 +355,13 @@ describe("POST /:flowId/rerun — command resolution", () => {
     expect(sentTrigger()).toBe("/social-appeal 2088242692000193");
   });
 
-  it("falls back to the facade binding and keeps a task description", async () => {
+  it("falls back to /workflow run for a run that records no message", async () => {
     insertRun("flow-cron", "ids-log-self-audit", JSON.stringify({ message: null, params: { enable_yuque_sync: "true" } }));
 
     const { status } = await rerun("flow-cron");
     expect(status).toBe(200);
     // Bare "/ids-log-self-audit" would make the Bot print help instead of running.
-    expect(sentTrigger()).toBe("/ids-log-self-audit 重新运行");
+    expect(sentTrigger()).toBe("/workflow run ids-log-self-audit");
   });
 
   it("keeps the run's own message when the binding supplies the command", async () => {
@@ -372,10 +372,18 @@ describe("POST /:flowId/rerun — command resolution", () => {
     expect(sentTrigger()).toBe("/ids-log-self-audit 什么是tc?");
   });
 
-  it("rejects a run whose workflow has no bound command", async () => {
+  it("still names an unbound workflow by id when the run records no message", async () => {
     insertRun("flow-unbound", "no-such-workflow", JSON.stringify({ message: null }));
 
-    const { status, body } = await rerun("flow-unbound");
+    const { status } = await rerun("flow-unbound");
+    expect(status).toBe(200);
+    expect(sentTrigger()).toBe("/workflow run no-such-workflow");
+  });
+
+  it("rejects a run that names no workflow at all", async () => {
+    insertRun("flow-blank", "", JSON.stringify({ message: null }));
+
+    const { status, body } = await rerun("flow-blank");
     expect(status).toBe(422);
     expect(String(body.message)).toContain("无法重跑");
     expect(sendInterventionMock).not.toHaveBeenCalled();

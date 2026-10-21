@@ -76,10 +76,22 @@ export function AppSidebar({
         <div className="flex h-[52px] items-center px-3">
           <brand.Logo compact />
           <span className="ml-auto flex shrink-0 items-center gap-0">
-            <IconButton label="搜索" icon={<Search className="h-4 w-4" />} onClick={() => setSearchOpen(true)} />
-            {notificationBell && <NotificationBell />}
+            {/* 展开态工具簇与折叠轨同判：muted 色阶退后（hover 由 ghost 自带 hover:text-foreground
+                恢复），品牌锁版为该行唯一高对比元素（尺寸仍 32px 触达不变） */}
+            <IconButton
+              className="text-muted-foreground"
+              label="搜索"
+              icon={<Search className="h-4 w-4" />}
+              onClick={() => setSearchOpen(true)}
+            />
+            {notificationBell && <NotificationBell className="text-muted-foreground" />}
             {onToggleCollapsed && (
-              <IconButton label="折叠导航" icon={<PanelLeftClose className="h-4 w-4" />} onClick={onToggleCollapsed} />
+              <IconButton
+                className="text-muted-foreground"
+                label="折叠导航"
+                icon={<PanelLeftClose className="h-4 w-4" />}
+                onClick={onToggleCollapsed}
+              />
             )}
           </span>
         </div>

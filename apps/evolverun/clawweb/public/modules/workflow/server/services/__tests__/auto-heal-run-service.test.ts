@@ -53,19 +53,20 @@ async function rejectWithoutSending(code: string, request = input) {
 }
 
 describe("source-aware auto-heal run service", () => {
-  it("replays the facade command for a cron run that records no input.command", async () => {
+  it("falls back to /workflow run for a cron run that records no command or message", async () => {
     expect(await service.run(input)).toEqual({ ok: true, workflowId, messageId: receipt.messageId, sessionId: receipt.sessionId });
     expect(findFullByFlowId).toHaveBeenCalledWith("source-cron");
     expect(hasExecutePermission).toHaveBeenCalledWith(workflowId, "owner-1");
     expect(hasEditPermission).toHaveBeenCalledWith(workflowId, "owner-1");
-    expect(findByWorkflowId).toHaveBeenCalledWith(workflowId);
+    // No message, so the binding is never consulted.
+    expect(findByWorkflowId).not.toHaveBeenCalled();
     expect(sendIntervention).toHaveBeenCalledOnce();
     const { command, commandLine } = sent();
     expect(command).toEqual({ botId: "default:owner-1", lifecycleStage: "draft", sessionId: null,
       sessionKey: expect.stringMatching(/^auto-heal-run:audit-workflow:/), message: expect.any(String) });
-    // facade_bindings stores the bare name ("audit-workflow"), so it needs the slash
-    // form plus a task description: a bare command makes the Bot answer with help text.
-    expect(commandLine).toBe(`/${workflowId} 自动修复重跑`);
+    // A bare slash command is a help query to the Bot; /workflow run is the
+    // documented invocation and the only form that needs no task description.
+    expect(commandLine).toBe(`/workflow run ${workflowId}`);
     expect(JSON.stringify(command)).not.toMatch(/must-not-escape|old-cron|SECRET|credentials/);
   });
 
@@ -117,46 +118,53 @@ describe("source-aware auto-heal run service", () => {
 
   it("adds the leading slash that facade_bindings omits", async () => {
     findByWorkflowId.mockResolvedValue([{ command: "ids-log-self-audit" }]);
+    run.input_json = JSON.stringify({ message: "跑一下自审" });
     await service.run(input);
-    expect(sent().commandLine).toBe("/ids-log-self-audit 自动修复重跑");
+    expect(sent().commandLine).toBe("/ids-log-self-audit 跑一下自审");
   });
 
   it("does not double the slash when the binding already carries one", async () => {
     findByWorkflowId.mockResolvedValue([{ command: "/already-slash" }]);
+    run.input_json = JSON.stringify({ message: "跑一下" });
     await service.run(input);
-    expect(sent().commandLine).toBe("/already-slash 自动修复重跑");
+    expect(sent().commandLine).toBe("/already-slash 跑一下");
   });
 
-  it("always carries a task description, so the Bot runs instead of printing help", async () => {
+  it("uses /workflow run when the run records no message, never a bare command", async () => {
     // Regression guard: `/ids-log-self-audit` alone made the Bot reply with the
     // command's help text and start nothing.
     findByWorkflowId.mockResolvedValue([{ command: "ids-log-self-audit" }]);
     run.input_json = JSON.stringify({ message: null, params: { enable_yuque_sync: "true" } });
     await service.run(input);
-    const commandLine = sent().commandLine;
-    expect(commandLine.startsWith("/ids-log-self-audit ")).toBe(true);
-    expect(commandLine.trim()).not.toBe("/ids-log-self-audit");
+    expect(sent().commandLine).toBe(`/workflow run ${workflowId}`);
+    expect(findByWorkflowId).not.toHaveBeenCalled();
+  });
+
+  it("still names the workflow by id when a message exists but nothing is bound", async () => {
+    findByWorkflowId.mockResolvedValue([]);
+    run.input_json = JSON.stringify({ message: "跑一下自审" });
+    await service.run(input);
+    expect(sent().commandLine).toBe(`/workflow run ${workflowId} 跑一下自审`);
   });
 
   it.each([
     ["no binding row", []],
     ["a blank bound command", [{ command: "   " }]],
     ["an unparseable input_json", [{ command: "audit-workflow" }], "{invalid"],
-  ])("refuses to send an empty trigger (%s)", async (_label, rows, inputJson = '{"trigger":"cron"}') => {
+  ])("still sends a usable trigger when the binding is unusable (%s)", async (_label, rows, inputJson = '{"trigger":"cron"}') => {
     findByWorkflowId.mockResolvedValue(rows);
     run.input_json = inputJson;
-    if (inputJson === "{invalid") {
-      // An unparseable input_json still resolves through the binding.
-      await service.run(input);
-      expect(sent().commandLine).toBe(`/${workflowId} 自动修复重跑`);
-      return;
-    }
-    await rejectWithoutSending("invalid_source");
+    // No message on any of these runs, so /workflow run <id> resolves without
+    // ever consulting the binding.
+    await service.run(input);
+    expect(sent().commandLine).toBe(`/workflow run ${workflowId}`);
   });
 
-  it("fails closed when the facade repository is absent", async () => {
+  it("falls back to /workflow run when the facade repository is absent", async () => {
     service = new AutoHealRunService({ ...deps, facadeRepo: null });
-    await rejectWithoutSending("invalid_source");
+    run.input_json = JSON.stringify({ trigger: "cron" });
+    await service.run(input);
+    expect(sent().commandLine).toBe(`/workflow run ${workflowId}`);
   });
 
   it("uses distinct sessions even when two requests start at the same time", async () => {
@@ -185,9 +193,9 @@ describe("source-aware auto-heal run service", () => {
     hasExecutePermission.mockResolvedValue(false);
     await service.run({ ...input, actorId: "admin", isAdmin: true });
     expect(sent().command.botId).toBe("default:original-owner");
-    // The actor is identified in the message header; the trigger itself is the bound command.
+    // The actor is identified in the message header; the trigger itself is the resolved command.
     expect(sent().command.message).toContain("admin(admin)");
-    expect(sent().commandLine).toBe(`/${workflowId} 自动修复重跑`);
+    expect(sent().commandLine).toBe(`/workflow run ${workflowId}`);
   });
 
   it("accepts edit as well as execute permission", async () => {

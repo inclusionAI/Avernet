@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { parse as parseYaml } from 'yaml';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
+import {repairFailureRef,readRepairFailure} from '@avernet/workflow/server/contracts/repair-failure';
 import { WorkflowDeployHistoryRepository } from '@avernet/workflow/server/repositories/workflow-deploy-history-repository';
 import { digestRepairJson, type RepairBaseline } from '@avernet/workflow/server/contracts/repair-batch';
 import { repairProposalSpecDigest } from '@avernet/workflow/server/contracts/repair-baseline-identity';
@@ -92,6 +93,22 @@ export class RepairGitStore {
   }
 
   async result(request: RepairExecutionReadRequest): Promise<RepairGeneratedResult> {
+    let absent: unknown;
+    try{return await this.candidateResult(request);}catch(error){if(!(error instanceof RepairResultAbsentError))throw error;absent=error;}
+    const failureIdentity={taskId:request.input.taskId,revision:request.input.revision,...request.identity,
+      parentCandidateCommit:request.input.parentCandidateCommit??request.input.baseline.packCommit};
+    const failureRef=repairFailureRef(failureIdentity);
+    if((await this.git(['ls-remote','origin',failureRef],64*1024)).trim()){
+      const commit=await this.fetch(failureRef);
+      const parent=failureIdentity.parentCandidateCommit;
+      const parents=(await this.git(['rev-list','--parents','-n','1',commit])).trim().split(/\s+/).slice(1);
+      if(parents.length!==1||parents[0]!==parent
+        ||(await this.git(['rev-parse',`${commit}^{tree}`])).trim()!==(await this.git(['rev-parse',`${parent}^{tree}`])).trim())throw new Error('Failure metadata changed the frozen Pack');
+      return readRepairFailure(await this.git(['log','-1','--format=%B',commit],32*1024),failureIdentity);
+    }
+    throw absent;
+  }
+  private async candidateResult(request:RepairExecutionReadRequest):Promise<RepairGeneratedResult>{
     const branch = request.input.taskBranch;
     if (!safeBranch.test(branch)) throw new Error('Invalid repair task branch');
     const advertised = (await this.git(['ls-remote', 'origin', `refs/heads/${branch}`], 64 * 1024)).trim();

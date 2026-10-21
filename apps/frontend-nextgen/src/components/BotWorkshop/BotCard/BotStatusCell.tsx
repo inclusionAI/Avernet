@@ -1,4 +1,3 @@
-import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { BotDomain } from '@/services/botWorkshop';
@@ -12,28 +11,42 @@ export interface BotStatusCellProps {
   onToggleProgress?: () => void;
 }
 
-function toneFor(lifecycle: BotDomain['lifecycle']): 'success' | 'error' | 'warning' | 'neutral' {
+/**
+ * 状态圆点配 dmore 稿（10/19 Bot管理首页）：8px 圆点 + 13px 文字，不再用彩色底 Badge。
+ * 圆点色走语义 token（草稿=warning 橙、预发/部署中=info 蓝、运行中=success 绿、
+ * 离线/未知=zinc、失败=destructive 红），暗色模式随 token 自动翻转。
+ */
+function dotColor(lifecycle: BotDomain['lifecycle']): string {
   switch (lifecycle) {
     case 'running':
-      return 'success';
+      return 'bg-success';
+    case 'deploying':
+    case 'prestable':
+      return 'bg-info';
     case 'failed':
-      return 'error';
+      return 'bg-destructive';
+    case 'offline':
     case 'unknown':
-      return 'warning';
+      return 'bg-content-icon';
     default:
-      return 'neutral';
+      return 'bg-warning';
   }
 }
 
 const BotStatusCell: React.FC<BotStatusCellProps> = ({ bot, progressExpanded, onToggleProgress }) => {
   const failureReason = bot.lifecycle === 'failed' ? bot.disabledActions.restart : undefined;
   const statusLabel = bot.serviceMode === 'service' && bot.lifecycle === 'failed' ? '部署失败' : lifecycleLabel[bot.lifecycle];
-  const badge = <Badge tone={toneFor(bot.lifecycle)}>{statusLabel}</Badge>;
+  const status = (
+    <span className="inline-flex items-center gap-1.5">
+      <span aria-hidden className={`size-2 shrink-0 rounded-full ${dotColor(bot.lifecycle)}`} />
+      <span className="whitespace-nowrap text-[13px] text-muted-foreground">{statusLabel}</span>
+    </span>
+  );
 
   if (bot.deployment === 'local' && ['deploying', 'failed', 'offline'].includes(bot.lifecycle))
     return (
       <div className="flex items-center gap-1">
-        {badge}
+        {status}
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -57,14 +70,14 @@ const BotStatusCell: React.FC<BotStatusCellProps> = ({ bot, progressExpanded, on
       </div>
     );
   if (!failureReason) {
-    return badge;
+    return status;
   }
 
   return (
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="inline-flex">{badge}</span>
+          <span className="inline-flex">{status}</span>
         </TooltipTrigger>
         <TooltipContent>{failureReason}</TooltipContent>
       </Tooltip>

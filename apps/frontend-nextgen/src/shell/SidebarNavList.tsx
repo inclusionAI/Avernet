@@ -42,7 +42,7 @@ export function SidebarNavList({ activePath, items, onNavigate, collapsed = fals
                     key={item.id}
                     ariaLabel={item.label}
                     label={item.label}
-                    className={cn(active && 'bg-selected text-foreground')}
+                    className={cn(active && 'bg-primary/10 text-primary')}
                     icon={<Icon className="h-4 w-4" />}
                     onClick={() => onNavigate(item.path)}
                   />
@@ -66,7 +66,7 @@ export function SidebarNavList({ activePath, items, onNavigate, collapsed = fals
                 Bot 分组右侧空间切换图标右缘 x=-16 与导航项内容右缘对齐；
                 分组间无分隔线（SVG 稿纯留白过渡，B1 的 border-t 分隔线已按稿撤除）。 */}
             <div className="flex min-h-8 items-center justify-between gap-2 px-2 pb-0.5 pt-0.5">
-              <p className="text-xs font-normal text-content-soft">{navSectionLabels[section]}</p>
+              <p className="text-xs font-normal tracking-[0.08em] text-content-soft">{navSectionLabels[section]}</p>
               {section === 'bot' && showSpaceSwitcher && <SpaceSwitcher compact />}
             </div>
             <div className="flex flex-col gap-0.5">
@@ -78,11 +78,14 @@ export function SidebarNavList({ activePath, items, onNavigate, collapsed = fals
                     key={item.id}
                     variant="ghost"
                     className={cn(
-                      // SVG 实测：药囊 h32 rx6 inset-x8（34px 行距=32+gap2）、icon 16 @x16、
-                      // 文案 14px @x40；未选 #525252 文案 + #71717A 图标、选中 #EBEBEB 胶囊 + #09090B。
+                      // SVG 实测：药囊 h32 rx6 inset-x8（34px 行距=32+gap2）、icon 16 @x16、文案 14px @x40；
+                      // 未选 #525252 文案 + #71717A 图标。选中态从稿面 #EBEBEB 灰胶囊改判为
+                      // 品牌语言 bg-primary/10 + text-primary + font-medium——与内容页（Bot 工作台/
+                      // 智能进化 pill tabs）激活态同构，导航与画布共用一套选择语义（用户反馈：侧栏观感）。
                       'h-8 w-full justify-start gap-2 rounded-md px-2 text-sm font-normal',
                       'text-content-strong hover:bg-muted/60 [&_svg]:text-muted-foreground',
-                      active && 'bg-selected text-foreground hover:bg-selected [&_svg]:text-foreground',
+                      active &&
+                        'bg-primary/10 font-medium text-primary hover:bg-primary/10 [&_svg]:text-primary',
                     )}
                     leftIcon={<Icon className="h-4 w-4" />}
                     onClick={() => onNavigate(item.path)}

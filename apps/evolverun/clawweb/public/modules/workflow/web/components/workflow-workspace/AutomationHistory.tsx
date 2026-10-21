@@ -12,7 +12,10 @@ export default function AutomationHistory({ workflowId }: { workflowId: string }
   return <section aria-label="自动任务历史记录" className="mt-4 space-y-3" aria-busy={records.isFetching}>
     <div className="flex flex-wrap items-center justify-between gap-2">
       <p className="font-medium">{all ? '全部执行记录' : '最近 8 条记录'}</p>
-      <button type="button" className="text-primary underline" onClick={() => { setAll(!all); setCursors(['']) }}>{all ? '收起全部记录' : '查看全部记录'}</button>
+      <div className="flex gap-3">
+        <button type="button" disabled={records.isFetching} className="text-primary underline disabled:opacity-50" onClick={() => void records.refetch()}>刷新记录</button>
+        <button type="button" className="text-primary underline" onClick={() => { setAll(!all); setCursors(['']) }}>{all ? '收起全部记录' : '查看全部记录'}</button>
+      </div>
     </div>
     <p className="text-xs text-muted-foreground">按任务创建时间从新到旧排列，时间均为上海时间。</p>
     {all && <div className="flex flex-wrap gap-3">

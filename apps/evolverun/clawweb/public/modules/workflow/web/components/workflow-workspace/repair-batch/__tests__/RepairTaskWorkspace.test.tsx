@@ -19,6 +19,15 @@ function fixture():RepairTaskDetail {
 const props=()=>({canEdit:true,onFeedback:vi.fn(),onCancel:vi.fn(),onRetryDispatch:vi.fn(),onRetryGeneration:vi.fn(),onRefresh:vi.fn(),dispatchError:'',busy:false})
 function mount(detail=fixture(),extra={}){return render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><RepairTaskPanel detail={detail} {...props()} {...extra}/></QueryClientProvider>)}
 beforeEach(()=>{sessionStorage.clear();vi.clearAllMocks();api.diff.mockResolvedValue({files:[],truncated:false});api.trials.mockResolvedValue({configured:false,trials:[]});api.verification.mockResolvedValue({evidence:{deployNumber:160,total:0,excludedUnknownVersions:0,samples:[],automatic:[]},conclusions:[]})})
+it('shows the failed stage, original goal, exact parse location and next action without downloading diagnostics',()=>{
+ const detail=fixture();detail.latestAttempt.phase='failed';detail.latestAttempt.draft=null;detail.latestSuccessful=null;
+ detail.latestAttempt.error={code:'CANDIDATE_WRITE_FAILED',message:'生成结果解析失败',stage:'parse_model_output',details:{reasonCode:'MODEL_OUTPUT_INVALID_JSON',itemIds:['source'],itemIndex:1,itemCount:1,line:1,column:2,parserMessage:'Expecting property name enclosed in double quotes'}};
+ mount(detail);
+ const failure=screen.getByRole('alert',{name:'生成失败详情'});
+ expect(failure).toHaveTextContent('模型结果解析');expect(failure).toHaveTextContent('校验输入并限制输出');
+ expect(failure).toHaveTextContent('第 1 行，第 2 列');expect(failure).toHaveTextContent('属性名必须使用双引号');
+ expect(failure).toHaveTextContent('exec');expect(failure).toHaveTextContent('可以沿用原要求重试');
+});
 it('switches actual content without generating, trialing or publishing and supports arrow-key focus',async()=>{
  const user=userEvent.setup(),onFeedback=vi.fn();mount(fixture(),{onFeedback});
  const tabs=await screen.findByRole('tablist',{name:'任务内容'});

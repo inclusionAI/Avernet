@@ -139,7 +139,8 @@ it('freezes all original sources and the actual consumer protocol in one generat
  const revision=await integrated.create('reviewer',{workflowId:'wf-1',itemIds:page.items[0].aggregation!.itemIds,inputDigest:page.inputDigest,instructions:'keep business behavior',requestId:'integrated-generation'});
  expect(revision.input.instructions).toBe('keep business behavior');
  expect(revision.input.items.map(i=>i.itemId)).toEqual(['item-0','item-1','item-2']);
- expect(revision.input.integration).toBeUndefined();
+ expect(revision.input.integration?.plans).toHaveLength(1);
+ expect(revision.input.integration?.plans[0].originalItemIds).toEqual(['item-0','item-1','item-2']);
  expect(revision.input.items.every(item=>item.context?.evidencePacket)).toBe(true);
  expect(f.calls).toHaveLength(1);
 });
@@ -190,7 +191,7 @@ it.each(['requests','tokens'] as const)('releases the %s budget lease and anothe
  restartTime=61000;await restarted.tick();expect(classify).toHaveBeenCalledTimes(1);
 });
 
-it('retains a reviewed shared cause in every affected frozen plan without adding unselected sources',async()=>{
+it('keeps the manual joint scope and original proposals when reviewed causes span selected sources',async()=>{
  const {c,read,classify,advance}=await setup();
  f.items.forEach((item,i)=>{(item.proposal!.operations as Array<Record<string,unknown>>)[0].nodeId=`node-${i}`});
  const shared={title:'共同输入缺失',certainty:'hypothesis',itemIds:['item-0','item-1'],evidenceIds:[]};
@@ -203,7 +204,7 @@ it('retains a reviewed shared cause in every affected frozen plan without adding
  const page=await integrated.candidates('wf-1');
  const revision=await integrated.create('reviewer',{workflowId:'wf-1',itemIds:['item-0','item-1'],inputDigest:page.inputDigest,instructions:'',requestId:'shared-cause'});
  expect(revision.input.items.map(item=>item.itemId)).toEqual(['item-0','item-1']);
- expect(revision.input.integration).toBeUndefined();
+ expect(revision.input.integration?.plans.flatMap(plan=>plan.originalItemIds).sort()).toEqual(['item-0','item-1']);
  expect(revision.input.items.map(item=>item.proposal)).toEqual(f.items.slice(0,2).map(item=>item.proposal));
 });
 

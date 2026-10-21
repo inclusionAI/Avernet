@@ -3,7 +3,6 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { SqliteDatabase } from '@avernet/clawweb-shared/server/db';
 import { repairReleaseMigrations } from '@avernet/clawweb-shared/server/schema-repair-release';
-import { automationHistoryMigration } from '@avernet/clawweb-shared/server/schema-automation-history';
 import { WorkflowAutomationHistoryRepository } from '../workflow-automation-history-repository.js';
 import { taskScope } from '../workflow-automation-repository.js';
 import { automationRecordQuery } from '../../contracts/workflow-automation-history.js';
@@ -12,8 +11,6 @@ const now = Date.parse('2026-10-20T10:00:00+08:00'), day = 86400000;
 beforeEach(async () => {
   raw = new Database(':memory:'); db = new SqliteDatabase(raw);
   for (const migration of repairReleaseMigrations) for (const sql of migration.sql) await db.exec(db.dialect.renderDdl(sql));
-  await automationHistoryMigration.migrate!(db);
-  for (const sql of automationHistoryMigration.sql) await db.exec(db.dialect.renderDdl(sql));
   repo = new WorkflowAutomationHistoryRepository(db);
 });
 afterEach(async () => { await db.close(); });
@@ -56,19 +53,19 @@ it('rejects oversized pages, invalid filters and invalid cursors before any data
   expect(read).not.toHaveBeenCalled();
   expect(() => automationRecordQuery({ limit: ['8', '20'] })).toThrow();
 });
-it('uses ordered index ranges and bounded scalar projections for a large history and rare-status filter', async () => {
+it('uses the existing task index and bounded projections without truncating rare-status or deep history', async () => {
   raw.transaction(() => { for (let i = 1; i <= 20000; i++) insert(i, now - i, ['auto_run', 'auto_draft', 'auto_notice'][i % 3], i > 19990 ? 'blocked' : 'done'); })();
   const query = vi.spyOn(db, 'query');
   for (const status of ['all', 'blocked'] as const) {
     query.mockClear();
     const page = await repo.page('wf', { limit: 8, status }, now);
-    expect(page.jobs).toHaveLength(8); expect(query).toHaveBeenCalledTimes(3);
+    expect(page.jobs).toHaveLength(8); expect(query).toHaveBeenCalledTimes(1);
     for (const [sql, args] of query.mock.calls) {
       expect(sql).not.toMatch(/COUNT\s*\(|OFFSET|SELECT\s+body_json/i);
       expect(args?.at(-1)).toBe(9);
       const plans = raw.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...args! as never[]) as { detail: string }[];
-      expect(plans.some(row => row.detail.includes(status === 'all' ? 'idx_repair_history_time' : 'idx_repair_history_status'))).toBe(true);
-      expect(plans.some(row => /SCAN workflow_repair_release_records|TEMP B-TREE/.test(row.detail))).toBe(false);
+      expect(plans.some(row => row.detail.includes('idx_repair_release_task'))).toBe(true);
+      expect(plans.some(row => /SCAN workflow_repair_release_records/.test(row.detail))).toBe(false);
     }
     query.mockClear();
     const deepCursor = Buffer.from(JSON.stringify({at:now,time:now-15000,id:(15000).toString(16).padStart(64,'0')})).toString('base64url');
@@ -76,15 +73,26 @@ it('uses ordered index ranges and bounded scalar projections for a large history
     expect(deep.jobs.every(job => job.createdAtMs! <= now-15000)).toBe(true);
     for (const [sql, args] of query.mock.calls) {
       const plans = raw.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...args! as never[]) as { detail: string }[];
-      expect(plans.some(row => /TEMP B-TREE/.test(row.detail))).toBe(false);
+      expect(plans.some(row => row.detail.includes('idx_repair_release_task'))).toBe(true);
       expect(args).toContain(now-15000);
     }
   }
 });
-it('derives indexed status from historical journals and updates it automatically', async () => {
+it('reads current status from historical journals without a generated column', async () => {
   const id = insert(1, now, 'auto_run', 'waiting');
   expect((await repo.page('wf', { status: 'waiting' }, now)).jobs).toHaveLength(1);
   raw.prepare("UPDATE workflow_repair_release_records SET body_json = json_set(body_json, '$.status', 'done') WHERE record_id=?").run(id);
   expect((await repo.page('wf', { status: 'waiting' }, now)).jobs).toEqual([]);
   expect((await repo.page('wf', { status: 'done' }, now)).jobs).toHaveLength(1);
+});
+
+it('extracts display JSON only after selecting a page, even when newer rows arrive last in index order', async () => {
+  for (let i = 1; i <= 200; i++) insert(i, now - 200 + i);
+  let extractions = 0;
+  raw.function('observe_json', value => { extractions++; return value; });
+  const query = db.query.bind(db);
+  vi.spyOn(db, 'query').mockImplementation((sql, args) => query(sql.replace(/JSON_EXTRACT\(([^)]+)\)/g, 'observe_json(JSON_EXTRACT($1))'), args));
+  const page = await repo.page('wf', { limit: 8 }, now);
+  expect(page.jobs.map(row => row.flowId)).toEqual(['flow-200', 'flow-199', 'flow-198', 'flow-197', 'flow-196', 'flow-195', 'flow-194', 'flow-193']);
+  expect(extractions).toBeLessThanOrEqual(9 * 8);
 });

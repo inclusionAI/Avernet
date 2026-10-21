@@ -1,7 +1,7 @@
-import { render, screen, within, waitFor } from '@testing-library/react'
+import { act, render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { focusManager, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import AutomationHistory from '../AutomationHistory'
 const requests: URL[] = []
 beforeEach(() => {
@@ -14,7 +14,7 @@ beforeEach(() => {
     return { ok: true, json: async () => ({ jobs: Array.from({length:count}, (_,i)=>({id:`${cursor?'older':'new'}-${i}`,kind:'auto_run',status:'done',attempts:1,reason:null,flowId:`${cursor?'older':'new'}-run-${i}`,complete:true})), nextCursor: !cursor && count === limit ? 'next-page' : null }) }
   }))
 })
-afterEach(()=>vi.unstubAllGlobals())
+afterEach(()=>{focusManager.setFocused(undefined);vi.useRealTimers();vi.unstubAllGlobals()})
 function mount(){const query = new QueryClient({defaultOptions:{queries:{retry:false},mutations:{retry:false}}});return render(<QueryClientProvider client={query}><AutomationHistory workflowId="wf/a"/></QueryClientProvider>)}
 it('loads only eight recent records initially, fetching older pages only on demand', async()=>{
   mount()
@@ -62,3 +62,16 @@ it('exposes query errors and lets the user retry without business writes', async
   await screen.findByText(/运行 new-run-7/)
   expect(requests).toHaveLength(1)
 })
+
+it('does not poll history and refreshes explicitly on request', async () => {
+  vi.useFakeTimers();
+  focusManager.setFocused(true);
+  mount();
+  await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+  expect(screen.getByText(/运行 new-run-7/)).toBeVisible();
+  await act(async () => { await vi.advanceTimersByTimeAsync(45000); });
+  expect(requests).toHaveLength(1);
+  vi.useRealTimers();
+  await userEvent.click(screen.getByRole('button', { name: '刷新记录' }));
+  await waitFor(() => expect(requests).toHaveLength(2));
+});

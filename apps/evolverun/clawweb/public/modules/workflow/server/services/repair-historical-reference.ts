@@ -22,6 +22,30 @@ export function freezeReference(item:RepairItem,target:WorkflowSnapshotRef|undef
  if(!target)return item;
  return {...item,context:{...item.context,targetSnapshot:target,referenceOnly:itemSnapshotKey(item)!==workflowSnapshotKey(target)}};
 }
+/** Review overlapping node goals together; an atomic suggestion is never split. */
+export function manualIntegration(items:RepairItem[],baseline:RepairBaseline):NonNullable<RepairBatchInput['integration']>{
+ const nodes=(item:RepairItem)=>new Set([
+  ...(Array.isArray(item.proposal?.operations)?item.proposal.operations:[]).map((op:unknown)=>op&&typeof op==='object'&&'nodeId' in op&&typeof op.nodeId==='string'&&op.nodeId?op.nodeId:'*'),
+  ...(item.context?.nodeId?[String(item.context.nodeId)]:[]),
+  ...(Array.isArray(item.proposal?.patches)&&item.proposal.patches.length?['*']:[]),
+ ]);
+ const groups:Array<{items:RepairItem[];nodes:Set<string>}>=[];
+ for(const item of items){
+  const current={items:[item],nodes:nodes(item)};if(!current.nodes.size)current.nodes.add('*');
+  for(let index=0;index<groups.length;){
+   const group=groups[index];
+   if(current.nodes.has('*')||group.nodes.has('*')||[...current.nodes].some(node=>group.nodes.has(node))){
+    current.items.push(...group.items);for(const node of group.nodes)current.nodes.add(node);groups.splice(index,1);index=0;
+   }else index++;
+  }
+  groups.push(current);
+ }
+ return {schemaVersion:'workflow-proposal-plan/v1',baselineSpecDigest:baseline.specDigest,plans:groups.map(group=>{
+  const originals=items.filter(item=>group.items.includes(item));
+  return {id:digestRepairJson(['selected-goals/v1',baseline,originals.map(item=>item.itemId)]),originalItemIds:originals.map(item=>item.itemId),
+   goals:originals.map(item=>`综合核对原始建议 ${item.itemId} 的完整目标；合并重复目标，保留互补约束，无法兼容的目标报告未解决，不扩大用户选择。`),relation:'complementary' as const};
+ })};
+}
 /** All explicitly selected goals are rewritten together against the current files, never old patches applied sequentially. */
 export function historicalIntegration(items:RepairItem[],baseline:RepairBaseline):NonNullable<RepairBatchInput['integration']>{
  for(const item of items)if(!itemSnapshot(item))changed('PLAN_SCOPE_INCOMPLETE',[item.itemId]);

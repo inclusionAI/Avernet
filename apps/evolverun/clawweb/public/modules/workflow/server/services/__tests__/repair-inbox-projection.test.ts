@@ -70,7 +70,7 @@ it('retains every member and frozen original when a real exact plan contains lar
   expect(revision.input.items).toHaveLength(10);
   expect(revision.input.items.every(row=>!('readSummary' in row))).toBe(true);
   expect((revision.input.items[0].context?.diagnoses as Array<{reasoning:string}>)[0].reasoning).toBe('证'.repeat(10000));
-  expect(revision.input.integration).toBeUndefined();
+  expect(revision.input.integration?.plans.flatMap(plan=>plan.originalItemIds).sort()).toEqual(f.items.map(item=>item.itemId).sort());
   expect(revision.input.items.flatMap(row=>row.sources)).toHaveLength(10);
 });
 it('pages complete metadata and retains trusted raw reads for legacy automatic selection',async()=>{

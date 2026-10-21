@@ -8,6 +8,7 @@ import RepairCandidateReview from './RepairCandidateReview'
 import RepairTaskScope from './RepairTaskScope'
 import RepairReleaseFlow from './RepairReleaseFlow'
 import RepairVerification from './RepairVerification'
+import RepairFailureDetails from './RepairFailureDetails'
 const views=[['scope','优化目标'],['candidate','改动与发布'],['observe','发布后效果']] as const
 type View=typeof views[number][0]
 const executionLabels:Record<string,string>={created:'等待派发',dispatching:'正在派发，结果尚未确认',dispatched:'已派发，等待生成结果',running:'正在生成候选',dispatch_failed:'派发失败',dispatch_uncertain:'派发结果待核对',succeeded:'执行结果已返回',failed:'执行失败',cancelled:'已取消'}
@@ -70,6 +71,7 @@ export default function RepairTaskPanel({detail,canEdit,onFeedback,onNextRound,o
    {detail.execution&&<details className="mt-3 text-xs text-muted-foreground"><summary>生成执行记录 · v{latest.revision}{latest.revision!==revision.revision?'（与当前候选分开保留）':''}</summary><p className="mt-2">{executionLabels[detail.execution.status]}</p><JsonDetails title="执行记录" value={detail.execution}/><JsonDetails title="最近尝试错误" value={latest.error}/></details>}
    {dispatchError&&<p role="alert" className="mt-3 text-xs text-destructive">{dispatchError}</p>}
   </header>
+  <RepairFailureDetails revision={revision.phase==='failed'?revision:latest} executionId={revision.phase!=='failed'||revision.revision===latest.revision?detail.execution?.executionId:null}/>
   <div role="tablist" aria-label="任务内容" className="grid grid-cols-3 rounded-lg border border-input bg-card p-1">
    {views.map(([key,label],index)=><button key={key} ref={element=>{tabRefs.current[index]=element}} id={`${id}-${key}`} type="button" role="tab" aria-selected={view===key} aria-controls={`${id}-${key}-panel`} tabIndex={view===key?0:-1} onClick={()=>setView(key)} onKeyDown={event=>{
     const next=event.key==='Home'?0:event.key==='End'?2:event.key==='ArrowRight'?(index+1)%3:event.key==='ArrowLeft'?(index+2)%3:-1

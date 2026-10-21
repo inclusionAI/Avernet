@@ -1,7 +1,7 @@
 import { RepairMaterialDownload } from '../repositories/repair-material-download.js';
 import { RepairMaterialRepository } from '../repositories/repair-material-repository.js';
 import { repairTaskPresentation } from '../contracts/repair-task-presentation.js';
-import {historicalReference,reviewVersionSelection,freezeReference,historicalIntegration} from './repair-historical-reference.js';
+import {historicalReference,reviewVersionSelection,freezeReference,historicalIntegration,manualIntegration} from './repair-historical-reference.js';
 import { inVersionScope, itemSnapshotKey } from '../contracts/repair-version-scope.js';
 import { workflowSnapshotKey } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot';
 import { inboxSummary, inboxPages } from './repair-inbox-projection.js';
@@ -527,7 +527,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       if(hasReferences&&this.execution?.integrationVersion!=='workflow-proposal-plan/v1')fail('CAPABILITY_UNAVAILABLE','生成器尚未支持历史建议参考',{reasonCode:'HISTORICAL_REFERENCE_UNSUPPORTED'});
       // Manual goals are reconciled during drafting; automatic batches retain patch validation.
       if (request.automation) assertProposalBaseline(frozenSelected, baseline);
-      const integrated = hasReferences?{instructions:'',integration:historicalIntegration(frozenSelected,baseline)}:request.automation && this.proposals ? await this.proposals.prepare(request.workflowId, selected, baseline) : { instructions: '', integration: undefined };
+      const integrated = hasReferences?{instructions:'',integration:historicalIntegration(frozenSelected,baseline)}:!request.automation&&frozenSelected.length>1?{instructions:'',integration:manualIntegration(frozenSelected,baseline)}:request.automation && this.proposals ? await this.proposals.prepare(request.workflowId, selected, baseline) : { instructions: '', integration: undefined };
       const frozenInstructions = [request.instructions, integrated.instructions].filter(Boolean).join('\n\n');
       if (frozenInstructions.length > MAX_INSTRUCTIONS_CHARS) fail('PAYLOAD_TOO_LARGE', '整合目标与说明过长，请缩小本次选择范围');
       if (request.automation && !taskId && canonicalRepairJson(await this.generationBaseline(request.workflowId)) !== canonicalRepairJson(baseline)) fail('STATE_CONFLICT', '生效版本在准备期间再次变化，选择与要求保留', { reasonCode: 'BASELINE_STALE' });
@@ -571,7 +571,8 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         const excludedSourceRefs = snapshot.items.filter(item => !request.itemIds.includes(item.itemId) && item.sourceAvailable)
           .flatMap(item => item.sources).sort((a, b) => canonicalRepairJson(a).localeCompare(canonicalRepairJson(b)));
         const input: RepairBatchInput = { schemaVersion: 'workflow-repair/v2', taskId: id,
-          revision: (previous?.latestAttempt.revision ?? 0) + 1, baseline, items: this.proposals || integrated.integration ? prepareProposalEvidence(selected, !!request.automation,{complete:true}) : selected,
+          // A manual joint plan does not change the existing evidence preparation policy.
+          revision: (previous?.latestAttempt.revision ?? 0) + 1, baseline, items: this.proposals || hasReferences ? prepareProposalEvidence(selected, !!request.automation,{complete:true}) : selected,
           excludedSources: { count: excludedSourceRefs.length, digest: digestRepairJson(excludedSourceRefs) },
           ...(request.automation ? { automation: request.automation } : {}),
           ...('integration' in integrated && integrated.integration ? { integration: integrated.integration } : {}),
@@ -689,6 +690,8 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         const committed = await repo.findRequest(task.workflowId, request.requestId, digest);
         if (committed) return committed;
         const input = { ...task.latestAttempt.input, revision: request.expectedRevision + 1,
+          ...(!task.latestAttempt.input.automation&&!task.latestAttempt.input.integration&&task.latestAttempt.input.items.length>1
+            ?{integration:manualIntegration(task.latestAttempt.input.items,task.latestAttempt.input.baseline)}:{}),
           parentCandidateCommit: typeof task.latestSuccessful?.draft?.candidateCommit === 'string' ? task.latestSuccessful.draft.candidateCommit : null,
           previousReportRef: task.latestSuccessful ? `${taskId}/revisions/${task.latestSuccessful.revision}` : null };
         const created = await repo.createRevision(tx, { input, requestId: request.requestId, requestDigest: digest,
@@ -751,8 +754,10 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
           }
         }
       } else {
+        let failure: Record<string, unknown> | undefined;
+        if(remote.status==='failed')try{const result=await this.execution.readResult(request);if(result.status==='failed')failure=result.error;}catch{/* Older consumers have no durable failure result. */}
         await this.report({ workflowId: revision.workflowId, taskId: revision.taskId, revision: revision.revision,
-          expectedStateVersion, status: 'failed', error: { code: remote.status === 'stopped' ? 'AIS_STOPPED' : 'AIS_FAILED',
+          expectedStateVersion, status: 'failed', error: failure??{ code: remote.status === 'stopped' ? 'AIS_STOPPED' : 'AIS_FAILED',
             rawStatus: remote.rawStatus, message: remote.errorMessage } });
         settled += 1;
       }

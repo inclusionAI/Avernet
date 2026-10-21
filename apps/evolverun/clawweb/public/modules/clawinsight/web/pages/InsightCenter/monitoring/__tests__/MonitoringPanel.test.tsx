@@ -287,6 +287,7 @@ describe('MonitoringPanel', () => {
     api.targetDiagnoses.mockImplementation((botId, query) => query.page === 18 ? pending.promise : Promise.resolve({ ...page(botId), total: 400, totalPages: 20, page: query.page }));
     render(<MonitoringPanel />);
     await screen.findByText('1 / 20 页');
+    await waitFor(() => expect(screen.getByRole('button', { name: '跳转' })).toBeEnabled());
     fireEvent.change(screen.getByLabelText('跳转页码'), { target: { value: '18' } });
     expect(api.targetDiagnoses).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: '跳转' }));

@@ -40,7 +40,7 @@ const BotTagsCell: React.FC<BotTagsCellProps> = ({ bot, engineVersionState, onOp
         )}
         {bot.deployment === 'local' ? '本地' : '云端'}
       </Badge>
-      {bot.serviceMode === 'service' && <Badge tone="purple">服务化</Badge>}
+      {bot.serviceMode === 'service' && <Badge tone="success">服务化</Badge>}
       {onOpenEngineInfo &&
       engineVersionState?.kind === 'ready' &&
       engineVersionUiState(engineVersionState.observation) === 'updatable' ? (
