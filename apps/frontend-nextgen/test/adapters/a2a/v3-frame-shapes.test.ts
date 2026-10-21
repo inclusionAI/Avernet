@@ -109,7 +109,7 @@ const OpenClawParser = loadOpenClawParser();
 // 钉形表已外提为公共数据文件（src/adapters/a2a/v3FrameShapes.ts）：契约套件
 //（testing.ts）与 oracle 测试共用同一份事实源；translate.test 直接 import 数据
 // 文件，不再经本测试文件转手。
-import { V3_FRAME_SHAPES } from '@/adapters/a2a/v3FrameShapes';
+import { V3_FRAME_SHAPES } from '@avernet/a2a-chat-client/testing';
 
 // ─── 钉板自检辅助（宿主侧自检用；表本体已外提） ─────────────────────
 

@@ -1,4 +1,4 @@
-import { a2aUrlsFromBaseUrl, a2aUrlsFromWsUrl } from '@/adapters/a2a/urls';
+import { a2aUrlsFromBaseUrl, a2aUrlsFromWsUrl } from '@avernet/a2a-chat-client';
 
 describe('a2aUrlsFromWsUrl（spec §2 地址映射）', () => {
   it('直连 v3 ws url 派生根级 A2A 面（丢弃 /api/{engine}/ws 路径）', () => {

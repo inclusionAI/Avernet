@@ -13,6 +13,12 @@
  * 发送门判据出口是显式收 registry 的 isSessionBanned 纯函数版。
  */
 export { A2AProvider } from './A2AProvider';
+// —— A2AProvider 消费面常量（错误信号语与拒绝文案，宿主/测试消费单源） ——
+export {
+  A2A_APPROVAL_ANSWERS_REQUIRED_MESSAGE, A2A_APPROVAL_UNSUPPORTED_MESSAGE,
+  A2A_FILE_REFS_UNSUPPORTED_MESSAGE,
+  RECOVERY_INCOMPLETE_MESSAGE, RECOVERY_STOPPED_MESSAGE, OUTCOME_UNKNOWN_MESSAGE,
+} from './A2AProvider';
 // —— 协议底座 ——
 export {
   buildRpcRequest, parseRpcMessage, classifyFailure,
@@ -51,6 +57,7 @@ export {
   REFUSAL_REASON_CACHE_LIMIT, REFUSAL_REASON_NOT_FOUND_OR_EXPIRED,
   DEFAULT_MAX_ATTEMPTS, DEFAULT_TOTAL_BUDGET_MS,
   DEFAULT_BACKOFF_CAPS_MS, DEFAULT_PER_CALL_TIMEOUT_MS,
+  RecoveryRunner,
   type RecoveryEngine, type RecoveryConfig, type RecoveryOutcome,
 } from './recovery';
 // —— parser 注入缝（类型段；宿主适配器 tcChatParser 不在出口）——

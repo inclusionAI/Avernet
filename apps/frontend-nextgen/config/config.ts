@@ -10,6 +10,12 @@ export default defineConfig({
   routes,
   alias: {
     '@/extensions': path.resolve(__dirname, '../src/extensions/empty'),
+    // 公共 A2A 聊天客户端包（packages/a2a-chat-client，src 源直连——TS-source 包，
+    // jsx-ts-tsx 规则无 exclude 照转译；不经 node_modules 故不入 MFSU 预构建）。
+    '@avernet/a2a-chat-client':
+      path.resolve(__dirname, '../../../packages/a2a-chat-client/src/index.ts'),
+    '@avernet/a2a-chat-client/testing':
+      path.resolve(__dirname, '../../../packages/a2a-chat-client/src/testing.ts'),
   },
   npmClient: 'npm',
   headScripts: [{ src: '/runtime-config.js' }],

@@ -19,6 +19,10 @@
 import type { SdkParser, SdkParserConfig, SdkParserFactory } from './sdkParser';
 import { V3_FRAME_SHAPES } from './v3FrameShapes';
 
+// 钉形表经测试子出口转出（oracle 测试与契约套件共用同一份事实源）
+export { V3_FRAME_SHAPES } from './v3FrameShapes';
+export type { PinnedFrame } from './v3FrameShapes';
+
 const SESSION = 'agent:main:main';
 
 export interface ParserContractSuiteOptions {

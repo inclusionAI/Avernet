@@ -6,7 +6,7 @@
  * 兼容即认定一致）。本文件只做接线：注入 nextgen 的 @tc-chat parserFactory。
  */
 import { createTcChatParserFactory } from '@/adapters/a2a/tcChatParser';
-import { createParserContractSuite } from '@/adapters/a2a/testing';
+import { createParserContractSuite } from '@avernet/a2a-chat-client/testing';
 
 createParserContractSuite(createTcChatParserFactory(), {
   suiteName: 'a2a parser behavior contract (tc-chat 2.1.0)',

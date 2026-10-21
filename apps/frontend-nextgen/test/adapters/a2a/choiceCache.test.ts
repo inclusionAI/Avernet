@@ -1,4 +1,4 @@
-import { TransportChoiceCache } from '@/adapters/a2a/choiceCache';
+import { TransportChoiceCache } from '@avernet/a2a-chat-client';
 
 const makeCache = () => new TransportChoiceCache();
 

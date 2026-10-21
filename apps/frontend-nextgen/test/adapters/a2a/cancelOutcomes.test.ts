@@ -9,7 +9,7 @@ import {
   classifyCancel,
   CANCEL_UI_TEXT,
   type CancelOutcomeKind,
-} from '@/adapters/a2a/cancelOutcomes';
+} from '@avernet/a2a-chat-client';
 
 /** engine router._cancel_task 成功信封（kernel run_snapshot 口径） */
 const cancelResult = (state: string, engineAbort?: string) => ({
