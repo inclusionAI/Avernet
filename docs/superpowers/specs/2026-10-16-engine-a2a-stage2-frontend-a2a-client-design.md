@@ -322,11 +322,22 @@ context 的禁发**。
 5. §7 停止放量条件——本轮复审通过（六类处置、立即回滚、恢复放量证据明确）。
 
 首版范围不再扩大；桌面/BCS/GRT 维持排除。
-## 9. 公共化边界（原地版，2026-10-20 追加）
+## 9. 公共化边界（原地版 2026-10-20 → 结构提取执行档 2026-10-21）
 
 PR#2934 评审后调整交付边界：从"nextgen 专属实现"改为"Avernet 拥有、可被第二
-前端消费的公共实现"。**经三轮探讨（包全套 → 轻量出仓 → 原地）决定本次不搬
-目录、不建独立包**，交付"代码层边界"：
+前端消费的公共实现"。2026-10-20 先以"原地版"立代码层边界（本节前半，作为
+提取的预备工程全部保留）；**2026-10-21 owner 拍板完成结构提取**——
+packages/a2a-chat-client（src 17 文件 + test 13 套/自含 oracle/contract +
+package/tsconfig/jest/lock/README 全套），nextgen 经 tsconfig/umi/jest 三处
+alias 消费（npm file: 因 npm 版本 symlink 深度失准被否决，alias 同时消除
+MFSU 预构建风险），宿主三件（switch/bootstrap/tcChatParser）留 nextgen 由
+hostDir 钉板钉死。TeamClaw 导出对称性风险由 owner 接受并记录跟进（PR 描述
+"内部导出管线跟进"段）；hostIsolation 钉板随包升级出**防逃逸**检查（相对
+import 禁 '../'、闭包只见清单成员）。CI 增独立包 job（typecheck + open-core
+包根扫描 + jest）。
+
+以下为原地版过程记录（作为提取预备工程的历史依据保留）：
+
 
 - **parserFactory 注入缝**：A2AProvider 构造不再直调任何 SDK 加载器，
   `A2AProviderConfig.parserFactory` 必填（缺注入 typed `parser_factory_missing`
@@ -355,6 +366,7 @@ PR#2934 评审后调整交付边界：从"nextgen 专属实现"改为"Avernet �
 2. 第二消费者（内部 OCB）的 a2a 副本在未合入分支，"走 submodule 消费"从未被
    真实承诺（YAGNI）——为假想消费者建共享基建不成比例。
 
-**触发再评估的条件**：第二前端正式承诺 submodule 消费 → 提取为机械 PR
-（git mv 钉板清单 17 文件 + 三行 alias；策略纯函数已在 policy.ts，bootstrap
-余下 re-export 瘦身为纯 glue，消费面不变）。届时本节更新为提取实况。
+**触发再评估的条件（已触发并执行）**：owner 于 2026-10-21 决策推进——
+提取按预备工程如约为机械式：git mv 17 文件 + 13 测试套 + fixtures/脚本，
+三行 alias 接线，bootstrap 瘦身为 re-export + 装配（消费面与全部历史钉板
+语义不变）。本节已更新为提取实况。
