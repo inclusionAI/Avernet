@@ -685,6 +685,9 @@ it("lets an approved adjustment use an Engine request instead of the reference S
 it("TE adjusts and verifies an approved cron action through actual API calls without Shell", async () => {
   target = { ...target, provider: "teclaw", activeEngine: "teclaw" };
   let task = await create("approval", { target: { ...request.target, engine: "TE" } });
+  const { planProtocol } = await agent.bootstrap(task);
+  expect(planProtocol.allowedOperations).toEqual(["file.write", "file.delete", "engine.restart", "cron.create", "cron.update", "cron.delete", "cron.run"]);
+  expect(planProtocol.operationScope).toContain("启用和禁用使用 cron.update");
   vi.mocked(runtime.request).mockResolvedValue({ status: 200, body: { success: true, data: [] } });
   const inspected = await agent.inspect(task, { operation: "engine_read", request: { method: "GET", path: "/api/v1/bot/cron" }, clientRequestId: "read-cron", purpose: "核对诊断中的重复定时任务" });
   expect(inspected.status).toBe("succeeded");

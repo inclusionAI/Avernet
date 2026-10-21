@@ -60,6 +60,30 @@ it("approves primary adjustments without requiring technical execution details",
   expect(value.plan!.actions).toEqual(abstract.actions);
 });
 
+it.each(["enable", "disable"])("allows correcting a cron.%s plan before approval without changing the task", action => {
+  const before = { ...state(), phase: "plan" as const };
+  const actionPlan: RecoveryPlan = { ...plan, actions: [{ actionId: "toggle-cron", operationScope: { operation: `cron.${action}`, target: "98907" },
+    summary: "调整指定定时任务的启用状态", risk: "需确认原停用原因", rollback: "恢复原状态", verification: "读取任务确认状态" }] };
+  expect(() => submitRecoveryPlan(before, actionPlan, 100)).toThrowError(expect.objectContaining({
+    status: 422, code: "invalid_recovery_result", message: expect.stringContaining("cron.update"),
+  }));
+  expect(before).toMatchObject({ status: "running", phase: "plan", version: 1, plan: null });
+  actionPlan.actions[0].operationScope!.operation = "cron.update";
+  actionPlan.actions[0].engineOperation = { method: "POST", path: `/api/v1/bot/cron/98907/${action}` };
+  expect(submitRecoveryPlan(before, actionPlan, 100)).toMatchObject({
+    status: "waiting_owner", phase: "apply", plan: { approvedAt: null, actions: actionPlan.actions },
+  });
+});
+
+it("keeps a different action or target outside the approved scope forbidden", () => {
+  const action = { actionId: "toggle-cron", operationScope: { operation: "cron.update", target: "98907" },
+    summary: "启用指定任务", risk: "确认停用原因", verification: "读取任务状态" };
+  for (const request of [{ method: "POST" as const, path: "/api/v1/bot/cron/other/enable" },
+    { method: "DELETE" as const, path: "/api/v1/bot/cron/98907" }]) {
+    expect(() => assertActionScope(action, request)).toThrowError(expect.objectContaining({ status: 403, code: "recovery_action_scope_mismatch" }));
+  }
+});
+
 
 it("does not expose running or Owner-waiting states as upstream results", () => {
   expect(() => recoveryTaskResult(state())).toThrow();
@@ -84,7 +108,7 @@ it.each([
   { operation: "file.write", target: "/config/teclaw.json" },
 ])("requires Owner handling for protected changes %j", operationScope => {
   const action = { actionId: "change", operationScope, summary: "调整能力", risk: "影响任务", rollback: "撤销本次变更", verification: "读取并验证" };
-  expect(() => submitRecoveryPlan({ ...state(), phase: "plan" }, { ...plan, actions: [action] }, 100)).toThrow();
+  expect(() => submitRecoveryPlan({ ...state(), phase: "plan" }, { ...plan, actions: [action] }, 100)).toThrowError(expect.objectContaining({ status: 403 }));
   expect(submitRecoveryPlan({ ...state(), phase: "plan" }, { ...plan, actions: [] }, 100).status).toBe("waiting_owner");
 });
 it("rejects a prose-only action before approval rather than at execution", () => {
