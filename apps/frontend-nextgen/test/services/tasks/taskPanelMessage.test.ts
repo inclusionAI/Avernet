@@ -9,6 +9,7 @@
  *  - 空标题兜底为「任务」。
  */
 import type { TaskRecord } from '@/domain/tasks/models';
+import { PANEL_WIDTH_STORAGE_KEY } from '@/services/workspace/panelWidthMemory';
 import {
   buildRelayRootExecutionMessage,
   buildTaskLaunchMessage,
@@ -163,11 +164,21 @@ describe('buildTaskLaunchMessage', () => {
   });
 });
 
-describe('buildTaskPanelAixUI defaultWidth(V2 副屏初始宽 420,spec §3.1-2)', () => {
-  it('tab 声明携带 defaultWidth: 420', () => {
+describe('buildTaskPanelAixUI defaultWidth(V2 副屏初始宽 420,拖宽记忆恢复)', () => {
+  beforeEach(() => localStorage.removeItem(PANEL_WIDTH_STORAGE_KEY));
+
+  it('无拖宽记忆:tab 声明携带 defaultWidth: 420(PRD 初始宽,spec §3.1-2)', () => {
     const raw = buildTaskPanelAixUI('t-dw', '任务宽', { taskId: 't-dw' });
     const tabMatch = raw.match(/tab='([^']+)'/);
     expect(tabMatch).not.toBeNull();
     expect(JSON.parse(tabMatch![1]).defaultWidth).toBe(420);
+  });
+
+  it('用户拖宽至 560 后,新任务 tab 的 defaultWidth 恢复 560(SDK 下 defaultWidth 优先于容器级拖宽,切任务不回落)', () => {
+    localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, '560');
+    const raw = buildTaskPanelAixUI('t-dw2', '任务宽2', { taskId: 't-dw2' });
+    const tabMatch = raw.match(/tab='([^']+)'/);
+    expect(tabMatch).not.toBeNull();
+    expect(JSON.parse(tabMatch![1]).defaultWidth).toBe(560);
   });
 });

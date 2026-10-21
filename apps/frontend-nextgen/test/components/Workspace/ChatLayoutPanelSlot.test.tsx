@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import { ChatLayoutPanelSlot } from '@/components/Workspace/ChatLayoutPanelSlot';
+import { PANEL_WIDTH_STORAGE_KEY } from '@/services/workspace/panelWidthMemory';
 import { describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom/jest-globals';
 import { render } from '@testing-library/react';
@@ -84,5 +85,30 @@ describe('ChatLayoutPanelSlot', () => {
     // strip-before-forward：SDK Panel 不感知收起策略，只收到业务 props。
     expect(mockPanelRenders.at(-1)?.dismissOnOutside).toBeUndefined();
     expect(mockPanelRenders.at(-1)?.bridge).toBe('bridge');
+  });
+
+  it('Root 注入拖拽结果（dynamicWidth% + containerWidth）时换算 px 落盘（拖宽记忆）', () => {
+    localStorage.clear();
+    render(
+      <ChatLayoutPanelSlot
+        {...asRootInjected({ bridge: 'bridge', dynamicWidth: '45%', containerWidth: 1000 })}
+      />,
+    );
+    expect(localStorage.getItem(PANEL_WIDTH_STORAGE_KEY)).toBe('450');
+  });
+
+  it('拖拽更新时持续跟踪最新宽度（连续拖动记忆的是落点不是起点）', () => {
+    localStorage.clear();
+    const { rerender } = render(
+      <ChatLayoutPanelSlot
+        {...asRootInjected({ bridge: 'bridge', dynamicWidth: '45%', containerWidth: 1000 })}
+      />,
+    );
+    rerender(
+      <ChatLayoutPanelSlot
+        {...asRootInjected({ bridge: 'bridge', dynamicWidth: '56%', containerWidth: 1000 })}
+      />,
+    );
+    expect(localStorage.getItem(PANEL_WIDTH_STORAGE_KEY)).toBe('560');
   });
 });

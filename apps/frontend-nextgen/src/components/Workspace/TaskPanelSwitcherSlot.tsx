@@ -2,6 +2,7 @@ import { TaskSwitcherBar } from '@/assets/TaskPanel/v2/TaskSwitcherBar';
 import { getCapabilities } from '@/capabilities';
 import { useTaskSwitcherTasks } from '@/hooks/useTaskSwitcherTasks';
 import { chatBridge } from '@/services/workspace/chatBridge';
+import { resolveTaskPanelDefaultWidth } from '@/services/workspace/panelWidthMemory';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import React from 'react';
@@ -41,7 +42,8 @@ export const TaskPanelSwitcherSlot: React.FC<{
           title: target?.title ?? '任务',
           type: 'taskPanel.TaskLoopView',
           closable: true,
-          defaultWidth: 420,
+          // 新开任务 tab 的初始宽:用户拖宽过则以记忆宽恢复,否则 PRD 初始 420(见 panelWidthMemory)。
+          defaultWidth: resolveTaskPanelDefaultWidth(),
           params: { ...params, taskId },
         });
       }}

@@ -17,10 +17,11 @@
  * 收起、仅显式信号关闭；转发 SDK 前剥离。
  */
 import { useWorkspacePanelDismiss } from '@/hooks/useWorkspacePanelDismiss';
+import { persistPanelWidthPercent } from '@/services/workspace/panelWidthMemory';
 import type { PanelHandle } from '@tc-chat/core';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import type { ChatLayoutPanelProps } from '@tc-chat/ui/es/ChatLayout/types';
-import { forwardRef, useCallback, useId, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { WORKSPACE_RIGHT_PANEL_LAYOUT } from './workspacePanelLayout';
 
 /** Root cloneElement 注入的内部 props（公开类型未声明，运行时存在）。 */
@@ -70,6 +71,11 @@ export const ChatLayoutPanelSlot = forwardRef<PanelHandle, ChatLayoutPanelSlotPr
   // 传 false 不订阅点外收起，仅保留 ref 显式关闭通道。
   useWorkspacePanelDismiss(open && dismissOnOutside, contains, dismiss);
   const injected = rest as ChatLayoutPanelProps & ChatLayoutPanelInjectedProps;
+  // 拖宽记忆:Root 注入的 dynamicWidth(ResizeHandle 拖拽输出百分比)+ containerWidth
+  // 换算 px 落盘,任务 tab openTab 时读取恢复(见 panelWidthMemory 背景)。
+  useEffect(() => {
+    persistPanelWidthPercent(injected.dynamicWidth, injected.containerWidth);
+  }, [injected.dynamicWidth, injected.containerWidth]);
   const rootIsOpenChange = injected.onIsOpenChange;
   const handleIsOpenChange = useCallback(
     (isOpen: boolean) => {
