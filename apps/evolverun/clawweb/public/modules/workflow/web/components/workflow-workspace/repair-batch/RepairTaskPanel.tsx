@@ -27,11 +27,16 @@ export default function RepairTaskPanel({detail,canEdit,onFeedback,onNextRound,o
  const [view,setView]=useState<View>(views.some(([key])=>key===saved.current?.view)?saved.current.view:detail.release?.deployments.some(row=>row.revision===initialRevision(detail)&&row.status==='succeeded')?'observe':'candidate')
  const manualSelection=useRef(!!saved.current && saved.current.followLatest!==true)
  const known=useRef(new Map<number,RepairRevision>())
- for(const row of [...detail.revisions,...(detail.latestSuccessful?[detail.latestSuccessful]:[]),detail.latestAttempt])known.current.set(row.revision,row)
+ const executions=useRef(new Map<number,RepairTaskDetail['execution']>())
+ for(const row of [...detail.revisions,...(detail.latestSuccessful?[detail.latestSuccessful]:[]),detail.latestAttempt]){
+  known.current.set(row.revision,row)
+  executions.current.set(row.revision,detail.executions?.[row.revision]??(row.revision===detail.latestAttempt.revision?detail.execution:undefined))
+ }
  const revision=known.current.get(selectedRevision)??detail.latestSuccessful??detail.latestAttempt
  const revisions=[...known.current.values()].sort((a,b)=>b.revision-a.revision)
  const id=useId(),tabRefs=useRef<Array<HTMLButtonElement|null>>([])
  const latest=detail.latestAttempt
+ const selectedExecution=executions.current.get(revision.revision)
  const deployment=detail.release?.deployments.find(row=>row.revision===revision.revision&&row.status!=='failed')??detail.release?.deployments.find(row=>row.revision===revision.revision)
  const published=deployment?.status==='succeeded'&&!!deployment.receipt
  const alreadyPublished=detail.revisions.some(row=>row.phase==='published')||!!detail.release?.deployments.some(row=>row.status==='succeeded')
@@ -65,13 +70,13 @@ export default function RepairTaskPanel({detail,canEdit,onFeedback,onNextRound,o
    </div>
    {!canEdit&&<p className="mt-3 text-xs text-warning-foreground">当前只有查看权限。</p>}
    {latest.revision!==revision.revision&&<p className="mt-3 text-xs text-muted-foreground">最近一次生成 v{latest.revision}：{candidateLabel(detail,latest)}；当前展示 v{revision.revision} 的内容。</p>}
-   {latest.phase==='failed'&&<div className="mt-3 space-y-2 border-t border-border pt-3 text-sm">
+   {latest.revision===revision.revision&&latest.phase==='failed'&&<div className="mt-3 space-y-2 border-t border-border pt-3 text-sm">
     <p>{latest.error?.code==='GIT_RESULT_UNAVAILABLE'?'原候选结果尚未读取成功，请核对原结果。':detail.latestSuccessful?'最新生成失败，已有候选保留。':'首次生成失败，尚无候选。'}</p>
    </div>}
-   {detail.execution&&<details className="mt-3 text-xs text-muted-foreground"><summary>生成执行记录 · v{latest.revision}{latest.revision!==revision.revision?'（与当前候选分开保留）':''}</summary><p className="mt-2">{executionLabels[detail.execution.status]}</p><JsonDetails title="执行记录" value={detail.execution}/><JsonDetails title="最近尝试错误" value={latest.error}/></details>}
+   <details className="mt-3 text-xs text-muted-foreground"><summary>生成执行记录 · v{revision.revision}</summary>{selectedExecution?<><p className="mt-2">{executionLabels[selectedExecution.status]}</p><JsonDetails title="执行记录" value={selectedExecution}/></>:<p className="mt-2">该版本暂无执行记录。</p>}<JsonDetails title="本版本错误" value={revision.error}/></details>
    {dispatchError&&<p role="alert" className="mt-3 text-xs text-destructive">{dispatchError}</p>}
   </header>
-  <RepairFailureDetails revision={revision.phase==='failed'?revision:latest} executionId={revision.phase!=='failed'||revision.revision===latest.revision?detail.execution?.executionId:null}/>
+  <RepairFailureDetails revision={revision} executionId={selectedExecution?.executionId}/>
   <div role="tablist" aria-label="任务内容" className="grid grid-cols-3 rounded-lg border border-input bg-card p-1">
    {views.map(([key,label],index)=><button key={key} ref={element=>{tabRefs.current[index]=element}} id={`${id}-${key}`} type="button" role="tab" aria-selected={view===key} aria-controls={`${id}-${key}-panel`} tabIndex={view===key?0:-1} onClick={()=>setView(key)} onKeyDown={event=>{
     const next=event.key==='Home'?0:event.key==='End'?2:event.key==='ArrowRight'?(index+1)%3:event.key==='ArrowLeft'?(index+2)%3:-1

@@ -57,9 +57,9 @@ automatic publication or weaker verification thresholds are introduced.
 
 ## Additional product review cases
 
-The selected revision owns its error, checks and no-change result. Task-level
-execution is explicitly labeled with its latest revision, so later success does
-not imply a failed historical revision succeeded. Failure without a candidate is
+The selected revision owns its error, checks, no-change result and execution record.
+The latest-generation summary is separate; later execution state or IDs are never
+substituted for missing historical records. Failure without a candidate is
 recovery, not a publish target. A no-change attempt does not require republishing
 an older effective candidate.
 

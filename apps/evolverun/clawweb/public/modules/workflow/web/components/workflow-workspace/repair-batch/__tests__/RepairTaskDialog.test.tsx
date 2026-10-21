@@ -79,7 +79,7 @@ it('shows one primary action, durable failed deployment status and Git links ins
 beforeEach(() => { sessionStorage.clear(); Object.values(repairApi).forEach(mock => mock.mockReset()); repairApi.diff.mockResolvedValue({ files: [], truncated: false }) })
 afterEach(() => vi.useRealTimers())
 
-it('shows the selected historical failure and identifies the latest execution separately', async () => {
+it('shows no execution record for a historical failure when only the latest execution is available', async () => {
   const detail = taskDetail('review', '最新成功候选')
   detail.latestAttempt.revision = 6
   const failed = { ...detail.latestAttempt, revision: 5, phase: 'failed', draft: null, checks: null,
@@ -89,7 +89,10 @@ it('shows the selected historical failure and identifies the latest execution se
   render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit={false} onClose={() => {}} onChanged={() => {}} />)
   await userEvent.selectOptions(await screen.findByRole('combobox', { name: '查看修复版本' }), '5')
   expect(screen.getByText('所选版本 v5：生成失败')).toBeVisible()
-  expect(screen.getByText(/生成执行记录 · v6/)).toBeVisible()
+  expect(screen.getByText('生成执行记录 · v5')).toBeVisible()
+  await userEvent.click(screen.getByText('生成执行记录 · v5'))
+  expect(screen.getByText('该版本暂无执行记录。')).toBeVisible()
+  expect(screen.queryByText(/生成执行记录 · v6/)).not.toBeInTheDocument()
   expect(screen.getByText(/AIS 任务执行或提交失败/)).toBeVisible()
   expect(screen.queryByText('当前查看的是历史候选，请切回最新可用候选。')).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: '发布此版本' })).not.toBeInTheDocument()

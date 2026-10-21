@@ -458,9 +458,10 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     const workflowId = await repo.taskWorkflow(taskId);
     if (!workflowId) fail('TASK_NOT_FOUND', 'Repair task does not exist');
     const revisions = await repo.listRevisions(workflowId, taskId);
-    const execution = await new RepairTaskRepository(db).execution(taskId, revisions[0].revision);
+    const executions = await new RepairTaskRepository(db).executions(taskId, revisions.map(row => row.revision));
+    const execution = executions.get(revisions[0].revision);
     const response: RepairTaskDetail = { workflowId, taskId, ...repairTaskPresentation(revisions.at(-1)!.input), latestAttempt: revisions[0], latestSuccessful: revisions.find(r => r.draft !== null && (r.phase !== 'no_change' || isAutomaticBatch(r.input))) ?? null,
-      revisions, capabilities: this.capabilities(), ...(execution ? { execution } : {}) };
+      revisions, capabilities: this.capabilities(), executions: Object.fromEntries(executions), ...(execution ? { execution } : {}) };
     response.scopeItemCount = isAutomaticBatch(revisions[0].input) ? revisions[0].input.automation!.totalItems ?? new Set(revisions.flatMap(r => r.input.items.map(item => item.itemId))).size : revisions[0].input.items.length;
     const progressRevision=isAutomaticBatch(revisions[0].input)?revisions[0]:retainedFeedbackCandidate(revisions);
     const progressRows=progressRevision?revisions.filter(row=>row.revision<=progressRevision.revision):[];

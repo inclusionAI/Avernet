@@ -10,8 +10,11 @@ generation, trial, publication or reconciliation requests.
 
 One version selector controls all three views. The header names that candidate,
 its source (manual or daily automatic), exact publication receipt and, once read,
-its observation status. Latest-attempt failures and execution records are separate;
-viewing published v1 while v2 failed or needed no change retains v1's identity.
+its observation status. Generation execution state, IDs and errors follow the
+selected revision too; missing historical records explicitly show “暂无执行记录”,
+never another revision's execution. A separate one-line latest-generation summary
+remains visible when viewing an older revision. Viewing published v1 while v2
+failed or needed no change retains v1's identity.
 An incomplete automatic batch needing no change does not imply the whole round is
 publishable. The existing `automaticProgress.publishable` gate remains authoritative.
 
@@ -21,6 +24,14 @@ Per-task session storage retains inspection view/version on back/reopen and when
 returning from the scope editor. Storage failures do not block inspection. Task
 records and version digests remain unchanged. Paged historical records are folded;
 there is no second sidebar version picker.
+
+The task detail adds optional `executions`, keyed by revision, from the existing
+`ce_steps` records. The history response includes only its page plus the latest
+attempt/successful revisions, within the existing response budget. The browser
+retains execution metadata with previously loaded revision pages. Legacy
+`execution` remains latest-only for existing clients and task recovery; it is never
+used as a fallback for a selected historical revision. No schema or execution-state
+transition changes are required.
 
 ## Starting another optimization task
 

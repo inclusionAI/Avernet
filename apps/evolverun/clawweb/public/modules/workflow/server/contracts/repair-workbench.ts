@@ -42,6 +42,8 @@ export type RepairCandidatesResponse = {
   page: { page: number; pageSize: number; total: number; totalPages: number; snapshotDigest?: string };
   limits: { maxItems: number; maxRequestBytes: number }; canEdit: boolean;
 };
+export type RepairTaskExecution = { status: 'created' | 'dispatching' | 'dispatch_uncertain' | 'dispatched' | 'running' | 'dispatch_failed' | 'succeeded' | 'failed' | 'cancelled';
+  errorCode: string | null; jobId: string | null; attempt: number; executionId: string | null; rawStatus: string | null };
 export type RepairTaskDetail = {
   workflowId: string; taskId: string; title?: string; source?: 'automatic' | 'manual'; latestAttempt: RepairRevision;
   latestSuccessful: RepairRevision | null; revisions: RepairRevision[]; capabilities: RepairCapabilities;
@@ -49,8 +51,10 @@ export type RepairTaskDetail = {
   revisionPage?: { page: number; pageSize: number; total: number; totalPages: number };
   scopeItemCount?: number;
   automaticProgress?: { completedBatches: number; totalBatches: number; changedItems?: number; publishable?: boolean };
-  execution?: { status: 'created' | 'dispatching' | 'dispatch_uncertain' | 'dispatched' | 'running' | 'dispatch_failed' | 'succeeded' | 'failed' | 'cancelled';
-    errorCode: string | null; jobId: string | null; attempt: number; executionId: string | null; rawStatus: string | null };
+  /** Latest attempt only, retained for existing clients and task-level recovery actions. */
+  execution?: RepairTaskExecution;
+  /** Read-only metadata keyed by generation revision; not part of frozen task input. */
+  executions?: Record<number, RepairTaskExecution>;
 };
 export type RepairSelectionRequest = {
   automation?: AutomationOrigin;

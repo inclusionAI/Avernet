@@ -3,20 +3,36 @@ import { RepairBatchError, canonicalRepairJson, digestRepairJson, type RepairRev
 import type { RepairExecutionIdentity } from '../contracts/repair-workbench.js';
 import type { RepairTaskDetail } from '../contracts/repair-workbench.js';
 
+type ExecutionRow = { status: string; error_code: string | null; bot_run_id: string | null; output_json: string | null };
+function executionFromRow(row: ExecutionRow): NonNullable<RepairTaskDetail['execution']> {
+  let output: { attempt?: unknown; executionId?: unknown; rawStatus?: unknown } = {};
+  try {
+    const parsed = row.output_json ? JSON.parse(row.output_json) : null;
+    if (parsed && typeof parsed === 'object') output = parsed;
+  } catch { /* Corrupt metadata is shown as absent, never trusted. */ }
+  return { status: row.status as NonNullable<RepairTaskDetail['execution']>['status'], errorCode: row.error_code,
+    jobId: row.bot_run_id, attempt: Number.isSafeInteger(output.attempt) ? Number(output.attempt) : 0,
+    executionId: typeof output.executionId === 'string' ? output.executionId : null,
+    rawStatus: typeof output.rawStatus === 'string' ? output.rawStatus : null };
+}
+
 /** Workflow task projection in the existing task tables; never call the legacy suggestion finalizer. */
 export class RepairTaskRepository {
   constructor(private readonly db: IDatabase) {}
   stepId(taskId: string, revision: number): string { return digestRepairJson(['workflow_repair_draft', taskId, revision]); }
   async execution(taskId: string, revision: number): Promise<RepairTaskDetail['execution']> {
-    const row = (await this.db.query<{ status: string; error_code: string | null; bot_run_id: string | null; output_json: string | null }>(
+    const row = (await this.db.query<ExecutionRow>(
       "SELECT status, error_code, bot_run_id, output_json FROM ce_steps WHERE task_id = ? AND step_id = ? AND step_type = 'workflow_repair_draft'", [taskId, this.stepId(taskId, revision)]))[0];
-    if (!row) return undefined;
-    let output: { attempt?: unknown; executionId?: unknown; rawStatus?: unknown } = {};
-    try { output = row.output_json ? JSON.parse(row.output_json) : {}; } catch { /* Corrupt metadata is shown as absent, never trusted. */ }
-    return { status: row.status as NonNullable<RepairTaskDetail['execution']>['status'], errorCode: row.error_code,
-      jobId: row.bot_run_id, attempt: Number.isSafeInteger(output.attempt) ? Number(output.attempt) : 0,
-      executionId: typeof output.executionId === 'string' ? output.executionId : null,
-      rawStatus: typeof output.rawStatus === 'string' ? output.rawStatus : null };
+    return row ? executionFromRow(row) : undefined;
+  }
+  async executions(taskId: string, revisions: number[]): Promise<Map<number, NonNullable<RepairTaskDetail['execution']>>> {
+    const byStep = new Map(revisions.map(revision => [this.stepId(taskId, revision), revision]));
+    const rows = await this.db.query<ExecutionRow & { step_id: string }>(
+      "SELECT step_id, status, error_code, bot_run_id, output_json FROM ce_steps WHERE task_id = ? AND step_type = 'workflow_repair_draft'", [taskId]);
+    return new Map(rows.flatMap(row => {
+      const revision = byStep.get(row.step_id);
+      return revision === undefined ? [] : [[revision, executionFromRow(row)] as const];
+    }));
   }
   async ensureNoLegacyApply(workflowId: string): Promise<void> {
     const tasks = await this.db.query<{ remark: string | null; config_json: string }>(
