@@ -106,3 +106,25 @@ def test_signed_token_keeps_authentication_semantics(auth_client, expired):
         repository.get_by_resource_key_and_tenant.assert_called_once_with(
             "test-resource", "test-tenant"
         )
+
+
+def test_every_chat_route_documents_authentication_service_unavailability():
+    from secbaas.community.adapters.web.routers.gateway.message_router import (
+        router as messages,
+    )
+    from secbaas.community.adapters.web.routers.gateway.session_router import (
+        router as sessions,
+    )
+
+    app = FastAPI()
+    app.include_router(messages)
+    app.include_router(sessions)
+    paths = app.openapi()["paths"]
+    for method, path in [
+        ("post", "/openapi/v1/chat"),
+        ("post", "/openapi/v1/chat/stream"),
+        ("get", "/openapi/v1/chat/messages/{message_id}"),
+        ("get", "/openapi/v1/chat/sessions/{session_id}"),
+        ("get", "/openapi/v1/chat/sessions/{session_id}/messages"),
+    ]:
+        assert "503" in paths[path][method]["responses"], path

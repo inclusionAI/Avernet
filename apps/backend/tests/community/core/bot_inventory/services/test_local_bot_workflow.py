@@ -5,13 +5,14 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-
 from agentclaw.community.core.bot_inventory.adapters.noop_business_space import (
     NoopBusinessSpaceContext,
 )
+from agentclaw.community.core.bot_inventory.errors import BotInventoryUpstreamError
 from agentclaw.community.core.bot_inventory.services.local_bot_workflow import (
     LocalBotWorkflowService,
 )
+from agentclaw.community.core.desktop_bot.errors import DesktopBotServiceError
 
 
 @pytest.mark.unit
@@ -63,3 +64,21 @@ def test_restart_does_not_reclassify_unexpected_errors() -> None:
 
     assert caught.value is error
     desktop.verify_ownership.assert_called_once_with(bot_id="l1", user_id="u1")
+
+
+@pytest.mark.unit
+def test_restart_accepts_port_error_subclasses_from_another_implementation() -> None:
+    class AlternateDesktopError(DesktopBotServiceError):
+        pass
+
+    desktop = MagicMock()
+    desktop.restart.side_effect = AlternateDesktopError("alternate upstream failure")
+    workflow = LocalBotWorkflowService(
+        desktop_service=desktop,
+        business_space=NoopBusinessSpaceContext(),
+        passport_plugin=MagicMock(),
+        auth_relationship_plugin=MagicMock(),
+    )
+
+    with pytest.raises(BotInventoryUpstreamError):
+        workflow.restart(owner_id="u1", header_space_id=None, bot_id="l1")

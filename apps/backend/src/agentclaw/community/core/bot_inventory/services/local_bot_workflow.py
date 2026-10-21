@@ -26,7 +26,7 @@ from agentclaw.community.core.bot_inventory.types import (
     LocalBotCreateCommand,
 )
 from agentclaw.community.core.errors import NotFound
-from agentclaw.community.core.service_bot.baas_service_errors import BaasServiceError
+from agentclaw.community.core.desktop_bot.errors import DesktopBotServiceError
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.core.bot_inventory.local_bot_workflow_service_protocol import LocalBotWorkflowServiceProtocol
@@ -247,8 +247,6 @@ class LocalBotWorkflowService(LocalBotWorkflowServiceProtocol):
         self._verify_visible(owner_id=owner_id, bot_id=bot_id)
         try:
             return self._desktop.restart(bot_id=bot_id, user_id=owner_id)
-        except BaasServiceError as exc:
-            raise BotInventoryUpstreamError("desktop restart upstream failed") from exc
         except Exception as exc:
             _raise_if_desktop_service_error(exc)
             raise
@@ -307,5 +305,5 @@ class LocalBotWorkflowService(LocalBotWorkflowServiceProtocol):
 
 
 def _raise_if_desktop_service_error(exc: Exception) -> None:
-    if exc.__class__.__name__ in {"DesktopBotServiceError", "DesktopBotOrphanError"}:
+    if isinstance(exc, DesktopBotServiceError):
         raise BotInventoryUpstreamError("desktop service failed") from exc

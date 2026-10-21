@@ -18,6 +18,9 @@ from agentclaw.community.api.local_bot_workflow_service import LocalBotWorkflowS
 from agentclaw.community.core.bot_inventory.adapters.noop_business_space import (
     NoopBusinessSpaceContext,
 )
+from agentclaw.community.core.bot_inventory.adapters.desktop_inventory import (
+    DesktopInventoryAdapter,
+)
 from agentclaw.community.core.bot_inventory.protocols import (
     BusinessSpaceContextProtocol,
     DesktopBotInventoryPort,
@@ -80,7 +83,7 @@ def client(desktop_service, passport, auth_rel):
         def configure(self, binder):
             space = NoopBusinessSpaceContext()
             workflow = LocalBotWorkflowService(
-                desktop_service=desktop_service,
+                desktop_service=DesktopInventoryAdapter(desktop_service),
                 business_space=space,
                 passport_plugin=passport,
                 auth_relationship_plugin=auth_rel,

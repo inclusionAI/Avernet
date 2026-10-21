@@ -291,6 +291,7 @@ async def deliver_message_stream(
         401: {"description": "Authentication failed"},
         403: {"description": "Bot access denied"},
         404: {"description": "Message not found"},
+        503: {"description": "Authentication service unavailable"},
     },
 )
 @inject

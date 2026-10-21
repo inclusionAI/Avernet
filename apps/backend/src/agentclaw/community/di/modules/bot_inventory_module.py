@@ -13,6 +13,9 @@ from agentclaw.community.api.local_bot_workflow_service import (
 from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
     CollaboratorService,
 )
+from agentclaw.community.core.bot_inventory.adapters.desktop_inventory import (
+    DesktopInventoryAdapter,
+)
 from agentclaw.community.core.bot_inventory.adapters.service_edit_lock import (
     ServiceEditLockView,
 )
@@ -111,7 +114,7 @@ class BotInventoryModule(Module):
     def desktop_inventory_port(
         self, service: DesktopBotService
     ) -> DesktopBotInventoryPort:
-        return service
+        return DesktopInventoryAdapter(service)
 
     @singleton
     @provider
