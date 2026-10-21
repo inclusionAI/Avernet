@@ -543,15 +543,13 @@ it("uses the Engine reference when no actual request is supplied, only after app
   expect(runtime.request).toHaveBeenCalledTimes(1);
 });
 it("TE rejects a Shell plan before granting any environmental operation", async () => {
-  target = { ...target, provider: "teclaw", activeEngine: "teclaw" };
-  let task = await create("approval", { target: { ...request.target, engine: "TE" } });
-  vi.mocked(runtime.request).mockResolvedValue({ status: 200, body: { success: true, data: [{ role: "assistant", content: "原动作失败" }] } });
-  const evidence = await inspect(task, "te-original");
+  target = { ...target, provider: "teclaw", activeEngine: "teclaw" }; let task = await create("approval", { target: { ...request.target, engine: "TE" } });
+  (agent as any).deps.trajectory = { read: vi.fn().mockResolvedValue({ traces: [] }) };
+  const evidence = await agent.trajectoryRead(task, { clientRequestId: "te-original", purpose: "调查原任务的环境阻塞" });
   await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "environment", summary: "根据诊断需形成环境方案", evidence_ids: [evidence.evidenceId] });
   task = await current(task.taskId);
   await expect(agent.report(task, { kind: "plan", phase: "plan", plan })).rejects.toMatchObject({ status: 422 });
-  expect(runtime.executeShell).not.toHaveBeenCalled();
-  expect(runtime.request).toHaveBeenCalledTimes(1);
+  expect(runtime.executeShell).not.toHaveBeenCalled(); expect(runtime.request).not.toHaveBeenCalled();
   expect(notifier.notify).not.toHaveBeenCalled();
 });
 it("a delivery marker quoted in a tool result cannot confirm original-session delivery", async () => {
@@ -683,8 +681,7 @@ it("lets an approved adjustment use an Engine request instead of the reference S
   await expect(agent.apply(await current(task.taskId), { clientRequestId: "invalid-engine", purpose: "无效的空接口请求", actionId: "fix", engineOperation: null })).rejects.toMatchObject({ status: 422 });
 });
 it("TE adjusts and verifies an approved cron action through actual API calls without Shell", async () => {
-  target = { ...target, provider: "teclaw", activeEngine: "teclaw" };
-  let task = await create("approval", { target: { ...request.target, engine: "TE" } });
+  target = { ...target, provider: "teclaw", activeEngine: "teclaw" }; let task = await create("approval", { target: { ...request.target, engine: "TE" } });
   const { planProtocol } = await agent.bootstrap(task);
   expect(planProtocol.allowedOperations).toEqual(["file.write", "file.delete", "engine.restart", "cron.create", "cron.update", "cron.delete", "cron.run"]);
   expect(planProtocol.operationScope).toContain("启用和禁用使用 cron.update");
@@ -971,12 +968,14 @@ it("leaves unmarked legacy recovery tasks unclaimed rather than guessing from th
   expect(ais.getJobStatusDetail).not.toHaveBeenCalled(); expect(ais.stopExecution).not.toHaveBeenCalled();
   expect((await current(task.taskId)).execution).toEqual(task.execution);
 });
-
 it.each([true, false])("accepts AIVision delivery from the current actual receipt, initial=%s", async initial => {
   target = { ...target, provider: "teclaw", activeEngine: "teclaw" };
   let task = await create("automatic", { target: { ...request.target, engine: "TE" } });
   const read = vi.fn().mockResolvedValue({ traces: [] });
   (agent as any).deps.trajectory = { read };
+  task = (await tasks.update(task.taskId, task.version, value => ({ ...value, version: value.version + 1, timeline: [...value.timeline, { event_id: "legacy-session", kind: "operation", at_ms: now, actor: "agent", summary: "旧会话读取", payload: { result: { session_id: request.session_key } } }] })))!;
+  expect((await agent.bootstrap(task)).tools).toMatchObject({ session_read: false, trajectory_read: true });
+  await expect(agent.sessionRead(task, { clientRequestId: "te-old-reader", purpose: "旧会话工具调用" })).rejects.toMatchObject({ status: 422, code: "unsupported_session_read" });
   if (initial) task = await toObserve(task);
   else {
     const basis = await agent.trajectoryRead(task, { clientRequestId: "te-assess", purpose: "读取原任务的环境阻塞证据" });
@@ -988,6 +987,7 @@ it.each([true, false])("accepts AIVision delivery from the current actual receip
     await agent.report(await current(task.taskId), { kind: "apply", phase: "apply", applicable: true, success: true, summary: "环境已核实，已发送继续指引" });
     task = await current(task.taskId); expect(task.delivery).toBeUndefined();
   }
+  expect(runtime.request).not.toHaveBeenCalled(); expect(runtime.executeShell).not.toHaveBeenCalled();
   const sent = [...task.timeline].reverse().find(event => typeof (event.payload.result as any)?.initial_message === "boolean")!;
   const receipt = (await agent.toolGet(task, String(sent.payload.tool_call_id))).result as any;
   read.mockResolvedValue({ delivery_confirmed: true, delivery: { location: "trace.input", marker: "verified" }, traces: [] });

@@ -58,7 +58,7 @@ ClawWeb 在现有 `POST /api/insight/v1/internal/monitoring/diagnosis-events` �
 | `target.bot_id` | 是 | Bot 业务标识。 |
 | `target.entity_id` | 是 | Bot 所属实体／Owner 标识。 |
 | `target.env` | 是 | 目标环境：`pre` 或 `prod`。 |
-| `target.engine` | 是 | 支持 `OC`、`CC`、`TE`。OC／CC 优先读 NAS，失败时经受控 Shell 读会话文件；TE 读会话 API 与 AIVision／TCLog 轨迹，不使用 Shell。各引擎的实际修复效果需真实现场验收。 |
+| `target.engine` | 是 | 支持 `OC`、`CC`、`TE`。OC／CC 优先读 NAS，失败时经受控 Shell 读会话文件；TE 只通过 AIVision／TCLog 轨迹调查原会话、验证触达和恢复效果，不调用会话 API，不使用 Shell。各引擎的实际修复效果需真实现场验收。 |
 | `session_key` | 是 | 发生故障、需要继续的原会话键；不是会话名称或 `session_id`。 |
 | `delivery_key` | 是 | 本次尝试的唯一投递键。同一次请求重试复用，新尝试换新键。 |
 | `diagnosis` | 是 | 脱敏诊断摘要，最多 8000 字符。 |

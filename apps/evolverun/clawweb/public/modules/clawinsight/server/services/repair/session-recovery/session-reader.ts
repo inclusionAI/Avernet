@@ -63,15 +63,15 @@ function quote(value: string): string { return `'${value.replaceAll("'", `'"'"'`
 function unavailable(detail: unknown): SessionRecoveryError {
   return new SessionRecoveryError(503, "original_session_unavailable", `原会话暂不可读或已变化，不能判断效果：${String(redactEvidenceValue(detail)).slice(0, 500)}`);
 }
-/** Original-session reads and delivery matching run inside the target through the controlled relay. */
+/** OC/CC original-session reads and delivery matching use the controlled relay. */
 export class RecoverySessionReader {
-  constructor(private readonly runtime: Pick<BotRuntime, "executeShell"> & Partial<Pick<BotRuntime, "request">>) {}
+  constructor(private readonly runtime: Pick<BotRuntime, "executeShell">) {}
   async read(input: { target: ResolvedBotTarget; sessionKey: string; deliveryKey: string; expectedSessionId?: string; fromLine?: number; offset?: number; limit?: number }) {
     const limit = input.limit ?? 100;
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500 || (input.fromLine !== undefined && (!Number.isSafeInteger(input.fromLine) || input.fromLine < 1))) {
       throw new SessionRecoveryError(422, "invalid_session_range", "会话读取范围无效");
     }
-    if (input.target.activeEngine === "teclaw") return this.readTeclaw(input, limit);
+    if (input.target.activeEngine === "teclaw") throw new SessionRecoveryError(422, "unsupported_session_read", "TE 通过 trajectory_read 读取 AIVision，不提供会话 API 读取");
     const encoded = gzipSync(Buffer.from(JSON.stringify({ sessionKey: input.sessionKey, engine: input.target.activeEngine, marker: `[会话自愈：${input.deliveryKey}]`,
       expectedSessionId: input.expectedSessionId, fromLine: input.fromLine, limit }))).toString("base64");
     // Compress the fixed read-only program so runtime-user wrapping stays within BaaS's command limit.
@@ -82,32 +82,4 @@ export class RecoverySessionReader {
     try { return redactEvidenceValue(JSON.parse(result.stdout)) as Record<string, unknown>; }
     catch { throw new SessionRecoveryError(503, "original_session_unavailable", "原会话记录格式无效"); }
   }
-  private async readTeclaw(input: { target: ResolvedBotTarget; sessionKey: string; deliveryKey: string; expectedSessionId?: string; offset?: number }, limit: number) {
-    if (!this.runtime.request) throw new SessionRecoveryError(503, "original_session_unavailable", "TE 会话接口未配置");
-    const offset = input.offset ?? 0;
-    if (!Number.isSafeInteger(offset) || offset < 0) throw new SessionRecoveryError(422, "invalid_session_range", "会话 offset 无效");
-    const encoded = Buffer.from(input.sessionKey).toString("base64url");
-    const response = await this.runtime.request({ target: input.target, method: "GET",
-      path: `/api/sessions/${encodeURIComponent(encoded)}/messages?engine=teclaw&limit=${limit}&offset=${offset}`, timeoutMs: 30000 });
-    const body = response.body as { success?: boolean; data?: unknown; total?: number; detail?: unknown };
-    if (response.status !== 200 || !body || body.success === false || !Array.isArray(body.data)) {
-      const detail = typeof body?.detail === "string" ? String(redactEvidenceValue(body.detail)).slice(0, 300) : "响应不符合 success/data 消息数组合同";
-      throw new SessionRecoveryError(response.status >= 400 ? response.status : 502,
-        response.status === 404 ? "original_session_not_found" : "original_session_unavailable",
-        `TE 会话查询 HTTP ${response.status}：${detail}；使用 AIVision 轨迹调查，当前接口缺失会话不证明任务未执行`);
-    }
-    if (input.expectedSessionId && input.expectedSessionId !== input.sessionKey || body.data.some((record: Record<string, unknown>) => record.session_id && record.session_id !== input.sessionKey)) throw new SessionRecoveryError(409, "original_session_changed", "TE 返回的会话身份已变化");
-    const marker = `[会话自愈：${input.deliveryKey}]`;
-    const records = body.data as Array<Record<string, unknown>>;
-    const matches = records.flatMap((record, index) => {
-      const content = typeof record.content === "string" ? record.content : Array.isArray(record.content) ? record.content.filter(p => p?.type === "text").map(p => p.text).join("\n") : "";
-      return record.role === "user" && content.includes(marker + "\n") ? [{ message_id: record.id ?? record.message_id ?? null,
-        offset: offset + index, text: content }] : [];
-    });
-    return redactEvidenceValue({ source: "teclaw_session_api", session_id: input.sessionKey, messages: records,
-      delivery: matches[0] ?? null, delivery_confirmed: matches.length > 0, delivery_matches: matches,
-      offset, total: body.total ?? null, next_offset: records.length === limit ? offset + records.length : null,
-      coverage: "api_window", missing_message_is_failure: false }) as Record<string, unknown>;
-  }
-
 }
