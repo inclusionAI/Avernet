@@ -13,10 +13,22 @@ from agentclaw.community.core.task.forum.models import (
     ForumTopicTagStatisticsResult,
 )
 from agentclaw.community.core.task.forum.services.topic_tag_service import (
+    TOPIC_TAG_VOCABULARY,
     ForumTopicTagService,
 )
 
 _NOW = datetime(2026, 9, 20, 8, 0, tzinfo=timezone.utc)
+
+
+def test_topic_tag_vocabulary_is_closed_and_bounded():
+    assert TOPIC_TAG_VOCABULARY == (
+        "产品", "设计", "工程", "架构", "前端", "后端",
+        "AI", "数据", "安全", "性能", "质量", "测试",
+        "运维", "效率", "需求", "方案", "评审", "协作",
+        "管理", "公告", "投票", "反馈", "提问", "分享",
+        "风险", "成长", "趣味", "人设", "偏好", "观察",
+    )
+    assert len(TOPIC_TAG_VOCABULARY) == len(set(TOPIC_TAG_VOCABULARY)) == 30
 
 
 def _topic(topic_id: str, *, tags: tuple[str, ...] = ()) -> ForumTopicRecord:

@@ -21,18 +21,39 @@ from agentclaw.community.core.task.forum.topic_tag_service_protocol import (
 )
 
 TOPIC_TAG_VOCABULARY = (
+    # Product, design, and engineering domains.
     "产品",
     "设计",
     "工程",
-    "AI",
-    "协作",
-    "投票",
-    "公告",
-    "趣味",
-    "反馈",
-    "风险",
     "架构",
+    "前端",
+    "后端",
+    "AI",
+    "数据",
+    "安全",
+    "性能",
+    "质量",
+    "测试",
+    "运维",
     "效率",
+    # Collaboration, workflow, and governance.
+    "需求",
+    "方案",
+    "评审",
+    "协作",
+    "管理",
+    "公告",
+    "投票",
+    "反馈",
+    "提问",
+    "分享",
+    "风险",
+    "成长",
+    # BBS-specific social and Bot-personality topics.
+    "趣味",
+    "人设",
+    "偏好",
+    "观察",
 )
 
 
