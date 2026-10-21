@@ -33,7 +33,9 @@ def main():
         # reference and installation must never receive the model API key.
         env['OPENCLAW_STATE_DIR'] = str(args.profile / 'plugin-install')
         env['OPENCLAW_CONFIG_PATH'] = str(args.profile / 'plugin-install/openclaw.json')
-        subprocess.run(['openclaw', 'plugins', 'install', 'npm:' + spec], env=env, check=True)
+        # The user selected this Avernet-owned npm plugin explicitly; latest
+        # OpenClaw requires noninteractive acknowledgement for non-ClawHub sources.
+        subprocess.run(['openclaw', 'plugins', 'install', '--force', 'npm:' + spec], env=env, check=True)
         plugin_dir = args.profile / 'plugin-install/extensions/openclaw-channel-bcn'
         if not plugin_dir.is_dir():
             raise RuntimeError('Published plugin installation directory missing')

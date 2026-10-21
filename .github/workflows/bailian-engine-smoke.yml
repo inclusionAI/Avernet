@@ -17,6 +17,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  harness-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s singlebox/compat/bailian/tests
+
   smoke:
     name: ${{ matrix.engine }} / qwen3.8-flash
     # Codex's bwrap sandbox needs unprivileged user namespaces; newer Ubuntu
@@ -163,6 +173,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10'
       - uses: actions/download-artifact@v4
         with:
           name: bailian-bcs-binaries

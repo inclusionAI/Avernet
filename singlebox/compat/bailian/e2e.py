@@ -208,9 +208,11 @@ class Harness:
                   'The file has been removed; use this conversation history.', marker, session)
         self.chat('new_session_isolation', 'What was the content of probe.txt in this conversation? '
                   'Do not use tools. If you have not read it in this conversation, answer UNKNOWN.',
-                  forbidden=marker)
+                  expected='UNKNOWN', forbidden=marker)
         self.stage = 'connection_restart'
         self.stop(self.engine_process)
+        self.wait(lambda: not any(item['bot_uuid'] == self.bot_id and item['is_online']
+                  for item in self.api('/bots/search?limit=100')['items']), 60)
         self.engine_process = self.start(self.engine_command, 'engine')
         self.wait(lambda: any(item['bot_uuid'] == self.bot_id and item['is_online']
                   for item in self.api('/bots/search?limit=100')['items']), 120)

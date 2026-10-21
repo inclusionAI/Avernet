@@ -11,6 +11,7 @@ import subprocess
 
 from configure import ENGINES
 from evidence import openclaw_evidence
+from provider_probe import ProviderProbe
 
 
 def diagnostic_excerpt(text: str, key: str) -> str:
@@ -52,6 +53,7 @@ def main() -> int:
     report = {"engine": args.engine, "scope": "engine_model_file_read",
               "bcs_certified": False, "commit": os.environ.get("GITHUB_SHA", ""),
               "status": "UNKNOWN", "reason": "not_run"}
+    probe = None
     try:
         if os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted":
             raise ValueError("Live engine execution requires a GitHub-hosted Actions runner")
@@ -72,6 +74,13 @@ def main() -> int:
         env.pop("ANTHROPIC_API_KEY", None)
         marker = "BCS_" + secrets.token_hex(16)
         (root / "workspace/probe.txt").write_text(marker + "\n", encoding="utf-8")
+        if args.engine == "openclaw":
+            config_path = root / "openclaw/openclaw.json"
+            config = json.loads(config_path.read_text())
+            provider = config["models"]["providers"]["bailian"]
+            probe = ProviderProbe(provider["baseUrl"], marker)
+            provider["baseUrl"] = probe.start()
+            config_path.write_text(json.dumps(config))
         prompt = "Use your file-reading tool to read probe.txt in the current workspace. Reply with only its complete content."
         with subprocess.Popen(command(args.engine, prompt, root), env=env,
                               cwd=root / "workspace", stdout=subprocess.PIPE,
@@ -101,6 +110,10 @@ def main() -> int:
     except (ValueError, OSError) as error:
         # Only controlled errors above are safe to expose; never dump exception payloads.
         report.update(status="UNKNOWN", reason=type(error).__name__)
+    finally:
+        if probe:
+            probe.close()
+            report["provider_evidence"] = probe.requests
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report))
