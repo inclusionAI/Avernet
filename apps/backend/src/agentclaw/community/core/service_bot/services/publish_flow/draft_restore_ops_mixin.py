@@ -157,7 +157,6 @@ class DraftRestoreOpsMixin:
                     f"草稿容器未就绪: binding_id={binding_id}, status={binding.status}"
                 )
 
-            bot = {**bot, "device_id": binding.device_id}
             behavior = self.provider_behavior(bot)
             invalid_reason = behavior.validate_draft_restore_artifact(source_ext)
             if invalid_reason:

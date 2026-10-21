@@ -36,7 +36,7 @@ def publisher(results):
     executor = Mock()
     executor.exec_shell_new.side_effect = results
     return AicodingArtifactTransferStrategy(executor, FastdiskPublishConfig(mist_secret_name="test-secret-name"), bucket='test',
-                             endpoint='https://oss.example.test', oss_mount_root='/aidesktop')
+                             endpoint='https://oss.example.test', oss_mount_root='/aidesktop', bindings=Mock())
 
 
 def publish(p):

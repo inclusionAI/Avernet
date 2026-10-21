@@ -20,6 +20,8 @@ from typing import Any, Callable, Protocol
 from agentclaw.community.core.workspace.engines.aicoding import _AICODING_RSYNC_EXCLUDES
 from agentclaw.community.core.workspace.engines.claude_code import _CLAUDE_CODE_RSYNC_EXCLUDES
 from agentclaw.community.core.workspace.engine_sandbox import EngineBuildPlan, EngineSandboxProvider
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.kernel.device_dto import CommandResult
 from agentclaw.community.log import get_logger
 
@@ -87,8 +89,10 @@ class AicodingArtifactTransferStrategy:
         return plan.engine_type in ('aicoding', 'claude_code')
 
     def __init__(self, executor: PublishCommandExecutor, config: FastdiskPublishConfig,
-                 *, bucket: str, endpoint: str, oss_mount_root: str):
+                 *, bucket: str, endpoint: str, oss_mount_root: str,
+                 bindings: DeviceBindingRepository):
         self.executor = executor
+        self._bindings = bindings
         self.config = config
         self.bucket = bucket
         endpoint = config.endpoint or endpoint
@@ -112,11 +116,19 @@ class AicodingArtifactTransferStrategy:
                 migration_error: type[Exception]) -> dict[str, str] | None:
         if not self.supports(plan):
             return None
-        device_id = bot.get("device_id")
-        if not device_id:
-            raise migration_error("恢复草稿缺少当前草稿设备 ID")
         if type(source_version) is not int or source_version < 1:
             raise migration_error("无效的历史版本")
+        # Resolve the current draft binding only for coding engines. Never trust
+        # a stale bot.device_id or rewrite the shared publish-flow Bot context.
+        binding_id = bot.get("binding_id")
+        if not binding_id:
+            raise migration_error("草稿 Bot 缺少 binding_id")
+        binding = self._bindings.get_by_id(binding_id)
+        if not binding or not binding.device_id:
+            raise migration_error("恢复草稿缺少当前草稿设备 ID")
+        if binding.status != DeviceBindingStatus.ACTIVE.value:
+            raise migration_error("草稿容器未就绪")
+        device_id = binding.device_id
         runtime_root = str(provider.get_base_path())
         runtime_artifact = (
             f"{migration_path_base(owner_id=bot['entity_id'], bot_id=bot['bot_id'])}"

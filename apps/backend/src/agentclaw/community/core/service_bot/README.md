@@ -261,3 +261,12 @@ Command transport stages only invocation parameters and execution control in
 bounded chunks, then waits for an atomic exit-status result. The container scripts
 repository owns transfer implementation. Consumers retain publication-state and
 error handling; no independent Backend post-upload object validation is added.
+
+
+Draft device resolution is AICoding-owned: after engine eligibility is established,
+the strategy queries the existing binding repository by `bot.binding_id` and
+requires an ACTIVE binding with a device ID. It does not trust `bot.device_id`,
+mutate the Bot context, or fall back on lookup failure. Other engines never make
+this strategy-specific query; the shared draft flow retains its original context.
+Optional command-timeout forwarding remains infrastructure-only: omitted timeout
+arguments retain the existing provider call/default behavior.

@@ -4604,6 +4604,8 @@ async def test_execute_restore_draft_uses_migration_path_and_keeps_state():
     assert result["status"] == "success"
     assert result["draft_binding_id"] == 77
     kwargs = build_service.restore_draft_async.await_args.kwargs
+    assert kwargs["bot"] is bot_service.get_bot.return_value
+    assert "device_id" not in kwargs["bot"]
     assert "bot_uuid" not in kwargs
     assert kwargs["source_version"] == 1
     assert kwargs["artifact_ext"]["migration_path"] == "/artifact/v1/openclaw"
@@ -4794,6 +4796,8 @@ async def test_execute_restore_draft_teclaw_uses_current_binding_and_historical_
     assert result["draft_binding_id"] == 77
     assert build_service.restore_teclaw_draft_async.await_count == 2
     kwargs = build_service.restore_teclaw_draft_async.await_args_list[0].kwargs
+    assert kwargs["bot"] is bot_service.get_bot.return_value
+    assert "device_id" not in kwargs["bot"]
     assert kwargs["bot_uuid"] == "BOT-current-draft"
     assert kwargs["owner_id"] == "u1"
     assert kwargs["source_version"] == 1

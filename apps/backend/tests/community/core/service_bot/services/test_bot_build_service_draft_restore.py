@@ -787,6 +787,8 @@ def test_aicoding_restore_selects_container_before_host_artifact_access(monkeypa
     svc._resolve_sandbox_provider = MagicMock(return_value=provider)
     svc._get_migration_path_base = MagicMock(return_value='/opt/nfs/bot-data')
     svc._artifact_transfer = object.__new__(AicodingArtifactTransferStrategy)
+    svc._artifact_transfer._bindings = MagicMock()
+    svc._artifact_transfer._bindings.get_by_id.return_value = MagicMock(device_id="current-draft", status="ACTIVE")
     svc._artifact_transfer.try_restore = MagicMock()
     svc._artifact_transfer.try_restore.return_value = fastdisk
     if fastdisk == 'failed':
@@ -797,7 +799,7 @@ def test_aicoding_restore_selects_container_before_host_artifact_access(monkeypa
     nas_root = tmp_path / 'not-accessed'
     monkeypatch.setattr(module, 'get_bot_dir', lambda *args, **kwargs: artifact_root)
     monkeypatch.setattr(module, 'get_bot_nas_dir', lambda *args, **kwargs: nas_root)
-    kwargs = dict(bot={'bot_id': 'b', 'entity_id': 'u', 'device_id': 'current-draft'},
+    kwargs = dict(bot={'bot_id': 'b', 'entity_id': 'u', 'device_id': 'stale-draft', 'binding_id': 77},
                   source_version=3, artifact_ext={'migration_path': '/untrusted/from-db'})
     if fastdisk is True:
         result = svc.restore_draft(**kwargs)

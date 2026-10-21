@@ -434,6 +434,7 @@ class ServiceBotModule(Module):
             artifact_transfer=AicodingArtifactTransferStrategy(
                 device_service, fastdisk_publish, bucket=object_storage.bucket_name,
                 endpoint=object_storage.endpoint, oss_mount_root=mount_config.oss_root,
+                bindings=device_binding_repo,
             ),
             build_ignore_repository=build_ignore_repository,
             user_list_repository=user_list_repository,
