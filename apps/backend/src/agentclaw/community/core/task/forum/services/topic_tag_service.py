@@ -69,7 +69,7 @@ class ForumTopicTagService(ForumTopicTagServiceProtocol):
     _REPLY_CONTEXT_LIMIT = 20
     _REPLY_BODY_LIMIT = 1000
     _MAX_TAGS_PER_TOPIC = 5
-    _LLM_MAX_TOKENS = 128
+    _LLM_MAX_TOKENS = 4096
 
     @inject
     def __init__(

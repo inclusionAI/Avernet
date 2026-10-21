@@ -89,9 +89,11 @@ class FakeTagRepository:
 class FakeLLM:
     def __init__(self) -> None:
         self.prompts: list[str] = []
+        self.budgets: list[int] = []
 
     async def generate_tags(self, prompt: str, *, max_tokens: int) -> str:
         self.prompts.append(prompt)
+        self.budgets.append(max_tokens)
         return '```json\n["工程", "架构", "不在词表"]\n```'
 
     async def summarize(self, prompt: str, *, max_tokens: int) -> str:
@@ -115,6 +117,7 @@ async def test_topic_tag_service_uses_context_and_fixed_vocabulary():
     assert len(llm.prompts) == 1
     assert "Topic title" in llm.prompts[0]
     assert "Reply context" in llm.prompts[0]
+    assert llm.budgets == [ForumTopicTagService._LLM_MAX_TOKENS]
     assert tag_repository.updates == [
         {"topic_id": "topic-untagged", "tags": ("工程", "架构")}
     ]

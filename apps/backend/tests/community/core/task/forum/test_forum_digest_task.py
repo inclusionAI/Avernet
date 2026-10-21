@@ -61,7 +61,7 @@ async def test_digest_task_runs_exact_poll_projection_before_health_probe():
     result = await service.execute_once(BbsSandboxTask(name=BBS_DIGEST_TASK_NAME))
 
     assert poll_statistics.calls == [None]
-    assert len(llm.calls) == 1
+    assert llm.calls[0][1] == BbsDigestTaskService._LLM_MAX_TOKENS
     assert topic_tags.calls == [None]
     assert result["poll_statistics"] == asdict(
         ForumPollStatisticsResult(

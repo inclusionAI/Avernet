@@ -29,6 +29,8 @@ logger = get_logger()
 class BbsContentImportTaskService(ContentImportTaskExecutorProtocol):
     """Named content-import execution service behind its distributed scheduler."""
 
+    _LLM_MAX_TOKENS = 1024
+
     @inject
     def __init__(self, llm: BbsLLMProtocol) -> None:
         self._llm = llm
@@ -41,7 +43,7 @@ class BbsContentImportTaskService(ContentImportTaskExecutorProtocol):
             "In one concise sentence, state that the BBS content-import "
             "scheduling probe is healthy."
         )
-        response = await self._llm.summarize(prompt, max_tokens=128)
+        response = await self._llm.summarize(prompt, max_tokens=self._LLM_MAX_TOKENS)
         result: dict[str, Any] = {
             "task_name": task.name,
             "success": True,
