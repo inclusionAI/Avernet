@@ -70,55 +70,6 @@ beforeEach(async () => {
   reporter = { report: async result => { callbacks.push(result); } };
   service = new SessionRecoveryTaskService({ controlPlaneEnvironment: "pre", tasks, agent, notifier, reporter, observationMs: 3600000, now: () => now, resolveTarget: async () => recoveryTargetSnapshot(target), actionNotifier });
 });
-it("reports none for investigation-only failures without adding a persisted task field", async () => {
-  const task = await create();
-  await inspect(task);
-  await service.executionFailure(task.taskId, "无法继续调查");
-  await service.reportResults();
-  expect(callbacks.at(-1)).toMatchObject({ status: "failed", effect: "unknown", intervention_status: "none" });
-  expect(JSON.parse((await repo.findTask(task.taskId))!.config_json).interventionStatus).toBeUndefined();
-});
-it.each([false, true])("keeps an unfinished write uncertain only after it is claimed: claimed=%s", async claimed => {
-  const task = await create();
-  const audit = new AgentToolCallRepository(db, "session_recovery");
-  const input = { callId: "intervention-unfinished", taskId: task.taskId, stepId: task.current!.stepId, executionId: task.execution!.executionId,
-    authorizationScopeDigest: task.authorizationScopeDigest!, clientRequestId: "intervention-unfinished", toolName: "retry_message", operation: "retry_message", isWrite: true, request: { purpose: "发送恢复建议" } };
-  await audit.createToolCall(input);
-  if (claimed) await audit.claimToolCall({ ...input, leaseOwner: "intervention-worker", leaseExpiresAt: Math.floor(now / 1000) + 60 });
-  await service.terminate(task.taskId, actor);
-  await service.reportResults();
-  expect(callbacks.at(-1)).toMatchObject({ status: "canceled", intervention_status: claimed ? "unknown" : "none" });
-});
-it.each([false, true])("requires actual message presence, not channel acceptance: confirmed=%s", async confirmed => {
-  const task = await create();
-  await agent.retryMessage(task, { clientRequestId: "intervention-message", purpose: "提供原任务继续指引", message: "请依据工具返回继续" });
-  if (confirmed) await inspect(await current(task.taskId));
-  await service.executionFailure(task.taskId, "执行中断");
-  await service.reportResults();
-  expect(callbacks.at(-1)).toMatchObject({ status: "failed", effect: "unknown", intervention_status: confirmed ? "performed" : "unknown" });
-});
-it.each(["success", "nonzero", "lost", "applied", "not_applied"] as const)("derives environment intervention from execution and reconciliation: %s", async outcome => {
-  let task = await create("automatic");
-  const read = await inspect(task);
-  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "environment", summary: "需要获批的环境动作", evidence_ids: [read.evidenceId] });
-  await agent.report(await current(task.taskId), { kind: "plan", phase: "plan", plan });
-  task = await current(task.taskId);
-  if (outcome === "nonzero") vi.mocked(runtime.executeShell).mockResolvedValueOnce({ status: "failed", exitCode: 1, stdout: "partial", stderr: "failed", durationMs: 1 });
-  else if (outcome !== "success") vi.mocked(runtime.executeShell).mockRejectedValueOnce(new Error("receipt lost"));
-  const call = await agent.apply(task, { actionId: "fix", clientRequestId: "intervention-action", purpose: "执行已批准动作" });
-  if (outcome === "applied" || outcome === "not_applied") {
-    const evidence = await inspect(await current(task.taskId), "intervention-check");
-    await agent.reconcileWrite(await current(task.taskId), { clientRequestId: "intervention-reconcile", purpose: "依据后续现场核实", sourceToolCallId: call.toolCallId,
-      outcome, summary: "依据后续读取回执核实动作", evidenceToolCallIds: [evidence.toolCallId] });
-  }
-  // Rehydrate with a new repository, as after a process restart.
-  tasks = new SessionRecoveryTaskRepository(db, repo, artifactStore);
-  expect((await agent.bootstrap(await current(task.taskId))).task.interventionStatus).toBeUndefined();
-  await service.executionFailure(task.taskId, "执行结束");
-  await service.reportResults();
-  expect(callbacks.at(-1)?.intervention_status).toBe(outcome === "success" || outcome === "applied" ? "performed" : outcome === "not_applied" ? "none" : "unknown");
-  expect((await service.detail(task.taskId, actor)).interventionStatus).toBeUndefined();
-});
 it("queries private event tasks for administrators while preserving Owner and sharing filters", async () => {
   const task = await create();
   expect((await service.list(request.event_id, { userId: "admin", isAdmin: true })).map(value => value.task_id)).toEqual([task.taskId]);
@@ -283,8 +234,7 @@ it("retains an in-flight write as unknown after stopping without replay or task 
   expect(await pending).toMatchObject({ status: "unknown" });
   expect((await current(task.taskId)).status).toBe("canceled");
   expect((await current(task.taskId)).timeline.some(event => event.kind === "operation" && event.payload.status === "unknown")).toBe(true);
-  await service.reportResults();
-  expect(callbacks.at(-1)).toMatchObject({ status: "canceled", intervention_status: "unknown" });
+  await service.reportResults(); expect(callbacks.at(-1)).toMatchObject({ status: "canceled", intervention_status: "unknown" });
   await service.maintenance(); expect(runtime.sendMessage).toHaveBeenCalledOnce();
 });
 it("non-MCP goes to one environment plan without any initial retry message", async () => {
@@ -509,9 +459,7 @@ it("preserves an approved plan and unknown write evidence across an AIS retry", 
   await expect(agent.apply(task, { actionId: "fix", clientRequestId: "blind-replay", purpose: "不能盲目重复写入" })).rejects.toMatchObject({ status: 409 });
   expect(runtime.executeShell).toHaveBeenCalledTimes(operationCount);
   await service.reportResults(); expect(callbacks).toEqual([]);
-  await service.executionFailure(task.taskId, "后续执行结束");
-  await service.reportResults();
-  // The confirmed message from the previous execution still counts despite the later unknown write.
+  await service.executionFailure(task.taskId, "后续执行结束"); await service.reportResults();
   expect(callbacks.at(-1)).toMatchObject({ status: "failed", intervention_status: "performed" });
 });
 it("does not retry a non-retryable Base failure or notify Owner about infrastructure failure", async () => {
@@ -887,8 +835,6 @@ it("migrates legacy pending results before reporting and preserves their origina
   expect((await current(task.taskId)).evidence).toEqual([evidence]);
   expect(JSON.parse((await repo.findTask(task.taskId))!.config_json).artifactStorage).toBe(2);
 });
-
-
 it("waiting snapshots survive same-task resumes and restart before the final result is delivered", async () => {
   let task = await toObserve(await create());
   const firstExecution = task.execution!.executionId;

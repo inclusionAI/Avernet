@@ -21,7 +21,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
   constructor(private readonly db: IDatabase, private readonly tasks: EvolveRepository, private readonly artifacts: RecoveryArtifactStore) {}
 
   async create(value: RecoveryStoredTask, stepId: string): Promise<void> {
-    const details = await this.put(value.taskId, this.details(value));
+    const details = await this.put(value.taskId, this.details({ ...value, interventionAuditComplete: true }));
     const report = await this.put(value.taskId, { events: value.timeline, details });
     await this.db.transaction(async tx => {
       await new EvolveRepository(tx).createTaskWithStep({
@@ -153,10 +153,11 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
   }
   private details(value: RecoveryStoredTask) {
     const auditedEvidence = new Set(value.timeline.filter(event => event.payload.raw_tool_call_id).map(event => event.payload.evidence_id));
-    return { plan: value.plan, judgment: value.judgment, evidence: value.evidence.filter(item => !auditedEvidence.has(item.evidence_id)), ...(value.delivery ? { delivery: value.delivery } : {}) };
+    return { plan: value.plan, judgment: value.judgment, evidence: value.evidence.filter(item => !auditedEvidence.has(item.evidence_id)),
+      ...(value.delivery ? { delivery: value.delivery } : {}), ...(value.interventionAuditComplete ? { interventionAuditComplete: true } : {}) };
   }
   private config(value: RecoveryStoredTask, detailsRef: ArtifactRef, resultDelivery: ResultDelivery[] = []): string {
-    const { timeline: _timeline, evidence: _evidence, pending_results: _results, interventionStatus: _intervention, plan, delivery: _delivery, judgment: _judgment, ...state } = value;
+    const { timeline: _timeline, evidence: _evidence, pending_results: _results, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, plan, delivery: _delivery, judgment: _judgment, ...state } = value;
     const json = JSON.stringify({ ...state, artifactStorage: 2, detailsRef, resultDelivery, plan: plan ? { digest: plan.digest, approvedAt: plan.approvedAt, actions: plan.actions.map(action => ({ actionId: action.actionId })) } : null });
     this.validateConfig(json);
     return json;
@@ -179,9 +180,9 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
   }
   private async hydrate(db: IDatabase, raw: string): Promise<RecoveryStoredTask> {
     const value = JSON.parse(raw);
-    if (value.artifactStorage !== 2) return value;
+    if (value.artifactStorage !== 2) return { ...value, interventionStatus: undefined, interventionAuditComplete: undefined };
     const { artifactStorage: _storage, detailsRef, resultDelivery, ...state } = value;
-    const details = await this.get(detailsRef) as Pick<RecoveryStoredTask, "plan" | "judgment" | "delivery" | "evidence">;
+    const details = await this.get(detailsRef) as Pick<RecoveryStoredTask, "plan" | "judgment" | "delivery" | "evidence" | "interventionAuditComplete">;
     const task = { ...state, ...details, timeline: [], evidence: details.evidence ?? [], pending_results: [] } as RecoveryStoredTask;
     const steps = await db.query<{ output_json: string }>("SELECT output_json FROM ce_steps WHERE task_id = ? AND step_type LIKE 'session_recovery%' AND output_json IS NOT NULL ORDER BY step_no", [value.taskId]);
     for (const step of steps) {
@@ -207,7 +208,8 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       }
       if (calls.length < 500) break;
     }
-    task.interventionStatus = recoveryInterventionStatus(interventionCalls, task.delivery?.delivery);
+    const intervention = recoveryInterventionStatus(interventionCalls, task.delivery?.delivery);
+    task.interventionStatus = intervention === "none" && !task.interventionAuditComplete ? "unknown" : intervention;
     for (const result of (resultDelivery ?? []) as ResultDelivery[]) {
       task.pending_results.push(await this.get(result) as RecoveryStoredTask["pending_results"][number]);
     }

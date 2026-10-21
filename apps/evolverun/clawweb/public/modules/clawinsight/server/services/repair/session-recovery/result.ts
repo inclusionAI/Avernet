@@ -22,7 +22,7 @@ export function recoveryInterventionStatus(calls: readonly AgentToolCall[], deli
     if (!call.isWrite) continue;
     const result = call.result as Record<string, unknown> | null;
     if (result?.dry_run === true || call.status === "pending" || result?.dispatched === false) continue;
-    if (call.status === "unknown" && reconciled.has(call.callId)) {
+    if (call.toolName === "apply_action" && call.status === "unknown" && reconciled.has(call.callId)) {
       if (reconciled.get(call.callId) === "applied") return "performed";
       continue;
     }
