@@ -160,7 +160,8 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     if (!eventId || eventId.length > 128) this.fail(422, "event_id 无效");
     const tasks = await this.deps.tasks.listForEvent(eventId, actor.userId, actor.isAdmin);
     return tasks.filter(task => this.canOperate(task, actor) || task.shared === true)
-      .map(task => ({ task_id: task.taskId, status: task.status, phase: task.phase, effect: task.judgment?.effect ?? "unknown" }));
+      .map(task => ({ task_id: task.taskId, status: task.status, phase: task.phase, effect: task.judgment?.effect ?? "unknown",
+        ...(task.completionReason ? { completion_reason: task.completionReason } : {}) }));
   }
   async detail(taskId: string, actor: RecoveryActor): Promise<RecoveryTaskView> {
     const task = await this.required(taskId);
@@ -225,6 +226,28 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     if (task.status === "failed") await this.deps.agent.release(task);
     this.notifyGroup(task, "execution");
     if (task.status === "failed") this.notifyGroup(task, "result");
+  }
+
+  async finishForUserContinuation(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }): Promise<void> {
+    const task = await this.mutate(taskId, version, value => {
+      if (value.status !== "running" || value.execution?.executionId !== input.executionId || value.execution.state === "ended") this.fail(409, "当前不能结束自愈任务");
+      const reads = new Set(value.timeline.filter(event => event.kind === "operation" && event.payload.status === "succeeded")
+        .map(event => event.payload.raw_tool_call_id ?? event.payload.tool_call_id));
+      if (typeof input.summary !== "string" || !input.summary.trim() || input.summary.length > 8000
+        || containsSecret(input.summary) || !Array.isArray(input.evidence_ids) || !input.evidence_ids.length
+        || input.evidence_ids.some(id => !value.evidence.some(item => item.evidence_id === id
+          && ["session_read", "trajectory_read"].includes(item.source) && reads.has(item.tool_call_id)))) this.fail(422, "用户续聊让路需要已保存的原会话或轨迹读取证据");
+      return { ...value, status: "completed", completionReason: "user_continued", version: value.version + 1,
+        observationDeadlineAt: null, ownerDeadlineAt: null, requiresFreshObservation: false,
+        ...(value.executionRetry ? { executionRetry: { ...value.executionRetry, retryAt: 0 } } : {}),
+        judgment: { delivery: value.judgment?.delivery ?? "unconfirmed", response: value.judgment?.response ?? "unknown",
+          effect: value.judgment?.effect ?? "unknown", summary: input.summary,
+          evidence_ids: [...new Set([...(value.judgment?.evidence_ids ?? []), ...input.evidence_ids])] },
+        timeline: [...value.timeline, this.event("termination", "agent", input.summary,
+          { completion_reason: "user_continued", evidence_ids: input.evidence_ids })] };
+    });
+    await this.deps.agent.release(task);
+    this.notifyGroup(task, "result");
   }
 
   async executionFailure(taskId: string, reason: string, executionId?: string, retryable = false): Promise<void> {

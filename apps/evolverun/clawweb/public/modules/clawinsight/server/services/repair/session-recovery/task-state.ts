@@ -92,6 +92,7 @@ export function recoveryTaskResult(state: RecoveryTaskState & Pick<RecoveryStore
   return { event_id: state.request.event_id, task_id: state.taskId, result_version: state.version,
     status: state.status, phase: state.phase,
     waiting_reason: state.status === "waiting_effect" ? "effect" : null,
+    ...(state.completionReason ? { completion_reason: state.completionReason } : {}),
     effect: state.judgment?.effect ?? "unknown", intervention_status: state.level === "debug" ? "none" : state.interventionStatus ?? "unknown",
     result_text: state.status === "canceled" ? terminationReason ?? "用户停止本次自愈任务" : state.judgment?.summary ?? "",
     evidence_ids: state.judgment?.evidence_ids ?? [], evidence: state.evidence.filter(item => state.judgment?.evidence_ids.includes(item.evidence_id)),

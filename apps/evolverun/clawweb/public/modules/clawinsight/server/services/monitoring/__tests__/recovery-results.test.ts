@@ -119,3 +119,20 @@ describe("existing sender/receiver compatibility", () => {
     expect(() => parseRecoveryResult({ ...result, ...patch })).toThrowError(expect.objectContaining({ code: "INVALID_RESULT" }));
   });
 });
+
+
+it.each(["none", "performed", "unknown"] as const)("stores normal user handoff with actual intervention_status=%s and keeps legacy history", async intervention_status => {
+  await repo.appendRecoveryResult(result);
+  const input = { ...result, result_version: 4, status: "completed" as const, waiting_reason: null,
+    completion_reason: "user_continued" as const, intervention_status, result_text: "用户已接手，本次自愈已让路" };
+  expect(parseRecoveryResult(input)).toEqual(input);
+  expect(await repo.appendRecoveryResult(input)).toBe(true);
+  expect(await history()).toEqual([result, input]);
+  expect(await repo.appendRecoveryResult(input)).toBe(false);
+});
+
+it.each([{ completion_reason: "other", status: "completed", waiting_reason: null },
+  { completion_reason: null, status: "completed", waiting_reason: null },
+  { completion_reason: "user_continued" }])("rejects an invalid normal completion reason: %j", patch => {
+  expect(() => parseRecoveryResult({ ...result, ...patch })).toThrowError(expect.objectContaining({ code: "INVALID_RESULT" }));
+});

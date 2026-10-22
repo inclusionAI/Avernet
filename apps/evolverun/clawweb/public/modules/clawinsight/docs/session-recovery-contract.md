@@ -131,3 +131,10 @@ Agent execution, plan approval, or Owner feedback through the task page.
 Administrators can list all tasks linked to a diagnosis event, including private
 tasks. Other users still see only their own tasks or tasks explicitly shared by
 the Owner. Task detail and operation authorization remain unchanged.
+
+
+## Normal completion after user continuation
+
+When a real user continues the original conversation after the fault, the worker reports `kind=blocked`, `reason=user_continued`, the current `phase`, a `summary` and successful controlled-read `evidence_ids`. This explicit reason completes the self-healing task normally with `status=completed` and `completionReason=user_continued`, ending the current execution and clearing wait/retry deadlines. It does not run recovery actions or imply business recovery. Existing effect evidence and task-wide intervention auditing are preserved.
+
+List and callback projections include optional `completion_reason=user_continued`. The monitoring receiver accepts it only for completed tasks, preserves it in existing history JSON and remains compatible with old payloads. UI, notifications and statistics distinguish this normal handoff from failure and from `effect=recovered`. Other blocked reports retain failure semantics; unknown reasons and unsupported read evidence are rejected. Roll out sender/receiver support before the updated worker package. No task-status enum or database schema change is required.

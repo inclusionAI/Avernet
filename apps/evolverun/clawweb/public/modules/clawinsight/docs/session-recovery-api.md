@@ -115,6 +115,7 @@ HTTP `202`：
 | `status` | `waiting_effect` 效果等待超时、任务可继续；`completed` 任务结束；`failed` 执行或方案失败、任务结束；`canceled` 用户手动停止、任务结束。 |
 | `phase` | `assess` Agent 判断初始干预方式；`observe` 观察消息或已有进展；`plan` 分析并形成方案；`apply` 执行完整方案；`verify` 验证原任务恢复。 |
 | `waiting_reason` | 效果等待超时为 `effect`；任务结束为 `null`。 |
+| `completion_reason` | 可选，`user_continued` 表示用户已继续原会话，自愈正常结束；仅与 `status=completed` 一起出现。任务详情使用 `completionReason`，列表和回传使用 `completion_reason`。不代表原任务已恢复，也不决定干预状态。 |
 | `effect` | `recovered` 原故障已解除；`not_recovered` 有证据表明未解除；`unknown` 无法判断；`not_intervened` Debug 未实际干预。 |
 | `intervention_status` | `none` 完整操作审计确认未实际干预；`performed` 至少一次干预已由实际回执或后续现场核实；`unknown` 无法确认是否发生过干预。新发送器始终提供；旧发送器和历史结果可省略，省略不等于 `none`。 |
 | `result_text` | 本次等待结论、最终效果或执行中断原因，供展示。 |
@@ -155,7 +156,7 @@ HTTP `200`（新结果或重复投递）：
 | 413 | 沿用请求体中间件 | 超过 128 KiB 请求体限制，不截断证据。 |
 | 503 | `MONITORING_NOT_READY` | 数据库或表结构不可用、存量损坏、容量超限或并发重试耗尽。 |
 
-非 JSON、语法错误和压缩请求沿用现有路由规则。结果对象不接受未知字段；`delivery`、`evidence`、`error`、`intervention_status` 可省略，其他顶层字段必需。`intervention_status` 提供时只能为 `none`、`performed` 或 `unknown`，接收端原样保留在 `self_healing_results` 中，不根据该字段改变诊断决策。旧结果与新结果可混存，历史缺省值不自动补齐。`result_version` 是正整数。没有新增证据条数限制，但总请求体必须满足上述大小限制。
+非 JSON、语法错误和压缩请求沿用现有路由规则。结果对象不接受未知字段；`delivery`、`evidence`、`error`、`intervention_status`、`completion_reason` 可省略，其他顶层字段必需。`intervention_status` 提供时只能为 `none`、`performed` 或 `unknown`，接收端原样保留在 `self_healing_results` 中，不根据该字段改变诊断决策。旧结果与新结果可混存，历史缺省值不自动补齐。`result_version` 是正整数。没有新增证据条数限制，但总请求体必须满足上述大小限制。
 
 接收接口尚未部署或回传失败时，任务仍可创建、执行并在任务页面查看；结果保留为待回传，成功响应后才记录为已回传。非 2xx（含 404/409/422）会持续重试，需修复拒收原因。部署须确认内部路径已有访问限制，接收端不单独增加发送方未提供的 Token。生产表需已存在可空的 `self_healing_results MEDIUMTEXT`；应用仅校验，不自动执行生产 DDL。联调需确认真实结果体大小、目标数据库兼容性以及内部访问控制。
 
@@ -208,3 +209,13 @@ POST /api/insight/v1/monitoring/session-recoveries/:taskId/terminate
 方案确认请求：`{ "plan_digest": "…", "approved": true, "cooperation_done": true, "feedback": "已处理所需配合事项" }`。配合事项不为空时必须确认完成；决策绑定完整方案摘要，不能改写已确认的决策。
 
 标注请求：`{ "layer": "effect", "correct": true, "reason": "原操作前后已核验", "evidence_ids": ["…"] }`。`layer` 为 `delivery / response / effect`；`correct` 为 `true / false / null`。标注追加保留，不覆盖 Agent 的判断。
+
+
+### 用户续聊后正常结束
+
+任何活动阶段核实原始故障后已有真实用户新消息时，Agent 回报
+`{"kind":"blocked","phase":"当前阶段","reason":"user_continued","summary":"续聊位置和依据","evidence_ids":["已保存的读取证据ID"]}`。
+控制面要求引用成功的 `session_read`／`trajectory_read` 审计，正常收口为 `completed`，记录 `completionReason=user_continued`，结束当前执行并清除等待／重试期限；不新增业务任务状态、不进入方案、不重放动作。
+`effect` 保留已有证据结论，缺少判断时为 `unknown`；`intervention_status` 继续由任务全量审计生成，已有干预不会被让路抹除。
+页面和群通知显示“用户已接手，自愈已让路”。统计单列该结束原因，不计为执行故障，也不能将 `completed` 直接计为恢复成功。
+没有该原因的既有 `blocked` 仍表示无法继续，沿用原失败流程；未知原因拒绝。先部署支持新字段的发送／接收后端，再更新自愈包。没有新建数据库表、字段或 AIS Base 配置。

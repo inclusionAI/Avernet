@@ -223,3 +223,17 @@ it("checks the independent Owner notification switch on each send", async () => 
   expect(await notifier.notify(input)).toBe(false);
   expect(sender.sendNotification).toHaveBeenCalledOnce();
 });
+
+
+it("notifies normal user handoff without claiming business recovery", async () => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed"; task.completionReason = "user_continued";
+  task.judgment = { delivery: "unconfirmed", response: "unknown", effect: "unknown", summary: "用户已继续对话，本次自愈已让路", evidence_ids: [] };
+  task.timeline = [{ event_id: "handoff", at_ms: 1, kind: "termination", actor: "agent", summary: task.judgment.summary, payload: { completion_reason: "user_continued" } }];
+  notifier.after({ taskId: task.taskId, eventId: "handoff", kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  expect(sender.send.mock.calls[0][0]).toMatchObject({ title: "会话自愈｜用户已接手，自愈已让路" });
+  expect(sender.send.mock.calls[0][0].text).toContain("恢复效果尚未确认");
+  expect(sender.send.mock.calls[0][0].text).not.toContain("原任务已恢复");
+  expect(sender.send.mock.calls[0][0].text).not.toContain("任务执行失败");
+});

@@ -21,7 +21,7 @@ function integer(value: unknown, minimum = 0) {
 export function parseRecoveryResult(input: unknown): MonitoringRecoveryResult {
   const result = object(input);
   keys(result, ["event_id", "task_id", "result_version", "status", "phase", "waiting_reason",
-    "effect", "result_text", "evidence_ids"], ["delivery", "evidence", "error", "intervention_status"]);
+    "effect", "result_text", "evidence_ids"], ["delivery", "evidence", "error", "intervention_status", "completion_reason"]);
   requireValue(text(result.event_id) && /^[A-Za-z0-9_.:-]{1,128}$/.test(result.event_id));
   requireValue(text(result.task_id) && result.task_id.trim().length > 0);
   requireValue(integer(result.result_version, 1));
@@ -30,6 +30,7 @@ export function parseRecoveryResult(input: unknown): MonitoringRecoveryResult {
   requireValue(result.waiting_reason === (result.status === "waiting_effect" ? "effect" : null));
   requireValue(["recovered", "not_recovered", "unknown", "not_intervened"].includes(result.effect as string) && text(result.effect));
   if (Object.hasOwn(result, "intervention_status")) requireValue(text(result.intervention_status) && ["none", "performed", "unknown"].includes(result.intervention_status));
+  if (Object.hasOwn(result, "completion_reason")) requireValue(result.completion_reason === "user_continued" && result.status === "completed");
   requireValue(text(result.result_text));
   requireValue(Array.isArray(result.evidence_ids) && result.evidence_ids.every(text));
   if (Object.hasOwn(result, "error")) requireValue(nullableText(result.error));

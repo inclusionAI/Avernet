@@ -431,7 +431,12 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     else if (body.kind === "apply") {
       if (typeof body.applicable !== "boolean" || typeof body.success !== "boolean" || typeof body.summary !== "string") fail(422, "执行回报格式无效");
       await this.deps.business().finishApply(task.taskId, task.version, { applicable: body.applicable, success: body.success, summary: body.summary });
-    } else if (body.kind === "blocked" && typeof body.summary === "string") await this.deps.business().executionFailure(task.taskId, redactPersistableText(body.summary, 8000), task.execution!.executionId);
+    } else if (body.kind === "blocked" && typeof body.summary === "string") {
+      if (body.reason === "user_continued") await this.deps.business().finishForUserContinuation(task.taskId, task.version,
+        { summary: body.summary, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId });
+      else if (body.reason !== undefined) fail(422, "未知的结束原因");
+      else await this.deps.business().executionFailure(task.taskId, redactPersistableText(body.summary, 8000), task.execution!.executionId);
+    }
     else fail(422, "未知业务回报类型");
     return { ok: true };
   }

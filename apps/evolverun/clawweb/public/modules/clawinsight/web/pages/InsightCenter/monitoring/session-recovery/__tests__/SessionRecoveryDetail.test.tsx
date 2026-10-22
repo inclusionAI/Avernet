@@ -2,10 +2,12 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import SessionRecoveryDetail from '../SessionRecoveryDetail';
+import { MemoryRouter } from 'react-router-dom';
+import { RecoveryTaskLinks } from '../RecoveryTaskLinks';
 import { api } from '@avernet/clawweb-shared/web/api/client';
 vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { evolve: { listTaskLogArchives: vi.fn(), getTaskLogArchiveDownloadUrl: vi.fn() } } }));
 import { sessionRecoveryApi } from '../../../../../api/session-recovery';
-vi.mock('../../../../../api/session-recovery', () => ({ sessionRecoveryApi: { detail: vi.fn(), decide: vi.fn(), annotate: vi.fn(), toolCall: vi.fn(), setTaskShared: vi.fn(), terminate: vi.fn() } }));
+vi.mock('../../../../../api/session-recovery', () => ({ sessionRecoveryApi: { detail: vi.fn(), list: vi.fn(), decide: vi.fn(), annotate: vi.fn(), toolCall: vi.fn(), setTaskShared: vi.fn(), terminate: vi.fn() } }));
 const task = { taskId: 'task', shared: false, canOperate: true, canManageShare: true, status: 'waiting_owner', phase: 'apply', request: { diagnosis: '原任务失败', target: { bot_id: 'default' }, session_key: 'original' },
   judgment: { effect: 'not_recovered', summary: '原问题仍存在' }, plan: { digest: 'plan-digest', approvedAt: null, summary: '完整修复方案', basis: '原失败证据', scope: '当前目标', verification: '原操作成功', actions: [{ actionId: 'fix', summary: '修正配置', risk: '局部变更', verification: '读取配置', command: 'printf fixture', rollback: '恢复原值' }], owner_cooperation: [{ request: '确认权限已开放', basis: '权限缺失' }] },
   timeline: [{ event_id: 'event', at_ms: 1, kind: 'plan', actor: 'agent', summary: '提出方案', payload: { evidence_ids: ['evidence'] } }], evidence: [{ evidence_id: 'evidence', tool_call_id: 'call', source: 'session', location: 'line:1', excerpt: '原失败消息' }] };
@@ -406,4 +408,23 @@ it('shows an Owner-only plan as one complete arrangement without fabricating an 
   expect(within(arrangement).queryByText('自愈 Agent')).toBeNull();
   expect(screen.queryByText('方案未列出具体操作。')).toBeNull();
   expect(screen.getByRole('button', { name: '确认完整方案' })).toBeDisabled();
+});
+
+
+it('shows normal user handoff without a recovery claim or continuation controls', async () => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'completed', completionReason: 'user_continued',
+    judgment: { effect: 'unknown', summary: '用户已继续对话，本次已让路', evidence_ids: [] } } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  await screen.findAllByText('已让路');
+  expect(screen.getByText('用户已继续对话，本次自愈已让路，不再自动干预。')).toBeVisible();
+  expect(screen.queryByText('原任务已恢复，可查看下方处理过程和判断依据。')).toBeNull();
+  expect(screen.queryByRole('button', { name: /停止任务|确认完整方案|拒绝方案/ })).toBeNull();
+});
+
+
+it('labels the diagnosis task link as a normal handoff', async () => {
+  vi.mocked(sessionRecoveryApi.list).mockResolvedValue({ items: [{ task_id: 'task', status: 'completed', phase: 'assess', effect: 'unknown', completion_reason: 'user_continued' }] });
+  render(<MemoryRouter><RecoveryTaskLinks eventId="event" /></MemoryRouter>);
+  expect(await screen.findByRole('link', { name: '查看自愈任务 已让路 task' })).toHaveAttribute('href', '/insight?module=monitoring&recoveryTaskId=task');
+  expect(screen.getByText('已让路')).toBeVisible();
 });

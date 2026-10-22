@@ -206,7 +206,7 @@ function RecoveryWorkflow({ task, currentPhase, selected, onSelect, grouped, raw
     if (tabs && tab && tabs.scrollWidth > tabs.clientWidth) tabs.scrollLeft = tab.offsetLeft - tabs.offsetLeft;
   }, [selected]);
   return <section className="sr-card sr-workflow-card">
-    <CardHeader title="自愈流程" description="自愈 Agent 判断处理方式，按需投递恢复消息、生成方案、执行修复并验证效果。" right={<StatusPill status={task.status}>{statusLabels[task.status]}</StatusPill>} />
+    <CardHeader title="自愈流程" description="自愈 Agent 判断处理方式，按需投递恢复消息、生成方案、执行修复并验证效果。" right={<StatusPill status={task.status}>{task.completionReason === 'user_continued' ? '已让路' : statusLabels[task.status]}</StatusPill>} />
     <div className="sr-workflow" ref={tabsRef} role="tablist" aria-label="自愈流程阶段">
       {phases.map((phase, index) => {
         const current = currentPhase === phase.key;
@@ -221,7 +221,7 @@ function RecoveryWorkflow({ task, currentPhase, selected, onSelect, grouped, raw
           onSelect(phases[next].key);
           (event.currentTarget.parentElement?.children[next] as HTMLElement)?.focus();
         }}>
-          <div className="sr-step-top"><span className="sr-step-index">{index + 1}</span><span className="sr-step-state">{current ? statusLabels[task.status] : visited ? '有记录' : '未进入'}</span></div>
+          <div className="sr-step-top"><span className="sr-step-index">{index + 1}</span><span className="sr-step-state">{current ? (task.completionReason === 'user_continued' ? '已让路' : statusLabels[task.status]) : visited ? '有记录' : '未进入'}</span></div>
           <span className="sr-step-title">{phase.title}</span>
           <span className="sr-step-description">{phase.description}</span>
           <span className="sr-step-count">{visited ? `${grouped[phase.key].length} 条记录 · 点击查看` : '点击查看阶段记录'}</span>
@@ -595,7 +595,7 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
     { key: 'effect', label: '效果', hint: '原任务是否已恢复', value: effectLabels[effect], tone: effect === 'recovered' ? 'success' : effect === 'not_recovered' ? 'danger' : 'neutral' },
   ];
   const stageSummary = task ? {
-    completed: effect === 'recovered' ? '原任务已恢复，可查看下方处理过程和判断依据。' : '本次自愈处理已结束，恢复情况请查看效果判断。',
+    completed: task.completionReason === 'user_continued' ? '用户已继续对话，本次自愈已让路，不再自动干预。' : effect === 'recovered' ? '原任务已恢复，可查看下方处理过程和判断依据。' : '本次自愈处理已结束，恢复情况请查看效果判断。',
     failed: '本次自愈未完成，请查看失败说明和相关操作记录。',
     canceled: '用户已停止本次自愈，后续处理已取消。',
     waiting_owner: !task.canOperate ? '等待 Owner 处理配合事项并确认修复方案。' : task.plan?.owner_cooperation.length ? '请先处理方案中的配合事项，再确认完整方案。' : '请核对完整修复方案，确认后 Agent 将继续执行。',
@@ -632,7 +632,7 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
     <button type="button" onClick={onBack} className="sr-back"><MonitoringIcon name="arrow" />返回监控</button>
     <header className="sr-hero">
       <div>
-        <div className="sr-kicker">{task && <StatusPill status={task.status}>{statusLabels[task.status]}</StatusPill>}<span>会话自愈</span><code>{taskId}</code></div>
+        <div className="sr-kicker">{task && <StatusPill status={task.status}>{task.completionReason === 'user_continued' ? '已让路' : statusLabels[task.status]}</StatusPill>}<span>会话自愈</span><code>{taskId}</code></div>
         <h1>自愈任务详情</h1>
         {task && <div className="sr-target"><span><MonitoringIcon name="bot" /></span><div><strong>{task.request.target.bot_id}</strong><p>{[task.request.target.engine, task.request.target.env, levelLabels[task.level]].filter(Boolean).join(' · ')}</p></div></div>}
       </div>
@@ -665,7 +665,7 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
       {task.status === 'waiting_owner' && <section role="status" className="sr-alert warning"><MonitoringIcon name="user" /><div><strong>{task.canOperate ? '需要确认修复方案' : '等待 Owner 确认修复方案'}</strong><p>{stageSummary}</p></div><button type="button" className="sr-button primary" onClick={viewPlan}>查看方案</button></section>}
       <section className="sr-summary-grid" aria-label="任务概览">
         <article className="sr-summary-card sr-stage-summary">
-          <div className="sr-summary-heading"><span className="sr-summary-icon"><MonitoringIcon name="clock" /></span><h2>当前阶段</h2><StatusPill status={task.status}>{statusLabels[task.status]}</StatusPill></div>
+          <div className="sr-summary-heading"><span className="sr-summary-icon"><MonitoringIcon name="clock" /></span><h2>当前阶段</h2><StatusPill status={task.status}>{task.completionReason === 'user_continued' ? '已让路' : statusLabels[task.status]}</StatusPill></div>
           <strong className="sr-summary-value">{currentPhase?.title || '—'}</strong>
           <div className="sr-summary-note"><PlanMarkdown text={stageSummary} /></div>
           <p className="sr-summary-updated">最近更新 · {formatTime(lastEvent?.at_ms)}</p>
