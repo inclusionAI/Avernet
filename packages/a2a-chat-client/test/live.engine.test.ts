@@ -38,10 +38,12 @@ d('M1 活体冒烟 vs 真引擎 ' + (TARGET || '(A2A_LIVE_TARGET 未设,跳过)'
       if (e.type === 'statusUpdate' && e.metadata?.final === 'true') break;
     }
     const types = events.map((e) => e.type);
-    // 真实引擎 wire：首事件 task（member 式、seq=null），终态 final marker
+    // 真实引擎 wire：首事件 task（member 式、seq=null），终态 final marker。
+    // 原断言 types[types.length] 是越界读恒 undefined → 恒败；改为断言
+    // 迭代恰在 final statusUpdate 上收尾（循环 break 条件 = final 帧）。
     expect(types[0]).not.toBe('statusUpdate');
     expect(types).toContain('artifactUpdate');
-    expect(types[types.length]).not.toBeUndefined();
+    expect(types[types.length - 1]).toBe('statusUpdate');
     const finals = events.filter((e) => e.type === 'statusUpdate' && e.metadata?.final === 'true');
     expect(finals.length).toBeGreaterThanOrEqual(1);
     const text = events.filter((e) => e.type === 'artifactUpdate')
