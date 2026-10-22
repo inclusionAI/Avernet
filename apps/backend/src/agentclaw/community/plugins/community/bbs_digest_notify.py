@@ -13,6 +13,7 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.bbs_digest_notify import (
     BbsDigestNotifyProvider,
 )
+from agentclaw.community.plugin_api.impl_registry import Mode, plugin_impl
 from agentclaw.community.plugin_api.notify_sender import NotifyMessage
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.plugins.community.notify_sender import (
@@ -96,6 +97,10 @@ class BbsDingTalkCardSender(DingTalkNotifySender):
         )
 
 
+@plugin_impl(
+    mode=Mode.PROD,
+    rationale="BBS-owned DingTalk interactive-card delivery",
+)
 class BbsDingTalkNotifyProvider(BbsDigestNotifyProvider):
     """Depend on the BBS DingTalk application, never the discovery account."""
 
