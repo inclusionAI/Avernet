@@ -11,7 +11,7 @@ use axum::{
     http::HeaderMap,
 };
 use bcs_protocol::{EnsureBotRequest, EnsureBotResponse};
-use bcs_service_api::{EnsureBotCommand, OnboardActorIdentity};
+use bcs_service_api::{EnsureBotCommand, OnboardActorIdentity, ServiceError};
 
 use crate::error::HttpAdapterError;
 use crate::state::HttpAppState;
@@ -56,11 +56,68 @@ pub async fn ensure_bot(
     // 3. Call the onboarding service.
     let result = state.services.bot_onboarding.ensure_bot(command).await?;
 
+    // 4. Optional human-facing visibility (`user_visibility`) — applied after
+    // the ensure upsert through the internal bot-attributes patch so a
+    // re-ensure that only binds owner edges stays a pure no-op when omitted.
+    user_visibility_patch(&state, &result.bot_uuid, body.user_visibility.as_deref()).await?;
+
     Ok(Json(EnsureBotResponse {
         bot_uuid: result.bot_uuid,
         ensured: result.ensured,
         created: result.created,
     }))
+}
+
+/// Build and apply the `user_visibility` patch for an ensure request.
+///
+/// `None` (or an empty/whitespace value) means "preserve existing" and skips
+/// the patch entirely. An invalid value or an unwired internal-attributes
+/// service fails the request; the ensure upsert itself remains idempotent and
+/// a retry with a fixed payload converges.
+async fn user_visibility_patch(
+    state: &HttpAppState,
+    bot_uuid: &str,
+    user_visibility: Option<&str>,
+) -> Result<(), HttpAdapterError> {
+    let Some(value) = user_visibility.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(());
+    };
+    if !matches!(value, "public" | "protected" | "private") {
+        return Err(HttpAdapterError::BadRequest(format!(
+            "user_visibility must be public, protected, or private; got '{value}'"
+        )));
+    }
+    let parsed = match value {
+        "public" => bcs_service_api::UserVisibility::Public,
+        "protected" => bcs_service_api::UserVisibility::Protected,
+        _ => bcs_service_api::UserVisibility::Private,
+    };
+    let service = state
+        .internal_bot_attributes_service
+        .as_ref()
+        .ok_or_else(|| {
+            HttpAdapterError::Service(ServiceError::InternalError(
+                "user_visibility requested but the internal bot-attributes service is not wired"
+                    .to_string(),
+            ))
+        })?;
+    service
+        .patch(
+            bcs_service_api::PatchBotInternalAttributes {
+                bot_id: bot_uuid.to_string(),
+                visibility: None,
+                user_visibility: Some(parsed),
+                friend_ext: None,
+                friend_check_in_strategy: None,
+            },
+        )
+        .await
+        .map_err(|error| {
+            HttpAdapterError::Service(ServiceError::InternalError(format!(
+                "failed to apply user_visibility='{value}' to bot '{bot_uuid}': {error}",
+            )))
+        })?;
+    Ok(())
 }
 
 /// Validate the service credential against the configured `ApiKeyRegistry`.
