@@ -13,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.bot_genome.repository import models as genome_models
 from agentclaw.community.core.bot_genome.repository.models import (
+    CandidateCollision,
     CandidateRefRequest,
     GenomePatchRow,
     GenomePromotionRow,
@@ -208,6 +209,19 @@ def test_record_writes_the_revision_its_patch_and_the_candidate_ref_in_one_trans
     assert revisions.get(**BOT, revision_id="sha256:" + "d" * 64) is None, "the revision rolled back with the ref"
     assert patches.get(**BOT, digest="sha256:" + "e" * 64) is None, "and so did the patch row"
     assert revisions.list(**BOT)[0] == 3
+
+
+def test_record_refuses_a_candidate_whose_content_another_record_already_holds(db):
+    revisions, refs, patches = GenomeRevisionRepository(db), GenomeRefRepository(db), GenomePatchRepository(db)
+    revisions.record(_revision(R1))  # a capture of the same content committed first
+    patch = GenomePatchRow(**BOT, digest=R3, base_id=R2, content='{"ops":[]}', created_at=NOW)
+    candidate = CandidateRefRequest(run_id="run_7", moved_kind="strategy_run", moved_actor="s@1", moved_at=NOW)
+    with pytest.raises(CandidateCollision) as caught:
+        revisions.record(_revision(R1, patch_digest=R3), patch=patch, candidate=candidate)
+    assert (caught.value.revision_id, caught.value.seq, caught.value.patch_digest) == (R1, 1, None)
+    assert patches.get(**BOT, digest=R3) is None and refs.candidate_count(**BOT, run_id="run_7") == 0, "nothing was written"
+    _, created, ref = revisions.record(_revision(R1), candidate=candidate)
+    assert not created and ref.name == "candidate/run_7/1", "the same patch (here: none) is a retry"
 
 
 def test_record_takes_the_parent_from_the_latest_revision_inside_the_transaction(db, monkeypatch):

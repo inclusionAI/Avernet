@@ -55,7 +55,10 @@ class GenomeRevisionRepositoryProtocol(Protocol):
         this revision (a retry). With ``parent_from_latest`` the new row's
         ``parent_id`` is the bot's latest revision as read inside the same
         transaction (``None`` for the first), so two overlapping records
-        cannot both come out parentless. Either everything lands or nothing does.
+        cannot both come out parentless. A candidate whose content is found
+        already recorded from a different patch raises ``CandidateCollision``
+        inside the transaction, so nothing is written. Either everything
+        lands or nothing does.
         """
         ...
 

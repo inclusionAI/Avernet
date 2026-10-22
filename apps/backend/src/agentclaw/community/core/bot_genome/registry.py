@@ -69,7 +69,12 @@ from agentclaw.community.core.bot_genome.patch import (
     shape_reasons,
 )
 from agentclaw.community.core.bot_genome.patch_models import GenomePatch
-from agentclaw.community.core.bot_genome.repository.models import CandidateRefRequest, GenomePatchRow, GenomeRevisionRow
+from agentclaw.community.core.bot_genome.repository.models import (
+    CandidateCollision,
+    CandidateRefRequest,
+    GenomePatchRow,
+    GenomeRevisionRow,
+)
 from agentclaw.community.core.bot_genome.spec_checks import SpecCheckContext, SpecChecks, policy_path_reasons
 from agentclaw.community.core.bot_genome.spec_models import GenomePolicy, GenomeSpec
 from agentclaw.community.core.repository.protocols.bot.genome import (
@@ -351,18 +356,19 @@ class GenomeRegistryService(GenomeRegistryProtocol):
             # A candidate's id is its patch digest and names its revision's patch. Content-addressed
             # dedupe would hand this patch a revision recorded from another patch (or a capture),
             # whose metadata and status are not this candidate's: a candidate is new content.
+            # This read gives the clear answer; the recording transaction repeats the check, so a
+            # capture of the same content committing in between is refused the same way.
             existing = self._revisions.get(**self._axes(bot), revision_id=revision_id(outcome.spec, base.policy))
             if existing is not None and existing.patch_digest != patch_row.digest:
-                origin = "another patch" if existing.patch_digest else "the bot's own state"
-                raise PatchRejected([Reason(
-                    "already_recorded", "patch",
-                    f"the result is revision {existing.revision_id} (r{existing.seq}), recorded earlier from {origin}; a candidate is new content, promote that revision instead",
-                )])
-        return self._record(
-            bot, outcome.spec, base.policy, parent=base.revision.id, created_by=created_by, status=status,
-            writes=writes, origin="genome/patch", patch=patch_row, evidence=list(patch.evidence),
-            risk_tier=tier, flags=flags, run=run,
-        )
+                raise PatchRejected([_already_recorded(existing.revision_id, existing.seq, existing.patch_digest)])
+        try:
+            return self._record(
+                bot, outcome.spec, base.policy, parent=base.revision.id, created_by=created_by, status=status,
+                writes=writes, origin="genome/patch", patch=patch_row, evidence=list(patch.evidence),
+                risk_tier=tier, flags=flags, run=run,
+            )
+        except CandidateCollision as exc:
+            raise PatchRejected([_already_recorded(exc.revision_id, exc.seq, exc.patch_digest)]) from exc
 
     def set_policy(self, bot: BotRef, policy: GenomePolicy, *, created_by: Provenance) -> RecordedRevision:
         validator = contract.definition_validator(contract.REVISION_SCHEMA_FILE, "policy")
@@ -448,6 +454,14 @@ class GenomeRegistryService(GenomeRegistryProtocol):
 
 
 # ---------------------------------------------------------------------------------------------
+
+
+def _already_recorded(revision_id: str, seq: int, patch_digest: str | None) -> Reason:
+    origin = "another patch" if patch_digest else "the bot's own state"
+    return Reason(
+        "already_recorded", "patch",
+        f"the result is revision {revision_id} (r{seq}), recorded earlier from {origin}; a candidate is new content, promote that revision instead",
+    )
 
 
 def _metadata(row: GenomeRevisionRow) -> RevisionMetadata:

@@ -120,6 +120,14 @@ class GenomeRefEventRow(BaseModel):
     moved_at: datetime
 
 
+class CandidateCollision(Exception):
+    """``record`` found the candidate's content already recorded from another patch (or a capture); nothing was written."""
+
+    def __init__(self, revision_id: str, seq: int, patch_digest: Optional[str]) -> None:
+        super().__init__(f"revision {revision_id} (r{seq}) already holds this content")
+        self.revision_id, self.seq, self.patch_digest = revision_id, seq, patch_digest
+
+
 class CandidateRefRequest(BaseModel):
     """What ``GenomeRevisionRepositoryProtocol.record`` needs to name a run's candidate ref in the same transaction."""
 

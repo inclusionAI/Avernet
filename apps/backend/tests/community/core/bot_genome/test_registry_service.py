@@ -194,6 +194,14 @@ async def test_a_candidate_whose_result_is_an_existing_revision_is_refused(world
     assert (same.created, same.revision.revision.id, same.ref) == (False, draft.revision.revision.id, "candidate/run_9/1"), "the same patch is a retry"
     again = await world.registry.record_patch(BOT, edit, created_by=OWNER, status=RevisionStatus.DRAFT)
     assert not again.created and again.revision.revision.id == draft.revision.revision.id, "a draft that reproduces a revision gets it back"
+    # The race: the pre-check sees nothing (another record commits the same content in between), and the
+    # recording transaction refuses it the same way, writing nothing.
+    real_get = world.revisions.get
+    world.revisions.get = lambda **kw: None if kw.get("revision_id") == draft.revision.revision.id else real_get(**kw)
+    with pytest.raises(PatchRejected) as caught:
+        await world.registry.record_patch(BOT, reworded, created_by=RUN, status=RevisionStatus.CANDIDATE, run=run)
+    world.revisions.get = real_get
+    assert caught.value.reasons[0].code == "already_recorded" and world.registry.list_refs(BOT) == [r for r in world.registry.list_refs(BOT) if r.name == "candidate/run_9/1"]
 
 
 @pytest.mark.asyncio

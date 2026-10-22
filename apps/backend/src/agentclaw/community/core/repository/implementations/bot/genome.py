@@ -15,6 +15,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.bot_genome.repository.models import (
+    CandidateCollision,
     CandidateRefRequest,
     GenomePatchModel,
     GenomePatchRow,
@@ -93,6 +94,8 @@ class GenomeRevisionRepository(GenomeRevisionRepositoryProtocol):
                 with _transaction(self._db) as session:
                     orm = _revision_row(session, **axes, revision_id=row.revision_id)
                     created = orm is None
+                    if orm is not None and candidate is not None and patch is not None and orm.patch_digest != patch.digest:
+                        raise CandidateCollision(orm.revision_id, orm.seq, orm.patch_digest)  # rolls the transaction back
                     if orm is None:
                         values = row.model_dump(exclude={"id", "seq", "gmt_create", "gmt_modified"})
                         if parent_from_latest:
