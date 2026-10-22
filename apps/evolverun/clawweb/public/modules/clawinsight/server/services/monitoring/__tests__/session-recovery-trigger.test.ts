@@ -135,3 +135,14 @@ it("does not downgrade missing or mismatched v3 identity to old recovery", async
   expect(service.create).not.toHaveBeenCalled();
   expect(warning).toHaveBeenCalledTimes(3);
 });
+
+it.each([{}, { STAGE: "" }])("creates recovery for a v3 personal Bot without a service stage: %j", async fields => {
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  const { service, trigger } = setup();
+  const { STAGE: _stage, ...identity } = runtimeIdentity;
+  await trigger.trigger({ ...event, schemaVersion: DIAGNOSIS_V3_VERSION,
+    runtimeIdentity: { ...identity, BOT_TYPE: "personal", OWNER_ID: event.entityId, ...fields } });
+  expect(service.create).toHaveBeenCalledTimes(1);
+  expect(service.create.mock.calls[0][0].target).toEqual({ ...bot, engine: "OC" });
+  expect(warning).not.toHaveBeenCalled();
+});

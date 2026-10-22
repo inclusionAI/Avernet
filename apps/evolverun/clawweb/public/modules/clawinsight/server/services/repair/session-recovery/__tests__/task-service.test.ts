@@ -169,6 +169,26 @@ it("validates runtime identity only through the recovery creation contract", () 
     .toEqual({ stage: "draft", deviceUuid: runtime_identity.deviceUuid });
 });
 
+it("creates and starts a personal Bot task using its normal binding without service locators", async () => {
+  const { deps, agent } = setup();
+  const target = { environment: "prod" as const, ownerId: "owner", botId: "default", provider: "baas", bindingId: "12",
+    deviceId: "BOT-personal", activeEngine: "openclaw", botType: "personal" };
+  const resolveTarget = vi.fn().mockResolvedValue(recoveryTargetSnapshot(target));
+  const service = new SessionRecoveryTaskService({ ...deps, resolveTarget });
+  const input = { ...request, target: { ...request.target, runtime_identity: { BOT_TYPE: "personal", STAGE: "",
+    TOKEN: "dummy", CLIENT_ID: "DEVICE-" + "a".repeat(32), VERSION: "V1" } } };
+  const ack = await service.create(input, actor); await flush();
+  expect(resolveTarget).toHaveBeenCalledWith(request);
+  const task = await service.detail(ack.task_id, actor);
+  expect(task.request.target).toEqual(request.target);
+  expect(task.runtimeTarget?.target).toMatchObject(target);
+  expect(task.runtimeTarget?.target).not.toHaveProperty("runtimeIdentity");
+  expect(task.status).toBe("running");
+  expect(agent.start).toHaveBeenCalledOnce();
+  expect(await service.create(input, actor)).toEqual(ack);
+  expect(resolveTarget).toHaveBeenCalledOnce();
+});
+
 it("persists the service instance identity and fences later requests from switching devices", async () => {
   const { deps } = setup();
   const runtimeIdentity = { stage: "online" as const, version: "V16", deviceUuid: "DEVICE-" + "a".repeat(32) };
