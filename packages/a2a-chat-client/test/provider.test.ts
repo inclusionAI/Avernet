@@ -23,7 +23,9 @@ import {
   A2AProvider,
   A2A_APPROVAL_ANSWERS_REQUIRED_MESSAGE,
   A2A_APPROVAL_UNSUPPORTED_MESSAGE,
+  A2A_ATTACHMENTS_UNSUPPORTED_MESSAGE,
   A2A_FILE_REFS_UNSUPPORTED_MESSAGE,
+  A2A_INJECT_UNSUPPORTED_MESSAGE,
   RECOVERY_INCOMPLETE_MESSAGE,
   RECOVERY_STOPPED_MESSAGE,
   OUTCOME_UNKNOWN_MESSAGE,
@@ -551,6 +553,34 @@ describe('request() — A2A wire → 真 parser 的主回路', () => {
       // 零 wire 出站：card 探测之外无任何 POST
       expect(fetchImpl.calls.filter((c) => c.url === A2A_URLS.rpcUrl)).toHaveLength(0);
       // 状态不粘滞：isRequesting 未占用——纯文本请求照常工作
+      expect(provider.isConnected).toBe(true);
+    });
+
+  it('附件与 inject：A2A 面 parts 只承载文本——提交前 typed 拒绝（不静默丢附件/不换执行语义），状态不粘滞',
+    async () => {
+      const fetchImpl = routingFetch(() => { throw new Error('no rpc expected'); });
+      const { provider, spies } = newProvider({ fetchImpl });
+      await provider.connect();
+
+      // v3 SDK 把附件写上 wire（chat.send 携带 attachments）、inject 走
+      // chat.inject（注入语义，非任务执行）；A2A 面两者的 wire 契约都缺——
+      // 必须出站前拒绝，不得把图片请求降级成纯文本、不得把注入当任务发
+      await expect(provider.request({
+        query: '帮我分析这张图', sessionKey: SESSION,
+        attachments: [{ id: 'file-1', kind: 'image' }] as any,
+      })).rejects.toThrow(A2A_ATTACHMENTS_UNSUPPORTED_MESSAGE);
+      await expect(provider.request({
+        query: '[注入] 上下文材料', sessionKey: SESSION, isInject: true as any,
+      })).rejects.toThrow(A2A_INJECT_UNSUPPORTED_MESSAGE);
+      // onError 上行 + typed failure（宿主 toast 消费面，与 fileRefs 门同构）
+      expect(spies.onError).toHaveBeenCalledTimes(2);
+      expect((spies.onError.mock.calls[0][0] as any).failure)
+        .toEqual({ kind: 'rpc', reason: 'attachments_unsupported' });
+      expect((spies.onError.mock.calls[1][0] as any).failure)
+        .toEqual({ kind: 'rpc', reason: 'inject_unsupported' });
+      expect(spies.onComplete).not.toHaveBeenCalled();
+      // 零 wire 出站 + 状态不粘滞
+      expect(fetchImpl.calls.filter((c) => c.url === A2A_URLS.rpcUrl)).toHaveLength(0);
       expect(provider.isConnected).toBe(true);
     });
 
@@ -1705,7 +1735,7 @@ describe('B14 M2 终审修复钉板（F1/F1b 共-seq、F2 not_found、F4 恢复�
         outcome: null, runFailure: null, terminalApplied: false,
       };
       const consume = (env: any) =>
-        (provider as any).consumeWireEvent(wireOf(env), bag) as string;
+        (provider as any).run.consumeWireEvent(wireOf(env), bag) as string;
 
       // 真内核全序：task、WORKING@2、你@3、好@4、你好！@5、state-change@6、
       // marker@6（与 state-change 共 seq——豁免面：恰一次应用）
