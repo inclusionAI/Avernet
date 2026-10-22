@@ -70,3 +70,22 @@ describe('a2a 开关构建期默认（define 注入面）', () => {
     expect(isA2aClientEnabled()).toBe(false);
   });
 });
+
+describe('构建期默认双形态判定（review P2：define 值类型统一）', () => {
+  const cases: Array<[boolean | string | undefined, boolean]> = [
+    [true, true],            // config/a2aBuildDefault 正路：布尔
+    ['true', true],          // 防御：异构 define 管线的字符串形态
+    [false, false],
+    ['false', false],
+    [undefined, false],
+    ["'true'", false],       // 旧坏产物（带引号字面量）恒关——修复前陷阱
+  ];
+  it.each(cases)('__A2A_CLIENT_DEFAULT__=%p → %s', (injected, expected) => {
+    (global as any).__A2A_CLIENT_DEFAULT__ = injected;
+    try {
+      expect(isA2aClientEnabled()).toBe(expected);
+    } finally {
+      delete (global as any).__A2A_CLIENT_DEFAULT__;
+    }
+  });
+});

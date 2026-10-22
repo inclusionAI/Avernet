@@ -1,6 +1,7 @@
 import tailwindcss from '@tailwindcss/postcss';
 import { defineConfig } from '@umijs/max';
 import path from 'path';
+import { a2aClientBuildDefault } from './a2aBuildDefault';
 import { routes } from './routes';
 
 const bcsEndpointPre = process.env.BCS_ENDPOINT_PRE || 'http://127.0.0.1:21000';
@@ -32,10 +33,13 @@ export default defineConfig({
     QWENWORK_PROVIDER_SLUG: process.env.QWENWORK_PROVIDER_SLUG || '',
     BCS_ENDPOINT_PRE: bcsEndpointPre,
     BCS_ENDPOINT_PROD: bcsEndpointProd,
-    // A2A 客户端构建期默认开关（spec stage2 §1 唯一读取口=adapters/a2a/switch.ts）。
-    // 镜像构建参数 A2A_CLIENT_DEFAULT=true 时验证/灰度镜像整包默认开；
-    // 主线构建不注入 → 语义为字符串 'false'，保持关闭。运行期 localStorage
-    // '0' 依然优先级最高（现场回退通道不因构建期默认而失效）。
-    __A2A_CLIENT_DEFAULT__: process.env.A2A_CLIENT_DEFAULT === 'true' ? "'true'" : "'false'",
+    // A2A 客户端构建期默认开关（spec stage2 §1 唯一读取口=adapters/a2a/
+    // switch.ts）。镜像构建参数 A2A_CLIENT_DEFAULT=true 时验证/灰度镜像
+    // 整包默认开；主线构建不注入保持关闭。值为**布尔**（review P2 修复：
+    // 旧 "'true'" 带引号字面量经 umi define 转换后是四字符字符串、恒 !==
+    // 'true'，灰度镜像实际全在跑 v3）；计算单源 config/a2aBuildDefault.ts
+    // （可直测，umi 配置链 jest 驱动不了）。运行期 localStorage '0' 依然
+    // 优先级最高（现场回退通道不因构建期默认而失效）。
+    __A2A_CLIENT_DEFAULT__: a2aClientBuildDefault(),
   },
 });
