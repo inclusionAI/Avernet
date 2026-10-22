@@ -89,4 +89,41 @@ describe('card 探测超时与取消（探测不携带 token；永久挂死须�
     const r = await p;
     expect(r.reason).toBe('aborted');
   });
+
+  // 响应头已到、响应体阻塞：超时必须覆盖 body 读取（真 fetch abort 会让
+  // 挂起的 body 读以 AbortError 报错）。旧实现 fetch 返回即 clearTimeout +
+  // 摘除 abort 监听 → json() 永悬，探测永不收口——本用例 10s 兜底超时即红。
+  it('响应头已到、响应体阻塞 → 超时覆盖 body 读取 → reason timeout', async () => {
+    const r = await fetchCard('http://x/.well-known/agent-card.json',
+      headersThenHangingBodyFetch as any, { timeoutMs: 20 });
+    expect(r.card).toBeNull();
+    expect(r.reason).toBe('timeout');
+  }, 10_000);
+
+  it('响应头已到、响应体阻塞 + 调用方 abort → 归 aborted', async () => {
+    const ctrl = new AbortController();
+    const p = fetchCard('http://x/.well-known/agent-card.json',
+      headersThenHangingBodyFetch as any, { signal: ctrl.signal, timeoutMs: 50 });
+    setTimeout(() => ctrl.abort(), 10);
+    const r = await p;
+    expect(r.reason).toBe('aborted');
+  });
 });
+
+// 模拟真 fetch 的 body 语义：头立即返回，body ReadableStream 挂死；仅在
+// fetch 的 signal abort 时让 body 以 AbortError 断流（与 undici 同口径）。
+const headersThenHangingBodyFetch = (u: string, init?: RequestInit) =>
+  new Promise<Response>((resolve, reject) => {
+    const s = init?.signal as AbortSignal | undefined;
+    if (!s) return;                    // 无 signal：真挂起
+    if (s.aborted) { reject(new DOMException('aborted', 'AbortError')); return; }
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        s.addEventListener('abort', () => {
+          try { controller.error(new DOMException('aborted', 'AbortError')); } catch { /* closed */ }
+        });
+        // 不 enqueue、不 close：body 永不完成
+      },
+    });
+    resolve(new Response(stream, { status: 200, headers: { 'content-type': 'application/json' } }));
+  });

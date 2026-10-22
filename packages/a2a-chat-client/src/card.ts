@@ -28,25 +28,28 @@ export async function fetchCard(
   }
   const timer = setTimeout(() => { timedOut = true; controller.abort(); },
     opts.timeoutMs ?? DEFAULT_CARD_TIMEOUT_MS);
-  let resp: Response;
+  let resp: Response | null = null;
   try {
     resp = await fetchImpl(cardUrl, {
       headers: { accept: 'application/json' }, signal: controller.signal,
     });
+    if (!resp.ok) return { card: null, reason: `http_${resp.status}` };
+    // 超时与取消须覆盖到 body 读取与解析完成：fetch 返回仅代表响应头到达，
+    // 在此之前清掉 timer/摘除监听会让「头到、body 挂死」的响应永悬探测
+    // （内部 abort 会让真 fetch 的挂起 body 以 AbortError 断流）。
+    const raw = await resp.json();
+    return { card: (raw && typeof raw === 'object') ? raw : null,
+             reason: raw && typeof raw === 'object' ? undefined : 'bad_json' };
   } catch {
     if (opts.signal?.aborted) return { card: null, reason: 'aborted' };
     if (timedOut) return { card: null, reason: 'timeout' };
-    return { card: null, reason: 'network' };
+    // 头阶段断流归 network；头已到、body/解析阶段断流归 bad_json
+    // （resp 已绑定 = fetch 自身成功，断点在 body 读取/解析）。
+    return { card: null, reason: resp === null ? 'network' : 'bad_json' };
   } finally {
     clearTimeout(timer);
     opts.signal?.removeEventListener('abort', onAbort);
   }
-  if (!resp.ok) return { card: null, reason: `http_${resp.status}` };
-  try {
-    const raw = await resp.json();
-    return { card: (raw && typeof raw === 'object') ? raw : null,
-             reason: raw && typeof raw === 'object' ? undefined : 'bad_json' };
-  } catch { return { card: null, reason: 'bad_json' }; }
 }
 
 export function validateScenarios(
