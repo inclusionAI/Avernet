@@ -64,6 +64,15 @@ beforeEach(() => {
   jest.clearAllMocks();
 });
 
+it('定位历史消息时收起覆盖面板，露出会话中的高亮消息', () => {
+  const { options } = makeOptions({});
+  const { result } = renderHook(() => useChatHeaderPanels(options));
+  act(() => result.current.togglePanel('history'));
+  act(() => result.current.locateMessage('m1'));
+  expect(result.current.openPanel).toBeNull();
+  expect(result.current.highlightMessageId).toBe('m1');
+});
+
 it('sessionHasSidePaneContent 引号变体均命中（引擎/BCS 输出风格不一），无标记不命中', () => {
   // 单引号（BCS 业务面板的真实输出形态：cardId 在前、type='panel' 靠后）。
   const singleQuoted =

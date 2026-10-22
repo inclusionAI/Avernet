@@ -193,6 +193,7 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
   const historySearch = useSessionHistorySearchModel(messages, sessionEpoch);
 
   const locateMessage = useCallback((messageId: string) => {
+    setOpenPanel(null);
     setHighlightMessageId(messageId);
     if (highlightTimer.current) clearTimeout(highlightTimer.current);
     highlightTimer.current = setTimeout(() => setHighlightMessageId(null), HIGHLIGHT_TIMEOUT_MS);

@@ -42,7 +42,7 @@ export function GroupWorkspaceArea({
     expandedGroupIds,
     sessionOnly ? scope?.session ?? undefined : undefined,
   );
-  const chat = useGroupChat(scope && !ws.selectedGroup ? null : sessions.selectedSession);
+  const chat = useGroupChat(scope && !ws.selectedGroup ? null : sessions.selectedSession, userIdentityId);
   const [activePanel, setActivePanel] = useState<GroupPanelKind>('none');
   // 头部六图标域（收藏/历史消息/副屏）：搜索口径与消息区渲染同源（filterVisibleGroupMessages），
   // 保证历史面板每条结果都能在消息区定位到（useGroupChatDisplayStatus 同款同源约定）。
@@ -140,113 +140,116 @@ export function GroupWorkspaceArea({
       {!sessionOnly && (
         <GroupWorkspaceSidebar sidebar={groupSidebarProps} open={mobileListOpen} onClose={onCloseMobileList} />
       )}
-      <GroupChatPane
-        identityLocked={Boolean(scope)}
-        group={selectedGroup}
-        session={sessions.selectedSession}
-        activeIdentity={ws.activeIdentity}
-        updateMemberMode={sessions.updateMemberMode}
-        updateMemberScope={sessions.updateMemberScope}
-        panelRef={chat.panelRef}
-        chatBridge={chat.chatBridge}
-        chat={chat.chat}
-        supportState={chat.supportState}
-        connectionStatus={chat.connectionStatus}
-        questions={chat.questions}
-        execApprovals={chat.execApprovals}
-        groupBootstrapProcessing={chat.groupBootstrapProcessing}
-        send={chat.send}
-        submitPanelMessage={chat.submitPanelMessage}
-        submitTaskExecutionMessage={chat.submitTaskExecutionMessage}
-        appendAssistantMessage={chat.appendAssistantMessage}
-        streamAssistantMessage={chat.streamAssistantMessage}
-        abortBot={chat.abortBot}
-        abortingBotIds={chat.abortingBotIds}
-        queuedDeliveries={chat.queuedDeliveries}
-        processingDeliveries={chat.processingDeliveries}
-        cancellingDeliveryIds={chat.cancellingDeliveryIds}
-        cancelDelivery={chat.cancelDelivery}
-        reconnect={chat.reconnect}
-        onOpenSessionList={sessionOnly ? undefined : onOpenMobileList}
-        reloadHistory={chat.reloadHistory}
-        hasMoreHistory={chat.hasMoreHistory}
-        isLoadingMoreHistory={chat.isLoadingMoreHistory}
-        onLoadMoreHistory={chat.loadMoreHistory}
-        canManageGroup={canManage}
-        activePanel={activePanel}
-        onTogglePanel={handleTogglePanel}
-        favorites={headerPanels.favorites}
-        sidePaneOpen={headerPanels.sidePaneOpen}
-        sidePaneDisabled={headerPanels.sidePaneDisabled}
-        onToggleSidePane={headerPanels.toggleSidePane}
-        onSidePaneIsOpenChange={headerPanels.onSidePaneIsOpenChange}
-        highlightMessageId={headerPanels.highlightMessageId}
-        onRequestDissolve={handleDissolve}
-        onRequestShareGroup={handleShareGroup}
-        onRequestShareSession={handleShareSession}
-        inputRef={chat.inputRef}
-        userAvatarUrl={userAvatarUrl}
-        userIdentityId={userIdentityId}
-        userIdentityName={userIdentityName}
-      />
-      <GroupChatAbortUnsupportedDialog
-        open={Boolean(chat.unsupportedAbortBotId)}
-        onClose={chat.dismissAbortUnsupported}
-      />
-      {selectedGroup ? (
-        <GroupMembersPanelSlot
-          open={activePanel === 'members'}
+      <div className="relative isolate flex min-h-0 min-w-0 flex-1" data-workspace-conversation="true">
+        <GroupChatPane
+          identityLocked={Boolean(scope)}
           group={selectedGroup}
           session={sessions.selectedSession}
+          activeIdentity={ws.activeIdentity}
+          updateMemberMode={sessions.updateMemberMode}
+          updateMemberScope={sessions.updateMemberScope}
+          panelRef={chat.panelRef}
+          chatBridge={chat.chatBridge}
+          chat={chat.chat}
+          historyOnly={chat.historyOnly}
+          supportState={chat.supportState}
+          connectionStatus={chat.connectionStatus}
+          questions={chat.questions}
+          execApprovals={chat.execApprovals}
+          groupBootstrapProcessing={chat.groupBootstrapProcessing}
+          send={chat.send}
+          submitPanelMessage={chat.submitPanelMessage}
+          submitTaskExecutionMessage={chat.submitTaskExecutionMessage}
+          appendAssistantMessage={chat.appendAssistantMessage}
+          streamAssistantMessage={chat.streamAssistantMessage}
+          abortBot={chat.abortBot}
+          abortingBotIds={chat.abortingBotIds}
+          queuedDeliveries={chat.queuedDeliveries}
+          processingDeliveries={chat.processingDeliveries}
+          cancellingDeliveryIds={chat.cancellingDeliveryIds}
+          cancelDelivery={chat.cancelDelivery}
+          reconnect={chat.reconnect}
+          onOpenSessionList={sessionOnly ? undefined : onOpenMobileList}
+          reloadHistory={chat.reloadHistory}
+          hasMoreHistory={chat.hasMoreHistory}
+          isLoadingMoreHistory={chat.isLoadingMoreHistory}
+          onLoadMoreHistory={chat.loadMoreHistory}
+          canManageGroup={canManage}
+          activePanel={activePanel}
+          onTogglePanel={handleTogglePanel}
+          favorites={headerPanels.favorites}
+          sidePaneOpen={headerPanels.sidePaneOpen}
+          sidePaneDisabled={headerPanels.sidePaneDisabled}
+          onToggleSidePane={headerPanels.toggleSidePane}
+          onSidePaneIsOpenChange={headerPanels.onSidePaneIsOpenChange}
+          highlightMessageId={headerPanels.highlightMessageId}
+          onRequestDissolve={handleDissolve}
+          onRequestShareGroup={handleShareGroup}
+          onRequestShareSession={handleShareSession}
+          inputRef={chat.inputRef}
+          userAvatarUrl={userAvatarUrl}
+          userIdentityId={userIdentityId}
+          userIdentityName={userIdentityName}
+        />
+        <GroupChatAbortUnsupportedDialog
+          open={Boolean(chat.unsupportedAbortBotId)}
+          onClose={chat.dismissAbortUnsupported}
+        />
+        {selectedGroup ? (
+          <GroupMembersPanelSlot
+            open={activePanel === 'members'}
+            group={selectedGroup}
+            session={sessions.selectedSession}
+            canManage={canManage}
+            onClose={() => setActivePanel('none')}
+          />
+        ) : null}
+        <WorkspaceManagePanels
+          activePanel={activePanel}
+          group={selectedGroup}
+          session={sessions.selectedSession}
+          groupAdvancedConfigEnabled={groupAdvancedConfigEnabled}
           canManage={canManage}
+          identities={ws.identities}
+          activeIdentity={ws.activeIdentity}
+          authenticatedUserId={userIdentityId}
+          authenticatedUserName={userIdentityName}
           onClose={() => setActivePanel('none')}
+          onUpdateGroup={groupManage.updateGroup}
+          onDissolveGroup={handleDissolve}
+          onLeaveGroup={handleLeaveGroup}
+          onAddGroupMember={groupManage.addMember}
+          onRemoveGroupMember={groupManage.removeMember}
+          onShareGroup={groupManage.createShare}
+          onSaveDingTalk={groupManage.saveDingTalk}
+          onToggleDingTalkActive={groupManage.toggleDingTalkActive}
+          onDeleteDingTalk={groupManage.deleteDingTalk}
+          dingTalkBinding={groupManage.dingTalkBinding}
+          dingTalkLoading={groupManage.dingTalkLoading}
+          onRenameSession={sessions.renameSession}
+          onDeleteSession={sessions.deleteSession}
+          onLeaveSession={handleLeaveSession}
+          onAddSessionMember={sessionManage.addMember}
+          onRemoveSessionMember={sessionManage.removeMember}
+          onShareSession={sessionManage.createShare}
         />
-      ) : null}
-      <WorkspaceManagePanels
-        activePanel={activePanel}
-        group={selectedGroup}
-        session={sessions.selectedSession}
-        groupAdvancedConfigEnabled={groupAdvancedConfigEnabled}
-        canManage={canManage}
-        identities={ws.identities}
-        activeIdentity={ws.activeIdentity}
-        authenticatedUserId={userIdentityId}
-        authenticatedUserName={userIdentityName}
-        onClose={() => setActivePanel('none')}
-        onUpdateGroup={groupManage.updateGroup}
-        onDissolveGroup={handleDissolve}
-        onLeaveGroup={handleLeaveGroup}
-        onAddGroupMember={groupManage.addMember}
-        onRemoveGroupMember={groupManage.removeMember}
-        onShareGroup={groupManage.createShare}
-        onSaveDingTalk={groupManage.saveDingTalk}
-        onToggleDingTalkActive={groupManage.toggleDingTalkActive}
-        onDeleteDingTalk={groupManage.deleteDingTalk}
-        dingTalkBinding={groupManage.dingTalkBinding}
-        dingTalkLoading={groupManage.dingTalkLoading}
-        onRenameSession={sessions.renameSession}
-        onDeleteSession={sessions.deleteSession}
-        onLeaveSession={handleLeaveSession}
-        onAddSessionMember={sessionManage.addMember}
-        onRemoveSessionMember={sessionManage.removeMember}
-        onShareSession={sessionManage.createShare}
-      />
-      {activePanel === 'resources' && sessions.selectedSession && (
-        /* 验收微调：会话文件由全屏 Modal 改为右侧副屏（与单聊侧同构容器）。 */
-        <SessionFilesSidebar
-          sessionId={sessions.selectedSession.sessionId}
-          participants={sessions.selectedSession.participants}
-          authenticatedUser={userIdentityId ? { userId: userIdentityId, name: userIdentityName } : null}
-          onClose={() => setActivePanel('none')}
-        />
-      )}
-      {activePanel === 'history' && sessions.selectedSession && (
-        <GroupHistorySidebar
-          search={headerPanels.historySearch}
-          onLocate={headerPanels.locateMessage}
-          onClose={() => setActivePanel('none')}
-        />
-      )}
+        {activePanel === 'resources' && sessions.selectedSession && (
+          /* 会话局部覆盖层：资源管理与单聊侧共用容器。 */
+          <SessionFilesSidebar
+            sessionId={sessions.selectedSession.sessionId}
+            participants={sessions.selectedSession.participants}
+            authenticatedUser={userIdentityId ? { userId: userIdentityId, name: userIdentityName } : null}
+            onClose={() => setActivePanel('none')}
+          />
+        )}
+        {activePanel === 'history' && sessions.selectedSession && (
+          <GroupHistorySidebar
+            search={headerPanels.historySearch}
+            onLocate={headerPanels.locateMessage}
+            onClose={() => setActivePanel('none')}
+          />
+        )}
+      </div>
       <CreateGroupModal
         open={createGroupDialog.open}
         activeIdentity={ws.activeIdentity}

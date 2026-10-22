@@ -1,5 +1,24 @@
 @import 'tailwindcss';
 
+@keyframes workspace-panel-slide-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.workspace-overlay-panel {
+  animation: workspace-panel-slide-in 240ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-overlay-panel {
+    animation: none;
+  }
+}
+
 /*
  * 消息正文末尾与常驻操作栏保持设计规范中的紧凑间距。
  * @tc-chat/ui 的 Markdown 节点自带 bottom margin，且 styled-components

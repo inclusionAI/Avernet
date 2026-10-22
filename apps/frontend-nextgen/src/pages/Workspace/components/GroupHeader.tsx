@@ -37,6 +37,7 @@ export interface GroupHeaderProps {
   selectedGroup: GroupView | null;
   selectedSession: SessionView | null;
   connectionStatus: ProviderConnectionStatus;
+  historyOnly?: boolean;
   onOpenSessionList?: () => void;
   canManageGroup?: unknown;
   activePanel: GroupPanelKind;
@@ -98,6 +99,7 @@ function HeaderIcon({
 }
 
 export function GroupHeader({
+  historyOnly = false,
   selectedGroup,
   selectedSession,
   connectionStatus,
@@ -182,7 +184,9 @@ export function GroupHeader({
               </div>
               {selectedSession ? (
                 <ChatConnectionStatus
-                  {...CONNECTION_COPY[connectionStatus]}
+                  {...(historyOnly
+                    ? { label: selectedSession.participants.length ? '未加入当前会话' : '正在加载成员信息', tone: 'neutral' as const }
+                    : CONNECTION_COPY[connectionStatus])}
                   // ④ 窄宽收纳（视口+容器双闸）：桌面主区被副屏/管理面板挤到 <32.5rem 时同样仅绿点。
                   labelVisibleClassName="lg:@min-[32.5rem]/group-header:inline"
                 />

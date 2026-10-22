@@ -3,7 +3,7 @@ import type { GroupView, SessionView } from '@/domain/collaboration';
 import type { PolicyResult } from '@/services/workspace/groupService';
 import { toast } from 'sonner';
 import { MembersPanel } from './MembersPanel';
-import { ResizableWorkspaceSidebar } from './ResizableWorkspaceSidebar';
+import { WorkspaceOverlayPanel } from './WorkspaceOverlayPanel';
 
 interface GroupMembersPanelSlotProps {
   open: boolean;
@@ -17,9 +17,8 @@ export function GroupMembersPanelSlot({ open, group, session, canManage, onClose
   if (!open) return null;
 
   return (
-    <ResizableWorkspaceSidebar
+    <WorkspaceOverlayPanel
       ariaLabel="群成员面板"
-      side="right"
       onDismiss={onClose}
       {...WORKSPACE_RIGHT_PANEL_LAYOUT}
       className="border-l border-border bg-card"
@@ -32,6 +31,6 @@ export function GroupMembersPanelSlot({ open, group, session, canManage, onClose
         onRemoveParticipant={() => toast.info('移除成员由协作群 Service 接入')}
         onClose={onClose}
       />
-    </ResizableWorkspaceSidebar>
+    </WorkspaceOverlayPanel>
   );
 }

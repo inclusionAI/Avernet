@@ -17,7 +17,7 @@ const session: SessionView = {
   title: 't',
   kind: 'chat',
   status: 'running',
-  participants: [],
+  participants: [{ actorId: 'me', kind: 'human', name: 'Me', role: 'member', mode: 'present' }],
   lastMessageAt: 0,
   createdAt: 0,
   favorite: false,
@@ -120,11 +120,13 @@ beforeEach(() => {
   // aixBridge 由 @/services/workspace/chatBridge mock 的 getter 在 useGroupChat 渲染时 ensure 指回单例,
   // 不在此 delete(单例跨 test 缓存,delete 后下一测试构造副作用不重跑);保留 resetWorkspace。
   useWorkspaceStore.getState().resetWorkspace();
-  useWorkspaceStore.setState({ activeIdentityId: 'me' });
+  useWorkspaceStore.setState({ activeIdentityId: 'me', identities: [{ id: 'me', kind: 'user', displayName: 'Me', online: true }] });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fn = () => jest.fn<any>();
   mockProvider = {
+    liveEnabled: true,
+    setLiveEnabled: fn().mockImplementation((enabled: boolean) => { mockProvider.liveEnabled = enabled; }),
     loadHistory: fn().mockResolvedValue([]),
     loadMoreHistory: fn().mockResolvedValue([]),
     connect: fn().mockResolvedValue(undefined),
@@ -176,11 +178,38 @@ it('mount connects to the provider with conversationKey=sessionId, unmount disco
     // 不再使用 SDK defaultMessages；改为显式 loadHistory + setMessages
     expect(opts.defaultMessages).toBeUndefined();
   });
-  expect(mockedProviderFactory).toHaveBeenCalledWith({ sessionId: 's1', groupId: 'g1', identityId: 'me' });
+  expect(mockedProviderFactory).toHaveBeenCalledWith({ sessionId: 's1', groupId: 'g1', identityId: 'me', liveEnabled: true });
   expect(mockProvider.connect).toHaveBeenCalled();
 
   unmount();
   expect(mockProvider.disconnect).toHaveBeenCalled();
+});
+
+it('absent mode keeps history refresh and pagination but blocks every send/reconnect entry', async () => {
+  const history = [{ id: 'm1', role: 'user', content: 'history', status: 'history' }];
+  mockProvider.loadHistory.mockResolvedValue(history);
+  mockProvider.hasMoreHistory = true;
+  const absent: SessionView = { ...session, participants: [{ ...session.participants[0], actorId: 'human_1', mode: 'absent' }] };
+  const { result } = renderHook(() => useGroupChat(absent, '1'));
+  await waitFor(() => expect(mockChat.setMessages).toHaveBeenCalledWith(history));
+  expect(result.current.historyOnly).toBe(true);
+  expect(result.current.connectionStatus).toBe('disconnected');
+  await act(async () => {
+    await result.current.reloadHistory();
+    await result.current.loadMoreHistory();
+    result.current.send('message');
+    result.current.submitPanelMessage('panel');
+    result.current.submitTaskExecutionMessage('task', 'bot_1');
+    await result.current.reconnect();
+    useWorkspaceStore.getState().bumpWsReconnect();
+  });
+  expect(mockProvider.loadHistory).toHaveBeenCalledTimes(2);
+  expect(mockProvider.loadMoreHistory).toHaveBeenCalledTimes(1);
+  expect(mockProvider.connect).not.toHaveBeenCalled();
+  expect(mockProvider.reconnect).not.toHaveBeenCalled();
+  expect(mockChat.onRequest).not.toHaveBeenCalled();
+  const bridge = mockUseChatBridgeCalls[mockUseChatBridgeCalls.length - 1];
+  expect(() => bridge.buildRequestParams('card', {})).toThrow('未加入');
 });
 
 it('mount calls provider.loadHistory and sets messages into chat', async () => {

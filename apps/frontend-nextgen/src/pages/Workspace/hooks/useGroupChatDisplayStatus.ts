@@ -41,7 +41,8 @@ export function useGroupChatDisplayStatus({
     setHistoryEmpty(outcome === 'ready' ? !!empty : false);
   }, []);
 
-  const isAutoReconnecting = useGroupChatAutoReconnect(provider, rawStatus);
+  const historyOnly = provider?.liveEnabled === false;
+  const isAutoReconnecting = useGroupChatAutoReconnect(historyOnly ? null : provider, rawStatus);
   const visibleCount = filterVisibleGroupMessages(messages).length;
   // 真空确认：loader 上报空历史后持续宽限仍无可见消息，才信任为真·空会话。
   const [emptyConfirmed, setEmptyConfirmed] = useState(false);
@@ -68,5 +69,5 @@ export function useGroupChatDisplayStatus({
     enterOutcome,
     autoReconnecting: isAutoReconnecting,
   });
-  return { status, onEnterOutcome };
+  return { status: historyOnly ? 'disconnected' as const : status, onEnterOutcome };
 }

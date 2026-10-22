@@ -248,6 +248,7 @@ function InteractiveStageHarness(props: { options: UseConversationInteractiveCha
       model={model}
       onOpenSessionList={() => {}}
       onOpenAgentCodingBot={mockAgentCodingOpen}
+      headerRightPanels={<div data-testid="header-right-panel" />}
     />
   );
 }
@@ -286,6 +287,9 @@ describe('交互式主舞台(mine / 好友 Bot 单聊)', () => {
     render(<InteractiveStageHarness options={options} />);
 
     expect(screen.getByTestId('chat-panel-stub')).toHaveAttribute('data-mode', 'bot');
+    const conversation = screen.getByTestId('chat-panel-stub').closest('[data-workspace-conversation]');
+    expect(conversation).toHaveClass('relative', 'isolate', 'min-w-0');
+    expect(conversation).toContainElement(screen.getByTestId('header-right-panel'));
     const executionOptions = mockUseTaskExecution.mock.calls.at(-1)?.[0] as {
       context: { ownerUserId: string; ownerBotId: string; mainSessionId: string | null } | null;
     };

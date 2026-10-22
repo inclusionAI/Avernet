@@ -17,6 +17,7 @@ export function useMessageAreaSkeleton({
   messages,
   status,
   confirmMs = EMPTY_CONFIRM_MS,
+  historyOnlyReady = false,
 }: {
   /** 渲染口径的可见消息（调用方须与消息区渲染层共用同一过滤）。 */
   messages: ChatMessage[];
@@ -24,6 +25,8 @@ export function useMessageAreaSkeleton({
   status: ProviderConnectionStatus;
   /** 空态确认宽限（ms）。 */
   confirmMs?: number;
+  /** 只读会话由 HTTP 完成信号确认历史，不等待不存在的 WS。 */
+  historyOnlyReady?: boolean;
 }): boolean {
   const isEmpty = messages.length === 0;
   const [emptyConfirmed, setEmptyConfirmed] = useState(false);
@@ -43,5 +46,5 @@ export function useMessageAreaSkeleton({
   // 内容显示的充分条件 = 可见消息非空 且 顶栏已连接（预览反馈第六轮：单聊历史经 HTTP 先到、
   // WS 连接后到时，骨架屏撑到连接完成——顶栏变绿与历史出现严格同帧，两链路视觉一致）。
   const contentReady = !isEmpty && status === 'connected';
-  return !contentReady && !emptyConfirmed;
+  return !historyOnlyReady && !contentReady && !emptyConfirmed;
 }

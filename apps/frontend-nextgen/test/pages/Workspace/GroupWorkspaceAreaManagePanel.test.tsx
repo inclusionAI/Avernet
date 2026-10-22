@@ -193,6 +193,10 @@ describe('GroupWorkspaceArea 管理面板打开期间切群补拉详情', () => 
 
     fireEvent.click(screen.getByRole('button', { name: '打开资源面板' }));
     expect(screen.getByTestId('session-files-sidebar')).toBeInTheDocument();
+    const conversation = screen.getByTestId('group-chat-pane').closest('[data-workspace-conversation]');
+    expect(conversation).toHaveClass('relative', 'isolate', 'min-w-0');
+    expect(conversation).toContainElement(screen.getByTestId('session-files-sidebar'));
+    expect(conversation).not.toContainElement(screen.getByTestId('in-flow-group-sidebar'));
 
     // 切回管理面板：resources 副屏被替换（单副屏互斥）。
     fireEvent.click(screen.getByRole('button', { name: '打开管理面板' }));

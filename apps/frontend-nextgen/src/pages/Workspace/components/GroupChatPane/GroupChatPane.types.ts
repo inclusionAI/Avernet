@@ -34,6 +34,7 @@ export interface GroupChatPaneProps {
   groupBootstrapProcessing?: boolean;
   supportState: GroupChatState;
   connectionStatus: ProviderConnectionStatus;
+  historyOnly?: boolean;
   send: (text: string, mentions?: string[], attachments?: SessionMessageAttachment[]) => void;
   /** 按当前群会话直发副屏 <AixUI> 消息（绕开全局桥 last-wins）。由 useGroupChat 提供。 */
   submitPanelMessage: (content: string) => void;

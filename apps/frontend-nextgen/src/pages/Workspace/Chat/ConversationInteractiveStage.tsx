@@ -45,7 +45,7 @@ export function ConversationInteractiveStage(props: {
   } = props;
   const { botChat, fileFeature, taskExecution } = model;
   return (
-    <>
+    <div className="relative isolate flex min-h-0 min-w-0 flex-1" data-workspace-conversation="true">
       {model.agentCodingBot ? (
         <AgentCodingGuide bot={model.agentCodingBot} onOpen={onOpenAgentCodingBot} />
       ) : (
@@ -116,6 +116,6 @@ export function ConversationInteractiveStage(props: {
       )}
       {fileFeature.featureNode}
       {headerRightPanels}
-    </>
+    </div>
   );
 }

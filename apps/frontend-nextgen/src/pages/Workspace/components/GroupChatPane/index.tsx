@@ -39,6 +39,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     execApprovals,
     supportState,
     connectionStatus,
+    historyOnly = false,
     groupBootstrapProcessing = false,
     send,
     abortBot,
@@ -86,7 +87,9 @@ export function GroupChatPane(props: GroupChatPaneProps) {
   const messages = filterVisibleGroupMessages(chat.messages ?? []);
   const isRequesting = !!chat.isRequesting;
   // 消息区两态强制（Spec AC-2，预览反馈第五轮）：空消息一律骨架屏，确认后的真空会话才显示空态。
-  const isLoadingHistory = useMessageAreaSkeleton({ messages, status: connectionStatus });
+  const isLoadingHistory = useMessageAreaSkeleton({
+    messages, status: connectionStatus, historyOnlyReady: historyOnly && supportState.phase === 'ready',
+  });
   const messageInteractions = useMessageInteractions({
     sessionId: session?.sessionId,
     messages,
@@ -150,7 +153,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
   const isWaitingForBot = !isHumanOnlyMention(lastSentMentions, session?.participants ?? []);
 
   // 输入框可见性（与下方 GroupChatComposer 渲染条件同源）：空态行动区仅在可发送视角提供。
-  const composerVisible = !!session && activeIdentity?.kind !== 'bot' && !collabPanel.humanAbsentOnly;
+  const composerVisible = !!session && !historyOnly && activeIdentity?.kind !== 'bot' && !collabPanel.humanAbsentOnly;
   // 帽条可见性与 composer 分离：「退出会话」仅在 human 视角已加入（present）时有意义（同原 LeaveBar）。
   const statusBarVisible = composerVisible && collabPanel.humanJoined && !collabPanel.botActorId;
 
@@ -162,6 +165,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
           selectedGroup={group}
           selectedSession={session}
           connectionStatus={connectionStatus}
+          historyOnly={historyOnly}
           onOpenSessionList={onOpenSessionList}
           canManageGroup={canManageGroup}
           activePanel={activePanel}
@@ -178,7 +182,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
         <GroupChatMessageArea
           session={session}
           group={group}
-          isLoadingHistory={isLoadingHistory && !groupBootstrapProcessing}
+          isLoadingHistory={isLoadingHistory && !groupBootstrapProcessing && !(historyOnly && showError)}
           groupBootstrapProcessing={groupBootstrapProcessing}
           showError={showError}
           supportError={supportState.error}

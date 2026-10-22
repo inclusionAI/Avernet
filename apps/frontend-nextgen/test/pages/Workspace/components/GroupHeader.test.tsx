@@ -91,6 +91,15 @@ it('顶部连接状态随真实会话连接变化，无会话时不显示', () =
   expect(screen.queryByRole('status')).not.toBeInTheDocument();
 });
 
+it('history-only sessions show a neutral membership status instead of a connection error', () => {
+  render(<GroupHeader {...buildProps({
+    selectedSession: { ...session, participants: group.participants },
+    connectionStatus: 'disconnected', historyOnly: true,
+  })} />);
+  expect(screen.getByRole('status')).toHaveTextContent('未加入当前会话');
+  expect(screen.queryByText('已断开')).not.toBeInTheDocument();
+});
+
 it('点击会话 ID 胶囊复制按钮写入剪贴板并 toast', async () => {
   const writeText = jest.fn().mockResolvedValue(undefined);
   Object.assign(navigator, { clipboard: { writeText } });

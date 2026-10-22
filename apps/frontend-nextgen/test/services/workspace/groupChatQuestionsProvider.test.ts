@@ -223,7 +223,7 @@ describe('groupChatProvider ask_user 集成（真实包装层）', () => {
     expect(inner.originalOnMessage).toHaveBeenCalledWith(expect.objectContaining({ id: 'connect-0' }));
   });
 
-  it('旧 inner 的入站回调在替换后不再触碰问答状态（透传仍归原解析器）', async () => {
+  it('旧 inner 的入站回调在替换后被丢弃，不再触碰问答或 SDK 状态', async () => {
     sc.createSessionToken
       .mockResolvedValueOnce(tokenResp('tk-1'))
       .mockResolvedValueOnce(tokenResp('tk-2'));
@@ -244,7 +244,7 @@ describe('groupChatProvider ask_user 集成（真实包装层）', () => {
     const staleFrame = askFrameWith('run-1', 'i2');
     staleIncoming(staleFrame);
     expect(snapshotsOf(subscriber)).toHaveLength(0);
-    expect(firstInner.originalOnMessage).toHaveBeenCalledWith(staleFrame);
+    expect(firstInner.originalOnMessage).not.toHaveBeenCalled();
 
     // 新连接正常消费交互（同 ID 交互按新周期重放语义重建）
     inners[1].transport.onMessage(askFrame());
@@ -341,19 +341,14 @@ describe('groupChatProvider ask_user 集成（真实包装层）', () => {
     const subscriber = jest.fn<any>();
     provider.subscribeToQuestions(subscriber);
 
-    // connect 初始化在途时用户断开：初始化仍会完成建链（既有 transport 行为），但问答状态必须保持熄火
+    // connect 初始化在途时用户断开：迟到的 token 不得恢复连接或问答状态。
     const connecting = provider.connect();
     provider.disconnect();
     tokenGate.resolve?.(tokenResp('tk-1'));
     await connecting;
 
-    expect(inners).toHaveLength(1);
-    expect(provider.isConnected).toBe(true);
-    const eventsAfterRace = snapshotsOf(subscriber).length;
-
-    // 被废弃连接的重放交互帧不得进入快照
-    inners[0].transport.onMessage(askFrame());
-    expect(snapshotsOf(subscriber)).toHaveLength(eventsAfterRace);
+    expect(inners).toHaveLength(0);
+    expect(provider.isConnected).toBe(false);
     const interactionsSeen = snapshotsOf(subscriber)
       .flatMap((s) => s.interactions)
       .map((i) => i.interactionId);

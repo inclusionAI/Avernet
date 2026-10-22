@@ -4,7 +4,7 @@ import type { ComposerCapabilitySetsState } from '@/components/Workspace/Capabil
 import { WORKSPACE_RIGHT_PANEL_LAYOUT } from '@/components/Workspace/workspacePanelLayout';
 import { BotSessionFilesPanel } from '@/pages/Workspace/components/BotSessionFiles/BotSessionFilesPanel';
 import { BotUploadFilesModal } from '@/pages/Workspace/components/BotSessionFiles/UploadFilesModal';
-import { ResizableWorkspaceSidebar } from '@/pages/Workspace/components/ResizableWorkspaceSidebar';
+import { WorkspaceOverlayPanel } from '@/pages/Workspace/components/WorkspaceOverlayPanel';
 import { buildBotSessionCommandItems } from '@/pages/Workspace/hooks/botSessionCommandItems';
 import { useBotCapabilitySets } from '@/pages/Workspace/hooks/useBotCapabilitySets';
 import { useBotSessionFileUpload } from '@/pages/Workspace/hooks/useBotSessionFileUpload';
@@ -199,11 +199,9 @@ export function useBotSessionFilesFeature(
         removeTask={upload.removeTask}
       />
       {drawerOpen && (
-        // 验收微调：单聊资源管理由全屏 Modal 改为右侧副屏（与协作群 SessionFilesPanel 同构容器）；
-        // 宽度与 dmore artboard-008（387px）对齐，仍可拖拽调整。
-        <ResizableWorkspaceSidebar
+        // 与群聊共用会话局部覆盖层，保留文件面板的拖宽能力。
+        <WorkspaceOverlayPanel
           ariaLabel="资源管理面板"
-          side="right"
           onDismiss={closeFileDrawer}
           {...WORKSPACE_RIGHT_PANEL_LAYOUT}
           className="z-30 bg-background"
@@ -222,7 +220,7 @@ export function useBotSessionFilesFeature(
             onDownload={(f) => void files.downloadFile(f)}
             onReference={handleReference}
           />
-        </ResizableWorkspaceSidebar>
+        </WorkspaceOverlayPanel>
       )}
     </>
   );

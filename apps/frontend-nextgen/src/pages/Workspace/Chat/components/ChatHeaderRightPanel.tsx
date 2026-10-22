@@ -3,11 +3,11 @@
  *
  * 面板共用聊天右栏宽度，48px 头行（标题 + 关闭）+ 内容分组；
  * 会话详情 = 只读行（会话名称/会话 ID/会话创建时间;2026-10-14 口径统一:原稿"会话Key"与值 session ID 不符），字段缺失隐藏行（不占位空白）。
- * 容器复用 ResizableWorkspaceSidebar（与群域 SessionFilesSidebar/会话文件副屏同构容器模式）。
+ * 容器复用 WorkspaceOverlayPanel，与群聊面板使用相同的会话局部覆盖层。
  */
 import { IconButton, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui';
 import { WORKSPACE_RIGHT_PANEL_LAYOUT } from '@/components/Workspace/workspacePanelLayout';
-import { ResizableWorkspaceSidebar } from '@/pages/Workspace/components/ResizableWorkspaceSidebar';
+import { WorkspaceOverlayPanel } from '@/pages/Workspace/components/WorkspaceOverlayPanel';
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
 import { X } from 'lucide-react';
 import type { ReactNode } from 'react';
@@ -21,9 +21,8 @@ export interface ChatHeaderRightPanelProps {
 /** 面板容器：48px 头行（14px 标题 + 关闭钮）+ 内容列。 */
 export function ChatHeaderRightPanel({ title, onClose, children }: ChatHeaderRightPanelProps) {
   return (
-    <ResizableWorkspaceSidebar
+    <WorkspaceOverlayPanel
       ariaLabel={`${title}面板`}
-      side="right"
       onDismiss={onClose}
       {...WORKSPACE_RIGHT_PANEL_LAYOUT}
       className="z-30 border-l border-border bg-card"
@@ -35,7 +34,7 @@ export function ChatHeaderRightPanel({ title, onClose, children }: ChatHeaderRig
         </div>
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">{children}</div>
       </div>
-    </ResizableWorkspaceSidebar>
+    </WorkspaceOverlayPanel>
   );
 }
 

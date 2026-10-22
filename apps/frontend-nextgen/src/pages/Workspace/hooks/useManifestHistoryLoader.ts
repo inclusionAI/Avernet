@@ -49,7 +49,7 @@ export function useManifestHistoryLoader({
     provider.beginHistoryHydration();
     void (async () => {
       try {
-        await provider.connect();
+        if (provider.liveEnabled) await provider.connect();
         if (cancelled) return;
         await queryAndRegisterManifestLibraryCdn();
         if (cancelled) return;

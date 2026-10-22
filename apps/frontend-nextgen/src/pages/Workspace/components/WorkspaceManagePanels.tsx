@@ -7,7 +7,7 @@ import type { GroupPanelKind } from './GroupHeader';
 import type { GroupDingTalkConfig } from './ManagePanel/DingTalkConfigPanel';
 import { GroupManagePanel } from './ManagePanel/GroupManagePanel';
 import { SessionManagePanel } from './ManagePanel/SessionManagePanel';
-import { ResizableWorkspaceSidebar } from './ResizableWorkspaceSidebar';
+import { WorkspaceOverlayPanel } from './WorkspaceOverlayPanel';
 
 export interface WorkspaceManagePanelsProps {
   activePanel: GroupPanelKind;
@@ -55,15 +55,14 @@ export function WorkspaceManagePanels(props: WorkspaceManagePanelsProps) {
 
   if (!group) return null;
 
-  // 不使用遮罩；公共侧栏处理外部点击，保留内部及 Portal 浮层交互。
+  // 会话局部遮罩由公共覆盖层处理，保留内部及 Portal 浮层交互。
   return (
     <>
       {activePanel === 'manage' ? (
-        <ResizableWorkspaceSidebar
+        <WorkspaceOverlayPanel
           ariaLabel="群管理面板"
           data-manage-panel="true"
           onDismiss={onClose}
-          side="right"
           {...WORKSPACE_RIGHT_PANEL_LAYOUT}
           className="z-30 bg-background"
         >
@@ -89,15 +88,14 @@ export function WorkspaceManagePanels(props: WorkspaceManagePanelsProps) {
             dingTalkBinding={props.dingTalkBinding}
             dingTalkLoading={props.dingTalkLoading}
           />
-        </ResizableWorkspaceSidebar>
+        </WorkspaceOverlayPanel>
       ) : null}
 
       {activePanel === 'sessionManage' && session ? (
-        <ResizableWorkspaceSidebar
+        <WorkspaceOverlayPanel
           ariaLabel="会话管理面板"
           data-manage-panel="true"
           onDismiss={onClose}
-          side="right"
           {...WORKSPACE_RIGHT_PANEL_LAYOUT}
           className="z-30 bg-background"
         >
@@ -119,7 +117,7 @@ export function WorkspaceManagePanels(props: WorkspaceManagePanelsProps) {
             onRemoveMember={props.onRemoveSessionMember}
             onShare={props.onShareSession}
           />
-        </ResizableWorkspaceSidebar>
+        </WorkspaceOverlayPanel>
       ) : null}
     </>
   );

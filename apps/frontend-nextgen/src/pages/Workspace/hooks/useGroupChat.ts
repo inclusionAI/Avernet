@@ -2,13 +2,12 @@ import type { SessionView } from '@/domain/collaboration';
 import { useTaskPreflightAssistant } from '@/hooks/useTaskPreflightAssistant';
 import { chatBridge } from '@/services/workspace/chatBridge';
 import type { SessionMessageAttachment } from '@/services/workspace/groupChatAttachmentService';
-import { createGroupChatProvider, type GroupChatState } from '@/services/workspace/groupChatProvider';
-import { resolveGroupWsOrigin } from '@/services/workspace/groupChatProviderHelpers';
+import type { GroupChatState } from '@/services/workspace/groupChatProvider';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useChat, useChatBridge, type ProviderConnectionStatus } from '@tc-chat/adapters';
 import type { BridgeInputRef, ChatMessage, PanelHandle } from '@tc-chat/core';
 import type { SenderRef } from '@tc-chat/ui/es/Sender/types';
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { toast } from 'sonner';
 import { prependUniqueMessages } from './groupChatHistoryUtils';
 import {
@@ -21,6 +20,7 @@ import { useGroupBootstrapProcessing } from './useGroupBootstrapProcessing';
 import { useGroupChatDisplayStatus } from './useGroupChatDisplayStatus';
 import { useGroupChatHistorySync } from './useGroupChatHistorySync';
 import { useGroupChatInteractions } from './useGroupChatInteractions';
+import { useGroupChatProvider } from './useGroupChatProvider';
 import { useGroupChatRunControl } from './useGroupChatRunControl';
 import { useProviderStateSubscriptions } from './useProviderStateSubscriptions';
 import { useViewScopeChangedNotice } from './useViewScopeChangedNotice';
@@ -38,7 +38,7 @@ import { useWsReconnectNonce } from './useWsReconnectNonce';
  * Provider 连接、history hydration 与 WS 暂存由 useManifestHistoryLoader 统一协调；
  * SessionView 同时提供 BCS 所需的 group_id 和 session_id。
  */
-export function useGroupChat(session: SessionView | null) {
+export function useGroupChat(session: SessionView | null, authenticatedUserId?: string | null) {
   const identityId = useWorkspaceStore((s) => s.activeIdentityId);
   const activeIdentity = useWorkspaceStore(
     (s) => s.identities.find((identity) => identity.id === s.activeIdentityId) ?? null,
@@ -59,11 +59,7 @@ export function useGroupChat(session: SessionView | null) {
   const [supportState, setSupportState] = useState<GroupChatState>({ phase: 'idle', error: null });
   const [connectionStatus, setConnectionStatus] = useState<ProviderConnectionStatus>('disconnected');
 
-  // Provider 依赖 sessionId + groupId + identityId；任一缺失则不创建（Hook 进入空闲态）。
-  const provider = useMemo(() => {
-    if (!sessionId || !groupId || !identityId) return null;
-    return createGroupChatProvider({ sessionId, groupId, identityId, wsOrigin: resolveGroupWsOrigin() });
-  }, [sessionId, groupId, identityId]);
+  const provider = useGroupChatProvider(session, identityId, authenticatedUserId);
   // 终止（abort）+ 投递队列（deliveries）组合为运行控制，控制本文件体积（门禁 250 行）。
   const runControl = useGroupChatRunControl(provider, sessionId);
 
@@ -101,8 +97,10 @@ export function useGroupChat(session: SessionView | null) {
     chat,
     panelRef,
     inputRef: inputRef as RefObject<BridgeInputRef | null>,
-    buildRequestParams: (content, extra) =>
-      buildGroupChatBridgeRequest(sessionId ?? '', content, extra, buildActorEcho(activeIdentity)),
+    buildRequestParams: (content, extra) => {
+      if (!provider?.liveEnabled) throw new Error('未加入当前会话，无法发送消息。');
+      return buildGroupChatBridgeRequest(sessionId ?? '', content, extra, buildActorEcho(activeIdentity));
+    },
   });
 
   // 订阅 Provider 阶段状态 + WebSocket 连接状态（拆至 useProviderStateSubscriptions，行为不变）。
@@ -139,7 +137,7 @@ export function useGroupChat(session: SessionView | null) {
     const hasAttachments = !!attachments && attachments.length > 0;
     // 输出中不阻塞发送：SDK 经 supportsConcurrentRequests 直发 provider.request，
     // 消息进入后端投递队列依次消费（拥塞控制归属后端）。
-    if (!sessionId || (!hasText && !hasAttachments)) return;
+    if (!provider?.liveEnabled || !sessionId || (!hasText && !hasAttachments)) return;
     const trimmed = text.trim();
     // 本地回显附件：share_url 用于跨端/免鉴权分发，`<img>` 本地回显改走会话内容地址避免分享域名/CORS 加载失败。
     // 与桥路径 buildGroupChatBridgeRequest 共用 buildEchoAttachments/buildGroupUserMessageExtra（O3 回显一致）。
@@ -157,7 +155,7 @@ export function useGroupChat(session: SessionView | null) {
   };
 
   const reconnect = async () => {
-    if (!provider) return;
+    if (!provider?.liveEnabled) return;
     try {
       await provider.reconnect();
     } catch (error: unknown) {
@@ -169,7 +167,7 @@ export function useGroupChat(session: SessionView | null) {
     if (!provider || !sessionId) return;
     provider.beginHistoryHydration();
     try {
-      if (!provider.isConnected) await provider.connect();
+      if (provider.liveEnabled && !provider.isConnected) await provider.connect();
       const history: ChatMessage[] = await provider.loadHistory();
       chat.setMessages(history);
       setHasMoreHistory(provider.hasMoreHistory);
@@ -182,7 +180,7 @@ export function useGroupChat(session: SessionView | null) {
   };
 
   // 视角切换成功重连后 / 服务端 view_scope_changed 推送后，以不变参数刷新历史消息（两路径回调重叠可接受）。
-  useWsReconnectNonce(provider, () => void reloadHistory());
+  useWsReconnectNonce(provider?.liveEnabled ? provider : null, () => void reloadHistory());
   useViewScopeChangedNotice(provider, () => void reloadHistory());
 
   // 向上翻页加载更早的历史消息：provider 以当前最旧时间戳为 before 游标拉取上一页，
@@ -205,16 +203,16 @@ export function useGroupChat(session: SessionView | null) {
   };
   const submitPanelMessage = useCallback(
     (content: string) => {
-      if (sessionId)
+      if (sessionId && provider?.liveEnabled)
         chat.onRequest(
           buildGroupChatBridgeRequest(sessionId, content, { isInject: true }, buildActorEcho(activeIdentity)),
         );
     },
-    [activeIdentity, chat, sessionId],
+    [activeIdentity, chat, sessionId, provider],
   );
   const submitTaskExecutionMessage = useCallback(
     (content: string, holderId: string) => {
-      if (sessionId)
+      if (sessionId && provider?.liveEnabled)
         chat.onRequest(
           buildGroupChatBridgeRequest(
             sessionId,
@@ -224,7 +222,7 @@ export function useGroupChat(session: SessionView | null) {
           ),
         );
     },
-    [activeIdentity, chat, sessionId],
+    [activeIdentity, chat, sessionId, provider],
   );
   return {
     chat,
@@ -232,6 +230,7 @@ export function useGroupChat(session: SessionView | null) {
     inputRef,
     chatBridge,
     supportState,
+    historyOnly: !provider?.liveEnabled,
     connectionStatus: displayStatus.status,
     send,
     submitPanelMessage,
