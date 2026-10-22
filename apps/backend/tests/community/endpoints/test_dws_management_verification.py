@@ -69,7 +69,7 @@ for _invalid in (False, True):
     )(lambda: None)
 
 
-def seed_runtime(body):
+def seed_runtime(body, *, invalid=False):
     def seed(world):
         seed_proof(body, invalid=False)(world)
         value = json.loads(body["payload"])
@@ -80,16 +80,23 @@ def seed_runtime(body):
             body["payload"].encode(),
             hashlib.sha256,
         ).hexdigest()
+        if invalid:
+            body["signature"] = "0" * 64
 
     return seed
 
 
-_runtime_body = {}
-endpoint_test(
-    method="POST",
-    path="/internal/dws-hosting/runtime-eligibility",
-    scenario="revalidate_enable_proof",
-    input=CaseInput(json_body=_runtime_body),
-    seed=seed_runtime(_runtime_body),
-    expect=ExpectSuccess(json_equals={"allowed": True}),
-)(lambda: None)
+for _invalid in (False, True):
+    _runtime_body = {}
+    endpoint_test(
+        method="POST",
+        path="/internal/dws-hosting/runtime-eligibility",
+        scenario="invalid_runtime_proof" if _invalid else "revalidate_enable_proof",
+        input=CaseInput(json_body=_runtime_body),
+        seed=seed_runtime(_runtime_body, invalid=_invalid),
+        expect=(
+            ExpectError(status=403)
+            if _invalid
+            else ExpectSuccess(json_equals={"allowed": True})
+        ),
+    )(lambda: None)
