@@ -226,6 +226,8 @@ async fn chain_history(db: &dyn DbPlugin) -> Result<Vec<(i64, String)>> {
 async fn assert_chain_columns(db: &dyn DbPlugin) -> Result<()> {
     for (table, columns) in [
         ("bcs_providers", vec!["env", "provider_id", "slug"]),
+        ("bcs_collaboration_drafts", vec!["draft_id", "owner_bot_id", "head_revision", "created_at", "deleted"]),
+        ("bcs_collaboration_draft_revisions", vec!["draft_id", "revision", "payload_json", "revoked"]),
         ("bcs_session_registry", vec!["env", "session_id", "session_type", "current_msg_seq"]),
         ("bcs_chat_runs", vec!["delivery_id", "source_message_id"]),
         ("bcs_messages", vec!["owner_bot_id", "visibility_domain", "audience_kind", "audience_actor_ids_json"]),
@@ -240,6 +242,9 @@ async fn assert_chain_columns(db: &dyn DbPlugin) -> Result<()> {
         let rows = db.query(DbStatement::with_params("SELECT column_name AS column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ?", vec![DbValue::from(table)])).await?;
         let actual = rows.iter().map(|row| db_get_column::<String>(row, "column_name")).collect::<bcs_db_api::DbResult<Vec<_>>>()?;
         for column in columns { assert!(actual.iter().any(|actual| actual == column), "missing {table}.{column}"); }
+        if table.starts_with("bcs_collaboration_draft") {
+            assert!(!actual.iter().any(|column| column == "deployment_id"), "obsolete {table}.deployment_id");
+        }
     }
     Ok(())
 }

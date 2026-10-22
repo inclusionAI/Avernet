@@ -108,8 +108,8 @@ type = "mysql"
 [collaboration_drafts]
 # Disabled by default, including when this section or enabled is omitted.
 # Restart to apply. Disabled Draft endpoints report DRAFT_SERVICE_UNAVAILABLE.
-# To enable on MySQL/shared deployments, also configure stable deployment_id,
-# active_key_id and key_files; see crates/services/bcs-collaboration-draft/CONTEXT.md.
+# Set enabled = true for SQLite or MySQL; no Draft signing keys are required.
+# Revision read grants persist in the database across replicas and restarts.
 enabled = false
 
 # Select a linked secret backend in deployments that do not use environment

@@ -1,9 +1,9 @@
-use bcs_collaboration_draft::{CollaborationDraftCore, DraftSigningKeys};
+use bcs_collaboration_draft::CollaborationDraftCore;
 use bcs_collaboration_store::draft::DbCollaborationDraftStore;
 use bcs_db_api::{DbPlugin, DbStatement};
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_service_api::{ValidateCollaborationDefinitionYamlCommand, core::collaboration_draft::*};
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 const ID: &str = "8d75fb68-628c-4e92-8431-e76870788f3c";
 const OTHER: &str = "879160ac-3cb0-4cf4-9c4e-c8db18c1a541";
@@ -16,12 +16,8 @@ async fn initialize(db: &dyn DbPlugin) {
         db.execute(DbStatement::new(sql)).await.unwrap();
     }
 }
-fn core(db: Arc<dyn DbPlugin>, deployment: &str) -> CollaborationDraftCore {
-    let keys = BTreeMap::from([("initial".into(), vec![0x4a; 32])]);
-    CollaborationDraftCore::new(
-        Arc::new(DbCollaborationDraftStore::new(db, deployment.into())),
-        DraftSigningKeys::new(deployment.into(), "initial".into(), keys).unwrap(),
-    )
+fn core(db: Arc<dyn DbPlugin>) -> CollaborationDraftCore {
+    CollaborationDraftCore::new(Arc::new(DbCollaborationDraftStore::new(db)))
 }
 fn content(text: &str) -> DraftContent {
     DraftContent {
@@ -32,7 +28,7 @@ fn content(text: &str) -> DraftContent {
 async fn setup() -> (Arc<LocalSqliteDbPlugin>, CollaborationDraftCore) {
     let db = Arc::new(LocalSqliteDbPlugin::new().unwrap());
     initialize(db.as_ref()).await;
-    let service = core(db.clone(), "deployment-a");
+    let service = core(db.clone());
     (db, service)
 }
 
@@ -141,8 +137,8 @@ async fn authorization_revocation_and_tombstones_are_independent_of_chat() {
             .await,
         Err(DraftCoreError::Unavailable)
     ));
-    // Same key, ID, source and revision in another deployment still cannot read.
-    let other_deployment = core(db.clone(), "deployment-b");
+    // Independent databases issue different random grants for the same ID and revision.
+    let (_, other_deployment) = setup().await;
     other_deployment
         .create("owner", ID, content(" "))
         .await
@@ -195,19 +191,19 @@ async fn authorization_revocation_and_tombstones_are_independent_of_chat() {
             .await,
         Err(DraftCoreError::Unavailable)
     ));
-    let rows = db.query(DbStatement::new("SELECT COUNT(*) AS n FROM bcs_collaboration_draft_revisions WHERE deployment_id='deployment-a'")).await.unwrap();
+    let rows = db.query(DbStatement::new("SELECT COUNT(*) AS n FROM bcs_collaboration_draft_revisions")).await.unwrap();
     assert_eq!(bcs_db_api::db_get_column::<i64>(&rows[0], "n").unwrap(), 0);
 }
 
 #[tokio::test]
-async fn restart_and_key_rotation_preserve_old_references_and_revocation() {
+async fn restart_preserves_references_and_revocation_without_keys() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("drafts.sqlite");
     let reference;
     {
         let db = Arc::new(LocalSqliteDbPlugin::new_file(&path).unwrap());
         initialize(db.as_ref()).await;
-        let service = core(db, "deployment-a");
+        let service = core(db);
         service
             .create("owner", ID, content("\r\n😀\r\n"))
             .await
@@ -220,14 +216,7 @@ async fn restart_and_key_rotation_preserve_old_references_and_revocation() {
         reference = service.reference("owner", ID, 1).await.unwrap();
     }
     let db = Arc::new(LocalSqliteDbPlugin::new_file(&path).unwrap());
-    let keys = BTreeMap::from([
-        ("initial".into(), vec![0x4a; 32]),
-        ("rotated".into(), vec![0x6b; 32]),
-    ]);
-    let service = CollaborationDraftCore::new(
-        Arc::new(DbCollaborationDraftStore::new(db, "deployment-a".into())),
-        DraftSigningKeys::new("deployment-a".into(), "rotated".into(), keys).unwrap(),
-    );
+    let service = core(db);
     assert_eq!(
         reference.read_token,
         service.reference("owner", ID, 1).await.unwrap().read_token

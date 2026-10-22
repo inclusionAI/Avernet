@@ -8,7 +8,7 @@ use bcs_service_api::{
 pub async fn collaboration_draft_core_service_contract_tests(
     service: &dyn CollaborationDraftCoreService,
 ) {
-    let id = "30000000-0000-0000-0000-000000000001";
+    let id = &uuid::Uuid::new_v4().to_string();
     service
         .create(
             "owner",
@@ -41,7 +41,7 @@ pub async fn collaboration_draft_core_service_contract_tests(
 }
 
 pub async fn collaboration_draft_service_contract_tests(service: &dyn CollaborationDraftService) {
-    let id = "30000000-0000-0000-0000-000000000002";
+    let id = &uuid::Uuid::new_v4().to_string();
     let saved = service
         .create(
             "owner",
@@ -81,7 +81,7 @@ pub async fn collaboration_draft_service_contract_tests(service: &dyn Collaborat
 }
 
 pub async fn collaboration_draft_repo_port_contract_tests(repo: &dyn CollaborationDraftRepoPort) {
-    let id = "30000000-0000-0000-0000-000000000003";
+    let id = &uuid::Uuid::new_v4().to_string();
     let meta = DraftMetadata {
         draft_id: id.into(),
         owner_bot_id: "owner".into(),
@@ -100,8 +100,7 @@ pub async fn collaboration_draft_repo_port_contract_tests(repo: &dyn Collaborati
             created_by: "owner".into(),
             created_at: "now".into(),
         },
-        share_nonce: "test-nonce".into(),
-        key_id: "key".into(),
+        read_token: "test-capability".into(),
         revoked: false,
     };
     repo.create(meta.clone(), first.clone()).await.unwrap();

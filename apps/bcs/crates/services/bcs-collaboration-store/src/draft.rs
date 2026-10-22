@@ -10,30 +10,19 @@ use std::sync::Arc;
 
 pub struct DbCollaborationDraftStore {
     db: Arc<dyn DbPlugin>,
-    deployment: String,
 }
 
 impl DbCollaborationDraftStore {
-    /// Startup guard: a lost signing file must not silently orphan old shares.
-    /// Reads at most one indexed row, including deleted draft tombstones.
-    pub async fn has_persisted_drafts(db: &dyn DbPlugin) -> Result<bool, DraftRepoError> {
-        let rows = db.query(DbStatement::new(
-            "SELECT draft_id FROM bcs_collaboration_drafts LIMIT 1",
-        )).await.map_err(failure)?;
-        Ok(!rows.is_empty())
-    }
-
-    pub fn new(db: Arc<dyn DbPlugin>, deployment: String) -> Self {
-        Self { db, deployment }
+    pub fn new(db: Arc<dyn DbPlugin>) -> Self {
+        Self { db }
     }
     fn key(&self, id: &str) -> Vec<DbValue> {
-        vec![self.deployment.clone().into(), id.to_string().into()]
+        vec![id.to_string().into()]
     }
     fn insert_revision(&self, r: &StoredDraftRevision) -> Result<DbStatement, DraftRepoError> {
         Ok(DbStatement::with_params(
-            "INSERT INTO bcs_collaboration_draft_revisions (deployment_id,draft_id,revision,payload_json,revoked) VALUES (?,?,?,?,0)",
+            "INSERT INTO bcs_collaboration_draft_revisions (draft_id,revision,payload_json,revoked) VALUES (?,?,?,0)",
             vec![
-                self.deployment.clone().into(),
                 r.content.draft_id.clone().into(),
                 (r.content.revision as i64).into(),
                 serde_json::to_string(r)
@@ -57,7 +46,7 @@ fn failure(e: DbError) -> DraftRepoError {
 impl CollaborationDraftRepoPort for DbCollaborationDraftStore {
     async fn metadata(&self, id: &str) -> Result<Option<DraftMetadata>, DraftRepoError> {
         let rows = self.db.query(DbStatement::with_params(
-            "SELECT draft_id,owner_bot_id,head_revision,created_at,deleted FROM bcs_collaboration_drafts WHERE deployment_id=? AND draft_id=?",
+            "SELECT draft_id,owner_bot_id,head_revision,created_at,deleted FROM bcs_collaboration_drafts WHERE draft_id=?",
             self.key(id),
         )).await.map_err(failure)?;
         rows.first()
@@ -82,7 +71,7 @@ impl CollaborationDraftRepoPort for DbCollaborationDraftStore {
         let mut params = self.key(id);
         params.push((revision as i64).into());
         let rows = self.db.query(DbStatement::with_params(
-            "SELECT r.payload_json,r.revoked FROM bcs_collaboration_draft_revisions r JOIN bcs_collaboration_drafts d ON d.deployment_id=r.deployment_id AND d.draft_id=r.draft_id WHERE r.deployment_id=? AND r.draft_id=? AND r.revision=? AND d.deleted=0",
+            "SELECT r.payload_json,r.revoked FROM bcs_collaboration_draft_revisions r JOIN bcs_collaboration_drafts d ON d.draft_id=r.draft_id WHERE r.draft_id=? AND r.revision=? AND d.deleted=0",
             params,
         )).await.map_err(failure)?;
         rows.first()
@@ -99,8 +88,8 @@ impl CollaborationDraftRepoPort for DbCollaborationDraftStore {
     async fn create(&self, m: DraftMetadata, r: StoredDraftRevision) -> Result<(), DraftRepoError> {
         self.db.transaction(vec![
             DbTransactionStep::Execute(DbStatement::with_params(
-                "INSERT INTO bcs_collaboration_drafts (deployment_id,draft_id,owner_bot_id,head_revision,created_at,deleted) VALUES (?,?,?,1,?,0)",
-                vec![self.deployment.clone().into(), m.draft_id.into(), m.owner_bot_id.into(), m.created_at.into()],
+                "INSERT INTO bcs_collaboration_drafts (draft_id,owner_bot_id,head_revision,created_at,deleted) VALUES (?,?,1,?,0)",
+                vec![m.draft_id.into(), m.owner_bot_id.into(), m.created_at.into()],
             )),
             DbTransactionStep::Execute(self.insert_revision(&r)?),
         ]).await.map_err(failure)?;
@@ -118,7 +107,7 @@ impl CollaborationDraftRepoPort for DbCollaborationDraftStore {
         self.db.transaction(vec![
             DbTransactionStep::ExecuteChecked {
                 statement: DbStatement::with_params(
-                    "UPDATE bcs_collaboration_drafts SET head_revision=head_revision+1 WHERE deployment_id=? AND draft_id=? AND owner_bot_id=? AND head_revision=? AND deleted=0",
+                    "UPDATE bcs_collaboration_drafts SET head_revision=head_revision+1 WHERE draft_id=? AND owner_bot_id=? AND head_revision=? AND deleted=0",
                     params,
                 ),
                 expected_affected_rows: 1,
@@ -132,7 +121,7 @@ impl CollaborationDraftRepoPort for DbCollaborationDraftStore {
         let mut params = self.key(id);
         params.extend([(revision as i64).into(), owner.to_string().into()]);
         self.db.execute(DbStatement::with_params(
-            "UPDATE bcs_collaboration_draft_revisions SET revoked=1 WHERE deployment_id=? AND draft_id=? AND revision=? AND EXISTS (SELECT 1 FROM bcs_collaboration_drafts d WHERE d.deployment_id=bcs_collaboration_draft_revisions.deployment_id AND d.draft_id=bcs_collaboration_draft_revisions.draft_id AND d.owner_bot_id=? AND d.deleted=0)",
+            "UPDATE bcs_collaboration_draft_revisions SET revoked=1 WHERE draft_id=? AND revision=? AND EXISTS (SELECT 1 FROM bcs_collaboration_drafts d WHERE d.draft_id=bcs_collaboration_draft_revisions.draft_id AND d.owner_bot_id=? AND d.deleted=0)",
             params,
         )).await.map_err(failure)?;
         Ok(())
@@ -143,11 +132,11 @@ impl CollaborationDraftRepoPort for DbCollaborationDraftStore {
         params.push(owner.to_string().into());
         self.db.transaction(vec![
             DbTransactionStep::Execute(DbStatement::with_params(
-                "UPDATE bcs_collaboration_drafts SET deleted=1,head_revision=0 WHERE deployment_id=? AND draft_id=? AND owner_bot_id=?",
+                "UPDATE bcs_collaboration_drafts SET deleted=1,head_revision=0 WHERE draft_id=? AND owner_bot_id=?",
                 params.clone(),
             )),
             DbTransactionStep::Execute(DbStatement::with_params(
-                "DELETE FROM bcs_collaboration_draft_revisions WHERE deployment_id=? AND draft_id=? AND EXISTS (SELECT 1 FROM bcs_collaboration_drafts d WHERE d.deployment_id=bcs_collaboration_draft_revisions.deployment_id AND d.draft_id=bcs_collaboration_draft_revisions.draft_id AND d.owner_bot_id=? AND d.deleted=1)",
+                "DELETE FROM bcs_collaboration_draft_revisions WHERE draft_id=? AND EXISTS (SELECT 1 FROM bcs_collaboration_drafts d WHERE d.draft_id=bcs_collaboration_draft_revisions.draft_id AND d.owner_bot_id=? AND d.deleted=1)",
                 params,
             )),
         ]).await.map_err(failure)?;

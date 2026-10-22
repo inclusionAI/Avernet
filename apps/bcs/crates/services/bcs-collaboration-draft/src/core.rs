@@ -4,62 +4,18 @@ use bcs_service_api::{
     core::collaboration_draft::*,
     port::repo::collaboration_draft::{CollaborationDraftRepoPort, DraftRepoError},
 };
-use hmac::{Hmac, Mac};
 use rand::{RngCore, rngs::OsRng};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, sync::Arc};
-
-/// Loaded by the composition root from protected, persistent key files.
-pub struct DraftSigningKeys {
-    deployment: String,
-    active: String,
-    keys: BTreeMap<String, Vec<u8>>,
-}
-
-impl DraftSigningKeys {
-    pub fn new(
-        deployment: String,
-        active: String,
-        keys: BTreeMap<String, Vec<u8>>,
-    ) -> Result<Self, DraftCoreError> {
-        if deployment.trim().is_empty()
-            || active.is_empty()
-            || !keys.contains_key(&active)
-            || keys.iter().any(|(id, key)| id.is_empty() || key.len() < 32)
-        {
-            return Err(DraftCoreError::Invalid);
-        }
-        Ok(Self {
-            deployment,
-            active,
-            keys,
-        })
-    }
-
-    fn mac(&self, r: &StoredDraftRevision) -> Result<Hmac<Sha256>, DraftCoreError> {
-        let key = self.keys.get(&r.key_id).ok_or(DraftCoreError::Storage)?;
-        let mut mac = Hmac::<Sha256>::new_from_slice(key).map_err(|_| DraftCoreError::Storage)?;
-        let input = serde_json::to_vec(&(
-            "bcs.collaboration-draft.read.v1",
-            &self.deployment,
-            &r.content.draft_id,
-            r.content.revision,
-            &r.share_nonce,
-        ))
-        .map_err(|_| DraftCoreError::Storage)?;
-        mac.update(&input);
-        Ok(mac)
-    }
-}
+use std::sync::Arc;
+use subtle::ConstantTimeEq;
 
 pub struct CollaborationDraftCore {
     repo: Arc<dyn CollaborationDraftRepoPort>,
-    signing: DraftSigningKeys,
 }
 
 impl CollaborationDraftCore {
-    pub fn new(repo: Arc<dyn CollaborationDraftRepoPort>, signing: DraftSigningKeys) -> Self {
-        Self { repo, signing }
+    pub fn new(repo: Arc<dyn CollaborationDraftRepoPort>) -> Self {
+        Self { repo }
     }
 
     async fn owned(&self, owner: &str, id: &str) -> Result<DraftMetadata, DraftCoreError> {
@@ -130,8 +86,7 @@ impl CollaborationDraftCore {
                 created_by: owner.into(),
                 created_at: chrono::Utc::now().to_rfc3339(),
             },
-            share_nonce: URL_SAFE_NO_PAD.encode(nonce),
-            key_id: self.signing.active.clone(),
+            read_token: URL_SAFE_NO_PAD.encode(nonce),
             revoked: false,
         })
     }
@@ -244,10 +199,9 @@ impl CollaborationDraftCoreService for CollaborationDraftCore {
                 if r.revoked {
                     return Err(DraftCoreError::Unavailable);
                 }
-                self.signing
-                    .mac(&r)?
-                    .verify_slice(&bytes)
-                    .map_err(|_| DraftCoreError::Unavailable)?;
+                if !bool::from(r.read_token.as_bytes().ct_eq(token.as_bytes())) {
+                    return Err(DraftCoreError::Unavailable);
+                }
                 Ok(r.content)
             }
         }
@@ -266,12 +220,11 @@ impl CollaborationDraftCoreService for CollaborationDraftCore {
         if r.revoked {
             return Err(DraftCoreError::Unavailable);
         }
-        let capability = URL_SAFE_NO_PAD.encode(self.signing.mac(&r)?.finalize().into_bytes());
         Ok(DraftReference {
             schema_version: 2,
             draft_id: id.into(),
             revision,
-            read_token: capability,
+            read_token: r.read_token,
         })
     }
 

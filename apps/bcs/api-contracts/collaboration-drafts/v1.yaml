@@ -8,11 +8,12 @@ info:
     authenticated owner Bot. On read/validate, presence of X-BCS-Draft-Read-Token
     always selects capability authorization, with no fallback to Bot or cookie
     credentials. Capabilities are transferable, revocable, fixed to one revision
-    and trusted deployment, and never grant management or execution.
+    in the configured database, and never grant management or execution.
+    Random read tokens are persisted with revisions; no signing keys are required.
     The service is disabled by default; opt in with collaboration_drafts.enabled.
     The checked-in local SQLite configuration explicitly enables the service.
     When disabled, authenticated/authorized requests report HTTP 503
-    DRAFT_SERVICE_UNAVAILABLE. Disabling preserves stored revisions and keys.
+    DRAFT_SERVICE_UNAVAILABLE. Disabling preserves stored revisions and read tokens.
 paths:
   /collaboration/drafts/{draftId}:
     parameters:
@@ -47,7 +48,7 @@ paths:
     delete:
       operationId: deleteCollaborationDraft
       security: [{BotToken: []}]
-      description: Deletes sources and preserves minimal ID/owner/deployment tombstone. Idempotent.
+      description: Deletes sources and preserves minimal ID/owner tombstone. Idempotent.
       responses:
         '204': {description: Deleted}
         default: {$ref: '#/components/responses/Error'}
@@ -121,7 +122,7 @@ paths:
     get:
       operationId: getCollaborationDraftReference
       security: [{BotToken: []}]
-      description: Recomputes the same active reference. Revoked/deleted versions cannot be re-shared.
+      description: Returns the same persisted active reference. Revoked/deleted versions cannot be re-shared.
       responses:
         '200':
           description: Four-field AixUI payload; no source, title or service URL.

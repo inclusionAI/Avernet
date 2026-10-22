@@ -30,4 +30,5 @@ axum            = { workspace = true }
 tokio           = { workspace = true }
 async-trait     = { workspace = true }
 serde_json      = { workspace = true }
+uuid            = { workspace = true }
 sha2            = { workspace = true }

@@ -610,8 +610,7 @@ fn default_group_session_ws_signing_key_secret() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BcsConfig {
-    /// Drafts are disabled unless explicitly enabled. Enabled SQLite deployments
-    /// initialize persistent keys beside their database unless keys are supplied.
+    /// Drafts are disabled unless explicitly enabled; read grants live in the database.
     #[serde(default)]
     pub collaboration_drafts: Option<crate::collaboration_drafts::CollaborationDraftConfig>,
     #[serde(default)]

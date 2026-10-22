@@ -5,7 +5,7 @@ use axum::{
 };
 use bcs_app_collaboration_draft::CollaborationDraftApplication;
 use bcs_bot::BotCore;
-use bcs_collaboration_draft::{CollaborationDraftCore, DraftSigningKeys};
+use bcs_collaboration_draft::CollaborationDraftCore;
 use bcs_collaboration_store::{MemoryCollaborationStore, draft::DbCollaborationDraftStore};
 use bcs_db_api::{DbPlugin, DbStatement};
 use bcs_db_local::LocalSqliteDbPlugin;
@@ -16,7 +16,7 @@ use bcs_service_api::{
 };
 use bcs_services_container::Services;
 use serde_json::{Value, json};
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 use tower::ServiceExt;
 
 const ID: &str = "750c52c6-60e2-4249-8ee5-1fb8cb9402ab";
@@ -98,13 +98,7 @@ async fn app() -> (Router, tempfile::TempDir) {
         Arc::new(UnusedJudge),
     ));
     let core = Arc::new(CollaborationDraftCore::new(
-        Arc::new(DbCollaborationDraftStore::new(db, "test".into())),
-        DraftSigningKeys::new(
-            "test".into(),
-            "test-key".into(),
-            BTreeMap::from([("test-key".into(), vec![7; 32])]),
-        )
-        .unwrap(),
+        Arc::new(DbCollaborationDraftStore::new(db)),
     ));
     services.collaboration_drafts = Some(Arc::new(CollaborationDraftApplication::new(
         core, validator, true,
@@ -230,6 +224,7 @@ async fn complete_fixed_version_http_contract_and_read_capability_precedence() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(read, saved);
     assert!(read.get("share_nonce").is_none());
+    assert!(read.get("read_token").is_none());
     let (status, validation) = call(
         &app,
         "POST",

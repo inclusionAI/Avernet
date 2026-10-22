@@ -35,8 +35,8 @@ pub struct DraftRevision {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct StoredDraftRevision {
     pub content: DraftRevision,
-    pub share_nonce: String,
-    pub key_id: String,
+    /// Random capability persisted with this exact revision; never a deployment key.
+    pub read_token: String,
     pub revoked: bool,
 }
 

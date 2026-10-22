@@ -1,9 +1,9 @@
-use bcs_collaboration_draft::{CollaborationDraftCore, DraftSigningKeys};
+use bcs_collaboration_draft::CollaborationDraftCore;
 use bcs_collaboration_store::draft::DbCollaborationDraftStore;
 use bcs_config_api::{MysqlDbConfig, StatementProtocol, mysql::MysqlConnectionConfig};
 use bcs_db_mysql::{MysqlDbManager, MysqlDbPlugin};
 use bcs_service_api::core::collaboration_draft::*;
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 #[tokio::test]
 #[ignore = "requires BCS_TEST_MYSQL_URL and the complete committed MySQL migration chain"]
@@ -27,18 +27,9 @@ async fn conformance_mysql_draft_transactions_and_utf8() {
         config.min_pool_size = 1;
         let manager = MysqlDbManager::new(config).await.unwrap();
         let plugin = Arc::new(MysqlDbPlugin::new(manager.clone(), "bcs"));
-        let deployment = format!("contract-{}", uuid::Uuid::new_v4());
-        let repo = Arc::new(DbCollaborationDraftStore::new(plugin, deployment.clone()));
+        let repo = Arc::new(DbCollaborationDraftStore::new(plugin));
         bcs_test_support::contract::collaboration_draft::collaboration_draft_repo_port_contract_tests(repo.as_ref()).await;
-        let service = CollaborationDraftCore::new(
-            repo,
-            DraftSigningKeys::new(
-                deployment,
-                "key".into(),
-                BTreeMap::from([("key".into(), vec![8; 32])]),
-            )
-            .unwrap(),
-        );
+        let service = CollaborationDraftCore::new(repo);
         bcs_test_support::contract::collaboration_draft::collaboration_draft_core_service_contract_tests(&service).await;
         let id = uuid::Uuid::new_v4().to_string();
         let yaml = "\0".repeat(MAX_DRAFT_BYTES);

@@ -82,7 +82,7 @@ type = "sqlite"
 path = "bcs.db"
 
 [collaboration_drafts]
-# Keep local previews available with persistent SQLite signing keys.
+# Keep local previews available; revision read grants persist in the database.
 enabled = true
 
 [secret]

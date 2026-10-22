@@ -1061,11 +1061,11 @@ dependencies = [
  "bcs-test-support",
  "chrono",
  "hex",
- "hmac",
  "mysql_async",
  "rand 0.8.7",
  "serde_json",
  "sha2",
+ "subtle",
  "tempfile",
  "tokio",
  "uuid",
@@ -2205,6 +2205,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

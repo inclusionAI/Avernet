@@ -216,6 +216,7 @@ secrecy = { version = "0.8", features = ["serde"] }
 # Crypto for signing
 sha2 = "0.10"
 hmac = "0.12"
+subtle = "2.6"
 hex = "0.4"
 base64 = "0.22"
 httpdate = "1"

@@ -5240,7 +5240,7 @@ impl BcsServer {
             .group_context(group_context_service)
             .a2a_chat(a2a_chat)
             .a2a_chat_runs(a2a_chat_runs)
-            .collaboration_drafts(crate::collaboration_drafts::build(&config, db_plugin.clone(), collaboration_runtime.clone()).await.map_err(crate::BcsError::StorageInitError)?)
+            .collaboration_drafts(crate::collaboration_drafts::build(&config, db_plugin.clone(), collaboration_runtime.clone()))
             .collaboration_runtime(collaboration_runtime)
             .collaboration_templates(collaboration_templates)
             .actor_directory(use_cases.actor_directory)

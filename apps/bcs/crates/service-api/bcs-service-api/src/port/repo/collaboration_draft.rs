@@ -9,7 +9,7 @@ pub enum DraftRepoError {
     Failed,
 }
 
-/// Implementations bind a trusted deployment once at construction.
+/// Draft IDs are unique within the configured database. Revision read grants are durable.
 #[async_trait]
 pub trait CollaborationDraftRepoPort: Send + Sync {
     async fn metadata(&self, id: &str) -> Result<Option<DraftMetadata>, DraftRepoError>;
