@@ -186,9 +186,12 @@ async def test_a_failed_listing_raises_its_code() -> None:
     [
         (DeviceAdapterEndpointNotFoundError('{"detail":"Not Found"}', standard_route_missing=True),
          "engine_outdated"),
-        (DeviceAdapterEndpointNotFoundError("gateway says no"), "engine_unreachable"),
+        # A 404 in any other shape is a missing endpoint too, e.g. an engine
+        # serving its own API: never a transient failure.
+        (DeviceAdapterEndpointNotFoundError('{"error":"not found"}'), "engine_outdated"),
+        (DeviceAdapterEndpointNotFoundError("gateway says no"), "engine_outdated"),
         (DeviceAdapterEndpointNotFoundError('{"success": false, "error": "other"}'),
-         "engine_unreachable"),
+         "engine_outdated"),
         (DeviceAdapterHTTPStatusError(501, ""), "engine_unsupported"),
         (DeviceAdapterHTTPStatusError(400, "bad"), "invalid_input"),
         (DeviceAdapterHTTPStatusError(409, "not json"), "engine_unreachable"),

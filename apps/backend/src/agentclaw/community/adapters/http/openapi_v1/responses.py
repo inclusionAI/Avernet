@@ -400,7 +400,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     AcliEngineUnsupportedError: (501, "This bot's engine does not support acli CLIs"),
     AcliBotNotRunningError: (409, "The bot has no running container"),
     AcliEngineOutdatedError: (
-        409, "This bot's engine version does not support acli CLIs yet; update or restart the bot"
+        409, "This bot's engine does not support CLI management yet; update its engine"
     ),
     AcliRequestRejectedError: (422, "acli rejected the request"),
     AcliOperationFailedError: (502, "The acli operation failed"),

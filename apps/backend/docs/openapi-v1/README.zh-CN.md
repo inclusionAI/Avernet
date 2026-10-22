@@ -990,7 +990,7 @@ try again later」，`data.operation` 为正在进行的操作。操作进行中
 | 202 | 仍在进行（`async`，或超过 30 秒等待） | 操作 |
 | 404 | 该 bot 没有这个操作 id | — |
 | 409 | 运行时有其他操作正在进行 | `{operation}` |
-| 409 | 删除默认 CLI；没有可取消的对应操作；操作已被取消（`cancelled`）；bot 不是 `ACTIVE` 或运行时没有运行中的容器（`not_running`）；引擎版本早于这些端点（`engine_outdated`） | 容器场景为 `{code, reason}` |
+| 409 | 删除默认 CLI；没有可取消的对应操作；操作已被取消（`cancelled`）；bot 不是 `ACTIVE` 或运行时没有运行中的容器（`not_running`）；引擎没有提供这些端点——版本较旧，或引擎未实现它们（`engine_outdated`；引擎返回的任何 `404`，不重试） | 容器场景为 `{code, reason}` |
 | 422 | 传入别名（`di`） | `{market_name}` |
 | 422 | 非服务型 bot 传了 `stage` | — |
 | 422 | acli 拒绝请求（通常是名称不存在；`install_failed`、`name_mismatch`） | `{code, reason}` |
@@ -1237,6 +1237,9 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 
 ## Changelog（变更记录）（每次挪动看板时追加一条带日期的记录）
 
+- **2026-10-22** —— **acli：引擎缺少端点时返回 `409 engine_outdated`。** 引擎返回的任何
+  `404`（不只是 FastAPI 原生的）现在都返回 `409`，`data.code: engine_outdated`，不再是
+  `502`「无法连接引擎」；添加或删除操作立即结束，不再重试最长 40 分钟。
 - **2026-10-21** —— **acli CLI 操作化。** 添加、删除与新增的安装/卸载取消都是由 backend 任务执行的操作：
   可选 `async`，同步最多等 30 秒后返回 `202`，用 `GET …/cli-operations[/{operation_id}]` 查询；同一运行时同时只有
   一个添加/删除（进行中再提交返回 `409` 并带正在进行的操作）。`stage` 指定服务型 bot 的 draft/verify/online 运行时；
