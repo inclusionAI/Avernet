@@ -23,6 +23,7 @@ consumes:
   - "DeviceAccessor (models only)"
   - "Layout initialization confirmation implementation"
 internal_dependencies:
+  - agentclaw.community.core.access    # configured super-admin scope for instance restart
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module
@@ -89,3 +90,13 @@ an expired worker cannot overwrite its replacement's state. Current checkpoints
 renew the lease without changing Bot state. A delayed LLM result must pass a
 claim checkpoint before bounded downstream sync; a superseded result is dropped.
 Legacy/manual calls without a claim retain the existing BotService write path.
+
+### Single-instance restart authorization
+
+Restart accepts the binding Owner, configured `admin.super_admin`, or an explicit
+Bot collaborator (MEMBER or ADMIN). Resolve the Bot by the binding-owned
+`device_props.bolt_id` and `entity_id`; the draft Bot binding is not the runtime
+binding. Public visibility and space-derived grants do not authorize this
+mutation. Missing authorization dependencies fail closed. BaaS receives the
+actual caller identity. Binding provider, environment and ACTIVE checks apply
+to every role before any restart request.

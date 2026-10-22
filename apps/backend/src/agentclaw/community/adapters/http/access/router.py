@@ -24,7 +24,7 @@ from agentclaw.community.adapters.http.access.schemas import (
     UserListCorrectionRequest,
     WhitelistCheckData,
 )
-from agentclaw.community.adapters.http.auth.dependencies import get_current_user, require_operator
+from agentclaw.community.adapters.http.auth.dependencies import get_current_user, require_operator, require_super_admin
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.api.policy_service import PolicyServiceProtocol
 from agentclaw.community.api.bot_quota_service import BotQuotaServiceProtocol
@@ -170,10 +170,10 @@ async def correct_user_list(
             description="Optional correction environment; defaults to the running environment",
         ),
     ] = None,
-    user: AuthenticatedUser = Depends(require_operator),  # COSEC: restrict all membership writes to operators.
+    user: AuthenticatedUser = Depends(require_super_admin),  # COSEC: only configured super admins may correct membership.
     service: UserListServiceProtocol = Injected(UserListServiceProtocol),
 ) -> ApiResponse[UserListCheckData]:
-    """Apply one operator-authorized user-list correction in the selected environment."""
+    """Apply one super-admin-authorized user-list correction in the selected environment."""
     started = perf_counter()
     correction_env = env or get_current_env()
     fields = "method=PUT route=/api/v1/user-lists/correct actor_id=%s entity_id=%s user_list_type=%s env=%s in_whitelist=%s"

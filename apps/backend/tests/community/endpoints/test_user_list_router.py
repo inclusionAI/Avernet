@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from agentclaw.community.core.user_list.models import EntityUserListModel
 from agentclaw.community.plugin_api.auth import AuthPlugin
 from agentclaw.community.plugin_api.database import DatabasePlugin
@@ -310,8 +312,8 @@ def user_list_check_requires_an_entity_id():
     ),
     extra_assertions=(_assert_ctoken_not_exposed,),
 )
-def user_list_correction_allows_an_operator_to_add():
-    """An operator may enable a current-environment entry."""
+def user_list_correction_allows_a_super_admin_to_add():
+    """A super admin may enable a current-environment entry."""
 
 
 @endpoint_test(
@@ -332,8 +334,8 @@ def user_list_correction_allows_an_operator_to_add():
         json_contains={"success": True, "data": {"in_whitelist": False}},
     ),
 )
-def user_list_correction_allows_another_operator_to_remove():
-    """Another operator may disable an exact entry."""
+def user_list_correction_allows_another_super_admin_to_remove():
+    """Another super admin may disable an exact entry."""
 
 
 @endpoint_test(
@@ -382,7 +384,7 @@ def user_list_correction_rejects_invalid_environment():
 @endpoint_test(
     method="PUT",
     path="/api/v1/user-lists/correct",
-    scenario="non_operator_cannot_add_member",
+    scenario="non_super_admin_cannot_add_member",
     input=CaseInput(
         headers={"x-user-id": _ENTITY_ID},
         json_body={
@@ -394,7 +396,7 @@ def user_list_correction_rejects_invalid_environment():
     seed=_seed_non_correction_user,
     expect=ExpectError(status=403),
 )
-def user_list_correction_rejects_non_operator():
+def user_list_correction_rejects_non_super_admin():
     """Authentication alone does not authorize membership writes."""
 
 
@@ -430,3 +432,10 @@ def user_list_correction_rejects_extra_request_fields():
 )
 def user_list_correction_rejects_server_managed_runtime_artifact_type():
     """An ordinary login cannot opt all users into a server-side build feature."""
+
+
+@pytest.fixture(autouse=True)
+def _correction_super_admins(monkeypatch):
+    from agentclaw.community.core.access import admin_scopes
+
+    monkeypatch.setattr(admin_scopes, "super_admin", lambda: frozenset(['first_authenticated_corrector', 'second_authenticated_corrector']))
