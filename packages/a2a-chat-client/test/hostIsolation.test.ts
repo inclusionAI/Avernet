@@ -19,7 +19,8 @@ const SRC = join(__dirname, '..', 'src');
 const COMMON_FILES = [
   'rpc.ts', 'rpcOnce.ts', 'stream.ts', 'card.ts', 'translate.ts',
   'cancelOutcomes.ts', 'sendBan.ts', 'choiceCache.ts', 'urls.ts', 'recovery.ts',
-  'A2AProviderInput.ts', 'A2AProvider.ts', 'sdkParser.ts', 'policy.ts',
+  'A2AProviderInput.ts', 'A2AProvider.ts', 'providerFacts.ts', 'A2aRunEngine.ts',
+  'sdkParser.ts', 'policy.ts',
   'index.ts', 'testing.ts', 'v3FrameShapes.ts',
 ] as const;
 
