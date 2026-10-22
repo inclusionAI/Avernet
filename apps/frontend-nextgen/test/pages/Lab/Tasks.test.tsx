@@ -123,9 +123,17 @@ beforeEach(() => {
   push.mockImplementation?.((...args: unknown[]) => mockPush(...(args as [])));
   mockPush.mockClear();
   mockListMyTasks.mockResolvedValue({ code: 0, message: 'ok', data: [listItem], request_id: 'r' });
-  (global as unknown as { fetch: unknown }).fetch = jest.fn(() =>
-    Promise.resolve({ ok: true, json: async () => dashboardEnvelope }),
-  );
+  (global as unknown as { fetch: unknown }).fetch = jest.fn((input: unknown) => {
+    const url = typeof input === 'string' ? input : '';
+    if (url.includes('/api/v1/collaboration/sessions/bcs_grp_group-1%3A1/files/file-1/content')) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        blob: async () => new Blob(['# 分析结论\n\n已完成 **三家竞品** 对比。'], { type: 'text/markdown' }),
+      });
+    }
+    return Promise.resolve({ ok: true, status: 200, json: async () => dashboardEnvelope });
+  });
 });
 
 describe('LabTasksPage(实验室·任务体验页)', () => {
@@ -170,7 +178,7 @@ describe('LabTasksPage(实验室·任务体验页)', () => {
     expect(within(row!).queryByRole('button', { name: '查看详情' })).not.toBeInTheDocument();
   });
 
-  it('点击查看产物后复用 TaskPanel 产物列表加载任务产物', async () => {
+  it('点击查看产物后复用 TaskPanel 的产物列表与文本预览', async () => {
     render(<LabTasksPage />);
     await waitFor(() => expect(screen.getByText('竞品协同分析')).toBeInTheDocument());
 
@@ -188,11 +196,35 @@ describe('LabTasksPage(实验室·任务体验页)', () => {
         ),
       ).toBe(true),
     );
-    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    const taskArtifactsDialog = await screen.findByRole('dialog');
+    expect(taskArtifactsDialog).toBeInTheDocument();
     expect(screen.getByText('任务产物')).toBeInTheDocument();
     expect(await screen.findByText('分析报告.md')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '预览产物 分析报告.md' })).toBeInTheDocument();
+    const previewButton = screen.getByRole('button', { name: '预览产物 分析报告.md' });
+    expect(previewButton).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '下载产物 分析报告.md' })).toBeInTheDocument();
+
+    fireEvent.click(previewButton);
+
+    const previewDrawer = await screen.findByTestId('task-artifact-preview-drawer');
+    expect(taskArtifactsDialog).toContainElement(previewDrawer);
+    expect(previewDrawer).toHaveStyle({ position: 'absolute' });
+    expect(await screen.findByRole('heading', { name: '分析结论', level: 1 })).toBeInTheDocument();
+    const markdown = document.querySelector('.markdown-body');
+    expect(markdown).toHaveClass('app-scrollbar', 'overflow-y-auto', 'px-6', 'py-4', 'text-sm', 'leading-6');
+
+    const anchorClick = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    try {
+      fireEvent.click(screen.getByRole('button', { name: '下载文件' }));
+      expect(anchorClick).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId('task-artifact-preview-drawer')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+      expect(screen.queryByTestId('task-artifact-preview-drawer')).not.toBeInTheDocument();
+      expect(screen.getByText('任务产物')).toBeInTheDocument();
+    } finally {
+      anchorClick.mockRestore();
+    }
   });
 
   it('进入对话沿用原查看会话路由逻辑', async () => {

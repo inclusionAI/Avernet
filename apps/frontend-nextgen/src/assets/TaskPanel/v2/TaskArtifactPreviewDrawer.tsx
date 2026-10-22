@@ -22,6 +22,8 @@ export interface TaskArtifactPreviewDrawerProps {
   artifact: TaskArtifactView;
   context: TaskArtifactAccessContext;
   onClose: () => void;
+  /** 嵌套在宿主 Drawer 时将预览挂到宿主内部，避免外层模态层拦截滚动与点击。 */
+  portalContainer?: HTMLElement | null;
 }
 
 const actionStyle: React.CSSProperties = {
@@ -56,7 +58,12 @@ function PreviewMessage({ children, danger = false }: { children: React.ReactNod
   );
 }
 
-export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps> = ({ artifact, context, onClose }) => {
+export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps> = ({
+  artifact,
+  context,
+  onClose,
+  portalContainer,
+}) => {
   const preview = useTaskArtifactPreview(artifact, context);
   const closeRef = useRef<HTMLButtonElement>(null);
   const [downloading, setDownloading] = useState(false);
@@ -136,24 +143,27 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
       );
     }
     if (preview.kind === 'text' && preview.text !== null) {
-      return markdownHtml !== null ? (
-        <SafeHtml html={markdownHtml} className="task-artifact-markdown" />
-      ) : (
-        <pre
-          style={{
-            margin: 0,
-            minHeight: 240,
-            padding: 16,
-            whiteSpace: 'pre-wrap',
-            overflowWrap: 'anywhere',
-            color: C.textPrimary,
-            background: C.surfaceAlt,
-            fontSize: 12,
-            lineHeight: 1.7,
-          }}
-        >
-          {preview.text}
-        </pre>
+      return (
+        <div className="flex min-h-0 flex-1 flex-col">
+          {markdownHtml !== null ? (
+            <SafeHtml
+              html={markdownHtml}
+              className="markdown-body app-scrollbar min-h-0 flex-1 overflow-y-auto px-6 py-4 text-sm leading-6 text-foreground"
+            />
+          ) : (
+            <pre
+              data-testid="task-artifact-plain-text"
+              className="app-scrollbar m-0 min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap break-all px-6 py-4 font-mono text-xs leading-6 text-foreground"
+            >
+              {preview.text}
+            </pre>
+          )}
+          {preview.truncated ? (
+            <div className="shrink-0 border-t border-border px-6 py-3 text-xs text-muted-foreground">
+              内容较长，仅显示部分，请下载查看完整内容。
+            </div>
+          ) : null}
+        </div>
       );
     }
     return <PreviewMessage>暂无可展示的预览内容，请下载后查看。</PreviewMessage>;
@@ -161,6 +171,7 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
 
   if (typeof document === 'undefined') return null;
   const fileRef = artifact.fileRef;
+  const isContained = portalContainer !== null && portalContainer !== undefined;
   const meta = [fileRef?.storageType, preview.size !== null ? formatFileSize(preview.size) : null]
     .filter(Boolean)
     .join(' · ');
@@ -169,7 +180,12 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
     <div
       data-testid="task-artifact-preview-drawer"
       onMouseDown={onClose}
-      style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0, 0, 0, 0.4)' }}
+      style={{
+        position: isContained ? 'absolute' : 'fixed',
+        inset: 0,
+        zIndex: 1000,
+        background: 'rgba(0, 0, 0, 0.4)',
+      }}
     >
       <aside
         role="dialog"
@@ -182,7 +198,7 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
           inset: '0 0 0 auto',
           display: 'flex',
           flexDirection: 'column',
-          width: 'min(640px, 100vw)',
+          width: isContained ? '100%' : 'min(640px, 100vw)',
           background: C.surface,
           color: C.textPrimary,
           boxShadow: '-8px 0 24px rgba(0, 0, 0, 0.16)',
@@ -215,7 +231,17 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
             <Close size={16} />
           </button>
         </header>
-        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>{body}</div>
+        <div
+          style={{
+            display: 'flex',
+            flex: 1,
+            minHeight: 0,
+            flexDirection: 'column',
+            overflow: preview.kind === 'text' ? 'hidden' : 'auto',
+          }}
+        >
+          {body}
+        </div>
         <footer
           style={{
             display: 'flex',
@@ -227,11 +253,6 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
             borderTop: `1px solid ${C.border}`,
           }}
         >
-          {preview.truncated && (
-            <span style={{ marginRight: 'auto', color: C.warning, fontSize: 11 }}>
-              预览已截断，请下载查看完整内容。
-            </span>
-          )}
           {downloadError && (
             <span role="alert" style={{ marginRight: 'auto', color: C.danger, fontSize: 11 }}>
               {downloadError}
@@ -257,7 +278,7 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
         </footer>
       </aside>
     </div>,
-    document.body,
+    portalContainer ?? document.body,
   );
 };
 

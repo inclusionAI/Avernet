@@ -4,6 +4,7 @@ import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/compone
 import { Empty } from '@/components/ui/Empty';
 import { Spin } from '@/components/ui/Spin';
 import { TASK_API_BASE, TASK_READ_API_BASE } from '@/services/tasks/taskConfig';
+import { useState } from 'react';
 
 export interface TaskArtifactsDrawerProps {
   taskId: string | null;
@@ -13,9 +14,12 @@ export interface TaskArtifactsDrawerProps {
 
 /** 实验室任务产物抽屉：复用 TaskPanel 的 dashboard 映射、产物聚合、预览与下载能力。 */
 export function TaskArtifactsDrawer({ taskId, ownerUserId, onClose }: TaskArtifactsDrawerProps) {
+  const [drawerElement, setDrawerElement] = useState<HTMLDivElement | null>(null);
+
   return (
     <Drawer open={Boolean(taskId)} onOpenChange={(open) => !open && onClose()}>
       <DrawerContent
+        ref={setDrawerElement}
         side="right"
         size="lg"
         className="overflow-hidden bg-background"
@@ -54,7 +58,14 @@ export function TaskArtifactsDrawer({ taskId, ownerUserId, onClose }: TaskArtifa
                   );
                 }
                 if (!task) return null;
-                return <TaskArtifactsList task={task} apiBaseUrl={TASK_API_BASE} title="产物列表" />;
+                return (
+                  <TaskArtifactsList
+                    task={task}
+                    apiBaseUrl={TASK_API_BASE}
+                    title="产物列表"
+                    previewPortalContainer={drawerElement}
+                  />
+                );
               }}
             </TaskPanelFetcher>
           ) : null}

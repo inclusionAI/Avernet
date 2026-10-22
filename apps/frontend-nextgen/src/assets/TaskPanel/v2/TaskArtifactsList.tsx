@@ -9,6 +9,7 @@ export interface TaskArtifactsListProps {
   task: TaskView;
   apiBaseUrl: string;
   title?: string;
+  previewPortalContainer?: HTMLElement | null;
 }
 
 export function collectTaskArtifacts(task: TaskView): TaskArtifactView[] {
@@ -22,7 +23,12 @@ export function collectTaskArtifacts(task: TaskView): TaskArtifactView[] {
   return [...merged.values()];
 }
 
-export const TaskArtifactsList: React.FC<TaskArtifactsListProps> = ({ task, apiBaseUrl, title }) => {
+export const TaskArtifactsList: React.FC<TaskArtifactsListProps> = ({
+  task,
+  apiBaseUrl,
+  title,
+  previewPortalContainer,
+}) => {
   const artifacts = useMemo(() => collectTaskArtifacts(task), [task]);
 
   return (
@@ -31,6 +37,7 @@ export const TaskArtifactsList: React.FC<TaskArtifactsListProps> = ({ task, apiB
       apiBaseUrl={apiBaseUrl}
       context={{ taskId: task.id, ownerBotId: task.ownerBotId, ownerUserId: task.ownerUserId }}
       title={title}
+      previewPortalContainer={previewPortalContainer}
     />
   );
 };

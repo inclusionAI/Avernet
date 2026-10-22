@@ -19,6 +19,8 @@ export interface ArtifactsSectionProps {
   context: TaskArtifactAccessContext;
   /** 区块展示标题 */
   title?: string;
+  /** 外部 Drawer 宿主，用于让预览留在同一模态交互层内。 */
+  previewPortalContainer?: HTMLElement | null;
 }
 
 const actionStyle: React.CSSProperties = {
@@ -32,7 +34,12 @@ const actionStyle: React.CSSProperties = {
   whiteSpace: 'nowrap',
 };
 
-export const ArtifactsSection: React.FC<ArtifactsSectionProps> = ({ artifacts, context, title = '产物' }) => {
+export const ArtifactsSection: React.FC<ArtifactsSectionProps> = ({
+  artifacts,
+  context,
+  title = '产物',
+  previewPortalContainer,
+}) => {
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -196,6 +203,7 @@ export const ArtifactsSection: React.FC<ArtifactsSectionProps> = ({ artifacts, c
           artifact={selectedArtifact}
           context={context}
           onClose={() => setSelectedArtifactId(null)}
+          portalContainer={previewPortalContainer}
         />
       )}
     </>
