@@ -1,11 +1,11 @@
 """E2E tests for Device Template API endpoints.
 
 Tests cover:
-- GET /api/v1/device-templates - List device templates
 - GET /api/v1/device-templates/{uuid} - Get template by UUID
 
 Error cases:
 - GET nonexistent template UUID
+- GET removed list endpoint (no longer registered for GET)
 """
 
 import pytest
@@ -17,24 +17,6 @@ pytestmark = [pytest.mark.e2e_asgi]
 
 class TestDeviceTemplateNormal:
     """Tests for normal device template operations."""
-
-    @pytest.mark.asyncio
-    async def test_list_templates(self, api: APITestHelper) -> None:
-        """Test list device templates with pagination."""
-        response = await api.client.get(
-            api.device_template_url(),
-            params=api.params(page=1, page_size=10),
-        )
-
-        assert response.status_code == 200
-        data = response.json()["data"]
-        assert "items" in data
-        assert "total" in data
-        assert "page" in data
-        assert "page_size" in data
-        assert isinstance(data["items"], list)
-        assert data["page"] == 1
-        assert data["page_size"] == 10
 
     @pytest.mark.asyncio
     async def test_get_template_by_uuid(self, api: APITestHelper) -> None:
@@ -62,3 +44,19 @@ class TestDeviceTemplateErrors:
         )
 
         assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_list_endpoint_removed_returns_404(self, api: APITestHelper) -> None:
+        """List endpoint is removed for GET: bare path is no longer registered for GET.
+
+        FastAPI returns 405 when the path is still matched by another method
+        (POST /api/v1/device-templates create_template) but GET has no handler
+        anymore; relax the assertion to also accept 404 in case POST creator
+        is removed in a future change.
+        """
+        response = await api.client.get(
+            api.device_template_url(),
+            params=api.params(page=1, page_size=10),
+        )
+
+        assert response.status_code in (404, 405)

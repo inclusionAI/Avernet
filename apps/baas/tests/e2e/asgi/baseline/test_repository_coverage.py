@@ -2,7 +2,6 @@
 
 Covers repository query operations exercised through the API:
 - GET /api/v1/device-bindings — Device binding queries
-- GET /api/v1/device-templates — Device template listing
 - GET /api/v1/bots — Bot listing with filters
 - GET /api/v1/publishes — Publish listing
 """
@@ -53,46 +52,6 @@ class TestDeviceBindingQueries:
             f"Expected non-500 for device-binding query, "
             f"got {response.status_code}: {response.text[:200]}"
         )
-
-
-class TestDeviceTemplateQueries:
-    """Tests for GET /api/v1/device-templates."""
-
-    @pytest.mark.asyncio
-    async def test_device_template_list(self, api: APITestHelper) -> None:
-        """GET /api/v1/device-templates returns paginated list."""
-        response = await api.client.get(
-            api.device_template_url(),
-            params=api.params(page=1, page_size=10),
-        )
-        assert response.status_code in (200, 404, 500), (
-            f"Expected 200, 404, or 500 for template list, "
-            f"got {response.status_code}: {response.text[:200]}"
-        )
-        if response.status_code == 200:
-            data = response.json()["data"]
-            assert isinstance(data, dict), (
-                f"Expected dict response, got {type(data)}: {data}"
-            )
-            if "items" in data:
-                assert isinstance(data["items"], list), (
-                    f"Expected list for items, got {type(data['items'])}"
-                )
-
-    @pytest.mark.asyncio
-    async def test_device_template_list_with_type_filter(
-        self, api: APITestHelper
-    ) -> None:
-        """GET /api/v1/device-templates with type filter."""
-        for template_type in ("ARCA", "LOCAL", "POOLAB", "TECLAW"):
-            response = await api.client.get(
-                api.device_template_url(),
-                params=api.params(page=1, page_size=10, type=template_type),
-            )
-            assert response.status_code != 500, (
-                f"Expected non-500 for template list with type={template_type}, "
-                f"got {response.status_code}: {response.text[:200]}"
-            )
 
 
 class TestBotListingQueries:

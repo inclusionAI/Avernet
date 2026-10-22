@@ -3,7 +3,6 @@
 Exposes DeviceTemplateService methods as HTTP endpoints.
 
 Endpoints:
-- GET /api/v1/device-templates - List templates with tenant isolation
 - GET /api/v1/device-templates/online - List ONLINE templates
 - GET /api/v1/device-templates/by-template-id/{template_id} - Get template by template_id
 - GET /api/v1/device-templates/resolve - Get default or explicit template
@@ -43,31 +42,6 @@ class StatusTransitionRequest(BaseModel):
 logger = get_logger("router")
 
 router = APIRouter(prefix="/api/v1/device-templates", tags=["设备模板管理"])
-
-
-@router.get("", response_model=ApiResponse[TemplateListResponse])
-@inject
-async def list_templates(
-    tenant: Annotated[str, Query(description="租户名称")],
-    status: Annotated[TemplateStatus | None, Query(description="模板状态过滤")] = None,
-    page: Annotated[int, Query(ge=1, description="页码")] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100, description="每页数量")] = 20,
-    service: DeviceTemplateManageService = Depends(
-        Provide[ApplicationContainer.services.device_template_service]
-    ),
-) -> ApiResponse[TemplateListResponse]:
-    """List device templates for a tenant with optional status filter."""
-
-    logger.info(
-        f"Listing templates: tenant={tenant}, status={status}, page={page}, page_size={page_size}"
-    )
-    result = service.list_templates(
-        tenant=tenant,
-        status=status,
-        page=page,
-        page_size=page_size,
-    )
-    return ApiResponse(data=result)
 
 
 @router.get("/online", response_model=ApiResponse[TemplateListResponse])
