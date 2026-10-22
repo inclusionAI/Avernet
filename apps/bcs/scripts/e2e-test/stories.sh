@@ -1790,13 +1790,13 @@ story_user_validates_external_channel_setup() {
 #
 # Flow:
 #   Check health -> list, get, and discover agents -> change and restore visibility
-#   -> reconnect and generate onboarding information -> update status -> propose a group
+#   -> reconnect and generate onboarding information -> update status -> create a group
 #   -> start a direct chat -> inspect groups and trusted relationships.
 #
 # Critical assertions:
 #   - Directory commands return the exact seeded agents and requested identities.
 #   - Visibility changes are read back and restored to the original value.
-#   - Onboarding, group proposal, and chat commands return actionable URLs or handles.
+#   - Onboarding, group creation, and chat commands return actionable URLs or handles.
 #   - Group-list output has a consistent count/entry shape and friends include the expected agent.
 story_operator_coordinates_with_cli() {
     info "Story: an operator uses bcs-cli to inspect and coordinate the agent network"
@@ -1809,7 +1809,7 @@ story_operator_coordinates_with_cli() {
     test_cli_onboard
     _story_cli_direct_onboard || return
     test_cli_update_status
-    test_cli_request_group_help
+    test_group_create_via_cli
     test_cli_chat
     test_cli_list_groups
     test_cli_friend

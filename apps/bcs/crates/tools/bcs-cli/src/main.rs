@@ -1059,31 +1059,6 @@ fn emit_collaboration_validation(validation: &serde_json::Value, structured_mode
     }
 }
 
-/// Skill→BCS interactive debug
-macro_rules! skill_debug_request {
-    ($debug:expr, $method:expr, $endpoint:expr, $body:expr) => {
-        if $debug {
-            eprintln!("[Skill→BCS] {} {}", $method, $endpoint);
-            if !$body.is_null() {
-                eprintln!("    {}", serde_json::to_string(&$body).unwrap_or_default());
-            }
-        }
-    };
-}
-
-/// BCS→Skill response debug
-macro_rules! skill_debug_response {
-    ($debug:expr, $status:expr, $body:expr) => {
-        if $debug {
-            eprintln!("[BCS→Skill] Status: {}", $status);
-            eprintln!(
-                "    {}",
-                serde_json::to_string_pretty(&$body).unwrap_or_default()
-            );
-        }
-    };
-}
-
 #[derive(Subcommand)]
 enum Commands {
     /// Health check for BCS (no authentication required)
@@ -1207,32 +1182,6 @@ enum Commands {
         /// Load (0.0-1.0)
         #[arg(short, long)]
         load: Option<f32>,
-    },
-
-    /// Request group help - create a collaboration proposal
-    RequestGroupHelp {
-        /// Authentication token (auto-discovered if not provided)
-        #[arg(long)]
-        token: Option<String>,
-
-        /// Topic for the group collaboration
-        #[arg(short, long)]
-        topic: String,
-
-        /// Suggested participants (comma-separated)
-        #[arg(short, long)]
-        participants: Option<String>,
-
-        /// Suggested driver (currently ignored by server; driver is always the requesting bot)
-        #[arg(long)]
-        driver: Option<String>,
-    },
-
-    /// Confirm a group help proposal
-    ConfirmGroupHelp {
-        /// Confirm URL (full URL with token)
-        #[arg(short, long)]
-        url: String,
     },
 
     /// Create a group directly
@@ -3257,104 +3206,6 @@ pub async fn run() -> Result<()> {
                 println!("✓ Status updated");
             } else {
                 println!("✗ Failed to update status");
-            }
-        }
-
-        Commands::RequestGroupHelp {
-            token,
-            topic,
-            participants,
-            driver,
-        } => {
-            let token = get_token(token.as_deref())?;
-            let client = create_client(
-                &bcs_url,
-                &token,
-                bcs_cookie.as_deref(),
-                oauth_headers.as_ref(),
-            );
-
-            let suggested_participants: Option<Vec<String>> =
-                participants.map(|p| p.split(',').map(|s| s.trim().to_string()).collect());
-
-            skill_debug_request!(
-                debug,
-                "POST",
-                "/groups/request",
-                json!({
-                    "topic": &topic,
-                    "suggested_participants": &suggested_participants,
-                    "driver": &driver
-                })
-            );
-
-            let result = client
-                .propose_group_chat_with_token(&topic, suggested_participants, driver.as_deref())
-                .await?;
-
-            skill_debug_response!(
-                debug,
-                "200",
-                json!({
-                    "mode": &result.mode,
-                    "driver_bot": &result.driver_bot,
-                    "participants": &result.participants,
-                    "confirm_url": &result.confirm_url
-                })
-            );
-
-            if cli.json {
-                println!("{}", serde_json::to_string(&result)?);
-            } else {
-                println!("Proposal created:");
-                println!("  Mode: {}", result.mode);
-                println!("  Driver: {}", result.driver_bot);
-                println!("  Participants: {}", result.participants.join(", "));
-                println!("  Confirm URL: {}", result.confirm_url);
-                println!("  Message: {}", result.message);
-            }
-        }
-
-        Commands::ConfirmGroupHelp { url } => {
-            // Confirm URL contains its own token, so we don't need the auth token
-            let mut client = BcsClient::new(&bcs_url);
-            if let Some(ref cookie) = bcs_cookie {
-                client.set_cookie(cookie);
-            }
-
-            skill_debug_request!(debug, "POST", &url, json!({}));
-
-            let result = client.confirm_proposal(&url).await?;
-
-            skill_debug_response!(
-                debug,
-                "200",
-                json!({
-                    "group_id": &result.group_id,
-                    "mode": &result.mode,
-                    "driver_bot": &result.driver_bot,
-                    "participants": &result.participants,
-                    "chat_url": &result.chat_url,
-                    "session_id": &result.session_id
-                })
-            );
-
-            if cli.json {
-                println!("{}", serde_json::to_string(&result)?);
-            } else {
-                println!("Group created:");
-                println!("  ID: {}", result.group_id);
-                if let Some(mode) = &result.mode {
-                    println!("  Mode: {}", mode);
-                }
-                println!("  Driver: {}", result.driver_bot);
-                println!("  Participants: {}", result.participants.join(", "));
-                if let Some(ref chat_url) = result.chat_url {
-                    println!("  Chat URL: {}", chat_url);
-                }
-                if let Some(ref session_id) = result.session_id {
-                    println!("  Session: {}", session_id);
-                }
             }
         }
 

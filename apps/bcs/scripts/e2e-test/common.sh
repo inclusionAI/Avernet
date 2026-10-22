@@ -585,10 +585,7 @@ bcs_cli() {
     local sub="$1" nested="${2:-}" third="${3:-}" command_path
     local args=() global_args=()
     [[ "${BCS_CLI_FORCE_JSON:-0}" = "1" ]] && global_args+=(--json)
-    # bcs-cli's top-level URL flag is -u/--url (NOT --base-url), and
-    # confirm-group-help reuses --url/<URL> for the confirm URL. To avoid any
-    # flag-namespace collision, inject the base URL via the MOLTIS_BCS_URL env
-    # var (which bcs-cli reads for -u/--url) instead of a CLI flag.
+    # Set the API base URL for every CLI invocation.
     export MOLTIS_BCS_URL="$BCS_API_BASE_URL"
     if [[ -z "$sub" ]]; then
         BCS_CLI_STDOUT=""

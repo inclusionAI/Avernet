@@ -17,10 +17,10 @@ use tracing::{debug, info, warn};
 use bcs_protocol::{
     BCS_CHAT_VERSION, BCS_CHAT_VERSION_HEADER, BindingChannels, BotCapabilities, BotConnectParams,
     BotConnectResponse, BotDynamicStatus, BotInfo, ChatRunCancelResponse, ChatRunState,
-    ChatRunStatusResponse, ChatRunSubmitResponse, ConfirmProposalResponse, CreateGroupRequest,
+    ChatRunStatusResponse, ChatRunSubmitResponse, CreateGroupRequest,
     CreateGroupResponse, DiscoverBotsExtendedResponse, DiscoverBotsResponse, FriendApiResponse,
     FusionRequest, FusionResponse, JoinRequest, JoinResponse, OnboardRequest, OnboardResponse,
-    ParticipantBindingInfo, ParticipantInfo, ProposalResponse, QueryBotEntry, QueryBotsRequest,
+    ParticipantBindingInfo, ParticipantInfo, QueryBotEntry, QueryBotsRequest,
     SetVisibilityRequest, Skill, UpdateStatusRequest, UpdateStatusResponse,
 };
 
@@ -1001,105 +1001,6 @@ impl BcsClient {
 
         let result: DiscoverBotsExtendedResponse =
             response.json().await.context("Invalid discover response")?;
-
-        Ok(result)
-    }
-
-    // ========================================================================
-    // Group Chat Proposals
-    // ========================================================================
-
-    /// Evaluate and propose a group chat using token authentication.
-    /// The bot_uuid is derived from the token on the server side.
-    pub async fn propose_group_chat_with_token(
-        &self,
-        topic: &str,
-        suggested_participants: Option<Vec<String>>,
-        suggested_driver: Option<&str>,
-    ) -> Result<ProposalResponse> {
-        let url = format!("{}/groups/request", self.base_url);
-
-        let payload = serde_json::json!({
-            "topic": topic,
-            "suggested_participants": suggested_participants.unwrap_or_default(),
-            "suggested_driver": suggested_driver,
-        });
-
-        debug!(
-            topic = %topic,
-            "Proposing group chat"
-        );
-
-        let response = self
-            .add_auth(self.http_client.post(&url).json(&payload))
-            .send()
-            .await
-            .context("Failed to propose group chat")?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(anyhow!("Proposal failed ({}): {}", status, body));
-        }
-
-        // 先获取原始响应内容，便于调试
-        let body = response
-            .text()
-            .await
-            .context("Failed to read response body")?;
-        eprintln!("[DEBUG] Response body: {}", body);
-
-        let result: ProposalResponse = serde_json::from_str(&body)
-            .with_context(|| format!("Invalid proposal response. Raw body: {}", body))?;
-
-        Ok(result)
-    }
-
-    /// Confirm a proposal.
-    pub async fn confirm_proposal(&self, confirm_url: &str) -> Result<ConfirmProposalResponse> {
-        // Handle relative URLs by prepending http://
-        let url = if confirm_url.starts_with("http://") || confirm_url.starts_with("https://") {
-            confirm_url.to_string()
-        } else {
-            format!("http://{}", confirm_url)
-        };
-
-        let response = self
-            .http_client
-            .post(&url)
-            .send()
-            .await
-            .context("Failed to confirm proposal")?;
-
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-
-        if !status.is_success() {
-            return Err(anyhow!("Confirmation failed ({}): {}", status, body));
-        }
-
-        // Server may return HTTP 200 with an error JSON body.
-        let json_value: serde_json::Value = serde_json::from_str(&body).with_context(|| {
-            format!(
-                "Invalid confirmation response (not JSON): {}",
-                &body[..body.len().min(200)]
-            )
-        })?;
-
-        if let Some(error_msg) = json_value.get("error").and_then(|e| e.as_str()) {
-            let error_status = json_value
-                .get("status")
-                .and_then(|s| s.as_u64())
-                .unwrap_or(500);
-            return Err(anyhow!(
-                "Confirmation failed ({}): {}",
-                error_status,
-                error_msg
-            ));
-        }
-
-        let result: ConfirmProposalResponse =
-            serde_json::from_value(json_value).context("Invalid confirmation response")?;
 
         Ok(result)
     }

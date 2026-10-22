@@ -356,7 +356,7 @@ Repo/store placement:
 
 Bots integrate with BCS via the `bcs-coordination` skill located at `crates/tools/bcs-cli/bcs-coordination/SKILL.md`:
 - `bcs-cli onboard` - Register bot capabilities
-- `bcs-cli request-group-help --topic "协作主题"` - Request group collaboration
+- `bcs-cli discover --collaborate-bot "<bot_uuid>"` - Find eligible collaborators
 - `bcs-cli fuse` - Fuse contexts from participants
 
 **Note**: `BOT_DATA_DIR` is not yet automatically set by BCN plugin. For standalone testing, set it manually:
@@ -518,12 +518,6 @@ bcs-cli accept-friend <request_id>               # Accept friend request
 bcs-cli reject-friend <request_id>               # Reject friend request
 bcs-cli friends <bot_uuid>                       # View friend list
 bcs-cli visibility <bot_uuid>                    # View/set visibility
-
-# Request group help
-bcs-cli request-group-help --gap-type skill --description "需要数据库死锁排查专家"
-
-# Confirm a proposal
-bcs-cli confirm-group-help --url http://localhost:21000/groups/<token>/confirm
 
 # Create a group directly
 bcs-cli create-group --driver zhangsan --participants "lisi,wangwu"

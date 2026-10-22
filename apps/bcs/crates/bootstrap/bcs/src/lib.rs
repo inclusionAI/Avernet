@@ -18,7 +18,7 @@
 //! │                                                             │
 //! │  Services:                                                  │
 //! │  • Bot registry (bot_uuid → bot with TTL)                   │
-//! │  • Proposal generation (request-group-help → proposal)      │
+//! │  • Proposal generation (HTTP request → proposal)            │
 //! │  • Group management (Agent/Fusion modes)                    │
 //! │  • Context fusion (reads files, single LLM call)            │
 //! │  • Message routing (to driver or @mentioned bot)            │

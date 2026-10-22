@@ -672,15 +672,15 @@ async fn test_group_proposal_request() {
     let client = create_client(addr, &token);
     client.onboard("TestBot", Some("Helper bot"), Some(vec!["skill1".into()]), Some(vec!["domain1".into()]), Some(vec!["scope1".into()]), None).await.ok();
 
-    // Request group help using the propose method
-    let proposal = client.propose_group_chat_with_token(
-        "Need expert help with database deadlock",
-        None,
-        None,
-    ).await;
-
-    // Proposal might fail if there are no matching bots, but we test the flow
-    if let Ok(prop) = proposal {
-        assert!(!prop.participants.is_empty() || !prop.confirm_url.is_empty(), "Should have participants or confirm URL");
-    }
+    // Exercise the retained backend API without the removed CLI proposal helper.
+    let proposal: serde_json::Value = reqwest::Client::new()
+        .post(format!("http://{addr}/groups/request"))
+        .bearer_auth(&token)
+        .json(&json!({"topic": "Need expert help with database deadlock"}))
+        .send().await.unwrap()
+        .error_for_status().unwrap()
+        .json().await.unwrap();
+    assert_eq!(proposal["driver_bot"], _bot_id);
+    assert!(proposal["participants"].as_array().unwrap().contains(&json!(_bot_id)));
+    assert!(proposal["confirm_url"].as_str().is_some_and(|url| url.ends_with("/confirm")));
 }

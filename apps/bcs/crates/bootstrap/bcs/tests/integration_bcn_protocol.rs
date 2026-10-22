@@ -275,42 +275,37 @@ async fn test_proposal_flow_end_to_end() {
 
     let mut bot1 = MockBot::connect(addr).await;
     bot1.register("Requester", &["coordination"], addr).await;
-    let client1 = bot1.http_client(addr);
 
     let mut bot2 = MockBot::connect(addr).await;
     bot2.register("Expert", &["database"], addr).await;
 
-    // Bot1 requests group help
-    let proposal = client1.propose_group_chat_with_token(
-        "Need database expert help",
-        None,
-        None,
-    ).await;
-
-    if let Ok(prop) = proposal {
-        if !prop.confirm_url.is_empty() {
-            let token = prop.confirm_url
-                .split('/')
-                .rev()
-                .nth(1)
-                .unwrap_or("")
-                .to_string();
-
-            if !token.is_empty() {
-                let anon = bcs_cli::BcsClient::new(format!("http://{}", addr));
-                let _ = anon.confirm_proposal(&token).await;
-
-                let frame1 = bot1.recv_frame().await;
-                if let Some(f) = frame1 {
-                    let action = frame_action(&f);
-                    assert!(action == "chat.send" || action == "chat.inject",
-                        "Bot1 should receive group context frame, got: {f}");
-                }
-            }
-        }
+    // The backend proposal contract remains available independently of the CLI.
+    let http = reqwest::Client::new();
+    let proposal: serde_json::Value = http
+        .post(format!("http://{addr}/groups/request"))
+        .bearer_auth(&bot1.token)
+        .json(&serde_json::json!({
+            "topic": "Need database expert help",
+            "suggested_participants": [&bot2.bot_id],
+        }))
+        .send().await.unwrap()
+        .error_for_status().unwrap()
+        .json().await.unwrap();
+    let confirm_url = reqwest::Url::parse(proposal["confirm_url"].as_str().unwrap()).unwrap();
+    // The test server binds a random port; use the returned path on that server.
+    let confirmed: serde_json::Value = http
+        .post(format!("http://{addr}{}", confirm_url.path()))
+        .send().await.unwrap()
+        .error_for_status().unwrap()
+        .json().await.unwrap();
+    assert!(confirmed["group_id"].as_str().is_some_and(|id| !id.is_empty()));
+    assert!(confirmed["session_id"].as_str().is_some_and(|id| !id.is_empty()));
+    for bot in [&mut bot1, &mut bot2] {
+        let frame = bot.recv_frame().await.expect("Participant should receive group context");
+        let action = frame_action(&frame);
+        assert!(action == "chat.send" || action == "chat.inject",
+            "Participant should receive group context frame, got: {frame}");
     }
-    // Test passes even if no matching bots found
-    let _ = bot2;
 }
 
 // ── Test 7: Heartbeat (bot.status) ───────────────────────────────────────────

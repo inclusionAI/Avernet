@@ -6,9 +6,7 @@
 
 | 命令                 | 必需参数                | 说明                         |
 | -------------------- | ----------------------- | ---------------------------- |
-| `request-group-help` | `--topic`               | 发起群聊协作提案             |
-| `confirm-group-help` | `--url`                 | 确认群聊提案                 |
-| `create-group`       | `--topic`               | 直接创建群组                 |
+| `create-group`       | `--driver` 或 `--manager`，以及 `--participants` | 直接创建群组 |
 | `get-group`          | `--group`               | 获取群组信息                 |
 | `list-groups`        | 无                      | 列出当前认证用户或 Bot 正式参与的群组 |
 | `add-member`         | `--group`, `--bot-uuid` | 添加成员到已有群组           |
@@ -23,82 +21,13 @@
 
 ---
 
-## request-group-help - 发起群聊协作
-
-当无法独立完成任务时，把当前 session 上下文总结，写入到本地文件中，发起 request-group-help，topic 中需要带入这个本地文件的路径，方便在群聊中获取原上下文信息。
-
-> **适用场景**：需要**自动发现参与者**或**人工确认**时使用两段式（request + confirm）。如果 agent 已知参与者，推荐直接使用 `create-group`。
-
-```bash
-bcs request-group-help --topic "<协作主题>"
-```
-
-**可选参数：**
-
-- `--participants "Bot1,Bot2"`: 建议的参与者
-- `--driver "BotID"`: 调用当前 skill 的 BotID
-
-**示例：**
-
-```bash
-# 基本用法
-bcs request-group-help --topic "数据库死锁排查，需要DBA专家"
-
-# 指定参与者
-bcs request-group-help --topic "代码与PRD超时时间冲突" --participants "bot-dba,bot-pm"
-
-# 指定 driver
-bcs request-group-help --topic "复杂问题需要多专家讨论" --participants "bot-sec,bot-legal,bot-dba" --driver "bot-001"
-```
-
-**返回示例：**
-
-```json
-{
-  "driver_bot": "bot-001",
-  "participants": ["bot-dba", "bot-pm"],
-  "confirm_url": "http://xxx/proposals/xxx/confirm",
-  "message": "协作提案已创建，请在10分钟内确认"
-}
-```
-
-> **注意**：`confirm_url` 有效期为 10 分钟。
-
----
-
-## confirm-group-help - 确认群聊提案
-
-当收到 `confirm_url` 时：要先和用户确认是否要建立群聊，用户回复以后调用下面的命令确认群聊。
-
-```bash
-bcs confirm-group-help --url "<confirm_url>"
-```
-
-**示例：**
-
-```bash
-bcs confirm-group-help --url "http://xxx/proposals/xxx/confirm"
-```
-
-**返回示例：**
-
-```json
-{
-  "group_id": "grp-001",
-  "driver_bot": "bot-001",
-  "participants": ["bot-dba", "bot-pm", "bot-001"],
-  "chat_url": "https://botchat.example.com/bcn/chat/detail?id=grp-001&bot_uuid=bot-001&session=grp-001%3A1a2b3c4d",
-  "session_id": "grp-001:1a2b3c4d"
-}
-```
-
-> **说明**：`chat_url` 为群聊页面链接，当服务端配置了 `botchat_url` 时返回，否则为 `null`；链接中的 `bot_uuid` 固定打开群聊时的 Bot 视角，`session` 定位默认会话。建群成功后必须立即把服务端返回的 `chat_url` 原样提供给用户；`session_id` 只作为新会话的交接标识，并遵守下方“建群后的会话交接”。
-
----
-
 ## create-group - 直接创建群组
 
-跳过提案流程，直接创建一个群组。**推荐在 agent 已知参与者的场景下使用**（如 agent 自己建群自己确认）。
+需要多人协作时，使用 `create-group` 直接建群。参与者未知时先用 `discover --collaborate-bot` 查找，选择返回的真实 Bot UUID；不要猜测参与者。已有明确建群授权即可执行，目标或参与者不明确时先与用户沟通。`--context` 只包含获准向群成员共享的任务背景。
+
+```bash
+bcs discover --query "database" --collaborate-bot "$BCS_BOT_UUID"
+```
 
 ```bash
 bcs create-group (--driver "<driver_bot_id>" | --manager "<manager_bot_id>") --participants "<bot1,bot2>" [--participant-tag "<bot_id>=<tag>"]... [--topic "<群组主题>"] [--context "<协作背景>"] [--no-session]
@@ -176,7 +105,7 @@ StateMachine 的 `start_initial_run` 只在创建初始 Session 时生效；单�
 
 ## 建群后的会话交接（默认规则）
 
-`confirm-group-help` 或未使用 `--no-session` 的 `create-group` 成功时，新群已经拥有独立的 group/session。默认在发起建群的旧会话完成交接，避免旧上下文隐式取得新会话控制权：
+未使用 `--no-session` 的 `create-group` 成功时，新群已经拥有独立的 group/session。默认在发起建群的旧会话完成交接，避免旧上下文隐式取得新会话控制权：
 
 1. 只向用户输出服务端响应中的原始 `chat_url`；不要手工重建链接。
 2. 输出链接后立即结束当前激活，不再调用任何工具。
@@ -402,7 +331,7 @@ bcs terminate-group --group "grp-001" --reason "任务已完成，协作结束"
 bcs friend request --bot-uuid "bot-dba-uuid"
 
 # 2. 等对方接受后，再拉群协作
-bcs request-group-help --topic "数据库死锁排查" --participants "bot-dba-uuid"
+bcs create-group --driver "$BCS_BOT_UUID" --topic "数据库死锁排查" --participants "bot-dba-uuid"
 ```
 
 ---
@@ -473,7 +402,7 @@ bcs request-group-help --topic "数据库死锁排查" --participants "bot-dba-u
 - **简单信息传递**："帮我把这个需求转给产品同学"
 - **确认细节**："DBA，当前死锁的具体原因是什么？"
 
-### 使用群聊（`request-group-help`）
+### 使用群聊（`create-group`）
 
 当需要多方互动或共同决策时，才创建群聊：
 
@@ -506,8 +435,6 @@ bcs request-group-help --topic "数据库死锁排查" --participants "bot-dba-u
 
 | 命令                 | 返回字段                                                   |
 | -------------------- | ---------------------------------------------------------- |
-| `request-group-help` | `driver_bot`, `participants`, `confirm_url`, `message`     |
-| `confirm-group-help` | `group_id`, `driver_bot`, `participants`, `chat_url`, `session_id`       |
 | `create-group`       | `id`, `driver_bot`, `participants`, `chat_url`, `session_id`             |
 | `get-group`          | `group_id`, `topic`, `status`, `driver_bot`, `originator`, `participants`, `created_at` |
 | `list-groups`        | `items`, `offset`, `returned`, `total`, `has_more`, 可选 `next_offset`/`next_command` |
@@ -524,8 +451,8 @@ bcs request-group-help --topic "数据库死锁排查" --participants "bot-dba-u
 ```
 用户：帮我排查数据库死锁。
 Bot：这需要数据库专业知识，让我请求DBA协助...
-[exec] bcs request-group-help --topic "数据库死锁排查"
-Bot：已创建协作请求！请在10分钟内确认：http://xxx/proposals/xxx/confirm
+[exec] bcs create-group --driver "$BCS_BOT_UUID" --topic "数据库死锁排查" --participants "bot-dba"
+Bot：<原样返回建群响应中的 chat_url，并结束当前激活>
 ```
 
 ### 场景：群聊协调
@@ -541,8 +468,8 @@ BCS：路由消息给 bot-dba 参与者
 ```
 用户：发现一个复杂问题，把专家们拉个群讨论
 Bot：好的，我将创建专家会诊群...
-[exec] bcs request-group-help --topic "复杂问题需要多专家讨论" --participants "bot-sec,bot-legal,bot-dba"
-Bot：专家会诊群已创建！
+[exec] bcs create-group --driver "$BCS_BOT_UUID" --topic "复杂问题需要多专家讨论" --participants "bot-sec,bot-legal,bot-dba"
+Bot：<原样返回建群响应中的 chat_url，并结束当前激活>
 ```
 
 ### 场景：终止已完成的群组

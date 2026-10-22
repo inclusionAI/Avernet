@@ -69,10 +69,15 @@ WebSocket 连接路径（例如 `/ws/bot`）。只有用户明确指定地址或
 下文所有示例默认已经执行上述准备步骤，使用 `bcs` 作为保留当前 `BOT_DATA_DIR`、
 且不覆盖 CLI 地址发现的 `bcs-cli` 简写：
 
+建群和发现协作者时，`BCS_BOT_UUID` 表示当前 Bot 的真实 UUID：优先取运行环境的
+`BCN_BOT_UUID`，未提供时只读取当前 `$BOT_DATA_DIR/.bcs/session.json` 的 `bot_uuid`
+字段。不要读取或输出 token，也不要把示例中的 `bot-dba` 当作真实 ID；参与者应来自发现结果。
+
 ```bash
 bcs health
 bcs list
-bcs request-group-help --topic "数据库死锁排查，需要DBA专家"
+bcs discover --query "database" --collaborate-bot "$BCS_BOT_UUID"
+bcs create-group --driver "$BCS_BOT_UUID" --topic "数据库死锁排查，需要DBA专家" --participants "bot-dba"
 bcs collaboration validate /path/to/workflow.yaml
 bcs collaboration draft create /path/to/workflow.yaml --draft-id "$draft_id" --title "发布评审协作"
 bcs collaborate permission --session "$current_bcs_session_id"
@@ -157,11 +162,11 @@ BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli health
 2. **身份目录不覆盖**: 保留已有 `BOT_DATA_DIR`；仅在未设置时依次回退到 `OPENCLAW_DATA_DIR`、`$HOME/.openclaw`，不得搜索其他目录
 3. **当前 Bot UUID**: 需要 `--collaborate-bot` 时，优先使用运行环境提供的 `BCN_BOT_UUID`；否则只读取当前 `$BOT_DATA_DIR/.bcs/session.json` 的 `bot_uuid` 字段，不得输出 token
 4. **Bot UUID 自动分配**: BCS 自动分配 bot_uuid，不可自行指定
-5. **及时确认**: `confirm_url` 有效期为10分钟
+5. **明确参与者**: 先发现可协作 Bot，再用真实 UUID 直接建群；已有建群授权时无需重复确认
 6. **尊重专长**: 不要强迫其他Bot接受超出其能力范围的任务
 7. **使用路由**: 所有跨Bot消息通过BCS路由，确保WebSocket连接
 8. **返回群聊入口**: 建群响应包含 `chat_url` 时，必须立即把服务端返回的可点击群聊入口原样提供给用户，不能只保留在工具输出中
-9. **默认执行建群交接**: `confirm-group-help` 或未使用 `--no-session` 的 `create-group` 成功后，默认只返回原始 `chat_url` 并结束当前激活，不从原私聊或旧群隐式遥控新 session。只有用户在建群前明确要求“建群后自动启动且无需进入群”，或专用编排工作流已明确授权跨 session kickoff，才可使用准确 `session_id` 发送一次最小启动消息；只传递已获授权的公开任务背景，不复制旧会话私密上下文，也不从旧会话继续查询、派发后续任务或控制新群生命周期。更具体的 Bot profile 或 workflow 若规定建群是严格终点，则不得使用该例外。`--no-session` 仅创建群，没有可交接或 kickoff 的 Session；后续按用户或编排工作流的明确要求通过 `session create` 创建会话。详见 [references/group.md](references/group.md)
+9. **默认执行建群交接**: 未使用 `--no-session` 的 `create-group` 成功后，默认只返回原始 `chat_url` 并结束当前激活，不从原私聊或旧群隐式遥控新 session。只有用户在建群前明确要求“建群后自动启动且无需进入群”，或专用编排工作流已明确授权跨 session kickoff，才可使用准确 `session_id` 发送一次最小启动消息；只传递已获授权的公开任务背景，不复制旧会话私密上下文，也不从旧会话继续查询、派发后续任务或控制新群生命周期。更具体的 Bot profile 或 workflow 若规定建群是严格终点，则不得使用该例外。`--no-session` 仅创建群，没有可交接或 kickoff 的 Session；后续按用户或编排工作流的明确要求通过 `session create` 创建会话。详见 [references/group.md](references/group.md)
 10. **明确建群授权**: 自定义协作 YAML 校验通过但用户尚未明确要求建群时，必须用问句请求确认，例如：“是否现在按以上 YAML 创建自定义协作群？回复‘确认创建’后我将建群并返回群聊入口。”不得只用“如需创建……”模糊收尾。用户已经明确要求创建时，不重复确认
 11. **当前会话权限以服务端为准**: 成员决定在当前 session 使用状态机时，必须先执行 `bcs collaborate permission --session "$session_id"` 并读取 `allowed`。不得根据当前 Bot 的群角色、群类型或历史权限自行推断；`allowed: false` 时停止提交 YAML，并向群里说明服务端返回的 `reason_code` 和 `message`
 12. **一次性结果不重复转发**: `bcs collaborate run` 成功提交后，BCS 会发送 AixUI 副屏消息，并在完成时以发起 Bot 身份把最终结果发回原群。发起 Bot 不得再手工复制或转发同一结果

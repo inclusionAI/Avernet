@@ -21,8 +21,6 @@
 #
 # bcs-cli 主要命令：
 #   onboard               - Bot 注册到 BCS (需要先通过 WebSocket 连接获取 token)
-#   request-group-help    - 请求群聊协作
-#   confirm-group-help    - 确认群聊提案
 #   create-group          - 直接创建群组
 #   fuse                  - 融合多方上下文
 #
@@ -238,30 +236,6 @@ assert_http_success() {
 
 check_bcs() {
     curl -sk "$BCS_URL/health" > /dev/null 2>&1
-}
-
-extract_confirm_url() {
-    local json="$1"
-    echo "$json" | python3 -c '
-import sys, json
-try:
-    data = json.load(sys.stdin)
-    print(data.get("confirm_url", ""))
-except:
-    print("")
-'
-}
-
-extract_group_id() {
-    local json="$1"
-    echo "$json" | python3 -c '
-import sys, json
-try:
-    data = json.load(sys.stdin)
-    print(data.get("group_id", ""))
-except:
-    print("")
-'
 }
 
 # ============================================================================
@@ -942,7 +916,7 @@ except:
         if [ -n "$response_text" ]; then
             echo -e "${DIM}[BCS←Bot] Response received${NC}" >&2
             # Check if response contains skill/BCS interaction markers
-            if echo "$response_text" | grep -qi "confirm\|group\|协作\|BCS\|request-group-help"; then
+            if echo "$response_text" | grep -qi "group\|协作\|BCS\|create-group"; then
                 echo -e "${DIM}[Bot→Skill→BCS] Bot used skill to call BCS${NC}" >&2
             fi
             print_success "$to_display: $response_text"
@@ -1360,7 +1334,7 @@ assert_group_active() {
 # Setup BCS Skills for Bots
 # ============================================================================
 
-# Create minimal BCS coordination skill for a bot (only request-group-help)
+# Install the discovery and direct group creation skill for a bot
 setup_bcs_skill() {
     local bot_dir="$1"
     local bot_id="$2"
@@ -1368,7 +1342,7 @@ setup_bcs_skill() {
     local skill_dir="$bot_dir/skills/bcs-coordination"
 
     # Copy the entire bcs-coordination skill directory (SKILL.md + references/)
-    local skill_source_dir="$PROJECT_ROOT/crates/bcs-cli/bcs-coordination"
+    local skill_source_dir="$PROJECT_ROOT/crates/tools/bcs-cli/bcs-coordination"
     cp -r "$skill_source_dir" "$bot_dir/skills/"
 
     # Patch SKILL.md with bot-specific values
@@ -1575,69 +1549,46 @@ EOF
 # Multi-Round Conversation Helper
 # ============================================================================
 
-# Send message with multiple rounds to encourage bot to use request-group-help
-# Usage: multi_round_request_group "bot_id" "initial_message" [max_rounds]
-# Returns: confirm_url if bot successfully requested group help, empty otherwise
-# Environment: Sets MULTI_ROUND_RESPONSE to the last response
-multi_round_request_group() {
+# Ask the bot to discover participants and create a group through the skill.
+# Returns the created group ID from the original chat_url handed back by the bot.
+# The local BCS config must provide botchat_url for this handoff scenario.
+multi_round_create_group() {
     local bot_id="$1"
-    local initial_message="$2"
+    local current_message="$2"
     local max_rounds="${3:-3}"
     local session_key="${4:-agent:cli:main}"
+    local round=0 response="" group_id=""
 
-    local round=0
-    local response=""
-    local confirm_url=""
-    local current_message="$initial_message"
-
-    MULTI_ROUND_RESPONSE=""
-    MULTI_ROUND_ROUNDS=0
-
-    while [ $round -lt $max_rounds ]; do
+    while [ "$round" -lt "$max_rounds" ]; do
         round=$((round + 1))
-        MULTI_ROUND_ROUNDS=$round
         print_info "=== Round $round/$max_rounds ==="
-
-        # Send message and wait for response
         response=$(send_and_wait "$bot_id" "AI工作台" "$session_key" "$current_message" 120)
-
         if [ -z "$response" ]; then
             print_error "No response from $bot_id in round $round"
             return 1
         fi
 
-        MULTI_ROUND_RESPONSE="$response"
-
-        # Check if bot returned a confirm_url (used skill successfully)
-        confirm_url=$(echo "$response" | grep -oE 'https?://[^)[:space:]>]+/groups/[^)[:space:]>]+' | head -1)
-
-        # Also try to extract from pattern like "127.0.0.1:21000/groups/.../confirm"
-        if [ -z "$confirm_url" ]; then
-            confirm_url=$(echo "$response" | grep -oE '[0-9.]+:[0-9]+/groups/[^)[:space:]>]+' | head -1)
-            [ -n "$confirm_url" ] && confirm_url="http://$confirm_url"
-        fi
-
-        if [ -n "$confirm_url" ]; then
-            print_success "Round $round: Bot returned confirm_url via skill"
-            echo "$confirm_url"
+        group_id=$(printf '%s' "$response" | python3 -c '
+import re, sys
+from urllib.parse import parse_qs, urlparse
+for url in re.findall(r"https?://[^\s<>)\x22\x27\x60]+", sys.stdin.read()):
+    parsed = urlparse(url.rstrip(".,，。"))
+    if parsed.path.rstrip("/").endswith("/bcn/chat/detail"):
+        group_id = parse_qs(parsed.query).get("id", [""])[0]
+        if group_id:
+            print(group_id)
+            break
+')
+        if [ -n "$group_id" ]; then
+            print_success "Round $round: Bot returned the created group chat_url"
+            printf '%s\n' "$group_id"
             return 0
-        else
-            print_warning "Round $round: Bot did not return confirm_url yet"
-
-            # Check if bot recognized the skill gap
-            if echo "$response" | grep -qi "协作\|协助\|无法独立完成\|需要.*支持\|能力边界\|专业\|专家\|发起\|请求"; then
-                print_success "Skill gap recognized in response"
-            fi
-
-            # If not last round, prompt bot to continue
-            if [ $round -lt $max_rounds ]; then
-                current_message="问题尚未解决，请使用 bcs-coordination 技能发起协作请求。"
-            fi
         fi
+        print_warning "Round $round: Bot did not return a group chat_url yet"
+        current_message="已授权你建群协作。请用 bcs-coordination 技能发现参与者并直接建群，返回原始 chat_url；若已建群，只返回已有链接，不要重复建群。"
     done
 
-    # Max rounds reached without confirm_url
-    print_warning "Max rounds ($max_rounds) reached, no confirm_url from $bot_id"
+    print_error "No group chat_url from $bot_id after $max_rounds rounds"
     return 1
 }
 
@@ -1727,7 +1678,7 @@ test_s2() {
 
 # ----------------------------------------------------------------------------
 # G1: Single chat -> Agent task dispatch group
-# Flow: User asks bot -> Bot recognizes gap -> Bot uses skill -> Returns confirm_url
+# Flow: User authorizes collaboration -> Bot discovers peers and creates group -> Returns chat_url
 # Routing: ALL messages broadcast to ALL participants, @mention indicates who should respond
 # Originator-first: 张三 is originator, responds to broadcast messages
 # ----------------------------------------------------------------------------
@@ -1739,59 +1690,36 @@ test_g1() {
         return 1
     fi
 
-    # Step 1: Multi-round conversation to request group help
-    local confirm_url
-    confirm_url=$(multi_round_request_group "张三" \
-        "帮我排查数据库死锁。如果自己搞不定, 可随时呼叫协作。请大家说话尽量简洁。" 3)
-
-    if [ -z "$confirm_url" ]; then
-        print_error "G1: Bot did not return confirm_url after multiple rounds"
-        return 1
-    fi
-
-    print_success "G1 confirm_url extracted"
-
-    # Step 2: User confirms the proposal
-    # BCS will automatically broadcast GROUP CONTEXT to ALL participants
-    print_info "用户: Confirming group proposal..."
-    local confirm_result
-    confirm_result=$("$BCS_CLI" --json --url "$BCS_URL" confirm-group-help --url "$confirm_url")
-    assert_http_success "$confirm_result" "G1 proposal confirmed"
-
+    # Step 1: The bot creates a group and hands its chat URL back to the user.
     local group_id
-    group_id=$(extract_group_id "$confirm_result")
-    assert_not_empty "$group_id" "G1 group_id extracted"
+    group_id=$(multi_round_create_group "张三" \
+        "帮我排查数据库死锁；若需要专家，请发现DBA并直接建群协作，将任务背景放入 context，返回建群响应中的原始 chat_url。请大家说话尽量简洁。" 3) || return 1
+    assert_not_empty "$group_id" "G1 group_id extracted from chat_url"
 
     print_success "G1 group created: $group_id"
 
-    # Step 3: Verify group was created correctly (use 张三's token)
+    # Step 2: Verify group was created correctly (use 张三's token)
     local group_info
     group_info=$(run_bcs_cli_as "张三" --json get-group --id "$group_id")
     assert_contains "$group_info" "DBA" "G1 group includes DBA"
 
-    # Step 4: BCS has already broadcast context to ALL participants
-    # Verify broadcast_results in confirm response
-    if echo "$confirm_result" | grep -q "broadcast_results"; then
-        print_success "G1: BCS broadcasted context to ALL participants"
-    fi
-
-    # Step 5: Test routing - @mention broadcasts to ALL (mentioned bot should respond)
+    # Step 3: Test routing - @mention broadcasts to ALL (mentioned bot should respond)
     print_info "Testing routing: @DBA message broadcasts to ALL (DBA should respond)..."
     local route_result
     route_result=$(run_bcs_cli_as "张三" --json group-chat --group "$group_id" --message "@DBA 请分析死锁日志")
     assert_http_success "$route_result" "G1 @mention routing (broadcast)"
 
-    # Step 6: Test routing - no @mention also broadcasts to ALL
+    # Step 4: Test routing - no @mention also broadcasts to ALL
     print_info "Testing routing: no @mention broadcasts to ALL participants..."
     route_result=$(run_bcs_cli_as "张三" --json group-chat --group "$group_id" --message "进度怎么样了？")
     assert_http_success "$route_result" "G1 broadcast routing"
 
-    print_success "G1 test completed (took $round rounds)"
+    print_success "G1 test completed"
 }
 
 # ----------------------------------------------------------------------------
 # G2: Single chat -> Fusion conflict alignment group
-# Flow: User asks bot -> Bot recognizes gap -> Bot uses skill -> Returns confirm_url
+# Flow: User authorizes collaboration -> Bot discovers peers and creates group -> Returns chat_url
 # Routing: ALL messages broadcast to ALL participants, @mention indicates who should respond
 # Originator-first: 张三 is originator, responds to broadcast, uses bcs_fuse when needed
 # ----------------------------------------------------------------------------
@@ -1803,26 +1731,11 @@ test_g2() {
         return 1
     fi
 
-    # Step 1: Multi-round conversation to request group help
-    local confirm_url
-    confirm_url=$(multi_round_request_group "张三" \
-        "代码和PRD有冲突，帮我协调。如果需要多方参与，请发起协作请求。" 3)
-
-    if [ -z "$confirm_url" ]; then
-        print_error "G2: Bot did not return confirm_url after multiple rounds"
-        return 1
-    fi
-
-    print_success "G2 confirm_url extracted"
-
-    # Step 2: User confirms the proposal
-    local confirm_result
-    confirm_result=$("$BCS_CLI" --json --url "$BCS_URL" confirm-group-help --url "$confirm_url")
-    assert_http_success "$confirm_result" "G2 proposal confirmed"
-
+    # Step 1: The bot creates a group and hands its chat URL back to the user.
     local group_id
-    group_id=$(extract_group_id "$confirm_result")
-    assert_not_empty "$group_id" "G2 group_id extracted"
+    group_id=$(multi_round_create_group "张三" \
+        "代码和PRD有冲突，帮我协调；请发现相关专家并直接建群，将冲突背景放入 context，返回建群响应中的原始 chat_url。" 3) || return 1
+    assert_not_empty "$group_id" "G2 group_id extracted from chat_url"
 
     print_success "G2 group created: $group_id"
 
@@ -1863,7 +1776,7 @@ instruction=请基于融合上下文给出协调方案
 
 # ----------------------------------------------------------------------------
 # G5: Expert consultation group - Fusion mode with multiple experts
-# Flow: User asks bot -> Bot recognizes gap -> Bot uses skill -> Returns confirm_url
+# Flow: User authorizes collaboration -> Bot discovers peers and creates group -> Returns chat_url
 # Routing: ALL messages broadcast to ALL participants, @mention indicates who should respond
 # Originator-first: 张三 is originator, uses bcs_fuse for multi-expert synthesis
 # ----------------------------------------------------------------------------
@@ -1875,26 +1788,11 @@ test_g5() {
         return 1
     fi
 
-    # Step 1: Multi-round conversation to request group help
-    local confirm_url
-    confirm_url=$(multi_round_request_group "张三" \
-        "新支付功能上线前需要全面评估，如果需要多位专家一起参与，请发起协作请求。" 3)
-
-    if [ -z "$confirm_url" ]; then
-        print_error "G5: Bot did not return confirm_url after multiple rounds"
-        return 1
-    fi
-
-    print_success "G5 confirm_url extracted"
-
-    # Step 2: User confirms the proposal
-    local confirm_result
-    confirm_result=$("$BCS_CLI" --json --url "$BCS_URL" confirm-group-help --url "$confirm_url")
-    assert_http_success "$confirm_result" "G5 proposal confirmed"
-
+    # Step 1: The bot creates a group and hands its chat URL back to the user.
     local group_id
-    group_id=$(extract_group_id "$confirm_result")
-    assert_not_empty "$group_id" "G5 group_id extracted"
+    group_id=$(multi_round_create_group "张三" \
+        "新支付功能上线前需要全面评估；请发现安全、法务和DBA专家并直接建群，将评估目标放入 context，返回建群响应中的原始 chat_url。" 3) || return 1
+    assert_not_empty "$group_id" "G5 group_id extracted from chat_url"
 
     print_success "G5 group created: $group_id"
 
