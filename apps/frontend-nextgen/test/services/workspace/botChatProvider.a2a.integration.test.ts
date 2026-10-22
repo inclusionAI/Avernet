@@ -19,7 +19,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { maybeBuildA2AProvider, takeCachedA2AProvider } from '@/adapters/a2a/bootstrap';
+import { getSendBanRegistry, maybeBuildA2AProvider, takeCachedA2AProvider } from '@/adapters/a2a/bootstrap';
 import { A2A_FILE_REFS_UNSUPPORTED_MESSAGE } from '@avernet/a2a-chat-client';
 import { A2A_SWITCH_KEY } from '@/adapters/a2a/switch';
 import * as ctrl from '@/services/backendApi/bots/privateBotSessionController';
@@ -68,13 +68,14 @@ const jrpcOk = (id: number, result: Record<string, unknown>) =>
 const jsonBody = (env: any) => new Response(JSON.stringify(env), {
   status: 200, headers: { 'content-type': 'application/json' },
 });
-/** CancelTask 成功信封(engineAbort=confirmed → cancelled-clean 唯自动解禁位) */
-const cancelConfirmed = (id: number) => jrpcOk(id, {
+/** CancelTask 成功信封(engineAbort 缺省 confirmed → cancelled-clean 唯自动解禁位;
+ * review P2-2 用例把 cancelOutcome 置 'timeout' 复现"停止未确认"→禁令保持) */
+const cancelConfirmed = (id: number, engineAbort: 'confirmed' | 'timeout' = 'confirmed') => jrpcOk(id, {
   task: {
     id: TASK_ID, contextId: 'sess-1',
     status: { state: 'TASK_STATE_CANCELED' }, metadata: {},
   },
-  engineAbort: 'confirmed',
+  engineAbort,
 });
 const engineCard = () => ({
   supportedInterfaces: [{
@@ -123,6 +124,8 @@ let sseFactory: ((reqId: number) => Response) | undefined;
 /** Review 第四轮：ReplayEvents 可编程回真事件流（SSE Response——replay 与主
  * 请求同走 streamRpc；旧任务恢复的终局回流生产位） */
 let replayFactory: ((reqId: number) => Response) | undefined;
+/** Review P2-2：CancelTask 控制面结局可编程（'timeout' = 停止未确认，禁令保持） */
+let cancelOutcome: 'confirmed' | 'timeout' = 'confirmed';
 let calls: Captured[] = [];
 
 async function routingFetch(input: any, init?: any): Promise<Response> {
@@ -131,7 +134,7 @@ async function routingFetch(input: any, init?: any): Promise<Response> {
   if (call.url === CARD_URL) return jsonBody(engineCard());
   const req = JSON.parse(String((init as RequestInit).body));
   if (req.method === 'SendStreamingMessage' && sseFactory) return sseFactory(req.id);
-  if (req.method === 'CancelTask') return jsonBody(cancelConfirmed(req.id));
+  if (req.method === 'CancelTask') return jsonBody(cancelConfirmed(req.id, cancelOutcome));
   if (req.method === 'GetTask') return jsonBody(jrpcOk(req.id, { task: { id: TASK_ID, contextId: 'sess-1', status: { state: 'TASK_STATE_COMPLETED' }, metadata: { seq: 2, lastSeq: 2 } } }));
   // R2-3 第二补丁：ReplayEvents 缺省打网络级拒（typed transport）——恢复轮的
   // 每次尝试都确定性失败，预算耗尽即 RECOVERY_STOPPED（不依赖引擎语义）；
@@ -173,6 +176,7 @@ beforeEach(() => {
   calls = [];
   sseFactory = undefined;
   replayFactory = undefined;
+  cancelOutcome = 'confirmed';
   storage.clear();
   storage.set(A2A_SWITCH_KEY, '1');
   (globalThis as any).fetch = routingFetch;
@@ -550,6 +554,107 @@ describe('BotChatProvider A2A 接缝活体集成（B16）', () => {
       await new Promise((r) => { setTimeout(r, 1); });   // CancelTask 控制面落地核销
     }
     expect(cancelOutcomes).toEqual(['cancelled-clean']);
+  });
+
+  it('review P2-2 §3.1 强制门：禁令窗口内非输入框入口（副屏/卡片直汇 request()）'
+    + '出站前被统一兜底拦截，confirmed 解禁后恢复发送', async () => {
+    const built = await maybeBuildA2AProvider({ url: WS_URL, xIAMToken: 'iam-1' });
+    expect(built).not.toBeNull();
+
+    // 建锚后 abort，控制面 engineAbort=timeout（review 复现口径）→ 禁令保持
+    const sse = deferredSse();
+    sseFactory = (reqId) => {
+      sse.push(`data: ${JSON.stringify({
+        jsonrpc: '2.0', id: reqId,
+        result: {
+          task: { id: TASK_ID, contextId: 'sess-1',
+            status: { state: 'TASK_STATE_SUBMITTED' }, metadata: {} },
+        },
+      })}\n\n`);
+      return sse.response;
+    };
+    cancelOutcome = 'timeout';
+
+    const { provider } = buildProvider({});
+    const onError = jest.fn();
+    provider.onError = onError;
+    await provider.connect();
+
+    const pending = provider.request({ content: '长任务', sessionId: 'sess-1' } satisfies BotChatRequest);
+    await new Promise((r) => { setTimeout(r, 0); });   // 等 in-flight run 建锚
+    provider.abort();
+    expect(provider.isSendBanned()).toBe(true);
+    sse.cut();
+    for (let i = 0; i < 200 && provider.isSendBanned(); i += 1) {
+      await new Promise((r) => { setTimeout(r, 1); });   // 控制面 timeout 落地——禁令仍在
+    }
+    expect(provider.isSendBanned()).toBe(true);
+
+    // 副屏/卡片路径不经 useBotChat.send 的提前检查，直汇 request()——必须在
+    // 统一执行入口出站前拦截：onError 上行一次 + 零新增 SendStreamingMessage
+    const sendCount = () => calls
+      .map((c) => { try { return JSON.parse(String(c.init.body)); } catch { return null; } })
+      .filter((b) => b?.method === 'SendStreamingMessage').length;
+    const before = sendCount();
+    await expect(provider.request({ content: '再发一条', sessionId: 'sess-1' } satisfies BotChatRequest))
+      .rejects.toThrow('该会话暂不可发送（底层执行停止未确认）');
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(sendCount()).toBe(before);
+
+    // 解禁（confirmed 唯自动释放位）后恢复：新发送照常出站
+    const registry = getSendBanRegistry();
+    registry.releaseOnConfirmedAbort(RPC_URL, 'sess-1');
+    expect(provider.isSendBanned()).toBe(false);
+    sseFactory = (reqId) => sseResponse(
+      snapshotEnvelopes.map((e) => ({ ...e, id: reqId })),
+    );
+    await provider.request({ content: '你好', sessionId: 'sess-1' } satisfies BotChatRequest);
+    expect(sendCount()).toBe(before + 1);
+    await pending.catch(() => undefined);
+  });
+
+  it('review P2-2 §3.1 强制门：回滚到 v3 后同 context 残留 A2A 禁令仍拦发送'
+    + '（谓词键由 wsUrl 派生、传输无关——回滚不是绕过路径）', async () => {
+    const built = await maybeBuildA2AProvider({ url: WS_URL, xIAMToken: 'iam-1' });
+    expect(built).not.toBeNull();
+
+    // 残留禁令 = 旧 A2A 任务取消未被 confirmed 核销（review 场景 4）：直接在
+    // app 级 registry（谓词同一实例）挂禁——键与 v3 签发 wsUrl 推导的 endpointBase 同源
+    const registry = getSendBanRegistry();
+    registry.begin(RPC_URL, 'sess-1');
+    try {
+      // SDK 工厂 stub：开关关 → takeCached 取不到 → v3 stub（真链路的
+      // rollbackTransportForNewRun 等价路径），记录直发送位事实
+      const sendings: string[] = [];
+      const stubFor = (kind: string): any => ({
+        isA2aProvider: kind === 'a2a',
+        isConnected: true,
+        connect: () => Promise.resolve(),
+        request: () => { sendings.push(kind); return Promise.resolve(); },
+        disconnect: () => undefined,
+        subscribeToConnectionStatus: () => () => undefined,
+      });
+      storage.set(A2A_SWITCH_KEY, '0');
+      const v3provider = createBotChatProvider({
+        bot: BOT, userId: '2088', sessionId: 'sess-1',
+        createSdkProvider: (cfg: any) =>
+          stubFor(takeCachedA2AProvider(cfg) ? 'a2a' : 'v3'),
+      });
+      const onError = jest.fn();
+      v3provider.onError = onError;
+
+      await expect(v3provider.request({ content: '试试绕过', sessionId: 'sess-1' } satisfies BotChatRequest))
+        .rejects.toThrow('该会话暂不可发送（底层执行停止未确认）');
+      expect(sendings).toEqual([]);          // v3 直发送位也未触达
+      expect(onError).toHaveBeenCalledTimes(1);
+
+      // confirmed 核销后同入口恢复
+      registry.releaseOnConfirmedAbort(RPC_URL, 'sess-1');
+      await v3provider.request({ content: '恢复了', sessionId: 'sess-1' } satisfies BotChatRequest);
+      expect(sendings).toEqual(['v3']);
+    } finally {
+      registry.releaseOnConfirmedAbort(RPC_URL, 'sess-1');   // 套件卫生：不泄漏给后续用例
+    }
   });
 
 });
