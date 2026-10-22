@@ -423,11 +423,11 @@ story_user_operates_group_workspace() {
     test_group_fuse_via_cli
     test_group_status_via_cli
     test_group_terminate_via_cli
-    _story_group_workspace_round_trip || return
+    _story_group_metadata_without_workspace || return
     _story_group_proposal_confirmation || return
 }
 
-_story_group_workspace_round_trip() {
+_story_group_metadata_without_workspace() {
     local body
     body="{\"driver_bot\":\"${BOT_CEO_UUID}\",\"label\":\"Incident response room\",\"participants\":[{\"bot_uuid\":\"${BOT_CEO_UUID}\",\"role\":\"driver\"},{\"bot_uuid\":\"${BOT_PM_UUID}\",\"role\":\"consultant\"},{\"bot_uuid\":\"${BOT_ENG_UUID}\",\"role\":\"consultant\"}]}"
     bot_post "/groups" CEO "$body"
@@ -447,15 +447,11 @@ _story_group_workspace_round_trip() {
     assert_json_eq "participant mode response identifies the actor" "$RESPONSE" "data.actor_id" "$BOT_ENG_UUID"
 
     api_put "/groups/${group_id}/workspace" \
-        '{"decisions":["ship the hotfix"],"notes":["customer impact contained"],"tasks":[],"audit_log":[]}'
-    require_status "team updates its shared workspace" "200" || return
-    assert_json_array_contains "workspace update stores the decision" "$RESPONSE" "workspace.decisions" "ship the hotfix"
-    assert_json_array_contains "workspace update stores the note" "$RESPONSE" "workspace.notes" "customer impact contained"
+        '{"decisions":[],"notes":[],"tasks":[],"audit_log":[]}'
+    require_status "deprecated group workspace writes are unavailable" "404" || return
 
     api_get "/groups/${group_id}/workspace"
-    require_status "team reads the shared workspace" "200" || return
-    assert_json_array_contains "workspace read returns the decision" "$RESPONSE" "decisions" "ship the hotfix"
-    assert_json_array_contains "workspace read returns the note" "$RESPONSE" "notes" "customer impact contained"
+    require_status "deprecated group workspace reads are unavailable" "404" || return
 
     bot_put "/groups/${group_id}/routing-policy" CEO \
         "{\"mode\":\"structured\",\"default_bot_final_delivery\":\"inject_observers\",\"sender_routes\":{\"${BOT_CEO_UUID}\":[\"${BOT_PM_UUID}\"]}}"

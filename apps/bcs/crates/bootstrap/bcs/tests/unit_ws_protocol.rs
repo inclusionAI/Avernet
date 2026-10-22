@@ -10,7 +10,7 @@
 
 use bcs_service_api::{
     DeliveryType, Group, GroupStatus, GroupStrategy, HumanMentionNotifyMode, Participant,
-    ParticipantRole, Workspace, RoutingCoreService,
+    ParticipantRole, RoutingCoreService,
 };
 use bcs_routing::MessageRouter;
 use bcs_protocol::GroupContext;
@@ -131,7 +131,6 @@ async fn test_group_chat_routing_no_mention() {
             },
         ],
         messages: vec![],
-        workspace: Workspace::default(),
             service_group_uuid: None,
             service_mode: None,
         created_at: 0,
@@ -196,7 +195,6 @@ async fn test_group_chat_routing_with_mention() {
             },
         ],
         messages: vec![],
-        workspace: Workspace::default(),
             service_group_uuid: None,
             service_mode: None,
         created_at: 0,
@@ -261,7 +259,6 @@ async fn test_group_chat_sender_exclusion() {
             },
         ],
         messages: vec![],
-        workspace: Workspace::default(),
             service_group_uuid: None,
             service_mode: None,
         created_at: 0,
@@ -324,7 +321,6 @@ async fn test_real_person_sends_to_group() {
             },
         ],
         messages: vec![],
-        workspace: Workspace::default(),
             service_group_uuid: None,
             service_mode: None,
         created_at: 0,
@@ -539,7 +535,6 @@ async fn test_all_mention_routing() {
             },
         ],
         messages: vec![],
-        workspace: Workspace::default(),
             service_group_uuid: None,
             service_mode: None,
         created_at: 0,
@@ -590,7 +585,6 @@ async fn test_invalid_mention_ignored() {
             },
         ],
         messages: vec![],
-        workspace: Workspace::default(),
             service_group_uuid: None,
             service_mode: None,
         created_at: 0,
@@ -641,7 +635,6 @@ async fn test_single_participant_group() {
             },
         ],
         messages: vec![],
-        workspace: Workspace::default(),
             service_group_uuid: None,
             service_mode: None,
         created_at: 0,

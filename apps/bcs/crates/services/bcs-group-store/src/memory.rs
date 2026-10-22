@@ -17,7 +17,7 @@ use bcs_service_api::types::MessageViewScope;
 use bcs_service_api::{
     Group as DomainGroup, GroupHumanNotifyPolicy, GroupKind, GroupMessage,
     GroupMutableFieldsPatch, GroupStatus, GroupStrategy, HumanMentionNotifyMode, Participant,
-    ParticipantMode, ServiceError, ServiceResult, ServiceSpec, Workspace, generated_group_id,
+    ParticipantMode, ServiceError, ServiceResult, ServiceSpec, generated_group_id,
 };
 use bcs_service_api::{GroupMetricCount, GroupMetricsSnapshotPort};
 
@@ -392,20 +392,6 @@ impl GroupRepoPort for MemoryGroupRepo {
         group.updated_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|duration| duration.as_millis() as u64)
-            .unwrap_or(0);
-        Ok(())
-    }
-
-    async fn update_workspace(&self, id: &str, workspace: Workspace) -> ServiceResult<()> {
-        let mut groups = self.groups.write().await;
-        let group = groups
-            .get_mut(id)
-            .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
-
-        group.workspace = workspace;
-        group.updated_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
         Ok(())
     }

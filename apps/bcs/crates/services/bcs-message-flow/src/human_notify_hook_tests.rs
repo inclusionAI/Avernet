@@ -205,10 +205,6 @@ impl GroupCoreService for PolicyGroupCore {
         self.fallback.update_participant_mode(id, actor_id, mode).await
     }
 
-    async fn update_workspace(&self, id: &str, workspace: bcs_domain::Workspace) -> ServiceResult<()> {
-        self.fallback.update_workspace(id, workspace).await
-    }
-
     async fn update_label(&self, id: &str, label: Option<String>) -> ServiceResult<()> {
         self.fallback.update_label(id, label).await
     }

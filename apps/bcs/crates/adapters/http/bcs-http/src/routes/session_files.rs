@@ -811,7 +811,7 @@ mod tests {
     use bcs_service_api::{
         BotCapabilities, BotRegistryCoreService, Group, GroupKind, GroupStatus,
         HumanMentionNotifyMode, Participant, ParticipantRole, ServiceResult, SessionKind,
-        SystemMessageService, Workspace,
+        SystemMessageService,
     };
     use bcs_services_container::Services;
     use bcs_session::SessionManagementServiceImpl;
@@ -954,7 +954,6 @@ mod tests {
             opening_message: None,
             participants: vec![group_participant("bot-a"), group_participant("bot-b")],
             messages: Vec::new(),
-            workspace: Workspace::default(),
             service_group_uuid: None,
             service_mode: None,
             created_at: 0,

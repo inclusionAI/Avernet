@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::actor::ActorKind;
-use crate::message::{AuditEntry, GroupMessage, Task};
+use crate::message::GroupMessage;
 
 /// Role of a participant in a session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -243,23 +243,6 @@ impl Participant {
     }
 }
 
-/// Shared workspace for a group session.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct Workspace {
-    /// Key decisions made.
-    #[serde(default)]
-    pub decisions: Vec<String>,
-    /// Tasks and assignments.
-    #[serde(default)]
-    pub tasks: Vec<Task>,
-    /// Notes and context.
-    #[serde(default)]
-    pub notes: Vec<String>,
-    /// Audit log entries.
-    #[serde(default)]
-    pub audit_log: Vec<AuditEntry>,
-}
-
 /// Status of a group session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -380,9 +363,6 @@ pub struct Group {
     /// Message history (only stored if store_messages is enabled in config).
     #[serde(default)]
     pub messages: Vec<GroupMessage>,
-    /// Shared workspace.
-    #[serde(default)]
-    pub workspace: Workspace,
     /// Service group UUID (immutable, set at instance creation; None for regular groups).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_group_uuid: Option<String>,
@@ -508,7 +488,6 @@ impl Group {
             opening_message: None,
             participants,
             messages: Vec::new(),
-            workspace: Workspace::default(),
             service_group_uuid: None,
             service_mode: None,
             created_at: now,

@@ -8,8 +8,8 @@ use bcs_service_api::{
     GroupProposalConfirmCommand, GroupProposalConfirmResult, GroupProposalCreateCommand,
     GroupProposalCreateResult, GroupProposalPreviewCommand, GroupProposalService,
     GroupRoutingPolicyCommand, GroupStatus, GroupStatusCommand, GroupTerminateCommand,
-    GroupUpdateLabelCommand, GroupUpdateWorkspaceCommand, GroupUseCaseError, ParticipantMode,
-    ProposalContext, RoutingMode, RoutingPolicy, ServiceError, Workspace,
+    GroupUpdateLabelCommand, GroupUseCaseError, ParticipantMode,
+    ProposalContext, RoutingMode, RoutingPolicy, ServiceError,
 };
 use bcs_test_support::{
     NoopGroupManagementService, NoopGroupMessageHistoryService, NoopGroupProposalService,
@@ -101,7 +101,6 @@ fn dm_create_command_and_result_carry_create_or_reuse_semantics() {
             opening_message: None,
             participants: Vec::new(),
             message_count: 0,
-            workspace: Workspace::default(),
             service_group_uuid: None,
             service_mode: None,
             group_kind: bcs_service_api::GroupKind::Dm,
@@ -219,7 +218,6 @@ fn group_result_dtos_are_route_friendly_views() {
         opening_message: None,
         participants: vec![participant],
         message_count: 1,
-        workspace: Workspace::default(),
         service_group_uuid: Some("service-group-1".to_string()),
         service_mode: Some("master_slave".to_string()),
         group_kind: bcs_service_api::GroupKind::Normal,
@@ -407,15 +405,6 @@ async fn noop_group_management_service_fails_closed() {
         })
         .await;
     assert_not_configured(label, "group management service is not configured");
-
-    let workspace = service
-        .update_workspace(GroupUpdateWorkspaceCommand {
-            caller_actor_id: None,
-            group_id: "group-1".to_string(),
-            workspace: Workspace::default(),
-        })
-        .await;
-    assert_not_configured(workspace, "group management service is not configured");
 
     let routing = service
         .update_routing_policy(GroupRoutingPolicyCommand {

@@ -25,8 +25,8 @@ use bcs_service_api::{
     GroupPatchSettingsResult, GroupQueryService, GroupRemoveMemberCommand, GroupRemoveMemberResult,
     GroupRoutingPolicyCommand, GroupRoutingPolicyResult, GroupStatus, GroupStatusCommand,
     GroupStrategy, GroupTerminateCommand, GroupUpdateLabelCommand, GroupUpdateVisibilityCommand,
-    GroupUpdateWorkspaceCommand, GroupUseCaseError, GroupWorkspaceQueryCommand,
-    GroupWorkspaceResult, InitialGroupRun, InitialGroupRunActivityKind, InitialGroupRunState,
+    GroupUseCaseError,
+    InitialGroupRun, InitialGroupRunActivityKind, InitialGroupRunState,
     NoopChannelBindingCleanupPort, Participant, ParticipantMode, ParticipantRole, RegisteredBot,
     RelationCoreService, ServiceError, ServiceResult, ServiceSpec, ServiceSpecPatchConflictField,
     Session, SessionKind, SessionManagementService, SystemMessageEvent,
@@ -181,13 +181,6 @@ impl GroupManagementService for GroupManagementWithRuntimeCleanup {
         cmd: GroupUpdateVisibilityCommand,
     ) -> Result<GroupDetailResult, GroupUseCaseError> {
         self.inner.update_visibility(cmd).await
-    }
-
-    async fn update_workspace(
-        &self,
-        cmd: GroupUpdateWorkspaceCommand,
-    ) -> Result<GroupWorkspaceResult, GroupUseCaseError> {
-        self.inner.update_workspace(cmd).await
     }
 
     async fn update_routing_policy(

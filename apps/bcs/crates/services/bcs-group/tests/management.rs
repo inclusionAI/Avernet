@@ -17,13 +17,13 @@ use bcs_service_api::{
     GroupListCommand, GroupManagementService, GroupParticipantModeCommand,
     GroupQueryService, GroupRoutingPolicyCommand, GroupCoreService, GroupKind, GroupStatus,
     GroupStatusCommand, GroupStrategy, GroupTerminateCommand, GroupUpdateLabelCommand,
-    GroupUpdateVisibilityCommand, GroupUpdateWorkspaceCommand,
-    GroupUseCaseError, GroupWorkspaceQueryCommand, RegisteredBot, RelationEdge, RelationCoreService,
+    GroupUpdateVisibilityCommand,
+    GroupUseCaseError, RegisteredBot, RelationEdge, RelationCoreService,
     Participant, ParticipantMode, ParticipantRole, RoutingMode, RoutingPolicy, ServiceError, ServiceResult, Session, SessionKind,
     SessionManagementService, SessionStatus, SessionUseCaseError, SystemMessageDispatchOutcome,
     SystemMessageEvent, SystemMessageRecipientResult, SystemMessageService,
     WorkbenchChatAbortAuthorizationCommand, WorkbenchChatAuthorizationCommand,
-    WorkbenchConnectCommand, WorkbenchSessionService, WorkbenchUseCaseError, Workspace,
+    WorkbenchConnectCommand, WorkbenchSessionService, WorkbenchUseCaseError,
 };
 use bcs_service_api::types::{MessageViewScope, OpeningMessage};
 use bcs_service_api::port::{ParticipantViewBindingPort, ParticipantViewScopeChangeLease};
@@ -498,7 +498,7 @@ async fn create_state_machine_group_with_human_caller_adds_present_human_to_init
 }
 
 #[tokio::test]
-async fn query_methods_list_detail_bot_groups_and_workspace() {
+async fn query_methods_list_detail_and_bot_groups() {
     let fixture = Fixture::new()
         .with_bot("driver", "Driver", "public", Some("alice"))
         .with_bot("helper", "Helper", "public", None);
@@ -514,18 +514,6 @@ async fn query_methods_list_detail_bot_groups_and_workspace() {
         ))
         .await
         .unwrap();
-    service
-        .update_workspace(GroupUpdateWorkspaceCommand {
-            caller_actor_id: None,
-            group_id: created.group_id.clone(),
-            workspace: Workspace {
-                decisions: vec!["ship it".to_string()],
-                ..Workspace::default()
-            },
-        })
-        .await
-        .unwrap();
-
     let listed = service
         .list_groups(GroupListCommand {
             group_kind: Some(Default::default()),
@@ -562,13 +550,6 @@ async fn query_methods_list_detail_bot_groups_and_workspace() {
     assert_eq!(bot_groups.total, 1);
     assert_eq!(bot_groups.items[0].driver_bot_id, "driver");
 
-    let workspace = service
-        .get_workspace(GroupWorkspaceQueryCommand {
-            group_id: created.group_id,
-        })
-        .await
-        .unwrap();
-    assert_eq!(workspace.workspace.decisions, vec!["ship it".to_string()]);
 }
 
 // Step 1: legacy Group application projections expose the persisted
@@ -2112,18 +2093,6 @@ async fn group_secondary_mutations_run_through_management_service() {
         .unwrap();
     assert_eq!(label.label.as_deref(), Some("Renamed"));
 
-    let workspace = service
-        .update_workspace(GroupUpdateWorkspaceCommand {
-            caller_actor_id: None,
-            group_id: "group-under-test".to_string(),
-            workspace: Workspace {
-                decisions: vec!["ship".to_string()],
-                ..Default::default()
-            },
-        })
-        .await
-        .unwrap();
-    assert_eq!(workspace.workspace.decisions, vec!["ship".to_string()]);
 
     let mut routes = HashMap::new();
     routes.insert("driver".to_string(), vec!["helper".to_string()]);

@@ -613,19 +613,6 @@ impl MySqlGroupStore {
         Ok(())
     }
 
-    /// Update workspace - NOT PERSISTED (memory only, lost on restart).
-    pub(crate) async fn update_workspace_sql(&self, id: &str, workspace: Workspace) -> ServiceResult<()> {
-        let mut group = self
-            .get(id)
-            .await
-            .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
-        group.workspace = workspace;
-        self.cache.write().await.insert(id.to_string(), group);
-
-        debug!(group_id = %id, "Group workspace updated in memory (not persisted)");
-        Ok(())
-    }
-
     /// Update session label.
     pub(crate) async fn update_label_sql(&self, id: &str, label: Option<String>) -> ServiceResult<()> {
         // Verify group exists

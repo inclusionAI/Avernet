@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use bcs_service_api::{
     Group, GroupCoreService, GroupHumanNotifyPolicy, GroupMessage, GroupStatus, Participant,
-    ParticipantMode, ServiceError, ServiceResult, Workspace,
+    ParticipantMode, ServiceError, ServiceResult,
     core::{GroupMutationCommand, GroupMutationKind},
 };
 use tokio::sync::RwLock;
@@ -178,15 +178,6 @@ impl GroupCoreService for FakeGroupCoreService {
             .find(|p| p.bot_uuid == actor_id)
             .ok_or_else(|| ServiceError::BotNotFound(actor_id.to_string()))?;
         participant.mode = Some(mode);
-        Ok(())
-    }
-
-    async fn update_workspace(&self, id: &str, workspace: Workspace) -> ServiceResult<()> {
-        let mut groups = self.groups.write().await;
-        let group = groups
-            .get_mut(id)
-            .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
-        group.workspace = workspace;
         Ok(())
     }
 

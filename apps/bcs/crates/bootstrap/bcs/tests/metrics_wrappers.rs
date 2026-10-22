@@ -275,16 +275,6 @@ impl GroupManagementService for GroupServiceFake {
         Ok(group_detail(GroupStatus::Active, GroupKind::Normal))
     }
 
-    async fn update_workspace(
-        &self,
-        _cmd: GroupUpdateWorkspaceCommand,
-    ) -> Result<GroupWorkspaceResult, GroupUseCaseError> {
-        Ok(GroupWorkspaceResult {
-            group_id: "group-wrapper".to_string(),
-            workspace: Workspace::default(),
-        })
-    }
-
     async fn update_routing_policy(
         &self,
         _cmd: GroupRoutingPolicyCommand,
@@ -561,7 +551,6 @@ fn group_detail(status: GroupStatus, group_kind: GroupKind) -> GroupDetailResult
         opening_message: None,
         participants: vec![participant_view("bot-driver")],
         message_count: 0,
-        workspace: Workspace::default(),
         service_group_uuid: None,
         service_mode: None,
         group_kind,

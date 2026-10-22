@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::core::{
     ActorKind, DefaultDelivery, GroupKind, GroupStatus, GroupStrategy, HumanMentionNotifyMode,
     ParticipantKind, MessageViewScope, ParticipantMode, RoutingMode, RoutingPolicy, ServiceError,
-    ServiceSpec, Workspace,
+    ServiceSpec,
 };
 
 /// Request for creating a group collaboration session.
@@ -117,14 +117,6 @@ pub struct GroupUpdateVisibilityCommand {
     pub visibility: String,
 }
 
-/// Request for replacing a group workspace.
-#[derive(Debug, Clone)]
-pub struct GroupUpdateWorkspaceCommand {
-    pub caller_actor_id: Option<String>,
-    pub group_id: String,
-    pub workspace: Workspace,
-}
-
 /// Request for updating a group's routing policy.
 #[derive(Debug, Clone)]
 pub struct GroupRoutingPolicyCommand {
@@ -169,11 +161,6 @@ pub struct BotGroupListCommand {
     pub limit: u64,
 }
 
-#[derive(Debug, Clone)]
-pub struct GroupWorkspaceQueryCommand {
-    pub group_id: String,
-}
-
 /// Participant view returned by group application-service DTOs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroupParticipantView {
@@ -203,7 +190,6 @@ pub struct GroupDetailResult {
     pub opening_message: Option<crate::types::OpeningMessage>,
     pub participants: Vec<GroupParticipantView>,
     pub message_count: usize,
-    pub workspace: Workspace,
     pub service_group_uuid: Option<String>,
     pub service_mode: Option<String>,
     pub group_kind: GroupKind,
@@ -309,13 +295,6 @@ pub struct GroupRemoveMemberResult {
 pub struct GroupDeleteResult {
     pub group_id: String,
     pub deleted: bool,
-}
-
-/// Response payload for a successful workspace update.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GroupWorkspaceResult {
-    pub group_id: String,
-    pub workspace: Workspace,
 }
 
 /// Response payload for a successful routing-policy update.
@@ -436,11 +415,6 @@ pub trait GroupQueryService: Send + Sync {
         &self,
         cmd: BotGroupListCommand,
     ) -> Result<GroupListResult, GroupUseCaseError>;
-
-    async fn get_workspace(
-        &self,
-        cmd: GroupWorkspaceQueryCommand,
-    ) -> Result<GroupWorkspaceResult, GroupUseCaseError>;
 }
 
 /// Group management application service.
@@ -498,11 +472,6 @@ pub trait GroupManagementService: Send + Sync {
         &self,
         cmd: GroupUpdateVisibilityCommand,
     ) -> Result<GroupDetailResult, GroupUseCaseError>;
-
-    async fn update_workspace(
-        &self,
-        cmd: GroupUpdateWorkspaceCommand,
-    ) -> Result<GroupWorkspaceResult, GroupUseCaseError>;
 
     async fn update_routing_policy(
         &self,

@@ -8,7 +8,7 @@
 //! MySQL: Session metadata + Participants (persistent)
 //! ```
 //!
-//! Messages and workspace are NOT persisted - they are lost on server restart.
+//! Messages are NOT persisted - they are lost on server restart.
 
 use async_trait::async_trait;
 use bcs_db_api::{
@@ -35,7 +35,6 @@ use bcs_service_api::{
     GroupMetricsSnapshotPort,
     GroupMutableFieldsPatch, GroupStatus, GroupStrategy, HumanMentionNotifyMode, Participant,
     ParticipantKind, ParticipantMode, ParticipantRole, RoutingPolicy, ServiceError, ServiceResult,
-    Workspace,
 };
 
 pub mod memory;
@@ -335,7 +334,7 @@ fn apply_db_group_mutation_candidate(
 ///
 /// Uses MySQL for persistent storage of session metadata and participants.
 ///
-/// Messages and workspace are NEVER persisted - they are lost on server restart.
+/// Messages are NEVER persisted - they are lost on server restart.
 pub struct MySqlGroupStore {
     /// Database plugin selected by the composition root.
     db: DbPluginCompat,

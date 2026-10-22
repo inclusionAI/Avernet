@@ -987,10 +987,6 @@ impl GroupCoreService for NoopGroupCoreService {
         Err(ServiceError::GroupNotFound(id.to_string()))
     }
 
-    async fn update_workspace(&self, id: &str, _workspace: Workspace) -> ServiceResult<()> {
-        Err(ServiceError::GroupNotFound(id.to_string()))
-    }
-
     async fn update_label(&self, id: &str, _label: Option<String>) -> ServiceResult<()> {
         Err(ServiceError::GroupNotFound(id.to_string()))
     }
@@ -1779,12 +1775,6 @@ impl GroupQueryService for NoopGroupQueryService {
         Err(service_not_configured("group query service").into())
     }
 
-    async fn get_workspace(
-        &self,
-        _cmd: GroupWorkspaceQueryCommand,
-    ) -> Result<GroupWorkspaceResult, GroupUseCaseError> {
-        Err(service_not_configured("group query service").into())
-    }
 }
 
 pub struct NoopGroupManagementService;
@@ -1848,13 +1838,6 @@ impl GroupManagementService for NoopGroupManagementService {
         &self,
         _cmd: GroupUpdateVisibilityCommand,
     ) -> Result<GroupDetailResult, GroupUseCaseError> {
-        Err(service_not_configured("group management service").into())
-    }
-
-    async fn update_workspace(
-        &self,
-        _cmd: GroupUpdateWorkspaceCommand,
-    ) -> Result<GroupWorkspaceResult, GroupUseCaseError> {
         Err(service_not_configured("group management service").into())
     }
 

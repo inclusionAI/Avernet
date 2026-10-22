@@ -8,7 +8,7 @@ use crate::types::{EventActor, GroupHumanNotifyPolicy};
 pub use bcs_domain::{
     DefaultDelivery, Group, GroupKind, GroupStatus, GroupStrategy, HumanMentionNotifyMode,
     MessageViewScope, Participant, ParticipantKind, ParticipantMode, ParticipantRole, RoutingMode,
-    RoutingPolicy, SenderRoutesValidationError, ServiceSpec, Workspace,
+    RoutingPolicy, SenderRoutesValidationError, ServiceSpec,
 };
 
 /// Actor input for actor-level DM group creation.
@@ -284,9 +284,6 @@ pub trait GroupCoreService: Send + Sync {
         };
         self.add_participant(group_id, participant).await
     }
-
-    /// Update group workspace.
-    async fn update_workspace(&self, id: &str, workspace: Workspace) -> ServiceResult<()>;
 
     /// Update group label.
     async fn update_label(&self, id: &str, label: Option<String>) -> ServiceResult<()>;

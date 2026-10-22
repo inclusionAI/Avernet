@@ -298,7 +298,7 @@ submodules/
 ## Core Components
 
 - **BotRegistry**: Token→bot_id mapping, capabilities, WS connections, heartbeat (5 min TTL)
-- **SessionStore**: In-memory group sessions with transcript and workspace
+- **SessionStore**: In-memory group sessions with transcript
 - **MessageRouter**: Broadcast + @mention routing
 - **FusionEngine**: Merges bot contexts (IDENTITY, SOUL, RULES, MEMORY)
 - **ProposalStore**: Temporary proposals with token-based confirmation URLs (10 min expiry)
@@ -409,7 +409,6 @@ export BOT_DATA_DIR=/path/to/bot/data
 | `/groups/{id}/chat` | POST | Send group chat message |
 | `/groups/{id}/messages` | POST | Send a persistent group message |
 | `/groups/{id}/fuse` | POST | Fuse participant contexts |
-| `/groups/{id}/workspace` | GET/PUT | Get/update workspace |
 
 ## Port Assignments
 

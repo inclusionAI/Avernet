@@ -29,11 +29,11 @@ use bcs_service_api::{
     GroupDetailResult, GroupKind, GroupListCommand, GroupListEntry, GroupParticipantModeCommand,
     GroupPatchSettingsCommand, GroupRemoveMemberCommand, GroupRoutingPolicyCommand, GroupStatus,
     GroupStatusCommand, GroupTerminateCommand, GroupUpdateLabelCommand,
-    GroupUpdateVisibilityCommand, GroupUpdateWorkspaceCommand, GroupUseCaseError,
-    GroupWorkspaceQueryCommand, MAX_COLLABORATION_DEFINITION_YAML_BYTES, ParticipantMode,
+    GroupUpdateVisibilityCommand, GroupUseCaseError,
+    MAX_COLLABORATION_DEFINITION_YAML_BYTES, ParticipantMode,
     PatchGroupCollaborationDefinitionCommand, RoutingMode, RoutingPolicy, ServiceError,
     ServiceSpec, SessionKind, SessionStatus, StartStateMachineRunCommand,
-    UpgradeGroupCollaborationDefinitionCommand, Workspace,
+    UpgradeGroupCollaborationDefinitionCommand,
 };
 use bcs_service_api::types::MessageViewScope;
 use serde::{Deserialize, Deserializer, Serialize};

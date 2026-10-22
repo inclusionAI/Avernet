@@ -41,8 +41,7 @@ use bcs_service_api::{
     GroupRoutingPolicyCommand, GroupRoutingPolicyResult, GroupSessionMetricCount,
     GroupSessionMetricsSnapshotPort, GroupStatus, GroupStatusCommand,
     GroupStrategy, GroupTerminateCommand, GroupUpdateLabelCommand, GroupUpdateVisibilityCommand,
-    GroupUpdateWorkspaceCommand,
-    GroupUseCaseError, GroupWorkspaceResult, MessageFlowService, MetricsResult,
+    GroupUseCaseError, MessageFlowService, MetricsResult,
     PersistentGroupSendCommand, PersistentGroupSendOutcome, ServiceError, ServiceResult,
     SessionKind, SessionStatus, TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand,
     TaskDispatchOutcome, TaskMessageCommand, TaskMessageOutcome, TaskRunAliasRegistration,
@@ -711,13 +710,6 @@ impl GroupManagementService for MetricsGroupManagementService {
         cmd: GroupUpdateVisibilityCommand,
     ) -> std::result::Result<GroupDetailResult, GroupUseCaseError> {
         self.inner.update_visibility(cmd).await
-    }
-
-    async fn update_workspace(
-        &self,
-        cmd: GroupUpdateWorkspaceCommand,
-    ) -> std::result::Result<GroupWorkspaceResult, GroupUseCaseError> {
-        self.inner.update_workspace(cmd).await
     }
 
     async fn update_routing_policy(

@@ -124,7 +124,6 @@ pub(crate) fn group_to_detail_json(mut group: GroupDetailResult) -> Value {
         "driver_bot": group.driver_bot_id,
         "participants": group.participants,
         "message_count": group.message_count,
-        "workspace": group.workspace,
         "service_group_uuid": group.service_group_uuid,
         "service_mode": group.service_mode,
         "created_at": group.created_at,

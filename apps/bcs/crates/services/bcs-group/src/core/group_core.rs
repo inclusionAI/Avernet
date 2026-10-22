@@ -14,7 +14,7 @@ use bcs_service_api::types::{
 use bcs_service_api::{
     ActorKind, DmActorSpec, Group, GroupCoreService, GroupKind, GroupMessage,
     GroupMutableFieldsPatch, GroupStatus, Participant, ParticipantMode, ParticipantRole,
-    ServiceError, ServiceResult, ServiceSpec, Workspace,
+    ServiceError, ServiceResult, ServiceSpec,
 };
 use chrono::{SecondsFormat, Utc};
 use serde_json::{Value, json};
@@ -187,10 +187,6 @@ impl GroupCoreService for GroupCore {
         self.repo
             .update_participant_message_view_scope(group_id, actor_id, message_view_scope)
             .await
-    }
-
-    async fn update_workspace(&self, id: &str, workspace: Workspace) -> ServiceResult<()> {
-        self.repo.update_workspace(id, workspace).await
     }
 
     async fn update_label(&self, id: &str, label: Option<String>) -> ServiceResult<()> {

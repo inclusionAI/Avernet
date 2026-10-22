@@ -30,7 +30,6 @@ pub(crate) fn group_to_detail_with_context(group: DomainGroup, context_injected:
             })
             .collect(),
         message_count,
-        workspace: group.workspace,
         service_group_uuid: group.service_group_uuid,
         service_mode: group.service_mode,
         group_kind: group.group_kind,

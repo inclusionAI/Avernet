@@ -1028,7 +1028,7 @@ mod tests {
     use super::*;
     use bcs_service_api::{
         BotCapabilities, ChatEventRouting, GroupStrategy, Participant,
-        ParticipantRole, RegisteredBot, ResponseMode, RouteSelectorWire, Workspace,
+        ParticipantRole, RegisteredBot, ResponseMode, RouteSelectorWire,
     };
     use bcs_test_support::NoopBotRegistryCoreService;
 
@@ -1066,7 +1066,6 @@ mod tests {
                 },
             ],
             messages: Vec::new(),
-            workspace: Workspace::default(),
             service_group_uuid: None,
             service_mode: None,
             created_at: 0,
@@ -1463,7 +1462,6 @@ mod tests {
                 },
             ],
             messages: Vec::new(),
-            workspace: Workspace::default(),
             service_group_uuid: None,
             service_mode: None,
             created_at: 0,
@@ -1698,7 +1696,6 @@ mod tests {
                 },
             ],
             messages: Vec::new(),
-            workspace: Workspace::default(),
             service_group_uuid: None,
             service_mode: None,
             created_at: 0,
@@ -1997,7 +1994,6 @@ mod tests {
                 },
             ],
             messages: Vec::new(),
-            workspace: Workspace::default(),
             service_group_uuid: None,
             service_mode: None,
             created_at: 0,
@@ -2289,7 +2285,6 @@ mod tests {
                 },
             ],
             messages: Vec::new(),
-            workspace: Workspace::default(),
             created_at: 0,
             updated_at: 0,
             group_kind: bcs_service_api::GroupKind::default(),

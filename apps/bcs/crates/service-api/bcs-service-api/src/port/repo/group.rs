@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use crate::types::{
     EventActor, Group, GroupHumanNotifyPolicy, GroupKind, GroupMessage, GroupMutableFieldsPatch,
     GroupStatus, Participant, MessageViewScope, ParticipantMode, RoutingPolicy, ServiceError,
-    ServiceResult, ServiceSpec, Workspace,
+    ServiceResult, ServiceSpec,
 };
 
 use super::AppendEventRecord;
@@ -121,7 +121,6 @@ pub trait GroupRepoPort: Send + Sync {
         actor_id: &str,
         message_view_scope: MessageViewScope,
     ) -> ServiceResult<()>;
-    async fn update_workspace(&self, id: &str, workspace: Workspace) -> ServiceResult<()>;
     async fn update_label(&self, id: &str, label: Option<String>) -> ServiceResult<()>;
     async fn update_status(&self, id: &str, status: GroupStatus) -> ServiceResult<()>;
     /// Persist a `service_spec` patch onto the group. `Some(spec)` installs or

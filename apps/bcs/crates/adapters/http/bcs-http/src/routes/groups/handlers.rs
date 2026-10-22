@@ -572,45 +572,6 @@ pub async fn update_group_visibility(
     })))
 }
 
-pub async fn get_workspace(
-    State(state): State<HttpAppState>,
-    Path(id): Path<String>,
-) -> Result<Json<Value>, HttpAdapterError> {
-    let result = state
-        .services
-        .group_query
-        .get_workspace(GroupWorkspaceQueryCommand { group_id: id })
-        .await
-        .map_err(group_use_case_error_to_http)?;
-
-    Ok(Json(
-        serde_json::to_value(result.workspace).unwrap_or_default(),
-    ))
-}
-
-pub async fn update_workspace(
-    State(state): State<HttpAppState>,
-    Path(id): Path<String>,
-    Json(workspace): Json<Workspace>,
-) -> Result<Json<Value>, HttpAdapterError> {
-    let result = state
-        .services
-        .group_management
-        .update_workspace(GroupUpdateWorkspaceCommand {
-            caller_actor_id: None,
-            group_id: id.clone(),
-            workspace,
-        })
-        .await
-        .map_err(group_use_case_error_to_http)?;
-
-    Ok(Json(serde_json::json!({
-        "updated": true,
-        "group_id": result.group_id,
-        "workspace": result.workspace,
-    })))
-}
-
 pub async fn update_routing_policy(
     State(state): State<HttpAppState>,
     Path(id): Path<String>,

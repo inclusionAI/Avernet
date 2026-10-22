@@ -287,10 +287,6 @@ fn build_api_routes() -> Router<HttpAppState> {
             put(routes::groups::update_group_visibility),
         )
         .route(
-            "/groups/{id}/workspace",
-            get(routes::groups::get_workspace).put(routes::groups::update_workspace),
-        )
-        .route(
             "/groups/{id}/settings",
             patch(routes::groups::patch_group_settings),
         )

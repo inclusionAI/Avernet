@@ -99,7 +99,6 @@ impl MySqlGroupStore {
                 opening_message,
                 participants,
                 messages: Vec::new(),            // Not persisted
-                workspace: Workspace::default(), // Not persisted
                 service_group_uuid,
                 service_mode,
                 created_at: Self::seconds_to_millis(created_ts),
@@ -299,7 +298,6 @@ impl MySqlGroupStore {
                     opening_message,
                     participants: Vec::new(),
                     messages: Vec::new(),
-                    workspace: Workspace::default(),
                     service_group_uuid,
                     service_mode,
                     created_at: Self::seconds_to_millis(created_ts),

@@ -14,7 +14,7 @@ use bcs_service_api::{
     GroupProposalService, GroupStatus, GroupUseCaseError, Participant, ParticipantMode,
     ProposalCoreService, RegisteredBot, ServiceError, ServiceResult, Session, SessionKind,
     SessionManagementService, SessionStatus, SessionUseCaseError, SystemMessageEvent,
-    SystemMessageService, Workspace,
+    SystemMessageService,
 };
 
 use bcs_proposal::{
@@ -997,15 +997,6 @@ impl GroupCoreService for FakeGroupStore {
             .find(|participant| participant.bot_uuid == actor_id)
             .ok_or_else(|| ServiceError::BotNotFound(actor_id.to_string()))?;
         participant.mode = Some(mode);
-        Ok(())
-    }
-
-    async fn update_workspace(&self, id: &str, workspace: Workspace) -> ServiceResult<()> {
-        let mut groups = self.groups.write().unwrap();
-        let group = groups
-            .get_mut(id)
-            .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
-        group.workspace = workspace;
         Ok(())
     }
 

@@ -68,7 +68,6 @@ impl GroupBuilder {
             opening_message: None,
             participants: self.participants,
             messages: Vec::new(),
-            workspace: Workspace::default(),
             service_group_uuid: None,
             service_mode: None,
             created_at: now,

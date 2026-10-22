@@ -110,10 +110,6 @@ impl GroupRepoPort for MySqlGroupStore {
             .await
     }
 
-    async fn update_workspace(&self, id: &str, workspace: Workspace) -> ServiceResult<()> {
-        self.update_workspace_sql(id, workspace).await
-    }
-
     async fn update_label(&self, id: &str, label: Option<String>) -> ServiceResult<()> {
         self.update_label_sql(id, label).await
     }

@@ -20,7 +20,7 @@ use bcs_service_api::{
     HandleBotTerminalEventOutcome, MessageFlowService, Participant, ParticipantMode,
     ParticipantRole, ProviderRunTransport, RedactedToken, ServiceError, ServiceResult, ServiceSpec,
     SessionHistoryResult, StartStateMachineRunCommand, StartStateMachineRunOutcome,
-    StateMachineDeliveryCorrelation, StateMachineRunView, Workspace,
+    StateMachineDeliveryCorrelation, StateMachineRunView,
     SystemMessageEvent, SystemMessageService, TaskCompleteCommand, TaskCompleteOutcome,
     TaskDispatchCommand, TaskDispatchOutcome, TaskMessageCommand, TaskMessageOutcome,
     TaskRunAliasRegistration, WebSendCommand, WebSendOutcome,
@@ -173,10 +173,6 @@ impl GroupCoreService for RecordingGroupCoreService {
         _mode: ParticipantMode,
     ) -> ServiceResult<()> {
         Err(ServiceError::GroupNotFound(group_id.to_string()))
-    }
-
-    async fn update_workspace(&self, id: &str, _workspace: Workspace) -> ServiceResult<()> {
-        Err(ServiceError::GroupNotFound(id.to_string()))
     }
 
     async fn update_label(&self, id: &str, _label: Option<String>) -> ServiceResult<()> {

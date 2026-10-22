@@ -2245,7 +2245,7 @@ async fn service_group_routes_are_not_registered() {
 }
 
 #[tokio::test]
-async fn group_secondary_routes_update_member_status_label_workspace_and_terminate() {
+async fn group_secondary_routes_preserve_metadata_and_reject_removed_workspace() {
     let temp_dir = TempDir::new().unwrap();
     let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
     for bot_id in ["driver-bot", "member-bot", "new-bot"] {
@@ -2370,53 +2370,32 @@ async fn group_secondary_routes_update_member_status_label_workspace_and_termina
         Some("Updated Group")
     );
 
-    let workspace_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/groups/group-secondary/workspace")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({
-                        "decisions": ["ship"],
-                        "tasks": [],
-                        "notes": ["note"],
-                        "audit_log": []
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(workspace_response.status(), StatusCode::OK);
-    assert_eq!(
-        groups
-            .get("group-secondary")
+    for method in ["GET", "PUT"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri("/groups/group-secondary/workspace")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"decisions":[],"tasks":[],"notes":[],"audit_log":[]}"#))
+                    .unwrap(),
+            )
             .await
-            .unwrap()
-            .workspace
-            .decisions,
-        vec!["ship".to_string()]
-    );
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{method} workspace");
+    }
 
-    let get_workspace_response = app
+    let detail_response = app
         .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/groups/group-secondary/workspace")
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(Request::builder().uri("/groups/group-secondary").body(Body::empty()).unwrap())
         .await
         .unwrap();
-    assert_eq!(get_workspace_response.status(), StatusCode::OK);
-    let body = to_bytes(get_workspace_response.into_body(), usize::MAX)
-        .await
-        .unwrap();
+    assert_eq!(detail_response.status(), StatusCode::OK);
+    let body = to_bytes(detail_response.into_body(), usize::MAX).await.unwrap();
     let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["decisions"][0], "ship");
+    assert_eq!(json["label"], "Updated Group");
+    assert!(json.get("workspace").is_none());
 
     let terminate_response = app
         .oneshot(

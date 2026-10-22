@@ -418,19 +418,6 @@ impl GroupManagementService for GroupManagement {
         Ok(group_to_detail(updated))
     }
 
-    async fn update_workspace(
-        &self,
-        cmd: GroupUpdateWorkspaceCommand,
-    ) -> Result<GroupWorkspaceResult, GroupUseCaseError> {
-        self.group
-            .update_workspace(&cmd.group_id, cmd.workspace.clone())
-            .await?;
-        Ok(GroupWorkspaceResult {
-            group_id: cmd.group_id,
-            workspace: cmd.workspace,
-        })
-    }
-
     async fn update_routing_policy(
         &self,
         cmd: GroupRoutingPolicyCommand,

@@ -25,7 +25,6 @@ use bcs_service_api::{
     GroupQueryService, GroupRoutingPolicyCommand, GroupRoutingPolicyResult, GroupStatus,
     GroupStatusCommand, GroupTerminateCommand, GroupUpdateLabelCommand, InitialGroupRun,
     InitialGroupRunActivityKind, InitialGroupRunState,
-    GroupUpdateWorkspaceCommand, GroupWorkspaceQueryCommand, GroupWorkspaceResult,
     HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, HumanResponseSource,
     ListPendingHumanNodesCommand, Participant, ParticipantKind, ParticipantMode, ParticipantRole,
     PendingHumanNodeView, RespondHumanNodeCommand, RespondHumanNodeOutcome, RoutingMode,
@@ -34,7 +33,7 @@ use bcs_service_api::{
     SessionStateMachinePermissionView, Skill, StartSessionStateMachineRunCommand,
     StartStateMachineRunCommand, StartStateMachineRunOutcome, StateMachineDeliveryCorrelation,
     StateMachineAssignee, StateMachineGraphMode, StateMachineNodeKind, StateMachineNodeRun,
-    StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus, StateMachineRunView, Workspace,
+    StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus, StateMachineRunView,
     ValidateCollaborationDefinitionYamlCommand,
 };
 use bcs_service_api::types::OpeningMessage;
@@ -102,7 +101,6 @@ struct RecordingGroupManagement {
     delete_calls: Mutex<Vec<GroupDeleteCommand>>,
     terminate_calls: Mutex<Vec<GroupTerminateCommand>>,
     label_calls: Mutex<Vec<GroupUpdateLabelCommand>>,
-    workspace_calls: Mutex<Vec<GroupUpdateWorkspaceCommand>>,
     routing_policy_calls: Mutex<Vec<GroupRoutingPolicyCommand>>,
     participant_mode_calls: Mutex<Vec<bcs_service_api::GroupParticipantModeCommand>>,
 }
@@ -112,7 +110,6 @@ struct RecordingGroupQuery {
     list_calls: Mutex<Vec<GroupListCommand>>,
     detail_calls: Mutex<Vec<GroupDetailCommand>>,
     bot_group_calls: Mutex<Vec<BotGroupListCommand>>,
-    workspace_calls: Mutex<Vec<GroupWorkspaceQueryCommand>>,
 }
 
 #[derive(Default)]
@@ -467,7 +464,6 @@ impl GroupQueryService for RecordingGroupQuery {
             opening_message: None,
             participants: vec![participant_view("driver-bot", "driver")],
             message_count: 0,
-            workspace: Workspace::default(),
             service_group_uuid: None,
             service_mode: None,
             group_kind: Default::default(),
@@ -498,19 +494,6 @@ impl GroupQueryService for RecordingGroupQuery {
         })
     }
 
-    async fn get_workspace(
-        &self,
-        cmd: GroupWorkspaceQueryCommand,
-    ) -> Result<GroupWorkspaceResult, bcs_service_api::GroupUseCaseError> {
-        self.workspace_calls.lock().await.push(cmd.clone());
-        Ok(GroupWorkspaceResult {
-            group_id: cmd.group_id,
-            workspace: Workspace {
-                decisions: vec!["use query service".to_string()],
-                ..Workspace::default()
-            },
-        })
-    }
 }
 
 #[async_trait::async_trait]
@@ -548,7 +531,6 @@ impl GroupManagementService for RecordingGroupManagement {
             opening_message: None,
             participants,
             message_count: 0,
-            workspace: Workspace::default(),
             service_group_uuid: None,
             service_mode: None,
             group_kind: bcs_service_api::GroupKind::Dm,
@@ -598,7 +580,6 @@ impl GroupManagementService for RecordingGroupManagement {
                 "driver",
             )],
             message_count: 0,
-            workspace: Workspace::default(),
             service_group_uuid: None,
             service_mode: None,
             group_kind: Default::default(),
@@ -666,7 +647,6 @@ impl GroupManagementService for RecordingGroupManagement {
             opening_message: None,
             participants: vec![participant_view(&cmd.caller_actor_id, "driver")],
             message_count: 0,
-            workspace: Workspace::default(),
             service_group_uuid: None,
             service_mode: None,
             group_kind: Default::default(),
@@ -700,7 +680,6 @@ impl GroupManagementService for RecordingGroupManagement {
             opening_message: None,
             participants: vec![participant_view(&cmd.caller_actor_id, "driver")],
             message_count: 0,
-            workspace: Workspace::default(),
             service_group_uuid: None,
             service_mode: None,
             group_kind: Default::default(),
@@ -727,18 +706,6 @@ impl GroupManagementService for RecordingGroupManagement {
         Err(bcs_service_api::GroupUseCaseError::InvalidProposal(
             "not yet implemented".to_string(),
         ))
-    }
-
-    async fn update_workspace(
-        &self,
-        cmd: GroupUpdateWorkspaceCommand,
-    ) -> Result<GroupWorkspaceResult, bcs_service_api::GroupUseCaseError> {
-        let result = GroupWorkspaceResult {
-            group_id: cmd.group_id.clone(),
-            workspace: cmd.workspace.clone(),
-        };
-        self.workspace_calls.lock().await.push(cmd);
-        Ok(result)
     }
 
     async fn update_routing_policy(
@@ -2267,22 +2234,6 @@ async fn group_query_routes_delegate_to_group_query_service() {
     assert_eq!(json["items"][0]["human_mention_notify_mode"], "all");
     assert_eq!(json["total"], 1);
 
-    let workspace_response = app
-        .oneshot(
-            Request::builder()
-                .uri("/groups/group-1/workspace")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(workspace_response.status(), StatusCode::OK);
-    let body = to_bytes(workspace_response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["decisions"], serde_json::json!(["use query service"]));
-
     let list_calls = query.list_calls.lock().await;
     assert_eq!(list_calls.len(), 1);
     assert_eq!(list_calls[0].group_kind, None);
@@ -2304,9 +2255,6 @@ async fn group_query_routes_delegate_to_group_query_service() {
     assert_eq!(bot_group_calls[0].limit, 5);
     drop(bot_group_calls);
 
-    let workspace_calls = query.workspace_calls.lock().await;
-    assert_eq!(workspace_calls.len(), 1);
-    assert_eq!(workspace_calls[0].group_id, "group-1");
 }
 
 #[tokio::test]
@@ -2532,10 +2480,6 @@ async fn get_group_preserves_legacy_detail_payload_from_query_service() {
         run_id: String::new(),
         attachments: None,
     }];
-    group.workspace = Workspace {
-        decisions: vec!["real decision".to_string()],
-        ..Workspace::default()
-    };
     group.service_group_uuid = Some("service-group-1".to_string());
     group.service_mode = Some("master_slave".to_string());
     group.dm_pair_key = Some("bot-a|bot-b".to_string());
@@ -2559,10 +2503,7 @@ async fn get_group_preserves_legacy_detail_payload_from_query_service() {
     let json: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["id"], "group-with-detail");
     assert_eq!(json["message_count"], 1);
-    assert_eq!(
-        json["workspace"]["decisions"],
-        serde_json::json!(["real decision"])
-    );
+    assert!(json.get("workspace").is_none());
     assert_eq!(json["service_group_uuid"], "service-group-1");
     assert_eq!(json["service_mode"], "master_slave");
     assert_eq!(json["dm_pair_key"], "bot-a|bot-b");
@@ -2716,30 +2657,6 @@ async fn group_secondary_routes_delegate_to_group_management() {
     assert_eq!(json["group_id"], "group-1");
     assert_eq!(json["label"], "Renamed group");
 
-    let workspace_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/groups/group-1/workspace")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({ "decisions": ["ship it"] }).to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(workspace_response.status(), StatusCode::OK);
-    let body = to_bytes(workspace_response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(
-        json["workspace"]["decisions"],
-        serde_json::json!(["ship it"])
-    );
-
     let routing_response = app
         .clone()
         .oneshot(
@@ -2797,15 +2714,6 @@ async fn group_secondary_routes_delegate_to_group_management() {
     assert_eq!(label_calls[0].group_id, "group-1");
     assert_eq!(label_calls[0].label.as_deref(), Some("Renamed group"));
     drop(label_calls);
-
-    let workspace_calls = recorder.workspace_calls.lock().await;
-    assert_eq!(workspace_calls.len(), 1);
-    assert_eq!(workspace_calls[0].group_id, "group-1");
-    assert_eq!(
-        workspace_calls[0].workspace.decisions,
-        vec!["ship it".to_string()]
-    );
-    drop(workspace_calls);
 
     let routing_calls = recorder.routing_policy_calls.lock().await;
     assert_eq!(routing_calls.len(), 1);
@@ -3137,7 +3045,6 @@ fn detail_from_create(cmd: &GroupCreateCommand) -> GroupDetailResult {
             })
             .collect(),
         message_count: 0,
-        workspace: Workspace::default(),
         service_group_uuid: None,
         service_mode: None,
         group_kind: Default::default(),
