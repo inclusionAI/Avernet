@@ -184,6 +184,7 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
               <p className="m-0 mb-1 text-sm font-medium text-foreground">操作</p>
               <div className="flex flex-col divide-y divide-border">
                 <Button
+                  ref={shareAnchorRef}
                   variant="ghost"
                   onClick={() => void handleShare()}
                   className="h-auto w-full justify-start px-2 py-2 text-left text-xs text-primary hover:bg-primary/10 hover:text-primary"

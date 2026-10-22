@@ -25,7 +25,7 @@ export interface WorkspaceManagePanelsProps {
   onLeaveGroup: (actorId: string) => Promise<boolean>;
   onAddGroupMember: (actorId: string) => Promise<boolean>;
   onRemoveGroupMember: (actorId: string) => Promise<boolean>;
-  onShareGroup: () => Promise<DomainResult<{ invitationUrl: string }>>;
+  onShareGroup: (expiresInSeconds?: number) => Promise<DomainResult<{ invitationUrl: string }>>;
   onSaveDingTalk: (config: GroupDingTalkConfig) => Promise<boolean>;
   onToggleDingTalkActive: (active: boolean) => Promise<boolean>;
   onDeleteDingTalk: () => Promise<boolean>;
@@ -36,7 +36,7 @@ export interface WorkspaceManagePanelsProps {
   onLeaveSession: (actorId: string) => Promise<boolean>;
   onAddSessionMember: (actorId: string) => Promise<boolean>;
   onRemoveSessionMember: (actorId: string) => Promise<boolean>;
-  onShareSession: () => Promise<DomainResult<{ invitationUrl: string }>>;
+  onShareSession: (expiresInSeconds?: number) => Promise<DomainResult<{ invitationUrl: string }>>;
 }
 
 /** 右侧群/会话管理面板渲染：只负责 UI 编排，写操作由父级 Hook 提供。 */
