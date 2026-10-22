@@ -13,7 +13,34 @@ fallback restart also retains the original caller environment. Tests were not
 rerun after this rebase, following the user's no-verification instruction; the
 results below apply to the pre-rebase implementation.
 
-## Implementation and configuration
+## Default-mode update (2026-10-22)
+
+At the user's request, `hook_idle` is now the default for Claude-compatible
+constructors and factories when `completion_mode` is omitted. Explicit `legacy`
+and `observe` overrides remain supported, and unsupported native profiles still
+fail closed. See the bridge CLI README for current configuration and rollback.
+This changes the earlier opt-in rollout decision, not the supported version or
+compatibility evidence. The following results are the historical 2026-10-19/20
+validation, not a claim of new live verification or deployment.
+
+Current default-change checks (2026-10-22):
+
+- Public bridge core/app/CLI: **405 passed, 2 failed, 3 ignored** via
+  `cargo test --locked --offline --no-fail-fast -p bcs-bridge-core -p bcs-bridge-app -p bcs-bridge-cli -- --test-threads=1`.
+  The two unchanged CLI pipe tests fail because this host keeps pipes at 4096
+  bytes and denies `F_SETPIPE_SZ` with `EPERM`; no pipe code/test was weakened.
+- Included regressions: **16 completion tests**, **18 WebSocket tests**, and
+  **10 session-recovery tests** passed. Constructor/factory defaults, explicit
+  legacy/observe, failed-result cause propagation over BCN V2/V3, cancellation,
+  restart/reconnect and approval paths are covered by synthetic protocol peers.
+- Internal bridge startup tests: **3 passed** using
+  `cargo test --locked --offline --manifest-path apps/bcs-internal/Cargo.toml -p bcs-bridge --test start -- --test-threads=1`
+  from the OCB workspace. The cfuse-cc fixture now exercises hook initialization
+  without `completion_mode`; the cfuse-codex test remains unchanged.
+- No new live-model verification, running configuration edit or bridge restart.
+  `git diff --check` passes; all changed source files remain below 1000 lines.
+
+## Original implementation and configuration
 
 The adapter supports `completion_mode = "legacy"` (default), `"observe"`, or
 `"hook_idle"` in the bot's `engine_options` table. For example:
@@ -126,9 +153,10 @@ full nested/resumed-background recovery, all concurrent engine-version combinati
 and production rollout are not certified. Unknown task kinds and nonempty cron
 snapshots fail closed. Missing snapshots never imply empty.
 
-The default remains legacy. This change supplies the opt-in implementation and
-regressions; completing the broader compatibility matrix is required before a
-release changes defaults. No live configuration, deployment or PR has been updated.
+At that validation point the default remained legacy, with broader compatibility
+validation planned before changing defaults. The 2026-10-22 user-requested default
+change above supersedes that rollout decision; the remaining compatibility limits
+still apply. No live configuration or deployment is changed by this default update.
 
 ## Acceptance matrix
 

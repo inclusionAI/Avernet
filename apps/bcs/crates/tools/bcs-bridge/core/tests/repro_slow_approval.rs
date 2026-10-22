@@ -28,8 +28,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use bcs_bridge_core::engine::claude_code::ClaudeCode;
-use bcs_bridge_core::engine::{Engine, SessionObserver, TurnError, TurnOutcome, TurnRequest};
+use bcs_bridge_core::engine::claude_code::ClaudeCodeFactory;
+use bcs_bridge_core::engine::{EngineFactory, SessionObserver, TurnError, TurnOutcome, TurnRequest};
 use bcs_bridge_core::interaction::{InteractionRegistry, ResolveOutcome};
 use bcs_protocol::stream::{InteractionPhase, StreamEvent};
 use serde_json::json;
@@ -49,7 +49,9 @@ impl SessionObserver for NoopObserver {
 /// `human_latency` 后点“允许”，然后等 turn 收尾并返回其结局。
 async fn drive_approval(human_latency: Duration, idle_window: Duration) -> Result<TurnOutcome, TurnError> {
     let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/mock_cc_approval.py");
-    let engine = ClaudeCode::new(PathBuf::from(script), vec![]);
+    // This approval-only peer intentionally speaks the legacy protocol.
+    let options = toml::toml! { completion_mode = "legacy" };
+    let engine = ClaudeCodeFactory::default().build(PathBuf::from(script), &options).unwrap();
     let mut req = TurnRequest::new("r-slow", "hi", "/tmp", Arc::new(NoopObserver));
     req.idle_timeout = Some(idle_window);
     let registry: InteractionRegistry = req.interactions.clone();

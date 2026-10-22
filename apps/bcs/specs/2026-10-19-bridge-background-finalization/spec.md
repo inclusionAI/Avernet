@@ -1,7 +1,7 @@
 # Bridge 后台任务收尾 Spec：Result + Idle + Stop 快照
 
 > 日期：2026-10-19
-> 状态：已实现显式 opt-in；仅验证 cfuse 2.6.44 → Claude Code 2.1.199 的有限能力范围。默认 legacy，推广门槛和未测边界见 validation.md。
+> 状态更新（2026-10-22）：按用户要求，Claude-compatible driver 未配置模式时默认 `hook_idle`，保留显式 `legacy` / `observe`。仅验证 cfuse 2.6.44 → Claude Code 2.1.199 的有限能力范围；本次默认值调整不扩大能力认证。下文原 opt-in 推广计划及未测边界的历史背景见 validation.md。
 > Owner：公共 BCS `bcs-bridge-core` 引擎适配边界；内部 launcher 由发行 composition 接线。
 > 公共源码基线：`7385c8323439081a4022b0623e13788d7f816e35`。
 > [问题与实验证据](research.md) · [执行计划](plan.md) · [实现验证](validation.md)
@@ -12,7 +12,7 @@
 新到达的原生 idle 和有效 Stop 后台快照**共同判定 BCS run 收尾。不读取 transcript，
 不解析运行日志，不再以 bridge 启发式消费 pending 作为 final 的硬门槛。
 
-当前实现已通过真实 launcher 的普通回复、恢复会话、后台 Bash、执行中消费及通知入队验证。它仍是隔离研究验证用的有限范围 opt-in，不等于全部任务类别和企业策略已验收。
+当前实现已通过真实 launcher 的普通回复、恢复会话、后台 Bash、执行中消费及通知入队验证。原始交付采用隔离研究验证用的有限范围 opt-in；2026-10-22 的默认值调整不等于全部任务类别和企业策略已验收。
 如果无法证明同轮关联或快照覆盖，停止启用此路径并记录缺少的协议能力，不用时间窗、
 文本相似度、计数猜测补洞。
 

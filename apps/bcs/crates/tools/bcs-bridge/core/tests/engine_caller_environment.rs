@@ -1,6 +1,6 @@
 #![cfg(unix)]
 use std::{path::PathBuf, sync::Arc};
-use bcs_bridge_core::engine::{claude_code::ClaudeCode, Engine, SessionObserver, TurnRequest};
+use bcs_bridge_core::engine::{claude_code::ClaudeCodeFactory, Engine, EngineFactory, SessionObserver, TurnRequest};
 
 struct Observer;
 #[async_trait::async_trait]
@@ -18,8 +18,10 @@ IFS= read -r request || exit 1
 printf '{"type":"result","subtype":"success","result":"%s","is_error":false,"session_id":"session"}\n' "$BCN_ACTOR_BOT_ID"
 "#).unwrap();
     std::fs::set_permissions(&bin,std::fs::Permissions::from_mode(0o755)).unwrap();
-    let engine=Arc::new(ClaudeCode::new(bin,Vec::new()));
-    async fn run(engine: Arc<ClaudeCode>,cwd:PathBuf,actor:&str)->String {
+    // The shell peer only implements legacy result frames; isolate caller env here.
+    let options = toml::toml! { completion_mode = "legacy" };
+    let engine = ClaudeCodeFactory::default().build(bin, &options).unwrap();
+    async fn run(engine: Arc<dyn Engine>,cwd:PathBuf,actor:&str)->String {
         let mut req=TurnRequest::new(actor,"hello",cwd,Arc::new(Observer));
         req.env=vec![("BCN_ACTOR_BOT_ID".into(),actor.into()),("BCN_AUTH_MODE".into(),"agentpass-subbots".into())];
         let(tx,mut rx)=tokio::sync::mpsc::channel(64);

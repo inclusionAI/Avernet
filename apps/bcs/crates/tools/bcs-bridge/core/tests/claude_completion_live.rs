@@ -20,8 +20,7 @@ async fn native_live_completion() {
         let cwd = tempfile::tempdir().unwrap();
         let args = ["--cc", "--skip-update", "--strict-mcp-config", "--mcp-config", "{\"mcpServers\":{}}", "--disable-slash-commands", "--setting-sources", "", "--tools", "Bash"];
         let factory = ClaudeCodeFactory::custom("live", "cfuse", args.into_iter().map(str::to_owned).collect());
-        let mut options = toml::Table::new(); options.insert("completion_mode".into(), "hook_idle".into());
-        let engine = factory.build(bin.clone().into(), &options).unwrap();
+        let engine = factory.build(bin.clone().into(), &toml::Table::new()).unwrap();
         let mut req = TurnRequest::new("live", prompt, cwd.path(), Arc::new(Observer));
         req.model = Some("antchat/GLM-5.3-Flash".into());
         req.permission_mode = Some("bypassPermissions".into());

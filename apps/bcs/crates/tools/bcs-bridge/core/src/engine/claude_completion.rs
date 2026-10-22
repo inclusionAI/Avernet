@@ -1,4 +1,4 @@
-//! Ordered native Stop/result/idle evidence for the opt-in Claude 2.1.199 profile.
+//! Ordered native Stop/result/idle evidence for the default Claude 2.1.199 profile.
 //! One instance belongs to one spawned process and one BCS run. This never reads
 //! transcripts or counts notification delivery. Missing evidence is not empty.
 use std::collections::HashSet;
@@ -6,9 +6,9 @@ use serde_json::{json, Value};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum CompletionMode {
-    #[default]
     Legacy,
     Observe,
+    #[default]
     HookIdle,
 }
 impl CompletionMode {
@@ -17,7 +17,7 @@ impl CompletionMode {
             if key != "completion_mode" { return Err(format!("unsupported engine_options key '{key}'")); }
         }
         match options.get("completion_mode") {
-            None => Ok(Self::Legacy),
+            None => Ok(Self::default()),
             Some(toml::Value::String(s)) => match s.as_str() {
                 "legacy" => Ok(Self::Legacy), "observe" => Ok(Self::Observe), "hook_idle" => Ok(Self::HookIdle),
                 _ => Err("completion_mode must be legacy, observe or hook_idle".into()),
