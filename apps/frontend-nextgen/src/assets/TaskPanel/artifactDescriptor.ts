@@ -11,6 +11,11 @@ function str(v: unknown): string | null {
   return typeof v === 'string' && v.length > 0 ? v : null;
 }
 
+function normalizeStorageType(value: unknown): 'bot_workspace' | 'session_file' | null {
+  const normalized = str(value)?.toLowerCase();
+  return normalized === 'bot_workspace' || normalized === 'session_file' ? normalized : null;
+}
+
 function msToIso(ms: number): string {
   const d = new Date(ms);
   return Number.isNaN(d.getTime()) ? String(ms) : d.toISOString();
@@ -37,11 +42,13 @@ export function normalizeDescriptor(
   const c: Record<string, unknown> = d.content ?? {};
   const name =
     d.artifact_name ?? (d.kind === 'file' ? str(c.file_name) : null) ?? d.artifact_id;
+  const storageType = normalizeStorageType(c.storage_type);
+  const storageId = str(c.storage_id);
   const fileRef =
-    d.kind === 'file' && str(c.storage_id) !== null
+    d.kind === 'file' && storageType && storageId
       ? {
-          storageType: (str(c.storage_type) ?? 'BOT_WORKSPACE') as 'BOT_WORKSPACE' | 'SESSION_FILE',
-          storageId: str(c.storage_id) as string,
+          storageType,
+          storageId,
           fileId: str(c.file_id),
           fileType: str(c.file_type),
         }
@@ -97,29 +104,13 @@ export function mergeArtifactLists(
   return [...merged.values()];
 }
 
-function joinUrl(base: string, path: string): string {
-  if (!base) return path;
-  return `${base.replace(/\/+$/, '')}${path}`;
-}
-
 /**
- * 产物可打开链接(纯函数,前端自行基于既有读口拼,后端 Descriptor 不携带现成 URL):
- * BOT_WORKSPACE → GET /api/resources/files/preview?path={storage_id}
- * SESSION_FILE → GET /sessions/{storage_id}/files/{file_id}/content
- * url_link → 业务链接本身;code → pr_link;text → null(无链接,展示摘要即可)。
+ * 可直接作为外链打开的产物地址。Descriptor file 需要携带任务 owner/bot 上下文，
+ * 统一交给 useTaskArtifactPreview 调用既有资源服务，禁止在这里猜测 HTTP 路径。
  */
-export function artifactViewHref(a: TaskArtifactView, apiBaseUrl: string): string | null {
+export function artifactViewHref(a: TaskArtifactView): string | null {
   if (a.kind === 'url_link' || a.kind === 'code') return a.url ?? null;
-  if (a.kind === 'file' && a.fileRef) {
-    const { storageType, storageId, fileId } = a.fileRef;
-    if (storageType === 'BOT_WORKSPACE') {
-      return joinUrl(apiBaseUrl, `/api/resources/files/preview?path=${encodeURIComponent(storageId)}`);
-    }
-    if (storageType === 'SESSION_FILE' && fileId) {
-      return joinUrl(apiBaseUrl, `/sessions/${encodeURIComponent(storageId)}/files/${encodeURIComponent(fileId)}/content`);
-    }
-    return null;
-  }
+  if (a.kind === 'file') return null;
   // legacy 口径:backend 已给现成 url 则直接用
   return a.url ?? null;
 }

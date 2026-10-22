@@ -52,6 +52,9 @@ from agentclaw.community.adapters.http.task.schemas import (
     task_info_request_from_dto,
     trajectory_to_dto,
 )
+from agentclaw.community.api.task.task_artifact_service import (
+    TaskArtifactApiServiceProtocol,
+)
 from agentclaw.community.api.task.task_grant_service import (
     TaskClaimGrantServiceProtocol,
 )
@@ -127,9 +130,9 @@ async def get_task_dashboard(
         bool, Query(description="是否返回各节点动作级历史快照(诊断用,默认关)")
     ] = False,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-    artifact_repo: TaskArtifactRepositoryProtocol = Injected(TaskArtifactRepositoryProtocol),  # noqa: B008
+    artifact_service: TaskArtifactApiServiceProtocol = Injected(TaskArtifactApiServiceProtocol),  # noqa: B008
 ) -> Envelope[TaskExecutionGraphDTO]:
-    """任务执行详情可视化(整图或按 node_id 子树投影),只读。
+    """任务执行详情可视化(整图或按 node_id 子树投影)。
 
     include_action_log=true 时返回各节点动作级历史快照(PLAN/DISPATCH/EXECUTE/VERIFY/RESET/
     TRANSITION 全量 payload),默认关(诊断页开)。任务/节点不存在 → TaskNotFoundError/NodeNotFoundError
@@ -139,11 +142,12 @@ async def get_task_dashboard(
         graph = service.get_task_dashboard(task_id, node_id, include_action_log=True)
     else:
         graph = service.get_task_dashboard(task_id, node_id)
+    artifact_rows = await artifact_service.sync_session_files_and_list(graph)
     return envelope(
         graph_to_dto(
             graph,
             include_action_log=include_action_log,
-            artifacts_by_node=group_artifacts_by_node(artifact_repo.list_by_task(task_id)),
+            artifacts_by_node=group_artifacts_by_node(artifact_rows),
         ),
         request,
     )

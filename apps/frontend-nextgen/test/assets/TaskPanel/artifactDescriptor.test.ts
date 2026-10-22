@@ -26,12 +26,12 @@ describe('normalizeDescriptor', () => {
     expect(view.updatedAt).toBe(new Date(1729400000000).toISOString());
   });
 
-  it('file 分支:BOT_WORKSPACE 产 fileRef,缺 artifact_name 回落 file_name', () => {
+  it('file 分支:bot_workspace 产 fileRef,缺 artifact_name 回落 file_name', () => {
     const view = normalizeDescriptor(artifactDescriptorWorkspaceFile, 'n1');
     expect(view.name).toBe('竞品分析报告.md');
     expect(view.kind).toBe('file');
     expect(view.fileRef).toEqual({
-      storageType: 'BOT_WORKSPACE',
+      storageType: 'bot_workspace',
       storageId: 'workspace/report.md',
       fileId: null,
       fileType: 'text/markdown',
@@ -39,9 +39,20 @@ describe('normalizeDescriptor', () => {
     expect(view.url).toBeNull();
   });
 
-  it('file 分支:SESSION_FILE 带 file_id', () => {
+  it('file 分支:session_file 带 file_id', () => {
     const view = normalizeDescriptor(artifactDescriptorSessionFile, 'n2');
-    expect(view.fileRef).toMatchObject({ storageType: 'SESSION_FILE', storageId: 'sess-9', fileId: 'f-1' });
+    expect(view.fileRef).toMatchObject({ storageType: 'session_file', storageId: 'sess-9', fileId: 'f-1' });
+  });
+
+  it('兼容旧 Mock 的大写 storage_type,归一化为后端小写 canonical 值', () => {
+    const view = normalizeDescriptor(
+      {
+        ...artifactDescriptorSessionFile,
+        content: { ...artifactDescriptorSessionFile.content, storage_type: 'SESSION_FILE' },
+      },
+      'n2',
+    );
+    expect(view.fileRef?.storageType).toBe('session_file');
   });
 
   it('text 分支:summary 承载文本,无链接', () => {
@@ -49,7 +60,7 @@ describe('normalizeDescriptor', () => {
     expect(view.kind).toBe('text');
     expect(view.type).toBe('document');
     expect(view.summary).toBe('一段纯文本结论');
-    expect(artifactViewHref(view, '')).toBeNull();
+    expect(artifactViewHref(view)).toBeNull();
   });
 
   it('code 分支:type=other,url 指向 pr_link', () => {
@@ -103,29 +114,17 @@ describe('artifactViewHref', () => {
   const link = normalizeDescriptor(artifactDescriptorUrlLink, 'n2v');
   const code = normalizeDescriptor(artifactDescriptorCode, 'n2');
 
-  it('BOT_WORKSPACE → resources preview path', () => {
-    expect(artifactViewHref(ws, '')).toBe('/api/resources/files/preview?path=workspace%2Freport.md');
-  });
-
-  it('apiBaseUrl 前缀拼接(尾部斜杠容忍)', () => {
-    expect(artifactViewHref(ws, 'https://gw.example')).toBe(
-      'https://gw.example/api/resources/files/preview?path=workspace%2Freport.md',
-    );
-    expect(artifactViewHref(ws, 'https://gw.example/')).toBe(
-      'https://gw.example/api/resources/files/preview?path=workspace%2Freport.md',
-    );
-  });
-
-  it('SESSION_FILE → 会话文件内容口', () => {
-    expect(artifactViewHref(sf, '')).toBe('/sessions/sess-9/files/f-1/content');
+  it('Descriptor file 不猜测 HTTP 地址,统一交给产物预览 Hook', () => {
+    expect(artifactViewHref(ws)).toBeNull();
+    expect(artifactViewHref(sf)).toBeNull();
   });
 
   it('url_link → 业务链接;code → pr_link;text → null', () => {
-    expect(artifactViewHref(link, '')).toBe('https://yuque.example/doc1');
-    expect(artifactViewHref(code, '')).toBe('https://git.example/pr/1024');
+    expect(artifactViewHref(link)).toBe('https://yuque.example/doc1');
+    expect(artifactViewHref(code)).toBe('https://git.example/pr/1024');
   });
 
   it('无 fileRef 的 file 视图 → null(不猜测链接)', () => {
-    expect(artifactViewHref({ ...ws, fileRef: null }, '')).toBeNull();
+    expect(artifactViewHref({ ...ws, fileRef: null })).toBeNull();
   });
 });

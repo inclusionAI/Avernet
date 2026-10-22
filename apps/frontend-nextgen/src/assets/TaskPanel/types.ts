@@ -23,9 +23,9 @@ export interface TaskArtifactView {
   /** 产出者(Descriptor.creator);legacy 为 null */
   owner?: string | null;
   updatedAt: string; // ISO 或格式化后的展示串
-  /** file 形态的存储寻址(前端自行拼预览链接,后端不给现成 URL) */
+  /** file 形态的存储寻址(使用既有资源/会话文件服务读取,后端不给现成 URL) */
   fileRef?: {
-    storageType: 'BOT_WORKSPACE' | 'SESSION_FILE';
+    storageType: 'bot_workspace' | 'session_file';
     storageId: string;
     fileId?: string | null;
     fileType?: string | null;
@@ -138,6 +138,8 @@ export interface TaskView {
   sourceLabel: string;
   ownerBotName: string;
   ownerBotId: string;
+  /** 资源归属用户；读取 bot_workspace 产物时作为 owner_id 传给既有资源接口。 */
+  ownerUserId: string;
   createdAt: string;
   finishedAt: string | null;
   loopRound: number;

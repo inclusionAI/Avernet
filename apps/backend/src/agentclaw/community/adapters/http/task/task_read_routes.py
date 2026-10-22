@@ -30,10 +30,10 @@ from agentclaw.community.adapters.http.task.schemas import (
 from agentclaw.community.adapters.http.task.schemas_artifact import (
     group_artifacts_by_node,
 )
-from agentclaw.community.api.task.task_service import TaskServiceProtocol
-from agentclaw.community.core.repository.protocols.task import (
-    TaskArtifactRepositoryProtocol,
+from agentclaw.community.api.task.task_artifact_service import (
+    TaskArtifactApiServiceProtocol,
 )
+from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.di import Injected
 
@@ -53,9 +53,9 @@ async def get_task_dashboard_internal(
         bool, Query(description="是否返回各节点动作级历史快照(诊断用,默认关)")
     ] = False,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-    artifact_repo: TaskArtifactRepositoryProtocol = Injected(TaskArtifactRepositoryProtocol),  # noqa: B008
+    artifact_service: TaskArtifactApiServiceProtocol = Injected(TaskArtifactApiServiceProtocol),  # noqa: B008
 ) -> Envelope[TaskExecutionGraphDTO]:
-    """任务执行详情可视化(内部副本;整图或按 node_id 子树投影),只读。
+    """任务执行详情可视化(内部副本;整图或按 node_id 子树投影)。
 
     include_action_log=true 时返回各节点动作级历史快照,默认关(诊断页开);
     节点 DTO 含产物清单(Descriptor 富化,spec 2026-10-20-task-artifact-domain §7)。
@@ -65,11 +65,12 @@ async def get_task_dashboard_internal(
         graph = service.get_task_dashboard(task_id, node_id, include_action_log=True)
     else:
         graph = service.get_task_dashboard(task_id, node_id)
+    artifact_rows = await artifact_service.sync_session_files_and_list(graph)
     return envelope(
         graph_to_dto(
             graph,
             include_action_log=include_action_log,
-            artifacts_by_node=group_artifacts_by_node(artifact_repo.list_by_task(task_id)),
+            artifacts_by_node=group_artifacts_by_node(artifact_rows),
         ),
         request,
     )

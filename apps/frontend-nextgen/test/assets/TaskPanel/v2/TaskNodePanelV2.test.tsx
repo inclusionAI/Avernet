@@ -4,12 +4,28 @@ import type { ResolvedSessionTarget } from '@/assets/TaskPanel/sessionResolution
 import type { TaskNodeView, TaskView } from '@/assets/TaskPanel/types';
 import { TaskNodePanelV2, type TaskNodePanelV2Props } from '@/assets/TaskPanel/v2/TaskNodePanelV2';
 import type { TaskPanelNav } from '@/assets/TaskPanel/v2/taskPanelNav';
+import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 jest.mock('@tc-chat/ui/es/MarkdownRender', () => ({
   MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div>,
 }));
+
+jest.mock('@/services/botWorkshop/botEditorService', () => {
+  const mockJest = require('@jest/globals').jest;
+  return {
+    botEditorService: {
+      previewResource: mockJest.fn(),
+      downloadResource: mockJest.fn(),
+    },
+  };
+});
+
+const previewResourceMock = jest.mocked(botEditorService.previewResource);
+const downloadResourceMock = jest.mocked(botEditorService.downloadResource);
+const createObjectUrlMock = jest.fn(() => 'blob:task-artifact');
+const revokeObjectUrlMock = jest.fn();
 
 const makeNav = (): TaskPanelNav & { calls: { select: string[]; drill: string[]; back: number[] } } => {
   const calls = { select: [] as string[], drill: [] as string[], back: [] as number[] };
@@ -64,6 +80,7 @@ const task = {
   sourceLabel: '',
   ownerBotName: '规划师',
   ownerBotId: 'bot-1',
+  ownerUserId: 'user-1',
   createdAt: '',
   finishedAt: null,
   loopRound: 1,
@@ -85,6 +102,12 @@ const props = (overrides?: Partial<TaskNodePanelV2Props>): TaskNodePanelV2Props 
 });
 
 beforeEach(() => {
+  jest.clearAllMocks();
+  Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrlMock });
+  Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrlMock });
+  jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+  previewResourceMock.mockResolvedValue({ kind: 'text', content: '# 调研结论', contentType: 'text/markdown' });
+  downloadResourceMock.mockResolvedValue(new Blob(['# 调研结论'], { type: 'text/markdown' }));
   // 群会话明细 fetch 返回空 envelope:群成员兜底合成 + 空消息,Sections 正常渲染
   (global as { fetch: unknown }).fetch = jest.fn(() =>
     Promise.resolve({
@@ -92,6 +115,10 @@ beforeEach(() => {
       json: async () => ({ code: 0, message: 'ok', data: null, request_id: 'r' }),
     }),
   );
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
 });
 
 describe('TaskNodePanelV2(L2)三区', () => {
@@ -142,6 +169,38 @@ describe('TaskNodePanelV2(L2)三区', () => {
     expect(screen.getByTitle('产物计数').textContent).toBe('1 项');
     expect(screen.getByText('调研报告')).toBeTruthy();
     expect(screen.queryByText('根级产物')).toBeNull();
+  });
+
+  it('bot_workspace 产物复用资源服务预览 Markdown 并下载', async () => {
+    const artifact = {
+      id: 'workspace-report',
+      name: '调研结论.md',
+      type: 'document' as const,
+      kind: 'file' as const,
+      owner: 'bot-1',
+      updatedAt: '2026-10-20T11:00:00.000Z',
+      fileRef: {
+        storageType: 'bot_workspace' as const,
+        storageId: 'workspace/report.md',
+        fileId: null,
+        fileType: 'text/markdown',
+      },
+    };
+    const node = { ...baseNode, artifacts: [artifact] } as TaskNodeView;
+    render(<TaskNodePanelV2 {...props({ node })} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '预览产物 调研结论.md' }));
+
+    await waitFor(() => expect(previewResourceMock).toHaveBeenCalledWith('bot-1', 'workspace/report.md', 'user-1'));
+    expect(await screen.findByRole('heading', { name: '调研结论' })).toBeTruthy();
+    expect(document.querySelector('script')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭产物预览' }));
+    fireEvent.click(screen.getByRole('button', { name: '下载产物 调研结论.md' }));
+
+    await waitFor(() => expect(downloadResourceMock).toHaveBeenCalledWith('bot-1', 'workspace/report.md', 'user-1'));
+    expect(createObjectUrlMock).toHaveBeenCalled();
+    expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
   });
 
   it('群节点追加区:bcsBaseUrl 注入时内嵌群执行明细(群成员 SectionCard)', async () => {

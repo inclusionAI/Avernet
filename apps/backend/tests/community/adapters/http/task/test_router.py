@@ -15,6 +15,9 @@ from agentclaw.community.adapters.http.task.auth import (
 from agentclaw.community.adapters.http.task.router import router, task_callback_router
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
+from agentclaw.community.api.task.task_artifact_service import (
+    TaskArtifactApiServiceProtocol,
+)
 from agentclaw.community.core.repository.protocols.task import (
     TaskArtifactRepositoryProtocol,
 )
@@ -279,6 +282,15 @@ class _StubTaskModule(Module):
         return CallbackDataEnricher(
             BcsTokenProviderImpl(base_url="http://bcs"), http_client=None
         )
+
+    @singleton
+    @provider
+    def artifact_service(self) -> TaskArtifactApiServiceProtocol:
+        class _EmptyArtifactService:
+            async def sync_session_files_and_list(self, graph, *, limit=200):
+                return []
+
+        return _EmptyArtifactService()
 
     @singleton
     @provider

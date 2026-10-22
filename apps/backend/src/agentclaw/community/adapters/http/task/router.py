@@ -35,6 +35,9 @@ from agentclaw.community.adapters.http.task.schemas import (
     task_info_request_from_dto, trajectory_to_dto,
 )
 from agentclaw.community.adapters.http.task.artifact_routes import router as artifact_api_router
+from agentclaw.community.adapters.http.task.result_writeback_routes import (
+    router as result_writeback_api_router,
+)
 from agentclaw.community.adapters.http.task.relay_routes import router as relay_api_router
 from agentclaw.community.adapters.http.task.bbs_routes import router as bbs_api_router
 from agentclaw.community.adapters.http.task.intake_routes import router as intake_api_router
@@ -54,6 +57,7 @@ from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
     CLAIM_JOIN_FILTER, HARNESS_POLLER, RELAY_EXECUTION, SEARCH_SKILL, SKILL_REPORT,
     TaskSettingsServiceProtocol,
 )
+from agentclaw.community.api.task.task_artifact_service import TaskArtifactApiServiceProtocol
 from agentclaw.community.api.task.task_grant_service import TaskClaimGrantServiceProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.api.task.task_context_service import TaskContextServiceProtocol
@@ -97,6 +101,7 @@ router.include_router(bbs_api_router)
 router.include_router(intake_api_router)
 router.include_router(task_read_api_router)
 router.include_router(artifact_api_router)
+router.include_router(result_writeback_api_router)
 
 # ===== 公开面镜像(execute;内部 /api/v1 副本,不经 spanner)=====
 # 与 ``adapters/http/openapi_v1/task/router.py`` 公开面同一 ``TaskServiceProtocol`` 委托,逻辑一致 —— 内部调用方走此副本免 gateway spanner。改其一须同步。
@@ -967,15 +972,16 @@ async def get_task_internal(
     request: Request,
     user: AuthenticatedUser = Depends(get_current_user),
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-    artifact_repo: TaskArtifactRepositoryProtocol = Injected(TaskArtifactRepositoryProtocol),  # noqa: B008
+    artifact_service: TaskArtifactApiServiceProtocol = Injected(TaskArtifactApiServiceProtocol),  # noqa: B008
 ) -> Envelope[TaskExecutionGraphDTO]:
     """Return one task dashboard for authenticated Goal clients."""
     del user
     graph = service.get_task_dashboard(task_id)
+    artifact_rows = await artifact_service.sync_session_files_and_list(graph)
     return envelope(
         graph_to_dto(
             graph,
-            artifacts_by_node=group_artifacts_by_node(artifact_repo.list_by_task(task_id)),
+            artifacts_by_node=group_artifacts_by_node(artifact_rows),
         ),
         request,
     )

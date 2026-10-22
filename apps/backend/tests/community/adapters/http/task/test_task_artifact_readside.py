@@ -20,6 +20,9 @@ from agentclaw.community.adapters.http.task.router import (
 from agentclaw.community.api.task.task_context_service import (
     TaskContextServiceProtocol,
 )
+from agentclaw.community.api.task.task_artifact_service import (
+    TaskArtifactApiServiceProtocol,
+)
 from agentclaw.community.core.task.task_service_protocol import TaskServiceProtocol
 from agentclaw.community.core.repository.protocols.task import (
     TaskArtifactRepositoryProtocol,
@@ -151,6 +154,16 @@ class _StubArtifactRepo:
         ][:limit]
 
 
+class _StubArtifactApiService:
+    def __init__(self, artifact_repo):
+        self._artifact_repo = artifact_repo
+        self.calls = []
+
+    async def sync_session_files_and_list(self, graph, *, limit=200):
+        self.calls.append(graph)
+        return self._artifact_repo.list_by_task(graph.task_id, limit=limit)
+
+
 class _StubTaskService:
     def __init__(self) -> None:
         self.callback = None
@@ -187,6 +200,7 @@ class _StubModule(Module):
         self._task_service = task_service
         self._trajectory_service = trajectory_service
         self._artifact_repo = artifact_repo
+        self._artifact_service = _StubArtifactApiService(artifact_repo)
 
     @singleton
     @provider
@@ -203,17 +217,19 @@ class _StubModule(Module):
     def artifact_repo(self) -> TaskArtifactRepositoryProtocol:
         return self._artifact_repo
 
+    @singleton
+    @provider
+    def artifact_service(self) -> TaskArtifactApiServiceProtocol:
+        return self._artifact_service
+
 
 def _client(records) -> TestClient:
-    injector = Injector(
-        [
-            _StubModule(
-                _StubTaskService(),
-                _StubTrajectoryService(),
-                _StubArtifactRepo(records),
-            )
-        ]
+    module = _StubModule(
+        _StubTaskService(),
+        _StubTrajectoryService(),
+        _StubArtifactRepo(records),
     )
+    injector = Injector([module])
     app = FastAPI()
     app.include_router(task_router)
     app.include_router(task_internal_router)
@@ -222,7 +238,9 @@ def _client(records) -> TestClient:
 
     app.dependency_overrides[get_current_user] = lambda: object()
     attach_injector(app, injector)
-    return TestClient(app)
+    client = TestClient(app)
+    client.app.state.artifact_service = module._artifact_service
+    return client
 
 
 class TestDashboardEnrichment:
@@ -247,6 +265,7 @@ class TestDashboardEnrichment:
         assert file_artifact["attempt"] == 1
         assert file_artifact["creator"] == "bot-1"
         assert isinstance(file_artifact["created_at"], int)
+        assert len(client.app.state.artifact_service.calls) == 1
         # kind-tagged wire 形
         assert file_artifact["content"]["kind"] == "file"
 
@@ -265,6 +284,16 @@ class TestDashboardEnrichment:
         node = response.json()["data"]["tasks"][0]
         assert node["artifacts"] is not None
         assert len(node["artifacts"]) == 3
+        assert len(client.app.state.artifact_service.calls) == 1
+
+    def test_internal_dashboard_list_route_uses_artifact_service(self):
+        client = _client(_sample_records())
+        response = client.get(
+            "/api/v1/collaboration/tasks/dashboard", params={"task_id": _TASK}
+        )
+        assert response.status_code == 200
+        assert len(response.json()["data"]["tasks"][0]["artifacts"]) == 3
+        assert len(client.app.state.artifact_service.calls) == 1
 
     def test_node_without_artifacts_gets_empty_list(self):
         """同任务下另一节点的产物:本节点 .artifacts 为空(不串扰)。"""

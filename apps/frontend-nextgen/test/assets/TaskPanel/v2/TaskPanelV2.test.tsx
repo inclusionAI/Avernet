@@ -20,6 +20,7 @@ const baseTask = {
   sourceLabel: '',
   ownerBotName: '规划师',
   ownerBotId: 'bot-1',
+  ownerUserId: 'user-1',
   createdAt: '',
   finishedAt: null,
   loopRound: 1,
@@ -120,11 +121,12 @@ describe('TaskPanelV2 壳', () => {
     expect(screen.getByText(/节点数据缺失/)).toBeTruthy();
   });
 
-  it('switcher 槽渲染在面包屑上方', () => {
+  it('顶部不再渲染旧任务标题与任务切换器', () => {
     render(<TaskPanelV2 {...baseProps({ switcher: <div data-testid="switcher-bar">bar</div> })} />);
-    const switcherNode = screen.getByTestId('switcher-bar');
-    const headerNode = screen.getByText('任务总览');
-    expect(switcherNode.compareDocumentPosition(headerNode) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByTestId('switcher-bar')).toBeNull();
+    const overviewTitle = screen.getByText('任务总览');
+    expect(overviewTitle).toBeTruthy();
+    expect(overviewTitle.closest('[data-task-panel-root]')?.getAttribute('data-task-panel-root')).toBe('true');
   });
 });
 

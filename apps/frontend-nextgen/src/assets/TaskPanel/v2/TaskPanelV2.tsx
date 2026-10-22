@@ -1,10 +1,12 @@
 // @asset-migrated: teamclaw 自研资产
 /**
- * TaskPanelV2 —— 副屏壳层(spec §3.2):多任务切换条槽位(可选)
- *  + 面包屑即标题行(两级栈导航) + 收起按钮 + L1/L2 互斥渲染。
+ * TaskPanelV2 —— 副屏壳层(spec §3.2):面包屑即标题行(两级栈导航)
+ *  + 收起按钮 + L1/L2 互斥渲染。
  * 下钻封顶 2 层:dagStack 顶即当前节点;节点在下一次轮询后消失时 L2 出空态,不卡栈。
  */
 import React from 'react';
+
+import './TaskPanelV2.css';
 
 import { PanelToggle, ChevronRight } from '../icons';
 import { C } from '../tokens';
@@ -23,7 +25,7 @@ export interface TaskPanelV2Props {
   onOpenSubTask?: (subTaskId: string) => void;
   /** 宿主注入的收起回调(SDK 面板级 handle 不暴露给 content,故由宿主决定行为) */
   onTogglePanel?: () => void;
-  /** 多任务切换条槽位(TaskSwitcherBar 由宿主注入) */
+  /** @deprecated 保留旧宿主入参兼容；副屏顶部不再展示任务标题与任务切换器。 */
   switcher?: React.ReactNode;
   className?: string;
   style?: React.CSSProperties;
@@ -37,7 +39,6 @@ export const TaskPanelV2: React.FC<TaskPanelV2Props> = ({
   userId,
   onOpenSubTask,
   onTogglePanel,
-  switcher,
   className,
   style,
 }) => {
@@ -49,10 +50,10 @@ export const TaskPanelV2: React.FC<TaskPanelV2Props> = ({
 
   return (
     <section
+      data-task-panel-root="true"
       className={className}
       style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: C.surface, ...style }}
     >
-      {switcher}
       <header
         style={{
           display: 'flex',

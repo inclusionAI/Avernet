@@ -16,6 +16,7 @@ const baseView = (overrides?: Partial<TaskView>): TaskView =>
     sourceLabel: '',
     ownerBotName: '规划师',
     ownerBotId: 'bot-owner',
+    ownerUserId: 'user-1',
     createdAt: '',
     finishedAt: null,
     loopRound: 1,
