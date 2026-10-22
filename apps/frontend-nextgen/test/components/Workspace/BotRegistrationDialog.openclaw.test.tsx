@@ -2,6 +2,7 @@
 import { extendCapabilities } from '@/capabilities';
 import { BotRegistrationDialog } from '@/components/Workspace/IdentitySelector/BotRegistrationDialog';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
+import { useBotRegistrationToken } from '@/pages/Workspace/hooks/useBotRegistrationToken';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
@@ -10,14 +11,14 @@ jest.mock('@/services/workspace/botRegistrationService', () => ({
   resolveBcsEndpoint: () => 'https://bcs.example.com',
 }));
 jest.mock('@/pages/Workspace/hooks/useBotRegistrationToken', () => ({
-  useBotRegistrationToken: () => ({
+  useBotRegistrationToken: jest.fn(() => ({
     token: 'test-token',
     expiresAt: 1900000000000,
     isLoading: false,
     error: null,
     bcsEndpoint: 'https://bcs.example.com',
     retry: jest.fn(),
-  }),
+  })),
 }));
 
 const baseUrl =
@@ -28,6 +29,7 @@ const enterName = (value: string) =>
 const commandText = () => document.querySelector('pre')?.textContent;
 
 beforeEach(() => {
+  jest.mocked(useBotRegistrationToken).mockClear();
   jest.mocked(useHumanIdentity).mockReturnValue({
     identity: { userId: 'test-user', displayName: '测试用户', online: true },
     status: 'ready',
@@ -35,11 +37,44 @@ beforeEach(() => {
   writeText.mockClear();
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
   extendCapabilities({
+    getOpenClawRegistrationEnabled: () => ({ status: 'available', value: true }),
     getAdditionalBotRegistrationPanels: () => ({ status: 'available', value: [] }),
     getDeepSeekHarnessRegistrationEnabled: () => ({ status: 'available', value: false }),
     getQwenWorkBotRegistrationConfig: () => ({ status: 'unsupported', value: { providerSlug: '', apiUrl: '' } }),
     getPoolabBridgeInstallation: () => ({ status: 'available', value: null }),
   });
+});
+
+it('hides OpenClaw without fetching its token when no onboarding panels remain', () => {
+  extendCapabilities({
+    getOpenClawRegistrationEnabled: () => ({ status: 'available', value: false }),
+  });
+  render(<BotRegistrationDialog open onClose={() => {}} />);
+  expect(screen.queryByRole('button', { name: 'OpenClaw' })).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('OpenClaw 接入方式')).not.toBeInTheDocument();
+  expect(screen.queryByRole('textbox', { name: 'Bot 名称' })).not.toBeInTheDocument();
+  expect(useBotRegistrationToken).toHaveBeenCalledWith(false);
+  expect(useBotRegistrationToken).not.toHaveBeenCalledWith(true);
+});
+
+it('falls back to an available panel when the selected OpenClaw tab is disabled', () => {
+  extendCapabilities({
+    getAdditionalBotRegistrationPanels: () => ({ status: 'available', value: [
+      { id: 'example', label: 'Example Bot', Panel: () => <p>Example onboarding</p> },
+    ] }),
+  });
+  const view = render(<BotRegistrationDialog open onClose={() => {}} />);
+  fireEvent.click(screen.getByRole('button', { name: 'OpenClaw' }));
+  expect(screen.getByLabelText('OpenClaw 接入方式')).toBeInTheDocument();
+  jest.mocked(useBotRegistrationToken).mockClear();
+  extendCapabilities({
+    getOpenClawRegistrationEnabled: () => ({ status: 'available', value: false }),
+  });
+  view.rerender(<BotRegistrationDialog open onClose={() => {}} />);
+  expect(screen.queryByRole('button', { name: 'OpenClaw' })).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('OpenClaw 接入方式')).not.toBeInTheDocument();
+  expect(screen.getByText('Example onboarding')).toBeInTheDocument();
+  expect(useBotRegistrationToken).not.toHaveBeenCalledWith(true);
 });
 
 it.each(['在终端执行', '让 Bot 执行'])('%s 在未填写名称时显示提示且不能复制', (mode) => {

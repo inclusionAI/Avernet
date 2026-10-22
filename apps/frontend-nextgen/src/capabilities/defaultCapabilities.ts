@@ -263,6 +263,7 @@ export const defaultCapabilities: AppCapabilities = {
     value: true,
   }),
   getAdditionalBotRegistrationPanels: () => ({ status: 'available', value: [] }),
+  getOpenClawRegistrationEnabled: () => ({ status: 'available', value: true }),
   getDeepSeekHarnessOnboardingCommand: () => ({ status: 'available', value: null }),
   getDeepSeekHarnessRegistrationEnabled: () => ({ status: 'available', value: true }),
   getDeepSeekHarnessRegistrationGuideUrl: () => {

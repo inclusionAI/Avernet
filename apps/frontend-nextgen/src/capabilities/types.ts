@@ -489,6 +489,8 @@ export interface AppCapabilities {
    * 同步签名，组件仅消费可见性，不感知部署环境。
    */
   getBotRegistrationEnabled: () => CapabilityResult<boolean>;
+  /** Whether the deployment offers OpenClaw onboarding; enabled by default. */
+  getOpenClawRegistrationEnabled: () => CapabilityResult<boolean>;
   /** Whether the deployment offers DeepSeek Harness onboarding. */
   getDeepSeekHarnessRegistrationEnabled: () => CapabilityResult<boolean>;
   /** Deployment-owned DSH guide link; null hides the optional link, preserving inline steps. */

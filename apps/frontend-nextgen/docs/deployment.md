@@ -36,6 +36,12 @@ production Nginx route for the internal `/api/v1` surface.
 
 ## Build
 
+Deployment overlays can disable the OpenClaw onboarding tab by overriding
+`getOpenClawRegistrationEnabled` with `{ status: 'available', value: false }`.
+It defaults to enabled. This controls external-bot onboarding only; existing bots
+and bot-engine creation options are unaffected. Re-enable the capability to restore
+the tab and its installer instructions.
+
 `DSH_REGISTRATION_GUIDE_URL` optionally supplies the DeepSeek Harness guide through
 runtime configuration. Set it to an HTTP(S) guide for the plugin version deployed
 with this release, using an immutable revision when hosting documentation in Git.

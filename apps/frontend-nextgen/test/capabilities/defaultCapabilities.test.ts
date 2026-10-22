@@ -6,6 +6,9 @@ import { history as mockHistory } from '@umijs/max';
 import { Bot, Terminal } from 'lucide-react';
 
 describe('Open Core default capabilities', () => {
+  test('OpenClaw onboarding remains enabled by default', () => {
+    expect(defaultCapabilities.getOpenClawRegistrationEnabled()).toEqual({ status: 'available', value: true });
+  });
   test('additional onboarding panels default to empty in Open Core', () => {
     expect(defaultCapabilities.getAdditionalBotRegistrationPanels()).toEqual({
       status: 'available',
