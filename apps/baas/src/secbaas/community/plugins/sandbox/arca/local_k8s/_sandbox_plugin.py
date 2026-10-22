@@ -32,6 +32,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
+import time
 import time
 import uuid
 from collections.abc import Callable
@@ -90,6 +92,7 @@ _SHARED_BOT_DATA_PVC_ACCESS_MODE = "ReadWriteOnce"
 # to_thread 挪出事件循环之外的第二道防线）；NodePort 记忆化在插件实例上（
 # Service 生命周期内不变），重复签发零 kube RT
 _A2A_URL_DISCOVERY_TIMEOUT_S = 5.0
+_A2A_URL_DISCOVERY_NEGATIVE_TTL_S = 30.0
 
 # Environment variable names consumed by this plugin.
 ENV_KUBECONFIG = "LOCAL_K8S_KUBECONFIG"
@@ -442,8 +445,13 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
     ) -> None:
         self._credentials = credentials
         self._arca_utils = arca_utils
-        # (namespace, service_name) -> node_port|None 的 a2a 发现记忆化
-        self._a2a_node_port_cache: dict[tuple[str, str], int | None] = {}
+        # (namespace, service_name) -> node_port|None|('error', monotonic_ts)
+        # 300 系后两字段是隔离语义的执行面（见 _a2a_base_url_cached）：
+        # in-flight 防线程轰炸；线程表供 a2a_discovery_join（测试/诊断面）
+        self._a2a_node_port_cache: dict[tuple[str, str], int | None | tuple[str, float]]
+        self._a2a_node_port_cache = {}
+        self._a2a_inflight: set[tuple[str, str]] = set()
+        self._a2a_threads: dict[tuple[str, str], "threading.Thread"] = {}
         self._client_manager = LocalK8sClientManager()
 
     def _client(self) -> ApiClient:
@@ -655,7 +663,21 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         )
 
         core_api = CoreV1Api(self._client())
-        core_api.create_namespaced_service(namespace=namespace, body=service)
+        created = core_api.create_namespaced_service(
+            namespace=namespace, body=service
+        )
+        # A2A 地址预热（review P2 终闭环）：create 响应里 API server 已完成
+        # NodePort 分配——直接落 a2a 记忆化，后续签发零 kube 查询。响应缺值
+        #（异步分配边缘）时留给后台发现补齐，不影响签发。
+        try:
+            created_ports = (
+                getattr(created, "spec", None) and created.spec.ports or None
+            )
+            assigned = created_ports[0].node_port if created_ports else None
+            if assigned:
+                self._a2a_node_port_cache[(namespace, service_name)] = assigned
+        except Exception:  # noqa: BLE001 — 预热失败无关紧要（还有后台发现）
+            pass
         logger.info(
             "local_k8s: created NodePort service %s/%s",
             namespace,
@@ -905,7 +927,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
                 ),
                 target=target,
                 expires_at=datetime.now(UTC) + timedelta(seconds=120),
-                a2a_base_url=self._resolve_a2a_base_url(deployment_name),
+                a2a_base_url=self._a2a_base_url_cached(deployment_name),
             )
         host, svc_port = self._resolve_public_port(deployment_name)
         # out-of-cluster：NodePort 就映射在 BaaS 自己的机器上，ws url 用的
@@ -918,65 +940,112 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             a2a_base_url=f"http://{host}:{svc_port}",
         )
 
-    def _resolve_a2a_base_url(self, deployment_name: str) -> str:
-        """in-cluster 部署下解析本设备 A2A 面的「浏览器可达」HTTP base。
+    def _a2a_template(self) -> str:
+        """部署级 A2A host 约定（LOCAL_K8S_A2A_URL_TEMPLATE）。空=未配置。"""
+        return str(_env(ENV_A2A_URL_TEMPLATE) or "").strip()
 
-        A2A 面由引擎 Pod 的 20003 直接服务（根级 ``/.well-known/
-        agent-card.json`` 与 ``/rpc``），不经 agentclawproxy。它的调用方是
-        *用户浏览器*，而 in-cluster 的 BaaS 自己只看得到 ClusterIP，
-        ``ws_url`` 走 proxypass 是它的正路；A2A 面则要求部署显式给出
-        ``LOCAL_K8S_A2A_URL_TEMPLATE``（例如
-        ``http://{service_name}.stable.alipay.net:{node_port}``），host 部分
-        由 /etc/hosts 一类的部署约定补齐。端口号一律经 kube api 实查
-        Service 的 NodePort，不做猜测。
+    def _a2a_base_url_cached(self, deployment_name: str) -> str:
+        """in-cluster 下取本设备 A2A 面的「浏览器可达」HTTP base——**签发
+        关键路径只读本方法，零 kube 查询**（review P2 终闭环：可选地址发现
+        慢/挂/不可用时，存量 WS 签发毫秒级照常返回，最多缺一个加性字段）。
 
-        无模板、未配 NodePort、或 Service 查询失败时返回 **空串**（记日志），
-        绝不让 A2A 的配置缺陷炸掉整条 chat 连接：字段是加性的，空串语义
-        就是"本平台没有可交付的 A2A 地址"，调用方回落原行为。
-        out-of-cluster 的浏览器可达语义与 ws url 同址，由调用方拼装。
+        语义与 ``_resolve_a2a_base_url`` 旧文档一致：地址由模板 + Service
+        NodePort 组成；模板空、NodePort 未知/未配、查询失败——一律返回
+        空串（"本平台当前无可交付的 A2A 地址"），绝不让 A2A 的配置缺陷
+        拖住 WS 签发。NodePort 由 *后台发现线程* 维护进 ``_a2a_node_port_cache``
+        （创建 Service 时亦会从 create 响应预热）；缓存未就绪的第一笔签发
+        得到空地址，后台发现完成后后续签发自然带上。
         """
-        from kubernetes.client import CoreV1Api
-
-        namespace = _namespace()
-        service_name = _build_service_name(deployment_name)
-
-        template = str(_env(ENV_A2A_URL_TEMPLATE) or "").strip()
+        template = self._a2a_template()
         if not template:
             return ""
+        namespace = _namespace()
+        service_name = _build_service_name(deployment_name)
         cache_key = (namespace, service_name)
-        if cache_key in self._a2a_node_port_cache:
-            node_port = self._a2a_node_port_cache[cache_key]
-        else:
-            try:
-                core_api = CoreV1Api(self._client())
-                svc = core_api.read_namespaced_service(
-                    name=service_name, namespace=namespace,
-                    _request_timeout=_A2A_URL_DISCOVERY_TIMEOUT_S,
-                )
-                node_port = (
-                    svc.spec.ports[0].node_port
-                    if svc.spec and svc.spec.ports
-                    else None
-                )
-                self._a2a_node_port_cache[cache_key] = node_port
-            except Exception as exc:  # noqa: BLE001 — 拓扑查询失败必须降级为空串
-                logger.warning(
-                    "local_k8s: a2a base url discovery failed for %s/%s: %s",
-                    namespace, service_name, exc,
-                )
+
+        entry = self._a2a_node_port_cache.get(cache_key)
+        if isinstance(entry, tuple):
+            kind, expire_at = entry
+            if kind == "error" and time.monotonic() >= expire_at:
+                # 负缓存过了 TTL：可以再探一次（仍然后台，不阻塞本签发）
+                self._a2a_node_port_cache.pop(cache_key, None)
+                entry = None
+            else:
                 return ""
-        if not node_port:
-            logger.warning(
-                "local_k8s: service %s/%s has no NodePort; a2a base url omitted",
-                namespace, service_name,
-            )
+        if isinstance(entry, int):
+            return self._a2a_render(template, namespace, service_name, entry)
+        # 未就绪（无值/None=已知无 NodePort）：值面可用即返回，缺值即调度
+        # 后台发现（in-flight 防轰炸），本签发立即以空地址返回
+        if entry is None and cache_key in self._a2a_node_port_cache:
             return ""
+        self._a2a_schedule_discovery(namespace, service_name)
+        return ""
+
+    @staticmethod
+    def _a2a_render(
+        template: str, namespace: str, service_name: str, node_port: int,
+    ) -> str:
         return (
             template
             .replace("{service_name}", service_name)
             .replace("{namespace}", namespace)
             .replace("{node_port}", str(node_port))
         )
+
+    def _a2a_schedule_discovery(self, namespace: str, service_name: str) -> None:
+        """后台发现 NodePort（守护线程、in-flight 去重）。失败写负缓存
+        （短 TTL），持续故障下不会反复等待、也不会线程轰炸。"""
+        cache_key = (namespace, service_name)
+        if cache_key in self._a2a_inflight:
+            return
+        self._a2a_inflight.add(cache_key)
+        thread = threading.Thread(
+            target=self._a2a_discover,
+            args=(namespace, service_name),
+            daemon=True,
+            name=f"a2a-url-discovery-{service_name}",
+        )
+        self._a2a_threads[cache_key] = thread
+        thread.start()
+
+    def _a2a_discover(self, namespace: str, service_name: str) -> None:
+        from kubernetes.client import CoreV1Api
+
+        cache_key = (namespace, service_name)
+        try:
+            core_api = CoreV1Api(self._client())
+            svc = core_api.read_namespaced_service(
+                name=service_name, namespace=namespace,
+                _request_timeout=_A2A_URL_DISCOVERY_TIMEOUT_S,
+            )
+            node_port = (
+                svc.spec.ports[0].node_port
+                if svc.spec and svc.spec.ports
+                else None
+            )
+            self._a2a_node_port_cache[cache_key] = node_port
+            if not node_port:
+                logger.warning(
+                    "local_k8s: service %s/%s has no NodePort; a2a base url omitted",
+                    namespace, service_name,
+                )
+        except Exception as exc:  # noqa: BLE001 — 发现失败降级为空地址 + 负缓存
+            logger.warning(
+                "local_k8s: a2a base url discovery failed for %s/%s: %s",
+                namespace, service_name, exc,
+            )
+            self._a2a_node_port_cache[cache_key] = (
+                "error", time.monotonic() + _A2A_URL_DISCOVERY_NEGATIVE_TTL_S,
+            )
+        finally:
+            self._a2a_inflight.discard(cache_key)
+
+    def a2a_discovery_join(self, deployment_name: str, timeout: float = 5.0) -> None:
+        """等待在途后台发现完成（测试/诊断 seam；产品路径不等待）。"""
+        cache_key = (_namespace(), _build_service_name(deployment_name))
+        thread = self._a2a_threads.pop(cache_key, None)
+        if thread and thread.is_alive():
+            thread.join(timeout=timeout)
 
     def resolve_http_connection_info(
         self,
