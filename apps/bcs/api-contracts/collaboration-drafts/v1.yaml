@@ -9,6 +9,10 @@ info:
     always selects capability authorization, with no fallback to Bot or cookie
     credentials. Capabilities are transferable, revocable, fixed to one revision
     and trusted deployment, and never grant management or execution.
+    The service is disabled by default; opt in with collaboration_drafts.enabled.
+    The checked-in local SQLite configuration explicitly enables the service.
+    When disabled, authenticated/authorized requests report HTTP 503
+    DRAFT_SERVICE_UNAVAILABLE. Disabling preserves stored revisions and keys.
 paths:
   /collaboration/drafts/{draftId}:
     parameters:

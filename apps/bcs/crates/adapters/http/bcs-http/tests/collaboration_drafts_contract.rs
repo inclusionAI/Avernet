@@ -153,6 +153,16 @@ async fn call(
 }
 
 #[tokio::test]
+async fn disabled_draft_service_reports_unavailable_without_affecting_router() {
+    let app = build_router(HttpAppState::new(Services::builder().build_for_test()));
+    for (method, suffix) in [("GET", "/revisions/1"), ("POST", "/revisions/1/validate")] {
+        let (status, body) = call(&app, method, suffix, None, Some("test-capability"), None).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["error"], "DRAFT_SERVICE_UNAVAILABLE");
+    }
+}
+
+#[tokio::test]
 async fn complete_fixed_version_http_contract_and_read_capability_precedence() {
     let (app, _dir) = app().await;
     let fixture: Value = serde_json::from_str(include_str!(

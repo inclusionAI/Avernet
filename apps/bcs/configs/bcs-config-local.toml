@@ -81,6 +81,10 @@ type = "sqlite"
 [database.sqlite]
 path = "bcs.db"
 
+[collaboration_drafts]
+# Keep local previews available with persistent SQLite signing keys.
+enabled = true
+
 [secret]
 provider = "env"
 
