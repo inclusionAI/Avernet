@@ -15,6 +15,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.bot_genome.repository.models import (
+    CandidateRefRequest,
     GenomePatchModel,
     GenomePatchRow,
     GenomePromotionModel,
@@ -75,6 +76,34 @@ class GenomeRevisionRepository(GenomeRevisionRepositoryProtocol):
                     return orm.to_record(), True
             except IntegrityError as exc:
                 last = exc  # uk_bot_revision (a concurrent record) or uk_bot_seq (a seq race): re-read, retry
+        raise RuntimeError(f"could not record revision {row.revision_id} after {SEQ_RETRIES} attempts") from last
+
+    def record(
+        self,
+        row: GenomeRevisionRow,
+        *,
+        patch: Optional[GenomePatchRow] = None,
+        candidate: Optional[CandidateRefRequest] = None,
+    ) -> tuple[GenomeRevisionRow, bool, Optional[GenomeRefRow]]:
+        axes = {k: getattr(row, k) for k in _BOT_AXES}
+        last: IntegrityError | None = None
+        for _ in range(SEQ_RETRIES):
+            try:
+                with _transaction(self._db) as session:
+                    orm = _revision_row(session, **axes, revision_id=row.revision_id)
+                    created = orm is None
+                    if orm is None:
+                        orm = GenomeRevisionModel(**row.model_dump(exclude={"id", "seq", "gmt_create", "gmt_modified"}), seq=self._next_seq(session, **axes))
+                        session.add(orm)
+                        session.flush()
+                    if patch is not None and _patch_row(session, **axes, digest=patch.digest) is None:
+                        session.add(GenomePatchModel(**patch.model_dump(exclude={"id"})))
+                        session.flush()
+                    ref = _candidate_ref(session, **axes, revision_id=row.revision_id, candidate=candidate) if candidate is not None else None
+                    session.refresh(orm)
+                    return orm.to_record(), created, ref.to_record() if ref is not None else None
+            except IntegrityError as exc:
+                last = exc  # a concurrent record (uk_bot_revision), a seq race, or a candidate number taken: retry whole
         raise RuntimeError(f"could not record revision {row.revision_id} after {SEQ_RETRIES} attempts") from last
 
     @staticmethod
@@ -261,6 +290,43 @@ class GenomeRefRepository(GenomeRefRepositoryProtocol):
                 .all()
             )
             return [row.to_record() for row in rows]
+
+
+def _revision_row(session, *, env: str, entity_id: str, bot_id: str, revision_id: str) -> Optional[GenomeRevisionModel]:
+    return (
+        session.query(GenomeRevisionModel)
+        .filter(*_bot(GenomeRevisionModel, env=env, entity_id=entity_id, bot_id=bot_id))
+        .filter(GenomeRevisionModel.revision_id == revision_id)
+        .one_or_none()
+    )
+
+
+def _patch_row(session, *, env: str, entity_id: str, bot_id: str, digest: str) -> Optional[GenomePatchModel]:
+    return (
+        session.query(GenomePatchModel)
+        .filter(*_bot(GenomePatchModel, env=env, entity_id=entity_id, bot_id=bot_id))
+        .filter(GenomePatchModel.digest == digest)
+        .one_or_none()
+    )
+
+
+def _candidate_ref(session, *, env: str, entity_id: str, bot_id: str, revision_id: str, candidate: CandidateRefRequest) -> GenomeRefModel:
+    """``candidate/<run>/<n>`` for this revision inside the caller's transaction: the one already pointing at it, or the next number."""
+    axes = dict(env=env, entity_id=entity_id, bot_id=bot_id)
+    prefix = f"candidate/{candidate.run_id}/"
+    named = (
+        session.query(GenomeRefModel)
+        .filter(*_bot(GenomeRefModel, **axes))
+        .filter(GenomeRefModel.name.startswith(prefix, autoescape=True))
+        .all()
+    )
+    for existing in named:
+        if existing.revision_id == revision_id:
+            return existing
+    return _cas_move(
+        session, **axes, name=f"{prefix}{len(named) + 1}", revision_id=revision_id, expected=None,
+        moved_kind=candidate.moved_kind, moved_actor=candidate.moved_actor, run_id=candidate.run_id, reason=None, moved_at=candidate.moved_at,
+    )
 
 
 def _ref_row(session, *, env: str, entity_id: str, bot_id: str, name: str) -> Optional[GenomeRefModel]:

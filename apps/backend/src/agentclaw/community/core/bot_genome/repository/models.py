@@ -120,6 +120,15 @@ class GenomeRefEventRow(BaseModel):
     moved_at: datetime
 
 
+class CandidateRefRequest(BaseModel):
+    """What ``GenomeRevisionRepositoryProtocol.record`` needs to name a run's candidate ref in the same transaction."""
+
+    run_id: str
+    moved_kind: str
+    moved_actor: str
+    moved_at: datetime
+
+
 class GenomePatchRow(BaseModel):
     """One ``ac_genome_patch`` row: the canonical JSON of a recorded patch."""
 

@@ -13,10 +13,12 @@ from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.bot_genome.repository import models as genome_models
 from agentclaw.community.core.bot_genome.repository.models import (
+    CandidateRefRequest,
     GenomePatchRow,
     GenomePromotionRow,
     GenomeRevisionRow,
 )
+from agentclaw.community.core.repository.implementations.bot import genome as genome_repositories
 from agentclaw.community.core.repository.implementations.bot.genome import (
     SEQ_RETRIES,
     GenomePatchRepository,
@@ -181,6 +183,31 @@ def test_candidate_refs_are_counted_per_run_and_listed_by_prefix(db):
     assert repo.candidate_count(**BOT, run_id="run_7") == 2
     assert repo.candidate_count(**BOT, run_id="run_9") == 0
     assert [r.name for r in repo.list(**BOT, name_prefix="candidate/run_7/")] == ["candidate/run_7/1", "candidate/run_7/2"]
+
+
+def test_record_writes_the_revision_its_patch_and_the_candidate_ref_in_one_transaction(db, monkeypatch):
+    revisions, refs, patches = GenomeRevisionRepository(db), GenomeRefRepository(db), GenomePatchRepository(db)
+    patch = GenomePatchRow(**BOT, digest=R3, base_id=R2, content='{"ops":[]}', created_at=NOW)
+    candidate = CandidateRefRequest(run_id="run_7", moved_kind="strategy_run", moved_actor="s@1", moved_at=NOW)
+    row, created, ref = revisions.record(_revision(R1, patch_digest=R3), patch=patch, candidate=candidate)
+    assert (created, row.seq, ref.name, ref.revision_id, ref.run_id) == (True, 1, "candidate/run_7/1", R1, "run_7")
+    assert patches.get(**BOT, digest=R3).base_id == R2
+    again, created_again, same_ref = revisions.record(_revision(R1, patch_digest=R3), patch=patch, candidate=candidate)
+    assert (created_again, again.seq, same_ref.name) == (False, 1, "candidate/run_7/1"), "a retry finds its own ref, numbers nothing new"
+    _, _, second = revisions.record(_revision(R2), candidate=candidate)
+    assert second.name == "candidate/run_7/2" and refs.candidate_count(**BOT, run_id="run_7") == 2
+    plain, _, no_ref = revisions.record(_revision(R3))
+    assert no_ref is None and plain.seq == 3
+
+    def boom(*args, **kwargs):
+        raise genome_repositories._Conflict("candidate")
+
+    monkeypatch.setattr(genome_repositories, "_cas_move", boom)
+    with pytest.raises(genome_repositories._Conflict):
+        revisions.record(_revision("sha256:" + "d" * 64, patch_digest="sha256:" + "e" * 64), patch=patch.model_copy(update={"digest": "sha256:" + "e" * 64}), candidate=candidate)
+    assert revisions.get(**BOT, revision_id="sha256:" + "d" * 64) is None, "the revision rolled back with the ref"
+    assert patches.get(**BOT, digest="sha256:" + "e" * 64) is None, "and so did the patch row"
+    assert revisions.list(**BOT)[0] == 3
 
 
 # -- patches and promotions ------------------------------------------------------------------------

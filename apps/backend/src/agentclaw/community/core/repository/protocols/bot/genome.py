@@ -14,6 +14,7 @@ from typing import Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_genome.repository.models import (
+        CandidateRefRequest,
         GenomePatchRow,
         GenomePromotionRow,
         GenomeRefEventRow,
@@ -34,6 +35,23 @@ class GenomeRevisionRepositoryProtocol(Protocol):
         insert transaction; a lost race retries). When the bot already holds
         ``row.revision_id`` the existing row comes back unchanged with
         ``created=False``: same id, same ``seq``, same parent.
+        """
+        ...
+
+    @abstractmethod
+    def record(
+        self,
+        row: GenomeRevisionRow,
+        *,
+        patch: Optional[GenomePatchRow] = None,
+        candidate: Optional[CandidateRefRequest] = None,
+    ) -> tuple[GenomeRevisionRow, bool, Optional[GenomeRefRow]]:
+        """``insert`` plus, in the same transaction, the patch row it came from and a run's candidate ref.
+
+        ``(revision, created, ref)``. The patch row is written once per
+        digest; the candidate ref is ``candidate/<run_id>/<n>`` with the
+        next ``n`` for the run, or the existing ref already pointing at
+        this revision (a retry). Either everything lands or nothing does.
         """
         ...
 

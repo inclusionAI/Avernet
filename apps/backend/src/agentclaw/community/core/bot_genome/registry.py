@@ -59,7 +59,6 @@ from agentclaw.community.core.bot_genome.models import (
     RevisionPage,
     RevisionStatus,
     RunScope,
-    candidate_ref,
     parse_ref_name,
 )
 from agentclaw.community.core.bot_genome.patch import (
@@ -70,7 +69,7 @@ from agentclaw.community.core.bot_genome.patch import (
     shape_reasons,
 )
 from agentclaw.community.core.bot_genome.patch_models import GenomePatch
-from agentclaw.community.core.bot_genome.repository.models import GenomePatchRow, GenomeRevisionRow
+from agentclaw.community.core.bot_genome.repository.models import CandidateRefRequest, GenomePatchRow, GenomeRevisionRow
 from agentclaw.community.core.bot_genome.spec_checks import SpecCheckContext, SpecChecks, policy_path_reasons
 from agentclaw.community.core.bot_genome.spec_models import GenomePolicy, GenomeSpec
 from agentclaw.community.core.repository.protocols.bot.genome import (
@@ -102,7 +101,6 @@ MOVERS: dict[str, RefMover] = {
     "candidate": RefMover.RUN,
 }
 _SEQ_REF = re.compile(r"^r([1-9][0-9]*)$")
-_CANDIDATE_ATTEMPTS = 5
 
 
 def _now() -> datetime:
@@ -231,20 +229,28 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         status: RevisionStatus,
         writes: dict[str, bytes],
         origin: str,
-        patch_digest: str | None = None,
+        patch: GenomePatchRow | None = None,
         evidence: list[str] | None = None,
         risk_tier: str | None = None,
         flags: tuple[str, ...] = (),
         run: RunScope | None = None,
     ) -> RecordedRevision:
-        """File the produced bytes, then the revision row (idempotent by id), then a run's candidate ref."""
+        """File the produced bytes, then in one transaction the revision row (idempotent by id), its patch row and a run's candidate ref.
+
+        Content goes first because it is content-addressed and idempotent:
+        bytes filed for a revision that is then not recorded are the same
+        as an upload nobody used. The three rows land together or not at all.
+        """
         scope = self._scope(bot)
         for digest, data in writes.items():
             stored = self._content.store_produced(data, scope=scope, origin=origin, modifier=created_by.audit, category="genome")
             if stored.digest != digest:
                 raise RuntimeError(f"produced bytes filed as {stored.digest}, expected {digest}")
         content = canonicalize({"policy": policy.to_json(), "spec": spec.to_json()}).decode("utf-8")
-        row, created = self._revisions.insert(
+        candidate = None
+        if run is not None:
+            candidate = CandidateRefRequest(run_id=run.run_id, moved_kind=created_by.kind.value, moved_actor=created_by.audit, moved_at=_now())
+        row, created, ref = self._revisions.record(
             GenomeRevisionRow(
                 **self._axes(bot),
                 revision_id=revision_id(spec, policy),
@@ -255,32 +261,15 @@ class GenomeRegistryService(GenomeRegistryProtocol):
                 created_actor=created_by.audit,
                 run_id=created_by.run_id,
                 run_step=created_by.step,
-                patch_digest=patch_digest,
+                patch_digest=patch.digest if patch is not None else None,
                 evidence=json.dumps(evidence or [], ensure_ascii=False),
                 content=content,
                 created_at=_now(),
-            )
+            ),
+            patch=patch,
+            candidate=candidate,
         )
-        ref = self._candidate_ref(bot, row.revision_id, created_by, run) if run is not None else None
-        return RecordedRevision(revision=self._revision(row), created=created, risk_tier=risk_tier, flags=flags, ref=ref)
-
-    def _candidate_ref(self, bot: BotRef, rev_id: str, created_by: Provenance, run: RunScope) -> str:
-        """``candidate/<run>/<n>`` for this revision: the existing one, or the next number (idempotent on retry)."""
-        axes = self._axes(bot)
-        prefix = f"candidate/{run.run_id}/"
-        for _ in range(_CANDIDATE_ATTEMPTS):
-            for existing in self._refs.list(**axes, name_prefix=prefix):
-                if existing.revision_id == rev_id:
-                    return existing.name
-            name = candidate_ref(run.run_id, self._refs.candidate_count(**axes, run_id=run.run_id) + 1)
-            moved = self._refs.move(
-                **axes, name=name, revision_id=rev_id, expected_revision_id=None,
-                moved_kind=created_by.kind.value, moved_actor=created_by.audit,
-                run_id=run.run_id, reason=None, moved_at=_now(),
-            )
-            if moved is not None:
-                return moved.name
-        raise RuntimeError(f"could not name a candidate for run {run.run_id} after {_CANDIDATE_ATTEMPTS} attempts")
+        return RecordedRevision(revision=self._revision(row), created=created, risk_tier=risk_tier, flags=flags, ref=ref.name if ref is not None else None)
 
     # -- revisions ----------------------------------------------------------------------------
 
@@ -359,13 +348,10 @@ class GenomeRegistryService(GenomeRegistryProtocol):
             raise PatchRejected(reasons)
         tier, flags = patch_assessment(outcome, base.policy)
         patch_bytes = canonicalize(patch_json)
-        patch_digest = sha256_digest(patch_bytes)
-        self._patches.insert(
-            GenomePatchRow(**self._axes(bot), digest=patch_digest, base_id=base.revision.id, content=patch_bytes.decode("utf-8"), created_at=_now())
-        )
+        patch_row = GenomePatchRow(**self._axes(bot), digest=sha256_digest(patch_bytes), base_id=base.revision.id, content=patch_bytes.decode("utf-8"), created_at=_now())
         return self._record(
             bot, outcome.spec, base.policy, parent=base.revision.id, created_by=created_by, status=status,
-            writes=writes, origin="genome/patch", patch_digest=patch_digest, evidence=list(patch.evidence),
+            writes=writes, origin="genome/patch", patch=patch_row, evidence=list(patch.evidence),
             risk_tier=tier, flags=flags, run=run,
         )
 
