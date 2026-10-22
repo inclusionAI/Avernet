@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
-use super::cli::CliSession;
+use super::codex_owned::{NativeTransport, OwnedConnection};
 use super::codex_app_server::CodexAppServer;
 use super::codex_transport::CodexConnection;
 use super::trace::TraceContext;
@@ -18,6 +18,7 @@ use super::{TurnError, TurnRequest};
 
 #[derive(Default)]
 pub(super) struct NativeServer {
+    transport: NativeTransport,
     server: Mutex<Option<Server>>,
     next_lease: AtomicU64,
     stopped: AtomicBool,
@@ -96,6 +97,8 @@ impl Drop for ManagedConnection {
 }
 
 impl NativeServer {
+    pub fn new(transport: NativeTransport) -> Self { Self { transport, ..Default::default() } }
+
     pub async fn shutdown(&self) {
         self.stopped.store(true, Ordering::Release);
         if let Some(mut server) = self.server.lock().await.take() {
@@ -105,7 +108,7 @@ impl NativeServer {
     }
 
     pub async fn connect(
-        &self, engine: &CodexAppServer, bin: &Path, args: &[String],
+        &self, engine: &CodexAppServer, bin: &Path,
         req: &TurnRequest, abort: &CancellationToken,
     ) -> Result<(CodexConnection, bool), TurnError> {
         let mut guard = tokio::select! {
@@ -121,16 +124,15 @@ impl NativeServer {
             let _ = (&mut server.task).await;
         }
         if guard.is_none() {
-            // Raw stdout is traced after demultiplexing, under the current run.
-            let mut process = CliSession::spawn(bin, args, &req.cwd, &req.env,
-                req.trace.as_ref().map(TraceContext::shared_process)).await.map_err(TurnError::Spawn)?;
-            process.disable_raw_trace();
-            let mut connection = CodexConnection::Process(process);
-            let mut backlog = VecDeque::new();
-            let mut next_id = 1;
-            let initialization = engine.initialize(&mut connection, &mut next_id, &mut backlog, abort);
-            tokio::time::timeout(std::time::Duration::from_secs(30), initialization).await
-                .map_err(|_| TurnError::Protocol("Codex app-server initialization timed out".into()))??;
+            let startup = async {
+                let mut connection = OwnedConnection::spawn(self.transport, engine, bin, req, abort).await?;
+                let mut backlog = VecDeque::new();
+                let mut next_id = 1;
+                engine.initialize(&mut connection.transport, &mut next_id, &mut backlog, abort).await?;
+                Ok::<_, TurnError>((connection, backlog))
+            };
+            let (connection, backlog) = tokio::time::timeout(std::time::Duration::from_secs(30), startup).await
+                .map_err(|_| TurnError::Protocol("Owned Codex app-server startup timed out; check launcher --listen support and engine diagnostics".into()))??;
             let (commands, receiver) = mpsc::unbounded_channel();
             let task = tokio::spawn(async move { serve(connection, receiver, backlog).await });
             *guard = Some(Server { commands, task });
@@ -307,12 +309,13 @@ impl Router {
     }
 }
 
-async fn serve(mut cli: CodexConnection, mut commands: mpsc::UnboundedReceiver<Command>, mut backlog: VecDeque<Value>) {
+async fn serve(mut connection: OwnedConnection, mut commands: mpsc::UnboundedReceiver<Command>, mut backlog: VecDeque<Value>) {
+    let cli = &mut connection.transport;
     let mut router = Router { clients: HashMap::new(), pending: HashMap::new(), loaded: HashSet::new(), next_id: 10, interrupts: HashMap::new(), server_requests: HashMap::new() };
     let result: io::Result<()> = async {
         loop {
             if let Some(value) = backlog.pop_front() {
-                router.message(&mut cli, value).await?;
+                router.message(cli, value).await?;
                 continue;
             }
             tokio::select! {
@@ -327,18 +330,18 @@ async fn serve(mut cli: CodexConnection, mut commands: mpsc::UnboundedReceiver<C
                         router.clients.insert(lease, Client { thread, turn: None, messages, trace });
                         let _ = ready.send(Ok(loaded));
                     }
-                    Some(Command::Write { lease, value }) => router.write(&mut cli, lease, value).await?,
+                    Some(Command::Write { lease, value }) => router.write(cli, lease, value).await?,
                     Some(Command::Close { lease, done }) => {
                         let abandoned: Vec<_> = router.server_requests.iter()
                             .filter(|(_, (owner, _))| *owner == lease).map(|(key, (_, id))| (key.clone(), id.clone())).collect();
                         for (key, id) in abandoned {
                             router.server_requests.remove(&key);
-                            write_line(&mut cli, &json!({"jsonrpc":"2.0", "id":id,
+                            write_line(cli, &json!({"jsonrpc":"2.0", "id":id,
                                 "error":{"code":-32000,"message":"Bridge turn closed before user input"}}).to_string()).await?;
                         }
                         if let Some(client) = router.clients.remove(&lease)
                             && let (Some(thread), Some(turn)) = (client.thread, client.turn) {
-                            router.interrupt(&mut cli, &thread, &turn, done).await?;
+                            router.interrupt(cli, &thread, &turn, done).await?;
                         } else if let Some(done) = done { let _ = done.send(Ok(())); }
                     }
                 },
@@ -350,7 +353,7 @@ async fn serve(mut cli: CodexConnection, mut commands: mpsc::UnboundedReceiver<C
                 line = cli.next_line() => {
                     let line = line?.ok_or_else(disconnected)?;
                     let value = serde_json::from_str(&line).map_err(io::Error::other)?;
-                    router.message(&mut cli, value).await?;
+                    router.message(cli, value).await?;
                 }
             }
         }
@@ -363,7 +366,7 @@ async fn serve(mut cli: CodexConnection, mut commands: mpsc::UnboundedReceiver<C
             let _ = client.messages.try_send(Err(io::Error::new(error.kind(), error.to_string())));
         }
     }
-    cli.kill().await;
+    connection.shutdown().await;
 }
 
 async fn write_line(cli: &mut CodexConnection, line: &str) -> io::Result<()> {

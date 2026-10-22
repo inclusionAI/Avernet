@@ -100,6 +100,53 @@ cwd = "/home/me/workspace"
 api_url = "https://bcs.example.com/prefix"
 ```
 
+## Owned Codex Unix WebSocket transport
+
+Launcher distributions on Unix can compose
+`CodexAppServerFactory::custom(...).with_owned_unix_socket()`. This selects
+`app-server --listen unix://PATH` for an **owned** server; it does not select
+`codex-desktop` or connect to a user's desktop listener. The public `codex`
+factory continues using stdio. This builder is unavailable on non-Unix targets.
+
+- Each engine instance/process generation gets a new temporary directory with
+  mode 0700 and a private socket. Socket ownership, permissions and peer UID are
+  validated before the WebSocket handshake. No TCP port is opened. Keep the
+  temporary path short enough for the platform's Unix socket limit.
+- The launcher must forward `--listen unix://PATH`, and the selected Codex must
+  support it. Readiness, handshake and initialization share a 30-second startup
+  deadline and respect cancellation. Unsupported engines fail explicitly; there
+  is no stdio fallback, desktop discovery or replay of an ambiguous request.
+- Bridge still owns the launcher and its process group. Normal completion
+  releases only that turn's managed lease; idle servers remain available.
+  Transport failure closes admissions, fails in-flight work and reaps the owned
+  process tree before a later request starts a new server and resumes its saved
+  thread. Startup cancellation/failure and engine shutdown also release the
+  process and temporary endpoint. Externally owned desktop hosts are never
+  signalled or removed.
+- Existing RPC ID routing, concurrent-thread isolation, thread mappings, caller
+  environment, workspace, model and sandbox/approval options are unchanged.
+  Diagnostic stdout is drained as bounded byte chunks and discarded; it is not
+  parsed as JSON-RPC. Stderr retains the existing trace/debug logging path.
+- This bypasses the app-server stdio writer's nonblocking stdout failure path;
+  it is not a promise that arbitrary engine hangs cannot occur. WebSocket
+  messages retain the existing 8 MiB limit. No additional database queries or
+  migrations are introduced.
+
+The socket implementation is shared with desktop attachment, but process
+ownership is held separately in the native server. Do not use the desktop
+constructor to enable owned sockets: its permissions, connection lifetime and
+cancellation rules intentionally differ.
+
+Validation: `codex_owned_socket`, `codex_persistent`, `codex_desktop` and
+`codex_questions` exercise the lifecycle and compatibility contracts. An
+optional real-engine transport test (no model turn, isolated engine home) is:
+
+```bash
+BCS_BRIDGE_TEST_CODEX_BIN=/absolute/path/to/codex \
+  cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-bridge-core --lib \
+  real_codex_socket_initialization_and_rpc_burst -- --ignored --nocapture
+```
+
 ## Codex process and thread lifecycle
 
 For `engine = "codex"`, each Bot owns one long-running `codex app-server`

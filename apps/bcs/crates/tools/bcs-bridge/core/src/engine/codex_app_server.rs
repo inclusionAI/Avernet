@@ -22,8 +22,9 @@
 //! terminal boundary.
 
 use std::collections::VecDeque;
-use std::path::PathBuf;
+#[cfg(test)]
 use std::sync::Arc;
+use std::path::PathBuf;
 
 use bcs_protocol::stream::StreamEvent;
 use serde_json::{Value, json};
@@ -195,7 +196,7 @@ impl CodexOptions {
     // `effort` wire values, mirroring the cfuse model catalog reasoning levels.
     const EFFORTS: [&'static str; 5] = ["minimal", "low", "medium", "high", "xhigh"];
 
-    fn parse(options: &toml::Table) -> Result<Self, String> {
+    pub(super) fn parse(options: &toml::Table) -> Result<Self, String> {
         let mut parsed = Self::default();
         for (key, value) in options {
             match (key.as_str(), value) {
@@ -286,11 +287,13 @@ impl CodexAppServer {
     /// `prefix_args` are placed before `app-server`, for launchers that select
     /// Codex through a subcommand or flag.
     pub fn new(bin: PathBuf, prefix_args: Vec<String>) -> Self {
-        Self::with_options(bin, prefix_args, CodexOptions::default())
+        Self::with_options(bin, prefix_args, CodexOptions::default(), Default::default())
     }
 
-    fn with_options(bin: PathBuf, prefix_args: Vec<String>, options: CodexOptions) -> Self {
-        Self { bin, prefix_args, desktop: false, socket: None, options, native: Default::default() }
+    pub(super) fn with_options(bin: PathBuf, prefix_args: Vec<String>, options: CodexOptions,
+        transport: super::codex_owned::NativeTransport) -> Self {
+        Self { bin, prefix_args, desktop: false, socket: None, options,
+            native: super::codex_persistent::NativeServer::new(transport) }
     }
 
     /// Connect over Unix WebSocket; never start, restart or stop the shared server.
@@ -328,9 +331,9 @@ impl CodexAppServer {
         send_notification(cli, "initialized", Value::Null).await
     }
 
-    fn launch_args(&self) -> Vec<String> {
+    pub(super) fn launch_args(&self, listen: &str) -> Vec<String> {
         let mut args = self.prefix_args.clone();
-        args.extend(["app-server".into(), "--listen".into(), "stdio://".into()]);
+        args.extend(["app-server".into(), "--listen".into(), listen.into()]);
         args
     }
 
@@ -372,33 +375,7 @@ impl CodexAppServer {
     }
 }
 
-/// Factory for [`CodexAppServer`] engines. The default is the built-in
-/// `codex` engine running `codex`; [`CodexAppServerFactory::custom`] reuses
-/// the driver for a launcher that speaks the same protocol.
-pub struct CodexAppServerFactory {
-    id: String,
-    default_bin: String,
-    prefix_args: Vec<String>,
-}
-
-impl CodexAppServerFactory {
-    pub fn custom(id: impl Into<String>, default_bin: impl Into<String>, prefix_args: Vec<String>) -> Self {
-        Self { id: id.into(), default_bin: default_bin.into(), prefix_args }
-    }
-}
-
-impl Default for CodexAppServerFactory {
-    fn default() -> Self { Self::custom("codex", "codex", Vec::new()) }
-}
-
-impl crate::engine::EngineFactory for CodexAppServerFactory {
-    fn supports_caller_env(&self) -> bool { true }
-    fn id(&self) -> &str { &self.id }
-    fn default_bin(&self) -> &str { &self.default_bin }
-    fn build(&self, bin: PathBuf, options: &toml::Table) -> Result<Arc<dyn Engine>, String> {
-        Ok(Arc::new(CodexAppServer::with_options(bin, self.prefix_args.clone(), CodexOptions::parse(options)?)))
-    }
-}
+pub use super::codex_factory::CodexAppServerFactory;
 
 #[async_trait::async_trait]
 impl Engine for CodexAppServer {
@@ -432,7 +409,7 @@ impl Engine for CodexAppServer {
             let socket = self.socket.as_deref().ok_or_else(|| TurnError::Protocol("Missing desktop socket".into()))?;
             (CodexConnection::connect(socket, req.trace.clone()).await?, false)
         } else {
-            self.native.connect(self, &self.bin, &self.launch_args(), &req, &abort).await?
+            self.native.connect(self, &self.bin, &req, &abort).await?
         };
 
         let mut next_id = 1_u64;

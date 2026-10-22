@@ -7,7 +7,8 @@ use super::trace::TraceContext;
 pub struct CliSession {
     child: Child,
     stdin: Option<ChildStdin>,
-    stdout: BufReader<tokio::process::ChildStdout>,
+    stdout: Option<BufReader<tokio::process::ChildStdout>>,
+    stdout_drain: Option<tokio::task::JoinHandle<()>>,
     trace: Option<TraceContext>,
     /// Set once the child has been reaped (`wait` returned). Later Drops must
     /// not signal the process group: the reaped pid is recyclable and
@@ -26,6 +27,20 @@ impl CliSession {
         cwd: &Path,
         env: &[(String, String)],
         trace: Option<TraceContext>,
+    ) -> std::io::Result<Self> {
+        Self::spawn_inner(bin, args, cwd, env, trace, true).await
+    }
+
+    #[cfg(unix)]
+    pub(super) async fn spawn_for_socket(
+        bin: &Path, args: &[String], cwd: &Path, env: &[(String, String)], trace: Option<TraceContext>,
+    ) -> std::io::Result<Self> {
+        Self::spawn_inner(bin, args, cwd, env, trace, false).await
+    }
+
+    async fn spawn_inner(
+        bin: &Path, args: &[String], cwd: &Path, env: &[(String, String)],
+        trace: Option<TraceContext>, rpc_stdout: bool,
     ) -> std::io::Result<Self> {
         let mut cmd = Command::new(bin);
         cmd.args(args)
@@ -50,7 +65,7 @@ impl CliSession {
         let stdin = child.stdin.take().ok_or_else(|| io_err("stdin not piped"))?;
         let stdout = child.stdout.take().ok_or_else(|| io_err("stdout not piped"))?;
         #[cfg(target_os = "linux")]
-        enlarge_stdout_pipe(&stdout);
+        if rpc_stdout { enlarge_stdout_pipe(&stdout); }
         let mut stderr = child
             .stderr
             .take()
@@ -76,10 +91,22 @@ impl CliSession {
                 }
             }
         });
+        let (stdout, stdout_drain) = if rpc_stdout {
+            (Some(BufReader::new(stdout)), None)
+        } else {
+            // Socket RPC never reads stdout. Drain arbitrary diagnostics as
+            // bounded byte chunks, without retaining or parsing them as JSONL.
+            let task = tokio::spawn(async move {
+                let mut stdout = stdout;
+                let _ = tokio::io::copy(&mut stdout, &mut tokio::io::sink()).await;
+            });
+            (None, Some(task))
+        };
         Ok(Self {
             child,
             stdin: Some(stdin),
-            stdout: BufReader::new(stdout),
+            stdout,
+            stdout_drain,
             trace,
             reaped: false,
             stdout_buffer: Vec::new(),
@@ -113,8 +140,9 @@ impl CliSession {
     pub(super) fn limit_stdout_line(&mut self, bytes: usize) { self.stdout_limit = bytes; }
 
     pub async fn next_line(&mut self) -> std::io::Result<Option<String>> {
+        let stdout = self.stdout.as_mut().ok_or_else(|| io_err("stdout is diagnostic-only"))?;
         let n = loop {
-            let available = self.stdout.fill_buf().await?;
+            let available = stdout.fill_buf().await?;
             if available.is_empty() { break 0; }
             let end = available.iter().position(|b| *b == b'\n');
             let take = end.map_or(available.len(), |i| i + 1);
@@ -123,7 +151,7 @@ impl CliSession {
                 return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "engine stdout line exceeds configured limit"));
             }
             self.stdout_buffer.extend_from_slice(&available[..take]);
-            self.stdout.consume(take);
+            stdout.consume(take);
             if end.is_some() { break take; }
         };
         if n == 0 && self.stdout_buffer.is_empty() {
@@ -163,6 +191,28 @@ impl CliSession {
         }
     }
 
+    /// Observe exit without reaping the group leader. Reaping first releases
+    /// its PID and makes child.id() unavailable before the final group SIGKILL,
+    /// leaving descendants that ignore SIGTERM alive.
+    #[cfg(unix)]
+    #[allow(unsafe_code)]
+    fn leader_exited(&mut self) -> bool {
+        let Some(pid) = self.child.id() else { return true; };
+        let mut info = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
+        // SAFETY: info points to writable siginfo_t storage; this observes only
+        // the child we own, and WNOWAIT preserves PID ownership until teardown.
+        unsafe {
+            libc::waitid(libc::P_PID, pid as libc::id_t, info.as_mut_ptr(),
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) == 0
+                && info.assume_init().si_pid() != 0
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn leader_exited(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(Some(_)))
+    }
+
     /// Graceful teardown: close stdin first, SIGTERM the whole process group,
     /// wait up to `GRACE_WINDOW` for the group to empty, only then SIGKILL.
     /// This lets the CLI flush undelivered task notifications out of its
@@ -183,12 +233,11 @@ impl CliSession {
             let pgid = pid as libc::pid_t;
             let _ = unsafe { libc::kill(-pgid, libc::SIGTERM) };
         }
-        // 3. Wait for the group to empty. `receiver_count()==0` on the child
-        //    means the leader exited; background-task descendants (node
-        //    workers) may still linger — a short bounded sleep covers them.
+        // 3. Give the leader a bounded chance to exit without reaping it.
+        //    Descendants may remain; the final group SIGKILL covers them.
         let deadline = std::time::Instant::now() + GRACE_WINDOW;
         while std::time::Instant::now() < deadline {
-            if let Ok(Some(_)) = self.child.try_wait() {
+            if self.leader_exited() {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -201,6 +250,7 @@ impl CliSession {
         self.graceful_kill_process_group().await;
         let _ = self.child.wait().await;
         self.reaped = true;
+        if let Some(task) = self.stdout_drain.take() { task.abort(); }
     }
 }
 
@@ -219,6 +269,7 @@ impl Drop for CliSession {
     #[allow(unsafe_code)]
     fn drop(&mut self) {
         if self.reaped {
+            if let Some(task) = self.stdout_drain.take() { task.abort(); }
             return;
         }
         self.close_stdin();
@@ -228,13 +279,14 @@ impl Drop for CliSession {
             let _ = unsafe { libc::kill(-pgid, libc::SIGTERM) };
             let deadline = std::time::Instant::now() + GRACE_WINDOW;
             while std::time::Instant::now() < deadline {
-                if let Ok(Some(_)) = self.child.try_wait() {
+                if self.leader_exited() {
                     break; // leader exited — SIGKILL below sweeps the rest.
                 }
                 std::thread::sleep(std::time::Duration::from_millis(25));
             }
         }
         self.kill_process_group();
+        if let Some(task) = self.stdout_drain.take() { task.abort(); }
     }
 }
 
@@ -362,7 +414,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let capacity = unsafe { libc::fcntl(cli.stdout.get_ref().as_raw_fd(), libc::F_GETPIPE_SZ) };
+        let capacity = unsafe { libc::fcntl(cli.stdout.as_ref().unwrap().get_ref().as_raw_fd(), libc::F_GETPIPE_SZ) };
         assert!(capacity >= 8 * 1024, "engine stdout pipe remained too small: {capacity}");
         // `kill_on_drop` reaps the fixture without waiting here; the existing
         // kill-path tests cover the explicit async cleanup method.
