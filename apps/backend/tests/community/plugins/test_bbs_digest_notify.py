@@ -92,3 +92,14 @@ def test_configured_bbs_dingtalk_sender_returns_card_result(monkeypatch) -> None
     )
 
     assert provider.send(_message()) == "bbs-card-123"
+
+
+def test_bbs_dingtalk_provider_registered_as_production_plugin() -> None:
+    from agentclaw.community.plugin_api.bbs_digest_notify import BbsDigestNotifyProvider
+    from agentclaw.community.plugin_api.impl_registry import IMPL_REGISTRY, Mode
+
+    entries = [entry for entry in IMPL_REGISTRY if entry.cls is BbsDingTalkNotifyProvider]
+    assert len(entries) == 1
+    assert entries[0].protocol is BbsDigestNotifyProvider
+    assert entries[0].mode is Mode.PROD
+    assert entries[0].flavor is None
