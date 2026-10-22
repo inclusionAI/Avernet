@@ -524,11 +524,13 @@ use super::*;
             "/tests/fixtures/mock_cc_bg_idle_forever.sh"
         );
         let mut req = TurnRequest::new("r-idle", "hi", ".", Arc::new(NullObserver));
-        req.idle_timeout = Some(std::time::Duration::from_millis(300));
+        // Include headroom for child startup and fixture scheduling on busy CI;
+        // 300ms can expire before task_started reaches the driver.
+        req.idle_timeout = Some(std::time::Duration::from_secs(3));
         let engine = ClaudeCode::new(PathBuf::from("bash"), vec![script.to_string()]);
         let (tx, _rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
         let turn = engine.run_turn(req, tx, tokio_util::sync::CancellationToken::new());
-        let error = tokio::time::timeout(std::time::Duration::from_secs(5), turn)
+        let error = tokio::time::timeout(std::time::Duration::from_secs(15), turn)
             .await
             .expect("watchdog must fire, not wedge")
             .expect_err("a quiet stream must fail the turn");
