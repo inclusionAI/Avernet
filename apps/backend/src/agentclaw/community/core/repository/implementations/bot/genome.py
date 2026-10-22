@@ -84,6 +84,7 @@ class GenomeRevisionRepository(GenomeRevisionRepositoryProtocol):
         *,
         patch: Optional[GenomePatchRow] = None,
         candidate: Optional[CandidateRefRequest] = None,
+        parent_from_latest: bool = False,
     ) -> tuple[GenomeRevisionRow, bool, Optional[GenomeRefRow]]:
         axes = {k: getattr(row, k) for k in _BOT_AXES}
         last: IntegrityError | None = None
@@ -93,7 +94,12 @@ class GenomeRevisionRepository(GenomeRevisionRepositoryProtocol):
                     orm = _revision_row(session, **axes, revision_id=row.revision_id)
                     created = orm is None
                     if orm is None:
-                        orm = GenomeRevisionModel(**row.model_dump(exclude={"id", "seq", "gmt_create", "gmt_modified"}), seq=self._next_seq(session, **axes))
+                        values = row.model_dump(exclude={"id", "seq", "gmt_create", "gmt_modified"})
+                        if parent_from_latest:
+                            # Read with the seq, so a race that collides on uk_bot_seq recomputes both on retry.
+                            latest = _latest_revision(session, **axes)
+                            values["parent_id"] = latest.revision_id if latest is not None else None
+                        orm = GenomeRevisionModel(**values, seq=self._next_seq(session, **axes))
                         session.add(orm)
                         session.flush()
                     if patch is not None and _patch_row(session, **axes, digest=patch.digest) is None:
@@ -298,6 +304,15 @@ def _revision_row(session, *, env: str, entity_id: str, bot_id: str, revision_id
         .filter(*_bot(GenomeRevisionModel, env=env, entity_id=entity_id, bot_id=bot_id))
         .filter(GenomeRevisionModel.revision_id == revision_id)
         .one_or_none()
+    )
+
+
+def _latest_revision(session, *, env: str, entity_id: str, bot_id: str) -> Optional[GenomeRevisionModel]:
+    return (
+        session.query(GenomeRevisionModel)
+        .filter(*_bot(GenomeRevisionModel, env=env, entity_id=entity_id, bot_id=bot_id))
+        .order_by(GenomeRevisionModel.seq.desc())
+        .first()
     )
 
 

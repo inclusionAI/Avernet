@@ -210,6 +210,24 @@ def test_record_writes_the_revision_its_patch_and_the_candidate_ref_in_one_trans
     assert revisions.list(**BOT)[0] == 3
 
 
+def test_record_takes_the_parent_from_the_latest_revision_inside_the_transaction(db, monkeypatch):
+    repo = GenomeRevisionRepository(db)
+    first, _, _ = repo.record(_revision(R1), parent_from_latest=True)
+    assert first.parent_id is None, "the bot's first revision"
+    competing = [R2]  # another request commits a root between this one's parent read and its flush
+    real = GenomeRevisionRepository._next_seq
+
+    def racing(session, **axes):
+        if competing:
+            repo.insert(_revision(competing.pop(), parent_id=R1))
+            return 2  # the stale number: collides on uk_bot_seq, the whole transaction retries
+        return real(session, **axes)
+
+    monkeypatch.setattr(GenomeRevisionRepository, "_next_seq", staticmethod(racing))
+    third, created, _ = repo.record(_revision(R3), parent_from_latest=True)
+    assert created and (third.seq, third.parent_id) == (3, R2), "the retry recomputed the parent with the seq"
+
+
 # -- patches and promotions ------------------------------------------------------------------------
 
 

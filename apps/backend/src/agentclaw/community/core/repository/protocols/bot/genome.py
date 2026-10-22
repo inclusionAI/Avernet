@@ -45,13 +45,17 @@ class GenomeRevisionRepositoryProtocol(Protocol):
         *,
         patch: Optional[GenomePatchRow] = None,
         candidate: Optional[CandidateRefRequest] = None,
+        parent_from_latest: bool = False,
     ) -> tuple[GenomeRevisionRow, bool, Optional[GenomeRefRow]]:
         """``insert`` plus, in the same transaction, the patch row it came from and a run's candidate ref.
 
         ``(revision, created, ref)``. The patch row is written once per
         digest; the candidate ref is ``candidate/<run_id>/<n>`` with the
         next ``n`` for the run, or the existing ref already pointing at
-        this revision (a retry). Either everything lands or nothing does.
+        this revision (a retry). With ``parent_from_latest`` the new row's
+        ``parent_id`` is the bot's latest revision as read inside the same
+        transaction (``None`` for the first), so two overlapping records
+        cannot both come out parentless. Either everything lands or nothing does.
         """
         ...
 

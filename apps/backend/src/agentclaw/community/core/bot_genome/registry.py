@@ -234,6 +234,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         risk_tier: str | None = None,
         flags: tuple[str, ...] = (),
         run: RunScope | None = None,
+        parent_from_latest: bool = False,
     ) -> RecordedRevision:
         """File the produced bytes, then in one transaction the revision row (idempotent by id), its patch row and a run's candidate ref.
 
@@ -268,6 +269,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
             ),
             patch=patch,
             candidate=candidate,
+            parent_from_latest=parent_from_latest,
         )
         return RecordedRevision(revision=self._revision(row), created=created, risk_tier=risk_tier, flags=flags, ref=ref.name if ref is not None else None)
 
@@ -298,17 +300,13 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         reasons = self._checks.reasons(captured.spec, policy, _PendingContent(writes, self._reader(bot)), self._ctx(bot, created_by.checked_as))
         if reasons:
             raise CaptureRefused(reasons)
+        # The parent is `active`; while the bot has none yet, its latest revision, read by the
+        # repository inside the recording transaction so that two overlapping first captures
+        # cannot both come out parentless.
         return self._record(
-            bot, captured.spec, policy, parent=self._capture_parent(bot, active), created_by=created_by,
-            status=RevisionStatus.DRAFT, writes=writes, origin="genome/capture",
+            bot, captured.spec, policy, parent=active.revision_id if active is not None else None, created_by=created_by,
+            status=RevisionStatus.DRAFT, writes=writes, origin="genome/capture", parent_from_latest=active is None,
         )
-
-    def _capture_parent(self, bot: BotRef, active: GenomeRevisionRow | None) -> str | None:
-        """``active``; while the bot has none yet, its latest revision, so only the first revision is parentless."""
-        if active is not None:
-            return active.revision_id
-        _, latest = self._revisions.list(**self._axes(bot), page=1, page_size=1)
-        return latest[0].revision_id if latest else None
 
     async def record_patch(
         self,
