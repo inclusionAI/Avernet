@@ -517,6 +517,7 @@ trace_dir = "{}"
 [[bot]]
 provider_bot_ref = "worker-1"
 engine = "claude-code"
+engine_options = {{ completion_mode = "legacy" }}
 cwd = "/tmp"
 engine_bin = "{}"
 "#, trace_dir.path().display(), bin)).await;

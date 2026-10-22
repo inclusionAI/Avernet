@@ -39,6 +39,8 @@ pub async fn spawn_app_with_mock(script: &str, engine: &str) -> String {
 /// [`spawn_app_with_mock`] 的 state-暴露版本：额外返回共享 [`AppState`]。
 pub async fn spawn_app_with_mock_and_state(script: &str, engine: &str) -> (String, Arc<AppState>) {
     let bin = format!("{}/tests/fixtures/{script}", env!("CARGO_MANIFEST_DIR"));
+    // These replay fixtures predate native Stop/idle and intentionally test legacy.
+    let options = if engine == "claude-code" { "engine_options = { completion_mode = \"legacy\" }" } else { "" };
     spawn_app_with_state(&format!(
         r#"
 provider_id = "bridge-1"
@@ -49,6 +51,7 @@ provider_bot_ref = "worker-1"
 engine = "{engine}"
 cwd = "/tmp"
 engine_bin = "{bin}"
+{options}
 "#
     ))
     .await

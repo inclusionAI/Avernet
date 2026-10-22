@@ -1,6 +1,7 @@
 use super::*;
+// These fixtures exercise the explicit legacy notification-consumption gate.
     async fn run_mock_cc(script: &str) -> Result<TurnOutcome, TurnError> {
-        let engine = ClaudeCode::new(PathBuf::from("bash"), vec![script.to_string()]);
+        let engine = ClaudeCode { bin: PathBuf::from("bash"), prefix_args: vec![script.to_string()], completion_mode: CompletionMode::Legacy };
         let req = TurnRequest::new("r-bg", "hi", ".", Arc::new(NullObserver));
         let (tx, _rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
         engine
@@ -527,7 +528,7 @@ use super::*;
         // Include headroom for child startup and fixture scheduling on busy CI;
         // 300ms can expire before task_started reaches the driver.
         req.idle_timeout = Some(std::time::Duration::from_secs(3));
-        let engine = ClaudeCode::new(PathBuf::from("bash"), vec![script.to_string()]);
+        let engine = ClaudeCode { bin: PathBuf::from("bash"), prefix_args: vec![script.to_string()], completion_mode: CompletionMode::Legacy };
         let (tx, _rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
         let turn = engine.run_turn(req, tx, tokio_util::sync::CancellationToken::new());
         let error = tokio::time::timeout(std::time::Duration::from_secs(15), turn)

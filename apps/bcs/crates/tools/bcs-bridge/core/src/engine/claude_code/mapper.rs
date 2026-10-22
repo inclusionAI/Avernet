@@ -585,16 +585,79 @@ pub(super) fn map_user(v: &Value, run_id: &str) -> CcMap {
 
 pub(super) fn map_result(v: &Value) -> CcMap {
     let subtype = v.get("subtype").and_then(|x| x.as_str()).unwrap_or("");
-    if v.get("is_error").and_then(Value::as_bool) == Some(true) {
-        return CcMap::Failed("engine_result_error".into());
-    }
-    if subtype == "success" {
+    let is_error = v.get("is_error").and_then(Value::as_bool) == Some(true);
+    if subtype == "success" && !is_error {
         let text = v.get("result").and_then(|x| x.as_str()).unwrap_or("").to_string();
         return CcMap::Final(text);
     }
-    // 非成功 result：上抛为引擎退出。净化——只保留引擎错误类别标识符，
-    // 绝不把原始 payload（可能含敏感细节）灌进错误消息。
+    // Keep actionable upstream causes without echoing arbitrary error payloads:
+    // result/errors can contain credentials, prompts, or provider response bodies.
+    let cause = v.get("error").and_then(|error| upstream_error_note(error, 3))
+        .or_else(|| v.get("errors").and_then(Value::as_array)
+            .and_then(|errors| errors.iter().take(8).find_map(|error| upstream_error_note(error, 3))))
+        .or_else(|| v.get("result").and_then(|error| upstream_error_note(error, 3)));
+    if let Some(cause) = cause { return CcMap::Failed(cause.into()); }
+    if is_error && matches!(subtype, "success" | "") {
+        return CcMap::Failed("engine_result_error".into());
+    }
     CcMap::Failed(sanitize_result_note(subtype))
+}
+
+/// Only allowlisted, constant summaries cross the BCN boundary. Recognize native
+/// error objects and CLI-rendered API errors; never quote their free-form text.
+fn upstream_error_note(value: &Value, depth: usize) -> Option<&'static str> {
+    if depth == 0 { return None; }
+    if let Some(text) = value.as_str() {
+        let text = text.trim();
+        if let Some(status) = upstream_error_status(text) { return upstream_status_note(status); }
+        let message = text.strip_prefix("API Error: ").unwrap_or(text);
+        let code = if let Some(rejected) = message.strip_prefix("Request rejected (") {
+            rejected.split_once(')')?.0
+        } else {
+            message.strip_prefix("HTTP ").unwrap_or(message)
+                .split(|c: char| c.is_ascii_whitespace() || c == ':').next()?
+        };
+        if code.len() == 3 {
+            if let Some(note) = code.parse().ok().and_then(upstream_status_note) { return Some(note); }
+        }
+        if text.starts_with('{') && text.len() <= 4096 {
+            let object: Value = serde_json::from_str(text).ok()?;
+            return upstream_error_note(&object, depth - 1);
+        }
+        return None;
+    }
+    let object = value.as_object()?;
+    object.get("type").and_then(Value::as_str).and_then(upstream_error_status).and_then(upstream_status_note)
+        .or_else(|| object.get("error").and_then(|error| upstream_error_note(error, depth - 1)))
+        .or_else(|| object.get("status").and_then(Value::as_u64).and_then(upstream_status_note))
+        .or_else(|| object.get("message").and_then(|message| upstream_error_note(message, depth - 1)))
+}
+
+fn upstream_error_status(kind: &str) -> Option<u64> {
+    match kind {
+        "invalid_request_error" => Some(400),
+        "authentication_error" => Some(401),
+        "permission_error" => Some(403),
+        "request_too_large" => Some(413),
+        "rate_limit_error" | "rate_limit" => Some(429),
+        "api_error" => Some(500),
+        "overloaded_error" => Some(529),
+        _ => None,
+    }
+}
+
+fn upstream_status_note(status: u64) -> Option<&'static str> {
+    match status {
+        400 => Some("upstream invalid_request_error (HTTP 400): model provider rejected the request; check model and input limits"),
+        401 => Some("upstream authentication_error (HTTP 401): model provider authentication failed; check credentials"),
+        403 => Some("upstream permission_error (HTTP 403): model provider denied access; check model permissions"),
+        413 => Some("upstream request_too_large (HTTP 413): model request exceeds the provider size limit"),
+        429 => Some("upstream rate_limit_error (HTTP 429): model provider rate limit exceeded; retry later"),
+        500 => Some("upstream api_error (HTTP 500): model provider internal error; retry later"),
+        503 => Some("upstream service_unavailable (HTTP 503): model provider unavailable; retry later"),
+        529 => Some("upstream overloaded_error (HTTP 529): model provider overloaded; retry later"),
+        _ => None,
+    }
 }
 
 /// 只保留引擎错误类别（有限标识符：字母数字/下划线/连字符），剥掉其它。

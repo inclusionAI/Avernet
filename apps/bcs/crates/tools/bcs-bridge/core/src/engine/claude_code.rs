@@ -10,7 +10,7 @@
 //!       [--permission-mode <mode>] [--resume <engine_session_id>] [--model <model>]
 //! ```
 //!
-//! 启动后立刻向 stdin 写一条 user 消息（claude stream-json 输入格式）。
+//! 默认先初始化原生 Stop hook，再向 stdin 写一条 user 消息；成功完成需 Stop/result/idle 证据。
 //!
 //! 事件映射表（cc stream-json → StreamEvent）：
 //!
@@ -57,8 +57,9 @@ pub struct ClaudeCode {
 impl ClaudeCode {
     /// `prefix_args` are placed before the stream-json arguments, for
     /// launchers that select Claude Code through a subcommand or flag.
+    /// Uses `hook_idle` completion; the factory accepts explicit mode overrides.
     pub fn new(bin: PathBuf, prefix_args: Vec<String>) -> Self {
-        Self { bin, prefix_args, completion_mode: CompletionMode::Legacy }
+        Self { bin, prefix_args, completion_mode: CompletionMode::default() }
     }
 }
 
@@ -187,7 +188,7 @@ impl Engine for ClaudeCode {
             }
         }
 
-        // 启动后立刻向 stdin 写一条 user 消息（claude stream-json 输入格式）。
+        // 初始化完成后发送业务输入；legacy 模式跳过初始化。
         let user_msg = serde_json::json!({
             "type": "user",
             "message": {
