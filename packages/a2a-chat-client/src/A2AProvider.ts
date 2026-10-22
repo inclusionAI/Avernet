@@ -377,7 +377,29 @@ export class A2AProvider {
       parser, ctx, state,
       outcome: null, runFailure: null, terminalApplied: false,
     };
-    const iamToken = await this.resolveIamToken();
+    // token 获取失败的生命周期边界（review）：此处请求尚未出站——绝不能
+    // 走下方发送阶段的 catch（那里会把"首个 Task 事件前的失败"当出站后
+    // 断流转成任务结果未知/进恢复语义）；也绝不能因抛错绕过 isRequesting
+    // 的归还，否则同 Provider 的后续请求恒"A request is already in
+    // progress"。getter 抛错/拒绝：如实上抛（保留 .failure 分类，由宿主
+    // 沿 lock 判定规则过滤——不强行标鉴权失败）；让位代次静默回归（不清理
+    // 新请求的槽）；abort() 自身也走 resolveIamToken 回归路径由各入口自持
+    // 其状态语义，此处不重复清理。
+    let iamToken: string | undefined;
+    try {
+      iamToken = await this.resolveIamToken();
+    } catch (err) {
+      // 让位代次让 cleanup 归新请求；迟到异常绝不触碰新请求状态
+      if (generation !== this.generation) return;
+      this.isRequesting = false;
+      this.notifyHardFailure(err);
+      const error = err instanceof Error ? err : new Error(String(err));
+      this.onError?.(error);
+      throw error;
+    }
+    // 等待 token 期间被取消/让位：不再启动发送（abort 的 UI 播报已由 abort
+    // 自身完成——不在此重复补发，避免新代次被旧异常窗口污染）
+    if (generation !== this.generation) return;
     // 出站位=代次记账（gate 于代次流通：被中止/让位的旧代次不得在延迟归还后
     // 污染新请求的出状态——旧代次的 ctrl 已 abort，其流静默收尾无 POV）
     if (generation === this.generation) {
