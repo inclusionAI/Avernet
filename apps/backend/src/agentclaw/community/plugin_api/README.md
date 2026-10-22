@@ -130,3 +130,18 @@ The default implementation preserves configured addresses; the community runtime
 implementation selects the existing Claude Code Engine source layout. The
 factory's existing locator/device-I/O adapters remain responsible for address
 translation, including enterprise host addresses and Teclaw namespaces.
+
+
+## Token scope V2 and staff-directory errors
+
+TokenScopeMatcher.is_allowed now requires bot_type alongside entity_id,
+user_list_type and env. Consumers must pass a trusted actual service/personal type;
+all is a stored rule scope, not a runtime identity. Sync OutboundTokenPlugin.match
+runs in a worker thread and must be read-only, create/close any database session
+there, and never capture a request-thread Session. Pipeline stage ordering and
+failure isolation are unchanged.
+
+DeptLookupError is owned by plugin_api.staff_dept, matching the StaffDeptPlugin
+contract. The old HTTP errors module re-exports the same class identity for
+compatibility; core consumers do not import HTTP exceptions. No-department still
+returns StaffDeptInfo with null fields, and infrastructure failure remains distinct.

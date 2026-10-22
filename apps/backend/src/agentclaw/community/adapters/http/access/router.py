@@ -9,7 +9,7 @@ from __future__ import annotations
 from time import perf_counter
 from typing import Annotated, Callable
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
 from agentclaw.community.adapters.http.access.schemas import (
     AllowDisallowData,
@@ -31,6 +31,7 @@ from agentclaw.community.api.bot_quota_service import BotQuotaServiceProtocol
 from agentclaw.community.api.user_list_service import UserListServiceProtocol
 from agentclaw.community.api.user_service import UserServiceProtocol
 from agentclaw.community.core.access.errors import UserNotFoundError
+from agentclaw.community.core.user_list.rules import MembershipConflictError
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
@@ -176,8 +177,8 @@ async def correct_user_list(
     """Apply one operator-authorized user-list correction in the selected environment."""
     started = perf_counter()
     correction_env = env or get_current_env()
-    fields = "method=PUT route=/api/v1/user-lists/correct actor_id=%s entity_id=%s user_list_type=%s env=%s in_whitelist=%s"
-    context = (user.staffId, request.entity_id, request.user_list_type, correction_env, request.in_whitelist)
+    fields = "system=backend direction=inbound operation=correct_membership method=PUT route=/api/v1/user-lists/correct actor_id=%s entity_id=%s user_list_type=%s env=%s in_whitelist=%s subject_type=%s bot_type=%s"
+    context = (user.staffId, request.entity_id, request.user_list_type, correction_env, request.in_whitelist, request.subject_type, request.bot_type)
     logger.info("user_list.correction.request " + fields, *context)
     try:
         in_whitelist = service.correct_membership(
@@ -185,6 +186,8 @@ async def correct_user_list(
             entity_id=request.entity_id,
             user_list_type=request.user_list_type,
             in_whitelist=request.in_whitelist,
+            subject_type=request.subject_type,
+            bot_type=request.bot_type,
             env=correction_env,
         )
     except Exception as exc:
@@ -192,6 +195,8 @@ async def correct_user_list(
             "user_list.correction.failed " + fields + " error_type=%s elapsed_ms=%.2f",
             *context, type(exc).__name__, (perf_counter() - started) * 1000,
         )
+        if isinstance(exc, MembershipConflictError):
+            raise HTTPException(status_code=409, detail="Department path conflicts with existing membership") from None
         raise
     logger.info(
         "user_list.correction.success " + fields + " status=200 result=%s elapsed_ms=%.2f",

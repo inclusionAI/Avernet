@@ -313,3 +313,17 @@ The 100-character name and 65,535-byte description limits match the current
 `ac_skill` persistence columns. Legacy no-frontmatter upload remains a
 compatibility fallback outside the canonical Protocol; removing that fallback
 would require a separate migration and compatibility review.
+
+
+## User-list Service API V2
+
+UserListServiceProtocol retains exact legacy is_in_user_list reads (user/all).
+correct_membership adds subject_type=user|department (default user) and
+bot_type=service|personal|all (default all), and changes only the specified complete
+scope. matches_user requires a trusted actual Bot type (service or personal),
+checks that type or all, then combines user membership OR department ancestry.
+It resolves departments through StaffDeptPlugin only when applicable rules exist;
+missing data or directory failure grants nothing. Path segments are case-sensitive,
+subject to explicit legacy unique-collation write conflicts (409). No public rule
+listing is exposed. The real DI provider supplies repository plus staff directory.
+The signature gate and real SQLite/HTTP behavior tests cover this contract.
