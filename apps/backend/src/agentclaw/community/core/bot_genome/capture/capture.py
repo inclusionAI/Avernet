@@ -12,6 +12,7 @@ a bot the reader cannot capture, a local skill that is not a valid package.
 from __future__ import annotations
 
 import re
+from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -58,23 +59,29 @@ class CapturedResource:
 class BotStateReader(Protocol):
     """What capture reads a bot through. One production implementation (``bot_state.py``), fakes in tests."""
 
-    def refusal(self, bot: BotRef) -> str | None:
+    @abstractmethod
+    async def refusal(self, bot: BotRef) -> str | None:
         """Why this bot cannot be captured at all, or ``None``."""
         ...
 
+    @abstractmethod
     async def persona_files(self, bot: BotRef) -> dict[str, str]:
         """``type → text`` of every identity file the bot has."""
         ...
 
+    @abstractmethod
     async def skills(self, bot: BotRef) -> tuple[CapturedSkill, ...]: ...
 
+    @abstractmethod
     async def resources(self, bot: BotRef) -> tuple[CapturedResource, ...]: ...
 
-    def mcp_servers(self, bot: BotRef) -> tuple[dict[str, Any], ...]:
+    @abstractmethod
+    async def mcp_servers(self, bot: BotRef) -> tuple[dict[str, Any], ...]:
         """``{"server_code": …, "config": …?}`` per enabled server, platform defaults excluded."""
         ...
 
-    def script_body(self, bot: BotRef) -> str | None:
+    @abstractmethod
+    async def script_body(self, bot: BotRef) -> str | None:
         """The startup script body after the ``${BOT_*}`` substitution apply performs, or ``None``."""
         ...
 
@@ -108,7 +115,7 @@ def agents_md_text(text: str) -> str:
 
 async def capture_spec(reader: BotStateReader, bot: BotRef, *, validator: SkillPackageValidator) -> CapturedSpec:
     """The bot's current state as a spec, plus the produced bytes to file."""
-    refusal = reader.refusal(bot)
+    refusal = await reader.refusal(bot)
     if refusal is not None:
         raise CaptureRefused([Reason("not_capturable", "bot", refusal)])
     writes: dict[str, bytes] = {}
@@ -175,13 +182,13 @@ async def capture_spec(reader: BotStateReader, bot: BotRef, *, validator: SkillP
         raise CaptureRefused(reasons)
 
     mcp = []
-    for server in reader.mcp_servers(bot):
+    for server in await reader.mcp_servers(bot):
         entry: dict[str, Any] = {"server_code": server["server_code"]}
         if server.get("config"):
             entry["config"] = dict(server["config"])
         mcp.append(entry)
 
-    body = reader.script_body(bot)
+    body = await reader.script_body(bot)
     script = {"digest": store(body.encode("utf-8"))} if body else None
 
     spec = {

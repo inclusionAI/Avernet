@@ -11,6 +11,7 @@ import re
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from abc import abstractmethod
 from enum import StrEnum
 from typing import Any, Protocol
 
@@ -24,6 +25,7 @@ class ContentReader(Protocol):
     for a digest the bot cannot reach.
     """
 
+    @abstractmethod
     def read(self, digest: str) -> bytes: ...
 
 
@@ -42,7 +44,13 @@ class ProvenanceKind(StrEnum):
 
 
 class RefMover(StrEnum):
-    """Who is moving a ref; each ref kind has exactly one allowed mover (01-genome.md §5.1)."""
+    """Who is moving a ref; each ref kind has exactly one allowed mover (01-genome.md §5.1).
+
+    ``OWNER`` moves ``draft``; ``PROMOTION`` moves ``active``, ``previous`` and
+    ``canary``; ``RUN`` is the registry itself creating ``candidate/<run_id>/<n>``
+    when an evolution run's candidate is recorded (a candidate ref is created
+    once and never moved).
+    """
 
     OWNER = "owner"
     PROMOTION = "promotion"
@@ -61,6 +69,8 @@ class BotRef:
     ``owner_id`` + ``bot_id`` is the bot's identity (a bot id alone is not
     unique across owners); ``entity_id`` is the storage key shared with the
     Manifest tables; ``engine_type`` and ``bot_type`` are the capability axes.
+    ``entity_type`` (``staff`` or ``user``) is the identity service's third
+    coordinate for the bot's files.
     """
 
     owner_id: str
@@ -100,35 +110,47 @@ RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
 @dataclass(frozen=True)
 class RunScope:
-    """The evolution run a candidate is recorded for, and the genes it may touch."""
+    """The evolution run a candidate is recorded for, and the genes it may touch.
+
+    ``run_id`` names the candidate ref (``candidate/<run_id>/<n>``);
+    ``allowed_genes`` is what the run's binding lets it change, and every op
+    of the patch must fall under one of them.
+    """
 
     run_id: str
-    binding_id: str
     allowed_genes: tuple[str, ...]
 
     def __post_init__(self) -> None:
+        """Runs on construction: refuses a run id that is not one ref segment, for in-process callers too."""
         if not RUN_ID_PATTERN.fullmatch(self.run_id):
             raise ValueError(f"run_id {self.run_id!r} is not one ref segment ([A-Za-z0-9_.-], 1-64)")
-        if not self.binding_id:
-            raise ValueError("binding_id is required")
 
 
 @dataclass(frozen=True)
 class RevisionMetadata:
-    id: str
-    seq: int
-    parent: str | None
+    """The platform-written part of a revision (contract §4.4); none of it is hashed."""
+
+    id: str  #: ``sha256:<hex64>`` of the canonical ``{spec, policy}``: the identity
+    seq: int  #: the bot's N-th recorded revision, from 1 (``r42``); a handle for people
+    parent: str | None  #: the patch's base, or ``active`` for a capture / policy change; ``None`` for the first
     created_by: Provenance
     created_at: datetime
     status: RevisionStatus
-    patch_digest: str | None
-    evidence: tuple[str, ...] = ()
-    evaluations: tuple[str, ...] = ()
-    annotations: dict[str, str] = field(default_factory=dict)
+    patch_digest: str | None  #: the stored patch's digest (the candidate id); ``None`` for a capture / policy change
+    evidence: tuple[str, ...] = ()  #: experience refs the patch cited, e.g. ``episode:ep_91``
+    evaluations: tuple[str, ...] = ()  #: verification evaluation ids attached later, e.g. ``ev_301``
+    annotations: dict[str, str] = field(default_factory=dict)  #: free-form platform notes
 
 
 @dataclass(frozen=True)
 class GenomeRevision:
+    """One revision: the contract's JSON record, parsed.
+
+    ``spec`` and ``policy`` are the contract's own JSON objects
+    (``genome-revision.schema.json``), kept as validated dicts because they
+    are hashed and exchanged in exactly that shape.
+    """
+
     genome_schema: int
     revision: RevisionMetadata
     spec: dict[str, Any]

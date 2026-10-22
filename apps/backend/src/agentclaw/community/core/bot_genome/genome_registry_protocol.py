@@ -71,7 +71,9 @@ class GenomeRegistryProtocol(Protocol):
     ) -> RecordedRevision:
         """Apply ``patch`` to its own ``base`` and record the result (README §6.4).
 
-        ``status`` is ``DRAFT`` (an owner) or ``CANDIDATE`` (a run, which
+        ``patch["base"]`` is the id of this bot's revision the ops apply to;
+        it becomes the new revision's parent. There is no separate base
+        argument. ``status`` is ``DRAFT`` (an owner) or ``CANDIDATE`` (a run, which
         also names ``candidate/<run>/<n>``). Raises ``RevisionNotFound``
         for a base that is not this bot's, ``PatchRejected`` with every
         reason, ``LimitExceeded``, ``ContentNotReachable``.

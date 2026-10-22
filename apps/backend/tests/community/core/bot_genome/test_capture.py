@@ -54,7 +54,7 @@ class FakeReader:
         script = blobs.read(spec["script"]["digest"]).decode("utf-8") if spec["script"] else None
         return cls(persona=persona, skills=skills, resources=resources, mcp=spec["tools"]["mcp"], script=script)
 
-    def refusal(self, bot: BotRef) -> str | None:
+    async def refusal(self, bot: BotRef) -> str | None:
         return self._refuse
 
     async def persona_files(self, bot: BotRef) -> dict[str, str]:
@@ -66,10 +66,10 @@ class FakeReader:
     async def resources(self, bot: BotRef) -> tuple[CapturedResource, ...]:
         return self._resources
 
-    def mcp_servers(self, bot: BotRef) -> tuple[dict[str, Any], ...]:
+    async def mcp_servers(self, bot: BotRef) -> tuple[dict[str, Any], ...]:
         return tuple(json.loads(json.dumps(e)) for e in self._mcp)
 
-    def script_body(self, bot: BotRef) -> str | None:
+    async def script_body(self, bot: BotRef) -> str | None:
         return self._script
 
 

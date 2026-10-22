@@ -77,7 +77,7 @@ async def test_going_back_is_a_promotion_of_a_promoted_revision(world: World) ->
 @pytest.mark.asyncio
 async def test_refusals_before_the_move_leave_refs_and_statuses_untouched(world: World) -> None:
     r1, r2 = await _two_revisions(world)
-    candidate = await world.registry.record_patch(BOT, load_patch("01-file-edit.json"), created_by=RUN, status=RevisionStatus.CANDIDATE, run=RunScope("run_7f3", "b1", ("persona", "skills", "resources")))
+    candidate = await world.registry.record_patch(BOT, load_patch("01-file-edit.json"), created_by=RUN, status=RevisionStatus.CANDIDATE, run=RunScope("run_7f3", ("persona", "skills", "resources")))
     with pytest.raises(NotPromotable):
         await world.promotion.promote(BOT, revision=candidate.revision.revision.id, ref="active", expected_revision=None, actor=OWNER, reason="x")
     with pytest.raises(RevisionNotFound):

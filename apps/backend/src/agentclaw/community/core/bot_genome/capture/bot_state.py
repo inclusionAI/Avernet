@@ -91,7 +91,7 @@ class PlatformBotStateReader(BotStateReader):
         self._is_teclaw = is_teclaw  # teclaw is an engine family, not a bot type (bot_service.is_teclaw_bot)
         self._teclaw_platform_managed = teclaw_platform_managed
 
-    def refusal(self, bot: BotRef) -> str | None:
+    async def refusal(self, bot: BotRef) -> str | None:
         if self._teclaw_platform_managed and self._is_teclaw(bot.engine_type):
             return "a platform-managed teclaw bot has no device to read; its state is composed from platform rows (RSI-04)"
         return None
@@ -153,7 +153,7 @@ class PlatformBotStateReader(BotStateReader):
             captured.append(CapturedResource(path, ((path.rsplit("/", 1)[-1], data),)))
         return tuple(captured)
 
-    def mcp_servers(self, bot: BotRef) -> tuple[dict[str, Any], ...]:
+    async def mcp_servers(self, bot: BotRef) -> tuple[dict[str, Any], ...]:
         who = dict(bot_id=bot.bot_id, owner_id=bot.owner_id, actor_id=bot.owner_id)
         codes = set(self._activation.list_installed_mcps(**who)) - set(self._activation.platform_default_mcp_codes(**who))
         servers = []
@@ -165,7 +165,7 @@ class PlatformBotStateReader(BotStateReader):
             servers.append(entry)
         return tuple(servers)
 
-    def script_body(self, bot: BotRef) -> str | None:
+    async def script_body(self, bot: BotRef) -> str | None:
         body = self._scripts.get_body(entity_id=bot.entity_id, bot_id=bot.bot_id)
         if not body:
             return None

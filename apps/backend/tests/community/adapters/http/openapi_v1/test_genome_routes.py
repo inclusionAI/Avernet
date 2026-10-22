@@ -172,14 +172,14 @@ def test_promotion_takes_applys_bar() -> None:
 async def test_record_patch_answers_201_then_200_and_threads_the_run() -> None:
     registry = AsyncMock()
     registry.record_patch.return_value = RecordedRevision(_revision(R2), True, risk_tier="T2", flags=("persona/SOUL.md",), ref="candidate/run_7/1")
-    body = RecordPatchRequest(status="candidate", run=RunScopePayload(run_id="run_7", binding_id="b1", allowed_genes=["persona"]), patch={"base": R1})
+    body = RecordPatchRequest(status="candidate", run=RunScopePayload(run_id="run_7", allowed_genes=["persona"]), patch={"base": R1})
     response = Response()
     out = await genome.record_genome_patch("bot_1", body, _request("POST"), response, "u1", "u1", HUMAN, _bot_service(), registry)
     assert response.status_code == 201 and out.data.ref == "candidate/run_7/1" and out.data.flags == ["persona/SOUL.md"]
     bot, patch = registry.record_patch.await_args.args
     kwargs = registry.record_patch.await_args.kwargs
     assert (bot.entity_id, bot.engine_type, bot.bot_type, bot.owner_id) == ("ent_1", "openclaw", "personal", "u1")
-    assert kwargs["status"] is RevisionStatus.CANDIDATE and kwargs["run"] == RunScope("run_7", "b1", ("persona",))
+    assert kwargs["status"] is RevisionStatus.CANDIDATE and kwargs["run"] == RunScope("run_7", ("persona",))
     assert kwargs["created_by"] == Provenance(ProvenanceKind.STRATEGY_RUN, "u1", run_id="run_7")
     registry.record_patch.return_value = RecordedRevision(_revision(R2), False)
     response = Response()
@@ -192,9 +192,9 @@ async def test_record_patch_answers_201_then_200_and_threads_the_run() -> None:
     "body",
     [
         {"status": "candidate", "patch": {}},
-        {"status": "draft", "run": {"run_id": "run_7", "binding_id": "b1", "allowed_genes": ["persona"]}, "patch": {}},
-        {"status": "candidate", "run": {"run_id": "a/b", "binding_id": "b1", "allowed_genes": ["persona"]}, "patch": {}},
-        {"status": "candidate", "run": {"run_id": "run 7", "binding_id": "b1", "allowed_genes": ["persona"]}, "patch": {}},
+        {"status": "draft", "run": {"run_id": "run_7", "allowed_genes": ["persona"]}, "patch": {}},
+        {"status": "candidate", "run": {"run_id": "a/b", "allowed_genes": ["persona"]}, "patch": {}},
+        {"status": "candidate", "run": {"run_id": "run 7", "allowed_genes": ["persona"]}, "patch": {}},
     ],
 )
 def test_a_candidate_needs_its_run_and_a_run_id_is_one_ref_segment(body: dict) -> None:
@@ -220,7 +220,7 @@ def test_an_application_caller_is_recorded_as_itself_acting_for_the_user() -> No
     assert genome._actor("u1", HUMAN) == OWNER and OWNER.audit == "u1"
     delegated = genome._actor("u1", APP)
     assert (delegated.actor, delegated.recorded_as, delegated.audit) == ("u1", "app:7:on-behalf-of:u1", "app:7:on-behalf-of:u1")
-    run = genome._actor("u1", APP, run=RunScope("run_7", "b1", ("persona",)))
+    run = genome._actor("u1", APP, run=RunScope("run_7", ("persona",)))
     assert (run.kind, run.run_id, run.recorded_as) == (ProvenanceKind.STRATEGY_RUN, "run_7", "app:7:on-behalf-of:u1")
     assert "recorded_as" not in delegated.as_dict(), "the contract's provenance shape is unchanged"
 

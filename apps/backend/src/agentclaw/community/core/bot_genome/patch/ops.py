@@ -58,22 +58,42 @@ class FileChange:
 
 @dataclass(frozen=True)
 class OpTouch:
-    """What one op touched: its gene path, the files it changed, and the facts the risk rules ask for."""
+    """What one op touched: its gene path, the files it changed, and the facts the risk rules ask for.
 
-    op: str
-    gene: str
-    files: tuple[str, ...] = ()
-    description_only: bool = False
-    mode: str | None = None
+    Examples: a ``file.edit`` of SOUL.md is ``OpTouch("file.edit",
+    "persona/SOUL.md", ("persona/SOUL.md",))``; a ``skill.update`` that only
+    reworded the description is ``OpTouch("skill.update",
+    "skills/refund-policy", ("skills/refund-policy/SKILL.md",),
+    description_only=True)`` (T1 instead of T2, README §6.3); a
+    ``memory.set_mode`` is ``OpTouch("memory.set_mode", "memory",
+    mode="replace")`` (T3 for ``replace``).
+    """
+
+    op: str  #: the op kind, e.g. ``file.edit``
+    gene: str  #: the gene path the op targets, e.g. ``persona/SOUL.md``
+    files: tuple[str, ...] = ()  #: gene paths of the files it changed (members of a tree included)
+    description_only: bool = False  #: ``skill.update``: only SKILL.md's front-matter description changed
+    mode: str | None = None  #: ``memory.set_mode``: the mode set
 
 
 @dataclass(frozen=True)
 class PatchOutcome:
-    spec: dict[str, Any]
-    writes: tuple[tuple[str, bytes], ...]
-    touched: tuple[OpTouch, ...]
-    changed_files: dict[str, FileChange] = field(default_factory=dict)
-    replaced: frozenset[str] = frozenset()
+    """What applying a patch to its base produced.
+
+    Example, for a patch that edits SOUL.md and adds ``data/tool.csv``:
+    ``spec`` is the base's spec with SOUL.md's digest replaced and the new
+    resource entry; ``writes`` holds the two new byte strings by digest, to
+    be filed in the content store; ``touched`` has one ``OpTouch`` per op;
+    ``changed_files`` maps ``persona/SOUL.md`` to its before/after bytes for
+    the rewrite measure; ``replaced`` would name ``resources/data/tool.csv``
+    only if the add replaced an existing entry of another kind.
+    """
+
+    spec: dict[str, Any]  #: the resulting spec (contract §4), canonical order
+    writes: tuple[tuple[str, bytes], ...]  #: ``(digest, bytes)`` the patch produced, not yet in the store
+    touched: tuple[OpTouch, ...]  #: one per op, in op order
+    changed_files: dict[str, FileChange] = field(default_factory=dict)  #: gene path → before/after bytes
+    replaced: frozenset[str] = frozenset()  #: gene paths an add replaced (a removed-then-added entry)
 
 
 def _is_text(data: bytes) -> bool:

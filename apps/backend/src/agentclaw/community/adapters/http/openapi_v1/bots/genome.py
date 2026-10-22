@@ -180,7 +180,7 @@ async def record_genome_patch(
     bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
     run = None
     if body.run is not None:
-        run = RunScope(run_id=body.run.run_id, binding_id=body.run.binding_id, allowed_genes=tuple(body.run.allowed_genes))
+        run = RunScope(run_id=body.run.run_id, allowed_genes=tuple(body.run.allowed_genes))
     actor = _actor(actor_id, caller, run=run)
     recorded = await registry.record_patch(bot, body.patch, created_by=actor, status=RevisionStatus(body.status), run=run)
     return envelope(_recorded(recorded, response), request)

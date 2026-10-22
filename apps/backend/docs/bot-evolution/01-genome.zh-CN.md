@@ -1298,9 +1298,8 @@ class RecordedRevision:
 
 @dataclass(frozen=True)
 class RunScope:
-    run_id: str
-    binding_id: str
-    allowed_genes: list[str]
+    run_id: str                      # 命名 candidate/<run_id>/<n>
+    allowed_genes: list[str]         # 运行的绑定允许其改动的基因
 
 class GenomeRegistryProtocol(Protocol):          # core/bot_genome/genome_registry_protocol.py
     # --- revisions -------------------------------------------------------
@@ -1431,7 +1430,7 @@ GET /openapi/v1/bots/bot_123/genome/revisions?status=candidate&parent=sha256:a90
 // Request: a patch recorded as a run candidate (internal caller: Evolution Run)
 {
   "status": "candidate",
-  "run": {"run_id": "run_7f3", "binding_id": "bind_01", "allowed_genes": ["persona", "skills"]},
+  "run": {"run_id": "run_7f3", "allowed_genes": ["persona", "skills"]},
   "patch": {
     "patch_schema": 1,
     "base": "sha256:a90b…",
@@ -1703,7 +1702,7 @@ async def submit_candidate(run: Run, candidate: Candidate) -> str:
     rev = await genome_api.record_revision(
         bot_id=run.bot.bot_id, entity_id=run.bot.owner_id,   # the run's bot: id in the path, owner as entity_id
         status="candidate",
-        run={"run_id": run.id, "binding_id": run.binding_id, "allowed_genes": run.allowed_genes},
+        run={"run_id": run.id, "allowed_genes": run.allowed_genes},
         patch=candidate.patch,
         idempotency_key=f"{run.id}/candidate/{candidate.patch_digest}",
     )

@@ -13,6 +13,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 _REV_DESCRIPTION = "A revision id (`sha256:<hex64>`), `r<seq>`, or a ref name such as `active`, `previous`, `draft` or `candidate/<run>/<n>`."
+RevisionStatusLiteral = Literal["draft", "candidate", "accepted", "rejected", "promoted", "archived"]
 _STATUS_DESCRIPTION = (
     "`draft` (an owner's edit), `candidate` (a run's proposal, undecided), `accepted` (the gate accepted it), "
     "`rejected`, `promoted` (made `active` at least once), `archived` (retired; never deleted)."
@@ -25,21 +26,21 @@ class ProvenancePayload(BaseModel):
     kind: Literal["user", "strategy_run"] = Field(description="`user` for a person, `strategy_run` for an evolution run.")
     actor: str = Field(description="The user id, or the strategy that proposed the change.")
     run_id: str | None = Field(default=None, description="The evolution run, for `strategy_run`.")
-    step: str | None = Field(default=None, description="The run step, for `strategy_run`.")
+    step: str | None = Field(default=None, description="For `strategy_run`: the strategy's step inside that run which produced the record, e.g. `propose` (a run can submit several candidates from several steps).")
 
 
 class RevisionSummary(BaseModel):
     """A revision's metadata, as listed; the content is read with `GET …/revisions/{rev}`."""
 
     id: str = Field(description="The content-hash id, `sha256:<hex64>`: the same content has the same id on any bot.")
-    seq: int = Field(description="The per-bot sequence number, for people: `r42` is seq 42. Never an identity.")
+    seq: int = Field(description="The per-bot sequence number: this is the bot's N-th recorded revision, counting from 1, so `r42` is its 42nd. A handle for people, never an identity (two bots both have an `r1`).")
     parent: str | None = Field(description="The revision this one was derived from; null for the bot's first.")
-    status: str = Field(description=_STATUS_DESCRIPTION)
+    status: RevisionStatusLiteral = Field(description=_STATUS_DESCRIPTION)
     created_by: ProvenancePayload = Field(description="Who recorded it.")
     created_at: datetime = Field(description="When it was recorded (UTC).")
-    patch_digest: str | None = Field(description="The patch that produced it (its candidate id), if it came from a patch.")
-    evidence: list[str] = Field(default_factory=list, description="Experience references the patch cited (`episode:<id>`, `feedback:<id>`, `eval:<id>`).")
-    evaluations: list[str] = Field(default_factory=list, description="Evaluation ids attached by verification.")
+    patch_digest: str | None = Field(description="The patch that produced it (its candidate id, `sha256:<hex64>`). Null when the revision did not come from a patch: a capture of the bot (`POST …/revisions:capture`) or a policy change (`PUT …/policy`).")
+    evidence: list[str] = Field(default_factory=list, description="Experience references the patch cited, e.g. `[\"episode:ep_91\", \"feedback:fb_311\"]` (`episode:<id>`, `feedback:<id>`, `eval:<id>`); empty for a capture or a policy change.")
+    evaluations: list[str] = Field(default_factory=list, description="Ids of the verification evaluations run on this revision, e.g. `[\"ev_301\", \"ev_302\"]`; empty until verification attaches one.")
     annotations: dict[str, str] = Field(default_factory=dict, description="Free-form platform notes, outside the hash.")
 
 
@@ -66,11 +67,11 @@ class RevisionRecorded(BaseModel):
 
     id: str = Field(description="The recorded revision's content-hash id.")
     seq: int = Field(description="Its per-bot sequence number.")
-    status: str = Field(description=_STATUS_DESCRIPTION)
+    status: RevisionStatusLiteral = Field(description=_STATUS_DESCRIPTION)
     parent: str | None = Field(description="The revision it was derived from; null for the bot's first.")
-    patch_digest: str | None = Field(description="The patch's candidate id when it came from a patch.")
+    patch_digest: str | None = Field(description="The patch's candidate id when it came from a patch; null for a capture or a policy change.")
     risk_tier: str | None = Field(default=None, description="The patch's tier `T0`–`T3` (contract §6.3); null for a capture or a policy change.")
-    flags: list[str] = Field(default_factory=list, description="Gene paths of files the patch rewrote (more than 2/5 of their lines).")
+    flags: list[str] = Field(default_factory=list, description="Gene paths of files the patch rewrote rather than edited: a text file with more than 2/5 of its lines changed, or an entry replaced by one of another kind. E.g. `[\"persona/SOUL.md\"]` when a `file.edit` rewrote most of SOUL.md, which lifts that op to at least T2 (contract §6.2).")
     ref: str | None = Field(default=None, description="The `candidate/<run>/<n>` ref a run's candidate was named; null otherwise.")
     created: bool = Field(description="False when the content already existed: same id, same seq, same parent.")
 
@@ -78,20 +79,19 @@ class RevisionRecorded(BaseModel):
 class RunScopePayload(BaseModel):
     """The evolution run a candidate is recorded for, and what it may change."""
 
-    run_id: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,64}$", description="The run's id; names the candidate ref `candidate/<run_id>/<n>`, so it is one ref segment: `[A-Za-z0-9_.-]`, 1 to 64 characters.")
-    binding_id: str = Field(min_length=1, max_length=64, description="The strategy binding the run executes.")
-    allowed_genes: list[str] = Field(description="Gene paths the run may change; every op must be covered by one.")
+    run_id: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,64}$", description="The run's id (one execution of a strategy for this bot, e.g. `run_7f3`); it names the candidate ref `candidate/<run_id>/<n>`, so it is one ref segment: `[A-Za-z0-9_.-]`, 1 to 64 characters.")
+    allowed_genes: list[str] = Field(description="Gene paths the run's binding lets it change, e.g. `[\"persona\", \"skills/refund-policy\"]`; every op of the patch must fall under one of them, or the patch is refused with `gene_not_allowed`.")
 
 
 class RecordPatchRequest(BaseModel):
     """Record a revision by applying a Genome Patch to its own `base`."""
 
     status: Literal["draft", "candidate"] = Field(description="`draft` for an owner's edit, `candidate` for a run's proposal.")
-    run: RunScopePayload | None = Field(default=None, description="Required with `candidate` and refused with `draft`: the run, which bounds the genes and names the candidate ref.")
-    patch: dict[str, Any] = Field(description="A Genome Patch (contract §6); `patch.base` is the revision it applies to.")
+    run: RunScopePayload | None = Field(default=None, description="Required with `candidate` and refused with `draft`: the evolution run that proposed the patch. It bounds the patch (every op must fall under the run's `allowed_genes`) and names the revision's ref `candidate/<run_id>/<n>`.")
+    patch: dict[str, Any] = Field(description="A Genome Patch (contract §6): `{patch_schema, base, ops, rationale, evidence}`, where `base` is the id of this bot's revision the ops apply to.")
 
     @model_validator(mode="after")
-    def _run_matches_status(self) -> "RecordPatchRequest":
+    def _run_matches_status(self) -> RecordPatchRequest:
         if (self.status == "candidate") != (self.run is not None):
             raise ValueError("`run` is required with status `candidate` and not allowed with `draft`")
         return self
@@ -127,7 +127,7 @@ class GenomeDiffPayload(BaseModel):
     against: str = Field(description="The revision it is compared with.")
     changes: list[GeneChangePayload] = Field(description="Every gene that differs, in gene-path order.")
     risk_tier: str = Field(description="The highest tier a patch making these changes would get (`T0`–`T3`).")
-    rewrite_flags: list[str] = Field(description="Gene paths of files rewritten beyond the 2/5 threshold.")
+    rewrite_flags: list[str] = Field(description="Gene paths of files a patch making these changes would be flagged `rewrite` on: a text file with more than 2/5 of its lines changed, or an entry replaced by one of another kind, e.g. `[\"persona/SOUL.md\"]`.")
 
 
 class GenomeRefPayload(BaseModel):
@@ -149,8 +149,8 @@ class GenomeRefsPayload(BaseModel):
 class MoveRefRequest(BaseModel):
     """Move the `draft` ref by compare-and-swap."""
 
-    revision: str = Field(description=_REV_DESCRIPTION)
-    expected_revision: str | None = Field(default=None, description="Where the ref points now, or null if it does not exist yet.")
+    revision: str = Field(description="The revision to point `draft` at (the ref is named by the path): " + _REV_DESCRIPTION)
+    expected_revision: str | None = Field(default=None, description="The revision id `draft` points at now, as the caller last read it, or null if `draft` does not exist yet; the move happens only if that is still true (`409` otherwise).")
     reason: str | None = Field(default=None, max_length=1024, description="Why, for the ref log.")
 
 
@@ -177,13 +177,13 @@ class PromotionPayload(BaseModel):
     ref: str = Field(description="The ref it moved (`active`).")
     revision: str = Field(description="The revision it moved the ref to.")
     from_revision: str | None = Field(description="Where the ref pointed before; null for a bot's first promotion.")
-    document_digest: str = Field(description="The digest of the compiled document's canonical JSON; what the apply report must repeat.")
+    document_digest: str = Field(description="`sha256:<hex64>` of the compiled document's canonical JSON (the revision rendered in the Manifest v1 field layout, contract §7); the apply report repeats it, which is how the registry later tells which revision a bot runs.")
     going_back: bool = Field(description="True when the target had been promoted before and is not the current `active`.")
     actor: ProvenancePayload = Field(description="Who promoted.")
     reason: str = Field(description="Why, as the actor said.")
     status: Literal["applying", "applied", "apply_failed"] = Field(description="`applying` while delivery starts, then `applied` or `apply_failed`.")
-    apply_kind: str = Field(description="The delivery seam that took it (`pending` until direct delivery lands).")
-    apply_reference: str | None = Field(description="The seam's handle (an apply id), or null.")
-    apply_detail: str = Field(description="The seam's last word; never raw error text.")
+    apply_kind: str = Field(description="Which delivery seam took the promotion: `pending` (RSI-03: no delivery exists yet, every promotion is refused before the refs move) or `direct` (RSI-04: direct delivery into the apply engine). Named by the seam, so a future seam adds a value.")
+    apply_reference: str | None = Field(description="The seam's handle for the delivery it started, an apply id such as `0123456789abcdef0123456789abcdef`; it is what `applied_revision` joins the bot's last apply on. Null when delivery did not start.")
+    apply_detail: str = Field(description="One sentence from the seam on how the start went, e.g. `started`; a failure names the error type only, never its text.")
     created_at: datetime = Field(description="When the refs moved (UTC).")
-    document: dict[str, Any] | None = Field(default=None, description="The compiled document; only on a single promotion read.")
+    document: dict[str, Any] | None = Field(default=None, description="The compiled document the promotion recorded (the revision in the Manifest v1 field layout, contract §7); present on a single promotion read, null in listings.")

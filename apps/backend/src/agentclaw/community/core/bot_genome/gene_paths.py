@@ -34,7 +34,12 @@ __all__ = [
 
 
 def decode_segment(segment: str) -> str:
-    """The name a canonical segment spells. Raises ``ValueError`` on a malformed escape."""
+    """The name a canonical segment spells. Raises ``ValueError`` on a malformed escape.
+
+    Examples: ``"SOUL.md"`` → ``"SOUL.md"``; ``"how%20to.md"`` → ``"how to.md"``;
+    ``"a%2Fb"`` → ``"a/b"`` (a slash inside one name, as opposed to a path
+    separator); ``"%4"`` → ``ValueError``.
+    """
     out = bytearray()
     i = 0
     while i < len(segment):
@@ -110,10 +115,16 @@ def mcp_path(server_code: str | None = None) -> str:
 
 
 def op_gene_path(op: dict[str, Any]) -> str:
-    """The gene path a patch op is checked against (README §6.1).
+    """The gene path a patch op targets, which policy and ``allowed_genes`` are checked against (README §6.1).
 
-    ``file.edit`` names its target directly; every other op's path is built
-    from its key field. The op is assumed schema-valid.
+    Not a kind of gene path: ``op`` is a patch op (``{"op": "persona.add",
+    "type": "SOUL.md", …}``), and the answer is one of the ordinary paths
+    below. ``file.edit`` names its target directly; every other op's path is
+    built from its key field. The op is assumed schema-valid. Examples:
+    ``{"op": "file.edit", "target": "persona/SOUL.md"}`` → ``"persona/SOUL.md"``;
+    ``{"op": "skill.add", "name": "refund-policy"}`` → ``"skills/refund-policy"``;
+    ``{"op": "resource.remove", "path": "data/faq.csv"}`` → ``"resources/data/faq.csv"``;
+    ``{"op": "memory.set_mode", "mode": "merge"}`` → ``"memory"``.
     """
     kind = op["op"]
     if kind == "file.edit":

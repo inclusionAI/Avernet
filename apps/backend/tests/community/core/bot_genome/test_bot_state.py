@@ -113,11 +113,12 @@ def _reader(**overrides: Any) -> PlatformBotStateReader:
     return PlatformBotStateReader(**deps)
 
 
-def test_platform_managed_teclaw_is_refused_and_nothing_else_is() -> None:
+@pytest.mark.asyncio
+async def test_platform_managed_teclaw_is_refused_and_nothing_else_is() -> None:
     teclaw = BotRef(owner_id="u1", bot_id="b", entity_id="e", engine_type="teclaw", bot_type="personal")
-    assert _reader(teclaw_platform_managed=True).refusal(teclaw) is not None
-    assert _reader(teclaw_platform_managed=False).refusal(teclaw) is None
-    assert _reader(teclaw_platform_managed=True).refusal(BOT) is None
+    assert await _reader(teclaw_platform_managed=True).refusal(teclaw) is not None
+    assert await _reader(teclaw_platform_managed=False).refusal(teclaw) is None
+    assert await _reader(teclaw_platform_managed=True).refusal(BOT) is None
 
 
 @pytest.mark.asyncio
@@ -177,17 +178,19 @@ async def test_a_listed_file_that_cannot_be_read_is_refused() -> None:
     assert caught.value.reasons[0].code == "resource_unreadable"
 
 
-def test_mcp_servers_exclude_platform_defaults_and_carry_the_bot_override() -> None:
+@pytest.mark.asyncio
+async def test_mcp_servers_exclude_platform_defaults_and_carry_the_bot_override() -> None:
     reader = _reader(
         activation=FakeActivation({"mcp.b", "mcp.a", "mcp.default"}, {"mcp.default"}),
         mcp_config=FakeMcpConfig({"mcp.a": {"url": "https://a.example.com/mcp"}, "mcp.b": {}}),
     )
-    assert reader.mcp_servers(BOT) == ({"server_code": "mcp.a", "config": {"url": "https://a.example.com/mcp"}}, {"server_code": "mcp.b"})
+    assert await reader.mcp_servers(BOT) == ({"server_code": "mcp.a", "config": {"url": "https://a.example.com/mcp"}}, {"server_code": "mcp.b"})
 
 
-def test_script_body_gets_the_placeholder_substitution_apply_performs(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_script_body_gets_the_placeholder_substitution_apply_performs(monkeypatch) -> None:
     monkeypatch.setattr("agentclaw.community.core.bot_genome.capture.bot_state.get_current_env", lambda: "pre")
     monkeypatch.setattr("agentclaw.community.core.bot_genome.capture.bot_state.get_current_avernet_tenant", lambda: "acme")
     reader = _reader(scripts=FakeScripts("echo ${BOT_ENV} ${BOT_TENANT} ${BOT_ENGINE_TYPE}\n"))
-    assert reader.script_body(BOT) == "echo pre acme openclaw\n"
-    assert _reader(scripts=FakeScripts("")).script_body(BOT) is None
+    assert await reader.script_body(BOT) == "echo pre acme openclaw\n"
+    assert await _reader(scripts=FakeScripts("")).script_body(BOT) is None
