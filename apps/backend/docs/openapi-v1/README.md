@@ -2041,10 +2041,12 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 
 ## Changelog (append a dated line whenever you move the board)
 
-- **2026-10-22** — **acli: a missing engine endpoint is `409 engine_outdated`.** Any
-  `404` from the engine (not only FastAPI's own) now answers `409` with
-  `data.code: engine_outdated`, instead of `502` "could not be reached", and an
-  add or remove ends at once instead of retrying for up to 40 minutes.
+- **2026-10-22** — **acli: a missing engine endpoint is `409 engine_outdated`.** A
+  `404` to an install, uninstall, cancel or listing (not only FastAPI's own) now
+  answers `409` with `data.code: engine_outdated`, instead of `502` "could not be
+  reached", and an add or remove ends at once instead of retrying for up to 40
+  minutes. A `404` while polling an operation the engine accepted is still
+  retried.
 - **2026-10-21** — **acli CLI operations.** Add, remove and the new install/uninstall
   cancels are operations run by backend tasks: optional `async`, a 30 s sync wait
   then `202`, `GET …/cli-operations[/{operation_id}]` to read them, one add/remove
