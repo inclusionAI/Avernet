@@ -106,6 +106,16 @@ def test_the_cross_field_rules_of_the_contract_bite(body: dict) -> None:
         parse_ops([body])
 
 
+def test_evidence_is_bounded_so_the_revision_row_can_hold_it() -> None:
+    base = json.loads(PATCH_FILES[1].read_text(encoding="utf-8"))
+    GenomePatch.from_json(dict(base, evidence=[f"episode:ep_{i}" for i in range(100)]))
+    with pytest.raises(ValidationError):
+        GenomePatch.from_json(dict(base, evidence=[f"episode:ep_{i}" for i in range(101)]))
+    with pytest.raises(ValidationError):
+        GenomePatch.from_json(dict(base, evidence=["episode:" + "x" * 121]))
+    assert len(json.dumps([f"episode:{'x' * 120}"] * 100)) < 65535, "the worst case fits a TEXT column"
+
+
 def test_the_value_sets_are_the_contracts() -> None:
     assert _literal_values(PersonaFileType) == set(schema_property(_REV, "definitions", "personaType")["enum"])
     assert _literal_values(MemoryMode) == set(schema_property(_REV, "definitions", "memorySpec", "properties", "mode")["enum"])

@@ -50,7 +50,7 @@
       "pattern": "^(?![/~])(?!.*(^|/)\\.{1,2}(/|(?![\\s\\S])))(?!.*//)[A-Za-z0-9._/-]+(?![\\s\\S])"
     },
     "memoryKey": {"description": "Stable name of one curated memory item, e.g. 'returns-window'; patch ops address an item by it.", "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*(?![\\s\\S])", "maxLength": 128},
-    "evidenceRef": {"description": "Reference to an Experience record that motivated a change or an item: 'episode:<id>', 'feedback:<id>' or 'eval:<id>' (01-genome.md §2.2).", "type": "string", "pattern": "^(episode|feedback|eval):[A-Za-z0-9_-]+(?![\\s\\S])"},
+    "evidenceRef": {"description": "Reference to an Experience record that motivated a change or an item: 'episode:<id>', 'feedback:<id>' or 'eval:<id>' (01-genome.md §2.2).", "type": "string", "maxLength": 128, "pattern": "^(episode|feedback|eval):[A-Za-z0-9_-]+(?![\\s\\S])"},
     "sortedUniqueStrings": {
       "description": "A list of strings without duplicates, sorted ascending in code-point order (README §3.1). JSON Schema checks uniqueness; the Registry checks the order.",
       "type": "array",
@@ -258,7 +258,7 @@
         "created_at": {"description": "When it was recorded, UTC, RFC 3339 with a Z suffix.", "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z(?![\\s\\S])"},
         "status": {"description": "Where the revision is in its lifecycle (01-genome.md §4.4). Besides status, only annotations and the append-only evaluations change after recording.", "type": "string", "enum": ["draft", "candidate", "accepted", "rejected", "promoted", "archived"]},
         "patch_digest": {"description": "The stored patch that turned parent into this revision; null when a whole Manifest document was recorded.", "oneOf": [{"type": "null"}, {"$ref": "#/definitions/digest"}]},
-        "evidence": {"description": "The Experience records that motivated the change; [] for most manual edits.", "type": "array", "items": {"$ref": "#/definitions/evidenceRef"}},
+        "evidence": {"description": "The Experience records that motivated the change; [] for most manual edits. At most 100.", "type": "array", "maxItems": 100, "items": {"$ref": "#/definitions/evidenceRef"}},
         "evaluations": {"description": "Ids of the Verification evaluations run on this revision; scores stay in Verification. Append-only: [] at record time, then Verification appends an id when an evaluation of this revision finishes.", "type": "array", "items": {"type": "string", "pattern": "^ev_[A-Za-z0-9]+(?![\\s\\S])"}},
         "annotations": {"description": "Free-form labels added after recording, e.g. {'experiment': 'escalation-wording'}.", "type": "object", "additionalProperties": {"type": "string"}}
       }

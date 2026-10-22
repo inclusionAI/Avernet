@@ -704,7 +704,8 @@ matters for resources, whose add and remove are T1.
 - Limits mirror the Manifest: 50 entries per category, 64 KiB of UTF-8 per
   inline content value and per unified diff (a change that needs more is
   sent as whole-file content by digest), at most 500 `file_diffs` in a
-  `skill.update`,
+  `skill.update`, at most 100 `evidence` refs of at most 128 characters
+  (the revision row stores them in a 64 KiB column),
   and the fetch-time size limits for persona files (1 MiB), skills (100 MiB),
   files (100 MiB) and trees (200 MiB, 5000 files).
 

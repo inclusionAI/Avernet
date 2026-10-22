@@ -64,6 +64,7 @@ Heading = constrained(_PATCH, *_TEXT_EDITS, 0, "properties", "heading")
 Anchor = constrained(_PATCH, *_TEXT_EDITS, 1, "properties", "anchor")
 InlineText = constrained(_PATCH, "definitions", "content", "oneOf", 0)
 Rationale = constrained(_PATCH, "properties", "rationale")
+MAX_EVIDENCE_REFS: int = schema_property(_PATCH, "properties", "evidence")["maxItems"]
 _TARGET_SHAPE = re.compile(schema_property(_PATCH, "definitions", "fileEdit", "properties", "target", "allOf", 1)["pattern"])
 
 
@@ -254,7 +255,7 @@ class GenomePatch(ContractModel):
     base: Digest = Field(description="The revision this patch is written against; every op must apply to it exactly.")
     ops: list[PatchOp] = Field(min_length=1, max_length=200, description="The changes, applied in order.")
     rationale: Rationale = Field(description="Why the change is proposed, in plain language for the reviewer.")
-    evidence: list[EvidenceRef] = Field(description="The Experience records that motivated the patch; required unless every op can be motivated by the rationale alone (README §6.4).")
+    evidence: list[EvidenceRef] = Field(max_length=MAX_EVIDENCE_REFS, description="The Experience records that motivated the patch, at most 100; required unless every op can be motivated by the rationale alone (README §6.4).")
 
 
 _OPS = TypeAdapter(list[PatchOp])

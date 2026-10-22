@@ -11,7 +11,7 @@
     "base": {"$ref": "genome-revision.schema.json#/definitions/revisionId", "description": "The revision this patch is written against; every op must apply to it exactly (README §6.4)."},
     "ops": {"description": "The changes, applied in order.", "type": "array", "minItems": 1, "maxItems": 200, "items": {"$ref": "#/definitions/op"}},
     "rationale": {"description": "Why the change is proposed, in plain language for the reviewer.", "type": "string", "minLength": 1, "maxLength": 8192},
-    "evidence": {"description": "The Experience records that motivated the patch; required unless every op can be motivated by the rationale alone (README §6.4).", "type": "array", "items": {"$ref": "genome-revision.schema.json#/definitions/evidenceRef"}}
+    "evidence": {"description": "The Experience records that motivated the patch; required unless every op can be motivated by the rationale alone (README §6.4). At most 100 refs of at most 128 characters.", "type": "array", "maxItems": 100, "items": {"$ref": "genome-revision.schema.json#/definitions/evidenceRef"}}
   },
   "definitions": {
     "op": {
