@@ -176,11 +176,16 @@ class CodeContent(ArtifactContent):
 
 ## 4. 回调上报契约(产物怎么进来)
 
-产物信息的上报**只走接力链路**(用户定稿):`POST /api/v1/collaboration/tasks/callback/report`(`adapters/http/task/router.py:463`,两事件合约落点 `:559`),在 `ExecutionEventDTO`(`schemas_relay_report.py`,`extra=forbid`)的**顶层**新增 optional `artifacts`(产物列表,与 `trace` 同级)。列表 item 为**扁平自描述结构**(用户定稿):每个 item 携带产物名、kind、归属字段和**恰好一个**内容字段,四个内容字段互斥、各自承载对应分支的 JSON **字符串**:
+产物信息的上报**只走接力链路**(用户定稿):`POST /api/v1/collaboration/tasks/callback/report`(`adapters/http/task/router.py:463`,两事件合约落点 `:559`)。**(2026-10-22 用户定稿,推翻原 event 内方案):`artifacts` 位于报文顶层,与 `trace`/`task_acceptance_result` 平级**——产物是“一次执行的结果清单”而非事件内部细节;携带条件仍是仅 `event_type=EXECUTION_RESULT` 且 `execution_decision=ACCEPTED`(其余组合 to_domain 整体拒绝)。列表 item 为**扁平自描述结构**:每个 item 携带产物名、kind、归属字段和**恰好一个**内容字段,四个内容字段互斥、各自为对应分支的 **JSON 对象**(2026-10-22 用户定稿,不再收 JSON 字符串;核心解析对字符串仍容忍,为手动 API 兼容):
 
 ```json
 {
-  "artifacts": [
+  "task_id": "t-a1b2",
+  "node_id": "relay-ab12cd34",
+  "event_id": "evt-1",
+  "relay_token": "rtok-…",
+  "event_type": "EXECUTION_RESULT",
+  "artifacts": [                        // ← 报文顶层,与 trace 平级
     {
       "artifact_name": "数据分析报告",        // 可选(见 3.6);file 产物缺省回落 file_content.file_name
       "artifact_kind": "file",             // text / file / url_link / code,须与非空 content 字段一致
@@ -188,16 +193,16 @@ class CodeContent(ArtifactContent):
       "task_id": "t-a1b2",                  // 与报文级 task_id 交叉校验
       "node_id": "relay-ab12cd34",           // 与报文级 node_id 交叉校验
       "attempt": 1,                          // 与图上 harness_retries 快照交叉校验
-      "text_content": null,                 // text 分支 JSON 字符串,如 "{\"text\": \"...\"}"
-      "file_content": "{
-        \"storage_type\": \"bot_workspace\",
-        \"storage_id\": \"reports/analysis-report.md\",
-        \"file_type\": \"text/markdown\",
-        \"file_name\": \"analysis-report.md\",
-        \"file_id\": null
-      }",                                 // BOT_WORKSPACE:storage_id=工作区相对路径(拒绝对路径/~/.. 逃逸),file_id 恒 null
-      "url_link_content": null,             // url_link 分支 JSON 字符串,如 "{\"url\":\"https://...\",\"type\":\"dima需求\"}"
-      "code_content": null                  // code 分支 JSON 字符串,如 "{\"code_base_name\":\"avernet\",...}"
+      "text_content": null,                 // text 分支内容对象,如 {"text": "..."}
+      "file_content": {
+        "storage_type": "bot_workspace",
+        "storage_id": "reports/analysis-report.md",
+        "file_type": "text/markdown",
+        "file_name": "analysis-report.md",
+        "file_id": null
+      },                                   // BOT_WORKSPACE:storage_id=工作区相对路径(拒绝对路径/~/.. 逃逸),file_id 恒 null
+      "url_link_content": null,             // url_link 分支内容对象,如 {"url": "https://…", "type": "dima需求"}
+      "code_content": null                  // code 分支内容对象,如 {"code_base_name": "avernet", …}
     },
     {
       "artifact_name": "分析报告 PDF 版",
@@ -207,21 +212,24 @@ class CodeContent(ArtifactContent):
       "node_id": "relay-ab12cd34",
       "attempt": 1,
       "text_content": null,
-      "file_content": "{
-        \"storage_type\": \"session_file\",
-        \"storage_id\": \"sess-xxx\",
-        \"file_type\": \"markdown\",
-        \"file_name\": \"analysis-report.md\",
-        \"file_id\": \"f987\"
-      }",                                 // SESSION_FILE:storage_id=群聊会话 id,file_id 必填
+      "file_content": {
+        "storage_type": "session_file",
+        "storage_id": "sess-xxx",
+        "file_type": "application/pdf",
+        "file_name": "analysis-report.pdf",
+        "file_id": "f-987"
+      },                                   // SESSION_FILE:storage_id=群聊会话 id,file_id 必填
       "url_link_content": null,
       "code_content": null
     }
-  ]
+  ],
+  "event": {
+    "execution_decision": "ACCEPTED",      // 只有 ACCEPTED 允许携带 artifacts
+    "output_patch": {"…" : "…"},
+    "…": "…"
+  }
 }
 ```
-
-> **可读性说明**:示例中 `file_content` 为排版展开;线上报文里它是**不含换行的单行 JSON 字符串**(JSON 字符串字面量不允许裸换行,序列化侧输出压缩单行,解析侧对空白无感)。
 
 `file_content` 两种形态对照(BOT_WORKSPACE:`storage_id`=工作区相对路径、`file_id` 恒 null;SESSION_FILE:`storage_id`=群聊会话 id、`file_id` 必填):
 
@@ -474,3 +482,10 @@ CREATE TABLE IF NOT EXISTS `task_artifact` (
 
 1. **content 字段放开对象形态(方案取舍 #23)**:独立 API 不背 relay 线上 JSON 字符串包袱——`POST /artifacts` 的四个 `*_content` 字段接受 **JSON 对象或 JSON 字符串**(`TaskArtifactAddRequestDTO` 放开为 `dict | str`),对象由路由层归一为单行字符串后进核心 `parse_artifact_report_item`,校验语义(kind-tag 禁入/互斥/路径逃逸/非 http(s))逐字节不变;relay `/callback/report` 契约**不动**,仍只认字符串。
 2. **spec §4 示例纠错**:`file_content` 的 BOT_WORKSPACE 示例原写 `"/home/admin/.openclaw/workspace/"`(绝对路径+目录)——与 §3.4/构造器的"storage_id 须工作区相对路径"约束自相矛盾,已改为 `"reports/analysis-report.md"`(`file_type` 同步从 `"markdown"` 改 MIME 形 `"text/markdown"`);用户照旧示例必 422。另外注意:`file_type` 是必填(构造器非空校验),**不做缺省推断**——"按扩展名推断"是上报文档口径,解析器不代填。
+
+### 12.6 增补修正(2026-10-22 第三次,用户定稿推翻设计者建议):relay artifacts 报文位置与 content 形态
+
+1. **`artifacts` 移到报文顶层**(与 `trace`/`task_acceptance_result` 平级),不再是 `ExecutionEventDTO` 顶层字段——设计者(我)12.5 前一轮论证过"事件载荷应留在 event 内",用户权衡后仍定稿报文级平级(读协议者第一眼可见、与报文级归属锚同屏);代价与让步:①"仅 ACCEPTED 可携带"从字段同居降为跨对象校验(to_domain 内完成);②PLANNED/PLAN_RESULT 排他由 `ExecutionEventDTO` 类型自然排除改为 to_domain 显式规则(`*_must not carry artifacts` → TaskStateError → 409);③`event→TaskNodePatch` 的镜像在 to_domain 内回流(顶层 artifacts 仍进 `artifact_patch`),协议面上不再一一对应。撤销本 spec §12.5 中"建议保留 event 内"的对 apply retrospect——历史记录保留在案。
+2. **relay 线上 content 字段改收 JSON 对象**(不收字符串):`ArtifactReportItemDTO` 四个 `*_content` 为 `dict | None`;核心 `parse_artifact_report_item` 同时容忍对象与字符串两种形态,字符串路径保留给手动 API 的向后兼容与既有单测。
+3. 手动 `POST /artifacts` 四个 content 字段(text/file/url_link/code)自 12.5 起即已全部支持对象与字符串,此点为澄清、非变更。
+4. 契约测试同步:`test_router.py` wire 用例改顶层+对象形态并增补 DECLINED→409;`test_artifact_report_item.py` 增报文顶层 DTO 契约类(ACCEPTED 落 patch/DECLINED 拒/无字段 None/[]明空/PLAN_RESULT 拒/event 内携带 forbidden/旧报文字节不变)与对象形态解析一致性/对象禁 kind tag/非对象非字符串拒绝单测。全量门禁 1915 passed, 27 skipped。

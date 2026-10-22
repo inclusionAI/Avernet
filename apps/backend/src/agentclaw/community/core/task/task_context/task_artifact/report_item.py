@@ -76,14 +76,19 @@ def parse_artifact_report_item(
         )
 
     payload = raw[expected_field]
-    if not isinstance(payload, str):
-        raise ValueError(f"{expected_field} 必须是 JSON 字符串")
-    try:
-        fields = json.loads(payload)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"{expected_field} 不是合法 JSON: {exc}") from exc
-    if not isinstance(fields, dict):
-        raise ValueError(f"{expected_field} 必须是 JSON object")
+    if isinstance(payload, dict):
+        # 对象形态(2026-10-22 用户定稿,线上契约):字段即对象,直通分支构造器。
+        fields = payload
+    elif isinstance(payload, str):
+        # 字符串形态(兼容旧约/手动 API 同构容忍):单行 JSON 字符串。
+        try:
+            fields = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{expected_field} 不是合法 JSON: {exc}") from exc
+        if not isinstance(fields, dict):
+            raise ValueError(f"{expected_field} 必须是 JSON object")
+    else:
+        raise ValueError(f"{expected_field} 必须是 JSON object 或 JSON 字符串")
     # content JSON 不含 kind tag(§4 规则 2)——判别由字段名承载,tag 由序列化器注入。
     if "kind" in fields:
         raise ValueError(f"{expected_field} 不应包含 kind tag")

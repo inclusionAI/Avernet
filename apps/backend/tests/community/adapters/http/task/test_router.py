@@ -1023,7 +1023,11 @@ class TestRouter:
 
 @pytest.mark.unit
 def test_relay_report_with_malformed_artifacts_gets_4xx_envelope(task_client):
-    """评审修正:artifact 解析失败(基 ValueError)必须落 4xx 错误信封,不得 500。"""
+    """评审修正:artifact 解析失败(基 ValueError)必须落 4xx 错误信封,不得 500。
+
+    2026-10-22 契约调整:artifacts 位于报文顶层(与 trace 平级),content 字段收 JSON 对象。
+    本例给出**非对象可解析**的携带方式之一:file 分支缺 file_type(构造器非空校验失败)。
+    """
 
     client, svc = task_client
     body = {
@@ -1032,30 +1036,67 @@ def test_relay_report_with_malformed_artifacts_gets_4xx_envelope(task_client):
         "event_id": "exec-artifact-bad",
         "relay_token": "run-1",
         "event_type": "EXECUTION_RESULT",
+        "artifacts": [
+            {
+                "artifact_kind": "file",
+                "session_id": "sess-9",
+                "task_id": "task-1",
+                "node_id": "task-1",
+                "attempt": 0,
+                "text_content": None,
+                "file_content": {
+                    "storage_type": "bot_workspace",
+                    "storage_id": "reports/x.md",
+                    "file_name": "x.md",
+                    "file_id": None,
+                },  # 缺 file_type → 分支构造器 fail-loud
+                "url_link_content": None,
+                "code_content": None,
+            }
+        ],
         "event": {
             "execution_decision": "ACCEPTED",
             "actual_goal": {"objective": "o", "acceptances": []},
             "local_acceptance_result": {"verdict": "DONE", "done_items": [], "gap_items": []},
             "output_patch": {},
-            "artifacts": [
-                {
-                    "artifact_kind": "file",
-                    "session_id": "sess-9",
-                    "task_id": "task-1",
-                    "node_id": "task-1",
-                    "attempt": 0,
-                    "text_content": None,
-                    "file_content": "not-json{",
-                    "url_link_content": None,
-                    "code_content": None,
-                }
-            ],
         },
     }
     r = client.post("/api/v1/collaboration/tasks/callback/report", json=body)
     assert r.status_code != 500, "malformed artifact report must not surface as 500"
     assert 400 <= r.status_code < 500
     assert "cache_id" not in r.text  # 保守:不回显原文 payload 的键
+
+
+@pytest.mark.unit
+def test_relay_report_declined_with_artifacts_rejected(task_client):
+    """DECLINED + 顶层 artifacts → TaskStateError → 409,不落库。"""
+
+    client, _service = task_client
+    body = {
+        "task_id": "task-1",
+        "node_id": "task-1",
+        "event_id": "exec-artifact-declined",
+        "relay_token": "run-1",
+        "event_type": "EXECUTION_RESULT",
+        "artifacts": [
+            {
+                "artifact_kind": "text",
+                "task_id": "task-1",
+                "node_id": "task-1",
+                "attempt": 0,
+                "text_content": {"text": "hi"},
+                "file_content": None,
+                "url_link_content": None,
+                "code_content": None,
+            }
+        ],
+        "event": {
+            "execution_decision": "DECLINED",
+            "output_patch": {},
+        },
+    }
+    r = client.post("/api/v1/collaboration/tasks/callback/report", json=body)
+    assert r.status_code == 409, r.text
 
 
 @pytest.mark.unit
