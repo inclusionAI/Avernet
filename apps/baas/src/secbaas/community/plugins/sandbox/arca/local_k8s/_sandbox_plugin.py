@@ -86,6 +86,11 @@ _SHARED_BOT_DATA_PVC_NAME = "bot-shared-data"
 _SHARED_BOT_DATA_PVC_SIZE = "10Gi"
 _SHARED_BOT_DATA_PVC_ACCESS_MODE = "ReadWriteOnce"
 
+# a2a 地址发现的 kube 实查上界（review P2：A2A 可选字段绝不拖住 WS 签发——
+# to_thread 挪出事件循环之外的第二道防线）；NodePort 记忆化在插件实例上（
+# Service 生命周期内不变），重复签发零 kube RT
+_A2A_URL_DISCOVERY_TIMEOUT_S = 5.0
+
 # Environment variable names consumed by this plugin.
 ENV_KUBECONFIG = "LOCAL_K8S_KUBECONFIG"
 _ENV_FALLBACK_KUBECONFIG_PATH = "KUBECONFIG"
@@ -437,6 +442,8 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
     ) -> None:
         self._credentials = credentials
         self._arca_utils = arca_utils
+        # (namespace, service_name) -> node_port|None 的 a2a 发现记忆化
+        self._a2a_node_port_cache: dict[tuple[str, str], int | None] = {}
         self._client_manager = LocalK8sClientManager()
 
     def _client(self) -> ApiClient:
@@ -936,22 +943,28 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         template = str(_env(ENV_A2A_URL_TEMPLATE) or "").strip()
         if not template:
             return ""
-        try:
-            core_api = CoreV1Api(self._client())
-            svc = core_api.read_namespaced_service(
-                name=service_name, namespace=namespace
-            )
-            node_port = (
-                svc.spec.ports[0].node_port
-                if svc.spec and svc.spec.ports
-                else None
-            )
-        except Exception as exc:  # noqa: BLE001 — 拓扑查询失败必须降级为空串
-            logger.warning(
-                "local_k8s: a2a base url discovery failed for %s/%s: %s",
-                namespace, service_name, exc,
-            )
-            return ""
+        cache_key = (namespace, service_name)
+        if cache_key in self._a2a_node_port_cache:
+            node_port = self._a2a_node_port_cache[cache_key]
+        else:
+            try:
+                core_api = CoreV1Api(self._client())
+                svc = core_api.read_namespaced_service(
+                    name=service_name, namespace=namespace,
+                    _request_timeout=_A2A_URL_DISCOVERY_TIMEOUT_S,
+                )
+                node_port = (
+                    svc.spec.ports[0].node_port
+                    if svc.spec and svc.spec.ports
+                    else None
+                )
+                self._a2a_node_port_cache[cache_key] = node_port
+            except Exception as exc:  # noqa: BLE001 — 拓扑查询失败必须降级为空串
+                logger.warning(
+                    "local_k8s: a2a base url discovery failed for %s/%s: %s",
+                    namespace, service_name, exc,
+                )
+                return ""
         if not node_port:
             logger.warning(
                 "local_k8s: service %s/%s has no NodePort; a2a base url omitted",
