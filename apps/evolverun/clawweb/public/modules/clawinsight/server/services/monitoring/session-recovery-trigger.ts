@@ -3,7 +3,7 @@ import type { SessionRecoveryApi } from "../repair/session-recovery/contracts.js
 import { SessionRecoveryError } from "../repair/session-recovery/errors.js";
 import { parseRequest } from "../repair/session-recovery/validation.js";
 import {
-  MonitoringError, type MonitoringRecoveryConfigStore, type MonitoringRecoveryTrigger, type MonitoringTarget,
+  DIAGNOSIS_V3_VERSION, MonitoringError, type DiagnosisEvent, type MonitoringRecoveryConfigStore, type MonitoringRecoveryTrigger, type MonitoringTarget,
 } from "./contracts.js";
 import { target, targetKey } from "./target.js";
 
@@ -32,6 +32,16 @@ function parseAllowlist(value: unknown): MonitoringTarget[] {
   });
 }
 
+/** Caller-side mapping only; semantic/device validation remains owned by recovery. */
+export function buildRecoveryTarget(event: DiagnosisEvent) {
+  const original = { bot_id: event.botId, entity_id: event.entityId, env: event.env, engine: event.engine };
+  if (event.schemaVersion !== DIAGNOSIS_V3_VERSION || event.engine !== "OC") return original;
+  const identity = event.runtimeIdentity;
+  if (!identity || !identity.BOT_ID || !identity.OWNER_ID || identity.BOT_ID !== event.botId) return null;
+  return { ...original, bot_id: identity.BOT_ID, entity_id: identity.OWNER_ID,
+    runtime_identity: identity };
+}
+
 export function createMonitoringRecoveryTrigger(input: {
   config: MonitoringRecoveryConfigStore;
   service: SessionRecoveryApi | null;
@@ -50,6 +60,11 @@ export function createMonitoringRecoveryTrigger(input: {
         throw new MonitoringError("NOT_READY", "自愈内测白名单暂不可用或格式无效。");
       }
       if (!allowed.some(entry => targetKey(entry) === targetKey(event))) return;
+      const recoveryTarget = buildRecoveryTarget(event);
+      if (recoveryTarget === null) {
+        console.warn("[monitoring] recovery skipped", { eventId: event.eventId, reason: "runtime_identity_unavailable_or_mismatched" });
+        return;
+      }
       let request;
       try {
         const diagnosis = [
@@ -58,14 +73,14 @@ export function createMonitoringRecoveryTrigger(input: {
         ].filter(Boolean).join("\n");
         request = parseRequest({
           event_id: event.eventId, tc_fault_label: event.tcFaultLabel,
-          target: { bot_id: event.botId, entity_id: event.entityId, env: event.env, engine: event.engine },
+          target: recoveryTarget,
           session_key: event.sessionKey,
           delivery_key: `monitoring-${createHash("sha256").update(event.eventId).digest("hex")}`,
           diagnosis,
         });
       } catch (error) {
         if (!(error instanceof SessionRecoveryError) || error.status !== 422) throw error;
-        console.warn("[monitoring] recovery skipped", { eventId: event.eventId, reason: "invalid_recovery_input", detail: error.message });
+        console.warn("[monitoring] recovery skipped", { eventId: event.eventId, reason: "invalid_recovery_input" });
         return;
       }
       if (!input.service) throw new MonitoringError("NOT_READY", "自愈服务尚未就绪。");

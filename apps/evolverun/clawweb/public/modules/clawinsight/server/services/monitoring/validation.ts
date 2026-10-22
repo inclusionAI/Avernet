@@ -1,6 +1,6 @@
 import {
-  CHECK_VERSION, DIAGNOSIS_VERSION, MonitoringError,
-  type BotCheck, type DiagnosisEvent, type DiagnosisQuery,
+  CHECK_VERSION, DIAGNOSIS_VERSION, DIAGNOSIS_V3_VERSION, MonitoringError,
+  type BotCheck, type DiagnosisEvent, type DiagnosisQuery, type RuntimeIdentity,
 } from "./contracts.js";
 import { id, target } from "./target.js";
 export { id } from "./target.js";
@@ -50,9 +50,27 @@ function reportIdentity(v: Record<string, unknown>, version: string) {
 const diagnosisKeys = ["entityId", "env", "schemaVersion", "eventId", "diagnosisId", "botId", "engine", "sessionKey", "sessionId", "traceId",
   "occurredAt", "diagnosedAt", "decision", "tcFaultLabel", "confidence", "businessProblemCategory",
   "businessProblemSubtype", "systemDiagnosis", "businessDiagnosis", "handlerName", "humanIntervention"];
+/** Full credentials object; normalization must not interpret/trim field values. */
+export function parseRuntimeIdentity(input: unknown): RuntimeIdentity | null {
+  if (input === null) return null;
+  if (!input || typeof input !== "object" || Array.isArray(input)) invalid("运行身份必须是对象或 null。");
+  const entries = Object.entries(input);
+  if (!entries.length || entries.some(([key, value]) => !key || typeof value !== "string")) invalid("运行身份必须是字符串字典。");
+  const unicode = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u;
+  if (entries.some(([key, value]) => unicode.test(key) || unicode.test(value))) invalid();
+  // fromEntries defines own data properties, including __proto__, without invoking setters.
+  const result: RuntimeIdentity = Object.fromEntries(entries.sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
+  if (Buffer.byteLength(JSON.stringify(result), "utf8") > 32 * 1024) {
+    throw new MonitoringError("PAYLOAD_TOO_LARGE", "运行身份大小超限。");
+  }
+  return result;
+}
 export function parseDiagnosis(input: unknown, key: string | undefined): DiagnosisEvent {
-  const v = record(input, diagnosisKeys);
-  const identity = reportIdentity(v, DIAGNOSIS_VERSION);
+  const v = record(input, [...diagnosisKeys, "runtimeIdentity"]);
+  const version = v.schemaVersion === DIAGNOSIS_V3_VERSION ? DIAGNOSIS_V3_VERSION : DIAGNOSIS_VERSION;
+  const identity = reportIdentity(v, version);
+  if (version === DIAGNOSIS_VERSION && "runtimeIdentity" in v) invalid("包含未约定的字段。");
+  const runtimeIdentity = version === DIAGNOSIS_V3_VERSION ? parseRuntimeIdentity(v.runtimeIdentity) : null;
   const eventId = id(v.eventId);
   if (id(v.diagnosisId) !== eventId || key !== eventId) invalid();
   const engine = oneOf(v.engine, ["OC", "TE"]);
@@ -68,7 +86,8 @@ export function parseDiagnosis(input: unknown, key: string | undefined): Diagnos
   if ([sessionKey, sessionId, traceId].some((s) => s !== null && !s.trim()) || (engine === "TE" && !traceId)) invalid();
   if (typeof v.humanIntervention !== "boolean") invalid();
   return {
-    schemaVersion: DIAGNOSIS_VERSION, eventId, diagnosisId: eventId, ...identity, engine,
+    ...(version === DIAGNOSIS_V3_VERSION ? { schemaVersion: version, runtimeIdentity } : { schemaVersion: version }),
+    eventId, diagnosisId: eventId, ...identity, engine,
     sessionKey, sessionId, traceId, occurredAt: v.occurredAt == null ? null : timestamp(v.occurredAt),
     diagnosedAt: timestamp(v.diagnosedAt), decision, tcFaultLabel, confidence,
     businessProblemCategory: nullableText(v.businessProblemCategory, 128),

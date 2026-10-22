@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DIAGNOSIS_VERSION, type DiagnosisEvent } from "../contracts.js";
+import { DIAGNOSIS_VERSION, DIAGNOSIS_V3_VERSION, type DiagnosisEvent } from "../contracts.js";
 import { createMonitoringRecoveryTrigger, SESSION_RECOVERY_ALLOWLIST_KEY } from "../session-recovery-trigger.js";
 import { SessionRecoveryError } from "../../repair/session-recovery/errors.js";
 
+import { runtimeIdentity } from "./runtime-identity-fixture.js";
 const bot = { bot_id: "default", entity_id: "001234", env: "prod" };
 const event: DiagnosisEvent = {
   schemaVersion: DIAGNOSIS_VERSION, eventId: "event-1", diagnosisId: "event-1", botId: "default",
@@ -106,4 +107,26 @@ describe("monitoring automatic recovery", () => {
     await trigger.trigger({ ...event, entityId: "another-owner" });
     await expect(trigger.trigger(event)).rejects.toMatchObject({ code: "NOT_READY" });
   });
+});
+
+
+it("retains the real recovery parser: this checkout's old contract rejects v3 rather than bypassing it", async () => {
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  const { service, trigger } = setup();
+  await trigger.trigger({ ...event, schemaVersion: DIAGNOSIS_V3_VERSION, runtimeIdentity });
+  expect(service.create).not.toHaveBeenCalled();
+  expect(warning).toHaveBeenCalledWith("[monitoring] recovery skipped", {
+    eventId: event.eventId, reason: "invalid_recovery_input",
+  });
+  expect(JSON.stringify(warning.mock.calls)).not.toContain(runtimeIdentity.TOKEN);
+});
+
+it("does not downgrade missing or mismatched v3 identity to old recovery", async () => {
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  const { service, trigger } = setup();
+  for (const identity of [null, { ...runtimeIdentity, BOT_ID: "wrong" }, { ...runtimeIdentity, OWNER_ID: "" }]) {
+    await trigger.trigger({ ...event, schemaVersion: DIAGNOSIS_V3_VERSION, runtimeIdentity: identity });
+  }
+  expect(service.create).not.toHaveBeenCalled();
+  expect(warning).toHaveBeenCalledTimes(3);
 });

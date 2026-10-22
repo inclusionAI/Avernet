@@ -13,6 +13,7 @@ export const monitoringDdl = [
   engine VARCHAR(2) NOT NULL COMMENT '引擎类型：OC或TE',
   session_key VARCHAR(1024) DEFAULT NULL COMMENT '上游会话键，无可靠值时为空',
   session_id VARCHAR(255) DEFAULT NULL COMMENT '上游真实Session ID',
+  runtime_identity TEXT DEFAULT NULL COMMENT '完整运行身份JSON，仅内部存储和自愈使用，不返回页面',
   trace_id VARCHAR(255) DEFAULT NULL COMMENT 'AI Vision Trace ID，TE上报必填',
   occurred_at_ms BIGINT DEFAULT NULL COMMENT '会话时间，UTC Unix毫秒，无可靠值时为空',
   diagnosed_at_ms BIGINT NOT NULL COMMENT '最终诊断完成时间，UTC Unix毫秒',

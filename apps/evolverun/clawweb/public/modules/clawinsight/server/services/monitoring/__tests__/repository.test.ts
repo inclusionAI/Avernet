@@ -9,6 +9,8 @@ import { MonitoringRepository } from "../../../repositories/monitoring-repositor
 import { parseDiagnosis, parseQuery, parseCheck } from "../validation.js";
 import { resolved, testTarget } from "./identity-fixtures.js";
 import { database } from "./test-database.js";
+import { DIAGNOSIS_V3_VERSION } from "../contracts.js";
+import { runtimeIdentity } from "./runtime-identity-fixture.js";
 const fixture = (name: string) =>
   JSON.parse(
     readFileSync(
@@ -164,5 +166,42 @@ describe("monitoring real SQL persistence (no HTTP listener)", () => {
     expect(sql).toContain("(bot_id, entity_id, env, decision, occurred_at_ms, event_id)");
     expect(sql).not.toContain("unixepoch"); expect(sql).not.toContain("VARCHAR(190)");
     expect(dialect.renderDdl("CREATE TABLE IF NOT EXISTS legacy (name VARCHAR(255))")).toContain("VARCHAR(190)");
+  });
+});
+
+
+describe("runtime identity persistence boundary", () => {
+  it("stores JSON once, tolerates key order replay and omits secrets from page DTOs", async () => {
+    const event = { ...alert, schemaVersion: DIAGNOSIS_V3_VERSION, runtimeIdentity };
+    expect(await insert(event)).toBe(true);
+    const [row] = await db.query("SELECT runtime_identity FROM insight_monitoring_diagnose WHERE event_id = ?", [event.eventId]);
+    expect(typeof row.runtime_identity).toBe("string");
+    expect(JSON.parse(String(row.runtime_identity))).toEqual(runtimeIdentity);
+    await db.close(); db = database(join(dir, "db.sqlite3")); repo = new MonitoringRepository(db);
+    expect(await insert({ ...event, runtimeIdentity: Object.fromEntries(Object.entries(runtimeIdentity).reverse()) })).toBe(false);
+    await expect(insert({ ...event, runtimeIdentity: { ...runtimeIdentity, VERSION: "V17" } })).rejects.toMatchObject({ code: "EVENT_CONFLICT" });
+    const page = await list();
+    expect(page.items[0]).not.toHaveProperty("runtimeIdentity");
+    expect(JSON.stringify(page)).not.toContain(runtimeIdentity.TOKEN);
+    expect(JSON.stringify(page)).not.toContain(runtimeIdentity.CLIENT_ID);
+  });
+  it("stores SQL NULL for explicit null and old v2, and reads historical v1 as v2", async () => {
+    await insert(alert);
+    await insert({ ...pass, schemaVersion: DIAGNOSIS_V3_VERSION, runtimeIdentity: null });
+    expect((await db.query("SELECT runtime_identity FROM insight_monitoring_diagnose")).every(row => row.runtime_identity === null)).toBe(true);
+    await db.exec("UPDATE insight_monitoring_diagnose SET schema_version = ? WHERE event_id = ?", ["claw-monitoring/diagnosis-event/v1", alert.eventId]);
+    expect((await list()).items).toHaveLength(2);
+  });
+  it("fails safely on corrupt stored JSON without returning credential text", async () => {
+    await insert({ ...alert, schemaVersion: DIAGNOSIS_V3_VERSION, runtimeIdentity });
+    await db.exec("UPDATE insight_monitoring_diagnose SET runtime_identity = ?", ["corrupt-" + runtimeIdentity.TOKEN]);
+    await expect(list()).rejects.toMatchObject({ code: "NOT_READY" });
+    await expect(list()).rejects.not.toThrow(runtimeIdentity.TOKEN);
+  });
+  it("requires the already-provisioned runtime column without trying to migrate it", async () => {
+    await db.exec("ALTER TABLE insight_monitoring_diagnose RENAME COLUMN runtime_identity TO missing_identity");
+    const exec = vi.spyOn(db, "exec");
+    await expect(insert()).rejects.toMatchObject({ code: "NOT_READY" });
+    expect(exec).not.toHaveBeenCalled();
   });
 });

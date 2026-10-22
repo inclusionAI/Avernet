@@ -12,6 +12,9 @@ import { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve
 import { SessionRecoveryTaskRepository } from "../../repositories/repair/session-recovery-task-repository.js";
 import { SessionRecoveryTaskService } from "../../services/repair/session-recovery/task-service.js";
 import { createMonitoringRecoveryTrigger, SESSION_RECOVERY_ALLOWLIST_KEY } from "../../services/monitoring/session-recovery-trigger.js";
+import { DIAGNOSIS_V3_VERSION } from "../../services/monitoring/contracts.js";
+import { runtimeIdentity } from "../../services/monitoring/__tests__/runtime-identity-fixture.js";
+import { MonitoringError } from "../../services/monitoring/contracts.js";
 import type { MonitoringRecoveryTrigger } from "../../services/monitoring/contracts.js";
 import { database } from "../../services/monitoring/__tests__/test-database.js";
 import { fixtureIntegration } from "../../services/monitoring/__tests__/identity-fixtures.js";
@@ -466,4 +469,29 @@ describe("recovery result receiver HTTP contract", () => {
     expect((await report({ ...base, result_text: "x".repeat(padding) })).status).toBe(200);
     expect((await report({ ...base, result_text: "x".repeat(padding + 1) })).status).toBe(413);
   });
+});
+
+
+it("stores the complete v3 snapshot without leaking it in ACKs, UI DTOs or rejection responses", async () => {
+  await stop();
+  recovery = { trigger: vi.fn().mockRejectedValue(new MonitoringError("INVALID_EVENT", "Recovery rejected; diagnostic saved")) };
+  await start();
+  const event = { ...unresolved, decision: "ALERT", handlerName: "NOT_COMPLETED", schemaVersion: DIAGNOSIS_V3_VERSION,
+    runtimeIdentity: { ...runtimeIdentity, BOT_ID: unresolved.botId } };
+  const rejected = await post(event);
+  expect(rejected.status).toBe(400);
+  const [stored] = await db.query("SELECT runtime_identity, entity_id FROM insight_monitoring_diagnose WHERE event_id = ?", [event.eventId]);
+  expect(JSON.parse(String(stored.runtime_identity))).toEqual(event.runtimeIdentity);
+  expect(stored.entity_id).toBe(event.entityId);
+  expect(recovery.trigger).toHaveBeenCalledWith(expect.objectContaining({ runtimeIdentity: event.runtimeIdentity, entityId: event.entityId }));
+  await stop(); recovery = undefined; await start();
+  const ack = await post(event);
+  expect(ack.status).toBe(200);
+  expect(ack.body.duplicate).toBe(true);
+  const page = await get(event.botId);
+  expect(page.body.items[0]).not.toHaveProperty("runtimeIdentity");
+  for (const response of [rejected, ack, page]) {
+    expect(JSON.stringify(response)).not.toContain(runtimeIdentity.TOKEN);
+    expect(JSON.stringify(response)).not.toContain(runtimeIdentity.CLIENT_ID);
+  }
 });

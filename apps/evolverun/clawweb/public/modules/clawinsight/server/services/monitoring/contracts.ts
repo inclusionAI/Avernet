@@ -6,13 +6,14 @@ export type RecoveryResultAck = {
   accepted: true; eventId: string; taskId: string; resultVersion: number; duplicate: boolean;
 };
 export const DIAGNOSIS_VERSION = "claw-monitoring/diagnosis-event/v2";
+export const DIAGNOSIS_V3_VERSION = "claw-monitoring/diagnosis-event/v3";
+export type RuntimeIdentity = Record<string, string>;
 export const CHECK_VERSION = "claw-monitoring/bot-check/v2";
 export type Engine = "OC" | "TE";
 export type Decision = "ALERT" | "PASS" | "UNRESOLVED";
 export type CheckStatus = "HEALTHY" | "ERROR" | "UNKNOWN" | "PAUSED";
 export type MonitoringBot = { botId: string; engine: Engine };
-export type DiagnosisEvent = {
-  schemaVersion: typeof DIAGNOSIS_VERSION;
+type DiagnosisFields = {
   eventId: string;
   diagnosisId: string;
   botId: string;
@@ -34,6 +35,10 @@ export type DiagnosisEvent = {
   handlerName: string | null;
   humanIntervention: boolean;
 };
+export type DiagnosisEvent = DiagnosisFields & (
+  | { schemaVersion: typeof DIAGNOSIS_VERSION; runtimeIdentity?: never }
+  | { schemaVersion: typeof DIAGNOSIS_V3_VERSION; runtimeIdentity: RuntimeIdentity | null }
+);
 export type BotCheck = {
   schemaVersion: typeof CHECK_VERSION;
   botId: string;
@@ -44,7 +49,7 @@ export type BotCheck = {
   lastSuccessfulCheckAt: string | null;
   status: CheckStatus;
 };
-export type DiagnosisItem = Omit<DiagnosisEvent, "schemaVersion" | "eventId" | "engine">;
+export type DiagnosisItem = Omit<DiagnosisEvent, "schemaVersion" | "eventId" | "engine" | "runtimeIdentity">;
 export type DiagnosisQuery = {
   startMs: number | null;
   endMs: number | null;

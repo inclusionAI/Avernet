@@ -1,7 +1,7 @@
 import { appendRecoveryResult } from "./monitoring-recovery-results.js";
 import type { MonitoringRecoveryResult } from "../services/monitoring/contracts.js";
 import type { IDatabase, Row } from "@avernet/clawweb-shared/server/db";
-import { CHECK_VERSION, DIAGNOSIS_VERSION, MonitoringError, type BotCheck, type DiagnosisEvent, type DiagnosisItem,
+import { CHECK_VERSION, DIAGNOSIS_VERSION, DIAGNOSIS_V3_VERSION, MonitoringError, type BotCheck, type DiagnosisEvent, type DiagnosisItem,
   type DiagnosisPage, type DiagnosisQuery, type MonitoringStore, type MonitoringTarget, type ResolvedReport, type MonitoringWindow } from "../services/monitoring/contracts.js";
 import { parseCheck, parseDiagnosis } from "../services/monitoring/validation.js";
 import { CHECKS_TABLE, DIAGNOSES_TABLE, verifyMonitoringSchema } from "./monitoring-schema-check.js";
@@ -14,7 +14,7 @@ const fields = {
   decision: "decision", tcFaultLabel: "tc_fault_label", confidence: "confidence_json",
   businessProblemCategory: "business_problem_category", businessProblemSubtype: "business_problem_subtype",
   systemDiagnosis: "system_diagnosis", businessDiagnosis: "business_diagnosis", handlerName: "handler_name",
-  humanIntervention: "human_intervention",
+  humanIntervention: "human_intervention", runtimeIdentity: "runtime_identity",
 } satisfies Partial<Record<keyof DiagnosisEvent, string>>;
 const columns = Object.values(fields);
 function integer(value: unknown): number {
@@ -31,6 +31,11 @@ function eventFromRow(row: Row): DiagnosisEvent {
   for (const [key, col] of Object.entries(fields)) event[key] = row[col];
   // Read-only projection of historical v1 rows; HTTP validators still reject v1.
   if (event.schemaVersion === "claw-monitoring/diagnosis-event/v1") event.schemaVersion = DIAGNOSIS_VERSION;
+  if (event.schemaVersion === DIAGNOSIS_V3_VERSION) {
+    event.runtimeIdentity = row.runtime_identity == null ? null : JSON.parse(String(row.runtime_identity));
+  } else {
+    delete event.runtimeIdentity;
+  }
   event.diagnosisId = row.event_id;
   event.occurredAt = iso(row.occurred_at_ms);
   event.diagnosedAt = iso(row.diagnosed_at_ms);
@@ -45,7 +50,7 @@ function checkFromRow(row: Row): BotCheck {
     checkedAt: iso(row.checked_at_ms), lastSuccessfulCheckAt: iso(row.last_successful_check_at_ms), status: row.status }, integer(row.checked_at_ms));
 }
 function item(event: DiagnosisEvent): DiagnosisItem {
-  const { schemaVersion: _version, eventId: _event, engine: _engine, ...result } = event;
+  const { schemaVersion: _version, eventId: _event, engine: _engine, runtimeIdentity: _runtimeIdentity, ...result } = event;
   return result;
 }
 function isDuplicate(error: unknown): boolean {
@@ -102,6 +107,7 @@ export class MonitoringRepository implements MonitoringStore {
         const value = event[name as keyof typeof fields];
         if (name === "occurredAt" || name === "diagnosedAt") return value === null ? null : Date.parse(String(value));
         if (name === "humanIntervention") return value ? 1 : 0;
+        if (name === "runtimeIdentity") return value == null ? null : JSON.stringify(value);
         if (name === "confidence") return value === null ? null : JSON.stringify(value);
         return value;
       });

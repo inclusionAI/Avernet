@@ -9,7 +9,7 @@ const diagnosisColumns: Record<string, [string, boolean]> = {
   diagnosed_at_ms: ["BIGINT", false], decision: ["VARCHAR(16)", false], tc_fault_label: ["VARCHAR(128)", true],
   confidence_json: ["VARCHAR(32)", true], business_problem_category: ["VARCHAR(128)", true],
   business_problem_subtype: ["VARCHAR(128)", true], system_diagnosis: ["TEXT", true], business_diagnosis: ["TEXT", true],
-  self_healing_results: ["MEDIUMTEXT", true],
+  self_healing_results: ["MEDIUMTEXT", true], runtime_identity: ["TEXT", true],
   handler_name: ["VARCHAR(128)", true], human_intervention: ["BIGINT", false], received_at_ms: ["BIGINT", false],
   gmt_create: ["TIMESTAMP", false], gmt_modified: ["TIMESTAMP", false],
 };
