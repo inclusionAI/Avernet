@@ -13,6 +13,7 @@ WORKDIR /repo
 COPY packages/a2a-chat-client/ ./packages/a2a-chat-client/
 COPY apps/frontend-nextgen/package.json apps/frontend-nextgen/package-lock.json ./apps/frontend-nextgen/
 ARG NPM_REGISTRY=https://registry.npmmirror.com
+ARG A2A_CLIENT_DEFAULT=false
 RUN --mount=type=cache,id=frontend-nextgen-npm,target=/root/.npm,sharing=locked \
     cd apps/frontend-nextgen && npm ci \
       --registry="${NPM_REGISTRY}" \
@@ -26,6 +27,7 @@ RUN --mount=type=cache,id=frontend-nextgen-npm,target=/root/.npm,sharing=locked 
       --fetch-timeout=300000
 
 COPY apps/frontend-nextgen/ ./apps/frontend-nextgen/
+ENV A2A_CLIENT_DEFAULT=${A2A_CLIENT_DEFAULT}
 RUN cd apps/frontend-nextgen && npm run build
 
 ########## Runtime ##########

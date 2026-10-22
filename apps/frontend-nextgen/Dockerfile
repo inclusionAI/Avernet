@@ -5,6 +5,10 @@
 # 的几何依据）：app 留在完整层级 apps/frontend-nextgen/，packages/ 同层级——
 # config/tsconfig 的 '@avernet/a2a-chat-client' alias 上引路径原样成立。
 FROM node:22-bookworm-slim AS build
+# A2A 客户端构建期默认开关（spec §1）：验证/灰度镜像在 build 命令上
+# --build-arg A2A_CLIENT_DEFAULT=true；缺省 false=主线 off 语义。
+ARG A2A_CLIENT_DEFAULT=false
+ENV A2A_CLIENT_DEFAULT=${A2A_CLIENT_DEFAULT}
 WORKDIR /repo
 COPY packages/a2a-chat-client/ ./packages/a2a-chat-client/
 COPY apps/frontend-nextgen/package.json apps/frontend-nextgen/package-lock.json ./apps/frontend-nextgen/

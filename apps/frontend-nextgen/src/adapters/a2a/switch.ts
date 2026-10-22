@@ -12,7 +12,7 @@
  */
 export const A2A_SWITCH_KEY = 'A2A_CHAT_CLIENT';
 
-declare const __A2A_CLIENT_DEFAULT__: string | undefined;
+declare const __A2A_CLIENT_DEFAULT__: boolean | string | undefined;
 
 export function isA2aClientEnabled(): boolean {
   try {
@@ -25,8 +25,13 @@ export function isA2aClientEnabled(): boolean {
     // storage 不可用（隐私模式等）→ 落到构建期默认，不武断全关
   }
   try {
-    return typeof __A2A_CLIENT_DEFAULT__ !== 'undefined'
-      && __A2A_CLIENT_DEFAULT__ === 'true';
+    // 双形态吸收（review P2）：unit-built 布尔（config/a2aBuildDefault.ts 的
+    // 正路）与防御性字符串 'true'（旧构建产物/异构 define 管线）都认；
+    // '"'true'"' 这类带引号字面量恒 false——引号进不了这个判定。
+    const buildDefault = typeof __A2A_CLIENT_DEFAULT__ === 'undefined'
+      ? undefined
+      : __A2A_CLIENT_DEFAULT__;
+    return buildDefault === true || buildDefault === 'true';
   } catch {
     return false;
   }
