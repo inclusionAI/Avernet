@@ -26,6 +26,7 @@ export interface RecoveryTaskReporter { report(result: RecoveryTaskResult): Prom
 /** Owns the self-healing workflow; execution and controlled tools are injected. */
 export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
   private readonly now: () => number;
+  private reportingCursor = "";
   constructor(private readonly deps: {
     controlPlaneEnvironment: AgentControlPlaneEnvironment;
     tasks: RecoveryTaskStore;
@@ -342,27 +343,35 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
 
   /** Independently scheduled delivery; never holds up state transitions or expiry handling. */
   async reportResults(): Promise<void> {
-    let cursor = "";
-    for (;;) {
-      const batch = await this.deps.tasks.listForReporting?.(20, cursor, this.deps.controlPlaneEnvironment) ?? [];
-      if (!batch.length) return;
-      await Promise.all(batch.map(task => this.reportPending(task)));
-      cursor = batch[batch.length - 1].taskId;
+    // A bounded page and serial HTTP calls cap each maintenance tick's work.
+    const batch = await this.deps.tasks.listForReporting?.(5, this.reportingCursor, this.deps.controlPlaneEnvironment);
+    if (!batch) return;
+    this.reportingCursor = batch.nextTaskId;
+    let remaining = 5;
+    for (const task of batch.tasks) {
+      remaining -= await this.reportPending(task, remaining);
+      if (!remaining) { this.reportingCursor = task.taskId; break; }
     }
   }
 
-  async reportPending(task: RecoveryStoredTask): Promise<void> {
-    if (!this.ownsTask(task)) return;
+  async reportPending(task: RecoveryStoredTask, limit = 5): Promise<number> {
+    if (!this.ownsTask(task)) return 0;
+    let sent = 0;
     for (const result of task.pending_results) {
+      if (sent >= limit) break;
+      const attempt = await this.deps.tasks.claimResult(task.taskId, result.result_version);
+      if (attempt === null) break;
+      sent += 1;
       try {
         await this.deps.reporter.report(result);
-        await this.deps.tasks.acknowledgeResult(task.taskId, result.result_version);
+        await this.deps.tasks.acknowledgeResult(task.taskId, result.result_version, attempt);
       } catch {
-        await this.deps.tasks.failResult?.(task.taskId, result.result_version);
-        console.error("[session-recovery] result callback remains pending", task.taskId, result.result_version);
-        return;
+        await this.deps.tasks.failResult(task.taskId, result.result_version, attempt);
+        console.error("[session-recovery] result callback failed", task.taskId, result.result_version);
+        break;
       }
     }
+    return sent;
   }
   private ownsTask(task: RecoveryStoredTask): boolean {
     return resolveTaskControlPlaneEnvironment(task) === this.deps.controlPlaneEnvironment;

@@ -13,13 +13,15 @@ function setup(callbackFails = false) {
     create: async value => { if (records.has(value.taskId)) throw new Error("duplicate"); records.set(value.taskId, structuredClone(value)); },
     find: async id => records.has(id) ? structuredClone(records.get(id)!) : null,
     listForEvent: async (eventId, ownerId, isAdmin) => [...records.values()].filter(value => value.request.event_id === eventId && (isAdmin || value.request.target.entity_id === ownerId || value.shared === true)),
-    listForReporting: async (limit, afterTaskId = "") => [...records.values()].filter(value => value.taskId > afterTaskId && value.pending_results.length > 0).sort((a, b) => a.taskId.localeCompare(b.taskId)).slice(0, limit),
+    listForReporting: async (limit, afterTaskId = "") => ({ tasks: [...records.values()].filter(value => value.taskId > afterTaskId && value.pending_results.length > 0).sort((a, b) => a.taskId.localeCompare(b.taskId)).slice(0, limit), nextTaskId: "" }),
     listForMaintenance: async (limit, afterTaskId = "") => [...records.values()].filter(value => value.taskId > afterTaskId).slice(0, limit),
     update: async (id, version, change) => {
       const value = records.get(id); if (!value || value.version !== version) return null;
       const changed = change(structuredClone(value)); records.set(id, structuredClone(changed)); return changed;
     },
     acknowledgeResult: async (id, version) => { const value = records.get(id)!; value.pending_results = value.pending_results.filter(item => item.result_version !== version); },
+    claimResult: async (id, version) => records.get(id)?.pending_results[0]?.result_version === version ? 1 : null,
+    failResult: async () => {},
     appendNotification: async (id, event) => { const value = records.get(id)!; if (value.timeline.some(item => item.event_id === event.event_id)) return false; value.timeline.push(event); return true; },
   };
   const delivery = { create: vi.fn().mockResolvedValue({ event_id: "evt", delivery_key: "send1", status: "accepted" }) };

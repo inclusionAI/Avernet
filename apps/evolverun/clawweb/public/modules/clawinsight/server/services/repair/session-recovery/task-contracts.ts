@@ -105,8 +105,10 @@ export interface RecoveryTaskStore {
   update(taskId: string, expectedVersion: number, change: (current: RecoveryStoredTask) => RecoveryStoredTask): Promise<RecoveryStoredTask | null>;
   /** Append a notification fact atomically without changing the Agent's business-state version. */
   appendNotification(taskId: string, event: RecoveryTimelineEvent): Promise<boolean>;
-  failResult?(taskId: string, resultVersion: number): Promise<void>;
-  acknowledgeResult(taskId: string, resultVersion: number): Promise<void>;
-  listForReporting?(limit: number, afterTaskId: string, controlPlaneEnvironment: import("../common/task-control-plane.js").AgentControlPlaneEnvironment): Promise<RecoveryStoredTask[]>;
+  /** Atomically reserve a due attempt. A stale worker must not send or settle another attempt. */
+  claimResult(taskId: string, resultVersion: number): Promise<number | null>;
+  failResult(taskId: string, resultVersion: number, attempt: number): Promise<void>;
+  acknowledgeResult(taskId: string, resultVersion: number, attempt: number): Promise<void>;
+  listForReporting?(limit: number, afterTaskId: string, controlPlaneEnvironment: import("../common/task-control-plane.js").AgentControlPlaneEnvironment): Promise<{ tasks: RecoveryStoredTask[]; nextTaskId: string }>;
   listForMaintenance?(limit: number, afterTaskId?: string): Promise<RecoveryStoredTask[]>;
 }

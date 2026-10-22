@@ -826,7 +826,7 @@ it("migrates legacy pending results before reporting and preserves their origina
   const evidence = { evidence_id: "legacy-evidence", tool_call_id: "legacy-call", source: "session", location: "original:1", excerpt: "历史现场" };
   await db.exec("UPDATE ce_tasks SET config_json = ? WHERE task_id = ?", [JSON.stringify({ ...task, status: "failed", evidence: [evidence], pending_results: [{ ...result, status: "waiting_owner", result_version: 0 }, result] }), task.taskId]);
   const legacyRow = (await repo.findTask(task.taskId))!;
-  expect(await tasks.listForReporting(20, "", "prod")).toEqual([]);
+  expect((await tasks.listForReporting(20, "", "prod")).tasks).toEqual([]);
   expect(await repo.findTask(task.taskId)).toEqual(legacyRow);
   // Old tasks had no phase artifact; preserve the original Step identity.
   await db.exec("UPDATE ce_steps SET output_json = NULL WHERE task_id = ? AND step_no > 0", [task.taskId]);
@@ -863,7 +863,7 @@ it("waiting snapshots survive same-task resumes and restart before the final res
   expect(task.pending_results.map(result => result.status)).toEqual(["waiting_effect", "waiting_effect", "completed"]);
   expect(task.pending_results[0]).toEqual(firstResult);
   expect(runtime.sendMessage).toHaveBeenCalledOnce();
-  expect(await tasks.listForReporting(20, "", "pre")).toEqual([]);
+  expect((await tasks.listForReporting(20, "", "pre")).tasks).toEqual([]);
   const stored = JSON.parse((await repo.findTask(task.taskId))!.config_json);
   expect(stored.pending_results).toBeUndefined(); expect(stored.timeline).toBeUndefined();
   expect(stored.resultDelivery).toHaveLength(3);
@@ -877,7 +877,7 @@ it("waiting snapshots survive same-task resumes and restart before the final res
     expect(callbacks.map(result => result.result_version)).toEqual(versions);
     expect((await current(task.taskId)).pending_results).toEqual([]);
     await restarted.reportResults(); expect(callbacks).toHaveLength(3);
-    await tasks.acknowledgeResult(task.taskId, versions[0]);
+    await tasks.acknowledgeResult(task.taskId, versions[0], 1);
     const acknowledgments = (await current(task.taskId)).timeline.filter(event => event.kind === "result");
     expect(acknowledgments).toHaveLength(3);
     expect(acknowledgments.map(event => event.payload.attempts)).toEqual([2, 1, 1]);
