@@ -240,6 +240,39 @@ class TestAddArtifact:
         )
         assert response.status_code in (400, 422)
 
+    def test_post_content_object_form_accepted(self):
+        """content 字段支持 JSON 对象形态(独立 API 放开 relay 字符串包袱)。"""
+        body = _file_body(
+            file_content={
+                "storage_type": "bot_workspace",
+                "storage_id": "reports/analysis-report.md",
+                "file_type": "text/markdown",
+                "file_name": "analysis-report.md",
+                "file_id": None,
+            }
+        )
+        client, _ = _client()
+        response = client.post("/api/v1/collaboration/tasks/artifacts", json=body)
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["kind"] == "file"
+        assert data["content"]["storage_id"] == "reports/analysis-report.md"
+
+    def test_post_absolute_path_storage_id_rejected(self):
+        """BOT_WORKSPACE 的 storage_id 拒绝绝对路径(spec 示例纠错后的口径)。"""
+        body = _file_body(
+            file_content={
+                "storage_type": "bot_workspace",
+                "storage_id": "/home/admin/.openclaw/workspace/report.md",
+                "file_type": "text/markdown",
+                "file_name": "report.md",
+                "file_id": None,
+            }
+        )
+        client, _ = _client()
+        response = client.post("/api/v1/collaboration/tasks/artifacts", json=body)
+        assert response.status_code == 422
+
 
 class TestListArtifacts:
     def _seed(self, client, repo):

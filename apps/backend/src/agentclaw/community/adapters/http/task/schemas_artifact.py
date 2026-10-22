@@ -15,7 +15,9 @@ class TaskArtifactAddRequestDTO(BaseModel):
 
     归属字段(task_id/node_id/attempt/session_id)由核心
     ``parse_artifact_report_item`` + ``TaskArtifactApiService.add_artifact``
-    与图交叉校验;四个 content 字段互斥、恰一个承载对应分支的 JSON 字符串。
+    与图交叉校验;四个 content 字段互斥、恰一个承载对应分支——**JSON 对象
+    或 JSON 字符串均可**(独立 API 不背 relay 线上字符串包袱,调用方无须双重
+    序列化;对象形态由路由层归一为字符串后进核心解析,校验语义不变)。
     """
 
     artifact_name: str | None = Field(
@@ -30,12 +32,20 @@ class TaskArtifactAddRequestDTO(BaseModel):
     task_id: str = Field(..., description="归属任务 ID")
     node_id: str = Field(..., description="产出节点 ID")
     attempt: int = Field(..., ge=0, description="归属 attempt(须与图上 harness_retries 快照一致)")
-    text_content: str | None = Field(
-        None, description="text 分支 JSON 字符串,如 {\"text\": \"...\"};四个 content 字段互斥"
+    text_content: dict | str | None = Field(
+        None, description="text 分支内容对象(或 JSON 字符串,下同),如 {\"text\": \"...\"};四个 content 字段互斥"
     )
-    file_content: str | None = Field(None, description="file 分支 JSON 字符串")
-    url_link_content: str | None = Field(None, description="url_link 分支 JSON 字符串")
-    code_content: str | None = Field(None, description="code 分支 JSON 字符串")
+    file_content: dict | str | None = Field(
+        None,
+        description="file 分支内容对象:storage_type(bot_workspace|session_file)/storage_id"
+        "(bot_workspace=工作区相对路径,拒绝绝对路径与 .. 逃逸)/file_type/file_name/file_id(session_file 必填)",
+    )
+    url_link_content: dict | str | None = Field(
+        None, description="url_link 分支内容对象:url(http s)+type(业务类型)"
+    )
+    code_content: dict | str | None = Field(
+        None, description="code 分支内容对象:code_base_name/code_base_address/pr_link/pr_desc"
+    )
 
     model_config = {"extra": "forbid"}
 

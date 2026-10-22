@@ -191,11 +191,11 @@ class CodeContent(ArtifactContent):
       "text_content": null,                 // text 分支 JSON 字符串,如 "{\"text\": \"...\"}"
       "file_content": "{
         \"storage_type\": \"bot_workspace\",
-        \"storage_id\": \"/home/admin/.openclaw/workspace/\",
-        \"file_type\": \"markdown\",
+        \"storage_id\": \"reports/analysis-report.md\",
+        \"file_type\": \"text/markdown\",
         \"file_name\": \"analysis-report.md\",
         \"file_id\": null
-      }",                                 // BOT_WORKSPACE:storage_id=工作区相对路径,file_id 恒 null
+      }",                                 // BOT_WORKSPACE:storage_id=工作区相对路径(拒绝对路径/~/.. 逃逸),file_id 恒 null
       "url_link_content": null,             // url_link 分支 JSON 字符串,如 "{\"url\":\"https://...\",\"type\":\"dima需求\"}"
       "code_content": null                  // code 分支 JSON 字符串,如 "{\"code_base_name\":\"avernet\",...}"
     },
@@ -467,3 +467,10 @@ CREATE TABLE IF NOT EXISTS `task_artifact` (
 - 新增测试:repository append 契约(insert/幂等查重/内容区分行)、core api service 单测(归属校验/attempt 失配/session 兜底/name 回落/creator 默认)、adapters HTTP 端到端(POST Descriptor/幂等/404×2/422×5/extra 拒绝;GET 列表/节点过滤/limit/未知任务空表/缺参 422/静态路由优先);
 - 新增模块覆盖率 100%(artifact_routes / artifact_api_service / task_artifact_repository);
 - 全量门禁:`tests/community/core/task tests/community/repository/task tests/community/adapters/http/task` → **1907 passed, 27 skipped**;`tests/community/architecture` → 339 passed,唯一失败 `test_shipped_python_has_no_corp_identifiers` 为基线既有存量(§0 验证状态同款);ruff changed files 清洁。
+
+### 12.5 增补修正(2026-10-22 第二次):content 对象形态容忍
+
+用户实测反馈两种调用摩擦,均已修正:
+
+1. **content 字段放开对象形态(方案取舍 #23)**:独立 API 不背 relay 线上 JSON 字符串包袱——`POST /artifacts` 的四个 `*_content` 字段接受 **JSON 对象或 JSON 字符串**(`TaskArtifactAddRequestDTO` 放开为 `dict | str`),对象由路由层归一为单行字符串后进核心 `parse_artifact_report_item`,校验语义(kind-tag 禁入/互斥/路径逃逸/非 http(s))逐字节不变;relay `/callback/report` 契约**不动**,仍只认字符串。
+2. **spec §4 示例纠错**:`file_content` 的 BOT_WORKSPACE 示例原写 `"/home/admin/.openclaw/workspace/"`(绝对路径+目录)——与 §3.4/构造器的"storage_id 须工作区相对路径"约束自相矛盾,已改为 `"reports/analysis-report.md"`(`file_type` 同步从 `"markdown"` 改 MIME 形 `"text/markdown"`);用户照旧示例必 422。另外注意:`file_type` 是必填(构造器非空校验),**不做缺省推断**——"按扩展名推断"是上报文档口径,解析器不代填。

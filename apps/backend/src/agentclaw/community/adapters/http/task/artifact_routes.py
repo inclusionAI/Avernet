@@ -10,6 +10,8 @@ relay/bbs/intake/read 子路由的既有先例拆出。
 """
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, Query, Request
 
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
@@ -50,13 +52,16 @@ async def add_task_artifact(
     """手动登记一条任务产物(append-only;幂等命中返回既有行)。
 
     请求体与 relay 回调上报 item 同构:``artifact_kind`` + 恰好一个 content 字段
-    (JSON 字符串,四个互斥);task_id/node_id/attempt 与图交叉校验(attempt 失配
-    即拒,session_id 图绑定优先、上报兜底)。结构/内容校验失败 → 422;
-    任务或节点不存在 → 404。成功返回读侧 Descriptor(安全字段,spec §7)。"""
+    (四个互斥;**JSON 对象或 JSON 字符串均可**,对象由本层归一为字符串);task_id/
+    node_id/attempt 与图交叉校验(attempt 失配即拒,session_id 图绑定优先、上报
+    兜底)。结构/内容校验失败 → 422;任务或节点不存在 → 404。成功返回读侧
+    Descriptor(安全字段,spec §7)。"""
     del user
+    raw = payload.model_dump()
+    _normalize_content_fields(raw)
     try:
         item = parse_artifact_report_item(
-            payload.model_dump(),
+            raw,
             report_task_id=payload.task_id,
             report_node_id=payload.node_id,
         )
@@ -66,6 +71,27 @@ async def add_task_artifact(
         raise TaskArtifactContentError(str(exc)) from exc
     record = service.add_artifact(item)
     return envelope(artifact_record_to_descriptor(record), request)
+
+
+_CONTENT_FIELDS = (
+    "text_content",
+    "file_content",
+    "url_link_content",
+    "code_content",
+)
+
+
+def _normalize_content_fields(raw: dict) -> None:
+    """content 字段对象形态 → 单行 JSON 字符串(就地归一;仅协议翻译,Rule 22)。
+
+    核心解析(含 kind-tag 禁入/互斥/路径逃逸校验)只认字符串;独立 API 放开
+    对象形态是调用方易用性取向,归一后语义与 relay 上报逐字节同构。
+    """
+
+    for field in _CONTENT_FIELDS:
+        value = raw.get(field)
+        if isinstance(value, dict):
+            raw[field] = json.dumps(value, ensure_ascii=False)
 
 
 @router.get(
