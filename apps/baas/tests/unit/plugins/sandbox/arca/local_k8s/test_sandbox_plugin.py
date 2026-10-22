@@ -1055,6 +1055,152 @@ class TestLocalK8sPluginA2aBaseUrl:
             assert mock_core.read_namespaced_service.call_count == 1
 
     @patch("kubernetes.client.CoreV1Api")
+    def test_a2a_discovery_thread_start_failure_degrades(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """review P2-1（调度失败边界）：后台发现线程启动失败（线程资源不足）必须
+        就地降级——WS 签发照常返回（a2a 面空串，零异常上抛）、零 kube 查询、
+        in-flight/线程记录零残留（残留会永久旁路该设备的后续调度）、负缓存
+        就位；TTL 出清后重新调度即恢复。"""
+        import time as _time
+
+        with patch.dict(
+            os.environ,
+            {
+                **self._INCLUSTER_ENV,
+                "LOCAL_K8S_A2A_URL_TEMPLATE": (
+                    "http://{service_name}.stable.alipay.net:{node_port}"
+                ),
+            },
+            clear=True,
+        ):
+            plugin = self._incluster_plugin(mock_client, mock_core_cls)
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_svc = MagicMock()
+            mock_svc.spec.ports = [MagicMock(node_port=30095)]
+            mock_core.read_namespaced_service.return_value = mock_svc
+            plugin._arca_utils.build_proxypass_url.return_value = (
+                "ws://proxypass/api/openclaw/ws"
+            )
+
+            class _ExplodingThread:
+                def __init__(self, *args, **kwargs): ...
+
+                def start(self):
+                    raise RuntimeError("can't start new thread")
+
+                def is_alive(self):
+                    return False
+
+            with patch(
+                "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin.threading.Thread",
+                _ExplodingThread,
+            ):
+                conn = plugin.resolve_ws_conn_info(
+                    paas_device_id="boom-abc",
+                    port=8080, path="/api/openclaw/ws",
+                )
+
+            # WS 签发不被调度异常打断：正常返回且 a2a 面降级空串，零 kube 查询
+            assert conn.ws_url == "ws://proxypass/api/openclaw/ws"
+            assert conn.a2a_base_url == ""
+            mock_core.read_namespaced_service.assert_not_called()
+            # 调度失败清理义务：in-flight / 线程记录零残留 + 负缓存就位
+            key = ("default", "boom-abc-svc")
+            assert plugin._a2a_inflight == set()
+            assert plugin._a2a_threads == {}
+            entry = plugin._a2a_node_port_cache[key]
+            assert isinstance(entry, tuple) and entry[0] == "error"
+            assert entry[1] > _time.monotonic()
+
+            # 负缓存出清（模拟 TTL 过期）后重新调度即恢复：真线程跑完发现
+            plugin._a2a_node_port_cache.clear()
+            plugin.resolve_ws_conn_info(
+                paas_device_id="boom-abc",
+                port=8080, path="/api/openclaw/ws",
+            )
+            plugin.a2a_discovery_join("boom-abc")
+            recovered = plugin.resolve_ws_conn_info(
+                paas_device_id="boom-abc",
+                port=8080, path="/api/openclaw/ws",
+            )
+            assert recovered.a2a_base_url == (
+                "http://boom-abc-svc.stable.alipay.net:30095"
+            )
+            assert mock_core.read_namespaced_service.call_count == 1
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_a2a_discovery_backpressure_cap_degrades_immediately(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """review P2-1：后台发现进程级并发上限——容量耗尽立即降级为空地址 +
+        短负缓存（零等待、零新线程、零 kube 查询），WS 签发不受影响；
+        本 key 不进 in-flight，容量释放后可再调度。"""
+        import time as _time
+
+        from secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin import (
+            _A2A_URL_DISCOVERY_MAX_CONCURRENCY,
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                **self._INCLUSTER_ENV,
+                "LOCAL_K8S_A2A_URL_TEMPLATE": (
+                    "http://{service_name}.stable.alipay.net:{node_port}"
+                ),
+            },
+            clear=True,
+        ):
+            plugin = self._incluster_plugin(mock_client, mock_core_cls)
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            # 占满并发额度（合成的他设备 key）——触达容量上限
+            for i in range(_A2A_URL_DISCOVERY_MAX_CONCURRENCY):
+                plugin._a2a_inflight.add(("default", f"busy-{i}-svc"))
+
+            start = _time.monotonic()
+            conn = plugin.resolve_ws_conn_info(
+                paas_device_id="cap-abc",
+                port=8080, path="/api/openclaw/ws",
+            )
+            elapsed = _time.monotonic() - start
+
+            assert conn.ws_url is not None
+            assert conn.a2a_base_url == ""
+            assert elapsed < 0.1, (
+                f"ws issuance waited {elapsed:.2f}s at capacity — "
+                "backpressure must degrade immediately, never queue")
+            mock_core.read_namespaced_service.assert_not_called()
+            # 零等待策略下既不占额度也不开线程：负缓存承载"稍后再试"
+            key = ("default", "cap-abc-svc")
+            assert key not in plugin._a2a_inflight
+            assert plugin._a2a_threads == {}
+            entry = plugin._a2a_node_port_cache[key]
+            assert isinstance(entry, tuple) and entry[0] == "error"
+            assert entry[1] > _time.monotonic()
+
+            # 容量释放 + 负缓存出清后可再调度（恢复路径不被容量事件旁路）
+            plugin._a2a_inflight.clear()
+            plugin._a2a_node_port_cache.clear()
+            mock_svc = MagicMock()
+            mock_svc.spec.ports = [MagicMock(node_port=30096)]
+            mock_core.read_namespaced_service.return_value = mock_svc
+            plugin.resolve_ws_conn_info(
+                paas_device_id="cap-abc",
+                port=8080, path="/api/openclaw/ws",
+            )
+            plugin.a2a_discovery_join("cap-abc")
+            recovered = plugin.resolve_ws_conn_info(
+                paas_device_id="cap-abc",
+                port=8080, path="/api/openclaw/ws",
+            )
+            assert recovered.a2a_base_url == (
+                "http://cap-abc-svc.stable.alipay.net:30096"
+            )
+
+    @patch("kubernetes.client.CoreV1Api")
     def test_a2a_discovery_bounded_timeout(self, mock_core_cls, mock_client) -> None:
         """review P2：kube 实查必须在有界超时内返回等待——无 _request_timeout
         的挂起会拖住整条 WS 签发（to_thread 之外的第二道防线）。"""

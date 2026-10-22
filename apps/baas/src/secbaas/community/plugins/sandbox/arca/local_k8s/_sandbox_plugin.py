@@ -93,6 +93,10 @@ _SHARED_BOT_DATA_PVC_ACCESS_MODE = "ReadWriteOnce"
 # Service 生命周期内不变），重复签发零 kube RT
 _A2A_URL_DISCOVERY_TIMEOUT_S = 5.0
 _A2A_URL_DISCOVERY_NEGATIVE_TTL_S = 30.0
+# 后台发现线程的并发上限（review P2-1 调度失败边界）：容量耗尽立即降级——
+# 空地址 + 短负缓存，绝不在 WS 签发链上等待/排队（发现是可选面，线程资源
+# 归属签发主链更优先）；插件实例内 in-flight 计数即额度
+_A2A_URL_DISCOVERY_MAX_CONCURRENCY = 8
 
 # Environment variable names consumed by this plugin.
 ENV_KUBECONFIG = "LOCAL_K8S_KUBECONFIG"
@@ -994,19 +998,51 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
 
     def _a2a_schedule_discovery(self, namespace: str, service_name: str) -> None:
         """后台发现 NodePort（守护线程、in-flight 去重）。失败写负缓存
-        （短 TTL），持续故障下不会反复等待、也不会线程轰炸。"""
+        （短 TTL），持续故障下不会反复等待、也不会线程轰炸。
+
+        调度失败边界（review P2-1）：本方法在 WS 签发调用链内同步执行，
+        ``threading.Thread`` 创建/启动失败（线程资源不足）与并发上限触顶都
+        就地降级为「空地址 + 短负缓存」——A2A 是可选面，调度故障绝不上抛
+        打断存量 WS 签发，也绝不残留 in-flight/线程记录（残留会让该设备的
+        后续调度被永久旁路）。负缓存过 TTL 自动出清，资源恢复后再次签发
+        即重新调度。"""
         cache_key = (namespace, service_name)
         if cache_key in self._a2a_inflight:
             return
+        if len(self._a2a_inflight) >= _A2A_URL_DISCOVERY_MAX_CONCURRENCY:
+            # 容量耗尽：立即降级（不等待），额度留给在途发现
+            self._a2a_note_schedule_failure(
+                cache_key, "background discovery concurrency cap reached")
+            return
         self._a2a_inflight.add(cache_key)
-        thread = threading.Thread(
-            target=self._a2a_discover,
-            args=(namespace, service_name),
-            daemon=True,
-            name=f"a2a-url-discovery-{service_name}",
+        try:
+            thread = threading.Thread(
+                target=self._a2a_discover,
+                args=(namespace, service_name),
+                daemon=True,
+                name=f"a2a-url-discovery-{service_name}",
+            )
+            self._a2a_threads[cache_key] = thread
+            thread.start()
+        except Exception as exc:  # noqa: BLE001 — 调度失败降级，不拖垮 WS 签发
+            self._a2a_inflight.discard(cache_key)
+            self._a2a_threads.pop(cache_key, None)
+            self._a2a_note_schedule_failure(
+                cache_key, f"failed to start discovery thread: {exc}")
+
+    def _a2a_note_schedule_failure(
+        self, cache_key: tuple[str, str], reason: str,
+    ) -> None:
+        """调度失败的就地降级位：短负缓存（TTL 后可恢复）+ 空地址语义。
+        与发现失败的负缓存同形状——``_a2a_base_url_cached`` 的 TTL 出清
+        路径无需感知两种失败的差别。"""
+        logger.warning(
+            "local_k8s: a2a base url scheduling skipped for %s/%s: %s",
+            cache_key[0], cache_key[1], reason,
         )
-        self._a2a_threads[cache_key] = thread
-        thread.start()
+        self._a2a_node_port_cache[cache_key] = (
+            "error", time.monotonic() + _A2A_URL_DISCOVERY_NEGATIVE_TTL_S,
+        )
 
     def _a2a_discover(self, namespace: str, service_name: str) -> None:
         from kubernetes.client import CoreV1Api
