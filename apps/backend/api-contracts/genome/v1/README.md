@@ -672,7 +672,7 @@ matters for resources, whose add and remove are T1.
 
   | Category | Predicate apply uses | Checks |
   | --- | --- | --- |
-  | `persona` | `IdentityMaterialiser`, `legal_identity_types` | UTF-8 bytes (including content given by digest); a type the bot's engine accepts |
+  | `persona` | `IdentityMaterialiser`, `legal_identity_types`, the identity fetch cap | UTF-8 bytes (including content given by digest), at most 1 MiB; a type the bot's engine accepts |
   | `skills` (`local`) | `SkillPackageValidator`, skills materialiser | One root `SKILL.md` with front matter `name` equal to the entry name and a non-empty `description`; Skill Center limits and path rules |
   | `resources` | `admission_refusal` (`core/resources/services/file_service.py`) | Every file, and every member of a directory: an allowed extension, at most 500 MB |
   | `resources` | resources materialiser (`apply/materialisers/resources.py`) | With trailing `/` removed, paths unique and none a whole-segment prefix of another (`foo.md` with `foo.md/`, `data/` with `data/a.md`, `foo.md` with `foo.md/b.csv`) |
@@ -700,8 +700,8 @@ matters for resources, whose add and remove are T1.
   inline content value and per unified diff (a change that needs more is
   sent as whole-file content by digest), at most 500 `file_diffs` in a
   `skill.update`,
-  and the fetch-time size limits for skills (100 MiB), files (100 MiB) and
-  trees (200 MiB, 5000 files).
+  and the fetch-time size limits for persona files (1 MiB), skills (100 MiB),
+  files (100 MiB) and trees (200 MiB, 5000 files).
 
 ## 7. Recording a revision
 

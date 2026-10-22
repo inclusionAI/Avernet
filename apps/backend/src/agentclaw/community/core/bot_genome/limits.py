@@ -20,6 +20,7 @@ __all__ = [
     "MAX_ENTRIES_PER_CATEGORY",
     "MAX_FILE_DIFFS",
     "MAX_INLINE_CONTENT_BYTES",
+    "MAX_PERSONA_BYTES",
     "MAX_RESOURCE_FILE_BYTES",
     "MAX_SKILL_BYTES",
     "MAX_TREE_BYTES",
@@ -33,6 +34,8 @@ __all__ = [
 MAX_DIFF_BYTES = MAX_INLINE_CONTENT_BYTES
 #: ``file_diffs`` entries in one ``skill.update``.
 MAX_FILE_DIFFS = 500
+#: A persona file: the fetch-time cap of an identity entry.
+MAX_PERSONA_BYTES = FETCH_ENTRY_LIMITS["identity"]
 #: A local skill's tree and a file resource: the fetch-time caps.
 MAX_SKILL_BYTES = FETCH_ENTRY_LIMITS["skills"]
 MAX_RESOURCE_FILE_BYTES = FETCH_ENTRY_LIMITS["resources_file"]

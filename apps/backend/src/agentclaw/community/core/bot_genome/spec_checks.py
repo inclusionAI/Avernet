@@ -40,6 +40,7 @@ from agentclaw.community.core.bot_genome.canonical import (
 )
 from agentclaw.community.core.bot_genome.errors import ContentNotReachable, Reason
 from agentclaw.community.core.bot_genome.limits import (
+    MAX_PERSONA_BYTES,
     MAX_RESOURCE_FILE_BYTES,
     MAX_SEGMENT_BYTES,
     MAX_SKILL_BYTES,
@@ -181,7 +182,7 @@ def tree_reasons(location: str, blob: bytes) -> tuple[list[Reason], list[tuple[s
 
 
 def persona_reasons(spec: dict[str, Any], content: ContentReader, engine_type: str) -> list[Reason]:
-    """UTF-8 bytes and a type the bot's engine accepts (codes ``not_utf8``, ``persona_type``)."""
+    """UTF-8 bytes within the identity cap and a type the bot's engine accepts (``not_utf8``, ``limit_exceeded``, ``persona_type``)."""
     reasons = []
     legal = legal_identity_types(engine_type)
     for index, entry in enumerate(spec["persona"]):
@@ -189,7 +190,11 @@ def persona_reasons(spec: dict[str, Any], content: ContentReader, engine_type: s
         if entry["type"] not in legal:
             reasons.append(Reason("persona_type", location, f"engine {engine_type!r} does not accept {entry['type']}"))
         data = _read(content, entry["digest"], location, reasons)
-        if data is not None and not _is_utf8(data):
+        if data is None:
+            continue
+        if len(data) > MAX_PERSONA_BYTES:
+            reasons.append(Reason("limit_exceeded", location, f"a persona file is at most {MAX_PERSONA_BYTES} bytes"))
+        elif not _is_utf8(data):
             reasons.append(Reason("not_utf8", location, f"{entry['type']} is not UTF-8 text"))
     return reasons
 

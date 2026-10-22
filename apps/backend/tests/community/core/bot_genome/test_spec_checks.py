@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import canonical_tree_bytes
+from agentclaw.community.core.bot_genome.limits import MAX_PERSONA_BYTES
 from agentclaw.community.core.bot_genome.spec_checks import (
     SpecCheckContext,
     SpecChecks,
@@ -121,6 +122,15 @@ def test_persona_type_the_engine_does_not_accept() -> None:
     reasons = persona_reasons(spec, BlobDir(), "claude_code")
     assert {r.code for r in reasons} == {"persona_type"} and len(reasons) == 4
     assert persona_reasons(spec, BlobDir(), "openclaw") == []
+
+
+def test_a_persona_file_over_the_identity_cap_is_refused() -> None:
+    spec, _ = _record()
+    blobs = BlobDir()
+    spec["persona"][0]["digest"] = blobs.put(b"x" * (MAX_PERSONA_BYTES + 1))
+    assert [r.code for r in persona_reasons(spec, blobs, "openclaw")] == ["limit_exceeded"]
+    spec["persona"][0]["digest"] = blobs.put(b"y" * MAX_PERSONA_BYTES)
+    assert persona_reasons(spec, blobs, "openclaw") == []
 
 
 def test_unreachable_content_is_a_reason_not_an_exception() -> None:
