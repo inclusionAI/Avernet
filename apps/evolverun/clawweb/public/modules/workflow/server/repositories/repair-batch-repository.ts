@@ -219,7 +219,7 @@ export class RepairBatchRepository {
       return revisionFromRow(retry);
     }
     const previous = await this.latest(tx, workflowId, input.taskId);
-    automaticAdvance(await new RepairBatchRepository(tx).listRevisions(workflowId, input.taskId), input);
+    if (isAutomaticBatch(input) || previous && isAutomaticBatch(previous.input)) automaticAdvance(await new RepairBatchRepository(tx).listRevisions(workflowId, input.taskId), input);
     if ((await tx.query('SELECT 1 FROM workflow_repair_revisions WHERE task_id = ? AND phase = ? LIMIT 1', [input.taskId, 'published'])).length) conflict('STATE_CONFLICT', '已部署任务不能再生成候选；请依据效果结论创建新基线任务');
     if (request.expectedAttemptRevision !== (previous?.revision ?? 0) || input.revision !== (previous?.revision ?? 0) + 1
       || (previous && !['review', 'blocked', 'failed', 'no_change'].includes(previous.phase))) conflict('STATE_CONFLICT', 'Revision is not editable or latest attempt changed');

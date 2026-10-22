@@ -1,6 +1,7 @@
 import type { RepairTrial, RepairTrialRequest, RepairTrialOptions, RepairTrialTarget } from '../../server/contracts/repair-trial'
 import { fetchJson } from '@avernet/clawweb-shared/web/api/client'
 import { readOnlyJson } from './read-only-json'
+import { getClientUser } from '@avernet/clawweb-shared/web/hooks/useClientUser'
 import type { RepairCandidatesQuery, RepairCandidatesResponse, RepairDiff, RepairFeedbackRequest, RepairInboxItem, RepairSelectionRequest, RepairSelectionState, RepairTaskDetail } from '../../server/contracts/repair-workbench'
 import type { RepairItem, RepairRevision, StoredRepairItem } from '../../server/contracts/repair-batch'
 import type { RepairConfirmRequest, RepairDeployRequest, RepairApproval, RepairDeployment, RepairReleaseTarget } from '../../server/contracts/repair-release'
@@ -9,6 +10,37 @@ import type { RepairVerificationEvidence, RepairVerificationConclusion } from '.
 const base = '/api/workflow-repairs'
 const segment = encodeURIComponent
 const post = <T,>(url: string, body: unknown) => fetchJson<T>(url, { method: 'POST', body: JSON.stringify(body) })
+// Coalesce only concurrent identical reads, scoped to the logged-in principal. Never cache a completed result.
+const candidateReads = new Map<string, Promise<RepairCandidatesResponse>>()
+async function readCandidates(workflowId: string, query: RepairCandidatesQuery): Promise<RepairCandidatesResponse> {
+  const readPage = (metadataPage: number): Promise<RepairCandidatesResponse> => {
+    if (query.previewSignatures !== undefined) return readOnlyJson<RepairCandidatesResponse>(
+      `${base}/candidates/query`, undefined, { ...query, workflowId, metadataPage })
+    const params = new URLSearchParams({ workflowId })
+    params.set('metadataPage', String(metadataPage))
+    if (query.versionScope) params.set('versionScope', query.versionScope)
+    if (query.snapshotKey) params.set('snapshotKey', query.snapshotKey)
+    if (query.state) params.set('state', query.state)
+    if (query.page) params.set('page', String(query.page))
+    if (query.pageSize) params.set('pageSize', String(query.pageSize))
+    if (query.includeHistorical) params.set('includeHistorical', 'true')
+    if (query.includeTasks !== undefined) params.set('includeTasks', String(query.includeTasks))
+    if (query.nodeId) params.set('nodeId', query.nodeId)
+    if (query.failureMode) params.set('failureMode', query.failureMode)
+    if (query.signature) params.set('signature', query.signature)
+    return readOnlyJson<RepairCandidatesResponse>(`${base}/candidates?${params}`)
+  }
+  const result = await readPage(query.metadataPage ?? 1)
+  if (query.metadataPage !== undefined) return result
+  const totalPages = result.metadata?.totalPages ?? 1
+  for (let page = 2; page <= totalPages; page++) {
+    const next = await readPage(page)
+    if (next.inputDigest !== result.inputDigest || next.metadata?.digest !== result.metadata?.digest || next.metadata?.totalPages !== totalPages) throw new Error('建议来源已变化，请重试读取。')
+    result.tasks.push(...next.tasks); result.repairSignatureKeys.push(...next.repairSignatureKeys)
+    result.facets.nodes.push(...next.facets.nodes); result.facets.failureModes.push(...next.facets.failureModes)
+  }
+  return result
+}
 export const repairBatches = {
   selection: (workflowId: string, itemIds: string[], includeHistorical: boolean) => readOnlyJson<RepairSelectionState>(`${base}/selection/query`, undefined, { workflowId, itemIds, includeHistorical }),
   retryProposalIntegration: (workflowId: string) => post<{ ok: true }>(`${base}/proposal-integration/retry`, { workflowId }),
@@ -29,34 +61,18 @@ export const repairBatches = {
   conclude: (taskId: string, deploymentId: string, request: { requestId: string; itemId: string; expectedStateVersion: number;
     result: 'verified' | 'ineffective' | 'inconclusive'; reason: string; flowIds: string[] }) => post<RepairVerificationConclusion>(`${base}/${segment(taskId)}/deployment/${segment(deploymentId)}/verification`, request),
   reopenItem: (taskId: string, deploymentId: string, request: { requestId: string; itemId: string; expectedStateVersion: number }) => post<unknown>(`${base}/${segment(taskId)}/deployment/${segment(deploymentId)}/reopen-item`, request),
-  candidates: async (workflowId: string, query: RepairCandidatesQuery = {}) => {
-    const readPage = (metadataPage: number): Promise<RepairCandidatesResponse> => {
-    if (query.previewSignatures !== undefined) return readOnlyJson<RepairCandidatesResponse>(
-      `${base}/candidates/query`, undefined, { ...query, workflowId, metadataPage })
-    const params = new URLSearchParams({ workflowId })
-    params.set('metadataPage', String(metadataPage))
-    if (query.versionScope) params.set('versionScope', query.versionScope)
-    if (query.snapshotKey) params.set('snapshotKey', query.snapshotKey)
-    if (query.state) params.set('state', query.state)
-    if (query.page) params.set('page', String(query.page))
-    if (query.pageSize) params.set('pageSize', String(query.pageSize))
-    if (query.includeHistorical) params.set('includeHistorical', 'true')
-    if (query.nodeId) params.set('nodeId', query.nodeId)
-    if (query.failureMode) params.set('failureMode', query.failureMode)
-    if (query.signature) params.set('signature', query.signature)
-    return readOnlyJson<RepairCandidatesResponse>(`${base}/candidates?${params}`)
+  candidates: (workflowId: string, query: RepairCandidatesQuery = {}) => {
+    const principal = getClientUser()?.userId
+    if (!principal) return readCandidates(workflowId, query)
+    const key = JSON.stringify([principal, workflowId, Object.entries(query).filter(([, value]) => value !== undefined).sort(([a], [b]) => a.localeCompare(b))])
+    let pending = candidateReads.get(key)
+    if (!pending) {
+      pending = readCandidates(workflowId, query)
+      candidateReads.set(key, pending)
+      void pending.then(() => candidateReads.delete(key), () => candidateReads.delete(key))
     }
-    const result = await readPage(query.metadataPage ?? 1)
-    // Explicit metadata paging is useful to non-browser callers. The UI needs all facets/task identities.
-    if (query.metadataPage !== undefined) return result
-    const totalPages = result.metadata?.totalPages ?? 1
-    for (let page = 2; page <= totalPages; page++) {
-      const next = await readPage(page)
-      if (next.inputDigest !== result.inputDigest || next.metadata?.digest !== result.metadata?.digest || next.metadata?.totalPages !== totalPages) throw new Error('建议来源已变化，请重试读取。')
-      result.tasks.push(...next.tasks); result.repairSignatureKeys.push(...next.repairSignatureKeys)
-      result.facets.nodes.push(...next.facets.nodes); result.facets.failureModes.push(...next.facets.failureModes)
-    }
-    return result
+    // Metadata assembly and callers may mutate arrays; they must not share their response object.
+    return pending.then(result => structuredClone(result))
   },
   item: (workflowId: string, itemId: string, originalOnly = false) => readOnlyJson<RepairInboxItem>(`${base}/items/${segment(itemId)}?workflowId=${segment(workflowId)}${originalOnly ? '&originalOnly=true' : ''}`),
   task: (taskId: string, revisionPage = 1) => readOnlyJson<RepairTaskDetail>(`${base}/${segment(taskId)}${revisionPage > 1 ? `?revisionPage=${revisionPage}` : ''}`),

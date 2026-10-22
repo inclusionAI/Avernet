@@ -54,6 +54,23 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     expect(result.body).toMatchObject({ latestAttempt: { revision: 1 }, release: { approval: null, deployments: [] } });
     expect(reads).toHaveLength(1);
   });
+  it('supports task-free candidate reads over GET and POST without changing selection identities or authorization', async () => {
+    const f = await setup();
+    const shown = await f.request('/candidates?workflowId=wf-1');
+    await f.request('/', { workflowId: 'wf-1', itemIds: ['item-0'], inputDigest: shown.body.inputDigest, instructions: '', requestId: 'light-page' });
+    const normal = await f.request('/candidates?workflowId=wf-1');
+    expect(normal.body.tasks).toHaveLength(1);
+    const reads = vi.spyOn(f.db, 'query');
+    for (const result of [await f.request('/candidates?workflowId=wf-1&includeTasks=false', undefined, 'viewer'),
+      await f.request('/candidates/query', { workflowId: 'wf-1', includeTasks: false }, 'viewer')]) {
+      expect(result.status).toBe(200);
+      expect(result.body).toMatchObject({ tasks: [], inputDigest: normal.body.inputDigest, items: normal.body.items, canEdit: false });
+    }
+    expect(reads.mock.calls.filter(([sql]) => sql.includes('FROM workflow_repair_revisions'))).toHaveLength(0);
+    reads.mockRestore();
+    expect((await f.request('/candidates?workflowId=wf-1&includeTasks=invalid')).status).toBe(400);
+    expect((await f.request('/candidates?workflowId=wf-1&includeTasks=false', undefined, 'denied')).status).toBe(403);
+  });
   it('returns a definite pre-creation failure instead of an unknown write result when the deployed pack cannot be read', async () => {
     const f = await setup();
     const inbox = await f.request('/candidates?workflowId=wf-1');

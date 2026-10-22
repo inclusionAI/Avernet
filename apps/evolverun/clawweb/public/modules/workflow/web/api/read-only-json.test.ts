@@ -5,6 +5,70 @@ import { gunzipSync } from 'node:zlib'
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
 describe('bounded repair reads', () => {
+  it('shares identical in-flight candidate reads without retaining stale results or sharing mutable responses', async () => {
+    vi.stubGlobal('__TERN__', { user: { outUserNo: 'reader' } })
+    const finishes: Array<() => void> = []
+    const urls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      urls.push(url)
+      await new Promise<void>(resolve => { finishes.push(resolve) })
+      return { ok: true, json: async () => ({ items: [{ itemId: 'original' }] }) }
+    }))
+    const first = repairBatches.candidates('wf-1', { metadataPage: 1, page: 1 })
+    const second = repairBatches.candidates('wf-1', { page: 1, metadataPage: 1 })
+    finishes.forEach(finish => finish())
+    const [a, b] = await Promise.all([first, second])
+    expect(urls).toHaveLength(1)
+    a.items[0].itemId = 'consumer-edit'
+    expect(b.items[0].itemId).toBe('original')
+    const next = repairBatches.candidates('wf-1', { metadataPage: 1, page: 1 })
+    expect(urls).toHaveLength(2)
+    finishes.at(-1)!(); await next
+  })
+  it('does not combine different principals or candidate pages', async () => {
+    const finishes: Array<() => void> = [], observed: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      const identity = `${new Headers(init.headers).get('X-User-Id')}:${new URL(url, 'http://localhost').searchParams.get('page')}`
+      observed.push(identity)
+      await new Promise<void>(resolve => finishes.push(resolve))
+      return { ok: true, json: async () => ({ items: [{ itemId: identity }] }) }
+    }))
+    vi.stubGlobal('__TERN__', { user: { outUserNo: 'reader-a' } })
+    const a = repairBatches.candidates('wf-1', { metadataPage: 1, page: 1 })
+    vi.stubGlobal('__TERN__', { user: { outUserNo: 'reader-b' } })
+    const b = repairBatches.candidates('wf-1', { metadataPage: 1, page: 1 })
+    const page = repairBatches.candidates('wf-1', { metadataPage: 1, page: 2 })
+    finishes.forEach(finish => finish())
+    expect((await Promise.all([a, b, page])).map(result => result.items[0].itemId)).toEqual(['reader-a:1', 'reader-b:1', 'reader-b:2'])
+    expect(observed).toEqual(['reader-a:1', 'reader-b:1', 'reader-b:2'])
+  })
+  it('evicts failed candidate reads so an explicit retry makes a fresh request', async () => {
+    vi.stubGlobal('__TERN__', { user: { outUserNo: 'reader' } })
+    const urls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      urls.push(url)
+      if (urls.length === 1) throw new Error('controlled read failure')
+      return { ok: true, json: async () => ({ items: [] }) }
+    }))
+    await expect(repairBatches.candidates('wf-1', { metadataPage: 1 })).rejects.toThrow('controlled read failure')
+    expect((await repairBatches.candidates('wf-1', { metadataPage: 1 })).items).toEqual([])
+    expect(urls).toHaveLength(2)
+  })
+  it('does not share a response before the browser principal is known', async () => {
+    const finishes: Array<() => void> = []
+    let calls = 0
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      calls++
+      await new Promise<void>(resolve => finishes.push(resolve))
+      return { ok: true, json: async () => ({ items: [] }) }
+    }))
+    const a = repairBatches.candidates('wf-1', { metadataPage: 1 })
+    const b = repairBatches.candidates('wf-1', { metadataPage: 1 })
+    finishes.forEach(finish => finish())
+    await Promise.all([a, b])
+    expect(calls).toBe(2)
+  })
+
   it('sends a 50-issue preview scope in the body without an oversized request URL', async () => {
     const previewSignatures = Array.from({ length: 50 }, (_, i) => `${i}:${'节点'.repeat(250)}`)
     let requestUrl = '', requestInit: RequestInit | undefined

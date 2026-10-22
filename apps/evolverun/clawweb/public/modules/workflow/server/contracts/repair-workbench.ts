@@ -24,7 +24,7 @@ export function repairSignatureKey(signature: string): string {
   return hash(0xcbf29ce484222325n) + hash(0x84222325cbf29ce4n);
 }
 export type RepairInboxFilter = 'pending' | 'processing' | 'awaiting_verification' | 'closed' | 'no_action' | 'all';
-export type RepairCandidatesQuery = { state?: RepairInboxFilter; page?: number; pageSize?: number; includeHistorical?: boolean;
+export type RepairCandidatesQuery = { state?: RepairInboxFilter; page?: number; pageSize?: number; includeHistorical?: boolean; includeTasks?: boolean;
   nodeId?: string; failureMode?: string; signature?: string; previewSignatures?: string[]; rawItems?: boolean; metadataPage?: number; versionScope?: RepairVersionScope; snapshotKey?: string };
 export type RepairTaskSummary = { taskId: string; revision: number; phase: RepairRevision['phase']; updatedAtMs: number; itemCount: number; title?: string; source?: 'automatic' | 'manual' };
 export type RepairCandidatesResponse = {

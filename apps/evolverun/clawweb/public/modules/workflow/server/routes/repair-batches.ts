@@ -131,6 +131,7 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
     if (versionScope !== undefined && !['current', 'historical', 'all'].includes(versionScope)) throw new RepairBatchError('INVALID_INPUT', 'Invalid version scope');
     if (typeof state !== 'string' || !['pending', 'processing', 'awaiting_verification', 'closed', 'no_action', 'all'].includes(state)) throw new RepairBatchError('INVALID_INPUT', 'Invalid state');
     if (actor) res.json({ ...await service.candidates(workflowId, { versionScope, snapshotKey: query.snapshotKey === undefined ? undefined : text(query.snapshotKey, 'snapshotKey'), state: state as RepairInboxFilter,
+      includeTasks: boolean(query.includeTasks, 'includeTasks', true),
       metadataPage: positive(query.metadataPage, 'metadataPage', 1), page: positive(query.page, 'page', 1), pageSize: positive(query.pageSize, 'pageSize', 20, 200),
       nodeId: query.nodeId === undefined ? undefined : text(query.nodeId, 'nodeId'),
       failureMode: query.failureMode === undefined ? undefined : text(query.failureMode, 'failureMode'),

@@ -149,7 +149,7 @@ OCB 已实现以上内容重建；部署历史事务激活前还会再次调用�
 
 | 请求 | 行为 |
 | --- | --- |
-| `GET /candidates?workflowId=&state=&page=&pageSize=&includeHistorical=&nodeId=&failureMode=&signature=&versionScope=&snapshotKey=` | 默认读取最近 7 天，显式 `includeHistorical=true` 包含历史；可选节点/类型/签名先过滤再分页和计数；inputDigest 仍绑定整个时间范围的来源，支持跨页选择；不读取证据 payload，不物化写库 |
+| `GET /candidates?workflowId=&state=&page=&pageSize=&includeHistorical=&includeTasks=&nodeId=&failureMode=&signature=&versionScope=&snapshotKey=` | 默认读取最近 7 天，显式 `includeHistorical=true` 包含历史；可选节点/类型/签名先过滤再分页和计数；inputDigest 仍绑定整个时间范围的来源，支持跨页选择；不读取证据 payload，不物化写库。`includeTasks` 默认 true，false 时跳过修复版本历史读取并返回空 tasks；POST 查询语义相同 |
 | `POST /candidates/query` | 只读查询，与 GET 使用相同 view 权限、过滤和快照；JSON 请求体包含 workflowId 和查询字段，批量 previewSignatures 最多 50 个，解压后请求体最多 256 KiB，避免长签名撑大 URL。返回每个问题的真实总数及最多 3 项预览，与全局建议页独立；先为基础响应和所有总数预留字节，再按剩余 4 MiB 响应预算添加完整项，不截断建议。预算不足时预览可少于 3 项或为空，仍可通过“查看全部”分页读取。旧 GET previewSignature 参数兼容保留，新客户端不再使用 |
 | `GET /items/:itemId?workflowId=` | 展开单条时读取该项完整建议、来源与证据 payload |
 | `POST /` | 校验当前来源摘要，原子写入处理项、修订、workflow_repair task 和 draft step，提交后派发，202 |

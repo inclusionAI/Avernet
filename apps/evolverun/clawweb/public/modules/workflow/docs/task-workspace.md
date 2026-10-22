@@ -111,6 +111,38 @@ The browser no longer posts reconciliation on a view timer: background Host
 reconciliation remains server-owned, and explicit recovery buttons retain the
 original request/deployment identity. Read-only task/observation polling remains.
 
+## Suggestion reads and revision submission
+
+The adjustment editor requests `metadataPage=1&includeTasks=false`: its candidate
+page does not need task summaries or their frozen revision bodies. Default callers
+retain task metadata. The history/version scope, selection digest, pagination and
+original evidence contract do not change; a history-enabled read still constructs
+the requested historical source summary, rather than pretending to be a SQL-limited
+twenty-row lookup.
+
+Identical concurrent candidate reads share only their pending request for a known
+browser principal and query scope; every subscriber gets a separate response object.
+Completed/failed requests are removed, so an explicit later refresh stays fresh.
+Unknown principals and different users/pages/scopes do not share requests. The
+editor depends on its effective history scope, so changing an overridden parent
+history flag cannot start the same historical read again.
+
+New revision submission reads selected source evidence once under the existing
+workflow transaction/lock and reuses the task snapshot already read for recovery;
+it rereads authoritative task state inside the transaction. Automatic chain,
+auto-to-manual feedback, source/version/claim checks and request idempotency remain.
+Plain manual tasks skip only the automatic-chain history scan whose validator was
+already a no-op for a manual predecessor. The response reads the exact submitted
+revision, not the complete task history. AIS dispatch still waits for a job receipt;
+no new background queue or response-before-dispatch behavior is introduced.
+
+The existing `[workflow-repair] request diagnostic` record now separates
+`task_state`, `revision_write`, `evidence_freeze`, `dispatch_materials`, `ais_submit`
+and `revision_response` in `stagesMs`. `revision_write` includes nested source and
+evidence stages: do not sum nested timings. Logs contain stage timings, not evidence,
+credentials or AIS request bodies. Local query-count regression is not proof of
+production latency after deployment.
+
 ## Validation boundary
 
 Interaction regressions exercise real tab content, keyboard navigation, single

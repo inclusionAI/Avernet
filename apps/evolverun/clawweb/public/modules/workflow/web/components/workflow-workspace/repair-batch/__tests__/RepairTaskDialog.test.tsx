@@ -60,6 +60,21 @@ const candidates = () => ({
   page: { page: 1, pageSize: 20, total: 1, totalPages: 1 }, limits: { maxItems: 100, maxRequestBytes: 65536 },
 })
 
+it('does not reread the same historical scope when the parent history flag changes', async () => {
+  const detail = taskDetail('review', '候选', ['item-1'])
+  detail.latestAttempt.input.items[0].context = { targetSnapshot: { kind: 'deployment', workflowId: 'wf-1', workflowVersion: 1, deployNumber: 1, configDigest: 'a'.repeat(64) } }
+  repairApi.task.mockResolvedValue(detail)
+  repairApi.candidates.mockResolvedValue(candidates())
+  const props = { workflowId: 'wf-1', taskId: 'FIX-1', canEdit: true, onClose() {}, onChanged() {} }
+  const view = render(<RepairTaskDialog {...props} includeHistorical={false} />)
+  await userEvent.click(await screen.findByRole('button', { name: '调整建议与要求', exact: true }))
+  await screen.findByRole('checkbox', { name: '选择修订项 新出现的修复建议' })
+  view.rerender(<RepairTaskDialog {...props} includeHistorical />)
+  await act(async () => {})
+  expect(repairApi.candidates).toHaveBeenCalledTimes(1)
+  expect(repairApi.candidates).toHaveBeenCalledWith('wf-1', expect.objectContaining({ includeHistorical: true, versionScope: 'all', includeTasks: false }))
+})
+
 it('shows one primary action, durable failed deployment status and Git links instead of prominent hashes', async () => {
   const detail = taskDetail('review', '候选已生成')
   detail.capabilities.publication = true

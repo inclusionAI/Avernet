@@ -47,6 +47,8 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
   const requestPayloadKey = useRef('')
   const requestSequence = useRef(0)
   const activeTask = useRef<{ taskId: string; active: boolean } | null>(null)
+  const feedbackHasTarget = !!detail?.latestAttempt.input.items[0]?.context?.targetSnapshot
+  const feedbackHistory = feedbackHasTarget || includeHistorical
 
   useEffect(() => {
     let current = true
@@ -77,7 +79,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     let current = true
     setFeedbackCandidatesLoading(true)
     setFeedbackCandidatesError('')
-    repairBatches.candidates(workflowId, { metadataPage: 1, ...(detail?.latestAttempt.input.items[0]?.context?.targetSnapshot ? { versionScope: 'all' as const } : {}), state: 'pending', page: feedbackPage, pageSize: 20, includeHistorical: detail?.latestAttempt.input.items[0]?.context?.targetSnapshot ? true : includeHistorical })
+    repairBatches.candidates(workflowId, { metadataPage: 1, includeTasks: false, ...(feedbackHasTarget ? { versionScope: 'all' as const } : {}), state: 'pending', page: feedbackPage, pageSize: 20, includeHistorical: feedbackHistory })
       .then(async result => {
         if (!current || !detail) return
         const key=`${taskId}:${detail.latestAttempt.revision}`
@@ -101,7 +103,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
       .catch(reason => { if (current) setFeedbackCandidatesError(repairReadError(reason)) })
       .finally(() => { if (current) setFeedbackCandidatesLoading(false) })
     return () => { current = false }
-  }, [mode, workflowId, feedbackPage, includeHistorical, sourceRefresh])
+  }, [mode, workflowId, feedbackPage, feedbackHistory, feedbackHasTarget, sourceRefresh])
 
   const inspectCandidate = (revision?: number) => {
     try {
