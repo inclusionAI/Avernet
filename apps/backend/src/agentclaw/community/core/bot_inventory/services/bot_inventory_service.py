@@ -499,9 +499,8 @@ class BotInventoryService(BotInventoryServiceProtocol):
             deploy_mode=deploy_mode,
             display_state=display_state,
             status=raw_status,
-            owner_entity_id=str(
-                row.get("owner_id") or row.get("entity_id") or owner_id
-            ),
+            entity_id=_optional_str(row.get("entity_id")),
+            owner_entity_id=str(row.get("owner_id") or owner_id),
             space=self._business_space.bot_space(
                 bot={**dict(row), "ext": ext},
                 owner_id=owner_id,

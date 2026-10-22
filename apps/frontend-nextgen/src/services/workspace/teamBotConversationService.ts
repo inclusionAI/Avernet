@@ -55,8 +55,11 @@ function readTemplateName(dto: CollaboratingBotDto, templateType: string | undef
 
 function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
   const realBotId = dto.bot_id.trim();
-  const ownerId = dto.entity_id?.trim() || undefined;
-  const botId = ownerId ? `${realBotId}:${ownerId}` : realBotId;
+  const entityId = dto.entity_id?.trim() || undefined;
+  // Runtime APIs' addressed-owner context matches the Bot record owner. The
+  // DTO entity_id is only the team-directory scope used in the composite ID.
+  const ownerId = dto.owner_id?.trim() || undefined;
+  const botId = entityId ? `${realBotId}:${entityId}` : realBotId;
   const declaredTemplateType = readTemplateType(dto);
   const templateType = normalizeTemplateType(dto.engine, declaredTemplateType);
   const templateName = readTemplateName(dto, templateType);
@@ -79,7 +82,7 @@ function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
     // 实例运行状态透传(2026-10-21):FAILED/PENDING 供行级禁用与悬停提示感知,团队成员不再对不可用 Bot 盲操作。
     status: dto.status,
     reachability: 'reachable',
-    chatable: Boolean(realBotId && ownerId),
+    chatable: Boolean(realBotId && entityId && ownerId),
     isAgentCodingBot: runtime.isAgentCodingBot,
     templateType: runtime.templateType,
     templateName: runtime.templateName,

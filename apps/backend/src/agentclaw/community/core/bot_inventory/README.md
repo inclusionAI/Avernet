@@ -51,3 +51,11 @@ for normalized card presentation. Keep using `actions` for available operations.
 The legacy `/api/bots/search`, `/bots`, and `/lifecycle` contracts are unchanged.
 Existing publication identifiers, diagnostic state, edit locks, and action policy
 remain intact. Projection reuses the existing batched publication read.
+
+## Inventory identity fields
+
+`GET /openapi/v1/bots/all` returns both `entity_id` and `owner_entity_id`.
+`entity_id` addresses the Bot record and is the team entity suffix for team Bot
+conversation routes. `owner_entity_id` remains the owning user and is the owner
+context for Bot runtime APIs; the values may coincide for personal Bots. The
+inventory adapter must not substitute one for the other.

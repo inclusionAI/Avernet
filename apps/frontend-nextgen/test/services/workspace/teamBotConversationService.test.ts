@@ -17,7 +17,7 @@ const dto = (overrides: Partial<CollaboratingBotDto> = {}): CollaboratingBotDto 
 });
 beforeEach(() => list.mockReset());
 
-test('entity_id 而不是 owner_id 作为会话 owner 上下文，mine 不标记好友', async () => {
+test('composite botId 使用 entity_id，会话 owner 上下文使用 owner_id，mine 不标记好友', async () => {
   list.mockResolvedValue({ code: 200000, data: { items: [dto()], total: 1 } });
   const result = await teamBotConversationService.listBots('human_viewer');
   expect(list).toHaveBeenCalledWith({ user_id: 'viewer', page: 1, page_size: 100 }, undefined);
@@ -27,7 +27,7 @@ test('entity_id 而不是 owner_id 作为会话 owner 上下文，mine 不标记
       {
         botId: 'shared:team-entity',
         realBotId: 'shared',
-        ownerId: 'team-entity',
+        ownerId: 'different-owner',
         displayName: '团队助手',
         engine: 'teclaw',
         chatable: true,
@@ -254,11 +254,17 @@ test('历史 aicoding 团队 Bot 缺 template_type 时归一为个人 Coding Bot
   });
 });
 
-test('缺 entity_id 不猜 owner 或 viewer，保留不可聊天行', async () => {
+test('缺 entity_id 不造复合 Bot ID，保留 DTO Bot owner 但不可聊天', async () => {
   list.mockResolvedValue({ code: 200000, data: { items: [dto({ entity_id: '' })], total: 1 } });
   const result = await teamBotConversationService.listBots('viewer');
   expect(result).toMatchObject({ ok: true, data: [{ chatable: false }] });
-  expect(result.ok ? result.data[0].ownerId : null).toBeUndefined();
+  expect(result.ok ? result.data[0].ownerId : null).toBe('different-owner');
+});
+
+test('缺 Bot owner_id 时团队 Bot 不可聊天', async () => {
+  list.mockResolvedValue({ code: 200000, data: { items: [dto({ owner_id: '' })], total: 1 } });
+  const result = await teamBotConversationService.listBots('viewer');
+  expect(result).toMatchObject({ ok: true, data: [{ botId: 'shared:team-entity', chatable: false }] });
 });
 
 test.each([20000, 403000, undefined])('不把错误/其他方言 code %p 当成空列表', async (code) => {

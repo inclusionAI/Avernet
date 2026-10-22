@@ -148,6 +148,28 @@ def test_list_inventory_combines_personal_cloud_and_local(client):
     assert all(item["publish"] is None for item in data["items"])
 
 
+def test_list_inventory_exposes_bot_entity_separately_from_user_owner(
+    client, bot_service, desktop_service
+):
+    bot_service.list_bots_by_conditions.return_value = {
+        "total": 1,
+        "items": [
+            {
+                **CLOUD,
+                "bot_id": "team-bot-1",
+                "owner_id": "owner-user-1",
+                "entity_id": "team_spc-example",
+            }
+        ],
+    }
+    desktop_service.list_user_bots.return_value = []
+    data = _ok(client.get("/openapi/v1/bots/all"))
+
+    item, = data["items"]
+    assert item["owner_entity_id"] == "owner-user-1"
+    assert item["entity_id"] == "team_spc-example"
+
+
 def test_list_inventory_carries_template_snapshot_verbatim(client):
     data = _ok(client.get("/openapi/v1/bots/all"))
 

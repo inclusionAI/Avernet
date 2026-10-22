@@ -114,7 +114,6 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, cu
   const ownerId = asString(dto.owner_entity_id) ?? asString(dto.owner_id);
   const spaceId = asString(dto.space_id) ?? asString(space?.space_id) ?? asString(dto.owner_entity_id);
   const spaceName = asString(dto.space_name) ?? asString(space?.space_name) ?? asString(space?.name);
-  const entityId = asString(dto.entity_id) ?? asString(dto.owner_entity_id) ?? spaceId;
   const avatarUrl = asString(dto.avatar_url) ?? asString(asRecord(dto.ext).avatar_url);
   const botType = asString(dto.bot_type) ?? 'personal';
   const inventoryKind = asString(dto.kind);
@@ -122,6 +121,9 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, cu
   const spaceKind = asString(space?.kind)?.toLowerCase();
   const ownership =
     entityType === 'proj' || entityType === 'team' || spaceKind === 'team' ? ('team' as const) : ('personal' as const);
+  const entityId =
+    asString(dto.entity_id) ??
+    (ownership === 'team' ? undefined : asString(dto.owner_entity_id) ?? spaceId);
   const runtime = runtimeFrom(dto, warnings);
   const templateType = templateTypeFrom(dto);
   const deployment = botType === 'desktop' ? ('local' as const) : ('cloud' as const);

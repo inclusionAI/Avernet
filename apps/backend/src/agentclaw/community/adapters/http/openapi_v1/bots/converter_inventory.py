@@ -58,6 +58,7 @@ def to_inventory_item(item: CoreItem) -> BotInventoryItem:
         publication_version=item.publication_version,
         live_version=item.live_version,
         internal_status=item.internal_status,
+        entity_id=item.entity_id,
         owner_entity_id=item.owner_entity_id,
         space=space,
         template_type=item.template_type,

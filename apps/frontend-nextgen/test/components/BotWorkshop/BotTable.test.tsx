@@ -75,6 +75,7 @@ describe('BotTable 表格结构', () => {
       '主要操作',
       '更多操作',
     ]);
+    expect(screen.getByRole('columnheader', { name: 'Bot信息' })).toHaveClass('normal-case');
     expect(screen.getByRole('table', { name: 'Bot 列表' })).toHaveClass('min-w-[1000px]');
     expect(screen.getByRole('columnheader', { name: '主要操作' })).toHaveClass('sticky', 'right-12');
   });

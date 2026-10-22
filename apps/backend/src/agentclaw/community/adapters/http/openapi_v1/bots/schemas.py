@@ -928,6 +928,10 @@ class BotInventoryItem(BaseModel):
     status: str = Field(
         description="Stored Bot status for every card kind, identical in meaning to /bots status. For service publication state use publish.status or display_state."
     )
+    entity_id: str | None = Field(
+        default=None,
+        description="Entity that addresses the Bot record; for team Bots this is the team entity, distinct from owner_entity_id. Null only when the source row does not provide it."
+    )
     publish: InventoryPublication | None = Field(
         default=None,
         description="Publication represented by this service card; null for non-service Bots or when no publication exists.",
@@ -947,7 +951,7 @@ class BotInventoryItem(BaseModel):
     live_version: int | None = Field(
         default=None, description="Currently running service version, when one exists."
     )
-    owner_entity_id: str = Field(description="User who owns the bot.")
+    owner_entity_id: str = Field(description="User who owns the bot; use entity_id to address the Bot record.")
     space: BusinessSpace | None = Field(
         default=None, description="Business space containing the bot, when resolved."
     )

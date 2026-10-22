@@ -196,7 +196,7 @@ export function BotAccessModal(props: Props) {
                 disabled={!selectedUser}
                 onClick={() =>
                   selectedUser &&
-                  void props.onAddCollaborator(selectedUser.userId, selectedUser.name, 'admin').then((added) => {
+                  void props.onAddCollaborator(selectedUser.userId, selectedUser.name, 'member').then((added) => {
                     if (added) {
                       setSelectedUser(undefined);
                       setMemberQuery('');

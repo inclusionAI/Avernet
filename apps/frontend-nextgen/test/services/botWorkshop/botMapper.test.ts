@@ -254,6 +254,21 @@ describe('botMapper', () => {
     expect(result.item.harnessContext?.entityId).toBe('entity-nested');
   });
 
+  test('团队 inventory 缺少 entity_id 时不把 owner_entity_id 当成实体路由标识', () => {
+    const result = mapBotDto({
+      bot_id: 'team-bot-1',
+      bot_name: '团队协作者 Bot',
+      engine: 'openclaw',
+      bot_type: 'personal',
+      status: 'ACTIVE',
+      owner_entity_id: 'owner-user-1',
+      space: { space_id: '252', name: 'Fixture Team', kind: 'team' },
+    });
+
+    expect(result.item.ownerId).toBe('owner-user-1');
+    expect(result.item.harnessContext?.entityId).toBeUndefined();
+  });
+
   test('复合键避免不同空间和 Bot 类型互相覆盖', () => {
     const result = mapBotList({
       items: [

@@ -110,6 +110,7 @@ class BotInventoryItem:
     deploy_mode: DeployMode
     display_state: DisplayState
     status: str
+    entity_id: str | None
     owner_entity_id: str
     space: BusinessSpaceRef | None
     avatar_url: str | None = None

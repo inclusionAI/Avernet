@@ -91,7 +91,7 @@ const BotTable: React.FC<BotTableProps> = ({
   const columns: DataTableColumn<BotDomain>[] = React.useMemo(
     () => [
       {
-        id: 'info',
+        id: 'info', className: 'normal-case',
         header: 'Bot信息',
         width: showDescriptionColumn ? 'w-[clamp(192px,16vw,240px)]' : 'w-[clamp(224px,19vw,320px)]',
         cell: (bot) => (

@@ -125,6 +125,69 @@ def test_list_items_combines_filters_and_paginates(service) -> None:
 
 
 @pytest.mark.unit
+def test_team_inventory_keeps_bot_entity_separate_from_user_owner(service) -> None:
+    inventory, bot, desktop = service
+    bot.list_bots_by_conditions.return_value = {
+        "total": 1,
+        "items": [
+            {
+                **CLOUD,
+                "bot_id": "team-bot-1",
+                "owner_id": "owner-user-1",
+                "entity_id": "team_spc-example",
+                "space_id": "252",
+            }
+        ],
+    }
+    desktop.list_user_bots.return_value = []
+    team_space = BusinessSpaceRef(space_id="252", name="Fixture Team", kind="team")
+
+    items, total = inventory.list_items(
+        owner_id="collaborator-user-1",
+        space=team_space,
+        keyword=None,
+        engine=None,
+        deploy_mode=DeployMode.CLOUD,
+        page=1,
+        page_size=10,
+    )
+
+    assert total == 1
+    assert items[0].owner_entity_id == "owner-user-1"
+    assert items[0].entity_id == "team_spc-example"
+
+
+@pytest.mark.unit
+def test_team_inventory_does_not_infer_missing_entity_from_owner(service) -> None:
+    inventory, bot, desktop = service
+    bot.list_bots_by_conditions.return_value = {
+        "total": 1,
+        "items": [
+            {
+                **CLOUD,
+                "bot_id": "team-bot-without-entity",
+                "owner_id": "owner-user-1",
+                "space_id": "252",
+            }
+        ],
+    }
+    desktop.list_user_bots.return_value = []
+
+    items, _ = inventory.list_items(
+        owner_id="collaborator-user-1",
+        space=BusinessSpaceRef(space_id="252", name="Fixture Team", kind="team"),
+        keyword=None,
+        engine=None,
+        deploy_mode=DeployMode.CLOUD,
+        page=1,
+        page_size=10,
+    )
+
+    assert items[0].owner_entity_id == "owner-user-1"
+    assert items[0].entity_id is None
+
+
+@pytest.mark.unit
 def test_cloud_pull_opts_out_of_template_attach(service) -> None:
     # The fan-out still pulls without template attachment: snapshots enter the
     # read model only through the page-slice enrichment (see the

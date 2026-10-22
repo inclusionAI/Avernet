@@ -53,7 +53,7 @@ test('空间成员下拉选择后携带姓名和工号添加成员', () => {
   expect(screen.getByText(/小明（149608）/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '添加' }));
 
-  expect(baseProps.onAddCollaborator).toHaveBeenCalledWith('149608', '小明', 'admin');
+  expect(baseProps.onAddCollaborator).toHaveBeenCalledWith('149608', '小明', 'member');
 });
 
 test('变更归属空间支持创建新团队', () => {

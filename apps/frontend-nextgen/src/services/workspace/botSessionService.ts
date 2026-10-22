@@ -26,7 +26,8 @@ import type { DomainError, DomainResult } from './identityService';
 export interface ChatBotView {
   botId: string; // mine 原始 bot_id(可能复合)
   realBotId: string; // 拆分 head
-  ownerId?: string; // 拆分 tail(staffNo)
+  /** Session/connection API owner ID; team Bot composite ID suffix remains entity_id. */
+  ownerId?: string; // Bot owner
   displayName: string;
   avatarUrl?: string;
   online: boolean;
@@ -45,7 +46,6 @@ export interface ChatBotView {
   runtimeStage?: BotIamTokenStage;
   /** 标记来自当前用户好友关系，而非当前用户管理的 Bot。 */
   isFriendBot?: boolean;
-  /** 团队 Bot 写接口必须显式携带实体 owner，不能由登录用户推断。 */
   isTeamBot?: boolean;
 }
 
