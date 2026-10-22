@@ -100,7 +100,7 @@ async def test_record_patch_reproduces_the_contract_candidate_and_is_idempotent(
     patch = load_patch("00-mixed-r1-to-r2.json")
     upload = world.registry.put_content(BOT, BlobDir().read("sha256:a191ca8f49999530a2cf4f48562ffde7d62011b3bcfe040195da089a3f117c95"), provenance=OWNER)
     assert upload.created and upload.digest == "sha256:a191ca8f49999530a2cf4f48562ffde7d62011b3bcfe040195da089a3f117c95"
-    run = RunScope(run_id="run_7f3", allowed_genes=("persona", "resources"))
+    run = RunScope(run_id="run_7f3", strategy="clawevolve/bot-evolution@2.0.0", allowed_genes=("persona", "resources"))
     recorded = await world.registry.record_patch(BOT, patch, created_by=RUN, status=RevisionStatus.CANDIDATE, run=run)
     meta = recorded.revision.revision
     assert meta.id == SUPPORT_BOT_CANDIDATE and meta.seq == 2 and meta.parent == SUPPORT_BOT
@@ -111,7 +111,7 @@ async def test_record_patch_reproduces_the_contract_candidate_and_is_idempotent(
     assert world.patches.get(env="dev", entity_id=BOT.entity_id, bot_id=BOT.bot_id, digest=meta.patch_digest).base_id == SUPPORT_BOT
     again = await world.registry.record_patch(BOT, patch, created_by=RUN, status=RevisionStatus.CANDIDATE, run=run)
     assert (again.created, again.revision.revision.seq, again.ref) == (False, 2, "candidate/run_7f3/1")
-    second = await world.registry.record_patch(BOT, load_patch("01-file-edit.json"), created_by=RUN, status=RevisionStatus.CANDIDATE, run=RunScope("run_7f3", ("persona", "skills", "resources")))
+    second = await world.registry.record_patch(BOT, load_patch("01-file-edit.json"), created_by=RUN, status=RevisionStatus.CANDIDATE, run=RunScope("run_7f3", "clawevolve/bot-evolution@2.0.0", ("persona", "skills", "resources")))
     assert second.ref == "candidate/run_7f3/2" and second.revision.revision.seq == 3
     page = world.registry.list_revisions(BOT, status=RevisionStatus.CANDIDATE, page=1, page_size=1)
     assert page.total == 2 and page.items[0].seq == 3
@@ -127,7 +127,7 @@ async def test_record_patch_refusals_leave_nothing_behind(world: World) -> None:
         await world.registry.record_patch(BOT, dict(patch, rationale=""), created_by=OWNER, status=RevisionStatus.DRAFT)
     assert [r.code for r in caught.value.reasons] == ["schema"]
     with pytest.raises(PatchRejected) as caught:
-        await world.registry.record_patch(BOT, patch, created_by=RUN, status=RevisionStatus.CANDIDATE, run=RunScope("run_1", ("skills",)))
+        await world.registry.record_patch(BOT, patch, created_by=RUN, status=RevisionStatus.CANDIDATE, run=RunScope("run_1", "clawevolve/bot-evolution@2.0.0", ("skills",)))
     assert {r.code for r in caught.value.reasons} == {"gene_not_allowed"}
     with pytest.raises(ContentNotReachable):  # the resource.add names bytes nobody uploaded for this bot
         await world.registry.record_patch(BOT, patch, created_by=OWNER, status=RevisionStatus.DRAFT)
@@ -141,11 +141,18 @@ async def test_record_patch_refusals_leave_nothing_behind(world: World) -> None:
     with pytest.raises(ValueError):  # a candidate is a run's proposal: no run, no candidate
         await world.registry.record_patch(BOT, patch, created_by=OWNER, status=RevisionStatus.CANDIDATE)
     with pytest.raises(ValueError):  # and a draft is the owner's: a run has no business on it
-        await world.registry.record_patch(BOT, patch, created_by=RUN, status=RevisionStatus.DRAFT, run=RunScope("run_1", ("persona",)))
+        await world.registry.record_patch(BOT, patch, created_by=RUN, status=RevisionStatus.DRAFT, run=RunScope("run_1", "clawevolve/bot-evolution@2.0.0", ("persona",)))
     with pytest.raises(ValueError):  # a run id is one ref segment, or candidate/<run>/<n> cannot be parsed back
-        RunScope("a/b", ("persona",))
+        RunScope("a/b", "clawevolve/bot-evolution@2.0.0", ("persona",))
     with pytest.raises(ValueError):  # `$` would let a trailing newline through; the segment must match whole
-        RunScope("run_1\n", ("persona",))
+        RunScope("run_1\n", "clawevolve/bot-evolution@2.0.0", ("persona",))
+    for dots in (".", ".."):
+        with pytest.raises(ValueError):  # a URL resolver folds these away, so candidate/<run>/<n> would not survive a request
+            RunScope(dots, "clawevolve/bot-evolution@2.0.0", ("persona",))
+    assert RunScope("..a", "clawevolve/bot-evolution@2.0.0", ("persona",)).run_id == "..a"  # a plain segment to a resolver
+    with pytest.raises(ValueError):  # the actor the contract records is the strategy's id@version
+        RunScope("run_1", "bot-evolution", ("persona",))
+    assert Provenance(ProvenanceKind.STRATEGY_RUN, "s@1", run_id="run_1", principal="user_owner_5").checked_as == "user_owner_5"
     assert world.registry.list_revisions(BOT).total == 1
     assert world.registry.list_refs(BOT) == []
 
@@ -175,7 +182,7 @@ async def test_set_policy_needs_active_and_a_canonical_sorted_policy(world: Worl
             world.registry.set_policy(BOT, bad, created_by=OWNER)
     # The spec is re-checked in the bot's current context: what applied when `active` was recorded
     # may not apply now (here the engine no longer accepts the persona files).
-    moved_engine = BotRef(owner_id=BOT.owner_id, bot_id=BOT.bot_id, entity_id=BOT.entity_id, engine_type="claude_code", bot_type=BOT.bot_type)
+    moved_engine = BotRef(entity_id=BOT.entity_id, bot_id=BOT.bot_id, engine_type="claude_code", bot_type=BOT.bot_type)
     with pytest.raises(PolicyRejected) as caught:
         world.registry.set_policy(moved_engine, dict(DEFAULT_POLICY, pins=[]), created_by=OWNER)
     assert {r.code for r in caught.value.reasons} == {"persona_type"}

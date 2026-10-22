@@ -98,25 +98,25 @@ class PlatformBotStateReader(BotStateReader):
 
     async def persona_files(self, bot: BotRef) -> dict[str, str]:
         listed = await self._identity.list_bot_files(
-            bot.entity_type, bot.entity_id, bot.bot_id, bot.owner_id, engine_type=bot.engine_type
+            bot.entity_type, bot.entity_id, bot.bot_id, bot.entity_id, engine_type=bot.engine_type
         )
         out: dict[str, str] = {}
         for file_type, exists in listed:
             if not exists:
                 continue
             out[file_type] = await self._identity.read_identity_file(
-                bot.entity_type, bot.entity_id, bot.bot_id, file_type, bot.owner_id, engine_type=bot.engine_type
+                bot.entity_type, bot.entity_id, bot.bot_id, file_type, bot.entity_id, engine_type=bot.engine_type
             )
         return out
 
     async def skills(self, bot: BotRef) -> tuple[CapturedSkill, ...]:
         captured: list[CapturedSkill] = []
-        for asset in self._capabilities.active_skill_assets(bot_id=bot.bot_id, owner_id=bot.owner_id):
+        for asset in self._capabilities.active_skill_assets(bot_id=bot.bot_id, owner_id=bot.entity_id):
             locator = str(asset.git_path or "")
             if locator.startswith(LOCAL_PREFIX):
                 _, storage = self._skill_factory.local_skill_package_storage_for_locator(
                     entity_id=bot.entity_id,
-                    owner_id=bot.owner_id,
+                    owner_id=bot.entity_id,
                     bot_id=bot.bot_id,
                     engine_type=bot.engine_type,
                     entity_type=bot.entity_type,
@@ -138,7 +138,7 @@ class PlatformBotStateReader(BotStateReader):
     async def resources(self, bot: BotRef) -> tuple[CapturedResource, ...]:
         service = self._resource_services.create(bot_id=bot.bot_id)
         captured: list[CapturedResource] = []
-        for resource in service.list_resources(user_id=bot.owner_id):
+        for resource in service.list_resources(user_id=bot.entity_id):
             if not resource.path or resource.is_directory:
                 continue  # URL, link and node resources are not workspace files; a folder row has no bytes
             # A row's path is relative to the bot's data directory (``workspace/data``, the compose
@@ -154,12 +154,12 @@ class PlatformBotStateReader(BotStateReader):
         return tuple(captured)
 
     async def mcp_servers(self, bot: BotRef) -> tuple[dict[str, Any], ...]:
-        who = dict(bot_id=bot.bot_id, owner_id=bot.owner_id, actor_id=bot.owner_id)
+        who = dict(bot_id=bot.bot_id, owner_id=bot.entity_id, actor_id=bot.entity_id)
         codes = set(self._activation.list_installed_mcps(**who)) - set(self._activation.platform_default_mcp_codes(**who))
         servers = []
         for code in sorted(codes):
             entry: dict[str, Any] = {"server_code": code}
-            override = self._mcp_config.get_bot_override(bot_id=bot.bot_id, owner_id=bot.owner_id, server_code=code)
+            override = self._mcp_config.get_bot_override(bot_id=bot.bot_id, owner_id=bot.entity_id, server_code=code)
             if override:
                 entry["config"] = override
             servers.append(entry)

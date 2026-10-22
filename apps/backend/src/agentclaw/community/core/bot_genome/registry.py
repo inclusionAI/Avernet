@@ -177,7 +177,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         return _BotContent(self._content, self._scope(bot))
 
     def _ctx(self, bot: BotRef, actor: str) -> SpecCheckContext:
-        return SpecCheckContext(engine_type=bot.engine_type, bot_type=bot.bot_type, owner_id=bot.owner_id, actor_id=actor)
+        return SpecCheckContext(engine_type=bot.engine_type, bot_type=bot.bot_type, entity_id=bot.entity_id, actor_id=actor)
 
     def _resolve(self, bot: BotRef, rev: str) -> GenomeRevisionRow:
         axes = self._axes(bot)
@@ -300,7 +300,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         active = self._active(bot)
         policy = loads_strict(active.content)["policy"] if active is not None else DEFAULT_POLICY
         writes = dict(captured.writes)
-        reasons = self._checks.reasons(captured.spec, policy, _PendingContent(writes, self._reader(bot)), self._ctx(bot, created_by.actor))
+        reasons = self._checks.reasons(captured.spec, policy, _PendingContent(writes, self._reader(bot)), self._ctx(bot, created_by.checked_as))
         if reasons:
             raise CaptureRefused(reasons)
         return self._record(
@@ -340,7 +340,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
             if len(outcome.spec[category]) > MAX_ENTRIES_PER_CATEGORY:
                 raise LimitExceeded(f"spec.{category} holds more than {MAX_ENTRIES_PER_CATEGORY} entries")
         writes = dict(outcome.writes)
-        reasons = self._checks.reasons(outcome.spec, base.policy, _PendingContent(writes, stored), self._ctx(bot, created_by.actor))
+        reasons = self._checks.reasons(outcome.spec, base.policy, _PendingContent(writes, stored), self._ctx(bot, created_by.checked_as))
         if reasons:
             raise PatchRejected(reasons)
         tier, flags = patch_assessment(outcome, base.policy)
@@ -372,7 +372,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         # The spec is unchanged, but what apply would accept may have moved since `active` was
         # recorded (a revoked MCP permission, a retired server): a recorded revision is one that
         # applies now, so the content is re-checked in the recording bot's current context.
-        reasons = self._checks.reasons(spec, policy, self._reader(bot), self._ctx(bot, created_by.actor))
+        reasons = self._checks.reasons(spec, policy, self._reader(bot), self._ctx(bot, created_by.checked_as))
         if reasons:
             raise PolicyRejected(reasons)
         return self._record(bot, spec, policy, parent=active.revision_id, created_by=created_by, status=RevisionStatus.DRAFT, writes={}, origin="genome/policy")

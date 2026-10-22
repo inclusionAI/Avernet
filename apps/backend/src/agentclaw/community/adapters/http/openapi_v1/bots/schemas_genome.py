@@ -7,10 +7,21 @@ would be a second, drifting copy.
 """
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any, Literal
+from datetime import datetime, timezone
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+
+
+def _as_utc(value: datetime) -> datetime:
+    """The registry stores naive UTC; the contract's timestamps carry a `Z`, which Pydantic writes only for an aware UTC value."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+#: A persisted UTC timestamp, serialized RFC 3339 with a `Z` suffix (the contract's `created_at` rule).
+UtcDatetime = Annotated[datetime, AfterValidator(_as_utc)]
 
 _REV_DESCRIPTION = "A revision id (`sha256:<hex64>`), `r<seq>`, or a ref name such as `active`, `previous`, `draft` or `candidate/<run>/<n>`."
 RevisionStatusLiteral = Literal["draft", "candidate", "accepted", "rejected", "promoted", "archived"]
@@ -37,7 +48,7 @@ class RevisionSummary(BaseModel):
     parent: str | None = Field(description="The revision this one was derived from; null for the bot's first.")
     status: RevisionStatusLiteral = Field(description=_STATUS_DESCRIPTION)
     created_by: ProvenancePayload = Field(description="Who recorded it.")
-    created_at: datetime = Field(description="When it was recorded (UTC).")
+    created_at: UtcDatetime = Field(description="When it was recorded, UTC with a `Z` suffix.")
     patch_digest: str | None = Field(description="The patch that produced it (its candidate id, `sha256:<hex64>`). Null when the revision did not come from a patch: a capture of the bot (`POST …/revisions:capture`) or a policy change (`PUT …/policy`).")
     evidence: list[str] = Field(default_factory=list, description="Experience references the patch cited, e.g. `[\"episode:ep_91\", \"feedback:fb_311\"]` (`episode:<id>`, `feedback:<id>`, `eval:<id>`); empty for a capture or a policy change.")
     evaluations: list[str] = Field(default_factory=list, description="Ids of the verification evaluations run on this revision, e.g. `[\"ev_301\", \"ev_302\"]`; empty until verification attaches one.")
@@ -79,8 +90,10 @@ class RevisionRecorded(BaseModel):
 class RunScopePayload(BaseModel):
     """The evolution run a candidate is recorded for, and what it may change."""
 
-    run_id: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,64}$", description="The run's id (one execution of a strategy for this bot, e.g. `run_7f3`); it names the candidate ref `candidate/<run_id>/<n>`, so it is one ref segment: `[A-Za-z0-9_.-]`, 1 to 64 characters.")
+    run_id: str = Field(pattern=r"^\.*[A-Za-z0-9_-][A-Za-z0-9_.-]*$", max_length=64, description="The run's id (one execution of a strategy for this bot, e.g. `run_7f3`); it names the candidate ref `candidate/<run_id>/<n>`, so it is one ref segment that survives URL path resolution: `[A-Za-z0-9_.-]`, 1 to 64 characters, not dots only (`.` and `..` a resolver folds away).")
+    strategy: str = Field(pattern=r"^[^\s@]+@[^\s@]+$", max_length=256, description="The strategy the run executes, `<id>@<version>`, e.g. `clawevolve/bot-evolution@2.0.0`; recorded as the candidate's `created_by.actor`.")
     allowed_genes: list[str] = Field(description="Gene paths the run's binding lets it change, e.g. `[\"persona\", \"skills/refund-policy\"]`; every op of the patch must fall under one of them, or the patch is refused with `gene_not_allowed`.")
+    step: str | None = Field(default=None, min_length=1, max_length=64, description="The strategy's own label for the step that produced the candidate, e.g. `propose`; recorded as `created_by.step`.")
 
 
 class RecordPatchRequest(BaseModel):
@@ -135,7 +148,7 @@ class GenomeRefPayload(BaseModel):
 
     name: str = Field(description="`active`, `previous`, `canary`, `draft`, or `candidate/<run>/<n>`.")
     revision: str = Field(description="The revision id it points at.")
-    moved_at: datetime = Field(description="When it last moved (UTC).")
+    moved_at: UtcDatetime = Field(description="When it last moved, UTC with a `Z` suffix.")
     moved_by: ProvenancePayload = Field(description="Who moved it.")
     reason: str | None = Field(default=None, description="Why, as the mover said.")
 
@@ -182,8 +195,8 @@ class PromotionPayload(BaseModel):
     actor: ProvenancePayload = Field(description="Who promoted.")
     reason: str = Field(description="Why, as the actor said.")
     status: Literal["applying", "applied", "apply_failed"] = Field(description="`applying` while delivery starts, then `applied` or `apply_failed`.")
-    apply_kind: str = Field(description="Which delivery seam took the promotion: `pending` (RSI-03: no delivery exists yet, every promotion is refused before the refs move) or `direct` (RSI-04: direct delivery into the apply engine). Named by the seam, so a future seam adds a value.")
+    apply_kind: Literal["pending", "direct"] = Field(description="Which delivery seam took the promotion: `pending` (RSI-03: no delivery exists yet, every promotion is refused before the refs move) or `direct` (RSI-04: direct delivery into the apply engine).")
     apply_reference: str | None = Field(description="The seam's handle for the delivery it started, an apply id such as `0123456789abcdef0123456789abcdef`; it is what `applied_revision` joins the bot's last apply on. Null when delivery did not start.")
     apply_detail: str = Field(description="One sentence from the seam on how the start went, e.g. `started`; a failure names the error type only, never its text.")
-    created_at: datetime = Field(description="When the refs moved (UTC).")
+    created_at: UtcDatetime = Field(description="When the refs moved, UTC with a `Z` suffix.")
     document: dict[str, Any] | None = Field(default=None, description="The compiled document the promotion recorded (the revision in the Manifest v1 field layout, contract §7); present on a single promotion read, null in listings.")

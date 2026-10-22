@@ -74,12 +74,11 @@ StatusQuery = Annotated[
 _OCTET_STREAM_BODY = {"requestBody": {"required": True, "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}}}
 
 
-def bot_ref(bot: dict[str, Any], *, owner_id: str, bot_id: str) -> BotRef:
+def bot_ref(bot: dict[str, Any], *, bot_id: str) -> BotRef:
     """The registry's view of a bot record: identity plus the engine and type facts the checks need."""
     return BotRef(
-        owner_id=owner_id,
-        bot_id=bot_id,
         entity_id=manifest_target(bot),
+        bot_id=bot_id,
         engine_type=str(bot.get("active_engine") or ""),
         bot_type=str(bot.get("bot_type") or "personal"),
         entity_type=str(bot.get("entity_type") or "staff"),
@@ -87,17 +86,20 @@ def bot_ref(bot: dict[str, Any], *, owner_id: str, bot_id: str) -> BotRef:
 
 
 def _actor(actor_id: str, caller: ActingCaller, *, run: RunScope | None = None) -> Provenance:
-    """``actor`` is the principal, which the apply-time MCP permission check is made against.
+    """Who the record names, and who the apply-time MCP permission check is made against.
 
-    An admitted application is that user for scoping, but the audit columns
-    (``recorded_as``) name the application with the user it acted for, as the
-    Manifest routes do (``audit_actor``).
+    A user's record names the principal; an admitted application is that
+    user for scoping, but the audit columns (``recorded_as``) name the
+    application with the user it acted for, as the Manifest routes do
+    (``audit_actor``). A run's candidate names the strategy (contract:
+    ``actor`` is its ``id@version``) and carries the principal the run acts
+    for as ``principal``, so the permission check is still made against a user.
     """
+    if run is not None:
+        return Provenance(ProvenanceKind.STRATEGY_RUN, run.strategy, run_id=run.run_id, step=run.step, principal=actor_id)
     audit = audit_actor(caller, actor_id)
     recorded_as = None if audit == actor_id else audit
-    if run is None:
-        return Provenance(ProvenanceKind.USER, actor_id, recorded_as=recorded_as)
-    return Provenance(ProvenanceKind.STRATEGY_RUN, actor_id, run_id=run.run_id, recorded_as=recorded_as)
+    return Provenance(ProvenanceKind.USER, actor_id, recorded_as=recorded_as)
 
 
 def _summary(meta: RevisionMetadata) -> RevisionSummary:
@@ -150,7 +152,7 @@ async def list_genome_revisions(
     registry: GenomeRegistryProtocol = Injected(GenomeRegistryProtocol),
 ) -> Envelope[Page[RevisionSummary]]:
     """List this bot's revisions, newest `seq` first. Metadata only; read one with `GET …/revisions/{rev}`."""
-    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
+    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), bot_id=bot_id)
     listed = registry.list_revisions(
         bot, status=None if status is None else RevisionStatus(status), parent=parent, page=page_no, page_size=page_size
     )
@@ -177,10 +179,10 @@ async def record_genome_patch(
     revision, `200` with the same id and seq when the content already
     existed. A `candidate` is named `candidate/<run>/<n>` and needs `run`.
     """
-    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
+    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), bot_id=bot_id)
     run = None
     if body.run is not None:
-        run = RunScope(run_id=body.run.run_id, allowed_genes=tuple(body.run.allowed_genes))
+        run = RunScope(run_id=body.run.run_id, strategy=body.run.strategy, allowed_genes=tuple(body.run.allowed_genes), step=body.run.step)
     actor = _actor(actor_id, caller, run=run)
     recorded = await registry.record_patch(bot, body.patch, created_by=actor, status=RevisionStatus(body.status), run=run)
     return envelope(_recorded(recorded, response), request)
@@ -204,7 +206,7 @@ async def capture_genome_revision(
     what cannot be captured (a resource path outside the Manifest rule, a
     platform-managed bot).
     """
-    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
+    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), bot_id=bot_id)
     recorded = await registry.capture(bot, created_by=_actor(actor_id, caller))
     return envelope(_recorded(recorded, response), request)
 
@@ -222,7 +224,7 @@ async def diff_genome_revision(
     registry: GenomeRegistryProtocol = Injected(GenomeRegistryProtocol),
 ) -> Envelope[GenomeDiffPayload]:
     """What `rev` changes against `against`, per gene, with unified diffs for text files."""
-    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
+    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), bot_id=bot_id)
     diff = registry.diff(bot, rev, against)
     return envelope(
         GenomeDiffPayload(
@@ -245,7 +247,7 @@ async def get_genome_revision(
     registry: GenomeRegistryProtocol = Injected(GenomeRegistryProtocol),
 ) -> Envelope[GenomeRevisionPayload]:
     """One revision, whole: metadata, `spec` and `policy`. A revision of another bot is not found."""
-    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
+    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), bot_id=bot_id)
     revision = registry.get_revision(bot, rev)
     return envelope(
         GenomeRevisionPayload(genome_schema=revision.genome_schema, revision=_summary(revision.revision), spec=revision.spec, policy=revision.policy),
@@ -267,7 +269,7 @@ async def set_genome_policy(
     registry: GenomeRegistryProtocol = Injected(GenomeRegistryProtocol),
 ) -> Envelope[RevisionRecorded]:
     """Record a revision with `active`'s content and this policy. The policy is not bot state: it is what automation may change."""
-    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
+    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), bot_id=bot_id)
     recorded = registry.set_policy(bot, body.model_dump(), created_by=_actor(actor_id, caller))
     return envelope(_recorded(recorded, response), request)
 
@@ -286,7 +288,7 @@ async def list_genome_refs(
     registry: GenomeRegistryProtocol = Injected(GenomeRegistryProtocol),
 ) -> Envelope[GenomeRefsPayload]:
     """Every ref of the bot (`active`, `previous`, `draft`, `candidate/<run>/<n>`, …) and where it points."""
-    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
+    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), bot_id=bot_id)
     return envelope(GenomeRefsPayload(refs=[_ref(r) for r in registry.list_refs(bot)]), request)
 
 
@@ -303,7 +305,7 @@ async def move_genome_draft_ref(
     registry: GenomeRegistryProtocol = Injected(GenomeRegistryProtocol),
 ) -> Envelope[GenomeRefPayload]:
     """Move `draft` by compare-and-swap: `expected_revision` must be where it points now (`409` with the current revision otherwise)."""
-    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
+    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), bot_id=bot_id)
     target = registry.get_revision(bot, body.revision).revision.id
     update = RefUpdate("draft", target, body.expected_revision, reason=body.reason)
     return envelope(_ref(registry.move_ref(bot, update, actor=_actor(actor_id, caller), mover=RefMover.OWNER)), request)
@@ -324,7 +326,7 @@ async def read_genome_content(
     registry: GenomeRegistryProtocol = Injected(GenomeRegistryProtocol),
 ) -> Response:
     """The bytes a digest names, hash-verified. Only digests this bot's revisions or uploads reach are found."""
-    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
+    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), bot_id=bot_id)
     return Response(content=registry.read_content(bot, digest), media_type="application/octet-stream")
 
 
@@ -341,7 +343,7 @@ async def put_genome_content(
     registry: GenomeRegistryProtocol = Injected(GenomeRegistryProtocol),
 ) -> Envelope[ContentStored]:
     """Upload raw bytes (`application/octet-stream`) for a later patch to name by digest. `200` when this bot already held them."""
-    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
+    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), bot_id=bot_id)
     data = await read_bounded_body(request, MAX_UPLOAD_BYTES)
     receipt = registry.put_content(bot, data, provenance=_actor(actor_id, caller))
     response.status_code = 201 if receipt.created else 200
@@ -386,7 +388,7 @@ async def promote_genome_revision(
     `apply_failed` with the refs moved; the owner goes back by promoting
     `previous`.
     """
-    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
+    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), bot_id=bot_id)
     promoted = await promotion.promote(
         bot, revision=body.revision, ref="active", expected_revision=body.expected_revision, actor=_actor(actor_id, caller), reason=body.reason
     )
@@ -406,7 +408,7 @@ async def list_genome_promotions(
     promotion: GenomePromotionServiceProtocol = Injected(GenomePromotionServiceProtocol),
 ) -> Envelope[Page[PromotionPayload]]:
     """This bot's promotions, newest first, without their documents."""
-    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
+    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), bot_id=bot_id)
     listed = promotion.list_promotions(bot, page=page_no, page_size=page_size)
     return page(listed.total, [_promotion(item) for item in listed.items], request)
 
@@ -423,5 +425,5 @@ async def get_genome_promotion(
     promotion: GenomePromotionServiceProtocol = Injected(GenomePromotionServiceProtocol),
 ) -> Envelope[PromotionPayload]:
     """One promotion with the compiled document it handed to delivery."""
-    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
+    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), bot_id=bot_id)
     return envelope(_promotion(promotion.get_promotion(bot, promotion_id)), request)

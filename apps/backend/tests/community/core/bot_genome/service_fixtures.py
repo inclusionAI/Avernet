@@ -27,8 +27,8 @@ from agentclaw.community.core.skill_center.skill_package import SkillPackageVali
 from tests.community.core.bot_genome.test_capture import FakeReader
 from tests.community.core.bot_genome.test_spec_checks import FakeAuth, FakeConfig
 
-BOT = BotRef(owner_id="user_owner_5", bot_id="bot_123", entity_id="ent_5", engine_type="openclaw", bot_type="arca")
-OTHER_BOT = BotRef(owner_id="user_owner_9", bot_id="bot_weather", entity_id="ent_9", engine_type="openclaw", bot_type="arca")
+BOT = BotRef(entity_id="user_owner_5", bot_id="bot_123", engine_type="openclaw", bot_type="arca")
+OTHER_BOT = BotRef(entity_id="user_owner_9", bot_id="bot_weather", engine_type="openclaw", bot_type="arca")
 OWNER = Provenance(ProvenanceKind.USER, "user_owner_5")
 RUN = Provenance(ProvenanceKind.STRATEGY_RUN, "strategy:tune", run_id="run_7f3", step="propose")
 

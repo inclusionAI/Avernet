@@ -66,16 +66,17 @@ PROMOTION_REFS = ("active", "previous", "canary")
 class BotRef:
     """The bot a registry call is about, with the facts every check needs.
 
-    ``owner_id`` + ``bot_id`` is the bot's identity (a bot id alone is not
-    unique across owners); ``entity_id`` is the storage key shared with the
-    Manifest tables; ``engine_type`` and ``bot_type`` are the capability axes.
+    ``entity_id`` + ``bot_id`` is the bot's identity within an env and tenant
+    (a bot id alone is not unique across entities); it is also the storage
+    key shared with the Manifest tables and the owner the platform services
+    scope the bot's files, skills, resources and MCP state by. ``engine_type``
+    and ``bot_type`` are the capability axes.
     ``entity_type`` (``staff`` or ``user``) is the identity service's third
     coordinate for the bot's files.
     """
 
-    owner_id: str
-    bot_id: str
     entity_id: str
+    bot_id: str
     engine_type: str
     bot_type: str
     entity_type: str = "staff"
@@ -83,17 +84,32 @@ class BotRef:
 
 @dataclass(frozen=True)
 class Provenance:
+    """Who recorded a revision or moved a ref (contract ``created_by`` / ``moved_by``).
+
+    ``actor`` is what the contract names: a user id, or for a ``strategy_run``
+    the strategy's ``id@version``. The apply-time permission checks are made
+    against a user, so a strategy's record also carries the ``principal``
+    the run acts for; a user's record checks as the user.
+    """
+
     kind: ProvenanceKind
-    actor: str  # the principal: the user acted for, which the MCP permission check is made against
+    actor: str
     run_id: str | None = None
     step: str | None = None
-    #: How the audit columns name the actor when that differs from the principal: an admitted
+    #: How the audit columns name a user actor when that differs from the principal: an admitted
     #: application acting for a user is ``app:<id>:on-behalf-of:<user>``, never just the user.
     recorded_as: str | None = None
+    #: ``strategy_run`` only: the user the run acts for, which the MCP permission check is made against.
+    principal: str | None = None
 
     @property
     def audit(self) -> str:
         return self.recorded_as or self.actor
+
+    @property
+    def checked_as(self) -> str:
+        """The user the apply-time permission checks are made against."""
+        return self.principal or self.actor
 
     def as_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"kind": self.kind.value, "actor": self.actor}
@@ -104,8 +120,13 @@ class Provenance:
         return out
 
 
-#: A run id is one ref segment: ``candidate/<run_id>/<n>`` must parse back into three parts.
-RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+#: A run id is one ref segment: ``candidate/<run_id>/<n>`` must parse back into three parts and
+#: survive URL path resolution, so a segment of dots only (``.`` and ``..`` a resolver folds away) is not a run id.
+RUN_ID_PATTERN = re.compile(r"^\.*[A-Za-z0-9_-][A-Za-z0-9_.-]*$")
+RUN_ID_MAX_LENGTH = 64
+#: A strategy is named ``<strategy id>@<version>`` (06-evolution-run.md); it is the candidate's ``actor``.
+STRATEGY_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+$")
+STRATEGY_MAX_LENGTH = 256
 
 
 @dataclass(frozen=True)
@@ -113,17 +134,23 @@ class RunScope:
     """The evolution run a candidate is recorded for, and the genes it may touch.
 
     ``run_id`` names the candidate ref (``candidate/<run_id>/<n>``);
+    ``strategy`` (``id@version``) is recorded as the candidate's actor;
     ``allowed_genes`` is what the run's binding lets it change, and every op
-    of the patch must fall under one of them.
+    of the patch must fall under one of them; ``step`` is the strategy's own
+    label for the step that produced the candidate.
     """
 
     run_id: str
+    strategy: str
     allowed_genes: tuple[str, ...]
+    step: str | None = None
 
     def __post_init__(self) -> None:
-        """Runs on construction: refuses a run id that is not one ref segment, for in-process callers too."""
-        if not RUN_ID_PATTERN.fullmatch(self.run_id):
-            raise ValueError(f"run_id {self.run_id!r} is not one ref segment ([A-Za-z0-9_.-], 1-64)")
+        """Runs on construction: refuses a run id or strategy the contract cannot record, for in-process callers too."""
+        if len(self.run_id) > RUN_ID_MAX_LENGTH or not RUN_ID_PATTERN.fullmatch(self.run_id):
+            raise ValueError(f"run_id {self.run_id!r} is not one ref segment ([A-Za-z0-9_.-], 1-64, not dots only)")
+        if len(self.strategy) > STRATEGY_MAX_LENGTH or not STRATEGY_PATTERN.fullmatch(self.strategy):
+            raise ValueError(f"strategy {self.strategy!r} is not <id>@<version>")
 
 
 @dataclass(frozen=True)

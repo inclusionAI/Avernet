@@ -77,7 +77,7 @@ class SpecCheckContext:
 
     engine_type: str
     bot_type: str
-    owner_id: str
+    entity_id: str
     actor_id: str
 
 
@@ -365,7 +365,7 @@ class SpecChecks:
                 continue
             config = entry.get("config")
             result = self._mcp_config.validate_bot_override(
-                user_id=ctx.owner_id, server_code=code, config=config if config else None, engine_type=ctx.engine_type
+                user_id=ctx.entity_id, server_code=code, config=config if config else None, engine_type=ctx.engine_type
             )
             if not result.get("valid"):
                 reasons.append(Reason("mcp_override", location, str(result.get("error") or "invalid config")))

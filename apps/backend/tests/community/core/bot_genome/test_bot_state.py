@@ -10,7 +10,7 @@ from agentclaw.community.core.bot_genome.capture.bot_state import PlatformBotSta
 from agentclaw.community.core.bot_genome.errors import CaptureRefused
 from agentclaw.community.core.bot_genome.models import BotRef
 
-BOT = BotRef(owner_id="u1", bot_id="bot_1", entity_id="ent_1", engine_type="openclaw", bot_type="arca")
+BOT = BotRef(entity_id="u1", bot_id="bot_1", engine_type="openclaw", bot_type="arca")
 
 
 class FakeIdentity:
@@ -115,7 +115,7 @@ def _reader(**overrides: Any) -> PlatformBotStateReader:
 
 @pytest.mark.asyncio
 async def test_platform_managed_teclaw_is_refused_and_nothing_else_is() -> None:
-    teclaw = BotRef(owner_id="u1", bot_id="b", entity_id="e", engine_type="teclaw", bot_type="personal")
+    teclaw = BotRef(entity_id="u1", bot_id="b", engine_type="teclaw", bot_type="personal")
     assert await _reader(teclaw_platform_managed=True).refusal(teclaw) is not None
     assert await _reader(teclaw_platform_managed=False).refusal(teclaw) is None
     assert await _reader(teclaw_platform_managed=True).refusal(BOT) is None
@@ -125,7 +125,7 @@ async def test_platform_managed_teclaw_is_refused_and_nothing_else_is() -> None:
 async def test_persona_reads_only_the_files_that_exist() -> None:
     identity = FakeIdentity({"SOUL.md": "# Soul\n", "OKR.md": None, "AGENTS.md": "# A\n"})
     assert await _reader(identity=identity).persona_files(BOT) == {"SOUL.md": "# Soul\n", "AGENTS.md": "# A\n"}
-    assert identity.calls[0] == ("list", "staff", "ent_1", "bot_1", "u1", "openclaw")
+    assert identity.calls[0] == ("list", "staff", "u1", "bot_1", "u1", "openclaw")
     assert ("read", "OKR.md") not in identity.calls
 
 
@@ -144,7 +144,7 @@ async def test_skills_are_classified_by_locator() -> None:
         ("weather", "repo", None, "team/weather", ()),
     ]
     call = factory.calls[0]
-    assert (call["entity_id"], call["owner_id"], call["bot_id"], call["engine_type"], call["entity_type"]) == ("ent_1", "u1", "bot_1", "openclaw", "staff")
+    assert (call["entity_id"], call["owner_id"], call["bot_id"], call["engine_type"], call["entity_type"]) == ("u1", "u1", "bot_1", "openclaw", "staff")
     assert (call["is_desktop"], call["is_teclaw"], call["locator"], call["skill_name"]) == (False, False, "local://skills-local/tidy", "tidy")
 
 
@@ -167,7 +167,7 @@ async def test_resources_are_the_bots_file_rows_read_from_the_device() -> None:
     files = FakeResourceFiles({"data/faq.csv": b"q,a\n", "data/kb/notes.md": b"# n\n"})
     resources = await _reader(resource_services=FakeResourceServices(rows), resource_files=files).resources(BOT)
     assert [(r.path, r.files) for r in resources] == [("data/faq.csv", (("faq.csv", b"q,a\n"),)), ("data/kb/notes.md", (("notes.md", b"# n\n"),))]
-    assert files.calls[0] == {"entity_type": "staff", "entity_id": "ent_1", "bot_id": "bot_1", "engine_type": "openclaw", "path": "data/faq.csv"}
+    assert files.calls[0] == {"entity_type": "staff", "entity_id": "u1", "bot_id": "bot_1", "engine_type": "openclaw", "path": "data/faq.csv"}
 
 
 @pytest.mark.asyncio

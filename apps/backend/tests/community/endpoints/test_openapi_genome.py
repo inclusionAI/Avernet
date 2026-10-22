@@ -83,7 +83,7 @@ _BOT_ID = "genome-endpoint-bot"
 
 
 def _bot_ref(bot_id: str) -> BotRef:
-    return BotRef(owner_id=_OWNER, bot_id=bot_id, entity_id=_OWNER, engine_type="openclaw", bot_type="personal")
+    return BotRef(entity_id=_OWNER, bot_id=bot_id, engine_type="openclaw", bot_type="personal")
 
 
 def _params(bot_id: str = _BOT_ID, *, json_body=None, raw_body=None, query=None, **extra) -> CaseInput:
@@ -138,7 +138,7 @@ def _seed_promotion_row(world) -> str:
     world.get(GenomePromotionRepositoryProtocol).insert(GenomePromotionRow(
         env=get_current_env(), entity_id=_OWNER, bot_id=bot_id, promotion_id=_PROMOTION_ID, ref="active", revision_id=_R1_ID,
         from_revision_id=None, document_digest=_SOUL_DIGEST, document_json="{}", actor_kind="user", actor_id=_OWNER, reason="seed",
-        status="applied", apply_kind="fake", apply_reference="apply_1", apply_detail="started",
+        status="applied", apply_kind="pending", apply_reference="apply_1", apply_detail="started",
         created_at=datetime.now(timezone.utc).replace(tzinfo=None),
     ))
     return bot_id

@@ -100,7 +100,7 @@ def _revision(rev: str = R1) -> GenomeRevision:
 def _promotion(doc: dict | None = None) -> Promotion:
     return Promotion(
         id="p" * 32, ref="active", revision=R2, from_revision=R1, document_digest=R1, going_back=False, actor=OWNER,
-        reason="ship", status="applied", apply_kind="fake", apply_reference="apply_1", apply_detail="", created_at=NOW, document=doc,
+        reason="ship", status="applied", apply_kind="pending", apply_reference="apply_1", apply_detail="", created_at=NOW, document=doc,
     )
 
 
@@ -172,15 +172,16 @@ def test_promotion_takes_applys_bar() -> None:
 async def test_record_patch_answers_201_then_200_and_threads_the_run() -> None:
     registry = AsyncMock()
     registry.record_patch.return_value = RecordedRevision(_revision(R2), True, risk_tier="T2", flags=("persona/SOUL.md",), ref="candidate/run_7/1")
-    body = RecordPatchRequest(status="candidate", run=RunScopePayload(run_id="run_7", allowed_genes=["persona"]), patch={"base": R1})
+    body = RecordPatchRequest(status="candidate", run=RunScopePayload(run_id="run_7", strategy="clawevolve/bot-evolution@2.0.0", allowed_genes=["persona"]), patch={"base": R1})
     response = Response()
     out = await genome.record_genome_patch("bot_1", body, _request("POST"), response, "u1", "u1", HUMAN, _bot_service(), registry)
     assert response.status_code == 201 and out.data.ref == "candidate/run_7/1" and out.data.flags == ["persona/SOUL.md"]
     bot, patch = registry.record_patch.await_args.args
     kwargs = registry.record_patch.await_args.kwargs
-    assert (bot.entity_id, bot.engine_type, bot.bot_type, bot.owner_id) == ("ent_1", "openclaw", "personal", "u1")
-    assert kwargs["status"] is RevisionStatus.CANDIDATE and kwargs["run"] == RunScope("run_7", ("persona",))
-    assert kwargs["created_by"] == Provenance(ProvenanceKind.STRATEGY_RUN, "u1", run_id="run_7")
+    assert (bot.entity_id, bot.engine_type, bot.bot_type) == ("ent_1", "openclaw", "personal")
+    assert kwargs["status"] is RevisionStatus.CANDIDATE and kwargs["run"] == RunScope("run_7", "clawevolve/bot-evolution@2.0.0", ("persona",))
+    assert kwargs["created_by"] == Provenance(ProvenanceKind.STRATEGY_RUN, "clawevolve/bot-evolution@2.0.0", run_id="run_7", principal="u1")
+    assert kwargs["created_by"].checked_as == "u1", "the MCP permission check is made against the user the run acts for"
     registry.record_patch.return_value = RecordedRevision(_revision(R2), False)
     response = Response()
     out = await genome.record_genome_patch("bot_1", RecordPatchRequest(status="draft", patch={}), _request("POST"), response, "u1", "u1", HUMAN, _bot_service(), registry)
@@ -192,9 +193,14 @@ async def test_record_patch_answers_201_then_200_and_threads_the_run() -> None:
     "body",
     [
         {"status": "candidate", "patch": {}},
-        {"status": "draft", "run": {"run_id": "run_7", "allowed_genes": ["persona"]}, "patch": {}},
-        {"status": "candidate", "run": {"run_id": "a/b", "allowed_genes": ["persona"]}, "patch": {}},
-        {"status": "candidate", "run": {"run_id": "run 7", "allowed_genes": ["persona"]}, "patch": {}},
+        {"status": "draft", "run": {"run_id": "run_7", "strategy": "clawevolve/bot-evolution@2.0.0", "allowed_genes": ["persona"]}, "patch": {}},
+        {"status": "candidate", "run": {"run_id": "a/b", "strategy": "clawevolve/bot-evolution@2.0.0", "allowed_genes": ["persona"]}, "patch": {}},
+        {"status": "candidate", "run": {"run_id": "run 7", "strategy": "clawevolve/bot-evolution@2.0.0", "allowed_genes": ["persona"]}, "patch": {}},
+        {"status": "candidate", "run": {"run_id": ".", "strategy": "clawevolve/bot-evolution@2.0.0", "allowed_genes": ["persona"]}, "patch": {}},
+        {"status": "candidate", "run": {"run_id": "..", "strategy": "clawevolve/bot-evolution@2.0.0", "allowed_genes": ["persona"]}, "patch": {}},
+        {"status": "candidate", "run": {"run_id": "r" * 65, "strategy": "clawevolve/bot-evolution@2.0.0", "allowed_genes": ["persona"]}, "patch": {}},
+        {"status": "candidate", "run": {"run_id": "run_7", "strategy": "bot-evolution", "allowed_genes": ["persona"]}, "patch": {}},
+        {"status": "candidate", "run": {"run_id": "run_7", "allowed_genes": ["persona"]}, "patch": {}},
     ],
 )
 def test_a_candidate_needs_its_run_and_a_run_id_is_one_ref_segment(body: dict) -> None:
@@ -220,8 +226,9 @@ def test_an_application_caller_is_recorded_as_itself_acting_for_the_user() -> No
     assert genome._actor("u1", HUMAN) == OWNER and OWNER.audit == "u1"
     delegated = genome._actor("u1", APP)
     assert (delegated.actor, delegated.recorded_as, delegated.audit) == ("u1", "app:7:on-behalf-of:u1", "app:7:on-behalf-of:u1")
-    run = genome._actor("u1", APP, run=RunScope("run_7", ("persona",)))
-    assert (run.kind, run.run_id, run.recorded_as) == (ProvenanceKind.STRATEGY_RUN, "run_7", "app:7:on-behalf-of:u1")
+    run = genome._actor("u1", APP, run=RunScope("run_7", "clawevolve/bot-evolution@2.0.0", ("persona",), step="propose"))
+    assert (run.kind, run.actor, run.run_id, run.step, run.principal) == (ProvenanceKind.STRATEGY_RUN, "clawevolve/bot-evolution@2.0.0", "run_7", "propose", "u1")
+    assert run.as_dict() == {"kind": "strategy_run", "actor": "clawevolve/bot-evolution@2.0.0", "run_id": "run_7", "step": "propose"}
     assert "recorded_as" not in delegated.as_dict(), "the contract's provenance shape is unchanged"
 
 
@@ -320,9 +327,15 @@ def test_policy_rejected_keeps_its_own_message() -> None:
     assert json.loads(mapped_error_response(PatchRejected([]), _request()).body)["message"] == "Patch rejected"
 
 
+def test_timestamps_carry_the_contracts_z_suffix() -> None:
+    summary = genome._summary(_revision().revision)
+    assert summary.model_dump(mode="json")["created_at"].endswith("Z"), "naive UTC from the store is written as the contract's `…Z`"
+    assert genome._promotion(_promotion()).model_dump(mode="json")["created_at"].endswith("Z")
+
+
 def test_bot_ref_reads_the_record_and_defaults() -> None:
-    ref = genome.bot_ref({"entity_id": "e", "active_engine": "claude_code", "bot_type": "service"}, owner_id="o", bot_id="b")
+    ref = genome.bot_ref({"entity_id": "e", "active_engine": "claude_code", "bot_type": "service"}, bot_id="b")
     assert (ref.entity_id, ref.engine_type, ref.bot_type, ref.entity_type) == ("e", "claude_code", "service", "staff")
     assert isinstance(genome._promotion(_promotion()).document, type(None))
-    assert genome.bot_ref({"entity_id": "e"}, owner_id="o", bot_id="b").bot_type == "personal"
+    assert genome.bot_ref({"entity_id": "e"}, bot_id="b").bot_type == "personal"
     assert CompiledManifest("r", {}, "d").document == {}

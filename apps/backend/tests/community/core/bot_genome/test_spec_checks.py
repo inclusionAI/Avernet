@@ -26,7 +26,7 @@ from tests.community.core.bot_genome.example_blobs import SUPPORT_BOT, BlobDir, 
 
 REVISIONS = load_revisions()
 INVALID = load_invalid()
-CTX = SpecCheckContext(engine_type="openclaw", bot_type="personal", owner_id="user_owner_5", actor_id="user_owner_5")
+CTX = SpecCheckContext(engine_type="openclaw", bot_type="personal", entity_id="user_owner_5", actor_id="user_owner_5")
 #: The contract's ``check`` names → the predicate code that refuses them.
 CODES = {
     "utf8": "not_utf8",
@@ -77,7 +77,7 @@ def _record(spec_changes: dict[str, Any] | None = None) -> tuple[dict[str, Any],
 def test_every_valid_example_passes(record_id: str) -> None:
     record = REVISIONS[record_id]
     engine = "claude_code" if record["spec"]["persona"] and record["spec"]["persona"][0]["type"] == "CLAUDE.md" else "openclaw"
-    ctx = SpecCheckContext(engine_type=engine, bot_type="personal", owner_id="o", actor_id="a")
+    ctx = SpecCheckContext(engine_type=engine, bot_type="personal", entity_id="o", actor_id="a")
     assert _checks().reasons(record["spec"], record["policy"], BlobDir(), ctx) == []
 
 
