@@ -2,9 +2,8 @@
 
 ``adapters/http/boot.py``'s ``finalize_worker_runtime`` resolves
 :class:`OptionalRouters` from the worker's injector and mounts every contained
-``APIRouter`` unconditionally. Prod boots see an empty list (bound by
-:class:`InfrastructureModule`); local boots see a populated list (bound by
-:class:`TestingInfrastructureModule`).
+``APIRouter`` unconditionally. Each deployment column binds its own routes, including generic
+knowledge selection and, for test/local boots, local SQL tooling.
 
 This is the one route registration that happens in the composition root's
 worker-runtime phase rather than at construction: it is the only place in the
@@ -17,6 +16,7 @@ binding key without creating a ``di/ -> api/`` cycle. The actual router
 modules under ``api/local/`` are imported lazily inside the local-mode
 provider, so prod never loads them.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

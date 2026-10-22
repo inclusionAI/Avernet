@@ -75,6 +75,7 @@ BOUNDARY_SIGNIFICANT_MODULES: frozenset[str] = frozenset({
     "agentclaw.community.core.bot_config_surface",
     "agentclaw.community.core.bot_chat",
     "agentclaw.community.core.bot_management",
+    "agentclaw.community.core.bot_knowledge",
     "agentclaw.community.core.bot_public",
     "agentclaw.community.core.bot_config_manifest",
     "agentclaw.community.core.bot_genome",
