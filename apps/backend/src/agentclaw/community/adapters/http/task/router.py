@@ -34,6 +34,7 @@ from agentclaw.community.adapters.http.task.schemas import (
     graph_to_dto, op_result_to_dto,
     task_info_request_from_dto, trajectory_to_dto,
 )
+from agentclaw.community.adapters.http.task.artifact_routes import router as artifact_api_router
 from agentclaw.community.adapters.http.task.relay_routes import router as relay_api_router
 from agentclaw.community.adapters.http.task.bbs_routes import router as bbs_api_router
 from agentclaw.community.adapters.http.task.intake_routes import router as intake_api_router
@@ -95,6 +96,7 @@ router.include_router(relay_api_router)
 router.include_router(bbs_api_router)
 router.include_router(intake_api_router)
 router.include_router(task_read_api_router)
+router.include_router(artifact_api_router)
 
 # ===== 公开面镜像(execute;内部 /api/v1 副本,不经 spanner)=====
 # 与 ``adapters/http/openapi_v1/task/router.py`` 公开面同一 ``TaskServiceProtocol`` 委托,逻辑一致 —— 内部调用方走此副本免 gateway spanner。改其一须同步。
@@ -944,12 +946,13 @@ async def set_dingtalk_config(
 
 # Keep this dynamic route after every static task route so names such as
 # ``benchmark_execute`` and ``discovery`` can never be consumed as task IDs.
-# /dashboard and /list now have real internal mirror routes above; this
-# guard stays as the safety net keeping those words (if a static route is
-# ever removed) from falling through to the ID lookup.
+# /dashboard and /list now have real internal mirror routes above; /artifacts
+# likewise (POST/GET, artifact_routes.py); this guard stays as the safety net
+# keeping those words (if a static route is ever removed) from falling through
+# to the ID lookup.
 def reject_public_only_task_id(task_id: str) -> None:
     """Refuse historical public-only read paths from reaching the ID lookup."""
-    if task_id in {"dashboard", "list"}:
+    if task_id in {"dashboard", "list", "artifacts"}:
         raise HTTPException(status_code=404, detail="Not Found")
 
 

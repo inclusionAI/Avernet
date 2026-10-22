@@ -77,6 +77,10 @@ from agentclaw.community.core.task.task_context.task_trajectory.trajectory_servi
     TaskTrajectoryService,
     TaskTrajectoryServiceProtocol,
 )
+from agentclaw.community.core.task.task_context.task_artifact.artifact_api_service import (
+    TaskArtifactApiService,
+    TaskArtifactApiServiceProtocol,
+)
 from agentclaw.community.core.task.task_context.task_context_service import TaskContextService
 from agentclaw.community.core.task.task_context.task_graph_service import (
     TaskGraphService,
@@ -142,10 +146,20 @@ class TaskPersistenceModule(Module):
         )
         # Artifact manifest read side (spec 2026-10-20-task-artifact-domain):
         # rows are written inline in the save_graph transaction; this binding
-        # serves ONLY the read queries (dashboard enrichment / trajectory HTML).
+        # serves the read queries (dashboard enrichment / trajectory HTML) and
+        # the manual-registration API write (`TaskArtifactApiService` below).
         binder.bind(
             TaskArtifactRepositoryProtocol,
             to=TaskArtifactRepository,
+            scope=singleton,
+        )
+        # Artifact manual-registration API service (POST/GET /tasks/artifacts):
+        # consumes the graph repo (归属/attempt 交叉校验) + the artifact repo
+        # appended just above; co-located with them the way the trajectory
+        # assembler is, so the artifact wiring lives in one place.
+        binder.bind(
+            TaskArtifactApiServiceProtocol,
+            to=TaskArtifactApiService,
             scope=singleton,
         )
 

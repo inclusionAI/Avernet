@@ -437,3 +437,33 @@ CREATE TABLE IF NOT EXISTS `task_artifact` (
 2. 前端拼下载链接需要的元数据,`TaskArtifactDescriptorDTO` 的 File 分支是否够用(需前端确认);——涉及具体前端协议,后期对齐
 3. 单 bot 工作区路径上报时,是否需要附带 `size`/摘要类字段(现读口不回这些,倾向于不加);
 4. `creator`(str)对 group 场景的取值(assignee group_id vs 具体执行 bot)按写入点实际可得信息定,实现时对齐;`modifier`/`gmt_modify` 恒等于 `creator`/`gmt_create`(行不可变),不构成开放问题。
+---
+
+## 12. 增补(2026-10-22):产物手动登记 API(独立写口 + task 级读口)
+
+用户需求:task 模块的任务产物增加两个 API 接口——**新增产物**、**按 task_id 查询产物列表**。均在内部面 `/api/v1/collaboration/tasks`,公开 `/openapi/v1` 零变更(§1.4 公开面零变更口径延续);OpenAPI 导出快照不动。
+
+### 12.1 新增产物:`POST /api/v1/collaboration/tasks/artifacts`
+
+- **请求体与 relay 上报 item 同构**(§4 扁平自描述结构,`extra=forbid`):`artifact_name`?/`artifact_kind`/`session_id`?/`task_id`/`node_id`/`attempt` + 恰好一个 content JSON 字符串;
+- **结构校验单点复用** `parse_artifact_report_item`(HTTP 层只转协议,Rule 22);解析层 `ValueError` 统一转 `TaskArtifactContentError` → 既有 422 信封;
+- **编排进 core**:`TaskArtifactApiService`(`core/task/task_context/task_artifact/artifact_api_service.py`,新增)——load_graph → `TaskNotFoundError`/`NodeNotFoundError`(404)/attempt 与图上 `harness_retries` 快照交叉校验(失配即拒,§4 规则 4 同口径)/session_id 图优先上报兜底(规则 5)/compose(复用 `artifact_publish` 提升出的模块级 compose 辅助,与 capture 单一事实源);
+- **写路径守恒取舍(方案取舍 #22)**:`TaskArtifactRepositoryProtocol` 增加 `append(record)`——自有事务 + select-first 查重(与 `save_graph` 内嵌写同键同口径),撤销该协议"仅读"的原教义;产物 manifest 仍然是 append-only、无 UPDATE,`save_graph` 内嵌写路径零 diff。幂等命中返回既有行(不重复落库、不部分接受);
+- **鉴权**:内部面 `get_current_user`,与 `/dashboard` 内部副本同款。
+
+### 12.2 查询产物列表:`GET /api/v1/collaboration/tasks/artifacts?task_id=&node_id=&limit=`
+
+- `task_id` 必填;`node_id` 可选过滤(→ `list_by_task_node`);`limit` 1-500 默认 200;
+- 返回 `TaskArtifactDescriptorDTO` 列表(attempt 倒序,仓储既有排序),无产物 → 空列表非 404;Descriptor 安全字段口径不变(§7)。
+
+### 12.3 路由挂载与防御
+
+- 新 `adapters/http/task/artifact_routes.py` 子模块(router.py Rule 9 体积帽沿,relay/bbs/intake/read 同款先例),`router.py` `include_router` 挂载;
+- `reject_public_only_task_id` 防误吞名单增补 `"artifacts"`(`/{task_id}` 动态路由 guard,既有 dashboard/list 防御同款);
+- DI:`TaskArtifactApiServiceProtocol` → `TaskArtifactApiService` singleton 绑定进 `task_persistence_module`(graph repo + artifact repo 均已在该模块绑定);`api/task/task_artifact_service.py` 仅 re-export(repo pattern)。
+
+### 12.4 验证(2026-10-22,uv / Python 3.12)
+
+- 新增测试:repository append 契约(insert/幂等查重/内容区分行)、core api service 单测(归属校验/attempt 失配/session 兜底/name 回落/creator 默认)、adapters HTTP 端到端(POST Descriptor/幂等/404×2/422×5/extra 拒绝;GET 列表/节点过滤/limit/未知任务空表/缺参 422/静态路由优先);
+- 新增模块覆盖率 100%(artifact_routes / artifact_api_service / task_artifact_repository);
+- 全量门禁:`tests/community/core/task tests/community/repository/task tests/community/adapters/http/task` → **1907 passed, 27 skipped**;`tests/community/architecture` → 339 passed,唯一失败 `test_shipped_python_has_no_corp_identifiers` 为基线既有存量(§0 验证状态同款);ruff changed files 清洁。

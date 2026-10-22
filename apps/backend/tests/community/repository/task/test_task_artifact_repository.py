@@ -98,3 +98,68 @@ def test_same_attempt_orders_gmt_create_desc(db):
         "task-art-00000000000000aa",
         "task-art-00000000000000bb",
     ]
+
+def _text_record(
+    *,
+    artifact_id: str,
+    task_id: str = "t-1",
+    node_id: str = "n-1",
+    attempt: int = 0,
+    text: str = "done",
+) -> TaskArtifactRecord:
+    """TEXT 产物 record(append 写口契约测试用)。"""
+    from agentclaw.community.core.task.task_context.task_artifact import (
+        TextContent,
+        artifact_content_hash,
+    )
+
+    content = TextContent(text=text)
+    return TaskArtifactRecord(
+        artifact_id=artifact_id,
+        artifact_name=None,
+        task_id=task_id,
+        node_id=node_id,
+        attempt=attempt,
+        scope_session_id="sess-1",
+        kind="text",
+        storage="inline",
+        content=content,
+        content_hash=artifact_content_hash(content),
+        creator="bot-1",
+        modifier="bot-1",
+        created_at=1730000000000,
+        gmt_create=None,
+    )
+
+
+def test_append_inserts_and_reads_back(db):
+    repo = TaskArtifactRepository(db)
+    record = _text_record(artifact_id="task-art-00000000000000a1")
+    returned = repo.append(record)
+    assert returned.artifact_id == "task-art-00000000000000a1"
+    rows = repo.list_by_task_node("t-1", "n-1")
+    assert len(rows) == 1
+    assert rows[0].content.text == "done"
+    assert rows[0].creator == "bot-1"
+
+
+def test_append_dedupe_returns_existing_row(db):
+    repo = TaskArtifactRepository(db)
+    first = repo.append(_text_record(artifact_id="task-art-00000000000000a1"))
+    # 幂等键 (task_id, node_id, attempt, kind, content_hash) 相同,artifact_id 不同:
+    # select-first 查重应命中并返回既有行,不插入第二行(spec §5.3 口径)。
+    second = repo.append(_text_record(artifact_id="task-art-00000000000000b2"))
+    assert second.artifact_id == first.artifact_id
+    assert second.artifact_id == "task-art-00000000000000a1"
+    assert len(repo.list_by_task_node("t-1", "n-1")) == 1
+
+
+def test_append_distinct_content_creates_distinct_rows(db):
+    repo = TaskArtifactRepository(db)
+    repo.append(_text_record(artifact_id="task-art-00000000000000a1", text="one"))
+    repo.append(_text_record(artifact_id="task-art-00000000000000b2", text="two"))
+    rows = repo.list_by_task_node("t-1", "n-1")
+    assert {r.artifact_id for r in rows} == {
+        "task-art-00000000000000a1",
+        "task-art-00000000000000b2",
+    }

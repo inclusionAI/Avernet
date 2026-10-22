@@ -281,7 +281,11 @@ describe('ConversationPage(Task 8 组合页)', () => {
 
     render(<ConversationPage />);
 
-    expect(await screen.findByTestId('interactive-stage')).toBeInTheDocument();
+    const stage = await screen.findByTestId('interactive-stage');
+    expect(stage).toBeInTheDocument();
+    // 主舞台 wrapper 是侧栏右侧的横向 flex item，必须允许收缩；否则普通会话的
+    // 固有宽度会把 ChatLayout 连同 420px TaskPanel 推出可视区，初次只剩窄条可见。
+    expect(stage.parentElement).toHaveClass('min-w-0');
     expect(screen.queryByText('请选择一个好友用户会话')).not.toBeInTheDocument();
   });
 

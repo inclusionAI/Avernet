@@ -10,6 +10,36 @@ import json
 from pydantic import BaseModel, Field
 
 
+class TaskArtifactAddRequestDTO(BaseModel):
+    """新增产物请求体:与 relay 上报 item 同构的扁平自描述结构(spec §4)。
+
+    归属字段(task_id/node_id/attempt/session_id)由核心
+    ``parse_artifact_report_item`` + ``TaskArtifactApiService.add_artifact``
+    与图交叉校验;四个 content 字段互斥、恰一个承载对应分支的 JSON 字符串。
+    """
+
+    artifact_name: str | None = Field(
+        None, description="业务展示名(可选;file 产物缺省回落 file_content.file_name)", max_length=255
+    )
+    artifact_kind: str = Field(
+        ..., description="内容形态:text|file|url_link|code,须与非空 content 字段一致"
+    )
+    session_id: str | None = Field(
+        None, description="协作会话 ID(图绑定优先,未绑定时采纳此值)"
+    )
+    task_id: str = Field(..., description="归属任务 ID")
+    node_id: str = Field(..., description="产出节点 ID")
+    attempt: int = Field(..., ge=0, description="归属 attempt(须与图上 harness_retries 快照一致)")
+    text_content: str | None = Field(
+        None, description="text 分支 JSON 字符串,如 {\"text\": \"...\"};四个 content 字段互斥"
+    )
+    file_content: str | None = Field(None, description="file 分支 JSON 字符串")
+    url_link_content: str | None = Field(None, description="url_link 分支 JSON 字符串")
+    code_content: str | None = Field(None, description="code 分支 JSON 字符串")
+
+    model_config = {"extra": "forbid"}
+
+
 class TaskArtifactDescriptorDTO(BaseModel):
     """产物读侧 Descriptor:只含安全字段(spec §7)。
 

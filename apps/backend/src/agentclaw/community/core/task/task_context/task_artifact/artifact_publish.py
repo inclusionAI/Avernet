@@ -39,6 +39,73 @@ _PENDING_PUBLISHED_ARTIFACTS: ContextVar[list | None] = ContextVar(
 _CONTROL_SIGNAL_KEYS = ("skipped", "notify_result")
 
 
+def graph_node_attempt(node: "TaskNode") -> int:
+    """节点 attempt = ``extend_props["harness_retries"]`` 快照(0 起;§3.3)。
+
+    口径与 ``NodeActionEvent.attempt`` / relay 幂等键同源;非 int 值 fail-loud。
+    """
+
+    value = (node.run_info.extend_props or {}).get("harness_retries", 0)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TaskArtifactContentError(
+            f"harness_retries 快照须为 int,得到 {value!r} (node_id={node.node_id})"
+        )
+    return value
+
+
+def graph_scope_session_id(graph: "TaskExecutionGraph") -> str | None:
+    """图绑定的协作会话(根节点 extend_props["session_id"];§3.3)。"""
+
+    if not graph.tasks:
+        return None
+    value = (graph.tasks[0].run_info.extend_props or {}).get("session_id")
+    return value if isinstance(value, str) and value else None
+
+
+def resolve_artifact_name(item: "ArtifactReportItem") -> str | None:
+    """名称回落(§3.6):file → file_content.file_name;其余上报值 or None。"""
+
+    if item.artifact_name is not None:
+        return item.artifact_name
+    if item.artifact_kind == ArtifactKind.FILE.value:
+        return item.content.file_name
+    return None
+
+
+def compose_artifact_record(
+    *,
+    task_id: str,
+    node_id: str,
+    attempt: int,
+    scope_session_id: str | None,
+    kind: ArtifactKind,
+    content: ArtifactContent,
+    artifact_name: str | None,
+    creator: str,
+    now_ms: int,
+) -> TaskArtifactRecord:
+    """构造一条待落库产物行(spec §3.1;capture 与手动登记两条写口共用)。"""
+
+    return TaskArtifactRecord(
+        artifact_id=new_artifact_id(),
+        artifact_name=artifact_name,
+        task_id=task_id,
+        node_id=node_id,
+        attempt=attempt,
+        scope_session_id=scope_session_id,
+        kind=kind.value,
+        storage=(
+            content.storage_type.value if kind is ArtifactKind.FILE else "inline"
+        ),
+        content=content,
+        content_hash=artifact_content_hash(content),
+        creator=creator,
+        modifier=None,
+        created_at=now_ms,
+        gmt_create=None,
+    )
+
+
 def stage_published(records: list[TaskArtifactRecord]) -> None:
     """暂存待写产物行(闭包语义:失败/stale 写会连同闭包一起重放)。"""
 
@@ -182,19 +249,11 @@ class TaskArtifactPublishService:
 
     @staticmethod
     def _graph_attempt(node: "TaskNode") -> int:
-        value = (node.run_info.extend_props or {}).get("harness_retries", 0)
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise TaskArtifactContentError(
-                f"harness_retries 快照须为 int,得到 {value!r} (node_id={node.node_id})"
-            )
-        return value
+        return graph_node_attempt(node)
 
     @staticmethod
     def _graph_session_id(graph: "TaskExecutionGraph") -> str | None:
-        if not graph.tasks:
-            return None
-        value = (graph.tasks[0].run_info.extend_props or {}).get("session_id")
-        return value if isinstance(value, str) and value else None
+        return graph_scope_session_id(graph)
 
     @staticmethod
     def _is_control_signal(output: dict) -> bool:
@@ -204,13 +263,7 @@ class TaskArtifactPublishService:
     def _artifact_name(
         item: "ArtifactReportItem",
     ) -> str | None:
-        """名称回落(§3.6):file → file_content.file_name;其余上报值 or None。"""
-
-        if item.artifact_name is not None:
-            return item.artifact_name
-        if item.artifact_kind == ArtifactKind.FILE.value:
-            return item.content.file_name
-        return None
+        return resolve_artifact_name(item)
 
     def _record(
         self,
@@ -225,21 +278,14 @@ class TaskArtifactPublishService:
         creator: str,
         now_ms: int,
     ) -> TaskArtifactRecord:
-        return TaskArtifactRecord(
-            artifact_id=new_artifact_id(),
-            artifact_name=artifact_name,
+        return compose_artifact_record(
             task_id=task_id,
             node_id=node_id,
             attempt=attempt,
             scope_session_id=scope_session_id,
-            kind=kind.value,
-            storage=(
-                content.storage_type.value if kind is ArtifactKind.FILE else "inline"
-            ),
+            kind=kind,
             content=content,
-            content_hash=artifact_content_hash(content),
+            artifact_name=artifact_name,
             creator=creator,
-            modifier=None,
-            created_at=now_ms,
-            gmt_create=None,
+            now_ms=now_ms,
         )

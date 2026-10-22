@@ -1,9 +1,12 @@
-"""Read-only repository contract for the ``task_artifact`` append-only manifest.
+"""Repository contract for the ``task_artifact`` append-only manifest.
 
-Rows are written ONLY inside the ``save_graph`` transaction (spec
+Graph-driven rows are written inside the ``save_graph`` transaction (spec
 2026-10-20-task-artifact-domain §5.2, ``TaskCallbackModel`` inline-write
-precedent) — this protocol never carries a write path. Domain imports are
-``TYPE_CHECKING``-only, per ``core/repository/README.md``.
+precedent). The API-driven write (manual artifact registration endpoint)
+runs through :meth:`append` in its own transaction — still append-only
+manifest semantics: INSERT with select-first dedupe, no UPDATE path
+anywhere. Domain imports are ``TYPE_CHECKING``-only, per
+``core/repository/README.md``.
 """
 
 from __future__ import annotations
@@ -17,7 +20,17 @@ if TYPE_CHECKING:
 
 @runtime_checkable
 class TaskArtifactRepositoryProtocol(Protocol):
-    """Read side of the immutable artifact manifest (no UPDATE path anywhere)."""
+    """Manifest of immutable artifacts (append + read; no UPDATE path anywhere)."""
+
+    @abstractmethod
+    def append(self, record: "TaskArtifactRecord") -> "TaskArtifactRecord":
+        """Insert one artifact row in this repo's own transaction.
+
+        select-first dedupe on ``(task_id, node_id, attempt, kind,
+        content_hash)`` mirrors the ``save_graph`` inline write (spec §5.3);
+        a duplicate hit is idempotent and returns the already-persisted
+        record. Write failures propagate (no swallowing)."""
+        ...
 
     @abstractmethod
     def list_by_task(
