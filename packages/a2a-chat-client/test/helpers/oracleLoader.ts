@@ -7,7 +7,7 @@
  */
 import * as fs from 'fs';
 import type {
-  SdkParser, SdkParserCtor, SdkParserConfig, SdkParserFactory,
+  SdkParser, SdkParserCtor, SdkParserFactory,
 } from '../../src/sdkParser';
 
 /** 同步加载真 OpenClawParser（test 环境专用：require.resolve 候选 + env 覆盖） */
