@@ -4,7 +4,7 @@
 
     python apps/backend/src/agentclaw/community/core/task/task_runner/client/\
 session_files/bcs_session_files_client_cli.py \\
-        list --base-url https://bcs-pre.alipay.com --session-id s1 \\
+        list --base-url http://127.0.0.1:21000 --session-id s1 \\
         --bot-token-file ~/.bcs/drv.token [--prefix 报告] [--status Ready]
     python .../bcs_session_files_client_cli.py \\
         read --base-url ... --session-id s1 --file-id f_abc123 --out ./报告.xlsx

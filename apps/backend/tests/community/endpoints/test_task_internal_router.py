@@ -418,26 +418,60 @@ def relay_context_expired_attempt():
     pass
 
 
-# Query surfaces are public-only. Keep the unauthenticated internal mirror from
-# being reintroduced accidentally; live/singlebox readers use /openapi/v1.
+# Authenticated mirrors of the public task read surfaces.
 @endpoint_test(
     method="GET",
     path=f"{_BASE}/dashboard",
-    scenario="not_exposed",
-    input=CaseInput(query_params={"task_id": "task-endpoint-1"}),
-    expect=ExpectError(status=404),
+    scenario="happy_ok",
+    seed=_seed_internal_task,
+    input=CaseInput(
+        headers=_STAFF_COOKIE,
+        query_params={"task_id": "task-endpoint-1"},
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"code": 200000, "data": {"run_id": 1, "status": "DEFINED"}},
+    ),
 )
-def dashboard_not_exposed():
+def dashboard_happy():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/dashboard",
+    scenario="err_unauthenticated",
+    input=CaseInput(query_params={"task_id": "task-endpoint-1"}),
+    expect=ExpectError(status=401),
+)
+def dashboard_unauthenticated():
     pass
 
 
 @endpoint_test(
     method="GET",
     path=f"{_BASE}/list",
-    scenario="not_exposed",
-    expect=ExpectError(status=404),
+    scenario="happy_ok",
+    input=CaseInput(
+        headers=_STAFF_COOKIE,
+        query_params={"user_id": "user-endpoint-1"},
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"code": 200000, "data": []},
+    ),
 )
-def list_not_exposed():
+def list_happy():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/list",
+    scenario="err_unauthenticated",
+    expect=ExpectError(status=401),
+)
+def list_unauthenticated():
     pass
 
 

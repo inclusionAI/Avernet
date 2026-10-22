@@ -10,7 +10,7 @@
 
 参数规约:
 * ``--base-url``:backend 网络地址;缺省取 ``AGENTCLAW_BASE_URL`` 环境变量,再缺省
-  ``https://agentclaw-prod.alipay.com``
+  ``http://127.0.0.1:8000``
 * ``ctoken`` / ``user_id``:网关侧 opaque 凭证/路由参数——backend middleware 在鉴权
   之前剥掉 ctoken(middleware.py:_remove_compatibility_ctoken),业务身份走 cookie;
   所以这两项只在「经公网网关调用」时必带,本地直连后端可不传
@@ -119,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--base-url", default=os.environ.get("AGENTCLAW_BASE_URL")
-                        or "https://agentclaw-prod.alipay.com",
+                        or "http://127.0.0.1:8000",
                         help="backend 地址(默认 $AGENTCLAW_BASE_URL)")
     parser.add_argument("--bot-id", required=True, help="目标 bot id")
     parser.add_argument("--path", required=True,
