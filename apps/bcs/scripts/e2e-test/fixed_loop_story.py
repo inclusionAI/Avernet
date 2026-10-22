@@ -136,7 +136,7 @@ class Story:
         self.post("/control/reset", mock=True)
         self.post("/me/ensure-human")
         self.provider = self.post("/providers", {
-            "name": "Loop E2E provider", "webhook_url": self.args.mock_url + "/provider/webhook",
+            "name": "Loop E2E provider", "webhook_url": (self.args.mock_sink_url or self.args.mock_url) + "/provider/webhook",
             "auth": {"mode": "static_bearer"}, "protocol_version": "2.0",
             "coordination": {"mode": "native_tool"},
         })
@@ -292,6 +292,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     for name in ("base-url", "mock-url", "cli", "driver", "human"):
         parser.add_argument("--" + name, required=True)
+    # BCS-facing sink URL for the provider webhook registration. Falls back to
+    # --mock-url when the harness and BCS share one network viewpoint.
+    parser.add_argument("--mock-sink-url", required=False)
     story = Story(parser.parse_args())
     try:
         story.setup()

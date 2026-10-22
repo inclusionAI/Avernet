@@ -461,6 +461,45 @@ get_bcs_cli_bin() {
     return 1
 }
 
+# Resolve the mock base URLs for the two viewpoints an e2e run spans.
+#
+# The Provider/Judge mock serves BOTH roles on the same process:
+#   - harness view: the e2e shell/python curls /control/*, /health, and the
+#     sync view endpoints directly from the host running the harness.
+#   - BCS sink view: URLs registered INTO BCS (provider webhook_url, group
+#     event subscriptions) that the BCS server calls back on.
+#
+# When BCS and the mock share a network namespace (singlebox, docker host
+# networking, CI compose) both viewpoints resolve to the same base URL, so
+# BCS_E2E_MOCK_BASE_URL alone is enough. When BCS runs on a separate network
+# plane (k3s nodeport with the mock on the host), the two viewpoints differ:
+# the harness may have to reach the mock through one address while BCS must
+# register another (and BCS's outbound-callback address policy may reject
+# loopback addresses). The two overrides exist for that case; each falls back
+# to BCS_E2E_MOCK_BASE_URL, preserving the documented single-URL behavior.
+mock_view_base_url() {
+    echo "${BCS_E2E_MOCK_VIEW_BASE_URL:-${BCS_E2E_MOCK_BASE_URL:-}}"
+}
+
+mock_sink_base_url() {
+    echo "${BCS_E2E_MOCK_SINK_BASE_URL:-${BCS_E2E_MOCK_BASE_URL:-}}"
+}
+
+# Create a temp file in a directory the bcs-cli process can read back.
+#
+# BSD `mktemp -t prefix` resolves against the system secure temp dir
+# (confstr(_CS_DARWIN_USER_TEMP_DIR)) and IGNORES $TMPDIR, so a path generated
+# on a macOS host is invisible to a containerized bcs-cli bind-mounting only
+# $HOME and $TMPDIR. GNU mktemp honors $TMPDIR, but the -t form is deprecated
+# there too. The concatenated form below is portable on both and pins the
+# directory so wrapper/host setups can bind-mount it. Override with
+# BCS_CLI_MKTEMP_DIR when the CLI container needs an explicitly shared path.
+bcs_cli_mktemp() {
+    local dir="${BCS_CLI_MKTEMP_DIR:-${TMPDIR:-/tmp}}"
+    mkdir -p "$dir"
+    mktemp "$dir/$1"
+}
+
 # Resolve the bots' data root in the singlebox standalone layout.
 # singlebox --standalone lays bots out as
 #   .standalone-openclaw/profiles/<role-slug>/.bcs/session.json

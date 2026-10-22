@@ -637,7 +637,7 @@ test_ep_connect_private_and_discover_branches() {
 # and the friend work-order event call), so it is skipped without it.
 test_ep_tc_friend_auth_sync_readdressed_principal() {
     info "EdgePermission: TC friend-auth-sync re-addresses the forwarded principal"
-    local mock_url="${BCS_E2E_MOCK_BASE_URL:-}"
+    local mock_url="$(mock_view_base_url)"
     if [[ -z "$mock_url" ]]; then
         skip_case "no Provider/Judge mock; friend-auth-sync e2e needs it" || return 77
     fi

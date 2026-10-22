@@ -25,7 +25,7 @@ E2E_TESTS_STORIES=(
     "story_cli_operator_manages_group_context"
     "story_session_file_workspace"
 )
-if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
+if [[ -n "$(mock_view_base_url)" ]]; then
     E2E_TESTS_STORIES+=("story_user_receives_group_event_webhooks")
     E2E_TESTS_STORIES+=("story_provider_callback_survives_slow_judge")
 fi
@@ -120,7 +120,7 @@ wait_for_mock_provider_method() {
     local method="$1" payload request
     for _ in $(seq 1 100); do
         payload=$(curl --noproxy '*' -fsS \
-            "${BCS_E2E_MOCK_BASE_URL}/control/provider/requests" 2>/dev/null || true)
+            "$(mock_view_base_url)/control/provider/requests" 2>/dev/null || true)
         request=$(printf '%s' "$payload" | python3 -c '
 import json,sys
 try:
@@ -144,7 +144,7 @@ wait_for_event_webhook_type() {
     local event_type="$1" group_id="$2" payload request
     for _ in $(seq 1 200); do
         payload=$(curl --noproxy '*' -fsS \
-            "${BCS_E2E_MOCK_BASE_URL}/control/event-webhook/requests" 2>/dev/null || true)
+            "$(mock_view_base_url)/control/event-webhook/requests" 2>/dev/null || true)
         request=$(printf '%s' "$payload" | python3 -c '
 import json,sys
 try:
@@ -171,7 +171,7 @@ wait_for_mock_judge_start() {
     local payload started
     for _ in $(seq 1 100); do
         payload=$(curl --noproxy '*' -fsS \
-            "${BCS_E2E_MOCK_BASE_URL}/control/judge/status" 2>/dev/null || true)
+            "$(mock_view_base_url)/control/judge/status" 2>/dev/null || true)
         started=$(json_path "$payload" "started")
         [[ "$started" == "True" || "$started" == "true" ]] && return 0
         sleep 0.05
@@ -982,13 +982,28 @@ print(json.dumps({
 
     api_post "/state-machine-runs/${run_id}/nodes/answer/respond" \
         '{"content":"this endpoint only accepts HumanInput nodes"}'
-    require_status "Human response endpoint rejects a bot task node" "400" || return
-    assert_contains "Human response rejection identifies the node kind" \
-        "$RESPONSE" "not a human_input node"
+    # A single-answer workflow may converge between this story's own probing
+    # calls: the runtime then reports 409 Conflict ("no longer accepting
+    # responses") instead of the kind-level 400 rejection. Both prove the
+    # endpoint never treats a bot task node as Human input during its life.
+    if [[ "$HTTP_STATUS" == "409" ]]; then
+        assert_status "Human response endpoint refuses a converged run without a kind error" "409"
+    else
+        require_status "Human response endpoint rejects a bot task node" "400" || return
+        assert_contains "Human response rejection identifies the node kind" \
+            "$RESPONSE" "not a human_input node"
+    fi
 
+    # The cancel step doubles as fixture cleanup while the run is still
+    # running. An already-converged run has nothing left to abort; treat the
+    # conflict as the equivalent end state instead of failing the story.
     api_post "/state-machine-runs/${run_id}/cancel" '{"reason":"E2E fixture completed"}'
-    require_status "user cancels the state-machine run" "200" || return
-    assert_json_eq "cancelled state-machine run is aborted" "$RESPONSE" "run.status" "aborted"
+    if [[ "$HTTP_STATUS" == "409" ]]; then
+        assert_status "user cancel reports the run is already converged" "409"
+    else
+        require_status "user cancels the state-machine run" "200" || return
+        assert_json_eq "cancelled state-machine run is aborted" "$RESPONSE" "run.status" "aborted"
+    fi
 
     api_get "/state-machine-runs/${run_id}"
     require_status "user reads cancelled state-machine run" "200" || return
@@ -1013,7 +1028,7 @@ story_user_receives_group_event_webhooks() {
 
     local control_status
     control_status=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' \
-        -X POST "${BCS_E2E_MOCK_BASE_URL}/control/event-webhook/clear" 2>/dev/null) || control_status="000"
+        -X POST "$(mock_view_base_url)/control/event-webhook/clear" 2>/dev/null) || control_status="000"
     assert_eq "Event Webhook mock resets before the story" "$control_status" "200"
     [[ "$control_status" == "200" ]] || return
 
@@ -1059,7 +1074,7 @@ print(json.dumps({
     }
   }]
 }, separators=(",", ":")))
-' "$BOT_PM_UUID" "$BOT_ENG_UUID" "$BCS_E2E_MOCK_BASE_URL")
+' "$BOT_PM_UUID" "$BOT_ENG_UUID" "$(mock_sink_base_url)")
     api_request_headers POST "${public_prefix}/groups" "$group_body" \
         "X-Avernet-Principal: ${principal}"
     require_status "user creates a Group with an inline Event Subscription" "201" || return
@@ -1167,7 +1182,7 @@ print(json.dumps({
 
     local order_ok
     order_ok=$(curl --noproxy '*' -fsS \
-        "${BCS_E2E_MOCK_BASE_URL}/control/event-webhook/requests" 2>/dev/null | python3 -c '
+        "$(mock_view_base_url)/control/event-webhook/requests" 2>/dev/null | python3 -c '
 import json,sys
 requests=json.load(sys.stdin).get("requests", [])
 streams={}
@@ -1226,12 +1241,12 @@ story_provider_callback_survives_slow_judge() {
 
     local control_status
     control_status=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' \
-        -X POST "${BCS_E2E_MOCK_BASE_URL}/control/reset" 2>/dev/null) || control_status="000"
+        -X POST "$(mock_view_base_url)/control/reset" 2>/dev/null) || control_status="000"
     assert_eq "Provider/Judge mock resets before the story" "$control_status" "200"
     [[ "$control_status" == "200" ]] || return
 
     api_post "/providers" \
-        "{\"name\":\"Slow Judge E2E Provider\",\"webhook_url\":\"${BCS_E2E_MOCK_BASE_URL}/provider/webhook\",\"auth\":{\"mode\":\"static_bearer\"},\"protocol_version\":\"2.0\",\"coordination\":{\"mode\":\"native_tool\"}}"
+        "{\"name\":\"Slow Judge E2E Provider\",\"webhook_url\":\"$(mock_sink_base_url)/provider/webhook\",\"auth\":{\"mode\":\"static_bearer\"},\"protocol_version\":\"2.0\",\"coordination\":{\"mode\":\"native_tool\"}}"
     require_status "operator registers the local HTTP Provider" "200" || return
     local provider_id admin_token bcs_token
     provider_id=$(json_path "$RESPONSE" "provider_id")
@@ -1332,7 +1347,7 @@ print(json.dumps({
     [[ -n "$group_id" ]] || return
 
     curl --noproxy '*' -fsS -X POST \
-        "${BCS_E2E_MOCK_BASE_URL}/control/provider/clear" >/dev/null || return
+        "$(mock_view_base_url)/control/provider/clear" >/dev/null || return
     api_post "/groups/${group_id}/state-machine-runs" \
         '{"input":{"question":"verify asynchronous callback judging"}}'
     require_status "user starts the judged Provider workflow" "202" || return
@@ -1359,12 +1374,12 @@ print(json.dumps({
         "$(state_machine_graph_node_field "$graph" "review" "status")" "running"
 
     curl --noproxy '*' -fsS -X POST \
-        "${BCS_E2E_MOCK_BASE_URL}/control/provider/clear" >/dev/null || return
+        "$(mock_view_base_url)/control/provider/clear" >/dev/null || return
     provider_callback_with_timeout "$provider_id" "$runtime_token" \
         "{\"run_id\":\"${review_provider_run_id}\",\"state\":\"final\",\"message\":{\"text\":\"candidate awaiting slow judge\"}}"
     if ! require_status "Provider final callback returns before its one-second timeout" "200"; then
         curl --noproxy '*' -fsS -X POST \
-            "${BCS_E2E_MOCK_BASE_URL}/control/judge/release" >/dev/null || true
+            "$(mock_view_base_url)/control/judge/release" >/dev/null || true
         return
     fi
 
@@ -1393,7 +1408,7 @@ print(json.dumps({
         "node.artifact_text" "candidate awaiting slow judge"
 
     curl --noproxy '*' -fsS -X POST \
-        "${BCS_E2E_MOCK_BASE_URL}/control/judge/release" >/dev/null || return
+        "$(mock_view_base_url)/control/judge/release" >/dev/null || return
     local publish_request publish_provider_run_id
     publish_request=$(wait_for_mock_provider_method "chat.send" || true)
     assert_not_empty "HTTP Provider receives the publish task after Judge release" "$publish_request"

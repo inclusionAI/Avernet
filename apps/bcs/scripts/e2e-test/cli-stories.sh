@@ -119,7 +119,7 @@ _story_cli_direct_onboard() {
 story_cli_operator_creates_custom_collaboration() {
     info "Story: an operator validates, trials, and persists a custom collaboration through bcs-cli"
     local yaml_file group_id trial_group_id trial_session_id run_id cleanup_status
-    yaml_file="$(mktemp -t bcs-custom-collaboration.XXXXXX 2>/dev/null || mktemp)"
+    yaml_file="$(bcs_cli_mktemp bcs-custom-collaboration.XXXXXX)"
     printf '%s\n' "name: CLI custom release workflow
 participants:
   planner:
