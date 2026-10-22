@@ -6,6 +6,8 @@ import json
 import time
 
 from agentclaw.community.di.dws_management_config import get_dws_management_config
+from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
+from tests.community.framework.di_seams import bind_overrides
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
@@ -20,6 +22,11 @@ from tests.community.endpoints.test_openapi_dws_hosting import _Resolver
 
 def seed_proof(body, *, invalid):
     def seed(_world):
+        bind_overrides(
+            _world,
+            SystemConfigServiceProtocol,
+            {"get_config": lambda self, **kw: {"mode": "all"}},
+        )
         init_principal_verifier_config(_Resolver(), "test-key", strict=False)
         payload = json.dumps(
             {
@@ -60,3 +67,29 @@ for _invalid in (False, True):
             else ExpectSuccess(json_equals={"verified": True})
         ),
     )(lambda: None)
+
+
+def seed_runtime(body):
+    def seed(world):
+        seed_proof(body, invalid=False)(world)
+        value = json.loads(body["payload"])
+        value.update(operation="enabled", data={"enabled": True}, timestamp_ms=0)
+        body["payload"] = json.dumps(value)
+        body["signature"] = hmac.new(
+            get_dws_management_config().bot_key("bot", "owner"),
+            body["payload"].encode(),
+            hashlib.sha256,
+        ).hexdigest()
+
+    return seed
+
+
+_runtime_body = {}
+endpoint_test(
+    method="POST",
+    path="/internal/dws-hosting/runtime-eligibility",
+    scenario="revalidate_enable_proof",
+    input=CaseInput(json_body=_runtime_body),
+    seed=seed_runtime(_runtime_body),
+    expect=ExpectSuccess(json_equals={"allowed": True}),
+)(lambda: None)

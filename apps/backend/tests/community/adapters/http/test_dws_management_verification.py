@@ -9,6 +9,9 @@ from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from fastapi_injector import attach_injector
+from injector import Injector, InstanceProvider
+from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
 
 from agentclaw.community.adapters.http.dws_hosting.router import router
 from agentclaw.community.di import dws_management_config as config
@@ -26,7 +29,43 @@ def client(monkeypatch):
     )
     app = FastAPI()
     app.include_router(router)
+    injector = Injector()
+    injector.binder.bind(
+        SystemConfigServiceProtocol,
+        to=InstanceProvider(SimpleNamespace(get_config=lambda **_: {"mode": "all"})),
+    )
+    attach_injector(app, injector)
     return TestClient(app)
+
+
+@pytest.mark.parametrize(
+    "mode,allowed", [("all", True), ("disabled", False), ("allowlist", False)]
+)
+def test_runtime_proof_rechecks_current_policy(client, mode, allowed):
+    client.app.state.injector.binder.bind(
+        SystemConfigServiceProtocol,
+        to=InstanceProvider(SimpleNamespace(get_config=lambda **_: {"mode": mode})),
+    )
+    body = proof(operation="enabled", data={"enabled": True}, timestamp_ms=0)
+    assert client.post(
+        "/internal/dws-hosting/runtime-eligibility", json=body
+    ).json() == {"allowed": allowed}
+    assert (
+        client.post("/internal/dws-hosting/verify-command", json=body).status_code
+        == 403
+    )
+
+
+@pytest.mark.parametrize(
+    "changes", [{}, {"operation": "enabled", "data": {"enabled": False}}]
+)
+def test_runtime_proof_requires_enable(client, changes):
+    assert (
+        client.post(
+            "/internal/dws-hosting/runtime-eligibility", json=proof(**changes)
+        ).status_code
+        == 403
+    )
 
 
 def proof(**changes):

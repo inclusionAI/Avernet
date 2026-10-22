@@ -7,6 +7,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
+from agentclaw.community.core.system_config.dws_rollout import is_allowed, is_stop
+from agentclaw.community.di import Injected
+from agentclaw.community.utils.env_utils import get_current_env
+from starlette.concurrency import run_in_threadpool
 
 from agentclaw.community.di.dws_management_config import (
     DwsManagementConfig,
@@ -36,6 +41,7 @@ class Command(BaseModel):
 async def verify_command(
     body: SignedCommand,
     config: Annotated[DwsManagementConfig, Depends(get_dws_management_config)],
+    rollout: SystemConfigServiceProtocol = Injected(SystemConfigServiceProtocol),
 ):
     if not config.key:
         raise HTTPException(503, "management_verifier_unavailable")
@@ -56,4 +62,39 @@ async def verify_command(
         or abs(int(time.time() * 1000) - value.timestamp_ms) > 30000
     ):
         raise HTTPException(403, "invalid_management_proof")
-    return {"verified": True}
+    allowed = is_stop(value.operation, value.data) or await run_in_threadpool(
+        is_allowed, rollout, value.actor_id, get_current_env()
+    )
+    return {"verified": allowed}
+
+
+@router.post("/runtime-eligibility", response_model=dict[str, bool])
+async def runtime_eligibility(
+    body: SignedCommand,
+    config: Annotated[DwsManagementConfig, Depends(get_dws_management_config)],
+    rollout: SystemConfigServiceProtocol = Injected(SystemConfigServiceProtocol),
+):
+    # COSEC: a previously signed enable command is a read-only credential for
+    # this one owner/Bot's rollout status, never a replayable management command.
+    # Management still requires the original 30-second age and nonce checks.
+    try:
+        value = Command.model_validate_json(body.payload)
+    except ValidationError:
+        raise HTTPException(403, "invalid_runtime_proof") from None
+    signature = hmac.new(
+        config.bot_key(value.bot_id, value.actor_id),
+        body.payload.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    if (
+        not config.key
+        or not hmac.compare_digest(signature, body.signature)
+        or value.operation != "enabled"
+        or value.data.get("enabled") is not True
+    ):
+        raise HTTPException(403, "invalid_runtime_proof")
+    return {
+        "allowed": await run_in_threadpool(
+            is_allowed, rollout, value.actor_id, get_current_env()
+        )
+    }
