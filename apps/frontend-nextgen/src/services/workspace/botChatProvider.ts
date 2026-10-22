@@ -1,5 +1,6 @@
 import {
   isSendBannedForSession,
+  revertA2AChoice,
   takeCachedA2AProvider,
   type A2aBootstrapConfig,
 } from '@/adapters/a2a/bootstrap';
@@ -303,6 +304,23 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
       if (epoch !== this.connectionEpoch) {
         if (inner) this.disconnectInner(inner);
         return;
+      }
+      // A2A connect 失败回退（review P3）：缓存命中换入的 A2A 在连接阶段（未
+      // 出站任何请求）失败——回退选择 probe-v3 + 丢弃缓存 inner，下次 connect
+      // 经工厂重建落回 v3；不允许"v3 本可用却持续失败"。已出站请求的失败不进
+      // 此分支（归 provider 恢复/取消面，不重发）。
+      if (inner !== null && (inner as { isA2aProvider?: boolean }).isA2aProvider === true) {
+        this.disconnectInner(inner);
+        // this.inner 与已 resolve 的 initializePromise 都要清：ensureInitialized
+        // 对旧 resolved 装载同样直返——不清则下次 connect 仍拿回死亡的 A2A inner
+        if (this.inner === inner) {
+          this.inner = null;
+          this.initializePromise = null;
+        }
+        revertA2AChoice({
+          url: this.wsUrl ?? '',
+          ...(this.a2aBaseUrl ? { a2aBaseUrl: this.a2aBaseUrl } : {}),
+        } as A2aBootstrapConfig);
       }
       const normalized = error instanceof Error ? error : new Error(String(error));
       this.setState({ phase: 'error', error: normalized.message });
