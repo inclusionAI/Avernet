@@ -16,9 +16,14 @@ export { A2AProvider } from './A2AProvider';
 // —— A2AProvider 消费面常量（错误信号语与拒绝文案，宿主/测试消费单源） ——
 export {
   A2A_APPROVAL_ANSWERS_REQUIRED_MESSAGE, A2A_APPROVAL_UNSUPPORTED_MESSAGE,
+  A2A_ATTACHMENTS_UNSUPPORTED_MESSAGE,
   A2A_FILE_REFS_UNSUPPORTED_MESSAGE,
-  RECOVERY_INCOMPLETE_MESSAGE, RECOVERY_STOPPED_MESSAGE, OUTCOME_UNKNOWN_MESSAGE,
+  A2A_INJECT_UNSUPPORTED_MESSAGE,
 } from './A2AProvider';
+// run 管线引擎的恢复信号语单源（review 拆分后自此导出）
+export {
+  RECOVERY_INCOMPLETE_MESSAGE, RECOVERY_STOPPED_MESSAGE, OUTCOME_UNKNOWN_MESSAGE,
+} from './A2aRunEngine';
 // —— 协议底座 ——
 export {
   buildRpcRequest, parseRpcMessage, classifyFailure,

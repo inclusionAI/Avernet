@@ -44,9 +44,21 @@
  *     resolve_unsupported → typed 拒绝、pending 保持（§5）。
  */
 import { buildRpcRequest, type WireFailure } from './rpc';
+import {
+  EMPTY_PARSE_RESULT,
+  STATE_CANCELED, STATE_COMPLETED, STATE_FAILED, STATE_REJECTED,
+  buildResolveResolution,
+  buildRunFailure,
+  firstStrOf,
+  latestArtifactText,
+  newMessageId,
+  terminalStateOf,
+  type A2aRunFailure,
+} from './providerFacts';
 import { rpcOnce } from './rpcOnce';
 import { streamRpc, type WireEvent } from './stream';
 import { fetchCard, validateScenarios, Scenario } from './card';
+import { A2aRunEngine, OUTCOME_UNKNOWN_MESSAGE, RECOVERY_INCOMPLETE_MESSAGE, RECOVERY_STOPPED_MESSAGE, type RunOutcomeBag } from './A2aRunEngine';
 import { translateEvent, type TranslateCtx } from './translate';
 import {
   RecoveryRunner,
@@ -90,6 +102,19 @@ export const A2A_APPROVAL_ANSWERS_REQUIRED_MESSAGE =
 export const A2A_FILE_REFS_UNSUPPORTED_MESSAGE =
   '当前 A2A 传输暂不支持会话文件引用，请移除引用后重试';
 
+/** 附件（图片等）：v3 SDK chat.send 会把 attachments 写上 wire（引擎消费
+ * 图片面）；A2A 的 message.parts 只有文本承载——静默丢附件会把「分析图片」
+ * 降级成纯文本请求、返回错误结果。出站前 typed 拒绝（fail-closed），承载
+ * 契约落地前这是缺能力的诚实边界；届时本守卫与常量一并移除。 */
+export const A2A_ATTACHMENTS_UNSUPPORTED_MESSAGE =
+  '当前 A2A 传输暂不支持发送附件，请移除附件后重试';
+
+/** inject 消息：v3 走 chat.inject（注入语义：入上下文、不计为用户任务）；
+ * A2A 只有 SendStreamingMessage 一种语义——照发会把注入当普通执行请求，
+ * 可能触发非预期的模型 run。出站前 typed 拒绝，注入承载契约落地前移除。 */
+export const A2A_INJECT_UNSUPPORTED_MESSAGE =
+  '当前 A2A 传输暂不支持注入消息，请稍后重试';
+
 /** B12：CancelTask 控制面单信封的兜底时限（对位引擎侧 chat.abort 10s RPC 窗；
  * 超时=取消结局不可知 → cancel-unknown 核销，禁令保持）。 */
 const CANCEL_RPC_TIMEOUT_MS = 10_000;
@@ -101,37 +126,20 @@ const CANCEL_RPC_TIMEOUT_MS = 10_000;
  */
 const DEFAULT_SEND_BAN_REGISTRY = createSendBanRegistry();
 
-// ─── B11 恢复面 UI 常量（spec §4.4/§3 信号语，导出供 UI 复用） ────────────
 
-/** replay 拒绝 + GetTask 终态：结果可取回但标"不完整" */
-export const RECOVERY_INCOMPLETE_MESSAGE = '恢复不完整，任务结果部分缺失';
-/** 未知 taskId 断流（首 Task 事件前）/ not_found_or_expired：结果未知；
- * spec §3 #2 —— 永不自动恢复、永不自动重发 */
-export const OUTCOME_UNKNOWN_MESSAGE = '结果未知';
-/** 预算耗尽：停止自动请求的信号语（spec §4.4 原文） */
-export const RECOVERY_STOPPED_MESSAGE = '恢复已停止，任务结果未确认';
 
 /**
  * run 级业务失败的归类：B9 事实源——wire FAILED 终态只在 statusUpdate metadata
  * 携 errorCode/errorMessage，没有 JSON-RPC 错误信封。归 rpc 桶（rpc.ts 头注
  * "业务 rpc 错误上浮 UI"），以 JSON-RPC 标准 Internal error 码承载。
  */
-interface A2aRunFailure extends WireFailure {
-  reason: 'run_failed';
-  errorCode?: string;
-}
 
 /** JSON-RPC Internal error（RFC 早期草案/事实标准码）：run 业务失败的折算承载 */
-const RUN_FAILED_RPC_CODE = -32603;
 
 /** v3 同款缺省会话键（OpenClawProvider.js:243） */
 const DEFAULT_SESSION_KEY = 'agent:main:main';
 
 /** engine wire.py 终态口径（与 translate.ts 常量同源） */
-const STATE_CANCELED = 'TASK_STATE_CANCELED';
-const STATE_REJECTED = 'TASK_STATE_REJECTED';
-const STATE_COMPLETED = 'TASK_STATE_COMPLETED';
-const STATE_FAILED = 'TASK_STATE_FAILED';
 
 /** OpenClawProvider.d.ts:18-27 ConnectionStatusEvent 镜像 */
 export interface A2aConnectionStatusEvent {
@@ -143,17 +151,7 @@ export interface A2aConnectionStatusEvent {
   wasClean?: boolean;
 }
 
-/**
- * 恢复终局信号（B11）的 typed 承载：与 run_failed 同走 rpc 桶上浮 UI；
- * reason 三值与 RecoveryOutcome 的三个"止损面"一一对应。
- * B14/F4：非可重试硬失败（auth/protocol）早退按 recovery_stopped 收口，
- * 原始 failure 经 `cause` 随行（分诊/锁定二判用，不再二次丢失）。
- */
-interface A2aRecoverySignalFailure extends WireFailure {
-  reason: 'recovery_incomplete' | 'recovery_outcome_unknown' | 'recovery_stopped';
-  /** F4：fatal 早退（RecoveryOutcome 'fatal'）时附录的原始 wire 失败 */
-  cause?: WireFailure;
-}
+
 
 /** B12 审批面 typed 失败标注（protocol 桶=客户端造词的 typed 拒绝，与
  * ask_user answers-required 同构；rpcError 附引擎原文供分诊） */
@@ -177,105 +175,6 @@ export interface A2AProviderConfig extends A2aOpenClawProviderConfig {
   /** B12：context 级 send-ban 注册表（§3.1）。缺省模块级共享实例——禁令
    * 生存期独立于 provider 实例；B13 注入自持实例以复用同一 registry。 */
   sendBan?: SendBanRegistry;
-}
-
-const EMPTY_PARSE_RESULT: SdkParseResult = {
-  blocks: [], content: '', done: false, toolCalls: [], isApproval: false,
-};
-
-/** uuidv4 等价：真浏览器 secure context / node jest 均有 crypto.randomUUID；
- * uuid 包在精简 nodeenv 没装，v3 的 `import { v4 } from 'uuid'` 路径
- * （OpenClawProvider.js:8）走不通。 */
-function newMessageId(): string {
-  try {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-      return crypto.randomUUID();
-    }
-  } catch { /* 下探 */ }
-  return `a2a-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`;
-}
-
-/** 终态成员的 status.state 读取（wire 事实：终态只随 statusUpdate 成员下发出） */
-function terminalStateOf(member: Record<string, unknown>): string {
-  const status = member.status;
-  if (typeof status === 'object' && status !== null
-    && typeof (status as { state?: unknown }).state === 'string') {
-    return (status as { state: string }).state;
-  }
-  return '';
-}
-
-/** 首个非空字符串（审批交互身份的候选键序读取） */
-function firstStrOf(...candidates: unknown[]): string {
-  for (const c of candidates) {
-    if (typeof c === 'string' && c !== '') return c;
-  }
-  return '';
-}
-
-/**
- * v3 decision('allow-once'|'deny') → engine resolution（per interaction kind）。
- * 引擎词汇表（事实源）：
- *   exec        decision ∈ 'allow-once'|'allow-always'|'deny'（gateway
- *               resolve.ts validDecisions）——v3 两值恰在表内，直传；
- *   mode_switch decision ∈ 'proceed'|'stay'（同一 gateway 口径）——
- *               allow-once→proceed / deny→stay；
- *   ask_user    decision ∈ 'submit'|'cancel'，submit 需结构化答案载荷
- *               （answer/answers/values/selected_options，router
- *               `_validated_resolution`）——v3 decision 枚举零载荷面：
- *               allow-once → null（typed 拒绝，B13+ UI 供答案）；deny →
- *               'cancel'（无载荷正当路径）。
- * kind 缺省 → 'exec'：唯一无 kind 的请求帧是 v3 形 exec.approval.requested
- * （gateway interaction.requested 三类都显式带 kind）。
- * 未知 kind（引擎新词汇）：原样透传，合法性与 422 由引擎裁决——pending 保持。
- */
-function buildResolveResolution(
-  kind: string | undefined, decision: 'allow-once' | 'deny',
-): Record<string, unknown> | null {
-  switch (kind ?? 'exec') {
-    case 'exec':
-      return { kind: 'exec', decision };
-    case 'mode_switch':
-      return { kind: 'mode_switch', decision: decision === 'allow-once' ? 'proceed' : 'stay' };
-    case 'ask_user':
-      return decision === 'deny'
-        ? { kind: 'ask_user', decision: 'cancel' }
-        : null;                         // submit 无答案载荷面 → typed 拒绝
-    default:
-      return { kind, decision };        // 未知 kind 透传（引擎裁决）
-  }
-}
-
-/** 引擎 GetTask artifacts 的最新全量文本（[...latest_text...]——自后向前取首个非空） */
-function latestArtifactText(task: Record<string, unknown>): string | undefined {
-  const artifacts = Array.isArray(task.artifacts) ? task.artifacts : [];
-  for (let i = artifacts.length - 1; i >= 0; i -= 1) {
-    const a = artifacts[i];
-    if (typeof a !== 'object' || a === null || Array.isArray(a)) continue;
-    const parts = Array.isArray((a as Record<string, unknown>).parts)
-      ? (a as Record<string, unknown>).parts as unknown[] : [];
-    const text = parts.map((p) =>
-      (typeof p === 'object' && p !== null
-        && typeof (p as { text?: unknown }).text === 'string')
-        ? (p as { text: string }).text : '').join('');
-    if (text !== '') return text;
-  }
-  return undefined;
-}
-
-/** wire FAILED 终态 metadata → typed failure（errorCode/errorMessage 事实源） */
-function buildRunFailure(metadata: Record<string, unknown>): A2aRunFailure {
-  const errorCode = typeof metadata.errorCode === 'string' ? metadata.errorCode : undefined;
-  const errorMessage = typeof metadata.errorMessage === 'string' ? metadata.errorMessage : undefined;
-  return {
-    kind: 'rpc',
-    reason: 'run_failed',
-    ...(errorCode !== undefined ? { errorCode } : {}),
-    rpcError: {
-      code: RUN_FAILED_RPC_CODE,
-      message: errorMessage ?? 'a2a run failed',
-    },
-  };
 }
 
 export class A2AProvider {
@@ -304,19 +203,15 @@ export class A2AProvider {
   private currentMessageId = '';
   private activeSessionKey = '';
   /** B11 恢复游标锚：最近一次已消费 wire seq */
-  private appliedSeq: number | null = null;
   /** B11 手工恢复锚：最近 run 的 (taskId, sessionKey, 滚动全文 bag) */
-  private recoveryAnchor:
-    | { taskRunId: string; sessionKey: string; state: { fullText: string } }
-    | null = null;
   /** 终帧/错误帧是否已入账（manualRecover 的"无事可恢复"判据；request 开局清零） */
-  private runSettled = false;
   /** 已出站的请求代次（该代次的 SendStreamingMessage 已 POST；null=尚无请求出站）。
    * 代次绑定而非布尔：布尔跨请求残留——上一请求置位后，复用 provider 的下一
    * 请求在 iam 签发窗口中止会被误判 task-outcome-unknown（review R2-2）。
    * abort 度线 = "当前在途代次是否曾出站"（dispatchedGeneration === 在途代次）。
    */
   private dispatchedGeneration: number | null = null;
+  private readonly run: A2aRunEngine;
   private parseResultListeners: Array<(result: SdkParseResult) => void> = [];
   private connectionStatusListeners:
     Array<(event: A2aConnectionStatusEvent) => void> = [];
@@ -342,6 +237,18 @@ export class A2AProvider {
     });
     // 防"构造后在首个使用点之前"的 unhandled rejection 噪音（双分支，awaiter 照常拿到拒绝）
     this.parserReady.catch(() => undefined);
+    // 管线引擎（review 拆分）：host 缝全部 getter/闭包——读实时字段值
+    const provider = this;
+    this.run = new A2aRunEngine({
+      get config() { return provider.config; },
+      generation: () => provider.generation,
+      resolveIamToken: () => provider.resolveIamToken(),
+      notifyHardFailure: (err: unknown) => provider.notifyHardFailure(err),
+      releaseBanOnNonCancelTerminal: (cid: string) =>
+        provider.releaseBanOnNonCancelTerminal(cid),
+      emitCancelledComplete: () => { provider.onComplete?.([]); },
+      emitError: (err: Error) => { provider.onError?.(err); },
+    });
   }
 
   // ─── ChatProvider 接口 ───────────────────────────────────────────────
@@ -395,7 +302,7 @@ export class A2AProvider {
 
   /** B11 恢复游标（applied-cursor）只读锚 */
   get lastAppliedSeq(): number | null {
-    return this.appliedSeq;
+    return this.run.appliedSeq;
   }
 
   /** 本次/最近一次请求的会话键（对位 v3 currentSessionKey，abort/recovery 关联锚） */
@@ -413,6 +320,23 @@ export class A2AProvider {
     if (fileRefs.length > 0) {
       const error = Object.assign(new Error(A2A_FILE_REFS_UNSUPPORTED_MESSAGE), {
         failure: { kind: 'rpc', reason: 'file_refs_unsupported' } as WireFailure,
+      });
+      this.onError?.(error);
+      throw error;
+    }
+    // 附件与 inject 的门（两常量头注意明理由）：与 fileRefs 同构、同位置——
+    // 出站前拒绝，未占请求槽、零 wire 出站（attachments/isInject 的独立
+    // wire 承载契约归 B11+，落地前拒绝是唯一诚实行为）
+    if (Array.isArray(params.attachments) && params.attachments.length > 0) {
+      const error = Object.assign(new Error(A2A_ATTACHMENTS_UNSUPPORTED_MESSAGE), {
+        failure: { kind: 'rpc', reason: 'attachments_unsupported' } as WireFailure,
+      });
+      this.onError?.(error);
+      throw error;
+    }
+    if (params.isInject === true) {
+      const error = Object.assign(new Error(A2A_INJECT_UNSUPPORTED_MESSAGE), {
+        failure: { kind: 'rpc', reason: 'inject_unsupported' } as WireFailure,
       });
       this.onError?.(error);
       throw error;
@@ -436,8 +360,8 @@ export class A2AProvider {
     const generation = ++this.generation;   // 本代请求车票：一切旧迭代器帧由此废
     const ctrl = new AbortController();
     this.currentAbort = ctrl;
-    this.appliedSeq = null;
-    this.recoveryAnchor = null;        // 恢复锚随游标一起重置（首 Task 类事件重建）
+    this.run.appliedSeq = null;
+    this.run.recoveryAnchor = null;        // 恢复锚随游标一起重置（首 Task 类事件重建）
     parser.reset();                    // 对位 :245
     parser.setSessionKey(sessionKey);  // 对位 :246
 
@@ -452,7 +376,7 @@ export class A2AProvider {
     // B11 起：主回路与恢复轮共用同一 RunOutcomeBag 记账（consumeWireEvent 单管线）
     const state = { fullText: '' };
     const ctx: TranslateCtx = { sessionKey, taskRunId: null };
-    this.runSettled = false;
+    this.run.runSettled = false;
     const bag: RunOutcomeBag = {
       parser, ctx, state,
       outcome: null, runFailure: null, terminalApplied: false,
@@ -470,7 +394,7 @@ export class A2AProvider {
         fetchImpl: this.config.fetchImpl ?? undefined,
       })) {
         if (generation !== this.generation) break;   // 迟帧栅栏
-        const step = this.consumeWireEvent(ev, bag);
+        const step = this.run.consumeWireEvent(ev, bag);
         if (step !== 'cont') break;    // 终态后关流——此处 break 同义，不必读流尾
       }
     } catch (err) {
@@ -501,12 +425,12 @@ export class A2AProvider {
         // B11 spec §3 #1：known-taskId 断流按已消费游标自动恢复（ReplayEvents）。
         // ⚠️ 恢复期仍持请求槽：request() 尚未收尾，abort() 的 in-flight 门必须
         // 视之为在途（onComplete([]) 播报语义完整）；让位才放槽。
-        const recovered = await this.runRecovery(generation, bag, ctrl);
+        const recovered = await this.run.runRecovery(generation, bag, ctrl);
         if (generation !== this.generation) return;   // 恢复中让位：槽归让位方
         this.isRequesting = false;
-        this.handleRecoveryOutcome(bag, recovered);
+        this.run.handleRecoveryOutcome(bag, recovered);
         // resumed/terminal → 正常收账（FAILED 走正常错误路径）
-        this.settleRun(bag);
+        this.run.settleRun(bag);
         return;
       }
       // 传输/协议/鉴权 typed failure（含恢复后仍不可收账的裸失败面）：
@@ -523,7 +447,7 @@ export class A2AProvider {
       return;                     // 被让位的旧 run：静默 resolve，不动 UI 也不动
     }                             // 请求槽（isRequesting 归中止方/新代所有，R2-1）
     this.isRequesting = false;
-    this.settleRun(bag);
+    this.run.settleRun(bag);
     // completed / resumed：parser.onComplete 钩子已驱动 UI（钉板 #7）；request 就此 resolve
   }
 
@@ -537,7 +461,7 @@ export class A2AProvider {
     if (!inFlight) {
       return;                           // 空闲 abort 纯 no-op（B10 钉：不二发 onComplete）
     }
-    const anchor = this.recoveryAnchor;
+    const anchor = this.run.recoveryAnchor;
     if (anchor) {
       // known-taskId 在途（含恢复轮——request 槽在恢复期仍持有，同走此路）：
       // dispatch wire CancelTask + 乐观挂禁；控制面落地后核销（§3.1）。
@@ -687,7 +611,7 @@ export class A2AProvider {
    * 决定：true → 旧任务处理器保留（仅让出发送位），false → 可安全断连退役。
    */
   get hasUnterminatedRecovery(): boolean {
-    return this.recoveryAnchor !== null && !this.runSettled && !this.isRequesting;
+    return this.run.recoveryAnchor !== null && !this.run.runSettled && !this.isRequesting;
   }
 
   /**
@@ -698,8 +622,8 @@ export class A2AProvider {
    *（晚到帧一律拒）。§3.1 语义：取消 = 用户明确放弃——宿主随即释放引用。
    */
   cancelUnterminatedTask(): void {
-    const anchor = this.recoveryAnchor;
-    if (!anchor || this.runSettled || this.isRequesting) return;
+    const anchor = this.run.recoveryAnchor;
+    if (!anchor || this.run.runSettled || this.isRequesting) return;
     this.generation += 1;
     this.fireWireCancel(anchor.taskRunId, anchor.sessionKey);
   }
@@ -712,8 +636,8 @@ export class A2AProvider {
    * （新请求/abort/disconnect——UI 播报归让位方，本层静默废止）。
    */
   async manualRecover(): Promise<RecoveryOutcome | null> {
-    const anchor = this.recoveryAnchor;
-    if (!anchor || this.runSettled || this.isRequesting) return null;
+    const anchor = this.run.recoveryAnchor;
+    if (!anchor || this.run.runSettled || this.isRequesting) return null;
     const parser = await this.ensureParser();
     const generation = this.generation;   // 当前代即取消锚
     const ctrl = new AbortController();
@@ -725,18 +649,18 @@ export class A2AProvider {
       outcome: null, runFailure: null, terminalApplied: false,
     };
     const runner = new RecoveryRunner(
-      this.buildRecoveryEngine(ctrl), this.config.recovery);
+      this.run.buildRecoveryEngine(ctrl), this.config.recovery);
     const recovered = await runner.run(
-      anchor.taskRunId, this.appliedSeq,
+      anchor.taskRunId, this.run.appliedSeq,
       (ev) => {
         if (generation !== this.generation) return;   // 迟帧栅栏：手工轮同门
-        this.consumeWireEvent(ev, bag);
+        this.run.consumeWireEvent(ev, bag);
       },
       { isCancelled: () => generation !== this.generation },
     );
     if (recovered.outcome === 'cancelled') return null;
     if (recovered.outcome === 'resumed-incomplete') {
-      this.applyRecoveredIncomplete(bag, recovered);
+      this.run.applyRecoveredIncomplete(bag, recovered);
       this.onError?.(new Error(RECOVERY_INCOMPLETE_MESSAGE));
       return recovered;
     }
@@ -746,7 +670,7 @@ export class A2AProvider {
       this.onError?.(new Error(RECOVERY_STOPPED_MESSAGE));
     } else if (recovered.outcome === 'fatal') {
       // F4：手工轮同路——硬失败播报宿主（锁检测）+ 预算耗尽等价信号语
-      this.notifyFatalRecovery(recovered.failure);
+      this.run.notifyFatalRecovery(recovered.failure);
       this.onError?.(new Error(RECOVERY_STOPPED_MESSAGE));
     }
     // terminal/resumed：consumeWireEvent 已喂 parser，UI 面由 parser 钩子驱动
@@ -872,239 +796,6 @@ export class A2AProvider {
    *    double final" 核销位——§3.4 豁免后仍不二发）；
    *  · 返回 'final' | 'error' 表示 run 已到收账面（调用方截流）。
    */
-  private consumeWireEvent(ev: WireEvent, bag: RunOutcomeBag): 'final' | 'error' | 'cont' {
-    if (bag.ctx.taskRunId === null) {
-      // wire task 成员带 id，其余成员带 taskId（同一 run id）——首帧即记
-      const candidate = ev.type === 'task'
-        ? (ev.member as { id?: unknown }).id
-        : (ev.member as { taskId?: unknown }).taskId;
-      if (typeof candidate === 'string' && candidate) {
-        bag.ctx.taskRunId = candidate;
-        this.recoveryAnchor = {
-          taskRunId: candidate, sessionKey: bag.ctx.sessionKey, state: bag.state,
-        };
-      }
-    }
-    // spec §3.4：「同一 seq 上未应用的 final marker 必须应用」。引擎事实
-    // （kernel.complete_run，kernel.py:156-180）：终态两连发——state-change
-    // statusUpdate(COMPLETED) 先经 _publish 把 last_seq 推到 N+1 并消费（游标
-    // →N+1），随后 final marker 以**同一 r.last_seq = N+1** 构造下发——inclusive
-    // 去重会把 marker 当重发吞掉（final 永不应用 → settleRun 无账可收 → UI 挂死）。
-    // 终态 marker 豁免 `<=` 去重；双终态防重由下方 terminalApplied 栅栏兜（同 run
-    // 第二终帧不再入账），主回路/replay 恢复/手工轮同一管线同豁免。
-    const isTerminalMarker = ev.type === 'statusUpdate' && ev.metadata.final === 'true';
-    if (!isTerminalMarker
-      && ev.seq !== null && this.appliedSeq !== null && ev.seq <= this.appliedSeq) {
-      return 'cont';                // 已消费游标之前的事件（重发面）：纯去重
-    }
-    const out = translateEvent(ev, bag.ctx, bag.state);
-    if (out === null) {
-      // 无渲染面（task/message 成员、纯 WORKING 心跳）：游标仍推进
-      if (ev.seq !== null) this.appliedSeq = ev.seq;
-      return 'cont';
-    }
-    if ((out.kind === 'final' || out.kind === 'error') && bag.terminalApplied) {
-      return 'cont';                // 同 run 第二终帧：防 parser 双 final
-    }
-    if (out.consumedSeq !== null) this.appliedSeq = out.consumedSeq;
-    if (out.kind === 'final' || out.kind === 'error') {
-      bag.terminalApplied = true;
-      this.runSettled = true;
-    }
-    bag.parser.handleMessage(out.frame);
-    if (out.kind === 'error') {
-      // parser.onError 已驱动 UI（钉板 #8）；分完帧再收账
-      bag.outcome = 'failed';
-      bag.runFailure = buildRunFailure(ev.metadata);
-      // §3.1 FAILED = 非 cancel 终态：按正常完成语义解禁（GetTask 确认同路）
-      this.releaseBanOnNonCancelTerminal(bag.ctx.sessionKey);
-      return 'error';
-    }
-    if (out.kind === 'final') {
-      // ⚠️ B9 契约：CANCELED/REJECTED 也出 final 帧（parser 纯 no-op）——
-      // 这里以成员终态区分 completion outcome 与 transport outcome
-      const stateStr = terminalStateOf(ev.member);
-      bag.outcome = (stateStr === STATE_CANCELED || stateStr === STATE_REJECTED)
-        ? 'cancelled' : 'completed';
-      if (bag.outcome !== 'cancelled') {
-        // §3.1 非 cancel 终态（COMPLETED 等）：正常完成语义解禁——
-        // CANCELED 走流也**不**解禁（解禁只认 engineAbort=confirmed）
-        this.releaseBanOnNonCancelTerminal(bag.ctx.sessionKey);
-      }
-      return 'final';
-    }
-    return 'cont';
-  }
-
-  /** run 收账三分支（completed/resumed 的 UI 面由 parser.onComplete 钩子已驱动） */
-  private settleRun(bag: RunOutcomeBag): void {
-    if (bag.outcome === 'failed' && bag.runFailure) {
-      throw Object.assign(new Error(bag.runFailure.rpcError!.message), { failure: bag.runFailure });
-    }
-    if (bag.outcome === 'cancelled') {
-      // v3 钉板：OpenClawProvider.js:291-299 abort() → onComplete([])；
-      // parser 对废除帧 no-op（OpenClawParser.js:637），完成播报由本层补发
-      this.onComplete?.([]);
-    }
-  }
-
-  /**
-   * 自动恢复轮（request 断流内联调用）：known taskId + 已消费游标 →
-   * RecoveryRunner（预算 spec §4.4 首版默认，config.recovery 可覆盖）。
-   * 恢复事件与主回路同管线同栅栏（abort/disconnect/新请求即取消 runner）。
-   */
-  private async runRecovery(
-    generation: number, bag: RunOutcomeBag, ctrl: AbortController,
-  ): Promise<RecoveryOutcome> {
-    const taskId = bag.ctx.taskRunId!;
-    const runner = new RecoveryRunner(
-      this.buildRecoveryEngine(ctrl), this.config.recovery);
-    return runner.run(
-      taskId, this.appliedSeq,
-      (ev) => {
-        if (generation !== this.generation) return;   // 迟帧栅栏：恢复流同门
-        this.consumeWireEvent(ev, bag);
-      },
-      { isCancelled: () => generation !== this.generation },
-    );
-  }
-
-  /** 恢复轮终局核销：止损面 → onError 信号语 + typed 拒绝（settleRun 前） */
-  private handleRecoveryOutcome(bag: RunOutcomeBag, recovered: RecoveryOutcome): void {
-    switch (recovered.outcome) {
-      case 'resumed-incomplete':
-        this.applyRecoveredIncomplete(bag, recovered);
-        throw this.surfaceRecoverySignal('recovery_incomplete', RECOVERY_INCOMPLETE_MESSAGE);
-      case 'unknown':
-        throw this.surfaceRecoverySignal('recovery_outcome_unknown', OUTCOME_UNKNOWN_MESSAGE);
-      case 'budget-exhausted':
-        throw this.surfaceRecoverySignal('recovery_stopped', RECOVERY_STOPPED_MESSAGE);
-      case 'fatal':
-        // F4：恢复期硬失败（auth/protocol）——先向宿主播报（locked-v3 锁检测
-        // 起点与 pre-task/请求期同路），再按预算耗尽等价信号语收口（原始
-        // failure 经 cause 随行）。恢复中 auth 拒绝不再空烧 4 轮重放。
-        throw this.surfaceFatalRecovery(recovered.failure);
-      default:
-        break;                      // resumed/terminal/cancelled → settleRun 收账
-    }
-  }
-
-  /**
-   * F4：恢复期硬失败（auth/protocol，NonRetryable early-exit）的对宿主播报——
-   * 恢复分支此前缺 notifyHardFailure（pre-task 面有，恢复面没有），鉴权拒绝
-   * 触发不了 bootstrap 的 lock 监听、还会烧满 5 attempt 预算。此处一次播报
-   * （runner 已把 auth/protocol 设为非可重试终局，故每轮 recovery 至多一次）。
-   */
-  private notifyFatalRecovery(failure: WireFailure): void {
-    this.notifyHardFailure(Object.assign(new Error('a2a recovery hard failure'), { failure }));
-  }
-
-  /** fatal 收口 = 预算耗尽等价信号语 + 原始 failure 附录（cause 随行分诊） */
-  private surfaceFatalRecovery(
-    failure: WireFailure,
-  ): Error & { failure: A2aRecoverySignalFailure } {
-    this.notifyFatalRecovery(failure);
-    return this.surfaceRecoverySignal('recovery_stopped', RECOVERY_STOPPED_MESSAGE, failure);
-  }
-
-  /** 信号语双面：onError 上浮 + typed 拒绝（reason 核销表见 A2aRecoverySignalFailure）
-   *  cause 仅 fatal 收口随行（budget-equivalent 信号的原始失败附录）。 */
-  private surfaceRecoverySignal(
-    reason: A2aRecoverySignalFailure['reason'], message: string,
-    cause?: WireFailure,
-  ): Error & { failure: A2aRecoverySignalFailure } {
-    const error = Object.assign(new Error(message), {
-      failure: {
-        kind: 'rpc', reason,
-        ...(cause !== undefined ? { cause } : {}),
-      } as A2aRecoverySignalFailure,
-    });
-    this.onError?.(error);
-    return error;
-  }
-
-  /**
-   * 'resumed-incomplete' 的结果取回（recovery.ts 不伪造 wire 事件——帧合成归本层）：
-   * COMPLETED → 按 B9 chatFrame 同构合成 final 全文快照帧喂 parser（结果可取回，
-   * parser.onComplete 驱动展示）；取消/拒绝/失败终态无安全合成正断面——只标不完整。
-   */
-  private applyRecoveredIncomplete(
-    bag: RunOutcomeBag, outcome: { state?: string; latestText?: string },
-  ): void {
-    if (outcome.state !== STATE_COMPLETED) return;
-    if (bag.terminalApplied) return;
-    bag.terminalApplied = true;
-    bag.outcome = 'completed';
-    this.runSettled = true;
-    // §3.1 GetTask 确认的 COMPLETED 终态：进非 cancel 终态解禁流
-    this.releaseBanOnNonCancelTerminal(bag.ctx.sessionKey);
-    const text = outcome.latestText ?? bag.state.fullText;
-    const frame = {
-      type: 'event',
-      event: 'chat',
-      seq: null,
-      payload: {
-        runId: bag.ctx.taskRunId ?? 'a2a-run',
-        sessionKey: bag.ctx.sessionKey,          // 钉板 #2：同值过 includes 门
-        request: { sessionKey: bag.ctx.sessionKey },   // 钉板 #4：request REQUIRED
-        seq: null,
-        state: 'final',
-        message: { role: 'assistant', content: [{ type: 'text', text }] },
-      },
-    };
-    bag.parser.handleMessage(frame);
-  }
-
-  /** 恢复引擎 adapter：streamRpc/rpcOnce over 实例面（iamToken 每调取新，signal 共请求 Ctrl） */
-  private buildRecoveryEngine(ctrl: AbortController): RecoveryEngine {
-    const rpcUrl = this.config.a2aUrls.rpcUrl;
-    const fetchImpl = this.config.fetchImpl ?? undefined;
-    const resolveToken = () => this.resolveIamToken();
-    return {
-      // spec §3 #1：known-taskId 断流一律按已消费游标 ReplayEvents
-      //（backlog 先回放后 live；拒绝以 RPC error 信封 typed 上浮）
-      replay: async function* replay(taskId: string, sinceSeq: number) {
-        const iamToken = await resolveToken();
-        yield* streamRpc(
-          rpcUrl, buildRpcRequest('ReplayEvents', { taskId, sinceSeq }),
-          { iamToken, signal: ctrl.signal, fetchImpl });
-      },
-      // GetTask 竞态分支的唯一合法订阅位（kernel sinceSeq=None 空 backlog）
-      subscribeFuture: async function* subscribeFuture(taskId: string) {
-        const iamToken = await resolveToken();
-        yield* streamRpc(
-          rpcUrl, buildRpcRequest('SubscribeToTask', { taskId, sinceSeq: null }),
-          { iamToken, signal: ctrl.signal, fetchImpl });
-      },
-      // 单信封 GetTask：not_found_or_expired → {found:false}（引擎契约）
-      getTask: async (taskId: string) => {
-        try {
-          const parsed = await rpcOnce(
-            rpcUrl, buildRpcRequest('GetTask', { taskId }),
-            { iamToken: await resolveToken(), signal: ctrl.signal, fetchImpl });
-          const task = (parsed.result as Record<string, unknown> | undefined)?.task;
-          if (typeof task !== 'object' || task === null || Array.isArray(task)) {
-            throw Object.assign(new Error('a2a unexpected result shape'), {
-              failure: { kind: 'protocol', reason: 'unexpected_result_shape' } as WireFailure,
-            });
-          }
-          const taskRecord = task as Record<string, unknown>;
-          const status = taskRecord.status;
-          const state = (typeof status === 'object' && status !== null
-            && typeof (status as { state?: unknown }).state === 'string')
-            ? (status as { state: string }).state : undefined;
-          return { found: true, state, latestText: latestArtifactText(taskRecord) };
-        } catch (err) {
-          const failure = (err as { failure?: WireFailure }).failure;
-          const reason = (failure?.rpcError?.data as { reason?: unknown } | undefined)?.reason;
-          if (failure?.kind === 'rpc' && reason === 'not_found_or_expired') {
-            return { found: false };
-          }
-          throw err;
-        }
-      },
-    };
-  }
 
   private async ensureParser(): Promise<SdkParser> {
     await this.parserReady;
@@ -1197,14 +888,5 @@ export class A2AProvider {
 }
 
 /** 主回路 / 恢复轮 / 手工轮共用的 run 记账袋（B11 起单管线入账） */
-interface RunOutcomeBag {
-  parser: SdkParser;
-  ctx: TranslateCtx;
-  /** B9 契约：artifactUpdate 独占改写的滚动全文（跨恢复轮存活） */
-  state: { fullText: string };
-  outcome: 'completed' | 'cancelled' | 'failed' | null;
-  runFailure: A2aRunFailure | null;
-  /** 双终态防重入（replay 重发面/竞态补看，"no double final" 核销位） */
-  terminalApplied: boolean;
-}
+
 
