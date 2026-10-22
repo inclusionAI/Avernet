@@ -1,5 +1,6 @@
 /**
- * 引擎 → 徽章语义色（presentation helper，Bot 管理「标签」列与对话侧 Bot 行徽章共用）：
+ * 引擎 → 徽章语义色（presentation helper，对话侧 Bot 行徽章使用；
+ * Bot 管理「标签」列已统一中性底色，不再消费本映射）：
  * OpenClaw 蓝、TEClaw 绿、Hermes 黄、ClaudeCode 紫（claude_code/claude-code 两种拼写）；
  * 未知/缺省引擎一律中性兜底。
  */

@@ -45,7 +45,7 @@ function EvolutionFactoryContent() {
   const [open, setOpen] = useState(false);
   return (
     // 与 Bot 管理首页同一画布规范：灰底画布 + PageHeader + 单张白卡承载 Tabs → 筛选行 → 结果面板 → 分页。
-    <main className="app-scrollbar h-full overflow-y-auto bg-muted">
+    <main className="app-scrollbar h-full overflow-y-auto bg-page-canvas">
       <div className="w-full p-5 sm:p-6">
         <PageHeader title="智能进化" description="围绕 Bot 的真实运行数据完成「诊断 → 优化 → 验证」的进化闭环" />
         <section className="mt-5 rounded-xl border border-border/60 bg-card p-4 sm:p-6">

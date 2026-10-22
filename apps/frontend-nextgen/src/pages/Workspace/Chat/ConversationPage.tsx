@@ -13,7 +13,6 @@ import { buildBotChatTarget } from '@/hooks/workspaceIdentityMapper';
 import { buildAgentCodingChatPath } from '@/services/workspace';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { chatBridge } from '@/services/workspace/chatBridge';
-import { useSpaceContextStore } from '@/stores/spaceContextStore';
 import { useChatBridge } from '@tc-chat/adapters';
 import type { BridgeInputRef, PanelHandle } from '@tc-chat/core';
 import type { SenderRef } from '@tc-chat/ui/es/Sender';
@@ -183,14 +182,6 @@ export default function ConversationPage(): JSX.Element {
     // 我的 Bot 空态文案内「Bot 管理」链接:跳 Bot 管理页创建 Bot。
     onOpenBotWorkshop: () => history.push('/bot-workshop'),
     onOpenAgentCodingBot: openAgentCodingBot,
-    // 「Bot 管理」菜单项(2026-10-21):带该 Bot 所属空间上下文跳转 Bot 管理页,打开即定位该空间。
-    onOpenBotManagement: (bot) => {
-      const spaceId = bot.spaceId ? Number(bot.spaceId) : undefined;
-      if (spaceId !== undefined) useSpaceContextStore.getState().setCurrentSpaceId(spaceId);
-      history.push('/bot-workshop');
-    },
-    // Bot 正在回复中(2026-10-21):仅当前打开的会话,会话行标题左侧渲染 loading。
-    replyingSessionId: botChat.chat.isRequesting ? (selectedSession?.sessionId ?? null) : null,
   };
 
   // 头部五图标域编排（chat-header-panels）：收藏会话/会话管理/历史消息/资源管理/副屏。

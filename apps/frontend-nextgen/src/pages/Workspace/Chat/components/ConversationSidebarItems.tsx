@@ -16,8 +16,7 @@ const EMPTY_SESSION_LIST: ConversationSessionListState = {
 /** 管理 Bot 行:归属(缺省 mine)与范围记忆均在 Store,缓存按 origin/scope 命中才展示。 */
 export function ManagedItem({ view, props }: { view: ConversationBotView; props: ConversationSidebarProps }) {
   const botId = view.bot.botId;
-  const { store, sessions, others, onOpenSession, onOpenAgentCodingBot, onOpenBotManagement, replyingSessionId } =
-    props;
+  const { store, sessions, others, onOpenSession, onOpenAgentCodingBot } = props;
   const origin = store.originByManagedBotId[botId] ?? 'mine';
   const scope = store.effectiveScopeByManagedBotId[botId] ?? 'all';
   const cache = store.sessionsByBotId[botId];
@@ -59,6 +58,7 @@ export function ManagedItem({ view, props }: { view: ConversationBotView; props:
       }}
       expanded={store.expandedBotIds[botId] === true}
       selectedSessionId={selectedBot ? store.selectedSessionId : null}
+      botSelected={selectedBot}
       origin={origin}
       scope={scope}
       sessionKey={store.sessionKeyByBotId[botId] ?? ''}
@@ -78,8 +78,6 @@ export function ManagedItem({ view, props }: { view: ConversationBotView; props:
       onToggleFavorite={(sessionId) => void sessions.favorites.toggleFavorite(botId, view.section, sessionId)}
       isFavoritePending={(sessionId) => sessions.favorites.isPending(botId, view.section, sessionId)}
       onOpenAgentCodingBot={onOpenAgentCodingBot}
-      onOpenBotManagement={onOpenBotManagement}
-      replyingSessionId={replyingSessionId}
     />
   );
 }
@@ -87,7 +85,7 @@ export function ManagedItem({ view, props }: { view: ConversationBotView; props:
 /** 好友 Bot 行:无归属概念,交互会话一律走好友 Bot 模型回调;会话范围读 scopeByFriendBotId。 */
 export function FriendItem({ view, props }: { view: ConversationBotView; props: ConversationSidebarProps }) {
   const botId = view.bot.botId;
-  const { store, sessions, onOpenAgentCodingBot, replyingSessionId } = props;
+  const { store, sessions, onOpenAgentCodingBot } = props;
   const scope = store.scopeByFriendBotId[botId] ?? 'all';
   const selectedBot = store.selectedBotId === botId && store.selectedSection === 'friend';
   return (
@@ -100,6 +98,7 @@ export function FriendItem({ view, props }: { view: ConversationBotView; props: 
       }}
       expanded={store.expandedBotIds[botId] === true}
       selectedSessionId={selectedBot ? store.selectedSessionId : null}
+      botSelected={selectedBot}
       origin="mine"
       scope={scope}
       sessionKey={store.sessionKeyByBotId[botId] ?? ''}
@@ -118,7 +117,6 @@ export function FriendItem({ view, props }: { view: ConversationBotView; props: 
       onToggleFavorite={(sessionId) => void sessions.favorites.toggleFavorite(botId, 'friend', sessionId)}
       isFavoritePending={(sessionId) => sessions.favorites.isPending(botId, 'friend', sessionId)}
       onOpenAgentCodingBot={onOpenAgentCodingBot}
-      replyingSessionId={replyingSessionId}
     />
   );
 }

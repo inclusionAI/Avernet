@@ -33,10 +33,6 @@ export interface ConversationSidebarProps {
   onOpenBotWorkshop(): void;
   /** AgentCoding Bot 使用专用 coding-chat;与 Bot 工坊「去使用」保持一致。 */
   onOpenAgentCodingBot(bot: ConversationBotView['bot']): void;
-  /** 「Bot 管理」菜单项回调:带该 Bot 所属空间上下文跳转 Bot 管理页;好友 Bot 不提供(菜单项不渲染)。 */
-  onOpenBotManagement?(bot: ConversationBotView['bot']): void;
-  /** Bot 正在回复中的会话 id(2026-10-21):仅当前打开的会话;会话行标题左侧渲染 loading 指示。 */
-  replyingSessionId?: string | null;
 }
 
 /** 空态文案内跳转链接:文案即入口,点击直达对应菜单路由(2026-10-14 体验修复)。 */
@@ -90,9 +86,11 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto bg-muted/20">
-        <div className="sticky top-0 z-20 bg-muted/20 pt-1 backdrop-blur-sm">
-          {/* 搜索框（dmore DOM 实测）：h32 rx8 白底 + 1px #E4E4E7 边框 + #A1A1AA 放大镜 + #B9BEC5 占位/文字 12px。 */}
-          <div className="px-4 pb-1">
+        <div className="sticky top-0 z-20 bg-muted/20 pt-2 backdrop-blur-sm">
+          {/* 搜索框（dmore DOM 实测）：h32 rx8 白底 + 1px #E4E4E7 边框 + #A1A1AA 放大镜 + #B9BEC5 占位/文字 12px。
+              pt-2 / pb-2 呼吸（2026-10-22 体验精修）：行间铅线拆除改为留白分组后，
+              检索口与其下目录保持同款空气感，不再贴着第一个分组标题。 */}
+          <div className="px-4 pb-2">
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-2 h-4 w-4 text-content-icon" />
               <Input
@@ -124,24 +122,13 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
               onToggleCollapsed={() =>
                 props.store.setBotGroupCollapsed('managed', props.store.collapsedBotGroups.managed !== true)
               }
-              dockSelectedBotId={props.store.selectedSection === 'managed' ? props.store.selectedBotId : null}
-              onQuickOpen={(view) => {
-                if (view.bot.isAgentCodingBot) {
-                  props.onOpenAgentCodingBot(view.bot);
-                  return;
-                }
-                props.store.setBotGroupCollapsed('managed', false);
-                // 未展开过才补 toggleBot(带会话懒加载);已展开的只恢复分组可见,不回弹成收起。
-                if (!props.store.expandedBotIds[view.bot.botId]) {
-                  props.sessions.toggleBot(view.bot.botId, 'managed');
-                }
-              }}
             />
-            {/* 团队 Bot 第三分组:桶非空/独立加载中/独立加载失败时渲染
+{/* 团队 Bot 第三分组:桶非空/独立加载中/独立加载失败时渲染
                 (collaborations 目录 loading/error/retry 须可见,2026-10-10 spec);
                 空桶(含搜索中无匹配)一律不渲染,不给空分组留死标题与缺省内容
-                (B2/B3 复原裁决 + 2026-10-14 体验修复);
-                折叠与我的/好友分组同款(store team 键),标题行 i 图标悬停提示来源。 */}
+                (B2/B3 复原裁决 + 2026-10-14 体验修复)。
+                2026-10-22 需求变更:接入收起,与我的/好友 Bot 同契约
+                (届时标题同款 chevron 旋转 + 收起只留标题行 + 计数承载成员量)。 */}
             {(filteredTeam.length > 0 || directory.teamLoading || directory.teamError) && (
               <SidebarSection
                 title={teamTitle}
@@ -151,24 +138,11 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
                 items={filteredTeam}
                 isSearching={isSearching}
                 renderItem={(view) => <ManagedItem key={view.bot.botId} view={view} props={props} />}
-                infoHint="通过团队成员身份获取的 Bot"
                 collapsible
                 collapsed={!isSearching && props.store.collapsedBotGroups.team === true}
                 onToggleCollapsed={() =>
                   props.store.setBotGroupCollapsed('team', props.store.collapsedBotGroups.team !== true)
                 }
-                dockSelectedBotId={props.store.selectedSection === 'team' ? props.store.selectedBotId : null}
-                onQuickOpen={(view) => {
-                  if (view.bot.isAgentCodingBot) {
-                    props.onOpenAgentCodingBot(view.bot);
-                    return;
-                  }
-                  props.store.setBotGroupCollapsed('team', false);
-                  // 与我的/好友分组同款直达语义:未展开过才补 toggleBot(带会话懒加载)。
-                  if (!props.store.expandedBotIds[view.bot.botId]) {
-                    props.sessions.toggleBot(view.bot.botId, 'team');
-                  }
-                }}
               />
             )}
             <SidebarSection
@@ -186,17 +160,6 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
               onToggleCollapsed={() =>
                 props.store.setBotGroupCollapsed('friend', props.store.collapsedBotGroups.friend !== true)
               }
-              dockSelectedBotId={props.store.selectedSection === 'friend' ? props.store.selectedBotId : null}
-              onQuickOpen={(view) => {
-                if (view.bot.isAgentCodingBot) {
-                  props.onOpenAgentCodingBot(view.bot);
-                  return;
-                }
-                props.store.setBotGroupCollapsed('friend', false);
-                if (!props.store.expandedBotIds[view.bot.botId]) {
-                  props.sessions.toggleBot(view.bot.botId, 'friend');
-                }
-              }}
             />
           </>
         )}
@@ -208,9 +171,10 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
 /** 桌面端(≥lg)可拖宽侧栏外壳;<lg 隐藏,由页面用 Drawer 包裹 Content 呈现。 */
 export function ConversationSidebar(props: ConversationSidebarProps) {
   const { managedBots, teamBots, friendBots, store } = props;
-  // 收起竖轨的数据面:管理/好友两组常驻(与展开态空态引导一致),
+  // 整栏收起竖轨的数据面:管理/好友两组常驻(与展开态空态引导一致),
   // 团队组仅在有成员时入轨(展开侧栏对空团队桶也不渲染死分组);加载中/失败态
   // 不进竖轨——收起条只做「快速抵达」,真态留在展开侧栏。
+  // (注:分组收起自 2026-10-22 起只留标题不再渲染泊位,竖轨是整栏级独立特性。)
   const railSections: ConversationCollapsedRailSection[] = [
     { id: 'managed', label: '我的 Bot', items: managedBots },
     ...(teamBots.length > 0
@@ -231,7 +195,7 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
               props.onOpenAgentCodingBot(view.bot);
               return;
             }
-            // 与分组「泊位」onQuickOpen 同契约:恢复分组可见(下次展开即就位) +
+            // 与分组展开同契约:恢复分组可见(下次展开即就位) +
             // 未展开过的 Bot 补 toggleBot 懒加载;侧栏本身保持收起不打扰舞台。
             if (view.section !== 'team') store.setBotGroupCollapsed(view.section, false);
             if (!store.expandedBotIds[view.bot.botId]) {

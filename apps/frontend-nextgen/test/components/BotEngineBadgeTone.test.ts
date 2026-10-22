@@ -1,6 +1,7 @@
 // 引擎徽章色彩口径（共享 presentation helper，见 src/components/BotEngineBadgeTone）：
-// Bot 管理「标签」列与对话侧 Bot 行徽章共用——OpenClaw 蓝(primary)、TEClaw 绿(success)、
-// Hermes 黄(warning)、ClaudeCode 紫(purple)，未知引擎中性兜底(neutral)（含大小写变体）。
+// 对话侧 Bot 行徽章使用——OpenClaw 蓝(primary)、TEClaw 绿(success)、Hermes 黄(warning)、
+// ClaudeCode 紫(purple)，未知引擎中性兜底(neutral)（含大小写变体）。
+// Bot 管理「标签」列已统一中性底色，不再消费本映射。
 import { getBotEngineBadgeTone } from '@/components/BotEngineBadgeTone';
 import { expect, it } from '@jest/globals';
 

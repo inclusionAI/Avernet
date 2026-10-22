@@ -40,9 +40,11 @@ export function useChatEngineVersionNotice(input: {
     state && target && target.key !== dismissedKey ? (
       <ChatEngineVersionNotice
         state={state}
+        // 与 Bot 管理列表的「引擎有更新」一致：点击直达更新确认弹窗（dmore image 19），
+        // 而不是引擎信息弹窗。
         onOpen={() => {
-          setInfoOpen(true);
-          setUpdateOpen(false);
+          setInfoOpen(false);
+          setUpdateOpen(true);
         }}
         onDismiss={() => setDismissedKey(target.key)}
       />

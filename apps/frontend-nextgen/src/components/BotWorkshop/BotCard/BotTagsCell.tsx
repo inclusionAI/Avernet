@@ -1,4 +1,3 @@
-import { getBotEngineBadgeTone } from '@/components/BotEngineBadgeTone';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import type { BotEngineVersionState } from '@/hooks/useBotEngineVersions';
@@ -15,7 +14,8 @@ import React from 'react';
  * 非服务 Bot 不补 `—` 占位:前两个 chip 无条件渲染,本列不存在「零标签」状态,
  * 补占位符只会与版本列的 `—` 在同一行重复出现。
  *
- * 标签用浅色语义底区分类别，不承载运行健康度；健康状态仍只由「状态」列表达。
+ * 标签统一用中性(default)底色，不再按引擎/部署/服务化涂装彩色，避免标签列表过杂；
+ * 健康状态仍只由「状态」列表达。
  */
 export interface BotTagsCellProps {
   bot: BotDomain;
@@ -31,8 +31,8 @@ const BotTagsCell: React.FC<BotTagsCellProps> = ({ bot, engineVersionState, onOp
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <Badge tone={getBotEngineBadgeTone(bot.runtime.engine)}>{engineLabel}</Badge>
-      <Badge tone={bot.deployment === 'local' ? 'warning' : 'primary'}>
+      <Badge tone="neutral">{engineLabel}</Badge>
+      <Badge tone="neutral">
         {bot.deployment === 'local' ? (
           <Laptop aria-hidden className="mr-1 size-3" />
         ) : (
@@ -40,7 +40,7 @@ const BotTagsCell: React.FC<BotTagsCellProps> = ({ bot, engineVersionState, onOp
         )}
         {bot.deployment === 'local' ? '本地' : '云端'}
       </Badge>
-      {bot.serviceMode === 'service' && <Badge tone="success">服务化</Badge>}
+      {bot.serviceMode === 'service' && <Badge tone="neutral">服务化</Badge>}
       {onOpenEngineInfo && engineVersionState?.kind === 'select_instance' ? (
         <Button
           variant="ghost"

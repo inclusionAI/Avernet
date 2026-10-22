@@ -1,12 +1,13 @@
-// 对话页侧栏目录分组卡:标题行(可收起分组的切换入口) + 分组体
-// (loading / error / 空态 / 列表),收起时渲染「Bot 泊位」压缩预览。
+// 对话页侧栏目录分组卡:标题行(含成员计数) + 分组体(loading / error / 空态 / 列表)。
+// 收起分组只留标题行（2026-10-22 需求变更:「Bot 泊位」头像预览删除,收起即净,
+// 成员数由标题右缘计数承载;原 2026-10-10「收起不留盲区」裁决作废）。
 // 与 ConversationSidebar 拆分自同文件(2026-10-10 收起需求 + TC-G005 文件体积门禁)。
-import { Button, Empty, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui';
+import { Button, Empty } from '@/components/ui';
 import type { ConversationBotView } from '@/domain/conversation/types';
-import { ChevronDown, ChevronRight, Info } from 'lucide-react';
+import { cn } from '@/utils/cn';
+import { ChevronDown } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { ListErrorState } from '../../components/ListErrorState';
-import { ConversationBotDock } from './ConversationBotDock';
 import { ConversationBotRowsSkeleton } from './ConversationSkeletons';
 
 export interface ConversationSidebarSectionProps {
@@ -20,78 +21,65 @@ export interface ConversationSidebarSectionProps {
   /** 空态提示,可含跳转链接(由调用方组装 ReactNode)。 */
   emptyHint?: ReactNode;
   isSearching: boolean;
-  /** 标题行来源提示(i 图标悬停说明;缺省不渲染)。 */
-  infoHint?: string;
   renderItem(view: ConversationBotView): ReactNode;
   /** 可收起分组(我的/好友 Bot):缺省展开,标题行点击切换;搜索时强制展开以保证可检索。 */
   collapsible?: boolean;
   collapsed: boolean;
   onToggleCollapsed(): void;
-  /** 收起分组「Bot 泊位」直达:传入即启用;头像点击展开分组并打开该 Bot 会话。 */
-  onQuickOpen?(view: ConversationBotView): void;
-  /** 泊位中当前选中 Bot 的 botId(调用方按 section 判定后传入);缺省不选中。 */
-  dockSelectedBotId?: string | null;
 }
 
 export function ConversationSidebarSection(props: ConversationSidebarSectionProps) {
   const { title, loading, error, onRetry, items } = props;
-  const { emptyTitle, emptyHint, isSearching, renderItem, collapsible, infoHint } = props;
-  const { collapsed, onToggleCollapsed, onQuickOpen, dockSelectedBotId } = props;
+  const { emptyTitle, emptyHint, isSearching, renderItem, collapsible } = props;
+  const { collapsed, onToggleCollapsed } = props;
   const bodyHidden = collapsible === true && collapsed;
   return (
-    <div className="pb-1" role="group" aria-label={title}>
+    <div className="pb-1 pt-0.5" role="group" aria-label={title}>
       {/* 分组标题行（dmore DOM 实测：h=32、与列表统一 36px 节奏）：12px 常规字重 #868686；
           x 与列表内容左缘对齐；标题行不再渲染「+」添加入口（2026-10-14 体验修复）。
           可收起分组标题即切换按钮（2026-10-10 需求：我的/好友 Bot 列表支持展开收起，
-          箭头语义与 Bot 行尾随箭头一致：ChevronDown=展开,ChevronRight=收起）。 */}
+          箭头语义与 Bot 行尾随箭头一致：ChevronDown=展开,ChevronRight=收起）。
+          标题行右缘补成员计数（2026-10-22 体验精修）：aria-hidden 纯视觉数字（行数由列表
+          本身可达，读屏不重复报），且置于切换按钮之外 → 按钮可访问名仍为纯标题。 */}
       <div className="flex min-h-8 items-center justify-between gap-1 px-4">
-        <div className="flex min-w-0 items-center gap-0.5">
-          {collapsible ? (
-            <Button
-              variant="ghost"
-              aria-expanded={!collapsed}
-              className="flex h-auto min-w-0 items-center justify-start gap-1 rounded-none px-0 py-1 text-xs font-normal text-content-soft hover:bg-transparent"
-              onClick={onToggleCollapsed}
-            >
-              <span className="truncate">{title}</span>
-              {collapsed ? (
-                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-content-icon" aria-hidden="true" />
-              ) : (
-                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-content-icon" aria-hidden="true" />
+        {collapsible ? (
+          <Button
+            variant="ghost"
+            aria-expanded={!collapsed}
+            className={cn(
+              // hover pill(2026-10-22 体验精修二轮):-mx-1 + px-1 补偿保持标题文字 x 不动,
+              // 悬停给极轻 muted 底揭示「标题即开关」可点性;去掉了原 hover:bg-transparent 的零反馈。
+              'flex h-auto min-w-0 items-center justify-start gap-1 rounded-md py-1 pr-1.5 pl-1 text-xs font-normal text-content-soft',
+              '-mx-1 hover:bg-muted/50 transition-colors',
+            )}
+            onClick={onToggleCollapsed}
+          >
+            <span className="truncate">{title}</span>
+            {/* chevron 旋转过渡:单 ChevronDown,收起 -rotate-90,与 Bot 行箭头同一动效语言。 */}
+            <ChevronDown
+              className={cn(
+                'h-3.5 w-3.5 shrink-0 text-content-icon transition-transform duration-150',
+                collapsed && '-rotate-90',
               )}
-            </Button>
-          ) : (
-            <p className="text-xs font-normal text-content-soft">{title}</p>
-          )}
-          {infoHint && (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span
-                    role="img"
-                    aria-label={infoHint}
-                    className="inline-flex shrink-0 cursor-help items-center text-content-icon"
-                  >
-                    <Info className="h-3 w-3" aria-hidden="true" />
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>{infoHint}</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          )}
-        </div>
+              aria-hidden="true"
+            />
+          </Button>
+        ) : (
+          <p className="text-xs font-normal text-content-soft">{title}</p>
+        )}
+        {items.length > 0 && (
+          <span
+            aria-hidden="true"
+            className="shrink-0 text-[11px] font-normal tabular-nums text-content-icon"
+          >
+            {items.length}
+          </span>
+        )}
       </div>
       {bodyHidden ? (
-        // 收起分组不演「盲区」:渲染「Bot 泊位」压缩预览(有成员才出现),
-        // 头像直达 + 选中态底保留,展开材料与列表行完全一致(16px AvatarTile)。
-        onQuickOpen && items.length > 0 ? (
-          <ConversationBotDock
-            items={items}
-            selectedBotId={dockSelectedBotId ?? null}
-            onQuickOpen={onQuickOpen}
-            onExpandGroup={onToggleCollapsed}
-          />
-        ) : null
+        // 收起分组只留标题行(2026-10-22 需求变更):不再渲染任何 Bot 泊位/头像预览,
+        // 成员量由标题右缘计数承载,展开仍由标题行一键恢复。
+        null
       ) : loading ? (
         <ConversationBotRowsSkeleton rows={3} />
       ) : error ? (

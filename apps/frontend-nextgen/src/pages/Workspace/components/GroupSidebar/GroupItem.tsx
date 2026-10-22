@@ -127,7 +127,7 @@ export const GroupItem = React.memo(function GroupItem({
             <TooltipProvider delayDuration={300}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="w-full min-w-0 truncate text-sm font-semibold leading-5 text-content-strong">
+                  <span className="w-full min-w-0 truncate text-[13px] font-normal leading-5 text-content-strong">
                     {group.name}
                   </span>
                 </TooltipTrigger>
@@ -141,8 +141,15 @@ export const GroupItem = React.memo(function GroupItem({
               {KIND_LABEL[group.kind]}
             </Badge>
           </span>
-          {/* 设计稿：仅展开态行内展示 chevron-down（收起态无箭头，点击整行仍可展开）。 */}
-          {expanded ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" /> : null}
+          {/* 箭头常驻 + 旋转过渡（2026-10-22 对话侧同语言）：收起 -rotate-90 提示「可展开」，
+              展开 归零；替代原「仅展开态显示」的收起态零暗示（点击整行仍可展开，语义不变）。 */}
+          <ChevronDown
+            className={cn(
+              'h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-150',
+              !expanded && '-rotate-90',
+            )}
+            aria-hidden="true"
+          />
         </Button>
         {/* v2 hover 操作区（设计稿未画，能力保留落位于行右缘轻量图标组）：
             新建会话入口 + 会话范围（全部/收藏）+ dots 菜单（管理/分享/解散）。
@@ -244,8 +251,6 @@ export const GroupItem = React.memo(function GroupItem({
           activeIdentity={activeIdentity}
         />
       )}
-
-      <div aria-hidden="true" className="mx-4 mt-1 border-b border-border/60" />
 
       <SharePopover
         open={shareOpen}

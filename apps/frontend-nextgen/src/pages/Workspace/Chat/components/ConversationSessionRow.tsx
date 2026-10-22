@@ -18,8 +18,9 @@
 // 行高 32 / 节奏 36(pitch)由列表容器承载,右余部无消息条数列(稿二级行无该元素)。
 import { Badge, Button, IconButton } from '@/components/ui';
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
+import { formatRelativeTime } from '@/utils/format';
 import { cn } from '@/utils/cn';
-import { Loader2, Star } from 'lucide-react';
+import { Star } from 'lucide-react';
 import React from 'react';
 import type { ConversationSessionRowActions } from '../hooks/useConversationSessionMenu';
 import { ConversationSessionActions } from './ConversationSessionActions';
@@ -32,8 +33,6 @@ export interface ConversationSessionRowProps {
   onSelect(): void;
   onToggleFavorite?(): void;
   favoritePending?: boolean;
-  /** Bot 正在回复中的会话 id(2026-10-21):仅当前打开的会话;标题左侧渲染 loading 旋转指示。 */
-  replyingSessionId?: string | null;
   /** 恢复的单聊会话操作(编辑标题/清除上下文/删除会话);只读行不传。 */
   actions?: ConversationSessionRowActions;
 }
@@ -45,10 +44,10 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
   onSelect,
   onToggleFavorite,
   favoritePending = false,
-  replyingSessionId,
   actions,
 }: ConversationSessionRowProps) {
   const favorite = session.favorite === true;
+  const timeText = formatRelativeTime(session.gmtModified);
   return (
     <div className="group/row relative flex min-h-8 items-center">
       {/* 行背景胶囊:hover 与选中同几何(inset-x-2 全宽 rx6),选中 = bg-selected,
@@ -57,20 +56,15 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
         aria-hidden="true"
         className={cn(
           'absolute inset-y-0 left-2 right-2 rounded-md',
+          // 选中胶囊升级为品牌蓝（2026-10-22 体验精修二轮）：原 dmore #EBEBEB 灰底与
+          // hover muted/60 几乎不可辨，「当前会话」一眼认不出。改判与 shell 主导航
+          // SpaceSwitcher 同语言（bg-primary/10 激活 pill），Bot 蓝名 → 会话蓝胶囊
+          // 构成完整的蓝色路径；几何槽位契约（inset-x-2 全宽 rx6）原样保留。
           selected
-            ? 'bg-selected'
+            ? 'bg-primary/10'
             : 'bg-muted/60 opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:opacity-100',
         )}
       />
-      {/* Bot 正在回复中(2026-10-21):仅当前会话行,标题左侧缩进区渲染旋转指示;
-          绝对定位不占 flex 流,标题起点不随 loading 出现跳动(用户验收修正)。 */}
-      {replyingSessionId === session.sessionId && (
-        <Loader2
-          role="status"
-          aria-label="Bot 正在回复"
-          className="absolute left-[40px] top-1/2 z-10 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-muted-foreground"
-        />
-      )}
       <Button
         variant="ghost"
         aria-current={selected ? 'page' : undefined}
@@ -98,13 +92,31 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
       >
         <span
           className={cn(
-            'min-w-0 flex-1 truncate text-[13px] leading-[18px] tracking-[-0.08px] text-content-strong',
-            // 2026-10-20 设计稿还原:会话名称选中态 Medium(500),未选中 Regular(400)。
-            selected ? 'font-medium' : 'font-normal',
+            'min-w-0 flex-1 truncate text-[13px] font-normal leading-[18px] text-content-strong',
+            // 选中行标题点亮品牌蓝（twMerge 后发覆盖 text-content-strong）：
+            // 与蓝胶囊共同构成选中锚点，不加粗维持稿「选中不加黑」的克制。
+            selected && 'text-primary',
           )}
         >
           {session.title}
         </span>
+        {/* 相对时间(gmtModified 首次启用,2026-10-22 体验精修):静默态可见的右缘轻提示,
+            让「最近聊过什么」一眼可辨;hover/键盘聚焦/触屏/「…」菜单打开期隐藏,把右缘
+            让给操作图标(与星标显隐同一组触发条件,方向相反)。aria-hidden:时间是次级装饰性
+            信息,且可访问名须保持纯标题(行内已由标题承载语义);仅读行右侧只有「只读」章,
+            无图标区,时间常驻不参与让位。 */}
+        {timeText && (
+          <span
+            aria-hidden="true"
+            className={cn(
+              'ml-1 shrink-0 text-[11px] font-normal leading-none text-content-hint',
+              !readOnly &&
+                'transition-opacity group-hover/row:opacity-0 group-focus-within/row:opacity-0 [@media(hover:none)]:opacity-0 group-has-[[data-state=open]]/row:opacity-0',
+            )}
+          >
+            {timeText}
+          </span>
+        )}
         {readOnly && (
           <Badge tone="neutral" className="shrink-0 rounded px-1.5 py-0 text-[10px] leading-4">
             只读

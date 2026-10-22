@@ -14,7 +14,7 @@ const BOT_NAME_LAYOUTS: Array<{ name: string; chip?: string }> = [
   { name: 'w-[29%]' },
 ];
 
-/** 一级 Bot 目录行骨架:回声 52px 行、36px 头像槽、双行名称及块间分隔线。 */
+/** 一级 Bot 目录行骨架:回声 52px 行、36px 头像槽(内 32px 头像)、双行名称;块间无分隔线(与实装行 2026-10-22 同构)。 */
 export function ConversationBotRowsSkeleton({ rows = 3 }: { rows?: number }) {
   return (
     <div aria-hidden="true" className="flex flex-col gap-1 overflow-hidden">
@@ -24,14 +24,13 @@ export function ConversationBotRowsSkeleton({ rows = 3 }: { rows?: number }) {
           <div key={index}>
             <div className="flex min-h-13 items-center gap-2 pr-4 pl-[17px]">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center">
-                <Skeleton.Block className="h-6 w-6 rounded-full" />
+                <Skeleton.Block className="h-8 w-8 rounded-full" />
               </span>
               <div className="flex min-w-0 flex-1 flex-col gap-1">
-                <Skeleton.Block className={cn('h-4 rounded-full', layout.name)} />
+                <Skeleton.Block className={cn('h-3.5 rounded-full', layout.name)} />
                 {layout.chip && <Skeleton.Block className={cn('h-4 rounded', layout.chip)} />}
               </div>
             </div>
-            <div className="mx-4 mt-1 border-b border-border/60" />
           </div>
         );
       })}
@@ -39,7 +38,7 @@ export function ConversationBotRowsSkeleton({ rows = 3 }: { rows?: number }) {
   );
 }
 
-/** 二级会话行骨架:复刻 ConversationSessionRow 的行槽与文字缩进。 */
+/** 二级会话行骨架:复刻 ConversationSessionRow 的行槽、文字缩进与右缘相对时间轻提示。 */
 export function ConversationSessionRowsSkeleton({ rows = 3 }: { rows?: number }) {
   return (
     <div aria-hidden="true" className="flex flex-col gap-1 py-1">
@@ -48,6 +47,7 @@ export function ConversationSessionRowsSkeleton({ rows = 3 }: { rows?: number })
           <Skeleton.Block
             className={cn('ml-[61px] h-3.5 rounded-full', SESSION_TITLE_WIDTHS[index % SESSION_TITLE_WIDTHS.length])}
           />
+          <Skeleton.Block className="ml-auto mr-6 h-2.5 w-8 shrink-0 rounded-full" />
         </div>
       ))}
     </div>

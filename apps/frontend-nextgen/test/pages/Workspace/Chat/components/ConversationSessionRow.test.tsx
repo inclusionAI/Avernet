@@ -32,23 +32,14 @@ describe('ConversationSessionRow 平齐化与热区分级（dmore 1:1）', () =>
     // 稿二级行:无前置消息图标、右余部无「N 条」列。
     expect(container.querySelector('svg.lucide-message-square')).toBeNull();
     expect(screen.queryByText('21 条')).not.toBeInTheDocument();
-    // 文字 13px/18px，与一级名称同色；选中态 Medium(500)为设计稿字体还原(2026-10-20)，未选中 Regular。
+    // 稿二级行:无前置消息图标、右余部无「N 条」列。
+    expect(container.querySelector('svg.lucide-message-square')).toBeNull();
+    expect(screen.queryByText('21 条')).not.toBeInTheDocument();
+    // 文字 13px/18px；未选中与一级名称同色,选中点亮品牌蓝(2026-10-22 二轮)但不加黑加粗。
     const title = screen.getByText('对话会话');
     expect(title).toHaveClass('text-[13px]', 'leading-[18px]');
-    expect(title).toHaveClass(selected ? 'font-medium' : 'font-normal', 'text-content-strong');
-  });
-
-  it('Bot 回复中:replyingSessionId 匹配行标题左侧渲染旋转 loading;未传(回复结束)时消失(2026-10-21)', () => {
-    const { rerender } = render(
-      <ConversationSessionRow session={session} selected={false} onSelect={jest.fn()} replyingSessionId="session-1" />,
-    );
-    const status = screen.getByRole('status');
-    expect(status).toHaveAttribute('aria-label', 'Bot 正在回复');
-    // 绝对定位于标题左侧缩进区,不占 flex 流(标题起点不随 loading 出现跳动)。
-    expect(status).toHaveClass('animate-spin', 'text-muted-foreground', 'absolute');
-    // 未传(回复结束)时 loading 消失。
-    rerender(<ConversationSessionRow session={session} selected={false} onSelect={jest.fn()} />);
-    expect(screen.queryByRole('status')).toBeNull();
+    expect(title).toHaveClass('font-normal');
+    expect(title).toHaveClass(selected ? 'text-primary' : 'text-content-strong');
   });
 
   it('标题对齐一级名称：固定头像槽后起排；非收藏行右缘内缩，收藏行右缘到边', () => {
@@ -75,11 +66,12 @@ describe('ConversationSessionRow 平齐化与热区分级（dmore 1:1）', () =>
     expect(container.firstElementChild).not.toBeNull();
   });
 
-  it('选中胶囊与 bot 行同构：全宽 bg-selected rx6（稿实拍 #EBEBEB x208..510）', () => {
+  it('选中胶囊升级品牌蓝：全宽 bg-primary/10 rx6（2026-10-22 二轮，告别与 hover 灰底不可辨）', () => {
     const { container } = render(<ConversationSessionRow session={session} selected onSelect={jest.fn()} />);
     const row = container.firstElementChild as HTMLElement;
     const capsule = row.querySelector('span[aria-hidden="true"]') as HTMLElement;
-    expect(capsule).toHaveClass('left-2', 'right-2', 'rounded-md', 'bg-selected');
+    // 几何契约不变(inset-x-2 全宽 rx6);选 中改壳 shell 主导航同语言的品牌蓝底。
+    expect(capsule).toHaveClass('left-2', 'right-2', 'rounded-md', 'bg-primary/10');
   });
 
   it('hover 胶囊与选中胶囊同几何：同样 inset-x-2 全宽，背景不随热区分级变短', () => {
@@ -174,6 +166,41 @@ describe('ConversationSessionRow 长标题让位（文字不与 hover 图标互�
     // pr-2 存活即证明无任何让位档生效（twMerge 会移除被覆盖的基础值）。
     expect(button).toHaveClass('pl-2', 'pr-2');
     expect(button).not.toHaveClass('group-hover/row:pr-[80px]');
+  });
+});
+
+describe('ConversationSessionRow 相对时间（2026-10-22 体验精修）', () => {
+  it('静默态右缘轻提示相对时间（gmtModified），hover/聚焦/触屏/菜单开启让位图标', () => {
+    const gmtModified = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    render(
+      <ConversationSessionRow
+        session={{ ...session, gmtModified }}
+        selected={false}
+        onSelect={jest.fn()}
+        onToggleFavorite={jest.fn()}
+      />,
+    );
+    // 3 小时前的相对时间口径 + 11px 弱化 hint 色 + 静默可见。
+    const time = screen.getByText('3 小时前');
+    expect(time).toHaveClass('text-[11px]', 'text-content-hint');
+    // 让位触发集与星标显隐同构（方向相反）：图标出现时时间退场。
+    expect(time).toHaveClass(
+      'group-hover/row:opacity-0',
+      'group-focus-within/row:opacity-0',
+      'group-has-[[data-state=open]]/row:opacity-0',
+    );
+  });
+
+  it('gmtModified 缺失不渲染时间节点；只读行时间常驻不参与让位', () => {
+    render(<ConversationSessionRow session={session} selected={false} onSelect={jest.fn()} />);
+    expect(screen.queryByText('刚刚')).not.toBeInTheDocument();
+    // 只读行右侧无图标区，时间常驻（无 opacity-0 让位档）。
+    const gmtModified = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    render(
+      <ConversationSessionRow session={{ ...session, gmtModified }} selected={false} readOnly onSelect={jest.fn()} />,
+    );
+    const time = screen.getByText('5 分钟前');
+    expect(time).not.toHaveClass('group-hover/row:opacity-0');
   });
 });
 

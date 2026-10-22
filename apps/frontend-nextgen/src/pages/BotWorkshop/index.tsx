@@ -32,11 +32,11 @@ const BotWorkshopPage: React.FC = () => {
     else setBasicInfoBot(bot);
   };
   return (
-    <main className="app-scrollbar h-full overflow-y-auto bg-muted">
+    <main className="app-scrollbar h-full overflow-y-auto bg-page-canvas">
       <div className="w-full p-5 sm:p-6">
         <PageHeader title="Bot 管理" description="创建、接入、配置和运维当前空间内的 Bot" />
         {/*
-          dmore 稿（10/19 Bot管理首页）：灰底画布（#F8F8F8 ≈ bg-muted）+ 单张白色 r12 卡片，
+          dmore 稿（10/19 Bot管理首页）：灰底画布（#F8F8F8 = bg-page-canvas）+ 单张白色 r12 卡片，
           卡内自上而下为 Tabs → 筛选行 → 结果面板 → 分页。
         */}
         <section className="mt-5 rounded-xl border border-border/60 bg-card p-4 sm:p-6">

@@ -74,6 +74,7 @@
 
   --muted: 240 4.8% 95.9%;
   --muted-foreground: 240 3.8% 46.1%;
+  --page-canvas: 0 0% 97.3%; /* 工作台页面画布底 #F8F8F8(Bot 管理/智能进化首页);暗色取随体的深色 muted */
 
   --accent: 240 4.8% 95.9%;
   --accent-foreground: 240 5.9% 10%;
@@ -204,6 +205,7 @@
 
   --muted: 240 3.7% 15.9%;
   --muted-foreground: 240 5% 64.9%;
+  --page-canvas: 240 3.7% 15.9%;
 
   --accent: 240 3.7% 15.9%;
   --accent-foreground: 0 0% 98%;
@@ -257,6 +259,7 @@
   --color-secondary-foreground: hsl(var(--secondary-foreground));
   --color-muted: hsl(var(--muted));
   --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-page-canvas: hsl(var(--page-canvas));
   --color-accent: hsl(var(--accent));
   --color-accent-foreground: hsl(var(--accent-foreground));
 
@@ -664,6 +667,31 @@ button {
 @media (prefers-reduced-motion: reduce) {
   .capability-popover[data-state='open'],
   .capability-page-in {
+    animation: none;
+  }
+}
+
+/* ==========================================================================
+   对话侧栏目录展开区（ConversationBotItem 展开区 / 会话ID检索输入）：
+   conversation-area-in —— 自所属 Bot 行上缘 2px 下落淡入，代替瞬现。
+   与 capability-* 同一纪律：局部 className、150ms、prefers-reduced-motion 静止。
+   ========================================================================== */
+@keyframes conversation-area-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.conversation-area-in {
+  animation: conversation-area-in 150ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conversation-area-in {
     animation: none;
   }
 }

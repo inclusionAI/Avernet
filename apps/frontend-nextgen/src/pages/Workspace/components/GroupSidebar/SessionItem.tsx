@@ -1,23 +1,14 @@
-import { Button, IconButton, Input } from '@/components/ui';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/AlertDialog';
-import { Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
+import { Button, IconButton } from '@/components/ui';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import type { IdentityView, SessionView } from '@/domain/collaboration';
 import type { DomainResult } from '@/services/workspace/identityService';
+import { formatRelativeTime } from '@/utils/format';
 import { cn } from '@/utils/cn';
 import { MoreHorizontal, Pencil, Settings2, Share2, Star, Trash2 } from 'lucide-react';
 import React, { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { SharePopover } from '../ManagePanel/SharePopover';
+import { SessionItemDeleteDialog, SessionItemRenameDialog } from './SessionItemDialogs';
 
 interface SessionItemProps {
   session: SessionView;
@@ -57,6 +48,9 @@ export const SessionItem = React.memo(function SessionItem({
   onShareSession,
 }: SessionItemProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  // 相对时间（lastMessageAt 即接口 updated_at，2026-10-22 精修对齐对话行 gmtModified 口径）：
+  // 群列表默认按 lastActivity 排序，时间轻提示呼应排序语义；0/缺失不渲染。
+  const timeText = session.lastMessageAt ? formatRelativeTime(new Date(session.lastMessageAt).toISOString()) : '';
   const [renameOpen, setRenameOpen] = useState(false);
   const [titleDraft, setTitleDraft] = useState(session.title);
   const [renaming, setRenaming] = useState(false);
@@ -112,12 +106,15 @@ export const SessionItem = React.memo(function SessionItem({
     <>
       <div className="group/row relative flex min-h-8 items-center">
         {/* 行背景胶囊：hover 与选中同几何（对齐对话行）。 */}
+        {/* 行背景胶囊：hover 与选中同几何（对齐对话行）。选中升级品牌蓝 bg-primary/10
+            （2026-10-22 精修，与对话侧同轮裁决）：原 bg-selected 灰底与 hover muted/60 几乎
+            不可辨，且割裂 shell 主导航已定稿的品牌蓝激活语言；几何槽位契约原样保留。 */}
         <span
           aria-hidden="true"
           className={cn(
             'absolute inset-y-0 left-2 right-2 rounded-md',
             selected
-              ? 'bg-selected'
+              ? 'bg-primary/10'
               : 'bg-muted/60 opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:opacity-100',
           )}
         />
@@ -138,9 +135,26 @@ export const SessionItem = React.memo(function SessionItem({
               'group-hover/row:pr-[88px] group-focus-within/row:pr-[88px] [@media(hover:none)]:pr-[88px] group-has-[[data-state=open]]/row:pr-[88px]',
           )}
         >
-          <span className="min-w-0 flex-1 truncate text-[13px] font-normal leading-[18px] text-content-strong">
+          <span
+            className={cn(
+              'min-w-0 flex-1 truncate text-[13px] font-normal leading-[18px] text-content-strong',
+              // 选中行标题点亮品牌蓝（twMerge 后发覆盖）：与蓝胶囊共同构成选中锚点，不加粗。
+              selected && 'text-primary',
+            )}
+          >
             {session.title}
           </span>
+          {/* 相对时间轻提示：静默态可见，hover/聚焦/触屏/「…」菜单开启期退场把右缘让给
+              操作图标（与星标显隐同一组触发条件，方向相反）；aria-hidden 保持行可访问名
+              为纯标题。群会话行无只读形态，让位档恒挂。 */}
+          {timeText && (
+            <span
+              aria-hidden="true"
+              className="ml-1 shrink-0 text-[11px] font-normal leading-none text-content-hint transition-opacity group-hover/row:opacity-0 group-focus-within/row:opacity-0 [@media(hover:none)]:opacity-0 group-has-[[data-state=open]]/row:opacity-0"
+            >
+              {timeText}
+            </span>
+          )}
         </Button>
         {/* dots 菜单槽（对话行 64..92px）。 */}
         <div className="absolute right-[64px] top-1/2 z-10 -translate-y-1/2" onClick={(e) => e.stopPropagation()}>
@@ -230,22 +244,13 @@ export const SessionItem = React.memo(function SessionItem({
         </span>
       </div>
 
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除会话</AlertDialogTitle>
-            <AlertDialogDescription>
-              删除后该会话及其消息将无法恢复，确定删除“{session.title}”吗？
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void confirmDelete()} disabled={deleting}>
-              {deleting ? '删除中…' : '确认删除'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <SessionItemDeleteDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title={session.title}
+        deleting={deleting}
+        onConfirm={() => void confirmDelete()}
+      />
 
       <SharePopover
         open={shareOpen}
@@ -259,27 +264,14 @@ export const SessionItem = React.memo(function SessionItem({
         onClose={() => setShareOpen(false)}
       />
 
-      <Modal open={renameOpen} onOpenChange={setRenameOpen}>
-        <ModalContent size="sm" showClose>
-          <ModalHeader>
-            <ModalTitle>编辑会话标题</ModalTitle>
-          </ModalHeader>
-          <Input value={titleDraft} onChange={(e) => setTitleDraft(e.target.value)} aria-label="会话标题" />
-          <ModalFooter>
-            <Button variant="ghost" size="sm" onClick={() => setRenameOpen(false)} disabled={renaming}>
-              取消
-            </Button>
-            <Button
-              variant="default"
-              size="sm"
-              onClick={() => void confirmRename()}
-              disabled={renaming || !titleDraft.trim()}
-            >
-              保存
-            </Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
+      <SessionItemRenameDialog
+        open={renameOpen}
+        onOpenChange={setRenameOpen}
+        draft={titleDraft}
+        onDraftChange={setTitleDraft}
+        saving={renaming}
+        onConfirm={() => void confirmRename()}
+      />
     </>
   );
 });

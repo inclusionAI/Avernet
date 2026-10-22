@@ -693,7 +693,7 @@ describe('BotTable bot 标签列', () => {
     expect(within(containersCell()).getByText('—')).toBeInTheDocument();
   });
 
-  test('标签列按引擎、部署方式和服务化枚举展示语义色', () => {
+  test('标签列统一中性底色,不再按引擎/部署/服务化涂装彩色', () => {
     const bot = mapBotDto({
       bot_id: 'tone-tag',
       bot_name: '配色 Bot',
@@ -704,9 +704,9 @@ describe('BotTable bot 标签列', () => {
 
     renderTable(bot);
 
-    expect(within(tagsCell()).getByText('openclaw')).toHaveClass('bg-primary/10', 'text-primary');
-    expect(within(tagsCell()).getByText('云端')).toHaveClass('bg-primary/10', 'text-primary');
-    expect(within(tagsCell()).getByText('服务化')).toHaveClass('bg-success/10', 'text-success');
+    expect(within(tagsCell()).getByText('openclaw')).toHaveClass('bg-muted', 'text-muted-foreground');
+    expect(within(tagsCell()).getByText('云端')).toHaveClass('bg-muted', 'text-muted-foreground');
+    expect(within(tagsCell()).getByText('服务化')).toHaveClass('bg-muted', 'text-muted-foreground');
   });
 });
 
