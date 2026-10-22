@@ -41,6 +41,7 @@ from agentclaw.community.core.bot_genome.canonical import (
     sha256_digest,
 )
 from agentclaw.community.core.bot_genome.rewrite import lcs_length, rewrite_flagged, strip_common, to_lines
+from agentclaw.community.core.bot_genome.spec_models import GenomeSpec
 
 _BACKEND = Path(__file__).resolve().parents[3]
 _CONTRACT = _BACKEND / "api-contracts" / "genome" / "v1"
@@ -554,7 +555,7 @@ def _compile(spec: dict[str, Any]) -> dict[str, Any]:
     """M′ from a revision: the registry's own compile (RSI-03), by manifest-v1-compatibility.md."""
     for entry in spec["persona"] + spec["resources"] + [s for s in spec["skills"] if "digest" in s]:
         _blob(entry["digest"])  # every digest the document points at is a real example blob
-    return compile_spec(spec, _BlobReader(), revision_id="example").document
+    return compile_spec(GenomeSpec.from_json(spec), _BlobReader(), revision_id="example").document
 
 
 def test_example_digests_are_well_formed() -> None:
