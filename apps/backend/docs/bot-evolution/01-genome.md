@@ -434,7 +434,8 @@ class RevisionMetadata:
                                      # (GET …/revisions/r42), but it is not an identity: other records store `id`
     bot: BotRef                      # the bot this revision belongs to (owner + bot id)
     parent: RevisionId | None        # the revision this one was made from: the patch's `base`, or `active` when the
-                                     # bot was captured or its policy changed; None only for the bot's first revision
+                                     # bot was captured or its policy changed (the bot's latest revision while it has
+                                     # no `active` yet); None only for the bot's first revision
     created_by: Provenance
     created_at: datetime
     status: RevisionStatus
@@ -1459,7 +1460,7 @@ class GenomeRegistryProtocol(Protocol):          # core/bot_genome/genome_regist
         """Metadata only, newest seq first."""
 
     async def capture(self, bot: BotRef, *, created_by: Provenance) -> RecordedRevision:
-        """Record the bot's current state; parent `active` or none; policy copied from `active`.
+        """Record the bot's current state; parent `active` (the latest revision until there is one; none for the first); policy copied from `active`.
         Idempotent: unchanged state returns the existing revision with created=False.
         Raises CaptureRefused naming what cannot be recorded."""
 
@@ -1617,8 +1618,9 @@ Errors: 404 the patch's `base` is not a revision of this bot; 422
 
 ### POST /bots/{bot_id}/genome/revisions:capture
 
-Record the bot's current state as a revision: parent `active` (none for the
-bot's first), policy copied from `active`, status `draft`. No body. This is
+Record the bot's current state as a revision: parent `active` (the bot's
+latest revision until it has an `active`; none for the bot's first), policy
+copied from `active`, status `draft`. No body. This is
 how an edit made outside the genome (the console, `PUT /config-manifest`)
 becomes a revision, and how a bot gets its first one. Called by owners
 through the UI or the API, and by pipelines after a Manifest apply.

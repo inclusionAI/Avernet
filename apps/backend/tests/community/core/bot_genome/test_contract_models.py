@@ -75,6 +75,11 @@ def test_every_predicate_invalid_example_parses(name: str) -> None:
 def test_absent_optional_members_stay_absent_and_nulls_stay_null() -> None:
     entry = McpServerEntry.from_json({"server_code": "a"})
     assert entry.config is None and entry.to_json() == {"server_code": "a"}
+    for body in ({"server_code": "a", "config": None}, {"server_code": "a", "config": {"url": None}}):
+        with pytest.raises(ValidationError):  # optional in the contract means left out, never null
+            McpServerEntry.from_json(body)
+    with pytest.raises(ValidationError):
+        SkillUpdate.from_json({"op": "skill.update", "name": "x", "files": None, "file_diffs": [{"path": "a.md", "diff": "@@ -1 +1 @@\n-a\n+b\n"}]})
     assert McpServerEntry.from_json({"server_code": "a", "config": {}}).to_json() == {"server_code": "a", "config": {}}
     assert McpConfig.from_json({"url": "https://x.example.com/mcp"}).to_json() == {"url": "https://x.example.com/mcp"}
     update = SkillUpdate.from_json({"op": "skill.update", "name": "x", "files": {"a.md": None}})

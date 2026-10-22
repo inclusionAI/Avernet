@@ -8,9 +8,13 @@ and length limits are read from the contract's own schema file at import
 round-trips every contract example through these classes.
 
 ``from_json`` / ``to_json`` are the two doors. ``to_json`` gives exactly the
-contract's JSON object (an absent optional member stays absent, a ``null``
-stays ``null``), which is what gets canonicalised and hashed; the revision
-id of a parsed example is therefore the example's own. The registry still
+contract's JSON object, which is what gets canonicalised and hashed; the
+revision id of a parsed example is therefore the example's own. A member
+the contract makes optional (an MCP override, its fields, a
+``skill.update``'s two halves) is left out when absent and refused when
+sent as ``null``, as the schema refuses it; a member the contract makes
+nullable (``memory``, ``script``, a deleted skill file) keeps its ``null``.
+The registry still
 runs the contract schema on that JSON before recording, as the contract's
 oracle for the rules a type cannot carry (list order, key uniqueness, the
 engine-specific persona set).
@@ -44,8 +48,8 @@ __all__ = [
     "ScriptEntry",
     "SkillEntry",
     "ToolsSpec",
-    "absent_when_none",
     "constrained",
+    "optional_member",
     "schema_property",
 ]
 
@@ -71,9 +75,14 @@ def constrained(schema_file: str, *path: str | int) -> type[str]:
 _REV = contract.REVISION_SCHEMA_FILE
 
 
-def absent_when_none(value: Any) -> bool:
-    """``Field(exclude_if=absent_when_none)``: an optional member the contract leaves out rather than writing ``null``."""
-    return value is None
+def optional_member(description: str, **constraints: Any) -> Any:
+    """A member the contract makes optional and not nullable: left out when absent, refused as ``null``.
+
+    The attribute is ``None`` at runtime while absent (the annotation names the
+    present type, so the OpenAPI document shows no ``null``); readers check
+    ``is not None`` before using it.
+    """
+    return Field(default=None, exclude_if=lambda value: value is None, description=description, **constraints)
 
 
 #: ``sha256:<64 hex>``: the address of stored bytes (contract §3.3).
@@ -181,17 +190,17 @@ class ResourceEntry(ContractModel):
 class McpConfig(ContractModel):
     """The bot-level override for one MCP server, the Manifest's closed set; a field left out is not overridden."""
 
-    url: McpUrl | None = Field(default=None, exclude_if=absent_when_none, description="Absolute http(s) URL with a host and no userinfo, so no credential is ever stored in a revision.")
-    headers: dict[HeaderName, HeaderValue] | None = Field(default=None, exclude_if=absent_when_none, description="HTTP headers sent to the server, name to value, as written; unique case-insensitively; never credentials.")
-    endpoint_env: Literal["PROD", "PRE"] | None = Field(default=None, exclude_if=absent_when_none, description="Which of the server's registered endpoints to use.")
-    transport_protocol: Literal["SSE", "STREAMABLE_HTTP"] | None = Field(default=None, exclude_if=absent_when_none, description="The MCP transport.")
+    url: McpUrl = optional_member("Absolute http(s) URL with a host and no userinfo, so no credential is ever stored in a revision.")
+    headers: dict[HeaderName, HeaderValue] = optional_member("HTTP headers sent to the server, name to value, as written; unique case-insensitively; never credentials.")
+    endpoint_env: Literal["PROD", "PRE"] = optional_member("Which of the server's registered endpoints to use.")
+    transport_protocol: Literal["SSE", "STREAMABLE_HTTP"] = optional_member("The MCP transport.")
 
 
 class McpServerEntry(ContractModel):
     """One MCP server enabled on this bot, keyed by server code, with an optional bot-level override."""
 
     server_code: Annotated[str, StringConstraints(min_length=1)] = Field(description="The server's code in the MCP registry, e.g. `mcp.ant.homistudio.meetmcp`.")
-    config: McpConfig | None = Field(default=None, exclude_if=absent_when_none, description="The bot-level override; absent means no override (user-level config and Center defaults are read at apply time).")
+    config: McpConfig = optional_member("The bot-level override; absent means no override (user-level config and Center defaults are read at apply time).")
 
 
 class ToolsSpec(ContractModel):

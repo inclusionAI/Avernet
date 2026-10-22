@@ -131,7 +131,7 @@ async def test_the_pending_seam_refuses_everything_before_any_ref_moves(world: W
     with pytest.raises(NotAppliable) as caught:
         await world.promotion.promote(BOT, revision=r1, ref="active", expected_revision=None, actor=OWNER, reason="x")
     assert "RSI-04" in caught.value.reasons[0].message
-    service_bot = BotRef(entity_id=BOT.entity_id, bot_id=BOT.bot_id, engine_type="openclaw", bot_type="service")
+    service_bot = BotRef(entity_id=BOT.entity_id, bot_id=BOT.bot_id, owner_id=BOT.owner_id, engine_type="openclaw", bot_type="service")
     with pytest.raises(PromotionUnsupported):
         await world.promotion.promote(service_bot, revision=r1, ref="active", expected_revision=None, actor=OWNER, reason="x")
     assert _refs(world) == {} and world.promotion.list_promotions(BOT).total == 0

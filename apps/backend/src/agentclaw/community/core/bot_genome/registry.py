@@ -178,7 +178,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         return _BotContent(self._content, self._scope(bot))
 
     def _ctx(self, bot: BotRef, actor: str) -> SpecCheckContext:
-        return SpecCheckContext(engine_type=bot.engine_type, bot_type=bot.bot_type, entity_id=bot.entity_id, actor_id=actor)
+        return SpecCheckContext(engine_type=bot.engine_type, bot_type=bot.bot_type, owner_id=bot.owner_id, actor_id=actor)
 
     def _resolve(self, bot: BotRef, rev: str) -> GenomeRevisionRow:
         axes = self._axes(bot)
@@ -310,9 +310,16 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         if reasons:
             raise CaptureRefused(reasons)
         return self._record(
-            bot, captured.spec, policy, parent=active.revision_id if active else None, created_by=created_by,
+            bot, captured.spec, policy, parent=self._capture_parent(bot, active), created_by=created_by,
             status=RevisionStatus.DRAFT, writes=writes, origin="genome/capture",
         )
+
+    def _capture_parent(self, bot: BotRef, active: GenomeRevisionRow | None) -> str | None:
+        """``active``; while the bot has none yet, its latest revision, so only the first revision is parentless."""
+        if active is not None:
+            return active.revision_id
+        _, latest = self._revisions.list(**self._axes(bot), page=1, page_size=1)
+        return latest[0].revision_id if latest else None
 
     async def record_patch(
         self,

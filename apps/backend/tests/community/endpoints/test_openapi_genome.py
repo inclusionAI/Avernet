@@ -84,7 +84,7 @@ _BOT_ID = "genome-endpoint-bot"
 
 
 def _bot_ref(bot_id: str) -> BotRef:
-    return BotRef(entity_id=_OWNER, bot_id=bot_id, engine_type="openclaw", bot_type="personal")
+    return BotRef(entity_id=_OWNER, bot_id=bot_id, owner_id=_OWNER, engine_type="openclaw", bot_type="personal")
 
 
 def _params(bot_id: str = _BOT_ID, *, json_body=None, raw_body=None, query=None, **extra) -> CaseInput:

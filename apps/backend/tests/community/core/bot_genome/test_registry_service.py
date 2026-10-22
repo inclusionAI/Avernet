@@ -87,6 +87,18 @@ async def test_capture_takes_the_parent_and_policy_from_active(world: World) -> 
 
 
 @pytest.mark.asyncio
+async def test_a_second_capture_without_active_descends_from_the_latest_revision(world: World) -> None:
+    first = await _capture_support_bot(world)
+    world.reader = FakeReader.from_spec(spec_of(SUPPORT_BOT_CANDIDATE))
+    second = await world.registry.capture(BOT, created_by=OWNER)
+    assert second.created and second.revision.revision.parent == first.revision.revision.id, "only the bot's first revision is parentless"
+    world.reader = FakeReader.from_spec(SUPPORT_SPEC)
+    third = await world.registry.capture(BOT, created_by=OWNER)
+    assert (third.created, third.revision.revision.id, third.revision.revision.parent) == (False, first.revision.revision.id, None), "same content, same revision"
+    assert [r.parent for r in world.registry.list_revisions(BOT).items] == [first.revision.revision.id, None]
+
+
+@pytest.mark.asyncio
 async def test_capture_refuses_by_name(world: World) -> None:
     world.reader = FakeReader(refuse="platform-managed teclaw")
     with pytest.raises(CaptureRefused):
@@ -193,7 +205,7 @@ async def test_set_policy_needs_active_and_a_canonical_sorted_policy(world: Worl
         GenomePolicy.from_json({"mutable_genes": [], "pins": []})
     # The spec is re-checked in the bot's current context: what applied when `active` was recorded
     # may not apply now (here the engine no longer accepts the persona files).
-    moved_engine = BotRef(entity_id=BOT.entity_id, bot_id=BOT.bot_id, engine_type="claude_code", bot_type=BOT.bot_type)
+    moved_engine = BotRef(entity_id=BOT.entity_id, bot_id=BOT.bot_id, owner_id=BOT.owner_id, engine_type="claude_code", bot_type=BOT.bot_type)
     with pytest.raises(PolicyRejected) as caught:
         world.registry.set_policy(moved_engine, DEFAULT_POLICY.model_copy(update={"pins": []}), created_by=OWNER)
     assert {r.code for r in caught.value.reasons} == {"persona_type"}

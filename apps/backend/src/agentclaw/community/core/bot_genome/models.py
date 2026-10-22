@@ -69,16 +69,19 @@ class BotRef:
     """The bot a registry call is about, with the facts every check needs.
 
     ``entity_id`` + ``bot_id`` is the bot's identity within an env and tenant
-    (a bot id alone is not unique across entities); it is also the storage
-    key shared with the Manifest tables and the owner the platform services
-    scope the bot's files, skills, resources and MCP state by. ``engine_type``
-    and ``bot_type`` are the capability axes.
+    (a bot id alone is not unique across entities) and the storage key the
+    genome and Manifest tables share. ``owner_id`` is a different value: the
+    owning user's id (``bot_service.create_bot`` sets ``entity_id`` to
+    ``staff_<user>`` unless told otherwise), which the identity, skill,
+    resource and MCP services scope their reads by. Capture needs both.
+    ``engine_type`` and ``bot_type`` are the capability axes;
     ``entity_type`` (``staff`` or ``user``) is the identity service's third
     coordinate for the bot's files.
     """
 
     entity_id: str
     bot_id: str
+    owner_id: str
     engine_type: str
     bot_type: str
     entity_type: str = "staff"
@@ -192,7 +195,7 @@ class GenomeRevision:
             "revision": {
                 "id": meta.id,
                 "seq": meta.seq,
-                "bot": {"owner_id": bot.entity_id, "bot_id": bot.bot_id},
+                "bot": {"owner_id": bot.owner_id, "bot_id": bot.bot_id},
                 "parent": meta.parent,
                 "created_by": meta.created_by.as_dict(),
                 "created_at": meta.created_at.strftime("%Y-%m-%dT%H:%M:%SZ"),

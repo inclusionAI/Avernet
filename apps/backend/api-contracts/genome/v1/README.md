@@ -713,8 +713,9 @@ A revision is recorded in one of two ways, both total (§4.3) by construction:
 - **By capture**: the bot's current state (persona files, skills, resources,
   MCP servers, startup script) is read through the same services the
   Manifest materialisers write through, normalised as below, and recorded
-  whole. Its parent is the bot's `active` revision, or none for the bot's
-  first; its policy is `active`'s (the default policy for a first revision).
+  whole. Its parent is the bot's `active` revision (its latest revision
+  while it has no `active` yet), or none for the bot's first; its policy is
+  `active`'s (the default policy for a first revision).
   Capturing an unchanged bot returns the existing revision.
 
 A policy change is its own record: a revision with `active`'s `spec` and the

@@ -10,7 +10,8 @@ from agentclaw.community.core.bot_genome.capture.bot_state import PlatformBotSta
 from agentclaw.community.core.bot_genome.errors import CaptureRefused
 from agentclaw.community.core.bot_genome.models import BotRef
 
-BOT = BotRef(entity_id="u1", bot_id="bot_1", engine_type="openclaw", bot_type="arca")
+#: ``entity_id`` is the storage key (``staff_<user>`` by default), ``owner_id`` the user: the reader must not mix them up.
+BOT = BotRef(entity_id="staff_u1", bot_id="bot_1", owner_id="u1", engine_type="openclaw", bot_type="arca")
 
 
 class FakeIdentity:
@@ -48,6 +49,7 @@ class FakeCapabilities:
         self.assets = assets
 
     def active_skill_assets(self, *, bot_id, owner_id, bot=None):
+        self.asked_for = owner_id
         return tuple(self.assets)
 
 
@@ -74,6 +76,7 @@ class FakeActivation:
         self.installed, self.defaults = installed, defaults
 
     def list_installed_mcps(self, *, bot_id, owner_id, actor_id):
+        self.asked_for = (owner_id, actor_id)
         return set(self.installed)
 
     def platform_default_mcp_codes(self, *, bot_id, owner_id, actor_id):
@@ -115,7 +118,7 @@ def _reader(**overrides: Any) -> PlatformBotStateReader:
 
 @pytest.mark.asyncio
 async def test_platform_managed_teclaw_is_refused_and_nothing_else_is() -> None:
-    teclaw = BotRef(entity_id="u1", bot_id="b", engine_type="teclaw", bot_type="personal")
+    teclaw = BotRef(entity_id="staff_u1", bot_id="b", owner_id="u1", engine_type="teclaw", bot_type="personal")
     assert await _reader(teclaw_platform_managed=True).refusal(teclaw) is not None
     assert await _reader(teclaw_platform_managed=False).refusal(teclaw) is None
     assert await _reader(teclaw_platform_managed=True).refusal(BOT) is None
@@ -125,7 +128,7 @@ async def test_platform_managed_teclaw_is_refused_and_nothing_else_is() -> None:
 async def test_persona_reads_only_the_files_that_exist() -> None:
     identity = FakeIdentity({"SOUL.md": "# Soul\n", "OKR.md": None, "AGENTS.md": "# A\n"})
     assert await _reader(identity=identity).persona_files(BOT) == {"SOUL.md": "# Soul\n", "AGENTS.md": "# A\n"}
-    assert identity.calls[0] == ("list", "staff", "u1", "bot_1", "u1", "openclaw")
+    assert identity.calls[0] == ("list", "staff", "staff_u1", "bot_1", "u1", "openclaw"), "entity for the files' home, owner for the user"
     assert ("read", "OKR.md") not in identity.calls
 
 
@@ -137,14 +140,16 @@ async def test_skills_are_classified_by_locator() -> None:
         SimpleNamespace(name="weather", git_path="git://team/weather", skill_uuid=None, sc_version_number=None),
     ]
     factory = FakeSkillFactory({"local://skills-local/tidy": [("SKILL.md", b"---\nname: tidy\n---\n")]})
-    skills = await _reader(capabilities=FakeCapabilities(assets), skill_factory=factory).skills(BOT)
+    capabilities = FakeCapabilities(assets)
+    skills = await _reader(capabilities=capabilities, skill_factory=factory).skills(BOT)
+    assert capabilities.asked_for == "u1", "active skills are the owner's rows"
     assert [(s.name, s.origin, s.center_version, s.repo_path, s.files) for s in skills] == [
         ("tidy", "local", None, None, (("SKILL.md", b"---\nname: tidy\n---\n"),)),
         ("refund", "center", "v7", None, ()),
         ("weather", "repo", None, "team/weather", ()),
     ]
     call = factory.calls[0]
-    assert (call["entity_id"], call["owner_id"], call["bot_id"], call["engine_type"], call["entity_type"]) == ("u1", "u1", "bot_1", "openclaw", "staff")
+    assert (call["entity_id"], call["owner_id"], call["bot_id"], call["engine_type"], call["entity_type"]) == ("staff_u1", "u1", "bot_1", "openclaw", "staff")
     assert (call["is_desktop"], call["is_teclaw"], call["locator"], call["skill_name"]) == (False, False, "local://skills-local/tidy", "tidy")
 
 
@@ -167,7 +172,7 @@ async def test_resources_are_the_bots_file_rows_read_from_the_device() -> None:
     files = FakeResourceFiles({"data/faq.csv": b"q,a\n", "data/kb/notes.md": b"# n\n"})
     resources = await _reader(resource_services=FakeResourceServices(rows), resource_files=files).resources(BOT)
     assert [(r.path, r.files) for r in resources] == [("data/faq.csv", (("faq.csv", b"q,a\n"),)), ("data/kb/notes.md", (("notes.md", b"# n\n"),))]
-    assert files.calls[0] == {"entity_type": "staff", "entity_id": "u1", "bot_id": "bot_1", "engine_type": "openclaw", "path": "data/faq.csv"}
+    assert files.calls[0] == {"entity_type": "staff", "entity_id": "staff_u1", "bot_id": "bot_1", "engine_type": "openclaw", "path": "data/faq.csv"}
 
 
 @pytest.mark.asyncio
@@ -180,11 +185,13 @@ async def test_a_listed_file_that_cannot_be_read_is_refused() -> None:
 
 @pytest.mark.asyncio
 async def test_mcp_servers_exclude_platform_defaults_and_carry_the_bot_override() -> None:
+    activation = FakeActivation({"mcp.b", "mcp.a", "mcp.default"}, {"mcp.default"})
     reader = _reader(
-        activation=FakeActivation({"mcp.b", "mcp.a", "mcp.default"}, {"mcp.default"}),
+        activation=activation,
         mcp_config=FakeMcpConfig({"mcp.a": {"url": "https://a.example.com/mcp"}, "mcp.b": {}}),
     )
     assert await reader.mcp_servers(BOT) == ({"server_code": "mcp.a", "config": {"url": "https://a.example.com/mcp"}}, {"server_code": "mcp.b"})
+    assert activation.asked_for == ("u1", "u1"), "MCP activation is the owner's"
 
 
 @pytest.mark.asyncio

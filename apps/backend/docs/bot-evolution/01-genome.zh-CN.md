@@ -405,7 +405,8 @@ class RevisionMetadata:
                                      # (GET …/revisions/r42), but it is not an identity: other records store `id`
     bot: BotRef                      # the bot this revision belongs to (owner + bot id)
     parent: RevisionId | None        # the revision this one was made from: the patch's `base`, or `active` when the
-                                     # bot was captured or its policy changed; None only for the bot's first revision
+                                     # bot was captured or its policy changed (the latest revision while there is no
+                                     # `active` yet); None only for the bot's first revision
     created_by: Provenance
     created_at: datetime
     status: RevisionStatus
@@ -1314,7 +1315,7 @@ class GenomeRegistryProtocol(Protocol):          # core/bot_genome/genome_regist
         """Metadata only, newest seq first."""
 
     async def capture(self, bot: BotRef, *, created_by: Provenance) -> RecordedRevision:
-        """Record the bot's current state; parent `active` or none; policy copied from `active`.
+        """Record the bot's current state; parent `active` (the latest revision until there is one; none for the first); policy copied from `active`.
         Idempotent: unchanged state returns the existing revision with created=False.
         Raises CaptureRefused naming what cannot be recorded."""
 

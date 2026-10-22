@@ -18,7 +18,7 @@ from agentclaw.community.core.skill_center.skill_package import SkillPackageVali
 from tests.community.core.bot_genome.example_blobs import EXAMPLES, BlobDir, load_revisions, spec_of
 
 REVISIONS = load_revisions()
-BOT = BotRef(entity_id="user_owner_5", bot_id="bot_123", engine_type="openclaw", bot_type="arca")
+BOT = BotRef(entity_id="staff_user_owner_5", bot_id="bot_123", owner_id="user_owner_5", engine_type="openclaw", bot_type="arca")
 VALIDATOR = SkillPackageValidator(SkillParser())
 
 

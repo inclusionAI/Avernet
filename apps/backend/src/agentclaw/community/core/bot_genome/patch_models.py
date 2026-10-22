@@ -24,8 +24,8 @@ from agentclaw.community.core.bot_genome.spec_models import (
     PersonaFileType,
     ResourcePath,
     SkillName,
-    absent_when_none,
     constrained,
+    optional_member,
     schema_property,
 )
 
@@ -171,8 +171,8 @@ class SkillUpdate(ContractModel):
 
     op: Literal["skill.update"] = Field(description="Marks this op shape.")
     name: SkillName = Field(description="The skill to change.")
-    file_diffs: list[FileDiff] | None = Field(default=None, min_length=1, max_length=500, exclude_if=absent_when_none, description="Unified diffs to existing text files of the skill; at most one per file.")
-    files: dict[SkillFilePath, Content | None] | None = Field(default=None, min_length=1, exclude_if=absent_when_none, description="Whole-file writes, path → new content, or null to delete that file; adds a new path, replaces an existing one. `SKILL.md` can be replaced but not deleted.")
+    file_diffs: list[FileDiff] = optional_member("Unified diffs to existing text files of the skill; at most one per file.", min_length=1, max_length=500)
+    files: dict[SkillFilePath, Content | None] = optional_member("Whole-file writes, path → new content, or null to delete that file; adds a new path, replaces an existing one. `SKILL.md` can be replaced but not deleted.", min_length=1)
 
     @model_validator(mode="after")
     def _at_least_one_and_skill_md_stays(self) -> Self:

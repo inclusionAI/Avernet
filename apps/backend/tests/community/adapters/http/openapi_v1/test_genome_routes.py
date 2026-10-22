@@ -188,7 +188,7 @@ async def test_record_patch_answers_201_then_200_and_threads_the_run() -> None:
     bot, patch = registry.record_patch.await_args.args
     assert patch == PATCH, "the typed patch reaches the registry as parsed"
     kwargs = registry.record_patch.await_args.kwargs
-    assert (bot.entity_id, bot.engine_type, bot.bot_type) == ("ent_1", "openclaw", "personal")
+    assert (bot.entity_id, bot.owner_id, bot.engine_type, bot.bot_type) == ("ent_1", "u1", "openclaw", "personal")
     assert kwargs["status"] is RevisionStatus.CANDIDATE and kwargs["run"] == RunScope("run_7", "clawevolve/bot-evolution@2.0.0", ("persona",))
     assert kwargs["created_by"] == Provenance(ProvenanceKind.STRATEGY_RUN, "clawevolve/bot-evolution@2.0.0", run_id="run_7", principal="u1")
     assert kwargs["created_by"].checked_as == "u1", "the MCP permission check is made against the user the run acts for"
@@ -262,6 +262,7 @@ async def test_capture_policy_and_lookups() -> None:
     registry.get_revision = Mock(return_value=_revision())
     out = await genome.get_genome_revision("bot_1", "r1", _request(), "u1", "u1", _bot_service(), registry)
     assert out.data.revision.id == R1 and out.data.spec == EMPTY_SPEC and out.data.model_dump(mode="json")["spec"] == EMPTY_SPEC.to_json()
+    assert out.data.revision.bot.model_dump() == {"owner_id": "u1", "bot_id": "bot_1"}, "the contract's `revision.bot`"
     registry.list_revisions = Mock(return_value=RevisionPage(3, (_meta(R2, 3),)))
     out = await genome.list_genome_revisions("bot_1", _request(), "u1", "u1", "candidate", None, 2, 1, _bot_service(), registry)
     assert (out.data.total, out.data.items[0].seq) == (3, 3)
@@ -345,14 +346,14 @@ def test_policy_rejected_keeps_its_own_message() -> None:
 
 
 def test_timestamps_carry_the_contracts_z_suffix() -> None:
-    summary = genome._summary(_revision().revision)
+    summary = genome._summary(_revision().revision, genome.bot_ref(BOT, owner_id="u1", bot_id="bot_1"))
     assert summary.model_dump(mode="json")["created_at"].endswith("Z"), "naive UTC from the store is written as the contract's `…Z`"
     assert genome._promotion(_promotion()).model_dump(mode="json")["created_at"].endswith("Z")
 
 
 def test_bot_ref_reads_the_record_and_defaults() -> None:
-    ref = genome.bot_ref({"entity_id": "e", "active_engine": "claude_code", "bot_type": "service"}, bot_id="b")
-    assert (ref.entity_id, ref.engine_type, ref.bot_type, ref.entity_type) == ("e", "claude_code", "service", "staff")
+    ref = genome.bot_ref({"entity_id": "e", "active_engine": "claude_code", "bot_type": "service"}, owner_id="o", bot_id="b")
+    assert (ref.entity_id, ref.owner_id, ref.engine_type, ref.bot_type, ref.entity_type) == ("e", "o", "claude_code", "service", "staff")
     assert isinstance(genome._promotion(_promotion()).document, type(None))
-    assert genome.bot_ref({"entity_id": "e"}, bot_id="b").bot_type == "personal"
+    assert genome.bot_ref({"entity_id": "e"}, owner_id="o", bot_id="b").bot_type == "personal"
     assert CompiledManifest("r", {}, "d").document == {}

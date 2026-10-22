@@ -45,12 +45,20 @@ class ProvenancePayload(BaseModel):
     step: str | None = Field(default=None, description="For `strategy_run`: the strategy's step inside that run which produced the record, e.g. `propose` (a run can submit several candidates from several steps).")
 
 
+class BotIdentityPayload(BaseModel):
+    """The bot a revision belongs to (contract `revision.bot`)."""
+
+    owner_id: str = Field(description="The bot owner's user id.")
+    bot_id: str = Field(description="The bot's id.")
+
+
 class RevisionSummary(BaseModel):
-    """A revision's metadata, as listed; the content is read with `GET …/revisions/{rev}`."""
+    """A revision's metadata (contract `revision`), as listed; the content is read with `GET …/revisions/{rev}`."""
 
     id: str = Field(description="The content-hash id, `sha256:<hex64>`: the same content has the same id on any bot.")
     seq: int = Field(description="The per-bot sequence number: this is the bot's N-th recorded revision, counting from 1, so `r42` is its 42nd. A handle for people, never an identity (two bots both have an `r1`).")
-    parent: str | None = Field(description="The revision this one was derived from; null for the bot's first.")
+    bot: BotIdentityPayload = Field(description="The bot this revision belongs to.")
+    parent: str | None = Field(description="The revision this one was derived from: the patch's base, or `active` for a capture or a policy change (the bot's latest revision while it has no `active` yet); null only for the bot's first.")
     status: RevisionStatusLiteral = Field(description=_STATUS_DESCRIPTION)
     created_by: ProvenancePayload = Field(description="Who recorded it.")
     created_at: UtcDatetime = Field(description="When it was recorded, UTC with a `Z` suffix.")
