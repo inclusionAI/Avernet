@@ -46,24 +46,20 @@
 import { buildRpcRequest, type WireFailure } from './rpc';
 import {
   EMPTY_PARSE_RESULT,
-  STATE_CANCELED, STATE_COMPLETED, STATE_FAILED, STATE_REJECTED,
+  STATE_COMPLETED, STATE_FAILED,
   buildResolveResolution,
-  buildRunFailure,
   firstStrOf,
-  latestArtifactText,
   newMessageId,
   terminalStateOf,
-  type A2aRunFailure,
 } from './providerFacts';
 import { rpcOnce } from './rpcOnce';
-import { streamRpc, type WireEvent } from './stream';
+import { streamRpc } from './stream';
 import { fetchCard, validateScenarios, Scenario } from './card';
 import { A2aRunEngine, OUTCOME_UNKNOWN_MESSAGE, RECOVERY_INCOMPLETE_MESSAGE, RECOVERY_STOPPED_MESSAGE, type RunOutcomeBag } from './A2aRunEngine';
-import { translateEvent, type TranslateCtx } from './translate';
+import type { TranslateCtx } from './translate';
 import {
   RecoveryRunner,
   type RecoveryConfig,
-  type RecoveryEngine,
   type RecoveryOutcome,
 } from './recovery';
 import { classifyCancel, type CancelOutcome } from './cancelOutcomes';
