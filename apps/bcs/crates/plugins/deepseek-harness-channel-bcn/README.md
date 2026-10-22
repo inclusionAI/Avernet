@@ -3,6 +3,17 @@
 DeepSeek Harness channel bundle for connecting a DSH Bot to the Avernet Bot
 Collaboration Network (BCN).
 
+## 0.2.3
+
+Validate DeepSeek Harness `0.2.1-rc.2` compatibility, retaining the existing
+`0.2.0-rc.2` lower bound and legacy Bot Session support.
+
+## 0.2.2
+
+- Support Provider-scoped v2 onboarding Tokens with `static_bearer` authentication and `plugin` mode.
+- Persist the local Provider reference before registration and retain Provider membership across restarts and Token rotation.
+- Keep existing legacy Bot Sessions working without automatic re-registration.
+
 ## 0.2.1
 
 Fix approval and question routing for BCN-owned Agents when the DSH Web UI is
@@ -12,8 +23,8 @@ Other Agents retain their existing interaction handlers.
 
 ## Compatibility
 
-- DeepSeek Harness declared compatibility: `>=0.2.0-rc.2 <=0.2.1-alpha.2`
-- DeepSeek Harness development/test baseline: `@deepseek-ai/dsh 0.2.1-alpha.2`
+- DeepSeek Harness declared compatibility: `>=0.2.0-rc.2 <=0.2.1-rc.2`
+- DeepSeek Harness development/test baseline: `@deepseek-ai/dsh 0.2.1-rc.2`
 - BCN Bot WebSocket protocol: V3
 - Node.js: `>=22.19.0`
 
@@ -24,10 +35,30 @@ session-key mapping helper for persisted sessions created by older releases.
 
 ## Capabilities
 
-First-time setup exchanges the human Token through `POST /register`. That
+First-time setup exchanges a legacy human Token or a Provider-scoped v2 Token through `POST /register`. That
 endpoint creates the Bot and establishes its display name and ownership. On
 restart, the plugin reuses the saved Bot Session and connects directly to
 `/ws/bot`; it does not re-register or require a separate `/bots/onboard` call.
+
+Provider-scoped onboarding uses `mode=plugin` and a generated local
+`provider_bot_ref`. Only `static_bearer` Providers are supported by this client;
+AgentPass registration is not inferred from a generated local identity. The server
+authenticates the Token, checks the human/Provider scope, and persists membership.
+The plugin verifies the returned Provider/ref/mode, then saves that metadata with
+the Bot Session. Provider-admin credentials are never needed on the local machine.
+
+Before the request, the plugin saves a non-secret pending identity in the managed
+`${botSessionRef}_REGISTRATION` credential. Retries retain the same reference;
+changing the endpoint, Provider, owner or Bot name while registration is pending
+requires a separate profile. A lost successful response or failed Session save
+can leave a registered Bot without local credentials: the server returns 409 for
+duplicate references and never replays credentials. The plugin stops rather than
+silently creating another Bot; an operator must recover that registration.
+
+Existing Bot Sessions without Provider metadata remain valid and are not
+automatically re-registered or migrated. Provider membership for an existing Bot
+must be attached through the server-side administration process. A Token is only
+needed for first registration; restarts and runtime Token rotation preserve membership.
 
 Current registration only publishes the Bot name and ownership. The configured
 `summary`, `domains`, `skills`, and `scopes` are not synchronized by this plugin;
@@ -135,16 +166,16 @@ missing, it exits without consuming the registration Token and prints the
 matching CLI installation command:
 
 ```bash
-npm install --global @deepseek-ai/dsh@0.2.1-alpha.2
+npm install --global @deepseek-ai/dsh@0.2.1-rc.2
 ```
 
 Run the generated onboarding command again after installing the CLI. When DSH
 is present, the same command installs this plugin, configures the `web` profile,
 and starts DSH so the plugin can complete onboarding with the injected Token.
 The DSH plugin manager checks the peer compatibility range declared in this
-package (`>=0.2.0-rc.2 <=0.2.1-alpha.2`) before activation. Existing
+package (`>=0.2.0-rc.2 <=0.2.1-rc.2`) before activation. Existing
 `0.1.1-rc.2` installations must be upgraded first. Development dependencies
-remain pinned to `0.2.1-alpha.2` so builds and unit tests remain reproducible.
+remain pinned to `0.2.1-rc.2` so builds and unit tests remain reproducible.
 
 The registration Token is removed from the package-manager and configuration
 helper environments and is passed only to the final DSH process. The installer
@@ -179,13 +210,13 @@ To exercise the exact prebuilt artifact that will be published:
 ```bash
 mkdir -p /tmp/dsh-bcn-pack
 npm pack --pack-destination /tmp/dsh-bcn-pack
-dsh plugin --profile bcn-tarball add /tmp/dsh-bcn-pack/avernet-plugin-deepseek-harness-channel-bcn-0.2.1.tgz
+dsh plugin --profile bcn-tarball add /tmp/dsh-bcn-pack/avernet-plugin-deepseek-harness-channel-bcn-0.2.3.tgz
 ```
 
 After publication, the installation command will be:
 
 ```bash
-dsh plugin --profile <profile> add @avernet-plugin/deepseek-harness-channel-bcn@0.2.1
+dsh plugin --profile <profile> add @avernet-plugin/deepseek-harness-channel-bcn@0.2.3
 ```
 
 The bundle patch adds the plugin in a disabled state, so installing it never

@@ -1,9 +1,11 @@
 import type { Context } from '@deepseek-ai/cordis';
+import { randomUUID } from 'node:crypto';
 import { credentialRef } from '@deepseek-ai/dsh-credentials';
 import type { Config } from './config.js';
 import { canonicalizeEndpoint, resolveEndpoint, type DnsResolver, type ResolvedEndpoint } from './endpoint.js';
 import { BcnRegistrationClient, NodeHttpTransport, type HttpTransport } from './http-client.js';
-import { parseBotSession, type BotSession } from './protocol.js';
+import { asRecord, asNonEmptyString, parseBotSession, type BotSession } from './protocol.js';
+import { registrationTokenScope } from './registration.js';
 
 export interface ResolvedBotSession {
   session: BotSession;
@@ -42,13 +44,37 @@ export async function loadOrRegisterBotSession(
     options.transport ?? new NodeHttpTransport(),
     config.connectionTimeoutMs,
   );
-  const registration = await client.register(onboardingToken.value, config.botName);
+  const scope = registrationTokenScope(onboardingToken.value);
+  let providerBotRef: string | undefined;
+  if (scope) {
+    // Persist before HTTP: a lost response or failed Session write must not create another Bot.
+    const pendingRef = credentialRef(`${config.botSessionRef}_REGISTRATION`);
+    const pending = await ctx.credentials.resolve(pendingRef);
+    if (pending) {
+      let record: Record<string, unknown> | undefined;
+      try { record = asRecord(JSON.parse(pending.value)); } catch { /* Report without credential contents. */ }
+      providerBotRef = asNonEmptyString(record?.providerBotRef);
+      if (!providerBotRef || record?.endpoint !== endpoint.baseUrl.toString()
+        || record.providerId !== scope.providerId || record.owner !== scope.owner
+        || record.botName !== config.botName) {
+        throw new Error('Pending BCN Provider registration differs from this endpoint, owner, Provider or Bot name; use a separate DSH profile');
+      }
+    } else {
+      providerBotRef = `dsh-${randomUUID()}`;
+      await ctx.credentials.set(pendingRef, JSON.stringify({
+        ...scope, endpoint: endpoint.baseUrl.toString(), botName: config.botName, providerBotRef,
+      }));
+    }
+  }
+  const registration = await client.register(onboardingToken.value, config.botName,
+    scope && providerBotRef ? { scope, providerBotRef } : undefined);
   const session: BotSession = {
     version: 1,
     endpoint: endpoint.baseUrl.toString(),
     botUuid: registration.bot_uuid,
     botToken: registration.bot_token,
     botName: registration.bot_name,
+    ...(registration.registration ? { registration: registration.registration } : {}),
   };
 
   // /register already creates the Bot, sets its name, and establishes ownership.

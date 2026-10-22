@@ -169,6 +169,6 @@ test('install script explains how to install DSH when the CLI is missing', async
     },
   });
   assert.equal(result.status, 1);
-  assert.match(`${result.stdout}${result.stderr}`, /npm install --global @deepseek-ai\/dsh@0\.2\.1-alpha\.2/);
+  assert.match(`${result.stdout}${result.stderr}`, /npm install --global @deepseek-ai\/dsh@0\.2\.1-rc\.2/);
   assert.doesNotMatch(`${result.stdout}${result.stderr}`, /registration-secret/);
 });

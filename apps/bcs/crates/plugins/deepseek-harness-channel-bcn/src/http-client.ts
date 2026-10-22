@@ -2,6 +2,7 @@ import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import type { RequestOptions } from 'node:http';
 import type { ResolvedEndpoint } from './endpoint.js';
+import { validateRegistrationResponse, type ProviderTokenScope } from './registration.js';
 import {
   MAX_FRAME_BYTES,
   asNonEmptyString,
@@ -94,8 +95,14 @@ export class BcnRegistrationClient {
     private readonly timeoutMs: number,
   ) {}
 
-  async register(token: string, botName: string): Promise<RegisterBotResponse> {
+  async register(token: string, botName: string,
+    provider?: { scope: ProviderTokenScope; providerBotRef: string },
+  ): Promise<RegisterBotResponse> {
     const query = new URLSearchParams({ token, 'bot-name': botName });
+    if (provider) {
+      query.set('mode', 'plugin');
+      query.set('provider_bot_ref', provider.providerBotRef);
+    }
     const response = asRecord(await this.transport.requestJson(
       this.endpoint,
       'register',
@@ -108,7 +115,12 @@ export class BcnRegistrationClient {
     if (!registeredName || !botUuid || !botToken) {
       throw new Error('BCN registration returned an incomplete Bot Session');
     }
-    return { bot_name: registeredName, bot_uuid: botUuid, bot_token: botToken };
+    if (!provider && response?.registration != null) {
+      throw new Error('BCN legacy registration unexpectedly returned Provider metadata');
+    }
+    const registration = provider ? validateRegistrationResponse(response?.registration, provider) : undefined;
+    return { bot_name: registeredName, bot_uuid: botUuid, bot_token: botToken,
+      ...(registration ? { registration } : {}) };
   }
 
 }
