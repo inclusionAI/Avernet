@@ -90,8 +90,6 @@ export type RecoveryTaskResult = {
 export type RecoveryStoredTask = RecoveryTaskState & {
   /** Transient projection of the complete tool ledger; never persisted or supplied by the Agent. */
   interventionStatus?: RecoveryInterventionStatus;
-  /** Written only at task creation; absence means historical audit coverage cannot be proven. */
-  interventionAuditComplete?: true;
   timeline: RecoveryTimelineEvent[];
   pending_results: RecoveryTaskResult[];
 };

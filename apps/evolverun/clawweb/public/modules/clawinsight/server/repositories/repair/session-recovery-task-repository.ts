@@ -21,7 +21,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
   constructor(private readonly db: IDatabase, private readonly tasks: EvolveRepository, private readonly artifacts: RecoveryArtifactStore) {}
 
   async create(value: RecoveryStoredTask, stepId: string): Promise<void> {
-    const details = await this.put(value.taskId, this.details({ ...value, interventionAuditComplete: true }));
+    const details = await this.put(value.taskId, this.details(value));
     const report = await this.put(value.taskId, { events: value.timeline, details });
     await this.db.transaction(async tx => {
       await new EvolveRepository(tx).createTaskWithStep({
@@ -154,10 +154,10 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
   private details(value: RecoveryStoredTask) {
     const auditedEvidence = new Set(value.timeline.filter(event => event.payload.raw_tool_call_id).map(event => event.payload.evidence_id));
     return { plan: value.plan, judgment: value.judgment, evidence: value.evidence.filter(item => !auditedEvidence.has(item.evidence_id)),
-      ...(value.delivery ? { delivery: value.delivery } : {}), ...(value.interventionAuditComplete ? { interventionAuditComplete: true } : {}) };
+      ...(value.delivery ? { delivery: value.delivery } : {}) };
   }
   private config(value: RecoveryStoredTask, detailsRef: ArtifactRef, resultDelivery: ResultDelivery[] = []): string {
-    const { timeline: _timeline, evidence: _evidence, pending_results: _results, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, plan, delivery: _delivery, judgment: _judgment, ...state } = value;
+    const { timeline: _timeline, evidence: _evidence, pending_results: _results, interventionStatus: _intervention, plan, delivery: _delivery, judgment: _judgment, ...state } = value;
     const json = JSON.stringify({ ...state, artifactStorage: 2, detailsRef, resultDelivery, plan: plan ? { digest: plan.digest, approvedAt: plan.approvedAt, actions: plan.actions.map(action => ({ actionId: action.actionId })) } : null });
     this.validateConfig(json);
     return json;
@@ -179,37 +179,38 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
     await tx.exec("UPDATE ce_steps SET status = 'succeeded' WHERE task_id = ? AND step_no > 0 AND step_no < ? AND status NOT IN ('succeeded','failed','canceled')", [value.taskId, stepNo]);
   }
   private async hydrate(db: IDatabase, raw: string): Promise<RecoveryStoredTask> {
-    const value = JSON.parse(raw);
-    if (value.artifactStorage !== 2) return { ...value, interventionStatus: undefined, interventionAuditComplete: undefined };
-    const { artifactStorage: _storage, detailsRef, resultDelivery, ...state } = value;
-    const details = await this.get(detailsRef) as Pick<RecoveryStoredTask, "plan" | "judgment" | "delivery" | "evidence" | "interventionAuditComplete">;
-    const task = { ...state, ...details, timeline: [], evidence: details.evidence ?? [], pending_results: [] } as RecoveryStoredTask;
-    const steps = await db.query<{ output_json: string }>("SELECT output_json FROM ce_steps WHERE task_id = ? AND step_type LIKE 'session_recovery%' AND output_json IS NOT NULL ORDER BY step_no", [value.taskId]);
-    for (const step of steps) {
-      const ref = JSON.parse(step.output_json);
-      if (ref.objectKey) task.timeline.push(...(await this.get(ref) as { events: RecoveryTimelineEvent[] }).events);
-    }
+    // Discard the retired coverage marker when reading already-saved task data.
+    const { interventionAuditComplete: _legacyCoverage, ...value } = JSON.parse(raw);
     const audit = new AgentToolCallRepository(db, "session_recovery");
     const interventionCalls: AgentToolCall[] = [];
     let afterId = 0;
     for (;;) {
       const calls = await audit.listToolCalls(value.taskId, { ...(afterId ? { afterId } : {}), limit: 500 });
       interventionCalls.push(...calls);
-      for (const call of calls) {
-        afterId = call.id;
-        if (!["succeeded", "failed", "unknown", "canceled"].includes(call.status)) continue;
-        const result = (call.result ?? {}) as Record<string, unknown>, request = (call.request ?? {}) as Record<string, unknown>;
-        const evidenceId = `evidence-${call.callId}`;
-        if (!task.evidence.some(item => item.evidence_id === evidenceId)) task.evidence.push({ evidence_id: evidenceId, tool_call_id: call.callId, source: call.toolName, location: typeof result.source === "string" ? result.source : `tool-call:${call.callId}`, excerpt: JSON.stringify(result).slice(0, 2000) });
-        const timestamp = typeof result.recorded_at_ms === "number" ? result.recorded_at_ms : typeof call.gmtCreate === "number" ? call.gmtCreate * 1000 : Date.parse(call.gmtCreate);
-        task.timeline.push({ event_id: call.callId, at_ms: timestamp, kind: "operation", actor: "agent", summary: String(request.purpose ?? call.toolName), payload: {
-          tool_call_id: call.callId, request, result: { delivery_confirmed: result.delivery_confirmed, session_id: result.session_id, delivery_key: result.delivery_key,
-            message: result.message, initial_message: result.initial_message, dry_run: result.dry_run }, status: call.status, evidence_id: evidenceId, raw_tool_call_id: call.callId } });
-      }
       if (calls.length < 500) break;
+      afterId = calls.at(-1)!.id;
     }
-    const intervention = recoveryInterventionStatus(interventionCalls, task.delivery?.delivery);
-    task.interventionStatus = intervention === "none" && !task.interventionAuditComplete ? "unknown" : intervention;
+    if (value.artifactStorage !== 2) return { ...value, interventionStatus: recoveryInterventionStatus(interventionCalls, value.delivery?.delivery) } as RecoveryStoredTask;
+    const { artifactStorage: _storage, detailsRef, resultDelivery, ...state } = value;
+    const { interventionAuditComplete: _legacyDetailsCoverage, ...details } = await this.get(detailsRef) as
+      Pick<RecoveryStoredTask, "plan" | "judgment" | "delivery" | "evidence"> & { interventionAuditComplete?: unknown };
+    const task = { ...state, ...details, timeline: [], evidence: details.evidence ?? [], pending_results: [] } as RecoveryStoredTask;
+    const steps = await db.query<{ output_json: string }>("SELECT output_json FROM ce_steps WHERE task_id = ? AND step_type LIKE 'session_recovery%' AND output_json IS NOT NULL ORDER BY step_no", [value.taskId]);
+    for (const step of steps) {
+      const ref = JSON.parse(step.output_json);
+      if (ref.objectKey) task.timeline.push(...(await this.get(ref) as { events: RecoveryTimelineEvent[] }).events);
+    }
+    for (const call of interventionCalls) {
+      if (!["succeeded", "failed", "unknown", "canceled"].includes(call.status)) continue;
+      const result = (call.result ?? {}) as Record<string, unknown>, request = (call.request ?? {}) as Record<string, unknown>;
+      const evidenceId = `evidence-${call.callId}`;
+      if (!task.evidence.some(item => item.evidence_id === evidenceId)) task.evidence.push({ evidence_id: evidenceId, tool_call_id: call.callId, source: call.toolName, location: typeof result.source === "string" ? result.source : `tool-call:${call.callId}`, excerpt: JSON.stringify(result).slice(0, 2000) });
+      const timestamp = typeof result.recorded_at_ms === "number" ? result.recorded_at_ms : typeof call.gmtCreate === "number" ? call.gmtCreate * 1000 : Date.parse(call.gmtCreate);
+      task.timeline.push({ event_id: call.callId, at_ms: timestamp, kind: "operation", actor: "agent", summary: String(request.purpose ?? call.toolName), payload: {
+        tool_call_id: call.callId, request, result: { delivery_confirmed: result.delivery_confirmed, session_id: result.session_id, delivery_key: result.delivery_key,
+          message: result.message, initial_message: result.initial_message, dry_run: result.dry_run }, status: call.status, evidence_id: evidenceId, raw_tool_call_id: call.callId } });
+    }
+    task.interventionStatus = recoveryInterventionStatus(interventionCalls, task.delivery?.delivery);
     for (const result of (resultDelivery ?? []) as ResultDelivery[]) {
       task.pending_results.push(await this.get(result) as RecoveryStoredTask["pending_results"][number]);
     }

@@ -166,7 +166,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     const task = await this.required(taskId);
     const canOperate = this.canOperate(task, actor);
     if (!canOperate && task.shared !== true) this.fail(403, "权限不足，请联系任务 Owner 开启分享");
-    const { pending_results: _pending, execution: _execution, authorizationScopeDigest: _scope, aisExecution: _ais, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, ...view } = task;
+    const { pending_results: _pending, execution: _execution, authorizationScopeDigest: _scope, aisExecution: _ais, interventionStatus: _intervention, ...view } = task;
     const executions = await this.deps.agent.listExecutions(taskId);
     return { ...view, pending_results: [], shared: task.shared === true, canOperate, canManageShare: canOperate,
       executions, ...(task.status === "canceled" ? { termination: executions.at(-1)?.termination ?? { status: "stop_pending" as const, aisJobId: executions.at(-1)?.jobId ?? null } } : {}) };

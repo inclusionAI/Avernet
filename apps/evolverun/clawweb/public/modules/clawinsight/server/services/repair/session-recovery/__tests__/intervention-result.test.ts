@@ -64,6 +64,8 @@ it("reports none for investigation-only failures without adding a persisted task
   await service.reportResults();
   expect(callbacks.at(-1)).toMatchObject({ status: "failed", effect: "unknown", intervention_status: "none" });
   expect(JSON.parse((await repo.findTask(task.taskId))!.config_json).interventionStatus).toBeUndefined();
+  const stored = JSON.parse((await repo.findTask(task.taskId))!.config_json);
+  expect(JSON.parse((await artifactStore.getObject(stored.detailsRef.objectKey)).content.toString())).not.toHaveProperty("interventionAuditComplete");
 });
 it.each([false, true])("keeps an unfinished write uncertain only after it is claimed: claimed=%s", async claimed => {
   const task = await create();
@@ -118,33 +120,53 @@ it.each(["success", "nonzero", "lost", "applied", "not_applied"] as const)("deri
   expect(callbacks.at(-1)?.intervention_status).toBe(outcome === "success" || outcome === "applied" ? "performed" : outcome === "not_applied" ? "none" : "unknown");
   expect((await service.detail(task.taskId, actor)).interventionStatus).toBeUndefined();
 });
-it("preserves unavailable historical audit after legacy migration and later termination", async () => {
-  const { interventionStatus: _projection, ...task } = await create();
+it.each(["none", "performed", "unknown"] as const)("uses existing legacy audit without rewriting queued results: %s", async expected => {
+  let task = await create();
+  if (expected !== "none") {
+    await agent.retryMessage(task, { clientRequestId: "legacy-message", purpose: "提供原任务继续指引", message: "请依据工具返回继续" });
+    if (expected === "performed") await inspect(await current(task.taskId));
+    task = await current(task.taskId);
+  }
+  const { interventionStatus: _projection, ...legacy } = task;
   const result = { event_id: task.request.event_id, task_id: task.taskId, result_version: task.version, status: "waiting_effect" as const,
     phase: "observe" as const, waiting_reason: "effect" as const, effect: "unknown" as const, result_text: "历史观察结果", evidence_ids: [] };
-  await db.exec("UPDATE ce_tasks SET config_json = ? WHERE task_id = ?", [JSON.stringify({ ...task, status: "waiting_effect", phase: "observe", pending_results: [result] }), task.taskId]);
+  await db.exec("UPDATE ce_tasks SET config_json = ? WHERE task_id = ?", [JSON.stringify({ ...legacy, status: "waiting_effect", phase: "observe", pending_results: [result] }), task.taskId]);
   await db.exec("UPDATE ce_steps SET output_json = NULL WHERE task_id = ? AND step_no > 0", [task.taskId]);
+  expect((await current(task.taskId)).interventionStatus).toBe(expected);
   await service.reportResults();
   expect(callbacks).toEqual([result]);
   const migrated = await current(task.taskId);
-  expect(migrated.interventionAuditComplete).toBeUndefined();
+  expect(migrated).not.toHaveProperty("interventionAuditComplete");
   expect(JSON.parse((await repo.findTask(task.taskId))!.config_json).interventionAuditComplete).toBeUndefined();
-  expect((await agent.bootstrap(migrated)).task.interventionAuditComplete).toBeUndefined();
-  expect((await service.detail(task.taskId, actor)).interventionAuditComplete).toBeUndefined();
+  expect((await agent.bootstrap(migrated)).task).not.toHaveProperty("interventionAuditComplete");
+  expect(await service.detail(task.taskId, actor)).not.toHaveProperty("interventionAuditComplete");
   await service.terminate(task.taskId, actor);
   await service.reportResults();
-  expect(callbacks.at(-1)).toMatchObject({ status: "canceled", intervention_status: "unknown" });
+  expect(callbacks.at(-1)).toMatchObject({ status: "canceled", intervention_status: expected });
 });
 
-it("does not treat a pre-upgrade v2 artifact without audit coverage as no intervention", async () => {
-  const task = await create();
+it.each(["none", "performed", "unknown"] as const)("ignores the retired marker when deriving artifact-backed intervention: %s", async expected => {
+  let task = await create();
+  if (expected !== "none") {
+    await agent.retryMessage(task, { clientRequestId: "artifact-message", purpose: "提供原任务继续指引", message: "请依据工具返回继续" });
+    if (expected === "performed") await inspect(await current(task.taskId));
+    task = await current(task.taskId);
+  }
   const stored = JSON.parse((await repo.findTask(task.taskId))!.config_json);
   const details = JSON.parse((await artifactStore.getObject(stored.detailsRef.objectKey)).content.toString());
-  delete details.interventionAuditComplete;
-  const content = Buffer.from(JSON.stringify(details)), objectKey = stored.detailsRef.objectKey + ".legacy";
-  await artifactStore.putObject(objectKey, content, "application/json");
-  stored.detailsRef = { objectKey, sha256: createHash("sha256").update(content).digest("hex") };
-  await db.exec("UPDATE ce_tasks SET config_json = ? WHERE task_id = ?", [JSON.stringify(stored), task.taskId]);
+  for (const marker of [undefined, true, false]) {
+    if (marker === undefined) delete details.interventionAuditComplete;
+    else details.interventionAuditComplete = marker;
+    const content = Buffer.from(JSON.stringify(details)), objectKey = stored.detailsRef.objectKey + `.marker-${String(marker)}`;
+    await artifactStore.putObject(objectKey, content, "application/json");
+    stored.detailsRef = { objectKey, sha256: createHash("sha256").update(content).digest("hex") };
+    await db.exec("UPDATE ce_tasks SET config_json = ? WHERE task_id = ?", [JSON.stringify(stored), task.taskId]);
+    const loaded = await current(task.taskId);
+    expect(loaded.interventionStatus).toBe(expected);
+    expect(loaded).not.toHaveProperty("interventionAuditComplete");
+    expect((await agent.bootstrap(loaded)).task).not.toHaveProperty("interventionAuditComplete");
+    expect(await service.detail(task.taskId, actor)).not.toHaveProperty("interventionAuditComplete");
+  }
   await service.executionFailure(task.taskId, "历史任务结束"); await service.reportResults();
-  expect(callbacks.at(-1)).toMatchObject({ status: "failed", intervention_status: "unknown" });
+  expect(callbacks.at(-1)).toMatchObject({ status: "failed", intervention_status: expected });
 });

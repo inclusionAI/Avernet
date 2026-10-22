@@ -221,7 +221,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     return task;
   }
   async bootstrap(task: RecoveryStoredTask) {
-    const { pending_results: _pending, execution: rawExecution, aisExecution: _ais, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, ...business } = task;
+    const { pending_results: _pending, execution: rawExecution, aisExecution: _ais, interventionStatus: _intervention, ...business } = task;
     const { ticketDigest: _digest, ...execution } = task.status === "canceled" ? this.executions.end(rawExecution!) : rawExecution!;
     return { taskId: task.taskId, stepId: task.current!.stepId, executionId: execution.executionId, deliveryKey: this.latestDeliveryKey(task), task: { ...business, execution,
         timeline: business.timeline.filter(event => event.payload.channel !== "group_webhook").slice(-60).map(event => ({ ...event, payload: event.kind === "operation" ? { tool_call_id: event.payload.tool_call_id, status: event.payload.status, evidence_id: event.payload.evidence_id } : event.payload })),
