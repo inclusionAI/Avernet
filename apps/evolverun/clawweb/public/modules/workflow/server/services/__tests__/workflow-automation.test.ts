@@ -80,6 +80,37 @@ it('uses Shanghai daily boundaries and merges missed days', () => {
   expect(automationDue(Date.parse('2026-11-01T00:59:00Z'), '09:00').key).toBe('2026-10-31');
   expect(automationDue(Date.parse('2026-11-01T01:00:00Z'), '09:00').key).toBe('2026-11-01');
 });
+it('parks disabled, never-dispatched analysis without claims, source reads or journal churn, and resumes on enable', async () => {
+  const f = await fixture(false, 0);
+  const repo = new WorkflowAutomationRepository(f.db);
+  const job = await repo.ensure('wf-1', 'auto_run', 'parked', { flowId: 'parked' }, 0);
+  await f.settings.set('wf-1', false, 'owner');
+  await f.service.tick(); f.advance(); await f.service.tick();
+  expect(f.ports.analysis.lookup).not.toHaveBeenCalled();
+  expect(f.ports.analysis.start).not.toHaveBeenCalled();
+  expect(await repo.get(job.id)).toEqual(job);
+  expect((await repo.recent('wf-1')).filter(row => row.kind === 'auto_cycle')).toEqual([]);
+  await f.settings.set('wf-1', true, 'owner');
+  f.advance(); await f.service.tick();
+  expect(f.ports.analysis.lookup).toHaveBeenCalledWith('parked', 'wf-1');
+  expect(await repo.get(job.id)).toMatchObject({ status: 'waiting', attempts: 1 });
+});
+it('still settles previously dispatched analysis while disabled, without replaying unknown requests', async () => {
+  const f = await fixture(false, 0);
+  const repo = new WorkflowAutomationRepository(f.db);
+  for (let i = 0; i < 4; i++) await repo.ensure('wf-1', 'auto_run', `parked-${i}`, { flowId: `parked-${i}`, analysisId: null }, -100);
+  const pending = await repo.ensure('wf-1', 'auto_run', 'sent', { flowId: 'sent' }, 0);
+  const claimed = (await repo.claim(pending.id, 0))!;
+  await repo.patch(claimed, { status: 'waiting', attempts: 1 }, 0, true);
+  await f.settings.set('wf-1', false, 'owner');
+  await f.service.tick();
+  expect(await repo.get(pending.id)).toMatchObject({ status: 'uncertain', attempts: 1 });
+  f.observations.set('sent', { status: 'completed', analysisId: 'result' });
+  f.advance(); await f.service.tick();
+  expect(await repo.get(pending.id)).toMatchObject({ status: 'done', attempts: 1 });
+  expect(f.ports.analysis.start).not.toHaveBeenCalled();
+  expect(vi.mocked(f.ports.analysis.lookup).mock.calls.map(([id]) => id)).toEqual(['sent', 'sent']);
+});
 
 it('logs worker entry and its first empty environment-scoped batch once, not every poll', async () => {
   const f = await fixture();

@@ -45,7 +45,7 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
     if (await isTrialRun(input.db, job.data.flowId)) {
       await repo.patch(job, { status: 'blocked', reason: 'CANDIDATE_TRIAL' }, now(), true); return;
     }
-    const observed = await bounded(input.ports.analysis.lookup(job.data.flowId));
+    const observed = await bounded(input.ports.analysis.lookup(job.data.flowId, job.workflowId));
     if (observed.status === 'completed') {
       await repo.patch(job, { status: 'done', reason: observed.complete === false ? 'PARTIAL_ANALYSIS' : null,
         data: { ...job.data, analysisId: observed.analysisId ?? null, complete: observed.complete !== false } }, now(), true); return;
@@ -188,6 +188,13 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
     await repo.patch(job, { status: terminal ? 'blocked' : 'waiting', reason: terminal ? 'DRAFT_REQUIRES_MANUAL_REVIEW' : null, data, nextAtMs: now() + 30000 }, now(), true);
   }
   async function workflow(policy: WorkflowAutomationPolicy) {
+    if (!policy.enabled) {
+      // Park never-dispatched analysis without claiming/writing it each poll.
+      // Filter before LIMIT so parked jobs cannot starve in-flight reconciliation.
+      for (const job of await repo.ready(policy.workflowId, 'auto_run', now(), 3, true)) await runAnalysis(job);
+      for (const job of await repo.ready(policy.workflowId, 'auto_draft', now(), 3)) await runDraft(job);
+      return;
+    }
     const initial = await repo.ensure(policy.workflowId, 'auto_cycle', 'state', { scanFromMs: policy.scopeVersion === 'all-qualified/v1' ? previousShanghaiDay(now()).fromMs : now() - DAY, scannedThroughMs: null, completedDue: null }, now());
     let cycle = await repo.claim(initial.id, now()); if (!cycle) return;
     try {

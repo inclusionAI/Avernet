@@ -19,7 +19,8 @@ export interface WorkflowAutomationPorts {
   owner(workflowId: string): Promise<string | null>;
   canEdit(workflowId: string, actorId: string): Promise<boolean>;
   analysis: {
-    lookup(flowId: string): Promise<AnalysisObservation>;
+    /** Known workflow bounds historical JSON membership reads; optional for older Hosts. */
+    lookup(flowId: string, workflowId?: string): Promise<AnalysisObservation>;
     start(input: { workflowId: string; flowId: string; actorId: string; policyVersion: number; dispatchToken: string; requestId: string }): Promise<AnalysisObservation>;
   };
   notify(input: AutomationNotification): Promise<{ status: 'sent' | 'retryable' | 'uncertain'; receipt?: string }>;

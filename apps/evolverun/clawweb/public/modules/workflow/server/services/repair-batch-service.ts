@@ -115,6 +115,8 @@ export type TrustedRepairReport = {
 
 class WorkflowRepairWorkbench implements RepairWorkbenchService {
   private readonly readSnapshots = new Map<string, { version: string; at: number; value: Awaited<ReturnType<WorkflowRepairWorkbench['snapshot']>> }>();
+  private readonly pendingReads = new Map<string, Promise<Awaited<ReturnType<WorkflowRepairWorkbench['snapshot']>>>>();
+  private readGeneration = 0;
   constructor(private readonly db: IDatabase, private readonly sources: RepairSourcePort, private readonly execution?: RepairExecutionPort, private readonly proposals?: ProposalCoordinator,
     private readonly onCompleted?: (tx: IDatabase, revision: RepairRevision) => Promise<void>) {}
   private capabilities(): RepairCapabilities {
@@ -122,8 +124,9 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       reason: this.execution ? null : 'Repair generation provider is unavailable' };
   }
   private tx<T>(fn: (tx: IDatabase) => Promise<T>): Promise<T> {
-    this.readSnapshots.clear();
-    return serial(this.db, () => this.db.transaction(fn)).finally(() => this.readSnapshots.clear());
+    const invalidate = () => { this.readGeneration++; this.readSnapshots.clear(); this.pendingReads.clear(); };
+    invalidate();
+    return serial(this.db, () => this.db.transaction(fn)).finally(invalidate);
   }
   private actor(actorId: string): void { if (!requiredText(actorId, 128)) fail('INVALID_INPUT', 'Actor identity is required'); }
 
@@ -140,15 +143,24 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
   }
   private async readSnapshot(workflowId: string, includeHistorical: boolean) {
     if (!identity(workflowId, 190)) fail('INVALID_INPUT', 'Invalid workflowId');
-    const version = this.sources.readVersion ? await this.sources.readVersion(this.db, workflowId) : null;
     const key = `${workflowId}:${includeHistorical}`;
+    const pending = this.pendingReads.get(key);
+    if (pending) return pending;
+    const generation = this.readGeneration;
+    const read = this.loadReadSnapshot(workflowId, includeHistorical, key, generation);
+    this.pendingReads.set(key, read);
+    try { return await read; }
+    finally { if (this.pendingReads.get(key) === read) this.pendingReads.delete(key); }
+  }
+  private async loadReadSnapshot(workflowId: string, includeHistorical: boolean, key: string, generation: number) {
+    const version = this.sources.readVersion ? await this.sources.readVersion(this.db, workflowId) : null;
     const cached = this.readSnapshots.get(key);
     if (version !== null && cached?.version === version && Date.now() - cached.at < 10_000) return cached.value;
     this.readSnapshots.delete(key);
     const value = await this.snapshot(this.db, workflowId, 'summary', { includeHistorical });
     // A small, version-checked read projection, never the input authority for writes.
     // TTL also bounds clock-based lookback changes and legacy second-resolution timestamps.
-    if (version !== null && Buffer.byteLength(JSON.stringify(value.items), 'utf8') <= 8 * 1024 * 1024) {
+    if (version !== null && generation === this.readGeneration && Buffer.byteLength(JSON.stringify(value.items), 'utf8') <= 8 * 1024 * 1024) {
       if (this.readSnapshots.size >= 4) this.readSnapshots.delete(this.readSnapshots.keys().next().value!);
       this.readSnapshots.set(key, { version, at: Date.now(), value });
     }

@@ -63,10 +63,14 @@ export class WorkflowAutomationRepository {
     const sql = `JSON_EXTRACT(${alias ? `${alias}.` : ''}body_json, '$.${field}')`;
     return this.db.dialect.driver === 'better-sqlite3' ? sql : `JSON_UNQUOTE(${sql})`;
   }
-  async ready(workflowId: string, kind: AutomationKind, now: number, limit = 20): Promise<AutomationJob[]> {
+  async ready(workflowId: string, kind: AutomationKind, now: number, limit = 20, dispatchedOnly = false): Promise<AutomationJob[]> {
     return (await this.db.query<{ body_json: string }>(`SELECT body_json FROM workflow_repair_release_records
       WHERE task_id = ? AND record_kind = ? AND ${this.json('status')} NOT IN ('done', 'blocked')
-      AND CAST(${this.json('nextAtMs')} AS SIGNED) <= ? ORDER BY updated_at_ms, record_id LIMIT ?`, [taskScope(workflowId), kind, now, limit]))
+      AND CAST(${this.json('nextAtMs')} AS SIGNED) <= ?
+      ${dispatchedOnly ? `AND (CAST(${this.json('attempts')} AS SIGNED) > 0
+        OR ${this.json('status')} IN ('dispatching', 'waiting', 'uncertain')
+        OR COALESCE(${this.json('data.analysisId')}, '') NOT IN ('', 'null'))` : ''}
+      ORDER BY updated_at_ms, record_id LIMIT ?`, [taskScope(workflowId), kind, now, limit]))
       .map(row => JSON.parse(row.body_json));
   }
   async readyAcross(kind: AutomationKind, now: number, limit: number, scopeKey: string): Promise<AutomationJob[]> {

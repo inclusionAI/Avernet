@@ -398,6 +398,17 @@ MySQL/OceanBase performance.
 
 ### Bounded draft-recovery polling
 
+Disabled workflows do not create/claim/update a daily cycle. Never-dispatched
+pending/retryable analysis jobs remain parked without membership lookups or
+journal writes until re-enabled. Previously dispatched, waiting and uncertain
+jobs still reconcile; the eligibility filter runs before the batch LIMIT so
+parked jobs cannot starve them. Disabling does not discard evidence, mark an
+unknown result successful, or stop completion notification delivery. Analysis
+lookup receives the known workflow ID as an optional Host-port argument to
+bound historical JSON membership scans, preserving latest applicable related-run
+results and compatibility with older single-argument Hosts. This scopes reads;
+it does not replace JSON membership with an indexed association table.
+
 Status polling and recovery use one batched eligibility query against the current
 failed revision and its original request. Cancelled tasks, tasks with a newer
 revision, stale request IDs, other policy versions and active leases are excluded
