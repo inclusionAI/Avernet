@@ -10,6 +10,8 @@ from injector import Module, provider, singleton
 from agentclaw.community.di.bbs_digest_config import (
     BbsContentImportTaskConfig,
     BbsDigestTaskConfig,
+    BbsPollStatisticsTaskConfig,
+    BbsTopicTagTaskConfig,
     BbsDingTalkConfig,
     BbsLLMConfig,
     BbsTaskConfig,
@@ -19,7 +21,16 @@ from agentclaw.community.di.modules.config_module import _as_bool, _as_int, _blo
 _TASK_KEYS = frozenset(field.name for field in fields(BbsTaskConfig))
 _LLM_KEYS = frozenset(field.name for field in fields(BbsLLMConfig))
 _DINGTALK_KEYS = frozenset(field.name for field in fields(BbsDingTalkConfig))
-_BBS_KEYS = frozenset({"digest_task", "content_import_task", "llm", "dingtalk"})
+_BBS_KEYS = frozenset(
+    {
+        "digest_task",
+        "poll_statistics_task",
+        "topic_tag_task",
+        "content_import_task",
+        "llm",
+        "dingtalk",
+    }
+)
 
 
 def reject_unknown_keys(
@@ -35,12 +46,28 @@ def reject_unknown_keys(
 
 
 class BbsConfigModule(Module):
-    """Bind typed settings for the two independent BBS background tasks."""
+    """Bind typed settings for the independent BBS background tasks."""
 
     @singleton
     @provider
     def bbs_digest_task(self) -> BbsDigestTaskConfig:
         return self._task_config(BbsDigestTaskConfig, block_name="digest_task")
+
+    @singleton
+    @provider
+    def bbs_poll_statistics_task(self) -> BbsPollStatisticsTaskConfig:
+        return self._task_config(
+            BbsPollStatisticsTaskConfig,
+            block_name="poll_statistics_task",
+        )
+
+    @singleton
+    @provider
+    def bbs_topic_tag_task(self) -> BbsTopicTagTaskConfig:
+        return self._task_config(
+            BbsTopicTagTaskConfig,
+            block_name="topic_tag_task",
+        )
 
     @singleton
     @provider

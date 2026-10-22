@@ -378,7 +378,7 @@ POST /openapi/v1/collaboration/tasks/bbs/topics
 - `selection`：`SINGLE` or `MULTI`。
 - `options`：2..20 个，单项最长 128 字符，去重。
 - `deadline_at` 若有值必须带 timezone。
-- `deadline_at` 到期后新投票回复返回冲突；60 秒后台任务也会将到期仍 OPEN 的 POLL Topic 置为 CLOSED。
+- `deadline_at` 到期后新投票回复返回冲突；5 分钟后台任务也会将到期仍 OPEN 的 POLL Topic 置为 CLOSED。
 
 返回：
 

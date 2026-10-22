@@ -19,6 +19,20 @@ from agentclaw.community.core.task.forum.digest.protocols import (
     DigestTaskExecutorProtocol,
 )
 from agentclaw.community.core.task.forum.digest.scheduler import DigestScheduler
+from agentclaw.community.core.task.forum.poll_statistics.protocols import (
+    PollStatisticsTaskExecutorProtocol,
+)
+from agentclaw.community.core.task.forum.poll_statistics.scheduler import (
+    PollStatisticsScheduler,
+)
+from agentclaw.community.core.task.forum.poll_statistics.service import (
+    BbsPollStatisticsTaskService,
+)
+from agentclaw.community.core.task.forum.topic_tag.protocols import (
+    TopicTagTaskExecutorProtocol,
+)
+from agentclaw.community.core.task.forum.topic_tag.scheduler import TopicTagScheduler
+from agentclaw.community.core.task.forum.topic_tag.service import BbsTopicTagTaskService
 from agentclaw.community.core.task.forum.digest.service import BbsDigestTaskService
 from agentclaw.community.core.task.forum.poll_statistics_protocol import (
     ForumPollStatisticsServiceProtocol,
@@ -46,6 +60,8 @@ from agentclaw.community.core.task.forum.topic_tag_service_protocol import (
 from agentclaw.community.di.bbs_digest_config import (
     BbsContentImportTaskConfig,
     BbsDigestTaskConfig,
+    BbsPollStatisticsTaskConfig,
+    BbsTopicTagTaskConfig,
     BbsDingTalkConfig,
     BbsLLMConfig,
 )
@@ -90,7 +106,7 @@ def _read_dingtalk_secret(
 
 
 class BbsDigestModule(Module):
-    """Composition root for the BBS digest and content-import runtime slices."""
+    """Composition root for the backend-owned BBS background-task slices."""
 
     @singleton
     @provider
@@ -170,14 +186,26 @@ class BbsDigestModule(Module):
     def bbs_digest_task_executor(
         self,
         llm: BbsLLMProtocol,
-        poll_statistics: ForumPollStatisticsServiceProtocol,
-        topic_tags: ForumTopicTagServiceProtocol,
     ) -> DigestTaskExecutorProtocol:
-        return BbsDigestTaskService(
-            llm=llm,
-            poll_statistics=poll_statistics,
-            topic_tags=topic_tags,
-        )
+        return BbsDigestTaskService(llm=llm)
+
+    @singleton
+    @provider
+    @inject
+    def bbs_topic_tag_task_executor(
+        self,
+        topic_tags: ForumTopicTagServiceProtocol,
+    ) -> TopicTagTaskExecutorProtocol:
+        return BbsTopicTagTaskService(topic_tags=topic_tags)
+
+    @singleton
+    @provider
+    @inject
+    def bbs_poll_statistics_task_executor(
+        self,
+        poll_statistics: ForumPollStatisticsServiceProtocol,
+    ) -> PollStatisticsTaskExecutorProtocol:
+        return BbsPollStatisticsTaskService(poll_statistics=poll_statistics)
 
     @singleton
     @provider
@@ -207,6 +235,36 @@ class BbsDigestModule(Module):
         cache: CachePlugin,
     ) -> DigestScheduler:
         return DigestScheduler(executor=task_executor, cache=cache, config=config)
+
+    @singleton
+    @provider
+    @inject
+    def bbs_poll_statistics_scheduler(
+        self,
+        task_executor: PollStatisticsTaskExecutorProtocol,
+        config: BbsPollStatisticsTaskConfig,
+        cache: CachePlugin,
+    ) -> PollStatisticsScheduler:
+        return PollStatisticsScheduler(
+            executor=task_executor,
+            cache=cache,
+            config=config,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def bbs_topic_tag_scheduler(
+        self,
+        task_executor: TopicTagTaskExecutorProtocol,
+        config: BbsTopicTagTaskConfig,
+        cache: CachePlugin,
+    ) -> TopicTagScheduler:
+        return TopicTagScheduler(
+            executor=task_executor,
+            cache=cache,
+            config=config,
+        )
 
     @singleton
     @provider
