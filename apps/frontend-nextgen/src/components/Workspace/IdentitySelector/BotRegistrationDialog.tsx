@@ -48,16 +48,19 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
   const qwenWorkEnabled =
     getCapabilities().getQwenWorkBotRegistrationConfig(resolveBcsEndpoint() ?? '').status === 'available';
   const deepSeekHarnessEnabled = getCapabilities().getDeepSeekHarnessRegistrationEnabled().value;
+  const openClawCapability = getCapabilities().getOpenClawRegistrationEnabled();
+  const openClawEnabled = openClawCapability.status === 'available' && openClawCapability.value;
   const poolabEnabled = getCapabilities().getPoolabBridgeInstallation().value !== null;
   const engineOptions = [
     ...(poolabEnabled ? [{ value: 'poolab' as const, label: 'Poolab' }] : []),
     ...additionalPanels.map(({ id, label }) => ({ value: id, label })),
     ...(deepSeekHarnessEnabled ? [{ value: 'deepseek-harness', label: 'DeepSeek Harness' }] : []),
     ...(qwenWorkEnabled ? [{ value: 'qwenwork', label: '千问办公' }] : []),
-    { value: 'openclaw', label: 'OpenClaw' },
+    ...(openClawEnabled ? [{ value: 'openclaw', label: 'OpenClaw' }] : []),
   ];
-  const defaultEngine = engineOptions[0].value;
-  const [engine, setEngine] = useState<RegistrationEngine>(defaultEngine);
+  const defaultEngine = engineOptions[0]?.value ?? '';
+  const [selectedEngine, setEngine] = useState<RegistrationEngine>(defaultEngine);
+  const engine = engineOptions.some(({ value }) => value === selectedEngine) ? selectedEngine : defaultEngine;
   const AdditionalPanel = additionalPanels.find((panel) => panel.id === engine)?.Panel;
   const [mode, setMode] = useState<AccessMode>('self');
   const { identity } = useHumanIdentity();
@@ -117,13 +120,17 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
           <ModalDescription className="leading-5">选择 Bot 类型，按对应指南完成接入。</ModalDescription>
         </ModalHeader>
 
-        <Segmented<RegistrationEngine>
-          aria-label="Bot 类型"
-          value={engine}
-          onChange={setEngine}
-          className="w-full overflow-x-auto"
-          options={engineOptions}
-        />
+        {engineOptions.length > 0 ? (
+          <Segmented<RegistrationEngine>
+            aria-label="Bot 类型"
+            value={engine}
+            onChange={setEngine}
+            className="w-full overflow-x-auto"
+            options={engineOptions}
+          />
+        ) : (
+          <Empty compact title="暂无可用的接入方式" description="当前未启用 Bot 接入方式，请联系管理员。" />
+        )}
         {AdditionalPanel ? (
           <Suspense fallback={<p role="status">正在加载接入指南…</p>}>
             <AdditionalPanel open={open} />
@@ -134,7 +141,7 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
           <QwenWorkRegistrationPanel open={open} />
         ) : engine === 'poolab' ? (
           <PoolabRegistrationPanel open={open} />
-        ) : (
+        ) : engine === 'openclaw' && openClawEnabled ? (
           <>
             <label className="block space-y-2 text-xs font-medium">
               <span>Bot 名称</span>
@@ -237,7 +244,7 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
               </div>
             )}
           </>
-        )}
+        ) : null}
       </ModalContent>
     </Modal>
   );
