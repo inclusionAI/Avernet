@@ -83,30 +83,40 @@ export default function AutoAnalysisPanel({ workflowId }: { workflowId: string }
     </div>
     <p className="text-xs text-muted-foreground">失败后分析运行问题并生成修复建议，不修改工作流。开关即时保存，已有任务继续处理。</p>
     <div className="space-y-3 border-t border-border pt-3">
-    <h4 className="text-sm font-medium">每日分析计划 <span className="ml-2 text-xs font-normal text-muted-foreground">{!policy.dailyConfigured ? '未配置' : policy.enabled ? '已开启' : '已暂停'}</span></h4>
+    <h4 className="text-sm font-medium">每日分析计划 <span className="ml-2 text-xs font-normal text-muted-foreground">{!policy.dailyConfigured ? '尚未启用' : policy.enabled ? '已开启' : '已暂停'}</span></h4>
     <div className="flex flex-wrap items-end gap-3">
       <label className="text-sm text-foreground">每日执行时间 <span className="text-muted-foreground">Asia/Shanghai</span>
         <input type="time" aria-label="每日执行时间" value={time} disabled={!policy.enabled || pending} onChange={event => setTime(event.target.value)} className="mt-2 block rounded-md border border-input bg-background px-3 py-2 text-foreground" /></label>
       <label className="text-sm text-foreground">最低影响<select aria-label="最低影响" value={impact} onChange={event => setImpact(event.target.value as 'medium' | 'high')} disabled={!policy.enabled || pending} className="mt-2 block rounded-md border border-input bg-background px-3 py-2"><option value="medium">中等及以上</option><option value="high">高等及以上</option></select></label>
       <button type="button" disabled={!policy.enabled || pending || !time || policy.dailyConfigured && time === policy.dailyTime && impact === (policy.minimumImpact ?? 'medium') && policy.scopeVersion === 'all-qualified/v1'}
         onClick={() => save({ dailyTime: time, minimumImpact: impact, dailyConfigured: true }, 'analysis', '分析计划保存中…', '分析计划已保存，按此时间和范围执行')}
-        className="rounded-md border border-input px-3 py-2 text-sm disabled:opacity-50">{saving === '分析计划保存中…' ? '保存中…' : '保存分析计划'}</button>
+        className="rounded-md border border-input px-3 py-2 text-sm disabled:opacity-50">{saving === '分析计划保存中…' ? '保存中…' : policy.dailyConfigured ? '保存分析计划' : '保存并启用每日分析'}</button>
     </div>
-    <p className="text-xs text-muted-foreground">保存后启用每日计划，分析前一自然日运行及历史未处理的达标建议。</p>
+    <p className="text-xs text-muted-foreground">{!policy.dailyConfigured ? '显示的时间仅为待保存设置，尚未启动每日分析；失败后自动分析由上方开关控制。' : '分析前一自然日运行及历史未处理的达标建议。'}</p>
     </div>
     {showFeedback('analysis')}
     {history === 'analysis' && <div id="automation-history-analysis"><AutomationHistory key={`${workflowId}:analysis`} kind="analysis" workflowId={workflowId} retry={retry} /></div>}
     </section>
     <section aria-label="自动优化" className="space-y-3 rounded-xl border border-input bg-card p-4">
       <div className="flex items-center gap-3"><h3 className="font-medium text-foreground">自动优化</h3>{historyButton('optimization')}</div>
-      <label className="flex items-center gap-2 text-sm">
+      {policy.dailyConfigured ? <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" aria-label="自动生成优化草稿" checked={pendingChanges.autoDraft ?? policy.autoDraft} disabled={!policy.enabled || !policy.dailyConfigured || pending}
           onChange={event => save({ autoDraft: event.target.checked }, 'optimization', event.target.checked ? '自动优化开启中…' : '自动优化关闭中…', '自动优化设置已保存')}
           className="h-4 w-4 shrink-0 accent-primary" />
         自动生成优化草稿
-      </label>
+      </label> : <div className="space-y-2">
+        <p className="text-sm">尚未开启自动优化</p>
+        {policy.enabled ? <>
+          <p className="text-xs text-muted-foreground">将保存上方计划：每天 {time || '（请选择时间）'}（上海时间），{impact === 'high' ? '高等及以上' : '中等及以上'}影响；并开启自动优化。</p>
+          <button type="button" disabled={pending || !time}
+            onClick={() => save({ dailyTime: time, minimumImpact: impact, dailyConfigured: true, autoDraft: true }, 'optimization', '正在保存计划并开启自动优化…', '每日分析计划和自动优化已开启，按计划执行')}
+            className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50">{feedback?.section === 'optimization' && pending ? '开启中…' : '保存计划并开启自动优化'}</button>
+        </> : <button type="button" disabled={pending}
+          onClick={() => save({ enabled: true }, 'optimization', '自动分析开启中…', '自动分析已开启，请确认上方每日计划后开启自动优化')}
+          className="rounded-md border border-input px-3 py-2 text-sm disabled:opacity-50">开启自动分析</button>}
+      </div>}
       <p className="text-xs text-muted-foreground">基于每日分析计划生成草稿，仍需审阅确认发布，不会自动部署。</p>
-      {(!policy.enabled || !policy.dailyConfigured) && <p className="text-xs text-muted-foreground">请先开启自动分析并保存每日分析计划，再开启自动优化。</p>}
+      {!policy.enabled && <p className="text-xs text-muted-foreground">自动分析已关闭，开启后才能按每日计划自动优化；已有任务继续处理。</p>}
       {showFeedback('optimization')}
       {history === 'optimization' && <div id="automation-history-optimization"><AutomationHistory key={`${workflowId}:optimization`} kind="optimization" workflowId={workflowId} retry={retry} /></div>}
     </section>

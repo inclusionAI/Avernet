@@ -58,6 +58,13 @@ unrelated local edits. Errors retain local input, and success requires the API
 response rather than an optimistic success message. Feedback appears beside the
 changed section; success clears after 2.5 seconds, while failures remain visible.
 The execution environment stays in a compact row above the configuration sections.
+An unconfigured daily plan is labelled as not enabled, and its displayed time is
+explicitly a draft rather than an active schedule. With analysis enabled, the
+optimization section previews the currently entered time/impact and offers one
+explicit action to save that plan and enable automatic drafts in a single existing
+versioned policy write. Merely opening the page does not activate anything. With
+analysis disabled, the section offers to enable analysis only; already configured
+plans retain the existing independent draft toggle and do not save unrelated edits.
 
 ## Evolution-task completion notices
 

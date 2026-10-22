@@ -7,20 +7,92 @@ import AutoAnalysisPanel from '../AutoAnalysisPanel'
 const requests: { url: URL; method: string; body?: Record<string, unknown> }[] = []
 const policy = { workflowId: 'wf/a', enabled: false, autoDraft: false, dailyTime: '09:00', version: 0, dailyConfigured: false, source: 'default', timezone: 'Asia/Shanghai', updatedAtMs: 0 }
 let saveError = ''
+let waitForSave: Promise<void> | undefined
+let storedPolicy: Record<string, unknown>
 beforeEach(() => {
   requests.length = 0
   saveError = ''
+  waitForSave = undefined
+  storedPolicy = { ...policy }
   vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(input, 'http://localhost'), method = init?.method ?? 'GET'
     const body = init?.body ? JSON.parse(String(init.body)) : undefined
     requests.push({ url, method, body })
-    if (url.pathname.endsWith('/auto-analysis')) return { ok: !saveError, json: async () => saveError ? { error: saveError } : { ...policy, ...body } }
+    if (method === 'PUT') await waitForSave
+    if (url.pathname.endsWith('/auto-analysis')) {
+      if (method === 'PUT' && !saveError) storedPolicy = { ...storedPolicy, ...body, version: Number(storedPolicy.version) + 1 }
+      return { ok: !saveError, json: async () => saveError ? { error: saveError } : { ...storedPolicy } }
+    }
     if (url.pathname.endsWith('/automation-status')) return { ok: true, json: async () => ({ jobs: [], retryableJobs: [], coverage: { total: 32, pending: 0, failed: 0, partial: 24, unknown: 7 } }) }
     if (url.pathname.endsWith('/automation-records')) return { ok: true, json: async () => ({
       jobs: url.searchParams.get('kind') === 'analysis' ? [{ id: 'run-job', kind: 'auto_run', status: 'done', attempts: 1, reason: null, flowId: 'run/a', complete: true }] : [], nextCursor: null,
     }) }
     throw new Error(`Unexpected request: ${method} ${url.pathname}`)
   }))
+})
+
+it('explicitly saves the displayed daily plan and enables optimization in one request, without saving other drafts', async () => {
+  storedPolicy = { ...policy, enabled: true, version: 7, executionEnvironment: 'pre' }
+  mount()
+  const start = await screen.findByRole('button', { name: '保存计划并开启自动优化' })
+  expect(screen.getByText('尚未启用')).toBeVisible()
+  expect(screen.queryByRole('checkbox', { name: '自动生成优化草稿' })).not.toBeInTheDocument()
+  expect(requests.every(request => request.method === 'GET')).toBe(true)
+  fireEvent.change(screen.getByLabelText('每日执行时间'), { target: { value: '10:30' } })
+  await userEvent.selectOptions(screen.getByLabelText('最低影响'), 'high')
+  await userEvent.type(screen.getByLabelText('通知人'), 'unsaved-recipient')
+  expect(screen.getByText(/每天 10:30.*高等及以上/)).toBeVisible()
+  await userEvent.click(start)
+  expect(await screen.findByRole('checkbox', { name: '自动生成优化草稿' })).toBeChecked()
+  expect(requests.filter(request => request.method === 'PUT').map(request => request.body)).toEqual([
+    { enabled: true, autoDraft: true, dailyTime: '10:30', minimumImpact: 'high', dailyConfigured: true, expectedVersion: 7 },
+  ])
+  expect(screen.getByLabelText('通知人')).toHaveValue('unsaved-recipient')
+  expect(screen.getByRole('combobox', { name: '自动任务执行环境' })).toHaveValue('pre')
+})
+
+it('acknowledges combined activation immediately, blocks duplicate writes and retains the plan after rejection', async () => {
+  storedPolicy = { ...policy, enabled: true }
+  mount()
+  const start = await screen.findByRole('button', { name: '保存计划并开启自动优化' })
+  fireEvent.change(screen.getByLabelText('每日执行时间'), { target: { value: '11:45' } })
+  let release!: () => void
+  waitForSave = new Promise(resolve => { release = resolve })
+  saveError = '计划保存失败'
+  await userEvent.click(start)
+  expect(screen.getByRole('status')).toHaveTextContent('正在保存计划并开启自动优化')
+  expect(screen.getByRole('button', { name: '开启中…' })).toBeDisabled()
+  await userEvent.click(screen.getByRole('button', { name: '开启中…' }))
+  expect(requests.filter(request => request.method === 'PUT')).toHaveLength(1)
+  await act(async () => { release() })
+  expect(await screen.findByRole('alert')).toHaveTextContent('计划保存失败')
+  expect(screen.getByLabelText('每日执行时间')).toHaveValue('11:45')
+  expect(screen.queryByRole('checkbox', { name: '自动生成优化草稿' })).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '保存计划并开启自动优化' })).toBeEnabled()
+})
+
+it('offers an analysis enable action without implicitly activating the daily plan or optimization', async () => {
+  mount()
+  await userEvent.click(await screen.findByRole('button', { name: '开启自动分析' }))
+  expect(await screen.findByRole('button', { name: '保存计划并开启自动优化' })).toBeEnabled()
+  expect(requests.filter(request => request.method === 'PUT').map(request => request.body)).toEqual([
+    { enabled: true, autoDraft: false, dailyTime: '09:00', dailyConfigured: false, expectedVersion: 0 },
+  ])
+})
+
+it('keeps configured optimization toggles separate from unsaved daily-plan edits', async () => {
+  storedPolicy = { ...policy, enabled: true, dailyConfigured: true, minimumImpact: 'medium' }
+  mount()
+  const toggle = await screen.findByRole('checkbox', { name: '自动生成优化草稿' })
+  fireEvent.change(screen.getByLabelText('每日执行时间'), { target: { value: '14:30' } })
+  await userEvent.selectOptions(screen.getByLabelText('最低影响'), 'high')
+  await userEvent.click(toggle)
+  expect(toggle).toBeChecked()
+  expect(requests.filter(request => request.method === 'PUT').map(request => request.body)).toEqual([
+    { enabled: true, autoDraft: true, dailyTime: '09:00', dailyConfigured: true, expectedVersion: 0 },
+  ])
+  expect(screen.getByLabelText('每日执行时间')).toHaveValue('14:30')
+  expect(screen.getByLabelText('最低影响')).toHaveValue('high')
 })
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 function mount() {

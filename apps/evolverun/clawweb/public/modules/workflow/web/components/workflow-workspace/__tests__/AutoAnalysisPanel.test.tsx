@@ -76,16 +76,17 @@ describe('automatic analysis settings and execution records', () => {
     await userEvent.click(toggle)
     expect(mocks.update).toHaveBeenCalledWith({ enabled: true, autoDraft: false, dailyTime: '09:00', dailyConfigured: false, expectedVersion: 0 }, expect.objectContaining({ onError: expect.any(Function) }))
     expect(screen.getByLabelText('每日执行时间')).toBeDisabled()
-    expect(screen.getByLabelText('自动生成优化草稿')).toBeDisabled()
+    expect(screen.queryByLabelText('自动生成优化草稿')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '开启自动分析' })).toBeDisabled()
   })
   it('distinguishes inherited failure analysis from unconfigured daily scheduling and saves both settings explicitly', async () => {
     mocks.policy.enabled = true; mocks.policy.source = 'environment'
     render(<AutoAnalysisPanel workflowId="wf-1" />)
-    expect(screen.getByText('未配置')).toBeVisible()
+    expect(screen.getByText('尚未启用')).toBeVisible()
     expect(screen.getByRole('switch', { name: '自动分析' })).toHaveAttribute('aria-checked', 'true')
     expect(mocks.update).not.toHaveBeenCalled()
     await userEvent.selectOptions(screen.getByLabelText('最低影响'), 'high')
-    await userEvent.click(screen.getByRole('button', { name: '保存分析计划' }))
+    await userEvent.click(screen.getByRole('button', { name: '保存并启用每日分析' }))
     expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ dailyTime: '09:00', minimumImpact: 'high' }), expect.any(Object))
   })
   it('shows real run identity, Shanghai time, partial evidence and existing analysis detail links on demand', async () => {
