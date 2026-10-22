@@ -9,7 +9,7 @@ import type { TaskNodeView, TaskView } from '@/assets/TaskPanel/types';
 import type { ResolvedSessionTarget } from '@/assets/TaskPanel/sessionResolution';
 import { TaskOverviewV2, type TaskOverviewV2Props } from '@/assets/TaskPanel/v2/TaskOverviewV2';
 import type { TaskPanelNav } from '@/assets/TaskPanel/v2/taskPanelNav';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it } from '@jest/globals';
 
 const nodeArtifacts = (n: Partial<TaskNodeView>): TaskNodeView =>
@@ -37,6 +37,7 @@ const task = {
   sourceLabel: 'Bot',
   ownerBotName: '规划师Bot',
   ownerBotId: 'bot-1',
+  ownerUserId: 'user-1',
   createdAt: '2026-10-20 10:00',
   finishedAt: null,
   loopRound: 1,
@@ -186,6 +187,37 @@ describe('TaskOverviewV2(L1)', () => {
     expect(screen.queryByText('文件')).toBeNull(); // 无 file kind 产物
     // url_link 卡可打开
     expect(screen.getByTitle('打开产物:需求说明书').getAttribute('href')).toBe('https://yuque.example/doc1');
+  });
+
+  it('session_file 产物可在 TaskPanel 内预览，并可关闭抽屉', async () => {
+    const sessionArtifact = {
+      id: 'session-pdf',
+      name: '附件.pdf',
+      type: 'document' as const,
+      kind: 'file' as const,
+      owner: 'bot-1',
+      updatedAt: '2026-10-20T11:00:00.000Z',
+      fileRef: {
+        storageType: 'session_file' as const,
+        storageId: 'sess-9',
+        fileId: 'f-1',
+        fileType: 'application/pdf',
+      },
+    };
+    render(<TaskOverviewV2 {...props({ task: { ...task, artifacts: [...task.artifacts, sessionArtifact] } })} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '预览产物 附件.pdf' }));
+
+    expect(await screen.findByTestId('task-artifact-preview-drawer')).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByTitle('附件.pdf 预览').getAttribute('src')).toBe(
+        '/api/v1/collaboration/sessions/sess-9/files/f-1/content?show=true',
+      ),
+    );
+    expect(screen.getByRole('button', { name: '下载产物 附件.pdf' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭产物预览' }));
+    expect(screen.queryByTestId('task-artifact-preview-drawer')).toBeNull();
   });
 
   it('PRD 两区结构:只有步骤与产物,无「任务产出」「任务信息」区', () => {

@@ -168,7 +168,11 @@ export const TaskNodePanelV2: React.FC<TaskNodePanelV2Props> = ({
       </section>
 
       {/* ③ 节点产物(nodes[].artifacts 已按节点圈定,无需过滤) */}
-      <ArtifactsSection artifacts={node.artifacts} apiBaseUrl={apiBaseUrl} />
+      <ArtifactsSection
+        artifacts={node.artifacts}
+        apiBaseUrl={apiBaseUrl}
+        context={{ taskId: task.id, ownerBotId: task.ownerBotId, ownerUserId: task.ownerUserId }}
+      />
 
       {/* ④ 群节点追加:存量的群成员 + 群消息明细(吸收,不再走左侧 rail) */}
       {groupEmbedEnabled && (

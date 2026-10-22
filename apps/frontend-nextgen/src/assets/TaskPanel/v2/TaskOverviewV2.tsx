@@ -109,7 +109,11 @@ export const TaskOverviewV2: React.FC<TaskOverviewV2Props> = ({ task, nav, apiBa
           </div>
         )}
       </section>
-      <ArtifactsSection artifacts={aggregatedArtifacts} apiBaseUrl={apiBaseUrl} />
+      <ArtifactsSection
+        artifacts={aggregatedArtifacts}
+        apiBaseUrl={apiBaseUrl}
+        context={{ taskId: task.id, ownerBotId: task.ownerBotId, ownerUserId: task.ownerUserId }}
+      />
     </div>
   );
 };

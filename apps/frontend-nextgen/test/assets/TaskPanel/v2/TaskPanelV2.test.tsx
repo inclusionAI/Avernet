@@ -20,6 +20,7 @@ const baseTask = {
   sourceLabel: '',
   ownerBotName: '规划师',
   ownerBotId: 'bot-1',
+  ownerUserId: 'user-1',
   createdAt: '',
   finishedAt: null,
   loopRound: 1,

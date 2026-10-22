@@ -11,7 +11,7 @@ export const artifactDescriptorWorkspaceFile: TaskArtifactDescriptorDto = {
   artifact_name: null, // 缺名回落 content.file_name
   kind: 'file',
   content: {
-    storage_type: 'BOT_WORKSPACE',
+    storage_type: 'bot_workspace',
     storage_id: 'workspace/report.md',
     file_name: '竞品分析报告.md',
     file_id: null,
@@ -27,7 +27,7 @@ export const artifactDescriptorSessionFile: TaskArtifactDescriptorDto = {
   artifact_name: '附件材料.pdf',
   kind: 'file',
   content: {
-    storage_type: 'SESSION_FILE',
+    storage_type: 'session_file',
     storage_id: 'sess-9',
     file_name: '材料.pdf',
     file_id: 'f-1',
