@@ -131,6 +131,10 @@ class Reader:
                 if request.get("method") == "initialize" and os.environ.get("MOCK_SOCKET_INIT_ERROR"):
                     send_frame(json.dumps({"id": request["id"], "error": {"message": "fixture initialization rejected"}}).encode())
                     continue
+                if request.get("method") == "bridge/transportSmokeUnknown":
+                    send_frame(json.dumps({"id": request["id"], "error": {
+                        "code": -32601, "message": "Method not found"}}).encode())
+                    continue
                 if request.get("method") == "turn/start" and request["params"]["input"][0]["text"] == "disconnect":
                     with open(log_path, "a") as log:
                         log.write(json.dumps({"method": "fixture/disconnect", "pid": os.getpid()}) + "\n")

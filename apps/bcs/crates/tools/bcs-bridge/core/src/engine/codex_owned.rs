@@ -107,17 +107,13 @@ mod tests {
         async fn established(&self, _: &str) -> Result<(), String> { Ok(()) }
     }
 
-    /// Opt-in local compatibility test: isolated engine home, no model turn,
-    /// no changes to the real launcher's config and no external Bot connection.
-    #[tokio::test]
-    #[ignore = "set BCS_BRIDGE_TEST_CODEX_BIN to a local Codex binary supporting unix://"]
-    async fn real_codex_socket_initialization_and_rpc_burst() {
-        let bin = std::path::PathBuf::from(std::env::var_os("BCS_BRIDGE_TEST_CODEX_BIN")
-            .expect("BCS_BRIDGE_TEST_CODEX_BIN must name a local Codex binary"));
+    // Exercise the same transport assertions in CI with a deterministic fixture
+    // and, on demand, against an installed Codex without making a model turn.
+    async fn assert_socket_initialization_and_rpc_burst(bin: std::path::PathBuf, prefix_args: Vec<String>) {
         let _ = tracing_subscriber::fmt().with_env_filter("bcs_bridge_core::engine=debug").with_test_writer().try_init();
         let home = tempfile::tempdir().unwrap();
         std::fs::create_dir(home.path().join("codex")).unwrap();
-        let engine = CodexAppServer::new(bin.clone(), Vec::new());
+        let engine = CodexAppServer::new(bin.clone(), prefix_args);
         let mut req = TurnRequest::new("transport-smoke", "unused", home.path(), Arc::new(Observer));
         req.env = vec![
             ("HOME".into(), home.path().to_string_lossy().into_owned()),
@@ -151,6 +147,25 @@ mod tests {
             owned.shutdown().await;
             drop(owned);
             assert!(!directory.exists());
-        }).await.expect("real Codex transport smoke must be bounded");
+        }).await.expect("Codex transport smoke must be bounded");
+    }
+
+    #[tokio::test]
+    async fn mock_codex_socket_initialization_and_rpc_burst() {
+        let python = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+            .map(|dir| dir.join("python3")).find(|path| path.is_file()).expect("python3 fixture interpreter");
+        assert_socket_initialization_and_rpc_burst(python, vec![
+            format!("{}/tests/fixtures/mock_codex_socket.py", env!("CARGO_MANIFEST_DIR")),
+        ]).await;
+    }
+
+    /// Opt-in local compatibility test: isolated engine home, no model turn,
+    /// no changes to the real launcher's config and no external Bot connection.
+    #[tokio::test]
+    #[ignore = "set BCS_BRIDGE_TEST_CODEX_BIN to a local Codex binary supporting unix://"]
+    async fn real_codex_socket_initialization_and_rpc_burst() {
+        let bin = std::path::PathBuf::from(std::env::var_os("BCS_BRIDGE_TEST_CODEX_BIN")
+            .expect("BCS_BRIDGE_TEST_CODEX_BIN must name a local Codex binary"));
+        assert_socket_initialization_and_rpc_burst(bin, Vec::new()).await;
     }
 }
