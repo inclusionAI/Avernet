@@ -234,6 +234,13 @@ def set_policy_rejected():
     pass
 
 
+@endpoint_test(method="PUT", path=f"{_GENOME}/policy", scenario="duplicate_member_refused_before_parsing",
+               input=_params(raw_body=b'{"mutable_genes": ["persona"], "pins": [], "risk_overrides": {"persona": "T3"}, "risk_overrides": {}}'),
+               seed=_seed_active, expect=ExpectError(status=422))
+def set_policy_duplicate_member():
+    pass
+
+
 # -- refs ----------------------------------------------------------------------------------------
 
 

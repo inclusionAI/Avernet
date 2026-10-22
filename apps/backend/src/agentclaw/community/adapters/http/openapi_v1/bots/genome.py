@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Path, Query, Request, Response
+from fastapi import APIRouter, Depends, Path, Query, Request, Response
+from fastapi.exceptions import RequestValidationError
 
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
@@ -26,6 +27,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import envelope, env
 from agentclaw.community.api.bot_genome_promotion_service import GenomePromotionServiceProtocol
 from agentclaw.community.api.bot_genome_registry_service import GenomeRegistryProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.core.bot_genome.canonical import NotCanonicalizable, loads_strict
 from agentclaw.community.core.bot_genome.errors import LimitExceeded
 from agentclaw.community.core.bot_genome.limits import MAX_UPLOAD_BYTES
 from agentclaw.community.core.bot_genome.spec_models import GenomePolicy
@@ -104,6 +106,25 @@ def _actor(actor_id: str, caller: ActingCaller, *, run: RunScope | None = None) 
     return Provenance(ProvenanceKind.USER, actor_id, recorded_as=recorded_as)
 
 
+async def reject_duplicate_members(request: Request) -> None:
+    """Contract §3.1: a record with a duplicate member name is refused, never parsed last-wins.
+
+    FastAPI's JSON parsing keeps the last of two duplicate members, so a body
+    with `risk_overrides` twice would record the second silently. The raw
+    body is read through the registry's strict loader first; malformed JSON
+    is left to FastAPI's own parsing to answer.
+    """
+    body = await request.body()
+    if not body:
+        return
+    try:
+        loads_strict(body.decode("utf-8"))
+    except NotCanonicalizable as exc:
+        raise RequestValidationError([{"type": "value_error", "loc": ("body",), "msg": f"not a contract record: {exc}"}]) from exc
+    except (UnicodeDecodeError, ValueError):
+        return
+
+
 def _summary(meta: RevisionMetadata, bot: BotRef) -> RevisionSummary:
     return RevisionSummary(
         id=meta.id, seq=meta.seq, bot=BotIdentityPayload(owner_id=bot.owner_id, bot_id=bot.bot_id),
@@ -174,6 +195,7 @@ async def record_genome_patch(
     caller: ActingCallerDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     registry: GenomeRegistryProtocol = Injected(GenomeRegistryProtocol),
+    _: None = Depends(reject_duplicate_members),
 ) -> Envelope[RevisionRecorded]:
     """Record a revision by applying a Genome Patch to its own `base`.
 
@@ -270,6 +292,7 @@ async def set_genome_policy(
     caller: ActingCallerDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     registry: GenomeRegistryProtocol = Injected(GenomeRegistryProtocol),
+    _: None = Depends(reject_duplicate_members),
 ) -> Envelope[RevisionRecorded]:
     """Record a revision with `active`'s content and this policy. The policy is not bot state: it is what automation may change."""
     bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)

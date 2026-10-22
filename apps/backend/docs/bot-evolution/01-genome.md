@@ -865,6 +865,11 @@ bot.
   `revision` metadata is excluded, so identical content always has the same
   id, whoever produced it. Recording content that already exists returns the
   existing revision; no duplicate is created and no new `seq` is assigned.
+  A run's candidate is the one exception: its candidate id is its patch
+  digest and names its revision's patch, so a candidate patch whose result
+  is a revision recorded from another patch (or a capture) is refused
+  (`already_recorded`) rather than handed that revision; promote the
+  existing revision instead. The same patch retried gets its revision back.
 - **`seq`.** A per-bot counter assigned when a new id is first recorded, for
   humans: the bot's first recorded revision is `r1`, the next new one `r2`,
   and so on. Example: a strategy submits a candidate whose content is new,
@@ -1613,8 +1618,10 @@ and `created: false`.
 Errors: 404 the patch's `base` is not a revision of this bot; 422
 `patch_rejected` with every reason (`does_not_apply`, `gene_not_mutable`,
 `pinned_item`, `gene_not_allowed`, `missing_rationale`, `missing_evidence`,
-`schema`, `not_canonical`, and the apply predicates of contract §6.4); 413
-`limit_exceeded`.
+`schema`, `not_canonical`, `already_recorded` for a candidate whose result is
+an existing revision, and the apply predicates of contract §6.4); 413
+`limit_exceeded`. A body with a duplicate member name is refused before it is
+parsed (contract §3.1).
 
 ### POST /bots/{bot_id}/genome/revisions:capture
 

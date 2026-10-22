@@ -347,6 +347,17 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         tier, flags = patch_assessment(outcome, base.policy)
         patch_bytes = canonicalize(patch_json)
         patch_row = GenomePatchRow(**self._axes(bot), digest=sha256_digest(patch_bytes), base_id=base.revision.id, content=patch_bytes.decode("utf-8"), created_at=_now())
+        if run is not None:
+            # A candidate's id is its patch digest and names its revision's patch. Content-addressed
+            # dedupe would hand this patch a revision recorded from another patch (or a capture),
+            # whose metadata and status are not this candidate's: a candidate is new content.
+            existing = self._revisions.get(**self._axes(bot), revision_id=revision_id(outcome.spec, base.policy))
+            if existing is not None and existing.patch_digest != patch_row.digest:
+                origin = "another patch" if existing.patch_digest else "the bot's own state"
+                raise PatchRejected([Reason(
+                    "already_recorded", "patch",
+                    f"the result is revision {existing.revision_id} (r{existing.seq}), recorded earlier from {origin}; a candidate is new content, promote that revision instead",
+                )])
         return self._record(
             bot, outcome.spec, base.policy, parent=base.revision.id, created_by=created_by, status=status,
             writes=writes, origin="genome/patch", patch=patch_row, evidence=list(patch.evidence),

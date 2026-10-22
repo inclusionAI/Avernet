@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import FastAPI, Response
+from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from starlette.requests import Request
 
@@ -343,6 +344,14 @@ def test_every_genome_error_maps_to_its_status_with_its_data(error, status, data
 def test_policy_rejected_keeps_its_own_message() -> None:
     assert json.loads(mapped_error_response(PolicyRejected([]), _request()).body)["message"] == "Policy rejected"
     assert json.loads(mapped_error_response(PatchRejected([]), _request()).body)["message"] == "Patch rejected"
+
+
+async def test_a_duplicate_member_name_is_refused_before_the_model_parses_it() -> None:
+    with pytest.raises(RequestValidationError):
+        await genome.reject_duplicate_members(_request("PUT", body=b'{"mutable_genes": [], "pins": [], "risk_overrides": {"persona": "T3"}, "risk_overrides": {}}'))
+    assert await genome.reject_duplicate_members(_request("PUT", body=b'{"mutable_genes": [], "pins": [], "risk_overrides": {}}')) is None
+    assert await genome.reject_duplicate_members(_request("PUT", body=b"")) is None
+    assert await genome.reject_duplicate_members(_request("PUT", body=b"{not json")) is None, "malformed JSON is FastAPI's to answer"
 
 
 def test_timestamps_carry_the_contracts_z_suffix() -> None:

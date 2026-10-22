@@ -658,6 +658,11 @@ matters for resources, whose add and remove are T1.
 - Every op's gene path is covered by `mutable_genes`, overlaps no pin, and,
   for a patch recorded for an Evolution Run, is covered by the run's
   `allowed_genes`.
+- A patch recorded for an Evolution Run is new content: when its result is
+  a revision already recorded from another patch or from a capture, it is
+  refused (`already_recorded`), because its candidate id (the patch digest)
+  would not name that revision's patch. The same patch retried returns its
+  revision. An owner's draft that reproduces a revision gets that revision.
 - `rationale` is non-empty. `evidence` is required for every op except
   `file.edit` on a resource, `memory.retire` and `persona.remove`, which can
   be motivated by the rationale alone.

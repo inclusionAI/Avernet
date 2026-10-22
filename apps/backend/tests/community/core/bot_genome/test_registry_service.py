@@ -179,6 +179,24 @@ async def test_record_patch_refusals_leave_nothing_behind(world: World) -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_candidate_whose_result_is_an_existing_revision_is_refused(world: World) -> None:
+    await _capture_support_bot(world)
+    edit = load_patch("01-file-edit.json")
+    draft = await world.registry.record_patch(BOT, edit, created_by=OWNER, status=RevisionStatus.DRAFT)
+    reworded = edit.model_copy(update={"rationale": "the same change, proposed by a run"})  # another digest, the same result
+    run = RunScope("run_9", "clawevolve/bot-evolution@2.0.0", ("persona", "skills", "resources"))
+    with pytest.raises(PatchRejected) as caught:
+        await world.registry.record_patch(BOT, reworded, created_by=RUN, status=RevisionStatus.CANDIDATE, run=run)
+    reason = caught.value.reasons[0]
+    assert (reason.code, reason.location) == ("already_recorded", "patch") and f"r{draft.revision.revision.seq}" in reason.message
+    assert world.registry.list_refs(BOT) == [] and world.registry.list_revisions(BOT).total == 2, "nothing recorded"
+    same = await world.registry.record_patch(BOT, edit, created_by=RUN, status=RevisionStatus.CANDIDATE, run=run)
+    assert (same.created, same.revision.revision.id, same.ref) == (False, draft.revision.revision.id, "candidate/run_9/1"), "the same patch is a retry"
+    again = await world.registry.record_patch(BOT, edit, created_by=OWNER, status=RevisionStatus.DRAFT)
+    assert not again.created and again.revision.revision.id == draft.revision.revision.id, "a draft that reproduces a revision gets it back"
+
+
+@pytest.mark.asyncio
 async def test_a_patch_on_another_bots_revision_is_not_found(world: World) -> None:
     await _capture_support_bot(world)
     with pytest.raises(RevisionNotFound):

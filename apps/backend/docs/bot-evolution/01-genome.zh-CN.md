@@ -809,6 +809,9 @@ Manifest 文档不同，修订版从不把某个类别留给先前状态，因�
 - **Id。** `id = "sha256:" + hex(SHA-256(RFC8785({spec, policy})))`。`revision`
   元数据被排除在外，因此相同的内容总是具有相同的 id，无论由谁产生。记录已存在的
   内容会返回已有的修订版；不会创建重复项，也不会分配新的 `seq`。
+  运行的候选是唯一的例外：候选 id 就是其补丁摘要，指向该修订版的补丁，所以当候选补丁
+  的结果是由另一个补丁（或一次捕获）记录的修订版时会被拒绝（`already_recorded`），
+  而不是被交给那个修订版；应改为晋升已有的修订版。同一补丁重试仍会得到其修订版。
 - **`seq`。** 一个每 Bot 计数器，在新的 id 首次被记录时分配，供人阅读：Bot 第一个
   记录的修订版是 `r1`，下一个新修订版是 `r2`，依此类推。示例：进化策略提交了一个内容
   全新的候选，于是它成为 `r42`；同一提交的重试会再次返回 `r42`，而不是创建 `r43`。
@@ -1463,8 +1466,9 @@ GET /openapi/v1/bots/bot_123/genome/revisions?status=candidate&parent=sha256:a90
 
 错误：404 补丁的 `base` 不是此 Bot 的修订版；422 `patch_rejected` 并附带全部原因
 （`does_not_apply`、`gene_not_mutable`、`pinned_item`、`gene_not_allowed`、
-`missing_rationale`、`missing_evidence`、`schema`、`not_canonical`，以及契约 §6.4
-的各项应用判定）；413 `limit_exceeded`。
+`missing_rationale`、`missing_evidence`、`schema`、`not_canonical`、候选结果为已有
+修订版时的 `already_recorded`，以及契约 §6.4 的各项应用判定）；413 `limit_exceeded`。
+请求体中出现重复成员名会在解析前被拒绝（契约 §3.1）。
 
 ### POST /bots/{bot_id}/genome/revisions:capture
 
