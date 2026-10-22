@@ -27,7 +27,9 @@ Owner waiting and effect waiting have separate deadlines. Owner expiry releases 
 
 ## Handbook and Agent assessment
 
-Handbook content has one source: OCB `clawevolve-recovery-handbook/SKILL.md` and `mcp/handbook.md`. It is packaged into the AIS Agent workspace only, not installed in the target Bot. The public catalog retains category references without internal professional content. Unsupported categories have no generic-retry chapter; the Agent assesses them from the diagnosis and actual evidence.
+Handbook content has one source: OCB `clawevolve-recovery-handbook/SKILL.md` and its topic directories, including `mcp/handbook.md` and `file-download/handbook.md`. It is packaged into the AIS Agent workspace only, not installed in the target Bot. The public catalog retains references without internal professional content. Each diagnostic category can select several candidate chapters, and several categories can share the same chapter. The Agent reads the applicable content based on the diagnosis and actual failure; a category match is not evidence of a particular cause.
+
+Creation freezes the catalog's `handbookVersion`, category and `chapters` list in the existing task history. Bootstrap reuses this snapshot on resume, without rerouting through the current catalog. Legacy v1 snapshots with a single `chapter` are exposed as a one-element list, or an empty list for null; their saved version and references are preserved, and missing snapshots are not backfilled. An empty candidate list has no generic-retry fallback; the Agent assesses the actual evidence independently. No diagnosis request fields or database schema change.
 
 There is no direct-intervention mode or category allowlist. Initial assessment cannot modify the environment. The Agent composes the advice; the original Bot receives that text, without being instructed to install or read the handbook. Initial messages use the upstream delivery key; stable tool retries return the saved receipt. Maintenance does not generate advice.
 
