@@ -1382,15 +1382,16 @@ describe('B12 abort() — CancelTask wire 面 + 四态禁令核销（§4.3/§3.1
       provider.abort();                     // 停在 iam 窗口：RPC 未出站
       releaseToken('tok');
 
-      // 出站即拒（abort signal）→ streamRpc 判定主动取消静默收尾（rpc.ts
-      // classifyFailure 前的 aborted 检查）——不 onError、无 typed 拒绝
+      // token 边界（review）：让位代次在出站前直接回归——连 SendStreamingMessage
+      // 的 fetch 都不再构造。旧口径以"带着已 abort 的 signal 打一发被 fetch 客户端
+      // 拒绝的请求"表达零 wire 面；新边界令零出站更早就位，钉板意图（服务端零
+      // run + cancelled-clean）不变
       await inFlight;
       expect(spies.onComplete).toHaveBeenCalledTimes(1);
       expect(spies.onComplete).toHaveBeenCalledWith([]);
       expect(spies.onError).not.toHaveBeenCalled();
       const rpcCalls = fetchImpl.calls.filter((c) => c.url === A2A_URLS.rpcUrl);
-      expect(rpcCalls).toHaveLength(1);
-      expect((rpcCalls[0].init as any).signal.aborted).toBe(true);
+      expect(rpcCalls).toHaveLength(0);
       expect(registry.isBanned(A2A_URLS.rpcUrl, SESSION)).toBe(false);
       expect(outcomes).toEqual([{ kind: 'cancelled-clean' }]);   // 真未发送：零 wire 面
     });
