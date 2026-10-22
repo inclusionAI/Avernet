@@ -923,6 +923,69 @@ class TestLocalK8sPluginA2aBaseUrl:
         )
 
     @patch("kubernetes.client.CoreV1Api")
+    def test_a2a_discovery_bounded_timeout(self, mock_core_cls, mock_client) -> None:
+        """review P2：kube 实查必须在有界超时内返回等待——无 _request_timeout
+        的挂起会拖住整条 WS 签发（to_thread 之外的第二道防线）。"""
+        with patch.dict(
+            os.environ,
+            {
+                **self._INCLUSTER_ENV,
+                "LOCAL_K8S_A2A_URL_TEMPLATE": (
+                    "http://{service_name}.stable.alipay.net:{node_port}"
+                ),
+            },
+            clear=True,
+        ):
+            plugin = self._incluster_plugin(mock_client, mock_core_cls)
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_svc = MagicMock()
+            mock_svc.spec.ports = [MagicMock(node_port=30082)]
+            mock_core.read_namespaced_service.return_value = mock_svc
+
+            plugin.resolve_ws_conn_info(
+                paas_device_id="a2a-to-abc",
+                port=8080, path="/api/openclaw/ws",
+            )
+
+        kwargs = mock_core.read_namespaced_service.call_args.kwargs
+        assert kwargs.get("_request_timeout") is not None and kwargs["_request_timeout"] <= 5
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_a2a_discovery_caches_nodeport(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """review P2：NodePort 对 Service 生命周期内不变——按 (namespace,
+        service) 记忆化，重复签发不再打 kube API。"""
+        with patch.dict(
+            os.environ,
+            {
+                **self._INCLUSTER_ENV,
+                "LOCAL_K8S_A2A_URL_TEMPLATE": (
+                    "http://{service_name}.stable.alipay.net:{node_port}"
+                ),
+            },
+            clear=True,
+        ):
+            plugin = self._incluster_plugin(mock_client, mock_core_cls)
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_svc = MagicMock()
+            mock_svc.spec.ports = [MagicMock(node_port=30082)]
+            mock_core.read_namespaced_service.return_value = mock_svc
+
+            for _ in range(2):
+                conn = plugin.resolve_ws_conn_info(
+                    paas_device_id="a2a-cache-abc",
+                    port=8080, path="/api/openclaw/ws",
+                )
+                assert conn.a2a_base_url == (
+                    "http://a2a-cache-abc-svc.stable.alipay.net:30082"
+                )
+
+        assert mock_core.read_namespaced_service.call_count == 1
+
+    @patch("kubernetes.client.CoreV1Api")
     def test_incluster_missing_nodeport_degrades_to_empty(
         self, mock_core_cls, mock_client
     ) -> None:
