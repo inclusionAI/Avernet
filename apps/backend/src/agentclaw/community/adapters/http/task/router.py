@@ -57,6 +57,7 @@ from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
     CLAIM_JOIN_FILTER, HARNESS_POLLER, RELAY_EXECUTION, SEARCH_SKILL, SKILL_REPORT,
     TaskSettingsServiceProtocol,
 )
+from agentclaw.community.api.task.task_artifact_service import TaskArtifactApiServiceProtocol
 from agentclaw.community.api.task.task_grant_service import TaskClaimGrantServiceProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.api.task.task_context_service import TaskContextServiceProtocol
@@ -971,15 +972,16 @@ async def get_task_internal(
     request: Request,
     user: AuthenticatedUser = Depends(get_current_user),
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-    artifact_repo: TaskArtifactRepositoryProtocol = Injected(TaskArtifactRepositoryProtocol),  # noqa: B008
+    artifact_service: TaskArtifactApiServiceProtocol = Injected(TaskArtifactApiServiceProtocol),  # noqa: B008
 ) -> Envelope[TaskExecutionGraphDTO]:
     """Return one task dashboard for authenticated Goal clients."""
     del user
     graph = service.get_task_dashboard(task_id)
+    artifact_rows = await artifact_service.sync_session_files_and_list(graph)
     return envelope(
         graph_to_dto(
             graph,
-            artifacts_by_node=group_artifacts_by_node(artifact_repo.list_by_task(task_id)),
+            artifacts_by_node=group_artifacts_by_node(artifact_rows),
         ),
         request,
     )

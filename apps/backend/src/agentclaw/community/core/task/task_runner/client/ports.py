@@ -155,6 +155,23 @@ class BcsClientPort(Protocol):
 
 
 @runtime_checkable
+class BcsSessionFilesPort(Protocol):
+    """Read ready file metadata from a BCS session workspace."""
+
+    async def list_files(
+        self,
+        session_id: str,
+        *,
+        prefix: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        caller_bearer: str | None = None,
+        extra_headers: dict[str, str] | None = None,
+    ) -> list[dict[str, Any]]: ...
+
+
+@runtime_checkable
 class ApiKeyProvider(Protocol):
     @property
     def api_key(self) -> str: ...
