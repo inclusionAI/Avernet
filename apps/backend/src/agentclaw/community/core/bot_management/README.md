@@ -191,13 +191,25 @@ continue to come from the build plan. Restore returns that physical draft path.
 Only absent/null configuration blocks use defaults; non-mapping blocks fail
 configuration validation.
 
-Deploy schema-5 container scripts before this Backend change. Old/missing scripts
+Deploy schema-6 container scripts before this Backend change. Old/missing scripts
 on fastdisk Bots fail closed. Non-target engines skip detection; non-fastdisk
 coding engines retain NAS transfer only after successful detection and binding
 checks. Restore is not transactional: completed replacements remain after failure;
 required transfer failures stop subsequent stale-file cleanup.
 
-To roll back, pause fastdisk transfers, retain compatible schema-5 scripts, and
+To roll back, pause fastdisk transfers, retain compatible schema-6 scripts, and
 revert Backend only after deciding how authoritative fastdisk files will remain
 available. Do not resume the old NAS path on stale data; first establish a
 verified migration to NAS or deploy the previous compatible fastdisk implementation.
+
+### Runtime artifact allowlist parity (schema 6)
+
+The shared build resolves `service_bot_runtime_artifact` once for the Bot owner
+and environment. The same boolean is passed to the AICoding publication hook and
+legacy NAS transfer; the strategy does not query a second allowlist. Schema 6
+adds `include_runtime_artifacts` (boolean, omitted means disabled). With the gate
+off, `.agentclaw` is untouched, while existing versioned `.local/bin` contents
+are cleared without reading the draft CLI source or creating an absent OSS
+subtree. Engine files and mount-path selection are unchanged. Historical draft
+restore ignores today's publication gate and restores the selected version.
+Schema-5 containers fail the pre-execution probe rather than ignoring the gate.

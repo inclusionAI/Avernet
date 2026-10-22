@@ -416,6 +416,7 @@ class BotBuildService:
                 migration_success = self._artifact_transfer.publish(
                     device_id=device_id, plan=build_plan, provider=provider,
                     target_dir=target_dir, ignore_paths=build_ignore_paths,
+                    include_runtime_artifacts=include_runtime_artifacts,
                 ) or self._migrate_bot_instance(
                     device_id=device_id,
                     source_dir=source_dir,

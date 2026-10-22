@@ -15,8 +15,12 @@ from agentclaw.community.core.workspace.engine_sandbox import (
 class ArtifactTransferStrategy(Protocol):
     def publish(self, *, device_id: str, plan: EngineBuildPlan,
                 provider: EngineSandboxProvider, target_dir: Path,
-                ignore_paths: tuple[str, ...]) -> bool:
-        """True only after the strategy completes publication transfer."""
+                ignore_paths: tuple[str, ...], include_runtime_artifacts: bool = False) -> bool:
+        """True only after transfer; reuse the caller-resolved CLI rollout decision.
+
+        False (the safe default) omits CLI snapshots using legacy NAS semantics.
+        It does not disable engine artifacts or affect historical restore.
+        """
         ...
 
     def restore(self, *, bot: dict[str, Any], source_version: int,

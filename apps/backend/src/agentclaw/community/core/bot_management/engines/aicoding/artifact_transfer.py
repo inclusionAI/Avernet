@@ -83,12 +83,13 @@ class AicodingArtifactTransferStrategy:
 
     def publish(self, *, device_id: str, plan: EngineBuildPlan,
                 provider: EngineSandboxProvider, target_dir: Path,
-                ignore_paths: tuple[str, ...]) -> bool:
+                ignore_paths: tuple[str, ...], include_runtime_artifacts: bool = False) -> bool:
         if not self.supports(plan):
             return False
         return self.try_publish(
             device_id=device_id, plan=plan, source_root=str(provider.get_base_path()),
             target_dir=target_dir, ignore_paths=ignore_paths,
+            include_runtime_artifacts=include_runtime_artifacts,
         )
 
     def restore(self, *, bot: dict[str, Any], source_version: int,
@@ -159,7 +160,7 @@ class AicodingArtifactTransferStrategy:
             raise FastdiskPublishError('fastdisk detection failed; NAS fallback is forbidden') from error
 
     def try_publish(self, *, device_id: str, plan: EngineBuildPlan,
-                    source_root: str, target_dir: Path, ignore_paths: tuple[str, ...]) -> bool:
+                    source_root: str, target_dir: Path, ignore_paths: tuple[str, ...], include_runtime_artifacts: bool = False) -> bool:
         if not self.supports(plan):
             return False
         layout = self.detect(device_id)
@@ -173,7 +174,7 @@ class AicodingArtifactTransferStrategy:
             raise FastdiskPublishError('fastdisk publish requires object storage configuration')
         request = build_request(
             plan=plan, source_root=layout['home'], object_prefix=str(object_prefix),
-            ignore_paths=ignore_paths,
+            ignore_paths=ignore_paths, include_runtime_artifacts=include_runtime_artifacts,
             layout=layout, config=self.config, bucket=self.bucket, endpoint=self.endpoint,
         )
         self._invoke(device_id, 'upload', request, self.config.upload_timeout_seconds)
@@ -192,7 +193,7 @@ class AicodingArtifactTransferStrategy:
             "tree=ast.parse(p.read_text()); "
             "supported=any(isinstance(n,ast.Assign) and "
             "any(isinstance(t,ast.Name) and t.id=='SERVICE_PUBLISH_SCHEMA' for t in n.targets) "
-            "and isinstance(n.value,ast.Constant) and n.value.value==5 for n in tree.body); "
+            "and isinstance(n.value,ast.Constant) and n.value.value==6 for n in tree.body); "
             "sys.exit(0 if supported else 45)"
         )
         probe_budget = self.config.detect_timeout_seconds
@@ -247,7 +248,7 @@ class AicodingArtifactTransferStrategy:
             raise FastdiskPublishError('restore artifact engine does not match plan')
         version_prefix = str(PurePosixPath('aidesktop') / relative.parent.as_posix())
         request = {
-            'schema_version': 5, 'operation_id': uuid.uuid4().hex,
+            'schema_version': 6, 'operation_id': uuid.uuid4().hex,
             'artifact_path': artifact_path, 'source_root': str(root),
             'version_prefix': version_prefix, 'engine_path': plan.migration_subpath,
             'bucket': self.bucket, 'endpoint': self.endpoint,
@@ -263,19 +264,20 @@ class AicodingArtifactTransferStrategy:
 
 
 def build_request(*, plan, source_root, object_prefix, ignore_paths,
-                  layout, config, bucket, endpoint):
+                  layout, config, bucket, endpoint, include_runtime_artifacts=False):
     root = PurePosixPath(source_root)
     target = PurePosixPath(object_prefix)
     if target.name != plan.migration_subpath:
         raise FastdiskPublishError('artifact prefix does not match engine plan')
     return {
-        'schema_version': 5, 'operation_id': uuid.uuid4().hex,
+        'schema_version': 6, 'operation_id': uuid.uuid4().hex,
         'bucket': bucket, 'endpoint': endpoint,
         'credential': {'provider': 'mist', 'secret_name': config.mist_secret_name, 'concat_env': True},
         'version_prefix': str(target.parent), 'engine_path': target.name,
         'source_root': str(root), 'fastdisk': {k: layout[k] for k in ('home', 'storage')},
         'additional_excludes': additional_excludes(plan),
         'build_ignore_paths': list(ignore_paths),
+        'include_runtime_artifacts': include_runtime_artifacts,
         'timeout_seconds': config.upload_timeout_seconds,
         'request_timeout_seconds': config.request_timeout_seconds,
     }

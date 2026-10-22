@@ -123,7 +123,7 @@ def test_request_uses_mist_name_not_backend_credentials():
     p = publisher([result(), result(), result()])
     publish(p)
     req = json.loads(base64.b64decode(shlex.split(p.executor.exec_shell_new.call_args.kwargs['shell_cmd'])[-1]))
-    assert req['schema_version'] == 5
+    assert req['schema_version'] == 6
     assert req['credential'] == {'provider': 'mist', 'secret_name': 'test-secret-name', 'concat_env': True}
     assert 'agentclaw' not in req
 
@@ -169,7 +169,7 @@ def test_failed_restore_stops_without_nas_fallback():
 @pytest.mark.parametrize('content,expected_error', [
     (None, 'missing'),
     ('raise RuntimeError("must not execute old script")', 'incompatible'),
-    ('SERVICE_PUBLISH_SCHEMA = 5\nraise RuntimeError("probe must not execute script")', None),
+    ('SERVICE_PUBLISH_SCHEMA = 6\nraise RuntimeError("probe must not execute script")', None),
 ])
 def test_probe_inspects_version_without_executing_script(monkeypatch, tmp_path, content, expected_error):
     import subprocess
@@ -189,10 +189,10 @@ def test_probe_inspects_version_without_executing_script(monkeypatch, tmp_path, 
     p.executor.exec_shell_new.side_effect = execute
     if expected_error:
         with pytest.raises(FastdiskPublishError, match=expected_error):
-            p._invoke('device', 'upload', {'schema_version': 5}, None)
+            p._invoke('device', 'upload', {'schema_version': 6}, None)
         assert len(calls) == 1
     else:
-        p._invoke('device', 'upload', {'schema_version': 5}, None)
+        p._invoke('device', 'upload', {'schema_version': 6}, None)
         assert len(calls) == 2
         assert 'TemporaryDirectory' not in calls[-1]['shell_cmd']
 
@@ -264,7 +264,7 @@ def test_only_dynamic_rules_cross_container_boundary():
     assert 'extra_include' not in request
 
 
-def test_schema5_fixed_policy_matches_container_contract():
+def test_schema6_fixed_policy_matches_container_contract():
     import hashlib
     from agentclaw.community.core.workspace.engines.aicoding import _AICODING_RSYNC_EXCLUDES
     from agentclaw.community.core.workspace.engines.claude_code import _CLAUDE_CODE_RSYNC_EXCLUDES
@@ -365,3 +365,31 @@ def test_detected_physical_home_owns_transfer_source_and_restore_destination(eng
     assert restored['draft_path'] == '/home/admin/.aicoding'
     assert request['engine_path'] == engine
     assert request['version_prefix'] == uploaded['version_prefix']
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+def test_publish_forwards_runtime_artifact_decision_to_container(enabled):
+    p = publisher([result(), result(), result()])
+    assert p.publish(device_id='draft', plan=_AICODING_BUILD_PLAN,
+        provider=Mock(get_base_path=Mock(return_value='/home/admin/.aicoding')),
+        target_dir=Path('/aidesktop/test/bolt_data/staff_u/b/3/aicoding'),
+        ignore_paths=(), include_runtime_artifacts=enabled)
+    req = json.loads(base64.b64decode(shlex.split(p.executor.exec_shell_new.call_args.kwargs['shell_cmd'])[-1]))
+    assert req['include_runtime_artifacts'] is enabled
+    assert req['schema_version'] == 6
+
+
+def test_schema5_container_is_rejected_before_upload(monkeypatch, tmp_path):
+    import subprocess
+    from agentclaw.community.core.bot_management.engines.aicoding import artifact_transfer as module
+    entry = tmp_path / 'service_publish.py'
+    entry.write_text('SERVICE_PUBLISH_SCHEMA = 5\nraise RuntimeError("must not execute")')
+    monkeypatch.setattr(module, 'ENTRY', str(entry))
+    p = publisher([])
+    def execute(**kwargs):
+        output = subprocess.run(shlex.split(kwargs['shell_cmd']), capture_output=True, text=True)
+        return SimpleNamespace(exit_code=output.returncode)
+    p.executor.exec_shell_new.side_effect = execute
+    with pytest.raises(FastdiskPublishError, match='incompatible'):
+        p._invoke('device', 'upload', {'schema_version': 6}, None)
+    assert p.executor.exec_shell_new.call_count == 1

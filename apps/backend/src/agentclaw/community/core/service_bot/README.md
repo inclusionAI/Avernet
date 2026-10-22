@@ -244,7 +244,7 @@ existing `ServiceBotModule`; no dedicated public configuration module is needed.
 The AICoding strategy consumes the existing build plan and a command executor. It
 embeds only read-only mount detection so legacy containers need no detector
 installation. Non-fastdisk bots retain host-side NAS transfer. Detector failure
-is not a non-fastdisk result. Fastdisk bots require schema-5
+is not a non-fastdisk result. Fastdisk bots require schema-6
 `/home/admin/bin/service_publish.py`; missing/incompatible scripts fail with a
 logged error, without uploading a fallback implementation.
 

@@ -202,6 +202,7 @@ def test_build_resolves_owner_list_once_and_passes_fixed_decision(tmp_path, monk
     service._user_list_repository.exists.side_effect = lambda **kw: enabled and kw["entity_id"] == "owner"
     service.build({"bot_id": "b", "entity_id": "owner"}, version=3)
     assert service._migrate_bot_instance.call_args.kwargs["include_runtime_artifacts"] is enabled
+    assert service._artifact_transfer.publish.call_args.kwargs["include_runtime_artifacts"] is enabled
     assert service._user_list_repository.exists.call_count == 2
     assert all(call.kwargs["env"] == "test" for call in service._user_list_repository.exists.call_args_list)
     assert service._user_list_repository.exists.call_args.kwargs["entity_id"] == "owner"
