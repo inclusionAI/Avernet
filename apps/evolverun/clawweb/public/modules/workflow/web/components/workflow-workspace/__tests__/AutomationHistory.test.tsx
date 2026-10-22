@@ -1,4 +1,4 @@
-import { act, render, screen, within, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { focusManager, QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -16,14 +16,13 @@ beforeEach(() => {
   }))
 })
 afterEach(()=>{focusManager.setFocused(undefined);vi.useRealTimers();vi.unstubAllGlobals()})
-function mount(){const query = new QueryClient({defaultOptions:{queries:{retry:false},mutations:{retry:false}}});return render(<QueryClientProvider client={query}><AutomationHistory workflowId="wf/a"/></QueryClientProvider>)}
-it('separates analysis from optimization and resets old page cursors when switching types', async () => {
-  mount(); await screen.findByText(/运行 new-run-0/)
+function mount(kind: 'analysis' | 'optimization' = 'analysis'){const query = new QueryClient({defaultOptions:{queries:{retry:false},mutations:{retry:false}}});return render(<QueryClientProvider client={query}><AutomationHistory workflowId="wf/a" kind={kind}/></QueryClientProvider>)}
+it('queries analysis and automatic drafts separately and starts each opened list on its first page', async () => {
+  const view = mount(); await screen.findByText(/运行 new-run-0/)
   expect(requests[0].searchParams.get('kind')).toBe('analysis')
-  expect(screen.getByRole('tab', { name: '自动分析' })).toHaveAttribute('aria-selected', 'true')
-  await userEvent.click(screen.getByRole('button', { name: '查看全部记录' })); await screen.findByText(/运行 new-run-19/)
   await userEvent.click(screen.getByRole('button', { name: '下一页' })); await screen.findByText(/运行 older-run-0/)
-  await userEvent.click(screen.getByRole('tab', { name: '自动优化' }))
+  view.unmount()
+  mount('optimization')
   await waitFor(() => expect(requests.at(-1)!.searchParams.get('kind')).toBe('optimization'))
   expect(requests.at(-1)!.searchParams.has('cursor')).toBe(false)
   expect(await screen.findAllByRole('link', { name: '查看原优化任务' })).toHaveLength(20)
@@ -31,7 +30,7 @@ it('separates analysis from optimization and resets old page cursors when switch
   expect(screen.getByText('第 1 页 · 每页最多 20 条')).toBeVisible()
 });
 
-it('folds notification exceptions, pages their own read-only query, and keeps full identifiers in details', async () => {
+it('pages notification exceptions with their own read-only query and keeps full identifiers in details', async () => {
   const taskId = '2d675412-fa44-414a-ab56-8b1abc672833'
   vi.stubGlobal('fetch', vi.fn(async (input: string) => {
     const url = new URL(input, 'http://localhost'); requests.push(url)
@@ -40,12 +39,10 @@ it('folds notification exceptions, pages their own read-only query, and keeps fu
   }))
   const query = new QueryClient({defaultOptions:{queries:{retry:false}}})
   render(<QueryClientProvider client={query}><NotificationAttention workflowId="wf/a" /></QueryClientProvider>)
-  const summary = await screen.findByText('通知发送异常，需处理')
-  expect(screen.getByText('任务通知 · 待核对')).not.toBeVisible()
+  expect(await screen.findByText('任务通知 · 待核对')).toBeVisible()
   expect(requests[0].searchParams.get('kind')).toBe('notification')
   expect(requests[0].searchParams.get('status')).toBe('attention')
   expect(requests[0].searchParams.get('limit')).toBe('8')
-  await userEvent.click(summary)
   expect(screen.getByText(/优化任务 2d675412…/)).toBeVisible()
   expect(screen.getByText(`优化任务编号：${taskId}`)).not.toBeVisible()
   await userEvent.click(screen.getByText('查看详情'))
@@ -60,15 +57,12 @@ it('folds notification exceptions, pages their own read-only query, and keeps fu
   await userEvent.click(screen.getByRole('button', {name:'刷新通知异常'}))
   await waitFor(() => expect(requests.filter(url=>!url.searchParams.has('cursor'))).toHaveLength(2))
 })
-it('loads only eight recent records initially, fetching older pages only on demand', async()=>{
+it('loads twenty records per expanded page and fetches older pages only on demand', async()=>{
   mount()
-  await screen.findByText(/运行 new-run-7/)
-  expect(screen.getAllByRole('link',{name:'查看分析'})).toHaveLength(8)
-  expect(requests).toHaveLength(1);expect(requests[0].pathname).toContain('wf%2Fa/automation-records')
-  expect(requests[0].searchParams.get('limit')).toBe('8')
-  expect(screen.queryByLabelText('执行记录时间范围')).not.toBeInTheDocument()
-  await userEvent.click(screen.getByRole('button',{name:'查看全部记录'}))
   await screen.findByText(/运行 new-run-19/)
+  expect(screen.getAllByRole('link',{name:'查看分析'})).toHaveLength(20)
+  expect(requests).toHaveLength(1);expect(requests[0].pathname).toContain('wf%2Fa/automation-records')
+  expect(requests[0].searchParams.get('limit')).toBe('20')
   expect(screen.getByRole('button',{name:'上一页'})).toBeDisabled()
   expect(requests.at(-1)!.searchParams.get('limit')).toBe('20')
   await userEvent.click(screen.getByRole('button',{name:'下一页'}))
@@ -80,9 +74,8 @@ it('loads only eight recent records initially, fetching older pages only on dema
   await screen.findByText(/运行 new-run-0/)
   expect(screen.getByText('第 1 页 · 每页最多 20 条')).toBeVisible()
 })
-it('resets pagination on date or status changes, and returns to unfiltered recent records when collapsed', async()=>{
+it('resets pagination on date or status changes and restores unfiltered records', async()=>{
   mount();await screen.findByText(/运行 new-run-0/)
-  await userEvent.click(screen.getByRole('button',{name:'查看全部记录'}));await screen.findByText(/运行 new-run-19/)
   await userEvent.click(screen.getByRole('button',{name:'下一页'}));await screen.findByText(/运行 older-run-0/)
   await userEvent.selectOptions(screen.getByLabelText('执行记录时间范围'),'today')
   await waitFor(()=>expect(requests.at(-1)!.searchParams.get('period')).toBe('today'))
@@ -94,16 +87,16 @@ it('resets pagination on date or status changes, and returns to unfiltered recen
   expect(await screen.findByText('没有符合筛选条件的记录。')).toBeVisible()
   expect(requests.at(-1)!.searchParams.get('status')).toBe('blocked')
   expect(requests.at(-1)!.searchParams.has('cursor')).toBe(false)
-  await userEvent.click(screen.getByRole('button',{name:'收起全部记录'}))
-  const history=screen.getByRole('region',{name:'自动任务历史记录'})
-  expect(within(history).getAllByRole('link',{name:'查看分析'})).toHaveLength(8)
-  expect(screen.queryByLabelText('执行记录状态')).not.toBeInTheDocument()
+  await userEvent.selectOptions(screen.getByLabelText('执行记录时间范围'),'all')
+  await userEvent.selectOptions(screen.getByLabelText('执行记录状态'),'all')
+  await screen.findByText(/运行 new-run-19/)
+  expect(screen.getAllByRole('link',{name:'查看分析'})).toHaveLength(20)
 })
 it('exposes query errors and lets the user retry without business writes', async()=>{
   vi.mocked(fetch).mockRejectedValueOnce(new Error('controlled history read failure'))
   mount();expect(await screen.findByRole('alert')).toHaveTextContent('执行记录读取失败')
   await userEvent.click(screen.getByRole('button',{name:'重试读取记录'}))
-  await screen.findByText(/运行 new-run-7/)
+  await screen.findByText(/运行 new-run-19/)
   expect(requests).toHaveLength(1)
 })
 
@@ -112,7 +105,7 @@ it('does not poll history and refreshes explicitly on request', async () => {
   focusManager.setFocused(true);
   mount();
   await act(async () => { await vi.advanceTimersByTimeAsync(10); });
-  expect(screen.getByText(/运行 new-run-7/)).toBeVisible();
+  expect(screen.getByText(/运行 new-run-19/)).toBeVisible();
   await act(async () => { await vi.advanceTimersByTimeAsync(45000); });
   expect(requests).toHaveLength(1);
   vi.useRealTimers();

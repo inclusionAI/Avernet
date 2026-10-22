@@ -1,4 +1,4 @@
-import { act, render as renderView, screen } from '@testing-library/react'
+import { act, render as renderView, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -14,6 +14,9 @@ vi.mock('../../../api/workflow-automation', () => ({
 }))
 import AutoAnalysisPanel from '../AutoAnalysisPanel'
 function render(ui: React.ReactNode) { return renderView(<QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>) }
+async function openRecords(region = '自动分析设置') {
+  await userEvent.click(within(screen.getByRole('region', { name: region })).getByRole('button', { name: '查看记录' }))
+}
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.policy = { workflowId: 'wf-1', enabled: false, autoDraft: false, dailyTime: '09:00', version: 0, dailyConfigured: false, source: 'default', timezone: 'Asia/Shanghai', updatedAtMs: 0 }
@@ -36,9 +39,8 @@ describe('automatic analysis settings and execution records', () => {
     ]
     render(<AutoAnalysisPanel workflowId="wf-1" />)
     expect(screen.queryByText('任务通知 · 已结束')).not.toBeInTheDocument()
-    expect(screen.getByText('通知发送异常，需处理')).toBeVisible()
-    expect(screen.getByText('任务通知 · 待核对')).not.toBeVisible()
-    await userEvent.click(screen.getByText('通知发送异常，需处理'))
+    expect(screen.queryByText('任务通知 · 待核对')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '查看通知异常' }))
     expect(screen.getByText('任务通知 · 待核对')).toBeVisible()
   })
   it('immediately acknowledges a slow switch save and rejects repeat clicks', async () => {
@@ -57,6 +59,14 @@ describe('automatic analysis settings and execution records', () => {
     expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ enabled: false, dailyConfigured: false, notificationRecipients: ['alice', 'bob'] }), expect.any(Object))
     expect(screen.getByRole('status')).toHaveTextContent('保存通知人')
   })
+  it('restores the Owner default by clearing recipients while analysis remains off', async () => {
+    mocks.policy.notificationRecipients = ['10001']
+    mocks.policy.notificationVersion = 4
+    render(<AutoAnalysisPanel workflowId="wf-1" />)
+    await userEvent.clear(screen.getByLabelText('通知人'))
+    await userEvent.click(screen.getByRole('button', { name: '保存通知人' }))
+    expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ enabled: false, dailyConfigured: false, notificationRecipients: [], expectedNotificationVersion: 4 }), expect.any(Object))
+  })
   it('preserves the existing enable request and disabled controls', async () => {
     render(<AutoAnalysisPanel workflowId="wf-1" />)
     expect(screen.getByRole('region', { name: '自动分析设置' })).toBeInTheDocument()
@@ -71,30 +81,32 @@ describe('automatic analysis settings and execution records', () => {
   it('distinguishes inherited failure analysis from unconfigured daily scheduling and saves both settings explicitly', async () => {
     mocks.policy.enabled = true; mocks.policy.source = 'environment'
     render(<AutoAnalysisPanel workflowId="wf-1" />)
-    expect(screen.getByText('失败后自动分析：已开启；每日定时分析：未配置。')).toBeVisible()
+    expect(screen.getByText('未配置')).toBeVisible()
+    expect(screen.getByRole('switch', { name: '自动分析' })).toHaveAttribute('aria-checked', 'true')
     expect(mocks.update).not.toHaveBeenCalled()
     await userEvent.selectOptions(screen.getByLabelText('最低影响'), 'high')
     await userEvent.click(screen.getByRole('button', { name: '保存分析计划' }))
     expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ dailyTime: '09:00', minimumImpact: 'high' }), expect.any(Object))
   })
-  it('shows real run identity, Shanghai time, partial evidence and existing analysis detail links', () => {
+  it('shows real run identity, Shanghai time, partial evidence and existing analysis detail links on demand', async () => {
     mocks.snapshot.jobs = [
       { id: 'j1', kind: 'auto_run', status: 'waiting', attempts: 1, reason: null, flowId: 'flow/a', createdAtMs: Date.parse('2026-10-20T02:03:04Z') },
       { id: 'j2', kind: 'auto_run', status: 'done', attempts: 1, reason: 'PARTIAL_ANALYSIS', flowId: 'flow-b', analysisId: 'analysis/b', complete: false },
       { id: 'j3', kind: 'auto_run', status: 'done', attempts: 1, reason: null, complete: true, flowId: 'flow-c' },
     ]
     render(<AutoAnalysisPanel workflowId="wf-1" />)
+    await openRecords()
     expect(screen.getByText('运行分析 · 分析中，等待分析结果')).toBeVisible()
     expect(screen.getByText('运行分析 · 分析结束，证据不完整')).toBeVisible()
     expect(screen.getByText('运行分析 · 分析结束')).toBeVisible()
     expect(screen.getByText(/2026\/10\/20 10:03:04.*运行 flow\/a/)).toBeVisible()
     expect(screen.getAllByRole('link', { name: '查看分析' }).map(a => a.getAttribute('href'))).toEqual(['/runs/flow%2Fa', '/runs/flow-b?analysisId=analysis%2Fb', '/runs/flow-c'])
-    expect(screen.getByText(/每日扫描尚无记录；失败事件触发的分析单独记录在下方/)).toBeVisible()
   })
   it('keeps old records inspectable without inventing links or complete evidence', async () => {
     mocks.snapshot.jobs = [{ id: 'old-job', kind: 'auto_run', status: 'done', attempts: 2, reason: null }]
     delete mocks.snapshot.retryableJobs
     render(<AutoAnalysisPanel workflowId="wf-1" />)
+    await openRecords()
     expect(screen.getByText('运行分析 · 分析结束，证据完整性待核对')).toBeVisible()
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
     await userEvent.click(screen.getByText('查看详情'))
@@ -112,13 +124,14 @@ describe('automatic analysis settings and execution records', () => {
     render(<AutoAnalysisPanel workflowId="wf-1" />)
     expect(screen.queryByRole('region', { name: '失败任务重试' })).not.toBeInTheDocument()
     expect(mocks.retry).not.toHaveBeenCalled()
+    await openRecords()
     await userEvent.click(screen.getByRole('button', { name: '重试分析' }))
     expect(mocks.retry).toHaveBeenLastCalledWith('wf-1', 'analysis-job')
     expect(screen.getByRole('status')).toHaveTextContent('已加入重试队列')
-    await userEvent.click(screen.getByRole('tab', {name:'自动优化'}))
+    await openRecords('自动优化')
     await userEvent.click(screen.getByRole('button', {name:'重试生成'}))
     expect(mocks.retry).toHaveBeenLastCalledWith('wf-1','draft-job')
-    await userEvent.click(screen.getByText('通知发送异常，需处理'))
+    await userEvent.click(screen.getByRole('button', { name: '查看通知异常' }))
     await userEvent.click(screen.getByRole('button', {name:'重发通知'}))
     expect(mocks.retry).toHaveBeenLastCalledWith('wf-1','notice-job')
     expect(mocks.retry).toHaveBeenCalledTimes(3)
@@ -135,7 +148,7 @@ it('does not leave a retry action outside a filtered-out record', async () => {
   mocks.snapshot.retryableJobs = [{id:'failure',kind:'auto_run',status:'blocked',reason:'ANALYSIS_FAILED',flowId:'target-run',attempts:3}]
   mocks.snapshot.jobs = mocks.snapshot.retryableJobs
   render(<AutoAnalysisPanel workflowId="wf-1" />)
-  await userEvent.click(screen.getByRole('button',{name:'查看全部记录'}))
+  await openRecords()
   await userEvent.selectOptions(screen.getByLabelText('执行记录时间范围'),'today')
   await userEvent.selectOptions(screen.getByLabelText('执行记录状态'),'done')
   expect(screen.queryByRole('button',{name:'重试失败任务'})).not.toBeInTheDocument()
@@ -149,20 +162,22 @@ it('shows immediate per-record pending feedback, prevents duplicate submits and 
   let reject!: (error: Error)=>void
   mocks.retry.mockImplementationOnce(()=>new Promise((_resolve, fail)=>{reject=fail}))
   render(<AutoAnalysisPanel workflowId="wf-1" />)
+  await openRecords()
   await userEvent.click(screen.getByRole('button',{name:'重试分析'}))
   expect(screen.getByRole('button',{name:'提交中…'})).toBeDisabled()
   expect(screen.getByRole('status')).toHaveTextContent('正在提交本条重试')
   await userEvent.click(screen.getByRole('button',{name:'提交中…'}))
   expect(mocks.retry).toHaveBeenCalledTimes(1)
   await act(async()=>reject(new Error('状态已变化')))
-  expect(screen.getByRole('status')).toHaveTextContent('状态已变化')
+  expect(screen.getByRole('alert')).toHaveTextContent('状态已变化')
   expect(mocks.refetch).toHaveBeenCalledOnce()
   expect(screen.getByRole('button',{name:'重试分析'})).toBeEnabled()
 })
 
-it('does not offer retries for running, unknown or completed records even if an eligibility snapshot is stale', () => {
+it('does not offer retries for running, unknown or completed records even if an eligibility snapshot is stale', async () => {
   mocks.snapshot.jobs = ['waiting','uncertain','done'].map((status,i)=>({id:`job-${i}`,kind:'auto_run',status,attempts:1,reason:null}))
   mocks.snapshot.retryableJobs = mocks.snapshot.jobs
   render(<AutoAnalysisPanel workflowId="wf-1" />)
+  await openRecords()
   expect(screen.queryByRole('button',{name:'重试分析'})).not.toBeInTheDocument()
 })

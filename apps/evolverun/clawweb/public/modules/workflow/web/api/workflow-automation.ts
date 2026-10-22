@@ -15,8 +15,8 @@ export function useSaveAutomationPolicy(id: string) {
   return useMutation({ mutationFn: (policy: AutomationPolicyWrite) => json<WorkflowAutomationPolicy>(`${base(id)}/auto-analysis`, { method: 'PUT', body: JSON.stringify(policy) }),
     onSuccess: policy => { query.setQueryData(['workflow-auto-analysis', id], policy); void query.invalidateQueries({ queryKey: ['workflow-automation-status', id] }) } })
 }
-export function useAutomationStatus(id: string) {
-  return useQuery({ queryKey: ['workflow-automation-status', id], queryFn: () => json<AutomationSnapshot>(`${base(id)}/automation-status`), retry: false, refetchInterval: 15000 })
+export function useAutomationStatus(id: string, enabled = true) {
+  return useQuery({ queryKey: ['workflow-automation-status', id], queryFn: () => json<AutomationSnapshot>(`${base(id)}/automation-status`), enabled, retry: false, refetchInterval: 15000 })
 }
 export function useAutomationRecords(id: string, options: AutomationRecordQuery) {
   const params = new URLSearchParams({ period: options.period ?? 'all', status: options.status ?? 'all', limit: String(options.limit ?? 8) })

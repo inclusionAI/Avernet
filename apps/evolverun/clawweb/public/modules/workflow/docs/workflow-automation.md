@@ -55,7 +55,9 @@ step, and evolution-task notifications. Switches save immediately; the analysis
 plan and recipients have separately named save actions. Pending writes show an
 immediate progress message, prevent duplicate submissions, and do not save
 unrelated local edits. Errors retain local input, and success requires the API
-response rather than an optimistic success message.
+response rather than an optimistic success message. Feedback appears beside the
+changed section; success clears after 2.5 seconds, while failures remain visible.
+The execution environment stays in a compact row above the configuration sections.
 
 ## Evolution-task completion notices
 
@@ -341,14 +343,15 @@ record ID and anchors the date window to the first page's time. “Today” star
 Shanghai midnight; “7d” includes today and the preceding six Shanghai calendar
 days. These are creation dates, not the original workflow run's occurrence date.
 
-The settings UI separates “自动分析” and “自动优化” task records. Each shows eight
-newest records, regardless of task status. Kind filtering happens in SQL before
+The settings UI provides separate “查看记录” entries in the “自动分析” and “自动优化”
+sections. Records and recovery status are read only after an entry is opened;
+the initial settings view requests neither. Kind filtering happens in SQL before
 paging, so notification traffic cannot hide real tasks. These are automatic-task
-records, not a complete manual evolution history; manual execution is shown in
-the corresponding evolution task. “查看全部记录”
-opens a 20-record page with date and status selectors and previous/next navigation.
-Changing a filter resets the cursor trail. Collapsing restores the unfiltered
-latest eight. Filters do not change recovery eligibility, but a filtered-out record
+records: optimization corresponds only to `auto_draft`; manual execution is shown
+in the corresponding evolution task. Opening an entry displays a compact,
+height-limited 20-record list with date/status selectors and previous/next navigation.
+Changing a filter resets the cursor trail. Collapsing removes the list; opening
+another entry starts at its first unfiltered page. Filters do not change recovery eligibility, but a filtered-out record
 leaves no detached action elsewhere on the page. Failed history reads can be retried without a business write.
 History pages load on demand and are briefly cached; they do not poll or refresh
 on window focus. The refresh button explicitly reloads the current page.
@@ -358,7 +361,7 @@ the selected record was requeued, not that execution completed. Scheduling and
 execution concurrency are unchanged.
 
 Successful notification journals remain stored but are not displayed in the main
-task list. A collapsed “通知发送异常，需处理” section queries only notifications with
+task list. “查看通知异常” loads only notifications with
 `status=attention` (retryable, uncertain or blocked; a query filter, not a new state).
 Its eight-record cursor pages expose every exception without a history cutoff.
 Task rows show time, result, a shortened target reference and the existing detail

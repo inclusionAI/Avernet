@@ -189,7 +189,7 @@ export default function ManagementTab({ workflowId, workflowTitle, onDeleted }: 
             onFacadeChanged={() => void refetchFacades()}
           />
         )}
-        {settingsTab === 'automation' && <AutoAnalysisPanel workflowId={workflowId} />}
+        {settingsTab === 'automation' && <AutoAnalysisPanel key={workflowId} workflowId={workflowId} />}
         {settingsTab === 'notification' && <NotificationPanel workflowId={workflowId} />}
         {settingsTab === 'callback' && <HttpCallbackPanel workflowId={workflowId} />}
       </SectionCard> : (

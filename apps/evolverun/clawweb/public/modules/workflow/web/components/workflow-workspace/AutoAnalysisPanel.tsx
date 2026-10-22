@@ -1,18 +1,25 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AutomationPolicyWrite, WorkflowAutomationPolicy, AutomationJobSummary } from '../../../server/contracts/workflow-automation'
 import { useQueryClient } from '@tanstack/react-query'
-import { reasons } from './AutomationJobRecord'
 import AutomationHistory, { NotificationAttention } from './AutomationHistory'
 import { retryAutomationFailures, useAutomationPolicy, useAutomationStatus, useSaveAutomationPolicy } from '../../api/workflow-automation'
+type Section = 'environment' | 'analysis' | 'optimization' | 'notification'
+type Feedback = { section: Section; text: string; state: 'pending' | 'success' | 'error' }
 export default function AutoAnalysisPanel({ workflowId }: { workflowId: string }) {
   const queryClient = useQueryClient()
-  const setting = useAutomationPolicy(workflowId), update = useSaveAutomationPolicy(workflowId), status = useAutomationStatus(workflowId)
+  const [history, setHistory] = useState<Exclude<Section, 'environment'> | ''>('')
+  const setting = useAutomationPolicy(workflowId), update = useSaveAutomationPolicy(workflowId), status = useAutomationStatus(workflowId, !!history)
   const [impact, setImpact] = useState<'medium' | 'high'>('medium')
-  const [time, setTime] = useState('09:00'), [message, setMessage] = useState(''), [retrying, setRetrying] = useState('')
+  const [time, setTime] = useState('09:00'), [feedback, setFeedback] = useState<Feedback | null>(null), [retrying, setRetrying] = useState('')
   const retryBusy = useRef(false)
   const [recipients, setRecipients] = useState(''), [saving, setSaving] = useState('')
   const [pendingChanges, setPendingChanges] = useState<Partial<AutomationPolicyWrite>>({})
   const busy = useRef(false), previous = useRef<WorkflowAutomationPolicy | undefined>(undefined)
+  useEffect(() => {
+    if (feedback?.state !== 'success') return
+    const timer = setTimeout(() => setFeedback(null), 2500)
+    return () => clearTimeout(timer)
+  }, [feedback])
   useEffect(() => {
     const next = setting.data
     if (!next) return
@@ -27,94 +34,95 @@ export default function AutoAnalysisPanel({ workflowId }: { workflowId: string }
   const policy = setting.data
   const pending = !!saving || update.isPending
   const enabled = pendingChanges.enabled ?? policy.enabled
-  const save = (changes: Partial<AutomationPolicyWrite>, action: string, done: string) => {
+  const save = (changes: Partial<AutomationPolicyWrite>, section: Section, action: string, done: string) => {
     if (busy.current) return
     busy.current = true
     setPendingChanges(changes)
     setSaving(action)
-    setMessage('')
+    setFeedback({ section, text: action, state: 'pending' })
     update.mutate({ enabled: policy.enabled, autoDraft: policy.autoDraft, dailyTime: policy.dailyTime, dailyConfigured: policy.dailyConfigured, expectedVersion: policy.version, ...changes },
-      { onSuccess: saved => { if (changes.notificationRecipients !== undefined) setRecipients((saved.notificationRecipients ?? []).join(', ')); setMessage(done) },
-        onError: error => { setMessage(error.message); void setting.refetch() }, onSettled: () => { busy.current = false; setSaving(''); setPendingChanges({}) } })
+      { onSuccess: saved => { if (changes.notificationRecipients !== undefined) setRecipients((saved.notificationRecipients ?? []).join(', ')); setFeedback({ section, text: done, state: 'success' }) },
+        onError: error => { setFeedback({ section, text: error.message, state: 'error' }); void setting.refetch() }, onSettled: () => { busy.current = false; setSaving(''); setPendingChanges({}) } })
   }
+  const showFeedback = (section: Section) => feedback?.section === section && <p role={feedback.state === 'error' ? 'alert' : 'status'} className={`text-xs ${feedback.state === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}>{feedback.text}</p>
+  const historyButton = (section: Exclude<Section, 'environment'>) => <button type="button" aria-expanded={history === section} aria-controls={`automation-history-${section}`}
+    onClick={() => setHistory(current => current === section ? '' : section)} className="text-xs text-primary underline">
+    {history === section ? '收起记录' : section === 'notification' ? '查看通知异常' : '查看记录'}</button>
   const switchStyle = 'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-wait disabled:opacity-60'
   const retry = { jobs: status.isError ? [] : status.data?.retryableJobs ?? [], pendingId: retrying, async onRetry(job: AutomationJobSummary) {
     if (retryBusy.current) return
-    retryBusy.current = true; setRetrying(job.id); setMessage('正在提交本条重试…')
-    try { await retryAutomationFailures(workflowId, job.id); setMessage('本条任务已加入重试队列，请在对应记录查看进度') }
-    catch (error) { setMessage(error instanceof Error ? error.message : '本条任务重试未提交') }
+    const section = job.kind === 'auto_run' ? 'analysis' : job.kind === 'auto_draft' ? 'optimization' : 'notification'
+    retryBusy.current = true; setRetrying(job.id); setFeedback({ section, text: '正在提交本条重试…', state: 'pending' })
+    try { await retryAutomationFailures(workflowId, job.id); setFeedback({ section, text: '本条任务已加入重试队列，请在对应记录查看进度', state: 'success' }) }
+    catch (error) { setFeedback({ section, text: error instanceof Error ? error.message : '本条任务重试未提交', state: 'error' }) }
     finally {
       await Promise.allSettled([status.refetch(), queryClient.invalidateQueries({ queryKey: ['workflow-automation-records', workflowId] })])
       setRetrying(''); retryBusy.current = false
     }
   } }
-  return <div className="space-y-5">
-    <section aria-label="自动任务执行环境" className="space-y-3 rounded-xl border border-input bg-card p-5">
-      <label className="block text-sm font-medium">自动任务执行环境
+  return <div className="space-y-4">
+    <section aria-label="自动任务执行环境" className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border pb-3">
+      <label className="flex items-center gap-3 text-sm font-medium">自动任务执行环境
         <select aria-label="自动任务执行环境" value={pendingChanges.executionEnvironment ?? policy.executionEnvironment ?? 'prod'} disabled={pending}
-          onChange={event => save({ executionEnvironment: event.target.value as 'pre' | 'prod' }, '执行环境保存中…', '执行环境已保存')}
-          className="mt-2 block rounded-md border border-input bg-background px-3 py-2 text-foreground">
+          onChange={event => save({ executionEnvironment: event.target.value as 'pre' | 'prod' }, 'environment', '执行环境保存中…', '执行环境已保存')}
+          className="rounded-md border border-input bg-background px-2 py-1.5 text-foreground">
           <option value="pre">预发</option><option value="prod">生产</option>
         </select>
       </label>
-      <p className="text-xs leading-5 text-muted-foreground">自动分析、自动优化和通知仅由所选环境处理，同环境多实例自动抢占。选择后立即保存；手动操作不受影响。</p>
+      <p className="text-xs text-muted-foreground">选择后立即保存，自动分析、优化和通知由所选环境处理。</p>
+      {showFeedback('environment')}
     </section>
-    <section aria-label="自动分析设置" className="space-y-4 rounded-xl border border-input bg-card p-5">
-    <div className="flex items-start justify-between gap-5">
-      <div><h3 className="font-medium text-foreground">1. 自动分析</h3><p className="mt-1 text-sm leading-6 text-muted-foreground">自动分析运行问题，产出诊断和修复建议，不修改工作流。</p></div>
+    <section aria-label="自动分析设置" className="space-y-3 rounded-xl border border-input bg-card p-4">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex items-center gap-3"><h3 className="font-medium text-foreground">自动分析</h3>{historyButton('analysis')}</div>
       <div className="flex shrink-0 items-center gap-2 text-sm"><span>{pendingChanges.enabled !== undefined ? '保存中…' : policy.enabled ? '已开启' : '已关闭'}</span>
       <button type="button" role="switch" aria-label="自动分析" aria-checked={enabled} disabled={pending}
-        aria-busy={pending} onClick={() => save({ enabled: !policy.enabled }, policy.enabled ? '自动分析关闭中…' : '自动分析开启中…', policy.enabled ? '自动分析已关闭；已有任务继续处理' : '自动分析已开启')}
+        aria-busy={pending} onClick={() => save({ enabled: !policy.enabled }, 'analysis', policy.enabled ? '自动分析关闭中…' : '自动分析开启中…', policy.enabled ? '自动分析已关闭；已有任务继续处理' : '自动分析已开启')}
         className={`${switchStyle} ${enabled ? 'bg-primary' : 'bg-muted-foreground/40'}`}>
         <span className={`h-4 w-4 rounded-full bg-background shadow-sm transition-transform ${enabled ? 'translate-x-6' : 'translate-x-1'}`} /></button></div>
     </div>
-    <p className="text-sm text-muted-foreground">失败后自动分析：{policy.enabled ? '已开启' : '已关闭'}；每日定时分析：{!policy.dailyConfigured ? '未配置' : policy.enabled ? '已开启' : '已暂停'}。</p>
-    <div className="space-y-3 border-t border-border pt-4">
-    <h4 className="text-sm font-medium">每日分析计划</h4>
-    <p className="text-xs leading-5 text-muted-foreground">保存下方时间和最低影响等级后启用每日计划。按上海时间分析前一自然日运行，并纳入历史未处理的达标建议。</p>
+    <p className="text-xs text-muted-foreground">失败后分析运行问题并生成修复建议，不修改工作流。开关即时保存，已有任务继续处理。</p>
+    <div className="space-y-3 border-t border-border pt-3">
+    <h4 className="text-sm font-medium">每日分析计划 <span className="ml-2 text-xs font-normal text-muted-foreground">{!policy.dailyConfigured ? '未配置' : policy.enabled ? '已开启' : '已暂停'}</span></h4>
     <div className="flex flex-wrap items-end gap-3">
       <label className="text-sm text-foreground">每日执行时间 <span className="text-muted-foreground">Asia/Shanghai</span>
         <input type="time" aria-label="每日执行时间" value={time} disabled={!policy.enabled || pending} onChange={event => setTime(event.target.value)} className="mt-2 block rounded-md border border-input bg-background px-3 py-2 text-foreground" /></label>
       <label className="text-sm text-foreground">最低影响<select aria-label="最低影响" value={impact} onChange={event => setImpact(event.target.value as 'medium' | 'high')} disabled={!policy.enabled || pending} className="mt-2 block rounded-md border border-input bg-background px-3 py-2"><option value="medium">中等及以上</option><option value="high">高等及以上</option></select></label>
       <button type="button" disabled={!policy.enabled || pending || !time || policy.dailyConfigured && time === policy.dailyTime && impact === (policy.minimumImpact ?? 'medium') && policy.scopeVersion === 'all-qualified/v1'}
-        onClick={() => save({ dailyTime: time, minimumImpact: impact, dailyConfigured: true }, '分析计划保存中…', '分析计划已保存，按此时间和范围执行')}
+        onClick={() => save({ dailyTime: time, minimumImpact: impact, dailyConfigured: true }, 'analysis', '分析计划保存中…', '分析计划已保存，按此时间和范围执行')}
         className="rounded-md border border-input px-3 py-2 text-sm disabled:opacity-50">{saving === '分析计划保存中…' ? '保存中…' : '保存分析计划'}</button>
     </div>
+    <p className="text-xs text-muted-foreground">保存后启用每日计划，分析前一自然日运行及历史未处理的达标建议。</p>
     </div>
-    <p className="text-xs leading-5 text-muted-foreground">开关即时保存。关闭后停止新的自动派发，已有任务继续处理；手动分析与手动优化不受影响。</p>
+    {showFeedback('analysis')}
+    {history === 'analysis' && <div id="automation-history-analysis"><AutomationHistory key={`${workflowId}:analysis`} kind="analysis" workflowId={workflowId} retry={retry} /></div>}
     </section>
-    <section aria-label="自动优化" className="space-y-3 rounded-xl border border-input bg-card p-5">
-      <h3 className="font-medium text-foreground">2. 自动优化</h3>
-      <p className="text-sm leading-6 text-muted-foreground">在每日分析计划的基础上，根据修复建议调用 AIS，自动生成优化草稿供你审阅。</p>
-      <label className="flex items-center justify-between gap-4 rounded-lg bg-muted p-4 text-sm">
-        <span>自动生成优化草稿<span className="mt-1 block text-xs leading-5 text-muted-foreground">草稿仍需你审阅并确认发布，不会自动部署。</span></span>
+    <section aria-label="自动优化" className="space-y-3 rounded-xl border border-input bg-card p-4">
+      <div className="flex items-center gap-3"><h3 className="font-medium text-foreground">自动优化</h3>{historyButton('optimization')}</div>
+      <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" aria-label="自动生成优化草稿" checked={pendingChanges.autoDraft ?? policy.autoDraft} disabled={!policy.enabled || !policy.dailyConfigured || pending}
-          onChange={event => save({ autoDraft: event.target.checked }, event.target.checked ? '自动优化开启中…' : '自动优化关闭中…', '自动优化设置已保存')}
+          onChange={event => save({ autoDraft: event.target.checked }, 'optimization', event.target.checked ? '自动优化开启中…' : '自动优化关闭中…', '自动优化设置已保存')}
           className="h-4 w-4 shrink-0 accent-primary" />
+        自动生成优化草稿
       </label>
+      <p className="text-xs text-muted-foreground">基于每日分析计划生成草稿，仍需审阅确认发布，不会自动部署。</p>
       {(!policy.enabled || !policy.dailyConfigured) && <p className="text-xs text-muted-foreground">请先开启自动分析并保存每日分析计划，再开启自动优化。</p>}
+      {showFeedback('optimization')}
+      {history === 'optimization' && <div id="automation-history-optimization"><AutomationHistory key={`${workflowId}:optimization`} kind="optimization" workflowId={workflowId} retry={retry} /></div>}
     </section>
-    <section aria-label="进化任务通知" className="space-y-3 rounded-xl border border-input bg-card p-5">
-      <h3 className="font-medium text-foreground">3. 进化任务通知</h3>
-      <p className="text-sm leading-6 text-muted-foreground">手动和自动生成的 AIS 优化任务完成后，发送钉钉通知并附任务链接；失败也会通知。此设置不依赖自动分析开关。</p>
-      <label className="block text-sm">通知人<input aria-label="通知人" value={recipients} disabled={pending} onChange={event => setRecipients(event.target.value)}
-        placeholder="留空默认通知 Owner；多个账号 ID 用逗号分隔" className="mt-2 block w-full max-w-xl rounded-md border border-input bg-background px-3 py-2" /></label>
-      <p className="text-xs text-muted-foreground">留空通知工作流负责人（Owner）；填写后仅通知所填账号，最多 20 人。</p>
+    <section aria-label="进化任务通知" className="space-y-3 rounded-xl border border-input bg-card p-4">
+      <div className="flex items-center gap-3"><h3 className="font-medium text-foreground">进化任务通知</h3>{historyButton('notification')}</div>
+      <p className="text-xs text-muted-foreground">手动和自动优化任务完成或失败时发送钉钉通知，不依赖自动分析开关。</p>
+      <div className="flex flex-wrap items-end gap-3">
+      <label className="block w-full max-w-sm text-sm">通知人（工号）<input aria-label="通知人" value={recipients} disabled={pending} onChange={event => setRecipients(event.target.value)}
+        placeholder="留空通知 Owner；多个工号用逗号分隔" className="mt-2 block w-full rounded-md border border-input bg-background px-3 py-2" /></label>
       <button type="button" disabled={pending || recipients === (policy.notificationRecipients ?? []).join(', ')}
-        onClick={() => save({ notificationRecipients: [...new Set(recipients.split(/[,，;；\s]+/).filter(Boolean))], expectedNotificationVersion: policy.notificationVersion ?? 0 }, '正在保存通知人…', '通知人已保存')}
+        onClick={() => save({ notificationRecipients: [...new Set(recipients.split(/[,，;；\s]+/).filter(Boolean))], expectedNotificationVersion: policy.notificationVersion ?? 0 }, 'notification', '正在保存通知人…', '通知人已保存')}
         className="rounded-md border border-input px-3 py-2 text-sm disabled:opacity-50">{saving === '正在保存通知人…' ? '保存中…' : '保存通知人'}</button>
-    </section>
-    {(saving || message) && <p role="status" aria-live="polite" className="sticky bottom-3 z-10 rounded-lg border border-border bg-background px-4 py-3 text-sm shadow-sm">{saving || message}</p>}
-    <section aria-label="自动分析执行状态" className="rounded-xl border border-input bg-card p-5 text-sm">
-      <h4 className="font-medium text-foreground">自动任务记录</h4>
-      {status.data?.round && <p className="mt-2 text-muted-foreground">本轮纳入 {status.data.round.total} 项；已完成 {status.data.round.completedBatches}/{status.data.round.batches} 批。保留待处理 {Object.values(status.data.round.deferred).reduce((a, b) => a + b, 0)} 项。<span className="block text-xs">按运行发生时间纳入前一自然日及历史未处理项；证据截至 {new Date(status.data.round.evidenceCutoffMs).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。</span></p>}
-      {status.data?.pauseReason && <p className="mt-2 text-muted-foreground">{reasons[status.data.pauseReason] ?? '请核对策略和当前负责人'}</p>}
-      {status.isError ? <p className="mt-2 text-muted-foreground">{status.error.message}</p> : <>
-        <p className="mt-2 text-muted-foreground">{status.data?.lastScannedAtMs ? `扫描进度：${new Date(status.data.lastScannedAtMs).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}` : '每日扫描尚无记录；失败事件触发的分析单独记录在下方。'}</p>
-        {status.data?.coverage && <p className="mt-2 text-xs leading-5 text-muted-foreground">分析记录 {status.data.coverage.total}；待完成 {status.data.coverage.pending}，明确失败 {status.data.coverage.failed}，部分覆盖 {status.data.coverage.partial}，结果未知 {status.data.coverage.unknown}。扫描完成不代表分析覆盖完整。</p>}
-      </>}
-      <AutomationHistory key={workflowId} workflowId={workflowId} retry={retry} />
-      <NotificationAttention key={`notification:${workflowId}`} workflowId={workflowId} retry={retry} />
+      </div>
+      <p className="text-xs text-muted-foreground">留空通知负责人（Owner）；填写后仅通知所填工号，最多 20 人。</p>
+      {showFeedback('notification')}
+      {history === 'notification' && <div id="automation-history-notification"><NotificationAttention key={workflowId} workflowId={workflowId} retry={retry} /></div>}
     </section>
   </div>
 }
