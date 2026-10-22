@@ -3335,6 +3335,9 @@ impl BcsClient {
         while let Some(chunk) = stream.next().await {
             tokio::io::AsyncWriteExt::write_all(&mut f, &chunk.map_err(reqwest::Error::without_url)?).await?;
         }
+        // Tokio buffers writes on a blocking worker. Wait for the final write
+        // and propagate its error before reporting that the file is ready.
+        tokio::io::AsyncWriteExt::flush(&mut f).await.context("flush downloaded file")?;
         Ok(out_path)
     }
 
