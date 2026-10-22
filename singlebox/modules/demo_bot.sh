@@ -17,6 +17,8 @@ demo_bot_defaults() {
     DEMO_GATEWAY_PORT="${GATEWAY_PORT:-8889}"
     DEMO_BOT_READY_TIMEOUT_SECONDS="${SINGLEBOX_DEMO_BOT_READY_TIMEOUT_SECONDS:-120}"
     DEMO_BOT_READY_POLL_INTERVAL_SECONDS="${SINGLEBOX_DEMO_BOT_READY_POLL_INTERVAL_SECONDS:-2}"
+    DEMO_BBS_SUBSCRIPTION_TIMEOUT_SECONDS="${SINGLEBOX_BBS_SUBSCRIPTION_TIMEOUT_SECONDS:-30}"
+    DEMO_BBS_SUBSCRIPTION_POLL_INTERVAL_SECONDS="${SINGLEBOX_BBS_SUBSCRIPTION_POLL_INTERVAL_SECONDS:-1}"
 
     DEMO_BBS_SKILL_ROOT="${SINGLEBOX_BBS_SKILL_ROOT:-${PROJECT_ROOT}/singlebox/skills/infra}"
     DEMO_BBS_SKILL_NAMES=(
@@ -363,6 +365,46 @@ demo_bbs_subscription_payload() {
     jq -n --arg note "$note" '{note: $note}'
 }
 
+demo_bbs_subscription_persisted() {
+    local backend_bot_id="$1"
+    local base_url response
+
+    base_url="$(demo_bot_backend_base_url)"
+    response="$(
+        curl --noproxy '*' --connect-timeout 2 --max-time 10 -fsS \
+            -X GET \
+            -H "x-user-id: ${DEMO_ENTITY_ID}" \
+            "${base_url}/api/v1/collaboration/tasks/bots/${backend_bot_id}/bbs/browse-subscription" \
+            2>>"${DEMO_BOT_LOG}" || true
+    )"
+    [ -n "$response" ] || return 1
+    printf '%s\n' "$response" >> "${DEMO_BOT_LOG}"
+    printf '%s\n' "$response" | jq -e \
+        --arg bot_id "$backend_bot_id" \
+        --arg mode "openclaw" \
+        '.code == 200000
+            and (.data.bot_id == $bot_id)
+            and (.data.mode == $mode)' >/dev/null 2>&1
+}
+
+demo_bbs_subscription_wait_persisted() {
+    local backend_bot_id="$1"
+    local started_at elapsed
+
+    started_at=$SECONDS
+    while true; do
+        if demo_bbs_subscription_persisted "$backend_bot_id"; then
+            return 0
+        fi
+        elapsed=$((SECONDS - started_at))
+        if [ "$elapsed" -ge "$DEMO_BBS_SUBSCRIPTION_TIMEOUT_SECONDS" ]; then
+            log_error "BBS Browse-Loop did not persist for ${backend_bot_id} within ${DEMO_BBS_SUBSCRIPTION_TIMEOUT_SECONDS}s. Check ${DEMO_BOT_LOG}"
+            return 1
+        fi
+        sleep "$DEMO_BBS_SUBSCRIPTION_POLL_INTERVAL_SECONDS"
+    done
+}
+
 demo_bbs_subscription_enable() {
     local backend_bot_id="$1"
     local note="$2"
@@ -382,10 +424,16 @@ demo_bbs_subscription_enable() {
     if ! printf '%s\n' "$response" | jq -e \
         --arg bot_id "$backend_bot_id" \
         --arg mode "openclaw" \
-        '(.code == 200000 or .code == 201000) and (.data.bot_id == $bot_id) and (.data.mode == $mode)' \
+        '(.code == 200000 or .code == 201000 or .code == 202000)
+            and (.data.bot_id == $bot_id)
+            and (.data.mode == $mode)' \
         >/dev/null 2>&1; then
         log_error "BBS Browse-Loop did not initialize for ${backend_bot_id}. Check ${DEMO_BOT_LOG}"
         return 1
+    fi
+
+    if printf '%s\n' "$response" | jq -e '.code == 202000' >/dev/null 2>&1; then
+        demo_bbs_subscription_wait_persisted "$backend_bot_id"
     fi
 }
 
