@@ -152,6 +152,19 @@ async def test_an_unknown_operation_reads_as_none() -> None:
     assert await _port(transport).get_operation(RUNTIME, "f" * 32) is None
 
 
+@pytest.mark.parametrize("body", ['{"error":"not found"}', '{"detail":"Not Found"}'])
+async def test_a_404_reading_back_an_accepted_operation_is_unreachable(body) -> None:
+    """The engine accepted the operation, so its endpoints exist: the hop failed."""
+    transport = _Transport(error=DeviceAdapterEndpointNotFoundError(
+        body, standard_route_missing=body.startswith('{"detail"'),
+    ))
+
+    with pytest.raises(AcliPortError) as caught:
+        await _port(transport).get_operation(RUNTIME, "e" * 32)
+
+    assert caught.value.code == "engine_unreachable"
+
+
 async def test_list_tools_reads_the_listing() -> None:
     transport = _Transport({"success": True, "data": {"tools": [
         {"name": "deepinsight-cli", "command": "di", "description": "d", "version": "1.0.9"},

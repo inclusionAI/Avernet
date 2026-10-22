@@ -83,7 +83,7 @@ class ArcaAcliPort(AcliPort):
         try:
             envelope = await self._invoke(
                 runtime, "GET", OPERATION_PATH.format(id=operation_id),
-                timeout=READ_TIMEOUT_SECONDS,
+                timeout=READ_TIMEOUT_SECONDS, route_known=True,
             )
         except AcliPortError as error:
             if error.code == "operation_not_found":
@@ -127,8 +127,13 @@ class ArcaAcliPort(AcliPort):
         *,
         timeout: float,
         body: dict[str, Any] | None = None,
+        route_known: bool = False,
     ) -> Mapping[str, Any]:
-        """The engine's envelope for a ``2xx``; every other answer raises."""
+        """The engine's envelope for a ``2xx``; every other answer raises.
+
+        ``route_known`` is for reading back an operation the engine accepted:
+        the endpoints exist there, so a ``404`` came from the hop and may pass.
+        """
         try:
             # Resolution can block on network I/O (BaaS connection info), so it
             # runs off the event loop, as the engine relay's does.
@@ -152,6 +157,15 @@ class ArcaAcliPort(AcliPort):
             envelope = _envelope_in(error)
             if envelope is not None and envelope.get("error") == "operation_not_found":
                 raise _refusal(envelope) from error
+            if route_known:
+                # The engine accepted this operation, so its endpoints exist: the
+                # 404 came from the hop (proxy, a recycled container).
+                logger.warning(
+                    "acli_port_unreachable bot_id=%s path=%s status=404", runtime.bot_id, path,
+                )
+                raise AcliPortError(
+                    "engine_unreachable", "the engine could not be reached (HTTP 404)"
+                ) from error
             # Any other 404 means the endpoint is not there: an engine build that
             # predates it, or an engine that does not implement it at all (one
             # serving its own API answers in its own 404 shape, not FastAPI's).

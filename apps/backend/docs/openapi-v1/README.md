@@ -1743,7 +1743,7 @@ only uninstalls. So anything installed in any stage is granted.
 | 202 | Still running (`async`, or past the 30 s wait) | the operation |
 | 404 | An operation id this bot never had | — |
 | 409 | Another operation is running in the runtime | `{operation}` |
-| 409 | Removing a default CLI; nothing of that kind to cancel; the operation was cancelled (`cancelled`); the bot is not `ACTIVE` or the runtime has no running container (`not_running`); the engine does not provide these endpoints — an older build, or an engine that does not implement them (`engine_outdated`; any `404` from the engine, never retried) | `{code, reason}` for the container cases |
+| 409 | Removing a default CLI; nothing of that kind to cancel; the operation was cancelled (`cancelled`); the bot is not `ACTIVE` or the runtime has no running container (`not_running`); the engine does not provide these endpoints — an older build, or an engine that does not implement them (`engine_outdated`; any `404` to an install, uninstall, cancel or listing, never retried) | `{code, reason}` for the container cases |
 | 422 | Passing an alias (`di`) | `{market_name}` |
 | 422 | A `stage` on a bot that is not a service bot | — |
 | 422 | acli rejected the request (usually an unknown name; `install_failed`, `name_mismatch`) | `{code, reason}` |

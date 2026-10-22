@@ -7,13 +7,14 @@ ends. Every failure reaches the service as :class:`AcliPortError` with a short
 
 * ``not_running`` — the runtime has no reachable container.
 * ``engine_unsupported`` — the engine answered 501: it refuses acli.
-* ``engine_outdated`` — the engine's own route-miss 404: its build predates
-  these endpoints.
+* ``engine_outdated`` — a 404 for an install, uninstall, cancel or listing:
+  the engine does not provide these endpoints (an older build, or an engine
+  that does not implement them).
 * ``engine_busy`` — another operation holds the container (``operation`` is it).
 * ``not_active`` — a cancel found nothing of that kind running.
 * ``invalid_input`` — the engine refused the request as malformed.
-* ``timeout`` / ``engine_unreachable`` — the call itself failed (a 404 from the
-  gateway rather than the engine is ``engine_unreachable``).
+* ``timeout`` / ``engine_unreachable`` — the call itself failed (a 404 while
+  reading back an operation the engine accepted is ``engine_unreachable``).
 * ``bad_output`` — the engine answered something unreadable.
 * any code the engine's runner reported (``list_failed``, ``acli_unavailable``, …).
 """

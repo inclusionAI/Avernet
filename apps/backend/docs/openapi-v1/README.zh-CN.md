@@ -990,7 +990,7 @@ try again later」，`data.operation` 为正在进行的操作。操作进行中
 | 202 | 仍在进行（`async`，或超过 30 秒等待） | 操作 |
 | 404 | 该 bot 没有这个操作 id | — |
 | 409 | 运行时有其他操作正在进行 | `{operation}` |
-| 409 | 删除默认 CLI；没有可取消的对应操作；操作已被取消（`cancelled`）；bot 不是 `ACTIVE` 或运行时没有运行中的容器（`not_running`）；引擎没有提供这些端点——版本较旧，或引擎未实现它们（`engine_outdated`；引擎返回的任何 `404`，不重试） | 容器场景为 `{code, reason}` |
+| 409 | 删除默认 CLI；没有可取消的对应操作；操作已被取消（`cancelled`）；bot 不是 `ACTIVE` 或运行时没有运行中的容器（`not_running`）；引擎没有提供这些端点——版本较旧，或引擎未实现它们（`engine_outdated`；安装、卸载、取消或列表请求收到的任何 `404`，不重试） | 容器场景为 `{code, reason}` |
 | 422 | 传入别名（`di`） | `{market_name}` |
 | 422 | 非服务型 bot 传了 `stage` | — |
 | 422 | acli 拒绝请求（通常是名称不存在；`install_failed`、`name_mismatch`） | `{code, reason}` |
