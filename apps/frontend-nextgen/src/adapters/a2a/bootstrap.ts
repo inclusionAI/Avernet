@@ -198,6 +198,26 @@ function prewarmA2AChoice(
  *   locked-v3 → null（页内最高优先级，自动清除无效——不预热不翻案）；
  *   a2a → 同步构造返回（信任页级已决结论；connect 期探测失败由 onError 面上浮）。
  */
+export function revertA2AChoice(
+  providerConfig: A2aBootstrapConfig,
+  choiceCache: TransportChoiceCache = appChoiceCache,
+): void {
+  // review P3：缓存命中构造的 A2AProvider 在连接阶段（未出站任何请求）探测
+  // 再失败——把选择回退 probe-v3（可翻案、永不锁），下一次工厂构建天然落
+  // 回 v3。只回退 'a2a' 现值：locked-v3 不被降级、probe-v3 重置无意义。
+  // 已出站请求的失败不归此路（归 provider 恢复/取消面，不重发）。
+  let urls: A2aUrls;
+  try {
+    urls = resolveA2aUrls(providerConfig);
+  } catch {
+    return;
+  }
+  const sessionKey = A2A_CHOICE_SESSION_KEY;
+  if (choiceCache.get(sessionKey, urls.rpcUrl)?.kind === 'a2a') {
+    choiceCache.set(sessionKey, urls.rpcUrl, 'probe-v3');
+  }
+}
+
 export function takeCachedA2AProvider(
   providerConfig: A2aBootstrapConfig,
   deps: A2aBootstrapDeps = {},
