@@ -160,7 +160,7 @@ it("validates runtime identity only through the recovery creation contract", () 
   for (const patch of [{ stage: "unknown" }, { deviceUuid: "BOT-wrong" }, { version: "16" }, { STAGE: "verify" }]) {
     expect(() => parseRequest({ ...request, target: { ...request.target, runtime_identity: { ...runtime_identity, ...patch } } })).toThrow();
   }
-  const completeIdentity = { TOKEN: runtime_identity.deviceUuid, CLIENT_ID: runtime_identity.deviceUuid,
+  const completeIdentity = { TOKEN: "dummy", CLIENT_ID: runtime_identity.deviceUuid,
     OWNER_ID: "owner", BOT_ID: "default", ENTITY_ID: "owner", ENTITY_TYPE: "staff", BOT_TYPE: "service",
     AGENT_CODE: "example-service", ADMINS: "", STAGE: "online", VERSION: "V16", future_metadata: { supported: true } };
   expect(parseRequest({ ...request, target: { ...request.target, runtime_identity: completeIdentity } }).target.runtime_identity).toEqual(runtime_identity);

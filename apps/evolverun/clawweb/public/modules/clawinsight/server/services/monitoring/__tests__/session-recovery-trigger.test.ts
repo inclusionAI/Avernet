@@ -110,15 +110,20 @@ describe("monitoring automatic recovery", () => {
 });
 
 
-it("retains the real recovery parser: this checkout's old contract rejects v3 rather than bypassing it", async () => {
+it("uses the real recovery parser to normalize v3 locators without forwarding credentials", async () => {
   const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
   const { service, trigger } = setup();
-  await trigger.trigger({ ...event, schemaVersion: DIAGNOSIS_V3_VERSION, runtimeIdentity });
-  expect(service.create).not.toHaveBeenCalled();
-  expect(warning).toHaveBeenCalledWith("[monitoring] recovery skipped", {
-    eventId: event.eventId, reason: "invalid_recovery_input",
-  });
-  expect(JSON.stringify(warning.mock.calls)).not.toContain(runtimeIdentity.TOKEN);
+  await trigger.trigger({ ...event, schemaVersion: DIAGNOSIS_V3_VERSION,
+    runtimeIdentity: { ...runtimeIdentity, OWNER_ID: event.entityId } });
+  expect(service.create).toHaveBeenCalledTimes(1);
+  const [request, actor] = service.create.mock.calls[0];
+  expect(request.target).toEqual({ ...bot, engine: "OC", runtime_identity: {
+    stage: "online", deviceUuid: runtimeIdentity.CLIENT_ID, version: "V16",
+  } });
+  expect(actor).toEqual({ userId: event.entityId, isAdmin: false });
+  expect(request.target.runtime_identity).not.toHaveProperty("TOKEN");
+  expect(request.target.runtime_identity).not.toHaveProperty("EXTENSION");
+  expect(warning).not.toHaveBeenCalled();
 });
 
 it("does not downgrade missing or mismatched v3 identity to old recovery", async () => {

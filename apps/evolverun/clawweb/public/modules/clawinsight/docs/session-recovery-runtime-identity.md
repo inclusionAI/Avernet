@@ -18,7 +18,7 @@
     "env": "prod",
     "engine": "OC",
     "runtime_identity": {
-      "TOKEN": "DEVICE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "TOKEN": "dummy",
       "CLIENT_ID": "DEVICE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "OWNER_ID": "example-owner",
       "BOT_ID": "example-service-bot",

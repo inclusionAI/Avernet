@@ -377,12 +377,12 @@ describe('monitoring browser HTTP identity and enrollment boundary', () => {
 });
 
 describe("diagnosis report -> allowlist -> durable recovery task", () => {
-  async function automaticRecovery() {
+  async function automaticRecovery(botId = "mock-bot-te") {
     await stop();
     await runMigrations(db, "sqlite");
     const config = new AppConfigRepository(db);
     await config.create({ config_key: SESSION_RECOVERY_ALLOWLIST_KEY, config_json: JSON.stringify({
-      allowed_bots: [{ bot_id: "mock-bot-te", entity_id: "001234", env: "prod" }],
+      allowed_bots: [{ bot_id: botId, entity_id: "001234", env: "prod" }],
     }) });
     const objects = new Map<string, Buffer>();
     const artifacts = {
@@ -397,7 +397,7 @@ describe("diagnosis report -> allowlist -> durable recovery task", () => {
     recovery = createMonitoringRecoveryTrigger({ config, service });
     await start();
     return { config, tasks, service, agent, artifacts,
-      input: { ...alert, env: "prod", handlerName: "NOT_COMPLETED", sessionKey: "agent:main:session:original:user:001234" } };
+      input: { ...alert, botId, env: "prod", handlerName: "NOT_COMPLETED", sessionKey: "agent:main:session:original:user:001234" } };
   }
 
   it("keeps the diagnosis on task storage failure, then creates exactly one task on duplicate retry", async () => {
@@ -425,6 +425,23 @@ describe("diagnosis report -> allowlist -> durable recovery task", () => {
     expect(responses.filter(response => response.status === 201)).toHaveLength(1);
     expect((await post(input)).body.duplicate).toBe(true);
     expect(await db.query("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'")).toHaveLength(1);
+    await vi.waitFor(() => expect(agent.start).toHaveBeenCalledTimes(1));
+  });
+
+  it("creates one durable OC v3 recovery task with normalized instance locators", async () => {
+    const { input, tasks, agent } = await automaticRecovery("mock-bot-oc");
+    const event = { ...input, schemaVersion: DIAGNOSIS_V3_VERSION, engine: "OC",
+      runtimeIdentity: { ...runtimeIdentity, BOT_ID: input.botId, OWNER_ID: input.entityId } };
+    expect((await post(event)).status).toBe(201);
+    expect((await post(event)).body.duplicate).toBe(true);
+    const rows = await db.query<{ task_id: string }>("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'");
+    expect(rows).toHaveLength(1);
+    const task = await tasks.find(rows[0].task_id);
+    expect(task?.request.target).toEqual({ bot_id: input.botId, entity_id: input.entityId, env: "prod", engine: "OC",
+      runtime_identity: { stage: "online", deviceUuid: runtimeIdentity.CLIENT_ID, version: "V16" } });
+    const [stored] = await db.query("SELECT runtime_identity FROM insight_monitoring_diagnose WHERE event_id = ?", [event.eventId]);
+    expect(JSON.parse(String(stored.runtime_identity))).toEqual(event.runtimeIdentity);
+    expect(task?.request.target.runtime_identity).not.toHaveProperty("TOKEN");
     await vi.waitFor(() => expect(agent.start).toHaveBeenCalledTimes(1));
   });
 
