@@ -1493,7 +1493,9 @@ GET /openapi/v1/bots/bot_123/genome/revisions?status=candidate&parent=sha256:a90
 ```
 
 响应与捕获相同（`201`；当 `active` 已经持有这份策略配置时为 `200`）。错误：422
-`policy_rejected` 并附带原因（`schema`、`not_canonical`、`order`）。低于某个操作
+`policy_rejected` 并附带策略配置自身的原因（`schema`、`not_canonical`、`order`），
+或者——由于该记录携带的是 `active` 的 spec——当该内容已不再可应用时附带 spec 的
+应用期原因（契约 §7）：收紧策略配置同样会被拒绝，原因会说明需要先修复什么。低于某个操作
 自身等级的覆盖不是错误；它没有效果，因为覆盖只能提升（§6.3）。
 
 ### GET /bots/{bot_id}/genome/revisions/{rev}

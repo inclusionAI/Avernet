@@ -1646,9 +1646,12 @@ patch op. Called by owners through the UI or the API.
 ```
 
 Answers like a capture (`201`, or `200` when `active` already has this
-policy). Errors: 422 `policy_rejected` with reasons (`schema`,
-`not_canonical`, `order`). An override below an op's own tier is not an
-error; it has no effect, since overrides only raise (§6.3).
+policy). Errors: 422 `policy_rejected` with the policy's reasons (`schema`,
+`not_canonical`, `order`) or, since the record carries `active`'s spec, the
+spec's apply-time reasons when that content no longer applies (contract
+§7): a tightening is refused too, and the reasons say what to fix first. An
+override below an op's own tier is not an error; it has no effect, since
+overrides only raise (§6.3).
 
 ### GET /bots/{bot_id}/genome/revisions/{rev}
 

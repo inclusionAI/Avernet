@@ -718,8 +718,12 @@ A revision is recorded in one of two ways, both total (§4.3) by construction:
   Capturing an unchanged bot returns the existing revision.
 
 A policy change is its own record: a revision with `active`'s `spec` and the
-new `policy`, whose parent is `active`. No request carries a base of its
-own; the base is always the patch's, `active`, or none.
+new `policy`, whose parent is `active`. It is recorded under the same rule as
+every other revision: the spec is re-checked against what apply accepts at
+that moment (§6.4), so a policy change, a tightening included, is refused
+while `active`'s content no longer applies (a revoked MCP permission, a
+retired server); the reasons name what to fix first. No request carries a
+base of its own; the base is always the patch's, `active`, or none.
 
 A Bot Config Manifest v1 document is not recorded directly. It is applied
 through `PUT /config-manifest` as today, and the resulting bot state is then
