@@ -180,12 +180,20 @@ async fn socket_instances_keep_endpoints_caller_environment_and_workspace_isolat
     let mut snapshots = Vec::new();
     let mut engines = Vec::new();
     for actor in ["actor-a", "actor-b"] {
-        let cwd = temp.path().join(actor); std::fs::create_dir(&cwd).unwrap();
+        let cwd = temp.path().join(actor);
+        if actor == "actor-b" {
+            // Exercise path aliases on Linux too, not only macOS's /var alias.
+            let target = temp.path().join("actor-b-real");
+            std::fs::create_dir(&target).unwrap();
+            std::os::unix::fs::symlink(&target, &cwd).unwrap();
+        } else { std::fs::create_dir(&cwd).unwrap(); }
         let log = cwd.join("rpc.jsonl"); let e = engine(&log, &toml::Table::new());
         turn(e.clone(), &log, actor, None, &[("BCN_ACTOR_BOT_ID", actor)], CancellationToken::new()).await.unwrap();
         let calls = requests(&log);
         assert!(calls.iter().all(|v| v["actor"] == actor));
-        assert_eq!(PathBuf::from(calls[0]["cwd"].as_str().unwrap()), cwd);
+        // os.getcwd() resolves symlinks; compare directory identity, not spelling.
+        let actual_cwd = PathBuf::from(calls[0]["cwd"].as_str().unwrap());
+        assert_eq!(actual_cwd.canonicalize().unwrap(), cwd.canonicalize().unwrap());
         snapshots.push(calls[0].clone()); engines.push((e, log));
     }
     assert_ne!(snapshots[0]["socket"], snapshots[1]["socket"]);
