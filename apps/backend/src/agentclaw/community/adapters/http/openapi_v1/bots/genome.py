@@ -98,6 +98,10 @@ def _actor(actor_id: str, caller: ActingCaller, *, run: RunScope | None = None) 
     (``audit_actor``). A run's candidate names the strategy (contract:
     ``actor`` is its ``id@version``) and carries the principal the run acts
     for as ``principal``, so the permission check is still made against a user.
+    Its audit identity is the strategy and the run id, on purpose: the
+    revision row has one actor column and the contract says what it holds,
+    while the application that submitted the candidate on the run's behalf
+    is the run record's to keep (06-evolution-run.md), not every revision's.
     """
     if run is not None:
         return Provenance(ProvenanceKind.STRATEGY_RUN, run.strategy, run_id=run.run_id, step=run.step, principal=actor_id)

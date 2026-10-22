@@ -1429,7 +1429,10 @@ GET /openapi/v1/bots/bot_123/genome/revisions?status=candidate&parent=sha256:a90
 通过把基因组补丁应用到它自己的 `patch.base` 上来记录修订版。请求级别没有 `base`：
 由补丁指明它。调用方：进化运行（当进化策略调用 `ctx.candidates.submit` 时；
 进化策略从不直接调用此接口），以及通过 UI 或 API 操作的所有者。返回该修订版；
-记录已存在的内容时，以 `200` 和 `created: false` 返回已有修订版。
+记录已存在的内容时，以 `200` 和 `created: false` 返回已有修订版。记录者即审计身份：
+用户记录写入调用者（被准入的应用写为 `app:<id>:on-behalf-of:<user>`）；运行的候选写入
+策略（`id@version`）及其运行 id，代表运行提交它的应用由运行记录保存
+（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)），而不是每个修订版都保存。
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).

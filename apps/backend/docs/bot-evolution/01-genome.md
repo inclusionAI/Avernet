@@ -1580,7 +1580,11 @@ is no request-level `base`: the patch names it. Called by Evolution Run
 (when a strategy calls `ctx.candidates.submit`; strategies never call this
 directly), and by owners through the UI or the API. Returns the revision;
 recording content that already exists returns the existing one with `200`
-and `created: false`.
+and `created: false`. Who recorded it is the audit identity: a user record
+names the caller (an admitted application as `app:<id>:on-behalf-of:<user>`);
+a run's candidate names the strategy (`id@version`) and its run id, and the
+application that submitted it on the run's behalf is kept by the run record
+([06-evolution-run.md](06-evolution-run.md)), not by every revision.
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
