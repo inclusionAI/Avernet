@@ -192,6 +192,8 @@ class UserListRepositoryProtocol(Protocol):
         entity_id: str,
         user_list_type: str,
         env: str | None = None,
+        subject_type: str = "user",
+        bot_type: str = "all",
     ) -> bool: ...
 
     @abstractmethod
@@ -202,4 +204,19 @@ class UserListRepositoryProtocol(Protocol):
         user_list_type: str,
         in_whitelist: bool,
         env: str | None = None,
+        subject_type: str = "user",
+        bot_type: str = "all",
     ) -> None: ...
+
+
+    @abstractmethod
+    def has_rules(
+        self, *, subject_type: str, user_list_type: str, env: str,
+        bot_types: tuple[str, ...],
+    ) -> bool: ...
+
+    @abstractmethod
+    def exists_any(
+        self, *, entity_ids: tuple[str, ...], subject_type: str,
+        user_list_type: str, env: str, bot_types: tuple[str, ...],
+    ) -> bool: ...

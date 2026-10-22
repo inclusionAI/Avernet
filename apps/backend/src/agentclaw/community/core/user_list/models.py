@@ -17,6 +17,8 @@ class EntityUserListModel(Base):
 
     id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
     entity_id = Column(String(1024), nullable=False)
+    subject_type = Column(String(20), nullable=False, default="user", server_default="user")
+    bot_type = Column(String(20), nullable=False, default="all", server_default="all")
     user_list_type = Column(String(64), nullable=False)
     env = Column(String(20), nullable=False, default=get_current_env)
     gmt_create = Column(DateTime, nullable=False, server_default=func.now())
@@ -32,12 +34,16 @@ class EntityUserListModel(Base):
             "entity_id",
             "user_list_type",
             "env",
+            "subject_type",
+            "bot_type",
             name="uk_entity_user_list_scope",
         ),
         Index(
             "idx_entity_user_list_lookup",
             "env",
             "user_list_type",
+            "subject_type",
+            "bot_type",
             "entity_id",
         ),
     )

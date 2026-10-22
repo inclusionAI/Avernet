@@ -330,7 +330,12 @@ from agentclaw.community.core.acli_clis.service import AcliCliService
 
 
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
+from agentclaw.community.api.user_list_service import UserListServiceProtocol
+from agentclaw.community.core.user_list.service import UserListService
+
+
 _PAIRS = [
+    (UserListServiceProtocol, UserListService),
     (SpaceManagementServiceProtocol, SpaceManagementService),
     (CronAdminServiceProtocol, CronAdminService),
     (AgentSwarmServiceProtocol, AgentSwarmService),

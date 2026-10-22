@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from agentclaw.community.core.user_list.service import UserListService
+from unittest.mock import Mock
 
 
 class _Repository:
@@ -25,6 +26,8 @@ class _Repository:
         entity_id: str,
         user_list_type: str,
         in_whitelist: bool,
+        subject_type: str = "user",
+        bot_type: str = "all",
         env: str | None = None,
     ) -> None:
         self.calls.append((entity_id, user_list_type, in_whitelist, env))
@@ -32,7 +35,7 @@ class _Repository:
 
 def test_correction_allows_any_authenticated_actor():
     repository = _Repository()
-    service = UserListService(repository=repository)
+    service = UserListService(repository=repository, staff_dept=Mock())
 
     result = service.correct_membership(
         actor_id="any_authenticated_actor",
@@ -47,7 +50,7 @@ def test_correction_allows_any_authenticated_actor():
 
 def test_correction_allows_another_authenticated_actor_to_remove():
     repository = _Repository()
-    service = UserListService(repository=repository)
+    service = UserListService(repository=repository, staff_dept=Mock())
 
     result = service.correct_membership(
         actor_id="another_authenticated_actor",
@@ -62,7 +65,7 @@ def test_correction_allows_another_authenticated_actor_to_remove():
 
 def test_correction_forwards_explicit_environment():
     repository = _Repository()
-    service = UserListService(repository=repository)
+    service = UserListService(repository=repository, staff_dept=Mock())
 
     result = service.correct_membership(
         actor_id="authenticated_actor",
@@ -78,7 +81,7 @@ def test_correction_forwards_explicit_environment():
 
 def test_runtime_artifact_list_can_be_corrected_after_boundary_authorization():
     repository = _Repository()
-    service = UserListService(repository=repository)
+    service = UserListService(repository=repository, staff_dept=Mock())
     for enabled in (True, False):
         result = service.correct_membership(
             actor_id="operator", entity_id="*",
