@@ -15,6 +15,7 @@ from agentclaw.community.core.bot_genome import contract
 from agentclaw.community.core.bot_genome.gene_paths import covers, overlaps
 from agentclaw.community.core.bot_genome.patch.ops import FileChange, OpTouch, PatchOutcome
 from agentclaw.community.core.bot_genome.rewrite import rewrite_flagged, to_lines
+from agentclaw.community.core.bot_genome.spec_models import GenomePolicy
 
 __all__ = [
     "TIERS",
@@ -81,7 +82,7 @@ def apply_overrides(tier: str, gene: str, overrides: Mapping[str, str]) -> str:
 
 
 def patch_assessment(
-    outcome: PatchOutcome, policy: dict[str, Any], tiers: dict[str, Any] | None = None
+    outcome: PatchOutcome, policy: GenomePolicy, tiers: dict[str, Any] | None = None
 ) -> tuple[str, tuple[str, ...]]:
     """``(the patch's tier, the gene paths of rewritten files)``."""
     tiers = tiers or contract.risk_tiers()
@@ -92,5 +93,5 @@ def patch_assessment(
         tier = op_tier(touch, tiers["rules"])
         flags = ["rewrite"] if rewritten_set.intersection(touch.files) else []
         tier = apply_raises(tier, flags, tiers["raises"])
-        op_tiers.append(apply_overrides(tier, touch.gene, policy.get("risk_overrides", {})))
+        op_tiers.append(apply_overrides(tier, touch.gene, policy.risk_overrides))
     return highest(op_tiers), rewritten

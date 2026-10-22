@@ -1,9 +1,11 @@
 """Wire shapes of the ``/openapi/v1/bots/{bot_id}/genome`` group (RSI-03).
 
-``spec``, ``policy`` and ``patch`` ride as plain JSON objects: their shape is
-the Genome contract's (``api-contracts/genome/v1/*.schema.json``), which the
-registry validates with the contract's own schemas; re-declaring it here
-would be a second, drifting copy.
+``spec``, ``policy`` and ``patch`` are the core's own contract models
+(``core/bot_genome/spec_models.py``, ``patch_models.py``): one set of
+classes for the wire and the registry, mirroring
+``api-contracts/genome/v1/*.schema.json`` with the contract's own patterns.
+The compiled document a promotion carries stays a JSON object: its shape is
+the Manifest's, which that module owns.
 """
 from __future__ import annotations
 
@@ -11,6 +13,9 @@ from datetime import datetime, timezone
 from typing import Annotated, Any, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+
+from agentclaw.community.core.bot_genome.patch_models import GenomePatch
+from agentclaw.community.core.bot_genome.spec_models import GenomePolicy, GenomeSpec
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -60,8 +65,8 @@ class GenomeRevisionPayload(BaseModel):
 
     genome_schema: int = Field(description="The contract version the record follows (1).")
     revision: RevisionSummary = Field(description="The revision's metadata.")
-    spec: dict[str, Any] = Field(description="The bot's definition, every category present (contract §4).")
-    policy: dict[str, Any] = Field(description="What automation may change: `mutable_genes`, `pins`, `risk_overrides` (contract §5).")
+    spec: GenomeSpec = Field(description="The bot's definition, every category present (contract §4).")
+    policy: GenomePolicy = Field(description="What automation may change: `mutable_genes`, `pins`, `risk_overrides` (contract §5).")
 
 
 class RevisionRecorded(BaseModel):
@@ -101,28 +106,13 @@ class RecordPatchRequest(BaseModel):
 
     status: Literal["draft", "candidate"] = Field(description="`draft` for an owner's edit, `candidate` for a run's proposal.")
     run: RunScopePayload | None = Field(default=None, description="Required with `candidate` and refused with `draft`: the evolution run that proposed the patch. It bounds the patch (every op must fall under the run's `allowed_genes`) and names the revision's ref `candidate/<run_id>/<n>`.")
-    patch: dict[str, Any] = Field(description="A Genome Patch (contract §6): `{patch_schema, base, ops, rationale, evidence}`, where `base` is the id of this bot's revision the ops apply to.")
+    patch: GenomePatch = Field(description="A Genome Patch (contract §6); `base` is the id of this bot's revision the ops apply to.")
 
     @model_validator(mode="after")
     def _run_matches_status(self) -> RecordPatchRequest:
         if (self.status == "candidate") != (self.run is not None):
             raise ValueError("`run` is required with status `candidate` and not allowed with `draft`")
         return self
-
-
-class PolicyRequest(BaseModel):
-    """The owner's policy: what automation may change on this bot (contract §5).
-
-    Exactly the contract's three fields, all required and nothing else: a
-    misspelled or missing `risk_overrides` must not be recorded as "no
-    overrides", which would silently drop a tier the owner meant to raise.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    mutable_genes: list[str] = Field(description="Sorted, unique gene paths patches may change; everything else is off limits.")
-    pins: list[str] = Field(description="Sorted, unique gene paths no patch may touch, even inside a mutable gene.")
-    risk_overrides: dict[str, str] = Field(description="Gene path → tier (`T0`–`T3`); an override can only raise an op's tier. Required, `{}` for none.")
 
 
 class GeneChangePayload(BaseModel):

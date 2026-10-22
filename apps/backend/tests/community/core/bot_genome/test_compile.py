@@ -9,6 +9,7 @@ import yaml
 
 from agentclaw.community.core.bot_genome.canonical import canonicalize, sha256_digest
 from agentclaw.community.core.bot_genome.compile import compile_spec, document_digest
+from agentclaw.community.core.bot_genome.spec_models import GenomeSpec, RepoSkill
 from tests.community.core.bot_genome.example_blobs import EXAMPLES, BlobDir, load_revisions
 
 CASES = sorted(p for p in (EXAMPLES / "manifest-v1").iterdir() if (p / "compiled.yaml").exists())
@@ -18,14 +19,15 @@ CASES = sorted(p for p in (EXAMPLES / "manifest-v1").iterdir() if (p / "compiled
 def test_every_compiled_yaml_is_the_compiled_revision(case: Path) -> None:
     revision = json.loads((case / "revision.json").read_text(encoding="utf-8"))
     expected = yaml.safe_load((case / "compiled.yaml").read_text(encoding="utf-8"))
-    compiled = compile_spec(revision["spec"], BlobDir(), revision_id=revision["revision"]["id"])
+    compiled = compile_spec(GenomeSpec.from_json(revision["spec"]), BlobDir(), revision_id=revision["revision"]["id"])
     assert compiled.document == expected
     assert compiled.revision_id == revision["revision"]["id"]
     assert compiled.document_digest == sha256_digest(canonicalize(expected))
 
 
 def test_repo_and_center_skills_and_memory() -> None:
-    spec = next(r for r in load_revisions().values() if any(s["origin"] == "repo" for s in r["spec"]["skills"]))["spec"]
+    spec = next(GenomeSpec.from_json(r["spec"]) for r in load_revisions().values() if any(s["origin"] == "repo" for s in r["spec"]["skills"]))
+    assert any(isinstance(s, RepoSkill) for s in spec.skills)
     document = compile_spec(spec, BlobDir(), revision_id="r").document
     assert document["manifest"]["skills"] == [{"name": "weather", "source": {"protocol": "repo", "path": "team/weather"}}]
     assert "memory" not in document["manifest"] and "cli_tools" not in document["manifest"] and "engine_config" not in document["manifest"]

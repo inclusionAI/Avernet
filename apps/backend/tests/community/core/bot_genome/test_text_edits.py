@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import TypeAdapter, ValidationError
 
+from agentclaw.community.core.bot_genome.patch_models import TextEdit
 from agentclaw.community.core.bot_genome.text_edits import (
     EditDoesNotApply,
     apply_edits,
@@ -120,10 +122,12 @@ def test_diff_is_strict(diff: str, problem: str) -> None:
 
 
 def test_apply_edits_in_order() -> None:
-    out = apply_edits("a\nb\n", [{"kind": "insert_after", "anchor": "a", "content": "x"}, {"kind": "diff", "diff": "@@ -3 +3 @@\n-b\n+B\n"}])
-    assert out == "a\nx\nB\n"
+    edits = TypeAdapter(list[TextEdit]).validate_python([{"kind": "insert_after", "anchor": "a", "content": "x"}, {"kind": "diff", "diff": "@@ -3 +3 @@\n-b\n+B\n"}])
+    assert apply_edits("a\nb\n", edits) == "a\nx\nB\n"
+    with pytest.raises(ValidationError):  # the edit kinds are the model's closed set
+        TypeAdapter(list[TextEdit]).validate_python([{"kind": "regex"}])
     with pytest.raises(EditDoesNotApply, match="unknown edit kind"):
-        apply_edits("a", [{"kind": "regex"}])
+        apply_edits("a", [{"kind": "regex"}])  # type: ignore[list-item]  # past the model: still refused by name
 
 
 # -- description_only --------------------------------------------------------------------------

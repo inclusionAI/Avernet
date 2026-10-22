@@ -1463,7 +1463,7 @@ class GenomeRegistryProtocol(Protocol):          # core/bot_genome/genome_regist
         Idempotent: unchanged state returns the existing revision with created=False.
         Raises CaptureRefused naming what cannot be recorded."""
 
-    async def record_patch(self, bot: BotRef, patch: dict, *, created_by: Provenance,
+    async def record_patch(self, bot: BotRef, patch: GenomePatch, *, created_by: Provenance,
                            status: RevisionStatus,          # DRAFT (owner) or CANDIDATE (run) only
                            run: RunScope | None = None) -> RecordedRevision:
         """Apply `patch` to its own `base` (a revision of this bot) and record the result (contract §6.4).
@@ -1471,7 +1471,7 @@ class GenomeRegistryProtocol(Protocol):          # core/bot_genome/genome_regist
         candidate/<run>/<n>. Idempotent: the same patch returns the same revision.
         Raises RevisionNotFound (the base), PatchRejected(reasons), LimitExceeded, ContentNotReachable."""
 
-    def set_policy(self, bot: BotRef, policy: dict, *, created_by: Provenance) -> RecordedRevision:
+    def set_policy(self, bot: BotRef, policy: GenomePolicy, *, created_by: Provenance) -> RecordedRevision:
         """Record a revision with `active`'s spec and the new policy. Raises PolicyRejected(reasons)."""
 
     def set_status(self, bot: BotRef, revision_id: RevisionId, status: RevisionStatus,

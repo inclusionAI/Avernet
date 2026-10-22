@@ -28,6 +28,7 @@ from agentclaw.community.api.bot_genome_registry_service import GenomeRegistryPr
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.bot_genome.errors import LimitExceeded
 from agentclaw.community.core.bot_genome.limits import MAX_UPLOAD_BYTES
+from agentclaw.community.core.bot_genome.spec_models import GenomePolicy
 from agentclaw.community.core.bot_genome.models import (
     BotRef,
     GenomeRef,
@@ -51,7 +52,6 @@ from .schemas_genome import (
     GenomeRefsPayload,
     GenomeRevisionPayload,
     MoveRefRequest,
-    PolicyRequest,
     PromoteRequest,
     PromotionPayload,
     RecordPatchRequest,
@@ -259,7 +259,7 @@ async def get_genome_revision(
 @envelope_errors
 async def set_genome_policy(
     bot_id: BotIdPath,
-    body: PolicyRequest,
+    body: GenomePolicy,
     request: Request,
     response: Response,
     actor_id: UserIdDep,
@@ -270,7 +270,7 @@ async def set_genome_policy(
 ) -> Envelope[RevisionRecorded]:
     """Record a revision with `active`'s content and this policy. The policy is not bot state: it is what automation may change."""
     bot = bot_ref(bot_service.get_bot(bot_id, owner_id), bot_id=bot_id)
-    recorded = registry.set_policy(bot, body.model_dump(), created_by=_actor(actor_id, caller))
+    recorded = registry.set_policy(bot, body, created_by=_actor(actor_id, caller))
     return envelope(_recorded(recorded, response), request)
 
 

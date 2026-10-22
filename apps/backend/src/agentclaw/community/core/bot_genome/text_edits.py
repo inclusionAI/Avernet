@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Sequence
-from typing import Any
+
+from agentclaw.community.core.bot_genome.patch_models import DiffEdit, InsertAfter, ReplaceSection, TextEdit
 
 __all__ = [
     "EditDoesNotApply",
@@ -198,18 +199,17 @@ def apply_unified_diff(text: str, diff: str) -> str:
     return _join(out, out_nl if out else True)
 
 
-def apply_edits(text: str, edits: Iterable[dict[str, Any]]) -> str:
-    """Apply schema-valid ``textEdit`` records in order."""
+def apply_edits(text: str, edits: Iterable[TextEdit]) -> str:
+    """Apply ``TextEdit`` records in order."""
     for edit in edits:
-        kind = edit["kind"]
-        if kind == "replace_section":
-            text = replace_section(text, edit["heading"], edit["content"])
-        elif kind == "insert_after":
-            text = insert_after(text, edit["anchor"], edit["content"])
-        elif kind == "diff":
-            text = apply_unified_diff(text, edit["diff"])
+        if isinstance(edit, ReplaceSection):
+            text = replace_section(text, edit.heading, edit.content)
+        elif isinstance(edit, InsertAfter):
+            text = insert_after(text, edit.anchor, edit.content)
+        elif isinstance(edit, DiffEdit):
+            text = apply_unified_diff(text, edit.diff)
         else:
-            raise EditDoesNotApply(f"unknown edit kind {kind!r}")
+            raise EditDoesNotApply(f"unknown edit kind {type(edit).__name__}")
     return text
 
 

@@ -18,7 +18,6 @@ from agentclaw.community.adapters.http.openapi_v1.bots import genome
 from agentclaw.community.adapters.http.openapi_v1.bots.genome import router
 from agentclaw.community.adapters.http.openapi_v1.bots.schemas_genome import (
     MoveRefRequest,
-    PolicyRequest,
     PromoteRequest,
     RecordPatchRequest,
     RunScopePayload,
@@ -40,6 +39,8 @@ from agentclaw.community.core.bot_genome.errors import (
     RefConflict,
     RevisionNotFound,
 )
+from agentclaw.community.core.bot_genome.patch_models import GenomePatch
+from agentclaw.community.core.bot_genome.spec_models import GenomePolicy, GenomeSpec
 from agentclaw.community.core.bot_genome.models import (
     CompiledManifest,
     GenomeDiff,
@@ -93,8 +94,16 @@ def _meta(rev: str = R1, seq: int = 1, status: RevisionStatus = RevisionStatus.D
     return RevisionMetadata(id=rev, seq=seq, parent=parent, created_by=OWNER, created_at=NOW, status=status, patch_digest=None)
 
 
+EMPTY_SPEC = GenomeSpec(persona=[], skills=[], memory=None, resources=[], tools={"mcp": []}, engine_config={}, script=None)
+POLICY = GenomePolicy(mutable_genes=["persona"], pins=[], risk_overrides={})
+PATCH = GenomePatch.from_json({
+    "patch_schema": 1, "base": R1, "rationale": "why", "evidence": ["feedback:fb_1"],
+    "ops": [{"op": "file.edit", "target": "persona/SOUL.md", "edits": [{"kind": "insert_after", "anchor": "## Tone", "content": "x"}]}],
+})
+
+
 def _revision(rev: str = R1) -> GenomeRevision:
-    return GenomeRevision(genome_schema=1, revision=_meta(rev), spec={"persona": []}, policy={"mutable_genes": []})
+    return GenomeRevision(genome_schema=1, revision=_meta(rev), spec=EMPTY_SPEC, policy=POLICY)
 
 
 def _promotion(doc: dict | None = None) -> Promotion:
@@ -172,11 +181,12 @@ def test_promotion_takes_applys_bar() -> None:
 async def test_record_patch_answers_201_then_200_and_threads_the_run() -> None:
     registry = AsyncMock()
     registry.record_patch.return_value = RecordedRevision(_revision(R2), True, risk_tier="T2", flags=("persona/SOUL.md",), ref="candidate/run_7/1")
-    body = RecordPatchRequest(status="candidate", run=RunScopePayload(run_id="run_7", strategy="clawevolve/bot-evolution@2.0.0", allowed_genes=["persona"]), patch={"base": R1})
+    body = RecordPatchRequest(status="candidate", run=RunScopePayload(run_id="run_7", strategy="clawevolve/bot-evolution@2.0.0", allowed_genes=["persona"]), patch=PATCH)
     response = Response()
     out = await genome.record_genome_patch("bot_1", body, _request("POST"), response, "u1", "u1", HUMAN, _bot_service(), registry)
     assert response.status_code == 201 and out.data.ref == "candidate/run_7/1" and out.data.flags == ["persona/SOUL.md"]
     bot, patch = registry.record_patch.await_args.args
+    assert patch == PATCH, "the typed patch reaches the registry as parsed"
     kwargs = registry.record_patch.await_args.kwargs
     assert (bot.entity_id, bot.engine_type, bot.bot_type) == ("ent_1", "openclaw", "personal")
     assert kwargs["status"] is RevisionStatus.CANDIDATE and kwargs["run"] == RunScope("run_7", "clawevolve/bot-evolution@2.0.0", ("persona",))
@@ -184,7 +194,7 @@ async def test_record_patch_answers_201_then_200_and_threads_the_run() -> None:
     assert kwargs["created_by"].checked_as == "u1", "the MCP permission check is made against the user the run acts for"
     registry.record_patch.return_value = RecordedRevision(_revision(R2), False)
     response = Response()
-    out = await genome.record_genome_patch("bot_1", RecordPatchRequest(status="draft", patch={}), _request("POST"), response, "u1", "u1", HUMAN, _bot_service(), registry)
+    out = await genome.record_genome_patch("bot_1", RecordPatchRequest(status="draft", patch=PATCH), _request("POST"), response, "u1", "u1", HUMAN, _bot_service(), registry)
     assert response.status_code == 200 and out.data.created is False
     assert registry.record_patch.await_args.kwargs["created_by"] == OWNER
 
@@ -218,8 +228,15 @@ def test_a_candidate_needs_its_run_and_a_run_id_is_one_ref_segment(body: dict) -
 )
 def test_a_policy_is_exactly_the_contracts_three_fields(body: dict) -> None:
     with pytest.raises(ValidationError):
-        PolicyRequest.model_validate(body)
-    assert PolicyRequest.model_validate({"mutable_genes": ["persona"], "pins": [], "risk_overrides": {}}).model_dump() == {"mutable_genes": ["persona"], "pins": [], "risk_overrides": {}}
+        GenomePolicy.model_validate(body)
+    assert GenomePolicy.model_validate({"mutable_genes": ["persona"], "pins": [], "risk_overrides": {}}).to_json() == {"mutable_genes": ["persona"], "pins": [], "risk_overrides": {}}
+
+
+def test_the_patch_body_is_the_typed_contract_model() -> None:
+    body = RecordPatchRequest.model_validate({"status": "draft", "patch": PATCH.to_json()})
+    assert body.patch == PATCH
+    with pytest.raises(ValidationError):  # a shape error is refused at the boundary, as the contract schema would
+        RecordPatchRequest.model_validate({"status": "draft", "patch": {"patch_schema": 1, "base": R1, "ops": [], "rationale": "x", "evidence": []}})
 
 
 def test_an_application_caller_is_recorded_as_itself_acting_for_the_user() -> None:
@@ -240,11 +257,11 @@ async def test_capture_policy_and_lookups() -> None:
     assert response.status_code == 201
     registry.set_policy = Mock(return_value=RecordedRevision(_revision(), False))
     response = Response()
-    out = await genome.set_genome_policy("bot_1", PolicyRequest(mutable_genes=["persona"], pins=[], risk_overrides={}), _request("PUT"), response, "u1", "u1", HUMAN, _bot_service(), registry)
-    assert response.status_code == 200 and registry.set_policy.call_args.args[1] == {"mutable_genes": ["persona"], "pins": [], "risk_overrides": {}}
+    out = await genome.set_genome_policy("bot_1", POLICY, _request("PUT"), response, "u1", "u1", HUMAN, _bot_service(), registry)
+    assert response.status_code == 200 and registry.set_policy.call_args.args[1] == POLICY
     registry.get_revision = Mock(return_value=_revision())
     out = await genome.get_genome_revision("bot_1", "r1", _request(), "u1", "u1", _bot_service(), registry)
-    assert out.data.revision.id == R1 and out.data.spec == {"persona": []}
+    assert out.data.revision.id == R1 and out.data.spec == EMPTY_SPEC and out.data.model_dump(mode="json")["spec"] == EMPTY_SPEC.to_json()
     registry.list_revisions = Mock(return_value=RevisionPage(3, (_meta(R2, 3),)))
     out = await genome.list_genome_revisions("bot_1", _request(), "u1", "u1", "candidate", None, 2, 1, _bot_service(), registry)
     assert (out.data.total, out.data.items[0].seq) == (3, 3)

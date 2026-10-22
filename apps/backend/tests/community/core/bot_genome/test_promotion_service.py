@@ -14,7 +14,7 @@ from agentclaw.community.core.bot_genome.errors import (
 )
 from agentclaw.community.core.bot_genome.models import BotRef, Provenance, ProvenanceKind, RevisionStatus, RunScope
 from agentclaw.community.core.bot_genome.promotion.applier import PendingDeliveryApplier
-from tests.community.core.bot_genome.example_blobs import SUPPORT_BOT, BlobDir, load_patch, load_revisions
+from tests.community.core.bot_genome.example_blobs import SUPPORT_BOT, BlobDir, load_patch, spec_of
 from tests.community.core.bot_genome.service_fixtures import BOT, OWNER, RUN, World
 from tests.community.core.bot_genome.test_capture import FakeReader
 
@@ -24,7 +24,7 @@ RETURNS_MD = "sha256:a191ca8f49999530a2cf4f48562ffde7d62011b3bcfe040195da089a3f1
 @pytest.fixture
 def world(tmp_path) -> World:
     w = World(tmp_path)
-    w.reader = FakeReader.from_spec(load_revisions()[SUPPORT_BOT]["spec"])
+    w.reader = FakeReader.from_spec(spec_of(SUPPORT_BOT))
     return w
 
 

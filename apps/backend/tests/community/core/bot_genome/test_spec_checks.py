@@ -1,7 +1,6 @@
 """README §6.4: every apply-time predicate, on the contract's invalid cases and with fakes of the MCP services."""
 from __future__ import annotations
 
-import copy
 from typing import Any
 
 import pytest
@@ -20,9 +19,19 @@ from agentclaw.community.core.bot_genome.spec_checks import (
     skill_reasons,
     tree_reasons,
 )
+from agentclaw.community.core.bot_genome.spec_models import (
+    GenomePolicy,
+    GenomeSpec,
+    LocalSkill,
+    McpConfig,
+    McpServerEntry,
+    MemorySpec,
+    ResourceEntry,
+    ScriptEntry,
+)
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
-from tests.community.core.bot_genome.example_blobs import SUPPORT_BOT, BlobDir, load_invalid, load_revisions
+from tests.community.core.bot_genome.example_blobs import SUPPORT_BOT, BlobDir, load_invalid, load_revisions, policy_of, spec_of
 
 REVISIONS = load_revisions()
 INVALID = load_invalid()
@@ -63,11 +72,12 @@ def _checks(auth: FakeAuth | None = None, config: FakeConfig | None = None) -> S
     return SpecChecks(validator=SkillPackageValidator(SkillParser()), mcp_auth=auth or FakeAuth(), mcp_config=config or FakeConfig())
 
 
-def _record(spec_changes: dict[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
-    record = copy.deepcopy(REVISIONS[SUPPORT_BOT])
-    if spec_changes:
-        record["spec"].update(spec_changes)
-    return record["spec"], record["policy"]
+def _record() -> tuple[GenomeSpec, GenomePolicy]:
+    return spec_of(SUPPORT_BOT), policy_of(SUPPORT_BOT)
+
+
+def _parsed(record: dict[str, Any]) -> tuple[GenomeSpec, GenomePolicy]:
+    return GenomeSpec.from_json(record["spec"]), GenomePolicy.from_json(record["policy"])
 
 
 # -- the contract's examples --------------------------------------------------------------------
@@ -75,24 +85,30 @@ def _record(spec_changes: dict[str, Any] | None = None) -> tuple[dict[str, Any],
 
 @pytest.mark.parametrize("record_id", sorted(REVISIONS), ids=lambda i: i[:15])
 def test_every_valid_example_passes(record_id: str) -> None:
-    record = REVISIONS[record_id]
-    engine = "claude_code" if record["spec"]["persona"] and record["spec"]["persona"][0]["type"] == "CLAUDE.md" else "openclaw"
+    spec, policy = _parsed(REVISIONS[record_id])
+    engine = "claude_code" if spec.persona and spec.persona[0].type == "CLAUDE.md" else "openclaw"
     ctx = SpecCheckContext(engine_type=engine, bot_type="personal", entity_id="o", actor_id="a")
-    assert _checks().reasons(record["spec"], record["policy"], BlobDir(), ctx) == []
+    assert _checks().reasons(spec, policy, BlobDir(), ctx) == []
 
 
 @pytest.mark.parametrize("name", sorted(n for n, c in INVALID.items() if c["check"] in CODES))
 def test_every_invalid_example_naming_a_predicate_is_refused_by_it(name: str) -> None:
     case = INVALID[name]
-    record = case["record"]
-    reasons = _checks().reasons(record["spec"], record["policy"], BlobDir(), CTX)
+    spec, policy = _parsed(case["record"])
+    reasons = _checks().reasons(spec, policy, BlobDir(), CTX)
     assert CODES[case["check"]] in {r.code for r in reasons}, (case["reason"], reasons)
 
 
 @pytest.mark.parametrize("name", ["mcp-url-no-host", "mcp-url-userinfo", "mcp-header-newline"])
 def test_mcp_examples_fail_the_entry_rules_too(name: str) -> None:
+    """These three fail the contract pattern, so the typed model refuses them; a spec built past the model still fails the Manifest rule."""
     record = INVALID[name]["record"]
-    reasons = mcp_entry_reasons(record["spec"], CTX)
+    spec, _ = _record()
+    spec.tools.mcp = [
+        McpServerEntry.model_construct(server_code=entry["server_code"], config=McpConfig.model_construct(**entry["config"]) if "config" in entry else None)
+        for entry in record["spec"]["tools"]["mcp"]
+    ]
+    reasons = mcp_entry_reasons(spec, CTX)
     assert reasons and all(r.code == "mcp_entry" for r in reasons)
     assert all(r.location.startswith("spec.tools.mcp[0].config") for r in reasons)
 
@@ -101,17 +117,19 @@ def test_mcp_examples_fail_the_entry_rules_too(name: str) -> None:
 
 
 def test_schema_reasons_name_the_field() -> None:
-    spec, policy = _record({"engine_config": {"x": 1}})
-    assert [(r.code, r.location) for r in schema_reasons(spec, policy)] == [("schema", "spec.engine_config")]
-    assert schema_reasons(spec, dict(policy, pins="nope"))[-1].location == "policy.pins"
+    spec, policy = _record()
+    spec_json = spec.to_json()
+    spec_json["engine_config"] = {"x": 1}
+    assert [(r.code, r.location) for r in schema_reasons(spec_json, policy.to_json())] == [("schema", "spec.engine_config")]
+    assert schema_reasons(spec_json, dict(policy.to_json(), pins="nope"))[-1].location == "policy.pins"
 
 
 def test_order_and_canonical_paths() -> None:
     spec, policy = _record()
-    spec["tools"]["mcp"].reverse()
+    spec.tools.mcp.reverse()
     assert [r.location for r in order_reasons(spec, policy)] == ["spec.tools.mcp"]
-    assert [r.location for r in order_reasons(spec, dict(policy, pins=["a", "a"]))] == ["spec.tools.mcp", "policy.pins"]
-    assert [r.location for r in policy_path_reasons(dict(policy, risk_overrides={"skills/%61": "T2"}))] == ["policy.risk_overrides"]
+    assert [r.location for r in order_reasons(spec, policy.model_copy(update={"pins": ["a", "a"]}))] == ["spec.tools.mcp", "policy.pins"]
+    assert [r.location for r in policy_path_reasons(policy.model_copy(update={"risk_overrides": {"skills/%61": "T2"}}))] == ["policy.risk_overrides"]
 
 
 # -- persona ---------------------------------------------------------------------------------------
@@ -127,15 +145,15 @@ def test_persona_type_the_engine_does_not_accept() -> None:
 def test_a_persona_file_over_the_identity_cap_is_refused() -> None:
     spec, _ = _record()
     blobs = BlobDir()
-    spec["persona"][0]["digest"] = blobs.put(b"x" * (MAX_PERSONA_BYTES + 1))
+    spec.persona[0].digest = blobs.put(b"x" * (MAX_PERSONA_BYTES + 1))
     assert [r.code for r in persona_reasons(spec, blobs, "openclaw")] == ["limit_exceeded"]
-    spec["persona"][0]["digest"] = blobs.put(b"y" * MAX_PERSONA_BYTES)
+    spec.persona[0].digest = blobs.put(b"y" * MAX_PERSONA_BYTES)
     assert persona_reasons(spec, blobs, "openclaw") == []
 
 
 def test_unreachable_content_is_a_reason_not_an_exception() -> None:
     spec, _ = _record()
-    spec["persona"][0]["digest"] = "sha256:" + "1" * 64
+    spec.persona[0].digest = "sha256:" + "1" * 64
     assert [r.code for r in persona_reasons(spec, BlobDir(), "openclaw")] == ["content_not_reachable"]
 
 
@@ -174,13 +192,13 @@ def test_skill_tree_must_be_what_the_validator_keeps() -> None:
     with_junk = blobs.put(canonical_tree_bytes([(".DS_Store", b"x"), ("SKILL.md", skill_md)]))
     no_description = blobs.put(canonical_tree_bytes([("SKILL.md", b"---\nname: tidy\ndescription: ''\n---\n")]))
     spec, _ = _record()
-    spec["skills"] = [{"name": "tidy", "origin": "local", "digest": good}]
+    spec.skills = [LocalSkill(name="tidy", origin="local", digest=good)]
     assert skill_reasons(spec, blobs, validator) == []
-    spec["skills"] = [{"name": "other", "origin": "local", "digest": good}]
+    spec.skills = [LocalSkill(name="other", origin="local", digest=good)]
     assert "names 'tidy'" in skill_reasons(spec, blobs, validator)[0].message
-    spec["skills"] = [{"name": "tidy", "origin": "local", "digest": with_junk}]
+    spec.skills = [LocalSkill(name="tidy", origin="local", digest=with_junk)]
     assert "validator keeps" in skill_reasons(spec, blobs, validator)[0].message
-    spec["skills"] = [{"name": "tidy", "origin": "local", "digest": no_description}]
+    spec.skills = [LocalSkill(name="tidy", origin="local", digest=no_description)]
     assert skill_reasons(spec, blobs, validator)[0].code == "skill_package"
 
 
@@ -190,17 +208,17 @@ def test_skill_tree_must_be_what_the_validator_keeps() -> None:
 def test_resource_rules() -> None:
     blobs = BlobDir()
     spec, _ = _record()
-    spec["resources"] = [
-        {"path": "data/faq.csv", "digest": blobs.put(b"q,a\n")},
-        {"path": "data/tool.sh", "digest": blobs.put(b"#!/bin/sh\n")},
-        {"path": "docs/", "digest": blobs.put(canonical_tree_bytes([("a.md", b"a"), ("run.toml", b"x")]))},
+    spec.resources = [
+        ResourceEntry(path="data/faq.csv", digest=blobs.put(b"q,a\n")),
+        ResourceEntry(path="data/tool.sh", digest=blobs.put(b"#!/bin/sh\n")),
+        ResourceEntry(path="docs/", digest=blobs.put(canonical_tree_bytes([("a.md", b"a"), ("run.toml", b"x")]))),
     ]
     reasons = resource_reasons(spec, blobs)
     assert [(r.code, r.location) for r in reasons] == [
         ("admission", "spec.resources[1]:'data/tool.sh'"),
         ("admission", "spec.resources[2]:'docs/run.toml'"),
     ]
-    spec["resources"] = [{"path": "data/", "digest": blobs.put(b"q,a\n")}, {"path": "data/x.md", "digest": blobs.put(b"x")}]
+    spec.resources = [ResourceEntry(path="data/", digest=blobs.put(b"q,a\n")), ResourceEntry(path="data/x.md", digest=blobs.put(b"x"))]
     reasons = resource_reasons(spec, blobs)
     assert [r.code for r in reasons] == ["resource_paths", "tree"]
 
@@ -209,14 +227,16 @@ def test_resource_rules() -> None:
 
 
 def test_mcp_entry_rules_with_hand_built_entries() -> None:
+    """Past the model (``model_construct`` skips validation, as a stored row from an older rule set would): the Manifest rules still refuse."""
     spec, _ = _record()
-    spec["tools"]["mcp"] = [
+    raw = [
         {"server_code": "a", "config": {"url": "ftp://x.example.com/"}},
         {"server_code": "b", "config": {"headers": {"X-A": "1", "x-a": "2"}}},
         {"server_code": "c", "config": {"headers": {"X-A\r": "1"}}},
         {"server_code": "d", "config": {"url": "https://user:pw@x.example.com/mcp"}},
         {"server_code": "e", "config": {"url": "https://x.example.com/mcp", "headers": {"X-A": "1"}, "transport_protocol": "SSE", "endpoint_env": "PROD"}},
     ]
+    spec.tools.mcp = [McpServerEntry.model_construct(server_code=e["server_code"], config=McpConfig.model_construct(**e["config"])) for e in raw]
     reasons = mcp_entry_reasons(spec, CTX)
     assert sorted(r.location for r in reasons) == [
         "spec.tools.mcp[0].config.url",
@@ -224,7 +244,7 @@ def test_mcp_entry_rules_with_hand_built_entries() -> None:
         "spec.tools.mcp[2].config.headers.X-A\r",
         "spec.tools.mcp[3].config.url",
     ]
-    assert spec["tools"]["mcp"][4]["config"]["transport_protocol"] == "SSE", "the entry is not modified"
+    assert spec.tools.mcp[4].config.transport_protocol == "SSE", "the entry is not modified"
 
 
 def test_mcp_context_checks_ask_the_services_as_apply_does() -> None:
@@ -232,7 +252,7 @@ def test_mcp_context_checks_ask_the_services_as_apply_does() -> None:
     auth, config = FakeAuth(), FakeConfig()
     assert _checks(auth, config).reasons(spec, policy, BlobDir(), CTX) == []
     assert auth.calls == [("user_owner_5", "mcp.x.meet"), ("user_owner_5", "mcp.x.orders")]
-    assert config.calls[0] == ("user_owner_5", "mcp.x.meet", spec["tools"]["mcp"][0]["config"], "openclaw")
+    assert config.calls[0] == ("user_owner_5", "mcp.x.meet", spec.tools.mcp[0].config.to_json(), "openclaw")
     assert config.calls[1] == ("user_owner_5", "mcp.x.orders", None, "openclaw")
 
 
@@ -254,7 +274,7 @@ def test_mcp_context_refusals(auth: FakeAuth, config: FakeConfig, codes: list[st
 
 def test_context_checks_wait_for_clean_entries() -> None:
     spec, policy = _record()
-    spec["tools"]["mcp"][0]["config"]["headers"] = {"X-A": "1", "x-a": "2"}  # past the schema, not the Manifest rule
+    spec.tools.mcp[0].config.headers = {"X-A": "1", "x-a": "2"}  # past the schema, not the Manifest rule
     auth = FakeAuth()
     reasons = _checks(auth).reasons(spec, policy, BlobDir(), CTX)
     assert [r.code for r in reasons] == ["mcp_entry"] and auth.calls == []
@@ -267,24 +287,25 @@ def test_memory_items_must_be_canonical_sorted_and_valid() -> None:
     blobs = BlobDir()
     spec, policy = _record()
     checks = _checks()
-    spec["memory"] = {"mode": "seed", "items_digest": blobs.put(b'[{"key":"b","source":[],"tags":[],"text":"t"},{"key":"a","source":[],"tags":[],"text":"t"}]')}
+    spec.memory = MemorySpec(mode="seed", items_digest=blobs.put(b'[{"key":"b","source":[],"tags":[],"text":"t"},{"key":"a","source":[],"tags":[],"text":"t"}]'))
     assert [r.code for r in checks.reasons(spec, policy, blobs, CTX)] == ["order"]
-    spec["memory"]["items_digest"] = blobs.put(b'[{"key":"A","text":"t"}]')
+    spec.memory.items_digest = blobs.put(b'[{"key":"A","text":"t"}]')
     assert {r.code for r in checks.reasons(spec, policy, blobs, CTX)} == {"schema"}
-    spec["memory"]["items_digest"] = blobs.put(b"not json")
+    spec.memory.items_digest = blobs.put(b"not json")
     assert [r.code for r in checks.reasons(spec, policy, blobs, CTX)] == ["schema"]
 
 
 def test_script_must_be_utf8() -> None:
     blobs = BlobDir()
-    spec, policy = _record({"script": {"digest": blobs.put(b"\xff\xfe")}})
+    spec, policy = _record()
+    spec.script = ScriptEntry(digest=blobs.put(b"\xff\xfe"))
     assert [(r.code, r.location) for r in _checks().reasons(spec, policy, blobs, CTX)] == [("not_utf8", "spec.script")]
 
 
 def test_memory_item_tags_and_sources_must_be_sorted() -> None:
     blobs = BlobDir()
     spec, policy = _record()
-    spec["memory"] = {"mode": "seed", "items_digest": blobs.put(b'[{"key":"a","source":["feedback:f","episode:e"],"tags":["b","a"],"text":"t"}]')}
+    spec.memory = MemorySpec(mode="seed", items_digest=blobs.put(b'[{"key":"a","source":["feedback:f","episode:e"],"tags":["b","a"],"text":"t"}]'))
     reasons = _checks().reasons(spec, policy, blobs, CTX)
     assert [(r.code, r.location) for r in reasons] == [("order", "spec.memory.items_digest:a.tags"), ("order", "spec.memory.items_digest:a.source")]
 

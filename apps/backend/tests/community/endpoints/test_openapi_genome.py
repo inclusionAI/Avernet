@@ -23,6 +23,7 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_
 from agentclaw.community.api.bot_genome_registry_service import GenomeRegistryProtocol
 from agentclaw.community.core.bot_genome.canonical import revision_id, sha256_digest
 from agentclaw.community.core.bot_genome.models import ApplyResult, BotRef, Provenance, ProvenanceKind, RevisionStatus
+from agentclaw.community.core.bot_genome.patch_models import GenomePatch
 from agentclaw.community.core.bot_genome.promotion.applier import RevisionApplier
 from agentclaw.community.core.bot_genome.registry import DEFAULT_POLICY
 from agentclaw.community.core.bot_genome.repository.models import GenomePromotionRow
@@ -118,7 +119,7 @@ def _seed_captured(world) -> str:
 def _seed_two_revisions(world) -> str:
     bot_id = _seed_captured(world)
     asyncio.run(world.get(GenomeRegistryProtocol).record_patch(
-        _bot_ref(bot_id), _PATCH, created_by=Provenance(ProvenanceKind.USER, _OWNER), status=RevisionStatus.DRAFT
+        _bot_ref(bot_id), GenomePatch.from_json(_PATCH), created_by=Provenance(ProvenanceKind.USER, _OWNER), status=RevisionStatus.DRAFT
     ))
     return bot_id
 
@@ -195,7 +196,7 @@ def capture_unknown_bot():
 
 
 @endpoint_test(method="GET", path=f"{_GENOME}/revisions/{{rev:path}}", scenario="by_sequence_number", input=_params(rev="r1"), seed=_seed_captured,
-               expect=ExpectSuccess(status=200, json_contains={"data": {"genome_schema": 1, "revision": {"id": _R1_ID, "seq": 1}, "policy": DEFAULT_POLICY}}))
+               expect=ExpectSuccess(status=200, json_contains={"data": {"genome_schema": 1, "revision": {"id": _R1_ID, "seq": 1}, "policy": DEFAULT_POLICY.to_json()}}))
 def get_revision_ok():
     pass
 

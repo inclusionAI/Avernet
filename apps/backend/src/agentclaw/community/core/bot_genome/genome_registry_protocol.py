@@ -8,7 +8,7 @@ the delivery-side checks are.
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from agentclaw.community.core.bot_genome.models import (
     BotRef,
@@ -25,6 +25,8 @@ from agentclaw.community.core.bot_genome.models import (
     RevisionStatus,
     RunScope,
 )
+from agentclaw.community.core.bot_genome.patch_models import GenomePatch
+from agentclaw.community.core.bot_genome.spec_models import GenomePolicy
 
 
 @runtime_checkable
@@ -63,7 +65,7 @@ class GenomeRegistryProtocol(Protocol):
     async def record_patch(
         self,
         bot: BotRef,
-        patch: dict[str, Any],
+        patch: GenomePatch,
         *,
         created_by: Provenance,
         status: RevisionStatus,
@@ -81,7 +83,7 @@ class GenomeRegistryProtocol(Protocol):
         ...
 
     @abstractmethod
-    def set_policy(self, bot: BotRef, policy: dict[str, Any], *, created_by: Provenance) -> RecordedRevision:
+    def set_policy(self, bot: BotRef, policy: GenomePolicy, *, created_by: Provenance) -> RecordedRevision:
         """Record a revision with ``active``'s spec and the new policy.
 
         The spec is re-checked against what apply accepts now; ``PolicyRejected``

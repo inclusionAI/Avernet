@@ -15,6 +15,8 @@ from abc import abstractmethod
 from enum import StrEnum
 from typing import Any, Protocol
 
+from agentclaw.community.core.bot_genome.spec_models import GenomePolicy, GenomeSpec
+
 
 class ContentReader(Protocol):
     """How patch application, checks, diff and compile read the bytes a digest names.
@@ -171,17 +173,16 @@ class RevisionMetadata:
 
 @dataclass(frozen=True)
 class GenomeRevision:
-    """One revision: the contract's JSON record, parsed.
+    """One revision: the contract's record, parsed (``genome-revision.schema.json``).
 
-    ``spec`` and ``policy`` are the contract's own JSON objects
-    (``genome-revision.schema.json``), kept as validated dicts because they
-    are hashed and exchanged in exactly that shape.
+    ``spec`` and ``policy`` are the hashed half; their ``to_json()`` is the
+    exact object the revision id is computed over.
     """
 
     genome_schema: int
     revision: RevisionMetadata
-    spec: dict[str, Any]
-    policy: dict[str, Any]
+    spec: GenomeSpec
+    policy: GenomePolicy
 
     def as_record(self, bot: BotRef) -> dict[str, Any]:
         """The contract's wire shape (``genome-revision.schema.json``)."""
@@ -191,7 +192,7 @@ class GenomeRevision:
             "revision": {
                 "id": meta.id,
                 "seq": meta.seq,
-                "bot": {"owner_id": bot.owner_id, "bot_id": bot.bot_id},
+                "bot": {"owner_id": bot.entity_id, "bot_id": bot.bot_id},
                 "parent": meta.parent,
                 "created_by": meta.created_by.as_dict(),
                 "created_at": meta.created_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -201,8 +202,8 @@ class GenomeRevision:
                 "evaluations": list(meta.evaluations),
                 "annotations": dict(meta.annotations),
             },
-            "spec": self.spec,
-            "policy": self.policy,
+            "spec": self.spec.to_json(),
+            "policy": self.policy.to_json(),
         }
 
 

@@ -15,7 +15,6 @@ import json
 import re
 from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any
 
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
@@ -70,8 +69,10 @@ from agentclaw.community.core.bot_genome.patch import (
     policy_reasons,
     shape_reasons,
 )
+from agentclaw.community.core.bot_genome.patch_models import GenomePatch
 from agentclaw.community.core.bot_genome.repository.models import GenomePatchRow, GenomeRevisionRow
 from agentclaw.community.core.bot_genome.spec_checks import SpecCheckContext, SpecChecks, policy_path_reasons
+from agentclaw.community.core.bot_genome.spec_models import GenomePolicy, GenomeSpec
 from agentclaw.community.core.repository.protocols.bot.genome import (
     GenomePatchRepositoryProtocol,
     GenomePromotionRepositoryProtocol,
@@ -87,11 +88,11 @@ __all__ = ["DEFAULT_POLICY", "GenomeRegistryService", "MOVERS"]
 logger = get_logger()
 
 #: README §5: the policy of a bot's first revision.
-DEFAULT_POLICY: dict[str, Any] = {
-    "mutable_genes": ["memory", "persona", "resources", "skills"],
-    "pins": ["persona/SAFETY.md"],
-    "risk_overrides": {},
-}
+DEFAULT_POLICY = GenomePolicy(
+    mutable_genes=["memory", "persona", "resources", "skills"],
+    pins=["persona/SAFETY.md"],
+    risk_overrides={},
+)
 #: 01-genome.md §5.1: the one mover of each ref kind.
 MOVERS: dict[str, RefMover] = {
     "active": RefMover.PROMOTION,
@@ -203,7 +204,12 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         hashed = loads_strict(row.content)
         if revision_id(hashed["spec"], hashed["policy"]) != row.revision_id:
             raise RuntimeError(f"stored revision {row.revision_id} fails its own id")
-        return GenomeRevision(genome_schema=row.genome_schema, revision=_metadata(row), spec=hashed["spec"], policy=hashed["policy"])
+        return GenomeRevision(
+            genome_schema=row.genome_schema,
+            revision=_metadata(row),
+            spec=GenomeSpec.from_json(hashed["spec"]),
+            policy=GenomePolicy.from_json(hashed["policy"]),
+        )
 
     def _active(self, bot: BotRef) -> GenomeRevisionRow | None:
         ref = self._refs.get(**self._axes(bot), name="active")
@@ -217,8 +223,8 @@ class GenomeRegistryService(GenomeRegistryProtocol):
     def _record(
         self,
         bot: BotRef,
-        spec: dict[str, Any],
-        policy: dict[str, Any],
+        spec: GenomeSpec,
+        policy: GenomePolicy,
         *,
         parent: str | None,
         created_by: Provenance,
@@ -237,7 +243,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
             stored = self._content.store_produced(data, scope=scope, origin=origin, modifier=created_by.audit, category="genome")
             if stored.digest != digest:
                 raise RuntimeError(f"produced bytes filed as {stored.digest}, expected {digest}")
-        content = canonicalize({"policy": policy, "spec": spec}).decode("utf-8")
+        content = canonicalize({"policy": policy.to_json(), "spec": spec.to_json()}).decode("utf-8")
         row, created = self._revisions.insert(
             GenomeRevisionRow(
                 **self._axes(bot),
@@ -298,7 +304,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
     async def capture(self, bot: BotRef, *, created_by: Provenance) -> RecordedRevision:
         captured = await capture_spec(self._state_reader(), bot, validator=self._validator)
         active = self._active(bot)
-        policy = loads_strict(active.content)["policy"] if active is not None else DEFAULT_POLICY
+        policy = GenomePolicy.from_json(loads_strict(active.content)["policy"]) if active is not None else DEFAULT_POLICY
         writes = dict(captured.writes)
         reasons = self._checks.reasons(captured.spec, policy, _PendingContent(writes, self._reader(bot)), self._ctx(bot, created_by.checked_as))
         if reasons:
@@ -311,7 +317,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
     async def record_patch(
         self,
         bot: BotRef,
-        patch: dict[str, Any],
+        patch: GenomePatch,
         *,
         created_by: Provenance,
         status: RevisionStatus,
@@ -322,53 +328,55 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         if (status is RevisionStatus.CANDIDATE) != (run is not None):
             # A candidate is a run's proposal: the run bounds its genes and names its ref. A draft is the owner's.
             raise ValueError("a candidate is recorded with its run, a draft without one")
-        reasons = shape_reasons(patch)
+        patch_json = patch.to_json()
+        reasons = shape_reasons(patch_json)
         if reasons:
             raise PatchRejected(reasons)
-        base_row = self._revisions.get(**self._axes(bot), revision_id=patch["base"])
+        base_row = self._revisions.get(**self._axes(bot), revision_id=patch.base)
         if base_row is None:
-            raise RevisionNotFound(patch["base"])
+            raise RevisionNotFound(patch.base)
         base = self._revision(base_row)
         reasons = evidence_reasons(patch) + policy_reasons(
-            patch["ops"], base.policy, allowed_genes=run.allowed_genes if run is not None else None
+            patch.ops, base.policy, allowed_genes=run.allowed_genes if run is not None else None
         )
         if reasons:
             raise PatchRejected(reasons)
         stored = self._reader(bot)
-        outcome = apply_patch(base.spec, patch, stored)
+        outcome = apply_patch(base.spec, patch.ops, stored)
         for category in ("persona", "skills", "resources"):
-            if len(outcome.spec[category]) > MAX_ENTRIES_PER_CATEGORY:
+            if len(getattr(outcome.spec, category)) > MAX_ENTRIES_PER_CATEGORY:
                 raise LimitExceeded(f"spec.{category} holds more than {MAX_ENTRIES_PER_CATEGORY} entries")
         writes = dict(outcome.writes)
         reasons = self._checks.reasons(outcome.spec, base.policy, _PendingContent(writes, stored), self._ctx(bot, created_by.checked_as))
         if reasons:
             raise PatchRejected(reasons)
         tier, flags = patch_assessment(outcome, base.policy)
-        patch_bytes = canonicalize(patch)
+        patch_bytes = canonicalize(patch_json)
         patch_digest = sha256_digest(patch_bytes)
         self._patches.insert(
             GenomePatchRow(**self._axes(bot), digest=patch_digest, base_id=base.revision.id, content=patch_bytes.decode("utf-8"), created_at=_now())
         )
         return self._record(
             bot, outcome.spec, base.policy, parent=base.revision.id, created_by=created_by, status=status,
-            writes=writes, origin="genome/patch", patch_digest=patch_digest, evidence=list(patch.get("evidence", [])),
+            writes=writes, origin="genome/patch", patch_digest=patch_digest, evidence=list(patch.evidence),
             risk_tier=tier, flags=flags, run=run,
         )
 
-    def set_policy(self, bot: BotRef, policy: dict[str, Any], *, created_by: Provenance) -> RecordedRevision:
+    def set_policy(self, bot: BotRef, policy: GenomePolicy, *, created_by: Provenance) -> RecordedRevision:
         validator = contract.definition_validator(contract.REVISION_SCHEMA_FILE, "policy")
-        reasons = [Reason("schema", "policy", error.message) for error in validator.iter_errors(policy)]
+        reasons = [Reason("schema", "policy", error.message) for error in validator.iter_errors(policy.to_json())]
         if not reasons:
             reasons = policy_path_reasons(policy)
             for name in ("mutable_genes", "pins"):
-                if policy[name] != sorted(policy[name]) or len(set(policy[name])) != len(policy[name]):
+                paths = getattr(policy, name)
+                if paths != sorted(paths) or len(set(paths)) != len(paths):
                     reasons.append(Reason("order", f"policy.{name}", "sorted, unique gene paths"))
         if reasons:
             raise PolicyRejected(reasons)
         active = self._active(bot)
         if active is None:
             raise RevisionNotFound("active")
-        spec = loads_strict(active.content)["spec"]
+        spec = GenomeSpec.from_json(loads_strict(active.content)["spec"])
         # The spec is unchanged, but what apply would accept may have moved since `active` was
         # recorded (a revoked MCP permission, a retired server): a recorded revision is one that
         # applies now, so the content is re-checked in the recording bot's current context.

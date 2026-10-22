@@ -9,9 +9,22 @@ comparison on whole segments.
 """
 from __future__ import annotations
 
-from typing import Any
-
 from agentclaw.community.core.bot_genome.canonical import encode_segment, is_canonical_gene_path
+from agentclaw.community.core.bot_genome.patch_models import (
+    FileEdit,
+    MemoryAdd,
+    MemoryRetire,
+    MemorySetMode,
+    MemoryUpdate,
+    PatchOp,
+    PersonaAdd,
+    PersonaRemove,
+    ResourceAdd,
+    ResourceRemove,
+    SkillAdd,
+    SkillRemove,
+    SkillUpdate,
+)
 
 GENE_CATEGORIES = ("persona", "skills", "memory", "resources", "tools", "engine_config", "script")
 
@@ -114,31 +127,30 @@ def mcp_path(server_code: str | None = None) -> str:
     return "tools/mcp" if server_code is None else "tools/mcp/" + encode_segment(server_code)
 
 
-def op_gene_path(op: dict[str, Any]) -> str:
+def op_gene_path(op: PatchOp) -> str:
     """The gene path a patch op targets, which policy and ``allowed_genes`` are checked against (README §6.1).
 
-    Not a kind of gene path: ``op`` is a patch op (``{"op": "persona.add",
-    "type": "SOUL.md", …}``), and the answer is one of the ordinary paths
-    below. ``file.edit`` names its target directly; every other op's path is
-    built from its key field. The op is assumed schema-valid. Examples:
-    ``{"op": "file.edit", "target": "persona/SOUL.md"}`` → ``"persona/SOUL.md"``;
-    ``{"op": "skill.add", "name": "refund-policy"}`` → ``"skills/refund-policy"``;
-    ``{"op": "resource.remove", "path": "data/faq.csv"}`` → ``"resources/data/faq.csv"``;
-    ``{"op": "memory.set_mode", "mode": "merge"}`` → ``"memory"``.
+    Not a kind of gene path: ``op`` is a patch op (a ``PersonaAdd``, a
+    ``FileEdit``, …), and the answer is one of the ordinary paths above.
+    ``file.edit`` names its target directly; every other op's path is built
+    from its key field. Examples:
+    ``FileEdit(target="persona/SOUL.md", …)`` → ``"persona/SOUL.md"``;
+    ``SkillAdd(name="refund-policy", …)`` → ``"skills/refund-policy"``;
+    ``ResourceRemove(path="data/faq.csv")`` → ``"resources/data/faq.csv"``;
+    ``MemorySetMode(mode="merge")`` → ``"memory"``.
     """
-    kind = op["op"]
-    if kind == "file.edit":
-        return op["target"]
-    if kind in ("persona.add", "persona.remove"):
-        return persona_path(op["type"])
-    if kind in ("skill.add", "skill.update", "skill.remove"):
-        return skill_path(op["name"])
-    if kind in ("resource.add", "resource.remove"):
-        return resource_path(op["path"])
-    if kind in ("memory.add", "memory.update"):
-        return memory_path(op["item"]["key"])
-    if kind == "memory.retire":
-        return memory_path(op["key"])
-    if kind == "memory.set_mode":
+    if isinstance(op, FileEdit):
+        return op.target
+    if isinstance(op, (PersonaAdd, PersonaRemove)):
+        return persona_path(op.type)
+    if isinstance(op, (SkillAdd, SkillUpdate, SkillRemove)):
+        return skill_path(op.name)
+    if isinstance(op, (ResourceAdd, ResourceRemove)):
+        return resource_path(op.path)
+    if isinstance(op, (MemoryAdd, MemoryUpdate)):
+        return memory_path(op.item.key)
+    if isinstance(op, MemoryRetire):
+        return memory_path(op.key)
+    if isinstance(op, MemorySetMode):
         return memory_path()
-    raise ValueError(f"unknown patch op: {kind!r}")
+    raise TypeError(f"not a patch op: {type(op).__name__}")

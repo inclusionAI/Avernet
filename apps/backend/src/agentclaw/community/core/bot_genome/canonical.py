@@ -61,9 +61,14 @@ def sha256_digest(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
-def revision_id(spec: dict[str, Any], policy: dict[str, Any]) -> str:
-    """Identity of a revision: the digest of ``JCS({"policy": …, "spec": …})``."""
-    return sha256_digest(canonicalize({"spec": spec, "policy": policy}))
+def as_json(value: Any) -> Any:
+    """A contract model's JSON object (``to_json()``), or the value itself when it already is JSON."""
+    return value.to_json() if hasattr(value, "to_json") else value
+
+
+def revision_id(spec: Any, policy: Any) -> str:
+    """Identity of a revision: the digest of ``JCS({"policy": …, "spec": …})``; takes the models or their JSON."""
+    return sha256_digest(canonicalize({"spec": as_json(spec), "policy": as_json(policy)}))
 
 
 def tree_digest(files: list[tuple[str, bytes]]) -> str:

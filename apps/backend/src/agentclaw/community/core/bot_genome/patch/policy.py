@@ -14,6 +14,8 @@ from agentclaw.community.core.bot_genome import contract
 from agentclaw.community.core.bot_genome.canonical import is_canonical_gene_path
 from agentclaw.community.core.bot_genome.errors import Reason
 from agentclaw.community.core.bot_genome.gene_paths import covers, op_gene_path, overlaps
+from agentclaw.community.core.bot_genome.patch_models import FileEdit, GenomePatch, PatchOp
+from agentclaw.community.core.bot_genome.spec_models import GenomePolicy
 
 __all__ = [
     "EVIDENCE_OPTIONAL",
@@ -27,7 +29,11 @@ EVIDENCE_OPTIONAL = frozenset({"memory.retire", "persona.remove"})
 
 
 def shape_reasons(patch: Any) -> list[Reason]:
-    """Schema violations (``schema``) and gene paths not in their canonical spelling (``not_canonical``)."""
+    """The patch's JSON against the contract schema (``schema``), then gene paths not in canonical spelling (``not_canonical``).
+
+    Takes the JSON form (``GenomePatch.to_json()``, or what a caller sent):
+    the contract schema is the oracle for the patterns and cross-field rules.
+    """
     errors = sorted(contract.patch_validator().iter_errors(patch), key=lambda error: list(error.absolute_path))
     if errors:
         return [Reason("schema", _location(list(error.absolute_path)), error.message) for error in errors]
@@ -38,13 +44,13 @@ def shape_reasons(patch: Any) -> list[Reason]:
     return reasons
 
 
-def evidence_reasons(patch: dict[str, Any]) -> list[Reason]:
+def evidence_reasons(patch: GenomePatch) -> list[Reason]:
     """``missing_rationale`` for a blank rationale; ``missing_evidence`` when an op needs evidence and none is given."""
     reasons = []
-    if not patch["rationale"].strip():
+    if not patch.rationale.strip():
         reasons.append(Reason("missing_rationale", "rationale", "a patch needs a rationale"))
-    if not patch.get("evidence"):
-        needing = [index for index, op in enumerate(patch["ops"]) if _needs_evidence(op)]
+    if not patch.evidence:
+        needing = [index for index, op in enumerate(patch.ops) if _needs_evidence(op)]
         if needing:
             reasons.append(
                 Reason(
@@ -56,19 +62,19 @@ def evidence_reasons(patch: dict[str, Any]) -> list[Reason]:
     return reasons
 
 
-def _needs_evidence(op: dict[str, Any]) -> bool:
-    if op["op"] in EVIDENCE_OPTIONAL:
+def _needs_evidence(op: PatchOp) -> bool:
+    if op.op in EVIDENCE_OPTIONAL:
         return False
-    if op["op"] == "file.edit":
-        return not op["target"].startswith("resources/")
+    if isinstance(op, FileEdit):
+        return not op.target.startswith("resources/")
     return True
 
 
 def policy_reasons(
-    ops: Iterable[dict[str, Any]], policy: dict[str, Any], *, allowed_genes: Iterable[str] | None = None
+    ops: Iterable[PatchOp], policy: GenomePolicy, *, allowed_genes: Iterable[str] | None = None
 ) -> list[Reason]:
     """Every op's gene path must be covered by ``mutable_genes``, overlap no pin, and, for a run, be in ``allowed_genes``."""
-    mutable, pins = policy["mutable_genes"], policy["pins"]
+    mutable, pins = policy.mutable_genes, policy.pins
     allowed = None if allowed_genes is None else tuple(allowed_genes)
     reasons = []
     for index, op in enumerate(ops):

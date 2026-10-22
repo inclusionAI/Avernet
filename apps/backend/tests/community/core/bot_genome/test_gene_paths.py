@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from agentclaw.community.core.bot_genome.gene_paths import (
     covers,
@@ -16,6 +17,7 @@ from agentclaw.community.core.bot_genome.gene_paths import (
     skill_path,
     split,
 )
+from agentclaw.community.core.bot_genome.patch_models import parse_ops
 
 
 def test_builders_use_the_contract_spellings() -> None:
@@ -73,24 +75,24 @@ def test_overlaps_is_symmetric() -> None:
 @pytest.mark.parametrize(
     ("op", "path"),
     [
-        ({"op": "file.edit", "target": "persona/SOUL.md", "edits": []}, "persona/SOUL.md"),
+        ({"op": "file.edit", "target": "persona/SOUL.md", "edits": [{"kind": "insert_after", "anchor": "a", "content": "b"}]}, "persona/SOUL.md"),
         ({"op": "persona.add", "type": "OKR.md", "content": ""}, "persona/OKR.md"),
         ({"op": "persona.remove", "type": "OKR.md"}, "persona/OKR.md"),
-        ({"op": "skill.add", "name": "invoice-lookup", "files": {}}, "skills/invoice-lookup"),
-        ({"op": "skill.update", "name": "refund-policy"}, "skills/refund-policy"),
+        ({"op": "skill.add", "name": "invoice-lookup", "files": {"SKILL.md": "x"}}, "skills/invoice-lookup"),
+        ({"op": "skill.update", "name": "refund-policy", "files": {"a.md": "x"}}, "skills/refund-policy"),
         ({"op": "skill.remove", "name": "refund-policy"}, "skills/refund-policy"),
-        ({"op": "resource.add", "path": "data/kb/", "content": {"digest": "x"}}, "resources/data/kb"),
+        ({"op": "resource.add", "path": "data/kb/", "content": {"digest": "sha256:" + "0" * 64}}, "resources/data/kb"),
         ({"op": "resource.remove", "path": "data/faq.csv"}, "resources/data/faq.csv"),
-        ({"op": "memory.add", "item": {"key": "k"}}, "memory/k"),
-        ({"op": "memory.update", "item": {"key": "k"}}, "memory/k"),
+        ({"op": "memory.add", "item": {"key": "k", "text": "t", "tags": [], "source": []}}, "memory/k"),
+        ({"op": "memory.update", "item": {"key": "k", "text": "t", "tags": [], "source": []}}, "memory/k"),
         ({"op": "memory.retire", "key": "k"}, "memory/k"),
         ({"op": "memory.set_mode", "mode": "seed"}, "memory"),
     ],
 )
 def test_op_gene_path(op: dict, path: str) -> None:
-    assert op_gene_path(op) == path
+    assert op_gene_path(parse_ops([op])[0]) == path
 
 
-def test_unknown_op_is_refused() -> None:
-    with pytest.raises(ValueError):
-        op_gene_path({"op": "tools.add"})
+def test_unknown_op_is_refused_by_the_model() -> None:
+    with pytest.raises(ValidationError):
+        parse_ops([{"op": "tools.add"}])

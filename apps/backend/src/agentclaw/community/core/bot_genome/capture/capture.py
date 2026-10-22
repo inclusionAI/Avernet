@@ -16,10 +16,13 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from pydantic import ValidationError
+
 from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import canonical_tree_bytes
 from agentclaw.community.core.bot_genome.canonical import sha256_digest
 from agentclaw.community.core.bot_genome.errors import CaptureRefused, Reason
 from agentclaw.community.core.bot_genome.models import BotRef
+from agentclaw.community.core.bot_genome.spec_models import GenomeSpec
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 
 __all__ = [
@@ -88,7 +91,9 @@ class BotStateReader(Protocol):
 
 @dataclass(frozen=True)
 class CapturedSpec:
-    spec: dict[str, Any]
+    """What capture produced: the spec, and the bytes it names that are not in the store yet."""
+
+    spec: GenomeSpec
     writes: tuple[tuple[str, bytes], ...]
 
 
@@ -191,7 +196,7 @@ async def capture_spec(reader: BotStateReader, bot: BotRef, *, validator: SkillP
     body = await reader.script_body(bot)
     script = {"digest": store(body.encode("utf-8"))} if body else None
 
-    spec = {
+    record = {
         "persona": sorted(persona, key=lambda e: e["type"]),
         "skills": sorted(skills, key=lambda e: e["name"]),
         "memory": None,
@@ -200,4 +205,10 @@ async def capture_spec(reader: BotStateReader, bot: BotRef, *, validator: SkillP
         "engine_config": {},
         "script": script,
     }
+    try:
+        spec = GenomeSpec.from_json(record)
+    except ValidationError as exc:  # the bot holds something the contract cannot record, e.g. a persona type outside its set
+        raise CaptureRefused(
+            [Reason("schema", "spec." + ".".join(str(p) for p in error["loc"]), error["msg"]) for error in exc.errors()]
+        ) from exc
     return CapturedSpec(spec=spec, writes=tuple(writes.items()))

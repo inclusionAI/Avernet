@@ -8,6 +8,9 @@ revision to delivery. The record format is the RSI-02 contract in
 
 Layout:
 
+- ``spec_models`` / ``patch_models`` — the contract's records as classes
+  (``GenomeSpec``, ``GenomePolicy``, ``GenomePatch`` and its ops), shared by the
+  core and the HTTP surface;
 - ``canonical`` / ``gene_paths`` / ``rewrite`` / ``text_edits`` — pure helpers
   the contract defines (RFC 8785 subset, gene-path grammar, the rewrite
   measure, the ``file.edit`` kinds);

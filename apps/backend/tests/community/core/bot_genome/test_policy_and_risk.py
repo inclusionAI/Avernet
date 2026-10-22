@@ -9,28 +9,39 @@ from agentclaw.community.core.bot_genome.contract import risk_tiers
 from agentclaw.community.core.bot_genome.patch import evidence_reasons, patch_assessment, policy_reasons, shape_reasons
 from agentclaw.community.core.bot_genome.patch.ops import FileChange, OpTouch, PatchOutcome
 from agentclaw.community.core.bot_genome.patch.risk import apply_overrides, apply_raises, highest, op_tier, rewritten_files
+from agentclaw.community.core.bot_genome.patch_models import GenomePatch, PatchOp, parse_ops
+from agentclaw.community.core.bot_genome.spec_models import GenomePolicy, GenomeSpec
 
-POLICY = {"mutable_genes": ["memory", "persona", "resources", "skills"], "pins": ["persona/SAFETY.md"], "risk_overrides": {}}
+POLICY = GenomePolicy(mutable_genes=["memory", "persona", "resources", "skills"], pins=["persona/SAFETY.md"], risk_overrides={})
 EDIT = {"kind": "insert_after", "anchor": "x", "content": "y"}
+EMPTY_SPEC = GenomeSpec(persona=[], skills=[], memory=None, resources=[], tools={"mcp": []}, engine_config={}, script=None)
 
 
-def _patch(*ops: dict[str, Any], rationale: str = "why", evidence: list[str] | None = None) -> dict[str, Any]:
+def _patch_json(*ops: dict[str, Any], rationale: str = "why", evidence: list[str] | None = None) -> dict[str, Any]:
     return {"patch_schema": 1, "base": "sha256:" + "0" * 64, "ops": list(ops), "rationale": rationale, "evidence": [] if evidence is None else evidence}
+
+
+def _patch(*ops: dict[str, Any], rationale: str = "why", evidence: list[str] | None = None) -> GenomePatch:
+    return GenomePatch.from_json(_patch_json(*ops, rationale=rationale, evidence=evidence))
+
+
+def _ops(*ops: dict[str, Any]) -> list[PatchOp]:
+    return parse_ops(list(ops))
 
 
 # -- shape ------------------------------------------------------------------------------------------
 
 
 def test_shape_reports_schema_errors_with_their_location() -> None:
-    reasons = shape_reasons(_patch({"op": "persona.add", "type": "SOUL.md"}))
+    reasons = shape_reasons(_patch_json({"op": "persona.add", "type": "SOUL.md"}))
     assert reasons and reasons[0].code == "schema" and reasons[0].location == "ops[0]"
-    reasons = shape_reasons(_patch({"op": "persona.remove", "type": "OKR.md"}, rationale="", evidence=["bad"]))
+    reasons = shape_reasons(_patch_json({"op": "persona.remove", "type": "OKR.md"}, rationale="", evidence=["bad"]))
     assert [r.location for r in reasons] == ["evidence[0]", "rationale"]
     assert {r.location for r in shape_reasons({"patch_schema": 2})} == {"$", "patch_schema"}
 
 
 def test_shape_reports_a_non_canonical_target() -> None:
-    reasons = shape_reasons(_patch({"op": "file.edit", "target": "persona/%53OUL.md", "edits": [EDIT]}))
+    reasons = shape_reasons(_patch_json({"op": "file.edit", "target": "persona/%53OUL.md", "edits": [EDIT]}))
     assert [(r.code, r.location) for r in reasons] == [("not_canonical", "ops[0].target")]
 
 
@@ -65,35 +76,35 @@ def test_evidence_is_required_per_op_kind(op: dict[str, Any], needs: bool) -> No
 
 
 def test_policy_allows_covered_unpinned_genes() -> None:
-    ops = [{"op": "file.edit", "target": "persona/SOUL.md", "edits": [EDIT]}, {"op": "skill.remove", "name": "x"}, {"op": "memory.set_mode", "mode": "seed"}]
+    ops = _ops({"op": "file.edit", "target": "persona/SOUL.md", "edits": [EDIT]}, {"op": "skill.remove", "name": "x"}, {"op": "memory.set_mode", "mode": "seed"})
     assert policy_reasons(ops, POLICY) == []
 
 
 def test_gene_not_mutable() -> None:
-    policy = dict(POLICY, mutable_genes=["persona/SOUL.md", "skills/x"])
-    ops = [
+    policy = POLICY.model_copy(update={"mutable_genes": ["persona/SOUL.md", "skills/x"]})
+    ops = _ops(
         {"op": "file.edit", "target": "persona/SOUL.md", "edits": [EDIT]},  # covered exactly
         {"op": "file.edit", "target": "skills/x/SKILL.md", "edits": [EDIT]},  # covered by a prefix
         {"op": "persona.add", "type": "OKR.md", "content": "x"},  # not covered
-        {"op": "skill.update", "name": "xy", "files": {}},  # "skills/x" does not cover "skills/xy"
-    ]
+        {"op": "skill.update", "name": "xy", "files": {"a.md": "x"}},  # "skills/x" does not cover "skills/xy"
+    )
     assert [(r.code, r.location) for r in policy_reasons(ops, policy)] == [("gene_not_mutable", "ops[2]"), ("gene_not_mutable", "ops[3]")]
 
 
 def test_pinned_item_blocks_the_item_its_parent_and_its_children() -> None:
-    policy = dict(POLICY, pins=["persona/SAFETY.md", "skills/x/SKILL.md", "memory/k"])
-    ops = [
+    policy = POLICY.model_copy(update={"pins": ["persona/SAFETY.md", "skills/x/SKILL.md", "memory/k"]})
+    ops = _ops(
         {"op": "persona.remove", "type": "SAFETY.md"},
         {"op": "skill.remove", "name": "x"},  # removing a skill with a pinned file
         {"op": "file.edit", "target": "skills/x/SKILL.md", "edits": [EDIT]},
         {"op": "memory.set_mode", "mode": "merge"},  # memory covers the pinned item
         {"op": "file.edit", "target": "skills/x/other.md", "edits": [EDIT]},  # sibling: fine
-    ]
+    )
     assert [r.location for r in policy_reasons(ops, policy) if r.code == "pinned_item"] == ["ops[0]", "ops[1]", "ops[2]", "ops[3]"]
 
 
 def test_gene_not_allowed_for_a_run() -> None:
-    ops = [{"op": "persona.add", "type": "OKR.md", "content": "x"}, {"op": "skill.remove", "name": "x"}]
+    ops = _ops({"op": "persona.add", "type": "OKR.md", "content": "x"}, {"op": "skill.remove", "name": "x"})
     reasons = policy_reasons(ops, POLICY, allowed_genes=["persona"])
     assert [(r.code, r.location) for r in reasons] == [("gene_not_allowed", "ops[1]")]
     assert policy_reasons(ops, POLICY, allowed_genes=["persona", "skills"]) == []
@@ -153,7 +164,7 @@ def test_patch_assessment_takes_the_highest_tier_and_flags_the_ops_that_changed_
     ten = "".join(f"l{i}\n" for i in range(10)).encode()
     rewritten = b"".join(b"n%d\n" % i for i in range(10))
     outcome = PatchOutcome(
-        spec={},
+        spec=EMPTY_SPEC,
         writes=(),
         touched=(
             OpTouch("file.edit", "resources/data/a.md", ("resources/data/a.md",)),
@@ -164,7 +175,7 @@ def test_patch_assessment_takes_the_highest_tier_and_flags_the_ops_that_changed_
     )
     tier, flags = patch_assessment(outcome, POLICY)
     assert (tier, flags) == ("T2", ("resources/data/a.md",))
-    tier, flags = patch_assessment(PatchOutcome(spec={}, writes=(), touched=(OpTouch("memory.add", "memory/k"),)), POLICY)
+    tier, flags = patch_assessment(PatchOutcome(spec=EMPTY_SPEC, writes=(), touched=(OpTouch("memory.add", "memory/k"),)), POLICY)
     assert (tier, flags) == ("T1", ())
-    override = dict(POLICY, risk_overrides={"memory": "T3"})
-    assert patch_assessment(PatchOutcome(spec={}, writes=(), touched=(OpTouch("memory.add", "memory/k"),)), override)[0] == "T3"
+    override = POLICY.model_copy(update={"risk_overrides": {"memory": "T3"}})
+    assert patch_assessment(PatchOutcome(spec=EMPTY_SPEC, writes=(), touched=(OpTouch("memory.add", "memory/k"),)), override)[0] == "T3"

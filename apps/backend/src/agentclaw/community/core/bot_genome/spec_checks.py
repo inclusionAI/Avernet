@@ -15,7 +15,6 @@ Codes: ``schema``, ``order``, ``not_canonical``, ``not_utf8``,
 """
 from __future__ import annotations
 
-import copy
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -49,6 +48,7 @@ from agentclaw.community.core.bot_genome.limits import (
     MAX_WRITTEN_PATH_BYTES,
 )
 from agentclaw.community.core.bot_genome.models import ContentReader
+from agentclaw.community.core.bot_genome.spec_models import GenomePolicy, GenomeSpec, LocalSkill
 from agentclaw.community.core.mcp.mcp_auth_service_protocol import MCPAuthServiceProtocol
 from agentclaw.community.core.mcp.mcp_config_service_protocol import MCPConfigServiceProtocol
 from agentclaw.community.core.resources.services.file_service import admission_refusal
@@ -86,7 +86,11 @@ class SpecCheckContext:
 
 
 def schema_reasons(spec: Any, policy: Any) -> list[Reason]:
-    """``spec`` and ``policy`` against their contract definitions (code ``schema``)."""
+    """The JSON of ``spec`` and ``policy`` against their contract definitions (code ``schema``).
+
+    Takes the JSON form (``to_json()``): the contract schema is the oracle
+    for the patterns and the rules a type cannot carry.
+    """
     reasons = []
     for name, value in (("spec", spec), ("policy", policy)):
         validator = contract.definition_validator(contract.REVISION_SCHEMA_FILE, name)
@@ -96,15 +100,15 @@ def schema_reasons(spec: Any, policy: Any) -> list[Reason]:
     return reasons
 
 
-def order_reasons(spec: dict[str, Any], policy: dict[str, Any]) -> list[Reason]:
+def order_reasons(spec: GenomeSpec, policy: GenomePolicy) -> list[Reason]:
     """README §3.1: every list sorted in code-point order and unique by its key (code ``order``)."""
     reasons = []
     lists: list[tuple[str, list[str]]] = [
-        (f"spec.{category}", [entry[key] for entry in spec[category]]) for category, key in _SORTED
+        (f"spec.{category}", [getattr(entry, key) for entry in getattr(spec, category)]) for category, key in _SORTED
     ]
-    lists.append(("spec.tools.mcp", [entry["server_code"] for entry in spec["tools"]["mcp"]]))
-    lists.append(("policy.mutable_genes", list(policy["mutable_genes"])))
-    lists.append(("policy.pins", list(policy["pins"])))
+    lists.append(("spec.tools.mcp", [entry.server_code for entry in spec.tools.mcp]))
+    lists.append(("policy.mutable_genes", list(policy.mutable_genes)))
+    lists.append(("policy.pins", list(policy.pins)))
     for location, keys in lists:
         if len(keys) != len(set(keys)):
             reasons.append(Reason("order", location, "keys must be unique"))
@@ -113,12 +117,12 @@ def order_reasons(spec: dict[str, Any], policy: dict[str, Any]) -> list[Reason]:
     return reasons
 
 
-def policy_path_reasons(policy: dict[str, Any]) -> list[Reason]:
+def policy_path_reasons(policy: GenomePolicy) -> list[Reason]:
     """README §2: every gene path in the policy in its canonical spelling (code ``not_canonical``)."""
     reasons = []
-    paths = [("policy.mutable_genes", p) for p in policy["mutable_genes"]]
-    paths += [("policy.pins", p) for p in policy["pins"]]
-    paths += [("policy.risk_overrides", p) for p in policy["risk_overrides"]]
+    paths = [("policy.mutable_genes", p) for p in policy.mutable_genes]
+    paths += [("policy.pins", p) for p in policy.pins]
+    paths += [("policy.risk_overrides", p) for p in policy.risk_overrides]
     for location, path in paths:
         if not is_canonical_gene_path(path):
             reasons.append(Reason("not_canonical", location, f"{path!r} is not in its canonical spelling"))
@@ -181,32 +185,32 @@ def tree_reasons(location: str, blob: bytes) -> tuple[list[Reason], list[tuple[s
 # Categories
 
 
-def persona_reasons(spec: dict[str, Any], content: ContentReader, engine_type: str) -> list[Reason]:
+def persona_reasons(spec: GenomeSpec, content: ContentReader, engine_type: str) -> list[Reason]:
     """UTF-8 bytes within the identity cap and a type the bot's engine accepts (``not_utf8``, ``limit_exceeded``, ``persona_type``)."""
     reasons = []
     legal = legal_identity_types(engine_type)
-    for index, entry in enumerate(spec["persona"]):
+    for index, entry in enumerate(spec.persona):
         location = f"spec.persona[{index}]"
-        if entry["type"] not in legal:
-            reasons.append(Reason("persona_type", location, f"engine {engine_type!r} does not accept {entry['type']}"))
-        data = _read(content, entry["digest"], location, reasons)
+        if entry.type not in legal:
+            reasons.append(Reason("persona_type", location, f"engine {engine_type!r} does not accept {entry.type}"))
+        data = _read(content, entry.digest, location, reasons)
         if data is None:
             continue
         if len(data) > MAX_PERSONA_BYTES:
             reasons.append(Reason("limit_exceeded", location, f"a persona file is at most {MAX_PERSONA_BYTES} bytes"))
         elif not _is_utf8(data):
-            reasons.append(Reason("not_utf8", location, f"{entry['type']} is not UTF-8 text"))
+            reasons.append(Reason("not_utf8", location, f"{entry.type} is not UTF-8 text"))
     return reasons
 
 
-def skill_reasons(spec: dict[str, Any], content: ContentReader, validator: SkillPackageValidator) -> list[Reason]:
+def skill_reasons(spec: GenomeSpec, content: ContentReader, validator: SkillPackageValidator) -> list[Reason]:
     """A local skill's tree is a valid package whose metadata name equals the entry name (README §4.2)."""
     reasons = []
-    for index, entry in enumerate(spec["skills"]):
-        if entry["origin"] != "local":
+    for index, entry in enumerate(spec.skills):
+        if not isinstance(entry, LocalSkill):
             continue
         location = f"spec.skills[{index}]"
-        blob = _read(content, entry["digest"], location, reasons)
+        blob = _read(content, entry.digest, location, reasons)
         if blob is None:
             continue
         if len(blob) > MAX_SKILL_BYTES:
@@ -221,31 +225,31 @@ def skill_reasons(spec: dict[str, Any], content: ContentReader, validator: Skill
         except ValueError as exc:  # SkillPackageInvalidError, SkillPackageTooLargeError and their kin
             reasons.append(Reason("skill_package", location, f"not a valid skill package: {exc}"))
             continue
-        if validated.name != entry["name"]:
-            reasons.append(Reason("skill_package", location, f"SKILL.md names {validated.name!r}, the entry {entry['name']!r}"))
+        if validated.name != entry.name:
+            reasons.append(Reason("skill_package", location, f"SKILL.md names {validated.name!r}, the entry {entry.name!r}"))
         elif sorted(validated.files) != sorted(members):
             reasons.append(Reason("skill_package", location, "the tree is not what the package validator keeps (README §4.2)"))
     return reasons
 
 
-def resource_reasons(spec: dict[str, Any], content: ContentReader) -> list[Reason]:
+def resource_reasons(spec: GenomeSpec, content: ContentReader) -> list[Reason]:
     """Admission of every written file and the path rules of README §4.2 (codes ``admission``, ``resource_paths``)."""
     reasons = []
-    stripped = [entry["path"].rstrip("/") for entry in spec["resources"]]
+    stripped = [entry.path.rstrip("/") for entry in spec.resources]
     if len(stripped) != len(set(stripped)):
         dup = next(p for p in stripped if stripped.count(p) > 1)
         reasons.append(Reason("resource_paths", "spec.resources", f"{dup!r} and {dup + '/'!r} name one workspace path"))
     collision = _prefix_collision(stripped)
     if collision is not None:
         reasons.append(Reason("resource_paths", "spec.resources", f"{collision[1]!r} lies beneath {collision[0]!r}"))
-    for index, entry in enumerate(spec["resources"]):
+    for index, entry in enumerate(spec.resources):
         location = f"spec.resources[{index}]"
-        path = entry["path"]
+        path = entry.path
         problem = _segments_ok(path.rstrip("/"))
         if problem is not None:
             reasons.append(Reason("resource_paths", location, problem))
             continue
-        blob = _read(content, entry["digest"], location, reasons)
+        blob = _read(content, entry.digest, location, reasons)
         if blob is None:
             continue
         if path.endswith("/"):
@@ -272,14 +276,14 @@ def resource_reasons(spec: dict[str, Any], content: ContentReader) -> list[Reaso
     return reasons
 
 
-def mcp_entry_reasons(spec: dict[str, Any], ctx: SpecCheckContext) -> list[Reason]:
+def mcp_entry_reasons(spec: GenomeSpec, ctx: SpecCheckContext) -> list[Reason]:
     """The Manifest's own MCP entry rules (URL with a host, header names and values), plus no userinfo."""
     manifest_ctx = Context(capabilities=ManifestCapabilities(ctx.engine_type, ctx.bot_type, (), ()))
     reasons = []
-    for index, entry in enumerate(spec["tools"]["mcp"]):
+    for index, entry in enumerate(spec.tools.mcp):
         location = f"spec.tools.mcp[{index}]"
-        validate_mcp_entry(manifest_ctx, location, copy.deepcopy(entry))
-        url = (entry.get("config") or {}).get("url")
+        validate_mcp_entry(manifest_ctx, location, entry.to_json())  # its own copy: the Manifest rule may normalise it
+        url = entry.config.url if entry.config is not None else None
         if isinstance(url, str):
             try:
                 parsed = urlsplit(url)
@@ -291,13 +295,13 @@ def mcp_entry_reasons(spec: dict[str, Any], ctx: SpecCheckContext) -> list[Reaso
     return reasons
 
 
-def memory_reasons(spec: dict[str, Any], content: ContentReader) -> list[Reason]:
+def memory_reasons(spec: GenomeSpec, content: ContentReader) -> list[Reason]:
     """The stored item list: canonical JSON of ``memoryItems``, sorted by key, keys unique."""
-    memory = spec["memory"]
+    memory = spec.memory
     if memory is None:
         return []
     reasons: list[Reason] = []
-    blob = _read(content, memory["items_digest"], "spec.memory.items_digest", reasons)
+    blob = _read(content, memory.items_digest, "spec.memory.items_digest", reasons)
     if blob is None:
         return reasons
     try:
@@ -318,10 +322,10 @@ def memory_reasons(spec: dict[str, Any], content: ContentReader) -> list[Reason]
     return reasons
 
 
-def script_reasons(spec: dict[str, Any], content: ContentReader) -> list[Reason]:
+def script_reasons(spec: GenomeSpec, content: ContentReader) -> list[Reason]:
     reasons: list[Reason] = []
-    if spec["script"] is not None:
-        data = _read(content, spec["script"]["digest"], "spec.script", reasons)
+    if spec.script is not None:
+        data = _read(content, spec.script.digest, "spec.script", reasons)
         if data is not None and not _is_utf8(data):
             reasons.append(Reason("not_utf8", "spec.script", "the script body is not UTF-8 text"))
     return reasons
@@ -350,11 +354,11 @@ class SpecChecks:
         self._mcp_auth = mcp_auth
         self._mcp_config = mcp_config
 
-    def mcp_context_reasons(self, spec: dict[str, Any], ctx: SpecCheckContext) -> list[Reason]:
+    def mcp_context_reasons(self, spec: GenomeSpec, ctx: SpecCheckContext) -> list[Reason]:
         """``McpMaterialiser.resolve``'s two questions: may the actor enable it, and is the override valid."""
         reasons = []
-        for index, entry in enumerate(spec["tools"]["mcp"]):
-            location, code = f"spec.tools.mcp[{index}]", entry["server_code"]
+        for index, entry in enumerate(spec.tools.mcp):
+            location, code = f"spec.tools.mcp[{index}]", entry.server_code
             try:
                 verdict = self._mcp_auth.check_mcp_permission_detail(ctx.actor_id, code)
                 permitted = bool(verdict.get("has_permission")) and bool(verdict.get("access_level"))
@@ -363,7 +367,7 @@ class SpecChecks:
             if not permitted:
                 reasons.append(Reason("mcp_not_permitted", location, f"{ctx.actor_id!r} may not enable {code!r}"))
                 continue
-            config = entry.get("config")
+            config = entry.config.to_json() if entry.config is not None else None
             result = self._mcp_config.validate_bot_override(
                 user_id=ctx.entity_id, server_code=code, config=config if config else None, engine_type=ctx.engine_type
             )
@@ -372,10 +376,10 @@ class SpecChecks:
         return reasons
 
     def reasons(
-        self, spec: dict[str, Any], policy: dict[str, Any], content: ContentReader, ctx: SpecCheckContext
+        self, spec: GenomeSpec, policy: GenomePolicy, content: ContentReader, ctx: SpecCheckContext
     ) -> list[Reason]:
         """Everything, shape first: a record that fails the schema is not walked further."""
-        found = schema_reasons(spec, policy)
+        found = schema_reasons(spec.to_json(), policy.to_json())
         if found:
             return found
         found = order_reasons(spec, policy) + policy_path_reasons(policy)
