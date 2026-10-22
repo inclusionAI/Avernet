@@ -231,7 +231,7 @@ async def gateway(key_file, handler, *, handshake="ok", snapshot=None):
         config = HostingGatewayConfig(
             url=f"ws://127.0.0.1:{port}",
             device_key_file=key_file,
-            token="offline-test-value",
+            token="test-token",
             run_timeout=1,
             connection_timeout=1,
         )
@@ -670,7 +670,7 @@ async def test_redirect_never_receives_credentials(key_file, execution):
             config = HostingGatewayConfig(
                 url=f"ws://127.0.0.1:{source.sockets[0].getsockname()[1]}",
                 device_key_file=key_file,
-                token="offline-test-value",
+                token="test-token",
             )
             with pytest.raises(ExecutionError):
                 _ = [

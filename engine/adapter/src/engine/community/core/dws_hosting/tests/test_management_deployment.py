@@ -38,7 +38,7 @@ def values(tmp_path):
         "authorization_hosts": ["example.com"],
         "gateway_url": "ws://127.0.0.1:18789",
         "gateway_device_key": str(tmp_path / "device.json"),
-        "gateway_token": "offline-placeholder",
+        "gateway_token": "test-token",
         "mcporter_config": str(tmp_path / "mcp.json"),
         "management_backend_url": "https://backend.example.test",
     }
