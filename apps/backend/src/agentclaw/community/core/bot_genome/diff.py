@@ -178,8 +178,14 @@ class _Differ:
                 old_blob, new_blob = self.content.read(before["digest"]), self.content.read(after["digest"])
                 if old_dir and new_dir:
                     self.changes.append(GeneChange(gene, "modified"))
-                    changed, _ = self._members(gene, old_blob, new_blob)
-                    self.touched.append(OpTouch("file.edit", gene, tuple(changed)))
+                    changed, touched = self._members(gene, old_blob, new_blob)
+                    if len(touched) == len(changed):
+                        self.touched.append(OpTouch("file.edit", gene, tuple(changed)))
+                    else:
+                        # A member added or removed: no file.edit does that; a patch removes and re-adds
+                        # the directory, which the assessor measures as a replacement.
+                        self.files[gene] = FileChange(None, None, text=False)
+                        self.touched.append(OpTouch("resource.add", gene, (gene,)))
                 elif old_dir or new_dir:
                     self.changes.append(GeneChange(gene, "modified"))
                     self.files[gene] = FileChange(None, None, text=False)

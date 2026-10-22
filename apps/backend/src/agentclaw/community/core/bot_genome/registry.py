@@ -369,6 +369,12 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         if active is None:
             raise RevisionNotFound("active")
         spec = loads_strict(active.content)["spec"]
+        # The spec is unchanged, but what apply would accept may have moved since `active` was
+        # recorded (a revoked MCP permission, a retired server): a recorded revision is one that
+        # applies now, so the content is re-checked in the recording bot's current context.
+        reasons = self._checks.reasons(spec, policy, self._reader(bot), self._ctx(bot, created_by.actor))
+        if reasons:
+            raise PolicyRejected(reasons)
         return self._record(bot, spec, policy, parent=active.revision_id, created_by=created_by, status=RevisionStatus.DRAFT, writes={}, origin="genome/policy")
 
     def set_status(self, bot: BotRef, revision_id: str, status: RevisionStatus, *, actor: Provenance, reason: str) -> None:

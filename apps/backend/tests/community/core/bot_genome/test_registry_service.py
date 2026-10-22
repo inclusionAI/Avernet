@@ -19,7 +19,7 @@ from agentclaw.community.core.bot_genome.errors import (
     RefConflict,
     RevisionNotFound,
 )
-from agentclaw.community.core.bot_genome.models import Provenance, ProvenanceKind, RefMover, RefUpdate, RevisionStatus, RunScope
+from agentclaw.community.core.bot_genome.models import BotRef, Provenance, ProvenanceKind, RefMover, RefUpdate, RevisionStatus, RunScope
 from agentclaw.community.core.bot_genome.registry import DEFAULT_POLICY
 from agentclaw.community.core.bot_genome.repository.models import GenomePromotionRow
 from tests.community.core.bot_genome.example_blobs import MEMORY_BOT, SUPPORT_BOT, SUPPORT_BOT_CANDIDATE, BlobDir, load_patch, load_revisions
@@ -173,6 +173,13 @@ async def test_set_policy_needs_active_and_a_canonical_sorted_policy(world: Worl
     for bad in ({"mutable_genes": ["skills", "persona"], "pins": [], "risk_overrides": {}}, {"mutable_genes": ["skills/%61"], "pins": [], "risk_overrides": {}}, {"mutable_genes": [], "pins": []}):
         with pytest.raises(PolicyRejected):
             world.registry.set_policy(BOT, bad, created_by=OWNER)
+    # The spec is re-checked in the bot's current context: what applied when `active` was recorded
+    # may not apply now (here the engine no longer accepts the persona files).
+    moved_engine = BotRef(owner_id=BOT.owner_id, bot_id=BOT.bot_id, entity_id=BOT.entity_id, engine_type="claude_code", bot_type=BOT.bot_type)
+    with pytest.raises(PolicyRejected) as caught:
+        world.registry.set_policy(moved_engine, dict(DEFAULT_POLICY, pins=[]), created_by=OWNER)
+    assert {r.code for r in caught.value.reasons} == {"persona_type"}
+    assert world.registry.list_revisions(BOT).total == 1, "nothing recorded"
 
 
 @pytest.mark.asyncio

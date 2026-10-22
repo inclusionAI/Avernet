@@ -80,7 +80,11 @@ class GenomeRegistryProtocol(Protocol):
 
     @abstractmethod
     def set_policy(self, bot: BotRef, policy: dict[str, Any], *, created_by: Provenance) -> RecordedRevision:
-        """Record a revision with ``active``'s spec and the new policy."""
+        """Record a revision with ``active``'s spec and the new policy.
+
+        The spec is re-checked against what apply accepts now; ``PolicyRejected``
+        carries the policy's own reasons or the spec's.
+        """
         ...
 
     @abstractmethod

@@ -104,6 +104,18 @@ def test_resources_measure_text_files_and_flag_a_replacement_across_kinds() -> N
     diff = _diff(a, d, blobs)
     assert [(x.gene, x.kind) for x in diff.changes] == [("resources/data/kb", "modified"), ("resources/data/kb/shipping.md", "modified")]
     assert diff.rewrite_flags == () and diff.risk_tier == "T1"
+    # A member added or removed is what no file.edit can do: a patch replaces the directory, so the
+    # diff measures it as that replacement (flagged, T2), not as an edit of the members that stayed.
+    e = copy.deepcopy(a)
+    e["resources"][1]["digest"] = blobs.put(canonical_tree_bytes([("returns/policy.md", b"# Returns\nReturns are accepted within 30 days of delivery.\n"), ("shipping.md", b"# Shipping\nStandard shipping takes 3-5 working days.\n"), ("warranty.md", b"# Warranty\n")]))
+    diff = _diff(a, e, blobs)
+    assert [(x.gene, x.kind) for x in diff.changes] == [("resources/data/kb", "modified"), ("resources/data/kb/warranty.md", "added")]
+    assert diff.rewrite_flags == ("resources/data/kb",) and diff.risk_tier == "T2"
+    f = copy.deepcopy(a)
+    f["resources"][1]["digest"] = blobs.put(canonical_tree_bytes([("shipping.md", b"# Shipping\nStandard shipping takes 3-5 working days.\n")]))
+    diff = _diff(a, f, blobs)
+    assert [(x.gene, x.kind) for x in diff.changes] == [("resources/data/kb", "modified"), ("resources/data/kb/returns/policy.md", "removed")]
+    assert diff.rewrite_flags == ("resources/data/kb",) and diff.risk_tier == "T2"
 
 
 def test_memory_items_and_mode() -> None:
