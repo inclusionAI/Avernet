@@ -26,7 +26,7 @@ export function registrationTokenScope(token: string): ProviderTokenScope | unde
     || !Array.isArray(payload.allowed_modes) || !payload.allowed_modes.includes('plugin')) {
     throw new Error('BCN onboarding token does not authorize Provider plugin registration');
   }
-  if (payload.auth_mode !== undefined && payload.auth_mode !== 'static_bearer') {
+  if (payload.auth_mode !== 'static_bearer') {
     throw new Error('DSH Provider registration requires static_bearer authentication');
   }
   return { providerId, owner: payload.id };

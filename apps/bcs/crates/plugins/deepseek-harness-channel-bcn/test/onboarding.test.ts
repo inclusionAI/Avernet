@@ -180,7 +180,7 @@ test('lost HTTP response keeps pending identity and surfaces a duplicate conflic
 });
 
 test('Provider registration fails closed for unsupported tokens and mismatched responses', async () => {
-  for (const overrides of [{ allowed_modes: ['gateway'] }, { auth_mode: 'agentpass' }, { exp: 1 }, { v: 3 }, { purpose: 'other' }]) {
+  for (const overrides of [{ allowed_modes: ['gateway'] }, { auth_mode: 'agentpass' }, { auth_mode: undefined }, { auth_mode: null }, { exp: 1 }, { v: 3 }, { purpose: 'other' }]) {
     const credentials = new MemoryCredentials();
     credentials.values.set('BCN_ONBOARDING_TOKEN', providerToken(overrides));
     const transport = new ProviderTransport();
