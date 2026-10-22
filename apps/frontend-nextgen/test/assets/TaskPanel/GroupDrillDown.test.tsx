@@ -11,7 +11,7 @@ import {
 } from '@/assets/TaskPanel/GroupDrillDown';
 import { describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 jest.mock('@tc-chat/ui/es/MarkdownRender', () => ({
   MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div>,
@@ -162,6 +162,114 @@ describe('GroupDrillDown message typography', () => {
       expect(screen.getByText('一'.repeat(201))).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: '收起消息' }));
       expect(screen.getByRole('button', { name: '展开消息' })).toBeInTheDocument();
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+});
+
+describe('GroupSessionView background refresh', () => {
+  it('刷新消息时保留现有内容和展开状态，不重新进入整页 loading', async () => {
+    const originalFetch = global.fetch;
+    const fetchMock = jest.fn<(...args: Parameters<typeof fetch>) => Promise<Response>>();
+    const groupResponse = {
+      ok: true,
+      json: async () => ({
+        data: {
+          group_id: 'group-1',
+          name: '执行会话',
+          status: 'active',
+          participants: [
+            {
+              actor_id: 'worker-bot:user-1',
+              actor_kind: 'bot',
+              name: '执行 Bot',
+              role: 'worker',
+              mode: 'auto',
+            },
+          ],
+        },
+      }),
+    } as Response;
+    const messageResponse = (id: string, content: string) =>
+      ({
+        ok: true,
+        json: async () => ({
+          data: {
+            items: [
+              {
+                id,
+                sender: '执行 Bot',
+                message_type: 'bot',
+                content,
+                timestamp: 1,
+              },
+            ],
+          },
+        }),
+      }) as Response;
+    let resolveRefreshMessages: ((response: Response) => void) | undefined;
+    const refreshMessages = new Promise<Response>((resolve) => {
+      resolveRefreshMessages = resolve;
+    });
+    fetchMock
+      .mockResolvedValueOnce(groupResponse)
+      .mockResolvedValueOnce(messageResponse('old-message', '已有消息'))
+      .mockResolvedValueOnce(groupResponse)
+      .mockImplementationOnce(() => refreshMessages);
+    global.fetch = fetchMock;
+
+    const node = {
+      id: 'node-1',
+      name: '执行会话',
+      sequence: 1,
+      status: 'running' as const,
+      executor: '执行 Bot',
+      runMode: 'coop_group',
+      groupId: 'group-1',
+      sessionId: 'bcs_grp_1:round-1',
+      hasSubTask: false,
+      subTaskId: null,
+      stepTraces: [],
+      acceptanceResult: null,
+      artifacts: [],
+    };
+
+    try {
+      const view = render(
+        <GroupSessionView
+          node={node}
+          bcsBaseUrl=""
+          apiBaseUrl=""
+          userId="user-1"
+          onBack={jest.fn()}
+          refreshVersion={0}
+        />,
+      );
+      expect(await screen.findByText('已有消息')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /群成员/ }));
+      expect(screen.getByRole('button', { name: /群成员/ })).toHaveAttribute('aria-expanded', 'true');
+
+      view.rerender(
+        <GroupSessionView
+          node={node}
+          bcsBaseUrl=""
+          apiBaseUrl=""
+          userId="user-1"
+          onBack={jest.fn()}
+          refreshVersion={1}
+        />,
+      );
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+      expect(screen.getByText('已有消息')).toBeInTheDocument();
+      expect(screen.queryByText('正在加载执行信息…')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /群成员/ })).toHaveAttribute('aria-expanded', 'true');
+
+      await act(async () => {
+        resolveRefreshMessages?.(messageResponse('new-message', '刷新后的消息'));
+        await refreshMessages;
+      });
+      expect(await screen.findByText('刷新后的消息')).toBeInTheDocument();
     } finally {
       global.fetch = originalFetch;
     }

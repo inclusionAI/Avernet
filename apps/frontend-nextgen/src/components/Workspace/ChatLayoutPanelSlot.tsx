@@ -13,7 +13,7 @@
  * App 侧 onOpenStateChange 串联其后，获得与 SDK 一致的真实开合态
  * （Monitor 激活态与 SidePanelCollapseButton 显隐同源消费）。
  *
- * 收起策略 dismissOnOutside（默认 true，单聊侧口径）为私有 prop：false 时不订阅点外
+ * 收起策略 dismissOnOutside（默认 true）为私有 prop：会话主界面传 false 时不订阅点外
  * 收起、仅显式信号关闭；转发 SDK 前剥离。
  */
 import { useWorkspacePanelDismiss } from '@/hooks/useWorkspacePanelDismiss';
