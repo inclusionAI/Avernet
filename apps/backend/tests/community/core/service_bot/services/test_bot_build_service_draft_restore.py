@@ -790,7 +790,7 @@ def test_aicoding_restore_selects_container_before_host_artifact_access(monkeypa
     svc._artifact_transfer._bindings = MagicMock()
     svc._artifact_transfer._bindings.get_by_id.return_value = MagicMock(device_id="current-draft", status="ACTIVE")
     svc._artifact_transfer.try_restore = MagicMock()
-    svc._artifact_transfer.try_restore.return_value = fastdisk
+    svc._artifact_transfer.try_restore.return_value = '/home/admin/.aicoding' if fastdisk else None
     if fastdisk == 'failed':
         svc._artifact_transfer.try_restore.side_effect = FastdiskPublishError('restore failed')
     svc._run_local_command = MagicMock()

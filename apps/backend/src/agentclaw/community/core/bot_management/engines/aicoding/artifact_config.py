@@ -23,7 +23,9 @@ class FastdiskPublishConfig:
 
 def parse_fastdisk_publish_config(raw: Any) -> FastdiskPublishConfig:
     """Map the deployment block, preserving existing defaults and validation."""
-    block = dict(raw) if isinstance(raw, dict) else {}
+    if raw is not None and not isinstance(raw, dict):
+        raise ValueError("fastdisk_publish must be a mapping")
+    block = {} if raw is None else dict(raw)
     allowed = {field.name for field in fields(FastdiskPublishConfig)}
     if set(block) - allowed:
         raise ValueError("unknown fastdisk_publish configuration key")

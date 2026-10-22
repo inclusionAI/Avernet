@@ -10,7 +10,6 @@ import pytest
 from agentclaw.community.core.bot_management.engines.aicoding.artifact_transfer import (
     DETECTION, detection_command, FastdiskPublishConfig, AicodingArtifactTransferStrategy, FastdiskPublishError,
 )
-from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
 from agentclaw.community.core.workspace.engines.aicoding import _AICODING_BUILD_PLAN
 
 
@@ -43,7 +42,7 @@ def publish(p):
     return p.try_publish(device_id='device', plan=_AICODING_BUILD_PLAN,
         source_root='/home/admin/.aicoding',
         target_dir=Path('/aidesktop/aidesktop_prod/bolt_data/staff_u/b/3/aicoding'),
-        ignore_paths=(), normalize_extra=BotBuildService._normalize_extra_include_file)
+        ignore_paths=())
 
 
 def test_non_fastdisk_preserves_original_path_and_never_uploads():
@@ -133,8 +132,7 @@ def restore(p):
     return p.try_restore(device_id='draft-device', plan=_AICODING_BUILD_PLAN,
         source_root='/home/admin/.aicoding', artifact_path='/opt/nfs/bot-data/3/aicoding',
         artifact_dir=Path('/aidesktop/aidesktop_prod/bolt_data/staff_u/b/3/aicoding'),
-        remaining_timeout=lambda: 1800,
-        normalize_extra=BotBuildService._normalize_extra_include_file)
+        remaining_timeout=lambda: 1800)
 
 
 def test_fastdisk_restore_uses_existing_draft_device_and_long_timeout():
@@ -157,7 +155,7 @@ def test_fastdisk_restore_uses_existing_draft_device_and_long_timeout():
 
 def test_non_fastdisk_restore_retains_nas_path():
     p = publisher([result(status='skip_no_fastdisk')])
-    assert restore(p) is False
+    assert restore(p) is None
     assert p.executor.exec_shell_new.call_count == 1
 
 
@@ -211,8 +209,7 @@ def test_restore_detection_uses_remaining_operation_budget():
     assert p.try_restore(device_id='draft', plan=_AICODING_BUILD_PLAN,
         source_root='/home/admin/.aicoding', artifact_path='/opt/nfs/bot-data/3/aicoding',
         artifact_dir=Path('/aidesktop/aidesktop_prod/bolt_data/staff_u/b/3/aicoding'),
-        remaining_timeout=lambda: 4.2,
-        normalize_extra=BotBuildService._normalize_extra_include_file) is False
+        remaining_timeout=lambda: 4.2) is None
     assert p.executor.exec_shell_new.call_args.kwargs['timeout_seconds'] == 5
 
 
@@ -258,8 +255,7 @@ def test_only_dynamic_rules_cross_container_boundary():
     assert p.try_publish(device_id='device', plan=plan,
         source_root='/home/admin/.aicoding',
         target_dir=Path('/aidesktop/aidesktop_prod/bolt_data/staff_u/b/3/aicoding'),
-        ignore_paths=('workspace/private',),
-        normalize_extra=BotBuildService._normalize_extra_include_file)
+        ignore_paths=('workspace/private',))
     request = json.loads(base64.b64decode(shlex.split(
         p.executor.exec_shell_new.call_args.kwargs['shell_cmd'])[-1]))
     assert request['additional_excludes'] == ['workspace/template-repo', 'workspace/shared-corpus']
@@ -284,10 +280,10 @@ def test_upload_and_restore_keep_same_bot_version_and_engine(engine, env_folder)
     from agentclaw.community.core.workspace.engines.claude_code import _CLAUDE_CODE_BUILD_PLAN
     from agentclaw.community.core.bot_management.engines.aicoding.artifact_transfer import build_request
     plan = _AICODING_BUILD_PLAN if engine == 'aicoding' else _CLAUDE_CODE_BUILD_PLAN
-    home = '/home/admin/.' + engine
+    home = '/home/admin/.aicoding'
     prefix = f'aidesktop/{env_folder}/bolt_data/staff_owner/bot-example/17/{engine}'
     request = build_request(plan=plan, source_root=home, object_prefix=prefix,
-        ignore_paths=(), normalize_extra=BotBuildService._normalize_extra_include_file,
+        ignore_paths=(),
         layout={'home': home, 'storage': '/opt/fastdisk'},
         config=FastdiskPublishConfig(mist_secret_name='test'), bucket='test',
         endpoint='https://oss.example.test')
@@ -300,8 +296,7 @@ def test_upload_and_restore_keep_same_bot_version_and_engine(engine, env_folder)
     mounted_artifact = '/opt/nfs/bot-data/17/' + engine
     assert p.try_restore(device_id='draft-device', plan=plan, source_root=home,
         artifact_path=mounted_artifact,
-        artifact_dir=Path('/aidesktop') / Path(prefix).relative_to('aidesktop'), remaining_timeout=lambda: 1800,
-        normalize_extra=BotBuildService._normalize_extra_include_file)
+        artifact_dir=Path('/aidesktop') / Path(prefix).relative_to('aidesktop'), remaining_timeout=lambda: 1800)
     restored = json.loads(base64.b64decode(shlex.split(
         p.executor.exec_shell_new.call_args.kwargs['shell_cmd'])[-1]))
     assert restored['version_prefix'] + '/' + restored['engine_path'] == prefix
@@ -311,7 +306,7 @@ def test_upload_and_restore_keep_same_bot_version_and_engine(engine, env_folder)
     assert restored['fastdisk'] == request['fastdisk']
     with pytest.raises(FastdiskPublishError, match='does not match'):
         build_request(plan=replace(plan, migration_subpath='wrong-engine'), source_root=home,
-            object_prefix=prefix, ignore_paths=(), normalize_extra=None,
+            object_prefix=prefix, ignore_paths=(),
             layout={'home': home, 'storage': '/opt/fastdisk'},
             config=FastdiskPublishConfig(), bucket='test', endpoint='https://oss.example.test')
 
@@ -326,11 +321,11 @@ def test_engine_scope_is_owned_by_aicoding_strategy(engine):
     p.executor.exec_shell_new.assert_not_called()
     if not supported:
         assert p.try_publish(device_id='unused', plan=plan, source_root='unused',
-                             target_dir=Path('/unused'), ignore_paths=(), normalize_extra=None) is False
+                             target_dir=Path('/unused'), ignore_paths=()) is False
         budget = Mock(side_effect=AssertionError('unsupported engine consumed timeout'))
         assert p.try_restore(device_id='unused', plan=plan, source_root='unused',
                              artifact_path='unused', artifact_dir=Path('/unused'),
-                             remaining_timeout=budget, normalize_extra=None) is False
+                             remaining_timeout=budget) is None
         p.executor.exec_shell_new.assert_not_called()
         budget.assert_not_called()
 
@@ -347,3 +342,26 @@ def test_transfer_failure_logs_operation_identity_without_request_secrets(monkey
     assert any(request['operation_id'] in message and request['version_prefix'] in message
                for message in messages)
     assert all('test-secret-name' not in message for message in messages)
+
+
+@pytest.mark.parametrize('engine', ['aicoding', 'claude_code'])
+def test_detected_physical_home_owns_transfer_source_and_restore_destination(engine):
+    from agentclaw.community.core.workspace.engines.claude_code import _CLAUDE_CODE_BUILD_PLAN
+    plan = _AICODING_BUILD_PLAN if engine == 'aicoding' else _CLAUDE_CODE_BUILD_PLAN
+    p = publisher([result(), result(), result(), result(), result(), result()])
+    provider = Mock(get_base_path=Mock(return_value='/home/admin/.' + engine))
+    target = Path('/aidesktop/test/bolt_data/staff_u/b/3') / engine
+    assert p.publish(device_id='draft', plan=plan, provider=provider, target_dir=target, ignore_paths=())
+    uploaded = json.loads(base64.b64decode(shlex.split(p.executor.exec_shell_new.call_args.kwargs['shell_cmd'])[-1]))
+    assert uploaded['source_root'] == uploaded['fastdisk']['home'] == '/home/admin/.aicoding'
+    assert uploaded['engine_path'] == engine
+    p._bindings.get_by_id.return_value = SimpleNamespace(device_id='draft', status='ACTIVE')
+    restored = p.restore(bot={'binding_id': 1, 'entity_id': 'u', 'bot_id': 'b'}, source_version=3,
+        plan=plan, provider=provider, artifact_dir=target,
+        migration_path_base=lambda **kw: '/opt/nfs/bot-data',
+        remaining_timeout=lambda: 1800, migration_error=RuntimeError)
+    request = json.loads(base64.b64decode(shlex.split(p.executor.exec_shell_new.call_args.kwargs['shell_cmd'])[-1]))
+    assert request['source_root'] == '/home/admin/.aicoding'
+    assert restored['draft_path'] == '/home/admin/.aicoding'
+    assert request['engine_path'] == engine
+    assert request['version_prefix'] == uploaded['version_prefix']

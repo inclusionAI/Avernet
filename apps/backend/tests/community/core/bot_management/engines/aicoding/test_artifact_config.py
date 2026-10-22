@@ -8,8 +8,8 @@ from agentclaw.community.core.bot_management.engines.aicoding.artifact_config im
 )
 
 
-@pytest.mark.parametrize("block", [None, {}, "invalid"])
-def test_missing_or_invalid_block_uses_defaults(block):
+@pytest.mark.parametrize("block", [None, {}])
+def test_missing_block_uses_defaults(block):
     config = parse_fastdisk_publish_config(block)
 
     assert config == FastdiskPublishConfig()
@@ -57,3 +57,9 @@ def test_composition_root_wires_strategy_with_deployment_config(monkeypatch):
     assert str(strategy.oss_mount_root) == "/test/oss"
     assert strategy.executor is args["device_service"]
     assert strategy._bindings is args["device_binding_repo"]
+
+
+@pytest.mark.parametrize("block", ["invalid", "", [], 0, False])
+def test_non_mapping_block_fails(block):
+    with pytest.raises(ValueError, match="must be a mapping"):
+        parse_fastdisk_publish_config(block)

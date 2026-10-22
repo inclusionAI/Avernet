@@ -1,5 +1,3 @@
-import importlib.util
-from pathlib import Path
 import subprocess
 from types import SimpleNamespace
 import pytest

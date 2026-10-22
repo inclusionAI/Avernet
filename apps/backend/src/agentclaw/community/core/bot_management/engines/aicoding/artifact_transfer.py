@@ -88,7 +88,7 @@ class AicodingArtifactTransferStrategy:
             return False
         return self.try_publish(
             device_id=device_id, plan=plan, source_root=str(provider.get_base_path()),
-            target_dir=target_dir, ignore_paths=ignore_paths, normalize_extra=None,
+            target_dir=target_dir, ignore_paths=ignore_paths,
         )
 
     def restore(self, *, bot: dict[str, Any], source_version: int,
@@ -116,14 +116,15 @@ class AicodingArtifactTransferStrategy:
             f"{migration_path_base(owner_id=bot['entity_id'], bot_id=bot['bot_id'])}"
             f"/{source_version}/{plan.migration_subpath}"
         )
-        if not self.try_restore(
+        restored_root = self.try_restore(
             device_id=device_id, plan=plan, source_root=runtime_root,
             artifact_path=runtime_artifact, artifact_dir=artifact_dir,
-            remaining_timeout=remaining_timeout, normalize_extra=None,
-        ):
+            remaining_timeout=remaining_timeout,
+        )
+        if restored_root is None:
             return None
         return {"restore_type": "migration_path",
-                "artifact_path": str(artifact_dir), "draft_path": runtime_root}
+                "artifact_path": str(artifact_dir), "draft_path": restored_root}
 
     def _exec(self, device_id: str, command: str, timeout: int) -> CommandResult:
         return self.executor.exec_shell_new(device_id=device_id, shell_cmd=command, timeout_seconds=timeout)
@@ -158,8 +159,7 @@ class AicodingArtifactTransferStrategy:
             raise FastdiskPublishError('fastdisk detection failed; NAS fallback is forbidden') from error
 
     def try_publish(self, *, device_id: str, plan: EngineBuildPlan,
-                    source_root: str, target_dir: Path, ignore_paths: tuple[str, ...],
-                    normalize_extra: Any) -> bool:
+                    source_root: str, target_dir: Path, ignore_paths: tuple[str, ...]) -> bool:
         if not self.supports(plan):
             return False
         layout = self.detect(device_id)
@@ -172,8 +172,8 @@ class AicodingArtifactTransferStrategy:
         if not self.bucket or not self.endpoint:
             raise FastdiskPublishError('fastdisk publish requires object storage configuration')
         request = build_request(
-            plan=plan, source_root=source_root, object_prefix=str(object_prefix),
-            ignore_paths=ignore_paths, normalize_extra=normalize_extra,
+            plan=plan, source_root=layout['home'], object_prefix=str(object_prefix),
+            ignore_paths=ignore_paths,
             layout=layout, config=self.config, bucket=self.bucket, endpoint=self.endpoint,
         )
         self._invoke(device_id, 'upload', request, self.config.upload_timeout_seconds)
@@ -227,13 +227,14 @@ class AicodingArtifactTransferStrategy:
                     round((time.monotonic() - started) * 1000))
 
     def try_restore(self, *, device_id: str, plan: EngineBuildPlan,
-                    source_root: str, artifact_path: str, artifact_dir: Path, remaining_timeout: Callable[[], float], normalize_extra: Any) -> bool:
+                    source_root: str, artifact_path: str, artifact_dir: Path, remaining_timeout: Callable[[], float]) -> str | None:
         if not self.supports(plan):
-            return False
+            return None
         layout = self.detect(device_id, timeout_seconds=remaining_timeout())
         if layout['status'] == 'skip_no_fastdisk':
-            return False
-        root = PurePosixPath(source_root)
+            return None
+        # Logical claude_code can run on the physical .aicoding layout.
+        root = PurePosixPath(layout['home'])
         # Same identity/version-derived OSS prefix as publication, never inferred
         # from the container mount path or accepted as an arbitrary DB path.
         try:
@@ -258,10 +259,10 @@ class AicodingArtifactTransferStrategy:
             'timeout_seconds': remaining_timeout(),
         }
         self._invoke(device_id, 'restore', request, request['timeout_seconds'])
-        return True
+        return str(root)
 
 
-def build_request(*, plan, source_root, object_prefix, ignore_paths, normalize_extra,
+def build_request(*, plan, source_root, object_prefix, ignore_paths,
                   layout, config, bucket, endpoint):
     root = PurePosixPath(source_root)
     target = PurePosixPath(object_prefix)

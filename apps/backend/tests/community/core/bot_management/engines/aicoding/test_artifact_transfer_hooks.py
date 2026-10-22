@@ -18,7 +18,7 @@ def fixture(engine):
     strategy._bindings = Mock()
     strategy._bindings.get_by_id.return_value = SimpleNamespace(device_id="draft", status="ACTIVE")
     strategy.try_publish = Mock(return_value=True)
-    strategy.try_restore = Mock(return_value=True)
+    strategy.try_restore = Mock(return_value=f'/home/admin/.{engine}')
     provider = Mock(get_base_path=Mock(return_value=f'/home/admin/.{engine}'))
     plan = replace(_AICODING_BUILD_PLAN, engine_type=engine, migration_subpath=engine)
     return strategy, dict(
@@ -88,7 +88,7 @@ def test_missing_device_keeps_existing_error_contract():
 
 def test_only_not_applicable_returns_fallback_and_errors_propagate():
     strategy, args = fixture('aicoding')
-    strategy.try_restore.return_value = False
+    strategy.try_restore.return_value = None
     assert strategy.restore(**args) is None
     error = FastdiskPublishError('restore failed')
     strategy.try_restore.side_effect = error

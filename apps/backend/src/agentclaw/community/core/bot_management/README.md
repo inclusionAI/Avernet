@@ -181,3 +181,23 @@ restart. Normal stop/start failures continue to propagate.
 service draft Bot release checks. It consumes existing repositories, the
 DeviceContextResolver and DeviceAdapterTransport and never invokes lifecycle or
 publish-policy writes. See its README for the contract and deployment boundary.
+
+### Fastdisk transfer runtime layout and rollout
+
+The artifact engine name is logical: `claude_code` may use the physical
+`.aicoding` runtime. After a successful fastdisk gate, both upload source and
+restore destination use the detected `layout.home`; OSS version/engine prefixes
+continue to come from the build plan. Restore returns that physical draft path.
+Only absent/null configuration blocks use defaults; non-mapping blocks fail
+configuration validation.
+
+Deploy schema-5 container scripts before this Backend change. Old/missing scripts
+on fastdisk Bots fail closed. Non-target engines skip detection; non-fastdisk
+coding engines retain NAS transfer only after successful detection and binding
+checks. Restore is not transactional: completed replacements remain after failure;
+required transfer failures stop subsequent stale-file cleanup.
+
+To roll back, pause fastdisk transfers, retain compatible schema-5 scripts, and
+revert Backend only after deciding how authoritative fastdisk files will remain
+available. Do not resume the old NAS path on stale data; first establish a
+verified migration to NAS or deploy the previous compatible fastdisk implementation.
