@@ -48,6 +48,7 @@ from agentclaw.community.core.expert_chat.services.expert_chat_session_runtime i
 from agentclaw.community.core.expert_chat.services.expert_chat_owned_session import (
     ExpertChatOwnedSessionMixin,
 )
+from agentclaw.community.core.expert_chat.services.bot_lookup import ExpertChatBotLookupMixin
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTransport,
@@ -108,7 +109,7 @@ class BotInfoProvider(Protocol):
 # ============ Service Implementation ============
 
 
-class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMixin, ExpertChatServiceProtocol):
+class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMixin, ExpertChatServiceProtocol):
     """用户与专家Bot对话业务逻辑"""
 
     @inject
@@ -171,7 +172,7 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
             BotNotPublishedError: Bot 未绑定设备
         """
         # 1. 校验 bot 是否存在且 ACTIVE（通过 bot_id + owner_id 唯一定位）
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        bot = self._find_chat_bot(bot_id, owner_id)
         if not bot:
             logger.warning(
                 f"[ExpertChatService] Bot not found: {bot_id}, owner={owner_id}"
@@ -217,7 +218,7 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
             owner_id = entry["owner_id"]
 
             # 使用 get_by_id_and_owner 唯一定位 bot
-            bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+            bot = self._find_chat_bot(bot_id, owner_id)
             if not bot:
                 logger.warning(
                     f"[ExpertChatService] Bot not found in list: {bot_id}, owner={owner_id}"
@@ -275,7 +276,7 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
         Returns:
             是否成功
         """
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        bot = self._find_chat_bot(bot_id, owner_id)
         legacy_session_key = self._repo.get_session(user_id, bot_id, owner_id)
         if legacy_session_key:
             self._repo.add_owned_session(user_id, bot_id, owner_id, legacy_session_key)
@@ -685,7 +686,7 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
             是否成功删除
         """
         # 1. 校验 bot 是否存在
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        bot = self._find_chat_bot(bot_id, owner_id)
         if not bot:
             raise BotNotFoundError(f"Bot不存在: {bot_id}")
 
@@ -731,7 +732,7 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
         bcn_friend_authorized: bool = False,
     ) -> Dict[str, Any]:
         """Resolve and authorize a Bot before any container-side operation."""
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        bot = self._find_chat_bot(bot_id, owner_id)
         if not bot:
             raise BotNotFoundError(f"Bot不存在: {bot_id}")
         if bot.get("status") != "ACTIVE":
@@ -739,7 +740,7 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
 
         # 以下为安全注释COSEC：互动列表归属和 Bot 访问权均使用服务端登录身份校验。
         bot_in_list = any(
-            entry["bot_id"] == bot_id and entry["owner_id"] == owner_id
+            entry["bot_id"] == bot_id and entry["owner_id"] == str(bot["entity_id"])
             for entry in self._repo.list_chat_bots(user_id)
         )
         if not bot_in_list:

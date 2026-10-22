@@ -194,6 +194,10 @@ class SeamBots:
     def get_by_id_and_owner(self, bot_id: str, owner_id: str):
         return {"id": 1, "bot_id": bot_id, "owner_id": owner_id, "env": "dev"}
 
+    def list_matches_by_legacy_locator(self, bot_id, locator):
+        row = self.get_by_id_and_owner(bot_id, locator)
+        return [] if row is None else [{"id": 1, "bot_id": bot_id, "entity_id": locator, **row}]
+
 
 class SeamCollaborators:
     """The level every non-owner caller holds. Owners never reach this.

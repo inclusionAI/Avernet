@@ -155,6 +155,9 @@ class _BotRepository:
             return None
         return {"binding_id": self.binding_id}
 
+    def get_by_id_and_entity(self, bot_id, entity_id):
+        return self.get_by_id_and_owner(bot_id, entity_id)
+
 
 class _BotFriendRepository:
     def __init__(self, relation=None) -> None:

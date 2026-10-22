@@ -127,6 +127,13 @@ class _Bots:
             "entity_id": "owner",
         }
 
+    def list_matches_by_legacy_locator(self, bot_id: str, locator: str) -> list[dict]:
+        bot = self.get_by_id_and_owner(bot_id, locator)
+        if bot is None:
+            return []
+        return [{"id": 1, "bot_id": bot_id, "owner_id": locator,
+                 "entity_id": locator, **bot}]
+
 
 class _Collaborators:
     def check_collaborator_permission(self, *_args):

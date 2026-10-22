@@ -363,7 +363,7 @@ class CollaboratorService(
         role = self._normalize_role(role)
 
         # 1. 查询 Bot 信息
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        bot = self._editor_policy.resolve_bot(bot_id=bot_id, owner_id=owner_id)
         if not bot:
             raise BotNotFoundError(f"Bot 不存在: bot_id={bot_id}, owner_id={owner_id}")
 
@@ -762,7 +762,7 @@ class CollaboratorService(
             env = get_current_env()
 
         # 1. 查询 Bot 信息，避免仅凭 owner_id/bot_id 删除跨 Bot 记录。
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        bot = self._editor_policy.resolve_bot(bot_id=bot_id, owner_id=owner_id)
         if not bot:
             raise BotNotFoundError(f"Bot 不存在: bot_id={bot_id}, owner_id={owner_id}")
 
@@ -863,7 +863,7 @@ class CollaboratorService(
         )
 
         # 1. 查询 Bot 信息
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        bot = self._editor_policy.resolve_bot(bot_id=bot_id, owner_id=owner_id)
         if not bot:
             raise BotNotFoundError(f"Bot 不存在: bot_id={bot_id}, owner_id={owner_id}")
 
@@ -933,7 +933,7 @@ class CollaboratorService(
             env = get_current_env()
 
         # 1. 查询 Bot 信息
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        bot = self._editor_policy.resolve_bot(bot_id=bot_id, owner_id=owner_id)
         if not bot:
             raise BotNotFoundError(f"Bot 不存在: bot_id={bot_id}, owner_id={owner_id}")
 

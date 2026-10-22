@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 
 from agentclaw.community.api.channel_service import ChannelServiceProtocol
-from agentclaw.community.core.channel.json_config_utils import _get_local_base_dir
+from agentclaw.community.core.channel import json_config_utils
 from agentclaw.community.core.repository.protocols.chat import ChannelRepository
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.utils.env_utils import get_current_env
@@ -52,7 +52,7 @@ def _template_path():
     template has to be. Taken from the production helper so the test cannot
     drift from the rule it depends on.
     """
-    return _get_local_base_dir() / "openclaw.json"
+    return json_config_utils._get_local_base_dir() / "openclaw.json"
 
 
 def _write_openclaw_template(world) -> None:

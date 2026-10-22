@@ -68,14 +68,11 @@ class DeviceBindingRepository(Protocol):
     def get_active_by_bot_and_owner(
         self, bot_id: str, owner_id: str
     ) -> "DeviceBindingRecord | None":
-        """返回 bot 当前 active binding。
+        """Return the Bot's current binding using an owner/entity locator.
 
-        通过 ac_bots.binding_id 反查 ac_entity_device_binding (JOIN)。
-        bot 不存在 / 无 active binding / owner 不匹配 → 返 None。
-        DeviceContextResolver 入口：一次查询拿到 binding 完整对象
-        （id / device_provider / device_props / status 等），
-        替代旧的 ``get_device_provider_by_bot_id_and_owner``
-        返 dict 缺 ``binding_id`` 的链路。
+        Resolve within the server tenant/environment. Missing Bot or binding
+        returns None; multiple matching Bots raise BotLookupAmbiguousError,
+        including a match without a binding. Does not authorize the caller.
         """
         ...
 

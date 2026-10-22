@@ -2,6 +2,9 @@
 
 Tests the service layer logic with mocked repositories.
 """
+from types import SimpleNamespace
+
+
 import pytest
 from unittest.mock import MagicMock, Mock
 from sqlalchemy.exc import IntegrityError
@@ -12,6 +15,11 @@ from agentclaw.community.core.bot_collaborator.services.collaborator_lock_servic
     LockReleaseDeniedError,
 )
 from agentclaw.community.core.bot_collaborator.models import BotCollabLockRecord, PermissionLevel
+
+
+class _UnchangedBotAddresses:
+    def resolve(self, *, bot_id, legacy_owner_id):
+        return SimpleNamespace(entity_id=legacy_owner_id, current_owner_id=legacy_owner_id)
 
 
 @pytest.fixture
@@ -45,6 +53,7 @@ def bot_service():
 def service(lock_repo, collab_service, bot_service):
     """Create a CollaboratorLockService with mocked dependencies."""
     return CollaboratorLockService(
+        bot_addresses=_UnchangedBotAddresses(),
         lock_repo=lock_repo,
         collab_service=collab_service,
         bot_service=bot_service,
@@ -402,6 +411,7 @@ def real_lock_service(monkeypatch):
     from agentclaw.community.core.base import Base
     Base.metadata.create_all(engine)
     return CollaboratorLockService(
+        bot_addresses=_UnchangedBotAddresses(),
         lock_repo=BotCollabLockRepository(_InMemSqliteDB(engine)),
         collab_service=MagicMock(),
         bot_service=MagicMock(),

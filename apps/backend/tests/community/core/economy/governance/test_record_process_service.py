@@ -143,6 +143,8 @@ def engine():
     GovernanceNotificationOrm.__table__.create(eng, checkfirst=True)
     AuditLogOrm.__table__.create(eng, checkfirst=True)
     WhitelistEntryOrm.__table__.create(eng, checkfirst=True)
+    from agentclaw.community.plugin_api.models import BotModel
+    BotModel.__table__.create(eng, checkfirst=True)
     return eng
 
 

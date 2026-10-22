@@ -293,6 +293,7 @@ def test_resolve_for_bot_handles_missing_bot_gracefully(
 ):
     """bot_repo 返 None(bot 已删/不存在)时 ctx.bot_type 兜底为 ''。"""
     fake_binding_repo.get_active_by_bot_and_owner.return_value = _mock_binding(1, "arca")
+    fake_bot_repo.get_by_id_and_entity.return_value = None
     fake_bot_repo.get_by_id_and_owner.return_value = None
 
     ctx = resolver.resolve_for_bot("bot-orphan", "user-1")

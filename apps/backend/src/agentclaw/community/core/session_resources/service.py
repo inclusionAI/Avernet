@@ -560,7 +560,11 @@ class SessionResourceService(SessionResourceServiceProtocol):
                 hash_identifier(requester_id)[:16],
                 hash_identifier(bot_id)[:16],
             )
-        bot = self._bot_repository.get_by_id_and_owner(bot_id, target_id)
+        bot = (
+            self._bot_repository.get_by_id_and_entity(bot_id, target_id)
+            if target_entity_id
+            else self._bot_repository.get_by_id_and_owner(bot_id, target_id)
+        )
         binding_id = bot.get("binding_id") if bot else None
         if (
             not isinstance(binding_id, int)

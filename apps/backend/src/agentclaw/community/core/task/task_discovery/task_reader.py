@@ -20,6 +20,7 @@ from agentclaw.community.core.task.task_discovery.discovered_task_models import 
     DiscoveredTaskModel,
 )
 from agentclaw.community.core.task.task_discovery.models import DiscoveredTask
+from agentclaw.community.core.repository.implementations.bot.resource_locator import resource_locator
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
@@ -155,7 +156,10 @@ def upsert_discovered_tasks(db: DatabasePlugin, tasks: list[dict]) -> int:
         写入的任务数量。
     """
     with db.transactional_orm_session() as session:
-        for t in tasks:
+        for item in tasks:
+            t = dict(item)
+            if t.get("bot_id") and t.get("owner_id"):
+                t["owner_id"] = resource_locator(session, t["bot_id"], t["owner_id"])
             existing = (
                 session.query(DiscoveredTaskModel)
                 .filter(DiscoveredTaskModel.task_id == t["task_id"])
@@ -259,6 +263,7 @@ class OrmTaskReader:
     ) -> list[DiscoveredTask]:
         """返回指定 bot 当天的待确认任务。"""
         with self._db.orm_session() as session:
+            owner_id = resource_locator(session, bot_id, owner_id)
             rows = (
                 session.query(DiscoveredTaskModel)
                 .filter(

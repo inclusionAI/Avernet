@@ -74,6 +74,7 @@ from agentclaw.community.core.bot_collaborator.protocols import (
     resolve_explicit_permission_level,
     resolve_operable_permission_level,
 )
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver
 from agentclaw.community.core.repository.protocols.bot import (
     BotCollabLogRepositoryProtocol,
     BotRepository,
@@ -308,7 +309,7 @@ def _level(
     members keeping their view and chat.
     """
     try:
-        bot = bots.get_by_id_and_owner(bot_id, owner_id)
+        bot = BotAddressResolver(bots).resolve(bot_id=bot_id, legacy_owner_id=owner_id).bot
     except Exception:
         logger.exception(
             "[bot_access] bot lookup failed for bot=%s; refusing", for_log(bot_id)
@@ -322,7 +323,7 @@ def _level(
                 collaborators,
                 bot=bot,
                 user_id=caller_id,
-                owner_id=owner_id,
+                owner_id=str(bot["owner_id"]),
             )
         except Exception:
             logger.exception(
@@ -336,7 +337,7 @@ def _level(
             collaborators,
             bot=bot,
             user_id=caller_id,
-            owner_id=owner_id,
+            owner_id=str(bot["owner_id"]),
         )
     except Exception:
         logger.exception(

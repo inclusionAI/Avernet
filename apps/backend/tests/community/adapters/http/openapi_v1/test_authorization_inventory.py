@@ -1035,11 +1035,14 @@ def test_the_check_the_exempted_twins_rely_on_still_exists():
         "they no longer reach the check they are exempted on account of"
     )
     get_source = inspect.getsource(query_service.SkillQueryService.get_local_skill)
-    assert "_require_view_access" in get_source, (
-        "get_local_skill no longer calls _require_view_access, so _bot_behind "
+    assert "_resolve_local" in get_source, (
+        "get_local_skill no longer calls _resolve_local, so _bot_behind "
         "reaches no collaborator check and the four exempted legacy skills "
         "twins are unguarded — the ends of the chain being intact is not enough"
     )
+
+    resolve_source = inspect.getsource(query_service.SkillQueryService._resolve_local)
+    assert "_require_view_access" in resolve_source
 
     source = inspect.getsource(query_service.SkillQueryService._require_view_access)
     assert "check_collaborator_permission" in source, (
@@ -1091,6 +1094,8 @@ def test_the_asset_service_check_the_unseamed_surfaces_rely_on_still_exists():
         ),
     }
     for name, source in guarded.items():
+        assert "_require_view_access" in source, f"{name} must reach the shared ACL"
+        source = inspect.getsource(asset_service.SkillQueryService._require_view_access)
         assert "check_collaborator_permission" in source, (
             f"{name} no longer performs a collaborator check. The seven "
             "{skill_id} rows are fine — the seam adjudicates them — but the "

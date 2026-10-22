@@ -6,6 +6,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
+from agentclaw.community.core.bot_management.addressing import BotAddressResolverProtocol, ResolvedBotContext
+from agentclaw.community.core.bot_collaborator.errors import BotNotFoundError
+from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
+
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.bot_collaborator.models import (
@@ -68,7 +72,7 @@ class CollaboratorLockService(CollaboratorLockServiceProtocol):
     - 释放锁（release）：释放资源
     - 获取锁信息（get_lock_info）：查看锁的详细信息，包含持有者名字
 
-    锁键格式：{bot_id}:{owner_id}
+    锁键格式：{bot_id}:{entity_id}（沿用旧格式，locator 段值保持稳定）
     """
 
     def __init__(
@@ -76,6 +80,7 @@ class CollaboratorLockService(CollaboratorLockServiceProtocol):
         lock_repo: BotCollabLockRepositoryProtocol,
         collab_service: CollaboratorServiceProtocol,
         bot_service: BotServiceProtocol,
+        bot_addresses: BotAddressResolverProtocol,
     ) -> None:
         """初始化服务。
 
@@ -87,6 +92,13 @@ class CollaboratorLockService(CollaboratorLockServiceProtocol):
         self._lock_repo = lock_repo
         self._collab_service = collab_service
         self._bot_service = bot_service
+        self._bot_addresses = bot_addresses
+
+    def _resolve_address(self, *, bot_id: str, legacy_owner_id: str) -> ResolvedBotContext:
+        try:
+            return self._bot_addresses.resolve(bot_id=bot_id, legacy_owner_id=legacy_owner_id)
+        except BotAddressNotFoundError:
+            raise BotNotFoundError(f"Bot 不存在: bot_id={bot_id}") from None
 
     @staticmethod
     def _make_lock_key(bot_id: str, owner_id: str) -> str:
@@ -94,7 +106,7 @@ class CollaboratorLockService(CollaboratorLockServiceProtocol):
 
         Args:
             bot_id: Bot ID
-            owner_id: Bot 拥有者工号
+            owner_id: 已解析的 Bot entity locator
 
         Returns:
             锁键字符串
@@ -127,7 +139,9 @@ class CollaboratorLockService(CollaboratorLockServiceProtocol):
         Returns:
             BotCollabLockRecord 如果成功获取锁或已持有锁，否则返回 None
         """
-        lock_key = self._make_lock_key(bot_id, owner_id)
+        lock_key = self._make_lock_key(bot_id, self._resolve_address(
+            bot_id=bot_id, legacy_owner_id=owner_id
+        ).entity_id)
 
         # 1. 先查询锁是否存在
         existing = self._lock_repo.get_by_key(lock_key)
@@ -197,7 +211,9 @@ class CollaboratorLockService(CollaboratorLockServiceProtocol):
             LockNotHeldError: 锁未被持有
             LockReleaseDeniedError: 无权释放锁（非持有者尝试释放）
         """
-        lock_key = self._make_lock_key(bot_id, owner_id)
+        lock_key = self._make_lock_key(bot_id, self._resolve_address(
+            bot_id=bot_id, legacy_owner_id=owner_id
+        ).entity_id)
 
         # 检查锁状态
         lock = self._lock_repo.get_by_key(lock_key)
@@ -249,7 +265,9 @@ class CollaboratorLockService(CollaboratorLockServiceProtocol):
         Returns:
             BotCollabLockRecord 抢锁成功后的锁记录
         """
-        lock_key = self._make_lock_key(bot_id, owner_id)
+        lock_key = self._make_lock_key(bot_id, self._resolve_address(
+            bot_id=bot_id, legacy_owner_id=owner_id
+        ).entity_id)
 
         # 释放旧锁（如果存在）
         existing = self._lock_repo.get_by_key(lock_key)
@@ -307,14 +325,19 @@ class CollaboratorLockService(CollaboratorLockServiceProtocol):
             has_collaborators = True
 
         # 有协作者，查询锁信息
-        lock_key = self._make_lock_key(bot_id, owner_id)
+        lock_key = self._make_lock_key(bot_id, self._resolve_address(
+            bot_id=bot_id, legacy_owner_id=owner_id
+        ).entity_id)
         lock = self._lock_repo.get_by_key(lock_key)
 
         if not lock:
             return LockInfoResult(lock=None, holder_name=None, has_collaborators=True, is_owner=False)
 
         # 判断持有者是否是 owner
-        is_owner = lock.holder_user_id == owner_id
+        current_owner = self._resolve_address(
+            bot_id=bot_id, legacy_owner_id=owner_id
+        ).current_owner_id
+        is_owner = lock.holder_user_id == current_owner
 
         # 查询锁持有者的名字（复用协作者列表）
         holder_name = self._get_holder_name_from_collaborators(
@@ -351,7 +374,9 @@ class CollaboratorLockService(CollaboratorLockServiceProtocol):
         2. 锁已存在但他人持有 -> 返回 None
         3. 锁不存在 -> 获取并返回；并发冲突返回 None
         """
-        lock_key = self._make_session_lock_key(bot_id, owner_id, session_id)
+        lock_key = self._make_session_lock_key(bot_id, self._resolve_address(
+            bot_id=bot_id, legacy_owner_id=owner_id
+        ).entity_id, session_id)
         existing = self._lock_repo.get_by_key(lock_key)
         if existing:
             if existing.holder_user_id == user_id:
@@ -390,7 +415,9 @@ class CollaboratorLockService(CollaboratorLockServiceProtocol):
         force: bool = False,
     ) -> bool:
         """释放会话锁。仅持有者可释放（force=True 除外）。锁不存在视为已释放，返回 True。"""
-        lock_key = self._make_session_lock_key(bot_id, owner_id, session_id)
+        lock_key = self._make_session_lock_key(bot_id, self._resolve_address(
+            bot_id=bot_id, legacy_owner_id=owner_id
+        ).entity_id, session_id)
         lock = self._lock_repo.get_by_key(lock_key)
         if not lock:
             return True
@@ -412,7 +439,9 @@ class CollaboratorLockService(CollaboratorLockServiceProtocol):
         user_id: str,
     ) -> BotCollabLockRecord:
         """抢夺会话锁。强制释放旧锁后获取新锁。"""
-        lock_key = self._make_session_lock_key(bot_id, owner_id, session_id)
+        lock_key = self._make_session_lock_key(bot_id, self._resolve_address(
+            bot_id=bot_id, legacy_owner_id=owner_id
+        ).entity_id, session_id)
         existing = self._lock_repo.get_by_key(lock_key)
         previous_holder = existing.holder_user_id if existing else None
         if existing:
@@ -433,7 +462,9 @@ class CollaboratorLockService(CollaboratorLockServiceProtocol):
     ) -> SessionLockInfoResult:
         """获取会话锁状态。直接按 lock_key 查锁，不依赖"是否有协作者"短路。"""
 
-        lock_key = self._make_session_lock_key(bot_id, owner_id, session_id)
+        lock_key = self._make_session_lock_key(bot_id, self._resolve_address(
+            bot_id=bot_id, legacy_owner_id=owner_id
+        ).entity_id, session_id)
         lock = self._lock_repo.get_by_key(lock_key)
         if not lock:
             return SessionLockInfoResult(locked=False, lock=None, holder_name=None, is_mine=False)
@@ -465,7 +496,15 @@ class CollaboratorLockService(CollaboratorLockServiceProtocol):
         任何失败不给授予（fail-closed）—— 短路回 has_collaborators=False
         的旧行为。
         """
-        if user_id == owner_id:
+        try:
+            current_owner = self._bot_addresses.resolve(
+                bot_id=bot_id, legacy_owner_id=owner_id
+            ).current_owner_id
+        except BotAddressNotFoundError:
+            # Legacy lock-info polling returns an empty lock surface for a
+            # nonexistent Bot. This does not grant access or acquire a lock.
+            return False
+        if user_id == current_owner:
             return False
         try:
             result = self._collab_service.check_collaborator_permission(
@@ -522,10 +561,13 @@ class CollaboratorLockService(CollaboratorLockServiceProtocol):
         Returns:
             持有者名字，找不到则返回 None
         """
-        # 如果锁持有者是 owner，从 bot 信息获取 owner_name
-        if holder_user_id == owner_id:
+        # Display the live Owner rather than treating an entity locator as a person.
+        current_owner = self._resolve_address(
+            bot_id=bot_id, legacy_owner_id=owner_id
+        ).current_owner_id
+        if holder_user_id == current_owner:
             try:
-                bot = self._bot_service.get_bot(bot_id, owner_id)
+                bot = self._bot_service.get_bot(bot_id, current_owner)
                 return bot.get("owner_name") if bot else None
             except Exception as e:
                 logger.warning("[_get_holder_name_from_collaborators] Failed to get bot owner_name: %s", e)

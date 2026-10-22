@@ -123,7 +123,11 @@ def svc():
 
 @pytest.fixture
 def bot_repo():
-    return MagicMock()
+    from tests.community.bot_address_fakes import support_legacy_locator
+
+    repo = MagicMock()
+    repo.get_by_id_and_owner.return_value = dict(BOT)
+    return support_legacy_locator(repo)
 
 
 @pytest.fixture

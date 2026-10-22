@@ -78,7 +78,7 @@ import json
 from typing import Any
 
 from injector import inject
-from sqlalchemy import func
+from sqlalchemy import or_, func
 
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
@@ -219,32 +219,32 @@ class DeviceRepository(
     def get_active_by_bot_and_owner(
         self, bot_id: str, owner_id: str
     ) -> DeviceBindingRecord | None:
-        """DeviceContextResolver 入口：按 bot_id + owner_id 拿 bot 当前 binding。
+        """Resolve a unique owner/entity locator and load its existing binding.
 
-        ``ac_bots`` JOIN ``ac_entity_device_binding`` ON
-        ``ac_bots.binding_id = ac_entity_device_binding.id``，过滤
-        ``owner_id`` 与 ``is_delete=0``。bot 不存在 / 无 binding /
-        owner 不匹配 → 返 None。一次查询拿到 binding 完整对象，
-        取代旧链路（``get_device_provider_by_bot_id_and_owner`` 返
-        dict 缺 ``binding_id`` → 再二次 ``get_by_id`` 取 record）。
+        The outer join retains Bots without a binding for ambiguity detection.
+        This resolves resources only; the caller remains responsible for access.
         """
         with self._db.orm_session() as db:
             m = (
-                db.query(EntityDeviceBinding)
+                db.query(BotModel.id, EntityDeviceBinding)
                 .select_from(BotModel)
-                .join(
+                .outerjoin(
                     EntityDeviceBinding,
                     BotModel.binding_id == EntityDeviceBinding.id,
                 )
                 .filter(
                     BotModel.bot_id == bot_id,
-                    BotModel.owner_id == owner_id,
+                    or_(BotModel.entity_id == owner_id, BotModel.owner_id == owner_id),
                     BotModel.is_delete == 0,
                     self._bot_env(),
                 )
-                .first()
+                .limit(2)
+                .all()
             )
-            return _to_record(m)
+            if len(m) > 1:
+                from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
+                raise BotLookupAmbiguousError(f"Ambiguous device Bot locator: {bot_id}")
+            return _to_record(m[0][1]) if m else None
 
     def get_by_device_id(
         self, device_id: str

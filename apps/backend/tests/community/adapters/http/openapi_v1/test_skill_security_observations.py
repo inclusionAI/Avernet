@@ -92,7 +92,11 @@ class _Repository:
 
 class _BotRepository:
     def get_by_id_and_owner(self, bot_id, owner_id):
-        return {"entity_id": "entity", "bot_id": bot_id, "owner_id": owner_id}
+        return {"entity_id": owner_id, "bot_id": bot_id, "owner_id": owner_id}
+
+    def list_matches_by_legacy_locator(self, bot_id, locator):
+        row = self.get_by_id_and_owner(bot_id, locator)
+        return [] if row is None else [{"id": 1, "bot_id": bot_id, "entity_id": locator, **row}]
 
 
 class _UploadService:

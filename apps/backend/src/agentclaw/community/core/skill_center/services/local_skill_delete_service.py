@@ -11,6 +11,8 @@ from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver, stable_resource_owner_id
+from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.errors import (
@@ -67,6 +69,7 @@ class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
         self._skill_repo = skill_repo
         self._skill_set_repo = skill_set_repo
         self._bot_repo = bot_repo
+        self._bot_addresses = BotAddressResolver(bot_repo)
         self._collaborators = collaborator_service
         self._skill_service_factory = skill_service_factory
         self._edit_guard = edit_guard
@@ -94,8 +97,7 @@ class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
                 owner_id,
                 user_id,
             )
-            if resolved_owner_id != owner_id:
-                raise LocalSkillNotFoundError()
+            owner_id = resolved_owner_id
             if self._scope_for(bot, bot_id) != scope:
                 raise LocalSkillNotFoundError()
             if not is_bot_ready(bot):
@@ -185,9 +187,12 @@ class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
             raise LocalSkillNotFoundError()
         bot_id = str(raw["bolt_id"])
         owner_id = str(raw["user_id"])
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if bot is None:
-            raise LocalSkillNotFoundError()
+        try:
+            bot = self._bot_addresses.resolve(
+                bot_id=bot_id, legacy_owner_id=owner_id
+            ).bot
+        except BotAddressNotFoundError:
+            raise LocalSkillNotFoundError() from None
         return self._scope_for(bot, bot_id)
 
     def _authorize(
@@ -200,14 +205,19 @@ class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
             raise LocalSkillNotFoundError()
         skill_owner_id = str(raw["user_id"])
         bot_id = str(raw["bolt_id"])
+        try:
+            bot = self._bot_addresses.resolve(
+                bot_id=bot_id, legacy_owner_id=owner_id
+            ).bot
+        except BotAddressNotFoundError:
+            raise LocalSkillNotFoundError() from None
+        owner_id = stable_resource_owner_id(bot)
         if skill_owner_id != owner_id:
             raise LocalSkillNotFoundError()
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if bot is None:
-            raise LocalSkillNotFoundError()
-        if user_id != owner_id:
+        current_owner = str(bot["owner_id"])
+        if user_id != current_owner:
             permission = self._collaborators.check_collaborator_permission(
-                bot_id, owner_id, user_id, PermissionLevel.MEMBER
+                bot_id, current_owner, user_id, PermissionLevel.MEMBER
             )
             if not permission.get("has_permission"):
                 raise LocalSkillNotFoundError()

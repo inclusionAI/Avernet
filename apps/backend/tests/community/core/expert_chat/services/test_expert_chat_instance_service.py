@@ -7,6 +7,7 @@ Tests the per-caller BaaS container provisioning service which handles:
 - Connection building via BaaS get_ws_info_by_bot_uuid
 - Exception handling with traceback recording
 """
+from tests.community.bot_address_fakes import support_legacy_locator
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 from dataclasses import dataclass
@@ -95,7 +96,13 @@ def _make_service(
     instance_repo = instance_repo or MagicMock()
     baas = baas or MagicMock()
     publish_repo = publish_repo or MagicMock()
-    bot_repo = bot_repo or MagicMock()
+    if bot_repo is None:
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = {
+            "bot_id": BOT_ID, "owner_id": OWNER_ID, "entity_id": OWNER_ID,
+            "active_engine": "openclaw", "bot_type": "service",
+        }
+    bot_repo = support_legacy_locator(bot_repo)
     binding_repo = binding_repo or MagicMock()
     bot_build_service = bot_build_service or MagicMock()
     caller_identity = caller_identity or MagicMock()

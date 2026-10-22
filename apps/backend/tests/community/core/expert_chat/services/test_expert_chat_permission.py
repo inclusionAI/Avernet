@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+from tests.community.bot_address_fakes import support_legacy_locator
 import pytest
 
 from agentclaw.community.core.expert_chat.errors import ChatPermissionError
@@ -40,7 +41,7 @@ def _make_service(
     """Construct ExpertChatService with mocked deps (含 Task 2.5 新增依赖)."""
     return ExpertChatService(
         repository=repository or MagicMock(),
-        bot_repo=bot_repo or MagicMock(),
+        bot_repo=support_legacy_locator(bot_repo or MagicMock()),
         device_provider=device_provider or MagicMock(),
         baas_service=baas_service or MagicMock(),
         resolver=resolver or MagicMock(),

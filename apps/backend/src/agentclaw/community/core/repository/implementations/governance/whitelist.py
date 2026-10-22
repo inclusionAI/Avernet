@@ -16,6 +16,7 @@ from sqlalchemy import or_
 
 from agentclaw.community.core.economy.governance.domain.whitelist import WhitelistEntry
 from agentclaw.community.core.economy.governance.orm import WhitelistEntryOrm
+from agentclaw.community.core.repository.implementations.bot.resource_locator import resource_locator, resource_owner_filter
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
@@ -55,6 +56,7 @@ class GovernanceWhitelistRepository(
         _env = get_current_env()
         now = datetime.now()
         with self._db.orm_session() as s:
+            owner_id = resource_locator(s, bot_id, owner_id)
             s.expire_on_commit = False
             exists = (
                 s.query(WhitelistEntryOrm.id)
@@ -99,6 +101,7 @@ class GovernanceWhitelistRepository(
         """
         _env = get_current_env()
         with self._db.orm_session() as s:
+            owner_id = resource_locator(s, bot_id, owner_id)
             s.expire_on_commit = False
             # 幂等: 查已有
             existing = (
@@ -163,6 +166,7 @@ class GovernanceWhitelistRepository(
         """
         _env = get_current_env()
         with self._db.orm_session() as s:
+            owner_id = resource_locator(s, bot_id, owner_id)
             s.expire_on_commit = False
             row = (
                 s.query(WhitelistEntryOrm)
@@ -218,7 +222,7 @@ class GovernanceWhitelistRepository(
                 .filter(
                     WhitelistEntryOrm.whitelist_type == whitelist_type,
                     WhitelistEntryOrm.env == _env,
-                    WhitelistEntryOrm.owner_id == owner_id,
+                    resource_owner_filter(WhitelistEntryOrm.bot_id, WhitelistEntryOrm.owner_id, owner_id),
                 )
                 .order_by(WhitelistEntryOrm.gmt_create.desc())
                 .offset(offset)
@@ -272,13 +276,18 @@ class GovernanceWhitelistRepository(
         _env = get_current_env()
         now = datetime.now()
         with self._db.orm_session() as s:
+            if bot_id and owner_id:
+                owner_id = resource_locator(s, bot_id, owner_id)
             s.expire_on_commit = False
             base_filters = [
                 WhitelistEntryOrm.whitelist_type == whitelist_type,
                 WhitelistEntryOrm.env == _env,
             ]
             if owner_id is not None:
-                base_filters.append(WhitelistEntryOrm.owner_id == owner_id)
+                base_filters.append(
+                    WhitelistEntryOrm.owner_id == owner_id if bot_id else
+                    resource_owner_filter(WhitelistEntryOrm.bot_id, WhitelistEntryOrm.owner_id, owner_id)
+                )
             if bot_id is not None:
                 base_filters.append(WhitelistEntryOrm.bot_id == bot_id)
             if not include_expired:

@@ -46,6 +46,8 @@ def _create_schema(engine):
             "bot_id", "owner_id", "user_id", "env", name="uk_bi_oi_ui_e",
         ),
     )
+    from agentclaw.community.plugin_api.models import BotModel
+    BotModel.__table__.to_metadata(md)
     md.create_all(engine)
 
 
@@ -212,6 +214,8 @@ def test_upsert_instance_mysql_dialect_with_mock():
     }
     mock_query = MagicMock()
     mock_query.filter.return_value = mock_query
+    mock_query.limit.return_value = mock_query
+    mock_query.all.return_value = []
     mock_query.first.return_value = mock_row
     mock_session.query.return_value = mock_query
 
@@ -248,6 +252,8 @@ def test_update_instance_with_both_fields_mysql():
     # Mock query for update
     mock_query = MagicMock()
     mock_query.filter.return_value = mock_query
+    mock_query.limit.return_value = mock_query
+    mock_query.all.return_value = []
     mock_query.update.return_value = 1  # 1 row updated
     mock_session.query.return_value = mock_query
 
@@ -261,7 +267,7 @@ def test_update_instance_with_both_fields_mysql():
     )
 
     assert result is True
-    mock_session.query.assert_called_once()
+    assert mock_session.query.call_count == 2
 
 
 def test_upsert_instance_returns_fallback_when_row_not_found(repo):
@@ -284,6 +290,8 @@ def test_upsert_instance_returns_fallback_when_row_not_found(repo):
         # Query returns None for row
         mock_query = MagicMock()
         mock_query.filter.return_value = mock_query
+        mock_query.limit.return_value = mock_query
+        mock_query.all.return_value = []
         mock_query.scalar.return_value = 123  # row_id is returned
         mock_query.first.return_value = None  # but row is None
         mock_session.query.return_value = mock_query

@@ -63,6 +63,8 @@ from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
     WorkOrderEventType,
 )
+from agentclaw.community.core.bot_management.addressing import BotAddressResolverProtocol
+from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.notify_sender import NotifyMessage
 from agentclaw.community.utils.env_utils import get_current_env
@@ -111,7 +113,11 @@ class DiscoveryService:
         discovery_lock_repo: TaskDiscoveryLockRepositoryProtocol | None = None,
         work_order_service: WorkOrderServiceProtocol | None = None,
         frontend_url_provider: ConfigFrontendUrlProvider | None = None,
+        bot_addresses: BotAddressResolverProtocol | None = None,
     ):
+        # Offline/manual discovery can run without a Bot store. The production
+        # composition always supplies the resolver before runtime operations.
+        self._bot_addresses = bot_addresses
         self._reader = reader
         self._session_initiator = session_initiator
         self._notify_sender = notify_sender
@@ -216,8 +222,13 @@ class DiscoveryService:
         seen_owners: set[str] = set()
         bots_to_discover: list[tuple[str, str]] = []
         for bot_id, owner_id in intersection:
-            if owner_id not in seen_owners:
-                seen_owners.add(owner_id)
+            responsible_owner = owner_id
+            if self._bot_addresses is not None:
+                responsible_owner = self._bot_addresses.resolve(
+                    bot_id=bot_id, legacy_owner_id=owner_id
+                ).current_owner_id
+            if responsible_owner not in seen_owners:
+                seen_owners.add(responsible_owner)
                 bots_to_discover.append((bot_id, owner_id))
 
         logger.info(
@@ -298,8 +309,20 @@ class DiscoveryService:
             owner_id,
             agent_id,
         )
+        resource_owner = owner_id
         dt = datetime.now().strftime("%Y-%m-%d")
-        tasks = self._reader.read_pending_tasks_for_bot(bot_id, owner_id, dt)
+        if self._bot_addresses is not None:
+            try:
+                bot = self._bot_addresses.resolve(bot_id=bot_id, legacy_owner_id=owner_id)
+            except BotAddressNotFoundError:
+                # Legacy manual polling is a successful no-op when there is no
+                # Bot and no pending work. Never execute detached work as a user.
+                if self._reader.read_pending_tasks_for_bot(bot_id, owner_id, dt):
+                    raise
+                return []
+            resource_owner = bot.entity_id
+            owner_id = bot.current_owner_id
+        tasks = self._reader.read_pending_tasks_for_bot(bot_id, resource_owner, dt)
         if not tasks:
             logger.info(
                 "[task_discovery] no pending tasks for bot=%s owner=%s dt=%s",

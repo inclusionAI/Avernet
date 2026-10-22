@@ -49,6 +49,22 @@ persistence contracts, while `forum.py` and `feedback.py` hold the BBS content
 and task feedback contracts. `implementations/task/` mirrors that package
 layout.
 
+## Compatibility locators and immutable resource keys
+
+Bot-owned resource reads/writes in chat, quality tasks, whitelist and ORM task
+discovery resolve a legacy `(bot_id, owner_id)` locator to the live Bot's immutable
+entity before using the existing resource column. The column name remains
+`owner_id`; it is not a current-person foreign key. Tenant/environment filtering
+remains in persistence. Ambiguous live matches raise an error. Detached historical
+records preserve their explicit locator; database errors never trigger fallback.
+Owner-only administrative lists can match a current Owner through a set-based Bot
+subquery, while a complete Bot address uses the resolved exact entity.
+
+Collaborator queries use the existing `bot_pk`, including bulk lists. Their
+`owner_id` remains a historical snapshot. Device binding lookup accepts the same
+owner/entity locator and detects ambiguity even when one Bot has no binding.
+Neither repository operation grants caller permissions.
+
 ## The contract is enforceable
 
 Every Protocol member carries `@abstractmethod` and every implementation declares

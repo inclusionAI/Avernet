@@ -6,6 +6,7 @@
 即 coding 应用（Personal Bot）作为"应用成员"复用协作者流程时放行。
 """
 
+from tests.community.bot_address_fakes import support_legacy_locator
 import pytest
 from unittest.mock import Mock
 
@@ -41,7 +42,7 @@ def collaborator_repo():
 
 @pytest.fixture
 def bot_repo():
-    return Mock()
+    return support_legacy_locator(Mock())
 
 
 @pytest.fixture
@@ -210,7 +211,7 @@ def test_add_collaborator_bot_not_found(service, bot_repo):
 def _service_for_sync(passport):
     return CollaboratorService(
         collaborator_repo=Mock(),
-        bot_repo=Mock(),
+        bot_repo=support_legacy_locator(Mock()),
         passport_plugin=passport,
         credentials_admins_writer=Mock(),
         space_access_service=Mock(),
@@ -285,7 +286,7 @@ def test_on_collaboration_changed_delegates_admins_to_credentials_writer():
         _admin_record("admin001"),
         _admin_record("admin002"),
     ]
-    bot_repo = Mock()
+    bot_repo = support_legacy_locator(Mock())
     bot_repo.get_by_id_and_owner.return_value = {"bot_id": "bot1", "owner_id": "owner1"}
     svc = CollaboratorService(
         collaborator_repo=collaborator_repo,

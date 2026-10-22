@@ -60,6 +60,14 @@ def app_with_testing_modules(request) -> FastAPI:
     that need the injector outside a request reach for it via this
     fixture's return value or the ``world`` fixture.
     """
+    # Endpoint seeds must never write or unlink the developer's ~/.openclaw.
+    # Keep the real JSON file loader, but give this test its own local root.
+    from agentclaw.community.core.channel import json_config_utils
+
+    monkeypatch = request.getfixturevalue("monkeypatch")
+    tmp_path = request.getfixturevalue("tmp_path")
+    monkeypatch.setattr(json_config_utils, "_get_local_base_dir", lambda: tmp_path / "openclaw")
+
     # Lazy imports so this module stays import-light: pulling in
     # ``agentclaw.community.adapters.http.app`` triggers the whole router graph + model
     # registration, which we want done exactly once per test session,

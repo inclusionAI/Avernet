@@ -71,6 +71,8 @@ from agentclaw.community.core.service_bot.services.arca_image_pin import (
     PublishImagePolicyResolver,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
+from agentclaw.community.core.expert_chat.services.bot_lookup import ExpertChatBotLookupMixin
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.expert_chat.expert_chat_instance_service_protocol import ExpertChatInstanceServiceProtocol
@@ -78,7 +80,7 @@ from agentclaw.community.core.expert_chat.expert_chat_instance_service_protocol 
 logger = get_logger()
 
 
-class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
+class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServiceProtocol):
     """Provision + reuse a per-caller baas container for a service bot.
 
     Dependencies are injected (see ``di/modules/expert_chat_module.py``):
@@ -150,12 +152,13 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         ``ConnectionError(5001)`` contract by ``_create_container`` /
         ``_upgrade_container``'s enclosing ``except Exception`` guard.
         """
-        if not self._bot_repo.get_by_id_and_owner(bot_id, owner_id):
+        bot = self._find_chat_bot(bot_id, owner_id)
+        if not bot:
             raise ConnectionError(
                 f"Bot not found: bot_id={bot_id} owner_id={owner_id}",
                 error_code="5001",
             )
-        return self._bot_service.get_bot(bot_id=bot_id, user_id=owner_id)
+        return self._bot_service.get_bot(bot_id=bot_id, user_id=str(bot["owner_id"]))
 
     def _resolve_publish_image_pin(self, publish_record, *, bot_id: str, owner_id: str):
         """Resolve through the shared seam.
@@ -163,7 +166,7 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         The image policy follows the bot's container, so the provider is resolved
         from the bot here rather than sniffed out of the publish record's ``ext``.
         """
-        bot_info = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        bot_info = self._find_chat_bot(bot_id, owner_id)
         if not bot_info:
             raise ConnectionError(
                 f"Bot not found: bot_id={bot_id} owner_id={owner_id}",
@@ -186,7 +189,7 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         force_upgrade: bool = False,
     ) -> Dict[str, Any]:
         """Allow authenticated BaaS to create or access a caller in server context."""
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        bot = self._find_chat_bot(bot_id, owner_id)
         if bot is None:
             raise self._caller_permission_error("bot_not_found")
         logger.info(
@@ -517,9 +520,12 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         ``version`` from the record; the rest is baas-side resolved).
         """
         env = get_current_env()
+        address = BotAddressResolver(self._bot_repo).resolve(
+            bot_id=bot_id, legacy_owner_id=owner_id
+        )
         publish_record = self._publish_repo.get_by_publish_bot_id(
             publish_bot_id=bot_id,
-            owner_id=owner_id,
+            owner_id=address.entity_id,
             env=env,
             publish_status=PublishStatus.SUCCESS.value,
         )
@@ -580,7 +586,7 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         try:
             result = await self._bot_build_service.release_async(
                 bot=bot_info,
-                user_id=owner_id,
+                user_id=str(bot_info["owner_id"]),
                 migration_path=migration_path,
                 device_count=1,
                 publish_stage=PublishStage.ONLINE,
@@ -614,7 +620,7 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         # bot_uuid serves as device_id, linking the BaaS container to the owner
         env = get_current_env()
         binding_id = self._binding_repo.insert_binding(
-            entity_id=owner_id,
+            entity_id=str(bot_info["entity_id"]),
             entity_type="staff",
             device_id=bot_uuid,
             device_provider="baas",
@@ -674,7 +680,7 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
             result = await self._bot_build_service.upgrade_async(
                 bot_uuid=bot_uuid,
                 bot=bot_info,
-                user_id=owner_id,
+                user_id=str(bot_info["owner_id"]),
                 migration_path=migration_path,
                 device_count=1,
                 publish_stage=PublishStage.ONLINE,

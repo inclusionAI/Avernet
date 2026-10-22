@@ -6,6 +6,21 @@
 
 下文 `community/` 指 `apps/backend/src/agentclaw/community/`；简称 `services/` 指本目录的 `services/`。仓库根 `AGENTS.md` 和 `docs/arch/` 仍规定通用架构约束。本目录 `README.md` 的 Context Boundary 继续承担机器可检验的依赖声明。
 
+## B4 Bot 资源寻址兼容（2026-10-22）
+
+Bot-bound Local Skill 查询、内容、参数、安全观察、上传和删除先通过
+`BotAddressResolver` 解析请求的兼容 locator。权限使用解析结果的当前 Owner 和真实
+actor；资源使用不可变 entity。上传/删除在编辑 guard 内复核原始 locator 的权限。
+`ac_skill.user_id` 对 Bot-local 资产表示稳定 entity；共享 Repo/Center/Space 资产的
+人员、空间和授权语义保持不变。旧 API 按 skill_id 查询时，从持久资产反查 Bot 后
+仍执行相同权限检查，不能用资源 locator 判定当前调用者是 Owner。
+
+此阶段不开放转交。历史 SkillService/SkillSetService 的直接元数据写入和模板查询
+尚需逐入口核验；不要把核心 Local Skill 链路已通过测试理解为所有 Legacy Skill
+操作均已转交就绪。工厂原有 entity 参数保留其契约，不在工厂内部将其重新解释为
+可变 Owner；Legacy 入参解析在后续 API 兼容阶段统一处理。保持现有 Engine layout
+contract 对物理路径的所有权。
+
 ## 1. 从 OpenAPI 进入
 
 `community/adapters/http/openapi_v1/__init__.py` 是 Router 装配入口。所有下列路径均位于 `/openapi/v1/bots`；Space-owned 资源只是使用这个命名空间，不因此归属于某个 Bot。
