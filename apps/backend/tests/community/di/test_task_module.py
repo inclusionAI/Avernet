@@ -14,8 +14,19 @@ from agentclaw.community.api.task.forum_digest_service import (
     ForumDigestReportServiceProtocol,
 )
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
+from agentclaw.community.core.task.forum.browsing import (
+    BbsBrowseLoopRunner,
+    BbsBrowseLoopScheduler,
+)
 from agentclaw.community.core.task.forum.browsing.cron_setup import (
     BbsBrowseCronManager,
+    BbsDigestCronManager,
+)
+from agentclaw.community.core.task.forum.browsing.subscription_provisioner import (
+    BbsBrowseSubscriptionProvisioner,
+)
+from agentclaw.community.core.task.forum.service_protocol import (
+    ForumServiceProtocol,
 )
 from agentclaw.community.di.config import TaskDispatchConfig
 from agentclaw.community.plugin_api.notify_sender import (
@@ -125,12 +136,40 @@ class _StubBbsCronModule(Module):
             skill_report_enabled=True,
         )
 
+    @singleton
+    @provider
+    def forum_service(self) -> ForumServiceProtocol:
+        return object()  # type: ignore[return-value]
+
+    @singleton
+    @provider
+    def openapi_bot_runtime(self) -> OpenApiBotPort:
+        return object()  # type: ignore[return-value]
+
+    @singleton
+    @provider
+    def bbs_browse_scheduler(self) -> BbsBrowseLoopScheduler:
+        return object()  # type: ignore[return-value]
+
 
 def test_task_module_wires_bbs_browse_cron_manager():
     injector = Injector([TaskModule(), _StubDiscoverModule(), _StubBbsCronModule()])
     manager = injector.get(BbsBrowseCronManager)
     assert manager is injector.get(BbsBrowseCronManager)
     assert manager._backend_base_url == "http://backend.example"
+
+
+def test_task_module_wires_digest_cron_and_subscription_provisioner():
+    injector = Injector([TaskModule(), _StubDiscoverModule(), _StubBbsCronModule()])
+    digest_manager = injector.get(BbsDigestCronManager)
+    assert digest_manager is injector.get(BbsDigestCronManager)
+    assert digest_manager._backend_base_url == "http://backend.example"
+
+    runner = injector.get(BbsBrowseLoopRunner)
+    assert runner is injector.get(BbsBrowseLoopRunner)
+
+    provisioner = injector.get(BbsBrowseSubscriptionProvisioner)
+    assert provisioner is injector.get(BbsBrowseSubscriptionProvisioner)
 
 
 def test_task_module_binds_callback_singletons():
@@ -235,7 +274,8 @@ def test_task_service_degrades_when_merchant_bindings_are_not_registered(monkeyp
     )
     monkeypatch.setenv("OCB_TASK_HARNESS_ENABLED", "0")
     svc = module.TaskModule().task_service(
-        _Graph(), object(),
+        _Graph(),
+        object(),
         TaskDispatchConfig(backend_url="https://backend.example"),
         _Injector(),
     )
@@ -245,7 +285,12 @@ def test_task_service_degrades_when_merchant_bindings_are_not_registered(monkeyp
 
 def test_task_module_wires_bbs_digest_report_service_singleton():
     injector = Injector(
-        [TaskModule(), _StubDiscoverModule(), _StubBbsCronModule(), _StubBbsDigestModule()]
+        [
+            TaskModule(),
+            _StubDiscoverModule(),
+            _StubBbsCronModule(),
+            _StubBbsDigestModule(),
+        ]
     )
     service = injector.get(ForumDigestReportServiceProtocol)
     assert service is injector.get(ForumDigestReportServiceProtocol)

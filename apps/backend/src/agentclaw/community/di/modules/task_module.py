@@ -71,20 +71,36 @@ from agentclaw.community.core.repository.protocols.task.forum_digest import (
 from agentclaw.community.api.task.task_context_service import TaskContextServiceProtocol
 from agentclaw.community.core.task.task_center.task_service import TaskService
 from agentclaw.community.core.task.task_center.task_intake import TaskIntakeHandler
-from agentclaw.community.core.task.task_center.bot_intake_skill import BotTaskIntakeSkill
-from agentclaw.community.core.task.task_center.intake_target_resolver import DefaultIntakeTargetResolver
-from agentclaw.community.core.task.repository.task_intake_repository import TaskIntakeRepositoryProtocol
+from agentclaw.community.core.task.task_center.bot_intake_skill import (
+    BotTaskIntakeSkill,
+)
+from agentclaw.community.core.task.task_center.intake_target_resolver import (
+    DefaultIntakeTargetResolver,
+)
+from agentclaw.community.core.task.repository.task_intake_repository import (
+    TaskIntakeRepositoryProtocol,
+)
 from agentclaw.community.core.task.task_dispatch.search import TaskSearch
 from agentclaw.community.core.task.task_center.recovery_lifecycle import (
     TaskRecoveryLifecycle,
 )
-from agentclaw.community.core.task.task_center.delivery_lifecycle import TaskDeliveryLifecycle
-from agentclaw.community.core.task.feedback.services.feedback_service import FeedbackService
+from agentclaw.community.core.task.task_center.delivery_lifecycle import (
+    TaskDeliveryLifecycle,
+)
+from agentclaw.community.core.task.feedback.services.feedback_service import (
+    FeedbackService,
+)
 from agentclaw.community.core.task.forum.browsing import (
     BbsBrowseLoopRunner,
     BbsBrowseLoopScheduler,
 )
-from agentclaw.community.core.task.forum.browsing.cron_setup import BbsBrowseCronManager
+from agentclaw.community.core.task.forum.browsing.cron_setup import (
+    BbsBrowseCronManager,
+    BbsDigestCronManager,
+)
+from agentclaw.community.core.task.forum.browsing.subscription_provisioner import (
+    BbsBrowseSubscriptionProvisioner,
+)
 from agentclaw.community.core.task.forum.digest.report_service import (
     BbsDigestReportService,
 )
@@ -178,7 +194,9 @@ class TaskModule(Module):
         # pure construction + contextvar staging, no repository, no IO; the write
         # itself rides the graph transaction. "未接线不发布" refers to the
         # graph-repo-absent case handled in _persist_locked, not this binding.
-        binder.bind(TaskArtifactPublishService, to=TaskArtifactPublishService, scope=singleton)
+        binder.bind(
+            TaskArtifactPublishService, to=TaskArtifactPublishService, scope=singleton
+        )
         binder.bind(ForumRepositoryProtocol, to=ForumRepository, scope=singleton)
         binder.bind(ForumServiceProtocol, to=ForumService, scope=singleton)
         binder.bind(
@@ -248,6 +266,39 @@ class TaskModule(Module):
         return BbsBrowseCronManager(
             cron_relay=cron_relay,
             backend_base_url=task_dispatch.backend_url,
+        )
+
+    @singleton
+    @provider
+    def bbs_digest_cron_manager(
+        self,
+        cron_relay: CronRelayServiceProtocol,
+        task_dispatch: TaskDispatchConfig,
+    ) -> BbsDigestCronManager:
+        """Build the Bot-side BBS digest cron manager with its Backend URL."""
+        return BbsDigestCronManager(
+            cron_relay=cron_relay,
+            backend_base_url=task_dispatch.backend_url,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def bbs_browse_subscription_provisioner(
+        self,
+        service: ForumServiceProtocol,
+        browse_cron: BbsBrowseCronManager,
+        digest_cron: BbsDigestCronManager,
+        runner: BbsBrowseLoopRunner,
+        scheduler: BbsBrowseLoopScheduler,
+    ) -> BbsBrowseSubscriptionProvisioner:
+        """Build the asynchronous BBS periodic-task subscription provisioner."""
+        return BbsBrowseSubscriptionProvisioner(
+            service=service,
+            browse_cron=browse_cron,
+            digest_cron=digest_cron,
+            runner=runner,
+            scheduler=scheduler,
         )
 
     @singleton
@@ -453,7 +504,8 @@ class TaskModule(Module):
                     intake_repository=intake_repo,
                 ),
                 DefaultIntakeTargetResolver(
-                    bot_service, staff_profile=staff_dept,
+                    bot_service,
+                    staff_profile=staff_dept,
                     search=TaskSearch(discover_port),
                 ),
             )

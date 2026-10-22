@@ -18,6 +18,7 @@ from agentclaw.community.core.task.forum.browsing.runner import BbsBrowseLoopRun
 from agentclaw.community.core.task.forum.browsing.messages import (
     bbs_browse_skill_names,
     browse_skill_name,
+    digest_cron_message,
 )
 from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
 from agentclaw.community.core.task.forum.models import (
@@ -51,9 +52,7 @@ class _FakeBot:
         message: str,
         metadata: dict[str, Any],
     ) -> BotSendResult:
-        self.sent.append(
-            {"bot_id": bot_id, "message": message, "metadata": metadata}
-        )
+        self.sent.append({"bot_id": bot_id, "message": message, "metadata": metadata})
         return BotSendResult(run_id="run_x", session_id="sess_x")
 
 
@@ -79,18 +78,22 @@ def test_browse_skill_name_is_environment_selected():
     assert browse_skill_name("dev") == "forum-browse"
     assert bbs_browse_skill_names("prod") == (
         "bbs-browse",
-        "bbs-topic-handler",
         "bbs-create-topic",
+        "bbs-topic-handler",
+        "bbs-digest-handler",
     )
     assert bbs_browse_skill_names("pre") == (
         "forum-browse",
-        "bbs-topic-handler",
-        "bbs-create-topic",
+        "forum-create-topic",
+        "forum-topic-handler",
+        "forum-digest-handler",
     )
 
 
 @pytest.mark.asyncio
-async def test_push_browse_once_returns_bot_result_and_injects_runtime_context(monkeypatch):
+async def test_push_browse_once_returns_bot_result_and_injects_runtime_context(
+    monkeypatch,
+):
     monkeypatch.setenv("SERVER_ENV", "dev")
     runner = _runner(_FakeBot(), _FakeService(_sub(mode="framework", bot_id="bot-a")))
     result = await runner.push_browse_once(bot_id="bot-a", expected_mode="framework")
@@ -174,12 +177,17 @@ async def test_push_cron_event_remove_message(monkeypatch):
     result = await runner.push_cron_event(bot_id="bot-b", action="remove")
     sent = runner._bot.sent[0]  # type: ignore[attr-defined]
     assert "[BBS-BROWSE-CRON]" in sent["message"]
-    assert "关闭" in sent["message"] or "删除" in sent["message"] or "移除" in sent["message"]
+    assert (
+        "关闭" in sent["message"]
+        or "删除" in sent["message"]
+        or "移除" in sent["message"]
+    )
     assert result.get("action") == "remove"
     assert sent["metadata"]["action"] == "remove"
     assert BBS_BROWSE_LOOP_CRON_NAME in sent["message"]
     # remove must locate the task by the fixed name (idempotent by name)
     assert "按名称" in sent["message"]
+
 
 @pytest.mark.asyncio
 async def test_push_cron_event_prod_register_keeps_deployment_skill_name(monkeypatch):
@@ -240,7 +248,10 @@ async def test_push_install_bbs_skills_sends_verified_wording(monkeypatch):
     sent = bot.sent[0]
     msg = sent["message"]
     assert msg.startswith("[BBS-BROWSE-SKILL]")
-    assert "forum-browse、bbs-topic-handler 和 bbs-create-topic" in msg
+    assert (
+        "forum-browse、forum-create-topic、forum-topic-handler 和 forum-digest-handler"
+        in msg
+    )
     for skill in bbs_browse_skill_names("dev"):
         assert skill in msg
     assert "workspace/skills/" in msg
@@ -256,3 +267,22 @@ async def test_push_install_bbs_skills_swallows_exception():
     runner = _runner(_RaisingBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-a")))
     result = await runner.push_install_bbs_skills(bot_id="bot-a")
     assert result is None
+
+
+def test_digest_cron_message_is_environment_selected(monkeypatch):
+    monkeypatch.setenv("SERVER_ENV", "pre")
+    pre_message = digest_cron_message(
+        bot_id="bot-a", backend_base_url="https://bbs.test"
+    )
+    assert pre_message == (
+        "[FORUM-DIGEST-COLLECT]\n"
+        "使用 $forum-digest-handler 执行一次 Forum digest collect。"
+    )
+
+    monkeypatch.setenv("SERVER_ENV", "prod")
+    prod_message = digest_cron_message(
+        bot_id="bot-a", backend_base_url="https://bbs.test"
+    )
+    assert prod_message == (
+        "[BBS-DIGEST-COLLECT]\n使用 $bbs-digest-handler 执行一次 BBS digest collect。"
+    )
