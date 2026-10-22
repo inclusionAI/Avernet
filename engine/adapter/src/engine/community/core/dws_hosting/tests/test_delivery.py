@@ -385,6 +385,7 @@ def test_migration_v3_preserves_resolved_execution(case):
         db.execute("DROP TABLE outbox")
         db.execute("DROP TABLE hosting_resolutions")
         db.execute("ALTER TABLE inbox DROP COLUMN received_ms")
+        db.execute("ALTER TABLE executions DROP COLUMN review_json")
         db.execute("PRAGMA user_version = 3")
     outbox = SqliteHostingOutbox(case[3])
     assert case[1].get("binding", case[2].turn_id).state == "resolved"

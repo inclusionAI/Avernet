@@ -82,7 +82,7 @@ class Engine:
 
     async def review_reply(self, request):
         self.reviews.append(request)
-        return result_json('{"verdict":"approve"}')
+        return result_json('{"verdict":"approve","reason_code":"approved","reason":"Permitted and relevant."}')
 
 
 def ready_more(state, chat="chat"):

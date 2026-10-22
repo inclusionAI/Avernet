@@ -8,6 +8,7 @@ from engine.community.kernel.dws_execution import (
     EngineUpdate,
     ExecutionRecord,
     HostingDecision,
+    HostingReview,
 )
 from engine.community.kernel.dws_hosting import Turn
 from engine.community.plugins.dws_hosting.database import HostingDatabase
@@ -79,12 +80,21 @@ class SqliteHostingExecutionStore:
             invocation=AgentInvocation.model_validate_json(row["invocation_json"]),
             state=row["state"],
             reason=row["reason"],
-            result=EngineUpdate.model_validate_json(row["result_json"])
-            if row["result_json"]
-            else None,
-            decision=HostingDecision.model_validate_json(row["decision_json"])
-            if row["decision_json"]
-            else None,
+            result=(
+                EngineUpdate.model_validate_json(row["result_json"])
+                if row["result_json"]
+                else None
+            ),
+            review=(
+                HostingReview.model_validate_json(row["review_json"])
+                if row["review_json"]
+                else None
+            ),
+            decision=(
+                HostingDecision.model_validate_json(row["decision_json"])
+                if row["decision_json"]
+                else None
+            ),
         )
 
     @staticmethod
@@ -204,7 +214,12 @@ class SqliteHostingExecutionStore:
             )
 
     def resolve(
-        self, binding_id: str, turn_id: str, decision: HostingDecision
+        self,
+        binding_id: str,
+        turn_id: str,
+        decision: HostingDecision,
+        *,
+        review: HostingReview | None = None,
     ) -> ExecutionRecord:
         with self._database.transaction() as db:
             row = self._row(db, binding_id, turn_id)
@@ -223,11 +238,12 @@ class SqliteHostingExecutionStore:
             current = self._current(db, binding_id, turn_id)
             state = "resolved" if current else "cancelled"
             db.execute(
-                "UPDATE executions SET state = ?, decision_json = ?, reason = ? WHERE turn_id = ?",
+                "UPDATE executions SET state = ?, decision_json = ?, reason = ?, review_json = ? WHERE turn_id = ?",
                 (
                     state,
                     decision.model_dump_json(exclude_unset=True),
                     "" if current else "control_revoked",
+                    review.model_dump_json() if review is not None else None,
                     turn_id,
                 ),
             )
@@ -239,7 +255,13 @@ class SqliteHostingExecutionStore:
             return self._record(self._row(db, binding_id, turn_id))
 
     def require_manual(
-        self, binding_id: str, turn_id: str, reason: str, *, ended: bool
+        self,
+        binding_id: str,
+        turn_id: str,
+        reason: str,
+        *,
+        ended: bool,
+        review: HostingReview | None = None,
     ) -> ExecutionRecord:
         with self._database.transaction() as db:
             row = self._row(db, binding_id, turn_id)
@@ -249,8 +271,13 @@ class SqliteHostingExecutionStore:
                 return self._record(row)
             state = "manual" if ended else "unknown"
             db.execute(
-                "UPDATE executions SET state = ?, reason = ? WHERE turn_id = ?",
-                (state, reason, turn_id),
+                "UPDATE executions SET state = ?, reason = ?, review_json = ? WHERE turn_id = ?",
+                (
+                    state,
+                    reason,
+                    review.model_dump_json() if review is not None else None,
+                    turn_id,
+                ),
             )
             db.execute(
                 "UPDATE batches SET state = ? WHERE batch_id = ?",

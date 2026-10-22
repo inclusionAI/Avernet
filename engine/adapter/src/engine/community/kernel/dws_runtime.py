@@ -47,3 +47,7 @@ class HostingIssue(Value):
 
 class HostingCapacityError(RuntimeError):
     """Stable code only; stop workers without dropping queued messages."""
+
+
+class RolloutUnavailable(RuntimeError):
+    """Eligibility is unknown: suspend work, but do not revoke owner consent."""

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from engine.community.plugins.dws_hosting.rollout import BackendHostingRollout
+from engine.community.kernel.dws_runtime import RolloutUnavailable
 from .test_runtime import runtime_case
 from .test_delivery import resolve
 
@@ -52,7 +53,8 @@ async def test_positive_cache_expires_and_restart_revalidates(tmp_path):
     restarted = BackendHostingRollout(tmp_path, rollout.binding, verifier)
     assert not await restarted.allowed()
     verifier.runtime_eligible.side_effect = TimeoutError()
-    assert not await restarted.allowed()
+    with pytest.raises(RolloutUnavailable):
+        await restarted.allowed()
 
 
 async def test_new_proof_invalidates_cache_and_scope_checked(tmp_path):

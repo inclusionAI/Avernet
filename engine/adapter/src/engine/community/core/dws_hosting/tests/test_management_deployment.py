@@ -89,7 +89,8 @@ def test_invalid_scope_cannot_construct_providers(monkeypatch, tmp_path, changes
     provider.assert_not_called()
 
 
-def test_composition_is_explicit_and_no_network(monkeypatch, tmp_path):
+@pytest.mark.parametrize("custom_connection", [False, True])
+def test_composition_is_explicit_and_no_network(monkeypatch, tmp_path, custom_connection):
     value = config(tmp_path)
     factory = Mock()
     disabled = value.model_copy(
@@ -107,7 +108,15 @@ def test_composition_is_explicit_and_no_network(monkeypatch, tmp_path):
         "build_management_endpoint",
     ]:
         monkeypatch.setattr(deployment, name, Mock())
-    result = deployment.build_deployed_management(value, factory)
+    connection_factory = Mock() if custom_connection else None
+    result = deployment.build_deployed_management(
+        value, factory, connection_factory=connection_factory
+    )
+    if custom_connection:
+        connection_factory.assert_called_once()
+        deployment.DwsCliConnection.assert_not_called()
+    else:
+        deployment.DwsCliConnection.assert_called_once()
     assert result is deployment.build_management_endpoint.return_value
     deployment.build_dws_runtime.assert_called_once()
     factory.assert_called_once()
