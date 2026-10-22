@@ -57,7 +57,10 @@ export const TaskOverviewV2: React.FC<TaskOverviewV2Props> = ({ task, nav, apiBa
     <div data-testid="task-overview-v2" style={{ minHeight: '100%' }}>
       <section>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px 0' }}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary }}>步骤</span>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary }}>步骤</span>
+            <span style={{ fontSize: 11, color: C.textSecondary }}>点击查看会话</span>
+          </div>
           <div style={{ display: 'inline-flex', gap: 2, background: C.surfaceAlt, borderRadius: 6, padding: 2 }}>
             <ViewSwitchButton
               active={view === 'node'}

@@ -128,6 +128,7 @@ describe('TaskOverviewV2(L1)', () => {
     expect(screen.getByText('需求澄清与规划')).toBeTruthy();
     expect(screen.getByText('并行调研执行')).toBeTruthy();
     expect(screen.getByText('竞品研究员Group')).toBeTruthy();
+    expect(screen.getByText('点击查看会话')).toBeTruthy();
     // I2:返工次数 = attemptCount-1(action_log 的 attempt 从 1 起 = 首发);attemptCount=2 → 第 1 次返工
     expect(screen.getByText('第 1 次返工')).toBeTruthy();
     // attemptCount 1(仅首发,无返工)不显示返工徽章
