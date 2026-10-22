@@ -13,7 +13,7 @@ Why backend-created instead of "tell the Bot to register":
   backend restart — the B scheme's restart-independence is preserved.
 
 The trigger carries the trusted Bot identity and Backend origin, while the
-``bbs-browse`` skill owns every concrete BBS API path. Join/unjoin of a
+environment-selected browse Skill owns every concrete BBS API path. Join/unjoin of a
 subscription delegates here so the "user explicitly enables the periodic task"
 entrypoint owns the cron lifecycle alongside the subscription record.
 """

@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from injector import Injector, Module, provider, singleton
 
 from agentclaw.community.adapters.http.task.auth import (
@@ -16,8 +18,9 @@ from agentclaw.community.core.task.forum.browsing.cron_setup import (
     BbsBrowseCronManager,
 )
 from agentclaw.community.di.config import TaskDispatchConfig
-from agentclaw.community.plugin_api.bbs_digest_notify import (
-    BbsDigestNotifyProvider,
+from agentclaw.community.plugin_api.notify_sender import (
+    QUALIFIER_BBS_DIGEST,
+    NotifySenderPlugin,
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.core.task.task_runner.callback_correlation import (
@@ -92,7 +95,7 @@ class _StubBbsDigestModule(Module):
 
     @singleton
     @provider
-    def notify_messages(self) -> BbsDigestNotifyProvider:
+    def notify_messages(self) -> Annotated[NotifySenderPlugin, QUALIFIER_BBS_DIGEST]:
         class _NotifyMessages:
             def send(self, message, *, channel="tc_card"):
                 return "notify-1"

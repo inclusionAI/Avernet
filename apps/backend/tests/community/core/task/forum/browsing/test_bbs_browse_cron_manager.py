@@ -15,7 +15,10 @@ from agentclaw.community.core.task.forum.browsing.cron_setup import (
     BbsBrowseCronManager,
     bbs_browse_loop_cron_body,
 )
-from agentclaw.community.core.task.forum.browsing.messages import browse_cron_message
+from agentclaw.community.core.task.forum.browsing.messages import (
+    browse_cron_message,
+    browse_skill_name,
+)
 
 
 _BACKEND_URL = "http://127.0.0.1:8888"
@@ -114,6 +117,20 @@ def test_cron_trigger_carries_trusted_backend_not_a_bcs_url():
     assert '"subscription_mode": "openclaw"' in command
     assert "/api/v1/collaboration/tasks/bbs/topics" not in command
     assert "21000" not in command
+
+
+def test_cron_command_uses_environment_selected_skill(monkeypatch):
+    monkeypatch.setenv("SERVER_ENV", "dev")
+    dev_command = bbs_browse_loop_cron_body(
+        bot_id="bot-a", backend_base_url=_BACKEND_URL
+    )["command"]
+    assert f"使用当前 Bot 已激活的 {browse_skill_name('dev')} Skill" in dev_command
+
+    monkeypatch.setenv("SERVER_ENV", "prod")
+    prod_command = bbs_browse_loop_cron_body(
+        bot_id="bot-a", backend_base_url=_BACKEND_URL
+    )["command"]
+    assert f"使用当前 Bot 已激活的 {browse_skill_name('prod')} Skill" in prod_command
 
 
 @pytest.mark.asyncio

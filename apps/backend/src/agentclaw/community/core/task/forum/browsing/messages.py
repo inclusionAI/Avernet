@@ -1,9 +1,10 @@
 """Message templates pushed to the Bot for the BBS Browse Loop.
 
 The trigger instruction carries a compact trusted runtime context. The activated
-bbs-browse Skill owns the concrete internal API paths and processing protocol;
-the runtime supplies the Bot identity and Backend origin that the Skill must
-never guess.
+Skill owns the concrete internal API paths and processing protocol; the Skill
+name is environment-selected (``bbs-browse`` in prod, ``forum-browse`` in dev
+and pre), and the runtime supplies the Bot identity and Backend origin that the
+Skill must never guess.
 """
 
 from __future__ import annotations
@@ -15,6 +16,32 @@ from agentclaw.community.core.task.forum.models import (
     BBS_BROWSE_LOOP_CRON_NAME,
     BrowseSubscriptionRecord,
 )
+from agentclaw.community.utils.env_utils import get_current_env
+
+_PROD_BBS_BROWSE_SKILL_NAME = "bbs-browse"
+_FORUM_BROWSE_SKILL_NAME = "forum-browse"
+_BBS_TOPIC_SKILL_NAMES: tuple[str, ...] = (
+    "bbs-topic-handler",
+    "bbs-create-topic",
+)
+
+
+def browse_skill_name(env: str) -> str:
+    """Return the browse Skill name selected for a normalized environment.
+
+    Production keeps the deployed ``bbs-browse`` name for compatibility; dev
+    and pre use the renamed ``forum-browse`` Skill while it is being rolled out.
+    """
+    if env == "prod":
+        return _PROD_BBS_BROWSE_SKILL_NAME
+    if env in {"dev", "pre"}:
+        return _FORUM_BROWSE_SKILL_NAME
+    raise ValueError(f"unknown normalized environment: {env}")
+
+
+def bbs_browse_skill_names(env: str) -> tuple[str, ...]:
+    """Return the complete Bot-side Skill set for a normalized environment."""
+    return (browse_skill_name(env), *_BBS_TOPIC_SKILL_NAMES)
 
 
 def _browse_runtime_message(
@@ -30,11 +57,12 @@ def _browse_runtime_message(
         "backend": backend_base_url.rstrip("/"),
         "subscription_mode": subscription_mode,
     }
+    skill_name = browse_skill_name(get_current_env())
     return "\n".join(
         [
-            "[BBS-BROWSE] 执行一次 bbs-browse 逛论坛流程，完成后退出本次对话。",
+            f"[BBS-BROWSE] 执行一次 {skill_name} 逛论坛流程，完成后退出本次对话。",
             f"触发来源: {trigger_source}",
-            "使用当前 Bot 已激活的 bbs-browse Skill 执行完整流程。",
+            f"使用当前 Bot 已激活的 {skill_name} Skill 执行完整流程。",
             "运行上下文（由可信运行时注入，不要猜测或替换 backend）:",
             json.dumps(context, ensure_ascii=False, indent=2),
         ]
@@ -47,10 +75,11 @@ def browse_once_message(
     backend_base_url: str,
     subscription: BrowseSubscriptionRecord,
 ) -> str:
-    """Compose a one-shot bbs-browse trigger with runtime context.
+    """Compose a one-shot browse trigger with runtime context.
 
-    The message deliberately does not inline API URLs.  bbs-browse is the
-    owner of the BBS contract and is loaded through the Bot Skill Center; this
+    The message deliberately does not inline API URLs.  The selected browse
+    Skill is the owner of the BBS contract and is loaded through the Bot Skill
+    Center; this
     delivery seam only provides the trusted Bot and backend identity.
     """
     source = "框架 cron" if subscription.mode == "framework" else "OpenClaw 自带 cron"
@@ -80,18 +109,19 @@ def cron_event_message(*, bot_id: str, action: Literal["register", "remove"]) ->
     BbsBrowseCronManager to create the same canonical task through the cron
     relay without asking the model to invent one.
     """
+    skill_name = browse_skill_name(get_current_env())
     if action == "register":
         plan = (
             "用 OpenClaw cron 工具注册本地定时任务:",
             f"  - 固定任务名称: {BBS_BROWSE_LOOP_CRON_NAME}（必须完全一致）",
             "  - 表达式: 0 * * * *（每小时一次）",
-            "  - 触发动作: 执行一次已激活的 bbs-browse Skill",
+            f"  - 触发动作: 执行一次已激活的 {skill_name} Skill",
             "  - 已存在同名任务时更新原任务，不要新建第二个",
             "  - 设置失败时返回明确错误，不要改用其它名称",
         )
     else:
         plan = (
-            "删除 bbs-browse 的本地定时任务。",
+            "删除 BBS 巡检的本地定时任务。",
             f"  - 按名称 {BBS_BROWSE_LOOP_CRON_NAME} 定位并删除。",
             "  - 如果任务不存在，按幂等成功处理。",
         )
@@ -103,17 +133,6 @@ def cron_event_message(*, bot_id: str, action: Literal["register", "remove"]) ->
     )
 
 
-# BBS skills the Bot must own locally (in the OpenClaw active pool) for the
-# community feature to work: the browse flow, topic handling, and topic
-# creation. Listed here so the join prompt — not the cron command — carries
-# the names; cron stays thin.
-BBS_BROWSE_SKILL_NAMES: tuple[str, ...] = (
-    "bbs-browse",
-    "bbs-topic-handler",
-    "bbs-create-topic",
-)
-
-
 def _cn_listing(names: tuple[str, ...]) -> str:
     """中文顿号列举：单项原样、两项「A 和 B」、多项「A、B 和 C」。"""
     if len(names) == 1:
@@ -123,7 +142,7 @@ def _cn_listing(names: tuple[str, ...]) -> str:
 
 def bbs_skill_install_message(*, bot_id: str) -> str:
     """Compose an instruction for the Bot to make the configured BBS OpenClaw
-    skills (``BBS_BROWSE_SKILL_NAMES``) available by idempotent self-symlink
+    skills (``bbs_browse_skill_names``) available by idempotent self-symlink
     into the active pool (``workspace/skills/`` <- ``skills-pool/.../infra/``).
 
     Sent once on subscribe/join as the fix for "the Bot never loaded the BBS
@@ -131,7 +150,7 @@ def bbs_skill_install_message(*, bot_id: str) -> str:
     relay API). Fire-and-forget: the Bot's install outcome is observed out of
     band, not echoed back here.
     """
-    listing = _cn_listing(BBS_BROWSE_SKILL_NAMES)
+    listing = _cn_listing(bbs_browse_skill_names(get_current_env()))
     return (
         f"[BBS-BROWSE-SKILL] 请确保 {listing} 已成为 OpenClaw 的可用技能。bot_id={bot_id}\n"
         "检查路径优先级：\n"
