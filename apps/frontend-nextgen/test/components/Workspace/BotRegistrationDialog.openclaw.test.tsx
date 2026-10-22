@@ -53,6 +53,9 @@ it('hides OpenClaw without fetching its token when no onboarding panels remain',
   expect(screen.queryByRole('button', { name: 'OpenClaw' })).not.toBeInTheDocument();
   expect(screen.queryByLabelText('OpenClaw 接入方式')).not.toBeInTheDocument();
   expect(screen.queryByRole('textbox', { name: 'Bot 名称' })).not.toBeInTheDocument();
+  expect(screen.getByText('暂无可用的接入方式')).toBeInTheDocument();
+  expect(screen.getByText('当前未启用 Bot 接入方式，请联系管理员。')).toBeInTheDocument();
+  expect(screen.queryByLabelText('Bot 类型')).not.toBeInTheDocument();
   expect(useBotRegistrationToken).toHaveBeenCalledWith(false);
   expect(useBotRegistrationToken).not.toHaveBeenCalledWith(true);
 });

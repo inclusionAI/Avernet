@@ -41,6 +41,8 @@ Deployment overlays can disable the OpenClaw onboarding tab by overriding
 It defaults to enabled. This controls external-bot onboarding only; existing bots
 and bot-engine creation options are unaffected. Re-enable the capability to restore
 the tab and its installer instructions.
+If no onboarding methods are enabled, the dialog displays an explicit unavailable
+state instead of an empty type selector or installer.
 
 `DSH_REGISTRATION_GUIDE_URL` optionally supplies the DeepSeek Harness guide through
 runtime configuration. Set it to an HTTP(S) guide for the plugin version deployed

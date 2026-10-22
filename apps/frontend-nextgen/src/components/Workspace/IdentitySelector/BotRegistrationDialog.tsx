@@ -120,13 +120,17 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
           <ModalDescription className="leading-5">选择 Bot 类型，按对应指南完成接入。</ModalDescription>
         </ModalHeader>
 
-        <Segmented<RegistrationEngine>
-          aria-label="Bot 类型"
-          value={engine}
-          onChange={setEngine}
-          className="w-full overflow-x-auto"
-          options={engineOptions}
-        />
+        {engineOptions.length > 0 ? (
+          <Segmented<RegistrationEngine>
+            aria-label="Bot 类型"
+            value={engine}
+            onChange={setEngine}
+            className="w-full overflow-x-auto"
+            options={engineOptions}
+          />
+        ) : (
+          <Empty compact title="暂无可用的接入方式" description="当前未启用 Bot 接入方式，请联系管理员。" />
+        )}
         {AdditionalPanel ? (
           <Suspense fallback={<p role="status">正在加载接入指南…</p>}>
             <AdditionalPanel open={open} />
