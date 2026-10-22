@@ -2,6 +2,7 @@ import {
   isSendBannedForSession,
   revertA2AChoice,
   takeCachedA2AProvider,
+  SEND_BAN_UI_TEXT,
   type A2aBootstrapConfig,
 } from '@/adapters/a2a/bootstrap';
 import type { CancelOutcome } from '@avernet/a2a-chat-client';
@@ -376,6 +377,18 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     this.iamToken = freshIamToken;
     updateProviderIamToken(inner, freshIamToken);
     if (!inner.isConnected) await this.connect();
+    // A2A M2 bootstrap seam：§3.1 发送禁令强制核验（review P2-2）。
+    // useBotChat.send 的检查只是输入框入口的提前提示——副屏/卡片等入口经
+    // chat.onRequest 直汇到本方法，绕过它；且初始化/刷 IAM/connect 等异步
+    // 步骤窗口内可能挂上新禁令（取消隔离不能靠入队时的旧读数）。禁令
+    // 判断必须在统一执行入口兜底、放在出站前最后同步点：挂禁即拒绝＋
+    // onError 上行，绝不发出 SendStreamingMessage。回滚到 v3 不豁免——
+    // 谓词键由 wsUrl/a2aBaseUrl 派生（传输无关），同 context 旧禁令仍在。
+    if (this.isSendBanned()) {
+      const error = new Error(SEND_BAN_UI_TEXT);
+      this.onError?.(error);
+      throw error;
+    }
     await inner.request(
       {
         query: params.content,

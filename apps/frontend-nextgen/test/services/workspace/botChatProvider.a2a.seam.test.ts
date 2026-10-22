@@ -77,9 +77,19 @@ describe('botChatProvider A2A bootstrap 接缝钉板（B16 static guard）', () 
     );
   });
 
-  it('A2A M2 bootstrap seam 标记：provider=3（wsUrl 锚/谓词+订阅面/工厂），hook=2（取消播报/发送门）', () => {
-    expect(countOf(PROVIDER_SOURCE, 'A2A M2 bootstrap seam')).toBe(3);
+  it('A2A M2 bootstrap seam 标记：provider=4（wsUrl 锚/谓词+订阅面/工厂/request() 禁令强制核验），hook=2（取消播报/发送门）', () => {
+    expect(countOf(PROVIDER_SOURCE, 'A2A M2 bootstrap seam')).toBe(4);
     expect(countOf(HOOK_SOURCE, 'A2A M2 bootstrap seam')).toBe(2);
+  });
+
+  it('§3.1 发送禁令强制门（review P2-2）：request() 出站前终核验兜底，位于 inner.request 之前', () => {
+    expect(PROVIDER_SOURCE).toContain('if (this.isSendBanned()) {');
+    expect(PROVIDER_SOURCE).toContain('const error = new Error(SEND_BAN_UI_TEXT);');
+    // onError 上行 + 拒绝，且在唯一直发送位 await inner.request( 之前
+    const gateAt = PROVIDER_SOURCE.indexOf('if (this.isSendBanned()) {');
+    const dispatchAt = PROVIDER_SOURCE.indexOf('await inner.request(');
+    expect(gateAt).toBeGreaterThan(-1);
+    expect(gateAt).toBeLessThan(dispatchAt);
   });
 
   it('A2A 触线行数精确钉死（8）——扩张必须改本钉板评审', () => {
