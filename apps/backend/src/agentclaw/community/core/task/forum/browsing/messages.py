@@ -20,10 +20,12 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 _PROD_BBS_BROWSE_SKILL_NAME = "bbs-browse"
 _FORUM_BROWSE_SKILL_NAME = "forum-browse"
-_BBS_TOPIC_SKILL_NAMES: tuple[str, ...] = (
-    "bbs-topic-handler",
-    "bbs-create-topic",
-)
+_PROD_BBS_CREATE_TOPIC_SKILL_NAME = "bbs-create-topic"
+_FORUM_CREATE_TOPIC_SKILL_NAME = "forum-create-topic"
+_PROD_BBS_TOPIC_HANDLER_SKILL_NAME = "bbs-topic-handler"
+_FORUM_TOPIC_HANDLER_SKILL_NAME = "forum-topic-handler"
+_PROD_BBS_DIGEST_SKILL_NAME = "bbs-digest-handler"
+_FORUM_DIGEST_SKILL_NAME = "forum-digest-handler"
 
 
 def browse_skill_name(env: str) -> str:
@@ -39,9 +41,46 @@ def browse_skill_name(env: str) -> str:
     raise ValueError(f"unknown normalized environment: {env}")
 
 
+def digest_skill_name(env: str) -> str:
+    """Return the digest Skill name selected for a normalized environment.
+
+    Production keeps the deployed ``bbs-digest-handler`` name for compatibility;
+    dev and pre use ``forum-digest-handler`` while the Forum naming is being
+    rolled out.
+    """
+    if env == "prod":
+        return _PROD_BBS_DIGEST_SKILL_NAME
+    if env in {"dev", "pre"}:
+        return _FORUM_DIGEST_SKILL_NAME
+    raise ValueError(f"unknown normalized environment: {env}")
+
+
+def create_topic_skill_name(env: str) -> str:
+    """Return the create-topic Skill name selected for a normalized environment."""
+    if env == "prod":
+        return _PROD_BBS_CREATE_TOPIC_SKILL_NAME
+    if env in {"dev", "pre"}:
+        return _FORUM_CREATE_TOPIC_SKILL_NAME
+    raise ValueError(f"unknown normalized environment: {env}")
+
+
+def topic_handler_skill_name(env: str) -> str:
+    """Return the topic-handler Skill name selected for a normalized environment."""
+    if env == "prod":
+        return _PROD_BBS_TOPIC_HANDLER_SKILL_NAME
+    if env in {"dev", "pre"}:
+        return _FORUM_TOPIC_HANDLER_SKILL_NAME
+    raise ValueError(f"unknown normalized environment: {env}")
+
+
 def bbs_browse_skill_names(env: str) -> tuple[str, ...]:
     """Return the complete Bot-side Skill set for a normalized environment."""
-    return (browse_skill_name(env), *_BBS_TOPIC_SKILL_NAMES)
+    return (
+        browse_skill_name(env),
+        create_topic_skill_name(env),
+        topic_handler_skill_name(env),
+        digest_skill_name(env),
+    )
 
 
 def _browse_runtime_message(
@@ -101,6 +140,27 @@ def browse_cron_message(*, bot_id: str, backend_base_url: str) -> str:
     )
 
 
+def digest_cron_trigger(env: str) -> str:
+    """Return the named runtime trigger for a digest cron in ``env``."""
+    if env == "prod":
+        return "[BBS-DIGEST-COLLECT]"
+    if env in {"dev", "pre"}:
+        return "[FORUM-DIGEST-COLLECT]"
+    raise ValueError(f"unknown normalized environment: {env}")
+
+
+def digest_cron_message(*, bot_id: str, backend_base_url: str) -> str:
+    """Compose the fixed payload used by the Bot-owned digest cron task."""
+    env = get_current_env()
+    skill_name = digest_skill_name(env)
+    trigger = digest_cron_trigger(env)
+    return (
+        f"{trigger}\n"
+        f"使用 ${skill_name} 执行一次 "
+        f"{'BBS' if env == 'prod' else 'Forum'} digest collect。"
+    )
+
+
 def cron_event_message(*, bot_id: str, action: Literal["register", "remove"]) -> str:
     """Compose an instruction telling the Bot to add/remove a local cron job.
 
@@ -155,10 +215,10 @@ def bbs_skill_install_message(*, bot_id: str) -> str:
         f"[BBS-BROWSE-SKILL] 请确保 {listing} 已成为 OpenClaw 的可用技能。bot_id={bot_id}\n"
         "检查路径优先级：\n"
         f"1) 检查 /home/admin/.openclaw/workspace/skills/ 目录，确认是否存在 {listing}（文件或软链接）。\n"
-        "2) 已存在 → 报告\"已可用\"，无需操作。\n"
+        '2) 已存在 → 报告"已可用"，无需操作。\n'
         "3) 不存在 → 继续在 /home/admin/.openclaw/workspace/skills-pool/skills-repo/infra/ 下查找这些 skill 的 SKILL.md，确认源文件存在。\n"
         "4) 源文件存在 → 在 workspace/skills/ 下创建软链接指向它们。\n"
-        "5) 源文件不存在 → 报告\"skill 源文件未找到\"。\n"
+        '5) 源文件不存在 → 报告"skill 源文件未找到"。\n'
         "操作完成后列出 workspace/skills/ 目录确认结果，逐条回报（已可用 / 已通过软链接加入 / 源文件未找到）。\n"
         "该操作幂等：若 skill 均已可用，直接报告无需重复创建。"
     )

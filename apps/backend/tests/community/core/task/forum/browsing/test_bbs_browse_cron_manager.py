@@ -13,11 +13,19 @@ from agentclaw.community.core.task.forum.browsing.cron_setup import (
     BBS_BROWSE_LOOP_CRON_TIMEOUT_SECS,
     BBS_BROWSE_RUN_TRIGGER,
     BbsBrowseCronManager,
+    BbsDigestCronManager,
     bbs_browse_loop_cron_body,
+    bbs_digest_loop_cron_body,
+    bbs_digest_loop_cron_expr,
+    BBS_DIGEST_LOOP_CRON_NAME,
+    BBS_DIGEST_LOOP_CRON_TIMEOUT_SECS,
+    BBS_DIGEST_RUN_TRIGGER,
+    FORUM_DIGEST_RUN_TRIGGER,
 )
 from agentclaw.community.core.task.forum.browsing.messages import (
     browse_cron_message,
     browse_skill_name,
+    digest_cron_message,
 )
 
 
@@ -264,3 +272,90 @@ async def test_ensure_cron_fails_when_create_is_not_acknowledged():
     with pytest.raises(RuntimeError, match="did not acknowledge cron setup"):
         await mgr.ensure_cron(bot_id="bot-a", owner_user_id="149844")
     assert relay.task_names() == []
+
+
+def test_digest_cron_cadence_is_environment_selected():
+    assert bbs_digest_loop_cron_expr("dev") == "0 * * * *"
+    assert bbs_digest_loop_cron_expr("pre") == "0 * * * *"
+    assert bbs_digest_loop_cron_expr("prod") == "0 20 * * *"
+
+
+def test_digest_cron_body_is_fixed_and_environment_selected(monkeypatch):
+    monkeypatch.setenv("SERVER_ENV", "dev")
+    dev_body = bbs_digest_loop_cron_body(bot_id="bot-a", backend_base_url=_BACKEND_URL)
+    assert dev_body == {
+        "name": BBS_DIGEST_LOOP_CRON_NAME,
+        "schedule": "0 * * * *",
+        "command": digest_cron_message(bot_id="bot-a", backend_base_url=_BACKEND_URL),
+        "timezone": "Asia/Shanghai",
+        "enabled": True,
+        "timeout_secs": BBS_DIGEST_LOOP_CRON_TIMEOUT_SECS,
+        "kind": BBS_BROWSE_LOOP_CRON_KIND,
+    }
+    assert dev_body["command"] == (
+        "[FORUM-DIGEST-COLLECT]\n"
+        "使用 $forum-digest-handler 执行一次 Forum digest collect。"
+    )
+    assert FORUM_DIGEST_RUN_TRIGGER == "[FORUM-DIGEST-COLLECT]"
+
+    monkeypatch.setenv("SERVER_ENV", "prod")
+    prod_body = bbs_digest_loop_cron_body(bot_id="bot-a", backend_base_url=_BACKEND_URL)
+    assert prod_body["schedule"] == "0 20 * * *"
+    assert BBS_DIGEST_RUN_TRIGGER == "[BBS-DIGEST-COLLECT]"
+    assert prod_body["command"] == (
+        "[BBS-DIGEST-COLLECT]\n使用 $bbs-digest-handler 执行一次 BBS digest collect。"
+    )
+
+
+@pytest.mark.asyncio
+async def test_ensure_digest_cron_creates_canonical_when_absent(monkeypatch):
+    monkeypatch.setenv("SERVER_ENV", "dev")
+    relay = _FakeCronRelay(tasks=[])
+    mgr = BbsDigestCronManager(cron_relay=relay, backend_base_url=_BACKEND_URL)
+    await mgr.ensure_cron(bot_id="bot-a", owner_user_id="149844")
+
+    creates = [c for op, c in relay.calls if op == "create"]
+    assert len(creates) == 1
+    assert creates[0]["body"] == bbs_digest_loop_cron_body(
+        bot_id="bot-a", backend_base_url=_BACKEND_URL
+    )
+    assert relay.task_names() == [BBS_DIGEST_LOOP_CRON_NAME]
+
+
+@pytest.mark.asyncio
+async def test_ensure_digest_cron_collapse_legacy_without_touching_browse(monkeypatch):
+    monkeypatch.setenv("SERVER_ENV", "pre")
+    relay = _FakeCronRelay(
+        tasks=[
+            {"id": "t-browse", "name": BBS_BROWSE_LOOP_CRON_NAME, "schedule": "old"},
+            {"id": "t-legacy", "name": "bbs-digest-handler", "schedule": "old"},
+            {"id": "t-other", "name": "okr-weekly", "schedule": "old"},
+        ]
+    )
+    mgr = BbsDigestCronManager(cron_relay=relay, backend_base_url=_BACKEND_URL)
+    await mgr.ensure_cron(bot_id="bot-a", owner_user_id="149844")
+
+    deletes = [c for op, c in relay.calls if op == "delete"]
+    assert {d["task_id"] for d in deletes} == {"t-legacy"}
+    assert relay.task_names() == [
+        BBS_BROWSE_LOOP_CRON_NAME,
+        "okr-weekly",
+        BBS_DIGEST_LOOP_CRON_NAME,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_remove_digest_cron_is_idempotent_and_namespace_scoped():
+    relay = _FakeCronRelay(
+        tasks=[
+            {"id": "t-digest", "name": BBS_DIGEST_LOOP_CRON_NAME, "schedule": "x"},
+            {"id": "t-legacy", "name": "bbs-digest-handler", "schedule": "x"},
+            {"id": "t-browse", "name": BBS_BROWSE_LOOP_CRON_NAME, "schedule": "x"},
+            {"id": "t-other", "name": "okr-weekly", "schedule": "x"},
+        ]
+    )
+    mgr = BbsDigestCronManager(cron_relay=relay, backend_base_url=_BACKEND_URL)
+    await mgr.remove_cron(bot_id="bot-a", owner_user_id="149844")
+    assert relay.task_names() == [BBS_BROWSE_LOOP_CRON_NAME, "okr-weekly"]
+    await mgr.remove_cron(bot_id="bot-a", owner_user_id="149844")
+    assert relay.task_names() == [BBS_BROWSE_LOOP_CRON_NAME, "okr-weekly"]
