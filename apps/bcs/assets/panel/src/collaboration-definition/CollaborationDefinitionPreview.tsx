@@ -23,6 +23,7 @@ import {
 } from './validation';
 import { decodeCollaborationDefinitionPayload, definitionVersionKey, readStoredDefinition, validateStoredDefinition, DraftReadError } from './reference';
 import type { CollaborationDefinitionPayload, StoredDefinition } from './reference';
+import { resolveHostApiBaseUrl } from './api';
 
 const Container = styled.section`
   box-sizing: border-box;
@@ -303,6 +304,7 @@ function readSnapshot(
 ): CollaborationDefinitionPayload {
   const raw =
     props.snapshot ??
+    props.data?.snapshot ??
     props.params?.data?.snapshot ??
     props.payload?.data?.snapshot;
   return decodeCollaborationDefinitionPayload(raw);
@@ -314,6 +316,7 @@ function readSourceMessageId(
 ): string {
   const raw =
     props.sourceMessageId ??
+    props.data?.sourceMessageId ??
     props.params?.data?.sourceMessageId ??
     props.payload?.data?.sourceMessageId;
   return typeof raw === 'string' && raw ? raw : `version-${definitionVersionKey(snapshot)}`;
@@ -406,6 +409,7 @@ function ValidationResult({ result }: { result: CollaborationDefinitionValidatio
 export default function CollaborationDefinitionPreview(
   props: CollaborationDefinitionComponentProps,
 ) {
+  const baseUrl = resolveHostApiBaseUrl(props) ?? '/bcnproxy';
   const decoded = useMemo(() => {
     try {
       const snapshot = readSnapshot(props);
@@ -435,7 +439,7 @@ export default function CollaborationDefinitionPreview(
   const requestKeyRef = useRef('');
   const snapshot = decoded.snapshot;
   const identityKey = snapshot
-    ? `${decoded.sourceMessageId}|${JSON.stringify(snapshot)}`
+    ? `${baseUrl}|${decoded.sourceMessageId}|${JSON.stringify(snapshot)}`
     : decoded.error;
 
   const runValidation = useCallback(async () => {
@@ -459,13 +463,13 @@ export default function CollaborationDefinitionPreview(
     try {
       const current = () => requestRef.current?.id === request.id && !request.controller.signal.aborted;
       if (snapshot.schemaVersion === 2) {
-        const source = await readStoredDefinition(snapshot, request.controller.signal);
+        const source = await readStoredDefinition(baseUrl, snapshot, request.controller.signal);
         if (!current()) return;
         setLoaded({ key: identityKey, source });
-        const validation = await validateStoredDefinition(snapshot, source, request.controller.signal);
+        const validation = await validateStoredDefinition(baseUrl, snapshot, source, request.controller.signal);
         if (current()) setState({ status: 'complete', ...validation });
       } else {
-        const result = await validateCollaborationDefinition(snapshot.definitionYaml, request.controller.signal);
+        const result = await validateCollaborationDefinition(baseUrl, snapshot.definitionYaml, request.controller.signal);
         if (current()) setState({ status: 'complete', result, checkedAt: Date.now() });
       }
     } catch (error) {
@@ -479,7 +483,7 @@ export default function CollaborationDefinitionPreview(
         checkedAt: Date.now(),
       });
     }
-  }, [decoded.error, snapshot, identityKey]);
+  }, [decoded.error, snapshot, identityKey, baseUrl]);
 
   useEffect(() => {
     setActiveTab('preview');

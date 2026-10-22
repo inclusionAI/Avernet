@@ -8,6 +8,7 @@ import {
 } from './snapshot';
 import type { CollaborationDefinitionComponentProps } from './types';
 import { decodeCollaborationDefinitionPayload, definitionVersionKey } from './reference';
+import { resolveHostApiBaseUrl } from './api';
 
 const Card = styled.article`
   box-sizing: border-box;
@@ -124,6 +125,7 @@ function bcsPanelCdn(): string | undefined {
 export default function CollaborationDefinitionCard(
   props: CollaborationDefinitionComponentProps,
 ) {
+  const apiBaseUrl = resolveHostApiBaseUrl(props);
   const rootRef = useRef<HTMLElement>(null);
   const ownerRef = useRef(Symbol('collaboration-definition-card'));
   const fallbackSource = useRef(`mounted-${++mountedSourceCounter}`);
@@ -154,7 +156,7 @@ export default function CollaborationDefinitionCard(
         window.aixBridge?.closePanelTab(tabId);
       }
     },
-    [decoded.snapshot?.schemaVersion === 2 ? fingerprint : decoded.snapshot?.snapshotId],
+    [decoded.snapshot?.schemaVersion === 2 ? fingerprint : decoded.snapshot?.snapshotId, apiBaseUrl],
   );
 
   const openPreview = () => {
@@ -168,7 +170,7 @@ export default function CollaborationDefinitionCard(
     }
     const messageId = sourceMessageId(rootRef.current, fallbackSource.current);
     const tabId = buildCollaborationDefinitionTabId(
-      `${window.location.origin}${window.location.pathname}${window.location.search}|${cdn}|${messageId}`,
+      `${window.location.origin}${window.location.pathname}${window.location.search}|${cdn}|${apiBaseUrl ?? ''}|${messageId}`,
       definitionVersionKey(snapshot),
     );
     let existing = openSnapshots.get(tabId);
@@ -188,7 +190,7 @@ export default function CollaborationDefinitionCard(
     const panelPayload = {
       cdn,
       entry: COLLABORATION_DEFINITION_PREVIEW_ENTRY,
-      data: { snapshot, sourceMessageId: messageId, tabId },
+      data: { snapshot, sourceMessageId: messageId, tabId, ...(apiBaseUrl ? { apiBaseUrl } : {}) },
     };
     const tab = {
       id: tabId,

@@ -25,6 +25,7 @@ for (const bad of [
   { ...reference, revision: 0 },
   { ...reference, title: 'forbidden' },
   { ...reference, url: 'https://untrusted.example' },
+  { ...reference, apiBaseUrl: 'https://untrusted.example' },
   { ...reference, definitionYaml: 'inline' },
 ]) assert.throws(() => decodeCollaborationDefinitionReference(bad));
 assert.equal(decodeCollaborationDefinitionReference({ ...reference, revision: Number.MAX_SAFE_INTEGER }).revision, Number.MAX_SAFE_INTEGER);
@@ -41,6 +42,7 @@ await act(async () => root.render(React.createElement(CollaborationDefinitionCar
 assert.equal(opened.length, 0);
 await act(async () => container.querySelector('button').click());
 assert.equal(opened.length, 1);
+assert(!('apiBaseUrl' in opened[0].params.data), 'an unconfigured card must allow the preview host to inject its base');
 assert(!opened[0].id.includes(reference.readToken));
 await act(async () => container.querySelector('button').click());
 assert.equal(opened[0].id, opened[1].id);
@@ -148,6 +150,38 @@ assert.match(panel.textContent, /引用不可用/);
 await act(async () => panelRoot.unmount());
 assert(requests.every(r => r.url.includes(`/revisions/1`)));
 
+// Exercise the real card -> UMD tab -> preview path with host configuration.
+mode = 'valid';
+for (const [cardProps, expectedBase, draftPath] of [
+  [{ ...reference, apiBaseUrl: '/api/v1/collaboration///', baseUrl: '/ignored', data: { apiBaseUrl: '/also-ignored' } }, '/api/v1/collaboration///', '/api/v1/collaboration/drafts'],
+  [{ ...reference, baseUrl: '/host-bcs/' }, '/host-bcs/', '/host-bcs/collaboration/drafts'],
+  [{ ...reference, data: { apiBaseUrl: '/data-bcs', baseUrl: '/ignored' } }, '/data-bcs', '/data-bcs/collaboration/drafts'],
+  [{ ...reference, data: { baseUrl: '/data-alias' } }, '/data-alias', '/data-alias/collaboration/drafts'],
+  [{ params: { data: { params: reference, apiBaseUrl: '/wrapped-bcs' } } }, '/wrapped-bcs', '/wrapped-bcs/collaboration/drafts'],
+  [{ payload: { data: { params: reference, baseUrl: '/payload-bcs' } } }, '/payload-bcs', '/payload-bcs/collaboration/drafts'],
+]) {
+  const cardRoot = createRoot(container);
+  await act(async () => cardRoot.render(React.createElement(CollaborationDefinitionCard, cardProps)));
+  assert.equal(container.querySelector('button').disabled, false, 'host props must not invalidate the reference');
+  await act(async () => container.querySelector('button').click());
+  const payload = opened.at(-1).params;
+  assert.equal(payload.data.apiBaseUrl, expectedBase);
+  assert.deepEqual(payload.data.snapshot, reference, 'host base must stay outside the fixed reference');
+  for (const envelope of ['params', 'payload']) {
+    const start = requests.length;
+    const previewRoot = createRoot(panel);
+    await act(async () => previewRoot.render(React.createElement(CollaborationDefinitionPreview, { [envelope]: payload })));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
+    assert.match(panel.textContent, /定义校验通过/);
+    assert.deepEqual(requests.slice(start).map(r => r.url), [
+      `${draftPath}/${reference.draftId}/revisions/1`,
+      `${draftPath}/${reference.draftId}/revisions/1/validate`,
+    ]);
+    await act(async () => previewRoot.unmount());
+  }
+  await act(async () => cardRoot.unmount());
+}
+
 // A transport can deliver a response after abort. Switching version/source must
 // still keep it from replacing the new preview or triggering old validation.
 const pending = [];
@@ -191,4 +225,34 @@ assert.equal(panel.querySelector('pre'), null);
 assert.equal(copyButton().disabled, true, 'never copy the previous version while the new one loads');
 await act(async () => raceRoot.unmount());
 assert.equal(pending[3].options.signal.aborted, true);
+
+// A host-base change alone must cancel old requests and discard old source.
+const baseRoot = createRoot(panel);
+const start = pending.length;
+await act(async () => baseRoot.render(React.createElement(CollaborationDefinitionPreview, {
+  snapshot: reference, apiBaseUrl: '/old-host',
+})));
+await act(async () => baseRoot.render(React.createElement(CollaborationDefinitionPreview, {
+  snapshot: reference, apiBaseUrl: '/api/v1/collaboration/',
+  baseUrl: '/ignored', data: { apiBaseUrl: '/also-ignored' },
+})));
+assert.equal(pending[start].options.signal.aborted, true);
+assert.equal(pending[start + 1].url, `/api/v1/collaboration/drafts/${reference.draftId}/revisions/1`);
+await act(async () => {
+  pending[start].resolve(Response.json(revision));
+  await new Promise(resolve => setTimeout(resolve, 20));
+});
+assert.equal(pending.length, start + 2, 'stale host response must not trigger validation');
+assert.equal(copyButton().disabled, true);
+await act(async () => {
+  pending[start + 1].resolve(Response.json(revision));
+  await new Promise(resolve => setTimeout(resolve, 30));
+});
+assert.equal(pending[start + 2].url, `/api/v1/collaboration/drafts/${reference.draftId}/revisions/1/validate`);
+await act(async () => {
+  pending[start + 2].resolve(Response.json(validation));
+  await new Promise(resolve => setTimeout(resolve, 20));
+});
+assert.match(panel.textContent, /定义校验通过/);
+await act(async () => baseRoot.unmount());
 console.log('Draft Panel: strict references, capability isolation, preview/source tabs, incident bytes/copy, fixed validation, unavailable and integrity states passed.');

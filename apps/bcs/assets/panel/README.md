@@ -64,7 +64,17 @@ The CLI returns a short `message` using `bcsPanel.CollaborationDefinitionCard`.
 Schema 2 contains only `schemaVersion`, `draftId`, `revision`, and `readToken`.
 The card loads no YAML until opened. The existing host bridge and Agent resource
 binding supply `bcsPanel`; no frontend registration changes are required.
-The preview reads that fixed revision through the host's `/bcnproxy` entry with
+The preview uses the host's `apiBaseUrl` or `baseUrl` (top-level props take
+precedence over `data`, including the `params.data` / `payload.data` envelopes).
+The card forwards an explicitly configured base when opening the preview;
+otherwise the side-panel host can inject its own base. Only the preview falls
+back to `/bcnproxy` when no host base is supplied. Requests append
+`/collaboration/drafts/...` or `/collaboration/definitions/validate` to a BCS root
+base; a base already ending in `/collaboration`, such as `/api/v1/collaboration`,
+uses `/drafts/...` or `/definitions/validate` without duplicating the namespace.
+Host configuration is separate from the strict four-field reference and must
+expose the requested API; configuring a base does not mount service routes.
+The fixed revision is read with
 `X-BCS-Draft-Read-Token`, rejects redirects, and verifies UTF-8 length and SHA-256.
 Validation requests use the stored version, never a substituted source body.
 Validation outages preserve already verified source for copying. References are

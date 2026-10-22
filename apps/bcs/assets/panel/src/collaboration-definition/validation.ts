@@ -9,8 +9,8 @@ import type {
   CollaborationDefinitionSummary,
   CollaborationDefinitionValidationResult,
 } from './types';
+import { collaborationApiUrl } from './api';
 
-const VALIDATION_URL = '/bcnproxy/collaboration/definitions/validate';
 const VALIDATION_TIMEOUT_MS = 15_000;
 
 export class CollaborationDefinitionValidationError extends Error {
@@ -296,6 +296,7 @@ function httpFailureMessage(status: number): string {
 }
 
 export async function validateCollaborationDefinition(
+  baseUrl: string,
   definitionYaml: string,
   signal?: AbortSignal,
 ): Promise<CollaborationDefinitionValidationResult> {
@@ -304,7 +305,7 @@ export async function validateCollaborationDefinition(
   signal?.addEventListener('abort', abort, { once: true });
   const timeout = window.setTimeout(() => controller.abort(), VALIDATION_TIMEOUT_MS);
   try {
-    const response = await fetch(VALIDATION_URL, {
+    const response = await fetch(collaborationApiUrl(baseUrl, 'definitions/validate'), {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },

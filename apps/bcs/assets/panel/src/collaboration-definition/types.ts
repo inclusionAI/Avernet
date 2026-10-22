@@ -100,6 +100,9 @@ export interface CollaborationDefinitionValidationResult {
 }
 
 export interface CollaborationDefinitionComponentProps {
+  apiBaseUrl?: string;
+  baseUrl?: string;
+  data?: Record<string, any>;
   schemaVersion?: unknown;
   draftId?: unknown;
   revision?: unknown;

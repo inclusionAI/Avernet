@@ -309,6 +309,26 @@ assert.equal(requests.length, 1, 'blank YAML must not call validation');
 assert.match(emptyContainer.textContent, /YAML 为空/);
 await act(async () => emptyRoot.unmount());
 
+// The legacy inline path follows the same host base and keeps its YAML intact.
+const hostRoot = createRoot(previewContainer);
+for (const [hostProps, expectedUrl] of [
+  [{ apiBaseUrl: '/api/v1/collaboration/', baseUrl: '/ignored' }, '/api/v1/collaboration/definitions/validate'],
+  [{ baseUrl: '/custom-bcs///' }, '/custom-bcs/collaboration/definitions/validate'],
+  [{ data: { apiBaseUrl: '/data-bcs' } }, '/data-bcs/collaboration/definitions/validate'],
+  [{ data: { baseUrl: '/data-alias' } }, '/data-alias/collaboration/definitions/validate'],
+]) {
+  const start = requests.length;
+  await act(async () => {
+    hostRoot.render(React.createElement(CollaborationDefinitionPreview, { snapshot, ...hostProps }));
+    await new Promise(resolve => setTimeout(resolve, 30));
+  });
+  assert.equal(requests.length, start + 1, 'changing only host configuration must revalidate');
+  assert.equal(requests.at(-1).url, expectedUrl);
+  assert.deepEqual(JSON.parse(requests.at(-1).options.body), { definition_yaml: snapshot.definitionYaml });
+  assert.match(previewContainer.textContent, /定义校验通过/);
+}
+await act(async () => hostRoot.unmount());
+
 globalThis.fetch = async () =>
   new Response(JSON.stringify(longLoopPreview), {
     status: 200,

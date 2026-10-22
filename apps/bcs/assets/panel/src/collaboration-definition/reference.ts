@@ -1,6 +1,7 @@
 import { CollaborationDefinitionSnapshotError, decodeCollaborationDefinitionSnapshot } from './snapshot';
 import { decodeCollaborationDefinitionValidationResult } from './validation';
 import type { CollaborationDefinitionSnapshot, CollaborationDefinitionValidationResult } from './types';
+import { collaborationApiUrl } from './api';
 
 export interface CollaborationDefinitionReference {
   schemaVersion: 2;
@@ -55,17 +56,14 @@ export function definitionVersionKey(payload: CollaborationDefinitionPayload): s
   return payload.schemaVersion === 1 ? payload.snapshotId : `${payload.draftId}:${payload.revision}`;
 }
 
-// This is the existing host BCS proxy, never a URL supplied by message props.
-const DRAFT_BASE = '/bcnproxy/collaboration/drafts';
-
-async function request(reference: CollaborationDefinitionReference, validate: boolean, signal: AbortSignal): Promise<any> {
+async function request(baseUrl: string, reference: CollaborationDefinitionReference, validate: boolean, signal: AbortSignal): Promise<any> {
   const controller = new AbortController();
   const abort = () => controller.abort();
   if (signal.aborted) controller.abort();
   signal.addEventListener('abort', abort, { once: true });
   const timeout = window.setTimeout(abort, 15_000);
   try {
-    const response = await fetch(`${DRAFT_BASE}/${reference.draftId}/revisions/${reference.revision}${validate ? '/validate' : ''}`, {
+    const response = await fetch(collaborationApiUrl(baseUrl, `drafts/${reference.draftId}/revisions/${reference.revision}${validate ? '/validate' : ''}`), {
       method: validate ? 'POST' : 'GET',
       headers: { 'X-BCS-Draft-Read-Token': reference.readToken },
       credentials: 'same-origin', cache: 'no-store', redirect: 'error',
@@ -85,8 +83,8 @@ async function request(reference: CollaborationDefinitionReference, validate: bo
   }
 }
 
-export async function readStoredDefinition(reference: CollaborationDefinitionReference, signal: AbortSignal): Promise<StoredDefinition> {
-  const r = await request(reference, false, signal);
+export async function readStoredDefinition(baseUrl: string, reference: CollaborationDefinitionReference, signal: AbortSignal): Promise<StoredDefinition> {
+  const r = await request(baseUrl, reference, false, signal);
   if (!r || r.draft_id !== reference.draftId || r.revision !== reference.revision
     || typeof r.definition_yaml !== 'string' || !validUnicode(r.definition_yaml) || !Number.isSafeInteger(r.size_bytes)
     || r.size_bytes < 0 || r.size_bytes > 65_536
@@ -108,10 +106,10 @@ export async function readStoredDefinition(reference: CollaborationDefinitionRef
     title: r.title ?? undefined, contentHash: hash, sizeBytes: bytes.length };
 }
 
-export async function validateStoredDefinition(reference: CollaborationDefinitionReference, source: StoredDefinition, signal: AbortSignal): Promise<{
+export async function validateStoredDefinition(baseUrl: string, reference: CollaborationDefinitionReference, source: StoredDefinition, signal: AbortSignal): Promise<{
   result: CollaborationDefinitionValidationResult; checkedAt: number; validator: string;
 }> {
-  const r = await request(reference, true, signal);
+  const r = await request(baseUrl, reference, true, signal);
   if (!r || r.draft_id !== source.draftId || r.revision !== source.revision || r.content_hash !== source.contentHash
     || typeof r.validator !== 'string' || !r.validator
     || typeof r.validated_at !== 'string' || !Number.isFinite(Date.parse(r.validated_at))) {

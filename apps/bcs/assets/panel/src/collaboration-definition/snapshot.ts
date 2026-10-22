@@ -91,7 +91,9 @@ export function snapshotInputFromProps(
     return (payloadData as Record<string, unknown>).params;
   }
   if (props.snapshot !== undefined) return props.snapshot;
-  return props;
+  // Host-injected transport settings are not fields of the message payload.
+  const { apiBaseUrl, baseUrl, data, ...snapshot } = props;
+  return snapshot;
 }
 
 export function decodeCollaborationDefinitionSnapshot(
