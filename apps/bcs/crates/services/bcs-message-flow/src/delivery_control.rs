@@ -92,7 +92,7 @@ pub async fn cancel_latest_queued(
             cancelled: Vec::new(),
         });
     };
-    visible(flow, &command.caller, &session, &actor, message).await?;
+    visible(flow, &command.caller, &session, &actor, message, SequenceAccess::Joined).await?;
 
     let mut cancelled = Vec::new();
     for row in rows.into_iter().filter(|row| {
@@ -152,7 +152,7 @@ pub async fn resolve(
     let message = repo.get_message_by_id(&session.id, &command.message_id).await
         .map_err(|_| ServiceError::InternalError("message ownership lookup failed".into()))?
         .ok_or_else(|| ServiceError::InvalidOperation { message: "message not found".into(), request_id: None })?;
-    visible(flow, &command.caller, &session, &actor, &message).await?;
+    visible(flow, &command.caller, &session, &actor, &message, SequenceAccess::Joined).await?;
     let service = flow.managed_deliveries.as_ref()
         .ok_or_else(|| ServiceError::Conflict("message is not queue-managed".into()))?;
     let row = service.lookup(bcs_service_api::port::repo::message_delivery::DeliveryLookup::Message(command.message_id.clone())).await
@@ -222,25 +222,65 @@ async fn authorize_session(
     Ok((session, actor))
 }
 
+#[derive(Clone, Copy)]
+enum SequenceAccess {
+    // Mutations retain the original authorization boundary.
+    Joined,
+    History { from_seq: Option<i64> },
+}
+
+fn joined_sequence(session: &Session, actor: &str) -> Option<i64> {
+    session.participant_join_seq.as_ref()
+        .and_then(|value| value.get(actor))
+        .and_then(serde_json::Value::as_i64)
+}
+
+async fn history_sequence_access(
+    flow: &BcsMessageFlow,
+    session: &Session,
+    actor: &str,
+) -> ServiceResult<SequenceAccess> {
+    let Some(anchor) = joined_sequence(session, actor) else {
+        // Preserve legacy Sessions without a recorded join boundary.
+        return Ok(SequenceAccess::Joined);
+    };
+    let Some(group) = flow.group.try_get(&session.group_id).await? else {
+        return Err(ServiceError::GroupNotFound(session.group_id.clone()));
+    };
+    let from_seq = match group.group_strategy {
+        bcs_domain::GroupStrategy::Chat => {
+            let repo = flow.message_repo.as_ref()
+                .ok_or_else(|| ServiceError::InternalError("message store unavailable".into()))?;
+            Some(repo.resolve_history_window_start(
+                &session.id, anchor, flow.new_participant_visible_limit,
+            ).await.map_err(|_| ServiceError::InternalError("message history window lookup failed".into()))?)
+        }
+        // These history projections use owner/audience, not a Chat join window.
+        bcs_domain::GroupStrategy::ManagerWorker | bcs_domain::GroupStrategy::StateMachine => None,
+    };
+    Ok(SequenceAccess::History { from_seq })
+}
+
 async fn visible(
     flow: &BcsMessageFlow,
     caller: &CallerContext,
     session: &Session,
     actor: &str,
     message: &PersistedMessage,
+    sequence_access: SequenceAccess,
 ) -> ServiceResult<()> {
     if message.session_id != session.id || message.group_id != session.group_id {
         return Err(ServiceError::Forbidden(
             "message does not belong to this session".into(),
         ));
     }
-    if session
-        .participant_join_seq
-        .as_ref()
-        .and_then(|v| v.get(actor))
-        .and_then(|v| v.as_i64())
-        .is_some_and(|joined| message.session_seq < joined)
-    {
+    let from_seq = match sequence_access {
+        SequenceAccess::Joined => joined_sequence(session, actor),
+        SequenceAccess::History { from_seq } => from_seq,
+    };
+    let supplemental = matches!(sequence_access, SequenceAccess::History { .. })
+        && bcs_domain::state_machine_history::is_supplemental_history(message);
+    if from_seq.is_some_and(|from| message.session_seq < from) && !supplemental {
         return Err(ServiceError::Forbidden(
             "message predates session access".into(),
         ));
@@ -310,6 +350,7 @@ pub async fn query(
         rows
     };
     let mut checked = std::collections::BTreeMap::new();
+    let mut history_access = None;
     let mut result = Vec::new();
     for row in &rows {
         if query.client_msg_id.is_none() && !query.message_ids.contains(&row.source_message_id) {
@@ -329,7 +370,15 @@ pub async fn query(
                 message.sender_id == actor && message.client_msg_id.as_ref() == Some(client)
             });
             if selected {
-                visible(flow, &query.caller, &session, &actor, &message).await?;
+                let access = match history_access {
+                    Some(access) => access,
+                    None => {
+                        let access = history_sequence_access(flow, &session, &actor).await?;
+                        history_access = Some(access);
+                        access
+                    }
+                };
+                visible(flow, &query.caller, &session, &actor, &message, access).await?;
             }
             checked.insert(row.source_message_id.clone(), (selected, message.content.clone()));
         }
@@ -358,7 +407,7 @@ pub async fn cancel(
             message: "message not found".into(),
             request_id: None,
         })?;
-    visible(flow, &command.caller, &session, &actor, &message).await?;
+    visible(flow, &command.caller, &session, &actor, &message, SequenceAccess::Joined).await?;
     if message.sender_id != actor {
         return Err(ServiceError::Forbidden(
             "only the message sender can cancel its delivery".into(),

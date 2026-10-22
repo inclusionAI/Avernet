@@ -64,6 +64,9 @@ pub struct BcsMessageFlow {
     pub provider_chat_run_timeout_ms: u64,
     pub system_message: Option<Arc<dyn SystemMessageService>>,
     pub message_repo: Option<Arc<dyn MessageRepoPort>>,
+    /// Read-only delivery queries share the configured Chat history window.
+    /// Bootstrap overrides this with message_history.new_participant_visible_limit.
+    pub new_participant_visible_limit: u64,
     pub event_record_factory: Option<Arc<dyn EventRecordFactoryPort>>,
     pub event_recorder: Option<Arc<dyn EventRecorderPort>>,
     pub message_tracker: Arc<crate::message_tracker::MessageTracker>,
@@ -112,6 +115,7 @@ impl BcsMessageFlow {
             provider_chat_run_timeout_ms: DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
             system_message: None,
             message_repo: None,
+            new_participant_visible_limit: 100,
             event_record_factory: None,
             event_recorder: None,
             message_tracker: Arc::new(crate::message_tracker::MessageTracker::new()),

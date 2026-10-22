@@ -73,8 +73,12 @@ error. Equal/older versions do not replace current state.
 - Inline v1 and reference v2 coordination consumption through an injected resolver port.
 
 Queued messages and run-reply display companions share the existing persisted
-visibility classifier. Queue status reads and targeted frontend events also
-enforce Human participant scope/audience; queueing does not bypass visibility.
+visibility classifier. Read-only delivery queries reuse the configured Chat
+history window for recorded join anchors (one bounded repository resolution per batch). ManagerWorker and
+StateMachine reads use their existing owner/audience rules without a Chat window.
+Missing legacy join anchors stay unrestricted by sequence; cancellation and manual
+resolution retain the strict join boundary. No View Actor override is added.
+Queue status reads and targeted frontend events also enforce Human participant scope/audience; queueing does not bypass visibility.
 
 Storage-only retries preserve scheduler work/results across transient DB failures,
 with 100 ms–5 s backoff, shutdown interruption and rate-limited warnings. Network

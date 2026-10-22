@@ -77,6 +77,10 @@ pub struct DeliveryAdmissionView {
     pub deliveries: Vec<DeliveryStatusView>,
 }
 
+/// Read-only status for the authenticated Session participant. Recorded Chat
+/// join anchors use the configured history window, not a strict post-join cutoff.
+/// Private-message and Human audience checks still apply to every selected source;
+/// any forbidden source fails the batch. This does not grant mutation authority.
 #[derive(Debug, Clone)]
 pub struct DeliveryStatusQuery {
     pub caller: super::CallerContext,

@@ -69,6 +69,7 @@ pub async fn wire_with_leader(
     let durable = repository.is_durable();
     config.provider_http.validate().map_err(|e| invalid(&e))?;
     flow.queue_persistable_headers = config.provider_http.queue_persistable_headers.clone();
+    flow.new_participant_visible_limit = config.message_history.new_participant_visible_limit;
     let live = Arc::new(LiveDeliveryPolicy::new(repository.clone(), initial.clone()));
     let service = ManagedMessageDelivery::new(repository).with_policy(live.clone());
     let metrics = Arc::new(crate::delivery_metrics::DeliveryMetrics::default());
@@ -202,6 +203,19 @@ async fn master(leader: &Arc<dyn bcs_service_api::LeaderElectionPort>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn delivery_queries_receive_configured_history_window() {
+        let fixture = wiring_support::FlowTestSupport::new_group_with_driver_and_observer().await;
+        let flow = BcsMessageFlow::new(fixture.group, fixture.routing, fixture.registry,
+            fixture.bot_delivery, fixture.frontend_delivery)
+            .with_message_repo(Arc::new(bcs_message_store::MemoryMessageRepo::new()));
+        let mut config = crate::BcsConfig::default();
+        assert_eq!(flow.new_participant_visible_limit, config.message_history.new_participant_visible_limit);
+        config.message_history.new_participant_visible_limit = 3;
+        let flow = wire(flow, &config).await.unwrap();
+        assert_eq!(flow.new_participant_visible_limit, 3);
+    }
 
     #[tokio::test]
     async fn master_reconciles_policy_after_five_seconds() {
