@@ -1,3 +1,5 @@
+
+from agentclaw.community.core.bot_management.engines.artifact_transfer import ArtifactTransferRegistry
 import copy
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -206,7 +208,7 @@ def test_bot_build_service_upgrade_returns_structured_result_for_bot_not_found()
     )
     svc = BotBuildService(
         user_list_repository=Mock(exists=Mock(return_value=False)),
-        artifact_transfer=Mock(publish=Mock(return_value=False), restore=Mock(return_value=None)),
+        artifact_transfers=ArtifactTransferRegistry({}),
         build_ignore_repository=Mock(get=Mock(return_value=None)),
         env="test",
         device_service=Mock(),
@@ -243,7 +245,7 @@ def test_bot_build_service_upgrade_raises_for_other_errors():
     baas_service.upgrade_bot.side_effect = Exception('boom')
     svc = BotBuildService(
         user_list_repository=Mock(exists=Mock(return_value=False)),
-        artifact_transfer=Mock(publish=Mock(return_value=False), restore=Mock(return_value=None)),
+        artifact_transfers=ArtifactTransferRegistry({}),
         build_ignore_repository=Mock(get=Mock(return_value=None)),
         env="test",
         device_service=Mock(),

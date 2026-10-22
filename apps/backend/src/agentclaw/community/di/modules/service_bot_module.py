@@ -26,6 +26,7 @@ bindings exist so production routes can use ``Injected(...)``.
 """
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.engines.artifact_transfer import ArtifactTransferRegistry
 from agentclaw.community.core.bot_management.engines.aicoding.artifact_transfer import AicodingArtifactTransferStrategy
 from agentclaw.community.core.bot_management.engines.aicoding.artifact_config import parse_fastdisk_publish_config
 from agentclaw.community.di.modules.config_module import read_user_config
@@ -412,6 +413,25 @@ class ServiceBotModule(Module):
     @singleton
     @provider
     @inject
+    def artifact_transfer_registry(
+        self,
+        device_service: DeviceService,
+        device_binding_repo: DeviceBindingRepository,
+        object_storage: cfg.ObjectStorageConfig,
+        mount_config: cfg.OssToNasConfig,
+    ) -> ArtifactTransferRegistry:
+        """Register coding hooks; every other engine gets the default no-op."""
+        coding = AicodingArtifactTransferStrategy(
+            device_service, parse_fastdisk_publish_config(read_user_config().get("fastdisk_publish")),
+            bucket=object_storage.bucket_name,
+            endpoint=object_storage.endpoint, oss_mount_root=mount_config.oss_root,
+            bindings=device_binding_repo,
+        )
+        return ArtifactTransferRegistry({"aicoding": coding, "claude_code": coding})
+
+    @singleton
+    @provider
+    @inject
     def bot_build_service(
         self,
         build_ignore_repository: BuildIgnoreRepositoryProtocol,
@@ -427,17 +447,11 @@ class ServiceBotModule(Module):
         baas: cfg.BaasConfig,
         common_whitelist_service: CommonWhiteListService,
         system_config_service: SystemConfigService,
-        object_storage: cfg.ObjectStorageConfig,
-        mount_config: cfg.OssToNasConfig,
+        artifact_transfers: ArtifactTransferRegistry,
     ) -> BotBuildService:
         """Construct ``BotBuildService`` with sandbox registry support."""
         return BotBuildService(
-            artifact_transfer=AicodingArtifactTransferStrategy(
-                device_service, parse_fastdisk_publish_config(read_user_config().get("fastdisk_publish")),
-                bucket=object_storage.bucket_name,
-                endpoint=object_storage.endpoint, oss_mount_root=mount_config.oss_root,
-                bindings=device_binding_repo,
-            ),
+            artifact_transfers=artifact_transfers,
             build_ignore_repository=build_ignore_repository,
             user_list_repository=user_list_repository,
             env=env_utils.get_current_env(),

@@ -217,29 +217,26 @@ The broader service split remains a separate refactor, as recorded by the
 existing architecture allowlist; this fix reduces the service file size.
 ## Fastdisk artifact transfer
 
-`BotBuildService` depends only on the neutral `ArtifactTransferStrategy` contract.
-The composition root injects `AicodingArtifactTransferStrategy` from
-`core/bot_management/engines/aicoding/artifact_transfer.py`. The strategy owns
-engine eligibility (`aicoding` and `claude_code` only), read-only detection and
-container-script invocation. Other engines never enter detection or script
-execution and retain the existing NAS build/restore path. The common orchestration
-has exactly two transfer hooks: `publish` and `restore`. Engine eligibility,
-draft-device/version checks, runtime path resolution and restore-result assembly
-are internal to the AICoding strategy; the caller does not use `supports` or
-assemble a container-script request. Publication returns false and restoration
-returns None only when not applicable; errors propagate without a NAS fallback.
-The path resolver is passed lazily, so other engines do not evaluate it.
-Build errors remain in their original module. The restore hook receives the
-existing migration-error type, preserving error handling without making the
-strategy import the orchestration implementation. This is an internal ownership refactor: API,
-version paths, configuration keys, script schema and timeout values are unchanged.
+`BotBuildService` receives the neutral `ArtifactTransferRegistry` and resolves
+an `ArtifactTransferStrategy` using each build plan's engine, at both `publish`
+and `restore` hooks. DI registers `AicodingArtifactTransferStrategy` only for
+`aicoding` and `claude_code`. Every other engine resolves to
+`DefaultArtifactTransferStrategy`, which returns False / None without runtime
+access, preserving the caller's existing NAS build/restore flow. A no-op never
+means transfer success. Coding errors propagate without NAS fallback.
 
-The strategy, `artifact_command.py` execution control and `fastdisk_detection/`
-embedded detector are colocated under `core/bot_management/engines/aicoding/`.
-Their unit tests mirror this engine directory. The transfer contract (`artifact_contract.py`) and pure configuration parser
-(`artifact_config.py`) live there too. The contract does not import the concrete
-strategy. DI reads the configuration block and assembles the strategy in the
-existing `ServiceBotModule`; no dedicated public configuration module is needed.
+The interface, default implementation and registry live in the neutral
+`core/bot_management/engines/artifact_transfer.py`; that module imports no
+coding implementation or configuration. Detection, draft-device/version checks,
+runtime path resolution, restore-result assembly, command execution and the
+pure configuration parser remain under `engines/aicoding/`. The caller neither
+checks `supports` nor assembles a container-script request. Path resolution is
+passed lazily, and the restore hook receives the existing migration-error type.
+
+The existing `ServiceBotModule` has a separate registry provider that assembles
+the coding implementation. Its `bot_build_service` provider only injects that
+registry. API, version paths, configuration keys, schema 6 and timeouts are
+unchanged by this selection refactor.
 
 The AICoding strategy consumes the existing build plan and a command executor. It
 embeds only read-only mount detection so legacy containers need no detector

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.engines.artifact_transfer import ArtifactTransferRegistry
+
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -38,7 +40,7 @@ def _make_service(
     whitelist_service.is_bot_feature_enabled.return_value = False
     return BotBuildService(
         user_list_repository=MagicMock(exists=MagicMock(return_value=False)),
-        artifact_transfer=MagicMock(publish=MagicMock(return_value=False), restore=MagicMock(return_value=None)),
+        artifact_transfers=ArtifactTransferRegistry({}),
         build_ignore_repository=MagicMock(get=MagicMock(return_value=None)),
         env="test",
         device_service=device_service,

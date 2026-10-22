@@ -37,7 +37,7 @@ from agentclaw.community.core.service_bot.services.build_ignore_rules import (
     is_excluded,
     validate_required_paths,
 )
-from agentclaw.community.core.bot_management.engines.aicoding.artifact_contract import ArtifactTransferStrategy
+from agentclaw.community.core.bot_management.engines.artifact_transfer import ArtifactTransferRegistry
 from agentclaw.community.core.service_bot.services.agentclaw_artifact import (
     restore_agentclaw_artifact,
     sync_agentclaw_artifact,
@@ -186,7 +186,7 @@ class BotBuildService:
         build_ignore_repository: BuildIgnoreRepositoryProtocol,
         user_list_repository: UserListRepositoryProtocol,
         env: str,
-        artifact_transfer: ArtifactTransferStrategy,
+        artifact_transfers: ArtifactTransferRegistry,
     ):
         """初始化 BotBuildService。
 
@@ -213,7 +213,7 @@ class BotBuildService:
         self._build_ignore_repository = build_ignore_repository
         self._env = env
         self._user_list_repository = user_list_repository
-        self._artifact_transfer = artifact_transfer
+        self._artifact_transfers = artifact_transfers
 
     def _get_device_binding_repo(self):
         return self._device_binding_repo
@@ -413,7 +413,7 @@ class BotBuildService:
             transfer_started = time.monotonic()
             migration_success = False
             try:
-                migration_success = self._artifact_transfer.publish(
+                migration_success = self._artifact_transfers.resolve(build_plan.engine_type).publish(
                     device_id=device_id, plan=build_plan, provider=provider,
                     target_dir=target_dir, ignore_paths=build_ignore_paths,
                     include_runtime_artifacts=include_runtime_artifacts,
@@ -1930,7 +1930,7 @@ class BotBuildService:
             entity_type=entity_type,
         )
         draft_dir = draft_nas_dir / build_plan.source_root_name
-        restored = self._artifact_transfer.restore(
+        restored = self._artifact_transfers.resolve(build_plan.engine_type).restore(
             bot=bot, source_version=source_version, plan=build_plan,
             provider=provider, artifact_dir=artifact_dir,
             migration_path_base=self._get_migration_path_base,

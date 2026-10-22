@@ -12,6 +12,7 @@ import uuid
 import zlib
 import time
 import math
+from ..artifact_transfer import ArtifactTransferStrategy
 from .artifact_command import run_artifact_command
 from .artifact_config import FastdiskPublishConfig
 from pathlib import Path, PurePosixPath
@@ -64,7 +65,7 @@ def detection_command() -> str:
     return command
 
 
-class AicodingArtifactTransferStrategy:
+class AicodingArtifactTransferStrategy(ArtifactTransferStrategy):
     @staticmethod
     def supports(plan: EngineBuildPlan) -> bool:
         """Only coding engines own this container transfer policy."""

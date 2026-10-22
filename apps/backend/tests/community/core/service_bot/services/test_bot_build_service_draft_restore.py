@@ -1,3 +1,6 @@
+from agentclaw.community.core.bot_management.engines.artifact_transfer import (
+    ArtifactTransferRegistry, DefaultArtifactTransferStrategy,
+)
 from agentclaw.community.core.bot_management.engines.aicoding.artifact_transfer import AicodingArtifactTransferStrategy
 
 import shutil
@@ -30,9 +33,11 @@ def test_restore_draft_arca_rsyncs_versioned_artifact_into_draft_nas(monkeypatch
     registry.resolve.return_value = provider
     baas = MagicMock()
     baas.resolve_container_provider.return_value = "baas"
+    coding = MagicMock()
+    coding.restore.side_effect = AssertionError("non-coding restore entered coding strategy")
     svc = BotBuildService(
         user_list_repository=MagicMock(exists=MagicMock(return_value=False)),
-        artifact_transfer=MagicMock(publish=MagicMock(return_value=False), restore=MagicMock(return_value=None)),
+        artifact_transfers=ArtifactTransferRegistry({"aicoding": coding, "claude_code": coding}),
         build_ignore_repository=MagicMock(get=MagicMock(return_value=None)),
         env="test",
         device_service=MagicMock(),
@@ -69,7 +74,8 @@ def test_restore_draft_arca_rsyncs_versioned_artifact_into_draft_nas(monkeypatch
         artifact_ext={"migration_path": "/home/admin/nfs/bot-data/3/openclaw"},
     )
 
-    svc._artifact_transfer.restore.assert_called_once()
+    assert isinstance(svc._artifact_transfers.resolve("openclaw"), DefaultArtifactTransferStrategy)
+    coding.restore.assert_not_called()
     assert result["restore_type"] == "migration_path"
     assert result["artifact_path"] == str(artifact_dir)
     rsync_call = svc._run_local_command.call_args_list[1].kwargs["cmd"]
@@ -118,7 +124,7 @@ async def test_restore_teclaw_draft_submits_then_checks_progress_one_step_at_a_t
     ]
     svc = BotBuildService(
         user_list_repository=MagicMock(exists=MagicMock(return_value=False)),
-        artifact_transfer=MagicMock(publish=MagicMock(return_value=False), restore=MagicMock(return_value=None)),
+        artifact_transfers=ArtifactTransferRegistry({}),
         build_ignore_repository=MagicMock(get=MagicMock(return_value=None)),
         env="test",
         device_service=MagicMock(),
@@ -212,7 +218,7 @@ async def test_restore_teclaw_draft_reports_terminal_baas_failure():
     baas.get_publish_progress.return_value = {"status": "FAILED"}
     svc = BotBuildService(
         user_list_repository=MagicMock(exists=MagicMock(return_value=False)),
-        artifact_transfer=MagicMock(publish=MagicMock(return_value=False), restore=MagicMock(return_value=None)),
+        artifact_transfers=ArtifactTransferRegistry({}),
         build_ignore_repository=MagicMock(get=MagicMock(return_value=None)),
         env="test",
         device_service=MagicMock(),
@@ -259,7 +265,7 @@ async def test_restore_teclaw_draft_retries_after_progress_query_error():
     baas.get_publish_progress.side_effect = RuntimeError("temporary gateway error")
     svc = BotBuildService(
         user_list_repository=MagicMock(exists=MagicMock(return_value=False)),
-        artifact_transfer=MagicMock(publish=MagicMock(return_value=False), restore=MagicMock(return_value=None)),
+        artifact_transfers=ArtifactTransferRegistry({}),
         build_ignore_repository=MagicMock(get=MagicMock(return_value=None)),
         env="test",
         device_service=MagicMock(),
@@ -786,13 +792,14 @@ def test_aicoding_restore_selects_container_before_host_artifact_access(monkeypa
     provider.get_base_path.return_value = '/home/admin/.aicoding'
     svc._resolve_sandbox_provider = MagicMock(return_value=provider)
     svc._get_migration_path_base = MagicMock(return_value='/opt/nfs/bot-data')
-    svc._artifact_transfer = object.__new__(AicodingArtifactTransferStrategy)
-    svc._artifact_transfer._bindings = MagicMock()
-    svc._artifact_transfer._bindings.get_by_id.return_value = MagicMock(device_id="current-draft", status="ACTIVE")
-    svc._artifact_transfer.try_restore = MagicMock()
-    svc._artifact_transfer.try_restore.return_value = '/home/admin/.aicoding' if fastdisk else None
+    coding = object.__new__(AicodingArtifactTransferStrategy)
+    svc._artifact_transfers = ArtifactTransferRegistry({"aicoding": coding, "claude_code": coding})
+    coding._bindings = MagicMock()
+    coding._bindings.get_by_id.return_value = MagicMock(device_id="current-draft", status="ACTIVE")
+    coding.try_restore = MagicMock()
+    coding.try_restore.return_value = '/home/admin/.aicoding' if fastdisk else None
     if fastdisk == 'failed':
-        svc._artifact_transfer.try_restore.side_effect = FastdiskPublishError('restore failed')
+        coding.try_restore.side_effect = FastdiskPublishError('restore failed')
     svc._run_local_command = MagicMock()
     svc._sync_extra_include_files = MagicMock()
     artifact_root = tmp_path / 'not-mounted-in-backend'
@@ -810,7 +817,7 @@ def test_aicoding_restore_selects_container_before_host_artifact_access(monkeypa
     else:
         with pytest.raises(FastdiskPublishError):
             svc.restore_draft(**kwargs)
-    call = svc._artifact_transfer.try_restore.call_args.kwargs
+    call = coding.try_restore.call_args.kwargs
     assert call['device_id'] == 'current-draft'
     assert call['artifact_path'] == '/opt/nfs/bot-data/3/aicoding'
     assert not nas_root.exists()

@@ -48,15 +48,23 @@ def test_composition_root_wires_strategy_with_deployment_config(monkeypatch):
     })
     module = service_bot_module.ServiceBotModule()
     args = {name: Mock() for name in signature(module.bot_build_service).parameters}
-    args["object_storage"] = SimpleNamespace(bucket_name="test-bucket", endpoint="")
-    args["mount_config"] = SimpleNamespace(oss_root="/test/oss")
+    registry = module.artifact_transfer_registry(
+        device_service=args["device_service"],
+        device_binding_repo=args["device_binding_repo"],
+        object_storage=SimpleNamespace(bucket_name="test-bucket", endpoint=""),
+        mount_config=SimpleNamespace(oss_root="/test/oss"),
+    )
+    args["artifact_transfers"] = registry
     service = module.bot_build_service(**args)
-    strategy = service._artifact_transfer
+    assert service._artifact_transfers is registry
+    strategy = registry.resolve("aicoding")
+    assert registry.resolve("claude_code") is strategy
     assert strategy.config.upload_timeout_seconds == 900
     assert strategy.bucket == "test-bucket"
     assert str(strategy.oss_mount_root) == "/test/oss"
     assert strategy.executor is args["device_service"]
     assert strategy._bindings is args["device_binding_repo"]
+
 
 
 @pytest.mark.parametrize("block", ["invalid", "", [], 0, False])

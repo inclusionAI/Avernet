@@ -20,6 +20,8 @@ provides:
   - "AicodingRestartLifecycle"
   - "AicodingArtifactTransferStrategy"
   - "ArtifactTransferStrategy"
+  - "DefaultArtifactTransferStrategy"
+  - "ArtifactTransferRegistry"
   - "CreateBotForOthersService"
   - "DefaultBotPassportRepairService"
   - "BotQuotaService and BotQuotaScope"
@@ -213,3 +215,19 @@ are cleared without reading the draft CLI source or creating an absent OSS
 subtree. Engine files and mount-path selection are unchanged. Historical draft
 restore ignores today's publication gate and restores the selected version.
 Schema-5 containers fail the pre-execution probe rather than ignoring the gate.
+
+
+### Artifact transfer strategy selection
+
+`engines/artifact_transfer.py` owns the neutral interface, default no-op and
+registry. The composition root registers the coding implementation for
+`aicoding` and `claude_code`; `BotBuildService` resolves using each build plan's
+engine on both publication and draft restore. All other engines select the
+default, whose `False` / `None` results retain the existing NAS flow without
+reading coding configuration, runtime paths or container state. The default
+never reports a completed transfer. Coding errors still propagate, not fall back.
+
+Fastdisk detection, configuration, command execution and OSS request construction
+remain in `engines/aicoding/`. DI assembly may reference the concrete coding
+implementation; the shared build service imports only the neutral registry.
+This is a selection refactor, not a script protocol change (schema 6 is unchanged).
