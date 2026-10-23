@@ -8,6 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+import httpx
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -18,7 +19,7 @@ from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosed
 
 from engine.community.core.dws_hosting.execution import HostingExecutor, invocation_for
-from engine.community.kernel.dws_execution import EngineUpdate, ExecutionError
+from engine.community.kernel.dws_execution import ExecutionError
 from engine.community.plugins.dws_hosting.openclaw import OpenClawHostingEngine
 from engine.community.plugins.dws_hosting.openclaw_transport import (
     HostingGatewayConfig,
@@ -27,6 +28,15 @@ from engine.community.plugins.dws_hosting.openclaw_transport import (
 )
 
 from .test_execution import build_execution, result_json
+
+
+@pytest.fixture(autouse=True)
+def scope_task_for_gateway_tests(monkeypatch):
+    # This suite exercises agent WS faults after eligibility; HTTP scope has its own suite.
+    async def allowed(self, data, prompt):
+        return {"decision": "allow", "reason_code": "inside_rule"}
+
+    monkeypatch.setattr(OpenClawHostingEngine, "classify_scope", allowed)
 
 
 @pytest.mark.parametrize(
@@ -247,45 +257,48 @@ async def response(ws, req, payload, *, ok=True, **extra):
     )
 
 
-@pytest.mark.parametrize("status", ["ok", "error", "in_flight", "rejected"])
+@pytest.mark.parametrize("status", ["ok", "error", "in_flight", "rejected", "invalid"])
 @pytest.mark.parametrize("method", ["repair", "review_reply"])
-async def test_repair_requires_tool_free_raw_model_mode(
-    execution, key_file, status, method
+async def test_auxiliary_uses_llm_task_without_agent_session(
+    execution, key_file, status, method, monkeypatch
 ):
     request = invocation_for(execution[2])
+    expected = (
+        {"verdict": "approve", "reason_code": "approved", "reason": "Relevant."}
+        if method == "review_reply"
+        else {"schema_version": 1, "rule_version": 1, "action": "ignore"}
+    )
+    calls = []
+    original = httpx.AsyncClient
 
-    async def handler(ws, req):
-        p = req["params"]
-        assert p["modelRun"] is True and p["promptMode"] == "none"
-        assert p["deliver"] is False
-        run = p["idempotencyKey"]
-        await response(ws, req, {"runId": run, "status": "accepted"})
-        await response(
-            ws,
-            req,
-            {
-                "runId": run,
-                "status": status,
-                "summary": "completed",
-                "result": json.loads(result_json()),
-            },
-            ok=status != "rejected",
-        )
+    def handle(req):
+        calls.append(req)
+        body = json.loads(req.content)
+        assert req.url.path == "/tools/invoke"
+        assert body["tool"] == "llm-task"
+        assert "sessionKey" not in body and "sessionKey" not in body["args"]
+        assert body["args"]["input"] == request.message
+        assert body["args"]["schema"]["additionalProperties"] is False
+        if status == "in_flight":
+            return httpx.Response(200, json={"ok": True, "status": "accepted"})
+        return httpx.Response(200, json={"ok": status != "rejected", "result": {
+            "isError": status == "error", "details": {"json": expected if status != "invalid" else {"verdict": "approve"}}
+        }})
 
-    async with gateway(key_file, handler) as (config, requests, _):
-        engine = OpenClawHostingEngine(config)
-        if status == "ok":
-            assert json.loads(await getattr(engine, method)(request)) == json.loads(
-                result_json()
-            )
-        else:
-            with pytest.raises(ExecutionError):
-                await getattr(engine, method)(request)
-        assert len(requests) == 1
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(handle), **kw))
+    engine = OpenClawHostingEngine(HostingGatewayConfig(url="ws://localhost", device_key_file=key_file, token="test"))
+    monkeypatch.setattr(engine, "_execute", lambda *a, **kw: pytest.fail("no persistent agent fallback"))
+    if status == "ok":
+        result = json.loads(await getattr(engine, method)(request))
+        assert json.loads(result["payloads"][0]["text"]) == expected
+    else:
+        with pytest.raises(ExecutionError):
+            await getattr(engine, method)(request)
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize("method", ["repair", "review_reply"])
-async def test_raw_model_ack_without_result_is_not_approval(
+async def test_auxiliary_cancellation_does_not_abort_main_session(
     execution, key_file, monkeypatch, method
 ):
     request = invocation_for(execution[2])
@@ -295,31 +308,33 @@ async def test_raw_model_ack_without_result_is_not_approval(
         )
     )
 
-    async def ack_only(request, *, raw_model):
-        assert raw_model is True
-        yield EngineUpdate(run_id=request.run_id, status="accepted")
-
-    monkeypatch.setattr(engine, "_execute", ack_only)
-    with pytest.raises(ExecutionError, match="unavailable"):
+    from engine.community.plugins.dws_hosting import llm_task
+    async def cancelled(*args, **kwargs):
+        raise asyncio.CancelledError()
+    async def forbidden(*args, **kwargs):
+        pytest.fail("auxiliary cancellation must not touch the main session")
+    monkeypatch.setattr(llm_task, "invoke", cancelled)
+    monkeypatch.setattr(engine, "_abort", forbidden)
+    with pytest.raises(asyncio.CancelledError):
         await getattr(engine, method)(request)
 
 
 @pytest.mark.parametrize("cached", [False, True])
-async def test_real_rpc_to_durable_decision(execution, key_file, cached):
+async def test_real_rpc_to_durable_decision(execution, key_file, cached, monkeypatch):
     state, ledger, turn, _ = execution
+    from engine.community.plugins.dws_hosting import llm_task
+    async def reviewed(*args, **kwargs):
+        return {"verdict": "approve", "reason_code": "approved", "reason": "Relevant."}
+    monkeypatch.setattr(llm_task, "invoke", reviewed)
 
     async def handler(ws, req):
         assert req["method"] == "agent"
         params = req["params"]
         assert params["deliver"] is False
-        if params["idempotencyKey"].endswith("-review"):
-            assert params["modelRun"] is True and params["promptMode"] == "none"
-            assert ":review:" in params["sessionKey"]
-            final = result_json('{"verdict":"approve"}')
-        else:
-            assert "modelRun" not in params and "promptMode" not in params
-            assert "rule_version" in params["extraSystemPrompt"]
-            final = result_json()
+        assert not params["idempotencyKey"].endswith("-review")
+        assert "modelRun" not in params and "promptMode" not in params
+        assert "rule_version" in params["extraSystemPrompt"]
+        final = result_json()
         assert params["sessionKey"].startswith("agent:main:dws:")
         run = params["idempotencyKey"]
         # Unrelated session events and other RPCs must never become this turn's result.
@@ -352,10 +367,8 @@ async def test_real_rpc_to_durable_decision(execution, key_file, cached):
         result = await worker.execute("binding", turn.turn_id)
         assert result.state == "resolved" and result.decision.action == "reply"
         await asyncio.wait_for(closed.wait(), 1)
-        assert len(requests) == 2
-        assert (
-            requests[0]["params"]["sessionKey"] != requests[1]["params"]["sessionKey"]
-        )
+        assert len(requests) == 1
+        assert requests[0]["params"]["sessionKey"] == invocation_for(turn).session_key
 
 
 @pytest.mark.parametrize(

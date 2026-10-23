@@ -15,7 +15,7 @@ from engine.community.kernel.dws_delivery import (
     DeliveryReceipt,
     PreflightError,
 )
-from engine.community.kernel.dws_execution import EngineUpdate
+from engine.community.kernel.dws_execution import EngineUpdate, HostingScope
 from engine.community.kernel.dws_management import HostingSettings
 from engine.community.plugins.dws_hosting.outbox import SqliteHostingOutbox
 from engine.community.plugins.dws_hosting.recovery import SqliteHostingRecoveryStore
@@ -58,6 +58,7 @@ def resolve(ledger, turn, *, action="reply"):
     from .test_context import permitted_context
     request = invocation_for(turn, permitted_context(turn))
     ledger.reserve(turn, request)
+    ledger.record_scope("binding", turn.turn_id, HostingScope(decision="allow", reason_code="inside_rule"))
     raw = result_json(decision_json(action, version=turn.rule_version))
     ledger.record_update(
         "binding",
@@ -361,6 +362,7 @@ def test_ignore_has_no_outbox_owner_notices_never_choose_peer(tmp_path, action):
     state, ledger, turn, directory = build_execution(tmp_path)
     if action == "manual":
         ledger.reserve(turn, invocation_for(turn))
+        ledger.record_scope("binding", turn.turn_id, HostingScope(decision="allow", reason_code="inside_rule"))
         ledger.require_manual("binding", turn.turn_id, "invalid_result", ended=True)
     else:
         resolve(ledger, turn, action=action)

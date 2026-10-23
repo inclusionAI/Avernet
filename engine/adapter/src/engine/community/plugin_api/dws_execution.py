@@ -11,11 +11,20 @@ from engine.community.kernel.dws_execution import (
     RunObservation,
     GatewayWitness,
     HostingReview,
+    HostingScope,
 )
 from engine.community.kernel.dws_hosting import Turn
 
 
 class HostingEngine(Protocol):
+    async def classify_scope(self, data: dict, prompt: str) -> HostingScope:
+        """Isolated, tool-free JSON task; never use the reply session or send.
+
+        Missing capability, invalid output and timeouts fail closed. Only allow
+        permits agent execution. Message content is data, not authorization.
+        """
+        ...
+
     def execute(self, request: AgentInvocation) -> AsyncIterator[EngineUpdate]:
         """One dispatch only; accepted is not terminal. Never automatically replay."""
         ...
@@ -54,6 +63,16 @@ class HostingFormatRepair(Protocol):
 
 
 class HostingExecutionStore(Protocol):
+    def record_scope(
+        self, binding_id: str, turn_id: str, scope: HostingScope
+    ) -> ExecutionRecord:
+        """Persist eligibility before dispatch; exclusions finish silently.
+
+        Unknown eligibility is retained for diagnosis, never an owner notice.
+        Revoked control epochs cancel the execution, including after inference.
+        """
+        ...
+
     def review_context(
         self, binding_id: str, turn_id: str
     ) -> tuple[dict[str, str], ...]:

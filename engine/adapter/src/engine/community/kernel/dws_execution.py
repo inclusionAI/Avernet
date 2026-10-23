@@ -26,6 +26,24 @@ class GatewayWitness(Value):
         return self
 
 
+class HostingScope(Value):
+    decision: Literal["allow", "ignore", "uncertain"]
+    reason_code: Literal[
+        "inside_rule", "outside_rule", "insufficient_facts", "unavailable"
+    ]
+
+    @model_validator(mode="after")
+    def consistent(self):
+        valid = {
+            "allow": {"inside_rule"},
+            "ignore": {"outside_rule"},
+            "uncertain": {"insufficient_facts", "unavailable"},
+        }
+        if self.reason_code not in valid[self.decision]:
+            raise ValueError("inconsistent scope result")
+        return self
+
+
 class AgentInvocation(Value):
     rpc_id: Identifier
     run_id: Identifier
@@ -37,6 +55,7 @@ class AgentInvocation(Value):
     dialogue_snapshot: DialogueSnapshot | None = None
     dialogue_sync_keys: tuple[str, ...] = ()
     gateway_witness: GatewayWitness | None = None
+    scope: HostingScope | None = None
 
 
 class EngineUpdate(Value):

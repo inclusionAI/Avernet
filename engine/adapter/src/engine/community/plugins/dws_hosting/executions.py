@@ -9,6 +9,7 @@ from engine.community.kernel.dws_execution import (
     ExecutionRecord,
     HostingDecision,
     HostingReview,
+    HostingScope,
 )
 from engine.community.kernel.dws_hosting import Turn
 from engine.community.plugins.dws_hosting.database import HostingDatabase
@@ -21,6 +22,38 @@ TERMINAL = {"resolved", "manual", "cancelled"}
 class SqliteHostingExecutionStore:
     def __init__(self, state_dir: Path):
         self._database = HostingDatabase(state_dir)
+
+    def record_scope(
+        self, binding_id: str, turn_id: str, scope: HostingScope
+    ) -> ExecutionRecord:
+        with self._database.transaction() as db:
+            row = self._row(db, binding_id, turn_id)
+            record = self._record(row)
+            if record.state != "dispatching" or record.invocation.scope is not None:
+                return record
+            current = self._current(db, binding_id, turn_id)
+            state = (
+                "dispatching" if current and scope.decision == "allow" else "cancelled"
+            )
+            request = record.invocation.model_copy(update={"scope": scope})
+            db.execute(
+                "UPDATE executions SET invocation_json=?, state=?, reason=? WHERE turn_id=?",
+                (
+                    request.model_dump_json(),
+                    state,
+                    ""
+                    if state == "dispatching"
+                    else (
+                        "scope_" + scope.reason_code if current else "control_revoked"
+                    ),
+                    turn_id,
+                ),
+            )
+            if state == "cancelled":
+                db.execute(
+                    "UPDATE batches SET state='completed' WHERE batch_id=?", (turn_id,)
+                )
+            return self._record(self._row(db, binding_id, turn_id))
 
     def review_context(
         self, binding_id: str, turn_id: str
