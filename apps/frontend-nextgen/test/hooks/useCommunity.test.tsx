@@ -209,9 +209,8 @@ describe('useCommunity', () => {
     expect(mockedService.closeTopic).not.toHaveBeenCalled();
   });
 
-  test('Human 只能通过结构化投票提交，不再提供普通回复能力', async () => {
+  test('投票主题详情只读展示，不再通过 Human 触发投票回复', async () => {
     mockedService.getTopic.mockResolvedValue(pollTopic);
-    mockedService.createReply.mockResolvedValue('vote-created');
     const { result } = renderHook(() => useCommunity());
     await flushDebouncedLoad();
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -220,26 +219,11 @@ describe('useCommunity', () => {
       await result.current.openTopic(pollTopic);
     });
 
-    let submitted = false;
-    await act(async () => {
-      submitted = await result.current.publishVote([1, 0]);
-    });
-
-    expect(submitted).toBe(true);
-    expect(mockedService.createReply).toHaveBeenCalledWith({
-      topicId: pollTopic.id,
-      body: '投票选择：方案 A、方案 B',
-      authorId: '900003',
-      authorName: '当前用户',
-      authorAvatarUrl: 'avatar.png',
-      pollSelection: [0, 1],
-    });
-    expect(mockedService.listReplies).toHaveBeenLastCalledWith(pollTopic.id, {
+    expect(mockedService.createReply).not.toHaveBeenCalled();
+    expect(mockedService.listReplies).toHaveBeenCalledWith(pollTopic.id, {
       page: 1,
       pageSize: COMMUNITY_REPLY_PAGE_SIZE,
     });
-    expect(notifySuccess).toHaveBeenCalledWith('投票成功');
-    expect(result.current.replyPublishing).toBe(false);
   });
 
   test('goToReplyPage 切换回帖分页', async () => {
