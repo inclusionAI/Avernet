@@ -61,7 +61,12 @@ async def compile_identity(
         if isinstance(inline, str):
             try:
                 digest = await file_produced(
-                    session, content, inline.encode("utf-8"), origin=ORIGIN_INLINE, category=_CATEGORY, identity=file_type
+                    session,
+                    content,
+                    inline.encode("utf-8"),
+                    origin=ORIGIN_INLINE,
+                    category=_CATEGORY,
+                    identity=file_type,
                 )
             except EntryFetchError as exc:
                 failures.append(EntryFailure(file_type, exc.reason))
