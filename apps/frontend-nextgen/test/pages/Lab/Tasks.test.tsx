@@ -97,6 +97,14 @@ const dashboardEnvelope = {
             creator: 'b-9',
             created_at: 1792557600000,
           },
+          {
+            artifact_id: 'artifact-text',
+            artifact_name: '执行摘要',
+            kind: 'text',
+            content: { text: '纯文本执行摘要' },
+            creator: 'b-9',
+            created_at: 1792557601000,
+          },
         ],
         run_info: { action_log: [{ seq: 1, ts: 1700000000000, action: 'dispatch', attempt: 1 }] },
       },
@@ -267,6 +275,11 @@ describe('LabTasksPage(实验室·任务体验页)', () => {
       fireEvent.click(screen.getByRole('button', { name: '关闭' }));
       expect(screen.queryByTestId('task-artifact-preview-drawer')).not.toBeInTheDocument();
       expect(screen.getByText('任务产物')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: '预览产物 执行摘要' }));
+      expect(await screen.findByTestId('task-artifact-plain-text')).toHaveTextContent('纯文本执行摘要');
+      fireEvent.click(screen.getByRole('button', { name: '下载文件' }));
+      expect(await screen.findByRole('alert')).toHaveTextContent('纯文本类型的产物不支持下载。');
     } finally {
       anchorClick.mockRestore();
     }

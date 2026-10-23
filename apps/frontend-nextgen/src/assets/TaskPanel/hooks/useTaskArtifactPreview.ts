@@ -75,13 +75,16 @@ function clickDownload(href: string, fileName: string, openInNewTab = false): vo
   anchor.remove();
 }
 
-/** 使用既有 session_files / bot workspace 服务加载 Task file artifact。 */
+/** 直接预览 text 产物；file 产物使用既有 session_files / bot workspace 服务加载。 */
 export function useTaskArtifactPreview(
   artifact: TaskArtifactView | null,
   context: TaskArtifactAccessContext,
 ): TaskArtifactPreviewState {
   const [state, setState] = useState<TaskArtifactPreviewState>(() => stateFor('other', 'unsupported'));
-  const fileRef = artifact?.kind === 'file' ? artifact.fileRef : null;
+  const hasArtifact = artifact !== null;
+  const artifactKind = artifact?.kind ?? null;
+  const textArtifactContent = artifactKind === 'text' ? artifact?.summary ?? '' : null;
+  const fileRef = artifactKind === 'file' ? artifact?.fileRef : null;
   const name = artifact?.name ?? '';
   const storageType = fileRef?.storageType ?? null;
   const storageId = fileRef?.storageId ?? null;
@@ -89,7 +92,16 @@ export function useTaskArtifactPreview(
   const fileType = fileRef?.fileType ?? '';
 
   useEffect(() => {
-    if (!artifact || !fileRef || !storageId) {
+    if (!hasArtifact) {
+      setState(stateFor('other', 'unsupported'));
+      return;
+    }
+    if (artifactKind === 'text') {
+      const text = textArtifactContent ?? '';
+      setState({ ...stateFor('text', 'ready'), text, size: new Blob([text]).size });
+      return;
+    }
+    if (!fileRef || !storageId) {
       setState(stateFor('other', 'unsupported'));
       return;
     }
@@ -148,7 +160,19 @@ export function useTaskArtifactPreview(
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [artifact?.id, context.ownerBotId, context.ownerUserId, fileId, fileRef, fileType, name, storageId, storageType]);
+  }, [
+    artifactKind,
+    context.ownerBotId,
+    context.ownerUserId,
+    fileId,
+    fileRef,
+    fileType,
+    hasArtifact,
+    name,
+    storageId,
+    storageType,
+    textArtifactContent,
+  ]);
 
   return state;
 }
@@ -158,6 +182,8 @@ export async function downloadTaskArtifact(
   artifact: TaskArtifactView,
   context: TaskArtifactAccessContext,
 ): Promise<void> {
+  if (artifact.kind === 'text') throw new Error('纯文本类型的产物不支持下载。');
+
   const fileRef = artifact.kind === 'file' ? artifact.fileRef : null;
   if (!fileRef) throw new Error('产物文件引用不完整，无法下载。');
 

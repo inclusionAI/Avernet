@@ -1,7 +1,7 @@
 // @asset-migrated: teamclaw 自研资产
 /**
  * ArtifactsSection —— 产物区(PRD #产物):任务级聚合(或 L2 按 node 过滤)后的产物卡列表。
- * Descriptor file 使用既有 session_files / bot workspace 服务站内预览与下载；链接类维持外链打开。
+ * Descriptor text/file 站内预览；file 使用既有 session_files / bot workspace 服务下载，链接类维持外链打开。
  */
 import React, { useState } from 'react';
 
@@ -96,6 +96,7 @@ export const ArtifactsSection: React.FC<ArtifactsSectionProps> = ({
               const href = artifactViewHref(a);
               const time = a.updatedAt ? a.updatedAt.replace('T', ' ').slice(0, 16) : '';
               const isFileArtifact = a.kind === 'file' && a.fileRef !== null && a.fileRef !== undefined;
+              const hasPreviewActions = a.kind === 'text' || isFileArtifact;
               return (
                 <li
                   key={a.id}
@@ -154,7 +155,7 @@ export const ArtifactsSection: React.FC<ArtifactsSectionProps> = ({
                       </div>
                     )}
                   </div>
-                  {isFileArtifact ? (
+                  {hasPreviewActions ? (
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                       <button
                         type="button"

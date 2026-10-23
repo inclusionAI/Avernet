@@ -190,6 +190,23 @@ describe('TaskOverviewV2(L1)', () => {
     expect(screen.getByTitle('打开产物:需求说明书').getAttribute('href')).toBe('https://yuque.example/doc1');
   });
 
+  it('纯文本产物可预览，并在下载时提示不支持', async () => {
+    render(<TaskOverviewV2 {...props()} />);
+
+    expect(screen.getByRole('button', { name: '预览产物 阶段结论' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '下载产物 阶段结论' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '预览产物 阶段结论' }));
+    expect((await screen.findByTestId('task-artifact-plain-text')).textContent).toContain('一段纯文本结论');
+
+    fireEvent.click(screen.getByRole('button', { name: '下载文件' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('纯文本类型的产物不支持下载。');
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+    fireEvent.click(screen.getByRole('button', { name: '下载产物 阶段结论' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('纯文本类型的产物不支持下载。');
+  });
+
   it('session_file 产物可在 TaskPanel 内预览，并可关闭抽屉', async () => {
     const sessionArtifact = {
       id: 'session-pdf',
