@@ -205,3 +205,25 @@ test('Provider identity must be durable before registration HTTP starts', async 
   await assert.rejects(loadOrRegisterBotSession(fakeContext(credentials), testConfig(), { transport }), /write failed/);
   assert.equal(transport.requests.length, 0);
 });
+
+
+test('lost Provider response blocks legacy onboarding without replacing the pending identity', async () => {
+  const credentials = new MemoryCredentials();
+  credentials.values.set('BCN_ONBOARDING_TOKEN', providerToken());
+  const transport = new ProviderTransport();
+  const original = transport.requestJson.bind(transport);
+  transport.requestJson = async (...args) => {
+    await original(...args);
+    throw new Error('connection lost');
+  };
+  await assert.rejects(loadOrRegisterBotSession(fakeContext(credentials), testConfig(), { transport }), /connection lost/);
+  const pending = credentials.values.get('BCN_BOT_SESSION_REGISTRATION');
+  assert.ok(pending);
+  credentials.values.set('BCN_ONBOARDING_TOKEN', token());
+  const legacy = new FakeHttpTransport();
+  await assert.rejects(loadOrRegisterBotSession(fakeContext(credentials), testConfig(), { transport: legacy }),
+    /Pending BCN Provider registration cannot be replaced by legacy onboarding/);
+  assert.equal(legacy.requests.length, 0);
+  assert.equal(credentials.values.get('BCN_BOT_SESSION_REGISTRATION'), pending);
+  assert.equal(credentials.values.has('BCN_BOT_SESSION'), false);
+});

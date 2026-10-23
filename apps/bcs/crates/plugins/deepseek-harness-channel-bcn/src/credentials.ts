@@ -45,11 +45,14 @@ export async function loadOrRegisterBotSession(
     config.connectionTimeoutMs,
   );
   const scope = registrationTokenScope(onboardingToken.value);
+  const pendingRef = credentialRef(`${config.botSessionRef}_REGISTRATION`);
+  const pending = await ctx.credentials.resolve(pendingRef);
+  if (pending && !scope) {
+    throw new Error('Pending BCN Provider registration cannot be replaced by legacy onboarding; use the original Provider token or a separate DSH profile');
+  }
   let providerBotRef: string | undefined;
   if (scope) {
     // Persist before HTTP: a lost response or failed Session write must not create another Bot.
-    const pendingRef = credentialRef(`${config.botSessionRef}_REGISTRATION`);
-    const pending = await ctx.credentials.resolve(pendingRef);
     if (pending) {
       let record: Record<string, unknown> | undefined;
       try { record = asRecord(JSON.parse(pending.value)); } catch { /* Report without credential contents. */ }
