@@ -81,8 +81,32 @@ const task = {
       startedAtMs: 1700000000000,
       endAtMs: 1700000005000,
       artifacts: [
-        { id: 'art-url', name: '需求说明书', type: 'link', kind: 'url_link', url: 'https://yuque.example/doc1', owner: 'group-902', updatedAt: '2026-10-20T08:53:20.000Z' },
-        { id: 'art-code', name: '重构 PR', type: 'other', kind: 'code', url: 'https://git.example/pr/1024', owner: 'bot-coder', updatedAt: '2026-10-20T08:56:40.000Z' },
+        {
+          id: 'art-url',
+          name: '需求说明书',
+          type: 'link',
+          kind: 'url_link',
+          url: 'https://yuque.example/doc1',
+          linkRef: { url: 'https://yuque.example/doc1', type: 'dima需求' },
+          owner: 'group-902',
+          updatedAt: '2026-10-20T08:53:20.000Z',
+        },
+        {
+          id: 'art-code',
+          name: '重构 PR',
+          type: 'other',
+          kind: 'code',
+          url: 'https://git.example/pr/1024',
+          summary: '产物读侧接入',
+          codeRef: {
+            codeBaseName: 'avernet',
+            codeBaseAddress: 'https://git.example/avernet',
+            pullRequestUrl: 'https://git.example/pr/1024',
+            description: '产物读侧接入',
+          },
+          owner: 'bot-coder',
+          updatedAt: '2026-10-20T08:56:40.000Z',
+        },
         { id: 'art-text', name: '阶段结论', type: 'document', kind: 'text', summary: '一段纯文本结论', owner: 'bot-planner', updatedAt: '2026-10-20T08:58:20.000Z' },
       ],
     }),
@@ -200,8 +224,40 @@ describe('TaskOverviewV2(L1)', () => {
     expect(screen.getByText('链接')).toBeTruthy();
     expect(screen.getByText('代码')).toBeTruthy();
     expect(screen.queryByText('文件')).toBeNull(); // 无 file kind 产物
-    // url_link 卡可打开
-    expect(screen.getByTitle('打开产物:需求说明书').getAttribute('href')).toBe('https://yuque.example/doc1');
+    // url_link 卡保留外链入口，并新增站内预览。
+    expect(screen.getByRole('link', { name: '跳转产物 需求说明书' }).getAttribute('href')).toBe(
+      'https://yuque.example/doc1',
+    );
+    expect(screen.getByRole('link', { name: '跳转产物 重构 PR' }).getAttribute('href')).toBe(
+      'https://git.example/pr/1024',
+    );
+    expect(screen.getByRole('button', { name: '预览产物 需求说明书' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '预览产物 重构 PR' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '下载产物 需求说明书' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '下载产物 重构 PR' })).toBeNull();
+  });
+
+  it('链接与代码产物可预览完整详情', async () => {
+    render(<TaskOverviewV2 {...props()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '预览产物 需求说明书' }));
+    const linkDetails = await screen.findByTestId('task-artifact-link-details');
+    expect(linkDetails.textContent).toContain('dima需求');
+    expect(linkDetails.textContent).toContain('https://yuque.example/doc1');
+    expect(linkDetails.textContent).toContain('group-902');
+    expect(screen.getByRole('link', { name: '打开链接' }).getAttribute('href')).toBe('https://yuque.example/doc1');
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+    fireEvent.click(screen.getByRole('button', { name: '预览产物 重构 PR' }));
+    const codeDetails = await screen.findByTestId('task-artifact-code-details');
+    expect(codeDetails.textContent).toContain('avernet');
+    expect(codeDetails.textContent).toContain('https://git.example/avernet');
+    expect(codeDetails.textContent).toContain('https://git.example/pr/1024');
+    expect(codeDetails.textContent).toContain('产物读侧接入');
+    expect(codeDetails.textContent).toContain('bot-coder');
+    expect(screen.getByRole('link', { name: '查看 PR' }).getAttribute('href')).toBe(
+      'https://git.example/pr/1024',
+    );
   });
 
   it('纯文本产物可预览，并在下载时提示不支持', async () => {

@@ -1,10 +1,11 @@
 // @asset-migrated: teamclaw 自研资产
-/** Task file artifact 站内预览抽屉；仅依赖 TaskPanel 与既有 Service，避免反向依赖 Workspace 页面。 */
+/** Task artifact 站内预览抽屉；仅依赖 TaskPanel 与既有 Service，避免反向依赖 Workspace 页面。 */
 import { formatFileSize, getFileExt } from '@/services/workspace/sessionFileUtils';
 import MarkdownIt from 'markdown-it';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { artifactViewHref } from '../artifactDescriptor';
 import {
   downloadTaskArtifact,
   type TaskArtifactAccessContext,
@@ -58,6 +59,24 @@ function PreviewMessage({ children, danger = false }: { children: React.ReactNod
   );
 }
 
+function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-[96px_minmax(0,1fr)] gap-4 border-b border-border py-4 last:border-b-0">
+      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+      <dd className="m-0 min-w-0 whitespace-pre-wrap break-all text-sm leading-6 text-foreground">{children}</dd>
+    </div>
+  );
+}
+
+function DetailLink({ href, children }: { href: string | null | undefined; children?: React.ReactNode }) {
+  if (!href) return <span className="text-muted-foreground">未提供</span>;
+  return (
+    <a href={href} target="_blank" rel="noreferrer" className="text-primary underline-offset-4 hover:underline">
+      {children ?? href}
+    </a>
+  );
+}
+
 export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps> = ({
   artifact,
   context,
@@ -68,6 +87,14 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
   const closeRef = useRef<HTMLButtonElement>(null);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const isLinkArtifact =
+    artifact.kind === 'url_link' ||
+    ((artifact.kind === null || artifact.kind === undefined) && artifact.type === 'link');
+  const isCodeArtifact = artifact.kind === 'code';
+  const isDetailArtifact = isLinkArtifact || isCodeArtifact;
+  const linkUrl = artifact.linkRef?.url ?? artifact.url ?? null;
+  const codeUrl = artifact.codeRef?.pullRequestUrl ?? artifact.url ?? null;
+  const detailHref = artifactViewHref(artifact) ?? (isCodeArtifact ? artifact.codeRef?.codeBaseAddress ?? null : null);
   const fileType = artifact.fileRef?.fileType ?? '';
   const isMarkdown = getFileExt(artifact.name) === 'md' || fileType.toLowerCase().startsWith('text/markdown');
   const markdownHtml = useMemo(
@@ -105,6 +132,38 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
   };
 
   const body = (() => {
+    if (isLinkArtifact) {
+      return (
+        <div data-testid="task-artifact-link-details" className="app-scrollbar min-h-0 flex-1 overflow-y-auto p-6">
+          <dl className="m-0 rounded-lg border border-border bg-card px-5">
+            <DetailRow label="链接类型">{artifact.linkRef?.type || '未提供'}</DetailRow>
+            <DetailRow label="链接地址">
+              <DetailLink href={linkUrl} />
+            </DetailRow>
+            <DetailRow label="产出者">{artifact.owner || '未提供'}</DetailRow>
+            <DetailRow label="创建时间">{artifact.updatedAt || '未提供'}</DetailRow>
+          </dl>
+        </div>
+      );
+    }
+    if (isCodeArtifact) {
+      return (
+        <div data-testid="task-artifact-code-details" className="app-scrollbar min-h-0 flex-1 overflow-y-auto p-6">
+          <dl className="m-0 rounded-lg border border-border bg-card px-5">
+            <DetailRow label="代码库">{artifact.codeRef?.codeBaseName || '未提供'}</DetailRow>
+            <DetailRow label="代码库地址">
+              <DetailLink href={artifact.codeRef?.codeBaseAddress} />
+            </DetailRow>
+            <DetailRow label="PR 链接">
+              <DetailLink href={codeUrl} />
+            </DetailRow>
+            <DetailRow label="PR 描述">{artifact.codeRef?.description ?? artifact.summary ?? '暂无描述'}</DetailRow>
+            <DetailRow label="产出者">{artifact.owner || '未提供'}</DetailRow>
+            <DetailRow label="创建时间">{artifact.updatedAt || '未提供'}</DetailRow>
+          </dl>
+        </div>
+      );
+    }
     if (preview.status === 'loading') return <PreviewMessage>正在加载产物预览…</PreviewMessage>;
     if (preview.status === 'error') {
       return <PreviewMessage danger>{preview.errorMessage ?? '预览加载失败，请稍后重试。'}</PreviewMessage>;
@@ -175,6 +234,11 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
   const meta = [fileRef?.storageType, preview.size !== null ? formatFileSize(preview.size) : null]
     .filter(Boolean)
     .join(' · ');
+  const artifactMeta = isLinkArtifact
+    ? ['链接产物', artifact.linkRef?.type, artifact.owner].filter(Boolean).join(' · ')
+    : isCodeArtifact
+      ? ['代码产物', artifact.codeRef?.codeBaseName, artifact.owner].filter(Boolean).join(' · ')
+      : [fileRef?.storageId, meta].filter(Boolean).join(' · ');
 
   return createPortal(
     <div
@@ -219,7 +283,7 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
             id="task-artifact-preview-description"
             style={{ marginTop: 5, fontSize: 11, color: C.textSecondary, overflowWrap: 'anywhere' }}
           >
-            {[fileRef?.storageId, meta].filter(Boolean).join(' · ')}
+            {artifactMeta}
           </div>
           <button
             ref={closeRef}
@@ -261,20 +325,33 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
           <button type="button" onClick={onClose} style={actionStyle}>
             关闭
           </button>
-          <button
-            type="button"
-            onClick={() => void download()}
-            disabled={downloading}
-            style={{
-              ...actionStyle,
-              borderColor: C.primary,
-              background: C.primary,
-              color: C.surface,
-              opacity: downloading ? 0.6 : 1,
-            }}
-          >
-            {downloading ? '下载中…' : '下载文件'}
-          </button>
+          {isDetailArtifact ? (
+            detailHref ? (
+              <a
+                href={detailHref}
+                target="_blank"
+                rel="noreferrer"
+                style={{ ...actionStyle, display: 'inline-flex', alignItems: 'center', textDecoration: 'none' }}
+              >
+                {isCodeArtifact ? '查看 PR' : '打开链接'}
+              </a>
+            ) : null
+          ) : (
+            <button
+              type="button"
+              onClick={() => void download()}
+              disabled={downloading}
+              style={{
+                ...actionStyle,
+                borderColor: C.primary,
+                background: C.primary,
+                color: C.surface,
+                opacity: downloading ? 0.6 : 1,
+              }}
+            >
+              {downloading ? '下载中…' : '下载文件'}
+            </button>
+          )}
         </footer>
       </aside>
     </div>,

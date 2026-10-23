@@ -105,6 +105,27 @@ const dashboardEnvelope = {
             creator: 'b-9',
             created_at: 1792557601000,
           },
+          {
+            artifact_id: 'artifact-link',
+            artifact_name: '需求文档',
+            kind: 'url_link',
+            content: { url: 'https://docs.example/task-requirement', type: '需求文档' },
+            creator: 'group-1',
+            created_at: 1792557602000,
+          },
+          {
+            artifact_id: 'artifact-code',
+            artifact_name: '实现 PR',
+            kind: 'code',
+            content: {
+              code_base_name: 'avernet',
+              code_base_address: 'https://git.example/avernet',
+              pr_link: 'https://git.example/avernet/pull/1',
+              pr_desc: '实现任务产物预览',
+            },
+            creator: 'b-9',
+            created_at: 1792557603000,
+          },
         ],
         run_info: { action_log: [{ seq: 1, ts: 1700000000000, action: 'dispatch', attempt: 1 }] },
       },
@@ -231,7 +252,7 @@ describe('LabTasksPage(实验室·任务体验页)', () => {
     expect(ownerBotSelect).toHaveTextContent('调研助手');
   });
 
-  it('点击查看产物后复用 TaskPanel 的产物列表与文本预览', async () => {
+  it('点击查看产物后复用 TaskPanel 的文件、文本、链接和代码预览', async () => {
     render(<LabTasksPage />);
     await waitFor(() => expect(screen.getByText('竞品协同分析')).toBeInTheDocument());
 
@@ -280,6 +301,28 @@ describe('LabTasksPage(实验室·任务体验页)', () => {
       expect(await screen.findByTestId('task-artifact-plain-text')).toHaveTextContent('纯文本执行摘要');
       fireEvent.click(screen.getByRole('button', { name: '下载文件' }));
       expect(await screen.findByRole('alert')).toHaveTextContent('纯文本类型的产物不支持下载。');
+
+      fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+      fireEvent.click(screen.getByRole('button', { name: '预览产物 需求文档' }));
+      const linkDetails = await screen.findByTestId('task-artifact-link-details');
+      expect(linkDetails).toHaveTextContent('需求文档');
+      expect(linkDetails).toHaveTextContent('https://docs.example/task-requirement');
+      expect(screen.getByRole('link', { name: '打开链接' })).toHaveAttribute(
+        'href',
+        'https://docs.example/task-requirement',
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+      fireEvent.click(screen.getByRole('button', { name: '预览产物 实现 PR' }));
+      const codeDetails = await screen.findByTestId('task-artifact-code-details');
+      expect(codeDetails).toHaveTextContent('avernet');
+      expect(codeDetails).toHaveTextContent('https://git.example/avernet');
+      expect(codeDetails).toHaveTextContent('https://git.example/avernet/pull/1');
+      expect(codeDetails).toHaveTextContent('实现任务产物预览');
+      expect(screen.getByRole('link', { name: '查看 PR' })).toHaveAttribute(
+        'href',
+        'https://git.example/avernet/pull/1',
+      );
     } finally {
       anchorClick.mockRestore();
     }
