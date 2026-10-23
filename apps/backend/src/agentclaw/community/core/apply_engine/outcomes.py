@@ -476,9 +476,11 @@ class ApplyReport:
     #: promotion's revision. Inside the report rather than a column: a report
     #: without it, written before the field existed, reads as the Manifest.
     state: StateRef = field(default_factory=ManifestStateRef)
-    #: Apply-level notes belonging to no category. Today's only producer is the
-    #: delivery strategy's closing step: a teclaw redeliver that failed after
-    #: every category was written is recorded here rather than raised.
+    #: Apply-level notes belonging to no category. Two producers: the delivery
+    #: strategy's closing step (a teclaw redeliver that failed after every
+    #: category was written is recorded here rather than raised), and a
+    #: compiler's refusal of the whole reference in the worker
+    #: (``CompileRefused``: a FAILED report with no categories and the reason).
     notes: tuple[str, ...] = field(default=())
 
     @property

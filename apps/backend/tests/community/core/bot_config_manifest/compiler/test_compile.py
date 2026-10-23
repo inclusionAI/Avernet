@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from agentclaw.community.core.apply_engine.compiler import ManifestStateRef
+from agentclaw.community.core.apply_engine.compiler import CompileRefused, ManifestStateRef
 from agentclaw.community.core.apply_engine.constructs import ManifestCategory, ManifestSection
 from agentclaw.community.core.apply_engine.desired_state import DesiredState
 from agentclaw.community.core.bot_config_manifest.sources.source_resolver import DeclaredSourceResolver
@@ -146,3 +146,23 @@ async def test_only_narrows_the_compile_to_a_phases_constructs_and_fetches_nothi
     assert state.declared == (ManifestSection.SCRIPT,)
     assert state.skills is None and state.identity is None
     assert objects.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_document_that_stopped_validating_is_refused_in_compile_and_raised_in_check() -> None:
+    """``check`` answers the caller before an apply id exists, with the validator's own error; the
+    same document failing in the worker is the engine's ``CompileRefused``, with the reason."""
+    from agentclaw.community.core.bot_config_manifest.schema import ManifestValidationError
+
+    compiler, _ = _compiler("schema_version: 1\nmanifest:\n  mcp: []\n")
+
+    class _Refusing(_Manifests):
+        def validate(self, *, document, active_engine, bot_type):
+            raise ManifestValidationError([])
+
+    compiler._manifests = _Refusing("schema_version: 1\nmanifest:\n  mcp: []\n")
+    with pytest.raises(ManifestValidationError):
+        compiler.check(make_context(), ManifestStateRef())
+    with pytest.raises(CompileRefused, match="no longer validates") as refused:
+        await compiler.compile(make_context(), ManifestStateRef())
+    assert isinstance(refused.value.__cause__, ManifestValidationError)

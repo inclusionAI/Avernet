@@ -185,13 +185,18 @@ def test_a_missing_never_started_unknown_or_superseded_promotion_is_refused() ->
     compiler, _, _ = _compiler(None)
     with pytest.raises(RevisionNotFound):
         compiler.check(ctx, GenomeStateRef("p" * 32))
+    with pytest.raises(CompileRefused, match="is not there to deliver") as refused:
+        asyncio.run(compiler.compile(ctx, GenomeStateRef("p" * 32)))
+    assert isinstance(refused.value.__cause__, RevisionNotFound)
     compiler, registry, _ = _compiler(_row("applied"))
     assert asyncio.run(compiler.compile(ctx, GenomeStateRef("p" * 32))).state is registry.state
     for status in ("apply_failed", "superseded", ""):
         compiler, _, _ = _compiler(_row(status))
         with pytest.raises(NotAppliable) as caught:
             compiler.check(ctx, GenomeStateRef("p" * 32))
-        assert "only a promotion in ['applied', 'applying'] is delivered" in caught.value.reasons[0].message
+        assert "only an applied or applying promotion is delivered" in caught.value.reasons[0].message
+        with pytest.raises(CompileRefused, match="only an applied or applying promotion"):
+            asyncio.run(compiler.compile(ctx, GenomeStateRef("p" * 32)))
     for active in ("sha256:" + "cd" * 32, None):
         compiler, _, _ = _compiler(_row("applied"), active=active)
         with pytest.raises(NotAppliable) as caught:
@@ -230,6 +235,14 @@ def test_a_revision_the_state_model_refuses_is_not_appliable_rather_than_a_crash
         compile_spec(spec, BlobDir())
     assert "'docs/guide.md' is outside 'data/'" in caught.value.reasons[0].message
     assert caught.value.reasons[0].location == "spec"
+
+    class _StaleRegistry:
+        def compile(self, bot, rev):
+            return compile_spec(spec, BlobDir())
+
+    compiler = GenomeCompiler(registry=_StaleRegistry(), promotions=_Promotions(_row()), refs=_Refs(), env=lambda: "dev")
+    with pytest.raises(CompileRefused, match="outside 'data/'"):
+        asyncio.run(compiler.compile(make_context(engine_type="openclaw", bot_type="arca"), GenomeStateRef("p" * 32)))
     blobs = BlobDir()
     binary = blobs.put(b"\xff\xfe not text")
     scripted = GenomeSpec.from_json({**spec.to_json(), "resources": [], "script": {"digest": binary}})

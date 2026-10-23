@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Collection, Mapping
 
-from agentclaw.community.core.apply_engine.compiler import Compiled, ManifestStateRef
+from agentclaw.community.core.apply_engine.compiler import Compiled, CompileRefused, ManifestStateRef
 from agentclaw.community.core.apply_engine.constructs import ApplyConstruct, ManifestCategory, ManifestSection
 from agentclaw.community.core.apply_engine.desired_state import DesiredState
 from agentclaw.community.core.apply_engine.context import ApplyContext
@@ -41,6 +41,7 @@ from agentclaw.community.core.bot_config_manifest.compiler.entries.resources imp
 from agentclaw.community.core.bot_config_manifest.compiler.entries.script import compile_script
 from agentclaw.community.core.bot_config_manifest.compiler.entries.skills import compile_skills
 from agentclaw.community.core.bot_config_manifest.compiler.session import CompileSession
+from agentclaw.community.core.bot_config_manifest.schema import ManifestValidationError
 from agentclaw.community.core.bot_config_manifest.fetch.git_source import GitSourceClient
 from agentclaw.community.core.apply_engine.run.report_codec import report_from_payload
 from agentclaw.community.core.content_store import ContentStoreProtocol
@@ -85,7 +86,18 @@ class ManifestCompiler:
     async def compile(
         self, ctx: ApplyContext, ref: ManifestStateRef, *, only: Collection[ApplyConstruct] | None = None
     ) -> Compiled:
-        return await self.compile_document(ctx, self._parsed_or_empty(ctx), only=only)
+        """The stored document's state; a document that stopped validating since ``check`` is ``CompileRefused``.
+
+        ``compile`` runs in the apply worker, after ``check`` accepted the
+        document and an apply id was minted; the bot can have moved in
+        between (its engine, a withdrawn materialiser), and that is a reason
+        the report should carry, not an engine failure.
+        """
+        try:
+            parsed = self._parsed_or_empty(ctx)
+        except ManifestValidationError as exc:
+            raise CompileRefused(f"the stored document no longer validates for this bot: {exc}") from exc
+        return await self.compile_document(ctx, parsed, only=only)
 
     async def compile_document(
         self, ctx: ApplyContext, parsed: Mapping[str, Any], *, only: Collection[ApplyConstruct] | None = None

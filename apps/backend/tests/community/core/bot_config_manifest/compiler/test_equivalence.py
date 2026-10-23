@@ -80,7 +80,9 @@ class _FixtureGit(GitSourceClient):
         root = Path(tempfile.mkdtemp(prefix="equivalence-git-")) / "content"
         shutil.copytree(SOURCES / "git-content", root)
         members = tuple(
-            ("100644", str(path.relative_to(root)), path.stat().st_size) for path in sorted(root.rglob("*")) if path.is_file()
+            ("100644", str(path.relative_to(root)), path.stat().st_size)
+            for path in sorted(root.rglob("*"))
+            if path.is_file()
         )
         return GitCheckout(root=root, sha="0" * 40, url=spec.url, ref=spec.ref, members=members, subpath=spec.subpath)
 

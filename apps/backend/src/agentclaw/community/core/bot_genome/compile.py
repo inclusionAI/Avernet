@@ -16,10 +16,10 @@ the promotion is current. The row is ``applying`` while the delivery seam
 answers and ``applied`` as soon as it has (before the apply run that delivers
 it compiles in its worker), so both resolve; a promotion whose delivery never
 started (``apply_failed``), or any status this module does not know, is
-refused. So is a promotion ``active`` has moved on from: a retried or
-redelivered apply must not converge the bot back to a revision the refs no
-longer name. It is registered in the run service's compiler map; RSI-04 is
-its first caller.
+refused. So is a promotion the ref it moved has since moved on from: a
+retried or redelivered apply must not converge the bot back to a revision
+the refs no longer name. It is registered in the run service's compiler map;
+RSI-04 is its first caller.
 """
 
 from __future__ import annotations
@@ -138,7 +138,8 @@ class GenomeCompiler:
         if row is None:
             raise RevisionNotFound(f"promotion {ref.promotion_id}")
         if row.status not in _DELIVERABLE:
-            _refuse(f"promotion {ref.promotion_id} is {row.status}; only a promotion in {sorted(_DELIVERABLE)} is delivered")
+            allowed = " or ".join(sorted(_DELIVERABLE))
+            _refuse(f"promotion {ref.promotion_id} is {row.status!r}; only an {allowed} promotion is delivered")
         current = self._refs.get(**axes, name=row.ref)
         if current is None or current.revision_id != row.revision_id:
             now = current.revision_id if current is not None else None
@@ -170,8 +171,14 @@ class GenomeCompiler:
             bot_type=ctx.bot_type,
         )
         try:
-            state = self._registry.compile(bot, self._revision_of(ctx, ref))
-        except (NotAppliable, RevisionNotFound) as exc:
+            revision = self._revision_of(ctx, ref)
+        except RevisionNotFound as exc:
+            raise CompileRefused(f"promotion {ref.promotion_id} is not there to deliver") from exc
+        except NotAppliable as exc:
+            raise CompileRefused(str(exc)) from exc
+        try:
+            state = self._registry.compile(bot, revision)
+        except NotAppliable as exc:  # the revision as recorded; a revision row that is gone is a bug and propagates
             raise CompileRefused(str(exc)) from exc
         # A creation half applies its own constructs only; the rest stay undeclared.
         return Compiled(state if only is None else state.only(only))
