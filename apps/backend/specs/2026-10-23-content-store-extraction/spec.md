@@ -32,30 +32,30 @@ as #3064; the plan was approved there on 2026-10-23.
 
 ## Acceptance Criteria
 
-- [ ] The content store (service, contract, scope and record models, errors,
+- [x] The content store (service, contract, scope and record models, errors,
       settings parser, provenance table model, repository contract and
       implementation, DDL) lives under its own core component and nothing in it
       imports the Manifest at runtime.
-- [ ] The acm-tree-v1 tree encoding (`canonical_tree_bytes`, `decode_tree_bytes`,
+- [x] The acm-tree-v1 tree encoding (`canonical_tree_bytes`, `decode_tree_bytes`,
       the magic) lives in the content store component and is no longer exported
       from the Manifest's apply package.
-- [ ] The Genome Registry imports the store, the digest grammar, and the tree
+- [x] The Genome Registry imports the store, the digest grammar, and the tree
       encoding from the content store component only; its declared module
       boundary no longer lists the Manifest's `content` or `apply.entry_delivery`.
-- [ ] The Manifest consumes the store through the same contract it did before;
+- [x] The Manifest consumes the store through the same contract it did before;
       every existing Manifest, Genome, repository and architecture test passes
       with only import paths and renamed symbols changed.
-- [ ] The store's audit identity column and the genome's actor columns share one
+- [x] The store's audit identity column and the genome's actor columns share one
       declared width (1100 characters), and an identity of that length is
       recorded rather than refused; one character more is still refused up front.
-- [ ] The DDL for the provenance table and the ORM model agree column for column
+- [x] The DDL for the provenance table and the ORM model agree column for column
       and on the audit width; the existing DDL type rules (DATETIME for
       application-filled instants, TIMESTAMP for database-filled ones) still cover
       the moved file.
-- [ ] The component is wired at the composition root in its own DI module; the
+- [x] The component is wired at the composition root in its own DI module; the
       yaml key `user_config.bot_config_manifest.content_store_dir` and the table
       name `ac_manifest_content` are unchanged.
-- [ ] Renames: `ContentStoreService`, `ContentStoreProtocol`,
+- [x] Renames: `ContentStoreService`, `ContentStoreProtocol`,
       `ContentStoreRepositoryProtocol`, `ContentStoreRepository`.
 
 ## In Scope
