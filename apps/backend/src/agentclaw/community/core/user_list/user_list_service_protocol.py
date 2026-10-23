@@ -28,7 +28,7 @@ class UserListServiceProtocol(Protocol):
         bot_type: str = "all",
         env: str | None = None,
     ) -> bool:
-        """Correct membership after the caller has passed operator authorization.
+        """Correct membership after the caller has passed super-admin authorization.
 
         HTTP adapters must reject non-operators before invoking this write.
         """

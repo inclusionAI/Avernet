@@ -165,7 +165,7 @@ or changing either source or target; any existing versioned snapshot is retained
 Disabled `.local/bin` retries still clear existing versioned bin snapshots without
 reading draft CLI directories or creating missing snapshots.
 
-The `PUT /api/v1/user-lists/correct` API requires operator authorization for all
+The `PUT /api/v1/user-lists/correct` API requires `admin.super_admin` authorization for all
 list types. Operators can add or remove this rollout type for an owner or `*`,
 with `env` selecting the environment. Ordinary authenticated users receive
 HTTP 403 without changing membership. Membership checks still require only login.
