@@ -3,6 +3,7 @@ import { runMigrations, type IDatabase } from '../db.js';
 import { dialectFor } from '../db/dialect.js';
 import { migrations } from '../schema.js';
 import { workflowSnapshotMigrations } from '../schema-workflow-snapshot.js';
+import { repairSchedulerMigration } from '../schema-repair-scheduler.js';
 
 type Migration = (typeof migrations)[number];
 
@@ -124,7 +125,7 @@ describe.each(['mysql', 'zdas'] as const)('runMigrations on %s', dbType => {
 
     expect(query).toHaveBeenCalledWith('SELECT MAX(version) as v FROM schema_version');
     expect(exec.mock.calls.filter(([sql]) => sql === ledgerInsert).map(([, params]) => params)).toEqual(
-      [...migrations, ...workflowSnapshotMigrations].filter(m => m.selfHealing || m.version > current).map(m => [m.version, m.description]),
+      [...migrations, ...workflowSnapshotMigrations, repairSchedulerMigration].filter(m => m.selfHealing || m.version > current).map(m => [m.version, m.description]),
     );
     const firstDdl = db.dialect.renderDdl(migrations[0].sql[0]);
     expect(exec.mock.calls.some(([sql]) => sql === firstDdl)).toBe(current < 1);
