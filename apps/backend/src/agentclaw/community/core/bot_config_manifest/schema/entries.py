@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlsplit
 
+from agentclaw.community.core.apply_engine.desired_state import RESOURCES_ROOT
 from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCategory,
 )
@@ -680,6 +681,16 @@ def validate_resource_entry(
     check_entry_keys(ctx, location, entry, ManifestCategory.RESOURCES)
     path = entry.get("path")
     usable = check_relative_path(ctx, f"{location}.path", path, what="path")
+    if usable and (not str(path).startswith(RESOURCES_ROOT) or path == RESOURCES_ROOT):
+        # The resources root: converging resources clears it and writes the
+        # declared entries back, so a path outside it would never be removed
+        # and a path naming the root itself has no entry to be.
+        ctx.add(
+            f"{location}.path",
+            "resources_outside_root",
+            f"resource path must be under the resources root {RESOURCES_ROOT!r}",
+        )
+        usable = False
     is_directory = isinstance(path, str) and path.endswith("/")
     source = resolve_source(ctx, location, entry, ManifestCategory.RESOURCES)
     # Git carries directory structure natively, so a tree needs no packaging

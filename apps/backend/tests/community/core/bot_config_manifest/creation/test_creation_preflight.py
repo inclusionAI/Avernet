@@ -52,7 +52,7 @@ _LANDED = frozenset(
 #: the next category to do so meets this gate on the way in.
 _UNMATERIALISED = (
     'schema_version: 1\nmanifest:\n  resources:\n'
-    '    - path: "docs/a.md"\n'
+    '    - path: "data/docs/a.md"\n'
     "      source:\n"
     "        protocol: oss\n"
     "        bucket: example\n"

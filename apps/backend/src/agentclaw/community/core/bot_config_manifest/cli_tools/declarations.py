@@ -129,7 +129,7 @@ class CliToolDecl:
         Reading a value like this as though it were a fetchable address is the
         defect this type was restructured to make unspellable.
         """
-        return _declared_address(self.entry) if self.entry is not None else ""
+        return declared_address(self.entry) if self.entry is not None else ""
 
     @property
     def convergence_key(self) -> Optional[tuple[str, Optional[str]]]:
@@ -155,7 +155,7 @@ class CliToolDecl:
         return (self.digest, self.subpath)
 
 
-def _declared_address(entry: Mapping[str, Any]) -> str:
+def declared_address(entry: Mapping[str, Any]) -> str:
     """How the entry named its source, for the report to echo.
 
     A ``from`` is the source's name, which is what the apply report's ``from``

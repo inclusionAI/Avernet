@@ -108,6 +108,49 @@ class FakeManifestContent:
         )
         return record
 
+    def store_produced(
+        self,
+        data: bytes,
+        *,
+        scope,
+        origin: str,
+        modifier: str = "",
+        category=None,
+        entry_identity=None,
+    ):
+        """The produced-content write path the Manifest compiler files inline bytes and trees through."""
+        if self.store_fault is not None:
+            raise self.store_fault
+        digest = "sha256:" + hashlib.sha256(data).hexdigest()
+        record = SimpleNamespace(
+            digest=digest,
+            source_url=f"produced://{origin}",
+            credential_name=None,
+            content_type=None,
+            bytes=data,
+        )
+        self.receipts.append(record)
+        self.blobs[digest] = data
+        self.store_calls.append(
+            {
+                "scope": scope,
+                "source_url": f"produced://{origin}",
+                "credential_name": None,
+                "modifier": modifier,
+                "digest": digest,
+                "apply_id": None,
+                "category": category,
+                "entry_identity": entry_identity,
+            }
+        )
+        return record
+
+    def is_reachable(self, scope, digest: str, *, produced_by: str | None = None) -> bool:
+        prefix = f"produced://{produced_by}/" if produced_by else None
+        return any(
+            r.digest == digest and (prefix is None or str(r.source_url).startswith(prefix)) for r in self.receipts
+        )
+
     def read(self, digest: str) -> bytes:
         from agentclaw.community.core.content_store.errors import (
             ContentIntegrityError,

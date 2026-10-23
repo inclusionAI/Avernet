@@ -3,7 +3,9 @@
 > Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
 >
 > One pull request (owner's decision, review round 1). Groups are the
-> order of work; the suite is green at the end of every group. Inside
+> order of work (inside Group 2 the compiler and the materialiser switch,
+> Tasks 4–7, land before the mechanical move, Task 3, so the move is pure
+> relocation); the suite is green at the end of every group. Inside
 > Group 2 each materialiser is its own commit, but the suite is green only
 > once the group is complete (the orchestrator switches input type with
 > the first materialiser; there is no typed-to-raw shim).
@@ -39,17 +41,18 @@
   - [ ] All moved tests pass at their new paths with import changes only; the pass count equals Task 1's.
 - **Depends on:** Task 2
 
-### Task 4: The Manifest compiler
+### Task 4: The Manifest compiler `[x]`
 - **Goal:** One place that reads a document's grammar, fetches, files bytes and emits a `DesiredState`.
 - **Files:** `core/bot_config_manifest/sources/` (moved funnel), `core/bot_config_manifest/compiler/{declared,session,compile}.py`, `compiler/entries/{script,mcp,identity,skills,resources,cli_tools,engine_config}.py`, `schema/validator.py` (`script: null` doc, `resources_outside_root`), `schema/entries.py`; `tests/community/core/bot_config_manifest/compiler/test_{declared,script,mcp,identity,skills,resources,cli_tools,compile}.py`, `tests/community/core/bot_config_manifest/sources/*` (moved), `test_manifest_schema.py`
 - **Done when:**
-  - [ ] `declared_entries` returns `[]` for `script: null` and `None` for an absent `script`; both pinned by one test (#2862).
-  - [ ] The validator refuses a resource path outside `data/` at PUT with `resources_outside_root`; the compiler emits the same as an `EntryFailure` for a stored document.
-  - [ ] Each entry compiler emits the typed entries and `EntryFailure`s for every refusal the matching materialiser test asserts today (lifted case by case, same reason text); fetch, `keep_last` notes, moved-ref notes, budget expiry and `on_fetch_failure: fail` are exercised with the existing fakes.
-  - [ ] Inline identity/resource content and resource trees are filed as produced content and are `is_reachable` for the bot; skills are filed as acm-tree-v1 under the delivery's receipt URL.
-  - [ ] CLI tools: a pinned digest already reachable is emitted without a fetch; a git source is fetched every time; `DesiredCliTool.pin` is `None` over git.
-  - [ ] `compile` returns `Compiled(state, sources)` with the git `SourceResolution` rows the session adopted, and the session's checkout trees are gone when it returns.
-- **Depends on:** Task 3
+  - [x] `declared_entries` returns `[]` for `script: null` and `None` for an absent `script`; both pinned by one test (#2862).
+  - [x] The validator refuses a resource path outside `data/` at PUT with `resources_outside_root`; the compiler emits the same as an `EntryFailure` for a stored document.
+  - [x] Each entry compiler emits the typed entries and `EntryFailure`s for every refusal the matching materialiser test asserts today (lifted case by case, same reason text); fetch, `keep_last` notes, moved-ref notes, budget expiry and `on_fetch_failure: fail` are exercised with the existing fakes.
+  - [x] Inline identity/resource content and resource trees are filed as produced content and are `is_reachable` for the bot; skills are filed as acm-tree-v1 under the delivery's receipt URL.
+  - [x] CLI tools: a pinned digest already reachable is emitted without a fetch; a git source is fetched every time; `DesiredCliTool.pin` is `None` over git.
+  - [x] `compile` returns `Compiled(state, sources)` with the git `SourceResolution` rows the session adopted, and the session's checkout trees are gone when it returns.
+- **Depends on:** Task 2 (the move, Task 3, follows the switch)
+- **Notes:** the keep_last / moved-ref / budget cases stay covered by the fetch-funnel suites (`test_source_resolver`, `test_source_fetchers`), which the compiler calls unchanged; the Manifest schema doc (`docs/bot-config-manifest/manifest-schema.zh-CN.md` §3.2) and the `script: null` note are written in Task 12.
 
 ### Task 5: Orchestrator and the script, mcp, identity materialisers on the model
 - **Goal:** The engine takes a `DesiredState`; three materialisers consume typed entries.
