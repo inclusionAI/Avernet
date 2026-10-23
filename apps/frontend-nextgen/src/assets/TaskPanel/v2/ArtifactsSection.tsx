@@ -1,7 +1,7 @@
 // @asset-migrated: teamclaw 自研资产
 /**
  * ArtifactsSection —— 产物区(PRD #产物):任务级聚合(或 L2 按 node 过滤)后的产物卡列表。
- * Descriptor file 使用既有 session_files / bot workspace 服务站内预览与下载；链接类维持外链打开。
+ * Descriptor 四种形态均支持站内预览；file 使用既有 session_files / bot workspace 服务下载，链接/代码保留外链入口。
  */
 import React, { useState } from 'react';
 
@@ -24,11 +24,19 @@ export interface ArtifactsSectionProps {
 }
 
 const actionStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  boxSizing: 'border-box',
+  minWidth: 40,
+  minHeight: 24,
   border: `1px solid ${C.border}`,
   borderRadius: 6,
   background: C.surface,
   color: C.primary,
+  fontFamily: 'inherit',
   fontSize: 11,
+  lineHeight: '16px',
   padding: '3px 8px',
   cursor: 'pointer',
   whiteSpace: 'nowrap',
@@ -96,6 +104,13 @@ export const ArtifactsSection: React.FC<ArtifactsSectionProps> = ({
               const href = artifactViewHref(a);
               const time = a.updatedAt ? a.updatedAt.replace('T', ' ').slice(0, 16) : '';
               const isFileArtifact = a.kind === 'file' && a.fileRef !== null && a.fileRef !== undefined;
+              const isInlineArtifact = a.kind === 'text';
+              const isDetailArtifact =
+                a.kind === 'url_link' ||
+                a.kind === 'code' ||
+                ((a.kind === null || a.kind === undefined) && a.type === 'link');
+              const hasPreviewActions = isInlineArtifact || isFileArtifact || isDetailArtifact;
+              const hasDownloadAction = isInlineArtifact || isFileArtifact;
               return (
                 <li
                   key={a.id}
@@ -154,7 +169,7 @@ export const ArtifactsSection: React.FC<ArtifactsSectionProps> = ({
                       </div>
                     )}
                   </div>
-                  {isFileArtifact ? (
+                  {hasPreviewActions ? (
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                       <button
                         type="button"
@@ -164,15 +179,29 @@ export const ArtifactsSection: React.FC<ArtifactsSectionProps> = ({
                       >
                         预览
                       </button>
-                      <button
-                        type="button"
-                        aria-label={`下载产物 ${a.name}`}
-                        disabled={downloadingId === a.id}
-                        onClick={() => void download(a)}
-                        style={{ ...actionStyle, opacity: downloadingId === a.id ? 0.6 : 1 }}
-                      >
-                        {downloadingId === a.id ? '下载中…' : '下载'}
-                      </button>
+                      {hasDownloadAction ? (
+                        <button
+                          type="button"
+                          aria-label={`下载产物 ${a.name}`}
+                          disabled={downloadingId === a.id}
+                          onClick={() => void download(a)}
+                          style={{ ...actionStyle, opacity: downloadingId === a.id ? 0.6 : 1 }}
+                        >
+                          {downloadingId === a.id ? '下载中…' : '下载'}
+                        </button>
+                      ) : null}
+                      {href ? (
+                        <a
+                          href={href}
+                          aria-label={`跳转产物 ${a.name}`}
+                          title={`打开产物:${a.name}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ ...actionStyle, textDecoration: 'none' }}
+                        >
+                          跳转
+                        </a>
+                      ) : null}
                     </div>
                   ) : href ? (
                     <a

@@ -66,6 +66,33 @@ describe('taskSidePanelStore', () => {
     expect(after.nodeScrollSignal).toBe(1);
   });
 
+  it('selectRootNode 在宿主会话已展示时只更新根节点选中态', () => {
+    useTaskSidePanelStore.getState().selectRootNode('t1', 'n-root');
+
+    const after = useTaskSidePanelStore.getState();
+    expect(after.navByTask['t1']?.selectedNodeId).toBe('n-root');
+    expect(after.pendingNavigation).toBeNull();
+    expect(after.linkedSession).toBeNull();
+    expect(after.nodeScrollSignal).toBe(0);
+  });
+
+  it('selectRootNode 退出其他节点的联动会话并取消待消费跳转', () => {
+    useTaskSidePanelStore.getState().selectNode('t1', 'n-other', target('sess-other'));
+    useTaskSidePanelStore.getState().openLinkedSession({
+      sessionId: 'sess-other',
+      kind: 'bot',
+      botId: 'bot-9',
+    });
+
+    useTaskSidePanelStore.getState().selectRootNode('t1', 'n-root');
+
+    const after = useTaskSidePanelStore.getState();
+    expect(after.navByTask['t1']?.selectedNodeId).toBe('n-root');
+    expect(after.pendingNavigation).toBeNull();
+    expect(after.linkedSession).toBeNull();
+    expect(after.nodeScrollSignal).toBe(1);
+  });
+
   it('drillInto 去重 push、封顶 2 层、不增加滚动信号', () => {
     const s = useTaskSidePanelStore.getState();
     s.drillInto('t1', 'n2', target('sess-grp'));

@@ -21,6 +21,7 @@ describe('normalizeDescriptor', () => {
     expect(view.kind).toBe('url_link');
     expect(view.type).toBe('link');
     expect(view.url).toBe('https://yuque.example/doc1');
+    expect(view.linkRef).toEqual({ url: 'https://yuque.example/doc1', type: 'dima需求' });
     expect(view.owner).toBe('group-902');
     expect(view.nodeId).toBe('n2v');
     expect(view.updatedAt).toBe(new Date(1729400000000).toISOString());
@@ -63,10 +64,17 @@ describe('normalizeDescriptor', () => {
     expect(artifactViewHref(view)).toBeNull();
   });
 
-  it('code 分支:type=other,url 指向 pr_link', () => {
+  it('code 分支:type=other,url 指向 pr_link,并保留代码库与 PR 详情', () => {
     const view = normalizeDescriptor(artifactDescriptorCode, 'n2');
     expect(view.type).toBe('other');
     expect(view.url).toBe('https://git.example/pr/1024');
+    expect(view.summary).toBe('产物读侧接入');
+    expect(view.codeRef).toEqual({
+      codeBaseName: 'avernet',
+      codeBaseAddress: 'https://git.example/avernet',
+      pullRequestUrl: 'https://git.example/pr/1024',
+      description: '产物读侧接入',
+    });
   });
 
   it('content 非 object(脏数据)不崩溃,回落 id 为名', () => {

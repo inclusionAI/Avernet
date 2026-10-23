@@ -21,6 +21,8 @@ import {
   type UserTaskStatusFilter,
   userTaskStatusOptions,
 } from '../userTaskUtils';
+import { filterUserTaskRecords, type UserTaskOwnerBotOption } from './userTaskFilters';
+import { UserTaskOwnerBotFilter } from './UserTaskOwnerBotFilter';
 import { UserTaskGoalContent, UserTaskPrimaryContent } from './UserTaskTableCells';
 import { ViewSessionButton } from './ViewSessionButton';
 
@@ -47,6 +49,7 @@ export interface UserTaskTabProps {
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
   botNameMap: Record<string, string>;
+  ownerBotOptions?: UserTaskOwnerBotOption[];
   /** 实验室页专用列与操作布局；默认值保持“我的任务”现有行为。 */
   displayVariant?: 'default' | 'lab';
 }
@@ -66,33 +69,28 @@ export function UserTaskTab({
   onPageChange,
   onPageSizeChange,
   botNameMap,
+  ownerBotOptions = [],
   displayVariant = 'default',
 }: UserTaskTabProps) {
   const [userKeyword, setUserKeyword] = useState('');
+  const [ownerBotFilter, setOwnerBotFilter] = useState('all');
   const isLabVariant = displayVariant === 'lab';
   const columnCount = isLabVariant ? 7 : 6;
 
-  const filteredTaskRecords = useMemo(() => {
-    const keyword = userKeyword.trim().toLowerCase();
-    return taskRecords.filter((record) => {
-      const title = getUserTaskTitle(record).toLowerCase();
-      const taskId = record.task_id.toLowerCase();
-      const botId = (record.owner_bot_id ?? '').toLowerCase();
-      const sourceType = (record.source_type ?? '').toLowerCase();
-      const matchesKeyword =
-        !keyword ||
-        title.includes(keyword) ||
-        taskId.includes(keyword) ||
-        botId.includes(keyword) ||
-        sourceType.includes(keyword);
-      // 状态过滤已下沉到服务端(status 推送查询),这里只做关键字本地过滤。
-      return matchesKeyword;
-    });
-  }, [taskRecords, userKeyword]);
+  const filteredTaskRecords = useMemo(
+    () =>
+      filterUserTaskRecords({
+        taskRecords,
+        keyword: userKeyword,
+        ownerBotFilter,
+        ownerBotOptions,
+      }),
+    [ownerBotFilter, ownerBotOptions, taskRecords, userKeyword],
+  );
 
   return (
     <section className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className={cn('grid gap-3', isLabVariant ? 'md:grid-cols-3' : 'md:grid-cols-2')}>
         <div className="relative min-w-0">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -108,7 +106,7 @@ export function UserTaskTab({
         <div className="flex min-w-0 items-center gap-2">
           <span className="shrink-0 text-xs font-medium text-muted-foreground">状态</span>
           <Select value={statusFilter} onValueChange={(value) => onStatusFilterChange(value as UserTaskStatusFilter)}>
-            <SelectTrigger className="w-full text-xs">
+            <SelectTrigger aria-label="状态" className="w-full text-xs">
               <SelectValue placeholder="请选择状态" />
             </SelectTrigger>
             <SelectContent>
@@ -120,6 +118,16 @@ export function UserTaskTab({
             </SelectContent>
           </Select>
         </div>
+        {isLabVariant ? (
+          <UserTaskOwnerBotFilter
+            value={ownerBotFilter}
+            options={ownerBotOptions}
+            onChange={(value) => {
+              setOwnerBotFilter(value);
+              onPageChange(1);
+            }}
+          />
+        ) : null}
       </div>
 
       <Card className="overflow-hidden rounded-lg shadow-sm">
@@ -165,7 +173,7 @@ export function UserTaskTab({
                       <Empty
                         title="暂无符合条件的用户任务"
                         description={
-                          userKeyword || statusFilter !== 'all'
+                          userKeyword || statusFilter !== 'all' || (isLabVariant && ownerBotFilter !== 'all')
                             ? '请尝试清除筛选条件或刷新数据。'
                             : '当前账号下还没有任务记录。'
                         }

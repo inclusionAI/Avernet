@@ -55,6 +55,7 @@ export interface TaskSidePanelState {
   /** 会话宿主左侧 ChatArea 的联动会话；null = 展示宿主当前真实会话 */
   linkedSession: TaskLinkedSessionTarget | null;
   setActiveTask: (taskId: string) => void;
+  selectRootNode: (taskId: string, nodeId: string) => void;
   selectNode: (taskId: string, nodeId: string, target: TaskNavTarget | null) => void;
   drillInto: (taskId: string, nodeId: string, target: TaskNavTarget | null) => void;
   backToOverview: (taskId: string) => void;
@@ -80,6 +81,15 @@ const initial = {
 export const useTaskSidePanelStore = create<TaskSidePanelState>((set) => ({
   ...initial,
   setActiveTask: (taskId) => set({ activeTaskId: taskId, pendingNavigation: null }),
+  selectRootNode: (taskId, nodeId) =>
+    set((s) => {
+      const prev = s.navByTask[taskId] ?? emptyRecord;
+      return {
+        navByTask: { ...s.navByTask, [taskId]: { ...prev, selectedNodeId: nodeId } },
+        pendingNavigation: null,
+        linkedSession: null,
+      };
+    }),
   selectNode: (taskId, nodeId, target) =>
     set((s) => {
       const prev = s.navByTask[taskId] ?? emptyRecord;

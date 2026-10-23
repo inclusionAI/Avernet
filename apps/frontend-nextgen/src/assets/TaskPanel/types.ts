@@ -18,6 +18,18 @@ export interface TaskArtifactView {
   kind?: 'text' | 'file' | 'url_link' | 'code' | null;
   url?: string | null;
   summary?: string | null;
+  /** url_link 形态的完整业务信息；url 继续保留给既有外链入口。 */
+  linkRef?: {
+    url: string | null;
+    type: string | null;
+  } | null;
+  /** code 形态的完整代码库 / PR 信息；url、summary 继续兼容既有消费方。 */
+  codeRef?: {
+    codeBaseName: string | null;
+    codeBaseAddress: string | null;
+    pullRequestUrl: string | null;
+    description: string | null;
+  } | null;
   /** 归属节点(产物区按 node 过滤用);legacy 回落入参 nodeId */
   nodeId?: string | null;
   /** 产出者(Descriptor.creator);legacy 为 null */

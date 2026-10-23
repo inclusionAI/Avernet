@@ -27,12 +27,13 @@ const downloadResourceMock = jest.mocked(botEditorService.downloadResource);
 const createObjectUrlMock = jest.fn(() => 'blob:task-artifact');
 const revokeObjectUrlMock = jest.fn();
 
-const makeNav = (): TaskPanelNav & { calls: { select: string[]; drill: string[]; back: number[] } } => {
-  const calls = { select: [] as string[], drill: [] as string[], back: [] as number[] };
+const makeNav = (): TaskPanelNav & { calls: { root: string[]; select: string[]; drill: string[]; back: number[] } } => {
+  const calls = { root: [] as string[], select: [] as string[], drill: [] as string[], back: [] as number[] };
   return {
     selectedNodeId: null,
     drillStack: [],
     calls,
+    selectRootNode: (id: string) => calls.root.push(id),
     selectNode: (id: string, target: ResolvedSessionTarget | null) => {
       void target;
       calls.select.push(id);

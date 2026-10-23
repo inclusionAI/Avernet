@@ -44,6 +44,9 @@ export function normalizeDescriptor(
     d.artifact_name ?? (d.kind === 'file' ? str(c.file_name) : null) ?? d.artifact_id;
   const storageType = normalizeStorageType(c.storage_type);
   const storageId = str(c.storage_id);
+  const linkUrl = d.kind === 'url_link' ? str(c.url) : null;
+  const pullRequestUrl = d.kind === 'code' ? str(c.pr_link) : null;
+  const codeDescription = d.kind === 'code' ? str(c.pr_desc) : null;
   const fileRef =
     d.kind === 'file' && storageType && storageId
       ? {
@@ -59,8 +62,18 @@ export function normalizeDescriptor(
     type: kindToType(d.kind),
     kind: d.kind,
     // url_link → 业务链接;code → pr_link 承载产物内容本身(后端 spec §3.4 边界澄清)
-    url: d.kind === 'url_link' ? str(c.url) : d.kind === 'code' ? str(c.pr_link) : null,
-    summary: d.kind === 'text' ? str(c.text) : d.kind === 'code' ? str(c.pr_desc) : null,
+    url: d.kind === 'url_link' ? linkUrl : d.kind === 'code' ? pullRequestUrl : null,
+    summary: d.kind === 'text' ? str(c.text) : codeDescription,
+    linkRef: d.kind === 'url_link' ? { url: linkUrl, type: str(c.type) } : null,
+    codeRef:
+      d.kind === 'code'
+        ? {
+            codeBaseName: str(c.code_base_name),
+            codeBaseAddress: str(c.code_base_address),
+            pullRequestUrl,
+            description: codeDescription,
+          }
+        : null,
     nodeId: fallbackNodeId,
     owner: d.creator ?? null,
     updatedAt: msToIso(d.created_at),
@@ -76,6 +89,8 @@ function legacyToView(a: TaskArtifactDto, fallbackNodeId: string | null): TaskAr
     kind: null,
     url: a.url ?? null,
     summary: a.summary ?? null,
+    linkRef: a.type === 'link' ? { url: a.url ?? null, type: null } : null,
+    codeRef: null,
     nodeId: a.node_id ?? fallbackNodeId,
     owner: null,
     updatedAt: a.created_at,

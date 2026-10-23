@@ -1,7 +1,8 @@
 // @asset-migrated: teamclaw 自研资产
 /**
  * NodeListViewV2 —— L1 节点卡片列表(PRD 方案A):
- * 点整卡 = 选中(高亮 + 发跳转,selectNode);下钻按钮(仅协作群节点)= 选中 + 进栈(drillInto)。
+ * 点根节点 = 选中并恢复宿主会话；点其他节点 = 选中并联动会话；
+ * 下钻按钮(仅协作群节点)= 选中 + 进栈(drillInto)。
  * 卡片信息:present 状态点/标题(完成划线)/执行体 pill(群/单聊 icon)/返工次数/HITL 徽章/子任务入口。
  */
 import React from 'react';
@@ -36,6 +37,7 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
   if (!task.nodes.length) {
     return <StateEmpty description="暂无任务节点" minHeight={200} />;
   }
+  const rootNodeId = task.nodes[0]?.id;
   return (
     <ul style={{ listStyle: 'none', margin: 0, padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
       {task.nodes.map((node) => {
@@ -46,17 +48,22 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
         const executorName = node.assigneeName || node.executor || '—';
         const selected = nav.selectedNodeId === node.id;
         const target = resolveNodeSessionTarget(node, task);
+        const isRootNode = node.id === rootNodeId;
+        const selectForConversation = () => {
+          if (isRootNode) nav.selectRootNode(node.id);
+          else nav.selectNode(node.id, target);
+        };
         return (
           <li
             key={node.id}
             role="button"
             tabIndex={0}
             aria-label={`选中节点 ${node.name}`}
-            onClick={() => nav.selectNode(node.id, target)}
+            onClick={selectForConversation}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
-                nav.selectNode(node.id, target);
+                selectForConversation();
               }
             }}
             style={{
@@ -153,15 +160,15 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
                 aria-label={`下钻 ${node.name}`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  nav.selectNode(node.id, target);
-                  nav.drillInto(node.id, target);
+                  selectForConversation();
+                  nav.drillInto(node.id, isRootNode ? null : target);
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
                     e.stopPropagation();
-                    nav.selectNode(node.id, target);
-                    nav.drillInto(node.id, target);
+                    selectForConversation();
+                    nav.drillInto(node.id, isRootNode ? null : target);
                   }
                 }}
                 style={{
