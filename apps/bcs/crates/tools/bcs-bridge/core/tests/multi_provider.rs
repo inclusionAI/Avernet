@@ -88,18 +88,3 @@ async fn mixed_transports_survive_a_fatal_provider_and_persist_independent_rotat
         if cfg.provider_id=="a" { assert!(identity.is_none()); } else { assert_eq!(identity.unwrap().token,"rotated-b"); }
     }
 }
-
-#[test]
-fn explicit_socket_cannot_alias_the_default_desktop_connection() {
-    let dir=tempfile::tempdir().unwrap();
-    let mut a=config(dir.path(),"a",None).bots.remove(0);
-    a.engine="codex-desktop".into();
-    let mut b=a.clone();b.bot_id=Some("bot-b".into());
-    let socket=dir.path().join("app-server-control/app-server-control.sock");
-    b.engine_options.insert("socket".into(),socket.to_str().unwrap().into());
-    let mut engines=EngineRegistry::new();
-    engines.register(bcs_bridge_core::engine::codex_desktop::CodexDesktopFactory::with_codex_home(dir.path().into()));
-    assert!(engines.validate_resources([&a,&b]).is_err());
-    b.engine_options.insert("socket".into(),dir.path().join("different.sock").to_str().unwrap().into());
-    assert!(engines.validate_resources([&a,&b]).is_ok());
-}

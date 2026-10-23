@@ -35,7 +35,6 @@ pub async fn serve_bridge_managed(
     use tokio::{net::TcpListener, task::JoinSet};
     // Validate aliases before any DB recovery, engine process or listener starts.
     let config = crate::config::BridgeConfig::new(config.providers)?;
-    engines.validate_resources(config.providers.iter().flat_map(|p| &p.bots))?;
     let mut listeners = BTreeMap::new();
     let mut failed_listeners = std::collections::BTreeSet::new();
     let mut first_error = None;

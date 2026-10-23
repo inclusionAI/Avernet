@@ -32,9 +32,6 @@ mod codex_owned;
 mod codex_persistent;
 pub mod trace;
 
-mod resources;
-pub use resources::{EngineResource, validate_resource_claims};
-
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -166,9 +163,6 @@ pub trait EngineFactory: Send + Sync {
     /// engines via their protocol flag). Engines that ignore the field let the
     /// registry warn instead of silently dropping the configured policy.
     fn ignores_permission_mode(&self) -> bool { true }
-    /// Physical connections that cannot be shared by concurrently configured Bots.
-    /// Subprocess engines own no exclusive desktop resource by default.
-    fn resources(&self, _options: &toml::Table) -> Result<Vec<EngineResource>, String> { Ok(Vec::new()) }
     /// Build an engine for `bin`, validating the bot's `engine_options`.
     fn build(&self, bin: PathBuf, options: &toml::Table) -> Result<Arc<dyn Engine>, String>;
 }
@@ -199,16 +193,6 @@ impl EngineRegistry {
     pub fn get(&self, id: &str) -> Option<&Arc<dyn EngineFactory>> { self.factories.get(id) }
 
     pub fn ids(&self) -> impl Iterator<Item = &str> { self.factories.keys().map(String::as_str) }
-
-    /// Check adapter-owned resource claims before listeners, databases or engines open.
-    pub fn validate_resources<'a>(&self, bots: impl IntoIterator<Item = &'a BotConfig>) -> anyhow::Result<()> {
-        let mut claims = Vec::new();
-        for bot in bots {
-            let factory = self.get(&bot.engine).ok_or_else(|| anyhow::anyhow!("Unknown engine '{}'", bot.engine))?;
-            claims.extend(factory.resources(&bot.engine_options).map_err(anyhow::Error::msg)?);
-        }
-        validate_resource_claims(claims)
-    }
 
     /// Build the engine configured for `bot`.
     pub fn build(&self, bot: &BotConfig) -> Result<Arc<dyn Engine>, String> {

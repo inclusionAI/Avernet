@@ -109,10 +109,10 @@ engine name or new registration token.
 ## Isolation and observability
 
 Each Provider owns its AppState, database, sessions, inject receipts, runs and
-interaction registry. Duplicate Provider IDs/Bot IDs, aliased databases,
-subbot working directories and exclusive desktop resources are rejected before
-runtime starts. Each plugin Bot reconnects independently. A fatal Bot connection
-failure does not cancel healthy siblings or other Providers.
+interaction registry. Duplicate Provider IDs/Bot IDs, aliased databases and
+conflicting subbot working directories are rejected before runtime starts. Each
+plugin Bot reconnects independently. A fatal Bot connection failure does not
+cancel healthy siblings or other Providers.
 
 Gateway Providers may share one listener. Requests are routed by the declared
 `to_bot.provider_id` and then authenticated against only that Provider's token.
@@ -130,7 +130,7 @@ Subbot children get their own Actor context. Ordinary engine children have
 inherited `BCN_AUTH_MODE` / `BCN_ACTOR_BOT_ID` removed; unrelated proxy, CA and
 parent authentication environment is retained.
 
-## Desktop resources and rollback
+## Desktop compatibility and rollback
 
 `init/deinit --engine qwenwork` locates the sole QwenWork Bot across all
 Providers in the selected V1/V2 document. Zero or multiple QwenWork candidates
@@ -140,9 +140,11 @@ QwenWork retains single-Bot usage: no new resource-claim arbitration, listener
 shutdown wait, or preflight shutdown calls are introduced. This does not scan
 other profiles or add a machine-wide registration lock.
 
-The generic `EngineFactory::resources` contract and Codex desktop socket
-conflict checks remain unchanged by this scope reduction; QwenWork no longer
-adds resource claims. Subprocess engines default to no claims.
+The added generic engine resource declarations and cross-Bot Codex desktop
+socket uniqueness checks have been withdrawn. Existing engine option validation,
+preflight and socket security checks remain unchanged, as does per-instance
+socket allocation for engines that own their Unix sockets. This does not add a
+guarantee that multiple Bots can share a desktop connection.
 
 Existing split profile files are **not automatically merged**. Select the
 intended file explicitly. A manual consolidation must stop the bridge, back up

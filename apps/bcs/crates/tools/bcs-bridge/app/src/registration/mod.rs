@@ -337,10 +337,6 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     }
     if let Some(edit) = &bootstrap.edit {
         let existing = crate::multi_config::load_document(&edit.source, path, app.credentials())?;
-        let candidate: bcs_bridge_core::config::BotConfig = toml::Value::Table(bot.clone()).try_into()
-            .map_err(|_| anyhow::anyhow!("Invalid new Bot configuration"))?;
-        let replacing = bootstrap.previous.is_some();
-        app.engines().validate_resources(existing.iter().enumerate().flat_map(|(index, p)| p.config.bots.iter().enumerate().filter(move |(bot_index, _)| !(replacing && edit.target == Some(index) && edit.bot == Some(*bot_index))).map(|(_, bot)| bot)).chain(std::iter::once(&candidate)))?;
         if !subbots {
             for provider in existing.iter().filter(|p| p.config.provider_auth.as_deref() == Some("agentpass-subbots")) {
                 if provider.config.bots.iter().any(|bot| bot.cwd.canonicalize().ok().as_deref() == Some(cwd)) {

@@ -96,8 +96,7 @@ pub(super) async fn update(
     let document = source.finish(document)?;
     let text = toml::to_string_pretty(&document)?;
     let merged = crate::multi_config::Document::parse(&text)?;
-    let providers = crate::multi_config::load_document(&merged, path, app.credentials())?;
-    app.engines().validate_resources(providers.iter().flat_map(|p| &p.config.bots))?;
+    crate::multi_config::load_document(&merged, path, app.credentials())?;
     let prepared = PreparedConfig::new(path, source.original.clone())?;
     let backup = prepared.backup_original()?;
     if let Some(admin) = admin {
