@@ -1,4 +1,5 @@
 import { productionRunsSql, isTrialRun } from "@avernet/clawweb-shared/server/services/run-purpose";
+import { logWorkflowBackground, startWorkflowBackgroundRun } from '@avernet/clawweb-shared/server/services/workflow-background-log';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { IssueAggregationRepository } from '@avernet/clawevolve/server/repositories/issue-aggregation-repository';
 import type { AutoAnalysisSettings } from './task-guard/auto-analysis-settings.js';
@@ -31,6 +32,7 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
   const issues = new IssueAggregationRepository(input.db);
   let roundRobin = 0;
   const environment = input.environment ?? 'prod';
+  logWorkflowBackground('workflow_automation', 'configured', { enabled: true, environment });
   async function authority(workflowId: string, draft = false) {
     const policy = await input.settings.get(workflowId);
     if ((policy.executionEnvironment ?? 'prod') !== environment) throw new RepairAutomationDeniedError('EXECUTION_ENVIRONMENT_MISMATCH');
@@ -60,6 +62,7 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
     catch (error) { await repo.patch(job, { status: 'retryable', reason: error instanceof Error ? error.message : 'OWNER_PERMISSION_DENIED', nextAtMs: now() + 60000 }, now(), true); return; }
     job = await repo.patch(job, { status: 'dispatching', attempts: job.attempts + 1, data: { ...job.data, actorId: access.actorId } }, now());
     let result: AnalysisObservation;
+    logWorkflowBackground('workflow_analysis_dispatch', 'dispatch', { environment, workflowId: job.workflowId, flowId: job.data.flowId });
     try { result = await bounded(input.ports.analysis.start({ workflowId: job.workflowId, flowId: job.data.flowId, actorId: access.actorId, policyVersion: access.policy.version, dispatchToken: job.leaseToken!, requestId: job.id })); }
     catch { result = { status: 'uncertain' }; }
     await repo.patch(job, { status: result.status === 'completed' ? 'done' : result.status === 'failed' ? 'retryable' : result.status === 'running' ? 'waiting' : 'uncertain',
@@ -105,7 +108,14 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
     if (!cycle.data.completedDue || policy.scopeVersion !== 'all-qualified/v1' && cycle.data.draftDue === cycle.data.completedDue) return cycle;
     const pendingTaskId = await repo.pendingAutomaticTask(cycle.workflowId);
     if (pendingTaskId) return repo.patch(cycle, { reason: 'DRAFT_IN_PROGRESS', data: { ...cycle.data, blockingTaskId: pendingTaskId } }, now());
-    const baseline = await input.ports.baseline(cycle.workflowId);
+    // Planning is DB-only. Git generation material is resolved by workbench.create,
+    // after a real, version-bound selection exists, not on every timer tick.
+    const header = await input.workbench.candidates(cycle.workflowId, { state: 'pending', pageSize: 1, versionScope: 'current' });
+    const snapshot = header.activeSnapshot;
+    if (snapshot?.status !== 'resolved' || snapshot.snapshot.kind !== 'deployment') {
+      return repo.patch(cycle, { reason: 'AUTOMATION_SNAPSHOT_UNAVAILABLE' }, now());
+    }
+    const baseline = { activeDeployNumber: snapshot.snapshot.deployNumber, specDigest: snapshot.snapshot.configDigest };
     if (policy.scopeVersion === 'all-qualified/v1') {
       const occupied=await repo.activeDraft(cycle.workflowId,undefined,baseline.activeDeployNumber??undefined);
       if(occupied)return repo.patch(cycle,{reason:'DRAFT_IN_PROGRESS',data:{...cycle.data,blockingTaskId:occupied.data.realTaskId??null}},now());
@@ -146,7 +156,7 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
   }
   async function runDraft(record: AutomationJob) {
     let job = await repo.claim(record.id, now()); if (!job || !job.data.request) return;
-    if (job.data.batches) return runAutomaticRound({ job, repo, workbench: input.workbench, ports: input.ports, now, authority: () => authority(job!.workflowId, true) });
+    if (job.data.batches) return runAutomaticRound({ job, repo, workbench: input.workbench, now, authority: () => authority(job!.workflowId, true) });
     const request = job.data.request as RepairSelectionRequest;
     const existing = await input.workbench.request(job.workflowId, request.requestId);
     let taskId = existing?.taskId ?? job.data.realTaskId;
@@ -157,9 +167,6 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
       if (await repo.pendingAutomaticTask(job.workflowId)) {
         await repo.patch(job, { status: 'pending', reason: 'DRAFT_IN_PROGRESS', nextAtMs: now() + 60000 }, now(), true); return;
       }
-      if (job.data.baseline && digestRepairJson(await input.ports.baseline(job.workflowId)) !== digestRepairJson(job.data.baseline)) {
-        await repo.patch(job, { status: 'blocked', reason: 'BASELINE_REASSESSMENT_REQUIRED' }, now(), true); return;
-      }
       let access;
       try { access = await authority(job.workflowId, true); }
       catch (error) { if (!(error instanceof RepairAutomationDeniedError)) throw error;
@@ -169,6 +176,7 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
       }
       if (job.attempts >= 2) { await repo.patch(job, { status: 'blocked', reason: 'DRAFT_REQUIRES_MANUAL_REVIEW' }, now(), true); return; }
       job = await repo.patch(job, { status: 'dispatching', attempts: job.attempts + 1 }, now());
+      logWorkflowBackground('workflow_automatic_draft', 'dispatch', { environment, workflowId: job.workflowId });
       try { taskId = (await bounded(input.workbench.create(access.actorId, request))).taskId; }
       catch {
         const recovered = await input.workbench.request(job.workflowId, request.requestId);
@@ -250,26 +258,37 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
   }
   return {
     async tick() {
+      const end = startWorkflowBackgroundRun('workflow_automation', 'timer', { environment });
+      try {
       const policies = (await input.settings.list()).filter(policy => (policy.executionEnvironment ?? 'prod') === environment);
       const count = Math.min(10, policies.length);
       for (let i = 0; i < count; i++) {
         const policy = policies[(roundRobin + i) % policies.length];
         try { await workflow(policy); }
-        catch (error) { console.warn('[workflow-automation] reconcile failed', { workflowId: policy.workflowId, environment,
+        catch (error) { logWorkflowBackground('workflow_policy', 'failed', { environment, workflowId: policy.workflowId });
+          console.warn('[workflow-automation] reconcile failed', { workflowId: policy.workflowId, environment,
           code: error instanceof RepairAutomationDeniedError ? error.message : 'AUTOMATION_RECONCILE_FAILED' }); }
       }
       if (policies.length) roundRobin = (roundRobin + count) % policies.length;
       // Manual completions and in-flight automatic results notify even with automation disabled/unconfigured.
       await drainNotifications();
+      end('succeeded', { policyCount: policies.length, enabledPolicyCount: policies.filter(policy => policy.enabled).length, count });
       return count;
+      } catch (error) { end('failed'); throw error; }
     },
     async onRunTerminal(event) {
       if (event.status !== 'failed') return;
+      const end = startWorkflowBackgroundRun('workflow_failed_run_analysis', 'run_failed', { environment, flowId: event.flowId });
+      try {
       const row = (await input.db.query<{ workflow_id: string }>(`SELECT workflow_id FROM ${productionRunsSql()} flow_runs WHERE flow_id = ?`, [event.flowId]))[0];
-      if (!row) return;
-      try { await authority(row.workflow_id); } catch (error) { if (error instanceof RepairAutomationDeniedError) return; throw error; }
+      if (!row) { end('skipped', { reason: 'RUN_NOT_FOUND' }); return; }
+      try { await authority(row.workflow_id); } catch (error) { if (error instanceof RepairAutomationDeniedError) {
+        end('skipped', { workflowId: row.workflow_id, reason: error.message }); return;
+      } throw error; }
       const job = await repo.ensure(row.workflow_id, 'auto_run', event.flowId, { flowId: event.flowId, evidenceCutoffMs: now() }, now());
       await runAnalysis(job);
+      end('succeeded', { workflowId: row.workflow_id });
+      } catch (error) { end('failed'); throw error; }
     },
     records(workflowId, query) { return new WorkflowAutomationHistoryRepository(input.db).page(workflowId, query, now()); },
     async status(workflowId) {

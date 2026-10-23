@@ -13,6 +13,7 @@ import { automaticChain, isAutomaticBatch, retainedFeedbackCandidate } from '../
 import { RepairAutomationDeniedError } from '../contracts/workflow-automation.js';
 import { repairEvidenceFacts, repairEvidenceFlows, validateAutomationOrigin } from '../contracts/repair-batch.js';
 import { randomUUID } from 'node:crypto';
+import { logWorkflowBackground, startWorkflowBackgroundRun, withWorkflowBackgroundContext } from '@avernet/clawweb-shared/server/services/workflow-background-log';
 import { repairStage } from '../observability/repair-diagnostics.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import {
@@ -117,6 +118,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
   private readonly readSnapshots = new Map<string, { version: string; at: number; value: Awaited<ReturnType<WorkflowRepairWorkbench['snapshot']>> }>();
   private readonly pendingReads = new Map<string, Promise<Awaited<ReturnType<WorkflowRepairWorkbench['snapshot']>>>>();
   private readGeneration = 0;
+  private readonly statusFailures = new Map<string, { at: number; suppressed: number }>();
   constructor(private readonly db: IDatabase, private readonly sources: RepairSourcePort, private readonly execution?: RepairExecutionPort, private readonly proposals?: ProposalCoordinator,
     private readonly onCompleted?: (tx: IDatabase, revision: RepairRevision) => Promise<void>) {}
   private capabilities(): RepairCapabilities {
@@ -732,49 +734,90 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     await serial(this.db, () => new RepairTaskRepository(this.db).expireStaleDispatches(Date.now() - 120_000));
     const executions = await serial(this.db, () => new RepairTaskRepository(this.db).active(limit));
     let settled = 0;
-    for (const active of executions) {
+    for (const active of executions) settled += await withWorkflowBackgroundContext({ operation: 'result', taskId: active.taskId,
+      revision: active.revision, jobId: active.jobId, attempt: active.identity.attempt, executionId: active.identity.executionId }, async () => {
       const task = await this.task(active.taskId);
       const revision = task.revisions.find(item => item.revision === active.revision);
-      if (!revision || revision.phase !== 'drafting') continue;
+      if (!revision || revision.phase !== 'drafting') return 0;
       const request = { input: revision.input, actorId: active.actorId, identity: active.identity, jobId: active.jobId };
-      if (Date.now() - active.requestedAtMs > 2_400_000) {
+      const fields = { workflowId: revision.workflowId };
+      if (!active.successObservedAtMs && Date.now() - active.requestedAtMs > 2_400_000) {
+        if (!await serial(this.db, () => new RepairTaskRepository(this.db).claimTimeout(active.taskId, active.identity))) return 0;
         try { await this.execution.stop?.(request); } catch { /* Persist timeout even if remote stop is unavailable. */ }
         const expectedStateVersion = revision.stateVersion;
         await this.report({ workflowId: revision.workflowId, taskId: revision.taskId, revision: revision.revision,
           expectedStateVersion, status: 'failed', error: { code: 'AIS_TIMEOUT', message: 'AIS repair exceeded the 40-minute deadline' } });
-        settled += 1;
-        continue;
+        logWorkflowBackground('repair_result', 'settled', { ...fields, outcome: 'failed', errorCode: 'AIS_TIMEOUT' });
+        return 1;
       }
-      let remote: Awaited<ReturnType<RepairExecutionPort['status']>>;
-      try { remote = await this.execution.status(request); } catch { continue; }
-      if (!await serial(this.db, () => new RepairTaskRepository(this.db).updateRemoteStatus(active.taskId, active.revision, active.identity, remote.rawStatus, remote.status === 'success'))) continue;
-      if (remote.status === 'running') continue;
+      let remote: Awaited<ReturnType<RepairExecutionPort['status']>> = { status: 'success', rawStatus: 'success', errorMessage: null };
+      if (!active.successObservedAtMs) {
+        try { remote = await this.execution!.status(request); this.statusFailures.delete(active.identity.executionId); }
+        catch {
+          const prior = this.statusFailures.get(active.identity.executionId);
+          if (!prior || Date.now() - prior.at >= 60_000) {
+            logWorkflowBackground('repair_result', 'failed', { ...fields, phase: 'ais_status', errorCode: 'AIS_STATUS_UNAVAILABLE', suppressed: prior?.suppressed ?? 0 });
+            if (this.statusFailures.size >= 200) this.statusFailures.delete(this.statusFailures.keys().next().value!);
+            this.statusFailures.set(active.identity.executionId, { at: Date.now(), suppressed: 0 });
+          } else prior.suppressed++;
+          return 0;
+        }
+        if (!await serial(this.db, () => new RepairTaskRepository(this.db).updateRemoteStatus(active.taskId, active.revision, active.identity, remote.rawStatus, remote.status === 'success'))) return 0;
+        if (remote.status === 'running') return 0;
+        logWorkflowBackground('repair_result', 'ais_terminal', { ...fields, status: remote.status });
+      }
       const expectedStateVersion = (await this.task(active.taskId)).revisions.find(item => item.revision === active.revision)?.stateVersion;
-      if (expectedStateVersion === undefined) continue;
+      if (expectedStateVersion === undefined) return 0;
+      let resultStatus: string = remote.status;
+      let outcome: 'succeeded' | 'failed' = remote.status === 'success' ? 'succeeded' : 'failed';
+      let errorCode = remote.status === 'stopped' ? 'AIS_STOPPED' : remote.status === 'failed' ? 'AIS_FAILED' : undefined;
       if (remote.status === 'success') {
+        const claim = await serial(this.db, () => new RepairTaskRepository(this.db).claimResult(active.taskId, active.identity));
+        if (claim === 'busy') return 0;
+        let result: Awaited<ReturnType<RepairExecutionPort['readResult']>>;
+        const end = startWorkflowBackgroundRun('repair_result', 'result_read', { ...fields, phase: 'result_read' });
         try {
-          const result = await this.execution.readResult(request);
+          if (claim === 'interrupted') throw new Error('RESULT_READ_INTERRUPTED');
+          result = await this.execution!.readResult(request);
+          end('succeeded');
+        } catch {
+          end('failed', { errorCode: 'GIT_RESULT_UNAVAILABLE' });
+          await this.report({ workflowId: revision.workflowId, taskId: revision.taskId, revision: revision.revision,
+            expectedStateVersion, status: 'failed', error: { code: 'GIT_RESULT_UNAVAILABLE',
+              message: 'Result ingestion failed or was interrupted; explicitly retry reading this execution result. No automatic Git retry.' } });
+          logWorkflowBackground('repair_result', 'settled', { ...fields, outcome: 'failed', errorCode: 'GIT_RESULT_UNAVAILABLE' });
+          return 1;
+        }
+        const settleEnd = startWorkflowBackgroundRun('repair_result', 'db_settlement', { ...fields, phase: 'db_settlement' });
+        try {
           await this.report({ workflowId: revision.workflowId, taskId: revision.taskId, revision: revision.revision,
             expectedStateVersion, ...result });
-          settled += 1;
-        } catch {
-          // Git publication may lag AIS success, but never leave a task spinning forever.
-          if (active.successObservedAtMs && Date.now() - active.successObservedAtMs > 300_000) {
-            await this.report({ workflowId: revision.workflowId, taskId: revision.taskId, revision: revision.revision,
-              expectedStateVersion, status: 'failed', error: { code: 'GIT_RESULT_UNAVAILABLE',
-                message: 'AIS completed, but no valid result appeared on the repair branch within five minutes' } });
-            settled += 1;
+          resultStatus = result.status;
+          if (result.status === 'failed') {
+            outcome = 'failed';
+            errorCode = typeof result.error.code === 'string' && /^[A-Z][A-Z0-9_]{0,127}$/.test(result.error.code) ? result.error.code : 'GIT_RESULT_FAILED';
           }
+          settleEnd('succeeded');
+        } catch (error) {
+          const invalid = error instanceof RepairBatchError && ['INVALID_INPUT', 'PAYLOAD_TOO_LARGE', 'CONTENT_MISMATCH'].includes(error.code);
+          settleEnd('failed', { errorCode: invalid ? 'RESULT_VALIDATION_FAILED' : 'RESULT_SETTLEMENT_FAILED' });
+          if (invalid) {
+            await this.report({ workflowId: revision.workflowId, taskId: revision.taskId, revision: revision.revision,
+              expectedStateVersion, status: 'failed', error: { code: 'GIT_RESULT_UNAVAILABLE', reasonCode: 'RESULT_VALIDATION_FAILED',
+                message: 'Result did not match the frozen task input; inspect and explicitly retry this execution result.' } });
+            logWorkflowBackground('repair_result', 'settled', { ...fields, outcome: 'failed', errorCode: 'RESULT_VALIDATION_FAILED' });
+            return 1;
+          }
+          throw error;
         }
       } else {
-        let failure: Record<string, unknown> | undefined;
-        if(remote.status==='failed')try{const result=await this.execution.readResult(request);if(result.status==='failed')failure=result.error;}catch{/* Older consumers have no durable failure result. */}
         await this.report({ workflowId: revision.workflowId, taskId: revision.taskId, revision: revision.revision,
-          expectedStateVersion, status: 'failed', error: failure??{ code: remote.status === 'stopped' ? 'AIS_STOPPED' : 'AIS_FAILED',
+          expectedStateVersion, status: 'failed', error: { code: remote.status === 'stopped' ? 'AIS_STOPPED' : 'AIS_FAILED',
             rawStatus: remote.rawStatus, message: remote.errorMessage } });
-        settled += 1;
       }
-    }
+      logWorkflowBackground('repair_result', 'settled', { ...fields, outcome, status: resultStatus, errorCode });
+      return 1;
+    });
     return settled;
   }
   async disposition(actorId: string, input: Parameters<RepairWorkbenchService['disposition']>[1]): Promise<StoredRepairItem> {

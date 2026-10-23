@@ -1,7 +1,7 @@
 import {workflowSnapshotKey} from '@avernet/clawweb-shared/server/contracts/workflow-snapshot';
-import type { AutomationWorkbench, WorkflowAutomationPorts, WorkflowAutomationPolicy } from '../contracts/workflow-automation.js';
+import { logWorkflowBackground } from '@avernet/clawweb-shared/server/services/workflow-background-log';
+import type { AutomationWorkbench, WorkflowAutomationPolicy } from '../contracts/workflow-automation.js';
 import type { RepairFeedbackRequest, RepairSelectionRequest } from '../contracts/repair-workbench.js';
-import type { RepairBaseline } from '../contracts/repair-batch.js';
 import { automaticChain } from '../contracts/repair-automatic-chain.js';
 import { digestRepairJson } from '../contracts/repair-batch.js';
 import { WorkflowAutomationRepository, type AutomationJob } from '../repositories/workflow-automation-repository.js';
@@ -15,8 +15,8 @@ async function bounded<T>(promise: Promise<T>): Promise<T> {
 
 /** One persisted round and one task; only its bounded next batch can dispatch. */
 export async function runAutomaticRound(input: { job: AutomationJob; repo: WorkflowAutomationRepository; workbench: AutomationWorkbench;
-  ports: WorkflowAutomationPorts; now: () => number; authority: () => Promise<{ actorId: string; policy: WorkflowAutomationPolicy }> }) {
-  const { repo, workbench, ports, now } = input;
+  now: () => number; authority: () => Promise<{ actorId: string; policy: WorkflowAutomationPolicy }> }) {
+  const { repo, workbench, now } = input;
   let job = input.job;
   const stop = async (reason: string) => { job = await repo.patch(job, { status: 'blocked', reason }, now(), true); };
   try {
@@ -33,8 +33,6 @@ export async function runAutomaticRound(input: { job: AutomationJob; repo: Workf
       if (!taskId && await repo.pendingAutomaticTask(job.workflowId)) {
         await repo.patch(job, { status: 'pending', reason: 'DRAFT_IN_PROGRESS', nextAtMs: now() + 60000 }, now(), true); return;
       }
-      const baseline = await ports.baseline(job.workflowId);
-      if (digestRepairJson(baseline) !== digestRepairJson(job.data.baseline as RepairBaseline)) return stop('BASELINE_REASSESSMENT_REQUIRED');
       const snapshot = await workbench.candidates(job.workflowId, { includeHistorical: true, state: 'all', pageSize: 1,versionScope:'current' });
       if(request.targetSnapshotKey&&snapshot.activeSnapshot!==undefined&&(snapshot.activeSnapshot?.status!=='resolved'||workflowSnapshotKey(snapshot.activeSnapshot.snapshot)!==request.targetSnapshotKey))return stop('TARGET_VERSION_CHANGED');
       if (snapshot.inputDigest !== request.inputDigest) return stop('SOURCE_CHANGED');
@@ -42,6 +40,7 @@ export async function runAutomaticRound(input: { job: AutomationJob; repo: Workf
         if (automaticItemDigest(item) !== job.data.revisions[item.itemId]) return stop('SOURCE_CHANGED');
       }
       job = await repo.patch(job, { status: 'dispatching', attempts: job.attempts + 1 }, now());
+      logWorkflowBackground('workflow_automatic_draft', 'dispatch', { workflowId: job.workflowId, taskId });
       try {
         const result = await bounded(taskId && job.data.recovery ? workbench.retryGeneration(access.actorId, taskId, job.data.recovery) : taskId ? workbench.revise(access.actorId, taskId, request as RepairFeedbackRequest)
           : workbench.create(access.actorId, request));
@@ -66,7 +65,6 @@ export async function runAutomaticRound(input: { job: AutomationJob; repo: Workf
     if (['review', 'no_change'].includes(revision.phase)
       && (revision.checks?.static as { status?: string })?.status === 'passed' && typeof revision.draft?.candidateCommit === 'string') {
       try { automaticChain(task.revisions, revision); } catch { return stop('AUTOMATIC_CHAIN_INCOMPLETE'); }
-      if(digestRepairJson(await ports.baseline(job.workflowId))!==digestRepairJson(job.data.baseline as RepairBaseline))return stop('BASELINE_REASSESSMENT_REQUIRED');
       if (index + 1 < batches.length) {
         const next: RepairFeedbackRequest = { ...request, itemIds: batches[index + 1], requestId: `${job.id}:${index + 1}`,
           expectedAttemptRevision: revision.revision, parentCandidateCommit: revision.draft.candidateCommit, feedback: '',

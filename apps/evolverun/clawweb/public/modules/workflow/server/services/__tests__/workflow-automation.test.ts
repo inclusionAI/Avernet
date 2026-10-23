@@ -27,19 +27,24 @@ async function fixture(autoDraft = false, count = 3, full = false) {
       scope_type TEXT, scope_json TEXT, status TEXT, result_json TEXT, requested_at_ms INTEGER, completed_at_ms INTEGER, state_version INTEGER DEFAULT 0);
     CREATE TABLE workflow_healing_diagnoses (diagnosis_id TEXT, workflow_id TEXT, flow_id TEXT, failure_signature TEXT,
       failure_mode TEXT, node_id TEXT, weak_node_id TEXT, error_text TEXT, gmt_modified INTEGER);
-    CREATE TABLE workflow_deploy_history (workflow_id TEXT, deploy_number INTEGER, is_active INTEGER);`);
+    CREATE TABLE workflow_deploy_history (workflow_id TEXT, deploy_number INTEGER, is_active INTEGER, version INTEGER, spec_json TEXT);`);
+  f.raw.exec("INSERT INTO workflow_deploy_history VALUES ('wf-1', 7, 1, 7, '{}')");
   let clock = Date.parse('2026-11-01T02:00:00Z');
   let owner: string | null = 'owner'; let permitted = true;
   const observations = new Map<string, AnalysisObservation>();
   const settings = createAutoAnalysisSettings({ repo: new AppConfigRepository(f.db), environmentDefault: '' });
   await settings.save('wf-1', { enabled: true, autoDraft, dailyTime: '09:00', expectedVersion: 0, ...(full ? { minimumImpact: 'medium' as const } : {}) }, 'owner');
-  const baseline = { ...await f.executionPort.resolveBaseline('wf-1'), activeDeployNumber: 7 };
+  const baseline = { ...await f.executionPort.resolveBaseline('wf-1'), activeDeployNumber: 7, specDigest: digestRepairJson({}) };
+  const activeSnapshot = () => ({ status: 'resolved' as const, snapshot: { kind: 'deployment' as const,
+    workflowId: 'wf-1', workflowVersion: baseline.activeDeployNumber, deployNumber: baseline.activeDeployNumber,
+    configDigest: baseline.proposalSpecDigest ?? baseline.specDigest } });
+  f.sourcePort.activeSnapshot = async () => activeSnapshot();
   f.executionPort.resolveBaseline = async () => baseline;
   f.executionPort.diff = async input => ({ ...input, files: [{ path: 'workflows/wf-1.yaml', status: 'M', before: 'old', after: 'new', patch: '@@ -1 +1 @@\n-old\n+new', binary: false, truncated: false }], truncated: false });
   const analyze = (flowId: string, diagnoses: unknown[] = []) => {
     f.raw.prepare(`INSERT INTO workflow_evolution_analysis_runs (analysis_id, workflow_id, flow_id, scope_type, scope_json,
       status, result_json, requested_at_ms, completed_at_ms) VALUES (?, 'wf-1', ?, 'single_run', ?, 'completed', ?, ?, ?)`)
-      .run(flowId, flowId, JSON.stringify({ flowIds: [flowId] }), JSON.stringify({ schemaVersion: 'workflow-evolution-analysis/v1',
+      .run(flowId, flowId, JSON.stringify({ flowIds: [flowId], workflowSnapshot: activeSnapshot() }), JSON.stringify({ schemaVersion: 'workflow-evolution-analysis/v1',
         analysisId: flowId, facts: [], inferences: [], unknowns: [], diagnoses }), clock - 1000, clock - 1000);
     observations.set(flowId, { status: 'completed', analysisId: flowId, complete: true });
   };
@@ -47,7 +52,7 @@ async function fixture(autoDraft = false, count = 3, full = false) {
     const proposal = { schemaVersion: 'workflow-patch/v1', workflowId: 'wf-1', baseSpecDigest: baseline.specDigest,
       summary: `修复节点 ${i}`, operations: [{ op: 'replace', nodeId: `n-${i}`, path: '/executor/timeoutSeconds', value: 60 }] };
     f.items[i].proposal = proposal;
-    f.items[i].context = { signature: `timeout-${i}`, failureMode: 'timeout', nodeId: `n-${i}`, diagnoses: [{ flowIds: [`known-${i}`] }] };
+    f.items[i].context = { sourceSnapshot: activeSnapshot(), signature: `timeout-${i}`, failureMode: 'timeout', nodeId: `n-${i}`, diagnoses: [{ flowIds: [`known-${i}`] }] };
     if (full) {
       f.items[i].context!.diagnoses = [{ flowId: `known-${i}`, severity: 'high', completedAtMs: clock - 1000 }];
       f.raw.prepare('INSERT INTO flow_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(100 + i, `known-${i}`, 'wf-1', 'failed', (clock - 86400000) / 1000, (clock - 86300000) / 1000, (clock - 86400000) / 1000, (clock - 86300000) / 1000);
@@ -57,6 +62,7 @@ async function fixture(autoDraft = false, count = 3, full = false) {
   }
   f.raw.prepare("INSERT INTO flow_runs VALUES (1, 'late-run', 'wf-1', 'failed', ?, ?, ?, ?)")
     .run(Math.floor((clock - 30 * 86400000) / 1000), Math.floor((clock - 30 * 86400000) / 1000), Math.floor((clock - 5000) / 1000), Math.floor((clock - 5000) / 1000));
+  f.raw.exec('ALTER TABLE flow_runs ADD COLUMN workflow_version INTEGER DEFAULT 7; ALTER TABLE flow_runs ADD COLUMN workflow_deploy_number INTEGER DEFAULT 7; ALTER TABLE flow_runs ADD COLUMN state_json TEXT');
   const ports: WorkflowAutomationPorts = { owner: async () => owner, canEdit: async () => permitted,
     baseline: async () => baseline,
     analysis: { lookup: vi.fn(async id => observations.get(id) ?? { status: 'absent' as const }),
@@ -79,6 +85,37 @@ async function fixture(autoDraft = false, count = 3, full = false) {
 it('uses Shanghai daily boundaries and merges missed days', () => {
   expect(automationDue(Date.parse('2026-11-01T00:59:00Z'), '09:00').key).toBe('2026-10-31');
   expect(automationDue(Date.parse('2026-11-01T01:00:00Z'), '09:00').key).toBe('2026-11-01');
+});
+it.each([false, true])('plans automatic scope without fetching Git, including an empty scope (full=%s)', async full => {
+  const f = await fixture(true, 0, full);
+  const baseline = vi.spyOn(f.ports, 'baseline');
+  await f.service.tick(); f.advance(); await f.service.tick();
+  expect(baseline).not.toHaveBeenCalled();
+  expect(f.calls).toHaveLength(0);
+});
+it.each([false, true])('dispatches a planned draft without rereading its Git baseline (batched=%s)', async full => {
+  const f = await fixture(true, 1, full);
+  await f.service.tick();
+  const job = (await f.service.status('wf-1')).jobs.find(row => row.kind === 'auto_draft')!;
+  expect(job).toBeTruthy();
+  expect(job.taskId).toBeUndefined();
+  f.ports.baseline = async () => { throw new Error('Git unavailable after planning'); };
+  f.advance(); await f.service.tick();
+  const record = await new WorkflowAutomationRepository(f.db).get(job.id);
+  expect(record).toMatchObject({ status: 'waiting', reason: null });
+  expect(f.calls).toHaveLength(1);
+  const task = await f.workbench.task(record!.data.realTaskId);
+  expect(task.latestAttempt.input.baseline).toEqual(f.baseline);
+});
+it('parks a disabled planned draft without reading Git or dispatching it', async () => {
+  const f = await fixture(true, 1);
+  await f.service.tick();
+  const job = (await f.service.status('wf-1')).jobs.find(row => row.kind === 'auto_draft')!;
+  await f.settings.set('wf-1', false, 'owner');
+  f.ports.baseline = async () => { throw new Error('Git unavailable while disabled'); };
+  f.advance(); await f.service.tick();
+  expect(await new WorkflowAutomationRepository(f.db).get(job.id)).toMatchObject({ status: 'retryable', reason: 'AUTOMATION_DISABLED', attempts: 0 });
+  expect(f.calls).toHaveLength(0);
 });
 it('parks disabled, never-dispatched analysis without claims, source reads or journal churn, and resumes on enable', async () => {
   const f = await fixture(false, 0);
@@ -120,6 +157,8 @@ it('logs worker entry and its first empty environment-scoped batch once, not eve
   const lines = info.mock.calls.map(([line]) => String(line));
   expect(lines.filter(line => line.includes('"event":"worker_started"'))).toHaveLength(1);
   expect(lines.filter(line => line.includes('"event":"batch_ready"'))).toHaveLength(1);
+  expect(lines.filter(line => line.includes('"job":"workflow_notification_drain"') && line.includes('"event":"start"'))).toHaveLength(1);
+  expect(lines.filter(line => line.includes('"job":"workflow_notification_drain"') && line.includes('"event":"end"'))).toHaveLength(1);
   expect(lines).toContainEqual(expect.stringContaining('"environment":"pre"'));
   expect(lines).toContainEqual(expect.stringContaining('"eligibleCount":0'));
 });
@@ -498,8 +537,9 @@ it('excludes only actually deployed changed items in the next daily round and re
     targets: async () => [{ id: 'wf-target', scope: 'workflow', botId: '', ownerId: '', environment: 'pre', label: 'workflow' }],
     activeBaseline: async () => f.baseline,
     dispatch: async deployment => {
-      f.baseline.activeDeployNumber = 8; f.baseline.packCommit = deployment.candidateCommit; f.baseline.specDigest = 'c'.repeat(64);
-      await f.db.exec("INSERT INTO workflow_deploy_history VALUES ('wf-1', 8, 1)");
+      f.baseline.activeDeployNumber = 8; f.baseline.packCommit = deployment.candidateCommit; f.baseline.specDigest = digestRepairJson({ release: 8 });
+      await f.db.exec('UPDATE workflow_deploy_history SET is_active = 0');
+      await f.db.exec("INSERT INTO workflow_deploy_history VALUES ('wf-1', 8, 1, 8, ?)", [JSON.stringify({ release: 8 })]);
       return { status: 'succeeded', receipt: { requestId: deployment.requestId, candidateCommit: deployment.candidateCommit,
         packDigest: deployment.packDigest, deployNumber: 8, releaseVersion: 8, tagName: 'deploy/wf-1/#8', targetId: 'wf-target' } };
     }, reconcile: async () => ({ status: 'uncertain' }),
@@ -507,14 +547,16 @@ it('excludes only actually deployed changed items in the next daily round and re
   const release = createRepairReleaseService({ db: f.db, workbench: f.workbench, publisher });
   await release.publish('owner', task.taskId, { revision: 1, expectedStateVersion: task.latestAttempt.stateVersion,
     requestId: 'human-publication', targetId: 'wf-target', acknowledgeUncoveredChecks: true });
-  const inbox = await f.workbench.candidates('wf-1');
+  const inbox = await f.workbench.candidates('wf-1', { versionScope: 'all' });
   expect(inbox.items.find(item => item.itemId === task.latestAttempt.input.items[0].itemId)?.state).toBe('awaiting_verification');
   expect(inbox.items.find(item => item.itemId === task.latestAttempt.input.items[1].itemId)?.state).toBe('pending');
   expect(inbox.counts.pending).toBe(2);
   // Reassess the independently unselected scope against the actual new baseline.
   const unselected = f.items.find(item => !task.latestAttempt.input.items.some(old => old.itemId === item.itemId))!;
   unselected.proposal = { ...unselected.proposal!, baseSpecDigest: f.baseline.specDigest };
-  f.analyze('new-baseline-evidence');
+  unselected.context!.sourceSnapshot = { status: 'resolved', snapshot: { kind: 'deployment', workflowId: 'wf-1', workflowVersion: 8, deployNumber: 8, configDigest: f.baseline.specDigest } };
+  f.analyze('new-baseline-evidence', [{ diagnosisId: 'new-baseline', flowIds: ['new-baseline-evidence'], nodeId: 'new-node',
+    failureSignature: unselected.context!.signature, failureMode: 'timeout', severity: 'high', reasoning: 'new baseline evidence', evidenceEventIds: [], proposal: unselected.proposal }]);
   f.advance(86400000); await f.service.tick(); f.advance(); await f.service.tick();
   const jobs = (await f.service.status('wf-1')).jobs.filter(job => job.kind === 'auto_draft' && job.taskId !== task.taskId);
   expect(jobs).toHaveLength(1);
@@ -610,7 +652,7 @@ it('recovers a confirmed failed automatic batch using a durable request key afte
 it('does not lose today runs when the incremental watermark advances before tomorrow scope', async () => {
   const f = await fixture(false, 1, true);
   const started = Date.parse('2026-11-01T00:00:00Z') / 1000;
-  f.raw.prepare('INSERT INTO flow_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(999, 'today-run', 'wf-1', 'failed', started, started + 60, started, started + 60);
+  f.raw.prepare('INSERT INTO flow_runs (id,flow_id,workflow_id,status,started_at,completed_at,gmt_create,gmt_modified) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(999, 'today-run', 'wf-1', 'failed', started, started + 60, started, started + 60);
   await f.service.tick();
   expect(vi.mocked(f.ports.analysis.start).mock.calls.some(([value]) => value.flowId === 'today-run')).toBe(false);
   f.advance(86400000); await f.restart().tick(); f.advance(); await f.service.tick();
@@ -676,7 +718,7 @@ it('excludes trials from terminal analysis and daily jobs', async () => {
   expect((await f.service.status('wf-1')).jobs.filter(job => job.kind === 'auto_run')).toEqual([]);
 });
 
-it('stops an automatic round before appending another batch after a deployment change',async()=>{
+it('advances an existing round without rereading Git and retains its frozen baseline',async()=>{
  const f=await fixture(true,101,true);
  for(let i=0;i<10;i++){await f.service.tick();f.advance();if(f.calls.length)break;}
  const job=(await f.service.status('wf-1')).jobs.find(j=>j.kind==='auto_draft'&&j.taskId)!;
@@ -685,10 +727,12 @@ it('stops an automatic round before appending another batch after a deployment c
  const draft={candidateCommit:'d'.repeat(40),parentCandidateCommit:f.baseline.packCommit,packDigest:'e'.repeat(40),itemResults:task.latestAttempt.input.items.map(item=>({itemId:item.itemId,status:'changed',reason:'fixture'}))};
  await f.workbench.report({workflowId:'wf-1',taskId:task.taskId,revision:1,expectedStateVersion:0,status:'succeeded',draft,checks:{schemaVersion:'workflow-repair-checks/v1',candidateCommit:draft.candidateCommit,packDigest:draft.packDigest,candidateDigest:digestRepairJson(draft),static:{status:'passed'},mock:{status:'not_covered'},coverage:task.latestAttempt.input.items.map(item=>({itemId:item.itemId}))}});
  f.baseline.activeDeployNumber=8;
+ f.ports.baseline=async()=>{throw new Error('Git unavailable after generation');};
  f.advance();await f.restart().tick();
  const record=await new WorkflowAutomationRepository(f.db).get(job.id);
- expect(record).toMatchObject({status:'blocked',reason:'BASELINE_REASSESSMENT_REQUIRED'});
- expect(record!.data.request.automation.batchIndex).toBe(0);
+ expect(record).toMatchObject({status:'pending',reason:null});
+ expect(record!.data.request.automation.batchIndex).toBe(1);
+ expect(record!.data.baseline.activeDeployNumber).toBe(7);
  expect(f.calls).toHaveLength(1);
 });
 
@@ -716,7 +760,7 @@ it.each([false, true])('pauses new automatic drafts across days while analysis c
   f.analyze('additional-evidence');
   f.advance(86400000);
   const now = Date.parse('2026-11-02T02:02:00Z') / 1000;
-  f.raw.prepare('INSERT INTO flow_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(999, 'new-unanalysed-run', 'wf-1', 'failed', now - 86400, now - 86300, now - 10, now - 10);
+  f.raw.prepare('INSERT INTO flow_runs (id,flow_id,workflow_id,status,started_at,completed_at,gmt_create,gmt_modified) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(999, 'new-unanalysed-run', 'wf-1', 'failed', now - 86400, now - 86300, now - 10, now - 10);
   for (let i = 0; i < 3; i++) { f.advance(); await f.restart().tick(); }
   expect(f.calls).toHaveLength(1);
   expect(vi.mocked(f.ports.analysis.start).mock.calls.some(([value]) => value.flowId === 'new-unanalysed-run')).toBe(true);

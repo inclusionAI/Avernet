@@ -1,4 +1,5 @@
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
+import { logWorkflowBackground, startWorkflowBackgroundRun } from '@avernet/clawweb-shared/server/services/workflow-background-log';
 import { isInvalidAutoAnalysisSettings, type AutoAnalysisSettings } from './task-guard/auto-analysis-settings.js';
 import { RepairAutomationDeniedError, type AutomationWorkbench, type WorkflowAutomationPorts } from '../contracts/workflow-automation.js';
 import { WorkflowAutomationRepository, type AutomationJob } from '../repositories/workflow-automation-repository.js';
@@ -11,7 +12,9 @@ export function createWorkflowNotificationDrain(input: {
   const now = input.now ?? Date.now;
   const repo = new WorkflowAutomationRepository(input.db);
   const environment = input.environment ?? 'prod';
+  logWorkflowBackground('workflow_notification_drain', 'configured', { environment, enabled: environment === 'pre' || environment === 'prod' });
   let firstPoll = true;
+  let lastSummaryAt = -Infinity, lastFailureAt = -Infinity, suppressed = 0;
   async function notify(record: AutomationJob) {
     let job = record;
     const log = (event: string, reason?: string, receipt?: string) => console.info('[workflow-notification] ' + JSON.stringify({
@@ -83,15 +86,19 @@ export function createWorkflowNotificationDrain(input: {
       result.status === 'sent' ? undefined : result.status === 'uncertain' ? 'NOTIFICATION_OUTCOME_UNKNOWN' : 'NOTIFICATION_REJECTED', result.receipt);
   }
   return async () => {
+    const summarize = now() - lastSummaryAt >= 60_000;
+    let end = summarize ? startWorkflowBackgroundRun('workflow_notification_drain', 'poll', { environment }) : undefined;
+    if (summarize) lastSummaryAt = now();
     const first = firstPoll; firstPoll = false;
     const enabled = environment === 'pre' || environment === 'prod';
     if (first) console.info('[workflow-notification] ' + JSON.stringify({ event: 'worker_started', environment, enabled }));
-    if (!enabled) return;
+    if (!enabled) { end?.('skipped', { reason: 'ENVIRONMENT_DISABLED' }); return; }
     let stage = 'settings_scan';
     try {
       const preWorkflows = (await input.settings.list()).filter(policy => policy.executionEnvironment === 'pre').map(policy => policy.workflowId);
       stage = 'queue_read';
       const ready = await repo.readyNotifications(now(), 5, { workflowIds: preWorkflows, exclude: environment === 'prod' });
+      if (ready.length && !end) end = startWorkflowBackgroundRun('workflow_notification_drain', 'poll', { environment });
       if (first || ready.length) console.info('[workflow-notification] ' + JSON.stringify({ event: 'batch_ready', environment,
         eligibleCount: ready.length, preWorkflowCount: preWorkflows.length }));
       stage = 'delivery';
@@ -101,8 +108,14 @@ export function createWorkflowNotificationDrain(input: {
           noticeId: record.id, taskId: record.data.taskId ?? null, revision: record.data.revision ?? null, reason: 'NOTIFICATION_DELIVERY_FAILED' }));
         throw error;
       })));
+      end?.('succeeded', { count: ready.length, suppressed });
+      if (end) suppressed = 0;
     } catch (error) {
-      console.warn('[workflow-notification] ' + JSON.stringify({ event: 'drain_failed', environment, stage, reason: 'NOTIFICATION_DRAIN_FAILED' }));
+      end?.('failed', { reason: stage, suppressed });
+      if (now() - lastFailureAt >= 60_000) {
+        console.warn('[workflow-notification] ' + JSON.stringify({ event: 'drain_failed', environment, stage, reason: 'NOTIFICATION_DRAIN_FAILED', suppressed }));
+        lastFailureAt = now(); suppressed = 0;
+      } else suppressed++;
       throw error;
     }
   };

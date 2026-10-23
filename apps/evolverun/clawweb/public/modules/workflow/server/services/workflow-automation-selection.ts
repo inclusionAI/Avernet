@@ -9,7 +9,8 @@ import { digestRepairJson } from '../contracts/repair-batch.js';
 import type { RepairBaseline } from '../contracts/repair-batch.js';
 import type { AutomationWorkbench } from '../contracts/workflow-automation.js';
 import type { RepairInboxItem } from '../contracts/repair-workbench.js';
-async function legacyAutomaticScope(workbench: AutomationWorkbench, issues: IssueAggregationRepository, workflowId: string, baseline: RepairBaseline) {
+export type AutomaticPlanningBaseline = Pick<RepairBaseline, 'activeDeployNumber' | 'specDigest' | 'proposalSpecDigest'>;
+async function legacyAutomaticScope(workbench: AutomationWorkbench, issues: IssueAggregationRepository, workflowId: string, baseline: AutomaticPlanningBaseline) {
   const header=await workbench.candidates(workflowId,{state:'pending',pageSize:1,versionScope:'current'});
   if(header.activeSnapshot!==undefined&&(header.activeSnapshot?.status!=='resolved'||header.activeSnapshot.snapshot.kind!=='deployment'||header.activeSnapshot.snapshot.deployNumber!==baseline.activeDeployNumber))return null;
   const ranked = await issues.listPage(workflowId, { page: 1, pageSize: 20, sort: 'priority',...(header.activeSnapshot!==undefined?{versionScope:'current' as const}:{}) });
@@ -62,7 +63,7 @@ async function legacyAutomaticScope(workbench: AutomationWorkbench, issues: Issu
     if (selectedUnits === 5) break;
   }
   if (!items.length) return null;
-  const fingerprint = digestRepairJson({ baseline: [baseline.packCommit,baseline.activeDeployNumber], items: items.map(item => ({ id: item.itemId,
+  const fingerprint = digestRepairJson({ baseline: [baseline.activeDeployNumber, baseline.proposalSpecDigest ?? baseline.specDigest], items: items.map(item => ({ id: item.itemId,
     revision: item.contentRevision, proposal: item.proposalKey, recurrence: item.context?.recurrence ?? null,
     flows: [...new Set(item.sources.flatMap(source => source.kind === 'diagnosis_candidate' ? [source.flowId] : []))].sort() })) });
   return { items, inputDigest, fingerprint,...(targetSnapshotKey?{targetSnapshotKey}:{}) };
@@ -80,7 +81,7 @@ export function automaticItemDigest(item: RepairItem) {
   return digestRepairJson({ id: item.itemId, revision: item.contentRevision, proposal: item.proposal, sources: item.sources, context: item.context ?? null });
 }
 export async function selectAutomaticScope(workbench: AutomationWorkbench, issues: IssueAggregationRepository,
-  workflowId: string, baseline: RepairBaseline, scope?: { db: IDatabase; minimumImpact: 'medium' | 'high'; evidenceCutoffMs: number }): Promise<AutomaticScope | null> {
+  workflowId: string, baseline: AutomaticPlanningBaseline, scope?: { db: IDatabase; minimumImpact: 'medium' | 'high'; evidenceCutoffMs: number }): Promise<AutomaticScope | null> {
   if (!scope) return legacyAutomaticScope(workbench, issues, workflowId, baseline);
   const window = previousShanghaiDay(scope.evidenceCutoffMs);
   const deferred: Record<string, string> = {}, revisions: Record<string, string> = {};

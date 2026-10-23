@@ -117,12 +117,46 @@ export class RepairTaskRepository {
     let output: Record<string, unknown>;
     try { output = JSON.parse(row.output_json ?? '{}'); } catch { return false; }
     if (output.executionId !== identity.executionId || output.attempt !== identity.attempt) return false;
+    if (Number.isSafeInteger(output.timeoutObservedAtMs)) return false;
     output.rawStatus = rawStatus;
     if (succeeded && !Number.isSafeInteger(output.successObservedAtMs)) output.successObservedAtMs = Date.now();
     const result = await this.db.exec(`UPDATE ce_steps SET status = CASE WHEN status = 'dispatched' THEN 'running' ELSE status END,
-      output_json = ?, gmt_modified = ? WHERE task_id = ? AND step_id = ? AND status IN ('dispatched', 'running')`,
-    [canonicalRepairJson(output), this.db.dialect.now(), taskId, identity.stepId]);
+      output_json = ?, gmt_modified = ? WHERE task_id = ? AND step_id = ? AND status IN ('dispatched', 'running') AND output_json = ?`,
+    [canonicalRepairJson(output), this.db.dialect.now(), taskId, identity.stepId, row.output_json]);
     return result.affectedRows === 1;
+  }
+  /** Fence a timeout against a concurrently persisted success before stopping AIS. */
+  async claimTimeout(taskId: string, identity: RepairExecutionIdentity): Promise<boolean> {
+    const row = (await this.db.query<{ output_json: string }>(`SELECT output_json FROM ce_steps
+      WHERE task_id = ? AND step_id = ? AND status IN ('dispatched', 'running')`, [taskId, identity.stepId]))[0];
+    if (!row) return false;
+    let output: Record<string, unknown>;
+    try { output = JSON.parse(row.output_json); } catch { return false; }
+    if (output.executionId !== identity.executionId || output.attempt !== identity.attempt
+      || Number.isSafeInteger(output.successObservedAtMs) || !Number.isSafeInteger(output.requestedAtMs)
+      || Date.now() - Number(output.requestedAtMs) <= 2_400_000) return false;
+    // A crashed timeout claimant can be resumed; it never opens a result read.
+    if (Number.isSafeInteger(output.timeoutObservedAtMs) && Date.now() - Number(output.timeoutObservedAtMs) < 120_000) return false;
+    const result = await this.db.exec(`UPDATE ce_steps SET output_json = ?, gmt_modified = ? WHERE task_id = ? AND step_id = ?
+      AND status IN ('dispatched', 'running') AND output_json = ?`,
+    [canonicalRepairJson({ ...output, timeoutObservedAtMs: Date.now() }), this.db.dialect.now(), taskId, identity.stepId, row.output_json]);
+    return result.affectedRows === 1;
+  }
+  /** Claim once per execution. Expiry permits explicit failure/recovery, never another automatic Git read. */
+  async claimResult(taskId: string, identity: RepairExecutionIdentity): Promise<'claimed' | 'busy' | 'interrupted'> {
+    const row = (await this.db.query<{ output_json: string }>(`SELECT output_json FROM ce_steps
+      WHERE task_id = ? AND step_id = ? AND status IN ('dispatched', 'running')`, [taskId, identity.stepId]))[0];
+    if (!row) return 'busy';
+    let output: Record<string, unknown>;
+    try { output = JSON.parse(row.output_json); } catch { return 'busy'; }
+    if (output.executionId !== identity.executionId || output.attempt !== identity.attempt || !Number.isSafeInteger(output.successObservedAtMs)
+      || Number.isSafeInteger(output.timeoutObservedAtMs)) return 'busy';
+    if (Number.isSafeInteger(output.resultReadAttemptedAtMs)) return Number(output.resultReadUntilMs) > Date.now() ? 'busy' : 'interrupted';
+    const next = { ...output, resultReadAttemptedAtMs: Date.now(), resultReadUntilMs: Date.now() + 900_000 };
+    const claimed = await this.db.exec(`UPDATE ce_steps SET output_json = ?, gmt_modified = ? WHERE task_id = ? AND step_id = ?
+      AND status IN ('dispatched', 'running') AND output_json = ?`,
+    [canonicalRepairJson(next), this.db.dialect.now(), taskId, identity.stepId, row.output_json]);
+    return claimed.affectedRows === 1 ? 'claimed' : 'busy';
   }
   async settle(revision: RepairRevision): Promise<void> {
     const config = await this.config(revision.taskId);

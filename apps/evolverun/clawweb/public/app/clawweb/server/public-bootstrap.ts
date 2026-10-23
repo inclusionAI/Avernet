@@ -1,4 +1,5 @@
 import express from "express";
+import { withWorkflowBackgroundContext } from '@avernet/clawweb-shared/server/services/workflow-background-log';
 import compression from "compression";
 import cookieParser from "cookie-parser";
 import { existsSync } from "node:fs";
@@ -144,7 +145,7 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       const repairPoll = setInterval(() => {
         if (repairPollBusy) return;
         repairPollBusy = true;
-        void repairRuntime.monitor.reconcile().catch(() => {
+        void withWorkflowBackgroundContext({ trigger: 'timer', environment: context.environment }, () => repairRuntime.monitor.reconcile()).catch(() => {
           console.warn('[clawweb] Workflow Repair reconciliation failed; will retry');
         }).finally(() => { repairPollBusy = false; });
       }, 15_000);
