@@ -22,11 +22,12 @@ carry.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any, ClassVar, Generic, Mapping, Protocol, TypeVar
+from typing import Any, ClassVar, Collection, Generic, Mapping, Protocol, TypeVar
 
+from agentclaw.community.core.workspace.constants import RESOURCES_ROOT_DIR
 from agentclaw.community.core.apply_engine.constructs import Construct, ManifestCategory, ManifestSection
 from agentclaw.community.core.apply_engine.paths import relative_path_refusal
 from agentclaw.community.core.content_store import DIGEST_RE
@@ -60,7 +61,7 @@ __all__ = [
 #: The one directory under the bot's workspace that holds its resources.
 #: Declared resource paths sit under it; converging resources clears it and
 #: writes the declared entries back (spec § Terms, "Resources root").
-RESOURCES_ROOT = "data/"
+RESOURCES_ROOT = f"{RESOURCES_ROOT_DIR}/"
 
 
 def _require(condition: bool, message: str) -> None:
@@ -396,6 +397,12 @@ class DesiredState:
     @property
     def declared(self) -> tuple[Construct, ...]:
         return tuple(c for c, name in _FIELD_BY_CONSTRUCT.items() if getattr(self, name) is not None)
+
+    def only(self, constructs: Collection[Construct]) -> DesiredState:
+        """This state with every construct outside ``constructs`` undeclared — a creation half's view."""
+        return replace(
+            self, **{name: None for construct, name in _FIELD_BY_CONSTRUCT.items() if construct not in constructs}
+        )
 
 
 def _check_resource_layout(entries: tuple[DesiredResource, ...]) -> None:

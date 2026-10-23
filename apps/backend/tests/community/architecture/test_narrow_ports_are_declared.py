@@ -59,6 +59,8 @@ from agentclaw.community.core.apply_engine.managed_files.ports import (
 from agentclaw.community.core.ports.activation_port import ActivationPort
 from agentclaw.community.core.ports.identity_file_port import IdentityFilePort
 from agentclaw.community.core.ports.resource_file_port import ResourceFilePort
+from agentclaw.community.core.ports.resource_rows_port import ResourceRowsPort
+from agentclaw.community.core.resources.service import ResourceService
 from agentclaw.community.core.ports.skill_package_upload_port import (
     SkillPackageUploadPort,
 )
@@ -76,6 +78,7 @@ _PORT_IMPLEMENTERS = [
     (IdentityFilePort, PlatformIdentity),
     (ResourceFilePort, DeviceResource),
     (ResourceFilePort, PlatformResource),
+    (ResourceRowsPort, ResourceService),
 ]
 
 #: Every outbound port. Members must be abstract for the declarations to gate.
@@ -84,6 +87,7 @@ _PORTS = [
     SkillPackageUploadPort,
     IdentityFilePort,
     ResourceFilePort,
+    ResourceRowsPort,
 ]
 
 

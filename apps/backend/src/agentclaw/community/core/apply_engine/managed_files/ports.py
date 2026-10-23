@@ -31,6 +31,7 @@ import asyncio
 import logging
 from typing import Any, Optional
 
+from agentclaw.community.core.workspace.constants import RESOURCES_ROOT_DIR
 from agentclaw.community.core.apply_engine.managed_files.store import (
     CATEGORY_IDENTITY,
     CATEGORY_RESOURCES,
@@ -212,6 +213,40 @@ class PlatformResource(_StorePort, ResourceFilePort):
             self._store.list, scope, category=CATEGORY_RESOURCES
         )
         return any(row.rel_path == rel or row.rel_path.startswith(rel + "/") for row in rows)
+
+    async def list_root(
+        self,
+        *,
+        entity_type: str = OWNER_ENTITY_TYPE,
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+    ) -> tuple[str, ...]:
+        """Every resources-category object under ``workspace/data/``, as ``data/...`` paths."""
+        rows = await asyncio.to_thread(
+            self._store.list, self._scope(entity_type, entity_id, bot_id), category=CATEGORY_RESOURCES
+        )
+        prefix = _workspace_path(RESOURCES_ROOT_DIR) + "/"
+        return tuple(sorted(row.rel_path[len("workspace/"):] for row in rows if row.rel_path.startswith(prefix)))
+
+    async def clear_root(
+        self,
+        *,
+        entity_type: str = OWNER_ENTITY_TYPE,
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+    ) -> bool:
+        """Delete every object under ``workspace/data/``; ``False`` when there were none."""
+        scope = self._scope(entity_type, entity_id, bot_id)
+        rows = await asyncio.to_thread(self._store.list, scope, category=CATEGORY_RESOURCES)
+        prefix = _workspace_path(RESOURCES_ROOT_DIR) + "/"
+        removed = False
+        for row in rows:
+            if row.rel_path.startswith(prefix):
+                await asyncio.to_thread(self._store.delete, scope, rel_path=row.rel_path)
+                removed = True
+        return removed
 
 
 class PlatformSkillPackageUpload(_StorePort, SkillPackageUploadPort):

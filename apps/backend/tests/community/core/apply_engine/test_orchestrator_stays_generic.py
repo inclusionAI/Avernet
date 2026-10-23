@@ -121,6 +121,7 @@ def test_every_registered_materialiser_has_a_place_in_the_order():
             package_validator=object(),
             content=object(),
             resource_service=object(),
+            resource_rows=object(),
             cli_tool_service=object(),
         )
     )

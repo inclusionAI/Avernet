@@ -44,6 +44,7 @@ from agentclaw.community.core.repository.implementations.bot.config_manifest_app
 )
 
 from ._fakes import (
+    resource_rows_for,
     manifest_compilers,
     FakeActivationService,
     FakeCapabilityReader,
@@ -158,6 +159,7 @@ def _world(*, bot, mode, platform_activation=None, redeliver=None):
             package_validator=real_validator(),
             content=FakeManifestContent(),
             resource_service=FakeResourceFileService(),
+            resource_rows=resource_rows_for()[0],
             cli_tool_service=object(),
         )
 

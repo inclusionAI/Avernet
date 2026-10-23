@@ -546,3 +546,53 @@ class TestDeleteFileRecord:
 
         assert await _make_service(repo).delete_file_record(path="other.txt") is False
         repo.delete.assert_not_called()
+
+
+class TestReplaceManifestRows:
+    """``ResourceRowsPort``: the apply engine's one write to these rows (#2162).
+
+    After an apply has rewritten the resources root, the rows under it must
+    say exactly what was written: every row under ``data/`` goes, one row per
+    written file comes back with ``source="manifest"``, and rows outside the
+    root are not touched.
+    """
+
+    @staticmethod
+    def _repo_with_rows(*paths: str) -> MagicMock:
+        repo = _mock_repo()
+        repo.list_resources.return_value = [
+            {"id": index, "attributes": {"path": path}} for index, path in enumerate(paths, start=1)
+        ]
+        repo.delete.return_value = True
+        return repo
+
+    @pytest.mark.asyncio
+    async def test_rows_under_the_root_are_replaced_and_rows_outside_it_kept(self):
+        repo = self._repo_with_rows("data/old.csv", "data/kb/faq.md", "notes/outside.txt")
+        svc = _make_service(repo, bot_id="bot7")
+
+        await svc.replace_manifest_rows(files=[("data/kb/faq.md", 3), ("data/new.txt", 1)], created_by="u2")
+
+        assert sorted(call.args[0] for call in repo.delete.call_args_list) == ["1", "2"]
+        created = [call.args[0] for call in repo.create.call_args_list]
+        assert [(row["attributes"]["path"], row["attributes"]["size"]) for row in created] == [
+            ("data/kb/faq.md", 3),
+            ("data/new.txt", 1),
+        ]
+        assert {row["source"] for row in created} == {"manifest"}
+        assert {row["bolt_id"] for row in created} == {"bot7"}
+        assert {row["created_by"] for row in created} == {"u2"}
+
+    @pytest.mark.asyncio
+    async def test_an_empty_written_set_clears_the_root_rows(self):
+        repo = self._repo_with_rows("data/old.csv")
+        await _make_service(repo).replace_manifest_rows(files=[], created_by=None)
+        repo.delete.assert_called_once_with("1")
+        repo.create.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_row_write_that_fails_raises_rather_than_reporting_success(self):
+        repo = self._repo_with_rows()
+        repo.create.side_effect = RuntimeError("db down")
+        with pytest.raises(RuntimeError):
+            await _make_service(repo).replace_manifest_rows(files=[("data/a.txt", 1)], created_by=None)

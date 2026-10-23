@@ -44,6 +44,7 @@ from agentclaw.community.core.repository.implementations.bot.config_manifest_app
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 from tests.community.core.apply_engine._fakes import (
+    resource_rows_for,
     manifest_compilers,
     FakeActivationService,
     FakeCapabilityReader,
@@ -142,6 +143,7 @@ def _build(db):
             package_validator=real_validator(),
             content=content,
             resource_service=FakeResourceFileService(),
+            resource_rows=resource_rows_for()[0],
             cli_tool_service=object(),
         )
 
