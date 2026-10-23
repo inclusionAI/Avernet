@@ -11,8 +11,7 @@ from agentclaw.community.core.bot_genome.capture.bot_state import PlatformBotSta
 from agentclaw.community.core.bot_genome.errors import CaptureRefused
 from agentclaw.community.core.bot_genome.models import BotRef
 
-#: ``entity_id`` is the storage key (``staff_<user>`` by default), ``owner_id`` the user: the reader must not mix them
-#: up.
+#: ``entity_id`` + ``bot_id`` identify the bot; ``owner_id`` is the owner's user id: the reader must not mix them up.
 BOT = BotRef(entity_id="staff_u1", bot_id="bot_1", owner_id="u1", engine_type="openclaw", bot_type="arca")
 
 
