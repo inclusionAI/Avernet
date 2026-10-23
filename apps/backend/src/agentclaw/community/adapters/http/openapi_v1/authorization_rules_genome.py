@@ -8,6 +8,7 @@ may do to the bot. Promotion takes apply's own bar — OWNER behind the edit
 lock — because it is the one operation that reaches the running bot
 (``test_config_manifest_apply_bars.py`` pins that dominance).
 """
+
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 
 from .models_authorization import EDIT_LOCK, Authorization, Check

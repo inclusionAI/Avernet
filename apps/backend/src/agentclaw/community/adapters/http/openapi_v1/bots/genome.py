@@ -6,6 +6,7 @@ load-bearing: ``:capture`` is a literal and ``/diff`` a suffix that the
 ``{rev:path}`` wildcard (needed for ``candidate/<run>/<n>``) must not
 swallow, so both are registered before the get route.
 """
+
 from __future__ import annotations
 
 from typing import Annotated, Any, Literal
@@ -64,17 +65,32 @@ from .schemas_genome import (
 
 router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/genome", tags=["bots"], route_class=PublicAPIRoute)
 
-RevPath = Annotated[str, Path(description="A revision id (`sha256:…`), `r<seq>`, or a ref name (`active`, `draft`, `candidate/<run>/<n>`).")]
-DigestPath = Annotated[str, Path(description="`sha256:<hex64>`, as a revision names it.")]
+# FastAPI binds each of these to the route's `{name}` placeholder by the parameter's name: `Path(...)` declares
+# a path parameter (not a query one) and carries its OpenAPI description.
+RevPath = Annotated[
+    str,
+    Path(description="A revision id (`sha256:…`), `r<seq>`, or a ref name (`active`, `draft`, `candidate/<run>/<n>`)."),
+]
+DigestPath = Annotated[
+    str, Path(description="`sha256:<hex64>`, as a revision names it; the path parameter `{digest}`.")
+]
 PromotionIdPath = Annotated[str, Path(description="The id returned by `POST …/genome/promotions`.")]
 PageQuery = Annotated[int, Query(ge=1, description="The page to return, counting from 1.")]
 PageSizeQuery = Annotated[int, Query(ge=1, le=100, description="Items per page, at most 100.")]
 StatusQuery = Annotated[
     Literal["draft", "candidate", "accepted", "rejected", "promoted", "archived"] | None,
-    Query(description="Only revisions in this status: `draft`, `candidate`, `accepted`, `rejected`, `promoted` or `archived`."),
+    Query(
+        description="Only revisions in this status: `draft`, `candidate`, `accepted`, `rejected`, `promoted` or "
+        "`archived`."
+    ),
 ]
 
-_OCTET_STREAM_BODY = {"requestBody": {"required": True, "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}}}
+_OCTET_STREAM_BODY = {
+    "requestBody": {
+        "required": True,
+        "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}},
+    }
+}
 
 
 def bot_ref(bot: dict[str, Any], *, owner_id: str, bot_id: str) -> BotRef:
@@ -104,7 +120,9 @@ def _actor(actor_id: str, caller: ActingCaller, *, run: RunScope | None = None) 
     is the run record's to keep (06-evolution-run.md), not every revision's.
     """
     if run is not None:
-        return Provenance(ProvenanceKind.STRATEGY_RUN, run.strategy, run_id=run.run_id, step=run.step, principal=actor_id)
+        return Provenance(
+            ProvenanceKind.STRATEGY_RUN, run.strategy, run_id=run.run_id, step=run.step, principal=actor_id
+        )
     audit = audit_actor(caller, actor_id)
     recorded_as = None if audit == actor_id else audit
     return Provenance(ProvenanceKind.USER, actor_id, recorded_as=recorded_as)
@@ -124,17 +142,26 @@ async def reject_duplicate_members(request: Request) -> None:
     try:
         loads_strict(body.decode("utf-8"))
     except NotCanonicalizable as exc:
-        raise RequestValidationError([{"type": "value_error", "loc": ("body",), "msg": f"not a contract record: {exc}"}]) from exc
+        raise RequestValidationError(
+            [{"type": "value_error", "loc": ("body",), "msg": f"not a contract record: {exc}"}]
+        ) from exc
     except (UnicodeDecodeError, ValueError):
         return
 
 
 def _summary(meta: RevisionMetadata, bot: BotRef) -> RevisionSummary:
     return RevisionSummary(
-        id=meta.id, seq=meta.seq, bot=BotIdentityPayload(owner_id=bot.owner_id, bot_id=bot.bot_id),
-        parent=meta.parent, status=meta.status.value, created_by=meta.created_by.as_dict(),
-        created_at=meta.created_at, patch_digest=meta.patch_digest, evidence=list(meta.evidence),
-        evaluations=list(meta.evaluations), annotations=dict(meta.annotations),
+        id=meta.id,
+        seq=meta.seq,
+        bot=BotIdentityPayload(owner_id=bot.owner_id, bot_id=bot.bot_id),
+        parent=meta.parent,
+        status=meta.status.value,
+        created_by=meta.created_by.as_dict(),
+        created_at=meta.created_at,
+        patch_digest=meta.patch_digest,
+        evidence=list(meta.evidence),
+        evaluations=list(meta.evaluations),
+        annotations=dict(meta.annotations),
     )
 
 
@@ -143,21 +170,39 @@ def _recorded(recorded: RecordedRevision, response: Response) -> RevisionRecorde
     meta = recorded.revision.revision
     response.status_code = 201 if recorded.created else 200
     return RevisionRecorded(
-        id=meta.id, seq=meta.seq, status=meta.status.value, parent=meta.parent, patch_digest=meta.patch_digest,
-        risk_tier=recorded.risk_tier, flags=list(recorded.flags), ref=recorded.ref, created=recorded.created,
+        id=meta.id,
+        seq=meta.seq,
+        status=meta.status.value,
+        parent=meta.parent,
+        patch_digest=meta.patch_digest,
+        risk_tier=recorded.risk_tier,
+        flags=list(recorded.flags),
+        ref=recorded.ref,
+        created=recorded.created,
     )
 
 
 def _ref(ref: GenomeRef) -> GenomeRefPayload:
-    return GenomeRefPayload(name=ref.name, revision=ref.revision, moved_at=ref.moved_at, moved_by=ref.moved_by.as_dict(), reason=ref.reason)
+    return GenomeRefPayload(
+        name=ref.name, revision=ref.revision, moved_at=ref.moved_at, moved_by=ref.moved_by.as_dict(), reason=ref.reason
+    )
 
 
 def _promotion(promotion: Promotion) -> PromotionPayload:
     return PromotionPayload(
-        id=promotion.id, ref=promotion.ref, revision=promotion.revision, from_revision=promotion.from_revision,
-        document_digest=promotion.document_digest, going_back=promotion.going_back, actor=promotion.actor.as_dict(),
-        reason=promotion.reason, status=promotion.status, apply_kind=promotion.apply_kind,
-        apply_reference=promotion.apply_reference, apply_detail=promotion.apply_detail, created_at=promotion.created_at,
+        id=promotion.id,
+        ref=promotion.ref,
+        revision=promotion.revision,
+        from_revision=promotion.from_revision,
+        document_digest=promotion.document_digest,
+        going_back=promotion.going_back,
+        actor=promotion.actor.as_dict(),
+        reason=promotion.reason,
+        status=promotion.status,
+        apply_kind=promotion.apply_kind,
+        apply_reference=promotion.apply_reference,
+        apply_detail=promotion.apply_detail,
+        created_at=promotion.created_at,
         document=promotion.document,
     )
 
@@ -165,7 +210,12 @@ def _promotion(promotion: Promotion) -> PromotionPayload:
 # -- revisions ----------------------------------------------------------------------------------
 
 
-@router.get("/revisions", response_model=Envelope[Page[RevisionSummary]], responses=USER_SCOPED_403, operation_id="list_bot_genome_revisions")
+@router.get(
+    "/revisions",
+    response_model=Envelope[Page[RevisionSummary]],
+    responses=USER_SCOPED_403,
+    operation_id="list_bot_genome_revisions",
+)
 @envelope_errors
 async def list_genome_revisions(
     bot_id: BotIdPath,
@@ -187,9 +237,15 @@ async def list_genome_revisions(
     return page(listed.total, [_summary(item, bot) for item in listed.items], request)
 
 
-@router.post("/revisions", response_model=Envelope[RevisionRecorded], responses=USER_SCOPED_403, status_code=201, operation_id="record_bot_genome_patch")
+@router.post(
+    "/revisions",
+    response_model=Envelope[RevisionRecorded],
+    responses=USER_SCOPED_403,
+    status_code=201,
+    operation_id="commit_bot_genome_patch",
+)
 @envelope_errors
-async def record_genome_patch(
+async def commit_genome_patch(
     bot_id: BotIdPath,
     body: RecordPatchRequest,
     request: Request,
@@ -201,7 +257,7 @@ async def record_genome_patch(
     registry: GenomeRegistryProtocol = Injected(GenomeRegistryProtocol),
     _: None = Depends(reject_duplicate_members),
 ) -> Envelope[RevisionRecorded]:
-    """Record a revision by applying a Genome Patch to its own `base`.
+    """Commit a Genome Patch: apply it to its own `base` and record the result as a new revision.
 
     Every op must apply exactly to `patch.base`; the result must pass the
     checks apply would run. A `422` lists every reason. `201` for a new
@@ -211,13 +267,26 @@ async def record_genome_patch(
     bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
     run = None
     if body.run is not None:
-        run = RunScope(run_id=body.run.run_id, strategy=body.run.strategy, allowed_genes=tuple(body.run.allowed_genes), step=body.run.step)
+        run = RunScope(
+            run_id=body.run.run_id,
+            strategy=body.run.strategy,
+            allowed_genes=tuple(body.run.allowed_genes),
+            step=body.run.step,
+        )
     actor = _actor(actor_id, caller, run=run)
-    recorded = await registry.record_patch(bot, body.patch, created_by=actor, status=RevisionStatus(body.status), run=run)
+    recorded = await registry.commit_patch(
+        bot, body.patch, created_by=actor, status=RevisionStatus(body.status), run=run
+    )
     return envelope(_recorded(recorded, response), request)
 
 
-@router.post("/revisions:capture", response_model=Envelope[RevisionRecorded], responses=USER_SCOPED_403, status_code=201, operation_id="capture_bot_genome_revision")
+@router.post(
+    "/revisions:capture",
+    response_model=Envelope[RevisionRecorded],
+    responses=USER_SCOPED_403,
+    status_code=201,
+    operation_id="capture_bot_genome_revision",
+)
 @envelope_errors
 async def capture_genome_revision(
     bot_id: BotIdPath,
@@ -240,7 +309,12 @@ async def capture_genome_revision(
     return envelope(_recorded(recorded, response), request)
 
 
-@router.get("/revisions/{rev:path}/diff", response_model=Envelope[GenomeDiffPayload], responses=USER_SCOPED_403, operation_id="diff_bot_genome_revision")
+@router.get(
+    "/revisions/{rev:path}/diff",
+    response_model=Envelope[GenomeDiffPayload],
+    responses=USER_SCOPED_403,
+    operation_id="diff_bot_genome_revision",
+)
 @envelope_errors
 async def diff_genome_revision(
     bot_id: BotIdPath,
@@ -248,7 +322,9 @@ async def diff_genome_revision(
     request: Request,
     actor_id: UserIdDep,
     owner_id: OwnerIdDep,
-    against: Annotated[str, Query(min_length=1, description="The revision to compare with (id, `r<seq>` or ref name).")],
+    against: Annotated[
+        str, Query(min_length=1, description="The revision to compare with (id, `r<seq>` or ref name).")
+    ],
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     registry: GenomeRegistryProtocol = Injected(GenomeRegistryProtocol),
 ) -> Envelope[GenomeDiffPayload]:
@@ -257,14 +333,24 @@ async def diff_genome_revision(
     diff = registry.diff(bot, rev, against)
     return envelope(
         GenomeDiffPayload(
-            revision=diff.revision, against=diff.against, risk_tier=diff.risk_tier, rewrite_flags=list(diff.rewrite_flags),
+            revision=diff.revision,
+            against=diff.against,
+            risk_tier=diff.risk_tier,
+            rewrite_flags=list(diff.rewrite_flags),
             changes=[{"gene": c.gene, "kind": c.kind, "diff": c.diff} for c in diff.changes],
         ),
         request,
     )
 
 
-@router.get("/revisions/{rev:path}", response_model=Envelope[GenomeRevisionPayload], responses=USER_SCOPED_403, operation_id="get_bot_genome_revision")
+# `{rev:path}` is Starlette's `path` converter: the parameter may contain `/`, which a candidate ref name
+# (`candidate/<run>/<n>`) does; the plain `{rev}` would stop at the first slash.
+@router.get(
+    "/revisions/{rev:path}",
+    response_model=Envelope[GenomeRevisionPayload],
+    responses=USER_SCOPED_403,
+    operation_id="get_bot_genome_revision",
+)
 @envelope_errors
 async def get_genome_revision(
     bot_id: BotIdPath,
@@ -279,12 +365,23 @@ async def get_genome_revision(
     bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
     revision = registry.get_revision(bot, rev)
     return envelope(
-        GenomeRevisionPayload(genome_schema=revision.genome_schema, revision=_summary(revision.revision, bot), spec=revision.spec, policy=revision.policy),
+        GenomeRevisionPayload(
+            genome_schema=revision.genome_schema,
+            revision=_summary(revision.revision, bot),
+            spec=revision.spec,
+            policy=revision.policy,
+        ),
         request,
     )
 
 
-@router.put("/policy", response_model=Envelope[RevisionRecorded], responses=USER_SCOPED_403, status_code=201, operation_id="set_bot_genome_policy")
+@router.put(
+    "/policy",
+    response_model=Envelope[RevisionRecorded],
+    responses=USER_SCOPED_403,
+    status_code=201,
+    operation_id="set_bot_genome_policy",
+)
 @envelope_errors
 async def set_genome_policy(
     bot_id: BotIdPath,
@@ -298,7 +395,9 @@ async def set_genome_policy(
     registry: GenomeRegistryProtocol = Injected(GenomeRegistryProtocol),
     _: None = Depends(reject_duplicate_members),
 ) -> Envelope[RevisionRecorded]:
-    """Record a revision with `active`'s content and this policy. The policy is not bot state: it is what automation may change."""
+    """Record a revision with `active`'s content and this policy. The policy is not bot state: it is what automation may
+    change.
+    """
     bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
     recorded = registry.set_policy(bot, body, created_by=_actor(actor_id, caller))
     return envelope(_recorded(recorded, response), request)
@@ -307,7 +406,9 @@ async def set_genome_policy(
 # -- refs ---------------------------------------------------------------------------------------
 
 
-@router.get("/refs", response_model=Envelope[GenomeRefsPayload], responses=USER_SCOPED_403, operation_id="list_bot_genome_refs")
+@router.get(
+    "/refs", response_model=Envelope[GenomeRefsPayload], responses=USER_SCOPED_403, operation_id="list_bot_genome_refs"
+)
 @envelope_errors
 async def list_genome_refs(
     bot_id: BotIdPath,
@@ -322,7 +423,12 @@ async def list_genome_refs(
     return envelope(GenomeRefsPayload(refs=[_ref(r) for r in registry.list_refs(bot)]), request)
 
 
-@router.put("/refs/draft", response_model=Envelope[GenomeRefPayload], responses=USER_SCOPED_403, operation_id="move_bot_genome_draft_ref")
+@router.put(
+    "/refs/draft",
+    response_model=Envelope[GenomeRefPayload],
+    responses=USER_SCOPED_403,
+    operation_id="move_bot_genome_draft_ref",
+)
 @envelope_errors
 async def move_genome_draft_ref(
     bot_id: BotIdPath,
@@ -334,7 +440,17 @@ async def move_genome_draft_ref(
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     registry: GenomeRegistryProtocol = Injected(GenomeRegistryProtocol),
 ) -> Envelope[GenomeRefPayload]:
-    """Move `draft` by compare-and-swap: `expected_revision` must be where it points now (`409` with the current revision otherwise)."""
+    """Point the owner's `draft` ref at a revision, by compare-and-swap.
+
+    `draft` is the owner's bookmark for the revision they are working on;
+    only the owner moves it (promotion moves `active` and `previous`, runs
+    name candidates). `revision` is where it points afterwards, given as an
+    id, `r<seq>` or a ref name. `expected_revision` is the revision id the
+    caller last saw `draft` at, or null if `draft` does not exist yet; the
+    move happens only if that is still true, otherwise `409` carries the
+    current revision so the caller can re-read and decide. `404` for a
+    revision that is not this bot's.
+    """
     bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
     target = registry.get_revision(bot, body.revision).revision.id
     update = RefUpdate("draft", target, body.expected_revision, reason=body.reason)
@@ -344,7 +460,12 @@ async def move_genome_draft_ref(
 # -- content ------------------------------------------------------------------------------------
 
 
-@router.get("/content/{digest}", response_model=None, responses={**USER_SCOPED_403, 200: {"content": {"application/octet-stream": {}}}}, operation_id="read_bot_genome_content")
+@router.get(
+    "/content/{digest}",
+    response_model=None,
+    responses={**USER_SCOPED_403, 200: {"content": {"application/octet-stream": {}}}},
+    operation_id="read_bot_genome_content",
+)
 @envelope_errors
 async def read_genome_content(
     bot_id: BotIdPath,
@@ -355,12 +476,25 @@ async def read_genome_content(
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     registry: GenomeRegistryProtocol = Injected(GenomeRegistryProtocol),
 ) -> Response:
-    """The bytes a digest names, hash-verified. Only digests this bot's revisions or uploads reach are found."""
+    """The bytes a digest names, hash-verified. Only digests this bot's revisions or uploads reach are found.
+
+    The body is the stored bytes themselves (a Markdown file, a CSV, an
+    acm-tree-v1 tree, …), not JSON, so there is no envelope: the response
+    is `application/octet-stream` and the caller checks the digest against
+    what it received (contract §9.1).
+    """
     bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
     return Response(content=registry.read_content(bot, digest), media_type="application/octet-stream")
 
 
-@router.put("/content", response_model=Envelope[ContentStored], responses=USER_SCOPED_403, status_code=201, openapi_extra=_OCTET_STREAM_BODY, operation_id="put_bot_genome_content")
+@router.put(
+    "/content",
+    response_model=Envelope[ContentStored],
+    responses=USER_SCOPED_403,
+    status_code=201,
+    openapi_extra=_OCTET_STREAM_BODY,
+    operation_id="put_bot_genome_content",
+)
 @envelope_errors
 async def put_genome_content(
     bot_id: BotIdPath,
@@ -372,7 +506,9 @@ async def put_genome_content(
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     registry: GenomeRegistryProtocol = Injected(GenomeRegistryProtocol),
 ) -> Envelope[ContentStored]:
-    """Upload raw bytes (`application/octet-stream`) for a later patch to name by digest. `200` when this bot already held them."""
+    """Upload raw bytes (`application/octet-stream`) for a later patch to name by digest. `200` when this bot already
+    held them.
+    """
     bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
     data = await read_bounded_body(request, MAX_UPLOAD_BYTES)
     receipt = registry.put_content(bot, data, provenance=_actor(actor_id, caller))
@@ -398,7 +534,13 @@ async def read_bounded_body(request: Request, limit: int) -> bytes:
 # -- promotions ---------------------------------------------------------------------------------
 
 
-@router.post("/promotions", response_model=Envelope[PromotionPayload], responses=USER_SCOPED_403, status_code=201, operation_id="promote_bot_genome_revision")
+@router.post(
+    "/promotions",
+    response_model=Envelope[PromotionPayload],
+    responses=USER_SCOPED_403,
+    status_code=201,
+    operation_id="promote_bot_genome_revision",
+)
 @envelope_errors
 async def promote_genome_revision(
     bot_id: BotIdPath,
@@ -420,12 +562,22 @@ async def promote_genome_revision(
     """
     bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
     promoted = await promotion.promote(
-        bot, revision=body.revision, ref="active", expected_revision=body.expected_revision, actor=_actor(actor_id, caller), reason=body.reason
+        bot,
+        revision=body.revision,
+        ref="active",
+        expected_revision=body.expected_revision,
+        actor=_actor(actor_id, caller),
+        reason=body.reason,
     )
     return envelope(_promotion(promoted), request)
 
 
-@router.get("/promotions", response_model=Envelope[Page[PromotionPayload]], responses=USER_SCOPED_403, operation_id="list_bot_genome_promotions")
+@router.get(
+    "/promotions",
+    response_model=Envelope[Page[PromotionPayload]],
+    responses=USER_SCOPED_403,
+    operation_id="list_bot_genome_promotions",
+)
 @envelope_errors
 async def list_genome_promotions(
     bot_id: BotIdPath,
@@ -443,7 +595,12 @@ async def list_genome_promotions(
     return page(listed.total, [_promotion(item) for item in listed.items], request)
 
 
-@router.get("/promotions/{promotion_id}", response_model=Envelope[PromotionPayload], responses=USER_SCOPED_403, operation_id="get_bot_genome_promotion")
+@router.get(
+    "/promotions/{promotion_id}",
+    response_model=Envelope[PromotionPayload],
+    responses=USER_SCOPED_403,
+    operation_id="get_bot_genome_promotion",
+)
 @envelope_errors
 async def get_genome_promotion(
     bot_id: BotIdPath,

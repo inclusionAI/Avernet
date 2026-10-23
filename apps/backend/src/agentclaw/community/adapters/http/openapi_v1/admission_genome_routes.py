@@ -3,6 +3,7 @@
 Every operation addresses a bot that may be shared, so each takes the
 addressed-bot grant, like the config-manifest group beside it.
 """
+
 from .admission_modes import AdmissionMode
 
 _GENOME = "/openapi/v1/bots/{bot_id}/genome"

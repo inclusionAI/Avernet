@@ -10,6 +10,7 @@ Validators are draft-07 (the schemas' own ``$schema``), with both files
 registered under their ``$id`` so the patch schema's cross-file ``$ref``s
 resolve.
 """
+
 from __future__ import annotations
 
 import json
@@ -27,8 +28,11 @@ RISK_TIERS_FILE = "risk-tiers.json"
 CONTRACT_FILES = (REVISION_SCHEMA_FILE, PATCH_SCHEMA_FILE, RISK_TIERS_FILE)
 
 
-def _load(name: str) -> Any:
-    return json.loads((CONTRACT_DIR / name).read_text(encoding="utf-8"))
+def _load(name: str) -> dict[str, Any]:
+    loaded = json.loads((CONTRACT_DIR / name).read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        raise ValueError(f"{name} is not a JSON object")
+    return loaded
 
 
 @lru_cache(maxsize=1)
@@ -40,9 +44,7 @@ def schemas() -> tuple[dict[str, Any], dict[str, Any]]:
 @lru_cache(maxsize=1)
 def _registry() -> Registry:
     revision, patch = schemas()
-    return Registry().with_resources(
-        (schema["$id"], Resource.from_contents(schema)) for schema in (revision, patch)
-    )
+    return Registry().with_resources((schema["$id"], Resource.from_contents(schema)) for schema in (revision, patch))
 
 
 @lru_cache(maxsize=1)
@@ -62,9 +64,7 @@ def definition_validator(schema_file: str, definition: str) -> jsonschema.Draft7
     """A validator for one ``definitions/<name>`` of a contract schema, e.g. ``policy`` or ``memoryItems``."""
     revision, patch = schemas()
     schema = revision if schema_file == REVISION_SCHEMA_FILE else patch
-    return jsonschema.Draft7Validator(
-        {"$ref": schema["$id"] + "#/definitions/" + definition}, registry=_registry()
-    )
+    return jsonschema.Draft7Validator({"$ref": schema["$id"] + "#/definitions/" + definition}, registry=_registry())
 
 
 @lru_cache(maxsize=1)

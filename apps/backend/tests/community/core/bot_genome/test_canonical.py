@@ -1,4 +1,5 @@
 """The registry's canonical JSON against the contract's vectors (README §3)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -52,7 +53,13 @@ def test_tree_digest_is_the_acm_tree_v1_digest() -> None:
 
 @pytest.mark.parametrize(
     ("name", "encoded"),
-    [("SOUL.md", "SOUL.md"), ("mcp:x", "mcp%3Ax"), (".", "%2E"), ("..", "%2E%2E"), ("docs/how to.md", "docs%2Fhow%20to.md")],
+    [
+        ("SOUL.md", "SOUL.md"),
+        ("mcp:x", "mcp%3Ax"),
+        (".", "%2E"),
+        ("..", "%2E%2E"),
+        ("docs/how to.md", "docs%2Fhow%20to.md"),
+    ],
 )
 def test_encode_segment(name: str, encoded: str) -> None:
     assert encode_segment(name) == encoded
@@ -63,6 +70,8 @@ def test_canonical_gene_paths(path: str) -> None:
     assert is_canonical_gene_path(path)
 
 
-@pytest.mark.parametrize("path", ["policy", "persona/SAFETY%2Emd", "skills/%61bc", "skills/%FF", "skills//x", "Persona"])
+@pytest.mark.parametrize(
+    "path", ["policy", "persona/SAFETY%2Emd", "skills/%61bc", "skills/%FF", "skills//x", "Persona"]
+)
 def test_non_canonical_gene_paths(path: str) -> None:
     assert not is_canonical_gene_path(path)

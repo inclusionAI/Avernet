@@ -1,4 +1,5 @@
 """``PlatformBotStateReader`` over fakes of each service it reads through, one test per category."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -10,7 +11,8 @@ from agentclaw.community.core.bot_genome.capture.bot_state import PlatformBotSta
 from agentclaw.community.core.bot_genome.errors import CaptureRefused
 from agentclaw.community.core.bot_genome.models import BotRef
 
-#: ``entity_id`` is the storage key (``staff_<user>`` by default), ``owner_id`` the user: the reader must not mix them up.
+#: ``entity_id`` is the storage key (``staff_<user>`` by default), ``owner_id`` the user: the reader must not mix them
+#: up.
 BOT = BotRef(entity_id="staff_u1", bot_id="bot_1", owner_id="u1", engine_type="openclaw", bot_type="arca")
 
 
@@ -22,7 +24,9 @@ class FakeIdentity:
         self.calls.append(("list", entity_type, entity_id, bot_id, owner_id, engine_type))
         return [(name, text is not None) for name, text in self.files.items()]
 
-    async def read_identity_file(self, entity_type, entity_id, bot_id, file_type, owner_id, *, engine_type=None, stage="draft"):
+    async def read_identity_file(
+        self, entity_type, entity_id, bot_id, file_type, owner_id, *, engine_type=None, stage="draft"
+    ):
         self.calls.append(("read", file_type))
         return self.files[file_type]
 
@@ -128,7 +132,9 @@ async def test_platform_managed_teclaw_is_refused_and_nothing_else_is() -> None:
 async def test_persona_reads_only_the_files_that_exist() -> None:
     identity = FakeIdentity({"SOUL.md": "# Soul\n", "OKR.md": None, "AGENTS.md": "# A\n"})
     assert await _reader(identity=identity).persona_files(BOT) == {"SOUL.md": "# Soul\n", "AGENTS.md": "# A\n"}
-    assert identity.calls[0] == ("list", "staff", "staff_u1", "bot_1", "u1", "openclaw"), "entity for the files' home, owner for the user"
+    assert identity.calls[0] == ("list", "staff", "staff_u1", "bot_1", "u1", "openclaw"), (
+        "entity for the files' home, owner for the user"
+    )
     assert ("read", "OKR.md") not in identity.calls
 
 
@@ -149,8 +155,19 @@ async def test_skills_are_classified_by_locator() -> None:
         ("weather", "repo", None, "team/weather", ()),
     ]
     call = factory.calls[0]
-    assert (call["entity_id"], call["owner_id"], call["bot_id"], call["engine_type"], call["entity_type"]) == ("staff_u1", "u1", "bot_1", "openclaw", "staff")
-    assert (call["is_desktop"], call["is_teclaw"], call["locator"], call["skill_name"]) == (False, False, "local://skills-local/tidy", "tidy")
+    assert (call["entity_id"], call["owner_id"], call["bot_id"], call["engine_type"], call["entity_type"]) == (
+        "staff_u1",
+        "u1",
+        "bot_1",
+        "openclaw",
+        "staff",
+    )
+    assert (call["is_desktop"], call["is_teclaw"], call["locator"], call["skill_name"]) == (
+        False,
+        False,
+        "local://skills-local/tidy",
+        "tidy",
+    )
 
 
 @pytest.mark.asyncio
@@ -171,8 +188,17 @@ async def test_resources_are_the_bots_file_rows_read_from_the_device() -> None:
     ]
     files = FakeResourceFiles({"data/faq.csv": b"q,a\n", "data/kb/notes.md": b"# n\n"})
     resources = await _reader(resource_services=FakeResourceServices(rows), resource_files=files).resources(BOT)
-    assert [(r.path, r.files) for r in resources] == [("data/faq.csv", (("faq.csv", b"q,a\n"),)), ("data/kb/notes.md", (("notes.md", b"# n\n"),))]
-    assert files.calls[0] == {"entity_type": "staff", "entity_id": "staff_u1", "bot_id": "bot_1", "engine_type": "openclaw", "path": "data/faq.csv"}
+    assert [(r.path, r.files) for r in resources] == [
+        ("data/faq.csv", (("faq.csv", b"q,a\n"),)),
+        ("data/kb/notes.md", (("notes.md", b"# n\n"),)),
+    ]
+    assert files.calls[0] == {
+        "entity_type": "staff",
+        "entity_id": "staff_u1",
+        "bot_id": "bot_1",
+        "engine_type": "openclaw",
+        "path": "data/faq.csv",
+    }
 
 
 @pytest.mark.asyncio
@@ -190,14 +216,19 @@ async def test_mcp_servers_exclude_platform_defaults_and_carry_the_bot_override(
         activation=activation,
         mcp_config=FakeMcpConfig({"mcp.a": {"url": "https://a.example.com/mcp"}, "mcp.b": {}}),
     )
-    assert await reader.mcp_servers(BOT) == ({"server_code": "mcp.a", "config": {"url": "https://a.example.com/mcp"}}, {"server_code": "mcp.b"})
+    assert await reader.mcp_servers(BOT) == (
+        {"server_code": "mcp.a", "config": {"url": "https://a.example.com/mcp"}},
+        {"server_code": "mcp.b"},
+    )
     assert activation.asked_for == ("u1", "u1"), "MCP activation is the owner's"
 
 
 @pytest.mark.asyncio
 async def test_script_body_gets_the_placeholder_substitution_apply_performs(monkeypatch) -> None:
     monkeypatch.setattr("agentclaw.community.core.bot_genome.capture.bot_state.get_current_env", lambda: "pre")
-    monkeypatch.setattr("agentclaw.community.core.bot_genome.capture.bot_state.get_current_avernet_tenant", lambda: "acme")
+    monkeypatch.setattr(
+        "agentclaw.community.core.bot_genome.capture.bot_state.get_current_avernet_tenant", lambda: "acme"
+    )
     reader = _reader(scripts=FakeScripts("echo ${BOT_ENV} ${BOT_TENANT} ${BOT_ENGINE_TYPE}\n"))
     assert await reader.script_body(BOT) == "echo pre acme openclaw\n"
     assert await _reader(scripts=FakeScripts("")).script_body(BOT) is None

@@ -195,7 +195,7 @@ class GenomeRegistryProtocol(Protocol):
     @abstractmethod
     async def capture(self, bot: BotRef, *, created_by: Provenance) -> RecordedRevision: ...
     @abstractmethod
-    async def record_patch(self, bot: BotRef, patch: dict, *, created_by: Provenance,
+    async def commit_patch(self, bot: BotRef, patch: dict, *, created_by: Provenance,
                            status: RevisionStatus, run: RunScope | None = None) -> RecordedRevision: ...
     @abstractmethod
     def set_policy(self, bot: BotRef, policy: dict, *, created_by: Provenance) -> RecordedRevision: ...
@@ -218,7 +218,7 @@ class GenomeRegistryProtocol(Protocol):
     def applied_revision(self, bot: BotRef) -> str | None: ...
 ```
 
-`capture` and `record_patch` are `async` because the state readers and the
+`capture` and `commit_patch` are `async` because the state readers and the
 MCP checks are async; the HTTP layer awaits them, the rest run in a
 threadpool like the Manifest routes.
 
@@ -298,7 +298,7 @@ promoting `previous`).
 | Method, path | Handler → service | Level | Status |
 | --- | --- | --- | --- |
 | `GET /revisions` | `list_revisions` | MEMBER | 200 `Page[RevisionSummary]` |
-| `POST /revisions` | `record_patch` | ADMIN | 201 `RevisionRecorded`; 200 when it already existed |
+| `POST /revisions` | `commit_patch` | ADMIN | 201 `RevisionRecorded`; 200 when it already existed |
 | `POST /revisions:capture` | `capture` | ADMIN | 201 `RevisionRecorded`; 200 when unchanged |
 | `GET /revisions/{rev:path}/diff?against=` | `diff` | MEMBER | 200 `GenomeDiffPayload` |
 | `GET /revisions/{rev:path}` | `get_revision` | MEMBER | 200 `GenomeRevisionPayload` |
@@ -485,7 +485,7 @@ async def capture(self, bot, *, created_by) -> RecordedRevision:
     # capture_spec → policy of active (or the contract default) → spec_checks → store_produced each blob →
     # revision row (idempotent; parent = active or None) → RecordedRevision(created, risk_tier=None)
 
-async def record_patch(self, bot, patch, *, created_by, status, run=None) -> RecordedRevision:
+async def commit_patch(self, bot, patch, *, created_by, status, run=None) -> RecordedRevision:
     # schema → patch.base resolves (RevisionNotFound) → gene paths canonical → policy/allowed (PatchRejected) → apply_patch →
     # limits → spec_checks → risk → store_produced writes → patch row → revision row (idempotent) →
     # candidate ref for a run (next n, idempotent on (run, revision)) → RecordedRevision

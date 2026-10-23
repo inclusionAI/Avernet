@@ -9,24 +9,39 @@ override. What cannot be recorded is refused by name
 (:class:`CaptureRefused`): a resource path the Manifest path rule rejects,
 a bot the reader cannot capture, a local skill that is not a valid package.
 """
+
 from __future__ import annotations
 
 import re
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, NamedTuple, Protocol, TypeVar
 
 from pydantic import ValidationError
 
 from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import canonical_tree_bytes
 from agentclaw.community.core.bot_genome.canonical import sha256_digest
 from agentclaw.community.core.bot_genome.errors import CaptureRefused, Reason
-from agentclaw.community.core.bot_genome.models import BotRef
-from agentclaw.community.core.bot_genome.spec_models import GenomeSpec
+from agentclaw.community.core.bot_genome.models import BotRef, ProducedBlob
+from agentclaw.community.core.bot_genome.spec_models import (
+    CenterSkill,
+    ContractModel,
+    GenomeSpec,
+    LocalSkill,
+    McpConfig,
+    McpServerEntry,
+    PersonaFile,
+    RepoSkill,
+    ResourceEntry,
+    ScriptEntry,
+    SkillEntry,
+    ToolsSpec,
+)
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 
 __all__ = [
     "BotStateReader",
+    "CapturedFile",
     "CapturedResource",
     "CapturedSkill",
     "CapturedSpec",
@@ -40,23 +55,53 @@ _PATH_CHARS = re.compile(r"^[A-Za-z0-9._/-]+$")
 _RESERVED_PERSONA = frozenset({"MEMORY.md", "IDENTITY.md"})
 
 
+class CapturedFile(NamedTuple):
+    """One file as read from the bot: its path and its bytes.
+
+    ``path`` is relative to what holds it: inside a skill it is the path from
+    the skill's root (``SKILL.md``, ``scripts/run.py``); for a resource it is
+    the file's own name. Example: ``CapturedFile("SKILL.md", b"---\\nname: tidy\\n---\\n")``.
+    """
+
+    path: str
+    data: bytes
+
+
 @dataclass(frozen=True)
 class CapturedSkill:
-    """One active skill as the reader found it; ``files`` only for ``local``."""
+    """One active skill as the reader found it, before contract normalisation.
 
-    name: str
-    origin: str  # local | center | repo
-    center_version: str | None = None
-    repo_path: str | None = None
-    files: tuple[tuple[str, bytes], ...] = ()
+    Which members are set follows ``origin``:
+
+    - ``local`` (a bot-owned upload): ``files`` holds the package's files,
+      e.g. ``CapturedSkill("tidy", "local", files=(CapturedFile("SKILL.md", …), CapturedFile("a.py", …)))``;
+      capture keeps what ``SkillPackageValidator`` keeps and stores them as one acm-tree-v1 tree.
+    - ``center`` (a Skill Center skill): ``center_version`` is the pinned version,
+      e.g. ``CapturedSkill("refund-policy", "center", center_version="v7")``.
+    - ``repo`` (the shared skills repository): ``repo_path`` is the path after ``git://`` on the
+      skill row, e.g. ``CapturedSkill("weather", "repo", repo_path="team/weather")``.
+    """
+
+    name: str  #: the skill's name, which becomes the entry's key (``skills/<name>``)
+    origin: str  #: ``local`` | ``center`` | ``repo`` (the prefix of the skill row's locator)
+    center_version: str | None = None  #: ``center`` only: the Skill Center version in use
+    repo_path: str | None = None  #: ``repo`` only: the skill's path inside the shared repository
+    files: tuple[CapturedFile, ...] = ()  #: ``local`` only: the package's files, path relative to the skill root
 
 
 @dataclass(frozen=True)
 class CapturedResource:
-    """One workspace resource; ``path`` ends in ``/`` for a directory, whose ``files`` are its members."""
+    """One workspace resource as the reader found it.
 
-    path: str
-    files: tuple[tuple[str, bytes], ...]
+    A file resource has exactly one member, e.g.
+    ``CapturedResource("data/faq.csv", (CapturedFile("faq.csv", b"q,a\\n"),))``;
+    a directory resource's ``path`` ends in ``/`` and ``files`` are its
+    members with paths relative to it, e.g.
+    ``CapturedResource("data/kb/", (CapturedFile("a.md", b"a"), CapturedFile("b.md", b"b")))``.
+    """
+
+    path: str  #: workspace-relative, as the bot's rows name it (``./`` and empty segments are normalised away)
+    files: tuple[CapturedFile, ...]  #: the file itself, or a directory's members
 
 
 class BotStateReader(Protocol):
@@ -69,18 +114,30 @@ class BotStateReader(Protocol):
 
     @abstractmethod
     async def persona_files(self, bot: BotRef) -> dict[str, str]:
-        """``type → text`` of every identity file the bot has."""
+        """Every identity file the bot has: file name (``SOUL.md``, ``AGENTS.md``, …) → its text.
+
+        Example: ``{"SOUL.md": "# Soul\\n…", "AGENTS.md": "# Agents\\n…"}``. Files the engine
+        writes for itself (``MEMORY.md``, ``IDENTITY.md``) may be included; capture drops them.
+        """
         ...
 
     @abstractmethod
-    async def skills(self, bot: BotRef) -> tuple[CapturedSkill, ...]: ...
+    async def skills(self, bot: BotRef) -> tuple[CapturedSkill, ...]:
+        """Every skill active on the bot, one :class:`CapturedSkill` each, in any order."""
+        ...
 
     @abstractmethod
-    async def resources(self, bot: BotRef) -> tuple[CapturedResource, ...]: ...
+    async def resources(self, bot: BotRef) -> tuple[CapturedResource, ...]:
+        """Every workspace resource of the bot, one :class:`CapturedResource` each, in any order."""
+        ...
 
     @abstractmethod
     async def mcp_servers(self, bot: BotRef) -> tuple[dict[str, Any], ...]:
-        """``{"server_code": …, "config": …?}`` per enabled server, platform defaults excluded."""
+        """One ``{"server_code": …, "config": …?}`` per MCP server enabled on the bot, platform defaults excluded.
+
+        ``config`` is the bot-level override in the Manifest's shape (``McpConfig``), present only when
+        the bot has one, e.g. ``{"server_code": "mcp.ant.weather", "config": {"endpoint_env": "PRE"}}``.
+        """
         ...
 
     @abstractmethod
@@ -94,11 +151,13 @@ class CapturedSpec:
     """What capture produced: the spec, and the bytes it names that are not in the store yet."""
 
     spec: GenomeSpec
-    writes: tuple[tuple[str, bytes], ...]
+    writes: tuple[ProducedBlob, ...]  #: every blob the spec's digests name, for the registry to file
 
 
 def normalise_resource_path(path: str) -> str:
-    """Drop empty and ``.`` segments, keep a trailing ``/``; raises ``ValueError`` when nothing is left or the rule fails."""
+    """Drop empty and ``.`` segments, keep a trailing ``/``; raises ``ValueError`` when nothing is left or the rule
+    fails.
+    """
     is_dir = path.endswith("/")
     segments = [segment for segment in path.split("/") if segment not in ("", ".")]
     if not segments:
@@ -118,97 +177,153 @@ def agents_md_text(text: str) -> str:
     return IdentityService._remove_reference_section(text).rstrip() + "\n"
 
 
+_M = TypeVar("_M", bound=ContractModel)
+
+
+def _schema_reasons(location: str, exc: ValidationError) -> list[Reason]:
+    """One ``schema`` reason per violation, located at the gene (``persona/SOUL.md``) and the member."""
+    return [Reason("schema", location + "".join(f".{p}" for p in error["loc"]), error["msg"]) for error in exc.errors()]
+
+
+class _Builder:
+    """Assembles typed entries, collecting every contract violation instead of stopping at the first."""
+
+    def __init__(self) -> None:
+        self.reasons: list[Reason] = []
+        self.writes: dict[str, bytes] = {}
+
+    def store(self, data: bytes) -> str:
+        digest = sha256_digest(data)
+        self.writes[digest] = data
+        return digest
+
+    def entry(self, model: type[_M], location: str, **members: Any) -> _M | None:
+        """``model(**members)``, or ``None`` with the violations recorded under ``location``."""
+        try:
+            return model(**members)
+        except ValidationError as exc:  # the bot holds something the contract cannot record
+            self.reasons.extend(_schema_reasons(location, exc))
+            return None
+
+
 async def capture_spec(reader: BotStateReader, bot: BotRef, *, validator: SkillPackageValidator) -> CapturedSpec:
     """The bot's current state as a spec, plus the produced bytes to file."""
     refusal = await reader.refusal(bot)
     if refusal is not None:
         raise CaptureRefused([Reason("not_capturable", "bot", refusal)])
-    writes: dict[str, bytes] = {}
+    build = _Builder()
 
-    def store(data: bytes) -> str:
-        digest = sha256_digest(data)
-        writes[digest] = data
-        return digest
-
-    persona = []
+    persona: list[PersonaFile] = []
     for file_type, text in (await reader.persona_files(bot)).items():
         if file_type in _RESERVED_PERSONA:
             continue
         if file_type == "AGENTS.md":
             text = agents_md_text(text)
-        persona.append({"type": file_type, "digest": store(text.encode("utf-8"))})
+        entry = build.entry(
+            PersonaFile, f"persona/{file_type}", type=file_type, digest=build.store(text.encode("utf-8"))
+        )
+        if entry is not None:
+            persona.append(entry)
 
-    skills = []
-    reasons: list[Reason] = []
+    skills: list[SkillEntry] = []
     for skill in await reader.skills(bot):
         location = f"skills/{skill.name}"
+        entry: SkillEntry | None
         if skill.origin == "local":
             try:
                 validated = validator.validate_directory(list(skill.files))
             except ValueError as exc:
-                reasons.append(Reason("skill_package", location, f"not a valid skill package: {exc}"))
+                build.reasons.append(Reason("skill_package", location, f"not a valid skill package: {exc}"))
                 continue
-            skills.append({"name": skill.name, "origin": "local", "digest": store(canonical_tree_bytes(list(validated.files)))})
+            digest = build.store(canonical_tree_bytes(list(validated.files)))
+            entry = build.entry(LocalSkill, location, name=skill.name, origin="local", digest=digest)
         elif skill.origin == "center":
             if not skill.center_version:
-                reasons.append(Reason("skill_package", location, "a Skill Center skill without a pinned version cannot be recorded"))
+                build.reasons.append(
+                    Reason(
+                        "skill_package", location, "a Skill Center skill without a pinned version cannot be recorded"
+                    )
+                )
                 continue
-            skills.append({"name": skill.name, "origin": "center", "center_version": skill.center_version})
+            entry = build.entry(
+                CenterSkill, location, name=skill.name, origin="center", center_version=skill.center_version
+            )
         elif skill.origin == "repo":
             if not skill.repo_path:
-                reasons.append(Reason("skill_package", location, "a shared-repository skill without a repository path cannot be recorded"))
+                build.reasons.append(
+                    Reason(
+                        "skill_package",
+                        location,
+                        "a shared-repository skill without a repository path cannot be recorded",
+                    )
+                )
                 continue
-            skills.append({"name": skill.name, "origin": "repo", "repo_path": skill.repo_path})
+            entry = build.entry(RepoSkill, location, name=skill.name, origin="repo", repo_path=skill.repo_path)
         else:
-            reasons.append(Reason("skill_package", location, f"unknown skill origin {skill.origin!r}"))
+            build.reasons.append(Reason("skill_package", location, f"unknown skill origin {skill.origin!r}"))
+            continue
+        if entry is not None:
+            skills.append(entry)
 
-    resources = []
+    resources: list[ResourceEntry] = []
     seen: dict[str, str] = {}
     for resource in await reader.resources(bot):
         location = f"resources/{resource.path}"
         try:
             path = normalise_resource_path(resource.path)
         except ValueError as exc:
-            reasons.append(Reason("resource_path", location, f"{resource.path!r} {exc}"))
+            build.reasons.append(Reason("resource_path", location, f"{resource.path!r} {exc}"))
             continue
         if path.rstrip("/") in seen:
-            reasons.append(Reason("resource_path", location, f"{resource.path!r} and {seen[path.rstrip('/')]!r} name one workspace path"))
+            build.reasons.append(
+                Reason(
+                    "resource_path",
+                    location,
+                    f"{resource.path!r} and {seen[path.rstrip('/')]!r} name one workspace path",
+                )
+            )
             continue
         seen[path.rstrip("/")] = resource.path
         if path.endswith("/"):
-            digest = store(canonical_tree_bytes(list(resource.files)))
+            digest = build.store(canonical_tree_bytes(list(resource.files)))
         elif len(resource.files) == 1:
-            digest = store(resource.files[0][1])
+            digest = build.store(resource.files[0].data)
         else:
-            reasons.append(Reason("resource_path", location, "a file resource has exactly one member"))
+            build.reasons.append(Reason("resource_path", location, "a file resource has exactly one member"))
             continue
-        resources.append({"path": path, "digest": digest})
-    if reasons:
-        raise CaptureRefused(reasons)
+        entry = build.entry(ResourceEntry, f"resources/{path}", path=path, digest=digest)
+        if entry is not None:
+            resources.append(entry)
 
-    mcp = []
+    mcp: list[McpServerEntry] = []
     for server in await reader.mcp_servers(bot):
-        entry: dict[str, Any] = {"server_code": server["server_code"]}
-        if server.get("config"):
-            entry["config"] = dict(server["config"])
-        mcp.append(entry)
+        code = server["server_code"]
+        members: dict[str, Any] = {"server_code": code}
+        if server.get("config"):  # an explicit override only; the member is left out otherwise, never null
+            members["config"] = build.entry(McpConfig, f"tools/mcp/{code}.config", **server["config"])
+            if members["config"] is None:
+                continue
+        entry = build.entry(McpServerEntry, f"tools/mcp/{code}", **members)
+        if entry is not None:
+            mcp.append(entry)
 
     body = await reader.script_body(bot)
-    script = {"digest": store(body.encode("utf-8"))} if body else None
+    script = build.entry(ScriptEntry, "script", digest=build.store(body.encode("utf-8"))) if body else None
+    if build.reasons:
+        raise CaptureRefused(build.reasons)
 
-    record = {
-        "persona": sorted(persona, key=lambda e: e["type"]),
-        "skills": sorted(skills, key=lambda e: e["name"]),
-        "memory": None,
-        "resources": sorted(resources, key=lambda e: e["path"]),
-        "tools": {"mcp": sorted(mcp, key=lambda e: e["server_code"])},
-        "engine_config": {},
-        "script": script,
-    }
     try:
-        spec = GenomeSpec.from_json(record)
-    except ValidationError as exc:  # the bot holds something the contract cannot record, e.g. a persona type outside its set
-        raise CaptureRefused(
-            [Reason("schema", "spec." + ".".join(str(p) for p in error["loc"]), error["msg"]) for error in exc.errors()]
-        ) from exc
-    return CapturedSpec(spec=spec, writes=tuple(writes.items()))
+        spec = GenomeSpec(
+            persona=sorted(persona, key=lambda e: e.type),
+            skills=sorted(skills, key=lambda e: e.name),
+            memory=None,
+            resources=sorted(resources, key=lambda e: e.path),
+            tools=ToolsSpec(mcp=sorted(mcp, key=lambda e: e.server_code)),
+            engine_config={},
+            script=script,
+        )
+    except (
+        ValidationError
+    ) as exc:  # a list-level rule the entries cannot carry, e.g. more entries than a category holds
+        raise CaptureRefused(_schema_reasons("spec", exc)) from exc
+    return CapturedSpec(spec=spec, writes=tuple(ProducedBlob(digest, data) for digest, data in build.writes.items()))

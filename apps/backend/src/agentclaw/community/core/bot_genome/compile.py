@@ -12,6 +12,7 @@ records and what RSI-04's apply report must repeat.
 The document itself stays a plain JSON object: its shape is the Manifest's
 (``bot_config_manifest/schema``), which owns and validates it.
 """
+
 from __future__ import annotations
 
 from typing import Any

@@ -1,4 +1,5 @@
 """Service API of promotion (RSI-03), re-exported by ``api/bot_genome_promotion_service.py``."""
+
 from __future__ import annotations
 
 from abc import abstractmethod

@@ -5,6 +5,7 @@ caller can refuse once with everything wrong. Codes: ``schema``,
 ``not_canonical``, ``missing_rationale``, ``missing_evidence``,
 ``gene_not_mutable``, ``pinned_item``, ``gene_not_allowed``.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -29,7 +30,7 @@ EVIDENCE_OPTIONAL = frozenset({"memory.retire", "persona.remove"})
 
 
 def shape_reasons(patch: Any) -> list[Reason]:
-    """The patch's JSON against the contract schema (``schema``), then gene paths not in canonical spelling (``not_canonical``).
+    """The patch's JSON against the contract schema (``schema``), then non-canonical gene paths (``not_canonical``).
 
     Takes the JSON form (``GenomePatch.to_json()``, or what a caller sent):
     the contract schema is the oracle for the patterns and cross-field rules.
@@ -40,7 +41,9 @@ def shape_reasons(patch: Any) -> list[Reason]:
     reasons = []
     for index, op in enumerate(patch["ops"]):
         if op["op"] == "file.edit" and not is_canonical_gene_path(op["target"]):
-            reasons.append(Reason("not_canonical", f"ops[{index}].target", f"{op['target']!r} is not in its canonical spelling"))
+            reasons.append(
+                Reason("not_canonical", f"ops[{index}].target", f"{op['target']!r} is not in its canonical spelling")
+            )
     return reasons
 
 
@@ -56,7 +59,8 @@ def evidence_reasons(patch: GenomePatch) -> list[Reason]:
                 Reason(
                     "missing_evidence",
                     "evidence",
-                    f"ops {needing} need evidence; only persona.remove, memory.retire and file.edit on a resource can rest on the rationale alone",
+                    f"ops {needing} need evidence; only persona.remove, memory.retire and file.edit on a resource "
+                    "can rest on the rationale alone",
                 )
             )
     return reasons
@@ -73,7 +77,9 @@ def _needs_evidence(op: PatchOp) -> bool:
 def policy_reasons(
     ops: Iterable[PatchOp], policy: GenomePolicy, *, allowed_genes: Iterable[str] | None = None
 ) -> list[Reason]:
-    """Every op's gene path must be covered by ``mutable_genes``, overlap no pin, and, for a run, be in ``allowed_genes``."""
+    """Every op's gene path must be covered by ``mutable_genes``, overlap no pin, and, for a run, be in
+    ``allowed_genes``.
+    """
     mutable, pins = policy.mutable_genes, policy.pins
     allowed = None if allowed_genes is None else tuple(allowed_genes)
     reasons = []
@@ -81,7 +87,9 @@ def policy_reasons(
         gene = op_gene_path(op)
         location = f"ops[{index}]"
         if not any(covers(rule, gene) for rule in mutable):
-            reasons.append(Reason("gene_not_mutable", location, f"{gene!r} is not covered by the policy's mutable_genes"))
+            reasons.append(
+                Reason("gene_not_mutable", location, f"{gene!r} is not covered by the policy's mutable_genes")
+            )
         pinned = [pin for pin in pins if overlaps(pin, gene)]
         if pinned:
             reasons.append(Reason("pinned_item", location, f"{gene!r} overlaps the pin {pinned[0]!r}"))

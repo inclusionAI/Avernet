@@ -1,4 +1,5 @@
 """The package's contract copies are the contract (one source of truth, README §1)."""
+
 from __future__ import annotations
 
 from pathlib import Path

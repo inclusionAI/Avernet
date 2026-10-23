@@ -1,4 +1,8 @@
-"""``GenomeRegistryService`` end to end over SQLite and a tmp content store: capture, patches, refs, content, compile."""
+"""``GenomeRegistryService`` end to end over SQLite and a tmp content store.
+
+Capture, patches, refs, content, compile.
+"""
+
 from __future__ import annotations
 
 import json
@@ -19,7 +23,15 @@ from agentclaw.community.core.bot_genome.errors import (
     RefConflict,
     RevisionNotFound,
 )
-from agentclaw.community.core.bot_genome.models import BotRef, Provenance, ProvenanceKind, RefMover, RefUpdate, RevisionStatus, RunScope
+from agentclaw.community.core.bot_genome.models import (
+    BotRef,
+    Provenance,
+    ProvenanceKind,
+    RefMover,
+    RefUpdate,
+    RevisionStatus,
+    RunScope,
+)
 from agentclaw.community.core.bot_genome.patch_models import GenomePatch, parse_ops
 from agentclaw.community.core.bot_genome.registry import DEFAULT_POLICY
 from agentclaw.community.core.bot_genome.repository.models import GenomePromotionRow
@@ -62,7 +74,13 @@ async def _capture_support_bot(world: World):
 async def test_capture_records_the_first_revision_with_the_default_policy_and_files_every_blob(world: World) -> None:
     recorded = await _capture_support_bot(world)
     meta = recorded.revision.revision
-    assert (recorded.created, meta.seq, meta.parent, meta.status, meta.patch_digest) == (True, 1, None, RevisionStatus.DRAFT, None)
+    assert (recorded.created, meta.seq, meta.parent, meta.status, meta.patch_digest) == (
+        True,
+        1,
+        None,
+        RevisionStatus.DRAFT,
+        None,
+    )
     assert recorded.revision.policy == DEFAULT_POLICY and recorded.risk_tier is None and recorded.ref is None
     for entry in SUPPORT_SPEC.persona + SUPPORT_SPEC.resources:
         assert world.registry.read_content(BOT, entry.digest) == BlobDir().read(entry.digest)
@@ -76,10 +94,31 @@ async def test_capture_records_the_first_revision_with_the_default_policy_and_fi
 async def test_capture_takes_the_parent_and_policy_from_active(world: World) -> None:
     first = await _capture_support_bot(world)
     policy = DEFAULT_POLICY.model_copy(update={"pins": ["persona/SAFETY.md", "skills/refund-policy"]})
-    world.refs.move(env="dev", entity_id=BOT.entity_id, bot_id=BOT.bot_id, name="active", revision_id=first.revision.revision.id, expected_revision_id=None, moved_kind="user", moved_actor="u", run_id=None, reason=None, moved_at=first.revision.revision.created_at)
+    world.refs.move(
+        env="dev",
+        entity_id=BOT.entity_id,
+        bot_id=BOT.bot_id,
+        name="active",
+        revision_id=first.revision.revision.id,
+        expected_revision_id=None,
+        moved_kind="user",
+        moved_actor="u",
+        run_id=None,
+        reason=None,
+        moved_at=first.revision.revision.created_at,
+    )
     repolicied = world.registry.set_policy(BOT, policy, created_by=OWNER)
-    assert repolicied.created and repolicied.revision.revision.parent == first.revision.revision.id and repolicied.revision.spec == SUPPORT_SPEC
-    world.registry.move_ref(BOT, RefUpdate("active", repolicied.revision.revision.id, first.revision.revision.id), actor=OWNER, mover=RefMover.PROMOTION)
+    assert (
+        repolicied.created
+        and repolicied.revision.revision.parent == first.revision.revision.id
+        and repolicied.revision.spec == SUPPORT_SPEC
+    )
+    world.registry.move_ref(
+        BOT,
+        RefUpdate("active", repolicied.revision.revision.id, first.revision.revision.id),
+        actor=OWNER,
+        mover=RefMover.PROMOTION,
+    )
     world.reader = FakeReader.from_spec(spec_of(SUPPORT_BOT_CANDIDATE))
     captured = await world.registry.capture(BOT, created_by=OWNER)
     assert captured.revision.policy == policy and captured.revision.revision.parent == repolicied.revision.revision.id
@@ -91,10 +130,16 @@ async def test_a_second_capture_without_active_descends_from_the_latest_revision
     first = await _capture_support_bot(world)
     world.reader = FakeReader.from_spec(spec_of(SUPPORT_BOT_CANDIDATE))
     second = await world.registry.capture(BOT, created_by=OWNER)
-    assert second.created and second.revision.revision.parent == first.revision.revision.id, "only the bot's first revision is parentless"
+    assert second.created and second.revision.revision.parent == first.revision.revision.id, (
+        "only the bot's first revision is parentless"
+    )
     world.reader = FakeReader.from_spec(SUPPORT_SPEC)
     third = await world.registry.capture(BOT, created_by=OWNER)
-    assert (third.created, third.revision.revision.id, third.revision.revision.parent) == (False, first.revision.revision.id, None), "same content, same revision"
+    assert (third.created, third.revision.revision.id, third.revision.revision.parent) == (
+        False,
+        first.revision.revision.id,
+        None,
+    ), "same content, same revision"
     assert [r.parent for r in world.registry.list_revisions(BOT).items] == [first.revision.revision.id, None]
 
 
@@ -121,20 +166,45 @@ async def test_capture_refuses_by_name(world: World) -> None:
 async def test_record_patch_reproduces_the_contract_candidate_and_is_idempotent(world: World) -> None:
     await _capture_support_bot(world)
     patch = load_patch("00-mixed-r1-to-r2.json")
-    upload = world.registry.put_content(BOT, BlobDir().read("sha256:a191ca8f49999530a2cf4f48562ffde7d62011b3bcfe040195da089a3f117c95"), provenance=OWNER)
+    upload = world.registry.put_content(
+        BOT, BlobDir().read("sha256:a191ca8f49999530a2cf4f48562ffde7d62011b3bcfe040195da089a3f117c95"), provenance=OWNER
+    )
     assert upload.created and upload.digest == "sha256:a191ca8f49999530a2cf4f48562ffde7d62011b3bcfe040195da089a3f117c95"
     run = RunScope(run_id="run_7f3", strategy="clawevolve/bot-evolution@2.0.0", allowed_genes=("persona", "resources"))
-    recorded = await world.registry.record_patch(BOT, patch, created_by=RUN, status=RevisionStatus.CANDIDATE, run=run)
+    recorded = await world.registry.commit_patch(BOT, patch, created_by=RUN, status=RevisionStatus.CANDIDATE, run=run)
     meta = recorded.revision.revision
     assert meta.id == SUPPORT_BOT_CANDIDATE and meta.seq == 2 and meta.parent == SUPPORT_BOT
-    assert meta.patch_digest == sha256_digest(canonicalize(patch.to_json())) == REVISIONS[SUPPORT_BOT_CANDIDATE]["revision"]["patch_digest"]
-    assert (meta.status, meta.evidence, meta.created_by.kind, meta.created_by.run_id) == (RevisionStatus.CANDIDATE, ("episode:ep_91", "feedback:fb_311"), ProvenanceKind.STRATEGY_RUN, "run_7f3")
-    assert (recorded.created, recorded.risk_tier, recorded.flags, recorded.ref) == (True, "T2", (), "candidate/run_7f3/1")
+    assert (
+        meta.patch_digest
+        == sha256_digest(canonicalize(patch.to_json()))
+        == REVISIONS[SUPPORT_BOT_CANDIDATE]["revision"]["patch_digest"]
+    )
+    assert (meta.status, meta.evidence, meta.created_by.kind, meta.created_by.run_id) == (
+        RevisionStatus.CANDIDATE,
+        ("episode:ep_91", "feedback:fb_311"),
+        ProvenanceKind.STRATEGY_RUN,
+        "run_7f3",
+    )
+    assert (recorded.created, recorded.risk_tier, recorded.flags, recorded.ref) == (
+        True,
+        "T2",
+        (),
+        "candidate/run_7f3/1",
+    )
     assert world.registry.get_revision(BOT, "candidate/run_7f3/1").revision.id == SUPPORT_BOT_CANDIDATE
-    assert world.patches.get(env="dev", entity_id=BOT.entity_id, bot_id=BOT.bot_id, digest=meta.patch_digest).base_id == SUPPORT_BOT
-    again = await world.registry.record_patch(BOT, patch, created_by=RUN, status=RevisionStatus.CANDIDATE, run=run)
+    assert (
+        world.patches.get(env="dev", entity_id=BOT.entity_id, bot_id=BOT.bot_id, digest=meta.patch_digest).base_id
+        == SUPPORT_BOT
+    )
+    again = await world.registry.commit_patch(BOT, patch, created_by=RUN, status=RevisionStatus.CANDIDATE, run=run)
     assert (again.created, again.revision.revision.seq, again.ref) == (False, 2, "candidate/run_7f3/1")
-    second = await world.registry.record_patch(BOT, load_patch("01-file-edit.json"), created_by=RUN, status=RevisionStatus.CANDIDATE, run=RunScope("run_7f3", "clawevolve/bot-evolution@2.0.0", ("persona", "skills", "resources")))
+    second = await world.registry.commit_patch(
+        BOT,
+        load_patch("01-file-edit.json"),
+        created_by=RUN,
+        status=RevisionStatus.CANDIDATE,
+        run=RunScope("run_7f3", "clawevolve/bot-evolution@2.0.0", ("persona", "skills", "resources")),
+    )
     assert second.ref == "candidate/run_7f3/2" and second.revision.revision.seq == 3
     page = world.registry.list_revisions(BOT, status=RevisionStatus.CANDIDATE, page=1, page_size=1)
     assert page.total == 2 and page.items[0].seq == 3
@@ -145,35 +215,58 @@ async def test_record_patch_refusals_leave_nothing_behind(world: World) -> None:
     await _capture_support_bot(world)
     patch = load_patch("00-mixed-r1-to-r2.json")
     with pytest.raises(RevisionNotFound):
-        await world.registry.record_patch(BOT, patch.model_copy(update={"base": "sha256:" + "0" * 64}), created_by=OWNER, status=RevisionStatus.DRAFT)
+        await world.registry.commit_patch(
+            BOT, patch.model_copy(update={"base": "sha256:" + "0" * 64}), created_by=OWNER, status=RevisionStatus.DRAFT
+        )
     with pytest.raises(ValidationError):  # the shape is the model's: a blank rationale never reaches the registry
         GenomePatch.from_json(dict(load_patch_json("00-mixed-r1-to-r2.json"), rationale=""))
     with pytest.raises(PatchRejected) as caught:
-        await world.registry.record_patch(BOT, patch, created_by=RUN, status=RevisionStatus.CANDIDATE, run=RunScope("run_1", "clawevolve/bot-evolution@2.0.0", ("skills",)))
+        await world.registry.commit_patch(
+            BOT,
+            patch,
+            created_by=RUN,
+            status=RevisionStatus.CANDIDATE,
+            run=RunScope("run_1", "clawevolve/bot-evolution@2.0.0", ("skills",)),
+        )
     assert {r.code for r in caught.value.reasons} == {"gene_not_allowed"}
     with pytest.raises(ContentNotReachable):  # the resource.add names bytes nobody uploaded for this bot
-        await world.registry.record_patch(BOT, patch, created_by=OWNER, status=RevisionStatus.DRAFT)
-    bad = load_patch("08-resource-add.json").model_copy(update={"ops": parse_ops([{"op": "resource.add", "path": "data/tool.sh", "content": "#!/bin/sh\n"}])})
+        await world.registry.commit_patch(BOT, patch, created_by=OWNER, status=RevisionStatus.DRAFT)
+    bad = load_patch("08-resource-add.json").model_copy(
+        update={"ops": parse_ops([{"op": "resource.add", "path": "data/tool.sh", "content": "#!/bin/sh\n"}])}
+    )
     with pytest.raises(PatchRejected) as caught:
-        await world.registry.record_patch(BOT, bad, created_by=OWNER, status=RevisionStatus.DRAFT)
+        await world.registry.commit_patch(BOT, bad, created_by=OWNER, status=RevisionStatus.DRAFT)
     assert [r.code for r in caught.value.reasons] == ["admission"]
     with pytest.raises(ValueError):
-        await world.registry.record_patch(BOT, patch, created_by=OWNER, status=RevisionStatus.PROMOTED)
+        await world.registry.commit_patch(BOT, patch, created_by=OWNER, status=RevisionStatus.PROMOTED)
     with pytest.raises(ValueError):  # a candidate is a run's proposal: no run, no candidate
-        await world.registry.record_patch(BOT, patch, created_by=OWNER, status=RevisionStatus.CANDIDATE)
+        await world.registry.commit_patch(BOT, patch, created_by=OWNER, status=RevisionStatus.CANDIDATE)
     with pytest.raises(ValueError):  # and a draft is the owner's: a run has no business on it
-        await world.registry.record_patch(BOT, patch, created_by=RUN, status=RevisionStatus.DRAFT, run=RunScope("run_1", "clawevolve/bot-evolution@2.0.0", ("persona",)))
+        await world.registry.commit_patch(
+            BOT,
+            patch,
+            created_by=RUN,
+            status=RevisionStatus.DRAFT,
+            run=RunScope("run_1", "clawevolve/bot-evolution@2.0.0", ("persona",)),
+        )
     with pytest.raises(ValueError):  # a run id is one ref segment, or candidate/<run>/<n> cannot be parsed back
         RunScope("a/b", "clawevolve/bot-evolution@2.0.0", ("persona",))
     with pytest.raises(ValueError):  # `$` would let a trailing newline through; the segment must match whole
         RunScope("run_1\n", "clawevolve/bot-evolution@2.0.0", ("persona",))
     for dots in (".", ".."):
-        with pytest.raises(ValueError):  # a URL resolver folds these away, so candidate/<run>/<n> would not survive a request
+        with pytest.raises(
+            ValueError
+        ):  # a URL resolver folds these away, so candidate/<run>/<n> would not survive a request
             RunScope(dots, "clawevolve/bot-evolution@2.0.0", ("persona",))
-    assert RunScope("..a", "clawevolve/bot-evolution@2.0.0", ("persona",)).run_id == "..a"  # a plain segment to a resolver
+    assert (
+        RunScope("..a", "clawevolve/bot-evolution@2.0.0", ("persona",)).run_id == "..a"
+    )  # a plain segment to a resolver
     with pytest.raises(ValueError):  # the actor the contract records is the strategy's id@version
         RunScope("run_1", "bot-evolution", ("persona",))
-    assert Provenance(ProvenanceKind.STRATEGY_RUN, "s@1", run_id="run_1", principal="user_owner_5").checked_as == "user_owner_5"
+    assert (
+        Provenance(ProvenanceKind.STRATEGY_RUN, "s@1", run_id="run_1", principal="user_owner_5").checked_as
+        == "user_owner_5"
+    )
     assert world.registry.list_revisions(BOT).total == 1
     assert world.registry.list_refs(BOT) == []
 
@@ -182,33 +275,48 @@ async def test_record_patch_refusals_leave_nothing_behind(world: World) -> None:
 async def test_a_candidate_whose_result_is_an_existing_revision_is_refused(world: World) -> None:
     await _capture_support_bot(world)
     edit = load_patch("01-file-edit.json")
-    draft = await world.registry.record_patch(BOT, edit, created_by=OWNER, status=RevisionStatus.DRAFT)
-    reworded = edit.model_copy(update={"rationale": "the same change, proposed by a run"})  # another digest, the same result
+    draft = await world.registry.commit_patch(BOT, edit, created_by=OWNER, status=RevisionStatus.DRAFT)
+    reworded = edit.model_copy(
+        update={"rationale": "the same change, proposed by a run"}
+    )  # another digest, the same result
     run = RunScope("run_9", "clawevolve/bot-evolution@2.0.0", ("persona", "skills", "resources"))
     with pytest.raises(PatchRejected) as caught:
-        await world.registry.record_patch(BOT, reworded, created_by=RUN, status=RevisionStatus.CANDIDATE, run=run)
+        await world.registry.commit_patch(BOT, reworded, created_by=RUN, status=RevisionStatus.CANDIDATE, run=run)
     reason = caught.value.reasons[0]
-    assert (reason.code, reason.location) == ("already_recorded", "patch") and f"r{draft.revision.revision.seq}" in reason.message
+    assert (reason.code, reason.location) == (
+        "already_recorded",
+        "patch",
+    ) and f"r{draft.revision.revision.seq}" in reason.message
     assert world.registry.list_refs(BOT) == [] and world.registry.list_revisions(BOT).total == 2, "nothing recorded"
-    same = await world.registry.record_patch(BOT, edit, created_by=RUN, status=RevisionStatus.CANDIDATE, run=run)
-    assert (same.created, same.revision.revision.id, same.ref) == (False, draft.revision.revision.id, "candidate/run_9/1"), "the same patch is a retry"
-    again = await world.registry.record_patch(BOT, edit, created_by=OWNER, status=RevisionStatus.DRAFT)
-    assert not again.created and again.revision.revision.id == draft.revision.revision.id, "a draft that reproduces a revision gets it back"
+    same = await world.registry.commit_patch(BOT, edit, created_by=RUN, status=RevisionStatus.CANDIDATE, run=run)
+    assert (same.created, same.revision.revision.id, same.ref) == (
+        False,
+        draft.revision.revision.id,
+        "candidate/run_9/1",
+    ), "the same patch is a retry"
+    again = await world.registry.commit_patch(BOT, edit, created_by=OWNER, status=RevisionStatus.DRAFT)
+    assert not again.created and again.revision.revision.id == draft.revision.revision.id, (
+        "a draft that reproduces a revision gets it back"
+    )
     # The race: the pre-check sees nothing (another record commits the same content in between), and the
     # recording transaction refuses it the same way, writing nothing.
     real_get = world.revisions.get
     world.revisions.get = lambda **kw: None if kw.get("revision_id") == draft.revision.revision.id else real_get(**kw)
     with pytest.raises(PatchRejected) as caught:
-        await world.registry.record_patch(BOT, reworded, created_by=RUN, status=RevisionStatus.CANDIDATE, run=run)
+        await world.registry.commit_patch(BOT, reworded, created_by=RUN, status=RevisionStatus.CANDIDATE, run=run)
     world.revisions.get = real_get
-    assert caught.value.reasons[0].code == "already_recorded" and world.registry.list_refs(BOT) == [r for r in world.registry.list_refs(BOT) if r.name == "candidate/run_9/1"]
+    assert caught.value.reasons[0].code == "already_recorded" and world.registry.list_refs(BOT) == [
+        r for r in world.registry.list_refs(BOT) if r.name == "candidate/run_9/1"
+    ]
 
 
 @pytest.mark.asyncio
 async def test_a_patch_on_another_bots_revision_is_not_found(world: World) -> None:
     await _capture_support_bot(world)
     with pytest.raises(RevisionNotFound):
-        await world.registry.record_patch(OTHER_BOT, load_patch("00-mixed-r1-to-r2.json"), created_by=OWNER, status=RevisionStatus.DRAFT)
+        await world.registry.commit_patch(
+            OTHER_BOT, load_patch("00-mixed-r1-to-r2.json"), created_by=OWNER, status=RevisionStatus.DRAFT
+        )
     with pytest.raises(RevisionNotFound):
         world.registry.get_revision(OTHER_BOT, SUPPORT_BOT)
 
@@ -221,17 +329,28 @@ async def test_set_policy_needs_active_and_a_canonical_sorted_policy(world: Worl
     first = await _capture_support_bot(world)
     with pytest.raises(RevisionNotFound):
         world.registry.set_policy(BOT, DEFAULT_POLICY, created_by=OWNER)
-    world.registry.move_ref(BOT, RefUpdate("active", first.revision.revision.id, None), actor=OWNER, mover=RefMover.PROMOTION)
+    world.registry.move_ref(
+        BOT, RefUpdate("active", first.revision.revision.id, None), actor=OWNER, mover=RefMover.PROMOTION
+    )
     same = world.registry.set_policy(BOT, DEFAULT_POLICY, created_by=OWNER)
     assert not same.created and same.revision.revision.id == first.revision.revision.id
-    for bad in ({"mutable_genes": ["skills", "persona"], "pins": [], "risk_overrides": {}}, {"mutable_genes": ["skills/%61"], "pins": [], "risk_overrides": {}}):
+    for bad in (
+        {"mutable_genes": ["skills", "persona"], "pins": [], "risk_overrides": {}},
+        {"mutable_genes": ["skills/%61"], "pins": [], "risk_overrides": {}},
+    ):
         with pytest.raises(PolicyRejected):  # order and canonical spelling: the registry's rules
             world.registry.set_policy(BOT, GenomePolicy.from_json(bad), created_by=OWNER)
     with pytest.raises(ValidationError):  # a missing field is the model's refusal
         GenomePolicy.from_json({"mutable_genes": [], "pins": []})
     # The spec is re-checked in the bot's current context: what applied when `active` was recorded
     # may not apply now (here the engine no longer accepts the persona files).
-    moved_engine = BotRef(entity_id=BOT.entity_id, bot_id=BOT.bot_id, owner_id=BOT.owner_id, engine_type="claude_code", bot_type=BOT.bot_type)
+    moved_engine = BotRef(
+        entity_id=BOT.entity_id,
+        bot_id=BOT.bot_id,
+        owner_id=BOT.owner_id,
+        engine_type="claude_code",
+        bot_type=BOT.bot_type,
+    )
     with pytest.raises(PolicyRejected) as caught:
         world.registry.set_policy(moved_engine, DEFAULT_POLICY.model_copy(update={"pins": []}), created_by=OWNER)
     assert {r.code for r in caught.value.reasons} == {"persona_type"}
@@ -257,7 +376,9 @@ async def test_audit_columns_name_the_application_acting_for_the_user(world: Wor
     delegated = Provenance(ProvenanceKind.USER, OWNER.actor, recorded_as=f"app:7:on-behalf-of:{OWNER.actor}")
     recorded = await world.registry.capture(BOT, created_by=delegated)
     assert recorded.revision.revision.created_by.actor == delegated.audit, "the row says who really recorded it"
-    moved = world.registry.move_ref(BOT, RefUpdate("draft", recorded.revision.revision.id, None), actor=delegated, mover=RefMover.OWNER)
+    moved = world.registry.move_ref(
+        BOT, RefUpdate("draft", recorded.revision.revision.id, None), actor=delegated, mover=RefMover.OWNER
+    )
     assert moved.moved_by.actor == delegated.audit
 
 
@@ -298,7 +419,11 @@ async def test_content_is_reachable_per_bot_and_uploads_are_bounded(world: World
     with pytest.raises(ContentNotReachable):
         world.registry.read_content(BOT, "sha256:" + "1" * 64)
     fetched = b"fetched by a Manifest apply, never captured or uploaded"
-    world.content.store(_fetched(fetched), scope=ContentScope(env="dev", entity_id=BOT.entity_id, bot_id=BOT.bot_id), source_url="https://code.example.com/x.git")
+    world.content.store(
+        _fetched(fetched),
+        scope=ContentScope(env="dev", entity_id=BOT.entity_id, bot_id=BOT.bot_id),
+        source_url="https://code.example.com/x.git",
+    )
     with pytest.raises(ContentNotReachable):  # the bot holds the bytes, but no revision or upload of its own names them
         world.registry.read_content(BOT, sha256_digest(fetched))
     with pytest.raises(ContentNotReachable):
@@ -319,22 +444,47 @@ async def test_content_is_reachable_per_bot_and_uploads_are_bounded(world: World
 @pytest.mark.asyncio
 async def test_diff_compile_and_applied_revision(world: World) -> None:
     first = await _capture_support_bot(world)
-    world.registry.put_content(BOT, BlobDir().read("sha256:a191ca8f49999530a2cf4f48562ffde7d62011b3bcfe040195da089a3f117c95"), provenance=OWNER)
-    second = await world.registry.record_patch(BOT, load_patch("00-mixed-r1-to-r2.json"), created_by=OWNER, status=RevisionStatus.DRAFT)
+    world.registry.put_content(
+        BOT, BlobDir().read("sha256:a191ca8f49999530a2cf4f48562ffde7d62011b3bcfe040195da089a3f117c95"), provenance=OWNER
+    )
+    second = await world.registry.commit_patch(
+        BOT, load_patch("00-mixed-r1-to-r2.json"), created_by=OWNER, status=RevisionStatus.DRAFT
+    )
     diff = world.registry.diff(BOT, "r2", "r1")
     assert (diff.revision, diff.against, diff.risk_tier) == (SUPPORT_BOT_CANDIDATE, SUPPORT_BOT, "T2")
-    assert [(c.gene, c.kind) for c in diff.changes] == [("persona/SOUL.md", "modified"), ("resources/data/returns.md", "added")]
+    assert [(c.gene, c.kind) for c in diff.changes] == [
+        ("persona/SOUL.md", "modified"),
+        ("resources/data/returns.md", "added"),
+    ]
     compiled = world.registry.compile(BOT, "r2")
-    assert compiled.revision_id == SUPPORT_BOT_CANDIDATE and compiled.document["manifest"]["resources"][-1]["path"] == "data/returns.md"
+    assert (
+        compiled.revision_id == SUPPORT_BOT_CANDIDATE
+        and compiled.document["manifest"]["resources"][-1]["path"] == "data/returns.md"
+    )
     assert compiled.document["script"]["body"].startswith("#!/")
     assert world.registry.applied_revision(BOT) is None
     world.report(BOT, "apply_9")
     assert world.registry.applied_revision(BOT) is None, "an apply nobody promoted"
-    world.promotions.insert(GenomePromotionRow(
-        env="dev", entity_id=BOT.entity_id, bot_id=BOT.bot_id, promotion_id="p" * 32, ref="active", revision_id=second.revision.revision.id,
-        from_revision_id=first.revision.revision.id, document_digest=compiled.document_digest, document_json=canonicalize(compiled.document).decode(),
-        actor_kind="user", actor_id="u", reason="ship", status="applied", apply_kind="pending", apply_reference="apply_9", created_at=first.revision.revision.created_at,
-    ))
+    world.promotions.insert(
+        GenomePromotionRow(
+            env="dev",
+            entity_id=BOT.entity_id,
+            bot_id=BOT.bot_id,
+            promotion_id="p" * 32,
+            ref="active",
+            revision_id=second.revision.revision.id,
+            from_revision_id=first.revision.revision.id,
+            document_digest=compiled.document_digest,
+            document_json=canonicalize(compiled.document).decode(),
+            actor_kind="user",
+            actor_id="u",
+            reason="ship",
+            status="applied",
+            apply_kind="pending",
+            apply_reference="apply_9",
+            created_at=first.revision.revision.created_at,
+        )
+    )
     assert world.registry.applied_revision(BOT) == SUPPORT_BOT_CANDIDATE
     for not_done in (ApplyStatus.RUNNING, ApplyStatus.PARTIAL, ApplyStatus.FAILED):
         world.report(BOT, "apply_9", status=not_done)

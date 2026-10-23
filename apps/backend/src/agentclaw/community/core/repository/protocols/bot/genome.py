@@ -6,6 +6,7 @@ axes ``(env, entity_id, bot_id)``; the tenant half comes from the guard on the
 models. A revision id, ref name or promotion id is never a key on its own: an
 id from another bot resolves to ``None``.
 """
+
 from __future__ import annotations
 
 from abc import abstractmethod
@@ -63,14 +64,10 @@ class GenomeRevisionRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
-    def get(
-        self, *, env: str, entity_id: str, bot_id: str, revision_id: str
-    ) -> Optional[GenomeRevisionRow]: ...
+    def get(self, *, env: str, entity_id: str, bot_id: str, revision_id: str) -> Optional[GenomeRevisionRow]: ...
 
     @abstractmethod
-    def get_by_seq(
-        self, *, env: str, entity_id: str, bot_id: str, seq: int
-    ) -> Optional[GenomeRevisionRow]: ...
+    def get_by_seq(self, *, env: str, entity_id: str, bot_id: str, seq: int) -> Optional[GenomeRevisionRow]: ...
 
     @abstractmethod
     def list(
@@ -108,14 +105,10 @@ class GenomeRefRepositoryProtocol(Protocol):
     """``ac_genome_ref`` + ``ac_genome_ref_event``: names moved by compare-and-swap."""
 
     @abstractmethod
-    def get(
-        self, *, env: str, entity_id: str, bot_id: str, name: str
-    ) -> Optional[GenomeRefRow]: ...
+    def get(self, *, env: str, entity_id: str, bot_id: str, name: str) -> Optional[GenomeRefRow]: ...
 
     @abstractmethod
-    def list(
-        self, *, env: str, entity_id: str, bot_id: str, name_prefix: Optional[str] = None
-    ) -> list[GenomeRefRow]:
+    def list(self, *, env: str, entity_id: str, bot_id: str, name_prefix: Optional[str] = None) -> list[GenomeRefRow]:
         """Every ref of the bot, by name; ``name_prefix`` narrows (``candidate/<run>/``)."""
         ...
 
@@ -168,16 +161,12 @@ class GenomeRefRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
-    def candidate_count(
-        self, *, env: str, entity_id: str, bot_id: str, run_id: str
-    ) -> int:
+    def candidate_count(self, *, env: str, entity_id: str, bot_id: str, run_id: str) -> int:
         """How many ``candidate/<run_id>/<n>`` refs the bot has; the next ``n`` is one more."""
         ...
 
     @abstractmethod
-    def events(
-        self, *, env: str, entity_id: str, bot_id: str, name: str, limit: int = 50
-    ) -> list[GenomeRefEventRow]:
+    def events(self, *, env: str, entity_id: str, bot_id: str, name: str, limit: int = 50) -> list[GenomeRefEventRow]:
         """One ref's moves, newest first."""
         ...
 
@@ -192,9 +181,7 @@ class GenomePatchRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
-    def get(
-        self, *, env: str, entity_id: str, bot_id: str, digest: str
-    ) -> Optional[GenomePatchRow]: ...
+    def get(self, *, env: str, entity_id: str, bot_id: str, digest: str) -> Optional[GenomePatchRow]: ...
 
 
 @runtime_checkable
@@ -223,9 +210,7 @@ class GenomePromotionRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
-    def get(
-        self, *, env: str, entity_id: str, bot_id: str, promotion_id: str
-    ) -> Optional[GenomePromotionRow]: ...
+    def get(self, *, env: str, entity_id: str, bot_id: str, promotion_id: str) -> Optional[GenomePromotionRow]: ...
 
     @abstractmethod
     def list(

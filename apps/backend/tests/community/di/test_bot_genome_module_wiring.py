@@ -1,4 +1,5 @@
 """The genome graph resolves on the test profile, and the state reader stays a thunk until first use."""
+
 from __future__ import annotations
 
 from typing import Callable
@@ -6,7 +7,11 @@ from typing import Callable
 from agentclaw.community.api.bot_genome_promotion_service import GenomePromotionServiceProtocol
 from agentclaw.community.api.bot_genome_registry_service import GenomeRegistryProtocol
 from agentclaw.community.core.bot_genome.capture import BotStateReader
-from agentclaw.community.core.bot_genome.promotion import GenomePromotionService, PendingDeliveryApplier, RevisionApplier
+from agentclaw.community.core.bot_genome.promotion import (
+    GenomePromotionService,
+    PendingDeliveryApplier,
+    RevisionApplier,
+)
 from agentclaw.community.core.bot_genome.registry import GenomeRegistryService
 from agentclaw.community.di.container import build_injector
 from agentclaw.community.di.profile import DeployProfile

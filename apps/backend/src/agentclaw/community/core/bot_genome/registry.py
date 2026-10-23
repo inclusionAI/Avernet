@@ -9,6 +9,7 @@ Recording order (plan): the shape and policy checks, apply, the spec
 checks on the result, risk; only then are produced bytes filed and rows
 written, so a refused patch leaves nothing behind.
 """
+
 from __future__ import annotations
 
 import json
@@ -117,7 +118,10 @@ _PRODUCER = "genome"
 
 
 class _BotContent(ContentReader):
-    """The content store scoped to one bot: a digest is readable only when the registry filed a row for it for this bot."""
+    """The content store scoped to one bot.
+
+    A digest is readable only when the registry filed a row for it for this bot.
+    """
 
     def __init__(self, content: ManifestContentServiceProtocol, scope: ContentScope) -> None:
         self._content, self._scope = content, scope
@@ -181,7 +185,9 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         return _BotContent(self._content, self._scope(bot))
 
     def _ctx(self, bot: BotRef, actor: str) -> SpecCheckContext:
-        return SpecCheckContext(engine_type=bot.engine_type, bot_type=bot.bot_type, owner_id=bot.owner_id, actor_id=actor)
+        return SpecCheckContext(
+            engine_type=bot.engine_type, bot_type=bot.bot_type, owner_id=bot.owner_id, actor_id=actor
+        )
 
     def _resolve(self, bot: BotRef, rev: str) -> GenomeRevisionRow:
         axes = self._axes(bot)
@@ -220,7 +226,9 @@ class GenomeRegistryService(GenomeRegistryProtocol):
             return None
         row = self._revisions.get(**self._axes(bot), revision_id=ref.revision_id)
         if row is None:
-            raise RuntimeError(f"ref 'active' of bot {bot.bot_id} points at {ref.revision_id}, which is not one of its revisions")
+            raise RuntimeError(
+                f"ref 'active' of bot {bot.bot_id} points at {ref.revision_id}, which is not one of its revisions"
+            )
         return row
 
     def _record(
@@ -241,21 +249,42 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         run: RunScope | None = None,
         parent_from_latest: bool = False,
     ) -> RecordedRevision:
-        """File the produced bytes, then in one transaction the revision row (idempotent by id), its patch row and a run's candidate ref.
+        """File the produced bytes, then in one transaction the revision row, its patch row and a run's candidate ref.
 
         Content goes first because it is content-addressed and idempotent:
         bytes filed for a revision that is then not recorded are the same
         as an upload nobody used. The three rows land together or not at all.
+
+        ``spec`` and ``policy`` are hashed into the revision id. ``parent`` is
+        the id the new revision descends from (``patch.base`` for a patch,
+        ``active`` for a capture or policy change; ``None`` for a bot's first
+        revision, see ``parent_from_latest``). ``writes`` maps digest →
+        bytes for every blob the spec names that is not in the content store
+        yet, e.g. ``{"sha256:3f9a…": b"# Soul\\n…"}`` for a captured
+        ``SOUL.md`` or an edited file's new text; it is empty for a policy
+        change. ``origin`` tags the content rows with how the bytes came to
+        be: ``genome/capture``, ``genome/patch`` or ``genome/policy``.
+        ``patch`` is the stored patch row when the revision is the result of
+        applying a patch (``commit_patch``), so that ``patch_digest`` names
+        it; a capture or a policy change has none. ``evidence``,
+        ``risk_tier`` and ``flags`` are likewise a patch's. ``run`` makes the
+        revision a run's candidate and creates ``candidate/<run>/<n>``.
         """
         scope = self._scope(bot)
+        # The spec names its bytes by digest; here they land in the content store (idempotent, by digest),
+        # filed to this bot so that `read_content` can reach them, before the revision row is written.
         for digest, data in writes.items():
-            stored = self._content.store_produced(data, scope=scope, origin=origin, modifier=created_by.audit, category="genome")
+            stored = self._content.store_produced(
+                data, scope=scope, origin=origin, modifier=created_by.audit, category="genome"
+            )
             if stored.digest != digest:
                 raise RuntimeError(f"produced bytes filed as {stored.digest}, expected {digest}")
         content = canonicalize({"policy": policy.to_json(), "spec": spec.to_json()}).decode("utf-8")
         candidate = None
         if run is not None:
-            candidate = CandidateRefRequest(run_id=run.run_id, moved_kind=created_by.kind.value, moved_actor=created_by.audit, moved_at=_now())
+            candidate = CandidateRefRequest(
+                run_id=run.run_id, moved_kind=created_by.kind.value, moved_actor=created_by.audit, moved_at=_now()
+            )
         row, created, ref = self._revisions.record(
             GenomeRevisionRow(
                 **self._axes(bot),
@@ -276,7 +305,13 @@ class GenomeRegistryService(GenomeRegistryProtocol):
             candidate=candidate,
             parent_from_latest=parent_from_latest,
         )
-        return RecordedRevision(revision=self._revision(row), created=created, risk_tier=risk_tier, flags=flags, ref=ref.name if ref is not None else None)
+        return RecordedRevision(
+            revision=self._revision(row),
+            created=created,
+            risk_tier=risk_tier,
+            flags=flags,
+            ref=ref.name if ref is not None else None,
+        )
 
     # -- revisions ----------------------------------------------------------------------------
 
@@ -293,27 +328,53 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         page_size: int = 20,
     ) -> RevisionPage:
         total, rows = self._revisions.list(
-            **self._axes(bot), status=None if status is None else status.value, parent_id=parent, page=page, page_size=page_size
+            **self._axes(bot),
+            status=None if status is None else status.value,
+            parent_id=parent,
+            page=page,
+            page_size=page_size,
         )
         return RevisionPage(total=total, items=tuple(_metadata(row) for row in rows))
 
     async def capture(self, bot: BotRef, *, created_by: Provenance) -> RecordedRevision:
+        """Record what the bot runs right now as a draft revision (README §7).
+
+        The bot's state is read through the platform services, normalised
+        as the contract says and checked as a patch result would be; a bot
+        the contract cannot represent is refused by name
+        (``CaptureRefused``). The policy is ``active``'s, or the default
+        while the bot has no ``active``. The parent is ``active``, or the
+        bot's latest revision while it has none, so only a bot's very first
+        revision is parentless. Re-capturing an unchanged bot returns the
+        existing revision with ``created=False``.
+        """
         captured = await capture_spec(self._state_reader(), bot, validator=self._validator)
         active = self._active(bot)
-        policy = GenomePolicy.from_json(loads_strict(active.content)["policy"]) if active is not None else DEFAULT_POLICY
+        policy = (
+            GenomePolicy.from_json(loads_strict(active.content)["policy"]) if active is not None else DEFAULT_POLICY
+        )
         writes = dict(captured.writes)
-        reasons = self._checks.reasons(captured.spec, policy, _PendingContent(writes, self._reader(bot)), self._ctx(bot, created_by.checked_as))
+        reasons = self._checks.reasons(
+            captured.spec, policy, _PendingContent(writes, self._reader(bot)), self._ctx(bot, created_by.checked_as)
+        )
         if reasons:
             raise CaptureRefused(reasons)
         # The parent is `active`; while the bot has none yet, its latest revision, read by the
         # repository inside the recording transaction so that two overlapping first captures
         # cannot both come out parentless.
         return self._record(
-            bot, captured.spec, policy, parent=active.revision_id if active is not None else None, created_by=created_by,
-            status=RevisionStatus.DRAFT, writes=writes, origin="genome/capture", parent_from_latest=active is None,
+            bot,
+            captured.spec,
+            policy,
+            parent=active.revision_id if active is not None else None,
+            created_by=created_by,
+            status=RevisionStatus.DRAFT,
+            writes=writes,
+            origin="genome/capture",
+            parent_from_latest=active is None,
         )
 
-    async def record_patch(
+    async def commit_patch(
         self,
         bot: BotRef,
         patch: GenomePatch,
@@ -322,6 +383,21 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         status: RevisionStatus,
         run: RunScope | None = None,
     ) -> RecordedRevision:
+        """Apply ``patch`` to its base revision and record the result as a new revision (README §6.4).
+
+        In order: the patch's shape (``shape_reasons``); the base,
+        ``patch.base``, which must be one of this bot's revisions and becomes
+        the new revision's parent; rationale and evidence; the base's policy
+        and, for a run, its ``allowed_genes``; the ops themselves, one by
+        one, each of which must apply exactly; the result against the limits
+        and the apply-time predicates (what the engine would accept now);
+        then the risk tier. Every refusal is a ``PatchRejected`` listing its
+        reasons. The patch is stored by its digest (the candidate id) with the
+        revision, in one transaction. ``status`` is ``DRAFT`` for an owner's
+        patch and ``CANDIDATE`` for a run's, which also creates
+        ``candidate/<run>/<n>``; a candidate whose result already exists as
+        another revision is refused as ``already_recorded``.
+        """
         if status not in (RevisionStatus.DRAFT, RevisionStatus.CANDIDATE):
             raise ValueError(f"a recorded patch is draft or candidate, not {status.value}")
         if (status is RevisionStatus.CANDIDATE) != (run is not None):
@@ -346,12 +422,20 @@ class GenomeRegistryService(GenomeRegistryProtocol):
             if len(getattr(outcome.spec, category)) > MAX_ENTRIES_PER_CATEGORY:
                 raise LimitExceeded(f"spec.{category} holds more than {MAX_ENTRIES_PER_CATEGORY} entries")
         writes = dict(outcome.writes)
-        reasons = self._checks.reasons(outcome.spec, base.policy, _PendingContent(writes, stored), self._ctx(bot, created_by.checked_as))
+        reasons = self._checks.reasons(
+            outcome.spec, base.policy, _PendingContent(writes, stored), self._ctx(bot, created_by.checked_as)
+        )
         if reasons:
             raise PatchRejected(reasons)
         tier, flags = patch_assessment(outcome, base.policy)
         patch_bytes = canonicalize(patch_json)
-        patch_row = GenomePatchRow(**self._axes(bot), digest=sha256_digest(patch_bytes), base_id=base.revision.id, content=patch_bytes.decode("utf-8"), created_at=_now())
+        patch_row = GenomePatchRow(
+            **self._axes(bot),
+            digest=sha256_digest(patch_bytes),
+            base_id=base.revision.id,
+            content=patch_bytes.decode("utf-8"),
+            created_at=_now(),
+        )
         if run is not None:
             # A candidate's id is its patch digest and names its revision's patch. Content-addressed
             # dedupe would hand this patch a revision recorded from another patch (or a capture),
@@ -363,14 +447,33 @@ class GenomeRegistryService(GenomeRegistryProtocol):
                 raise PatchRejected([_already_recorded(existing.revision_id, existing.seq, existing.patch_digest)])
         try:
             return self._record(
-                bot, outcome.spec, base.policy, parent=base.revision.id, created_by=created_by, status=status,
-                writes=writes, origin="genome/patch", patch=patch_row, evidence=list(patch.evidence),
-                risk_tier=tier, flags=flags, run=run,
+                bot,
+                outcome.spec,
+                base.policy,
+                parent=base.revision.id,
+                created_by=created_by,
+                status=status,
+                writes=writes,
+                origin="genome/patch",
+                patch=patch_row,
+                evidence=list(patch.evidence),
+                risk_tier=tier,
+                flags=flags,
+                run=run,
             )
         except CandidateCollision as exc:
             raise PatchRejected([_already_recorded(exc.revision_id, exc.seq, exc.patch_digest)]) from exc
 
     def set_policy(self, bot: BotRef, policy: GenomePolicy, *, created_by: Provenance) -> RecordedRevision:
+        """Record a new draft revision with ``active``'s spec and this policy (README §5).
+
+        Revisions never change, ``active``'s included: the policy is part of
+        what the revision id hashes, so a new policy is a new revision whose
+        parent is ``active``. The bot keeps running ``active`` until the new
+        revision is promoted. The policy is checked for shape and gene-path
+        grammar, and the unchanged spec is re-checked against what apply
+        accepts now (``PolicyRejected`` either way).
+        """
         validator = contract.definition_validator(contract.REVISION_SCHEMA_FILE, "policy")
         reasons = [Reason("schema", "policy", error.message) for error in validator.iter_errors(policy.to_json())]
         if not reasons:
@@ -391,17 +494,42 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         reasons = self._checks.reasons(spec, policy, self._reader(bot), self._ctx(bot, created_by.checked_as))
         if reasons:
             raise PolicyRejected(reasons)
-        return self._record(bot, spec, policy, parent=active.revision_id, created_by=created_by, status=RevisionStatus.DRAFT, writes={}, origin="genome/policy")
+        return self._record(
+            bot,
+            spec,
+            policy,
+            parent=active.revision_id,
+            created_by=created_by,
+            status=RevisionStatus.DRAFT,
+            writes={},
+            origin="genome/policy",
+        )
 
-    def set_status(self, bot: BotRef, revision_id: str, status: RevisionStatus, *, actor: Provenance, reason: str) -> None:
+    def set_status(
+        self, bot: BotRef, revision_id: str, status: RevisionStatus, *, actor: Provenance, reason: str
+    ) -> None:
         row = self._resolve(bot, revision_id)
         if self._revisions.update_metadata(**self._axes(bot), revision_id=row.revision_id, status=status.value) is None:
             raise RevisionNotFound(revision_id)
-        logger.info("[genome.status] bot=%s revision=%s status=%s actor=%s reason=%s", bot.bot_id, row.revision_id, status.value, actor.actor, reason)
+        logger.info(
+            "[genome.status] bot=%s revision=%s status=%s actor=%s reason=%s",
+            bot.bot_id,
+            row.revision_id,
+            status.value,
+            actor.actor,
+            reason,
+        )
 
     def diff(self, bot: BotRef, rev: str, against: str) -> GenomeDiff:
         newer, older = self._revision(self._resolve(bot, rev)), self._revision(self._resolve(bot, against))
-        return diff_specs(older.spec, newer.spec, self._reader(bot), revision=newer.revision.id, against=older.revision.id, policy=newer.policy)
+        return diff_specs(
+            older.spec,
+            newer.spec,
+            self._reader(bot),
+            revision=newer.revision.id,
+            against=older.revision.id,
+            policy=newer.policy,
+        )
 
     # -- refs ---------------------------------------------------------------------------------
 
@@ -409,6 +537,17 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         return [_ref(row) for row in self._refs.list(**self._axes(bot))]
 
     def move_ref(self, bot: BotRef, update: RefUpdate, *, actor: Provenance, mover: RefMover) -> GenomeRef:
+        """Point a ref at a revision by compare-and-swap, logging the move (README §8).
+
+        ``update.revision`` is the revision id the ref points at afterwards
+        (it must be one of this bot's); ``update.expected_revision`` is where
+        the caller believes the ref points now, ``None`` if it should not
+        exist yet. The store moves the ref only if that is still true, so two
+        callers racing for one ref cannot both win: the loser gets
+        ``RefConflict`` with the ref's current revision. ``mover`` must be the
+        ref's designated mover (``active`` / ``previous`` by promotion, ``draft``
+        by the owner, candidates by the registry), else ``MoverNotAllowed``.
+        """
         try:
             kind, _, _ = parse_ref_name(update.name)
         except ValueError as exc:
@@ -418,12 +557,21 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         if self._revisions.get(**self._axes(bot), revision_id=update.revision) is None:
             raise RevisionNotFound(update.revision)
         moved = self._refs.move(
-            **self._axes(bot), name=update.name, revision_id=update.revision, expected_revision_id=update.expected_revision,
-            moved_kind=actor.kind.value, moved_actor=actor.audit, run_id=actor.run_id, reason=update.reason, moved_at=_now(),
+            **self._axes(bot),
+            name=update.name,
+            revision_id=update.revision,
+            expected_revision_id=update.expected_revision,
+            moved_kind=actor.kind.value,
+            moved_actor=actor.audit,
+            run_id=actor.run_id,
+            reason=update.reason,
+            moved_at=_now(),
         )
         if moved is None:
             current = self._refs.get(**self._axes(bot), name=update.name)
-            raise RefConflict(update.name, expected=update.expected_revision, current=current.revision_id if current else None)
+            raise RefConflict(
+                update.name, expected=update.expected_revision, current=current.revision_id if current else None
+            )
         return _ref(moved)
 
     # -- content ------------------------------------------------------------------------------
@@ -436,7 +584,9 @@ class GenomeRegistryService(GenomeRegistryProtocol):
             raise LimitExceeded(f"an upload is at most {MAX_UPLOAD_BYTES} bytes")
         scope = self._scope(bot)
         existed = self._content.is_reachable(scope, sha256_digest(data), produced_by=_PRODUCER)
-        stored = self._content.store_produced(data, scope=scope, origin="genome/upload", modifier=provenance.audit, category="genome")
+        stored = self._content.store_produced(
+            data, scope=scope, origin="genome/upload", modifier=provenance.audit, category="genome"
+        )
         return ContentReceipt(digest=stored.digest, size=len(data), created=not existed)
 
     # -- delivery -----------------------------------------------------------------------------
@@ -459,8 +609,10 @@ class GenomeRegistryService(GenomeRegistryProtocol):
 def _already_recorded(revision_id: str, seq: int, patch_digest: str | None) -> Reason:
     origin = "another patch" if patch_digest else "the bot's own state"
     return Reason(
-        "already_recorded", "patch",
-        f"the result is revision {revision_id} (r{seq}), recorded earlier from {origin}; a candidate is new content, promote that revision instead",
+        "already_recorded",
+        "patch",
+        f"the result is revision {revision_id} (r{seq}), recorded earlier from {origin}; "
+        "a candidate is new content, promote that revision instead",
     )
 
 
@@ -469,7 +621,9 @@ def _metadata(row: GenomeRevisionRow) -> RevisionMetadata:
         id=row.revision_id,
         seq=row.seq,
         parent=row.parent_id,
-        created_by=Provenance(ProvenanceKind(row.created_kind), row.created_actor, run_id=row.run_id, step=row.run_step),
+        created_by=Provenance(
+            ProvenanceKind(row.created_kind), row.created_actor, run_id=row.run_id, step=row.run_step
+        ),
         created_at=row.created_at,
         status=RevisionStatus(row.status),
         patch_digest=row.patch_digest,

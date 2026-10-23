@@ -1,4 +1,5 @@
 """A registry (and later a promotion service) over in-memory SQLite, a tmp content store and fakes."""
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -27,8 +28,16 @@ from agentclaw.community.core.skill_center.skill_package import SkillPackageVali
 from tests.community.core.bot_genome.test_capture import FakeReader
 from tests.community.core.bot_genome.test_spec_checks import FakeAuth, FakeConfig
 
-BOT = BotRef(entity_id="staff_user_owner_5", bot_id="bot_123", owner_id="user_owner_5", engine_type="openclaw", bot_type="arca")
-OTHER_BOT = BotRef(entity_id="staff_user_owner_9", bot_id="bot_weather", owner_id="user_owner_9", engine_type="openclaw", bot_type="arca")
+BOT = BotRef(
+    entity_id="staff_user_owner_5", bot_id="bot_123", owner_id="user_owner_5", engine_type="openclaw", bot_type="arca"
+)
+OTHER_BOT = BotRef(
+    entity_id="staff_user_owner_9",
+    bot_id="bot_weather",
+    owner_id="user_owner_9",
+    engine_type="openclaw",
+    bot_type="arca",
+)
 OWNER = Provenance(ProvenanceKind.USER, "user_owner_5")
 RUN = Provenance(ProvenanceKind.STRATEGY_RUN, "strategy:tune", run_id="run_7f3", step="propose")
 
@@ -121,7 +130,12 @@ class World:
         )
         self.applier = FakeApplier()
         self.promotion = GenomePromotionService(
-            registry=self.registry, revisions=self.revisions, refs=self.refs, promotions=self.promotions, applier=self.applier, env=lambda: "dev"
+            registry=self.registry,
+            revisions=self.revisions,
+            refs=self.refs,
+            promotions=self.promotions,
+            applier=self.applier,
+            env=lambda: "dev",
         )
 
     def report(self, bot: BotRef, apply_id: str, status: ApplyStatus = ApplyStatus.SUCCEEDED) -> None:

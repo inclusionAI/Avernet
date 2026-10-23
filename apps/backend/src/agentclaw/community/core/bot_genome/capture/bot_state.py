@@ -22,6 +22,7 @@ teclaw delivery mode is ``platform``) has no device to read: its state is
 composed from platform rows (``managed_files``), and capturing it is
 RSI-04's to define, so the reader refuses it by name.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -29,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 from agentclaw.community.core.bot_config_manifest.schema import placeholders
 from agentclaw.community.core.bot_genome.capture.capture import (
+    CapturedFile,
     BotStateReader,
     CapturedResource,
     CapturedSkill,
@@ -93,7 +95,9 @@ class PlatformBotStateReader(BotStateReader):
 
     async def refusal(self, bot: BotRef) -> str | None:
         if self._teclaw_platform_managed and self._is_teclaw(bot.engine_type):
-            return "a platform-managed teclaw bot has no device to read; its state is composed from platform rows (RSI-04)"
+            return (
+                "a platform-managed teclaw bot has no device to read; its state is composed from platform rows (RSI-04)"
+            )
         return None
 
     async def persona_files(self, bot: BotRef) -> dict[str, str]:
@@ -126,13 +130,17 @@ class PlatformBotStateReader(BotStateReader):
                     skill_name=asset.name,
                 )
                 files = await storage.read_package_files()
-                captured.append(CapturedSkill(asset.name, "local", files=tuple(files)))
+                captured.append(
+                    CapturedSkill(asset.name, "local", files=tuple(CapturedFile(path, data) for path, data in files))
+                )
             elif locator.startswith(CENTER_PREFIX):
                 captured.append(CapturedSkill(asset.name, "center", center_version=asset.sc_version_number))
             elif locator.startswith(REPO_PREFIX):
                 captured.append(CapturedSkill(asset.name, "repo", repo_path=locator[len(REPO_PREFIX) :]))
             else:
-                raise CaptureRefused([Reason("skill_package", f"skills/{asset.name}", f"unknown skill locator {locator!r}")])
+                raise CaptureRefused(
+                    [Reason("skill_package", f"skills/{asset.name}", f"unknown skill locator {locator!r}")]
+                )
         return tuple(captured)
 
     async def resources(self, bot: BotRef) -> tuple[CapturedResource, ...]:
@@ -145,17 +153,30 @@ class PlatformBotStateReader(BotStateReader):
             # collector's join); the workspace-relative path apply writes and a revision names has it in front.
             path = RESOURCE_DATA_DIR + resource.path.lstrip("/")
             data = await self._resource_files.read_file(
-                entity_type=bot.entity_type, entity_id=bot.entity_id, bot_id=bot.bot_id,
-                engine_type=bot.engine_type, path=path,
+                entity_type=bot.entity_type,
+                entity_id=bot.entity_id,
+                bot_id=bot.bot_id,
+                engine_type=bot.engine_type,
+                path=path,
             )
             if data is None:
-                raise CaptureRefused([Reason("resource_unreadable", f"resources/{path}", f"{path!r} is listed but cannot be read from the bot")])
-            captured.append(CapturedResource(path, ((path.rsplit("/", 1)[-1], data),)))
+                raise CaptureRefused(
+                    [
+                        Reason(
+                            "resource_unreadable",
+                            f"resources/{path}",
+                            f"{path!r} is listed but cannot be read from the bot",
+                        )
+                    ]
+                )
+            captured.append(CapturedResource(path, (CapturedFile(path.rsplit("/", 1)[-1], data),)))
         return tuple(captured)
 
     async def mcp_servers(self, bot: BotRef) -> tuple[dict[str, Any], ...]:
         who = dict(bot_id=bot.bot_id, owner_id=bot.owner_id, actor_id=bot.owner_id)
-        codes = set(self._activation.list_installed_mcps(**who)) - set(self._activation.platform_default_mcp_codes(**who))
+        codes = set(self._activation.list_installed_mcps(**who)) - set(
+            self._activation.platform_default_mcp_codes(**who)
+        )
         servers = []
         for code in sorted(codes):
             entry: dict[str, Any] = {"server_code": code}
@@ -169,4 +190,6 @@ class PlatformBotStateReader(BotStateReader):
         body = self._scripts.get_body(entity_id=bot.entity_id, bot_id=bot.bot_id)
         if not body:
             return None
-        return placeholders.resolve(body, engine_type=bot.engine_type, env=get_current_env(), tenant=get_current_avernet_tenant())
+        return placeholders.resolve(
+            body, engine_type=bot.engine_type, env=get_current_env(), tenant=get_current_avernet_tenant()
+        )

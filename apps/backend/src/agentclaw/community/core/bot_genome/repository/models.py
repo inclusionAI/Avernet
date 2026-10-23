@@ -21,6 +21,7 @@ there).
 - ``ac_genome_promotion``: one row per promotion, with the compiled document
   that was handed to delivery and its digest.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -121,7 +122,10 @@ class GenomeRefEventRow(BaseModel):
 
 
 class CandidateCollision(Exception):
-    """``record`` found the candidate's content already recorded from another patch (or a capture); nothing was written."""
+    """``record`` found the candidate's content already recorded from another patch (or a capture).
+
+    Nothing was written.
+    """
 
     def __init__(self, revision_id: str, seq: int, patch_digest: Optional[str]) -> None:
         super().__init__(f"revision {revision_id} (r{seq}) already holds this content")
@@ -201,7 +205,11 @@ class GenomeRevisionModel(Base):
     genome_schema = Column(Integer, nullable=False, comment="contract version (1)")
     status = Column(String(16), nullable=False, comment="draft/candidate/accepted/rejected/promoted/archived")
     created_kind = Column(String(16), nullable=False, comment="user/strategy_run")
-    created_actor = Column(String(1100), nullable=False, comment="who recorded it; an app acting for a user is app:<id>:on-behalf-of:<user>")
+    created_actor = Column(
+        String(1100),
+        nullable=False,
+        comment="who recorded it; an app acting for a user is app:<id>:on-behalf-of:<user>",
+    )
     run_id = Column(String(64), nullable=True, comment="the evolution run, for strategy_run")
     run_step = Column(String(64), nullable=True, comment="the run step")
     patch_digest = Column(CHAR(DIGEST_WIDTH), nullable=True, comment="the patch that produced it")
@@ -237,9 +245,7 @@ class GenomeRefModel(Base):
     run_id = Column(String(64), nullable=True)
     reason = Column(String(1024), nullable=True)
 
-    __table_args__ = (
-        UniqueConstraint("avernet_tenant", "env", "entity_id", "bot_id", "name", name="uk_bot_ref"),
-    )
+    __table_args__ = (UniqueConstraint("avernet_tenant", "env", "entity_id", "bot_id", "name", name="uk_bot_ref"),)
 
     def to_record(self) -> GenomeRefRow:
         return GenomeRefRow.model_validate(self, from_attributes=True)
@@ -277,9 +283,7 @@ class GenomePatchModel(Base):
     content = Column(MediumText, nullable=False, comment="JCS(patch)")
     created_at = Column(DateTime, nullable=False)
 
-    __table_args__ = (
-        UniqueConstraint("avernet_tenant", "env", "entity_id", "bot_id", "digest", name="uk_bot_patch"),
-    )
+    __table_args__ = (UniqueConstraint("avernet_tenant", "env", "entity_id", "bot_id", "digest", name="uk_bot_patch"),)
 
     def to_record(self) -> GenomePatchRow:
         return GenomePatchRow.model_validate(self, from_attributes=True)
@@ -295,7 +299,9 @@ class GenomePromotionModel(Base):
     revision_id = Column(CHAR(DIGEST_WIDTH), nullable=False)
     from_revision_id = Column(CHAR(DIGEST_WIDTH), nullable=True, comment="where the ref pointed before")
     document_digest = Column(CHAR(DIGEST_WIDTH), nullable=False, comment="sha256 of JCS(compiled document)")
-    document_json = Column(MediumText, nullable=False, comment="the compiled document handed to delivery, canonical JSON")
+    document_json = Column(
+        MediumText, nullable=False, comment="the compiled document handed to delivery, canonical JSON"
+    )
     going_back = Column(Boolean, nullable=False, default=False, comment="the target had been promoted before")
     actor_kind = Column(String(16), nullable=False, comment="user/strategy_run")
     actor_id = Column(String(1100), nullable=False)

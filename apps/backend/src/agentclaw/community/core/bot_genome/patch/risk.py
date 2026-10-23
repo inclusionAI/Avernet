@@ -6,6 +6,7 @@ op's gene path and whose ``when`` holds gives the default tier; the
 ``T2``; ``policy.risk_overrides`` lift by overlap. The patch's tier is the
 highest over its ops.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
@@ -63,7 +64,10 @@ def rewritten_files(changed_files: Mapping[str, FileChange], threshold: Mapping[
             flagged.append(gene)
             continue
         if rewrite_flagged(
-            a, b, numerator=threshold["numerator"], denominator=threshold["denominator"],
+            a,
+            b,
+            numerator=threshold["numerator"],
+            denominator=threshold["denominator"],
             cell_limit=threshold["lcs_cell_limit"],
         ):
             flagged.append(gene)

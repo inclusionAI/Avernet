@@ -4,6 +4,7 @@ Every value is imported from the module that owns it on the Manifest side,
 so the two surfaces cannot drift: a patch may not carry what a Manifest
 could not.
 """
+
 from __future__ import annotations
 
 from agentclaw.community.core.bot_config_manifest.fetch.limits import (

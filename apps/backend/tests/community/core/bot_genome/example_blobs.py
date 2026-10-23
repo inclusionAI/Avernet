@@ -1,4 +1,7 @@
-"""The contract's examples as test fixtures: the blobs directory as a ContentReader, the revisions by id, the patches as models."""
+"""The contract's examples as test fixtures: the blobs directory as a ContentReader, the revisions by id, the patches as
+models.
+"""
+
 from __future__ import annotations
 
 import json

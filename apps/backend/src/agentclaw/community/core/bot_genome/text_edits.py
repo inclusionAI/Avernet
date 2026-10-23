@@ -9,6 +9,7 @@ same patch on the same base gives the same bytes anywhere.
 
 Lines are separated by ``"\\n"`` only; a ``"\\r"`` stays part of its line.
 """
+
 from __future__ import annotations
 
 import re
@@ -188,7 +189,9 @@ def apply_unified_diff(text: str, diff: str) -> str:
                 if no_newline and (ends_nl or cursor != len(lines) - 1):
                     raise EditDoesNotApply(f"line {cursor + 1} is not the file's last line without a newline")
                 if not no_newline and not ends_nl and cursor == len(lines) - 1:
-                    raise EditDoesNotApply(f"line {cursor + 1} ends the file without a newline; the diff says it has one")
+                    raise EditDoesNotApply(
+                        f"line {cursor + 1} ends the file without a newline; the diff says it has one"
+                    )
                 cursor += 1
             if tag != "-":
                 out.append(line)
@@ -254,7 +257,4 @@ def description_only(before: bytes, after: bytes) -> bool:
     if old_span is None or new_span is None or old_span[0] != new_span[0]:
         return False
     old_front, new_front = old_parts[0], new_parts[0]
-    return (
-        old_front[: old_span[0]] == new_front[: new_span[0]]
-        and old_front[old_span[1] :] == new_front[new_span[1] :]
-    )
+    return old_front[: old_span[0]] == new_front[: new_span[0]] and old_front[old_span[1] :] == new_front[new_span[1] :]

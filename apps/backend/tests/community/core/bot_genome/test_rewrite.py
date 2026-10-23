@@ -1,4 +1,5 @@
 """The registry's rewrite measure against the contract's vectors (README §6.3)."""
+
 from __future__ import annotations
 
 import json
@@ -31,12 +32,17 @@ def test_rewrite_vectors(vector: dict[str, Any]) -> None:
     if "lcs" in expected:
         assert len(a) - len(rest_a) + lcs_length(rest_a, rest_b) == expected["lcs"]
     flagged = rewrite_flagged(
-        a, b, numerator=threshold["numerator"], denominator=threshold["denominator"],
+        a,
+        b,
+        numerator=threshold["numerator"],
+        denominator=threshold["denominator"],
         cell_limit=threshold["lcs_cell_limit"],
     )
     assert flagged == expected["flagged"], vector["note"]
 
 
-@pytest.mark.parametrize(("text", "lines"), [("", []), ("\n", [""]), ("a", ["a"]), ("a\n", ["a"]), ("a\r\nb", ["a\r", "b"])])
+@pytest.mark.parametrize(
+    ("text", "lines"), [("", []), ("\n", [""]), ("a", ["a"]), ("a\n", ["a"]), ("a\r\nb", ["a\r", "b"])]
+)
 def test_to_lines(text: str, lines: list[str]) -> None:
     assert to_lines(text) == lines

@@ -13,12 +13,12 @@ Codes: ``schema``, ``order``, ``not_canonical``, ``not_utf8``,
 ``resource_paths``, ``mcp_entry``, ``mcp_not_permitted``, ``mcp_override``,
 ``limit_exceeded``, ``content_not_reachable``.
 """
+
 from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any
 from urllib.parse import urlsplit
 
 from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
@@ -85,14 +85,15 @@ class SpecCheckContext:
 # Shape
 
 
-def schema_reasons(spec: Any, policy: Any) -> list[Reason]:
-    """The JSON of ``spec`` and ``policy`` against their contract definitions (code ``schema``).
+def schema_reasons(spec: GenomeSpec, policy: GenomePolicy) -> list[Reason]:
+    """``spec`` and ``policy`` against their contract schema definitions (code ``schema``).
 
-    Takes the JSON form (``to_json()``): the contract schema is the oracle
-    for the patterns and the rules a type cannot carry.
+    The check runs on the JSON form (``to_json()``): the contract schema is
+    the oracle for the patterns and for the rules a type cannot carry, so a
+    record built in code (``model_construct``) is held to it too.
     """
     reasons = []
-    for name, value in (("spec", spec), ("policy", policy)):
+    for name, value in (("spec", spec.to_json()), ("policy", policy.to_json())):
         validator = contract.definition_validator(contract.REVISION_SCHEMA_FILE, name)
         for error in sorted(validator.iter_errors(value), key=lambda e: list(e.absolute_path)):
             path = "".join(f"[{p}]" if isinstance(p, int) else f".{p}" for p in error.absolute_path)
@@ -186,7 +187,9 @@ def tree_reasons(location: str, blob: bytes) -> tuple[list[Reason], list[tuple[s
 
 
 def persona_reasons(spec: GenomeSpec, content: ContentReader, engine_type: str) -> list[Reason]:
-    """UTF-8 bytes within the identity cap and a type the bot's engine accepts (``not_utf8``, ``limit_exceeded``, ``persona_type``)."""
+    """UTF-8 bytes within the identity cap and a type the bot's engine accepts (``not_utf8``, ``limit_exceeded``,
+    ``persona_type``).
+    """
     reasons = []
     legal = legal_identity_types(engine_type)
     for index, entry in enumerate(spec.persona):
@@ -226,9 +229,13 @@ def skill_reasons(spec: GenomeSpec, content: ContentReader, validator: SkillPack
             reasons.append(Reason("skill_package", location, f"not a valid skill package: {exc}"))
             continue
         if validated.name != entry.name:
-            reasons.append(Reason("skill_package", location, f"SKILL.md names {validated.name!r}, the entry {entry.name!r}"))
+            reasons.append(
+                Reason("skill_package", location, f"SKILL.md names {validated.name!r}, the entry {entry.name!r}")
+            )
         elif sorted(validated.files) != sorted(members):
-            reasons.append(Reason("skill_package", location, "the tree is not what the package validator keeps (README §4.2)"))
+            reasons.append(
+                Reason("skill_package", location, "the tree is not what the package validator keeps (README §4.2)")
+            )
     return reasons
 
 
@@ -254,7 +261,9 @@ def resource_reasons(spec: GenomeSpec, content: ContentReader) -> list[Reason]:
             continue
         if path.endswith("/"):
             if len(blob) > MAX_TREE_BYTES:
-                reasons.append(Reason("limit_exceeded", location, f"a directory resource is at most {MAX_TREE_BYTES} bytes"))
+                reasons.append(
+                    Reason("limit_exceeded", location, f"a directory resource is at most {MAX_TREE_BYTES} bytes")
+                )
                 continue
             found, members = tree_reasons(location, blob)
             reasons.extend(found)
@@ -263,12 +272,20 @@ def resource_reasons(spec: GenomeSpec, content: ContentReader) -> list[Reason]:
             files = [(path + member, data) for member, data in members]
         else:
             if len(blob) > MAX_RESOURCE_FILE_BYTES:
-                reasons.append(Reason("limit_exceeded", location, f"a file resource is at most {MAX_RESOURCE_FILE_BYTES} bytes"))
+                reasons.append(
+                    Reason("limit_exceeded", location, f"a file resource is at most {MAX_RESOURCE_FILE_BYTES} bytes")
+                )
                 continue
             files = [(path, blob)]
         for written, data in files:
             if len(written.encode("utf-8")) > MAX_WRITTEN_PATH_BYTES:
-                reasons.append(Reason("resource_paths", f"{location}:{written!r}", f"a written path is at most {MAX_WRITTEN_PATH_BYTES} bytes"))
+                reasons.append(
+                    Reason(
+                        "resource_paths",
+                        f"{location}:{written!r}",
+                        f"a written path is at most {MAX_WRITTEN_PATH_BYTES} bytes",
+                    )
+                )
                 continue
             refusal = admission_refusal(written.rsplit("/", 1)[-1], data)
             if refusal is not None:
@@ -318,7 +335,9 @@ def memory_reasons(spec: GenomeSpec, content: ContentReader) -> list[Reason]:
         for item in items:
             for field in ("tags", "source"):
                 if item[field] != sorted(item[field]):
-                    reasons.append(Reason("order", f"spec.memory.items_digest:{item['key']}.{field}", f"{field} must be sorted"))
+                    reasons.append(
+                        Reason("order", f"spec.memory.items_digest:{item['key']}.{field}", f"{field} must be sorted")
+                    )
     return reasons
 
 
@@ -379,7 +398,7 @@ class SpecChecks:
         self, spec: GenomeSpec, policy: GenomePolicy, content: ContentReader, ctx: SpecCheckContext
     ) -> list[Reason]:
         """Everything, shape first: a record that fails the schema is not walked further."""
-        found = schema_reasons(spec.to_json(), policy.to_json())
+        found = schema_reasons(spec, policy)
         if found:
             return found
         found = order_reasons(spec, policy) + policy_path_reasons(policy)

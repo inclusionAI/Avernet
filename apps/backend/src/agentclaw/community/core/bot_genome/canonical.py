@@ -16,6 +16,7 @@ Usage::
     canonicalize({"b": 1, "a": [True, None]})   # -> b'{"a":[true,null],"b":1}'
     revision_id(spec, policy)                    # -> "sha256:7c1e…"
 """
+
 from __future__ import annotations
 
 import hashlib

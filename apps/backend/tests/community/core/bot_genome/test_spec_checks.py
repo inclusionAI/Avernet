@@ -1,4 +1,5 @@
 """README §6.4: every apply-time predicate, on the contract's invalid cases and with fakes of the MCP services."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -31,7 +32,14 @@ from agentclaw.community.core.bot_genome.spec_models import (
 )
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
-from tests.community.core.bot_genome.example_blobs import SUPPORT_BOT, BlobDir, load_invalid, load_revisions, policy_of, spec_of
+from tests.community.core.bot_genome.example_blobs import (
+    SUPPORT_BOT,
+    BlobDir,
+    load_invalid,
+    load_revisions,
+    policy_of,
+    spec_of,
+)
 
 REVISIONS = load_revisions()
 INVALID = load_invalid()
@@ -63,13 +71,17 @@ class FakeConfig:
     def __init__(self, valid: bool = True) -> None:
         self.valid, self.calls = valid, []
 
-    def validate_bot_override(self, *, user_id: str, server_code: str, config: Any, engine_type: str | None = None) -> dict[str, Any]:
+    def validate_bot_override(
+        self, *, user_id: str, server_code: str, config: Any, engine_type: str | None = None
+    ) -> dict[str, Any]:
         self.calls.append((user_id, server_code, config, engine_type))
         return {"valid": True} if self.valid else {"valid": False, "error": "no remote config on a LOCAL server"}
 
 
 def _checks(auth: FakeAuth | None = None, config: FakeConfig | None = None) -> SpecChecks:
-    return SpecChecks(validator=SkillPackageValidator(SkillParser()), mcp_auth=auth or FakeAuth(), mcp_config=config or FakeConfig())
+    return SpecChecks(
+        validator=SkillPackageValidator(SkillParser()), mcp_auth=auth or FakeAuth(), mcp_config=config or FakeConfig()
+    )
 
 
 def _record() -> tuple[GenomeSpec, GenomePolicy]:
@@ -101,11 +113,16 @@ def test_every_invalid_example_naming_a_predicate_is_refused_by_it(name: str) ->
 
 @pytest.mark.parametrize("name", ["mcp-url-no-host", "mcp-url-userinfo", "mcp-header-newline"])
 def test_mcp_examples_fail_the_entry_rules_too(name: str) -> None:
-    """These three fail the contract pattern, so the typed model refuses them; a spec built past the model still fails the Manifest rule."""
+    """These three fail the contract pattern, so the typed model refuses them; a spec built past the model still fails
+    the Manifest rule.
+    """
     record = INVALID[name]["record"]
     spec, _ = _record()
     spec.tools.mcp = [
-        McpServerEntry.model_construct(server_code=entry["server_code"], config=McpConfig.model_construct(**entry["config"]) if "config" in entry else None)
+        McpServerEntry.model_construct(
+            server_code=entry["server_code"],
+            config=McpConfig.model_construct(**entry["config"]) if "config" in entry else None,
+        )
         for entry in record["spec"]["tools"]["mcp"]
     ]
     reasons = mcp_entry_reasons(spec, CTX)
@@ -118,18 +135,24 @@ def test_mcp_examples_fail_the_entry_rules_too(name: str) -> None:
 
 def test_schema_reasons_name_the_field() -> None:
     spec, policy = _record()
-    spec_json = spec.to_json()
-    spec_json["engine_config"] = {"x": 1}
-    assert [(r.code, r.location) for r in schema_reasons(spec_json, policy.to_json())] == [("schema", "spec.engine_config")]
-    assert schema_reasons(spec_json, dict(policy.to_json(), pins="nope"))[-1].location == "policy.pins"
+    # ``model_construct`` skips validation: a record built in code can hold what the parser refuses
+    bad_spec = spec.model_copy(update={"engine_config": {"x": 1}})
+    assert [(r.code, r.location) for r in schema_reasons(bad_spec, policy)] == [("schema", "spec.engine_config")]
+    bad_policy = policy.model_copy(update={"pins": "nope"})
+    assert schema_reasons(bad_spec, bad_policy)[-1].location == "policy.pins"
 
 
 def test_order_and_canonical_paths() -> None:
     spec, policy = _record()
     spec.tools.mcp.reverse()
     assert [r.location for r in order_reasons(spec, policy)] == ["spec.tools.mcp"]
-    assert [r.location for r in order_reasons(spec, policy.model_copy(update={"pins": ["a", "a"]}))] == ["spec.tools.mcp", "policy.pins"]
-    assert [r.location for r in policy_path_reasons(policy.model_copy(update={"risk_overrides": {"skills/%61": "T2"}}))] == ["policy.risk_overrides"]
+    assert [r.location for r in order_reasons(spec, policy.model_copy(update={"pins": ["a", "a"]}))] == [
+        "spec.tools.mcp",
+        "policy.pins",
+    ]
+    assert [
+        r.location for r in policy_path_reasons(policy.model_copy(update={"risk_overrides": {"skills/%61": "T2"}}))
+    ] == ["policy.risk_overrides"]
 
 
 # -- persona ---------------------------------------------------------------------------------------
@@ -218,7 +241,10 @@ def test_resource_rules() -> None:
         ("admission", "spec.resources[1]:'data/tool.sh'"),
         ("admission", "spec.resources[2]:'docs/run.toml'"),
     ]
-    spec.resources = [ResourceEntry(path="data/", digest=blobs.put(b"q,a\n")), ResourceEntry(path="data/x.md", digest=blobs.put(b"x"))]
+    spec.resources = [
+        ResourceEntry(path="data/", digest=blobs.put(b"q,a\n")),
+        ResourceEntry(path="data/x.md", digest=blobs.put(b"x")),
+    ]
     reasons = resource_reasons(spec, blobs)
     assert [r.code for r in reasons] == ["resource_paths", "tree"]
 
@@ -227,16 +253,29 @@ def test_resource_rules() -> None:
 
 
 def test_mcp_entry_rules_with_hand_built_entries() -> None:
-    """Past the model (``model_construct`` skips validation, as a stored row from an older rule set would): the Manifest rules still refuse."""
+    """Past the model (``model_construct`` skips validation, as a stored row from an older rule set would): the Manifest
+    rules still refuse.
+    """
     spec, _ = _record()
     raw = [
         {"server_code": "a", "config": {"url": "ftp://x.example.com/"}},
         {"server_code": "b", "config": {"headers": {"X-A": "1", "x-a": "2"}}},
         {"server_code": "c", "config": {"headers": {"X-A\r": "1"}}},
         {"server_code": "d", "config": {"url": "https://user:pw@x.example.com/mcp"}},
-        {"server_code": "e", "config": {"url": "https://x.example.com/mcp", "headers": {"X-A": "1"}, "transport_protocol": "SSE", "endpoint_env": "PROD"}},
+        {
+            "server_code": "e",
+            "config": {
+                "url": "https://x.example.com/mcp",
+                "headers": {"X-A": "1"},
+                "transport_protocol": "SSE",
+                "endpoint_env": "PROD",
+            },
+        },
     ]
-    spec.tools.mcp = [McpServerEntry.model_construct(server_code=e["server_code"], config=McpConfig.model_construct(**e["config"])) for e in raw]
+    spec.tools.mcp = [
+        McpServerEntry.model_construct(server_code=e["server_code"], config=McpConfig.model_construct(**e["config"]))
+        for e in raw
+    ]
     reasons = mcp_entry_reasons(spec, CTX)
     assert sorted(r.location for r in reasons) == [
         "spec.tools.mcp[0].config.url",
@@ -287,7 +326,12 @@ def test_memory_items_must_be_canonical_sorted_and_valid() -> None:
     blobs = BlobDir()
     spec, policy = _record()
     checks = _checks()
-    spec.memory = MemorySpec(mode="seed", items_digest=blobs.put(b'[{"key":"b","source":[],"tags":[],"text":"t"},{"key":"a","source":[],"tags":[],"text":"t"}]'))
+    spec.memory = MemorySpec(
+        mode="seed",
+        items_digest=blobs.put(
+            b'[{"key":"b","source":[],"tags":[],"text":"t"},{"key":"a","source":[],"tags":[],"text":"t"}]'
+        ),
+    )
     assert [r.code for r in checks.reasons(spec, policy, blobs, CTX)] == ["order"]
     spec.memory.items_digest = blobs.put(b'[{"key":"A","text":"t"}]')
     assert {r.code for r in checks.reasons(spec, policy, blobs, CTX)} == {"schema"}
@@ -305,9 +349,15 @@ def test_script_must_be_utf8() -> None:
 def test_memory_item_tags_and_sources_must_be_sorted() -> None:
     blobs = BlobDir()
     spec, policy = _record()
-    spec.memory = MemorySpec(mode="seed", items_digest=blobs.put(b'[{"key":"a","source":["feedback:f","episode:e"],"tags":["b","a"],"text":"t"}]'))
+    spec.memory = MemorySpec(
+        mode="seed",
+        items_digest=blobs.put(b'[{"key":"a","source":["feedback:f","episode:e"],"tags":["b","a"],"text":"t"}]'),
+    )
     reasons = _checks().reasons(spec, policy, blobs, CTX)
-    assert [(r.code, r.location) for r in reasons] == [("order", "spec.memory.items_digest:a.tags"), ("order", "spec.memory.items_digest:a.source")]
+    assert [(r.code, r.location) for r in reasons] == [
+        ("order", "spec.memory.items_digest:a.tags"),
+        ("order", "spec.memory.items_digest:a.source"),
+    ]
 
 
 def test_a_drive_letter_is_not_a_tree_member() -> None:

@@ -1322,7 +1322,7 @@ class GenomeRegistryProtocol(Protocol):          # core/bot_genome/genome_regist
         Idempotent: unchanged state returns the existing revision with created=False.
         Raises CaptureRefused naming what cannot be recorded."""
 
-    async def record_patch(self, bot: BotRef, patch: GenomePatch, *, created_by: Provenance,
+    async def commit_patch(self, bot: BotRef, patch: GenomePatch, *, created_by: Provenance,
                            status: RevisionStatus,          # DRAFT (owner) or CANDIDATE (run) only
                            run: RunScope | None = None) -> RecordedRevision:
         """Apply `patch` to its own `base` (a revision of this bot) and record the result (contract §6.4).

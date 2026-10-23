@@ -16,6 +16,7 @@ Usage::
 
     rewrite_flagged(["a", "b"], ["a", "c"], numerator=2, denominator=5, cell_limit=2**24)  # -> True
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -78,9 +79,7 @@ def _lcs_table(a: Sequence[str], b: Sequence[str]) -> int:
     return row[-1]
 
 
-def rewrite_flagged(
-    a: Sequence[str], b: Sequence[str], *, numerator: int, denominator: int, cell_limit: int
-) -> bool:
+def rewrite_flagged(a: Sequence[str], b: Sequence[str], *, numerator: int, denominator: int, cell_limit: int) -> bool:
     """README §6.3: True when the change from ``a`` to ``b`` is a rewrite."""
     total = len(a) + len(b)
     if total == 0:

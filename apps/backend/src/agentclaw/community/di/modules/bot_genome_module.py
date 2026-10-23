@@ -10,6 +10,7 @@ The seam: ``revision_applier`` binds :class:`PendingDeliveryApplier`, which
 refuses every promotion before any ref moves. RSI-04 rebinds this one
 provider to its direct-delivery applier; nothing else changes.
 """
+
 from __future__ import annotations
 
 from typing import Callable
@@ -152,7 +153,9 @@ class BotGenomeModule(Module):
         promotions: GenomePromotionRepositoryProtocol,
         applier: RevisionApplier,
     ) -> GenomePromotionServiceProtocol:
-        return GenomePromotionService(registry=registry, revisions=revisions, refs=refs, promotions=promotions, applier=applier)
+        return GenomePromotionService(
+            registry=registry, revisions=revisions, refs=refs, promotions=promotions, applier=applier
+        )
 
 
 class _Lazy:

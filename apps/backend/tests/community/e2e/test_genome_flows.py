@@ -6,6 +6,7 @@ the story exercises the same wiring singlebox would. It stops where the spec
 says it stops: the only delivery seam bound today refuses the promotion as
 ``not_appliable`` naming RSI-04, before any ref moves.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -38,23 +39,48 @@ class _Resolver:
 
 def _principal() -> str:
     now = int(time.time())
-    claims = {"iss": "gateway", "aud": "backend", "iat": now, "exp": now + 3600,
-              "principals": [{"type": "user", "subject": {"id": _OWNER, "username": f"{_OWNER}@example.test"}}]}
+    claims = {
+        "iss": "gateway",
+        "aud": "backend",
+        "iat": now,
+        "exp": now + 3600,
+        "principals": [{"type": "user", "subject": {"id": _OWNER, "username": f"{_OWNER}@example.test"}}],
+    }
     return jwt.encode(claims, _KEY, algorithm="HS256")
 
 
 def _seed_personal_bot(world, bot_id: str) -> None:
-    """A personal openclaw bot on a local device binding without ``adapter_port``, so the identity files land on the local filesystem."""
+    """A personal openclaw bot on a local device binding without ``adapter_port``, so the identity files land on the
+    local filesystem.
+    """
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
     binding_id = world.get(DeviceBindingRepository).insert_binding(
-        entity_id=_OWNER, entity_type="staff", device_id=f"local_dev_{bot_id}", device_provider="local", env="dev",
-        device_props={}, status="ACTIVE", apply_reason="genome e2e seed", applied_by=_OWNER,
+        entity_id=_OWNER,
+        entity_type="staff",
+        device_id=f"local_dev_{bot_id}",
+        device_provider="local",
+        env="dev",
+        device_props={},
+        status="ACTIVE",
+        apply_reason="genome e2e seed",
+        applied_by=_OWNER,
     )
-    world.get(BotRepository).insert({
-        "bot_id": bot_id, "bot_name": f"Bot {bot_id}", "owner_id": _OWNER, "owner_name": _OWNER, "bot_type": "personal",
-        "status": "ACTIVE", "entity_id": _OWNER, "entity_type": "staff", "creator_id": _OWNER, "active_engine": "openclaw",
-        "device_id": f"local_dev_{bot_id}", "binding_id": binding_id,
-    })
+    world.get(BotRepository).insert(
+        {
+            "bot_id": bot_id,
+            "bot_name": f"Bot {bot_id}",
+            "owner_id": _OWNER,
+            "owner_name": _OWNER,
+            "bot_type": "personal",
+            "status": "ACTIVE",
+            "entity_id": _OWNER,
+            "entity_type": "staff",
+            "creator_id": _OWNER,
+            "active_engine": "openclaw",
+            "device_id": f"local_dev_{bot_id}",
+            "binding_id": binding_id,
+        }
+    )
 
 
 @pytest.mark.e2e
@@ -71,7 +97,13 @@ def test_capture_patch_diff_draft_and_promote_up_to_the_delivery_seam(app_with_t
     r = client.post(f"{genome}/revisions:capture", params=query)
     assert r.status_code == 201, r.text
     first = r.json()["data"]
-    assert (first["seq"], first["parent"], first["status"], first["created"], first["patch_digest"]) == (1, None, "draft", True, None)
+    assert (first["seq"], first["parent"], first["status"], first["created"], first["patch_digest"]) == (
+        1,
+        None,
+        "draft",
+        True,
+        None,
+    )
     r = client.get(f"{genome}/revisions/active", params=query)
     assert r.status_code == 404, "capture names no ref"
     revision = client.get(f"{genome}/revisions/r1", params=query).json()["data"]
@@ -83,10 +115,23 @@ def test_capture_patch_diff_draft_and_promote_up_to_the_delivery_seam(app_with_t
 
     # 2. patch against the captured base
     patch = {
-        "patch_schema": 1, "base": first["id"],
-        "ops": [{"op": "file.edit", "target": "persona/SOUL.md",
-                 "edits": [{"kind": "insert_after", "anchor": "## Tone", "content": "Confirm the order id before quoting amounts."}]}],
-        "rationale": "Owner edit after a customer complaint.", "evidence": ["feedback:fb_1"],
+        "patch_schema": 1,
+        "base": first["id"],
+        "ops": [
+            {
+                "op": "file.edit",
+                "target": "persona/SOUL.md",
+                "edits": [
+                    {
+                        "kind": "insert_after",
+                        "anchor": "## Tone",
+                        "content": "Confirm the order id before quoting amounts.",
+                    }
+                ],
+            }
+        ],
+        "rationale": "Owner edit after a customer complaint.",
+        "evidence": ["feedback:fb_1"],
     }
     r = client.post(f"{genome}/revisions", params=query, json={"status": "draft", "patch": patch})
     assert r.status_code == 201, r.text
@@ -101,7 +146,9 @@ def test_capture_patch_diff_draft_and_promote_up_to_the_delivery_seam(app_with_t
     assert "+Confirm the order id before quoting amounts." in diff["changes"][0]["diff"]
 
     # 4. move draft by compare-and-swap
-    r = client.put(f"{genome}/refs/draft", params=query, json={"revision": "r2", "expected_revision": None, "reason": "wip"})
+    r = client.put(
+        f"{genome}/refs/draft", params=query, json={"revision": "r2", "expected_revision": None, "reason": "wip"}
+    )
     assert r.status_code == 200, r.text
     assert r.json()["data"]["revision"] == second["id"]
     stale = client.put(f"{genome}/refs/draft", params=query, json={"revision": "r1", "expected_revision": None})
@@ -110,7 +157,9 @@ def test_capture_patch_diff_draft_and_promote_up_to_the_delivery_seam(app_with_t
     assert [(ref["name"], ref["revision"]) for ref in refs_before] == [("draft", second["id"])]
 
     # 5. promote: refused at the delivery seam, naming RSI-04, before any ref moves
-    r = client.post(f"{genome}/promotions", params=query, json={"revision": "r2", "expected_revision": None, "reason": "ship it"})
+    r = client.post(
+        f"{genome}/promotions", params=query, json={"revision": "r2", "expected_revision": None, "reason": "ship it"}
+    )
     assert r.status_code == 422, r.text
     reasons = r.json()["data"]["reasons"]
     assert reasons[0]["code"] == "not_appliable" and "RSI-04" in reasons[0]["message"]

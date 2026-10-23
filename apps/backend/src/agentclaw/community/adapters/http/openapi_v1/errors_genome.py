@@ -4,6 +4,7 @@ Fixed messages, never raw exception text; what a caller acts on rides in
 ``data`` (:func:`genome_error_data`): the reasons of a refusal, or the
 current revision of a ref that moved.
 """
+
 from __future__ import annotations
 
 from agentclaw.community.core.bot_genome.errors import (

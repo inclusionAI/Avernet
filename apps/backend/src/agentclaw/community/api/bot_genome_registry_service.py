@@ -5,6 +5,7 @@ Re-export only. The Protocol is defined in its owning core module
 can inherit it without a ``core -> api`` waiver; adapters import it from
 here, as for the Manifest contracts.
 """
+
 from __future__ import annotations
 
 from agentclaw.community.core.bot_genome.genome_registry_protocol import (

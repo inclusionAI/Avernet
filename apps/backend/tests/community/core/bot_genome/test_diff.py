@@ -1,4 +1,5 @@
 """``diff_specs``: added/removed/modified per gene, text diffs that apply back, the tier and rewrite flags."""
+
 from __future__ import annotations
 
 import json
@@ -17,7 +18,14 @@ from agentclaw.community.core.bot_genome.spec_models import (
     ResourceEntry,
 )
 from agentclaw.community.core.bot_genome.text_edits import apply_unified_diff
-from tests.community.core.bot_genome.example_blobs import MEMORY_BOT, SUPPORT_BOT, SUPPORT_BOT_CANDIDATE, BlobDir, policy_of, spec_of
+from tests.community.core.bot_genome.example_blobs import (
+    MEMORY_BOT,
+    SUPPORT_BOT,
+    SUPPORT_BOT_CANDIDATE,
+    BlobDir,
+    policy_of,
+    spec_of,
+)
 
 
 def _diff(a: GenomeSpec, b: GenomeSpec, blobs: BlobDir | None = None, policy: GenomePolicy | None = None):
@@ -52,26 +60,38 @@ def test_the_example_candidate_against_its_parent() -> None:
     a, b = spec_of(SUPPORT_BOT), spec_of(SUPPORT_BOT_CANDIDATE)
     diff = _diff(a, b, policy=policy_of(SUPPORT_BOT_CANDIDATE))
     assert (diff.revision, diff.against, diff.risk_tier, diff.rewrite_flags) == ("rev-b", "rev-a", "T2", ())
-    assert [(c.gene, c.kind) for c in diff.changes] == [("persona/SOUL.md", "modified"), ("resources/data/returns.md", "added")]
+    assert [(c.gene, c.kind) for c in diff.changes] == [
+        ("persona/SOUL.md", "modified"),
+        ("resources/data/returns.md", "added"),
+    ]
     soul_before = BlobDir().read(_soul(a)).decode()
     soul_after = BlobDir().read(_soul(b)).decode()
     assert apply_unified_diff(soul_before, diff.changes[0].diff) == soul_after
     assert diff.changes[1].diff is None
     reverse = _diff(b, a)
-    assert [(c.gene, c.kind) for c in reverse.changes] == [("persona/SOUL.md", "modified"), ("resources/data/returns.md", "removed")]
+    assert [(c.gene, c.kind) for c in reverse.changes] == [
+        ("persona/SOUL.md", "modified"),
+        ("resources/data/returns.md", "removed"),
+    ]
     assert _diff(a, a).changes == () and _diff(a, a).risk_tier == "T0"
 
 
 def test_skills_report_members_and_the_description_only_tier() -> None:
     blobs = BlobDir()
     a = spec_of(SUPPORT_BOT)
-    skill_md = b"---\nname: quality-check\ndescription: Check a reply against the service rules before sending it.\n---\nRead RULES.md, then check the draft reply line by line.\n"
+    skill_md = (
+        b"---\nname: quality-check\ndescription: Check a reply against the service rules before sending it.\n---\n"
+        b"Read RULES.md, then check the draft reply line by line.\n"
+    )
     check_py = b"import sys\n\nprint('ok' if sys.stdin.read().strip() else 'empty')\n"
     tweaked = skill_md.replace(b"Check a reply", b"Check every reply")
     b = spec_of(SUPPORT_BOT)
     b.skills[0].digest = blobs.put(canonical_tree_bytes([("SKILL.md", tweaked), ("scripts/check.py", check_py)]))
     diff = _diff(a, b, blobs)
-    assert [(c.gene, c.kind) for c in diff.changes] == [("skills/quality-check", "modified"), ("skills/quality-check/SKILL.md", "modified")]
+    assert [(c.gene, c.kind) for c in diff.changes] == [
+        ("skills/quality-check", "modified"),
+        ("skills/quality-check/SKILL.md", "modified"),
+    ]
     assert diff.changes[1].diff.startswith("@@ -1,5 +1,5 @@\n ---\n name: quality-check\n-description: Check a reply")
     assert diff.risk_tier == "T1"
     c = spec_of(SUPPORT_BOT)
@@ -87,7 +107,10 @@ def test_skills_report_members_and_the_description_only_tier() -> None:
     d.skills[1] = CenterSkill(name="refund-policy", origin="center", center_version="v8")
     d.skills.append(RepoSkill(name="weather", origin="repo", repo_path="team/weather"))
     diff = _diff(a, d, blobs)
-    assert [(x.gene, x.kind, x.diff) for x in diff.changes] == [("skills/refund-policy", "modified", None), ("skills/weather", "added", None)]
+    assert [(x.gene, x.kind, x.diff) for x in diff.changes] == [
+        ("skills/refund-policy", "modified", None),
+        ("skills/weather", "added", None),
+    ]
 
 
 def test_resources_measure_text_files_and_flag_a_replacement_across_kinds() -> None:
@@ -104,21 +127,47 @@ def test_resources_measure_text_files_and_flag_a_replacement_across_kinds() -> N
     assert [(x.gene, x.kind, x.diff) for x in diff.changes] == [("resources/data/faq.csv", "modified", None)]
     assert diff.rewrite_flags == ("resources/data/faq.csv",) and diff.risk_tier == "T2"
     d = spec_of(SUPPORT_BOT)
-    d.resources[1].digest = blobs.put(canonical_tree_bytes([("returns/policy.md", b"# Returns\nReturns are accepted within 30 days of delivery.\n"), ("shipping.md", b"# Shipping\nStandard shipping takes 3-5 working days.\nFree over 50.\n")]))
+    d.resources[1].digest = blobs.put(
+        canonical_tree_bytes(
+            [
+                ("returns/policy.md", b"# Returns\nReturns are accepted within 30 days of delivery.\n"),
+                ("shipping.md", b"# Shipping\nStandard shipping takes 3-5 working days.\nFree over 50.\n"),
+            ]
+        )
+    )
     diff = _diff(a, d, blobs)
-    assert [(x.gene, x.kind) for x in diff.changes] == [("resources/data/kb", "modified"), ("resources/data/kb/shipping.md", "modified")]
+    assert [(x.gene, x.kind) for x in diff.changes] == [
+        ("resources/data/kb", "modified"),
+        ("resources/data/kb/shipping.md", "modified"),
+    ]
     assert diff.rewrite_flags == () and diff.risk_tier == "T1"
     # A member added or removed is what no file.edit can do: a patch replaces the directory, so the
     # diff measures it as that replacement (flagged, T2), not as an edit of the members that stayed.
     e = spec_of(SUPPORT_BOT)
-    e.resources[1].digest = blobs.put(canonical_tree_bytes([("returns/policy.md", b"# Returns\nReturns are accepted within 30 days of delivery.\n"), ("shipping.md", b"# Shipping\nStandard shipping takes 3-5 working days.\n"), ("warranty.md", b"# Warranty\n")]))
+    e.resources[1].digest = blobs.put(
+        canonical_tree_bytes(
+            [
+                ("returns/policy.md", b"# Returns\nReturns are accepted within 30 days of delivery.\n"),
+                ("shipping.md", b"# Shipping\nStandard shipping takes 3-5 working days.\n"),
+                ("warranty.md", b"# Warranty\n"),
+            ]
+        )
+    )
     diff = _diff(a, e, blobs)
-    assert [(x.gene, x.kind) for x in diff.changes] == [("resources/data/kb", "modified"), ("resources/data/kb/warranty.md", "added")]
+    assert [(x.gene, x.kind) for x in diff.changes] == [
+        ("resources/data/kb", "modified"),
+        ("resources/data/kb/warranty.md", "added"),
+    ]
     assert diff.rewrite_flags == ("resources/data/kb",) and diff.risk_tier == "T2"
     f = spec_of(SUPPORT_BOT)
-    f.resources[1].digest = blobs.put(canonical_tree_bytes([("shipping.md", b"# Shipping\nStandard shipping takes 3-5 working days.\n")]))
+    f.resources[1].digest = blobs.put(
+        canonical_tree_bytes([("shipping.md", b"# Shipping\nStandard shipping takes 3-5 working days.\n")])
+    )
     diff = _diff(a, f, blobs)
-    assert [(x.gene, x.kind) for x in diff.changes] == [("resources/data/kb", "modified"), ("resources/data/kb/returns/policy.md", "removed")]
+    assert [(x.gene, x.kind) for x in diff.changes] == [
+        ("resources/data/kb", "modified"),
+        ("resources/data/kb/returns/policy.md", "removed"),
+    ]
     assert diff.rewrite_flags == ("resources/data/kb",) and diff.risk_tier == "T2"
 
 
@@ -138,11 +187,15 @@ def test_memory_items_and_mode() -> None:
         ("memory/returns-window", "modified"),
         ("memory/vip", "added"),
     ]
-    assert "-  \"text\": \"Returns are accepted within 30 days of delivery.\"" in diff.changes[2].diff
+    assert '-  "text": "Returns are accepted within 30 days of delivery."' in diff.changes[2].diff
     assert diff.risk_tier == "T3"
     c = spec_of(MEMORY_BOT)
     c.memory = None
-    assert [(x.gene, x.kind) for x in _diff(a, c, blobs).changes] == [("memory", "removed"), ("memory/customer-tier-rules", "removed"), ("memory/returns-window", "removed")]
+    assert [(x.gene, x.kind) for x in _diff(a, c, blobs).changes] == [
+        ("memory", "removed"),
+        ("memory/customer-tier-rules", "removed"),
+        ("memory/returns-window", "removed"),
+    ]
     assert _diff(c, a, blobs).risk_tier == "T1"
 
 
@@ -154,7 +207,11 @@ def test_human_only_genes_are_t3_and_overrides_raise() -> None:
     del b.tools.mcp[1]
     b.script = None
     diff = _diff(a, b, blobs)
-    assert [(c.gene, c.kind) for c in diff.changes] == [("tools/mcp/mcp.x.meet", "modified"), ("tools/mcp/mcp.x.orders", "removed"), ("script", "removed")]
+    assert [(c.gene, c.kind) for c in diff.changes] == [
+        ("tools/mcp/mcp.x.meet", "modified"),
+        ("tools/mcp/mcp.x.orders", "removed"),
+        ("script", "removed"),
+    ]
     assert '-      "X-Project": "support"' in diff.changes[0].diff
     assert diff.risk_tier == "T3"
     c = spec_of(SUPPORT_BOT)
@@ -180,8 +237,13 @@ def test_a_trailing_newline_flip_on_a_context_line_round_trips(before: str, afte
 def test_a_skill_that_gains_a_file_beside_a_description_tweak_is_not_description_only() -> None:
     blobs = BlobDir()
     a = spec_of(SUPPORT_BOT)
-    tweaked = b"---\nname: quality-check\ndescription: Check every reply against the service rules before sending it.\n---\nRead RULES.md, then check the draft reply line by line.\n"
+    tweaked = (
+        b"---\nname: quality-check\ndescription: Check every reply against the service rules before sending it.\n---\n"
+        b"Read RULES.md, then check the draft reply line by line.\n"
+    )
     check_py = b"import sys\n\nprint('ok' if sys.stdin.read().strip() else 'empty')\n"
     b = spec_of(SUPPORT_BOT)
-    b.skills[0].digest = blobs.put(canonical_tree_bytes([("SKILL.md", tweaked), ("scripts/check.py", check_py), ("evil.py", b"import os\n")]))
+    b.skills[0].digest = blobs.put(
+        canonical_tree_bytes([("SKILL.md", tweaked), ("scripts/check.py", check_py), ("evil.py", b"import os\n")])
+    )
     assert _diff(a, b, blobs).risk_tier == "T2"

@@ -7,6 +7,7 @@ revision's ``promoted`` status and the promotion row with the compiled
 document → ``applier.start`` → the row's delivery answer. Everything before
 that transaction leaves no trace, and the transaction leaves all or nothing.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -91,7 +92,10 @@ class GenomePromotionService(GenomePromotionServiceProtocol):
         target = self._registry.get_revision(bot, revision)
         status = target.revision.status
         if status not in PROMOTABLE:
-            raise NotPromotable(f"revision {target.revision.id} is {status.value}; only a draft, an accepted candidate or a promoted revision can be promoted")
+            raise NotPromotable(
+                f"revision {target.revision.id} is {status.value}; "
+                "only a draft, an accepted candidate or a promoted revision can be promoted"
+            )
         compiled = self._registry.compile(bot, target.revision.id)
         active = self._refs.get(**self._axes(bot), name="active")
         if active is not None and actor.kind is not ProvenanceKind.USER:
@@ -132,14 +136,29 @@ class GenomePromotionService(GenomePromotionServiceProtocol):
             raise RefConflict("active", expected=expected_revision, current=current.revision_id if current else None)
         try:
             result = await self._applier.start(bot, compiled, actor=actor, reason=reason)
-        except Exception as exc:  # noqa: BLE001 - the refs moved; the failure is the promotion's record, not the caller's crash
-            logger.warning("[genome.promotion] delivery did not start promotion=%s bot=%s: %s", row.promotion_id, bot.bot_id, exc)
+        # The refs moved already: a delivery failure is the promotion's record, not the caller's crash.
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[genome.promotion] delivery did not start promotion=%s bot=%s: %s", row.promotion_id, bot.bot_id, exc
+            )
             # The type only: delivery errors can quote headers or paths, and the row is never deleted.
-            detail = f"delivery did not start ({type(exc).__name__}); see the server log for promotion {row.promotion_id}"
-            finished = self._promotions.finish(**self._axes(bot), promotion_id=row.promotion_id, status="apply_failed", apply_reference=None, apply_detail=detail)
+            detail = (
+                f"delivery did not start ({type(exc).__name__}); see the server log for promotion {row.promotion_id}"
+            )
+            finished = self._promotions.finish(
+                **self._axes(bot),
+                promotion_id=row.promotion_id,
+                status="apply_failed",
+                apply_reference=None,
+                apply_detail=detail,
+            )
         else:
             finished = self._promotions.finish(
-                **self._axes(bot), promotion_id=row.promotion_id, status="applied", apply_reference=result.reference, apply_detail=result.detail[:1024]
+                **self._axes(bot),
+                promotion_id=row.promotion_id,
+                status="applied",
+                apply_reference=result.reference,
+                apply_detail=result.detail[:1024],
             )
         return _promotion(finished or row, with_document=True)
 

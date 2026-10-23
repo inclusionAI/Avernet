@@ -695,7 +695,9 @@ def test_reachability_by_producer_ignores_what_the_manifest_fetched(tmp_path):
     digest = "sha256:" + hashlib.sha256(data).hexdigest()
     service.store(_fetched(data), scope=SCOPE, source_url="https://code.example.com/team/content.git")
     assert service.is_reachable(SCOPE, digest) is True
-    assert service.is_reachable(SCOPE, digest, produced_by="genome") is False, "a Manifest fetch is not the registry's row"
+    assert service.is_reachable(SCOPE, digest, produced_by="genome") is False, (
+        "a Manifest fetch is not the registry's row"
+    )
     produced = service.store_produced(data, scope=SCOPE, origin="genome/capture")
     assert produced.id is not None and len(repo.rows) == 2, "the registry's own row is filed beside the fetched one"
     assert service.is_reachable(SCOPE, digest, produced_by="genome") is True

@@ -8,6 +8,7 @@ applier in place of :class:`PendingDeliveryApplier` in
 ``di/modules/bot_genome_module.py``, and nothing else on the promotion path
 changes.
 """
+
 from __future__ import annotations
 
 from abc import abstractmethod
@@ -45,9 +46,17 @@ class PendingDeliveryApplier(RevisionApplier):
 
     def preflight(self, bot: BotRef, compiled: CompiledManifest) -> None:
         if bot.bot_type == "service":
-            raise PromotionUnsupported("promotion of a service bot goes through the publish flow, which RSI-04 / RSI-16 bind")
+            raise PromotionUnsupported(
+                "promotion of a service bot goes through the publish flow, which RSI-04 / RSI-16 bind"
+            )
         raise NotAppliable(
-            [Reason("not_appliable", "revision", "direct delivery of a compiled revision lands with RSI-04; nothing can deliver it yet")]
+            [
+                Reason(
+                    "not_appliable",
+                    "revision",
+                    "direct delivery of a compiled revision lands with RSI-04; nothing can deliver it yet",
+                )
+            ]
         )
 
     async def start(self, bot: BotRef, compiled: CompiledManifest, *, actor: Provenance, reason: str) -> ApplyResult:

@@ -12,6 +12,7 @@ apply-time predicates (``spec_checks.py``) and limits on counts. Those run
 on the outcome, so one ``PatchRejected`` can list every reason at once where
 the contract allows it.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -32,7 +33,7 @@ from agentclaw.community.core.bot_genome.canonical import (
 )
 from agentclaw.community.core.bot_genome.errors import PatchRejected, Reason
 from agentclaw.community.core.bot_genome.limits import MAX_DIFF_BYTES, MAX_INLINE_CONTENT_BYTES
-from agentclaw.community.core.bot_genome.models import ContentReader
+from agentclaw.community.core.bot_genome.models import ContentReader, ProducedBlob
 from agentclaw.community.core.bot_genome.patch_models import (
     Content,
     FileEdit,
@@ -40,6 +41,7 @@ from agentclaw.community.core.bot_genome.patch_models import (
     MemoryRetire,
     MemorySetMode,
     MemoryUpdate,
+    OpKind,
     PatchOp,
     PersonaAdd,
     PersonaRemove,
@@ -52,9 +54,11 @@ from agentclaw.community.core.bot_genome.patch_models import (
     parse_memory_items,
 )
 from agentclaw.community.core.bot_genome.spec_models import (
+    GenePath,
     GenomeSpec,
     LocalSkill,
     MemoryItem,
+    MemoryMode,
     PersonaFile,
     ResourceEntry,
     SkillEntry,
@@ -96,11 +100,11 @@ class OpTouch:
     mode="replace")`` (T3 for ``replace``).
     """
 
-    op: str  #: the op kind, e.g. ``file.edit``
-    gene: str  #: the gene path the op targets, e.g. ``persona/SOUL.md``
-    files: tuple[str, ...] = ()  #: gene paths of the files it changed (members of a tree included)
+    op: OpKind  #: the op kind, e.g. ``file.edit``
+    gene: GenePath  #: the gene path the op targets, e.g. ``persona/SOUL.md``
+    files: tuple[GenePath, ...] = ()  #: gene paths of the files it changed (members of a tree included)
     description_only: bool = False  #: ``skill.update``: only SKILL.md's front-matter description changed
-    mode: str | None = None  #: ``memory.set_mode``: the mode set
+    mode: MemoryMode | None = None  #: ``memory.set_mode``: the mode set
 
 
 @dataclass(frozen=True)
@@ -117,7 +121,7 @@ class PatchOutcome:
     """
 
     spec: GenomeSpec  #: the resulting spec (contract §4), canonical order
-    writes: tuple[tuple[str, bytes], ...]  #: ``(digest, bytes)`` the patch produced, not yet in the store
+    writes: tuple[ProducedBlob, ...]  #: the bytes the patch produced, by digest, not yet in the store
     touched: tuple[OpTouch, ...]  #: one per op, in op order
     changed_files: dict[str, FileChange] = field(default_factory=dict)  #: gene path → before/after bytes
     replaced: frozenset[str] = frozenset()  #: gene paths an add replaced (a removed-then-added entry)
@@ -168,7 +172,10 @@ class _Applier:
         if isinstance(value, str):
             data = value.encode("utf-8")
             if len(data) > MAX_INLINE_CONTENT_BYTES:
-                raise _Reject("limit_exceeded", f"{location}: inline content is {len(data)} bytes, over {MAX_INLINE_CONTENT_BYTES}")
+                raise _Reject(
+                    "limit_exceeded",
+                    f"{location}: inline content is {len(data)} bytes, over {MAX_INLINE_CONTENT_BYTES}",
+                )
             self.writes[sha256_digest(data)] = data
             return data
         return self._read(value.digest)
@@ -180,7 +187,16 @@ class _Applier:
             raise _Reject("not_utf8", f"{what} is not UTF-8 text") from exc
 
     def _record_change(self, gene: str, before: bytes, after: bytes) -> None:
-        """Measured once, base → result: the first record's base side (and kind) is kept."""
+        """Note that this patch changed ``gene`` from ``before`` to ``after``, for the rewrite measure.
+
+        README §6.3 measures each file once, from its bytes in the base
+        revision to its bytes in the result, however many ops touched it.
+        So: a file this patch added is not in the base and is not measured
+        at all; the first change of a base file fixes the ``before`` side and
+        later changes only move the ``after`` side; a file already marked as
+        replaced across kinds (``text=False``, see ``_mark_add``) stays so,
+        whatever happens to it afterwards.
+        """
         if any(gene_paths.covers(added, gene) for added in self.added):
             return  # not in the base: README §6.3 measures only files that exist there
         earlier = self.changed.get(gene)
@@ -191,7 +207,24 @@ class _Applier:
         # a replacement across kinds stays flagged whatever happens to the file afterwards
 
     def _mark_add(self, gene: str, *, new_digest: str | None, new_is_tree: bool) -> None:
-        """README §6.3 replacement: an add after a remove of the same key is judged as a change."""
+        """Note that this patch added ``gene``; if it removed the same key earlier, that is a replacement.
+
+        README §6.3: removing an entry and adding one with the same key in
+        one patch is judged as a change of that entry, not as a fresh add,
+        so it is measured (or flagged) like an edit. ``new_digest`` is the
+        added entry's content digest, ``None`` when the entry has no bytes
+        of its own to compare (a Center or repo skill); ``new_is_tree`` says
+        whether it is a directory or skill tree rather than one file.
+        ``self.removed`` remembers the removed entry's digest and kind the
+        same way.
+
+        A replacement is measured as text, base bytes → new bytes, only when
+        both sides are single files with bytes. Otherwise (``FileChange(None,
+        None, text=False)``) there is nothing line-based to measure and the
+        contract flags it outright: either side has no digest, either side is
+        a tree, or the entry had already been turned into such a replacement
+        earlier in this patch.
+        """
         old = self.removed.pop(gene, None)
         if old is None:
             self.added.add(gene)
@@ -199,7 +232,13 @@ class _Applier:
         old_digest, old_is_tree = old
         self.replaced.add(gene)
         earlier = self.changed.get(gene)  # the entry was edited before it was removed: its base side wins
-        if old_digest is None or new_digest is None or old_is_tree or new_is_tree or (earlier is not None and not earlier.text):
+        if (
+            old_digest is None
+            or new_digest is None
+            or old_is_tree
+            or new_is_tree
+            or (earlier is not None and not earlier.text)
+        ):
             self.changed[gene] = FileChange(None, None, text=False)
             return
         before = earlier.before if earlier is not None else self._read(old_digest)
@@ -242,7 +281,9 @@ class _Applier:
             for key in ("content", "diff"):
                 value = getattr(edit, key, None)
                 if value is not None and len(value.encode("utf-8")) > MAX_INLINE_CONTENT_BYTES:
-                    raise _Reject("limit_exceeded", f"{location}: an edit's {key} is over {MAX_INLINE_CONTENT_BYTES} bytes")
+                    raise _Reject(
+                        "limit_exceeded", f"{location}: an edit's {key} is over {MAX_INLINE_CONTENT_BYTES} bytes"
+                    )
 
         if category == "persona" and len(segments) == 1:
             entry = self._persona(segments[0])
@@ -268,7 +309,9 @@ class _Applier:
             entry.digest = self._store(canonical_tree_bytes(list(members.items())))
             self._record_change(target, before, after)
             is_skill_md = member == "SKILL.md"
-            return OpTouch("file.edit", target, (target,), description_only=is_skill_md and description_only(before, after))
+            return OpTouch(
+                "file.edit", target, (target,), description_only=is_skill_md and description_only(before, after)
+            )
 
         if category == "resources" and segments:
             entry, member = self._resource_file(segments, location)
@@ -285,7 +328,9 @@ class _Applier:
             self._record_change(target, before, after)
             return OpTouch("file.edit", target, (target,))
 
-        raise _Reject("does_not_apply", f"{location}: {target!r} does not name a persona file, a skill file or a resource file")
+        raise _Reject(
+            "does_not_apply", f"{location}: {target!r} does not name a persona file, a skill file or a resource file"
+        )
 
     def _edit_text(self, before: bytes, edits: Sequence[TextEdit], location: str) -> bytes:
         text = self._text_of(before, f"{location}: the target")
@@ -365,7 +410,9 @@ class _Applier:
         diff_paths = [item.path for item in diffs]
         twice = sorted({p for p in diff_paths if diff_paths.count(p) > 1} | (set(diff_paths) & set(files)))
         if twice:
-            raise _Reject("does_not_apply", f"{location}: {twice[0]!r} appears more than once across file_diffs and files")
+            raise _Reject(
+                "does_not_apply", f"{location}: {twice[0]!r} appears more than once across file_diffs and files"
+            )
         changed: dict[str, tuple[bytes, bytes]] = {}
         for index, item in enumerate(diffs):
             path, where = item.path, f"{location}.file_diffs[{index}]"
@@ -424,7 +471,9 @@ class _Applier:
         is_dir = path.endswith("/")
         if is_dir:
             if isinstance(op.content, str):
-                raise _Reject("does_not_apply", f"{location}: a directory resource is added from an uploaded tree, by digest")
+                raise _Reject(
+                    "does_not_apply", f"{location}: a directory resource is added from an uploaded tree, by digest"
+                )
             data = self._read(op.content.digest)
             if decode_tree_bytes(data) is None:
                 raise _Reject("does_not_apply", f"{location}: {op.content.digest} is not an acm-tree-v1 blob")
@@ -531,7 +580,7 @@ class _Applier:
         self.spec.resources.sort(key=lambda entry: entry.path)
         return PatchOutcome(
             spec=self.spec,
-            writes=tuple(self.writes.items()),
+            writes=tuple(ProducedBlob(digest, data) for digest, data in self.writes.items()),
             touched=tuple(self.touched),
             changed_files=dict(self.changed),
             replaced=frozenset(self.replaced),

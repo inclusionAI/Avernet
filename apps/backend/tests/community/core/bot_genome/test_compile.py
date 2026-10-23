@@ -1,4 +1,5 @@
 """``compile_spec`` against the contract's ``compiled.yaml`` cases; the document digest is of the canonical JSON."""
+
 from __future__ import annotations
 
 import json
@@ -26,15 +27,29 @@ def test_every_compiled_yaml_is_the_compiled_revision(case: Path) -> None:
 
 
 def test_repo_and_center_skills_and_memory() -> None:
-    spec = next(GenomeSpec.from_json(r["spec"]) for r in load_revisions().values() if any(s["origin"] == "repo" for s in r["spec"]["skills"]))
+    spec = next(
+        GenomeSpec.from_json(r["spec"])
+        for r in load_revisions().values()
+        if any(s["origin"] == "repo" for s in r["spec"]["skills"])
+    )
     assert any(isinstance(s, RepoSkill) for s in spec.skills)
     document = compile_spec(spec, BlobDir(), revision_id="r").document
-    assert document["manifest"]["skills"] == [{"name": "weather", "source": {"protocol": "repo", "path": "team/weather"}}]
-    assert "memory" not in document["manifest"] and "cli_tools" not in document["manifest"] and "engine_config" not in document["manifest"]
+    assert document["manifest"]["skills"] == [
+        {"name": "weather", "source": {"protocol": "repo", "path": "team/weather"}}
+    ]
+    assert (
+        "memory" not in document["manifest"]
+        and "cli_tools" not in document["manifest"]
+        and "engine_config" not in document["manifest"]
+    )
     assert document["script"] is None
 
 
 def test_document_digest_does_not_depend_on_yaml_formatting() -> None:
-    a = yaml.safe_load("schema_version: 1\nmanifest: {identity: [], skills: [], resources: [], mcp: []}\nscript: null\n")
-    b = yaml.safe_load("script: ~\nmanifest:\n  mcp: []\n  resources: []\n  skills: []\n  identity: []\nschema_version: 1\n")
+    a = yaml.safe_load(
+        "schema_version: 1\nmanifest: {identity: [], skills: [], resources: [], mcp: []}\nscript: null\n"
+    )
+    b = yaml.safe_load(
+        "script: ~\nmanifest:\n  mcp: []\n  resources: []\n  skills: []\n  identity: []\nschema_version: 1\n"
+    )
     assert document_digest(a) == document_digest(b)

@@ -1,10 +1,11 @@
 """Values the Genome Registry and promotion pass around.
 
-``spec`` and ``policy`` stay the contract's JSON (validated by the schema in
-``contract.py``); the dataclasses here carry what the registry adds around
-them. Everything is frozen: a revision never changes, and a ref move returns
-a new ``GenomeRef``.
+``spec`` and ``policy`` are the contract's typed records (``spec_models.py``);
+the dataclasses here carry what the registry adds around them. Everything
+is frozen: a revision never changes, and a ref move returns a new
+``GenomeRef``.
 """
+
 from __future__ import annotations
 
 import re
@@ -13,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from abc import abstractmethod
 from enum import StrEnum
-from typing import Any, Protocol
+from typing import Any, NamedTuple, Protocol
 
 from agentclaw.community.core.bot_genome.spec_models import GenomePolicy, GenomeSpec
 
@@ -101,8 +102,11 @@ class Provenance:
     actor: str
     run_id: str | None = None
     step: str | None = None
-    #: How the audit columns name a user actor when that differs from the principal: an admitted
-    #: application acting for a user is ``app:<id>:on-behalf-of:<user>``, never just the user.
+    #: What the audit columns (``created_actor``, ``moved_actor``, a promotion's ``actor_id``) record
+    #: when that is not ``actor`` itself. Set only for an admitted application acting for a user:
+    #: ``actor`` is the user (what the contract's ``created_by`` shows), ``recorded_as`` is
+    #: ``app:<application id>:on-behalf-of:<user>``, so the audit trail keeps the application.
+    #: ``None`` for a user acting directly and for a strategy run: the audit then records ``actor``.
     recorded_as: str | None = None
     #: ``strategy_run`` only: the user the run acts for, which the MCP permission check is made against.
     principal: str | None = None
@@ -210,15 +214,31 @@ class GenomeRevision:
         }
 
 
+class ProducedBlob(NamedTuple):
+    """Bytes an operation produced that are not in the content store yet, named by their digest.
+
+    ``digest`` is ``sha256:<64 hex>`` of ``data``, the address the spec names
+    them by; the registry files every blob under it before the revision is
+    recorded. Example: capturing a bot whose ``SOUL.md`` is ``"# Soul\\n"``
+    yields ``ProducedBlob("sha256:3f9a…", b"# Soul\\n")``.
+    """
+
+    digest: str
+    data: bytes
+
+
 @dataclass(frozen=True)
 class RecordedRevision:
     """What recording returns: the revision, whether it was new, and the assessment of a patch."""
 
-    revision: GenomeRevision
-    created: bool
+    revision: GenomeRevision  #: the recorded revision, as ``get_revision`` would return it
+    created: bool  #: False when a revision with this id already existed, which is then returned unchanged
+    #: a patch's tier (``T0``–``T3``, README §6.3); ``None`` for a capture / policy change
     risk_tier: str | None = None
-    flags: tuple[str, ...] = ()
-    ref: str | None = None
+    flags: tuple[
+        str, ...
+    ] = ()  #: gene paths of files the patch rewrote (over the rewrite threshold), e.g. ``persona/SOUL.md``
+    ref: str | None = None  #: the ref recording created, ``candidate/<run>/<n>`` for a candidate; ``None`` otherwise
 
 
 @dataclass(frozen=True)
@@ -238,38 +258,54 @@ class GenomeRef:
 
 @dataclass(frozen=True)
 class RefUpdate:
-    """A compare-and-swap move: ``expected_revision`` is where the caller believes the ref points now.
+    """A request to move one ref by compare-and-swap (README §8).
 
-    ``None`` means the ref must not exist yet.
+    The move succeeds only if ``name`` points at ``expected_revision`` at
+    the moment it is applied; otherwise ``RefConflict`` reports where it
+    points now and nothing changes. Example: ``RefUpdate("draft",
+    "sha256:7c1e…", "sha256:a90b…")`` moves ``draft`` from ``a90b`` to
+    ``7c1e`` and fails if someone moved it first.
     """
 
-    name: str
-    revision: str
-    expected_revision: str | None
-    reason: str | None = None
+    name: str  #: the ref to move: ``active``, ``previous``, ``draft`` or ``candidate/<run>/<n>``
+    revision: str  #: the revision id the ref points at after the move
+    expected_revision: str | None  #: the revision id it must point at now; ``None`` means the ref must not exist yet
+    reason: str | None = None  #: the caller's reason, kept in the ref event log
 
 
 @dataclass(frozen=True)
 class GeneChange:
-    gene: str
-    kind: str  # added | removed | modified
+    """One gene that differs between two revisions (README §9.3)."""
+
+    gene: str  #: the gene path, e.g. ``persona/SOUL.md`` or ``skills/refund-policy/SKILL.md``
+    kind: str  #: ``added`` | ``removed`` | ``modified``
+    #: A unified diff of the text, present only for a ``modified`` text file (or JSON value such as an MCP
+    #: entry) whose diff fits ``MAX_DIFF_BYTES``; ``None`` for added / removed genes, binary files and trees.
     diff: str | None = None
 
 
 @dataclass(frozen=True)
 class GenomeDiff:
-    revision: str
-    against: str
-    changes: tuple[GeneChange, ...]
+    """What ``revision`` changes against ``against``, gene by gene, with the risk of applying that change."""
+
+    revision: str  #: the newer revision's id
+    against: str  #: the older revision's id
+    changes: tuple[GeneChange, ...]  #: in gene-path order
+    #: The tier (``T0``–``T3``) a patch making exactly these changes would get under ``revision``'s policy,
+    #: rewrite raise included.
     risk_tier: str
+    #: Gene paths of text files whose change is a rewrite (more than the threshold of their lines changed,
+    #: README §6.3) and of entries replaced by another kind; each raises the tier one step.
     rewrite_flags: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class ContentReceipt:
-    digest: str
-    size: int
-    created: bool
+    """What an upload answers."""
+
+    digest: str  #: ``sha256:<64 hex>`` of the uploaded bytes, the name a patch then uses
+    size: int  #: the byte count
+    created: bool  #: False when this bot could already reach these bytes
 
 
 @dataclass(frozen=True)
@@ -292,22 +328,28 @@ class ApplyResult:
 
 @dataclass(frozen=True)
 class Promotion:
-    """One promotion as recorded; ``document`` is carried only when the caller asked for it."""
+    """One promotion as recorded: the move of ``ref`` from ``from_revision`` to ``revision`` and its delivery.
 
-    id: str
-    ref: str
-    revision: str
-    from_revision: str | None
-    document_digest: str
-    going_back: bool
-    actor: Provenance
-    reason: str
-    status: str  # applying | applied | apply_failed
-    apply_kind: str
-    apply_reference: str | None
-    apply_detail: str
-    created_at: datetime
-    document: dict[str, Any] | None = None
+    Promoting moves ``active`` to the target (and ``previous`` to the old
+    ``active``), records this row with the compiled document, then hands
+    the document to the delivery seam. ``document`` is carried only when the
+    caller asked for it (a single read, not a listing).
+    """
+
+    id: str  #: the promotion's id
+    ref: str  #: the ref it moved; ``active`` for every promotion today (canary refs are RSI-16)
+    revision: str  #: the revision id the ref points at after the promotion
+    from_revision: str | None  #: where the ref pointed before; ``None`` for the bot's first promotion
+    document_digest: str  #: ``sha256:<64 hex>`` of the compiled document's canonical JSON
+    going_back: bool  #: True when the target had been promoted before and was not the current ``active``
+    actor: Provenance  #: who promoted
+    reason: str  #: why, as the actor said
+    status: str  #: ``applying`` until the seam answers, then ``applied`` or ``apply_failed``
+    apply_kind: str  #: which delivery seam took it: ``pending`` (none yet, RSI-03) or ``direct`` (RSI-04)
+    apply_reference: str | None  #: the seam's handle for the delivery (an apply id); ``None`` when none started
+    apply_detail: str  #: the seam's one-line answer, e.g. ``started``; a failure names the error type only
+    created_at: datetime  #: when the refs moved
+    document: dict[str, Any] | None = None  #: the compiled document (Manifest v1 layout), when asked for
 
 
 @dataclass(frozen=True)

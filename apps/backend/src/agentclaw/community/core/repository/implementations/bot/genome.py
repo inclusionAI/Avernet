@@ -5,6 +5,7 @@ The injected :class:`DatabasePlugin`'s ``orm_session()`` yields a SQLAlchemy
 exit, rollback on an exception), which is what the compare-and-swap moves
 and the ``active``/``previous`` pair rely on.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -70,7 +71,9 @@ class GenomeRevisionRepository(GenomeRevisionRepositoryProtocol):
             try:
                 with self._db.orm_session() as session:
                     seq = self._next_seq(session, **axes)
-                    orm = GenomeRevisionModel(**row.model_dump(exclude={"id", "seq", "gmt_create", "gmt_modified"}), seq=seq)
+                    orm = GenomeRevisionModel(
+                        **row.model_dump(exclude={"id", "seq", "gmt_create", "gmt_modified"}), seq=seq
+                    )
                     session.add(orm)
                     session.flush()
                     session.refresh(orm)
@@ -94,8 +97,15 @@ class GenomeRevisionRepository(GenomeRevisionRepositoryProtocol):
                 with _transaction(self._db) as session:
                     orm = _revision_row(session, **axes, revision_id=row.revision_id)
                     created = orm is None
-                    if orm is not None and candidate is not None and patch is not None and orm.patch_digest != patch.digest:
-                        raise CandidateCollision(orm.revision_id, orm.seq, orm.patch_digest)  # rolls the transaction back
+                    if (
+                        orm is not None
+                        and candidate is not None
+                        and patch is not None
+                        and orm.patch_digest != patch.digest
+                    ):
+                        raise CandidateCollision(
+                            orm.revision_id, orm.seq, orm.patch_digest
+                        )  # rolls the transaction back
                     if orm is None:
                         values = row.model_dump(exclude={"id", "seq", "gmt_create", "gmt_modified"})
                         if parent_from_latest:
@@ -108,18 +118,26 @@ class GenomeRevisionRepository(GenomeRevisionRepositoryProtocol):
                     if patch is not None and _patch_row(session, **axes, digest=patch.digest) is None:
                         session.add(GenomePatchModel(**patch.model_dump(exclude={"id"})))
                         session.flush()
-                    ref = _candidate_ref(session, **axes, revision_id=row.revision_id, candidate=candidate) if candidate is not None else None
+                    ref = (
+                        _candidate_ref(session, **axes, revision_id=row.revision_id, candidate=candidate)
+                        if candidate is not None
+                        else None
+                    )
                     session.refresh(orm)
                     return orm.to_record(), created, ref.to_record() if ref is not None else None
             except IntegrityError as exc:
-                last = exc  # a concurrent record (uk_bot_revision), a seq race, or a candidate number taken: retry whole
+                last = (
+                    exc  # a concurrent record (uk_bot_revision), a seq race, or a candidate number taken: retry whole
+                )
         raise RuntimeError(f"could not record revision {row.revision_id} after {SEQ_RETRIES} attempts") from last
 
     @staticmethod
     def _next_seq(session, *, env: str, entity_id: str, bot_id: str) -> int:
-        current = session.query(func.max(GenomeRevisionModel.seq)).filter(
-            *_bot(GenomeRevisionModel, env=env, entity_id=entity_id, bot_id=bot_id)
-        ).scalar()
+        current = (
+            session.query(func.max(GenomeRevisionModel.seq))
+            .filter(*_bot(GenomeRevisionModel, env=env, entity_id=entity_id, bot_id=bot_id))
+            .scalar()
+        )
         return (current or 0) + 1
 
     def get(self, *, env: str, entity_id: str, bot_id: str, revision_id: str) -> Optional[GenomeRevisionRow]:
@@ -210,7 +228,9 @@ class GenomeRefRepository(GenomeRefRepositoryProtocol):
 
     def list(self, *, env: str, entity_id: str, bot_id: str, name_prefix: Optional[str] = None) -> list[GenomeRefRow]:
         with self._db.orm_session() as session:
-            query = session.query(GenomeRefModel).filter(*_bot(GenomeRefModel, env=env, entity_id=entity_id, bot_id=bot_id))
+            query = session.query(GenomeRefModel).filter(
+                *_bot(GenomeRefModel, env=env, entity_id=entity_id, bot_id=bot_id)
+            )
             if name_prefix is not None:
                 query = query.filter(GenomeRefModel.name.startswith(name_prefix, autoescape=True))
             return [row.to_record() for row in query.order_by(GenomeRefModel.name).all()]
@@ -234,8 +254,14 @@ class GenomeRefRepository(GenomeRefRepositoryProtocol):
         try:
             with _transaction(self._db) as session:
                 row = self._cas(
-                    session, env=env, entity_id=entity_id, bot_id=bot_id, name=name,
-                    revision_id=revision_id, expected=expected_revision_id, **stamp,
+                    session,
+                    env=env,
+                    entity_id=entity_id,
+                    bot_id=bot_id,
+                    name=name,
+                    revision_id=revision_id,
+                    expected=expected_revision_id,
+                    **stamp,
                 )
                 session.flush()
                 session.refresh(row)
@@ -261,7 +287,13 @@ class GenomeRefRepository(GenomeRefRepositoryProtocol):
         try:
             with _transaction(self._db) as session:
                 active, previous = _move_pair(
-                    session, env=env, entity_id=entity_id, bot_id=bot_id, revision_id=revision_id, expected_active=expected_active, **stamp
+                    session,
+                    env=env,
+                    entity_id=entity_id,
+                    bot_id=bot_id,
+                    revision_id=revision_id,
+                    expected_active=expected_active,
+                    **stamp,
                 )
                 session.flush()
                 session.refresh(active)
@@ -328,8 +360,12 @@ def _patch_row(session, *, env: str, entity_id: str, bot_id: str, digest: str) -
     )
 
 
-def _candidate_ref(session, *, env: str, entity_id: str, bot_id: str, revision_id: str, candidate: CandidateRefRequest) -> GenomeRefModel:
-    """``candidate/<run>/<n>`` for this revision inside the caller's transaction: the one already pointing at it, or the next number."""
+def _candidate_ref(
+    session, *, env: str, entity_id: str, bot_id: str, revision_id: str, candidate: CandidateRefRequest
+) -> GenomeRefModel:
+    """``candidate/<run>/<n>`` for this revision inside the caller's transaction: the one already pointing at it, or the
+    next number.
+    """
     axes = dict(env=env, entity_id=entity_id, bot_id=bot_id)
     prefix = f"candidate/{candidate.run_id}/"
     named = (
@@ -342,8 +378,16 @@ def _candidate_ref(session, *, env: str, entity_id: str, bot_id: str, revision_i
         if existing.revision_id == revision_id:
             return existing
     return _cas_move(
-        session, **axes, name=f"{prefix}{len(named) + 1}", revision_id=revision_id, expected=None,
-        moved_kind=candidate.moved_kind, moved_actor=candidate.moved_actor, run_id=candidate.run_id, reason=None, moved_at=candidate.moved_at,
+        session,
+        **axes,
+        name=f"{prefix}{len(named) + 1}",
+        revision_id=revision_id,
+        expected=None,
+        moved_kind=candidate.moved_kind,
+        moved_actor=candidate.moved_actor,
+        run_id=candidate.run_id,
+        reason=None,
+        moved_at=candidate.moved_at,
     )
 
 
@@ -357,9 +401,19 @@ def _ref_row(session, *, env: str, entity_id: str, bot_id: str, name: str) -> Op
 
 
 def _cas_move(
-    session, *, env: str, entity_id: str, bot_id: str, name: str, revision_id: str,
-    expected: Optional[str], moved_kind: str, moved_actor: str, run_id: Optional[str],
-    reason: Optional[str], moved_at: datetime,
+    session,
+    *,
+    env: str,
+    entity_id: str,
+    bot_id: str,
+    name: str,
+    revision_id: str,
+    expected: Optional[str],
+    moved_kind: str,
+    moved_actor: str,
+    run_id: Optional[str],
+    reason: Optional[str],
+    moved_at: datetime,
 ) -> GenomeRefModel:
     """One conditional move inside the caller's transaction; raises ``_Conflict`` when the CAS matches nothing."""
     axes = dict(env=env, entity_id=entity_id, bot_id=bot_id)
@@ -369,6 +423,8 @@ def _cas_move(
         session.add(row)
         session.flush()  # uk_bot_ref decides who created it
     else:
+        # The CAS itself: the ref row (name → revision_id pointer) is repointed from `expected` to
+        # `revision_id` only if it still points at `expected`; a revision row is never changed.
         updated = (
             session.query(GenomeRefModel)
             .filter(*_bot(GenomeRefModel, **axes))
@@ -386,7 +442,9 @@ def _cas_move(
     return row
 
 
-def _move_pair(session, *, env: str, entity_id: str, bot_id: str, revision_id: str, expected_active: Optional[str], **stamp) -> tuple[GenomeRefModel, Optional[GenomeRefModel]]:
+def _move_pair(
+    session, *, env: str, entity_id: str, bot_id: str, revision_id: str, expected_active: Optional[str], **stamp
+) -> tuple[GenomeRefModel, Optional[GenomeRefModel]]:
     """``active`` → ``revision_id`` by CAS and ``previous`` → the old ``active``, inside the caller's transaction.
 
     Re-promoting the revision ``active`` already points at (``revision_id == expected_active``) moves
@@ -398,8 +456,12 @@ def _move_pair(session, *, env: str, entity_id: str, bot_id: str, revision_id: s
     if expected_active is not None and expected_active != revision_id:
         current = _ref_row(session, **axes, name="previous")
         previous = _cas_move(
-            session, **axes, name="previous", revision_id=expected_active,
-            expected=current.revision_id if current is not None else None, **stamp,
+            session,
+            **axes,
+            name="previous",
+            revision_id=expected_active,
+            expected=current.revision_id if current is not None else None,
+            **stamp,
         )
     return active, previous
 
@@ -466,7 +528,9 @@ class GenomePromotionRepository(GenomePromotionRepositoryProtocol):
         leaves no ref moved, no status changed and no row. ``None`` on conflict.
         """
         axes = dict(env=row.env, entity_id=row.entity_id, bot_id=row.bot_id)
-        stamp = dict(moved_kind=row.actor_kind, moved_actor=row.actor_id, run_id=None, reason=row.reason, moved_at=moved_at)
+        stamp = dict(
+            moved_kind=row.actor_kind, moved_actor=row.actor_id, run_id=None, reason=row.reason, moved_at=moved_at
+        )
         try:
             with _transaction(self._db) as session:
                 _move_pair(session, **axes, revision_id=row.revision_id, expected_active=expected_active, **stamp)
@@ -488,7 +552,9 @@ class GenomePromotionRepository(GenomePromotionRepositoryProtocol):
         except (_Conflict, IntegrityError):
             return None
 
-    def _one(self, session, *, env: str, entity_id: str, bot_id: str, promotion_id: str) -> Optional[GenomePromotionModel]:
+    def _one(
+        self, session, *, env: str, entity_id: str, bot_id: str, promotion_id: str
+    ) -> Optional[GenomePromotionModel]:
         return (
             session.query(GenomePromotionModel)
             .filter(*_bot(GenomePromotionModel, env=env, entity_id=entity_id, bot_id=bot_id))

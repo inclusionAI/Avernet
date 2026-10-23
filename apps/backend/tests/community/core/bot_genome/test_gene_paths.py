@@ -1,4 +1,5 @@
 """Gene path grammar: builders, covering, overlap (README §2, §6.1)."""
+
 from __future__ import annotations
 
 import pytest
@@ -75,7 +76,14 @@ def test_overlaps_is_symmetric() -> None:
 @pytest.mark.parametrize(
     ("op", "path"),
     [
-        ({"op": "file.edit", "target": "persona/SOUL.md", "edits": [{"kind": "insert_after", "anchor": "a", "content": "b"}]}, "persona/SOUL.md"),
+        (
+            {
+                "op": "file.edit",
+                "target": "persona/SOUL.md",
+                "edits": [{"kind": "insert_after", "anchor": "a", "content": "b"}],
+            },
+            "persona/SOUL.md",
+        ),
         ({"op": "persona.add", "type": "OKR.md", "content": ""}, "persona/OKR.md"),
         ({"op": "persona.remove", "type": "OKR.md"}, "persona/OKR.md"),
         ({"op": "skill.add", "name": "invoice-lookup", "files": {"SKILL.md": "x"}}, "skills/invoice-lookup"),

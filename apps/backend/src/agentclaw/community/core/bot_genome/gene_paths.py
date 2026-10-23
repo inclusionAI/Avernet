@@ -7,6 +7,7 @@ percent-encoded in uppercase hex, and ``.`` / ``..`` are written ``%2E`` /
 every patch op's target, and diff output, so matching is plain string
 comparison on whole segments.
 """
+
 from __future__ import annotations
 
 from agentclaw.community.core.bot_genome.canonical import encode_segment, is_canonical_gene_path

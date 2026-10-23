@@ -5,6 +5,7 @@ status in ``adapters/http/openapi_v1/errors_genome.py``. ``Reason`` is the
 one shape every refusal lists, so a ``422`` body reads the same whether the
 schema, the policy or an apply-time predicate refused.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

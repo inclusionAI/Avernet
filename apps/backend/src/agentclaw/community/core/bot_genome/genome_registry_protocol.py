@@ -2,9 +2,10 @@
 
 Every call names the bot (:class:`BotRef`); a revision id, sequence number
 or ref name from another bot resolves to :class:`RevisionNotFound`.
-``capture`` and ``record_patch`` are ``async`` because the state reader and
+``capture`` and ``commit_patch`` are ``async`` because the state reader and
 the delivery-side checks are.
 """
+
 from __future__ import annotations
 
 from abc import abstractmethod
@@ -62,7 +63,7 @@ class GenomeRegistryProtocol(Protocol):
         ...
 
     @abstractmethod
-    async def record_patch(
+    async def commit_patch(
         self,
         bot: BotRef,
         patch: GenomePatch,
@@ -71,14 +72,19 @@ class GenomeRegistryProtocol(Protocol):
         status: RevisionStatus,
         run: RunScope | None = None,
     ) -> RecordedRevision:
-        """Apply ``patch`` to its own ``base`` and record the result (README §6.4).
+        """Apply ``patch`` to its base revision and record the result as a new revision (README §6.4).
 
-        ``patch["base"]`` is the id of this bot's revision the ops apply to;
-        it becomes the new revision's parent. There is no separate base
-        argument. ``status`` is ``DRAFT`` (an owner) or ``CANDIDATE`` (a run, which
-        also names ``candidate/<run>/<n>``). Raises ``RevisionNotFound``
-        for a base that is not this bot's, ``PatchRejected`` with every
-        reason, ``LimitExceeded``, ``ContentNotReachable``.
+        ``patch.base`` is the id of this bot's revision the ops apply to; it
+        becomes the new revision's parent. There is no separate base
+        argument. The ops must apply exactly, the result must pass the
+        policy, the limits and the apply-time checks, and the patch is
+        stored by its digest with the revision. ``status`` is ``DRAFT`` (an
+        owner's patch) or ``CANDIDATE`` (a run's, which also names
+        ``candidate/<run>/<n>`` and needs ``run``). Idempotent: the same
+        patch returns the same revision with ``created=False``. Raises
+        ``RevisionNotFound`` for a base that is not this bot's,
+        ``PatchRejected`` with every reason, ``LimitExceeded``,
+        ``ContentNotReachable``.
         """
         ...
 

@@ -10,6 +10,7 @@ text file, and the policy's overrides lift by overlap. Changes no patch can
 make (``tools``, ``script``, ``engine_config``) are ``T3``: they are
 human-only by construction.
 """
+
 from __future__ import annotations
 
 import difflib
@@ -158,7 +159,9 @@ class _Differ:
                     only_description = touched == [skill_md] and description_only(
                         self.files[skill_md].before or b"", self.files[skill_md].after or b""
                     )
-                    self.touched.append(OpTouch("skill.update", gene, tuple(changed), description_only=only_description))
+                    self.touched.append(
+                        OpTouch("skill.update", gene, tuple(changed), description_only=only_description)
+                    )
                 else:
                     self.files[gene] = FileChange(None, None, text=False)  # a change of kind: a replacement
                     self.touched.append(OpTouch("skill.update", gene, (gene,)))
@@ -237,7 +240,9 @@ class _Differ:
             elif code not in new:
                 self.changes.append(GeneChange(gene, "removed"))
             elif old[code] != new[code]:
-                self.changes.append(GeneChange(gene, "modified", self._json_diff(old[code].to_json(), new[code].to_json())))
+                self.changes.append(
+                    GeneChange(gene, "modified", self._json_diff(old[code].to_json(), new[code].to_json()))
+                )
             else:
                 continue
             self.touched.append(OpTouch("human.only", gene))
@@ -249,12 +254,18 @@ class _Differ:
         if old is None or new is None:
             self.changes.append(GeneChange("script", "added" if old is None else "removed"))
         else:
-            self.changes.append(GeneChange("script", "modified", self._text_diff(self.content.read(old.digest), self.content.read(new.digest))))
+            self.changes.append(
+                GeneChange(
+                    "script", "modified", self._text_diff(self.content.read(old.digest), self.content.read(new.digest))
+                )
+            )
         self.touched.append(OpTouch("human.only", "script"))
 
     def engine_config(self) -> None:
         if self.a.engine_config != self.b.engine_config:
-            self.changes.append(GeneChange("engine_config", "modified", self._json_diff(self.a.engine_config, self.b.engine_config)))
+            self.changes.append(
+                GeneChange("engine_config", "modified", self._json_diff(self.a.engine_config, self.b.engine_config))
+            )
             self.touched.append(OpTouch("human.only", "engine_config"))
 
 
@@ -269,7 +280,15 @@ def diff_specs(
 ) -> GenomeDiff:
     """``b`` (the revision) against ``a``; ``policy`` is the revision's, for its risk overrides."""
     differ = _Differ(a, b, content)
-    for category in (differ.persona, differ.skills, differ.resources, differ.memory, differ.tools, differ.script, differ.engine_config):
+    for category in (
+        differ.persona,
+        differ.skills,
+        differ.resources,
+        differ.memory,
+        differ.tools,
+        differ.script,
+        differ.engine_config,
+    ):
         category()
     tiers = contract.risk_tiers()
     rewritten = rewritten_files(differ.files, tiers["rewrite_threshold"])

@@ -1,4 +1,5 @@
 """The ``file.edit`` kinds (README §6.2) and the ``description_only`` condition (§6.3)."""
+
 from __future__ import annotations
 
 import pytest
@@ -122,7 +123,9 @@ def test_diff_is_strict(diff: str, problem: str) -> None:
 
 
 def test_apply_edits_in_order() -> None:
-    edits = TypeAdapter(list[TextEdit]).validate_python([{"kind": "insert_after", "anchor": "a", "content": "x"}, {"kind": "diff", "diff": "@@ -3 +3 @@\n-b\n+B\n"}])
+    edits = TypeAdapter(list[TextEdit]).validate_python(
+        [{"kind": "insert_after", "anchor": "a", "content": "x"}, {"kind": "diff", "diff": "@@ -3 +3 @@\n-b\n+B\n"}]
+    )
     assert apply_edits("a\nb\n", edits) == "a\nx\nB\n"
     with pytest.raises(ValidationError):  # the edit kinds are the model's closed set
         TypeAdapter(list[TextEdit]).validate_python([{"kind": "regex"}])

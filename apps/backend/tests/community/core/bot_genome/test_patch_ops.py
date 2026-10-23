@@ -1,4 +1,5 @@
 """Patch application against the contract's example patches and bases (README §6.1, §6.2, §6.4)."""
+
 from __future__ import annotations
 
 import json
@@ -109,7 +110,9 @@ def test_memory_ops_edit_the_stored_item_list() -> None:
 # -- refusals -------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", ["delete-skill-md", "unknown-op", "op-on-mcp", "diff-with-file-headers", "empty-rationale"])
+@pytest.mark.parametrize(
+    "name", ["delete-skill-md", "unknown-op", "op-on-mcp", "diff-with-file-headers", "empty-rationale"]
+)
 def test_invalid_patch_examples_fail_the_shape_check_and_the_model(name: str) -> None:
     case = json.loads((EXAMPLES / "invalid" / f"{name}.json").read_text(encoding="utf-8"))
     assert case["check"] == "schema"
@@ -122,23 +125,123 @@ def test_invalid_patch_examples_fail_the_shape_check_and_the_model(name: str) ->
 @pytest.mark.parametrize(
     ("ops", "message"),
     [
-        ([{"op": "file.edit", "target": "persona/OKR.md", "edits": [{"kind": "insert_after", "anchor": "x", "content": "y"}]}], "no persona file"),
-        ([{"op": "file.edit", "target": "persona/SOUL.md", "edits": [{"kind": "insert_after", "anchor": "## Nope", "content": "y"}]}], "occurs 0 times"),
-        ([{"op": "file.edit", "target": "persona/SOUL.md", "edits": [{"kind": "diff", "diff": "@@ -1 +1 @@\n-nope\n+x\n"}]}], "the diff expects"),
-        ([{"op": "file.edit", "target": "skills/refund-policy/SKILL.md", "edits": [{"kind": "insert_after", "anchor": "x", "content": "y"}]}], "no local skill"),
-        ([{"op": "file.edit", "target": "skills/quality-check/nope.md", "edits": [{"kind": "insert_after", "anchor": "x", "content": "y"}]}], "has no file"),
-        ([{"op": "file.edit", "target": "resources/data/kb/nope.md", "edits": [{"kind": "insert_after", "anchor": "x", "content": "y"}]}], "has no file"),
-        ([{"op": "file.edit", "target": "resources/data/nope.md", "edits": [{"kind": "insert_after", "anchor": "x", "content": "y"}]}], "no resource file"),
+        (
+            [
+                {
+                    "op": "file.edit",
+                    "target": "persona/OKR.md",
+                    "edits": [{"kind": "insert_after", "anchor": "x", "content": "y"}],
+                }
+            ],
+            "no persona file",
+        ),
+        (
+            [
+                {
+                    "op": "file.edit",
+                    "target": "persona/SOUL.md",
+                    "edits": [{"kind": "insert_after", "anchor": "## Nope", "content": "y"}],
+                }
+            ],
+            "occurs 0 times",
+        ),
+        (
+            [
+                {
+                    "op": "file.edit",
+                    "target": "persona/SOUL.md",
+                    "edits": [{"kind": "diff", "diff": "@@ -1 +1 @@\n-nope\n+x\n"}],
+                }
+            ],
+            "the diff expects",
+        ),
+        (
+            [
+                {
+                    "op": "file.edit",
+                    "target": "skills/refund-policy/SKILL.md",
+                    "edits": [{"kind": "insert_after", "anchor": "x", "content": "y"}],
+                }
+            ],
+            "no local skill",
+        ),
+        (
+            [
+                {
+                    "op": "file.edit",
+                    "target": "skills/quality-check/nope.md",
+                    "edits": [{"kind": "insert_after", "anchor": "x", "content": "y"}],
+                }
+            ],
+            "has no file",
+        ),
+        (
+            [
+                {
+                    "op": "file.edit",
+                    "target": "resources/data/kb/nope.md",
+                    "edits": [{"kind": "insert_after", "anchor": "x", "content": "y"}],
+                }
+            ],
+            "has no file",
+        ),
+        (
+            [
+                {
+                    "op": "file.edit",
+                    "target": "resources/data/nope.md",
+                    "edits": [{"kind": "insert_after", "anchor": "x", "content": "y"}],
+                }
+            ],
+            "no resource file",
+        ),
         ([{"op": "persona.add", "type": "SOUL.md", "content": "x"}], "already has persona file"),
         ([{"op": "persona.remove", "type": "OKR.md"}], "no persona file"),
         ([{"op": "skill.add", "name": "quality-check", "files": {"SKILL.md": "x"}}], "already has skill"),
         ([{"op": "skill.update", "name": "refund-policy", "files": {"a.md": "x"}}], "no local skill"),
         ([{"op": "skill.update", "name": "quality-check", "files": {"nope.md": None}}], "to delete"),
-        ([{"op": "skill.update", "name": "quality-check", "file_diffs": [{"path": "nope.md", "diff": "@@ -1 +1 @@\n-a\n+b\n"}]}], "has no file"),
-        ([{"op": "skill.update", "name": "quality-check", "file_diffs": [{"path": "SKILL.md", "diff": "@@ -1 +1 @@\n-a\n+b\n"}], "files": {"SKILL.md": "x"}}], "more than once"),
+        (
+            [
+                {
+                    "op": "skill.update",
+                    "name": "quality-check",
+                    "file_diffs": [{"path": "nope.md", "diff": "@@ -1 +1 @@\n-a\n+b\n"}],
+                }
+            ],
+            "has no file",
+        ),
+        (
+            [
+                {
+                    "op": "skill.update",
+                    "name": "quality-check",
+                    "file_diffs": [{"path": "SKILL.md", "diff": "@@ -1 +1 @@\n-a\n+b\n"}],
+                    "files": {"SKILL.md": "x"},
+                }
+            ],
+            "more than once",
+        ),
         ([{"op": "skill.remove", "name": "nope"}], "no skill"),
-        ([{"op": "resource.add", "path": "data/faq.csv/", "content": {"digest": "sha256:30b884a411447c5dae5db89b6aab4c59114b454477be951e82d5e123622344ff"}}], "already has resource"),
-        ([{"op": "resource.add", "path": "data/new/", "content": {"digest": "sha256:a5d2be13ca810cd6cb138660cf6809166c1f9e4ca2f422dc73ff2ed8c26358b5"}}], "not an acm-tree-v1 blob"),
+        (
+            [
+                {
+                    "op": "resource.add",
+                    "path": "data/faq.csv/",
+                    "content": {"digest": "sha256:30b884a411447c5dae5db89b6aab4c59114b454477be951e82d5e123622344ff"},
+                }
+            ],
+            "already has resource",
+        ),
+        (
+            [
+                {
+                    "op": "resource.add",
+                    "path": "data/new/",
+                    "content": {"digest": "sha256:a5d2be13ca810cd6cb138660cf6809166c1f9e4ca2f422dc73ff2ed8c26358b5"},
+                }
+            ],
+            "not an acm-tree-v1 blob",
+        ),
         ([{"op": "resource.remove", "path": "data/kb"}], "no resource"),
     ],
 )
@@ -151,7 +254,15 @@ def test_ops_that_do_not_apply_exactly(ops: list[dict[str, Any]], message: str) 
 
 def test_a_target_that_is_not_a_file_gene_is_refused_by_the_model() -> None:
     with pytest.raises(ValidationError):
-        parse_ops([{"op": "file.edit", "target": "script", "edits": [{"kind": "insert_after", "anchor": "x", "content": "y"}]}])
+        parse_ops(
+            [
+                {
+                    "op": "file.edit",
+                    "target": "script",
+                    "edits": [{"kind": "insert_after", "anchor": "x", "content": "y"}],
+                }
+            ]
+        )
 
 
 def test_skill_update_refuses_to_delete_skill_md_at_the_model() -> None:
@@ -186,7 +297,17 @@ def test_a_binary_target_is_not_utf8() -> None:
     blobs = BlobDir()
     spec = spec_of(SUPPORT_BOT)
     spec.resources.append(ResourceEntry(path="logo.png", digest=blobs.put(b"\x89PNG\xff\xfe")))
-    error = _rejected(spec, [{"op": "file.edit", "target": "resources/logo.png", "edits": [{"kind": "insert_after", "anchor": "x", "content": "y"}]}], blobs)
+    error = _rejected(
+        spec,
+        [
+            {
+                "op": "file.edit",
+                "target": "resources/logo.png",
+                "edits": [{"kind": "insert_after", "anchor": "x", "content": "y"}],
+            }
+        ],
+        blobs,
+    )
     assert error.reasons[0].code == "not_utf8"
 
 
@@ -194,7 +315,16 @@ def test_inline_content_over_the_byte_limit() -> None:
     big = "é" * 40000  # under the schema's 65536 code points, over 64 KiB of UTF-8
     error = _rejected(spec_of(SUPPORT_BOT), [{"op": "persona.add", "type": "OKR.md", "content": big}])
     assert error.reasons[0].code == "limit_exceeded"
-    error = _rejected(spec_of(SUPPORT_BOT), [{"op": "file.edit", "target": "persona/SOUL.md", "edits": [{"kind": "insert_after", "anchor": "## Tone", "content": big}]}])
+    error = _rejected(
+        spec_of(SUPPORT_BOT),
+        [
+            {
+                "op": "file.edit",
+                "target": "persona/SOUL.md",
+                "edits": [{"kind": "insert_after", "anchor": "## Tone", "content": big}],
+            }
+        ],
+    )
     assert error.reasons[0].code == "limit_exceeded"
 
 
@@ -205,7 +335,11 @@ def test_an_unknown_op_is_refused_by_the_model() -> None:
 
 def test_a_digest_the_bot_cannot_reach_propagates() -> None:
     with pytest.raises(ContentNotReachable):
-        apply_patch(spec_of(SUPPORT_BOT), _ops({"op": "persona.add", "type": "OKR.md", "content": {"digest": "sha256:" + "0" * 64}}), BlobDir())
+        apply_patch(
+            spec_of(SUPPORT_BOT),
+            _ops({"op": "persona.add", "type": "OKR.md", "content": {"digest": "sha256:" + "0" * 64}}),
+            BlobDir(),
+        )
 
 
 # -- replacement and change tracking ------------------------------------------------------------
@@ -217,7 +351,10 @@ def test_remove_then_add_is_a_replacement_measured_as_a_change() -> None:
     soul = blobs.read(_soul(spec))
     outcome = apply_patch(
         spec,
-        _ops({"op": "persona.remove", "type": "SOUL.md"}, {"op": "persona.add", "type": "SOUL.md", "content": "# Soul\nRewritten.\n"}),
+        _ops(
+            {"op": "persona.remove", "type": "SOUL.md"},
+            {"op": "persona.add", "type": "SOUL.md", "content": "# Soul\nRewritten.\n"},
+        ),
         blobs,
     )
     assert outcome.replaced == {"persona/SOUL.md"}
@@ -232,7 +369,10 @@ def test_replacing_a_file_resource_by_a_directory_is_not_measured() -> None:
     digest = blobs.put(tree)
     outcome = apply_patch(
         spec_of(SUPPORT_BOT),
-        _ops({"op": "resource.remove", "path": "data/faq.csv"}, {"op": "resource.add", "path": "data/faq.csv/", "content": {"digest": digest}}),
+        _ops(
+            {"op": "resource.remove", "path": "data/faq.csv"},
+            {"op": "resource.add", "path": "data/faq.csv/", "content": {"digest": digest}},
+        ),
         blobs,
     )
     assert outcome.replaced == {"resources/data/faq.csv"}
@@ -244,8 +384,16 @@ def test_a_file_edited_twice_is_tracked_once_from_base_to_result() -> None:
     blobs = BlobDir()
     before = blobs.read(_soul(spec))
     ops = _ops(
-        {"op": "file.edit", "target": "persona/SOUL.md", "edits": [{"kind": "insert_after", "anchor": "## Tone", "content": "one"}]},
-        {"op": "file.edit", "target": "persona/SOUL.md", "edits": [{"kind": "insert_after", "anchor": "one", "content": "two"}]},
+        {
+            "op": "file.edit",
+            "target": "persona/SOUL.md",
+            "edits": [{"kind": "insert_after", "anchor": "## Tone", "content": "one"}],
+        },
+        {
+            "op": "file.edit",
+            "target": "persona/SOUL.md",
+            "edits": [{"kind": "insert_after", "anchor": "one", "content": "two"}],
+        },
     )
     outcome = apply_patch(spec, ops, blobs)
     change = outcome.changed_files["persona/SOUL.md"]
@@ -258,9 +406,24 @@ def test_a_file_edited_twice_is_tracked_once_from_base_to_result() -> None:
 
 def test_skill_update_that_also_adds_or_deletes_a_file_is_not_description_only() -> None:
     spec = spec_of(SUPPORT_BOT)
-    tweak = "@@ -1,4 +1,4 @@\n ---\n name: quality-check\n-description: Check a reply against the service rules before sending it.\n+description: Check every draft.\n ---\n"
+    tweak = (
+        "@@ -1,4 +1,4 @@\n ---\n name: quality-check\n"
+        "-description: Check a reply against the service rules before sending it.\n"
+        "+description: Check every draft.\n ---\n"
+    )
     for files in ({"evil.py": "import os\n"}, {"scripts/check.py": None}):
-        outcome = apply_patch(spec, _ops({"op": "skill.update", "name": "quality-check", "file_diffs": [{"path": "SKILL.md", "diff": tweak}], "files": files}), BlobDir())
+        outcome = apply_patch(
+            spec,
+            _ops(
+                {
+                    "op": "skill.update",
+                    "name": "quality-check",
+                    "file_diffs": [{"path": "SKILL.md", "diff": tweak}],
+                    "files": files,
+                }
+            ),
+            BlobDir(),
+        )
         assert outcome.touched[0].description_only is False
 
 
@@ -269,7 +432,11 @@ def test_an_edit_then_remove_then_add_is_measured_from_the_base() -> None:
     spec = spec_of(SUPPORT_BOT)
     base = blobs.read(_soul(spec))
     ops = _ops(
-        {"op": "file.edit", "target": "persona/SOUL.md", "edits": [{"kind": "insert_after", "anchor": "## Tone", "content": "one"}]},
+        {
+            "op": "file.edit",
+            "target": "persona/SOUL.md",
+            "edits": [{"kind": "insert_after", "anchor": "## Tone", "content": "one"}],
+        },
         {"op": "persona.remove", "type": "SOUL.md"},
         {"op": "persona.add", "type": "SOUL.md", "content": "# Soul\nRewritten.\n"},
     )
@@ -283,7 +450,11 @@ def test_a_replacement_across_kinds_stays_flagged_after_a_later_edit() -> None:
     ops = _ops(
         {"op": "resource.remove", "path": "data/kb/"},
         {"op": "resource.add", "path": "data/kb", "content": "# KB\n"},
-        {"op": "file.edit", "target": "resources/data/kb", "edits": [{"kind": "insert_after", "anchor": "# KB", "content": "x"}]},
+        {
+            "op": "file.edit",
+            "target": "resources/data/kb",
+            "edits": [{"kind": "insert_after", "anchor": "# KB", "content": "x"}],
+        },
     )
     outcome = apply_patch(spec_of(SUPPORT_BOT), ops, blobs)
     assert outcome.changed_files["resources/data/kb"].text is False
@@ -293,11 +464,23 @@ def test_files_the_patch_itself_adds_are_not_measured() -> None:
     blobs = BlobDir()
     ops = _ops(
         {"op": "resource.add", "path": "data/y.md", "content": "a\n"},
-        {"op": "file.edit", "target": "resources/data/y.md", "edits": [{"kind": "insert_after", "anchor": "a", "content": "b\nc\nd\n"}]},
+        {
+            "op": "file.edit",
+            "target": "resources/data/y.md",
+            "edits": [{"kind": "insert_after", "anchor": "a", "content": "b\nc\nd\n"}],
+        },
         {"op": "skill.add", "name": "fresh", "files": {"SKILL.md": "---\nname: fresh\ndescription: d\n---\nx\n"}},
-        {"op": "file.edit", "target": "skills/fresh/SKILL.md", "edits": [{"kind": "insert_after", "anchor": "x", "content": "y\nz\nw\n"}]},
+        {
+            "op": "file.edit",
+            "target": "skills/fresh/SKILL.md",
+            "edits": [{"kind": "insert_after", "anchor": "x", "content": "y\nz\nw\n"}],
+        },
         {"op": "skill.update", "name": "quality-check", "files": {"new.md": "n\n"}},
-        {"op": "file.edit", "target": "skills/quality-check/new.md", "edits": [{"kind": "insert_after", "anchor": "n", "content": "m\no\np\n"}]},
+        {
+            "op": "file.edit",
+            "target": "skills/quality-check/new.md",
+            "edits": [{"kind": "insert_after", "anchor": "n", "content": "m\no\np\n"}],
+        },
         {"op": "resource.remove", "path": "data/y.md"},  # removing what the patch added is not a replacement either
         {"op": "resource.add", "path": "data/y.md", "content": "again\n"},
     )

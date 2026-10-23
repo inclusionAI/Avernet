@@ -5,6 +5,7 @@ patterns come from the contract schema at import, and the contract examples
 pin the two together. ``PatchOp`` is the discriminated union the op's ``op``
 member selects; ``TextEdit`` the one ``kind`` selects.
 """
+
 from __future__ import annotations
 
 import re
@@ -41,6 +42,7 @@ __all__ = [
     "MemoryRetire",
     "MemorySetMode",
     "MemoryUpdate",
+    "OpKind",
     "PatchOp",
     "PersonaAdd",
     "PersonaRemove",
@@ -65,7 +67,9 @@ Anchor = constrained(_PATCH, *_TEXT_EDITS, 1, "properties", "anchor")
 InlineText = constrained(_PATCH, "definitions", "content", "oneOf", 0)
 Rationale = constrained(_PATCH, "properties", "rationale")
 MAX_EVIDENCE_REFS: int = schema_property(_PATCH, "properties", "evidence")["maxItems"]
-_TARGET_SHAPE = re.compile(schema_property(_PATCH, "definitions", "fileEdit", "properties", "target", "allOf", 1)["pattern"])
+_TARGET_SHAPE = re.compile(
+    schema_property(_PATCH, "definitions", "fileEdit", "properties", "target", "allOf", 1)["pattern"]
+)
 
 
 def _a_file_gene(target: str) -> str:
@@ -105,14 +109,18 @@ class InsertAfter(ContractModel):
 
     kind: Literal["insert_after"] = Field(description="Marks this edit kind.")
     anchor: Anchor = Field(description="One whole line of the file, which must occur exactly once.")
-    content: Annotated[str, StringConstraints(min_length=1, max_length=65536)] = Field(description="The text to insert.")
+    content: Annotated[str, StringConstraints(min_length=1, max_length=65536)] = Field(
+        description="The text to insert."
+    )
 
 
 class DiffEdit(ContractModel):
     """Apply a unified diff; expresses any text change."""
 
     kind: Literal["diff"] = Field(description="Marks this edit kind.")
-    diff: UnifiedDiff = Field(description="The hunks to apply (`@@ … @@` lines, then ` `, `-`, `+` lines; no `---`/`+++` header).")
+    diff: UnifiedDiff = Field(
+        description="The hunks to apply (`@@ … @@` lines, then ` `, `-`, `+` lines; no `---`/`+++` header)."
+    )
 
 
 #: One edit to a text file: exactly one of the three kinds, chosen by `kind`.
@@ -127,7 +135,10 @@ class FileEdit(ContractModel):
     """Op `file.edit`: edits one existing text file in place."""
 
     op: Literal["file.edit"] = Field(description="Marks this op shape.")
-    target: FileTarget = Field(description="A persona file, a file inside a skill, a file resource, or a file inside a directory resource, e.g. `persona/SOUL.md`.")
+    target: FileTarget = Field(
+        description="A persona file, a file inside a skill, a file resource, or a file inside a directory resource, "
+        "e.g. `persona/SOUL.md`."
+    )
     edits: list[TextEdit] = Field(min_length=1, max_length=100, description="The edits, applied in order to the file.")
 
 
@@ -151,7 +162,11 @@ class SkillAdd(ContractModel):
 
     op: Literal["skill.add"] = Field(description="Marks this op shape.")
     name: SkillName = Field(description="The new skill's name; equals the SKILL.md metadata name.")
-    files: dict[SkillFilePath, Content] = Field(max_length=500, description="Path inside the skill → content (inline text, or `{digest}` for uploaded bytes); must include `SKILL.md`.")
+    files: dict[SkillFilePath, Content] = Field(
+        max_length=500,
+        description="Path inside the skill → content (inline text, or `{digest}` for uploaded bytes); must include "
+        "`SKILL.md`.",
+    )
 
     @model_validator(mode="after")
     def _has_skill_md(self) -> Self:
@@ -172,8 +187,14 @@ class SkillUpdate(ContractModel):
 
     op: Literal["skill.update"] = Field(description="Marks this op shape.")
     name: SkillName = Field(description="The skill to change.")
-    file_diffs: list[FileDiff] = optional_member("Unified diffs to existing text files of the skill; at most one per file.", min_length=1, max_length=500)
-    files: dict[SkillFilePath, Content | None] = optional_member("Whole-file writes, path → new content, or null to delete that file; adds a new path, replaces an existing one. `SKILL.md` can be replaced but not deleted.", min_length=1)
+    file_diffs: list[FileDiff] = optional_member(
+        "Unified diffs to existing text files of the skill; at most one per file.", min_length=1, max_length=500
+    )
+    files: dict[SkillFilePath, Content | None] = optional_member(
+        "Whole-file writes, path → new content, or null to delete that file; adds a new path, replaces an existing "
+        "one. `SKILL.md` can be replaced but not deleted.",
+        min_length=1,
+    )
 
     @model_validator(mode="after")
     def _at_least_one_and_skill_md_stays(self) -> Self:
@@ -196,7 +217,9 @@ class ResourceAdd(ContractModel):
 
     op: Literal["resource.add"] = Field(description="Marks this op shape.")
     path: ResourcePath = Field(description="Where the resource goes in the workspace; ends in `/` for a directory.")
-    content: Content = Field(description="The file's content, inline or by digest; a directory is always `{digest}` of an uploaded tree.")
+    content: Content = Field(
+        description="The file's content, inline or by digest; a directory is always `{digest}` of an uploaded tree."
+    )
 
     @model_validator(mode="after")
     def _a_directory_comes_from_a_tree(self) -> Self:
@@ -240,22 +263,55 @@ class MemorySetMode(ContractModel):
     mode: MemoryMode = Field(description="The new mode; `replace` is T3.")
 
 
+#: The twelve op names of README §6.1, the values of an op's `op` member.
+OpKind = Literal[
+    "file.edit",
+    "persona.add",
+    "persona.remove",
+    "skill.add",
+    "skill.update",
+    "skill.remove",
+    "resource.add",
+    "resource.remove",
+    "memory.add",
+    "memory.update",
+    "memory.retire",
+    "memory.set_mode",
+]
+
 #: One change: the shape the op's `op` member selects.
 PatchOp = Annotated[
-    FileEdit | PersonaAdd | PersonaRemove | SkillAdd | SkillUpdate | SkillRemove
-    | ResourceAdd | ResourceRemove | MemoryAdd | MemoryUpdate | MemoryRetire | MemorySetMode,
+    FileEdit
+    | PersonaAdd
+    | PersonaRemove
+    | SkillAdd
+    | SkillUpdate
+    | SkillRemove
+    | ResourceAdd
+    | ResourceRemove
+    | MemoryAdd
+    | MemoryUpdate
+    | MemoryRetire
+    | MemorySetMode,
     Field(discriminator="op"),
 ]
 
 
 class GenomePatch(ContractModel):
-    """A typed, itemized change against a base revision (contract §6); its canonical JSON's digest is the candidate id."""
+    """A typed, itemized change against a base revision (contract §6).
+
+    The digest of its canonical JSON is the candidate id.
+    """
 
     patch_schema: Literal[1] = Field(description="Version of this format; 1 for genome v1.")
     base: Digest = Field(description="The revision this patch is written against; every op must apply to it exactly.")
     ops: list[PatchOp] = Field(min_length=1, max_length=200, description="The changes, applied in order.")
     rationale: Rationale = Field(description="Why the change is proposed, in plain language for the reviewer.")
-    evidence: list[EvidenceRef] = Field(max_length=MAX_EVIDENCE_REFS, description="The Experience records that motivated the patch, at most 100; required unless every op can be motivated by the rationale alone (README §6.4).")
+    evidence: list[EvidenceRef] = Field(
+        max_length=MAX_EVIDENCE_REFS,
+        description="The Experience records that motivated the patch, at most 100; required unless every op can be "
+        "motivated by the rationale alone (README §6.4).",
+    )
 
 
 _OPS = TypeAdapter(list[PatchOp])

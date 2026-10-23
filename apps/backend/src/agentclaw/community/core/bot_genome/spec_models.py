@@ -19,6 +19,7 @@ runs the contract schema on that JSON before recording, as the contract's
 oracle for the rules a type cannot carry (list order, key uniqueness, the
 engine-specific persona set).
 """
+
 from __future__ import annotations
 
 from typing import Annotated, Any, Literal, Self
@@ -55,9 +56,24 @@ __all__ = [
 
 
 def schema_property(schema_file: str, *path: str | int) -> dict[str, Any]:
-    """One node of a contract schema, e.g. ``schema_property(REVISION_SCHEMA_FILE, "definitions", "digest")``."""
+    """One node of a contract schema, found by walking ``path`` from its root.
+
+    ``schema_file`` is ``contract.REVISION_SCHEMA_FILE`` or
+    ``contract.PATCH_SCHEMA_FILE``; anything else is a programming error and
+    raises ``ValueError``. Each ``path`` part is a JSON object key (``str``)
+    or, inside a JSON array such as a ``oneOf``, an index (``int``):
+    ``schema_property(REVISION_SCHEMA_FILE, "definitions", "digest")`` is the
+    digest definition, and ``schema_property(REVISION_SCHEMA_FILE,
+    "definitions", "skillEntry", "oneOf", 1, "properties", "center_version")``
+    is the ``center_version`` property of the second skill shape.
+    """
     revision, patch = contract.schemas()
-    node: Any = revision if schema_file == contract.REVISION_SCHEMA_FILE else patch
+    if schema_file == contract.REVISION_SCHEMA_FILE:
+        node: Any = revision
+    elif schema_file == contract.PATCH_SCHEMA_FILE:
+        node = patch
+    else:
+        raise ValueError(f"{schema_file!r} is not a contract schema file")
     for part in path:
         node = node[part]
     return node
@@ -68,7 +84,9 @@ def constrained(schema_file: str, *path: str | int) -> type[str]:
     node = schema_property(schema_file, *path)
     return Annotated[  # type: ignore[return-value]
         str,
-        StringConstraints(pattern=node.get("pattern"), min_length=node.get("minLength"), max_length=node.get("maxLength")),
+        StringConstraints(
+            pattern=node.get("pattern"), min_length=node.get("minLength"), max_length=node.get("maxLength")
+        ),
     ]
 
 
@@ -93,8 +111,20 @@ GenePath = constrained(_REV, "definitions", "genePath")
 RiskTier = Literal["T0", "T1", "T2", "T3"]
 #: The identity file types the Manifest accepts; which ones a given bot's engine accepts is narrower (README §4.2).
 PersonaFileType = Literal[
-    "AGENTS.md", "BOOTSTRAP.md", "CLAUDE.md", "GREETING.md", "HEARTBEAT.md", "KNOWLEDGE.md", "OKR.md",
-    "OUTPUT.md", "README.md", "RULES.md", "SAFETY.md", "SOUL.md", "TOOLS.md", "USER.md",
+    "AGENTS.md",
+    "BOOTSTRAP.md",
+    "CLAUDE.md",
+    "GREETING.md",
+    "HEARTBEAT.md",
+    "KNOWLEDGE.md",
+    "OKR.md",
+    "OUTPUT.md",
+    "README.md",
+    "RULES.md",
+    "SAFETY.md",
+    "SOUL.md",
+    "TOOLS.md",
+    "USER.md",
 ]
 #: How apply writes the curated items into the engine's memory (README §4.4).
 MemoryMode = Literal["seed", "merge", "replace"]
@@ -117,7 +147,17 @@ class ContractModel(BaseModel):
 
     @classmethod
     def from_json(cls, value: Any) -> Self:
-        """Parse the contract's JSON object; raises ``pydantic.ValidationError`` naming every violation."""
+        """Parse the contract's JSON object into this class; raises ``pydantic.ValidationError`` naming every violation.
+
+        ``model_validate`` is Pydantic's parser: it checks that ``value`` is an
+        object with exactly this class's members (``extra="forbid"``), that
+        each member has the declared type and, where the type came from
+        ``constrained()``, the contract's pattern and length limits (for a
+        ``PersonaFile``: ``type`` is one of the persona file names and
+        ``digest`` matches ``sha256:<64 hex>``), picks the shape of a union
+        by its discriminator, and runs the class's own validators. Every
+        violation is collected, not just the first.
+        """
         return cls.model_validate(value)
 
     def to_json(self) -> dict[str, Any]:
@@ -157,7 +197,9 @@ class RepoSkill(ContractModel):
 
     name: SkillName = Field(description="The skill's name as the bot sees it, and its key.")
     origin: Literal["repo"] = Field(description="Marks this shape: a shared-repository skill.")
-    repo_path: RepoPath = Field(description="The skill's path inside the shared skill repository (what follows `git://` on the skill row).")
+    repo_path: RepoPath = Field(
+        description="The skill's path inside the shared skill repository (what follows `git://` on the skill row)."
+    )
 
 
 #: One skill of the bot: exactly one of the three shapes, chosen by `origin` (README §4.2).
@@ -167,17 +209,26 @@ SkillEntry = Annotated[LocalSkill | CenterSkill | RepoSkill, Field(discriminator
 class MemorySpec(ContractModel):
     """The bot's curated memory: how apply writes it, and where the stored item list is (README §4.4)."""
 
-    mode: MemoryMode = Field(description="`seed` writes an item only where the engine has none with that key; `merge` overwrites same keys and keeps the rest; `replace` makes the engine's memory exactly the curated items (T3).")
-    items_digest: Digest = Field(description="The stored item list (`MemoryItem` records, canonical JSON, sorted by key).")
+    mode: MemoryMode = Field(
+        description="`seed` writes an item only where the engine has none with that key; `merge` overwrites same keys "
+        "and keeps the rest; `replace` makes the engine's memory exactly the curated items (T3)."
+    )
+    items_digest: Digest = Field(
+        description="The stored item list (`MemoryItem` records, canonical JSON, sorted by key)."
+    )
 
 
 class MemoryItem(ContractModel):
     """One curated memory item, inside the stored list `MemorySpec.items_digest` points at."""
 
-    key: MemoryKey = Field(description="The item's stable name, unique in the list, e.g. `returns-window`; patch ops address it.")
+    key: MemoryKey = Field(
+        description="The item's stable name, unique in the list, e.g. `returns-window`; patch ops address it."
+    )
     text: MemoryText = Field(description="The fact, rule or lesson itself, e.g. `Returns are accepted within 30 days.`")
-    tags: list[str] = Field(description="Free-form topic labels, sorted and unique, e.g. `[\"returns\"]`.")
-    source: list[EvidenceRef] = Field(description="What the item was learned from, sorted and unique, e.g. `[\"episode:ep_97\"]`.")
+    tags: list[str] = Field(description='Free-form topic labels, sorted and unique, e.g. `["returns"]`.')
+    source: list[EvidenceRef] = Field(
+        description='What the item was learned from, sorted and unique, e.g. `["episode:ep_97"]`.'
+    )
 
 
 class ResourceEntry(ContractModel):
@@ -190,8 +241,12 @@ class ResourceEntry(ContractModel):
 class McpConfig(ContractModel):
     """The bot-level override for one MCP server, the Manifest's closed set; a field left out is not overridden."""
 
-    url: McpUrl = optional_member("Absolute http(s) URL with a host and no userinfo, so no credential is ever stored in a revision.")
-    headers: dict[HeaderName, HeaderValue] = optional_member("HTTP headers sent to the server, name to value, as written; unique case-insensitively; never credentials.")
+    url: McpUrl = optional_member(
+        "Absolute http(s) URL with a host and no userinfo, so no credential is ever stored in a revision."
+    )
+    headers: dict[HeaderName, HeaderValue] = optional_member(
+        "HTTP headers sent to the server, name to value, as written; unique case-insensitively; never credentials."
+    )
     endpoint_env: Literal["PROD", "PRE"] = optional_member("Which of the server's registered endpoints to use.")
     transport_protocol: Literal["SSE", "STREAMABLE_HTTP"] = optional_member("The MCP transport.")
 
@@ -199,8 +254,13 @@ class McpConfig(ContractModel):
 class McpServerEntry(ContractModel):
     """One MCP server enabled on this bot, keyed by server code, with an optional bot-level override."""
 
-    server_code: Annotated[str, StringConstraints(min_length=1)] = Field(description="The server's code in the MCP registry, e.g. `mcp.ant.homistudio.meetmcp`.")
-    config: McpConfig = optional_member("The bot-level override; absent means no override (user-level config and Center defaults are read at apply time).")
+    server_code: Annotated[str, StringConstraints(min_length=1)] = Field(
+        description="The server's code in the MCP registry, e.g. `mcp.ant.homistudio.meetmcp`."
+    )
+    config: McpConfig = optional_member(
+        "The bot-level override; absent means no override (user-level config and Center defaults are read at apply "
+        "time)."
+    )
 
 
 class ToolsSpec(ContractModel):
@@ -225,15 +285,26 @@ class GenomeSpec(ContractModel):
     persona: list[PersonaFile] = Field(max_length=50, description="Identity files, sorted by type.")
     skills: list[SkillEntry] = Field(max_length=50, description="Skills, sorted by name.")
     memory: MemorySpec | None = Field(description="Curated memory, or null when the bot has none.")
-    resources: list[ResourceEntry] = Field(max_length=50, description="Workspace files and directories, sorted by path.")
+    resources: list[ResourceEntry] = Field(
+        max_length=50, description="Workspace files and directories, sorted by path."
+    )
     tools: ToolsSpec = Field(description="The MCP servers.")
     engine_config: dict[str, Any] = Field(max_length=0, description="Always `{}` in genome v1.")
     script: ScriptEntry | None = Field(description="The startup script, or null when the bot has none.")
 
 
 class GenomePolicy(ContractModel):
-    """What automated actors may change on this bot (contract §5); hashed into the revision id, outside any patch's reach."""
+    """What automated actors may change on this bot (contract §5); hashed into the revision id, outside any patch's
+    reach.
+    """
 
-    mutable_genes: list[GenePath] = Field(description="Sorted, unique gene paths patches may change; everything else is off limits.")
-    pins: list[GenePath] = Field(description="Sorted, unique gene paths no patch may touch, even inside a mutable gene, e.g. `persona/SAFETY.md`.")
-    risk_overrides: dict[GenePath, RiskTier] = Field(description="Gene path → tier for ops overlapping it; can only raise an op's tier. `{}` for none.")
+    mutable_genes: list[GenePath] = Field(
+        description="Sorted, unique gene paths patches may change; everything else is off limits."
+    )
+    pins: list[GenePath] = Field(
+        description="Sorted, unique gene paths no patch may touch, even inside a mutable gene, e.g. "
+        "`persona/SAFETY.md`."
+    )
+    risk_overrides: dict[GenePath, RiskTier] = Field(
+        description="Gene path → tier for ops overlapping it; can only raise an op's tier. `{}` for none."
+    )
