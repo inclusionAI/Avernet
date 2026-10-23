@@ -147,3 +147,38 @@ def test_state_reference_payloads_round_trip() -> None:
         state_ref_from_payload({"kind": "svn"})
     with pytest.raises(ValueError, match="promotion id"):
         GenomeStateRef("")
+
+
+def test_resource_paths_are_normalised_workspace_relative_paths() -> None:
+    for bad in ("data/../SOUL.md", "data//x", "data/./x", "/data/x", "data/a b"):
+        with pytest.raises(ValueError):
+            DesiredResourceFile(bad, StoredContent(DIGEST))
+
+
+def test_a_directory_entry_owns_its_subtree() -> None:
+    tree = DesiredResourceTree(RESOURCES_ROOT + "prices/", StoredContent(DIGEST))
+    nested = DesiredResourceFile(RESOURCES_ROOT + "prices/2026.csv", StoredContent(OTHER))
+    same = DesiredResourceFile(RESOURCES_ROOT + "prices", StoredContent(OTHER))
+    with pytest.raises(ValueError, match="nested under directory entry"):
+        DesiredState(resources=Declaration((tree, nested)))
+    with pytest.raises(ValueError, match="nested under directory entry"):
+        DesiredState(resources=Declaration((same, tree)))
+    DesiredState(
+        resources=Declaration((tree, DesiredResourceFile(RESOURCES_ROOT + "prices.csv", StoredContent(OTHER))))
+    )
+
+
+def test_mcp_override_keeps_an_explicit_empty_headers_override() -> None:
+    assert McpOverride.from_config({"headers": {}}).as_config() == {"headers": {}}
+    assert McpOverride.from_config({"url": "https://x"}).headers is None
+    with pytest.raises(ValueError, match="case-insensitive"):
+        McpOverride(headers=(McpHeader("Authorization", "a"), McpHeader("authorization", "b")))
+
+
+def test_engine_config_is_a_read_only_copy() -> None:
+    raw = {"model": "x"}
+    entry = DesiredEngineConfig(raw)
+    raw["model"] = "y"
+    assert entry.config["model"] == "x"
+    with pytest.raises(TypeError):
+        entry.config["model"] = "z"  # type: ignore[index]

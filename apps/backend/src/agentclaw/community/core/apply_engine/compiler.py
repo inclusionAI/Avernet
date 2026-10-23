@@ -56,11 +56,6 @@ class GenomeStateRef:
 
 StateRef = ManifestStateRef | GenomeStateRef
 
-_REF_TYPES: dict[str, type[ManifestStateRef] | type[GenomeStateRef]] = {
-    ManifestStateRef.kind: ManifestStateRef,
-    GenomeStateRef.kind: GenomeStateRef,
-}
-
 
 def state_ref_from_payload(payload: Mapping[str, Any] | None) -> StateRef:
     """The reference a task payload or a persisted report carries; absent means the Manifest."""

@@ -15,10 +15,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from agentclaw.community.core.bot_config_manifest.capabilities import (
-    ManifestCategory,
-    ManifestSection,
-)
+from agentclaw.community.core.apply_engine.constructs import ApplyConstruct
 
 #: What a construct is, for the purposes of applying it: one of the six
 #: categories under ``manifest``, or the top-level ``script`` section.
@@ -38,7 +35,6 @@ from agentclaw.community.core.bot_config_manifest.capabilities import (
 #: materialiser's own ``construct`` class attribute.
 #: Consumed by: ``apply/registry.build_materialisers`` (as the map key),
 #: ``EntryResult.as_dict`` and ``CategoryResult.as_dict`` (as ``.value``).
-ApplyConstruct = ManifestCategory | ManifestSection
 
 
 class EntryOutcome(StrEnum):

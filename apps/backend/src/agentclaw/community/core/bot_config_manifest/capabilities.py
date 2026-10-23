@@ -52,6 +52,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Iterable
 
+from agentclaw.community.core.apply_engine.constructs import (
+    Construct,
+    ConstructKind,
+    ManifestCategory,
+    ManifestSection,
+    kind_of,
+    parse_category,  # noqa: F401 - re-exported for the parser until the move completes
+)
 from agentclaw.community.core.workspace.constants import (
     DEFAULT_ENGINE_TYPE,
     SUPPORTED_ENGINE_TYPES,
@@ -65,17 +73,6 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from agentclaw.community.core.bot_config_manifest.support_matrix import (
         SourceKind,
     )
-
-# The construct vocabulary is the apply engine's (``core/apply_engine/constructs.py``);
-# this module answers which constructs a bot can be told to have.
-from agentclaw.community.core.apply_engine.constructs import (  # noqa: E402
-    Construct,
-    ConstructKind,
-    ManifestCategory,
-    ManifestSection,
-    kind_of,
-    parse_category,  # noqa: F401 - re-exported for the parser until the move completes
-)
 
 #: The schema versions this build parses. A document naming anything else is
 #: refused rather than best-effort parsed.
