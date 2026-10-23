@@ -575,7 +575,7 @@ class ApplyRunService(ApplyRunServiceProtocol):
         previewing. Only the write stage is skipped. A reference the compiler
         refuses is the compiler's own domain error to the caller (the one its
         HTTP surface maps), never the worker's ``CompileRefused``: the
-        refusal is unwrapped to the error it was raised from.
+        refusal is unwrapped to the error it carries.
         """
         compiler = self._compiler_for(state)
         ctx = self._context(
@@ -589,9 +589,7 @@ class ApplyRunService(ApplyRunServiceProtocol):
         try:
             compiled = await compiler.compile(ctx, state)
         except CompileRefused as refused:
-            if refused.domain_error is None:
-                raise
-            raise refused.domain_error from None
+            raise refused.domain_error
         report = await self._orchestrator(self.delivery_for_engine(ctx.engine_type)).apply(
             ctx,
             compiled.state,

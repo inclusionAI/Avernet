@@ -159,9 +159,11 @@ class GenomeCompiler:
         """The promotion's revision as a desired state; what ``check`` would refuse is ``CompileRefused`` here.
 
         ``compile`` runs in the apply worker, after ``check`` accepted the
-        reference and an apply id was minted; the refs can have moved in
-        between, and a revision can fail the state model as recorded. Either
-        is a reason the report should carry, not an engine failure.
+        reference and an apply id was minted — the refs can have moved in
+        between, and a revision can fail the state model as recorded — and
+        it is the dry run's front door, with no ``check`` before it. Either
+        way the refusal is a reason the report (or the caller) should carry,
+        not an engine failure.
         """
         bot = BotRef(
             entity_id=ctx.entity_id,
@@ -173,13 +175,13 @@ class GenomeCompiler:
         try:
             revision = self._revision_of(ctx, ref)
         except RevisionNotFound as exc:
-            raise CompileRefused(f"promotion {ref.promotion_id} is not there to deliver") from exc
+            raise CompileRefused(f"promotion {ref.promotion_id} is not there to deliver", domain_error=exc) from exc
         except NotAppliable as exc:
-            raise CompileRefused(str(exc)) from exc
+            raise CompileRefused(str(exc), domain_error=exc) from exc
         try:
             state = self._registry.compile(bot, revision)
         except NotAppliable as exc:  # the revision as recorded; a revision row that is gone is a bug and propagates
-            raise CompileRefused(str(exc)) from exc
+            raise CompileRefused(str(exc), domain_error=exc) from exc
         # A creation half applies its own constructs only; the rest stay undeclared.
         return Compiled(state if only is None else state.only(only))
 
