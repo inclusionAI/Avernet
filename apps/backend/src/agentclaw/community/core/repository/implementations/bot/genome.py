@@ -97,15 +97,16 @@ class GenomeRevisionRepository(GenomeRevisionRepositoryProtocol):
                 with _transaction(self._db) as session:
                     orm = _revision_row(session, **axes, revision_id=row.revision_id)
                     created = orm is None
+                    named = _run_candidate_refs(session, **axes, run_id=candidate.run_id) if candidate else []
                     if (
                         orm is not None
                         and candidate is not None
-                        and patch is not None
-                        and orm.patch_digest != patch.digest
+                        and not any(r.revision_id == orm.revision_id for r in named)
                     ):
-                        raise CandidateCollision(
-                            orm.revision_id, orm.seq, orm.patch_digest
-                        )  # rolls the transaction back
+                        # The content exists but this run has no candidate pointing at it: it was recorded by
+                        # another run, as an owner's draft, from another patch or from a capture. Only the run
+                        # that first recorded it may retry. Rolls the transaction back.
+                        raise CandidateCollision(orm.revision_id, orm.seq, orm.patch_digest)
                     if orm is None:
                         values = row.model_dump(exclude={"id", "seq", "gmt_create", "gmt_modified"})
                         if parent_from_latest:
@@ -119,7 +120,7 @@ class GenomeRevisionRepository(GenomeRevisionRepositoryProtocol):
                         session.add(GenomePatchModel(**patch.model_dump(exclude={"id"})))
                         session.flush()
                     ref = (
-                        _candidate_ref(session, **axes, revision_id=row.revision_id, candidate=candidate)
+                        _candidate_ref(session, **axes, revision_id=row.revision_id, candidate=candidate, named=named)
                         if candidate is not None
                         else None
                     )
@@ -360,27 +361,37 @@ def _patch_row(session, *, env: str, entity_id: str, bot_id: str, digest: str) -
     )
 
 
+def _run_candidate_refs(session, *, env: str, entity_id: str, bot_id: str, run_id: str) -> list[GenomeRefModel]:
+    """Every ``candidate/<run_id>/<n>`` ref of the bot, read inside the caller's transaction."""
+    return (
+        session.query(GenomeRefModel)
+        .filter(*_bot(GenomeRefModel, env=env, entity_id=entity_id, bot_id=bot_id))
+        .filter(GenomeRefModel.name.startswith(f"candidate/{run_id}/", autoescape=True))
+        .all()
+    )
+
+
 def _candidate_ref(
-    session, *, env: str, entity_id: str, bot_id: str, revision_id: str, candidate: CandidateRefRequest
+    session,
+    *,
+    env: str,
+    entity_id: str,
+    bot_id: str,
+    revision_id: str,
+    candidate: CandidateRefRequest,
+    named: list[GenomeRefModel],
 ) -> GenomeRefModel:
-    """``candidate/<run>/<n>`` for this revision inside the caller's transaction: the one already pointing at it, or the
+    """``candidate/<run>/<n>`` for this revision: the one of ``named`` (this run's refs) already pointing at it, or the
     next number.
     """
     axes = dict(env=env, entity_id=entity_id, bot_id=bot_id)
-    prefix = f"candidate/{candidate.run_id}/"
-    named = (
-        session.query(GenomeRefModel)
-        .filter(*_bot(GenomeRefModel, **axes))
-        .filter(GenomeRefModel.name.startswith(prefix, autoescape=True))
-        .all()
-    )
     for existing in named:
         if existing.revision_id == revision_id:
             return existing
     return _cas_move(
         session,
         **axes,
-        name=f"{prefix}{len(named) + 1}",
+        name=f"candidate/{candidate.run_id}/{len(named) + 1}",
         revision_id=revision_id,
         expected=None,
         moved_kind=candidate.moved_kind,

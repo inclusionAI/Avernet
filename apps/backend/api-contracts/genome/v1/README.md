@@ -661,8 +661,11 @@ matters for resources, whose add and remove are T1.
 - A patch recorded for an Evolution Run is new content: when its result is
   a revision already recorded from another patch or from a capture, it is
   refused (`already_recorded`), because its candidate id (the patch digest)
-  would not name that revision's patch. The same patch retried returns its
-  revision. An owner's draft that reproduces a revision gets that revision.
+  would not name that revision's patch, and when its result is a revision
+  another run or an owner recorded from the same patch, because that
+  revision's status and provenance are not this candidate's. Only the run
+  that first recorded a candidate may retry it and get the revision back.
+  An owner's draft that reproduces a revision gets that revision.
 - `rationale` is non-empty. `evidence` is required for every op except
   `file.edit` on a resource, `memory.retire` and `persona.remove`, which can
   be motivated by the rationale alone.

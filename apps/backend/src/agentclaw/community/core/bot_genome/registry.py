@@ -396,7 +396,8 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         revision, in one transaction. ``status`` is ``DRAFT`` for an owner's
         patch and ``CANDIDATE`` for a run's, which also creates
         ``candidate/<run>/<n>``; a candidate whose result already exists as
-        another revision is refused as ``already_recorded``.
+        a revision is refused as ``already_recorded``, unless this very run
+        recorded it (a retry returns it with ``created=False``).
         """
         if status not in (RevisionStatus.DRAFT, RevisionStatus.CANDIDATE):
             raise ValueError(f"a recorded patch is draft or candidate, not {status.value}")
@@ -446,14 +447,20 @@ class GenomeRegistryService(GenomeRegistryProtocol):
             created_at=_now(),
         )
         if run is not None:
-            # A candidate's id is its patch digest and names its revision's patch. Content-addressed
-            # dedupe would hand this patch a revision recorded from another patch (or a capture),
-            # whose metadata and status are not this candidate's: a candidate is new content.
-            # This read gives the clear answer; the recording transaction repeats the check, so a
-            # capture of the same content committing in between is refused the same way.
+            # A candidate is new content: a revision that already exists was recorded by another run,
+            # as an owner's draft, from another patch or from a capture, and its status and provenance
+            # are not this candidate's. Only the run that first recorded it may retry (its own
+            # `candidate/<run>/<n>` already points at the revision). This read gives the clear answer;
+            # the recording transaction repeats the check, so a record of the same content committing
+            # in between is refused the same way.
             existing = self._revisions.get(**self._axes(bot), revision_id=revision_id(outcome.spec, base.policy))
-            if existing is not None and existing.patch_digest != patch_row.digest:
-                raise PatchRejected([_already_recorded(existing.revision_id, existing.seq, existing.patch_digest)])
+            if existing is not None and not any(
+                ref.revision_id == existing.revision_id
+                for ref in self._refs.list(**self._axes(bot), name_prefix=f"candidate/{run.run_id}/")
+            ):
+                raise PatchRejected(
+                    [_already_recorded(existing.revision_id, existing.seq, existing.patch_digest, patch_row.digest)]
+                )
         try:
             return self._record(
                 bot,
@@ -471,7 +478,9 @@ class GenomeRegistryService(GenomeRegistryProtocol):
                 run=run,
             )
         except CandidateCollision as exc:
-            raise PatchRejected([_already_recorded(exc.revision_id, exc.seq, exc.patch_digest)]) from exc
+            raise PatchRejected(
+                [_already_recorded(exc.revision_id, exc.seq, exc.patch_digest, patch_row.digest)]
+            ) from exc
 
     def set_policy(self, bot: BotRef, policy: GenomePolicy, *, created_by: Provenance) -> RecordedRevision:
         """Record a new draft revision with ``active``'s spec and this policy (README §5).
@@ -615,8 +624,13 @@ class GenomeRegistryService(GenomeRegistryProtocol):
 # ---------------------------------------------------------------------------------------------
 
 
-def _already_recorded(revision_id: str, seq: int, patch_digest: str | None) -> Reason:
-    origin = "another patch" if patch_digest else "the bot's own state"
+def _already_recorded(revision_id: str, seq: int, patch_digest: str | None, this_patch: str) -> Reason:
+    if patch_digest is None:
+        origin = "the bot's own state"
+    elif patch_digest == this_patch:
+        origin = "this same patch, by another run or as a draft"
+    else:
+        origin = "another patch"
     return Reason(
         "already_recorded",
         "patch",

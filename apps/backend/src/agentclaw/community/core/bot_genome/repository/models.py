@@ -122,8 +122,10 @@ class GenomeRefEventRow(BaseModel):
 
 
 class CandidateCollision(Exception):
-    """``record`` found the candidate's content already recorded from another patch (or a capture).
+    """``record`` found the candidate's content already recorded, and not by this run.
 
+    Another run's candidate, an owner's draft, another patch or a capture
+    holds the revision; only the run that first recorded it may retry.
     Nothing was written.
     """
 

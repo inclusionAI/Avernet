@@ -288,12 +288,10 @@ async def test_a_candidate_whose_result_is_an_existing_revision_is_refused(world
         "patch",
     ) and f"r{draft.revision.revision.seq}" in reason.message
     assert world.registry.list_refs(BOT) == [] and world.registry.list_revisions(BOT).total == 2, "nothing recorded"
-    same = await world.registry.commit_patch(BOT, edit, created_by=RUN, status=RevisionStatus.CANDIDATE, run=run)
-    assert (same.created, same.revision.revision.id, same.ref) == (
-        False,
-        draft.revision.revision.id,
-        "candidate/run_7f3/1",
-    ), "the same patch is a retry"
+    with pytest.raises(PatchRejected) as caught:  # the very same patch, recorded as the owner's draft: not this run's
+        await world.registry.commit_patch(BOT, edit, created_by=RUN, status=RevisionStatus.CANDIDATE, run=run)
+    assert caught.value.reasons[0].code == "already_recorded" and "same patch" in caught.value.reasons[0].message
+    assert world.registry.list_refs(BOT) == [], "no candidate ref points at the owner's draft"
     again = await world.registry.commit_patch(BOT, edit, created_by=OWNER, status=RevisionStatus.DRAFT)
     assert not again.created and again.revision.revision.id == draft.revision.revision.id, (
         "a draft that reproduces a revision gets it back"
@@ -305,9 +303,28 @@ async def test_a_candidate_whose_result_is_an_existing_revision_is_refused(world
     with pytest.raises(PatchRejected) as caught:
         await world.registry.commit_patch(BOT, reworded, created_by=RUN, status=RevisionStatus.CANDIDATE, run=run)
     world.revisions.get = real_get
-    assert caught.value.reasons[0].code == "already_recorded" and world.registry.list_refs(BOT) == [
-        r for r in world.registry.list_refs(BOT) if r.name == "candidate/run_7f3/1"
-    ]
+    assert caught.value.reasons[0].code == "already_recorded" and world.registry.list_refs(BOT) == []
+
+
+@pytest.mark.asyncio
+async def test_only_the_run_that_recorded_a_candidate_may_retry_it(world: World) -> None:
+    await _capture_support_bot(world)
+    patch = load_patch("01-file-edit.json")
+    run_a = RunScope("run_a", RUN.actor, ("persona", "skills", "resources"))
+    by_a = Provenance(ProvenanceKind.STRATEGY_RUN, RUN.actor, run_id="run_a")
+    first = await world.registry.commit_patch(BOT, patch, created_by=by_a, status=RevisionStatus.CANDIDATE, run=run_a)
+    retry = await world.registry.commit_patch(BOT, patch, created_by=by_a, status=RevisionStatus.CANDIDATE, run=run_a)
+    assert first.created and (retry.created, retry.ref, retry.revision.revision.id) == (
+        False,
+        "candidate/run_a/1",
+        first.revision.revision.id,
+    )
+    run_b = RunScope("run_b", RUN.actor, ("persona", "skills", "resources"))
+    by_b = Provenance(ProvenanceKind.STRATEGY_RUN, RUN.actor, run_id="run_b")
+    with pytest.raises(PatchRejected) as caught:
+        await world.registry.commit_patch(BOT, patch, created_by=by_b, status=RevisionStatus.CANDIDATE, run=run_b)
+    assert caught.value.reasons[0].code == "already_recorded"
+    assert [r.name for r in world.registry.list_refs(BOT)] == ["candidate/run_a/1"], "run b got no ref to run a's work"
 
 
 @pytest.mark.asyncio

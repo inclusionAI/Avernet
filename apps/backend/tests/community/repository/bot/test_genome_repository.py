@@ -254,8 +254,16 @@ def test_record_refuses_a_candidate_whose_content_another_record_already_holds(d
     assert patches.get(**BOT, digest=R3) is None and refs.candidate_count(**BOT, run_id="run_7") == 0, (
         "nothing was written"
     )
-    _, created, ref = revisions.record(_revision(R1), candidate=candidate)
-    assert not created and ref.name == "candidate/run_7/1", "the same patch (here: none) is a retry"
+    with pytest.raises(CandidateCollision):  # the same content, even with the same patch digest, is not this run's
+        revisions.record(_revision(R1), candidate=candidate)
+    _, created, ref = revisions.record(_revision(R2, patch_digest=R3), patch=patch, candidate=candidate)
+    assert created and ref.name == "candidate/run_7/1"
+    _, created, again = revisions.record(_revision(R2, patch_digest=R3), patch=patch, candidate=candidate)
+    assert not created and again.name == "candidate/run_7/1", "the run that recorded it retries it"
+    other = CandidateRefRequest(run_id="run_8", moved_kind="strategy_run", moved_actor="s@1", moved_at=NOW)
+    with pytest.raises(CandidateCollision):  # another run, the same patch: not its content
+        revisions.record(_revision(R2, patch_digest=R3), patch=patch, candidate=other)
+    assert refs.candidate_count(**BOT, run_id="run_8") == 0
 
 
 def test_record_takes_the_parent_from_the_latest_revision_inside_the_transaction(db, monkeypatch):

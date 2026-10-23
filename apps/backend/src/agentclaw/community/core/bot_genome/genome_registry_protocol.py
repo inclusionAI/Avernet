@@ -80,8 +80,11 @@ class GenomeRegistryProtocol(Protocol):
         policy, the limits and the apply-time checks, and the patch is
         stored by its digest with the revision. ``status`` is ``DRAFT`` (an
         owner's patch) or ``CANDIDATE`` (a run's, which also names
-        ``candidate/<run>/<n>`` and needs ``run``). Idempotent: the same
-        patch returns the same revision with ``created=False``. Raises
+        ``candidate/<run>/<n>`` and needs ``run``). Idempotent for the
+        recorder: the same patch retried by the same run (or an owner's
+        draft reproducing a revision) returns the revision with
+        ``created=False``; a candidate whose result another run, a draft or
+        a capture recorded is refused (``already_recorded``). Raises
         ``RevisionNotFound`` for a base that is not this bot's,
         ``PatchRejected`` with every reason, ``LimitExceeded``,
         ``ContentNotReachable``.

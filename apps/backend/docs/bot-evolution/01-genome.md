@@ -868,8 +868,10 @@ bot.
   A run's candidate is the one exception: its candidate id is its patch
   digest and names its revision's patch, so a candidate patch whose result
   is a revision recorded from another patch (or a capture) is refused
-  (`already_recorded`) rather than handed that revision; promote the
-  existing revision instead. The same patch retried gets its revision back.
+  (`already_recorded`) rather than handed that revision, and so is a
+  candidate whose result another run or an owner already recorded from the
+  same patch; promote the existing revision instead. Only the run that
+  first recorded a candidate may retry it and get its revision back.
 - **`seq`.** A per-bot counter assigned when a new id is first recorded, for
   humans: the bot's first recorded revision is `r1`, the next new one `r2`,
   and so on. Example: a strategy submits a candidate whose content is new,
@@ -1172,8 +1174,8 @@ one patch for review, while the archive keeps each step.
 ### 6.5 Patch identity and candidates
 
 The stored patch is content-addressed. Its digest is the **candidate id**
-used by strategies and by Promotion (`sha256:c41e…`): a retried submission of
-the same patch returns the same id and creates nothing new. The resulting
+used by strategies and by Promotion (`sha256:c41e…`): the same run
+resubmitting the same patch gets the same id and creates nothing new. The resulting
 revision has its own id (hash of `{spec, policy}`) and records the patch in
 `patch_digest`. Keeping both identities is open decision G-9. See [03-strategy.md](03-strategy.md) for the
 strategy-side `ctx.candidates.submit`.
@@ -1474,7 +1476,8 @@ class GenomeRegistryProtocol(Protocol):          # core/bot_genome/genome_regist
                            run: RunScope | None = None) -> RecordedRevision:
         """Apply `patch` to its own `base` (a revision of this bot) and record the result (contract §6.4).
         A CANDIDATE needs `run`, whose allowed_genes bound the ops and whose run_id names
-        candidate/<run>/<n>. Idempotent: the same patch returns the same revision.
+        candidate/<run>/<n>. Idempotent for the recorder: the same run retrying the same patch gets its
+        revision; a candidate whose result another run, a draft or a capture recorded is refused.
         Raises RevisionNotFound (the base), PatchRejected(reasons), LimitExceeded, ContentNotReachable."""
 
     def set_policy(self, bot: BotRef, policy: GenomePolicy, *, created_by: Provenance) -> RecordedRevision:
