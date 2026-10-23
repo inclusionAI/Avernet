@@ -226,7 +226,7 @@ async def test_record_patch_refusals_leave_nothing_behind(world: World) -> None:
             patch,
             created_by=RUN,
             status=RevisionStatus.CANDIDATE,
-            run=RunScope("run_1", "clawevolve/bot-evolution@2.0.0", ("skills",)),
+            run=RunScope("run_7f3", "clawevolve/bot-evolution@2.0.0", ("skills",)),
         )
     assert {r.code for r in caught.value.reasons} == {"gene_not_allowed"}
     with pytest.raises(ContentNotReachable):  # the resource.add names bytes nobody uploaded for this bot
@@ -279,7 +279,7 @@ async def test_a_candidate_whose_result_is_an_existing_revision_is_refused(world
     reworded = edit.model_copy(
         update={"rationale": "the same change, proposed by a run"}
     )  # another digest, the same result
-    run = RunScope("run_9", "clawevolve/bot-evolution@2.0.0", ("persona", "skills", "resources"))
+    run = RunScope("run_7f3", "clawevolve/bot-evolution@2.0.0", ("persona", "skills", "resources"))
     with pytest.raises(PatchRejected) as caught:
         await world.registry.commit_patch(BOT, reworded, created_by=RUN, status=RevisionStatus.CANDIDATE, run=run)
     reason = caught.value.reasons[0]
@@ -292,7 +292,7 @@ async def test_a_candidate_whose_result_is_an_existing_revision_is_refused(world
     assert (same.created, same.revision.revision.id, same.ref) == (
         False,
         draft.revision.revision.id,
-        "candidate/run_9/1",
+        "candidate/run_7f3/1",
     ), "the same patch is a retry"
     again = await world.registry.commit_patch(BOT, edit, created_by=OWNER, status=RevisionStatus.DRAFT)
     assert not again.created and again.revision.revision.id == draft.revision.revision.id, (
@@ -306,7 +306,7 @@ async def test_a_candidate_whose_result_is_an_existing_revision_is_refused(world
         await world.registry.commit_patch(BOT, reworded, created_by=RUN, status=RevisionStatus.CANDIDATE, run=run)
     world.revisions.get = real_get
     assert caught.value.reasons[0].code == "already_recorded" and world.registry.list_refs(BOT) == [
-        r for r in world.registry.list_refs(BOT) if r.name == "candidate/run_9/1"
+        r for r in world.registry.list_refs(BOT) if r.name == "candidate/run_7f3/1"
     ]
 
 
@@ -517,3 +517,19 @@ def test_provenance_holds_the_contracts_run_id_rule() -> None:
     with pytest.raises(ValueError):
         Provenance(ProvenanceKind.USER, "u1", run_id="run_1")  # a user with one
     assert Provenance(ProvenanceKind.STRATEGY_RUN, "s@1", run_id="run_1").as_dict()["run_id"] == "run_1"
+
+
+@pytest.mark.asyncio
+async def test_a_candidates_provenance_must_be_its_runs(world: World) -> None:
+    """``candidate/<run>/<n>`` and the revision's ``created_by`` name the same run, or nothing is recorded."""
+    await world.registry.capture(BOT, created_by=OWNER)
+    patch = load_patch("00-mixed-r1-to-r2.json")
+    run = RunScope(run_id="run_7f3", strategy=RUN.actor, allowed_genes=("persona", "skills", "resources"))
+    other_run = Provenance(ProvenanceKind.STRATEGY_RUN, RUN.actor, run_id="run_other", step="propose")
+    other_strategy = Provenance(ProvenanceKind.STRATEGY_RUN, "other/strategy@1.0.0", run_id="run_7f3")
+    for actor in (OWNER, other_run, other_strategy):
+        with pytest.raises(ValueError):
+            await world.registry.commit_patch(BOT, patch, created_by=actor, status=RevisionStatus.CANDIDATE, run=run)
+    with pytest.raises(ValueError):  # a draft is the owner's
+        await world.registry.commit_patch(BOT, patch, created_by=RUN, status=RevisionStatus.DRAFT)
+    assert world.registry.list_refs(BOT) == []

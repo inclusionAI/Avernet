@@ -41,6 +41,7 @@ from agentclaw.community.core.bot_genome.errors import ContentNotReachable, Reas
 from agentclaw.community.core.bot_genome.limits import (
     MAX_PERSONA_BYTES,
     MAX_RESOURCE_FILE_BYTES,
+    MAX_SCRIPT_BYTES,
     MAX_SEGMENT_BYTES,
     MAX_SKILL_BYTES,
     MAX_TREE_BYTES,
@@ -342,10 +343,22 @@ def memory_reasons(spec: GenomeSpec, content: ContentReader) -> list[Reason]:
 
 
 def script_reasons(spec: GenomeSpec, content: ContentReader) -> list[Reason]:
+    """UTF-8 bytes within the startup-script cap (``limit_exceeded``, ``not_utf8``).
+
+    The cap is the startup-script service's, mirrored from the Manifest. A
+    captured body has the ``${BOT_*}`` placeholders already substituted, so
+    it can be longer than the script the owner typed.
+    """
     reasons: list[Reason] = []
     if spec.script is not None:
         data = _read(content, spec.script.digest, "spec.script", reasons)
-        if data is not None and not _is_utf8(data):
+        if data is None:
+            pass
+        elif len(data) > MAX_SCRIPT_BYTES:
+            reasons.append(
+                Reason("limit_exceeded", "spec.script", f"a startup script is at most {MAX_SCRIPT_BYTES} bytes")
+            )
+        elif not _is_utf8(data):
             reasons.append(Reason("not_utf8", "spec.script", "the script body is not UTF-8 text"))
     return reasons
 

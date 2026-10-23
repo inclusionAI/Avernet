@@ -39,7 +39,7 @@ OTHER_BOT = BotRef(
     bot_type="arca",
 )
 OWNER = Provenance(ProvenanceKind.USER, "user_owner_5")
-RUN = Provenance(ProvenanceKind.STRATEGY_RUN, "strategy:tune", run_id="run_7f3", step="propose")
+RUN = Provenance(ProvenanceKind.STRATEGY_RUN, "clawevolve/bot-evolution@2.0.0", run_id="run_7f3", step="propose")
 
 
 class InMemorySqliteDB:

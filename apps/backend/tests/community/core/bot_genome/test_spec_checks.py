@@ -8,6 +8,7 @@ import pytest
 
 from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import canonical_tree_bytes
 from agentclaw.community.core.bot_genome.limits import MAX_PERSONA_BYTES
+from agentclaw.community.core.bot_genome.limits import MAX_SCRIPT_BYTES
 from agentclaw.community.core.bot_genome.spec_checks import (
     SpecCheckContext,
     SpecChecks,
@@ -337,6 +338,17 @@ def test_memory_items_must_be_canonical_sorted_and_valid() -> None:
     assert {r.code for r in checks.reasons(spec, policy, blobs, CTX)} == {"schema"}
     spec.memory.items_digest = blobs.put(b"not json")
     assert [r.code for r in checks.reasons(spec, policy, blobs, CTX)] == ["schema"]
+
+
+def test_script_is_bounded_like_the_startup_script_service() -> None:
+    blobs = BlobDir()
+    spec, policy = _record()
+    spec.script = ScriptEntry(digest=blobs.put(b"#" * (MAX_SCRIPT_BYTES + 1)))
+    assert [(r.code, r.location) for r in _checks().reasons(spec, policy, blobs, CTX)] == [
+        ("limit_exceeded", "spec.script")
+    ]
+    spec.script = ScriptEntry(digest=blobs.put(b"#" * MAX_SCRIPT_BYTES))
+    assert _checks().reasons(spec, policy, blobs, CTX) == []
 
 
 def test_script_must_be_utf8() -> None:

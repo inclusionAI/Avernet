@@ -403,6 +403,15 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         if (status is RevisionStatus.CANDIDATE) != (run is not None):
             # A candidate is a run's proposal: the run bounds its genes and names its ref. A draft is the owner's.
             raise ValueError("a candidate is recorded with its run, a draft without one")
+        if run is not None:
+            # The revision's provenance and the candidate ref must name the same run, else the audit trail
+            # attributes `candidate/<run>/<n>` to another run or to a user. (`step` is the strategy's own
+            # label for the step, not an identity.)
+            expected = (ProvenanceKind.STRATEGY_RUN, run.strategy, run.run_id)
+            if (created_by.kind, created_by.actor, created_by.run_id) != expected:
+                raise ValueError("a candidate's provenance is its run's: strategy_run, the run's strategy and run_id")
+        elif created_by.kind is not ProvenanceKind.USER:
+            raise ValueError("a draft is recorded by a user")
         patch_json = patch.to_json()
         reasons = shape_reasons(patch_json)
         if reasons:

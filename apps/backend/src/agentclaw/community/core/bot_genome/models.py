@@ -93,10 +93,14 @@ class BotRef:
 class Provenance:
     """Who recorded a revision or moved a ref (contract ``created_by`` / ``moved_by``).
 
-    ``actor`` is what the contract names: a user id, or for a ``strategy_run``
-    the strategy's ``id@version``. The apply-time permission checks are made
-    against a user, so a strategy's record also carries the ``principal``
-    the run acts for; a user's record checks as the user.
+    ``actor`` is a user id, or for a ``strategy_run`` the strategy's
+    ``id@version``. On the way in, ``actor`` is the acting user and
+    ``recorded_as`` the audit identity when the two differ; what is stored,
+    and what every read (``created_by``, ``moved_by``, a promotion's actor)
+    shows as ``actor``, is the audit identity (01-genome.md §12). The
+    apply-time permission checks are made against a user, so a strategy's
+    record also carries the ``principal`` the run acts for; a user's record
+    checks as the user.
     """
 
     kind: ProvenanceKind
@@ -105,9 +109,10 @@ class Provenance:
     step: str | None = None
     #: What the audit columns (``created_actor``, ``moved_actor``, a promotion's ``actor_id``) record
     #: when that is not ``actor`` itself. Set only for an admitted application acting for a user:
-    #: ``actor`` is the user (what the contract's ``created_by`` shows), ``recorded_as`` is
-    #: ``app:<application id>:on-behalf-of:<user>``, so the audit trail keeps the application.
-    #: ``None`` for a user acting directly and for a strategy run: the audit then records ``actor``.
+    #: ``actor`` is the user (what ``checked_as`` checks permissions as), ``recorded_as`` is
+    #: ``app:<application id>:on-behalf-of:<user>``, which is what the record then shows as its
+    #: ``created_by.actor`` / ``moved_by.actor``, as the Manifest's audit columns do. ``None`` for a
+    #: user acting directly and for a strategy run: the audit then records ``actor``.
     recorded_as: str | None = None
     #: ``strategy_run`` only: the user the run acts for, which the MCP permission check is made against.
     principal: str | None = None

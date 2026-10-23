@@ -14,6 +14,7 @@ from agentclaw.community.core.bot_config_manifest.fetch.limits import (
 from agentclaw.community.core.bot_config_manifest.schema.limits import (
     MAX_ENTRIES_PER_CATEGORY,
     MAX_INLINE_CONTENT_BYTES,
+    MAX_SCRIPT_BYTES,
 )
 
 __all__ = [
@@ -24,6 +25,7 @@ __all__ = [
     "MAX_INLINE_CONTENT_BYTES",
     "MAX_PERSONA_BYTES",
     "MAX_RESOURCE_FILE_BYTES",
+    "MAX_SCRIPT_BYTES",
     "MAX_SKILL_BYTES",
     "MAX_TREE_BYTES",
     "MAX_TREE_MEMBERS",
