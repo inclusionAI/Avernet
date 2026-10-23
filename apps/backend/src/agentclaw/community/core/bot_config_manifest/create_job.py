@@ -28,19 +28,20 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
+from agentclaw.community.core.apply_engine.compiler import ManifestStateRef
 from agentclaw.community.core.bot_app_grant.protocols import (
     BotAppGrantSweepProtocol,
 )
-from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+from agentclaw.community.core.apply_engine.delivery import (
     CreationSequence,
 )
-from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
-from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
+from agentclaw.community.core.apply_engine.order import ApplyPhase
+from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
+from agentclaw.community.core.apply_engine.run.service_protocol import (
     ManifestApplyInProgressError,
 )
-from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
-    BotConfigManifestApplyServiceProtocol,
+from agentclaw.community.core.apply_engine.run.service_protocol import (
+    ApplyRunServiceProtocol,
 )
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_ON_CONTAINER_TRIGGER,
@@ -301,7 +302,7 @@ class BotCreateWithManifestHandler:
         self,
         *,
         manifest_seam_provider: Callable[[], ManifestCreationSeam],
-        apply_service_provider: Callable[[], BotConfigManifestApplyServiceProtocol],
+        apply_service_provider: Callable[[], ApplyRunServiceProtocol],
         bot_repository_provider: Callable[[], BotRepository],
         passport_plugin_provider: Callable[[], PassportPlugin],
         # The three below stay ``Any``, and each for the same structural
@@ -634,6 +635,7 @@ class BotCreateWithManifestHandler:
                 bot=bot,
                 owner_id=str(payload["user_id"]),
                 actor_id=str(payload["user_id"]),
+                state=ManifestStateRef(),
                 trigger=CREATE_ON_CONTAINER_TRIGGER,
                 phase=ApplyPhase.ON_CONTAINER,
                 carry_from_apply_id=self._pre_container_apply_id(

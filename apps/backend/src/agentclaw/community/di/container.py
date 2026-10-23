@@ -41,8 +41,8 @@ from agentclaw.community.di.modules.bot_friend_auth_module import BotFriendAuthM
 from agentclaw.community.di.modules.bot_inventory_module import BotInventoryModule
 from agentclaw.community.di.modules.bot_genome_module import BotGenomeModule
 from agentclaw.community.di.modules.bot_management_module import BotManagementModule
-from agentclaw.community.di.modules.manifest_delivery_module import (
-    ManifestDeliveryModule,
+from agentclaw.community.di.modules.apply_engine_module import (
+    ApplyEngineModule,
 )
 from agentclaw.community.di.modules.manifest_fetch_module import ManifestFetchModule
 from agentclaw.community.di.modules.bot_public_module import BotPublicModule
@@ -194,7 +194,7 @@ def build_injector(
         # The content store binds after the module that parses its blob root
         # (cfg.BotConfigManifestConfig) and before its two consumers.
         ContentStoreModule(),
-        ManifestDeliveryModule(),
+        ApplyEngineModule(),
         BotGenomeModule(),
         BotInventoryModule(),
         SkillsPoolModule(),

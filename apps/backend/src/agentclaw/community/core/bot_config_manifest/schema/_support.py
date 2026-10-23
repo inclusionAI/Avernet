@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable
 from urllib.parse import urlsplit
 
-from agentclaw.community.core.bot_config_manifest.capabilities import (
+from agentclaw.community.core.apply_engine.capabilities import (
     ManifestCapabilities,
 )
 from agentclaw.community.core.bot_config_manifest.schema.limits import (
@@ -23,6 +23,7 @@ from agentclaw.community.core.bot_config_manifest.schema.placeholders import (
 from agentclaw.community.core.bot_config_manifest.schema.sources import (
     SourceDecl,
 )
+from agentclaw.community.core.apply_engine.paths import relative_path_refusal
 from agentclaw.community.core.bot_config_manifest.schema.violations import Violation
 
 #: ``sha256:`` + 64 lowercase hex. One form, because a digest that can be
@@ -30,11 +31,6 @@ from agentclaw.community.core.bot_config_manifest.schema.violations import Viola
 #: ``\A``/``\Z`` form for the same reason the shared fetch-side
 #: ``DIGEST_RE`` states: ``$`` also matches before a trailing newline.
 _DIGEST_RE = re.compile(r"\Asha256:[0-9a-f]{64}\Z")
-
-#: Conservative on purpose: letters, digits, and the four separators a real
-#: workspace path needs. Everything a shell, a URL or a filesystem would have to
-#: quote is refused here rather than escaped at four downstream call sites.
-_PATH_CHARS_RE = re.compile(r"^[A-Za-z0-9._/\-${}]+$")
 
 #: An identifier for a skill or a tool. It becomes a directory name and, for a
 #: tool, a command name.
@@ -163,42 +159,6 @@ def check_digest(ctx: Context, location: str, value: Any) -> None:
             "invalid_digest",
             "digest must be 'sha256:' followed by 64 lowercase hex characters",
         )
-
-
-def relative_path_refusal(
-    value: Any, *, what: str = "path"
-) -> tuple[str, str] | None:
-    """The workspace-relative path rule, pure (no ``Context``, no I/O).
-
-    Returns ``(code, message)`` for a value the workspace cannot accept, or
-    ``None`` when it is usable by later rules (nesting, basenames). Re-asked
-    from outside the PUT layer — the apply-time belt (a stored document can
-    predate the validator) — as *the* rule rather than a re-derivation, so
-    the two sides cannot drift.
-
-    ``..`` is checked **per segment**, not as a substring: a directory named
-    ``..config`` is legitimate and contains the two characters. A substring test
-    would refuse it while still admitting nothing more.
-    """
-    if not isinstance(value, str) or not value:
-        return "invalid_path", f"{what} must be a non-empty string"
-    if value.startswith("/") or (len(value) > 1 and value[1] == ":"):
-        return (
-            "absolute_path",
-            f"{what} must be workspace-relative, not absolute",
-        )
-    if value.startswith("~"):
-        return "absolute_path", f"{what} must not start with '~'"
-    segments = value.split("/")
-    if any(segment == ".." for segment in segments):
-        return "path_traversal", f"{what} must not contain a '..' segment"
-    if not _PATH_CHARS_RE.match(value):
-        return (
-            "invalid_path",
-            f"{what} may only contain letters, digits, '.', '_', '-', '/' and "
-            "${...} placeholders",
-        )
-    return None
 
 
 def check_relative_path(

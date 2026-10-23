@@ -29,13 +29,13 @@ The HTTP adapter maps the returned plain dicts / bytes to its response schemas.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Mapping
 
 from injector import inject
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_config_surface.coords import BotConfigCoords
-from agentclaw.community.core.ports.resource_file_port import ResourceFilePort
+from agentclaw.community.core.ports.resource_file_port import ResourceFilePort, RootListingFailed
 from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_runtime_engine_for_bot,
 )
@@ -62,7 +62,7 @@ from agentclaw.community.core.resources.services.file_service import (
     admission_refusal,
 )
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
-from agentclaw.community.core.workspace.constants import SUPPORTED_ENGINE_TYPES
+from agentclaw.community.core.workspace.constants import RESOURCES_ROOT_DIR, SUPPORTED_ENGINE_TYPES
 from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemDispatcher
 from agentclaw.community.log import get_logger
 
@@ -352,9 +352,18 @@ class ResourceFileService(ResourceFilePort):
         a recursive listing correct; teclaw doesn't, so fall back to the entry name
         (valid for the non-recursive listings we do today).
         """
-        rel_in_listing = entry.get("relative_path")
-        leaf = rel_in_listing if rel_in_listing else entry.get("name", "")
+        leaf = ResourceFileService._leaf(entry)
         return f"{request_path}/{leaf}" if request_path else leaf
+
+    @staticmethod
+    def _leaf(entry: Mapping[str, Any]) -> str:
+        """The path an entry goes by under the listed directory: ``relative_path`` where the engine gives one, else
+        ``name``; ``""`` for neither."""
+        for key in ("relative_path", "name"):
+            value = entry.get(key)
+            if isinstance(value, str) and value:
+                return value
+        return ""
 
     # ── operations ───────────────────────────────────────────────────────────
 
@@ -627,6 +636,92 @@ class ResourceFileService(ResourceFilePort):
             return await device_fs.delete_tree(logical)
         return await device_fs.delete_file(logical)
 
+    async def list_root(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+        runtime_context: DeviceContext | None = None,
+    ) -> tuple[str, ...]:
+        """Every file under the resources root, as ``data/...`` paths; ``()`` when the root is absent.
+
+        Level by level, like the directory download — no engine's recursive
+        flag is trusted — but with none of its curation: dotfiles and system
+        names count, because everything under the root is the apply engine's
+        to replace. Nothing is skipped: the listing is what the apply engine
+        clears and rewrites the root on the strength of, so it is complete or
+        it raises.
+
+        A root that does not list is confirmed absent from its parent: a bot
+        that has had its identity applied has a workspace that lists, so a
+        workspace that does not is a transport that cannot list at all, and
+        a workspace that still names ``data`` is a root listing that failed
+        (or a file squatting on the root) — each raises ``RootListingFailed``
+        rather than answer ``()``, because teclaw's ``list_dir`` gives
+        ``None`` for an absent directory and a failed call alike. The same
+        holds one level down: a subdirectory the walk was just told about
+        and then cannot list is a failed listing, not an empty directory,
+        and an entry with no name at all is a listing the walk cannot read.
+        An entry that does not say ``is_dir`` is read as a file, as the
+        directory download reads it.
+        """
+        ctx = runtime_context or self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
+        device_fs = self._device_fs(
+            ctx, entity_type=entity_type, entity_id=entity_id,
+            bot_id=bot_id, engine_type=engine_type,
+        )
+        root = await device_fs.list_dir(self._logical(RESOURCES_ROOT_DIR))
+        if root is None:
+            parent = await device_fs.list_dir(self._logical(""))
+            if parent is None:
+                raise RootListingFailed(f"the workspace of bot {bot_id} could not be listed")
+            named = self._named_in(parent, RESOURCES_ROOT_DIR)
+            if named is None:
+                return ()
+            if self._is_dir_flag(named) is False:
+                raise RootListingFailed(f"the resources root of bot {bot_id} is a file, not a directory")
+            raise RootListingFailed(f"the resources root of bot {bot_id} is present but could not be listed")
+        files: list[str] = []
+        queue: list[tuple[str, list[dict[str, Any]]]] = [(RESOURCES_ROOT_DIR, root)]
+        while queue:
+            current, entries = queue.pop(0)
+            for entry in sorted(entries, key=self._leaf):
+                if not self._leaf(entry):
+                    # Nameless: the listing is not one to clear a root on.
+                    raise RootListingFailed(f"{current} of bot {bot_id} listed an entry without a name")
+                rel = self._rel_path(current, entry)
+                if self._is_dir_flag(entry):
+                    sub = await device_fs.list_dir(self._logical(rel))
+                    if sub is None:
+                        raise RootListingFailed(f"{rel} of bot {bot_id} was listed but could not be listed itself")
+                    queue.append((rel, sub))
+                    continue
+                files.append(rel)
+        return tuple(files)
+
+    async def clear_root(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+        runtime_context: DeviceContext | None = None,
+    ) -> bool:
+        """Delete the resources root tree; ``False`` when there was nothing to delete.
+
+        One ``delete_tree`` of ``workspace/data``: the engine's own tree
+        delete, which every transport routes to its recursive remove.
+        """
+        ctx = runtime_context or self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
+        device_fs = self._device_fs(
+            ctx, entity_type=entity_type, entity_id=entity_id,
+            bot_id=bot_id, engine_type=engine_type,
+        )
+        return await device_fs.delete_tree(self._logical(RESOURCES_ROOT_DIR))
+
     async def _is_dir(self, device_fs: Any, path: str) -> bool:
         """Whether *path* names a directory, asked of the parent's listing.
 
@@ -648,10 +743,26 @@ class ResourceFileService(ResourceFilePort):
                 type(self).__name__, parent, exc,
             )
             return False
-        for entry in entries or ():
-            if entry.get("name") == leaf:
-                return bool(entry.get("is_dir", False))
-        return False
+        named = self._named_in(entries or (), leaf)
+        return bool(self._is_dir_flag(named)) if named is not None else False
+
+    @staticmethod
+    def _named_in(entries: Any, leaf: str) -> dict[str, Any] | None:
+        """The listing entry named ``leaf``, or ``None`` when the listing has no such child.
+
+        The listings here are never recursive, so an entry's path under the
+        listed directory (``_leaf``) is its name.
+        """
+        for entry in entries:
+            if ResourceFileService._leaf(entry) == leaf:
+                return entry
+        return None
+
+    @staticmethod
+    def _is_dir_flag(entry: Mapping[str, Any]) -> bool | None:
+        """The entry's ``is_dir`` as the engine said it (a bool, or ``0``/``1``); ``None`` when it did not say."""
+        flag = entry.get("is_dir")
+        return bool(flag) if isinstance(flag, (bool, int)) else None
 
     async def upload_file(
         self,

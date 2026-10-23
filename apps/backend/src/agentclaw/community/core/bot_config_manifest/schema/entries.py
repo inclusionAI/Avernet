@@ -17,7 +17,9 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlsplit
 
-from agentclaw.community.core.bot_config_manifest.capabilities import (
+from agentclaw.community.core.apply_engine.desired_state import RESOURCES_ROOT
+from agentclaw.community.core.apply_engine.identity_types import RESERVED_IDENTITY_FILES, legal_identity_types
+from agentclaw.community.core.apply_engine.capabilities import (
     ManifestCategory,
 )
 from agentclaw.community.core.bot_config_manifest.schema._support import (
@@ -34,19 +36,13 @@ from agentclaw.community.core.bot_config_manifest.schema.sources import (
     SourceDecl,
     parse_source,
 )
-from agentclaw.community.core.bot_config_manifest.support_matrix import (
+from agentclaw.community.core.apply_engine.support_matrix import (
     ARCHIVE_FIELDS,
     SourceKind,
     archive_field_refusal,
     digest_required,
     refusal_for,
 )
-
-#: Engine-generated runtime state. Apply never writes them and never removes
-#: them (work-items §3.2), so a document declaring one would be accepted and
-#: then never converge. Refused at write time instead, which is what keeps
-#: "accepted" and "appliable" the same set.
-RESERVED_IDENTITY_FILES: frozenset[str] = frozenset({"MEMORY.md", "IDENTITY.md"})
 
 #: ``skip`` is gone. Under per-entry diffing it meant "leave this one alone";
 #: under category overwrite (work-items §3.2) it would mean "delete this one" —
@@ -59,7 +55,7 @@ VALID_UNPACK: frozenset[str] = frozenset({"zip", "tar.gz"})
 
 #: Which (category, protocol) combinations this build accepts is no longer
 #: written here at all: it is
-#: :data:`~agentclaw.community.core.bot_config_manifest.support_matrix.MATRIX`,
+#: :data:`~agentclaw.community.core.apply_engine.support_matrix.MATRIX`,
 #: one table that this validator and the capabilities endpoint both read. The
 #: per-category narrowing that used to live at this spot was the defect, not the
 #: rule — it could not be enumerated, published, or tested cell by cell.
@@ -93,26 +89,6 @@ _MAX_MCP_HEADER_VALUE_CHARS = 2000
 
 #: The four mutually exclusive ways an entry can name its content (schema §2).
 _SOURCE_SELECTORS = ("from", "source", "content")
-
-
-def legal_identity_types(engine_type: str) -> frozenset[str]:
-    """The identity files this engine accepts.
-
-    Imported lazily, and that is not style: ``core/services/identity.py`` pulls
-    in the device dispatcher and a DI module at import time, so a module-level
-    import would drag the injector into a pure validator and close a cycle. The
-    constants stay defined there — one definition, per that module's own
-    docstring — and ``harness/services/bot_profile.py`` reaches them the same
-    way for the same reason.
-    """
-    from agentclaw.community.core.services.identity import (
-        CLAUDE_CODE_IDENTITY_FILES,
-        VALID_IDENTITY_FILES,
-    )
-
-    if engine_type == "claude_code":
-        return frozenset(CLAUDE_CODE_IDENTITY_FILES)
-    return frozenset(VALID_IDENTITY_FILES)
 
 
 def check_entry_keys(
@@ -178,7 +154,7 @@ def resolve_source(
       has none, and a git ref's commit SHA *is* its digest (§2.2), so writing
       one there is a second, weaker pin that can disagree with the first.
     * **the (category, protocol) cell must be open.** Asked of
-      :data:`~agentclaw.community.core.bot_config_manifest.support_matrix.MATRIX`
+      :data:`~agentclaw.community.core.apply_engine.support_matrix.MATRIX`
       — the same table ``GET …/capabilities`` publishes — so a refusal here and
       the answer a caller reads before writing are the same string, and the
       combination is refused at ``PUT`` rather than at apply.
@@ -680,6 +656,16 @@ def validate_resource_entry(
     check_entry_keys(ctx, location, entry, ManifestCategory.RESOURCES)
     path = entry.get("path")
     usable = check_relative_path(ctx, f"{location}.path", path, what="path")
+    if usable and (not str(path).startswith(RESOURCES_ROOT) or path == RESOURCES_ROOT):
+        # The resources root: converging resources clears it and writes the
+        # declared entries back, so a path outside it would never be removed
+        # and a path naming the root itself has no entry to be.
+        ctx.add(
+            f"{location}.path",
+            "resources_outside_root",
+            f"resource path must be under the resources root {RESOURCES_ROOT!r}",
+        )
+        usable = False
     is_directory = isinstance(path, str) and path.endswith("/")
     source = resolve_source(ctx, location, entry, ManifestCategory.RESOURCES)
     # Git carries directory structure natively, so a tree needs no packaging

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.core.bot_config_manifest.capabilities import (
+from agentclaw.community.core.apply_engine.capabilities import (
     resolve_capabilities,
 )
 from agentclaw.community.core.bot_config_manifest.schema import (
@@ -224,7 +224,7 @@ sources:
     ref: v1.2.0
 manifest:
   resources:
-    - path: assets/logo.png
+    - path: data/assets/logo.png
       from: content
       subpath: brand/logo.png
 """)
@@ -232,7 +232,7 @@ manifest:
     _accept("""schema_version: 1
 manifest:
   resources:
-    - path: assets/logo.png
+    - path: data/assets/logo.png
       source:
         protocol: git
         url: https://code.example.com/team/content.git
@@ -1473,3 +1473,23 @@ def test_one_mistake_on_a_source_field_is_one_violation():
         assert decl is None
         assert len(violations) == 1, (raw, [v.message for v in violations])
         assert expected in violations[0].message, (raw, violations[0].message)
+
+
+def test_resources_live_under_the_resources_root():
+    """A resource path outside ``data/`` (or naming the root itself) is refused at PUT: converging
+    resources clears the root and writes the declared entries back, so nothing outside it could
+    ever be removed, and the root has no entry to be."""
+    outside = """schema_version: 1
+manifest:
+  resources:
+    - path: notes/hello.txt
+      content: hi
+    - path: data/
+      content: hi
+    - path: data/notes/hello.txt
+      content: hi
+"""
+    rejected = _reject(outside)
+    assert ("manifest.resources[0].path", "resources_outside_root") in rejected
+    assert ("manifest.resources[1].path", "resources_outside_root") in rejected
+    assert not any(code == "resources_outside_root" and "[2]" in loc for loc, code in rejected)

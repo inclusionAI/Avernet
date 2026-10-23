@@ -1,10 +1,10 @@
 """``GenomePromotionService``: the 08-promotion.md §7.1 steps over the registry, the refs and the seam.
 
 Order: resolve the target → refuse a candidate the gate has not accepted →
-compile → drift (automated actors only) → ``applier.preflight`` → one
+compile → drift (automated actors only, observed by reading the bot) → ``applier.preflight`` → one
 transaction holding the ``active``/``previous`` compare-and-swap, the
-revision's ``promoted`` status and the promotion row with the compiled
-document → ``applier.start`` → the row's delivery answer. Everything before
+revision's ``promoted`` status and the promotion row → ``applier.start`` →
+the row's delivery answer. Everything before
 that transaction leaves no trace, and the transaction leaves all or nothing.
 """
 
@@ -14,7 +14,6 @@ import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
 
-from agentclaw.community.core.bot_genome.canonical import canonicalize, loads_strict
 from agentclaw.community.core.bot_genome.errors import (
     Drifted,
     NotPromotable,
@@ -96,13 +95,13 @@ class GenomePromotionService(GenomePromotionServiceProtocol):
                 f"revision {target.revision.id} is {status.value}; "
                 "only a draft, an accepted candidate or a promoted revision can be promoted"
             )
-        compiled = self._registry.compile(bot, target.revision.id)
-        active = self._refs.get(**self._axes(bot), name="active")
-        if active is not None and actor.kind is not ProvenanceKind.USER:
-            applied = self._registry.applied_revision(bot)
-            if applied != active.revision_id:
-                raise Drifted(active=active.revision_id, applied=applied)
-        self._applier.preflight(bot, compiled)
+        state = self._registry.compile(bot, target.revision.id)
+        if actor.kind is not ProvenanceKind.USER:
+            # An automated actor may not promote over a bot that has moved by hand; an owner may.
+            drift = await self._registry.drift(bot)
+            if drift is not None:
+                raise Drifted(active=drift.active, observed=drift.observed)
+        self._applier.preflight(bot, state)
 
         now = _now()
         row = self._promotions.start(
@@ -112,8 +111,6 @@ class GenomePromotionService(GenomePromotionServiceProtocol):
                 ref="active",
                 revision_id=target.revision.id,
                 from_revision_id=expected_revision,
-                document_digest=compiled.document_digest,
-                document_json=canonicalize(compiled.document).decode("utf-8"),
                 going_back=status is RevisionStatus.PROMOTED and expected_revision != target.revision.id,
                 actor_kind=actor.kind.value,
                 actor_id=actor.audit,
@@ -136,7 +133,7 @@ class GenomePromotionService(GenomePromotionServiceProtocol):
             current = self._refs.get(**self._axes(bot), name="active")
             raise RefConflict("active", expected=expected_revision, current=current.revision_id if current else None)
         try:
-            result = await self._applier.start(bot, compiled, actor=actor, reason=reason)
+            result = await self._applier.start(bot, state, actor=actor, reason=reason)
         # The refs moved already: a delivery failure is the promotion's record, not the caller's crash.
         except Exception as exc:  # noqa: BLE001
             logger.warning(
@@ -150,7 +147,6 @@ class GenomePromotionService(GenomePromotionServiceProtocol):
                 **self._axes(bot),
                 promotion_id=row.promotion_id,
                 status="apply_failed",
-                apply_reference=None,
                 apply_detail=detail,
             )
         else:
@@ -158,36 +154,32 @@ class GenomePromotionService(GenomePromotionServiceProtocol):
                 **self._axes(bot),
                 promotion_id=row.promotion_id,
                 status="applied",
-                apply_reference=result.reference,
                 apply_detail=result.detail[:1024],
             )
-        return _promotion(finished or row, with_document=True)
+        return _promotion(finished or row)
 
     def get_promotion(self, bot: BotRef, promotion_id: str) -> Promotion:
         row = self._promotions.get(**self._axes(bot), promotion_id=promotion_id)
         if row is None:
             raise RevisionNotFound(promotion_id)
-        return _promotion(row, with_document=True)
+        return _promotion(row)
 
     def list_promotions(self, bot: BotRef, *, page: int = 1, page_size: int = 20) -> PromotionPage:
         total, rows = self._promotions.list(**self._axes(bot), page=page, page_size=page_size)
-        return PromotionPage(total=total, items=tuple(_promotion(row, with_document=False) for row in rows))
+        return PromotionPage(total=total, items=tuple(_promotion(row) for row in rows))
 
 
-def _promotion(row: GenomePromotionRow, *, with_document: bool) -> Promotion:
+def _promotion(row: GenomePromotionRow) -> Promotion:
     return Promotion(
         id=row.promotion_id,
         ref=row.ref,
         revision=row.revision_id,
         from_revision=row.from_revision_id,
-        document_digest=row.document_digest,
         going_back=bool(row.going_back),
         actor=Provenance(ProvenanceKind(row.actor_kind), row.actor_id, run_id=row.actor_run_id),
         reason=row.reason,
         status=row.status,
         apply_kind=row.apply_kind,
-        apply_reference=row.apply_reference,
         apply_detail=row.apply_detail,
         created_at=row.created_at,
-        document=loads_strict(row.document_json) if with_document else None,
     )

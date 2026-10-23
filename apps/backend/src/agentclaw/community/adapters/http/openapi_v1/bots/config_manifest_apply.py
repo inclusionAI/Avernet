@@ -8,7 +8,7 @@ row.
 
 Nothing about *what applying does* is decided here. The router resolves the bot,
 calls the service, and shapes the result; the rules live in
-``core/bot_config_manifest/apply``.
+``core/apply_engine``.
 """
 
 from __future__ import annotations
@@ -34,8 +34,9 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
 )
-from agentclaw.community.api.bot_config_manifest_apply_service import (
-    BotConfigManifestApplyServiceProtocol,
+from agentclaw.community.api.apply_run_service import (
+    ApplyRunServiceProtocol,
+    ManifestStateRef,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.di import Injected
@@ -115,8 +116,8 @@ async def apply_bot_config_manifest(
         ),
     ] = False,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    apply_service: BotConfigManifestApplyServiceProtocol = Injected(
-        BotConfigManifestApplyServiceProtocol
+    apply_service: ApplyRunServiceProtocol = Injected(
+        ApplyRunServiceProtocol
     ),
 ) -> Envelope[ConfigManifestApplyAccepted] | Envelope[ConfigManifestApply]:
     """Apply this bot's stored manifest. Returns immediately with an id to poll.
@@ -177,6 +178,7 @@ async def apply_bot_config_manifest(
             # A dry run writes no record, so it has no audit column to fill and
             # needs only the principal.
             actor_id=actor_id,
+            state=ManifestStateRef(),
         )
         return envelope(apply_payload(report), request)
 
@@ -193,6 +195,9 @@ async def apply_bot_config_manifest(
         owner_id=owner_id,
         actor_id=actor_id,
         audit_actor=audit,
+        # This API applies the bot's stored document; a promotion's revision
+        # starts from the genome routes.
+        state=ManifestStateRef(),
     )
     return envelope(
         ConfigManifestApplyAccepted(
@@ -216,8 +221,8 @@ async def get_bot_config_manifest_apply(
     actor_id: UserIdDep,
     owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    apply_service: BotConfigManifestApplyServiceProtocol = Injected(
-        BotConfigManifestApplyServiceProtocol
+    apply_service: ApplyRunServiceProtocol = Injected(
+        ApplyRunServiceProtocol
     ),
 ) -> Envelope[ConfigManifestApply]:
     """Read one apply's report, whether it is still running or finished.
@@ -252,8 +257,8 @@ async def get_bot_config_manifest_last_apply(
     actor_id: UserIdDep,
     owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    apply_service: BotConfigManifestApplyServiceProtocol = Injected(
-        BotConfigManifestApplyServiceProtocol
+    apply_service: ApplyRunServiceProtocol = Injected(
+        ApplyRunServiceProtocol
     ),
 ) -> Envelope[ConfigManifestApply]:
     """The most recent apply for this bot.

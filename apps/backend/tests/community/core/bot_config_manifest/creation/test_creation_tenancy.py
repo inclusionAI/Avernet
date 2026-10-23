@@ -23,10 +23,10 @@ from typing import Optional
 
 import pytest
 
-from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
+from agentclaw.community.core.apply_engine.apply_task import (
     ApplyTaskHandler,
 )
-from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+from agentclaw.community.core.apply_engine.delivery import (
     CreationSequence,
 )
 from agentclaw.community.core.bot_config_manifest.create_job import (
@@ -75,7 +75,7 @@ class _TenantWatchingManifests:
         # Recorded here too: this is the record-free entry point the
         # pre-container phase uses, and it is reached before the document read.
         self._observe()
-        from agentclaw.community.core.bot_config_manifest.capabilities import (
+        from agentclaw.community.core.apply_engine.capabilities import (
             resolve_capabilities,
         )
 
@@ -113,23 +113,23 @@ def _real_apply_service(manifests):
     from sqlalchemy.pool import StaticPool
 
     from agentclaw.community.core.base import Base
-    from agentclaw.community.core.bot_config_manifest.repository.apply_models import (  # noqa: F401
+    from agentclaw.community.core.apply_engine.repository.apply_models import (  # noqa: F401
         BotConfigManifestApplyLockModel,
         BotConfigManifestApplyModel,
     )
     from agentclaw.community.core.bot_config_manifest.repository.models import (  # noqa: F401
         BotConfigManifestModel,
     )
-    from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
-        BotConfigManifestApplyService,
+    from agentclaw.community.core.apply_engine.run.service import (
+        ApplyRunService,
     )
     from agentclaw.community.core.repository.implementations.bot.config_manifest_apply import (
         BotConfigManifestApplyLockRepository,
         BotConfigManifestApplyRepository,
     )
-    from ..apply._fakes import (
-        FakeGitClient,
-        arca_only_delivery,
+    from tests.community.core.apply_engine._fakes import (
+        manifest_compilers,
+            arca_only_delivery,
         device_port_bundle,
     )
 
@@ -157,11 +157,11 @@ def _real_apply_service(manifests):
                 db.close()
 
     db = _Db()
-    return BotConfigManifestApplyService(
+    return ApplyRunService(
         manifest_service=manifests,
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
-        git_client_provider=lambda: FakeGitClient(),
+        compilers=manifest_compilers(manifests=manifests),
         task_queue_provider=lambda: None,
         bot_repository=_NoBot(),
         # The delivery seam, assembled the way the composition root

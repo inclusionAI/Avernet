@@ -8,7 +8,7 @@ are migrated.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from agentclaw.community.core.resources.models import (
     Resource,
@@ -18,7 +18,9 @@ from agentclaw.community.core.resources.models import (
     create_node_resource,
     create_url_resource,
 )
+from agentclaw.community.core.ports.resource_rows_port import ResourceRowsPort
 from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
+from agentclaw.community.core.workspace.constants import RESOURCES_ROOT_DIR
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -61,7 +63,7 @@ class InvalidResourcePathError(ValueError):
     """
 
 
-class ResourceService:
+class ResourceService(ResourceRowsPort):
     """Manage resources backed by `ResourceRepositoryProtocol`."""
 
     def __init__(self, *, bot_id: str, repository: ResourceRepositoryProtocol) -> None:
@@ -408,6 +410,32 @@ class ResourceService:
                 # many rows as it has files.
                 removed = self._repo.delete(str(item.get("id"))) or removed
         return removed
+
+    async def replace_manifest_rows(
+        self,
+        *,
+        files: Sequence[tuple[str, int]],
+        owner_id: str,
+        created_by: Optional[str],
+    ) -> None:
+        """Replace this bot's file rows under the resources root with the apply's written set.
+
+        The rows are the console listing's and the publish pipeline's view of
+        the workspace, so after an apply has rewritten ``data/`` in full they
+        must say exactly that: every row under the root goes, and one row per
+        written file comes back with ``source="manifest"``, owned by the
+        bot's owner so the console's per-user listing and duplicate check see
+        it, and stamped with the actor who applied. The repository offers no
+        transaction, so this is delete-then-insert through its own calls;
+        nothing is caught, so a write that did not land raises to the
+        materialiser, which reports the category partially written and the
+        next apply converges it.
+        """
+        # The root's row and every row beneath it, the same subtree rule a
+        # directory delete uses.
+        await self.delete_file_record(path=RESOURCES_ROOT_DIR)
+        for path, size in files:
+            await self.record_uploaded_file(path=path, size=size, user_id=owner_id, created_by=created_by, source="manifest")
 
     async def record_uploaded_file(
         self,

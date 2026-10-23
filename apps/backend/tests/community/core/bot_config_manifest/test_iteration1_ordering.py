@@ -16,27 +16,27 @@ container by the artifact — there is no first-boot ordering at all.
 """
 from __future__ import annotations
 
-from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+from agentclaw.community.core.apply_engine.delivery import (
     ArcaDelivery,
     MaterialiserPorts,
     TeclawPlatformDelivery,
 )
-from agentclaw.community.core.bot_config_manifest.apply.order import (
+from agentclaw.community.core.apply_engine.order import (
     APPLY_ORDER,
     ApplyPhase,
 )
-from agentclaw.community.core.bot_config_manifest.apply.triggers import (
+from agentclaw.community.core.apply_engine.triggers import (
     ALL_TRIGGERS,
     TRIGGER_COLUMN_WIDTH,
 )
-from agentclaw.community.core.bot_config_manifest.capabilities import ManifestSection
+from agentclaw.community.core.apply_engine.capabilities import ManifestSection
 async def _no_redeliver(ctx) -> None:
     """The closing step, doing nothing — this test is not about it."""
     return None
 
 
 def _ports() -> MaterialiserPorts:
-    return MaterialiserPorts(*([None] * 11))
+    return MaterialiserPorts(*([None] * 12))
 
 
 def test_on_arca_the_script_is_the_only_pre_container_construct() -> None:

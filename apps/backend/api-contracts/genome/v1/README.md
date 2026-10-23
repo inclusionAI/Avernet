@@ -395,7 +395,7 @@ Every entry in `spec` is a **key**, the one field that names it, plus a
   system's path limit (4096 bytes on Linux) once the workspace root is in
   front of it. The characters are the Manifest's own path rule, ASCII only:
   a resource with any other name could not be written back through a
-  compiled document, so it cannot be recorded (§7, §8). Every file a resource puts in the
+  compiled state, so it cannot be recorded (§7, §8). Every file a resource puts in the
   workspace (a file resource, or each member of a directory resource) must
   pass the workspace admission rule apply uses, `admission_refusal` in
   `core/resources/services/file_service.py`: an allowed extension
@@ -741,7 +741,7 @@ base of its own; the base is always the patch's, `active`, or none.
 A Bot Config Manifest v1 document is not recorded directly. It is applied
 through `PUT /config-manifest` as today, and the resulting bot state is then
 captured; the field-by-field mapping of a document into the revision it
-yields, and of the revision back into the compiled document, is in
+yields, and of the revision into the compiled desired state, is in
 [`manifest-v1-compatibility.md`](manifest-v1-compatibility.md). How the
 document's fetch details end up, after apply and capture:
 
@@ -765,7 +765,7 @@ document's fetch details end up, after apply and capture:
 
 A current-state resource whose path the Manifest's path rule refuses (any
 character outside `A–Z a–z 0–9 . _ - /`, for example `how to.md`, which the
-console upload accepts) cannot be captured, because no compiled document
+console upload accepts) cannot be captured, because no compiled state
 could deliver it back. Capture refuses and names the path, rather than
 dropping the resource silently; the owner renames it first (§8). Capture
 reads resource files the platform has a row for, under the bot's `data/`
@@ -803,26 +803,29 @@ its `repo_path`.
 **Ignored and refused.**
 
 - `cli_tools` in a document is ignored: it stays only in the provenance YAML,
-  the revision has no CLI tools, and the compiled document omits the
-  category, so apply leaves the bot's existing CLI tools as they are.
+  the revision has no CLI tools, and the compiled state leaves the construct
+  undeclared, so apply leaves the bot's existing CLI tools as they are.
 - `engine_config` in a document is refused (the Manifest refuses it too),
   until #2858.
 
-**Compiling.** Compiling a revision gives a complete desired-state document
-in the Manifest's v1 field layout, whose entries point at the content store
-by digest (`{protocol: content_store, digest}`), at a pinned Skill Center
-version (`{protocol: center, version}`) or at a shared-repository skill
-(`{protocol: repo, path}`), with `memory` omitted while `null`. These source
-spellings are not Manifest grammar: the document is consumed by direct
-delivery into the apply engine (RSI-04), never by `PUT /config-manifest`.
+**Compiling.** Compiling a revision gives the apply engine's typed desired
+state (`core/apply_engine/desired_state.py`): one declaration per construct
+the revision covers — `script`, `identity`, `resources`, `skills`, `mcp`,
+an empty list declaring "none" — whose entries name their bytes in the
+content store by digest, a Skill Center skill by its pinned version and a
+shared-repository skill by its path; `cli_tools` and `engine_config` stay
+undeclared, and `memory` is not delivered while `null`. A Bot Config
+Manifest document compiles into the same state, so the two are compared,
+not translated: the contract tests check that every example case compiles
+to the same state from its document and from its revision. The state is
+consumed by the apply engine directly (RSI-04 binds the promotion to an
+apply whose state reference names the promotion), never by
+`PUT /config-manifest`.
 
-**`document_digest`.** The compiled document's digest is the SHA-256 of its
-RFC 8785 canonical JSON (§3.1), `sha256:<hex64>`. It is a function of the
-revision alone: the same revision compiles to the same digest on every bot
-and every day. A promotion records it next to the revision id, and delivery
-(RSI-04) must report it unchanged, so that "which revision does this bot
-run" is a lookup by digest. The mapping of every field is in
-[`manifest-v1-compatibility.md`](manifest-v1-compatibility.md).
+**What a bot runs.** Whether a bot holds its `active` revision is observed,
+never recorded: the registry captures the bot's state as `capture` would
+and compares the revision id it would record with `active`. The mapping of
+every field is in [`manifest-v1-compatibility.md`](manifest-v1-compatibility.md).
 
 ## 8. Known limitations
 
@@ -831,8 +834,6 @@ run" is a lookup by digest. The mapping of every field is in
 | A revision pins only the bot-level MCP override; the user-level MCP config and Center defaults are read at apply time, so the same revision can give a different MCP setup later | [#2859](https://github.com/inclusionAI/Avernet/issues/2859) |
 | MCP header values are stored as written. A credential put in a header would be kept in revisions, which are never deleted. No production bot does this today | [#2860](https://github.com/inclusionAI/Avernet/issues/2860) |
 | `engine_config` is refused | [#2858](https://github.com/inclusionAI/Avernet/issues/2858) |
-| Removing a resource from a Manifest does not remove it from the bot, so going back to a revision without a resource leaves it in place | [#2162](https://github.com/inclusionAI/Avernet/issues/2162) |
 | Editing one file of a directory stores a new blob for the whole tree | Open decision G-1 |
-| CLI tools are not part of a revision; compiled documents leave them untouched | acli work |
-| `script: null` in a Manifest document is read as "absent" by apply, so a compiled document cannot remove a bot's script | [#2862](https://github.com/inclusionAI/Avernet/issues/2862) |
+| CLI tools are not part of a revision; a compiled state leaves them undeclared, so apply leaves them untouched | acli work |
 | Resource paths use the Manifest's ASCII path rule, while the console upload accepts any name; a bot with a resource such as `how to.md` must rename it before its first revision is captured | Manifest v1 path rule (`_PATH_CHARS_RE`) |

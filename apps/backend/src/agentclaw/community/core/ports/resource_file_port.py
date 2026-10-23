@@ -35,7 +35,7 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class ResourceFilePort(Protocol):
-    """The three methods the ``resources`` materialiser reaches, as a type key.
+    """The five methods the ``resources`` materialiser reaches, as a type key.
 
     The declared keyword-only parameters are *apply's own call surface* —
     exactly and only what the materialiser passes, every one present on the
@@ -84,5 +84,47 @@ class ResourceFilePort(Protocol):
         path: str,
     ) -> bool: ...
 
+    @abstractmethod
+    async def list_root(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+    ) -> tuple[str, ...]:
+        """Every file under the resources root (``data/``), as workspace-relative paths; ``()`` when absent.
 
-__all__ = ["ResourceFilePort"]
+        ``()`` is a confirmed absence, never a listing that could not be
+        made: an implementation that cannot tell the two apart raises
+        :class:`RootListingFailed` instead of answering empty.
+        """
+        ...
+
+    @abstractmethod
+    async def clear_root(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+    ) -> bool:
+        """Delete the resources root and everything under it; ``False`` when nothing was there."""
+        ...
+
+
+class RootListingFailed(RuntimeError):
+    """``list_root`` could not list the root and could not confirm it absent.
+
+    The apply engine clears and rewrites the root on the strength of this
+    listing (what it removes, and whether a refused clear found anything to
+    refuse), so a listing that failed must never come back as "nothing
+    there". The device transports do not all distinguish the two — teclaw's
+    ``list_dir`` answers ``None`` for both — which is why the implementation
+    confirms absence from the parent directory and raises this when that
+    confirmation is not available.
+    """
+
+
+__all__ = ["ResourceFilePort", "RootListingFailed"]

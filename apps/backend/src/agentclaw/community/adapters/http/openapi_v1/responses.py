@@ -63,7 +63,7 @@ from agentclaw.community.api.bot_config_manifest_service import (
     ManifestTooLargeError,
     ManifestValidationError,
 )
-from agentclaw.community.api.bot_config_manifest_apply_service import (
+from agentclaw.community.api.apply_run_service import (
     ManifestApplyInProgressError,
 )
 from agentclaw.community.api.bot_cli_tool_service import (

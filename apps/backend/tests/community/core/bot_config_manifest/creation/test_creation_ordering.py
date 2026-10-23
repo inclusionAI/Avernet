@@ -25,11 +25,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
+from agentclaw.community.core.apply_engine.outcomes import (
     ApplyStatus,
     EntryOutcome,
 )
-from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+from agentclaw.community.core.apply_engine.delivery import (
     CreationSequence,
 )
 from agentclaw.community.core.bot_config_manifest.create_job import (
@@ -42,26 +42,28 @@ from agentclaw.community.core.bot_config_manifest.creation import (
 )
 
 # Imported for side effect: registers the models on ``Base.metadata``.
-from agentclaw.community.core.bot_config_manifest.repository.apply_models import (  # noqa: F401
+from agentclaw.community.core.apply_engine.repository.apply_models import (  # noqa: F401
     BotConfigManifestApplyLockModel,
     BotConfigManifestApplyModel,
 )
 from agentclaw.community.core.bot_config_manifest.repository.models import (  # noqa: F401
     BotConfigManifestModel,
 )
-from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
-    BotConfigManifestApplyService,
+from agentclaw.community.core.apply_engine.run.service import (
+    ApplyRunService,
 )
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.core.repository.implementations.bot.config_manifest_apply import (
     BotConfigManifestApplyLockRepository,
     BotConfigManifestApplyRepository,
 )
-from ..apply._fakes import (
+from tests.community.core.apply_engine._fakes import (
     FakeGitClient,
+    FakeManifestContent,
     FakeStartupScriptService,
     arca_only_delivery,
     device_port_bundle,
+    manifest_compilers,
 )
 
 _ENTITY = "u_owner"
@@ -122,7 +124,7 @@ class _Manifests:
         Phase A runs before the bot exists, so there is no record to read the
         engine off; it comes from the creation's own spec instead.
         """
-        from agentclaw.community.core.bot_config_manifest.capabilities import (
+        from agentclaw.community.core.apply_engine.capabilities import (
             resolve_capabilities,
         )
 
@@ -195,19 +197,25 @@ def _build(db, *, scripts=None):
     """
     scripts = scripts if scripts is not None else FakeStartupScriptService()
     queue = _InlineQueue()
-    applies = BotConfigManifestApplyService(
-        manifest_service=_Manifests(),
+    manifests = _Manifests()
+    # One content store between the compiler and the materialisers: the
+    # materialisers read back by digest what the compiler filed.
+    content = FakeManifestContent()
+    applies = ApplyRunService(
+        manifest_service=manifests,
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
-        git_client_provider=lambda: FakeGitClient(),
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(),
+        compilers=manifest_compilers(manifests=manifests, content=content, git=FakeGitClient),
         # The delivery seam, assembled the way the composition root
         # assembles it: a bundle of device-backed ports, one strategy
         # over it, and a lookup. The categories this suite's document
         # does not declare are never reached, but their ports must
         # exist for the registry to register them.
-        delivery_strategies=arca_only_delivery(device_port_bundle(script_service=scripts)),
+        delivery_strategies=arca_only_delivery(
+            device_port_bundle(script_service=scripts, content=content)
+        ),
     )
     queue.service = applies
 

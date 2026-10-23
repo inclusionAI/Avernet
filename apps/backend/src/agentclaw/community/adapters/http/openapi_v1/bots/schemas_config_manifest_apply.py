@@ -131,6 +131,15 @@ class ConfigManifestApplyCategory(BaseModel):
     )
 
 
+class ConfigManifestApplyState(BaseModel):
+    """What the apply applied: the bot's stored Manifest, or a genome promotion's revision."""
+
+    kind: str = Field(description="`manifest` for the stored document, `genome` for a promotion's revision.")
+    promotion_id: str | None = Field(
+        default=None, description="The promotion whose revision was applied. Only for `genome`."
+    )
+
+
 class ConfigManifestApply(BaseModel):
     """One apply's report — what was delivered, and what was not."""
 
@@ -143,6 +152,7 @@ class ConfigManifestApply(BaseModel):
                 "result": "SUCCEEDED",
                 "started_at": "2026-08-31T09:12:04+00:00",
                 "finished_at": "2026-08-31T09:12:06+00:00",
+                "state": {"kind": "manifest", "promotion_id": None},
                 "sources": [],
                 "categories": [
                     {"category": "mcp", "aborted": False, "removed": ["mcp.old"]}
@@ -173,6 +183,11 @@ class ConfigManifestApply(BaseModel):
     )
     finished_at: datetime | None = Field(
         default=None, description="Null exactly while `result` is `RUNNING`."
+    )
+    state: ConfigManifestApplyState = Field(
+        default_factory=lambda: ConfigManifestApplyState(kind="manifest"),
+        description="What was applied. This API's own applies are always the stored "
+        "Manifest; a promotion's apply reads back here too, naming its promotion.",
     )
     sources: list[ConfigManifestApplySource] = Field(
         default_factory=list,

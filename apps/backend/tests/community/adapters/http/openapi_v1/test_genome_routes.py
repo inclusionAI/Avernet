@@ -44,7 +44,6 @@ from agentclaw.community.core.bot_genome.errors import (
 from agentclaw.community.core.bot_genome.patch_models import GenomePatch
 from agentclaw.community.core.bot_genome.spec_models import GenomePolicy, GenomeSpec
 from agentclaw.community.core.bot_genome.models import (
-    CompiledManifest,
     GenomeDiff,
     GenomeRef,
     GenomeRevision,
@@ -125,22 +124,19 @@ def _revision(rev: str = R1) -> GenomeRevision:
     return GenomeRevision(genome_schema=1, revision=_meta(rev), spec=EMPTY_SPEC, policy=POLICY)
 
 
-def _promotion(doc: dict | None = None) -> Promotion:
+def _promotion() -> Promotion:
     return Promotion(
         id="p" * 32,
         ref="active",
         revision=R2,
         from_revision=R1,
-        document_digest=R1,
         going_back=False,
         actor=OWNER,
         reason="ship",
         status="applied",
         apply_kind="pending",
-        apply_reference="apply_1",
         apply_detail="",
         created_at=NOW,
-        document=doc,
     )
 
 
@@ -455,7 +451,7 @@ async def test_refs_content_and_promotions() -> None:
     assert response.status_code == 200 and out.data.size == 5 and registry.put_content.call_args.args[1] == b"hello"
 
     promotion = AsyncMock()
-    promotion.promote.return_value = _promotion({"schema_version": 1})
+    promotion.promote.return_value = _promotion()
     out = await genome.promote_genome_revision(
         "bot_1",
         PromoteRequest(revision="previous", expected_revision=R1, reason="back"),
@@ -466,7 +462,7 @@ async def test_refs_content_and_promotions() -> None:
         _bot_service(),
         promotion,
     )
-    assert out.data.document == {"schema_version": 1} and out.data.status == "applied"
+    assert out.data.status == "applied" and out.data.revision == R2
     assert promotion.promote.await_args.kwargs == {
         "revision": "previous",
         "ref": "active",
@@ -476,11 +472,11 @@ async def test_refs_content_and_promotions() -> None:
     }
     promotion.list_promotions = Mock(return_value=PromotionPage(1, (_promotion(),)))
     out = await genome.list_genome_promotions("bot_1", _request(), "u1", "u1", 1, 20, _bot_service(), promotion)
-    assert out.data.items[0].document is None
-    promotion.get_promotion = Mock(return_value=_promotion({"x": 1}))
+    assert out.data.items[0].revision == R2 and not hasattr(out.data.items[0], "document")
+    promotion.get_promotion = Mock(return_value=_promotion())
     assert (
         await genome.get_genome_promotion("bot_1", "p" * 32, _request(), "u1", "u1", _bot_service(), promotion)
-    ).data.document == {"x": 1}
+    ).data.id == "p" * 32
 
 
 async def test_the_upload_cap_is_enforced_before_the_body_is_read_whole() -> None:
@@ -505,7 +501,7 @@ async def test_the_upload_cap_is_enforced_before_the_body_is_read_whole() -> Non
             409,
             {"ref": "draft", "expected_revision": None, "current_revision": R1},
         ),
-        (Drifted(active=R1, applied=None), 409, {"active": R1, "applied": None}),
+        (Drifted(active=R1, observed=R2), 409, {"active": R1, "observed": R2}),
         (
             PatchRejected([Reason("does_not_apply", "ops[0]", "no")]),
             422,
@@ -593,6 +589,4 @@ def test_bot_ref_reads_the_record_and_defaults() -> None:
         "service",
         "staff",
     )
-    assert isinstance(genome._promotion(_promotion()).document, type(None))
     assert genome.bot_ref({"entity_id": "e"}, owner_id="o", bot_id="b").bot_type == "personal"
-    assert CompiledManifest("r", {}, "d").document == {}

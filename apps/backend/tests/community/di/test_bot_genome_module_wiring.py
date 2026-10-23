@@ -33,3 +33,24 @@ def test_the_state_reader_is_a_thunk_that_builds_the_platform_reader() -> None:
     assert callable(thunk)
     reader = thunk()
     assert reader.refusal.__self__.__class__.__name__ == "PlatformBotStateReader"
+
+
+def test_the_genome_compiler_is_the_compiler_maps_genome_row() -> None:
+    """The run service looks its compiler up by reference type; the genome row
+    is contributed here, over the same registry and promotion repository the
+    promotion service uses."""
+    from agentclaw.community.core.apply_engine.compiler import GenomeStateRef, ManifestStateRef, StateCompilers
+    from agentclaw.community.core.bot_genome.compile import GenomeCompiler
+    from agentclaw.community.core.repository.protocols.bot.genome import (
+        GenomePromotionRepositoryProtocol,
+        GenomeRefRepositoryProtocol,
+    )
+
+    injector = build_injector(profile=DeployProfile.TEST)
+    compilers = injector.get(StateCompilers)
+    compiler = compilers[GenomeStateRef]
+    assert isinstance(compiler, GenomeCompiler) and compiler is injector.get(GenomeCompiler)
+    assert compiler._registry is injector.get(GenomeRegistryProtocol)
+    assert compiler._promotions is injector.get(GenomePromotionRepositoryProtocol)
+    assert compiler._refs is injector.get(GenomeRefRepositoryProtocol)
+    assert ManifestStateRef in compilers, "both rows land in one map"

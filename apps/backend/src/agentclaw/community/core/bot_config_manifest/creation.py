@@ -24,21 +24,24 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+from agentclaw.community.core.apply_engine.compiler import ManifestStateRef
+from agentclaw.community.core.apply_engine.triggers import (
+    CREATE_ON_CONTAINER_TRIGGER,
+    CREATE_PRE_CONTAINER_TRIGGER,
+)
+from agentclaw.community.core.apply_engine.delivery import (
     CreationSequence,
 )
-from agentclaw.community.core.bot_config_manifest.apply.order import (
+from agentclaw.community.core.apply_engine.order import (
     APPLY_ORDER,
     ApplyPhase,
 )
-from agentclaw.community.core.bot_config_manifest.apply.orchestrator import (
-    declared_entries,
-)
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
+from agentclaw.community.core.bot_config_manifest.compiler.declared import declared_entries
+from agentclaw.community.core.apply_engine.outcomes import (
     ApplyConstruct,
 )
-from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
-    BotConfigManifestApplyServiceProtocol,
+from agentclaw.community.core.apply_engine.run.service_protocol import (
+    ApplyRunServiceProtocol,
 )
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import (
     BotConfigManifestServiceProtocol,
@@ -59,12 +62,6 @@ from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
-
-#: The trigger the pre-container phase records under. The poll and the creation
-#: job both recognise a creation's phases by these, via ``last_apply``.
-CREATE_PRE_CONTAINER_TRIGGER = "create:pre_container"
-#: The trigger the post-container phase records under.
-CREATE_ON_CONTAINER_TRIGGER = "create:on_container"
 
 def _no_materialiser_refusal(construct: ApplyConstruct) -> str:
     return (
@@ -219,7 +216,7 @@ class BotCreationManifestSeam(ManifestCreationSeam):
         self,
         *,
         manifest_service: BotConfigManifestServiceProtocol,
-        apply_service: BotConfigManifestApplyServiceProtocol,
+        apply_service: ApplyRunServiceProtocol,
         script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
         start_job: Callable[..., None],
         find_job: Callable[..., Optional[TaskRecord]],
@@ -352,6 +349,7 @@ class BotCreationManifestSeam(ManifestCreationSeam):
                 bot=bot,
                 owner_id=owner_id,
                 actor_id=actor_id,
+                state=ManifestStateRef(),
                 trigger=CREATE_PRE_CONTAINER_TRIGGER,
                 phase=ApplyPhase.PRE_CONTAINER,
                 engine_type=engine_type,

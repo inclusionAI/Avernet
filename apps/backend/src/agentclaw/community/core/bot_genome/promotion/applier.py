@@ -1,7 +1,7 @@
 """The delivery seam: ``RevisionApplier`` and this item's only implementation.
 
-A promotion compiles a revision and hands the compiled document to an
-applier. ``preflight`` runs before any ref moves and refuses what cannot be
+A promotion compiles a revision into the apply engine's desired state and
+hands it to an applier. ``preflight`` runs before any ref moves and refuses what cannot be
 delivered; ``start`` runs after the refs moved and the promotion row exists,
 and answers with the applier's handle. RSI-04 (direct delivery) binds its
 applier in place of :class:`PendingDeliveryApplier` in
@@ -15,7 +15,8 @@ from abc import abstractmethod
 from typing import Protocol, runtime_checkable
 
 from agentclaw.community.core.bot_genome.errors import NotAppliable, PromotionUnsupported, Reason
-from agentclaw.community.core.bot_genome.models import ApplyResult, BotRef, CompiledManifest, Provenance
+from agentclaw.community.core.apply_engine.desired_state import DesiredState
+from agentclaw.community.core.bot_genome.models import ApplyResult, BotRef, Provenance
 
 __all__ = ["PendingDeliveryApplier", "RevisionApplier"]
 
@@ -29,13 +30,13 @@ class RevisionApplier(Protocol):
         ...
 
     @abstractmethod
-    def preflight(self, bot: BotRef, compiled: CompiledManifest) -> None:
+    def preflight(self, bot: BotRef, state: DesiredState) -> None:
         """Raise ``NotAppliable`` or ``PromotionUnsupported`` before any ref moves."""
         ...
 
     @abstractmethod
-    async def start(self, bot: BotRef, compiled: CompiledManifest, *, actor: Provenance, reason: str) -> ApplyResult:
-        """Deliver the compiled revision; the result's ``reference`` is what ``applied_revision`` joins on."""
+    async def start(self, bot: BotRef, state: DesiredState, *, actor: Provenance, reason: str) -> ApplyResult:
+        """Deliver the revision's desired state; the result's ``detail`` is the promotion row's last word."""
         ...
 
 
@@ -44,7 +45,7 @@ class PendingDeliveryApplier(RevisionApplier):
 
     kind = "pending"
 
-    def preflight(self, bot: BotRef, compiled: CompiledManifest) -> None:
+    def preflight(self, bot: BotRef, state: DesiredState) -> None:
         if bot.bot_type == "service":
             raise PromotionUnsupported(
                 "promotion of a service bot goes through the publish flow, which RSI-04 / RSI-16 bind"
@@ -59,5 +60,5 @@ class PendingDeliveryApplier(RevisionApplier):
             ]
         )
 
-    async def start(self, bot: BotRef, compiled: CompiledManifest, *, actor: Provenance, reason: str) -> ApplyResult:
+    async def start(self, bot: BotRef, state: DesiredState, *, actor: Provenance, reason: str) -> ApplyResult:
         raise AssertionError("PendingDeliveryApplier.preflight refuses every promotion; start is never reached")
