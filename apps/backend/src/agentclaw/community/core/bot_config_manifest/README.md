@@ -655,6 +655,7 @@ consumed_by:
   - "the apply orchestration (`apply/`, W4 #1472 + W5 #1473) — di/modules/manifest_fetch_module.py reads the content store root and the fetch_transport_allowlist (via the store's and W2's pure parsers over config_module's seam; the allowlist reaches SourceCredentialService as endpoint_allow_hosts, its one consumer) and holds the one DeclaredSourceResolver over the object store, the content store (bound by content_store_module) and W3's credentials"
   - "adapters/http/openapi_v1/source_credentials — the public tenant credential register/rotate/read/delete surface (OPEN admission; app-operated — the edge requires an app credential, owner-app guarded)"
 internal_dependencies:
+  - agentclaw.community.core.apply_engine  # the construct vocabulary (constructs.py); the engine the Manifest compiles for
   - agentclaw.community.core.base
   - agentclaw.community.core.content_store  # the store Service API, scope, errors, DIGEST_RE and the acm-tree-v1 encoding (W11, moved out in #3064)
   - agentclaw.community.core.bot_app_grant.protocols  # BotAppGrantSweepProtocol — the creation job withdraws the submitting application's creation grant when a creation gives up before a bot exists

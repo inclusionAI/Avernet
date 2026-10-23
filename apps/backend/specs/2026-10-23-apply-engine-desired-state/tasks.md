@@ -18,14 +18,14 @@
   - [x] `apply_engine` is in `BOUNDARY_SIGNIFICANT_MODULES`; its README carries a `## Context Boundary` naming what it provides and consumes; the boundary test passes with the empty package.
 - **Depends on:** —
 
-### Task 2: The desired-state model and the compiler contract
+### Task 2: The desired-state model and the compiler contract `[x]`
 - **Goal:** The typed input, with its invariants, and the compiler/StateRef types.
-- **Files:** `core/apply_engine/desired_state.py`, `core/apply_engine/compiler.py`; `tests/community/core/apply_engine/test_desired_state.py`
+- **Files:** `core/apply_engine/{desired_state,compiler,content,constructs}.py` (the construct enums moved here from `bot_config_manifest/capabilities.py`, which imports them back until Task 3 rewrites the importers); `tests/community/core/apply_engine/test_desired_state.py`
 - **Done when:**
-  - [ ] Every type in plan § The model exists, frozen, with enums for the closed sets; `DesiredState.declaration(construct)`, `DesiredState.EMPTY`, `RESOURCES_ROOT`.
-  - [ ] `__post_init__` refuses a malformed digest, a tree path without `/`, a file path with one, a resource path outside the root, a duplicate identity within a declaration, an empty server code; tests cover each.
-  - [ ] `McpOverride.as_config()` round-trips the mapping the MCP ports take today (headers lower-cased only in the comparison helper, as `mcp.py` does now).
-  - [ ] `DesiredStateCompiler`, `ManifestStateRef`, `GenomeStateRef` (with `to_payload`/`from_payload`), `Compiled` defined and exported.
+  - [x] Every type in plan § The model exists, frozen, with enums for the closed sets; `DesiredState.declaration(construct)`, `DesiredState.EMPTY`, `RESOURCES_ROOT`.
+  - [x] `__post_init__` refuses a malformed digest, a tree path without `/`, a file path with one, a resource path outside the root, a duplicate identity within a declaration, an empty server code; tests cover each.
+  - [x] `McpOverride.as_config()` round-trips the mapping the MCP ports take today (headers lower-cased only in the comparison helper, as `mcp.py` does now).
+  - [x] `DesiredStateCompiler`, `ManifestStateRef`, `GenomeStateRef` (with `to_payload`/`from_payload`), `Compiled` defined and exported.
 - **Depends on:** Task 1
 
 ## Group 2 — Move the engine, split the Manifest into a compiler
