@@ -810,6 +810,30 @@ async def test_list_root_names_a_file_squatting_on_the_root():
 
 
 @pytest.mark.asyncio
+async def test_list_root_reads_a_numeric_is_dir_as_the_engine_meant_it():
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(
+        side_effect=lambda logical: {"workspace": [{"name": "data", "is_dir": 0}]}.get(logical)
+    )
+    svc, _ = _svc(provider="teclaw", device_fs=device_fs)
+    with pytest.raises(RootListingFailed, match="is a file, not a directory"):
+        await svc.list_root(**_COORDS)
+
+
+@pytest.mark.asyncio
+async def test_list_root_raises_on_an_entry_it_cannot_describe():
+    """An entry without ``is_dir`` (or without a name) is neither descended nor
+    recorded as a file: a listing the walk cannot read whole is not one to
+    clear a root on."""
+    for entries in ([{"name": "kb"}], [{"is_dir": False}]):
+        device_fs = MagicMock()
+        device_fs.list_dir = AsyncMock(side_effect=lambda logical, e=entries: {"workspace/data": e}.get(logical))
+        svc, _ = _svc(provider="teclaw", device_fs=device_fs)
+        with pytest.raises(RootListingFailed, match="listed an entry it could not describe"):
+            await svc.list_root(**_COORDS)
+
+
+@pytest.mark.asyncio
 async def test_list_root_does_not_call_a_root_a_file_when_the_engine_omits_is_dir():
     device_fs = MagicMock()
     device_fs.list_dir = AsyncMock(side_effect=lambda logical: {"workspace": [{"name": "data"}]}.get(logical))

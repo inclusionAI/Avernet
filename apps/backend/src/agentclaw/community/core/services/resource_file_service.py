@@ -29,7 +29,7 @@ The HTTP adapter maps the returned plain dicts / bytes to its response schemas.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Mapping
 
 from injector import inject
 
@@ -668,7 +668,7 @@ class ResourceFileService(ResourceFilePort):
             named = self._named_in(parent, RESOURCES_ROOT_DIR)
             if named is None:
                 return ()
-            if named.get("is_dir") is False:  # an engine that omits the key has not said it is a file
+            if self._is_dir_flag(named) is False:
                 raise RootListingFailed(f"the resources root of bot {bot_id} is a file, not a directory")
             raise RootListingFailed(f"the resources root of bot {bot_id} is present but could not be listed")
         files: list[str] = []
@@ -677,7 +677,11 @@ class ResourceFileService(ResourceFilePort):
             current, entries = queue.pop(0)
             for entry in sorted(entries, key=lambda e: e.get("name", "")):
                 rel = self._rel_path(current, entry)
-                if bool(entry.get("is_dir", False)):
+                is_dir = self._is_dir_flag(entry)
+                if rel == current or is_dir is None:
+                    # Nameless, or neither a file nor a directory: the listing is not one to clear a root on.
+                    raise RootListingFailed(f"{current} of bot {bot_id} listed an entry it could not describe")
+                if is_dir:
                     sub = await device_fs.list_dir(self._logical(rel))
                     if sub is None:
                         raise RootListingFailed(f"{rel} of bot {bot_id} was listed but could not be listed itself")
@@ -729,7 +733,7 @@ class ResourceFileService(ResourceFilePort):
             )
             return False
         named = self._named_in(entries or (), leaf)
-        return bool(named.get("is_dir", False)) if named is not None else False
+        return bool(self._is_dir_flag(named)) if named is not None else False
 
     @staticmethod
     def _named_in(entries: Any, leaf: str) -> dict[str, Any] | None:
@@ -738,6 +742,12 @@ class ResourceFileService(ResourceFilePort):
             if entry.get("name") == leaf:
                 return entry
         return None
+
+    @staticmethod
+    def _is_dir_flag(entry: Mapping[str, Any]) -> bool | None:
+        """The entry's ``is_dir`` as the engine said it (``0``/``1`` included); ``None`` when it said nothing."""
+        flag = entry.get("is_dir")
+        return None if flag is None else bool(flag)
 
     async def upload_file(
         self,
