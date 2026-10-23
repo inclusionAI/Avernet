@@ -335,7 +335,6 @@ class Actor:
 @dataclass(frozen=True)
 class ApplyResult:
     kind: ApplyKind
-    reference: str | None           # apply report id or published version, once known
     detail: str                     # short human-readable progress or failure text
 
 @dataclass(frozen=True)

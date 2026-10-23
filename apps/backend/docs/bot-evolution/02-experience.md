@@ -38,8 +38,7 @@ Verification evaluates a specific revision; an episode gets it by
 attribution from the bot's genome refs (the revision `active` pointed at
 when the episode started, unless the Genome Registry observed the bot as
 drifted at the time, or for a service bot the revision of the published
-version that was serving
-by the Genome Registry); feedback inherits it from its episode. Records
+version that was serving); feedback inherits it from its episode. Records
 from before the bot had revisions, or from while the bot was drifted
 (changed directly through the Manifest), are stored with
 `revision_id: null` (unattributed). The rules and an example timeline are in

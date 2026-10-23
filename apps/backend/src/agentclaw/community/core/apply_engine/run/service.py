@@ -572,7 +572,10 @@ class ApplyRunService(ApplyRunServiceProtocol):
         The compile is the real one — the same compiler, the same fetch
         bounds, the same baselines — so the plan previewed is the plan the
         apply would make, and the resolutions reported are what the caller is
-        previewing. Only the write stage is skipped.
+        previewing. Only the write stage is skipped. ``check`` runs first, as
+        it does for a real apply: a reference the compiler refuses is the
+        compiler's own domain error to the caller (the one its HTTP surface
+        maps), never the worker's ``CompileRefused``.
         """
         compiler = self._compiler_for(state)
         ctx = self._context(
@@ -583,6 +586,7 @@ class ApplyRunService(ApplyRunServiceProtocol):
             entity_id=entity_id,
             env=get_current_env(),
         )
+        compiler.check(ctx, state)
         compiled = await compiler.compile(ctx, state)
         report = await self._orchestrator(self.delivery_for_engine(ctx.engine_type)).apply(
             ctx,
