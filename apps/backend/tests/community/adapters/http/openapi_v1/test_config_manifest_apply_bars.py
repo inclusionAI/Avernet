@@ -29,7 +29,7 @@ from agentclaw.community.adapters.http.openapi_v1.authorization import (
     ServiceChecked,
 )
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
-from agentclaw.community.core.bot_config_manifest.apply.registry import (
+from agentclaw.community.core.apply_engine.registry import (
     build_materialisers,
 )
 

@@ -10,7 +10,7 @@ from datetime import datetime
 
 import pytest
 
-from agentclaw.community.core.bot_config_manifest.capabilities import ManifestSection
+from agentclaw.community.core.apply_engine.capabilities import ManifestSection
 from agentclaw.community.core.bot_config_manifest.repository.models import (
     BotConfigManifestRecord,
 )

@@ -10,12 +10,12 @@ import yaml
 from agentclaw.community.core.apply_engine.compiler import ManifestStateRef
 from agentclaw.community.core.apply_engine.constructs import ManifestCategory, ManifestSection
 from agentclaw.community.core.apply_engine.desired_state import DesiredState
-from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
-from agentclaw.community.core.bot_config_manifest.capabilities import resolve_capabilities
+from agentclaw.community.core.bot_config_manifest.sources.source_resolver import DeclaredSourceResolver
+from agentclaw.community.core.apply_engine.capabilities import resolve_capabilities
 from agentclaw.community.core.bot_config_manifest.compiler import ManifestCompiler
 from agentclaw.community.core.bot_config_manifest.compiler.session import digest_of
 from agentclaw.community.core.bot_config_manifest.schema.validator import validate_document
-from tests.community.core.bot_config_manifest.apply._fakes import (
+from tests.community.core.apply_engine._fakes import (
     FakeGitClient,
     FakeManifestContent,
     FakeObjectCredentials,

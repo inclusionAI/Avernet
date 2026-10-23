@@ -25,7 +25,7 @@ from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_pr
     BotConfigManifestServiceProtocol,
     ManifestWriteResult,
 )
-from agentclaw.community.core.bot_config_manifest.capabilities import (
+from agentclaw.community.core.apply_engine.capabilities import (
     ManifestCapabilities,
     capabilities_for_bot,
     resolve_capabilities,

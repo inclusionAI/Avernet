@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyReport
+from agentclaw.community.core.apply_engine.outcomes import ApplyReport
 
 __all__ = ["BASELINE_HISTORY_APPLIES", "last_resolutions"]
 

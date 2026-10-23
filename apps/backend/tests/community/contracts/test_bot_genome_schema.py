@@ -521,7 +521,7 @@ _CASE_DIRS = [path for path in sorted(_CASES.iterdir()) if path.is_dir() and pat
 
 @pytest.mark.parametrize("case", _CASE_DIRS, ids=[path.name for path in _CASE_DIRS])
 def test_manifest_v1_case_gets_its_stated_outcome(case: Path) -> None:
-    from agentclaw.community.core.bot_config_manifest.capabilities import resolve_capabilities
+    from agentclaw.community.core.apply_engine.capabilities import resolve_capabilities
     from agentclaw.community.core.bot_config_manifest.schema import (
         ManifestValidationError,
         validate_document,

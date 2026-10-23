@@ -6,9 +6,9 @@ import json
 from datetime import datetime
 from types import SimpleNamespace
 
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyReport, ApplyStatus, SourceResolution
+from agentclaw.community.core.apply_engine.outcomes import ApplyReport, ApplyStatus, SourceResolution
 from agentclaw.community.core.bot_config_manifest.compiler.baselines import BASELINE_HISTORY_APPLIES, last_resolutions
-from tests.community.core.bot_config_manifest.apply._fakes import FakeManifestContent, make_context, manifest_compiler
+from tests.community.core.apply_engine._fakes import FakeManifestContent, make_context, manifest_compiler
 
 URL = "https://git.corp/charts.git"
 

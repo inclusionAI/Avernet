@@ -22,8 +22,8 @@ from agentclaw.community.core.apply_engine.desired_state import (
     LocalSkillPackage,
     StoredContent,
 )
-from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import EntryDelivery
-from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
+from agentclaw.community.core.bot_config_manifest.sources.entry_delivery import EntryDelivery
+from agentclaw.community.core.bot_config_manifest.sources.source_resolver import DeclaredSourceResolver
 from agentclaw.community.core.bot_config_manifest.compiler.entries._fetch import EntryFetchError, fetch, file_tree
 from agentclaw.community.core.bot_config_manifest.compiler.session import CompileSession
 from agentclaw.community.core.bot_config_manifest.fetch.limits import (
@@ -31,7 +31,7 @@ from agentclaw.community.core.bot_config_manifest.fetch.limits import (
     FETCH_ENTRY_LIMITS,
     FetchCategory,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.unpack import UnpackError, unpack_archive
+from agentclaw.community.core.apply_engine.unpack import UnpackError, unpack_archive
 from agentclaw.community.core.content_store import ContentStoreProtocol, canonical_tree_bytes, decode_tree_bytes
 from agentclaw.community.core.skill_center.skill_package import (
     SkillPackageInvalidError,

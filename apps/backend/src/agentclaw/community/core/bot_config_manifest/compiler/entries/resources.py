@@ -24,8 +24,8 @@ from agentclaw.community.core.apply_engine.desired_state import (
     StoredContent,
 )
 from agentclaw.community.core.apply_engine.paths import relative_path_refusal
-from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import archive_refusal
-from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
+from agentclaw.community.core.bot_config_manifest.sources.entry_delivery import archive_refusal
+from agentclaw.community.core.bot_config_manifest.sources.source_resolver import (
     DeclaredSourceResolver,
     declared_protocol,
 )
@@ -39,7 +39,7 @@ from agentclaw.community.core.bot_config_manifest.compiler.entries._fetch import
 )
 from agentclaw.community.core.bot_config_manifest.compiler.session import CompileSession, digest_of
 from agentclaw.community.core.bot_config_manifest.fetch.limits import FetchCategory
-from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKind
+from agentclaw.community.core.apply_engine.support_matrix import SourceKind
 from agentclaw.community.core.content_store import ContentStoreProtocol, canonical_tree_bytes
 
 __all__ = ["OUTSIDE_ROOT_REASON", "compile_resources"]

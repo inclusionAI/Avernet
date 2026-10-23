@@ -13,8 +13,8 @@ from typing import Optional
 
 import pytest
 
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
-from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
+from agentclaw.community.core.apply_engine.delivery import (
     CreationSequence,
 )
 from agentclaw.community.core.bot_config_manifest.create_job import (
@@ -27,7 +27,7 @@ from agentclaw.community.core.bot_config_manifest.create_job import (
     create_job_idempotency_key,
     enqueue_create_job,
 )
-from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
+from agentclaw.community.core.apply_engine.run.service_protocol import (
     ManifestApplyInProgressError,
 )
 from agentclaw.community.core.bot_config_manifest.schema import (

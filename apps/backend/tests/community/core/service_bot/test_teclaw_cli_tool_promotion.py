@@ -12,13 +12,13 @@ import asyncio
 
 import pytest
 
-from agentclaw.community.core.bot_config_manifest.cli_tools.store import CliToolStore
+from agentclaw.community.core.apply_engine.cli_tools.store import CliToolStore
 from agentclaw.community.core.service_bot.services.deploy.teclaw_file_promotion import (
     TeclawFilePromotion,
     TeclawFilePromotionError,
 )
 
-from tests.community.core.bot_config_manifest.cli_tools._fakes import (
+from tests.community.core.apply_engine.cli_tools._fakes import (
     FakeCliToolRepo,
     FakeCopyingObjectStorage,
 )

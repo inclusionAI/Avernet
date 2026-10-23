@@ -21,10 +21,10 @@ from typing import Any, Callable, Mapping
 from agentclaw.community.core.apply_engine.compiler import Compiled, ManifestStateRef
 from agentclaw.community.core.apply_engine.constructs import ManifestCategory, ManifestSection
 from agentclaw.community.core.apply_engine.desired_state import DesiredState
-from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyReport, ApplyStatus
-from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
-from agentclaw.community.core.bot_config_manifest.apply.source_session import SourceSession
+from agentclaw.community.core.apply_engine.context import ApplyContext
+from agentclaw.community.core.apply_engine.outcomes import ApplyReport, ApplyStatus
+from agentclaw.community.core.bot_config_manifest.sources.source_resolver import DeclaredSourceResolver
+from agentclaw.community.core.bot_config_manifest.sources.source_session import SourceSession
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import (
     BotConfigManifestServiceProtocol,
 )
@@ -42,7 +42,7 @@ from agentclaw.community.core.bot_config_manifest.compiler.entries.script import
 from agentclaw.community.core.bot_config_manifest.compiler.entries.skills import compile_skills
 from agentclaw.community.core.bot_config_manifest.compiler.session import CompileSession
 from agentclaw.community.core.bot_config_manifest.fetch.git_source import GitSourceClient
-from agentclaw.community.core.bot_config_manifest.services.apply_report_codec import report_from_payload
+from agentclaw.community.core.apply_engine.run.report_codec import report_from_payload
 from agentclaw.community.core.content_store import ContentStoreProtocol
 from agentclaw.community.core.repository.protocols.bot import BotConfigManifestApplyRepositoryProtocol
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator

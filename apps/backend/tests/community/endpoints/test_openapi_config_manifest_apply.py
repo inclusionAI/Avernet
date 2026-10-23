@@ -5,7 +5,7 @@ real gateway-principal verification, the ownership guard, the declared bars, and
 the repository round trip.
 
 The engine's own behaviour — convergence, all-or-nothing, overwrite — is proven
-in ``tests/community/core/bot_config_manifest/apply/``. What these cover is the
+in ``tests/community/core/apply_engine/``. What these cover is the
 *surface*: the shapes a caller sees, and the two "absent is not an error" rules.
 """
 
@@ -22,10 +22,10 @@ import jwt
 from injector import singleton
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
-from agentclaw.community.api.bot_config_manifest_apply_service import (
-    BotConfigManifestApplyServiceProtocol,
+from agentclaw.community.api.apply_run_service import (
+    ApplyRunServiceProtocol,
 )
-from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
+from agentclaw.community.core.apply_engine.apply_task import (
     APPLY_TASK_TYPE,
 )
 from agentclaw.community.core.repository.protocols.platform import (
@@ -215,7 +215,7 @@ def _await_the_background_apply(_response, world) -> None:
             "the explicit-apply route reached the service with a phase; it must "
             f"pass none, got {task.payload['phase']!r}"
         )
-    apply_service = world.get(BotConfigManifestApplyServiceProtocol)
+    apply_service = world.get(ApplyRunServiceProtocol)
     for task in enqueued:
         apply_service.run_apply_task(task.payload)
 
@@ -557,7 +557,7 @@ def _seed_bot_with_resource_manifest(world) -> None:
     from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
         AliyunObjectStore,
     )
-    from tests.community.core.bot_config_manifest.apply._fakes import (
+    from tests.community.core.apply_engine._fakes import (
         FakeObjectStore,
     )
 

@@ -300,8 +300,8 @@ class AgentSwarmModule(Module):
         construction never refuses for identity reasons.
         ``max_platform_workers`` sizes the module-scoped chat bridge
         (``executor`` block)."""
-        from agentclaw.community.api.bot_config_manifest_apply_service import (
-            BotConfigManifestApplyServiceProtocol,
+        from agentclaw.community.api.apply_run_service import (
+            ApplyRunServiceProtocol,
         )
         from agentclaw.community.api.bot_service import BotServiceProtocol
         from agentclaw.community.core.bot_inventory.protocols import (
@@ -321,7 +321,7 @@ class AgentSwarmModule(Module):
             passport_plugin=injector.get(PassportPlugin),
             skill_set_factory=injector.get(SkillSetServiceFactoryProtocol),
             bot_repo=injector.get(BotRepository),
-            apply_service=injector.get(BotConfigManifestApplyServiceProtocol),
+            apply_service=injector.get(ApplyRunServiceProtocol),
             space_context=injector.get(BusinessSpaceContextProtocol),
             baas_service=injector.get(BaasService),
             max_platform_workers=config.executor.max_platform_workers,

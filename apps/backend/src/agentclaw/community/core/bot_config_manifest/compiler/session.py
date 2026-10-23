@@ -16,13 +16,13 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
-from agentclaw.community.core.bot_config_manifest.apply.budget import ApplyFetchBudget
-from agentclaw.community.core.bot_config_manifest.apply.source_session import SourceSession
+from agentclaw.community.core.bot_config_manifest.sources.budget import ApplyFetchBudget
+from agentclaw.community.core.bot_config_manifest.sources.source_session import SourceSession
 from agentclaw.community.core.bot_config_manifest.fetch.limits import APPLY_BUDGET_S, APPLY_FETCH_TOTAL_LIMIT
 from agentclaw.community.core.content_store import ContentScope
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
+    from agentclaw.community.core.apply_engine.context import ApplyContext
 
 __all__ = ["CompileSession", "digest_of"]
 

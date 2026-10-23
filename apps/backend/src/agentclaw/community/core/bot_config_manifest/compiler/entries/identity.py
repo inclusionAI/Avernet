@@ -16,7 +16,7 @@ from agentclaw.community.core.apply_engine.desired_state import (
     EntryFailure,
     StoredContent,
 )
-from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
+from agentclaw.community.core.bot_config_manifest.sources.source_resolver import DeclaredSourceResolver
 from agentclaw.community.core.bot_config_manifest.compiler.entries._fetch import (
     ORIGIN_INLINE,
     EntryFetchError,

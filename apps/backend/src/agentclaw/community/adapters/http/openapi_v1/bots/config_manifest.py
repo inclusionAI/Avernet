@@ -39,8 +39,8 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
 )
-from agentclaw.community.api.bot_config_manifest_apply_service import (
-    BotConfigManifestApplyServiceProtocol,
+from agentclaw.community.api.apply_run_service import (
+    ApplyRunServiceProtocol,
 )
 from agentclaw.community.api.bot_config_manifest_service import (
     BotConfigManifestServiceProtocol,
@@ -116,8 +116,8 @@ async def update_bot_config_manifest(
     manifest_service: BotConfigManifestServiceProtocol = Injected(
         BotConfigManifestServiceProtocol
     ),
-    apply_service: BotConfigManifestApplyServiceProtocol = Injected(
-        BotConfigManifestApplyServiceProtocol
+    apply_service: ApplyRunServiceProtocol = Injected(
+        ApplyRunServiceProtocol
     ),
 ) -> Envelope[ConfigManifest]:
     """Set or replace a bot's configuration manifest, and apply it.

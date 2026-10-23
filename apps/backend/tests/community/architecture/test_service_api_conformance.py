@@ -83,14 +83,14 @@ from agentclaw.community.api.bot_startup_script_service import (
 from agentclaw.community.api.bot_cli_tool_service import (
     BotCliToolServiceProtocol,
 )
-from agentclaw.community.core.bot_config_manifest.cli_tools.bot_service import (
+from agentclaw.community.core.apply_engine.cli_tools.bot_service import (
     BotCliToolService,
 )
 from agentclaw.community.core.common_config.bot_config_service import (
     BotCommonConfigService,
 )
-from agentclaw.community.api.bot_config_manifest_apply_service import (
-    BotConfigManifestApplyServiceProtocol,
+from agentclaw.community.api.apply_run_service import (
+    ApplyRunServiceProtocol,
 )
 from agentclaw.community.api.bot_config_manifest_service import (
     BotConfigManifestServiceProtocol,
@@ -231,8 +231,8 @@ from agentclaw.community.core.bot_management.services.bot_space_service import (
 from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
     BotStartupScriptService,
 )
-from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
-    BotConfigManifestApplyService,
+from agentclaw.community.core.apply_engine.run.service import (
+    ApplyRunService,
 )
 from agentclaw.community.core.bot_config_manifest.services.config_manifest_service import (
     BotConfigManifestService,
@@ -365,7 +365,7 @@ _PAIRS = [
     (BotStartupScriptServiceProtocol, BotStartupScriptService),
     (BotConfigManifestServiceProtocol, BotConfigManifestService),
     (SourceCredentialServiceProtocol, SourceCredentialService),
-    (BotConfigManifestApplyServiceProtocol, BotConfigManifestApplyService),
+    (ApplyRunServiceProtocol, ApplyRunService),
     (GenomeRegistryProtocol, GenomeRegistryService),
     (GenomePromotionServiceProtocol, GenomePromotionService),
     (BotCliToolServiceProtocol, BotCliToolService),

@@ -20,7 +20,7 @@ a desired state is already in the content store, named by digest. That is
 what lets a revision be delivered with no Manifest document in between
 (RSI-04) and what keeps a grammar change out of the materialisers.
 
-Extracted from `core/bot_config_manifest/apply/` by
+Extracted from `core/apply_engine/` by
 `apps/backend/specs/2026-10-23-apply-engine-desired-state/`, which also
 records the resources-root rule (`data/`, cleared then written on every
 apply that declares resources) and the typed state reference an apply run
@@ -68,14 +68,20 @@ provides:
   - MaterialiserPorts
   - TeclawDeliveryMode
   - ApplyRunService
-  - ApplyRunServiceProtocol  # api/apply_run_service.py re-exports it
+  - ApplyRunServiceProtocol  # run/service_protocol.py; api/apply_run_service.py re-exports it
   - ApplyAccepted
   - ApplyTaskHandler
   - ApplyTaskLifecycle
   - APPLY_TASK_TYPE
   - build_apply_task_payload
   - BotConfigManifestApplyRecord  # the persisted apply row (table keeps its historical name)
-  - CliToolService  # and the cli_tools package it moved with
+  - ManifestCapabilities  # which constructs a bot can be told to have (capabilities.py); resolve_capabilities, capabilities_for_bot, CapabilityResolver
+  - SourceKind  # and source_matrix: which (construct, source kind) pairs are open (support_matrix.py)
+  - legal_identity_types  # and RESERVED_IDENTITY_FILES (identity_types.py)
+  - unpack_archive  # UnpackedTree, UnpackError, ARCHIVE_MEMBER_LIMIT, ARCHIVE_UNPACKED_LIMIT — the guarded archive unpack
+  - CREATE_PRE_CONTAINER_TRIGGER  # and CREATE_ON_CONTAINER_TRIGGER, ALL_TRIGGERS (triggers.py)
+  - CliToolService  # and the cli_tools package it moved with: CliToolDecl, CliToolStore, CliToolContext, the delivery ports, BotCliToolService, BotCliToolServiceProtocol
+  - ManagedFilesStore  # and ManagedFilesComposeReader, EngineOwnedComposeReader, PlatformIdentity / PlatformResource / PlatformSkillPackageUpload (managed_files/)
 consumes:
   - "ContentStoreProtocol (core.content_store) — the bytes every desired entry names, read by digest"
   - "IdentityFilePort, ResourceFilePort, SkillPackageUploadPort, ActivationPort (core.ports) — the narrow write ports the materialisers call"
@@ -93,21 +99,24 @@ consumed_by:
   - "di/modules/apply_engine_module, bot_management_module — binds ports, strategies, compilers and the run service"
   - "plugins/community/agentswarm — reads a bot's last apply"
 internal_dependencies:
-  - agentclaw.community.api
   - agentclaw.community.core.base
+  - agentclaw.community.core.bot_management.engines.registry  # the runtime-engine routing policy the resources materialiser addresses workspaces through
   - agentclaw.community.core.bot_startup_script
+  - agentclaw.community.core.config_compose.models  # the collector-shaped refs the managed-files reader yields to the teclaw composer
+  - agentclaw.community.core.config_compose.protocols  # ManagedFilesReader + PlatformOwnershipReader, the compose seams the managed-files reader inherits
   - agentclaw.community.core.content_store
-  - agentclaw.community.core.devices
   - agentclaw.community.core.mcp
   - agentclaw.community.core.ports
   - agentclaw.community.core.repository
   - agentclaw.community.core.resources
   - agentclaw.community.core.services
   - agentclaw.community.core.skill_center
-  - agentclaw.community.core.storage
   - agentclaw.community.core.task_queue
   - agentclaw.community.core.workspace
+  - agentclaw.community.kernel  # OwnershipCategory (bot_config) for the managed-files reader; lifecycle for the apply task handler
   - agentclaw.community.log
+  - agentclaw.community.plugin_api.device_adapter_transport  # the one engine channel core can reach; the ARCA cli_tools port POSTs an install through it
+  - agentclaw.community.plugin_api.object_storage  # the bot-data object store the managed-files store and the cli_tools store write into
   - agentclaw.community.utils
 ```
 

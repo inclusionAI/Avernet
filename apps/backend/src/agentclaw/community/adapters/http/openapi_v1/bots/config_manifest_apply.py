@@ -8,7 +8,7 @@ row.
 
 Nothing about *what applying does* is decided here. The router resolves the bot,
 calls the service, and shapes the result; the rules live in
-``core/bot_config_manifest/apply``.
+``core/apply_engine``.
 """
 
 from __future__ import annotations
@@ -34,8 +34,8 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
 )
-from agentclaw.community.api.bot_config_manifest_apply_service import (
-    BotConfigManifestApplyServiceProtocol,
+from agentclaw.community.api.apply_run_service import (
+    ApplyRunServiceProtocol,
     ManifestStateRef,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
@@ -116,8 +116,8 @@ async def apply_bot_config_manifest(
         ),
     ] = False,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    apply_service: BotConfigManifestApplyServiceProtocol = Injected(
-        BotConfigManifestApplyServiceProtocol
+    apply_service: ApplyRunServiceProtocol = Injected(
+        ApplyRunServiceProtocol
     ),
 ) -> Envelope[ConfigManifestApplyAccepted] | Envelope[ConfigManifestApply]:
     """Apply this bot's stored manifest. Returns immediately with an id to poll.
@@ -221,8 +221,8 @@ async def get_bot_config_manifest_apply(
     actor_id: UserIdDep,
     owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    apply_service: BotConfigManifestApplyServiceProtocol = Injected(
-        BotConfigManifestApplyServiceProtocol
+    apply_service: ApplyRunServiceProtocol = Injected(
+        ApplyRunServiceProtocol
     ),
 ) -> Envelope[ConfigManifestApply]:
     """Read one apply's report, whether it is still running or finished.
@@ -257,8 +257,8 @@ async def get_bot_config_manifest_last_apply(
     actor_id: UserIdDep,
     owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    apply_service: BotConfigManifestApplyServiceProtocol = Injected(
-        BotConfigManifestApplyServiceProtocol
+    apply_service: ApplyRunServiceProtocol = Injected(
+        ApplyRunServiceProtocol
     ),
 ) -> Envelope[ConfigManifestApply]:
     """The most recent apply for this bot.

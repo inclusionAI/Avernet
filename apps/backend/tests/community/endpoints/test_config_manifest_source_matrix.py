@@ -21,10 +21,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
-from agentclaw.community.core.bot_config_manifest.capabilities import (
+from agentclaw.community.core.apply_engine.capabilities import (
     ManifestCategory,
 )
-from agentclaw.community.core.bot_config_manifest.support_matrix import (
+from agentclaw.community.core.apply_engine.support_matrix import (
     MATRIX,
     SourceKind,
     refusal_for,

@@ -30,7 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
-from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKind
+from agentclaw.community.core.apply_engine.support_matrix import SourceKind
 
 #: ``mode`` selects what happens when a ref resolves somewhere new
 #: (work-items §3.2). Declared on the **source**, never on an entry: the
@@ -98,7 +98,7 @@ _REQUIRED_BY_PROTOCOL: dict[SourceKind, tuple[str, ...]] = {
 _ADDRESSING_FIELDS: frozenset[str] = frozenset({"url", "bucket"})
 
 #: The protocols a source may declare. ``content`` is a
-#: :class:`~agentclaw.community.core.bot_config_manifest.support_matrix.SourceKind`
+#: :class:`~agentclaw.community.core.apply_engine.support_matrix.SourceKind`
 #: but never a *source*: inline text is written on the entry and there is
 #: nothing to declare.
 DECLARABLE_PROTOCOLS: tuple[SourceKind, ...] = (SourceKind.GIT, SourceKind.OSS)

@@ -165,7 +165,7 @@ from agentclaw.community.core.workspace.engines import create_engine_sandbox_reg
 from agentclaw.community.core.workspace.path_factory import (
     WorkspacePathFactory,
 )
-from agentclaw.community.core.bot_config_manifest.cli_tools.store import CliToolStore
+from agentclaw.community.core.apply_engine.cli_tools.store import CliToolStore
 from agentclaw.community.core.repository.protocols.bot.cli_tool import (
     BotCliToolRepositoryProtocol,
 )
