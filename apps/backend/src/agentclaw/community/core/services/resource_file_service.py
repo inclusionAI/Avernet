@@ -644,12 +644,15 @@ class ResourceFileService(ResourceFilePort):
         to replace. An entry that vanishes mid-walk is skipped (a live
         workspace may change under the walk).
 
-        A root that does not list is confirmed absent from its parent: the
-        workspace root of a running bot always lists, so a parent that does
-        not is a transport that cannot list at all, and a parent that still
-        names ``data`` is a root listing that failed — both raise
-        ``RootListingFailed`` rather than answer ``()`` (teclaw's ``list_dir``
-        gives ``None`` for an absent directory and a failed call alike).
+        A root that does not list is confirmed absent from its parent: a bot
+        that has had its identity applied has a workspace that lists, so a
+        workspace that does not is a transport that cannot list at all, and
+        a workspace that still names ``data`` is a root listing that failed
+        (or a file squatting on the root) — each raises ``RootListingFailed``
+        rather than answer ``()``, because teclaw's ``list_dir`` gives
+        ``None`` for an absent directory and a failed call alike. The same
+        holds one level down: a subdirectory the walk was just told about
+        and then cannot list is a failed listing, not an empty directory.
         """
         ctx = runtime_context or self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
         device_fs = self._device_fs(
@@ -661,9 +664,12 @@ class ResourceFileService(ResourceFilePort):
             parent = await device_fs.list_dir(self._logical(""))
             if parent is None:
                 raise RootListingFailed(f"the workspace of bot {bot_id} could not be listed")
-            if any(entry.get("name") == RESOURCES_ROOT_DIR for entry in parent):
-                raise RootListingFailed(f"the resources root of bot {bot_id} is present but could not be listed")
-            return ()
+            named = self._named_in(parent, RESOURCES_ROOT_DIR)
+            if named is None:
+                return ()
+            if not bool(named.get("is_dir", False)):
+                raise RootListingFailed(f"the resources root of bot {bot_id} is a file, not a directory")
+            raise RootListingFailed(f"the resources root of bot {bot_id} is present but could not be listed")
         files: list[str] = []
         queue: list[tuple[str, list[dict[str, Any]]]] = [(RESOURCES_ROOT_DIR, root)]
         while queue:
@@ -672,8 +678,9 @@ class ResourceFileService(ResourceFilePort):
                 rel = self._rel_path(current, entry)
                 if bool(entry.get("is_dir", False)):
                     sub = await device_fs.list_dir(self._logical(rel))
-                    if sub is not None:
-                        queue.append((rel, sub))
+                    if sub is None:
+                        raise RootListingFailed(f"{rel} of bot {bot_id} was listed but could not be listed itself")
+                    queue.append((rel, sub))
                     continue
                 files.append(rel)
         return tuple(files)
@@ -720,10 +727,16 @@ class ResourceFileService(ResourceFilePort):
                 type(self).__name__, parent, exc,
             )
             return False
-        for entry in entries or ():
+        named = self._named_in(entries or (), leaf)
+        return bool(named.get("is_dir", False)) if named is not None else False
+
+    @staticmethod
+    def _named_in(entries: Any, leaf: str) -> dict[str, Any] | None:
+        """The listing entry named ``leaf``, or ``None`` when the listing has no such child."""
+        for entry in entries:
             if entry.get("name") == leaf:
-                return bool(entry.get("is_dir", False))
-        return False
+                return entry
+        return None
 
     async def upload_file(
         self,

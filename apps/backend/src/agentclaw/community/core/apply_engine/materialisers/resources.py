@@ -89,8 +89,24 @@ from agentclaw.community.core.apply_engine.capabilities import (
 from agentclaw.community.core.ports.resource_rows_port import ResourceRowsPort
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 
+#: The reason the category aborts with when the root could not be listed in ``plan``.
+ROOT_NOT_LISTED_REASON = "resources root could not be listed"
 #: The reason the category aborts with when the root could not be cleared.
 ROOT_NOT_CLEARED_REASON = "resources root could not be cleared"
+
+
+class ResourcesRootNotListed(RuntimeError):
+    """The plan's one listing of the root could not be made.
+
+    Raised out of ``plan``, so the orchestrator aborts the category with the
+    area untouched. Like ``ResourcesRootNotCleared`` it carries the stage's
+    own words and chains the transport's error as its cause: a BaaS listing
+    error quotes the request URL, which must reach the log and never the
+    report.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(ROOT_NOT_LISTED_REASON)
 
 
 class ResourcesRootNotCleared(RuntimeError):
@@ -201,11 +217,14 @@ class ResourcesMaterialiser(Materialiser):
         removals alone; the write stage clears the root whatever it says.
         """
         entity_type, entity_id, engine = _coords(ctx)
-        listed = frozenset(
-            await self._resources.list_root(
-                entity_type=entity_type, entity_id=entity_id, bot_id=ctx.bot_id, engine_type=engine
+        try:
+            listed = frozenset(
+                await self._resources.list_root(
+                    entity_type=entity_type, entity_id=entity_id, bot_id=ctx.bot_id, engine_type=engine
+                )
             )
-        )
+        except Exception as exc:  # noqa: BLE001 — the report gets the stage's words, the log gets the cause
+            raise ResourcesRootNotListed() from exc
         planned = tuple(
             PlannedEntry(intent=intent, outcome="updated" if intent.identity in listed else "created")
             for intent in intents
