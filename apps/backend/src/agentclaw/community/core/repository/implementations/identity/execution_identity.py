@@ -42,21 +42,21 @@ class ExecutionIdentityRepository(ExecutionIdentityRepositoryProtocol):
         self._db = db
 
     @staticmethod
-    def _state_query(session, *, bot_pk: int, status: ExecutionIdentityStatus):
+    def _state_query(session, *, bot_pk: int, status: ExecutionIdentityStatus, env: str | None = None):
         return (
             session.query(BotExecutionIdentityBindingModel)
             .filter(
                 BotExecutionIdentityBindingModel.bot_pk == bot_pk,
-                BotExecutionIdentityBindingModel.env == get_current_env(),
+                BotExecutionIdentityBindingModel.env == (get_current_env() if env is None else env),
                 BotExecutionIdentityBindingModel.status == status.value,
             )
             .order_by(BotExecutionIdentityBindingModel.id.desc())
         )
 
-    def get_active(self, *, bot_pk: int) -> ExecutionIdentityBinding | None:
+    def get_active(self, *, bot_pk: int, env: str | None = None) -> ExecutionIdentityBinding | None:
         with self._db.orm_session() as session:
             row = self._state_query(
-                session, bot_pk=bot_pk, status=ExecutionIdentityStatus.ACTIVE
+                session, bot_pk=bot_pk, status=ExecutionIdentityStatus.ACTIVE, env=env
             ).first()
             return _record(row) if row is not None else None
 

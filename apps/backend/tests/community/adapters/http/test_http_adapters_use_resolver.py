@@ -613,6 +613,9 @@ def _file_router_app(mock_ctx, tmp_path):
         "bot_type": "personal",
     }
 
+    from tests.community.bot_address_fakes import support_legacy_locator
+    bot_repo = support_legacy_locator(bot_repo)
+
     path_factory = _make_mock_path_factory(tmp_path)
     baas_service = MagicMock()
     publish_repo = MagicMock()

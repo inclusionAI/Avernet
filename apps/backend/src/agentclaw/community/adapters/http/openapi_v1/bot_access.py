@@ -43,8 +43,6 @@ import json
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
-from fastapi import Request
-
 from agentclaw.community.adapters.http.openapi_v1.access_log import (
     RESPONSE_STATUS_KEY,
 )
@@ -60,14 +58,14 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     BotEditLockCheckError,
     BotEditLockRequiredError,
 )
+from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.api.collaborator_lock_service import (
     CollaboratorLockServiceProtocol,
 )
 from agentclaw.community.api.member_management_capability import (
     MemberManagementCapabilityProtocol,
 )
-from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
-from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
@@ -80,6 +78,7 @@ from agentclaw.community.core.repository.protocols.bot import (
     BotRepository,
 )
 from agentclaw.community.log import get_logger
+from fastapi import Request
 
 logger = get_logger()
 
@@ -219,7 +218,10 @@ async def _uses_member_management_semantics(
     if bots is None or capabilities is None:
         return False
     try:
-        bot = await asyncio.to_thread(bots.get_by_id_and_owner, bot_id, owner_id)
+        context = await asyncio.to_thread(
+            BotAddressResolver(bots).resolve, bot_id=bot_id, legacy_owner_id=owner_id
+        )
+        bot = context.bot
         return bool(bot and capabilities.uses_member_management_semantics(bot, bot_id))
     except Exception:
         logger.exception(

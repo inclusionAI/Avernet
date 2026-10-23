@@ -143,7 +143,9 @@ class CallerIdentityRepositoryProtocol(Protocol):
 @runtime_checkable
 class ExecutionIdentityRepositoryProtocol(Protocol):
     @abstractmethod
-    def get_active(self, *, bot_pk: int) -> ExecutionIdentityBinding | None: ...
+    def get_active(self, *, bot_pk: int, env: str | None = None) -> ExecutionIdentityBinding | None:
+        """Read an ACTIVE binding in the server's env, or an explicit maintenance target env."""
+        ...
 
     @abstractmethod
     def get_pending(self, *, bot_pk: int) -> ExecutionIdentityBinding | None: ...

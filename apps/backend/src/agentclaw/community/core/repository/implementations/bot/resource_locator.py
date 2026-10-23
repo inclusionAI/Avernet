@@ -5,27 +5,26 @@ exists. Keep that historical address when there is no live match; never choose
 between two different live Bots. This helper does not grant user access.
 """
 
-from sqlalchemy import or_, select, tuple_
-from sqlalchemy.orm import Session
-
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.utils.env_utils import get_current_env
+from sqlalchemy import or_, select, tuple_
+from sqlalchemy.orm import Session
 
 
-def resource_locator(session: Session, bot_id: str, locator: str) -> str:
+def resource_locator(session: Session, bot_id: str, locator: str, *, include_deleted: bool = False) -> str:
     """Return the immutable entity for an existing Bot, or the offline locator."""
-    rows = (
-        session.query(BotModel.entity_id)
-        .filter(
-            BotModel.bot_id == bot_id,
-            or_(BotModel.entity_id == locator, BotModel.owner_id == locator),
-            BotModel.env == get_current_env(),
-            BotModel.is_delete == 0,
-        )
-        .limit(2)
-        .all()
-    )
+    conditions = [
+        BotModel.bot_id == bot_id,
+        or_(BotModel.entity_id == locator, BotModel.owner_id == locator),
+        BotModel.env == get_current_env(),
+    ]
+    if not include_deleted:
+        conditions.append(BotModel.is_delete == 0)
+    query = session.query(BotModel.entity_id).filter(*conditions)
+    # Deletion's final grant sweep runs after soft deletion. Historical rows
+    # may repeat an address; only different stable entities are ambiguous.
+    rows = query.distinct().limit(2).all() if include_deleted else query.limit(2).all()
     if len(rows) > 1:
         raise BotLookupAmbiguousError(f"Ambiguous resource Bot locator: {bot_id}")
     if not rows:

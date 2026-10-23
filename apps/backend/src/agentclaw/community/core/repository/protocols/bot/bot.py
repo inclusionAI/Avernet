@@ -10,7 +10,7 @@ site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Any, Dict, List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.render_screen.models import (
@@ -156,6 +156,24 @@ class BotRepository(Protocol):
         soft-deleted rows — so "in this list" means "live for this owner right
         now".
         """
+        ...
+
+    @abstractmethod
+    def page_live_bots_by_pks(
+        self, bot_pks: list[int], *, exclude_owner_id: str, entity_pairs: list[tuple[str, str]] | None,
+        page: int, page_size: int,
+    ) -> tuple[int, list[dict[str, Any]]]:
+        """Page live relation targets by stable PK; optional app scope is exact entity pairs.
+
+        None means a human listing, an empty list means no application scope.
+        Historical collaborator owner snapshots are never used to locate Bots.
+        Current Owners are excluded from their own collaboration collection.
+        """
+        ...
+
+    @abstractmethod
+    def get_live_bot_owners_by_entity(self, pairs: list[tuple[str, str]]) -> dict[tuple[str, str], str]:
+        """Current personnel owners for exact stable Bot addresses, in one scoped read."""
         ...
 
     @abstractmethod

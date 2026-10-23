@@ -41,9 +41,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from injector import inject
-from sqlalchemy.exc import IntegrityError
-
 from agentclaw.community.core.bot_app_grant.errors import GrantOwnerConflictError
 from agentclaw.community.core.bot_app_grant.models import (
     BotAppGrantLogModel,
@@ -51,13 +48,17 @@ from agentclaw.community.core.bot_app_grant.models import (
     BotAppGrantRecord,
     GrantAction,
 )
+from agentclaw.community.core.repository.implementations.bot.resource_locator import (
+    resource_locator,
+)
 from agentclaw.community.core.repository.protocols.bot import (
     BotAppGrantRepositoryProtocol,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
-
+from injector import inject
+from sqlalchemy.exc import IntegrityError
 
 logger = get_logger()
 
@@ -107,6 +108,8 @@ class BotAppGrantRepository(
         bot_id = data["bot_id"]
         user_id = data["user_id"]
         owner_id = data["owner_id"]
+        with self._db.orm_session() as db:
+            owner_id = resource_locator(db, bot_id, owner_id)
         app_name = data["app_name"]
         env = get_current_env()
 
@@ -207,6 +210,7 @@ class BotAppGrantRepository(
     ) -> BotAppGrantRecord:
         """The write half of :meth:`grant`, in one transaction."""
         with self._db.transactional_orm_session() as db:
+            owner_id = resource_locator(db, bot_id, owner_id)
             # No lock: see the module docstring. The unique key is what
             # serializes this, and a FOR UPDATE matching no row would take a gap
             # lock that deadlocks a concurrent inserter instead.
@@ -276,6 +280,7 @@ class BotAppGrantRepository(
         """
         env = get_current_env()
         with self._db.transactional_orm_session() as db:
+            owner_id = resource_locator(db, bot_id, owner_id)
             row = self._live_row(
                 db, bot_id, user_id, app_id, env, lock=True, owner_id=owner_id
             )
@@ -306,14 +311,15 @@ class BotAppGrantRepository(
             owner_id,
             app_id=app_id,
             reason="owner revoked an app outright",
+            include_deleted=False,
         )
 
     def revoke_all_for_bot(self, bot_id: str, owner_id: str) -> int:
         """Withdraw every authorization standing against a bot."""
-        return self._sweep(bot_id, owner_id, app_id=None, reason="bot deleted")
+        return self._sweep(bot_id, owner_id, app_id=None, reason="bot deleted", include_deleted=True)
 
     def _sweep(
-        self, bot_id: str, owner_id: str, *, app_id: Optional[int], reason: str
+        self, bot_id: str, owner_id: str, *, app_id: Optional[int], reason: str, include_deleted: bool
     ) -> int:
         """Delete a set of live rows and log one ``revoked`` event for each.
 
@@ -340,6 +346,7 @@ class BotAppGrantRepository(
         """
         env = get_current_env()
         with self._db.transactional_orm_session() as db:
+            owner_id = resource_locator(db, bot_id, owner_id, include_deleted=include_deleted)
             query = db.query(self._Grant).filter(
                 self._Grant.bot_id == bot_id,
                 self._Grant.owner_id == owner_id,
@@ -400,6 +407,7 @@ class BotAppGrantRepository(
         ``idx_bot_app_grant_bot_owner`` was built for.
         """
         with self._db.orm_session() as db:
+            owner_id = resource_locator(db, bot_id, owner_id)
             rows = (
                 db.query(self._Grant)
                 .filter(
@@ -445,6 +453,7 @@ class BotAppGrantRepository(
         while the unique key happens to make the row singular.
         """
         with self._db.orm_session() as db:
+            owner_id = resource_locator(db, bot_id, owner_id)
             row = self._live_row(
                 db, bot_id, user_id, app_id, get_current_env(), owner_id=owner_id
             )

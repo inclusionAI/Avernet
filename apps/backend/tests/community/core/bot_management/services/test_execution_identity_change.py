@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock
+from dataclasses import replace
 
 import pytest
 
@@ -99,3 +100,32 @@ def test_activate_requires_a_persisted_pending_binding() -> None:
         service.change_execution_identity(
             bot_id="bot-1", owner_id="owner-1", action="activate", modifier_id="operator-1",
         )
+
+
+def test_pending_status_never_injects_even_if_upstream_returns_a_token() -> None:
+    service, bindings, passport, runtime = _service()
+    bindings.get_pending.return_value = _binding(status=ExecutionIdentityStatus.PENDING)
+    passport.query_auth_status.return_value = {"status": "PENDING", "token": "unexpected"}
+    result = service.change_execution_identity(
+        bot_id="bot-1", owner_id="owner-1", action="activate", modifier_id="operator-1",
+    )
+    assert result["token_injected"] is False
+    runtime.hot_update_passport_token_to_device.assert_not_called()
+    bindings.activate_pending.assert_not_called()
+
+
+def test_matching_executor_with_different_credential_cannot_activate() -> None:
+    service, bindings, passport, runtime = _service()
+    bindings.get_pending.return_value = replace(
+        _binding(status=ExecutionIdentityStatus.PENDING), credential_id="expected"
+    )
+    passport.query_auth_status.return_value = {"status": "ISSUED", "token": "token"}
+    passport.query_agent_passport.return_value = {
+        "execution_workno": "digital-1", "credential_id": "other-credential",
+    }
+    with pytest.raises(ExecutionIdentityOperationNotAllowedError):
+        service.change_execution_identity(
+            bot_id="bot-1", owner_id="owner-1", action="activate", modifier_id="operator-1",
+        )
+    runtime.hot_update_passport_token_to_device.assert_not_called()
+    bindings.activate_pending.assert_not_called()
