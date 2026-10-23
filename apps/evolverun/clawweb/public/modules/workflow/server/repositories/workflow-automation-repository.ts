@@ -67,10 +67,11 @@ export class WorkflowAutomationRepository {
     return (await this.db.query<{ body_json: string }>(`SELECT body_json FROM workflow_repair_release_records
       WHERE task_id = ? AND record_kind = ? AND ${this.json('status')} NOT IN ('done', 'blocked')
       AND CAST(${this.json('nextAtMs')} AS SIGNED) <= ?
+      AND CAST(${this.json('leaseUntilMs')} AS SIGNED) <= ?
       ${dispatchedOnly ? `AND (CAST(${this.json('attempts')} AS SIGNED) > 0
         OR ${this.json('status')} IN ('dispatching', 'waiting', 'uncertain')
         OR COALESCE(${this.json('data.analysisId')}, '') NOT IN ('', 'null'))` : ''}
-      ORDER BY updated_at_ms, record_id LIMIT ?`, [taskScope(workflowId), kind, now, limit]))
+      ORDER BY updated_at_ms, record_id LIMIT ?`, [taskScope(workflowId), kind, now, now, limit]))
       .map(row => JSON.parse(row.body_json));
   }
   async readyAcross(kind: AutomationKind, now: number, limit: number, scopeKey: string): Promise<AutomationJob[]> {

@@ -8,6 +8,7 @@ import { RepairAutomationDeniedError } from '../contracts/workflow-automation.js
 import type { RepairSelectionRequest } from '../contracts/repair-workbench.js';
 import { digestRepairJson } from '../contracts/repair-batch.js';
 import { WorkflowAutomationRepository, type AutomationJob } from '../repositories/workflow-automation-repository.js';
+import { WorkflowPlannerLeaseRepository } from '../repositories/workflow-planner-lease-repository.js';
 import { runAutomaticRound } from './workflow-automation-round.js';
 import { previousShanghaiDay, selectAutomaticScope } from './workflow-automation-selection.js';
 import { WorkflowAutomationHistoryRepository } from '../repositories/workflow-automation-history-repository.js';
@@ -30,7 +31,7 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
   const repo = new WorkflowAutomationRepository(input.db);
   const drainNotifications = createWorkflowNotificationDrain(input);
   const issues = new IssueAggregationRepository(input.db);
-  let roundRobin = 0;
+  const planner = new WorkflowPlannerLeaseRepository(input.db);
   const environment = input.environment ?? 'prod';
   logWorkflowBackground('workflow_automation', 'configured', { enabled: true, environment });
   async function authority(workflowId: string, draft = false) {
@@ -200,7 +201,7 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
       // Park never-dispatched analysis without claiming/writing it each poll.
       // Filter before LIMIT so parked jobs cannot starve in-flight reconciliation.
       for (const job of await repo.ready(policy.workflowId, 'auto_run', now(), 3, true)) await runAnalysis(job);
-      for (const job of await repo.ready(policy.workflowId, 'auto_draft', now(), 3)) await runDraft(job);
+      for (const job of await repo.ready(policy.workflowId, 'auto_draft', now(), 3, true)) await runDraft(job);
       return;
     }
     const initial = await repo.ensure(policy.workflowId, 'auto_cycle', 'state', { scanFromMs: policy.scopeVersion === 'all-qualified/v1' ? previousShanghaiDay(now()).fromMs : now() - DAY, scannedThroughMs: null, completedDue: null }, now());
@@ -215,7 +216,7 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
       if (!policy.enabled) cycle = await repo.patch(cycle, { reason: 'AUTOMATION_DISABLED' }, now());
       // Existing analysis/draft requests are read/reconciled even while policy is disabled.
       for (const job of (await repo.ready(policy.workflowId, 'auto_run', now(), 3))) await runAnalysis(job);
-      for (const job of (await repo.ready(policy.workflowId, 'auto_draft', now(), 3))) await runDraft(job);
+      for (const job of (await repo.ready(policy.workflowId, 'auto_draft', now(), 3, !policy.autoDraft || !policy.dailyConfigured))) await runDraft(job);
       const current = await input.settings.get(policy.workflowId);
       if (current.enabled && current.dailyConfigured && cycle.data.completedDue) {
         const analysisVersion = await input.db.query(`SELECT COUNT(*) AS count, MAX(id) AS latest, MAX(completed_at_ms) AS completed, SUM(state_version) AS revision
@@ -259,22 +260,41 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
   return {
     async tick() {
       const end = startWorkflowBackgroundRun('workflow_automation', 'timer', { environment });
+      let lease: Awaited<ReturnType<typeof planner.claim>> = null;
       try {
-      const policies = (await input.settings.list()).filter(policy => (policy.executionEnvironment ?? 'prod') === environment);
+      lease = await planner.claim(environment, now());
+      if (!lease) {
+        // Planning ownership must not pause the independent completion queue.
+        await drainNotifications();
+        end('skipped', { reason: 'PLANNER_NOT_CLAIMED' }); return 0;
+      }
+      const policies = (await input.settings.list()).filter(policy => (policy.executionEnvironment ?? 'prod') === environment)
+        .sort((a, b) => a.workflowId < b.workflowId ? -1 : a.workflowId > b.workflowId ? 1 : 0);
       const count = Math.min(10, policies.length);
+      const after = lease.cursor === null ? 0 : policies.findIndex(policy => policy.workflowId > lease!.cursor!);
+      const start = after < 0 ? 0 : after;
+      // Fence after policy I/O, then renew at each workflow boundary. Never
+      // hold a DB transaction over candidate queries or external dispatch.
+      lease = await planner.checkpoint(lease, lease.cursor, now());
       for (let i = 0; i < count; i++) {
-        const policy = policies[(roundRobin + i) % policies.length];
+        const policy = policies[(start + i) % policies.length];
         try { await workflow(policy); }
         catch (error) { logWorkflowBackground('workflow_policy', 'failed', { environment, workflowId: policy.workflowId });
           console.warn('[workflow-automation] reconcile failed', { workflowId: policy.workflowId, environment,
           code: error instanceof RepairAutomationDeniedError ? error.message : 'AUTOMATION_RECONCILE_FAILED' }); }
+        lease = await planner.checkpoint(lease, policy.workflowId, now());
       }
-      if (policies.length) roundRobin = (roundRobin + count) % policies.length;
+      await planner.checkpoint(lease, lease.cursor, now(), true); lease = null;
       // Manual completions and in-flight automatic results notify even with automation disabled/unconfigured.
       await drainNotifications();
       end('succeeded', { policyCount: policies.length, enabledPolicyCount: policies.filter(policy => policy.enabled).length, count });
       return count;
-      } catch (error) { end('failed'); throw error; }
+      } catch (error) { end('failed', { errorCode: error instanceof Error && error.message === 'AUTOMATION_PLANNER_LEASE_LOST'
+        ? 'AUTOMATION_PLANNER_LEASE_LOST' : 'AUTOMATION_RECONCILE_FAILED' }); throw error; }
+      finally {
+        if (lease) try { await planner.checkpoint(lease, lease.cursor, now(), true); }
+        catch { logWorkflowBackground('workflow_automation', 'release_failed', { environment, reason: 'PLANNER_LEASE_UNAVAILABLE' }); }
+      }
     },
     async onRunTerminal(event) {
       if (event.status !== 'failed') return;

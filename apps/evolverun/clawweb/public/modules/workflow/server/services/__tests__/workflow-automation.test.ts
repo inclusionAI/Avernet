@@ -86,6 +86,51 @@ it('uses Shanghai daily boundaries and merges missed days', () => {
   expect(automationDue(Date.parse('2026-11-01T00:59:00Z'), '09:00').key).toBe('2026-10-31');
   expect(automationDue(Date.parse('2026-11-01T01:00:00Z'), '09:00').key).toBe('2026-11-01');
 });
+it('a losing environment planner skips planning but retains independent notification delivery', async () => {
+  const f = await fixture(false, 0);
+  const original = f.settings.list.bind(f.settings);
+  let resume!: () => void;
+  const gate = new Promise<void>(resolve => { resume = resolve; });
+  const listed = vi.spyOn(f.settings, 'list').mockImplementationOnce(async () => { await gate; return original(); });
+  const first = f.service.tick();
+  try {
+    await vi.waitFor(() => expect(listed).toHaveBeenCalledTimes(1));
+    expect(await f.host().tick()).toBe(0);
+    // One blocked planner read, one independent notification scope read;
+    // no second planner scan.
+    expect(listed).toHaveBeenCalledTimes(2);
+  } finally { resume(); await first; }
+});
+it('persists planner rotation across replicas so workflows after the first batch are not starved', async () => {
+  const f = await fixture(false, 0);
+  const policy = await f.settings.get('wf-1');
+  vi.spyOn(f.settings, 'list').mockResolvedValue(Array.from({ length: 11 }, (_, i) => ({
+    ...policy, enabled: false, workflowId: `flow-${String(i + 1).padStart(2, '0')}`,
+  })));
+  const reads = vi.spyOn(WorkflowAutomationRepository.prototype, 'ready');
+  await f.service.tick();
+  reads.mockClear();
+  f.advance(); await f.host().tick();
+  expect(reads.mock.calls[0][0]).toBe('flow-11');
+});
+it('stops a planner that expired while loading settings before it can dispatch new work', async () => {
+  const f = await fixture(false, 0);
+  const original = f.settings.list.bind(f.settings);
+  vi.spyOn(f.settings, 'list').mockImplementationOnce(async () => { f.advance(300001); return original(); });
+  await expect(f.service.tick()).rejects.toThrow('AUTOMATION_PLANNER_LEASE_LOST');
+  expect(f.ports.analysis.start).not.toHaveBeenCalled();
+  expect(f.calls).toHaveLength(0);
+  expect((await f.service.status('wf-1')).jobs).toEqual([]);
+});
+it('does not let leased jobs occupy the ready-page limit and starve available work', async () => {
+  const f = await fixture(false, 0);
+  const repo = new WorkflowAutomationRepository(f.db);
+  const now = Date.parse('2026-11-01T02:00:00Z');
+  for (let i = 0; i < 4; i++) await repo.ensure('wf-1', 'auto_run', `lease-${i}`, { flowId: `lease-${i}` }, now);
+  const jobs = await repo.ready('wf-1', 'auto_run', now, 4);
+  for (const job of jobs.slice(0, 3)) await repo.claim(job.id, now);
+  expect((await repo.ready('wf-1', 'auto_run', now, 3)).map(job => job.id)).toEqual([jobs[3].id]);
+});
 it.each([false, true])('plans automatic scope without fetching Git, including an empty scope (full=%s)', async full => {
   const f = await fixture(true, 0, full);
   const baseline = vi.spyOn(f.ports, 'baseline');
@@ -107,14 +152,16 @@ it.each([false, true])('dispatches a planned draft without rereading its Git bas
   const task = await f.workbench.task(record!.data.realTaskId);
   expect(task.latestAttempt.input.baseline).toEqual(f.baseline);
 });
-it('parks a disabled planned draft without reading Git or dispatching it', async () => {
+it.each([false, true])('parks a disabled planned draft without journal churn (analysis enabled=%s)', async analysisEnabled => {
   const f = await fixture(true, 1);
   await f.service.tick();
   const job = (await f.service.status('wf-1')).jobs.find(row => row.kind === 'auto_draft')!;
-  await f.settings.set('wf-1', false, 'owner');
+  const before = await new WorkflowAutomationRepository(f.db).get(job.id);
+  const policy = await f.settings.get('wf-1');
+  await f.settings.save('wf-1', { enabled: analysisEnabled, autoDraft: false, dailyTime: policy.dailyTime, expectedVersion: policy.version }, 'owner');
   f.ports.baseline = async () => { throw new Error('Git unavailable while disabled'); };
   f.advance(); await f.service.tick();
-  expect(await new WorkflowAutomationRepository(f.db).get(job.id)).toMatchObject({ status: 'retryable', reason: 'AUTOMATION_DISABLED', attempts: 0 });
+  expect(await new WorkflowAutomationRepository(f.db).get(job.id)).toEqual(before);
   expect(f.calls).toHaveLength(0);
 });
 it('parks disabled, never-dispatched analysis without claims, source reads or journal churn, and resumes on enable', async () => {
