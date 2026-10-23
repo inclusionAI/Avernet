@@ -11,7 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
-from agentclaw.community.core.content_store import ContentScope
+from agentclaw.community.core.content_store import MAX_AUDIT_ACTOR_CHARS, ContentScope
 from agentclaw.community.core.bot_genome.canonical import canonicalize, sha256_digest
 from agentclaw.community.core.bot_genome.errors import (
     CaptureRefused,
@@ -529,13 +529,18 @@ async def test_memory_bot_patches_work_end_to_end(world: World) -> None:
 
 
 def test_an_audit_identity_the_columns_cannot_hold_is_refused_on_construction() -> None:
-    """User ids are unbounded at the API boundary; the content store's ``modifier`` column is 1024 wide."""
-    long_user = "u-" + "x" * 1024
+    """User ids are unbounded at the API boundary; every audit column is MAX_AUDIT_ACTOR_CHARS wide."""
+    long_user = "u-" + "x" * MAX_AUDIT_ACTOR_CHARS
     with pytest.raises(LimitExceeded):
         Provenance(ProvenanceKind.USER, long_user, recorded_as=f"app:app_1:on-behalf-of:{long_user}")
     with pytest.raises(LimitExceeded):
         Provenance(ProvenanceKind.USER, long_user)
-    assert Provenance(ProvenanceKind.USER, "u-" + "x" * 1000, recorded_as="app:a:on-behalf-of:u-" + "x" * 1000).audit
+    # A 1024-character user id behind an application prefix fits; exactly the bound is recorded.
+    assert Provenance(ProvenanceKind.USER, "u-" + "x" * 1022, recorded_as="app:1:on-behalf-of:u-" + "x" * 1022).audit
+    at_bound = "x" * MAX_AUDIT_ACTOR_CHARS
+    assert len(Provenance(ProvenanceKind.USER, at_bound).audit) == MAX_AUDIT_ACTOR_CHARS
+    with pytest.raises(LimitExceeded):
+        Provenance(ProvenanceKind.USER, at_bound + "x")
 
 
 def test_provenance_holds_the_contracts_run_id_rule() -> None:

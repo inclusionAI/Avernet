@@ -53,6 +53,7 @@ from agentclaw.community.di.modules.caller_identity_module import CallerIdentity
 from agentclaw.community.di.modules.channel_module import ChannelModule
 from agentclaw.community.di.modules.common_config_module import CommonConfigModule
 from agentclaw.community.di.modules.config_module import ConfigModule
+from agentclaw.community.di.modules.content_store_module import ContentStoreModule
 from agentclaw.community.di.modules.cron_module import CronModule
 from agentclaw.community.di.modules.desktop_bot_module import DesktopBotModule
 from agentclaw.community.di.modules.desktop_skill_recovery_config_module import (
@@ -190,6 +191,9 @@ def build_injector(
         AgentSwarmModule(),
         BotQuotaModule(),
         ManifestFetchModule(),
+        # The content store binds after the module that parses its blob root
+        # (cfg.BotConfigManifestConfig) and before its two consumers.
+        ContentStoreModule(),
         ManifestDeliveryModule(),
         BotGenomeModule(),
         BotInventoryModule(),

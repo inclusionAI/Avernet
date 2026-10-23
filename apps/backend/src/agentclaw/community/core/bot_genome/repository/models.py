@@ -44,6 +44,7 @@ from sqlalchemy.dialects import mysql
 from sqlalchemy.sql import func
 
 from agentclaw.community.core.base import Base
+from agentclaw.community.core.bot_genome.limits import MAX_AUDIT_ACTOR_CHARS
 from agentclaw.community.utils.avernet_tenant_guard import (
     register_avernet_tenant_guard,
 )
@@ -209,7 +210,7 @@ class GenomeRevisionModel(Base):
     status = Column(String(16), nullable=False, comment="draft/candidate/accepted/rejected/promoted/archived")
     created_kind = Column(String(16), nullable=False, comment="user/strategy_run")
     created_actor = Column(
-        String(1100),
+        String(MAX_AUDIT_ACTOR_CHARS),
         nullable=False,
         comment="who recorded it; an app acting for a user is app:<id>:on-behalf-of:<user>",
     )
@@ -244,7 +245,7 @@ class GenomeRefModel(Base):
     version = Column(BigInteger, nullable=False, default=1, comment="moves so far; CAS token")
     moved_at = Column(DateTime, nullable=False)
     moved_kind = Column(String(16), nullable=False, comment="user/strategy_run")
-    moved_actor = Column(String(1100), nullable=False)
+    moved_actor = Column(String(MAX_AUDIT_ACTOR_CHARS), nullable=False)
     run_id = Column(String(64), nullable=True)
     reason = Column(String(1024), nullable=True)
 
@@ -263,7 +264,7 @@ class GenomeRefEventModel(Base):
     from_revision_id = Column(CHAR(DIGEST_WIDTH), nullable=True, comment="NULL when the ref was created")
     to_revision_id = Column(CHAR(DIGEST_WIDTH), nullable=False)
     moved_kind = Column(String(16), nullable=False)
-    moved_actor = Column(String(1100), nullable=False)
+    moved_actor = Column(String(MAX_AUDIT_ACTOR_CHARS), nullable=False)
     run_id = Column(String(64), nullable=True)
     reason = Column(String(1024), nullable=True)
     moved_at = Column(DateTime, nullable=False)
@@ -307,7 +308,7 @@ class GenomePromotionModel(Base):
     )
     going_back = Column(Boolean, nullable=False, default=False, comment="the target had been promoted before")
     actor_kind = Column(String(16), nullable=False, comment="user/strategy_run")
-    actor_id = Column(String(1100), nullable=False)
+    actor_id = Column(String(MAX_AUDIT_ACTOR_CHARS), nullable=False)
     actor_run_id = Column(String(64), nullable=True, comment="the evolution run, for strategy_run")
     reason = Column(String(1024), nullable=False)
     status = Column(String(16), nullable=False, comment="applying/applied/apply_failed")

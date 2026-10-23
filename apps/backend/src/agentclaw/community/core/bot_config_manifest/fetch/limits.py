@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Callable, Mapping
 
-from agentclaw.community.core.content_store.limits import DIGEST_RE
+from agentclaw.community.core.content_store.limits import DIGEST_RE  # noqa: F401  re-exported: the fetch vocabulary, see below
 
 #: Address resolution seam: host → resolved IP string list. Real DNS via
 #: socket in production; tests inject deterministic answers (including the

@@ -1,8 +1,8 @@
 """ManifestFetchModule — the fetch-side machine parts of manifest apply (W5).
 
 The apply wiring W11's repository binding comment reserved: the guarded
-fetcher (W2), the content store (W11), and the one entry-fetcher funnel over
-W2/W3/W11, plus the lazy service factories the registry's fetch-consuming
+fetcher (W2) and the one entry-fetcher funnel over W2/W3 and the content
+store (W11; the store itself binds in ``content_store_module``, #3064), plus the lazy service factories the registry's fetch-consuming
 materialisers take their collaborators through. One module because one
 feature wave owns them — the same reason the apply service and its
 repositories bind in ``bot_management_module``, where they landed with W4.
@@ -20,7 +20,6 @@ here, with the store it reads through.
 """
 from __future__ import annotations
 
-from pathlib import Path
 from types import MappingProxyType
 from typing import Callable, Mapping
 
@@ -48,9 +47,6 @@ from agentclaw.community.core.ports.identity_file_port import (
 from agentclaw.community.core.ports.resource_file_port import (
     ResourceFilePort,
 )
-from agentclaw.community.core.content_store.service import (
-    ContentStoreService,
-)
 from agentclaw.community.core.content_store.service_protocol import (
     ContentStoreProtocol,
 )
@@ -63,9 +59,6 @@ from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
 )
 from agentclaw.community.core.repository.protocols.bot.cli_tool import (
     BotCliToolRepositoryProtocol,
-)
-from agentclaw.community.core.repository.protocols.bot import (
-    ContentStoreRepositoryProtocol,
 )
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
@@ -279,20 +272,6 @@ class ManifestFetchModule(Module):
         to select — one road, taken.
         """
         return AliyunObjectStore()
-
-    @singleton
-    @provider
-    @inject
-    def manifest_content_service(
-        self,
-        repository: ContentStoreRepositoryProtocol,
-        manifest_config: cfg.BotConfigManifestConfig,
-    ) -> ContentStoreProtocol:
-        """The W11 content store: blob root from the typed config cluster."""
-        return ContentStoreService(
-            repository,
-            Path(manifest_config.content_store_dir),
-        )
 
     @singleton
     @provider

@@ -120,8 +120,8 @@ class Provenance:
     def __post_init__(self) -> None:
         """Runs on construction: an identity the audit columns cannot hold is refused before anything is written.
 
-        User ids are unbounded at the API boundary, and the content store's
-        ``modifier`` column (a frozen migration shared with the Manifest) is
+        User ids are unbounded at the API boundary, and every audit column
+        (the content store's ``modifier`` and the genome's actor columns) is
         ``MAX_AUDIT_ACTOR_CHARS`` wide, so a longer identity is refused here
         as ``LimitExceeded`` rather than failing inside a write.
         """

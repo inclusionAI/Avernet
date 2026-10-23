@@ -13,14 +13,14 @@
   - [x] `tests/community/core/content_store/` (moved `test_content_store.py` + new `test_tree.py`) and `tests/community/repository/bot/test_content_store_repository.py` (moved, plus the DDL/ORM width test) pass; `test_manifest_ddl_contract` covers `content_store/sql` (pulled forward from Task 3 because the move broke it).
 - **Depends on:** —
 
-## Task 2: Point the Manifest and the Genome at the component; wire it at the composition root
+## Task 2: [x] Point the Manifest and the Genome at the component; wire it at the composition root
 - **Goal:** Every consumer imports from `core.content_store`; the component binds in its own DI module; the genome's actor widths derive from the shared constant.
-- **Files:** `core/bot_config_manifest/apply/{entry_delivery,fetch_context,source_fetchers,source_resolver}.py`, `core/bot_config_manifest/apply/materialisers/resources.py`, `core/bot_genome/{limits,registry,canonical,diff,spec_checks}.py`, `core/bot_genome/capture/capture.py`, `core/bot_genome/patch/ops.py`, `core/bot_genome/repository/models.py`, `core/bot_genome/models.py`, `di/modules/content_store_module.py` (new), `di/modules/{bot_management_module,manifest_fetch_module,bot_genome_module}.py`, `di/container.py`
+- **Files:** `core/bot_config_manifest/apply/{entry_delivery,fetch_context,source_fetchers,source_resolver}.py`, `core/bot_config_manifest/apply/materialisers/resources.py`, `core/bot_genome/{limits,registry,canonical,diff,spec_checks}.py`, `core/bot_genome/capture/capture.py`, `core/bot_genome/patch/ops.py`, `core/bot_genome/repository/models.py`, `core/bot_genome/models.py`, `di/modules/content_store_module.py` (new), `tests/community/di/test_content_store_module_wiring.py` (new), `di/modules/{bot_management_module,manifest_fetch_module,bot_genome_module}.py`, `di/container.py`
 - **Done when:**
   - [x] `grep -rn "bot_config_manifest.content\|bot_config_manifest/content\|ManifestContentService\|ManifestContentRepository\|entry_delivery import.*tree_bytes" apps/backend/src` is empty (done in Task 1 so every commit imports).
-  - [ ] `ContentStoreModule` binds the repository and provides `ContentStoreProtocol`; the two old bindings are gone; `build_injector` resolves `ContentStoreProtocol` and `GenomeRegistryProtocol` under the test profile.
-  - [ ] Genome `String(1100)` columns read `String(MAX_AUDIT_ACTOR_CHARS)`; `bot_genome.limits.MAX_AUDIT_ACTOR_CHARS` is the store's constant.
-  - [ ] All tests under `tests/community/core/bot_config_manifest`, `tests/community/core/bot_genome`, `tests/community/repository/bot`, `tests/community/contracts/test_bot_genome_schema.py`, `tests/community/e2e/test_genome_flows.py` pass with import paths updated; the registry width test asserts 1100 is recorded and 1101 refused.
+  - [x] `ContentStoreModule` binds the repository and provides `ContentStoreProtocol`; the two old bindings are gone; `build_injector` resolves `ContentStoreProtocol` and `GenomeRegistryProtocol` under the test profile.
+  - [x] Genome `String(1100)` columns read `String(MAX_AUDIT_ACTOR_CHARS)`; `bot_genome.limits.MAX_AUDIT_ACTOR_CHARS` is the store's constant.
+  - [x] All tests under `tests/community/core/bot_config_manifest`, `tests/community/core/bot_genome`, `tests/community/repository/bot`, `tests/community/contracts/test_bot_genome_schema.py`, `tests/community/e2e/test_genome_flows.py` pass with import paths updated; the registry width test asserts 1100 is recorded and 1101 refused.
 - **Depends on:** Task 1
 
 ## Task 3: Declare the boundary, exempt the module, update the docs

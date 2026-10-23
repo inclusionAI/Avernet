@@ -21,9 +21,7 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplySta
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
     BotConfigManifestApplyServiceProtocol,
 )
-from agentclaw.community.core.content_store import ContentScope, ContentStoreProtocol
-from agentclaw.community.core.content_store.errors import ContentStoreError
-from agentclaw.community.core.bot_config_manifest.fetch.limits import DIGEST_RE
+from agentclaw.community.core.content_store import DIGEST_RE, ContentScope, ContentStoreError, ContentStoreProtocol
 from agentclaw.community.core.bot_genome import contract
 from agentclaw.community.core.bot_genome.canonical import canonicalize, loads_strict, revision_id, sha256_digest
 from agentclaw.community.core.bot_genome.capture import BotStateReader, capture_spec
