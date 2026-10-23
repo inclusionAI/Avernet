@@ -1,4 +1,5 @@
 import { resolveTaskControlPlaneEnvironment, type AgentControlPlaneEnvironment } from "../common/task-control-plane.js";
+import { simulationReadTools, type RecoverySimulationAssessment } from "./simulation.js";
 import { assertActionScope, engineActionScope, recoveryActionOperations, validateRecoveryAction } from "./action-scope.js";
 import { comparableRequestPayload } from "../../../repositories/repair/agent-tool-call-record.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -7,7 +8,7 @@ import type { AisExecutor } from "@avernet/clawevolve/server/contracts/ais-execu
 import type { AisStatusHandler } from "@avernet/clawevolve/server/services/ais/status-handler";
 import { BotEngineOperations } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import type { BotSessionTrajectoryReader as RecoveryTrajectoryReader } from "@avernet/clawweb-shared/server/services/bot-runtime";
-import type { BotRuntime, BotTargetResolver, ResolvedBotTarget, EngineOperation } from "@avernet/clawweb-shared/server/services/bot-runtime";
+import type { BotRuntime, BotTarget, BotTargetResolver, ResolvedBotTarget, EngineOperation } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import { AgentToolCallRepository } from "../../../repositories/repair/agent-tool-call-repository.js";
 import { sameAgentExecutionReport, AgentExecutionService, createAgentExecutionStep, agentExecutionContract } from "../common/agent-execution.js";
 import { AgentRuntimeTool } from "../common/agent-tools/runtime-tool.js";
@@ -71,7 +72,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       }
       if (!await this.settleInterruptedTools(task)) return;
     }
-    if (!task.runtimeTarget || !task.current || !task.authorizationScopeDigest) fail(503, "目标快照未配置");
+    if ((!task.simulation && !task.runtimeTarget) || !task.current || !task.authorizationScopeDigest) fail(503, "目标快照未配置");
     if (!Number.isSafeInteger(this.deps.snapshotId) || this.deps.snapshotId <= 0) fail(503, "自愈 AIS Base Snapshot 未配置");
     const executionNo = (task.executionNo ?? 0) + 1;
     const issued = this.executions.issue(`exec-${randomUUID()}`, task.current.stepId, this.deps.launchGraceSeconds);
@@ -91,6 +92,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     }
     const envelope = { taskType: "session_recovery", taskId: task.taskId, stepId: contract.stepId, attempt: executionNo,
       input: { taskId: task.taskId, executionId: issued.execution.executionId,
+        ...(task.simulation ? { simulation: true } : {}),
         toolsBaseUrl: `${this.deps.publicBaseUrl}/api/insight/v1/internal/monitoring/session-recoveries/${encodeURIComponent(task.taskId)}/executions/${issued.execution.executionId}`,
         credentials: { executionTicket: issued.ticket } },
       runtime: { clawwebUrl: this.deps.publicBaseUrl, package: { packageId: this.deps.packageId ?? "clawevolve-session-recovery" } } };
@@ -225,6 +227,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
   async bootstrap(task: RecoveryStoredTask) {
     const { pending_results: _pending, execution: rawExecution, aisExecution: _ais, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, ...business } = task;
     const { ticketDigest: _digest, ...execution } = task.status === "canceled" ? this.executions.end(rawExecution!) : rawExecution!;
+    const engine = task.runtimeTarget?.target.activeEngine ?? { OC: "openclaw", CC: "claude_code", TE: "teclaw" }[task.request.target.engine] as "openclaw" | "claude_code" | "teclaw";
     return { taskId: task.taskId, stepId: task.current!.stepId, executionId: execution.executionId, deliveryKey: this.latestDeliveryKey(task), task: { ...business, execution,
         timeline: business.timeline.filter(event => event.payload.channel !== "group_webhook").slice(-60).map(event => ({ ...event, payload: event.kind === "operation" ? { tool_call_id: event.payload.tool_call_id, status: event.payload.status, evidence_id: event.payload.evidence_id } : event.payload })),
         evidence: business.evidence.map(item => ({ ...item, excerpt: item.excerpt.slice(0, 1500) })),
@@ -233,8 +236,8 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         allowedOperations: recoveryActionOperations,
         operationScope: "所有 Agent 执行动作需在方案内提供参考 Engine 请求或结构化 operationScope: { operation, target? }。operation 必须取自 allowedOperations，不自行构造动作名；定时任务启用和禁用使用 cron.update，target 填定时任务ID，文件操作的 target 填绝对路径。合法动作名不代表目标支持该操作，实际接口与工具以 tools.engine 和 supportedActionTypes 为准。参数内容可调整，主要动作和对象不可更换。MCP 和用户 Skill 的全部变更交给 Owner，写入 owner_cooperation；无需 Agent 操作时 actions 用空数组。Owner 完成配合后再继续验证和重试。Cron 必须使用声明的接口工具。Shell 仅承载其余获批环境动作，不得绕过接口或变更 MCP／Skill；服务不解析完整 Shell 业务语义。",
         unknownWrite: "未知写入先读取现场，用 reconcile_write 提交 applied / not_applied 和后续读取证据。原调用记录保持不可变；核实后可继续方案，不会自动重放。",
-      }, tools: { logs_search: !!this.deps.logs,
-        runtime_inspect: true, session_read: task.request.target.engine !== "TE", supportedActionTypes: task.request.target.engine === "TE" ? ["engine_operation"] : ["container_command", "engine_operation"], engine: BotEngineOperations.capabilities(task.runtimeTarget!.target.activeEngine), trajectory_read: !!this.deps.trajectory, nasSessionRead: task.request.target.engine !== "TE", nasRoots: this.deps.nasRoots ?? [], ocb_operation: false, apply_action: task.plan?.approvedAt != null, retry_message: true, reconcile_write: true } };
+      }, tools: { logs_search: !!this.deps.logs, knowledge_read: true,
+        runtime_inspect: true, session_read: task.request.target.engine !== "TE", supportedActionTypes: task.request.target.engine === "TE" ? ["engine_operation"] : ["container_command", "engine_operation"], engine: BotEngineOperations.capabilities(engine), trajectory_read: !!this.deps.trajectory && (!task.simulation || this.deps.trajectory.supportsHistoricalBoundary === true), nasSessionRead: task.request.target.engine !== "TE", nasRoots: this.deps.nasRoots ?? [], ocb_operation: false, apply_action: !task.simulation && task.plan?.approvedAt != null, retry_message: !task.simulation, reconcile_write: !task.simulation } };
   }
   async heartbeat(task: RecoveryStoredTask, sessionId?: string) {
     if (task.status === "canceled" || task.execution?.state === "ended") return { state: "ended" };
@@ -245,10 +248,11 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
   async sessionRead(task: RecoveryStoredTask, body: Record<string, unknown>) {
     if (task.request.target.engine === "TE") throw new SessionRecoveryError(422, "unsupported_session_read", "TE 通过 trajectory_read 读取 AIVision，不提供会话 API 读取");
     return this.tool(task, body, "session_read", false, async () => {
-      const output = body.nas_evidence ? this.nasEvidence(task, body.nas_evidence) : await this.reader.read({ target: task.runtimeTarget!.target, sessionKey: task.request.session_key,
+      const output = body.nas_evidence ? this.nasEvidence(task, body.nas_evidence) : await this.reader.read({ target: task.simulation ? await this.historicalSessionTarget(task) : task.runtimeTarget!.target, sessionKey: task.request.session_key,
+        ...(task.simulation ? { cutoff: { messageId: task.simulation.cutoffNode.messageId!, atMs: task.simulation.cutoffAtMs } } : {}),
         deliveryKey: this.latestDeliveryKey(task), expectedSessionId: this.originalSessionId(task),
         ...(body.from_line === undefined ? {} : { fromLine: body.from_line as number }), ...(body.offset === undefined ? {} : { offset: body.offset as number }), ...(body.limit === undefined ? {} : { limit: body.limit as number }) });
-      if (task.requiresFreshObservation) {
+      if (!task.simulation && task.requiresFreshObservation) {
         const latest = await this.required(task.taskId);
         await this.save(latest, value => ({ ...value, requiresFreshObservation: false, observationDeadlineAt: this.now() + this.deps.observationMs }), task.execution!.executionId);
       }
@@ -256,11 +260,25 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     });
   }
   private nasEvidence(task: RecoveryStoredTask, value: unknown): Record<string, unknown> {
-    const evidence = value as Record<string, unknown>, target = task.runtimeTarget!.target;
+    const evidence = value as Record<string, unknown>, target = task.runtimeTarget?.target ?? {
+      ...this.logicalTarget(task), entityId: task.request.target.entity_id, entityType: "staff",
+      activeEngine: { OC: "openclaw", CC: "claude_code", TE: "teclaw" }[task.request.target.engine],
+    };
     const storage = [target.environment, target.entityType || "staff", target.entityId || target.ownerId, target.activeEngine, target.botId].join("_");
     if (task.request.target.engine === "TE" || !evidence || typeof evidence.source !== "string" || !Array.isArray(evidence.messages)
       || evidence.messages.length > 500 || JSON.stringify(evidence).length > 100000 || evidence.source.includes("..")
       || !(this.deps.nasRoots ?? []).some(root => String(evidence.source).startsWith(`${root}/${target.environment}/${storage}/`))) fail(422, "NAS 证据不属于本任务的只读会话范围");
+    if (task.simulation) {
+      if (task.request.target.runtime_identity) fail(422, "服务实例 NAS 读取需要原始权威定位，不能推断个人目录");
+      const boundary = evidence.historical_boundary as Record<string, unknown> | undefined;
+      if (!boundary || boundary.message_id !== task.simulation.cutoffNode.messageId || boundary.cutoff_at_ms !== task.simulation.cutoffAtMs
+        || !Number.isSafeInteger(boundary.end_line) || Number(boundary.end_line) < 1
+        || evidence.next_line != null && (!Number.isSafeInteger(evidence.next_line) || Number(evidence.next_line) > Number(boundary.end_line))
+        || evidence.messages.some((item: { line_no?: number; record?: { timestamp?: unknown } }) => !Number.isSafeInteger(item.line_no)
+          || Number(item.line_no) < 1 || Number(item.line_no) > Number(boundary.end_line)
+          || this.recordAfterCutoff(item.record?.timestamp ?? (item.record as { message?: { timestamp?: unknown } })?.message?.timestamp, task.simulation!.cutoffAtMs))
+        || Array.isArray(evidence.failure_context) && evidence.failure_context.length) fail(422, "NAS 证据超出任务历史边界");
+    }
     const originalId = this.originalSessionId(task);
     if (originalId && originalId !== evidence.session_id) fail(409, "原会话已变化");
     const key = this.latestDeliveryKey(task);
@@ -278,6 +296,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
   }
   async trajectoryRead(task: RecoveryStoredTask, body: Record<string, unknown>) {
     if (!this.deps.trajectory) fail(503, "轨迹读取未配置");
+    if (task.simulation && !this.deps.trajectory.supportsHistoricalBoundary) fail(503, "轨迹读取器未声明历史边界能力");
     const offset = body.offset ?? 0, limit = body.limit ?? 20;
     if (!Number.isSafeInteger(offset) || Number(offset) < 0 || !Number.isSafeInteger(limit) || Number(limit) < 1 || Number(limit) > 100
       || body.trace_id !== undefined && (typeof body.trace_id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(body.trace_id))
@@ -294,15 +313,17 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       const call = sent ? await this.deps.audit.findToolCall(String(sent.payload.tool_call_id)) : null;
       const receipt = call?.taskId === task.taskId && call.toolName === "retry_message" ? call.result as Record<string, unknown> : undefined;
       const startedAt = receipt?.dry_run !== true && typeof receipt?.started_at_ms === "number" ? receipt.started_at_ms : undefined;
-      const result = await this.deps.trajectory!.read({ target: task.runtimeTarget!.target,
+      const result = await this.deps.trajectory!.read({ target: task.runtimeTarget?.target ?? this.logicalTarget(task),
         sessionKey: task.request.session_key, offset: Number(offset), limit: Number(limit), traceId: body.trace_id as string | undefined, maxBytes: 128 * 1024,
         observationId: body.observation_id as string | undefined, field: body.field as "input" | "output" | undefined,
         contentOffset: body.content_offset as number | undefined, contentLimit: body.content_limit as number | undefined,
-        ...(startedAt !== undefined ? { messageMarker: `[会话自愈：${deliveryKey}]\n`, notBeforeMs: startedAt } : {}) });
+        ...(task.simulation ? { until: { atMs: task.simulation.cutoffAtMs, traceId: task.simulation.cutoffNode.traceId,
+          observationId: task.simulation.cutoffNode.observationId, sessionId: this.originalSessionId(task) } } : {}),
+        ...(!task.simulation && startedAt !== undefined ? { messageMarker: `[会话自愈：${deliveryKey}]\n`, notBeforeMs: startedAt } : {}) });
       if (Buffer.byteLength(JSON.stringify(result), "utf8") > 128 * 1024) {
         throw new SessionRecoveryError(422, "recovery_trajectory_page_too_large", "轨迹页过大，请缩小读取范围；正文使用 field 和 content_offset 分段读取");
       }
-      if (task.requiresFreshObservation) {
+      if (!task.simulation && task.requiresFreshObservation) {
         const latest = await this.required(task.taskId);
         await this.save(latest, value => ({ ...value, requiresFreshObservation: false, observationDeadlineAt: this.now() + this.deps.observationMs }), task.execution!.executionId);
       }
@@ -310,15 +331,35 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     });
   }
   async inspect(task: RecoveryStoredTask, body: Record<string, unknown>) {
-    if (body.operation === "trajectory_read" && body.sessionKey !== task.request.session_key) fail(403, "轨迹必须属于原会话");
+    if (body.operation === "trajectory_read") {
+      if (body.sessionKey !== task.request.session_key) fail(403, "轨迹必须属于原会话");
+      return this.trajectoryRead(task, { clientRequestId: body.clientRequestId, purpose: body.purpose,
+        offset: body.offset, limit: body.limit, trace_id: body.traceId });
+    }
     if (body.operation === "shell_exec") fail(403, "调查阶段只开放结构化读取；环境命令经方案操作入口执行");
-    return this.tool(task, body, "runtime_inspect", false, () => this.runtimeTool.inspect(this.context(task), body as AgentRuntimeInspectInput));
+    if (task.simulation) {
+      const candidate = JSON.stringify(body.operation === "engine_read" ? body.request : body.path ?? "");
+      if (body.operation === "http_get" || /(?:\.openclaw\/agents\/[^/]+\/sessions|\.claude\/projects|\/(?:sessions|trajectories)(?:[\/?."\s]|$))/i.test(candidate)) {
+        fail(403, "历史会话和轨迹须通过专用受控工具读取，环境接口使用已声明的结构化只读操作");
+      }
+    }
+    return this.tool(task, body, "runtime_inspect", false, async () => {
+      const context = this.context(task, task.simulation ? await this.currentTarget(task) : task.runtimeTarget!.target);
+      const result = await this.runtimeTool.inspect(context, body as AgentRuntimeInspectInput, { allowSessionHistory: !task.simulation });
+      return task.simulation ? { ...result, temporal_context: "current_environment", observed_at_ms: this.now() } : result;
+    });
   }
   async logs(task: RecoveryStoredTask, body: Record<string, unknown>) {
     if (!this.deps.logs) fail(503, "日志工具未配置");
-    return this.tool(task, body, "logs_search", false, () => this.deps.logs!.search(this.context(task), body));
+    const end = task.simulation?.cutoffAtMs ?? this.now();
+    const context = { taskId: task.taskId, target: this.logicalTarget(task),
+      issue: { traceId: null, relatedTaskId: null, errorText: task.request.diagnosis,
+        timeRange: { from: Math.max(1, Math.floor(end / 1000) - 86400), to: Math.floor(end / 1000) } },
+      ...(task.simulation ? { notAfterMs: task.simulation.cutoffAtMs } : {}) };
+    return this.tool(task, body, "logs_search", false, () => this.deps.logs!.search(context, body));
   }
   async apply(task: RecoveryStoredTask, body: Record<string, unknown>) {
+    this.requireLiveTask(task);
     if (task.status !== "running" || task.phase !== "apply" || !task.plan?.approvedAt || task.level === "debug") fail(403, "环境修改需要有效的完整方案授权");
     const action = task.plan.actions.find(item => item.actionId === body.actionId);
     if (!action) fail(422, "操作不属于获批方案");
@@ -354,6 +395,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
   }
 
   async retryMessage(task: RecoveryStoredTask, body: Record<string, unknown>) {
+    this.requireLiveTask(task);
     const prior = task.timeline.find(event => event.kind === "operation" && (event.payload.request as Record<string, unknown>)?.clientRequestId === body.clientRequestId
       && (event.payload.result as Record<string, unknown>)?.initial_message === true);
     const initial = task.phase === "assess" || !!prior;
@@ -382,6 +424,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     return { ...call, toolCallId: call.callId };
   }
   async reconcileWrite(task: RecoveryStoredTask, body: Record<string, unknown>) {
+    this.requireLiveTask(task);
     const source = await this.toolGet(task, String(body.sourceToolCallId));
     if (!source.isWrite || source.status !== "unknown" || source.stepId !== task.current!.stepId) fail(409, "只能核实当前步骤的未知写入结果");
     if (!["applied", "not_applied"].includes(String(body.outcome)) || typeof body.summary !== "string" || !body.summary.trim()
@@ -409,10 +452,13 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
   }
   async report(task: RecoveryStoredTask, body: Record<string, unknown>) {
     if (body.phase !== task.phase) fail(409, "回报不对应当前阶段，请重新读取任务");
+    if (task.simulation && !["assessment", "plan", "blocked", "release"].includes(String(body.kind))) fail(403, "仿真只接受拟议判断和方案，不接受执行或效果回报");
     if (body.kind === "release") {
       await this.release(task, true);
     } else if (body.kind === "assessment") {
-      await this.deps.business().assess(task.taskId, task.version, { decision: body.decision as "message" | "environment" | "observe", summary: body.summary as string, evidence_ids: body.evidence_ids as string[] });
+      if (task.simulation) await this.deps.business().assessSimulation(task.taskId, task.version,
+        { decision: body.decision, summary: body.summary, evidence_ids: body.evidence_ids, ...(body.knowledge === undefined ? {} : { knowledge: body.knowledge }), ...(body.message === undefined ? {} : { message: body.message }) } as RecoverySimulationAssessment);
+      else await this.deps.business().assess(task.taskId, task.version, { decision: body.decision as "message" | "environment" | "observe", summary: body.summary as string, evidence_ids: body.evidence_ids as string[] });
     } else if (body.kind === "observation") {
       const judgment = body.judgment as RecoveryJudgment;
       if (!judgment || !["confirmed", "unconfirmed"].includes(judgment.delivery) || !["acted", "replied", "none", "unknown"].includes(judgment.response)
@@ -425,7 +471,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         if (!action || typeof action !== "object") fail(422, "方案操作格式无效");
         if (task.request.target.engine === "TE" && (action.type === "container_command" || action.command !== undefined)) fail(422, "TE 不提供 Shell，需使用声明接口或在方案中说明 Owner 配合事项");
         if (task.request.target.engine === "TE" && !action.engineOperation && !action.operationScope) fail(422, "TE 方案动作必须声明 operationScope 或参考 Engine 请求");
-        if (action.engineOperation) BotEngineOperations.validate(task.runtimeTarget!.target.activeEngine, action.engineOperation, true);
+        if (action.engineOperation) BotEngineOperations.validate(task.runtimeTarget?.target.activeEngine ?? { OC: "openclaw", CC: "claude_code", TE: "teclaw" }[task.request.target.engine] as "openclaw" | "claude_code" | "teclaw", action.engineOperation, true);
       }
       await this.deps.business().plan(task.taskId, task.version, plan);
     }
@@ -433,7 +479,9 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       if (typeof body.applicable !== "boolean" || typeof body.success !== "boolean" || typeof body.summary !== "string") fail(422, "执行回报格式无效");
       await this.deps.business().finishApply(task.taskId, task.version, { applicable: body.applicable, success: body.success, summary: body.summary });
     } else if (body.kind === "blocked" && typeof body.summary === "string") {
-      if (body.reason === "user_continued") await this.deps.business().finishForUserContinuation(task.taskId, task.version,
+      if (task.simulation && body.reason === "user_continued") await this.deps.business().assessSimulation(task.taskId, task.version,
+        { decision: "user_continued", summary: body.summary, evidence_ids: body.evidence_ids as string[] });
+      else if (body.reason === "user_continued") await this.deps.business().finishForUserContinuation(task.taskId, task.version,
         { summary: body.summary, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId });
       else if (body.reason !== undefined) fail(422, "未知的结束原因");
       else await this.deps.business().executionFailure(task.taskId, redactPersistableText(body.summary, 8000), task.execution!.executionId);
@@ -467,6 +515,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     return { applied: await this.deps.repo.updateStepStatus(step.step_id, { ...report, expectedStep: { status: step.status, output_json: step.output_json } }) };
   };
   private async tool(task: RecoveryStoredTask, body: Record<string, unknown>, name: string, write: boolean, run: (markDispatched: () => void) => Promise<unknown>) {
+    if (task.simulation && (write || !simulationReadTools.has(name))) fail(403, "仿真只允许受控只读调查，不允许真实干预");
     if (typeof body.clientRequestId !== "string" || !body.clientRequestId.trim() || typeof body.purpose !== "string" || !body.purpose.trim()) fail(422, "工具调用需要稳定 clientRequestId 与 purpose");
     const scope = task.authorizationScopeDigest!, execution = task.execution!;
     const { call, created } = await this.deps.audit.createToolCall({ callId: `tc-${randomUUID()}`, taskId: task.taskId, stepId: task.current!.stepId,
@@ -474,6 +523,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       toolName: name, operation: String(body.operation ?? name), actionId: typeof body.actionId === "string" ? body.actionId : null,
       request: recoveryToolRequest(body), isWrite: write, toolCallLedgerGuard: (calls, locked) => {
         const config = locked.taskConfig as RecoveryStoredTask | undefined;
+        if (config?.simulation && (write || !simulationReadTools.has(name))) fail(403, "仿真只允许受控只读调查，不允许真实干预");
         if (!config || config.status === "canceled" || config.execution?.executionId !== execution.executionId || config.execution.state === "ended"
           || config.execution.leaseExpiresAt <= Math.floor(this.now() / 1000)) fail(409, "执行授权已变化");
         if (name === "reconcile_write" && calls.some(item => item.toolName === "reconcile_write" && item.status === "succeeded"
@@ -542,11 +592,31 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     }
     return evidenceId;
   }
-  private context(task: RecoveryStoredTask): AgentToolContext {
+  private context(task: RecoveryStoredTask, target = task.runtimeTarget!.target): AgentToolContext {
     return { taskId: task.taskId,
       issue: { traceId: null, relatedTaskId: null, errorText: task.request.diagnosis,
         timeRange: { from: Math.floor(this.now() / 1000) - 86400, to: Math.floor(this.now() / 1000) } },
-      target: task.runtimeTarget!.target };
+      target };
+  }
+  private requireLiveTask(task: RecoveryStoredTask): void {
+    if (task.simulation) fail(403, "仿真不允许实际干预或核实真实写入");
+  }
+  private logicalTarget(task: RecoveryStoredTask): BotTarget {
+    return { environment: task.request.target.env, ownerId: task.request.target.entity_id, botId: task.request.target.bot_id,
+      ...(task.request.target.runtime_identity ? { runtimeIdentity: task.request.target.runtime_identity } : {}) };
+  }
+  private async currentTarget(task: RecoveryStoredTask) {
+    return recoveryTargetSnapshot(await this.deps.targets.resolve(this.logicalTarget(task))).target;
+  }
+  private async historicalSessionTarget(task: RecoveryStoredTask) {
+    const target = await this.currentTarget(task);
+    const engine = { OC: 'openclaw', CC: 'claude_code', TE: 'teclaw' }[task.request.target.engine];
+    if (target.activeEngine !== engine) fail(409, '当前引擎已变化，不能用于读取原会话');
+    return target;
+  }
+  private recordAfterCutoff(timestamp: unknown, cutoffAtMs: number): boolean {
+    const at = typeof timestamp === "number" ? timestamp : typeof timestamp === "string" ? Date.parse(timestamp) : NaN;
+    return Number.isFinite(at) && at > cutoffAtMs;
   }
   private latestDeliveryKey(task: RecoveryStoredTask): string {
     const event = [...task.timeline].reverse().find(item => item.kind === "operation" && typeof (item.payload.result as Record<string, unknown>)?.delivery_key === "string");

@@ -1,6 +1,35 @@
 # 会话自愈接口
 
-创建接口同步确认受理；效果等待超时和任务结束时通过异步结果接口回报。消息投递成功与原故障恢复分别表达。
+## 历史离线仿真
+
+登录态 `POST /api/insight/v1/monitoring/session-recoveries/simulations` 发起历史仿真，`cases` 接受 1～10 个 case。每个 case 独立复用现有任务流程；不增加页面创建入口，沿用任务详情展示判断、拟议消息、完整方案和取证过程。
+
+```json
+{
+  "batch_id": "handbook-review-001",
+  "cases": [{
+    "request": {
+      "event_id": "original-diagnosis-event",
+      "delivery_key": "original-delivery-key",
+      "diagnosis": "原始诊断文本",
+      "tc_fault_label": "TC.MCP.PERMISSION",
+      "target": { "entity_id": "example-owner", "bot_id": "default", "env": "prod", "engine": "OC" },
+      "session_key": "agent:main:session:original",
+      "session_id": "original"
+    },
+    "cutoff_node": { "message_id": "original-failure-message" },
+    "cutoff_at_ms": 1792713600000
+  }]
+}
+```
+
+OC／CC 的 `cutoff_node` 为原会话 `message_id`；TE 使用 `trace_id`，可附 `observation_id`。截止节点包含在可见范围内，`cutoff_at_ms` 是对应的 Unix 毫秒时间，不可晚于当前时间。原目标与原会话沿用既有请求合同。调用方提供原始诊断和稳定节点，不能用当前会话代替原会话。仅 Owner 或管理员可发起；同一批次和 case 输入重试复用任务，输入不同返回 `409`；换批次创建新运行，保留旧结果。
+
+HTTP `202` 返回 `{ "batch_id": "…", "items": [{ "event_id": "…", "delivery_key": "…", "task_id": "SR-…", "status": "accepted" }] }`。创建不要求解析当前 Bot 路由；Agent 按需使用原有会话、轨迹和日志工具，工具强制执行历史边界。允许只读环境调查，回执标明当前环境和查询时点；会话历史不能通过环境工具绕过边界。来源缺失或无法定位截止节点时返回不可取得，不默认读到最新。
+
+消息建议作为 `assessment.message` 保存；环境决策进入原有 plan 阶段，完整方案提交后结束。`completed` 表示仿真产物已生成，effect 为 `not_intervened`；不发送消息、不执行方案、不投递线上业务通知或诊断结果，不允许审批或继续成为在线执行。详情、工具回执、日志归档和停止接口沿用现有实现。输入与边界责任见[离线仿真 Spec](../../../../../docs/clawweb/specs/clawinsight-session-recovery-simulation.md)。
+
+以下在线自愈接口同步确认受理，效果等待超时和任务结束时通过异步结果接口回报。消息投递成功与原故障恢复分别表达；离线仿真不触发该回报。
 
 ## 实时诊断自动触发（内测）
 

@@ -306,3 +306,25 @@ it("does not permit the deep-diagnostic Shell to perform interface operations", 
   })).rejects.toMatchObject({ code: "adapter_tool_required" });
   expect(executeShell).not.toHaveBeenCalled();
 });
+
+it("excludes transcripts from recursive environment searches and guards resolved symlink paths", async () => {
+  const { mkdtemp, mkdir, writeFile, symlink, rm } = await import('node:fs/promises');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const directory = await mkdtemp(join(tmpdir(), 'recovery-environment-'));
+  try {
+    const sessions = join(directory, '.openclaw/agents/main/sessions');
+    await mkdir(sessions, { recursive: true });
+    await writeFile(join(sessions, 'original.jsonl'), 'match future-answer\n');
+    await writeFile(join(directory, 'config.txt'), 'match environment-setting\n');
+    await symlink(join(sessions, 'original.jsonl'), join(directory, 'alias.txt'));
+    // Adapt the Linux runtime's realpath flags for the macOS test host.
+    const run = (command: string) => promisify(execFile)('/bin/bash', ['-c', 'realpath(){ command realpath "$3"; }; ' + command]);
+    const search = await run(buildAgentRuntimeCommand({ operation: 'fs_search', path: directory, pattern: 'match' }, 'FRAME', { allowSessionHistory: false }));
+    expect(search.stdout).toContain('environment-setting');
+    expect(search.stdout).not.toContain('future-answer');
+    await expect(run(buildAgentRuntimeCommand({ operation: 'fs_read', path: join(directory, 'alias.txt') }, 'FRAME', { allowSessionHistory: false }))).rejects.toMatchObject({ code: 45 });
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});

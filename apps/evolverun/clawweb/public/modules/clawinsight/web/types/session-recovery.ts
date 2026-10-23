@@ -4,6 +4,7 @@ export type SessionRecoveryTask = {
   shared: boolean;
   canOperate: boolean;
   canManageShare: boolean;
+  simulation?: { batchId: string; cutoffAtMs: number; cutoffNode: { messageId?: string; traceId?: string; observationId?: string }; inputDigest: string };
   level: 'debug' | 'approval' | 'automatic';
   status: 'running' | 'waiting_owner' | 'waiting_effect' | 'completed' | 'failed' | 'canceled';
   completionReason?: 'user_continued';

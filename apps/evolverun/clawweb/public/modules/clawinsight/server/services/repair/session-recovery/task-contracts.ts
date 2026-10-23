@@ -43,6 +43,8 @@ export type RecoveryTimelineEvent = {
   payload: Record<string, unknown>;
 };
 export type RecoveryTaskState = {
+  /** Present only for a frozen offline run; never grants live target access. */
+  simulation?: import("./simulation.js").RecoverySimulation;
   schemaVersion: "session-recovery-task/v1";
   taskId: string;
   request: RecoveryRequest;

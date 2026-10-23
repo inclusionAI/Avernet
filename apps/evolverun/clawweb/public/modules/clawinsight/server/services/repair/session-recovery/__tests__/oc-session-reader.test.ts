@@ -63,3 +63,19 @@ it("does not infer a physical ID from an arbitrary session key or a path", async
   await expect(reader.read({ ...input, sessionKey: "agent:main:session:unmapped" })).rejects.toMatchObject({ code: "original_session_unavailable" });
   await expect(reader.read({ ...input, expectedSessionId: "../private" })).rejects.toMatchObject({ code: "original_session_unavailable" });
 });
+
+it("cuts historical pages at the original node even after index rotation and subsequent user messages", async () => {
+  await writeFile(join(directory, "sessions.json"), JSON.stringify({ [key]: { sessionId: "next-run" } }));
+  await writeFile(join(directory, `${id}.jsonl`), [
+    { type: 'session', id }, { type: 'message', id: 'fault', timestamp: 9000, message: { role: 'assistant', content: 'original failure' } },
+    { type: 'message', id: 'future', timestamp: 20000, message: { role: 'user', content: 'later answer' } },
+  ].map(row => JSON.stringify(row)).join('\n'));
+  const bounded = { ...input, expectedSessionId: id, cutoff: { messageId: 'fault', atMs: 10000 }, limit: 1 };
+  expect(await reader.read(bounded)).toMatchObject({ messages: [{ line_no: 1 }], next_line: 2, historical_boundary: { end_line: 2 } });
+  const last = await reader.read({ ...bounded, fromLine: 2 });
+  expect(last).toMatchObject({ messages: [{ record: { id: 'fault' } }], next_line: null });
+  expect(JSON.stringify(last)).not.toContain('later answer');
+  expect(await reader.read({ ...bounded, fromLine: 3 })).toMatchObject({ messages: [], next_line: null });
+  await expect(reader.read({ ...bounded, cutoff: { messageId: 'missing', atMs: 10000 } })).rejects.toMatchObject({ code: 'original_session_unavailable' });
+  await expect(reader.read({ ...bounded, cutoff: { messageId: 'fault', atMs: 8000 } })).rejects.toMatchObject({ code: 'original_session_unavailable' });
+});

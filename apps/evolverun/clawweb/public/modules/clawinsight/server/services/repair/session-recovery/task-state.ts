@@ -59,12 +59,13 @@ export function submitRecoveryPlan(state: RecoveryTaskState, plan: RecoveryPlan,
   return next(state, {
     plan: { ...plan, digest, approvedAt: requiresOwner || state.level === "debug" ? null : now },
     status: requiresOwner ? "waiting_owner" : state.level === "debug" ? "completed" : "running",
-    phase: "apply", ownerDeadlineAt: null,
+    phase: state.simulation ? "plan" : "apply", ownerDeadlineAt: null,
     ...(state.level === "debug" ? { judgment: { delivery: "unconfirmed", response: "unknown", effect: "not_intervened", summary: "未实际干预", evidence_ids: [] } as RecoveryJudgment } : {}),
   });
 }
 
 export function decideRecoveryPlan(state: RecoveryTaskState, digest: string, approved: boolean, now: number): RecoveryTaskState {
+  if (state.simulation) conflict("仿真方案不可批准执行");
   if (state.status !== "waiting_owner" || !state.plan || state.plan.digest !== digest) conflict("决策不对应当前待确认方案");
   return next(state, approved
     ? { status: "running", ownerDeadlineAt: null, plan: { ...state.plan, approvedAt: now } }
@@ -74,6 +75,7 @@ export function decideRecoveryPlan(state: RecoveryTaskState, digest: string, app
 }
 
 export function resumeRecoveryObservation(state: RecoveryTaskState): RecoveryTaskState {
+  if (state.simulation) conflict("仿真不可等待或恢复在线效果观察");
   if (state.status !== "waiting_effect") conflict("只有等待效果的任务可以由上游继续");
   // Do not reset the deadline here: first consume new evidence and preserve the paused phase.
   return next(state, { status: "running", requiresFreshObservation: true });

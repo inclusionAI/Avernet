@@ -5,6 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { SessionRecoveryError } from "./errors.js";
 import { parseRequest } from "./validation.js";
 import { recoveryHandbook } from "./handbook.js";
+import { parseRecoverySimulationBatch, simulationReadTools, validateSimulationKnowledge, type RecoverySimulation, type RecoverySimulationAssessment } from "./simulation.js";
 import { decideRecoveryPlan, observeRecovery, recoveryTaskResult, resumeRecoveryObservation, submitRecoveryPlan, terminateRecoveryTask } from "./task-state.js";
 import type { RecoveryActionNotifier, RecoveryActor, RecoveryAcknowledgment, RecoveryExecutionView, RecoveryRequest, RecoveryResult, RecoveryTaskView, RecoveryTermination, SessionRecoveryTaskApi } from "./contracts.js";
 import type { RecoveryEvidence, RecoveryJudgment, RecoveryLevel, RecoveryPlan, RecoveryTaskResult, RecoveryTimelineEvent, RecoveryStoredTask, RecoveryTaskStore } from "./task-contracts.js";
@@ -41,26 +42,43 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
 
   async create(raw: unknown, actor: RecoveryActor): Promise<RecoveryAcknowledgment & { task_id: string }> {
     const request = parseRequest(raw);
+    return this.createTask(request, actor, this.level(raw));
+  }
+
+  async createSimulations(raw: unknown, actor: RecoveryActor) {
+    const batch = parseRecoverySimulationBatch(raw, this.now());
+    // Validate all identities before the first persistent write or AIS launch.
+    if (batch.cases.some(item => !actor.isAdmin && item.request.target.entity_id !== actor.userId)) this.fail(403, "无权仿真其他目标");
+    const items: Array<RecoveryAcknowledgment & { task_id: string }> = [];
+    for (const item of batch.cases) {
+      const task = await this.createTask(item.request, actor, "debug", item.simulation);
+      items.push(task);
+    }
+    return { batch_id: batch.batch_id, items };
+  }
+
+  private async createTask(request: RecoveryRequest, actor: RecoveryActor, level: RecoveryLevel, simulation?: RecoverySimulation): Promise<RecoveryAcknowledgment & { task_id: string }> {
     if (actor.userId !== request.target.entity_id && !actor.isAdmin) this.fail(403, "无权发起目标自愈");
-    const level = this.level(raw);
     const handbook = recoveryHandbook(request.tc_fault_label);
-    const taskId = `SR-${createHash("sha256").update(JSON.stringify([request.event_id, request.delivery_key])).digest("hex").slice(0, 48)}`;
+    const taskId = `SR-${createHash("sha256").update(JSON.stringify(simulation
+      ? ["simulation", simulation.batchId, request.event_id, request.delivery_key] : [request.event_id, request.delivery_key])).digest("hex").slice(0, 48)}`;
     const existing = await this.deps.tasks.find(taskId);
     if (existing) {
-      if (JSON.stringify(existing.request) !== JSON.stringify(request)) this.fail(409, "同一投递标识的请求内容不一致");
+      if (JSON.stringify(existing.request) !== JSON.stringify(request) || existing.simulation?.inputDigest !== simulation?.inputDigest) this.fail(409, "同一投递标识的请求内容不一致");
       return { event_id: request.event_id, delivery_key: request.delivery_key, status: "accepted", task_id: taskId };
     }
-    const runtimeTarget = await this.deps.resolveTarget?.(request);
+    const runtimeTarget = simulation ? undefined : await this.deps.resolveTarget?.(request);
     const task: RecoveryStoredTask = { schemaVersion: "session-recovery-task/v1", taskId, request, level, controlPlaneEnvironment: this.deps.controlPlaneEnvironment,
       status: "running", phase: "assess", version: 1, shared: false, observationDeadlineAt: null, ownerDeadlineAt: null,
+      ...(simulation ? { simulation, authorizationScopeDigest: createHash("sha256").update(JSON.stringify({ simulation: simulation.inputDigest, taskId })).digest("hex"), current: { stepId: `${taskId}-1` } } : {}),
       ...(runtimeTarget ? { runtimeTarget, authorizationScopeDigest: createHash("sha256").update(JSON.stringify({ target: request.target, level })).digest("hex"), current: { stepId: `${taskId}-1` } } : {}),
       plan: null, judgment: null, evidence: [], pending_results: [], timeline: [this.event("created", "service", "收到诊断并创建自愈任务", { request, handbook, initial_intervention: "agent" }),
-        ...(level === "debug" ? [this.event("message", "service", "Debug：仅记录干预策略，不实际发送", { initial_intervention: "agent" })] : [])] };
+        ...(level === "debug" && !simulation ? [this.event("message", "service", "Debug：仅记录干预策略，不实际发送", { initial_intervention: "agent" })] : [])] };
     try { await this.deps.tasks.create(task, `${taskId}-1`); }
     catch (error) {
       const raced = await this.deps.tasks.find(taskId);
       if (!raced) throw error;
-      if (JSON.stringify(raced.request) !== JSON.stringify(request)) this.fail(409, "同一投递标识的请求内容不一致");
+      if (JSON.stringify(raced.request) !== JSON.stringify(request) || raced.simulation?.inputDigest !== simulation?.inputDigest) this.fail(409, "同一投递标识的请求内容不一致");
       return { event_id: request.event_id, delivery_key: request.delivery_key, status: "accepted", task_id: taskId };
     }
     setImmediate(() => {
@@ -93,6 +111,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
 
   async assess(taskId: string, version: number, input: { decision: "message" | "environment" | "observe"; summary: string; evidence_ids: string[] }): Promise<void> {
     const task = await this.mutate(taskId, version, value => {
+      if (value.simulation) this.fail(409, "仿真必须提交拟议决策");
       if (value.status !== "running" || value.phase !== "assess") this.fail(409, "当前不能提交初始判断");
       if (!["message", "environment", "observe"].includes(input.decision) || typeof input.summary !== "string" || !input.summary.trim()
         || input.summary.length > 8000 || containsSecret(input.summary) || !Array.isArray(input.evidence_ids) || !input.evidence_ids.length
@@ -107,6 +126,29 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     });
     if (task.status === "completed") await this.deps.agent.release(task);
     if (task.status === "completed") this.notifyGroup(task, "result");
+  }
+
+  async assessSimulation(taskId: string, version: number, input: RecoverySimulationAssessment): Promise<void> {
+    const task = await this.mutate(taskId, version, value => {
+      if (!value.simulation || value.status !== "running" || !["assess", "plan"].includes(value.phase)) this.fail(409, "当前不能提交仿真判断");
+      const reads = new Set(value.timeline.filter(event => event.kind === "operation" && event.payload.status === "succeeded")
+        .map(event => event.payload.tool_call_id));
+      if (!["message", "environment", "observe", "insufficient_evidence", "user_continued"].includes(input.decision)
+        || value.phase === "plan" && !["insufficient_evidence", "user_continued"].includes(input.decision)
+        || typeof input.summary !== "string" || !input.summary.trim() || input.summary.length > 8000
+        || !Array.isArray(input.evidence_ids) || input.evidence_ids.some(id => !value.evidence.some(item => item.evidence_id === id && simulationReadTools.has(item.source)
+          && (input.decision !== "user_continued" || ["session_read", "trajectory_read"].includes(item.source))
+          && (input.decision === "insufficient_evidence" || reads.has(item.tool_call_id))))
+        || input.decision !== "insufficient_evidence" && !input.evidence_ids.length
+        || input.message !== undefined && (input.decision !== "message" || typeof input.message !== "string" || !input.message.trim() || input.message.length > 8000)
+        || input.decision === "message" && !input.message?.trim() || !validateSimulationKnowledge(input.knowledge) || containsSecret(JSON.stringify(input))) this.fail(422, "仿真判断需要有效决策、依据及完整拟发送消息");
+      const planning = input.decision === "environment";
+      return { ...value, version: value.version + 1, status: planning ? "running" : "completed", phase: planning ? "plan" : value.phase,
+        observationDeadlineAt: null, ownerDeadlineAt: null,
+        judgment: { delivery: "unconfirmed", response: "unknown", effect: "not_intervened", summary: input.summary, evidence_ids: input.evidence_ids },
+        timeline: [...value.timeline, this.event("assessment", "agent", input.summary, { ...input, phase: value.phase, simulation: true })] };
+    });
+    if (task.status === "completed") await this.deps.agent.release(task);
   }
 
   async observe(taskId: string, version: number, judgment: RecoveryJudgment, evidence: RecoveryEvidence[]): Promise<void> {
@@ -306,6 +348,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
   }
 
   private async notify(task: RecoveryStoredTask, kind: "plan" | "result", summary: string): Promise<void> {
+    if (task.simulation) return;
     // Notification completion is a timeline fact, independent of Owner approval.
     let sent = false;
     try {
@@ -319,6 +362,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       timeline: [...value.timeline, this.event("notification", "service", sent ? "钉钉通知已发送" : "钉钉通知未确认，请在任务页面处理", { kind, sent })] }));
   }
   private notifyGroup(task: RecoveryStoredTask, kind: Parameters<RecoveryActionNotifier["after"]>[0]["kind"]): void {
+    if (task.simulation) return;
     const event = task.timeline.at(-1);
     if (!event) return;
     try { this.deps.actionNotifier?.after({ taskId: task.taskId, eventId: event.event_id, kind }); }
@@ -329,7 +373,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     for (let attempt = 0; attempt < 5; attempt++) {
       const updated = await this.deps.tasks.update(taskId, version, value => {
         const changed = change(value);
-        const reportable = changed.status !== value.status
+        const reportable = !changed.simulation && changed.status !== value.status
           && ["waiting_effect", "completed", "failed", "canceled"].includes(changed.status);
         return { ...changed, pending_results: reportable
           ? [...value.pending_results, recoveryTaskResult(changed, changed.status === "canceled"
@@ -355,7 +399,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
   }
 
   async reportPending(task: RecoveryStoredTask, limit = 5): Promise<number> {
-    if (!this.ownsTask(task)) return 0;
+    if (task.simulation || !this.ownsTask(task)) return 0;
     let sent = 0;
     for (const result of task.pending_results) {
       if (sent >= limit) break;

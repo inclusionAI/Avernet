@@ -53,6 +53,11 @@ const decisionLabels: Record<string, string> = {
   observe: '继续观察', message: '发送恢复消息', environment: '制定修复方案',
 };
 
+const simulationDecisionLabels: Record<string, string> = {
+  observe: '无需干预', message: '提出消息干预建议', environment: '制定拟议修复方案',
+  insufficient_evidence: '历史证据不足', user_continued: '历史用户续聊，建议让路',
+};
+
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -73,7 +78,7 @@ function groupPhaseEvents(task: SessionRecoveryTask | null): Record<RecoveryPhas
     grouped[phase].push(event);
     active = phase;
     // Business events delimit the next stage; tool calls retain their chronological order.
-    if (event.kind === 'assessment') active = event.payload.decision === 'environment' ? 'plan' : 'observe';
+    if (event.kind === 'assessment') active = event.payload.decision === 'environment' ? 'plan' : task.simulation ? phase : 'observe';
     else if (event.kind === 'plan') active = task.level === 'automatic' && task.plan?.owner_cooperation.length === 0 ? 'apply' : 'plan';
     else if (event.kind === 'owner_decision' && event.payload.approved === true) active = 'apply';
     else if (event.kind === 'operation' && event.payload.success === true) active = 'verify';
@@ -197,7 +202,8 @@ function RecoveryWorkflow({ task, currentPhase, selected, onSelect, grouped, raw
   children?: ReactNode;
   actions?: ReactNode;
 }) {
-  const selectedPhase = phases.find(phase => phase.key === selected)!;
+  const visiblePhases = task.simulation ? phases.filter(phase => phase.key === 'assess' || phase.key === 'plan') : phases;
+  const selectedPhase = visiblePhases.find(phase => phase.key === selected)!;
   const events = grouped[selected];
   const tabsRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -206,9 +212,9 @@ function RecoveryWorkflow({ task, currentPhase, selected, onSelect, grouped, raw
     if (tabs && tab && tabs.scrollWidth > tabs.clientWidth) tabs.scrollLeft = tab.offsetLeft - tabs.offsetLeft;
   }, [selected]);
   return <section className="sr-card sr-workflow-card">
-    <CardHeader title="自愈流程" description="自愈 Agent 判断处理方式，按需投递恢复消息、生成方案、执行修复并验证效果。" right={<StatusPill status={task.status}>{task.completionReason === 'user_continued' ? '已让路' : statusLabels[task.status]}</StatusPill>} />
+    <CardHeader title="自愈流程" description={task.simulation ? '根据历史证据提出首次干预消息或完整方案，不执行实际干预。' : '自愈 Agent 判断处理方式，按需投递恢复消息、生成方案、执行修复并验证效果。'} right={<StatusPill status={task.status}>{task.completionReason === 'user_continued' ? '已让路' : statusLabels[task.status]}</StatusPill>} />
     <div className="sr-workflow" ref={tabsRef} role="tablist" aria-label="自愈流程阶段">
-      {phases.map((phase, index) => {
+      {visiblePhases.map((phase, index) => {
         const current = currentPhase === phase.key;
         const visited = grouped[phase.key].length > 0;
         const failed = current && task.status === 'failed';
@@ -217,13 +223,13 @@ function RecoveryWorkflow({ task, currentPhase, selected, onSelect, grouped, raw
           const offset = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
           if (!offset && event.key !== 'Home' && event.key !== 'End') return;
           event.preventDefault();
-          const next = event.key === 'Home' ? 0 : event.key === 'End' ? phases.length - 1 : (index + offset + phases.length) % phases.length;
-          onSelect(phases[next].key);
+          const next = event.key === 'Home' ? 0 : event.key === 'End' ? visiblePhases.length - 1 : (index + offset + visiblePhases.length) % visiblePhases.length;
+          onSelect(visiblePhases[next].key);
           (event.currentTarget.parentElement?.children[next] as HTMLElement)?.focus();
         }}>
           <div className="sr-step-top"><span className="sr-step-index">{index + 1}</span><span className="sr-step-state">{current ? (task.completionReason === 'user_continued' ? '已让路' : statusLabels[task.status]) : visited ? '有记录' : '未进入'}</span></div>
           <span className="sr-step-title">{phase.title}</span>
-          <span className="sr-step-description">{phase.description}</span>
+          <span className="sr-step-description">{task.simulation && phase.key === 'plan' ? '查看拟议动作及配合安排' : phase.description}</span>
           <span className="sr-step-count">{visited ? `${grouped[phase.key].length} 条记录 · 点击查看` : '点击查看阶段记录'}</span>
         </button>;
       })}
@@ -343,12 +349,13 @@ function ProcessAction({ task, event, index, rawEvidence, loadEvidence, onViewAc
     // Retain old, unlinked evidence with the task's initial record rather than dropping it.
     || event === task.timeline[0] && !task.timeline.some(entry => entry.payload.raw_tool_call_id === item.tool_call_id || eventEvidenceIds(entry).includes(item.evidence_id)));
   const effect = typeof judgment.effect === 'string' && judgment.effect in effectLabels ? judgment.effect as keyof typeof effectLabels : undefined;
-  const decision = event.kind === 'assessment' && typeof event.payload.decision === 'string' ? decisionLabels[event.payload.decision] : undefined;
+  const decision = event.kind === 'assessment' && typeof event.payload.decision === 'string' ? (task.simulation ? simulationDecisionLabels : decisionLabels)[event.payload.decision] : undefined;
   const conclusionSummary = event.kind !== 'assessment' && typeof detailText === 'string' && detailText !== resultSummary ? detailText : undefined;
   return <li className={`sr-process-action ${status}`}>
     <div className="sr-process-index">{index + 1}</div>
     <article>
       <div className="sr-process-header"><h3>{title}</h3><div className="sr-process-status">{status && <StatusPill status={status}>{actionStatusLabels[status] || status}</StatusPill>}{effect && <StatusPill status={effect}>{effectLabels[effect]}</StatusPill>}</div></div>
+      {task.simulation && event.kind === 'assessment' && typeof event.payload.message === 'string' && <div className="sr-operation-field"><h4>拟发送的干预消息（未发送）</h4><PlanMarkdown text={event.payload.message} /></div>}
       {decision && <div className="sr-assessment-decision"><span>处理方式：</span><strong>{decision}</strong></div>}
       {typeof error === 'string' && <p className="sr-process-error"><strong>失败原因：</strong>{error}</p>}
       {resultSummary && <div className="sr-process-result sr-result-preview"><span>结果：</span><PlanMarkdown text={resultSummary} />{typeof result.httpStatus === 'number' && <span className="sr-receipt-code">HTTP {result.httpStatus}</span>}{typeof result.exitCode === 'number' && <span className="sr-receipt-code">退出码 {result.exitCode}</span>}</div>}
@@ -411,16 +418,16 @@ function RecoveryPlan({ task, busy, ownerFeedback, cooperationDone, onFeedback, 
       <h3>执行安排</h3>
       <ol className="sr-plan-body sr-plan-steps">
         {plan.owner_cooperation.map((item, index) => <li key={`owner-${index}`} className="sr-plan-step owner" id={index === 0 ? 'recovery-owner-cooperation' : undefined}>
-          <div className="sr-plan-step-heading"><span className="sr-step-actor"><MonitoringIcon name="user" />Owner</span><span className="sr-note">方案确认前处理</span></div>
+          <div className="sr-plan-step-heading"><span className="sr-step-actor"><MonitoringIcon name="user" />Owner</span><span className="sr-note">{task.simulation ? '拟议配合事项' : '方案确认前处理'}</span></div>
           <div className="sr-owner-request"><PlanMarkdown text={item.request} /></div>
           <details className="sr-disclosure"><summary>查看这项安排的依据</summary><PlanMarkdown text={item.basis} /></details>
-          {task.canOperate && task.status === 'waiting_owner' && index === plan.owner_cooperation.length - 1 && <div className="sr-owner-feedback">
+          {!task.simulation && task.canOperate && task.status === 'waiting_owner' && index === plan.owner_cooperation.length - 1 && <div className="sr-owner-feedback">
             <label>补充信息或处理说明<textarea maxLength={4000} value={ownerFeedback} onChange={(event) => onFeedback(event.target.value)} placeholder="填写处理进度或补充信息，供 Agent 继续处理时参考" /></label>
             <label className="sr-check"><input type="checkbox" checked={cooperationDone} onChange={(event) => onCooperation(event.target.checked)} />我已处理方案中的配合事项</label>
           </div>}
         </li>)}
         {plan.actions.map(action => <li key={action.actionId} id={`recovery-action-${encodeURIComponent(action.actionId)}`} className="sr-plan-step agent">
-          <div className="sr-plan-step-heading"><span className="sr-step-actor"><MonitoringIcon name="bot" />自愈 Agent</span><span className="sr-note">按确认的方案继续执行</span></div>
+          <div className="sr-plan-step-heading"><span className="sr-step-actor"><MonitoringIcon name="bot" />自愈 Agent</span><span className="sr-note">{task.simulation ? '拟议执行安排' : '按确认的方案继续执行'}</span></div>
           <div className="sr-action-description"><PlanMarkdown text={action.summary} /></div>
           <details className="sr-disclosure sr-action-safeguards"><summary>查看风险、验证与回退</summary>
             <div className="sr-action-grid">
@@ -442,7 +449,7 @@ function RecoveryPlan({ task, busy, ownerFeedback, cooperationDone, onFeedback, 
       <h3>验收与确认</h3>
       <div className="sr-plan-body">
       <PlanMarkdown text={plan.verification} />
-      {task.canOperate && task.status === 'waiting_owner' && <div className="sr-decision-panel">
+      {!task.simulation && task.canOperate && task.status === 'waiting_owner' && <div className="sr-decision-panel">
         <h4>确认完整方案</h4>
         <p>请核对上述分工、处理安排与验收标准，确认后 Agent 将继续执行。</p>
         {plan.owner_cooperation.length === 0 && <label>补充信息或处理说明<textarea maxLength={4000} value={ownerFeedback} onChange={(event) => onFeedback(event.target.value)} placeholder="填写补充信息" /></label>}
@@ -595,14 +602,14 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
     { key: 'effect', label: '效果', hint: '原任务是否已恢复', value: effectLabels[effect], tone: effect === 'recovered' ? 'success' : effect === 'not_recovered' ? 'danger' : 'neutral' },
   ];
   const stageSummary = task ? {
-    completed: task.completionReason === 'user_continued' ? '用户已继续对话，本次自愈已让路，不再自动干预。' : effect === 'recovered' ? '原任务已恢复，可查看下方处理过程和判断依据。' : '本次自愈处理已结束，恢复情况请查看效果判断。',
+    completed: task.simulation ? '仿真已完成，可查看判断、拟发送消息或完整方案；未执行实际干预。' : task.completionReason === 'user_continued' ? '用户已继续对话，本次自愈已让路，不再自动干预。' : effect === 'recovered' ? '原任务已恢复，可查看下方处理过程和判断依据。' : '本次自愈处理已结束，恢复情况请查看效果判断。',
     failed: '本次自愈未完成，请查看失败说明和相关操作记录。',
     canceled: '用户已停止本次自愈，后续处理已取消。',
     waiting_owner: !task.canOperate ? '等待 Owner 处理配合事项并确认修复方案。' : task.plan?.owner_cooperation.length ? '请先处理方案中的配合事项，再确认完整方案。' : '请核对完整修复方案，确认后 Agent 将继续执行。',
     waiting_effect: '恢复效果尚未确定，等待原会话出现新的执行结果。',
     running: lastEvent?.summary || '等待任务执行记录。',
   }[task.status] : '';
-  const review = task?.canOperate && ['completed', 'failed'].includes(task.status) ? <ReviewSection busy={busy} saved={annotationSaved} annotationLayer={annotationLayer} annotationCorrect={annotationCorrect} annotationReason={annotationReason} onLayer={(value) => { setAnnotationLayer(value); setAnnotationSaved(false); }} onCorrect={(value) => { setAnnotationCorrect(value); setAnnotationSaved(false); }} onReason={(value) => { setAnnotationReason(value); setAnnotationSaved(false); }} onSubmit={() => void annotate()} /> : null;
+  const review = !task?.simulation && task?.canOperate && ['completed', 'failed'].includes(task.status) ? <ReviewSection busy={busy} saved={annotationSaved} annotationLayer={annotationLayer} annotationCorrect={annotationCorrect} annotationReason={annotationReason} onLayer={(value) => { setAnnotationLayer(value); setAnnotationSaved(false); }} onCorrect={(value) => { setAnnotationCorrect(value); setAnnotationSaved(false); }} onReason={(value) => { setAnnotationReason(value); setAnnotationSaved(false); }} onSubmit={() => void annotate()} /> : null;
   const toggleSharing = async () => {
     if (!task?.canManageShare || sharingBusy) return;
     setSharingBusy(true);
@@ -628,13 +635,13 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
     window.requestAnimationFrame(() => document.getElementById('recovery-plan')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   };
 
-  return <main className="session-recovery-detail">
+  return <main className={`session-recovery-detail${task?.simulation ? ' sr-simulation' : ''}`}>
     <button type="button" onClick={onBack} className="sr-back"><MonitoringIcon name="arrow" />返回监控</button>
     <header className="sr-hero">
       <div>
-        <div className="sr-kicker">{task && <StatusPill status={task.status}>{task.completionReason === 'user_continued' ? '已让路' : statusLabels[task.status]}</StatusPill>}<span>会话自愈</span><code>{taskId}</code></div>
-        <h1>自愈任务详情</h1>
-        {task && <div className="sr-target"><span><MonitoringIcon name="bot" /></span><div><strong>{task.request.target.bot_id}</strong><p>{[task.request.target.engine, task.request.target.env, levelLabels[task.level]].filter(Boolean).join(' · ')}</p></div></div>}
+        <div className="sr-kicker">{task && <StatusPill status={task.status}>{task.completionReason === 'user_continued' ? '已让路' : statusLabels[task.status]}</StatusPill>}<span>{task?.simulation ? '离线仿真' : '会话自愈'}</span><code>{taskId}</code></div>
+        <h1>{task?.simulation ? '自愈离线仿真详情' : '自愈任务详情'}</h1>
+        {task && <div className="sr-target"><span><MonitoringIcon name="bot" /></span><div><strong>{task.request.target.bot_id}</strong><p>{[task.request.target.engine, task.request.target.env, task.simulation ? '离线仿真' : levelLabels[task.level]].filter(Boolean).join(' · ')}</p></div></div>}
       </div>
       <div className="sr-hero-actions">
         {task?.shared && <StatusPill status="completed">已公开分享</StatusPill>}
@@ -671,9 +678,9 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
           <p className="sr-summary-updated">最近更新 · {formatTime(lastEvent?.at_ms)}</p>
         </article>
         <article className="sr-summary-card sr-effect-summary">
-          <div className="sr-summary-heading"><span className="sr-summary-icon"><MonitoringIcon name="pulse" /></span><h2>恢复效果</h2></div>
+          <div className="sr-summary-heading"><span className="sr-summary-icon"><MonitoringIcon name="pulse" /></span><h2>{task.simulation ? '仿真判断' : '恢复效果'}</h2></div>
           <div className="sr-judgment-grid">
-            {judgments.map(judgment => <div key={judgment.key} className={`sr-judgment-item ${judgment.tone}`}>
+            {(task.simulation ? [{ key: 'simulation', label: '执行方式', hint: '仅保存拟议决策和方案', value: '未执行实际干预', tone: 'neutral' }] : judgments).map(judgment => <div key={judgment.key} className={`sr-judgment-item ${judgment.tone}`}>
               <span className="sr-judgment-label">{judgment.label}</span>
               <strong className="sr-judgment-value"><MonitoringIcon name={judgment.tone === 'success' ? 'check' : judgment.tone === 'danger' ? 'alert' : 'question'} />{judgment.value}</strong>
               <span className="sr-judgment-hint">{judgment.hint}</span>
@@ -700,7 +707,8 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
               <DetailRow label="目标 Bot" mono>{task.request.target.bot_id}</DetailRow>
               <DetailRow label="目标环境">{task.request.target.env}</DetailRow>
               <DetailRow label="引擎">{task.request.target.engine}</DetailRow>
-              <DetailRow label="执行权限">{levelLabels[task.level]}</DetailRow>
+              <DetailRow label="执行权限">{task.simulation ? '离线仿真' : levelLabels[task.level]}</DetailRow>
+              {task.simulation && <DetailRow label="历史截止点">{formatTime(task.simulation.cutoffAtMs)} · {task.simulation.cutoffNode.messageId ?? task.simulation.cutoffNode.observationId ?? task.simulation.cutoffNode.traceId}</DetailRow>}
               <DetailRow label="故障标签" mono>{task.request.tc_fault_label}</DetailRow>
               <DetailRow label="创建时间">{formatTime(task.timeline[0]?.at_ms)}</DetailRow>
               <DetailRow label="最新记录">{formatTime(lastEvent?.at_ms)}</DetailRow>

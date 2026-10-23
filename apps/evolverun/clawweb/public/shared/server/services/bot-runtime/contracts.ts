@@ -9,14 +9,18 @@ export type ResolvedBotTarget = BotTarget & {
   entityId?: string; entityType?: string; sandboxId?: string; arcaInstanceId?: string; botType?: string; activeEngine?: string;
 };
 export interface BotSessionTrajectoryReader {
+  /** Explicit opt-in: implementations must enforce until on lists and all detail/content reads. */
+  readonly supportsHistoricalBoundary?: boolean;
   /** With maxBytes (32–128 KiB), list trace summaries or page observations for traceId. Full input/output
    * is read explicitly with field and optional observationId, using UTF-16 offsets.
    * Results must fit within 128 KiB; next_offset / next_content_offset enable continuation.
    * Without maxBytes, preserve existing full-record reads. Missing uploads are not proof of failure. */
-  read(input: { target: ResolvedBotTarget; sessionKey: string; offset: number; limit: number; traceId?: string;
+  read(input: { target: BotTarget; sessionKey: string; offset: number; limit: number; traceId?: string;
     maxBytes?: number; observationId?: string; field?: "input" | "output"; contentOffset?: number; contentLimit?: number;
     /** Optional exact user-message match in the scoped trace input; never infer it from previews or tool output. */
-    messageMarker?: string; notBeforeMs?: number }): Promise<Record<string, unknown>>;
+    messageMarker?: string; notBeforeMs?: number;
+    /** Inclusive historical upper bound. Unknown or unlocatable nodes must not fall back to latest. */
+    until?: { atMs: number; traceId?: string; observationId?: string; sessionId?: string } }): Promise<Record<string, unknown>>;
 }
 export interface BotTargetResolver { resolve(target: BotTarget): Promise<ResolvedBotTarget> }
 /** Trusted callers can supply their already validated/frozen target. */
