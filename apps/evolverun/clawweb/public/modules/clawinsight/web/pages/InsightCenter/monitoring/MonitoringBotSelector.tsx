@@ -31,10 +31,10 @@ export function MonitoringBotSelector({ selected, isAdmin, startDate, endDate, r
   const unavailable = useRef(onUnavailable); unavailable.current = onUnavailable;
   const id = useId();
   useEffect(() => {
-    if (composing) return;
+    if (composing || draft.trim() === q) return;
     const timer = setTimeout(() => { setQ(draft.trim()); setCursor(null); }, 250);
     return () => clearTimeout(timer);
-  }, [draft, composing]);
+  }, [draft, composing, q]);
   useEffect(() => {
     const controller = new AbortController(); let active = true;
     const timer = setTimeout(() => controller.abort(new DOMException('Timeout', 'TimeoutError')), 15000);

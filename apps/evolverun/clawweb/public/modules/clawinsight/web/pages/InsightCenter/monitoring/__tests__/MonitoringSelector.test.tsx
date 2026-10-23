@@ -84,6 +84,21 @@ describe('bounded searchable Bot selector', () => {
     expect(api.options).toHaveBeenCalledTimes(1);
     expect(api.options.mock.lastCall?.[1]).toBe('助手');
   });
+  it('keeps an explicitly loaded page when the initial unchanged-search debounce would expire', async () => {
+    vi.useFakeTimers();
+    api.options.mockImplementation((_scope, _q, _dates, cursor) => Promise.resolve({
+      items: [bot(cursor ? '002' : '001')], nextCursor: cursor ? null : 'cursor-1',
+    }));
+    render(<MonitoringBotSelector {...defaults} isAdmin />);
+    await act(async () => {});
+    open(); await act(async () => {});
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '加载更多 Bot' })); });
+    expect(screen.getByText('Bot 002')).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(screen.getByText('Bot 002')).toBeInTheDocument();
+    expect(screen.getByText('Bot 001')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '加载更多 Bot' })).not.toBeInTheDocument();
+  });
   it('explicitly loads more, resets cursors on scope/date changes and clears candidates on permission loss', async () => {
     api.options.mockImplementation((_scope, _q, _dates, cursor) => Promise.resolve({ items: [bot(cursor ? '002' : '001')], nextCursor: cursor ? null : 'cursor-1' }));
     const mounted = render(<MonitoringBotSelector {...defaults} isAdmin />); await waitFor(() => expect(defaults.onSelect).toHaveBeenCalled()); open();
