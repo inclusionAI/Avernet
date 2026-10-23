@@ -859,7 +859,9 @@ class TestLocalK8sPluginA2aBaseUrl:
         assert conn.ws_url == "ws://localhost:30081/api/openclaw/ws"
         assert conn.a2a_base_url == "http://localhost:30081"
 
-    def _incluster_plugin(self, mock_client, mock_core_cls=None) -> LocalK8sArcaSandboxPlugin:
+    def _incluster_plugin(
+        self, mock_client, mock_core_cls=None
+    ) -> LocalK8sArcaSandboxPlugin:
         plugin = LocalK8sArcaSandboxPlugin(
             credentials=_make_credentials(), arca_utils=MagicMock()
         )
@@ -927,9 +929,7 @@ class TestLocalK8sPluginA2aBaseUrl:
             )
 
         assert first.a2a_base_url == ""
-        assert conn.a2a_base_url == (
-            "http://tpl-test-abc-svc.stable.alipay.net:30082"
-        )
+        assert conn.a2a_base_url == ("http://tpl-test-abc-svc.stable.alipay.net:30082")
 
     @patch("kubernetes.client.CoreV1Api")
     def test_create_service_response_warms_a2a_cache(
@@ -954,17 +954,14 @@ class TestLocalK8sPluginA2aBaseUrl:
             created.spec.ports = [MagicMock(node_port=30090)]
             mock_core.create_namespaced_service.return_value = created
 
-            plugin._create_service(
-                deployment_name="warm-abc", container_port=20003
-            )
+            plugin._create_service(deployment_name="warm-abc", container_port=20003)
 
             conn = plugin.resolve_ws_conn_info(
                 paas_device_id="warm-abc",
-                port=20003, path="/api/openclaw/ws",
+                port=20003,
+                path="/api/openclaw/ws",
             )
-            assert conn.a2a_base_url == (
-                "http://warm-abc-svc.stable.alipay.net:30090"
-            )
+            assert conn.a2a_base_url == ("http://warm-abc-svc.stable.alipay.net:30090")
             # 预热命中：签发行程未做任何 read 查询、未开后台线程
             mock_core.read_namespaced_service.assert_not_called()
 
@@ -1000,19 +997,22 @@ class TestLocalK8sPluginA2aBaseUrl:
             start = _time.monotonic()
             conn = plugin.resolve_ws_conn_info(
                 paas_device_id="slow-k8s-abc",
-                port=8080, path="/api/openclaw/ws",
+                port=8080,
+                path="/api/openclaw/ws",
             )
             elapsed = _time.monotonic() - start
 
-            assert conn.a2a_base_url == ""      # 缓存未就绪：空地址立即返回
+            assert conn.a2a_base_url == ""  # 缓存未就绪：空地址立即返回
             assert elapsed < 0.1, (
                 f"ws issuance waited {elapsed:.2f}s for slow k8s — "
-                "discovery must not be on the critical path")
+                "discovery must not be on the critical path"
+            )
             # 后台发现完成、写入缓存后，下一笔签发命中
             plugin.a2a_discovery_join("slow-k8s-abc")
             conn2 = plugin.resolve_ws_conn_info(
                 paas_device_id="slow-k8s-abc",
-                port=8080, path="/api/openclaw/ws",
+                port=8080,
+                path="/api/openclaw/ws",
             )
             assert conn2.a2a_base_url == (
                 "http://slow-k8s-abc-svc.stable.alipay.net:30083"
@@ -1046,7 +1046,8 @@ class TestLocalK8sPluginA2aBaseUrl:
             for _ in range(3):
                 conn = plugin.resolve_ws_conn_info(
                     paas_device_id="neg-cache-abc",
-                    port=8080, path="/api/openclaw/ws",
+                    port=8080,
+                    path="/api/openclaw/ws",
                 )
                 assert conn.a2a_base_url == ""
                 plugin.a2a_discovery_join("neg-cache-abc")
@@ -1099,7 +1100,8 @@ class TestLocalK8sPluginA2aBaseUrl:
             ):
                 conn = plugin.resolve_ws_conn_info(
                     paas_device_id="boom-abc",
-                    port=8080, path="/api/openclaw/ws",
+                    port=8080,
+                    path="/api/openclaw/ws",
                 )
 
             # WS 签发不被调度异常打断：正常返回且 a2a 面降级空串，零 kube 查询
@@ -1118,12 +1120,14 @@ class TestLocalK8sPluginA2aBaseUrl:
             plugin._a2a_node_port_cache.clear()
             plugin.resolve_ws_conn_info(
                 paas_device_id="boom-abc",
-                port=8080, path="/api/openclaw/ws",
+                port=8080,
+                path="/api/openclaw/ws",
             )
             plugin.a2a_discovery_join("boom-abc")
             recovered = plugin.resolve_ws_conn_info(
                 paas_device_id="boom-abc",
-                port=8080, path="/api/openclaw/ws",
+                port=8080,
+                path="/api/openclaw/ws",
             )
             assert recovered.a2a_base_url == (
                 "http://boom-abc-svc.stable.alipay.net:30095"
@@ -1163,7 +1167,8 @@ class TestLocalK8sPluginA2aBaseUrl:
             start = _time.monotonic()
             conn = plugin.resolve_ws_conn_info(
                 paas_device_id="cap-abc",
-                port=8080, path="/api/openclaw/ws",
+                port=8080,
+                path="/api/openclaw/ws",
             )
             elapsed = _time.monotonic() - start
 
@@ -1171,7 +1176,8 @@ class TestLocalK8sPluginA2aBaseUrl:
             assert conn.a2a_base_url == ""
             assert elapsed < 0.1, (
                 f"ws issuance waited {elapsed:.2f}s at capacity — "
-                "backpressure must degrade immediately, never queue")
+                "backpressure must degrade immediately, never queue"
+            )
             mock_core.read_namespaced_service.assert_not_called()
             # 零等待策略下既不占额度也不开线程：负缓存承载"稍后再试"
             key = ("default", "cap-abc-svc")
@@ -1189,12 +1195,14 @@ class TestLocalK8sPluginA2aBaseUrl:
             mock_core.read_namespaced_service.return_value = mock_svc
             plugin.resolve_ws_conn_info(
                 paas_device_id="cap-abc",
-                port=8080, path="/api/openclaw/ws",
+                port=8080,
+                path="/api/openclaw/ws",
             )
             plugin.a2a_discovery_join("cap-abc")
             recovered = plugin.resolve_ws_conn_info(
                 paas_device_id="cap-abc",
-                port=8080, path="/api/openclaw/ws",
+                port=8080,
+                path="/api/openclaw/ws",
             )
             assert recovered.a2a_base_url == (
                 "http://cap-abc-svc.stable.alipay.net:30096"
@@ -1223,16 +1231,18 @@ class TestLocalK8sPluginA2aBaseUrl:
 
             plugin.resolve_ws_conn_info(
                 paas_device_id="a2a-to-abc",
-                port=8080, path="/api/openclaw/ws",
+                port=8080,
+                path="/api/openclaw/ws",
             )
 
         kwargs = mock_core.read_namespaced_service.call_args.kwargs
-        assert kwargs.get("_request_timeout") is not None and kwargs["_request_timeout"] <= 5
+        assert (
+            kwargs.get("_request_timeout") is not None
+            and kwargs["_request_timeout"] <= 5
+        )
 
     @patch("kubernetes.client.CoreV1Api")
-    def test_a2a_discovery_caches_nodeport(
-        self, mock_core_cls, mock_client
-    ) -> None:
+    def test_a2a_discovery_caches_nodeport(self, mock_core_cls, mock_client) -> None:
         """review P2：NodePort 对 Service 生命周期内不变——按 (namespace,
         service) 记忆化，重复签发不再打 kube API。"""
         with patch.dict(
@@ -1254,14 +1264,16 @@ class TestLocalK8sPluginA2aBaseUrl:
 
             first = plugin.resolve_ws_conn_info(
                 paas_device_id="a2a-cache-abc",
-                port=8080, path="/api/openclaw/ws",
+                port=8080,
+                path="/api/openclaw/ws",
             )
-            assert first.a2a_base_url == ""       # 未就绪：先空地址
+            assert first.a2a_base_url == ""  # 未就绪：先空地址
             plugin.a2a_discovery_join("a2a-cache-abc")
             for _ in range(2):
                 conn = plugin.resolve_ws_conn_info(
                     paas_device_id="a2a-cache-abc",
-                    port=8080, path="/api/openclaw/ws",
+                    port=8080,
+                    path="/api/openclaw/ws",
                 )
                 assert conn.a2a_base_url == (
                     "http://a2a-cache-abc-svc.stable.alipay.net:30082"

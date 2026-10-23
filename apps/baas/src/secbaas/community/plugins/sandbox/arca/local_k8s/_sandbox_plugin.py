@@ -43,7 +43,6 @@ import os
 import re
 import threading
 import time
-import time
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -471,7 +470,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         self._a2a_node_port_cache: dict[tuple[str, str], int | None | tuple[str, float]]
         self._a2a_node_port_cache = self._a2a_discovery.node_port_cache
         self._a2a_inflight: set[tuple[str, str]] = self._a2a_discovery.inflight
-        self._a2a_threads: dict[tuple[str, str], "threading.Thread"] = (
+        self._a2a_threads: dict[tuple[str, str], threading.Thread] = (
             self._a2a_discovery.threads
         )
         self._client_manager = LocalK8sClientManager()
@@ -750,12 +749,10 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         )
 
         core_api = CoreV1Api(self._client())
-        created = core_api.create_namespaced_service(
-            namespace=namespace, body=service
-        )
+        created = core_api.create_namespaced_service(namespace=namespace, body=service)
         # A2A 地址预热（review P2 终闭环）：create 响应里 API server 已完成
         # NodePort 分配——直接落 a2a 记忆化，后续签发零 kube 查询。响应缺值
-        #（异步分配边缘）时留给后台发现补齐，不影响签发。
+        # （异步分配边缘）时留给后台发现补齐，不影响签发。
         # 预热按模板门控（review P2 回收）：A2A 关闭（模板空）的普通创建
         # 对应用级共享状态零落账，销毁/重建来回不积累无用发现记录。
         try:
@@ -1067,11 +1064,13 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
 
     @staticmethod
     def _a2a_render(
-        template: str, namespace: str, service_name: str, node_port: int,
+        template: str,
+        namespace: str,
+        service_name: str,
+        node_port: int,
     ) -> str:
         return (
-            template
-            .replace("{service_name}", service_name)
+            template.replace("{service_name}", service_name)
             .replace("{namespace}", namespace)
             .replace("{node_port}", str(node_port))
         )
@@ -1097,7 +1096,8 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         if outcome == _AT_CAPACITY:
             # 容量耗尽：立即降级（不等待），额度留给在途发现
             self._a2a_note_schedule_failure(
-                cache_key, "background discovery concurrency cap reached")
+                cache_key, "background discovery concurrency cap reached"
+            )
             return
         try:
             thread = threading.Thread(
@@ -1112,17 +1112,22 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             self._a2a_discovery.release(cache_key)
             self._a2a_threads.pop(cache_key, None)
             self._a2a_note_schedule_failure(
-                cache_key, f"failed to start discovery thread: {exc}")
+                cache_key, f"failed to start discovery thread: {exc}"
+            )
 
     def _a2a_note_schedule_failure(
-        self, cache_key: tuple[str, str], reason: str,
+        self,
+        cache_key: tuple[str, str],
+        reason: str,
     ) -> None:
         """调度失败的就地降级位：短负缓存（TTL 后可恢复）+ 空地址语义。
         与发现失败的负缓存同形状——``_a2a_base_url_cached`` 的 TTL 出清
         路径无需感知两种失败的差别。"""
         logger.warning(
             "local_k8s: a2a base url scheduling skipped for %s/%s: %s",
-            cache_key[0], cache_key[1], reason,
+            cache_key[0],
+            cache_key[1],
+            reason,
         )
         self._a2a_discovery.note_negative(cache_key)
 
@@ -1133,13 +1138,12 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         try:
             core_api = CoreV1Api(self._client())
             svc = core_api.read_namespaced_service(
-                name=service_name, namespace=namespace,
+                name=service_name,
+                namespace=namespace,
                 _request_timeout=_A2A_URL_DISCOVERY_TIMEOUT_S,
             )
             node_port = (
-                svc.spec.ports[0].node_port
-                if svc.spec and svc.spec.ports
-                else None
+                svc.spec.ports[0].node_port if svc.spec and svc.spec.ports else None
             )
             # 回写走 in-flight 门控：Service 若毁于发现窗口内，迟到结果
             # 在 state 内被拒收，已销毁设备的缓存条目不复活（review P2 回收）
@@ -1147,12 +1151,15 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             if not node_port:
                 logger.warning(
                     "local_k8s: service %s/%s has no NodePort; a2a base url omitted",
-                    namespace, service_name,
+                    namespace,
+                    service_name,
                 )
         except Exception as exc:  # noqa: BLE001 — 发现失败降级为空地址 + 负缓存
             logger.warning(
                 "local_k8s: a2a base url discovery failed for %s/%s: %s",
-                namespace, service_name, exc,
+                namespace,
+                service_name,
+                exc,
             )
             self._a2a_discovery.commit_negative(cache_key)
         finally:

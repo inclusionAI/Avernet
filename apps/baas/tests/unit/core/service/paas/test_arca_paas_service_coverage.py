@@ -1673,8 +1673,13 @@ class TestResolveWsConnInfoEventLoop:
 
         def _slow_resolve(**kwargs):
             time.sleep(block_seconds)
-            return MagicMock(ws_url="ws://x", token="t", target="x",
-                             expires_at=None, a2a_base_url="http://a2a")
+            return MagicMock(
+                ws_url="ws://x",
+                token="t",
+                target="x",
+                expires_at=None,
+                a2a_base_url="http://a2a",
+            )
 
         plugin.resolve_ws_conn_info = MagicMock(side_effect=_slow_resolve)
         svc = ArcaPaasService(credentials=arca_credentials, arca_sandbox_plugin=plugin)
@@ -1690,7 +1695,8 @@ class TestResolveWsConnInfoEventLoop:
             hb = asyncio.create_task(_heartbeat())
             start = time.monotonic()
             await svc.resolve_ws_conn_info(
-                paas_device_id="sb-1", port=20003, path="/ws")
+                paas_device_id="sb-1", port=20003, path="/ws"
+            )
             elapsed = time.monotonic() - start
             hb.cancel()
             return elapsed
@@ -1700,4 +1706,5 @@ class TestResolveWsConnInfoEventLoop:
         # 若同步跑在协程线程，整个阻塞期 tick 数 ~1
         assert len(ticks) >= 6, (
             f"event loop stalled during blocking plugin call: "
-            f"{len(ticks)} ticks in {block_seconds}s")
+            f"{len(ticks)} ticks in {block_seconds}s"
+        )
