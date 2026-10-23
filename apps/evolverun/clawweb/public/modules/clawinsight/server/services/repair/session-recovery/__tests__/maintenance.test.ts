@@ -56,3 +56,34 @@ it("counts concurrent failure reports for one execution once using the real task
   expect(saved.execution!.state).toBe("ended");
   expect(saved.timeline.filter(event => event.payload.retryable === true)).toHaveLength(1);
 });
+
+it("does not load object artifacts for healthy, waiting or other-control-plane tasks", async () => {
+  await create("healthy");
+  await update(await create("owner"), { status: "waiting_owner" });
+  await update(await create("other-plane"), { controlPlaneEnvironment: "prod" });
+  vi.mocked(artifacts.getObject).mockClear();
+  expect(await tasks.listForMaintenance(200, "", "pre", now)).toEqual({ tasks: [], nextTaskId: "" });
+  expect(artifacts.getObject).not.toHaveBeenCalled();
+});
+
+it("advances an empty filtered page and finds the later due task", async () => {
+  const all = [await create("one"), await create("two")].sort((a, b) => a.taskId.localeCompare(b.taskId));
+  const due = await update(all[1], { execution: { ...all[1].execution!, state: "ended" } });
+  vi.mocked(artifacts.getObject).mockClear();
+  const first = await tasks.listForMaintenance(1, "", "pre", now);
+  expect(first).toEqual({ tasks: [], nextTaskId: all[0].taskId });
+  expect(artifacts.getObject).not.toHaveBeenCalled();
+  const second = await tasks.listForMaintenance(1, first.nextTaskId, "pre", now);
+  expect(second.tasks.map(task => task.taskId)).toEqual([due.taskId]);
+});
+
+it("uses the maintenance clock to select observation expiry and only due retries", async () => {
+  let task = await create();
+  task = await update(task, { phase: "observe", observationDeadlineAt: now + 1000 });
+  expect((await tasks.listForMaintenance(200, "", "pre", now)).tasks).toEqual([]);
+  expect((await tasks.listForMaintenance(200, "", "pre", now + 1000)).tasks.map(value => value.taskId)).toEqual([task.taskId]);
+  task = await update(task, { observationDeadlineAt: null, execution: { ...task.execution!, state: "ended" },
+    executionRetry: { failures: 1, executionId: task.execution!.executionId, retryAt: now + 20000 } });
+  expect((await tasks.listForMaintenance(200, "", "pre", now + 19999)).tasks).toEqual([]);
+  expect((await tasks.listForMaintenance(200, "", "pre", now + 20000)).tasks.map(value => value.taskId)).toEqual([task.taskId]);
+});

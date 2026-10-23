@@ -110,5 +110,6 @@ export interface RecoveryTaskStore {
   failResult(taskId: string, resultVersion: number, attempt: number): Promise<void>;
   acknowledgeResult(taskId: string, resultVersion: number, attempt: number): Promise<void>;
   listForReporting?(limit: number, afterTaskId: string, controlPlaneEnvironment: import("../common/task-control-plane.js").AgentControlPlaneEnvironment): Promise<{ tasks: RecoveryStoredTask[]; nextTaskId: string }>;
-  listForMaintenance?(limit: number, afterTaskId?: string): Promise<RecoveryStoredTask[]>;
+  /** Cursor follows compact candidate rows even when a page requires no business action. */
+  listForMaintenance?(limit: number, afterTaskId: string, controlPlaneEnvironment: import("../common/task-control-plane.js").AgentControlPlaneEnvironment, now?: number): Promise<{ tasks: RecoveryStoredTask[]; nextTaskId: string }>;
 }
