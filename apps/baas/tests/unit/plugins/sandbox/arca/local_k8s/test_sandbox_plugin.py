@@ -1110,7 +1110,7 @@ class TestLocalK8sPluginA2aBaseUrl:
             mock_core.read_namespaced_service.assert_not_called()
             # 调度失败清理义务：in-flight / 线程记录零残留 + 负缓存就位
             key = ("default", "boom-abc-svc")
-            assert plugin._a2a_inflight == set()
+            assert plugin._a2a_inflight == {}
             assert plugin._a2a_threads == {}
             entry = plugin._a2a_node_port_cache[key]
             assert isinstance(entry, tuple) and entry[0] == "error"
@@ -1162,7 +1162,7 @@ class TestLocalK8sPluginA2aBaseUrl:
             mock_core_cls.return_value = mock_core
             # 占满并发额度（合成的他设备 key）——触达容量上限
             for i in range(_A2A_URL_DISCOVERY_MAX_CONCURRENCY):
-                plugin._a2a_inflight.add(("default", f"busy-{i}-svc"))
+                plugin._a2a_inflight[("default", f"busy-{i}-svc")] = 10_000
 
             start = _time.monotonic()
             conn = plugin.resolve_ws_conn_info(

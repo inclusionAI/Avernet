@@ -66,6 +66,7 @@ from ._a2a_discovery import (
     _ALREADY_IN_FLIGHT,
     _AT_CAPACITY,
     A2aUrlDiscoveryState,
+    TaskToken,
 )
 from ._sandbox import LocalK8sArcaSandbox, _convert_outbound_rules
 
@@ -761,7 +762,9 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             )
             assigned = created_ports[0].node_port if created_ports else None
             if assigned and self._a2a_template():
-                self._a2a_node_port_cache[(namespace, service_name)] = assigned
+                # 走 state 原语落账（连带记正缓存有效期,过期的快照不再被
+                # 永久交付）而不是直接写共享 dict
+                self._a2a_discovery.note_warm((namespace, service_name), assigned)
         except Exception:  # noqa: BLE001 — 预热失败无关紧要（还有后台发现）
             pass
         logger.info(
@@ -1036,7 +1039,11 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         拖住 WS 签发。NodePort 由 *后台发现线程* 维护进 ``_a2a_node_port_cache``
         （创建 Service 时亦会从 create 响应预热）；缓存未就绪的第一笔签发
         得到空地址，后台发现完成后后续签发自然带上。
-        """
+
+        正缓存有限有效期（review P2 跨 worker）：本进程的 destroy() 失效
+        拦不住其他 worker/带外的 Service 删除，NodePort 快照只代表「上次
+        验证时」的事实。过期后旧值不再交付（转后台发现再验证），陈旧窗口
+        有界而不是永久；再验证前的签发照旧空地址立即返回，不等 kube。"""
         template = self._a2a_template()
         if not template:
             return ""
@@ -1054,11 +1061,17 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             else:
                 return ""
         if isinstance(entry, int):
-            return self._a2a_render(template, namespace, service_name, entry)
-        # 未就绪（无值/None=已知无 NodePort）：值面可用即返回，缺值即调度
-        # 后台发现（in-flight 防轰炸），本签发立即以空地址返回
+            if not self._a2a_discovery.positive_expired(cache_key):
+                return self._a2a_render(template, namespace, service_name, entry)
+            # 正缓存过期：未经验证的旧值不得继续交付，清条目转后台再发现
+            self._a2a_discovery.drop(cache_key)
+            entry = None
+        # 未就绪（无值/None=已知无 NodePort）：值面仍新鲜（未过期）即返回，
+        # 过期或缺失调度后台发现（in-flight 防轰炸），本签发立即以空地址返回
         if entry is None and cache_key in self._a2a_node_port_cache:
-            return ""
+            if not self._a2a_discovery.positive_expired(cache_key):
+                return ""
+            self._a2a_discovery.drop(cache_key)
         self._a2a_schedule_discovery(namespace, service_name)
         return ""
 
@@ -1090,7 +1103,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         后续调度被永久旁路）。负缓存过 TTL 自动出清，资源恢复后再次签发
         即重新调度。"""
         cache_key = (namespace, service_name)
-        outcome = self._a2a_discovery.acquire(cache_key)
+        outcome, token = self._a2a_discovery.acquire(cache_key)
         if outcome == _ALREADY_IN_FLIGHT:
             return  # 同 key 发现在途：坐等结果落缓存，不写负缓存
         if outcome == _AT_CAPACITY:
@@ -1099,18 +1112,20 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
                 cache_key, "background discovery concurrency cap reached"
             )
             return
+        thread: threading.Thread | None = None
         try:
             thread = threading.Thread(
                 target=self._a2a_discover,
-                args=(namespace, service_name),
+                args=(namespace, service_name, token),
                 daemon=True,
                 name=f"a2a-url-discovery-{service_name}",
             )
             self._a2a_threads[cache_key] = thread
             thread.start()
         except Exception as exc:  # noqa: BLE001 — 调度失败降级，不拖垮 WS 签发
-            self._a2a_discovery.release(cache_key)
-            self._a2a_threads.pop(cache_key, None)
+            # 启动失败确认：归还**本代次**额度、按线程身份清记录（token
+            # 校验保证不会误清任何新一代任务的标记），再就地降级
+            self._a2a_discovery.finish(cache_key, token, thread)
             self._a2a_note_schedule_failure(
                 cache_key, f"failed to start discovery thread: {exc}"
             )
@@ -1131,7 +1146,9 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         )
         self._a2a_discovery.note_negative(cache_key)
 
-    def _a2a_discover(self, namespace: str, service_name: str) -> None:
+    def _a2a_discover(
+        self, namespace: str, service_name: str, token: TaskToken
+    ) -> None:
         from kubernetes.client import CoreV1Api
 
         cache_key = (namespace, service_name)
@@ -1145,9 +1162,9 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             node_port = (
                 svc.spec.ports[0].node_port if svc.spec and svc.spec.ports else None
             )
-            # 回写走 in-flight 门控：Service 若毁于发现窗口内，迟到结果
-            # 在 state 内被拒收，已销毁设备的缓存条目不复活（review P2 回收）
-            self._a2a_discovery.commit_result(cache_key, node_port)
+            # 回写凭任务代际门控：Service 若毁于发现窗口内，迟到结果在 state
+            # 内被拒收（已销毁设备的缓存条目不复活，review P2 回收）
+            self._a2a_discovery.commit_result(cache_key, token, node_port)
             if not node_port:
                 logger.warning(
                     "local_k8s: service %s/%s has no NodePort; a2a base url omitted",
@@ -1161,11 +1178,12 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
                 service_name,
                 exc,
             )
-            self._a2a_discovery.commit_negative(cache_key)
+            self._a2a_discovery.commit_negative(cache_key, token)
         finally:
-            # 自然收尾即清理：额度释放 + 按线程身份清线程记录，同锁原子，
-            # 不依赖诊断 a2a_discovery_join（review P2 回收）
-            self._a2a_discovery.finish(cache_key, threading.current_thread())
+            # 自然收尾即清理：只能归还自己代次的额度、清自己线程对象的
+            # 记录，同锁原子且不依赖诊断 a2a_discovery_join——旧任务收尾
+            # 动不了同 key 新一代任务的任何标记（review P2 回收）
+            self._a2a_discovery.finish(cache_key, token, threading.current_thread())
 
     def a2a_discovery_join(self, deployment_name: str, timeout: float = 5.0) -> None:
         """等待在途后台发现完成（测试/诊断 seam；产品路径不等待）。"""
