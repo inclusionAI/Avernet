@@ -113,24 +113,26 @@
 
 ## Group 4 — Genome: compile, observe drift, drop the delivery records
 
-### Task 10: The genome compiler and `compile` on the model
+### Task 10: The genome compiler and `compile` on the model `[x]`
 - **Goal:** A revision renders into the same `DesiredState`; the contract examples prove equivalence.
 - **Files:** `core/bot_genome/compile.py` (rewritten), `registry.py`, `genome_registry_protocol.py`, `models.py` (`CompiledManifest` deleted), `spec_checks.py` (root rule), `promotion/applier.py`, `di/modules/{bot_genome_module,apply_engine_module}.py`; `api-contracts/genome/v1/examples/manifest-v1/*/compiled.yaml` (deleted), `manifest-v1-compatibility.md`, `README.md` §7; tests `bot_genome/test_compile.py` (rewritten), `test_spec_checks.py`, `contracts/test_bot_genome_schema.py`, `bot_config_manifest/compiler/test_equivalence.py`
 - **Done when:**
-  - [ ] `compile_spec` covers every spec member per plan § Genome compiler; `GenomeCompiler` resolves a promotion id to its revision and refuses a missing or finished promotion.
-  - [ ] `GenomeRegistryProtocol.compile(bot, rev) -> DesiredState`; `RevisionApplier.preflight/start` take it; `PendingDeliveryApplier` still refuses everything; the genome compiler is registered with no production caller.
-  - [ ] Equivalence holds for every manifest-v1 case with a revision; the contract test no longer reads `compiled.yaml`; the compatibility doc describes the equivalence.
+  - [x] `compile_spec` covers every spec member per plan § Genome compiler; `GenomeCompiler` resolves a promotion id to its revision and refuses a missing or finished promotion.
+  - [x] `GenomeRegistryProtocol.compile(bot, rev) -> DesiredState`; `RevisionApplier.preflight/start` take it; `PendingDeliveryApplier` still refuses everything; the genome compiler is registered with no production caller.
+  - [x] Equivalence holds for every manifest-v1 case with a revision; the contract test no longer reads `compiled.yaml`; the compatibility doc describes the equivalence.
 - **Depends on:** Task 7
+- **Notes:** the equivalence test (`compiler/test_equivalence.py`) drives the real `ManifestCompiler` over the fixture sources (a fake git client serving a temporary copy of `sources/git-content`, since the source session removes a checkout's root when it closes; the two OSS fixtures in a fake object store) and compares each construct with `compile_spec`'s declaration as a set — a revision keeps its categories sorted by key, a document keeps its author's order. A category the document leaves out is undeclared on the Manifest side and declared empty on the genome side (the revision was captured from an empty bot), which the test reads as equal. `registry.py`, `genome_registry_protocol.py` and `models.py` carry Task 11's changes in the same commit, since one file cannot be split.
 
-### Task 11: Drift observed; the promotion without delivery records
+### Task 11: Drift observed; the promotion without delivery records `[x]`
 - **Goal:** Drift by reading the bot; remove `applied_revision`, `by_apply_reference`, `apply_reference`, `document_*`.
 - **Files:** `core/bot_genome/{registry,genome_registry_protocol,models,errors}.py`, `promotion/{service,applier}.py`, `repository/models.py`, `sql/2026_10_19_bot_genome.sql`, `core/repository/{protocols,implementations}/bot/genome.py`, `adapters/http/openapi_v1/bots/{genome,schemas_genome}.py`, `errors_genome.py`, `di/modules/bot_genome_module.py`; tests `test_registry_service.py`, `test_promotion_service.py`, `service_fixtures.py`, `test_genome_repository.py`, `test_genome_routes.py`, `endpoints/test_openapi_genome.py`, `test_domain_error_status_map_complete.py`
 - **Done when:**
-  - [ ] `drift(bot)` answers `None` without `active`, `None` when the observed state equals `active` under its policy, `Drift(active, observed)` otherwise, and propagates `CaptureRefused`; nothing is recorded; tests with the capture `FakeReader`.
-  - [ ] Promotion checks drift for non-user actors only and raises `Drifted(active, observed)`; the 409 body carries both; a `CaptureRefused` from the check surfaces as 422 naming what could not be read.
-  - [ ] The three columns and the index are gone from DDL, ORM and row; the DDL/ORM pin test passes; `finish(status, apply_detail)`.
-  - [ ] `PromotionPayload` has no `document_digest`, `apply_reference`, `document`; OpenAPI snapshot updated; the registry has no `applies` dependency and the genome boundary README no longer names the apply service.
+  - [x] `drift(bot)` answers `None` without `active`, `None` when the observed state equals `active` under its policy, `Drift(active, observed)` otherwise, and propagates `CaptureRefused`; nothing is recorded; tests with the capture `FakeReader`.
+  - [x] Promotion checks drift for non-user actors only and raises `Drifted(active, observed)`; the 409 body carries both; a `CaptureRefused` from the check surfaces as 422 naming what could not be read.
+  - [x] The three columns and the index are gone from DDL, ORM and row; the DDL/ORM pin test passes; `finish(status, apply_detail)`.
+  - [x] `PromotionPayload` has no `document_digest`, `apply_reference`, `document`; OpenAPI snapshot updated; the registry has no `applies` dependency and the genome boundary README no longer names the apply service.
 - **Depends on:** Task 10
+- **Notes:** `ApplyResult` keeps `kind` and `detail` only (`reference` went with `apply_reference`); the promotion row records the delivery's answer and nothing of the state it delivered. The `Drifted` 409 carries `{active, observed}`. `CaptureRefused` already maps to 422 through the domain error map, so the promotion path needed no new mapping. The backend checks in no OpenAPI snapshot; the wire shape is pinned by the route and endpoint tests.
 
 ## Group 5 — Docs and closure
 

@@ -4,14 +4,15 @@
 (``core/bot_genome/spec_models.py``, ``patch_models.py``): one set of
 classes for the wire and the registry, mirroring
 ``api-contracts/genome/v1/*.schema.json`` with the contract's own patterns.
-The compiled document a promotion carries stays a JSON object: its shape is
-the Manifest's, which that module owns.
+A promotion carries no document: the revision compiles into the apply
+engine's desired state at delivery time, and the row records the delivery's
+answer only.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
@@ -287,11 +288,6 @@ class PromotionPayload(BaseModel):
     )
     revision: str = Field(description="The revision it moved the ref to.")
     from_revision: str | None = Field(description="Where the ref pointed before; null for a bot's first promotion.")
-    document_digest: str = Field(
-        description="`sha256:<hex64>` of the compiled document's canonical JSON (the revision rendered in the Manifest "
-        "v1 field layout, contract §7); the apply report repeats it, which is how the registry later tells "
-        "which revision a bot runs."
-    )
     going_back: bool = Field(
         description="True when the target had been promoted before and is not the current `active`."
     )
@@ -305,18 +301,8 @@ class PromotionPayload(BaseModel):
         "promotion is refused before the refs move) or `direct` (RSI-04: direct delivery into the apply "
         "engine)."
     )
-    apply_reference: str | None = Field(
-        description="The seam's handle for the delivery it started, an apply id such as "
-        "`0123456789abcdef0123456789abcdef`; it is what `applied_revision` joins the bot's last apply on. "
-        "Null when delivery did not start."
-    )
     apply_detail: str = Field(
         description="One sentence from the seam on how the start went, e.g. `started`; a failure names the error type "
         "only, never its text."
     )
     created_at: UtcDatetime = Field(description="When the refs moved, UTC with a `Z` suffix.")
-    document: dict[str, Any] | None = Field(
-        default=None,
-        description="The compiled document the promotion recorded (the revision in the Manifest v1 field layout, "
-        "contract §7); present on a single promotion read, null in listings.",
-    )

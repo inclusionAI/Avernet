@@ -1,16 +1,13 @@
-"""A registry (and later a promotion service) over in-memory SQLite, a tmp content store and fakes."""
+"""A registry and a promotion service over in-memory SQLite, a tmp content store and fakes."""
 
 from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
 from agentclaw.community.core.content_store.service import ContentStoreService
 from agentclaw.community.core.bot_genome.models import ApplyResult, BotRef, Provenance, ProvenanceKind
 from agentclaw.community.core.bot_genome.promotion.service import GenomePromotionService
@@ -65,16 +62,6 @@ class InMemorySqliteDB:
     transactional_orm_session = orm_session
 
 
-class FakeApplies:
-    """``last_apply`` only: the report id the registry joins to a promotion."""
-
-    def __init__(self) -> None:
-        self.reports: dict[tuple[str, str], Any] = {}
-
-    def last_apply(self, *, entity_id: str, bot_id: str):
-        return self.reports.get((entity_id, bot_id))
-
-
 class FakeApplier:
     """Accepts by default; ``refuse`` makes preflight raise it, ``fail`` makes start raise it."""
 
@@ -86,20 +73,19 @@ class FakeApplier:
         self.fail: Exception | None = None
         self.preflights: list = []
         self.starts: list = []
-        self.next_reference = "apply_1"
 
-    def preflight(self, bot, compiled) -> None:
-        self.preflights.append((bot, compiled))
+    def preflight(self, bot, state) -> None:
+        self.preflights.append((bot, state))
         if self.on_preflight is not None:
             self.on_preflight()  # something that happens while the service is between its read and its write
         if self.refuse is not None:
             raise self.refuse
 
-    async def start(self, bot, compiled, *, actor, reason) -> ApplyResult:
-        self.starts.append((bot, compiled, actor, reason))
+    async def start(self, bot, state, *, actor, reason) -> ApplyResult:
+        self.starts.append((bot, state, actor, reason))
         if self.fail is not None:
             raise self.fail
-        return ApplyResult(kind=self.kind, reference=self.next_reference, detail="started")
+        return ApplyResult(kind=self.kind, detail="started")
 
 
 class World:
@@ -114,7 +100,6 @@ class World:
         self.content = ContentStoreService(ContentStoreRepository(self.db), tmp_path / "store")
         self.reader = FakeReader()
         self.auth, self.config = FakeAuth(), FakeConfig()
-        self.applies = FakeApplies()
         self.validator = SkillPackageValidator(SkillParser())
         self.registry = GenomeRegistryService(
             revisions=self.revisions,
@@ -125,7 +110,6 @@ class World:
             state_reader=lambda: self.reader,
             checks=SpecChecks(validator=self.validator, mcp_auth=self.auth, mcp_config=self.config),
             validator=self.validator,
-            applies=self.applies,
             env=lambda: "dev",
         )
         self.applier = FakeApplier()
@@ -137,6 +121,3 @@ class World:
             applier=self.applier,
             env=lambda: "dev",
         )
-
-    def report(self, bot: BotRef, apply_id: str, status: ApplyStatus = ApplyStatus.SUCCEEDED) -> None:
-        self.applies.reports[(bot.entity_id, bot.bot_id)] = SimpleNamespace(apply_id=apply_id, status=status)

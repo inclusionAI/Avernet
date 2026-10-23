@@ -49,5 +49,5 @@ def genome_error_data(exc: Exception) -> object | None:
     if isinstance(exc, RefConflict):
         return {"ref": exc.ref, "expected_revision": exc.expected, "current_revision": exc.current}
     if isinstance(exc, Drifted):
-        return {"active": exc.active, "applied": exc.applied}
+        return {"active": exc.active, "observed": exc.observed}
     return None
