@@ -60,6 +60,11 @@ def hook(n, tasks):
     assert answer["response"]["response"] == {}, "observation must not block or change model input"
 
 epoch()
+if case == "authentication_error":
+    # Native 2.1.199 failure shape; no successful Stop/idle evidence follows.
+    emit("result", subtype="success", is_error=True, api_error_status=401,
+         result="Failed to authenticate. API Error: 401 review synthetic authentication failure")
+    time.sleep(60)
 if case == "rate_limit_error":
     # A failed turn emits no successful Stop/idle evidence. The driver must
     # surface the cause immediately rather than waiting for completion hooks.

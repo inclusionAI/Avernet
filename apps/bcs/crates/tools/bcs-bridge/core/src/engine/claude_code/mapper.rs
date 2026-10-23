@@ -592,7 +592,9 @@ pub(super) fn map_result(v: &Value) -> CcMap {
     }
     // Keep actionable upstream causes without echoing arbitrary error payloads:
     // result/errors can contain credentials, prompts, or provider response bodies.
-    let cause = v.get("error").and_then(|error| upstream_error_note(error, 3))
+    // Native CLI failures may expose only api_error_status and prefixed text.
+    let cause = v.get("api_error_status").and_then(Value::as_u64).and_then(upstream_status_note)
+        .or_else(|| v.get("error").and_then(|error| upstream_error_note(error, 3)))
         .or_else(|| v.get("errors").and_then(Value::as_array)
             .and_then(|errors| errors.iter().take(8).find_map(|error| upstream_error_note(error, 3))))
         .or_else(|| v.get("result").and_then(|error| upstream_error_note(error, 3)));

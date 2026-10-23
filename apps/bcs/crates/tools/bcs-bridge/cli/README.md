@@ -316,6 +316,9 @@ the existing `errorMessage` field, for example:
 engine exited: upstream rate_limit_error (HTTP 429): model provider rate limit exceeded; retry later
 ```
 
+For failed results, a recognized numeric `api_error_status` takes precedence
+over the `error`, `errors` and `result` fallbacks. Missing, malformed or unknown
+status values retain those fallbacks; successful results remain unchanged.
 Known authentication, permission, request-size, rate-limit and provider-service
 errors are converted to constant diagnostic summaries. Free-form provider
 messages, credentials, prompts and response bodies are not forwarded in the

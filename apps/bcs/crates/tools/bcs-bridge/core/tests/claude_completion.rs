@@ -46,6 +46,14 @@ async fn omitted_completion_mode_uses_hook_idle() {
 }
 
 #[tokio::test]
+async fn default_mode_native_auth_failure_does_not_wait_for_completion_hooks() {
+    let error = run_case_traced("authentication_error", None, None).await
+        .expect_err("native authentication failure must terminate without Stop/idle");
+    assert_eq!(error,
+        "engine exited: upstream authentication_error (HTTP 401): model provider authentication failed; check credentials");
+}
+
+#[tokio::test]
 async fn direct_constructor_uses_hook_idle() {
     let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/mock_cc_hook_idle.py");
     let engine = Arc::new(ClaudeCode::new("python3".into(), vec![script.into(), "alive".into()]));
