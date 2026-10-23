@@ -70,7 +70,8 @@ model = "gpt-4.1-mini"
 timeout_ms = 120000
 temperature = 0
 max_tokens = 4096
-structured_output = "json_schema"
+# Override in singlebox/.env.local when the local judge needs another transport.
+structured_output = "${BCS_LLM_STRUCTURED_OUTPUT:-json_schema}"
 
 [leader_election]
 enabled = false

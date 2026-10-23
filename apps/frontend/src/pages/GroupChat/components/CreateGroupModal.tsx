@@ -28,6 +28,7 @@ import * as BcnController from '@/services/backend-api/BcnController';
 import { AppExt } from '@/shell';
 import { computeIsOnline, useBotNetworkStore } from '@/stores/botNetworkStore';
 import { BotRecommendTracker } from '@/utils/botRecommendTracker';
+import { chatBridge } from '@/utils/chatBridge';
 import { cn } from '@/utils/utils';
 import {
   HighlightStyle,
@@ -55,6 +56,7 @@ import {
   Workflow,
   X,
 } from 'lucide-react';
+import { history } from '@umijs/max';
 import React, {
   useCallback,
   useEffect,
@@ -98,6 +100,9 @@ import CollaborationFlowPreviewLoader from './CollaborationFlowPreviewLoader';
 import CollaborationFlowWorkspace from './CollaborationFlowWorkspace';
 import CollaborationValidationNotices from './CollaborationValidationNotices';
 import PrivateBotHint from './PrivateBotHint';
+import { useGroupCreation } from '../hooks/useGroupCreation';
+import { toBindingBot, type CollaborationDefinitionReference, groupDefinitionError } from '@/services/backend-api/GroupCreationController';
+import { GroupBotPager, GroupCreationStatus, GroupOriginatorPicker } from './GroupCreationControls';
 
 /** 最大可选成员 Bot 数量 */
 const MAX_MEMBER_BOTS = 19;
@@ -236,6 +241,10 @@ interface CreateGroupModalProps {
   onSuccess: (group: GroupInfo) => void;
   /** 当前视角的 Actor 类型 */
   actorKind?: 'human' | 'bot';
+  /** Choose a user-owned Bot without changing the current chat identity. */
+  selectOriginator?: boolean;
+  /** Optional immutable source used once to seed the editable form. */
+  initialDraft?: CollaborationDefinitionReference;
 }
 
 const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
@@ -243,6 +252,8 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   onClose,
   onSuccess,
   actorKind = 'bot',
+  selectOriginator = false,
+  initialDraft,
 }) => {
   // 协作模板「查看文档」链接走 resources 契约：开源默认 null 不渲染
   const { bcnCollaborationDocUrl } = useExt(AppExt).resources;
@@ -261,9 +272,9 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   const [botSearch, setBotSearch] = useState('');
   const [error, setError] = useState<string>('');
   const [autoReply, setAutoReply] = useState(true); // 是否开启自动回复
-  const [groupStrategy, setGroupStrategy] = useState<GroupStrategy>('chat');
+  const [groupStrategy, setGroupStrategy] = useState<GroupStrategy>(initialDraft ? 'state_machine' : 'chat');
   const [collaborationYamlTemplate, setCollaborationYamlTemplate] =
-    useState('');
+    useState(initialDraft ? FREE_COLLABORATION_TEMPLATE_ID : '');
   const [collaborationTemplates, setCollaborationTemplates] =
     useState<BcnController.CollaborationTemplatesResponse | null>(null);
   const [hasLoadedCollaborationTemplates, setHasLoadedCollaborationTemplates] =
@@ -325,7 +336,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   const selectedBotCacheRef = useRef<Map<string, any>>(new Map());
   const collaborationTemplatesRequestIdRef = useRef(0);
   const collaborationYamlRequestIdRef = useRef(0);
-  const collaborationYamlTemplateRef = useRef('');
+  const collaborationYamlTemplateRef = useRef(initialDraft ? FREE_COLLABORATION_TEMPLATE_ID : '');
   const collaborationDefinitionYamlRef = useRef('');
   const participantTabsRef = useRef<HTMLDivElement>(null);
   const participantTabButtonRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -353,7 +364,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   const currentBotsRef = useRef<{ bot_uuid: string; position: number }[]>([]);
 
   // 一层 Tab：我的好友 / 可协作Bot
-  const [memberTab, setMemberTab] = useState<MemberTab>('friends');
+  const [memberTab, setMemberTab] = useState<MemberTab>(selectOriginator ? 'collaborate' : 'friends');
   // 二层 Tab（仅在可协作Bot下显示）：按名称筛选 / 按画像筛选
   const [filterMode, setFilterMode] = useState<FilterMode>('name');
   // 名称搜索结果（API 搜索）
@@ -408,7 +419,21 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   const [isLoadingFriends, setIsLoadingFriends] = useState(false);
 
   // 从 store 获取当前 Tab Bot（发起者）
-  const originator = useBotNetworkStore((state) => state.driverBot);
+  const chatOriginator = useBotNetworkStore((state) => state.driverBot);
+  const creation = useGroupCreation({ selectOriginator, initialDraft, open, query: botSearch });
+  const originator = selectOriginator
+    ? (creation.originator ? toBindingBot(creation.originator) : undefined) : chatOriginator;
+
+  useEffect(() => {
+    if (!selectOriginator) return;
+    setParticipantBindings({}); setConsultantBots([]); setMasterBot('');
+    setDriverBotId(creation.originator?.bot_id || '');
+    selectedBotCacheRef.current.clear(); setBotSearch(''); setError('');
+  }, [creation.originator?.bot_id, creation.user?.user_id]);
+  useEffect(() => {
+    if (!selectOriginator) return;
+    setDescription(''); setWebhookUrl(''); setOpeningMessage('');
+  }, [creation.user?.user_id]);
 
   // Actor hook（用于替换 discoverBots）
   const { loadActors, searchActors } = useActor();
@@ -431,7 +456,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     originatorStatus === 'online' &&
     originator?.dynamic_status?.status === 'offline';
   const isOriginatorOnline = originatorStatus === 'online';
-  const canCreateStateMachineGroup = actorKind !== 'human';
+  const canCreateStateMachineGroup = !!selectOriginator || actorKind !== 'human';
   const collaborationTemplateList = useMemo(
     () =>
       [...(collaborationTemplates?.templates || [])].sort(
@@ -588,20 +613,33 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 
   // 内部调用 hook 获取群组相关数据和方法
   const {
-    availableBots,
-    isLoadingAvailableBots,
+    availableBots: ordinaryAvailableBots,
+    isLoadingAvailableBots: ordinaryLoadingAvailableBots,
     hasMoreAvailableBots,
     isLoadingMoreBots,
-    isCreatingGroup,
+    isCreatingGroup: ordinaryCreatingGroup,
     loadAvailableBots,
     loadMoreAvailableBots,
-    createGroup,
+    createGroup: createCurrentGroup,
   } = useGroups();
+  const isCreatingGroup = selectOriginator ? creation.busy : ordinaryCreatingGroup;
+  const createGroup = async (params: CreateGroupParams) => {
+    if (!selectOriginator) return createCurrentGroup(params);
+    const groupUrl = await creation.submit(params);
+    if (groupUrl) {
+      onClose();
+      chatBridge.closePanelForce();
+      history.push(groupUrl);
+    }
+    return null;
+  };
+  const availableBots = selectOriginator ? creation.candidates.page.items.map(toBindingBot) : ordinaryAvailableBots;
+  const isLoadingAvailableBots = selectOriginator ? creation.candidates.loading : ordinaryLoadingAvailableBots;
 
   // 弹窗打开时：创建新的 tracker（生成新的 session_id）
   // 弹窗关闭时：tracker 失效（下次打开会创建新的）
   useEffect(() => {
-    if (open) {
+    if (open && !selectOriginator) {
       // 弹窗打开时创建新的 tracker，生成新的 session_id
       trackerRef.current = new BotRecommendTracker();
       console.log(
@@ -638,7 +676,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 
   // 弹窗打开时加载第一页（隐身模式下不加载，human actor 跳过在线检查）
   useEffect(() => {
-    if (!open || !originator?.bot_uuid) return;
+    if (selectOriginator || !open || !originator?.bot_uuid) return;
     if (
       actorKind === 'human' ||
       (originator.is_online && originator.dynamic_status?.status !== 'offline')
@@ -681,7 +719,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   // 我的好友：本地过滤好友列表
   // 可协作Bot + 按名称筛选：有搜索词用 API 结果，无搜索词用初始列表
   // 可协作Bot + 按画像筛选：有搜索词用 API 结果，无搜索词用全量数据
-  const filteredBots =
+  const filteredBots = selectOriginator ? availableBots :
     memberTab === 'friends'
       ? friendBots.filter(
           (b) =>
@@ -695,7 +733,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
       : botSearch.trim()
       ? smartFilteredBots
       : selectableBots;
-  const isLoadingBots =
+  const isLoadingBots = selectOriginator ? creation.candidates.loading :
     memberTab === 'friends'
       ? isLoadingFriends
       : filterMode === 'name'
@@ -732,7 +770,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   // 名称搜索：调用 Actor API
   const handleNameSearch = useCallback(
     async (name: string) => {
-      if (!originator?.bot_uuid) return;
+      if (selectOriginator || !originator?.bot_uuid) return;
       setIsLoadingNameSearch(true);
       try {
         // 使用 Actor API（cooperatable_only=true 用于获取可协作 Bot）
@@ -774,7 +812,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   // 智能搜索：调用 Actor API（searchActors 语义搜索）
   const handleSmartSearch = useCallback(
     async (query: string) => {
-      if (!originator?.bot_uuid) return;
+      if (selectOriginator || !originator?.bot_uuid) return;
       setIsLoadingSmartSearch(true);
       requestStartTimeRef.current = Date.now();
 
@@ -844,7 +882,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   const handleSmartRecommend = useCallback(async () => {
     // 优先使用协作目标，其次使用协作室名称
     const recommendQuery = description.trim() || topic.trim();
-    if (!originator?.bot_uuid || !recommendQuery) {
+    if (selectOriginator || !originator?.bot_uuid || !recommendQuery) {
       return;
     }
     setIsRecommending(true);
@@ -934,7 +972,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 
   // 加载我的好友列表（bot 模式）或我的 Bot 列表（human 模式）
   const handleLoadFriends = useCallback(async () => {
-    if (!originator?.bot_uuid) return;
+    if (selectOriginator || !originator?.bot_uuid) return;
     setIsLoadingFriends(true);
     try {
       if (actorKind === 'human') {
@@ -1058,7 +1096,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 
   // 滚动到底部触发加载更多（仅按名称筛选模式且无搜索词时）
   const handleListScroll = () => {
-    if (memberTab !== 'collaborate' || filterMode !== 'name') return;
+    if (selectOriginator || memberTab !== 'collaborate' || filterMode !== 'name') return;
     // 有搜索词时使用 API 搜索，不支持分页
     if (botSearch.trim()) return;
     const el = listRef.current;
@@ -1071,6 +1109,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   // 自动加载更多：当可协作Bot列表内容未填满容器或接近底部时，自动继续加载
   useEffect(() => {
     const checkAndLoadMore = () => {
+      if (selectOriginator) return;
       // 只在可协作Bot Tab 且按名称筛选模式且无搜索词时执行
       if (
         memberTab !== 'collaborate' ||
@@ -1166,6 +1205,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   };
 
   const handleClose = () => {
+    if (selectOriginator || initialDraft) { if (!creation.busy) onClose(); return; }
     resetForm();
     onClose();
   };
@@ -1348,6 +1388,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 
   useEffect(() => {
     if (
+      !!initialDraft ||
       !open ||
       groupStrategy !== 'state_machine' ||
       hasLoadedCollaborationTemplates ||
@@ -1436,8 +1477,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     }
   };
 
-  const handleValidateCollaborationYaml = async () => {
-    const definitionYaml = collaborationDefinitionYaml;
+  const handleValidateCollaborationYaml = async (definitionYaml = collaborationDefinitionYaml) => {
     if (!definitionYaml.trim()) {
       setError('请输入自定义协作 YAML');
       return;
@@ -1460,9 +1500,12 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
         return;
       }
 
-      const definitions = buildCollaborationParticipantDefinitions(
-        response.participants,
-      );
+      if (selectOriginator) {
+        const issue = groupDefinitionError({ ...response, participants: response.participants || [], warnings: response.warnings || [] });
+        if (issue) { clearCollaborationYamlBindingState(); setError(issue); return; }
+      }
+      const definitions = buildCollaborationParticipantDefinitions(response.participants)
+        .map(definition => selectOriginator ? { ...definition, required: true } : definition);
       if (!definitions.length) {
         clearCollaborationYamlBindingState();
         setError('YAML 校验通过，但未返回可绑定的 participant');
@@ -1503,6 +1546,22 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
       setError(err instanceof Error ? err.message : 'YAML 校验请求失败');
     }
   };
+
+  useEffect(() => {
+    const source = creation.initialDefinition;
+    if (!source) return;
+    setTopic(source.title || '自定义协作');
+    setGroupStrategy('state_machine');
+    collaborationYamlTemplateRef.current = FREE_COLLABORATION_TEMPLATE_ID;
+    collaborationDefinitionYamlRef.current = source.definitionYaml;
+    setCollaborationYamlTemplate(FREE_COLLABORATION_TEMPLATE_ID);
+    setCollaborationDefinitionYaml(source.definitionYaml);
+    setValidatedCollaborationYaml(''); setValidatedCollaborationGraph(null);
+    setValidatedCollaborationSummary(null); setCollaborationValidationWarnings([]);
+    setParticipantDefinitions([]); setParticipantBindings({}); setActiveParticipantKey('');
+    setCollaborationAuthoringStage('yaml');
+    void handleValidateCollaborationYaml(source.definitionYaml);
+  }, [creation.initialDefinition]);
 
   const toggleBindingBot = (botId: string, position?: number) => {
     if (!activeParticipantKey) {
@@ -1721,7 +1780,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
         return;
       }
 
-      if (!isOriginatorBoundToParticipant) {
+      if (!selectOriginator && !isOriginatorBoundToParticipant) {
         setError(
           `请至少为发起方 Bot「${
             originator.bot_name || originator.bot_uuid
@@ -1731,7 +1790,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
       }
     }
 
-    const stateMachineDriverBot = isStateMachine
+    const stateMachineDriverBot = isStateMachine && selectOriginator ? originator.bot_uuid : isStateMachine
       ? participantBindings.coordinator?.[0] ||
         participantBindings.driver?.[0] ||
         allBoundBotIds[0] ||
@@ -1933,7 +1992,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div role="dialog" aria-modal="true" aria-label="拉起协作" className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* 遮罩 - 仅用于视觉遮罩，点击不关闭 */}
       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
 
@@ -1960,6 +2019,8 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
           <button
             type="button"
             onClick={handleClose}
+            disabled={!!selectOriginator && creation.busy}
+            aria-label="关闭建群浮层"
             className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
             data-aspm-click="ca114903.da194173"
             data-aspm-desc="GroupChat-关闭创建协作弹窗"
@@ -1970,6 +2031,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
           </button>
         </div>
 
+        <fieldset disabled={creation.initialDefinitionPending || (selectOriginator && (creation.frozen || creation.checking))} className="m-0 flex min-h-0 flex-1 flex-col border-0 p-0">
         <CollaborationFlowWorkspace
           className="rounded-none bg-white"
           compact={isCompactCollaborationFlowLayout}
@@ -2011,6 +2073,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                 </label>
                 <input
                   type="text"
+                  aria-label="协作群名称"
                   value={topic}
                   onChange={(e) => setTopic(e.target.value)}
                   placeholder="留空则自动用 Bot 名称生成"
@@ -2029,9 +2092,10 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                 </label>
                 <input
                   type="text"
+                  aria-label="协作目标"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder="描述协作目标，用于智能推荐"
+                  placeholder={selectOriginator ? '描述本次协作要完成的目标' : '描述协作目标，用于智能推荐'}
                   required={groupStrategy === 'state_machine'}
                   className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-lavender-500/20 focus:border-lavender-400 transition-all"
                 />
@@ -2039,7 +2103,11 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
             </div>
 
             {/* 协作群类型选择 */}
-            <div className="mt-2">
+            {selectOriginator ? <GroupOriginatorPicker creation={creation} /> : null}
+            {initialDraft ? <p className="mt-2 text-xs text-muted-foreground">{creation.initialDefinitionPending
+              ? creation.error || '正在读取初始内容…'
+              : `已载入版本 ${initialDraft.revision}，可自由编辑；修改仅用于本次建群。`}</p> : null}
+            {!initialDraft && <div className="mt-2">
               <label className="block text-sm font-medium text-slate-700 mb-1">
                 协作群类型
               </label>
@@ -2224,7 +2292,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                   </div>
                 </div>
               )}
-            </div>
+            </div>}
 
             {groupStrategy === 'chat' ? (
               /* 自由聊天型：群主 Bot + 自动回复 */
@@ -2601,7 +2669,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                   {MANAGER_WORKER_DEFAULT_WORKER_TIP}
                 </p>
               </div>
-            ) : (
+            ) : selectOriginator ? null : (
               /* 结构化协同：展示发起方 Bot */
               <div className="mt-2">
                 <label className="block text-sm font-medium text-slate-700 mb-1">
@@ -2803,7 +2871,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                           协同剧本
                           <span className="text-red-500 ml-0.5">*</span>
                         </label>
-                        <div className="flex items-center bg-slate-100 rounded-lg p-0.5 flex-shrink-0">
+                        {!initialDraft && <div className="flex items-center bg-slate-100 rounded-lg p-0.5 flex-shrink-0">
                           <button
                             type="button"
                             onClick={() =>
@@ -2832,8 +2900,8 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                           >
                             模板
                           </button>
-                        </div>
-                        {isCollaborationTemplateMode && (
+                        </div>}
+                        {!initialDraft && isCollaborationTemplateMode && (
                           <div
                             ref={collaborationTemplateDropdownRef}
                             className="relative min-w-[180px] max-w-[280px] flex-1"
@@ -3074,7 +3142,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                               协作流程预览
                             </Button>
                           )}
-                        {participantDefinitions.length > 0 &&
+                        {!selectOriginator && participantDefinitions.length > 0 &&
                           !isOriginatorBoundToParticipant && (
                             <span className="text-xs font-medium px-2 py-0.5 rounded-full text-amber-600 bg-amber-50">
                               发起方未绑定
@@ -3246,6 +3314,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                             </div>
                           )}
 
+                          {selectOriginator ? <div className="mb-2 text-sm font-medium">可协作 Bot · {originator?.bot_name || '请先选择发起方'}</div> : <>
                           <div className="flex items-center gap-2 mb-2 flex-shrink-0 min-w-0 overflow-x-auto">
                             <div className="flex items-center bg-slate-100 rounded-lg p-0.5 flex-shrink-0">
                               <button
@@ -3312,6 +3381,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                             )}
                           </div>
 
+                          </>}
                           <div className="relative mb-2 flex-shrink-0">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
                             <input
@@ -3350,12 +3420,13 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                             )}
                           </div>
 
+                          {selectOriginator ? <GroupBotPager page={creation.candidates} label="可协作 Bot" /> : null}
                           <div
                             ref={listRef}
                             onScroll={handleListScroll}
                             className="flex-1 min-h-[120px] border border-slate-200/60 rounded-xl overflow-auto scroll-pb-6"
                           >
-                            {actorKind === 'bot' &&
+                            {!selectOriginator && actorKind === 'bot' &&
                             (!originator?.is_online ||
                               originator?.dynamic_status?.status ===
                                 'offline') ? (
@@ -3425,6 +3496,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                                   ) : (
                                     <button
                                       key={bot.bot_uuid}
+                                      title={selectOriginator ? bot.bot_uuid : undefined}
                                       type="button"
                                       onClick={() =>
                                         toggleBot(bot.bot_uuid, index)
@@ -3572,6 +3644,12 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                   </div>
                 )}
 
+                {selectOriginator ? <>
+                  <div className="mb-2 text-sm font-medium">可协作 Bot · {originator?.bot_name || '请先选择发起方'}</div>
+                  <input aria-label="搜索可协作 Bot" value={botSearch} onChange={e => setBotSearch(e.target.value)}
+                    placeholder="搜索 Bot 名称" className="mb-2 rounded border border-input bg-background px-3 py-1 text-sm" />
+                  <GroupBotPager page={creation.candidates} label="可协作 Bot" />
+                </> : <>
                 {/* 一层 Tab：我的好友 / 可协作Bot + 智能推荐按钮 */}
                 <div className="flex items-center justify-between mb-2 flex-shrink-0">
                   <div className="flex items-center bg-slate-100 rounded-lg p-0.5">
@@ -3731,13 +3809,15 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                   </div>
                 )}
 
+                </>}
+
                 {/* Bot 列表（flex-1 撑满，内部滚动） */}
                 <div
                   ref={listRef}
                   onScroll={handleListScroll}
                   className="flex-1 min-h-0 border border-slate-200/60 rounded-xl overflow-auto"
                 >
-                  {actorKind === 'bot' &&
+                  {!selectOriginator && actorKind === 'bot' &&
                   (!originator?.is_online ||
                     originator?.dynamic_status?.status === 'offline') ? (
                     <PrivateBotHint
@@ -3937,17 +4017,21 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
             )}
           </div>
         </CollaborationFlowWorkspace>
+        </fieldset>
 
         {/* 底部：错误 + 按钮 */}
         <div className="flex items-center justify-between px-6 py-2 border-t border-slate-100 flex-shrink-0">
           <div className="flex-1">
-            {error && <p className="text-sm text-red-500">{error}</p>}
+            {selectOriginator ? <GroupCreationStatus creation={creation} startsWorkflow={groupStrategy === 'state_machine'} /> : null}
+            {error || (!selectOriginator && creation.error) ? <p role="alert" className="text-sm text-destructive">{error || creation.error}</p> : null}
+            {!selectOriginator && creation.error ? <Button size="sm" onClick={creation.retry}>重试读取</Button> : null}
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <Button
               variant="default"
               ghost
               onClick={handleClose}
+              disabled={!!selectOriginator && creation.busy}
               data-aspm-click="ca114903.da194182"
               data-aspm-desc="GroupChat-取消创建协作"
               data-aspm-param={``}
@@ -3955,12 +4039,12 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
             >
               取消
             </Button>
-            <Button
+            {(!selectOriginator || !['unknown', 'success'].includes(creation.submission.phase)) && <Button
               variant="primary"
               onClick={handleCreate}
-              loading={isCreatingGroup}
+              loading={selectOriginator ? creation.busy : isCreatingGroup}
               disabled={
-                isCreatingGroup ||
+                creation.initialDefinitionPending || (selectOriginator ? creation.busy || creation.checking || !creation.user || !!creation.error : isCreatingGroup) ||
                 !originator ||
                 (groupStrategy === 'state_machine'
                   ? !description.trim() ||
@@ -3971,7 +4055,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                     !canExecuteValidatedCollaboration(collaborationValidationWarnings) ||
                     missingParticipantBindingLabels.length > 0 ||
                     allBoundBotIds.length === 0 ||
-                    !isOriginatorBoundToParticipant
+                    (!selectOriginator && !isOriginatorBoundToParticipant)
                   : false) ||
                 (groupStrategy === 'chat' && !driverBotId) ||
                 (groupStrategy === 'manager_worker' && !masterBot)
@@ -3981,8 +4065,8 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
               data-aspm-param={``}
               data-aspm-expo
             >
-              创建协作群
-            </Button>
+              {selectOriginator && groupStrategy === 'state_machine' ? '建群并开始协作' : '创建协作群'}
+            </Button>}
           </div>
         </div>
       </div>

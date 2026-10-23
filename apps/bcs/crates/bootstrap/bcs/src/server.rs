@@ -5474,6 +5474,11 @@ impl BcsServer {
                 crate::agent_identity::build_agent_identity_port()?,
                 self.state.services.registry.clone(),
             )));
+        openapi_v1.collaboration_drafts = self.state.services.collaboration_drafts.clone();
+        let mut browser_v1 = openapi_v1.clone();
+        browser_v1.principal_verifier = Arc::new(crate::browser_principal::BrowserPrincipalVerifier(
+            self.state.auth_chain.clone(),
+        ));
         if let (Some(auth_service), Some(public_base_url)) =
             (oauth_state.clone(), self.openapi_auth_public_base_url())
         {
@@ -5494,6 +5499,7 @@ impl BcsServer {
             .with_state(Arc::clone(&self.state))
             .merge(api_router)
             .merge(bcs_api_http::router(openapi_v1))
+            .merge(bcs_api_http::v1::human::router(browser_v1))
             .merge(bcs_api_http::group_session_connection_router(
                 group_session_connections,
                 self.state.gateway_principal_verifier.clone(),

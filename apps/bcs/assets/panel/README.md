@@ -81,10 +81,13 @@ Validation outages preserve already verified source for copying. References are
 transferable and revocable; reopening/refreshing reauthenticates without a
 persistent cache. Tokens never enter tab IDs or URLs.
 
-Opening a card selects the Preview subtab. Source is a separate read-only subtab;
-Copy Source stays in the header and copies the verified original from either
-view. Changing the fixed revision returns to Preview. Both card versions fill
-their host width, including the preview button.
+Opening a card selects **协作预览**. **查看定义** shows the read-only original;
+**复制源码** appears beside **协作定义 YAML** only in that tab and copies the
+verified original. YAML syntax highlighting uses only the YAML grammar and renders
+React text nodes, preserving indentation, line endings and literal markup.
+Successful validation appears inline with the header's version
+information. Changing the fixed revision returns to the preview tab. Both card
+versions fill their host width, including the preview button.
 
 Loop previews show the logical structure used by group creation: one body per
 Loop, a return edge, iteration limits, and distinct exit branches. Nested Loops
@@ -92,7 +95,47 @@ retain their containers. The diagram fits the panel width and supports zoom;
 the projection does not change the stored YAML or validation summary.
 
 Historical schema 1 snapshots and `collaboration preview <file>` retain their
-read-only behavior. The preview never creates groups, drafts, or Runs.
+read-only behavior. Opening a preview never creates groups, drafts, or Runs.
+
+### Open the host's group creation modal
+
+Schema 2 previews offer a primary **发起协作** button in the upper right. An explicit click calls the trusted
+host's generic `onOpenCreateGroup({ draft: reference })`, where `reference` has
+exactly `{schemaVersion: 2, draftId, revision, readToken}`. Other panels can call
+`onOpenCreateGroup()` to guide ordinary group creation without a Draft. The event
+only opens configuration; it never submits. The BCS Panel owns preview and source
+copying, not a separate creation form or Human API client. Schema 1 stays read-only;
+a missing callback leaves the preview usable with an integration notice.
+
+The current `apps/frontend` UMD host injects this callback for panel components,
+checks the options, and lazy-loads its existing `CreateGroupModal`. Independent
+`selectOriginator` and optional `initialDraft` props control owned-Bot selection
+and initial content. Without them, the normal entry retains its current identity.
+With a Draft, the host verifies the fixed revision's bytes/hash and seeds the
+existing free editor once, then automatically validates and expands role bindings
+and the logical Loop preview. Draft entry fixes the state-machine group type and
+hides type/template switching. Users can still choose **重新编辑** to edit and
+revalidate YAML. Entries without a Draft retain all group types and templates.
+Editing invalidates the prior validation and bindings; it does not write a Draft.
+
+Owned Bots come from `/bcnproxy/collaboration/user`, independently of the current
+chat Bot. Candidates use the selected originator's perspective. Switching that
+Bot clears members and bindings; searching or paging preserves selections.
+The same `CreateGroupParams` feed normal and Human creation. Submission snapshots
+the current form, rechecks the Human, and validates the **current edited YAML**
+for state-machine groups. It never reloads a Draft over edits. YAML bytes and
+bindings travel separately; read tokens are only used for the initial read.
+
+**建群并开始协作** explicitly starts a state-machine group. The other group types
+use **创建协作群**. Unknown outcomes block repeat submission. Closing/reopening the
+same modal preserves edits and submission state; refreshing or closing the panel
+has no persistent recovery guarantee. A later share revocation cannot withdraw
+text already read into the local editor.
+
+`apps/frontend-nextgen` has not adopted this callback or editable modal parameters.
+Its API bases, identity, navigation and acceptance work remain in the
+[group-launch roadmap](../../specs/2026-10-22-collaboration-draft-group-launch/roadmap.md).
+No API base, navigation target or user identity is accepted from message options.
 
 For a failed Run, the panel shows a **Rerun** action. It sends an empty
 `POST /state-machine-runs/{run_id}/reruns` request. The source panel remains on
