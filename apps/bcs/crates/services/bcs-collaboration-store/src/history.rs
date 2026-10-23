@@ -453,14 +453,7 @@ impl MySqlCollaborationStore {
         }
         // Native MySQL JSON canonicalizes whitespace and object key order.
         // Compare JSON values, not the textual serialization of that column.
-        // MariaDB cannot serve `CAST(? AS JSON)` (its JSON type is a LONGTEXT
-        // alias), so backends without the cast fall through to the textual
-        // comparison; the affected-rows-0 path below re-verifies the payload
-        // with a semantic Rust-side comparison, keeping textual matching
-        // correct on every backend, merely one extra read when it misses.
-        let payload_match = if self.flavor == DbSqlFlavor::Mysql
-            && self.mysql_json_cast_supported().await
-        {
+        let payload_match = if self.flavor == DbSqlFlavor::Mysql {
             "payload_json = CAST(? AS JSON)"
         } else {
             "payload_json = ?"

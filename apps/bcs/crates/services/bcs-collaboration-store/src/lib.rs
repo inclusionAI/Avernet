@@ -1303,12 +1303,6 @@ pub struct MySqlCollaborationStore {
     db: Arc<dyn DbPlugin>,
     env: String,
     flavor: DbSqlFlavor,
-    /// Lazily-probed `CAST(? AS JSON)` support, only read on the MySQL flavor.
-    /// MySQL 8 accepts the cast; MariaDB (whose JSON type is a LONGTEXT
-    /// alias, in every released version) rejects it, so JSON-derived column
-    /// comparisons there must stay textual and rely on the Rust-side payload
-    /// equality fallback. One probe per store instance, shared across clones.
-    json_cast_supported: Arc<tokio::sync::OnceCell<bool>>,
 }
 
 impl MySqlCollaborationStore {
@@ -1317,7 +1311,6 @@ impl MySqlCollaborationStore {
             db,
             env,
             flavor: DbSqlFlavor::Mysql,
-            json_cast_supported: Arc::new(tokio::sync::OnceCell::new()),
         }
     }
 
@@ -1326,33 +1319,7 @@ impl MySqlCollaborationStore {
             db,
             env,
             flavor: DbSqlFlavor::Sqlite,
-            json_cast_supported: Arc::new(tokio::sync::OnceCell::new()),
         }
-    }
-
-    /// Whether the backing server accepts `CAST(? AS JSON)`. MySQL 8 does;
-    /// MariaDB (JSON = LONGTEXT alias, every released version) rejects the
-    /// cast, so JSON-derived column comparisons there must stay textual and
-    /// lean on the Rust-side payload equality fallbacks. Probed once per
-    /// store instance with a cheap literal-cast SELECT and shared across
-    /// clones, so hot confirmation/recovery paths pay a single extra query
-    /// per process-lifetime, not one per statement.
-    async fn mysql_json_cast_supported(&self) -> bool {
-        if self.flavor != DbSqlFlavor::Mysql {
-            return false;
-        }
-        *self
-            .json_cast_supported
-            .get_or_init(|| async {
-                self.db
-                    .query(DbStatement::with_params(
-                        "SELECT CAST('{\"probe\": true}' AS JSON) AS probe".to_string(),
-                        vec![],
-                    ))
-                    .await
-                    .is_ok()
-            })
-            .await
     }
 
     async fn upsert_definition_internal(

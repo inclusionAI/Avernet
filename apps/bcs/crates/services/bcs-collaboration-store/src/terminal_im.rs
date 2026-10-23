@@ -201,17 +201,7 @@ impl MySqlCollaborationStore {
         valid_change(&c.checkpoint.payload, &expected, &next)?;
         let terminal = status(&next) != Status::Pending;
         let status = match status(&next) { Status::Pending => "pending", Status::Delivered => "delivered", _ => "failed" };
-        // MariaDB cannot serve `CAST(? AS JSON)` (its JSON type is a LONGTEXT
-        // alias), so drop to the textual comparison on such backends; the
-        // claim-fencing columns plus the Rust-side Progress compare in
-        // valid_change above keep the CAS semantics identical.
-        let progress_compare = if self.flavor == DbSqlFlavor::Mysql
-            && self.mysql_json_cast_supported().await
-        {
-            "progress_json = CAST(? AS JSON)"
-        } else {
-            "progress_json = ?"
-        };
+        let progress_compare = match self.flavor { DbSqlFlavor::Mysql => "progress_json = CAST(? AS JSON)", DbSqlFlavor::Sqlite => "progress_json = ?" };
         let mut params = vec![DbValue::from(encoded!(&next)?), DbValue::from(status), optional_u64_value(if status == "delivered" { Some(now) } else { None })];
         params.extend(self.terminal_im_fence(c)); params.extend([DbValue::from(now), DbValue::from(encoded!(&expected)?)]);
         let changed = self.db.execute(DbStatement::with_params(format!(
