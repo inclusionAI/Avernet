@@ -352,9 +352,14 @@ class ResourceFileService(ResourceFilePort):
         a recursive listing correct; teclaw doesn't, so fall back to the entry name
         (valid for the non-recursive listings we do today).
         """
-        rel_in_listing = entry.get("relative_path")
-        leaf = rel_in_listing if rel_in_listing else entry.get("name", "")
+        leaf = ResourceFileService._leaf(entry)
         return f"{request_path}/{leaf}" if request_path else leaf
+
+    @staticmethod
+    def _leaf(entry: Mapping[str, Any]) -> str:
+        """The name an entry goes by: ``relative_path`` where the engine gives one, else ``name``; ``""`` for neither."""
+        leaf = entry.get("relative_path") or entry.get("name")
+        return leaf if isinstance(leaf, str) else ""
 
     # ── operations ───────────────────────────────────────────────────────────
 
@@ -653,7 +658,10 @@ class ResourceFileService(ResourceFilePort):
         rather than answer ``()``, because teclaw's ``list_dir`` gives
         ``None`` for an absent directory and a failed call alike. The same
         holds one level down: a subdirectory the walk was just told about
-        and then cannot list is a failed listing, not an empty directory.
+        and then cannot list is a failed listing, not an empty directory,
+        and an entry with no name at all is a listing the walk cannot read.
+        An entry that does not say ``is_dir`` is read as a file, as the
+        directory download reads it.
         """
         ctx = runtime_context or self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
         device_fs = self._device_fs(
@@ -675,13 +683,12 @@ class ResourceFileService(ResourceFilePort):
         queue: list[tuple[str, list[dict[str, Any]]]] = [(RESOURCES_ROOT_DIR, root)]
         while queue:
             current, entries = queue.pop(0)
-            for entry in sorted(entries, key=lambda e: e.get("name", "")):
-                is_dir = self._is_dir_flag(entry)
-                if not (entry.get("relative_path") or entry.get("name")) or is_dir is None:
-                    # Nameless, or neither a file nor a directory: the listing is not one to clear a root on.
-                    raise RootListingFailed(f"{current} of bot {bot_id} listed an entry it could not describe")
+            for entry in sorted(entries, key=self._leaf):
+                if not self._leaf(entry):
+                    # Nameless: the listing is not one to clear a root on.
+                    raise RootListingFailed(f"{current} of bot {bot_id} listed an entry without a name")
                 rel = self._rel_path(current, entry)
-                if is_dir:
+                if self._is_dir_flag(entry):
                     sub = await device_fs.list_dir(self._logical(rel))
                     if sub is None:
                         raise RootListingFailed(f"{rel} of bot {bot_id} was listed but could not be listed itself")
@@ -739,15 +746,15 @@ class ResourceFileService(ResourceFilePort):
     def _named_in(entries: Any, leaf: str) -> dict[str, Any] | None:
         """The listing entry named ``leaf``, or ``None`` when the listing has no such child."""
         for entry in entries:
-            if entry.get("name") == leaf:
+            if ResourceFileService._leaf(entry) == leaf:
                 return entry
         return None
 
     @staticmethod
     def _is_dir_flag(entry: Mapping[str, Any]) -> bool | None:
-        """The entry's ``is_dir`` as the engine said it (``0``/``1`` included); ``None`` when it said nothing."""
+        """The entry's ``is_dir`` as the engine said it (a bool, or ``0``/``1``); ``None`` when it did not say."""
         flag = entry.get("is_dir")
-        return None if flag is None else bool(flag)
+        return bool(flag) if isinstance(flag, (bool, int)) else None
 
     async def upload_file(
         self,

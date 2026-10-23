@@ -821,16 +821,19 @@ async def test_list_root_reads_a_numeric_is_dir_as_the_engine_meant_it():
 
 
 @pytest.mark.asyncio
-async def test_list_root_raises_on_an_entry_it_cannot_describe():
-    """An entry without ``is_dir`` (or without a name) is neither descended nor
-    recorded as a file: a listing the walk cannot read whole is not one to
-    clear a root on."""
-    for entries in ([{"name": "kb"}], [{"is_dir": False}]):
-        device_fs = MagicMock()
-        device_fs.list_dir = AsyncMock(side_effect=lambda logical, e=entries: {"workspace/data": e}.get(logical))
-        svc, _ = _svc(provider="teclaw", device_fs=device_fs)
-        with pytest.raises(RootListingFailed, match="listed an entry it could not describe"):
-            await svc.list_root(**_COORDS)
+async def test_list_root_raises_on_a_nameless_entry_and_reads_an_unsaid_is_dir_as_a_file():
+    """A listing the walk cannot read whole is not one to clear a root on; an
+    entry that does not say ``is_dir`` is a file, as the download reads it,
+    and ``relative_path`` names an entry as well as ``name`` does."""
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(side_effect=lambda logical: {"workspace/data": [{"is_dir": False}]}.get(logical))
+    svc, _ = _svc(provider="teclaw", device_fs=device_fs)
+    with pytest.raises(RootListingFailed, match="listed an entry without a name"):
+        await svc.list_root(**_COORDS)
+    device_fs.list_dir = AsyncMock(
+        side_effect=lambda logical: {"workspace/data": [{"name": "kb"}, {"relative_path": "a.txt"}]}.get(logical)
+    )
+    assert await svc.list_root(**_COORDS) == ("data/a.txt", "data/kb")
 
 
 @pytest.mark.asyncio
