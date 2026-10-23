@@ -38,7 +38,9 @@ from agentclaw.community.core.bot_config_manifest.fetch.errors import (
 )
 from agentclaw.community.core.apply_engine.materialisers.resources import (
     ROOT_NOT_CLEARED_REASON,
+    ROOT_NOT_LISTED_REASON,
     ResourcesRootNotCleared,
+    ResourcesRootNotListed,
 )
 from agentclaw.community.core.apply_engine.delivery import ArcaDelivery
 from agentclaw.community.core.apply_engine.orchestrator import (
@@ -900,6 +902,23 @@ def test_a_file_the_bot_wrote_after_the_plan_listed_an_empty_root_still_fails_a_
     with pytest.raises(ResourcesRootNotCleared):
         _run(m.write(ctx, plan))
     assert svc.writes == {} and svc.present == {"data/scratch/notes.txt"}
+
+
+def test_a_plan_whose_listing_fails_aborts_in_the_stages_words_with_the_cause_chained():
+    """The plan's listing is the other place a transport error could reach
+    the report verbatim (``plan failed: …`` interpolates what ``plan``
+    raises); the stage raises its own words and keeps the cause for the
+    log, and nothing has been touched."""
+    svc = FakeResourceFileService()
+    svc.fail_list = True
+    m = _materialiser(svc, _StubDeclaredSourceResolver())
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(m.resolve(ctx, [{"path": "data/notes/r.md", "content": "# rules"}]))
+    with pytest.raises(ResourcesRootNotListed) as caught:
+        _run(m.plan(ctx, resolved.intents))
+    assert str(caught.value) == ROOT_NOT_LISTED_REASON and "token" not in str(caught.value)
+    assert "token" in str(caught.value.__cause__)
+    assert svc.clear_root_calls == [] and svc.writes == {}
 
 
 def test_a_second_listing_that_fails_aborts_with_the_cause_chained_for_the_log():

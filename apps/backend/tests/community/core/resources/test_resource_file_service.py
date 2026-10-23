@@ -799,6 +799,33 @@ async def test_list_root_raises_when_the_root_does_not_list_but_the_parent_names
 
 
 @pytest.mark.asyncio
+async def test_list_root_names_a_file_squatting_on_the_root():
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(
+        side_effect=lambda logical: {"workspace": [{"name": "data", "is_dir": False}]}.get(logical)
+    )
+    svc, _ = _svc(provider="teclaw", device_fs=device_fs)
+    with pytest.raises(RootListingFailed, match="is a file, not a directory"):
+        await svc.list_root(**_COORDS)
+
+
+@pytest.mark.asyncio
+async def test_list_root_raises_when_a_subdirectory_it_was_told_about_does_not_list():
+    """The walk was just told ``kb`` is a directory; a ``None`` for it is a
+    failed listing, not an empty directory — read as empty it would hide the
+    files under it from ``removals`` and from the refused-clear check."""
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(
+        side_effect=lambda logical: {
+            "workspace/data": [{"name": "kb", "is_dir": True, "relative_path": "kb"}],
+        }.get(logical)
+    )
+    svc, _ = _svc(provider="teclaw", device_fs=device_fs)
+    with pytest.raises(RootListingFailed, match="data/kb .* could not be listed itself"):
+        await svc.list_root(**_COORDS)
+
+
+@pytest.mark.asyncio
 async def test_list_root_raises_when_the_workspace_itself_does_not_list():
     device_fs = MagicMock()
     device_fs.list_dir = AsyncMock(return_value=None)
