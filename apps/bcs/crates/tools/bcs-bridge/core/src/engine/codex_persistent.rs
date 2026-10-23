@@ -80,7 +80,9 @@ impl ManagedConnection {
         if let Some(commands) = self.commands.take() {
             let (done, result) = oneshot::channel();
             if commands.send(Command::Close { lease: self.lease, done: Some(done) }).is_ok() {
-                let _ = tokio::time::timeout(std::time::Duration::from_secs(6), result).await;
+                // The router bounds both the late start ACK and the interrupt ACK.
+                // Do not return while either phase still owns the thread.
+                let _ = result.await;
             }
         }
     }
@@ -155,6 +157,7 @@ impl NativeServer {
 }
 
 struct InterruptWaiter {
+    thread: Option<String>,
     deadline: tokio::time::Instant,
     done: Option<oneshot::Sender<io::Result<()>>>,
 }
@@ -165,6 +168,7 @@ struct Router {
     loaded: HashSet<String>,
     next_id: u64,
     interrupts: HashMap<u64, InterruptWaiter>,
+    closing: HashMap<u64, InterruptWaiter>,
     server_requests: HashMap<String, (u64, Value)>,
 }
 
@@ -198,6 +202,7 @@ impl Router {
         let id = self.next_id;
         self.next_id += 1;
         self.interrupts.insert(id, InterruptWaiter {
+            thread: Some(thread.to_owned()),
             deadline: tokio::time::Instant::now() + std::time::Duration::from_secs(5), done,
         });
         write_line(cli, &json!({"jsonrpc":"2.0", "id":id, "method":"turn/interrupt",
@@ -263,8 +268,16 @@ impl Router {
                         client.turn = Some(turn.into());
                     } else if let Some(thread) = &pending.thread {
                         // Cancellation can happen before turn/start acknowledges.
-                        self.interrupt(cli, thread, turn, None).await?;
+                        let done = self.closing.remove(&pending.lease).and_then(|waiter| waiter.done);
+                        self.interrupt(cli, thread, turn, done).await?;
                     }
+                }
+                if pending.method == "turn/start"
+                    && let Some(waiter) = self.closing.remove(&pending.lease) {
+                    if value.get("error").is_none() {
+                        return Err(io::Error::other("Cancelled Codex turn/start response lacked a turn id; restarting the owned server"));
+                    }
+                    if let Some(done) = waiter.done { let _ = done.send(Ok(())); }
                 }
                 value["id"] = pending.id;
                 self.deliver(pending.lease, &value)?;
@@ -311,17 +324,29 @@ impl Router {
 
 async fn serve(mut connection: OwnedConnection, mut commands: mpsc::UnboundedReceiver<Command>, mut backlog: VecDeque<Value>) {
     let cli = &mut connection.transport;
-    let mut router = Router { clients: HashMap::new(), pending: HashMap::new(), loaded: HashSet::new(), next_id: 10, interrupts: HashMap::new(), server_requests: HashMap::new() };
+    let mut router = Router { clients: HashMap::new(), pending: HashMap::new(), loaded: HashSet::new(), next_id: 10, interrupts: HashMap::new(), closing: HashMap::new(), server_requests: HashMap::new() };
+    let mut waiting = VecDeque::new();
     let result: io::Result<()> = async {
         loop {
             if let Some(value) = backlog.pop_front() {
                 router.message(cli, value).await?;
                 continue;
             }
+            let ready = waiting.iter().position(|command| match command {
+                Command::Open { thread, .. } => !thread.as_ref().is_some_and(|thread|
+                    router.closing.values().chain(router.interrupts.values()).any(|waiter| waiter.thread.as_ref() == Some(thread))),
+                _ => true,
+            });
             tokio::select! {
-                command = commands.recv() => match command {
+                command = async {
+                    if let Some(index) = ready { waiting.remove(index) } else { commands.recv().await }
+                } => match command {
                     None => return Ok(()),
                     Some(Command::Open { lease, thread, messages, ready, trace }) => {
+                        if thread.as_ref().is_some_and(|thread| router.closing.values().chain(router.interrupts.values()).any(|waiter| waiter.thread.as_ref() == Some(thread))) {
+                            waiting.push_back(Command::Open { lease, thread, messages, ready, trace });
+                            continue;
+                        }
                         if thread.as_ref().is_some_and(|thread| router.clients.values().any(|client| client.thread.as_ref() == Some(thread))) {
                             let _ = ready.send(Err(io::Error::other("Codex thread already has an active Bridge turn")));
                             continue;
@@ -332,6 +357,7 @@ async fn serve(mut connection: OwnedConnection, mut commands: mpsc::UnboundedRec
                     }
                     Some(Command::Write { lease, value }) => router.write(cli, lease, value).await?,
                     Some(Command::Close { lease, done }) => {
+                        waiting.retain(|command| !matches!(command, Command::Open { lease: waiting_lease, .. } if *waiting_lease == lease));
                         let abandoned: Vec<_> = router.server_requests.iter()
                             .filter(|(_, (owner, _))| *owner == lease).map(|(key, (_, id))| (key.clone(), id.clone())).collect();
                         for (key, id) in abandoned {
@@ -342,12 +368,17 @@ async fn serve(mut connection: OwnedConnection, mut commands: mpsc::UnboundedRec
                         if let Some(client) = router.clients.remove(&lease)
                             && let (Some(thread), Some(turn)) = (client.thread, client.turn) {
                             router.interrupt(cli, &thread, &turn, done).await?;
+                        } else if let Some(pending) = router.pending.values().find(|pending| pending.lease == lease && pending.method == "turn/start") {
+                            router.closing.insert(lease, InterruptWaiter {
+                                thread: pending.thread.clone(),
+                                deadline: tokio::time::Instant::now() + std::time::Duration::from_secs(5), done,
+                            });
                         } else if let Some(done) = done { let _ = done.send(Ok(())); }
                     }
                 },
-                _ = tokio::time::sleep_until(router.interrupts.values().map(|waiter| waiter.deadline).min()
+                _ = tokio::time::sleep_until(router.interrupts.values().chain(router.closing.values()).map(|waiter| waiter.deadline).min()
                     .unwrap_or_else(|| tokio::time::Instant::now() + std::time::Duration::from_secs(86400))),
-                    if !router.interrupts.is_empty() => {
+                    if !router.interrupts.is_empty() || !router.closing.is_empty() => {
                     return Err(io::Error::new(io::ErrorKind::TimedOut, "Codex turn interruption was not acknowledged; restarting the owned server"));
                 }
                 line = cli.next_line() => {

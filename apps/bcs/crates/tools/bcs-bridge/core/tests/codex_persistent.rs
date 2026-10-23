@@ -259,6 +259,38 @@ async fn unacknowledged_interrupt_reaps_server_before_next_request_resumes() {
 }
 
 #[tokio::test]
+async fn cancellation_before_start_ack_waits_for_cleanup_before_returning() {
+    for prompt in ["hold", "ignore-interrupt", "never-start"] {
+        let temp = tempfile::tempdir().unwrap();
+        let log = temp.path().join("rpc.jsonl");
+        let engine = engine(&log);
+        let abort = CancellationToken::new();
+        let mut held = {
+            let engine = engine.clone(); let abort = abort.clone();
+            let prompt = format!("gated-start-{prompt}");
+            tokio::spawn(async move { turn(&engine, &prompt, None, abort).await })
+        };
+        wait_method(&log, "turn/start", 1).await;
+        let calls = requests(&log);
+        let thread = calls.iter().find(|v| v["method"] == "turn/start").unwrap()["params"]["threadId"].as_str().unwrap().to_owned();
+        abort.cancel();
+        // The fixture cannot ACK until released. Cancellation must stay pending,
+        // rather than letting the caller start another turn on the old process.
+        assert!(tokio::time::timeout(Duration::from_millis(100), &mut held).await.is_err());
+        if prompt != "never-start" {
+            std::fs::write(log.with_extension("jsonl.release"), "release").unwrap();
+        }
+        assert!(matches!(held.await.unwrap(), Err(TurnError::Aborted)));
+        turn(&engine, "next", Some(thread), CancellationToken::new()).await.unwrap();
+        let calls = requests(&log);
+        assert_eq!(calls.iter().filter(|v| v["method"] == "turn/interrupt").count(), usize::from(prompt != "never-start"));
+        let restarted = usize::from(prompt != "hold");
+        assert_eq!(calls.iter().filter(|v| v["method"] == "initialize").count(), 1 + restarted);
+        assert_eq!(calls.iter().filter(|v| v["method"] == "thread/resume").count(), restarted);
+    }
+}
+
+#[tokio::test]
 async fn delayed_interrupted_completion_cannot_finish_followup_on_same_thread() {
     // Release the old completion only when the follow-up starts: no scheduling
     // sleeps, and exercise delivery before/after its RPC ack and between deltas.

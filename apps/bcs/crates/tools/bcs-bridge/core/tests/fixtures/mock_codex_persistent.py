@@ -56,6 +56,10 @@ for raw in sys.stdin:
         thread = params["threadId"]
         assert thread in threads
         prompt = params["input"][0]["text"]
+        if prompt.startswith("gated-start-"):
+            while not os.path.exists(log_path + ".release"):
+                time.sleep(0.005)
+            prompt = prompt.removeprefix("gated-start-")
         if prompt == "crash":
             os._exit(2)
         turns += 1
