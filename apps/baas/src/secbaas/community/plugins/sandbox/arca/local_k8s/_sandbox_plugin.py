@@ -681,12 +681,14 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         # A2A 地址预热（review P2 终闭环）：create 响应里 API server 已完成
         # NodePort 分配——直接落 a2a 记忆化，后续签发零 kube 查询。响应缺值
         #（异步分配边缘）时留给后台发现补齐，不影响签发。
+        # 预热按模板门控（review P2 回收）：A2A 关闭（模板空）的普通创建
+        # 对应用级共享状态零落账，销毁/重建来回不积累无用发现记录。
         try:
             created_ports = (
                 getattr(created, "spec", None) and created.spec.ports or None
             )
             assigned = created_ports[0].node_port if created_ports else None
-            if assigned:
+            if assigned and self._a2a_template():
                 self._a2a_node_port_cache[(namespace, service_name)] = assigned
         except Exception:  # noqa: BLE001 — 预热失败无关紧要（还有后台发现）
             pass
@@ -855,6 +857,9 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             sidecar_container_name=_SIDECAR_CONTAINER_NAME,
             pvc_name=pvc_name,
             storage=effective_storage,
+            # destroy() 即生命周期失效锚点（review P2 回收）：Service 销毁
+            # 时刻出清该设备的共享发现状态
+            discovery_state=self._a2a_discovery,
         )
 
     def _resolve_storage_id_from_deployment(self, deployment_name: str) -> str | None:
@@ -904,6 +909,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             sidecar_container_name=_SIDECAR_CONTAINER_NAME,
             pvc_name=pvc_name,
             storage=storage,
+            discovery_state=self._a2a_discovery,
         )
 
     def close(self) -> None:
@@ -1069,7 +1075,9 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
                 if svc.spec and svc.spec.ports
                 else None
             )
-            self._a2a_node_port_cache[cache_key] = node_port
+            # 回写走 in-flight 门控：Service 若毁于发现窗口内，迟到结果
+            # 在 state 内被拒收，已销毁设备的缓存条目不复活（review P2 回收）
+            self._a2a_discovery.commit_result(cache_key, node_port)
             if not node_port:
                 logger.warning(
                     "local_k8s: service %s/%s has no NodePort; a2a base url omitted",
@@ -1080,9 +1088,11 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
                 "local_k8s: a2a base url discovery failed for %s/%s: %s",
                 namespace, service_name, exc,
             )
-            self._a2a_discovery.note_negative(cache_key)
+            self._a2a_discovery.commit_negative(cache_key)
         finally:
-            self._a2a_discovery.release(cache_key)
+            # 自然收尾即清理：额度释放 + 按线程身份清线程记录，同锁原子，
+            # 不依赖诊断 a2a_discovery_join（review P2 回收）
+            self._a2a_discovery.finish(cache_key, threading.current_thread())
 
     def a2a_discovery_join(self, deployment_name: str, timeout: float = 5.0) -> None:
         """等待在途后台发现完成（测试/诊断 seam；产品路径不等待）。"""
