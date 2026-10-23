@@ -1,13 +1,18 @@
-"""Tests for the ``resources`` materialiser (W6).
+"""Tests for the ``resources`` materialiser (W6, revised for #2162).
 
 Pins, by the work item's acceptance criteria:
 - file entries materialise through ``ResourceFileService`` at a
   workspace-relative ``path`` (physical placement stays the engine's call);
-- directory entries converge as the whole archive: the tree under ``path`` is
-  replaced in full, including hand-added files (ownership rule);
-- fetch failures abort the whole category before the first write (§3.2);
-- the platform unpacks to a temporary location — a bad archive or failed fetch
-  never reaches the bot;
+- directory entries expand into their members; the root (``data/``) is owned
+  whole: every apply clears it and writes the declaration back, so a path the
+  previous apply wrote and this one omits, and a file the bot wrote there
+  itself, both go — and ``plan`` reports them as ``removals`` (ownership rule);
+- nothing outside the root is ever touched or reported;
+- fetch failures and admission refusals abort the whole category before the
+  root is cleared (§3.2);
+- a clear that fails fails every member with nothing written; the platform's
+  resource rows follow the written files, and a rows failure is a confirmed
+  partial write;
 - convergence writes are file-grained (teclaw per-file forwarding is the same
   transport), and the module never touches ``BotConfigArtifact``;
 - archive limits (member count / unpacked size) apply with W1's keys.
@@ -18,6 +23,8 @@ import asyncio
 from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
+
+import pytest
 
 from agentclaw.community.core.bot_config_manifest.sources.entry_delivery import (
     BlobDelivery,
@@ -30,13 +37,14 @@ from agentclaw.community.core.bot_config_manifest.fetch.errors import (
     FetchRefusedError,
 )
 from agentclaw.community.core.apply_engine.materialisers.resources import (
-    _DECLARED_TREE,
+    ROOT_NOT_CLEARED_REASON,
 )
 from agentclaw.community.core.apply_engine.delivery import ArcaDelivery
 from agentclaw.community.core.apply_engine.orchestrator import (
     ApplyOrchestrator,
 )
 from agentclaw.community.core.apply_engine.registry import (
+    ConfirmedPartialWriteError,
     build_materialisers,
 )
 
@@ -48,6 +56,7 @@ from ._fakes import (
     FakeManifestContent,
     FakeMcpAuth,
     FakeResourceFileService,
+    FakeResourceRows,
     FakeSkillUploadService,
     FakeStartupScriptService,
     build_skill_tgz,
@@ -56,6 +65,7 @@ from ._fakes import (
     make_context,
     manifest_compiler,
     real_validator,
+    resource_rows_for,
 )
 
 
@@ -70,15 +80,20 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def _materialiser(svc, resolver, *, source_session=None):
+def _materialiser(svc, resolver, *, source_session=None, resource_rows=None):
     """The resources materialiser fed through the real entry compiler.
 
     Raw entries go through ``compile_resources`` over ``resolver`` and a
     fresh content store, and the typed result is what the materialiser
     reads back — the road a real apply takes. ``source_session`` is what a
     ``from`` name resolves against; the compiler's session carries it.
+    ``resource_rows`` is the rows factory the write stage replaces the
+    bot's rows through; a test that does not read the rows gets a recorder
+    nobody looks at.
     """
-    return compiling_resources(svc, resolver, FakeManifestContent(), source_session=source_session)
+    return compiling_resources(
+        svc, resolver, FakeManifestContent(), source_session=source_session, resource_rows=resource_rows
+    )
 
 
 #: The bucket the fetch cases read. A resources entry names a declared
@@ -337,43 +352,27 @@ def _tgz(member: dict[str, bytes]) -> bytes:
     return build_skill_tgz(list(member.items()))
 
 
-def test_fake_resource_service_records_uploads_and_deletes():
-    svc = FakeResourceFileService(exists_paths={"data/old.bin"})
+def test_fake_resource_service_records_uploads_and_the_root_clear():
+    """The fake's contract, pinned where the suite leans on it: ``list_root``
+    and ``clear_root`` see the root and only the root, the clear empties the
+    presence set (so a later listing is honest), and ``fail_clear`` is the
+    transports' silent ``False`` with nothing removed."""
+    svc = FakeResourceFileService()
+    svc.record_present("data/old.bin", "notes/outside.txt")
     ctx = make_context(engine_type="claude_code")
-    _run(
-        svc.upload_file(
-            entity_id=ctx.entity_id,
-            bot_id=ctx.bot_id,
-            engine_type=ctx.engine_type,
-            target_dir="data",
-            filename="a.bin",
-            data=b"hello",
-        )
-    )
-    _run(
-        svc.delete(
-            entity_id=ctx.entity_id,
-            bot_id=ctx.bot_id,
-            engine_type=ctx.engine_type,
-            path="data/old.bin",
-        )
-    )
+    coords = dict(entity_id=ctx.entity_id, bot_id=ctx.bot_id, engine_type=ctx.engine_type)
+    _run(svc.upload_file(**coords, target_dir="data", filename="a.bin", data=b"hello"))
     assert svc.writes == {("data", "a.bin"): b"hello"}
-    assert svc.deleted == ["data/old.bin"]
-    # Deleted paths report absent — the fake must contract this, because the
-    # plan stage's classification reads ``exists`` and would otherwise call
-    # a deleted file "unchanged".
-    assert (
-        _run(
-            svc.exists(
-                entity_id=ctx.entity_id,
-                bot_id=ctx.bot_id,
-                engine_type=ctx.engine_type,
-                path="data/old.bin",
-            )
-        )
-        is False
-    )
+    assert _run(svc.list_root(**coords)) == ("data/a.bin", "data/old.bin")
+    assert _run(svc.clear_root(**coords)) is True
+    assert svc.deleted == ["data/a.bin", "data/old.bin"]
+    # Outside the root is never the clear's business.
+    assert svc.present == {"notes/outside.txt"}
+    assert _run(svc.list_root(**coords)) == ()
+    svc.record_present("data/again.bin")
+    svc.fail_clear = True
+    assert _run(svc.clear_root(**coords)) is False
+    assert svc.present == {"notes/outside.txt", "data/again.bin"}
 
 
 # --- file entries: a declared fetch and inline content (Task 2) ---
@@ -479,16 +478,15 @@ def test_dir_entry_expands_members_under_path():
     )
     assert resolved.ok, [f.reason for f in resolved.failures]
     got = {i.identity: i.value for i in resolved.intents}
-    # The "data/wrap/" entry is the declared-tree marker: an explicit object,
-    # never ``None`` (the dataclass default) — a future intent constructed
-    # without an explicit value must not silently promise a tree deletion.
+    # Members only: the directory entry is the declaration's *form*, not an
+    # intent of its own. The root's replacement is the write stage's clear,
+    # not a marker riding in the intents, so nothing here ends in a slash.
     assert got == {
-        "data/wrap/": _DECLARED_TREE,
         "data/wrap/a.txt": b"AAA",
         "data/wrap/sub/b.txt": b"BBB",
     }
-    assert resolved.intents[0].identity == "data/wrap/"
-    assert resolved.intents[0].value is _DECLARED_TREE
+    assert all(not i.identity.endswith("/") for i in resolved.intents)
+    assert all(i.note is None for i in resolved.intents)
 
 
 def test_bad_archive_is_a_resolve_failure_and_nothing_reaches_the_bot():
@@ -503,7 +501,7 @@ def test_bad_archive_is_a_resolve_failure_and_nothing_reaches_the_bot():
     )
     assert not resolved.ok
     assert resolved.failures[0].identity == "data/wrap/"
-    assert svc.writes == {} and svc.deleted == []
+    assert svc.writes == {} and svc.deleted == [] and svc.clear_root_calls == []
 
 
 def test_dir_unpack_missing_is_rejected_at_resolve():
@@ -587,30 +585,56 @@ def test_plan_addresses_the_bot_owner_not_the_manifest_storage_key():
     )
     assert resolved.ok, [f.reason for f in resolved.failures]
     _run(m.plan(ctx, resolved.intents))
-    assert svc.exists_probes == [
+    assert svc.list_root_calls == [
         {
             "entity_type": "staff",
             "entity_id": "u_owner",
             "bot_id": "b_1",
             "engine_type": "claude_code",
-            "path": "data/a.md",
         }
     ]
+    assert svc.exists_probes == []
 
 
-def test_declared_trees_report_as_removals_not_member_rows():
-    """A declared tree's replacement rides the plan's removals channel.
+def test_plan_makes_one_root_listing_and_no_presence_probes():
+    """One listing classifies every member and yields the removals; per-member
+    ``exists`` probes are the N round trips the listing replaces."""
+    archive = _tgz({"a.txt": b"AAA", "sub/b.txt": b"BBB"})
+    svc = FakeResourceFileService()
+    svc.record_present("data/wrap/a.txt", "data/stale.md")
+    m = _materialiser(svc, _StubDeclaredSourceResolver(archive))
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(
+        m.resolve(
+            ctx,
+            [
+                {"path": "data/wrap/", "unpack": "tar.gz", "source": _src("t.tgz")},
+                {"path": "data/notes/r.md", "content": "# rules"},
+                {"path": "data/x.md", "content": "x"},
+            ],
+        )
+    )
+    assert resolved.ok, [f.reason for f in resolved.failures]
+    plan = _run(m.plan(ctx, resolved.intents))
+    assert len(svc.list_root_calls) == 1
+    assert svc.exists_probes == []
+    assert len(plan.entries) == 4
+    assert plan.removals == ("data/stale.md",)
 
-    The old encoding put the tree in ``entries`` as a ``value=None``
-    sentence-turn — so the dry-run projection emitted a report row for it
-    while the real write skipped it (two shapes for one document), and an
-    empty archive's destructive delete left no audit row at all. The
-    removals channel is the engine's own answer for "an overwrite removes
-    something with no declared entry to attach to": the tree reports under
-    the category's ``removed``, the member files classify as entries.
+
+def test_plan_removals_are_what_the_root_holds_and_the_declaration_does_not():
+    """``removals`` is ``listed − declared``: the audit row for the root's
+    ownership rule, sorted, every file under ``data/`` the declaration does
+    not put back — whoever wrote it — and nothing from outside the root.
     """
     archive = _tgz({"a.txt": b"AAA"})
-    svc = FakeResourceFileService(exists_paths={"data/established/a.txt"})
+    svc = FakeResourceFileService()
+    svc.record_present(
+        "data/established/a.txt",
+        "data/established/stale.txt",
+        "data/scratch.log",
+        "notes/outside.txt",
+    )
     m = _materialiser(svc, _StubDeclaredSourceResolver(archive))
     ctx = make_context(engine_type="claude_code")
     resolved = _run(
@@ -633,20 +657,18 @@ def test_declared_trees_report_as_removals_not_member_rows():
     assert resolved.ok, [f.reason for f in resolved.failures]
     plan = _run(m.plan(ctx, resolved.intents))
     by_id = {p.intent.identity: p.outcome for p in plan.entries}
-    # Members only: presence is probed per member file; a fresh upload under
-    # a replaced tree classifies as created, exactly as a first apply would.
+    # Members only, classified against the listing: a member the root already
+    # holds is updated, a fresh one classifies as created, as a first apply would.
     assert by_id == {
         "data/established/a.txt": "updated",
         "data/fresh/a.txt": "created",
     }
-    # Presence probes never ask about the tree roots — they have no label.
-    assert all(not p["path"].endswith("/") for p in svc.exists_probes)
-    # The declared trees, in declaration order, as removals.
-    assert plan.removals == ("data/established/", "data/fresh/")
+    assert plan.removals == ("data/established/stale.txt", "data/scratch.log")
+    assert "notes/outside.txt" not in plan.removals
     assert not plan.is_noop
 
 
-# --- write: delivery through the one write chain (Task 5) ---
+# --- write: clear the root, then deliver through the one write chain (Task 5) ---
 
 
 def _write_through(m, ctx, entries):
@@ -656,8 +678,9 @@ def _write_through(m, ctx, entries):
     return plan, _run(m.write(ctx, plan))
 
 
-def test_write_replaces_the_tree_then_uploads_every_member():
-    svc = FakeResourceFileService(exists_paths={"data/wrap/old.txt"})
+def test_write_clears_the_root_then_uploads_every_member():
+    svc = FakeResourceFileService()
+    svc.record_present("data/wrap/old.txt")
     archive = _tgz({"a.txt": b"AAA", "sub/b.txt": b"BBB"})
     m = _materialiser(svc, _StubDeclaredSourceResolver(archive))
     ctx = make_context(engine_type="claude_code")
@@ -666,56 +689,115 @@ def test_write_replaces_the_tree_then_uploads_every_member():
         ctx,
         [{"path": "data/wrap/", "unpack": "tar.gz", "source": _src("t.tgz")}],
     )
-    # One delete per declared tree, first: the replace removes everything
-    # under "data/wrap/" — including files the new archive no longer ships and
-    # hand-added ones (the ownership rule).
-    assert svc.deleted == ["data/wrap"]
+    # One clear of the root, first: it removes everything under "data/" —
+    # including files the new archive no longer ships and hand-added ones
+    # (the ownership rule). The uploads land *after* it, or they would not
+    # be present now.
+    assert len(svc.clear_root_calls) == 1
+    assert svc.deleted == ["data/wrap/old.txt"]
     assert svc.writes == {
         ("data/wrap", "a.txt"): b"AAA",
         ("data/wrap/sub", "b.txt"): b"BBB",
     }
-    # The tree replacement is an ownership action, not an entry: only its
-    # member files report.
+    assert svc.present == {"data/wrap/a.txt", "data/wrap/sub/b.txt"}
+    # The clear is an ownership action, not an entry: only the member files
+    # report; what the clear took and the declaration did not put back is
+    # the plan's audit row.
     assert [r.identity for r in results] == ["data/wrap/a.txt", "data/wrap/sub/b.txt"]
     assert all(r.outcome.value == "created" for r in results)
-    # The tree is in the plan's removals — the audit row for the replace.
-    assert plan.removals == ("data/wrap/",)
+    assert plan.removals == ("data/wrap/old.txt",)
 
 
-def test_write_deletes_the_declared_tree_without_the_trailing_slash():
-    """F1: the write chain's file/dir branching keys on the path's shape.
-
-    ``ResourceFileService._is_dir`` rpartitions ``path`` and looks the leaf
-    up in the parent listing — for "data/wrap/" that leaf is the empty string and
-    never matches, so the delete is routed to the single-file remove API
-    ("not recursive" by that service's own docstring) and every transport
-    under it swallows the refusal as ``False``. The materialiser must
-    therefore hand the write chain the tree path *minus* the declaring
-    slash, which routes to the recursive branch.
-    """
-    svc = FakeResourceFileService(exists_paths={"data/wrap/old.txt"})
-    archive = _tgz({"a.txt": b"AAA"})
-    m = _materialiser(svc, _StubDeclaredSourceResolver(archive))
+def test_a_path_the_previous_apply_wrote_and_this_one_omits_is_removed():
+    """#2162: the root converges to the declaration, not to its union with
+    history. A file apply #1 declared and apply #2 does not is gone after #2
+    and named in its ``removals``."""
+    svc = FakeResourceFileService()
+    factory, rows = resource_rows_for()
     ctx = make_context(engine_type="claude_code")
+    first = _materialiser(svc, _StubDeclaredSourceResolver(), resource_rows=factory)
     _write_through(
-        m, ctx, [{"path": "data/wrap/", "unpack": "tar.gz", "source": _src("t")}]
+        first, ctx, [{"path": "data/a.md", "content": "A"}, {"path": "data/b.md", "content": "B"}]
     )
-    assert [c["path"] for c in svc.delete_calls] == ["data/wrap"]
+    assert svc.present == {"data/a.md", "data/b.md"}
+
+    second = _materialiser(svc, _StubDeclaredSourceResolver(), resource_rows=factory)
+    plan, results = _write_through(second, ctx, [{"path": "data/a.md", "content": "A"}])
+    assert plan.removals == ("data/b.md",)
+    assert svc.present == {"data/a.md"}
+    assert "data/b.md" in svc.deleted
+    assert [(r.identity, r.outcome.value) for r in results] == [("data/a.md", "updated")]
+    assert rows.rows == [("data/a.md", 1)]
 
 
-def test_a_silently_failed_tree_delete_fails_its_members():
-    """F1's second half: the transports refuse by returning ``False``, not
-    by raising — all three device filesystems catch their own errors — so a
-    write stage that only caught exceptions would see a refused rmtree as
-    success and upload the new members over a tree that was never
-    replaced, reporting ``created``. A ``False`` delete with the tree still
-    present (re-probed) must fail the tree's members instead.
+def test_a_file_the_bot_wrote_under_the_root_is_removed_and_reported():
+    """The engine keeps no "who wrote this" ledger and needs none: the root
+    is the ownership boundary. A file the bot wrote there itself goes with
+    the clear and the report says so."""
+    svc = FakeResourceFileService()
+    svc.record_present("data/scratch/notes.log")
+    m = _materialiser(svc, _StubDeclaredSourceResolver())
+    ctx = make_context(engine_type="claude_code")
+    plan, results = _write_through(m, ctx, [{"path": "data/a.md", "content": "A"}])
+    assert plan.removals == ("data/scratch/notes.log",)
+    assert svc.deleted == ["data/scratch/notes.log"]
+    assert svc.present == {"data/a.md"}
+    assert [(r.identity, r.outcome.value) for r in results] == [("data/a.md", "created")]
+
+
+def test_a_file_outside_the_root_is_never_touched_or_reported():
+    """Nothing outside ``data/`` is the materialiser's to see: not listed,
+    not cleared, not in ``removals``."""
+    svc = FakeResourceFileService()
+    svc.record_present("notes/outside.txt", "identity/soul.md")
+    m = _materialiser(svc, _StubDeclaredSourceResolver())
+    ctx = make_context(engine_type="claude_code")
+    plan, _results = _write_through(m, ctx, [{"path": "data/a.md", "content": "A"}])
+    assert plan.removals == ()
+    assert svc.deleted == []
+    assert svc.present == {"notes/outside.txt", "identity/soul.md", "data/a.md"}
+
+
+def test_the_rows_follow_the_written_files():
+    """The platform's resource rows are replaced last, from exactly the
+    members that landed — one ``(path, size)`` per written file, in
+    declaration order, created by the apply's actor."""
+    svc = FakeResourceFileService()
+    factory, rows = resource_rows_for()
+    archive = _tgz({"a.txt": b"AAA", "sub/b.txt": b"BB"})
+    m = _materialiser(svc, _StubDeclaredSourceResolver(archive), resource_rows=factory)
+    ctx = make_context(engine_type="claude_code", actor_id="u_actor")
+    _write_through(
+        m,
+        ctx,
+        [
+            {"path": "data/notes/r.md", "content": "# rules"},
+            {"path": "data/wrap/", "unpack": "tar.gz", "source": _src("t.tgz")},
+        ],
+    )
+    assert len(rows.replacements) == 1
+    assert rows.replacements[-1] == {
+        "files": [("data/notes/r.md", 7), ("data/wrap/a.txt", 3), ("data/wrap/sub/b.txt", 2)],
+        "created_by": "u_actor",
+    }
+    assert rows.replacements[-1]["created_by"] == ctx.actor_id
+    assert {path for path, _ in rows.rows} == set(svc.present)
+
+
+def test_a_silently_failed_clear_fails_every_member_and_writes_nothing():
+    """The transports refuse by returning ``False``, not by raising — all
+    three device filesystems catch their own errors — so a write stage that
+    only caught exceptions would see a refused rmtree as success and upload
+    the new members over a root that was never cleared. A ``False`` clear
+    with files still listed must fail every member with nothing written,
+    and the rows are left alone: they still describe what is on the bot.
     """
-    svc = FakeResourceFileService(
-        exists_paths={"data/tools"}, fail_deletes={"data/tools"}
-    )
+    svc = FakeResourceFileService()
+    svc.record_present("data/tools/old.md")
+    svc.fail_clear = True
+    factory, rows = resource_rows_for()
     archive = _tgz({"a.md": b"A"})
-    m = _materialiser(svc, _StubDeclaredSourceResolver(archive))
+    m = _materialiser(svc, _StubDeclaredSourceResolver(archive), resource_rows=factory)
     ctx = make_context(engine_type="claude_code")
     plan, results = _write_through(
         m,
@@ -725,23 +807,59 @@ def test_a_silently_failed_tree_delete_fails_its_members():
             {"path": "data/notes/r.md", "content": "# rules"},
         ],
     )
-    by_id = {r.identity: r for r in results}
-    assert by_id["data/tools/a.md"].outcome.value == "failed"
-    assert by_id["data/tools/a.md"].reason == "directory tree replacement failed"
-    # Nothing from the failed tree was uploaded; the sibling outside it
-    # still converged.
-    assert ("data/tools", "a.md") not in svc.writes
-    assert by_id["data/notes/r.md"].outcome.value == "created"
-    assert plan.removals == ("data/tools/",)
+    assert [(r.identity, r.outcome.value, r.reason) for r in results] == [
+        ("data/tools/a.md", "failed", ROOT_NOT_CLEARED_REASON),
+        ("data/notes/r.md", "failed", ROOT_NOT_CLEARED_REASON),
+    ]
+    assert ROOT_NOT_CLEARED_REASON == "resources root could not be cleared; nothing was written"
+    assert svc.upload_calls == [] and svc.writes == {}
+    assert svc.present == {"data/tools/old.md"}
+    assert rows.replacements == []
+    # The plan still said what the clear *would* have removed.
+    assert plan.removals == ("data/tools/old.md",)
 
 
-def test_a_failed_delete_of_an_absent_tree_is_not_a_failure():
-    """``delete`` returns ``False`` when nothing was deleted — the real
-    service's own contract — which is the *normal* answer for a first
-    apply onto a tree that does not exist yet. The failure detection must
-    re-probe presence, not read ``False`` as refusal.
+def test_a_clear_that_raises_fails_every_member_in_composed_words():
+    """M2: the clear is part of delivery — a raise there must not escape as
+    raw exception text (the orchestrator would abort the whole category
+    quoting it); every member answers FAILED, in the stage's own words, and
+    nothing is uploaded onto a root in an unknown state.
     """
-    svc = FakeResourceFileService(fail_deletes={"data/tools"})
+
+    class _BuggyClear(FakeResourceFileService):
+        async def clear_root(self, **kwargs):
+            raise RuntimeError("rmtree quoted a header with a token")
+
+    archive = _tgz({"a.md": b"A"})
+    svc = _BuggyClear()
+    m = _materialiser(svc, _StubDeclaredSourceResolver(archive))
+    ctx = make_context(engine_type="claude_code")
+    _plan, results = _write_through(
+        m,
+        ctx,
+        [
+            {"path": "data/tools/", "unpack": "tar.gz", "source": _src("t.tgz")},
+            {"path": "data/notes/r.md", "content": "# rules"},
+        ],
+    )
+    assert [(r.identity, r.outcome.value) for r in results] == [
+        ("data/tools/a.md", "failed"),
+        ("data/notes/r.md", "failed"),
+    ]
+    assert all(r.reason == ROOT_NOT_CLEARED_REASON for r in results)
+    # the raw exception text never reached the report
+    assert all("token" not in (r.reason or "") for r in results)
+    assert svc.writes == {}
+
+
+def test_a_false_clear_of_an_absent_root_is_not_a_failure():
+    """``clear_root`` returns ``False`` when nothing was deleted — the port's
+    own contract — which is the *normal* answer for a first apply onto a
+    root that does not exist yet. The failure detection must re-list the
+    root, not read ``False`` as refusal.
+    """
+    svc = FakeResourceFileService()
+    svc.fail_clear = True  # answers False; the root is empty, so that is the truth
     archive = _tgz({"a.md": b"A"})
     m = _materialiser(svc, _StubDeclaredSourceResolver(archive))
     ctx = make_context(engine_type="claude_code")
@@ -752,10 +870,32 @@ def test_a_failed_delete_of_an_absent_tree_is_not_a_failure():
     )
     assert [r.outcome.value for r in results] == ["created"]
     assert svc.writes == {("data/tools", "a.md"): b"A"}
+    assert plan.removals == ()
+
+
+def test_a_rows_failure_raises_confirmed_partial_write_after_the_files_landed():
+    """The files are on the bot and the rows are not: exactly what
+    ``ConfirmedPartialWriteError`` tells the orchestrator to report. The
+    write is not rolled back — the transport has no transaction — and the
+    error never swallows the rows failure."""
+    svc = FakeResourceFileService()
+    factory, rows = resource_rows_for(FakeResourceRows(fail=True))
+    m = _materialiser(svc, _StubDeclaredSourceResolver(), resource_rows=factory)
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(m.resolve(ctx, [{"path": "data/a.md", "content": "A"}]))
+    assert resolved.ok, [f.reason for f in resolved.failures]
+    plan = _run(m.plan(ctx, resolved.intents))
+    with pytest.raises(ConfirmedPartialWriteError) as raised:
+        _run(m.write(ctx, plan))
+    assert isinstance(raised.value.__cause__, RuntimeError)
+    assert svc.writes == {("data", "a.md"): b"A"}
+    assert svc.present == {"data/a.md"}
+    assert rows.replacements == []
 
 
 def test_write_addresses_the_bot_owner():
-    """The write chain gets the owner's address, the router's own way."""
+    """The write chain gets the owner's address, the router's own way — for
+    the clear and for every upload."""
     svc = FakeResourceFileService()
     archive = _tgz({"a.txt": b"AAA"})
     m = _materialiser(svc, _StubDeclaredSourceResolver(archive))
@@ -768,13 +908,12 @@ def test_write_addresses_the_bot_owner():
     _write_through(
         m, ctx, [{"path": "data/wrap/", "unpack": "tar.gz", "source": _src("t")}]
     )
-    assert svc.delete_calls == [
+    assert svc.clear_root_calls == [
         {
             "entity_type": "staff",
             "entity_id": "u_owner",
             "bot_id": "b_1",
             "engine_type": "claude_code",
-            "path": "data/wrap",
         }
     ]
     assert svc.upload_calls == [
@@ -787,19 +926,21 @@ def test_write_addresses_the_bot_owner():
             "filename": "a.txt",
         }
     ]
+    assert svc.delete_calls == []
 
 
 def test_write_is_player_setup_convergent():
-    """Applying N times equals applying once: same writes, same deletes, no growth.
+    """Applying N times equals applying once: same files, same rows, no growth.
 
     Both applies run against the SAME service state: the second pass is the
-    convergence claim (the tree from apply #1 is deleted and rewritten, no
+    convergence claim (the root from apply #1 is cleared and rewritten, no
     duplicate rows, no stale entries), not a re-observation of apply #1.
     """
     archive = _tgz({"a.txt": b"AAA"})
     svc = FakeResourceFileService()
+    factory, rows = resource_rows_for()
     for _ in range(2):
-        m = _materialiser(svc, _StubDeclaredSourceResolver(archive))
+        m = _materialiser(svc, _StubDeclaredSourceResolver(archive), resource_rows=factory)
         ctx = make_context(engine_type="claude_code")
         _write_through(
             m,
@@ -807,7 +948,12 @@ def test_write_is_player_setup_convergent():
             [{"path": "data/wrap/", "unpack": "tar.gz", "source": _src("t.tgz")}],
         )
     assert svc.writes == {("data/wrap", "a.txt"): b"AAA"}
-    assert svc.deleted == ["data/wrap", "data/wrap"]
+    assert svc.present == {"data/wrap/a.txt"}
+    # The first clear found an empty root; the second removed apply #1's file.
+    assert svc.deleted == ["data/wrap/a.txt"]
+    assert len(svc.clear_root_calls) == 2
+    assert len(rows.replacements) == 2
+    assert rows.rows == [("data/wrap/a.txt", 3)]
 
 
 def test_write_failure_yields_failed_entry_per_member():
@@ -818,8 +964,9 @@ def test_write_failure_yields_failed_entry_per_member():
             return await super().upload_file(**kw)
 
     svc = _Buggy(exists_paths=set())
+    factory, rows = resource_rows_for()
     archive = _tgz({"a.txt": b"A", "b.txt": "B".encode()})
-    m = _materialiser(svc, _StubDeclaredSourceResolver(archive))
+    m = _materialiser(svc, _StubDeclaredSourceResolver(archive), resource_rows=factory)
     ctx = make_context(engine_type="claude_code")
     plan, results = _write_through(
         m,
@@ -836,7 +983,10 @@ def test_write_failure_yields_failed_entry_per_member():
         for r in results
         if r.outcome.value == "failed"
     )
+    assert [r.reason for r in results if r.outcome.value == "failed"] == ["resource delivery failed"]
     assert svc.writes == {("data/wrap", "a.txt"): b"A"}
+    # The rows describe what landed, not what was declared.
+    assert rows.rows == [("data/wrap/a.txt", 1)]
 
 
 # --- registration: the fifth materialiser, and the artifact contract (Task 6) ---
@@ -885,6 +1035,7 @@ def test_build_materialisers_registers_six():
         package_validator=object(),
         content=object(),
         resource_service=object(),
+        resource_rows=resource_rows_for()[0],
         cli_tool_service=object(),
     )
     assert ManifestCategory.RESOURCES in registry
@@ -987,17 +1138,17 @@ def test_write_carries_the_note_onto_the_report_row():
     assert [r.note for r in results] == ["fell back (keep_last)"]
 
 
-# --- the write chain's admission rules, asked before the first delete (H1) ---
+# --- the write chain's admission rules, asked before the root is cleared (H1) ---
 
 
 def test_an_archive_member_the_chain_would_refuse_fails_at_resolve():
     """``upload_file`` refuses extensions outside its allow-list (no ``.sh``,
     no extensionless files). That refusal must land in ``resolve`` — before
-    the tree marker promises the declared tree — or the category reaches
-    write with a member that deterministically fails *after* the
-    destructive delete, on every re-apply. The failure is keyed to the
-    *declared* entry's identity with the member named in the reason, so
-    the orchestrator's abort mapping can blame the declared row.
+    the write stage clears the root — or the category reaches write with a
+    member that deterministically fails *after* the destructive clear, on
+    every re-apply. The failure is keyed to the *declared* entry's identity
+    with the member named in the reason, so the orchestrator's abort
+    mapping can blame the declared row.
     """
     archive = _tgz({"a.md": b"ok", "run.sh": b"#!/bin/sh\n"})
     svc = FakeResourceFileService(exists_paths={"data/tools/old.md"})
@@ -1010,12 +1161,13 @@ def test_an_archive_member_the_chain_would_refuse_fails_at_resolve():
         )
     )
     # The whole category aborts (§3.2): one undeliverable member means the
-    # tree is NOT deleted for a partial delivery.
+    # root is NOT cleared for a partial delivery.
     assert not resolved.ok
     assert resolved.failures[0].identity == "data/tools/"
     # The reason names the offending member inside the declared entry.
     assert "data/tools/run.sh" in resolved.failures[0].reason
     assert "file type" in resolved.failures[0].reason.lower()
+    assert svc.clear_root_calls == [] and svc.present == {"data/tools/old.md"}
 
 
 def test_an_extensionless_inline_file_fails_at_resolve():
@@ -1072,48 +1224,10 @@ def test_strip_components_of_the_wrong_type_is_a_resolve_failure():
     assert "strip_components" in resolved.failures[0].reason
 
 
-def test_a_failed_tree_replacement_fails_its_members_in_composed_words():
-    """M2: the sentinel delete is part of delivery — a raise there must not
-    escape as raw exception text (the orchestrator would abort the whole
-    category quoting it); the tree's members answer FAILED, in the stage's
-    own words, and other categories' entries in this one keep their shot.
-    """
-
-    class _BuggyTreeDelete(FakeResourceFileService):
-        async def delete(self, **kwargs):
-            if kwargs["path"] == "data/tools":
-                raise RuntimeError("rmtree quoted a header with a token")
-            return await super().delete(**kwargs)
-
-    archive = _tgz({"a.md": b"A"})
-    svc = _BuggyTreeDelete(exists_paths=set())
-    m = _materialiser(svc, _StubDeclaredSourceResolver(archive))
-    ctx = make_context(engine_type="claude_code")
-    plan, results = _write_through(
-        m,
-        ctx,
-        [
-            {
-                "path": "data/tools/",
-                "unpack": "tar.gz",
-                "source": _src("t.tgz"),
-            },
-            {"path": "data/notes/r.md", "content": "# rules"},
-        ],
-    )
-    by_id = {r.identity: r for r in results}
-    assert by_id["data/tools/a.md"].outcome.value == "failed"
-    assert by_id["data/tools/a.md"].reason == "directory tree replacement failed"
-    # the raw exception text never reached the report
-    assert all("token" not in (r.reason or "") for r in results)
-    # the sibling entry outside the failed tree was still delivered
-    assert by_id["data/notes/r.md"].outcome.value == "created"
+# --- report shape: the removals channel, end to end (review F4) ---
 
 
-# --- report shape: the tree channel, end to end (review F4) ---
-
-
-def _resources_engine(svc, fetcher):
+def _resources_engine(svc, fetcher, *, resource_rows=None):
     """An orchestrator over the real registry and the real compiler, resources wired to the rig.
 
     One content store for both halves: the compiler files every entry's
@@ -1132,6 +1246,7 @@ def _resources_engine(svc, fetcher):
             package_validator=real_validator(),
             content=content,
             resource_service=svc,
+            resource_rows=resource_rows or resource_rows_for()[0],
             cli_tool_service=object(),
         ),
         steps=_arca_steps
@@ -1154,19 +1269,22 @@ _DOCUMENT = {
 }
 
 
+def _resources_category(report):
+    return next(c for c in report.categories if c.construct.value == "resources")
+
+
 def test_dry_run_and_apply_report_the_same_resources_shape():
     """F4: preview and execution must answer in one shape.
 
-    The old encoding put the declared tree in ``entries`` (the dry-run
-    projection emits one row per planned entry) while the real write
-    skipped it — one document, two report shapes, and any caller diffing
-    preview against execution saw a row vanish. With the tree in
-    ``removals`` both paths take the same plan and report the same rows
-    plus the same ``removed``.
+    Both paths take the same plan, so a dry run reports the same rows and the
+    same ``removals`` — the bot-written file that is about to go — while
+    writing nothing: no clear, no upload, no rows. The execution delivers.
     """
     archive = _tgz({"a.txt": b"AAA"})
     svc = FakeResourceFileService()
-    engine = _resources_engine(svc, _StubDeclaredSourceResolver(archive))
+    svc.record_present("data/stale.md")
+    factory, rows = resource_rows_for()
+    engine = _resources_engine(svc, _StubDeclaredSourceResolver(archive), resource_rows=factory)
     ctx = make_context(engine_type="claude_code")
 
     dry = _run(
@@ -1175,6 +1293,11 @@ def test_dry_run_and_apply_report_the_same_resources_shape():
             started_at=datetime.now(), dry_run=True,
         )
     )
+    # The preview wrote nothing: the root still holds the stale file.
+    assert svc.writes == {} and svc.deleted == [] and svc.clear_root_calls == []
+    assert svc.present == {"data/stale.md"}
+    assert rows.replacements == []
+
     real = _run(
         engine.apply(
             ctx, _DOCUMENT, apply_id="a2", trigger="explicit",
@@ -1183,80 +1306,86 @@ def test_dry_run_and_apply_report_the_same_resources_shape():
     )
 
     for report in (dry, real):
-        resources = next(
-            c for c in report.categories if c.construct.value == "resources"
-        )
-        assert resources.removals == ("data/wrap/",)
+        resources = _resources_category(report)
+        assert resources.removals == ("data/stale.md",)
+        assert resources.as_dict()["removed"] == ["data/stale.md"]
+        assert not resources.aborted
     dry_rows = {e.identity: e.outcome.value for e in dry.entries}
     real_rows = {e.identity: e.outcome.value for e in real.entries}
     assert dry_rows == {"data/notes/r.md": "created", "data/wrap/a.txt": "created"}
     assert real_rows == {"data/notes/r.md": "created", "data/wrap/a.txt": "created"}
-    # The preview wrote nothing; the execution delivered.
+    # The execution delivered.
     assert svc.writes == {("data/notes", "r.md"): b"# rules", ("data/wrap", "a.txt"): b"AAA"}
-    assert svc.deleted == ["data/wrap"]
+    assert svc.deleted == ["data/stale.md"]
+    assert svc.present == {"data/notes/r.md", "data/wrap/a.txt"}
+    assert rows.rows == [("data/wrap/a.txt", 3), ("data/notes/r.md", 7)]
 
 
-def test_an_empty_archive_still_audits_the_tree_removal():
-    """F4's tail case: a dirs-only (or empty) archive replaces the declared
-    tree with nothing. The old encoding deleted the whole tree while
-    emitting zero report rows — a destructive operation with no audit
-    trail. The removals channel makes the replace visible as ``removed``
-    in both shapes.
+def test_a_declared_empty_category_clears_the_root_and_reports_every_removal():
+    """``resources: []`` is a declaration, not an omission: the root converges
+    to nothing. Every listed file is in ``removals`` (both shapes), the
+    clear happens for real, nothing is delivered, the rows become ``[]`` —
+    and what is outside the root stays.
     """
-    archive = _tgz({})
-    svc = FakeResourceFileService(exists_paths={"data/gone/old.md"})
-    engine = _resources_engine(svc, _StubDeclaredSourceResolver(archive))
+    svc = FakeResourceFileService()
+    svc.record_present("data/gone/old.md", "data/x.csv", "notes/outside.txt")
+    factory, rows = resource_rows_for()
+    engine = _resources_engine(svc, _StubDeclaredSourceResolver(), resource_rows=factory)
     ctx = make_context(engine_type="claude_code")
+    document = {"schema_version": 1, "manifest": {"resources": []}}
 
     dry = _run(
         engine.apply(
-            ctx,
-            {
-                "schema_version": 1,
-                "manifest": {
-                    "resources": [
-                        {
-                            "path": "data/gone/",
-                            "unpack": "tar.gz",
-                            "source": _src("empty.tgz"),
-                        }
-                    ]
-                },
-            },
-            apply_id="a1", trigger="explicit",
+            ctx, document, apply_id="a1", trigger="explicit",
             started_at=datetime.now(), dry_run=True,
         )
     )
+    assert svc.deleted == [] and svc.clear_root_calls == [] and rows.replacements == []
     real = _run(
         engine.apply(
-            ctx,
-            {
-                "schema_version": 1,
-                "manifest": {
-                    "resources": [
-                        {
-                            "path": "data/gone/",
-                            "unpack": "tar.gz",
-                            "source": _src("empty.tgz"),
-                        }
-                    ]
-                },
-            },
-            apply_id="a2", trigger="explicit",
+            ctx, document, apply_id="a2", trigger="explicit",
             started_at=datetime.now(), dry_run=False,
         )
     )
 
     for report in (dry, real):
-        resources = next(
-            c for c in report.categories if c.construct.value == "resources"
-        )
-        assert resources.removals == ("data/gone/",)
-        assert resources.as_dict()["removed"] == ["data/gone/"]
+        resources = _resources_category(report)
+        assert resources.removals == ("data/gone/old.md", "data/x.csv")
+        assert resources.as_dict()["removed"] == ["data/gone/old.md", "data/x.csv"]
+        assert not resources.aborted
     assert [e.identity for e in real.entries] == []
-    # The tree was deleted for real, and nothing was delivered.
-    assert svc.deleted == ["data/gone"]
+    # The root was cleared for real, and nothing was delivered.
+    assert svc.deleted == ["data/gone/old.md", "data/x.csv"]
     assert svc.writes == {}
+    assert svc.present == {"notes/outside.txt"}
+    assert rows.replacements == [{"files": [], "created_by": ctx.actor_id}]
+
+
+def test_a_rows_failure_reports_a_confirmed_partial_write():
+    """The orchestrator's half of the rows contract: a ``ConfirmedPartialWriteError``
+    out of ``write`` aborts the category as *partially written* and
+    *confirmed* — the files are on the bot, the rows are not — never as
+    converged, and never as untouched."""
+    archive = _tgz({"a.txt": b"AAA"})
+    svc = FakeResourceFileService()
+    factory, _rows = resource_rows_for(FakeResourceRows(fail=True))
+    engine = _resources_engine(svc, _StubDeclaredSourceResolver(archive), resource_rows=factory)
+    ctx = make_context(engine_type="claude_code")
+
+    report = _run(
+        engine.apply(
+            ctx, _DOCUMENT, apply_id="a1", trigger="explicit",
+            started_at=datetime.now(), dry_run=False,
+        )
+    )
+
+    resources = _resources_category(report)
+    assert resources.aborted and resources.partially_written and resources.confirmed_partial
+    assert {e.identity for e in report.entries} == {"data/wrap/", "data/notes/r.md"}
+    assert all(e.outcome.value == "failed" for e in report.entries)
+    assert all((e.reason or "").startswith("write failed") for e in report.entries)
+    # The files did land; it is the rows that did not.
+    assert svc.writes == {("data/notes", "r.md"): b"# rules", ("data/wrap", "a.txt"): b"AAA"}
 
 
 def test_a_refused_member_blames_the_declared_entry_in_the_report():
@@ -1303,9 +1432,10 @@ def test_a_refused_member_blames_the_declared_entry_in_the_report():
     assert "file type" in (row.reason or "").lower()
     # The blameless neighbour keeps the generic skip wording.
     assert rows[("data/notes/r.md", "skipped")].reason is not None
-    # Nothing was written and the tree still stands.
+    # Nothing was written and the root still stands.
     assert svc.writes == {}
-    assert svc.deleted == []
+    assert svc.deleted == [] and svc.clear_root_calls == []
+    assert svc.present == {"data/tools/old.md"}
 
 
 # --- the write address's engine half: the runtime routing (F2) ---
@@ -1329,9 +1459,10 @@ def test_routed_bots_address_the_runtime_engine_workspace():
     _write_through(
         m, ctx, [{"path": "data/wrap/", "unpack": "tar.gz", "source": _src("t")}]
     )
-    assert svc.delete_calls[0]["engine_type"] == "aicoding"
+    assert svc.clear_root_calls[0]["engine_type"] == "aicoding"
     assert all(c["engine_type"] == "aicoding" for c in svc.upload_calls)
-    assert all(p["engine_type"] == "aicoding" for p in svc.exists_probes)
+    assert all(c["engine_type"] == "aicoding" for c in svc.list_root_calls)
+    assert svc.exists_probes == []
 
 
 def test_unrouted_bots_keep_the_active_engine():
@@ -1350,7 +1481,7 @@ def test_unrouted_bots_keep_the_active_engine():
         _write_through(
             m, ctx, [{"path": "data/wrap/", "unpack": "tar.gz", "source": _src("t")}]
         )
-        assert svc.delete_calls[0]["engine_type"] == "claude_code"
+        assert svc.clear_root_calls[0]["engine_type"] == "claude_code"
 
     svc = FakeResourceFileService()
     m = _materialiser(svc, _StubDeclaredSourceResolver(archive))
@@ -1358,7 +1489,7 @@ def test_unrouted_bots_keep_the_active_engine():
     _write_through(
         m, ctx, [{"path": "data/wrap/", "unpack": "tar.gz", "source": _src("t")}]
     )
-    assert svc.delete_calls[0]["engine_type"] == "openclaw"
+    assert svc.clear_root_calls[0]["engine_type"] == "openclaw"
 
 
 def test_an_engineless_bot_record_falls_back_to_the_context_engine():
@@ -1372,7 +1503,7 @@ def test_an_engineless_bot_record_falls_back_to_the_context_engine():
     _write_through(
         m, ctx, [{"path": "data/wrap/", "unpack": "tar.gz", "source": _src("t")}]
     )
-    assert svc.delete_calls[0]["engine_type"] == "openclaw"
+    assert svc.clear_root_calls[0]["engine_type"] == "openclaw"
 
 
 # --- the apply-time path belt re-asks the schema's own rule (F6) ---
@@ -1472,8 +1603,9 @@ def test_the_port_mirrors_the_apply_side_call_surface():
     every parameter the port declares must exist on the real
     ``ResourceFileService`` method with the same declared default (the
     fake mirrors the port in turn). The port is deliberately *narrower*
-    than the real service — ``preserve_structure`` and ``publish_id`` /
-    ``device_uuid`` are the router's vocabulary, not apply's.
+    than the real service — ``preserve_structure``, ``publish_id`` /
+    ``device_uuid`` and ``runtime_context`` are the router's vocabulary,
+    not apply's.
     """
     import inspect
 
@@ -1491,7 +1623,7 @@ def test_the_port_mirrors_the_apply_side_call_surface():
             if param.kind == inspect.Parameter.KEYWORD_ONLY
         }
 
-    for method in ("upload_file", "delete", "exists"):
+    for method in ("upload_file", "delete", "exists", "list_root", "clear_root"):
         port_params = _kwparams(getattr(ResourceFilePort, method))
         real_params = _kwparams(getattr(ResourceFileService, method))
         # Every port parameter exists on the real service...
@@ -1501,9 +1633,21 @@ def test_the_port_mirrors_the_apply_side_call_surface():
             assert real_params[name] == default, (method, name)
         # ...and every parameter the port declares is one apply passes.
         assert "preserve_structure" not in port_params, method
+        assert "runtime_context" not in port_params, method
         # The one divergence the apply side must not reintroduce: ``exists``
         # is addressed like ``delete`` and ``upload_file``, entity and all.
         assert "entity_type" in _kwparams(ResourceFilePort.exists)
+    # The root operations are addressed by the workspace alone: the root is
+    # the port's own constant, never a path the caller names.
+    for method in ("list_root", "clear_root"):
+        assert set(_kwparams(getattr(ResourceFilePort, method))) == {
+            "entity_type", "entity_id", "bot_id", "engine_type",
+        }, method
+    # ...and the fake copies the shape apply calls.
+    for method in ("list_root", "clear_root"):
+        assert set(_kwparams(getattr(FakeResourceFileService, method))) == {
+            "entity_type", "entity_id", "bot_id", "engine_type",
+        }, method
 
 
 def test_an_unhashable_unpack_kind_is_refused_not_raised():
@@ -1606,11 +1750,9 @@ def test_a_directory_entry_over_git_takes_the_tree_recursively():
         )
     )
     assert resolved.ok
-    # The declared-tree marker rides first so the write stage replaces the tree
-    # before any member uploads.
-    assert resolved.intents[0].identity == "data/kb/"
-    assert resolved.intents[0].value is _DECLARED_TREE
-    assert {i.identity: i.value for i in resolved.intents[1:]} == {
+    # Members only — the tree's replacement is the write stage's clear of the
+    # root, not an intent riding ahead of the members.
+    assert {i.identity: i.value for i in resolved.intents} == {
         "data/kb/deep/nested/notes.md": b"# nested\n",
         "data/kb/faq.csv": b"q,a\n",
         "data/kb/pricing.csv": b"sku,price\n",
@@ -1631,32 +1773,31 @@ def test_a_directory_entry_over_git_declares_no_unpack():
 
 
 def test_a_file_removed_upstream_disappears_on_the_next_apply():
-    """A directory entry owns its tree: the declared area is replaced wholesale,
-    not merged. Modelled as two applies over a shrinking repository."""
+    """The root is owned whole: the declared area is replaced wholesale, not
+    merged. Modelled as two applies over a shrinking repository — the file
+    the second tree no longer carries is gone from the bot and named in the
+    second apply's ``removals``."""
     svc = FakeResourceFileService()
+    ctx = _ctx()
     m = _git_rig(svc, _StubDeclaredSourceResolver(git_trees={_REPO: _TREE}), subpath="kb")
-    first = _run(
-        m.resolve(_ctx(), [{"path": "data/kb/", "from": "content"}])
-    )
-    assert "data/kb/pricing.csv" in {i.identity for i in first.intents}
+    _write_through(m, ctx, [{"path": "data/kb/", "from": "content"}])
+    assert "data/kb/pricing.csv" in svc.present
 
     shrunk = {k: v for k, v in _TREE.items() if k != "kb/pricing.csv"}
     m2 = _git_rig(svc, _StubDeclaredSourceResolver(git_trees={_REPO: shrunk}), subpath="kb")
-    second = _run(
-        m2.resolve(_ctx(), [{"path": "data/kb/", "from": "content"}])
-    )
-    identities = {i.identity for i in second.intents}
-    assert "data/kb/pricing.csv" not in identities
-    # The tree marker is still declared, which is what makes the removal happen
-    # on the bot rather than only in this list.
-    assert second.intents[0].value is _DECLARED_TREE
+    plan, _results = _write_through(m2, ctx, [{"path": "data/kb/", "from": "content"}])
+    assert plan.removals == ("data/kb/pricing.csv",)
+    # The clear is what makes the removal happen on the bot rather than only
+    # in this list.
+    assert svc.present == {"data/kb/deep/nested/notes.md", "data/kb/faq.csv"}
 
 
-def test_a_member_refused_by_admission_aborts_with_the_tree_still_standing():
-    """The gate runs before the marker that promises the tree. One undeliverable
-    member must fail the category *without* a delete — otherwise every re-apply
-    deterministically deletes the tree and then fails to refill it."""
+def test_a_member_refused_by_admission_aborts_with_the_root_still_standing():
+    """The gate runs before the clear. One undeliverable member must fail the
+    category *without* a clear — otherwise every re-apply deterministically
+    empties the root and then fails to refill it."""
     svc = FakeResourceFileService()
+    svc.record_present("data/kb/ok.md")
     oversized = {"kb/ok.md": b"fine\n", "kb/bad.exe": b"\x00" * 8}
     m = _git_rig(svc, _StubDeclaredSourceResolver(git_trees={_REPO: oversized}), subpath="kb")
     resolved = _run(
@@ -1665,6 +1806,7 @@ def test_a_member_refused_by_admission_aborts_with_the_tree_still_standing():
     assert not resolved.ok
     assert resolved.intents == ()
     assert "bad.exe" in resolved.failures[0].reason
+    assert svc.clear_root_calls == [] and svc.present == {"data/kb/ok.md"}
 
 
 def test_two_entries_share_one_declared_git_source():
@@ -1834,13 +1976,13 @@ def test_keep_last_delivers_a_stored_git_tree_instead_of_failing():
         m.resolve(_ctx(), [{"path": "data/kb/", "from": "content"}])
     )
     assert resolved.ok, resolved.failures
-    assert resolved.intents[0].value is _DECLARED_TREE
-    assert {i.identity: i.value for i in resolved.intents[1:]} == {
+    assert {i.identity: i.value for i in resolved.intents} == {
         "data/kb/deep/notes.md": b"# nested\n",
         "data/kb/faq.csv": b"q,a\n",
     }
-    # The report must say the source was tried and the stored copy stood in.
-    assert all("keep_last" in i.note for i in resolved.intents[1:])
+    # The report must say the source was tried and the stored copy stood in —
+    # on every member, since the entry's note is each member's note.
+    assert all("keep_last" in i.note for i in resolved.intents)
 
 
 def test_a_real_archive_still_takes_the_unpack_road():
