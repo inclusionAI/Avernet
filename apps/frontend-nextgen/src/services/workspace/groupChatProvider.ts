@@ -1,6 +1,8 @@
 import type { GroupExecResolution } from '@/domain/collaboration/groupExecApprovals';
 import { GroupExecApprovalService, type GroupExecApprovalSnapshot } from './groupExecApprovalService';
 import type { GroupQuestionResolution } from '@/domain/collaboration/groupQuestions';
+import { parseConnectSpeakingMode } from '@/domain/collaboration/speakingLease';
+import { GroupSpeakingLeaseService, type SpeakingLeaseSnapshot } from './groupSpeakingLeaseService';
 import {
   createSessionToken,
   type SessionMessageAttachment,
@@ -57,6 +59,7 @@ type HydrationCapableGroupChatProvider = SdkGroupChatProvider & {
 };
 
 type SessionFrame = {
+  id?: string;
   method?: string;
   params?: Record<string, unknown>;
 };
@@ -118,6 +121,16 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
   private readonly questionService: GroupQuestionService;
   private readonly execApprovalService: GroupExecApprovalService;
   /**
+   * 发言权租约生命周期 service——本 Provider 实例私有（快照/等待随实例隔离）。
+   * 组件只经 subscribeToSpeakingLease / acquireSpeakingLease 等方法消费。
+   */
+  private readonly speakingLeaseService: GroupSpeakingLeaseService;
+  /**
+   * 最近一次出站 connect 帧的 id：connect 应答以 id 识别，读取 speaking_mode
+   * 后即失效（undefined = 无在途 connect 应答可认领）。
+   */
+  private pendingConnectFrameId?: string;
+  /**
    * 拥有问答状态的连接周期（inner 身份校验）：只有当前周期的 inner 能驱动 questionService。
    * 断开、替换或异步初始化被 disconnect 废弃时置 null——旧回调迟到也不更新新连接状态。
    */
@@ -154,6 +167,13 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     this.execApprovalService = new GroupExecApprovalService({
       groupId: options.groupId,
       bcsSessionId: options.sessionId,
+      send: (frame) => this.sendQuestionFrame(frame),
+      isConnected: () => this.isConnected,
+    });
+    this.speakingLeaseService = new GroupSpeakingLeaseService({
+      groupId: options.groupId,
+      // 服务端 holderActorId 形如 human_{userId}；identityId 即登录 userId。
+      humanActorId: `human_${options.identityId}`,
       send: (frame) => this.sendQuestionFrame(frame),
       isConnected: () => this.isConnected,
     });
@@ -248,6 +268,29 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
    */
   resolveQuestion(key: string, resolution: GroupQuestionResolution): Promise<void> {
     return this.questionService.resolve(key, resolution);
+  }
+
+  /** 订阅发言权快照（委托 speakingLeaseService，订阅即回放当前状态）。 */
+  subscribeToSpeakingLease(listener: (snapshot: SpeakingLeaseSnapshot) => void): () => void {
+    return this.speakingLeaseService.subscribe(listener);
+  }
+
+  /**
+   * 获取（preempt=false）/ 抢占（preempt=true）发言权。
+   * 成功返回 true；被占用返回 false；指令失败拒绝 LeaseCommandError。
+   */
+  acquireSpeakingLease(preempt = false): Promise<boolean> {
+    return this.speakingLeaseService.acquire(preempt);
+  }
+
+  /** 释放当前持有的发言权；失败拒绝 LeaseCommandError，此刻不清 UI 状态。 */
+  releaseSpeakingLease(): Promise<void> {
+    return this.speakingLeaseService.release();
+  }
+
+  /** lease.current 补拍快照（含轮询收敛；失败落 error 态）。 */
+  refreshSpeakingLease(): Promise<void> {
+    return this.speakingLeaseService.refresh();
   }
 
   private emitViewScopeChanged(): void {
@@ -361,6 +404,8 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
       if (isConnectHandshake && this.questionScopeInner === inner) {
         this.questionService.resetConnection();
         this.execApprovalService.resetConnection();
+        // connect 应答以帧 id 识别：在途应答到达时读 speaking_mode（一个时刻至多一个）。
+        this.pendingConnectFrameId = (frame as SessionFrame).id;
       }
       if (!frame || typeof frame !== 'object') return originalSend(frame);
       const target = frame as SessionFrame;
@@ -369,7 +414,16 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
 
       const params: Record<string, unknown> = { ...target.params, session_id: sessionId };
       if (target.method === 'connect') params.view_actor_id = this.options.identityId;
-      if (target.method === 'chat.send') params.sessionKey = sessionId;
+      if (target.method === 'chat.send') {
+        params.sessionKey = sessionId;
+        // lease_required 会话：服务端要求 chat.send 携带本会有效租约；临期（≤5s）
+        // 租约不注入——服务端逐条判定为权威，前端不据此放宽发送。
+        const leaseParams = this.speakingLeaseService.usableLeaseParams(Date.now());
+        if (leaseParams) {
+          params.leaseId = leaseParams.leaseId;
+          params.leaseEpoch = leaseParams.leaseEpoch;
+        }
+      }
       return originalSend({ ...target, params });
     };
   }
@@ -386,6 +440,17 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     const originalOnMessage = transport.onMessage.bind(transport);
     transport.onMessage = (msg: unknown) => {
       if (!this.liveAllowed || this.inner !== inner) return;
+      if (this.questionScopeInner === inner && this.speakingLeaseService.handleFrame(msg)) {
+        return;
+      }
+      if (this.questionScopeInner === inner && this.isPendingConnectResponse(msg)) {
+        // connect 应答读 speaking_mode 后即失效；不吞帧——SDK 依赖 connect 应答，
+        // 读毕照常透传 originalOnMessage。
+        this.pendingConnectFrameId = undefined;
+        this.speakingLeaseService.setSpeakingMode(
+          parseConnectSpeakingMode((msg as { payload?: Record<string, unknown> }).payload),
+        );
+      }
       if (this.questionScopeInner === inner && (this.questionService.handleFrame(msg) || this.execApprovalService.handleFrame(msg))) {
         return;
       }
@@ -432,6 +497,7 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     this.lifecycleSeq += 1;
     this.transportGeneration += 1;
     this.questionScopeInner = null;
+    this.pendingConnectFrameId = undefined;
     this.questionService.resetConnection();
     this.execApprovalService.resetConnection();
     const inner = this.inner;
@@ -447,6 +513,15 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
 
   private assertConnected(inner: SdkGroupChatProvider): void {
     if (!inner.isConnected) throw new Error('协作会话 WebSocket 未建立。');
+  }
+
+  /** 在途 connect 应答识别：res 帧 id 精确匹配最近一次出站 connect 帧。 */
+  private isPendingConnectResponse(msg: unknown): msg is { payload?: Record<string, unknown> } {
+    if (!this.pendingConnectFrameId || typeof msg !== 'object' || msg === null) return false;
+    const candidate = msg as Record<string, unknown>;
+    return (
+      candidate.type === 'res' && candidate.id === this.pendingConnectFrameId
+    );
   }
 
   async request(params: GroupChatRequest, messageId?: string): Promise<void> {

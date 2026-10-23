@@ -148,6 +148,11 @@ beforeEach(() => {
     resolveQuestion: jest.fn<any>(() => Promise.resolve(undefined)),
     subscribeToExecApprovals: jest.fn<any>(() => jest.fn<any>()),
     resolveExecApproval: jest.fn<any>(() => Promise.resolve(undefined)),
+    // 发言权接线（SpeakingLeaseProvider 结构面）：Hook 经 useSpeakingLease 订阅。
+    subscribeToSpeakingLease: jest.fn<any>(() => jest.fn<any>()),
+    acquireSpeakingLease: jest.fn<any>(() => Promise.resolve(true)),
+    releaseSpeakingLease: jest.fn<any>(() => Promise.resolve(undefined)),
+    refreshSpeakingLease: jest.fn<any>(() => Promise.resolve(undefined)),
   };
   mockedProviderFactory.mockReturnValue(mockProvider);
 

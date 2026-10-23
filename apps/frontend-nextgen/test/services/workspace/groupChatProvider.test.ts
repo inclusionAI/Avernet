@@ -843,3 +843,75 @@ test('exec approval is handled outside SDK and uses the active transport for res
   inner.transport.onMessage(event);
   expect(pending).toEqual([]);
 });
+
+test('connect 应答读 speaking_mode 更新发言权快照，且 connect 应答透传给 SDK', async () => {
+  sc.createSessionToken.mockResolvedValue({ code: 20000, message: '', request_id: 'r',
+    data: { token: 'tk', expires_at: 999 } });
+  const provider = createGroupChatProvider({ sessionId: 's1', groupId: 'g1', identityId: 'me',
+    createSdkProvider: fakeSdkProvider as unknown as Parameters<typeof createGroupChatProvider>[0]['createSdkProvider'],
+    wsOrigin: 'wss://x.test' });
+  const snapshots: Array<{ speakingMode?: string }> = [];
+  provider.subscribeToSpeakingLease((snapshot) => snapshots.push(snapshot));
+  expect(snapshots[0].speakingMode).toBeUndefined();
+  await provider.connect();
+  const inner = (provider as unknown as {
+    inner: { transport: { send: jest.Mock; onMessage?: (msg: unknown) => void }; originalOnMessage: jest.Mock };
+  }).inner;
+
+  await inner.transport.send({ type: 'req', id: 'connect-9', method: 'connect', params: { group_id: 'g1' } });
+  inner.transport.onMessage?.({
+    type: 'res',
+    id: 'connect-9',
+    ok: true,
+    payload: { speaking_mode: 'lease_required' },
+  });
+
+  expect(snapshots.at(-1)!.speakingMode).toBe('lease_required');
+  // connect 应答不吞帧：SDK 依赖它标记连接就绪
+  expect(inner.originalOnMessage).toHaveBeenCalledWith(
+    expect.objectContaining({ type: 'res', id: 'connect-9' }),
+  );
+});
+
+test('chat.send 在持有有效租约时注入 leaseId/leaseEpoch，无租约不注入', async () => {
+  sc.createSessionToken.mockResolvedValue({ code: 20000, message: '', request_id: 'r',
+    data: { token: 'tk', expires_at: 999 } });
+  const provider = createGroupChatProvider({ sessionId: 's1', groupId: 'g1', identityId: 'me',
+    createSdkProvider: fakeSdkProvider as unknown as Parameters<typeof createGroupChatProvider>[0]['createSdkProvider'],
+    wsOrigin: 'wss://x.test' });
+  await provider.connect();
+  const inner = (provider as unknown as {
+    inner: { transport: { send: jest.Mock; onMessage?: (msg: unknown) => void } };
+  }).inner;
+
+  // 无租约：不允许出现 lease 字段
+  await inner.transport.send({ type: 'req', id: 'send-0', method: 'chat.send', params: { message: 'hi' } });
+  let lastCall = lastOriginalSend.mock.calls.at(-1);
+  expect(lastCall[0].params.leaseId).toBeUndefined();
+  expect(lastCall[0].params.leaseEpoch).toBeUndefined();
+
+  // 经包装层取权（服务端 holderActorId = human_me 与 identityId 对齐）
+  lastOriginalSend.mockImplementation(async (frame: Record<string, unknown>) => {
+    if (frame.method === 'lease.acquire') {
+      inner.transport.onMessage?.({
+        type: 'res',
+        id: frame.id as string,
+        ok: true,
+        payload: {
+          status: 'granted',
+          leaseId: 'lease-7',
+          epoch: 3,
+          expiresAt_ms: Date.now() + 60_000,
+          holderActorId: 'human_me',
+        },
+      });
+    }
+  });
+  await expect(provider.acquireSpeakingLease()).resolves.toBe(true);
+
+  // 持有有效租约：chat.send 注入服务端授予的 leaseId/epoch
+  await inner.transport.send({ type: 'req', id: 'send-1', method: 'chat.send', params: { message: 'hi again' } });
+  lastCall = lastOriginalSend.mock.calls.at(-1);
+  expect(lastCall[0].params.leaseId).toBe('lease-7');
+  expect(lastCall[0].params.leaseEpoch).toBe(3);
+});
