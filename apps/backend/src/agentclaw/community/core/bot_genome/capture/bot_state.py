@@ -26,14 +26,17 @@ RSI-04's to define, so the reader refuses it by name.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from agentclaw.community.core.bot_config_manifest.schema import placeholders
 from agentclaw.community.core.bot_genome.capture.capture import (
-    CapturedFile,
     BotStateReader,
+    CapturedFile,
+    CapturedMcpServer,
+    CapturedPersonaFile,
     CapturedResource,
     CapturedSkill,
+    SkillOrigin,
 )
 from agentclaw.community.core.bot_genome.errors import CaptureRefused, Reason
 from agentclaw.community.core.bot_genome.models import BotRef
@@ -100,18 +103,19 @@ class PlatformBotStateReader(BotStateReader):
             )
         return None
 
-    async def persona_files(self, bot: BotRef) -> dict[str, str]:
+    async def persona_files(self, bot: BotRef) -> tuple[CapturedPersonaFile, ...]:
         listed = await self._identity.list_bot_files(
             bot.entity_type, bot.entity_id, bot.bot_id, bot.owner_id, engine_type=bot.engine_type
         )
-        out: dict[str, str] = {}
+        out: list[CapturedPersonaFile] = []
         for file_type, exists in listed:
             if not exists:
                 continue
-            out[file_type] = await self._identity.read_identity_file(
+            text = await self._identity.read_identity_file(
                 bot.entity_type, bot.entity_id, bot.bot_id, file_type, bot.owner_id, engine_type=bot.engine_type
             )
-        return out
+            out.append(CapturedPersonaFile(file_type, text))
+        return tuple(out)
 
     async def skills(self, bot: BotRef) -> tuple[CapturedSkill, ...]:
         captured: list[CapturedSkill] = []
@@ -131,12 +135,14 @@ class PlatformBotStateReader(BotStateReader):
                 )
                 files = await storage.read_package_files()
                 captured.append(
-                    CapturedSkill(asset.name, "local", files=tuple(CapturedFile(path, data) for path, data in files))
+                    CapturedSkill(
+                        asset.name, SkillOrigin.LOCAL, files=tuple(CapturedFile(path, data) for path, data in files)
+                    )
                 )
             elif locator.startswith(CENTER_PREFIX):
-                captured.append(CapturedSkill(asset.name, "center", center_version=asset.sc_version_number))
+                captured.append(CapturedSkill(asset.name, SkillOrigin.CENTER, center_version=asset.sc_version_number))
             elif locator.startswith(REPO_PREFIX):
-                captured.append(CapturedSkill(asset.name, "repo", repo_path=locator[len(REPO_PREFIX) :]))
+                captured.append(CapturedSkill(asset.name, SkillOrigin.REPO, repo_path=locator[len(REPO_PREFIX) :]))
             else:
                 raise CaptureRefused(
                     [Reason("skill_package", f"skills/{asset.name}", f"unknown skill locator {locator!r}")]
@@ -172,18 +178,15 @@ class PlatformBotStateReader(BotStateReader):
             captured.append(CapturedResource(path, (CapturedFile(path.rsplit("/", 1)[-1], data),)))
         return tuple(captured)
 
-    async def mcp_servers(self, bot: BotRef) -> tuple[dict[str, Any], ...]:
+    async def mcp_servers(self, bot: BotRef) -> tuple[CapturedMcpServer, ...]:
         who = dict(bot_id=bot.bot_id, owner_id=bot.owner_id, actor_id=bot.owner_id)
         codes = set(self._activation.list_installed_mcps(**who)) - set(
             self._activation.platform_default_mcp_codes(**who)
         )
         servers = []
         for code in sorted(codes):
-            entry: dict[str, Any] = {"server_code": code}
             override = self._mcp_config.get_bot_override(bot_id=bot.bot_id, owner_id=bot.owner_id, server_code=code)
-            if override:
-                entry["config"] = override
-            servers.append(entry)
+            servers.append(CapturedMcpServer(code, dict(override) if override else None))
         return tuple(servers)
 
     async def script_body(self, bot: BotRef) -> str | None:

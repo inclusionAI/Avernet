@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from agentclaw.community.core.bot_genome.capture import CapturedMcpServer, CapturedPersonaFile
 from agentclaw.community.core.bot_genome.capture.bot_state import PlatformBotStateReader
 from agentclaw.community.core.bot_genome.errors import CaptureRefused
 from agentclaw.community.core.bot_genome.models import BotRef
@@ -130,7 +131,10 @@ async def test_platform_managed_teclaw_is_refused_and_nothing_else_is() -> None:
 @pytest.mark.asyncio
 async def test_persona_reads_only_the_files_that_exist() -> None:
     identity = FakeIdentity({"SOUL.md": "# Soul\n", "OKR.md": None, "AGENTS.md": "# A\n"})
-    assert await _reader(identity=identity).persona_files(BOT) == {"SOUL.md": "# Soul\n", "AGENTS.md": "# A\n"}
+    assert await _reader(identity=identity).persona_files(BOT) == (
+        CapturedPersonaFile("SOUL.md", "# Soul\n"),
+        CapturedPersonaFile("AGENTS.md", "# A\n"),
+    )
     assert identity.calls[0] == ("list", "staff", "staff_u1", "bot_1", "u1", "openclaw"), (
         "entity for the files' home, owner for the user"
     )
@@ -216,8 +220,8 @@ async def test_mcp_servers_exclude_platform_defaults_and_carry_the_bot_override(
         mcp_config=FakeMcpConfig({"mcp.a": {"url": "https://a.example.com/mcp"}, "mcp.b": {}}),
     )
     assert await reader.mcp_servers(BOT) == (
-        {"server_code": "mcp.a", "config": {"url": "https://a.example.com/mcp"}},
-        {"server_code": "mcp.b"},
+        CapturedMcpServer("mcp.a", {"url": "https://a.example.com/mcp"}),
+        CapturedMcpServer("mcp.b", None),
     )
     assert activation.asked_for == ("u1", "u1"), "MCP activation is the owner's"
 

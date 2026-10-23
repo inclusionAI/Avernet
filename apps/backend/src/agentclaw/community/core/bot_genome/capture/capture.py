@@ -15,6 +15,7 @@ from __future__ import annotations
 import re
 from abc import abstractmethod
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any, NamedTuple, Protocol, TypeVar
 
 from pydantic import ValidationError
@@ -42,6 +43,8 @@ from agentclaw.community.core.skill_center.skill_package import SkillPackageVali
 __all__ = [
     "BotStateReader",
     "CapturedFile",
+    "CapturedMcpServer",
+    "CapturedPersonaFile",
     "CapturedResource",
     "CapturedSkill",
     "CapturedSpec",
@@ -67,23 +70,59 @@ class CapturedFile(NamedTuple):
     data: bytes
 
 
+class SkillOrigin(StrEnum):
+    """Where a skill's files come from: the prefix of the skill row's locator, and the contract's ``origin``."""
+
+    LOCAL = "local"  #: a bot-owned upload (``local://…``): the files are the bot's, stored as a tree
+    CENTER = "center"  #: a Skill Center skill (``center://…``): pinned by version, not copied
+    REPO = "repo"  #: the shared skills repository (``git://…``): by repository path, neither copied nor pinned
+
+
+class CapturedPersonaFile(NamedTuple):
+    """One identity file as read from the bot: its file name and its text.
+
+    Example: ``CapturedPersonaFile("SOUL.md", "# Soul\\n…")``. The name is
+    the contract's persona ``type``; the text is the file as the engine
+    sees it, before capture's normalisation (README §7).
+    """
+
+    type: str
+    text: str
+
+
+@dataclass(frozen=True)
+class CapturedMcpServer:
+    """One MCP server enabled on the bot, with its bot-level override if it has one.
+
+    ``override`` is the raw override as the MCP configuration service holds it, in
+    the Manifest's shape (the members of ``McpConfig``: ``url``, ``headers``,
+    ``endpoint_env``, ``transport_protocol``); capture validates it into an
+    ``McpConfig`` and refuses what the contract cannot record. Example:
+    ``CapturedMcpServer("mcp.ant.weather", {"endpoint_env": "PRE"})``; a server
+    without an override is ``CapturedMcpServer("mcp.ant.weather", None)``.
+    """
+
+    server_code: str  #: the server's code in the MCP registry, the entry's key (``tools/mcp/<code>``)
+    override: dict[str, Any] | None = None  #: the bot-level override, or ``None`` when the bot has none
+
+
 @dataclass(frozen=True)
 class CapturedSkill:
     """One active skill as the reader found it, before contract normalisation.
 
     Which members are set follows ``origin``:
 
-    - ``local`` (a bot-owned upload): ``files`` holds the package's files,
-      e.g. ``CapturedSkill("tidy", "local", files=(CapturedFile("SKILL.md", …), CapturedFile("a.py", …)))``;
+    - ``SkillOrigin.LOCAL`` (a bot-owned upload): ``files`` holds the package's files, e.g.
+      ``CapturedSkill("tidy", SkillOrigin.LOCAL, files=(CapturedFile("SKILL.md", …), CapturedFile("a.py", …)))``;
       capture keeps what ``SkillPackageValidator`` keeps and stores them as one acm-tree-v1 tree.
-    - ``center`` (a Skill Center skill): ``center_version`` is the pinned version,
-      e.g. ``CapturedSkill("refund-policy", "center", center_version="v7")``.
-    - ``repo`` (the shared skills repository): ``repo_path`` is the path after ``git://`` on the
-      skill row, e.g. ``CapturedSkill("weather", "repo", repo_path="team/weather")``.
+    - ``SkillOrigin.CENTER`` (a Skill Center skill): ``center_version`` is the pinned version,
+      e.g. ``CapturedSkill("refund-policy", SkillOrigin.CENTER, center_version="v7")``.
+    - ``SkillOrigin.REPO`` (the shared skills repository): ``repo_path`` is the path after ``git://`` on
+      the skill row, e.g. ``CapturedSkill("weather", SkillOrigin.REPO, repo_path="team/weather")``.
     """
 
     name: str  #: the skill's name, which becomes the entry's key (``skills/<name>``)
-    origin: str  #: ``local`` | ``center`` | ``repo`` (the prefix of the skill row's locator)
+    origin: SkillOrigin  #: where the files come from (the prefix of the skill row's locator)
     center_version: str | None = None  #: ``center`` only: the Skill Center version in use
     repo_path: str | None = None  #: ``repo`` only: the skill's path inside the shared repository
     files: tuple[CapturedFile, ...] = ()  #: ``local`` only: the package's files, path relative to the skill root
@@ -113,11 +152,11 @@ class BotStateReader(Protocol):
         ...
 
     @abstractmethod
-    async def persona_files(self, bot: BotRef) -> dict[str, str]:
-        """Every identity file the bot has: file name (``SOUL.md``, ``AGENTS.md``, …) → its text.
+    async def persona_files(self, bot: BotRef) -> tuple[CapturedPersonaFile, ...]:
+        """Every identity file the bot has, one :class:`CapturedPersonaFile` each, in any order.
 
-        Example: ``{"SOUL.md": "# Soul\\n…", "AGENTS.md": "# Agents\\n…"}``. Files the engine
-        writes for itself (``MEMORY.md``, ``IDENTITY.md``) may be included; capture drops them.
+        Example: ``(CapturedPersonaFile("SOUL.md", "# Soul\\n…"), CapturedPersonaFile("AGENTS.md", "# Agents\\n…"))``.
+        Files the engine writes for itself (``MEMORY.md``, ``IDENTITY.md``) may be included; capture drops them.
         """
         ...
 
@@ -132,12 +171,8 @@ class BotStateReader(Protocol):
         ...
 
     @abstractmethod
-    async def mcp_servers(self, bot: BotRef) -> tuple[dict[str, Any], ...]:
-        """One ``{"server_code": …, "config": …?}`` per MCP server enabled on the bot, platform defaults excluded.
-
-        ``config`` is the bot-level override in the Manifest's shape (``McpConfig``), present only when
-        the bot has one, e.g. ``{"server_code": "mcp.ant.weather", "config": {"endpoint_env": "PRE"}}``.
-        """
+    async def mcp_servers(self, bot: BotRef) -> tuple[CapturedMcpServer, ...]:
+        """Every MCP server enabled on the bot, platform defaults excluded, one :class:`CapturedMcpServer` each."""
         ...
 
     @abstractmethod
@@ -198,7 +233,13 @@ class _Builder:
         return digest
 
     def entry(self, model: type[_M], location: str, **members: Any) -> _M | None:
-        """``model(**members)``, or ``None`` with the violations recorded under ``location``."""
+        """``model(**members)``, or ``None`` with the violations recorded under ``location``.
+
+        ``_M`` is a type variable bounded by ``ContractModel``: ``model`` is
+        the class itself (``type[_M]``, e.g. ``PersonaFile``), and the return
+        is an instance of that same class, so ``build.entry(PersonaFile, …)``
+        is typed as ``PersonaFile | None`` rather than ``ContractModel | None``.
+        """
         try:
             return model(**members)
         except ValidationError as exc:  # the bot holds something the contract cannot record
@@ -214,13 +255,12 @@ async def capture_spec(reader: BotStateReader, bot: BotRef, *, validator: SkillP
     build = _Builder()
 
     persona: list[PersonaFile] = []
-    for file_type, text in (await reader.persona_files(bot)).items():
-        if file_type in _RESERVED_PERSONA:
+    for file in await reader.persona_files(bot):
+        if file.type in _RESERVED_PERSONA:
             continue
-        if file_type == "AGENTS.md":
-            text = agents_md_text(text)
+        text = agents_md_text(file.text) if file.type == "AGENTS.md" else file.text
         entry = build.entry(
-            PersonaFile, f"persona/{file_type}", type=file_type, digest=build.store(text.encode("utf-8"))
+            PersonaFile, f"persona/{file.type}", type=file.type, digest=build.store(text.encode("utf-8"))
         )
         if entry is not None:
             persona.append(entry)
@@ -229,7 +269,7 @@ async def capture_spec(reader: BotStateReader, bot: BotRef, *, validator: SkillP
     for skill in await reader.skills(bot):
         location = f"skills/{skill.name}"
         entry: SkillEntry | None
-        if skill.origin == "local":
+        if skill.origin == SkillOrigin.LOCAL:
             try:
                 validated = validator.validate_directory(list(skill.files))
             except ValueError as exc:
@@ -237,7 +277,7 @@ async def capture_spec(reader: BotStateReader, bot: BotRef, *, validator: SkillP
                 continue
             digest = build.store(canonical_tree_bytes(list(validated.files)))
             entry = build.entry(LocalSkill, location, name=skill.name, origin="local", digest=digest)
-        elif skill.origin == "center":
+        elif skill.origin == SkillOrigin.CENTER:
             if not skill.center_version:
                 build.reasons.append(
                     Reason(
@@ -248,7 +288,7 @@ async def capture_spec(reader: BotStateReader, bot: BotRef, *, validator: SkillP
             entry = build.entry(
                 CenterSkill, location, name=skill.name, origin="center", center_version=skill.center_version
             )
-        elif skill.origin == "repo":
+        elif skill.origin == SkillOrigin.REPO:
             if not skill.repo_path:
                 build.reasons.append(
                     Reason(
@@ -297,10 +337,10 @@ async def capture_spec(reader: BotStateReader, bot: BotRef, *, validator: SkillP
 
     mcp: list[McpServerEntry] = []
     for server in await reader.mcp_servers(bot):
-        code = server["server_code"]
+        code = server.server_code
         members: dict[str, Any] = {"server_code": code}
-        if server.get("config"):  # an explicit override only; the member is left out otherwise, never null
-            members["config"] = build.entry(McpConfig, f"tools/mcp/{code}.config", **server["config"])
+        if server.override:  # an explicit override only; the member is left out otherwise, never null
+            members["config"] = build.entry(McpConfig, f"tools/mcp/{code}.config", **server.override)
             if members["config"] is None:
                 continue
         entry = build.entry(McpServerEntry, f"tools/mcp/{code}", **members)

@@ -21,7 +21,7 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import de
 from agentclaw.community.core.bot_genome import contract, gene_paths
 from agentclaw.community.core.bot_genome.canonical import loads_strict
 from agentclaw.community.core.bot_genome.limits import MAX_DIFF_BYTES
-from agentclaw.community.core.bot_genome.models import ContentReader, GeneChange, GenomeDiff
+from agentclaw.community.core.bot_genome.models import ChangeKind, ContentReader, GeneChange, GenomeDiff
 from agentclaw.community.core.bot_genome.patch.ops import FileChange, OpTouch
 from agentclaw.community.core.bot_genome.patch.risk import (
     apply_overrides,
@@ -98,7 +98,7 @@ class _Differ:
 
     def _file(self, gene: str, before: bytes, after: bytes) -> None:
         """A modified file: its change, its text diff, and its entry for the rewrite measure."""
-        self.changes.append(GeneChange(gene, "modified", self._text_diff(before, after)))
+        self.changes.append(GeneChange(gene, ChangeKind.MODIFIED, self._text_diff(before, after)))
         self.files[gene] = FileChange(before, after)
 
     def _members(self, gene: str, before: bytes, after: bytes) -> tuple[list[str], list[str]]:
@@ -110,9 +110,9 @@ class _Differ:
         for path in sorted(set(old) | set(new)):
             member = gene + "/" + gene_paths.join("skills", path).split("/", 1)[1]
             if path not in old:
-                self.changes.append(GeneChange(member, "added"))
+                self.changes.append(GeneChange(member, ChangeKind.ADDED))
             elif path not in new:
-                self.changes.append(GeneChange(member, "removed"))
+                self.changes.append(GeneChange(member, ChangeKind.REMOVED))
             elif old[path] != new[path]:
                 self._file(member, old[path], new[path])
                 modified.append(member)
@@ -129,10 +129,10 @@ class _Differ:
         for kind in sorted(set(old) | set(new)):
             gene = gene_paths.persona_path(kind)
             if kind not in old:
-                self.changes.append(GeneChange(gene, "added"))
+                self.changes.append(GeneChange(gene, ChangeKind.ADDED))
                 self.touched.append(OpTouch("persona.add", gene))
             elif kind not in new:
-                self.changes.append(GeneChange(gene, "removed"))
+                self.changes.append(GeneChange(gene, ChangeKind.REMOVED))
                 self.touched.append(OpTouch("persona.remove", gene))
             elif old[kind] != new[kind]:
                 self._file(gene, self.content.read(old[kind]), self.content.read(new[kind]))
@@ -144,13 +144,13 @@ class _Differ:
         for name in sorted(set(old) | set(new)):
             gene = gene_paths.skill_path(name)
             if name not in old:
-                self.changes.append(GeneChange(gene, "added"))
+                self.changes.append(GeneChange(gene, ChangeKind.ADDED))
                 self.touched.append(OpTouch("skill.add", gene))
             elif name not in new:
-                self.changes.append(GeneChange(gene, "removed"))
+                self.changes.append(GeneChange(gene, ChangeKind.REMOVED))
                 self.touched.append(OpTouch("skill.remove", gene))
             elif old[name] != new[name]:
-                self.changes.append(GeneChange(gene, "modified"))
+                self.changes.append(GeneChange(gene, ChangeKind.MODIFIED))
                 before, after = old[name], new[name]
                 if isinstance(before, LocalSkill) and isinstance(after, LocalSkill):
                     old_blob, new_blob = self.content.read(before.digest), self.content.read(after.digest)
@@ -171,17 +171,17 @@ class _Differ:
         new = {gene_paths.resource_path(e.path): e for e in self.b.resources}
         for gene in sorted(set(old) | set(new)):
             if gene not in old:
-                self.changes.append(GeneChange(gene, "added"))
+                self.changes.append(GeneChange(gene, ChangeKind.ADDED))
                 self.touched.append(OpTouch("resource.add", gene))
             elif gene not in new:
-                self.changes.append(GeneChange(gene, "removed"))
+                self.changes.append(GeneChange(gene, ChangeKind.REMOVED))
                 self.touched.append(OpTouch("resource.remove", gene))
             elif old[gene] != new[gene]:
                 before, after = old[gene], new[gene]
                 old_dir, new_dir = before.path.endswith("/"), after.path.endswith("/")
                 old_blob, new_blob = self.content.read(before.digest), self.content.read(after.digest)
                 if old_dir and new_dir:
-                    self.changes.append(GeneChange(gene, "modified"))
+                    self.changes.append(GeneChange(gene, ChangeKind.MODIFIED))
                     changed, touched = self._members(gene, old_blob, new_blob)
                     if len(touched) == len(changed):
                         self.touched.append(OpTouch("file.edit", gene, tuple(changed)))
@@ -191,7 +191,7 @@ class _Differ:
                         self.files[gene] = FileChange(None, None, text=False)
                         self.touched.append(OpTouch("resource.add", gene, (gene,)))
                 elif old_dir or new_dir:
-                    self.changes.append(GeneChange(gene, "modified"))
+                    self.changes.append(GeneChange(gene, ChangeKind.MODIFIED))
                     self.files[gene] = FileChange(None, None, text=False)
                     self.touched.append(OpTouch("resource.add", gene, (gene,)))
                 else:
@@ -204,23 +204,27 @@ class _Differ:
             return
         gene = gene_paths.memory_path()
         if old is None or new is None:
-            self.changes.append(GeneChange(gene, "added" if old is None else "removed"))
+            self.changes.append(GeneChange(gene, ChangeKind.ADDED if old is None else ChangeKind.REMOVED))
             self.touched.append(OpTouch("memory.set_mode", gene, mode=(new or old).mode))  # type: ignore[union-attr]
         elif old.mode != new.mode:
-            self.changes.append(GeneChange(gene, "modified", self._json_diff({"mode": old.mode}, {"mode": new.mode})))
+            self.changes.append(
+                GeneChange(gene, ChangeKind.MODIFIED, self._json_diff({"mode": old.mode}, {"mode": new.mode}))
+            )
             self.touched.append(OpTouch("memory.set_mode", gene, mode=new.mode))
         old_items = self._items(old)
         new_items = self._items(new)
         for key in sorted(set(old_items) | set(new_items)):
             item_gene = gene_paths.memory_path(key)
             if key not in old_items:
-                self.changes.append(GeneChange(item_gene, "added"))
+                self.changes.append(GeneChange(item_gene, ChangeKind.ADDED))
                 self.touched.append(OpTouch("memory.add", item_gene))
             elif key not in new_items:
-                self.changes.append(GeneChange(item_gene, "removed"))
+                self.changes.append(GeneChange(item_gene, ChangeKind.REMOVED))
                 self.touched.append(OpTouch("memory.retire", item_gene))
             elif old_items[key] != new_items[key]:
-                self.changes.append(GeneChange(item_gene, "modified", self._json_diff(old_items[key], new_items[key])))
+                self.changes.append(
+                    GeneChange(item_gene, ChangeKind.MODIFIED, self._json_diff(old_items[key], new_items[key]))
+                )
                 self.touched.append(OpTouch("memory.update", item_gene))
 
     def _items(self, memory: MemorySpec | None) -> dict[str, Any]:
@@ -236,12 +240,12 @@ class _Differ:
         for code in sorted(set(old) | set(new)):
             gene = gene_paths.mcp_path(code)
             if code not in old:
-                self.changes.append(GeneChange(gene, "added"))
+                self.changes.append(GeneChange(gene, ChangeKind.ADDED))
             elif code not in new:
-                self.changes.append(GeneChange(gene, "removed"))
+                self.changes.append(GeneChange(gene, ChangeKind.REMOVED))
             elif old[code] != new[code]:
                 self.changes.append(
-                    GeneChange(gene, "modified", self._json_diff(old[code].to_json(), new[code].to_json()))
+                    GeneChange(gene, ChangeKind.MODIFIED, self._json_diff(old[code].to_json(), new[code].to_json()))
                 )
             else:
                 continue
@@ -252,11 +256,13 @@ class _Differ:
         if old == new:
             return
         if old is None or new is None:
-            self.changes.append(GeneChange("script", "added" if old is None else "removed"))
+            self.changes.append(GeneChange("script", ChangeKind.ADDED if old is None else ChangeKind.REMOVED))
         else:
             self.changes.append(
                 GeneChange(
-                    "script", "modified", self._text_diff(self.content.read(old.digest), self.content.read(new.digest))
+                    "script",
+                    ChangeKind.MODIFIED,
+                    self._text_diff(self.content.read(old.digest), self.content.read(new.digest)),
                 )
             )
         self.touched.append(OpTouch("human.only", "script"))
@@ -264,7 +270,9 @@ class _Differ:
     def engine_config(self) -> None:
         if self.a.engine_config != self.b.engine_config:
             self.changes.append(
-                GeneChange("engine_config", "modified", self._json_diff(self.a.engine_config, self.b.engine_config))
+                GeneChange(
+                    "engine_config", ChangeKind.MODIFIED, self._json_diff(self.a.engine_config, self.b.engine_config)
+                )
             )
             self.touched.append(OpTouch("human.only", "engine_config"))
 

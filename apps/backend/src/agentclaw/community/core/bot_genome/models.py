@@ -298,12 +298,20 @@ class RefUpdate:
     reason: str | None = None  #: the caller's reason, kept in the ref event log
 
 
+class ChangeKind(StrEnum):
+    """How a gene differs between two revisions (README §9.3)."""
+
+    ADDED = "added"  #: in the newer revision only
+    REMOVED = "removed"  #: in the older revision only
+    MODIFIED = "modified"  #: in both, with different content
+
+
 @dataclass(frozen=True)
 class GeneChange:
     """One gene that differs between two revisions (README §9.3)."""
 
     gene: str  #: the gene path, e.g. ``persona/SOUL.md`` or ``skills/refund-policy/SKILL.md``
-    kind: str  #: ``added`` | ``removed`` | ``modified``
+    kind: ChangeKind  #: added, removed or modified
     #: A unified diff of the text, present only for a ``modified`` text file (or JSON value such as an MCP
     #: entry) whose diff fits ``MAX_DIFF_BYTES``; ``None`` for added / removed genes, binary files and trees.
     diff: str | None = None

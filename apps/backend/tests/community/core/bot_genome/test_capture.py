@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 import pytest
 
 from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import canonical_tree_bytes, decode_tree_bytes
 from agentclaw.community.core.bot_genome.canonical import sha256_digest
-from agentclaw.community.core.bot_genome.capture import CapturedFile, CapturedResource, CapturedSkill, capture_spec
+from agentclaw.community.core.bot_genome.capture import (
+    CapturedFile,
+    CapturedMcpServer,
+    CapturedPersonaFile,
+    CapturedResource,
+    CapturedSkill,
+    SkillOrigin,
+    capture_spec,
+)
 from agentclaw.community.core.bot_genome.capture.capture import agents_md_text, normalise_resource_path
 from agentclaw.community.core.bot_genome.errors import CaptureRefused
 from agentclaw.community.core.bot_genome.models import BotRef
@@ -45,13 +52,15 @@ class FakeReader:
             if isinstance(e, LocalSkill):
                 skills.append(
                     CapturedSkill(
-                        e.name, "local", files=tuple(CapturedFile(*f) for f in decode_tree_bytes(blobs.read(e.digest)))
+                        e.name,
+                        SkillOrigin.LOCAL,
+                        files=tuple(CapturedFile(*f) for f in decode_tree_bytes(blobs.read(e.digest))),
                     )
                 )
             elif isinstance(e, RepoSkill):
-                skills.append(CapturedSkill(e.name, "repo", repo_path=e.repo_path))
+                skills.append(CapturedSkill(e.name, SkillOrigin.REPO, repo_path=e.repo_path))
             else:
-                skills.append(CapturedSkill(e.name, "center", center_version=e.center_version))
+                skills.append(CapturedSkill(e.name, SkillOrigin.CENTER, center_version=e.center_version))
         resources = []
         for e in spec.resources:
             data = blobs.read(e.digest)
@@ -71,8 +80,8 @@ class FakeReader:
     async def refusal(self, bot: BotRef) -> str | None:
         return self._refuse
 
-    async def persona_files(self, bot: BotRef) -> dict[str, str]:
-        return dict(self._persona)
+    async def persona_files(self, bot: BotRef) -> tuple[CapturedPersonaFile, ...]:
+        return tuple(CapturedPersonaFile(file_type, text) for file_type, text in self._persona.items())
 
     async def skills(self, bot: BotRef) -> tuple[CapturedSkill, ...]:
         return self._skills
@@ -80,8 +89,9 @@ class FakeReader:
     async def resources(self, bot: BotRef) -> tuple[CapturedResource, ...]:
         return self._resources
 
-    async def mcp_servers(self, bot: BotRef) -> tuple[dict[str, Any], ...]:
-        return tuple(json.loads(json.dumps(e)) for e in self._mcp)
+    async def mcp_servers(self, bot: BotRef) -> tuple[CapturedMcpServer, ...]:
+        copied = (json.loads(json.dumps(e)) for e in self._mcp)
+        return tuple(CapturedMcpServer(e["server_code"], e.get("config")) for e in copied)
 
     async def script_body(self, bot: BotRef) -> str | None:
         return self._script
@@ -161,15 +171,15 @@ async def test_local_skills_are_what_the_validator_keeps_and_repo_skills_keep_th
         skills=[
             CapturedSkill(
                 "tidy",
-                "local",
+                SkillOrigin.LOCAL,
                 files=(
                     CapturedFile("tidy/SKILL.md", skill_md),
                     CapturedFile("tidy/.DS_Store", b"x"),
                     CapturedFile("tidy/a.py", b"print()\n"),
                 ),
             ),
-            CapturedSkill("weather", "repo", repo_path="team/weather"),
-            CapturedSkill("refund", "center", center_version="v7"),
+            CapturedSkill("weather", SkillOrigin.REPO, repo_path="team/weather"),
+            CapturedSkill("refund", SkillOrigin.CENTER, center_version="v7"),
         ]
     )
     captured = await _capture(reader)
@@ -264,8 +274,8 @@ async def test_a_persona_type_outside_the_contract_is_refused_as_schema() -> Non
 async def test_an_invalid_local_skill_and_an_unpinned_center_skill_are_refused() -> None:
     reader = FakeReader(
         skills=[
-            CapturedSkill("bad", "local", files=(CapturedFile("README.md", b"no skill"),)),
-            CapturedSkill("refund", "center", center_version=None),
+            CapturedSkill("bad", SkillOrigin.LOCAL, files=(CapturedFile("README.md", b"no skill"),)),
+            CapturedSkill("refund", SkillOrigin.CENTER, center_version=None),
         ]
     )
     with pytest.raises(CaptureRefused) as caught:
