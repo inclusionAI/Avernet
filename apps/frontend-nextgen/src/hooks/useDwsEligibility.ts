@@ -1,3 +1,4 @@
+import { isHostingStatus } from '@/domain/dwsHosting';
 import { dwsHostingService } from '@/services/botWorkshop/dwsHostingService';
 import { useEffect, useState } from 'react';
 
@@ -16,10 +17,15 @@ export function useDwsEligibility(
     let controller: AbortController;
     const refresh = async () => {
       controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
+      const timeout = setTimeout(() => {
+        controller.abort();
+        if (active) setGrant({ key, available: false });
+      }, 5000);
       try {
-        const available = await dwsHostingService.eligibility(botId, controller.signal);
-        if (active) setGrant({ key, available });
+        const allowed = await dwsHostingService.eligibility(botId, controller.signal);
+        if (!active || controller.signal.aborted) return;
+        const available = allowed && isHostingStatus(await dwsHostingService.status(botId, controller.signal));
+        if (active && !controller.signal.aborted) setGrant({ key, available });
       } catch {
         if (active) setGrant({ key, available: false });
       } finally {
