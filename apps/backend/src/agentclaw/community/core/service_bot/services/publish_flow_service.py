@@ -337,6 +337,9 @@ class PublishFlowService(
         - gate seam 未绑定（None）或决策 allowed → 返回 None，不拦截。
         - 决策 blocked → 把门禁摘要写入发布单 ``ext.gate``（供前端摘要与
           运维阻断原因查询），并返回草稿态结果；不做任何状态推进。
+        - ``ext.gate`` 写用合并语义（幂等，reviewer L366）：只刷新决策面字段，
+          保留编排已写的 ``evaluation_id`` / ``eval_env_context`` / ``started_at``，
+          重复 publish_staging 检查不清掉"已在评的评测"状态。
         - 决策接口抛异常（非预期崩溃）→ fail-open：灰度期门禁平台抖动不应卡住
           发布主流程，记录 warning 后放行。真正的"是否拦截"由 corp 侧 DRM 总
           开关 + 门禁名单两层控制（spec §6）；本层只兜底非预期异常。plugin
@@ -390,11 +393,15 @@ class PublishFlowService(
             "report_url": decision.report_url,
             "operator": operator,
         }
+        def _merge_gate_block(ext):
+            # 幂等（reviewer L366）：重复 publish_staging 门禁检查不应清掉编排已写的
+            # evaluation_id / eval_env_context / started_at——它们标识"已在评的评测"。
+            # ext.gate 写用合并：仅刷新决策面字段，保留评测跟踪字段。
+            existing = ext.get("gate") if isinstance(ext.get("gate"), dict) else {}
+            ext["gate"] = {**existing, **gate_summary}
+
         try:
-            self._publish_service.mutate_publish_ext(
-                publish_record.id,
-                lambda ext: ext.update({"gate": gate_summary}),
-            )
+            self._publish_service.mutate_publish_ext(publish_record.id, _merge_gate_block)
         except Exception as exc:  # noqa: BLE001 — 摘要落库失败不改变阻断语义
             logger.warning(
                 "[PublishFlowService] gate ext record failed: %s", exc

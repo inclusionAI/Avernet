@@ -281,3 +281,41 @@ async def test_gate_ext_record_failure_does_not_unblock():
     assert result.status == PublishStatus.DRAFT.value
     assert result.data["gate"]["status"] == GATE_EVAL_FAILED_ENFORCE
     publish_service.mutate_publish_ext.assert_called_once()  # 尝试落过摘要
+
+
+@pytest.mark.asyncio
+async def test_gate_block_ext_write_preserves_in_progress_eval():
+    """幂等（reviewer L366）：重复 publish_staging 检查不清掉编排已写的
+    evaluation_id / eval_env_context / started_at——只刷新决策字段。"""
+    gate = _FakeGate(
+        GatePublishDecision(
+            allowed=False,
+            status=GATE_EVALUATING,
+            reason="评测任务执行中",
+            hit=True,
+            hit_type="space",
+            mode="enforce",
+        )
+    )
+    svc, publish_service, record = _mk_service(gate)
+
+    await svc.process(publish_id=1, operator="u1")
+
+    publish_service.mutate_publish_ext.assert_called_once()
+    _, mutator = publish_service.mutate_publish_ext.call_args[0]
+    # 编排此前已落 ext.gate（一次 start_evaluation）——模拟"已在评的评测"
+    pre_ext = {
+        "gate": {
+            "status": "evaluating",
+            "evaluation_id": "st-uuid-1",
+            "eval_env_context": {"binding_id": "bnd-1", "default_tag": "eval"},
+            "started_at": "2026-10-20T00:00:00",
+        }
+    }
+    mutator(pre_ext)
+    # 决策面刷新（checked_at 写入、status 仍 evaluating），评测跟踪字段保留
+    assert "checked_at" in pre_ext["gate"]
+    assert pre_ext["gate"]["status"] == GATE_EVALUATING
+    assert pre_ext["gate"]["evaluation_id"] == "st-uuid-1"
+    assert pre_ext["gate"]["eval_env_context"]["binding_id"] == "bnd-1"
+    assert pre_ext["gate"]["started_at"] == "2026-10-20T00:00:00"

@@ -56,6 +56,7 @@
 
 - gate seam 未绑定（`None`）或决策 `allowed=True` → 不拦截。
 - 决策阻断 → 把决策摘要写入发布单 `ext.gate`（`status / checked_at / hit_type / mode / policy_name / reason / failure_summary / report_url / operator`），返回草稿态 `PublishFlowResult`（`data={"gate": gate_summary}`），不做任何状态推进。
+- `ext.gate` 写为**合并**而非覆盖（幂等，reviewer L366）：只刷新上述决策面字段，保留编排已写的 `evaluation_id` / `eval_env_context` / `started_at`。重复 `publish_staging` 检查不清掉"已在评的评测"状态——放行后由 `EvaluationOrchestrator.query_progress` 回写终态。验证：`test_gate_block_ext_write_preserves_in_progress_eval`。
 - 决策接口抛异常（非预期崩溃）→ fail-open：灰度期门禁平台抖动不应卡住发布主流程，记录 warning 后放行（`return None`，不落 `ext.gate`）。真正的"是否拦截"由 corp 侧 DRM 总开关 + 门禁名单两层控制（见 §6）；本层只兜底非预期异常。plugin 自身 handled 错误（如 corp `ProdEvaluationGate` 把 HTTP 错误转成 `GATE_ERROR` 决策返回）仍按其返回的阻断决策阻断——不在本 fail-open 分支。
 - `ext.gate` 落库失败（`mutate_publish_ext` 抛异常）→ warning 吞掉，但阻断结果照常返回（摘要仍在 `result.data.gate`，避免有人误把落库失败回退成放行）。
 - 推进点之前解析 `space_id`（`bot_service.get_bot`）；解析失败不阻断门禁判定（`space_id=""` 传给 gate）。

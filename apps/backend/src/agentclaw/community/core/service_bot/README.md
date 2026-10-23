@@ -79,6 +79,7 @@ internal_dependencies:
   - agentclaw.community.core.devices.services.device_filesystem    # teclaw build-time file promotion (TeclawFilePromotion)
   - agentclaw.community.plugin_api.engine_ext_client
   - agentclaw.community.plugin_api.eval_env             # DYNAMIC_ENV_TAG_KEY injected into eval container extra_envs
+  - agentclaw.community.plugin_api.evaluation_gate     # EvaluationGatePlugin seam queried before DRAFT→BUILDING advance (publish gating, B2)
   - agentclaw.community.plugin_api.http_client
   - agentclaw.community.plugin_api.models
   - agentclaw.community.plugin_api.object_storage           # teclaw promotion stages files to OSS
