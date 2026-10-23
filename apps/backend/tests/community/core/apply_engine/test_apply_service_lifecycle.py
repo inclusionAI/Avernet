@@ -1036,8 +1036,9 @@ def test_a_dry_run_hears_the_compilers_own_refusal_not_the_workers(world):
     ``CompileRefused`` itself is what only the worker records."""
     service, applies, _locks, _scripts, _ = world
     service._compilers = {ManifestStateRef: _RefusingCompiler()}
-    with pytest.raises(_DomainRefusal, match="superseded"):
+    with pytest.raises(_DomainRefusal, match="superseded") as raised:
         _dry_run(service)
+    assert raised.value.__context__ is None, "the worker-only refusal is not on the domain error's chain"
     assert service.last_apply(entity_id=_ENTITY, bot_id=_BOT) is None, "a dry run leaves no record, refused or not"
 
 
