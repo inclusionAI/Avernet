@@ -75,6 +75,7 @@ export function createMonitoringRecoveryTrigger(input: {
           event_id: event.eventId, tc_fault_label: event.tcFaultLabel,
           target: recoveryTarget,
           session_key: event.sessionKey,
+          ...(event.sessionId ? { session_id: event.sessionId } : {}),
           delivery_key: `monitoring-${createHash("sha256").update(event.eventId).digest("hex")}`,
           diagnosis,
         });

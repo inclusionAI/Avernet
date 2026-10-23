@@ -16,6 +16,7 @@ import type { AgentToolContext, AgentRuntimeInspectInput, AgentRuntimeTargetSnap
 import { redactEvidenceValue, redactPersistableText } from "@avernet/clawweb-shared/server/services/redaction";
 import { SessionRecoveryError } from "./errors.js";
 import { RecoverySessionReader } from "./session-reader.js";
+import { cronRunSessionId } from "./session-identity.js";
 import { savedRecoveryHandbook } from "./handbook.js";
 import { recoveryResult } from "./result.js";
 import type { RecoveryAgentExecutor } from "./task-service.js";
@@ -365,7 +366,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       if (recoveryTargetSnapshot(currentTarget).fingerprint !== task.runtimeTarget!.fingerprint) fail(409, "目标运行位置已变化，不能投递旧方案的重试消息");
       const originalId = this.originalSessionId(task);
       if (originalId && task.request.target.engine !== "TE") await this.reader.read({ target: task.runtimeTarget!.target, sessionKey: task.request.session_key,
-        deliveryKey: this.latestDeliveryKey(task), expectedSessionId: originalId, limit: 1 });
+        deliveryKey: this.latestDeliveryKey(task), expectedSessionId: originalId, requireIndex: true, limit: 1 });
       const marker = `[会话自愈：${key}]`;
       const startedAt = this.now();
       const message = `${marker}\n${body.message}`;
@@ -552,6 +553,8 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     return event ? String((event.payload.result as Record<string, unknown>).delivery_key) : task.request.delivery_key;
   }
   private originalSessionId(task: RecoveryStoredTask): string | undefined {
+    const requested = task.request.session_id ?? (task.request.target.engine === "OC" ? cronRunSessionId(task.request.session_key) : undefined);
+    if (requested) return requested;
     const source = task.timeline.find(event => event.kind === "operation" && (event.payload.result as Record<string, unknown>)?.session_id);
     return source ? String((source.payload.result as Record<string, unknown>).session_id) : undefined;
   }

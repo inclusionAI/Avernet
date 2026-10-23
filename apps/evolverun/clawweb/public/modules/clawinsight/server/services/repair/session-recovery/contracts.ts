@@ -7,6 +7,7 @@ export type RecoveryRequest = {
   tc_fault_label: string | null;
   target: { bot_id: string; entity_id: string; env: "pre" | "prod"; engine: "OC" | "CC" | "TE"; runtime_identity?: BotRuntimeIdentity };
   session_key: string;
+  session_id?: string;
   delivery_key: string;
   diagnosis: string;
   error_location?: string;

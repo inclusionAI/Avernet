@@ -35,6 +35,12 @@ function setup(callbackFails = false) {
 }
 
 describe("self-healing task orchestration", () => {
+  it("retains the upstream physical Session ID in storage and task detail", async () => {
+    const { service, records } = setup();
+    const { task_id } = await service.create({ ...request, session_id: "original" }, actor);
+    expect(records.get(task_id)!.request.session_id).toBe("original");
+    expect((await service.detail(task_id, actor)).request.session_id).toBe("original");
+  });
   it("starts an independent Agent without backend advice once for an idempotent trigger", async () => {
     const { service, agent, delivery } = setup();
     const accepted = await service.create(request, actor);

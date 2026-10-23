@@ -29,7 +29,7 @@ describe("monitoring automatic recovery", () => {
     const [request, actor] = service.create.mock.calls[0];
     expect(request).toEqual({
       event_id: event.eventId, tc_fault_label: event.tcFaultLabel, target: { ...bot, engine },
-      session_key: event.sessionKey, delivery_key: expect.any(String),
+      session_key: event.sessionKey, session_id: event.sessionId, delivery_key: expect.any(String),
       diagnosis: `业务诊断：${event.businessDiagnosis}\n系统诊断：${event.systemDiagnosis}`,
     });
     expect(actor).toEqual({ userId: "001234", isAdmin: false });
@@ -99,6 +99,12 @@ describe("monitoring automatic recovery", () => {
     await trigger.trigger({ ...event, sessionKey: null, traceId: "trace" });
     expect(service.create).not.toHaveBeenCalled();
     expect(warning).toHaveBeenCalledWith("[monitoring] recovery skipped", expect.objectContaining({ eventId: event.eventId, reason: "invalid_recovery_input" }));
+  });
+
+  it("preserves legacy diagnostics without a physical Session ID", async () => {
+    const { service, trigger } = setup();
+    await trigger.trigger({ ...event, sessionId: null });
+    expect(service.create.mock.calls[0][0]).not.toHaveProperty("session_id");
   });
 
   it("returns a retryable error only for allowed targets when the recovery service is unavailable", async () => {
