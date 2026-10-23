@@ -24,9 +24,9 @@ its first caller.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable, Collection
+from typing import TYPE_CHECKING, Callable, Collection, NoReturn
 
-from agentclaw.community.core.apply_engine.compiler import Compiled, GenomeStateRef
+from agentclaw.community.core.apply_engine.compiler import Compiled, CompileRefused, GenomeStateRef
 from agentclaw.community.core.apply_engine.constructs import ApplyConstruct
 from agentclaw.community.core.apply_engine.desired_state import (
     CenterSkillVersion,
@@ -138,37 +138,30 @@ class GenomeCompiler:
         if row is None:
             raise RevisionNotFound(f"promotion {ref.promotion_id}")
         if row.status not in _DELIVERABLE:
-            raise NotAppliable(
-                [
-                    Reason(
-                        "not_appliable",
-                        "promotion",
-                        f"promotion {ref.promotion_id} is {row.status}; only an applying or applied promotion is delivered",
-                    )
-                ]
-            )
-        active = self._refs.get(**axes, name="active")
-        if active is None or active.revision_id != row.revision_id:
-            now = active.revision_id if active is not None else None
-            raise NotAppliable(
-                [
-                    Reason(
-                        "not_appliable",
-                        "promotion",
-                        f"promotion {ref.promotion_id} moved active to {row.revision_id}, but active is {now!r} now; "
-                        "a superseded promotion is not delivered",
-                    )
-                ]
+            _refuse(f"promotion {ref.promotion_id} is {row.status}; only a promotion in {sorted(_DELIVERABLE)} is delivered")
+        current = self._refs.get(**axes, name=row.ref)
+        if current is None or current.revision_id != row.revision_id:
+            now = current.revision_id if current is not None else None
+            _refuse(
+                f"promotion {ref.promotion_id} moved {row.ref} to {row.revision_id}, but {row.ref} is {now!r} now; "
+                "a superseded promotion is not delivered"
             )
         return row.revision_id
 
     def check(self, ctx: ApplyContext, ref: GenomeStateRef) -> None:
+        """Raises the genome's own errors (``RevisionNotFound``, ``NotAppliable``), which its HTTP surface maps."""
         self._revision_of(ctx, ref)
 
     async def compile(
         self, ctx: ApplyContext, ref: GenomeStateRef, *, only: Collection[ApplyConstruct] | None = None
     ) -> Compiled:
-        revision = self._revision_of(ctx, ref)
+        """The promotion's revision as a desired state; what ``check`` would refuse is ``CompileRefused`` here.
+
+        ``compile`` runs in the apply worker, after ``check`` accepted the
+        reference and an apply id was minted; the refs can have moved in
+        between, and a revision can fail the state model as recorded. Either
+        is a reason the report should carry, not an engine failure.
+        """
         bot = BotRef(
             entity_id=ctx.entity_id,
             bot_id=ctx.bot_id,
@@ -176,6 +169,13 @@ class GenomeCompiler:
             engine_type=ctx.engine_type,
             bot_type=ctx.bot_type,
         )
-        state = self._registry.compile(bot, revision)
+        try:
+            state = self._registry.compile(bot, self._revision_of(ctx, ref))
+        except (NotAppliable, RevisionNotFound) as exc:
+            raise CompileRefused(str(exc)) from exc
         # A creation half applies its own constructs only; the rest stay undeclared.
         return Compiled(state if only is None else state.only(only))
+
+
+def _refuse(message: str) -> NoReturn:
+    raise NotAppliable([Reason("not_appliable", "promotion", message)])
