@@ -411,8 +411,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/sessions"): ServiceChecked(
         PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.router"
     ),
-    ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files"): Check(
-        PermissionLevel.MEMBER
+    ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files"): ServiceChecked(
+        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.router"
     ),
     (
         "POST",

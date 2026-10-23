@@ -1,6 +1,6 @@
 import { CapabilityPanel } from '@/components/BotWorkshop/Editor/CapabilityPanel';
 import { ChannelConfigPanel } from '@/components/BotWorkshop/Editor/ChannelConfigPanel';
-import { DebugChatPanel } from '@/components/BotWorkshop/Editor/DebugChatPanel';
+import { DetailDebugChat } from './DetailDebugChat';
 import { DwsHostingPanel } from '@/components/BotWorkshop/Editor/DwsHostingPanel';
 import { IdentityConfigPanel } from '@/components/BotWorkshop/Editor/IdentityConfigPanel';
 import { LinkPanel } from '@/components/BotWorkshop/Editor/LinkPanel';
@@ -273,25 +273,19 @@ const BotWorkshopDetailPage: React.FC = () => {
           </fieldset>
         </section>
         {debugOpen ? (
-          <div
-            className={cn(
-              'hidden min-w-0 flex-1 transition-[flex-basis,width] duration-200 ease-out lg:flex',
-              debugFullscreen && 'flex',
-            )}
-          >
-            <DebugChatPanel
-              key={`${bot.id}:${verifying ? 'verify' : runtimeStage ?? bot.lifecycle}`}
-              bot={bot}
-              runtimeStage={verifying ? 'verify' : runtimeStage}
-              ownerId={addressedOwnerId}
-              fullscreen={debugFullscreen}
-              onClose={() => {
-                setDebugOpen(false);
-                setDebugFullscreen(false);
-              }}
-              onToggleFullscreen={() => setDebugFullscreen((current) => !current)}
-            />
-          </div>
+          <DetailDebugChat
+            authenticatedUserId={requestIdentity.ready ? requestIdentity.userId ?? null : null}
+            key={`${bot.id}:${verifying ? 'verify' : runtimeStage ?? bot.lifecycle}`}
+            bot={bot}
+            runtimeStage={verifying ? 'verify' : runtimeStage}
+            ownerId={addressedOwnerId}
+            fullscreen={debugFullscreen}
+            onClose={() => {
+              setDebugOpen(false);
+              setDebugFullscreen(false);
+            }}
+            onToggleFullscreen={() => setDebugFullscreen((current) => !current)}
+          />
         ) : null}
       </div>
     </main>

@@ -14,6 +14,9 @@ from injector import Injector, Module
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions import router
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
+from agentclaw.community.api.human_bot_friendship_service import HumanBotFriendshipServiceProtocol
+from agentclaw.community.core.expert_chat.errors import BotNotFoundError
 from agentclaw.community.api.tc_resource_ready_observer import (
     TcResourceReadyObserverProtocol,
 )
@@ -181,15 +184,17 @@ def observer() -> _Observer:
 
 
 @pytest.fixture
-def client(relay, resources, runtime_bindings, observer):
+def client(relay, resources, runtime_bindings, observer, friendships, expert):
     class _Bindings(Module):
         def configure(self, binder):
             binder.bind(EngineRuntimeRelayProtocol, to=relay)
+            binder.bind(HumanBotFriendshipServiceProtocol, to=friendships)
+            binder.bind(ExpertChatServiceProtocol, to=expert)
             binder.bind(SessionResourceServiceProtocol, to=resources)
             binder.bind(RuntimeBindingResolutionService, to=runtime_bindings)
             binder.bind(TcResourceReadyObserverProtocol, to=observer)
-            # These six file operations are ``Check(MEMBER)``; the gate runs
-            # ahead of every one of them.
+            # Mutations/content retain Check(MEMBER); list checks operator
+            # access or an explicitly addressed, owned friend session.
             bind_seam_from_relay(binder, relay)
 
     app = FastAPI()
@@ -202,6 +207,75 @@ def client(relay, resources, runtime_bindings, observer):
 
 def _base() -> str:
     return f"/openapi/v1/bots/{BOT}/sessions/{SESSION_ID}/files"
+
+
+@pytest.fixture
+def friend_client(client, friendships):
+    friendships.allowed = True
+    client.app.dependency_overrides[require_principal] = lambda: {"user_id": "friend-1"}
+    return user_scoped_client(client.app, "friend-1")
+
+
+def test_friend_list_checks_friendship_and_session_ownership_before_resources(
+    friend_client, resources, friendships, expert, relay,
+):
+    data = ok(friend_client.get(_base(), params={"owner_id": OWNER, "f_user_id": "friend-1"}))
+    assert data["files"][0]["resource_id"] == "sr_1"
+    assert friendships.calls[0]["human_id"] == "friend-1"
+    owned = next(call for call in expert.calls if call[0] == "get_owned_chat_session")
+    assert owned[1][:4] == ("friend-1", BOT, OWNER, SESSION_ID)
+    assert owned[2]["bcn_friend_authorized"] is True
+    assert resources.calls == [("list", {
+        "owner_id": OWNER, "bot_id": BOT, "session_key": SESSION_ID, "ready_only": True,
+    })]
+    assert relay.attempts == []
+
+
+def test_owner_can_list_one_verified_friends_session(client, friendships, expert):
+    friendships.allowed = True
+    assert client.get(_base(), params={"f_user_id": "friend-1"}).status_code == 200
+    owned = next(call for call in expert.calls if call[0] == "get_owned_chat_session")
+    assert owned[1][:4] == ("friend-1", BOT, OWNER, SESSION_ID)
+
+
+def test_friendship_source_failure_never_reads_resources(friend_client, friendships, resources):
+    from unittest.mock import Mock
+    from agentclaw.community.core.bot_chat.bcn_friendship import FriendshipSourceUnavailableError
+
+    friendships.is_friend = Mock(side_effect=FriendshipSourceUnavailableError("unavailable"))
+    response = friend_client.get(_base(), params={"owner_id": OWNER, "f_user_id": "friend-1"})
+    assert response.status_code == 409
+    assert resources.calls == []
+
+
+@pytest.mark.parametrize("reason", ["not_friend", "foreign_identity", "foreign_session", "verify", "online", "missing_parameter"])
+def test_friend_list_refuses_unauthorized_access_without_reading_resources(
+    friend_client, resources, friendships, expert, reason,
+):
+    from unittest.mock import AsyncMock
+
+    params = {"owner_id": OWNER, "f_user_id": "friend-1"}
+    if reason == "not_friend":
+        friendships.allowed = False
+    elif reason == "foreign_identity":
+        params["f_user_id"] = "friend-2"
+    elif reason == "foreign_session":
+        expert.get_owned_chat_session = AsyncMock(side_effect=BotNotFoundError("foreign session"))
+    elif reason == "missing_parameter":
+        del params["f_user_id"]
+    else:
+        params["stage"] = reason
+    assert fails(friend_client.get(_base(), params=params), 404)["message"] == "Not found"
+    assert resources.calls == []
+
+
+@pytest.mark.parametrize("suffix,method", [("/sr_1/content", "get"), ("/sr_1", "delete"), ("/upload-intents", "post")])
+def test_friend_parameter_does_not_grant_other_file_permissions(friend_client, resources, suffix, method):
+    response = getattr(friend_client, method)(
+        _base() + suffix, params={"owner_id": OWNER, "f_user_id": "friend-1"},
+    )
+    assert response.status_code == 404
+    assert resources.calls == []
 
 
 def test_upload_rejects_all_internal_routing_fields(client, resources):
