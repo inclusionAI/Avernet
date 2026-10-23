@@ -9,6 +9,7 @@ uses.
 
 from __future__ import annotations
 
+from agentclaw.community.core.apply_engine.compiler import GenomeStateRef, ManifestStateRef, StateRef
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
     ApplyAccepted,
     ApplyPhase,
@@ -22,5 +23,8 @@ __all__ = [
     "ApplyPhase",
     "ApplyReport",
     "BotConfigManifestApplyServiceProtocol",
+    "GenomeStateRef",
     "ManifestApplyInProgressError",
+    "ManifestStateRef",
+    "StateRef",
 ]

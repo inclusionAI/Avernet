@@ -11,7 +11,7 @@ reference's identifiers only.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Mapping, Protocol, TypeVar, runtime_checkable
+from typing import TYPE_CHECKING, Any, ClassVar, Dict, Mapping, Protocol, TypeVar, runtime_checkable
 
 from agentclaw.community.core.apply_engine.desired_state import DesiredState
 
@@ -24,6 +24,7 @@ __all__ = [
     "DesiredStateCompiler",
     "GenomeStateRef",
     "ManifestStateRef",
+    "StateCompilers",
     "StateRef",
     "state_ref_from_payload",
 ]
@@ -90,4 +91,20 @@ class DesiredStateCompiler(Protocol[R]):
     propagates, which the run service records as a failed apply.
     """
 
+    def check(self, ctx: ApplyContext, ref: R) -> None:
+        """Refuse now what ``compile`` would refuse later, so the caller hears it before an apply id exists.
+
+        Synchronous and cheap: the Manifest compiler re-validates the stored
+        document (the engine may have changed since it was accepted), the
+        genome compiler checks the promotion is there to deliver. Raises the
+        same error ``compile`` would; returns ``None`` when nothing stands in
+        the way. Fetches nothing.
+        """
+        ...
+
     async def compile(self, ctx: ApplyContext, ref: R) -> Compiled: ...
+
+
+#: The run service's lookup: one compiler per reference type. A map
+#: multibinding, so each compiler's module contributes its own row.
+StateCompilers = Dict[type, DesiredStateCompiler]

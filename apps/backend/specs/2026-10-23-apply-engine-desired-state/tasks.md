@@ -54,36 +54,39 @@
 - **Depends on:** Task 2 (the move, Task 3, follows the switch)
 - **Notes:** the keep_last / moved-ref / budget cases stay covered by the fetch-funnel suites (`test_source_resolver`, `test_source_fetchers`), which the compiler calls unchanged; the Manifest schema doc (`docs/bot-config-manifest/manifest-schema.zh-CN.md` §3.2) and the `script: null` note are written in Task 12.
 
-### Task 5: Orchestrator and the script, mcp, identity materialisers on the model
+### Task 5: Orchestrator and the script, mcp, identity materialisers on the model `[x]`
 - **Goal:** The engine takes a `DesiredState`; three materialisers consume typed entries.
 - **Files:** `core/apply_engine/{orchestrator,registry,context,outcomes}.py`, `materialisers/{script,mcp,identity}.py`, `delivery.py` (`content` port); `tests/community/core/apply_engine/{test_apply_engine,test_orchestrator_stays_generic,test_identity_materialiser}.py` and the mcp cases in `test_apply_engine.py`
 - **Done when:**
-  - [ ] `ApplyOrchestrator.apply(ctx, state, …)`; `declaration.failures` abort the construct exactly like `ResolveResult` failures (one test pins the entry outcomes and the untouched area).
-  - [ ] `ApplyContext` has no `budget`/`source_session`; `entry_identity` takes typed entries.
-  - [ ] script/mcp/identity `resolve` keep only the engine-side checks in plan § contract; identity reads bytes through the `content` port and refuses non-UTF-8.
-  - [ ] Their tests build typed entries directly; engine-side cases unchanged in count.
+  - [x] `ApplyOrchestrator.apply(ctx, state, …)`; `declaration.failures` abort the construct exactly like `ResolveResult` failures (one test pins the entry outcomes and the untouched area).
+  - [x] `ApplyContext` has no `budget`/`source_session`; `entry_identity` takes typed entries.
+  - [x] script/mcp/identity `resolve` keep only the engine-side checks in plan § contract; identity reads bytes through the `content` port and refuses non-UTF-8.
+  - [x] Their tests build typed entries directly; engine-side cases unchanged in count.
 - **Depends on:** Task 4
+- **Notes:** the suites written against raw entries run through `CompilingMaterialiser` / `EngineRig` (`_fakes.py`): a raw entry goes through the real entry compiler over the same fakes and the typed result is what the materialiser sees, so every refusal keeps its test whichever side now owns it. The fetch-funnel suites take a `fetch_context()` (a `CompileSession`) since the apply context no longer carries the budget or the session. Two belts landed on the way: `file_single` files a produced row when a delivery filed no receipt the bot can reach, and the skills compiler accepts a stored `acm-tree-v1` blob served back by `keep_last` for a git package.
 
-### Task 6: Skills, resources and cli_tools materialisers on the model
+### Task 6: Skills, resources and cli_tools materialisers on the model `[x]`
 - **Goal:** The three fetching materialisers stop fetching.
 - **Files:** `materialisers/{skills,resources,cli_tools}.py`, `cli_tools/{declarations,service}.py` (`CliToolDecl.content`, `_acquire` reads the store); tests `test_skills_materialiser.py`, `test_resources_materialiser.py`, `test_cli_tools_materialiser.py`, `cli_tools` service tests
 - **Done when:**
-  - [ ] Skills: decoded tree → `validate_directory` → canonical zip → upload; a Center or repo skill resolves to a failure naming RSI-04; `keep_last`/stored-copy notes come from `DesiredSkill.note`.
-  - [ ] Resources: admission per member from stored bytes; trees decoded; nesting ban kept; the tree-delete-then-write order kept for now (clear-then-write is Task 9).
-  - [ ] CLI tools: no `entry` on `CliToolDecl`, no resolver on `CliToolService`; `install` reads `decl.content` from the store; the upload road is untouched; convergence key from `pin`.
-  - [ ] No materialiser imports `bot_config_manifest`; the "materialisers name no engine" and "orchestrator stays generic" tests pass.
+  - [x] Skills: decoded tree → `validate_directory` → canonical zip → upload; a Center or repo skill resolves to a failure naming RSI-04; `keep_last`/stored-copy notes come from `DesiredSkill.note`.
+  - [x] Resources: admission per member from stored bytes; trees decoded; nesting ban kept; the tree-delete-then-write order kept for now (clear-then-write is Task 9).
+  - [x] CLI tools: no `entry` on `CliToolDecl`, no resolver on `CliToolService`; `install` reads `decl.content` from the store; the upload road is untouched; convergence key from `pin`.
+  - [x] No materialiser imports `bot_config_manifest` beyond what the move (Task 3) relocates; the "materialisers name no engine" and "orchestrator stays generic" tests pass.
 - **Depends on:** Task 5
+- **Notes:** `CliToolService` takes a `ContentReader` in place of the resolver; `FETCH_CATEGORY` and `CliToolDecl.from_entry` are gone (the grammar lives in `compiler/entries/cli_tools.py`, the `DesiredCliTool → CliToolDecl` mapping is pinned in the materialiser suite). Resource test documents moved under `data/`, the root the validator now enforces.
 
-### Task 7: The apply run on compilers
+### Task 7: The apply run on compilers `[x]`
 - **Goal:** `ApplyRunService` starts from a `StateRef` and resolves a compiler.
 - **Files:** `core/apply_engine/run/service.py`, `apply_task.py`, `run/report_codec.py`, `outcomes.py` (`ApplyReport.state`), `di/modules/{apply_engine_module,manifest_fetch_module,bot_management_module}.py`, HTTP apply routes and schemas, `creation.py`, `create_job.py`; tests `test_apply_service_lifecycle.py`, `test_apply_service_uses_strategy.py`, `test_apply_task.py`, `di/test_apply_engine_module_wiring.py`, HTTP apply tests, creation tests
 - **Done when:**
-  - [ ] `start_apply(..., state=StateRef)` and `dry_run(..., state=StateRef)`; an unregistered reference type is a `ValueError` before the lock; the payload carries `state`; the worker compiles then applies.
-  - [ ] `recent_applies` exposed for the Manifest compiler's baselines; `_last_resolutions` lives in the compiler.
-  - [ ] Reports carry `state` inside the JSON; a persisted report without it reads back as `manifest`; the HTTP payload shows it; OpenAPI snapshot updated.
-  - [ ] The compilers map is an injector map keyed by reference type with the Manifest compiler registered; wiring test covers it.
-  - [ ] Pass count equals Task 1's plus the new tests.
+  - [x] `start_apply(..., state=StateRef)` and `dry_run(..., state=StateRef)`; an unregistered reference type is a `ValueError` before the lock; the payload carries `state`; the worker compiles then applies.
+  - [x] The Manifest compiler reads the bot's recent reports for its baselines; `last_resolutions` lives in `compiler/baselines.py` (tests ported to `compiler/test_baselines.py`).
+  - [x] Reports carry `state` inside the JSON; a persisted report without it reads back as `manifest`; the HTTP payload shows it (`ConfigManifestApply.state`).
+  - [x] The compilers map (`StateCompilers`) is an injector map multibinding keyed by reference type with the Manifest compiler registered beside the fetch pipeline; wiring test covers it.
+  - [x] Pass count equals Task 1's plus the new tests.
 - **Depends on:** Task 6
+- **Notes:** two deviations from the plan. (1) The compiler reads the apply *repository* for baselines rather than a `recent_applies` on the run service: the run service holds the compilers map, so a compiler holding the run service would be a construction cycle. (2) `DesiredStateCompiler` gained a synchronous `check(ctx, ref)`: `start_apply` keeps refusing a stored document that no longer validates *to the caller*, before an apply id exists (the HTTP 422 contract), and the genome compiler will refuse a missing or finished promotion the same way; the compile itself, which fetches, stays on the worker. A compile that raises on the worker is a failed apply with the lock released, the same terminal path a raising orchestrator takes.
 
 ## Group 3 — Resources totality
 

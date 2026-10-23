@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
+from agentclaw.community.core.apply_engine.compiler import ManifestStateRef
 from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     CreationSequence,
 )
@@ -31,9 +32,7 @@ from agentclaw.community.core.bot_config_manifest.apply.order import (
     APPLY_ORDER,
     ApplyPhase,
 )
-from agentclaw.community.core.bot_config_manifest.apply.orchestrator import (
-    declared_entries,
-)
+from agentclaw.community.core.bot_config_manifest.compiler.declared import declared_entries
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     ApplyConstruct,
 )
@@ -352,6 +351,7 @@ class BotCreationManifestSeam(ManifestCreationSeam):
                 bot=bot,
                 owner_id=owner_id,
                 actor_id=actor_id,
+                state=ManifestStateRef(),
                 trigger=CREATE_PRE_CONTAINER_TRIGGER,
                 phase=ApplyPhase.PRE_CONTAINER,
                 engine_type=engine_type,

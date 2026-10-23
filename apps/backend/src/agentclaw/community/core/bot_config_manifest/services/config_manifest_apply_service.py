@@ -1,7 +1,14 @@
 """Applying a bot's configuration manifest (issue #1472).
 
-Owns the lifecycle around the orchestrator: the lock, the re-validation, the
-record's two writes, and handing the work to the queue that runs it.
+Owns the lifecycle around the orchestrator: the lock, the pre-apply check,
+the record's two writes, and handing the work to the queue that runs it.
+
+**An apply starts from a state reference, not a document.** ``start_apply``
+takes a :class:`~...apply_engine.compiler.StateRef` — the bot's stored
+Manifest, or a genome promotion's revision — looks the reference's compiler
+up in the map it was built with, and the worker compiles then applies. This
+service reads no document and names no construct: what a reference means is
+its compiler's business, and the orchestrator applies whatever came out.
 
 **Apply is started, not awaited.** :meth:`start_apply` answers as soon as it can
 answer — with an ``apply_id`` — and the orchestrator runs elsewhere. Applying is
@@ -26,14 +33,16 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
-import time
 import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 
-from agentclaw.community.core.bot_config_manifest.apply.budget import (
-    ApplyFetchBudget,
+from agentclaw.community.core.apply_engine.compiler import (
+    DesiredStateCompiler,
+    StateCompilers,
+    StateRef,
+    state_ref_from_payload,
 )
 from agentclaw.community.core.bot_config_manifest.apply.carry_forward import (
     carry_forward,
@@ -51,13 +60,6 @@ from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
     phase_from_payload,
 )
 from agentclaw.community.core.bot_config_manifest.apply.triggers import require_phase_matches_trigger
-from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
-    GitSourceClient,
-)
-from agentclaw.community.core.bot_config_manifest.fetch.limits import (
-    APPLY_BUDGET_S,
-    APPLY_FETCH_TOTAL_LIMIT,
-)
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.apply.orchestrator import ApplyOrchestrator
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
@@ -67,9 +69,6 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
 )
 from agentclaw.community.core.bot_config_manifest.apply.registry import (
     build_materialisers,
-)
-from agentclaw.community.core.bot_config_manifest.apply.source_session import (
-    SourceSession,
 )
 from agentclaw.community.core.bot_config_manifest.services.apply_termination import (
     parse_started_at,
@@ -137,15 +136,6 @@ def _engine_and_bot_type(
         return str(bot.get("active_engine") or ""), str(bot.get("bot_type") or "")
     return str(engine_type or ""), str(bot_type or "")
 
-#: How many report rows the strict-mode baseline read walks back through.
-#: The common case resolves the newest report on the first row; the walk
-#: exists so a run of failed fetches (each carrying no resolution for the
-#: source it could not reach) cannot wipe a baseline that a report further
-#: back still records. Bounded because a source a document no longer names
-#: must age out eventually, rather than be remembered forever.
-_BASELINE_HISTORY_APPLIES = 10
-
-
 class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
     """Start applies, and read what they did."""
 
@@ -159,23 +149,17 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         manifest_service: BotConfigManifestServiceProtocol,
         apply_repository: BotConfigManifestApplyRepositoryProtocol,
         lock_repository: BotConfigManifestApplyLockRepositoryProtocol,
-        git_client_provider: Callable[[], GitSourceClient],
         task_queue_provider: Callable[[], "TaskQueueService"],
         bot_repository: BotRepository,
         *,
         delivery_strategies: DeliveryStrategyFactory,
+        compilers: StateCompilers,
     ) -> None:
+        # Read for capabilities only (``_context``): what a document may be is
+        # the Manifest compiler's question now, asked when it compiles.
         self._manifests = manifest_service
         self._applies = apply_repository
         self._locks = lock_repository
-        # W7's git transport, held lazily: the sessions built
-        # above reach it by lookup rather than by a held instance, so no
-        # client state can outlive the apply that asked for it. The type is
-        # the fetch-side Protocol — already in this file's import tree via
-        # ``source_session`` — and a runtime import rather than a
-        # TYPE_CHECKING one because the injector resolves this constructor's
-        # string annotations against this module's globals.
-        self._git_client_provider = git_client_provider
         # The queue that now runs the work, and the reader that rebuilds what the
         # payload deliberately does not carry.
         #
@@ -197,6 +181,10 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         # container ports silently. A service that cannot be built without the
         # seam cannot be built wrong.
         self._strategies = delivery_strategies
+        # One compiler per state reference type, contributed by each
+        # compiler's own module. Required for the same reason the seam is: a
+        # service with no compiler could start nothing.
+        self._compilers = dict(compilers)
 
     # ── starting ────────────────────────────────────────────────────────────
 
@@ -209,22 +197,29 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         owner_id: str,
         actor_id: str,
         audit_actor: Optional[str] = None,
+        state: StateRef,
         trigger: str = "explicit",
         phase: ApplyPhase | None = None,
         engine_type: Optional[str] = None,
         bot_type: Optional[str] = None,
         carry_from_apply_id: Optional[str] = None,
     ) -> ApplyAccepted:
-        """Lock, validate, record ``RUNNING``, enqueue the work, return the id.
+        """Lock, check, record ``RUNNING``, enqueue the work, return the id.
 
-        The order is the contract. Both refusals happen **before** an id exists,
+        The order is the contract. Every refusal happens **before** an id exists,
         so a caller never holds a handle to an apply that never ran.
+
+        ``state`` names what to apply, and its type picks the compiler: an
+        unregistered type is a ``ValueError`` before the lock, like a
+        phase/trigger mismatch — a programming error at the call site, not a
+        state of the bot.
 
         **What runs where, and why the split is here.** Everything above the
         enqueue is synchronous on the caller's thread — the lock (so a concurrent
-        apply still raises ``ManifestApplyInProgressError``), the re-validation
-        (so an invalid stored document still raises *to the caller*), the
-        ``apply_id`` and the ``RUNNING`` row. Only the work is handed off. That
+        apply still raises ``ManifestApplyInProgressError``), the compiler's
+        check (so a stored document that no longer validates still raises *to
+        the caller*), the ``apply_id`` and the ``RUNNING`` row. Only the work
+        is handed off — the compile included, because it fetches. That
         is what keeps ``POST …/config-manifest/apply``'s contract identical to
         what W4 shipped while the executor underneath it changed from a daemon
         thread to a durable task.
@@ -250,6 +245,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         caller with nothing to distinguish keeps the obvious behaviour.
         """
         require_phase_matches_trigger(trigger, phase)
+        compiler = self._compiler_for(state)
         env = get_current_env()
         lock = self._locks.acquire(
             env=env, entity_id=entity_id, bot_id=bot_id, holder_user_id=actor_id
@@ -266,34 +262,25 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 raise ManifestApplyInProgressError(bot_id)
 
         try:
-            # Called for its **exception**, not its value: the parsed document
-            # is rebuilt by the handler, so nothing here needs it. What this
-            # buys is that a document which cannot be applied is refused
+            # Called for its **exception**: what cannot be applied is refused
             # synchronously, to the caller, before an ``apply_id`` exists —
-            # exactly as it was before the work moved to the queue.
-            #
-            # It was validated at ``PUT``, so why again? Because validity is
-            # relative to the bot, and the bot moves:
-            #
-            # * **The engine changed.** A document declaring an
-            #   ``identity`` file only Claude Code accepts validated against a
-            #   Claude Code bot; the bot has since been switched to another
-            #   engine, and the capability set it resolves against no longer
-            #   admits that construct.
-            # * **The build changed.** A category whose materialiser has been
-            #   withdrawn since the ``PUT`` — or a document written against a
-            #   newer schema and rolled back to.
-            #
-            # Neither is hypothetical enough to skip: both leave a stored
-            # document that was valid when written and is not now, and both
-            # would otherwise surface as a failed apply on a live bot rather
-            # than a ``422`` on the request that asked for it.
-            self._parsed_or_empty(
-                entity_id=entity_id,
-                bot_id=bot_id,
-                bot=bot,
-                engine_type=engine_type,
-                bot_type=bot_type,
+            # exactly as it was when this service validated the document
+            # itself. The Manifest compiler re-validates the stored document
+            # (its docstring says why a ``PUT``'s validation is not enough);
+            # the worker compiles from the same reference again, because the
+            # compile fetches and a fetch does not belong on this thread.
+            compiler.check(
+                self._context(
+                    bot_id=bot_id,
+                    bot=bot,
+                    owner_id=owner_id,
+                    actor_id=actor_id,
+                    entity_id=entity_id,
+                    env=env,
+                    engine_type=engine_type,
+                    bot_type=bot_type,
+                ),
+                state,
             )
             apply_id = uuid.uuid4().hex
             started_at = datetime.now()
@@ -313,6 +300,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                         trigger=trigger,
                         status=ApplyStatus.RUNNING,
                         started_at=started_at,
+                        state=state,
                     ).as_payload()
                 ),
             )
@@ -346,6 +334,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                     lock_token=lock.lock_token,
                     started_at=started_at.isoformat(),
                     phase=phase,
+                    state=state.to_payload(),
                     engine_type=engine_type,
                     bot_type=bot_type,
                     carry_from_apply_id=carry_from_apply_id,
@@ -381,7 +370,8 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         self,
         *,
         ctx: ApplyContext,
-        parsed: dict,
+        compiler: DesiredStateCompiler,
+        state: StateRef,
         apply_id: str,
         trigger: str,
         started_at: datetime,
@@ -389,20 +379,24 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         lock_token: str,
         carry_from_apply_id: Optional[str] = None,
     ) -> None:
-        """The background half. Always terminates the report and the lock.
+        """The background half: compile, apply, terminate the report and the lock.
 
         Both the terminal write and the lock release are in ``finally`` blocks:
-        a raising orchestrator must not leave a report polling forever, and must
-        not leave the bot locked against every future apply.
+        a raising compiler or orchestrator must not leave a report polling
+        forever, and must not leave the bot locked against every future apply.
+        The compile runs here, on the worker, because it fetches; a compiler
+        that raises (the document stopped validating since the check, a
+        promotion that went away) is a failed apply, recorded like any other.
         """
         report: ApplyReport | None = None
         try:
             strategy = self.delivery_for_engine(ctx.engine_type)
             report = asyncio.run(
-                self._apply_and_finish(
+                self._compile_apply_and_finish(
                     strategy,
                     ctx,
-                    parsed,
+                    compiler,
+                    state,
                     apply_id=apply_id,
                     trigger=trigger,
                     started_at=started_at,
@@ -423,6 +417,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 started_at=started_at,
                 finished_at=datetime.now(),
                 categories=(),
+                state=state,
             )
             record_engine_failure(report, exc)
         else:
@@ -445,28 +440,19 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                         report=json.dumps(report.as_payload()),
                     )
             finally:
-                # W7: the session's checkout trees are this process's to
-                # clean or nobody's — close runs whether the finish write
-                # succeeded or not, and wrapped so a close that raised still
-                # frees the bot. The resolutions survive the close: the
-                # report above has already read them out.
-                try:
-                    if ctx.source_session is not None:
-                        ctx.source_session.close()
-                finally:
-                    self._locks.release(
-                        env=ctx.env,
-                        entity_id=ctx.entity_id,
-                        bot_id=ctx.bot_id,
-                        lock_token=lock_token,
-                    )
+                self._locks.release(
+                    env=ctx.env,
+                    entity_id=ctx.entity_id,
+                    bot_id=ctx.bot_id,
+                    lock_token=lock_token,
+                )
 
     def run_apply_task(self, payload: dict) -> None:
         """Execute one apply from its task payload. Called only by the handler.
 
-        Rebuilds what the payload deliberately does not carry — the bot record and
-        the parsed document (see ``build_apply_task_payload``) — then runs the same
-        ``_run`` body the daemon thread used to.
+        Rebuilds what the payload deliberately does not carry — the bot record,
+        and the state its reference names (see ``build_apply_task_payload``) —
+        then runs the same ``_run`` body the daemon thread used to.
 
         **The tenant is re-established here, from the payload.** The queue has no
         tenant column and no request context survives to handler time, so
@@ -482,11 +468,10 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         with avernet_tenant_scope(tenant):
             bot_id = str(payload["bot_id"])
             try:
-                ctx, parsed = self._rebuild(payload)
+                ctx, compiler, state = self._rebuild(payload)
             except Exception as exc:  # noqa: BLE001 - see below
-                # The rebuild can fail for reasons a retry cannot fix: the bot's
-                # engine changed since the enqueue and the stored document no
-                # longer validates for it, or the row is corrupt. Letting that
+                # The rebuild can fail for reasons a retry cannot fix: the bot
+                # went away since the enqueue, or the row is corrupt. Letting that
                 # escape would hand the worker an exception it treats as a retry,
                 # and the apply would loop until its deadline with the lock still
                 # held and the record still RUNNING. Terminate it here instead —
@@ -500,7 +485,8 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 return
             self._run(
                 ctx=ctx,
-                parsed=parsed,
+                compiler=compiler,
+                state=state,
                 apply_id=str(payload["apply_id"]),
                 trigger=str(payload["trigger"]),
                 started_at=parse_started_at(payload.get("started_at")),
@@ -509,8 +495,10 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 carry_from_apply_id=payload.get("carry_from_apply_id"),
             )
 
-    def _rebuild(self, payload: dict) -> tuple[ApplyContext, dict]:
-        """The context and document the payload deliberately does not carry."""
+    def _rebuild(self, payload: dict) -> tuple[ApplyContext, DesiredStateCompiler, StateRef]:
+        """The context, and the compiler the payload's state reference names."""
+        state = state_ref_from_payload(payload.get("state"))
+        compiler = self._compiler_for(state)
         entity_id = str(payload["entity_id"])
         bot_id = str(payload["bot_id"])
         # Re-read rather than trust a serialised copy: the record may have
@@ -523,13 +511,6 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             # enqueue and now, and applying against defaulted capabilities
             # would be a guess.
             raise ManifestApplyBotMissingError(bot_id)
-        parsed = self._parsed_or_empty(
-            entity_id=entity_id,
-            bot_id=bot_id,
-            bot=bot,
-            engine_type=payload.get("engine_type"),
-            bot_type=payload.get("bot_type"),
-        )
         ctx = self._context(
             bot_id=bot_id,
             bot=bot,
@@ -539,37 +520,12 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             env=str(payload["env"]),
             engine_type=payload.get("engine_type"),
             bot_type=payload.get("bot_type"),
-            # The id this context's fetch pipeline stamps into every receipt, so
-            # the linkage column answers "what did THIS apply fetch" as an
+            # The id the compiler's fetches stamp into every receipt, so the
+            # linkage column answers "what did THIS apply fetch" as an
             # indexed read.
             apply_id=str(payload["apply_id"]),
-            # The two apply-scope promises of fetch/limits.py, made real: one
-            # ledger per apply, consulted before each entry's fetch and charged
-            # after. It is built here rather than at the enqueue because its
-            # deadline is a monotonic reading of *this* process' clock, and
-            # because the apply's duration is the handler's, not the caller's.
-            budget=ApplyFetchBudget(
-                deadline=time.monotonic() + APPLY_BUDGET_S,
-                total_bytes=APPLY_FETCH_TOTAL_LIMIT,
-            ),
-            # W7 built this in the request thread "so the worker never races a
-            # baseline read". It is built here for the same two reasons the
-            # budget is: the session owns checkout trees on disk, and those
-            # belong to the process that applies them rather than to the one
-            # that enqueued — across a restart the request process may not
-            # exist. The race W7 named is still closed, by the lock rather than
-            # by the thread: it is acquired before the enqueue and released by
-            # this handler, so the baseline read happens inside the same held
-            # lock the request thread's did, with no second apply between them.
-            source_session=SourceSession(
-                sources=parsed.get("sources") or {},
-                baselines=self._last_resolutions(
-                    entity_id=entity_id, bot_id=bot_id
-                ),
-                git=self._git_client_provider(),
-            ),
         )
-        return ctx, parsed
+        return ctx, compiler, state
 
     def _bot_or_none(self, *, entity_id: str, bot_id: str) -> Optional[dict]:
         """The bot record, or ``None`` when it does not exist yet.
@@ -591,53 +547,38 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         bot: dict,
         owner_id: str,
         actor_id: str,
+        state: StateRef,
     ) -> ApplyReport:
-        """Compute the plan. Writes nothing, and mints no id."""
-        env = get_current_env()
-        parsed = self._parsed_or_empty(entity_id=entity_id, bot_id=bot_id, bot=bot)
+        """Compute the plan. Writes nothing, and mints no id.
+
+        The compile is the real one — the same compiler, the same fetch
+        bounds, the same baselines — so the plan previewed is the plan the
+        apply would make, and the resolutions reported are what the caller is
+        previewing. Only the write stage is skipped.
+        """
+        compiler = self._compiler_for(state)
         ctx = self._context(
             bot_id=bot_id,
             bot=bot,
             owner_id=owner_id,
             actor_id=actor_id,
             entity_id=entity_id,
-            env=env,
-            # A dry run may fetch, but bounded the same way: a preview that
-            # cannot cost an unbounded run of network time is part of what
-            # keeps it honest to answer synchronously.
-            budget=ApplyFetchBudget(
-                deadline=time.monotonic() + APPLY_BUDGET_S,
-                total_bytes=APPLY_FETCH_TOTAL_LIMIT,
-            ),
-            # The same per-apply source session a real apply runs under,
-            # baselines and all: a dry run's strict-mode answers must be the
-            # answers the real apply would give, and the resolutions it
-            # reports are what the caller is previewing.
-            source_session=SourceSession(
-                sources=parsed.get("sources") or {},
-                baselines=self._last_resolutions(entity_id=entity_id, bot_id=bot_id),
-                git=self._git_client_provider(),
-            ),
+            env=get_current_env(),
         )
-        try:
-            return await self._orchestrator(
-                self.delivery_for_engine(ctx.engine_type)
-            ).apply(
-                ctx,
-                parsed,
-                # No id: a dry run appears in no history, so there is nothing to
-                # address it by. Naming it explicitly rather than minting one keeps
-                # "writes nothing" true of the record as well as of the bot.
-                apply_id="",
-                trigger="dry_run",
-                started_at=datetime.now(),
-                dry_run=True,
-            )
-        finally:
-            # No worker thread exists for a dry run, so its session closes
-            # here — the one terminal path whose ``finally`` is this one.
-            if ctx.source_session is not None:
-                ctx.source_session.close()
+        compiled = await compiler.compile(ctx, state)
+        report = await self._orchestrator(self.delivery_for_engine(ctx.engine_type)).apply(
+            ctx,
+            compiled.state,
+            # No id: a dry run appears in no history, so there is nothing to
+            # address it by. Naming it explicitly rather than minting one keeps
+            # "writes nothing" true of the record as well as of the bot.
+            apply_id="",
+            trigger="dry_run",
+            started_at=datetime.now(),
+            dry_run=True,
+            sources=compiled.sources,
+        )
+        return dataclasses.replace(report, state=state)
 
     # ── reading ─────────────────────────────────────────────────────────────
 
@@ -661,44 +602,6 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             env=get_current_env(), entity_id=entity_id, bot_id=bot_id
         )
         return self._to_report(record, entity_id=entity_id, bot_id=bot_id)
-
-    def _last_resolutions(
-        self, *, entity_id: str, bot_id: str
-    ) -> dict[tuple[str, str, str], str]:
-        """Each ``(url, ref, mode)``'s SHA as the last apply that RESOLVED it,
-        never the row's ``name`` (W7; ``apply/source_session`` says why).
-
-        The reports are where "what did we resolve" already lives
-        (``ApplyReport.sources``), so strict mode reads them back rather than
-        keeping a second table the two could drift apart on. The read walks a
-        bounded history, **not just the newest report**: the newest apply may
-        have failed to fetch a source (a failed fetch or a strict refusal
-        adopts nothing), and reading only that row would wipe the baseline,
-        disarming strict mode and ``keep_last`` after one outage. Per key the
-        newest report wins, and within one report its last row — a creation
-        folds two applies (``apply/carry_forward``), carried phase first, so
-        the later row is the one its delivery stood behind; the walk reads
-        each report backwards. A row with no ``ref`` reads ``"HEAD"``; one
-        missing ``url`` or ``mode`` yields no opinion, nor do empty reports.
-        """
-        records = self._applies.recent(
-            env=get_current_env(),
-            entity_id=entity_id,
-            bot_id=bot_id,
-            limit=_BASELINE_HISTORY_APPLIES,
-        )
-        baselines: dict[tuple[str, str, str], str] = {}
-        for record in records:
-            report = self._to_report(record, entity_id=entity_id, bot_id=bot_id)
-            if report is None:
-                continue
-            for source in reversed(report.sources):
-                if (source.url is None or source.mode is None
-                        or source.resolved_sha is None):
-                    continue
-                key = (source.url, source.ref or "HEAD", source.mode)
-                baselines.setdefault(key, source.resolved_sha)
-        return baselines
 
     # ── internals ───────────────────────────────────────────────────────────
 
@@ -746,31 +649,35 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
     def delivery_for_bot(self, bot: dict) -> DeliveryStrategy:
         return self._strategies.for_bot(bot)
 
-    async def _apply_and_finish(
+    async def _compile_apply_and_finish(
         self,
         strategy: DeliveryStrategy,
         ctx: ApplyContext,
-        parsed: dict,
+        compiler: DesiredStateCompiler,
+        state: StateRef,
         *,
         apply_id: str,
         trigger: str,
         started_at: datetime,
         phase: ApplyPhase | None = None,
     ) -> ApplyReport:
-        """Walk the categories, then let the strategy close the apply.
+        """Compile the reference, walk the constructs, then let the strategy close the apply.
 
         The closing step runs only after every category has been written and
         only for a real apply; its failure is a note on the report, never a
         raise (§2.7: a manifest problem does not fail what it rode on).
         """
+        compiled = await compiler.compile(ctx, state)
         report = await self._orchestrator(strategy).apply(
             ctx,
-            parsed,
+            compiled.state,
             apply_id=apply_id,
             trigger=trigger,
             started_at=started_at,
             phase=phase,
+            sources=compiled.sources,
         )
+        report = dataclasses.replace(report, state=state)
         try:
             note = await strategy.finish(ctx, report)
         except Exception as exc:  # noqa: BLE001 — recorded, never raised
@@ -794,8 +701,6 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         entity_id: str,
         env: str,
         apply_id: Optional[str] = None,
-        budget: Optional[ApplyFetchBudget] = None,
-        source_session: Optional[SourceSession] = None,
         engine_type: Optional[str] = None,
         bot_type: Optional[str] = None,
     ) -> ApplyContext:
@@ -839,39 +744,14 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 )
             ),
             apply_id=apply_id,
-            budget=budget,
-            source_session=source_session,
         )
 
-    def _parsed_or_empty(
-        self,
-        *,
-        entity_id: str,
-        bot_id: str,
-        bot: Optional[dict],
-        engine_type: Optional[str] = None,
-        bot_type: Optional[str] = None,
-    ) -> dict:
-        """The stored document, re-validated, or ``{}`` when there is none.
-
-        A bot with no manifest applies nothing and reports nothing applied —
-        not an error, the same rule that makes an absent manifest read as an
-        empty document rather than a 404.
-
-        Re-validating is not paranoia: capabilities resolve from the bot's
-        engine, which can change after a document is accepted, so a construct
-        that was appliable at ``PUT`` may not be now.
-        """
-        record = self._manifests.get(entity_id=entity_id, bot_id=bot_id)
-        if record is None:
-            return {}
-        engine, kind = _engine_and_bot_type(bot, engine_type, bot_type)
-        result = self._manifests.validate(
-            document=record.document,
-            active_engine=engine,
-            bot_type=kind,
-        )
-        return result.parsed
+    def _compiler_for(self, state: StateRef) -> DesiredStateCompiler:
+        """The compiler registered for this reference's type; a missing one is a wiring error, not a bot state."""
+        try:
+            return self._compilers[type(state)]
+        except KeyError:
+            raise ValueError(f"no compiler is registered for a {type(state).__name__} state reference") from None
 
     def _to_report(
         self, record: Any, *, entity_id: str, bot_id: str

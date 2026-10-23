@@ -14,6 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from agentclaw.community.core.apply_engine.compiler import ManifestStateRef
 from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     ArcaDelivery,
     DeliveryStrategyFactory,
@@ -24,7 +25,6 @@ from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     TeclawPlatformDelivery,
     family_from_engine_test,
 )
-from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
 from agentclaw.community.core.bot_config_manifest.apply import triggers
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
@@ -44,10 +44,9 @@ from agentclaw.community.core.repository.implementations.bot.config_manifest_app
 )
 
 from ._fakes import (
+    manifest_compilers,
     FakeActivationService,
     FakeCapabilityReader,
-    FakeCredentials,
-    FakeGitClient,
     FakeIdentityService,
     FakeManifestContent,
     FakeMcpAuth,
@@ -60,7 +59,6 @@ from ._fakes import (
     real_validator,
     teclaw_engine_test,
 )
-from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
 
 _ENTITY = "u_owner"
 _BOT = "b_teclaw"
@@ -158,9 +156,7 @@ def _world(*, bot, mode, platform_activation=None, redeliver=None):
             upload_service=FakeSkillUploadService(),
             capability_reader=FakeCapabilityReader(),
             package_validator=real_validator(),
-            entry_fetcher=DeclaredSourceResolver(
-                FakeManifestContent(), FakeCredentials(), FakeObjectStore()
-            ),
+            content=FakeManifestContent(),
             resource_service=FakeResourceFileService(),
             cli_tool_service=object(),
         )
@@ -186,7 +182,7 @@ def _world(*, bot, mode, platform_activation=None, redeliver=None):
         manifest_service=_Manifests(),
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
-        git_client_provider=lambda: FakeGitClient(),
+        compilers=manifest_compilers(manifests=_Manifests()),
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(bot),
         delivery_strategies=DeliveryStrategyFactory(
@@ -209,7 +205,7 @@ def _apply(service, bot, phase):
         bot_id=bot["bot_id"],
         bot=bot,
         owner_id=_ENTITY,
-        actor_id=_ENTITY,
+        actor_id=_ENTITY, state=ManifestStateRef(),
         trigger=(
             triggers.CREATE_PRE_CONTAINER
             if phase is ApplyPhase.PRE_CONTAINER
@@ -325,7 +321,7 @@ async def test_dry_run_runs_through_the_strategy_and_writes_nothing() -> None:
         bot=_TECLAW_BOT, mode=TeclawDeliveryMode.PLATFORM, redeliver=redeliver
     )
     report = await service.dry_run(
-        entity_id=_ENTITY, bot_id=_BOT, bot=_TECLAW_BOT, owner_id=_ENTITY, actor_id=_ENTITY
+        entity_id=_ENTITY, bot_id=_BOT, bot=_TECLAW_BOT, owner_id=_ENTITY, actor_id=_ENTITY, state=ManifestStateRef()
     )
     assert [c.construct.value for c in report.categories] == ["mcp"]
     assert platform_activation.activated == []

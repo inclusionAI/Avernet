@@ -15,6 +15,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
+from agentclaw.community.core.apply_engine.compiler import ManifestStateRef, StateRef
 from agentclaw.community.core.apply_engine.constructs import ApplyConstruct
 
 #: What a construct is, for the purposes of applying it: one of the six
@@ -471,6 +472,10 @@ class ApplyReport:
     #: One per distinct git source this apply resolved. Empty when the document
     #: names no git source, which includes every object-store-only document.
     sources: tuple[SourceResolution, ...] = field(default=())
+    #: What was applied: the Manifest (the bot's stored document) or a genome
+    #: promotion's revision. Inside the report rather than a column: a report
+    #: without it, written before the field existed, reads as the Manifest.
+    state: StateRef = field(default_factory=ManifestStateRef)
     #: Apply-level notes belonging to no category. Today's only producer is the
     #: delivery strategy's closing step: a teclaw redeliver that failed after
     #: every category was written is recorded here rather than raised.
@@ -496,6 +501,7 @@ class ApplyReport:
                 "result": "PARTIAL",
                 "started_at": "2026-03-01T09:00:00+00:00",
                 "finished_at": "2026-03-01T09:00:04+00:00",
+                "state": {"kind": "manifest"},
                 "sources": [{"name": "content",
                              "url": "https://code.example.com/team/content.git",
                              "ref": "v1.2.0", "mode": "strict",
@@ -522,6 +528,7 @@ class ApplyReport:
             "finished_at": (
                 self.finished_at.isoformat() if self.finished_at else None
             ),
+            "state": self.state.to_payload(),
             "sources": [source.as_dict() for source in self.sources],
             "categories": [category.as_dict() for category in self.categories],
             "entries": [entry.as_dict() for entry in self.entries],

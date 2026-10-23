@@ -44,10 +44,10 @@ from agentclaw.community.core.repository.implementations.bot.config_manifest_app
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 from ..apply._fakes import (
+    manifest_compilers,
     FakeActivationService,
     FakeCapabilityReader,
     FakeCredentials,
-    FakeGitClient,
     FakeManifestContent,
     FakeMcpAuth,
     FakeResourceFileService,
@@ -127,7 +127,8 @@ def _build(db):
     )
     queue = _InlineQueue()
     bots = _Bots()
-    fetcher = lambda: DeclaredSourceResolver(FakeManifestContent(), FakeCredentials(), FakeObjectStore())  # noqa: E731
+    content = FakeManifestContent()
+    fetcher = lambda: DeclaredSourceResolver(content, FakeCredentials(), FakeObjectStore())  # noqa: E731
 
     def platform_ports() -> MaterialiserPorts:
         return MaterialiserPorts(
@@ -139,7 +140,7 @@ def _build(db):
             upload_service=FakeSkillUploadService(),
             capability_reader=FakeCapabilityReader(),
             package_validator=real_validator(),
-            entry_fetcher=fetcher(),
+            content=content,
             resource_service=FakeResourceFileService(),
             cli_tool_service=object(),
         )
@@ -148,7 +149,7 @@ def _build(db):
         manifest_service=_Manifests(),
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
-        git_client_provider=lambda: FakeGitClient(),
+        compilers=manifest_compilers(manifests=_Manifests(), content=content, resolver=fetcher()),
         task_queue_provider=lambda: queue,
         bot_repository=bots,
         # The platform-managed deployment: the store-backed bundle above, and

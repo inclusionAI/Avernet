@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from agentclaw.community.core.apply_engine.compiler import state_ref_from_payload
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     ApplyReport,
     ApplyStatus,
@@ -81,6 +82,8 @@ def report_from_payload(
         started_at=record.started_at,
         finished_at=record.finished_at,
         categories=tuple(categories),
+        # Absent on rows written before the field existed: those were Manifest applies.
+        state=state_ref_from_payload(payload.get("state")),
         sources=tuple(
             SourceResolution(
                 name=source.get("name", ""),
