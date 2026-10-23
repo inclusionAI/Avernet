@@ -532,6 +532,9 @@ def test_friend_user_id_is_optional_and_only_on_human_chat_capable_operations():
         ("patch", "/openapi/v1/bots/{bot_id}/sessions/{session_id}"),
         ("delete", "/openapi/v1/bots/{bot_id}/sessions/{session_id}"),
         ("get", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/messages"),
+        # Only the file list supports friend reads; content and mutations
+        # retain their owner/collaborator contract without this selector.
+        ("get", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files"),
         ("delete", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/messages"),
         ("put", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/favorite"),
         ("delete", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/favorite"),
