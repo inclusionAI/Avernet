@@ -88,12 +88,20 @@ class CompileRefused(Exception):
     """A compiler refuses the reference as a whole, for a reason the report should say.
 
     Not a bug: the reference named something that cannot be compiled *now* —
-    a promotion ``active`` has moved on from, a revision the state model no
-    longer accepts. The run service records the apply as failed with the
-    message as a note on the report (an engine exception is recorded without
-    its text, since that is where raw internals could reach a response body;
-    this message is composed by the compiler for the caller to read).
+    a promotion whose ref has moved on, a revision the state model no longer
+    accepts, a document that stopped validating. In the apply worker the run
+    service records the apply as failed with the message as a note on the
+    report (an engine exception is recorded without its text, since that is
+    where raw internals could reach a response body; this message is composed
+    by the compiler for the caller to read). A compiler raises it ``from`` its
+    own domain error — the one its HTTP surface maps — so a caller that
+    answers a request (a dry run) re-raises that cause instead.
     """
+
+    @property
+    def domain_error(self) -> BaseException | None:
+        """The compiler's own error this refusal was raised from, for a caller with an HTTP surface."""
+        return self.__cause__
 
 
 @runtime_checkable
