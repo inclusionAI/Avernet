@@ -82,5 +82,5 @@ file writes. Other Provider tables, credentials and state paths are retained.
 The adapter declares exclusive desktop settings/database/listener resources via
 `EngineFactory::resources`; two Bots cannot claim the same physical channel.
 Initialization checks all QwenWork resource claims before writing configuration
-or Hooks. Explicit shutdown cancels peers and awaits the listener (bounded to
-five seconds), permitting preflight followed by runtime initialization.
+or Hooks. Engine cleanup retains its existing drop-triggered cancellation;
+this change does not add a listener shutdown wait or alter turn execution.

@@ -136,8 +136,9 @@ parent authentication environment is retained.
 Providers; the selector is not the desktop channel's Bot ID. One physical
 QwenWork installation/channel or Codex desktop socket cannot be claimed by two
 Bots. `EngineFactory::resources` declares exclusive paths/addresses without
-starting an engine; subprocess engines default to no claims. QwenWork shutdown
-waits for its listener to release so preflight does not occupy runtime ports.
+starting an engine; subprocess engines default to no claims. Existing engine
+cleanup behavior is unchanged; this feature does not introduce a QwenWork
+shutdown wait or new preflight shutdown calls.
 
 Existing split profile files are **not automatically merged**. Select the
 intended file explicitly. A manual consolidation must stop the bridge, back up

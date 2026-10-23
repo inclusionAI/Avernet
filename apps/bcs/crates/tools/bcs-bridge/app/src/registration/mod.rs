@@ -254,9 +254,7 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     if !engine_options.is_empty() || factory.registration_requires_options() {
         let engine = factory.build(engine_bin.clone().unwrap_or_default(), &engine_options)
             .map_err(|error| anyhow::anyhow!("Invalid engine options: {error}"))?;
-        let preflight = engine.preflight().await;
-        engine.shutdown().await;
-        preflight?;
+        engine.preflight().await?;
     }
     if args.token.trim().is_empty() || args.bot_name.trim().is_empty() { bail!("Registration token and Bot name must be nonempty"); }
     if args.provider_bot_ref.as_deref().is_some_and(|value| !valid_provider_bot_ref(value)) {

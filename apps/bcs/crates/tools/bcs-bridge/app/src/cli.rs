@@ -201,10 +201,7 @@ pub(crate) async fn load_start(config_path: &std::path::Path, app: &BridgeApp, c
     app.engines().validate_resources(providers.iter().flat_map(|p| &p.config.bots))?;
     for provider in &providers {
         for (bot, settings) in provider.config.bots.iter().zip(&provider.registrations) {
-            let engine = app.engines().build(bot).map_err(anyhow::Error::msg)?;
-            let preflight = engine.preflight().await;
-            engine.shutdown().await;
-            preflight?;
+            app.engines().build(bot).map_err(anyhow::Error::msg)?.preflight().await?;
             if matches!(bot.engine.as_str(), "codex" | "codex-desktop") {
                 if let Some(policy) = &settings.provider_auth {
                     app.identity(policy)?.validate_workspace(bot, settings.api_url.as_deref()).await?;

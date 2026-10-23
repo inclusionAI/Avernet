@@ -99,7 +99,7 @@ impl EngineFactory for QwenWorkFactory {
         let state = Arc::new(transport::State::new(options));
         let task_state = state.clone();
         let stop = shutdown.clone();
-        let task = runtime.spawn(async move {
+        runtime.spawn(async move {
             if let Err(error) = axum::serve(listener, transport::router(task_state.clone()))
                 .with_graceful_shutdown(stop.cancelled_owned())
                 .await
@@ -108,7 +108,7 @@ impl EngineFactory for QwenWorkFactory {
                 tracing::error!(%error, "qwenwork listener failed");
             }
         });
-        Ok(Arc::new(QwenWork { state, shutdown, task: tokio::sync::Mutex::new(Some(task)) }))
+        Ok(Arc::new(QwenWork { state, shutdown }))
     }
 }
 
@@ -130,7 +130,6 @@ fn resource_claims(options: &toml::Table) -> Result<Vec<bcs_bridge_core::engine:
 struct QwenWork {
     state: Arc<transport::State>,
     shutdown: CancellationToken,
-    task: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 impl Drop for QwenWork {
     fn drop(&mut self) {
