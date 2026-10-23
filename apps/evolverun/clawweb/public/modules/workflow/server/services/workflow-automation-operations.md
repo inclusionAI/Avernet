@@ -5,7 +5,7 @@
 - The unique record key and `state_version` compare-and-swap choose one owner. Other replicas skip automatic planning, but may still drain the independent notification queue. This does not eliminate notification configuration reads.
 - A lease lasts five minutes and is renewed at workflow boundaries. A failed/crashed owner can be replaced after expiry. A stale owner cannot update the cursor or start another workflow without a valid checkpoint. There is no transaction held over network I/O.
 - Workflow IDs are sorted and the last visited ID is persisted. Changing replicas or restarting does not repeatedly prioritize the first ten workflows. Each pass visits at most ten.
-- A completed/released pass enforces a shared fifteen-second cooldown. This is a planning opportunity, not a schedule to generate a task every fifteen seconds; daily due checks remain authoritative.
+- A completed/released pass enforces a shared sixty-second cooldown. This is a planning opportunity, not a schedule to generate a task every minute; daily due checks remain authoritative. A busy planner and rotation across more than ten workflows can delay a workflow beyond one minute.
 - Existing workflow-cycle and individual analysis/draft claims, stable request IDs, policy checks and result recovery remain the dispatch safety boundary. This is not an exactly-once guarantee for external providers. Long-running work is not forcibly cancelled when a planner lease expires.
 - Disabled, never-dispatched analysis/drafts are excluded before the ready-page LIMIT, without repeated claim/status writes. Already-dispatched work can still settle; an unsubmitted next batch remains paused when automatic drafts are off. Actively leased jobs are also excluded before LIMIT.
 

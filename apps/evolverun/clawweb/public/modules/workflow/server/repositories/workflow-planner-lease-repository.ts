@@ -41,7 +41,7 @@ export class WorkflowPlannerLeaseRepository {
     if (!lease.ownerId || lease.untilMs <= now) throw new Error('AUTOMATION_PLANNER_LEASE_LOST');
     const next = { ...lease, cursor, stateVersion: lease.stateVersion + 1,
       ownerId: release ? null : lease.ownerId, untilMs: release ? 0 : now + leaseMs,
-      nextAtMs: release ? now + 15_000 : lease.nextAtMs };
+      nextAtMs: release ? now + 60_000 : lease.nextAtMs };
     try { await new RepairReleaseRepository(this.db).update(next, lease.stateVersion); return next; }
     catch (error) { if (isConflict(error)) throw new Error('AUTOMATION_PLANNER_LEASE_LOST'); throw error; }
   }

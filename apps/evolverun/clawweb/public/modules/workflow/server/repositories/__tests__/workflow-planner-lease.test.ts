@@ -23,7 +23,9 @@ it('retains the cursor across release and enforces a shared cooldown before anot
   const owner = (await f.a.claim('prod', 100))!;
   await f.a.checkpoint(owner, 'workflow-10', 200, true);
   expect(await f.b.claim('prod', 201)).toBeNull();
-  expect(await f.b.claim('prod', 15_200)).toMatchObject({ cursor: 'workflow-10' });
+  expect(await f.b.claim('prod', 15_200)).toBeNull();
+  expect(await f.b.claim('prod', 60_199)).toBeNull();
+  expect(await f.b.claim('prod', 60_200)).toMatchObject({ cursor: 'workflow-10' });
 });
 it('recovers a crashed planner after expiry and fences delayed writes from its old owner', async () => {
   const f = await fixture();
@@ -34,7 +36,8 @@ it('recovers a crashed planner after expiry and fences delayed writes from its o
   // Even with an old sampled timestamp, CAS must reject the displaced owner.
   await expect(f.a.checkpoint(old, 'stale', 200, true)).rejects.toThrow('AUTOMATION_PLANNER_LEASE_LOST');
   await f.b.checkpoint(replacement, 'current', 300_101, true);
-  expect(await f.a.claim('prod', 315_101)).toMatchObject({ cursor: 'current' });
+  expect(await f.a.claim('prod', 360_100)).toBeNull();
+  expect(await f.a.claim('prod', 360_101)).toMatchObject({ cursor: 'current' });
 });
 it('does not renew its own expired lease without reacquiring it', async () => {
   const f = await fixture();
