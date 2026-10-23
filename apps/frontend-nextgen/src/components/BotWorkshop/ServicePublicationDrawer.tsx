@@ -5,10 +5,13 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/Drawer';
 import { Empty } from '@/components/ui/Empty';
 import { Spin } from '@/components/ui/Spin';
+import { appExtension, type PublishStagingGatePolicy } from '@/extensions';
 import type { ServicePublication, ServicePublicationAction } from '@/domain/botEditor';
 import { useServicePublications } from '@/hooks/useServicePublications';
 import type { BotDomain } from '@/services/botWorkshop';
 import { ArrowRight, ExternalLink, RefreshCw, RotateCw } from 'lucide-react';
+import { Suspense, useState } from 'react';
+import { toast } from 'sonner';
 
 const statusLabel: Record<ServicePublication['status'], string> = {
   draft: '草稿',
@@ -29,8 +32,26 @@ export function ServicePublicationDrawer({
   onChanged?: () => Promise<void>;
 }) {
   const publications = useServicePublications(bot?.id);
-  const run = (action: ServicePublicationAction, item: ServicePublication) => {
-    if (action === 'publish_staging') return publications.advance('prestable');
+  // ── 评测门禁拦截（publish_staging hook，Open Core 直通=无 gate） ──────────
+  const gate = appExtension.publishStagingGate;
+  const [gateOpen, setGateOpen] = useState(false);
+  const [gatePolicy, setGatePolicy] = useState<PublishStagingGatePolicy | null>(null);
+  const [gateItem, setGateItem] = useState<ServicePublication | null>(null);
+
+  const run = async (action: ServicePublicationAction, item: ServicePublication) => {
+    if (action === 'publish_staging') {
+      // 门禁拦截：命中名单 → 弹 Dialog（开始评测/紧急发布），不调 advance
+      if (gate) {
+        const result = await gate.check({ botId: bot?.id ?? '' });
+        if (!result.allowed) {
+          setGatePolicy(result.policy ?? null);
+          setGateItem(item);
+          setGateOpen(true);
+          return;
+        }
+      }
+      return publications.advance('prestable');
+    }
     if (action === 'publish_online') return publications.advance('online');
     if (action === 'cancel_staging') return publications.cancel();
     if (action === 'offline') return publications.offline();
@@ -159,6 +180,34 @@ export function ServicePublicationDrawer({
           </Button>
         </div>
       </DrawerContent>
+      {gate && (
+        <Suspense fallback={null}>
+          <gate.Dialog
+            open={gateOpen}
+            botName={bot?.name}
+            policy={gatePolicy}
+            onStartEvaluation={async () => {
+              if (!gateItem) return;
+              const ok = await gate.startEvaluation({
+                publishId: gateItem.publicationId,
+                setUuid: '',
+                botId: bot?.id ?? '',
+              });
+              toast[ok ? 'success' : 'error'](
+                ok ? '评测已发起，评测期间不可修改 Bot' : '开始评测失败，请重试或紧急发布',
+              );
+              if (ok) setGateOpen(false);
+            }}
+            onEmergencyPublish={async () => {
+              const ok = await gate.emergencyPublish({ botId: bot?.id ?? '' });
+              if (ok) setGateOpen(false);
+            }}
+            onOpenChange={(open) => {
+              if (!open) setGateOpen(false);
+            }}
+          />
+        </Suspense>
+      )}
     </Drawer>
   );
 }

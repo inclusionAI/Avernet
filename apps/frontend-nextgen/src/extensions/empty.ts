@@ -100,4 +100,39 @@ export function registerSidePanelWiring(): void {
 export const appExtension = {
   avatarEditor: React.lazy(() => import('@/components/BotWorkshop/BotAvatar/AvatarEditor')),
   capabilities: defaultCapabilities,
+  // publish_staging 门禁拦截 slot：Open Core 默认 null（直通，无门禁）；
+  // internal overlay 经 src/internal/evaluation-gate 注入。
+  publishStagingGate: null as PublishStagingGateSpec | null,
 };
+
+// ── publish_staging 门禁 slot 的 public 类型声明（无业务语义，仅接口契约）──
+export interface PublishStagingGatePolicy {
+  hit_type?: string;
+  policy_name?: string;
+  mode?: string;
+}
+export interface PublishStagingGateSpec {
+  check: (params: {
+    botId: string;
+    spaceId?: string;
+  }) => Promise<{ allowed: boolean; policy?: PublishStagingGatePolicy }>;
+  startEvaluation: (params: {
+    publishId: number;
+    setUuid: string;
+    botId: string;
+    spaceId?: string;
+  }) => Promise<boolean>;
+  emergencyPublish: (params: {
+    botId: string;
+    spaceId?: string;
+  }) => Promise<boolean>;
+  Dialog: ComponentType<PublishStagingGateDialogProps>;
+}
+export interface PublishStagingGateDialogProps {
+  open: boolean;
+  botName?: string;
+  policy: PublishStagingGatePolicy | null;
+  onStartEvaluation: () => void;
+  onEmergencyPublish: () => void;
+  onOpenChange: (open: boolean) => void;
+}
