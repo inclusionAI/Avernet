@@ -10,12 +10,12 @@
 
 ## Group 1 — The component and the model
 
-### Task 1: Behaviour lock and the package skeleton
+### Task 1: Behaviour lock and the package skeleton `[x]`
 - **Goal:** Record what must keep passing; create `core/apply_engine/` with its boundary.
 - **Files:** `core/apply_engine/{__init__,README}.md`, `tests/community/architecture/test_module_boundaries.py`
 - **Done when:**
-  - [ ] The Manifest, creation, DI, HTTP apply and genome suites are run on the branch tip and their pass counts noted in the PR description's Validation section.
-  - [ ] `apply_engine` is in `BOUNDARY_SIGNIFICANT_MODULES`; its README carries a `## Context Boundary` naming what it provides and consumes; the boundary test passes with the empty package.
+  - [x] The Manifest, creation, DI, HTTP apply and genome suites are run on the branch tip and their pass counts noted in the PR description's Validation section.
+  - [x] `apply_engine` is in `BOUNDARY_SIGNIFICANT_MODULES`; its README carries a `## Context Boundary` naming what it provides and consumes; the boundary test passes with the empty package.
 - **Depends on:** —
 
 ### Task 2: The desired-state model and the compiler contract
