@@ -26,6 +26,9 @@ for (const bad of [
   { ...reference, title: 'forbidden' },
   { ...reference, url: 'https://untrusted.example' },
   { ...reference, apiBaseUrl: 'https://untrusted.example' },
+  { ...reference, userApiBaseUrl: '/untrusted-user' },
+  { ...reference, groupUrlTemplate: '/untrusted-group' },
+  { ...reference, groupListUrl: '/untrusted-list' },
   { ...reference, definitionYaml: 'inline' },
 ]) assert.throws(() => decodeCollaborationDefinitionReference(bad));
 assert.equal(decodeCollaborationDefinitionReference({ ...reference, revision: Number.MAX_SAFE_INTEGER }).revision, Number.MAX_SAFE_INTEGER);
@@ -95,7 +98,7 @@ async function render() {
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
 }
 await render();
-assert.equal(tab('预览').getAttribute('aria-selected'), 'true');
+assert.equal(tab('协作预览').getAttribute('aria-selected'), 'true');
 assert.equal(panel.querySelector('pre'), null, 'opening a draft shows preview without the source block');
 assert.match(panel.textContent, /定义校验通过/);
 assert.equal(panel.querySelectorAll('[data-node-id]').length, 3, 'incident shows writing, review and publish once');
@@ -108,43 +111,46 @@ const logicalNodes = [...panel.querySelectorAll('[data-node-id]')].map(node => n
 assert.deepEqual(logicalNodes, ['节点 写稿', '节点 审稿', '节点 发表']);
 let copied;
 Object.defineProperty(globalThis, 'navigator', { value: { clipboard: { writeText: async text => { copied = text; } } }, configurable: true });
-await act(async () => copyButton().click());
-assert.equal(copied, fixture.revision.definition_yaml);
-await selectTab('源码');
+assert.equal(copyButton(), null, 'copy appears only in the definition tab');
+await selectTab('查看定义');
+assert.equal(panel.querySelector('h3').textContent, '协作定义 YAML');
 assert.equal(panel.querySelector('pre').textContent, fixture.revision.definition_yaml);
 assert.equal(new TextEncoder().encode(panel.querySelector('pre').textContent).length, 2174);
+assert.ok(panel.querySelector('pre .hljs-attr'), 'the incident YAML highlights mapping keys');
+assert.ok(panel.querySelector('pre .hljs-literal'), 'the incident YAML highlights boolean values');
 assert.match(panel.textContent, /test-validator/);
 copied = undefined;
 await act(async () => copyButton().click());
-assert.equal(copied, fixture.revision.definition_yaml, 'copy works in both tabs');
-await act(async () => tab('源码').dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })));
-assert.equal(document.activeElement, tab('预览'));
-assert.equal(tab('预览').getAttribute('aria-selected'), 'true');
+assert.equal(copied, fixture.revision.definition_yaml, 'copy preserves the verified original in the definition tab');
+await act(async () => tab('查看定义').dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })));
+assert.equal(document.activeElement, tab('协作预览'));
+assert.equal(tab('协作预览').getAttribute('aria-selected'), 'true');
 assert.equal(panel.querySelector('pre'), null);
+assert.equal(copyButton(), null);
 assert.equal(panel.querySelectorAll('[data-node-id]').length, 3, 'returning from source retains the logical loop view');
 assert.equal(requests.length, 2, 'switching tabs and copying reuse the fixed revision without refetching');
 mode = 'validation-down';
 await render();
+await selectTab('查看定义');
 assert.equal(copyButton().disabled, false, 'verified source remains available when validation fails');
-await selectTab('源码');
 assert.equal(panel.querySelector('pre').textContent, fixture.revision.definition_yaml);
 assert.match(panel.textContent, /HTTP 503/);
 mode = 'corrupt';
 await render();
-assert.equal(copyButton().disabled, true);
-await selectTab('源码');
+await selectTab('查看定义');
+assert.equal(copyButton(), null);
 assert.equal(panel.querySelector('pre'), null);
 assert.match(panel.textContent, /SHA-256 不匹配/);
 mode = 'invalid-unicode';
 await render();
-assert.equal(copyButton().disabled, true);
-await selectTab('源码');
+await selectTab('查看定义');
+assert.equal(copyButton(), null);
 assert.equal(panel.querySelector('pre'), null);
 assert.match(panel.textContent, /完整性检查失败/);
 mode = 'revoked';
 await render();
-assert.equal(copyButton().disabled, true);
-await selectTab('源码');
+await selectTab('查看定义');
+assert.equal(copyButton(), null);
 assert.equal(panel.querySelector('pre'), null);
 assert.match(panel.textContent, /引用不可用/);
 await act(async () => panelRoot.unmount());
@@ -213,16 +219,17 @@ await act(async () => {
   await new Promise(resolve => setTimeout(resolve, 20));
 });
 assert.match(panel.textContent, /定义校验通过/);
-await selectTab('源码');
+await selectTab('查看定义');
 assert.match(panel.textContent, /source-b/);
 assert(!panel.textContent.includes('source-a'));
 await act(async () => raceRoot.render(React.createElement(CollaborationDefinitionPreview, {
   snapshot: { ...reference, revision: 3 }, sourceMessageId: 'source-c',
 })));
 assert.equal(pending.length, 4);
-assert.equal(tab('预览').getAttribute('aria-selected'), 'true', 'a different version opens in preview');
+assert.equal(tab('协作预览').getAttribute('aria-selected'), 'true', 'a different version opens in preview');
 assert.equal(panel.querySelector('pre'), null);
-assert.equal(copyButton().disabled, true, 'never copy the previous version while the new one loads');
+await selectTab('查看定义');
+assert.equal(copyButton(), null, 'never copy the previous version while the new one loads');
 await act(async () => raceRoot.unmount());
 assert.equal(pending[3].options.signal.aborted, true);
 
@@ -243,7 +250,7 @@ await act(async () => {
   await new Promise(resolve => setTimeout(resolve, 20));
 });
 assert.equal(pending.length, start + 2, 'stale host response must not trigger validation');
-assert.equal(copyButton().disabled, true);
+assert.equal(copyButton(), null);
 await act(async () => {
   pending[start + 1].resolve(Response.json(revision));
   await new Promise(resolve => setTimeout(resolve, 30));

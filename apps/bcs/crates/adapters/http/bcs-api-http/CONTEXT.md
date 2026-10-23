@@ -2,6 +2,17 @@
 
 ## Provides
 
+- Immutable Draft GET/validate at `/api/v1/collaboration/drafts/**`, outside
+  Gateway middleware, using only the fixed revision read capability. The native
+  and V1 adapters share one injected Draft service; V1 adds an envelope, not
+  management routes, identity fallback or persistence.
+- `GET /openapi/v1/collaboration/me` projects the verified Human only. The native
+  `/collaboration/user` browser slice reuses V1 me/Bot mine/candidates/Group create
+  handlers with a bootstrap-selected Human verifier, no-store responses and a
+  cross-site/custom-header write boundary. `X-BCS-Expected-User` compares a
+  prepared configuration's user with verified identity before dispatch; it is
+  never an authentication source. Ownership and eligibility stay in application.
+
 - `GET /openapi/v1/collaboration/channels/conversations/by-session` reuses the
   Session V1 application facade's Human/owned-Bot read authorization before
   querying Channel mappings. It returns a V1 envelope with all mappings and

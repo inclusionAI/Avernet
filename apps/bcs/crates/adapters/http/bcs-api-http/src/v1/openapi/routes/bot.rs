@@ -65,7 +65,7 @@ async fn query_bots(
         .into_response())
 }
 
-async fn list_candidates(
+pub(crate) async fn list_candidates(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
@@ -161,7 +161,7 @@ async fn update_bot(
         .into_response())
 }
 
-async fn list_mine(
+pub(crate) async fn list_mine(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,

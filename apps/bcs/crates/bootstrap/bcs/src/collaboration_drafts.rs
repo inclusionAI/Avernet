@@ -98,7 +98,9 @@ mod tests {
             (include_str!("../../../../configs/bcs-config-local.toml"), true),
             (include_str!("../../../../configs/bcs-config-example.toml"), false),
         ] {
-            let config: crate::config::BcsConfig = toml::from_str(source).unwrap();
+            let mut value = crate::config_loader::parse_config_content("toml", source, "checked-in config").unwrap();
+            crate::config_loader::expand_env_vars(&mut value).unwrap();
+            let config: crate::config::BcsConfig = serde_json::from_value(value).unwrap();
             assert_eq!(build(&config, db.clone(), validator()).is_some(), enabled);
         }
     }

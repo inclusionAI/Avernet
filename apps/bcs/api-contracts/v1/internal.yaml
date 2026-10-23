@@ -4,6 +4,10 @@ info:
   version: 1.0.0
   description: Versioned internal contract for trusted BCN collaboration services.
 paths:
+  /api/v1/collaboration/drafts/{draftId}/revisions/{revision}:
+    $ref: ./internal/collaboration-drafts.yaml#/RevisionPath
+  /api/v1/collaboration/drafts/{draftId}/revisions/{revision}/validate:
+    $ref: ./internal/collaboration-drafts.yaml#/ValidatePath
   /api/v1/collaboration/providers/by-slug/{slug}:
     $ref: ./internal/provider-discovery.yaml#/ProviderDiscoveryPath
   /api/v1/collaboration/agents/me:
@@ -50,6 +54,8 @@ paths:
     $ref: ./openapi/collaboration-definitions.yaml#/CollaborationDefinitionValidatePath
 components:
   securitySchemes:
+    RevisionReadToken:
+      $ref: ../collaboration-drafts/v1.yaml#/components/securitySchemes/RevisionReadToken
     AgentIdentityBearer:
       type: http
       scheme: bearer

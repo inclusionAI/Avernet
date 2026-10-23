@@ -2,6 +2,12 @@
 
 ## Provides
 
+- Native `/collaboration/user` composition with the existing BCS Human browser
+  auth chain and existing V1 Bot/Group services. Its verifier rejects Bot, Actor,
+  Gateway and Draft credentials; it never promotes a Bot's owner to the caller.
+  Gateway V1 verification remains independent and never falls back to this chain.
+  Both Draft HTTP projections receive the same existing Draft service instance.
+
 The Prometheus message-flow decorator transparently forwards one-shot result
 publication, including its original command and errors. Enabling metrics does
 not select the application's unconfigured default or change Group queue/legacy
