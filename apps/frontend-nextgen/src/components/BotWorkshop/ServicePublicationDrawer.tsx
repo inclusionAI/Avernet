@@ -5,11 +5,11 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/Drawer';
 import { Empty } from '@/components/ui/Empty';
 import { Spin } from '@/components/ui/Spin';
-import { appExtension } from '@/extensions';
+import { appExtension, type PublishStagingGatePolicy } from '@/extensions';
 import type { ServicePublication, ServicePublicationAction } from '@/domain/botEditor';
 import { useServicePublications } from '@/hooks/useServicePublications';
 import type { BotDomain } from '@/services/botWorkshop';
-import { ArrowRight, ExternalLink, RefreshCw, RotateCw, ShieldAlert } from 'lucide-react';
+import { ArrowRight, ExternalLink, RefreshCw, RotateCw } from 'lucide-react';
 import { Suspense, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -35,7 +35,7 @@ export function ServicePublicationDrawer({
   // ── 评测门禁拦截（publish_staging hook，Open Core 直通=无 gate） ──────────
   const gate = appExtension.publishStagingGate;
   const [gateOpen, setGateOpen] = useState(false);
-  const [gatePolicy, setGatePolicy] = useState<Record<string, unknown> | null>(null);
+  const [gatePolicy, setGatePolicy] = useState<PublishStagingGatePolicy | null>(null);
   const [gateItem, setGateItem] = useState<ServicePublication | null>(null);
 
   const run = async (action: ServicePublicationAction, item: ServicePublication) => {
