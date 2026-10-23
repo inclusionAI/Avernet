@@ -32,7 +32,11 @@ pub async fn ensure_bot(
     // 1. Verify service credential.
     verify_service_credential(&state, &headers)?;
 
-    // 2. Map body → EnsureBotCommand.
+    // 2. Parse the human-facing visibility BEFORE any side effect so an
+    // invalid payload fails the request without having ensured the bot.
+    let user_visibility = parse_user_visibility(body.user_visibility.as_deref())?;
+
+    // 3. Map body → EnsureBotCommand.
     let name = body
         .name
         .filter(|name| !name.trim().is_empty())
@@ -53,13 +57,13 @@ pub async fn ensure_bot(
         actor_identity,
     };
 
-    // 3. Call the onboarding service.
+    // 4. Call the onboarding service.
     let result = state.services.bot_onboarding.ensure_bot(command).await?;
 
-    // 4. Optional human-facing visibility (`user_visibility`) — applied after
+    // 5. Optional human-facing visibility (`user_visibility`) — applied after
     // the ensure upsert through the internal bot-attributes patch so a
     // re-ensure that only binds owner edges stays a pure no-op when omitted.
-    user_visibility_patch(&state, &result.bot_uuid, body.user_visibility.as_deref()).await?;
+    apply_user_visibility(&state, &result.bot_uuid, user_visibility).await?;
 
     Ok(Json(EnsureBotResponse {
         bot_uuid: result.bot_uuid,
@@ -68,29 +72,39 @@ pub async fn ensure_bot(
     }))
 }
 
-/// Build and apply the `user_visibility` patch for an ensure request.
+/// Parse the request's human-facing visibility.
 ///
-/// `None` (or an empty/whitespace value) means "preserve existing" and skips
-/// the patch entirely. An invalid value or an unwired internal-attributes
-/// service fails the request; the ensure upsert itself remains idempotent and
-/// a retry with a fixed payload converges.
-async fn user_visibility_patch(
+/// `None` (or an empty/whitespace value) means "preserve existing" and maps
+/// to a no-op; any other value must name one of the three supported states.
+/// Runs before the ensure upsert so an invalid payload never leaves a
+/// half-applied bot behind while the request still reads as a client error.
+fn parse_user_visibility(
+    user_visibility: Option<&str>,
+) -> Result<Option<bcs_service_api::UserVisibility>, HttpAdapterError> {
+    let Some(value) = user_visibility.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    match value {
+        "public" => Ok(Some(bcs_service_api::UserVisibility::Public)),
+        "protected" => Ok(Some(bcs_service_api::UserVisibility::Protected)),
+        "private" => Ok(Some(bcs_service_api::UserVisibility::Private)),
+        _ => Err(HttpAdapterError::BadRequest(format!(
+            "user_visibility must be public, protected, or private; got '{value}'"
+        ))),
+    }
+}
+
+/// Apply the parsed human-facing visibility after the ensure upsert, through
+/// the internal bot-attributes patch. A missing internal-attributes service
+/// fails the request; the ensure upsert itself remains idempotent and a
+/// retry with a fixed deployment converges.
+async fn apply_user_visibility(
     state: &HttpAppState,
     bot_uuid: &str,
-    user_visibility: Option<&str>,
+    user_visibility: Option<bcs_service_api::UserVisibility>,
 ) -> Result<(), HttpAdapterError> {
-    let Some(value) = user_visibility.map(str::trim).filter(|value| !value.is_empty()) else {
+    let Some(parsed) = user_visibility else {
         return Ok(());
-    };
-    if !matches!(value, "public" | "protected" | "private") {
-        return Err(HttpAdapterError::BadRequest(format!(
-            "user_visibility must be public, protected, or private; got '{value}'"
-        )));
-    }
-    let parsed = match value {
-        "public" => bcs_service_api::UserVisibility::Public,
-        "protected" => bcs_service_api::UserVisibility::Protected,
-        _ => bcs_service_api::UserVisibility::Private,
     };
     let service = state
         .internal_bot_attributes_service
@@ -114,7 +128,7 @@ async fn user_visibility_patch(
         .await
         .map_err(|error| {
             HttpAdapterError::Service(ServiceError::InternalError(format!(
-                "failed to apply user_visibility='{value}' to bot '{bot_uuid}': {error}",
+                "failed to apply user_visibility='{parsed:?}' to bot '{bot_uuid}': {error}",
             )))
         })?;
     Ok(())
@@ -433,4 +447,5 @@ mod tests {
     fn json_import_compiles() {
         let _ = Json::<Value>::default();
     }
+
 }
