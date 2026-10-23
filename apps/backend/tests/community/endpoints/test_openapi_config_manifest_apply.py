@@ -512,10 +512,10 @@ _RESOURCE_DOCUMENT = (
     "schema_version: 1\n"
     "manifest:\n"
     "  resources:\n"
-    "    - path: notes/r.md\n"
+    "    - path: data/notes/r.md\n"
     "      content: |\n"
     "        # rules\n"
-    "    - path: tools/\n"
+    "    - path: data/tools/\n"
     "      unpack: tar.gz\n"
     "      strip_components: 1\n"
     "      source:\n"
@@ -582,6 +582,17 @@ def _seed_bot_with_resource_manifest(world) -> None:
     async def exists(_self, **_kwargs):
         return False
 
+    listed: list[int] = []
+    clears: list[int] = []
+
+    async def list_root(_self, **_kwargs):
+        listed.append(1)
+        return ()
+
+    async def clear_root(_self, **_kwargs):
+        clears.append(1)
+        return True
+
     # The object store is doubled BEFORE the fetch funnel is first resolved:
     # the funnel is a singleton built over whatever store the injector holds
     # at that moment, and a fake bound afterwards would never be consulted.
@@ -590,7 +601,13 @@ def _seed_bot_with_resource_manifest(world) -> None:
     bind_overrides(
         world,
         ResourceFileService,
-        {"upload_file": upload_file, "delete": delete, "exists": exists},
+        {
+            "upload_file": upload_file,
+            "delete": delete,
+            "exists": exists,
+            "list_root": list_root,
+            "clear_root": clear_root,
+        },
     )
     # The stubs only record; the materialiser under test still decides what
     # to call, so its decisions are visible on the recorders. Function
@@ -626,6 +643,7 @@ def _seed_bot_with_resource_manifest(world) -> None:
 
     _seed_bot_with_resource_manifest.uploads = uploads
     _seed_bot_with_resource_manifest.deletes = deletes
+    _seed_bot_with_resource_manifest.clears = clears
 
 
 def _resources_reached_the_write_chain(_response, world) -> None:
@@ -643,23 +661,23 @@ def _resources_reached_the_write_chain(_response, world) -> None:
     by_entry = {
         (e["category"], e["name"]): e["action"] for e in report["entries"]
     }
-    assert by_entry[("resources", "notes/r.md")] == "created"
-    assert by_entry[("resources", "tools/a.py")] == "created"
-    assert by_entry[("resources", "tools/sub/b.py")] == "created"
+    assert by_entry[("resources", "data/notes/r.md")] == "created"
+    assert by_entry[("resources", "data/tools/a.py")] == "created"
+    assert by_entry[("resources", "data/tools/sub/b.py")] == "created"
 
     uploads = _seed_bot_with_resource_manifest.uploads
-    assert sorted(u["target_dir"] for u in uploads) == ["notes", "tools", "tools/sub"]
+    assert sorted(u["target_dir"] for u in uploads) == ["data/notes", "data/tools", "data/tools/sub"]
     writes = {(u["target_dir"], u["filename"]): u["data"] for u in uploads}
     assert writes == {
-        ("notes", "r.md"): b"# rules\n",
-        ("tools", "a.py"): b"x = 1\n",
-        ("tools/sub", "b.py"): b"y = 2\n",
+        ("data/notes", "r.md"): b"# rules\n",
+        ("data/tools", "a.py"): b"x = 1\n",
+        ("data/tools/sub", "b.py"): b"y = 2\n",
     }
-    # The declared directory tree is replaced in full, delete first — the
-    # ownership rule, including files the new archive no longer ships. The
-    # tree is addressed without the declaring slash: the write chain's
-    # file-vs-tree branching keys on the path's shape.
-    assert _seed_bot_with_resource_manifest.deletes == ["tools"]
+    # The resources root is owned whole: cleared once, before any member is
+    # written — the ownership rule, including files the new archive no longer
+    # ships and files the bot wrote there itself.
+    assert len(_seed_bot_with_resource_manifest.clears) == 1
+    assert _seed_bot_with_resource_manifest.deletes == []
 
 
 @endpoint_test(
