@@ -1,6 +1,7 @@
 import { PageHeader } from '@/components/Common/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
+import type { UserTaskOwnerBotOption } from '@/pages/MyTask/components/userTaskFilters';
 import { UserTaskTab } from '@/pages/MyTask/components/UserTaskTab';
 import { useMyTaskTasks } from '@/pages/MyTask/hooks/useMyTaskTasks';
 import type { UserTaskStatusFilter } from '@/pages/MyTask/userTaskUtils';
@@ -51,6 +52,22 @@ export default function LabTasksPage() {
     });
     return map;
   }, [chatBots]);
+  const ownerBotOptions = useMemo<UserTaskOwnerBotOption[]>(() => {
+    const options = new Map<string, UserTaskOwnerBotOption>();
+    chatBots.forEach((bot) => {
+      const botId = normalizeBotNameKey(bot.botId);
+      const realBotId = normalizeBotNameKey(bot.realBotId);
+      const value = realBotId || botId;
+      if (!value) return;
+      const aliases = Array.from(new Set([botId, realBotId].filter(Boolean)));
+      options.set(value, {
+        value,
+        label: bot.displayName || bot.botId,
+        aliases,
+      });
+    });
+    return Array.from(options.values()).sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'));
+  }, [chatBots]);
 
   return (
     <main className="app-scrollbar h-full min-h-0 overflow-y-auto">
@@ -100,6 +117,7 @@ export default function LabTasksPage() {
             setPage(DEFAULT_PAGE);
           }}
           botNameMap={botNameMap}
+          ownerBotOptions={ownerBotOptions}
           displayVariant="lab"
         />
       </div>
