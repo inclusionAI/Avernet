@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import io
+import tempfile
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -744,7 +745,9 @@ class _StaticGit:
         if self.error is not None:
             raise self.error
         return SimpleNamespace(
-            root=None,
+            # A real directory: the source session removes a checkout's root when the compile closes,
+            # and ``shutil.rmtree(None)`` is a TypeError on current Python patch releases.
+            root=Path(tempfile.mkdtemp(prefix="fake-git-")),
             sha=self.sha,
             url=spec.url,
             ref=spec.ref,

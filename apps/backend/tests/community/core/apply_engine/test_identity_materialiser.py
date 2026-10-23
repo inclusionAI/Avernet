@@ -22,6 +22,8 @@ reserved names, UTF-8) at the materialiser's.
 """
 from __future__ import annotations
 
+import tempfile
+
 import ast
 import asyncio
 from pathlib import Path
@@ -467,7 +469,9 @@ class _StaticGit:
     def fetch(self, spec, *, headers=None):
         self.specs.append(spec)
         return SimpleNamespace(
-            root=None,
+            # A real directory: the source session removes a checkout's root when the compile closes,
+            # and ``shutil.rmtree(None)`` is a TypeError on current Python patch releases.
+            root=Path(tempfile.mkdtemp(prefix="fake-git-")),
             sha=self.sha,
             url=spec.url,
             ref=spec.ref,
