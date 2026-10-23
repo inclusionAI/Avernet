@@ -132,7 +132,12 @@ class GenomeRegistryProtocol(Protocol):
 
     @abstractmethod
     def compile(self, bot: BotRef, rev: str) -> DesiredState:
-        """The revision rendered as the apply engine's desired state (``bot_genome/compile``)."""
+        """The revision rendered as the apply engine's desired state (``bot_genome/compile``).
+
+        Raises ``RevisionNotFound``, and ``NotAppliable`` for a revision the
+        state model refuses as recorded (one recorded before a rule the model
+        now enforces, such as a resource outside the resources root).
+        """
         ...
 
     @abstractmethod
