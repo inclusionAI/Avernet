@@ -132,13 +132,17 @@ parent authentication environment is retained.
 
 ## Desktop resources and rollback
 
-`init/deinit --engine qwenwork --bot-id <BCS-bot-id>` selects one Bot across
-Providers; the selector is not the desktop channel's Bot ID. One physical
-QwenWork installation/channel or Codex desktop socket cannot be claimed by two
-Bots. `EngineFactory::resources` declares exclusive paths/addresses without
-starting an engine; subprocess engines default to no claims. Existing engine
-cleanup behavior is unchanged; this feature does not introduce a QwenWork
-shutdown wait or new preflight shutdown calls.
+`init/deinit --engine qwenwork` locates the sole QwenWork Bot across all
+Providers in the selected V1/V2 document. Zero or multiple QwenWork candidates
+are rejected; initialization has no `--bot-id` selector. Registration's
+existing-Bot selector remains available and is unrelated to initialization.
+QwenWork retains single-Bot usage: no new resource-claim arbitration, listener
+shutdown wait, or preflight shutdown calls are introduced. This does not scan
+other profiles or add a machine-wide registration lock.
+
+The generic `EngineFactory::resources` contract and Codex desktop socket
+conflict checks remain unchanged by this scope reduction; QwenWork no longer
+adds resource claims. Subprocess engines default to no claims.
 
 Existing split profile files are **not automatically merged**. Select the
 intended file explicitly. A manual consolidation must stop the bridge, back up

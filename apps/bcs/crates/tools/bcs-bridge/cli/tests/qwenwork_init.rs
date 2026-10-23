@@ -35,3 +35,21 @@ fn deinit_help_is_wired_without_loading_configuration() {
     assert!(output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains("--engine"));
 }
+
+#[test]
+fn init_and_deinit_reject_bot_selectors_but_registration_keeps_them() {
+    for command in ["init", "deinit"] {
+        let help = Command::new(env!("CARGO_BIN_EXE_bcs-bridge")).args([command, "--help"]).output().unwrap();
+        assert!(help.status.success());
+        assert!(!String::from_utf8_lossy(&help.stdout).contains("--bot-id"));
+        let output = Command::new(env!("CARGO_BIN_EXE_bcs-bridge"))
+            .args([command, "--engine", "qwenwork", "--bot-id", "test-bot"]).output().unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("--bot-id"));
+    }
+    let help = Command::new(env!("CARGO_BIN_EXE_bcs-bridge")).args(["register", "--help"]).output().unwrap();
+    assert!(help.status.success());
+    let stdout = String::from_utf8_lossy(&help.stdout);
+    assert!(stdout.contains("--bot-id"));
+    assert!(stdout.contains("--add-bot"));
+}

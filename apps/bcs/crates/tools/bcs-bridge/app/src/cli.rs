@@ -45,9 +45,6 @@ struct StatusArgs {
 struct InitArgs {
     #[arg(long)]
     engine: String,
-    /// Select one Bot when several use this engine
-    #[arg(long)]
-    bot_id: Option<String>,
     /// Optional initializer setting, e.g. database_path=/absolute/path/agents.db
     #[arg(long = "option")]
     options: Vec<String>,
@@ -148,9 +145,6 @@ pub async fn run(cli: Cli, app: &BridgeApp) -> anyhow::Result<()> {
                 if key.is_empty() || value.is_empty() || options.insert(key.to_owned(), value.into()).is_some() {
                     bail!("Initializer options must be nonempty and unique");
                 }
-            }
-            if let Some(id) = args.bot_id {
-                if options.insert("bot_id".into(), id.into()).is_some() { bail!("Specify --bot-id only once"); }
             }
             let message = if cleanup { app.deinitialize(&args.engine, &config_path, &options)? }
                 else { app.initialize(&args.engine, &config_path, &options)? };

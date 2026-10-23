@@ -77,10 +77,9 @@ unrelated settings and registration, and performs zero database operations.
 ## Multi-Provider configuration
 
 Initialization/deinitialization supports legacy TOML and V2 `[[provider.bot]]`.
-An optional `--bot-id` selects the BCS binding; ambiguous selections fail before
-file writes. Other Provider tables, credentials and state paths are retained.
-The adapter declares exclusive desktop settings/database/listener resources via
-`EngineFactory::resources`; two Bots cannot claim the same physical channel.
-Initialization checks all QwenWork resource claims before writing configuration
-or Hooks. Engine cleanup retains its existing drop-triggered cancellation;
-this change does not add a listener shutdown wait or alter turn execution.
+It automatically locates the single QwenWork Bot across the selected document;
+zero or multiple candidates fail before configuration/Hook writes. Other
+Provider tables, credentials and state paths are retained. QwenWork keeps its
+single-Bot contract: no initializer Bot selector, multi-Bot resource claims,
+or machine-wide profile scanning is introduced. Engine cleanup retains its
+existing drop-triggered cancellation; turn execution is unchanged.

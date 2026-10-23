@@ -279,35 +279,77 @@ fn init_rejects_settings_symlink_to_registered_config_without_writes() {
 }
 
 #[test]
-fn v2_init_and_deinit_select_the_bot_and_preserve_other_provider_identity() {
+fn v2_init_and_deinit_find_the_unique_bot_and_preserve_other_provider_identity() {
     let (root, config, settings) = fixture();
     let source: toml::Table = toml::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
     let other: toml::Table = toml::from_str("provider_id='legacy'\nstate_path='legacy.db'\nprovider_auth='agentpass'\n[[bot]]\nengine='codex'\nprovider_bot_ref='parent'\nbot_id='old-id'\ntoken='old-token'\ncwd='/tmp'").unwrap();
     let doc = toml::Table::from_iter([("schema_version".into(),2.into()),("provider".into(),toml::Value::Array(vec![other.clone().into(),source.into()]))]);
     fs::write(&config,toml::to_string(&doc).unwrap()).unwrap();
-    let selected=toml::Table::from_iter([("bot_id".into(),"bot-registered".into())]);
-    initialize_at(&config,&selected,root.path()).unwrap();
+    initialize_at(&config,&toml::Table::new(),root.path()).unwrap();
     let updated:toml::Table=toml::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
     assert_eq!(updated["provider"][0],toml::Value::Table(other));
     assert_eq!(updated["provider"][1]["bot"][0]["token"].as_str(),Some("keep-token"));
     let bytes=fs::read(&config).unwrap();
-    assert!(initialize_at(&config,&toml::Table::from_iter([("bot_id".into(),"missing".into())]),root.path()).is_err());
-    assert_eq!(fs::read(&config).unwrap(),bytes);
-    deinitialize_at(&config,&selected,root.path()).unwrap();
+    deinitialize_at(&config,&toml::Table::new(),root.path()).unwrap();
     assert_eq!(fs::read(&config).unwrap(),bytes);
     assert!(!fs::read_to_string(&settings).unwrap().contains("/hooks"));
 }
 
 #[test]
-fn v2_init_refuses_duplicate_physical_channels_before_writing_any_files() {
-    let (root, config, settings)=fixture();
-    initialize_at(&config,&toml::Table::new(),root.path()).unwrap();
-    let source:toml::Value=toml::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
-    let mut other=source.clone();other["provider_id"]="another-provider".into();other["bot"][0]["bot_id"]="another-bot".into();
-    let document=toml::Table::from_iter([("schema_version".into(),2.into()),("provider".into(),toml::Value::Array(vec![source,other]))]);
-    fs::write(&config,toml::to_string(&document).unwrap()).unwrap();
-    let original=fs::read(&config).unwrap();let hooks=fs::read(&settings).unwrap();
-    let selected=toml::Table::from_iter([("bot_id".into(),"another-bot".into())]);
-    assert!(initialize_at(&config,&selected,root.path()).unwrap_err().to_string().contains("same desktop resource"));
-    assert_eq!(fs::read(&config).unwrap(),original);assert_eq!(fs::read(&settings).unwrap(),hooks);
+fn init_and_deinit_require_one_qwenwork_bot_without_writes() {
+    for layout in ["legacy", "v2-one-provider", "v2-two-providers"] {
+        for count in [0, 2] {
+            let (root, config, settings) = fixture();
+            initialize_at(&config, &toml::Table::new(), root.path()).unwrap();
+            let mut source: toml::Value = toml::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+            if count == 0 { source["bot"][0]["engine"] = "codex".into(); }
+            let mut second = source["bot"][0].clone();
+            second["bot_id"] = "another-bot".into();
+            second["provider_bot_ref"] = "qwen-2".into();
+            second["engine_options"]["listen"] = "127.0.0.1:52492".into();
+            if count == 2 && layout != "v2-two-providers" {
+                source["bot"].as_array_mut().unwrap().push(second.clone());
+            }
+            let document = if layout == "legacy" { source } else {
+                let mut providers = vec![source.clone()];
+                if layout == "v2-two-providers" {
+                    source["provider_id"] = "another-provider".into();
+                    source["bot"] = toml::Value::Array(vec![second]);
+                    providers.push(source);
+                }
+                toml::Value::Table(toml::Table::from_iter([
+                    ("schema_version".into(), 2.into()), ("provider".into(), providers.into()),
+                ]))
+            };
+            fs::write(&config, toml::to_string(&document).unwrap()).unwrap();
+            let original = fs::read(&config).unwrap();
+            let hooks = fs::read(&settings).unwrap();
+            let shared_path = settings.with_file_name("bcs-bridge.toml");
+            let shared = fs::read(&shared_path).unwrap();
+            for cleanup in [false, true] {
+                let result = if cleanup { deinitialize_at(&config, &toml::Table::new(), root.path()) }
+                    else { initialize_at(&config, &toml::Table::new(), root.path()) };
+                assert!(result.unwrap_err().to_string().contains("exactly one qwenwork Bot"), "{layout}, {count}, {cleanup}");
+                assert_eq!(fs::read(&config).unwrap(), original);
+                assert_eq!(fs::read(&settings).unwrap(), hooks);
+                assert_eq!(fs::read(&shared_path).unwrap(), shared);
+            }
+        }
+    }
+}
+
+#[test]
+fn init_and_deinit_reject_bot_id_options_without_writes() {
+    let (root, config, settings) = fixture();
+    initialize_at(&config, &toml::Table::new(), root.path()).unwrap();
+    let original = fs::read(&config).unwrap();
+    let hooks = fs::read(&settings).unwrap();
+    let shared_path = settings.with_file_name("bcs-bridge.toml");
+    let shared = fs::read(&shared_path).unwrap();
+    let options = toml::Table::from_iter([("bot_id".into(), "bot-registered".into())]);
+    assert!(initialize_at(&config, &options, root.path()).unwrap_err().to_string().contains("Unknown initializer option"));
+    assert!(deinitialize_at(&config, &options, root.path()).unwrap_err().to_string().contains("Deinit accepts only"));
+    assert_eq!(fs::read(&config).unwrap(), original);
+    assert_eq!(fs::read(&settings).unwrap(), hooks);
+    assert_eq!(fs::read(&shared_path).unwrap(), shared);
 }
