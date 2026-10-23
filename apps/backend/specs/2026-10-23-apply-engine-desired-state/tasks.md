@@ -105,7 +105,7 @@
 - **Files:** `core/apply_engine/materialisers/resources.py`; `tests/community/core/apply_engine/test_resources_materialiser.py`, `_fakes.py` (`FakeResourceFileService` keeps a tree)
 - **Done when:**
   - [x] `plan` classifies from one `list_root()` (no per-member `exists` probes) and reports `removals = listed − declared member paths`; the declared-tree marker is gone.
-  - [x] `write` clears the root first (a failed clear fails the category with nothing written), then uploads every member in declaration order with today's per-entry outcomes, then replaces the rows; a row failure raises `ConfirmedPartialWriteError`, which the orchestrator reports as a confirmed partial write (the files are on the bot, the rows are not).
+  - [x] `write` clears the root first (a clear that does not land raises `ResourcesRootNotCleared`: the category is reported aborted and partially written — nothing was uploaded, but a device `rmtree` that errored may have taken part of the root — and its removals are not claimed), then uploads every member in declaration order with today's per-entry outcomes, then replaces the rows; a row failure raises `ConfirmedPartialWriteError`, which the orchestrator reports as a confirmed partial write (the files are on the bot, the rows are not).
   - [x] Tests: a path declared by the previous document and omitted now is gone; a bot-written file under `data/` is gone and listed in `removals`; a file outside `data/` is untouched; rows match the written set; the platform-store road mirrors each.
   - [x] Module docstring rewritten: the "cross-entry removals are v1-empty" paragraph replaced by the resources-root rule and clear-then-write.
 - **Depends on:** Task 8

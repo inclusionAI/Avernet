@@ -847,8 +847,8 @@ def test_a_false_clear_of_an_absent_root_is_not_a_failure():
     """``clear_root`` returns ``False`` when nothing was deleted — the port's
     own contract — which is the *normal* answer for a first apply onto a
     root that does not exist yet. The plan listed nothing under the root,
-    so ``False`` reads as absence, not refusal — and without a second
-    listing.
+    and one more listing confirms it is still empty, so ``False`` reads as
+    absence, not refusal.
     """
     svc = FakeResourceFileService()
     svc.fail_clear = True  # answers False; the root is empty, so that is the truth
@@ -863,6 +863,42 @@ def test_a_false_clear_of_an_absent_root_is_not_a_failure():
     assert [r.outcome.value for r in results] == ["created"]
     assert svc.writes == {("data/tools", "a.md"): b"A"}
     assert plan.removals == ()
+    assert len(svc.list_root_calls) == 2
+
+
+def test_a_refused_clear_over_members_that_were_all_present_is_a_failure():
+    """The plan's second signal: no removal at all, every member already
+    under the root (``updated``) — the root had something to delete, so a
+    ``False`` is a refusal, with no second listing needed."""
+    svc = FakeResourceFileService()
+    svc.record_present("data/notes/r.md")
+    svc.fail_clear = True
+    m = _materialiser(svc, _StubDeclaredSourceResolver())
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(m.resolve(ctx, [{"path": "data/notes/r.md", "content": "# rules"}]))
+    plan = _run(m.plan(ctx, resolved.intents))
+    assert plan.removals == () and [e.outcome for e in plan.entries] == ["updated"]
+    with pytest.raises(ResourcesRootNotCleared):
+        _run(m.write(ctx, plan))
+    assert svc.writes == {} and len(svc.list_root_calls) == 1
+
+
+def test_a_file_the_bot_wrote_after_the_plan_listed_an_empty_root_still_fails_a_refused_clear():
+    """The window between ``plan`` and ``write``: the root was empty when
+    listed, the bot wrote under it since, and the transport refused the
+    clear with a ``False``. The plan cannot see the file; the second listing
+    does, and the category aborts rather than uploading over it."""
+    svc = FakeResourceFileService()
+    svc.fail_clear = True
+    m = _materialiser(svc, _StubDeclaredSourceResolver())
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(m.resolve(ctx, [{"path": "data/notes/r.md", "content": "# rules"}]))
+    plan = _run(m.plan(ctx, resolved.intents))
+    assert plan.removals == () and [e.outcome for e in plan.entries] == ["created"]
+    svc.record_present("data/scratch/notes.txt")
+    with pytest.raises(ResourcesRootNotCleared):
+        _run(m.write(ctx, plan))
+    assert svc.writes == {} and svc.present == {"data/scratch/notes.txt"}
 
 
 def test_a_rows_failure_raises_confirmed_partial_write_after_the_files_landed():

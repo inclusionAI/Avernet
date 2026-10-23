@@ -1092,25 +1092,27 @@ def resource_rows_for(rows: FakeResourceRows | None = None):
 
 
 class FakeResourceFileService:
-    """Stands in for ``ResourceFileService``: uploads and deletes, recorded.
+    """Stands in for ``ResourceFileService``: a presence set, with every call recorded.
 
     ``ResourceFileService`` is v1's single write chain for manifest resources
     (its dispatcher covers the arca / baas / teclaw transports uniformly), so
-    the fake needs only the three entry points the materialiser calls:
-    ``upload_file``, ``delete`` — plus ``exists`` for the plan stage's
-    classification. Signatures mirror the port's apply-side surface (every
-    parameter the materialiser passes; the router-only extras such as
-    ``preserve_structure`` are deliberately absent), so a drift shows up as a
-    TypeError in these tests before it shows up mid-apply in production.
+    the fake needs only the apply-side entry points: ``list_root`` for the
+    plan stage's one listing, ``clear_root`` and ``upload_file`` for the
+    write stage, plus ``delete`` / ``exists`` for the other materialisers
+    and the older contract checks. Signatures mirror the port's apply-side
+    surface (every parameter the materialiser passes; the router-only
+    extras such as ``preserve_structure`` are deliberately absent), so a
+    drift shows up as a TypeError in these tests before it shows up
+    mid-apply in production.
 
-    ``delete`` removes from the presence set as well — the real service's
-    contract — because the plan stage classifies by ``exists`` and would
-    otherwise call a deleted path "unchanged". Deleting a directory removes
-    the whole subtree from presence (the real chain's ``delete_tree``
-    branch); a path named in ``fail_deletes`` answers a silent ``False``
-    with presence untouched — the real transports' contract, which catch
-    their own errors and return ``False`` rather than raise, so a refused
-    ``rmtree`` is only distinguishable by re-probing presence.
+    Presence is the workspace as the bot would see it: ``record_present``
+    seeds it, uploads add to it, ``clear_root`` empties everything under
+    ``data/`` and ``delete`` a path or subtree. ``fail_clear`` makes
+    ``clear_root`` answer the transports' silent ``False`` with presence
+    untouched — the real device filesystems catch their own errors and
+    return ``False`` rather than raise — which is what the materialiser's
+    plan-against-listing reading of a ``False`` is tested with; a path in
+    ``fail_deletes`` does the same for ``delete``.
     """
 
     def __init__(
