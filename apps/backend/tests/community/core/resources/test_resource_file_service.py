@@ -18,6 +18,7 @@ from agentclaw.community.core.resources.service import (
     DirectoryTooLargeError,
     ResourceNotFoundError,
 )
+from agentclaw.community.core.ports.resource_file_port import RootListingFailed
 from agentclaw.community.core.services import resource_file_service
 from agentclaw.community.core.services.resource_file_service import (
     ResourceFileService,
@@ -773,12 +774,37 @@ async def test_list_root_walks_data_level_by_level_and_keeps_dotfiles():
 
 
 @pytest.mark.asyncio
-async def test_list_root_answers_empty_for_an_absent_root():
+async def test_list_root_answers_empty_for_a_root_its_parent_confirms_absent():
+    """``None`` for the root is absence only once the workspace lists without a ``data`` entry."""
     device_fs = MagicMock()
-    device_fs.list_dir = AsyncMock(return_value=None)
+    device_fs.list_dir = AsyncMock(
+        side_effect=lambda logical: {"workspace": [{"name": "skills", "is_dir": True}]}.get(logical)
+    )
     svc, _ = _svc(provider="baas", device_fs=device_fs)
     assert await svc.list_root(**_COORDS) == ()
-    device_fs.list_dir.assert_awaited_once_with("workspace/data")
+    assert [c.args[0] for c in device_fs.list_dir.await_args_list] == ["workspace/data", "workspace"]
+
+
+@pytest.mark.asyncio
+async def test_list_root_raises_when_the_root_does_not_list_but_the_parent_names_it():
+    """Teclaw's ``list_dir`` answers ``None`` for a failed call as for an
+    absent directory; a parent that still names ``data`` says which."""
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(
+        side_effect=lambda logical: {"workspace": [{"name": "data", "is_dir": True}]}.get(logical)
+    )
+    svc, _ = _svc(provider="teclaw", device_fs=device_fs)
+    with pytest.raises(RootListingFailed, match="present but could not be listed"):
+        await svc.list_root(**_COORDS)
+
+
+@pytest.mark.asyncio
+async def test_list_root_raises_when_the_workspace_itself_does_not_list():
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(return_value=None)
+    svc, _ = _svc(provider="teclaw", device_fs=device_fs)
+    with pytest.raises(RootListingFailed, match="workspace .* could not be listed"):
+        await svc.list_root(**_COORDS)
 
 
 @pytest.mark.asyncio

@@ -1134,6 +1134,8 @@ class FakeResourceFileService:
         #: When set, ``clear_root`` answers ``False`` and removes nothing — the
         #: transports' one failure signal.
         self.fail_clear = False
+        #: When set, ``list_root`` raises — the port's answer for a listing it could not make.
+        self.fail_list = False
 
     @property
     def present(self) -> frozenset[str]:
@@ -1234,6 +1236,8 @@ class FakeResourceFileService:
         self.list_root_calls.append(
             {"entity_type": entity_type, "entity_id": entity_id, "bot_id": bot_id, "engine_type": engine_type}
         )
+        if self.fail_list:
+            raise RuntimeError("listing quoted a header with a token")
         return tuple(sorted(p for p in self._exists if p.startswith(RESOURCES_ROOT)))
 
     async def clear_root(

@@ -93,7 +93,12 @@ class ResourceFilePort(Protocol):
         bot_id: str,
         engine_type: str,
     ) -> tuple[str, ...]:
-        """Every file under the resources root (``data/``), as workspace-relative paths; ``()`` when absent."""
+        """Every file under the resources root (``data/``), as workspace-relative paths; ``()`` when absent.
+
+        ``()`` is a confirmed absence, never a listing that could not be
+        made: an implementation that cannot tell the two apart raises
+        :class:`RootListingFailed` instead of answering empty.
+        """
         ...
 
     @abstractmethod
@@ -109,4 +114,17 @@ class ResourceFilePort(Protocol):
         ...
 
 
-__all__ = ["ResourceFilePort"]
+class RootListingFailed(RuntimeError):
+    """``list_root`` could not list the root and could not confirm it absent.
+
+    The apply engine clears and rewrites the root on the strength of this
+    listing (what it removes, and whether a refused clear found anything to
+    refuse), so a listing that failed must never come back as "nothing
+    there". The device transports do not all distinguish the two — teclaw's
+    ``list_dir`` answers ``None`` for both — which is why the implementation
+    confirms absence from the parent directory and raises this when that
+    confirmation is not available.
+    """
+
+
+__all__ = ["ResourceFilePort", "RootListingFailed"]
