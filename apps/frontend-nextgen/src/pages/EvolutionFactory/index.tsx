@@ -10,6 +10,9 @@ import { EvolutionTabs, typeTone } from './shared';
 import TaskList from './TaskList';
 import { useEvolutionContext } from './useEvolutionContext';
 import VersionList from './VersionList';
+import { Points } from '@/tracking/points';
+import { TrackExpo } from '@/tracking/TrackExpo';
+import { Tracert } from '@/utils/tracert';
 
 const taskIcons = {
   diagnose: Search,
@@ -53,7 +56,10 @@ function EvolutionFactoryContent() {
           {tab === 'tasks' ? (
             <TaskList onCreate={() => setOpen(true)} />
           ) : tab === 'templates' ? (
-            <DomainList />
+            <>
+              <TrackExpo point={Points.evolution.entryCardsExpo} />
+              <DomainList />
+            </>
           ) : (
             <VersionList />
           )}
@@ -97,7 +103,10 @@ function EvolutionFactoryContent() {
                           key={type.type}
                           aria-label={type.label}
                           className="flex w-full items-center justify-between gap-3 rounded-lg border border-border/60 bg-card p-3.5 text-left transition-colors hover:border-primary hover:bg-primary/[0.03]"
-                          onClick={() => history.push(`/evolution-factory/new?type=${type.type}`)}
+                          onClick={() => {
+                            Tracert.click(Points.evolution.createEntry);
+                            history.push(`/evolution-factory/new?type=${type.type}`);
+                          }}
                         >
                           <span className="flex min-w-0 items-start gap-3.5">
                             <span

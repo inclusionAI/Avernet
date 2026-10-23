@@ -14,6 +14,8 @@
 //     管理域拆分后独立页入口；Open Core spaces=false 不渲染）
 import { getCapabilities } from '@/capabilities';
 import { Button, Empty, IconButton, Popover, PopoverContent, PopoverTrigger, Skeleton } from '@/components/ui';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 import type { Space } from '@/domain/admin/models';
 import { initSpaceContext, refreshSpaceContext, switchSpaceContext, useSpaceContext } from '@/hooks/useSpaceContext';
 import { cn } from '@/utils/cn';
@@ -84,6 +86,7 @@ export function SpaceSwitcher({ compact = false, collapsed = false }: { compact?
   }, []);
 
   const onSelect = (id: number) => {
+    Tracert.click(Points.shell.spaceSwitchSelect);
     switchSpaceContext(id);
     setOpen(false);
   };
@@ -111,6 +114,7 @@ export function SpaceSwitcher({ compact = false, collapsed = false }: { compact?
   const onOpenChange = (next: boolean) => {
     setOpen(next);
     if (!next) return;
+    Tracert.click(Points.shell.spaceSwitchOpen);
     void initSpaceContext();
     const now = Date.now();
     if (now - lastRefreshAt.current < REFRESH_THROTTLE_MS) return;

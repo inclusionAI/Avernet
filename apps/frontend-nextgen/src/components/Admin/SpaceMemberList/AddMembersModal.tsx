@@ -22,6 +22,8 @@ import type { SpaceMember } from '@/domain/admin/models';
 import { X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { UserSearchDropdown } from './UserSearchDropdown';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 export interface AddMembersModalProps {
   open: boolean;
@@ -68,6 +70,7 @@ export function AddMembersModal({
   // 批量提交：部分失败回填 failed 子集（模态保持打开供重试）；全成功清选 + 复位 + 关闭。
   const submitAdd = async () => {
     if (selectedUsers.length === 0 || addMembersLoading) return;
+    Tracert.click(Points.spaceAdmin.addMember);
     const result = await onAddMembers(selectedUsers, newRole);
     if (result && result.failed.length > 0) {
       // 把失败项还原为可重试的 chip（以 userName 作 nickName，保持展示一致）

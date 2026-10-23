@@ -25,6 +25,8 @@ import { filterUserTaskRecords, type UserTaskOwnerBotOption } from './userTaskFi
 import { UserTaskOwnerBotFilter } from './UserTaskOwnerBotFilter';
 import { UserTaskGoalContent, UserTaskPrimaryContent } from './UserTaskTableCells';
 import { ViewSessionButton } from './ViewSessionButton';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 function Th({ className, ...props }: React.ThHTMLAttributes<HTMLTableCellElement>) {
   return <th className={cn('h-10 px-4 py-3 text-xs font-medium text-muted-foreground', className)} {...props} />;
@@ -243,6 +245,7 @@ export function UserTaskTab({
                                   leftIcon={<FileOutput className="size-4" />}
                                   onClick={(event) => {
                                     event.stopPropagation();
+                                    Tracert.click(Points.myTask.openDetail, { task_id: record.task_id });
                                     onSelectTask(record.task_id);
                                   }}
                                 >
@@ -259,6 +262,7 @@ export function UserTaskTab({
                                   leftIcon={<Eye className="size-4" />}
                                   onClick={(event) => {
                                     event.stopPropagation();
+                                    Tracert.click(Points.myTask.openDetail, { task_id: record.task_id });
                                     onSelectTask(record.task_id);
                                   }}
                                 >

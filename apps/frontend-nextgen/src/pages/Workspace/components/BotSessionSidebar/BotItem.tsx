@@ -12,6 +12,8 @@ import { SIDEBAR_TAG_CLASS } from '../GroupSidebar/GroupItem.types';
 import { ListErrorState } from '../ListErrorState';
 import { SessionScopeFilter } from '../SessionScopeFilter';
 import { BotSessionItem } from './BotSessionItem';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 interface BotItemProps {
   bot: ChatBotView;
@@ -167,6 +169,7 @@ export const BotItem = React.memo(function BotItem({
               className="h-6 w-6 rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
               onClick={(event) => {
                 event.stopPropagation();
+                Tracert.click(Points.workspaceChat.newSession, { bot_id: bot.botId });
                 onCreateSession(bot.botId);
               }}
             />

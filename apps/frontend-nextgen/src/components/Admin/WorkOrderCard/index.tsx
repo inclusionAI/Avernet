@@ -12,6 +12,8 @@ import { formatAbsoluteTime } from '@/utils/format';
 import { Eye } from 'lucide-react';
 import { useState } from 'react';
 import { Tag } from '../Tag';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 export interface WorkOrderCardProps {
   workOrder: WorkOrder;
@@ -35,6 +37,7 @@ export function WorkOrderCard({ workOrder: wo, onApprove, onReject, onView, canA
     if (submitting) return;
     setSubmitting(true);
     try {
+      Tracert.click(Points.ticketCenter.handleWorkOrder, { ticket_id: wo.workOrderId });
       await onApprove?.(wo.workOrderId);
     } finally {
       setSubmitting(false);
@@ -46,6 +49,7 @@ export function WorkOrderCard({ workOrder: wo, onApprove, onReject, onView, canA
     if (!text) return;
     setSubmitting(true);
     try {
+      Tracert.click(Points.ticketCenter.handleWorkOrder, { ticket_id: wo.workOrderId });
       await onReject?.(wo.workOrderId, text);
       setRejectOpen(false);
       setRemark('');

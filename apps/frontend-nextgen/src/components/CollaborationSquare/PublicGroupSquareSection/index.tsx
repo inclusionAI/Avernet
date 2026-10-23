@@ -10,6 +10,8 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { useCollaborationSquare } from '@/hooks/useCollaborationSquare';
 import { RefreshCw } from 'lucide-react';
 import { useEffect, useRef } from 'react';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 const LOAD_MORE_PRELOAD_DISTANCE = 420;
 
@@ -96,9 +98,15 @@ export function PublicGroupSquareSection({ square, scrollRootRef, canLoadMore }:
               key={group.id}
               group={group}
               busy={square.busyKeys.includes(`group:${group.id}`)}
-              onOpenMembers={(item) => void square.openGroupMembers(item)}
+              onOpenMembers={(item) => {
+                Tracert.click(Points.collabSquare.openGroupCard, { group_id: item.id });
+                void square.openGroupMembers(item);
+              }}
               onShare={(item) => square.share('group', item.id)}
-              onCreateSession={square.createGroupSession}
+              onCreateSession={(item) => {
+                Tracert.click(Points.collabSquare.joinGroup, { group_id: item.id });
+                square.createGroupSession(item);
+              }}
             />
           ))}
         </div>

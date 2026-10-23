@@ -17,6 +17,8 @@ import { Pagination } from '@/components/ui/Pagination';
 import { useBotWorkshop } from '@/hooks/useBotWorkshop';
 import { getGeneralConfigAvailability, type BotDomain } from '@/services/botWorkshop';
 import React, { useState } from 'react';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 const BotWorkshopPage: React.FC = () => {
   const workshop = useBotWorkshop();
@@ -28,6 +30,7 @@ const BotWorkshopPage: React.FC = () => {
   const showBotLogs = getCapabilities().getLoginStrategy().value === 'ace-gateway';
   const effectiveTab = workshop.currentSpaceKind === 'personal' ? activeTab : 'tc';
   const handleView = (bot: BotDomain) => {
+    Tracert.click(Points.botWorkshop.openDetail, { bot_id: bot.id });
     if (workshop.canEnterDetail(bot)) workshop.openDetail(bot);
     else setBasicInfoBot(bot);
   };

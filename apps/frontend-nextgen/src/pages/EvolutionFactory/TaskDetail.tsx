@@ -22,6 +22,8 @@ import { TaskProgress } from './TaskProgress';
 import { TaskTimeline } from './TaskTimeline';
 import { useEvolutionContext } from './useEvolutionContext';
 import VersionList from './VersionList';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 function TaskDetailContent() {
   const { taskId = '' } = useParams<{ taskId: string }>();
@@ -217,7 +219,10 @@ function TaskDetailContent() {
                         size="sm"
                         variant="outline"
                         loading={busy}
-                        onClick={() => void action(step, 'retry').catch(() => undefined)}
+                        onClick={() => {
+                          Tracert.click(Points.evolution.runTask, { task_id: taskId });
+                          void action(step, 'retry').catch(() => undefined);
+                        }}
                       >
                         继续执行
                       </Button>
