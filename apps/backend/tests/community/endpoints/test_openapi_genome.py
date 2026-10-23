@@ -209,14 +209,11 @@ def _seed_promotion_row(world) -> str:
             ref="active",
             revision_id=_R1_ID,
             from_revision_id=None,
-            document_digest=_SOUL_DIGEST,
-            document_json="{}",
             actor_kind="user",
             actor_id=_OWNER,
             reason="seed",
             status="applied",
             apply_kind="pending",
-            apply_reference="apply_1",
             apply_detail="started",
             created_at=datetime.now(timezone.utc).replace(tzinfo=None),
         )
@@ -228,10 +225,10 @@ def _seed_deliverable(world) -> str:
     """A captured bot whose delivery seam accepts, so a promotion can succeed before RSI-04."""
     bot_id = _seed_captured(world)
 
-    async def _start(self, bot, compiled, *, actor, reason):
-        return ApplyResult(kind="fake", reference="apply_1", detail="started")
+    async def _start(self, bot, state, *, actor, reason):
+        return ApplyResult(kind="fake", detail="started")
 
-    bind_overrides(world, RevisionApplier, {"preflight": lambda self, bot, compiled: None, "start": _start})
+    bind_overrides(world, RevisionApplier, {"preflight": lambda self, bot, state: None, "start": _start})
     return bot_id
 
 
@@ -549,7 +546,7 @@ def put_content_unknown_bot():
                 "revision": _R1_ID,
                 "from_revision": None,
                 "status": "applied",
-                "apply_reference": "apply_1",
+                "apply_detail": "started",
             }
         },
     ),
@@ -573,7 +570,7 @@ def promote_not_appliable():
 @endpoint_test(
     method="GET",
     path=f"{_GENOME}/promotions",
-    scenario="lists_without_documents",
+    scenario="lists_the_bots_promotions",
     input=_params(),
     seed=_seed_promotion_row,
     expect=ExpectSuccess(
@@ -581,7 +578,7 @@ def promote_not_appliable():
         json_contains={
             "data": {
                 "total": 1,
-                "items": [{"id": _PROMOTION_ID, "revision": _R1_ID, "status": "applied", "document": None}],
+                "items": [{"id": _PROMOTION_ID, "revision": _R1_ID, "status": "applied"}],
             }
         },
     ),
@@ -605,10 +602,10 @@ def list_promotions_unknown_bot():
 @endpoint_test(
     method="GET",
     path=f"{_GENOME}/promotions/{{promotion_id}}",
-    scenario="with_its_document",
+    scenario="by_id",
     input=_params(promotion_id=_PROMOTION_ID),
     seed=_seed_promotion_row,
-    expect=ExpectSuccess(status=200, json_contains={"data": {"id": _PROMOTION_ID, "document": {}}}),
+    expect=ExpectSuccess(status=200, json_contains={"data": {"id": _PROMOTION_ID, "apply_detail": "started"}}),
 )
 def get_promotion_ok():
     pass

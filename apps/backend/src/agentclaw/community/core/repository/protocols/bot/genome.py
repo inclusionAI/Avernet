@@ -220,13 +220,6 @@ class GenomePromotionRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
-    def by_apply_reference(
-        self, *, env: str, entity_id: str, bot_id: str, apply_reference: str
-    ) -> Optional[GenomePromotionRow]:
-        """The promotion whose delivery produced ``apply_reference`` (an apply id), or ``None``."""
-        ...
-
-    @abstractmethod
     def finish(
         self,
         *,
@@ -235,7 +228,6 @@ class GenomePromotionRepositoryProtocol(Protocol):
         bot_id: str,
         promotion_id: str,
         status: str,
-        apply_reference: Optional[str],
         apply_detail: str,
     ) -> Optional[GenomePromotionRow]:
         """Record delivery's answer; ``None`` when the row is gone."""

@@ -10,9 +10,8 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
 from agentclaw.community.core.content_store import MAX_AUDIT_ACTOR_CHARS, ContentScope
-from agentclaw.community.core.bot_genome.canonical import canonicalize, sha256_digest
+from agentclaw.community.core.bot_genome.canonical import canonicalize, revision_id, sha256_digest
 from agentclaw.community.core.bot_genome.errors import (
     CaptureRefused,
     ContentNotReachable,
@@ -34,7 +33,6 @@ from agentclaw.community.core.bot_genome.models import (
 )
 from agentclaw.community.core.bot_genome.patch_models import GenomePatch, parse_ops
 from agentclaw.community.core.bot_genome.registry import DEFAULT_POLICY
-from agentclaw.community.core.bot_genome.repository.models import GenomePromotionRow
 from agentclaw.community.core.bot_genome.spec_models import GenomePolicy
 from tests.community.core.bot_genome.example_blobs import (
     MEMORY_BOT,
@@ -469,8 +467,8 @@ async def test_content_is_reachable_per_bot_and_uploads_are_bounded(world: World
 
 
 @pytest.mark.asyncio
-async def test_diff_compile_and_applied_revision(world: World) -> None:
-    first = await _capture_support_bot(world)
+async def test_diff_and_compile(world: World) -> None:
+    await _capture_support_bot(world)
     world.registry.put_content(
         BOT, BlobDir().read("sha256:a191ca8f49999530a2cf4f48562ffde7d62011b3bcfe040195da089a3f117c95"), provenance=OWNER
     )
@@ -483,39 +481,49 @@ async def test_diff_compile_and_applied_revision(world: World) -> None:
         ("persona/SOUL.md", "modified"),
         ("resources/data/returns.md", "added"),
     ]
-    compiled = world.registry.compile(BOT, "r2")
-    assert (
-        compiled.revision_id == SUPPORT_BOT_CANDIDATE
-        and compiled.document["manifest"]["resources"][-1]["path"] == "data/returns.md"
-    )
-    assert compiled.document["script"]["body"].startswith("#!/")
-    assert world.registry.applied_revision(BOT) is None
-    world.report(BOT, "apply_9")
-    assert world.registry.applied_revision(BOT) is None, "an apply nobody promoted"
-    world.promotions.insert(
-        GenomePromotionRow(
-            env="dev",
-            entity_id=BOT.entity_id,
-            bot_id=BOT.bot_id,
-            promotion_id="p" * 32,
-            ref="active",
-            revision_id=second.revision.revision.id,
-            from_revision_id=first.revision.revision.id,
-            document_digest=compiled.document_digest,
-            document_json=canonicalize(compiled.document).decode(),
-            actor_kind="user",
-            actor_id="u",
-            reason="ship",
-            status="applied",
-            apply_kind="pending",
-            apply_reference="apply_9",
-            created_at=first.revision.revision.created_at,
-        )
-    )
-    assert world.registry.applied_revision(BOT) == SUPPORT_BOT_CANDIDATE
-    for not_done in (ApplyStatus.RUNNING, ApplyStatus.PARTIAL, ApplyStatus.FAILED):
-        world.report(BOT, "apply_9", status=not_done)
-        assert world.registry.applied_revision(BOT) is None, f"a {not_done.value} apply is not what the bot runs"
+    state = world.registry.compile(BOT, "r2")
+    assert second.revision.revision.id == SUPPORT_BOT_CANDIDATE
+    assert state.resources.entries[-1].path == "data/returns.md"
+    assert state.script.entries[0].body.startswith("#!/")
+    assert state.cli_tools is None and state.engine_config is None, "never in a revision, so never declared"
+
+
+# -- drift: the bot against its active revision, observed by reading the bot ------------------------
+
+
+async def _promote_first(world: World, revision: str) -> None:
+    """``active`` is moved by promotion only; the fake applier accepts."""
+    await world.promotion.promote(BOT, revision=revision, ref="active", expected_revision=None, actor=OWNER, reason="x")
+
+
+@pytest.mark.asyncio
+async def test_drift_is_none_without_an_active_and_none_while_the_bot_reads_as_active(world: World) -> None:
+    assert await world.registry.drift(BOT) is None, "nothing to drift from"
+    first = await _capture_support_bot(world)
+    await _promote_first(world, first.revision.revision.id)
+    assert await world.registry.drift(BOT) is None, "the reader still answers what r1 recorded"
+
+
+@pytest.mark.asyncio
+async def test_drift_names_active_and_what_the_bot_would_record_now(world: World) -> None:
+    first = await _capture_support_bot(world)
+    await _promote_first(world, first.revision.revision.id)
+    world.reader._script = "#!/bin/sh\necho edited by hand\n"
+    drift = await world.registry.drift(BOT)
+    assert drift is not None and drift.active == SUPPORT_BOT
+    captured = await world.registry.capture(BOT, created_by=OWNER)
+    assert drift.observed == captured.revision.revision.id, "observed is the id capture records for this state"
+    assert drift.observed == revision_id(captured.revision.spec, first.revision.policy)
+    assert world.registry.list_revisions(BOT).total == 2, "drift itself recorded nothing"
+
+
+@pytest.mark.asyncio
+async def test_drift_propagates_a_bot_that_cannot_be_read(world: World) -> None:
+    first = await _capture_support_bot(world)
+    await _promote_first(world, first.revision.revision.id)
+    world.reader._refuse = "the device is offline"
+    with pytest.raises(CaptureRefused):
+        await world.registry.drift(BOT)
 
 
 @pytest.mark.asyncio

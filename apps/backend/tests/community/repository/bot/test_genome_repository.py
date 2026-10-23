@@ -301,7 +301,7 @@ def test_patch_rows_are_content_addressed(db):
     assert repo.get(**BOT, digest=R2).content == '{"ops":[]}' and repo.get(**OTHER, digest=R2) is None
 
 
-def test_promotions_round_trip_list_and_join_on_the_apply_reference(db):
+def test_promotions_round_trip_list_and_finish(db):
     repo = GenomePromotionRepository(db)
 
     def _promotion(promotion_id: str, created_at: datetime) -> GenomePromotionRow:
@@ -311,8 +311,6 @@ def test_promotions_round_trip_list_and_join_on_the_apply_reference(db):
             ref="active",
             revision_id=R2,
             from_revision_id=R1,
-            document_digest=R3,
-            document_json='{"manifest":{}}',
             going_back=False,
             actor_kind="user",
             actor_id="u1",
@@ -324,18 +322,14 @@ def test_promotions_round_trip_list_and_join_on_the_apply_reference(db):
 
     first = repo.insert(_promotion("a" * 32, NOW))
     second = repo.insert(_promotion("b" * 32, NOW + timedelta(seconds=1)))
-    assert first.id is not None and first.document_json == '{"manifest":{}}' and first.apply_detail == ""
+    assert first.id is not None and first.apply_detail == ""
     total, rows = repo.list(**BOT)
     assert total == 2 and [r.promotion_id for r in rows] == [second.promotion_id, first.promotion_id]
     assert repo.list(**OTHER) == (0, [])
-    finished = repo.finish(
-        **BOT, promotion_id=first.promotion_id, status="applied", apply_reference="apply_9", apply_detail="ok"
-    )
-    assert (finished.status, finished.apply_reference, finished.apply_detail) == ("applied", "apply_9", "ok")
-    assert repo.by_apply_reference(**BOT, apply_reference="apply_9").promotion_id == first.promotion_id
-    assert repo.by_apply_reference(**BOT, apply_reference="apply_0") is None
+    finished = repo.finish(**BOT, promotion_id=first.promotion_id, status="applied", apply_detail="ok")
+    assert (finished.status, finished.apply_detail) == ("applied", "ok")
     assert repo.get(**OTHER, promotion_id=first.promotion_id) is None
-    assert repo.finish(**BOT, promotion_id="c" * 32, status="applied", apply_reference=None, apply_detail="") is None
+    assert repo.finish(**BOT, promotion_id="c" * 32, status="applied", apply_detail="") is None
 
 
 # -- the DDL and the ORM agree ---------------------------------------------------------------------
@@ -442,8 +436,6 @@ def test_promotion_start_moves_marks_and_files_in_one_transaction(db):
             ref="active",
             revision_id=revision_id,
             from_revision_id=None,
-            document_digest=R3,
-            document_json="{}",
             actor_kind="user",
             actor_id="u1",
             reason="r",

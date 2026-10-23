@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.core.bot_genome.canonical import canonicalize
+from agentclaw.community.core.apply_engine.desired_state import DesiredState
 from agentclaw.community.core.bot_genome.errors import (
     Drifted,
     NotAppliable,
@@ -15,7 +15,7 @@ from agentclaw.community.core.bot_genome.errors import (
 )
 from agentclaw.community.core.bot_genome.models import BotRef, Provenance, ProvenanceKind, RevisionStatus, RunScope
 from agentclaw.community.core.bot_genome.promotion.applier import PendingDeliveryApplier
-from tests.community.core.bot_genome.example_blobs import SUPPORT_BOT, BlobDir, load_patch, spec_of
+from tests.community.core.bot_genome.example_blobs import SUPPORT_BOT, SUPPORT_BOT_CANDIDATE, BlobDir, load_patch, spec_of
 from tests.community.core.bot_genome.service_fixtures import BOT, OWNER, RUN, World
 from tests.community.core.bot_genome.test_capture import FakeReader
 
@@ -44,38 +44,34 @@ def _refs(world: World) -> dict[str, str]:
 
 
 @pytest.mark.asyncio
-async def test_promote_moves_the_pair_marks_promoted_records_the_document_and_starts_delivery(world: World) -> None:
+async def test_promote_moves_the_pair_marks_promoted_and_hands_the_desired_state_to_delivery(world: World) -> None:
     r1, r2 = await _two_revisions(world)
     first = await world.promotion.promote(
         BOT, revision="r1", ref="active", expected_revision=None, actor=OWNER, reason="first"
     )
-    assert (
-        first.revision,
-        first.from_revision,
-        first.status,
-        first.apply_kind,
-        first.apply_reference,
-        first.apply_detail,
-    ) == (r1, None, "applied", "fake", "apply_1", "started")
+    assert (first.revision, first.from_revision, first.status, first.apply_kind, first.apply_detail) == (
+        r1,
+        None,
+        "applied",
+        "fake",
+        "started",
+    )
     assert first.going_back is False and first.actor == OWNER and first.reason == "first"
     assert _refs(world) == {"active": r1}
     assert world.registry.get_revision(BOT, r1).revision.status == RevisionStatus.PROMOTED
-    compiled = world.registry.compile(BOT, r1)
-    assert first.document == compiled.document and first.document_digest == compiled.document_digest
-    assert world.applier.preflights[0][1].document_digest == compiled.document_digest
-    world.report(BOT, "apply_1")
-    assert world.registry.applied_revision(BOT) == r1
+    state = world.registry.compile(BOT, r1)
+    assert isinstance(state, DesiredState)
+    assert world.applier.preflights[0][1] == state and world.applier.starts[0][1] == state
+    assert world.applier.starts[0][2:] == (OWNER, "first")
 
-    world.applier.next_reference = "apply_2"
+    # An automated actor: the bot still reads as r1 (nothing moved it by hand), so no drift.
     second = await world.promotion.promote(
         BOT, revision=r2, ref="active", expected_revision=r1, actor=RUN, reason="gate"
     )
     assert second.from_revision == r1 and _refs(world) == {"active": r2, "previous": r1}
     page = world.promotion.list_promotions(BOT)
-    assert page.total == 2 and [p.revision for p in page.items] == [r2, r1] and page.items[0].document is None
-    assert (
-        world.promotion.get_promotion(BOT, second.id).document["manifest"]["resources"][-1]["path"] == "data/returns.md"
-    )
+    assert page.total == 2 and [p.revision for p in page.items] == [r2, r1]
+    assert world.promotion.get_promotion(BOT, second.id).revision == r2
     with pytest.raises(RevisionNotFound):
         world.promotion.get_promotion(BOT, "x" * 32)
 
@@ -127,19 +123,23 @@ async def test_refusals_before_the_move_leave_refs_and_statuses_untouched(world:
 
 @pytest.mark.asyncio
 async def test_drift_refuses_automated_actors_only(world: World) -> None:
+    """Drift is read off the bot: after an owner edits the bot by hand (here,
+    the script), its state no longer records as ``active``. A strategy run
+    may not promote over that; the owner may, and once the bot holds what
+    ``active`` says again, the run may move it."""
     r1, r2 = await _two_revisions(world)
     await world.promotion.promote(BOT, revision=r1, ref="active", expected_revision=None, actor=OWNER, reason="a")
-    world.report(BOT, "apply_by_hand")  # a direct PUT /config-manifest since the promotion
+    world.reader._script = "#!/bin/sh\necho edited by hand\n"  # a direct edit since the promotion
     with pytest.raises(Drifted) as caught:
         await world.promotion.promote(BOT, revision=r2, ref="active", expected_revision=r1, actor=RUN, reason="gate")
-    assert (caught.value.active, caught.value.applied) == (r1, None)
+    assert caught.value.active == r1 and caught.value.observed not in (r1, r2)
     assert _refs(world) == {"active": r1}
     reconciled = await world.promotion.promote(
         BOT, revision=r2, ref="active", expected_revision=r1, actor=OWNER, reason="keep my edit"
     )
     assert reconciled.revision == r2
-    world.report(BOT, "apply_1")
-    assert world.registry.applied_revision(BOT) == r2, "the apply the promotion started"
+    world.reader = FakeReader.from_spec(spec_of(SUPPORT_BOT_CANDIDATE))  # the delivery landed r2 on the bot
+    assert await world.registry.drift(BOT) is None
     await world.promotion.promote(
         BOT, revision=r1, ref="active", expected_revision=r2, actor=RUN, reason="rollback rule"
     )
@@ -152,7 +152,7 @@ async def test_a_failed_start_is_recorded_with_the_refs_moved(world: World) -> N
     failed = await world.promotion.promote(
         BOT, revision=r1, ref="active", expected_revision=None, actor=OWNER, reason="x"
     )
-    assert (failed.status, failed.apply_reference) == ("apply_failed", None)
+    assert failed.status == "apply_failed"
     assert "RuntimeError" in failed.apply_detail and "device unreachable" not in failed.apply_detail, (
         "no exception text on the row"
     )
@@ -161,7 +161,7 @@ async def test_a_failed_start_is_recorded_with_the_refs_moved(world: World) -> N
         and world.registry.get_revision(BOT, r1).revision.status == RevisionStatus.PROMOTED
     )
     row = world.promotions.get(env="dev", entity_id=BOT.entity_id, bot_id=BOT.bot_id, promotion_id=failed.id)
-    assert row.document_json == canonicalize(world.registry.compile(BOT, r1).document).decode()
+    assert row.status == "apply_failed" and row.apply_kind == "fake"
 
 
 @pytest.mark.asyncio
