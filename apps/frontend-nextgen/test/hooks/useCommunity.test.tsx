@@ -52,6 +52,11 @@ const reply: CommunityReply = {
   author: { type: 'bot', id: 'bot-1', displayName: '协作助手' },
   createdAt: '2026-10-06T06:20:00Z',
 };
+const pollTopic: CommunityTopic = {
+  ...topic,
+  topicType: 'poll',
+  topicConfig: { poll: { selection: 'multi', options: ['方案 A', '方案 B'] } },
+};
 
 async function flushDebouncedLoad() {
   await act(async () => {
@@ -204,67 +209,37 @@ describe('useCommunity', () => {
     expect(mockedService.closeTopic).not.toHaveBeenCalled();
   });
 
-  test('普通回复不携带 replyToPostId，成功后刷新当前页', async () => {
-    mockedService.getTopic.mockResolvedValue(topic);
-    mockedService.createReply.mockResolvedValue('reply-created');
+  test('Human 只能通过结构化投票提交，不再提供普通回复能力', async () => {
+    mockedService.getTopic.mockResolvedValue(pollTopic);
+    mockedService.createReply.mockResolvedValue('vote-created');
     const { result } = renderHook(() => useCommunity());
     await flushDebouncedLoad();
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     await act(async () => {
-      await result.current.openTopic(topic);
+      await result.current.openTopic(pollTopic);
     });
 
-    let created = false;
+    let submitted = false;
     await act(async () => {
-      created = await result.current.publishReply('  继续讨论  ');
+      submitted = await result.current.publishVote([1, 0]);
     });
 
-    expect(created).toBe(true);
+    expect(submitted).toBe(true);
     expect(mockedService.createReply).toHaveBeenCalledWith({
-      topicId: topic.id,
-      body: '  继续讨论  ',
+      topicId: pollTopic.id,
+      body: '投票选择：方案 A、方案 B',
       authorId: '900003',
       authorName: '当前用户',
       authorAvatarUrl: 'avatar.png',
-      replyToPostId: undefined,
+      pollSelection: [0, 1],
     });
-    expect(result.current.replyTargetPostId).toBeNull();
-    expect(mockedService.listReplies).toHaveBeenLastCalledWith(topic.id, {
+    expect(mockedService.listReplies).toHaveBeenLastCalledWith(pollTopic.id, {
       page: 1,
       pageSize: COMMUNITY_REPLY_PAGE_SIZE,
     });
-    expect(notifySuccess).toHaveBeenCalledWith('主题回复成功');
-  });
-
-  test('点击楼层回复时记录 Post id，并提交 replyToPostId', async () => {
-    mockedService.getTopic.mockResolvedValue(topic);
-    mockedService.createReply.mockResolvedValue('reply-created');
-    const { result } = renderHook(() => useCommunity());
-    await flushDebouncedLoad();
-    await waitFor(() => expect(result.current.loading).toBe(false));
-
-    await act(async () => {
-      await result.current.openTopic(topic);
-    });
-    act(() => {
-      result.current.startReply('reply-1');
-    });
-
-    expect(result.current.replyTargetPostId).toBe('reply-1');
-
-    let created = false;
-    await act(async () => {
-      created = await result.current.publishReply('给楼层的回复');
-    });
-
-    expect(created).toBe(true);
-    expect(mockedService.createReply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        replyToPostId: 'reply-1',
-      }),
-    );
-    expect(notifySuccess).toHaveBeenCalledWith('回复楼层成功');
+    expect(notifySuccess).toHaveBeenCalledWith('投票成功');
+    expect(result.current.replyPublishing).toBe(false);
   });
 
   test('goToReplyPage 切换回帖分页', async () => {

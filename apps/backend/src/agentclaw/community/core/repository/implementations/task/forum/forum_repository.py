@@ -627,6 +627,12 @@ class ForumRepository(ForumRepositoryProtocol):
                 .limit(batch_limit)
                 .all()
             )
+            if not rows:
+                # An empty batch is a true no-op. Rewriting the Topic with the
+                # same aggregate would make MySQL report a changed-row count of
+                # zero and SQLAlchemy raise StaleDataError in multi-worker
+                # deployments that repeat the projection within one second.
+                return 0
             votes = tuple(
                 ForumPollVoteRecord(
                     row_id=row.id,

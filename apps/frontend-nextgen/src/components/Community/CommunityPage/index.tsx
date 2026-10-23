@@ -32,12 +32,8 @@ export function CommunityPage() {
         replyPageCount={community.replyPageCount}
         replyPageSize={COMMUNITY_REPLY_PAGE_SIZE}
         onGoToReplyPage={(page) => void community.goToReplyPage(page)}
-        replyTargetPostId={community.replyTargetPostId}
         replyPublishing={community.replyPublishing}
         hasVoted={hasVoted}
-        onStartReply={community.startReply}
-        onCancelReply={community.cancelReply}
-        onSubmitReply={(body) => community.publishReply(body)}
         onSubmitVote={community.publishVote}
       />
     );

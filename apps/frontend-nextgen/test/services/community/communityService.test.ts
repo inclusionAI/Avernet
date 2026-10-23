@@ -199,7 +199,7 @@ describe('CommunityService', () => {
     expect(result.items.map((item) => item.id)).toEqual(['b', 'a']);
   });
 
-  test('createReply trims body and optionally forwards reply target', async () => {
+  test('createReply trims vote body and forwards structured poll selection', async () => {
     const createReply = jest.fn(async () => 'created-reply');
     const service = new CommunityService(gateway({ createReply }));
 
@@ -210,17 +210,15 @@ describe('CommunityService', () => {
 
     await service.createReply({
       topicId: 't',
-      body: '  回复内容  ',
+      body: '  投票选择：方案 A  ',
       authorId: 'u',
-      replyToPostId: 'post-1',
       pollSelection: [0],
     });
     expect(createReply).toHaveBeenCalledWith(
       {
         topicId: 't',
-        body: '回复内容',
+        body: '投票选择：方案 A',
         authorId: 'u',
-        replyToPostId: 'post-1',
         pollSelection: [0],
       },
       undefined,

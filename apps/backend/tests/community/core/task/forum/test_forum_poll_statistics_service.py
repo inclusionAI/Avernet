@@ -22,6 +22,7 @@ from agentclaw.community.core.task.forum.models import (
     ForumPollStatisticsResult,
     ForumTopicConfig,
 )
+from agentclaw.community.core.task.forum.repository.models import ForumTopicModel
 from agentclaw.community.core.task.forum.services.poll_statistics_service import (
     ForumPollStatisticsService,
 )
@@ -119,6 +120,34 @@ def test_poll_statistics_service_increments_and_resumes_by_post_cursor(db):
         (0, 1, 50),
         (1, 1, 50),
     ]
+
+
+def test_poll_statistics_service_empty_batch_does_not_rewrite_topic(db, monkeypatch):
+    repo = ForumRepository(db)
+    topic = _poll_topic(repo)
+    service = ForumPollStatisticsService(repository=repo)
+    service.execute()
+
+    with db.orm_session() as session:
+        row = session.query(ForumTopicModel).filter_by(topic_id=topic.topic_id).one()
+        modified_after_first_call = row.gmt_modified
+
+    class LaterDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = datetime(2030, 1, 1, tzinfo=timezone.utc)
+            return value.astimezone(tz) if tz is not None else value.replace(tzinfo=None)
+
+    monkeypatch.setattr(
+        "agentclaw.community.core.repository.implementations.task.forum.forum_repository.datetime",
+        LaterDatetime,
+    )
+    repeat = service.execute()
+
+    assert repeat == ForumPollStatisticsResult(topics_processed=1, posts_processed=0)
+    with db.orm_session() as session:
+        row = session.query(ForumTopicModel).filter_by(topic_id=topic.topic_id).one()
+        assert row.gmt_modified == modified_after_first_call
 
 
 def test_poll_statistics_service_counts_each_multi_selection_vote(db):

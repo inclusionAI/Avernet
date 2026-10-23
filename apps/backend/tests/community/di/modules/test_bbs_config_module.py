@@ -1,4 +1,4 @@
-"""Configuration parsing tests for the two independent BBS tasks."""
+"""Configuration parsing tests for the independent BBS periodic tasks."""
 
 from __future__ import annotations
 
@@ -10,6 +10,8 @@ from agentclaw.community.di.modules import bbs_config_module
 from agentclaw.community.di.bbs_digest_config import (
     BbsContentImportTaskConfig,
     BbsDigestTaskConfig,
+    BbsPollStatisticsTaskConfig,
+    BbsTopicTagTaskConfig,
     BbsDingTalkConfig,
     BbsLLMConfig,
 )
@@ -20,7 +22,38 @@ def _patch_block(monkeypatch: pytest.MonkeyPatch, value: dict[str, Any]) -> None
     monkeypatch.setattr(bbs_config_module, "_block", lambda _name: value)
 
 
-def test_bbs_config_module_parses_two_independent_task_blocks(
+def test_bbs_task_defaults_use_independent_intervals() -> None:
+    assert BbsDigestTaskConfig() == BbsDigestTaskConfig(
+        enabled=False,
+        interval=300,
+        jitter=5,
+        lock_ttl=240,
+        heartbeat=45,
+    )
+    assert BbsPollStatisticsTaskConfig() == BbsPollStatisticsTaskConfig(
+        enabled=True,
+        interval=300,
+        jitter=5,
+        lock_ttl=240,
+        heartbeat=45,
+    )
+    assert BbsTopicTagTaskConfig() == BbsTopicTagTaskConfig(
+        enabled=True,
+        interval=7200,
+        jitter=30,
+        lock_ttl=240,
+        heartbeat=45,
+    )
+    assert BbsContentImportTaskConfig() == BbsContentImportTaskConfig(
+        enabled=False,
+        interval=60,
+        jitter=5,
+        lock_ttl=240,
+        heartbeat=45,
+    )
+
+
+def test_bbs_config_module_parses_independent_task_blocks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_block(
@@ -30,6 +63,20 @@ def test_bbs_config_module_parses_two_independent_task_blocks(
                 "enabled": True,
                 "interval": "120",
                 "jitter": 7,
+                "lock_ttl": 180,
+                "heartbeat": 30,
+            },
+            "poll_statistics_task": {
+                "enabled": False,
+                "interval": 45,
+                "jitter": 0,
+                "lock_ttl": 90,
+                "heartbeat": 20,
+            },
+            "topic_tag_task": {
+                "enabled": False,
+                "interval": 7200,
+                "jitter": 10,
                 "lock_ttl": 180,
                 "heartbeat": 30,
             },
@@ -50,6 +97,20 @@ def test_bbs_config_module_parses_two_independent_task_blocks(
         enabled=True,
         interval=120,
         jitter=7,
+        lock_ttl=180,
+        heartbeat=30,
+    )
+    assert module.bbs_poll_statistics_task() == BbsPollStatisticsTaskConfig(
+        enabled=False,
+        interval=45,
+        jitter=0,
+        lock_ttl=90,
+        heartbeat=20,
+    )
+    assert module.bbs_topic_tag_task() == BbsTopicTagTaskConfig(
+        enabled=False,
+        interval=7200,
+        jitter=10,
         lock_ttl=180,
         heartbeat=30,
     )
