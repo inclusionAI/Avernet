@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import time
+import threading
 
 log_path = sys.argv[1]
 MOCK_DELAY = float(os.environ.get("MOCK_DELAY", "0"))
@@ -11,6 +12,7 @@ threads = set()
 turns = 0
 counter = 0
 ignore_interrupts = set()
+gated_interrupts = set()
 delayed_turns = set()
 delayed_completions = {}
 questions = {}
@@ -60,6 +62,12 @@ for raw in sys.stdin:
             while not os.path.exists(log_path + ".release"):
                 time.sleep(0.005)
             prompt = prompt.removeprefix("gated-start-")
+        if prompt == "start-error":
+            send({"id": request["id"], "error": {"message": "start rejected"}})
+            continue
+        if prompt == "start-malformed":
+            send({"id": request["id"], "result": {"turn": {}}})
+            continue
         if prompt == "crash":
             os._exit(2)
         turns += 1
@@ -130,11 +138,13 @@ for raw in sys.stdin:
                 "threadId": thread, "turnId": turn,
                 "turn": {"id": turn, "status": "failed", "error": {"message": "test failure"}}}})
             continue
+        if prompt == "gated-interrupt":
+            gated_interrupts.add(turn)
         if prompt == "ignore-interrupt":
             ignore_interrupts.add(turn)
         if prompt == "hold-delayed-completion":
             delayed_turns.add(turn)
-        if prompt in ("hold", "late-start", "ignore-interrupt", "hold-delayed-completion"):
+        if prompt in ("hold", "late-start", "ignore-interrupt", "hold-delayed-completion", "gated-interrupt"):
             continue
         send({"method": "item/agentMessage/delta", "params": {
             "threadId": thread, "turnId": turn, "delta": f"{os.getpid()}:"}})
@@ -146,6 +156,15 @@ for raw in sys.stdin:
             "threadId": thread, "turn": {"id": turn, "status": "completed"}}})
         continue
     elif method == "turn/interrupt":
+        if params["turnId"] in gated_interrupts:
+            def release_interrupt(rpc_id=request["id"], turn_params=dict(params)):
+                while not os.path.exists(log_path + ".interrupt-release"):
+                    time.sleep(0.005)
+                send({"id": rpc_id, "result": {}})
+                send({"method": "turn/completed", "params": dict(turn_params,
+                    turn={"id": turn_params["turnId"], "status": "interrupted"})})
+            threading.Thread(target=release_interrupt, daemon=True).start()
+            continue
         if params["turnId"] in ignore_interrupts:
             continue
         send({"id": request["id"], "result": {}})
