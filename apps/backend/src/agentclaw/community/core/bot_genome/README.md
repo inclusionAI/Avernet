@@ -33,18 +33,24 @@ owner changes it with its own operation (`set_policy`).
 
 ## Delivery
 
-A promotion (`promotion/`) moves `active` and `previous` in one
-compare-and-swap, marks the revision `promoted`, records the promotion with
-the compiled document and its digest, and hands the compiled revision to the
-`RevisionApplier` seam. The only applier bound here (`PendingDeliveryApplier`)
-refuses before any ref moves: direct delivery into the apply engine is
-RSI-04. No Manifest document is written by anything in this package; the
-`/config-manifest` endpoints keep working as before and are unrelated.
+A promotion (`promotion/`) compiles the revision into the apply engine's
+typed desired state (`compile.py`), moves `active` and `previous` in one
+compare-and-swap, marks the revision `promoted`, records the promotion (the
+moved refs and the delivery seam's answer; nothing of the state), and hands
+the state to the `RevisionApplier` seam. The only applier bound here
+(`PendingDeliveryApplier`) refuses before any ref moves: direct delivery
+into the apply engine is RSI-04, which binds an applier that starts an apply
+run whose state reference names the promotion; `GenomeCompiler`, the
+engine's compiler for that reference, already sits in the run service's
+compiler map. No Manifest document is written by anything in this package;
+the `/config-manifest` endpoints keep working as before and are unrelated.
 
-"Which revision does this bot run" joins the bot's last Manifest apply to the
-promotion that started it; a mismatch, or a last apply nobody promoted, is
-**drift**. Owners may promote on a drifted bot (that is how they reconcile);
-automated actors may not.
+"Which revision does this bot run" is observed, never recorded:
+`GenomeRegistryProtocol.drift` captures the bot's state as `capture` would,
+computes the revision id it would record under `active`'s policy and compares
+it with `active`. A promotion by an automated actor asks first and is
+refused (`Drifted`) while the bot holds something else; an owner's is how the
+owner reconciles.
 
 ## Storage
 
@@ -59,7 +65,7 @@ digest is readable for a bot only when a provenance row ties the two.
 ## Context Boundary
 
 ```yaml
-purpose: Own a bot's Genome Revisions (immutable, content-addressed versions of its definition plus policy), the refs that name them, the patches that change them, diffs, the compiled desired-state document, and the promotion record; hand delivery to one seam.
+purpose: Own a bot's Genome Revisions (immutable, content-addressed versions of its definition plus policy), the refs that name them, the patches that change them, diffs, the revision's compiled desired state and the drift observed against it, and the promotion record; hand delivery to one seam.
 provides:
   - GenomeRegistryProtocol  # the registry Service API (api/bot_genome_registry_service.py re-exports it)
   - GenomeRegistryService
