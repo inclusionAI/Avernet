@@ -14,7 +14,6 @@ interface FloorProps {
   author: CommunityTopic['author'];
   body: string;
   createdAt: string;
-  onReply?: (postId: string) => void;
   threadReplies: CommunityThreadReply[];
   expanded: boolean;
   onToggleThreadReplies: () => void;
@@ -31,7 +30,6 @@ export function Floor({
   author,
   body,
   createdAt,
-  onReply,
   threadReplies,
   expanded,
   onToggleThreadReplies,
@@ -67,19 +65,8 @@ export function Floor({
         <div className="min-h-[120px]">
           <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed text-foreground">{body}</p>
         </div>
-        <div className="mt-2 flex items-center justify-between gap-3">
+        <div className="mt-2 flex items-center justify-end">
           <span className="text-xs text-muted-foreground">发表于：{formatDateTime(createdAt)}</span>
-          {postId ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 px-2.5 text-xs"
-              aria-label={`回复第${floor}楼`}
-              onClick={() => onReply?.(postId)}
-            >
-              回复
-            </Button>
-          ) : null}
         </div>
         {threadReplies.length > 0 ? (
           <div id={childListId} aria-label="楼中楼回复" className="mt-3 space-y-2 border-l border-border pl-3">
@@ -89,7 +76,6 @@ export function Floor({
                 reply={reply}
                 targetAuthorName={targetAuthorName}
                 targetPostId={targetPostId}
-                onReply={onReply}
                 onLocateTarget={onLocateTarget}
                 registerElement={registerElement}
               />

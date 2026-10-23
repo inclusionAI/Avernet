@@ -7,7 +7,6 @@ interface ThreadReplyProps {
   reply: CommunityReply;
   targetAuthorName: string;
   targetPostId?: string;
-  onReply?: (postId: string) => void;
   onLocateTarget?: (postId: string) => void;
   registerElement?: ReplyElementRegistrar;
 }
@@ -16,7 +15,6 @@ export function ThreadReply({
   reply,
   targetAuthorName,
   targetPostId,
-  onReply,
   onLocateTarget,
   registerElement,
 }: ThreadReplyProps) {
@@ -41,17 +39,8 @@ export function ThreadReply({
         )}
       </div>
       <p className="m-0 mt-2 whitespace-pre-wrap text-xs leading-relaxed text-foreground">{reply.body}</p>
-      <div className="mt-2 flex items-center justify-end gap-3">
+      <div className="mt-2 flex items-center justify-end">
         <span className="text-[10px] text-muted-foreground">{formatDateTime(reply.createdAt)}</span>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 px-2 text-[10px]"
-          aria-label={`回复${reply.author.displayName}`}
-          onClick={() => onReply?.(reply.id)}
-        >
-          回复
-        </Button>
       </div>
     </article>
   );

@@ -26,12 +26,9 @@ export function useCommunityReplies({
   const [replyTotal, setReplyTotal] = useState(0);
   const [replyLoading, setReplyLoading] = useState(false);
   const [replyError, setReplyError] = useState<string | null>(null);
-  // 被引用回复的 Post id。null 表示直接回复 Topic；楼层号只在展示层派生。
-  const [replyTargetPostId, setReplyTargetPostId] = useState<string | null>(null);
   const [replyPublishing, setReplyPublishing] = useState(false);
 
   const resetReplies = useCallback(() => {
-    setReplyTargetPostId(null);
     setReplyTotal(0);
     setReplyPage(1);
     setReplyError(null);
@@ -59,7 +56,6 @@ export function useCommunityReplies({
   );
 
   const openFirstReplyPage = useCallback(async (topicId: string) => {
-    setReplyTargetPostId(null);
     setReplyTotal(0);
     setReplyPage(1);
     setReplyError(null);
@@ -69,52 +65,9 @@ export function useCommunityReplies({
   const goToReplyPage = useCallback(
     async (page: number) => {
       if (!selectedTopic) return;
-      setReplyTargetPostId(null);
       await fetchReplies(selectedTopic.id, page);
     },
     [fetchReplies, selectedTopic],
-  );
-
-  const startReply = useCallback((postId: string) => {
-    if (postId) setReplyTargetPostId(postId);
-  }, []);
-
-  const cancelReply = useCallback(() => setReplyTargetPostId(null), []);
-
-  const publishReply = useCallback(
-    async (body: string) => {
-      const topic = selectedTopic;
-      if (!topic) return false;
-      setReplyPublishing(true);
-      try {
-        await communityService.createReply({
-          topicId: topic.id,
-          body,
-          authorId: currentUserId || 'current-user',
-          authorName,
-          authorAvatarUrl,
-          replyToPostId: replyTargetPostId ?? undefined,
-        });
-        setReplyTargetPostId(null);
-        await fetchReplies(topic.id, replyPage);
-        notifySuccess(replyTargetPostId ? '回复楼层成功' : '主题回复成功');
-        return true;
-      } catch (error) {
-        notifyError(communityErrorMessage(error, '回复发布失败'), { title: '回复失败' });
-        return false;
-      } finally {
-        setReplyPublishing(false);
-      }
-    },
-    [
-      authorAvatarUrl,
-      authorName,
-      currentUserId,
-      fetchReplies,
-      replyPage,
-      replyTargetPostId,
-      selectedTopic,
-    ],
   );
 
   const publishVote = useCallback(
@@ -139,7 +92,6 @@ export function useCommunityReplies({
           authorAvatarUrl,
           pollSelection: uniqueIndices,
         });
-        setReplyTargetPostId(null);
         await fetchReplies(topic.id, replyPage);
         if (currentUserId) await refreshTopic(topic.id);
         notifySuccess('投票成功');
@@ -173,11 +125,7 @@ export function useCommunityReplies({
     replyTotal,
     replyLoading,
     replyError,
-    replyTargetPostId,
     replyPublishing,
-    startReply,
-    cancelReply,
-    publishReply,
     publishVote,
   };
 }

@@ -51,6 +51,9 @@ from agentclaw.community.core.task.forum.service_protocol import ForumServicePro
 from agentclaw.community.core.repository.protocols.task.forum import (
     ForumRepositoryProtocol,
 )
+from agentclaw.community.log import get_logger
+
+logger = get_logger()
 
 
 class ForumService(ForumServiceProtocol):
@@ -236,7 +239,16 @@ class ForumService(ForumServiceProtocol):
         normalized_poll_selection = self._reply_poll_selection(
             poll_selection, topic
         )
-        return self._repository.create_reply(
+        logger.info(
+            "[forum-reply][create] topic_id=%s author_type=%s author_id=%s "
+            "client_request_id=%s input_reply_to_post_id=%s",
+            normalized_topic_id,
+            normalized_author_type,
+            normalized_author_id,
+            request_id,
+            normalized_reply_to_post_id,
+        )
+        result = self._repository.create_reply(
             topic_id=normalized_topic_id,
             author_type=normalized_author_type,
             author_id=normalized_author_id,
@@ -247,6 +259,16 @@ class ForumService(ForumServiceProtocol):
             author_display_name=normalized_display_name,
             author_avatar_url=normalized_avatar,
         )
+        logger.info(
+            "[forum-reply][persisted] topic_id=%s post_id=%s "
+            "client_request_id=%s stored_reply_to_post_id=%s created=%s",
+            normalized_topic_id,
+            result.post.post_id,
+            request_id,
+            result.post.reply_to_post_id,
+            result.created,
+        )
+        return result
 
     def close_topic(self, *, topic_id: str) -> ForumTopicRecord:
         normalized_topic_id = self._required_text(topic_id, "topic_id", MAX_ID_LENGTH)

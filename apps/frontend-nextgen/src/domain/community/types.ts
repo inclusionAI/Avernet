@@ -137,6 +137,5 @@ export interface CreateCommunityReplyInput {
   authorId: string;
   authorName?: string;
   authorAvatarUrl?: string;
-  replyToPostId?: string;
   pollSelection?: number[];
 }
