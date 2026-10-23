@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from secbaas.community.api.device_manage import ArcaCredentials
+from secbaas.community.api.device_manage import ArcaCredentials, ResourceSpecification
 from secbaas.community.plugins.sandbox.arca.local_k8s import (
     LocalK8sArcaSandboxPlugin,
     local_k8s_plugin_factory,
@@ -226,6 +226,194 @@ class TestA2aDiscoverySharedLifecycle:
                 f"http://cap-{_A2A_URL_DISCOVERY_MAX_CONCURRENCY}-abc-svc"
                 ".stable.alipay.net:30099"
             )
+
+
+class TestA2aDiscoveryReclamation:
+    """应用级共享状态的回收(review P2 回收机制)。
+
+    状态提升为应用级后,历史必须受控:线程表不能只靠诊断 join 清出、
+    缓存条目随 Service 生命周期失效、A2A 关闭的普通创建零状态落账。"""
+
+    def _poll_until(self, predicate, deadline_s: float = 3.0) -> None:
+        deadline = time.monotonic() + deadline_s
+        while time.monotonic() < deadline:
+            if predicate():
+                return
+            time.sleep(0.01)
+        # 到点后仍不满足,留给断言给出失败信息
+        assert predicate(), "condition not reached within deadline"
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_finished_discovery_frees_thread_record_without_diagnostic_join(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """自然收尾即清理:发现完成后线程记录与额度自行释放,不依赖
+        诊断 seam(a2a_discovery_join),诊断清理缺席时 threads 表收敛。"""
+        shared = A2aUrlDiscoveryState()
+
+        with patch.dict(os.environ, _LIFECYCLE_ENV, clear=True):
+            plugin = _build_plugin(mock_client, shared)
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_core.read_namespaced_service.return_value = _service_with_node_port(
+                30096
+            )
+
+            conn = plugin.resolve_ws_conn_info(
+                paas_device_id="converge-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+            assert conn.a2a_base_url == ""  # 未就绪:空地址,后台发现出队
+
+            key = ("default", "converge-abc-svc")
+            # 不调用任何诊断 join——任务自然结束后记录必须自行收敛
+            self._poll_until(lambda: isinstance(shared.node_port_cache.get(key), int))
+            self._poll_until(lambda: key not in shared.threads)
+
+            assert key not in shared.inflight
+            assert shared.threads == {}
+
+    @patch("kubernetes.client.AppsV1Api")
+    @patch("kubernetes.client.CoreV1Api")
+    def test_destroy_invalidates_history_and_cache_stays_bounded_across_batches(
+        self, mock_core_cls, mock_apps_cls, mock_client
+    ) -> None:
+        """批次创建→销毁后状态受控:销毁 Service 即失效该设备的发现
+        缓存与线程记录,历史设备总量不残留——按当前活跃设备量而非
+        历史总量累积。"""
+        shared = A2aUrlDiscoveryState()
+        batches = 5
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    **_LIFECYCLE_ENV,
+                    "LOCAL_K8S_OUTBOUND_RULE": "",
+                },
+                clear=True,
+            ),
+            patch(
+                "secbaas.community.plugins.sandbox.arca.local_k8s"
+                "._sandbox_plugin._resolve_kubeconfig",
+                return_value="apiVersion: v1\nkind: Config",
+            ),
+        ):
+            plugin = _build_plugin(mock_client, shared)
+            mock_apps = MagicMock()
+            mock_apps_cls.return_value = mock_apps
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+
+            mock_pod = MagicMock()
+            mock_pod.status.phase = "Running"
+            mock_pod.metadata.name = "tpl-xyz-abc"
+            mock_core.list_namespaced_pod.return_value.items = [mock_pod]
+
+            for i in range(batches):
+                mock_core.create_namespaced_service.return_value = (
+                    _service_with_node_port(30090 + i)
+                )
+                sandbox = plugin.create_sync_sandbox(
+                    template_id=f"tpl-batch-{i}",
+                    envs={},
+                    resource_spec=ResourceSpecification(cpu=1, memory=2),
+                    image="bot-runtime:tag",
+                )
+                key = ("default", f"{sandbox.sandbox_id}-svc")
+                # create 预热 + 历史负残留都在,批次中途最多一个活跃设备的记录
+                assert isinstance(shared.node_port_cache[key], int)
+                assert len(shared.node_port_cache) == 1
+
+                sandbox.destroy()
+                # 销毁即失效:该设备的缓存与线程记录不存活于应用级状态
+                assert key not in shared.node_port_cache
+                assert key not in shared.threads
+                assert key not in shared.inflight
+
+        assert shared.node_port_cache == {}
+        assert shared.threads == {}
+        assert shared.inflight == set()
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_a2a_disabled_creation_accumulates_no_discovery_state(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """A2A 关闭(模板空)时,普通创建流程零发现状态落账:预热按
+        模板门控,创建/销毁来回跑不动共享状态的分毫。"""
+        shared = A2aUrlDiscoveryState()
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    **_LIFECYCLE_ENV,
+                    "LOCAL_K8S_A2A_URL_TEMPLATE": "",
+                },
+                clear=True,
+            ),
+            patch(
+                "secbaas.community.plugins.sandbox.arca.local_k8s"
+                "._sandbox_plugin._resolve_kubeconfig",
+                return_value="apiVersion: v1\nkind: Config",
+            ),
+        ):
+            plugin = _build_plugin(mock_client, shared)
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_core.create_namespaced_service.return_value = _service_with_node_port(
+                30099
+            )
+
+            for i in range(100):
+                plugin._create_service(
+                    deployment_name=f"dead-{i}-abc", container_port=20003
+                )
+
+        assert shared.node_port_cache == {}
+        assert shared.inflight == set()
+        assert shared.threads == {}
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_destroy_during_inflight_discovery_drops_late_write_back(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """销毁落在发现窗口内:迟到的发现回写不得复活已销毁设备的
+        缓存条目(invalidate 与在途收尾按同一把锁协调)。"""
+        shared = A2aUrlDiscoveryState()
+        gate = threading.Event()
+
+        with patch.dict(os.environ, _LIFECYCLE_ENV, clear=True):
+            plugin = _build_plugin(mock_client, shared)
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+
+            def _blocked_read(**kwargs):
+                gate.wait(timeout=5.0)
+                return _service_with_node_port(30097)
+
+            mock_core.read_namespaced_service.side_effect = _blocked_read
+
+            conn = plugin.resolve_ws_conn_info(
+                paas_device_id="late-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+            assert conn.a2a_base_url == ""
+
+            key = ("default", "late-abc-svc")
+            self._poll_until(lambda: key in shared.inflight)
+
+            # Service 在发现查证途中被销毁 → 生命周期失效先行
+            shared.invalidate(key)
+            gate.set()
+            self._poll_until(
+                lambda: key not in shared.inflight and key not in shared.threads
+            )
+
+            # 迟到回写被丢弃:已销毁设备的历史记录不复活
+            assert key not in shared.node_port_cache
 
 
 class TestCompositionWiring:

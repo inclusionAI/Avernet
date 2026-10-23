@@ -84,8 +84,64 @@ class A2aUrlDiscoveryState:
         with self._lock:
             self.inflight.discard(cache_key)
 
+    def finish(self, cache_key: DiscoveryKey, thread: threading.Thread) -> None:
+        """发现任务的**自然收尾**：额度释放与线程记录清理同锁原子完成。
+
+        线程记录不能依赖诊断 seam（a2a_discovery_join 只在没有它时被调
+        用的测试/诊断面）清出——任务结束后应用级状态必须自行收敛。按
+        线程对象身份删：本 key 已被换上新任务或被 invalidate 先行移除
+        时都不误删他人记录。"""
+        with self._lock:
+            self.inflight.discard(cache_key)
+            if self.threads.get(cache_key) is thread:
+                del self.threads[cache_key]
+
+    def commit_result(self, cache_key: DiscoveryKey, node_port: int | None) -> bool:
+        """发现结果落账：仅当本 key 仍在 in-flight 时写入。
+
+        invalidate（Service 销毁）会同步摘除 in-flight——销毁窗口内迟到
+        的发现回写在此被丢弃，已销毁设备的历史缓存条目不复活。返回是否
+        落账（False = 设备已被销毁，结果放弃）。"""
+        with self._lock:
+            if cache_key not in self.inflight:
+                return False
+            self.node_port_cache[cache_key] = node_port
+            return True
+
+    def commit_negative(self, cache_key: DiscoveryKey) -> None:
+        """发现失败的负缓存落账：与 :meth:`commit_result` 同门控（仅当
+        本 key 仍在 in-flight），迟到负结果同样不得复活历史。"""
+        self._commit_entry(
+            cache_key, ("error", time.monotonic() + self._negative_ttl_s)
+        )
+
+    def _commit_entry(
+        self, cache_key: DiscoveryKey, entry: int | None | tuple[str, float]
+    ) -> bool:
+        with self._lock:
+            if cache_key not in self.inflight:
+                return False
+            self.node_port_cache[cache_key] = entry
+            return True
+
+    def invalidate(self, cache_key: DiscoveryKey) -> None:
+        """生命周期失效（Service 销毁）：缓存与线程记录出清，同锁摘除
+        in-flight 作回写门控判据。
+
+        摘除 in-flight 会短暂放宽同 key 去重——只发生在设备销毁瞬间，
+        重复发现是只读幂等查询；不摘则销毁窗口内的迟到回写无法被
+        :meth:`commit_result` 拒收。在途任务自己的 :meth:`finish` 收尾
+        均为幂等（discard + 身份判删），互不干扰。"""
+        with self._lock:
+            self.node_port_cache.pop(cache_key, None)
+            self.threads.pop(cache_key, None)
+            self.inflight.discard(cache_key)
+
     def note_negative(self, cache_key: DiscoveryKey) -> None:
-        """写短 TTL 负缓存（调度失败与发现失败同形状，出清路径无感差异）。"""
+        """写短 TTL 负缓存（调度失败与发现失败同形状，出清路径无感差异）。
+
+        签发链上的调度降级发生在入队前（本 key 无在途任务），不适用
+        in-flight 门控，无条件落账。"""
         self.node_port_cache[cache_key] = (
             "error",
             time.monotonic() + self._negative_ttl_s,
