@@ -136,14 +136,15 @@
 
 ## Group 5 — Docs and closure
 
-### Task 12: Docs, ADR, work items, context map
+### Task 12: Docs, ADR, work items, context map `[x]`
 - **Goal:** Every document says what the code does.
 - **Files:** `docs/bot-evolution/{01-genome,08-promotion,06-evolution-run,work-items}.md` (+ zh-CN), `docs/adr/0022-apply-engine-desired-state-and-observed-drift.md` (+ zh-CN), `CONTEXT-MAP.md`, `core/{apply_engine,bot_config_manifest,bot_genome}/README.md`, `api-contracts/genome/v1/README.md` §7–8, the Manifest schema docs (resources root, `script: null`)
 - **Done when:**
-  - [ ] Sections listed in the spec rewritten: the compiled document is the apply engine's desired state; drift is observed; no apply-id join, no document digest on reports or promotions; RSI-04 scope reduced to binding, Center/repo skills, service-bot publish, singlebox.
-  - [ ] The ADR records: typed desired state as the engine's only input with compilers; drift observed, not tracked; the resources root; links to ADR 0019/0020 where they describe the digest mapping (link, do not edit them).
-  - [ ] `work-items.md` RSI-03 "Left to RSI-04" and RSI-04 updated; #2162 and #2862 rows in the contract README § Known limitations closed.
+  - [x] Sections listed in the spec rewritten: the compiled document is the apply engine's desired state; drift is observed; no apply-id join, no document digest on reports or promotions; RSI-04 scope reduced to binding, Center/repo skills, service-bot publish, singlebox.
+  - [x] The ADR records: typed desired state as the engine's only input with compilers; drift observed, not tracked; the resources root; links to ADR 0019/0020 where they describe the digest mapping (link, do not edit them).
+  - [x] `work-items.md` RSI-03 "Left to RSI-04" and RSI-04 updated; #2162 and #2862 rows in the contract README § Known limitations closed.
 - **Depends on:** Tasks 9, 11
+- **Notes:** `02-experience.md` (+ zh-CN) attributed episodes through the applied document digest; its three passages now attribute through `active` at the time, `null` while the Registry observes drift. The two `genome-model` SVGs relabel `CompiledManifest` as `DesiredState`. The Manifest schema doc (`manifest-schema.zh-CN.md` §3.2, §3.6) states the resources-root rule and that `script: null` removes a script while an absent `script` leaves it alone. `02-experience.md`'s open decision X-2 (an engine-stamped `applied_revision` per session) is a different field and stands.
 
 ### Task 13: Final gates and PR
 - **Goal:** Green, within limits, reviewable.

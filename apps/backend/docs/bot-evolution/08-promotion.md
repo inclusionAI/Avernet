@@ -360,8 +360,6 @@ class Promotion:
     revision_id: str                # what the ref now points at
     revision_seq: int
     from_revision_id: str           # what the ref pointed at before
-    document_digest: str            # digest of the compiled Manifest document applied for `revision_id`; the
-                                    # apply report or publish record carries only this digest (01-genome.md §8)
     going_back: bool                # informational: target is an ancestor that was promoted before
     candidate_id: str | None        # set when the promotion came from a candidate
     gate_decision_id: str | None
@@ -381,14 +379,13 @@ class Promotion:
   "revision_id": "sha256:7c1e…",
   "revision_seq": 42,
   "from_revision_id": "sha256:a90b…",
-  "document_digest": "sha256:f27a…",    // r42 compiles to this; the apply report records it
   "going_back": false,
   "candidate_id": "sha256:c41e…",
   "gate_decision_id": "gd_204",
   "actor": {"kind": "user", "id": "user_owner_17"},
   "reason": "Reviewed diff and verification report; escalation fix is correct.",
   "status": "applied",
-  "apply": {"kind": "manifest_apply", "reference": "apply_8812", "detail": "all categories converged"},
+  "apply": {"kind": "direct", "detail": "apply started"},   // the seam's answer; the apply run names the promotion
   "created_at": "2026-10-08T09:12:00Z"
 }
 ```
@@ -857,17 +854,17 @@ the only way evolution changes a bot.
 4. **Record.** A `Promotion` record and a ledger entry with actor, reason,
    gate decision, approval, and links to evaluations
    ([05-experiment-ledger.md](05-experiment-ledger.md)). The `Promotion`
-   record keeps the applied document digest next to the revision id, and
-   the Genome Registry records that the revision compiled to that digest,
-   so the digest on the apply report or publish record maps back to the
-   revision ([01-genome.md](01-genome.md) §5.5).
+   record keeps the moved refs and the delivery seam's answer, nothing of
+   the state it delivered: which revision the bot holds is observed by
+   reading it ([01-genome.md](01-genome.md) §5.5).
 5. **Attribution.** From now on, episodes carry the new revision id
    ([02-experience.md](02-experience.md)), which is what makes online
    comparison of `r41` and `r42` possible.
 
 **Drift.** Before step 1, Promotion asks the Genome Registry whether the
-bot has drifted (`GenomeRegistry.applied_revision` differs from `active`): its last applied document digest differs from the digest
-`active` compiles to, usually after a direct `PUT /config-manifest`
+bot has drifted (`GenomeRegistry.drift(bot)`): the Registry reads the bot's
+current state and the revision id it would record differs from `active`,
+usually after a direct `PUT /config-manifest` or a hand edit on the device
 ([01-genome.md](01-genome.md) §5.5). On drift, promotions by the gate
 (`gate_policy`), by review-queue approvals, and by an auto-rollback rule
 (`rollout_policy`) are refused with `409 drifted`. An owner promotion is
@@ -1236,14 +1233,13 @@ Example response (`200`):
     "revision_id": "sha256:7c1e…",
     "revision_seq": 42,
     "from_revision_id": "sha256:a90b…",
-    "document_digest": "sha256:f27a…",
     "going_back": false,
     "candidate_id": "sha256:c41e…",
     "gate_decision_id": "gd_204",
     "actor": {"kind": "user", "id": "user_owner_17"},
     "reason": "Reviewed diff and verification report; escalation fix is correct.",
     "status": "applying",
-    "apply": {"kind": "manifest_apply", "reference": null, "detail": "apply started"},
+    "apply": {"kind": "direct", "detail": "apply started"},
     "created_at": "2026-10-08T09:12:00Z"
   }
 }
@@ -1331,23 +1327,21 @@ Example response (`201`):
   "revision_id": "sha256:a90b…",
   "revision_seq": 41,
   "from_revision_id": "sha256:7c1e…",
-  "document_digest": "sha256:91d4…",  // what r41 compiles to
   "going_back": true,
   "candidate_id": null,
   "gate_decision_id": null,
   "actor": {"kind": "user", "id": "user_owner_17"},
   "reason": "r42 mis-routes VIP refunds",
   "status": "applying",
-  "apply": {"kind": "manifest_apply", "reference": null, "detail": "apply started"},
+  "apply": {"kind": "direct", "detail": "apply started"},
   "created_at": "2026-10-09T08:02:00Z"
 }
 ```
 
-The ref moves at once; apply progress is visible on the promotion's
-`apply` field through the existing Manifest apply report (personal bots) or
-publish record (service bots). Both record only the digest of the applied
-document; the promotion's `document_digest` ties that digest to the
-revision.
+The ref moves at once; apply progress is visible through the existing
+Manifest apply report (personal bots) or publish record (service bots),
+whose state reference names the promotion. Neither carries a digest of what
+it applied: whether the bot holds `active` is observed by reading it.
 
 Notable errors: `404 not_found` (unknown revision or not this bot's);
 `409 ref_conflict` (`expected_revision` does not match; nothing changed);
@@ -1459,7 +1453,7 @@ wait in the review queue.
 
 | Other part | Direction | What flows |
 | --- | --- | --- |
-| Genome ([01-genome.md](01-genome.md)) | Promotion → Genome | Drift check before a promotion; CAS moves of `active`, `previous`, `canary`; revision status changes (`promoted`, `rejected`); recording which document digest an applied revision compiled to; reading patches, diffs, and `policy` |
+| Genome ([01-genome.md](01-genome.md)) | Promotion → Genome | Drift check (by reading the bot) before an automated promotion; CAS moves of `active`, `previous`, `canary`; revision status changes (`promoted`, `rejected`); compiling the revision's desired state; reading patches, diffs, and `policy` |
 | Genome ([01-genome.md](01-genome.md)) | Genome → Promotion | Patch-level floor results at record time (base, mutable genes, pins, rewrite flag) |
 | Experience ([02-experience.md](02-experience.md)) | Promotion → Experience (indirect) | After promotion, episodes carry the new revision id |
 | Strategy ([03-strategy.md](03-strategy.md)) | none directly | Strategies submit candidates and read verdicts only; they never see gate decisions or the queue |
@@ -1470,7 +1464,7 @@ wait in the review queue.
 | Verification ([07-verification.md](07-verification.md)) | Promotion → Verification | `verify(candidate, profile)` when a holdout or baseline result is missing |
 | Evolution API ([09-evolution-api.md](09-evolution-api.md)) | API → Promotion | Public endpoints of §10 |
 | Meta-evolution ([10-meta-evolution.md](10-meta-evolution.md)) | Meta → Promotion | Mechanism adoption through a separate gate profile (T3 default, comparison report required) |
-| Existing Manifest apply and service-bot publish flow (Backend) | Promotion → existing | Apply of the promoted revision's compiled document; apply reports and publish records carry the applied document digest, never a revision id |
+| Existing Manifest apply and service-bot publish flow (Backend) | Promotion → existing | An apply run over the promoted revision's desired state (its state reference names the promotion); apply reports and publish records carry no digest and no revision id |
 
 ## 13. Open decisions
 

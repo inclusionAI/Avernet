@@ -35,9 +35,10 @@ sent to the feedback endpoint or picked up by ingest adapters), and
 stored with the **genome revision id** of the bot version that produced it,
 attached at ingest: an eval trace knows its revision directly, because
 Verification evaluates a specific revision; an episode gets it by
-attribution from the bot's apply history (the document digest that was
-applied to the bot when the episode started, or for a service bot the
-digest of the published version that was serving, mapped to its revision
+attribution from the bot's genome refs (the revision `active` pointed at
+when the episode started, unless the Genome Registry observed the bot as
+drifted at the time, or for a service bot the revision of the published
+version that was serving
 by the Genome Registry); feedback inherits it from its episode. Records
 from before the bot had revisions, or from while the bot was drifted
 (changed directly through the Manifest), are stored with
@@ -499,22 +500,20 @@ Attribution is the store's main reason to exist, so the rule is strict: an
 episode is tagged with the genome revision that was **applied to the bot
 when the episode started**.
 
-- Once the Genome Registry is in place, every apply report records the
-  digest of the Manifest document it applied ([01-genome.md](01-genome.md)
-  §8). This digest is **not a git SHA**: it is the sha256 of the exact
-  Manifest document apply used, for example `sha256:f27a…`. Today apply
-  reports record only the git SHAs of the sources they resolved, not the
-  document applied (`services/config_manifest_apply_service.py:846-875`).
-  The Manifest knows nothing about revisions; the Genome Registry maps each
-  digest to the revision that compiled to it (01-genome.md §5.5), for
-  example `sha256:f27a…` → r41. The store resolves an episode's revision by
-  applying that mapping to the bot's apply history at the episode's
-  `started_at`.
+- The Genome Registry records no digest of what it delivered, and apply
+  reports carry none ([01-genome.md](01-genome.md) §5.5): which revision a
+  bot holds is observed by reading it (`GenomeRegistry.drift`). The store
+  therefore resolves an episode's revision from the ref log: the revision
+  `active` pointed at at the episode's `started_at` (the `active` ref's
+  move events are append-only), `null` when the Registry's drift check at
+  that time said the bot held something else — a run start and every
+  automated promotion ask it, and a drifted bot is reconciled by an owner
+  promotion, whose ref move is itself in the log.
   This is **proposed**; the alternative is that the engine stamps the
   revision into each exported session (§5, open decision X-2).
 - Episodes recorded before the bot had any revision, while the bot was
-  drifted (its last applied digest maps to no revision because the owner
-  changed it directly through the Manifest; 01-genome.md §5.5), or that
+  drifted (the owner changed it directly through the Manifest, so reading
+  it gives a revision id other than `active`; 01-genome.md §5.5), or that
   cannot be matched (for example, an apply was in flight), get
   `revision_id: null` and
   are reported as **unattributed**. They are still useful as diagnosis input,
@@ -548,7 +547,7 @@ Example timeline for `bot_123`:
 | Time | Event | Records produced and their `revision_id` |
 | --- | --- | --- |
 | Sep 20 | Bot runs on Manifest v1; no revisions exist yet | Episode `ep_12` → `null` (unattributed) |
-| Sep 30 02:40 | First revision `r41` recorded and applied | (apply report records the document digest, which the Registry maps to `r41`) |
+| Sep 30 02:40 | First revision `r41` recorded and promoted | (`active` → `r41` in the ref log; the bot is read as holding `r41`) |
 | Oct 7 09:12 | Session starts | Episode `ep_91` → `r41` (the revision applied at 09:12) |
 | Oct 7 09:13 | User corrects the bot in that session | Feedback `fb_204` → `r41` (copied from `ep_91`) |
 | Oct 8 02:31 | Verification evaluates candidate `r42` in a sandbox | Eval trace `et_5521` → `r42` (known directly) |
