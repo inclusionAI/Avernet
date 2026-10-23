@@ -58,6 +58,9 @@ impl CliSession {
         {
             cmd.process_group(0);
         }
+        // A bridge may run legacy and subbot identities together. Inherited
+        // selectors must not turn a legacy Bot into whichever Actor launched us.
+        cmd.env_remove("BCN_AUTH_MODE").env_remove("BCN_ACTOR_BOT_ID");
         for (k, v) in env {
             cmd.env(k, v);
         }

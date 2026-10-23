@@ -33,6 +33,14 @@ a `mcporter_mcp` Provider does not match this handshake. V2 fallback remains sup
 
 The only BCS dependency is the `bcs-protocol` contract crate.
 
+## Multiple Providers
+
+A single configuration/daemon can host Bots from multiple Providers in one BCS
+deployment. Legacy TOML is read without rewriting; adding another Provider
+backs up and upgrades the same file to V2. See [compatibility, commands and
+isolation](MULTI_PROVIDER.md). Stop before registration changes; use
+`status --json` to check the selected Bot rather than just process readiness.
+
 ## Usage
 
 ```bash

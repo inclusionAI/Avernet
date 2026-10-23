@@ -73,3 +73,14 @@ preserved; ambiguous installations and conflicting listeners fail closed.
 Deinitialization uses the same composition-root callback boundary and config lock.
 It removes owned global HTTP Hooks using URL/credential identity, preserves
 unrelated settings and registration, and performs zero database operations.
+
+## Multi-Provider configuration
+
+Initialization/deinitialization supports legacy TOML and V2 `[[provider.bot]]`.
+An optional `--bot-id` selects the BCS binding; ambiguous selections fail before
+file writes. Other Provider tables, credentials and state paths are retained.
+The adapter declares exclusive desktop settings/database/listener resources via
+`EngineFactory::resources`; two Bots cannot claim the same physical channel.
+Initialization checks all QwenWork resource claims before writing configuration
+or Hooks. Explicit shutdown cancels peers and awaits the listener (bounded to
+five seconds), permitting preflight followed by runtime initialization.

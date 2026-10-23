@@ -29,15 +29,13 @@ fn configuration_lock(config_path: &Path) -> Result<fs::File> {
 }
 
 fn deinitialize_at(config_path: &Path, options: &toml::Table, home: &Path) -> Result<String> {
-    if options.keys().any(|key| key != "settings_path") { bail!("Deinit accepts only --option settings_path"); }
+    if options.keys().any(|key| !["settings_path", "bot_id"].contains(&key.as_str())) { bail!("Deinit accepts only settings_path and the Bot selector"); }
     let _lock = configuration_lock(config_path)?;
     let original = fs::read(config_path).context("Keep the registered configuration until deinit completes")?;
-    let config: toml::Table = toml::from_str(std::str::from_utf8(&original).context("Configuration must be UTF-8")?)
+    let mut config: toml::Table = toml::from_str(std::str::from_utf8(&original).context("Configuration must be UTF-8")?)
         .map_err(|_| anyhow::anyhow!("Invalid bridge TOML"))?;
-    let bots = config.get("bot").and_then(toml::Value::as_array).context("No registered Bots")?;
-    let candidates: Vec<_> = bots.iter().filter(|bot| bot.get("engine").and_then(toml::Value::as_str) == Some("qwenwork")).collect();
-    if candidates.len() != 1 { bail!("Deinit requires exactly one qwenwork Bot"); }
-    let engine = candidates[0].get("engine_options").and_then(toml::Value::as_table).context("QwenWork is not initialized")?;
+    let bot = selected_bot(&mut config, options.get("bot_id").and_then(toml::Value::as_str))?;
+    let engine = bot.get("engine_options").and_then(toml::Value::as_table).context("QwenWork is not initialized")?;
     let engine = desktop_options(engine)?;
     let listen = engine.get("listen").and_then(toml::Value::as_str).context("Missing listener")?;
     let secret = engine.get("hook_secret").and_then(toml::Value::as_str).filter(|s| !s.is_empty()).context("Missing Hook credential")?;
@@ -66,7 +64,7 @@ fn deinitialize_at(config_path: &Path, options: &toml::Table, home: &Path) -> Re
 
 fn initialize_at(config_path: &Path, overrides: &toml::Table, home: &Path) -> Result<String> {
     for key in overrides.keys() {
-        if !["database_path", "settings_path", "listen"].contains(&key.as_str()) {
+        if !["database_path", "settings_path", "listen", "bot_id"].contains(&key.as_str()) {
             bail!("Unknown initializer option '{key}'");
         }
     }
@@ -74,10 +72,7 @@ fn initialize_at(config_path: &Path, overrides: &toml::Table, home: &Path) -> Re
     let original = fs::read(config_path).context("Register the qwenwork Bot before initializing")?;
     let text = std::str::from_utf8(&original).context("Bridge configuration must be UTF-8")?;
     let mut document: toml::Table = toml::from_str(text).map_err(|_| anyhow::anyhow!("Invalid bridge TOML"))?;
-    let bots = document.get_mut("bot").and_then(toml::Value::as_array_mut).context("No registered Bots in configuration")?;
-    let indexes: Vec<_> = bots.iter().enumerate().filter(|(_, b)| b.get("engine").and_then(toml::Value::as_str) == Some("qwenwork")).map(|(i, _)| i).collect();
-    if indexes.len() != 1 { bail!("Initialization requires exactly one qwenwork Bot in the selected configuration"); }
-    let bot = bots[indexes[0]].as_table_mut().context("Invalid Bot configuration")?;
+    let bot = selected_bot(&mut document, overrides.get("bot_id").and_then(toml::Value::as_str))?;
     let mut engine = bot.get("engine_options").and_then(toml::Value::as_table).cloned().unwrap_or_default();
     if let Some(value) = overrides.get("database_path") { engine.insert("database_path".into(), value.clone()); }
     if !engine.contains_key("database_path") {
@@ -164,6 +159,7 @@ fn initialize_at(config_path: &Path, overrides: &toml::Table, home: &Path) -> Re
     engine.insert("settings_path".into(), settings_path.to_str().context("Settings path must be UTF-8")?.into());
     let shared_bytes = toml::to_string_pretty(&engine)?.into_bytes();
     bot.insert("engine_options".into(), engine.into());
+    validate_desktop_resources(&document)?;
     let config_bytes = toml::to_string_pretty(&document).context("Cannot serialize bridge configuration")?.into_bytes();
     let settings_bytes = serde_json::to_vec_pretty(&settings).context("Cannot serialize desktop settings")?;
     let config_backup = backup(config_path, &original)?;
@@ -328,3 +324,40 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
 #[cfg(test)]
 #[path = "setup_tests.rs"]
 mod tests;
+
+/// Select by BCS Bot identity, not by desktop channel identity or display name.
+fn validate_desktop_resources(document: &toml::Table) -> Result<()> {
+    let groups: Vec<&toml::Table> = if let Some(groups) = document.get("provider").and_then(toml::Value::as_array) {
+        groups.iter().filter_map(toml::Value::as_table).collect()
+    } else { vec![document] };
+    let mut claims = Vec::new();
+    for bot in groups.iter().filter_map(|g| g.get("bot").and_then(toml::Value::as_array)).flatten() {
+        if bot.get("engine").and_then(toml::Value::as_str) != Some("qwenwork") { continue; }
+        let options = bot.get("engine_options").and_then(toml::Value::as_table).cloned().unwrap_or_default();
+        claims.extend(super::resource_claims(&options).map_err(anyhow::Error::msg)?);
+    }
+    bcs_bridge_core::engine::validate_resource_claims(claims)
+}
+
+fn selected_bot<'a>(document: &'a mut toml::Table, id: Option<&str>) -> Result<&'a mut toml::Table> {
+    let groups: Vec<&mut toml::Table> = if document.contains_key("provider") || document.contains_key("schema_version") {
+        if document.get("schema_version").and_then(toml::Value::as_integer) != Some(2)
+            || document.keys().any(|key| !["schema_version", "provider"].contains(&key.as_str())) {
+            bail!("Invalid V2 bridge configuration");
+        }
+        document.get_mut("provider").and_then(toml::Value::as_array_mut).context("Missing Providers")?
+            .iter_mut().map(|group| group.as_table_mut().context("Invalid Provider")).collect::<Result<_>>()?
+    } else { vec![document] };
+    let mut candidates = Vec::new();
+    for group in groups {
+        for bot in group.get_mut("bot").and_then(toml::Value::as_array_mut).context("No registered Bots")? {
+            let bot = bot.as_table_mut().context("Invalid Bot")?;
+            if bot.get("engine").and_then(toml::Value::as_str) == Some("qwenwork")
+                && id.is_none_or(|id| bot.get("bot_id").and_then(toml::Value::as_str) == Some(id)) {
+                candidates.push(bot);
+            }
+        }
+    }
+    if candidates.len() != 1 { bail!("Initialization/deinit requires exactly one qwenwork Bot; select --bot-id when ambiguous"); }
+    Ok(candidates.remove(0))
+}

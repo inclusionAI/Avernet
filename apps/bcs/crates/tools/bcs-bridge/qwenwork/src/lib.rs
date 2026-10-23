@@ -77,6 +77,11 @@ impl EngineFactory for QwenWorkFactory {
     fn requires_bin(&self) -> bool {
         false
     }
+    fn resources(&self, options: &toml::Table) -> Result<Vec<bcs_bridge_core::engine::EngineResource>, String> {
+        let options = setup::desktop_options(options).map_err(|_| "Cannot load shared desktop resources")?;
+        resource_claims(&options)
+    }
+
     fn build(&self, bin: PathBuf, options: &toml::Table) -> Result<Arc<dyn Engine>, String> {
         if !bin.as_os_str().is_empty() {
             return Err("qwenwork attaches to a running app; remove engine_bin".into());
@@ -94,7 +99,7 @@ impl EngineFactory for QwenWorkFactory {
         let state = Arc::new(transport::State::new(options));
         let task_state = state.clone();
         let stop = shutdown.clone();
-        runtime.spawn(async move {
+        let task = runtime.spawn(async move {
             if let Err(error) = axum::serve(listener, transport::router(task_state.clone()))
                 .with_graceful_shutdown(stop.cancelled_owned())
                 .await
@@ -103,13 +108,29 @@ impl EngineFactory for QwenWorkFactory {
                 tracing::error!(%error, "qwenwork listener failed");
             }
         });
-        Ok(Arc::new(QwenWork { state, shutdown }))
+        Ok(Arc::new(QwenWork { state, shutdown, task: tokio::sync::Mutex::new(Some(task)) }))
     }
+}
+
+fn resource_claims(options: &toml::Table) -> Result<Vec<bcs_bridge_core::engine::EngineResource>, String> {
+    use bcs_bridge_core::engine::EngineResource;
+    if options.is_empty() { return Ok(vec![EngineResource::Default("qwenwork.uninitialized")]); }
+    let mut resources = Vec::new();
+    for key in ["settings_path", "database_path"] {
+        if let Some(path) = options.get(key).and_then(toml::Value::as_str) {
+            resources.push(EngineResource::Path(if key == "settings_path" { "qwenwork.settings" } else { "qwenwork.database" }, path.into()));
+        }
+    }
+    if let Some(listen) = options.get("listen").and_then(toml::Value::as_str) {
+        resources.push(EngineResource::Address("qwenwork.listen", listen.parse().map_err(|_| "Invalid desktop listen address")?));
+    }
+    Ok(resources)
 }
 
 struct QwenWork {
     state: Arc<transport::State>,
     shutdown: CancellationToken,
+    task: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 impl Drop for QwenWork {
     fn drop(&mut self) {

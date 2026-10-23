@@ -22,7 +22,7 @@ pub(super) fn saved_webhook<'a>(args: &RegisterArgs, source: &'a Bootstrap, prov
 
 /// Retain credentials and durable state when replacing settings for the same binding.
 pub(super) async fn update(
-    args: &RegisterArgs, path: &Path, source: &Bootstrap, provider: &str, api: &str,
+    args: &RegisterArgs, path: &Path, source: &Bootstrap, app: &crate::app::BridgeApp, provider: &str, api: &str,
     client: &RegistrationClient, webhook_token: Option<&str>, engine_bin: Option<&Path>,
     engine_options: &toml::Table,
 ) -> anyhow::Result<bool> {
@@ -30,16 +30,29 @@ pub(super) async fn update(
     let same_provider = previous.get("provider_id").and_then(toml::Value::as_str) == Some(provider);
     let same_api = source.settings.api_url.as_deref().is_some_and(|old|
         old.trim_end_matches('/') == api.trim_end_matches('/'));
-    if !same_provider || !same_api { return Ok(false); }
+    if !same_provider || !same_api {
+        if source.edit.as_ref().is_some_and(|edit| edit.source.v2 || edit.source.groups.iter().any(|g| g.get("bot").and_then(toml::Value::as_array).is_some_and(|b| b.len() > 1))) { bail!("Replacement cannot change a Provider binding in a V2 configuration"); }
+        return Ok(false);
+    }
     let bots = previous.get("bot").and_then(toml::Value::as_array).context("Configuration has no Bots")?;
     if bots.len() != 1 { bail!("Replacement requires a single Bot configuration"); }
     let old_bot = bots[0].as_table().context("Invalid saved Bot")?;
     let reference = old_bot.get("provider_bot_ref").and_then(toml::Value::as_str).context("Missing saved Bot reference")?;
-    if args.provider_bot_ref.as_deref().is_some_and(|requested| requested != reference) { return Ok(false); }
+    if args.provider_bot_ref.as_deref().is_some_and(|requested| requested != reference) {
+        if source.edit.as_ref().is_some_and(|edit| edit.source.v2 || edit.source.groups.iter().any(|g| g.get("bot").and_then(toml::Value::as_array).is_some_and(|b| b.len() > 1))) { bail!("Replacement cannot change a Bot reference in a V2 configuration"); }
+        return Ok(false);
+    }
     if previous.get("mode").and_then(toml::Value::as_str) != Some(args.mode.name()) {
         bail!("Changing an existing Bot's connection mode is unsupported; use a new profile and Bot reference");
     }
     let bot_id = old_bot.get("bot_id").and_then(toml::Value::as_str).context("Missing saved Bot ID")?;
+    let siblings = source.edit.as_ref().and_then(|edit| edit.target.map(|i| &edit.source.groups[i]))
+        .and_then(|group| group.get("bot")).and_then(toml::Value::as_array).is_some_and(|bots| bots.len() > 1);
+    if siblings && (args.upstream_url.as_deref().is_some_and(|url|
+        previous.get("plugin").and_then(|p| p.get("url")).and_then(toml::Value::as_str) != Some(url))
+        || (args.listen_is_explicit && previous.get("listen").and_then(toml::Value::as_str) != Some(args.listen.to_string().as_str()))) {
+        bail!("A Bot replacement cannot change settings shared by other Bots in this Provider");
+    }
     let mut document = previous.clone();
     let mut bot = old_bot.clone();
     let same_engine = bot.get("engine").and_then(toml::Value::as_str) == Some(args.engine.as_str());
@@ -75,14 +88,23 @@ pub(super) async fn update(
     document.insert("bot".into(), toml::Value::Array(vec![toml::Value::Table(bot)]));
     config::runtime(&document, path, webhook_token)?;
     let settings = config::RegistrationSettings { api_url: Some(api.into()), webhook_url: webhook.map(str::to_owned), provider_auth: source.settings.provider_auth.clone() };
-    document.insert("registration".into(), toml::Value::try_from(settings)?);
+    let settings = toml::Value::try_from(settings)?;
+    if let Some(bot) = document.get_mut("bot").and_then(toml::Value::as_array_mut).and_then(|bots| bots.first_mut()).and_then(toml::Value::as_table_mut) {
+        if bot.contains_key("registration") { bot.insert("registration".into(), settings.clone()); }
+    }
+    document.insert("registration".into(), settings);
+    let document = source.finish(document)?;
     let text = toml::to_string_pretty(&document)?;
+    let merged = crate::multi_config::Document::parse(&text)?;
+    let providers = crate::multi_config::load_document(&merged, path, app.credentials())?;
+    app.engines().validate_resources(providers.iter().flat_map(|p| &p.config.bots))?;
     let prepared = PreparedConfig::new(path, source.original.clone())?;
     let backup = prepared.backup_original()?;
     if let Some(admin) = admin {
         client.update_webhook(provider, reference, bot_id, webhook.context("Missing gateway webhook")?, admin).await?;
     }
     prepared.save(&text)?;
+    println!("Bot ID: {bot_id}");
     println!("Bridge settings updated; existing Bot identity, credentials and state retained. Backup: {}", backup.display());
     Ok(true)
 }

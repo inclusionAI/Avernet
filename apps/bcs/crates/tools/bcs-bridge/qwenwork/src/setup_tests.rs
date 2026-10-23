@@ -277,3 +277,37 @@ fn init_rejects_settings_symlink_to_registered_config_without_writes() {
     assert_eq!(fs::read(&config).unwrap(), original);
     assert!(fs::symlink_metadata(&settings).unwrap().file_type().is_symlink());
 }
+
+#[test]
+fn v2_init_and_deinit_select_the_bot_and_preserve_other_provider_identity() {
+    let (root, config, settings) = fixture();
+    let source: toml::Table = toml::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+    let other: toml::Table = toml::from_str("provider_id='legacy'\nstate_path='legacy.db'\nprovider_auth='agentpass'\n[[bot]]\nengine='codex'\nprovider_bot_ref='parent'\nbot_id='old-id'\ntoken='old-token'\ncwd='/tmp'").unwrap();
+    let doc = toml::Table::from_iter([("schema_version".into(),2.into()),("provider".into(),toml::Value::Array(vec![other.clone().into(),source.into()]))]);
+    fs::write(&config,toml::to_string(&doc).unwrap()).unwrap();
+    let selected=toml::Table::from_iter([("bot_id".into(),"bot-registered".into())]);
+    initialize_at(&config,&selected,root.path()).unwrap();
+    let updated:toml::Table=toml::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+    assert_eq!(updated["provider"][0],toml::Value::Table(other));
+    assert_eq!(updated["provider"][1]["bot"][0]["token"].as_str(),Some("keep-token"));
+    let bytes=fs::read(&config).unwrap();
+    assert!(initialize_at(&config,&toml::Table::from_iter([("bot_id".into(),"missing".into())]),root.path()).is_err());
+    assert_eq!(fs::read(&config).unwrap(),bytes);
+    deinitialize_at(&config,&selected,root.path()).unwrap();
+    assert_eq!(fs::read(&config).unwrap(),bytes);
+    assert!(!fs::read_to_string(&settings).unwrap().contains("/hooks"));
+}
+
+#[test]
+fn v2_init_refuses_duplicate_physical_channels_before_writing_any_files() {
+    let (root, config, settings)=fixture();
+    initialize_at(&config,&toml::Table::new(),root.path()).unwrap();
+    let source:toml::Value=toml::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+    let mut other=source.clone();other["provider_id"]="another-provider".into();other["bot"][0]["bot_id"]="another-bot".into();
+    let document=toml::Table::from_iter([("schema_version".into(),2.into()),("provider".into(),toml::Value::Array(vec![source,other]))]);
+    fs::write(&config,toml::to_string(&document).unwrap()).unwrap();
+    let original=fs::read(&config).unwrap();let hooks=fs::read(&settings).unwrap();
+    let selected=toml::Table::from_iter([("bot_id".into(),"another-bot".into())]);
+    assert!(initialize_at(&config,&selected,root.path()).unwrap_err().to_string().contains("same desktop resource"));
+    assert_eq!(fs::read(&config).unwrap(),original);assert_eq!(fs::read(&settings).unwrap(),hooks);
+}

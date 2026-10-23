@@ -48,7 +48,7 @@ engine_bin = "/bin/sh"
 cwd = "{}"
 "#, dir.path().display()), &dir.path().join("bridge.toml")).unwrap();
     let state = Arc::new(AppState::new(config.clone(), &EngineRegistry::builtin()).unwrap());
-    let mut client = BotClient::new(state, config.bots[0].clone(), config.plugin.unwrap()).await.unwrap();
+    let mut client = BotClient::new(state, config.bots[0].clone(), config.plugin.unwrap(), crate::status::BridgeStatus::default()).await.unwrap();
     client.protocol_v3 = true;
     (dir, client)
 }

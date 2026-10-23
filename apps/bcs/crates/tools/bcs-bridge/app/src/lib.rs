@@ -9,6 +9,7 @@
 pub mod app;
 mod cli;
 mod config;
+mod multi_config;
 pub mod credentials;
 pub mod identity;
 #[cfg(unix)]

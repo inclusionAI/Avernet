@@ -60,6 +60,17 @@ async fn connected(state: &State, abort: &CancellationToken) -> Result<Peer, Tur
 
 #[async_trait]
 impl Engine for QwenWork {
+    async fn shutdown(&self) {
+        self.shutdown.cancel();
+        if let Some(peer) = self.state.lock().peer.as_ref() { peer.closed.cancel(); }
+        if let Some(mut task) = self.task.lock().await.take() {
+            if tokio::time::timeout(Duration::from_secs(5), &mut task).await.is_err() {
+                task.abort();
+                let _ = task.await;
+            }
+        }
+    }
+
     async fn run_turn(
         &self,
         req: TurnRequest,

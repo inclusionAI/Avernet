@@ -41,6 +41,7 @@ struct BotClient {
     bot: BotConfig,
     config: PluginConfig,
     identity: ConnectionIdentity,
+    status: crate::status::BridgeStatus,
     /// Whether the current connection negotiated protocol V3. V3 selects the
     /// canonical Run Event uplink and enables interaction (HITL) support.
     protocol_v3: bool,
@@ -65,7 +66,12 @@ struct BotIdentityFailure(String);
 /// Run one independent client per configured Bot. Shutdown cancels and reaps
 /// active engine turns; an ordinary socket error only reconnects its client.
 pub async fn serve(state: Arc<AppState>, shutdown: CancellationToken) -> anyhow::Result<()> {
-    let isolate_bot_identity = state.config.provider_auth.as_deref() == Some("agentpass-subbots");
+    let status = crate::status::BridgeStatus::default();
+    status.register(&state.config);
+    serve_observed(state, shutdown, status).await
+}
+
+pub(crate) async fn serve_observed(state: Arc<AppState>, shutdown: CancellationToken, status: crate::status::BridgeStatus) -> anyhow::Result<()> {
     let config = state.config.plugin.clone().context("plugin config required")?;
     let stop = shutdown.child_token();
     let mut clients = JoinSet::new();
@@ -74,18 +80,25 @@ pub async fn serve(state: Arc<AppState>, shutdown: CancellationToken) -> anyhow:
         let bot = bot.clone();
         let config = config.clone();
         let stop = stop.clone();
-        clients.spawn(async move { BotClient::new(state, bot, config).await?.run(stop).await });
+        let status = status.clone();
+        clients.spawn(async move {
+            let provider = state.config.provider_id.clone();
+            let reference = bot.provider_bot_ref.clone();
+            let result = match BotClient::new(state, bot, config, status.clone()).await {
+                Ok(client) => client.run(stop.clone()).await,
+                Err(error) => Err(error),
+            };
+            status.set(&provider, &reference, if result.is_err() { "failed" } else if stop.is_cancelled() { "stopped" } else { "offline" });
+            result
+        });
     }
     let mut first_error = None;
     while let Some(result) = clients.join_next().await {
         match result {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
-                let isolate = isolate_bot_identity && error.is::<BotIdentityFailure>();
                 if first_error.is_none() { first_error = Some(error); }
-                if isolate {
-                    tracing::warn!("Upstream Bot identity failed; sibling Bot clients remain running");
-                } else { stop.cancel(); }
+                tracing::warn!("Upstream Bot client failed; other Bot clients remain running");
             }
             Err(error) => {
                 if first_error.is_none() { first_error = Some(anyhow!("upstream client task failed: {error}")); }
@@ -98,7 +111,7 @@ pub async fn serve(state: Arc<AppState>, shutdown: CancellationToken) -> anyhow:
 }
 
 impl BotClient {
-    async fn new(state: Arc<AppState>, bot: BotConfig, config: PluginConfig) -> anyhow::Result<Self> {
+    async fn new(state: Arc<AppState>, bot: BotConfig, config: PluginConfig, status: crate::status::BridgeStatus) -> anyhow::Result<Self> {
         let bot_id = bot.bot_id.clone().context("plugin bot_id required")?;
         let saved = state.sessions.load_identity(&config.url, &bot.provider_bot_ref).await?;
         let identity = match saved {
@@ -106,12 +119,13 @@ impl BotClient {
             Some(identity) => identity,
             None => ConnectionIdentity { bot_id, token:bot.token.clone().unwrap_or_default() },
         };
-        Ok(Self {state,bot,config,identity,protocol_v3:false,pending:BTreeMap::new(),routes:BTreeMap::new(),replies:VecDeque::new(),wire_seq:0})
+        Ok(Self {state,bot,config,identity,status,protocol_v3:false,pending:BTreeMap::new(),routes:BTreeMap::new(),replies:VecDeque::new(),wire_seq:0})
     }
 
     async fn run(mut self, stop: CancellationToken) -> anyhow::Result<()> {
         let mut occupied_retries = 0;
         let outcome = loop {
+            self.status.set(&self.state.config.provider_id, &self.bot.provider_bot_ref, "connecting");
             let connected = tokio::select! {
                 _ = stop.cancelled() => break Ok(()),
                 connected = self.connect() => connected,
@@ -124,6 +138,7 @@ impl BotClient {
                     match self.state.sessions.save_identity(&self.config.url, &self.bot.provider_bot_ref, identity.clone()).await {
                         Ok(()) => {
                             self.identity = identity;
+                            self.status.set(&self.state.config.provider_id, &self.bot.provider_bot_ref, "online");
                             tracing::info!(provider_bot_ref = %self.bot.provider_bot_ref, bot_id = %self.identity.bot_id,
                                 version = if self.protocol_v3 { 3 } else { 2 },
                                 "upstream Bot connected with the negotiated Bot WebSocket protocol");
@@ -161,6 +176,7 @@ impl BotClient {
                         "upstream disconnected; retaining runs for reconnect");
                 }
             }
+            self.status.set(&self.state.config.provider_id, &self.bot.provider_bot_ref, "reconnecting");
             tokio::select! {
                 _ = stop.cancelled() => break Ok(()),
                 _ = tokio::time::sleep(retry_delay) => {}

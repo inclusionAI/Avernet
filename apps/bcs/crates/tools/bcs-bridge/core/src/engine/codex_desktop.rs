@@ -22,10 +22,21 @@ impl EngineFactory for CodexDesktopFactory {
     fn default_bin(&self) -> &str { "" }
     fn requires_bin(&self) -> bool { false }
     fn registration_requires_options(&self) -> bool { true }
+    fn resources(&self, options: &toml::Table) -> Result<Vec<super::EngineResource>, String> {
+        Ok(vec![super::EngineResource::Path("codex-desktop.socket", self.socket(options)?)])
+    }
     fn build(&self, bin: PathBuf, options: &toml::Table) -> Result<Arc<dyn Engine>, String> {
         if options.keys().any(|key| key != "socket") {
             return Err("codex-desktop supports only the socket engine option".into());
         }
+        let socket = self.socket(options)?;
+        if !bin.as_os_str().is_empty() { return Err("codex-desktop does not launch an executable".into()); }
+        Ok(Arc::new(CodexAppServer::desktop(socket)))
+    }
+}
+
+impl CodexDesktopFactory {
+    fn socket(&self, options: &toml::Table) -> Result<PathBuf, String> {
         let socket = match options.get("socket") {
             Some(value) => {
                 let value = value.as_str().filter(|value| !value.trim().is_empty())
@@ -38,8 +49,7 @@ impl EngineFactory for CodexDesktopFactory {
                 .ok_or("Cannot locate an absolute Codex home for desktop detection")?
                 .join("app-server-control/app-server-control.sock"),
         };
-        if !bin.as_os_str().is_empty() { return Err("codex-desktop does not launch an executable".into()); }
-        Ok(Arc::new(CodexAppServer::desktop(socket)))
+        Ok(socket)
     }
 }
 

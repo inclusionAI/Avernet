@@ -2,13 +2,13 @@ use super::*;
 
 
 #[test]
-fn only_subbot_configs_can_append() {
+fn subbots_append_within_their_group_and_other_providers_create_new_groups() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("bridge.toml");
     std::fs::write(&path, "provider_id='p'\nprovider_auth='agentpass-subbots'\nmode='plugin'\nbot=[]\n").unwrap();
     assert!(config::read_for_registration(&path, "agentpass-subbots", "p", "plugin").is_ok());
     assert!(config::read_for_registration(&path, "agentpass", "p", "plugin").is_err());
-    assert!(config::read_for_registration(&path, "agentpass-subbots", "other", "plugin").is_err());
+    assert!(config::read_for_registration(&path, "agentpass-subbots", "other", "plugin").is_ok());
     assert!(config::read_for_registration(&path, "agentpass-subbots", "p", "gateway").is_err());
 }
 

@@ -6,7 +6,6 @@ use std::{fs::{self, File, OpenOptions}, io::{Read, Write}, os::unix::fs::{DirBu
     time::{Duration, SystemTime, UNIX_EPOCH}};
 
 use anyhow::{Context, bail};
-use bcs_bridge_core::{config::ProviderConfig, engine::EngineRegistry};
 use serde::{Deserialize, Serialize};
 use tokio::{io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader}, net::{UnixListener, UnixStream},
     sync::oneshot, time::{Instant, sleep, timeout}};
@@ -72,7 +71,14 @@ struct Record {
 struct Request { instance_id: String, command: String }
 
 #[derive(Deserialize, Serialize)]
-struct Response { record: Record, state: String }
+struct Response {
+    record: Record,
+    state: String,
+    #[serde(default)]
+    health: String,
+    #[serde(default)]
+    bots: Vec<bcs_bridge_core::status::BotStatus>,
+}
 
 struct Instance { paths: Paths, _lock: File }
 impl Drop for Instance {
@@ -89,22 +95,19 @@ impl Drop for Instance {
 pub fn reserve_registration(runtime_dir: &Path) -> anyhow::Result<File> {
     let paths = Paths::new(runtime_dir);
     paths.create()?;
-    paths.lock(true)?.context("A bridge instance is running; stop it with bcs-bridge stop before --replace-existing")
+    paths.lock(true)?.context("A bridge instance is running; stop it with bcs-bridge stop before changing registered configuration")
 }
 
-pub async fn run(_config: ProviderConfig, engines: &EngineRegistry, config_path: &Path, runtime_dir: &Path, credentials: &dyn crate::credentials::CredentialSource, cwd_override: Option<&Path>) -> anyhow::Result<()> {
+pub async fn run(app: &crate::app::BridgeApp, config_path: &Path, runtime_dir: &Path, cwd_override: Option<&Path>) -> anyhow::Result<()> {
+    // Invalid configuration must not create lifecycle files. Fence the exact
+    // validated snapshot after acquiring the registration/startup lock.
+    let original = fs::read(config_path).context("Cannot read bridge configuration")?;
+    let config = crate::cli::load_start(config_path, app, cwd_override).await?;
     let paths = Paths::new(runtime_dir);
     paths.create()?;
     let lock = paths.lock(true)?.context("A bridge instance is already starting or running; use bcs-bridge status or stop")?;
+    if fs::read(config_path)? != original { bail!("Configuration changed during startup validation; retry"); }
     let instance = Instance { paths, _lock: lock };
-    // Registration and startup share the lock; reload only after acquiring it.
-    let mut config = crate::config::load_runtime(config_path, credentials)?;
-    if let Some(cwd) = cwd_override {
-        if config.bots.len() != 1 || !matches!(config.bots[0].engine.as_str(), "codex" | "codex-desktop") {
-            anyhow::bail!("--cwd requires a configuration containing one native Codex Bot");
-        }
-        config.bots[0].cwd = cwd.canonicalize().context("Cannot resolve requested working directory")?;
-    }
     let socket = instance.paths.file("bridge.sock");
     match fs::remove_file(&socket) {
         Ok(()) => {},
@@ -124,9 +127,10 @@ pub async fn run(_config: ProviderConfig, engines: &EngineRegistry, config_path:
         .map_err(|_| anyhow::anyhow!("Cannot initialize bridge logging"))?;
     let phase = Arc::new(AtomicU8::new(STARTING));
     let shutdown = CancellationToken::new();
-    let control = tokio::spawn(control_loop(listener, record, phase.clone(), shutdown.clone()));
+    let observations = bcs_bridge_core::status::BridgeStatus::default();
+    let control = tokio::spawn(control_loop(listener, record, phase.clone(), shutdown.clone(), observations.clone()));
     let (ready, initialized) = oneshot::channel();
-    let service = bcs_bridge_core::service::serve_managed(config, engines, shutdown, Some(ready));
+    let service = bcs_bridge_core::service::serve_bridge_managed(config, app.engines(), shutdown, Some(ready), observations);
     tokio::pin!(service);
     let result = tokio::select! {
         biased;
@@ -143,15 +147,15 @@ pub async fn run(_config: ProviderConfig, engines: &EngineRegistry, config_path:
     result
 }
 
-async fn control_loop(listener: UnixListener, record: Record, phase: Arc<AtomicU8>, shutdown: CancellationToken) {
+async fn control_loop(listener: UnixListener, record: Record, phase: Arc<AtomicU8>, shutdown: CancellationToken, observations: bcs_bridge_core::status::BridgeStatus) {
     loop {
         let Ok((stream, _)) = listener.accept().await else { break; };
         // Bound each local request, including clients that connect but never send a line.
-        let _ = timeout(CONTROL_TIMEOUT, handle_control(stream, &record, &phase, &shutdown)).await;
+        let _ = timeout(CONTROL_TIMEOUT, handle_control(stream, &record, &phase, &shutdown, &observations)).await;
     }
 }
 
-async fn handle_control(stream: UnixStream, record: &Record, phase: &AtomicU8, shutdown: &CancellationToken) -> anyhow::Result<()> {
+async fn handle_control(stream: UnixStream, record: &Record, phase: &AtomicU8, shutdown: &CancellationToken, observations: &bcs_bridge_core::status::BridgeStatus) -> anyhow::Result<()> {
     let mut reader = BufReader::new(stream.take(4096));
     let mut line = String::new();
     reader.read_line(&mut line).await?;
@@ -163,7 +167,11 @@ async fn handle_control(stream: UnixStream, record: &Record, phase: &AtomicU8, s
         _ => bail!("Unknown bridge control command"),
     }
     let state = match phase.load(Ordering::SeqCst) { STARTING => "starting", RUNNING => "running", _ => "stopping" };
-    let response = Response { record: record.clone(), state: state.into() };
+    let bots = observations.snapshot();
+    let health = if bots.iter().any(|bot| matches!(bot.state.as_str(), "failed" | "offline")) { "degraded" }
+        else if !bots.is_empty() && bots.iter().all(|bot| matches!(bot.state.as_str(), "online" | "listening")) { "ready" }
+        else { "connecting" };
+    let response = Response { record: record.clone(), state: state.into(), health: health.into(), bots };
     let mut bytes = serde_json::to_vec(&response)?;
     bytes.push(b'\n');
     let result = reader.get_mut().get_mut().write_all(&bytes).await;
@@ -177,7 +185,7 @@ async fn request(paths: &Paths, record: &Record, command: &str) -> anyhow::Resul
         let mut bytes = serde_json::to_vec(&Request { instance_id: record.instance_id.clone(), command: command.into() })?;
         bytes.push(b'\n');
         stream.write_all(&bytes).await?;
-        let mut reader = BufReader::new(stream.take(8192));
+        let mut reader = BufReader::new(stream.take(512 * 1024));
         let mut line = String::new();
         reader.read_line(&mut line).await?;
         let response: Response = serde_json::from_str(&line)?;
@@ -203,12 +211,18 @@ pub async fn current_configuration(runtime_dir: &Path) -> anyhow::Result<Option<
     Ok(inspect(&Paths::new(runtime_dir)).await?.map(|response| response.record.config))
 }
 
-pub async fn status(runtime_dir: &Path) -> anyhow::Result<()> {
+pub async fn status(runtime_dir: &Path, json: bool) -> anyhow::Result<()> {
     match inspect(&Paths::new(runtime_dir)).await? {
+        None if json => println!("{}", serde_json::json!({"state":"stopped","health":"stopped","bots":[]})),
         None => println!("Bridge is stopped"),
+        Some(response) if json => println!("{}", serde_json::to_string(&response)?),
         Some(response) => {
             println!("Bridge is {} (PID {}, config {})", response.state, response.record.pid, response.record.config.display());
             println!("Active profile: {}", crate::profiles::active_name(runtime_dir, &response.record.config).unwrap_or("legacy/custom"));
+            println!("Connections: {}", response.health);
+            for bot in response.bots {
+                println!("  {} / {}: {} ({})", bot.provider_id, bot.bot_id.as_deref().unwrap_or(&bot.provider_bot_ref), bot.state, bot.engine);
+            }
         }
     }
     Ok(())
