@@ -211,6 +211,46 @@ class SliceStore:
                 attempt, claim_epoch, result_status,
             )
 
+    async def record_agent_bot_state(self, run: Run, agent_id: AgentId,
+                                     claim_epoch: int, bot_id: str,
+                                     bot_state: str) -> None:
+        """Fenced best-effort write of a persona lifecycle state (openspec
+        add-bot-create-human-confirm D2/D3).
+
+        The park/terminal legs of a bot persona's setup: unlike
+        ``record_agent_binding`` this settles no ledger row — the attempt
+        is still in flight — it only mirrors the gate's observable state
+        onto the legacy ``ac_agent_swarm_agent.bot_id/bot_state`` columns
+        so the run surface (detail, SSE gate deltas, descriptor join)
+        reads the park and the authorization's terminal verdicts from the
+        same durable row it already composes. Fencing and failure
+        semantics follow the binding leg's legacy-column write: the
+        claim-epoch predicate rejects a stale slice's write, a fenced or
+        missing update is logged and never unwinds the attempt, and a
+        store/repository error must not fail the park itself
+        (best-effort, like ``journal_attempt_result``).
+        """
+        if self._lost_probe() or self._agent_repo is None:
+            return
+        try:
+            updated = await run_blocking(
+                self._agent_repo.update_status,
+                run.run_id, agent_id, run.tenant, AgentStatus.QUEUED.value,
+                bot_id=bot_id, bot_state=bot_state, claim_epoch=claim_epoch,
+            )
+        except Exception:
+            logger.warning(
+                "[agentswarm][swarm] bot-state journal failed agent=%s "
+                "bot=%s state=%s", agent_id, bot_id, bot_state,
+            )
+            return
+        if not updated:
+            logger.info(
+                "[agentswarm][swarm] bot-state journal matched no row "
+                "agent=%s bot=%s state=%s (row absent or fenced)",
+                agent_id, bot_id, bot_state,
+            )
+
     async def record_agent_binding(self, run: Run, agent_id: AgentId,
                                     claim_epoch: int, attempt: int,
                                     executor_kind: str, executor_id: str,

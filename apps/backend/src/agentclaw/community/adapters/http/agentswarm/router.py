@@ -50,16 +50,17 @@ from agentclaw.community.core.agentswarm.domain.models import (
 )
 from agentclaw.community.core.agentswarm.domain.models import RunOptions
 from agentclaw.community.core.agentswarm.service.protocols import (
-    AgentSwarmConfigError, AgentSwarmRunNotFoundError,
+    AgentAuthorizationState, AgentSwarmConfigError, AgentSwarmRunNotFoundError,
     GlobalRunLimitExceeded, QueueDepthExceeded, TenantRunLimitExceeded,
 )
 from agentclaw.community.core.agentswarm.repository.audit.impl import AgentSwarmAuditWriter, AuditAction
 from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.agentswarm.schemas import (
     AgentCatalogSpecDTO, AgentDetailDTO, AgentMessageDetailDTO,
-    AgentResultDetailDTO, AgentAttemptDetailDTO, CancelResponseDTO,
-    GuardEventDetailDTO, RoundDetailDTO, RunDetailDTO, RunListDTO,
-    RunSummaryDTO, StreamEventDTO, SubmitRunDTO, SubmitRunResponseDTO,
+    AgentResultDetailDTO, AgentAttemptDetailDTO, BotAuthorizationDTO,
+    CancelResponseDTO, GuardEventDetailDTO, RoundDetailDTO, RunDetailDTO,
+    RunListDTO, RunSummaryDTO, StreamEventDTO, SubmitRunDTO,
+    SubmitRunResponseDTO,
 )
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
@@ -117,6 +118,59 @@ def _audit(
             "[AgentSwarmAudit] audit call dropped (action=%s run_id=%s tenant=%s)",
             action, run_id, tenant,
         )
+
+
+# Bot lifecycle states that matter to the SSE gate stream: the park state
+# (D2) plus the authorization outcomes that resolve it. Everything else is
+# ordinary provisioning drift and must NOT emit a gate event (D7 fast path).
+_GATE_STATE = "AWAITING_AUTHORIZATION"
+
+
+def authorization_gate_deltas(
+    last: dict[str, str],
+    snapshot: tuple[AgentAuthorizationState, ...],
+) -> list[dict]:
+    """Per-stream authorization gate crossings for one SSE poll.
+
+    ``last`` is this connection's previous bot state per agent (absent =
+    not yet seen by this stream). A delta is emitted when an agent enters
+    the human gate from any other state (including "not seen" — a stream
+    that attaches mid-park surfaces the pending consent once, URLs
+    included) or when its state changes out of the gate (issued resumes
+    provisioning; rejected/expired report the terminal auth state).
+    Unchanged polls — and every non-gate transition such as the
+    auto-issued PROVISIONING→READY path — emit nothing. Emissions ride the
+    existing ``agent`` event kind with the same payload shape plus the bot
+    fields (``bot_id``, ``bot_state``, and ``authorization`` while parked),
+    so no new event vocabulary enters the wire contract.
+    """
+    deltas: list[dict] = []
+    for item in snapshot:
+        prev = last.get(item.agent_id)
+        entered = (
+            item.bot_state == _GATE_STATE and prev != _GATE_STATE
+        )
+        exited = prev == _GATE_STATE and item.bot_state != _GATE_STATE
+        if not (entered or exited):
+            continue
+        payload: dict = {
+            "agent_id": item.agent_id,
+            "name": item.name,
+            "status": item.status,
+            "kind": item.kind,
+            "spawn_round": item.spawn_round,
+            "bot_id": item.bot_id,
+            "bot_state": item.bot_state,
+        }
+        if item.authorization is not None:
+            payload["authorization"] = {
+                "state": item.authorization.state,
+                "iframe_url": item.authorization.iframe_url,
+                "redirect_url": item.authorization.redirect_url,
+                "deadline": item.authorization.deadline,
+            }
+        deltas.append(payload)
+    return deltas
 
 
 @router.post("/runs")
@@ -240,6 +294,12 @@ async def stream_run(
             return
         yield _sse("status", {"status": run.status.value})
         after_agent = after_round = after_event = 0
+        # Per-stream view of each agent's bot state for the authorization
+        # gate deltas: absent means this connection has not seen the agent
+        # parked yet, so a stream attaching mid-park surfaces the gate
+        # once. Not a row cursor — the durable cursors below stay the
+        # only replay mechanism (each event once per stream).
+        gate_seen: dict[str, str] = {}
         while True:
             try:
                 events = svc.run_events(
@@ -256,6 +316,11 @@ async def stream_run(
                     "spawn_round": agent.spawn_round,
                 })
                 after_agent = agent.row_cursor
+            for delta in authorization_gate_deltas(
+                    gate_seen, events.agent_authorizations):
+                yield _sse("agent", delta)
+            for item in events.agent_authorizations:
+                gate_seen[item.agent_id] = item.bot_state
             for round_event in events.rounds:
                 yield _sse("round", {
                     "round_id": round_event.round_id,
@@ -434,6 +499,15 @@ def _to_detail_dto(detail) -> RunDetailDTO:
                 output=a.output,
                 started_at=a.started_at,
                 ended_at=a.ended_at,
+                authorization=(
+                    BotAuthorizationDTO(
+                        state=a.authorization.state,
+                        iframe_url=a.authorization.iframe_url,
+                        redirect_url=a.authorization.redirect_url,
+                        deadline=a.authorization.deadline,
+                    )
+                    if a.authorization is not None else None
+                ),
                 result=AgentResultDetailDTO(
                     payload=a.result.payload,
                     artifact_key=a.result.artifact_key,

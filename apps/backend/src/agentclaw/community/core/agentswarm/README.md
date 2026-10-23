@@ -153,7 +153,7 @@ All tables carry `id`, `env`, `tenant`, `is_deleted`, `gmt_create`,
 | `node_executions.agent` + `DAGNode.id` | `agent.name` + lineage (`agent_id`, `parent_agent_id`, `depth`) | Mapped |
 | instance id (`{name}-{uuid}`) | `agent.agent_id` (fresh uuid per spawn) | Mapped |
 | `DAGNode.wave` | `agent.spawn_round` | Mapped |
-| Avernet `_bot_id` + lifecycle states | `agent.bot_id` + `agent.bot_state` (POC never persisted bot state) | Mapped |
+| Avernet `_bot_id` + lifecycle states | `agent.bot_id` + `agent.bot_state` (POC never persisted bot state) | Mapped — `bot_state` now includes `AWAITING_AUTHORIZATION`, the human passport-authorization park: a consent-required create reports the gate instead of generic `PROVISIONING`, and rides an `authorization` descriptor on the run surfaces (see Bot-create human gate below) |
 | `AgentContext.upstream` | structural: lineage via `parent_agent_id` + `result_shard`s | Mapped |
 
 ### Messages, shards, rounds, guards
@@ -336,6 +336,74 @@ unresolvable tenant (principal without a tenant) → 400; missing LLM
 config → 400; unknown run → 404. SSE `run_events` advance row
 cursors (`after_agent_id`, `after_round_id`, `after_event`) — each event
 emits once per stream.
+
+### Bot-create human gate (`AWAITING_AUTHORIZATION`)
+
+Bot lifecycle states (`ac_agent_swarm_agent.bot_state`) are
+`PROVISIONING`, `AWAITING_AUTHORIZATION`, `READY`,
+`AUTHORIZATION_REJECTED`, `AUTHORIZATION_EXPIRED`, `CREATE_FAILED`,
+`APPLY_FAILED`. While a bot's passport application is **pending human
+approval** (the in-window consent window, enforced by the durable creation
+job), the swarm reports `AWAITING_AUTHORIZATION` instead of generic
+`PROVISIONING`; the park is per-bot — a mixed run keeps each agent's gate
+state independent, and auto-issued creations (passport issued inline, no
+consent page) never enter the gate (the decision keys off the application
+status being pending, never off the presence of consent URLs).
+
+**Run detail** — an agent parked at the gate carries an additive
+`authorization` descriptor, sourced read-side from the durable
+creation-job payload (D1 — no copy of it lives in swarm tables):
+
+```json
+{
+  "agent_id": "agent-42",
+  "name": "scout",
+  "status": "RUNNING",
+  "bot_id": "agent_swarm_9f31c0e2a7b4d6f1",
+  "bot_state": "AWAITING_AUTHORIZATION",
+  "authorization": {
+    "state": "AWAITING_AUTHORIZATION",
+    "iframe_url": "https://tcauthmng.example/consent?app=passport",
+    "redirect_url": "https://tcauthmng.example/done",
+    "deadline": "2026-11-20T10:10:00"
+  }
+}
+```
+
+Agents not parked — auto-issued, provisioning, terminal — serialize
+`authorization: null`, and every pre-existing field is unchanged.
+Approvals happen only on the tcauthmng consent page; the swarm only
+surfaced the URL, never approves on a human's behalf.
+
+```bash
+# detail view of a mixed run: one agent parked at the gate, one ready
+curl -sS 'http://127.0.0.1:8000/openapi/v1/agentswarm/runs/<run_id>/detail?tenant=acme' \
+  | jq '.agents[] | {name, bot_state, authorization}'
+```
+
+**SSE gate deltas** — `GET /runs/{run_id}/events` rides the existing
+`agent` event kind (no new event names) for gate crossings: entering the
+park (`bot_state` becomes `AWAITING_AUTHORIZATION`, descriptor attached)
+and leaving it (issued → `PROVISIONING`/`READY` resume, human-rejected →
+`AUTHORIZATION_REJECTED`, window elapsed → `AUTHORIZATION_EXPIRED` —
+descriptor absent from the payload). Deltas are per-stream state, keyed
+off the `RunEvents` authorization snapshot, not row cursors: unchanged
+status polls emit nothing, the auto-issue fast path (`PROVISIONING →
+READY`) emits nothing, and each crossing emits exactly once per stream
+(a stream attaching mid-park surfaces the pending gate once):
+
+```
+event: agent
+data: {"event": "agent", "run_id": "<run_id>", "data": {
+  "agent_id": "agent-42", "name": "scout", "status": "RUNNING",
+  "kind": "bot", "spawn_round": 0,
+  "bot_id": "agent_swarm_9f31c0e2a7b4d6f1",
+  "bot_state": "AWAITING_AUTHORIZATION",
+  "authorization": {"state": "AWAITING_AUTHORIZATION",
+                    "iframe_url": "https://tcauthmng.example/consent?app=passport",
+                    "redirect_url": "https://tcauthmng.example/done",
+                    "deadline": "2026-11-20T10:10:00"}}}
+```
 
 CLI (`build_parser`/`main(argv, client)`; no `__main__` guard — invoke
 `main` directly):

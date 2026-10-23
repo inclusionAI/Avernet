@@ -9,7 +9,7 @@ import uuid
 
 from agentclaw.community.core.agentswarm.config.settings import AgentSwarmConfig
 from agentclaw.community.core.agentswarm.domain.models import (
-    EpochMillis, Run, RunId, RunPage, RunStatus, TenantId,
+    Agent, BotState, EpochMillis, Run, RunId, RunPage, RunStatus, TenantId,
 )
 from agentclaw.community.core.agentswarm.repository.agent import AgentRepository
 from agentclaw.community.core.agentswarm.repository.agent_attempt import (
@@ -24,14 +24,28 @@ from agentclaw.community.core.agentswarm.repository.agent_result import AgentRes
 from agentclaw.community.core.agentswarm.service.protocols import (
     AgentSwarmConfigError, AgentSwarmRunNotFoundError,
     AgentSwarmRunNotPurgeableError, AgentSwarmServiceProtocol,
-    AgentSwarmSyncTimeoutError, AgentDetailItem, AgentEvent,
-    AgentMessageDetail, AgentResultDetail, AgentAttemptDetail,
+    AgentSwarmSyncTimeoutError, AgentAuthorizationState, AgentDetailItem,
+    AgentEvent, AgentMessageDetail, AgentResultDetail, AgentAttemptDetail,
+    BotAuthorizationDescriptor, BotAuthorizationSource,
     GlobalRunLimitExceeded, GuardEventDetailItem, GuardEventSummary,
     QueueDepthExceeded, RoundDetailItem, RoundEvent, RunDetail, RunEvents,
     SubmitRunRequest, TenantRunLimitExceeded,
 )
 
 logger = get_logger("agentswarm")
+
+
+def _unresolvable_authorization(agent: Agent) -> BotAuthorizationDescriptor:
+    """The parked gate for a row whose creation payload cannot answer.
+
+    Presence is keyed off the durable park state, so the descriptor still
+    surfaces — with the wire module's empty-spelling for payload facts the
+    seam could not serve — never a fabricated URL or deadline for it.
+    """
+    return BotAuthorizationDescriptor(
+        state=BotState.AWAITING_AUTHORIZATION.value,
+        iframe_url="", redirect_url="", deadline="",
+    )
 
 class AgentSwarmService(AgentSwarmServiceProtocol):
 
@@ -41,7 +55,8 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
                  result_repo: AgentResultRepository,
                  config: AgentSwarmConfig,
                  attempt_repo: AgentAttemptRepository | None = None,
-) -> None:
+                 authorization_source: BotAuthorizationSource | None = None,
+    ) -> None:
         self._run_repo = run_repo
         self._dispatch_repo = dispatch_repo
         self._agent_repo = agent_repo
@@ -50,6 +65,7 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
         self._guard_repo = guard_repo
         self._result_repo = result_repo
         self._attempt_repo = attempt_repo
+        self._authorization_source = authorization_source
         self._config = config
         slice_max = config.orchestration.slice_max_seconds
         # Float deadline with a one-poll-cycle floor: int() truncated a
@@ -189,13 +205,28 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
         run = self._run_repo.get(rid, tid)
         if run is None:
             raise AgentSwarmRunNotFoundError(run_id)
+        agent_rows = self._agent_repo.list_by_run_with_rows(rid, tid)
         agents = tuple(
             AgentEvent(
                 agent_id=a.agent_id, name=a.name, status=a.status, kind=a.kind,
                 spawn_round=a.spawn_round, row_cursor=row,
             )
-            for row, a in self._agent_repo.list_by_run_with_rows(rid, tid)
+            for row, a in agent_rows
             if row > after_agent_id
+        )
+        agent_authorizations = tuple(
+            AgentAuthorizationState(
+                agent_id=str(a.agent_id),
+                name=a.name,
+                status=a.status.value,
+                kind=a.kind.value,
+                spawn_round=int(a.spawn_round),
+                bot_id=str(a.bot_id) if a.bot_id is not None else None,
+                bot_state=a.bot_state.value,
+                authorization=self._authorization_for(a, run),
+            )
+            for _, a in agent_rows
+            if a.bot_state is not None
         )
         rounds = tuple(
             RoundEvent(
@@ -214,6 +245,7 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
         return RunEvents(
             agents=agents, rounds=rounds, guards=guards,
             run_status=run.status, terminal=terminal,
+            agent_authorizations=agent_authorizations,
         )
 
     def get_run_detail(self, run_id: str, tenant: str) -> RunDetail | None:
@@ -303,6 +335,7 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
                 result=result,
                 attempt_ledger=tuple(ledger_by_agent.get(str(agent.agent_id), ())),
                 messages=messages,
+                authorization=self._authorization_for(agent, run),
             ))
 
         rounds = tuple(
@@ -359,6 +392,36 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
             raise AgentSwarmConfigError(
                 "agentswarm llm config missing: base_url/api_key required"
             )
+
+    def _authorization_for(
+        self, agent: Agent, run: Run,
+    ) -> BotAuthorizationDescriptor | None:
+        if agent.bot_state is not BotState.AWAITING_AUTHORIZATION:
+            # Descriptor presence is keyed off the durable park state only:
+            # auto-issued, provisioning and terminal bots surface none (D7 —
+            # the gate decision derives from the row, never from the mere
+            # presence of consent URLs in a payload).
+            return None
+        if (
+            self._authorization_source is None
+            or not (run.owner_id or "").strip()
+            or agent.bot_id is None
+        ):
+            return _unresolvable_authorization(agent)
+        try:
+            descriptor = self._authorization_source.authorization(
+                owner_id=run.owner_id, bot_id=str(agent.bot_id),
+            )
+        except Exception:
+            logger.warning(
+                "[agentswarm][service] authorization payload lookup failed "
+                "for agent=%s bot=%s (parked state surfaces without URLs)",
+                agent.agent_id, agent.bot_id,
+            )
+            return _unresolvable_authorization(agent)
+        if descriptor is None:
+            return _unresolvable_authorization(agent)
+        return descriptor
 
     def purge_run(self, run_id: str, tenant: str) -> dict[str, int] | None:
         rid, tid = RunId(run_id), TenantId(tenant)

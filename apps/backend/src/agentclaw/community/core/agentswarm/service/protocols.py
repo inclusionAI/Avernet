@@ -11,7 +11,8 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from agentclaw.community.core.agentswarm.domain.models import (
-    AgentKind, AgentSpec, AgentStatus, GuardKind, ProviderKind, RequestMetadata, Run,
+    AgentKind, AgentSpec, AgentStatus, GuardKind, ProviderKind,
+    RequestMetadata, Run,
     RunOptions, RunPage, RunStatus,
 )
 
@@ -26,6 +27,50 @@ class SubmitRunRequest:
     idempotency_key: str | None = None
     owner_id: str = ""
     run_options: RunOptions = field(default_factory=RunOptions)
+
+
+@dataclass(frozen=True)
+class BotAuthorizationDescriptor:
+    """The pending human-authorization gate for one agent's bot (D1/D4).
+
+    The shared-contract shape — the host adapter's status result and the
+    run surfaces serialize the same four fields: ``state`` is the parked
+    BotState value (``AWAITING_AUTHORIZATION``), ``iframe_url`` /
+    ``redirect_url`` the passport application's consent surfaces as
+    submitted (empty when the payload has none), ``deadline`` the
+    authorization window's end as the ISO-8601 spelling the creation-job
+    payload itself carries. D1: the payload is the only durable copy —
+    this is a read-side join, never a second stored one. Present exactly
+    for agents parked at the gate; auto-issued, provisioning and terminal
+    bots surface none (D7 fast path).
+    """
+    state: str
+    iframe_url: str
+    redirect_url: str
+    deadline: str
+
+
+@runtime_checkable
+class BotAuthorizationSource(Protocol):
+    """Read-only seam over a bot's durable creation job (manifest seam).
+
+    The service composes run surfaces from ``ac_agent_swarm_*`` rows only;
+    the authorization URLs and window live in the creation-job payload the
+    host platform persists, so the composition asks this seam — never the
+    task queue directly (D17/D35 agentswarm isolation: the swarm's core
+    module imports neither ``core.bot_management`` nor ``core.task_queue``).
+    Declared with the module's own ``BotAuthorizationDescriptor`` return
+    type; the concrete adapter bound by the DI root derives the same
+    descriptor the host adapter reports (D1), so there is exactly one
+    source of truth and zero copied state.
+    """
+
+    @abstractmethod
+    def authorization(self, *, owner_id: str, bot_id: str) -> BotAuthorizationDescriptor | None:
+        """The gate descriptor for a (owner, bot) creation, or ``None`` when
+        no durable creation payload exists for it. Must not raise on
+        infrastructure errors — callers degrade, never fail the read."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -54,6 +99,25 @@ class GuardEventSummary:
 
 
 @dataclass(frozen=True)
+class AgentAuthorizationState:
+    """One bot-kind agent's current provisioning-gate snapshot (poll payload).
+
+    The per-poll read behind the SSE gate-delta stream: every agent row that
+    carries a bot state, with the ``authorization`` descriptor attached for
+    those parked at the human gate. Keyed by ``agent_id``; per-bot by
+    construction (D7), so a mixed run snapshots each bot independently.
+    """
+    agent_id: str
+    name: str
+    status: str
+    kind: str
+    spawn_round: int
+    bot_id: str | None
+    bot_state: str
+    authorization: BotAuthorizationDescriptor | None = None
+
+
+@dataclass(frozen=True)
 class RunEvents:
     """Incremental durable progress: rows after the cursors plus run status."""
     agents: tuple[AgentEvent, ...]
@@ -61,6 +125,7 @@ class RunEvents:
     guards: tuple[GuardEventSummary, ...]
     run_status: RunStatus
     terminal: RunStatus | None
+    agent_authorizations: tuple[AgentAuthorizationState, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -121,6 +186,7 @@ class AgentDetailItem:
     result: AgentResultDetail | None
     attempt_ledger: tuple[AgentAttemptDetail, ...]
     messages: tuple[AgentMessageDetail, ...]
+    authorization: BotAuthorizationDescriptor | None = None
 
 
 @dataclass(frozen=True)

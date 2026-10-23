@@ -8,6 +8,43 @@ from typing import Protocol, runtime_checkable
 # ``from agentclaw.community.core... import`` lives here.
 
 
+class ParkedAwaitingAuthorization(RuntimeError):
+    """``setup()`` parked its persona at a human authorization gate.
+
+    The subagent raises this — instead of polling its ready budget away —
+    when the provisioned identity reports it is awaiting a human
+    authorization that only that human can complete (openspec
+    add-bot-create-human-confirm D3/D5). It is a wait state, an outcome
+    distinct from both progress and failure, so the runtime treats it
+    accordingly:
+
+    - no failed-attempt increment, no timeout journal entry, and no new
+      attempt idempotency key or replacement identity — the parked persona
+      is the one the authorization is pending for;
+    - parked time never counts against the setup clock (D5), so the park
+      may legitimately outlast ``setup_timeout``;
+    - the pool rechecks the gate by re-invoking the **same** subagent's
+      ``setup()`` as a cheap status continuation: an implementation that
+      parks MUST therefore be re-entrant — keep the minted identity, skip
+      the create leg, and continue the provisioning poll — so the same
+      setup continuation finishes with the same identity once the
+      authorization resolves. Authorization transitions then decide the
+      outcome: issuance resumes toward READY, and the rejection /
+      window-elapse states surface as terminal provisioning errors.
+
+    The message carries the human-readable facts (bot id, window
+    deadline); approval itself happens only on the official consent page,
+    never through this seam.
+    """
+
+    def __init__(self, message: str, *, bot_id: str | None = None) -> None:
+        super().__init__(message)
+        # ``None`` normalizes to the pre-attribute empty spelling so a
+        # marker double carrying no identity keeps working and the runtime
+        # reads a plain ``str`` (never branches on the type).
+        self.bot_id = bot_id if bot_id is not None else ""
+
+
 @runtime_checkable
 class Subagent(Protocol):
     name: str

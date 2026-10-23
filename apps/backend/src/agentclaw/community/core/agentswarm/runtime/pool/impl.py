@@ -7,12 +7,15 @@ import uuid
 from typing import Any
 
 from agentclaw.community.core.agentswarm.domain.models import (
-    AgentId, AgentStatus, IdempotencyKey, NonRetryableProvisioningError, Run,
+    AgentId, AgentStatus, BotState, IdempotencyKey,
+    NonRetryableProvisioningError, Run,
     SubagentResult, TaskEnvelope, TenantId, AgentSpec, AgentKind,
 )
 from dataclasses import dataclass
 
-from agentclaw.community.plugin_api.agentswarm.subagent import SubagentFactory
+from agentclaw.community.plugin_api.agentswarm.subagent import (
+    ParkedAwaitingAuthorization, SubagentFactory,
+)
 from agentclaw.community.plugin_api.agentswarm.artifact import ArtifactStore
 from agentclaw.community.core.agentswarm.runtime.breaker import (
     UpstreamBreaker,
@@ -36,6 +39,20 @@ class EnvelopeSchemaInvalid(Exception):
 # unbounded-DB-write vector. 1,000,000 chars ≈ 1 MB: far above any sane
 # routed result, far below the artifact cap, bounded in serialized form.
 _MAX_INLINE_RESULT_CHARS = 1_000_000
+
+# Parked-gate recheck cadence (openspec add-bot-create-human-confirm
+# D3/D5): while an attempt is parked awaiting human authorization, each
+# recheck is the subagent's own cheap status continuation, and this
+# interval only paces those rechecks. The park's bound is the job's
+# authorization deadline — never a new timeout knob — and parked time
+# never counts against ``setup_timeout``.
+_PARK_RECHECK_INTERVAL_SECONDS = 2.0
+
+# Ledger spelling for the parked wait-state transition (D3): one
+# diagnostic write on entry to the gate (the same attempt row a later
+# COMPLETED/FAILED result overwrites via journal_attempt_result) — never
+# a FAILED/TIMEOUT entry, never per-recheck spam.
+_PARK_LEDGER_STATUS = "PARKED_AWAITING_AUTHORIZATION"
 
 
 @dataclass
@@ -65,6 +82,10 @@ class SubagentRuntime:
         - ``metrics=None`` means no metrics backend is configured
           (local/test profiles); a private no-op fills the seam so call
           sites never branch on instrumentation.
+        - ``park_recheck_interval`` paces the rechecks of an attempt
+          parked at a human authorization gate (openspec D3/D5): the
+          default matches the module constant, it is not a settings knob,
+          and parked time is never counted against ``setup_timeout``.
         """
 
     def __init__(
@@ -78,6 +99,7 @@ class SubagentRuntime:
         artifact_inline_threshold: int = 16384,
         upstream_breaker: UpstreamBreaker | None = None,
         binding_store: "SliceStore | None" = None,
+        park_recheck_interval: float = _PARK_RECHECK_INTERVAL_SECONDS,
     ) -> None:
         self._factory = factory
         self._artifact_store = artifact_store
@@ -88,6 +110,7 @@ class SubagentRuntime:
         self._artifact_inline_threshold = artifact_inline_threshold
         self._upstream_breaker = upstream_breaker
         self._binding_store = binding_store
+        self._park_recheck_interval = park_recheck_interval
         self._claim_epoch = 0
         self._work: asyncio.Queue = asyncio.Queue(maxsize=max_width)
         self._completions: asyncio.Queue = asyncio.Queue()
@@ -288,6 +311,13 @@ class SubagentRuntime:
                 )
 
             subagent = None
+            # Park state of this attempt (openspec D3): True only while the
+            # attempt sits at the human authorization gate, so the finally
+            # below can distinguish "cancelled while parked" — where tearing
+            # the persona down would discard the pending authorization and
+            # force the respawn to open a fresh one — from every ordinary
+            # attempt outcome, which keeps the pre-change teardown contract.
+            parked = False
             try:
                 # D23 fresh context per attempt; factory construction stays
                 # inside the attempt's guard so a malformed spec degrades to
@@ -302,9 +332,40 @@ class SubagentRuntime:
                 # Write-ahead: the binding INTENT lands before setup()
                 # so a setup failure leaves a reconcilable ledger row.
                 await self._journal_intent(subagent, spec, item, attempt)
-                await asyncio.wait_for(
-                    subagent.setup(), timeout=self._setup_timeout,
-                )
+                # Park-aware setup wait (D3/D5): a ParkedAwaitingAuthorization
+                # outcome is the human gate's wait state, not an attempt
+                # failure — no failed-attempt increment, no new attempt key,
+                # no replacement persona, and no setup clock against the
+                # wait. Each recheck re-invokes the SAME subagent's setup()
+                # (its park continuation: one cheap status poll); the
+                # ``wait_for`` re-arms per recheck so only genuine
+                # provisioning time inside one continuation is ever bounded
+                # by setup_timeout. Slice-end cancellation unwinds through
+                # the CancelledError clause mid-park; the persona survives
+                # for the next slice's D16 respawn.
+                while True:
+                    try:
+                        await asyncio.wait_for(
+                            subagent.setup(), timeout=self._setup_timeout,
+                        )
+                        break
+                    except ParkedAwaitingAuthorization as exc:
+                        if not parked:
+                            parked = True
+                            logger.info(
+                                "[agentswarm][runtime] agent=%s attempt=%d "
+                                "parked at authorization gate: %s",
+                                item.agent_id, attempt, exc,
+                            )
+                            await self._record_gate_state(
+                                item, getattr(exc, "bot_id", ""),
+                                BotState.AWAITING_AUTHORIZATION.value,
+                            )
+                            await self._journal_result(
+                                item, attempt, _PARK_LEDGER_STATUS, str(exc),
+                            )
+                        await asyncio.sleep(self._park_recheck_interval)
+                parked = False
                 await self._journal_binding(subagent, spec, item, attempt)
                 raw = await asyncio.wait_for(
                     subagent.run_task(item.envelope),
@@ -331,13 +392,21 @@ class SubagentRuntime:
                 await self._journal_result(item, attempt, "COMPLETED", None)
                 return result
             except asyncio.TimeoutError:
+                parked = False
                 last_error = "timeout"
                 await self._journal_result(item, attempt, "TIMEOUT", "timeout")
                 self._record_upstream_failure()
                 logger.warning("[agentswarm][runtime] agent=%s attempt=%d timeout", item.agent_id, attempt)
             except asyncio.CancelledError:
+                # Mid-park cancellation is the ONLY path that leaves ``parked``
+                # set (D3): a parked persona awaiting its human must survive
+                # the slice boundary so the next slice's D16 respawn adopts
+                # the same authorization window instead of opening a new
+                # one. Every other outcome below clears the flag and keeps
+                # the pre-change teardown contract.
                 raise
             except SliceLost:
+                parked = False
                 # The fenced binding journal rejected this slice's claim —
                 # that is authoritative evidence the claim is gone, so set
                 # the cooperative-unwind event: never feed the breaker
@@ -355,6 +424,7 @@ class SubagentRuntime:
                 # top-of-loop check, so journal this attempt's outcome now.
                 await self._journal_result(item, attempt, "SLICE_LOST", "slice_lost")
             except Exception as exc:
+                parked = False
                 if self._is_non_retryable(exc):
                     # Deterministic provisioning failures (a space quota
                     # ceiling) will fail every retry the same way — fail
@@ -366,6 +436,15 @@ class SubagentRuntime:
                         "non_retryable=%s error=%s",
                         item.agent_id, attempt, type(exc).__name__, exc,
                     )
+                    if getattr(exc, "bot_state", ""):
+                        # The authorization's terminal verdict overrides the
+                        # parked state on the agent row so the run surface
+                        # stops serving the consent URL for a bot that can
+                        # no longer be confirmed (openspec D2).
+                        await self._record_gate_state(
+                            item, getattr(exc, "bot_id", ""),
+                            str(getattr(exc, "bot_state", "")),
+                        )
                     await self._journal_result(item, attempt, "FAILED", last_error)
                     break
                 last_error = str(exc)
@@ -373,7 +452,12 @@ class SubagentRuntime:
                 self._record_upstream_failure()
                 logger.warning("[agentswarm][runtime] agent=%s attempt=%d error=%s", item.agent_id, attempt, exc)
             finally:
-                if subagent is not None:
+                if subagent is not None and not parked:
+                    # Parked (mid-park cancellation, D3): the persona's
+                    # authorization window is the wait itself — teardown
+                    # would discard the pending application and force the
+                    # respawn to open a fresh gate, so the awaiting persona
+                    # survives for the next slice's adopt-on-respawn.
                     try:
                         await subagent.teardown()
                     except Exception:
@@ -462,6 +546,25 @@ class SubagentRuntime:
         await self._binding_store.journal_attempt_result(
             item.run, item.agent_id, item.claim_epoch, attempt,
             result_status, result_message,
+        )
+
+    async def _record_gate_state(self, item: _WorkItem, bot_id: str,
+                                 bot_state: str) -> None:
+        """Mirror the human gate onto the agent row (openspec D2/D3).
+
+        Additive SPI reads only: a marker double carrying no identity
+        skips the write. The store call is fenced and best-effort, so a
+        park or terminal verdict never unwinds its own attempt because its
+        durable-column twin could not land.
+        """
+        if self._binding_store is None or self._slice_lost.is_set():
+            return
+        bot_id = str(bot_id or "").strip()
+        bot_state = str(bot_state or "").strip()
+        if not bot_id or not bot_state:
+            return
+        await self._binding_store.record_agent_bot_state(
+            item.run, item.agent_id, item.claim_epoch, bot_id, bot_state,
         )
 
     @staticmethod
