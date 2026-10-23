@@ -28,7 +28,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import envelope, env
 from agentclaw.community.api.bot_genome_promotion_service import GenomePromotionServiceProtocol
 from agentclaw.community.api.bot_genome_registry_service import GenomeRegistryProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
-from agentclaw.community.core.bot_genome.canonical import NotCanonicalizable, loads_strict
+from agentclaw.community.core.bot_genome.canonical import NotCanonicalizable, canonicalize, loads_strict
 from agentclaw.community.core.bot_genome.errors import LimitExceeded
 from agentclaw.community.core.bot_genome.limits import MAX_UPLOAD_BYTES
 from agentclaw.community.core.bot_genome.spec_models import GenomePolicy
@@ -128,19 +128,22 @@ def _actor(actor_id: str, caller: ActingCaller, *, run: RunScope | None = None) 
     return Provenance(ProvenanceKind.USER, actor_id, recorded_as=recorded_as)
 
 
-async def reject_duplicate_members(request: Request) -> None:
-    """Contract §3.1: a record with a duplicate member name is refused, never parsed last-wins.
+async def reject_non_canonical_body(request: Request) -> None:
+    """Contract §3.1: a body outside the canonical JSON subset is refused before the model parses it.
 
     FastAPI's JSON parsing keeps the last of two duplicate members, so a body
-    with `risk_overrides` twice would record the second silently. The raw
-    body is read through the registry's strict loader first; malformed JSON
-    is left to FastAPI's own parsing to answer.
+    with `risk_overrides` twice would record the second silently; it also
+    accepts an escaped lone surrogate (`"\\ud800"`) and a float such as
+    `1.0`, which the model would normalise and the registry then refuse while
+    hashing, as a `500`. The raw body is read through the registry's strict
+    loader and canonicalised first; malformed JSON is left to FastAPI's own
+    parsing to answer.
     """
     body = await request.body()
     if not body:
         return
     try:
-        loads_strict(body.decode("utf-8"))
+        canonicalize(loads_strict(body.decode("utf-8")))
     except NotCanonicalizable as exc:
         raise RequestValidationError(
             [{"type": "value_error", "loc": ("body",), "msg": f"not a contract record: {exc}"}]
@@ -255,7 +258,7 @@ async def commit_genome_patch(
     caller: ActingCallerDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     registry: GenomeRegistryProtocol = Injected(GenomeRegistryProtocol),
-    _: None = Depends(reject_duplicate_members),
+    _: None = Depends(reject_non_canonical_body),
 ) -> Envelope[RevisionRecorded]:
     """Commit a Genome Patch: apply it to its own `base` and record the result as a new revision.
 
@@ -393,7 +396,7 @@ async def set_genome_policy(
     caller: ActingCallerDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     registry: GenomeRegistryProtocol = Injected(GenomeRegistryProtocol),
-    _: None = Depends(reject_duplicate_members),
+    _: None = Depends(reject_non_canonical_body),
 ) -> Envelope[RevisionRecorded]:
     """Record a revision with `active`'s content and this policy. The policy is not bot state: it is what automation may
     change.

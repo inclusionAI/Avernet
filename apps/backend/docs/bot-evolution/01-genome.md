@@ -1624,8 +1624,11 @@ Errors: 404 the patch's `base` is not a revision of this bot; 422
 `pinned_item`, `gene_not_allowed`, `missing_rationale`, `missing_evidence`,
 `schema`, `not_canonical`, `already_recorded` for a candidate whose result is
 an existing revision, and the apply predicates of contract §6.4); 413
-`limit_exceeded`. A body with a duplicate member name is refused before it is
-parsed (contract §3.1).
+`limit_exceeded`. A body outside the canonical JSON subset (a duplicate member
+name, a float, a lone surrogate) is refused before it is parsed (contract
+§3.1). An audit identity longer than 1024 characters (the width of the content
+store's `modifier` column; an application's is `app:<id>:on-behalf-of:<user>`)
+is refused as 413 `limit_exceeded` before anything is written.
 
 ### POST /bots/{bot_id}/genome/revisions:capture
 

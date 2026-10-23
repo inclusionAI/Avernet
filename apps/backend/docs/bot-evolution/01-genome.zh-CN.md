@@ -1471,7 +1471,9 @@ GET /openapi/v1/bots/bot_123/genome/revisions?status=candidate&parent=sha256:a90
 （`does_not_apply`、`gene_not_mutable`、`pinned_item`、`gene_not_allowed`、
 `missing_rationale`、`missing_evidence`、`schema`、`not_canonical`、候选结果为已有
 修订版时的 `already_recorded`，以及契约 §6.4 的各项应用判定）；413 `limit_exceeded`。
-请求体中出现重复成员名会在解析前被拒绝（契约 §3.1）。
+请求体超出规范 JSON 子集（重复成员名、浮点数、孤立代理项）会在解析前被拒绝（契约 §3.1）。
+审计身份超过 1024 个字符（内容存储 `modifier` 列的宽度；应用的身份为
+`app:<id>:on-behalf-of:<user>`）会在写入任何内容前以 413 `limit_exceeded` 拒绝。
 
 ### POST /bots/{bot_id}/genome/revisions:capture
 

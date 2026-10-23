@@ -499,3 +499,13 @@ async def test_memory_bot_patches_work_end_to_end(world: World) -> None:
     assert captured.revision.spec.memory is None, "capture has no curated memory until RSI-05"
     items = json.loads(BlobDir().read(spec_of(MEMORY_BOT).memory.items_digest))
     assert items[0]["key"] == "customer-tier-rules"
+
+
+def test_an_audit_identity_the_columns_cannot_hold_is_refused_on_construction() -> None:
+    """User ids are unbounded at the API boundary; the content store's ``modifier`` column is 1024 wide."""
+    long_user = "u-" + "x" * 1024
+    with pytest.raises(LimitExceeded):
+        Provenance(ProvenanceKind.USER, long_user, recorded_as=f"app:app_1:on-behalf-of:{long_user}")
+    with pytest.raises(LimitExceeded):
+        Provenance(ProvenanceKind.USER, long_user)
+    assert Provenance(ProvenanceKind.USER, "u-" + "x" * 1000, recorded_as="app:a:on-behalf-of:u-" + "x" * 1000).audit

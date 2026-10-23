@@ -545,22 +545,31 @@ def test_policy_rejected_keeps_its_own_message() -> None:
     assert json.loads(mapped_error_response(PatchRejected([]), _request()).body)["message"] == "Patch rejected"
 
 
-async def test_a_duplicate_member_name_is_refused_before_the_model_parses_it() -> None:
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(
+            b'{"mutable_genes": [], "pins": [], "risk_overrides": {"persona": "T3"}, "risk_overrides": {}}',
+            id="duplicate member",
+        ),
+        pytest.param(b'{"patch_schema": 1, "rationale": "\\ud800 alone", "ops": []}', id="lone surrogate"),
+        pytest.param(b'{"patch_schema": 1.0, "ops": []}', id="float"),
+    ],
+)
+async def test_a_body_outside_the_canonical_subset_is_refused_before_the_model_parses_it(body: bytes) -> None:
     with pytest.raises(RequestValidationError):
-        await genome.reject_duplicate_members(
-            _request(
-                "PUT",
-                body=b'{"mutable_genes": [], "pins": [], "risk_overrides": {"persona": "T3"}, "risk_overrides": {}}',
-            )
-        )
+        await genome.reject_non_canonical_body(_request("PUT", body=body))
+
+
+async def test_a_canonical_body_passes_the_pre_check() -> None:
     assert (
-        await genome.reject_duplicate_members(
+        await genome.reject_non_canonical_body(
             _request("PUT", body=b'{"mutable_genes": [], "pins": [], "risk_overrides": {}}')
         )
         is None
     )
-    assert await genome.reject_duplicate_members(_request("PUT", body=b"")) is None
-    assert await genome.reject_duplicate_members(_request("PUT", body=b"{not json")) is None, (
+    assert await genome.reject_non_canonical_body(_request("PUT", body=b"")) is None
+    assert await genome.reject_non_canonical_body(_request("PUT", body=b"{not json")) is None, (
         "malformed JSON is FastAPI's to answer"
     )
 

@@ -16,6 +16,8 @@ from abc import abstractmethod
 from enum import StrEnum
 from typing import Any, NamedTuple, Protocol
 
+from agentclaw.community.core.bot_genome.errors import LimitExceeded
+from agentclaw.community.core.bot_genome.limits import MAX_AUDIT_ACTOR_CHARS
 from agentclaw.community.core.bot_genome.spec_models import GenomePolicy, GenomeSpec
 
 
@@ -111,8 +113,22 @@ class Provenance:
     #: ``strategy_run`` only: the user the run acts for, which the MCP permission check is made against.
     principal: str | None = None
 
+    def __post_init__(self) -> None:
+        """Runs on construction: an identity the audit columns cannot hold is refused before anything is written.
+
+        User ids are unbounded at the API boundary, and the content store's
+        ``modifier`` column (a frozen migration shared with the Manifest) is
+        ``MAX_AUDIT_ACTOR_CHARS`` wide, so a longer identity is refused here
+        as ``LimitExceeded`` rather than failing inside a write.
+        """
+        if len(self.audit) > MAX_AUDIT_ACTOR_CHARS:
+            raise LimitExceeded(
+                f"the audit identity is {len(self.audit)} characters; the audit columns hold {MAX_AUDIT_ACTOR_CHARS}"
+            )
+
     @property
     def audit(self) -> str:
+        """What the audit columns record: ``recorded_as`` when set, else ``actor``."""
         return self.recorded_as or self.actor
 
     @property

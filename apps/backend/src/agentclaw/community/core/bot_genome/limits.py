@@ -17,6 +17,7 @@ from agentclaw.community.core.bot_config_manifest.schema.limits import (
 )
 
 __all__ = [
+    "MAX_AUDIT_ACTOR_CHARS",
     "MAX_DIFF_BYTES",
     "MAX_ENTRIES_PER_CATEGORY",
     "MAX_FILE_DIFFS",
@@ -47,4 +48,9 @@ MAX_TREE_MEMBERS = ARCHIVE_MEMBER_LIMIT
 MAX_UPLOAD_BYTES = max(MAX_SKILL_BYTES, MAX_RESOURCE_FILE_BYTES, MAX_TREE_BYTES)
 #: README §3.4 / §4.2: one path segment, and one written workspace path.
 MAX_SEGMENT_BYTES = 255
+#: An audit identity (``created_actor``, ``moved_actor``, a promotion's ``actor_id``, and the content
+#: store's ``modifier``): the width of the content store's frozen ``modifier`` column, the narrowest
+#: audit column the registry writes through. An application acting for a user records
+#: ``app:<id>:on-behalf-of:<user>``, so a user id near this length cannot be recorded.
+MAX_AUDIT_ACTOR_CHARS = 1024
 MAX_WRITTEN_PATH_BYTES = 1024
