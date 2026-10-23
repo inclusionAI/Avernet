@@ -365,7 +365,7 @@ async def test_blocked_sender_never_calls_engine_or_any_sender(tmp_path, sender,
     assert engine.calls == []
     outbox = SqliteHostingOutbox(directory)
     record = outbox.enqueue("binding", turn.turn_id, now_ms=10000)
-    assert record.state == "cancelled"
+    assert record is None
     await HostingDeliveryWorker(outbox, sender_port, lambda: 10000).run_once("binding")
     assert sender_port.sent == sender_port.preflights == []
 
@@ -397,7 +397,7 @@ async def test_wrong_model_reply_cannot_bypass_outbound_guard(tmp_path, context_
     ledger.resolve("binding", turn.turn_id, parse_decision(raw, 1))
     outbox = SqliteHostingOutbox(directory)
     record = outbox.enqueue("binding", turn.turn_id, now_ms=10000)
-    assert record.state == "cancelled"
+    assert record is None
     sender = Sender()
     await HostingDeliveryWorker(outbox, sender, lambda: 10000).run_once("binding")
     assert not sender.sent

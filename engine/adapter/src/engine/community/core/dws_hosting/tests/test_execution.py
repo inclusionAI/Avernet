@@ -53,6 +53,9 @@ def build_execution(tmp_path, *, text="hello"):
 
 
 class Engine:
+    async def classify_scope(self, data, prompt):
+        return {"decision": "allow", "reason_code": "inside_rule"}
+
     def __init__(self, *, text=None, ended=False, failure=None):
         self.calls = []
         self.reviews = []

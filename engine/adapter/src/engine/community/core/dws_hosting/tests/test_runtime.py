@@ -105,9 +105,11 @@ async def test_recovery_barrier_then_execute_enqueue_send_and_stop(tmp_path):
 
 @pytest.mark.parametrize("phase", ["received", "resolved", "queued"])
 async def test_restart_saved_result_never_reexecutes(tmp_path, phase):
+    from engine.community.kernel.dws_execution import HostingScope
     runtime, _, ledger, turn, _, sender, engine, intake, _ = runtime_case(tmp_path)
     request = invocation_for(turn, permitted_context(turn))
     ledger.reserve(turn, request)
+    ledger.record_scope("binding", turn.turn_id, HostingScope(decision="allow", reason_code="inside_rule"))
     ledger.record_update(
         "binding",
         turn.turn_id,
