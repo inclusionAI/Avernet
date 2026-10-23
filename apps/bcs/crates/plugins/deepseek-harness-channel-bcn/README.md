@@ -3,6 +3,11 @@
 DeepSeek Harness channel bundle for connecting a DSH Bot to the Avernet Bot
 Collaboration Network (BCN).
 
+## 0.2.4
+
+- Reject Provider onboarding tokens without explicit `static_bearer` auth before registration, avoiding unusable Bot registrations.
+- Install the matching 0.2.4 plugin release by default.
+
 ## 0.2.3
 
 Validate DeepSeek Harness `0.2.1-rc.2` compatibility, retaining the existing
@@ -210,13 +215,13 @@ To exercise the exact prebuilt artifact that will be published:
 ```bash
 mkdir -p /tmp/dsh-bcn-pack
 npm pack --pack-destination /tmp/dsh-bcn-pack
-dsh plugin --profile bcn-tarball add /tmp/dsh-bcn-pack/avernet-plugin-deepseek-harness-channel-bcn-0.2.3.tgz
+dsh plugin --profile bcn-tarball add /tmp/dsh-bcn-pack/avernet-plugin-deepseek-harness-channel-bcn-0.2.4.tgz
 ```
 
 After publication, the installation command will be:
 
 ```bash
-dsh plugin --profile <profile> add @avernet-plugin/deepseek-harness-channel-bcn@0.2.3
+dsh plugin --profile <profile> add @avernet-plugin/deepseek-harness-channel-bcn@0.2.4
 ```
 
 The bundle patch adds the plugin in a disabled state, so installing it never

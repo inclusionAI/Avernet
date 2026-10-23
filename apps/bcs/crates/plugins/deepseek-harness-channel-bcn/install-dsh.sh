@@ -5,7 +5,7 @@ set +x
 profile="web"
 endpoint=""
 bot_name="DeepSeek Harness Bot"
-package_spec="@avernet-plugin/deepseek-harness-channel-bcn@0.2.3"
+package_spec="@avernet-plugin/deepseek-harness-channel-bcn@0.2.4"
 start_dsh=true
 dsh_package="${DSH_PACKAGE:-@deepseek-ai/dsh@0.2.1-rc.2}"
 

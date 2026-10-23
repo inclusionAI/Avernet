@@ -1,6 +1,6 @@
 {
   "name": "@avernet-plugin/deepseek-harness-channel-bcn",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "DeepSeek Harness channel bundle for the Avernet Bot Collaboration Network.",
   "type": "module",
   "main": "./dist/index.js",
