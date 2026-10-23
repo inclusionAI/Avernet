@@ -165,4 +165,4 @@ async def test_a_document_that_stopped_validating_is_refused_in_compile_and_rais
         compiler.check(make_context(), ManifestStateRef())
     with pytest.raises(CompileRefused, match="no longer validates") as refused:
         await compiler.compile(make_context(), ManifestStateRef())
-    assert isinstance(refused.value.__cause__, ManifestValidationError)
+    assert isinstance(refused.value.domain_error, ManifestValidationError)
