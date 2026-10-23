@@ -25,10 +25,10 @@ from agentclaw.community.core.content_store import (
     canonical_tree_bytes,
     decode_tree_bytes,
 )
-from agentclaw.community.core.bot_config_manifest.capabilities import ManifestCapabilities
+from agentclaw.community.core.apply_engine.capabilities import ManifestCapabilities
 from agentclaw.community.core.bot_config_manifest.schema._support import Context
+from agentclaw.community.core.apply_engine.identity_types import legal_identity_types
 from agentclaw.community.core.bot_config_manifest.schema.entries import (
-    legal_identity_types,
     validate_mcp_entry,
 )
 from agentclaw.community.core.bot_genome import contract

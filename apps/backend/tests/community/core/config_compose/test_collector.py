@@ -31,7 +31,7 @@ from agentclaw.community.utils.avernet_tenant import (
     avernet_tenant_scope,
     get_current_avernet_tenant,
 )
-from tests.community.core.bot_config_manifest.cli_tools._fakes import (
+from tests.community.core.apply_engine.cli_tools._fakes import (
     FakeCliToolRepo,
 )
 

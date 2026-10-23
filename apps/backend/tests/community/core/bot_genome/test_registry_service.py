@@ -10,7 +10,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
+from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
 from agentclaw.community.core.content_store import MAX_AUDIT_ACTOR_CHARS, ContentScope
 from agentclaw.community.core.bot_genome.canonical import canonicalize, sha256_digest
 from agentclaw.community.core.bot_genome.errors import (

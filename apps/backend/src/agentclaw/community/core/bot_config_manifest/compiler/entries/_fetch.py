@@ -19,8 +19,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Mapping, Optional
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import EntryDelivery, EntryFetchError
-from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
+from agentclaw.community.core.bot_config_manifest.sources.entry_delivery import EntryDelivery, EntryFetchError
+from agentclaw.community.core.bot_config_manifest.sources.source_resolver import DeclaredSourceResolver
 from agentclaw.community.core.bot_config_manifest.compiler.session import CompileSession, digest_of
 from agentclaw.community.core.content_store import ContentStoreProtocol
 

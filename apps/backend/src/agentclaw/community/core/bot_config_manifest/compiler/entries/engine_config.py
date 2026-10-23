@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Mapping, Sequence
 
 from agentclaw.community.core.apply_engine.desired_state import Declaration, DesiredEngineConfig, EntryFailure
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import entry_identity
+from agentclaw.community.core.apply_engine.outcomes import entry_identity
 
 __all__ = ["compile_engine_config"]
 

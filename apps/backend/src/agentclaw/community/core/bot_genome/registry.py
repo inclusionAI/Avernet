@@ -17,9 +17,9 @@ import re
 from collections.abc import Callable
 from datetime import datetime, timezone
 
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
-from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
-    BotConfigManifestApplyServiceProtocol,
+from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
+from agentclaw.community.core.apply_engine.run.service_protocol import (
+    ApplyRunServiceProtocol,
 )
 from agentclaw.community.core.content_store import DIGEST_RE, ContentScope, ContentStoreError, ContentStoreProtocol
 from agentclaw.community.core.bot_genome import contract
@@ -157,7 +157,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         state_reader: Callable[[], BotStateReader],
         checks: SpecChecks,
         validator: SkillPackageValidator,
-        applies: BotConfigManifestApplyServiceProtocol,
+        applies: ApplyRunServiceProtocol,
         env: Callable[[], str] = get_current_env,
     ) -> None:
         self._revisions = revisions

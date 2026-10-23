@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
+from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
 from agentclaw.community.core.content_store.service import ContentStoreService
 from agentclaw.community.core.bot_genome.models import ApplyResult, BotRef, Provenance, ProvenanceKind
 from agentclaw.community.core.bot_genome.promotion.service import GenomePromotionService

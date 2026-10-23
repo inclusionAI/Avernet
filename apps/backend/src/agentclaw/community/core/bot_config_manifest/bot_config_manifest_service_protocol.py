@@ -33,7 +33,7 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Any, Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
-from agentclaw.community.core.bot_config_manifest.capabilities import (
+from agentclaw.community.core.apply_engine.capabilities import (
     ManifestCapabilities,
 )
 from agentclaw.community.core.bot_config_manifest.schema import (

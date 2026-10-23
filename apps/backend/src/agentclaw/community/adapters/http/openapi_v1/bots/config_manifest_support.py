@@ -11,9 +11,9 @@ from __future__ import annotations
 from typing import Any, Optional, Sequence
 
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
-from agentclaw.community.api.bot_config_manifest_apply_service import (
+from agentclaw.community.api.apply_run_service import (
     ApplyReport,
-    BotConfigManifestApplyServiceProtocol,
+    ApplyRunServiceProtocol,
     ManifestApplyInProgressError,
     ManifestStateRef,
 )
@@ -21,8 +21,8 @@ from agentclaw.community.api.bot_config_manifest_service import (
     ManifestCapabilities,
     ManifestWriteResult,
 )
-from agentclaw.community.core.bot_config_manifest.apply.delivery import DeliveryStrategy
-from agentclaw.community.core.bot_config_manifest.apply.triggers import PUT as PUT_TRIGGER
+from agentclaw.community.core.apply_engine.delivery import DeliveryStrategy
+from agentclaw.community.core.apply_engine.triggers import PUT as PUT_TRIGGER
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.bot_config_manifest.repository.models import (
     BotConfigManifestRecord,
@@ -152,7 +152,7 @@ def put_warnings(
 
 
 def delivery_or_none(
-    apply_service: BotConfigManifestApplyServiceProtocol, bot: dict[str, Any]
+    apply_service: ApplyRunServiceProtocol, bot: dict[str, Any]
 ) -> Optional[DeliveryStrategy]:
     """The bot's delivery strategy for the response's notes, or ``None``.
 
@@ -175,7 +175,7 @@ def delivery_or_none(
 
 
 def start_put_apply(
-    apply_service: BotConfigManifestApplyServiceProtocol,
+    apply_service: ApplyRunServiceProtocol,
     *,
     entity_id: str,
     bot_id: str,

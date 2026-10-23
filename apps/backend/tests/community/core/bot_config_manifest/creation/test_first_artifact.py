@@ -20,36 +20,36 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from agentclaw.community.core.apply_engine.compiler import ManifestStateRef
-from agentclaw.community.core.bot_config_manifest.apply.delivery import MaterialiserPorts
-from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
-from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
-from agentclaw.community.core.bot_config_manifest.apply.activation_delegates import (
+from agentclaw.community.core.apply_engine.delivery import MaterialiserPorts
+from agentclaw.community.core.bot_config_manifest.sources.source_resolver import DeclaredSourceResolver
+from agentclaw.community.core.apply_engine.order import ApplyPhase
+from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
+from agentclaw.community.core.apply_engine.activation_delegates import (
     PlatformActivation,
 )
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_PRE_CONTAINER_TRIGGER,
 )
-from agentclaw.community.core.bot_config_manifest.managed_files import (
+from agentclaw.community.core.apply_engine.managed_files import (
     ManagedFilesComposeReader,
     ManagedFilesStore,
 )
-from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
+from agentclaw.community.core.apply_engine.managed_files.ports import (
     PlatformIdentity,
     PlatformResource,
     PlatformSkillPackageUpload,
 )
-from agentclaw.community.core.bot_config_manifest.repository.apply_models import (  # noqa: F401
+from agentclaw.community.core.apply_engine.repository.apply_models import (  # noqa: F401
     BotConfigManifestApplyLockModel,
     BotConfigManifestApplyModel,
 )
-from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
-    BotConfigManifestApplyService,
+from agentclaw.community.core.apply_engine.run.service import (
+    ApplyRunService,
 )
 from agentclaw.community.core.bot_management.services.teclaw_provision_service import (
     TeclawProvisionService,
 )
-from tests.community.core.bot_config_manifest.cli_tools._fakes import (
+from tests.community.core.apply_engine.cli_tools._fakes import (
     FakeCliToolRepo,
 )
 from agentclaw.community.core.config_compose.services.collector import (
@@ -66,11 +66,11 @@ from agentclaw.community.core.service_bot.services.deploy.teclaw_compose_produce
 )
 from agentclaw.community.kernel.bot_config import StoreRef
 
-from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+from agentclaw.community.core.apply_engine.delivery import (
     TeclawPlatformDelivery,
 )
 
-from ..apply._fakes import (
+from tests.community.core.apply_engine._fakes import (
     manifest_compilers,
     FakeActivationService,
     delivery_strategies,
@@ -86,8 +86,8 @@ from ..apply._fakes import (
     seeded_object_store,
     no_redeliver,
 )
-from ..managed_files._fakes import FakeObjectStorage
-from ..managed_files.test_skill_port import FakeSkillRepository, LiveCapabilityReader
+from tests.community.core.apply_engine.managed_files._fakes import FakeObjectStorage
+from tests.community.core.apply_engine.managed_files.test_skill_port import FakeSkillRepository, LiveCapabilityReader
 from tests.community.core.config_compose.test_collector import _reader_over, _registry_over
 
 _OWNER = "u_owner"
@@ -155,7 +155,7 @@ class _Manifests:
         return self.resolve_capabilities(active_engine=bot.get("active_engine"), bot_type=bot.get("bot_type"))
 
     def resolve_capabilities(self, *, active_engine, bot_type):
-        from agentclaw.community.core.bot_config_manifest.capabilities import resolve_capabilities
+        from agentclaw.community.core.apply_engine.capabilities import resolve_capabilities
 
         return resolve_capabilities(active_engine=active_engine, bot_type=bot_type, is_teclaw=lambda e: e == "teclaw")
 
@@ -219,7 +219,7 @@ def _build(db):
         )
 
     queue = _InlineQueue()
-    applies = BotConfigManifestApplyService(
+    applies = ApplyRunService(
         manifest_service=_Manifests(),
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),

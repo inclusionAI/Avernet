@@ -10,7 +10,7 @@ from agentclaw.community.core.bot_config_manifest.compiler.entries.identity impo
 from agentclaw.community.core.bot_config_manifest.compiler.entries.mcp import compile_mcp
 from agentclaw.community.core.bot_config_manifest.compiler.entries.script import compile_script
 from agentclaw.community.core.bot_config_manifest.compiler.session import digest_of
-from tests.community.core.bot_config_manifest.apply._fakes import oss_source
+from tests.community.core.apply_engine._fakes import oss_source
 from tests.community.core.bot_config_manifest.compiler._rig import rig
 
 

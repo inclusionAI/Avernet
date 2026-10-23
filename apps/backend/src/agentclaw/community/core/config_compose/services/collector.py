@@ -37,7 +37,7 @@ from agentclaw.community.core.config_compose.models import (
     McpComposeInput,
     StdioLaunch,
 )
-from agentclaw.community.core.bot_config_manifest.cli_tools.store import (
+from agentclaw.community.core.apply_engine.cli_tools.store import (
     BOT_DATA_STORE as CLI_TOOL_STORE,
     CliToolScope,
     CliToolStore,

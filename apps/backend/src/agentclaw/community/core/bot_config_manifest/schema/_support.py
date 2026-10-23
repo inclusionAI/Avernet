@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable
 from urllib.parse import urlsplit
 
-from agentclaw.community.core.bot_config_manifest.capabilities import (
+from agentclaw.community.core.apply_engine.capabilities import (
     ManifestCapabilities,
 )
 from agentclaw.community.core.bot_config_manifest.schema.limits import (

@@ -3,7 +3,7 @@
 Everything the registry reads a bot through is resolved lazily, through the
 thunks the Manifest modules already bind (``Callable[[], X]``): the state
 reader reaches the device dispatcher graph, and resolving it at boot would
-close the same import cycle ``manifest_delivery_module`` documents. The
+close the same import cycle ``apply_engine_module`` documents. The
 registry is handed a thunk and builds the reader on first use.
 
 The seam: ``revision_applier`` binds :class:`PendingDeliveryApplier`, which
@@ -19,11 +19,11 @@ from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.api.bot_genome_promotion_service import GenomePromotionServiceProtocol
 from agentclaw.community.api.bot_genome_registry_service import GenomeRegistryProtocol
-from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
-    BotConfigManifestApplyServiceProtocol,
+from agentclaw.community.core.apply_engine.run.service_protocol import (
+    ApplyRunServiceProtocol,
 )
 from agentclaw.community.core.content_store import ContentStoreProtocol
-from agentclaw.community.core.bot_config_manifest.delivery_mode import TeclawDeliveryMode
+from agentclaw.community.core.apply_engine.delivery_mode import TeclawDeliveryMode
 from agentclaw.community.core.bot_genome.capture import BotStateReader
 from agentclaw.community.core.bot_genome.capture.bot_state import PlatformBotStateReader
 from agentclaw.community.core.bot_genome.promotion import (
@@ -121,7 +121,7 @@ class BotGenomeModule(Module):
         validator: Callable[[], SkillPackageValidator],
         mcp_auth: Callable[[], MCPAuthServiceProtocol],
         mcp_config: Callable[[], MCPConfigServiceProtocol],
-        applies: BotConfigManifestApplyServiceProtocol,
+        applies: ApplyRunServiceProtocol,
     ) -> GenomeRegistryProtocol:
         package_validator = validator()
         return GenomeRegistryService(

@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.core.bot_config_manifest.apply.delivery import MaterialiserPorts
-from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
+from agentclaw.community.core.apply_engine.delivery import MaterialiserPorts
+from agentclaw.community.core.bot_config_manifest.sources.source_resolver import DeclaredSourceResolver
+from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.create_job import (
     DEFAULT_CREATE_DEADLINE_SECONDS,
     BotCreateWithManifestHandler,
@@ -22,20 +22,20 @@ from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_PRE_CONTAINER_TRIGGER,
     BotCreationManifestSeam,
 )
-from agentclaw.community.core.bot_config_manifest.managed_files import (
+from agentclaw.community.core.apply_engine.managed_files import (
     CATEGORY_IDENTITY,
     ManagedFileScope,
     ManagedFilesStore,
 )
-from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
+from agentclaw.community.core.apply_engine.managed_files.ports import (
     PlatformIdentity,
 )
-from agentclaw.community.core.bot_config_manifest.repository.apply_models import (  # noqa: F401
+from agentclaw.community.core.apply_engine.repository.apply_models import (  # noqa: F401
     BotConfigManifestApplyLockModel,
     BotConfigManifestApplyModel,
 )
-from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
-    BotConfigManifestApplyService,
+from agentclaw.community.core.apply_engine.run.service import (
+    ApplyRunService,
 )
 from agentclaw.community.core.repository.implementations.bot.config_manifest_apply import (
     BotConfigManifestApplyLockRepository,
@@ -43,7 +43,7 @@ from agentclaw.community.core.repository.implementations.bot.config_manifest_app
 )
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
-from ..apply._fakes import (
+from tests.community.core.apply_engine._fakes import (
     manifest_compilers,
     FakeActivationService,
     FakeCapabilityReader,
@@ -58,12 +58,12 @@ from ..apply._fakes import (
     no_redeliver,
     teclaw_engine_test,
 )
-from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+from agentclaw.community.core.apply_engine.delivery import (
     TeclawPlatformDelivery,
 )
-from ..managed_files._fakes import FakeObjectStorage
+from tests.community.core.apply_engine.managed_files._fakes import FakeObjectStorage
 from .test_creation_ordering import _Db, _InlineQueue, _IssuedPassport, _RecordedRelationship
-from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
+from tests.community.core.apply_engine._fakes import FakeObjectStore
 
 _ENTITY = "u_owner"
 _BOT = "b_teclaw"
@@ -92,7 +92,7 @@ class _Manifests:
         return self.resolve_capabilities(active_engine=bot.get("active_engine"), bot_type=bot.get("bot_type"))
 
     def resolve_capabilities(self, *, active_engine, bot_type):
-        from agentclaw.community.core.bot_config_manifest.capabilities import resolve_capabilities
+        from agentclaw.community.core.apply_engine.capabilities import resolve_capabilities
 
         return resolve_capabilities(active_engine=active_engine, bot_type=bot_type, is_teclaw=lambda e: e == "teclaw")
 
@@ -145,7 +145,7 @@ def _build(db):
             cli_tool_service=object(),
         )
 
-    applies = BotConfigManifestApplyService(
+    applies = ApplyRunService(
         manifest_service=_Manifests(),
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.core.bot_config_manifest.capabilities import (
+from agentclaw.community.core.apply_engine.capabilities import (
     ManifestCategory,
     ManifestSection,
 )
@@ -20,7 +20,7 @@ from agentclaw.community.core.bot_config_manifest.creation import (
 from agentclaw.community.core.bot_config_manifest.schema import (
     ManifestValidationError,
 )
-from agentclaw.community.core.bot_config_manifest.capabilities import (
+from agentclaw.community.core.apply_engine.capabilities import (
     resolve_capabilities,
 )
 from agentclaw.community.core.bot_config_manifest.schema.validator import (

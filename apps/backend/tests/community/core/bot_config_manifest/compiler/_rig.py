@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
+from agentclaw.community.core.bot_config_manifest.sources.source_resolver import DeclaredSourceResolver
 from agentclaw.community.core.bot_config_manifest.compiler.session import CompileSession
-from tests.community.core.bot_config_manifest.apply._fakes import (
+from tests.community.core.apply_engine._fakes import (
     FakeManifestContent,
     FakeObjectCredentials,
     declared_session,

@@ -14,7 +14,7 @@ with W2's and W11's own pure parsers — the yaml keys and their consumers
 remain defined together.
 
 W8's delivery cluster — the two port bundles, the per-mode strategies and the
-family lookup over them — binds in ``manifest_delivery_module``, for the same
+family lookup over them — binds in ``apply_engine_module``, for the same
 size reason and because it reads as one thing. The compose-side reader stays
 here, with the store it reads through.
 """
@@ -31,7 +31,7 @@ from agentclaw.community.core.repository.protocols.bot.config_manifest_apply imp
     BotConfigManifestApplyRepositoryProtocol,
 )
 
-from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
+from agentclaw.community.core.bot_config_manifest.sources.source_resolver import (
     DeclaredSourceResolver,
 )
 from agentclaw.community.core.bot_config_manifest.credentials.service import (
@@ -41,7 +41,7 @@ from agentclaw.community.core.bot_management.token_vault import TokenVault
 from agentclaw.community.core.repository.protocols.bot.source_credential import (
     SourceCredentialRepositoryProtocol,
 )
-from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
+from agentclaw.community.core.apply_engine.cli_tools.service import (
     CliToolPurger,
     CliToolService,
     CliToolServiceFactory,
@@ -82,12 +82,12 @@ from agentclaw.community.core.bot_config_manifest.credentials.service_protocol i
     SourceCredentialServiceProtocol,
 )
 from agentclaw.community.di import config as cfg
-from agentclaw.community.core.bot_config_manifest.managed_files import (
+from agentclaw.community.core.apply_engine.managed_files import (
     EngineOwnedComposeReader,
     ManagedFilesComposeReader,
     ManagedFilesStore,
 )
-from agentclaw.community.core.bot_config_manifest.delivery_mode import (
+from agentclaw.community.core.apply_engine.delivery_mode import (
     TeclawDeliveryMode,
 )
 from agentclaw.community.core.config_compose.protocols import (
@@ -96,7 +96,7 @@ from agentclaw.community.core.config_compose.protocols import (
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import (
     BotConfigManifestServiceProtocol,
 )
-from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+from agentclaw.community.core.apply_engine.delivery import (
     Redeliver,
 )
 from agentclaw.community.core.bot_startup_script.protocols import (
@@ -110,7 +110,7 @@ from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 #:
 #: The compose seam's half of the mode: one row per mode, and what the row
 #: builds is an object that already knows the answer. The apply seam settles
-#: the same fact through one provider per mode, in ``manifest_delivery_module``
+#: the same fact through one provider per mode, in ``apply_engine_module``
 #: — a single-valued binding has no such shape, because injector has no
 #: conditional provider for one: two providers of one key would collide, and
 #: the last one installed would win. ``PLATFORM`` reads the managed-files
@@ -156,7 +156,7 @@ class ManifestFetchModule(Module):
         consumers stay defined together. This provider is only the one sofa
         read, through config_module's public seam.
         """
-        from agentclaw.community.core.bot_config_manifest.delivery_mode import (
+        from agentclaw.community.core.apply_engine.delivery_mode import (
             teclaw_delivery_mode_from_config,
         )
         from agentclaw.community.core.content_store.settings import (
@@ -500,10 +500,10 @@ class ManifestFetchModule(Module):
         reason the resource factory above records: it reaches the device
         dispatcher graph at import time.
         """
-        from agentclaw.community.core.bot_config_manifest.cli_tools.store import (
+        from agentclaw.community.core.apply_engine.cli_tools.store import (
             CliToolStore,
         )
-        from agentclaw.community.core.bot_config_manifest.cli_tools.teclaw_port import (
+        from agentclaw.community.core.apply_engine.cli_tools.teclaw_port import (
             TeclawCliToolPort,
         )
         from agentclaw.community.core.repository.protocols.bot.cli_tool import (
@@ -523,7 +523,7 @@ class ManifestFetchModule(Module):
                 # graph, and asking for it here would close the same import
                 # cycle the function-level imports below exist to avoid.
                 return TeclawCliToolPort(redeliver=injector.get(Redeliver))
-            from agentclaw.community.core.bot_config_manifest.cli_tools.arca_port import (
+            from agentclaw.community.core.apply_engine.cli_tools.arca_port import (
                 ArcaCliToolPort,
             )
             from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -559,7 +559,7 @@ class ManifestFetchModule(Module):
         Not the service: a creation that ended without a bot has no container,
         so this drops rows and objects and reaches no engine at all.
         """
-        from agentclaw.community.core.bot_config_manifest.cli_tools.store import (
+        from agentclaw.community.core.apply_engine.cli_tools.store import (
             CliToolStore,
         )
         from agentclaw.community.core.storage.path import get_teclaw_bolt_data_prefix
@@ -607,7 +607,7 @@ class ManifestFetchModule(Module):
         service is looked up lazily for the reason every provider in this
         module is lazy — it reaches the graph that builds this one.
         """
-        from agentclaw.community.core.bot_config_manifest.cli_tools.bot_service import (
+        from agentclaw.community.core.apply_engine.cli_tools.bot_service import (
             BotCliToolService,
             BotLookupPort,
         )

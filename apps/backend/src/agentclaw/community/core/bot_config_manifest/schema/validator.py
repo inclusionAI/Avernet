@@ -23,7 +23,7 @@ from typing import Any
 
 import yaml
 
-from agentclaw.community.core.bot_config_manifest.capabilities import (
+from agentclaw.community.core.apply_engine.capabilities import (
     SUPPORTED_SCHEMA_VERSIONS,
     ManifestCapabilities,
     ManifestCategory,
@@ -120,7 +120,7 @@ def validate_document(
     Args:
         document: The document exactly as submitted.
         capabilities: The verdicts from
-            :func:`~agentclaw.community.core.bot_config_manifest.capabilities.resolve_capabilities`.
+            :func:`~agentclaw.community.core.apply_engine.capabilities.resolve_capabilities`.
             Passed in rather than resolved here so the write path and W13's
             pre-creation preflight are provably answering from the same object.
 

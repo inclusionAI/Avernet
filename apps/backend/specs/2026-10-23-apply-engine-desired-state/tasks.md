@@ -32,14 +32,15 @@
 
 ## Group 2 — Move the engine, split the Manifest into a compiler
 
-### Task 3: Move the engine-side modules
+### Task 3: Move the engine-side modules `[x]`
 - **Goal:** Relocate everything that runs after a state exists; imports updated, no behaviour change.
 - **Files:** `git mv` per plan § Key Files: constructs/capabilities, delivery mode, context, order, outcomes, registry, orchestrator, materialisers, delivery, delegates, narrow ports, managed_files, redeliver, carry_forward, triggers, apply_task, run/{service,report_codec,lock_reaper,termination}, repository/apply_models, cli_tools; repository protocols/impls; `api/apply_run_service.py`; DI modules; HTTP imports; `creation.py`, `create_job.py`, agentswarm host; test moves and `_fakes.py` split.
 - **Done when:**
-  - [ ] `BotConfigManifestApplyService` → `ApplyRunService`, protocol → `ApplyRunServiceProtocol`; every caller and test updated; no re-export shim left in `bot_config_manifest`.
-  - [ ] `bot_config_manifest/README.md` boundary lists only what remains; `apply_engine/README.md` lists the moved exports; the boundary, narrow-ports, service-API conformance and no-module-level-instance tests pass.
-  - [ ] All moved tests pass at their new paths with import changes only; the pass count equals Task 1's.
+  - [x] `BotConfigManifestApplyService` → `ApplyRunService`, protocol → `ApplyRunServiceProtocol`; every caller and test updated; no re-export shim left in `bot_config_manifest`.
+  - [x] `bot_config_manifest/README.md` boundary lists only what remains; `apply_engine/README.md` lists the moved exports; the boundary, narrow-ports, service-API conformance and no-module-level-instance tests pass.
+  - [x] All moved tests pass at their new paths with import changes only; the pass count equals Task 1's.
 - **Depends on:** Task 2
+- **Notes:** landed after Tasks 4–7, as planned. Deviations from the plan's file list: `capabilities.py` moved whole and stays beside `constructs.py` rather than merging into it; `support_matrix.py` (its lazy import), `fetch/unpack.py` (the cli_tools service unpacks; the archive caps now live on `apply_engine/unpack.py` and `fetch/limits` re-exports them) and the identity-file vocabulary (`apply_engine/identity_types.py`, re-imported by `schema/entries`) moved too, because the engine may not import the Manifest package. The protocol module is `run/service_protocol.py` (the API-layer gate accepts re-exports only from a `*_protocol` module). Two narrow Protocols keep the engine free of Manifest imports: `CapabilityResolver` (what the run service asks of the Manifest service) and `ManifestPresence` (the managed-files reader's one question). The creation triggers moved to `apply_engine/triggers.py`. Tests: one shared `_fakes.py` under `tests/community/core/apply_engine/` (the Manifest compiler and sources suites import it) rather than the two-way split the plan sketched; `apply_engine` is listed in the singlebox E2E exemption beside `bot_config_manifest`, whose flows cover it.
 
 ### Task 4: The Manifest compiler `[x]`
 - **Goal:** One place that reads a document's grammar, fetches, files bytes and emits a `DesiredState`.

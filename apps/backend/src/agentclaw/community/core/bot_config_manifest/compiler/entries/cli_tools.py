@@ -20,11 +20,11 @@ from agentclaw.community.core.apply_engine.desired_state import (
     StoredContent,
     UnpackKind,
 )
-from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
+from agentclaw.community.core.bot_config_manifest.sources.source_resolver import (
     DeclaredSourceResolver,
     declared_protocol,
 )
-from agentclaw.community.core.bot_config_manifest.cli_tools.declarations import declared_address
+from agentclaw.community.core.apply_engine.cli_tools.declarations import declared_address
 from agentclaw.community.core.bot_config_manifest.compiler.entries._fetch import (
     EntryFetchError,
     fetch,
@@ -32,7 +32,7 @@ from agentclaw.community.core.bot_config_manifest.compiler.entries._fetch import
 )
 from agentclaw.community.core.bot_config_manifest.compiler.session import CompileSession, digest_of
 from agentclaw.community.core.bot_config_manifest.fetch.limits import FetchCategory
-from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKind
+from agentclaw.community.core.apply_engine.support_matrix import SourceKind
 from agentclaw.community.core.content_store import ContentStoreProtocol
 
 __all__ = ["compile_cli_tools"]

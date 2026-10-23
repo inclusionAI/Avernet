@@ -42,7 +42,7 @@ import asyncio
 from dataclasses import dataclass, field
 
 from agentclaw.community.log import get_logger
-from agentclaw.community.core.bot_config_manifest.cli_tools.store import (
+from agentclaw.community.core.apply_engine.cli_tools.store import (
     BOT_DATA_STORE,
     CliToolScope,
     CliToolStore,

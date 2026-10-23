@@ -7,7 +7,7 @@ import pytest
 from agentclaw.community.core.apply_engine.desired_state import LocalSkillPackage, SkillOrigin
 from agentclaw.community.core.bot_config_manifest.compiler.entries.skills import compile_skills
 from agentclaw.community.core.content_store import decode_tree_bytes
-from tests.community.core.bot_config_manifest.apply._fakes import build_skill_zip, oss_source, real_validator
+from tests.community.core.apply_engine._fakes import build_skill_zip, oss_source, real_validator
 from tests.community.core.bot_config_manifest.compiler._rig import rig
 
 
