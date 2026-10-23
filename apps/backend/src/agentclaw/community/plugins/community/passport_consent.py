@@ -33,10 +33,16 @@ from typing import Any
 from uuid import uuid4
 
 from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.impl_registry import (
+    Flavor,
+    Mode,
+    plugin_impl,
+)
 from agentclaw.community.plugin_api.passport import (
     CliItem,
     PassportError,
     PassportManualConsentControl,
+    extract_cli_items,
     validate_passport_target_env,
 )
 from agentclaw.community.plugins.community.passport import (
@@ -102,12 +108,25 @@ class _Application:
         return facts
 
 
-class ManualConsentPassportPlugin(SelfIssuedPassportPlugin, PassportManualConsentControl):
+@plugin_impl(
+    mode=Mode.LOCAL,
+    flavor=Flavor.FAKE,
+    rationale="simulator-only stand-in for tcauthmng's interactive gate",
+)
+class ManualConsentPassportPlugin(PassportManualConsentControl):
     """Community passport that requires a human decision for every apply.
 
     Only ``CommunityIdentityModule`` names this class, and only when
     ``user_config.community_identity.passport_mode`` is ``manual_consent``;
     every other composition holds :class:`NullPassportManualConsentControl`.
+    Rule 20 pairs this class against
+    :class:`NullPassportManualConsentControl` (the Mode.PROD answer: no
+    consent surface anywhere the manual mode never binds). The single
+    Plugin-family direct base is the control Protocol; every
+    ``PassportPlugin`` leg this class does not own delegates, unchanged, to a
+    composed community self-issued instance
+    (:class:`SelfIssuedPassportPlugin`) rather than a second nominal
+    base — the registry's protocol detection allows exactly one.
     """
 
     available = True
@@ -117,6 +136,35 @@ class ManualConsentPassportPlugin(SelfIssuedPassportPlugin, PassportManualConsen
         self._lock = threading.Lock()
         self._applications: dict[str, _Application] = {}
         self._application_ids_by_key: dict[tuple[str, str, str], str] = {}
+        self._issued_base = SelfIssuedPassportPlugin()
+
+    def __getattr__(self, name: str):
+        # PassportPlugin legs this class does not own (update / freeze /
+        # destroy / reissue / online / ... — the stateless community
+        # surface) answer through the composed self-issued base. Only
+        # missing attributes reach here, so the owned apply/query legs
+        # above keep their own dispatch; private lookups stay errors.
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return getattr(self._issued_base, name)
+
+    def query_passport_clis(
+        self,
+        bot_id: str,
+        owner_workno: str,
+        *,
+        target_env: str | None = None,
+        entity_id: str | None = None,
+    ) -> list[CliItem]:
+        # Compose cli grants off THIS class's passport facts, not the
+        # base's unconditional ISSUED shape, so post-approval answers
+        # mirror SelfIssued exactly while pending/rejected answer empty.
+        passport_facts = self.query_agent_passport(
+            bot_id, owner_workno, target_env=target_env, entity_id=entity_id,
+        )
+        if not passport_facts:
+            return []
+        return extract_cli_items(passport_facts)
 
     # ── PassportPlugin: the apply side ───────────────────────────────────────
 
@@ -195,7 +243,7 @@ class ManualConsentPassportPlugin(SelfIssuedPassportPlugin, PassportManualConsen
     ) -> dict[str, Any] | None:
         validate_passport_target_env(target_env)
         self._record_first_bootstrap(bot_id=bot_id, owner_workno=owner_workno)
-        return super().apply_first_agent_passport(
+        return self._issued_base.apply_first_agent_passport(
             bot_id=bot_id,
             owner_workno=owner_workno,
             mcp_codes=mcp_codes,
@@ -398,6 +446,11 @@ class ManualConsentPassportPlugin(SelfIssuedPassportPlugin, PassportManualConsen
             return self._applications[application_id]
 
 
+@plugin_impl(
+    mode=Mode.PROD,
+    rationale="prod/pre compositions keep the consent surface off; "
+              "manual consent is a simulator concern",
+)
 class NullPassportManualConsentControl(PassportManualConsentControl):
     """The mode-off control bound wherever manual consent is off (D8).
 
