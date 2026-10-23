@@ -83,6 +83,9 @@
     "cache": {
       "redis_url": "${REDIS_URL:-}"
     },
+    "community_identity": {
+      "passport_mode": "self_issued"
+    },
     "cors": {
       "allow_origin_regex": [],
       "allow_origins": [

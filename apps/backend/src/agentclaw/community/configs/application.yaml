@@ -264,3 +264,25 @@ user_config:
     fetch_transport_allowlist: []
     content_store_dir: "./data/manifest_content"
     teclaw_platform_managed: false
+
+  # Community identity (passport) mode — the switch that selects which
+  # passport plugin the community columns run. Flip passport_mode to
+  # manual_consent to exercise the full bot create → human confirm →
+  # creation-complete lifecycle in the simulator stack: applyAgentPassport
+  # then mirrors prod tcauthmng — it leaves a PENDING application with the
+  # simulator's mock-services AgentPass service and returns that service's
+  # consent-page URL, and only a human click on that page flips the status.
+  # The default self_issued keeps the existing apply-answers-ISSUED
+  # behavior, identical to before the knob existed.
+  # Accepted values: self_issued | manual_consent (case-insensitive,
+  # whitespace-trimmed; anything else fails the boot). manual_consent
+  # additionally requires consent_base_url (trimmed, must start with
+  # http:// or https://, no trailing slash) — the base URL of the
+  # mock-services AgentPass service (the external simulator service that
+  # owns the passport application registry, the consent page, and the
+  # approve/reject decisions; the backend binds only its HTTP client).
+  # No hostname is hardcoded in code. Read by community_identity_from_block
+  # in di/community_identity_config.py, invoked when CommunityIdentityModule
+  # is assembled.
+  community_identity:
+    passport_mode: self_issued

@@ -72,6 +72,8 @@ import json
 import ssl
 import threading
 import uuid
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any
 
 import yaml
@@ -90,6 +92,7 @@ from agentclaw.community.core.bot_config_manifest.schema import (
 )
 from agentclaw.community.core.bot_config_manifest.create_job import (
     AUTHORIZATION_WINDOW_ELAPSED, BOT_COULD_NOT_BE_PROVISIONED,
+    DEFAULT_CREATE_DEADLINE_SECONDS,
 )
 from agentclaw.community.core.bot_management.create_context import (
     BotCreateContext, BotCreateDeploymentMode, BotCreateSpec as HostCreateSpec,
@@ -234,6 +237,55 @@ class ChatTimeoutError(RuntimeError):
     ``cancel_event`` (slice lost from the asyncio side) unwinds the same
     way, within one receive slice.
     """
+
+
+@dataclass(frozen=True)
+class BotAuthorizationDescriptor:
+    """The pending authorization's observable facts.
+
+    Sourced only from the durable creation-job payload — never a second
+    copy of Passport state and never a live Passport re-query:
+    ``applyAgentPassport`` returns the consent URLs once, at application
+    time, and the job payload is the only durable home they have.
+    The with-manifest HTTP poll serves the same payload's URLs; this
+    descriptor rides the swarm's own status result so run-surface
+    consumers can route a human to the official consent page. Approval
+    itself happens only on that page — the swarm never approves,
+    synthesizes, or stores an approval.
+
+    ``deadline`` is the authorization window's end — the payload's
+    ``submitted_at`` plus its frozen ``window_seconds`` — as an ISO-8601
+    string, the same spelling the payload itself carries. It is empty
+    only for a payload too old to name its submission time, in which
+    case the queue's own deadline still bounds the creation.
+    """
+    state: str
+    iframe_url: str
+    redirect_url: str
+    deadline: str
+
+
+class BotStatusResult(str):
+    """``bot_status``'s answer: the ``BotState`` string, optionally
+    carrying the pending-authorization descriptor.
+
+    A plain ``str`` for every existing consumer — equality with
+    ``BotState`` values, string matchers, persistence — because the
+    ``BotPlatform.bot_status -> str`` SPI contract is unchanged and this
+    change must stay additive. The descriptor rides as an attribute the
+    run-surface composition reads (``getattr(status, "authorization",
+    None)``): present only on ``AWAITING_AUTHORIZATION``, absent on every
+    other state, so a consumer never has to test the type to know that a
+    state without the gate carries no descriptor.
+    """
+
+    __slots__ = ("authorization",)
+
+    def __new__(cls, state: str,
+                authorization: BotAuthorizationDescriptor | None = None):
+        result = super().__new__(cls, state)
+        result.authorization = authorization
+        return result
 
 
 def _idem_digest(idempotency_key: str, length: int) -> str:
@@ -421,8 +473,17 @@ class AvernetBotPlatform(BotPlatform):
             # unknown bot id — neither is a terminal verdict, so provisioning.
             return BotState.PROVISIONING.value
         if bot is None and job.status not in TERMINAL_STATUSES:
-            # Live job, nothing created yet: the authorization window and
-            # every pre-container state read the same from here.
+            # Live job, nothing created yet: first ask whether the creation
+            # is parked at the human gate — an application
+            # actually PENDING inside its authorization window is the one
+            # in-flight state a human can move, and reporting it as generic
+            # PROVISIONING hid the only actionable fact (the consent URL)
+            # for the whole 600s window.
+            awaiting = self._pending_authorization(job=job, bot_id=bot_id, owner=owner)
+            if awaiting is not None:
+                return awaiting
+            # Authorization issued (or not answerable): the authorization
+            # window and every pre-container state read the same from here.
             return BotState.PROVISIONING.value
         if bot is None:
             # Terminal job, no bot: declined, never answered, or the platform
@@ -488,6 +549,98 @@ class AvernetBotPlatform(BotPlatform):
         # instead of PROVISIONING, which would only burn the poller's
         # whole deadline into a generic timeout.
         return BotState.CREATE_FAILED.value
+
+    # ── the human gate ────────────────────────────────────────────────
+
+    def _pending_authorization(self, *, job, bot_id: BotId,
+                               owner: str) -> BotStatusResult | None:
+        """The awaiting-human verdict for a live, bot-less creation.
+
+        ``BotStatusResult(AWAITING_AUTHORIZATION)`` scoped by the window
+        and carrying the D1 descriptor, or ``None`` — which keeps the
+        pre-change PROVISIONING answer — when this creation is not
+        actually parked at the gate:
+
+        - application not PENDING: the gate keys off the application's
+          own status (``query_auth_status``), never off the creation
+          surface or the mere presence of consent URLs in the payload,
+          so an ISSUED creation — issued inline by the auto-issue
+          fast path or by a human who already approved — proceeds
+          through the normal provisioning answer even though its payload
+          carries URLs;
+        - a Passport that cannot answer is a wait, never a verdict —
+          the same fail-soft rule the creation job's own status poll
+          follows;
+        - PENDING past the window's end: the job retires itself within
+          one poll delay (queue deadline as the backstop) and the
+          terminal branch below then answers from the job row; until
+          then the in-progress answer stands rather than front-running
+          the job's own discard.
+        """
+        if self._application_status(bot_id, owner) != "PENDING":
+            return None
+        descriptor = self._awaiting_authorization_descriptor(job)
+        if descriptor is None:
+            return None
+        return BotStatusResult(
+            BotState.AWAITING_AUTHORIZATION.value, descriptor)
+
+    def _application_status(self, bot_id: BotId, owner: str) -> str | None:
+        """The Passport application's own status, fail-soft to ``None``.
+
+        The creation job polls the same provider (``query_auth_status``,
+        5s cadence); this read borrows its answers rather than any
+        Passport state of our own, and any failure — outage, provider
+        without the method, malformed answer — reads as "no answer yet".
+        """
+        try:
+            answer = self._passport.query_auth_status(
+                bot_id=bot_id, owner_workno=owner)
+        except Exception:  # noqa: BLE001 — a wait, not a verdict
+            return None
+        if not answer:
+            return None
+        return str(answer.get("status") or "")
+
+    def _awaiting_authorization_descriptor(
+            self, job) -> BotAuthorizationDescriptor | None:
+        """The authorization facts from the job payload, in the window.
+
+        ``None`` once the window (``submitted_at`` + the frozen
+        ``window_seconds``, exactly the horizons the creation job itself
+        enforces) has elapsed. A payload naming no readable submission
+        time counts as fresh — the job's own expiry rule — and serves an
+        empty deadline rather than inventing a clock.
+        """
+        payload = getattr(job, "payload", None) or {}
+        submitted = str(payload.get("submitted_at") or "")
+        try:
+            window = int(payload.get("window_seconds")
+                         or DEFAULT_CREATE_DEADLINE_SECONDS)
+        except (TypeError, ValueError):
+            window = DEFAULT_CREATE_DEADLINE_SECONDS
+        started = None
+        if submitted:
+            try:
+                started = datetime.fromisoformat(submitted)
+            except ValueError:
+                logger.warning(
+                    "[agentswarm][host-platform] unreadable submitted_at=%r "
+                    "in creation payload; leaving the window to the job",
+                    submitted,
+                )
+        if started is not None and (
+                datetime.now() - started > timedelta(seconds=window)):
+            return None
+        deadline = (
+            (started + timedelta(seconds=window)).isoformat()
+            if started is not None else "")
+        return BotAuthorizationDescriptor(
+            state=BotState.AWAITING_AUTHORIZATION.value,
+            iframe_url=str(payload.get("iframe_url") or ""),
+            redirect_url=str(payload.get("redirect_url") or ""),
+            deadline=deadline,
+        )
 
     # ── delete ────────────────────────────────────────────────────────────
 

@@ -105,6 +105,9 @@
     "codefuse_token": {
       "master_key_secret": "other_manual_agentclaw_codefuse_token_key"
     },
+    "community_identity": {
+      "passport_mode": "self_issued"
+    },
     "cors": {
       "allow_origin_regex": [],
       "allow_origins": [
