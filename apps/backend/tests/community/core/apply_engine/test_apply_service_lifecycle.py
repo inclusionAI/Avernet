@@ -308,8 +308,6 @@ def test_dry_run_writes_no_row_and_mints_no_id(world):
     Counted rather than trusted: the table is read before and after, so a future
     change that started recording plans fails here.
     """
-    import asyncio
-
     service, applies, _locks, scripts, _manifests = world
 
     before = applies.latest(env="dev", entity_id=_ENTITY, bot_id=_BOT)
@@ -640,8 +638,6 @@ def test_a_dry_run_closes_its_session(world, monkeypatch):
     """The dry run builds a session too (it may fetch through it), and has
     no background thread — its own ``finally`` is the only place the close
     can live."""
-    import asyncio
-
     service, _applies, _locks, _scripts, _manifests = world
     closed = _counting_session_closes(monkeypatch)
     before = FakeGitClient.constructed
