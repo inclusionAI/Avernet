@@ -163,10 +163,12 @@ class CliToolsMaterialiser(Materialiser):
     """Converges this bot's installed CLI tools toward the declaration.
 
     ``identity`` is the entry's ``name``; ``Intent.value`` is a
-    ``CliToolDecl``, the service's own declaration type. Unlike the other
-    fetching categories, ``resolve`` performs **no fetch** — the service owns
-    fetching for both of its callers — so a source that is down produces a
-    ``FAILED`` row out of ``write`` rather than aborting the category::
+    ``CliToolDecl``, the service's own declaration type. ``resolve`` performs
+    **no fetch** and reads nothing: the compiler already acquired the tool's
+    bytes into the content store (a source that is down fails the entry at
+    compile time), and the service reads them back by digest in ``write``,
+    so what can still fail there is the install itself — verification,
+    placement, the record — one ``FAILED`` row per tool::
 
         resolve -> ResolveResult(intents=(Intent(
                        identity="mycli",

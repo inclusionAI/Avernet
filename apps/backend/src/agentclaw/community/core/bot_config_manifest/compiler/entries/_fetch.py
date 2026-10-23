@@ -23,7 +23,7 @@ from agentclaw.community.core.bot_config_manifest.sources.entry_delivery import 
 from agentclaw.community.core.bot_config_manifest.sources.source_resolver import DeclaredSourceResolver
 from agentclaw.community.core.bot_config_manifest.compiler.session import CompileSession, digest_of
 from agentclaw.community.core.content_store import ContentStoreProtocol
-from agentclaw.community.core.content_store.errors import ContentStoreError
+from agentclaw.community.core.content_store.errors import ContentStoreError, ContentStoreFault
 
 __all__ = ["EntryFetchError", "fetch", "file_produced", "file_single", "file_tree"]
 
@@ -110,16 +110,16 @@ async def file_produced(
 
 
 def _store_produced(content: ContentStoreProtocol, data: bytes, **kwargs: Any) -> None:
-    """File produced bytes; a store *refusal* is this entry's failure, never the whole compile's.
+    """File produced bytes; a store error is this entry's failure, never the whole compile's.
 
-    ``ContentStoreError`` is the store's 4xx family (quota, scope, shape);
-    its faults (corruption, I/O) are deliberately not caught — they are the
-    platform's problem, and the run service records them as a failed apply.
+    The same policy the git road's ``GitDelivery.file`` applies to its
+    receipt: refusal or fault, the entry fails with the store's words and the
+    other entries still compile.
     """
     try:
         content.store_produced(data, **kwargs)
-    except ContentStoreError as exc:
-        raise EntryFetchError(f"the platform could not file the entry's bytes: {exc}") from exc
+    except (ContentStoreError, ContentStoreFault) as exc:
+        raise EntryFetchError(f"the bytes could not be filed with the platform's store: {exc}") from exc
 
 
 async def file_tree(
