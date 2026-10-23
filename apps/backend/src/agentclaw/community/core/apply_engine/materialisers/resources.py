@@ -211,6 +211,10 @@ class ResourcesMaterialiser(Materialiser):
     async def plan(self, ctx: ApplyContext, intents: Sequence[Intent]) -> CategoryPlan:
         """Classify against one listing of the root; what the listing has and the declaration lacks is ``removals``.
 
+        A listing that cannot be made raises ``ResourcesRootNotListed``: the
+        category aborts untouched rather than plan against a root it cannot
+        see.
+
         Never ``unchanged`` — every apply rewrites every member, so
         classifying anything as unchanged would be a claim the write stage
         does not honour. The listing is consulted for the labels and for the
@@ -370,4 +374,10 @@ def _coords(ctx: ApplyContext) -> tuple[str, str, str]:
     return "staff", ctx.owner_id, engine
 
 
-__all__ = ["ResourcesMaterialiser"]
+__all__ = [
+    "ROOT_NOT_CLEARED_REASON",
+    "ROOT_NOT_LISTED_REASON",
+    "ResourcesMaterialiser",
+    "ResourcesRootNotCleared",
+    "ResourcesRootNotListed",
+]

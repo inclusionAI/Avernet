@@ -641,8 +641,9 @@ class ResourceFileService(ResourceFilePort):
         Level by level, like the directory download — no engine's recursive
         flag is trusted — but with none of its curation: dotfiles and system
         names count, because everything under the root is the apply engine's
-        to replace. An entry that vanishes mid-walk is skipped (a live
-        workspace may change under the walk).
+        to replace. Nothing is skipped: the listing is what the apply engine
+        clears and rewrites the root on the strength of, so it is complete or
+        it raises.
 
         A root that does not list is confirmed absent from its parent: a bot
         that has had its identity applied has a workspace that lists, so a
@@ -667,7 +668,7 @@ class ResourceFileService(ResourceFilePort):
             named = self._named_in(parent, RESOURCES_ROOT_DIR)
             if named is None:
                 return ()
-            if not bool(named.get("is_dir", False)):
+            if named.get("is_dir") is False:  # an engine that omits the key has not said it is a file
                 raise RootListingFailed(f"the resources root of bot {bot_id} is a file, not a directory")
             raise RootListingFailed(f"the resources root of bot {bot_id} is present but could not be listed")
         files: list[str] = []
