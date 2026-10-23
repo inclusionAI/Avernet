@@ -210,6 +210,8 @@ async fn conformance_live_group_admission_uses_defaults_and_blocks_drain_bypass(
     policy.defaults.max_queued = 1;
     flow.replace_delivery_policy(admin(), 0, policy.clone()).await.unwrap();
     let command = WebSendCommand {
+        caller_ingress: None,
+        speaking_lease: None,
         caller: CallerContext::Human(HumanActor { actor_id: "human_1".into(), staff_no: "1".into() }),
         group_id: "group-1".into(), session_id: Some("group-1:live".into()), from_actor_id: "human_1".into(),
         from_name: None, message: "live defaults".into(), mentions: vec!["bot-driver".into()], attachments: None,
@@ -242,6 +244,9 @@ async fn conformance_live_group_admission_uses_defaults_and_blocks_drain_bypass(
     let send = service.snapshot(None).await.unwrap().into_iter()
         .find(|row| row.state.kind == bcs_domain::DeliveryType::Send).unwrap();
     service.transition(bcs_service_api::DeliveryTransitionCommand {
+        caller_dispatch_commit: None,
+        caller_cancel: None,
+        caller_terminal: None,
         delivery_id: send.delivery_id, expected_state_version: send.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested,
         now_ms: 100, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
@@ -267,6 +272,8 @@ async fn manual_resolution_checks_human_scope_ownership_and_version() {
         .with_session_management(Arc::new(StaticSessionManagement::new(test_session("group-1:resolve", "group-1", group.participants))));
     let human = CallerContext::Human(HumanActor { actor_id: "human_1".into(), staff_no: "1".into() });
     let admitted = flow.handle_web_send(WebSendCommand {
+        caller_ingress: None,
+        speaking_lease: None,
         caller: human.clone(), group_id: "group-1".into(), session_id: Some("group-1:resolve".into()), from_actor_id: "human_1".into(),
         from_name: None, message: "resolve test".into(), mentions: vec!["bot-driver".into()], attachments: None,
         thinking: None, idempotency_key: Some("resolve".into()), source_im_message_id: None, channel_sender_identity: None,
@@ -274,6 +281,9 @@ async fn manual_resolution_checks_human_scope_ownership_and_version() {
     }).await.unwrap().queue_admission.unwrap();
     let row = service.snapshot(None).await.unwrap().into_iter().find(|r| r.state.kind == bcs_domain::DeliveryType::Send).unwrap();
     let transition = |row: &bcs_domain::message_delivery::PersistedMessageDelivery, event| DeliveryTransitionCommand {
+        caller_dispatch_commit: None,
+        caller_cancel: None,
+        caller_terminal: None,
         delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version, event,
         now_ms: chrono::Utc::now().timestamp_millis(), request_id: None, actor_id: None, reply: None,
         transport_context_json: None, deadline_at_ms: None,
@@ -343,6 +353,8 @@ async fn conformance_queued_group_preparation_and_ingress() {
     );
     Arc::get_mut(&mut flow).unwrap().delivery_queue_ttl_ms = Some(60000);
     let command = WebSendCommand {
+        caller_ingress: None,
+        speaking_lease: None,
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_1".into(),
             staff_no: "1".into(),
@@ -471,6 +483,9 @@ async fn conformance_queued_group_preparation_and_ingress() {
     );
     let started = service
         .transition(DeliveryTransitionCommand {
+            caller_dispatch_commit: None,
+            caller_cancel: None,
+            caller_terminal: None,
             delivery_id: row.delivery_id.clone(),
             expected_state_version: row.state.state_version,
             event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend,
@@ -588,6 +603,9 @@ async fn conformance_queued_group_preparation_and_ingress() {
     let mut reply_frame = preparer.prepare(reply_delivery).await.unwrap();
     let active_reply = service
         .transition(DeliveryTransitionCommand {
+            caller_dispatch_commit: None,
+            caller_cancel: None,
+            caller_terminal: None,
             delivery_id: reply_delivery.delivery_id.clone(),
             expected_state_version: reply_delivery.state.state_version,
             event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend,

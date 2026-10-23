@@ -209,11 +209,11 @@ async fn queued_im_reaction_targets_source_message_and_does_not_replay_on_restar
     assert_eq!(messages[0].raw_payload["state"], "queued");
     assert_eq!(messages[0].raw_payload["message_id"], "im-queue");
     let failed_row = admitted.deliveries.iter().find(|row| row.target_bot_id == "bot-observer").unwrap();
-    let running = service.transition(DeliveryTransitionCommand { delivery_id: failed_row.delivery_id.clone(), expected_state_version: failed_row.state.state_version,
+    let running = service.transition(DeliveryTransitionCommand { caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None, delivery_id: failed_row.delivery_id.clone(), expected_state_version: failed_row.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend,
         now_ms: now, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
     }).await.unwrap();
-    let failed = service.transition(DeliveryTransitionCommand { delivery_id: running.delivery_id.clone(), expected_state_version: running.state.state_version,
+    let failed = service.transition(DeliveryTransitionCommand { caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None, delivery_id: running.delivery_id.clone(), expected_state_version: running.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::Failed,
         now_ms: now, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
     }).await.unwrap();
@@ -227,11 +227,11 @@ async fn queued_im_reaction_targets_source_message_and_does_not_replay_on_restar
         message: NewMessage { visibility_domain: MessageVisibilityDomain::Chat, audience: None, group_id: "group-1".into(), session_id: "group-1:im-original".into(), sender_id: "human_1".into(), sender_type: SenderType::Human,
             message_type: "chat".into(), content: json!({"text":"reject","source_im_message_id":"im-rejected-source"}), client_msg_id: None, owner_bot_id: None, created_at: now as u64, run_id: String::new() },
     }).await.unwrap().deliveries.remove(0);
-    let rejected = service.transition(DeliveryTransitionCommand { delivery_id: rejected.delivery_id.clone(), expected_state_version: rejected.state.state_version,
+    let rejected = service.transition(DeliveryTransitionCommand { caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None, delivery_id: rejected.delivery_id.clone(), expected_state_version: rejected.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend,
         now_ms: now, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
     }).await.unwrap();
-    service.transition(DeliveryTransitionCommand { delivery_id: rejected.delivery_id.clone(), expected_state_version: rejected.state.state_version,
+    service.transition(DeliveryTransitionCommand { caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None, delivery_id: rejected.delivery_id.clone(), expected_state_version: rejected.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::TransportRejected,
         now_ms: now, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
     }).await.unwrap();
@@ -242,7 +242,7 @@ async fn queued_im_reaction_targets_source_message_and_does_not_replay_on_restar
     assert_eq!(rejected_hint[1].source_im_message_id.as_deref(), Some("im-rejected-source"));
     assert!(rejected_hint[1].text.as_ref().unwrap().contains("bot-observer：处理失败"));
     let row = admitted.deliveries.iter().find(|row| row.target_bot_id == "bot-driver").unwrap();
-    service.transition(DeliveryTransitionCommand { delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
+    service.transition(DeliveryTransitionCommand { caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None, delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested,
         now_ms: now, request_id: None, actor_id: Some("human_1".into()), reply: None, transport_context_json: None, deadline_at_ms: None,
     }).await.unwrap();
@@ -293,7 +293,7 @@ async fn expired_im_reaction_waits_until_no_target_remains_queued() {
     assert_eq!(queued.source_im_message_id.as_deref(), Some("im-expiring-source"));
     assert_eq!(queued.raw_payload["state"], "queued");
     let row = admitted.deliveries.iter().find(|row| row.target_bot_id == "bot-driver").unwrap();
-    service.transition(DeliveryTransitionCommand {
+    service.transition(DeliveryTransitionCommand { caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None,
         delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::QueueExpired,
         now_ms: now + 1_000, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
@@ -301,7 +301,7 @@ async fn expired_im_reaction_waits_until_no_target_remains_queued() {
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert_eq!(channel.outbound().await.len(), 1, "a queued target keeps the actionable queue reaction visible");
     let row = admitted.deliveries.iter().find(|row| row.target_bot_id == "bot-observer").unwrap();
-    service.transition(DeliveryTransitionCommand {
+    service.transition(DeliveryTransitionCommand { caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None,
         delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::QueueExpired,
         now_ms: now + 1_000, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
@@ -2083,6 +2083,7 @@ async fn task_bot_final_event_is_forwarded_to_driver_and_task_replied() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .unwrap();
@@ -2161,6 +2162,7 @@ async fn duplicate_terminal_task_bot_event_is_ignored_after_reply() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .unwrap();
@@ -2235,6 +2237,7 @@ async fn terminal_task_bot_event_from_non_target_bot_is_ignored() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .unwrap();
@@ -2287,6 +2290,7 @@ async fn task_run_alias_requires_target_bot_and_dispatched_task() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .unwrap();
@@ -2375,6 +2379,7 @@ async fn task_ledger_notifications_are_sent_to_driver_after_dispatch_and_reply()
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work", "bcs_session_id": "group-1:abcdef12"}),
+            caller_delegation: None,
         })
         .await
         .unwrap();
@@ -2438,6 +2443,7 @@ async fn dispatch_transport_error_remains_pending_until_confirmed() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
     else {
@@ -2501,6 +2507,7 @@ async fn non_terminal_bot_event_does_not_mark_replied() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .unwrap();
@@ -2560,7 +2567,8 @@ async fn task_dispatch_uses_manager_session_for_worker_context() {
             payload: json!({
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
-            }),
+        }),
+        caller_delegation: None,
         })
         .await
         .unwrap();
@@ -2610,6 +2618,7 @@ async fn manager_worker_task_dispatch_authorizes_manager_role_not_driver_bot_fie
             target_bot_id: "bot-worker".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .expect("manager role should be allowed to dispatch tasks");
@@ -2651,7 +2660,8 @@ async fn manager_worker_unknown_target_emits_public_group_notice() {
             payload: json!({
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
-            }),
+        }),
+        caller_delegation: None,
         })
         .await
         .expect_err("unknown worker must reject task dispatch");
@@ -3241,6 +3251,7 @@ async fn task_dispatch_rejects_muted_target_without_delivery() {
             target_bot_id: "bot-worker".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .expect_err("muted target should not receive task dispatch");
@@ -3294,7 +3305,8 @@ async fn task_dispatch_rejects_target_muted_in_session_participants() {
             payload: json!({
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
-            }),
+        }),
+        caller_delegation: None,
         })
         .await
         .expect_err("session-muted target should not receive task dispatch");
@@ -3346,6 +3358,7 @@ async fn task_dispatch_uses_legacy_wire_group_id_to_load_session_participants() 
             target_bot_id: "bot-worker".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .expect_err("legacy wire group id should resolve session participants");
@@ -3382,7 +3395,8 @@ async fn task_result_is_forwarded_back_to_manager_session() {
             payload: json!({
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
-            }),
+        }),
+        caller_delegation: None,
         })
         .await
         .unwrap();
@@ -3577,7 +3591,8 @@ async fn manager_worker_task_result_preserves_manager_session_context() {
             payload: json!({
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
-            }),
+        }),
+        caller_delegation: None,
         })
         .await
         .unwrap();
@@ -3640,7 +3655,8 @@ async fn manager_worker_task_result_records_independent_manager_run_context() {
             payload: json!({
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
-            }),
+        }),
+        caller_delegation: None,
         })
         .await
         .unwrap();
@@ -3715,7 +3731,8 @@ async fn manager_worker_task_final_suffix_snapshot_persists_only_after_tool_resu
             payload: json!({
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
-            }),
+        }),
+        caller_delegation: None,
         })
         .await
         .unwrap();
@@ -3836,7 +3853,8 @@ async fn duplicate_manager_worker_task_final_does_not_append_duplicate_result_hi
             payload: json!({
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
-            }),
+        }),
+        caller_delegation: None,
         })
         .await
         .unwrap();
@@ -3883,7 +3901,8 @@ async fn manager_worker_task_final_from_non_target_bot_does_not_append_result_hi
             payload: json!({
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
-            }),
+        }),
+        caller_delegation: None,
         })
         .await
         .unwrap();
@@ -4331,7 +4350,8 @@ async fn manager_worker_task_result_defaults_to_text_after_last_tool_call() {
             payload: json!({
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
-            }),
+        }),
+        caller_delegation: None,
         })
         .await
         .unwrap();
@@ -4414,7 +4434,8 @@ async fn manager_worker_task_result_uses_agent_tool_boundary_by_default() {
             payload: json!({
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
-            }),
+        }),
+        caller_delegation: None,
         })
         .await
         .unwrap();
@@ -4531,7 +4552,8 @@ async fn manager_worker_task_result_uses_final_when_agent_tool_has_no_followup_t
             payload: json!({
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
-            }),
+        }),
+        caller_delegation: None,
         })
         .await
         .unwrap();
@@ -4658,6 +4680,7 @@ async fn ws_task_complete_blocked_returns_err_when_pending() {
         target_bot_id: "bot-observer".to_string(),
         target_bot_name: None,
         payload: json!({"message": "do work"}),
+            caller_delegation: None,
     })
     .await
     .unwrap();
@@ -4718,6 +4741,7 @@ async fn echo_task_complete_blocked_returns_ok_guarded_when_pending() {
         target_bot_id: "bot-observer".to_string(),
         target_bot_name: None,
         payload: json!({"message": "do work"}),
+            caller_delegation: None,
     })
     .await
     .unwrap();
@@ -4770,6 +4794,7 @@ async fn task_complete_allowed_when_no_pending() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .unwrap();
@@ -4892,6 +4917,7 @@ async fn task_complete_pending_in_other_session_does_not_block() {
             "bcs_session_id": "group-1:pending",
             "message": "do work"
         }),
+        caller_delegation: None,
     })
     .await
     .unwrap();
@@ -5359,6 +5385,7 @@ async fn task_dispatch_blocking_interceptor_prevents_bot_delivery() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await;
 
@@ -5697,6 +5724,7 @@ async fn manager_worker_task_dispatch_uses_sse_for_eligible_provider_worker() {
             "message": "do work",
             "bcs_session_id": "group-1:abcdef12",
         }),
+        caller_delegation: None,
     })
     .await
     .expect("task.dispatch should deliver to provider worker");
@@ -5743,7 +5771,8 @@ async fn manager_worker_task_result_uses_sse_for_eligible_provider_manager() {
             payload: json!({
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
-            }),
+        }),
+        caller_delegation: None,
         })
         .await
         .expect("task.dispatch should deliver to worker");
@@ -5805,7 +5834,8 @@ async fn manager_worker_provider_task_flow_uses_session_participant_tags() {
             payload: json!({
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
-            }),
+        }),
+        caller_delegation: None,
         })
         .await
         .expect("task dispatch should use worker session tags");
@@ -5858,7 +5888,8 @@ async fn manager_worker_task_dispatch_persists_dispatch_to_worker_history_after_
             payload: json!({
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
-            }),
+        }),
+        caller_delegation: None,
         })
         .await
         .expect("task.dispatch should deliver to worker");
@@ -5891,7 +5922,8 @@ async fn manager_worker_task_dispatch_records_context_before_history_persistence
             payload: json!({
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
-            }),
+        }),
+        caller_delegation: None,
         })
         .await
     });
@@ -5936,6 +5968,7 @@ async fn manager_worker_rejected_task_dispatch_persists_error_and_sends_result()
             target_bot_id: "bot-worker".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .expect_err("not-delivered task.dispatch should fail");
@@ -5964,6 +5997,7 @@ async fn manager_worker_task_dispatch_does_not_persist_when_delivery_errors() {
             target_bot_id: "bot-worker".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .expect_err("delivery error should fail task.dispatch");
@@ -5997,6 +6031,7 @@ async fn non_manager_worker_task_dispatch_does_not_persist_owner_tagged_dispatch
         target_bot_id: "bot-observer".to_string(),
         target_bot_name: None,
         payload: json!({"message": "do work"}),
+            caller_delegation: None,
     })
     .await
     .expect("legacy master_slave dispatch should remain deliverable");
@@ -6754,6 +6789,7 @@ async fn task_run_error_terminal_flushes_buffered_chat_segment() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .unwrap();
@@ -6833,6 +6869,7 @@ async fn task_run_final_terminal_flushes_buffered_chat_segment() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .unwrap();
@@ -6923,6 +6960,7 @@ async fn duplicate_task_final_does_not_append_second_history_row() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .unwrap();
@@ -6979,6 +7017,7 @@ async fn task_final_from_non_target_bot_does_not_append_history() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .unwrap();

@@ -26,6 +26,8 @@ pub mod types;
 pub mod workbench_use_cases;
 
 pub use bcs_domain::bot_provider;
+pub use bcs_domain::caller_identity::{BotCallerBlockedReason, BotCallerEffectiveStatus};
+pub use bcs_domain::caller_identity::{CallerIdentityConfig, CallerMinimumIsolation};
 
 pub use actors::{
     ActorCapabilitiesView, ActorDirectoryEntry, ActorDirectoryService, ActorListCommand,
@@ -40,13 +42,17 @@ pub use core::{
     WorkerRecommendResult, WorkerRecommendation,
 };
 pub use application::{SystemMessageService, SystemMessageQueueService, SystemQueueAdmissionOutcome};
+pub use application::message_flow::WebSendLeaseClaim;
 pub use application::message_delivery::{
+    CallerExecutionCancelCommand, CallerExecutionCancelOutcome, CallerExecutionControlService,
+    CallerExecutionQuery, CallerExecutionStatus, CallerExecutionStatusView,
     CancelMessageDeliveryCommand, CancelMessageDeliveryResult, DeliveryAdmissionView,
     DeliveryResolution, ResolveMessageDeliveryCommand,
     DeliveryStatusQuery, DeliveryStatusView, DeliveryTransitionCommand,
     ManagedDeliveryError, ManagedDeliveryPreparationService, ManagedMessageDeliveryService,
     PreparedManagedDelivery,
 };
+pub use application::message_delivery::CallerDispatchContext;
 pub use application::v1::{
     BindInviteCode, BindInviteCodeResult, BotInternalAttributes, FriendCheckInStrategy,
     GetMyInviteCodeBinding, InitInviteCodes, InitInviteCodesResult,
@@ -174,7 +180,7 @@ pub use message_flow::{
     GroupChatOutcome, GroupFusionCommand, GroupFusionService, MessageDeliveryResult,
     MessageFlowService, ParticipantPerspective, PersistentGroupSendCommand,
     PersistentGroupSendOutcome, ProviderEventIngestCommand, ProviderEventSource,
-    TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand,
+    TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand, CallerDelegationAssignment,
     TaskDispatchOutcome, TaskMessageCommand, TaskMessageOutcome, TaskRunAliasRegistration,
     ChannelSenderIdentity, WebSendCommand, WebSendOutcome,
 };
@@ -190,6 +196,7 @@ pub use application::{
     ProviderEventIngestService,
     ProviderManagementService,
     RegisterProviderBotCommand, RegisterProviderBotOutcome, RegisterProviderCommand,
+    SyncProviderBotCallerConfigurationCommand,
     RegisterProviderOutcome, UpdateProviderBotCommand, UpdateProviderBotOutcome,
     UpdateProviderCommand, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     CreateOrganizationCommand,
@@ -206,7 +213,9 @@ pub use port::{
     ActiveBotRunContext, BotAbortDeliveryCommand, BotAbortDeliveryResult, BotConnectionControlPort,
     BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotMetricCount,
     BotCatalogCleanupPort, BotMetricsSnapshotPort, BotRepoPort, BotRunContext,
-    BotControlPlaneRepoPort,
+    BotControlPlaneRepoPort, BotCallerConfiguration, CallerConfigRevisionConflict,
+    CallerConfigRevisionDecision, CallerConfigurationSync, CallerIdentitySnapshot,
+    CallerTokenVisibility, ProviderCallerCapabilities,
     BotRunContextPort, BotRunScope, BotRunTransportOwner, BotTerminalEvent,
     BotTerminalObserverPort, BotTerminalState,
     CompositeBotTerminalObserver, ProviderRunTransport, ProviderTransportPreference,

@@ -59,6 +59,9 @@ pub(super) async fn handle_task_bot_event(
                 scratch.record_final_response_text(task_id, &normalized.text).await;
                 task_response_text(&scratch.get(task_id).await.unwrap_or_else(|| entry.clone()), cmd)
             };
+            // Delivery lookup already binds the authenticated Bot/run/session.
+            // Its current state/attempt and terminal CAS are authoritative;
+            // Caller adds no second child registry or completion prerequisite.
             crate::queued_task_terminal::commit(flow, &row, cmd, &response_text, normalized).await?;
             if let Some(group) = flow.group.get(&entry.group_id).await {
                 crate::task_flow::emit_task_ledger_status(flow, &group, &entry.group_id,

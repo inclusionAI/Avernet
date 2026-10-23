@@ -48,9 +48,9 @@ pub(crate) async fn commit(flow: &BcsMessageFlow, row: &PersistedMessageDelivery
     let service = flow.managed_deliveries.as_ref().ok_or_else(|| queued_task::error("task queue unavailable"))?;
     let mut current = row.clone();
     for _ in 0..3 {
-        let transition = DeliveryTransitionCommand { delivery_id:current.delivery_id.clone(), expected_state_version:current.state.state_version,
+        let transition = DeliveryTransitionCommand { caller_dispatch_commit:None, caller_cancel:None, delivery_id:current.delivery_id.clone(), expected_state_version:current.state.state_version,
             event:match cmd.state { ChatEventState::Final => Event::Completed, ChatEventState::Aborted => Event::Aborted, _ => Event::Failed },
-            now_ms:reply.now_ms, request_id:None, actor_id:None, reply:Some(reply.clone()), transport_context_json:None, deadline_at_ms:None };
+            now_ms:reply.now_ms, request_id:None, actor_id:None, reply:Some(reply.clone()), transport_context_json:None, deadline_at_ms:None, caller_terminal:None };
         match crate::storage_retry::retry(crate::storage_retry::shutdown(flow), "task_terminal_commit",
             crate::storage_retry::managed_storage, || service.transition(transition.clone())).await {
             Ok(committed) => { queued_task::restore(flow, &committed).await?; return Ok(()); }

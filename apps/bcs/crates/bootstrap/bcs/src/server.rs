@@ -1090,6 +1090,12 @@ pub struct BcsServerState {
     /// Shared OAuth identity port (used to build `/auth/*` route state).
     pub user_identity_port: Option<Arc<dyn bcs_auth_api::UserIdentityPort>>,
 
+    /// Speaking-lease store for the WS lease commands (spec §6.3, P3.3).
+    /// `None` in memory compositions keeps lease commands answering an
+    /// explicit error — never a fabricated lease.
+    pub speaking_leases:
+        Option<Arc<dyn bcs_service_api::port::repo::session_speaking_lease::SpeakingLeaseRepoPort>>,
+
     /// User-controlled outbound HTTP URL security policy.
     pub outbound_url_guard: OutboundUrlGuard,
 
@@ -1301,6 +1307,7 @@ fn build_provider_services_with_webhook_url_guard(
     control_plane: Arc<dyn BotControlPlaneCoreService>,
     channel_binding_cleanup: Arc<dyn ChannelBindingCleanupPort>,
     bot_catalog_cleanup: Arc<dyn BotCatalogCleanupPort>,
+    caller_config_repo: Arc<dyn BotControlPlaneRepoPort>,
 ) -> (
     Arc<dyn ProviderCoreService>,
     Arc<dyn ProviderBotCoreService>,
@@ -1312,7 +1319,8 @@ fn build_provider_services_with_webhook_url_guard(
         repos.provider_bindings.clone(),
         registry.clone(),
         webhook_url_guard,
-    ).with_bot_provider_repo(repos.bot_providers.clone()));
+    ).with_bot_provider_repo(repos.bot_providers.clone())
+    .with_caller_config_store(caller_config_repo));
     let provider_core: Arc<dyn ProviderCoreService> = provider_core_impl.clone();
     let provider_bot_core: Arc<dyn ProviderBotCoreService> = provider_core_impl;
     let mut provider_management = ProviderManagement::new(
@@ -2220,6 +2228,7 @@ impl Default for BcsServerState {
                 provider_control_plane.clone(),
                 channel_binding_cleanup.clone(),
                 build_bot_catalog_cleanup(&config),
+                control_plane_repo.clone(),
             );
         let (organization_core, organization_management) = memory_organization_services(
             &provider_repos,
@@ -2448,7 +2457,8 @@ impl Default for BcsServerState {
             .with_channel_binding_cleanup(channel_binding_cleanup.clone())
             .with_participant_view_bindings(frontend_connections.clone())
             .with_outbound_url_guard(outbound_url_guard.clone())
-            .with_bot_runtime(bot_use_cases.clone()),
+            .with_bot_runtime(bot_use_cases.clone())
+            .with_caller_config_plane(provider_control_plane.clone()),
         );
         let group_proposals = Arc::new(GroupProposalUseCases::new(
             sessions.clone(),
@@ -2738,6 +2748,8 @@ impl Default for BcsServerState {
         Self {
             config,
             services,
+            speaking_leases: None,
+
             run_channels,
             bot_connections,
             frontend_connections,
@@ -3080,7 +3092,8 @@ fn build_use_case_bundle(
         .with_channel_binding_cleanup(channel_binding_cleanup)
         .with_participant_view_bindings(participant_view_bindings)
         .with_outbound_url_guard(callback_url_guard.clone())
-        .with_bot_runtime(bot_use_cases.clone()),
+        .with_bot_runtime(bot_use_cases.clone())
+        .with_caller_config_plane(provider_control_plane.clone()),
     );
     let group_management_v1: Arc<dyn bcs_service_api::GroupManagementService> =
         Arc::new((*group_management).clone().for_v1_openapi());
@@ -3871,6 +3884,7 @@ impl BcsServer {
                 provider_control_plane.clone(),
                 channel_binding_cleanup.clone(),
                 build_bot_catalog_cleanup(&config),
+                control_plane_repo.clone(),
             );
         let (organization_core, organization_management) = memory_organization_services(
             &provider_repos,
@@ -4353,6 +4367,8 @@ impl BcsServer {
         let state = Arc::new(BcsServerState {
             config: config.clone(),
             services,
+            speaking_leases: None,
+
             run_channels,
             bot_connections,
             frontend_connections,
@@ -4560,6 +4576,7 @@ impl BcsServer {
                 provider_control_plane.clone(),
                 channel_binding_cleanup.clone(),
                 build_bot_catalog_cleanup(&config),
+                control_plane_repo.clone(),
             );
         let (organization_core, organization_management) = db_organization_services(
             db_plugin.clone(),
@@ -4784,7 +4801,17 @@ impl BcsServer {
         let raw_bot_delivery: Arc<dyn BotDeliveryPort> = Arc::new(
             bcs_provider_http::BotTransportMux::new(ws_bot_delivery, provider_transport.clone()),
         );
-        let bot_delivery = maybe_wrap_bot_delivery(&config, raw_bot_delivery);
+        // Install the caller configuration delivery gate: every content dispatch of
+// a caller-enabled Bot fails closed here until the P2 protected send path
+// takes over. Memory compose paths keep the plain transport: their control
+// plane has no caller configuration storage and must not block everything.
+let bot_delivery = maybe_wrap_bot_delivery(
+    &config,
+    Arc::new(bcs_bot::application::CallerConfigurationDeliveryGate::new(
+        raw_bot_delivery,
+        provider_control_plane.clone(),
+    )),
+);
         let raw_frontend_delivery: Arc<dyn FrontendDeliveryPort> =
             Arc::new(WorkbenchFrontendDelivery::new(
                 frontend_connections.clone(),
@@ -5004,7 +5031,58 @@ impl BcsServer {
         );
         let message_flow_builder = message_flow_builder.with_system_message(use_cases.system_message.clone()).with_direct_chat(a2a_chat_impl);
         let channel_slot = message_flow_builder.channel_slot();
-        let message_flow: Arc<dyn MessageFlowService> = crate::message_delivery_wiring::wire_with_leader(message_flow_builder, &config, leader_election.clone()).await?;
+        // Caller identity service (P1.7): the optional [caller_identity]
+        // section assembles the JWT identity plugin; absent = no caller
+        // capability (§15.4 guard stays), present-and-invalid refuses
+        // startup — never a permissive default.
+        let caller_protected = match crate::caller_identity_wiring::assemble_caller_identity_plugin(&config)? {
+            Some(identity) => Some(crate::message_delivery_wiring::CallerProtectedAssembly {
+                provider_core: provider_core.clone(),
+                gateway: provider_transport.clone() as Arc<dyn bcs_service_api::port::CallerContainerGatewayPort>,
+                sender: provider_transport.clone() as Arc<dyn bcs_service_api::port::CallerExecutionSendPort>,
+                identity,
+                // Observe fan-out (spec §6.4): the same provider transport
+                // builds observe injectors for dispatched targets —
+                // all containers of one Bot live behind its Provider
+                // webhook.
+                observe_injector_factory: Some(Arc::new(
+                    crate::message_delivery_wiring::ProviderObserveInjectorFactory {
+                        transport: provider_transport.clone(),
+                    },
+                )),
+            }),
+            None => None,
+        };
+        // P3.3 SQL speaking leases: the durable store keyed by the
+        // resolved environment shares the same wiring as every other
+        // SQL store (its table ships in the baseline DDL). The SAME
+        // instance feeds the flow (admission fencing) and the WS lease
+        // command entrance (spec §6.3) — one store, one epoch.
+        let lease_store: Arc<
+            dyn bcs_service_api::port::repo::session_speaking_lease::SpeakingLeaseRepoPort,
+        > = Arc::new(bcs_session_store::SqlSpeakingLeaseRepo::new(
+            db_plugin.clone(),
+            crate::env::resolve_env(),
+            db_sql_flavor(&db_kind),
+        ));
+        let wired_flow = crate::message_delivery_wiring::wire_with_caller_assembly(
+            message_flow_builder,
+            &config,
+            leader_election.clone(),
+            Some(provider_control_plane.clone()),
+            caller_protected,
+            Some(lease_store.clone()),
+        )
+        .await?;
+
+        // review-VI P1 / §15.83 S4: the production composition hands the SAME
+        // protected dispatch pipeline the runtime scheduler uses to the
+        // collaboration runtime — its node dispatch port + its instance
+        // registrar — so a Human-triggered caller-aware workflow's nodes ride
+        // the protected wire. Absent in caller-less compositions (the
+        // runtime then keeps the historical direct delivery).
+        let caller_pipeline_for_orchestration = wired_flow.caller_dispatch_pipeline.clone();
+        let message_flow: Arc<dyn MessageFlowService> = wired_flow;
         let mut delivery_startup_guard = crate::message_delivery_wiring::StartupGuard(Some(message_flow.clone()));
         frontend_connections
             .set_bot_query(use_cases.bot_query.clone())
@@ -5047,6 +5125,21 @@ impl BcsServer {
                 .with_fixed_loop_limits(config.collaboration.fixed_loop_limits)
                 .with_loop_execution_enabled(config.collaboration.loop_execution_enabled)
                 .with_nested_loop_execution_enabled(config.collaboration.nested_loop_execution_enabled)
+                // §15.83 S4 (review-VI P1): the caller-aware workflow wiring.
+                // The policy resolver ALWAYS mounts when a caller control
+                // plane exists — an unwired composition then refuses
+                // caller-enabled assignees CLOSED instead of silently
+                // degrading to the ordinary wire; the protected port mounts
+                // exactly when the pipeline does.
+                .with_caller_orchestration(
+                    Some(provider_control_plane.clone()),
+                    caller_pipeline_for_orchestration.clone().map(|pipeline| {
+                        pipeline as Arc<dyn bcs_service_api::port::OrchestrationCallerDispatchPort>
+                    }),
+                    caller_pipeline_for_orchestration
+                        .clone()
+                        .map(|pipeline| pipeline as Arc<dyn bcs_service_api::port::OrchestrationInstanceRegistrar>),
+                )
             .with_history_persistence(config.state_machine_history.persistence_enabled)
             .with_history_cutoff_timestamp(config.message_history.state_machine_cutoff_timestamp)
                 .with_loop_instrumentation(state_machine_loop_instrumentation(metrics.as_ref()))
@@ -5332,6 +5425,12 @@ impl BcsServer {
             admin_invocation_runs,
             connect_service,
             admission_service,
+            // The SQL production composition shares its lease store with the
+            // WS entrance (the identity connection between the flow's
+            // admission fence and the workbench lease commands — review
+            // P1-5: this was the gap that left the SQL slice claiming
+            // wiring while the WS commands answered "unavailable").
+            speaking_leases: Some(lease_store),
         });
 
         delivery_startup_guard.0 = None;
@@ -5937,6 +6036,8 @@ fn web_ws_dispatch_state(
         group_session_connections,
         frontend_connections: state.frontend_connections.clone(),
         run_channels: state.frontend_run_channels.clone(),
+        speaking_leases: state.speaking_leases.clone(),
+        lease_idle_timeout_ms: state.config.speaking_lease.idle_timeout_ms,
     })
 }
 
@@ -6097,7 +6198,7 @@ mod tests {
         let cleanup = Arc::new(RecordingChannelBindingCleanup::default());
         let provider_control_plane: Arc<dyn BotControlPlaneCoreService> =
             Arc::new(BotControlPlaneCore::new(
-                control_plane_repo,
+                control_plane_repo.clone(),
                 provider_repos.provider_repo.clone(),
                 provider_repos.provider_bindings.clone(),
             ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
@@ -6111,6 +6212,7 @@ mod tests {
                 provider_control_plane.clone(),
                 cleanup.clone(),
                 Arc::new(NoopBotCatalogCleanupPort),
+                control_plane_repo.clone(),
             );
 
         let registered = provider_management
@@ -6124,6 +6226,7 @@ mod tests {
                 created_by: "11111111".to_string(),
                 protocol_version: None,
                 coordination: None,
+                caller_capabilities: None,
             })
             .await
             .expect("register provider");
@@ -6663,6 +6766,7 @@ mod tests {
                 created_by: "admin-owner".to_string(),
                 protocol_version: None,
                 coordination: None,
+                caller_capabilities: None,
             })
             .await
             .unwrap();
@@ -6824,14 +6928,31 @@ async fn ws_upgrade_handler(
 ) -> Response {
     // Resolve identity BEFORE on_upgrade: once the connection switches to
     // WebSocket frames the original HTTP headers are gone, so cookie
-    // extraction must happen here in the request scope.
-    let bound_actor_id = match state.auth_chain.authenticate(&headers).await {
-        Ok(result) => result
-            .principal
-            .and_then(|p| p.user_id)
-            .filter(|s| !s.is_empty())
-            .map(|staff_no| format!("human_{}", staff_no)),
-        Err(_) => None,
+    // extraction must happen here in the request scope. The same
+    // authentication run also produces the runtime-only caller ingress
+    // (spec §10.1.1): strict extraction — machine principals and
+    // window-less/expired sessions carry no caller identity; the
+    // dispatcher re-checks the window per frame.
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or_default();
+    let (bound_actor_id, caller_ingress) = match state.auth_chain.authenticate(&headers).await {
+        Ok(result) => match result.principal.as_ref() {
+            Some(principal) => {
+                let bound_actor_id = principal
+                    .user_id
+                    .clone()
+                    .filter(|s| !s.is_empty())
+                    .map(|staff_no| format!("human_{}", staff_no));
+                let caller_ingress = bound_actor_id.is_some().then(|| {
+                    bcs_ws::web::ws_upgrade_caller_ingress(principal, now_ms)
+                }).flatten();
+                (bound_actor_id, caller_ingress)
+            }
+            None => (None, None),
+        },
+        Err(_) => (None, None),
     };
 
     if let Some(ref actor_id) = bound_actor_id {
@@ -6849,6 +6970,7 @@ async fn ws_upgrade_handler(
             ws_state,
             bcs_ws::web::WorkbenchConnectionAuth::UserBound {
                 actor_id: bound_actor_id,
+                caller_ingress,
             },
             metrics_hook,
         ))

@@ -70,6 +70,9 @@ pub async fn managed_message_delivery_service_contract_tests<
     let row = &admitted.deliveries[0];
     assert_eq!(row.state.status, MessageDeliveryStatus::Queued);
     let command = DeliveryTransitionCommand {
+        caller_dispatch_commit: None,
+        caller_cancel: None,
+        caller_terminal: None,
         delivery_id: row.delivery_id.clone(),
         expected_state_version: row.state.state_version,
         event: DeliveryLifecycleEvent::CancelRequested,

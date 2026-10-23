@@ -64,11 +64,16 @@ async fn upgrade(
             return error_response(ConnectionError::Unavailable, request_id);
         }
     };
+    // The V1 connection token binds a user display identity but carries no
+    // IAM/OAuth trusted session window, so it can never produce a caller
+    // identity (spec §10.13 strict extraction): display-only material
+    // stays display-only. Fail-closed — the caller seam decides semantics.
     let auth = WorkbenchConnectionAuth::SessionBound {
         tenant: binding.tenant,
         actor_id: format!("human_{}", binding.user_id),
         group_id: binding.group_id,
         session_id: binding.session_id,
+        caller_ingress: None,
     };
     let dispatch = state.dispatch;
     let metrics = state.metrics;

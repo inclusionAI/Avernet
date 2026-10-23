@@ -429,7 +429,7 @@ impl SessionLaunchApplication {
                     opening_message_override: None,
                     input: session.input.clone().unwrap_or(serde_json::Value::Null),
                     caller_id: Some(prepared.caller.actor_id().to_string()),
-                    authenticated_human,
+                    authenticated_human, caller_association: None,
                 })
                 .await?;
             return Ok(SessionLaunchOutcome {

@@ -6,6 +6,7 @@ use bcs_service_api::{
     CancelLatestQueuedMessageCommand, CancelLatestQueuedMessageOutcome,
     CancelMessageDeliveryCommand, CancelMessageDeliveryResult, DeliveryStatusQuery,
     DeliveryStatusView, DeliveryTransitionCommand, ManagedDeliveryError,
+    ManagedMessageDeliveryService,
 };
 
 pub async fn cancel_latest_queued(
@@ -102,6 +103,9 @@ pub async fn cancel_latest_queued(
     }) {
         match service
             .transition(DeliveryTransitionCommand {
+                caller_dispatch_commit: None,
+                caller_cancel: None,
+                caller_terminal: None,
                 delivery_id: row.delivery_id,
                 expected_state_version: row.state.state_version,
                 event: Event::CancelRequested,
@@ -173,6 +177,9 @@ pub async fn resolve(
         DeliveryResolution::ConfirmedStopped => Event::ResolveStopped,
     };
     let updated = service.transition(DeliveryTransitionCommand {
+        caller_dispatch_commit: None,
+        caller_cancel: None,
+        caller_terminal: None,
         delivery_id: row.delivery_id.clone(), expected_state_version: command.expected_state_version,
         event, now_ms: chrono::Utc::now().timestamp_millis(), request_id: row.request_id.clone(),
         actor_id: Some(actor.clone()), reply: None,
@@ -448,10 +455,10 @@ pub async fn cancel(
             continue;
         }
         let now_ms = chrono::Utc::now().timestamp_millis();
-        match service.transition(DeliveryTransitionCommand { delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
+        match service.transition(DeliveryTransitionCommand { caller_dispatch_commit: None, delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
             event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested, now_ms,
             request_id: None, actor_id: Some(actor.clone()), reply: None, transport_context_json: None,
-            deadline_at_ms: Some(now_ms.saturating_add(30_000)) }).await {
+            deadline_at_ms: Some(now_ms.saturating_add(30_000)), caller_cancel: None, caller_terminal: None }).await {
             Ok(updated) => results.push(CancelMessageDeliveryResult { delivery: DeliveryStatusView::from(&updated).with_content_preview(Some(&message.content)), error: None }),
             Err(error) => {
                 if matches!(error, ManagedDeliveryError::Repository(bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Storage(_))) {
@@ -462,4 +469,198 @@ pub async fn cancel(
         }
     }
     Ok(results)
+}
+
+/// Credential-free execution control (spec §7.8 "execution.status /
+/// execution.cancel"): locates a caller dispatch strictly by its original
+/// eight-field association and only ever reads or extends the durable typed
+/// intents — no container ensure, no identity re-acquisition, no Provider
+/// re-targeting. Shares the SAME Managed service instance as the scheduler
+/// and the callbacks: control decisions and lifecycle CAS commit against
+/// one state machine.
+pub struct CallerExecutionControl {
+    managed: std::sync::Arc<crate::managed_delivery::ManagedMessageDelivery>,
+}
+
+impl CallerExecutionControl {
+    pub fn new(managed: std::sync::Arc<crate::managed_delivery::ManagedMessageDelivery>) -> Self {
+        Self { managed }
+    }
+
+    /// Locate the committed dispatch row by its network idempotency id and
+    /// verify the association. A missing row or a mismatched association is
+    /// reported as not-found without leaking whether a row exists.
+    async fn locate(
+        &self,
+        query: &bcs_service_api::CallerExecutionQuery,
+    ) -> Result<Option<bcs_domain::message_delivery::PersistedMessageDelivery>, ManagedDeliveryError> {
+        let rows = self
+            .managed
+            .lookup(bcs_service_api::port::repo::message_delivery::DeliveryLookup::Request(
+                query.dispatch_id.clone(),
+            ))
+            .await?;
+        let row = rows.into_iter().find(|row| {
+            row.env == query.environment
+                && row.target_bot_id == query.target_bot_id
+                && row.session_id == query.session_id
+                && row.run_id.as_deref() == Some(query.run_id.as_str())
+                && row.attempt_no == query.attempt
+                && row.request_id.as_deref() == Some(query.dispatch_id.as_str())
+        });
+        Ok(row)
+    }
+}
+
+fn status_wire_name(status: bcs_domain::message_delivery::MessageDeliveryStatus) -> String {
+    serde_json::to_value(status)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn view_for(
+    status: bcs_service_api::CallerExecutionStatus,
+    row: Option<&bcs_domain::message_delivery::PersistedMessageDelivery>,
+) -> bcs_service_api::CallerExecutionStatusView {
+    match row {
+        None => bcs_service_api::CallerExecutionStatusView {
+            status,
+            execution_state: "not_found".to_string(),
+            control_revision: None,
+            cancel_state: None,
+        },
+        Some(row) => bcs_service_api::CallerExecutionStatusView {
+            status,
+            execution_state: status_wire_name(row.state.status),
+            control_revision: row
+                .semantic_projection_json
+                .get("caller_dispatch")
+                .and_then(|v| v.get("caller_control_revision"))
+                .and_then(serde_json::Value::as_u64),
+            cancel_state: row
+                .semantic_projection_json
+                .get("caller_cancel")
+                .and_then(|v| v.get("cancel_state"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+        },
+    }
+}
+
+#[async_trait::async_trait]
+impl bcs_service_api::CallerExecutionControlService for CallerExecutionControl {
+    async fn execution_status(
+        &self,
+        query: bcs_service_api::CallerExecutionQuery,
+    ) -> Result<bcs_service_api::CallerExecutionStatusView, ManagedDeliveryError> {
+        let row = self.locate(&query).await?;
+        let Some(row) = row else {
+            return Ok(view_for(bcs_service_api::CallerExecutionStatus::NotFound, None));
+        };
+        // v1: an uncertain attempt reports Unknown — never a fabricated
+        // terminal block, and not-found is never concluded from silence.
+        let status = match row.state.status {
+            bcs_domain::message_delivery::MessageDeliveryStatus::Unknown
+            | bcs_domain::message_delivery::MessageDeliveryStatus::CancelUnknown => {
+                bcs_service_api::CallerExecutionStatus::Unknown
+            }
+            _ => bcs_service_api::CallerExecutionStatus::Accepted,
+        };
+        Ok(view_for(status, Some(&row)))
+    }
+
+    async fn execution_cancel(
+        &self,
+        command: bcs_service_api::CallerExecutionCancelCommand,
+    ) -> Result<bcs_service_api::CallerExecutionCancelOutcome, ManagedDeliveryError> {
+        let row = self.locate(&command.query).await?;
+        let Some(row) = row else {
+            // NotFound is not stop evidence: the honest v1 answer is an
+            // unconfirmed intent, never a release claim.
+            return Ok(bcs_service_api::CallerExecutionCancelOutcome {
+                cancel_state: "unconfirmed".to_string(),
+                execution_state: "not_found".to_string(),
+                last_event_seq: None,
+            });
+        };
+        let dispatch = row.semantic_projection_json.get("caller_dispatch");
+        let Some(dispatch) = dispatch else {
+            // The row matched the association but has no committed
+            // dispatch facts to freeze the intent against — refuse to lie.
+            return Ok(bcs_service_api::CallerExecutionCancelOutcome {
+                cancel_state: "unconfirmed".to_string(),
+                execution_state: status_wire_name(row.state.status),
+                last_event_seq: None,
+            });
+        };
+        let plan = bcs_service_api::application::message_delivery::CancelCallerDispatchCommand {
+            delivery_id: row.delivery_id.clone(),
+            expected_state_version: row.state.state_version,
+            now_ms: command.now_ms,
+            dispatch: bcs_service_api::port::CallerDispatchAssociation {
+                environment: command.query.environment.clone(),
+                target_bot_id: command.query.target_bot_id.clone(),
+                provider_id: command.query.provider_id.clone(),
+                provider_bot_ref: command.query.provider_bot_ref.clone(),
+                session_id: command.query.session_id.clone(),
+                run_id: command.query.run_id.clone(),
+                attempt: command.query.attempt,
+                dispatch_id: command.query.dispatch_id.clone(),
+            },
+            cancel: bcs_service_api::application::message_delivery::CallerCancelIntent {
+                cancel_request_id: command.cancel_request_id,
+                control_revision: dispatch
+                    .get("caller_control_revision")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+                reason: command.reason,
+                not_after_ms: dispatch
+                    .get("caller_not_after_ms")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(i64::MAX),
+            },
+        };
+        // Replay-first: an already-durable identical intent is a no-write
+        // success; a different one conflicts; a fresh row transitions.
+        let applied = self.managed.cancel_caller_dispatch(plan.clone()).await;
+        match applied {
+            Ok(_) => {}
+            Err(ManagedDeliveryError::Conflict) => {
+                // Concurrent writer advanced the row: re-read once and retry
+                // the SAME command; still-conflicting state is a real
+                // conflict, not a retry loop.
+                let reloaded = self
+                    .locate(&command.query)
+                    .await?
+                    .ok_or(ManagedDeliveryError::NotFound)?;
+                let mut retry = plan;
+                retry.expected_state_version = reloaded.state.state_version;
+                self.managed.cancel_caller_dispatch(retry).await?;
+            }
+            Err(error) => return Err(error),
+        }
+        // Read-your-own-write receipt: the durable intent and the row's
+        // post-transition state come back from the same managed view.
+        let settled = self
+            .managed
+            .lookup(bcs_service_api::port::repo::message_delivery::DeliveryLookup::Request(
+                command.query.dispatch_id.clone(),
+            ))
+            .await?
+            .into_iter()
+            .find(|row| row.request_id.as_deref() == Some(command.query.dispatch_id.as_str()))
+            .ok_or(ManagedDeliveryError::NotFound)?;
+        Ok(bcs_service_api::CallerExecutionCancelOutcome {
+            cancel_state: settled
+                .semantic_projection_json
+                .get("caller_cancel")
+                .and_then(|v| v.get("cancel_state"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("requested")
+                .to_string(),
+            execution_state: status_wire_name(settled.state.status),
+            last_event_seq: Some(settled.state.state_version),
+        })
+    }
 }

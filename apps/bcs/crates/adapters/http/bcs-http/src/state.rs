@@ -79,6 +79,31 @@ pub trait UserIdentityPort: Send + Sync {
 /// request headers and maps the resolved principal to staff_no / nick_name.
 /// Delegates identity persistence methods to an optional inner
 /// `bcs_auth_api::UserIdentityPort`.
+/// Same-authentication pair (spec §10.1.1, P2-A): the display sender the
+/// routes keep consuming, plus the independent runtime-only trusted
+/// ingress. The pair is not serializable as a whole — the ingress is
+/// contractually non-persistable material.
+#[derive(Debug)]
+pub struct AuthenticatedCallerRequest {
+    pub sender: HttpUserIdentity,
+    pub ingress: bcs_service_api::application::caller_identity::AuthenticatedHumanCallerIngress,
+}
+
+/// Closed extraction failures. The strict path never falls back to the
+/// display-only identity and never retries a different chain path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallerIngressExtractionError {
+    /// No human evidence with a trusted session window in this request: the
+    /// adapter does not synthesize a caller identity from display data.
+    Unsupported,
+    /// The chain matched but authentication itself failed.
+    AuthenticationFailed,
+    /// The trusted session window has ended relative to `now_ms`.
+    Expired,
+    /// Authenticated identity could not become a valid ingress envelope.
+    InvalidIdentity,
+}
+
 pub struct ChainUserIdentityPort {
     chain: Arc<bcs_auth_api::AuthPluginChain>,
     inner: Option<Arc<dyn bcs_auth_api::UserIdentityPort>>,
@@ -95,6 +120,65 @@ impl std::fmt::Debug for ChainUserIdentityPort {
 impl ChainUserIdentityPort {
     pub fn new(chain: Arc<bcs_auth_api::AuthPluginChain>) -> Self {
         Self { chain, inner: None }
+    }
+
+    /// Strict caller-identity extraction (spec §10.1.1/§10.13, P2-A):
+    /// from the SAME authentication run the route gets both its display
+    /// sender projection and an independent runtime-only
+    /// `AuthenticatedHumanCallerIngress`. The ingress carries the trusted
+    /// session window the authentication artifact actually verified; a
+    /// display-only principal without an expiry yields no caller identity
+    /// — never a synthesized one. Explicit `now_ms` keeps the adapter
+    /// deterministic; expiry is re-checked by consumers after any await.
+    pub async fn extract_caller_request(
+        &self,
+        headers: &HeaderMap,
+        now_ms: i64,
+    ) -> Result<AuthenticatedCallerRequest, CallerIngressExtractionError> {
+        let result = self
+            .chain
+            .authenticate(headers)
+            .await
+            .map_err(|_| CallerIngressExtractionError::AuthenticationFailed)?;
+        let principal = result
+            .principal
+            .ok_or(CallerIngressExtractionError::Unsupported)?;
+        // Machine credentials/bot principals are never human callers.
+        if principal.bot_uuid.is_some() || principal.owner_id.is_some() {
+            return Err(CallerIngressExtractionError::Unsupported);
+        }
+        let mut staff_no = principal
+            .user_id
+            .clone()
+            .ok_or(CallerIngressExtractionError::Unsupported)?;
+        let nick_name = principal.user_name.clone();
+        let expires_at_ms = principal
+            .human_expires_at_ms
+            .ok_or(CallerIngressExtractionError::Unsupported)?
+            as i64;
+        if expires_at_ms <= now_ms {
+            return Err(CallerIngressExtractionError::Expired);
+        }
+        let actor_id = format!("human_{staff_no}");
+        let ingress =
+            bcs_service_api::application::caller_identity::AuthenticatedHumanCallerIngress::new(
+                bcs_service_api::application::principal::HumanActor {
+                    actor_id,
+                    staff_no: staff_no.clone(),
+                },
+                bcs_service_api::application::caller_identity::HumanCallerAuthSource::HttpAuth,
+                now_ms,
+                expires_at_ms,
+                bcs_config::resolve_env_str(),
+            )
+            .map_err(|_| CallerIngressExtractionError::InvalidIdentity)?;
+        Ok(AuthenticatedCallerRequest {
+            sender: HttpUserIdentity {
+                staff_no: Some(staff_no),
+                nick_name,
+            },
+            ingress,
+        })
     }
 
     pub fn with_inner(mut self, inner: Arc<dyn bcs_auth_api::UserIdentityPort>) -> Self {
@@ -447,6 +531,12 @@ pub struct HttpAppState {
     pub chat_run_events: Arc<dyn ChatRunEventPort>,
     pub bot_request: Arc<dyn BotRequestPort>,
     pub user_identity: Arc<dyn UserIdentityPort>,
+    /// Concrete strict caller-identity extractor (P2-A): retains the
+    /// `ChainUserIdentityPort` behind `user_identity` so routes can request
+    /// the runtime-only ingress from the same authentication chain without a
+    /// downcast or a second chain instance. `None` keeps the legacy routes
+    /// untouched; callers fall back to the ordinary behavior.
+    pub caller_ingress_source: Option<Arc<ChainUserIdentityPort>>,
     pub bot_runtime_token_resolver: Arc<dyn BotRuntimeTokenResolverPort>,
     pub visibility_sync: Arc<dyn VisibilitySyncPort>,
     pub strict_container_validation: bool,
@@ -504,6 +594,7 @@ impl HttpAppState {
             chat_run_cleanup: Arc::new(NoopChatRunCleanupPort),
             chat_run_events: Arc::new(NoopChatRunEventPort),
             bot_request: Arc::new(NoopBotRequestPort),
+            caller_ingress_source: None,
             user_identity: Arc::new(ChainUserIdentityPort::new(Arc::new(
                 bcs_auth_api::AuthPluginChain::new(vec![]),
             ))),
@@ -612,6 +703,11 @@ impl HttpAppState {
 
     pub fn with_user_identity(mut self, user_identity: Arc<dyn UserIdentityPort>) -> Self {
         self.user_identity = user_identity;
+        self
+    }
+
+    pub fn with_caller_ingress_source(mut self, source: Arc<ChainUserIdentityPort>) -> Self {
+        self.caller_ingress_source = Some(source);
         self
     }
 

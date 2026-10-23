@@ -86,3 +86,18 @@ credential revocation. Clients retain credentials and use their existing
 reconnect/backoff policy through the master-routing ingress. Promotion creates a
 fresh epoch and never revives cancelled sockets. There is no cross-replica
 forwarding or replay guarantee for in-flight messages. API/frame DTOs are unchanged.
+
+Speaking-lease acquire/preempt/release/current reauthorize the authenticated
+Human through Workbench chat authorization on every command before touching the
+lease store. An owned Bot does not stand in for Human participation. Absent
+participants fail the same sender gate as chat.send. Session-bound credentials
+cannot address another Group; the bound Session supplies authorization context.
+The existing group-keyed lease wire/storage contract is unchanged. Authorization
+adds one group-service read per command (existing group cache applies); scoped
+Session authorization also reads that Session. No new membership cache is added.
+For a non-member, the reused authorization also checks owned Bots: up to the
+Group's Bot participant count registry reads (memory hits normally, database
+fallback on misses), before refusing a non-participating Human sender. A scoped
+Session fallback can read the Session twice. These are existing authorization
+costs now incurred by lease commands; no batching/cache rewrite is included here.
+The focused tests use memory stores and do not establish database load capacity.

@@ -62,6 +62,14 @@ pub struct WebDispatchState {
     pub group_session_connections: Option<Arc<dyn GroupSessionConnectionService>>,
     pub frontend_connections: Arc<WorkbenchConnectionRegistry>,
     pub run_channels: Arc<RunChannelManager>,
+    /// Speaking-lease store (spec §6.3, P3.3): `None` keeps every lease
+    /// command answered with an explicit error instead of a fake result.
+    pub speaking_leases:
+        Option<Arc<dyn bcs_service_api::port::repo::session_speaking_lease::SpeakingLeaseRepoPort>>,
+    /// Idle window granted at acquire/preempt (§15.99; frozen 60s legacy
+    /// value default). Composition supplies it from
+    /// `[speaking_lease] idle_timeout_ms`.
+    pub lease_idle_timeout_ms: i64,
 }
 
 impl std::fmt::Debug for WebDispatchState {
@@ -182,6 +190,9 @@ async fn handle_client_request(
         "interaction.resolve" => {
             handle_interaction_resolve(state, req, tx, connection_state, auth).await?;
         }
+        "lease.acquire" | "lease.preempt" | "lease.release" | "lease.current" => {
+            handle_lease_command(state, req, tx, auth).await?;
+        }
         _ => {
             send_error(
                 tx,
@@ -193,262 +204,6 @@ async fn handle_client_request(
         }
     }
 
-    Ok(())
-}
-
-#[derive(Debug, Deserialize)]
-struct ConnectParams {
-    group_id: String,
-    #[serde(default, alias = "bcs_session_id", alias = "sessionId")]
-    session_id: Option<String>,
-    #[serde(default, alias = "viewActorId")]
-    view_actor_id: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct ConnectResponse {
-    group_id: String,
-    participants: Vec<Value>,
-    view_actor_id: String,
-    message_view_scope: bcs_domain::MessageViewScope,
-}
-
-async fn handle_connect(
-    state: &Arc<WebDispatchState>,
-    req: &RequestFrame,
-    tx: &mpsc::Sender<String>,
-    connection_state: &mut WebClientConnectionState,
-    auth: &WorkbenchConnectionAuth,
-) -> Result<()> {
-    let bound_actor_id = auth.actor_id();
-    let params: ConnectParams = serde_json::from_value(req.params.clone().unwrap_or(Value::Null))
-        .map_err(|e| {
-        WebWsDispatchError::InvalidFrameFormat(format!("Invalid connect params: {}", e))
-    })?;
-
-    if connection_state.phase == WebConnectionPhase::Connected
-        && matches!(auth, WorkbenchConnectionAuth::SessionBound { .. })
-    {
-        send_error(
-            tx,
-            &req.id,
-            "already_connected",
-            "This WebSocket is already connected",
-        )
-        .await?;
-        return Ok(());
-    }
-
-    let (group_id, session_id) = match auth {
-        WorkbenchConnectionAuth::UserBound { .. } => {
-            (params.group_id.clone(), params.session_id.clone())
-        }
-        WorkbenchConnectionAuth::SessionBound {
-            group_id,
-            session_id,
-            ..
-        } => {
-            if params.group_id != *group_id || params.session_id.as_deref() != Some(session_id) {
-                send_error(
-                    tx,
-                    &req.id,
-                    "token_scope_mismatch",
-                    "Connect scope does not match the connection token",
-                )
-                .await?;
-                connection_state.phase = WebConnectionPhase::Closed;
-                return Ok(());
-            }
-            (group_id.clone(), Some(session_id.clone()))
-        }
-    };
-
-    debug!(
-        group_id = %group_id,
-        session_id = ?session_id,
-        bound_actor_id = ?bound_actor_id,
-        "Processing connect request"
-    );
-
-    let outcome = match auth {
-        WorkbenchConnectionAuth::UserBound { .. } => match state
-            .workbench_sessions
-            .connect(WorkbenchConnectCommand {
-                bound_actor_id: bound_actor_id.map(str::to_string),
-                view_actor_id: params.view_actor_id.clone(),
-                group_id: group_id.clone(),
-                session_id: session_id.clone(),
-            })
-            .await
-        {
-            Ok(outcome) => outcome,
-            Err(err) => {
-                warn!(
-                    request_id = %bcs_observability::CurrentRequestId,
-                    group_id = %group_id,
-                    session_id = ?session_id,
-                    bound_actor_id = ?bound_actor_id,
-                    error = ?err,
-                    "connect rejected by Workbench WS authorization"
-                );
-                let message = err.message();
-                send_error(tx, &req.id, err.code(), &message).await?;
-                return Ok(());
-            }
-        },
-        WorkbenchConnectionAuth::SessionBound {
-            tenant,
-            actor_id,
-            group_id,
-            session_id,
-        } => {
-            if params
-                .view_actor_id
-                .as_deref()
-                .is_some_and(|view_actor_id| view_actor_id != actor_id)
-            {
-                send_error(
-                    tx,
-                    &req.id,
-                    "forbidden_view_actor",
-                    "Session-bound connections may only use the authenticated Human view",
-                )
-                .await?;
-                return Ok(());
-            }
-            let user_id = actor_id
-                .strip_prefix("human_")
-                .filter(|user_id| !user_id.is_empty());
-            let service = state.group_session_connections.as_ref();
-            let authorized = match (service, user_id) {
-                (Some(service), Some(user_id)) => {
-                    service
-                        .authorize_connect(AuthorizeGroupSessionConnection {
-                            binding: GroupSessionConnectionBinding {
-                                tenant: tenant.clone(),
-                                user_id: user_id.to_string(),
-                                group_id: group_id.clone(),
-                                session_id: session_id.clone(),
-                            },
-                        })
-                        .await
-                }
-                _ => {
-                    warn!(request_id = %bcs_observability::CurrentRequestId, "session-bound connect is missing a valid V1 authorization context");
-                    send_session_access_revoked(tx, &req.id, connection_state).await?;
-                    return Ok(());
-                }
-            };
-            match authorized {
-                Ok(authorized) => WorkbenchConnectOutcome {
-                    group_id: group_id.clone(),
-                    participants: authorized
-                        .participants
-                        .into_iter()
-                        .map(|participant| WorkbenchParticipantView {
-                            bot_uuid: participant.actor_id,
-                            role: participant_role_to_wire(participant.role).to_string(),
-                            kind: ParticipantKind::Bot,
-                            mode: Some(participant.mode),
-                            message_view_scope: participant.message_view_scope,
-                        })
-                        .collect(),
-                },
-                Err(err) => {
-                    warn!(
-                        request_id = %bcs_observability::CurrentRequestId,
-                        error = ?err,
-                        "connect rejected by V1 group-session authorization"
-                    );
-                    send_session_access_revoked(tx, &req.id, connection_state).await?;
-                    return Ok(());
-                }
-            }
-        }
-    };
-
-    // The bound actor remains the registry identity for legacy clients, but it
-    // must not implicitly opt those clients into participant projection.
-    let explicit_view_actor_id = params.view_actor_id.as_deref();
-    let resolved_view_actor_id = explicit_view_actor_id.or(bound_actor_id);
-    let resolved_participant = match explicit_view_actor_id {
-        Some(actor_id) => Some(
-            outcome
-                .participants
-                .iter()
-                .find(|participant| participant.bot_uuid == actor_id)
-                .ok_or_else(|| {
-                    WebWsDispatchError::InvalidFrameFormat(
-                        "authorized view actor is not a participant".to_string(),
-                    )
-                })?,
-        ),
-        None => None,
-    };
-    let resolved_message_view_scope = resolved_participant
-        .map(|participant| participant.message_view_scope)
-        .unwrap_or_default();
-    let connection_human_view = explicit_view_actor_id
-        .filter(|actor_id| actor_id.starts_with("human_"))
-        .and_then(|actor_id| {
-            resolved_participant.map(|participant| HumanMessageView {
-                actor_id: actor_id.to_string(),
-                scope: participant.message_view_scope,
-                allow_legacy_unclassified_chat: true,
-            })
-        });
-    let subscription_key = session_id.clone().unwrap_or_else(|| group_id.clone());
-    let conn_id = state
-        .frontend_connections
-        .subscribe_with_shutdown(
-            subscription_key.clone(),
-            tx.clone(),
-            resolved_view_actor_id.map(str::to_string),
-            connection_human_view.clone(),
-            connection_state.shutdown.clone(),
-        )
-        .await?;
-    connection_state.subscribed_sessions.push((
-        subscription_key,
-        conn_id,
-        connection_human_view.clone(),
-    ));
-    connection_state.phase = WebConnectionPhase::Connected;
-
-    let participants: Vec<Value> = outcome
-        .participants
-        .into_iter()
-        .map(|participant| serde_json::to_value(participant).unwrap_or(Value::Null))
-        .collect();
-
-    let response = ConnectResponse {
-        group_id: outcome.group_id,
-        participants,
-        view_actor_id: resolved_view_actor_id.unwrap_or_default().to_string(),
-        message_view_scope: resolved_message_view_scope,
-    };
-
-    send_ok(tx, &req.id, serde_json::to_value(response)?).await?;
-    if let Some(session_id) = session_id.as_deref() {
-        match state.interactions.list_pending(session_id).await {
-            Ok(pending) => {
-                let pending_visible = connection_human_view.as_ref().is_none_or(|view| {
-                    view.allows_artifact(
-                        bcs_domain::MessageVisibilityDomain::StateMachine,
-                        Some(&bcs_domain::MessageAudience::FullOnly),
-                    )
-                });
-                if pending_visible {
-                    for event in pending {
-                        send_interaction_event(tx, &event).await?;
-                    }
-                }
-            }
-            Err(error) => {
-                warn!(request_id = %bcs_observability::CurrentRequestId, session_id, %error, "pending interaction replay failed after connect");
-            }
-        }
-    }
     Ok(())
 }
 
@@ -479,209 +234,6 @@ fn participant_role_to_wire(role: ParticipantRole) -> &'static str {
 }
 
 #[derive(Debug, Deserialize)]
-struct InteractionResolveParams {
-    #[serde(rename = "bcsRunId", alias = "bcs_run_id")]
-    bcs_run_id: String,
-    #[serde(rename = "interactionId", alias = "interaction_id")]
-    interaction_id: String,
-    #[serde(rename = "idempotencyKey", alias = "idempotency_key")]
-    idempotency_key: String,
-    #[serde(
-        default,
-        rename = "bcsSessionId",
-        alias = "bcs_session_id",
-        alias = "sessionId"
-    )]
-    bcs_session_id: Option<String>,
-    #[serde(default, rename = "groupId", alias = "group_id")]
-    group_id: Option<String>,
-    #[serde(default)]
-    kind: Option<String>,
-    #[serde(flatten)]
-    resolution: HashMap<String, Value>,
-}
-
-async fn handle_interaction_resolve(
-    state: &Arc<WebDispatchState>,
-    req: &RequestFrame,
-    tx: &mpsc::Sender<String>,
-    connection_state: &mut WebClientConnectionState,
-    auth: &WorkbenchConnectionAuth,
-) -> Result<()> {
-    let params: InteractionResolveParams =
-        match serde_json::from_value(req.params.clone().unwrap_or(Value::Null)) {
-            Ok(params) => params,
-            Err(error) => {
-                send_error(
-                    tx,
-                    &req.id,
-                    "invalid_request",
-                    &format!("Invalid interaction.resolve params: {error}"),
-                )
-                .await?;
-                return Ok(());
-            }
-        };
-    let Some(resolver_actor_id) = auth.actor_id().map(str::to_string) else {
-        send_error(
-            tx,
-            &req.id,
-            "unauthorized",
-            "An authenticated Human is required to resolve an interaction",
-        )
-        .await?;
-        return Ok(());
-    };
-    let (expected_bcs_session_id, expected_group_id) = match auth {
-        WorkbenchConnectionAuth::SessionBound {
-            group_id,
-            session_id,
-            ..
-        } => (Some(session_id.clone()), Some(group_id.clone())),
-        WorkbenchConnectionAuth::UserBound { .. } => (None, None),
-    };
-
-    if let WorkbenchConnectionAuth::SessionBound {
-        group_id,
-        session_id,
-        ..
-    } = auth
-    {
-        let mismatched = params
-            .group_id
-            .as_deref()
-            .is_some_and(|provided| provided != group_id)
-            || params
-                .bcs_session_id
-                .as_deref()
-                .is_some_and(|provided| provided != session_id);
-        if mismatched {
-            send_error(
-                tx,
-                &req.id,
-                "token_scope_mismatch",
-                "Request scope does not match the connection token",
-            )
-            .await?;
-            connection_state.phase = WebConnectionPhase::Closed;
-            return Ok(());
-        }
-    }
-
-    // `kind` is presentation context only. The Application service loads the
-    // authoritative kind and Provider route from its server-owned record.
-    let _ = params.kind;
-    match state
-        .interactions
-        .resolve(ResolveInteractionCommand {
-            bcs_run_id: params.bcs_run_id,
-            interaction_id: params.interaction_id.clone(),
-            idempotency_key: params.idempotency_key,
-            resolver_actor_id,
-            expected_bcs_session_id,
-            expected_group_id,
-            resolution: Value::Object(params.resolution.into_iter().collect()),
-        })
-        .await
-    {
-        Ok(result) => {
-            send_ok(
-                tx,
-                &req.id,
-                serde_json::json!({
-                    "accepted": result.accepted,
-                    "interactionId": result.interaction_id,
-                    "interactionStatus": interaction_status_slug(result.status),
-                    "idempotencyKey": result.idempotency_key,
-                }),
-            )
-            .await?;
-        }
-        Err(InteractionServiceError::InvalidRequest(message)) => {
-            send_error(tx, &req.id, "invalid_request", &message).await?;
-        }
-        Err(InteractionServiceError::Unauthorized) => {
-            send_error(
-                tx,
-                &req.id,
-                "unauthorized",
-                "The current Human cannot resolve this interaction",
-            )
-            .await?;
-        }
-        Err(InteractionServiceError::NotFound) => {
-            send_error(
-                tx,
-                &req.id,
-                "not_found",
-                "The interaction does not exist or is no longer retained",
-            )
-            .await?;
-        }
-        Err(InteractionServiceError::ResolveFailed {
-            message,
-            retryable,
-            status,
-        }) => {
-            send_error_shape(
-                tx,
-                &req.id,
-                ErrorShape {
-                    code: "interaction_resolve_failed".to_string(),
-                    message,
-                    details: Some(serde_json::json!({
-                        "interactionId": params.interaction_id,
-                        "interactionStatus": interaction_status_slug(status),
-                    })),
-                    retryable,
-                    retry_after_ms: None,
-                },
-            )
-            .await?;
-        }
-        Err(InteractionServiceError::Internal(message)) => {
-            warn!(request_id = %bcs_observability::CurrentRequestId, %message, "interaction resolve application service failed");
-            send_error_shape(
-                tx,
-                &req.id,
-                ErrorShape {
-                    code: "interaction_resolve_failed".to_string(),
-                    message: "Interaction resolution could not be processed".to_string(),
-                    details: Some(serde_json::json!({
-                        "interactionId": params.interaction_id,
-                        "interactionStatus": "pending",
-                    })),
-                    retryable: true,
-                    retry_after_ms: None,
-                },
-            )
-            .await?;
-        }
-    }
-    Ok(())
-}
-
-fn interaction_status_slug(status: InteractionStatus) -> &'static str {
-    match status {
-        InteractionStatus::Pending => "pending",
-        InteractionStatus::Accepted => "accepted",
-        InteractionStatus::Resolved => "resolved",
-        InteractionStatus::Invalidated => "invalidated",
-    }
-}
-
-async fn send_interaction_event(
-    tx: &mpsc::Sender<String>,
-    event: &InteractionFrontendEvent,
-) -> Result<()> {
-    let json = interaction_event_json(event)?;
-    tx.send(json).await.map_err(|error| {
-        WebWsDispatchError::WsProtocolError(format!("Failed to replay interaction event: {error}"))
-    })?;
-    Ok(())
-}
-
-#[derive(Debug, Deserialize)]
 struct ChatSendParams {
     #[serde(alias = "sessionKey")]
     session_key: Option<String>,
@@ -697,6 +249,13 @@ struct ChatSendParams {
     thinking: Option<String>,
     #[serde(alias = "idempotencyKey")]
     idempotency_key: Option<String>,
+    /// Speaking-lease coordinates for caller groups (spec §6.3): the id
+    /// and epoch an acquire/preempt returned. Optional — plain groups
+    /// never carry it and DM traffic never fences on it.
+    #[serde(default, alias = "leaseId")]
+    lease_id: Option<String>,
+    #[serde(default, alias = "leaseEpoch")]
+    lease_epoch: Option<u64>,
     attachments: Option<Vec<bcs_protocol::Attachment>>,
 }
 
@@ -793,6 +352,7 @@ async fn handle_chat_send(
             caller_actor_id: bound_actor_id.unwrap_or_default().to_string(),
             content: params.message.clone(),
             source: HumanResponseSource::Http,
+            caller_ingress: auth.caller_ingress().cloned(),
         })
         .await
     {
@@ -904,10 +464,34 @@ async fn handle_chat_send(
 
     let caller = caller_context_from_bound_actor(bound_actor_id, &from_id);
 
+    // Caller identity comes only from the authenticated WebSocket upgrade
+    // snapshot (spec §10.1.1): the runtime-only ingress with its trusted
+    // window re-checked per frame — a display actor alone is never a caller.
+    // Effective sender selects whether the Human authentication snapshot can
+    // become execution identity: speaking as an owned Bot is ordinary Bot
+    // speech and must not carry the bound Human's ingress. No window
+    // re-check exists on the WS channel (§15.97): the login was verified at
+    // the upgrade moment and the identity lives for the connection.
+    let caller_ingress = if bound_actor_id == Some(from_id.as_str()) {
+        auth.caller_ingress().cloned()
+    } else {
+        None
+    };
+
     info!("chat.send: calling message_flow.handle_web_send");
     let outcome = state
         .message_flow
         .handle_web_send(WebSendCommand {
+            caller_ingress,
+            speaking_lease: params
+                .lease_id
+                .as_deref()
+                .filter(|lease_id| !lease_id.trim().is_empty())
+                .zip(params.lease_epoch)
+                .map(|(lease_id, epoch)| bcs_service_api::WebSendLeaseClaim {
+                    lease_id: lease_id.to_string(),
+                    epoch,
+                }),
             caller,
             group_id: group_id.clone(),
             session_id: session_id.clone(),
@@ -1373,3 +957,10 @@ async fn send_error_shape(
     })?;
     Ok(())
 }
+
+mod connect;
+mod interaction;
+mod lease;
+use connect::handle_connect;
+use interaction::{handle_interaction_resolve, send_interaction_event};
+use lease::handle_lease_command;

@@ -12,6 +12,24 @@ pub(super) async fn handle_web_send_with_result(
     mut cmd: WebSendCommand,
     result_message: Option<&state_machine_result::ResultMessage>,
 ) -> ServiceResult<WebSendOutcome> {
+    // Authentication and execution identity are separate types, but a Human
+    // submission must bind both to the same sender before any side effect.
+    if let Some(ingress) = cmd.caller_ingress.as_ref() {
+        if ingress.is_expired(now_ms().max(0) as i64) {
+            return Err(ServiceError::InvalidOperation {
+                message: "caller identity expired".into(), request_id: None,
+            });
+        }
+        let matches_principal = matches!(&cmd.caller,
+            CallerContext::Human(actor) if actor == ingress.actor());
+        if !matches_principal || cmd.from_actor_id != ingress.actor().actor_id
+            || ingress.env() != bcs_config::resolve_env_str()
+        {
+            return Err(ServiceError::InvalidOperation {
+                message: "caller identity mismatch".into(), request_id: None,
+            });
+        }
+    }
     log_message_received(&cmd, MessageLogMode::FreeChat);
 
     let mut group = flow
@@ -102,12 +120,346 @@ pub(super) async fn handle_web_send_with_result(
     } else {
         SenderType::Bot
     };
+    // Resolve caller-enabled targets for a request authenticated as a Human,
+    // even when the effective sender is one of that Human's owned Bots. The
+    // guard below then requires that an enabled target be addressed by real
+    // Human speech: a Human must not bypass caller work by proxying a Bot.
+    let caller_admission_targets: Vec<String> = if matches!(&cmd.caller, CallerContext::Human(_)) {
+        match flow.caller_admission.as_ref() {
+            Some(deps) => {
+                let env = bcs_config::resolve_env_str();
+                if group.group_kind == GroupKind::Dm {
+                    vec![command_targets_first_bot(&decision).to_string()]
+                } else {
+                    // Per-target configuration check (§15.96 batch): ONE
+                    // round trip for the whole member scan (plus the routed
+                    // target when it differs), not one per participant.
+                    // Only caller-enabled member bots (plus the routed
+                    // target if enabled) become admission targets; plain
+                    // groups stay ordinary.
+                    let participants: Vec<String> = group
+                        .participants
+                        .iter()
+                        .filter(|p| p.is_bot())
+                        .map(|p| p.bot_uuid.clone())
+                        .collect();
+                    let routed = command_targets_first_bot(&decision).to_string();
+                    let mut batch = participants.clone();
+                    if !routed.is_empty() {
+                        batch.push(routed.clone());
+                    }
+                    let configs = deps
+                        .control_plane
+                        .get_caller_configurations(&batch, &env)
+                        .await
+                        .map_err(|_| ServiceError::InvalidOperation {
+                            message: "caller configuration unavailable".into(), request_id: None,
+                        })?;
+                    let is_enabled = |bot_id: &str| {
+                        configs
+                            .iter()
+                            .find(|(id, _)| id == bot_id)
+                            .and_then(|(_, config)| config.snapshot.as_ref())
+                            .is_some_and(|snapshot| snapshot.caller_identity.enabled)
+                    };
+                    let enabled: Vec<String> = participants
+                        .iter()
+                        .filter(|bot_id| is_enabled(bot_id))
+                        .cloned()
+                        .collect();
+                    let enabled = if !routed.is_empty() && !enabled.contains(&routed) && is_enabled(&routed) {
+                        let mut with_routed = enabled;
+                        with_routed.push(routed);
+                        with_routed
+                    } else {
+                        enabled
+                    };
+                    enabled
+                }
+            }
+            None => Vec::new(),
+        }
+    } else {
+        Vec::new()
+    };
+    // Resolve enabled targets once (the group gate below reuses the same set).
+    let caller_admission_targets: Vec<String> = if group.group_kind == GroupKind::Dm {
+        // DM: original single-target check
+        match flow.caller_admission.as_ref() {
+            Some(deps) if matches!(&cmd.caller, CallerContext::Human(_)) => {
+                let target_enabled = deps
+                    .control_plane
+                    .get_caller_configuration(
+                        command_targets_first_bot(&decision),
+                        &bcs_config::resolve_env_str(),
+                    )
+                    .await
+                    .map_err(|_| ServiceError::InvalidOperation {
+                        message: "caller configuration unavailable".into(), request_id: None,
+                    })?
+                    .is_some_and(|config| config.snapshot.is_some_and(|s| s.caller_identity.enabled));
+                if target_enabled { caller_admission_targets } else { Vec::new() }
+            }
+            _ => Vec::new(),
+        }
+    } else {
+        caller_admission_targets
+    };
+    // Caller mode follows target configuration, never the presence of identity.
+    // A stripped/expired WS snapshot must not become ordinary Owner work, and
+    // a Human speaking as an owned Bot must not include an enabled target in
+    // ordinary execution merely to avoid carrying the Human's identity.
+    if !caller_admission_targets.is_empty() {
+        if sender_type != SenderType::Human {
+            return Err(ServiceError::InvalidOperation {
+                message: "caller target requires human speech".into(),
+                request_id: None,
+            });
+        }
+        if cmd.caller_ingress.is_none() {
+            return Err(ServiceError::InvalidOperation {
+                message: "caller identity missing".into(),
+                request_id: None,
+            });
+        }
+    }
+    let caller_deps = if caller_admission_targets.is_empty() { None } else { flow.caller_admission.clone() };
+    // P3.2 speaking lease (spec §6.1/§6.3): only Human speech in CALLER
+    // groups is fenced — plain groups (no Human member, or no bot with a
+    // caller-enabled configuration) never read or write the lease store.
+    // An enabled-but-blocked bot still fences: selecting the fence is not
+    // a downgrade into an ordinary group.
+    // Review 2.4: the group-type judgment is INDEPENDENT of whether this
+    // submission carries strict caller ingress — a caller group fences
+    // Human speech no matter how the message authenticated, so an
+    // ingress-less Human message can never slip the fence. A control-plane
+    // configuration read failure is fail-closed (the mode is UNDECIDABLE,
+    // not Plain); groups without Human members stay Plain without a single
+    // configuration read.
+    let speaking_fence = if sender_type == SenderType::Human
+        && group.group_kind != GroupKind::Dm
+    {
+        let has_human_member = group
+            .participants
+            .iter()
+            .any(|participant| participant.actor_kind == ActorKind::Human);
+        let mut any_bot_caller_enabled = false;
+        let mut mode_undecidable = false;
+        if has_human_member {
+            let env = bcs_config::resolve_env_str();
+            if let Some(deps) = flow.caller_admission.as_ref() {
+                for participant in group.participants.iter().filter(|p| p.is_bot()) {
+                    match deps
+                        .control_plane
+                        .get_caller_configuration(&participant.bot_uuid, &env)
+                        .await
+                    {
+                        // A read failure is never "not enabled": the lease
+                        // mode must not fail open (a human message would
+                        // bypass the fence exactly when the control plane
+                        // is broken).
+                        Err(_) => {
+                            mode_undecidable = true;
+                            break;
+                        }
+                        Ok(None) => {}
+                        Ok(Some(config)) => {
+                            let enabled_here = config
+                                .snapshot
+                                .as_ref()
+                                .is_some_and(|snapshot| snapshot.caller_identity.enabled);
+                            if enabled_here {
+                                any_bot_caller_enabled = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if mode_undecidable {
+            return Err(ServiceError::InvalidOperation {
+                message: "caller configuration unavailable; speaking-lease mode is undecidable"
+                    .into(),
+                request_id: None,
+            });
+        }
+        match bcs_domain::speaking_lease::resolve_speaking_mode(has_human_member, any_bot_caller_enabled) {
+            bcs_domain::speaking_lease::SessionSpeakingMode::Plain => None,
+            bcs_domain::speaking_lease::SessionSpeakingMode::LeaseRequired => {
+                // Fail closed when the composition cannot decide leases.
+                let repo = flow.speaking_leases.as_ref().ok_or_else(|| {
+                    ServiceError::InvalidOperation {
+                        message: "speaking lease required but unavailable".into(),
+                        request_id: None,
+                    }
+                })?;
+                let claim = cmd.speaking_lease.as_ref().ok_or_else(|| {
+                    ServiceError::InvalidOperation {
+                        message: "speaking lease required".into(),
+                        request_id: None,
+                    }
+                })?;
+                Some((repo.clone(), claim.clone()))
+            }
+        }
+    } else {
+        None
+    };
+    // Submission eligibility fence BEFORE durable acceptance (spec §6.3
+    // rule 2): a message that passed the fence before a preemption
+    // boundary stays legal; a claim losing the race is refused entry.
+    // The lease key is the GROUP (spec §6.3: one Human voice per caller
+    // group); DM traffic never fences. cmd.session_id may already be
+    // resolved to a session-scoped id here — deliberately not used as the
+    // lease key.
+    let speaking_claim = speaking_fence.as_ref().map(|(repo, claim)| {
+        (repo.clone(), cmd.group_id.clone(), claim.clone())
+    });
+    if let Some((repo, session, claim)) = speaking_claim.as_ref() {
+        let holder = cmd.from_actor_id.clone();
+        let decision = repo
+            .check_submission(bcs_service_api::port::repo::session_speaking_lease::AdmitMessage {
+                session_id: session,
+                expected_holder: &holder,
+                expected_lease_id: &claim.lease_id,
+                expected_epoch: claim.epoch,
+                now_ms: now_ms().max(0) as i64,
+                idle_timeout_ms: flow.speaking_lease_idle_timeout_ms,
+            })
+            .await?;
+        match decision {
+            bcs_service_api::port::repo::session_speaking_lease::LeaseDecision::Admitted(_) => {}
+            other => {
+                // The closed reason kinds: superseded/wrong-holder/lost —
+                // actionable for the client, never identity material.
+                let kind = match &other {
+                    bcs_service_api::port::repo::session_speaking_lease::LeaseDecision::Admitted(_) => unreachable!(),
+                    bcs_service_api::port::repo::session_speaking_lease::LeaseDecision::Superseded { .. } => "superseded",
+                    bcs_service_api::port::repo::session_speaking_lease::LeaseDecision::WrongHolder { .. } => "wrong_holder",
+                    bcs_service_api::port::repo::session_speaking_lease::LeaseDecision::Lost => "lost",
+                };
+                return Err(ServiceError::InvalidOperation {
+                    message: format!("speaking lease rejected the submission: {kind}"),
+                    request_id: None,
+                })
+            }
+        }
+    }
     let admission = match crate::queued_admission::prepare_group_admission_with_message(flow, &group, &cmd, &decision,
         &sender_display_name, from_bot_owner.clone(), result_message.map(|result| (result.id.as_str(), &result.message))).await? {
-        Some(command) => Some(flow.managed_deliveries.as_ref().ok_or_else(|| ServiceError::InternalError("queue service unavailable".into()))?
-            .admit(command).await.map_err(|_| ServiceError::InternalError("queue admission persistence failed".into()))?),
+        Some(command) => {
+            let managed = flow.managed_deliveries.as_ref().ok_or_else(|| ServiceError::InternalError("queue service unavailable".into()))?;
+            match caller_deps {
+                None => Some(managed.admit(command).await.map_err(|_| ServiceError::InternalError("queue admission persistence failed".into()))?),
+                Some(deps) => {
+                    let ingress = cmd.caller_ingress.take()
+                        .ok_or_else(|| ServiceError::InvalidOperation { message: "caller identity missing".into(), request_id: None })?;
+                    // Per-target scopes: only targets present in the prepared
+                    // delivery command (a missing enabled target is simply
+                    // not routed this round). DM keeps the classic shape; a
+                    // group puts the first enabled target as primary and the
+                    // rest as extras (all marked, all published atomically).
+                    let make_scope = |target_bot_id: &str| {
+                        bcs_service_api::application::caller_execution::HandoffScope {
+                            env: bcs_config::resolve_env_str(),
+                            session_id: command.message.session_id.clone(),
+                            group_id: Some(command.message.group_id.clone()),
+                            source_message_id: command.message_id.clone(),
+                            target_bot_id: target_bot_id.to_string(),
+                        }
+                    };
+                    let routed_targets: Vec<String> = command
+                        .targets
+                        .iter()
+                        .filter(|target| {
+                            caller_admission_targets.is_empty()
+                                || caller_admission_targets.contains(&target.target_bot_id)
+                        })
+                        .map(|target| target.target_bot_id.clone())
+                        .collect();
+                    // §7.2.1 delegation-only scopes (review batch-3 §3.1):
+                    // the caller-DISABLED routed targets of a lease-admitted
+                    // caller group (the fence above proved the lease; the
+                    // group gate keeps DM — 私聊 Owner A 不初始化 lineage).
+                    // These targets keep the ordinary Owner execution; their
+                    // row carries only the trusted `caller_lineage` marker
+                    // and their identity parks for the runtime's delegation-
+                    // only root registration.
+                    let delegation_scopes: Vec<_> = if speaking_fence.is_some()
+                        && group.group_kind != GroupKind::Dm
+                    {
+                        command
+                            .targets
+                            .iter()
+                            .map(|target| target.target_bot_id.clone())
+                            .filter(|target_bot_id| {
+                                !routed_targets.contains(target_bot_id)
+                                    && group.participants.iter().any(|participant| {
+                                        participant.is_bot()
+                                            && participant.bot_uuid == *target_bot_id
+                                    })
+                            })
+                            .map(|target_bot_id| make_scope(&target_bot_id))
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
+                    // No caller-enabled target routed and no Owner
+                    // association target either: nothing the seam owns.
+                    if routed_targets.is_empty() && delegation_scopes.is_empty() {
+                        return Err(ServiceError::InvalidOperation { message: "caller admission requires one delivery target".into(), request_id: None });
+                    }
+                    let scope = routed_targets.first().map(|target_bot_id| make_scope(target_bot_id));
+                    let extra_scopes: Vec<_> = routed_targets
+                        .iter()
+                        .skip(1)
+                        .map(|target_bot_id| make_scope(target_bot_id))
+                        .collect();
+                    let caller_message = crate::caller_admission::CallerMessageAdmission {
+                        scope,
+                        extra_scopes,
+                        delegation_scopes,
+                        ingress,
+                        admission: command,
+                    };
+                    let now = now_ms().max(0) as i64;
+                    let outcome = crate::caller_admission::admit_caller_message(&deps, caller_message, now)
+                        .await
+                        .map_err(caller_admission_error)?;
+                    Some(outcome.result)
+                }
+            }
+        }
         None => None,
     };
+    // Duplicates replay their original acceptance and NEVER renew the
+    // idle window; a fresh acceptance is the only renewal event, and a
+    // renewal decision lost after acceptance never un-accepts the message.
+    if admission.as_ref().is_some_and(|result| !result.duplicate) {
+        if let Some((repo, session, claim)) = speaking_claim.as_ref() {
+            let renewal = repo
+                .admit_message(bcs_service_api::port::repo::session_speaking_lease::AdmitMessage {
+                    session_id: session,
+                    expected_holder: &cmd.from_actor_id,
+                    expected_lease_id: &claim.lease_id,
+                    expected_epoch: claim.epoch,
+                    now_ms: now_ms().max(0) as i64,
+                    idle_timeout_ms: flow.speaking_lease_idle_timeout_ms,
+                })
+                .await;
+            if !matches!(
+                renewal,
+                Ok(bcs_service_api::port::repo::session_speaking_lease::LeaseDecision::Admitted(_))
+            ) {
+                tracing::warn!(
+                    request_id = %bcs_observability::CurrentRequestId,
+                    session_id = %session,
+                    "web send: speaking lease renewal lost after acceptance; the message stays accepted"
+                );
+            }
+        }
+    }
     if let (Some(result), Some(admitted)) = (result_message, admission.as_ref()) {
         result.validate_admission(admitted, &decision)?;
     }
@@ -591,4 +943,35 @@ mod queue_admission_status_tests {
             assert_eq!(queue_admission_status(deliveries.clone().into_iter()), expected, "{deliveries:?}");
         }
     }
+}
+
+fn caller_admission_error(error: crate::caller_admission::CallerAdmissionError) -> ServiceError {
+    match error {
+        crate::caller_admission::CallerAdmissionError::TargetNotCallerEnabled => ServiceError::InvalidOperation {
+            message: "caller target is not caller-enabled".to_string(),
+            request_id: None,
+        },
+        crate::caller_admission::CallerAdmissionError::IdentityMismatch => ServiceError::InvalidOperation {
+            message: "caller identity mismatch".to_string(),
+            request_id: None,
+        },
+        crate::caller_admission::CallerAdmissionError::IdentityExpired => ServiceError::InvalidOperation {
+            message: "caller identity expired".to_string(),
+            request_id: None,
+        },
+        crate::caller_admission::CallerAdmissionError::HandoffRefused => ServiceError::InternalError(
+            "caller identity handoff refused the slot".to_string(),
+        ),
+        crate::caller_admission::CallerAdmissionError::Admission(text) => ServiceError::InternalError(
+            format!("queue admission failed: {text}"),
+        ),
+    }
+}
+
+fn command_targets_first_bot(decision: &RoutingDecision) -> &str {
+    decision
+        .targets
+        .first()
+        .map(|t| t.bot_uuid.as_str())
+        .unwrap_or_default()
 }

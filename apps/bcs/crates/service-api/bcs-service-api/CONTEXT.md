@@ -504,3 +504,38 @@ summary; HTTP version negotiation remains the adapter's responsibility.
 SessionManagementService.authorize_collaboration is the policy contract used before HTTP self-enrollment and runtime Human input. Bootstrap injects the live registry into SessionManagementServiceImpl; the runtime-cleanup wrapper delegates the contract. Legacy implementations without Provider support retain their existing default behavior.
 
 BotProviderRepoPort.validate_provider_affiliation is a fresh preflight for registration before capability merging. Concrete memory/SQL attachment implementations must also recheck public membership at the write boundary; the default unsupported error is not an authorization fallback.
+
+## Runtime-only caller identity envelopes
+
+`application::caller_identity` freezes the P0 caller identity envelopes:
+the strict `AuthenticatedHumanCallerIngress` (same-authentication Human caller
+material with a trusted, monotonically shrinkable validity window),
+`CallerSubjectRef` (opaque subject handle reachable only through explicit
+`expose_ref`) and the closed three-value `CallerExecutionPurpose`. These
+types never derive serde; Debug redacts the staff principal and the subject
+reference. Ingress supports Clone for trusted WS snapshots without renewing
+validity. WebSendCommand and GroupChatCommand clones remove caller_ingress;
+identity-preserving forwarding explicitly moves it. Handoff claim-once remains
+per scope, independent of Rust Clone. Persistable caller control-plane contracts live in
+`bcs_domain::caller_identity` instead. The access-level `application ::
+principal::CallerContext` is intentionally separate; it stays the request
+principal enum and never carries execution identity.
+
+
+Human acting for an owned Bot is authenticated as the Human but uses the Bot as the
+effective sender. It stays ordinary Bot speech for caller-disabled targets, never
+carries the Human ingress, and fails closed when a caller-enabled target is present.
+
+Caller observe commands carry a redacted destination subject and optional paired
+Gateway reference/epoch. Provider wire maps the subject to caller_context.subject
+for both send and ordinary observe-only inject; inject has no execution credential
+or identity-expiry claim. Provider container_routing defaults to ensure; explicit
+caller_subject opts into lazy Human×Bot routing and session isolation. Preparation
+reads the existing ProviderCore capability source once per target preparation,
+never per observer. Failed reads or ensure calls cannot enable a fallback. The
+subject/observe directory remains bounded, expiring and memory-only; no identity
+storage or new lifecycle is introduced.
+
+## Caller identity boundary
+
+Shared caller runtime envelopes are domain-owned and reexported here for compatibility. The issuance trait now lives exclusively in `bcs-caller-identity-api`; Service API does not depend on Plugin API.

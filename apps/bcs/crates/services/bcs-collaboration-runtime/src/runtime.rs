@@ -163,6 +163,17 @@ pub struct CollaborationRuntime {
     event_record_factory: Option<Arc<dyn EventRecordFactoryPort>>,
     judge: Arc<dyn JudgeEvaluatorPort>,
     callback_url_guard: OutboundUrlGuard,
+    /// §15.83 S3 (spec §8.5 / review-V P1-1): when BOTH are present, a node
+    /// whose assignee resolves Protected routes through the caller wire
+    /// (reusing the node's own run/attempt); an Ordinary resolution keeps
+    /// the historical direct delivery untouched.
+    caller_node_dispatch: Option<Arc<dyn bcs_service_api::port::OrchestrationCallerDispatchPort>>,
+    caller_policy_resolver: Option<Arc<dyn bcs_service_api::port::OrchestrationCallerPolicyResolver>>,
+    /// §15.83 S2: the composition's instance-association registrar. A
+    /// Human-triggered caller-aware run registers its delegation-only
+    /// association here at submission; without a registrar the run is
+    /// Bot-only caller-closed by construction.
+    caller_instance_registrar: Option<Arc<dyn bcs_service_api::port::OrchestrationInstanceRegistrar>>,
 }
 
 struct ResolvedDefinition {
@@ -218,7 +229,132 @@ impl CollaborationRuntime {
             result_publisher: None,
             event_record_factory: None,
             callback_url_guard: OutboundUrlGuard::strict(),
+            caller_node_dispatch: None,
+            caller_policy_resolver: None,
+            caller_instance_registrar: None,
         }
+    }
+
+    /// §15.83 S3: attach the protected orchestration node dispatch seam.
+    /// Both pieces must be present — a port without the policy resolver
+    /// (or vice versa) keeps every node on the ordinary wire.
+    /// §15.83 S2: attach the instance-association registrar (the
+    /// composition's Human-triggered delegation-only registration seam).
+    pub fn with_caller_instance_registrar(
+        mut self,
+        registrar: Arc<dyn bcs_service_api::port::OrchestrationInstanceRegistrar>,
+    ) -> Self {
+        self.caller_instance_registrar = Some(registrar);
+        self
+    }
+
+    /// §15.83 S2 rearm: refresh the run's delegation-only instance
+    /// association after a HumanInput response is consumed. Same-subject
+    /// submissions refresh the window (idempotent per workflow_run_id);
+    /// a cross-subject submission is refused by the lineage index's
+    /// structural comparison — the original binding never flips. No
+    /// registrar in this composition skips opportunistically: the human
+    /// response's primary purpose is node data, never a protected
+    /// submission (unlike the one-shot route whose primary intent IS the
+    /// caller-aware run).
+    async fn rearm_instance_association(
+        &self,
+        run: &StateMachineRun,
+        ingress: bcs_service_api::application::caller_identity::AuthenticatedHumanCallerIngress,
+    ) {
+        let Some(registrar) = self.caller_instance_registrar.clone() else {
+            tracing::debug!(
+                run_id = %run.run_id,
+                "state_machine: no caller registrar wired; human-input association rearm skipped"
+            );
+            return;
+        };
+        let now_ms = bcs_protocol::now_ms() as i64;
+        let association = bcs_service_api::port::OrchestrationInstanceAssociation {
+            // Same stamping as start_state_machine_run (§15.90): the
+            // mega-turn identity of the instance — the index's structural
+            // match expects this exact format for the same run.
+            //
+            // Environment convergence note: the entry-side (§15.90)
+            // `environment` comes from the HTTP adapter's `manifest_env`
+            // (bootstrap-resolved), while the rearm resolves
+            // `bcs_config::resolve_env_str()` here. They converge in
+            // practice — the §15.90 registration requires
+            // `ingress.env() == environment`, and runtime startup
+            // prefixes both from the SERVER_ENV family — but they are
+            // resolved in different places (adapter-supplied vs
+            // runtime-resolved), which is why they are not the same
+            // literal call site.
+            workflow_run_id: run.run_id.clone(),
+            environment: bcs_config::resolve_env_str(),
+            group_id: run.group_id.clone(),
+            session_id: run.session_id.clone(),
+            message_turn_id: format!("{}:000-panel", run.run_id),
+            history_cutoff_seq: 0,
+            expires_at_ms: ingress.expires_at_ms(),
+            ingress,
+            now_ms,
+        };
+        match registrar.register_instance(association).await {
+            Ok(true) => tracing::info!(
+                run_id = %run.run_id,
+                "state_machine: human input re-armed the caller instance association"
+            ),
+            Ok(false) => tracing::warn!(
+                run_id = %run.run_id,
+                "state_machine: human input association rearm refused (cross-subject or capacity); nodes keep the existing lineage"
+            ),
+            Err(error) => tracing::warn!(
+                run_id = %run.run_id, %error,
+                "state_machine: human input association rearm failed; nodes stay caller-closed"
+            ),
+        }
+    }
+
+    /// §15.83 S4 (review-VI P1): the production composition's single
+    /// orchestration mount — a control-plane-backed policy resolver ALWAYS
+    /// (an ILL-configured composition is caught in the resolver: the
+    /// transport gate on caller-enabled assignees keeps the closed world),
+    /// and the protected dispatch port + instance registrar when the
+    /// pipeline exists. One seam, three consistent lifetimes.
+    pub fn with_caller_orchestration(
+        mut self,
+        control_plane: Option<Arc<dyn bcs_service_api::BotControlPlaneCoreService>>,
+        pipeline: Option<
+            Arc<dyn bcs_service_api::port::OrchestrationCallerDispatchPort>,
+        >,
+        registrar: Option<Arc<dyn bcs_service_api::port::OrchestrationInstanceRegistrar>>,
+    ) -> Self {
+        if let Some(plane) = control_plane {
+            if let (Some(pipeline), Some(registrar)) = (pipeline, registrar) {
+                self.caller_node_dispatch = Some(pipeline);
+                self.caller_policy_resolver = Some(Arc::new(
+                    ControlPlaneOrchestrationResolver { plane },
+                ));
+                self.caller_instance_registrar = Some(registrar);
+            } else {
+                // No protected assembly but a caller control plane present:
+                // the resolver ALONE refuses caller-enabled assignees closed
+                // at node dispatch — never a silent ordinary-wire
+                // degradation.
+                self.caller_policy_resolver = Some(Arc::new(
+                    RefusingOrchestrationResolver { plane },
+                ));
+                self.caller_node_dispatch = None;
+                self.caller_instance_registrar = None;
+            }
+        }
+        self
+    }
+
+    pub fn with_caller_node_dispatch(
+        mut self,
+        port: Arc<dyn bcs_service_api::port::OrchestrationCallerDispatchPort>,
+        resolver: Arc<dyn bcs_service_api::port::OrchestrationCallerPolicyResolver>,
+    ) -> Self {
+        self.caller_node_dispatch = Some(port);
+        self.caller_policy_resolver = Some(resolver);
+        self
     }
 
     pub fn with_bot_registry(mut self, bot_registry: Arc<dyn BotRegistryCoreService>) -> Self {
@@ -2821,6 +2957,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             input: cmd.input,
             caller_id: Some(cmd.caller_bot_id),
             authenticated_human: None,
+            caller_association: cmd.caller_association,
         })
         .await
     }
@@ -3075,6 +3212,61 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             self.runs.create_run(run.clone(), nodes).await?;
             true
         };
+        // §15.83 S2 (spec §8.5): a Human-triggered caller-aware run
+        // registers its INSTANCE-level delegation-only association NOW —
+        // before any node dispatch can claim it. The runtime stamps the
+        // created run's id into the template the trusted adapter supplied;
+        // the registrar owns the only identity material (in-memory
+        // lineage). Refusal keeps the run running caller-closed (the
+        // nodes then refuse closed at the protected wire) — never silent.
+        if let Some(mut association) = cmd.caller_association.clone() {
+            // Stamp the trusted scope facts the adapter left empty: the
+            // created run's identity, its group, its session-anchored
+            // mega-turn (the opening panel message id the runtime itself
+            // renders), and the request's own clock.
+            if association.workflow_run_id.trim().is_empty() {
+                association.workflow_run_id = run.run_id.clone();
+            }
+            if association.group_id.trim().is_empty() {
+                association.group_id = run.group_id.clone();
+            }
+            if association.session_id.trim().is_empty() {
+                association.session_id = run.session_id.clone();
+            }
+            if association.message_turn_id.trim().is_empty() {
+                association.message_turn_id = format!("{}:000-panel", run.run_id);
+            }
+            if association.now_ms <= 0 {
+                association.now_ms = bcs_protocol::now_ms() as i64;
+            }
+            if let Some(registrar) = self.caller_instance_registrar.clone() {
+                match registrar
+                    .register_instance(association)
+                    .await
+                {
+                    Ok(true) => {
+                        tracing::info!(run_id = %run.run_id,
+                            "state_machine: caller instance association registered (caller-aware run)");
+                    }
+                    Ok(false) => {
+                        tracing::warn!(run_id = %run.run_id,
+                            "state_machine: caller instance association refused (capacity); nodes stay caller-closed");
+                    }
+                    Err(error) => {
+                        tracing::warn!(run_id = %run.run_id, %error,
+                            "state_machine: caller instance registration refused; nodes stay caller-closed");
+                    }
+                }
+            } else {
+                // No registrar attached while the adapter carried an
+                // association: the composition is mis-assembled for
+                // caller-aware runs — refuse the whole submission rather
+                // than silently degrading the human's caller intent.
+                return Err(CollaborationRuntimeError::InvalidRequest(
+                    "caller association supplied but no caller registrar is configured".into(),
+                ));
+            }
+        }
         if !created {
             return Err(CollaborationRuntimeError::Conflict(
                 "state_machine_run_active: the current session already has an active state-machine run"
@@ -3447,6 +3639,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 ));
             }
         };
+        let caller_ingress = cmd.caller_ingress.clone();
         let response = self
             .respond_human_node(RespondHumanNodeCommand {
                 run_id: run.run_id,
@@ -3456,6 +3649,24 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 source: cmd.source,
             })
             .await?;
+        // §15.83 S2 human-input rearm (spec 2026-10-22): refreshes the
+        // run's delegation-only association window. The response's primary
+        // purpose is node data — a missing registrar or refused refresh
+        // never fails the response; nodes keep the existing lineage facts.
+        //
+        // INTENTIONAL ORDERING BOUNDARY — do not "fix" the apparent
+        // mismatch: `respond_human_node` drives node progression
+        // internally, meaning sibling/next nodes dispatched inside
+        // `apply_completed_node_progression` read the PRE-rearm lineage
+        // window; a refreshed window only benefits subsequent rounds
+        // (retry / progression scan / later dispatch). This is the
+        // accepted consequence of the spec's "refresh AFTER consumption"
+        // ordering (spec 2026-10-22: 续注真正生效于前端重连后的新输入).
+        // Whoever touches `apply_completed_node_progression` must NOT
+        // rearrange this ordering based on that apparent mismatch.
+        if let Some(ingress) = caller_ingress {
+            self.rearm_instance_association(&response.run, ingress).await;
+        }
         Ok(HandleSessionHumanInputOutcome::Consumed { response })
     }
 
@@ -5028,6 +5239,10 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             auto_start_on_service_invocation: cmd.auto_start_on_service_invocation,
             requires_human_input_channel,
         })
+    }
+
+    fn caller_orchestration_wired(&self) -> bool {
+        self.caller_instance_registrar.is_some() || self.caller_node_dispatch.is_some()
     }
 }
 
@@ -6767,5 +6982,72 @@ runtime:
             CollaborationRuntimeError::NodeNotFound { run_id, node_id }
                 if run_id == "run-missing-node" && node_id == "missing"
         ));
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// §15.83 S4 (review-VI P1): the control-plane-backed orchestration resolvers.
+// ---------------------------------------------------------------------------
+
+/// The full-shape composition: caller-enabled assignee → Protected with an
+/// execution-bound proof; absent/disabled → Ordinary (the historical direct
+/// wire). A control-plane READ failure resolves Ordinary-CLOSED too — never
+/// a guess: provider 必须自行降级判定。
+pub(super) struct ControlPlaneOrchestrationResolver {
+    pub plane: Arc<dyn bcs_service_api::BotControlPlaneCoreService>,
+}
+
+#[async_trait::async_trait]
+impl bcs_service_api::port::OrchestrationCallerPolicyResolver for ControlPlaneOrchestrationResolver {
+    async fn resolve(
+        &self,
+        assignee_bot_id: &str,
+        environment: &str,
+    ) -> bcs_service_api::port::OrchestrationAssigneeResolution {
+        match self.plane.get_caller_configuration(assignee_bot_id, environment).await {
+            Ok(Some(config)) if config
+                .snapshot
+                .as_ref()
+                .is_some_and(|snapshot| snapshot.caller_identity.enabled) =>
+            {
+                bcs_service_api::port::OrchestrationAssigneeResolution::Protected(
+                    bcs_service_api::port::OrchestrationAssigneePolicy::Execution,
+                )
+            }
+            Ok(Some(_)) => bcs_service_api::port::OrchestrationAssigneeResolution::Ordinary,
+            // An UNREADABLE configuration on a caller-aware workflow is a
+            // closed world verdict — the instance's association namespace is
+            // not guessed at node dispatch granularity.
+            Ok(None) | Err(_) => bcs_service_api::port::OrchestrationAssigneeResolution::UnknownClosed,
+        }
+    }
+}
+
+/// The refuse-closed fallback composition: a caller control plane exists but
+/// the protected pipeline does not — every assignee with caller ENABLED
+/// refuses closed; the ordinary wire never runs caller-enabled nodes.
+pub(super) struct RefusingOrchestrationResolver {
+    pub plane: Arc<dyn bcs_service_api::BotControlPlaneCoreService>,
+}
+
+#[async_trait::async_trait]
+impl bcs_service_api::port::OrchestrationCallerPolicyResolver for RefusingOrchestrationResolver {
+    async fn resolve(
+        &self,
+        assignee_bot_id: &str,
+        environment: &str,
+    ) -> bcs_service_api::port::OrchestrationAssigneeResolution {
+        match self.plane.get_caller_configuration(assignee_bot_id, environment).await {
+            Ok(Some(config)) if config
+                .snapshot
+                .as_ref()
+                .is_some_and(|snapshot| snapshot.caller_identity.enabled) =>
+            {
+                bcs_service_api::port::OrchestrationAssigneeResolution::UnknownClosed
+            }
+            Ok(Some(_)) => bcs_service_api::port::OrchestrationAssigneeResolution::Ordinary,
+            Ok(None) | Err(_) => bcs_service_api::port::OrchestrationAssigneeResolution::UnknownClosed,
+        }
     }
 }

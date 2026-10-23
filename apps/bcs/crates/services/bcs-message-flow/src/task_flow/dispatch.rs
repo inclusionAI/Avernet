@@ -117,13 +117,54 @@ pub async fn handle_task_dispatch(
             .ok_or_else(|| crate::queued_task::error("task manager missing"))?;
         let name = resolve_participant_name(flow, driver).await;
         let intent = crate::queued_task::TaskIntent { leg:crate::queued_task::TaskLeg::Dispatch,
-            task_id:effective_task_id.clone(), manager:cmd.driver_bot_id.clone(), worker:target_bot_id,
+            task_id:effective_task_id.clone(), manager:cmd.driver_bot_id.clone(), worker:target_bot_id.clone(),
             worker_name:target_bot_name, response_mode,
             assignment_intent_id:cmd.payload.get("assignment_intent_id").and_then(Value::as_str).map(str::to_owned),
             summary:message.chars().take(80).collect() };
-        let admission = crate::queued_task::command(flow, &group, &manager_session_id, intent,
+        let mut admission = crate::queued_task::command(flow, &group, &manager_session_id, intent,
             &message, cmd.payload.get("attachments"), &name, drain).await?;
-        crate::queued_task::admit(flow, admission).await?;
+        // Existing admission owns the real task/run identity. Persist only
+        // the trusted coordination edge's non-secret parent/invocation and
+        // issuance purpose; no separate child registration or lifecycle.
+        if let Some(delegation) = cmd.caller_delegation.as_ref() {
+            // Target's own caller configuration decides the issuance
+            // purpose (spec §8.3, review P1-2): the SAME per-target read
+            // web_send performs (control-plane enabled snapshot).
+            // Caller-enabled Worker → Execution identity; an absent or
+            // disabled config → DelegationOnly middle-hop — never a
+            // blanket purpose either way.
+            let target_caller_enabled = match flow.caller_admission.as_ref() {
+                Some(deps) => deps
+                    .control_plane
+                    .get_caller_configuration(&target_bot_id, &bcs_config::resolve_env_str())
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|config| config.snapshot)
+                    .is_some_and(|snapshot| snapshot.caller_identity.enabled),
+                None => false,
+            };
+            let purpose = if target_caller_enabled { "execution" } else { "delegation_only" };
+            for target in admission.targets.iter_mut() {
+                if let Value::Object(map) = &mut target.semantic_projection_json {
+                    map.insert("caller_required".into(), Value::Bool(true));
+                    map.insert("caller_task".into(), Value::String(message.clone()));
+                    // Nested under the DECLARED caller_delegation field: the
+                    // strict projection decode (deny_unknown_fields) accepts
+                    // the row on every task path (run this line through
+                    // intent/terminal/reply decoding unchanged).
+                    let mut nested = serde_json::Map::new();
+                    nested.insert("parent_run_id".to_string(), Value::String(delegation.parent_run_id.clone()));
+                    nested.insert("parent_attempt".to_string(), Value::from(delegation.parent_attempt));
+                    nested.insert("parent_bot_id".to_string(), Value::String(delegation.parent_bot_id.clone()));
+                    nested.insert("invocation_id".to_string(), Value::String(delegation.invocation_id.clone()));
+                    nested.insert("execution_purpose".to_string(), Value::String(purpose.to_string()));
+                    map.insert("caller_delegation".into(), Value::Object(nested));
+                }
+            }
+        }
+        let admitted = crate::queued_task::admit(flow, admission).await?;
+        let real_run_id = admitted.run_id.clone();
         let entry = flow.task_store.get(&effective_task_id).await
             .ok_or_else(|| crate::queued_task::error("admitted task projection missing"))?;
         record_task_event(flow, "task.assigned", &entry, &cmd.driver_bot_id, now,
@@ -137,7 +178,11 @@ pub async fn handle_task_dispatch(
             ])).await?;
         emit_task_ledger_status(flow, &group, &group_id, Some(&manager_session_id), &cmd.driver_bot_id).await;
         return Ok(TaskDispatchOutcome { task_id:effective_task_id, status:"queued".into(),
+            real_run_id,
             bot_deliveries:Vec::new(), frontend_deliveries:Vec::new() });
+    }
+    if cmd.caller_delegation.is_some() {
+        return Err(crate::queued_task::error("caller delegation requires managed task admission"));
     }
     let mut task_entry = new_task_entry(
         effective_task_id.clone(),
@@ -366,9 +411,21 @@ pub async fn handle_task_dispatch(
     )
     .await;
 
+    // The direct (legacy) branch never carries a delegation: the protected
+    // worker path is queue-backed by construction; a delegation here is a
+    // wiring error and refuses closed rather than dispatching ordinary.
+    if cmd.caller_delegation.is_some() {
+        return Err(ServiceError::InvalidOperation {
+            message: "caller delegation requires the queued protected path; direct dispatch refused".to_string(),
+            request_id: Some(effective_task_id),
+        });
+    }
     Ok(TaskDispatchOutcome {
         task_id: effective_task_id,
         status: "dispatched".to_string(),
+        // The direct branch's frame identity is the task id itself (the
+        // immediate chat.send the remainder of the legacy flow drives).
+        real_run_id: None,
         bot_deliveries: vec![result],
         frontend_deliveries: Vec::new(),
     })

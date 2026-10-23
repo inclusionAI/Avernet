@@ -107,6 +107,16 @@ impl MessageDeliveryCoreService for MessageDeliveryCore {
                     result.state.may_have_been_sent = true;
                     Status::Dispatching
                 }
+                // Typed caller dispatch commit (§7.5.1): only from Dispatching
+                // Send rows, keeps Dispatching, never stamps submitted /
+                // accepted. The application layer carries the payload; core
+                // refuses this event before an attempt is authorized.
+                Event::CommitCallerDispatch
+                    if current.status == Status::Dispatching
+                        && matches!(current.kind, DeliveryType::Send) =>
+                {
+                    Status::Dispatching
+                }
                 Event::Accepted => match current.status {
                     Status::Dispatching | Status::Unknown => Status::Running,
                     // ACK cannot erase a persisted cancellation intent.
@@ -151,6 +161,17 @@ impl MessageDeliveryCoreService for MessageDeliveryCore {
                     Status::Cancelling | Status::CancelUnknown => current.status,
                     _ => return Err(invalid()),
                 },
+                // Typed caller cancel intent (spec §"取消意图与回执"): the
+                // intent is durable in the same CAS as the state change. Only
+                // dispatched caller rows; a queued row has nothing fenced yet
+                // and uses the ordinary CancelRequested path.
+                Event::CancelCallerDispatch => match current.status {
+                    Status::Dispatching | Status::Running | Status::Unknown => {
+                        result.request_abort = true;
+                        Status::Cancelling
+                    }
+                    _ => return Err(invalid()),
+                },
                 Event::ScopeAbortRequested if active(current.status) => {
                     result.request_abort = true;
                     Status::Cancelling
@@ -185,6 +206,15 @@ impl MessageDeliveryCoreService for MessageDeliveryCore {
             }
         };
         if next == current.status && result.state.may_have_been_sent == current.may_have_been_sent {
+            // A typed caller dispatch commit changes the row (projection merge)
+            // even though the status stays Dispatching; it must persist.
+            if matches!(event, Event::CommitCallerDispatch) {
+                result.state.state_version = current
+                    .state_version
+                    .checked_add(1)
+                    .ok_or(DeliveryLifecycleError::VersionExhausted)?;
+                result.changed = true;
+            }
             return Ok(result);
         }
         result.state.status = next;

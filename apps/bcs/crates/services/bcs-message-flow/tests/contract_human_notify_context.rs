@@ -43,6 +43,8 @@ fn bot_caller() -> CallerContext {
 async fn web_send_notification_carries_group_label_and_session_title() {
     let (_support, recorder, flow) = setup().await;
     flow.handle_web_send(WebSendCommand {
+        caller_ingress: None,
+        speaking_lease: None,
         caller: bot_caller(),
         group_id: "group-1".to_string(),
         session_id: Some("group-1:s1".to_string()),
@@ -226,6 +228,8 @@ async fn set_notify_mode(support: &support::FlowTestSupport, mode: HumanMentionN
 
 fn web_send_from(sender: &str, mentions: Vec<String>) -> WebSendCommand {
     WebSendCommand {
+        caller_ingress: None,
+        speaking_lease: None,
         caller: if sender.starts_with("human_") {
             CallerContext::Human(HumanActor { actor_id: sender.to_string(), staff_no: "1".to_string() })
         } else {
@@ -442,6 +446,8 @@ async fn dm_group_never_notifies_for_any_mode() {
     ] {
         set_notify_mode(&support, mode).await;
         flow.handle_web_send(WebSendCommand {
+            caller_ingress: None,
+            speaking_lease: None,
             caller: CallerContext::Human(HumanActor { actor_id: "human_1".to_string(), staff_no: "1".to_string() }),
             group_id: "group-1".to_string(),
             session_id: None,

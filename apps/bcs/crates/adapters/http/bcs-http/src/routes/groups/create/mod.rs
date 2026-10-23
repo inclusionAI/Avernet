@@ -220,6 +220,7 @@ pub(crate) async fn create_group_without_inline_subscriptions(
                 &result,
                 caller_actor_id.clone(),
                 authenticated_human,
+                &headers,
             )
             .await?
             {

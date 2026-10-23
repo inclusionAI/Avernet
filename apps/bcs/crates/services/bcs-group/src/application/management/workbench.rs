@@ -93,9 +93,13 @@ impl WorkbenchSessionService for GroupManagement {
             // Compatibility path for Workbench clients that predate explicit
             // participant views. Its authorization and participant list are
             // the values produced by the original full-view connection.
+            let speaking_mode = self
+                .resolve_connect_speaking_mode(&legacy_participants, group.group_strategy)
+                .await;
             return Ok(WorkbenchConnectOutcome {
                 group_id: command.group_id,
                 participants: legacy_participants,
+                speaking_mode,
             });
         };
 
@@ -133,6 +137,9 @@ impl WorkbenchSessionService for GroupManagement {
         };
 
         Ok(WorkbenchConnectOutcome {
+            speaking_mode: self
+                .resolve_connect_speaking_mode(&participants, group.group_strategy)
+                .await,
             group_id: command.group_id,
             participants,
         })

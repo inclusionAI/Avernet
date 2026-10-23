@@ -55,6 +55,13 @@ pub struct WorkbenchParticipantView {
 pub struct WorkbenchConnectOutcome {
     pub group_id: String,
     pub participants: Vec<WorkbenchParticipantView>,
+    /// Session-level speaking semantics the server resolves over the
+    /// CURRENT membership and the CURRENT per-bot caller configuration
+    /// (`resolve_speaking_mode`): `lease_required` when the connect scope
+    /// has a Human member and a caller-enabled member Bot. Advisory for
+    /// session UI; message admission always re-resolves authoritatively.
+    #[serde(default)]
+    pub speaking_mode: bcs_domain::speaking_lease::SessionSpeakingMode,
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -108,7 +108,7 @@ async fn manager_worker_initialization_queues_owned_context_with_directed_audien
 }
 
 fn user_send() -> WebSendCommand {
-    WebSendCommand { caller: CallerContext::Human(HumanActor { actor_id:"human_1".into(), staff_no:"1".into() }),
+    WebSendCommand { caller_ingress: None, speaking_lease: None, caller: CallerContext::Human(HumanActor { actor_id:"human_1".into(), staff_no:"1".into() }),
         group_id:"group-1".into(), session_id:Some("group-1:system".into()), from_actor_id:"human_1".into(),
         from_name:None, message:"请检查当前需求".into(), mentions:vec!["bot-observer".into()], attachments:None,
         thinking:None, idempotency_key:Some("user-request".into()), source_im_message_id:None,
@@ -150,7 +150,7 @@ async fn initialization_is_queued_and_first_group_send_carries_required_context_
     assert!(wire.contains("初始化目标") && wire.contains("请检查当前需求"));
     let selection = &prepared.transport_context_json["context_selection"];
     assert_eq!(selection["selected"].as_array().unwrap().len(), 1);
-    let started = service.transition(DeliveryTransitionCommand { delivery_id:carrier.delivery_id.clone(),
+    let started = service.transition(DeliveryTransitionCommand { caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None, delivery_id:carrier.delivery_id.clone(),
         expected_state_version:carrier.state.state_version, event:Event::StartSend,
         now_ms:chrono::Utc::now().timestamp_millis(), request_id:None, actor_id:None, reply:None,
         transport_context_json:Some(prepared.transport_context_json), deadline_at_ms:Some(i64::MAX) }).await.unwrap();
@@ -158,7 +158,7 @@ async fn initialization_is_queued_and_first_group_send_carries_required_context_
     preparer.before_send(&started, &prepared.command).await.unwrap();
     assert!(contexts.get_context(started.run_id.as_deref().unwrap()).await.is_some());
     support.bot_delivery.deliver(prepared.command).await.unwrap();
-    service.transition(DeliveryTransitionCommand { delivery_id:started.delivery_id,
+    service.transition(DeliveryTransitionCommand { caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None, delivery_id:started.delivery_id,
         expected_state_version:started.state.state_version, event:Event::Completed,
         now_ms:chrono::Utc::now().timestamp_millis(), request_id:None, actor_id:None, reply:None,
         transport_context_json:None, deadline_at_ms:None }).await.unwrap();

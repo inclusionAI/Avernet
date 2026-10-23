@@ -44,6 +44,10 @@ use bcs_service_api::{
     ValidateCollaborationDefinitionYamlCommand,
 };
 use bcs_service_api::{CreateOrReactivateCommand, NewSessionParams, SessionKind};
+use bcs_service_api::application::caller_identity::{
+    AuthenticatedHumanCallerIngress, HumanCallerAuthSource,
+};
+use bcs_service_api::application::principal::HumanActor;
 use bcs_session::{SessionManagementServiceImpl, SessionManagementWithRuntimeCleanup};
 use bcs_session_store::MemorySessionRepo;
 use bcs_test_support::{NoopBotRegistryCoreService, NoopFriendCoreService};
@@ -325,7 +329,7 @@ async fn current_session_permission_is_owned_by_chat_and_manager_group_driver() 
             )]),
             opening_message: None,
             input: Value::Null,
-            judge_available: false,
+            judge_available: false, caller_association: None,
         })
         .await
         .expect_err("run start must re-check permission server-side");
@@ -421,7 +425,7 @@ async fn legacy_chat_session_allows_one_shot_run_for_participant_human_view() {
             )]),
             opening_message: None,
             input: Value::Null,
-            judge_available: false,
+            judge_available: false, caller_association: None,
         })
         .await
         .expect("message scope must not block a one-shot state-machine run");
@@ -502,7 +506,7 @@ async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publis
             )]),
             opening_message: Some(OpeningMessage::Text("Invalid {{bcs.unknown}}".to_string())),
             input: Value::Null,
-            judge_available: false,
+            judge_available: false, caller_association: None,
         })
         .await
         .expect_err("invalid one-shot opening message must be rejected");
@@ -534,7 +538,7 @@ async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publis
             )]),
             opening_message: None,
             input: json!({"question": "resolve this"}),
-            judge_available: false,
+            judge_available: false, caller_association: None,
         })
         .await
         .expect("start one-shot run");
@@ -737,7 +741,7 @@ async fn manager_worker_one_shot_human_input_consumes_the_assigned_human_chat_re
             participant_bindings: BTreeMap::new(),
             opening_message: None,
             input: Value::Null,
-            judge_available: false,
+            judge_available: false, caller_association: None,
         })
         .await
         .expect("start one-shot HumanInput run");
@@ -753,6 +757,7 @@ async fn manager_worker_one_shot_human_input_consumes_the_assigned_human_chat_re
             caller_actor_id: "human_1001".to_string(),
             content: "确认".to_string(),
             source: HumanResponseSource::Http,
+            caller_ingress: None,
         })
         .await
         .expect("route manager-worker chat reply to one-shot HumanInput");
@@ -844,7 +849,7 @@ async fn one_shot_result_publication_failure_marks_run_failed_and_allows_rerun()
             )]),
             opening_message: Some(opening_message.clone()),
             input: json!({"question": "resolve this"}),
-            judge_available: false,
+            judge_available: false, caller_association: None,
         })
         .await
         .expect("start one-shot run");
@@ -1172,7 +1177,7 @@ async fn human_input_without_authenticated_or_present_human_is_invalid_request()
             opening_message_override: None,
             input: json!({"proposal": "ship it"}),
             caller_id: Some("human_untrusted".to_string()),
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect_err("HumanInput must require a Present Human session participant");
@@ -1232,7 +1237,7 @@ async fn human_input_can_start_without_authenticated_human_when_session_has_pres
             opening_message_override: None,
             input: json!({"proposal": "ship it"}),
             caller_id: Some("bot_driver".to_string()),
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("existing Present Human should allow service invocation");
@@ -1291,7 +1296,7 @@ async fn authenticated_human_is_added_or_restored_before_human_input_starts() {
             authenticated_human: Some(AuthenticatedHumanCaller {
                 actor_id: "human_1001".to_string(),
                 display_name: Some("Reviewer".to_string()),
-            }),
+            }), caller_association: None,
         })
         .await
         .expect("authenticated Human should be materialized into session");
@@ -1345,7 +1350,7 @@ async fn authenticated_human_is_added_or_restored_before_human_input_starts() {
             authenticated_human: Some(AuthenticatedHumanCaller {
                 actor_id: "human_2002".to_string(),
                 display_name: Some("Returning Reviewer".to_string()),
-            }),
+            }), caller_association: None,
         })
         .await
         .expect("authenticated Human should be restored to Present");
@@ -1405,7 +1410,7 @@ async fn human_input_waits_without_bot_delivery_and_completes_from_natural_langu
             authenticated_human: Some(AuthenticatedHumanCaller {
                 actor_id: "human_1001".to_string(),
                 display_name: Some("Reviewer".to_string()),
-            }),
+            }), caller_association: None,
         })
         .await
         .expect("start human run");
@@ -1562,6 +1567,7 @@ async fn human_input_waits_without_bot_delivery_and_completes_from_natural_langu
             caller_actor_id: "human_1001".to_string(),
             content: "这个方案可以发布".to_string(),
             source: HumanResponseSource::Http,
+            caller_ingress: None,
         })
         .await
         .expect("route session message to HumanInput");
@@ -1688,7 +1694,7 @@ async fn frontend_human_input_skips_im_delivery_and_accepts_present_human() {
             authenticated_human: Some(AuthenticatedHumanCaller {
                 actor_id: "human_1001".to_string(),
                 display_name: Some("Reviewer".to_string()),
-            }),
+            }), caller_association: None,
         })
         .await
         .expect("start frontend HumanInput run");
@@ -1772,7 +1778,7 @@ async fn im_human_input_rejects_a_different_present_human() {
             opening_message_override: None,
             input: json!({"proposal": "assigned review"}),
             caller_id: Some("bot_driver".to_string()),
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start assigned IM HumanInput run");
@@ -1833,7 +1839,7 @@ async fn state_machine_session_rejects_message_without_pending_human_input() {
             authenticated_human: Some(AuthenticatedHumanCaller {
                 actor_id: "human_1001".to_string(),
                 display_name: Some("Reviewer".to_string()),
-            }),
+            }), caller_association: None,
         })
         .await
         .expect("start bot run");
@@ -1845,6 +1851,7 @@ async fn state_machine_session_rejects_message_without_pending_human_input() {
             caller_actor_id: "human_1001".to_string(),
             content: "这条消息不能发送给 bot".to_string(),
             source: HumanResponseSource::Http,
+            caller_ingress: None,
         })
         .await
         .expect_err("state-machine chat must reject input while no HumanInput is pending");
@@ -1900,7 +1907,7 @@ async fn human_run_owner_can_cancel_through_human_access_api() {
             authenticated_human: Some(AuthenticatedHumanCaller {
                 actor_id: "human_1001".to_string(),
                 display_name: Some("Reviewer".to_string()),
-            }),
+            }), caller_association: None,
         })
         .await
         .expect("start Human run");
@@ -1966,7 +1973,7 @@ async fn human_runtime_rejects_missing_context_and_invalid_response_targets() {
             authenticated_human: Some(AuthenticatedHumanCaller {
                 actor_id: "human_1001".to_string(),
                 display_name: Some("Reviewer".to_string()),
-            }),
+            }), caller_association: None,
         })
         .await
         .expect("start Human run");
@@ -1993,7 +2000,7 @@ async fn human_runtime_rejects_missing_context_and_invalid_response_targets() {
                 authenticated_human: Some(AuthenticatedHumanCaller {
                     actor_id: "human_1001".to_string(),
                     display_name: Some("Reviewer".to_string()),
-                }),
+                }), caller_association: None,
             })
             .await
             .expect_err("invalid run context must reject start");
@@ -2007,6 +2014,7 @@ async fn human_runtime_rejects_missing_context_and_invalid_response_targets() {
             caller_actor_id: "human_1001".to_string(),
             content: "regular chat".to_string(),
             source: HumanResponseSource::Http,
+            caller_ingress: None,
         })
         .await
         .expect("regular group remains outside state-machine input routing");
@@ -2035,6 +2043,7 @@ async fn human_runtime_rejects_missing_context_and_invalid_response_targets() {
                 caller_actor_id: "human_1001".to_string(),
                 content: "invalid context".to_string(),
                 source: HumanResponseSource::Http,
+                caller_ingress: None,
             })
             .await
             .expect_err("invalid state-machine input context must be rejected");
@@ -2161,7 +2170,7 @@ async fn human_input_uses_the_same_judge_contract_as_bot_output() {
             authenticated_human: Some(AuthenticatedHumanCaller {
                 actor_id: "human_1001".to_string(),
                 display_name: Some("Reviewer".to_string()),
-            }),
+            }), caller_association: None,
         })
         .await
         .expect("start judged Human run");
@@ -2214,7 +2223,7 @@ async fn human_input_is_persisted_and_no_longer_pending_while_judging() {
             authenticated_human: Some(AuthenticatedHumanCaller {
                 actor_id: "human_1001".to_string(),
                 display_name: Some("Reviewer".to_string()),
-            }),
+            }), caller_association: None,
         })
         .await
         .expect("start judged Human run");
@@ -2307,7 +2316,7 @@ async fn human_input_remains_persisted_when_judge_fails() {
             authenticated_human: Some(AuthenticatedHumanCaller {
                 actor_id: "human_1001".to_string(),
                 display_name: Some("Reviewer".to_string()),
-            }),
+            }), caller_association: None,
         })
         .await
         .expect("start judged Human run");
@@ -2374,7 +2383,7 @@ async fn human_input_timeout_ignores_global_retries_and_rejects_late_response() 
             authenticated_human: Some(AuthenticatedHumanCaller {
                 actor_id: "human_1001".to_string(),
                 display_name: Some("Reviewer".to_string()),
-            }),
+            }), caller_association: None,
         })
         .await
         .expect("start Human timeout run");
@@ -2440,7 +2449,7 @@ async fn timeout_scanner_aborts_run_when_group_is_missing() {
             opening_message_override: None,
             input: json!({"question": "group will be deleted"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run");
@@ -2498,7 +2507,7 @@ async fn timeout_scanner_aborts_run_when_session_is_missing() {
             opening_message_override: None,
             input: json!({"question": "session will be deleted"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run");
@@ -2559,7 +2568,7 @@ async fn timeout_scanner_skips_invalid_candidate_and_processes_later_run() {
             opening_message_override: None,
             input: json!({"question": "valid timeout"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start valid run");
@@ -2660,7 +2669,7 @@ async fn single_node_run_completes_session_with_bot_final_text() {
             opening_message_override: None,
             input: json!({"question": "review this"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run");
@@ -2944,7 +2953,7 @@ async fn state_machine_bot_delivery_registers_message_flow_run_context() {
             opening_message_override: None,
             input: json!({"question": "stream this"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run");
@@ -2996,7 +3005,7 @@ async fn state_machine_explicit_node_timeout_overrides_provider_chat_default() {
             opening_message_override: None,
             input: json!({"question": "stream this"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run");
@@ -3045,7 +3054,7 @@ async fn start_run_fails_and_marks_node_failed_when_delivery_returns_not_deliver
             opening_message_override: None,
             input: json!({"question": "review this"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await;
 
@@ -3109,7 +3118,7 @@ async fn message_less_final_fails_attempt_and_schedules_retry() {
             opening_message_override: None,
             input: json!({"question": "empty final should retry"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run");
@@ -3226,7 +3235,7 @@ async fn state_machine_completion_dispatches_service_callback() {
             opening_message_override: None,
             input: json!({"question": "callback after completion"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run");
@@ -3279,7 +3288,7 @@ async fn state_machine_runtime_logs_run_node_and_terminal_lifecycle() {
                 opening_message_override: None,
                 input: json!({"question": "logging"}),
                 caller_id: Some("caller-1".to_string()),
-                authenticated_human: None,
+                authenticated_human: None, caller_association: None,
             })
             .await
             .expect("start run");
@@ -3363,7 +3372,7 @@ async fn fixed_loop_preview_honors_server_limits_and_cannot_start_or_configure_v
     let started = runtime.start_state_machine_run(StartStateMachineRunCommand {
         group_id: "group-1".into(), session_id: None, definition_yaml: Some(yaml.into()),
         definition: None, definition_ref: None, participant_bindings: None, opening_message_override: None,
-        input: json!({}), caller_id: None, authenticated_human: None,
+        input: json!({}), caller_id: None, authenticated_human: None, caller_association: None,
     }).await;
     assert!(matches!(started, Err(CollaborationRuntimeError::InvalidDefinition(_))));
     assert!(delivery.commands.lock().await.is_empty());
@@ -3415,7 +3424,7 @@ async fn start_run_uses_group_default_definition_binding() {
             opening_message_override: None,
             input: json!({"question": "use binding"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run from binding");
@@ -3451,7 +3460,7 @@ async fn deleting_session_aborts_all_active_state_machine_runs() {
             opening_message_override: None,
             input: json!({"question": "delete the session"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run");
@@ -3514,7 +3523,7 @@ async fn deleting_group_aborts_active_state_machine_runs() {
             opening_message_override: None,
             input: json!({"question": "delete the group"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run");
@@ -3569,7 +3578,7 @@ async fn retrying_deleted_group_cleanup_aborts_orphaned_active_runs() {
             opening_message_override: None,
             input: json!({"question": "recover orphaned run"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run");
@@ -3639,7 +3648,7 @@ async fn group_runtime_cleanup_aborts_runs_and_removes_sessions_and_binding() {
             opening_message_override: None,
             input: json!({"question": "review this"}),
             caller_id: Some("driver-bot".to_string()),
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run");
@@ -3739,7 +3748,7 @@ async fn configure_im_definition_defers_channel_validation_until_run_start() {
             opening_message_override: None,
             input: Value::Null,
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect_err("run start must still enforce the active binding");
@@ -4010,7 +4019,7 @@ async fn start_run_from_group_binding_does_not_upsert_persisted_definition() {
             opening_message_override: None,
             input: json!({"question": "use binding without rewriting definition"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run from binding");
@@ -4087,7 +4096,7 @@ async fn custom_opening_message_is_rendered_once_and_reused_from_history() {
             opening_message_override: None,
             input: Value::Null,
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run");
@@ -4137,7 +4146,7 @@ async fn custom_opening_message_is_rendered_once_and_reused_from_history() {
             opening_message_override: None,
             input: Value::Null,
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start next run");
@@ -4193,7 +4202,7 @@ async fn opening_message_persistence_failure_fails_run_before_node_dispatch() {
             opening_message_override: None,
             input: Value::Null,
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect_err("opening message persistence failure must abort startup");
@@ -4266,7 +4275,7 @@ async fn start_run_uses_group_participant_bindings_for_template_definition() {
             opening_message_override: None,
             input: json!({"question": "use participant binding"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run from binding");
@@ -4337,7 +4346,7 @@ async fn start_run_rejects_multi_bot_slot_with_current_single_assignee_runtime()
             opening_message_override: None,
             input: json!({"question": "multi"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect_err("multi bot slot is not supported by the current single-assignee runtime");
@@ -4374,7 +4383,7 @@ async fn graph_view_returns_snapshot_edges_and_node_status() {
             opening_message_override: None,
             input: json!({"question": "graph"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run");
@@ -4449,7 +4458,7 @@ async fn complete_transitions_support_fan_out_and_implicit_all_join() {
             opening_message_override: None,
             input: json!({"question": "join"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run");
@@ -4544,7 +4553,7 @@ async fn judged_node_routes_selected_outcome_and_skips_unselected_branch() {
             opening_message_override: None,
             input: json!({"question": "judge branch"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run");
@@ -4635,7 +4644,7 @@ async fn judged_node_publishes_bot_output_but_not_judge_message_to_workbench() {
             opening_message_override: None,
             input: json!({"question": "judge branch"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run");
@@ -4701,7 +4710,7 @@ async fn judged_node_failure_records_runtime_event_and_fails_run() {
             opening_message_override: None,
             input: json!({"question": "judge branch"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run");
@@ -4783,7 +4792,7 @@ async fn judged_node_timeout_records_runtime_event_and_fails_run() {
             opening_message_override: None,
             input: json!({"question": "judge branch"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run");
@@ -4860,7 +4869,7 @@ async fn judged_node_keeps_shared_merge_reachable_from_selected_branch() {
             opening_message_override: None,
             input: json!({"question": "judge shared merge"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run");
@@ -5821,3 +5830,262 @@ mod history_identity;
 
 #[path = "runtime_progression/history_persistence.rs"]
 mod history_persistence;
+
+#[tokio::test]
+async fn caller_orchestration_wired_reports_composition_capability() {
+    use bcs_service_api::CollaborationRuntimeService;
+    let group_store = Arc::new(GroupStore::new());
+    group_store
+        .upsert(state_machine_test_group())
+        .await
+        .expect("seed group");
+    let sessions = test_sessions();
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let bare = test_runtime!(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        group_store.clone(),
+        sessions.clone(),
+        Arc::new(RecordingDelivery::default()),
+        noop_judge(),
+    );
+    assert!(!CollaborationRuntimeService::caller_orchestration_wired(&bare));
+
+    #[derive(Default)]
+    struct CountingRegistrar;
+    #[async_trait::async_trait]
+    impl bcs_service_api::port::OrchestrationInstanceRegistrar for CountingRegistrar {
+        async fn register_instance(
+            &self,
+            _association: bcs_service_api::port::OrchestrationInstanceAssociation,
+        ) -> Result<bool, bcs_service_api::port::OrchestrationDispatchError> {
+            Ok(true)
+        }
+    }
+
+    let wired = test_runtime!(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        group_store,
+        sessions,
+        Arc::new(RecordingDelivery::default()),
+        noop_judge(),
+    )
+    .with_caller_instance_registrar(Arc::new(CountingRegistrar));
+    assert!(CollaborationRuntimeService::caller_orchestration_wired(&wired));
+}
+
+// §15.83 S2 human-input rearm (spec 2026-10-22, G1 entry B): after a
+// HumanInput node consumes a human response, the runtime refreshes the
+// run's delegation-only instance association window with the trusted
+// human ingress carried on the command.
+
+struct RecordingInstanceRegistrar {
+    registrations: StdMutex<Vec<bcs_service_api::port::OrchestrationInstanceAssociation>>,
+}
+
+impl RecordingInstanceRegistrar {
+    fn new() -> Self {
+        Self {
+            registrations: StdMutex::new(Vec::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl bcs_service_api::port::OrchestrationInstanceRegistrar for RecordingInstanceRegistrar {
+    async fn register_instance(
+        &self,
+        association: bcs_service_api::port::OrchestrationInstanceAssociation,
+    ) -> Result<bool, bcs_service_api::port::OrchestrationDispatchError> {
+        self.registrations
+            .lock()
+            .expect("registrar lock")
+            .push(association);
+        Ok(true)
+    }
+}
+
+struct RefusingRegistrar;
+
+#[async_trait]
+impl bcs_service_api::port::OrchestrationInstanceRegistrar for RefusingRegistrar {
+    async fn register_instance(
+        &self,
+        _association: bcs_service_api::port::OrchestrationInstanceAssociation,
+    ) -> Result<bool, bcs_service_api::port::OrchestrationDispatchError> {
+        Ok(false)
+    }
+}
+
+fn human_input_rearm_ingress() -> AuthenticatedHumanCallerIngress {
+    let now = bcs_protocol::now_ms() as i64;
+    AuthenticatedHumanCallerIngress::new(
+        HumanActor {
+            actor_id: "human_1001".into(),
+            staff_no: "1001".into(),
+        },
+        HumanCallerAuthSource::HttpAuth,
+        now - 1_000,
+        now + 300_000,
+        bcs_config::resolve_env_str(),
+    )
+    .expect("valid trusted ingress")
+}
+
+async fn human_input_rearm_setup(
+    registrar: Arc<dyn bcs_service_api::port::OrchestrationInstanceRegistrar>,
+) -> (CollaborationRuntime, String, String) {
+    let group_store = Arc::new(GroupStore::new());
+    let group = session_collaboration_group(GroupStrategy::ManagerWorker);
+    group_store
+        .upsert(group.clone())
+        .await
+        .expect("seed manager-worker group");
+    let mut participants = group.participants.clone();
+    let mut human = Participant::human("human_1001", ParticipantRole::Observer);
+    human.mode = Some(ParticipantMode::Present);
+    human.message_view_scope = MessageViewScope::Participant;
+    participants.push(human);
+    let sessions = test_sessions();
+    let session = sessions
+        .create_or_reactivate(CreateOrReactivateCommand {
+            group_id: group.id.clone(),
+            session_id: None,
+            params: NewSessionParams {
+                session_kind: SessionKind::Chat,
+                participants,
+                message_visibility_version: 1,
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("seed manager-worker session")
+        .session;
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let runtime = test_runtime!(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group_store,
+        sessions,
+        Arc::new(RecordingDelivery::default()),
+        noop_judge(),
+    )
+    .with_caller_instance_registrar(registrar)
+    .with_message_repo(Arc::new(MemoryMessageRepo::new()))
+    .with_result_publisher(Arc::new(RecordingResultPublisher::default()));
+    (runtime, group.id, session.id)
+}
+
+#[tokio::test]
+async fn human_input_response_re_arms_the_run_caller_instance_association() {
+    let registrar = Arc::new(RecordingInstanceRegistrar::new());
+    let (runtime, group_id, session_id) =
+        human_input_rearm_setup(registrar.clone()).await;
+
+    let started = runtime
+        .start_session_state_machine_run(StartSessionStateMachineRunCommand {
+            session_id: session_id.clone(),
+            caller_bot_id: "driver-bot".to_string(),
+            definition_yaml: one_shot_human_input_authoring_yaml(),
+            participant_bindings: BTreeMap::new(),
+            opening_message: None,
+            input: Value::Null,
+            judge_available: false, caller_association: None,
+        })
+        .await
+        .expect("start one-shot HumanInput run");
+    assert_eq!(
+        started.view.nodes[0].status,
+        StateMachineNodeStatus::Running
+    );
+
+    let outcome = runtime
+        .handle_session_human_input(HandleSessionHumanInputCommand {
+            group_id: group_id.clone(),
+            session_id: Some(session_id.clone()),
+            caller_actor_id: "human_1001".to_string(),
+            content: "确认".to_string(),
+            source: HumanResponseSource::Http,
+            caller_ingress: Some(human_input_rearm_ingress()),
+        })
+        .await
+        .expect("route manager-worker chat reply to one-shot HumanInput");
+    let HandleSessionHumanInputOutcome::Consumed { response } = outcome else {
+        panic!("assigned Human reply must be consumed by the one-shot run");
+    };
+    assert_eq!(response.node.status, StateMachineNodeStatus::Completed);
+    assert_eq!(response.run.status, StateMachineRunStatus::Completed);
+
+    let registered = registrar.registrations.lock().expect("registrar lock");
+    assert_eq!(registered.len(), 1);
+    assert_eq!(registered[0].workflow_run_id, started.view.run.run_id);
+    assert_eq!(registered[0].group_id, group_id);
+    assert_eq!(registered[0].session_id, response.run.session_id);
+    assert_eq!(
+        registered[0].message_turn_id,
+        format!("{}:000-panel", started.view.run.run_id)
+    );
+    assert_eq!(registered[0].environment, bcs_config::resolve_env_str());
+    assert_eq!(registered[0].expires_at_ms, registered[0].ingress.expires_at_ms());
+    assert_eq!(registered[0].ingress.actor().staff_no, "1001");
+    assert_eq!(
+        registered[0].history_cutoff_seq, 0,
+        "rearm mirror must keep the §15.90 hardcoded ceiling"
+    );
+    assert!(
+        registered[0].now_ms > 0,
+        "rearm mirror must stamp a real clock"
+    );
+}
+
+#[tokio::test]
+async fn human_input_response_refused_association_refresh_still_consumes_the_reply() {
+    let (runtime, group_id, session_id) =
+        human_input_rearm_setup(Arc::new(RefusingRegistrar)).await;
+
+    let started = runtime
+        .start_session_state_machine_run(StartSessionStateMachineRunCommand {
+            session_id: session_id.clone(),
+            caller_bot_id: "driver-bot".to_string(),
+            definition_yaml: one_shot_human_input_authoring_yaml(),
+            participant_bindings: BTreeMap::new(),
+            opening_message: None,
+            input: Value::Null,
+            judge_available: false, caller_association: None,
+        })
+        .await
+        .expect("start one-shot HumanInput run");
+    assert_eq!(
+        started.view.nodes[0].status,
+        StateMachineNodeStatus::Running
+    );
+
+    // The registrar refuses the refresh (a full index / cross-subject
+    // submission): the human response's primary purpose is node data, so
+    // the consumption must still succeed and the node must complete.
+    let outcome = runtime
+        .handle_session_human_input(HandleSessionHumanInputCommand {
+            group_id: group_id,
+            session_id: Some(session_id),
+            caller_actor_id: "human_1001".to_string(),
+            content: "确认".to_string(),
+            source: HumanResponseSource::Http,
+            caller_ingress: Some(human_input_rearm_ingress()),
+        })
+        .await
+        .expect("refused association refresh must not fail the human reply");
+    let HandleSessionHumanInputOutcome::Consumed { response } = outcome else {
+        panic!("assigned Human reply must stay consumed despite refused rearm");
+    };
+    assert_eq!(response.node.status, StateMachineNodeStatus::Completed);
+    assert_eq!(response.node.artifact_text.as_deref(), Some("确认"));
+    assert_eq!(response.node.responded_by.as_deref(), Some("human_1001"));
+    assert_eq!(response.run.status, StateMachineRunStatus::Completed);
+}

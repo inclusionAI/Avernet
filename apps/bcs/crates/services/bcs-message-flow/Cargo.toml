@@ -11,6 +11,9 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+bcs-caller-identity-api = { workspace = true }
+thiserror = { workspace = true }
+
 bcs-observability = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
@@ -29,10 +32,14 @@ bcs-chat-run-store = { workspace = true }
 bcs-cache-api = { workspace = true }
 bcs-protocol = { workspace = true }
 chrono = { workspace = true }
+sha2 = { workspace = true }
+
+bcs-config = { workspace = true }
+bcs-db-api = { workspace = true }
 
 [dev-dependencies]
-bcs-db-api = { workspace = true }
 bcs-db-local = { workspace = true }
+
 # The integration suite uses the composition root's SQLite migration runner.
 sha2 = { workspace = true }
 hex = { workspace = true }
@@ -47,3 +54,4 @@ tokio = { workspace = true, features = ["test-util"] }
 bcs-session = { workspace = true }
 bcs-session-store = { workspace = true }
 bcs-group-store = { workspace = true }
+bcs-bot-store = { workspace = true }

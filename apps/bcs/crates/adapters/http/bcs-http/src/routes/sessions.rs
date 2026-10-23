@@ -1473,6 +1473,11 @@ pub async fn session_chat(
             caller_actor_id: caller_id.to_string(),
             content: body.message.clone(),
             source: bcs_service_api::HumanResponseSource::Http,
+            // The HTTP session_chat path stays caller-closed for now; the
+            // design (spec 2026-10-22) scopes entry B to the WS channel.
+            // Route the same ingress here later if one-shot parity is
+            // ever needed.
+            caller_ingress: None,
         })
         .await
     {
@@ -1501,7 +1506,26 @@ pub async fn session_chat(
         GroupChatCaller::Human(human) => Some(human.actor_id.clone()),
         GroupChatCaller::Bot { .. } => body.from,
     };
+    // Strict same-authentication caller material (spec §10.1.1/§7.5.1):
+    // only attached when BOTH the concrete extractor is configured and the
+    // authentication chain yields a Human with a trusted session window.
+    // Extraction failure never fails the request here — the ordinary path
+    // continues and the seam makes the fail-closed judgment; the DM-only
+    // branch of the flow decides whether caller semantics apply.
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or_default();
+    let caller_ingress = match (&state.caller_ingress_source, &caller) {
+        (Some(source), GroupChatCaller::Human(_)) => source
+            .extract_caller_request(&headers, now_ms)
+            .await
+            .ok()
+            .map(|request| request.ingress),
+        _ => None,
+    };
     let cmd = GroupChatCommand {
+        caller_ingress,
         caller: group_chat_caller_context(&caller),
         group_id: sess.group_id.clone(),
         requested_sender_id,

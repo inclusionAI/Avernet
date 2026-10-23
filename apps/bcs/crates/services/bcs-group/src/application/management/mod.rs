@@ -80,6 +80,12 @@ pub struct GroupManagement {
     bot_runtime: Option<Arc<dyn BotRuntimeConnectionService>>,
     outbound_url_guard: OutboundUrlGuard,
     v1_openapi_create_policy: bool,
+    /// Batched caller-config read plane for the connect-time
+    /// `speaking_mode` projection. None = no caller capability is wired,
+    /// which resolves to `Plain` (the same closed-by-assembly default
+    /// every other caller consumer follows).
+    caller_config_plane:
+        Option<Arc<dyn bcs_service_api::core::bot_control_plane::BotControlPlaneCoreService>>,
 }
 
 pub struct GroupManagementWithRuntimeCleanup {
@@ -249,12 +255,84 @@ impl GroupManagement {
             bot_runtime: None,
             outbound_url_guard: OutboundUrlGuard::strict(),
             v1_openapi_create_policy: false,
+            caller_config_plane: None,
         }
     }
 
     pub fn with_bot_runtime(mut self, bot_runtime: Arc<dyn BotRuntimeConnectionService>) -> Self {
         self.bot_runtime = Some(bot_runtime);
         self
+    }
+
+    pub fn with_caller_config_plane(
+        mut self,
+        plane: Arc<dyn bcs_service_api::core::bot_control_plane::BotControlPlaneCoreService>,
+    ) -> Self {
+        self.caller_config_plane = Some(plane);
+        self
+    }
+
+    /// Advisory session-UI semantics for the Workbench connect outcome: the
+    /// same `resolve_speaking_mode` reduction the message admission fence
+    /// performs, read over the CURRENT membership and the CURRENT per-bot
+    /// caller configuration (except state_machine groups, which return
+    /// Plain before any reduction — their Human messages never enter the
+    /// web_send fence). Message admission re-resolves authoritatively
+    /// per submission — this projection never gates server behavior.
+    /// Without a wired caller-config plane no caller capability exists, so
+    /// the reduction stays `Plain` (assembly-closed default).
+    pub(crate) async fn resolve_connect_speaking_mode(
+        &self,
+        participants: &[WorkbenchParticipantView],
+        group_strategy: GroupStrategy,
+    ) -> bcs_domain::speaking_lease::SessionSpeakingMode {
+        use bcs_domain::speaking_lease::SessionSpeakingMode;
+
+        // G2 (spec 2026-10-22): state_machine groups route Human messages
+        // through the HumanInput terminal path (dispatcher.rs) — they never
+        // ride the web_send admission fence, so the speaking lease carries
+        // no meaning for their sessions.
+        if group_strategy == GroupStrategy::StateMachine {
+            return SessionSpeakingMode::Plain;
+        }
+        // Human members carry the canonical `human_<staff_no>` actor id — the
+        // same format every Workbench scope check trims on.
+        let has_human_member = participants
+            .iter()
+            .any(|participant| participant.bot_uuid.starts_with("human_"));
+        if !has_human_member {
+            return SessionSpeakingMode::Plain;
+        }
+        let Some(plane) = self.caller_config_plane.as_ref() else {
+            return SessionSpeakingMode::Plain;
+        };
+        let bot_ids: Vec<String> = participants
+            .iter()
+            .filter(|participant| !participant.bot_uuid.starts_with("human_"))
+            .map(|participant| participant.bot_uuid.clone())
+            .collect();
+        if bot_ids.is_empty() {
+            return SessionSpeakingMode::Plain;
+        }
+        // One batched read (§15.96) over the same cache path the message
+        // fence uses; a read failure keeps the advisory projection Plain
+        // instead of failing the connect handshake.
+        let any_bot_caller_enabled = match plane
+            .get_caller_configurations(&bot_ids, &bcs_config::resolve_env_str())
+            .await
+        {
+            Ok(configs) => configs.iter().any(|(_, config)| {
+                config
+                    .snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.caller_identity.enabled)
+            }),
+            Err(_) => false,
+        };
+        bcs_domain::speaking_lease::resolve_speaking_mode(
+            has_human_member,
+            any_bot_caller_enabled,
+        )
     }
 
     pub fn with_channel_binding_cleanup(
