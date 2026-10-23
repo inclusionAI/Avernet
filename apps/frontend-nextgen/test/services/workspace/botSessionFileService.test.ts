@@ -220,6 +220,13 @@ describe('botSessionFileService.uploadOne', () => {
 });
 
 describe('botSessionFileService 列表/删除/下载', () => {
+  it('好友文件列表传递规范化的 f_user_id，保留 Bot owner_id', async () => {
+    mocked.listReady.mockResolvedValue({ files: [] });
+    await botSessionFileService.loadReady('bot-1', 'sess-1', 'human_149608', '146836', 'human_149608');
+    expect(mocked.listReady).toHaveBeenCalledWith('bot-1', 'sess-1', {
+      user_id: '149608', owner_id: '146836', f_user_id: '149608',
+    });
+  });
   it('loadReady 映射 view', async () => {
     mocked.listReady.mockResolvedValue({
       files: [

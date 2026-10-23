@@ -6,7 +6,13 @@ from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 @runtime_checkable
 class ExpertChatServiceProtocol(Protocol):
-    """Service API for expert-chat bot list + session lifecycle."""
+    """Service API for expert-chat bot list + session lifecycle.
+
+    Read methods may receive actor_user_id from the verified delivery caller.
+    Omission preserves user_id as actor; user_id always selects the session
+    subject. A different actor requires explicit friendship authorization and
+    must be the Bot owner. This is not a client-selectable elevation flag.
+    """
 
     def add_chat_bot(
         self, user_id: str, bot_id: str, owner_id: str
@@ -37,7 +43,7 @@ class ExpertChatServiceProtocol(Protocol):
         offset: int = 0,
         iam_token: Optional[str] = None,
         *,
-        bcn_friend_authorized: bool = False,
+        bcn_friend_authorized: bool = False, actor_user_id: str | None = None,
     ) -> Dict[str, Any]: ...
 
     async def create_chat_session(
@@ -74,13 +80,13 @@ class ExpertChatServiceProtocol(Protocol):
     async def get_owned_chat_session(
         self, user_id: str, bot_id: str, owner_id: str, session_key: str,
         iam_token: Optional[str] = None,
-        *, bcn_friend_authorized: bool = False,
+        *, bcn_friend_authorized: bool = False, actor_user_id: str | None = None,
     ) -> Dict[str, Any]: ...
 
     async def list_owned_chat_session_messages(
         self, user_id: str, bot_id: str, owner_id: str, session_key: str,
         limit: int, offset: int = 0, iam_token: Optional[str] = None,
-        *, bcn_friend_authorized: bool = False,
+        *, bcn_friend_authorized: bool = False, actor_user_id: str | None = None,
     ) -> Dict[str, Any]: ...
 
     async def update_owned_chat_session(
