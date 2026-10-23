@@ -15,13 +15,11 @@ from __future__ import annotations
 
 from typing import Callable
 
-from injector import Binder, Injector, Module, inject, provider, singleton
+from injector import Binder, Injector, Module, inject, multiprovider, provider, singleton
 
 from agentclaw.community.api.bot_genome_promotion_service import GenomePromotionServiceProtocol
 from agentclaw.community.api.bot_genome_registry_service import GenomeRegistryProtocol
-from agentclaw.community.core.apply_engine.run.service_protocol import (
-    ApplyRunServiceProtocol,
-)
+from agentclaw.community.core.apply_engine.compiler import GenomeStateRef, StateCompilers
 from agentclaw.community.core.content_store import ContentStoreProtocol
 from agentclaw.community.core.apply_engine.delivery_mode import TeclawDeliveryMode
 from agentclaw.community.core.bot_genome.capture import BotStateReader
@@ -31,6 +29,7 @@ from agentclaw.community.core.bot_genome.promotion import (
     PendingDeliveryApplier,
     RevisionApplier,
 )
+from agentclaw.community.core.bot_genome.compile import GenomeCompiler
 from agentclaw.community.core.bot_genome.registry import GenomeRegistryService
 from agentclaw.community.core.bot_genome.spec_checks import SpecChecks
 from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
@@ -121,7 +120,6 @@ class BotGenomeModule(Module):
         validator: Callable[[], SkillPackageValidator],
         mcp_auth: Callable[[], MCPAuthServiceProtocol],
         mcp_config: Callable[[], MCPConfigServiceProtocol],
-        applies: ApplyRunServiceProtocol,
     ) -> GenomeRegistryProtocol:
         package_validator = validator()
         return GenomeRegistryService(
@@ -133,8 +131,23 @@ class BotGenomeModule(Module):
             state_reader=state_reader,
             checks=SpecChecks(validator=package_validator, mcp_auth=_Lazy(mcp_auth), mcp_config=_Lazy(mcp_config)),
             validator=package_validator,
-            applies=applies,
         )
+
+    @singleton
+    @provider
+    @inject
+    def genome_compiler(
+        self, registry: GenomeRegistryProtocol, promotions: GenomePromotionRepositoryProtocol
+    ) -> GenomeCompiler:
+        """The genome's ``DesiredStateCompiler``: a promotion id → its revision's desired state."""
+        return GenomeCompiler(registry=registry, promotions=promotions)
+
+    @singleton
+    @multiprovider
+    @inject
+    def genome_state_compiler(self, compiler: GenomeCompiler) -> StateCompilers:
+        """The genome row of the run service's compiler map; RSI-04 is its first caller."""
+        return {GenomeStateRef: compiler}
 
     @singleton
     @provider

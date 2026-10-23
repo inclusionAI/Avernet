@@ -79,7 +79,8 @@ provides:
   - RefMover
   - GenomeDiff
   - GeneChange
-  - CompiledManifest
+  - GenomeCompiler  # the DesiredStateCompiler for GenomeStateRef (compile.py); compile_spec renders a spec
+  - Drift
   - ContentReceipt
   - ApplyResult
   - Promotion
@@ -114,7 +115,6 @@ consumes:
   - "MCPAuthServiceProtocol (core.mcp) and MCPConfigServiceProtocol (core.mcp) — the MCP permission and bot-override checks apply runs, re-run at record time"
   - "placeholders.resolve (core.bot_config_manifest.schema.placeholders) — the ${BOT_*} substitution a captured script body gets, as apply would"
   - "IdentityFilePort (core.ports), BotCapabilityStateReaderProtocol, DirectActivationServiceProtocol, SkillServiceFactory local package storage (core.skill_center), ResourceService / ResourceFileService (core.resources, core.services), BotStartupScriptServiceProtocol (core.bot_startup_script) — what capture reads a bot through"
-  - "ApplyRunServiceProtocol.last_apply (core.bot_config_manifest) — the join applied_revision makes to find which promotion started the bot's last apply"
   - "the limits of core.bot_config_manifest.fetch.limits and schema.limits — mirrored, never redefined"
   - "the genome repository Protocols (core.repository) — persistence for the five ac_genome_* tables"
 consumed_by:
@@ -123,8 +123,10 @@ consumed_by:
   - "RSI-04 (direct delivery) — binds a real RevisionApplier; RSI-08 (evolution runs) records candidates through GenomeRegistryProtocol"
 internal_dependencies:
   - agentclaw.community.core.base
-  - agentclaw.community.core.apply_engine.outcomes  # ApplyStatus: only a SUCCEEDED apply is "what the bot runs"
-  - agentclaw.community.core.apply_engine.run.service_protocol  # last_apply, for applied_revision
+  - agentclaw.community.core.apply_engine.compiler  # Compiled, GenomeStateRef — the genome is one of the run service's compilers
+  - agentclaw.community.core.apply_engine.constructs  # the construct vocabulary a creation half narrows a state by
+  - agentclaw.community.core.apply_engine.context  # ApplyContext, the run the genome compiler compiles for (typing only)
+  - agentclaw.community.core.apply_engine.desired_state  # the DesiredState a revision compiles to
   - agentclaw.community.core.apply_engine.identity_types  # legal_identity_types — the persona types the bot's engine accepts
   - agentclaw.community.core.apply_engine.capabilities  # ManifestCapabilities, for the Manifest's MCP entry rules
   - agentclaw.community.core.bot_config_manifest.fetch.limits  # the fetch-time caps the contract mirrors

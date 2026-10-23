@@ -182,3 +182,18 @@ def test_engine_config_is_a_read_only_copy() -> None:
     assert entry.config["model"] == "x"
     with pytest.raises(TypeError):
         entry.config["model"] = "z"  # type: ignore[index]
+
+
+def test_only_keeps_the_named_constructs_declared_and_undeclares_the_rest() -> None:
+    """A creation phase applies half the constructs; ``only`` is how a compiled
+    state is narrowed to that half without recompiling."""
+    state = DesiredState(
+        script=Declaration((DesiredScript("echo"),)),
+        identity=Declaration((DesiredIdentityFile("SOUL.md", StoredContent(DIGEST)),)),
+        mcp=Declaration(()),
+    )
+    half = state.only({ManifestSection.SCRIPT, ManifestCategory.MCP})
+    assert half.declared == (ManifestSection.SCRIPT, ManifestCategory.MCP)
+    assert half.script == state.script and half.mcp == state.mcp and half.identity is None
+    assert state.only(()) == DesiredState.EMPTY
+    assert state.only(state.declared) == state
