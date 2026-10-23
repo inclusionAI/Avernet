@@ -28,6 +28,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
+from agentclaw.community.core.apply_engine.compiler import ManifestStateRef
 from agentclaw.community.core.bot_app_grant.protocols import (
     BotAppGrantSweepProtocol,
 )
@@ -634,6 +635,7 @@ class BotCreateWithManifestHandler:
                 bot=bot,
                 owner_id=str(payload["user_id"]),
                 actor_id=str(payload["user_id"]),
+                state=ManifestStateRef(),
                 trigger=CREATE_ON_CONTAINER_TRIGGER,
                 phase=ApplyPhase.ON_CONTAINER,
                 carry_from_apply_id=self._pre_container_apply_id(

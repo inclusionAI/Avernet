@@ -128,8 +128,8 @@ def _real_apply_service(manifests):
         BotConfigManifestApplyRepository,
     )
     from ..apply._fakes import (
-        FakeGitClient,
-        arca_only_delivery,
+        manifest_compilers,
+            arca_only_delivery,
         device_port_bundle,
     )
 
@@ -161,7 +161,7 @@ def _real_apply_service(manifests):
         manifest_service=manifests,
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
-        git_client_provider=lambda: FakeGitClient(),
+        compilers=manifest_compilers(manifests=manifests),
         task_queue_provider=lambda: None,
         bot_repository=_NoBot(),
         # The delivery seam, assembled the way the composition root

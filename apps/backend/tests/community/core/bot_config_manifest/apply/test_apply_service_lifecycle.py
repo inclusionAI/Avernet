@@ -10,17 +10,15 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
-from datetime import datetime
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from agentclaw.community.core.apply_engine.compiler import ManifestStateRef
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
-    ApplyReport,
     ApplyStatus,
-    SourceResolution,
 )
 from agentclaw.community.core.bot_config_manifest.apply.source_session import (
     SourceSession,
@@ -56,6 +54,7 @@ from ._fakes import (
     FakeStartupScriptService,
     arca_only_delivery,
     device_port_bundle,
+    manifest_compilers,
 )
 
 _ENTITY = "u_owner"
@@ -172,14 +171,11 @@ def world():
     scripts = FakeStartupScriptService()
     applies = BotConfigManifestApplyRepository(db)
     locks = BotConfigManifestApplyLockRepository(db)
+    manifests = _ManifestService(_DOCUMENT)
     service = BotConfigManifestApplyService(
-        manifest_service=_ManifestService(_DOCUMENT),
+        manifest_service=manifests,
         apply_repository=applies,
         lock_repository=locks,
-        # W7's git transport. This suite's document declares no ``sources``,
-        # so the client is never *used* — it is constructed per apply and
-        # must never be fetched through, which FakeGitClient enforces.
-        git_client_provider=lambda: FakeGitClient(),
         task_queue_provider=lambda: queue,
         bot_repository=_FakeBotRepository(_BOT_RECORD),
         # The delivery seam, assembled the way the composition root
@@ -188,6 +184,12 @@ def world():
         # does not declare are never reached, but their ports must
         # exist for the registry to register them.
         delivery_strategies=arca_only_delivery(device_port_bundle(script_service=scripts)),
+        # The Manifest compiler over the same document fake and apply
+        # repository (its git baselines). W7's git transport: this suite's
+        # document declares no ``sources``, so the client is never *used* —
+        # it is constructed per compile and must never be fetched through,
+        # which FakeGitClient enforces.
+        compilers=manifest_compilers(manifests=manifests, applies=applies, git=FakeGitClient),
     )
     # Closes the loop: the fake worker needs the service it runs work for.
     queue.service = service
@@ -201,6 +203,7 @@ def _start(service):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
+        state=ManifestStateRef(),
     )
 
 
@@ -317,6 +320,7 @@ def test_dry_run_writes_no_row_and_mints_no_id(world):
             bot=_BOT_RECORD,
             owner_id=_ENTITY,
             actor_id=_ENTITY,
+            state=ManifestStateRef(),
         )
     )
 
@@ -433,6 +437,7 @@ def test_the_audit_label_is_recorded_without_becoming_the_principal(world):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
+        state=ManifestStateRef(),
         audit_actor=label,
     )
     report = _drain(service)
@@ -456,6 +461,7 @@ def test_the_audit_label_defaults_to_the_principal(world):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
+        state=ManifestStateRef(),
     )
     _drain(service)
 
@@ -474,7 +480,6 @@ def test_partially_written_survives_the_storage_round_trip(world):
     path anybody uses. A field written by ``as_dict`` but not read back does not
     exist as far as the API is concerned.
     """
-    import json
 
     service, applies, _locks, _scripts, _manifests = world
     applies.start(
@@ -552,6 +557,7 @@ def test_an_enqueue_that_fails_terminates_the_report_and_frees_the_lock(
             bot=_BOT_RECORD,
             owner_id=_ENTITY,
             actor_id=_ENTITY,
+            state=ManifestStateRef(),
         )
 
     # The report is terminal, not stranded RUNNING.
@@ -567,6 +573,7 @@ def test_an_enqueue_that_fails_terminates_the_report_and_frees_the_lock(
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
+        state=ManifestStateRef(),
     )
     assert accepted.status is ApplyStatus.RUNNING
 
@@ -601,217 +608,6 @@ def test_a_source_session_is_built_per_apply_and_closed(world, monkeypatch):
         "each apply must build its own source session (one git client each)"
     )
     assert len(closed) == 2, "every finished apply must close its session"
-
-
-def _row(report: ApplyReport) -> object:
-    """A duck-typed apply row carrying one report payload — every field
-    ``_report_from_payload`` re-reads off the record (apply_id, bot_id,
-    trigger, started_at, finished_at, report, status)."""
-    from types import SimpleNamespace
-
-    return SimpleNamespace(
-        apply_id=report.apply_id,
-        bot_id=report.bot_id,
-        trigger=report.trigger,
-        started_at=report.started_at,
-        finished_at=None,
-        report=json.dumps(report.as_payload()),
-        status=report.status.value,
-    )
-
-
-def _report_with_sources(
-    resolutions, *, status=ApplyStatus.SUCCEEDED, apply_id: str = "prior"
-) -> ApplyReport:
-    return ApplyReport(
-        apply_id=apply_id,
-        bot_id=_BOT,
-        trigger="explicit",
-        status=status,
-        started_at=datetime.now(),
-        sources=tuple(resolutions),
-    )
-
-
-def test_a_strict_baseline_is_read_back_from_report_history(world, monkeypatch):
-    """``_last_resolutions``: the reports ARE the baseline table.
-
-    Strict mode reads "what did we resolve last time" out of
-    ``ApplyReport.sources`` rather than a second table, so the two cannot
-    drift. No report — and a report with no resolutions — yield no
-    opinions; a recorded resolution yields its SHA under its ``(url, ref)``;
-    and the walk is bounded by the history window rather than one row (see
-    the next test).
-    """
-    service, _applies, _locks, _scripts, _manifests = world
-
-    # Never applied: no report, no baselines.
-    assert service._last_resolutions(entity_id=_ENTITY, bot_id=_BOT) == {}
-
-    # A real apply with no declared sources records no resolutions.
-    _start(service)
-    report = _drain(service)
-    assert report.status is ApplyStatus.SUCCEEDED
-    assert report.sources == ()
-    assert service._last_resolutions(entity_id=_ENTITY, bot_id=_BOT) == {}
-
-    charts = SourceResolution(
-        name="charts",
-        url="https://git.corp/charts.git",
-        ref="main",
-        mode="strict",
-        resolved_sha="f" * 40,
-        auth="ci-token",
-    )
-    monkeypatch.setattr(
-        service._applies,
-        "recent",
-        lambda *, env, entity_id, bot_id, limit: [_row(
-            _report_with_sources([charts])
-        )],
-    )
-    assert service._last_resolutions(
-        entity_id=_ENTITY, bot_id=_BOT
-    ) == {("https://git.corp/charts.git", "main", "strict"): "f" * 40}
-
-
-def test_baselines_are_read_by_url_ref_and_mode_and_skip_incomplete_rows(
-    world, monkeypatch
-):
-    """The key is the repository, the ref and the mode, with three consequences.
-
-    Several rows in one report may share a key — the report carries one row
-    per *declaration*, so two ``from`` names over one repository at one mode
-    are two rows — and they always carry the same sha, because one apply
-    resolves a ``(url, ref)`` once. A second ref, or the same pair at the
-    other ``mode``, is its own key with its own answer. And a row missing
-    ``url`` or ``mode`` is skipped outright: that is a report written before
-    those were recorded, and there is no honest way to guess what it meant.
-    """
-    service, _applies, _locks, _scripts, _manifests = world
-    url = "https://git.corp/charts.git"
-    rows = [
-        SourceResolution(name="charts", url=url, ref="main",
-                         mode="non_strict", resolved_sha="f" * 40),
-        # A second declaration of the same repository, ref and mode.
-        SourceResolution(name="dashboards", url=url, ref="main",
-                         mode="non_strict", resolved_sha="f" * 40),
-        # Same repository, another ref: its own key, its own answer.
-        SourceResolution(name="pinned", url=url, ref="v1",
-                         mode="strict", resolved_sha="c" * 40),
-        # Same repository AND ref, the other mode: also its own key. This is
-        # the row that must not become the strict declaration's baseline.
-        SourceResolution(name="pinned-main", url=url, ref="main",
-                         mode="strict", resolved_sha="e" * 40),
-        # Pre-existing history: no url and no mode, so no baseline.
-        SourceResolution(name="legacy", ref="main", resolved_sha="d" * 40),
-    ]
-    monkeypatch.setattr(
-        service._applies,
-        "recent",
-        lambda *, env, entity_id, bot_id, limit: [_row(_report_with_sources(rows))],
-    )
-    assert service._last_resolutions(entity_id=_ENTITY, bot_id=_BOT) == {
-        (url, "main", "non_strict"): "f" * 40,
-        (url, "v1", "strict"): "c" * 40,
-        (url, "main", "strict"): "e" * 40,
-    }
-
-
-def test_a_failed_apply_does_not_wipe_a_strict_baseline(world, monkeypatch):
-    """The walk-back is the fix the review required: only the newest row
-    reads as "the last apply", and a newest apply whose fetch failed (its
-    report carries no resolution for the source) must not disarm strict
-    mode for the apply after it — the record one row back still holds the
-    baseline, and the newest row that carries a source wins per source."""
-    service, _applies, _locks, _scripts, _manifests = world
-    charts = SourceResolution(
-        name="charts",
-        url="https://git.corp/charts.git",
-        ref="main",
-        mode="strict",
-        resolved_sha="e" * 40,
-    )
-    empty_failed = _report_with_sources(
-        [], status=ApplyStatus.FAILED, apply_id="failed-1"
-    )
-    succeeded = _report_with_sources([charts], apply_id="prior-1")
-
-    # Newest first: the failed fetch recorded nothing; the row before it did.
-    monkeypatch.setattr(
-        service._applies,
-        "recent",
-        lambda *, env, entity_id, bot_id, limit: [_row(empty_failed), _row(succeeded)],
-    )
-    assert service._last_resolutions(
-        entity_id=_ENTITY, bot_id=_BOT
-    ) == {("https://git.corp/charts.git", "main", "strict"): "e" * 40}
-
-    # Newest wins per source: a newer report that re-resolved the source is
-    # the baseline, not an older one.
-    moved = SourceResolution(
-        name="charts",
-        url="https://git.corp/charts.git",
-        ref="main",
-        mode="strict",
-        resolved_sha="b" * 40,
-    )
-    monkeypatch.setattr(
-        service._applies,
-        "recent",
-        lambda *, env, entity_id, bot_id, limit: [
-            _row(_report_with_sources([moved])), _row(succeeded)
-        ],
-    )
-    assert service._last_resolutions(
-        entity_id=_ENTITY, bot_id=_BOT
-    ) == {("https://git.corp/charts.git", "main", "strict"): "b" * 40}
-
-
-def test_within_one_report_the_later_resolution_is_the_baseline(world, monkeypatch):
-    """A folded creation report can hold two resolutions of one moving ref.
-
-    Its two phases resolve minutes apart, with the carried (pre-container)
-    rows first, so a ``ref: main`` that moved between them leaves both commits
-    in one report. The later row is what the apply's own delivery stood
-    behind, so it is what the next apply compares against — taking the first
-    would hand ``keep_last`` the stored tree of a commit one older than what
-    was actually delivered.
-    """
-    service, _applies, _locks, _scripts, _manifests = world
-    url = "https://git.corp/manifest-testing.git"
-    phase_a = SourceResolution(name="content", url=url, ref="main",
-                               mode="non_strict", resolved_sha="7" * 40)
-    phase_b = SourceResolution(name="content", url=url, ref="main",
-                               mode="non_strict", resolved_sha="9" * 40)
-    monkeypatch.setattr(
-        service._applies,
-        "recent",
-        lambda *, env, entity_id, bot_id, limit: [
-            _row(_report_with_sources([phase_a, phase_b], apply_id="created"))
-        ],
-    )
-    assert service._last_resolutions(entity_id=_ENTITY, bot_id=_BOT) == {
-        (url, "main", "non_strict"): "9" * 40
-    }
-
-    # Across records the newest still wins outright: an older report's later
-    # row must not reach past a newer report that answered the same key.
-    older = SourceResolution(name="content", url=url, ref="main",
-                             mode="non_strict", resolved_sha="1" * 40)
-    monkeypatch.setattr(
-        service._applies,
-        "recent",
-        lambda *, env, entity_id, bot_id, limit: [
-            _row(_report_with_sources([phase_b], apply_id="newest")),
-            _row(_report_with_sources([phase_a, older], apply_id="older")),
-        ],
-    )
-    assert service._last_resolutions(entity_id=_ENTITY, bot_id=_BOT) == {
-        (url, "main", "non_strict"): "9" * 40
-    }
-
-
 
 
 def test_a_failed_handoff_has_no_session_to_leak(world, monkeypatch):
@@ -866,6 +662,7 @@ def test_a_dry_run_closes_its_session(world, monkeypatch):
             bot=_BOT_RECORD,
             owner_id=_ENTITY,
             actor_id=_ENTITY,
+            state=ManifestStateRef(),
         )
     )
     assert report.status is ApplyStatus.SUCCEEDED
@@ -906,6 +703,7 @@ def test_a_phase_on_a_non_creation_trigger_is_refused_before_anything_is_minted(
             bot=_BOT_RECORD,
             owner_id=_ENTITY,
             actor_id=_ENTITY,
+            state=ManifestStateRef(),
             trigger="explicit",
             phase=ApplyPhase.PRE_CONTAINER,
         )
@@ -922,6 +720,7 @@ def test_a_phase_on_a_non_creation_trigger_is_refused_before_anything_is_minted(
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
+        state=ManifestStateRef(),
     )
     assert accepted.apply_id
 
@@ -942,6 +741,7 @@ def test_a_creation_trigger_with_no_phase_is_refused_the_same_way(world):
             bot=_BOT_RECORD,
             owner_id=_ENTITY,
             actor_id=_ENTITY,
+            state=ManifestStateRef(),
             trigger="create:pre_container",
         )
 
@@ -955,6 +755,7 @@ def test_a_creation_trigger_with_no_phase_is_refused_the_same_way(world):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
+        state=ManifestStateRef(),
         trigger="create:on_container",
         phase=ApplyPhase.ON_CONTAINER,
     )
@@ -970,6 +771,7 @@ def test_the_second_phase_report_carries_the_first_phases_categories(world):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
+        state=ManifestStateRef(),
         trigger="create:pre_container",
         phase=ApplyPhase.PRE_CONTAINER,
     )
@@ -979,6 +781,7 @@ def test_the_second_phase_report_carries_the_first_phases_categories(world):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
+        state=ManifestStateRef(),
         trigger="create:on_container",
         phase=ApplyPhase.ON_CONTAINER,
         carry_from_apply_id=first.apply_id,
@@ -1011,6 +814,7 @@ def test_a_missing_carry_id_is_ignored_rather_than_failing_the_apply(world):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
+        state=ManifestStateRef(),
         trigger="create:on_container",
         phase=ApplyPhase.ON_CONTAINER,
         carry_from_apply_id="does-not-exist",
@@ -1051,6 +855,7 @@ def test_a_failed_first_phase_survives_the_merge_and_re_derives_the_summary(worl
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
+        state=ManifestStateRef(),
         trigger="create:pre_container",
         phase=ApplyPhase.PRE_CONTAINER,
     )
@@ -1067,6 +872,7 @@ def test_a_failed_first_phase_survives_the_merge_and_re_derives_the_summary(worl
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
+        state=ManifestStateRef(),
         trigger="create:on_container",
         phase=ApplyPhase.ON_CONTAINER,
         carry_from_apply_id=first.apply_id,
@@ -1138,7 +944,7 @@ def test_registering_a_materialiser_widens_it_with_no_edit_to_any_caller(world):
 
 
 def test_an_apply_that_cannot_be_rebuilt_terminates_instead_of_looping(world):
-    """A rebuild failure is terminal, not a retry.
+    """A compile failure on the worker is terminal, not a retry.
 
     The document is re-read at execution rather than carried in the payload, so
     it can fail to validate then — the bot's engine changed since the enqueue,
@@ -1156,12 +962,13 @@ def test_an_apply_that_cannot_be_rebuilt_terminates_instead_of_looping(world):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
+        state=ManifestStateRef(),
     )
-    # A second apply, whose rebuild will fail.
-    def _refuse(**_kwargs):
+    # A second apply, whose compile will fail.
+    async def _refuse(*_args, **_kwargs):
         raise RuntimeError("the stored document no longer validates")
 
-    service._parsed_or_empty = _refuse
+    service._compilers[ManifestStateRef].compile = _refuse
     payload = {
         "apply_id": "apply-that-cannot-start",
         "entity_id": _ENTITY,
@@ -1174,6 +981,7 @@ def test_an_apply_that_cannot_be_rebuilt_terminates_instead_of_looping(world):
         "lock_token": "no-such-token",
         "started_at": None,
         "phase": None,
+        "state": {"kind": "manifest"},
         "carry_from_apply_id": None,
         "engine_type": None,
         "bot_type": None,

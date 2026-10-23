@@ -23,7 +23,13 @@ from __future__ import annotations
 from types import MappingProxyType
 from typing import Callable, Mapping
 
-from injector import Injector, Module, inject, provider, singleton
+from injector import Injector, Module, inject, multiprovider, provider, singleton
+
+from agentclaw.community.core.apply_engine.compiler import ManifestStateRef, StateCompilers
+from agentclaw.community.core.bot_config_manifest.compiler import ManifestCompiler
+from agentclaw.community.core.repository.protocols.bot.config_manifest_apply import (
+    BotConfigManifestApplyRepositoryProtocol,
+)
 
 from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
     DeclaredSourceResolver,
@@ -400,6 +406,43 @@ class ManifestFetchModule(Module):
     @singleton
     @provider
     @inject
+    def manifest_compiler(
+        self,
+        manifests: BotConfigManifestServiceProtocol,
+        content: ContentStoreProtocol,
+        resolver: DeclaredSourceResolver,
+        validator_factory: Callable[[], SkillPackageValidator],
+        git_client_provider: Callable[[], GitSourceClient],
+        applies: BotConfigManifestApplyRepositoryProtocol,
+    ) -> ManifestCompiler:
+        """The compiler for the bot's stored Manifest: document → desired state.
+
+        Everything the fetch-consuming categories used to be handed one by
+        one — the funnel, the store, the package gate, W7's git transport —
+        now meets here, because the compile is where fetching happens. The
+        apply repository is read for the git baselines (W7's strict mode),
+        which is why the compiler is built beside the fetch pipeline rather
+        than beside the run service that asks it to compile.
+        """
+        return ManifestCompiler(
+            manifests=manifests,
+            content=content,
+            resolver=resolver,
+            validator=validator_factory(),
+            git_client_provider=git_client_provider,
+            applies=applies,
+        )
+
+    @singleton
+    @multiprovider
+    @inject
+    def manifest_state_compiler(self, compiler: ManifestCompiler) -> StateCompilers:
+        """The Manifest row of the run service's compiler map; the genome contributes its own."""
+        return {ManifestStateRef: compiler}
+
+    @singleton
+    @provider
+    @inject
     def manifest_entry_fetcher_factory(
         self, injector: Injector
     ) -> Callable[[], DeclaredSourceResolver]:
@@ -434,13 +477,13 @@ class ManifestFetchModule(Module):
         self,
         injector: Injector,
         object_storage: ObjectStoragePlugin,
-        entry_fetcher_provider: Callable[[], DeclaredSourceResolver],
+        content: ContentStoreProtocol,
     ) -> CliToolServiceFactory:
         """W9: the one component both callers install a CLI tool through.
 
         Parameterised by the delivery binding and by nothing else, because that
         is the only thing that differs: the table, the object store and the
-        fetch funnel are shared. Three keys, not two:
+        content store the compiler filed the bytes in are shared. Three keys, not two:
 
         * ``"arca"`` — the engine's CLI endpoints, for either caller.
         * ``"teclaw"`` — the apply path. The port makes **no** artifact push,
@@ -500,7 +543,7 @@ class ManifestFetchModule(Module):
                 repo=injector.get(BotCliToolRepositoryProtocol),
                 store=store,
                 delivery=_delivery(family),
-                entry_fetcher=entry_fetcher_provider(),
+                content=content,
             )
 
         return _factory

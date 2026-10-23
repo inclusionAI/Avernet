@@ -15,6 +15,7 @@ from agentclaw.community.api.bot_config_manifest_apply_service import (
     ApplyReport,
     BotConfigManifestApplyServiceProtocol,
     ManifestApplyInProgressError,
+    ManifestStateRef,
 )
 from agentclaw.community.api.bot_config_manifest_service import (
     ManifestCapabilities,
@@ -34,6 +35,7 @@ from .schemas_config_manifest_apply import (
     ConfigManifestApply,
     ConfigManifestApplyCategory,
     ConfigManifestApplyEntry,
+    ConfigManifestApplyState,
     ConfigManifestApplySource,
 )
 from .schemas import (
@@ -196,6 +198,7 @@ def start_put_apply(
             owner_id=owner_id,
             actor_id=actor_id,
             audit_actor=audit,
+            state=ManifestStateRef(),
             trigger=PUT_TRIGGER,
         )
     except ManifestApplyInProgressError:
@@ -265,6 +268,7 @@ def apply_payload(report: ApplyReport) -> ConfigManifestApply:
         ],
         entries=[ConfigManifestApplyEntry(**entry) for entry in payload["entries"]],
         notes=list(payload.get("notes") or ()),
+        state=ConfigManifestApplyState(**payload["state"]),
     )
 
 
@@ -282,6 +286,7 @@ def empty_apply_payload(bot_id: str) -> ConfigManifestApply:
         result="",
         started_at=None,
         finished_at=None,
+        state=ConfigManifestApplyState(kind="manifest"),
         sources=[],
         categories=[],
         entries=[],

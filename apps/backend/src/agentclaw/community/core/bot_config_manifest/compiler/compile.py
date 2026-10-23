@@ -70,6 +70,18 @@ class ManifestCompiler:
         self._git = git_client_provider
         self._applies = applies
 
+    def check(self, ctx: ApplyContext, ref: ManifestStateRef) -> None:
+        """Re-validate the stored document for the bot as it is now; raises ``ManifestValidationError``.
+
+        Called for its exception: a document that cannot be applied is
+        refused to the caller, before an apply id exists, exactly as it was
+        when the run service validated here itself. Validity is relative to
+        the bot, and the bot moves — the engine changed since the ``PUT``,
+        or a construct's materialiser was withdrawn — so the ``PUT``'s own
+        validation is not enough.
+        """
+        self._parsed_or_empty(ctx)
+
     async def compile(self, ctx: ApplyContext, ref: ManifestStateRef) -> Compiled:
         return await self.compile_document(ctx, self._parsed_or_empty(ctx))
 

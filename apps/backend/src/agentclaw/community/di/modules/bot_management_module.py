@@ -17,6 +17,7 @@ they pick up the swapped repositories transparently.
 
 from __future__ import annotations
 
+from agentclaw.community.core.apply_engine.compiler import StateCompilers
 from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import ArcaRestartTransport
@@ -744,28 +745,31 @@ class BotManagementModule(Module):
         manifest_service: BotConfigManifestServiceProtocol,
         apply_repository: BotConfigManifestApplyRepositoryProtocol,
         lock_repository: BotConfigManifestApplyLockRepositoryProtocol,
-        git_client_provider: Callable[[], GitSourceClient],
         task_queue_provider: Callable[[], TaskQueueService],
         bot_repository: BotRepository,
         delivery_strategies: DeliveryStrategyFactory,
+        compilers: StateCompilers,
     ) -> BotConfigManifestApplyService:
-        """The apply lifecycle, over a delivery seam it does not assemble.
+        """The apply lifecycle, over a delivery seam and a compiler map it does not assemble.
 
         The ten lazy service providers this used to thread through — the write
         targets every materialiser calls — are gone from here and from the
         service: they were only ever the ARCA port bundle's ingredients, and a
         bundle is a wiring decision. ``manifest_fetch_module`` builds both
         bundles and both strategies beside the store one of them writes to, and
-        hands over the finished seam.
+        hands over the finished seam. The compilers are a map multibinding
+        the same way: ``manifest_fetch_module`` contributes the Manifest row
+        beside the fetch pipeline it compiles through, and a genome row comes
+        from the genome module.
         """
         return BotConfigManifestApplyService(
             manifest_service,
             apply_repository,
             lock_repository,
-            git_client_provider,
             task_queue_provider,
             bot_repository,
             delivery_strategies=delivery_strategies,
+            compilers=compilers,
         )
 
     @singleton

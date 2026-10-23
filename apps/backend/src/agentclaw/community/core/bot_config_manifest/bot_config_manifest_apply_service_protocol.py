@@ -28,6 +28,7 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Optional, Protocol, runtime_checkable
 
+from agentclaw.community.core.apply_engine.compiler import StateRef
 from agentclaw.community.core.bot_config_manifest.apply.delivery import DeliveryStrategy
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
@@ -88,13 +89,20 @@ class BotConfigManifestApplyServiceProtocol(Protocol):
         owner_id: str,
         actor_id: str,
         audit_actor: Optional[str] = None,
+        state: StateRef,
         trigger: str = "explicit",
         phase: ApplyPhase | None = None,
         engine_type: Optional[str] = None,
         bot_type: Optional[str] = None,
         carry_from_apply_id: Optional[str] = None,
     ) -> ApplyAccepted:
-        """Take the lock, validate, record ``RUNNING``, start the work, return.
+        """Take the lock, check, record ``RUNNING``, start the work, return.
+
+        ``state`` names what to apply — ``ManifestStateRef()`` for the bot's
+        stored document, ``GenomeStateRef(promotion_id)`` for a promotion's
+        revision — and its type picks the compiler the worker compiles it
+        with. Stated at every call site, never defaulted, for the reason
+        ``phase`` is: what an apply applies must not be inherited.
 
         ``bot`` is optional for one caller: W13 applies the pre-container phase
         **before** the bot record exists, and passes ``engine_type`` /
@@ -136,7 +144,8 @@ class BotConfigManifestApplyServiceProtocol(Protocol):
 
         Raises:
             ValueError: ``trigger`` and ``phase`` disagree — a creation trigger
-                that names no phase, or any other trigger that names one. A
+                that names no phase, or any other trigger that names one — or
+                ``state`` is of a type no compiler is registered for. A
                 programming error at a call site, raised before the lock is
                 taken and before an ``apply_id`` exists.
             ManifestApplyInProgressError: Another apply holds this bot's lock.
@@ -156,13 +165,17 @@ class BotConfigManifestApplyServiceProtocol(Protocol):
         bot: dict,
         owner_id: str,
         actor_id: str,
+        state: StateRef,
     ) -> ApplyReport:
         """Compute the plan and return it. Writes no bot state; mints no id.
+
+        ``state`` is what :meth:`start_apply` takes: the preview compiles the
+        same reference through the same compiler.
 
         Synchronous, unlike :meth:`start_apply`, because a preview whose answer
         arrives later by polling is not a preview. W5 revisited it, as the
         old tripwire demanded, and the honest statement is narrower than
-        "writes nothing": fetch belongs to ``resolve``, so a declared source
+        "writes nothing": fetch belongs to the compile, so a declared source
         **may really be fetched** (bounded by the same per-apply ledger a
         real apply uses) — and the bytes the platform acquires on the bot's
         behalf are filed as the platform's own copy, because §2.8's audit

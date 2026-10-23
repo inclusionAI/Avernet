@@ -19,6 +19,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from agentclaw.community.core.apply_engine.compiler import ManifestStateRef
 from agentclaw.community.core.bot_config_manifest.apply.delivery import MaterialiserPorts
 from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
@@ -70,8 +71,8 @@ from agentclaw.community.core.bot_config_manifest.apply.delivery import (
 )
 
 from ..apply._fakes import (
+    manifest_compilers,
     FakeActivationService,
-    FakeGitClient,
     delivery_strategies,
     teclaw_engine_test,
     FakeManifestContent,
@@ -100,7 +101,7 @@ manifest:
     - type: RULES.md
       content: '# be kind'
   resources:
-    - path: kb/faq.md
+    - path: data/kb/faq.md
       content: 'Q: ?'
   skills:
     - name: quality-check
@@ -194,8 +195,10 @@ def _build(db):
     scripts = FakeStartupScriptService()
     validator = real_validator()
 
+    content = FakeManifestContent()
+
     def fetcher():
-        return DeclaredSourceResolver(FakeManifestContent(), FakeObjectCredentials(), seeded_object_store({_QC_KEY: _QZ}))
+        return DeclaredSourceResolver(content, FakeObjectCredentials(), seeded_object_store({_QC_KEY: _QZ}))
 
     def platform_ports() -> MaterialiserPorts:
         return MaterialiserPorts(
@@ -210,7 +213,7 @@ def _build(db):
             ),
             capability_reader=reader_of_active,
             package_validator=validator,
-            entry_fetcher=fetcher(),
+            content=content,
             resource_service=PlatformResource(store),
             cli_tool_service=object(),
         )
@@ -220,7 +223,7 @@ def _build(db):
         manifest_service=_Manifests(),
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
-        git_client_provider=lambda: FakeGitClient(),
+        compilers=manifest_compilers(manifests=_Manifests(), content=content, resolver=fetcher()),
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(),
         # The platform-managed deployment, assembled the way the composition
@@ -292,7 +295,7 @@ def test_the_first_artifact_carries_the_manifest(world):
 
     # The deferred creation's single phase, against the record.
     accepted = applies.start_apply(
-        entity_id=_ENTITY, bot_id=_BOT, bot=dict(_RECORD), owner_id=_OWNER, actor_id=_OWNER,
+        entity_id=_ENTITY, bot_id=_BOT, bot=dict(_RECORD), owner_id=_OWNER, actor_id=_OWNER, state=ManifestStateRef(),
         trigger=CREATE_PRE_CONTAINER_TRIGGER, phase=ApplyPhase.PRE_CONTAINER,
     )
     report = applies.last_apply(entity_id=_ENTITY, bot_id=_BOT)
@@ -315,7 +318,7 @@ def test_the_first_artifact_carries_the_manifest(world):
         {"name": "RULES.md", "store": "bot-data", "path": f"{_REF_ROOT}/identity/RULES.md"}
     ]
     assert [r["path"] for r in artifact["resources"]] == [
-        f"{_REF_ROOT}/workspace/kb/faq.md",
+        f"{_REF_ROOT}/workspace/data/kb/faq.md",
         f"{_REF_ROOT}/workspace/skills-local/quality-check/SKILL.md",
         f"{_REF_ROOT}/workspace/skills-local/quality-check/scripts/run.sh",
     ]

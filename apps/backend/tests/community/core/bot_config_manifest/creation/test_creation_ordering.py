@@ -59,9 +59,11 @@ from agentclaw.community.core.repository.implementations.bot.config_manifest_app
 )
 from ..apply._fakes import (
     FakeGitClient,
+    FakeManifestContent,
     FakeStartupScriptService,
     arca_only_delivery,
     device_port_bundle,
+    manifest_compilers,
 )
 
 _ENTITY = "u_owner"
@@ -195,19 +197,25 @@ def _build(db, *, scripts=None):
     """
     scripts = scripts if scripts is not None else FakeStartupScriptService()
     queue = _InlineQueue()
+    manifests = _Manifests()
+    # One content store between the compiler and the materialisers: the
+    # materialisers read back by digest what the compiler filed.
+    content = FakeManifestContent()
     applies = BotConfigManifestApplyService(
-        manifest_service=_Manifests(),
+        manifest_service=manifests,
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
-        git_client_provider=lambda: FakeGitClient(),
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(),
+        compilers=manifest_compilers(manifests=manifests, content=content, git=FakeGitClient),
         # The delivery seam, assembled the way the composition root
         # assembles it: a bundle of device-backed ports, one strategy
         # over it, and a lookup. The categories this suite's document
         # does not declare are never reached, but their ports must
         # exist for the registry to register them.
-        delivery_strategies=arca_only_delivery(device_port_bundle(script_service=scripts)),
+        delivery_strategies=arca_only_delivery(
+            device_port_bundle(script_service=scripts, content=content)
+        ),
     )
     queue.service = applies
 

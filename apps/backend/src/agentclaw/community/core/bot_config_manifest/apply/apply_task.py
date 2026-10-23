@@ -22,7 +22,7 @@ from the apply itself — re-applying an unchanged document performs no writes, 
 the lock serialises attempts. Anyone adding a materialiser that is not convergent
 breaks this, and no amount of queue configuration would save it.
 
-**What is *not* here.** The lock, the re-validation that raises to the caller, the
+**What is *not* here.** The lock, the compiler's check that raises to the caller, the
 ``apply_id`` and the ``RUNNING`` row all stay in ``start_apply``, synchronous on
 the caller's thread — see its docstring. Only the work moved, which is what keeps
 ``POST …/config-manifest/apply``'s contract (``202`` + an id, a concurrent apply
@@ -69,6 +69,7 @@ def build_apply_task_payload(
     lock_token: str,
     started_at: str,
     phase: ApplyPhase | None,
+    state: dict[str, Any],
     carry_from_apply_id: Optional[str] = None,
     engine_type: Optional[str] = None,
     bot_type: Optional[str] = None,
@@ -89,6 +90,7 @@ def build_apply_task_payload(
             "lock_token": "lk_3f9c...",
             "started_at": "2026-03-01T09:00:00+00:00",
             "phase": "pre_container",        # or "on_container", or None
+            "state": {"kind": "manifest"},   # or {"kind": "genome", "promotion_id": ...}
             "carry_from_apply_id": None,     # or an earlier phase's apply_id
             "engine_type": "claude_code",    # only read when there is no
             "bot_type": "arca",              # bot record yet
@@ -98,6 +100,10 @@ def build_apply_task_payload(
     reconstructed from a default at the far end: one of the two phase names for
     a creation half, and ``null`` — a stated value, not an absence — for the
     whole apply.
+
+    ``state`` is the reference the worker compiles from — identifiers only,
+    never the compiled state: the Manifest carries nothing (a bot has one
+    stored document), a genome run carries its promotion id.
 
     Consumed by: :meth:`ApplyTaskHandler.handle`, which passes it straight to
     ``BotConfigManifestApplyService.run_apply_task``.
@@ -142,6 +148,7 @@ def build_apply_task_payload(
         # half, ``null`` for the whole apply. Never reconstructed from a
         # default at the far end.
         PHASE_KEY: phase.value if phase is not None else None,
+        "state": state,
         "carry_from_apply_id": carry_from_apply_id,
         "engine_type": engine_type,
         "bot_type": bot_type,
