@@ -10,7 +10,7 @@
  *   deploy tag:   deploy/{workflowId}/#N
  *   annotation:   version=N\naction=deploy\nworkflowIds={workflowId}
  */
-import { execFileSync } from "node:child_process";
+import { executeGit } from "@avernet/clawweb-shared/server/services/git-execution";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { existsSync, lstatSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -53,26 +53,22 @@ function isolatedGitEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   };
 }
 
-function git(
+async function git(
   cwd: string,
   args: string[],
   options?: { env?: NodeJS.ProcessEnv; timeout?: number; maxBuffer?: number },
-): string {
+): Promise<string> {
   try {
-    const result = execFileSync(
-      "git",
+    const result = await executeGit(
       args,
       {
         cwd,
         env: options?.env ?? isolatedGitEnvironment(process.env),
-        encoding: "utf-8",
-        // execFileSync otherwise forwards stderr before we can sanitize errors.
-        stdio: ["ignore", "pipe", "pipe"],
         timeout: options?.timeout ?? 60_000,
         maxBuffer: options?.maxBuffer ?? 16 * 1024 * 1024,
       },
     );
-    return result.trim();
+    return result.toString('utf8').trim();
   } catch (err: unknown) {
     // Remote servers and helpers can echo credentials (raw, encoded or Basic
     // auth). Never include their output, Error.message/cause, or argv in errors.
@@ -80,7 +76,7 @@ function git(
     while (args[commandIndex] === "-c") commandIndex += 2;
     const status = (err as { status?: unknown } | null)?.status;
     const detail = typeof status === "number" ? ` (exit ${status})` : "";
-    throw new Error(`git ${args[commandIndex]} failed${detail}`);
+    throw Object.assign(new Error(`git ${args[commandIndex]} failed${detail}`), { code: (err as { code?: string })?.code });
   }
 }
 
@@ -102,7 +98,7 @@ function httpRemoteUrl(remoteUrl: string): URL | null {
 }
 
 function credentialHelper(credentialsPath: string): string {
-  // Git runs helpers through a shell even though we use execFileSync. Quote
+  // Git runs helpers through a shell even though we use execFile. Quote
   // only the path; the username/token are never part of this command.
   const quotedPath = "'" + credentialsPath.replace(/'/g, "'\\''") + "'";
   return `store --file ${quotedPath}`;
@@ -180,21 +176,21 @@ export async function cloneClawflows(
         const helper = await writeCredentials(bootstrapAuthDir, credentials);
         cloneOptions.push("-c", "credential.helper=", "-c", `credential.helper=${helper}`);
       }
-      git(repoDir, [...cloneOptions, "clone", "--quiet", cloneUrl, "."], {
+      await git(repoDir, [...cloneOptions, "clone", "--quiet", cloneUrl, "."], {
         env: isolatedGitEnvironment(process.env),
         timeout: 120_000,
       });
-      git(repoDir, ["remote", "set-url", "origin", cloneUrl]);
-      git(repoDir, ["config", "user.name", config.username || "clawweb"]);
-      git(repoDir, ["config", "user.email", config.email || `${config.username || "clawweb"}@antgroup.com`]);
+      await git(repoDir, ["remote", "set-url", "origin", cloneUrl]);
+      await git(repoDir, ["config", "user.name", config.username || "clawweb"]);
+      await git(repoDir, ["config", "user.email", config.email || `${config.username || "clawweb"}@antgroup.com`]);
 
       if (credentials) {
         // A new owned directory also lets failure cleanup remove partial writes
         // without deleting files that predated this operation.
         repoAuthDir = await mkdtemp(path.join(repoDir, ".git", "cw-autoheal-auth-"));
         const helper = await writeCredentials(repoAuthDir, credentials);
-        git(repoDir, ["config", "--local", "--replace-all", "credential.helper", ""]);
-        git(repoDir, ["config", "--local", "--add", "credential.helper", helper]);
+        await git(repoDir, ["config", "--local", "--replace-all", "credential.helper", ""]);
+        await git(repoDir, ["config", "--local", "--add", "credential.helper", helper]);
       }
     } finally {
       if (bootstrapAuthDir) await rm(bootstrapAuthDir, { recursive: true, force: true });
@@ -263,30 +259,32 @@ export async function commitAndPushSaved(
   const branch = `saved/${workflowId}`;
 
   try {
-    git(repoDir, ["checkout", "--orphan", branch]);
-  } catch {
+    await git(repoDir, ["checkout", "--orphan", branch]);
+  } catch (error) {
+    if (['GIT_OPERATION_TIMEOUT', 'GIT_TIMEOUT', 'GIT_QUEUE_FULL'].includes((error as { code?: string }).code ?? '')) throw error;
     // Branch may already exist locally (e.g. reused temp dir); force-create it.
-    git(repoDir, ["checkout", "-B", branch]);
+    await git(repoDir, ["checkout", "-B", branch]);
   }
 
-  git(repoDir, ["add", "."]);
+  await git(repoDir, ["add", "."]);
 
   const message = `[auto-heal] save ${workflowId}: ${note || "auto"}`;
-  git(repoDir, ["commit", "-m", message, "--author", `${author.name} <${author.email}>`]);
+  await git(repoDir, ["commit", "-m", message, "--author", `${author.name} <${author.email}>`]);
 
-  const commit = git(repoDir, ["rev-parse", "HEAD"]);
+  const commit = await git(repoDir, ["rev-parse", "HEAD"]);
 
-  git(repoDir, ["push", "--force-with-lease", "origin", branch]);
+  await git(repoDir, ["push", "--force-with-lease", "origin", branch]);
 
   return { branch, commit };
 }
 
-export function getMaxDeployNumberFromGitTags(repoDir: string, workflowId: string): number {
+export async function getMaxDeployNumberFromGitTags(repoDir: string, workflowId: string): Promise<number> {
   const prefix = `deploy/${workflowId}/#`;
   let raw: string;
   try {
-    raw = git(repoDir, ["tag", "-l", `${prefix}*`]);
-  } catch {
+    raw = await git(repoDir, ["tag", "-l", `${prefix}*`]);
+  } catch (error) {
+    if (['GIT_OPERATION_TIMEOUT', 'GIT_TIMEOUT', 'GIT_QUEUE_FULL'].includes((error as { code?: string }).code ?? '')) throw error;
     return 0;
   }
 
@@ -313,18 +311,18 @@ export async function commitAndPushDeploy(
   const branch = `wf/${workflowId}`;
   const tagName = `deploy/${workflowId}/#${deployNumber}`;
 
-  git(repoDir, ["checkout", "-B", branch]);
-  git(repoDir, ["add", "."]);
+  await git(repoDir, ["checkout", "-B", branch]);
+  await git(repoDir, ["add", "."]);
 
   const message = `[${author.name}] deploy ${workflowId} #${deployNumber} v${version}`;
-  git(repoDir, ["commit", "-m", message, "--author", `${author.name} <${author.email}>`]);
+  await git(repoDir, ["commit", "-m", message, "--author", `${author.name} <${author.email}>`]);
 
   const annotation = `version=${version}\naction=deploy\nworkflowIds=${workflowId}`;
-  git(repoDir, ["tag", "-a", tagName, "-m", annotation]);
+  await git(repoDir, ["tag", "-a", tagName, "-m", annotation]);
 
-  const commit = git(repoDir, ["rev-parse", "HEAD"]);
+  const commit = await git(repoDir, ["rev-parse", "HEAD"]);
 
-  git(repoDir, [
+  await git(repoDir, [
     "push",
     "--atomic",
     "--force-with-lease",
