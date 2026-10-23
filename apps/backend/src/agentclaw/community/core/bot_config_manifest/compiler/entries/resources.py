@@ -119,7 +119,7 @@ async def _file(
         )
         return DesiredResourceFile(path, StoredContent(digest))
     delivery = await fetch(session, resolver, entry=entry, category=_CATEGORY_FILE, identity=path)
-    data = await file_single(session, delivery, category=_CATEGORY_FILE, identity=path)
+    data = await file_single(session, content, delivery, category=_CATEGORY_FILE, identity=path)
     return DesiredResourceFile(path, StoredContent(digest_of(data)), note=delivery.note())
 
 

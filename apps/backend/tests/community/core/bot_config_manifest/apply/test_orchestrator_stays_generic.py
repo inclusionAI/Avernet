@@ -119,7 +119,7 @@ def test_every_registered_materialiser_has_a_place_in_the_order():
             upload_service=object(),
             capability_reader=object(),
             package_validator=object(),
-            entry_fetcher=object(),
+            content=object(),
             resource_service=object(),
             cli_tool_service=object(),
         )

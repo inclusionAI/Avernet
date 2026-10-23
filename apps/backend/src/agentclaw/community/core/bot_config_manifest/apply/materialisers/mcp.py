@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Sequence
 
+from agentclaw.community.core.apply_engine.desired_state import DesiredMcpServer
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     EntryOutcome,
@@ -90,47 +91,18 @@ class McpMaterialiser(Materialiser):
         self._mcp_config = mcp_config_service
         self._reader = capability_reader
 
-    async def resolve(
-        self, ctx: ApplyContext, entries: Sequence[dict[str, Any]]
-    ) -> ResolveResult:
-        """Validate every explicit MCP before the category writes anything."""
+    async def resolve(self, ctx: ApplyContext, entries: Sequence[DesiredMcpServer]) -> ResolveResult:
+        """Validate every explicit MCP before the category writes anything: permission, then the override."""
         intents: list[Intent] = []
         failures: list[ResolveFailure] = []
-        seen: set[str] = set()
-        for index, entry in enumerate(entries):
-            server_code = entry.get("server_code") if isinstance(entry, dict) else None
-            if not isinstance(server_code, str) or not server_code:
-                failures.append(
-                    ResolveFailure(
-                        f"[{index}]", "an mcp entry must name a 'server_code'"
-                    )
-                )
-                continue
-            if server_code in seen:
-                # A set cannot contain a duplicate. Refusing rather than
-                # de-duplicating silently: two entries for one server means the
-                # author believes something that is not true of the result.
-                failures.append(
-                    ResolveFailure(
-                        server_code, "declared more than once in this category"
-                    )
-                )
-                continue
-            seen.add(server_code)
-
+        for entry in entries:
+            server_code = entry.server_code
             if not self._permitted(ctx, server_code):
                 failures.append(
-                    ResolveFailure(
-                        server_code,
-                        "this tenant does not have permission to enable this MCP "
-                        "server",
-                    )
+                    ResolveFailure(server_code, "this tenant does not have permission to enable this MCP server")
                 )
                 continue
-            config = entry.get("config")
-            normalized_config = (
-                config if isinstance(config, dict) and config else None
-            )
+            normalized_config = entry.override.as_config() if entry.override is not None else None
             verdict = self._mcp_config.validate_bot_override(
                 user_id=ctx.owner_id,
                 server_code=server_code,
@@ -138,18 +110,9 @@ class McpMaterialiser(Materialiser):
                 engine_type=ctx.engine_type,
             )
             if not verdict.get("valid"):
-                failures.append(
-                    ResolveFailure(
-                        server_code, str(verdict.get("error") or "invalid config")
-                    )
-                )
+                failures.append(ResolveFailure(server_code, str(verdict.get("error") or "invalid config")))
                 continue
-            intents.append(
-                Intent(
-                    server_code,
-                    normalized_config,
-                )
-            )
+            intents.append(Intent(server_code, normalized_config))
 
         return ResolveResult(intents=tuple(intents), failures=tuple(failures))
 

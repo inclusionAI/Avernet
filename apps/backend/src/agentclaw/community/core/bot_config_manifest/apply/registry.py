@@ -47,15 +47,15 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Optional, Protocol, Sequence, runtime_checkable
+from typing import TYPE_CHECKING, Any, Optional, Protocol, Sequence, TypeVar, runtime_checkable
 
+from agentclaw.community.core.apply_engine.content import ContentReader
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
 
 if TYPE_CHECKING:  # pragma: no cover — the registry stays import-light; see below
     from agentclaw.community.core.ports.activation_port import (
         ActivationPort,
     )
-    from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
     from agentclaw.community.core.ports.identity_file_port import (
         IdentityFilePort,
     )
@@ -274,11 +274,15 @@ class CategoryPlan:
         )
 
 
+E = TypeVar("E", contravariant=True)
+
+
 @runtime_checkable
-class Materialiser(Protocol):
+class Materialiser(Protocol[E]):
     """Three stages, because three acceptance criteria need boundaries there.
 
-    The currencies, in order: ``Sequence[dict]`` in, :class:`ResolveResult`,
+    The currencies, in order: the construct's typed desired entries in
+    (``core/apply_engine/desired_state``), :class:`ResolveResult`,
     :class:`CategoryPlan`, ``Sequence[EntryResult]`` out. This module's own
     docstring works one category through all three.
 
@@ -300,22 +304,19 @@ class Materialiser(Protocol):
     construct: ApplyConstruct
 
     @abstractmethod
-    async def resolve(
-        self, ctx: ApplyContext, entries: Sequence[dict[str, Any]]
-    ) -> ResolveResult:
-        """Declared entries → intents.
+    async def resolve(self, ctx: ApplyContext, entries: Sequence[E]) -> ResolveResult:
+        """Desired entries → intents.
 
-        ``entries`` are the raw mappings straight out of the parsed document,
-        in declaration order, e.g. ``[{"server_code": "gh"}, {"path":
-        "data/faq.csv", "from": "content"}]``. A category declared empty
-        (``mcp: []``) arrives as ``[]`` and must still be handled: it means
+        ``entries`` are the construct's typed desired entries in declaration
+        order, e.g. ``[DesiredMcpServer("gh"), DesiredMcpServer("slack",
+        override)]``, their content already in the content store. A construct
+        declared empty arrives as ``[]`` and must still be handled: it means
         "remove everything", not "do nothing".
 
-        Everything that can fail **before touching the bot** fails here:
-        placeholder substitution, validators, permission checks. The fetch
-        lands in this stage and nowhere else, which is why the
-        transient-failure criterion is satisfied by construction rather than by
-        each materialiser remembering to satisfy it.
+        Everything that can fail **before touching the bot** and belongs to
+        the engine or its ports fails here: engine capability, permission,
+        package validation, admission, reserved names. Grammar and fetch are
+        the compiler's and never reach this stage.
         """
         ...
 
@@ -361,7 +362,7 @@ def build_materialisers(
     upload_service: SkillPackageUploadPort,
     capability_reader: BotCapabilityStateReaderProtocol,
     package_validator: SkillPackageValidator,
-    entry_fetcher: DeclaredSourceResolver,
+    content: ContentReader,
     resource_service: ResourceFilePort,
     cli_tool_service: CliToolService,
 ) -> dict[ApplyConstruct, Materialiser]:
@@ -390,13 +391,12 @@ def build_materialisers(
 
     The map is keyed by each materialiser's own ``construct`` rather than by a
     name written here, so a materialiser cannot be registered under the wrong
-    key. The fetch-side dependencies (``package_validator``,
-    ``entry_fetcher``) exist because ``skills`` and ``identity`` materialise
-    fetched bytes: the validator is the upload path's own gate, the entry
-    fetcher is the fetch funnel, and neither belongs inside the engine.
-    ``cli_tools`` takes neither — it is handed one dependency, the service both
-    *it* and the management API call, which already holds the family's delivery
-    port.
+    key. ``content`` is the engine's one read port onto the content store:
+    every desired file is there by digest, and ``identity``, ``skills`` and
+    ``resources`` read their bytes through it; ``package_validator`` is the
+    upload path's own gate, re-asked on the stored package. ``cli_tools``
+    takes one dependency, the service both *it* and the management API call,
+    which already holds the family's delivery port and its own store read.
     """
     from agentclaw.community.core.bot_config_manifest.apply.materialisers.cli_tools import (
         CliToolsMaterialiser,
@@ -425,15 +425,15 @@ def build_materialisers(
             mcp_config_service,
             capability_reader,
         ),
-        IdentityMaterialiser(identity_service, entry_fetcher),
+        IdentityMaterialiser(identity_service, content),
         SkillsMaterialiser(
             upload_service,
             activation_service,
             capability_reader,
             package_validator,
-            entry_fetcher,
+            content,
         ),
-        ResourcesMaterialiser(resource_service, entry_fetcher),
+        ResourcesMaterialiser(resource_service, content),
         CliToolsMaterialiser(cli_tool_service),
     )
     return {m.construct: m for m in materialisers}

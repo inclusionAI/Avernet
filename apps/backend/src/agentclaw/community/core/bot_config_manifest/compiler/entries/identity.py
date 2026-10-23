@@ -69,7 +69,7 @@ async def compile_identity(
             continue
         try:
             delivery = await fetch(session, resolver, entry=entry, category=_CATEGORY, identity=file_type)
-            body = await file_single(session, delivery, category=_CATEGORY, identity=file_type)
+            body = await file_single(session, content, delivery, category=_CATEGORY, identity=file_type)
         except EntryFetchError as exc:
             # Includes the "must name a single file" refusal a tree delivery
             # raises when nothing selected one file out of it.

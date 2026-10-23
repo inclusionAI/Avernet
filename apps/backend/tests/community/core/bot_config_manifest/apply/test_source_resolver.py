@@ -50,7 +50,7 @@ from ._fakes import (
     FakeCredentials,
     FakeManifestContent,
     fetched_object,
-    make_context,
+    fetch_context,
 )
 
 BODY = b"soul-or-skill-bytes"
@@ -141,7 +141,7 @@ def _store_holding(content: FakeManifestContent, body: bytes = BODY) -> None:
 
 def _oss_ctx(**kwargs):
     """A context whose session declares :data:`_OSS_SOURCE` as ``"s"``."""
-    return make_context(
+    return fetch_context(
         source_session=_session(_ScriptedGit(), sources={"s": _OSS_SOURCE}),
         **kwargs,
     )
@@ -283,7 +283,7 @@ def test_a_missing_credential_fails_with_the_name_and_no_read(objects_rig):
     pipeline = DeclaredSourceResolver(
         content, FakeCredentials(missing={"ghost"}), objects
     )
-    ctx = make_context(source_session=_session(_ScriptedGit(), sources={
+    ctx = fetch_context(source_session=_session(_ScriptedGit(), sources={
         "s": {"protocol": "oss", "bucket": "b", "key": "k", "auth": "ghost"},
     }))
 
@@ -489,7 +489,7 @@ def test_a_named_oss_source_reads_through_the_object_store(objects_rig):
     not have come from has nothing to travel over."""
     _, objects, pipeline = objects_rig
     objects.put("named-bucket", "assets/logo.png", BODY, access_key_id=_OBJ_AK)
-    ctx = make_context(
+    ctx = fetch_context(
         source_session=_session(_ScriptedGit(), sources={
             "cdn": {
                 "protocol": "oss",
@@ -522,7 +522,7 @@ def test_the_document_names_the_bucket_and_the_credential_names_the_host(
     """
     _, objects, pipeline = objects_rig
     objects.put("b", "k", BODY, access_key_id=_OBJ_AK)
-    ctx = make_context(source_session=_session(_ScriptedGit(), sources={
+    ctx = fetch_context(source_session=_session(_ScriptedGit(), sources={
         "s": {"protocol": "oss", "bucket": "b", "key": "k", "auth": "oss-cred"},
     }))
     pipeline.resolve(ctx, entry={"from": "s"}, category="identity")
@@ -556,7 +556,7 @@ def test_a_refusal_is_never_masked_by_keep_last(objects_rig, break_it, expected)
     """
     _, objects, pipeline = objects_rig
     objects.put("b", "k", BODY, access_key_id=_OBJ_AK)
-    ctx = make_context(source_session=_session(_ScriptedGit(), sources={
+    ctx = fetch_context(source_session=_session(_ScriptedGit(), sources={
         "s": {"protocol": "oss", "bucket": "b", "key": "k", "auth": "oss-cred"},
     }))
     entry = {"from": "s", "on_fetch_failure": "keep_last"}
@@ -572,7 +572,7 @@ def test_an_unreachable_store_is_a_failure_keep_last_may_answer(objects_rig):
     """The one status that is the transport rather than the document."""
     _, objects, pipeline = objects_rig
     objects.put("b", "k", BODY, access_key_id=_OBJ_AK)
-    ctx = make_context(source_session=_session(_ScriptedGit(), sources={
+    ctx = fetch_context(source_session=_session(_ScriptedGit(), sources={
         "s": {"protocol": "oss", "bucket": "b", "key": "k", "auth": "oss-cred"},
     }))
     # First apply files the receipt the second one falls back to.
@@ -592,7 +592,7 @@ def test_an_unreachable_store_is_a_failure_keep_last_may_answer(objects_rig):
 def test_resolve_gives_the_git_road_a_checkout(rig):
     _, credentials, pipeline = rig
     git = _ScriptedGit()
-    ctx = make_context(
+    ctx = fetch_context(
         source_session=_session(git, sources={
             "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "pkg"},
         })
@@ -611,14 +611,17 @@ def test_resolve_gives_the_git_road_a_checkout(rig):
 
 def test_resolve_refuses_a_from_that_names_nothing(rig):
     _, _, pipeline = rig
-    ctx = make_context(source_session=_session(_ScriptedGit()))
+    ctx = fetch_context(source_session=_session(_ScriptedGit()))
     with pytest.raises(EntryFetchError, match="not declared"):
         pipeline.resolve(ctx, entry={"from": "ghost"}, category="skills")
 
 
 def test_resolve_missing_session_is_loud(rig):
+    """A compile session always carries one; the guard is for any other caller."""
+    from dataclasses import replace
+
     _, _, pipeline = rig
-    ctx = make_context()
+    ctx = replace(fetch_context(), source_session=None)
     with pytest.raises(EntryFetchError, match="no source session"):
         pipeline.resolve(ctx, entry={"from": "x"}, category="skills")
 
@@ -629,7 +632,7 @@ def test_strict_refuses_when_the_ref_moved(rig):
     # The baseline is keyed on the repository and the ref, not on what the
     # document called the source — so the same pair, resolving to a different
     # commit, is the one thing strict mode refuses.
-    ctx = make_context(
+    ctx = fetch_context(
         source_session=_session(
             git, baselines={(GIT_URL, "main", "strict"): "b" * 40}
         )
@@ -650,7 +653,7 @@ def test_strict_refuses_when_the_ref_moved(rig):
 def test_non_strict_records_the_move_in_the_note(rig):
     _, _, pipeline = rig
     git = _ScriptedGit()
-    ctx = make_context(
+    ctx = fetch_context(
         source_session=_session(
             git, baselines={(GIT_URL, "main", "non_strict"): "b" * 40}
         )
@@ -668,7 +671,7 @@ def test_non_strict_records_the_move_in_the_note(rig):
 def test_strict_on_the_first_apply_has_no_opinion(rig):
     _, _, pipeline = rig
     git = _ScriptedGit()
-    ctx = make_context(source_session=_session(git))  # no baselines
+    ctx = fetch_context(source_session=_session(git))  # no baselines
     decl = pipeline.resolve(
         ctx,
         entry={"source": {"protocol": "git", "url": GIT_URL, "ref": "main", "mode": "strict"}},
@@ -686,7 +689,7 @@ def test_an_inline_source_is_named_url_at_ref(rig):
     belonged to."""
     _, _, pipeline = rig
     git = _ScriptedGit()
-    ctx = make_context(source_session=_session(git))
+    ctx = fetch_context(source_session=_session(git))
     for ref in ("a", "b"):
         pipeline.resolve(
             ctx,
@@ -705,7 +708,7 @@ def test_an_inline_strict_refusal_names_the_ref_it_refused(rig):
     a sentence a reader can act on when the document names it twice."""
     _, _, pipeline = rig
     git = _ScriptedGit()
-    ctx = make_context(
+    ctx = fetch_context(
         source_session=_session(
             git, baselines={(GIT_URL, "main", "strict"): "b" * 40}
         )
@@ -730,7 +733,7 @@ def test_two_names_over_one_repository_are_two_rows_and_one_baseline(rig):
         "content": {"protocol": "git", "url": GIT_URL, "ref": "main"},
         "docs": {"protocol": "git", "url": GIT_URL, "ref": "main"},
     })
-    ctx = make_context(source_session=session)
+    ctx = fetch_context(source_session=session)
     for name in ("content", "docs"):
         pipeline.resolve(ctx, entry={"from": name}, category="skills")
     records = session.resolution_records()
@@ -765,7 +768,7 @@ def test_an_at_sign_in_a_url_or_ref_does_not_collide_two_declarations(rig):
 
     git = _ScriptedGit()
     session = _session(git)
-    ctx = make_context(source_session=session)
+    ctx = fetch_context(source_session=session)
     pipeline.resolve(ctx, entry={"source": first}, category="skills")
     pipeline.resolve(ctx, entry={"source": second}, category="skills")
 
@@ -789,7 +792,7 @@ def test_an_at_sign_in_a_url_or_ref_does_not_collide_two_declarations(rig):
     moved = _ScriptedGit(sha="c" * 40)
     with pytest.raises(EntryFetchError, match="moved"):
         pipeline.resolve(
-            make_context(source_session=_session(moved, baselines=rebuilt)),
+            fetch_context(source_session=_session(moved, baselines=rebuilt)),
             entry={"source": second},
             category="skills",
         )
@@ -816,7 +819,7 @@ def test_two_inline_declarations_at_two_modes_are_two_rows(rig):
     # have taken the shared display slot.
     git = _ScriptedGit()
     session = _session(git)
-    ctx = make_context(source_session=session)
+    ctx = fetch_context(source_session=session)
     pipeline.resolve(ctx, entry={"source": loose}, category="skills")
     pipeline.resolve(ctx, entry={"source": pinned}, category="skills")
 
@@ -837,7 +840,7 @@ def test_two_inline_declarations_at_two_modes_are_two_rows(rig):
     moved = _ScriptedGit(sha="c" * 40)
     with pytest.raises(EntryFetchError, match="moved"):
         pipeline.resolve(
-            make_context(source_session=_session(moved, baselines=rebuilt)),
+            fetch_context(source_session=_session(moved, baselines=rebuilt)),
             entry={"source": pinned},
             category="skills",
         )
@@ -879,7 +882,7 @@ def test_a_non_strict_alias_cannot_advance_a_strict_pin(rig):
             (GIT_URL, "main", "non_strict"): old,
         },
     )
-    ctx = make_context(source_session=session)
+    ctx = fetch_context(source_session=session)
 
     loose = pipeline.resolve(ctx, entry={"from": "loose"}, category="skills")
     assert isinstance(loose, GitDelivery)
@@ -908,7 +911,7 @@ def test_a_non_strict_alias_cannot_advance_a_strict_pin(rig):
     )
     with pytest.raises(EntryFetchError, match="moved"):
         pipeline.resolve(
-            make_context(source_session=next_session),
+            fetch_context(source_session=next_session),
             entry={"from": "pinned"},
             category="skills",
         )
@@ -923,7 +926,7 @@ def test_strict_passes_when_the_document_re_pins_the_ref(rig):
     ``non_strict``, apply once, and flip it back."""
     _, _, pipeline = rig
     git = _ScriptedGit()
-    ctx = make_context(
+    ctx = fetch_context(
         source_session=_session(
             git, baselines={(GIT_URL, "v1", "strict"): "b" * 40}
         )
@@ -952,7 +955,7 @@ def test_strict_passes_when_the_document_re_points_the_url(rig):
     _, _, pipeline = rig
     git = _ScriptedGit()
     other = "https://git.corp/other.git"
-    ctx = make_context(
+    ctx = fetch_context(
         source_session=_session(
             git, baselines={(GIT_URL, "main", "strict"): "b" * 40}
         )
@@ -976,7 +979,7 @@ def test_a_sha_shaped_ref_trips_neither_branch(rig):
     ``(url, <sha>)`` always answers with the sha its baseline holds."""
     _, _, pipeline = rig
     git = _ScriptedGit()
-    ctx = make_context(
+    ctx = fetch_context(
         source_session=_session(
             git, baselines={(GIT_URL, _FAKE_SHA, "strict"): _FAKE_SHA}
         )
@@ -998,7 +1001,7 @@ def test_non_strict_does_not_call_a_re_pin_a_move(rig):
     describing a drift that never happened."""
     _, _, pipeline = rig
     git = _ScriptedGit()
-    ctx = make_context(
+    ctx = fetch_context(
         source_session=_session(
             git, baselines={(GIT_URL, "v1", "non_strict"): "b" * 40}
         )
@@ -1014,7 +1017,7 @@ def test_non_strict_does_not_call_a_re_pin_a_move(rig):
 
 def test_digest_on_a_git_source_is_refused(rig):
     _, _, pipeline = rig
-    ctx = make_context(source_session=_session(_ScriptedGit()))
+    ctx = fetch_context(source_session=_session(_ScriptedGit()))
     with pytest.raises(EntryFetchError, match="digest"):
         pipeline.resolve(
             ctx,
@@ -1034,7 +1037,7 @@ def test_git_keep_last_falls_back_to_the_baseline_receipt(rig):
         scope=None, source_url=baseline_url,
     )
     git = _ScriptedGit(error=FetchFailedError("git fetch failed"))
-    ctx = make_context(source_session=_session(
+    ctx = fetch_context(source_session=_session(
         git,
         sources={"app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "pkg"}},
         baselines={(GIT_URL, "main", "non_strict"): old_sha},
@@ -1066,7 +1069,7 @@ def test_git_keep_last_has_no_receipt_to_reuse_after_a_re_pin(rig):
         scope=None, source_url=baseline_url,
     )
     git = _ScriptedGit(error=FetchFailedError("git fetch failed"))
-    ctx = make_context(source_session=_session(
+    ctx = fetch_context(source_session=_session(
         git,
         sources={"app": {"protocol": "git", "url": GIT_URL, "ref": "v2",
                          "subpath": "pkg"}},
@@ -1085,7 +1088,7 @@ def test_git_keep_last_has_no_receipt_to_reuse_after_a_re_pin(rig):
 def test_git_credentials_reach_the_transport_as_headers(rig):
     _, credentials, pipeline = rig
     git = _ScriptedGit()
-    ctx = make_context(source_session=_session(git, sources={
+    ctx = fetch_context(source_session=_session(git, sources={
         "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "auth": "ci-token"},
     }))
     pipeline.resolve(ctx, entry={"from": "app"}, category="skills")
@@ -1109,7 +1112,7 @@ def _git_source_ctx(*, subpath="pkg", auth=None, **kwargs):
     source = {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": subpath}
     if auth is not None:
         source["auth"] = auth
-    return make_context(
+    return fetch_context(
         source_session=_session(_ScriptedGit(), sources={"app": source}),
         **kwargs,
     )
@@ -1149,7 +1152,7 @@ def test_the_git_fetchs_declared_bytes_charge_the_apply_ledger_once(rig):
     _, _, pipeline = rig
     git = _ScriptedGit()
     ctx = _with_budget(
-        make_context(source_session=_session(git, sources={
+        fetch_context(source_session=_session(git, sources={
             "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "pkg"},
         })),
         _Ledger(),
@@ -1172,7 +1175,7 @@ def test_a_git_fetch_exhausting_the_byte_ledger_fails_the_entry(rig):
     )
 
     ctx = _with_budget(
-        make_context(source_session=_session(git, sources={
+        fetch_context(source_session=_session(git, sources={
             "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "pkg"},
         })),
         ApplyFetchBudget(deadline=9e99, total_bytes=5),
@@ -1194,7 +1197,7 @@ def test_entry_subpath_composes_with_the_sources_on_the_git_road(rig):
     """
     _, _, pipeline = rig
     git = _ScriptedGit()
-    ctx = make_context(source_session=_session(git, sources={
+    ctx = fetch_context(source_session=_session(git, sources={
         "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "pkg"},
     }))
     decl = pipeline.resolve(
@@ -1209,7 +1212,7 @@ def test_entry_subpath_composes_with_the_sources_on_the_git_road(rig):
 def test_a_source_with_no_subpath_takes_the_entrys_whole(rig):
     _, _, pipeline = rig
     git = _ScriptedGit()
-    ctx = make_context(source_session=_session(git, sources={
+    ctx = fetch_context(source_session=_session(git, sources={
         "app": {"protocol": "git", "url": GIT_URL, "ref": "main"},
     }))
     decl = pipeline.resolve(
@@ -1231,7 +1234,7 @@ def test_two_entries_off_one_git_source_share_a_checkout_and_a_sha(rig):
     session = _session(git, sources={
         "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "kb"},
     })
-    ctx = make_context(source_session=session)
+    ctx = fetch_context(source_session=session)
     first = pipeline.resolve(
         ctx, entry={"from": "app", "subpath": "faq.csv"}, category="resources_file"
     )
@@ -1253,7 +1256,7 @@ def test_a_composed_subpath_that_escapes_the_tree_is_refused(rig):
     second, weaker rule here, which is how one gets through by satisfying the
     other."""
     _, _, pipeline = rig
-    ctx = make_context(source_session=_session(_ScriptedGit(), sources={
+    ctx = fetch_context(source_session=_session(_ScriptedGit(), sources={
         "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "pkg"},
     }))
     with pytest.raises(EntryFetchError, match="'..' segment"):
@@ -1271,7 +1274,7 @@ def test_an_entry_subpath_is_not_part_of_an_object_stores_address(objects_rig):
     ``key`` is what addresses the object, and it composes separately."""
     _, objects, pipeline = objects_rig
     objects.put("b", "pkg.tar.gz", BODY, access_key_id=_OBJ_AK)
-    ctx = make_context(source_session=_session(_ScriptedGit(), sources={
+    ctx = fetch_context(source_session=_session(_ScriptedGit(), sources={
         "cdn": {
             "protocol": "oss",
             "bucket": "b",
@@ -1290,7 +1293,7 @@ def test_an_entry_subpath_is_not_part_of_an_object_stores_address(objects_rig):
 
 def test_entry_level_auth_on_an_inline_git_source_is_refused(rig):
     _, _, pipeline = rig
-    ctx = make_context(source_session=_session(_ScriptedGit()))
+    ctx = fetch_context(source_session=_session(_ScriptedGit()))
     with pytest.raises(EntryFetchError, match="'auth' is not supported on a git"):
         pipeline.resolve(
             ctx,
@@ -1339,7 +1342,7 @@ def test_the_object_road_files_once_and_its_delivery_adds_nothing(objects_rig):
 def test_the_git_road_carries_the_auth_and_the_category_limit(rig):
     content, _, pipeline = rig
     git = _ScriptedGit()
-    ctx = make_context(source_session=_session(git, sources={
+    ctx = fetch_context(source_session=_session(git, sources={
         "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "auth": "ci-token"},
     }))
     decl = pipeline.resolve(ctx, entry={"from": "app"}, category="identity")
@@ -1367,7 +1370,7 @@ def test_an_oss_source_without_auth_is_refused_before_any_read(objects_rig):
     belt for a document that reached storage before that rule existed.
     """
     _, objects, pipeline = objects_rig
-    ctx = make_context(source_session=_session(_ScriptedGit(), sources={
+    ctx = fetch_context(source_session=_session(_ScriptedGit(), sources={
         "cdn": {"protocol": "oss", "bucket": "b", "key": "k"},
     }))
     with pytest.raises(EntryFetchError, match="auth"):
@@ -1392,7 +1395,7 @@ def test_a_source_written_as_a_plain_url_string_is_refused(rig):
     written by a person, not produced by the platform.
     """
     _, _, pipeline = rig
-    ctx = make_context(source_session=_session(_ScriptedGit()))
+    ctx = fetch_context(source_session=_session(_ScriptedGit()))
     with pytest.raises(EntryFetchError) as raised:
         pipeline.resolve(
             ctx,
@@ -1416,7 +1419,7 @@ def test_declared_protocol_cannot_answer_for_a_source_that_is_not_a_declaration(
     raises the real error with the real message rather than a rule derived
     from a shape nothing supports.
     """
-    ctx = make_context()
+    ctx = fetch_context()
     assert declared_protocol(ctx, {"source": "https://example.com/x.zip"}) is None
     assert declared_protocol(ctx, {"content": "inline text"}) is None
     assert (

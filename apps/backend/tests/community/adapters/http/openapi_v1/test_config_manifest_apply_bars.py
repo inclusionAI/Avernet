@@ -136,7 +136,7 @@ def test_apply_declares_the_bar_w10_settled():
             upload_service=object(),
             capability_reader=object(),
             package_validator=object(),
-            entry_fetcher=object(),
+            content=object(),
             resource_service=object(),
             cli_tool_service=object(),
         )
@@ -195,7 +195,7 @@ def test_apply_admission_mode_is_no_wider_than_the_categories_it_writes():
         upload_service=object(),
         capability_reader=object(),
         package_validator=object(),
-        entry_fetcher=object(),
+        content=object(),
         resource_service=object(),
         cli_tool_service=object(),
     ):

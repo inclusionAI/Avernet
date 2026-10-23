@@ -32,7 +32,7 @@ from agentclaw.community.core.bot_config_manifest.fetch.limits import (
     FetchCategory,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.unpack import UnpackError, unpack_archive
-from agentclaw.community.core.content_store import ContentStoreProtocol, canonical_tree_bytes
+from agentclaw.community.core.content_store import ContentStoreProtocol, canonical_tree_bytes, decode_tree_bytes
 from agentclaw.community.core.skill_center.skill_package import (
     SkillPackageInvalidError,
     SkillPackageTooLargeError,
@@ -152,9 +152,15 @@ def _blob_package(
     tar.gz) is unpacked and the selected subtree goes through
     ``validate_directory``.
     """
+    archive = delivery.single()
+    stored_tree = decode_tree_bytes(archive)
+    if stored_tree is not None:
+        # The platform's own copy of a git-delivered package, served back by
+        # ``keep_last``: the compiler filed it as one tree blob, so it is
+        # already the selected subtree and needs no unpack.
+        return _validate(validator.validate_directory, list(stored_tree))
     kind = _archive_kind(entry, delivery.source_url() or "", delivery.content_type())
     subpath = entry.get("subpath")
-    archive = delivery.single()
     if kind == "zip" and not subpath:
         return _validate(validator.validate_zip, archive)
     files = _extract_subtree(archive, kind, subpath if isinstance(subpath, str) else None)

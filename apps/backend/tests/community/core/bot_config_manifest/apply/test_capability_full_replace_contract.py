@@ -80,8 +80,9 @@ from ._fakes import (
     FakeObjectCredentials,
     OSS_AUTH,
     OSS_BUCKET,
+    EngineRig,
     build_skill_zip,
-    declared_session,
+    manifest_compiler,
     real_validator,
     seeded_object_store,
 )
@@ -327,7 +328,6 @@ def _context(bot: dict, *, apply_id: str | None) -> ApplyContext:
         bot=bot,
         capabilities=capabilities,
         apply_id=apply_id,
-        source_session=declared_session(),
     )
 
 
@@ -358,19 +358,21 @@ async def test_combined_full_replace_dry_run_and_apply_use_real_persistence():
     package = build_skill_zip("dependent")
     key = "skills/dependent.zip"
     objects = seeded_object_store({key: package})
-    fetcher = DeclaredSourceResolver(
-        FakeManifestContent(), FakeObjectCredentials(), objects
-    )
-    orchestrator = ApplyOrchestrator(
-        {
-            ManifestCategory.SKILLS: SkillsMaterialiser(
-                uploads, activation, reader, real_validator(), fetcher
-            ),
-            ManifestCategory.MCP: McpMaterialiser(
-                activation, _Center(), _McpConfig(), reader
-            ),
-        },
-        steps=ArcaDelivery(lambda: None).steps_for,
+    content = FakeManifestContent()
+    fetcher = DeclaredSourceResolver(content, FakeObjectCredentials(), objects)
+    orchestrator = EngineRig(
+        ApplyOrchestrator(
+            {
+                ManifestCategory.SKILLS: SkillsMaterialiser(
+                    uploads, activation, reader, real_validator(), content
+                ),
+                ManifestCategory.MCP: McpMaterialiser(
+                    activation, _Center(), _McpConfig(), reader
+                ),
+            },
+            steps=ArcaDelivery(lambda: None).steps_for,
+        ),
+        manifest_compiler(content=content, resolver=fetcher),
     )
     digest = "sha256:" + hashlib.sha256(package).hexdigest()
     document = f"""schema_version: 1
