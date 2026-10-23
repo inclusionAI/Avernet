@@ -59,9 +59,13 @@ async def compile_identity(
 
         inline = entry.get("content")
         if isinstance(inline, str):
-            digest = await file_produced(
-                session, content, inline.encode("utf-8"), origin=ORIGIN_INLINE, category=_CATEGORY, identity=file_type
-            )
+            try:
+                digest = await file_produced(
+                    session, content, inline.encode("utf-8"), origin=ORIGIN_INLINE, category=_CATEGORY, identity=file_type
+                )
+            except EntryFetchError as exc:
+                failures.append(EntryFailure(file_type, exc.reason))
+                continue
             desired.append(DesiredIdentityFile(file_type, StoredContent(digest)))
             continue
         if "from" not in entry and "source" not in entry:

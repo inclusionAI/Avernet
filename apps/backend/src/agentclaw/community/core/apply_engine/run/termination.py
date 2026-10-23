@@ -17,7 +17,7 @@ import json
 from datetime import datetime
 from typing import Optional
 
-from agentclaw.community.core.apply_engine.compiler import StateRef, state_ref_from_payload
+from agentclaw.community.core.apply_engine.compiler import ManifestStateRef, StateRef, state_ref_from_payload
 from agentclaw.community.core.apply_engine.outcomes import (
     ApplyReport,
     ApplyStatus,
@@ -55,6 +55,19 @@ def record_engine_failure(report: ApplyReport, exc: Exception) -> None:
     )
 
 
+def _state_of(payload: dict) -> StateRef:
+    """The payload's state reference, or the Manifest when the payload cannot say.
+
+    This runs on the path that terminates an apply whose rebuild failed —
+    possibly *because* the reference was unreadable — so it must not raise
+    the same error again before the report is written and the lock freed.
+    """
+    try:
+        return state_ref_from_payload(payload.get("state"))
+    except ValueError:
+        return ManifestStateRef()
+
+
 def terminate_unstartable(
     applies: BotConfigManifestApplyRepositoryProtocol,
     locks: BotConfigManifestApplyLockRepositoryProtocol,
@@ -79,7 +92,7 @@ def terminate_unstartable(
         started_at=parse_started_at(payload.get("started_at")),
         finished_at=datetime.now(),
         categories=(),
-        state=state_ref_from_payload(payload.get("state")),
+        state=_state_of(payload),
     )
     record_engine_failure(report, exc)
     try:
