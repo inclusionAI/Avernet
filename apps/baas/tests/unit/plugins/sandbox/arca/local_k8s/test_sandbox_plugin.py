@@ -1139,7 +1139,7 @@ class TestLocalK8sPluginA2aBaseUrl:
         本 key 不进 in-flight，容量释放后可再调度。"""
         import time as _time
 
-        from secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin import (
+        from secbaas.community.plugins.sandbox.arca.local_k8s._a2a_discovery import (
             _A2A_URL_DISCOVERY_MAX_CONCURRENCY,
         )
 

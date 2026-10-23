@@ -63,6 +63,11 @@ from secbaas.community.logger import get_logger
 from secbaas.community.plugins.sandbox.utils.arca_utils import ArcaUtils
 from secbaas.community.spi.sandbox.arca import ArcaSandbox, ArcaSandboxPlugin
 
+from ._a2a_discovery import (
+    _ALREADY_IN_FLIGHT,
+    _AT_CAPACITY,
+    A2aUrlDiscoveryState,
+)
 from ._sandbox import LocalK8sArcaSandbox, _convert_outbound_rules
 
 if TYPE_CHECKING:
@@ -99,14 +104,8 @@ _SHARED_BOT_DATA_PVC_SIZE = "10Gi"
 _SHARED_BOT_DATA_PVC_ACCESS_MODE = "ReadWriteOnce"
 
 # a2a 地址发现的 kube 实查上界（review P2：A2A 可选字段绝不拖住 WS 签发——
-# to_thread 挪出事件循环之外的第二道防线）；NodePort 记忆化在插件实例上（
-# Service 生命周期内不变），重复签发零 kube RT
+# to_thread 挪出事件循环之外的第二道防线）
 _A2A_URL_DISCOVERY_TIMEOUT_S = 5.0
-_A2A_URL_DISCOVERY_NEGATIVE_TTL_S = 30.0
-# 后台发现线程的并发上限（review P2-1 调度失败边界）：容量耗尽立即降级——
-# 空地址 + 短负缓存，绝不在 WS 签发链上等待/排队（发现是可选面，线程资源
-# 归属签发主链更优先）；插件实例内 in-flight 计数即额度
-_A2A_URL_DISCOVERY_MAX_CONCURRENCY = 8
 
 # Environment variable names consumed by this plugin.
 ENV_KUBECONFIG = "LOCAL_K8S_KUBECONFIG"
@@ -456,16 +455,25 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         self,
         credentials: ArcaCredentials | None = None,
         arca_utils: ArcaUtils | None = None,
+        discovery_state: A2aUrlDiscoveryState | None = None,
     ) -> None:
         self._credentials = credentials
         self._arca_utils = arca_utils
-        # (namespace, service_name) -> node_port|None|('error', monotonic_ts)
-        # 300 系后两字段是隔离语义的执行面（见 _a2a_base_url_cached）：
-        # in-flight 防线程轰炸；线程表供 a2a_discovery_join（测试/诊断面）
+        # review P2（跨请求生命周期）：本插件由 PaasServiceFactory 按请求
+        # 创建（credentials 逐请求注入，插件本身绝不整体单例），而发现缓
+        # 存/负缓存/in-flight/线程表是 *进程级* 语义的执行面——挂在实例上
+        # 活不过一个请求，「首次为空、后续自然带上」不成立，并发上限也随
+        # 实例增殖失效。因此沉淀到 A2aUrlDiscoveryState，由组合入口以
+        # Singleton 注入工厂；None = 未经组合入口直建（测试），各自独立。
+        # 下面三个引用与共享 dict/set 是同一对象：记忆化读写、create 响应
+        # 预热、发现线程收尾逻辑不感知归属变化，只有调度入口走原子原语。
+        self._a2a_discovery = discovery_state or A2aUrlDiscoveryState()
         self._a2a_node_port_cache: dict[tuple[str, str], int | None | tuple[str, float]]
-        self._a2a_node_port_cache = {}
-        self._a2a_inflight: set[tuple[str, str]] = set()
-        self._a2a_threads: dict[tuple[str, str], "threading.Thread"] = {}
+        self._a2a_node_port_cache = self._a2a_discovery.node_port_cache
+        self._a2a_inflight: set[tuple[str, str]] = self._a2a_discovery.inflight
+        self._a2a_threads: dict[tuple[str, str], "threading.Thread"] = (
+            self._a2a_discovery.threads
+        )
         self._client_manager = LocalK8sClientManager()
 
     def _client(self) -> ApiClient:
@@ -1066,6 +1074,10 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         """后台发现 NodePort（守护线程、in-flight 去重）。失败写负缓存
         （短 TTL），持续故障下不会反复等待、也不会线程轰炸。
 
+        跨请求去重与进程级并发上限（review P2）：本插件按请求创建，去重
+        与额度必须由共享 ``A2aUrlDiscoveryState`` 在 *一个原子区* 内完成
+        ——各实例/各请求分别自查额度会同时「都认为自己还有额度」突破上限。
+
         调度失败边界（review P2-1）：本方法在 WS 签发调用链内同步执行，
         ``threading.Thread`` 创建/启动失败（线程资源不足）与并发上限触顶都
         就地降级为「空地址 + 短负缓存」——A2A 是可选面，调度故障绝不上抛
@@ -1073,14 +1085,14 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         后续调度被永久旁路）。负缓存过 TTL 自动出清，资源恢复后再次签发
         即重新调度。"""
         cache_key = (namespace, service_name)
-        if cache_key in self._a2a_inflight:
-            return
-        if len(self._a2a_inflight) >= _A2A_URL_DISCOVERY_MAX_CONCURRENCY:
+        outcome = self._a2a_discovery.acquire(cache_key)
+        if outcome == _ALREADY_IN_FLIGHT:
+            return  # 同 key 发现在途：坐等结果落缓存，不写负缓存
+        if outcome == _AT_CAPACITY:
             # 容量耗尽：立即降级（不等待），额度留给在途发现
             self._a2a_note_schedule_failure(
                 cache_key, "background discovery concurrency cap reached")
             return
-        self._a2a_inflight.add(cache_key)
         try:
             thread = threading.Thread(
                 target=self._a2a_discover,
@@ -1091,7 +1103,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             self._a2a_threads[cache_key] = thread
             thread.start()
         except Exception as exc:  # noqa: BLE001 — 调度失败降级，不拖垮 WS 签发
-            self._a2a_inflight.discard(cache_key)
+            self._a2a_discovery.release(cache_key)
             self._a2a_threads.pop(cache_key, None)
             self._a2a_note_schedule_failure(
                 cache_key, f"failed to start discovery thread: {exc}")
@@ -1106,9 +1118,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             "local_k8s: a2a base url scheduling skipped for %s/%s: %s",
             cache_key[0], cache_key[1], reason,
         )
-        self._a2a_node_port_cache[cache_key] = (
-            "error", time.monotonic() + _A2A_URL_DISCOVERY_NEGATIVE_TTL_S,
-        )
+        self._a2a_discovery.note_negative(cache_key)
 
     def _a2a_discover(self, namespace: str, service_name: str) -> None:
         from kubernetes.client import CoreV1Api
@@ -1136,11 +1146,9 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
                 "local_k8s: a2a base url discovery failed for %s/%s: %s",
                 namespace, service_name, exc,
             )
-            self._a2a_node_port_cache[cache_key] = (
-                "error", time.monotonic() + _A2A_URL_DISCOVERY_NEGATIVE_TTL_S,
-            )
+            self._a2a_discovery.note_negative(cache_key)
         finally:
-            self._a2a_inflight.discard(cache_key)
+            self._a2a_discovery.release(cache_key)
 
     def a2a_discovery_join(self, deployment_name: str, timeout: float = 5.0) -> None:
         """等待在途后台发现完成（测试/诊断 seam；产品路径不等待）。"""
@@ -1234,16 +1242,26 @@ def local_k8s_plugin_factory(
     _credentials: ArcaCredentials | None = None,
     *,
     arca_utils: ArcaUtils | None = None,
+    discovery_state: A2aUrlDiscoveryState | None = None,
 ) -> Callable[[ArcaCredentials], LocalK8sArcaSandboxPlugin]:
-    """Return a callable that builds LocalK8sArcaSandboxPlugin with arca_utils baked in.
+    """Return a callable that builds LocalK8sArcaSandboxPlugin with arca_utils
+    and the shared A2A discovery state baked in.
 
     The leading ``_credentials`` arg absorbs any positional argument that
     dependency_injector may pass when the provider is called with args.
     In normal flow, Singleton calls this with keyword args only, returning
     the inner ``_build`` function.
+
+    ``discovery_state`` 是组合入口注入的应用级 Singleton（review P2：插件
+    实例按请求创建，发现缓存/并发额度必须跨请求共享）；None = 未注入（测试
+    直用工厂），每个实例各自独立。
     """
 
     def _build(credentials: ArcaCredentials | None = None) -> LocalK8sArcaSandboxPlugin:
-        return LocalK8sArcaSandboxPlugin(credentials=credentials, arca_utils=arca_utils)
+        return LocalK8sArcaSandboxPlugin(
+            credentials=credentials,
+            arca_utils=arca_utils,
+            discovery_state=discovery_state,
+        )
 
     return _build
