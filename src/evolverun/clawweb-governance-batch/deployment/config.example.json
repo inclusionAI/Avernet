@@ -1,0 +1,23 @@
+{
+  "project": "example_project",
+  "clawweb_url": "https://effect-center.example.com",
+  "output_dir": "./runs",
+  "state_dir": "./state",
+  "nas_roots": [
+    "/mnt/bots/prod"
+  ],
+  "llm_config_file": "./deployment-llm.json",
+  "window_days": 7,
+  "lookback_days": 14,
+  "max_data_age_days": 3,
+  "top_per_lane": 5,
+  "sessions_per_bot": 24,
+  "verification_limit": 10,
+  "verification_sessions": 100,
+  "timeout_seconds": 180,
+  "max_message_bytes": 2000000,
+  "allow_writes": false,
+  "rejection_cooldown_days": 15,
+  "analysis_max_tokens": 12000,
+  "cron_only": true
+}
