@@ -32,7 +32,8 @@ use bcs_service_api::{
     Session, SessionKind, SessionManagementService, SystemMessageEvent,
     WorkbenchChatAbortAuthorizationCommand,
     WorkbenchChatAuthorizationCommand, WorkbenchConnectCommand, WorkbenchConnectOutcome,
-    WorkbenchParticipantView, WorkbenchSessionService, WorkbenchUseCaseError, backfill_bot_names,
+    WorkbenchParticipantView, WorkbenchSessionService, WorkbenchSpeakingModeCommand,
+    WorkbenchUseCaseError, backfill_bot_names,
     generated_group_id, validate_sender_routes,
 };
 use tracing::warn;

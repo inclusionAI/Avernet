@@ -26,7 +26,7 @@ use bcs_service_api::{
     TaskRunAliasRegistration, WebSendCommand, WebSendOutcome,
     WorkbenchChatAbortAuthorizationCommand, WorkbenchChatAuthorizationCommand,
     WorkbenchConnectCommand, WorkbenchConnectOutcome, WorkbenchParticipantView,
-    WorkbenchSessionService, WorkbenchUseCaseError,
+    WorkbenchSessionService, WorkbenchSpeakingModeCommand, WorkbenchUseCaseError,
 };
 use bcs_service_api::{
     InteractionFrontendEvent, InteractionRequestedOutcome, InteractionService,
@@ -203,6 +203,9 @@ struct RecordingWorkbenchSessions {
     connect_error: Mutex<Option<WorkbenchUseCaseError>>,
     connect_scope: Mutex<Option<MessageViewScope>>,
     connect_participants: Mutex<Option<Vec<WorkbenchParticipantView>>>,
+    speaking_mode_commands: Mutex<Vec<WorkbenchSpeakingModeCommand>>,
+    speaking_mode_projection:
+        Mutex<Option<bcs_domain::speaking_lease::SessionSpeakingMode>>,
 }
 
 #[derive(Default)]
@@ -282,6 +285,17 @@ impl WorkbenchSessionService for RecordingWorkbenchSessions {
             participants,
             speaking_mode: bcs_domain::speaking_lease::SessionSpeakingMode::Plain,
         })
+    }
+
+    async fn resolve_speaking_mode_projection(
+        &self,
+        command: WorkbenchSpeakingModeCommand,
+    ) -> bcs_domain::speaking_lease::SessionSpeakingMode {
+        self.speaking_mode_commands.lock().await.push(command);
+        self.speaking_mode_projection
+            .lock()
+            .await
+            .unwrap_or(bcs_domain::speaking_lease::SessionSpeakingMode::Plain)
     }
 
     async fn authorize_chat_send(
@@ -1676,6 +1690,44 @@ async fn connect_session_bound(
     .unwrap();
     assert!(recv_response(rx).await.ok);
     outcome
+}
+
+#[tokio::test]
+async fn session_bound_connect_publishes_the_workbench_speaking_mode_projection() {
+    let state = new_state();
+    *state.workbench_sessions.speaking_mode_projection.lock().await = Some(
+        bcs_domain::speaking_lease::SessionSpeakingMode::LeaseRequired,
+    );
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut connection = WebClientConnectionState::default();
+    let connect = BcsFrame::Request(RequestFrame::new(
+        "connect-speaking",
+        "connect",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "session_id": "session-bound-1"
+        })),
+    ));
+    let outcome = dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&connect).unwrap(),
+        &tx,
+        &mut connection,
+        &session_bound_auth(),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(outcome, WebDispatchOutcome::ClientConnect { subscribed: true }));
+    let response = recv_response(&mut rx).await;
+    assert!(response.ok);
+    let payload = response.payload.expect("connect payload");
+    // The session-bound handshake must publish the SAME advisory projection
+    // the UserBound connect resolves — never a hard-coded Plain.
+    assert_eq!(payload["speaking_mode"], "lease_required");
+    let commands = state.workbench_sessions.speaking_mode_commands.lock().await;
+    assert_eq!(commands.len(), 1, "one projection per session-bound connect");
+    assert_eq!(commands[0].group_id, "group-web-1");
+    assert_eq!(commands[0].session_id.as_deref(), Some("session-bound-1"));
 }
 
 #[tokio::test]

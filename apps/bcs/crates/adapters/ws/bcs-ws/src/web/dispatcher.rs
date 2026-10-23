@@ -13,7 +13,7 @@ use bcs_service_api::{
     HumanResponseSource, MessageFlowService, ParticipantKind, ServiceError, WebSendCommand,
     WorkbenchChatAbortAuthorizationCommand, WorkbenchChatAuthorizationCommand,
     WorkbenchConnectCommand, WorkbenchConnectOutcome, WorkbenchParticipantView,
-    WorkbenchSessionService,
+    WorkbenchSessionService, WorkbenchSpeakingModeCommand,
 };
 use bcs_service_api::{
     InteractionFrontendEvent, InteractionService, InteractionServiceError, InteractionStatus,

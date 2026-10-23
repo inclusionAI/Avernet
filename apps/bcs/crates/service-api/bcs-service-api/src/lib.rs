@@ -263,7 +263,7 @@ pub use port::{
 pub use workbench_use_cases::{
     WorkbenchChatAbortAuthorizationCommand, WorkbenchChatAuthorizationCommand,
     WorkbenchConnectCommand, WorkbenchConnectOutcome, WorkbenchParticipantView,
-    WorkbenchSessionService, WorkbenchUseCaseError,
+    WorkbenchSessionService, WorkbenchSpeakingModeCommand, WorkbenchUseCaseError,
 };
 
 pub use types::{

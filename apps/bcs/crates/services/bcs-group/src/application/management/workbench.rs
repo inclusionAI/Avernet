@@ -145,6 +145,33 @@ impl WorkbenchSessionService for GroupManagement {
         })
     }
 
+    async fn resolve_speaking_mode_projection(
+        &self,
+        command: WorkbenchSpeakingModeCommand,
+    ) -> bcs_domain::speaking_lease::SessionSpeakingMode {
+        use bcs_domain::speaking_lease::SessionSpeakingMode;
+
+        // Same reduction `connect` performs, mirrored for transport-scoped
+        // (V1 session-bound) connects: the CURRENT membership and the CURRENT
+        // per-bot caller configuration. Lookup failures degrade to `Plain`
+        // (advisory projection) — message admission re-resolves authoritatively.
+        let Some(group) = self.group.get(&command.group_id).await else {
+            return SessionSpeakingMode::Plain;
+        };
+        let participants = if let Some(session_id) = command.session_id.as_deref() {
+            match self.session_management.get(session_id).await {
+                Ok(Some(session)) if session.group_id == command.group_id => {
+                    workbench_participants_from_slice(&session.participants)
+                }
+                _ => return SessionSpeakingMode::Plain,
+            }
+        } else {
+            workbench_participants(&group)
+        };
+        self.resolve_connect_speaking_mode(&participants, group.group_strategy)
+            .await
+    }
+
     async fn authorize_chat_send(
         &self,
         command: WorkbenchChatAuthorizationCommand,

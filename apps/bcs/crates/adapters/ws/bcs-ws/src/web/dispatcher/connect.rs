@@ -162,11 +162,20 @@ pub(super) async fn handle_connect(
                             message_view_scope: participant.message_view_scope,
                         })
                         .collect(),
-                    // The V1 group-session token binds a display identity only
-                    // (no IAM/OAuth window), so its scope never carries the
-                    // caller speaking semantics.
-                    speaking_mode:
-                        bcs_domain::speaking_lease::SessionSpeakingMode::Plain,
+                    // Session-bound connections carry the full caller
+                    // semantics (upgrade-time caller ingress, lease.* commands
+                    // and the message admission fence all serve SessionBound),
+                    // so the connect handshake publishes the same advisory
+                    // speaking-mode projection the UserBound path resolves —
+                    // message admission stays the authoritative per-message
+                    // gate either way.
+                    speaking_mode: state
+                        .workbench_sessions
+                        .resolve_speaking_mode_projection(WorkbenchSpeakingModeCommand {
+                            group_id: group_id.clone(),
+                            session_id: Some(session_id.clone()),
+                        })
+                        .await,
                 },
                 Err(err) => {
                     warn!(
