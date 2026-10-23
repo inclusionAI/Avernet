@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
+from agentclaw.community.core.apply_engine.skill_validation import PackageRefusal, validate_package
 from agentclaw.community.core.apply_engine.desired_state import (
     Declaration,
     DesiredSkill,
@@ -34,8 +35,6 @@ from agentclaw.community.core.bot_config_manifest.fetch.limits import (
 from agentclaw.community.core.apply_engine.unpack import UnpackError, unpack_archive
 from agentclaw.community.core.content_store import ContentStoreProtocol, canonical_tree_bytes, decode_tree_bytes
 from agentclaw.community.core.skill_center.skill_package import (
-    SkillPackageInvalidError,
-    SkillPackageTooLargeError,
     SkillPackageValidator,
     ValidatedSkillPackage,
 )
@@ -57,10 +56,6 @@ _KIND_BY_CONTENT_TYPE: tuple[tuple[str, str], ...] = (
     ("application/x-gzip", "tar.gz"),
     ("application/x-tar", "tar.gz"),
 )
-
-
-class _PackageRefusal(Exception):
-    """The fetched bytes can never become a skill package — refuse the entry."""
 
 
 async def compile_skills(
@@ -108,7 +103,7 @@ async def compile_skills(
                 validated = await asyncio.to_thread(_tree_package, delivery, validator)
             else:
                 validated = await asyncio.to_thread(_blob_package, entry, delivery, validator)
-        except _PackageRefusal as exc:
+        except PackageRefusal as exc:
             failures.append(EntryFailure(name, str(exc)))
             continue
         if validated.name != name:
@@ -135,10 +130,10 @@ def _tree_package(delivery: EntryDelivery, validator: SkillPackageValidator) -> 
     try:
         files = delivery.members(unpack=None, strip_components=0)
     except EntryFetchError as exc:
-        raise _PackageRefusal(str(exc)) from exc
+        raise PackageRefusal(str(exc)) from exc
     if isinstance(files, str):
-        raise _PackageRefusal(files)
-    return _validate(validator.validate_directory, files)
+        raise PackageRefusal(files)
+    return validate_package(validator.validate_directory, files)
 
 
 def _blob_package(
@@ -158,13 +153,13 @@ def _blob_package(
         # The platform's own copy of a git-delivered package, served back by
         # ``keep_last``: the compiler filed it as one tree blob, so it is
         # already the selected subtree and needs no unpack.
-        return _validate(validator.validate_directory, list(stored_tree))
+        return validate_package(validator.validate_directory, list(stored_tree))
     kind = _archive_kind(entry, delivery.source_url() or "", delivery.content_type())
     subpath = entry.get("subpath")
     if kind == "zip" and not subpath:
-        return _validate(validator.validate_zip, archive)
+        return validate_package(validator.validate_zip, archive)
     files = _extract_subtree(archive, kind, subpath if isinstance(subpath, str) else None)
-    return _validate(validator.validate_directory, files)
+    return validate_package(validator.validate_directory, files)
 
 
 def _extract_subtree(archive: bytes, kind: str, subpath: Optional[str]) -> list[tuple[str, bytes]]:
@@ -180,7 +175,7 @@ def _extract_subtree(archive: bytes, kind: str, subpath: Optional[str]) -> list[
                 unpacked_size_limit=FETCH_ENTRY_LIMITS["resources_unpacked"],
             )
         except UnpackError as exc:
-            raise _PackageRefusal(f"the fetched skill archive could not be unpacked: {exc}") from exc
+            raise PackageRefusal(f"the fetched skill archive could not be unpacked: {exc}") from exc
         selected: list[tuple[str, bytes]] = []
         for member in tree.members:
             relative = _under_subpath(member, subpath)
@@ -190,7 +185,7 @@ def _extract_subtree(archive: bytes, kind: str, subpath: Optional[str]) -> list[
             # verified, permissions flattened, traversal refused.
             selected.append((relative, (root / member).read_bytes()))
         if not selected:
-            raise _PackageRefusal(
+            raise PackageRefusal(
                 f"the archive contains nothing under subpath {subpath!r}"
                 if subpath
                 else "the archive contains no files"
@@ -212,20 +207,10 @@ def _archive_kind(entry: Mapping[str, Any], source_url: str, content_type: Optio
         for ctype, kind in _KIND_BY_CONTENT_TYPE:
             if media == ctype:
                 return kind
-    raise _PackageRefusal(
+    raise PackageRefusal(
         "cannot tell how to unpack this skill source: neither its URL suffix nor its content type says 'zip' or "
         "'tar.gz', and 'unpack' is not declared"
     )
-
-
-def _validate(call, payload) -> ValidatedSkillPackage:
-    """One validator call, refused as an entry failure rather than a mid-write surprise."""
-    try:
-        return call(payload)
-    except SkillPackageInvalidError as exc:
-        raise _PackageRefusal(f"the fetched skill is not a valid package ({exc.reason})") from exc
-    except SkillPackageTooLargeError:
-        raise _PackageRefusal("the fetched skill package is over the upload package limits") from None
 
 
 def _under_subpath(member: str, subpath: Optional[str]) -> Optional[str]:

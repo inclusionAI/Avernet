@@ -129,13 +129,11 @@ def context_for(ctx: ApplyContext) -> CliToolContext:
         #        actor_id="usr_collaborator", entity_id="ent_7",
         #        env="prod", engine_type=<the bot's engine>, tenant="acme",
         #        apply_id="ap_01HZX8",        # None off the apply path
-        #        budget=ApplyFetchBudget(...),      # None likewise
-        #        source_session=SourceSession(...), # None likewise
         #    )
 
-    Ten fields, all copied straight off :class:`ApplyContext`. The service
-    itself satisfies ``FetchContext`` through this object, which is how its
-    fetch is charged to this apply's budget. ``engine_type`` is carried but
+    Eight fields, all copied straight off :class:`ApplyContext`; the service
+    fetches nothing, so no budget or source session rides along any more —
+    the compiler already acquired the tool's bytes. ``engine_type`` is carried but
     never compared here: this module must not name an engine, and a structural
     test pins that against its whole source, docstrings included.
 
@@ -145,10 +143,9 @@ def context_for(ctx: ApplyContext) -> CliToolContext:
     there*, and therefore whether a later full override is replacing a
     hand-installed tool.
 
-    The three apply-only fields ride along so the service's fetch is charged to
-    this apply's budget and its receipts carry this apply's id. An install
-    through the HTTP route passes ``None`` for all three, which is what that
-    column's nullability means.
+    ``apply_id`` rides along so the service's rows name the apply that wrote
+    them. An install through the HTTP route passes ``None``, which is what
+    that column's nullability means.
     """
     return CliToolContext(
         bot_id=ctx.bot_id,

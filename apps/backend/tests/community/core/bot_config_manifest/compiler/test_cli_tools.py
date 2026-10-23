@@ -60,3 +60,18 @@ async def test_the_digest_belt_and_the_grammar_are_re_asked() -> None:
     assert "[3]" in reasons
     assert "unknown unpack kind" in reasons["weird"]
     assert "gone" in reasons
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_pin_fails_the_entry_not_the_compile() -> None:
+    session, content, resolver = rig({"tools/mycli": b"\x7fELF"})
+    declared = await compile_cli_tools(
+        session,
+        [{"name": "mycli", "source": oss_source("tools/mycli"), "digest": "abc123"}],
+        resolver=resolver,
+        content=content,
+    )
+    assert declared.entries == ()
+    assert [(f.identity, f.reason) for f in declared.failures] == [
+        ("mycli", "digest must be 'sha256:' followed by 64 lowercase hex characters")
+    ]

@@ -17,6 +17,7 @@ import json
 from datetime import datetime
 from typing import Optional
 
+from agentclaw.community.core.apply_engine.compiler import StateRef, state_ref_from_payload
 from agentclaw.community.core.apply_engine.outcomes import (
     ApplyReport,
     ApplyStatus,
@@ -78,6 +79,7 @@ def terminate_unstartable(
         started_at=parse_started_at(payload.get("started_at")),
         finished_at=datetime.now(),
         categories=(),
+        state=state_ref_from_payload(payload.get("state")),
     )
     record_engine_failure(report, exc)
     try:
@@ -109,6 +111,7 @@ def terminate_on_launch_failure(
     trigger: str,
     started_at: datetime,
     lock_token: str,
+    state: StateRef,
     exc: BaseException,
 ) -> None:
     """A RUNNING report whose work never launched: finish it, free the bot.
@@ -143,6 +146,7 @@ def terminate_on_launch_failure(
                     started_at=started_at,
                     finished_at=datetime.now(),
                     categories=(),
+                    state=state,
                 ).as_payload()
             ),
         )

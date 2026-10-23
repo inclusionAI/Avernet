@@ -20,7 +20,7 @@ a desired state is already in the content store, named by digest. That is
 what lets a revision be delivered with no Manifest document in between
 (RSI-04) and what keeps a grammar change out of the materialisers.
 
-Extracted from `core/apply_engine/` by
+Extracted from `core/bot_config_manifest/apply/` by
 `apps/backend/specs/2026-10-23-apply-engine-desired-state/`, which also
 records the resources-root rule (`data/`, cleared then written on every
 apply that declares resources) and the typed state reference an apply run

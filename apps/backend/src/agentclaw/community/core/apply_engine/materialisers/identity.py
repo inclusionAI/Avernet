@@ -152,7 +152,8 @@ class IdentityMaterialiser(Materialiser):
                 failures.append(
                     ResolveFailure(
                         file_type,
-                        f"{file_type} is engine-generated runtime state: apply never writes it and never removes it",
+                        f"{file_type} is engine-generated runtime state: apply "
+                        "never writes it and never removes it",
                     )
                 )
                 continue
@@ -160,8 +161,8 @@ class IdentityMaterialiser(Materialiser):
                 failures.append(
                     ResolveFailure(
                         file_type,
-                        f"identity type {file_type!r} is not valid for engine {ctx.engine_type!r}; allowed: "
-                        + ", ".join(sorted(legal)),
+                        f"identity type {file_type!r} is not valid for engine "
+                        f"{ctx.engine_type!r}; allowed: " + ", ".join(sorted(legal)),
                     )
                 )
                 continue
@@ -172,7 +173,12 @@ class IdentityMaterialiser(Materialiser):
                 continue
             text = _decode_utf8(body)
             if text is None:
-                failures.append(ResolveFailure(file_type, "the identity source is not UTF-8 text"))
+                failures.append(
+                    ResolveFailure(
+                        file_type,
+                        "the identity source is not UTF-8 text",
+                    )
+                )
                 continue
             intents.append(Intent(file_type, text, note=entry.note))
 
