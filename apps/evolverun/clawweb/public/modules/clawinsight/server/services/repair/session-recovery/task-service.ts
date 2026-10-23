@@ -257,8 +257,10 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     const task = await this.mutate(taskId, previous.version, value => {
       if (value.status !== "running") this.fail(409, "任务已离开执行阶段");
       if (executionId && (value.execution?.executionId !== executionId || value.execution.state === "ended")) this.fail(409, "旧执行已结束");
-      const failures = (value.executionRetry?.failures ?? 0) + 1;
       const failedExecutionId = executionId ?? value.execution?.executionId;
+      // The retry marker is committed before release; another report may arrive in between.
+      if (failedExecutionId && value.executionRetry?.executionId === failedExecutionId) return { ...value, version: value.version + 1 };
+      const failures = (value.executionRetry?.failures ?? 0) + 1;
       const delay = retryable ? EXECUTION_RETRY_DELAYS_MS[failures - 1] : undefined;
       const summary = delay !== undefined ? `${reason}；已保存进度，${delay / 1000} 秒后重试 AIS 执行（第 ${failures} 次重试）`
         : retryable ? `${reason}；AIS 执行重试次数已用尽（失败 ${failures} 次），原任务效果未确认` : reason;
