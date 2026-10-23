@@ -914,4 +914,6 @@ test('chat.send 在持有有效租约时注入 leaseId/leaseEpoch，无租约不
   lastCall = lastOriginalSend.mock.calls.at(-1);
   expect(lastCall[0].params.leaseId).toBe('lease-7');
   expect(lastCall[0].params.leaseEpoch).toBe(3);
+  // 收敛：断开连接停掉租约轮询/到期定时器并立结在途请求，避免用例结束后定时器继续驱动。
+  await provider.disconnect();
 });

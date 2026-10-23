@@ -95,6 +95,31 @@ export class GroupSpeakingLeaseService {
   }
 
   /**
+   * 连接周期结束（disconnect / 底层断线）时收敛：停轮询与到期定时器，并立结
+   * 在途请求（回复 lease_disconnected，各等待自行走 catch 路径）。避免断开的
+   * 连接周期继续驱动定时器、在途请求超时后才误报。
+   */
+  resetConnection(): void {
+    if (this.expiryTimer) {
+      clearTimeout(this.expiryTimer);
+      this.expiryTimer = undefined;
+    }
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = undefined;
+    }
+    for (const [id, resolve] of this.pending) {
+      this.pending.delete(id);
+      resolve({
+        type: 'res',
+        id,
+        ok: false,
+        error: { code: 'lease_disconnected', retryable: true },
+      });
+    }
+  }
+
+  /**
    * 入站帧路由：仅吃 type==='res' 且 id 命中 pending 的租约应答；
    * 其余帧返回 false 由包装层继续既有链路。
    */

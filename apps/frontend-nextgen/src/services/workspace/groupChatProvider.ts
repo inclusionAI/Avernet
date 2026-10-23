@@ -371,9 +371,11 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
       }
       // 断线（含 SDK 内部重连失败）立即结束问答响应等待并清空快照；connected 通知不重置——
       // connect ACK 后服务端重放的 Pending 必须保留（协议 §7.3），快照重建只发生在下一次真实握手。
+      // 发言权同步停轮询/到期定时器并立结在途租约请求，避免断开的连接周期继续驱动定时器。
       if (event.status === 'disconnected' && this.questionScopeInner === inner) {
         this.questionService.resetConnection();
         this.execApprovalService.resetConnection();
+        this.speakingLeaseService.resetConnection();
       }
       this.emitConnection(event);
     });
@@ -500,6 +502,7 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     this.pendingConnectFrameId = undefined;
     this.questionService.resetConnection();
     this.execApprovalService.resetConnection();
+    this.speakingLeaseService.resetConnection();
     const inner = this.inner;
     this.inner = null;
     this.initializePromise = null;

@@ -287,4 +287,15 @@ describe('GroupSpeakingLeaseService', () => {
     await expect(service.refresh()).resolves.toBeUndefined();
     expect(transport.frames).toHaveLength(0);
   });
+
+  it('resetConnection 立结在途租约并停轮询/到期定时器', async () => {
+    // 在途请求:应答器挂空,请求停等中
+    transport.respondWith(() => undefined);
+    const pending = service.acquire(true);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    service.resetConnection();
+    await expect(pending).rejects.toThrow('lease_disconnected');
+  });
 });
