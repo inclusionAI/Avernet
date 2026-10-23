@@ -586,15 +586,15 @@ class ApplyRunService(ApplyRunServiceProtocol):
             entity_id=entity_id,
             env=get_current_env(),
         )
-        refusal: CompileRefused | None = None
+        domain_error: Exception | None = None
         try:
             compiled = await compiler.compile(ctx, state)
         except CompileRefused as exc:
-            refusal = exc
-        if refusal is not None:
+            domain_error = exc.domain_error
+        if domain_error is not None:
             # Raised outside the handler: the domain error keeps its own chain and
             # does not acquire the worker-only refusal as its context.
-            raise refusal.domain_error
+            raise domain_error
         report = await self._orchestrator(self.delivery_for_engine(ctx.engine_type)).apply(
             ctx,
             compiled.state,

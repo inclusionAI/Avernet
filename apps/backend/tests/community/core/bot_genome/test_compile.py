@@ -207,6 +207,7 @@ def test_a_missing_never_started_unknown_or_superseded_promotion_is_refused() ->
             asyncio.run(compiler.compile(ctx, GenomeStateRef("p" * 32)))
         assert isinstance(refused.value.domain_error, NotAppliable) and "superseded" in str(refused.value)
         assert refused.value.domain_error.reasons == caught.value.reasons, "the same refusal check raised"
+        assert refused.value.__cause__ is refused.value.domain_error, "chained for the worker's log too"
 
 
 def test_currency_is_judged_against_the_ref_the_promotion_moved() -> None:
