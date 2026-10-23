@@ -334,7 +334,7 @@ class TestA2aDiscoveryReclamation:
 
         assert shared.node_port_cache == {}
         assert shared.threads == {}
-        assert shared.inflight == set()
+        assert shared.inflight == {}
 
     @patch("kubernetes.client.CoreV1Api")
     def test_a2a_disabled_creation_accumulates_no_discovery_state(
@@ -372,27 +372,30 @@ class TestA2aDiscoveryReclamation:
                 )
 
         assert shared.node_port_cache == {}
-        assert shared.inflight == set()
+        assert shared.inflight == {}
         assert shared.threads == {}
 
     @patch("kubernetes.client.CoreV1Api")
-    def test_destroy_during_inflight_discovery_drops_late_write_back(
+    def test_destroy_during_inflight_drops_late_write_back(
         self, mock_core_cls, mock_client
     ) -> None:
-        """销毁落在发现窗口内:迟到的发现回写不得复活已销毁设备的
-        缓存条目(invalidate 与在途收尾按同一把锁协调)。"""
+        """销毁落在发现窗口内:撤销的是旧任务**回写资格**而非额度——旧任务
+        照常跑完并自行归还额度,其迟到回写按代际校验被拒收;真实等待线程
+        结束(保存线程引用 join)后的断言才可信(评审指正:以状态位轮询
+        当完成证据不牢)。"""
         shared = A2aUrlDiscoveryState()
         gate = threading.Event()
+        started: list[str] = []
+
+        def _blocked_read(**kwargs):
+            started.append(kwargs.get("name", "?"))
+            gate.wait(timeout=5.0)
+            return _service_with_node_port(30097)
 
         with patch.dict(os.environ, _LIFECYCLE_ENV, clear=True):
             plugin = _build_plugin(mock_client, shared)
             mock_core = MagicMock()
             mock_core_cls.return_value = mock_core
-
-            def _blocked_read(**kwargs):
-                gate.wait(timeout=5.0)
-                return _service_with_node_port(30097)
-
             mock_core.read_namespaced_service.side_effect = _blocked_read
 
             conn = plugin.resolve_ws_conn_info(
@@ -404,16 +407,212 @@ class TestA2aDiscoveryReclamation:
 
             key = ("default", "late-abc-svc")
             self._poll_until(lambda: key in shared.inflight)
+            stale_thread = shared.threads[key]
 
-            # Service 在发现查证途中被销毁 → 生命周期失效先行
+            # Service 在发现查证途中被销毁:撤销回写资格,额度不提前归还
             shared.invalidate(key)
+            assert key in shared.inflight, "invalidate 不得归还仍在执行任务的额度"
+
+            # 旧任务在途期间同 key 再签发:按 in-flight 去重坐等,不重查
+            again = plugin.resolve_ws_conn_info(
+                paas_device_id="late-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+            assert again.a2a_base_url == ""
+            assert len(started) == 1
+
+            # 旧任务携带旧快照返回:代际校验拒收,不复活已销毁设备条目
             gate.set()
-            self._poll_until(
-                lambda: key not in shared.inflight and key not in shared.threads
+            stale_thread.join(timeout=3.0)
+            assert not stale_thread.is_alive()
+            self._poll_until(lambda: key not in shared.inflight)
+            assert key not in shared.node_port_cache
+            assert len(started) == 1  # 迟到回写被拒收,全程只此一次查询
+
+            # 旧任务归位后,新一轮签发重新发现并落账新事实
+            gate.set()  # 幂等,后续读不再阻塞
+            mock_core.read_namespaced_service.side_effect = None
+            fresh = _service_with_node_port(30098)
+            mock_core.read_namespaced_service.return_value = fresh
+            refreshed = plugin.resolve_ws_conn_info(
+                paas_device_id="late-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+            assert refreshed.a2a_base_url == ""
+            plugin.a2a_discovery_join("late-abc")
+            landed = plugin.resolve_ws_conn_info(
+                paas_device_id="late-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+            assert landed.a2a_base_url == (
+                "http://late-abc-svc.stable.alipay.net:30098"
             )
 
-            # 迟到回写被丢弃:已销毁设备的历史记录不复活
-            assert key not in shared.node_port_cache
+    @patch("kubernetes.client.CoreV1Api")
+    def test_destroy_keeps_quota_bounded_concurrency(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """销毁不归还额度(评审 P2-1):满额后在途任务未结束时销毁其设备,
+        再签发其他 key 不得突破并发上限——实际并发恒 ≤ 8,额度只在任务
+        真正结束时归还。"""
+        shared = A2aUrlDiscoveryState()
+        cap = _A2A_URL_DISCOVERY_MAX_CONCURRENCY
+        gate = threading.Event()
+        started: list[str] = []
+
+        def _blocked_read(**kwargs):
+            started.append(kwargs.get("name", "?"))
+            gate.wait(timeout=5.0)
+            return _service_with_node_port(30097)
+
+        with patch.dict(os.environ, _LIFECYCLE_ENV, clear=True):
+            plugins = [_build_plugin(mock_client, shared) for _ in range(cap + 4)]
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_core.read_namespaced_service.side_effect = _blocked_read
+
+            # 满额:cap 个设备并签,发现任务全部阻塞在 kube 查询上
+            for idx in range(cap):
+                plugins[idx].resolve_ws_conn_info(
+                    paas_device_id=f"hold-{idx}-abc",
+                    port=8080,
+                    path="/api/openclaw/ws",
+                )
+            self._poll_until(lambda: len(started) == cap)
+
+            # 销毁其中一个设备:额度仍在被(被撤销资格但仍在跑的)任务持有
+            shared.invalidate(("default", "hold-0-abc-svc"))
+            assert len(shared.inflight) == cap
+
+            # 其他 key 的新签发:不突破上限,立即降级空地址
+            degraded = plugins[cap].resolve_ws_conn_info(
+                paas_device_id="extra-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+            assert degraded.ws_url
+            assert degraded.a2a_base_url == ""
+            time.sleep(0.2)  # 若额度被误归还,此处第 9 个查询会漏出来
+            assert len(started) == cap
+
+            # 任务真正结束后额度归还,负缓存承载的"稍后再试"可恢复
+            gate.set()
+            self._poll_until(lambda: shared.inflight == {})
+            shared.node_port_cache.pop(("default", "extra-abc-svc"), None)
+            plugins[cap].resolve_ws_conn_info(
+                paas_device_id="extra-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+            self._poll_until(lambda: len(started) == cap + 1)
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_positive_cache_expires_and_revalidates_across_workers(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """正缓存有限有效期(评审 P2-3 跨 worker):本进程 destroy() 不是
+        唯一保障——正常删除落在别的 worker(DI Singleton 仅进程内共享)
+        或带外时,本 worker 的旧快照至多陈旧一个 TTL,过期后不再被交付,
+        转后台发现再验证;旧地址在过期后绝不返回。"""
+        import time as _time
+
+        # 独立的 worker A 状态 + 短 TTL 让过期在测试里可达
+        worker_a = A2aUrlDiscoveryState(positive_ttl_s=0.15)
+
+        reads: list[str] = []
+
+        def _read(**kwargs):
+            reads.append(kwargs.get("name", "?"))
+            if len(reads) == 1:
+                return _service_with_node_port(30095)
+            # Service 已被其他 worker 删除:真实 kube 语义是 404,这里以
+            # 异常模拟(插件会落负缓存)
+            raise RuntimeError("404 not found")
+
+        with patch.dict(os.environ, _LIFECYCLE_ENV, clear=True):
+            plugin = _build_plugin(mock_client, worker_a)
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_core.read_namespaced_service.side_effect = _read
+
+            first = plugin.resolve_ws_conn_info(
+                paas_device_id="worker-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+            assert first.a2a_base_url == ""
+            plugin.a2a_discovery_join("worker-abc")
+            key = ("default", "worker-abc-svc")
+
+            within_ttl = plugin.resolve_ws_conn_info(
+                paas_device_id="worker-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+            # TTL 内旧快照仍交付(有界陈旧窗口,删除可能尚未发生)
+            assert within_ttl.a2a_base_url == (
+                "http://worker-abc-svc.stable.alipay.net:30095"
+            )
+
+            # 与其他 worker 的删除交错:worker A 不知情,靠 TTL 兜底
+            _time.sleep(0.2)
+
+            expired = plugin.resolve_ws_conn_info(
+                paas_device_id="worker-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+            assert expired.a2a_base_url == ""  # 过期旧值不再交付,零等待
+            assert key not in worker_a.node_port_cache or isinstance(
+                worker_a.node_port_cache.get(key), tuple
+            )
+            plugin.a2a_discovery_join("worker-abc")
+            after = plugin.resolve_ws_conn_info(
+                paas_device_id="worker-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+            # 再验证结果(删除→负缓存)就位后,旧地址 30095 绝不再返回
+            assert after.a2a_base_url == ""
+            assert len(reads) == 2  # 全程恰好两次 kube 查询
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_expired_history_is_swept_on_next_schedule(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """不再被访问的历史也不积累(评审 P2 回收清扫):acquire 时的全表
+        过期清扫让历史设备条目随任何一次新调度出清——应用级缓存受
+        「最近有效期窗口内的设备」约束,而非历史设备总量。"""
+        history = A2aUrlDiscoveryState(positive_ttl_s=0.05)
+
+        for idx in range(50):
+            history.note_warm(("default", f"old-{idx}-svc"), 30100 + idx)
+        time.sleep(0.15)  # 历史条目全部过期
+
+        with patch.dict(os.environ, _LIFECYCLE_ENV, clear=True):
+            plugin = _build_plugin(mock_client, history)
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_core.read_namespaced_service.return_value = _service_with_node_port(
+                30099
+            )
+
+            assert len(history.node_port_cache) == 50  # 过期但未清扫前仍在
+            conn = plugin.resolve_ws_conn_info(
+                paas_device_id="sweep-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+            assert conn.a2a_base_url == ""
+
+            # 新调度触发的全表清扫:50 条历史出清,只剩本设备
+            plugin.a2a_discovery_join("sweep-abc")
+            assert set(history.node_port_cache) == {("default", "sweep-abc-svc")}
+            assert history.inflight == {}
+            assert history.threads == {}
 
 
 class TestCompositionWiring:
