@@ -38,6 +38,7 @@ from agentclaw.community.core.bot_config_manifest.fetch.errors import (
 )
 from agentclaw.community.core.apply_engine.materialisers.resources import (
     ROOT_NOT_CLEARED_REASON,
+    ResourcesRootNotCleared,
 )
 from agentclaw.community.core.apply_engine.delivery import ArcaDelivery
 from agentclaw.community.core.apply_engine.orchestrator import (
@@ -778,9 +779,11 @@ def test_the_rows_follow_the_written_files():
     assert len(rows.replacements) == 1
     assert rows.replacements[-1] == {
         "files": [("data/notes/r.md", 7), ("data/wrap/a.txt", 3), ("data/wrap/sub/b.txt", 2)],
+        "owner_id": ctx.owner_id,
         "created_by": "u_actor",
     }
-    assert rows.replacements[-1]["created_by"] == ctx.actor_id
+    # Owned by the bot's owner (whose listing these rows are), stamped with the actor who applied.
+    assert rows.replacements[-1]["created_by"] == ctx.actor_id != ctx.owner_id
     assert {path for path, _ in rows.rows} == set(svc.present)
 
 
@@ -789,8 +792,10 @@ def test_a_silently_failed_clear_fails_every_member_and_writes_nothing():
     three device filesystems catch their own errors — so a write stage that
     only caught exceptions would see a refused rmtree as success and upload
     the new members over a root that was never cleared. A ``False`` clear
-    with files still listed must fail every member with nothing written,
-    and the rows are left alone: they still describe what is on the bot.
+    on a root the plan listed files under aborts the category — raised, so
+    the orchestrator claims neither the members nor the removals — with
+    nothing written, and the rows are left alone: they still describe what
+    is on the bot.
     """
     svc = FakeResourceFileService()
     svc.record_present("data/tools/old.md")
@@ -799,31 +804,24 @@ def test_a_silently_failed_clear_fails_every_member_and_writes_nothing():
     archive = _tgz({"a.md": b"A"})
     m = _materialiser(svc, _StubDeclaredSourceResolver(archive), resource_rows=factory)
     ctx = make_context(engine_type="claude_code")
-    plan, results = _write_through(
-        m,
-        ctx,
-        [
-            {"path": "data/tools/", "unpack": "tar.gz", "source": _src("t.tgz")},
-            {"path": "data/notes/r.md", "content": "# rules"},
-        ],
-    )
-    assert [(r.identity, r.outcome.value, r.reason) for r in results] == [
-        ("data/tools/a.md", "failed", ROOT_NOT_CLEARED_REASON),
-        ("data/notes/r.md", "failed", ROOT_NOT_CLEARED_REASON),
+    entries = [
+        {"path": "data/tools/", "unpack": "tar.gz", "source": _src("t.tgz")},
+        {"path": "data/notes/r.md", "content": "# rules"},
     ]
-    assert ROOT_NOT_CLEARED_REASON == "resources root could not be cleared; nothing was written"
+    with pytest.raises(ResourcesRootNotCleared, match=ROOT_NOT_CLEARED_REASON):
+        _write_through(m, ctx, entries)
     assert svc.upload_calls == [] and svc.writes == {}
     assert svc.present == {"data/tools/old.md"}
     assert rows.replacements == []
-    # The plan still said what the clear *would* have removed.
-    assert plan.removals == ("data/tools/old.md",)
+    # No second listing: the plan's own listing is what tells a refusal from an absent root.
+    assert len(svc.list_root_calls) == 1
 
 
 def test_a_clear_that_raises_fails_every_member_in_composed_words():
     """M2: the clear is part of delivery — a raise there must not escape as
-    raw exception text (the orchestrator would abort the whole category
-    quoting it); every member answers FAILED, in the stage's own words, and
-    nothing is uploaded onto a root in an unknown state.
+    raw exception text (the orchestrator quotes what ``write`` raises); the
+    category aborts in the stage's own words, and nothing is uploaded onto a
+    root in an unknown state.
     """
 
     class _BuggyClear(FakeResourceFileService):
@@ -834,29 +832,23 @@ def test_a_clear_that_raises_fails_every_member_in_composed_words():
     svc = _BuggyClear()
     m = _materialiser(svc, _StubDeclaredSourceResolver(archive))
     ctx = make_context(engine_type="claude_code")
-    _plan, results = _write_through(
-        m,
-        ctx,
-        [
-            {"path": "data/tools/", "unpack": "tar.gz", "source": _src("t.tgz")},
-            {"path": "data/notes/r.md", "content": "# rules"},
-        ],
-    )
-    assert [(r.identity, r.outcome.value) for r in results] == [
-        ("data/tools/a.md", "failed"),
-        ("data/notes/r.md", "failed"),
+    entries = [
+        {"path": "data/tools/", "unpack": "tar.gz", "source": _src("t.tgz")},
+        {"path": "data/notes/r.md", "content": "# rules"},
     ]
-    assert all(r.reason == ROOT_NOT_CLEARED_REASON for r in results)
-    # the raw exception text never reached the report
-    assert all("token" not in (r.reason or "") for r in results)
+    with pytest.raises(ResourcesRootNotCleared) as caught:
+        _write_through(m, ctx, entries)
+    # the raw exception text never reaches the report
+    assert str(caught.value) == ROOT_NOT_CLEARED_REASON and "token" not in str(caught.value)
     assert svc.writes == {}
 
 
 def test_a_false_clear_of_an_absent_root_is_not_a_failure():
     """``clear_root`` returns ``False`` when nothing was deleted — the port's
     own contract — which is the *normal* answer for a first apply onto a
-    root that does not exist yet. The failure detection must re-list the
-    root, not read ``False`` as refusal.
+    root that does not exist yet. The plan listed nothing under the root,
+    so ``False`` reads as absence, not refusal — and without a second
+    listing.
     """
     svc = FakeResourceFileService()
     svc.fail_clear = True  # answers False; the root is empty, so that is the truth
@@ -1358,7 +1350,7 @@ def test_a_declared_empty_category_clears_the_root_and_reports_every_removal():
     assert svc.deleted == ["data/gone/old.md", "data/x.csv"]
     assert svc.writes == {}
     assert svc.present == {"notes/outside.txt"}
-    assert rows.replacements == [{"files": [], "created_by": ctx.actor_id}]
+    assert rows.replacements == [{"files": [], "owner_id": ctx.owner_id, "created_by": ctx.actor_id}]
 
 
 def test_a_rows_failure_reports_a_confirmed_partial_write():

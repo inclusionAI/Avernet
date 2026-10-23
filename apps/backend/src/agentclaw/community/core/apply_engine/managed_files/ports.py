@@ -227,7 +227,8 @@ class PlatformResource(_StorePort, ResourceFilePort):
             self._store.list, self._scope(entity_type, entity_id, bot_id), category=CATEGORY_RESOURCES
         )
         prefix = _workspace_path(RESOURCES_ROOT_DIR) + "/"
-        return tuple(sorted(row.rel_path[len("workspace/"):] for row in rows if row.rel_path.startswith(prefix)))
+        namespace = len(WORKSPACE_NS) + 1
+        return tuple(sorted(row.rel_path[namespace:] for row in rows if row.rel_path.startswith(prefix)))
 
     async def clear_root(
         self,
@@ -237,16 +238,10 @@ class PlatformResource(_StorePort, ResourceFilePort):
         bot_id: str,
         engine_type: str,
     ) -> bool:
-        """Delete every object under ``workspace/data/``; ``False`` when there were none."""
-        scope = self._scope(entity_type, entity_id, bot_id)
-        rows = await asyncio.to_thread(self._store.list, scope, category=CATEGORY_RESOURCES)
-        prefix = _workspace_path(RESOURCES_ROOT_DIR) + "/"
-        removed = False
-        for row in rows:
-            if row.rel_path.startswith(prefix):
-                await asyncio.to_thread(self._store.delete, scope, rel_path=row.rel_path)
-                removed = True
-        return removed
+        """Delete every object under ``workspace/data/``; ``False`` when there were none — ``delete`` of the root."""
+        return await self.delete(
+            entity_type=entity_type, entity_id=entity_id, bot_id=bot_id, engine_type=engine_type, path=RESOURCES_ROOT_DIR
+        )
 
 
 class PlatformSkillPackageUpload(_StorePort, SkillPackageUploadPort):

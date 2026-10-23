@@ -23,13 +23,16 @@ class ResourceRowsPort(Protocol):
         self,
         *,
         files: Sequence[tuple[str, int]],
+        owner_id: str,
         created_by: Optional[str],
     ) -> None:
         """Replace the bot's file rows under ``data/`` with one row per ``(path, size)``, source ``manifest``.
 
         Deletes every file row under the root first, then inserts the given
-        rows. A failure raises: a row write that did not land is never
-        reported as success.
+        rows, owned by ``owner_id`` (the bot's owner, whose console listing
+        these rows are) and stamped ``created_by`` (the actor who applied).
+        A failure raises: a row write that did not land is never reported as
+        success.
         """
         ...
 

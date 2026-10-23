@@ -87,8 +87,24 @@ from agentclaw.community.core.apply_engine.capabilities import (
 from agentclaw.community.core.ports.resource_rows_port import ResourceRowsPort
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 
-#: The reason every member carries when the root could not be cleared: nothing was written.
-ROOT_NOT_CLEARED_REASON = "resources root could not be cleared; nothing was written"
+#: The reason the category aborts with when the root could not be cleared.
+ROOT_NOT_CLEARED_REASON = "resources root could not be cleared"
+
+
+class ResourcesRootNotCleared(RuntimeError):
+    """The root's tree delete did not land, so nothing was written over it.
+
+    Raised out of ``write`` on purpose: the orchestrator then reports the
+    category aborted, every member failed and the removals *not* made, and
+    marks it partially written — the conservative reading, since the
+    platform road deletes object by object and a raise midway leaves the
+    root half-cleared. The message is the stage's own words, never the
+    transport's (a transport error can quote a header, a header can carry a
+    token).
+    """
+
+    def __init__(self) -> None:
+        super().__init__(ROOT_NOT_CLEARED_REASON)
 
 
 class ResourcesMaterialiser(Materialiser):
@@ -196,22 +212,20 @@ class ResourcesMaterialiser(Materialiser):
     async def write(self, ctx: ApplyContext, plan: CategoryPlan) -> Sequence[EntryResult]:
         """Clear the root, write every member in declaration order, then replace the rows.
 
-        A clear that fails fails every member with nothing written — the
-        root is still what it was. A member whose upload fails gets its own
-        ``failed`` row and the rest still land (the transport has no rename,
-        so there is no atomic alternative; the report is the source of
-        truth). The rows are rewritten last, from the members that landed;
-        if that write fails the files are on the bot and the rows are not,
-        which is exactly what ``ConfirmedPartialWriteError`` tells the
-        orchestrator to report.
+        A clear that fails raises ``ResourcesRootNotCleared`` with nothing
+        written over the root: the category aborts and its removals are not
+        claimed. A member whose upload fails gets its own ``failed`` row and
+        the rest still land (the transport has no rename, so there is no
+        atomic alternative; the report is the source of truth). The rows are
+        rewritten last, from the members that landed, owned by the bot's
+        owner and stamped with the actor; if that write fails the files are
+        on the bot and the rows are not, which is exactly what
+        ``ConfirmedPartialWriteError`` tells the orchestrator to report.
         """
         entity_type, entity_id, engine = _coords(ctx)
         coords = dict(entity_type=entity_type, entity_id=entity_id, bot_id=ctx.bot_id, engine_type=engine)
-        if not await self._cleared(coords):
-            return tuple(
-                EntryResult(self.construct, planned.intent.identity, EntryOutcome.FAILED, ROOT_NOT_CLEARED_REASON)
-                for planned in plan.entries
-            )
+        if not await self._cleared(coords, plan):
+            raise ResourcesRootNotCleared()
         results: list[EntryResult] = []
         written: list[tuple[str, int]] = []
         for planned in plan.entries:
@@ -231,29 +245,34 @@ class ResourcesMaterialiser(Materialiser):
                 EntryResult(self.construct, identity, EntryOutcome(planned.outcome), note=planned.intent.note)
             )
         try:
-            await self._rows(ctx.bot_id).replace_manifest_rows(files=written, created_by=ctx.actor_id)
+            await self._rows(ctx.bot_id).replace_manifest_rows(
+                files=written, owner_id=ctx.owner_id, created_by=ctx.actor_id
+            )
         except Exception as exc:
             raise ConfirmedPartialWriteError(
                 "the resource files were written but the bot's resource rows could not be replaced"
             ) from exc
         return tuple(results)
 
-    async def _cleared(self, coords: dict[str, str]) -> bool:
-        """Whether the root is empty after the clear.
+    async def _cleared(self, coords: dict[str, str], plan: CategoryPlan) -> bool:
+        """Whether the root's clear landed.
 
         ``False`` from the port is ambiguous in the write chain's own
         contract: both "there was no root to delete" (a first apply — fine)
         and the transports' only failure signal (every device filesystem
-        catches its own errors and answers ``False``). A listing afterwards
-        tells them apart: a root that still has files was not cleared. A
-        port that raises is a failed clear outright.
+        catches its own errors and answers ``False``). The plan's own
+        listing tells them apart without another round trip: a root that
+        listed anything (a removal, or a member classified ``updated``) had
+        something to delete, so a ``False`` there is a refusal. A port that
+        raises is a failed clear outright.
         """
         try:
             if await self._resources.clear_root(**coords):
                 return True
-            return not await self._resources.list_root(**coords)
-        except Exception:  # noqa: BLE001 — surfaced per member, in composed words
+        except Exception:  # noqa: BLE001 — surfaced in the stage's own words, never the transport's
             return False
+        listed_anything = bool(plan.removals) or any(planned.outcome == "updated" for planned in plan.entries)
+        return not listed_anything
 
 
 def _stored(entry: DesiredResource) -> StoredContent:
