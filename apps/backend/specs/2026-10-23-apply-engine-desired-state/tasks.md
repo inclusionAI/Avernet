@@ -149,7 +149,7 @@
 ### Task 13: Final gates and PR
 - **Goal:** Green, within limits, reviewable.
 - **Done when:**
-  - [ ] `ruff check` and `ruff format --line-length 120 --check` clean on every new file; no touched file over 1,000 lines; no formatting churn in untouched lines.
+  - [x] `ruff check` and `ruff format --line-length 120 --check` clean on every new file; no touched file over 1,000 lines; no formatting churn in untouched lines.
   - [ ] `DEPLOY_PROFILE=test pytest tests/community` and `./scripts/ci_test.sh` pass.
   - [ ] PR body per template: Problem / Solution / Validation (pass counts before and after, equivalence cases) / Compatibility and risk (resources root rule on stored documents, clear-then-write window, skills receipt format, DDL edited in place) / Related issues (#2162, #2862, #3064, RSI-04).
 - **Depends on:** Task 12
