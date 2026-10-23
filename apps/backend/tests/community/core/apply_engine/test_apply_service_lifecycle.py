@@ -1038,24 +1038,56 @@ class _DomainRefusal(Exception):
     """Stands in for a compiler's own error (ManifestValidationError, NotAppliable): what its HTTP surface maps."""
 
 
-class _RefusingBoth(_RefusingCompiler):
-    def check(self, ctx, ref):
-        raise _DomainRefusal("the document no longer validates")
+class _RefusingFromDomainError(_RefusingCompiler):
+    async def compile(self, ctx, ref, *, only=None):
+        try:
+            raise _DomainRefusal("the document no longer validates")
+        except _DomainRefusal as exc:
+            raise CompileRefused(str(exc)) from exc
+
+
+def _dry_run(service):
+    import asyncio
+
+    return asyncio.run(
+        service.dry_run(
+            entity_id=_ENTITY, bot_id=_BOT, bot=_BOT_RECORD, owner_id=_ENTITY, actor_id=_ENTITY, state=ManifestStateRef()
+        )
+    )
 
 
 def test_a_dry_run_hears_the_compilers_own_refusal_not_the_workers(world):
-    """A dry run answers an HTTP caller: it runs ``check`` first, so a reference
-    the compiler refuses raises the compiler's domain error (mapped to 422 /
-    404 / 409 by its surface), never ``CompileRefused``, which only the worker
-    records."""
-    import asyncio
-
+    """A dry run answers an HTTP caller: a refusal is unwrapped to the domain
+    error the compiler raised it from (mapped to 422 / 404 / 409 by its
+    surface); ``CompileRefused`` itself is what only the worker records. A
+    refusal raised from nothing stays as it is."""
     service, applies, _locks, _scripts, _ = world
-    service._compilers = {ManifestStateRef: _RefusingBoth()}
+    service._compilers = {ManifestStateRef: _RefusingFromDomainError()}
     with pytest.raises(_DomainRefusal):
-        asyncio.run(
-            service.dry_run(
-                entity_id=_ENTITY, bot_id=_BOT, bot=_BOT_RECORD, owner_id=_ENTITY, actor_id=_ENTITY, state=ManifestStateRef()
-            )
-        )
+        _dry_run(service)
+    service._compilers = {ManifestStateRef: _RefusingCompiler()}
+    with pytest.raises(CompileRefused):
+        _dry_run(service)
     assert service.last_apply(entity_id=_ENTITY, bot_id=_BOT) is None, "a dry run leaves no record, refused or not"
+
+
+def test_a_dry_run_of_a_document_that_stopped_validating_raises_the_validators_error(world):
+    """The real road: the stored document fails the validator (a resource outside the root the engine owns),
+    and the caller gets ``ManifestValidationError`` with its violations, as the route maps it."""
+    from agentclaw.community.core.apply_engine.capabilities import resolve_capabilities
+    from agentclaw.community.core.bot_config_manifest.schema import ManifestValidationError, validate_document
+
+    class _ValidatingManifests(_ManifestService):
+        """The fixture's document fake, with the real validator behind ``validate``."""
+
+        def validate(self, *, document, active_engine, bot_type):
+            caps = resolve_capabilities(active_engine=active_engine, bot_type=bot_type, is_teclaw=lambda e: e == "teclaw")
+            return validate_document(document, caps)
+
+    service, *_ = world
+    service._compilers[ManifestStateRef]._manifests = _ValidatingManifests(
+        "schema_version: 1\nmanifest:\n  resources:\n    - path: notes/outside.md\n      content: x\n"
+    )
+    with pytest.raises(ManifestValidationError) as refused:
+        _dry_run(service)
+    assert refused.value.violations
