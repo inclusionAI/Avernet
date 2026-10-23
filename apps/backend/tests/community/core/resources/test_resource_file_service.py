@@ -837,10 +837,10 @@ async def test_list_root_raises_on_a_nameless_entry_and_reads_an_unsaid_is_dir_a
 
 
 @pytest.mark.asyncio
-async def test_list_root_confirms_the_root_from_the_parent_by_its_own_name():
-    """``relative_path`` can carry a parent segment; the parent lookup matches
-    the entry's ``name``, and falls back to the last segment of its path."""
-    for entry in ({"name": "data", "relative_path": "./data", "is_dir": True}, {"relative_path": "x/data", "is_dir": True}):
+async def test_list_root_finds_the_root_in_its_parent_by_relative_path_or_name():
+    """The parent listing is not recursive, so an entry's ``relative_path`` is
+    its name; an engine that gives only one of the two is read the same."""
+    for entry in ({"relative_path": "data", "is_dir": True}, {"name": "data", "relative_path": 7, "is_dir": True}):
         device_fs = MagicMock()
         device_fs.list_dir = AsyncMock(side_effect=lambda logical, e=entry: {"workspace": [e]}.get(logical))
         svc, _ = _svc(provider="teclaw", device_fs=device_fs)
