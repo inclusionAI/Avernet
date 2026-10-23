@@ -490,7 +490,17 @@ impl Engine for CodexAppServer {
         let turn = if self.desktop {
             tokio::time::timeout(std::time::Duration::from_secs(30), start).await
                 .map_err(|_| TurnError::Protocol("turn/start timed out; outcome may be unknown, inspect the saved Codex thread before retrying".into()))??
-        } else { start.await? };
+        } else {
+            match start.await {
+                Ok(turn) => turn,
+                Err(error) => {
+                    // Cancellation before the start ACK still owns a pending turn.
+                    // Wait for its interruption or server shutdown before returning.
+                    cli.kill().await;
+                    return Err(error);
+                }
+            }
+        };
         let mut turn_id = extract_turn_id(&turn).ok_or_else(|| {
             TurnError::Protocol(format!("app-server turn response missing turn.id: {turn}"))
         })?;
