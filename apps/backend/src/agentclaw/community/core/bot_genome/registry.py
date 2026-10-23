@@ -213,6 +213,11 @@ class GenomeRegistryService(GenomeRegistryProtocol):
             policy=GenomePolicy.from_json(hashed["policy"]),
         )
 
+    @staticmethod
+    def _policy_of(row: GenomeRevisionRow) -> GenomePolicy:
+        """A stored revision's policy, read without re-verifying the whole revision."""
+        return GenomePolicy.from_json(loads_strict(row.content)["policy"])
+
     def _active(self, bot: BotRef) -> GenomeRevisionRow | None:
         ref = self._refs.get(**self._axes(bot), name="active")
         if ref is None:
@@ -343,9 +348,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         """
         captured = await capture_spec(self._state_reader(), bot, validator=self._validator)
         active = self._active(bot)
-        policy = (
-            GenomePolicy.from_json(loads_strict(active.content)["policy"]) if active is not None else DEFAULT_POLICY
-        )
+        policy = self._policy_of(active) if active is not None else DEFAULT_POLICY
         writes = dict(captured.writes)
         reasons = self._checks.reasons(
             captured.spec, policy, _PendingContent(writes, self._reader(bot)), self._ctx(bot, created_by.checked_as)
@@ -628,7 +631,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         if active is None:
             return None
         captured = await capture_spec(self._state_reader(), bot, validator=self._validator)
-        observed = revision_id(captured.spec, self._revision(active).policy)
+        observed = revision_id(captured.spec, self._policy_of(active))
         if observed == active.revision_id:
             return None
         return Drift(active=active.revision_id, observed=observed)

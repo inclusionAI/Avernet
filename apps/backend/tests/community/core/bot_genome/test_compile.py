@@ -159,13 +159,37 @@ def test_only_narrows_the_genome_state_to_a_phases_constructs() -> None:
     assert half.identity is None and half.resources is None and half.skills is None and half.mcp is None
 
 
-def test_a_missing_or_finished_promotion_is_refused() -> None:
+def test_a_missing_promotion_or_one_whose_delivery_never_started_is_refused() -> None:
+    """The row is ``applied`` by the time the apply run compiles in its
+    worker (the seam answered "started" before that), so ``applied`` resolves
+    like ``applying``; only ``apply_failed`` has nothing to deliver."""
     ctx = make_context(engine_type="openclaw", bot_type="arca")
     compiler, _, _ = _compiler(None)
     with pytest.raises(RevisionNotFound):
         compiler.check(ctx, GenomeStateRef("p" * 32))
-    for status in ("applied", "apply_failed"):
-        compiler, _, _ = _compiler(_row(status))
-        with pytest.raises(NotAppliable) as caught:
-            asyncio.run(compiler.compile(ctx, GenomeStateRef("p" * 32)))
-        assert status in caught.value.reasons[0].message
+    compiler, registry, _ = _compiler(_row("applied"))
+    assert asyncio.run(compiler.compile(ctx, GenomeStateRef("p" * 32))).state is registry.state
+    compiler, _, _ = _compiler(_row("apply_failed"))
+    with pytest.raises(NotAppliable) as caught:
+        asyncio.run(compiler.compile(ctx, GenomeStateRef("p" * 32)))
+    assert "never started" in caught.value.reasons[0].message
+
+
+def test_a_revision_the_state_model_refuses_is_not_appliable_rather_than_a_crash() -> None:
+    """A revision recorded before the resources-root rule names ``docs/``; the
+    model refuses the path, and the compiler says so as a reason."""
+    spec = GenomeSpec.from_json(
+        {
+            "persona": [],
+            "skills": [],
+            "memory": None,
+            "resources": [{"path": "docs/guide.md", "digest": "sha256:" + "ab" * 32}],
+            "tools": {"mcp": []},
+            "engine_config": {},
+            "script": None,
+        }
+    )
+    with pytest.raises(NotAppliable) as caught:
+        compile_spec(spec, BlobDir())
+    assert "'docs/guide.md' is outside 'data/'" in caught.value.reasons[0].message
+    assert caught.value.reasons[0].location == "spec"
