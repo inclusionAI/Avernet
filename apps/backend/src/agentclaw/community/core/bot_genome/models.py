@@ -71,23 +71,22 @@ PROMOTION_REFS = ("active", "previous", "canary")
 class BotRef:
     """The bot a registry call is about, with the facts every check needs.
 
-    ``entity_id`` + ``bot_id`` is the bot's identity within an env and tenant
-    (a bot id alone is not unique across entities) and the storage key the
-    genome and Manifest tables share. ``owner_id`` is a different value: the
-    owning user's id (``bot_service.create_bot`` sets ``entity_id`` to
-    ``staff_<user>`` unless told otherwise), which the identity, skill,
-    resource and MCP services scope their reads by. Capture needs both.
-    ``engine_type`` and ``bot_type`` are the capability axes;
-    ``entity_type`` (``staff`` or ``user``) is the identity service's third
-    coordinate for the bot's files.
+    ``entity_id`` + ``bot_id`` identifies the bot (within an env and tenant)
+    and is the key every genome table is scoped by. ``owner_id`` is not part
+    of that identity: it is the bot's owner as the bot record says
+    (``ac_bots.owner_id``), carried here because the platform services
+    capture and the spec checks read through (identity files, skills,
+    resources, MCP overrides) scope by the owner's user id, and because the
+    contract's ``revision.bot`` names the owner. The caller resolves both
+    from the bot record; the registry never derives one from the other.
     """
 
-    entity_id: str
-    bot_id: str
-    owner_id: str
-    engine_type: str
-    bot_type: str
-    entity_type: str = "staff"
+    entity_id: str  #: with ``bot_id``, the bot's identity and the genome tables' key
+    bot_id: str  #: the bot's id
+    owner_id: str  #: the owner's user id from the bot record; what the platform services scope by
+    engine_type: str  #: the engine the bot runs on (``openclaw``, …): a capability axis of the checks
+    bot_type: str  #: ``personal`` / ``arca`` / ``desktop`` / ``service`` …: the other capability axis
+    entity_type: str = "staff"  #: ``staff`` or ``user``: the identity service's third coordinate for the bot's files
 
 
 @dataclass(frozen=True)
