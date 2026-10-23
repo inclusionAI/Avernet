@@ -659,9 +659,12 @@ test_ep_tc_friend_auth_sync_readdressed_principal() {
 
     # Ensure a TC-shaped (bot_id:owner_work_no) protected bot owned by 85020;
     # the colon address is what routes the approve into the TC sync port.
+    # user_visibility declares the human-facing visibility at provisioning
+    # time so the TC row does not inherit whichever default the backend's
+    # schema happens to ship (SQLite says 'protected', MariaDB 'private').
     HTTP_STATUS=$(curl -s -o "$_RESPONSE_FILE" -w '%{http_code}' \
         -H "X-BCS-Service-Key: e2e-test-key" -H "Content-Type: application/json" \
-        -X POST -d '{"name":"TC sync bot","staff_no":"85020","visibility":"protected"}' \
+        -X POST -d '{"name":"TC sync bot","staff_no":"85020","visibility":"protected","user_visibility":"protected"}' \
         "${BCS_API_BASE_URL%/}/admin/bots/${tc_bot}/ensure" 2>/dev/null) || HTTP_STATUS="000"
     if [[ "$HTTP_STATUS" != "200" ]]; then
         fail "ensure TC-shaped bot returned $HTTP_STATUS: $(cat "$_RESPONSE_FILE")"
