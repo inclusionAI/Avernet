@@ -1032,3 +1032,30 @@ def test_a_compile_refused_in_the_worker_is_a_failed_report_with_the_reason(worl
                             "a superseded promotion is not delivered",)
     assert scripts.writes == 0
     assert locks.get(env="dev", entity_id=_ENTITY, bot_id=_BOT) is None, "the lock is released after a refusal"
+
+
+class _DomainRefusal(Exception):
+    """Stands in for a compiler's own error (ManifestValidationError, NotAppliable): what its HTTP surface maps."""
+
+
+class _RefusingBoth(_RefusingCompiler):
+    def check(self, ctx, ref):
+        raise _DomainRefusal("the document no longer validates")
+
+
+def test_a_dry_run_hears_the_compilers_own_refusal_not_the_workers(world):
+    """A dry run answers an HTTP caller: it runs ``check`` first, so a reference
+    the compiler refuses raises the compiler's domain error (mapped to 422 /
+    404 / 409 by its surface), never ``CompileRefused``, which only the worker
+    records."""
+    import asyncio
+
+    service, applies, _locks, _scripts, _ = world
+    service._compilers = {ManifestStateRef: _RefusingBoth()}
+    with pytest.raises(_DomainRefusal):
+        asyncio.run(
+            service.dry_run(
+                entity_id=_ENTITY, bot_id=_BOT, bot=_BOT_RECORD, owner_id=_ENTITY, actor_id=_ENTITY, state=ManifestStateRef()
+            )
+        )
+    assert service.last_apply(entity_id=_ENTITY, bot_id=_BOT) is None, "a dry run leaves no record, refused or not"
