@@ -64,8 +64,9 @@ API-installed tool rather than silently overwriting it.
 """
 from __future__ import annotations
 
-from typing import Any, Sequence
+from typing import Sequence
 
+from agentclaw.community.core.apply_engine.desired_state import DesiredCliTool
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     EntryOutcome,
@@ -76,7 +77,6 @@ from agentclaw.community.core.bot_config_manifest.apply.registry import (
     Intent,
     Materialiser,
     PlannedEntry,
-    ResolveFailure,
     ResolveResult,
 )
 from agentclaw.community.core.bot_config_manifest.capabilities import ManifestCategory
@@ -93,10 +93,6 @@ from agentclaw.community.core.bot_config_manifest.cli_tools.models import (
 from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
     CliToolService,
 )
-from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
-    declared_protocol,
-)
-from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKind
 
 #: ``CliToolStatus`` → the :class:`~...outcomes.EntryOutcome` its report row
 #: carries::
@@ -163,8 +159,6 @@ def context_for(ctx: ApplyContext) -> CliToolContext:
         engine_type=ctx.engine_type,
         tenant=ctx.tenant,
         apply_id=ctx.apply_id,
-        budget=ctx.budget,
-        source_session=ctx.source_session,
     )
 
 
@@ -192,90 +186,31 @@ class CliToolsMaterialiser(Materialiser):
     def __init__(self, cli_tool_service: CliToolService) -> None:
         self._tools = cli_tool_service
 
-    async def resolve(
-        self, ctx: ApplyContext, entries: Sequence[dict[str, Any]]
-    ) -> ResolveResult:
-        """The syntactic checks, and nothing else. **No fetch here.**
+    async def resolve(self, ctx: ApplyContext, entries: Sequence[DesiredCliTool]) -> ResolveResult:
+        """The service's declaration per desired tool. **No fetch here, and no grammar.**
 
-        The other fetching categories fetch in ``resolve`` because that is where
-        their failures belong. This one does not, and the difference is
-        deliberate: the service owns fetching for both of its callers, and a
-        fetch here would be a second implementation reached only by the manifest
-        — the one arm where a divergence is hardest to notice, because a report
-        row would still say the entry failed.
-
-        The cost is that a fetch failure surfaces as a ``FAILED`` entry from
-        ``write`` rather than as a resolve failure that aborts the category. For
-        this category that is the better reading anyway: three tools that
-        installed and one whose source was down is exactly what happened, and
-        aborting would leave the bot with none of them.
+        The compiler fetched the bytes and filed them; the belt that an
+        object-store tool is digest-pinned was asked there too. What this
+        stage hands on is the service's own vocabulary, so the install reads
+        the stored bytes and shapes them the way the declaration says.
         """
-        intents: list[Intent] = []
-        failures: list[ResolveFailure] = []
-        seen: set[str] = set()
-
-        for index, entry in enumerate(entries):
-            if not isinstance(entry, dict):
-                failures.append(
-                    ResolveFailure(f"[{index}]", "a cli_tools entry must be a mapping")
-                )
-                continue
-            name = entry.get("name")
-            if not isinstance(name, str) or not name:
-                failures.append(
-                    ResolveFailure(f"[{index}]", "a cli_tools entry must name a command")
-                )
-                continue
-            if name in seen:
-                # A bot cannot have one command twice, and the table's UNIQUE
-                # constraint says so. Refused rather than de-duplicated: two
-                # entries for one name means the author believes something that
-                # is not true of the result.
-                failures.append(
-                    ResolveFailure(name, "declared more than once in this category")
-                )
-                continue
-            seen.add(name)
-
-            decl = CliToolDecl.from_entry(entry)
-            if not decl.digest and declared_protocol(ctx, entry) is not SourceKind.GIT:
-                # The schema refuses this at PUT. Re-asked here because a stored
-                # document can predate a rule or have skipped the validator (a
-                # hand-built apply in W8's lifecycle points), and the platform
-                # distributing an unpinned executable is the one thing this
-                # category exists not to do.
-                #
-                # **Except over git**, where the resolved commit SHA is already
-                # the pin — the same exemption ``DIGEST_REQUIRED`` states at
-                # ``PUT``, keyed on the same axis. A belt that refused what the
-                # surface accepts would be the "accepted means appliable" rule
-                # broken by the belt itself. ``declared_protocol`` answers from
-                # the source declaration through the one parser, so inline and
-                # ``from:`` are the same source — which is the whole of D5.
-                failures.append(
-                    ResolveFailure(
-                        name,
-                        "cli_tools requires a 'digest' — the platform is "
-                        "distributing an executable, so the supply chain is "
-                        "pinned or the entry is refused",
-                    )
-                )
-                continue
-            if not entry.get("from") and not entry.get("source"):
-                failures.append(
-                    ResolveFailure(name, "a cli_tools entry must name a source")
-                )
-                continue
-
-            # No substitution here. ``${BOT_*}`` in a declared source is the
-            # fetch funnel's to resolve, on its own road — which is also the
-            # only road that can see a ``from``-named source's fields at all.
-            # This materialiser used to substitute a copy of the address for
-            # itself, and that copy is what a stale reader could acquire from;
-            # the entry it passes down is now the entry it was given.
-            intents.append(Intent(name, decl))
-
-        return ResolveResult(intents=tuple(intents), failures=tuple(failures))
+        intents = tuple(
+            Intent(
+                entry.name,
+                CliToolDecl(
+                    name=entry.name,
+                    digest=entry.pin or "",
+                    subpath=entry.subpath,
+                    unpack=entry.unpack.value if entry.unpack is not None else None,
+                    version=entry.version,
+                    content=entry.content,
+                    declared_address=entry.declared_address,
+                ),
+                note=entry.note,
+            )
+            for entry in entries
+        )
+        return ResolveResult(intents=intents, failures=())
 
     async def plan(
         self, ctx: ApplyContext, intents: Sequence[Intent]

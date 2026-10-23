@@ -1,17 +1,9 @@
 """Fakes shared by the CLI-tools tests (W9)."""
 from __future__ import annotations
 
-from types import SimpleNamespace
-from typing import Mapping, Optional
+from typing import Optional
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
-    BlobDelivery,
-    GitDelivery,
-)
-from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
-    EntryFetchError,
-    GitEntrySource,
-)
+from tests.community.core.bot_config_manifest.apply._fakes import FakeManifestContent
 
 
 class FakeObjectStorage:
@@ -185,149 +177,29 @@ class FakeDelivery:
         return list(self.listing or [])
 
 
-class FakeFetchedEntry:
-    def __init__(self, content: bytes, digest: str) -> None:
-        self.content = content
-        self.digest = digest
-        self.from_store = False
-        self.fallback_reason = None
-        self.source_url = None
+class FakeToolContent(FakeManifestContent):
+    """The content store the service reads a manifest tool's bytes from, with the reads counted.
 
-
-class FakeGitEntrySource(GitEntrySource):
-    """A **real** ``GitEntrySource`` over a one-file fake checkout.
-
-    Real, not a look-alike: the service dispatches on the type, and a duck-typed
-    double would let a change to that dispatch pass its own tests.
+    The Manifest compiler files a tool's bytes here and the service's only
+    acquisition is ``read(digest)``; a suite that used to count fetches counts
+    reads instead. ``hold`` seeds bytes at their own digest — the state a
+    compile leaves behind — and answers the address a declaration names them by.
     """
 
-    def __new__(cls, content: bytes, decl, entry):
-        subpath = decl.get("subpath")
-        if entry.get("subpath"):
-            subpath = (
-                f"{subpath.rstrip('/')}/{entry['subpath'].lstrip('/')}"
-                if subpath
-                else entry["subpath"]
-            )
-        return GitEntrySource(
-            checkout=SimpleNamespace(
-                sha="c" * 40,
-                root=None,
-                tree_bytes=len(content),
-                files=lambda subpath=None, file_limit=None: [
-                    (subpath or "tool", content)
-                ],
-                read_file=lambda subpath=None, file_limit=None: content,
-            ),
-            source_url=decl["url"],
-            subpath=subpath,
-            moved_from=None,
-            auth=decl.get("auth"),
-        )
+    def __init__(self) -> None:
+        super().__init__()
+        self.reads: list[str] = []
 
+    def hold(self, data: bytes, *, scope=None, at: Optional[str] = None) -> str:
+        """File ``data`` as produced content; ``at`` plants it under another address instead."""
+        if at is None:
+            return self.store_produced(data, scope=scope, origin="test/cli_tools").digest
+        self.blobs[at] = data
+        return at
 
-class _RecordingStore:
-    """The content store a :class:`GitDelivery` files through, recorded.
-
-    The git road's delivery writes its own receipt now, so what used to be a
-    ``file_bytes`` recording on the fetcher is a store call here — in the
-    store's own vocabulary, which is what the real one receives.
-    """
-
-    def __init__(self, filed: list[dict]) -> None:
-        self._filed = filed
-
-    def store(
-        self,
-        fetched,
-        *,
-        scope,
-        source_url,
-        credential_name=None,
-        modifier="",
-        apply_id=None,
-        category=None,
-        entry_identity=None,
-    ):
-        self._filed.append(
-            {
-                "content": fetched.bytes,
-                "source_url": source_url,
-                "category": category,
-                "entry_identity": entry_identity,
-                "credential_name": credential_name,
-            }
-        )
-        return SimpleNamespace(digest=fetched.sha256)
-
-
-class FakeDeclaredSourceResolver:
-    """Answers a declared entry with canned bytes; records what it resolved.
-
-    It resolves the entry the way the real ``resolve`` does — a ``from``
-    name against the session's ``sources``, an inline declaration, a git source
-    answering with a tree — and **refuses anything else**, including the bare
-    URL string the grammar used to allow. A double that quietly served a string
-    would let the one road the service no longer has go on passing its tests.
-    """
-
-    def __init__(self, *, content: bytes = b"", digest: str = "", error=None) -> None:
-        self.content = content
-        self.digest = digest
-        self.error = error
-        self.calls: list[dict] = []
-        self.filed: list[dict] = []
-        #: The store a git delivery files its own receipt through.
-        self.store = _RecordingStore(self.filed)
-
-    def resolve(self, ctx, *, entry, category, entry_identity=None):
-        decl = None
-        if isinstance(entry.get("from"), str):
-            session = getattr(ctx, "source_session", None)
-            declared = getattr(session, "sources", {}) if session else {}
-            decl = declared.get(entry["from"])
-            if decl is None:
-                raise EntryFetchError(
-                    f"'from' names source {entry['from']!r}, which is not "
-                    "declared under 'sources'"
-                )
-        elif isinstance(entry.get("source"), Mapping):
-            decl = entry["source"]
-        else:
-            raise EntryFetchError(
-                "an entry must name one of 'from', 'source' or 'content', "
-                "and 'source' is a declaration object carrying a 'protocol' "
-                "(declare 'protocol: git' or 'protocol: oss') — a URL written "
-                "as a plain string is not one"
-            )
-
-        self.calls.append(
-            {
-                "declaration": dict(decl),
-                "protocol": decl.get("protocol"),
-                "source_address": decl.get("url") or decl.get("key"),
-                "digest": entry.get("digest"),
-                "auth": decl.get("auth"),
-                "category": category,
-                "entry_identity": entry_identity,
-                "keep_last": (
-                    entry.get("on_fetch_failure", "keep_last") == "keep_last"
-                ),
-            }
-        )
-        if self.error is not None:
-            raise self.error
-        if decl.get("protocol") == "git":
-            return GitDelivery(
-                FakeGitEntrySource(self.content, decl, entry), self.store
-            )
-        return BlobDelivery(
-            FakeFetchedEntry(
-                self.content, self.digest or entry.get("digest") or ""
-            )
-        )
-
-
+    def read(self, digest: str) -> bytes:
+        self.reads.append(digest)
+        return super().read(digest)
 
 
 def code_of(module) -> str:

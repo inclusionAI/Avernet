@@ -4,6 +4,12 @@ The cases here are the failure modes that would otherwise be silent: a row
 recorded for a tool the engine refused, a removal computed from a drifted
 engine listing, an archive member picked by accident, a binary for the wrong
 architecture.
+
+The service fetches nothing. A manifest tool's bytes were fetched and filed
+by the Manifest compiler, and the declaration names them in the content store
+(:class:`StoredContent`); the service's whole acquisition is one ``read`` of
+that address. The store here is :class:`FakeToolContent`, seeded the way a
+compile leaves it.
 """
 from __future__ import annotations
 
@@ -14,9 +20,7 @@ import zipfile
 
 import pytest
 
-from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
-    EntryFetchError,
-)
+from agentclaw.community.core.apply_engine.desired_state import StoredContent
 from agentclaw.community.core.bot_config_manifest.cli_tools import (
     CliToolContext,
     CliToolDecl,
@@ -25,11 +29,11 @@ from agentclaw.community.core.bot_config_manifest.cli_tools import (
     CliToolService,
     CliToolStore,
 )
+from agentclaw.community.core.bot_config_manifest.cli_tools.declarations import (
+    declared_address,
+)
 from agentclaw.community.core.bot_config_manifest.cli_tools.delivery_port import (
     CliToolPlacementError,
-)
-from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
-    FETCH_CATEGORY,
 )
 from agentclaw.community.core.bot_config_manifest.cli_tools.teclaw_port import (
     CliToolDriftUnobservableError,
@@ -39,8 +43,8 @@ from ._fakes import (
     elf,
     FakeCliToolRepo,
     FakeDelivery,
-    FakeDeclaredSourceResolver,
     FakeObjectStorage,
+    FakeToolContent,
     code_of,
 )
 
@@ -63,8 +67,12 @@ def _elf(machine: int = 0x3E, *, payload: bytes = b"\x00" * 64) -> bytes:
     return elf(machine=machine, payload=payload)
 
 
+def _digest_of(data: bytes) -> str:
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
 _TOOL = _elf()
-_DIGEST = "sha256:" + hashlib.sha256(_TOOL).hexdigest()
+_DIGEST = _digest_of(_TOOL)
 
 
 def _zip(members: dict[str, bytes]) -> bytes:
@@ -85,25 +93,29 @@ def _targz(members: dict[str, bytes]) -> bytes:
     return buf.getvalue()
 
 
-def _service(*, content=_TOOL, digest=_DIGEST, fetch_error=None, delivery=None, oss=None):
+def _service(*, content=_TOOL, digest=_DIGEST, delivery=None, oss=None):
+    """A service over fakes, with the content store holding ``content`` at ``digest``.
+
+    ``digest`` defaults to what ``content`` really hashes to — the state a
+    compile leaves — and a test that plants other bytes under an address is
+    exercising the belt the service keeps over what the store hands back.
+    """
     oss = oss or FakeObjectStorage()
     repo = FakeCliToolRepo()
     delivery = delivery if delivery is not None else FakeDelivery()
-    fetcher = FakeDeclaredSourceResolver(content=content, digest=digest, error=fetch_error)
+    reader = FakeToolContent()
+    reader.hold(content, at=digest)
     store = CliToolStore(object_storage=oss, store_base=lambda: _BASE)
-    service = CliToolService(
-        repo=repo, store=store, delivery=delivery, entry_fetcher=fetcher
-    )
-    return service, repo, delivery, fetcher, oss
+    service = CliToolService(repo=repo, store=store, delivery=delivery, content=reader)
+    return service, repo, delivery, reader, oss
 
 
 def _entry(**kwargs) -> dict:
     """A manifest entry declaring one tool over an object-store source.
 
-    The only source form a document can take besides git: a declaration object
-    with a ``protocol``. It is what the manifest road resolves, and building
-    the declaration *from an entry* is what keeps these tests on that road
-    rather than on a shape only a test can make.
+    Only ``declared_address`` reads an entry here: the compiler turns one into
+    a desired tool and the materialiser into a declaration, and what reaches
+    the service is the address the document wrote, for the row to echo.
     """
     entry = {
         "name": "mycli",
@@ -120,12 +132,20 @@ def _entry(**kwargs) -> dict:
 
 
 def _decl(**kwargs) -> CliToolDecl:
-    """The manifest road's declaration."""
-    return CliToolDecl.from_entry(_entry(**kwargs))
+    """The manifest road's declaration: the bytes named in the content store.
+
+    ``content`` is the declared digest's address unless the test says
+    otherwise — the compiler files a pinned tool under its pin.
+    """
+    base = {"name": "mycli", "digest": _DIGEST, "declared_address": "tools/mycli"}
+    base.update(kwargs)
+    if "content" not in base:
+        base["content"] = StoredContent(base["digest"])
+    return CliToolDecl(**base)
 
 
 def _upload_decl(**kwargs) -> CliToolDecl:
-    """The upload road's: the same vocabulary, with no entry to resolve."""
+    """The upload road's: the same vocabulary, with no stored content to read."""
     base = {"name": "mycli", "digest": _DIGEST}
     base.update(kwargs)
     return CliToolDecl(**base)
@@ -135,8 +155,8 @@ def _upload_decl(**kwargs) -> CliToolDecl:
 
 
 @pytest.mark.asyncio
-async def test_install_fetches_stores_delivers_and_records() -> None:
-    service, repo, delivery, fetcher, oss = _service()
+async def test_install_reads_stores_delivers_and_records() -> None:
+    service, repo, delivery, _, oss = _service()
     outcome = await service.install(_CTX, _decl(version="1.4.2"), installed_by="u2")
 
     assert outcome.status is CliToolStatus.INSTALLED
@@ -149,6 +169,9 @@ async def test_install_fetches_stores_delivers_and_records() -> None:
         _DIGEST, "1.4.2", _key(),
     )
     assert (record.installed_by, record.modifier) == ("u2", "u2")
+    # The audit column echoes what the document said, never an address the
+    # service resolved — it resolved none.
+    assert record.source == "tools/mycli"
 
 
 @pytest.mark.asyncio
@@ -171,30 +194,32 @@ async def test_bytes_are_written_to_oss_before_delivery() -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_fetch_goes_through_the_declared_source_door() -> None:
-    """One funnel, one door — a category that resolved a source its own way
-    would acquire bytes the platform's provenance log never saw, and would be
-    the second place that decides what a declaration means."""
-    service, _, _, fetcher, _ = _service()
+async def test_the_bytes_come_from_the_content_store_at_the_declared_address() -> None:
+    """One road in: the platform's copy, at the address the declaration
+    names. A service that resolved a source its own way would acquire bytes the
+    provenance log never saw, and would be the second place that decides what a
+    declaration means — so it holds no resolver and makes exactly one read."""
+    from agentclaw.community.core.bot_config_manifest.cli_tools import service as mod
+
+    service, _, _, reader, _ = _service()
     await service.install(_CTX, _decl(), installed_by="u2")
-    call = fetcher.calls[0]
-    assert call["category"] == FETCH_CATEGORY == "cli_tools"
-    assert (call["protocol"], call["source_address"], call["auth"]) == (
-        "oss", "mycli", "oss-prod",
-    )
-    assert (call["digest"], call["entry_identity"]) == (_DIGEST, "mycli")
+    assert reader.reads == [_DIGEST]
+    code = code_of(mod)
+    for forbidden in ("DeclaredSourceResolver", "entry_fetcher", "_resolver", "FetchCategory"):
+        assert forbidden not in code, f"the service names {forbidden!r}"
 
 
 @pytest.mark.asyncio
-async def test_a_declaration_with_no_entry_is_refused_on_the_manifest_road() -> None:
-    """``install`` *is* the manifest road, and its first act is to resolve an
-    entry. Handed a declaration that carries none — an upload's — it says so
-    rather than fetching nothing, which is the failure mode the two roads were
-    separated to make impossible."""
-    service, repo, delivery, fetcher, _ = _service()
+async def test_a_declaration_with_no_stored_content_is_refused_on_the_manifest_road() -> None:
+    """``install`` *is* the manifest road, and its first act is to read the
+    declaration's stored bytes. Handed a declaration that names none — an
+    upload's — it says so rather than reading nothing, which is the failure
+    mode the two roads were separated to make impossible."""
+    service, repo, delivery, reader, _ = _service()
     outcome = await service.install(_CTX, _upload_decl(), installed_by="u2")
     assert outcome.status is CliToolStatus.FAILED
-    assert fetcher.calls == [] and repo.rows == {} and delivery.installed == []
+    assert "no stored bytes" in outcome.detail
+    assert reader.reads == [] and repo.rows == {} and delivery.installed == []
 
 
 # ── the pin ───────────────────────────────────────────────────────────────
@@ -205,10 +230,10 @@ async def test_install_enforces_the_declared_sha256() -> None:
     """The one category that distributes an executable hashes what it is about
     to install and compares it with what was declared.
 
-    The belt behind the fetch pipeline's own pin, and it is over the *bytes* —
-    not over what the road that delivered them said about itself. ``keep_last``
-    is why it is worth having: a stored copy standing in for an unreachable
-    source is the path where bytes other than the declared ones can arrive."""
+    The belt behind the compiler's own pin, and it is over the *bytes* — not
+    over what the store said about itself. Here the store answers the declared
+    address with other bytes, which is the path where bytes other than the
+    declared ones can arrive."""
     delivered = _elf(payload=b"\x09" * 64)
     service, repo, delivery, _, _ = _service(content=delivered)
     outcome = await service.install(_CTX, _decl(), installed_by="u2")
@@ -218,10 +243,29 @@ async def test_install_enforces_the_declared_sha256() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_fetch_failure_records_nothing() -> None:
-    service, repo, delivery, _, oss = _service(fetch_error=EntryFetchError("404"))
+async def test_a_digest_the_store_does_not_hold_records_nothing() -> None:
+    """The store's terminal "no stored content": the compiler emitted an
+    address nothing was filed under. A failed outcome naming the address, and
+    nothing written anywhere."""
+    service, repo, delivery, reader, oss = _service()
+    reader.missing_blobs.add(_DIGEST)
     outcome = await service.install(_CTX, _decl(), installed_by="u2")
-    assert outcome.status is CliToolStatus.FAILED and "404" in outcome.detail
+    assert outcome.status is CliToolStatus.FAILED and _DIGEST in outcome.detail
+    assert repo.rows == {} and oss.puts == [] and delivery.installed == []
+
+
+@pytest.mark.asyncio
+async def test_a_stored_blob_that_fails_its_own_digest_escalates() -> None:
+    """The store's other refusal — present, corrupt — is the platform's own
+    fault (``ContentStoreFault``, deliberately not a ``ContentStoreError``):
+    disk damage is not a declaration's mistake to report as its outcome, so
+    it escalates, and nothing is recorded on the way out."""
+    from agentclaw.community.core.content_store.errors import ContentStoreFault
+
+    service, repo, delivery, reader, oss = _service()
+    reader.corrupt_blobs.add(_DIGEST)
+    with pytest.raises(ContentStoreFault):
+        await service.install(_CTX, _decl(), installed_by="u2")
     assert repo.rows == {} and oss.puts == [] and delivery.installed == []
 
 
@@ -232,16 +276,16 @@ async def test_a_fetch_failure_records_nothing() -> None:
 async def test_an_upload_installs_without_acquiring_anything() -> None:
     """The management API's road: the bytes came with the request.
 
-    The assertion that matters is the empty ``fetcher.calls`` — the road has no
-    source, so nothing resolves one, and a service that reached for the funnel
-    anyway would be fetching against an address nobody declared."""
-    service, repo, delivery, fetcher, oss = _service()
+    The assertion that matters is the empty ``reader.reads`` — the road has no
+    stored content, so nothing reads any, and a service that reached for the
+    store anyway would be reading an address nobody declared."""
+    service, repo, delivery, reader, oss = _service()
     outcome = await service.install_upload(
         _CTX, _upload_decl(version="1.4.2"), data=_TOOL, installed_by="u2"
     )
 
     assert outcome.status is CliToolStatus.INSTALLED
-    assert fetcher.calls == [] and fetcher.filed == []
+    assert reader.reads == []
     assert delivery.installed == [("mycli", _TOOL)]
     assert oss.objects[_key()] == _TOOL
     record = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli")
@@ -268,12 +312,12 @@ async def test_an_upload_that_is_not_what_its_digest_says_is_refused() -> None:
 
 
 @pytest.mark.asyncio
-async def test_an_uploaded_archive_is_unpacked_the_same_way_a_fetched_one_is() -> None:
+async def test_an_uploaded_archive_is_unpacked_the_same_way_a_stored_one_is() -> None:
     """One pipeline after the bytes are in hand: the archive rules, the
     selection and the ELF gate cannot answer differently by road, because there
     is only one implementation of them to answer with."""
     archive = _targz({"README.md": b"not a tool", "bin/mycli": _TOOL})
-    digest = "sha256:" + hashlib.sha256(archive).hexdigest()
+    digest = _digest_of(archive)
     service, repo, delivery, _, _ = _service()
     outcome = await service.install_upload(
         _CTX,
@@ -285,7 +329,7 @@ async def test_an_uploaded_archive_is_unpacked_the_same_way_a_fetched_one_is() -
     assert delivery.installed == [("mycli", _TOOL)]
     record = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli")
     # The archive's digest — what was uploaded and pinned — with the member's
-    # own md5 and size, which is the same split the fetched road records.
+    # own md5 and size, which is the same split the manifest road records.
     assert (record.digest, record.subpath) == (digest, "bin/mycli")
     assert record.size_bytes == len(_TOOL)
 
@@ -294,7 +338,7 @@ async def test_an_uploaded_archive_is_unpacked_the_same_way_a_fetched_one_is() -
 async def test_an_uploaded_binary_for_another_architecture_is_refused() -> None:
     """The gate is the pipeline's, not the road's."""
     other = _elf(machine=0xB7)
-    digest = "sha256:" + hashlib.sha256(other).hexdigest()
+    digest = _digest_of(other)
     service, repo, delivery, _, _ = _service()
     outcome = await service.install_upload(
         _CTX, _upload_decl(digest=digest), data=other, installed_by="u2"
@@ -322,7 +366,7 @@ async def test_an_upload_defaults_to_insert_only() -> None:
 @pytest.mark.parametrize("kind,pack", [("zip", _zip), ("tar.gz", _targz)])
 async def test_archive_selects_only_the_declared_subpath(kind, pack) -> None:
     archive = pack({"README.md": b"not a tool", "bin/mycli": _TOOL})
-    digest = "sha256:" + hashlib.sha256(archive).hexdigest()
+    digest = _digest_of(archive)
     service, _, delivery, _, oss = _service(content=archive, digest=digest)
     outcome = await service.install(
         _CTX, _decl(digest=digest, unpack=kind, subpath="bin/mycli"), installed_by="u2"
@@ -338,7 +382,7 @@ async def test_archive_selects_only_the_declared_subpath(kind, pack) -> None:
 @pytest.mark.asyncio
 async def test_an_absent_member_fails_and_names_what_the_archive_holds() -> None:
     archive = _zip({"bin/other": _TOOL})
-    digest = "sha256:" + hashlib.sha256(archive).hexdigest()
+    digest = _digest_of(archive)
     service, repo, _, _, _ = _service(content=archive, digest=digest)
     outcome = await service.install(
         _CTX, _decl(digest=digest, unpack="zip", subpath="bin/mycli"), installed_by="u2"
@@ -354,7 +398,7 @@ async def test_a_subpath_naming_a_directory_is_refused() -> None:
     member; ``select_subpath``'s not-a-regular-file refusal is the belt behind
     that, exercised directly in ``test_verify.py``."""
     archive = _zip({"bin/mycli": _TOOL})
-    digest = "sha256:" + hashlib.sha256(archive).hexdigest()
+    digest = _digest_of(archive)
     service, _, _, _, _ = _service(content=archive, digest=digest)
     outcome = await service.install(
         _CTX, _decl(digest=digest, unpack="zip", subpath="bin"), installed_by="u2"
@@ -366,7 +410,7 @@ async def test_a_subpath_naming_a_directory_is_refused() -> None:
 async def test_unpack_without_a_subpath_fails_rather_than_guessing() -> None:
     """One entry is one command is one file: which file is the caller's to say."""
     archive = _zip({"bin/mycli": _TOOL})
-    digest = "sha256:" + hashlib.sha256(archive).hexdigest()
+    digest = _digest_of(archive)
     service, _, _, _, _ = _service(content=archive, digest=digest)
     outcome = await service.install(
         _CTX, _decl(digest=digest, unpack="zip"), installed_by="u2"
@@ -390,7 +434,7 @@ async def test_a_subpath_without_unpack_is_refused_not_ignored() -> None:
 @pytest.mark.asyncio
 async def test_a_non_elf_file_is_refused() -> None:
     script = b"#!/bin/sh\necho hi\n" + b"\x00" * 32
-    digest = "sha256:" + hashlib.sha256(script).hexdigest()
+    digest = _digest_of(script)
     service, repo, delivery, _, _ = _service(content=script, digest=digest)
     outcome = await service.install(_CTX, _decl(digest=digest), installed_by="u2")
     assert outcome.status is CliToolStatus.FAILED and "ELF" in outcome.detail
@@ -402,7 +446,7 @@ async def test_a_non_amd64_elf_fails_with_the_architecture_found() -> None:
     """A wrong build has a perfectly valid digest; without this the failure
     would surface as an Exec format error inside a container days later."""
     arm = _elf(0xB7)
-    digest = "sha256:" + hashlib.sha256(arm).hexdigest()
+    digest = _digest_of(arm)
     service, repo, _, _, _ = _service(content=arm, digest=digest)
     outcome = await service.install(_CTX, _decl(digest=digest), installed_by="u2")
     assert outcome.status is CliToolStatus.FAILED
@@ -411,11 +455,11 @@ async def test_a_non_amd64_elf_fails_with_the_architecture_found() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_name_that_is_not_one_key_segment_is_refused_before_any_fetch() -> None:
-    service, _, _, fetcher, _ = _service()
+async def test_a_name_that_is_not_one_key_segment_is_refused_before_any_read() -> None:
+    service, _, _, reader, _ = _service()
     outcome = await service.install(_CTX, _decl(name="../escape"), installed_by="u2")
     assert outcome.status is CliToolStatus.FAILED
-    assert fetcher.calls == []
+    assert reader.reads == []
 
 
 # ── placement failure ─────────────────────────────────────────────────────
@@ -528,12 +572,12 @@ async def test_replace_all_computes_removals_from_the_table_not_the_engine() -> 
 
 
 @pytest.mark.asyncio
-async def test_a_matching_digest_and_subpath_is_unchanged_and_not_refetched() -> None:
-    service, _, delivery, fetcher, _ = _service()
+async def test_a_matching_digest_and_subpath_is_unchanged_and_not_reread() -> None:
+    service, _, delivery, reader, _ = _service()
     await service.install(_CTX, _decl(), installed_by="manifest")
     outcomes = await service.replace_all(_CTX, [_decl()], installed_by="manifest")
     assert [o.status for o in outcomes] == [CliToolStatus.UNCHANGED]
-    assert len(fetcher.calls) == 1
+    assert len(reader.reads) == 1
     assert len(delivery.installed) == 1
 
 
@@ -541,20 +585,20 @@ async def test_a_matching_digest_and_subpath_is_unchanged_and_not_refetched() ->
 async def test_version_alone_never_forces_a_reinstall() -> None:
     """``version`` is a label. Letting it converge would redeliver a 200 MiB
     binary because a comment changed."""
-    service, _, _, fetcher, _ = _service()
+    service, _, _, reader, _ = _service()
     await service.install(_CTX, _decl(version="1.0"), installed_by="manifest")
     outcomes = await service.replace_all(
         _CTX, [_decl(version="2.0")], installed_by="manifest"
     )
     assert [o.status for o in outcomes] == [CliToolStatus.UNCHANGED]
-    assert len(fetcher.calls) == 1
+    assert len(reader.reads) == 1
 
 
 @pytest.mark.asyncio
 async def test_a_changed_subpath_reinstalls_even_at_the_same_digest() -> None:
     """One archive can carry two commands, so the digest alone cannot decide."""
     archive = _zip({"bin/a": _TOOL, "bin/b": _elf(payload=b"\x01" * 64)})
-    digest = "sha256:" + hashlib.sha256(archive).hexdigest()
+    digest = _digest_of(archive)
     service, _, delivery, _, _ = _service(content=archive, digest=digest)
     await service.install(
         _CTX, _decl(digest=digest, unpack="zip", subpath="bin/a"), installed_by="manifest"
@@ -565,7 +609,7 @@ async def test_a_changed_subpath_reinstalls_even_at_the_same_digest() -> None:
         installed_by="manifest",
     )
     assert [o.status for o in outcomes] == [CliToolStatus.INSTALLED]
-    # Re-fetched and re-stored, then delivered as the whole set.
+    # Re-read and re-stored, then delivered as the whole set.
     assert [[name for name, _ in call] for call in delivery.replaced] == [["mycli"]]
 
 
@@ -573,8 +617,10 @@ async def test_a_changed_subpath_reinstalls_even_at_the_same_digest() -> None:
 async def test_replace_all_reports_per_tool_on_partial_failure() -> None:
     """Three succeed, one fails, and the caller is told which — rather than
     being handed an exception and left to reconcile."""
-    service, repo, _, _, _ = _service()
-    bad = _decl(name="bad", digest="sha256:" + "0" * 64)
+    service, repo, _, reader, _ = _service()
+    unheld = "sha256:" + "0" * 64
+    reader.missing_blobs.add(unheld)
+    bad = _decl(name="bad", digest=unheld)
     outcomes = await service.replace_all(
         _CTX, [_decl(name="a"), bad, _decl(name="c")], installed_by="manifest"
     )
@@ -632,36 +678,15 @@ def test_the_service_composes_no_filesystem_path_for_a_bot() -> None:
         assert forbidden not in code, f"the service names {forbidden!r}"
 
 
-def test_the_context_is_what_the_fetch_funnel_asks_for() -> None:
-    """An HTTP-driven install and a manifest apply fetch through one funnel;
-    the seam that makes that true is a declared protocol, not a coincidence."""
-    from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
-        FetchContext,
-    )
-
-    assert isinstance(_CTX, FetchContext)
+def test_the_context_scopes_the_object_store_by_bot() -> None:
+    """The context carries the bot's storage coordinates and nothing a fetch
+    would read: the service does not fetch, so the apply-only fields that
+    charged a budget and resolved a source are gone from it."""
     assert _CTX.scope == CliToolScope(entity_type="staff", entity_id="u1", bot_id="bot7")
+    assert not hasattr(_CTX, "budget") and not hasattr(_CTX, "source_session")
 
 
 # ── the vocabulary ────────────────────────────────────────────────────────
-
-
-def test_a_manifest_entry_becomes_a_declaration() -> None:
-    """The materialiser and the HTTP route reach the service through one type,
-    which is what keeps the two callers from drifting. What the entry does
-    *not* become is an address: the declaration carries the entry itself, so
-    the one thing that can resolve a source is the one thing that does."""
-    source = {"protocol": "git", "url": "https://x/t.git", "ref": "v1"}
-    decl = CliToolDecl.from_entry({
-        "name": "mycli", "source": source, "digest": _DIGEST,
-        "subpath": "bin/mycli", "unpack": "zip", "version": "1.4.2",
-    })
-    assert decl == CliToolDecl(
-        name="mycli", digest=_DIGEST,
-        subpath="bin/mycli", unpack="zip", version="1.4.2",
-    )
-    assert decl.entry["source"] == source
-    assert decl.keep_last is True
 
 
 def test_the_declared_address_is_echoed_but_never_resolved() -> None:
@@ -669,26 +694,20 @@ def test_the_declared_address_is_echoed_but_never_resolved() -> None:
     its own words — a ``from`` in the source's name, a git source in its URL,
     an object-store one in bucket and key — and an upload, which declared no
     source at all, in nothing."""
-    named = CliToolDecl.from_entry(
-        {"name": "c", "from": "artifacts", "key": "c", "digest": _DIGEST}
+    assert declared_address({"name": "c", "from": "artifacts", "key": "c", "digest": _DIGEST}) == "artifacts"
+    assert declared_address({"name": "c", "source": {"protocol": "git", "url": "https://x/c.git"}}) == (
+        "https://x/c.git"
     )
-    git = CliToolDecl.from_entry(
-        {"name": "c", "source": {"protocol": "git", "url": "https://x/c.git"}}
-    )
-    assert (named.declared_address, git.declared_address) == (
-        "artifacts", "https://x/c.git",
-    )
-    assert _decl().declared_address == "tools/mycli"
+    assert declared_address(_entry()) == "tools/mycli"
+    assert declared_address({"name": "c", "source": "https://x/c"}) == ""
     assert _upload_decl().declared_address == ""
 
 
-def test_on_fetch_failure_fail_turns_keep_last_off() -> None:
-    decl = CliToolDecl.from_entry(
-        {"name": "c", "source": {"protocol": "oss", "bucket": "b", "key": "c",
-                                 "auth": "a"},
-         "digest": _DIGEST, "on_fetch_failure": "fail"}
-    )
-    assert decl.keep_last is False
+def test_a_declaration_without_a_digest_has_no_convergence_key() -> None:
+    """The git road's declaration: the commit is its pin, so nothing on the
+    row can say "already installed" — see ``CliToolDecl.convergence_key``."""
+    assert _decl(digest="", content=StoredContent(_DIGEST)).convergence_key is None
+    assert _decl(subpath="bin/x").convergence_key == (_DIGEST, "bin/x")
 
 
 def test_a_failed_outcome_says_it_failed() -> None:
@@ -809,14 +828,13 @@ async def test_a_failed_replacement_leaves_the_installed_tools_bytes_intact() ->
     would copy the wrong bytes under the right metadata, which is worse than a
     missing object.
     """
-    service, repo, _, _, oss = _service()
+    service, repo, _, reader, oss = _service()
     await service.install(_CTX, _decl(), installed_by="u2")
     original_key = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli").oss_key
 
     other = _elf(payload=b"\x02" * 64)
-    other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
+    other_digest = reader.hold(other)
     service._delivery.install_error = CliToolPlacementError("nope")
-    service._resolver.content, service._resolver.digest = other, other_digest
 
     outcome = await service.install(
         _CTX, _decl(digest=other_digest), installed_by="u2"
@@ -848,13 +866,12 @@ async def test_a_failed_reinstall_of_the_same_digest_keeps_the_shared_object() -
 
 @pytest.mark.asyncio
 async def test_a_successful_replacement_collects_the_version_it_replaced() -> None:
-    service, repo, _, _, oss = _service()
+    service, repo, _, reader, oss = _service()
     await service.install(_CTX, _decl(), installed_by="u2")
     old_key = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli").oss_key
 
     other = _elf(payload=b"\x02" * 64)
-    other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
-    service._resolver.content, service._resolver.digest = other, other_digest
+    other_digest = reader.hold(other)
     outcome = await service.install(
         _CTX, _decl(digest=other_digest), installed_by="u2"
     )
@@ -992,7 +1009,7 @@ async def test_insert_only_refuses_a_name_taken_during_the_install() -> None:
     winner_key = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli").oss_key
 
     other = _elf(payload=b"\x02" * 64)
-    other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
+    other_digest = _digest_of(other)
 
     outcome = await service.install_upload(
         _CTX, _upload_decl(digest=other_digest), data=other, installed_by="u2"
@@ -1013,7 +1030,7 @@ async def test_a_conflicting_install_leaves_no_object_behind() -> None:
     await service.install(_CTX, _decl(), installed_by="someone-else")
 
     other = _elf(payload=b"\x02" * 64)
-    other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
+    other_digest = _digest_of(other)
     await service.install_upload(
         _CTX, _upload_decl(digest=other_digest), data=other, installed_by="u2"
     )
@@ -1026,12 +1043,11 @@ async def test_a_conflicting_install_leaves_no_object_behind() -> None:
 async def test_a_manifest_apply_still_replaces_rather_than_conflicting() -> None:
     """A full override is entitled to replace, so it never asks for
     insert-only — otherwise every re-apply of a changed tool would 409."""
-    service, repo, _, _, _ = _service()
+    service, repo, _, reader, _ = _service()
     await service.install(_CTX, _decl(), installed_by="u2")
 
     other = _elf(payload=b"\x02" * 64)
-    other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
-    service._resolver.content, service._resolver.digest = other, other_digest
+    other_digest = reader.hold(other)
     outcomes = await service.replace_all(
         _CTX, [_decl(digest=other_digest)], installed_by="manifest"
     )
@@ -1112,13 +1128,12 @@ async def test_a_failed_record_leaves_the_previous_version_intact() -> None:
     """The same rule the other discard paths follow: only a key nothing
     references is removed, so a replacement that cannot be recorded leaves the
     row it failed to replace still describing bytes that exist."""
-    service, repo, _, _, oss = _service()
+    service, repo, _, reader, oss = _service()
     await service.install(_CTX, _decl(), installed_by="u2")
     old_key = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli").oss_key
 
     other = _elf(payload=b"\x02" * 64)
-    other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
-    service._resolver.content, service._resolver.digest = other, other_digest
+    other_digest = reader.hold(other)
     repo.write_error = RuntimeError("connection reset")
 
     outcome = await service.install(
@@ -1131,12 +1146,12 @@ async def test_a_failed_record_leaves_the_previous_version_intact() -> None:
 
 @pytest.mark.asyncio
 async def test_a_successful_install_reports_where_the_time_went(caplog) -> None:
-    """Three networks move the binary — the source, the object store, the
+    """Three stores move the binary — the content store, the object store, the
     engine — and "which of the three was slow" is the first question when an
     apply drags. A single total cannot answer it.
 
     ``acquire`` rather than ``fetch``, because on the upload road there is no
-    fetch: the phase is "how long until the bytes were in hand", which is a
+    read: the phase is "how long until the bytes were in hand", which is a
     real number on one road and zero on the other."""
     service, *_ = _service()
 
@@ -1159,13 +1174,12 @@ async def test_a_per_name_refusal_puts_that_tools_row_back() -> None:
     the declaration's ``(digest, subpath)`` — report ``unchanged`` and never
     retry. The rollback is what makes "the next apply re-sends" true.
     """
-    service, repo, delivery, _, oss = _service()
+    service, repo, delivery, reader, oss = _service()
     await service.install(_CTX, _decl(), installed_by="u2")
     old = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli")
 
     other = _elf(payload=b"\x02" * 64)
-    other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
-    service._resolver.content, service._resolver.digest = other, other_digest
+    other_digest = reader.hold(other)
     delivery.replace_failures = {"mycli": "not executable"}
 
     outcomes = await service.replace_all(
@@ -1184,13 +1198,12 @@ async def test_a_per_name_refusal_keeps_the_last_known_good_binary() -> None:
     """The superseded object is collected only for a name the family accepted.
     Discarding before reading the per-name results would delete the working
     binary of the very tool the engine had just rejected."""
-    service, repo, delivery, _, oss = _service()
+    service, repo, delivery, reader, oss = _service()
     await service.install(_CTX, _decl(), installed_by="u2")
     old_key = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli").oss_key
 
     other = _elf(payload=b"\x02" * 64)
-    other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
-    service._resolver.content, service._resolver.digest = other, other_digest
+    other_digest = reader.hold(other)
     delivery.replace_failures = {"mycli": "not executable"}
 
     await service.replace_all(_CTX, [_decl(digest=other_digest)], installed_by="manifest")

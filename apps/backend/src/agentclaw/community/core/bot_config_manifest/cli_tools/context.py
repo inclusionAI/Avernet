@@ -11,27 +11,18 @@ operation needs: ``owner_id`` resolves the bot and its device binding,
 is carried but read by nobody here: the family difference lives in *which*
 delivery port the strategy bound, never in a branch inside one.
 
-It also satisfies ``apply/source_resolver.py``'s :class:`FetchContext`, which is
-what lets an HTTP-driven install fetch through the *same* funnel a manifest
-apply does. ``apply_id``, ``budget`` and ``source_session`` are the three
-fields only an apply has, and they are ``None`` for the API caller: an
-unbudgeted single install files a receipt with no apply linkage, which is
-exactly what that column's nullability means.
+``apply_id`` is the one field only an apply has, and it is ``None`` for the
+API caller: a single install records no apply linkage, which is exactly what
+that column's nullability means. The service fetches nothing itself: a
+manifest tool's bytes are in the content store, filed by the Manifest
+compiler, and an upload carries its own.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 from agentclaw.community.core.bot_config_manifest.cli_tools.store import CliToolScope
-
-if TYPE_CHECKING:
-    from agentclaw.community.core.bot_config_manifest.apply.budget import (
-        ApplyFetchBudget,
-    )
-    from agentclaw.community.core.bot_config_manifest.apply.source_session import (
-        SourceSession,
-    )
 
 
 @dataclass(frozen=True)
@@ -58,8 +49,6 @@ class CliToolContext:
     entity_type: str = "staff"
     #: The three an apply has and a single API-driven install does not.
     apply_id: Optional[str] = None
-    budget: Optional["ApplyFetchBudget"] = None
-    source_session: Optional["SourceSession"] = None
 
     @property
     def scope(self) -> CliToolScope:

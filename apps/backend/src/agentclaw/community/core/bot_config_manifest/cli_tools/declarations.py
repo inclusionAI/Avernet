@@ -11,10 +11,11 @@ for three tools and fail for the fourth and the caller needs to be told which.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Mapping, Optional
 
+from agentclaw.community.core.apply_engine.desired_state import StoredContent
 from agentclaw.community.core.bot_config_manifest.cli_tools.models import (
     BotCliToolRecord,
 )
@@ -57,13 +58,13 @@ class CliToolDecl:
     executable. (The one exemption is the git road, whose commit SHA is the
     pin; there the field is empty.)
 
-    **Where the bytes come from is not one of its fields.** There are two
-    roads and each carries its own payload: a manifest entry goes through
-    ``DeclaredSourceResolver.resolve`` — see :attr:`entry` — and an upload
-    arrives as bytes the
-    caller already holds. Neither is a URL this type could hold, and holding
-    one is precisely how a source *name* once went on the wire as though it
-    were an address.
+    **Where the bytes come from is not an address.** There are two roads
+    and each carries its own payload: a manifest entry's bytes were fetched
+    and filed by the Manifest compiler, so the declaration names them in the
+    content store (:attr:`content`); an upload arrives as bytes the caller
+    already holds. Neither is a URL this type could hold, and holding one is
+    precisely how a source *name* once went on the wire as though it were an
+    address.
     """
 
     name: str
@@ -74,62 +75,15 @@ class CliToolDecl:
     #: Metadata only. It never affects convergence — two installs of the same
     #: bytes under different ``version`` strings are the same tool.
     version: Optional[str] = None
-    #: The credential *name* the fetch rides, never a secret.
-    auth: Optional[str] = None
-    #: ``on_fetch_failure`` — the stored copy may stand in for an unreachable
-    #: source, per the schema's default.
-    keep_last: bool = True
-    #: The manifest entry this was read from — **the manifest road's payload**.
-    #:
-    #: Present ⇒ the acquisition goes through
-    #: ``DeclaredSourceResolver.resolve``, which is the only thing that can
-    #: resolve a ``from`` name or a ``protocol: git``
-    #: source. ``CliToolService.install`` requires it, because that method *is*
-    #: the manifest road; the upload road has its own entry point and carries
-    #: bytes instead, so a decl built for it leaves this ``None`` and never
-    #: reaches a fetch.
-    #:
-    #: ``compare=False`` on purpose. This field is *how* the bytes are
-    #: acquired, not *what* is declared: two entries naming the same tool from
-    #: the same place are the same declaration whichever mapping they were read
-    #: from. Comparing it would also make the type unhashable (a dict), and
-    #: would let a whitespace-level edit to a manifest read as a changed tool.
-    entry: Optional[Mapping[str, Any]] = field(default=None, compare=False)
-
-    @classmethod
-    def from_entry(cls, entry: Mapping[str, Any]) -> CliToolDecl:
-        """A validated manifest entry, as this vocabulary.
-
-        Reads only keys ``CATEGORY_ENTRY_KEYS[CLI_TOOLS]`` allows; the entry
-        has already been through the schema, so the shapes are trusted and the
-        conversion asserts nothing a second time. Note the absence of
-        ``strip_components``: unlike ``resources``, a ``cli_tools`` entry may
-        not declare one, so ``subpath`` names a member of the archive exactly
-        as it is packed.
-        """
-        return cls(
-            name=entry["name"],
-            entry=dict(entry),
-            digest=entry.get("digest") or "",
-            subpath=entry.get("subpath"),
-            unpack=entry.get("unpack"),
-            version=entry.get("version"),
-            auth=entry.get("auth"),
-            keep_last=entry.get("on_fetch_failure", "keep_last") == "keep_last",
-        )
-
-    @property
-    def declared_address(self) -> str:
-        """How this entry named its source, for the row and the report to echo.
-
-        **Read by nobody that fetches.** The acquisition goes through
-        :attr:`entry`; this is the audit column's value, and it is deliberately
-        whatever the document *said* — a ``from`` name, a git URL, an empty
-        string on the upload road, where the caller declared no source at all.
-        Reading a value like this as though it were a fetchable address is the
-        defect this type was restructured to make unspellable.
-        """
-        return declared_address(self.entry) if self.entry is not None else ""
+    #: The stored bytes the install reads — **the manifest road's payload**.
+    #: ``None`` on the upload road, whose entry point carries the bytes
+    #: instead and never reaches a store read.
+    content: Optional[StoredContent] = None
+    #: How the document named the source, for the row and the report to echo.
+    #: **Read by nobody that acquires.** Deliberately whatever the document
+    #: *said* — a ``from`` name, a git URL, an empty string on the upload
+    #: road, where the caller declared no source at all.
+    declared_address: str = ""
 
     @property
     def convergence_key(self) -> Optional[tuple[str, Optional[str]]]:

@@ -45,12 +45,8 @@ import time
 from pathlib import Path
 from typing import Callable, Mapping, Optional, Sequence
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
-    EntryFetchError,
-)
-from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
-    DeclaredSourceResolver,
-)
+from agentclaw.community.core.apply_engine.content import ContentReader
+from agentclaw.community.core.content_store.errors import ContentStoreError
 from agentclaw.community.core.bot_config_manifest.cli_tools.context import (
     CliToolContext,
 )
@@ -79,9 +75,6 @@ from agentclaw.community.core.bot_config_manifest.cli_tools.verify import (
     select_subpath,
     verify_amd64_elf,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.limits import (
-    FetchCategory,
-)
 from agentclaw.community.core.bot_config_manifest.fetch.unpack import (
     UnpackError,
     unpack_archive,
@@ -94,9 +87,6 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
 
-#: The fetch category, and with it the 200 MiB per-entry width schema §5 gives
-#: this category. Named rather than inlined so the width is read from one table.
-FETCH_CATEGORY = FetchCategory.CLI_TOOLS.value
 
 
 class CliToolService:
@@ -108,12 +98,12 @@ class CliToolService:
         repo: BotCliToolRepositoryProtocol,
         store: CliToolStore,
         delivery: CliToolDeliveryPort,
-        entry_fetcher: DeclaredSourceResolver,
+        content: ContentReader,
     ) -> None:
         self._repo = repo
         self._store = store
         self._delivery = delivery
-        self._resolver = entry_fetcher
+        self._content = content
 
     # ── reads ────────────────────────────────────────────────────────────
 
@@ -162,12 +152,11 @@ class CliToolService:
     ) -> CliToolOutcome:
         """**The manifest road.** Acquire, verify, store, record and deliver.
 
-        ``decl.entry`` is the manifest entry, and it is required: this method's
-        first act is to resolve that entry through
-        ``DeclaredSourceResolver.resolve``, the same door every other fetching
-        category uses. A declaration with no entry
-        names no source, so it is refused rather than half-acquired — the
-        upload road is :meth:`install_upload`, which carries its bytes.
+        ``decl.content`` names the tool's bytes in the content store, where the
+        Manifest compiler filed them, and it is required: this method's first
+        act is to read them. A declaration with no stored content names no
+        bytes, so it is refused rather than half-acquired — the upload road is
+        :meth:`install_upload`, which carries its bytes.
 
         Every failure comes back as a ``FAILED`` outcome carrying the reason,
         rather than as an exception: a full override installing four tools must
@@ -189,11 +178,11 @@ class CliToolService:
             checked_name(decl.name)
         except ValueError as error:
             return CliToolOutcome(decl.name, CliToolStatus.FAILED, str(error))
-        if decl.entry is None:
+        if decl.content is None:
             return CliToolOutcome(
                 decl.name,
                 CliToolStatus.FAILED,
-                f"{decl.name!r}: no manifest entry to acquire the tool from",
+                f"{decl.name!r}: no stored bytes to acquire the tool from",
             )
 
         # Three phases move a binary that can be a few hundred megabytes, over
@@ -205,7 +194,7 @@ class CliToolService:
         started = time.monotonic()
         try:
             data, from_tree = await self._acquire(ctx, decl)
-        except (EntryFetchError, ValueError) as error:
+        except (ContentStoreError, ValueError) as error:
             return CliToolOutcome(decl.name, CliToolStatus.FAILED, str(error))
         return await self._install_bytes(
             ctx,
@@ -732,45 +721,19 @@ class CliToolService:
 
     # ── the pipeline ─────────────────────────────────────────────────────
 
-    async def _acquire(
-        self, ctx: CliToolContext, decl: CliToolDecl
-    ) -> tuple[bytes, bool]:
-        """The manifest entry's bytes, and whether its ``subpath`` is spent.
+    async def _acquire(self, ctx: CliToolContext, decl: CliToolDecl) -> tuple[bytes, bool]:
+        """The declaration's bytes, read from the content store.
 
-        One door: ``DeclaredSourceResolver.resolve``, the same one every other
-        fetching category uses, and the only one that resolves a ``from`` name or a
-        ``protocol: git`` source. There is no second road to pick between —
-        reading an address off the declaration instead is what used to put a
-        source *name* on the wire as though it were a URL: accepted at ``PUT``,
-        failed at apply, the one construct that broke "accepted means
-        appliable".
-
-        The flag is the git road's: on a checkout ``single()`` has already
-        returned the one file the composed subpath named, so the shaping step
-        must not look for an archive member of the same name.
+        The Manifest compiler fetched them through the one funnel every
+        fetching category uses and filed them under this bot; the service
+        reads the platform's copy and never a source. The flag that a
+        ``subpath`` is already spent is always ``False`` here: on the git road
+        the compiler selected the one file and emitted no subpath, so the
+        shaping step has nothing to look for.
         """
-        delivery = await asyncio.to_thread(
-            self._resolver.resolve,
-            ctx,
-            entry=decl.entry,
-            category=FETCH_CATEGORY,
-            entry_identity=decl.name,
-        )
-        data = await asyncio.to_thread(delivery.single)
-        # A tree's bytes are not filed by the fetch — only the caller knows
-        # which of them this entry delivers, and here that is the one file the
-        # composed subpath named. The delivery files them under its own
-        # identity, auth included, so the lineage answers "which credential
-        # served this" on both roads; the road that already filed writes
-        # nothing, which is why this is no longer a question the service asks.
-        await asyncio.to_thread(
-            delivery.file,
-            ctx,
-            data,
-            category=FETCH_CATEGORY,
-            entry_identity=decl.name,
-        )
-        return data, delivery.is_tree()
+        assert decl.content is not None  # ``install`` refused the None case
+        data = await asyncio.to_thread(self._content.read, decl.content.digest)
+        return data, False
 
     @staticmethod
     def _shape(data: bytes, decl: CliToolDecl, selected: bool) -> bytes:
@@ -882,7 +845,6 @@ CliToolServiceFactory = Callable[[str], CliToolService]
 
 
 __all__ = [
-    "FETCH_CATEGORY",
     "CliToolPurger",
     "CliToolService",
     "CliToolServiceFactory",
