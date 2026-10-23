@@ -346,6 +346,8 @@ class DesiredCliTool:
     unpack: UnpackKind | None = None
     version: str | None = None
     note: str | None = None
+    #: How the document named the source, echoed on the platform's row for audit; empty when it declared none.
+    declared_address: str = ""
 
     def __post_init__(self) -> None:
         _require(bool(self.name), "a CLI tool needs a name")

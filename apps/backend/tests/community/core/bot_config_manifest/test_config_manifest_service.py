@@ -140,7 +140,7 @@ def test_put_accepts_a_git_source_document(service, repository):
         "    - type: SOUL.md\n"
         "      from: repo\n"
         "  resources:\n"
-        "    - path: assets/logo.png\n"
+        "    - path: data/assets/logo.png\n"
         "      source:\n"
         "        protocol: oss\n"
         "        bucket: cdn\n"
