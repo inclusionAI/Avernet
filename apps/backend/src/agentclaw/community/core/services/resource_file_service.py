@@ -357,9 +357,19 @@ class ResourceFileService(ResourceFilePort):
 
     @staticmethod
     def _leaf(entry: Mapping[str, Any]) -> str:
-        """The name an entry goes by: ``relative_path`` where the engine gives one, else ``name``; ``""`` for neither."""
-        leaf = entry.get("relative_path") or entry.get("name")
-        return leaf if isinstance(leaf, str) else ""
+        """The path an entry goes by under the listed directory: ``relative_path`` where the engine gives one, else
+        ``name``; ``""`` for neither."""
+        for key in ("relative_path", "name"):
+            value = entry.get(key)
+            if isinstance(value, str) and value:
+                return value
+        return ""
+
+    @staticmethod
+    def _basename(entry: Mapping[str, Any]) -> str:
+        """The entry's own name: ``name`` where the engine gives one (``relative_path`` can carry a parent)."""
+        name = entry.get("name")
+        return name if isinstance(name, str) and name else ResourceFileService._leaf(entry).rsplit("/", 1)[-1]
 
     # ── operations ───────────────────────────────────────────────────────────
 
@@ -746,7 +756,7 @@ class ResourceFileService(ResourceFilePort):
     def _named_in(entries: Any, leaf: str) -> dict[str, Any] | None:
         """The listing entry named ``leaf``, or ``None`` when the listing has no such child."""
         for entry in entries:
-            if ResourceFileService._leaf(entry) == leaf:
+            if ResourceFileService._basename(entry) == leaf:
                 return entry
         return None
 
