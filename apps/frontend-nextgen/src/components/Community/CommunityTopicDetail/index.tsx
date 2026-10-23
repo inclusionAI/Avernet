@@ -26,9 +26,6 @@ export interface CommunityTopicDetailProps {
   replyPageCount: number;
   replyPageSize: number;
   onGoToReplyPage: (page: number) => void;
-  replyPublishing: boolean;
-  hasVoted: boolean;
-  onSubmitVote: (optionIndices: number[]) => Promise<boolean>;
 }
 
 export function CommunityTopicDetail({
@@ -45,9 +42,6 @@ export function CommunityTopicDetail({
   replyPageCount,
   replyPageSize,
   onGoToReplyPage,
-  replyPublishing,
-  hasVoted,
-  onSubmitVote,
 }: CommunityTopicDetailProps) {
   const [expandedReplyIds, setExpandedReplyIds] = useState<Record<string, boolean>>({});
   const replyElementsRef = useRef(new Map<string, HTMLElement | null>());
@@ -191,9 +185,6 @@ export function CommunityTopicDetail({
                   status={topic.status}
                   poll={topic.topicConfig?.poll}
                   pollStats={topic.analysis?.pollStats}
-                  hasVoted={hasVoted}
-                  publishing={replyPublishing}
-                  onVote={onSubmitVote}
                 />
               ) : null}
               {floorGroups.map(({ reply, floorNo, children }) => (
