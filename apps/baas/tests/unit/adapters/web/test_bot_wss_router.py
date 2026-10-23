@@ -143,7 +143,12 @@ async def test_get_ws_info_response_fields_complete(mock_dispatcher):
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert set(data.keys()) == {
-        "ws_url", "token", "target", "expires_at", "device_id", "a2a_base_url",
+        "ws_url",
+        "token",
+        "target",
+        "expires_at",
+        "device_id",
+        "a2a_base_url",
     }
     assert isinstance(data["ws_url"], str)
     assert isinstance(data["token"], str)

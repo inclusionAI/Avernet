@@ -20,9 +20,8 @@ if TYPE_CHECKING:
     from kubernetes.client import ApiClient
 
     from secbaas.community.api.device_manage import ArcaCredentials
-    from secbaas.community.plugins.sandbox.arca.local_k8s._a2a_discovery import (
-        A2aUrlDiscoveryState,
-    )
+
+    from ._a2a_discovery import A2aUrlDiscoveryState
 
 logger = get_logger("plugin-sandbox")
 
