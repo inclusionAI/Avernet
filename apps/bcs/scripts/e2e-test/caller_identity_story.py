@@ -12,9 +12,9 @@ Drives the guarded dispatch chain over live HTTP:
 3. the Human answers a pending node over the session WebSocket (entry-B
    rearm) and the follow-up node rides the same protected wire;
 4. the lease command surface is exercised on the state_machine group, and a
-   plain caller group proves the lease fence, the web-send admission path,
-   and the P1 CALLER_EXECUTION_UNAVAILABLE closed contract for the gated
-   delivery chain.
+   plain caller group proves the lease fence, the web-send admission seam
+   and the protected ride toward the caller-enabled worker — with the
+   managed queue policy enabled and restored through its CAS API.
 """
 from __future__ import annotations
 
@@ -372,6 +372,7 @@ class CallerStory:
         })
         plain_group_id, plain_session_id = group["id"], group["session_id"]
         assert plain_session_id, group
+        self.enable_group_queue_policy()
         self.post("/control/provider/clear", mock=True)
         socket_client = WorkbenchSocket(self.args.base_url, self.args.human,
                                         plain_group_id, plain_session_id)
@@ -396,8 +397,7 @@ class CallerStory:
                                            "message": "must be fenced"}})
             time.sleep(1.0)
             fenced_rides = self.request("/control/provider/requests", mock=True)["requests"]
-            assert not any((item["body"].get("method") == "chat.send")
-                           and item["body"].get("session_id", "").startswith(plain_group_id)
+            assert not any("must be fenced" in json.dumps(item["body"], ensure_ascii=False)
                            for item in fenced_rides), fenced_rides
             # The admitted turn carries the lease coordinates and rides the
             # caller admission path toward the caller-enabled target.
@@ -411,21 +411,28 @@ class CallerStory:
                                            "leaseEpoch": lease["epoch"]}})
             admitted = socket_client.receive("chat-plain-send")
             assert admitted.get("ok") is True, admitted
-            # P1 contract: the mentioned caller-enabled worker is refused by
-            # the CallerConfigurationDeliveryGate (CALLER_EXECUTION_UNAVAILABLE)
-            # and the turn converges with a closed system note to the others;
-            # no Provider ride with caller extensions may exist for it.
-            time.sleep(1.0)
-            rides = self.request("/control/provider/requests", mock=True)["requests"]
-            worker_rides = [item for item in rides
-                            if item["body"].get("method") == "chat.send"
-                            and item["body"].get("session_id", "").startswith(plain_group_id)]
-            assert not any((item["body"].get("extensions") or {}).get("caller_context")
-                           for item in worker_rides), rides
-            failure_note = [item for item in rides
-                            if item["body"].get("method") == "chat.inject"
-                            and "消息投递失败" in json.dumps(item["body"], ensure_ascii=False)]
-            assert failure_note, rides
+            # The admitted turn runs the caller admission seam and rides the
+            # protected wire toward the caller-enabled worker: the Provider
+            # must see the container ensure first, then chat.send with the
+            # runtime-only caller_context and a real execution proof.
+            def is_protected_ride(item):
+                body = item["body"]
+                return (body.get("method") == "chat.send"
+                        and (body.get("extensions") or {}).get("caller_context"))
+            rides = self.wait("protected admission ride",
+                              lambda: self.request("/control/provider/requests", mock=True)["requests"],
+                              lambda items: any(item["body"].get("method") == "caller.container.ensure"
+                                                and any(is_protected_ride(item)
+                                                        and "route this caller turn" in json.dumps(item["body"])
+                                                        for item in items)
+                                                for item in items))
+            ride = next(item for item in rides
+                        if is_protected_ride(item)
+                        and "route this caller turn" in json.dumps(item["body"]))
+            token = ride["body"]["extensions"]["caller_execution_token"]
+            assert token["format"] == "jwt" and token["token"], token
+            self.post("/control/provider/clear", mock=True)
+            self.answer_dispatch(ride["body"]["id"], "worker acknowledges the caller turn")
             history = self.wait("human turn in session history",
                                 lambda: self.request(f"/sessions/{segment(plain_session_id)}/messages"),
                                 lambda messages: any("route this caller turn" in json.dumps(message)
@@ -438,11 +445,41 @@ class CallerStory:
             released = socket_client.receive("lease-plain-release")
             released_ok = released.get("ok") is True
             # A stale epoch is a legitimate release rejection (preempted by
-            # our own worker turn); either outcome is a valid lease fact.
+            # renewal during the turn); both outcomes are closed lease facts.
             assert released_ok or ("lease" in released["error"]["message"]), released
         finally:
             socket_client.close()
-        print("  plain caller group: lease fence, admission and the closed P1 delivery gate verified", flush=True)
+            self.restore_delivery_policy()
+        print("  plain caller group: lease fence, admission and the protected ride verified", flush=True)
+
+    def enable_group_queue_policy(self) -> None:
+        """Queue admission (and the caller seam mounted on it) only runs for
+        bots the managed delivery policy enforces; enable it for the story
+        scope and restore the original policy afterwards."""
+        current = self.request("/admin/message-delivery/policy")
+        self._delivery_policy_restore = {"version": current["version"],
+                                         "policy": current["policy"]}
+        enforced = json.loads(json.dumps(current["policy"]))
+        enforced["flow_enabled"]["group"] = True
+        enforced["flow_enabled"]["system"] = True
+        enforced["defaults"]["mode"] = "enforce"
+        body = {"expected_version": current["version"], "policy": enforced}
+        updated = self.request("/admin/message-delivery/policy", body, method="PUT")
+        assert updated["version"] == current["version"] + 1, updated
+
+    def restore_delivery_policy(self) -> None:
+        restore = getattr(self, "_delivery_policy_restore", None)
+        if not restore:
+            return
+        try:
+            self.request("/admin/message-delivery/policy",
+                         {"expected_version": restore["version"] + 1,
+                          "policy": restore["policy"]}, method="PUT")
+        except AssertionError:
+            # Best-effort cleanup: a failed restore surfaces in the next
+            # policy CAS rather than hiding inside this story.
+            pass
+        self._delivery_policy_restore = None
 
     def run(self) -> None:
         self.setup()
