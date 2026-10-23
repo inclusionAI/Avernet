@@ -31,7 +31,6 @@ from agentclaw.community.core.content_store import (
     canonical_tree_bytes,
     decode_tree_bytes,
 )
-from agentclaw.community.core.bot_genome.compile import compile_spec
 from agentclaw.community.core.bot_genome.canonical import (
     NotCanonicalizable,
     canonicalize,
@@ -41,7 +40,6 @@ from agentclaw.community.core.bot_genome.canonical import (
     sha256_digest,
 )
 from agentclaw.community.core.bot_genome.rewrite import lcs_length, rewrite_flagged, strip_common, to_lines
-from agentclaw.community.core.bot_genome.spec_models import GenomeSpec
 
 _BACKEND = Path(__file__).resolve().parents[3]
 _CONTRACT = _BACKEND / "api-contracts" / "genome" / "v1"
@@ -540,22 +538,12 @@ def test_manifest_v1_case_gets_its_stated_outcome(case: Path) -> None:
 
     validate_document(document, capabilities)
     revision = _load(case / "revision.json")
-    compiled = yaml.safe_load((case / "compiled.yaml").read_text(encoding="utf-8"))
-    assert compiled == _compile(revision["spec"]), "compiled.yaml must be derived from revision.json"
-
-
-class _BlobReader:
-    """The example blobs as the registry's ``ContentReader``."""
-
-    def read(self, digest: str) -> bytes:
-        return _blob(digest)
-
-
-def _compile(spec: dict[str, Any]) -> dict[str, Any]:
-    """M′ from a revision: the registry's own compile (RSI-03), by manifest-v1-compatibility.md."""
+    assert not (case / "compiled.yaml").exists(), "M′ is the compiled desired state, not a document"
+    spec = revision["spec"]
     for entry in spec["persona"] + spec["resources"] + [s for s in spec["skills"] if "digest" in s]:
-        _blob(entry["digest"])  # every digest the document points at is a real example blob
-    return compile_spec(GenomeSpec.from_json(spec), _BlobReader(), revision_id="example").document
+        _blob(entry["digest"])  # every digest the revision points at is a real example blob
+    # That the revision compiles to the same desired state as the document is
+    # tests/community/core/bot_config_manifest/compiler/test_equivalence.py.
 
 
 def test_example_digests_are_well_formed() -> None:
