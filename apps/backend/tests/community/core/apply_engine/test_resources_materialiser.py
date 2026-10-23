@@ -838,8 +838,9 @@ def test_a_clear_that_raises_fails_every_member_in_composed_words():
     ]
     with pytest.raises(ResourcesRootNotCleared) as caught:
         _write_through(m, ctx, entries)
-    # the raw exception text never reaches the report
+    # the raw exception text never reaches the report; it is the chained cause, for the log
     assert str(caught.value) == ROOT_NOT_CLEARED_REASON and "token" not in str(caught.value)
+    assert "token" in str(caught.value.__cause__)
     assert svc.writes == {}
 
 
@@ -899,6 +900,25 @@ def test_a_file_the_bot_wrote_after_the_plan_listed_an_empty_root_still_fails_a_
     with pytest.raises(ResourcesRootNotCleared):
         _run(m.write(ctx, plan))
     assert svc.writes == {} and svc.present == {"data/scratch/notes.txt"}
+
+
+def test_a_second_listing_that_fails_aborts_with_the_cause_chained_for_the_log():
+    """A transport that could not delete may not list either; the port
+    raises for that rather than answer empty, and the stage aborts — the
+    report in its own words, the transport's error chained as the cause so
+    the server log still says what happened."""
+    svc = FakeResourceFileService()
+    svc.fail_clear = True
+    m = _materialiser(svc, _StubDeclaredSourceResolver())
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(m.resolve(ctx, [{"path": "data/notes/r.md", "content": "# rules"}]))
+    plan = _run(m.plan(ctx, resolved.intents))
+    svc.fail_list = True
+    with pytest.raises(ResourcesRootNotCleared) as caught:
+        _run(m.write(ctx, plan))
+    assert str(caught.value) == ROOT_NOT_CLEARED_REASON
+    assert isinstance(caught.value.__cause__, RuntimeError) and "token" in str(caught.value.__cause__)
+    assert svc.writes == {}
 
 
 def test_a_rows_failure_raises_confirmed_partial_write_after_the_files_landed():

@@ -228,8 +228,7 @@ class ResourcesMaterialiser(Materialiser):
         """
         entity_type, entity_id, engine = _coords(ctx)
         coords = dict(entity_type=entity_type, entity_id=entity_id, bot_id=ctx.bot_id, engine_type=engine)
-        if not await self._cleared(coords, plan):
-            raise ResourcesRootNotCleared()
+        await self._clear(coords, plan)
         results: list[EntryResult] = []
         written: list[tuple[str, int]] = []
         for planned in plan.entries:
@@ -258,8 +257,8 @@ class ResourcesMaterialiser(Materialiser):
             ) from exc
         return tuple(results)
 
-    async def _cleared(self, coords: dict[str, str], plan: CategoryPlan) -> bool:
-        """Whether the root's clear landed.
+    async def _clear(self, coords: dict[str, str], plan: CategoryPlan) -> None:
+        """Clear the root, or raise ``ResourcesRootNotCleared`` (the transport's error chained as its cause).
 
         ``False`` from the port is ambiguous in the write chain's own
         contract: both "there was no root to delete" (a first apply — fine)
@@ -273,22 +272,22 @@ class ResourcesMaterialiser(Materialiser):
         run lock admits one per bot), and that costs a report the next apply
         converges, never an upload over an uncleared root. A root the plan
         found empty is listed once more, because a file the bot wrote in
-        that same moment would otherwise survive a refused clear unseen; the
-        listing alone is not trusted for the first case because a transport
-        that cannot delete may not be able to list either, and answers
-        "nothing" for both. A port that raises is a failed clear outright.
+        that same moment would otherwise survive a refused clear unseen (the
+        port raises rather than answer ``()`` for a listing it could not
+        make). A port that raises is a failed clear outright; the raise is
+        kept as the cause for the server log, never as the report's words.
         """
         try:
             if await self._resources.clear_root(**coords):
-                return True
-        except Exception:  # noqa: BLE001 — surfaced in the stage's own words, never the transport's
-            return False
-        if plan.removals or any(planned.outcome == "updated" for planned in plan.entries):
-            return False
-        try:
-            return not await self._resources.list_root(**coords)
-        except Exception:  # noqa: BLE001
-            return False
+                return
+            if plan.removals or any(planned.outcome == "updated" for planned in plan.entries):
+                raise ResourcesRootNotCleared()
+            if await self._resources.list_root(**coords):
+                raise ResourcesRootNotCleared()
+        except ResourcesRootNotCleared:
+            raise
+        except Exception as exc:  # noqa: BLE001 — the report gets the stage's words, the log gets the cause
+            raise ResourcesRootNotCleared() from exc
 
 
 def _stored(entry: DesiredResource) -> StoredContent:

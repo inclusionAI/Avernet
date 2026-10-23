@@ -35,7 +35,7 @@ from injector import inject
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_config_surface.coords import BotConfigCoords
-from agentclaw.community.core.ports.resource_file_port import ResourceFilePort
+from agentclaw.community.core.ports.resource_file_port import ResourceFilePort, RootListingFailed
 from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_runtime_engine_for_bot,
 )
@@ -643,6 +643,13 @@ class ResourceFileService(ResourceFilePort):
         names count, because everything under the root is the apply engine's
         to replace. An entry that vanishes mid-walk is skipped (a live
         workspace may change under the walk).
+
+        A root that does not list is confirmed absent from its parent: the
+        workspace root of a running bot always lists, so a parent that does
+        not is a transport that cannot list at all, and a parent that still
+        names ``data`` is a root listing that failed — both raise
+        ``RootListingFailed`` rather than answer ``()`` (teclaw's ``list_dir``
+        gives ``None`` for an absent directory and a failed call alike).
         """
         ctx = runtime_context or self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
         device_fs = self._device_fs(
@@ -651,6 +658,11 @@ class ResourceFileService(ResourceFilePort):
         )
         root = await device_fs.list_dir(self._logical(RESOURCES_ROOT_DIR))
         if root is None:
+            parent = await device_fs.list_dir(self._logical(""))
+            if parent is None:
+                raise RootListingFailed(f"the workspace of bot {bot_id} could not be listed")
+            if any(entry.get("name") == RESOURCES_ROOT_DIR for entry in parent):
+                raise RootListingFailed(f"the resources root of bot {bot_id} is present but could not be listed")
             return ()
         files: list[str] = []
         queue: list[tuple[str, list[dict[str, Any]]]] = [(RESOURCES_ROOT_DIR, root)]
