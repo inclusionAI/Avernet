@@ -11,12 +11,15 @@ covers (``cli_tools``, ``engine_config``) are left undeclared, so an apply
 leaves them as they are. ``memory`` is not delivered until RSI-05.
 
 ``GenomeCompiler`` is the ``DesiredStateCompiler`` for ``GenomeStateRef``: a
-promotion id resolves to the promotion row, whose revision compiles. The row
-is ``applying`` while the delivery seam answers and ``applied`` as soon as it
-has — before the apply run that delivers it compiles in its worker — so both
-resolve; only a promotion whose delivery never started (``apply_failed``) has
-nothing to deliver. It is registered in the run service's compiler map;
-RSI-04 is its first caller.
+promotion id resolves to the promotion row, whose revision compiles — while
+the promotion is current. The row is ``applying`` while the delivery seam
+answers and ``applied`` as soon as it has (before the apply run that delivers
+it compiles in its worker), so both resolve; a promotion whose delivery never
+started (``apply_failed``), or any status this module does not know, is
+refused. So is a promotion ``active`` has moved on from: a retried or
+redelivered apply must not converge the bot back to a revision the refs no
+longer name. It is registered in the run service's compiler map; RSI-04 is
+its first caller.
 """
 
 from __future__ import annotations
@@ -51,7 +54,10 @@ from agentclaw.community.core.bot_genome.spec_models import (
     ResourceEntry,
     SkillEntry,
 )
-from agentclaw.community.core.repository.protocols.bot.genome import GenomePromotionRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot.genome import (
+    GenomePromotionRepositoryProtocol,
+    GenomeRefRepositoryProtocol,
+)
 from agentclaw.community.utils.env_utils import get_current_env
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -60,8 +66,8 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 __all__ = ["GenomeCompiler", "compile_spec"]
 
-#: The promotion status whose delivery never started: there is nothing to deliver for it.
-_NEVER_STARTED = "apply_failed"
+#: The promotion statuses under which a revision is delivered; anything else never started, or is unknown here.
+_DELIVERABLE = frozenset({"applying", "applied"})
 
 
 def _skill_source(entry: SkillEntry) -> LocalSkillPackage | CenterSkillVersion | RepoSkillPath:
@@ -92,12 +98,12 @@ def compile_spec(spec: GenomeSpec, content: ContentReader) -> DesiredState:
     resource outside the resources root — is ``NotAppliable`` naming the
     rule, not a compiler error.
     """
-    script: Declaration[DesiredScript]
-    if spec.script is not None:
-        script = Declaration((DesiredScript(content.read(spec.script.digest).decode("utf-8")),))
-    else:
-        script = Declaration(())
     try:
+        script: Declaration[DesiredScript]
+        if spec.script is not None:
+            script = Declaration((DesiredScript(content.read(spec.script.digest).decode("utf-8")),))
+        else:
+            script = Declaration(())
         return DesiredState(
             script=script,
             identity=Declaration(tuple(DesiredIdentityFile(e.type, StoredContent(e.digest)) for e in spec.persona)),
@@ -117,27 +123,40 @@ class GenomeCompiler:
         *,
         registry: GenomeRegistryProtocol,
         promotions: GenomePromotionRepositoryProtocol,
+        refs: GenomeRefRepositoryProtocol,
         env: Callable[[], str] = get_current_env,
     ) -> None:
         self._registry = registry
         self._promotions = promotions
+        self._refs = refs
         self._env = env
 
     def _revision_of(self, ctx: ApplyContext, ref: GenomeStateRef) -> str:
-        """The revision id the promotion delivers; a missing promotion, or one whose delivery never started, is refused."""
-        row = self._promotions.get(
-            env=self._env(), entity_id=ctx.entity_id, bot_id=ctx.bot_id, promotion_id=ref.promotion_id
-        )
+        """The revision id the promotion delivers; a missing, never-started or superseded promotion is refused."""
+        axes = dict(env=self._env(), entity_id=ctx.entity_id, bot_id=ctx.bot_id)
+        row = self._promotions.get(**axes, promotion_id=ref.promotion_id)
         if row is None:
             raise RevisionNotFound(f"promotion {ref.promotion_id}")
-        if row.status == _NEVER_STARTED:
+        if row.status not in _DELIVERABLE:
             raise NotAppliable(
                 [
                     Reason(
                         "not_appliable",
                         "promotion",
-                        f"promotion {ref.promotion_id} is {row.status}: its delivery never started, so there is "
-                        "nothing to deliver",
+                        f"promotion {ref.promotion_id} is {row.status}; only an applying or applied promotion is delivered",
+                    )
+                ]
+            )
+        active = self._refs.get(**axes, name="active")
+        if active is None or active.revision_id != row.revision_id:
+            now = active.revision_id if active is not None else None
+            raise NotAppliable(
+                [
+                    Reason(
+                        "not_appliable",
+                        "promotion",
+                        f"promotion {ref.promotion_id} moved active to {row.revision_id}, but active is {now!r} now; "
+                        "a superseded promotion is not delivered",
                     )
                 ]
             )

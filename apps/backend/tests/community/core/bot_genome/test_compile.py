@@ -123,14 +123,29 @@ class _Registry:
         return self.state
 
 
+REVISION = "sha256:" + "ab" * 32
+
+
 def _row(status: str = "applying"):
-    return SimpleNamespace(revision_id="sha256:" + "ab" * 32, status=status)
+    return SimpleNamespace(revision_id=REVISION, status=status)
 
 
-def _compiler(row, state: DesiredState | None = None) -> tuple[GenomeCompiler, _Registry, _Promotions]:
+class _Refs:
+    def __init__(self, active: str | None = REVISION) -> None:
+        self.active = active
+
+    def get(self, *, name, **axes):
+        assert name == "active"
+        return None if self.active is None else SimpleNamespace(revision_id=self.active)
+
+
+def _compiler(
+    row, state: DesiredState | None = None, *, active: str | None = REVISION
+) -> tuple[GenomeCompiler, _Registry, _Promotions]:
     registry = _Registry(state or compile_spec(_spec(CASES[0]), BlobDir()))
     promotions = _Promotions(row)
-    return GenomeCompiler(registry=registry, promotions=promotions, env=lambda: "dev"), registry, promotions
+    compiler = GenomeCompiler(registry=registry, promotions=promotions, refs=_Refs(active), env=lambda: "dev")
+    return compiler, registry, promotions
 
 
 def test_the_genome_compiler_resolves_the_promotion_to_its_revision_and_compiles_it() -> None:
@@ -159,25 +174,34 @@ def test_only_narrows_the_genome_state_to_a_phases_constructs() -> None:
     assert half.identity is None and half.resources is None and half.skills is None and half.mcp is None
 
 
-def test_a_missing_promotion_or_one_whose_delivery_never_started_is_refused() -> None:
+def test_a_missing_never_started_unknown_or_superseded_promotion_is_refused() -> None:
     """The row is ``applied`` by the time the apply run compiles in its
     worker (the seam answered "started" before that), so ``applied`` resolves
-    like ``applying``; only ``apply_failed`` has nothing to deliver."""
+    like ``applying``; ``apply_failed`` has nothing to deliver, a status this
+    module does not know is refused rather than trusted, and a promotion
+    ``active`` has moved on from must not be redelivered over the newer one."""
     ctx = make_context(engine_type="openclaw", bot_type="arca")
     compiler, _, _ = _compiler(None)
     with pytest.raises(RevisionNotFound):
         compiler.check(ctx, GenomeStateRef("p" * 32))
     compiler, registry, _ = _compiler(_row("applied"))
     assert asyncio.run(compiler.compile(ctx, GenomeStateRef("p" * 32))).state is registry.state
-    compiler, _, _ = _compiler(_row("apply_failed"))
-    with pytest.raises(NotAppliable) as caught:
-        asyncio.run(compiler.compile(ctx, GenomeStateRef("p" * 32)))
-    assert "never started" in caught.value.reasons[0].message
+    for status in ("apply_failed", "superseded", ""):
+        compiler, _, _ = _compiler(_row(status))
+        with pytest.raises(NotAppliable) as caught:
+            asyncio.run(compiler.compile(ctx, GenomeStateRef("p" * 32)))
+        assert "only an applying or applied promotion" in caught.value.reasons[0].message
+    for active in ("sha256:" + "cd" * 32, None):
+        compiler, _, _ = _compiler(_row("applied"), active=active)
+        with pytest.raises(NotAppliable) as caught:
+            compiler.check(ctx, GenomeStateRef("p" * 32))
+        assert "superseded" in caught.value.reasons[0].message
 
 
 def test_a_revision_the_state_model_refuses_is_not_appliable_rather_than_a_crash() -> None:
     """A revision recorded before the resources-root rule names ``docs/``; the
-    model refuses the path, and the compiler says so as a reason."""
+    model refuses the path, and the compiler says so as a reason. A script
+    blob that is not UTF-8 is the same kind of refusal."""
     spec = GenomeSpec.from_json(
         {
             "persona": [],
@@ -193,3 +217,8 @@ def test_a_revision_the_state_model_refuses_is_not_appliable_rather_than_a_crash
         compile_spec(spec, BlobDir())
     assert "'docs/guide.md' is outside 'data/'" in caught.value.reasons[0].message
     assert caught.value.reasons[0].location == "spec"
+    blobs = BlobDir()
+    binary = blobs.put(b"\xff\xfe not text")
+    scripted = GenomeSpec.from_json({**spec.to_json(), "resources": [], "script": {"digest": binary}})
+    with pytest.raises(NotAppliable):
+        compile_spec(scripted, blobs)

@@ -137,10 +137,13 @@ class BotGenomeModule(Module):
     @provider
     @inject
     def genome_compiler(
-        self, registry: GenomeRegistryProtocol, promotions: GenomePromotionRepositoryProtocol
+        self,
+        registry: GenomeRegistryProtocol,
+        promotions: GenomePromotionRepositoryProtocol,
+        refs: GenomeRefRepositoryProtocol,
     ) -> GenomeCompiler:
-        """The genome's ``DesiredStateCompiler``: a promotion id → its revision's desired state."""
-        return GenomeCompiler(registry=registry, promotions=promotions)
+        """The genome's ``DesiredStateCompiler``: a current promotion's id → its revision's desired state."""
+        return GenomeCompiler(registry=registry, promotions=promotions, refs=refs)
 
     @singleton
     @multiprovider
