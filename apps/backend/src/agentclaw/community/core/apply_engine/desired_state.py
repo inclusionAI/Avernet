@@ -24,9 +24,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, ClassVar, Generic, Mapping, TypeVar
+from types import MappingProxyType
+from typing import Any, ClassVar, Generic, Mapping, Protocol, TypeVar
 
 from agentclaw.community.core.apply_engine.constructs import Construct, ManifestCategory, ManifestSection
+from agentclaw.community.core.apply_engine.paths import relative_path_refusal
 from agentclaw.community.core.content_store import DIGEST_RE
 
 __all__ = [
@@ -84,7 +86,14 @@ class EntryFailure:
     reason: str
 
 
-E = TypeVar("E")
+class HasIdentity(Protocol):
+    """What every desired entry exposes: the key the report and the materialiser address it by."""
+
+    @property
+    def identity(self) -> str: ...
+
+
+E = TypeVar("E", bound=HasIdentity)
 
 
 @dataclass(frozen=True)
@@ -103,13 +112,12 @@ class Declaration(Generic[E]):
     def __post_init__(self) -> None:
         seen: set[str] = set()
         for entry in self.entries:
-            identity = getattr(entry, "identity")
-            _require(identity not in seen, f"duplicate entry {identity!r} in one declaration")
-            seen.add(identity)
+            _require(entry.identity not in seen, f"duplicate entry {entry.identity!r} in one declaration")
+            seen.add(entry.identity)
 
     @property
     def identities(self) -> tuple[str, ...]:
-        return tuple(getattr(entry, "identity") for entry in self.entries)
+        return tuple(entry.identity for entry in self.entries)
 
 
 @dataclass(frozen=True)
@@ -192,6 +200,10 @@ class DesiredSkill:
 
 
 def _check_resource_path(path: str, *, tree: bool) -> None:
+    refusal = relative_path_refusal(path, what="resource path")
+    _require(refusal is None, refusal[1] if refusal else "")
+    segments = path.rstrip("/").split("/")
+    _require(all(segment not in ("", ".") for segment in segments), f"resource path {path!r} is not normalised")
     _require(path.startswith(RESOURCES_ROOT), f"resource path {path!r} is outside {RESOURCES_ROOT!r}")
     _require(len(path) > len(RESOURCES_ROOT), f"resource path {path!r} names the root itself")
     if tree:
@@ -263,16 +275,21 @@ class McpOverride:
     """
 
     url: str | None = None
-    headers: tuple[McpHeader, ...] = ()
+    #: ``None`` = headers not overridden; ``()`` = overridden to none (clears persisted headers).
+    headers: tuple[McpHeader, ...] | None = None
     endpoint_env: McpEndpointEnv | None = None
     transport: McpTransport | None = None
+
+    def __post_init__(self) -> None:
+        names = [header.name.lower() for header in self.headers or ()]
+        _require(len(names) == len(set(names)), "MCP header names are case-insensitive and must be unique")
 
     def as_config(self) -> dict[str, Any]:
         """The mapping the MCP ports take today (``url``, ``headers``, ``endpoint_env``, ``transport_protocol``)."""
         config: dict[str, Any] = {}
         if self.url is not None:
             config["url"] = self.url
-        if self.headers:
+        if self.headers is not None:
             config["headers"] = {header.name: header.value for header in self.headers}
         if self.endpoint_env is not None:
             config["endpoint_env"] = self.endpoint_env.value
@@ -285,10 +302,10 @@ class McpOverride:
         """The typed override of a validated config mapping; unknown members are a compiler bug."""
         unknown = set(config) - {"url", "headers", "endpoint_env", "transport_protocol"}
         _require(not unknown, f"unknown MCP override members: {sorted(unknown)}")
-        headers = config.get("headers") or {}
+        headers = config.get("headers")
         return cls(
             url=config.get("url"),
-            headers=tuple(McpHeader(str(name), str(value)) for name, value in headers.items()),
+            headers=None if headers is None else tuple(McpHeader(str(n), str(v)) for n, v in headers.items()),
             endpoint_env=McpEndpointEnv(config["endpoint_env"]) if "endpoint_env" in config else None,
             transport=McpTransport(config["transport_protocol"]) if "transport_protocol" in config else None,
         )
@@ -347,6 +364,10 @@ class DesiredEngineConfig:
     config: Mapping[str, Any]
     identity: ClassVar[str] = ManifestCategory.ENGINE_CONFIG.value
 
+    def __post_init__(self) -> None:
+        # A private, read-only copy: the frozen promise holds for the mapping too (it is not hashable).
+        object.__setattr__(self, "config", MappingProxyType(dict(self.config)))
+
 
 @dataclass(frozen=True)
 class DesiredState:
@@ -362,6 +383,10 @@ class DesiredState:
 
     EMPTY: ClassVar[DesiredState]
 
+    def __post_init__(self) -> None:
+        if self.resources is not None:
+            _check_resource_layout(self.resources.entries)
+
     def declaration(self, construct: Construct) -> Declaration[Any] | None:
         """The declaration for one construct, or ``None`` when the state does not declare it."""
         return getattr(self, _FIELD_BY_CONSTRUCT[construct])
@@ -369,6 +394,15 @@ class DesiredState:
     @property
     def declared(self) -> tuple[Construct, ...]:
         return tuple(c for c, name in _FIELD_BY_CONSTRUCT.items() if getattr(self, name) is not None)
+
+
+def _check_resource_layout(entries: tuple[DesiredResource, ...]) -> None:
+    """A directory entry owns its whole subtree, so nothing else may sit under it or share its name."""
+    trees = [entry.path for entry in entries if isinstance(entry, DesiredResourceTree)]
+    for entry in entries:
+        for tree in trees:
+            if entry.path != tree and (entry.path.startswith(tree) or entry.path + "/" == tree):
+                raise ValueError(f"resource path {entry.path!r} is nested under directory entry {tree!r}")
 
 
 _FIELD_BY_CONSTRUCT: dict[Construct, str] = {
