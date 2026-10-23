@@ -50,7 +50,6 @@ never look like a verdict about what a bot supports.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Callable, Iterable
 
 from agentclaw.community.core.workspace.constants import (
@@ -67,74 +66,16 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
         SourceKind,
     )
 
-class ConstructKind(StrEnum):
-    """What sort of thing a construct is. Derived, never chosen at a call site."""
-
-    CATEGORY = "category"
-    SECTION = "section"
-
-
-class ManifestCategory(StrEnum):
-    """The six categories under ``manifest``, in the order schema §1 lists them.
-
-    Also the *closed* set the parser admits: an unknown key under ``manifest``
-    is refused, not ignored.
-    """
-
-    MCP = "mcp"
-    RESOURCES = "resources"
-    SKILLS = "skills"
-    ENGINE_CONFIG = "engine_config"
-    IDENTITY = "identity"
-    CLI_TOOLS = "cli_tools"
-
-
-class ManifestSection(StrEnum):
-    """A top-level section that is not a category."""
-
-    SCRIPT = "script"
-
-
-#: Either of the two. A value's own type says which kind it is, which is what
-#: makes an ill-formed ``(kind, name)`` pair unwritable rather than merely
-#: invalid.
-#:
-#: ``SourceForm`` used to be a third member, publishing one row per source
-#: *spelling* (``oss``/``git``/``named``/``content``). Review asked what
-#: ``named`` was doing there, and the check settled it: across all 50
-#: engine/bot-type/teclaw configurations no form ever carried a verdict of
-#: its own — the only refusal is bot-wide ("desktop bots are outside this
-#: feature's scope") and hits all four identically. So the axis published four
-#: rows that could never disagree, and the spelling/protocol split it forced
-#: on the parser is the same one that produced the D5 bug recorded in
-#: ``support_matrix.py``. Which (category, protocol) pairs are open was always
-#: the real question, and ``source_matrix`` answers it on ``SourceKind``.
-Construct = ManifestCategory | ManifestSection
-
-_KIND_BY_TYPE: dict[type, ConstructKind] = {
-    ManifestCategory: ConstructKind.CATEGORY,
-    ManifestSection: ConstructKind.SECTION,
-}
-
-
-def kind_of(construct: Construct) -> ConstructKind:
-    """The kind a construct belongs to, read off its type."""
-    return _KIND_BY_TYPE[type(construct)]
-
-
-def parse_category(value: object) -> ManifestCategory | None:
-    """A ``manifest`` key as a category, or ``None`` when it is not one.
-
-    The parser needs this because a submitted document may name anything;
-    everything *inside* this package works in enums from there on.
-    """
-    if not isinstance(value, str):
-        return None
-    try:
-        return ManifestCategory(value)
-    except ValueError:
-        return None
-
+# The construct vocabulary is the apply engine's (``core/apply_engine/constructs.py``);
+# this module answers which constructs a bot can be told to have.
+from agentclaw.community.core.apply_engine.constructs import (  # noqa: E402
+    Construct,
+    ConstructKind,
+    ManifestCategory,
+    ManifestSection,
+    kind_of,
+    parse_category,  # noqa: F401 - re-exported for the parser until the move completes
+)
 
 #: The schema versions this build parses. A document naming anything else is
 #: refused rather than best-effort parsed.
