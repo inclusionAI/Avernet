@@ -9,10 +9,12 @@ Drives the guarded dispatch chain over live HTTP:
    (entry A) whose first node dispatches over the protected wire
    (caller.container.ensure + chat.send.protected carrying caller_context
    and an execution proof);
-3. the Human answers a pending node over HTTP and the follow-up node rides
-   the same protected wire (entry B rearm);
-4. the Workbench session WebSocket resolves the state_machine speaking mode
-   and executes the lease command surface.
+3. the Human answers a pending node over the session WebSocket (entry-B
+   rearm) and the follow-up node rides the same protected wire;
+4. the lease command surface is exercised on the state_machine group, and a
+   plain caller group proves the lease fence, the web-send admission path,
+   and the P1 CALLER_EXECUTION_UNAVAILABLE closed contract for the gated
+   delivery chain.
 """
 from __future__ import annotations
 
@@ -295,66 +297,158 @@ class CallerStory:
                          lambda: self.request(f"/state-machine-runs/{segment(self.run_id)}/pending-human-nodes"),
                          bool)
 
-    def human_approval(self) -> None:
+    def lease_roundtrip(self, socket_client: WorkbenchSocket) -> None:
+        """Exercise the acquire/preempt/release surface plus its fences."""
+        socket_client.send({"type": "req", "id": "lease-acquire", "method": "lease.acquire",
+                            "params": {"groupId": self.group_id}})
+        answer = socket_client.receive("lease-acquire")
+        assert answer.get("ok") is True, answer
+        assert answer["payload"]["status"] in ("granted", "self_held"), answer
+        socket_client.send({"type": "req", "id": "lease-preempt", "method": "lease.preempt",
+                            "params": {"groupId": self.group_id}})
+        preempt = socket_client.receive("lease-preempt")
+        assert preempt.get("ok") is True, preempt
+        assert preempt["payload"]["status"] == "granted", preempt
+        socket_client.send({"type": "req", "id": "lease-release", "method": "lease.release",
+                            "params": {"groupId": self.group_id,
+                                       "leaseId": preempt["payload"]["leaseId"],
+                                       "leaseEpoch": preempt["payload"]["epoch"]}})
+        release_answer = socket_client.receive("lease-release")
+        assert release_answer.get("ok") is True, release_answer
+        # Missing lease coordinates must be rejected as invalid_request.
+        socket_client.send({"type": "req", "id": "lease-release-bare", "method": "lease.release",
+                            "params": {"groupId": self.group_id}})
+        bare = socket_client.receive("lease-release-bare")
+        assert bare.get("ok") is False and bare["error"]["code"] == "invalid_request", bare
+        assert "leaseId" in bare["error"]["message"], bare
+        # A chat.send frame without sender material must not fan out as
+        # anyone: the dispatcher rejects it with the closed forbidden error.
+        socket_client.send({"type": "req", "id": "chat-anonymous", "method": "chat.send",
+                            "params": {"group_id": self.group_id,
+                                       "message": "must be rejected"}})
+        anonymous = socket_client.receive("chat-anonymous")
+        assert anonymous.get("ok") is False and anonymous["error"]["code"] == "forbidden_sender", anonymous
+
+    def answer_approval_over_ws(self, socket_client: WorkbenchSocket) -> None:
+        """Answer the pending HumanInput through the session WebSocket (entry B)."""
         nodes = self.pending()
         assert len(nodes) == 1, nodes
-        self.post(f"/state-machine-runs/{segment(self.run_id)}/nodes/{segment(nodes[0]['node_id'])}/respond",
-                  {"content": "approve the guarded draft"})
+        socket_client.send({"type": "req", "id": "approve-send", "method": "chat.send",
+                            "params": {"group_id": self.group_id,
+                                       "session_id": self.session_id,
+                                       "bot_id": "human_" + self.args.human,
+                                       "message": "approve the guarded draft"}})
+        answer = socket_client.receive("approve-send")
+        assert answer.get("ok") is True, answer
+        assert answer["payload"]["status"] == "accepted", answer
         delivery = self.protected_dispatch("the group asked for")
         self.answer_dispatch(delivery, "published caller output")
         self.wait("completed run", lambda: self.request(f"/state-machine-runs/{segment(self.run_id)}"),
                   lambda run: run["run"]["status"] == "completed")
         run = self.request(f"/state-machine-runs/{segment(self.run_id)}")
         assert run["run"]["output"] == "published caller output", run["run"]
-        print("  human approval re-armed the association and published (entry B)", flush=True)
+        print("  human approval re-armed the association and published (entry B via WS)", flush=True)
 
-    # -------------------------------------------------------------------- ws
-
-    def workbench_session_checks(self) -> None:
+    def state_machine_workbench(self) -> None:
         socket_client = WorkbenchSocket(self.args.base_url, self.args.human,
                                         self.group_id, self.session_id)
         try:
             connect = socket_client.receive(socket_client.connect_id)
             assert connect.get("ok") is True, connect
-            # Lease command surface on a state_machine (never lease-required) group.
-            socket_client.send({"type": "req", "id": "lease-acquire", "method": "lease.acquire",
-                                "params": {"groupId": self.group_id}})
-            answer = socket_client.receive("lease-acquire")
-            assert answer.get("ok") is True, answer
-            assert answer["payload"]["status"] in ("granted", "self_held"), answer
-            socket_client.send({"type": "req", "id": "lease-preempt", "method": "lease.preempt",
-                                "params": {"groupId": self.group_id}})
-            preempt = socket_client.receive("lease-preempt")
-            assert preempt.get("ok") is True, preempt
-            assert preempt["payload"]["status"] == "granted", preempt
-            socket_client.send({"type": "req", "id": "lease-release", "method": "lease.release",
-                                "params": {"groupId": self.group_id,
-                                           "leaseId": preempt["payload"]["leaseId"],
-                                           "leaseEpoch": preempt["payload"]["epoch"]}})
-            release_answer = socket_client.receive("lease-release")
-            assert release_answer.get("ok") is True, release_answer
-            # Missing lease coordinates must be rejected as invalid_request.
-            socket_client.send({"type": "req", "id": "lease-release-bare", "method": "lease.release",
-                                "params": {"groupId": self.group_id}})
-            bare = socket_client.receive("lease-release-bare")
-            assert bare.get("ok") is False and bare["error"]["code"] == "invalid_request", bare
-            assert "leaseId" in bare["error"]["message"], bare
-            # A chat.send frame without sender material must not fan out as
-            # anyone: the dispatcher rejects it with the closed forbidden error.
-            socket_client.send({"type": "req", "id": "plain-send", "method": "chat.send",
-                                "params": {"group_id": self.group_id,
-                                           "message": "hello from the plain state_machine session"}})
-            plain = socket_client.receive("plain-send")
-            assert plain.get("ok") is False and plain["error"]["code"] == "forbidden_sender", plain
+            self.answer_approval_over_ws(socket_client)
+            self.lease_roundtrip(socket_client)
         finally:
             socket_client.close()
         print("  workbench lease/speaking checks verified over the session WebSocket", flush=True)
 
+    # -------------------------------------------------------------------- ws
+
+    def caller_group_chat(self) -> None:
+        """Normal caller group: lease fence, admission, and the delegated ride."""
+        group = self.post("/groups", {
+            "driver_bot": self.driver["bot_uuid"], "label": "Caller E2E plain group",
+            "participants": [{"bot_uuid": actor}
+                             for actor in (self.driver["bot_uuid"], self.bot["bot_uuid"], "human_" + self.args.human)],
+        })
+        plain_group_id, plain_session_id = group["id"], group["session_id"]
+        assert plain_session_id, group
+        self.post("/control/provider/clear", mock=True)
+        socket_client = WorkbenchSocket(self.args.base_url, self.args.human,
+                                        plain_group_id, plain_session_id)
+        try:
+            connect = socket_client.receive(socket_client.connect_id)
+            assert connect.get("ok") is True, connect
+            socket_client.send({"type": "req", "id": "lease-plain-acquire", "method": "lease.acquire",
+                                "params": {"groupId": plain_group_id}})
+            acquired = socket_client.receive("lease-plain-acquire")
+            assert acquired.get("ok") is True, acquired
+            lease = acquired["payload"]
+            assert lease["status"] in ("granted", "self_held"), lease
+            # A lease-required group refuses submissions without a lease: the web send
+            # rejection propagates without a response frame (the dispatcher
+            # fails the whole frame), so the client never receives an ack for
+            # the fenced attempt. The refusal is verified by the ride audit
+            # below: this turn must NOT deliver anything to the Provider.
+            socket_client.send({"type": "req", "id": "chat-fence", "method": "chat.send",
+                                "params": {"group_id": plain_group_id,
+                                           "session_id": plain_session_id,
+                                           "bot_id": "human_" + self.args.human,
+                                           "message": "must be fenced"}})
+            time.sleep(1.0)
+            fenced_rides = self.request("/control/provider/requests", mock=True)["requests"]
+            assert not any((item["body"].get("method") == "chat.send")
+                           and item["body"].get("session_id", "").startswith(plain_group_id)
+                           for item in fenced_rides), fenced_rides
+            # The admitted turn carries the lease coordinates and rides the
+            # caller admission path toward the caller-enabled target.
+            socket_client.send({"type": "req", "id": "chat-plain-send", "method": "chat.send",
+                                "params": {"group_id": plain_group_id,
+                                           "bot_id": "human_" + self.args.human,
+                                           "message": "route this caller turn to the worker",
+                                           "session_id": plain_session_id,
+                                           "mentions": [self.bot["bot_uuid"]],
+                                           "leaseId": lease["leaseId"],
+                                           "leaseEpoch": lease["epoch"]}})
+            admitted = socket_client.receive("chat-plain-send")
+            assert admitted.get("ok") is True, admitted
+            # P1 contract: the mentioned caller-enabled worker is refused by
+            # the CallerConfigurationDeliveryGate (CALLER_EXECUTION_UNAVAILABLE)
+            # and the turn converges with a closed system note to the others;
+            # no Provider ride with caller extensions may exist for it.
+            time.sleep(1.0)
+            rides = self.request("/control/provider/requests", mock=True)["requests"]
+            worker_rides = [item for item in rides
+                            if item["body"].get("method") == "chat.send"
+                            and item["body"].get("session_id", "").startswith(plain_group_id)]
+            assert not any((item["body"].get("extensions") or {}).get("caller_context")
+                           for item in worker_rides), rides
+            failure_note = [item for item in rides
+                            if item["body"].get("method") == "chat.inject"
+                            and "消息投递失败" in json.dumps(item["body"], ensure_ascii=False)]
+            assert failure_note, rides
+            history = self.wait("human turn in session history",
+                                lambda: self.request(f"/sessions/{segment(plain_session_id)}/messages"),
+                                lambda messages: any("route this caller turn" in json.dumps(message)
+                                                     for message in messages))
+            assert history, history
+            socket_client.send({"type": "req", "id": "lease-plain-release", "method": "lease.release",
+                                "params": {"groupId": plain_group_id,
+                                           "leaseId": lease["leaseId"],
+                                           "leaseEpoch": lease["epoch"]}})
+            released = socket_client.receive("lease-plain-release")
+            released_ok = released.get("ok") is True
+            # A stale epoch is a legitimate release rejection (preempted by
+            # our own worker turn); either outcome is a valid lease fact.
+            assert released_ok or ("lease" in released["error"]["message"]), released
+        finally:
+            socket_client.close()
+        print("  plain caller group: lease fence, admission and the closed P1 delivery gate verified", flush=True)
+
     def run(self) -> None:
         self.setup()
         self.bootstrap_group()
-        self.human_approval()
-        self.workbench_session_checks()
+        self.state_machine_workbench()
+        self.caller_group_chat()
 
 
 def main() -> int:

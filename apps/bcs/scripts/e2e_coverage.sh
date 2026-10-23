@@ -365,7 +365,25 @@ if [[ "$no_stop" -eq 0 ]]; then
     bcs-session-store/src/memory_operations/
     bcs-user-identity/src/memory.rs
   )
-  changed_skip_regex="^crates/services/($(IFS='|'; printf '%s' "${e2e_unreachable_memory_repos[*]}" | sed 's/\./\\./g'))"
+  # P2 caller delivery chain: every queued caller transition is refused by the
+  # P1 CallerConfigurationDeliveryGate ("P1: no ready caller execution chain
+  # exists yet", CALLER_EXECUTION_UNAVAILABLE) — the only path that reaches a
+  # caller-enabled Bot is the orchestration-protected state-machine ride, which
+  # bypasses these queue-side stages. No e2e story can exercise them until the
+  # P2 wiring replaces the gate's readiness inputs; a listed file that shows
+  # any E2E hit is counted again (the gate warns and re-includes).
+  e2e_unreachable_p2_caller_delivery=(
+    bcs-message-flow/src/caller_dispatch_pipeline/barrier.rs
+    bcs-message-flow/src/caller_dispatch_pipeline/delegate.rs
+    bcs-message-flow/src/caller_dispatch_pipeline/observe.rs
+    bcs-message-flow/src/delivery_runtime/caller_dispatch.rs
+    bcs-message-flow/src/delivery_runtime/caller_delegate.rs
+  )
+  e2e_unreachable=(
+    "${e2e_unreachable_memory_repos[@]}"
+    "${e2e_unreachable_p2_caller_delivery[@]}"
+  )
+  changed_skip_regex="^crates/services/($(IFS='|'; printf '%s' "${e2e_unreachable[*]}" | sed 's/\./\\./g'))"
   changed_args=(--changed-line-min "$changed_line_min"
     --changed-line-min-lines "$changed_line_min_lines"
     --changed-skip-regex "$changed_skip_regex")
