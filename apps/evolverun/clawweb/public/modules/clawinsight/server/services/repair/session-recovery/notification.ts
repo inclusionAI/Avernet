@@ -168,6 +168,8 @@ export class SessionRecoveryGroupNotifier implements RecoveryActionNotifier {
     const config = webhookConfig(row.config_json);
     const task = await this.deps.tasks.find(input.taskId);
     if (!task || resolveTaskControlPlaneEnvironment(task) !== this.deps.controlPlaneEnvironment) return;
+    // Reuse the complete tool audit; uncertain delivery must not be treated as no intervention.
+    if (input.kind === "result" && task.interventionStatus === "none") return;
     const target = task.request.target;
     const webhook = config.bot_webhooks?.find(item => item.bot_id === target.bot_id && item.entity_id === target.entity_id)?.webhook ?? config.webhook;
     const source = task.timeline.find(event => event.event_id === input.eventId);

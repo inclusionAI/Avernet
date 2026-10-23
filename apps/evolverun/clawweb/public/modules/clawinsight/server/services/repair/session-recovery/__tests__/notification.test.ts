@@ -20,6 +20,47 @@ function setup() {
 }
 const message = { taskId: "SR-notification", eventId: "call-1", kind: "message" as const };
 
+it.each([
+  ["completed", "recovered", undefined],
+  ["completed", "unknown", undefined],
+  ["failed", "unknown", undefined],
+  ["canceled", "unknown", undefined],
+  ["completed", "unknown", "user_continued"],
+] as const)("omits terminal group notices without intervention: %s/%s/%s", async (status, effect, completionReason) => {
+  const { notifier, task, tasks, sender, events } = setup();
+  task.status = status; task.completionReason = completionReason; task.interventionStatus = "none";
+  task.judgment = { delivery: "unconfirmed", response: "none", effect, summary: "仅调查，未实际干预", evidence_ids: [] };
+  task.timeline = [{ event_id: "result-1", kind: "observation", at_ms: 2, actor: "agent", summary: task.judgment.summary, payload: {} }];
+  const original = structuredClone(task);
+  notifier.after({ ...message, eventId: "result-1", kind: "result" });
+  await new Promise(resolve => setImmediate(resolve));
+  expect(tasks.find).toHaveBeenCalledWith(task.taskId);
+  expect(sender.send).not.toHaveBeenCalled(); expect(tasks.appendNotification).not.toHaveBeenCalled();
+  expect(events).toEqual([]); expect(task).toEqual(original);
+});
+
+it.each(["performed", "unknown", undefined] as const)("retains terminal notices for performed or uncertain intervention: %s", async interventionStatus => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed"; task.interventionStatus = interventionStatus;
+  notifier.after({ ...message, kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  expect(sender.send).toHaveBeenCalledOnce();
+  expect(sender.send.mock.calls[0][0].title).toBe("会话自愈｜任务已完成");
+});
+
+it.each(["message", "plan", "execution"] as const)("retains %s notices before any confirmed intervention", async kind => {
+  const { notifier, task, sender, events } = setup();
+  task.interventionStatus = "none";
+  if (kind === "plan") {
+    task.status = "waiting_owner";
+    task.timeline[0].payload.plan = { summary: "需要用户开通权限", actions: [], owner_cooperation: [{ request: "申请目标文档的读取权限" }] };
+  }
+  notifier.after({ ...message, kind });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  expect(sender.send).toHaveBeenCalledOnce();
+  if (kind === "plan") expect(sender.send.mock.calls[0][0].text).toContain("申请目标文档的读取权限");
+});
+
 it.each(["message", "plan", "execution", "result"] as const)("routes %s to the exact Bot and Owner override only", async kind => {
   const { notifier, config, sender, task, events } = setup();
   task.request.target.bot_id = "default";
@@ -225,9 +266,9 @@ it("checks the independent Owner notification switch on each send", async () => 
 });
 
 
-it("notifies normal user handoff without claiming business recovery", async () => {
+it("notifies user handoff after intervention without claiming business recovery", async () => {
   const { notifier, task, sender, events } = setup();
-  task.status = "completed"; task.completionReason = "user_continued";
+  task.status = "completed"; task.completionReason = "user_continued"; task.interventionStatus = "performed";
   task.judgment = { delivery: "unconfirmed", response: "unknown", effect: "unknown", summary: "用户已继续对话，本次自愈已让路", evidence_ids: [] };
   task.timeline = [{ event_id: "handoff", at_ms: 1, kind: "termination", actor: "agent", summary: task.judgment.summary, payload: { completion_reason: "user_continued" } }];
   notifier.after({ taskId: task.taskId, eventId: "handoff", kind: "result" });
