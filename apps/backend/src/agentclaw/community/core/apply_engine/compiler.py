@@ -23,6 +23,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 __all__ = [
     "Compiled",
+    "CompileRefused",
     "DesiredStateCompiler",
     "GenomeStateRef",
     "ManifestStateRef",
@@ -83,14 +84,28 @@ class Compiled:
 R = TypeVar("R", ManifestStateRef, GenomeStateRef, contravariant=True)
 
 
+class CompileRefused(Exception):
+    """A compiler refuses the reference as a whole, for a reason the report should say.
+
+    Not a bug: the reference named something that cannot be compiled *now* —
+    a promotion ``active`` has moved on from, a revision the state model no
+    longer accepts. The run service records the apply as failed with the
+    message as a note on the report (an engine exception is recorded without
+    its text, since that is where raw internals could reach a response body;
+    this message is composed by the compiler for the caller to read).
+    """
+
+
 @runtime_checkable
 class DesiredStateCompiler(Protocol[R]):
     """Compile one kind of state reference into a desired state.
 
     Fetching, grammar and content filing all happen inside ``compile``; what
     comes out names bytes already in the content store. A per-entry problem is
-    an ``EntryFailure`` on its declaration; an exception is a bug and
-    propagates, which the run service records as a failed apply.
+    an ``EntryFailure`` on its declaration; a reference that cannot be
+    compiled at all is ``CompileRefused``, recorded with its reason; any other
+    exception is a bug and propagates, which the run service records as a
+    failed apply.
     """
 
     def check(self, ctx: ApplyContext, ref: R) -> None:
@@ -98,9 +113,13 @@ class DesiredStateCompiler(Protocol[R]):
 
         Synchronous and cheap: the Manifest compiler re-validates the stored
         document (the engine may have changed since it was accepted), the
-        genome compiler checks the promotion is there to deliver. Raises the
-        same error ``compile`` would; returns ``None`` when nothing stands in
-        the way. Fetches nothing.
+        genome compiler checks the promotion is there to deliver and still
+        current — the one its ref points at, in a status it knows. Raises
+        the compiler's own domain error (the one its HTTP surface maps); the
+        same refusal from ``compile``, later, is ``CompileRefused``. Returns
+        ``None`` when nothing stands in the way. Fetches nothing. What
+        ``check`` accepted can still be refused by ``compile``: the bot and
+        its refs move between the two.
         """
         ...
 

@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 
 
 from agentclaw.community.core.apply_engine.compiler import (
+    CompileRefused,
     DesiredStateCompiler,
     StateCompilers,
     StateRef,
@@ -401,6 +402,24 @@ class ApplyRunService(ApplyRunServiceProtocol):
                     started_at=started_at,
                     phase=phase,
                 )
+            )
+        except CompileRefused as exc:
+            # Not a bug: the reference could not be compiled now (a promotion
+            # active has moved on from, a revision the model refuses). The
+            # report says why, in the compiler's own words.
+            logger.warning(
+                "[manifest_apply] compile refused, apply_id=%s, bot_id=%s: %s", apply_id, ctx.bot_id, exc
+            )
+            report = ApplyReport(
+                apply_id=apply_id,
+                bot_id=ctx.bot_id,
+                trigger=trigger,
+                status=ApplyStatus.FAILED,
+                started_at=started_at,
+                finished_at=datetime.now(),
+                categories=(),
+                state=state,
+                notes=(f"compile refused: {exc}",),
             )
         except Exception as exc:  # noqa: BLE001 - a daemon thread has no caller
             logger.exception(

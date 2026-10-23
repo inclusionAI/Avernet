@@ -16,7 +16,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from agentclaw.community.core.apply_engine.compiler import ManifestStateRef
+from agentclaw.community.core.apply_engine.compiler import CompileRefused, ManifestStateRef
 from agentclaw.community.core.apply_engine.outcomes import (
     ApplyStatus,
 )
@@ -1006,3 +1006,29 @@ def test_an_apply_that_cannot_be_rebuilt_terminates_instead_of_looping(world):
         "an apply that cannot be rebuilt must terminate, not poll forever"
     )
     assert accepted.apply_id  # the first apply is untouched
+
+
+class _RefusingCompiler:
+    """Passes ``check`` and refuses ``compile``: the reference moved between the two, as a promotion's can."""
+
+    def check(self, ctx, ref):
+        return None
+
+    async def compile(self, ctx, ref, *, only=None):
+        raise CompileRefused("promotion p1 moved active to r1, but active is r2 now; a superseded promotion is not delivered")
+
+
+def test_a_compile_refused_in_the_worker_is_a_failed_report_with_the_reason(world):
+    """A refusal is not an engine failure: the report says why, in the compiler's
+    words, and no category was touched. An engine exception, by contrast, is
+    recorded without its text (``record_engine_failure``)."""
+    service, applies, locks, scripts, _ = world
+    service._compilers = {ManifestStateRef: _RefusingCompiler()}
+    accepted = _start(service)
+    report = _drain(service)
+    assert report.apply_id == accepted.apply_id
+    assert report.status is ApplyStatus.FAILED and report.categories == ()
+    assert report.notes == ("compile refused: promotion p1 moved active to r1, but active is r2 now; "
+                            "a superseded promotion is not delivered",)
+    assert scripts.writes == 0
+    assert locks.get(env="dev", entity_id=_ENTITY, bot_id=_BOT) is None, "the lock is released after a refusal"

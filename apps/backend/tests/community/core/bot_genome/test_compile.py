@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentclaw.community.core.apply_engine.compiler import Compiled, GenomeStateRef
+from agentclaw.community.core.apply_engine.compiler import Compiled, CompileRefused, GenomeStateRef
 from agentclaw.community.core.apply_engine.constructs import ManifestCategory, ManifestSection
 from agentclaw.community.core.apply_engine.desired_state import (
     CenterSkillVersion,
@@ -126,16 +126,17 @@ class _Registry:
 REVISION = "sha256:" + "ab" * 32
 
 
-def _row(status: str = "applying"):
-    return SimpleNamespace(revision_id=REVISION, status=status)
+def _row(status: str = "applying", ref: str = "active"):
+    return SimpleNamespace(revision_id=REVISION, status=status, ref=ref)
 
 
 class _Refs:
     def __init__(self, active: str | None = REVISION) -> None:
         self.active = active
+        self.asked: list[str] = []
 
     def get(self, *, name, **axes):
-        assert name == "active"
+        self.asked.append(name)
         return None if self.active is None else SimpleNamespace(revision_id=self.active)
 
 
@@ -189,13 +190,25 @@ def test_a_missing_never_started_unknown_or_superseded_promotion_is_refused() ->
     for status in ("apply_failed", "superseded", ""):
         compiler, _, _ = _compiler(_row(status))
         with pytest.raises(NotAppliable) as caught:
-            asyncio.run(compiler.compile(ctx, GenomeStateRef("p" * 32)))
-        assert "only an applying or applied promotion" in caught.value.reasons[0].message
+            compiler.check(ctx, GenomeStateRef("p" * 32))
+        assert "only a promotion in ['applied', 'applying'] is delivered" in caught.value.reasons[0].message
     for active in ("sha256:" + "cd" * 32, None):
         compiler, _, _ = _compiler(_row("applied"), active=active)
         with pytest.raises(NotAppliable) as caught:
             compiler.check(ctx, GenomeStateRef("p" * 32))
         assert "superseded" in caught.value.reasons[0].message
+        # In the worker the same refusal is the engine's CompileRefused, with the genome error as its cause.
+        with pytest.raises(CompileRefused) as refused:
+            asyncio.run(compiler.compile(ctx, GenomeStateRef("p" * 32)))
+        assert isinstance(refused.value.__cause__, NotAppliable) and "superseded" in str(refused.value)
+
+
+def test_currency_is_judged_against_the_ref_the_promotion_moved() -> None:
+    """A canary promotion (RSI-16) moves ``canary``, not ``active``; it is current while ``canary`` points at it."""
+    compiler, registry, _ = _compiler(_row("applied", ref="canary"))
+    ctx = make_context(engine_type="openclaw", bot_type="arca")
+    assert asyncio.run(compiler.compile(ctx, GenomeStateRef("p" * 32))).state is registry.state
+    assert compiler._refs.asked == ["canary"]
 
 
 def test_a_revision_the_state_model_refuses_is_not_appliable_rather_than_a_crash() -> None:
