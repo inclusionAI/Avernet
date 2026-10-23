@@ -91,13 +91,14 @@
 
 ## Group 3 — Resources totality
 
-### Task 8: Resource road: list and clear the root; rows follow
+### Task 8: Resource road: list and clear the root; rows follow `[x]`
 - **Goal:** The port can list and clear `data/`; the platform's resource rows can be replaced for a bot.
 - **Files:** `core/ports/resource_file_port.py`, `core/services/resource_file_service.py` (`list_root`, `clear_root`), `core/apply_engine/resource_files.py`, `core/apply_engine/managed_files/ports.py`, `core/resources/service.py` (`replace_manifest_rows`); tests `test_device_port_forwarding.py`, `managed_files/test_store_ports.py`, resource service tests
 - **Done when:**
-  - [ ] `list_root()` returns every file path under `data/` relative to the workspace via `list_dir(recursive=True)`; `clear_root()` is `delete_tree("workspace/data")` and answers `False` on an absent root; both forwarded by `DeviceResource`; `PlatformResource` lists and deletes its resources category.
-  - [ ] `replace_manifest_rows(bot, paths)` deletes the bot's file rows under `data/` and inserts one row per path with source `manifest`, in one transaction; a write failure raises.
+  - [x] `list_root()` returns every file path under `data/` relative to the workspace (a level-by-level walk — no engine's `recursive` flag is trusted anywhere in the service, so the plan's `list_dir(recursive=True)` became the walk the directory download already uses, minus its curation); `clear_root()` is `delete_tree("workspace/data")` and answers `False` on an absent root; both forwarded by `DeviceResource`; `PlatformResource` lists and deletes its resources category.
+  - [x] `replace_manifest_rows(files, created_by)` deletes the bot's file rows under `data/` and inserts one row per written file with source `manifest`; a write failure raises. Not one transaction: the resource repository offers no transaction seam, so it is delete-then-insert through the repository's own calls, and the materialiser reports a failed row write as a confirmed partial write for the next apply to converge.
 - **Depends on:** Task 3
+- **Notes:** the root is named once, as `RESOURCES_ROOT_DIR` in `core/workspace/constants.py` (the vocabulary both the file service and the engine can reach); the engine's `RESOURCES_ROOT` derives from it. The rows reach the materialiser through a new narrow port, `core/ports/resource_rows_port.py` (`ResourceRowsPort`, implemented by `ResourceService`), as a bot-id → port factory on `MaterialiserPorts.resource_rows`, which both DI bundles fill from `ResourceServiceFactoryProtocol`.
 
 ### Task 9: Resources materialiser converges by clear then write
 - **Goal:** Close #2162.

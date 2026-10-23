@@ -151,3 +151,20 @@ def test_resource_tree_delete_is_a_prefix_delete_over_the_store() -> None:
     assert [r.rel_path for r in store.list(_SCOPE, category=CATEGORY_RESOURCES)] == ["workspace/kb-old/c.md"]
     assert not _run(port.exists(**args, path="kb"))
     assert len(oss.objects) == 1
+
+
+def test_platform_resource_lists_and_clears_the_root_only() -> None:
+    """``list_root`` names every object under ``workspace/data/`` as a ``data/...`` path;
+    ``clear_root`` deletes exactly those and answers whether there were any."""
+    store, oss = _store()
+    port = PlatformResource(store)
+    coords = dict(entity_id="u_owner", bot_id="b_1", engine_type="teclaw")
+    _run(port.upload_file(**coords, target_dir="data/kb", filename="faq.md", data=b"q"))
+    _run(port.upload_file(**coords, target_dir="data", filename="notes.txt", data=b"n"))
+    _run(port.upload_file(**coords, target_dir="other", filename="keep.txt", data=b"k"))
+
+    assert _run(port.list_root(**coords)) == ("data/kb/faq.md", "data/notes.txt")
+    assert _run(port.clear_root(**coords)) is True
+    assert _run(port.list_root(**coords)) == ()
+    assert [r.rel_path for r in store.list(_SCOPE, category=CATEGORY_RESOURCES)] == ["workspace/other/keep.txt"]
+    assert _run(port.clear_root(**coords)) is False

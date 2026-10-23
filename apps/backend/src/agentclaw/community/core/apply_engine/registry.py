@@ -47,7 +47,7 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Optional, Protocol, Sequence, TypeVar, runtime_checkable
+from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol, Sequence, TypeVar, runtime_checkable
 
 from agentclaw.community.core.apply_engine.content import ContentReader
 from agentclaw.community.core.apply_engine.context import ApplyContext
@@ -62,6 +62,7 @@ if TYPE_CHECKING:  # pragma: no cover — the registry stays import-light; see b
     from agentclaw.community.core.ports.resource_file_port import (
         ResourceFilePort,
     )
+    from agentclaw.community.core.ports.resource_rows_port import ResourceRowsPort
     from agentclaw.community.core.ports.skill_package_upload_port import (
         SkillPackageUploadPort,
     )
@@ -364,6 +365,7 @@ def build_materialisers(
     package_validator: SkillPackageValidator,
     content: ContentReader,
     resource_service: ResourceFilePort,
+    resource_rows: Callable[[str], ResourceRowsPort],
     cli_tool_service: CliToolService,
 ) -> dict[ApplyConstruct, Materialiser]:
     """The registry, built from injected services::
@@ -433,7 +435,7 @@ def build_materialisers(
             package_validator,
             content,
         ),
-        ResourcesMaterialiser(resource_service, content),
+        ResourcesMaterialiser(resource_service, content, resource_rows),
         CliToolsMaterialiser(cli_tool_service),
     )
     return {m.construct: m for m in materialisers}

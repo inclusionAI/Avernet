@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
+from agentclaw.community.core.apply_engine.desired_state import RESOURCES_ROOT
 from agentclaw.community.core.apply_engine.context import ApplyContext
 from agentclaw.community.core.apply_engine.capabilities import (
     resolve_capabilities,
@@ -1066,6 +1067,30 @@ def make_context(
     )
 
 
+class FakeResourceRows:
+    """``ResourceRowsPort`` for one bot, recording every replacement; ``fail`` makes the write raise."""
+
+    def __init__(self, fail: bool = False) -> None:
+        self.replacements: list[dict[str, Any]] = []
+        self.fail = fail
+
+    async def replace_manifest_rows(self, *, files, created_by):
+        if self.fail:
+            raise RuntimeError("rows unavailable")
+        self.replacements.append({"files": list(files), "created_by": created_by})
+
+    @property
+    def rows(self) -> list[tuple[str, int]]:
+        """The rows as the last replacement left them."""
+        return list(self.replacements[-1]["files"]) if self.replacements else []
+
+
+def resource_rows_for(rows: FakeResourceRows | None = None):
+    """A ``resource_rows`` factory answering one recorder for every bot; returns ``(factory, recorder)``."""
+    recorder = rows or FakeResourceRows()
+    return (lambda bot_id: recorder), recorder
+
+
 class FakeResourceFileService:
     """Stands in for ``ResourceFileService``: uploads and deletes, recorded.
 
@@ -1102,6 +1127,16 @@ class FakeResourceFileService:
         self.exists_probes: list[dict[str, Any]] = []
         self._exists = set(exists_paths or ())
         self._fail_deletes = set(fail_deletes or ())
+        self.list_root_calls: list[dict[str, Any]] = []
+        self.clear_root_calls: list[dict[str, Any]] = []
+        #: When set, ``clear_root`` answers ``False`` and removes nothing — the
+        #: transports' one failure signal.
+        self.fail_clear = False
+
+    @property
+    def present(self) -> frozenset[str]:
+        """Every path the fake currently holds — the workspace as the bot would see it."""
+        return frozenset(self._exists)
 
     def record_present(self, *paths: str) -> None:
         self._exists.update(paths)
@@ -1186,6 +1221,38 @@ class FakeResourceFileService:
         )
         return path in self._exists
 
+    async def list_root(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+    ) -> tuple[str, ...]:
+        self.list_root_calls.append(
+            {"entity_type": entity_type, "entity_id": entity_id, "bot_id": bot_id, "engine_type": engine_type}
+        )
+        return tuple(sorted(p for p in self._exists if p.startswith(RESOURCES_ROOT)))
+
+    async def clear_root(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+    ) -> bool:
+        """The tree delete of ``data/``; ``fail_clear`` answers the transports' silent ``False``."""
+        self.clear_root_calls.append(
+            {"entity_type": entity_type, "entity_id": entity_id, "bot_id": bot_id, "engine_type": engine_type}
+        )
+        if self.fail_clear:
+            return False
+        under = {p for p in self._exists if p.startswith(RESOURCES_ROOT)}
+        self._exists -= under
+        self.deleted.extend(sorted(under))
+        return bool(under)
+
 
 # ── the delivery seam (W8) ───────────────────────────────────────────────
 #
@@ -1229,6 +1296,7 @@ def device_port_bundle(
     package_validator=None,
     content=None,
     resource_service=None,
+    resource_rows=None,
     cli_tool_service=None,
 ):
     """The device-backed bundle, over fakes, wrapped as the root wraps it.
@@ -1284,6 +1352,7 @@ def device_port_bundle(
             FakeManifestContent(), FakeCredentials(), FakeObjectStore()
         ),
         resource_service=DeviceResource(resource_service or FakeResourceFileService()),
+        resource_rows=resource_rows or resource_rows_for()[0],
         cli_tool_service=cli_tool_service,
     )
     return lambda: bundle
@@ -1437,14 +1506,14 @@ def compiling_skills(uploads, activation, reader, validator, resolver, content, 
     return CompilingMaterialiser(materialiser, compile, source_session=source_session)
 
 
-def compiling_resources(resource_service, resolver, content, *, source_session=None):
+def compiling_resources(resource_service, resolver, content, *, source_session=None, resource_rows=None):
     from agentclaw.community.core.apply_engine.materialisers.resources import ResourcesMaterialiser
     from agentclaw.community.core.bot_config_manifest.compiler.entries.resources import compile_resources
 
     async def compile(session, entries):
         return await compile_resources(session, entries, resolver=resolver, content=content)
 
-    materialiser = ResourcesMaterialiser(resource_service, content)
+    materialiser = ResourcesMaterialiser(resource_service, content, resource_rows or resource_rows_for()[0])
     return CompilingMaterialiser(materialiser, compile, source_session=source_session)
 
 

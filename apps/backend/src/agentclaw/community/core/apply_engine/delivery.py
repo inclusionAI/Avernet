@@ -85,6 +85,7 @@ from agentclaw.community.core.ports.identity_file_port import (
 from agentclaw.community.core.ports.resource_file_port import (
     ResourceFilePort,
 )
+from agentclaw.community.core.ports.resource_rows_port import ResourceRowsPort
 from agentclaw.community.core.ports.skill_package_upload_port import (
     SkillPackageUploadPort,
 )
@@ -190,6 +191,8 @@ class MaterialiserPorts:
     #: The engine's one read port onto the content store: every desired file is there by digest.
     content: ContentReader
     resource_service: ResourceFilePort
+    #: bot id → the bot's resource rows, replaced after the resources root is rewritten.
+    resource_rows: ResourceRowsFactory
     #: W9. One field for a whole category, because the service already holds
     #: the family's delivery port — so the ``cli_tools`` materialiser takes one
     #: dependency and the family difference stays here, where W6 put it.
@@ -211,10 +214,14 @@ class MaterialiserPorts:
             "package_validator": self.package_validator,
             "content": self.content,
             "resource_service": self.resource_service,
+            "resource_rows": self.resource_rows,
             "cli_tool_service": self.cli_tool_service,
             "mcp_config_service": self.mcp_config_service,
         }
 
+
+#: One bot's resource rows, by bot id — the per-bot ``ResourceService`` behind its narrow port.
+ResourceRowsFactory = Callable[[str], ResourceRowsPort]
 
 #: A port bundle that has not been built yet. Every field behind one reaches
 #: either the device graph or the object store, so a strategy is bound holding

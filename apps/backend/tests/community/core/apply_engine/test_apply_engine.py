@@ -44,6 +44,7 @@ from agentclaw.community.core.skill_center.errors import (
 )
 
 from ._fakes import (
+    resource_rows_for,
     EngineRig,
     FakeActivationService,
     FakeCapabilityReader,
@@ -98,6 +99,7 @@ def _engine(
             package_validator=real_validator(),
             content=content,
             resource_service=FakeResourceFileService(),
+            resource_rows=resource_rows_for()[0],
             cli_tool_service=object(),
         ),
         steps=_arca_steps

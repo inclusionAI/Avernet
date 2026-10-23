@@ -71,6 +71,7 @@ from agentclaw.community.core.apply_engine.delivery import (
 )
 
 from tests.community.core.apply_engine._fakes import (
+    resource_rows_for,
     manifest_compilers,
     FakeActivationService,
     delivery_strategies,
@@ -215,6 +216,7 @@ def _build(db):
             package_validator=validator,
             content=content,
             resource_service=PlatformResource(store),
+            resource_rows=resource_rows_for()[0],
             cli_tool_service=object(),
         )
 

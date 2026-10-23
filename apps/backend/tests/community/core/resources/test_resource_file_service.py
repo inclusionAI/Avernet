@@ -746,3 +746,45 @@ async def test_walk_aborts_on_a_read_error():
 
     with pytest.raises(RuntimeError):
         await _collect(svc, "")
+
+
+# ── the resources root: list and clear ───────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_list_root_walks_data_level_by_level_and_keeps_dotfiles():
+    """Every file under ``data/`` as a workspace-relative path; dotfiles count, the
+    root is the apply engine's whole."""
+    device_fs = MagicMock()
+
+    async def list_dir(path):
+        return {
+            "workspace/data": [
+                {"name": "kb", "is_dir": True, "relative_path": "kb"},
+                {"name": ".hidden", "is_dir": False, "relative_path": ".hidden"},
+                {"name": "faq.md", "is_dir": False, "relative_path": "faq.md"},
+            ],
+            "workspace/data/kb": [{"name": "a.txt", "is_dir": False, "relative_path": "a.txt"}],
+        }[path]
+
+    device_fs.list_dir = AsyncMock(side_effect=list_dir)
+    svc, _ = _svc(provider="baas", device_fs=device_fs)
+    assert await svc.list_root(**_COORDS) == ("data/.hidden", "data/faq.md", "data/kb/a.txt")
+
+
+@pytest.mark.asyncio
+async def test_list_root_answers_empty_for_an_absent_root():
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(return_value=None)
+    svc, _ = _svc(provider="baas", device_fs=device_fs)
+    assert await svc.list_root(**_COORDS) == ()
+    device_fs.list_dir.assert_awaited_once_with("workspace/data")
+
+
+@pytest.mark.asyncio
+async def test_clear_root_is_one_tree_delete_of_workspace_data():
+    device_fs = MagicMock()
+    device_fs.delete_tree = AsyncMock(return_value=True)
+    svc, _ = _svc(provider="baas", device_fs=device_fs)
+    assert await svc.clear_root(**_COORDS) is True
+    device_fs.delete_tree.assert_awaited_once_with("workspace/data")

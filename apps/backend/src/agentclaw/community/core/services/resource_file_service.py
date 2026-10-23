@@ -62,7 +62,7 @@ from agentclaw.community.core.resources.services.file_service import (
     admission_refusal,
 )
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
-from agentclaw.community.core.workspace.constants import SUPPORTED_ENGINE_TYPES
+from agentclaw.community.core.workspace.constants import RESOURCES_ROOT_DIR, SUPPORTED_ENGINE_TYPES
 from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemDispatcher
 from agentclaw.community.log import get_logger
 
@@ -626,6 +626,66 @@ class ResourceFileService(ResourceFilePort):
         if await self._is_dir(device_fs, path):
             return await device_fs.delete_tree(logical)
         return await device_fs.delete_file(logical)
+
+    async def list_root(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+        runtime_context: DeviceContext | None = None,
+    ) -> tuple[str, ...]:
+        """Every file under the resources root, as ``data/...`` paths; ``()`` when the root is absent.
+
+        Level by level, like the directory download — no engine's recursive
+        flag is trusted — but with none of its curation: dotfiles and system
+        names count, because everything under the root is the apply engine's
+        to replace. An entry that vanishes mid-walk is skipped (a live
+        workspace may change under the walk).
+        """
+        ctx = runtime_context or self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
+        device_fs = self._device_fs(
+            ctx, entity_type=entity_type, entity_id=entity_id,
+            bot_id=bot_id, engine_type=engine_type,
+        )
+        root = await device_fs.list_dir(self._logical(RESOURCES_ROOT_DIR))
+        if root is None:
+            return ()
+        files: list[str] = []
+        queue: list[tuple[str, list[dict[str, Any]]]] = [(RESOURCES_ROOT_DIR, root)]
+        while queue:
+            current, entries = queue.pop(0)
+            for entry in sorted(entries, key=lambda e: e.get("name", "")):
+                rel = self._rel_path(current, entry)
+                if bool(entry.get("is_dir", False)):
+                    sub = await device_fs.list_dir(self._logical(rel))
+                    if sub is not None:
+                        queue.append((rel, sub))
+                    continue
+                files.append(rel)
+        return tuple(files)
+
+    async def clear_root(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+        runtime_context: DeviceContext | None = None,
+    ) -> bool:
+        """Delete the resources root tree; ``False`` when there was nothing to delete.
+
+        One ``delete_tree`` of ``workspace/data``: the engine's own tree
+        delete, which every transport routes to its recursive remove.
+        """
+        ctx = runtime_context or self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
+        device_fs = self._device_fs(
+            ctx, entity_type=entity_type, entity_id=entity_id,
+            bot_id=bot_id, engine_type=engine_type,
+        )
+        return await device_fs.delete_tree(self._logical(RESOURCES_ROOT_DIR))
 
     async def _is_dir(self, device_fs: Any, path: str) -> bool:
         """Whether *path* names a directory, asked of the parent's listing.

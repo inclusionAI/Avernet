@@ -138,6 +138,7 @@ def test_apply_declares_the_bar_w10_settled():
             package_validator=object(),
             content=object(),
             resource_service=object(),
+            resource_rows=object(),
             cli_tool_service=object(),
         )
     ),
@@ -197,6 +198,7 @@ def test_apply_admission_mode_is_no_wider_than_the_categories_it_writes():
         package_validator=object(),
         content=object(),
         resource_service=object(),
+        resource_rows=object(),
         cli_tool_service=object(),
     ):
         for path in _CATEGORY_WRITE_PATHS[construct.value]:

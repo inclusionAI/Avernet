@@ -50,7 +50,7 @@ async def _no_redeliver(ctx) -> None:
 
 
 def _ports(tag: str) -> MaterialiserPorts:
-    return MaterialiserPorts(*([tag] * 11))
+    return MaterialiserPorts(*([tag] * 12))
 
 
 def _arca() -> ArcaDelivery:

@@ -103,6 +103,7 @@ from agentclaw.community.core.skill_center.services.local_skill_security_upload_
     NoopLocalSkillSecurityUploadHook,
 )
 from agentclaw.community.core.ports.identity_file_port import IdentityFilePort
+from agentclaw.community.api.resource_service import ResourceServiceFactoryProtocol
 from agentclaw.community.core.ports.resource_file_port import ResourceFilePort
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.skill_center.capability_state_contract import (
@@ -142,6 +143,7 @@ class ApplyEngineModule(Module):
         content_store: ContentStoreProtocol,
         delete_service_provider: Callable[[], LocalSkillDeleteServiceProtocol],
         resource_service_provider: Callable[[], ResourceFilePort],
+        resource_services: ResourceServiceFactoryProtocol,
         cli_tool_service_factory: CliToolServiceFactory,
     ) -> DevicePorts:
         """The device-backed ports — ARCA's writes, and the pre-W8 teclaw shape's.
@@ -184,6 +186,7 @@ class ApplyEngineModule(Module):
                 package_validator=package_validator_provider(),
                 content=content_store,
                 resource_service=DeviceResource(resource_service_provider()),
+                resource_rows=lambda bot_id: resource_services.create(bot_id=bot_id),
                 cli_tool_service=cli_tool_service_factory("arca"),
             )
 
@@ -204,6 +207,7 @@ class ApplyEngineModule(Module):
         capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
         package_validator_provider: Callable[[], SkillPackageValidator],
         content_store: ContentStoreProtocol,
+        resource_services: ResourceServiceFactoryProtocol,
         cli_tool_service_factory: CliToolServiceFactory,
     ) -> PlatformPorts:
         """The store-backed ports (W8, spec D-7).
@@ -239,6 +243,7 @@ class ApplyEngineModule(Module):
                 package_validator=validator,
                 content=content_store,
                 resource_service=PlatformResource(store),
+                resource_rows=lambda bot_id: resource_services.create(bot_id=bot_id),
                 # W9 is always platform-managed and never consults the switch,
                 # as ``mcp`` does not: the artifact is the delivery on this
                 # family whatever the switch says.

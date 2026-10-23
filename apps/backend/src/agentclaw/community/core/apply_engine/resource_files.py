@@ -37,7 +37,7 @@ if TYPE_CHECKING:  # pragma: no cover — see the module docstring
 class DeviceResource(ResourceFilePort):
     """The ARCA resource road: workspace files onto the bot's live container.
 
-    Three methods, each forwarded verbatim. What a call looks like from the
+    Five methods, each forwarded verbatim. What a call looks like from the
     ``resources`` materialiser::
 
         await port.upload_file(
@@ -56,7 +56,13 @@ class DeviceResource(ResourceFilePort):
                           engine_type="claude_code",
                           path="data/faq.csv")     # -> True | False
 
-    ``entity_type`` defaults to ``"staff"`` on all three; apply never passes
+        await port.list_root(entity_id="ent_7", bot_id="bot_42",
+                             engine_type="claude_code")  # -> ("data/faq.csv", ...)
+
+        await port.clear_root(entity_id="ent_7", bot_id="bot_42",
+                              engine_type="claude_code")  # -> True | False
+
+    ``entity_type`` defaults to ``"staff"`` on all five; apply never passes
     anything else.
 
     Bound as ``MaterialiserPorts.resource_service`` for the ARCA family. Its
@@ -110,6 +116,33 @@ class DeviceResource(ResourceFilePort):
         return await self._inner.exists(
             entity_type=entity_type, entity_id=entity_id, bot_id=bot_id,
             engine_type=engine_type, path=path,
+        )
+
+
+    async def list_root(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+    ) -> tuple[str, ...]:
+        return await self._inner.list_root(
+            entity_type=entity_type, entity_id=entity_id, bot_id=bot_id,
+            engine_type=engine_type,
+        )
+
+    async def clear_root(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+    ) -> bool:
+        return await self._inner.clear_root(
+            entity_type=entity_type, entity_id=entity_id, bot_id=bot_id,
+            engine_type=engine_type,
         )
 
 

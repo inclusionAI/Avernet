@@ -35,7 +35,7 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class ResourceFilePort(Protocol):
-    """The three methods the ``resources`` materialiser reaches, as a type key.
+    """The five methods the ``resources`` materialiser reaches, as a type key.
 
     The declared keyword-only parameters are *apply's own call surface* —
     exactly and only what the materialiser passes, every one present on the
@@ -83,6 +83,30 @@ class ResourceFilePort(Protocol):
         engine_type: str,
         path: str,
     ) -> bool: ...
+
+    @abstractmethod
+    async def list_root(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+    ) -> tuple[str, ...]:
+        """Every file under the resources root (``data/``), as workspace-relative paths; ``()`` when absent."""
+        ...
+
+    @abstractmethod
+    async def clear_root(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+    ) -> bool:
+        """Delete the resources root and everything under it; ``False`` when nothing was there."""
+        ...
 
 
 __all__ = ["ResourceFilePort"]
