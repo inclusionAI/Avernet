@@ -27,7 +27,7 @@ from agentclaw.community.core.bot_config_manifest.fetch.errors import (
     FetchRefusedError,
 )
 
-from ._fakes import FakeManifestContent, make_context
+from ._fakes import FakeManifestContent, fetch_context, make_context
 
 
 def _blob(content: bytes = b"body", **kw) -> BlobDelivery:
@@ -109,7 +109,9 @@ def test_the_two_roads_disagree_on_exactly_the_two_questions_that_differ():
     rather than an ``isinstance`` sneaking back in.
     """
     blob, git = _blob(), _git(store=FakeManifestContent())
-    ctx = make_context()
+    # The git road files and charges the compile's budget, so it reads the
+    # compile session — the ``FetchContext`` — not the apply context.
+    ctx = fetch_context()
     assert blob.is_tree() is False
     assert git.is_tree() is True
 
@@ -216,7 +218,7 @@ def test_a_tree_files_under_its_receipt_identity_and_credential_name():
     delivery = _git(auth="ci-token", subpath="pkg", store=content)
 
     digest = delivery.file(
-        make_context(apply_id="apply-1"),
+        fetch_context(apply_id="apply-1"),
         b"canonical-zip",
         category="skills",
         entry_identity="s1",

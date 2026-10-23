@@ -77,9 +77,7 @@ from agentclaw.community.core.bot_config_manifest.apply.resource_files import (
 from agentclaw.community.core.bot_config_manifest.apply.skill_package_upload import (
     DeviceSkillPackageUpload,
 )
-from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
-    DeclaredSourceResolver,
-)
+from agentclaw.community.core.content_store import ContentStoreProtocol
 from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
     CliToolServiceFactory,
 )
@@ -141,7 +139,7 @@ class ManifestDeliveryModule(Module):
         upload_service_provider: Callable[[], LocalSkillUploadServiceProtocol],
         capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
         package_validator_provider: Callable[[], SkillPackageValidator],
-        entry_fetcher_provider: Callable[[], DeclaredSourceResolver],
+        content_store: ContentStoreProtocol,
         delete_service_provider: Callable[[], LocalSkillDeleteServiceProtocol],
         resource_service_provider: Callable[[], ResourceFilePort],
         cli_tool_service_factory: CliToolServiceFactory,
@@ -184,7 +182,7 @@ class ManifestDeliveryModule(Module):
                 ),
                 capability_reader=capability_reader_provider(),
                 package_validator=package_validator_provider(),
-                entry_fetcher=entry_fetcher_provider(),
+                content=content_store,
                 resource_service=DeviceResource(resource_service_provider()),
                 cli_tool_service=cli_tool_service_factory("arca"),
             )
@@ -205,7 +203,7 @@ class ManifestDeliveryModule(Module):
         mcp_config_service_provider: Callable[[], MCPConfigServiceProtocol],
         capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
         package_validator_provider: Callable[[], SkillPackageValidator],
-        entry_fetcher_provider: Callable[[], DeclaredSourceResolver],
+        content_store: ContentStoreProtocol,
         cli_tool_service_factory: CliToolServiceFactory,
     ) -> PlatformPorts:
         """The store-backed ports (W8, spec D-7).
@@ -239,7 +237,7 @@ class ManifestDeliveryModule(Module):
                 ),
                 capability_reader=capability_reader_provider(),
                 package_validator=validator,
-                entry_fetcher=entry_fetcher_provider(),
+                content=content_store,
                 resource_service=PlatformResource(store),
                 # W9 is always platform-managed and never consults the switch,
                 # as ``mcp`` does not: the artifact is the delivery on this

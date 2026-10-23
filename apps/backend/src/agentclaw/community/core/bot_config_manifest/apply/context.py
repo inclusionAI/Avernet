@@ -16,12 +16,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from agentclaw.community.core.bot_config_manifest.apply.budget import (  # noqa: F401
-    ApplyFetchBudget,
-)
-from agentclaw.community.core.bot_config_manifest.apply.source_session import (
-    SourceSession,
-)
 from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCapabilities,
 )
@@ -52,8 +46,6 @@ class ApplyContext:
             bot={...},                       # the bot record; see below
             capabilities=ManifestCapabilities(...),
             apply_id="ap_01HZX8",            # None on a dry run
-            budget=ApplyFetchBudget(...),    # None without a fetch pipeline
-            source_session=SourceSession(...),   # None likewise
         )
 
     ``bot`` is normally the full bot record read from the database. On exactly
@@ -126,21 +118,6 @@ class ApplyContext:
     #: makes it write no report row. The entry-identity half of that linkage is
     #: per fetch and rides the materialiser's call instead.
     apply_id: Optional[str] = None
-    #: This apply's fetch allowance: 300 seconds and 500 MiB, from
-    #: ``fetch/limits.py``. Mutable by design inside the frozen context —
-    #: consult before each fetch, charge after. ``None`` for callers that run
-    #: no fetch pipeline (tests, hand-driven use), and every budget check is
-    #: written to tolerate that.
-    budget: Optional["ApplyFetchBudget"] = None
-    #: This apply's named-source state: the document's ``sources`` map, the
-    #: strict-mode baselines read back from the last apply's report, and the
-    #: git checkout cache. Mutable by design inside the frozen context, for the
-    #: same reason as ``budget``: the alternative is state on a DI-singleton
-    #: fetcher, which would leak across applies. ``None`` for callers that run
-    #: no ``from``/git pipeline; the declared-source resolver refuses such
-    #: entries loudly
-    #: rather than fetching anonymously.
-    source_session: Optional[SourceSession] = None
     capability_state: CapabilityApplyState = field(default_factory=CapabilityApplyState)
 
 

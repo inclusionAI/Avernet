@@ -11,6 +11,14 @@ What these pin, by the work item's acceptance criteria:
 - the area is the **active skill set**, narrowed by the Set-governed members
   (never removals, never declarable), tar.gz/subpath/unpack all land, one
   fetch failure aborts the category, re-applies converge with zero writes.
+
+The materialiser takes typed ``DesiredSkill`` entries whose package the
+compiler has validated and filed as one ``acm-tree-v1`` blob. The suite keeps
+driving raw document entries: a ``CompilingMaterialiser`` runs them through
+the real ``compile_skills`` over the same fakes, so the grammar refusals
+(inline content, no source), the fetch (pins, keep_last, archive kinds,
+subpaths) and the package validation are asserted at the seam they now live
+on, and the write road and the area at the materialiser's.
 """
 from __future__ import annotations
 
@@ -37,6 +45,7 @@ from agentclaw.community.core.bot_config_manifest.fetch.errors import (
 from agentclaw.community.core.bot_config_manifest.apply.registry import (
     ConfirmedPartialWriteError,
 )
+from agentclaw.community.core.content_store import decode_tree_bytes
 
 from ._fakes import (
     FakeActivationService,
@@ -47,7 +56,7 @@ from ._fakes import (
     OSS_BUCKET,
     build_skill_tgz,
     build_skill_zip,
-    declared_session,
+    compiling_skills,
     fetched_object,
     make_context,
     oss_source,
@@ -71,9 +80,6 @@ def _run(coro):
 def _ctx(**kwargs):
     kwargs.setdefault("engine_type", "openclaw")
     kwargs.setdefault("owner_id", "u_owner")
-    # Every declared source is resolved against the apply's source session,
-    # so a rig that declares one hands the context one.
-    kwargs.setdefault("source_session", declared_session())
     return make_context(**kwargs)
 
 
@@ -98,27 +104,28 @@ def skill_rig(
     assets: list | None = None,
     member_ids: set[int] | None = None,
     local_assets: list | None = None,
+    content: FakeManifestContent | None = None,
+    source_session=None,
 ) -> tuple:
     """(materialiser, uploads, activation, reader, objects, content).
 
     ``packages`` seeds the bucket a declared ``oss`` source reads: object key
     → the package's bytes. A source that has died is modelled on the store
     (``objects.make_unavailable``), which is the road a skills entry takes.
+    A declared source is resolved against ``source_session`` (the rig's own
+    empty one when none is given); ``content`` lets a second rig read the
+    receipts a first one filed.
     """
-    from agentclaw.community.core.bot_config_manifest.apply.materialisers.skills import (
-        SkillsMaterialiser,
-    )
-
     uploads = FakeSkillUploadService()
     activation = FakeActivationService()
     reader = FakeCapabilityReader(
         assets=assets, member_ids=member_ids, local_assets=local_assets
     )
     objects = seeded_object_store(packages)
-    content = FakeManifestContent()
-    pipeline = DeclaredSourceResolver(content, FakeObjectCredentials(), objects)
-    materialiser = SkillsMaterialiser(
-        uploads, activation, reader, real_validator(), pipeline
+    content = content or FakeManifestContent()
+    resolver = DeclaredSourceResolver(content, FakeObjectCredentials(), objects)
+    materialiser = compiling_skills(
+        uploads, activation, reader, real_validator(), resolver, content, source_session=source_session
     )
     return materialiser, uploads, activation, reader, objects, content
 
@@ -241,14 +248,18 @@ def test_the_packages_own_name_must_equal_the_declared_name():
     assert uploads.uploads == []
 
 
-def test_inline_content_is_refused_by_the_materialiser_too():
-    # The validator refuses it at PUT; the belt keeps a hand-built apply
-    # honest — there is no package to build from inline text.
+def test_inline_content_is_refused_before_the_materialiser_runs():
+    # The validator refuses it at PUT; the compiler is the belt for a
+    # hand-built apply — there is no package to build from inline text, so
+    # the entry never becomes a DesiredSkill and the materialiser never sees it.
     materialiser, uploads, _, _, _, _ = skill_rig()
     resolved = _run(
         materialiser.resolve(_ctx(), [{"name": "qc", "content": "not a package"}])
     )
     assert not resolved.ok
+    assert resolved.failures[0].identity == "qc"
+    assert "inline 'content'" in resolved.failures[0].reason
+    assert materialiser.last_declaration.entries == ()
     assert uploads.uploads == []
 
 
@@ -737,25 +748,26 @@ class _StaticGit:
             sha=self.sha,
             url=spec.url,
             ref=spec.ref,
+            # The declared size the compile budget charges a fresh checkout.
+            tree_bytes=sum(len(body) for _, body in self._files),
             files=lambda subpath=None, file_limit=None: list(self._files),
             read_file=lambda subpath=None, file_limit=None: b"",
         )
 
 
-def _git_ctx(git: _StaticGit, *, sources=None, baselines=None):
-    """The W7 context: a source session over a scripted git client."""
+def _git_rig(git: _StaticGit, *, sources=None, baselines=None, content=None):
+    """The W7 rig: a source session over a scripted git client."""
     session = SourceSession(
         sources=sources or {}, baselines=baselines or {}, git=git
     )
-    return _ctx(source_session=session)
+    return skill_rig(source_session=session, content=content)
 
 
 def test_a_skills_entry_from_a_git_tree_builds_a_package():
-    materialiser, uploads, _, _, _, _ = skill_rig()
     git = _StaticGit()
-    ctx = _git_ctx(git, sources={"src": SKILL_GIT_SOURCE})
+    materialiser, uploads, _, _, _, _ = _git_rig(git, sources={"src": SKILL_GIT_SOURCE})
     result, plan, written = _run(
-        _apply(materialiser, ctx, [{"name": "demo", "from": "src"}])
+        _apply(materialiser, _ctx(), [{"name": "demo", "from": "src"}])
     )
     assert result.ok
     assert [e.outcome.value for e in written] == ["created"]
@@ -766,32 +778,33 @@ def test_a_skills_entry_from_a_git_tree_builds_a_package():
     assert git.specs[0].subpath == "pkg"
 
 
-def test_the_git_tree_road_files_the_canonical_zip_with_the_store():
-    materialiser, _, _, _, _, content = skill_rig()
+def test_the_git_tree_road_files_the_canonical_tree_with_the_store():
     git = _StaticGit()
-    ctx = _git_ctx(git, sources={"src": SKILL_GIT_SOURCE})
-    result, _, _ = _run(_apply(materialiser, ctx, [{"name": "demo", "from": "src"}]))
+    materialiser, _, _, _, _, content = _git_rig(git, sources={"src": SKILL_GIT_SOURCE})
+    result, _, _ = _run(_apply(materialiser, _ctx(), [{"name": "demo", "from": "src"}]))
     assert result.ok
     # The receipt identity is the canonical git URL; the deliverable bytes
-    # (the canonical zip) are what the platform keeps a copy of, so a later
-    # keep_last falls back to what this entry actually installs.
+    # (the validated package as one acm-tree-v1 blob) are what the platform
+    # keeps a copy of, so a later keep_last falls back to what this entry
+    # actually installs — and the state names that very blob.
     call = content.store_calls[-1]
     assert call["source_url"].startswith("git+https://git.corp/skills.git@")
     assert call["source_url"].endswith(":pkg")
-    assert content.receipts[-1].content_type == "application/zip"
+    assert decode_tree_bytes(content.read(call["digest"])) == [("SKILL.md", _SKILL_MD)]
+    (skill,) = materialiser.last_declaration.entries
+    assert skill.source.tree.digest == call["digest"]
 
 
 def test_a_moved_ref_note_survives_into_the_package():
-    materialiser, _, _, _, _, _ = skill_rig()
     git = _StaticGit(sha="a" * 40)
-    ctx = _git_ctx(
+    materialiser, _, _, _, _, _ = _git_rig(
         git,
         sources={"src": SKILL_GIT_SOURCE},
         baselines={
             ("https://git.corp/skills.git", "main", "non_strict"): "b" * 40
         },
     )
-    result, _, written = _run(_apply(materialiser, ctx, [{"name": "demo", "from": "src"}]))
+    result, _, written = _run(_apply(materialiser, _ctx(), [{"name": "demo", "from": "src"}]))
     assert result.ok
     # Non-strict moves are applied and reported: both SHAs on the row.
     note = written[0].note
@@ -800,30 +813,32 @@ def test_a_moved_ref_note_survives_into_the_package():
     assert "a" * 40 in note
 
 
-def test_git_keep_last_serves_the_stored_zip_through_the_zip_road():
-    materialiser, uploads, _, _, _, content = skill_rig()
-    stored = build_skill_zip("demo")
-    target = f"git+https://git.corp/skills.git@{'b' * 40}:pkg"
-    content.store(
-        fetched_object(stored, url=target, content_type="application/zip"),
-        scope=None,
-        source_url=target,
-    )
+def test_git_keep_last_serves_the_stored_tree():
+    """A first apply over a live source files the tree under the resolved
+    SHA; a later apply whose git fetch fails, with that SHA as its baseline,
+    installs the platform's copy — and the copy is whatever the compiler
+    filed, so this drives the two applies rather than pre-filing a shape."""
+    first, _, _, _, _, content = _git_rig(_StaticGit(sha="b" * 40), sources={"src": SKILL_GIT_SOURCE})
+    result, _, _ = _run(_apply(first, _ctx(), [{"name": "demo", "from": "src"}]))
+    assert result.ok
+
     git = _StaticGit(error=FetchFailedError("the git fetch failed"))
-    ctx = _git_ctx(
+    materialiser, uploads, _, _, _, _ = _git_rig(
         git,
         sources={"src": SKILL_GIT_SOURCE},
         baselines={
             ("https://git.corp/skills.git", "main", "non_strict"): "b" * 40
         },
+        content=content,
     )
     result, _, written = _run(
         _apply(
             materialiser,
-            ctx,
+            _ctx(),
             [{"name": "demo", "from": "src", "on_fetch_failure": "keep_last"}],
         )
     )
-    assert result.ok
+    assert result.ok, [f.reason for f in result.failures]
     assert [e.outcome.value for e in written] == ["created"]
+    assert "keep_last" in written[0].note
     real_validator().validate_zip(uploads.uploads[0]["package"])

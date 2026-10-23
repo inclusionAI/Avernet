@@ -35,11 +35,12 @@ republish — and never re-executes inside a container that is already up.
 """
 from __future__ import annotations
 
-from typing import Any, Sequence
+from typing import Sequence
 
 from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
     BotStartupScriptServiceProtocol,
 )
+from agentclaw.community.core.apply_engine.desired_state import DesiredScript
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     EntryOutcome,
@@ -54,7 +55,6 @@ from agentclaw.community.core.bot_config_manifest.apply.registry import (
     ResolveResult,
 )
 from agentclaw.community.core.bot_config_manifest.capabilities import ManifestSection
-from agentclaw.community.core.bot_config_manifest.schema import placeholders
 
 #: How a script entry names itself in a report. It has no entity key of its own
 #: — there is one script — so the section's own name is used.
@@ -99,10 +99,8 @@ class ScriptMaterialiser(Materialiser):
     def __init__(self, script_service: BotStartupScriptServiceProtocol) -> None:
         self._scripts = script_service
 
-    async def resolve(
-        self, ctx: ApplyContext, entries: Sequence[dict[str, Any]]
-    ) -> ResolveResult:
-        """Substitute ``${BOT_*}`` and re-check that this bot accepts a script.
+    async def resolve(self, ctx: ApplyContext, entries: Sequence[DesiredScript]) -> ResolveResult:
+        """Re-check that this bot accepts a script; the body is the compiler's, substituted.
 
         The capability is re-asked rather than trusted from the ``PUT`` that
         accepted the document: a bot's engine can change after a manifest is
@@ -111,43 +109,13 @@ class ScriptMaterialiser(Materialiser):
         """
         if not ctx.capabilities.supports(ManifestSection.SCRIPT):
             return ResolveResult(
-                failures=(
-                    ResolveFailure(
-                        _IDENTITY,
-                        ctx.capabilities.reason_for(ManifestSection.SCRIPT),
-                    ),
-                )
+                failures=(ResolveFailure(_IDENTITY, ctx.capabilities.reason_for(ManifestSection.SCRIPT)),)
             )
-
         if not entries:
             # ``script: null`` — declared, and declared to be nothing. The area
             # is emptied, which for one script means the row is removed.
             return ResolveResult(intents=(Intent(_IDENTITY, None),))
-
-        body = entries[0].get("body")
-        if not isinstance(body, str):
-            return ResolveResult(
-                failures=(
-                    ResolveFailure(_IDENTITY, "'script.body' must be a string"),
-                )
-            )
-
-        # One whitelist, one resolver: the write path validates ``${...}`` names
-        # against ``ALLOWED_PLACEHOLDERS`` and this substitutes the same set. A
-        # second copy of either would be a second answer.
-        return ResolveResult(
-            intents=(
-                Intent(
-                    _IDENTITY,
-                    placeholders.resolve(
-                        body,
-                        engine_type=ctx.engine_type,
-                        env=ctx.env,
-                        tenant=ctx.tenant,
-                    ),
-                ),
-            )
-        )
+        return ResolveResult(intents=(Intent(_IDENTITY, entries[0].body),))
 
     async def plan(
         self, ctx: ApplyContext, intents: Sequence[Intent]

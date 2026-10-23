@@ -81,18 +81,15 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Sequence
 
+from agentclaw.community.core.apply_engine.content import ContentReader
+from agentclaw.community.core.apply_engine.desired_state import (
+    DesiredResource,
+    DesiredResourceTree,
+    StoredContent,
+)
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
-from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
-    EntryDelivery,
-    EntryFetchError,
-    archive_refusal,
-)
-from agentclaw.community.core.content_store import (
-    canonical_tree_bytes,
-)
-from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
-    declared_protocol,
-)
+from agentclaw.community.core.content_store import decode_tree_bytes
+from agentclaw.community.core.content_store.errors import ContentStoreError
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     EntryOutcome,
     EntryResult,
@@ -108,25 +105,7 @@ from agentclaw.community.core.bot_config_manifest.apply.registry import (
 from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCategory,
 )
-from agentclaw.community.core.bot_config_manifest.schema._support import (
-    relative_path_refusal,
-)
-from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKind
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
-
-#: Schema §5 states the two resource forms' fetch widths separately —
-#: ``resources_file`` (100MB) and ``resources_archive`` (200MB) — and the
-#: fetch funnel caps by these exact keys, so each form fetches under its own
-#: name. A shared "resources" would silently take the file width's fallback
-#: for archives, and the W11 linkage column would carry a category the
-#: vocabulary never defined. ``FetchCategory``'s members, not raw strings:
-#: a typo in a string would silently re-take the fallback cap.
-from agentclaw.community.core.bot_config_manifest.fetch.limits import (
-    FetchCategory,
-)
-
-_FETCH_CATEGORY_FILE = FetchCategory.RESOURCES_FILE.value
-_FETCH_CATEGORY_ARCHIVE = FetchCategory.RESOURCES_ARCHIVE.value
 
 
 class _DeclaredTree:
@@ -187,283 +166,58 @@ class ResourcesMaterialiser(Materialiser):
 
     construct = ManifestCategory.RESOURCES
 
-    def __init__(self, resource_service: Any, resolver: Any) -> None:
+    def __init__(self, resource_service: Any, content: ContentReader) -> None:
         self._resources = resource_service
-        self._resolver = resolver
+        self._content = content
 
-    async def resolve(
-        self, ctx: ApplyContext, entries: Sequence[dict[str, Any]]
-    ) -> ResolveResult:
-        """Declared entries → intents: bytes per ``path``, both forms.
+    async def resolve(self, ctx: ApplyContext, entries: Sequence[DesiredResource]) -> ResolveResult:
+        """Desired entries → intents: bytes per ``path``, both forms, read from the store.
 
-        Everything that can fail **before touching the bot** fails here, the
-        registry's contract for the whole engine: path validation re-asked
-        (a document can predate the rule), inline ``content`` taken as the
-        bytes without a fetch, and ``source`` fetched through the W2/W3/W11
-        funnel — a failure aborts the whole category before the first write,
-        which under overwrite is the non-destructive answer.
+        Everything that can fail **before touching the bot** and is the
+        engine's fails here: a stored blob that is not there, a tree blob that
+        does not decode, and the write chain's own admission rule on every
+        member — asked now so a refusal never lands after the declared tree
+        has been deleted. Path rules, duplicates and nesting are the model's
+        and the compiler's, and never reach this stage.
         """
         intents: list[Intent] = []
         failures: list[ResolveFailure] = []
-        # The PUT layer refuses a duplicate resource path (one owner per
-        # path); the belt re-asks it — two entries at one path would
-        # otherwise converge to whatever wrote last, a no-rule answer.
-        seen: set[str] = set()
-        for index, entry in enumerate(entries):
-            path = entry.get("path") if isinstance(entry, dict) else None
-            failed = self._entry_failure(entry, path, index)
-            if failed is not None:
-                failures.append(failed)
+        for entry in entries:
+            path = entry.path
+            try:
+                data = await asyncio.to_thread(self._content.read, _stored(entry).digest)
+            except ContentStoreError as exc:
+                failures.append(ResolveFailure(path, f"the resource's bytes are not in the store: {exc}"))
                 continue
-            assert isinstance(path, str)  # _entry_failure passed it
-            if path in seen:
-                failures.append(
-                    ResolveFailure(
-                        path,
-                        "a resources path is declared more than once "
-                        "in this category",
-                    )
-                )
-                continue
-            seen.add(path)
-            if isinstance(path, str) and path.endswith("/"):
-                # The archive fields are checked BEFORE the network, on the one
-                # road where they apply. ``resolve``'s whole contract is that
-                # everything which can fail without touching the bot fails
-                # first — and a fetch here can be 200 MiB against this apply's
-                # byte budget and its lock TTL, spent on an entry a missing
-                # 'unpack' guarantees to reject. The protocol is answered from
-                # the declaration, so no fetch is needed to know which rules
-                # apply. ``None`` (a malformed or undeclared source) falls
-                # through: the fetch below raises the real error.
-                protocol = declared_protocol(ctx, entry)
-                if protocol is SourceKind.OSS:
-                    refusal = archive_refusal(
-                        entry.get("unpack"), entry.get("strip_components", 0)
-                    )
-                    if refusal is not None:
-                        failures.append(ResolveFailure(path, refusal))
-                        continue
-                try:
-                    delivery = await self._fetch_entry(
-                        ctx, entry, path, _FETCH_CATEGORY_ARCHIVE
-                    )
-                    # One call on every road. A git checkout answers with its
-                    # tree, an archive with its unpacked members, and a
-                    # ``keep_last`` fallback for a failed git fetch answers
-                    # with the stored tree decoded — three shapes the delivery
-                    # resolves, because which one arrived is not a question
-                    # this category has any way to answer.
-                    members = await asyncio.to_thread(
-                        delivery.members,
-                        unpack=entry.get("unpack"),
-                        strip_components=entry.get("strip_components", 0),
-                    )
-                except EntryFetchError as exc:
-                    failures.append(ResolveFailure(path, exc.reason))
+            if isinstance(entry, DesiredResourceTree):
+                members = decode_tree_bytes(data)
+                if members is None:
+                    failures.append(ResolveFailure(path, "the stored directory blob is not an acm-tree-v1 tree"))
                     continue
-                if isinstance(members, str):
-                    failures.append(ResolveFailure(path, members))
-                    continue
-                # The members are filed as **one canonical blob** under the
-                # tree's receipt URL — the same shape the skills materialiser
-                # files a package as, and for the same reason: §2.8's audit and
-                # ``keep_last`` read one receipt per entry, and a receipt per
-                # member would make a 5000-file tree 5000 rows describing one
-                # delivery.
-                try:
-                    await asyncio.to_thread(
-                        self._file_tree, ctx, delivery, members, path
-                    )
-                except EntryFetchError as exc:
-                    failures.append(ResolveFailure(path, exc.reason))
-                    continue
-                note = delivery.note()
-                # The declared-tree marker intent rides first so plan routes
-                # the tree into ``removals`` and write replaces it before
-                # members upload. The gate on every member comes before the
-                # marker that promises the tree: one undeliverable member
-                # must abort the category with the tree still standing, not
-                # delete it for a partial delivery every re-apply repeats.
+                # The gate on every member comes before the marker that
+                # promises the tree: one undeliverable member must abort the
+                # category with the tree still standing, not delete it for a
+                # partial delivery every re-apply repeats. The failure keys to
+                # the *declared* entry's identity; the member is named in the
+                # reason.
                 bad = next(
-                    (
-                        (path + rel, refused)
-                        for rel, data in members
-                        if (refused := _delivery_refusal(path + rel, data))
-                        is not None
-                    ),
-                    None,
+                    ((path + rel, r) for rel, body in members if (r := _delivery_refusal(path + rel, body))), None
                 )
                 if bad is not None:
-                    # The failure keys to the *declared* entry's identity —
-                    # the orchestrator's abort mapping blames declared rows,
-                    # and a member-keyed failure would match nothing, sinking
-                    # the reason (which member, which admission rule) out of
-                    # the report. The member is named in the reason instead.
-                    failures.append(
-                        ResolveFailure(
-                            path,
-                            f"archive member {bad[0]!r}: {bad[1]}",
-                        )
-                    )
+                    failures.append(ResolveFailure(path, f"archive member {bad[0]!r}: {bad[1]}"))
                     continue
+                # The declared-tree marker intent rides first so plan routes
+                # the tree into ``removals`` and write replaces it before
+                # members upload.
                 intents.append(Intent(identity=path, value=_DECLARED_TREE))
-                for rel, data in members:
-                    intents.append(
-                        Intent(identity=path + rel, value=data, note=note)
-                    )
+                intents.extend(Intent(identity=path + rel, value=body, note=entry.note) for rel, body in members)
                 continue
-            inline = entry.get("content")
-            if isinstance(inline, str):
-                data = inline.encode("utf-8")
-                refused = _delivery_refusal(path, data)
-                if refused is not None:
-                    failures.append(ResolveFailure(path, refused))
-                    continue
-                intents.append(Intent(identity=path, value=data))
-                continue
-            try:
-                delivery = await self._fetch_entry(
-                    ctx, entry, path, _FETCH_CATEGORY_FILE
-                )
-                data = await asyncio.to_thread(delivery.single)
-                await asyncio.to_thread(
-                    self._file_one, ctx, delivery, data, path
-                )
-            except EntryFetchError as exc:
-                failures.append(ResolveFailure(str(path), exc.reason))
-                continue
-            note = delivery.note()
             refused = _delivery_refusal(path, data)
             if refused is not None:
                 failures.append(ResolveFailure(path, refused))
                 continue
-            intents.append(Intent(identity=path, value=data, note=note))
-        self._check_nesting(entries, failures)
+            intents.append(Intent(identity=path, value=data, note=entry.note))
         return ResolveResult(intents=tuple(intents), failures=tuple(failures))
-
-    async def _fetch_entry(
-        self,
-        ctx: ApplyContext,
-        entry: dict[str, Any],
-        path: str,
-        category: str,
-    ):
-        """One entry's content through the W2/W3/W11 funnel.
-
-        ``DeclaredSourceResolver.resolve``, not ``fetch``: this is the whole of
-        defect D1. The
-        URL-only call this replaced is why ``resources`` was the one fetching
-        category that could not name a source — not just git, but ``from:``
-        pointing at anything, since a named source has no ``source:`` URL for
-        the old signature to take. Every other fetching category came through
-        this door already.
-
-        Returns an :class:`EntryDelivery`; the caller does not branch. The
-        whole delivery rather than its bytes, because a keep_last fallback's
-        reason and a moved ref's note ride on it (§9.6 — the report row must
-        state the fallback), and dropping either here would be the contract
-        broken quietly. Blocking network + disk I/O (W2's sync
-        transport, W11's blob write) off the event loop — see the identity
-        materialiser's note; a dry run must not park the server on a hung
-        source.
-        """
-        return await asyncio.to_thread(
-            self._resolver.resolve,
-            ctx,
-            entry=entry,
-            category=category,
-            entry_identity=path,
-        )
-
-    def _file_tree(
-        self,
-        ctx: ApplyContext,
-        delivery: EntryDelivery,
-        members: list[tuple[str, bytes]],
-        path: str,
-    ) -> None:
-        """File a delivered tree with the store, as one canonical blob.
-
-        Unconditional, and the delivery decides what that means: the object
-        road filed what arrived inside the fetch and writes nothing again,
-        while the git road files these bytes under its own receipt identity
-        with the source's credential name riding along — so the lineage
-        answers "which credential served this" identically on both roads.
-        """
-        delivery.file(
-            ctx,
-            canonical_tree_bytes(members),
-            category=_FETCH_CATEGORY_ARCHIVE,
-            entry_identity=path,
-        )
-
-    def _file_one(
-        self,
-        ctx: ApplyContext,
-        delivery: EntryDelivery,
-        data: bytes,
-        path: str,
-    ) -> None:
-        """File one delivered file with the store. Same rule as the tree's."""
-        delivery.file(
-            ctx,
-            data,
-            category=_FETCH_CATEGORY_FILE,
-            entry_identity=path,
-        )
-
-    def _entry_failure(
-        self, entry: dict[str, Any], path: Any, index: int
-    ) -> ResolveFailure | None:
-        """Path re-validation: the belt behind the PUT-time schema rules.
-
-        A stored document can predate a rule, or have skipped the validator
-        (a hand-built apply in W8's lifecycle points) — this is the half the
-        path-safety question needs answered at *apply* time, not only at
-        write time. The rule itself is the schema's own pure predicate
-        (:func:`relative_path_refusal`), not a re-derivation: the belt must
-        refuse exactly what the PUT layer refuses — "~", drive letters,
-        quoted characters and all — or it is a second, weaker rule.
-        """
-        if not isinstance(path, str) or not path:
-            return ResolveFailure(
-                f"[{index}]", "a resources entry must declare a 'path'"
-            )
-        refusal = relative_path_refusal(path, what="path")
-        if refusal is not None:
-            return ResolveFailure(path, refusal[1])
-        return None
-
-    def _check_nesting(
-        self,
-        entries: Sequence[dict[str, Any]],
-        failures: list[ResolveFailure],
-    ) -> None:
-        """The PUT-time nesting ban, re-asked here (W6 acceptance).
-
-        One declared path living under another declared directory path would
-        make the directory's whole-tree replace delete the sibling mid-apply.
-        Paths are already relative and normalised at schema time; here we
-        re-check, so a document that reached storage before this check existed
-        still cannot apply destructively.
-        """
-        paths = [
-            e.get("path")
-            for e in entries
-            if isinstance(e, dict) and isinstance(e.get("path"), str)
-        ]
-        directories = [p for p in paths if p.endswith("/")]
-        for candidate in paths:
-            for directory in directories:
-                if candidate != directory and candidate.startswith(directory):
-                    failures.append(
-                        ResolveFailure(
-                            candidate,
-                            f"path nests under another declared directory "
-                            f"{directory!r}",
-                        )
-                    )
 
     async def plan(
         self, ctx: ApplyContext, intents: Sequence[Intent]
@@ -611,6 +365,11 @@ class ResourcesMaterialiser(Materialiser):
                 )
             )
         return tuple(results)
+
+
+def _stored(entry: DesiredResource) -> StoredContent:
+    """The one stored blob a resource names: its tree for a directory, its content for a file."""
+    return entry.tree if isinstance(entry, DesiredResourceTree) else entry.content
 
 
 def _delivery_refusal(identity: str, data: bytes) -> str | None:

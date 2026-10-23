@@ -29,6 +29,8 @@ __all__ = ["EntryFetchError", "fetch", "file_produced", "file_single", "file_tre
 #: The produced-content origins the compiler files under.
 ORIGIN_INLINE = "manifest/inline"
 ORIGIN_TREE = "manifest/tree"
+#: A fetched single file whose delivery filed no receipt the bot can reach (the belt, never the road).
+ORIGIN_RECEIPT = "manifest/receipt"
 
 
 async def fetch(
@@ -49,12 +51,35 @@ async def fetch(
     return await asyncio.to_thread(resolver.resolve, session, entry=entry, category=category, entry_identity=identity)
 
 
-async def file_single(session: CompileSession, delivery: EntryDelivery, *, category: str, identity: str) -> bytes:
-    """The one file the delivery names, filed; returns its bytes (the digest is ``digest_of`` them)."""
+async def file_single(
+    session: CompileSession,
+    content: ContentStoreProtocol,
+    delivery: EntryDelivery,
+    *,
+    category: str,
+    identity: str,
+) -> bytes:
+    """The one file the delivery names, filed; returns its bytes (the digest is ``digest_of`` them).
+
+    The delivery files its own receipt (the object road did so inside the
+    fetch; the git road writes it here). The reachability check after it is
+    the belt: the state carries this digest, so the bot must hold a row for
+    it, and a delivery that filed nowhere gets a produced row rather than a
+    digest the materialiser cannot read.
+    """
 
     def _read_and_file() -> bytes:
         body = delivery.single()
         delivery.file(session, body, category=category, entry_identity=identity)
+        if not content.is_reachable(session.scope, digest_of(body)):
+            content.store_produced(
+                body,
+                scope=session.scope,
+                origin=ORIGIN_RECEIPT,
+                modifier=session.actor_id,
+                category=category,
+                entry_identity=identity,
+            )
         return body
 
     return await asyncio.to_thread(_read_and_file)

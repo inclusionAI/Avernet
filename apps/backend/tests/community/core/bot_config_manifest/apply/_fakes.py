@@ -471,7 +471,7 @@ class FakeIdentityService:
 
 
 def identity_rig(files: dict[str, str] | None = None):
-    """A materialiser over fakes: (materialiser, identity fake, object store,
+    """A compiling identity materialiser over fakes: (materialiser, identity fake, object store,
     content store).
 
     The declared source :data:`SOUL_SOURCE` reads :data:`SOUL_KEY` out of the
@@ -480,15 +480,12 @@ def identity_rig(files: dict[str, str] | None = None):
     from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
         DeclaredSourceResolver,
     )
-    from agentclaw.community.core.bot_config_manifest.apply.materialisers.identity import (
-        IdentityMaterialiser,
-    )
 
     identity = FakeIdentityService(files)
     objects = seeded_object_store({SOUL_KEY: SOUL_BODY})
     content = FakeManifestContent()
     pipeline = DeclaredSourceResolver(content, FakeObjectCredentials(), objects)
-    return IdentityMaterialiser(identity, pipeline), identity, objects, content
+    return compiling_identity(identity, pipeline, content), identity, objects, content
 
 
 SOUL_KEY = "identity/soul.md"
@@ -1031,13 +1028,11 @@ def make_context(
     engine_type: str = "claude_code",
     bot_type: str = "personal",
     apply_id: str | None = None,
-    source_session=None,
     bot: dict[str, Any] | None = None,
 ) -> ApplyContext:
     """An ``ApplyContext`` with real capabilities resolved for a baas bot.
 
-    ``source_session`` carries the W7 per-apply named-source state when a
-    test drives the ``from``/git pipeline. ``bot`` overlays the default
+    ``bot`` overlays the default
     record — e.g. ``bot={"template_type": "applicationCoding"}`` for the
     runtime-routing cases: the bot record is what the engine-provisioning
     routing policy reads, and ``bot_type`` / ``engine_type`` stay the
@@ -1062,7 +1057,6 @@ def make_context(
         engine_type=engine_type,
         bot_type=bot_type,
         apply_id=apply_id,
-        source_session=source_session,
         bot=record,
         capabilities=resolve_capabilities(
             active_engine=engine_type,
@@ -1233,7 +1227,7 @@ def device_port_bundle(
     delete_service=None,
     capability_reader=None,
     package_validator=None,
-    entry_fetcher=None,
+    content=None,
     resource_service=None,
     cli_tool_service=None,
 ):
@@ -1285,7 +1279,7 @@ def device_port_bundle(
         ),
         capability_reader=capability_reader or FakeCapabilityReader(),
         package_validator=package_validator or real_validator(),
-        entry_fetcher=entry_fetcher
+        content=content or FakeManifestContent()
         or DeclaredSourceResolver(
             FakeManifestContent(), FakeCredentials(), FakeObjectStore()
         ),
@@ -1349,3 +1343,165 @@ def arca_only_delivery(ports):
     )
 
     return delivery_strategies(arca=ArcaDelivery(ports))
+
+
+# ── compiling rigs: raw document entries → the typed state the engine takes ──
+#
+# The materialisers take typed desired entries (``core/apply_engine/desired_state``)
+# and the Manifest compiler is what turns a document's raw entries into them.
+# These rigs keep the suites written against raw entries honest: a raw entry
+# goes through the real entry compiler, over the same fakes, and the typed
+# result is what the materialiser sees — exactly the road a real apply takes.
+
+
+def compile_session(ctx: ApplyContext, *, source_session=None):
+    """The compiler's per-apply session over a test context."""
+    from agentclaw.community.core.bot_config_manifest.compiler.session import CompileSession
+
+    return CompileSession.open(ctx, source_session=source_session or declared_session())
+
+
+def fetch_context(*, source_session=None, budget=None, **context_kwargs):
+    """The ``FetchContext`` a fetcher or resolver reads, built the way the compiler builds it.
+
+    ``context_kwargs`` are ``make_context``'s; ``source_session`` and
+    ``budget`` are the two fields only a compile session carries, so a suite
+    driving the funnel directly names them here rather than on the apply
+    context, which no longer has them.
+    """
+    from dataclasses import replace
+
+    session = compile_session(make_context(**context_kwargs), source_session=source_session)
+    return session if budget is None else replace(session, budget=budget)
+
+
+class CompilingMaterialiser:
+    """A materialiser fed through its entry compiler, the way the orchestrator feeds it.
+
+    ``resolve(ctx, raw_entries)`` compiles the raw entries first. A compile
+    failure aborts the construct before ``resolve`` runs — the orchestrator's
+    rule — and is answered as a ``ResolveResult`` carrying those failures, so
+    a suite reads one shape whichever side refused. ``plan`` and ``write``
+    pass straight through.
+    """
+
+    def __init__(self, materialiser, compile, *, source_session=None) -> None:
+        self.materialiser = materialiser
+        self._compile = compile
+        self._source_session = source_session
+        self.last_declaration = None
+
+    @property
+    def construct(self):
+        return self.materialiser.construct
+
+    async def resolve(self, ctx: ApplyContext, entries):
+        from agentclaw.community.core.bot_config_manifest.apply.registry import ResolveFailure, ResolveResult
+
+        session = compile_session(ctx, source_session=self._source_session)
+        try:
+            declared = await self._compile(session, entries)
+        finally:
+            session.close()
+        self.last_declaration = declared
+        if declared.failures:
+            return ResolveResult(failures=tuple(ResolveFailure(f.identity, f.reason) for f in declared.failures))
+        return await self.materialiser.resolve(ctx, declared.entries)
+
+    async def plan(self, ctx: ApplyContext, intents):
+        return await self.materialiser.plan(ctx, intents)
+
+    async def write(self, ctx: ApplyContext, plan):
+        return await self.materialiser.write(ctx, plan)
+
+
+def compiling_identity(identity_service, resolver, content, *, source_session=None):
+    from agentclaw.community.core.bot_config_manifest.apply.materialisers.identity import IdentityMaterialiser
+    from agentclaw.community.core.bot_config_manifest.compiler.entries.identity import compile_identity
+
+    async def compile(session, entries):
+        return await compile_identity(session, entries, resolver=resolver, content=content)
+
+    materialiser = IdentityMaterialiser(identity_service, content)
+    return CompilingMaterialiser(materialiser, compile, source_session=source_session)
+
+
+def compiling_skills(uploads, activation, reader, validator, resolver, content, *, source_session=None):
+    from agentclaw.community.core.bot_config_manifest.apply.materialisers.skills import SkillsMaterialiser
+    from agentclaw.community.core.bot_config_manifest.compiler.entries.skills import compile_skills
+
+    async def compile(session, entries):
+        return await compile_skills(session, entries, resolver=resolver, content=content, validator=validator)
+
+    materialiser = SkillsMaterialiser(uploads, activation, reader, validator, content)
+    return CompilingMaterialiser(materialiser, compile, source_session=source_session)
+
+
+def compiling_resources(resource_service, resolver, content, *, source_session=None):
+    from agentclaw.community.core.bot_config_manifest.apply.materialisers.resources import ResourcesMaterialiser
+    from agentclaw.community.core.bot_config_manifest.compiler.entries.resources import compile_resources
+
+    async def compile(session, entries):
+        return await compile_resources(session, entries, resolver=resolver, content=content)
+
+    materialiser = ResourcesMaterialiser(resource_service, content)
+    return CompilingMaterialiser(materialiser, compile, source_session=source_session)
+
+
+def compiling_cli_tools(service, resolver, content, *, source_session=None):
+    from agentclaw.community.core.bot_config_manifest.apply.materialisers.cli_tools import CliToolsMaterialiser
+    from agentclaw.community.core.bot_config_manifest.compiler.entries.cli_tools import compile_cli_tools
+
+    async def compile(session, entries):
+        return await compile_cli_tools(session, entries, resolver=resolver, content=content)
+
+    return CompilingMaterialiser(CliToolsMaterialiser(service), compile, source_session=source_session)
+
+
+class EngineRig:
+    """An orchestrator over a compiler: ``apply(ctx, parsed_document, …)`` the way the run service does it."""
+
+    def __init__(self, orchestrator, compiler) -> None:
+        self.orchestrator = orchestrator
+        self.compiler = compiler
+
+    async def apply(self, ctx: ApplyContext, parsed, **kwargs):
+        compiled = await self.compiler.compile_document(ctx, parsed)
+        return await self.orchestrator.apply(ctx, compiled.state, sources=compiled.sources, **kwargs)
+
+
+def manifest_compilers(*, manifests, applies=None, content=None, resolver=None, git=None, validator=None):
+    """The run service's compiler map with its Manifest row, over fakes.
+
+    ``manifests`` is the suite's document fake (``get`` / ``validate``);
+    ``applies`` the apply repository the git baselines read, left out when
+    the suite's document declares no sources. The content store and funnel
+    default to empty fakes for the same reason.
+    """
+    from agentclaw.community.core.apply_engine.compiler import ManifestStateRef
+    from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
+
+    content = content or FakeManifestContent()
+    resolver = resolver or DeclaredSourceResolver(content, FakeObjectCredentials(), seeded_object_store())
+    compiler = manifest_compiler(
+        manifests=manifests, applies=applies, content=content, resolver=resolver, git=git, validator=validator
+    )
+    return {ManifestStateRef: compiler}
+
+
+def manifest_compiler(*, content, resolver, validator=None, git=None, applies=None, manifests=None):
+    """A ``ManifestCompiler`` over fakes; ``compile_document`` is what the engine rigs call."""
+    from agentclaw.community.core.bot_config_manifest.compiler import ManifestCompiler
+
+    class _NoApplies:
+        def recent(self, **kwargs):
+            return []
+
+    return ManifestCompiler(
+        manifests=manifests,
+        content=content,
+        resolver=resolver,
+        validator=validator or real_validator(),
+        git_client_provider=git or FakeGitClient,
+        applies=applies or _NoApplies(),
+    )

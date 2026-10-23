@@ -67,11 +67,9 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any, Optional, Sequence
 
-from agentclaw.community.core.bot_config_manifest.fetch.limits import FetchCategory
-from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
-    EntryFetchError,
-    DeclaredSourceResolver,
-)
+from agentclaw.community.core.apply_engine.content import ContentReader
+from agentclaw.community.core.apply_engine.desired_state import DesiredIdentityFile
+from agentclaw.community.core.content_store.errors import ContentStoreError
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     EntryOutcome,
     EntryResult,
@@ -96,12 +94,6 @@ if TYPE_CHECKING:
     from agentclaw.community.core.bot_config_manifest.apply.context import (
         ApplyContext,
     )
-
-#: The fetch category every entry here is charged and capped under. The
-#: identity cap is the smallest of the six, 1 MiB, because these are text
-#: files.
-_FETCH_CATEGORY = FetchCategory.IDENTITY
-
 
 def _decode_utf8(body: bytes) -> Optional[str]:
     """Both roads hand back bytes; only this category decides they must be
@@ -136,16 +128,12 @@ class IdentityMaterialiser(Materialiser):
 
     construct = ManifestCategory.IDENTITY
 
-    def __init__(
-        self, identity_service: Any, resolver: "DeclaredSourceResolver"
-    ) -> None:
+    def __init__(self, identity_service: Any, content: ContentReader) -> None:
         self._identity = identity_service
-        self._resolver = resolver
+        self._content = content
 
-    async def resolve(
-        self, ctx: "ApplyContext", entries: Sequence[dict[str, Any]]
-    ) -> ResolveResult:
-        """Declared entries → intents: one text body per file, both forms.
+    async def resolve(self, ctx: "ApplyContext", entries: Sequence[DesiredIdentityFile]) -> ResolveResult:
+        """Desired entries → intents: one text body per file, read from the store.
 
         The engine's legal set is **re-asked here** rather than trusted from
         the ``PUT`` that accepted the document: a bot's engine can change
@@ -156,34 +144,15 @@ class IdentityMaterialiser(Materialiser):
         """
         intents: list[Intent] = []
         failures: list[ResolveFailure] = []
-        seen: set[str] = set()
         legal = legal_identity_types(ctx.engine_type)
 
-        for index, entry in enumerate(entries):
-            file_type = entry.get("type") if isinstance(entry, dict) else None
-            if not isinstance(file_type, str) or not file_type:
-                failures.append(
-                    ResolveFailure(f"[{index}]", "an identity entry must name a 'type'")
-                )
-                continue
-            if file_type in seen:
-                # The file set is keyed by type: a second declaration of one
-                # file has no order with the first, so the document states
-                # something untrue of any result.
-                failures.append(
-                    ResolveFailure(
-                        file_type, "declared more than once in this category"
-                    )
-                )
-                continue
-            seen.add(file_type)
-
+        for entry in entries:
+            file_type = entry.type
             if file_type in RESERVED_IDENTITY_FILES:
                 failures.append(
                     ResolveFailure(
                         file_type,
-                        f"{file_type} is engine-generated runtime state: apply "
-                        "never writes it and never removes it",
+                        f"{file_type} is engine-generated runtime state: apply never writes it and never removes it",
                     )
                 )
                 continue
@@ -191,83 +160,21 @@ class IdentityMaterialiser(Materialiser):
                 failures.append(
                     ResolveFailure(
                         file_type,
-                        f"identity type {file_type!r} is not valid for engine "
-                        f"{ctx.engine_type!r}; allowed: " + ", ".join(sorted(legal)),
+                        f"identity type {file_type!r} is not valid for engine {ctx.engine_type!r}; allowed: "
+                        + ", ".join(sorted(legal)),
                     )
                 )
                 continue
-
-            inline = entry.get("content")
-            if isinstance(inline, str):
-                # Inline entries carry no fetch fields — the validator refuses
-                # ``auth``/``digest``/``on_fetch_failure`` on ``content``, so
-                # reaching this branch with any of them means a document that
-                # skipped validation; the fields are simply not read.
-                intents.append(Intent(file_type, inline, note=None))
-                continue
-
-            if "from" not in entry and "source" not in entry:
-                failures.append(
-                    ResolveFailure(
-                        file_type,
-                        "an identity entry must declare 'source', 'from' "
-                        "or 'content'",
-                    )
-                )
-                continue
-
             try:
-                # The fetch is blocking network I/O (W2's sync transport) and
-                # runs off the event loop — the repo's idiom for a blocking
-                # call from a coroutine. It matters on the `dry_run` path,
-                # which the adapter awaits inline; a hung source must not
-                # park every concurrent request.
-                delivery = await asyncio.to_thread(
-                    self._resolver.resolve,
-                    ctx,
-                    entry=entry,
-                    category=_FETCH_CATEGORY,
-                    entry_identity=file_type,
-                )
-            except EntryFetchError as exc:
-                failures.append(ResolveFailure(file_type, exc.reason))
-                continue
-
-            def _read_and_file() -> bytes:
-                body = delivery.single()
-                # The one file's bytes go through the same store the object
-                # road files with — auth included, so the lineage's answer to
-                # "which credential served this" is the same on both roads.
-                # Unconditional: a road that filed on the way past writes
-                # nothing here, and the caller no longer has to ask which.
-                delivery.file(
-                    ctx,
-                    body,
-                    category=_FETCH_CATEGORY,
-                    entry_identity=file_type,
-                )
-                return body
-
-            try:
-                body = await asyncio.to_thread(_read_and_file)
-            except EntryFetchError as exc:
-                # Includes the "must name a single file" refusal a tree
-                # delivery raises when nothing selected one file out of it.
-                # That check used to live here, worded for this category —
-                # but asking it needed a git-only field on the delivery,
-                # which is the seam leaking to save one sentence.
-                failures.append(ResolveFailure(file_type, exc.reason))
+                body = await asyncio.to_thread(self._content.read, entry.content.digest)
+            except ContentStoreError as exc:
+                failures.append(ResolveFailure(file_type, f"the identity file's bytes are not in the store: {exc}"))
                 continue
             text = _decode_utf8(body)
             if text is None:
-                failures.append(
-                    ResolveFailure(
-                        file_type,
-                        "the fetched identity source is not UTF-8 text",
-                    )
-                )
+                failures.append(ResolveFailure(file_type, "the identity source is not UTF-8 text"))
                 continue
-            intents.append(Intent(file_type, text, note=delivery.note()))
+            intents.append(Intent(file_type, text, note=entry.note))
 
         return ResolveResult(intents=tuple(intents), failures=tuple(failures))
 

@@ -14,6 +14,11 @@ from unittest.mock import MagicMock
 import pytest
 import yaml
 
+from agentclaw.community.core.apply_engine.desired_state import (
+    Declaration,
+    DesiredScript,
+    DesiredState,
+)
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.apply.delivery import ArcaDelivery
 from agentclaw.community.core.bot_config_manifest.apply.orchestrator import (
@@ -23,9 +28,6 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     ApplyStatus,
     EntryOutcome,
     SourceResolution,
-)
-from agentclaw.community.core.bot_config_manifest.apply.source_session import (
-    SourceSession,
 )
 from agentclaw.community.core.bot_config_manifest.apply.registry import (
     build_materialisers,
@@ -42,20 +44,21 @@ from agentclaw.community.core.skill_center.errors import (
 )
 
 from ._fakes import (
+    EngineRig,
     FakeActivationService,
     FakeCapabilityReader,
     FakeCredentials,
-    FakeGitClient,
     FakeIdentityService,
     FakeManifestContent,
     FakeMcpAuth,
+    FakeObjectStore,
     FakeResourceFileService,
     FakeSkillUploadService,
     FakeStartupScriptService,
     make_context,
+    manifest_compiler,
     real_validator,
 )
-from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
 
 
 #: The orchestrator is always handed a delivery strategy's ``steps_for``; these
@@ -66,39 +69,43 @@ _arca_steps = ArcaDelivery(lambda: None).steps_for
 
 def _engine(
     scripts=None, activations=None, auth=None, mcp_config=None,
-    uploads=None, reader=None, entry_fetcher=None,
+    uploads=None, reader=None, identity=None, objects=None, credentials=None,
 ):
-    """The W4-shaped engine: mcp + script over their fakes (these tests are
-    the engine's contract, not the two fetch-consuming categories' — those
-    have their own materialiser files)."""
+    """The engine the run service drives: a compiler over the document, the
+    orchestrator over the state it compiles, one content store between them.
+
+    mcp + script over their fakes (these tests are the engine's contract, not
+    the fetch-consuming categories' — those have their own materialiser
+    files). ``objects`` / ``credentials`` seed the declared-source road for the
+    few tests that fetch.
+    """
     if mcp_config is None:
         mcp_config = MagicMock()
         mcp_config.validate_bot_override.return_value = {
             "valid": True,
             "error": None,
         }
-    return ApplyOrchestrator(
+    content = FakeManifestContent()
+    orchestrator = ApplyOrchestrator(
         build_materialisers(
             script_service=scripts or FakeStartupScriptService(),
             activation_service=activations or FakeActivationService(),
             mcp_auth_service=auth or FakeMcpAuth(),
             mcp_config_service=mcp_config,
-            identity_service=FakeIdentityService(),
+            identity_service=identity or FakeIdentityService(),
             upload_service=uploads or FakeSkillUploadService(),
             capability_reader=reader or FakeCapabilityReader(),
             package_validator=real_validator(),
-            entry_fetcher=entry_fetcher or _dummy_entry_fetcher(),
+            content=content,
             resource_service=FakeResourceFileService(),
             cli_tool_service=object(),
         ),
         steps=_arca_steps
     )
-
-
-def _dummy_entry_fetcher():
-    """The engine tests never declare skills/identity sources, so the fetcher
-    the registry holds for them can be a never-called placeholder."""
-    return DeclaredSourceResolver(FakeManifestContent(), FakeCredentials(), FakeObjectStore())
+    resolver = DeclaredSourceResolver(
+        content, credentials or FakeCredentials(), objects or FakeObjectStore()
+    )
+    return EngineRig(orchestrator, manifest_compiler(content=content, resolver=resolver))
 
 
 async def _apply(engine, document, *, ctx=None, dry_run=False, phase=None):
@@ -799,6 +806,7 @@ def test_the_report_payload_names_every_field_it_emits():
         "result",
         "started_at",
         "finished_at",
+        "state",
         "sources",
         "notes",
         "categories",
@@ -1042,16 +1050,12 @@ async def test_failed_skill_write_refreshes_actual_dependencies_before_mcp():
         OSS_AUTH,
         OSS_BUCKET,
         build_skill_zip,
-        declared_session,
         seeded_object_store,
         skill_asset,
     )
 
     key = "skills/new-skill.zip"
     objects = seeded_object_store({key: build_skill_zip("new-skill")})
-    fetcher = DeclaredSourceResolver(
-        FakeManifestContent(), FakeObjectCredentials(), objects
-    )
     reader = FakeCapabilityReader(
         assets=[
             skill_asset(
@@ -1074,7 +1078,8 @@ async def test_failed_skill_write_refreshes_actual_dependencies_before_mcp():
         _engine(
             activations=activations,
             reader=reader,
-            entry_fetcher=fetcher,
+            objects=objects,
+            credentials=FakeObjectCredentials(),
         ),
         "schema_version: 1\nmanifest:\n"
         "  skills:\n"
@@ -1085,7 +1090,6 @@ async def test_failed_skill_write_refreshes_actual_dependencies_before_mcp():
         f"        key: {key}\n"
         f"        auth: {OSS_AUTH}\n"
         "  mcp: []\n",
-        ctx=make_context(source_session=declared_session()),
     )
 
     by_construct = {category.construct: category for category in report.categories}
@@ -1152,7 +1156,6 @@ async def test_a_fetching_document_applies_all_four_categories_in_order():
         SOUL_BODY as _SOUL_BODY,
         SOUL_KEY as _SOUL_KEY,
         build_skill_zip,
-        declared_session,
         seeded_object_store,
     )
 
@@ -1169,21 +1172,14 @@ async def test_a_fetching_document_applies_all_four_categories_in_order():
     objects = seeded_object_store({_SOUL_KEY: _SOUL_BODY, qc_key: qc_zip})
     # identity rules fetch: its bucket is unreachable — a real outage shape.
     objects.make_unavailable("rules-bucket", "source answered 404")
-    engine = ApplyOrchestrator(
-        build_materialisers(
-            script_service=FakeStartupScriptService(),
-            activation_service=activation,
-            mcp_auth_service=FakeMcpAuth(),
-            mcp_config_service=object(),
-            identity_service=identity,
-            upload_service=uploads,
-            capability_reader=reader,
-            package_validator=real_validator(),
-            entry_fetcher=DeclaredSourceResolver(FakeManifestContent(), FakeObjectCredentials(), objects),
-            resource_service=FakeResourceFileService(),
-            cli_tool_service=object(),
-        ),
-        steps=_arca_steps
+    engine = _engine(
+        activations=activation,
+        mcp_config=object(),
+        uploads=uploads,
+        reader=reader,
+        identity=identity,
+        objects=objects,
+        credentials=FakeObjectCredentials(),
     )
 
     report = await _apply(
@@ -1214,9 +1210,7 @@ manifest:
 script:
   body: "echo hi"
 """,
-        ctx=make_context(
-            engine_type="openclaw", source_session=declared_session()
-        ),
+        ctx=make_context(engine_type="openclaw"),
     )
 
     # identity aborted on the failed RULES fetch — nothing written there;
@@ -1247,14 +1241,15 @@ script:
 
 
 @pytest.mark.asyncio
-async def test_the_sessions_resolutions_ride_into_the_report():
-    """W7 wiring: the report's ``sources`` is the session's records and
+async def test_the_compilers_resolutions_ride_into_the_report():
+    """W7 wiring: the report's ``sources`` is what the compiler resolved and
     nothing else.
 
     The orchestrator holds no per-apply state, so the resolutions cannot
-    live on it — they ride the context's session and are read out at report
-    time. A session with no resolutions and no session at all both stay
-    empty, which is what every pre-W7 document expects.
+    live on it — the compiler reads them out of its session and hands them
+    over as ``sources``, which the orchestrator carries onto the report
+    verbatim. A compile that resolved nothing stays empty, not absent, which
+    is what every pre-W7 document expects.
     """
     engine = _engine()
     resolution = SourceResolution(
@@ -1265,16 +1260,17 @@ async def test_the_sessions_resolutions_ride_into_the_report():
         resolved_sha="f" * 40,
         auth="ci-token",
     )
-    # The test-visible seam for a checkout that a materialiser's resolve
-    # would have recorded: the session's own record list, appended directly.
-    session = SourceSession(sources={}, baselines={}, git=FakeGitClient())
-    session._resolutions.append(resolution)
-    empty_session = SourceSession(sources={}, baselines={}, git=FakeGitClient())
+    state = DesiredState(script=Declaration((DesiredScript("echo hi"),)))
 
-    report = await _apply(
-        engine,
-        'script:\n  body: "echo hi"\n',
-        ctx=make_context(source_session=session),
+    # The seam a compiler hands its records across: the orchestrator's own
+    # ``sources`` argument, carried as given.
+    report = await engine.orchestrator.apply(
+        make_context(),
+        state,
+        apply_id="a1",
+        trigger="explicit",
+        started_at=datetime.now(),
+        sources=(resolution,),
     )
     assert report.as_payload()["sources"] == [
         {
@@ -1287,14 +1283,13 @@ async def test_the_sessions_resolutions_ride_into_the_report():
         }
     ]
 
-    # No resolutions recorded — the section is empty, not absent.
-    plain = await _apply(
-        engine,
-        'script:\n  body: "echo hi"\n',
-        ctx=make_context(source_session=empty_session),
+    # No resolutions handed over — the section is empty, not absent.
+    plain = await engine.orchestrator.apply(
+        make_context(), state, apply_id="a1", trigger="explicit", started_at=datetime.now()
     )
     assert plain.as_payload()["sources"] == []
 
-    # No session at all (pre-W7 callers, hand-driven tests) — same answer.
+    # Through the compiler, a document naming no git source resolves nothing
+    # — same answer.
     bare = await _apply(engine, 'script:\n  body: "echo hi"\n')
     assert bare.as_payload()["sources"] == []

@@ -15,9 +15,6 @@ from typing import Any
 from unittest.mock import Mock
 
 from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
-from agentclaw.community.core.bot_config_manifest.apply.materialisers.skills import (
-    SkillsMaterialiser,
-)
 from agentclaw.community.core.bot_config_manifest.managed_files import (
     CATEGORY_SKILLS,
     ManagedFileScope,
@@ -34,7 +31,7 @@ from tests.community.core.bot_config_manifest.apply._fakes import (
     FakeObjectCredentials,
     OSS_BUCKET,
     build_skill_zip,
-    declared_session,
+    compiling_skills,
     make_context,
     oss_source,
     real_validator,
@@ -156,9 +153,10 @@ def _rig(packages: dict[str, bytes]):
         security_hook=Mock(),
     )
     objects = seeded_object_store(packages)
-    pipeline = DeclaredSourceResolver(FakeManifestContent(), FakeObjectCredentials(), objects)
-    materialiser = SkillsMaterialiser(
-        port, activation, LiveCapabilityReader(skills, activation), real_validator(), pipeline
+    content = FakeManifestContent()
+    pipeline = DeclaredSourceResolver(content, FakeObjectCredentials(), objects)
+    materialiser = compiling_skills(
+        port, activation, LiveCapabilityReader(skills, activation), real_validator(), pipeline, content
     )
     return materialiser, store, oss, skills, activation, objects
 
@@ -172,12 +170,7 @@ async def _apply(materialiser, ctx, entries):
 
 
 def _ctx():
-    return make_context(
-        engine_type="teclaw",
-        owner_id="u_owner",
-        # A declared source resolves against the apply's source session.
-        source_session=declared_session(),
-    )
+    return make_context(engine_type="teclaw", owner_id="u_owner")
 
 
 def _declared(key: str = QC_KEY, body: bytes = QZ):

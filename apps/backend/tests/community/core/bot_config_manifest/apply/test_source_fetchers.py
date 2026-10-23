@@ -38,7 +38,7 @@ from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKi
 from ._fakes import (
     FakeCredentials,
     FakeManifestContent,
-    make_context,
+    fetch_context,
 )
 from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
 
@@ -161,7 +161,7 @@ def test_dispatch_selects_the_fetcher_the_declaration_names(
     pipeline._fetchers = {kind: recorder, **others}
 
     result = pipeline.resolve(
-        make_context(source_session=_session()),
+        fetch_context(source_session=_session()),
         entry={"source": source},
         category="resources_file",
         entry_identity="x",
@@ -180,7 +180,7 @@ def test_the_request_carries_what_the_front_door_resolved(pipeline):
     pipeline._fetchers = {SourceKind.OSS: recorder, SourceKind.GIT: _Recorder()}
 
     pipeline.resolve(
-        make_context(source_session=_session()),
+        fetch_context(source_session=_session()),
         entry={
             "source": {
                 "protocol": "oss",
@@ -207,7 +207,7 @@ def test_a_named_source_carries_its_name_for_the_report(pipeline):
     baseline is read by — an inline source has neither, and says so."""
     recorder = _Recorder()
     pipeline._fetchers = {SourceKind.GIT: recorder, SourceKind.OSS: _Recorder()}
-    ctx = make_context(
+    ctx = fetch_context(
         source_session=_session(
             {
                 "content": {
@@ -272,7 +272,7 @@ def test_a_git_source_naming_an_object_store_credential_fails_one_entry():
     pipeline = DeclaredSourceResolver(
         FakeManifestContent(), _WrongTypeCredentials(), FakeObjectStore()
     )
-    ctx = make_context(
+    ctx = fetch_context(
         source_session=_session(
             {
                 "repo": {

@@ -101,7 +101,7 @@ async def compile_cli_tools(
             continue
         try:
             delivery = await fetch(session, resolver, entry=entry, category=_CATEGORY, identity=name)
-            data = await file_single(session, delivery, category=_CATEGORY, identity=name)
+            data = await file_single(session, content, delivery, category=_CATEGORY, identity=name)
         except EntryFetchError as exc:
             failures.append(EntryFailure(name, exc.reason))
             continue

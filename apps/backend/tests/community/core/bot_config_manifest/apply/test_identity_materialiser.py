@@ -8,8 +8,17 @@ What these pin, by the work item's acceptance criteria:
 - the area is the identity file set **minus the reserved names**, and both
   halves of that subtraction are pinned (never written, never removed);
 - a fetch failure aborts the whole category before the first write —
-  §3.2's all-or-nothing, by construction because fetch belongs to ``resolve``;
+  §3.2's all-or-nothing, by construction because fetch belongs to the
+  compiler, which runs before ``resolve``;
 - convergence: re-applying the same document performs no write at all.
+
+The materialiser takes typed ``DesiredIdentityFile`` entries whose bytes the
+compiler has already filed with the content store. The suite keeps driving
+raw document entries: a ``CompilingMaterialiser`` runs them through the real
+``compile_identity`` over the same fakes, so the grammar refusals (missing
+type, duplicates, no source form) and the fetch (keep_last, pins, receipts)
+are asserted at the seam they now live on, and the engine facts (legal set,
+reserved names, UTF-8) at the materialiser's.
 """
 from __future__ import annotations
 
@@ -20,9 +29,6 @@ from types import SimpleNamespace
 
 from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
     DeclaredSourceResolver,
-)
-from agentclaw.community.core.bot_config_manifest.apply.materialisers.identity import (
-    IdentityMaterialiser,
 )
 from agentclaw.community.core.bot_config_manifest.apply.source_session import (
     SourceSession,
@@ -40,9 +46,8 @@ from ._fakes import (
     FakeManifestContent,
     FakeObjectCredentials,
     OSS_BUCKET,
-    declared_session,
+    compiling_identity,
     fetched_object,
-    identity_rig,
     make_context,
     oss_source,
     seeded_object_store,
@@ -66,9 +71,24 @@ def _ctx(**kwargs):
     # turn every RULES/SOUL test into a legality test.
     kwargs.setdefault("engine_type", "openclaw")
     kwargs.setdefault("owner_id", "u_owner")
-    # Every declared source is resolved against the apply's source session.
-    kwargs.setdefault("source_session", declared_session())
     return make_context(**kwargs)
+
+
+def identity_rig(files: dict[str, str] | None = None, *, source_session=None):
+    """A compiling materialiser over fakes: (materialiser, identity fake,
+    object store, content store).
+
+    Local so the suite can hand the rig a ``source_session``. The declared
+    source :data:`SOUL_SOURCE` reads :data:`SOUL_KEY` out of the seeded bucket
+    and serves :data:`SOUL_BODY`; a declared source is resolved against
+    ``source_session`` (the rig's own empty one when none is given).
+    """
+    identity = FakeIdentityService(files)
+    objects = seeded_object_store({SOUL_KEY: SOUL_BODY})
+    content = FakeManifestContent()
+    resolver = DeclaredSourceResolver(content, FakeObjectCredentials(), objects)
+    materialiser = compiling_identity(identity, resolver, content, source_session=source_session)
+    return materialiser, identity, objects, content
 
 
 async def _apply(materialiser, ctx, entries):
@@ -135,6 +155,8 @@ def test_placeholder_substitution_reaches_the_identity_fetch():
 
 
 def test_a_non_utf8_identity_source_fails_the_entry():
+    # The compiler files whatever bytes the source serves; "is this text" is
+    # the materialiser's question, asked when it reads them back.
     materialiser, identity, objects, _ = identity_rig()
     binary = bytes([0xFF, 0xFE, 0x00, 0x01])
     objects.put(OSS_BUCKET, SOUL_KEY, binary)
@@ -142,6 +164,7 @@ def test_a_non_utf8_identity_source_fails_the_entry():
     resolved = _run(materialiser.resolve(_ctx(), [DECLARED]))
     assert not resolved.ok
     assert "UTF-8" in resolved.failures[0].reason
+    assert [e.type for e in materialiser.last_declaration.entries] == ["SOUL.md"]
     assert identity.writes == []
 
 
@@ -157,6 +180,8 @@ def test_the_engines_legal_set_is_reasked_at_apply_time():
     )
     assert not resolved.ok
     assert "SOUL.md" in resolved.failures[0].reason
+    # The compiler accepted the entry: the legal set is the materialiser's refusal.
+    assert materialiser.last_declaration.failures == ()
     assert identity.writes == []
 
 
@@ -178,6 +203,8 @@ def test_a_reserved_name_is_refused_even_though_the_validator_also_refuses_it():
     )
     assert not resolved.ok
     assert {f.identity for f in resolved.failures} == {"MEMORY.md", "IDENTITY.md"}
+    # Both compiled: the reserved subtraction is the materialiser's own belt.
+    assert materialiser.last_declaration.failures == ()
     assert identity.writes == []
 
 
@@ -208,16 +235,12 @@ def test_an_entry_without_either_source_form_is_refused():
 
 
 def test_one_failed_fetch_aborts_the_whole_category_no_writes():
-    identity = FakeIdentityService()
+    materialiser, identity, objects, _ = identity_rig()
     ok_key = "identity/rules.md"
-    objects = seeded_object_store({ok_key: b"# rules"})
+    objects.put(OSS_BUCKET, ok_key, b"# rules")
     # The second entry reads a bucket the store cannot reach — a transport
     # failure with nothing filed to fall back to.
     objects.make_unavailable("down-bucket", "source answered 404")
-    materialiser = IdentityMaterialiser(
-        identity,
-        DeclaredSourceResolver(FakeManifestContent(), FakeObjectCredentials(), objects),
-    )
 
     resolved = _run(
         materialiser.resolve(
@@ -230,27 +253,21 @@ def test_one_failed_fetch_aborts_the_whole_category_no_writes():
     )
     assert not resolved.ok
     assert "source answered 404" in resolved.failures[0].reason
-    # Refused in resolve ⇒ no plan, no write — the all-or-nothing property
-    # holds by construction, not by a mid-write undo.
+    # Refused before resolve ran ⇒ no plan, no write — the all-or-nothing
+    # property holds by construction, not by a mid-write undo.
     assert identity.writes == []
     assert identity.listed == 0
 
 
 def test_keep_last_reuses_the_platform_copy_when_the_source_is_down():
-    identity = FakeIdentityService()
-    content = FakeManifestContent()
+    materialiser, identity, objects, content = identity_rig()
     # A prior apply fetched and filed the bytes; since then, the source died.
     content.store(
         fetched_object(SOUL_BODY, url=SOUL_RECEIPT, content_type="text/markdown"),
         scope=None,
         source_url=SOUL_RECEIPT,
     )
-    objects = seeded_object_store({SOUL_KEY: SOUL_BODY})
     objects.make_unavailable(OSS_BUCKET, "source transport failed")
-    materialiser = IdentityMaterialiser(
-        identity,
-        DeclaredSourceResolver(content, FakeObjectCredentials(), objects),
-    )
 
     result, plan, written = _run(
         _apply(
@@ -370,19 +387,13 @@ def test_an_omitted_on_fetch_failure_defaults_to_keep_last():
     """The schema doc's default is ``keep_last`` (§2): an entry that omits
     the field must behave like one that wrote it — the minimal, conforming
     declaration reuses the platform's own copy when the source is down."""
-    identity = FakeIdentityService()
-    content = FakeManifestContent()
+    materialiser, identity, objects, content = identity_rig()
     content.store(
         fetched_object(SOUL_BODY, url=SOUL_RECEIPT, content_type="text/markdown"),
         scope=None,
         source_url=SOUL_RECEIPT,
     )
-    objects = seeded_object_store({SOUL_KEY: SOUL_BODY})
     objects.make_unavailable(OSS_BUCKET, "source transport failed")
-    materialiser = IdentityMaterialiser(
-        identity,
-        DeclaredSourceResolver(content, FakeObjectCredentials(), objects),
-    )
 
     result, _, written = _run(
         _apply(materialiser, _ctx(), [DECLARED])  # no on_fetch_failure key
@@ -436,17 +447,16 @@ def _raise_no_subpath():
 class _StaticGit:
     """A git client that serves one checkout with stable bytes.
 
-    The checkout shape mirrors :class:`GitCheckout` where the materialiser
+    The checkout shape mirrors :class:`GitCheckout` where the compiler
     reaches it: ``read_file``/``files`` take the source's subpath argument
     the way the guarded readers do, and the bytes are static so the intent,
     the note and the store filing can be asserted exactly.
 
     ``read_file`` refuses a ``None`` subpath because the real one does. That
-    fidelity is load-bearing now: the materialiser used to ask "is the
-    subpath set?" itself before reading, so a permissive double still failed
-    the entry. It no longer asks — the question needed a git-only field on
-    the delivery seam — and a double that answered where the real checkout
-    refuses would let this test pass against code that cannot work.
+    fidelity is load-bearing: nothing upstream asks "is the subpath set?"
+    before reading — the question needed a git-only field on the delivery
+    seam — and a double that answered where the real checkout refuses would
+    let this test pass against code that cannot work.
     """
 
     def __init__(self, sha: str = "a" * 40, body: bytes = b"# rules\n") -> None:
@@ -461,6 +471,8 @@ class _StaticGit:
             sha=self.sha,
             url=spec.url,
             ref=spec.ref,
+            # The declared size the compile budget charges a fresh checkout.
+            tree_bytes=len(self.body),
             files=lambda subpath=None, file_limit=None: [],
             read_file=lambda subpath=None, file_limit=None: (
                 self.body
@@ -470,13 +482,13 @@ class _StaticGit:
         )
 
 
-def _git_ctx(git: _StaticGit | None = None, *, sources=None, baselines=None):
-    """The W7 context: a source session over a scripted git client, with
-    the document's ``sources`` declarations and the strict baselines."""
+def _git_rig(git: _StaticGit | None = None, *, sources=None, baselines=None):
+    """The W7 rig: a source session over a scripted git client, with the
+    document's ``sources`` declarations and the strict baselines."""
     session = SourceSession(
         sources=sources or {}, baselines=baselines or {}, git=git or _StaticGit()
     )
-    return _ctx(source_session=session)
+    return identity_rig(source_session=session)
 
 
 IDENTITY_GIT_SOURCE = {
@@ -488,11 +500,10 @@ IDENTITY_GIT_SOURCE = {
 
 
 def test_an_identity_entry_can_read_one_file_from_a_git_source():
-    materialiser, identity, _, _ = identity_rig()
     git = _StaticGit()
-    ctx = _git_ctx(git, sources={"id": IDENTITY_GIT_SOURCE})
+    materialiser, identity, _, _ = _git_rig(git, sources={"id": IDENTITY_GIT_SOURCE})
     result, plan, written = _run(
-        _apply(materialiser, ctx, [{"type": "RULES.md", "from": "id"}])
+        _apply(materialiser, _ctx(), [{"type": "RULES.md", "from": "id"}])
     )
     assert result.ok
     assert [e.outcome.value for e in written] == ["created"]
@@ -503,11 +514,10 @@ def test_an_identity_entry_can_read_one_file_from_a_git_source():
 
 
 def test_a_git_identity_without_subpath_is_a_resolve_failure():
-    materialiser, identity, _, _ = identity_rig()
-    ctx = _git_ctx(
+    materialiser, identity, _, _ = _git_rig(
         sources={"id": {"protocol": "git", "url": "https://git.corp/id.git", "ref": "main"}}
     )
-    resolved = _run(materialiser.resolve(ctx, [{"type": "RULES.md", "from": "id"}]))
+    resolved = _run(materialiser.resolve(_ctx(), [{"type": "RULES.md", "from": "id"}]))
     assert not resolved.ok
     # Identity reads exactly one file — the subpath is where it is named.
     assert "subpath" in resolved.failures[0].reason
@@ -516,14 +526,13 @@ def test_a_git_identity_without_subpath_is_a_resolve_failure():
 
 
 def test_a_moved_ref_on_the_git_road_lands_in_the_note():
-    materialiser, _, _, _ = identity_rig()
     git = _StaticGit(sha="a" * 40)
-    ctx = _git_ctx(
+    materialiser, _, _, _ = _git_rig(
         git,
         sources={"id": IDENTITY_GIT_SOURCE},
         baselines={("https://git.corp/id.git", "main", "non_strict"): "b" * 40},
     )
-    resolved = _run(materialiser.resolve(ctx, [{"type": "RULES.md", "from": "id"}]))
+    resolved = _run(materialiser.resolve(_ctx(), [{"type": "RULES.md", "from": "id"}]))
     assert resolved.ok
     # Non-strict moves are applied and reported: both SHAs, the old one
     # first — the report is the only outlet for the drift (§2.7 pull-only).
@@ -533,11 +542,10 @@ def test_a_moved_ref_on_the_git_road_lands_in_the_note():
 
 
 def test_the_git_road_files_its_bytes_with_the_store():
-    materialiser, identity, _, content = identity_rig()
     git = _StaticGit()
-    ctx = _git_ctx(git, sources={"id": IDENTITY_GIT_SOURCE})
+    materialiser, identity, _, content = _git_rig(git, sources={"id": IDENTITY_GIT_SOURCE})
     result, _, _ = _run(
-        _apply(materialiser, ctx, [{"type": "RULES.md", "from": "id"}])
+        _apply(materialiser, _ctx(), [{"type": "RULES.md", "from": "id"}])
     )
     assert result.ok
     # The receipt identity is the canonical git URL, full SHA in it: the
@@ -545,4 +553,3 @@ def test_the_git_road_files_its_bytes_with_the_store():
     assert content.store_calls[-1]["source_url"] == (
         f"git+https://git.corp/id.git@{'a' * 40}:files/rules.md"
     )
-
