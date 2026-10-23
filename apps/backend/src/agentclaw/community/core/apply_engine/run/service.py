@@ -358,6 +358,7 @@ class ApplyRunService(ApplyRunServiceProtocol):
                 trigger=trigger,
                 started_at=started_at,
                 lock_token=lock.lock_token,
+                state=state,
                 exc=exc,
             )
             raise
@@ -665,7 +666,10 @@ class ApplyRunService(ApplyRunServiceProtocol):
         only for a real apply; its failure is a note on the report, never a
         raise (§2.7: a manifest problem does not fail what it rode on).
         """
-        compiled = await compiler.compile(ctx, state)
+        # A creation half compiles only its own constructs: the pre-container
+        # phase must not spend the fetch budget on skills it cannot deliver yet.
+        only = None if phase is None else frozenset(step.construct for step in strategy.steps_for(phase))
+        compiled = await compiler.compile(ctx, state, only=only)
         report = await self._orchestrator(strategy).apply(
             ctx,
             compiled.state,

@@ -99,7 +99,11 @@ class McpMaterialiser(Materialiser):
             server_code = entry.server_code
             if not self._permitted(ctx, server_code):
                 failures.append(
-                    ResolveFailure(server_code, "this tenant does not have permission to enable this MCP server")
+                    ResolveFailure(
+                        server_code,
+                        "this tenant does not have permission to enable this MCP "
+                        "server",
+                    )
                 )
                 continue
             normalized_config = entry.override.as_config() if entry.override is not None else None
@@ -110,9 +114,18 @@ class McpMaterialiser(Materialiser):
                 engine_type=ctx.engine_type,
             )
             if not verdict.get("valid"):
-                failures.append(ResolveFailure(server_code, str(verdict.get("error") or "invalid config")))
+                failures.append(
+                    ResolveFailure(
+                        server_code, str(verdict.get("error") or "invalid config")
+                    )
+                )
                 continue
-            intents.append(Intent(server_code, normalized_config))
+            intents.append(
+                Intent(
+                    server_code,
+                    normalized_config,
+                )
+            )
 
         return ResolveResult(intents=tuple(intents), failures=tuple(failures))
 

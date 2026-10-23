@@ -11,6 +11,7 @@ is handed.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Mapping, Sequence
 
 from agentclaw.community.core.apply_engine.desired_state import (
@@ -34,6 +35,7 @@ from agentclaw.community.core.bot_config_manifest.compiler.session import Compil
 from agentclaw.community.core.bot_config_manifest.fetch.limits import FetchCategory
 from agentclaw.community.core.apply_engine.support_matrix import SourceKind
 from agentclaw.community.core.content_store import ContentStoreProtocol
+from agentclaw.community.core.content_store.limits import DIGEST_RE
 
 __all__ = ["compile_cli_tools"]
 
@@ -68,6 +70,11 @@ async def compile_cli_tools(
             continue
         seen.add(name)
         pin = entry.get("digest") or None
+        if pin is not None and not (isinstance(pin, str) and DIGEST_RE.match(pin)):
+            # The schema's own belt, re-asked: a stored document can predate it,
+            # and a malformed pin must fail this entry, not the compile.
+            failures.append(EntryFailure(name, "digest must be 'sha256:' followed by 64 lowercase hex characters"))
+            continue
         protocol = declared_protocol(session, entry)
         if not pin and protocol is not SourceKind.GIT:
             failures.append(EntryFailure(name, _DIGEST_REQUIRED))
@@ -85,7 +92,7 @@ async def compile_cli_tools(
         version = entry.get("version") if isinstance(entry.get("version"), str) else None
         address = declared_address(entry)
 
-        if pin and content.is_reachable(session.scope, pin):
+        if pin and await asyncio.to_thread(content.is_reachable, session.scope, pin):
             # The platform already holds these exact bytes for this bot: no fetch.
             desired.append(
                 DesiredCliTool(

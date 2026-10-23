@@ -126,3 +126,23 @@ async def test_compile_document_takes_a_parsed_document_as_is() -> None:
     state = (await compiler.compile_document(make_context(), parsed)).state
     assert state.mcp.entries[0].server_code == "gh" and state.script is None
     assert state.engine_config.entries[0].config["model"] == "fast"
+
+
+@pytest.mark.asyncio
+async def test_only_narrows_the_compile_to_a_phases_constructs_and_fetches_nothing_else() -> None:
+    """The pre-container half compiles the script alone: the skill is neither fetched nor declared."""
+    objects = seeded_object_store({"fixtures/qc.zip": PACKAGE})
+    content = FakeManifestContent()
+    resolver = DeclaredSourceResolver(content, FakeObjectCredentials(), objects)
+    compiler = ManifestCompiler(
+        manifests=_Manifests(DOCUMENT),
+        content=content,
+        resolver=resolver,
+        validator=real_validator(),
+        git_client_provider=FakeGitClient,
+        applies=_Applies(),
+    )
+    state = (await compiler.compile(make_context(), ManifestStateRef(), only={ManifestSection.SCRIPT})).state
+    assert state.declared == (ManifestSection.SCRIPT,)
+    assert state.skills is None and state.identity is None
+    assert objects.calls == []

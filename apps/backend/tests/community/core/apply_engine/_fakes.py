@@ -1466,7 +1466,10 @@ class EngineRig:
         self.compiler = compiler
 
     async def apply(self, ctx: ApplyContext, parsed, **kwargs):
-        compiled = await self.compiler.compile_document(ctx, parsed)
+        # A phase compiles only its own constructs, as the run service does it.
+        phase = kwargs.get("phase")
+        only = None if phase is None else frozenset(step.construct for step in self.orchestrator._steps(phase))
+        compiled = await self.compiler.compile_document(ctx, parsed, only=only)
         return await self.orchestrator.apply(ctx, compiled.state, sources=compiled.sources, **kwargs)
 
 

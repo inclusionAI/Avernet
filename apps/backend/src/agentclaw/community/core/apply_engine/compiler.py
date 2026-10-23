@@ -11,7 +11,9 @@ reference's identifiers only.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Dict, Mapping, Protocol, TypeVar, runtime_checkable
+from typing import TYPE_CHECKING, Any, ClassVar, Collection, Dict, Mapping, Protocol, TypeVar, runtime_checkable
+
+from agentclaw.community.core.apply_engine.constructs import ApplyConstruct
 
 from agentclaw.community.core.apply_engine.desired_state import DesiredState
 
@@ -102,7 +104,16 @@ class DesiredStateCompiler(Protocol[R]):
         """
         ...
 
-    async def compile(self, ctx: ApplyContext, ref: R) -> Compiled: ...
+    async def compile(self, ctx: ApplyContext, ref: R, *, only: Collection[ApplyConstruct] | None = None) -> Compiled:
+        """The desired state the reference names, fetched and filed.
+
+        ``only`` is the set of constructs this run will apply — a creation
+        phase's half — and a compiler leaves every other construct out of the
+        state, declared or not, so no fetch is spent on a construct the run
+        cannot touch and no failure is reported for one it will not reach.
+        ``None`` compiles every declared construct.
+        """
+        ...
 
 
 #: The run service's lookup: one compiler per reference type. A map

@@ -18,6 +18,7 @@ import asyncio
 from typing import TYPE_CHECKING, Any, Sequence
 
 from agentclaw.community.core.apply_engine.content import ContentReader
+from agentclaw.community.core.apply_engine.skill_validation import PackageRefusal, validate_package
 from agentclaw.community.core.apply_engine.desired_state import DesiredSkill, LocalSkillPackage
 from agentclaw.community.core.content_store import decode_tree_bytes
 from agentclaw.community.core.content_store.errors import ContentStoreError
@@ -51,8 +52,6 @@ from agentclaw.community.core.skill_center.mcp_dependency_scope import (
     mcp_dependency_codes,
 )
 from agentclaw.community.core.skill_center.skill_package import (
-    SkillPackageInvalidError,
-    SkillPackageTooLargeError,
     SkillPackageValidator,
 )
 from agentclaw.community.log import get_logger
@@ -63,15 +62,6 @@ if TYPE_CHECKING:
     )
 
 logger = get_logger()
-
-class _PackageRefusal(Exception):
-    """The stored bytes can never become a skill package — refuse the entry.
-
-    Internal to this module: raised by ``_validate`` and caught in
-    ``resolve``, which turns ``str(exc)`` into the entry's
-    :class:`~...registry.ResolveFailure` reason.
-    """
-
 
 class _SkillPackage:
     """One entry's validated, upload-ready package — the intent's value.
@@ -171,8 +161,8 @@ class SkillsMaterialiser(Materialiser):
             try:
                 # A large package re-packed is seconds of CPU and a dry run
                 # runs this on the request event loop: off the loop.
-                validated = await asyncio.to_thread(self._validate, self._validator.validate_directory, files)
-            except _PackageRefusal as exc:
+                validated = await asyncio.to_thread(validate_package, self._validator.validate_directory, files)
+            except PackageRefusal as exc:
                 failures.append(ResolveFailure(name, str(exc)))
                 continue
             if validated.name != name:
@@ -300,20 +290,6 @@ class SkillsMaterialiser(Materialiser):
             raise
         self._refresh_actual_dependency_codes(ctx)
         return tuple(results)
-
-    def _validate(self, call, payload):
-        """One validator call, refused as an entry failure — at resolve time,
-        in the all-or-nothing envelope, never as a mid-write surprise."""
-        try:
-            return call(payload)
-        except SkillPackageInvalidError as exc:
-            raise _PackageRefusal(
-                f"the fetched skill is not a valid package ({exc.reason})"
-            ) from exc
-        except SkillPackageTooLargeError:
-            raise _PackageRefusal(
-                "the fetched skill package is over the upload package limits"
-            ) from None
 
     def _area(self, ctx: "ApplyContext") -> dict[str, Any]:
         """The active set by name — the reader's flush-then-read for this bot."""

@@ -16,10 +16,10 @@ document read as empty rather than a 404.
 from __future__ import annotations
 
 import json
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Collection, Mapping
 
 from agentclaw.community.core.apply_engine.compiler import Compiled, ManifestStateRef
-from agentclaw.community.core.apply_engine.constructs import ManifestCategory, ManifestSection
+from agentclaw.community.core.apply_engine.constructs import ApplyConstruct, ManifestCategory, ManifestSection
 from agentclaw.community.core.apply_engine.desired_state import DesiredState
 from agentclaw.community.core.apply_engine.context import ApplyContext
 from agentclaw.community.core.apply_engine.outcomes import ApplyReport, ApplyStatus
@@ -82,11 +82,20 @@ class ManifestCompiler:
         """
         self._parsed_or_empty(ctx)
 
-    async def compile(self, ctx: ApplyContext, ref: ManifestStateRef) -> Compiled:
-        return await self.compile_document(ctx, self._parsed_or_empty(ctx))
+    async def compile(
+        self, ctx: ApplyContext, ref: ManifestStateRef, *, only: Collection[ApplyConstruct] | None = None
+    ) -> Compiled:
+        return await self.compile_document(ctx, self._parsed_or_empty(ctx), only=only)
 
-    async def compile_document(self, ctx: ApplyContext, parsed: Mapping[str, Any]) -> Compiled:
-        """Compile an already-parsed document (the stored one, or a caller's own, e.g. the creation preflight)."""
+    async def compile_document(
+        self, ctx: ApplyContext, parsed: Mapping[str, Any], *, only: Collection[ApplyConstruct] | None = None
+    ) -> Compiled:
+        """Compile an already-parsed document (the stored one, or a caller's own, e.g. the creation preflight).
+
+        ``only`` narrows the compile to the constructs a run will apply (a
+        creation phase's half); the rest are left undeclared in the state, so
+        the pre-container phase fetches nothing it cannot deliver.
+        """
         session = CompileSession.open(
             ctx,
             source_session=SourceSession(
@@ -96,21 +105,32 @@ class ManifestCompiler:
             ),
         )
         try:
-            state = await self._state(session, parsed)
+            state = await self._state(session, parsed, only)
             sources = tuple(session.source_session.resolution_records())
         finally:
             session.close()
         return Compiled(state, sources)
 
-    async def _state(self, session: CompileSession, parsed: Mapping[str, Any]) -> DesiredState:
-        script = declared_entries(parsed, ManifestSection.SCRIPT)
-        identity = declared_entries(parsed, ManifestCategory.IDENTITY)
-        resources = declared_entries(parsed, ManifestCategory.RESOURCES)
-        skills = declared_entries(parsed, ManifestCategory.SKILLS)
-        mcp = declared_entries(parsed, ManifestCategory.MCP)
-        cli_tools = declared_entries(parsed, ManifestCategory.CLI_TOOLS)
+    async def _state(
+        self, session: CompileSession, parsed: Mapping[str, Any], only: Collection[ApplyConstruct] | None
+    ) -> DesiredState:
+        def declared(construct: ApplyConstruct):
+            if only is not None and construct not in only:
+                return None
+            return declared_entries(parsed, construct)
+
+        script = declared(ManifestSection.SCRIPT)
+        identity = declared(ManifestCategory.IDENTITY)
+        resources = declared(ManifestCategory.RESOURCES)
+        skills = declared(ManifestCategory.SKILLS)
+        mcp = declared(ManifestCategory.MCP)
+        cli_tools = declared(ManifestCategory.CLI_TOOLS)
         manifest = parsed.get("manifest")
-        engine_config_declared = isinstance(manifest, Mapping) and "engine_config" in manifest
+        engine_config_declared = (
+            (only is None or ManifestCategory.ENGINE_CONFIG in only)
+            and isinstance(manifest, Mapping)
+            and "engine_config" in manifest
+        )
         # Compiled in apply order, so fetches happen in the order the report lists.
         kwargs = dict(resolver=self._resolver, content=self._content)
         return DesiredState(
