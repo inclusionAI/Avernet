@@ -50,6 +50,15 @@ runs --all --workflowId "tech-research-v2" --status "failed" --limit 20 --before
 默认 Bot 范围及日志仍按运行环境 bot/owner 查询，无归属旧记录不包含在内；`--all` 按 workflow 查看权限查询；只有该 workflow 的所有 Bot 查看权限才包含来源 Bot 缺失的旧记录。
 内部接口沿用服务级 Ed25519 签名信任，身份和范围位于签名 POST body 中，不构成独立的终端用户登录认证。
 
+## 日志写入长度保护
+
+`@avernet/workflow` 的 `RunLogRepository.insertBatch` 在构造 SQL 参数时，将每条 `message` 限制为最多 65,535 个 UTF-8 字节，包含末尾的 `\n...[truncated]` 标记。未超限消息保持原样；超长消息保留完整 Unicode 码点组成的前缀，不拆开中文字符或 emoji 的代理对，也不修改调用方的数组或条目。截断后的尾部不会另存，不能通过日志翻页恢复。
+
+这是最终写库保护，与查询时显示前 2000 字符的限制不同。即使客户端没有做长度保护，调用 `/api/internal/run-logs/batch` 的正常日志写入也会经过此处。该行为不修改表结构、请求字段或成功响应格式。
+
+OCB 的内部 ClawWeb Host 从 `@avernet/workflow` 导入此 Repository 和路由，不维护另一份限长实现。发布 OCB 时须确保其构建引用包含此修复的 Avernet 版本，并重新构建、部署服务；仅修改工作区源码或升级客户端不代表服务端已生效。此保护不修复上游损坏的 workflow state，也不能代替实际数据库列类型及错误列名的核验。
+
+
 ## 发布顺序
 
 1. Avernet ClawWeb Shared 数据库迁移 v119：增加 `flow_retry_requests.options_json`，增加共享列表查询索引。
