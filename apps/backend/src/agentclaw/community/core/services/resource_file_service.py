@@ -365,12 +365,6 @@ class ResourceFileService(ResourceFilePort):
                 return value
         return ""
 
-    @staticmethod
-    def _basename(entry: Mapping[str, Any]) -> str:
-        """The entry's own name: ``name`` where the engine gives one (``relative_path`` can carry a parent)."""
-        name = entry.get("name")
-        return name if isinstance(name, str) and name else ResourceFileService._leaf(entry).rsplit("/", 1)[-1]
-
     # ── operations ───────────────────────────────────────────────────────────
 
     async def list_dir(
@@ -754,9 +748,13 @@ class ResourceFileService(ResourceFilePort):
 
     @staticmethod
     def _named_in(entries: Any, leaf: str) -> dict[str, Any] | None:
-        """The listing entry named ``leaf``, or ``None`` when the listing has no such child."""
+        """The listing entry named ``leaf``, or ``None`` when the listing has no such child.
+
+        The listings here are never recursive, so an entry's path under the
+        listed directory (``_leaf``) is its name.
+        """
         for entry in entries:
-            if ResourceFileService._basename(entry) == leaf:
+            if ResourceFileService._leaf(entry) == leaf:
                 return entry
         return None
 
