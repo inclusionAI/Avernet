@@ -571,7 +571,9 @@ class TestReplaceManifestRows:
         repo = self._repo_with_rows("data/old.csv", "data/kb/faq.md", "notes/outside.txt")
         svc = _make_service(repo, bot_id="bot7")
 
-        await svc.replace_manifest_rows(files=[("data/kb/faq.md", 3), ("data/new.txt", 1)], created_by="u2")
+        await svc.replace_manifest_rows(
+            files=[("data/kb/faq.md", 3), ("data/new.txt", 1)], owner_id="owner", created_by="u2"
+        )
 
         assert sorted(call.args[0] for call in repo.delete.call_args_list) == ["1", "2"]
         created = [call.args[0] for call in repo.create.call_args_list]
@@ -582,12 +584,13 @@ class TestReplaceManifestRows:
         assert {row["source"] for row in created} == {"manifest"}
         assert {row["bolt_id"] for row in created} == {"bot7"}
         assert {row["created_by"] for row in created} == {"u2"}
+        assert {row["user_id"] for row in created} == {"owner"}, "owned by the owner, stamped with the actor"
 
     @pytest.mark.asyncio
-    async def test_an_empty_written_set_clears_the_root_rows(self):
-        repo = self._repo_with_rows("data/old.csv")
-        await _make_service(repo).replace_manifest_rows(files=[], created_by=None)
-        repo.delete.assert_called_once_with("1")
+    async def test_an_empty_written_set_clears_the_root_rows_and_the_roots_own_row(self):
+        repo = self._repo_with_rows("data", "data/old.csv")
+        await _make_service(repo).replace_manifest_rows(files=[], owner_id="owner", created_by=None)
+        assert sorted(call.args[0] for call in repo.delete.call_args_list) == ["1", "2"]
         repo.create.assert_not_called()
 
     @pytest.mark.asyncio
@@ -595,4 +598,4 @@ class TestReplaceManifestRows:
         repo = self._repo_with_rows()
         repo.create.side_effect = RuntimeError("db down")
         with pytest.raises(RuntimeError):
-            await _make_service(repo).replace_manifest_rows(files=[("data/a.txt", 1)], created_by=None)
+            await _make_service(repo).replace_manifest_rows(files=[("data/a.txt", 1)], owner_id="owner", created_by=None)

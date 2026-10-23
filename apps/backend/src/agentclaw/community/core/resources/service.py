@@ -415,6 +415,7 @@ class ResourceService(ResourceRowsPort):
         self,
         *,
         files: Sequence[tuple[str, int]],
+        owner_id: str,
         created_by: Optional[str],
     ) -> None:
         """Replace this bot's file rows under the resources root with the apply's written set.
@@ -422,26 +423,19 @@ class ResourceService(ResourceRowsPort):
         The rows are the console listing's and the publish pipeline's view of
         the workspace, so after an apply has rewritten ``data/`` in full they
         must say exactly that: every row under the root goes, and one row per
-        written file comes back with ``source="manifest"``. The repository
-        offers no transaction, so this is delete-then-insert through its own
-        calls; nothing is caught, so a write that did not land raises to the
+        written file comes back with ``source="manifest"``, owned by the
+        bot's owner so the console's per-user listing and duplicate check see
+        it, and stamped with the actor who applied. The repository offers no
+        transaction, so this is delete-then-insert through its own calls;
+        nothing is caught, so a write that did not land raises to the
         materialiser, which reports the category partially written and the
         next apply converges it.
         """
-        prefix = f"{RESOURCES_ROOT_DIR}/"
-        for item in self._repo.list_resources(
-            resource_type=ResourceType.FILE.value,
-            parent_path=None,
-            user_id=None,
-            bolt_id=self._bot_id,
-        ):
-            row_path = (item.get("attributes") or {}).get("path") or ""
-            if row_path.startswith(prefix):
-                self._repo.delete(str(item.get("id")))
+        # The root's row and every row beneath it, the same subtree rule a
+        # directory delete uses.
+        await self.delete_file_record(path=RESOURCES_ROOT_DIR)
         for path, size in files:
-            await self.record_uploaded_file(
-                path=path, size=size, user_id=created_by, created_by=created_by, source="manifest"
-            )
+            await self.record_uploaded_file(path=path, size=size, user_id=owner_id, created_by=created_by, source="manifest")
 
     async def record_uploaded_file(
         self,

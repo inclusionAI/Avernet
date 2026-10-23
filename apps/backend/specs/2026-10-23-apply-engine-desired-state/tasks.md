@@ -100,15 +100,16 @@
 - **Depends on:** Task 3
 - **Notes:** the root is named once, as `RESOURCES_ROOT_DIR` in `core/workspace/constants.py` (the vocabulary both the file service and the engine can reach); the engine's `RESOURCES_ROOT` derives from it. The rows reach the materialiser through a new narrow port, `core/ports/resource_rows_port.py` (`ResourceRowsPort`, implemented by `ResourceService`), as a bot-id → port factory on `MaterialiserPorts.resource_rows`, which both DI bundles fill from `ResourceServiceFactoryProtocol`.
 
-### Task 9: Resources materialiser converges by clear then write
+### Task 9: Resources materialiser converges by clear then write `[x]`
 - **Goal:** Close #2162.
 - **Files:** `core/apply_engine/materialisers/resources.py`; `tests/community/core/apply_engine/test_resources_materialiser.py`, `_fakes.py` (`FakeResourceFileService` keeps a tree)
 - **Done when:**
-  - [ ] `plan` classifies from one `list_root()` (no per-member `exists` probes) and reports `removals = listed − declared member paths`; the declared-tree marker is gone.
-  - [ ] `write` clears the root first (a failed clear fails the category with nothing written), then uploads every member in declaration order with today's per-entry outcomes, then replaces the rows; a row failure fails the category.
-  - [ ] Tests: a path declared by the previous document and omitted now is gone; a bot-written file under `data/` is gone and listed in `removals`; a file outside `data/` is untouched; rows match the written set; the platform-store road mirrors each.
-  - [ ] Module docstring rewritten: the "cross-entry removals are v1-empty" paragraph replaced by the resources-root rule and clear-then-write.
+  - [x] `plan` classifies from one `list_root()` (no per-member `exists` probes) and reports `removals = listed − declared member paths`; the declared-tree marker is gone.
+  - [x] `write` clears the root first (a failed clear fails the category with nothing written), then uploads every member in declaration order with today's per-entry outcomes, then replaces the rows; a row failure raises `ConfirmedPartialWriteError`, which the orchestrator reports as a confirmed partial write (the files are on the bot, the rows are not).
+  - [x] Tests: a path declared by the previous document and omitted now is gone; a bot-written file under `data/` is gone and listed in `removals`; a file outside `data/` is untouched; rows match the written set; the platform-store road mirrors each.
+  - [x] Module docstring rewritten: the "cross-entry removals are v1-empty" paragraph replaced by the resources-root rule and clear-then-write.
 - **Depends on:** Task 8
+- **Notes:** the materialiser's production change landed with Task 8's commit (the registry hands it the rows factory, so the two could not be split cleanly); Task 9's commit is the suite, rewritten to the new semantics: three cases whose premise was the per-tree delete are gone, the rest keep their assertions, and the nine acceptance cases above are new.
 
 ## Group 4 — Genome: compile, observe drift, drop the delivery records
 

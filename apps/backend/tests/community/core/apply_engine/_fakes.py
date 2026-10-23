@@ -1074,10 +1074,10 @@ class FakeResourceRows:
         self.replacements: list[dict[str, Any]] = []
         self.fail = fail
 
-    async def replace_manifest_rows(self, *, files, created_by):
+    async def replace_manifest_rows(self, *, files, owner_id, created_by):
         if self.fail:
             raise RuntimeError("rows unavailable")
-        self.replacements.append({"files": list(files), "created_by": created_by})
+        self.replacements.append({"files": list(files), "owner_id": owner_id, "created_by": created_by})
 
     @property
     def rows(self) -> list[tuple[str, int]]:
