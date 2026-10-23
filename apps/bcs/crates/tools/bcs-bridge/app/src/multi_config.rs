@@ -46,15 +46,6 @@ impl Document {
         Self::parse(&std::fs::read_to_string(path).context("Cannot read bridge configuration")?)
     }
 
-    pub fn endpoints(&self) -> Vec<(Option<String>, Option<String>)> {
-        self.groups.iter().map(|group| (
-            group.get("api_url").or_else(|| group.get("registration").and_then(|r| r.get("api_url")))
-                .or_else(|| group.get("bot").and_then(toml::Value::as_array)?.first()?.get("registration")?.get("api_url"))
-                .and_then(toml::Value::as_str).map(str::to_owned),
-            group.get("plugin").and_then(|p| p.get("url")).and_then(toml::Value::as_str).map(str::to_owned),
-        )).collect()
-    }
-
     pub fn bots_document(&self) -> toml::Table {
         let bots = self.groups.iter().filter_map(|g| g.get("bot").and_then(toml::Value::as_array))
             .flatten().cloned().collect();

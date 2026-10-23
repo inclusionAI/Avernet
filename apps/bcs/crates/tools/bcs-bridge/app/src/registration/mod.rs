@@ -187,7 +187,6 @@ impl RegisterArgs {
             }
         }
         crate::multi_config::load(path, app.credentials())?;
-        crate::profile::validate_environment(app.profile(), &source.endpoints())?;
         println!("Bot ID: {}", bots[0].get("bot_id").and_then(toml::Value::as_str).context("Missing saved Bot ID")?);
         println!("Profile is already registered. Existing Bot identity, engine settings and state are retained; no registration request was sent. Use init/start with the same --profile.");
         Ok(true)
@@ -279,10 +278,6 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
             (None, Some(url))
         }
     };
-    let mut endpoints = bootstrap.edit.as_ref().map(|edit| edit.source.endpoints()).unwrap_or_default();
-    if let Some(index) = bootstrap.edit.as_ref().and_then(|edit| edit.target) { endpoints.remove(index); }
-    endpoints.push((Some(api_url.clone()), upstream_url.clone()));
-    crate::profile::validate_environment(app.profile(), &endpoints)?;
     let workspace = workspace::Workspace::prepare(args.cwd.as_deref(), subbots)?;
     if subbots { workspace.check_explicit(&bootstrap.all_bots(), path)?; }
     let cwd = workspace.identity_cwd();

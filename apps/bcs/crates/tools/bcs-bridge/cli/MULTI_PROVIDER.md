@@ -1,10 +1,10 @@
 # Multiple Providers in one bridge
 
 One user still has **one active configuration and one bridge process**. A
-configuration may now contain up to 64 Providers and 256 Bots, all belonging to
-one BCS deployment. Profiles select configurations; startup does not scan or
-combine other profiles. Simultaneous staging/production connections and hot
-reload are not supported.
+configuration may now contain up to 64 Providers and 256 Bots. This change
+is scoped to Providers in one BCS deployment; simultaneous staging/production
+operation is outside its supported scope. Profiles select configurations;
+startup does not scan or combine other profiles. Hot reload is not supported.
 
 ## Existing users
 
@@ -40,10 +40,10 @@ bcs-bridge status --json
 
 Endpoints for an existing Provider cannot silently change on append. New
 Providers use their own explicit endpoints or distribution defaults, not those
-of an unrelated existing Provider. The public distribution compares endpoint
-host/port; distributions can implement `DeployProfile::endpoint_scope` for
-known same-deployment API/WebSocket aliases. Unknown external aliases are not a
-multi-environment feature.
+of an unrelated existing Provider. Registration and startup do not classify
+endpoint hosts/ports or domain aliases as deployments, or reject a configuration
+on that basis. Existing URL validation, endpoint selection and credential
+policies remain unchanged. This is not a guarantee of multi-environment support.
 
 For a Provider already in the file:
 

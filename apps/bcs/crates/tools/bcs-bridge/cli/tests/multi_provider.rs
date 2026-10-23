@@ -76,10 +76,14 @@ async fn legacy_plus_subbots_upgrade_once_and_preserve_all_old_hard_state() {
     let old=seed(home.path(),&api);
     let dbpath=home.path().join(".bcn-bridge/legacy.sqlite3"); let db=std::fs::read(&dbpath).unwrap();
     let oldbot: toml::Value=toml::from_str(&old).unwrap();
-    success(&register(home.path(),&api,"multi","agentpass-subbots",&[]).await);
+    // Different custom endpoints must not imply a deployment mismatch.
+    let upstream="ws://localhost:21001/ws/bot";
+    success(&register(home.path(),&api,"multi","agentpass-subbots",&["--upstream-url",upstream]).await);
     let document:toml::Value=toml::from_str(&read(home.path())).unwrap();
     assert_eq!(document["schema_version"].as_integer(),Some(2));
     let groups=document["provider"].as_array().unwrap(); assert_eq!(groups.len(),2);
+    assert_eq!(groups[0]["plugin"],oldbot["plugin"]);
+    assert_eq!(groups[1]["plugin"]["url"].as_str(),Some(upstream));
     for key in ["provider_bot_ref","bot_id","token","cwd","engine_bin"] { assert_eq!(groups[0]["bot"][0][key],oldbot["bot"][0][key]); }
     assert_eq!(groups[0]["provider_auth"].as_str(),Some("agentpass"));
     assert_eq!(groups[0]["bot"][0]["registration"]["provider_auth"].as_str(),Some("static-bearer"));
@@ -91,7 +95,7 @@ async fn legacy_plus_subbots_upgrade_once_and_preserve_all_old_hard_state() {
     }).collect();
     assert_eq!(backups.len(),1); assert_eq!(std::fs::read_to_string(&backups[0]).unwrap(),old);
     let old_group=groups[0].clone(); let first_new=groups[1]["bot"][0].clone();
-    success(&register(home.path(),&api,"multi","agentpass-subbots",&[]).await);
+    success(&register(home.path(),&api,"multi","agentpass-subbots",&["--upstream-url",upstream]).await);
     let document:toml::Value=toml::from_str(&read(home.path())).unwrap();
     assert_eq!(document["provider"][0],old_group);
     assert_eq!(document["provider"][1]["bot"][0],first_new);
@@ -102,19 +106,17 @@ async fn legacy_plus_subbots_upgrade_once_and_preserve_all_old_hard_state() {
     assert!(!register(home.path(),&api,"multi","agentpass-subbots",&["--bot-id","missing"]).await.status.success());
     assert_eq!(read(home.path()),before); assert_eq!(*calls.lock().unwrap(),2);
     // Explicit reuse is a no-op, including per-Bot resolver metadata.
-    success(&register(home.path(),&api,"multi","agentpass-subbots",&["--bot-id","bot_new_1"]).await);
+    success(&register(home.path(),&api,"multi","agentpass-subbots",&["--bot-id","bot_new_1","--upstream-url",upstream]).await);
     assert_eq!(read(home.path()),before);
+    assert_eq!(*calls.lock().unwrap(),2);
     server.abort();
 }
 
 #[tokio::test]
-async fn running_lock_and_invalid_environment_refuse_upgrade_before_network() {
+async fn running_lock_refuses_upgrade_before_network() {
     let home=tempfile::tempdir().unwrap(); let before=seed(home.path(),"http://127.0.0.1:9");
     let lock=std::fs::File::create(home.path().join(".bcn-bridge/bridge.lock")).unwrap(); lock.try_lock().unwrap();
     let out=register(home.path(),"http://127.0.0.1:9","multi","agentpass-subbots",&[]).await;
     assert!(!out.status.success()); assert!(String::from_utf8_lossy(&out.stderr).contains("stop"));
-    assert_eq!(read(home.path()),before); drop(lock);
-    let out=register(home.path(),"http://127.0.0.1:9","multi","agentpass-subbots",&["--upstream-url","ws://localhost:21001/ws/bot"]).await;
-    assert!(!out.status.success()); assert!(String::from_utf8_lossy(&out.stderr).contains("single BCS environment"));
     assert_eq!(read(home.path()),before);
 }

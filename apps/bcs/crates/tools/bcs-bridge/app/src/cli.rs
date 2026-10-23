@@ -179,7 +179,6 @@ pub(crate) async fn load_start(config_path: &std::path::Path, app: &BridgeApp, c
     let document = crate::multi_config::Document::load(config_path)?;
     let mut providers = crate::multi_config::load_document(&document, config_path, app.credentials())
         .map_err(|error| anyhow::anyhow!("Cannot load bridge configuration at {}: {error}", config_path.display()))?;
-    crate::profile::validate_environment(app.profile(), &document.endpoints())?;
     if let Some(cwd) = cwd_override {
         if providers.len() != 1 || providers[0].config.bots.len() != 1
             || !matches!(providers[0].config.bots[0].engine.as_str(), "codex" | "codex-desktop") {
@@ -235,6 +234,39 @@ mod tests {
             let cli = from_matches(&app, &mut command, &matches);
             let Commands::Register(args) = cli.command else { panic!("expected registration"); };
             assert_eq!(args.model.as_deref(), expected);
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn startup_preserves_custom_endpoints_without_deployment_classification() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bridge.toml");
+        let group = |id: &str, upstream: &str| -> toml::Table {
+            toml::from_str(&format!("provider_id='{id}'\nmode='plugin'\nstate_path='{id}.db'\napi_url='https://api.example/register'\n[plugin]\nurl='{upstream}'\n[[bot]]\nprovider_bot_ref='worker'\nbot_id='bot-{id}'\nengine='codex'\nengine_bin='/bin/true'\ncwd='{}'\n", dir.path().display())).unwrap()
+        };
+        let first_url = "ws://127.0.0.1:21000/ws/bot";
+        let second_url = "ws://localhost:21001/ws/bot";
+        let first = group("first", first_url);
+        let second = group("second", second_url);
+        let legacy = toml::Value::Table(first.clone());
+        let v2 = toml::Value::Table(toml::Table::from_iter([
+            ("schema_version".into(), 2.into()),
+            ("provider".into(), toml::Value::Array(vec![first.into(), second.into()])),
+        ]));
+        let app = BridgeApp::builder().build();
+        for (document, count) in [(legacy, 1), (v2, 2)] {
+            let text = format!("# Keep custom endpoints unchanged\n{}", toml::to_string(&document).unwrap());
+            std::fs::write(&path, &text).unwrap();
+            let config = load_start(&path, &app, None).await.unwrap();
+            assert_eq!(config.providers.len(), count);
+            assert_eq!(config.providers[0].plugin.as_ref().unwrap().url, first_url);
+            if count == 2 { assert_eq!(config.providers[1].plugin.as_ref().unwrap().url, second_url); }
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+            let invalid = text.replace(first_url, "not-a-websocket-url");
+            std::fs::write(&path, &invalid).unwrap();
+            assert!(load_start(&path, &app, None).await.is_err());
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), invalid);
         }
     }
 
