@@ -1,4 +1,4 @@
-"""The manifest content store — platform-side copies of fetched sources (W11, #1510).
+"""The content store — the platform's own copies of fetched and produced bytes (W11, #1510; RSI-03).
 
 The §2.8 hard requirement: content the platform fetches on a manifest's
 behalf is kept as **the platform's own durable copy**, and every step after
@@ -18,7 +18,7 @@ Two halves:
   directory), and reading verifies the hash on the same pass — the store
   hands back bytes it can prove, or it fails.
 - **Provenance** lives in ``ac_manifest_content`` (append-only, one row per
-  store event) via :class:`ManifestContentRepositoryProtocol`.
+  store event) via :class:`ContentStoreRepositoryProtocol`.
 
 Retention, stated against the audit requirement rather than picked: v1
 retains rows and blobs unconditionally — no delete, no sweep, no TTL. Until
@@ -38,31 +38,39 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import httpx
 
-from agentclaw.community.core.bot_config_manifest.content.errors import (
+from agentclaw.community.core.content_store.errors import (
     ContentIntegrityError,
     ContentMissingError,
     ContentStoreError,
 )
-from agentclaw.community.core.bot_config_manifest.content.service_protocol import (
-    ManifestContentServiceProtocol,
+from agentclaw.community.core.content_store.service_protocol import (
+    ContentStoreProtocol,
 )
-from agentclaw.community.core.bot_config_manifest.content.models import (
+from agentclaw.community.core.content_store.models import (
     ContentScope,
     StoredContentRecord,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.errors import (
-    FetchedObject,
+from agentclaw.community.core.content_store.limits import (
+    DIGEST_RE,
+    MAX_AUDIT_ACTOR_CHARS,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.limits import DIGEST_RE
 from agentclaw.community.core.repository.protocols.bot import (
     DEFAULT_RECORD_LIMIT,
-    ManifestContentRepositoryProtocol,
+    ContentStoreRepositoryProtocol,
 )
 from agentclaw.community.log import get_logger
+
+if TYPE_CHECKING:
+    # The receipt type only: the store never fetches, and importing the
+    # transport stack at runtime would make every consumer of the store a
+    # consumer of the Manifest's fetch layer.
+    from agentclaw.community.core.bot_config_manifest.fetch.errors import (
+        FetchedObject,
+    )
 
 logger = get_logger()
 
@@ -78,7 +86,7 @@ logger = get_logger()
 _URL_MAX = 2048
 _CREDENTIAL_NAME_MAX = 128
 _CONTENT_TYPE_MAX = 256
-_MODIFIER_MAX = 1024
+_MODIFIER_MAX = MAX_AUDIT_ACTOR_CHARS
 #: The apply-linkage trio from the DDL — same before-the-blob discipline.
 _APPLY_ID_MAX = 64
 _CATEGORY_MAX = 32
@@ -186,12 +194,12 @@ def _advisory_content_type(value: Optional[str]) -> Optional[str]:
     return None
 
 
-class ManifestContentService(ManifestContentServiceProtocol):
+class ContentStoreService(ContentStoreProtocol):
     """Store fetched bytes once, address them by digest, read them back provably."""
 
     def __init__(
         self,
-        repository: ManifestContentRepositoryProtocol,
+        repository: ContentStoreRepositoryProtocol,
         root: Path,
     ) -> None:
         """Args:

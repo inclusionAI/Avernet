@@ -32,10 +32,15 @@ _CORE = Path(__file__).parents[4] / "src" / "agentclaw" / "community" / "core"
 
 _SQL_DIR = _CORE / "bot_config_manifest" / "sql"
 
-#: Every directory whose DDL this rule governs. ``_SQL_DIR`` stays a single
-#: directory because ``_APPLICATION_SUPPLIED`` addresses files inside it by
-#: name.
-_SQL_DIRS = (_SQL_DIR, _CORE / "bot_startup_script" / "sql")
+#: Every directory whose DDL this rule governs. ``content_store/sql`` holds
+#: ``ac_manifest_content``: the provenance log was built as the Manifest's
+#: W11 and moved out with the content store (#3064), and the DATETIME rule on
+#: its ``fetched_at`` followed it.
+_SQL_DIRS = (
+    _SQL_DIR,
+    _CORE / "bot_startup_script" / "sql",
+    _CORE / "content_store" / "sql",
+)
 
 #: Columns filled by the application, which must stay DATETIME. TIMESTAMP reads
 #: the bound naive value as session-local and converts it, so an instant the
@@ -49,6 +54,13 @@ _SQL_DIRS = (_SQL_DIR, _CORE / "bot_startup_script" / "sql")
 _APPLICATION_SUPPLIED = {
     "2026_08_31_manifest_content.sql": ("fetched_at",),
 }
+
+
+def _sql_file(filename: str) -> Path:
+    """The one file of that name across ``_SQL_DIRS``; a miss is a test bug, not a pass."""
+    found = [directory / filename for directory in _SQL_DIRS if (directory / filename).is_file()]
+    assert len(found) == 1, f"{filename}: expected exactly one match under _SQL_DIRS, got {found}"
+    return found[0]
 
 #: The DDL review standard (研发规范) that gates provisioning on OceanBase.
 #: ac_bot_config_manifest_apply was refused on exactly these two rules -- a
@@ -162,7 +174,7 @@ def _sql_files() -> list[Path]:
 def test_application_supplied_times_are_datetime() -> None:
     """The regression fixed in acb6c1c5: these must not become TIMESTAMP."""
     for filename, columns in _APPLICATION_SUPPLIED.items():
-        tables = _tables(_SQL_DIR / filename)
+        tables = _tables(_sql_file(filename))
         for column in columns:
             found = {
                 table: declarations[column]

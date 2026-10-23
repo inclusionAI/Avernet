@@ -32,9 +32,9 @@ from agentclaw.community.core.repository.protocols.bot.genome import (
     GenomeRefRepositoryProtocol,
     GenomeRevisionRepositoryProtocol,
 )
-from agentclaw.community.core.repository.protocols.bot.manifest_content import (
+from agentclaw.community.core.repository.protocols.bot.content_store import (
     DEFAULT_RECORD_LIMIT,
-    ManifestContentRepositoryProtocol,
+    ContentStoreRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot.collaborator import (
     CollaboratorRepositoryProtocol,
@@ -79,7 +79,7 @@ __all__ = [
     "GenomePromotionRepositoryProtocol",
     "GenomeRefRepositoryProtocol",
     "GenomeRevisionRepositoryProtocol",
-    "ManifestContentRepositoryProtocol",
+    "ContentStoreRepositoryProtocol",
     "RenderScreenRepository",
     "SourceCredentialRepositoryProtocol",
     "TemplateRepository",

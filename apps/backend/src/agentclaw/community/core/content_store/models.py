@@ -6,7 +6,7 @@ bootstrap emits the table — the side-effect import lives in ``core/schema.py``
 Two halves, one mechanism (§2.8, W11):
 
 - the BYTES live in the content-addressed blob directory owned by
-  :class:`~agentclaw.community.core.bot_config_manifest.content.service.ManifestContentService`
+  :class:`~agentclaw.community.core.content_store.service.ContentStoreService`
   — never in this table, because schema §5 lets one entry be 100–200 MiB;
 - this table is the append-only PROVENANCE LOG — one row per store event,
   carrying who fetched what from where, when, and under which credential
@@ -32,6 +32,7 @@ from sqlalchemy import (
 from sqlalchemy.sql import func
 
 from agentclaw.community.core.base import Base
+from agentclaw.community.core.content_store.limits import MAX_AUDIT_ACTOR_CHARS
 from agentclaw.community.utils.avernet_tenant_guard import (
     register_avernet_tenant_guard,
 )
@@ -132,7 +133,11 @@ class ManifestContentModel(Base):
     apply_id = Column(String(64), nullable=True, comment="触发拉取的 apply 键")
     category = Column(String(32), nullable=True, comment="条目类目")
     entry_identity = Column(String(256), nullable=True, comment="条目标识")
-    modifier = Column(String(1024), nullable=False, default="", comment="审计：触发拉取的身份")
+    # The audit identity width the Genome Registry's actor columns share; the
+    # DDL declares the same number (test-pinned).
+    modifier = Column(
+        String(MAX_AUDIT_ACTOR_CHARS), nullable=False, default="", comment="审计：触发拉取的身份"
+    )
 
     # Data-isolation tenant — same load-bearing role as W1's table: a bot_id
     # is unique only within a tenant, and two colliding legacy "default" bots

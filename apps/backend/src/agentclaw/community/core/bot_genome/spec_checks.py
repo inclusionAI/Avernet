@@ -21,7 +21,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
+from agentclaw.community.core.content_store import (
     canonical_tree_bytes,
     decode_tree_bytes,
 )

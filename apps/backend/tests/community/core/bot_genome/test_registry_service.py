@@ -11,7 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
-from agentclaw.community.core.bot_config_manifest.content import ContentScope
+from agentclaw.community.core.content_store import ContentScope
 from agentclaw.community.core.bot_genome.canonical import canonicalize, sha256_digest
 from agentclaw.community.core.bot_genome.errors import (
     CaptureRefused,
@@ -48,7 +48,7 @@ from tests.community.core.bot_genome.example_blobs import (
 )
 from tests.community.core.bot_genome.service_fixtures import BOT, OTHER_BOT, OWNER, RUN, World
 from tests.community.core.bot_genome.test_capture import FakeReader
-from tests.community.core.bot_config_manifest.content.test_content_store import _fetched
+from tests.community.core.content_store.test_content_store import _fetched
 
 REVISIONS = load_revisions()
 SUPPORT_SPEC = spec_of(SUPPORT_BOT)

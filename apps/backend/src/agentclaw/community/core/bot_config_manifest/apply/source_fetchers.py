@@ -103,10 +103,10 @@ from agentclaw.community.core.bot_config_manifest.apply.fetch_context import (
 from agentclaw.community.core.bot_config_manifest.apply.source_session import (
     SourceSession,
 )
-from agentclaw.community.core.bot_config_manifest.content.service_protocol import (
-    ManifestContentServiceProtocol,
+from agentclaw.community.core.content_store.service_protocol import (
+    ContentStoreProtocol,
 )
-from agentclaw.community.core.bot_config_manifest.content.errors import (
+from agentclaw.community.core.content_store.errors import (
     ContentMissingError,
     ContentStoreError,
     ContentStoreFault,
@@ -305,7 +305,7 @@ class ObjectStoreFetcher(SourceFetcher):
 
     def __init__(
         self,
-        content: ManifestContentServiceProtocol,
+        content: ContentStoreProtocol,
         credentials: SourceCredentialServiceProtocol,
         objects: AliyunObjectStore,
     ) -> None:
@@ -542,7 +542,7 @@ class GitSourceFetcher(SourceFetcher):
 
     def __init__(
         self,
-        content: ManifestContentServiceProtocol,
+        content: ContentStoreProtocol,
         credentials: SourceCredentialServiceProtocol,
     ) -> None:
         self._content = content
@@ -758,7 +758,7 @@ if _UNSERVED:
 
 
 def build_fetchers(
-    content: ManifestContentServiceProtocol,
+    content: ContentStoreProtocol,
     credentials: SourceCredentialServiceProtocol,
     objects: AliyunObjectStore,
 ) -> Mapping[SourceKind, SourceFetcher]:

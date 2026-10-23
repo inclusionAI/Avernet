@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import canonical_tree_bytes, decode_tree_bytes
+from agentclaw.community.core.content_store import canonical_tree_bytes, decode_tree_bytes
 from agentclaw.community.core.bot_genome.canonical import canonicalize, revision_id, sha256_digest
 from agentclaw.community.core.bot_genome.errors import ContentNotReachable, PatchRejected
 from agentclaw.community.core.bot_genome.patch import apply_patch, shape_reasons

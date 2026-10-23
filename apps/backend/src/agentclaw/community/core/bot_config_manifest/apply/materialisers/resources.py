@@ -86,6 +86,8 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
     EntryDelivery,
     EntryFetchError,
     archive_refusal,
+)
+from agentclaw.community.core.content_store import (
     canonical_tree_bytes,
 )
 from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (

@@ -1,4 +1,4 @@
-"""Unit tests for ManifestContentRepository.
+"""Unit tests for ContentStoreRepository, and the DDL/ORM agreement of ``ac_manifest_content``.
 
 Exercised against in-memory / file-backed SQLite — the same single ORM body
 that runs on prod OceanBase, so the append-only shape and the tenant guard
@@ -10,19 +10,23 @@ that way — repetition is the audit fact, not a bug to dedupe away.
 """
 from __future__ import annotations
 
+import re
 from contextlib import contextmanager
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.bot_config_manifest.content.models import (
-    ManifestContentModel,  # noqa: F401  side-effect: registers on Base.metadata
+from agentclaw.community.core.content_store import models as content_models
+from agentclaw.community.core.content_store.limits import MAX_AUDIT_ACTOR_CHARS
+from agentclaw.community.core.content_store.models import (
+    ManifestContentModel,  # side-effect: registers on Base.metadata
     StoredContentRecord,
 )
-from agentclaw.community.core.repository.implementations.bot.manifest_content import (
-    ManifestContentRepository,
+from agentclaw.community.core.repository.implementations.bot.content_store import (
+    ContentStoreRepository,
 )
 
 
@@ -54,7 +58,7 @@ def repo():
     from agentclaw.community.core.base import Base
 
     Base.metadata.create_all(engine)
-    return ManifestContentRepository(InMemorySqliteDB(engine))
+    return ContentStoreRepository(InMemorySqliteDB(engine))
 
 
 def _record(*, env="dev", entity_id="ent_a", bot_id="bot_1",
@@ -197,7 +201,7 @@ def test_latest_for_confines_to_the_request_tenant(tmp_path):
         connect_args={"check_same_thread": False},
     )
     Base.metadata.create_all(engine)
-    repo = ManifestContentRepository(InMemorySqliteDB(engine))
+    repo = ContentStoreRepository(InMemorySqliteDB(engine))
     shared = dict(env="dev", entity_id="default", bot_id="shared-bot-id")
     url = "https://content.example/shared.bin"
 
@@ -233,7 +237,7 @@ def test_two_tenants_sharing_a_bot_id_read_only_their_own_receipts(tmp_path):
         connect_args={"check_same_thread": False},
     )
     Base.metadata.create_all(engine)
-    repo = ManifestContentRepository(InMemorySqliteDB(engine))
+    repo = ContentStoreRepository(InMemorySqliteDB(engine))
     shared = dict(env="dev", entity_id="default", bot_id="shared-bot-id")
 
     with avernet_tenant_scope("tenant-a"):
@@ -260,3 +264,39 @@ def test_has_digest_is_true_only_for_the_bot_that_holds_a_row(repo):
     axes = dict(env="dev", entity_id="ent_a", bot_id="bot_1", digest=digest)
     assert repo.has_digest(**axes, source_url_prefix="produced://genome/") is False
     assert repo.has_digest(**axes, source_url_prefix="produced://genome_") is False, "LIKE wildcards are escaped"
+
+
+# -- the DDL and the ORM agree ---------------------------------------------------------------------
+
+_DDL = Path(content_models.__file__).resolve().parent / "sql" / "2026_08_31_manifest_content.sql"
+
+
+def _ddl_columns() -> dict[str, str]:
+    """``ac_manifest_content``'s columns as declared, name -> the rest of the line."""
+    columns: dict[str, str] = {}
+    inside = False
+    for line in _DDL.read_text(encoding="utf-8").splitlines():
+        if re.match(r"CREATE TABLE `ac_manifest_content`", line):
+            inside = True
+            continue
+        if not inside or line.lstrip().startswith(("--", "PRIMARY", "UNIQUE", "KEY")):
+            continue
+        if line.startswith(")"):
+            break
+        column = re.match(r"\s+`(\w+)`\s+(.*?),?$", line)
+        if column:
+            columns[column.group(1)] = column.group(2)
+    return columns
+
+
+def test_ddl_columns_match_the_orm() -> None:
+    ddl = _ddl_columns()
+    orm = [column.name for column in ManifestContentModel.__table__.columns]
+    assert sorted(ddl) == sorted(orm), f"DDL {sorted(ddl)} vs ORM {sorted(orm)}"
+
+
+def test_the_audit_identity_width_is_the_shared_constant_on_both_sides() -> None:
+    """``modifier`` is sized by MAX_AUDIT_ACTOR_CHARS, the bound the Genome Registry's actor columns share."""
+    assert _ddl_columns()["modifier"].startswith(f"varchar({MAX_AUDIT_ACTOR_CHARS})")
+    assert ManifestContentModel.__table__.columns["modifier"].type.length == MAX_AUDIT_ACTOR_CHARS
+    assert MAX_AUDIT_ACTOR_CHARS == 1100

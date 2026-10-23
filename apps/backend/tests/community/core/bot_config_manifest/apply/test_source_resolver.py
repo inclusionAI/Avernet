@@ -341,7 +341,7 @@ def test_a_pinned_blob_that_is_corrupt_loudly_fails_the_entry(objects_rig):
 
 def test_a_store_side_refusal_of_the_lookup_is_the_entrys_error(objects_rig):
     content, _, pipeline = objects_rig
-    from agentclaw.community.core.bot_config_manifest.content.errors import (
+    from agentclaw.community.core.content_store.errors import (
         ContentStoreError,
     )
 
@@ -359,7 +359,7 @@ def test_a_store_side_refusal_of_the_filing_is_the_entrys_error(objects_rig):
     with the store's words, not the whole category under a wrapped 'resolve
     failed' surprise."""
     content, objects, pipeline = objects_rig
-    from agentclaw.community.core.bot_config_manifest.content.errors import (
+    from agentclaw.community.core.content_store.errors import (
         ContentStoreError,
     )
 

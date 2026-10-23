@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import canonical_tree_bytes, decode_tree_bytes
+from agentclaw.community.core.content_store import canonical_tree_bytes, decode_tree_bytes
 from agentclaw.community.core.bot_genome.canonical import sha256_digest
 from agentclaw.community.core.bot_genome.capture import (
     CapturedFile,

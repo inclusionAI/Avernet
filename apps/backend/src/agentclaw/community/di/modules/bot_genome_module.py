@@ -22,7 +22,7 @@ from agentclaw.community.api.bot_genome_registry_service import GenomeRegistryPr
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
     BotConfigManifestApplyServiceProtocol,
 )
-from agentclaw.community.core.bot_config_manifest.content import ManifestContentServiceProtocol
+from agentclaw.community.core.content_store import ContentStoreProtocol
 from agentclaw.community.core.bot_config_manifest.delivery_mode import TeclawDeliveryMode
 from agentclaw.community.core.bot_genome.capture import BotStateReader
 from agentclaw.community.core.bot_genome.capture.bot_state import PlatformBotStateReader
@@ -116,7 +116,7 @@ class BotGenomeModule(Module):
         refs: GenomeRefRepositoryProtocol,
         patches: GenomePatchRepositoryProtocol,
         promotions: GenomePromotionRepositoryProtocol,
-        content: ManifestContentServiceProtocol,
+        content: ContentStoreProtocol,
         state_reader: Callable[[], BotStateReader],
         validator: Callable[[], SkillPackageValidator],
         mcp_auth: Callable[[], MCPAuthServiceProtocol],

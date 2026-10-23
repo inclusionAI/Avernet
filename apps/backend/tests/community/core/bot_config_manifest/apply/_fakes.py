@@ -109,7 +109,7 @@ class FakeManifestContent:
         return record
 
     def read(self, digest: str) -> bytes:
-        from agentclaw.community.core.bot_config_manifest.content.errors import (
+        from agentclaw.community.core.content_store.errors import (
             ContentIntegrityError,
             ContentMissingError,
         )

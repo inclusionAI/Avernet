@@ -21,9 +21,8 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
     GitDelivery,
     GitEntrySource,
     archive_refusal,
-    canonical_tree_bytes,
-    decode_tree_bytes,
 )
+from agentclaw.community.core.content_store import canonical_tree_bytes
 from agentclaw.community.core.bot_config_manifest.fetch.errors import (
     FetchRefusedError,
 )
@@ -265,35 +264,6 @@ def test_a_tree_offers_no_digest_for_the_pin_belt_to_compare():
     ``digest`` on a git source — so ``None`` is the honest answer, and the
     belt reads it as "nothing to compare"."""
     assert _git().digest() is None
-
-
-# ── the canonical tree form ──────────────────────────────────────────────────
-
-
-def test_the_canonical_form_round_trips_and_sorts():
-    members = [("z.md", b"last"), ("a/b.md", b"first")]
-    assert decode_tree_bytes(canonical_tree_bytes(members)) == sorted(members)
-
-
-def test_two_different_trees_cannot_be_made_to_hash_alike():
-    """Length-prefixed, not delimiter-joined: a delimiter is something a path
-    or a payload could contain, and a tree that could be made to frame as
-    another tree is a receipt that proves nothing."""
-    assert canonical_tree_bytes([("a", b"b"), ("c", b"d")]) != canonical_tree_bytes(
-        [("a", b"b\nc"), ("", b"d")]
-    )
-
-
-@pytest.mark.parametrize(
-    "blob",
-    [b"", b"PK\x03\x04 a real zip", canonical_tree_bytes([("a.md", b"0123456789")])[:-4]],
-)
-def test_what_is_not_a_canonical_tree_decodes_to_none(blob):
-    """``None``, never an exception: the caller is asking "is this a stored
-    tree or an archive?", and a shape it does not recognise is an answer. A
-    truncated one is the same answer — a receipt that does not decode cleanly
-    must not half-deliver a tree."""
-    assert decode_tree_bytes(blob) is None
 
 
 # ── the shared archive rule ──────────────────────────────────────────────────

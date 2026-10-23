@@ -151,7 +151,11 @@ CREATE TABLE `ac_manifest_content` (
   `apply_id`      varchar(64)   DEFAULT NULL COMMENT '触发拉取的 apply（W4 报告键；干跑为 NULL）',
   `category`      varchar(32)   DEFAULT NULL COMMENT '条目类目（skills/identity/…；条目维度之一）',
   `entry_identity` varchar(256) DEFAULT NULL COMMENT '条目标识（对账锚外的维度：skill name / identity type / …）',
-  `modifier`      varchar(1024) NOT NULL DEFAULT '' COMMENT '审计：触发拉取的身份',
+  -- 1100 is MAX_AUDIT_ACTOR_CHARS (content_store/limits.py), the width every
+  -- audit-identity column the store and the Genome Registry write shares. It
+  -- holds `app:<bigint>:on-behalf-of:<1024-char user id>` (4 + 20 + 14 + 1024
+  -- = 1062); the ORM column takes the same constant (test-pinned).
+  `modifier`      varchar(1100) NOT NULL DEFAULT '' COMMENT '审计：触发拉取的身份',
   `gmt_create`    timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `gmt_modified`  timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
   PRIMARY KEY (`id`),

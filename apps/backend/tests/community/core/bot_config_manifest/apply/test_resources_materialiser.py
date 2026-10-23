@@ -1681,7 +1681,7 @@ def test_a_git_sourced_tree_files_one_receipt_not_one_per_member():
     assert len(stub.filed) == 1
     assert stub.filed[0]["entry_identity"] == "data/kb/"
     # The canonical form is deterministic and injective: same tree, same bytes.
-    from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (  # noqa: E501
+    from agentclaw.community.core.content_store import (
         canonical_tree_bytes,
     )
 
@@ -1726,7 +1726,7 @@ def test_the_canonical_tree_form_round_trips():
     """`keep_last` is the DEFAULT, and it promises the bot keeps running what
     it has. A stored form with no decoder cannot keep that promise, so the
     canonical bytes are reversible and self-describing."""
-    from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (  # noqa: E501
+    from agentclaw.community.core.content_store import (
         canonical_tree_bytes,
         decode_tree_bytes,
     )
@@ -1746,7 +1746,7 @@ def test_the_canonical_tree_form_round_trips():
 def test_bytes_that_are_not_a_canonical_tree_decode_to_none():
     """`None` is an answer, not a fault: the caller is asking "tree or
     archive?", and a truncated receipt must not half-deliver a tree."""
-    from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (  # noqa: E501
+    from agentclaw.community.core.content_store import (
         canonical_tree_bytes,
         decode_tree_bytes,
     )
@@ -1765,7 +1765,7 @@ def test_keep_last_delivers_a_stored_git_tree_instead_of_failing():
     about a field a git source may not even carry. The stored copy now comes
     back as the tree it was.
     """
-    from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (  # noqa: E501
+    from agentclaw.community.core.content_store import (
         canonical_tree_bytes,
     )
 

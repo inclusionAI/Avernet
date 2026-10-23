@@ -17,7 +17,7 @@ import difflib
 import json
 from typing import Any
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import decode_tree_bytes
+from agentclaw.community.core.content_store import decode_tree_bytes
 from agentclaw.community.core.bot_genome import contract, gene_paths
 from agentclaw.community.core.bot_genome.canonical import loads_strict
 from agentclaw.community.core.bot_genome.limits import MAX_DIFF_BYTES

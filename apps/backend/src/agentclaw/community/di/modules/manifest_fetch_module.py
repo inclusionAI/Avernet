@@ -48,11 +48,11 @@ from agentclaw.community.core.ports.identity_file_port import (
 from agentclaw.community.core.ports.resource_file_port import (
     ResourceFilePort,
 )
-from agentclaw.community.core.bot_config_manifest.content.service import (
-    ManifestContentService,
+from agentclaw.community.core.content_store.service import (
+    ContentStoreService,
 )
-from agentclaw.community.core.bot_config_manifest.content.service_protocol import (
-    ManifestContentServiceProtocol,
+from agentclaw.community.core.content_store.service_protocol import (
+    ContentStoreProtocol,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
     GitSourceClient,
@@ -65,7 +65,7 @@ from agentclaw.community.core.repository.protocols.bot.cli_tool import (
     BotCliToolRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import (
-    ManifestContentRepositoryProtocol,
+    ContentStoreRepositoryProtocol,
 )
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
@@ -160,7 +160,7 @@ class ManifestFetchModule(Module):
         from agentclaw.community.core.bot_config_manifest.delivery_mode import (
             teclaw_delivery_mode_from_config,
         )
-        from agentclaw.community.core.bot_config_manifest.content.settings import (
+        from agentclaw.community.core.content_store.settings import (
             content_store_root_from_config,
         )
         from agentclaw.community.core.bot_config_manifest.fetch.limits import (
@@ -285,11 +285,11 @@ class ManifestFetchModule(Module):
     @inject
     def manifest_content_service(
         self,
-        repository: ManifestContentRepositoryProtocol,
+        repository: ContentStoreRepositoryProtocol,
         manifest_config: cfg.BotConfigManifestConfig,
-    ) -> ManifestContentServiceProtocol:
+    ) -> ContentStoreProtocol:
         """The W11 content store: blob root from the typed config cluster."""
-        return ManifestContentService(
+        return ContentStoreService(
             repository,
             Path(manifest_config.content_store_dir),
         )
@@ -299,7 +299,7 @@ class ManifestFetchModule(Module):
     @inject
     def manifest_entry_fetcher(
         self,
-        content: ManifestContentServiceProtocol,
+        content: ContentStoreProtocol,
         credentials: SourceCredentialServiceProtocol,
         objects: AliyunObjectStore,
     ) -> DeclaredSourceResolver:

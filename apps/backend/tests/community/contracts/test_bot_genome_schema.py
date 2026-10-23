@@ -27,7 +27,7 @@ import pytest
 import yaml
 from referencing import Registry, Resource
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
+from agentclaw.community.core.content_store import (
     canonical_tree_bytes,
     decode_tree_bytes,
 )

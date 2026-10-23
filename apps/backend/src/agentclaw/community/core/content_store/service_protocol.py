@@ -1,4 +1,4 @@
-"""Manifest content store service contract (issue #1510, W11).
+"""Content store service contract (issue #1510, W11; the Genome Registry's produced-bytes path, RSI-03).
 
 Every member is ``@abstractmethod``: an implementation that omits one fails
 at construction naming the missing member, instead of raising
@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.bot_config_manifest.content.models import (
+    from agentclaw.community.core.content_store.models import (
         ContentScope,
         StoredContentRecord,
     )
@@ -23,12 +23,12 @@ if TYPE_CHECKING:
         FetchedObject,
     )
     from agentclaw.community.core.repository.protocols.bot import (
-        ManifestContentRepositoryProtocol,
+        ContentStoreRepositoryProtocol,
     )
 
 
 @runtime_checkable
-class ManifestContentServiceProtocol(Protocol):
+class ContentStoreProtocol(Protocol):
     """内容存储服务接口(§2.8).
 
     One mechanism behind three consumers — audit, delivery, ``keep_last`` —
@@ -40,7 +40,7 @@ class ManifestContentServiceProtocol(Protocol):
     @abstractmethod
     def __init__(
         self,
-        repository: ManifestContentRepositoryProtocol,
+        repository: ContentStoreRepositoryProtocol,
         root: Path,
     ) -> None:
         """The blob tree root is a constructor value — a config-borne

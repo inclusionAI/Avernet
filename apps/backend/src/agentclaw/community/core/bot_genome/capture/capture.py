@@ -20,7 +20,7 @@ from typing import Any, NamedTuple, Protocol, TypeVar
 
 from pydantic import ValidationError
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import canonical_tree_bytes
+from agentclaw.community.core.content_store import canonical_tree_bytes
 from agentclaw.community.core.bot_genome.canonical import sha256_digest
 from agentclaw.community.core.bot_genome.errors import CaptureRefused, Reason
 from agentclaw.community.core.bot_genome.models import BotRef, ProducedBlob

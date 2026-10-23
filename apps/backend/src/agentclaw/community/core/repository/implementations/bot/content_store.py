@@ -1,6 +1,6 @@
 """溯源日志 Repository (prod OceanBase + local SQLite).
 
-One ORM implementation behind ``ManifestContentRepositoryProtocol``. The only
+One ORM implementation behind ``ContentStoreRepositoryProtocol``. The only
 per-environment difference is the injected :class:`DatabasePlugin`:
 ``orm_session()`` yields a SQLAlchemy ``Session`` in both runtimes, so this
 single body runs unchanged on OceanBase (prod) and SQLite (local).
@@ -22,18 +22,18 @@ from typing import Optional
 
 from injector import inject
 
-from agentclaw.community.core.bot_config_manifest.content.models import (
+from agentclaw.community.core.content_store.models import (
     ManifestContentModel,
     StoredContentRecord,
 )
 from agentclaw.community.core.repository.protocols.bot import (
     DEFAULT_RECORD_LIMIT,
-    ManifestContentRepositoryProtocol,
+    ContentStoreRepositoryProtocol,
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
 
-class ManifestContentRepository(ManifestContentRepositoryProtocol):
+class ContentStoreRepository(ContentStoreRepositoryProtocol):
     """manifest 内容溯源仓库实现。"""
 
     @inject

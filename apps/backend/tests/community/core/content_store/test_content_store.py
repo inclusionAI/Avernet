@@ -17,19 +17,19 @@ from pathlib import Path
 import pytest
 import yaml
 
-from agentclaw.community.core.bot_config_manifest.content.errors import (
+from agentclaw.community.core.content_store.errors import (
     ContentIntegrityError,
     ContentMissingError,
     ContentStoreError,
 )
-from agentclaw.community.core.bot_config_manifest.content.models import (
+from agentclaw.community.core.content_store.models import (
     ContentScope,
     StoredContentRecord,
 )
-from agentclaw.community.core.bot_config_manifest.content.service import (
-    ManifestContentService,
+from agentclaw.community.core.content_store.service import (
+    ContentStoreService,
 )
-from agentclaw.community.core.bot_config_manifest.content.settings import (
+from agentclaw.community.core.content_store.settings import (
     DEFAULT_CONTENT_STORE_DIR,
     content_store_root_from_config,
 )
@@ -99,9 +99,9 @@ def _fetched(body: bytes = BODY, *, url: str = "https://content.example/a.bin",
     )
 
 
-def _service(tmp_path: Path) -> tuple[ManifestContentService, _FakeRepository]:
+def _service(tmp_path: Path) -> tuple[ContentStoreService, _FakeRepository]:
     repo = _FakeRepository()
-    return ManifestContentService(repo, tmp_path / "store"), repo
+    return ContentStoreService(repo, tmp_path / "store"), repo
 
 
 def _blob_file(tmp_path: Path, digest: str) -> Path:
@@ -358,7 +358,7 @@ def test_a_repository_failure_after_the_blob_is_the_standard_shape(tmp_path):
     # and the next store of the same digest reuses them without rewriting.
     repo = _FakeRepository()
     repo.fail_next = True
-    service = ManifestContentService(repo, tmp_path / "store")
+    service = ContentStoreService(repo, tmp_path / "store")
     with pytest.raises(RuntimeError, match="row insert failed"):
         service.store(_fetched(), scope=SCOPE,
                       source_url="https://content.example/a.bin")
@@ -463,7 +463,7 @@ def test_an_unparseable_provenance_url_is_refused(tmp_path):
 def test_a_relative_root_resolves_against_the_cwd(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     repo = _FakeRepository()
-    service = ManifestContentService(repo, Path(DEFAULT_CONTENT_STORE_DIR))
+    service = ContentStoreService(repo, Path(DEFAULT_CONTENT_STORE_DIR))
     service.store(_fetched(), scope=SCOPE, source_url="https://content.example/a.bin")
     assert (tmp_path / DEFAULT_CONTENT_STORE_DIR / "blobs").is_dir()
 
@@ -498,7 +498,7 @@ def test_a_malformed_root_is_a_configuration_error(settings):
 
 
 _SHIPPED_APP_YAML = (
-    pathlib.Path(__file__).resolve().parents[5]
+    pathlib.Path(__file__).resolve().parents[4]
     / "src" / "agentclaw" / "community" / "configs" / "application.yaml"
 )
 

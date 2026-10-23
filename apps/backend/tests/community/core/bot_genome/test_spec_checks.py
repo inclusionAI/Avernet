@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import canonical_tree_bytes
+from agentclaw.community.core.content_store import canonical_tree_bytes
 from agentclaw.community.core.bot_genome.limits import MAX_PERSONA_BYTES
 from agentclaw.community.core.bot_genome.limits import MAX_SCRIPT_BYTES
 from agentclaw.community.core.bot_genome.spec_checks import (

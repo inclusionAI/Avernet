@@ -81,8 +81,8 @@ from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
 from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKind
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.bot_config_manifest.content.service_protocol import (
-        ManifestContentServiceProtocol,
+    from agentclaw.community.core.content_store.service_protocol import (
+        ContentStoreProtocol,
     )
     from agentclaw.community.core.bot_config_manifest.credentials.service_protocol import (
         SourceCredentialServiceProtocol,
@@ -107,7 +107,7 @@ class DeclaredSourceResolver:
 
     def __init__(
         self,
-        content: ManifestContentServiceProtocol,
+        content: ContentStoreProtocol,
         credentials: SourceCredentialServiceProtocol,
         objects: AliyunObjectStore,
     ) -> None:

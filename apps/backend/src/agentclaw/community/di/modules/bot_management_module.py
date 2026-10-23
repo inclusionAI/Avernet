@@ -64,7 +64,7 @@ from agentclaw.community.core.repository.protocols.bot import (
     BotConfigManifestRepositoryProtocol,
     BotRestartLockRepositoryProtocol,
     BotStartupScriptRepositoryProtocol,
-    ManifestContentRepositoryProtocol,
+    ContentStoreRepositoryProtocol,
     SourceCredentialRepositoryProtocol,
 )
 from agentclaw.community.api.bot_startup_script_service import (
@@ -240,8 +240,8 @@ from agentclaw.community.core.repository.implementations.bot.startup_script impo
 from agentclaw.community.core.repository.implementations.bot.config_manifest import (
     BotConfigManifestRepository,
 )
-from agentclaw.community.core.repository.implementations.bot.manifest_content import (
-    ManifestContentRepository,
+from agentclaw.community.core.repository.implementations.bot.content_store import (
+    ContentStoreRepository,
 )
 from agentclaw.community.core.repository.implementations.bot.source_credential import (
     SourceCredentialRepository,
@@ -363,14 +363,14 @@ class BotManagementModule(Module):
             to=BotConfigManifestRepository,
             scope=singleton,
         )
-        # ManifestContentRepository: the append-only provenance log behind
+        # ContentStoreRepository: the append-only provenance log behind
         # W11's content store. Only the repository binds now — the store
         # service itself is constructed by W4's apply wiring, which owns the
         # content_store_dir config read (same "declared machine part" shape
         # as W2's fetcher before an orchestrator consumed it).
         binder.bind(
-            ManifestContentRepositoryProtocol,
-            to=ManifestContentRepository,
+            ContentStoreRepositoryProtocol,
+            to=ContentStoreRepository,
             scope=singleton,
         )
         # Bound here rather than in a module of its own: the manifest service

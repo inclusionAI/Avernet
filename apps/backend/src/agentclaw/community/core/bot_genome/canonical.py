@@ -23,7 +23,7 @@ import hashlib
 import json
 from typing import Any
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
+from agentclaw.community.core.content_store import (
     canonical_tree_bytes,
 )
 

@@ -21,8 +21,8 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplySta
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
     BotConfigManifestApplyServiceProtocol,
 )
-from agentclaw.community.core.bot_config_manifest.content import ContentScope, ManifestContentServiceProtocol
-from agentclaw.community.core.bot_config_manifest.content.errors import ContentStoreError
+from agentclaw.community.core.content_store import ContentScope, ContentStoreProtocol
+from agentclaw.community.core.content_store.errors import ContentStoreError
 from agentclaw.community.core.bot_config_manifest.fetch.limits import DIGEST_RE
 from agentclaw.community.core.bot_genome import contract
 from agentclaw.community.core.bot_genome.canonical import canonicalize, loads_strict, revision_id, sha256_digest
@@ -123,7 +123,7 @@ class _BotContent(ContentReader):
     A digest is readable only when the registry filed a row for it for this bot.
     """
 
-    def __init__(self, content: ManifestContentServiceProtocol, scope: ContentScope) -> None:
+    def __init__(self, content: ContentStoreProtocol, scope: ContentScope) -> None:
         self._content, self._scope = content, scope
 
     def read(self, digest: str) -> bytes:
@@ -155,7 +155,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         refs: GenomeRefRepositoryProtocol,
         patches: GenomePatchRepositoryProtocol,
         promotions: GenomePromotionRepositoryProtocol,
-        content: ManifestContentServiceProtocol,
+        content: ContentStoreProtocol,
         state_reader: Callable[[], BotStateReader],
         checks: SpecChecks,
         validator: SkillPackageValidator,

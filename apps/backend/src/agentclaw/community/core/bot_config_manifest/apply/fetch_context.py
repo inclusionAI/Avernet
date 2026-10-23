@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 from agentclaw.community.core.bot_config_manifest.apply.source_session import (
     SourceSession,
 )
-from agentclaw.community.core.bot_config_manifest.content.models import (
+from agentclaw.community.core.content_store.models import (
     ContentScope,
 )
 

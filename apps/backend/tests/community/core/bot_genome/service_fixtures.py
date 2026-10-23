@@ -11,7 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
-from agentclaw.community.core.bot_config_manifest.content.service import ManifestContentService
+from agentclaw.community.core.content_store.service import ContentStoreService
 from agentclaw.community.core.bot_genome.models import ApplyResult, BotRef, Provenance, ProvenanceKind
 from agentclaw.community.core.bot_genome.promotion.service import GenomePromotionService
 from agentclaw.community.core.bot_genome.registry import GenomeRegistryService
@@ -22,7 +22,7 @@ from agentclaw.community.core.repository.implementations.bot.genome import (
     GenomeRefRepository,
     GenomeRevisionRepository,
 )
-from agentclaw.community.core.repository.implementations.bot.manifest_content import ManifestContentRepository
+from agentclaw.community.core.repository.implementations.bot.content_store import ContentStoreRepository
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 from tests.community.core.bot_genome.test_capture import FakeReader
@@ -111,7 +111,7 @@ class World:
         self.refs = GenomeRefRepository(self.db)
         self.patches = GenomePatchRepository(self.db)
         self.promotions = GenomePromotionRepository(self.db)
-        self.content = ManifestContentService(ManifestContentRepository(self.db), tmp_path / "store")
+        self.content = ContentStoreService(ContentStoreRepository(self.db), tmp_path / "store")
         self.reader = FakeReader()
         self.auth, self.config = FakeAuth(), FakeConfig()
         self.applies = FakeApplies()

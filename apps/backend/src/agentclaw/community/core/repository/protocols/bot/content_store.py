@@ -11,7 +11,7 @@ from abc import abstractmethod
 from typing import Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.bot_config_manifest.content.models import (
+    from agentclaw.community.core.content_store.models import (
         StoredContentRecord,
     )
 
@@ -23,7 +23,7 @@ DEFAULT_RECORD_LIMIT = 50
 
 
 @runtime_checkable
-class ManifestContentRepositoryProtocol(Protocol):
+class ContentStoreRepositoryProtocol(Protocol):
     """manifest 内容溯源日志仓库接口.
 
     Backed by ``ac_manifest_content`` — an append-only log, one row per store
