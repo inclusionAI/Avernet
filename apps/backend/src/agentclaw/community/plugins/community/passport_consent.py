@@ -226,7 +226,8 @@ class ManualConsentPassportPlugin(SelfIssuedPassportPlugin, PassportManualConsen
         if entry is None:
             return None
         if entry.status == APPLICATION_STATUS_ISSUED:
-            return {"status": APPLICATION_STATUS_ISSUED, "token": _token_for(bot_id)}
+            return {"token": _token_for(bot_id),
+                    "status": APPLICATION_STATUS_ISSUED}
         return {"status": entry.status}
 
     def query_token(

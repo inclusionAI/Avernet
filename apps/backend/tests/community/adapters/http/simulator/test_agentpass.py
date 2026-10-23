@@ -20,6 +20,7 @@ from agentclaw.community.plugins.community.passport_consent import (
     ManualConsentPassportPlugin,
     NullPassportManualConsentControl,
 )
+from agentclaw.community.plugins.community.passport import _token_for
 
 _BASE_URL = "http://backend-simulator:31231"
 
@@ -189,8 +190,8 @@ def test_decision_round_trip_approve_then_reject(manual_client):
     }
 
     assert plugin.query_auth_status("bot-approve", "workno-1") == {
+        "token": _token_for("bot-approve"),
         "status": "ISSUED",
-        "token": "community-passport-bot-approve",
     }
     assert plugin.query_auth_status("bot-reject", "workno-1") == {
         "status": "REJECTED",
