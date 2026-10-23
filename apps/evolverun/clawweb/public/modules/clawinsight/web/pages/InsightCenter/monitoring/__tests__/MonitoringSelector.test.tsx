@@ -100,17 +100,31 @@ describe('bounded searchable Bot selector', () => {
     expect(screen.queryByRole('button', { name: '加载更多 Bot' })).not.toBeInTheDocument();
   });
   it('explicitly loads more, resets cursors on scope/date changes and clears candidates on permission loss', async () => {
+    const loadMore = async () => {
+      const button = await screen.findByRole('button', { name: '加载更多 Bot' });
+      await waitFor(() => expect(button).toBeEnabled());
+      await act(async () => { fireEvent.click(button); });
+    };
+    let finishRefresh!: () => void;
+    const firstPage = { items: [bot('001')], nextCursor: 'cursor-1' };
     api.options.mockImplementation((_scope, _q, _dates, cursor) => Promise.resolve({ items: [bot(cursor ? '002' : '001')], nextCursor: cursor ? null : 'cursor-1' }));
+    api.options.mockResolvedValueOnce(firstPage).mockImplementationOnce(() => new Promise(resolve => {
+      finishRefresh = () => resolve(firstPage);
+    }));
     const mounted = render(<MonitoringBotSelector {...defaults} isAdmin />); await waitFor(() => expect(defaults.onSelect).toHaveBeenCalled()); open();
-    fireEvent.click(await screen.findByRole('button', { name: '加载更多 Bot' }));
+    expect(screen.getByRole('button', { name: '加载更多 Bot' })).toBeDisabled();
+    const pendingLoad = loadMore();
+    await act(async () => {});
+    await act(async () => finishRefresh());
+    await pendingLoad;
     await screen.findByText('Bot 002'); expect(screen.getByText('Bot 001')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '全部 Bot' }));
     await waitFor(() => expect(api.options.mock.lastCall?.slice(0,4)).toEqual(['all', '', { startDate: defaults.startDate, endDate: defaults.endDate }, null]));
-    fireEvent.click(await screen.findByRole('button', { name: '加载更多 Bot' })); await screen.findByText('Bot 002');
+    await loadMore(); await screen.findByText('Bot 002');
     mounted.rerender(<MonitoringBotSelector {...defaults} isAdmin endDate="2026-09-11" />);
     await waitFor(() => expect(api.options.mock.lastCall?.[3]).toBeNull());
     api.options.mockRejectedValue({ status: 403 });
-    fireEvent.click(await screen.findByRole('button', { name: '加载更多 Bot' }));
+    await loadMore();
     await waitFor(() => expect(defaults.onUnavailable).toHaveBeenCalledWith({ status: 403 }));
     expect(screen.queryByText('Bot 001')).not.toBeInTheDocument();
   });
