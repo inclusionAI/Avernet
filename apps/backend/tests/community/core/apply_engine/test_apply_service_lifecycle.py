@@ -207,6 +207,17 @@ def _start(service):
     )
 
 
+def _dry_run(service):
+    """A dry run over the fixture's bot, as the route would ask for it."""
+    import asyncio
+
+    return asyncio.run(
+        service.dry_run(
+            entity_id=_ENTITY, bot_id=_BOT, bot=_BOT_RECORD, owner_id=_ENTITY, actor_id=_ENTITY, state=ManifestStateRef()
+        )
+    )
+
+
 def _drain(service):
     """Let the background thread finish, then read the terminal report.
 
@@ -1017,16 +1028,6 @@ def test_a_compile_refused_in_the_worker_is_a_failed_report_with_the_reason(worl
                             "a superseded promotion is not delivered",)
     assert scripts.writes == 0
     assert locks.get(env="dev", entity_id=_ENTITY, bot_id=_BOT) is None, "the lock is released after a refusal"
-
-
-def _dry_run(service):
-    import asyncio
-
-    return asyncio.run(
-        service.dry_run(
-            entity_id=_ENTITY, bot_id=_BOT, bot=_BOT_RECORD, owner_id=_ENTITY, actor_id=_ENTITY, state=ManifestStateRef()
-        )
-    )
 
 
 def test_a_dry_run_hears_the_compilers_own_refusal_not_the_workers(world):

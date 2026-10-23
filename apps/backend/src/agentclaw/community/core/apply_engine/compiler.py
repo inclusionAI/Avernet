@@ -98,9 +98,14 @@ class CompileRefused(Exception):
     answers a request (a dry run) raises that instead.
     """
 
-    def __init__(self, message: str, *, domain_error: Exception) -> None:
-        super().__init__(message)
+    def __init__(self, message: str, domain_error: Exception) -> None:
+        # Both in ``args`` so the exception copies and pickles as any other.
+        super().__init__(message, domain_error)
+        self.message = message
         self.domain_error = domain_error
+
+    def __str__(self) -> str:
+        return self.message
 
 
 @runtime_checkable

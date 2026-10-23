@@ -187,7 +187,7 @@ def test_a_missing_never_started_unknown_or_superseded_promotion_is_refused() ->
         compiler.check(ctx, GenomeStateRef("p" * 32))
     with pytest.raises(CompileRefused, match="is not there to deliver") as refused:
         asyncio.run(compiler.compile(ctx, GenomeStateRef("p" * 32)))
-    assert isinstance(refused.value.__cause__, RevisionNotFound)
+    assert isinstance(refused.value.domain_error, RevisionNotFound)
     compiler, registry, _ = _compiler(_row("applied"))
     assert asyncio.run(compiler.compile(ctx, GenomeStateRef("p" * 32))).state is registry.state
     for status in ("apply_failed", "superseded", ""):
@@ -205,7 +205,8 @@ def test_a_missing_never_started_unknown_or_superseded_promotion_is_refused() ->
         # In the worker the same refusal is the engine's CompileRefused, with the genome error as its cause.
         with pytest.raises(CompileRefused) as refused:
             asyncio.run(compiler.compile(ctx, GenomeStateRef("p" * 32)))
-        assert isinstance(refused.value.__cause__, NotAppliable) and "superseded" in str(refused.value)
+        assert isinstance(refused.value.domain_error, NotAppliable) and "superseded" in str(refused.value)
+        assert refused.value.domain_error.reasons == caught.value.reasons, "the same refusal check raised"
 
 
 def test_currency_is_judged_against_the_ref_the_promotion_moved() -> None:
@@ -241,8 +242,9 @@ def test_a_revision_the_state_model_refuses_is_not_appliable_rather_than_a_crash
             return compile_spec(spec, BlobDir())
 
     compiler = GenomeCompiler(registry=_StaleRegistry(), promotions=_Promotions(_row()), refs=_Refs(), env=lambda: "dev")
-    with pytest.raises(CompileRefused, match="outside 'data/'"):
+    with pytest.raises(CompileRefused, match="outside 'data/'") as refused:
         asyncio.run(compiler.compile(make_context(engine_type="openclaw", bot_type="arca"), GenomeStateRef("p" * 32)))
+    assert isinstance(refused.value.domain_error, NotAppliable)
     blobs = BlobDir()
     binary = blobs.put(b"\xff\xfe not text")
     scripted = GenomeSpec.from_json({**spec.to_json(), "resources": [], "script": {"digest": binary}})
