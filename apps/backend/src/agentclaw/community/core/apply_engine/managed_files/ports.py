@@ -180,8 +180,10 @@ class PlatformResource(_StorePort, ResourceFilePort):
         path: str,
     ) -> bool:
         """Delete a file, or every file under a directory. ``False`` when
-        nothing was there — the write chain's own contract, which the
-        materialiser disambiguates by re-probing ``exists``."""
+        nothing was there — the write chain's own contract; a delete that
+        does not land raises, so ``False`` here never hides a refusal. The
+        resources materialiser reads a ``False`` from ``clear_root`` against
+        what its plan listed under the root."""
         scope = self._scope(entity_type, entity_id, bot_id)
         target = path.strip("/")
         rel = _workspace_path(target)

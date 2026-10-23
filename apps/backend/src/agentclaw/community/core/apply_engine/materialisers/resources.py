@@ -50,8 +50,10 @@ Two things are re-asked here rather than trusted:
 The write window: the transport has no rename, so a stop between the clear
 and the last member leaves the root partly written; the member's result row
 says ``failed`` and the next apply converges it. Costs: one root listing in
-``plan`` (no per-member ``exists`` probes); one tree delete of the root, one
-upload per member and one row rewrite in ``write``.
+``plan`` (no per-member ``exists`` probes); one tree delete of the root
+(plus one more listing only when the plan found the root empty and the
+delete answered ``False``), one upload per member and one row rewrite in
+``write``.
 """
 
 from __future__ import annotations
@@ -96,11 +98,13 @@ class ResourcesRootNotCleared(RuntimeError):
 
     Raised out of ``write`` on purpose: the orchestrator then reports the
     category aborted, every member failed and the removals *not* made, and
-    marks it partially written — the conservative reading, since the
-    platform road deletes object by object and a raise midway leaves the
-    root half-cleared. The message is the stage's own words, never the
-    transport's (a transport error can quote a header, a header can carry a
-    token).
+    marks it partially written. That is the conservative reading for a
+    refusal as much as for a raise: the platform road deletes object by
+    object, and a device ``rmtree`` that errors part-way has already taken
+    what it reached before the transport answered ``False`` — so "re-apply
+    to converge" is the only honest advice. The message is the stage's own
+    words, never the transport's (a transport error can quote a header, a
+    header can carry a token).
     """
 
     def __init__(self) -> None:
@@ -261,18 +265,30 @@ class ResourcesMaterialiser(Materialiser):
         contract: both "there was no root to delete" (a first apply — fine)
         and the transports' only failure signal (every device filesystem
         catches its own errors and answers ``False``). The plan's own
-        listing tells them apart without another round trip: a root that
-        listed anything (a removal, or a member classified ``updated``) had
-        something to delete, so a ``False`` there is a refusal. A port that
-        raises is a failed clear outright.
+        listing tells them apart first: a root that listed anything (a
+        removal, or a member classified ``updated``) had something to
+        delete, so a ``False`` there is a refusal — read conservatively,
+        since the one way to be wrong is the bot emptying its own root in
+        the moment between ``plan`` and ``write`` (a second apply cannot: the
+        run lock admits one per bot), and that costs a report the next apply
+        converges, never an upload over an uncleared root. A root the plan
+        found empty is listed once more, because a file the bot wrote in
+        that same moment would otherwise survive a refused clear unseen; the
+        listing alone is not trusted for the first case because a transport
+        that cannot delete may not be able to list either, and answers
+        "nothing" for both. A port that raises is a failed clear outright.
         """
         try:
             if await self._resources.clear_root(**coords):
                 return True
         except Exception:  # noqa: BLE001 — surfaced in the stage's own words, never the transport's
             return False
-        listed_anything = bool(plan.removals) or any(planned.outcome == "updated" for planned in plan.entries)
-        return not listed_anything
+        if plan.removals or any(planned.outcome == "updated" for planned in plan.entries):
+            return False
+        try:
+            return not await self._resources.list_root(**coords)
+        except Exception:  # noqa: BLE001
+            return False
 
 
 def _stored(entry: DesiredResource) -> StoredContent:
