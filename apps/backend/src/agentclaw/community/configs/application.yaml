@@ -262,3 +262,16 @@ user_config:
     fetch_transport_allowlist: []
     content_store_dir: "./data/manifest_content"
     teclaw_platform_managed: false
+
+  # 社区身份（护照）模式 — openspec add-bot-create-human-confirm D8。
+  # 模拟器栈要用「人工确认」模式演练 bot 创建 → 人工授权 → 创建完成的完整链路时，
+  # 把 passport_mode 翻成 manual_consent：applyAgentPassport 行为对齐生产 tcauthmng
+  # （注册 PENDING 申请并返回授权页 URL，只有人点击授权页才能翻转状态）。
+  # 默认 self_issued：沿用原有的即申请即签发行为，装配与切换前完全一致。
+  # 取值仅限 self_issued | manual_consent（忽略大小写与首尾空白；其他值启动报错）。
+  # manual_consent 模式必须提供 consent_base_url（去掉首尾空白，须以 http:// 或
+  # https:// 开头，结尾不带 /）——授权页/决策接口的 URL 前缀由配置注入，代码不落
+  # 任何主机名。读取方：di/community_identity_config.py 的
+  # community_identity_from_block（CommunityIdentityModule 装配时调用）。
+  community_identity:
+    passport_mode: self_issued

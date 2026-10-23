@@ -6,7 +6,10 @@ from injector import Module, provider, singleton
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth import AuthPlugin
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
-from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.plugin_api.passport import (
+    PassportManualConsentControl,
+    PassportPlugin,
+)
 from agentclaw.community.plugin_api.token_exchange import TokenExchangePlugin
 
 
@@ -50,3 +53,12 @@ class TestIdentityModule(Module):
 
         logger.info("TokenExchangePlugin: LocalTokenExchangePlugin (test)")
         return LocalTokenExchangePlugin()
+
+    @singleton
+    @provider
+    def manual_consent_control(self) -> PassportManualConsentControl:
+        from agentclaw.community.plugins.community.passport_consent import (
+            NullPassportManualConsentControl,
+        )
+
+        return NullPassportManualConsentControl()

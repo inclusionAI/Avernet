@@ -135,6 +135,7 @@ from agentclaw.community.adapters.http.antprocess import router as antprocess_ro
 from agentclaw.community.adapters.http.antcode.router import router as antcode_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_public import bot_public_auth_router, bot_public_router, bot_public_noauth_router  # noqa: E402
 from agentclaw.community.adapters.http.oss_to_nas.router import router as oss_to_nas_router  # noqa: E402
+from agentclaw.community.adapters.http.simulator import simulator_agentpass_router  # noqa: E402
 from agentclaw.community.adapters.http.system import system_health_router, system_readiness_router, system_disk_usage_router  # noqa: E402
 from agentclaw.community.adapters.http.desktop.router import bot_router as desktop_bot_router, device_router as desktop_device_router  # noqa: E402
 from agentclaw.community.adapters.http.harness.router import router as harness_router  # noqa: E402
@@ -935,6 +936,10 @@ app.include_router(bot_public_router)
 app.include_router(bot_public_noauth_router)
 app.include_router(workitem_noauth_router)  # 工作项接口 (route URL still /api/public/dima)
 app.include_router(oss_to_nas_router)
+# openspec add-bot-create-human-confirm D8: the manual-consent simulator's
+# AgentPass consent surfaces. Mounted unconditionally — every mode answers 404
+# through the null control except manual_consent compositions.
+app.include_router(simulator_agentpass_router)
 app.include_router(system_health_router)
 app.include_router(system_readiness_router)
 app.include_router(system_disk_usage_router)

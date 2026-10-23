@@ -28,6 +28,56 @@ def validate_passport_target_env(target_env: str | None) -> None:
         raise ValueError("target_env must be 'pre' or 'prod'")
 
 
+@runtime_checkable
+class PassportManualConsentControl(Plugin, Protocol):
+    """Decision surface of the manual-consent simulator passport (D8).
+
+    openspec ``add-bot-create-human-confirm`` D8: where ``SelfIssuedPassportPlugin``
+    answers ``ISSUED`` unconditionally, the community composition built for the
+    simulator stack may instead mirror the prod AgentPass behavior —
+    ``apply_agent_passport`` leaves a PENDING application that only a human can
+    flip, by clicking approve/reject on a consent page. This Protocol is the one
+    owner of that decision vocabulary; the simulator ``/simulator/agentpass``
+    HTTP adapters are delivery-only shells over it, and community
+    ``CommunityIdentityModule`` decides which implementation the process holds
+    (the manual plugin when ``user_config.community_identity.passport_mode`` is
+    ``manual_consent``, a null control otherwise — "the app does not branch on
+    mode; DI decides").
+
+    ``available`` is the mode-off answer: a control whose ``available`` is
+    ``False`` has no applications at all, and the consent adapters answer 404
+    rather than routing to it, which is how a composition without the manual
+    plugin keeps the simulator surfaces silent.
+    """
+
+    available: bool
+
+    def decide(
+        self,
+        application_id: str,
+        *,
+        approve: bool,
+        reason: str | None = None,
+    ) -> str | None:
+        """Record the human's verdict; return the terminal status.
+
+        ``"ISSUED"`` on approve, ``"REJECTED"`` on decline, ``None`` when no
+        application answers to ``application_id``. Deciding a second time is a
+        contract violation against a decided application and implementing
+        controls raise on it rather than answering — the decision is a
+        transition, not a value someone gets to rewrite.
+        """
+        ...
+
+    def get_application(self, application_id: str) -> dict[str, Any] | None:
+        """The application's facts (page-rendering shape), or ``None`` if unknown."""
+        ...
+
+    def list_applications(self, bot_id: str | None = None) -> list[dict[str, Any]]:
+        """Applications in this process's registry, newest first, optional bot filter."""
+        ...
+
+
 @dataclass
 class SubResourceItem:
     """Neutral second-level resource item for :meth:`PassportPlugin.save_sub_resources`.
