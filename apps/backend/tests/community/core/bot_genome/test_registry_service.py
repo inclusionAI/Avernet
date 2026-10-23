@@ -509,3 +509,11 @@ def test_an_audit_identity_the_columns_cannot_hold_is_refused_on_construction() 
     with pytest.raises(LimitExceeded):
         Provenance(ProvenanceKind.USER, long_user)
     assert Provenance(ProvenanceKind.USER, "u-" + "x" * 1000, recorded_as="app:a:on-behalf-of:u-" + "x" * 1000).audit
+
+
+def test_provenance_holds_the_contracts_run_id_rule() -> None:
+    with pytest.raises(ValueError):
+        Provenance(ProvenanceKind.STRATEGY_RUN, "s@1")  # a run without its run id
+    with pytest.raises(ValueError):
+        Provenance(ProvenanceKind.USER, "u1", run_id="run_1")  # a user with one
+    assert Provenance(ProvenanceKind.STRATEGY_RUN, "s@1", run_id="run_1").as_dict()["run_id"] == "run_1"

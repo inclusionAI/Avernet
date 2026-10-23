@@ -170,6 +170,7 @@ class GenomePromotionRow(BaseModel):
     going_back: bool = False
     actor_kind: str
     actor_id: str
+    actor_run_id: Optional[str] = None  #: the evolution run, for a ``strategy_run`` actor
     reason: str
     status: str
     apply_kind: str
@@ -305,6 +306,7 @@ class GenomePromotionModel(Base):
     going_back = Column(Boolean, nullable=False, default=False, comment="the target had been promoted before")
     actor_kind = Column(String(16), nullable=False, comment="user/strategy_run")
     actor_id = Column(String(1100), nullable=False)
+    actor_run_id = Column(String(64), nullable=True, comment="the evolution run, for strategy_run")
     reason = Column(String(1024), nullable=False)
     status = Column(String(16), nullable=False, comment="applying/applied/apply_failed")
     apply_kind = Column(String(16), nullable=False, comment="the applier that took it (pending/direct/…)")

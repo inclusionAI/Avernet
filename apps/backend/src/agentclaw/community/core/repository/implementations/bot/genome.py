@@ -529,7 +529,11 @@ class GenomePromotionRepository(GenomePromotionRepositoryProtocol):
         """
         axes = dict(env=row.env, entity_id=row.entity_id, bot_id=row.bot_id)
         stamp = dict(
-            moved_kind=row.actor_kind, moved_actor=row.actor_id, run_id=None, reason=row.reason, moved_at=moved_at
+            moved_kind=row.actor_kind,
+            moved_actor=row.actor_id,
+            run_id=row.actor_run_id,
+            reason=row.reason,
+            moved_at=moved_at,
         )
         try:
             with _transaction(self._db) as session:

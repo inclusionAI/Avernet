@@ -230,3 +230,20 @@ async def test_a_write_failure_after_the_move_rolls_the_move_back(world: World, 
         await world.promotion.promote(BOT, revision=r1, ref="active", expected_revision=None, actor=OWNER, reason="x")
     assert _refs(world) == {} and world.registry.get_revision(BOT, r1).revision.status == RevisionStatus.DRAFT
     assert world.applier.starts == []
+
+
+@pytest.mark.asyncio
+async def test_a_strategy_runs_promotion_keeps_its_run_id_on_the_record_and_the_ref_moves(world: World) -> None:
+    """An automated gate promotes as ``strategy_run``: the contract's provenance names the run everywhere."""
+    r1, _ = await _two_revisions(world)
+    promoted = await world.promotion.promote(
+        BOT, revision=r1, ref="active", expected_revision=None, actor=RUN, reason="gate passed"
+    )
+    assert (promoted.actor.kind, promoted.actor.actor, promoted.actor.run_id) == (
+        ProvenanceKind.STRATEGY_RUN,
+        RUN.actor,
+        RUN.run_id,
+    )
+    assert world.promotion.get_promotion(BOT, promoted.id).actor.run_id == RUN.run_id
+    moved_by = {r.name: r.moved_by for r in world.registry.list_refs(BOT)}
+    assert moved_by["active"].run_id == RUN.run_id and moved_by["active"].as_dict()["run_id"] == RUN.run_id

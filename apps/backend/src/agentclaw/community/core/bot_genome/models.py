@@ -125,6 +125,11 @@ class Provenance:
             raise LimitExceeded(
                 f"the audit identity is {len(self.audit)} characters; the audit columns hold {MAX_AUDIT_ACTOR_CHARS}"
             )
+        # The contract's provenance rule: a strategy_run names its run; a user has no run or step.
+        if self.kind is ProvenanceKind.STRATEGY_RUN and not self.run_id:
+            raise ValueError("a strategy_run provenance names its run_id")
+        if self.kind is ProvenanceKind.USER and (self.run_id is not None or self.step is not None):
+            raise ValueError("a user provenance carries no run_id or step")
 
     @property
     def audit(self) -> str:

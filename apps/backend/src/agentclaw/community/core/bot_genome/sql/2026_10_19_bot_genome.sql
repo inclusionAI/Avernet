@@ -136,6 +136,7 @@ CREATE TABLE `ac_genome_promotion` (
   `going_back`       tinyint(1)    NOT NULL COMMENT 'the target had been promoted before',
   `actor_kind`       varchar(16)   NOT NULL COMMENT 'user/strategy_run',
   `actor_id`         varchar(1100) NOT NULL,
+  `actor_run_id`     varchar(64)   DEFAULT NULL COMMENT 'the evolution run, for strategy_run',
   `reason`           varchar(1024) NOT NULL,
   `status`           varchar(16)   NOT NULL COMMENT 'applying/applied/apply_failed',
   `apply_kind`       varchar(16)   NOT NULL COMMENT 'the applier that took it (pending/direct/…)',
