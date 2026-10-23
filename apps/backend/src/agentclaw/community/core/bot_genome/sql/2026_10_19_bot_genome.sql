@@ -145,4 +145,4 @@ CREATE TABLE `ac_genome_promotion` (
   UNIQUE KEY `uk_genome_promotion` (`avernet_tenant`, `promotion_id`) GLOBAL,
   KEY `idx_genome_promotion_bot_created` (`avernet_tenant`, `env`, `entity_id`, `bot_id`, `created_at`) GLOBAL
 ) AUTO_INCREMENT_MODE = 'ORDER' DEFAULT CHARSET = utf8mb4
-  COMMENT = 'Bot Genome promotions, with the compiled document handed to delivery';
+  COMMENT = 'Bot Genome promotions: the moved refs and the delivery''s answer';

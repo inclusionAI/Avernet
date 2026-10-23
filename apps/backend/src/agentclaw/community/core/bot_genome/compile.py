@@ -11,8 +11,12 @@ covers (``cli_tools``, ``engine_config``) are left undeclared, so an apply
 leaves them as they are. ``memory`` is not delivered until RSI-05.
 
 ``GenomeCompiler`` is the ``DesiredStateCompiler`` for ``GenomeStateRef``: a
-promotion id resolves to the promotion row, whose revision compiles. It is
-registered in the run service's compiler map; RSI-04 is its first caller.
+promotion id resolves to the promotion row, whose revision compiles. The row
+is ``applying`` while the delivery seam answers and ``applied`` as soon as it
+has — before the apply run that delivers it compiles in its worker — so both
+resolve; only a promotion whose delivery never started (``apply_failed``) has
+nothing to deliver. It is registered in the run service's compiler map;
+RSI-04 is its first caller.
 """
 
 from __future__ import annotations
@@ -56,8 +60,8 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 __all__ = ["GenomeCompiler", "compile_spec"]
 
-#: The promotion status a revision is delivered under; anything else is finished or never started.
-_DELIVERABLE_STATUS = "applying"
+#: The promotion status whose delivery never started: there is nothing to deliver for it.
+_NEVER_STARTED = "apply_failed"
 
 
 def _skill_source(entry: SkillEntry) -> LocalSkillPackage | CenterSkillVersion | RepoSkillPath:
@@ -83,20 +87,26 @@ def compile_spec(spec: GenomeSpec, content: ContentReader) -> DesiredState:
     """The desired state of ``spec``; ``content`` supplies the script body.
 
     Pure: nothing is fetched and nothing is filed, because a revision only
-    ever names bytes the bot can already reach.
+    ever names bytes the bot can already reach. A revision the state model
+    refuses — one recorded before a rule the model now enforces, such as a
+    resource outside the resources root — is ``NotAppliable`` naming the
+    rule, not a compiler error.
     """
     script: Declaration[DesiredScript]
     if spec.script is not None:
         script = Declaration((DesiredScript(content.read(spec.script.digest).decode("utf-8")),))
     else:
         script = Declaration(())
-    return DesiredState(
-        script=script,
-        identity=Declaration(tuple(DesiredIdentityFile(e.type, StoredContent(e.digest)) for e in spec.persona)),
-        resources=Declaration(tuple(_resource(e) for e in spec.resources)),
-        skills=Declaration(tuple(DesiredSkill(e.name, _skill_source(e)) for e in spec.skills)),
-        mcp=Declaration(tuple(_mcp(e) for e in spec.tools.mcp)),
-    )
+    try:
+        return DesiredState(
+            script=script,
+            identity=Declaration(tuple(DesiredIdentityFile(e.type, StoredContent(e.digest)) for e in spec.persona)),
+            resources=Declaration(tuple(_resource(e) for e in spec.resources)),
+            skills=Declaration(tuple(DesiredSkill(e.name, _skill_source(e)) for e in spec.skills)),
+            mcp=Declaration(tuple(_mcp(e) for e in spec.tools.mcp)),
+        )
+    except ValueError as exc:
+        raise NotAppliable([Reason("not_appliable", "spec", f"the revision cannot be delivered as recorded: {exc}")]) from exc
 
 
 class GenomeCompiler:
@@ -114,19 +124,20 @@ class GenomeCompiler:
         self._env = env
 
     def _revision_of(self, ctx: ApplyContext, ref: GenomeStateRef) -> str:
-        """The revision id the promotion delivers; a missing or finished promotion is refused."""
+        """The revision id the promotion delivers; a missing promotion, or one whose delivery never started, is refused."""
         row = self._promotions.get(
             env=self._env(), entity_id=ctx.entity_id, bot_id=ctx.bot_id, promotion_id=ref.promotion_id
         )
         if row is None:
             raise RevisionNotFound(f"promotion {ref.promotion_id}")
-        if row.status != _DELIVERABLE_STATUS:
+        if row.status == _NEVER_STARTED:
             raise NotAppliable(
                 [
                     Reason(
                         "not_appliable",
                         "promotion",
-                        f"promotion {ref.promotion_id} is {row.status}; only an applying promotion is delivered",
+                        f"promotion {ref.promotion_id} is {row.status}: its delivery never started, so there is "
+                        "nothing to deliver",
                     )
                 ]
             )
