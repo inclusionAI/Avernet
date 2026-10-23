@@ -102,13 +102,18 @@ void artifactDescriptorCode;
 void artifactDescriptorText;
 
 const makeNav = (): TaskPanelNav & {
-  calls: { select: Array<[string, ResolvedSessionTarget | null]>; drill: string[] };
+  calls: { root: string[]; select: Array<[string, ResolvedSessionTarget | null]>; drill: string[] };
 } => {
-  const calls = { select: [] as Array<[string, ResolvedSessionTarget | null]>, drill: [] as string[] };
+  const calls = {
+    root: [] as string[],
+    select: [] as Array<[string, ResolvedSessionTarget | null]>,
+    drill: [] as string[],
+  };
   return {
     selectedNodeId: null,
     drillStack: [],
     calls,
+    selectRootNode: (id: string) => calls.root.push(id),
     selectNode: (id: string, target: ResolvedSessionTarget | null) => calls.select.push([id, target]),
     drillInto: (id: string) => calls.drill.push(id),
     backToOverview: () => {},
@@ -139,21 +144,19 @@ describe('TaskOverviewV2(L1)', () => {
     expect((doneTitle as HTMLElement).style.textDecoration).toContain('line-through');
   });
 
-  it('PRD 跳转/下钻分离:点整卡 = selectNode(不发下钻);点下钻按钮 = selectNode + drillInto', () => {
+  it('根节点恢复宿主会话；其他节点保持会话联动与下钻', () => {
     const nav = makeNav();
     render(<TaskOverviewV2 {...props({ nav })} />);
 
     fireEvent.click(screen.getByText('需求澄清与规划'));
-    expect(nav.calls.select).toHaveLength(1);
-    expect(nav.calls.select[0][0]).toBe('n-solo');
-    // 点卡附带会话目标解析结果(point selectNode 携带 SessionTarget)
-    expect(nav.calls.select[0][1]).toMatchObject({ sessionId: 'agent:main:session:s-main' });
+    expect(nav.calls.root).toEqual(['n-solo']);
+    expect(nav.calls.select).toHaveLength(0);
     expect(nav.calls.drill).toHaveLength(0);
 
     fireEvent.click(screen.getByTitle('下钻节点副屏'));
-    expect(nav.calls.select).toHaveLength(2);
-    expect(nav.calls.select[1][0]).toBe('n-group');
-    expect(nav.calls.select[1][1]).toMatchObject({ sessionId: 'bcs_grp_902:round:2', kind: 'group' });
+    expect(nav.calls.select).toHaveLength(1);
+    expect(nav.calls.select[0][0]).toBe('n-group');
+    expect(nav.calls.select[0][1]).toMatchObject({ sessionId: 'bcs_grp_902:round:2', kind: 'group' });
     expect(nav.calls.drill).toEqual(['n-group']);
   });
 
@@ -174,6 +177,17 @@ describe('TaskOverviewV2(L1)', () => {
     // 节点可点(selectNode 语义) — SVG 热区以 aria-label 查询
     fireEvent.click(screen.getByLabelText('下钻节点副屏'));
     expect(nav.calls.drill).toEqual(['n-group']);
+  });
+
+  it('DAG 视图点击根节点同样只恢复宿主会话', () => {
+    const nav = makeNav();
+    render(<TaskOverviewV2 {...props({ nav })} />);
+    fireEvent.click(screen.getByTitle('切换到 DAG 视图'));
+
+    fireEvent.keyDown(screen.getByLabelText('查看节点 需求澄清与规划'), { key: 'Enter' });
+
+    expect(nav.calls.root).toEqual(['n-solo']);
+    expect(nav.calls.select).toHaveLength(0);
   });
 
   it('产物区:任务级聚合(根 legacy + 节点产物)去重计数,kind 徽章与链接', () => {
