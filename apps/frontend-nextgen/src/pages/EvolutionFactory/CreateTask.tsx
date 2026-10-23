@@ -19,6 +19,8 @@ import { EvolutionSettings } from './EvolutionSettings';
 import PackForm from './PackForm';
 import { Choice, ErrorBox, Field, useResource } from './shared';
 import { useEvolutionContext } from './useEvolutionContext';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 function CreateTaskContent() {
   const rawType = new URLSearchParams(useLocation().search).get('type') ?? '';
@@ -84,6 +86,7 @@ function CreateTaskContent() {
   const sources =
     diagnoses.data?.tasks.filter((task) => completedDiagnosis(task) && matchesDiagnosisTarget(task, draft)) ?? [];
   const submit = async (event: React.FormEvent) => {
+    Tracert.click(Points.evolution.createSubmit);
     event.preventDefault();
     if (submitting.current) return;
     setError('');

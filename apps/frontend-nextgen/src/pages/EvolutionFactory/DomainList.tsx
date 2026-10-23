@@ -11,6 +11,8 @@ import { Plus, Search } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 import { ErrorBox, Field, Hint, ListSkeleton, PlaceholderPanel, TablePanel, useResource } from './shared';
 import { useEvolutionContext } from './useEvolutionContext';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 const linkClass = 'h-7 rounded-md px-1.5 text-[13px] font-normal text-primary hover:bg-primary/10 hover:text-primary';
 
@@ -124,11 +126,12 @@ export default function DomainList() {
             type="button"
             variant="ghost"
             className={linkClass}
-            onClick={() =>
+            onClick={() => {
+              Tracert.click(Points.evolution.openDomain, { domain_id: d.domainId });
               history.push(
                 `/evolution-factory/domains/${encodeURIComponent(d.ownerUserId)}/${encodeURIComponent(d.domainId)}`,
-              )
-            }
+              );
+            }}
           >
             查看模板与运行
           </Button>

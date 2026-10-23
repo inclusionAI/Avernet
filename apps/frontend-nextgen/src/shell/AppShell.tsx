@@ -12,6 +12,8 @@ import { OpenSourceExperienceNotice } from './OpenSourceExperienceNotice';
 import { SidebarNavList } from './SidebarNavList';
 import { getMergedNavigationItems, getNavigationItem } from './navigation';
 import { getRouteMeta } from './routeMeta';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 /**
  * 全局壳（refactor-global-nav-shell）：单侧边栏 + 内容区两栏布局，顶栏（AppHeader）已退役，
@@ -56,6 +58,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [isDesktop, hideNavigation]);
   // <lg 抽屉内点导航：跳转并收起抽屉。
   const handleMobileNavigate = (path: string) => {
+    Tracert.click(Points.shell.navClick, { nav_target: path });
     history.push(path);
     setMobileNavOpen(false);
   };
@@ -93,7 +96,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               activePath={location.pathname}
               collapsed={sidebarCollapsed}
               items={mergedItems}
-              onNavigate={(path) => history.push(path)}
+              onNavigate={(path) => {
+                Tracert.click(Points.shell.navClick, { nav_target: path });
+                history.push(path);
+              }}
               onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
               currentUser={currentUser}
             />

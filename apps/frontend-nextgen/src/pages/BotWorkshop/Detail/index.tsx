@@ -29,7 +29,7 @@ import { DetailHeader } from './DetailHeader';
 import { DetailNavigation } from './DetailNavigation';
 import { moreTabs } from './detailTabs';
 import { useHostingTabs } from './useHostingTabs';
-
+import { Points } from '@/tracking/points';import { Tracert } from '@/utils/tracert';
 const BotWorkshopDetailPage: React.FC = () => {
   const params = new URLSearchParams(useLocation().search);
   const id = params.get('id');
@@ -76,8 +76,7 @@ const BotWorkshopDetailPage: React.FC = () => {
     isOwner,
     desktopPolicy.routines,
   );
-  const [debugOpen, setDebugOpen] = useState(true);
-  const [debugFullscreen, setDebugFullscreen] = useState(false);
+  const [debugOpen, setDebugOpen] = useState(true); const [debugFullscreen, setDebugFullscreen] = useState(false);
   useEffect(() => {
     setDebugOpen(true);
     setDebugFullscreen(false);
@@ -129,7 +128,9 @@ const BotWorkshopDetailPage: React.FC = () => {
         saving={detail.saving}
         onBack={detail.back}
         onOpenDebug={() => setDebugOpen(true)}
-        onSaveBasic={detail.save}
+        onSaveBasic={async (input) => {
+          Tracert.click(Points.botWorkshop.saveConfig, { bot_id: id }); await detail.save(input);
+        }}
         onReload={() => void detail.retry()}
       />
       <div className="flex min-h-0 flex-1 overflow-hidden">

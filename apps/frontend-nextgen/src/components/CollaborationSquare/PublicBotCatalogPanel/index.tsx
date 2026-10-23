@@ -11,6 +11,8 @@ import type { BotCatalogViewModel, PublicBot } from '@/domain/collaborationSquar
 import { getPublicBotActionKey, getPublicBotTargetId, resolvePublicBotPrimaryAction } from '@/domain/collaborationSquare/types';
 import { Bot, RefreshCw, Search } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 export interface PublicBotCatalogPanelProps {
   /** 面板展示层 view model，由协作广场 store hook 产出。 */
@@ -138,7 +140,10 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
               activeActor={activeActor}
               busy={vm.busyKeys.includes(getPublicBotActionKey(activeActor, getPublicBotTargetId(bot)))}
               onShare={(item) => vm.share(item)}
-              onPrimaryAction={handlePrimaryAction}
+              onPrimaryAction={(item) => {
+                Tracert.click(Points.collabSquare.openBotCard, { bot_id: getPublicBotTargetId(item) });
+                handlePrimaryAction(item);
+              }}
             />
           ))}
         </div>

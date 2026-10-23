@@ -21,6 +21,8 @@ import { history } from '@umijs/max';
 import { useCallback, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { useBotWorkshopAccess } from './useBotWorkshopAccess';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 import { useBotWorkshopCreateFlow } from './useBotWorkshopCreateFlow';
 import { useBotWorkshopLocks } from './useBotWorkshopLocks';
 export function useBotWorkshop() {
@@ -213,14 +215,19 @@ export function useBotWorkshop() {
         toast.error(localCreateRestriction);
         return;
       }
+      Tracert.click(Points.botWorkshop.createLocal);
       state.setCreateScenario('local');
     },
-    openCreateCloud: () => state.setCreateScenario('cloud'),
+    openCreateCloud: () => {
+      Tracert.click(Points.botWorkshop.createCloud);
+      state.setCreateScenario('cloud');
+    },
     closeCreate: () => {
       createFlow.cancelAuthorization();
       state.setCreateScenario(undefined);
     },
     submitCreate: async (input: BotCreateInput) => {
+      Tracert.click(Points.botWorkshop.createSubmit);
       if (input.scenario === 'local' && !canCreateLocal) {
         const error = new Error(localCreateRestriction);
         toast.error(error.message);
