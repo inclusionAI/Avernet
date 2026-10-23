@@ -1062,3 +1062,4 @@ def test_a_dry_run_of_a_document_that_stopped_validating_raises_the_validators_e
     with pytest.raises(ManifestValidationError) as refused:
         _dry_run(service)
     assert refused.value.violations
+    assert refused.value.__context__ is None, "the route sees the validator's error alone"

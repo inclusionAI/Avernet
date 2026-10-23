@@ -99,7 +99,8 @@ class CompileRefused(Exception):
     """
 
     def __init__(self, message: str, domain_error: Exception) -> None:
-        # Both in ``args``, so the exception copies as any other (pickling also needs the domain error to).
+        # Both in ``args``, so copy and pickle rebuild it through ``cls(*args)``; pickling additionally
+        # needs the domain error itself to be picklable, which is its own class's concern.
         super().__init__(message, domain_error)
         self.message = message
         self.domain_error = domain_error
