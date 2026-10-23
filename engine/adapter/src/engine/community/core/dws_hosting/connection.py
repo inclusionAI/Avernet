@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+from hashlib import sha256
 from collections.abc import Awaitable, Callable
 from contextlib import aclosing
 from engine.community.core.dws_hosting.storage import durable_call
@@ -12,8 +14,9 @@ from engine.community.kernel.dws_connection import (
     AuthorizationStatus,
     DwsError,
     IntakePolicy,
+    ListenerNotice,
 )
-from engine.community.kernel.dws_hosting import Binding
+from engine.community.kernel.dws_hosting import Binding, DirectMessage
 from engine.community.plugin_api.dws_connection import (
     DwsConnection,
     HostingRecoveryStore,
@@ -89,6 +92,15 @@ class DwsIntake:
             "incomplete_discovery",
         }
     )
+    HISTORY_RETRYABLE = frozenset(
+        {
+            "command_failed",
+            "command_timeout",
+            "incomplete_result",
+            "incomplete_history",
+            "incomplete_discovery",
+        }
+    )
 
     def __init__(
         self,
@@ -153,9 +165,14 @@ class DwsIntake:
             for message in result.messages:
                 if message.conversation_id != cid:
                     raise DwsError("history_scope_mismatch")
-                await durable_call(
-                    self.state.ingest, self.binding.binding_id, message, now_ms=now
+                received_ms = self.clock_ms()
+                outcome = await durable_call(
+                    self.state.ingest,
+                    self.binding.binding_id,
+                    message,
+                    now_ms=received_ms,
                 )
+                self._log_received(message, received_ms, "history_scan", outcome)
             await durable_call(
                 self.recovery.resolve_hints, window, cid, result.observed_ids
             )
@@ -170,6 +187,7 @@ class DwsIntake:
                 if notice.kind == "ready":
                     self._ready.set()
                 else:
+                    self._log_received(notice, self.clock_ms(), "live_event", "hint")
                     await durable_call(
                         self.recovery.record_hint, self.binding.binding_id, notice
                     )
@@ -183,8 +201,24 @@ class DwsIntake:
             )
         except TimeoutError:
             raise DwsError("listener_not_ready") from None
+        retry = self.policy.retry_seconds
         while True:
-            caught_up = await self.reconcile_once()
+            try:
+                caught_up = await self.reconcile_once()
+            except DwsError as exc:
+                if str(exc) not in self.HISTORY_RETRYABLE:
+                    raise
+                # Reconciliation already fenced claims. Keep receiving durable hints
+                # while the upstream history API recovers; never skip its watermark.
+                logging.getLogger(__name__).warning(
+                    "DWS history recovery deferred: code=%s retry_seconds=%s",
+                    str(exc),
+                    retry,
+                )
+                await asyncio.sleep(retry)
+                retry = min(retry * 2, self.policy.max_retry_seconds)
+                continue
+            retry = self.policy.retry_seconds
             self._recovered = self._recovered or caught_up
             delay = self.policy.poll_seconds if caught_up else 1.0
             await asyncio.sleep(delay)
@@ -214,18 +248,41 @@ class DwsIntake:
             for message in result.messages:
                 if message.conversation_id != window.conversation_id:
                     raise DwsError("history_scope_mismatch")
-                await durable_call(
+                received_ms = self.clock_ms()
+                outcome = await durable_call(
                     self.state.ingest,
                     self.binding.binding_id,
                     message,
-                    now_ms=self.clock_ms(),
+                    now_ms=received_ms,
                 )
+                self._log_received(message, received_ms, "live_history", outcome)
             after = await self.connection.health()
             if not after.connected or after.generation != before.generation:
                 raise DwsError("connection_changed")
             await durable_call(
                 self.recovery.complete_hints, window, result.observed_ids
             )
+
+    @staticmethod
+    def _log_received(
+        message: DirectMessage | ListenerNotice,
+        received_ms: int,
+        source: str,
+        outcome: str,
+    ) -> None:
+        if outcome == "duplicate":
+            return
+        # Correlate live hints with history without logging identities or content.
+        key = sha256(
+            (message.conversation_id + "\0" + message.message_id).encode()
+        ).hexdigest()[:16]
+        logging.getLogger(__name__).info(
+            "DWS intake: source=%s message_key=%s delay_ms=%s outcome=%s",
+            source,
+            key,
+            max(0, received_ms - message.created_at_ms),
+            outcome,
+        )
 
     async def _live(self) -> None:
         await self._ready.wait()
@@ -270,6 +327,9 @@ class DwsIntake:
                         await self._block()
                         if str(exc) not in self.RETRYABLE:
                             raise
+                        logging.getLogger(__name__).warning(
+                            "DWS listener restarting: code=%s", str(exc)
+                        )
                         if self._recovered:
                             delay = self.policy.retry_seconds
                         await asyncio.sleep(delay)

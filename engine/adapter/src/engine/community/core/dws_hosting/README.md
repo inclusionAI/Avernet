@@ -120,6 +120,10 @@ authorization, supervision and failure behavior through ports with real SQLite.
   turn claims. Partial pages,
   disconnects, identity changes and stale attempts cannot release the barrier.
   Transient failures back off; invalid output/storage faults stop safely.
+- Transient history/discovery failures keep the event consumer alive while
+  reconciliation retries with bounded backoff. The first failure fences claims
+  immediately and the failed interval is never skipped. Actual connection
+  loss still rotates the consumer and requires reconciliation again.
 - Only bounded, complete history advances a cursor. This is not an exactly-once
   delivery guarantee: history retention/visibility must be qualified. Permanently
   unavailable hinted messages and oversized windows currently stay blocked and
@@ -130,6 +134,14 @@ worker. A database-wide process lease spans all workers and cancellation joins
 pending SQLite calls before releasing ownership. Local locking is not deployment fencing for two
 containers with copied state. Engine execution is explicit, not started by intake;
 delivery is explicit too, not started by intake or ordinary chat.
+
+Rollout qualification distinguishes an explicit denial from `RolloutUnavailable`.
+Transport errors, unavailable services and malformed responses pause new work and
+sends without changing owner consent. A failed check does not extend the 30-second
+positive cache; retries are throttled for 5 seconds. Recovery resumes only after a
+fresh positive check. Explicit denial still disables hosting durably, and neither
+recovery nor a later grant can undo a manual disable. This contract affects only
+DWS runtime eligibility; management-command verification still fails closed.
 
 ## Execution and Results
 
@@ -176,14 +188,32 @@ delivery is explicit too, not started by intake or ordinary chat.
   history is untrusted context, never authority. No persistent agent history is read.
   It checks relevance to the current batch; a greeting cannot justify an unrelated
   task. Input deduplicates current-batch messages by message ID, not text; no
-  dialogue-count reduction or model change. Only a single `verdict` is returned:
+  dialogue-count reduction or model change. Review returns `verdict`, an enumerated
+  `reason_code`, and a single-line `reason` (1..240 characters, no private message
+  quotes, credentials or reasoning trace). The validated diagnosis is persisted
+  atomically with the outcome in private SQLite `executions.review_json`; it is
+  excluded from execution serialization, management projections and owner notices.
   `approve` keeps the candidate unchanged; `skip_owner_replied` resolves to ignore
   only with a later complete owner message as supporting evidence. No reply or
-  owner notice is queued for that skip. `reject`, uncertainty,
+  owner notice is queued for that skip. `reject` with `outside_rule` also resolves
+  to ignore: a confirmed scope exclusion is not a processing failure. Identity or
+  relationship uncertainty is never treated as scope exclusion. Other rejections, uncertainty,
   invalid output, unsupported mode or a 60-second timeout becomes manual.
   No original agent replay or replacement reply is attempted. This adds one model
   call and may conservatively reject context-dependent replies; it reduces risk,
   not a guarantee of semantic correctness. Review sessions may persist.
+
+- Model-generated `escalate` decisions also pass this isolated scope review before
+  creating an owner notice. In-scope requests for missing personal facts may
+  escalate; out-of-scope requests must not. `ignore` needs no further model call.
+  This retains natural-language rule interpretation, not a regex/person whitelist
+  or a new pre-generation rule-router. Generation may still produce an out-of-scope
+  candidate; the independent review can veto both reply and escalation.
+- Legacy verdict-only responses remain accepted with `reason_code=unspecified`;
+  a legacy reject still requires manual handling, never an invented scope reason.
+  Existing historical records retain a null review. Schema v7 adds the nullable
+  review column without modifying settings, enabled state, rule versions or outbox.
+  Older workers reject v7; restore a pre-upgrade database backup before downgrade.
 
 ### Real dialogue and incremental session sync
 
@@ -264,3 +294,14 @@ process ownership and fault propagation. `test_formatting.py` verifies lossless
 delimiter repair, refusing missing fields, duplicate decisions or changed versions.
 
 See `engine/adapter/specs/dws-personal-hosting.md` for implementation progress.
+
+### Review and intake diagnostics
+
+Verbose single-line review explanations are truncated to 240 characters at the
+model-result boundary. Verdict, reason code, extra fields, control characters and
+JSON ambiguity remain strictly validated; truncation never upgrades a rejection.
+Unavailable reviews log only the failure stage, not model content or exceptions.
+Intake logs distinguish live events, live history reads and periodic history scans
+using a hashed message reference and receipt delay, without names or message text.
+Periodic scans record actual ingestion time, not scan start. The 30-second fallback
+scan is unchanged; missing live events can still incur that polling delay.

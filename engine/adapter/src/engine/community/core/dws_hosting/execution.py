@@ -8,7 +8,7 @@ from contextlib import aclosing
 from engine.community.core.dws_hosting.results import parse_decision
 from engine.community.core.dws_hosting.formatting import repair_format
 from engine.community.core.dws_hosting.decision_repair import recover_decision
-from engine.community.core.dws_hosting.reply_review import review_reply
+from engine.community.core.dws_hosting.reply_review import ReviewRejected, review_reply
 from engine.community.core.dws_hosting.storage import durable_call
 from engine.community.kernel.dws_execution import (
     AgentInvocation,
@@ -125,9 +125,9 @@ def invocation_for(
                     "source": "authorized_account_binding",
                 },
                 "current_batch": [message.model_dump() for message in turn.messages],
-                "directory_context": context.model_dump()
-                if context is not None
-                else None,
+                "directory_context": (
+                    context.model_dump() if context is not None else None
+                ),
                 "adapter_state": {
                     "rule_version": turn.rule_version,
                     "binding_epoch": turn.binding_epoch,
@@ -312,11 +312,11 @@ class HostingExecutor:
                         await durable_call(
                             self.executions.review_context, binding_id, turn_id
                         )
-                        if decision.action == "reply"
+                        if decision.action != "ignore"
                         else ()
                     )
                 )
-                decision = await review_reply(
+                reviewed = await review_reply(
                     self.engine, record.invocation, decision, recent
                 )
             except ExecutionError as exc:
@@ -326,9 +326,18 @@ class HostingExecutor:
                     turn_id,
                     str(exc),
                     ended=True,
+                    **(
+                        {"review": exc.review}
+                        if isinstance(exc, ReviewRejected)
+                        else {}
+                    ),
                 )
             return await durable_call(
-                self.executions.resolve, binding_id, turn_id, decision
+                self.executions.resolve,
+                binding_id,
+                turn_id,
+                reviewed.decision,
+                review=reviewed.review,
             )
         if record.state in ("dispatching", "accepted", "unknown") and inspect_unknown:
             try:

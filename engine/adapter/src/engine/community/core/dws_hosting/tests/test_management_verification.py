@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 from engine.community.plugins.dws_hosting.verification import BackendManagementVerifier
+from engine.community.kernel.dws_runtime import RolloutUnavailable
 
 
 @pytest.mark.parametrize(
@@ -102,4 +103,8 @@ async def test_runtime_eligibility_uses_scoped_backend_route(value, expected):
     verifier = BackendManagementVerifier(
         "https://backend.test", transport=httpx.MockTransport(handler)
     )
-    assert await verifier.runtime_eligible("command", "proof") is expected
+    if type(value) is bool:
+        assert await verifier.runtime_eligible("command", "proof") is expected
+    else:
+        with pytest.raises(RolloutUnavailable):
+            await verifier.runtime_eligible("command", "proof")
