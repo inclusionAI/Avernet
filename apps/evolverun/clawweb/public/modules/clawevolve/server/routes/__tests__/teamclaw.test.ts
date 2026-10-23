@@ -24,6 +24,7 @@ let server: ReturnType<express.Application["listen"]>,
 const spaces = vi.fn();
 let templates: BenchTemplateRepository;
 beforeEach(async () => {
+  vi.stubEnv("SERVER_ENV", "dev");
   db = new SqliteDatabase(new Database(":memory:"));
   await runMigrations(db, "sqlite");
   tasks = new EvolveRepository(db);
@@ -137,6 +138,7 @@ afterEach(async () => {
   if (server)
     await new Promise<void>((resolve) => server.close(() => resolve()));
   await db.close();
+  vi.unstubAllEnvs();
 });
 const request = (
   path: string,
@@ -372,6 +374,53 @@ describe("explicit TeamClaw space adapters", () => {
         })
       ).status
     ).toBe(400);
+  });
+  it.each([
+    ["prod", ["production"]],
+    ["gray", ["production"]],
+    ["pre", ["preview", "production", "local", "unknown"]],
+    ["dev", ["preview", "production", "local", "unknown"]],
+  ])("filters only production Bot choices for server environment %s", async (env, expected) => {
+    vi.stubEnv("SERVER_ENV", env);
+    bots = [
+      { ownerId: "author", botId: "preview", env: "pre", activeEngine: "openclaw", botName: "Preview" },
+      { ownerId: "author", botId: "production", env: "prod", activeEngine: "openclaw", botName: "Production" },
+      { ownerId: "author", botId: "local", env: "dev", activeEngine: "openclaw", botName: "Local" },
+      { ownerId: "author", botId: "unknown", env: "", activeEngine: "openclaw", botName: "Unknown" },
+      { ownerId: "author", botId: "unsupported", env: "prod", activeEngine: "teclaw", botName: "Unsupported" },
+    ];
+    const response = await request("/evolve/teamclaw/bots?space_id=42&env=pre");
+    expect(response.status).toBe(200);
+    const page = await response.json();
+    expect(page.items.map((bot: SpaceBot) => bot.botId)).toEqual(expected);
+    expect(page.total).toBe(expected.length);
+  });
+  it("filters production choices before paging and keeps search behavior", async () => {
+    vi.stubEnv("SERVER_ENV", "prod");
+    bots = Array.from({ length: 60 }, (_, i) => ({
+      ownerId: "author", botId: `pre-${i}`, env: "pre", activeEngine: "openclaw", botName: "Preview",
+    }));
+    bots.push(...Array.from({ length: 3 }, (_, i) => ({
+      ownerId: "author", botId: `prod-${i}`, env: "prod", activeEngine: "openclaw", botName: `Production ${i}`,
+    })));
+    const first = await (await request("/evolve/teamclaw/bots?space_id=42&pageSize=2")).json();
+    const second = await (await request("/evolve/teamclaw/bots?space_id=42&pageSize=2&page=2")).json();
+    expect(first.total).toBe(3);
+    expect(first.items.map((bot: SpaceBot) => bot.botId)).toEqual(["prod-0", "prod-1"]);
+    expect(second.total).toBe(3);
+    expect(second.items.map((bot: SpaceBot) => bot.botId)).toEqual(["prod-2"]);
+    const search = await (await request("/evolve/teamclaw/bots?space_id=42&query=prod-1")).json();
+    expect(search.total).toBe(1);
+    expect(search.items[0].botId).toBe("prod-1");
+  });
+  it("does not change historical task visibility or legacy task access in production", async () => {
+    vi.stubEnv("SERVER_ENV", "prod");
+    expect((await (await request("/evolve/teamclaw/bots?space_id=42")).json()).total).toBe(0);
+    expect((await request("/evolve/teamclaw/tasks/task?space_id=42")).status).toBe(200);
+    const page = await (await request("/evolve/teamclaw/tasks?space_id=42")).json();
+    expect(page.total).toBe(1);
+    expect(page.tasks[0].task_id).toBe("task");
+    expect((await request("/evolve/tasks/task", "GET", undefined, "author")).status).toBe(200);
   });
   it("paginates the entire supported-engine Bot inventory", async () => {
     bots = Array.from({ length: 121 }, (_, i) => ({
