@@ -16,7 +16,6 @@ import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
 import { parseDebugChatMessageContent } from '@/services/botWorkshop/debugChatFiles';
 import { botSessionService, type BotChatSessionView, type ChatBotView } from '@/services/workspace/botSessionService';
-import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { FileText, Loader2, Maximize2, Minimize2, Plus, RefreshCw, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
@@ -54,6 +53,7 @@ function DebugMessageContent({ content }: { content: string }) {
 
 export function DebugChatPanel({
   bot,
+  authenticatedUserId,
   runtimeStage,
   ownerId,
   fullscreen = false,
@@ -61,6 +61,7 @@ export function DebugChatPanel({
   onToggleFullscreen,
 }: {
   bot: BotDomain;
+  authenticatedUserId: string | null;
   runtimeStage?: BotRuntimeStage;
   ownerId?: string;
   fullscreen?: boolean;
@@ -68,7 +69,7 @@ export function DebugChatPanel({
   onToggleFullscreen?: () => void;
 }) {
   const avatarUrl = bot.avatarUrl || generateBotAvatar(bot.id || bot.name);
-  const identityId = useWorkspaceStore((state) => state.activeIdentityId);
+  const identityId = authenticatedUserId;
   const [sessions, setSessions] = useState<BotChatSessionView[]>([]);
   const [session, setSession] = useState<BotChatSessionView | null>(null);
   const [loading, setLoading] = useState(true);
@@ -90,7 +91,7 @@ export function DebugChatPanel({
     (botId: string) => botEditorService.registerRenderScreenLibraries(botId, ownerId ?? bot.ownerId),
     [bot.ownerId, ownerId],
   );
-  const debug = useBotChat(chatBot, session, undefined, registerRenderScreenLibraries);
+  const debug = useBotChat(chatBot, session, undefined, registerRenderScreenLibraries, identityId);
   const handleSessionModelChange = useCallback((_botId: string, sessionId: string, model: string) => {
     setSessions((items) => items.map((item) => (item.sessionId === sessionId ? { ...item, model } : item)));
     setSession((current) => (current?.sessionId === sessionId ? { ...current, model } : current));
