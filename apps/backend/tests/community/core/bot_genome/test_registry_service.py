@@ -325,6 +325,16 @@ async def test_only_the_run_that_recorded_a_candidate_may_retry_it(world: World)
         await world.registry.commit_patch(BOT, patch, created_by=by_b, status=RevisionStatus.CANDIDATE, run=run_b)
     assert caught.value.reasons[0].code == "already_recorded"
     assert [r.name for r in world.registry.list_refs(BOT)] == ["candidate/run_a/1"], "run b got no ref to run a's work"
+    reworded = patch.model_copy(update={"rationale": "same ops, new words"})  # another digest, the same content
+    with pytest.raises(PatchRejected) as caught:  # the same run, but not the patch its candidate names
+        await world.registry.commit_patch(BOT, reworded, created_by=by_a, status=RevisionStatus.CANDIDATE, run=run_a)
+    assert caught.value.reasons[0].code == "already_recorded"
+    named = world.registry.get_revision(BOT, "candidate/run_a/1").revision.patch_digest
+    assert named == first.revision.revision.patch_digest
+    reworded_digest = sha256_digest(canonicalize(reworded.to_json()))
+    assert world.patches.get(env="dev", entity_id=BOT.entity_id, bot_id=BOT.bot_id, digest=reworded_digest) is None, (
+        "the second patch was not stored"
+    )
 
 
 @pytest.mark.asyncio
@@ -550,3 +560,8 @@ async def test_a_candidates_provenance_must_be_its_runs(world: World) -> None:
     with pytest.raises(ValueError):  # a draft is the owner's
         await world.registry.commit_patch(BOT, patch, created_by=RUN, status=RevisionStatus.DRAFT)
     assert world.registry.list_refs(BOT) == []
+
+
+def test_the_policy_is_an_owners_operation(world: World) -> None:
+    with pytest.raises(ValueError):
+        world.registry.set_policy(BOT, DEFAULT_POLICY, created_by=RUN)

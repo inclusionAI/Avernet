@@ -871,7 +871,9 @@ bot.
   (`already_recorded`) rather than handed that revision, and so is a
   candidate whose result another run or an owner already recorded from the
   same patch; promote the existing revision instead. Only the run that
-  first recorded a candidate may retry it and get its revision back.
+  first recorded a candidate, resubmitting the same patch, gets its
+  revision back (another patch of the same run producing the same content
+  is refused too: the revision's `patch_digest` names the first).
 - **`seq`.** A per-bot counter assigned when a new id is first recorded, for
   humans: the bot's first recorded revision is `r1`, the next new one `r2`,
   and so on. Example: a strategy submits a candidate whose content is new,

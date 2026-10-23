@@ -264,6 +264,11 @@ def test_record_refuses_a_candidate_whose_content_another_record_already_holds(d
     with pytest.raises(CandidateCollision):  # another run, the same patch: not its content
         revisions.record(_revision(R2, patch_digest=R3), patch=patch, candidate=other)
     assert refs.candidate_count(**BOT, run_id="run_8") == 0
+    r4 = "sha256:" + "d" * 64
+    another_patch = GenomePatchRow(**BOT, digest=r4, base_id=R2, content='{"ops":[],"rationale":"x"}', created_at=NOW)
+    with pytest.raises(CandidateCollision):  # the same run, another patch producing the same content: not a retry
+        revisions.record(_revision(R2, patch_digest=r4), patch=another_patch, candidate=candidate)
+    assert patches.get(**BOT, digest=r4) is None and refs.candidate_count(**BOT, run_id="run_7") == 1
 
 
 def test_record_takes_the_parent_from_the_latest_revision_inside_the_transaction(db, monkeypatch):

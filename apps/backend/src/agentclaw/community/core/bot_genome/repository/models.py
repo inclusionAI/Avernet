@@ -122,11 +122,11 @@ class GenomeRefEventRow(BaseModel):
 
 
 class CandidateCollision(Exception):
-    """``record`` found the candidate's content already recorded, and not by this run.
+    """``record`` found the candidate's content already recorded, and this is not the recording run's retry.
 
-    Another run's candidate, an owner's draft, another patch or a capture
-    holds the revision; only the run that first recorded it may retry.
-    Nothing was written.
+    Another run's candidate, an owner's draft, a capture, or this run with
+    a different patch holds the revision; only the run that first recorded
+    it, resubmitting the same patch, gets it back. Nothing was written.
     """
 
     def __init__(self, revision_id: str, seq: int, patch_digest: Optional[str]) -> None:

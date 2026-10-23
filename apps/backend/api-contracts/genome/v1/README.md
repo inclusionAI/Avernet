@@ -664,7 +664,10 @@ matters for resources, whose add and remove are T1.
   would not name that revision's patch, and when its result is a revision
   another run or an owner recorded from the same patch, because that
   revision's status and provenance are not this candidate's. Only the run
-  that first recorded a candidate may retry it and get the revision back.
+  that first recorded a candidate, resubmitting the same patch, gets the
+  revision back; the same run with a different patch (say, a new rationale)
+  that produces the same content is refused too, since the revision's
+  `patch_digest` names the first patch.
   An owner's draft that reproduces a revision gets that revision.
 - `rationale` is non-empty. `evidence` is required for every op except
   `file.edit` on a resource, `memory.retire` and `persona.remove`, which can

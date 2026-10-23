@@ -448,15 +448,18 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         )
         if run is not None:
             # A candidate is new content: a revision that already exists was recorded by another run,
-            # as an owner's draft, from another patch or from a capture, and its status and provenance
-            # are not this candidate's. Only the run that first recorded it may retry (its own
-            # `candidate/<run>/<n>` already points at the revision). This read gives the clear answer;
-            # the recording transaction repeats the check, so a record of the same content committing
-            # in between is refused the same way.
+            # as an owner's draft, from another patch or from a capture, and its status, provenance or
+            # patch_digest are not this candidate's. The one exception is a retry: the run that first
+            # recorded it (its own `candidate/<run>/<n>` points at the revision) resubmitting the very
+            # same patch. This read gives the clear answer; the recording transaction repeats the check,
+            # so a record of the same content committing in between is refused the same way.
             existing = self._revisions.get(**self._axes(bot), revision_id=revision_id(outcome.spec, base.policy))
-            if existing is not None and not any(
-                ref.revision_id == existing.revision_id
-                for ref in self._refs.list(**self._axes(bot), name_prefix=f"candidate/{run.run_id}/")
+            if existing is not None and not (
+                existing.patch_digest == patch_row.digest
+                and any(
+                    ref.revision_id == existing.revision_id
+                    for ref in self._refs.list(**self._axes(bot), name_prefix=f"candidate/{run.run_id}/")
+                )
             ):
                 raise PatchRejected(
                     [_already_recorded(existing.revision_id, existing.seq, existing.patch_digest, patch_row.digest)]
@@ -490,8 +493,13 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         parent is ``active``. The bot keeps running ``active`` until the new
         revision is promoted. The policy is checked for shape and gene-path
         grammar, and the unchanged spec is re-checked against what apply
-        accepts now (``PolicyRejected`` either way).
+        accepts now (``PolicyRejected`` either way). An owner's operation:
+        a ``strategy_run`` provenance is a programming error (``ValueError``).
         """
+        if created_by.kind is not ProvenanceKind.USER:
+            # The policy is what bounds automation; only an owner (or an admitted application acting for
+            # one) changes it. A run that could loosen `mutable_genes` or drop a pin would gate itself.
+            raise ValueError("the policy is changed by a user, never by a strategy run")
         validator = contract.definition_validator(contract.REVISION_SCHEMA_FILE, "policy")
         reasons = [Reason("schema", "policy", error.message) for error in validator.iter_errors(policy.to_json())]
         if not reasons:

@@ -101,11 +101,17 @@ class GenomeRevisionRepository(GenomeRevisionRepositoryProtocol):
                     if (
                         orm is not None
                         and candidate is not None
-                        and not any(r.revision_id == orm.revision_id for r in named)
+                        and not (
+                            any(r.revision_id == orm.revision_id for r in named)
+                            and patch is not None
+                            and orm.patch_digest == patch.digest
+                        )
                     ):
-                        # The content exists but this run has no candidate pointing at it: it was recorded by
-                        # another run, as an owner's draft, from another patch or from a capture. Only the run
-                        # that first recorded it may retry. Rolls the transaction back.
+                        # The content exists and this is not a retry: a retry is this run's own candidate
+                        # (its ref already points at the revision) submitting the very same patch. Anything
+                        # else (another run, an owner's draft, a capture, or this run with another patch that
+                        # happens to produce the same content) would hand the caller a revision whose status,
+                        # provenance or patch_digest is not its own. Rolls the transaction back.
                         raise CandidateCollision(orm.revision_id, orm.seq, orm.patch_digest)
                     if orm is None:
                         values = row.model_dump(exclude={"id", "seq", "gmt_create", "gmt_modified"})

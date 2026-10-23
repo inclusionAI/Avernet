@@ -83,8 +83,9 @@ class GenomeRegistryProtocol(Protocol):
         ``candidate/<run>/<n>`` and needs ``run``). Idempotent for the
         recorder: the same patch retried by the same run (or an owner's
         draft reproducing a revision) returns the revision with
-        ``created=False``; a candidate whose result another run, a draft or
-        a capture recorded is refused (``already_recorded``). Raises
+        ``created=False``; a candidate whose result another run, a draft, a
+        capture, or this run with a different patch recorded is refused
+        (``already_recorded``). Raises
         ``RevisionNotFound`` for a base that is not this bot's,
         ``PatchRejected`` with every reason, ``LimitExceeded``,
         ``ContentNotReachable``.
@@ -93,7 +94,7 @@ class GenomeRegistryProtocol(Protocol):
 
     @abstractmethod
     def set_policy(self, bot: BotRef, policy: GenomePolicy, *, created_by: Provenance) -> RecordedRevision:
-        """Record a revision with ``active``'s spec and the new policy.
+        """Record a revision with ``active``'s spec and the new policy; an owner's operation (never a run's).
 
         The spec is re-checked against what apply accepts now; ``PolicyRejected``
         carries the policy's own reasons or the spec's.
