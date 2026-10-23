@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from "node:child_process";
+import { execFile, type ExecFileOptions, type ExecFileException } from "node:child_process";
+import { executeGit } from "@avernet/clawweb-shared/server/services/git-execution";
 import {
   existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync,
 } from "node:fs";
@@ -18,7 +19,7 @@ import {
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
-  return { ...actual, execFileSync: vi.fn(actual.execFileSync) };
+  return { ...actual, execFile: vi.fn(actual.execFile) };
 });
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -27,8 +28,9 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 
 const realWriteFile = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).writeFile;
-const realExecFileSync = (await vi.importActual<typeof import("node:child_process")>("node:child_process")).execFileSync;
-const execMock = vi.mocked(execFileSync);
+const realExecFile = (await vi.importActual<typeof import("node:child_process")>("node:child_process")).execFile;
+const execMock = vi.mocked(execFile);
+type GitCallback = (error: ExecFileException | null, stdout: Buffer, stderr: Buffer) => void;
 // Deliberately synthetic credentials, including URL/shell metacharacters.
 const username = "fixture user+name@example.invalid";
 const token = "fixture-only:p@ss /?#%+'\"$;雪";
@@ -45,7 +47,7 @@ let globalConfig: string;
 let globalContents: string;
 
 beforeEach(async () => {
-  execMock.mockReset().mockImplementation(realExecFileSync);
+  execMock.mockReset().mockImplementation(realExecFile);
   vi.mocked(fsPromises.writeFile).mockReset().mockImplementation(realWriteFile);
   root = mkdtempSync(path.join(tmpdir(), "cw-git-client-test-"));
   // Both shell quote forms, substitution and whitespace must stay literal.
@@ -92,12 +94,12 @@ function expectCredential(cwd: string, remoteUrl: string, prefix: string[] = [],
 function bridgeTransport(options: {
   remoteUrl?: string;
   password?: string;
-  beforeClone?: (args: string[], opts: ExecFileSyncOptionsWithStringEncoding) => void;
+  beforeClone?: (args: string[], opts: ExecFileOptions) => void;
   fail?: (args: string[]) => boolean;
   failure?: Error;
 } = {}): { authenticatedClones: number; authenticatedPushes: number; authenticatedFetches: number } {
   const counts = { authenticatedClones: 0, authenticatedPushes: 0, authenticatedFetches: 0 };
-  execMock.mockImplementation(((file: string, args: string[], opts: ExecFileSyncOptionsWithStringEncoding) => {
+  execMock.mockImplementation(((file: string, args: string[], opts: ExecFileOptions, callback: GitCallback) => {
     expect(file).toBe("git");
     expectNoSecrets(args);
     expect(opts.env?.GIT_CONFIG_NOSYSTEM).toBe("1");
@@ -114,16 +116,16 @@ function bridgeTransport(options: {
       expectCredential(repo, options.remoteUrl ?? config.remoteUrl, prefix, options.password);
       counts.authenticatedClones++;
       options.beforeClone?.(args, opts);
-      return realExecFileSync(file, [...prefix, "clone", "--quiet", bare, "."], opts);
+      return realExecFile(file, [...prefix, "clone", "--quiet", bare, "."], { ...opts, encoding: "buffer" }, callback);
     }
     if (args[0] === "push" || args[0] === "fetch") {
       expectCredential(repo, options.remoteUrl ?? config.remoteUrl, [], options.password);
       if (args[0] === "push") counts.authenticatedPushes++;
       else counts.authenticatedFetches++;
-      return realExecFileSync(file, args.map((arg) => arg === "origin" ? bare : arg), opts);
+      return realExecFile(file, args.map((arg) => arg === "origin" ? bare : arg), { ...opts, encoding: "buffer" }, callback);
     }
-    return realExecFileSync(file, args, opts);
-  }) as typeof execFileSync);
+    return realExecFile(file, args, { ...opts, encoding: "buffer" }, callback);
+  }) as typeof execFile);
   return counts;
 }
 
@@ -161,7 +163,7 @@ describe("ClawFlowsGitClient isolated credentials", () => {
     let bootstrapFile = "";
     const counts = bridgeTransport({ remoteUrl, beforeClone(args, opts) {
       expect(args).toContain(remoteUrl);
-      expect(opts.stdio).toEqual(["ignore", "pipe", "pipe"]);
+      expect(opts.shell).toBe(false);
       expect(readdirSync(repo)).toEqual([]);
       const files = credentialFiles(root);
       expect(files).toHaveLength(1);
@@ -181,8 +183,8 @@ describe("ClawFlowsGitClient isolated credentials", () => {
     expect(statSync(files[0]).mode & 0o777).toBe(0o600);
     expect(runGit(repo, ["remote", "get-url", "origin"])).toBe(remoteUrl);
     expectNoSecrets(readFileSync(path.join(repo, ".git", "config"), "utf8"));
-    execFileSync("git", ["fetch", "origin"], {
-      cwd: repo, env: gitEnvironment(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    await executeGit(["fetch", "origin"], {
+      cwd: repo, env: gitEnvironment(),
     });
     writeFileSync(path.join(repo, "saved.txt"), "saved\n");
     const saved = await commitAndPushSaved(repo, "git-fixture", "fixture", author);
@@ -219,8 +221,8 @@ describe("ClawFlowsGitClient isolated credentials", () => {
       expect(helpers).toContain("store --file ");
     } });
     await cloneClawflows(repo, config);
-    execFileSync("git", ["fetch", "origin"], {
-      cwd: repo, env: gitEnvironment(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    await executeGit(["fetch", "origin"], {
+      cwd: repo, env: gitEnvironment(),
     });
     writeFileSync(path.join(repo, "inherited-helper.txt"), "safe\n");
     await commitAndPushSaved(repo, "inherited-helper", "fixture", author);
@@ -256,7 +258,7 @@ describe("ClawFlowsGitClient isolated credentials", () => {
     expect(String(caught)).toContain("128");
     expectAuthRemoved();
     for (const [, , opts] of execMock.mock.calls) {
-      expect((opts as ExecFileSyncOptionsWithStringEncoding).stdio).toEqual(["ignore", "pipe", "pipe"]);
+      expect((opts as ExecFileOptions).shell).toBe(false);
     }
   });
 
@@ -300,15 +302,15 @@ describe("ClawFlowsGitClient isolated credentials", () => {
   });
 
   it.each(["https://git.example.invalid/team/repo.git", "http://git.example.invalid/team/repo.git", "git@git.example.invalid:team/repo.git", "ssh://git@git.example.invalid/team/repo.git"])("preserves no-token/SSH transport %s", async (remoteUrl) => {
-    execMock.mockImplementation(((file: string, args: string[], opts: ExecFileSyncOptionsWithStringEncoding) => {
+    execMock.mockImplementation(((file: string, args: string[], opts: ExecFileOptions, callback: GitCallback) => {
       expectNoSecrets(args);
       if (args[0] === "clone") {
         expect(args).toContain(remoteUrl);
         expect(credentialFiles(root)).toEqual([]);
-        return realExecFileSync(file, ["clone", "--quiet", bare, "."], opts);
+        return realExecFile(file, ["clone", "--quiet", bare, "."], { ...opts, encoding: "buffer" }, callback);
       }
-      return realExecFileSync(file, args, opts);
-    }) as typeof execFileSync);
+      return realExecFile(file, args, { ...opts, encoding: "buffer" }, callback);
+    }) as typeof execFile);
     await cloneClawflows(repo, { ...config, remoteUrl, token: remoteUrl.startsWith("http") ? undefined : token });
     expect(runGit(repo, ["remote", "get-url", "origin"])).toBe(remoteUrl);
     expect(credentialFiles(root)).toEqual([]);

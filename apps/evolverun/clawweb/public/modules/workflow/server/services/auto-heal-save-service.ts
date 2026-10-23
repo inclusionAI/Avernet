@@ -14,6 +14,7 @@
  * NOT create a deploy tag.
  */
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
+import { withGitOperation } from "@avernet/clawweb-shared/server/services/git-execution";
 import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { stringify as stringifyYaml } from "yaml";
 import { normalizeWorkflowSpec, validateWorkflowSemantics, type WorkflowSpec } from "../workflow.js";
@@ -119,23 +120,26 @@ export class AutoHealSaveService {
       ...normalized,
     });
 
-    let repoDir: string;
-    try {
-      repoDir = await createTempRepo();
-    } catch (mkErr) {
-      const msg = mkErr instanceof Error ? mkErr.message : String(mkErr);
-      throw makeError(500, "Internal Server Error", `无法创建临时 git 目录: ${msg}`);
-    }
+    const gitResult = await withGitOperation({ workflowId, operation: 'autoheal_save' }, async () => {
+      let repoDir: string;
+      try {
+        repoDir = await createTempRepo();
+      } catch (mkErr) {
+        const msg = mkErr instanceof Error ? mkErr.message : String(mkErr);
+        throw makeError(500, "Internal Server Error", `无法创建临时 git 目录: ${msg}`);
+      }
 
-    let gitResult: { branch: string; commit: string } | undefined;
-    try {
-      await cloneClawflows(repoDir, this.gitConfig);
-      await writeWorkflowSpecToRepo(repoDir, packId, workflowId, normalized);
-      await ensurePackManifest(repoDir, packId, workflowId);
-      gitResult = await commitAndPushSaved(repoDir, workflowId, input.note ?? "auto-heal save", this.author);
-    } finally {
-      await removeTempRepo(repoDir);
-    }
+      let gitResult: { branch: string; commit: string } | undefined;
+      try {
+        await cloneClawflows(repoDir, this.gitConfig);
+        await writeWorkflowSpecToRepo(repoDir, packId, workflowId, normalized);
+        await ensurePackManifest(repoDir, packId, workflowId);
+        gitResult = await commitAndPushSaved(repoDir, workflowId, input.note ?? "auto-heal save", this.author);
+      } finally {
+        await removeTempRepo(repoDir);
+      }
+      return gitResult;
+    });
 
     if (!gitResult) {
       throw makeError(500, "Internal Server Error", "Git save produced no result");

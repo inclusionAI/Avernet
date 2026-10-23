@@ -15,6 +15,7 @@
  * action="deploy", matching ClawMind semantics.
  */
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
+import { withGitOperation } from "@avernet/clawweb-shared/server/services/git-execution";
 import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { stringify as stringifyYaml, parse as parseYaml } from "yaml";
 import { normalizeWorkflowSpec, validateWorkflowSemantics, type WorkflowSpec } from "../workflow.js";
@@ -181,37 +182,40 @@ export class AutoHealDeployService {
       throw makeError(500, "Internal Server Error", `无法预留部署记录: ${msg}`);
     }
 
-    let repoDir: string;
-    try {
-      repoDir = await createTempRepo();
-    } catch (mkErr) {
-      const msg = mkErr instanceof Error ? mkErr.message : String(mkErr);
-      throw makeError(500, "Internal Server Error", `无法创建临时 git 目录: ${msg}`);
-    }
+    const gitResult = await withGitOperation({ workflowId, operation: 'autoheal_deploy' }, async () => {
+      let repoDir: string;
+      try {
+        repoDir = await createTempRepo();
+      } catch (mkErr) {
+        const msg = mkErr instanceof Error ? mkErr.message : String(mkErr);
+        throw makeError(500, "Internal Server Error", `无法创建临时 git 目录: ${msg}`);
+      }
 
-    let gitResult: { branch: string; tagName: string; commit: string; deployNumber: number } | undefined;
-    try {
-      await cloneClawflows(repoDir, this.gitConfig);
-      await writeWorkflowSpecToRepo(repoDir, packId, workflowId, spec);
-      await ensurePackManifest(repoDir, packId, workflowId);
+      let gitResult: { branch: string; tagName: string; commit: string; deployNumber: number } | undefined;
+      try {
+        await cloneClawflows(repoDir, this.gitConfig);
+        await writeWorkflowSpecToRepo(repoDir, packId, workflowId, spec);
+        await ensurePackManifest(repoDir, packId, workflowId);
 
-      // Fall back to git tags if there are tags not yet reflected in the DB
-      // (e.g. manual/external deploys). This is a safety net, not the primary
-      // allocation mechanism.
-      const gitMaxDeployNumber = getMaxDeployNumberFromGitTags(repoDir, workflowId);
-      const deployNumber = Math.max(reservedDeployNumber, gitMaxDeployNumber) + 1;
+        // Fall back to git tags if there are tags not yet reflected in the DB
+        // (e.g. manual/external deploys). This is a safety net, not the primary
+        // allocation mechanism.
+        const gitMaxDeployNumber = await getMaxDeployNumberFromGitTags(repoDir, workflowId);
+        const deployNumber = Math.max(reservedDeployNumber, gitMaxDeployNumber) + 1;
 
-      gitResult = await commitAndPushDeploy(
-        repoDir,
-        workflowId,
-        deployNumber,
-        newVersion,
-        input.note ?? "auto-heal deploy",
-        this.author,
-      );
-    } finally {
-      await removeTempRepo(repoDir);
-    }
+        gitResult = await commitAndPushDeploy(
+          repoDir,
+          workflowId,
+          deployNumber,
+          newVersion,
+          input.note ?? "auto-heal deploy",
+          this.author,
+        );
+      } finally {
+        await removeTempRepo(repoDir);
+      }
+      return gitResult;
+    });
 
     if (!gitResult) {
       throw makeError(500, "Internal Server Error", "Git deploy produced no result");

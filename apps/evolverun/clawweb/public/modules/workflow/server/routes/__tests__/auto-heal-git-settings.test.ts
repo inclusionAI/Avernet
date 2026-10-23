@@ -84,7 +84,7 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", (endpoin
     vi.spyOn(gitClient, "cloneClawflows").mockResolvedValue();
     vi.spyOn(gitClient, "writeWorkflowSpecToRepo").mockResolvedValue();
     vi.spyOn(gitClient, "ensurePackManifest").mockResolvedValue();
-    vi.spyOn(gitClient, "getMaxDeployNumberFromGitTags").mockReturnValue(0);
+    vi.spyOn(gitClient, "getMaxDeployNumberFromGitTags").mockResolvedValue(0);
     vi.spyOn(gitClient, "commitAndPushSaved").mockResolvedValue({ branch: `saved/${spec.id}`, commit: "abc123" });
     vi.spyOn(gitClient, "commitAndPushDeploy").mockImplementation(async (_dir, workflowId, deployNumber) => ({
       branch: `wf/${workflowId}`, tagName: `deploy/${workflowId}/#${deployNumber}`, commit: "abc123", deployNumber,

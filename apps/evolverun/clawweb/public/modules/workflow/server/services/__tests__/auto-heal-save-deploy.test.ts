@@ -211,7 +211,7 @@ describe("AutoHealDeployService", () => {
     vi.spyOn(gitClient, "ensurePackManifest").mockResolvedValue();
     vi.spyOn(gitClient, "createTempRepo").mockResolvedValue("/tmp/cw-autoheal-xxx");
     vi.spyOn(gitClient, "removeTempRepo").mockResolvedValue();
-    vi.spyOn(gitClient, "getMaxDeployNumberFromGitTags").mockReturnValue(0);
+    vi.spyOn(gitClient, "getMaxDeployNumberFromGitTags").mockResolvedValue(0);
     vi.spyOn(gitClient, "commitAndPushDeploy").mockResolvedValue({
       branch: "wf/wf-test",
       tagName: "deploy/wf-test/#1",
@@ -407,7 +407,7 @@ describe("AutoHealDeployService", () => {
       triggerRun,
     );
 
-    vi.spyOn(gitClient, "getMaxDeployNumberFromGitTags").mockReturnValueOnce(5);
+    vi.spyOn(gitClient, "getMaxDeployNumberFromGitTags").mockResolvedValueOnce(5);
     vi.spyOn(gitClient, "commitAndPushDeploy").mockResolvedValueOnce({
       branch: "wf/wf-test",
       tagName: "deploy/wf-test/#6",
