@@ -448,4 +448,194 @@ mod tests {
         let _ = Json::<Value>::default();
     }
 
+    // ── user_visibility (provisioning-time human-facing visibility) ─────────
+
+    /// Records the last attributes patch.
+    struct RecordingInternalAttributes {
+        last_patch: tokio::sync::Mutex<Option<bcs_service_api::PatchBotInternalAttributes>>,
+    }
+
+    impl RecordingInternalAttributes {
+        fn recording() -> Arc<Self> {
+            Arc::new(Self {
+                last_patch: tokio::sync::Mutex::new(None),
+            })
+        }
+    }
+
+    #[async_trait]
+    impl bcs_service_api::InternalBotAttributesService for RecordingInternalAttributes {
+        async fn get(
+            &self,
+            _bot_id: String,
+        ) -> Result<
+            bcs_service_api::BotInternalAttributes,
+            bcs_service_api::application::v1::ApplicationError,
+        > {
+            Err(bcs_service_api::application::v1::ApplicationError::internal(
+                "not used".to_string(),
+            ))
+        }
+
+        async fn patch(
+            &self,
+            command: bcs_service_api::PatchBotInternalAttributes,
+        ) -> Result<
+            bcs_service_api::BotInternalAttributes,
+            bcs_service_api::application::v1::ApplicationError,
+        > {
+            *self.last_patch.lock().await = Some(command);
+            Ok(bcs_service_api::BotInternalAttributes {
+                visibility: "protected".to_string(),
+                user_visibility: bcs_service_api::UserVisibility::Protected,
+                friend_ext: serde_json::Map::new(),
+                friend_check_in_strategy: bcs_service_api::FriendCheckInStrategy::Approval,
+            })
+        }
+    }
+
+    fn app_with_attributes(
+        registry: ApiKeyRegistry,
+        onboarding: Arc<dyn BotOnboardingService>,
+        attributes: Arc<dyn bcs_service_api::InternalBotAttributesService>,
+    ) -> axum::Router {
+        let state = HttpAppState::new(
+            Services::builder()
+                .bot_onboarding(onboarding)
+                .build_for_test(),
+        )
+        .with_internal_bot_attributes_service(attributes)
+        .with_service_api_keys(Arc::new(registry));
+        build_router(state)
+    }
+
+    #[tokio::test]
+    async fn ensure_user_visibility_applies_attributes_patch() {
+        let onboarding = Arc::new(RecordingOnboarding {
+            last_ensure: tokio::sync::Mutex::new(None),
+            created: true,
+        });
+        let attributes = RecordingInternalAttributes::recording();
+        let app = app_with_attributes(
+            ApiKeyRegistry::new(Vec::new()),
+            onboarding.clone(),
+            attributes.clone(),
+        );
+
+        let response = app
+            .oneshot(ensure_request(
+                &json!({"name":"MyBot","staff_no":"85020","visibility":"protected","user_visibility":"public"}),
+                "X-BCS-Service-Key",
+                "any-dev-key",
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let patch = attributes.last_patch.lock().await.clone().unwrap();
+        assert_eq!(patch.bot_id, "bot-85020");
+        assert_eq!(
+            patch.user_visibility,
+            Some(bcs_service_api::UserVisibility::Public)
+        );
+        // The patch is user_visibility-only: no other attribute moves.
+        assert_eq!(patch.visibility, None);
+        assert_eq!(patch.friend_ext, None);
+        assert_eq!(patch.friend_check_in_strategy, None);
+        // The upsert ran first; the attributes patch applies on top of it.
+        assert!(onboarding.last_ensure.lock().await.is_some());
+    }
+
+    #[tokio::test]
+    async fn ensure_user_visibility_absent_or_blank_is_a_no_op() {
+        let onboarding = Arc::new(RecordingOnboarding {
+            last_ensure: tokio::sync::Mutex::new(None),
+            created: true,
+        });
+        let attributes = RecordingInternalAttributes::recording();
+        let app = app_with_attributes(
+            ApiKeyRegistry::new(Vec::new()),
+            onboarding.clone(),
+            attributes.clone(),
+        );
+
+        for body in [
+            json!({"name":"MyBot","staff_no":"85020","visibility":"protected"}),
+            json!({"name":"MyBot","staff_no":"85020","user_visibility":""}),
+            json!({"name":"MyBot","staff_no":"85020","user_visibility":"   "}),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(ensure_request(&body, "X-BCS-Service-Key", "any-dev-key"))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), axum::http::StatusCode::OK);
+            assert!(
+                attributes.last_patch.lock().await.is_none(),
+                "absent/blank user_visibility must not touch attributes (body {body})"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn ensure_user_visibility_invalid_value_returns_400_without_patching() {
+        let onboarding = Arc::new(RecordingOnboarding {
+            last_ensure: tokio::sync::Mutex::new(None),
+            created: true,
+        });
+        let attributes = RecordingInternalAttributes::recording();
+        let app = app_with_attributes(
+            ApiKeyRegistry::new(Vec::new()),
+            onboarding.clone(),
+            attributes.clone(),
+        );
+
+        let response = app
+            .oneshot(ensure_request(
+                &json!({"name":"MyBot","staff_no":"85020","user_visibility":"friends"}),
+                "X-BCS-Service-Key",
+                "any-dev-key",
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        let body = body_json(response).await;
+        assert!(
+            body.to_string().contains("user_visibility"),
+            "error must name the offending field: {body}"
+        );
+        assert!(attributes.last_patch.lock().await.is_none());
+        assert!(
+            onboarding.last_ensure.lock().await.is_none(),
+            "invalid payloads must fail before the ensure upsert"
+        );
+    }
+
+    #[tokio::test]
+    async fn ensure_user_visibility_without_attributes_service_reports_missing_wiring() {
+        // Same wiring as app(): no internal bot-attributes service mounted.
+        let onboarding = Arc::new(RecordingOnboarding {
+            last_ensure: tokio::sync::Mutex::new(None),
+            created: true,
+        });
+        let app = app(ApiKeyRegistry::new(Vec::new()), onboarding.clone());
+
+        let response = app
+            .oneshot(ensure_request(
+                &json!({"name":"MyBot","staff_no":"85020","user_visibility":"public"}),
+                "X-BCS-Service-Key",
+                "any-dev-key",
+            ))
+            .await
+            .unwrap();
+
+        // The upsert already succeeded, so a fixed deployment converges on
+        // retry; missing wiring is a server-side condition, not a client error.
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert!(onboarding.last_ensure.lock().await.is_some());
+    }
 }
