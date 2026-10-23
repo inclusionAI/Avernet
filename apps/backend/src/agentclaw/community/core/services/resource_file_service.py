@@ -676,11 +676,11 @@ class ResourceFileService(ResourceFilePort):
         while queue:
             current, entries = queue.pop(0)
             for entry in sorted(entries, key=lambda e: e.get("name", "")):
-                rel = self._rel_path(current, entry)
                 is_dir = self._is_dir_flag(entry)
-                if rel == current or is_dir is None:
+                if not (entry.get("relative_path") or entry.get("name")) or is_dir is None:
                     # Nameless, or neither a file nor a directory: the listing is not one to clear a root on.
                     raise RootListingFailed(f"{current} of bot {bot_id} listed an entry it could not describe")
+                rel = self._rel_path(current, entry)
                 if is_dir:
                     sub = await device_fs.list_dir(self._logical(rel))
                     if sub is None:
