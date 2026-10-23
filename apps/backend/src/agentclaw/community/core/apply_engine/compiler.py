@@ -93,15 +93,14 @@ class CompileRefused(Exception):
     service records the apply as failed with the message as a note on the
     report (an engine exception is recorded without its text, since that is
     where raw internals could reach a response body; this message is composed
-    by the compiler for the caller to read). A compiler raises it ``from`` its
-    own domain error — the one its HTTP surface maps — so a caller that
-    answers a request (a dry run) re-raises that cause instead.
+    by the compiler for the caller to read). It carries the compiler's own
+    ``domain_error`` — the one its HTTP surface maps — so a caller that
+    answers a request (a dry run) raises that instead.
     """
 
-    @property
-    def domain_error(self) -> BaseException | None:
-        """The compiler's own error this refusal was raised from, for a caller with an HTTP surface."""
-        return self.__cause__
+    def __init__(self, message: str, *, domain_error: Exception) -> None:
+        super().__init__(message)
+        self.domain_error = domain_error
 
 
 @runtime_checkable

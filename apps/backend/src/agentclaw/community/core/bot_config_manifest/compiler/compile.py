@@ -86,17 +86,21 @@ class ManifestCompiler:
     async def compile(
         self, ctx: ApplyContext, ref: ManifestStateRef, *, only: Collection[ApplyConstruct] | None = None
     ) -> Compiled:
-        """The stored document's state; a document that stopped validating since ``check`` is ``CompileRefused``.
+        """The stored document's state; a document that does not validate is ``CompileRefused``.
 
         ``compile`` runs in the apply worker, after ``check`` accepted the
-        document and an apply id was minted; the bot can have moved in
-        between (its engine, a withdrawn materialiser), and that is a reason
-        the report should carry, not an engine failure.
+        document and an apply id was minted — the bot can have moved in
+        between (its engine, a withdrawn materialiser) — and it is the dry
+        run's front door, with no ``check`` before it; either way the
+        refusal is a reason the report (or the caller) should carry, not an
+        engine failure.
         """
         try:
             parsed = self._parsed_or_empty(ctx)
         except ManifestValidationError as exc:
-            raise CompileRefused(f"the stored document no longer validates for this bot: {exc}") from exc
+            raise CompileRefused(
+                f"the stored document no longer validates for this bot: {exc}", domain_error=exc
+            ) from exc
         return await self.compile_document(ctx, parsed, only=only)
 
     async def compile_document(

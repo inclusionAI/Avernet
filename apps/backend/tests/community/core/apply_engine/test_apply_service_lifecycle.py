@@ -313,16 +313,7 @@ def test_dry_run_writes_no_row_and_mints_no_id(world):
     service, applies, _locks, scripts, _manifests = world
 
     before = applies.latest(env="dev", entity_id=_ENTITY, bot_id=_BOT)
-    report = asyncio.run(
-        service.dry_run(
-            entity_id=_ENTITY,
-            bot_id=_BOT,
-            bot=_BOT_RECORD,
-            owner_id=_ENTITY,
-            actor_id=_ENTITY,
-            state=ManifestStateRef(),
-        )
-    )
+    report = _dry_run(service)
 
     assert report.apply_id == ""
     assert applies.latest(env="dev", entity_id=_ENTITY, bot_id=_BOT) is before
@@ -655,16 +646,7 @@ def test_a_dry_run_closes_its_session(world, monkeypatch):
     closed = _counting_session_closes(monkeypatch)
     before = FakeGitClient.constructed
 
-    report = asyncio.run(
-        service.dry_run(
-            entity_id=_ENTITY,
-            bot_id=_BOT,
-            bot=_BOT_RECORD,
-            owner_id=_ENTITY,
-            actor_id=_ENTITY,
-            state=ManifestStateRef(),
-        )
-    )
+    report = _dry_run(service)
     assert report.status is ApplyStatus.SUCCEEDED
     assert FakeGitClient.constructed - before == 1
     assert len(closed) == 1, "a dry run must close its session before returning"
@@ -1008,6 +990,10 @@ def test_an_apply_that_cannot_be_rebuilt_terminates_instead_of_looping(world):
     assert accepted.apply_id  # the first apply is untouched
 
 
+class _DomainRefusal(Exception):
+    """Stands in for a compiler's own error (ManifestValidationError, NotAppliable): what its HTTP surface maps."""
+
+
 class _RefusingCompiler:
     """Passes ``check`` and refuses ``compile``: the reference moved between the two, as a promotion's can."""
 
@@ -1015,7 +1001,10 @@ class _RefusingCompiler:
         return None
 
     async def compile(self, ctx, ref, *, only=None):
-        raise CompileRefused("promotion p1 moved active to r1, but active is r2 now; a superseded promotion is not delivered")
+        raise CompileRefused(
+            "promotion p1 moved active to r1, but active is r2 now; a superseded promotion is not delivered",
+            domain_error=_DomainRefusal("superseded"),
+        )
 
 
 def test_a_compile_refused_in_the_worker_is_a_failed_report_with_the_reason(world):
@@ -1034,18 +1023,6 @@ def test_a_compile_refused_in_the_worker_is_a_failed_report_with_the_reason(worl
     assert locks.get(env="dev", entity_id=_ENTITY, bot_id=_BOT) is None, "the lock is released after a refusal"
 
 
-class _DomainRefusal(Exception):
-    """Stands in for a compiler's own error (ManifestValidationError, NotAppliable): what its HTTP surface maps."""
-
-
-class _RefusingFromDomainError(_RefusingCompiler):
-    async def compile(self, ctx, ref, *, only=None):
-        try:
-            raise _DomainRefusal("the document no longer validates")
-        except _DomainRefusal as exc:
-            raise CompileRefused(str(exc)) from exc
-
-
 def _dry_run(service):
     import asyncio
 
@@ -1058,15 +1035,11 @@ def _dry_run(service):
 
 def test_a_dry_run_hears_the_compilers_own_refusal_not_the_workers(world):
     """A dry run answers an HTTP caller: a refusal is unwrapped to the domain
-    error the compiler raised it from (mapped to 422 / 404 / 409 by its
-    surface); ``CompileRefused`` itself is what only the worker records. A
-    refusal raised from nothing stays as it is."""
+    error the compiler carries (mapped to 422 / 404 / 409 by its surface);
+    ``CompileRefused`` itself is what only the worker records."""
     service, applies, _locks, _scripts, _ = world
-    service._compilers = {ManifestStateRef: _RefusingFromDomainError()}
-    with pytest.raises(_DomainRefusal):
-        _dry_run(service)
     service._compilers = {ManifestStateRef: _RefusingCompiler()}
-    with pytest.raises(CompileRefused):
+    with pytest.raises(_DomainRefusal, match="superseded"):
         _dry_run(service)
     assert service.last_apply(entity_id=_ENTITY, bot_id=_BOT) is None, "a dry run leaves no record, refused or not"
 
@@ -1074,15 +1047,15 @@ def test_a_dry_run_hears_the_compilers_own_refusal_not_the_workers(world):
 def test_a_dry_run_of_a_document_that_stopped_validating_raises_the_validators_error(world):
     """The real road: the stored document fails the validator (a resource outside the root the engine owns),
     and the caller gets ``ManifestValidationError`` with its violations, as the route maps it."""
-    from agentclaw.community.core.apply_engine.capabilities import resolve_capabilities
     from agentclaw.community.core.bot_config_manifest.schema import ManifestValidationError, validate_document
 
     class _ValidatingManifests(_ManifestService):
         """The fixture's document fake, with the real validator behind ``validate``."""
 
         def validate(self, *, document, active_engine, bot_type):
-            caps = resolve_capabilities(active_engine=active_engine, bot_type=bot_type, is_teclaw=lambda e: e == "teclaw")
-            return validate_document(document, caps)
+            return validate_document(
+                document, self.capabilities_for_bot({"active_engine": active_engine, "bot_type": bot_type})
+            )
 
     service, *_ = world
     service._compilers[ManifestStateRef]._manifests = _ValidatingManifests(
