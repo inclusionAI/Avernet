@@ -33,10 +33,11 @@
   - [x] `tests/community/architecture` passes, apart from the four cold-import/boot tests that fail identically on the clean `dev` tip in this sandbox (the editable install of the project could not be built behind the blocked PyPI mirror; they import `agentclaw` in a subprocess without `src` on the path).
 - **Depends on:** Task 2
 
-## Task 4: Verification
+## Task 4: [~] Verification
 - **Goal:** Ensure the change meets every spec acceptance criterion.
 - **Done when:**
-  - [ ] The full command block in plan.md §Testing Strategy passes, and `./scripts/ci_test.sh` passes (or what could not run is stated with the reason).
+  - [x] The full command block in plan.md §Testing Strategy passes (2816 passed; the four cold-import/boot tests pass once the project is importable in the venv).
+  - [ ] `./scripts/ci_test.sh --base origin/dev` passes (running).
   - [ ] Every spec acceptance criterion is checked off.
 - **Depends on:** Task 3
 

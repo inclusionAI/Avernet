@@ -243,9 +243,11 @@ user_config:
   # 100–200MiB，放 BLOB 列是自毁形态（max_allowed_packet/行宽/备份放大）。
   # 中性默认落在进程工作目录（同 skill_scan.storage_dir 形态）；部署需要
   # 共享卷（NAS）时由各环境 overlay 覆写为绝对路径。v1 留存策略：行与字节
-  # 一律不删，理由与机件见 sql/2026_08_31_manifest_content.sql 头注释。
-  # 读取方：core/bot_config_manifest/content/settings.py 的
-  # content_store_root_from_config（W4 组合根在装配存储服务时调用）。
+  # 一律不删，理由与机件见 core/content_store/sql/2026_08_31_manifest_content.sql
+  # 头注释。存储本身自 #3064 起是独立组件 core/content_store/（Manifest 与
+  # Genome Registry 共用），键名保持不变。读取方：core/content_store/settings.py 的
+  # content_store_root_from_config（manifest_fetch_module 解析，content_store_module
+  # 装配存储服务时注入）。
   #
   # teclaw_platform_managed（W8 #1476）：teclaw 系 bot 的 manifest 走「平台管理」
   # 投递——每个类目物化进平台状态（数据库行 + bot-data 对象存储里的托管文件，
