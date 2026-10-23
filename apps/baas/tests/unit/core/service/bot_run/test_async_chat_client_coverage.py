@@ -1995,7 +1995,7 @@ class TestA2aBaseUrlFromWs:
     """
 
     def test_proxypass_shape_keeps_route_prefix_wss(self):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
+        from secbaas.community.core.service.bot_run._async_chat_client_a2a import (
             _a2a_base_url_from_ws,
         )
 
@@ -2005,7 +2005,7 @@ class TestA2aBaseUrlFromWs:
         )
 
     def test_proxypass_shape_keeps_route_prefix_ws(self):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
+        from secbaas.community.core.service.bot_run._async_chat_client_a2a import (
             _a2a_base_url_from_ws,
         )
 
@@ -2013,7 +2013,7 @@ class TestA2aBaseUrlFromWs:
         assert _a2a_base_url_from_ws(uri) == "http://proxy.example/proxypass/sbx-1"
 
     def test_aicoding_custom_adapter_ws_path_shape(self):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
+        from secbaas.community.core.service.bot_run._async_chat_client_a2a import (
             _a2a_base_url_from_ws,
         )
 
@@ -2022,7 +2022,7 @@ class TestA2aBaseUrlFromWs:
         assert _a2a_base_url_from_ws(uri) == "https://proxy.example/proxypass/sbx-1"
 
     def test_default_engine_path_shape(self):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
+        from secbaas.community.core.service.bot_run._async_chat_client_a2a import (
             _a2a_base_url_from_ws,
         )
 
@@ -2030,21 +2030,21 @@ class TestA2aBaseUrlFromWs:
         assert _a2a_base_url_from_ws(uri) == "http://proxy.example/proxypass/sbx-1"
 
     def test_direct_shape_no_prefix_strips_to_bare_base(self):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
+        from secbaas.community.core.service.bot_run._async_chat_client_a2a import (
             _a2a_base_url_from_ws,
         )
 
         assert _a2a_base_url_from_ws("ws://host:20003/ws") == "http://host:20003"
 
     def test_direct_shape_no_path(self):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
+        from secbaas.community.core.service.bot_run._async_chat_client_a2a import (
             _a2a_base_url_from_ws,
         )
 
         assert _a2a_base_url_from_ws("ws://host:20003") == "http://host:20003"
 
     def test_non_ws_scheme_returns_none(self):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
+        from secbaas.community.core.service.bot_run._async_chat_client_a2a import (
             _a2a_base_url_from_ws,
         )
 
@@ -2094,16 +2094,19 @@ class TestInteractionAnswerTransportAttribution:
         resolution = InteractionResolution(kind="exec", decision="allow-once")
         service = _claim_service_for(resolution)
         acc = AsyncChatClient(
-            uri="ws://host/ws", max_retries=0, interaction_service=service
+            uri="ws://host/ws",
+            max_retries=0,
+            interaction_service=service,
+            transport_mode="grey",
         )
-        acc._transport = "a2a"
+        acc._chat_transport._current_name = "a2a"
         a2a_client = MagicMock(name="a2a")
         a2a_client.interaction_resolve = AsyncMock(return_value=_make_exchange())
         v3_client = MagicMock(name="v3")
         v3_client.interaction_resolve = AsyncMock(return_value=_make_exchange())
         acc._client = a2a_client
-        acc._v3_fallback = v3_client
-        acc._v3_routed_sessions["sk1"] = "v3"  # B3 归属：附件 reroute 过
+        acc._chat_transport.fallback_client = v3_client
+        acc._chat_transport.routed_sessions["sk1"] = "v3"  # B3 归属：附件 reroute 过
 
         await acc._dispatch_interaction_answer(
             session_key="sk1", interaction_id="int-1", deadline_ms=None
@@ -2121,15 +2124,18 @@ class TestInteractionAnswerTransportAttribution:
         resolution = InteractionResolution(kind="exec", decision="allow-once")
         service = _claim_service_for(resolution)
         acc = AsyncChatClient(
-            uri="ws://host/ws", max_retries=0, interaction_service=service
+            uri="ws://host/ws",
+            max_retries=0,
+            interaction_service=service,
+            transport_mode="grey",
         )
-        acc._transport = "a2a"
+        acc._chat_transport._current_name = "a2a"
         a2a_client = MagicMock(name="a2a")
         a2a_client.interaction_resolve = AsyncMock(return_value=_make_exchange())
         v3_client = MagicMock(name="v3")
         v3_client.interaction_resolve = AsyncMock(return_value=_make_exchange())
         acc._client = a2a_client
-        acc._v3_fallback = v3_client
+        acc._chat_transport.fallback_client = v3_client
 
         await acc._dispatch_interaction_answer(
             session_key="sk1", interaction_id="int-1", deadline_ms=None
@@ -2145,12 +2151,15 @@ class TestInteractionAnswerTransportAttribution:
         resolution = InteractionResolution(kind="exec", decision="allow-once")
         service = _claim_service_for(resolution)
         acc = AsyncChatClient(
-            uri="ws://host/ws", max_retries=0, interaction_service=service
+            uri="ws://host/ws",
+            max_retries=0,
+            interaction_service=service,
+            transport_mode="grey",
         )
-        acc._transport = "a2a"
+        acc._chat_transport._current_name = "a2a"
         acc._client = MagicMock(name="a2a")
-        acc._v3_routed_sessions["sk1"] = "v3"
-        acc._v3_fallback = None  # fallback 已收口
+        acc._chat_transport.routed_sessions["sk1"] = "v3"
+        acc._chat_transport.fallback_client = None  # fallback 已收口
 
         await acc._dispatch_interaction_answer(
             session_key="sk1", interaction_id="int-1", deadline_ms=None
@@ -2170,8 +2179,8 @@ class TestInteractionAnswerTransportAttribution:
         )
         engine_client = MagicMock()
         engine_client.interaction_resolve = AsyncMock(return_value=_make_exchange())
-        acc._client = engine_client  # off 模式 v3-ws，脏归属表也不得干扰
-        acc._v3_routed_sessions["sk1"] = "v3"
+        acc._client = engine_client  # off 模式 v3-ws
+        assert not hasattr(acc._chat_transport, "routed_sessions")
 
         await acc._dispatch_interaction_answer(
             session_key="sk1", interaction_id="int-1", deadline_ms=None
@@ -2196,8 +2205,8 @@ class TestA2aModeValidation:
             AsyncChatClient as _ACC,
         )
 
-        with pytest.raises(ValueError, match="invalid a2a_mode"):
-            _ACC(uri="ws://host/ws", a2a_mode="bogus")
+        with pytest.raises(ValueError, match="invalid transport_mode"):
+            _ACC(uri="ws://host/ws", transport_mode="bogus")
 
     @pytest.mark.parametrize("mode", ["off", "grey", "on"])
     def test_valid_modes_are_accepted(self, mode, mock_bot_ws):
@@ -2205,8 +2214,137 @@ class TestA2aModeValidation:
             AsyncChatClient as _ACC,
         )
 
-        client = _ACC(uri="ws://host/ws", a2a_mode=mode)
-        assert client._a2a_mode == mode
+        client = _ACC(uri="ws://host/ws", transport_mode=mode)
+        assert client.transport_mode == mode
+
+    def test_constructor_selects_transport_strategy_once(self, mock_bot_ws):
+        """off 默认只选 WS；grey/on 只选 A2A，构造后不允许混走另一实现。"""
+        from secbaas.community.core.service.bot_run._async_chat_client_a2a import (
+            A2aChatTransport,
+        )
+        from secbaas.community.core.service.bot_run._async_chat_client_ws import (
+            WebSocketChatTransport,
+        )
+
+        default_client = AsyncChatClient(uri="ws://host/ws")
+        assert isinstance(default_client._chat_transport, WebSocketChatTransport)
+        assert not hasattr(default_client._chat_transport, "fallback_client")
+        assert not hasattr(default_client._chat_transport, "routed_sessions")
+
+        for mode in ("off", "grey", "on"):
+            client = AsyncChatClient(uri="ws://host/ws", transport_mode=mode)
+            assert client.transport_name == "unknown"
+            assert not hasattr(client, "_transport")
+
+        for mode in ("grey", "on"):
+            client = AsyncChatClient(uri="ws://host/ws", transport_mode=mode)
+            assert isinstance(client._chat_transport, A2aChatTransport)
+            assert client._chat_transport.mode == mode
+
+    @pytest.mark.asyncio
+    async def test_a2a_reconnect_uses_selected_strategy(self, mock_bot_ws):
+        """A2A 断链重连仍走 A2A 策略，不落回硬编码 WS 构造。"""
+
+        def make_a2a_client(**_kwargs):
+            instance = MagicMock()
+            instance.connected = True
+            instance.connect = AsyncMock(return_value=True)
+            instance.close = AsyncMock()
+            instance.server_info = {"features": {}}
+            return instance
+
+        a2a_cls = MagicMock(side_effect=make_a2a_client)
+        ws_cls = MagicMock(side_effect=AssertionError("A2A reconnect used WS"))
+        with (
+            patch(
+                "secbaas.community.core.service.bot_run._async_chat_client_a2a."
+                "BotA2aClient",
+                a2a_cls,
+            ),
+            patch(
+                "secbaas.community.core.service.bot_run._async_chat_client."
+                "BotWebSocketClient",
+                ws_cls,
+            ),
+        ):
+            client = AsyncChatClient(
+                uri="ws://host/api/openclaw/ws",
+                transport_mode="on",
+                max_retries=1,
+                retry_base_backoff=0,
+            )
+            await client.connect()
+            old_client = client._client
+
+            old_client.connected = False
+            client._notify_disconnect()
+            await asyncio.sleep(0.02)
+
+            assert a2a_cls.call_count == 2
+            assert ws_cls.call_count == 0
+            assert client._client is not old_client
+            assert client._chat_transport.transport_name == "a2a"
+            await client.close()
+
+    @pytest.mark.asyncio
+    async def test_a2a_on_without_base_url_raises(self, mock_bot_ws):
+        """transport_mode=on 无可推导 HTTP base 时明确失败，不伪装成 WS 成功。"""
+        from secbaas.community.core.service.bot_run._bot_a2a_client import (
+            A2aUnavailableError,
+        )
+
+        client = AsyncChatClient(uri="ws://host/not-openclaw", transport_mode="on")
+        # A non-openclaw/custom path is still convertible to a host base, so
+        # force the strategy boundary directly to cover the no-base contract.
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client_a2a."
+            "_a2a_base_url_from_ws",
+            return_value=None,
+        ):
+            with pytest.raises(A2aUnavailableError):
+                await client.connect()
+
+
+class TestA2aGreyReconnectFallbackOwnership:
+    """grey 重连回退 WS 后，既有 fallback run 仍必须按归属路由。"""
+
+    @pytest.mark.asyncio
+    async def test_late_abort_and_interaction_stay_on_fallback(self, mock_bot_ws):
+        class _FakeEndpoint:
+            connected = True
+
+            def __init__(self, name: str):
+                self.name = name
+                self.calls: list[str] = []
+
+            async def chat_abort(self, *args, **kwargs):
+                self.calls.extend(args)
+                return {"ok": True, "endpoint": self.name}
+
+        acc = AsyncChatClient(uri="ws://host/api/openclaw/ws", transport_mode="grey")
+        fallback = _FakeEndpoint("fallback")
+        new_main = _FakeEndpoint("new-main-ws")
+        acc._client = new_main
+        acc._chat_transport._current_name = "v3-ws"
+        acc._chat_transport.fallback_client = fallback
+        acc._chat_transport.routed_sessions["s-att"] = "v3"
+
+        assert await acc.chat_abort("s-att", "r1") == {
+            "ok": True,
+            "endpoint": "fallback",
+        }
+        client, extra = await acc._chat_transport.interaction_target(
+            session_key="s-att"
+        )
+        assert client is fallback
+        assert extra == {}
+
+        # 未登记归属的 normal run 仍走重连后的 WS main，不带 A2A session key。
+        client, extra = await acc._chat_transport.interaction_target(
+            session_key="s-normal"
+        )
+        assert client is new_main
+        assert extra == {}
 
 
 # ==================== A2A base URL: unknown custom ws path ====================
@@ -2216,7 +2354,7 @@ class TestA2aBaseUrlUnknownWsPath:
     def test_unknown_custom_ws_path_falls_back_to_bare_host(self):
         """末段非 ``ws`` 的自定义 ws_path：不猜前缀归属——base 维持 host 根，
         由能力探测诚实回退（portal 前缀只在词汇表内剥）。"""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
+        from secbaas.community.core.service.bot_run._async_chat_client_a2a import (
             _a2a_base_url_from_ws,
         )
 
@@ -2285,8 +2423,7 @@ class _StubV3Transport:
 def stub_v3_patch():
     _StubV3Transport.instances = []
     with patch(
-        "secbaas.community.core.service.bot_run._bot_websocket_client."
-        "BotWebSocketClient",
+        "secbaas.community.core.service.bot_run._async_chat_client.BotWebSocketClient",
         _StubV3Transport,
     ):
         yield
@@ -2294,12 +2431,12 @@ def stub_v3_patch():
 
 
 def _a2a_acc_with_stub_main_client() -> AsyncChatClient:
-    """transport=a2a + 可收口的替身主连接（close 可 await）。"""
-    acc = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+    """A2A 策略 + 可收口的替身主连接（close 可 await）。"""
+    acc = AsyncChatClient(uri="ws://host/ws", max_retries=0, transport_mode="grey")
     acc._client = MagicMock()
     acc._client.connected = True
     acc._client.close = AsyncMock()
-    acc._transport = "a2a"
+    acc._chat_transport._current_name = "a2a"  # 已连接的 A2A 策略测试面
     return acc
 
 
@@ -2316,7 +2453,7 @@ class TestInjectAttachmentsV3Reroute:
             "with files", session_key="sk-att", attachments=[{"kind": "screenshot"}]
         )
 
-        fallback = acc._v3_fallback
+        fallback = acc._chat_transport.fallback_client
         assert fallback is not None, "附件注入必须懒建 v3 专用连接"
         assert fallback is _StubV3Transport.instances[-1]
         assert fallback.inject_calls, "chat_inject 未打到 v3 fallback"
@@ -2325,9 +2462,13 @@ class TestInjectAttachmentsV3Reroute:
         assert args == (), f"参数应全关键字转 v3: {args}"
         assert kwargs["message"] == "with files", f"message 必须原样转 v3: {kwargs}"
         assert kwargs["attachments"] == [{"kind": "screenshot"}]
+        # 注入不开启主 run 等待面；保留旧行为：不注入归属表。
+        assert acc._chat_transport.routed_sessions == {}
 
         await acc.close()
-        assert acc._v3_fallback is None, "注入收口后 fallback 随 close 清空"
+        assert acc._chat_transport.fallback_client is None, (
+            "注入收口后 fallback 随 close 清空"
+        )
 
     @pytest.mark.asyncio
     async def test_second_a2a_inject_reuses_cached_v3_fallback(
@@ -2337,10 +2478,12 @@ class TestInjectAttachmentsV3Reroute:
         acc = _a2a_acc_with_stub_main_client()
 
         await acc.inject_message("first", session_key="sk-1", attachments=[{"k": 1}])
-        first_fallback = acc._v3_fallback
+        first_fallback = acc._chat_transport.fallback_client
         await acc.inject_message("second", session_key="sk-2", attachments=[{"k": 2}])
 
-        assert acc._v3_fallback is first_fallback, "second 注入必须复用同一 fallback"
+        assert acc._chat_transport.fallback_client is first_fallback, (
+            "second 注入必须复用同一 fallback"
+        )
         created = len(_StubV3Transport.instances)
         assert created == 1, f"fallback 被重建 {created} 次（应为 1）"
         assert len(first_fallback.inject_calls) == 2
@@ -2349,6 +2492,22 @@ class TestInjectAttachmentsV3Reroute:
         assert first_fallback.close_calls == 1, "收口必须关唯一的 fallback"
 
     @pytest.mark.asyncio
+    async def test_a2a_inject_attachment_preserves_send_ownership(
+        self, mock_bot_ws, stub_v3_patch
+    ):
+        """注入附件走 fallback，但不覆盖/清空已有主 run 归属。"""
+        acc = _a2a_acc_with_stub_main_client()
+
+        await acc.send_message(
+            "main", session_key="sk-att", attachments=[{"k": 1}], wait_result=False
+        )
+        assert "sk-att" in acc._chat_transport.routed_sessions
+
+        await acc.inject_message("side", session_key="sk-att", attachments=[{"k": 2}])
+
+        assert "sk-att" in acc._chat_transport.routed_sessions
+        await acc.close()
+
     async def test_bridge_snapshot_is_empty_without_client(self, mock_bot_ws):
         """快照从当前传输取 handlers——无传输时空表（fallback 不注册假面）。"""
         acc = AsyncChatClient(uri="ws://host/ws", max_retries=0)
@@ -2359,17 +2518,17 @@ class TestInjectAttachmentsV3Reroute:
         self, mock_bot_ws, mock_bot_ws_instance
     ):
         """fallback close 抛错必须吞掉——主连接收口不得被旁支拖死。"""
-        acc = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        acc = AsyncChatClient(uri="ws://host/ws", max_retries=0, transport_mode="grey")
         await acc.connect()
 
         bad_fallback = MagicMock()
         bad_fallback.close = AsyncMock(side_effect=RuntimeError("fallback boom"))
-        acc._v3_fallback = bad_fallback
+        acc._chat_transport.fallback_client = bad_fallback
 
         await acc.close()  # 不得上抛
 
         bad_fallback.close.assert_awaited_once()
-        assert acc._v3_fallback is None, "close 后 fallback 必须清空"
+        assert acc._chat_transport.fallback_client is None, "close 后 fallback 必须清空"
         mock_bot_ws_instance.close.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -2379,14 +2538,14 @@ class TestInjectAttachmentsV3Reroute:
         acc = _a2a_acc_with_stub_main_client()
 
         await acc.inject_message("m", session_key="sk-1", attachments=[{"k": 1}])
-        fallback = acc._v3_fallback
+        fallback = acc._chat_transport.fallback_client
         assert fallback is not None
 
         await acc.close()
 
         assert fallback.close_calls == 1, "fallback 随 close 收口"
-        assert acc._v3_fallback is None
-        assert acc._v3_routed_sessions == {}
+        assert acc._chat_transport.fallback_client is None
+        assert acc._chat_transport.routed_sessions == {}
 
 
 class TestV3FallbackDisconnectRecovery:
@@ -2430,7 +2589,7 @@ class TestV3FallbackDisconnectRecovery:
                 and len(_StubV3Transport.instances[-1].chat_send_calls) >= 1
             )
         )
-        fallback = acc._v3_fallback
+        fallback = acc._chat_transport.fallback_client
         assert fallback is not None
 
         fallback.simulate_disconnect()
@@ -2441,8 +2600,8 @@ class TestV3FallbackDisconnectRecovery:
         assert len(fallback.chat_send_calls) == 1
         assert acc._client.chat_send.await_count == 0
         # 坏连接不再被持有；归属路由表收口
-        assert acc._v3_fallback is None
-        assert acc._v3_routed_sessions == {}
+        assert acc._chat_transport.fallback_client is None
+        assert acc._chat_transport.routed_sessions == {}
 
     @pytest.mark.asyncio
     async def test_ack_then_disconnect_terminates_stream_waiter(
@@ -2468,7 +2627,7 @@ class TestV3FallbackDisconnectRecovery:
                 and len(_StubV3Transport.instances[-1].chat_send_calls) >= 1
             )
         )
-        acc._v3_fallback.simulate_disconnect()
+        acc._chat_transport.fallback_client.simulate_disconnect()
 
         chunks = await asyncio.wait_for(task, 2)
         errs = [c for c in chunks if c.type == "error"]
@@ -2499,7 +2658,7 @@ class TestV3FallbackDisconnectRecovery:
         )
         await self._wait_until(lambda: acc._client.chat_send.await_count == 1)
 
-        acc._v3_fallback.simulate_disconnect()
+        acc._chat_transport.fallback_client.simulate_disconnect()
 
         with pytest.raises(BotSessionError):
             await asyncio.wait_for(att_task, 2)
@@ -2534,7 +2693,7 @@ class TestV3FallbackDisconnectRecovery:
             return task
 
         task1 = await send_att("sk-att-4a", 1)
-        first = acc._v3_fallback
+        first = acc._chat_transport.fallback_client
         first.simulate_disconnect()
         with pytest.raises(BotSessionError):
             await asyncio.wait_for(task1, 2)
@@ -2551,7 +2710,7 @@ class TestV3FallbackDisconnectRecovery:
                 and len(_StubV3Transport.instances[-1].chat_send_calls) >= 1
             )
         )
-        second = acc._v3_fallback
+        second = acc._chat_transport.fallback_client
         assert second is not None and second is not first, "复用了已断开连接"
         assert len(_StubV3Transport.instances) == created + 1
         assert second in _StubV3Transport.instances
@@ -2560,7 +2719,9 @@ class TestV3FallbackDisconnectRecovery:
         # 收尾：第二连接存活；旧连接的迟到断连通知（验收 5）不
         # 清新连接、不误杀其等待方
         first.simulate_disconnect()
-        assert acc._v3_fallback is second, "旧连接迟到通知清掉了新连接"
+        assert acc._chat_transport.fallback_client is second, (
+            "旧连接迟到通知清掉了新连接"
+        )
         await asyncio.sleep(0.05)
         assert not task2.done(), "旧连接迟到通知误杀了新连接的等待方"
         second.simulate_disconnect()
@@ -2576,13 +2737,13 @@ class TestV3FallbackDisconnectRecovery:
         失效收口（归属表清理）并重建。"""
         acc = self._acc_with_awaitable_main()
         await acc.inject_message("m", session_key="sk-att-5", attachments=[{"k": 1}])
-        first = acc._v3_fallback
+        first = acc._chat_transport.fallback_client
         assert first is not None
         first.connected = False  # 死连接，未触发断连处理器
 
         await acc.inject_message("m2", session_key="sk-att-5", attachments=[{"k": 1}])
 
-        second = acc._v3_fallback
+        second = acc._chat_transport.fallback_client
         assert second is not first, "死连接被复用"
         assert len(_StubV3Transport.instances) == 2
         assert len(second.inject_calls) == 1
@@ -2605,8 +2766,8 @@ class TestAttachFallbackRunOwnershipLifecycle:
 
     def _acc_with_owned_a2a_main(self) -> AsyncChatClient:
         """transport=a2a + 显式诚实面主连接（归属查询/abort 不误报）。"""
-        acc = AsyncChatClient(uri="ws://host/ws", max_retries=0)
-        acc._transport = "a2a"
+        acc = AsyncChatClient(uri="ws://host/ws", max_retries=0, transport_mode="grey")
+        acc._chat_transport._current_name = "a2a"
         acc._client = MagicMock()
         acc._client.connected = True
         acc._client.close = AsyncMock()
@@ -2630,10 +2791,10 @@ class TestAttachFallbackRunOwnershipLifecycle:
             "m", session_key="sk-att", attachments=[{"k": 1}], wait_result=False
         )
 
-        fallback = acc._v3_fallback
+        fallback = acc._chat_transport.fallback_client
         assert fallback is not None and fallback.chat_send_calls, "未重路由 v3"
         # ACK 后归属标记不得被等待方 finally 收口
-        assert "sk-att" in acc._v3_routed_sessions, "ACK 后归属标记被误清"
+        assert "sk-att" in acc._chat_transport.routed_sessions, "ACK 后归属标记被误清"
         # 池归属路由查询：找到持 run 的连接
         assert acc.tracks_session("sk-att") is True, "池归属查询不认后台附件 run"
         # sweep 排空判断：连接不得当空闲收口
@@ -2658,7 +2819,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
             "m", session_key="sk-att", attachments=[{"k": 1}], wait_result=False
         )
 
-        fallback = acc._v3_fallback
+        fallback = acc._chat_transport.fallback_client
         chat_handler = fallback._event_handlers["chat"]
         # 引擎经 v3 连接推 final——此时 orchestrator 的 session state 已被
         # ACK 方 finally pop（state=None 分支是归属标记唯一见证者）
@@ -2670,7 +2831,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
             }
         )
 
-        assert "sk-att" not in acc._v3_routed_sessions, "终态帧后标记泄漏"
+        assert "sk-att" not in acc._chat_transport.routed_sessions, "终态帧后标记泄漏"
         assert acc.tracks_session("sk-att") is False, "终态后归属查询仍认账"
         assert acc.has_active_sessions is False, "终态后连接仍不可收口"
         await acc.close()
@@ -2690,9 +2851,11 @@ class TestAttachFallbackRunOwnershipLifecycle:
                 timeout=0.05,
             )
 
-        assert "sk-att" in acc._v3_routed_sessions, "超时后归属标记被误清"
+        assert "sk-att" in acc._chat_transport.routed_sessions, "超时后归属标记被误清"
         await acc.chat_abort("sk-att")
-        assert acc._v3_fallback.chat_abort_calls == [("sk-att", {"run_id": None})]
+        assert acc._chat_transport.fallback_client.chat_abort_calls == [
+            ("sk-att", {"run_id": None})
+        ]
         acc._client.chat_abort.assert_not_awaited()
         await acc.close()
 
@@ -2710,10 +2873,11 @@ class TestAttachFallbackRunOwnershipLifecycle:
         )
         await self._wait_until(
             lambda: (
-                acc._v3_fallback is not None and bool(acc._v3_fallback.chat_send_calls)
+                acc._chat_transport.fallback_client is not None
+                and bool(acc._chat_transport.fallback_client.chat_send_calls)
             )
         )
-        chat_handler = acc._v3_fallback._event_handlers["chat"]
+        chat_handler = acc._chat_transport.fallback_client._event_handlers["chat"]
         chat_handler(
             {
                 "sessionKey": "sk-att",
@@ -2725,7 +2889,9 @@ class TestAttachFallbackRunOwnershipLifecycle:
 
         with pytest.raises(BotSessionError):
             await task
-        assert "sk-att" not in acc._v3_routed_sessions, "error 终态后标记泄漏"
+        assert "sk-att" not in acc._chat_transport.routed_sessions, (
+            "error 终态后标记泄漏"
+        )
         await acc.close()
 
     @pytest.mark.asyncio
@@ -2758,7 +2924,9 @@ class TestAttachFallbackRunOwnershipLifecycle:
                     wait_result=False,
                 )
 
-        assert "sk-att" not in acc._v3_routed_sessions, "失败发送残留归属标记"
+        assert "sk-att" not in acc._chat_transport.routed_sessions, (
+            "失败发送残留归属标记"
+        )
         acc._client.chat_abort.assert_not_awaited()
         await acc.close()
 
@@ -2775,7 +2943,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
         await acc.send_message(
             "m", session_key="sk-att", attachments=[{"k": 1}], wait_result=False
         )
-        fallback = acc._v3_fallback
+        fallback = acc._chat_transport.fallback_client
         chat_handler = fallback._event_handlers["chat"]
 
         # 两种注入终态形态，主 run 都必须在途认账
@@ -2796,7 +2964,9 @@ class TestAttachFallbackRunOwnershipLifecycle:
             }
         )
 
-        assert "sk-att" in acc._v3_routed_sessions, "注入 final 误释放主 run 归属"
+        assert "sk-att" in acc._chat_transport.routed_sessions, (
+            "注入 final 误释放主 run 归属"
+        )
         assert acc.tracks_session("sk-att") is True, "归属查询因注入误翻"
         await acc.chat_abort("sk-att")
         assert fallback.chat_abort_calls == [("sk-att", {"run_id": None})], (
@@ -2821,14 +2991,17 @@ class TestAttachFallbackRunOwnershipLifecycle:
         )
         await self._wait_until(
             lambda: (
-                acc._v3_fallback is not None and bool(acc._v3_fallback.chat_send_calls)
+                acc._chat_transport.fallback_client is not None
+                and bool(acc._chat_transport.fallback_client.chat_send_calls)
             )
         )
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
 
-        assert "sk-att" in acc._v3_routed_sessions, "取消等待方误删在途 run 归属"
+        assert "sk-att" in acc._chat_transport.routed_sessions, (
+            "取消等待方误删在途 run 归属"
+        )
         await acc.chat_abort("sk-att")
         acc._client.chat_abort.assert_not_awaited()
         await acc.close()
@@ -2858,10 +3031,11 @@ class TestAttachFallbackRunOwnershipLifecycle:
         t = asyncio.create_task(consume())
         await self._wait_until(
             lambda: (
-                acc._v3_fallback is not None and bool(acc._v3_fallback.chat_send_calls)
+                acc._chat_transport.fallback_client is not None
+                and bool(acc._chat_transport.fallback_client.chat_send_calls)
             )
         )
-        acc._v3_fallback._event_handlers["chat"](
+        acc._chat_transport.fallback_client._event_handlers["chat"](
             {
                 "sessionKey": "sk-att",
                 "state": "delta",
@@ -2872,7 +3046,9 @@ class TestAttachFallbackRunOwnershipLifecycle:
         await t
         assert chunks, "未消费到任何 chunk 就提前结束（fixture 失效）"
 
-        assert "sk-att" in acc._v3_routed_sessions, "流式提前关闭误删在途 run 归属"
+        assert "sk-att" in acc._chat_transport.routed_sessions, (
+            "流式提前关闭误删在途 run 归属"
+        )
         await acc.chat_abort("sk-att")
         acc._client.chat_abort.assert_not_awaited()
         await acc.close()
@@ -2884,7 +3060,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
         已被等待方 pop"的形态，否则此后再无终态可触发清理，标记永久残留
         （连接无法排空、owner 悬挂）。"""
         with patch(
-            "secbaas.community.core.service.bot_run._bot_websocket_client."
+            "secbaas.community.core.service.bot_run._async_chat_client."
             "BotWebSocketClient",
             _TerminalOnSendV3,
         ):
@@ -2893,7 +3069,9 @@ class TestAttachFallbackRunOwnershipLifecycle:
                 "m", session_key="sk-att", attachments=[{"k": 1}], wait_result=False
             )
 
-        assert "sk-att" not in acc._v3_routed_sessions, "终态已到达但归属永久残留"
+        assert "sk-att" not in acc._chat_transport.routed_sessions, (
+            "终态已到达但归属永久残留"
+        )
         assert acc.tracks_session("sk-att") is False, "终态后归属查询仍认账"
         assert acc.has_active_sessions is False, "终态后连接仍不可排空"
         await acc.close()
@@ -2908,8 +3086,6 @@ class TestAttachFallbackRunOwnershipLifecycle:
         断连——恢复执行必须抛 NotConnectedError，不得被 finally 里未初始化
         变量的 UnboundLocalError 吞掉真实断连原因。"""
         acc = AsyncChatClient(uri="ws://host/ws", max_retries=0)
-        acc._transport = "v3-ws"  # 该缺陷与传输无关，普通 v3 模式同样成立
-        acc._transport = "a2a"
         acc._client = MagicMock()
         acc._client.connected = True
         acc._client.close = AsyncMock()
@@ -2955,9 +3131,11 @@ class TestAttachFallbackRunOwnershipLifecycle:
         await acc.send_message(
             "m", session_key="sk-att", attachments=[{"k": 1}], wait_result=False
         )
-        assert "sk-att" in acc._v3_routed_sessions
-        acc._v3_fallback._event_handlers["chat"](final_frame)
-        assert "sk-att" not in acc._v3_routed_sessions, "装饰 key 的后台终态未释放归属"
+        assert "sk-att" in acc._chat_transport.routed_sessions
+        acc._chat_transport.fallback_client._event_handlers["chat"](final_frame)
+        assert "sk-att" not in acc._chat_transport.routed_sessions, (
+            "装饰 key 的后台终态未释放归属"
+        )
         assert acc.has_active_sessions is False
 
         # 等待中态：装饰 key 终态唤醒等待方，归属同样释放
@@ -2966,11 +3144,13 @@ class TestAttachFallbackRunOwnershipLifecycle:
                 "m2", session_key="sk-att", attachments=[{"k": 1}], wait_result=True
             )
         )
-        await self._wait_until(lambda: len(acc._v3_fallback.chat_send_calls) == 2)
-        acc._v3_fallback._event_handlers["chat"](final_frame)
+        await self._wait_until(
+            lambda: len(acc._chat_transport.fallback_client.chat_send_calls) == 2
+        )
+        acc._chat_transport.fallback_client._event_handlers["chat"](final_frame)
         content, _payloads = await task
         assert content == "done"
-        assert "sk-att" not in acc._v3_routed_sessions, (
+        assert "sk-att" not in acc._chat_transport.routed_sessions, (
             "装饰 key 的等待中终态未释放归属"
         )
         await acc.close()
@@ -2989,7 +3169,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
             "error": acc._on_error,
         }
         with patch(
-            "secbaas.community.core.service.bot_run._bot_websocket_client."
+            "secbaas.community.core.service.bot_run._async_chat_client."
             "BotWebSocketClient",
             _StubV3Transport,
         ):
@@ -2997,19 +3177,23 @@ class TestAttachFallbackRunOwnershipLifecycle:
             await acc.send_message(
                 "m", session_key="sk-att", attachments=[{"k": 1}], wait_result=False
             )
-            acc._v3_fallback._event_handlers["agent"](
+            acc._chat_transport.fallback_client._event_handlers["agent"](
                 {"sessionKey": "sk-att", "stream": "assistant", "state": "final"}
             )
-            assert "sk-att" not in acc._v3_routed_sessions, "agent final 通道未释放归属"
+            assert "sk-att" not in acc._chat_transport.routed_sessions, (
+                "agent final 通道未释放归属"
+            )
 
             # error 通道（后台态）
             await acc.send_message(
                 "m2", session_key="sk-att", attachments=[{"k": 1}], wait_result=False
             )
-            acc._v3_fallback._event_handlers["error"](
+            acc._chat_transport.fallback_client._event_handlers["error"](
                 {"sessionKey": "sk-att", "state": "error", "errorMessage": "boom"}
             )
-            assert "sk-att" not in acc._v3_routed_sessions, "error 通道未释放归属"
+            assert "sk-att" not in acc._chat_transport.routed_sessions, (
+                "error 通道未释放归属"
+            )
         await acc.close()
 
     @pytest.mark.asyncio
@@ -3032,10 +3216,11 @@ class TestAttachFallbackRunOwnershipLifecycle:
         )
         await self._wait_until(
             lambda: (
-                acc._v3_fallback is not None and bool(acc._v3_fallback.chat_send_calls)
+                acc._chat_transport.fallback_client is not None
+                and bool(acc._chat_transport.fallback_client.chat_send_calls)
             )
         )
-        acc._v3_fallback._event_handlers["agent"](
+        acc._chat_transport.fallback_client._event_handlers["agent"](
             {
                 "sessionKey": "sk-att",
                 "stream": "assistant",
@@ -3044,7 +3229,9 @@ class TestAttachFallbackRunOwnershipLifecycle:
             }
         )
         await task
-        assert "sk-att" not in acc._v3_routed_sessions, "agent final 唤醒后归属未释放"
+        assert "sk-att" not in acc._chat_transport.routed_sessions, (
+            "agent final 唤醒后归属未释放"
+        )
         assert acc.has_active_sessions is False
         await acc.close()
 
@@ -3065,8 +3252,8 @@ class TestAttachFallbackRunOwnershipLifecycle:
         await acc.send_message(
             "m1", session_key="chat-1", attachments=[{"k": 1}], wait_result=False
         )
-        assert "chat-1" in acc._v3_routed_sessions
-        fallback = acc._v3_fallback
+        assert "chat-1" in acc._chat_transport.routed_sessions
+        fallback = acc._chat_transport.fallback_client
 
         # chat-10：A2A 主连接 run（裸 key，包含 chat-1 为前缀）终结
         acc._client._event_handlers["chat"](
@@ -3077,7 +3264,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
             }
         )
 
-        assert "chat-1" in acc._v3_routed_sessions, (
+        assert "chat-1" in acc._chat_transport.routed_sessions, (
             "A2A session 终态误清了 fallback 前缀 session 的归属"
         )
         assert acc.tracks_session("chat-1") is True
@@ -3137,7 +3324,7 @@ class TestV3FallbackConcurrentInit:
         _GatedV3Transport.gated_instances = []
         _GatedV3Transport.release = gated
         with patch(
-            "secbaas.community.core.service.bot_run._bot_websocket_client."
+            "secbaas.community.core.service.bot_run._async_chat_client."
             "BotWebSocketClient",
             _GatedV3Transport,
         ):
@@ -3164,13 +3351,13 @@ class TestV3FallbackConcurrentInit:
         assert constructed == 1, (
             f"并发首发构造了 {constructed} 条连接（互斥缺失，应为 1）"
         )
-        single = acc._v3_fallback
+        single = acc._chat_transport.fallback_client
         assert single is not None, "fallback 未发布"
         # 两个 run 都必须走这唯一的连接，归属都指向它
         assert len(single.chat_send_calls) == 2, "并发首发被分散到多条连接"
-        assert "sk-1" in acc._v3_routed_sessions
-        assert "sk-2" in acc._v3_routed_sessions
+        assert "sk-1" in acc._chat_transport.routed_sessions
+        assert "sk-2" in acc._chat_transport.routed_sessions
         # 唯一连接断连 → 归属按预期整体收口（不再有"各连各的"误杀面）
         single.simulate_disconnect()
-        assert acc._v3_routed_sessions == {}, "断连后归属未整体收口"
+        assert acc._chat_transport.routed_sessions == {}, "断连后归属未整体收口"
         await acc.close()

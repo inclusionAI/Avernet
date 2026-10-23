@@ -225,7 +225,7 @@ class AsyncChatClientPool:
                 session_key_timeout=self._session_key_timeout,
                 max_retries=self._max_retries,
                 retry_base_backoff=self._retry_base_backoff,
-                a2a_mode=current_mode,
+                transport_mode=current_mode,
                 ignore_case=self._read_ignore_case(self._system_config_service),
                 interaction_service=self._interaction_service
                 if self._enable_process_interaction(self._system_config_service)
