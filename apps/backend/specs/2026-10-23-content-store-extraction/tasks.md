@@ -23,14 +23,14 @@
   - [x] All tests under `tests/community/core/bot_config_manifest`, `tests/community/core/bot_genome`, `tests/community/repository/bot`, `tests/community/contracts/test_bot_genome_schema.py`, `tests/community/e2e/test_genome_flows.py` pass with import paths updated; the registry width test asserts 1100 is recorded and 1101 refused.
 - **Depends on:** Task 1
 
-## Task 3: Declare the boundary, exempt the module, update the docs
+## Task 3: [x] Declare the boundary, exempt the module, update the docs
 - **Goal:** The architecture gates know about the new component and the module READMEs and design docs name the new home.
 - **Files:** `core/content_store/README.md` (Context Boundary), `core/bot_config_manifest/README.md`, `core/bot_genome/README.md`, `core/repository/README.md`, `docs/bot-evolution/01-genome.md`, `docs/bot-evolution/01-genome.zh-CN.md`, `tests/community/architecture/test_module_boundaries.py`, `tests/community/framework/flow_coverage.py`, `tests/community/core/bot_config_manifest/test_manifest_ddl_contract.py`
 - **Done when:**
-  - [ ] `agentclaw.community.core.content_store` is in `BOUNDARY_SIGNIFICANT_MODULES` and its README declares `purpose` / `provides` / `consumes` / `consumed_by` / `internal_dependencies`.
-  - [ ] `bot_genome`'s declared `internal_dependencies` no longer lists `bot_config_manifest.content` or `bot_config_manifest.apply.entry_delivery`; `bot_config_manifest` lists `core.content_store`.
-  - [ ] `SINGLEBOX_E2E_EXEMPT` has a `content_store` entry with a reason (`test_manifest_ddl_contract` was already updated in Task 1).
-  - [ ] `tests/community/architecture` passes.
+  - [x] `agentclaw.community.core.content_store` is in `BOUNDARY_SIGNIFICANT_MODULES` and its README declares `purpose` / `provides` / `consumes` / `consumed_by` / `internal_dependencies`.
+  - [x] `bot_genome`'s declared `internal_dependencies` no longer lists `bot_config_manifest.content` or `bot_config_manifest.apply.entry_delivery`; `bot_config_manifest` lists `core.content_store`.
+  - [x] `SINGLEBOX_E2E_EXEMPT` has a `content_store` entry with a reason (`test_manifest_ddl_contract` was already updated in Task 1).
+  - [x] `tests/community/architecture` passes, apart from the four cold-import/boot tests that fail identically on the clean `dev` tip in this sandbox (the editable install of the project could not be built behind the blocked PyPI mirror; they import `agentclaw` in a subprocess without `src` on the path).
 - **Depends on:** Task 2
 
 ## Task 4: Verification

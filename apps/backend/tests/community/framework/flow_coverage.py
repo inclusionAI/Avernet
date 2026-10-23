@@ -235,9 +235,9 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
         "own, covered by the security matrix in "
         "tests/community/core/bot_config_manifest/fetch/ and the store "
         "contract tests in "
-        "tests/community/core/bot_config_manifest/content/ (plus its "
+        "tests/community/core/content_store/ (plus its "
         "repository over a real database in "
-        "tests/community/repository/bot/test_manifest_content_repository.py), "
+        "tests/community/repository/bot/test_content_store_repository.py), "
         "by the materialiser suites in "
         "tests/community/core/bot_config_manifest/apply/ (the two fetching "
         "categories over fakes that count every write, and the entry-fetch "
@@ -251,6 +251,20 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
         "manifest routes through the assembled app) plus the apply routes in "
         "tests/community/endpoints/test_openapi_config_manifest_apply.py. "
         "Drain this when singlebox fronts the backend with a gateway."
+    ),
+    "content_store": (
+        "The content-addressed store behind the Manifest's fetch pipeline and "
+        "the Genome Registry (moved out of bot_config_manifest in #3064): "
+        "storage behaviour with no singlebox-visible flow of its own, reached "
+        "only through the two consumers above, whose exemptions name why "
+        "neither can run in singlebox yet. Covered by the store contract tests "
+        "in tests/community/core/content_store/ (the receipt-before-write, "
+        "verified-read, sanitised-URL and produced-row rules, and the "
+        "acm-tree-v1 framing), by its repository over a real database in "
+        "tests/community/repository/bot/test_content_store_repository.py "
+        "(append-only, tenant guard, DDL/ORM agreement), and by its wiring in "
+        "tests/community/di/test_content_store_module_wiring.py. Drain with "
+        "bot_config_manifest or bot_genome, whichever gains a flow first."
     ),
     "bot_genome": (
         "Blocked on the same missing minter as _GATEWAY_PRINCIPAL_EXEMPT_REASON "

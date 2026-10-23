@@ -1,4 +1,4 @@
-"""Error vocabulary for the manifest content store (W11, #1510).
+"""Error vocabulary for the content store (W11, #1510).
 
 Messages in this family may carry a digest, a sanitized URL (scheme, host,
 path — never userinfo, never a query string), and a credential *name*. There

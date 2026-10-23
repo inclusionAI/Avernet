@@ -61,8 +61,8 @@ It explicitly does **not** own:
 
 **Placement.** Backend, as a new core package `core/bot_genome/` next to
 `core/bot_config_manifest/`, because Backend owns desired state and the
-Manifest already lives there. Content reuses the manifest content store
-(`core/bot_config_manifest/content/service.py`). Promotion sits beside it in
+Manifest already lives there. Content reuses the content store
+(`core/content_store/`, its own component since #3064). Promotion sits beside it in
 Backend because promotion must sit beside apply.
 
 **Layering.** The genome sits on top of the Manifest. The Manifest is not
@@ -1290,10 +1290,11 @@ Manifest.
 
 ## 9. Storage
 
-### 9.1 Content: reuse the manifest content store
+### 9.1 Content: reuse the content store
 
 The manifest apply pipeline already keeps the platform's own durable copy of
-everything it fetches (`core/bot_config_manifest/content/service.py`):
+everything it fetches (`core/content_store/`, built as the Manifest's W11 and
+moved out as its own component in #3064):
 
 - **Bytes** live in a content-addressed blob directory,
   `<root>/blobs/<hex[:2]>/<hex64>`, written once and atomically and
@@ -1315,7 +1316,7 @@ second copy.
 
 How content is fetched from a digest:
 
-- **Inside Backend,** `ManifestContentService.read(digest)` returns the bytes
+- **Inside Backend,** `ContentStoreService.read(digest)` returns the bytes
   and re-verifies the hash on read.
 - **Outside Backend** (UI, pipelines, strategies, evaluators), the Registry API
   serves `GET /bots/{bot_id}/genome/content/{digest}`. It is access-checked
@@ -1330,7 +1331,7 @@ How content is fetched from a digest:
 Three extensions are needed:
 
 1. **A write path for produced content** (shipped in RSI-03,
-   `ManifestContentService.store_produced`). Before it every store event was
+   `ContentStoreService.store_produced`). Before it every store event was
    a *fetch* (`source_url` required). Content created by a strategy, such as
    an edited `SKILL.md` or a new memory item, captured from the bot, or
    uploaded, is stored with its origin (`capture`, `patch`, `upload`) and

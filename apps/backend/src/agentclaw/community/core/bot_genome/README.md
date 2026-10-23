@@ -13,7 +13,7 @@ implementation: `apps/backend/specs/2026-10-19-bot-genome-registry/` (RSI-03).
 ## What a revision is, and where it comes from
 
 A revision is the contract's JSON: `spec` (every category present, file
-content by digest in the manifest content store) and `policy`, hashed
+content by digest in the content store) and `policy`, hashed
 together into the id (`canonical.py`). Two ways to record one:
 
 - **Capture** (`capture/`): read what the bot has now through the services
@@ -52,7 +52,7 @@ Five tables, `sql/2026_10_19_bot_genome.sql`: revisions (the hashed canonical
 JSON, never updated except status and annotations), refs (one row per name,
 CAS on the expected revision), an append-only ref event log, patches
 (content-addressed; the digest is the candidate id) and promotions. Bytes
-live in the manifest content store; produced bytes (captured files, files a
+live in the content store (`core/content_store/`); produced bytes (captured files, files a
 patch writes, uploads) go through its `store_produced` write path, and a
 digest is readable for a bot only when a provenance row ties the two.
 
@@ -106,8 +106,8 @@ provides:
   - GenomePatchRepositoryProtocol
   - GenomePromotionRepositoryProtocol
 consumes:
-  - "ManifestContentServiceProtocol (core.bot_config_manifest.content) — every byte a revision references lives in the manifest content store; produced bytes go through store_produced and reachability through is_reachable"
-  - "canonical_tree_bytes / decode_tree_bytes (core.bot_config_manifest.apply.entry_delivery) — the acm-tree-v1 encoding a skill or directory resource is stored as"
+  - "ContentStoreProtocol (core.content_store) — every byte a revision references lives in the content store; produced bytes go through store_produced and reachability through is_reachable"
+  - "canonical_tree_bytes / decode_tree_bytes (core.content_store) — the acm-tree-v1 encoding a skill or directory resource is stored as; MAX_AUDIT_ACTOR_CHARS sizes the actor columns"
   - "SkillPackageValidator (core.skill_center.skill_package) — a local skill's tree is what the validator keeps (README §4.2)"
   - "admission_refusal (core.resources.services.file_service) — every resource file a revision writes must pass the workspace admission rule"
   - "legal_identity_types (core.bot_config_manifest.schema.entries) — the persona types the bot's engine accepts"
@@ -123,14 +123,13 @@ consumed_by:
   - "RSI-04 (direct delivery) — binds a real RevisionApplier; RSI-08 (evolution runs) records candidates through GenomeRegistryProtocol"
 internal_dependencies:
   - agentclaw.community.core.base
-  - agentclaw.community.core.bot_config_manifest.apply.entry_delivery  # acm-tree-v1 encode/decode
   - agentclaw.community.core.bot_config_manifest.apply.outcomes  # ApplyStatus: only a SUCCEEDED apply is "what the bot runs"
   - agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol  # last_apply, for applied_revision
   - agentclaw.community.core.bot_config_manifest.capabilities  # ManifestCapabilities, for the Manifest's MCP entry rules
-  - agentclaw.community.core.bot_config_manifest.content  # the content store Service API and scope
   - agentclaw.community.core.bot_config_manifest.fetch.limits  # the fetch-time caps the contract mirrors
   - agentclaw.community.core.bot_config_manifest.schema  # limits, legal_identity_types, placeholders, the MCP entry rules
   - agentclaw.community.core.bot_startup_script  # the script body capture reads
+  - agentclaw.community.core.content_store  # the store Service API and scope, DIGEST_RE, acm-tree-v1 encode/decode, MAX_AUDIT_ACTOR_CHARS
   - agentclaw.community.core.mcp.mcp_auth_service_protocol  # the MCP permission check
   - agentclaw.community.core.mcp.mcp_config_service_protocol  # bot-override validation and the override capture reads
   - agentclaw.community.core.ports.identity_file_port  # the identity files capture reads

@@ -131,8 +131,8 @@ provides:
   - BotCliToolRepositoryProtocol
   - BotStartupScriptRepositoryProtocol
   - CollaboratorRepositoryProtocol
-  - ManifestContentRepositoryProtocol
-  - ManifestContentRepository
+  - ContentStoreRepositoryProtocol
+  - ContentStoreRepository
   - GenomeRevisionRepositoryProtocol
   - GenomeRevisionRepository
   - GenomeRefRepositoryProtocol
@@ -327,6 +327,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_public
   - agentclaw.community.core.bot_config_manifest
   - agentclaw.community.core.bot_genome.repository.models  # the five ac_genome_* ORM models and row records
+  - agentclaw.community.core.content_store.models  # the ac_manifest_content ORM model and record behind the content store repository
   - agentclaw.community.core.bot_startup_script
   - agentclaw.community.core.bot_config_manifest
   - agentclaw.community.core.caller_identity

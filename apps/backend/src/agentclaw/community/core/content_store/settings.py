@@ -1,4 +1,4 @@
-"""Config seam for the manifest content store (W11, #1510).
+"""Config seam for the content store (W11, #1510).
 
 The store's root directory is an ``application.yaml`` decision, kept
 config-borne per the review ruling on the transport allowlist (the same

@@ -56,8 +56,8 @@ Bot 的变更都是对某个修订版的应用。
 
 **放置位置。** 放在 Backend 中，作为新的核心包 `core/bot_genome/`，与
 `core/bot_config_manifest/` 并列，因为 Backend 负责期望状态，且 Manifest
-已经位于此处。内容复用 manifest 内容存储
-（`core/bot_config_manifest/content/service.py`）。晋升同样位于 Backend 中、
+已经位于此处。内容复用内容存储
+（`core/content_store/`，自 #3064 起为独立组件）。晋升同样位于 Backend 中、
 与其相邻，因为晋升必须与应用放在一起。
 
 **分层。** 基因组构建在 Manifest 之上。Manifest 不感知修订版：它只获得格式特性
@@ -1167,7 +1167,7 @@ Manifest 保持对修订版无感知（§1、§5.5），其语法也**不新增�
 ### 9.1 内容：复用 manifest 内容存储
 
 manifest 应用流水线已经为其获取的所有内容保留了平台自己的持久副本
-（`core/bot_config_manifest/content/service.py`）：
+（`core/content_store/`，作为 Manifest 的 W11 构建，#3064 起独立为组件）：
 
 - **字节**存放在一个内容寻址的 blob 目录中，
   `<root>/blobs/<hex[:2]>/<hex64>`，只原子地写入一次，并在读取时校验哈希。一个目录
@@ -1185,7 +1185,7 @@ manifest 应用流水线已经为其获取的所有内容保留了平台自己�
 
 如何根据摘要获取内容：
 
-- **在 Backend 内部，** `ManifestContentService.read(digest)` 返回字节，并在读取时
+- **在 Backend 内部，** `ContentStoreService.read(digest)` 返回字节，并在读取时
   重新校验哈希。
 - **在 Backend 外部**（UI、流水线、进化策略、评估器），注册表 API 提供
   `GET /bots/{bot_id}/genome/content/{digest}`。它会针对 Bot 进行访问检查，因此摘要
@@ -1197,7 +1197,7 @@ manifest 应用流水线已经为其获取的所有内容保留了平台自己�
 
 需要三项扩展：
 
-1. **产出型内容的写入路径**（已在 RSI-03 交付，`ManifestContentService.store_produced`）。
+1. **产出型内容的写入路径**（已在 RSI-03 交付，`ContentStoreService.store_produced`）。
    在此之前，每个存储事件都是一次*获取*（`source_url` 是必需的）。由进化策略创建的
    内容（例如编辑过的 `SKILL.md` 或新的记忆条目）、从 Bot 捕获的内容，或上传的内容，
    都以其来历（`capture`、`patch`、`upload`）和记录它的参与者作为来源信息存储，

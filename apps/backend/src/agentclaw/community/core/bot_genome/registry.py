@@ -3,7 +3,7 @@
 What it ties together: capture (``capture/``), patch application, policy
 and risk (``patch/``), the apply-time predicates (``spec_checks``), the
 diff and the compiled document, the five ``ac_genome_*`` repositories, and
-the manifest content store for every byte a revision names.
+the content store for every byte a revision names.
 
 Recording order (plan): the shape and policy checks, apply, the spec
 checks on the result, risk; only then are produced bytes filed and rows

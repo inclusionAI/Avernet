@@ -24,7 +24,7 @@ from agentclaw.community.core.bot_genome.spec_models import GenomePolicy, Genome
 class ContentReader(Protocol):
     """How patch application, checks, diff and compile read the bytes a digest names.
 
-    The registry binds it to the manifest content store scoped to the bot;
+    The registry binds it to the content store scoped to the bot;
     tests bind it to a directory of blobs. ``read`` raises
     :class:`~agentclaw.community.core.bot_genome.errors.ContentNotReachable`
     for a digest the bot cannot reach.
