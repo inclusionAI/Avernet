@@ -5566,6 +5566,7 @@ let bot_delivery = maybe_wrap_bot_delivery(
             group_session_connections.clone(),
             web_ws_dispatch_state(&self.state, Some(group_session_connections.clone())),
             ws_lifecycle_hook(&self.state),
+            Arc::clone(&self.state.auth_chain),
         );
         let oauth_state = self.build_full_oauth_route_state();
         let mut openapi_v1 = self.state.openapi_v1.clone()
