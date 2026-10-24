@@ -10,6 +10,14 @@ import { digestRepairJson } from '../../contracts/repair-batch.js';
 import type { RepairPublicationPort } from '../../contracts/repair-release.js';
 import { automationDue } from '../workflow-automation-service.js';
 import { WorkflowAutomationRepository } from '../../repositories/workflow-automation-repository.js';
+async function planWithoutDispatch(f: Awaited<ReturnType<typeof fixture>>) {
+  // Simulate a restart between persisted planning and provider dispatch.
+  const original = WorkflowAutomationRepository.prototype.ready;
+  const ready = vi.spyOn(WorkflowAutomationRepository.prototype, 'ready').mockImplementation(function (...args) {
+    return args[1] === 'auto_draft' ? Promise.resolve([]) : original.apply(this, args);
+  });
+  try { await f.service.tick(); } finally { ready.mockRestore(); }
+}
 it('uses Shanghai daily boundaries and merges missed days', () => {
   expect(automationDue(Date.parse('2026-11-01T00:59:00Z'), '09:00').key).toBe('2026-10-31');
   expect(automationDue(Date.parse('2026-11-01T01:00:00Z'), '09:00').key).toBe('2026-11-01');
@@ -23,7 +31,7 @@ it.each([false, true])('plans automatic scope without fetching Git, including an
 });
 it.each([false, true])('dispatches a planned draft without rereading its Git baseline (batched=%s)', async full => {
   const f = await fixture(true, 1, full);
-  await f.service.tick();
+  await planWithoutDispatch(f);
   const job = (await f.service.status('wf-1')).jobs.find(row => row.kind === 'auto_draft')!;
   expect(job).toBeTruthy();
   expect(job.taskId).toBeUndefined();
@@ -37,7 +45,7 @@ it.each([false, true])('dispatches a planned draft without rereading its Git bas
 });
 it.each([false, true])('parks a disabled planned draft without journal churn (analysis enabled=%s)', async analysisEnabled => {
   const f = await fixture(true, 1);
-  await f.service.tick();
+  await planWithoutDispatch(f);
   const job = (await f.service.status('wf-1')).jobs.find(row => row.kind === 'auto_draft')!;
   const before = await new WorkflowAutomationRepository(f.db).get(job.id);
   const policy = await f.settings.get('wf-1');
@@ -201,6 +209,7 @@ it('leaves a pre workflow unclaimed by prod and dispatches once across two pre h
   expect(f.ports.analysis.start).not.toHaveBeenCalled();
   expect(await f.db.query("SELECT record_id FROM workflow_repair_release_records WHERE record_kind='auto_cycle'")).toEqual([]);
   const pre = f.restart('pre'), pre2 = f.host('pre');
+  await Promise.all([pre.onRunTerminal({ flowId: 'late-run', status: 'failed' }), pre2.onRunTerminal({ flowId: 'late-run', status: 'failed' })]);
   await Promise.all([pre.tick(), pre2.tick()]);
   expect(f.ports.analysis.start).toHaveBeenCalledTimes(1);
   f.advance(); await Promise.all([pre.tick(), pre2.tick()]);
@@ -375,9 +384,11 @@ it('keeps generation in drafting if its completion notification cannot be persis
   expect((await f.workbench.task(task.taskId)).latestAttempt.phase).toBe('drafting');
   expect(f.ports.notify).not.toHaveBeenCalled();
 });
-it('claims one daily scan across hosts, analyzes late arrivals once and preserves frozen draft scope', async () => {
+it('claims one daily draft plan across hosts and keeps failed-run analysis independent with frozen draft scope', async () => {
   const f = await fixture(true);
   await Promise.all([f.service.tick(), f.restart().tick()]);
+  expect(f.ports.analysis.start).not.toHaveBeenCalled();
+  await f.service.onRunTerminal({ flowId: 'late-run', status: 'failed' });
   expect(f.ports.analysis.start).toHaveBeenCalledTimes(1);
   f.advance(); await f.service.tick();
   expect(f.calls).toHaveLength(1);
@@ -392,7 +403,9 @@ it('claims one daily scan across hosts, analyzes late arrivals once and preserve
   expect((await f.workbench.task(draftId)).latestAttempt.input).toEqual(original.latestAttempt.input);
 });
 it('disabling before final dispatch prevents AIS and still reconciles an already-started analysis', async () => {
-  const f = await fixture(true); f.disableAtDispatch();
+  const f = await fixture(true);
+  await f.service.onRunTerminal({ flowId: 'late-run', status: 'failed' });
+  f.disableAtDispatch();
   await f.service.tick(); f.advance(); await f.service.tick();
   expect(f.calls).toHaveLength(0);
   expect((await f.settings.get('wf-1')).enabled).toBe(false);
@@ -416,6 +429,7 @@ it('notification rejection retries only notification and re-resolves Owner permi
 it('unknown notification results and expired analysis dispatches are not blindly replayed', async () => {
   const f = await fixture();
   vi.mocked(f.ports.notify).mockResolvedValue({ status: 'uncertain' });
+  await f.service.onRunTerminal({ flowId: 'late-run', status: 'failed' });
   await f.service.tick(); const sent = vi.mocked(f.ports.notify).mock.calls.length;
   f.advance(300000); await f.restart().tick();
   expect(f.ports.notify).toHaveBeenCalledTimes(sent);
@@ -507,6 +521,7 @@ it('does not auto-select mutually exclusive proposals and lets manual scopes coe
 it('preserves historical pending items and explicit analysis failures without claiming full coverage', async () => {
   const f = await fixture();
   vi.mocked(f.ports.analysis.start).mockResolvedValue({ status: 'failed' });
+  await f.service.onRunTerminal({ flowId: 'late-run', status: 'failed' });
   await f.service.tick();
   for (let i = 0; i < 3; i++) { f.advance(); await f.restart().tick(); }
   expect(f.ports.analysis.start).toHaveBeenCalledTimes(3);
@@ -579,13 +594,15 @@ it('recovers a confirmed failed automatic batch using a durable request key afte
   f.advance(); await f.restart().tick();
   expect(f.calls).toHaveLength(2);
 });
-it('does not lose today runs when the incremental watermark advances before tomorrow scope', async () => {
+it('does not scan today or older runs on the daily timer but still analyzes explicit failure events', async () => {
   const f = await fixture(false, 1, true);
   const started = Date.parse('2026-11-01T00:00:00Z') / 1000;
   f.raw.prepare('INSERT INTO flow_runs (id,flow_id,workflow_id,status,started_at,completed_at,gmt_create,gmt_modified) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(999, 'today-run', 'wf-1', 'failed', started, started + 60, started, started + 60);
   await f.service.tick();
   expect(vi.mocked(f.ports.analysis.start).mock.calls.some(([value]) => value.flowId === 'today-run')).toBe(false);
   f.advance(86400000); await f.restart().tick(); f.advance(); await f.service.tick();
+  expect(f.ports.analysis.start).not.toHaveBeenCalled();
+  await f.service.onRunTerminal({ flowId: 'today-run', status: 'failed' });
   expect(vi.mocked(f.ports.analysis.start).mock.calls.some(([value]) => value.flowId === 'today-run')).toBe(true);
 });
 it.each([true, false])('notifies a final no_change round only when prior batches have publishable changes: %s', async priorChanged => {
@@ -691,6 +708,7 @@ it.each([false, true])('pauses new automatic drafts across days while analysis c
   f.advance(86400000);
   const now = Date.parse('2026-11-02T02:02:00Z') / 1000;
   f.raw.prepare('INSERT INTO flow_runs (id,flow_id,workflow_id,status,started_at,completed_at,gmt_create,gmt_modified) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(999, 'new-unanalysed-run', 'wf-1', 'failed', now - 86400, now - 86300, now - 10, now - 10);
+  await f.service.onRunTerminal({ flowId: 'new-unanalysed-run', status: 'failed' });
   for (let i = 0; i < 3; i++) { f.advance(); await f.restart().tick(); }
   expect(f.calls).toHaveLength(1);
   expect(vi.mocked(f.ports.analysis.start).mock.calls.some(([value]) => value.flowId === 'new-unanalysed-run')).toBe(true);

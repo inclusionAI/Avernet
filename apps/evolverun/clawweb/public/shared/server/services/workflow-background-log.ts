@@ -3,6 +3,7 @@ import { hostname } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { getCurrentEnv } from '../env.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { redactText } from './redaction.js';
 
 export type WorkflowBackgroundFields = {
   enabled?: boolean; intervalMs?: number; trigger?: string; outcome?: string; elapsedMs?: number;
@@ -15,6 +16,15 @@ const allowed = new Set(['enabled', 'intervalMs', 'trigger', 'outcome', 'elapsed
   'flowId', 'taskId', 'count', 'policyCount', 'enabledPolicyCount', 'op', 'reason', 'environment',
   'operation', 'revision', 'attempt', 'executionId', 'jobId', 'phase', 'status', 'errorCode', 'spanId', 'suppressed', 'queueWaitMs']);
 const context = new AsyncLocalStorage<WorkflowBackgroundFields>();
+/** Retain a useful cause without serializing SQL, parameters, provider payloads or credentials. */
+export function workflowBackgroundError(error: unknown): Pick<WorkflowBackgroundFields, 'errorCode' | 'reason'> {
+  const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+  return {
+    errorCode: typeof code === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(code) ? code
+      : error instanceof Error ? error.name : 'UNKNOWN_ERROR',
+    reason: redactText(error instanceof Error ? error.message : String(error), 1024),
+  };
+}
 export function withWorkflowBackgroundContext<T>(fields: WorkflowBackgroundFields, action: () => T): T {
   return context.run({ runId: context.getStore()?.runId ?? randomUUID(), trigger: 'manual', ...context.getStore(), ...fields }, action);
 }

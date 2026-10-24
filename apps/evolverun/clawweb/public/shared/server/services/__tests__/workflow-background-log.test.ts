@@ -1,8 +1,21 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { performance } from 'node:perf_hooks';
-import { logWorkflowBackground, startWorkflowBackgroundRun, withWorkflowBackgroundContext } from '../workflow-background-log.js';
+import { logWorkflowBackground, startWorkflowBackgroundRun, withWorkflowBackgroundContext, workflowBackgroundError } from '../workflow-background-log.js';
 
 afterEach(() => vi.restoreAllMocks());
+
+it('retains the actual failure code and bounded redacted cause, not SQL or exception objects', () => {
+  const error = Object.assign(new Error('Expected finite JSON data; password=example'), {
+    code: 'INVALID_INPUT', sql: 'PRIVATE_SQL', params: ['PRIVATE_PARAMETER'],
+  });
+  const fields = workflowBackgroundError(error);
+  expect(fields.errorCode).toBe('INVALID_INPUT');
+  expect(fields.reason).toContain('Expected finite JSON data');
+  expect(JSON.stringify(fields)).not.toContain('password=example');
+  expect(JSON.stringify(fields)).not.toContain('PRIVATE_');
+  expect(workflowBackgroundError(new TypeError('bad cursor'))).toEqual({ errorCode: 'TypeError', reason: 'bad cursor' });
+  expect(workflowBackgroundError(new Error('x'.repeat(4096))).reason!.length).toBeLessThan(1100);
+});
 
 it('keeps concurrent task and trigger contexts separate across asynchronous Git calls', async () => {
   const output = vi.spyOn(console, 'info').mockImplementation(() => {});

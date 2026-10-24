@@ -86,7 +86,7 @@ describe('automatic analysis settings and execution records', () => {
     expect(screen.getByRole('switch', { name: '自动分析' })).toHaveAttribute('aria-checked', 'true')
     expect(mocks.update).not.toHaveBeenCalled()
     await userEvent.selectOptions(screen.getByLabelText('最低影响'), 'high')
-    await userEvent.click(screen.getByRole('button', { name: '保存并启用每日分析' }))
+    await userEvent.click(screen.getByRole('button', { name: '保存每日草稿计划' }))
     expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ dailyTime: '09:00', minimumImpact: 'high' }), expect.any(Object))
   })
   it('shows real run identity, Shanghai time, partial evidence and existing analysis detail links on demand', async () => {

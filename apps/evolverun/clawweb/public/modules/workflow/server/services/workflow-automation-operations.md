@@ -9,9 +9,23 @@
 - Existing workflow-cycle and individual analysis/draft claims, stable request IDs, policy checks and result recovery remain the dispatch safety boundary. This is not an exactly-once guarantee for external providers. Long-running work is not forcibly cancelled when a planner lease expires.
 - Disabled, never-dispatched analysis/drafts are excluded before the ready-page LIMIT, without repeated claim/status writes. Already-dispatched work can still settle; an unsubmitted next batch remains paused when automatic drafts are off. Actively leased jobs are also excluded before LIMIT.
 
+## Daily drafts consume existing suggestions
+
+At the saved daily time, read existing eligible suggestions and plan/dispatch a draft in the same pass. Eligibility, version binding, batching, stable request IDs and leases are unchanged. The timer does not scan historical `flow_runs` or enqueue new `auto_run` analysis jobs. Old cycle fields (`openDue`, `completedDue`, scan cursors) are not prerequisites.
+
+Failed-run event analysis remains independent: a failed run can trigger analysis and produce suggestions as before. Already-persisted analysis jobs can still recover, but their failure cannot block daily draft creation. Existing journal records are not deleted, and notification bookkeeping failure does not stop draft dispatch. No backfill or manual queue clearing is required.
+
 ## Diagnostics and rollout
 
-Search `[workflow-background]` with `job=workflow_automation`. `reason=PLANNER_NOT_CLAIMED` means another owner or the cooldown prevented planning; `errorCode=AUTOMATION_PLANNER_LEASE_LOST` fences an expired/stale owner. Correlate environment, instance, PID and runId. Existing per-job analysis/draft dispatch logs remain available. Do not log the lease token or business payloads.
+For a workflow that did not create a draft, search `[workflow-background]` together with its `workflowId`, then:
+
+- `workflow_automatic_draft`: `planned` includes the selected count and job ID; `created` includes task ID; `skipped` explains `NOT_DUE`, `DAILY_NOT_CONFIGURED`, `AUTO_DRAFT_DISABLED`, `NO_ELIGIBLE_SUGGESTIONS`, `DRAFT_IN_PROGRESS`, unavailable snapshot or unchanged suggestions. `filtered` counts explain excluded suggestions.
+- `workflow_policy` + `failed`: includes `phase`, real `errorCode` and a bounded, redacted `reason`. Phases distinguish settings reads, suggestion version lookup, draft planning/dispatch, analysis recovery and notification bookkeeping. Creation/recovery errors also emit `workflow_automatic_draft` + `failed`.
+- `workflow_automation` + `end`: reports `outcome=failed` when any workflow policy or isolated recovery/bookkeeping operation failed; a successful outer loop no longer hides these failures.
+
+Use `runId`, instance and environment to correlate these events. Do not search only `workflow_analysis_dispatch`: an existing-suggestion draft does not require a new analysis dispatch.
+
+Search `[workflow-background]` with `job=workflow_automation`. `reason=PLANNER_NOT_CLAIMED` means another owner or the cooldown prevented planning; `reason=AUTOMATION_PLANNER_LEASE_LOST` fences an expired/stale owner. Existing per-job analysis/draft dispatch logs remain available. Do not log the lease token or business payloads.
 
 The new `auto_planner` journal record's `cursor`, `untilMs`, `nextAtMs` and `state_version` support read-only ownership/cadence checks. Do not clear it to force a run during incident diagnosis. Replica clocks must be synchronized, as with existing automation job leases.
 

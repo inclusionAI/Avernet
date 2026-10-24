@@ -1,5 +1,5 @@
 import {workflowSnapshotKey} from '@avernet/clawweb-shared/server/contracts/workflow-snapshot';
-import { logWorkflowBackground } from '@avernet/clawweb-shared/server/services/workflow-background-log';
+import { logWorkflowBackground, workflowBackgroundError } from '@avernet/clawweb-shared/server/services/workflow-background-log';
 import type { AutomationWorkbench, WorkflowAutomationPolicy } from '../contracts/workflow-automation.js';
 import type { RepairFeedbackRequest, RepairSelectionRequest } from '../contracts/repair-workbench.js';
 import { automaticChain } from '../contracts/repair-automatic-chain.js';
@@ -18,7 +18,11 @@ export async function runAutomaticRound(input: { job: AutomationJob; repo: Workf
   now: () => number; authority: () => Promise<{ actorId: string; policy: WorkflowAutomationPolicy }> }) {
   const { repo, workbench, now } = input;
   let job = input.job;
-  const stop = async (reason: string) => { job = await repo.patch(job, { status: 'blocked', reason }, now(), true); };
+  const stop = async (reason: string) => {
+    logWorkflowBackground('workflow_automatic_draft', 'skipped', { workflowId: job.workflowId, jobId: job.id,
+      taskId: job.data.realTaskId, reason });
+    job = await repo.patch(job, { status: 'blocked', reason }, now(), true);
+  };
   try {
     const request = job.data.request as RepairSelectionRequest | RepairFeedbackRequest;
     const existing = await workbench.request(job.workflowId, request.requestId);
@@ -28,9 +32,11 @@ export async function runAutomaticRound(input: { job: AutomationJob; repo: Workf
       if (access.actorId !== job.data.actorId || access.policy.version !== request.automation!.policyVersion) return stop('OWNER_OR_POLICY_CHANGED');
       // Resolve unknown outcomes via the stable request key before considering another target.
       if (job.status === 'uncertain' || job.status === 'dispatching') {
+        logWorkflowBackground('workflow_automatic_draft', 'skipped', { workflowId: job.workflowId, jobId: job.id, reason: 'DRAFT_REQUEST_REQUIRES_LOOKUP' });
         job = await repo.patch(job, { status: 'uncertain', reason: 'DRAFT_REQUEST_REQUIRES_LOOKUP', nextAtMs: now() + 30000 }, now(), true); return;
       }
       if (!taskId && await repo.pendingAutomaticTask(job.workflowId)) {
+        logWorkflowBackground('workflow_automatic_draft', 'skipped', { workflowId: job.workflowId, jobId: job.id, reason: 'DRAFT_IN_PROGRESS' });
         await repo.patch(job, { status: 'pending', reason: 'DRAFT_IN_PROGRESS', nextAtMs: now() + 60000 }, now(), true); return;
       }
       const snapshot = await workbench.candidates(job.workflowId, { includeHistorical: true, state: 'all', pageSize: 1,versionScope:'current' });
@@ -45,7 +51,10 @@ export async function runAutomaticRound(input: { job: AutomationJob; repo: Workf
         const result = await bounded(taskId && job.data.recovery ? workbench.retryGeneration(access.actorId, taskId, job.data.recovery) : taskId ? workbench.revise(access.actorId, taskId, request as RepairFeedbackRequest)
           : workbench.create(access.actorId, request));
         taskId = result.taskId;
+        logWorkflowBackground('workflow_automatic_draft', 'created', { workflowId: job.workflowId, jobId: job.id, taskId, revision: result.revision });
       } catch (error) {
+        logWorkflowBackground('workflow_automatic_draft', 'failed', { workflowId: job.workflowId, jobId: job.id, taskId,
+          phase: 'create_task', ...workflowBackgroundError(error) });
         const recovered = await workbench.request(job.workflowId, request.requestId);
         if (!recovered) {
           const code = (error as { code?: string }).code;
@@ -83,6 +92,8 @@ export async function runAutomaticRound(input: { job: AutomationJob; repo: Workf
     await repo.patch(job, { status: terminal ? 'blocked' : 'waiting', reason: terminal ? 'DRAFT_REQUIRES_MANUAL_REVIEW' : null,
       data, nextAtMs: now() + 30000 }, now(), true);
   } catch (error) {
+    logWorkflowBackground('workflow_automatic_draft', 'failed', { workflowId: job.workflowId, jobId: job.id,
+      phase: 'draft_recovery', ...workflowBackgroundError(error) });
     const reason = error instanceof Error ? error.message : 'DRAFT_REQUIRES_MANUAL_REVIEW';
     await repo.patch(job, { status: reason === 'AUTOMATION_DISABLED' ? 'retryable' : 'blocked', reason, nextAtMs: now() + 30000 }, now(), true);
   }
