@@ -36,6 +36,75 @@ it('ignores an unfinished historical scan instead of requiring its completion ma
   expect(f.calls).toHaveLength(1);
 });
 
+it.each([false, true])('dispatches text and file-repair suggestions unchanged to AIS without requiring patch operations (batched=%s)', async full => {
+  const f = await fixture(true, 2, full);
+  f.items[0].proposal = null;
+  f.items[0].instruction = '检查 query-core-data 的超时处理，增加硬超时兜底。';
+  f.items[1].proposal = { summary: '修复 parse_alert.py 的异常处理' };
+  f.items[1].instruction = '分析脚本实际实现后修改，不预设修改行号。';
+  await f.service.tick();
+  expect(f.calls).toHaveLength(1);
+  const draft = (await new WorkflowAutomationRepository(f.db).recent('wf-1')).find(job => job.kind === 'auto_draft')!;
+  const task = await f.workbench.task(draft.data.realTaskId);
+  expect(task.latestAttempt.input.items.map(item => ({ proposal: item.proposal, instruction: item.instruction }))).toEqual([
+    { proposal: null, instruction: '检查 query-core-data 的超时处理，增加硬超时兜底。' },
+    { proposal: { summary: '修复 parse_alert.py 的异常处理' }, instruction: '分析脚本实际实现后修改，不预设修改行号。' },
+  ]);
+});
+
+it.each([false, true])('still excludes textual goals carrying a different explicit workflow or baseline (batched=%s)', async full => {
+  const f = await fixture(true, 2, full);
+  f.items[0].proposal = { workflowId: 'another-workflow', summary: '修复脚本错误' };
+  f.items[1].proposal = { baseSpecDigest: 'f'.repeat(64), summary: '修复旧版本脚本' };
+  await f.service.tick();
+  expect(f.calls).toEqual([]);
+  expect((await new WorkflowAutomationRepository(f.db).recent('wf-1')).filter(job => job.kind === 'auto_draft')).toEqual([]);
+});
+
+it.each([false, true])('excludes structured changes without a baseline without blocking valid text and patch goals (batched=%s)', async full => {
+  const f = await fixture(true, 4, full);
+  f.items[0].proposal = null;
+  f.items[0].instruction = '分析 parse_alert.py 并修复异常处理。';
+  delete f.items[2].proposal!.baseSpecDigest;
+  f.items[3].proposal = { summary: '旧文件修改', baseSpecDigest: null,
+    patches: [{ path: 'scripts/parse_alert.py', before: 'old', after: 'new' }] };
+  const output = vi.spyOn(console, 'info').mockImplementation(() => {});
+  await f.service.tick();
+  expect(f.calls).toHaveLength(1);
+  const job = (await new WorkflowAutomationRepository(f.db).recent('wf-1')).find(row => row.kind === 'auto_draft')!;
+  const task = await f.workbench.task(job.data.realTaskId);
+  expect(task.latestAttempt.input.items.map(item => item.itemId)).toEqual(['item-0', 'item-1']);
+  expect(task.latestAttempt.input.items[0]).toMatchObject({ proposal: null, instruction: '分析 parse_alert.py 并修复异常处理。' });
+  if (full) expect(events(output)).toContainEqual(expect.objectContaining({ job: 'workflow_automatic_draft',
+    event: 'filtered', reason: 'BASELINE_REASSESSMENT_REQUIRED', count: 2 }));
+});
+
+it('records a failed daily selection once instead of retrying candidate reads every minute', async () => {
+  const f = await fixture(true, 1, true);
+  const candidates = vi.spyOn(f.workbench, 'candidates').mockRejectedValue(new Error('candidate store unavailable'));
+  const output = vi.spyOn(console, 'info').mockImplementation(() => {});
+  await f.service.tick();
+  f.advance(); await f.restart().tick();
+  expect(candidates).toHaveBeenCalledTimes(1);
+  expect(events(output).filter(event => event.job === 'workflow_policy' && event.phase === 'draft_planning' && event.event === 'failed')).toHaveLength(1);
+});
+
+it('finishes an empty daily selection once without rereading suggestions or repeating skip logs after new analyses arrive', async () => {
+  const f = await fixture(true, 0, true);
+  const candidates = vi.spyOn(f.workbench, 'candidates');
+  const output = vi.spyOn(console, 'info').mockImplementation(() => {});
+  await f.service.tick();
+  const initialReads = candidates.mock.calls.length;
+  expect(initialReads).toBeGreaterThan(0);
+  f.analyze('later-today');
+  for (let i = 0; i < 3; i++) { f.advance(); await f.restart().tick(); }
+  expect(candidates.mock.calls).toHaveLength(initialReads);
+  expect(events(output).filter(event => event.job === 'workflow_automatic_draft' && event.reason === 'NO_ELIGIBLE_SUGGESTIONS')).toHaveLength(1);
+  f.advance(86400000);
+  await f.restart().tick();
+  expect(candidates.mock.calls.length).toBeGreaterThan(initialReads);
+});
+
 it('does not let analysis recovery errors block creating a draft and reports partial poll failure', async () => {
   const f = await fixture(true, 1, true);
   await new WorkflowAutomationRepository(f.db).ensure('wf-1', 'auto_run', 'old-run', { flowId: 'old-run' }, 0);
