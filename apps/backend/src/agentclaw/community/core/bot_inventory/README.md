@@ -60,3 +60,20 @@ for normalized card presentation. Keep using `actions` for available operations.
 The legacy `/api/bots/search`, `/bots`, and `/lifecycle` contracts are unchanged.
 Existing publication identifiers, diagnostic state, edit locks, and action policy
 remain intact. Projection reuses the existing batched publication read.
+
+## Explicit collaborator visibility
+
+The default personal inventory combines the caller's own Bots in that personal
+space with Bots explicitly shared with the caller, including Bots assigned to
+other personal or team spaces. An explicit team-space selection remains a
+space filter. Space membership alone does not add other spaces' Bots to the
+personal view. Existing effective permission checks still reject revoked team
+membership; listing does not grant access to Space metadata or change Bot actions.
+
+Collaborator candidates are resolved using their primary key and owner as well
+as Bot ID, under the existing tenant/environment scope. Sources are combined
+before service publication expansion and final card pagination. Returned cards
+retain the source owner and space. Owner-only creation template snapshots are
+not loaded or returned for collaborator cards. Inaccessible Space metadata is represented
+only by its identifier. Application grant-filtered inventories remain restricted
+to the delegator's own Bots and never expand through collaborator relationships.
