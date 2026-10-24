@@ -216,6 +216,10 @@ async fn publish_status(
         run_fallback: None, exclude_conn_id: None,
         visibility_domain: message.visibility_domain.unwrap_or(bcs_domain::MessageVisibilityDomain::ManagerWorker),
         audience: message.audience.clone(),
+        // Delivery-status updates are independent resource events:
+        // authorized per event against current facts.
+        operation_id: None, terminal: false,
+        run_id: None,
     }).await?;
     Ok(())
 }

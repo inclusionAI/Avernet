@@ -16,6 +16,16 @@ diagnostic-logs = ["dep:bcs-observability", "dep:tracing", "dep:tracing-subscrib
 [dependencies]
 bcs-domain      = { workspace = true }
 bcs-service-api = { workspace = true }
+bcs-config      = { workspace = true }
+bcs-db-local    = { workspace = true }
+bcs-bot         = { workspace = true }
+bcs-bot-store   = { workspace = true }
+bcs-app-bot     = { workspace = true }
+bcs-edge-permission = { workspace = true }
+bcs-edge-permission-store = { workspace = true }
+bcs-app-register = { workspace = true }
+bcs-route-security = { workspace = true }
+bcs-relation    = { workspace = true }
 bcs-auth-api    = { workspace = true }
 bcs-cache-api   = { workspace = true }
 bcs-db-api      = { workspace = true }

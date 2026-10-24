@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bcs_domain::HumanMessageView;
+use bcs_domain::{HumanMessageView, MessageVisibilityDomain};
 use bcs_protocol::{BcsFrame, ErrorShape, RequestFrame, ResponseFrame};
 use bcs_service_api::application::v1::{
-    AuthorizeGroupSessionConnection, GroupSessionConnectionBinding, GroupSessionConnectionService,
-    ParticipantRole,
+    AuthorizeGroupSessionConnection, ConnectionView, DeliveryAdmissionService,
+    DeliveryScope, DeliveryVisibility, GroupSessionConnectionBinding,
+    GroupSessionConnectionService, ParticipantRole, ProtectedDeliveryBinding,
 };
 use bcs_service_api::{
     CallerContext, ChatAbortCommand, CollaborationRuntimeError, CollaborationRuntimeService,
@@ -25,7 +26,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::shared::RunChannelManager;
+use crate::shared::{OutboundFrame, RunChannelManager};
 use crate::web::frontend_delivery::interaction_event_json;
 use crate::web::{WorkbenchConnectionAuth, WorkbenchConnectionRegistry};
 
@@ -62,6 +63,11 @@ pub struct WebDispatchState {
     pub group_session_connections: Option<Arc<dyn GroupSessionConnectionService>>,
     pub frontend_connections: Arc<WorkbenchConnectionRegistry>,
     pub run_channels: Arc<RunChannelManager>,
+    /// Operation-boundary delivery admission (bot-authority spec
+    /// §8.2 — 已准入输出不追溯): consulted ONCE per accepted
+    /// operation and per independent resource event; the per-frame
+    /// re-authorization contract is retired.
+    pub delivery_admission: Arc<dyn DeliveryAdmissionService>,
 }
 
 impl std::fmt::Debug for WebDispatchState {
@@ -80,6 +86,7 @@ impl std::fmt::Debug for WebDispatchState {
             )
             .field("frontend_connections", &"<WorkbenchConnectionRegistry>")
             .field("run_channels", &"<RunChannelManager>")
+            .field("delivery_admission", &"<DeliveryAdmissionService>")
             .finish()
     }
 }
@@ -98,6 +105,27 @@ pub struct WebClientConnectionState {
     pub subscribed_sessions: Vec<(String, u64, Option<HumanMessageView>)>,
     pub phase: WebConnectionPhase,
     pub shutdown: CancellationToken,
+    /// The connect-time authorized view actor (`human_*` self view
+    /// or the explicitly selected Bot uuid). Frame bindings derive
+    /// their view from this authorized selection, never from
+    /// per-frame business JSON.
+    pub authorized_view_actor: Option<String>,
+    /// The connection's bounded protected-frame queue. The final
+    /// socket writer drains it and re-authorizes every protected
+    /// frame before send (bot-authority spec §8.2).
+    pub protected_frames: Option<mpsc::Sender<OutboundFrame>>,
+}
+
+impl WebClientConnectionState {
+    /// Open the per-connection protected frame queue. Called once by
+    /// the connection handler; the receiver is drained by the socket
+    /// writer.
+    pub fn open_protected_queue(&mut self) -> mpsc::Receiver<OutboundFrame> {
+        let (tx, rx) =
+            mpsc::channel(crate::shared::PROTECTED_FRAME_QUEUE_SIZE);
+        self.protected_frames = Some(tx);
+        rx
+    }
 }
 
 pub async fn dispatch_client_frame(
@@ -270,6 +298,12 @@ async fn handle_connect(
         "Processing connect request"
     );
 
+    // The V1 path records the application-authorized view here; the
+    // legacy UserBound path resolves it below from its existing
+    // connect outcome.
+    let mut v1_authorized_view: Option<ConnectionView> = None;
+    let mut v1_authorized_user_id: Option<String> = None;
+
     let outcome = match auth {
         WorkbenchConnectionAuth::UserBound { .. } => match state
             .workbench_sessions
@@ -302,20 +336,29 @@ async fn handle_connect(
             group_id,
             session_id,
         } => {
-            if params
-                .view_actor_id
-                .as_deref()
-                .is_some_and(|view_actor_id| view_actor_id != actor_id)
-            {
-                send_error(
-                    tx,
-                    &req.id,
-                    "forbidden_view_actor",
-                    "Session-bound connections may only use the authenticated Human view",
-                )
-                .await?;
-                return Ok(());
-            }
+            // The wire `view_actor_id` selects the view explicitly
+            // (bot-authority spec §8.3): default (or the bound Human
+            // itself) is the Human self view, another Human actor is
+            // rejected, and a Bot uuid is a selection parameter whose
+            // management edge and resource qualification the
+            // application re-verifies.
+            let view = match params.view_actor_id.as_deref() {
+                None => ConnectionView::HumanSelf,
+                Some(selected) if selected == actor_id => ConnectionView::HumanSelf,
+                Some(selected) if selected.starts_with("human_") => {
+                    send_error(
+                        tx,
+                        &req.id,
+                        "forbidden_view_actor",
+                        "Session-bound connections may view as themselves or a controlled Bot",
+                    )
+                    .await?;
+                    return Ok(());
+                }
+                Some(bot_id) => ConnectionView::Bot {
+                    bot_id: bot_id.to_string(),
+                },
+            };
             let user_id = actor_id
                 .strip_prefix("human_")
                 .filter(|user_id| !user_id.is_empty());
@@ -330,6 +373,7 @@ async fn handle_connect(
                                 group_id: group_id.clone(),
                                 session_id: session_id.clone(),
                             },
+                            view,
                         })
                         .await
                 }
@@ -340,20 +384,24 @@ async fn handle_connect(
                 }
             };
             match authorized {
-                Ok(authorized) => WorkbenchConnectOutcome {
-                    group_id: group_id.clone(),
-                    participants: authorized
-                        .participants
-                        .into_iter()
-                        .map(|participant| WorkbenchParticipantView {
-                            bot_uuid: participant.actor_id,
-                            role: participant_role_to_wire(participant.role).to_string(),
-                            kind: ParticipantKind::Bot,
-                            mode: Some(participant.mode),
-                            message_view_scope: participant.message_view_scope,
-                        })
-                        .collect(),
-                },
+                Ok(authorized) => {
+                    v1_authorized_user_id = user_id.map(str::to_string);
+                    v1_authorized_view = Some(authorized.view);
+                    WorkbenchConnectOutcome {
+                        group_id: group_id.clone(),
+                        participants: authorized
+                            .participants
+                            .into_iter()
+                            .map(|participant| WorkbenchParticipantView {
+                                bot_uuid: participant.actor_id,
+                                role: participant_role_to_wire(participant.role).to_string(),
+                                kind: ParticipantKind::Bot,
+                                mode: Some(participant.mode),
+                                message_view_scope: participant.message_view_scope,
+                            })
+                            .collect(),
+                    }
+                }
                 Err(err) => {
                     warn!(
                         request_id = %bcs_observability::CurrentRequestId,
@@ -371,6 +419,14 @@ async fn handle_connect(
     // must not implicitly opt those clients into participant projection.
     let explicit_view_actor_id = params.view_actor_id.as_deref();
     let resolved_view_actor_id = explicit_view_actor_id.or(bound_actor_id);
+    connection_state.authorized_view_actor = match v1_authorized_view {
+        Some(ConnectionView::Bot { bot_id }) => Some(bot_id),
+        Some(ConnectionView::HumanSelf) => Some(format!(
+            "human_{}",
+            v1_authorized_user_id.unwrap_or_default()
+        )),
+        None => resolved_view_actor_id.map(str::to_string),
+    };
     let resolved_participant = match explicit_view_actor_id {
         Some(actor_id) => Some(
             outcome
@@ -398,18 +454,54 @@ async fn handle_connect(
             })
         });
     let subscription_key = session_id.clone().unwrap_or_else(|| group_id.clone());
-    let conn_id = state
-        .frontend_connections
-        .subscribe_with_shutdown(
-            subscription_key.clone(),
-            tx.clone(),
-            resolved_view_actor_id.map(str::to_string),
-            connection_human_view.clone(),
-            connection_state.shutdown.clone(),
-        )
-        .await?;
+    // The registry subscription carries the connection's protected
+    // delivery binding when one can be built: fanout (broadcast)
+    // frames then flow as typed Protected frames through the same
+    // final per-frame authorization as run frames. Connections that
+    // cannot produce a binding (no authenticated Human identity, or
+    // dispatch-driven tests without a queue) keep the legacy
+    // registry path.
+    let connect_binding = build_protected_delivery_binding(
+        auth,
+        &group_id,
+        session_id.as_deref(),
+        // The connect view actor IS the connection's view; there is
+        // no per-send Bot sender identity at subscribe time.
+        resolved_view_actor_id.unwrap_or_default(),
+        None,
+        None,
+        resolved_view_actor_id,
+    );
+    let subscription = match (
+        connect_binding,
+        connection_state.protected_frames.clone(),
+    ) {
+        (Some(binding), Some(queue)) => state
+            .frontend_connections
+            .subscribe_protected_with_shutdown(
+                subscription_key.clone(),
+                tx.clone(),
+                resolved_view_actor_id.map(str::to_string),
+                connection_human_view.clone(),
+                connection_state.shutdown.clone(),
+                binding,
+                queue,
+            )
+            .await?,
+        _ => state
+            .frontend_connections
+            .subscribe_with_shutdown(
+                subscription_key.clone(),
+                tx.clone(),
+                resolved_view_actor_id.map(str::to_string),
+                connection_human_view.clone(),
+                connection_state.shutdown.clone(),
+            )
+            .await?,
+    };
+    let conn_id = subscription;
     connection_state.subscribed_sessions.push((
-        subscription_key,
+        subscription_key.clone(),
         conn_id,
         connection_human_view.clone(),
     ));
@@ -432,14 +524,56 @@ async fn handle_connect(
     if let Some(session_id) = session_id.as_deref() {
         match state.interactions.list_pending(session_id).await {
             Ok(pending) => {
-                let pending_visible = connection_human_view.as_ref().is_none_or(|view| {
-                    view.allows_artifact(
-                        bcs_domain::MessageVisibilityDomain::StateMachine,
-                        Some(&bcs_domain::MessageAudience::FullOnly),
-                    )
-                });
-                if pending_visible {
-                    for event in pending {
+                // Replaying pending interactions to a FRESH connection
+                // is an independent finite event (bot-authority spec
+                // §8.2/§7.3): each replayed event is authorized ONCE
+                // against CURRENT facts — a connection re-established
+                // after a revocation replays nothing it lost.
+                let replay_visibility = DeliveryVisibility {
+                    domain: MessageVisibilityDomain::StateMachine,
+                    audience: Some(bcs_domain::MessageAudience::FullOnly),
+                };
+                for event in pending {
+                    if let (Some(binding), Some(queue)) = (
+                        state
+                            .frontend_connections
+                            .protected_binding(&subscription_key, conn_id)
+                            .await,
+                        connection_state.protected_frames.clone(),
+                    ) {
+                        let scope = DeliveryScope {
+                            group_id: binding.group_id.clone(),
+                            session_id: binding.session_id.clone(),
+                        };
+                        let admitted = state
+                            .delivery_admission
+                            .resolve_recipient_views(&scope, &[binding])
+                            .await
+                            .map(|recipients| {
+                                recipients
+                                    .first()
+                                    .is_some_and(|permit| permit.allows(&replay_visibility))
+                            })
+                            .unwrap_or(false);
+                        if !admitted {
+                            debug!(
+                                request_id = %bcs_observability::CurrentRequestId,
+                                session_id,
+                                "pending interaction replay skipped: not admitted on the fresh connection"
+                            );
+                            continue;
+                        }
+                        let frame = OutboundFrame::Data {
+                            payload: interaction_event_json(&event)?,
+                        };
+                        if queue.send(frame).await.is_err() {
+                            warn!(
+                                request_id = %bcs_observability::CurrentRequestId,
+                                session_id,
+                                "closed protected queue dropped a pending interaction replay"
+                            );
+                        }
+                    } else {
                         send_interaction_event(tx, &event).await?;
                     }
                 }
@@ -843,11 +977,9 @@ async fn handle_chat_send(
                 .find(|(key, _, _)| key == &group_id)
         });
     let sender_conn_id = sender_subscription.map(|(_, id, _)| *id);
-    // A Session run must never inherit a broader Group subscription. User-bound
-    // clients historically may send before connect, so resolve the authoritative
-    // Session participant view on demand instead of registering an unrestricted
-    // run channel.
-    let mut sender_human_view = exact_sender_subscription.and_then(|(_, _, view)| view.clone());
+    // A Session send must never inherit a broader Group subscription. User-bound
+    // clients historically may send before connect, so the authoritative
+    // Session participant qualification is verified on demand below.
     if from_id.starts_with("human_") {
         if let Some(session_id) = session_id.as_deref()
             && state
@@ -881,11 +1013,11 @@ async fn handle_chat_send(
                 return Ok(());
             }
         };
-        let Some(participant) = outcome
+        if !outcome
             .participants
             .iter()
-            .find(|participant| participant.bot_uuid == from_id)
-        else {
+            .any(|participant| participant.bot_uuid == from_id)
+        {
             send_error(
                 tx,
                 &req.id,
@@ -894,12 +1026,7 @@ async fn handle_chat_send(
             )
             .await?;
             return Ok(());
-        };
-        sender_human_view = Some(HumanMessageView {
-            actor_id: from_id.clone(),
-            scope: participant.message_view_scope,
-            allow_legacy_unclassified_chat: true,
-        });
+        }
     }
 
     let caller = caller_context_from_bound_actor(bound_actor_id, &from_id);
@@ -911,7 +1038,7 @@ async fn handle_chat_send(
             caller,
             group_id: group_id.clone(),
             session_id: session_id.clone(),
-            from_actor_id: from_id,
+            from_actor_id: from_id.clone(),
             from_name: params.bot_name.clone(),
             message: params.message,
             mentions: params.mentions,
@@ -939,17 +1066,43 @@ async fn handle_chat_send(
     connection_state
         .active_run_ids
         .extend(outcome.active_run_ids.iter().cloned());
-    let run_session_key = session_id.unwrap_or_else(|| group_id.clone());
+    let run_session_key = session_id
+        .clone()
+        .unwrap_or_else(|| group_id.clone());
     for run_id in &outcome.active_run_ids {
+        // Each Workbench run attaches a PROTECTED sink pinned to THIS
+        // connection instance and binds the run to the operation that
+        // admitted it (bot-authority spec §8.2): the fanout lane of
+        // the same operation already holds this connection's frozen
+        // permit, and run frames check THAT permit at the enqueue
+        // boundary. There is no fallback to an unbound public sender.
+        let Some(protected_frames) = connection_state.protected_frames.clone() else {
+            warn!(
+                request_id = %bcs_observability::CurrentRequestId,
+                run_id = %run_id,
+                "protected frame queue is not open; refusing to register an unbound run sink"
+            );
+            break;
+        };
+        let Some(sender_conn_id) = sender_conn_id else {
+            warn!(
+                request_id = %bcs_observability::CurrentRequestId,
+                run_id = %run_id,
+                "run registration refused: no connection instance for the sender"
+            );
+            break;
+        };
         state
             .run_channels
-            .register_with_view(
+            .register_workbench(
                 run_id.clone(),
                 run_session_key.clone(),
-                tx.clone(),
+                protected_frames,
+                sender_conn_id,
+                &outcome.operation_id,
                 Some("workbench-ws".to_string()),
                 bound_actor_id.map(str::to_string),
-                sender_human_view.clone(),
+                None,
             )
             .await;
     }
@@ -1253,6 +1406,58 @@ fn caller_context_from_bound_actor(
         .unwrap_or(actor_id.as_str())
         .to_string();
     CallerContext::Human(HumanActor { actor_id, staff_no })
+}
+
+/// The protected delivery binding of a run registration: identity
+/// from the AUTHENTICATED connection (token/cookie chain), the
+/// resource resolved by the send, the authorized view actor, and the
+/// connection instance. No cached role/scope is stored — the final
+/// writer re-reads current facts per frame.
+fn control_user_id(actor_id: Option<&str>) -> String {
+    actor_id
+        .and_then(|actor| actor.strip_prefix("human_"))
+        .unwrap_or_default()
+        .to_string()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_protected_delivery_binding(
+    auth: &WorkbenchConnectionAuth,
+    group_id: &str,
+    session_id: Option<&str>,
+    from_id: &str,
+    sender_human_view: Option<&HumanMessageView>,
+    sender_conn_id: Option<u64>,
+    authorized_view_actor: Option<&str>,
+) -> Option<ProtectedDeliveryBinding> {
+    let user_id = control_user_id(auth.actor_id());
+    if user_id.is_empty() {
+        // No authenticated Human identity: refuse rather than bind a
+        // public-unrestricted connection.
+        return None;
+    }
+    let view_actor_id = match auth {
+        WorkbenchConnectionAuth::SessionBound { .. } => authorized_view_actor
+            .unwrap_or(from_id)
+            .to_string(),
+        WorkbenchConnectionAuth::UserBound { .. } => sender_human_view
+            .map(|view| view.actor_id.clone())
+            .unwrap_or_else(|| from_id.to_string()),
+    };
+    let tenant = match auth {
+        WorkbenchConnectionAuth::SessionBound { tenant, .. } => {
+            tenant.clone()
+        }
+        WorkbenchConnectionAuth::UserBound { .. } => None,
+    };
+    Some(ProtectedDeliveryBinding {
+        tenant,
+        user_id,
+        group_id: group_id.to_string(),
+        session_id: session_id.map(str::to_string),
+        view_actor_id,
+        connection_instance_id: sender_conn_id.unwrap_or(0),
+    })
 }
 
 async fn send_ok(tx: &mpsc::Sender<String>, req_id: &str, payload: Value) -> Result<()> {

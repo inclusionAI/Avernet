@@ -1269,9 +1269,14 @@ story_provider_callback_survives_slow_judge() {
     [[ -n "$provider_bot_uuid" && -n "$runtime_token" ]] || return
 
     # Group membership enforces the same trust boundary for Provider-backed
-    # bots as it does for native bots. Make the fixture explicitly public and
-    # establish its relationship with the driver before creating the group.
-    api_put "/bots/${provider_bot_uuid}/visibility" '{"visibility":"public"}'
+    # bots as it does for native bots. Legacy Provider-admin publication
+    # does not mint a Human authority edge (only the trusted register
+    # surface does), so the fixture bot makes itself discoverable with its
+    # own runtime credential; the driver then establishes the relationship
+    # with it before the group is created.
+    api_request_headers PUT "/bots/${provider_bot_uuid}/visibility" \
+        '{"visibility":"public"}' \
+        "X-BCS-Bot-Token: ${runtime_token}"
     require_status "operator makes the slow-Judge Provider bot discoverable" "200" || return
     api_post "/friends/request" \
         "{\"from_bot\":\"${BOT_CEO_UUID}\",\"to_bot\":\"${provider_bot_uuid}\"}"

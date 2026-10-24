@@ -34,7 +34,8 @@ pub(crate) async fn commit(flow: &BcsMessageFlow, row: &PersistedMessageDelivery
         flow_kind:bcs_domain::message_delivery::DeliveryFlowKind::Task,
         targets:vec![bcs_service_api::port::repo::message_delivery::DeliveryAdmissionTarget {
             rejection:None, target_bot_id:task.manager.clone(), kind:bcs_domain::DeliveryType::Send,
-            max_queued:100, semantic_projection_json:serde_json::to_value(projection)? }],
+            max_queued:100, semantic_projection_json:serde_json::to_value(projection)?, run_id: None,
+}],
         now_ms:now, expire_at_ms:None,
     };
     let mut terminal = cmd.clone();

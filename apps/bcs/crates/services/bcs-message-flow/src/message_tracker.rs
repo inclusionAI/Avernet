@@ -91,6 +91,15 @@ pub struct MessageTracker {
     /// Cache it before bot delivery so the first response event can target
     /// the exact source message even when requests share one conversation.
     channel_source_message_ids: Mutex<HashMap<String, String>>,
+    /// run_id → application-assigned business operation id
+    /// (bot-authority spec §8.2: 帧携带可信 operation 归属，许可沿
+    /// 操作冻结而不是逐帧查询). Seeded when the operation's own send
+    /// path creates the run (before the bot can emit its first
+    /// event) and cleared with the run's terminal cleanup. Runs
+    /// created outside an admitted operation (internal drains,
+    /// relay/task continuations) simply have no entry: their events
+    /// authorize per event against current facts.
+    run_operations: Mutex<HashMap<String, String>>,
 }
 
 impl MessageTracker {
@@ -105,7 +114,34 @@ impl MessageTracker {
             streaming_thinking_buf: Mutex::new(HashMap::new()),
             channel_sender_info: Mutex::new(HashMap::new()),
             channel_source_message_ids: Mutex::new(HashMap::new()),
+            run_operations: Mutex::new(HashMap::new()),
         }
+    }
+
+    // -- Run → business operation binding (spec §8.2) --
+
+    /// Bind a run to the operation that admitted it. Insert-only for
+    /// the run's lifetime (a re-seed of the SAME operation is a
+    /// no-op; a conflicting rebind leaks no frames because output
+    /// keyed by the first binding already holds a permit).
+    pub async fn cache_run_operation(&self, run_id: &str, operation_id: &str) {
+        self.run_operations
+            .lock()
+            .await
+            .entry(run_id.to_string())
+            .or_insert_with(|| operation_id.to_string());
+    }
+
+    /// The operation a run was admitted under, if any.
+    pub async fn operation_of_run(&self, run_id: &str) -> Option<String> {
+        self.run_operations.lock().await.get(run_id).cloned()
+    }
+
+    /// Drop a run → operation binding: a transport failure proved
+    /// the run produces nothing under that operation, so stray later
+    /// events under its id must not inherit the operation tag.
+    pub async fn uncache_run_operation(&self, run_id: &str) {
+        self.run_operations.lock().await.remove(run_id);
     }
 
     // -- Tool call lifecycle --
@@ -355,6 +391,7 @@ impl MessageTracker {
         self.channel_source_message_ids.lock().await.remove(run_id);
         self.coordination_surfaces.lock().await.remove(run_id);
         self.bot_event_run_info.lock().await.remove(run_id);
+        self.run_operations.lock().await.remove(run_id);
         self.streaming_chat_buf.lock().await.remove(run_id)
     }
 }

@@ -96,6 +96,9 @@ async fn delivery_ports_are_transport_free_contracts() {
             exclude_conn_id: None,
             visibility_domain: MessageVisibilityDomain::Chat,
             audience: Some(MessageAudience::Public),
+            operation_id: None,
+            terminal: false,
+            run_id: None,
         })
         .await
         .unwrap();

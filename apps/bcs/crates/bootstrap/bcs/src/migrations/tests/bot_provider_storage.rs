@@ -6,7 +6,7 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
         .iter()
         .map(|migration| migration.version)
         .collect::<Vec<_>>();
-    assert_eq!(sqlite, (1..=36).collect::<Vec<_>>());
+    assert_eq!(sqlite, (1..=37).collect::<Vec<_>>());
     assert_eq!(SQLITE_VERSIONED_MIGRATIONS[28].name, "fixed_loop_runtime");
     assert_eq!(SQLITE_VERSIONED_MIGRATIONS[29].name, "bot_provider_storage");
     // The new Group migration owns SQLite version 31 (Provider storage keeps
@@ -16,8 +16,18 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
         "group_human_mention_notify_mode"
     );
 
-    let directory =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../migrations/mysql");
+    // Suites that include this file from crates at other
+    // depths (e.g. `crates/application/v1/*`) share the
+    // repository layout: the SQL directory sits above
+    // `crates/`, so try the known manifest-relative roots.
+    let directory = [
+        "../../../migrations/mysql",
+        "../../../../migrations/mysql",
+    ]
+    .iter()
+    .map(|base| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(base))
+    .find(|candidate| candidate.is_dir())
+    .expect("migrations/mysql directory resolves");
     let mut mysql = std::fs::read_dir(directory)
         .unwrap()
         .map(|entry| {
@@ -31,14 +41,17 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
         .iter()
         .map(|name| name.split('_').next().unwrap().parse::<i64>().unwrap())
         .collect::<Vec<_>>();
-    // MySQL Provider storage remains version 029; the new Group migration is
-    // MySQL version 030.
-    assert_eq!(versions, (1..=35).collect::<Vec<_>>());
+    // MySQL Provider storage remains version 029; the Group
+    // human-mention migration is MySQL version 030, Group context
+    // owners is 034, collaboration drafts is 035 and bot authority
+    // is MySQL version 036.
+    assert_eq!(versions, (1..=36).collect::<Vec<_>>());
     assert_eq!(mysql[27], "028_fixed_loop_runtime.sql");
     assert_eq!(mysql[28], "029_bot_provider_storage.sql");
     assert_eq!(mysql[29], "030_group_human_mention_notify_mode.sql");
     assert_eq!(mysql[33], "034_group_context_owners.sql");
     assert_eq!(mysql[34], "035_collaboration_drafts.sql");
+    assert_eq!(mysql[35], "036_bot_authority.sql");
 }
 
 #[tokio::test]
@@ -67,7 +80,7 @@ async fn bot_provider_storage_upgrades_29_without_new_tables_or_rewriting_histor
             .iter()
             .map(|migration| migration.version)
             .collect::<Vec<_>>(),
-        vec![30, 31, 32, 33, 34, 35, 36]
+        vec![30, 31, 32, 33, 34, 35, 36, 37]
     );
 
     run_sqlite_migrations(&db).await?;
@@ -94,7 +107,11 @@ async fn bot_provider_storage_upgrades_29_without_new_tables_or_rewriting_histor
     assert_eq!(db.query(DbStatement::new(history_sql)).await?, original);
     assert!(column_names(&db, "bcs_collaboration_drafts").await?.iter().any(|c| c == "head_revision"));
     assert!(column_names(&db, "bcs_collaboration_draft_revisions").await?.iter().any(|c| c == "payload_json"));
-    let tables = db.query(DbStatement::new("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('bcs_session_registry', 'bcs_group_contexts', 'bcs_collaboration_drafts', 'bcs_collaboration_draft_revisions') ORDER BY name")).await?;
+    // The version-30+ tail legitimately adds: the Session-registry
+    // table (32), Group context (34), the collaboration-draft
+    // tables (36) and the bot-authority tables (37); the Provider
+    // storage upgrade itself adds no tables.
+    let tables = db.query(DbStatement::new("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('bcs_session_registry', 'bcs_group_contexts', 'bcs_collaboration_drafts', 'bcs_collaboration_draft_revisions', 'bot_ownership_transfers', 'bot_authority_changes') ORDER BY name")).await?;
     assert_eq!(tables, original_tables);
     Ok(())
 }

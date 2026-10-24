@@ -1,5 +1,35 @@
 # bcs-service-api Context
 
+Operation-boundary delivery admission (bot-authority spec §8.2 — 已准入输出不追溯):
+`DeliveryAdmissionService::resolve_recipient_views` resolves each candidate
+connection's delivery view ONCE per accepted operation per scope (one shared
+snapshot batch, never per frame). `OutputAdmissionPort` installs the result as
+read-only in-process permits at business-accept time; producers stamp trusted
+metadata (`FrontendDeliveryCommand.operation_id` / `run_id` / `terminal`) and
+the adapter checks frames against frozen permits at the enqueue boundary.
+Mid-operation revocation never interrupts admitted output; new operations,
+subscriptions and reconnects re-admit against current facts. Frames with no
+operation tag are independent resource events authorized per publish against
+current facts; their read failures skip fail-closed and never cancel streams.
+Terminal frames are typed: after accept the producer registers the operation's
+COMPLETE Send-run set (`register_operation_runs`) BEFORE the durable commit —
+a terminal closes only its own stream, and the operation turns Draining when
+EVERY registered stream is terminal (Run terminal ≠ operation complete);
+producer visibility facts are frozen from the admission-time Group/Session
+snapshot before the first callback, and managed deliveries pre-assign their
+canonical run ids (`DeliveryAdmissionTarget.run_id`) so bindings, facts and
+the full managed ∪ direct stream set exist before the commit — a queue
+worker never runs an unbound admitted row, and a caller cancelled AT the
+commit boundary changes nothing. Accepted operations are reclaimed only by
+explicit end-states, never by age: stream terminals, recipient loss, or
+`release_operation_runs`. Releases are exact: commit-side failure, duplicates
+and admission-time rejections release only their fresh identities, a
+`delivered=false` explicit rejection releases only that run, a transport Err
+(uncertain) releases nothing, and an aborted send releases only runs that
+never started — already-delivered siblings keep their binding until their
+own terminal. A terminal that cannot enqueue within the bounded backpressure
+budget retires the saturated connection (observable transport failure),
+leaving no silent final-less stream.
 
 MessageFlowService::publish_state_machine_result accepts the original one-shot
 result command. Success acknowledges durable Group admission for managed targets

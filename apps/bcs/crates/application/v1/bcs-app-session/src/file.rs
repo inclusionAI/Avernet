@@ -1,6 +1,5 @@
 //! OpenAPI V1 session-file application facade.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -13,20 +12,24 @@ use bcs_service_api::application::session_files::{
     SessionFileUseCaseError, ShareMintCommand,
 };
 use bcs_service_api::application::v1::{
-    ApplicationError, CompleteSessionFile, DeleteResult, DeleteSessionFile, DownloadSessionFile,
-    DownloadSharedSessionFile, GetSessionFile, IdentityPolicy, ListSessionFiles,
-    PrepareSessionFile, PrepareSessionFileResult, Principal, SessionFileActor,
-    SessionFileActorKind, SessionFileApplicationService, SessionFileContent,
-    SessionFileInternalContentUrlProjector, SessionFilePage, SessionFileStatus, SessionFileView,
-    ShareSessionFile, ShareSessionFileResult, UPLOAD_COMPLETION_SHARE_TTL_SECONDS,
-    UploadSessionFileContent, UploadSessionFileResult, select_principal,
+    ApplicationError, AuthenticatedCaller, CompleteSessionFile, DeleteResult,
+    DeleteSessionFile, DownloadSessionFile, DownloadSharedSessionFile, GetSessionFile,
+    IdentityPolicy, ListSessionFiles, PrepareSessionFile, PrepareSessionFileResult,
+    Principal, resolve_authorized_principal, SessionFileActor, SessionFileActorKind,
+    SessionFileApplicationService, SessionFileContent,
+    SessionFileInternalContentUrlProjector, SessionFilePage, SessionFileStatus,
+    SessionFileView, ShareSessionFile, ShareSessionFileResult,
+    UPLOAD_COMPLETION_SHARE_TTL_SECONDS, UploadSessionFileContent,
+    UploadSessionFileResult, select_principal,
 };
+use bcs_service_api::port::bot_authority::BotAuthorityPort;
 use bcs_service_api::{
     BotRegistryCoreService, GroupCoreService, ServiceError, SystemMessageService,
 };
 
 pub struct SessionFileApplicationServiceImpl {
     files: Arc<dyn LegacySessionFileService>,
+    bot_authority: Option<Arc<dyn BotAuthorityPort>>,
     sessions: Arc<dyn SessionManagementService>,
     groups: Arc<dyn GroupCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
@@ -45,6 +48,7 @@ impl SessionFileApplicationServiceImpl {
     ) -> Self {
         Self {
             files,
+            bot_authority: None,
             sessions,
             groups,
             registry,
@@ -53,12 +57,75 @@ impl SessionFileApplicationServiceImpl {
         }
     }
 
+    /// Wire the authority hook (bot-authority plan Task 6.3).
+    pub fn with_bot_authority_hook(
+        mut self,
+        bot_authority: Arc<dyn BotAuthorityPort>,
+    ) -> Self {
+        self.bot_authority = Some(bot_authority);
+        self
+    }
+
+    /// The wired authority hook; failing to wire one is a
+    /// composition error and must fail closed (never deny-as-Ok).
+    fn authority(&self) -> Result<&dyn BotAuthorityPort, ApplicationError> {
+        self.bot_authority
+            .as_deref()
+            .ok_or_else(|| {
+                ApplicationError::internal(
+                    "bot authority hook is not wired",
+                )
+            })
+    }
+
+    /// Row 7 Human→Bot control leg: a live `can_manage`
+    /// edge; the historical `created_by` no longer
+    /// authorizes anything here.
+    async fn human_controls_bot(
+        &self,
+        user_id: &str,
+        bot_id: &str,
+    ) -> Result<bool, ApplicationError> {
+        match self.authority()?.can_manage(user_id, bot_id).await {
+            Ok(result) => Ok(result),
+            Err(ServiceError::Forbidden(message)) => {
+                Err(ApplicationError::forbidden(message))
+            }
+            Err(other) => Err(ApplicationError::internal(format!(
+                "bot authority lookup failed: {other}"
+            ))),
+        }
+    }
+
+    /// Row 7: replaces the claim-local `HumanOrOwnedBot`
+    /// selection with the live-edge resolver for the
+    /// authenticated Bot; pure Bot / pure Human credentials
+    /// keep their existing selection.
+    async fn resolve_principal(
+        &self,
+        caller: &AuthenticatedCaller,
+    ) -> Result<Principal, ApplicationError> {
+        match &caller.bot {
+            Some(bot) => {
+                resolve_authorized_principal(
+                    caller,
+                    IdentityPolicy::HumanOrAuthorizedBot {
+                        bot_id: bot.bot_uuid.clone(),
+                    },
+                    self.authority()?,
+                )
+                .await
+            }
+            None => select_principal(caller, IdentityPolicy::HumanOrOwnedBot),
+        }
+    }
+
     async fn load_member(
         &self,
-        caller: &bcs_service_api::application::v1::AuthenticatedCaller,
+        caller: &AuthenticatedCaller,
         session_id: &str,
     ) -> Result<(Principal, Session), ApplicationError> {
-        let principal = select_principal(caller, IdentityPolicy::HumanOrOwnedBot)?;
+        let principal = self.resolve_principal(caller).await?;
         let session = self
             .sessions
             .get(session_id)
@@ -106,40 +173,70 @@ impl SessionFileApplicationServiceImpl {
         let Principal::Human(human) = principal else {
             return Ok(false);
         };
-        let owned = self
-            .registry
-            .try_list_bots_by_creator(&human.subject.id)
-            .await
-            .map_err(map_service_error)?
-            .into_iter()
-            .map(|bot| bot.bot_uuid)
-            .collect::<HashSet<_>>();
-        Ok(session
-            .participants
-            .iter()
-            .any(|participant| participant.is_bot() && owned.contains(&participant.bot_uuid)))
+        // Row 7 membership leg: the Human is a member
+        // through a participant Bot it CURRENTLY
+        // controls (live `can_manage` per participant,
+        // never a creator-list whitelist).
+        for participant in session.participants.iter().filter(|p| p.is_bot()) {
+            if self
+                .human_controls_bot(&human.subject.id, &participant.bot_uuid)
+                .await?
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
-    async fn caller_identities(
+    /// Identity expansion for the legacy delegate contract
+    /// (`caller_identities = [caller.actor_id] + controlled bot
+    /// UUIDs`, row 7). The controlled-bot legs are the CURRENT
+    /// `can_manage` edges: a Human's expansion is itself plus
+    /// the Session's Bot participants it currently controls
+    /// (preserving the Session-rights boundary of the legacy
+    /// delegate, row 19 — the delegate's own rules are
+    /// unchanged). `extra` appends one user-specified actor
+    /// (e.g. a file owner) with the same live-control check.
+    async fn caller_identities_with_extra(
         &self,
         principal: &Principal,
+        session: Option<&Session>,
+        extra: Option<&str>,
     ) -> Result<Vec<String>, ApplicationError> {
         match principal {
             Principal::Bot(bot) => Ok(vec![bot.bot_uuid.clone()]),
             Principal::Human(human) => {
                 let mut identities = vec![principal.actor_id()];
-                identities.extend(
-                    self.registry
-                        .try_list_bots_by_creator(&human.subject.id)
-                        .await
-                        .map_err(map_service_error)?
-                        .into_iter()
-                        .map(|bot| bot.bot_uuid),
-                );
+                let mut candidates: Vec<String> = session
+                    .map(|session| {
+                        session
+                            .participants
+                            .iter()
+                            .filter(|participant| participant.is_bot())
+                            .map(|participant| participant.bot_uuid.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if let Some(extra) = extra {
+                    if !candidates.iter().any(|id| id == extra) {
+                        candidates.push(extra.to_string());
+                    }
+                }
+                for candidate in candidates {
+                    if self
+                        .human_controls_bot(&human.subject.id, &candidate)
+                        .await?
+                    {
+                        identities.push(candidate);
+                    }
+                }
+                identities.sort();
+                identities.dedup();
                 Ok(identities)
             }
         }
     }
+
 
     async fn ensure_upload_mutation(
         &self,
@@ -155,13 +252,14 @@ impl SessionFileApplicationServiceImpl {
         if file.owner.actor_kind != ActorKind::Bot {
             return Err(upload_owner_mismatch());
         }
-        let owned = self
-            .registry
-            .try_get(&file.owner.actor_id)
-            .await
-            .map_err(map_service_error)?
-            .is_some_and(|bot| bot.created_by.as_deref() == Some(human.subject.id.as_str()));
-        if owned {
+        // Row 7 mutation leg: a Human may mutate a file
+        // owned by a Bot it CURRENTLY controls (live
+        // `can_manage`); the historical `created_by` no
+        // longer authorizes.
+        let controlled = self
+            .human_controls_bot(&human.subject.id, &file.owner.actor_id)
+            .await?;
+        if controlled {
             Ok(())
         } else {
             Err(upload_owner_mismatch())
@@ -170,7 +268,7 @@ impl SessionFileApplicationServiceImpl {
 
     async fn authorized_file(
         &self,
-        caller: &bcs_service_api::application::v1::AuthenticatedCaller,
+        caller: &AuthenticatedCaller,
         session_id: &str,
         file_id: &str,
         mutation: bool,
@@ -226,7 +324,13 @@ impl SessionFileApplicationServiceImpl {
         session: &Session,
         file: &SessionFile,
     ) -> Option<String> {
-        let caller_identities = match self.caller_identities(principal).await {
+        // The identity expansion is a live-control set:
+        // the Session's Bot participants the Human
+        // CURRENTLY controls (row 7).
+        let caller_identities = match self
+            .caller_identities_with_extra(principal, Some(session), None)
+            .await
+        {
             Ok(identities) => identities,
             Err(error) => {
                 tracing::warn!(
@@ -417,6 +521,23 @@ impl SessionFileApplicationService for SessionFileApplicationServiceImpl {
         let (principal, session) = self
             .load_member(&command.caller, &command.session_id)
             .await?;
+        // The delete metadata contract is idempotent (F6): the
+        // file may already be gone by the time a retry arrives.
+        // The `load_member` gate above still decides whether the
+        // CURRENT caller may touch this Session at all; only the
+        // "metadata is already absent" fact shortcuts to success.
+        // Every other read failure (storage, internal) propagates.
+        let file = match self
+            .files
+            .get(&command.session_id, &command.file_id)
+            .await
+        {
+            Ok(file) => file,
+            Err(SessionFileUseCaseError::NotFound(_)) => {
+                return Ok(DeleteResult { deleted: true });
+            }
+            Err(other) => return Err(map_file_error(other)),
+        };
         let group = self
             .groups
             .try_get(&session.group_id)
@@ -433,7 +554,17 @@ impl SessionFileApplicationService for SessionFileApplicationServiceImpl {
                 session_id: command.session_id,
                 file_id: command.file_id,
                 caller: actor_ref(&principal),
-                caller_identities: self.caller_identities(&principal).await?,
+                // Identity expansion stays a live-control
+                // set: session participants (plus the file
+                // owner as an explicit candidate) through
+                // the CURRENT `can_manage` edges.
+                caller_identities: self
+                    .caller_identities_with_extra(
+                        &principal,
+                        Some(&session),
+                        Some(&file.owner.actor_id),
+                    )
+                    .await?,
                 session_creator: session.created_by,
                 driver_bot: Some(group.driver_bot),
             })
@@ -498,7 +629,22 @@ impl SessionFileApplicationService for SessionFileApplicationServiceImpl {
                 file_id: command.file_id,
                 caller: actor_ref(&principal),
                 ttl_seconds: command.ttl_seconds,
-                caller_identities: self.caller_identities(&principal).await?,
+                // Row 7: `can_share` separates the caller
+                // identities from the Session participants;
+                // a Human whose membership passed through a
+                // controlled participant Bot must carry that
+                // Bot identity too (the bounded
+                // `caller_identities_with_extra` shape the
+                // load/ensure paths use) — the bare Human
+                // identity alone would fail the
+                // participants intersection.
+                caller_identities: self
+                    .caller_identities_with_extra(
+                        &principal,
+                        Some(&session),
+                        None,
+                    )
+                    .await?,
                 session_participants: session
                     .participants
                     .iter()

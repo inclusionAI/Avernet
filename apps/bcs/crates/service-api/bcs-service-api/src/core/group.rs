@@ -211,6 +211,24 @@ pub trait GroupCoreService: Send + Sync {
         Ok(self.get(id).await)
     }
 
+    /// Read the Group's authorization-fact snapshot through the
+    /// strict repo read (spec §8.3).
+    ///
+    /// Only `Ok(None)` means Group not found; any storage or
+    /// decoding failure is `Err`. A Core that has no strict
+    /// snapshot repo keeps the default fail-closed error — it
+    /// must NEVER fall back to the ordinary cached `get`.
+    async fn read_authorization_snapshot(
+        &self,
+        _group_id: &str,
+    ) -> ServiceResult<Option<crate::types::authorization_snapshot::GroupAuthorizationSnapshot>>
+    {
+        Err(super::ServiceError::InvalidOperation {
+            message: "Group authorization snapshot reads are not configured".to_string(),
+            request_id: None,
+        })
+    }
+
     /// Add a message to a group.
     async fn add_message(&self, id: &str, message: GroupMessage) -> ServiceResult<()>;
 

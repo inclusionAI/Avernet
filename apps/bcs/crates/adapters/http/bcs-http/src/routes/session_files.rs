@@ -296,6 +296,19 @@ fn forbidden_not_participant() -> Response {
 /// file-existence oracle. The underlying `SessionFileUseCaseError` variants
 /// (InvalidInput / InvalidState / NotFound / …) stay distinct at the service
 /// layer for tests; the HTTP surface never distinguishes them.
+/// A failing authority read is an internal error (HTTP 500),
+/// never a silent deny-as-forbidden.
+fn authority_internal_error(error: impl std::fmt::Display) -> Response {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({
+            "error": "INTERNAL_SERVER_ERROR",
+            "message": format!("bot authority lookup failed: {error}")
+        })),
+    )
+        .into_response()
+}
+
 fn share_consume_err_to_response() -> Response {
     (
         StatusCode::NOT_FOUND,
@@ -321,22 +334,38 @@ fn caller_to_actor_ref(caller: &GroupChatCaller) -> ActorRef {
     }
 }
 
-/// Collect the caller actor_id plus any bots owned by that human (for Humans),
-/// or just the bot_uuid (for Bots). Used to feed mutate-authz into the service.
-async fn caller_identities(state: &HttpAppState, caller: &GroupChatCaller) -> Vec<String> {
+/// Collect the caller actor_id plus any Bot the Human
+/// CONTROLS among `candidates` (for Humans), or just the
+/// bot_uuid (for Bots). Used to feed mutate-authz into the
+/// service. The candidates are the relevant Bot actors of
+/// the resource; the live authority hook decides per Bot
+/// (bot-authority plan Task 6.5): the legacy
+/// `list_bots_by_creator` expansion is gone. A failing
+/// authority read is an internal error.
+async fn caller_identities(
+    state: &HttpAppState,
+    caller: &GroupChatCaller,
+    candidates: &[String],
+) -> Result<Vec<String>, crate::error::HttpAdapterError> {
     match caller {
-        GroupChatCaller::Bot { bot_uuid } => vec![bot_uuid.clone()],
+        GroupChatCaller::Bot { bot_uuid } => Ok(vec![bot_uuid.clone()]),
         GroupChatCaller::Human(h) => {
             let mut ids = vec![h.actor_id.clone()];
-            for b in state
-                .services
-                .registry
-                .list_bots_by_creator(&h.staff_no)
-                .await
-            {
-                ids.push(b.bot_uuid);
+            for bot_id in candidates {
+                if ids.contains(bot_id) {
+                    continue;
+                }
+                if crate::routes::sessions::human_controls_bot(
+                    state,
+                    &h.staff_no,
+                    bot_id,
+                )
+                .await?
+                {
+                    ids.push(bot_id.clone());
+                }
             }
-            ids
+            Ok(ids)
         }
     }
 }
@@ -359,16 +388,16 @@ async fn ensure_session_member(
     state: &HttpAppState,
     sid: &str,
     caller: &GroupChatCaller,
-) -> Option<bcs_service_api::Session> {
+) -> Result<Option<bcs_service_api::Session>, crate::error::HttpAdapterError> {
     let sess = match state.services.session_management.get(sid).await {
         Ok(Some(s)) => s,
-        _ => return None,
+        _ => return Ok(None),
     };
     // The session is always scoped to a parent group; require it to still
     // exist. Membership, however, is judged against the session's own
     // participants — not the group's seed.
     if state.services.group.get(&sess.group_id).await.is_none() {
-        return None;
+        return Ok(None);
     }
     let is_member = match caller {
         GroupChatCaller::Bot { bot_uuid } => sess
@@ -382,13 +411,13 @@ async fn ensure_session_member(
                 &h.actor_id,
                 &h.staff_no,
             )
-            .await
+            .await?
         }
     };
     if is_member {
-        Some(sess)
+        Ok(Some(sess))
     } else {
-        None
+        Ok(None)
     }
 }
 
@@ -429,7 +458,11 @@ pub async fn prepare_upload(
         Ok(c) => c,
         Err(_) => return unauthorized(),
     };
-    if ensure_session_member(&state, &sid, &caller).await.is_none() {
+    let is_member = match ensure_session_member(&state, &sid, &caller).await {
+        Ok(v) => v.is_some(),
+        Err(error) => return authority_internal_error(error),
+    };
+    if !is_member {
         return forbidden_not_participant();
     }
     let cmd = PrepareUploadCommand {
@@ -464,7 +497,11 @@ pub async fn upload_bytes(
         Ok(c) => c,
         Err(_) => return unauthorized(),
     };
-    if ensure_session_member(&state, &sid, &caller).await.is_none() {
+    let is_member = match ensure_session_member(&state, &sid, &caller).await {
+        Ok(v) => v.is_some(),
+        Err(error) => return authority_internal_error(error),
+    };
+    if !is_member {
         return forbidden_not_participant();
     }
     let part = uri
@@ -506,7 +543,11 @@ pub async fn complete_upload(
         Ok(c) => c,
         Err(_) => return unauthorized(),
     };
-    if ensure_session_member(&state, &sid, &caller).await.is_none() {
+    let is_member = match ensure_session_member(&state, &sid, &caller).await {
+        Ok(v) => v.is_some(),
+        Err(error) => return authority_internal_error(error),
+    };
+    if !is_member {
         return forbidden_not_participant();
     }
     let Some(application) = state.session_file_application.as_ref() else {
@@ -543,15 +584,52 @@ pub async fn delete_file(
         Ok(c) => c,
         Err(_) => return unauthorized(),
     };
-    if ensure_session_member(&state, &sid, &caller).await.is_none() {
+    let is_member = match ensure_session_member(&state, &sid, &caller).await {
+        Ok(v) => v.is_some(),
+        Err(error) => return authority_internal_error(error),
+    };
+    if !is_member {
         return forbidden_not_participant();
     }
     let (session_creator, driver_bot) = resolve_mutate_authz(&state, &sid).await;
+    // Identity expansion follows the LIVE authority
+    // edge (bot-authority plan Task 6.5); a failing
+    // read is an internal error.
+    let mut candidate_actors: Vec<String> = Vec::new();
+    if let Some(c) = &session_creator {
+        candidate_actors.push(c.clone());
+    }
+    if let Some(d) = &driver_bot {
+        if !d.is_empty() {
+            candidate_actors.push(d.clone());
+        }
+    }
+    // V1-facade parity: the FILE's owner is an
+    // authorized-delete candidate — a Human DELETEing a
+    // file a participant Bot uploaded must still be
+    // admitted through its CURRENT control edge, not the
+    // file's historical ownership facts. A missing file
+    // keeps the service's own NotFound path.
+    match state.services.session_files.get(&sid, &file_id).await {
+        Ok(file) => {
+            let owner = file.owner.actor_id;
+            if !candidate_actors.contains(&owner) {
+                candidate_actors.push(owner);
+            }
+        }
+        Err(SessionFileUseCaseError::NotFound(_)) => {}
+        Err(error) => return authority_internal_error(error),
+    }
+    let caller_identities =
+        match caller_identities(&state, &caller, &candidate_actors).await {
+            Ok(ids) => ids,
+            Err(error) => return authority_internal_error(error),
+        };
     let cmd = DeleteFileCommand {
         session_id: sid,
         file_id,
         caller: caller_to_actor_ref(&caller),
-        caller_identities: caller_identities(&state, &caller).await,
+        caller_identities,
         session_creator,
         driver_bot,
     };
@@ -572,7 +650,11 @@ pub async fn list_files(
         Ok(c) => c,
         Err(_) => return unauthorized(),
     };
-    if ensure_session_member(&state, &sid, &caller).await.is_none() {
+    let is_member = match ensure_session_member(&state, &sid, &caller).await {
+        Ok(v) => v.is_some(),
+        Err(error) => return authority_internal_error(error),
+    };
+    if !is_member {
         return forbidden_not_participant();
     }
     let status: Option<FileStatus> = match q.status.as_deref() {
@@ -614,7 +696,11 @@ pub async fn get_file(
         Ok(c) => c,
         Err(_) => return unauthorized(),
     };
-    if ensure_session_member(&state, &sid, &caller).await.is_none() {
+    let is_member = match ensure_session_member(&state, &sid, &caller).await {
+        Ok(v) => v.is_some(),
+        Err(error) => return authority_internal_error(error),
+    };
+    if !is_member {
         return forbidden_not_participant();
     }
     match state.services.session_files.get(&sid, &file_id).await {
@@ -633,7 +719,11 @@ pub async fn capabilities(
         Ok(c) => c,
         Err(_) => return unauthorized(),
     };
-    if ensure_session_member(&state, &sid, &caller).await.is_none() {
+    let is_member = match ensure_session_member(&state, &sid, &caller).await {
+        Ok(v) => v.is_some(),
+        Err(error) => return authority_internal_error(error),
+    };
+    if !is_member {
         return forbidden_not_participant();
     }
     let c: CapabilitiesView = state.services.session_files.capabilities().await;
@@ -655,7 +745,11 @@ pub async fn download_content(
         Ok(c) => c,
         Err(_) => return unauthorized(),
     };
-    if ensure_session_member(&state, &sid, &caller).await.is_none() {
+    let is_member = match ensure_session_member(&state, &sid, &caller).await {
+        Ok(v) => v.is_some(),
+        Err(error) => return authority_internal_error(error),
+    };
+    if !is_member {
         return forbidden_not_participant();
     }
     // TTL hidden from frontend: always None → download_route uses share_link_ttl.
@@ -725,15 +819,29 @@ pub async fn share_mint(
         Err(_) => return unauthorized(),
     };
     let sess = match ensure_session_member(&state, &sid, &caller).await {
-        Some(s) => s,
-        None => return forbidden_not_participant(),
+        Ok(Some(sess)) => sess,
+        Ok(None) => return forbidden_not_participant(),
+        Err(error) => return authority_internal_error(error),
     };
+    // Identity expansion follows the LIVE authority
+    // edge (bot-authority plan Task 6.5); a failing
+    // read is an internal error.
+    let share_candidates = sess
+        .participants
+        .iter()
+        .map(|p| p.bot_uuid.clone())
+        .collect::<Vec<_>>();
+    let caller_identities =
+        match caller_identities(&state, &caller, &share_candidates).await {
+            Ok(ids) => ids,
+            Err(error) => return authority_internal_error(error),
+        };
     let cmd = ShareMintCommand {
         session_id: sid,
         file_id,
         caller: caller_to_actor_ref(&caller),
         ttl_seconds: body.ttl_seconds,
-        caller_identities: caller_identities(&state, &caller).await,
+        caller_identities,
         session_participants: sess
             .participants
             .iter()
@@ -1001,6 +1109,15 @@ mod tests {
             group_repo.clone(),
         ));
 
+        // The CURRENT owner edges for the seeded
+        // bots (bot-authority plan Task 6.3): the
+        // file facade consults the authority hook;
+        // the historic registry owner facts alone
+        // no longer authorize.
+        let authority = bcs_test_support::lazy_authority_chain();
+        authority.hook.seed_owner("bot-a", "alice");
+        authority.hook.seed_owner("bot-b", "bob");
+
         // SessionFileService with FakeStoragePlugin (local caps) + in-memory repo.
         let storage: Arc<dyn bcs_storage_api::StoragePlugin> =
             Arc::new(FakeStoragePlugin::new(local_caps()));
@@ -1032,7 +1149,8 @@ mod tests {
                 registry.clone(),
                 system_messages.clone(),
                 Arc::new(CompletionShareProjector),
-            ),
+            )
+            .with_bot_authority_hook(authority.hook.clone()),
         );
         let services = Services::builder()
             .registry(registry)

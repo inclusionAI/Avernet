@@ -198,11 +198,17 @@ pub(crate) async fn extract_human_actor_id(
         .map(|staff_no| format!("human_{}", staff_no))
 }
 
-/// Resolve the caller bot identity for group member management endpoints.
+/// Resolve the caller bot identity for group member
+/// management endpoints.
 ///
-/// Tries bot token first; falls back to human identity (cookie or
-/// X-Mock-User-Id in local/dev mode) and looks up a bot owned by
-/// the human that has coordinator access to the group.
+/// Tries bot token first; falls back to human identity
+/// (cookie or X-Mock-User-Id in local/dev mode) and
+/// picks the group's coordinator candidate the human
+/// CURRENTLY CONTROLS through the live authority hook
+/// (bot-authority plan Task 6.5, spec §8 Group 成员);
+/// the historical `list_bots_by_creator` probe is gone.
+/// A failing authority read is an internal error, never
+/// a deny-as-403.
 pub(crate) async fn resolve_group_member_caller(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -228,21 +234,48 @@ pub(crate) async fn resolve_group_member_caller(
 
     let staff_no = human_id.strip_prefix("human_").unwrap_or(&human_id);
 
-    let owned = state
-        .services
-        .bot_query
-        .list_bots_by_creator(staff_no)
-        .await
-        .map_err(bot_use_case_error_to_http)?;
-    let coordinator = owned.iter().find(|b| {
-        b.bot_uuid == group.driver_bot_id || group.originator.as_deref() == Some(&b.bot_uuid)
-    });
+    // The group's coordinator candidates: the driver
+    // first, then the originator Bot (the group's
+    // own resource facts — never an ownership list).
+    let mut candidates: Vec<String> = vec![group.driver_bot_id.clone()];
+    if let Some(originator) = group.originator.as_deref() {
+        if originator != group.driver_bot_id {
+            candidates.push(originator.to_string());
+        }
+    }
+    for bot_id in candidates {
+        // A candidate that IS the current Human's own actor id
+        // (the Human is the group's originator or driver
+        // themself) needs no authority edge: the hook by design
+        // carries no Human→Human manage edge, and this
+        // self-identity admission survives driver handover and
+        // manager-edge revocation (the spec §3.3 revocation
+        // boundary). The downstream coordinator check decides
+        // what the Human may do with the group.
+        if bot_id == human_id {
+            return Ok(bot_id);
+        }
+        match state
+            .services
+            .bot_authority_hook
+            .can_manage(staff_no, &bot_id)
+            .await
+        {
+            Ok(true) => return Ok(bot_id),
+            Ok(false) => continue,
+            Err(error) => {
+                return Err(HttpAdapterError::Service(
+                    ServiceError::InternalError(format!(
+                        "bot authority lookup failed: {error}"
+                    )),
+                ));
+            }
+        }
+    }
 
-    coordinator.map(|b| b.bot_uuid.clone()).ok_or_else(|| {
-        HttpAdapterError::Forbidden(
-            "human caller does not own a coordinator bot in this group".to_string(),
-        )
-    })
+    Err(HttpAdapterError::Forbidden(
+        "human caller does not control a coordinator bot in this group".to_string(),
+    ))
 }
 
 pub(crate) async fn resolve_actor_caller(

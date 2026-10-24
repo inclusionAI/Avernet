@@ -182,7 +182,7 @@ async fn queued_im_reaction_targets_source_message_and_does_not_replay_on_restar
     service.admit(AdmitMessageDeliveries {
         display_message: None,
         message_id: "im-young".into(), flow_kind: DeliveryFlowKind::Group, now_ms: now - 3_000, expire_at_ms: None, event: None,
-        targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot-driver".into(), kind: DeliveryType::Send, max_queued: 10, semantic_projection_json: json!({"version":1}) }],
+        targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot-driver".into(), kind: DeliveryType::Send, max_queued: 10, semantic_projection_json: json!({"version":1}), run_id: None }],
         message: NewMessage { visibility_domain: MessageVisibilityDomain::Chat, audience: None, group_id: "group-1".into(), session_id: "group-1:im-original".into(), sender_id: "human_1".into(), sender_type: SenderType::Human,
             message_type: "chat".into(), content: json!({"text":"young","source_im_message_id":"im-young-source"}), client_msg_id: None, owner_bot_id: None, created_at: (now - 3_000) as u64, run_id: String::new() },
     }).await.unwrap();
@@ -192,7 +192,7 @@ async fn queued_im_reaction_targets_source_message_and_does_not_replay_on_restar
         display_message: None,
         message_id: "im-queue".into(), flow_kind: DeliveryFlowKind::Group, now_ms: now - 11_000, expire_at_ms: None, event: None,
         targets: [("bot-driver", DeliveryType::Send), ("bot-observer", DeliveryType::Send), ("context-only", DeliveryType::Inject)].into_iter()
-            .map(|(bot, kind)| DeliveryAdmissionTarget { rejection: None, target_bot_id: bot.into(), kind, max_queued: 10, semantic_projection_json: json!({"version":1}) }).collect(),
+            .map(|(bot, kind)| DeliveryAdmissionTarget { rejection: None, target_bot_id: bot.into(), kind, max_queued: 10, semantic_projection_json: json!({"version":1}), run_id: None,}).collect(),
         message: NewMessage { visibility_domain: MessageVisibilityDomain::Chat, audience: None, group_id: "group-1".into(), session_id: "group-1:im-original".into(), sender_id: "human_1".into(), sender_type: SenderType::Human,
             message_type: "chat".into(), content: json!({"text":"hello","source_im_message_id":"im-original"}), client_msg_id: None, owner_bot_id: None, created_at: (now - 11_000) as u64, run_id: String::new() },
     }).await.unwrap();
@@ -223,7 +223,7 @@ async fn queued_im_reaction_targets_source_message_and_does_not_replay_on_restar
     let rejected = service.admit(AdmitMessageDeliveries {
         display_message: None,
         message_id: "im-rejected".into(), flow_kind: DeliveryFlowKind::Group, now_ms: now, expire_at_ms: None, event: None,
-        targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot-observer".into(), kind: DeliveryType::Send, max_queued: 10, semantic_projection_json: json!({"version":1}) }],
+        targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot-observer".into(), kind: DeliveryType::Send, max_queued: 10, semantic_projection_json: json!({"version":1}), run_id: None,}],
         message: NewMessage { visibility_domain: MessageVisibilityDomain::Chat, audience: None, group_id: "group-1".into(), session_id: "group-1:im-original".into(), sender_id: "human_1".into(), sender_type: SenderType::Human,
             message_type: "chat".into(), content: json!({"text":"reject","source_im_message_id":"im-rejected-source"}), client_msg_id: None, owner_bot_id: None, created_at: now as u64, run_id: String::new() },
     }).await.unwrap().deliveries.remove(0);
@@ -282,7 +282,7 @@ async fn expired_im_reaction_waits_until_no_target_remains_queued() {
     let admitted = service.admit(AdmitMessageDeliveries {
         display_message: None,
         message_id: "im-expiring".into(), flow_kind: DeliveryFlowKind::Group, now_ms: now - 11_000, expire_at_ms: Some(now + 1_000), event: None,
-        targets: ["bot-driver", "bot-observer"].into_iter().map(|bot| DeliveryAdmissionTarget { rejection: None, target_bot_id: bot.into(), kind: DeliveryType::Send, max_queued: 10, semantic_projection_json: json!({"version":1}) }).collect(),
+        targets: ["bot-driver", "bot-observer"].into_iter().map(|bot| DeliveryAdmissionTarget { rejection: None, target_bot_id: bot.into(), kind: DeliveryType::Send, max_queued: 10, semantic_projection_json: json!({"version":1}), run_id: None }).collect(),
         message: NewMessage { visibility_domain: MessageVisibilityDomain::Chat, audience: None, group_id: "group-1".into(), session_id: "group-1:im-expiring".into(), sender_id: "human_1".into(), sender_type: SenderType::Human,
             message_type: "chat".into(), content: json!({"text":"later","source_im_message_id":"im-expiring-source"}), client_msg_id: None, owner_bot_id: None, created_at: (now - 11_000) as u64, run_id: String::new() },
     }).await.unwrap();
@@ -338,7 +338,7 @@ async fn reaction_delivery_is_bounded_to_one_provider_call_per_tick() {
         service.admit(AdmitMessageDeliveries {
             display_message: None,
             message_id: format!("im-bounded-{index}"), flow_kind: DeliveryFlowKind::Group, now_ms: now - 11_000, expire_at_ms: None, event: None,
-            targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot-driver".into(), kind: DeliveryType::Send, max_queued: 10, semantic_projection_json: json!({"version":1}) }],
+            targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot-driver".into(), kind: DeliveryType::Send, max_queued: 10, semantic_projection_json: json!({"version":1}), run_id: None }],
             message: NewMessage { visibility_domain: MessageVisibilityDomain::Chat, audience: None, group_id: "group-1".into(), session_id: format!("group-1:im-bounded-{index}"), sender_id: "human_1".into(), sender_type: SenderType::Human,
                 message_type: "chat".into(), content: json!({"text":"later","source_im_message_id":format!("im-bounded-source-{index}")}), client_msg_id: None, owner_bot_id: None, created_at: (now - 11_000) as u64, run_id: String::new() },
         }).await.unwrap();

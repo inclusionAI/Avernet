@@ -116,7 +116,7 @@ async fn batch_initialization_is_atomic_and_preserves_required_contexts() -> Res
     let make = |id: &str, kind, required| AdmitMessageDeliveries {
         display_message: None, message_id: id.into(), flow_kind: DeliveryFlowKind::System, now_ms: 1, expire_at_ms: Some(10), event: None,
         message: NewMessage { visibility_domain: bcs_domain::MessageVisibilityDomain::Chat, audience: None, group_id: "g".into(), session_id: "batch".into(), sender_id: "system".into(), sender_type: SenderType::System, message_type: "system".into(), content: serde_json::json!({"text":id}), client_msg_id: Some(id.into()), owner_bot_id: None, created_at: 1, run_id: String::new() },
-        targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot".into(), kind, max_queued: 2, semantic_projection_json: serde_json::json!({"required_context":required}) }],
+        targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot".into(), kind, max_queued: 2, semantic_projection_json: serde_json::json!({"required_context":required}), run_id: None }],
     };
     for repo in repos {
         let mut invalid = make("invalid", DeliveryType::Send, false); invalid.message.content = serde_json::json!({});
@@ -196,7 +196,7 @@ async fn newly_created_session_sequence_uses_transactional_read() -> Result<(), 
             message_type: "system".into(), content: serde_json::json!({"text":"initial context"}),
             client_msg_id: None, owner_bot_id: None, created_at: 1, run_id: String::new() },
         targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "manager".into(),
-            kind: DeliveryType::Send, max_queued: 1, semantic_projection_json: serde_json::json!({}) }],
+            kind: DeliveryType::Send, max_queued: 1, semantic_projection_json: serde_json::json!({}), run_id: None }],
     }).await?;
     assert_eq!(result.message.session_seq, 1);
     assert_eq!(result.deliveries[0].source_session_seq, 1);
@@ -246,7 +246,7 @@ async fn pooled_file_sqlite_preserves_contract_and_concurrent_capacity() -> Resu
         flow_kind: DeliveryFlowKind::Group, now_ms: 100, expire_at_ms: None, event: None,
         targets: vec![DeliveryAdmissionTarget { rejection: None,
             target_bot_id: "capacity-bot".into(), kind, max_queued: 3,
-            semantic_projection_json: serde_json::json!({"version":1}),
+            semantic_projection_json: serde_json::json!({"version":1}), run_id: None,
         }],
     };
     let mut tasks = tokio::task::JoinSet::new();

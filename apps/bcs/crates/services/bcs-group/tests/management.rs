@@ -1322,10 +1322,15 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             message_view_scope: None,
         })
         .await;
+    // Row 14 cutover (bot-authority plan Task 6.3):
+    // acting THROUGH a Bot the Human does not
+    // control is rejected at the control leg, before
+    // the coordinator check that used to catch it via
+    // the legacy `created_by = None` auto-claim.
     assert!(matches!(
         non_coordinator,
         Err(GroupUseCaseError::Forbidden(message))
-            if message.contains("group coordinator")
+            if message.contains("Not authorized as bot 'other-bot'")
     ));
 
     let protected_stranger = service
@@ -2585,6 +2590,46 @@ impl StaticSessionManagement {
     }
 }
 
+/// The strict Session authorization snapshot over the SAME
+/// static Session the management fake serves (F4): Workbench
+/// admission reads Session facts through the snapshot Core only.
+#[async_trait]
+impl bcs_service_api::core::SessionAuthorizationCoreService for StaticSessionManagement {
+    async fn read_authorization_snapshot(
+        &self,
+        session_id: &str,
+    ) -> bcs_service_api::ServiceResult<
+        Option<bcs_service_api::types::authorization_snapshot::SessionAuthorizationSnapshot>,
+    > {
+        use bcs_service_api::types::authorization_snapshot::{
+            ParticipantAuthorizationSnapshot, SessionAuthorizationSnapshot,
+        };
+        Ok((self.session.id == session_id).then(|| SessionAuthorizationSnapshot {
+            env: "dev".to_string(),
+            id: self.session.id.clone(),
+            live: true,
+            group_id: self.session.group_id.clone(),
+            status: self.session.status,
+            session_kind: self.session.session_kind,
+            created_by: self.session.created_by.clone(),
+            message_visibility_version: self.session.message_visibility_version,
+            participant_join_seq: self.session.participant_join_seq.clone(),
+            participants: self
+                .session
+                .participants
+                .iter()
+                .map(|participant| ParticipantAuthorizationSnapshot {
+                    actor_id: participant.bot_uuid.clone(),
+                    actor_kind: participant.actor_kind,
+                    role: participant.role,
+                    effective_mode: participant.effective_mode(),
+                    message_view_scope: participant.message_view_scope,
+                })
+                .collect(),
+        }))
+    }
+}
+
 #[async_trait]
 impl SessionManagementService for StaticSessionManagement {
     async fn create_or_reactivate(
@@ -2736,6 +2781,11 @@ struct Fixture {
     friend: Arc<FakeFriendCoreService>,
     relation: Arc<FakeRelationCoreService>,
     provider_downlink_bots: Arc<RwLock<HashSet<String>>>,
+    /// The authority chain backing the control
+    /// legs (rows 14/15/16): a LAZY-seed live hook
+    /// whose owner edges the sync `with_bot`
+    /// builder enqueues.
+    authority: Arc<bcs_test_support::LazySeedAuthorityHook>,
 }
 
 impl Fixture {
@@ -2746,6 +2796,7 @@ impl Fixture {
             friend: Arc::new(FakeFriendCoreService::default()),
             relation: Arc::new(FakeRelationCoreService::default()),
             provider_downlink_bots: Arc::new(RwLock::new(HashSet::new())),
+            authority: bcs_test_support::lazy_authority_chain().hook,
         }
     }
 
@@ -2772,7 +2823,7 @@ impl Fixture {
         max_group_members: usize,
         max_groups_as_driver: usize,
         max_groups_as_member: usize,
-        session_management: Arc<dyn SessionManagementService>,
+        session_management: Arc<StaticSessionManagement>,
     ) -> GroupManagement {
         GroupManagement::new(
             self.group.clone(),
@@ -2785,18 +2836,25 @@ impl Fixture {
                 max_groups_as_member,
                 relation_env: "dev".to_string(),
             },
-            session_management,
+            session_management.clone(),
             Arc::new(NoopSystemMessageService),
         )
+        .with_bot_authority(self.authority.clone())
         .with_bot_runtime(Arc::new(FakeBotRuntimeConnectionService {
             provider_downlink_bots: self.provider_downlink_bots.clone(),
         }))
+        .with_session_authorization(session_management)
     }
 
     fn service_with_system_message(
         &self,
         system_message: Arc<dyn SystemMessageService>,
     ) -> GroupManagement {
+        let session_management = Arc::new(StaticSessionManagement::new(test_session(
+            "group-under-test:abcdef12",
+            "group-under-test",
+            Vec::new(),
+        )));
         GroupManagement::new(
             self.group.clone(),
             self.registry.clone(),
@@ -2808,16 +2866,14 @@ impl Fixture {
                 max_groups_as_member: 10,
                 relation_env: "dev".to_string(),
             },
-            Arc::new(StaticSessionManagement::new(test_session(
-                "group-under-test:abcdef12",
-                "group-under-test",
-                Vec::new(),
-            ))),
+            session_management.clone(),
             system_message,
         )
+        .with_bot_authority(self.authority.clone())
         .with_bot_runtime(Arc::new(FakeBotRuntimeConnectionService {
             provider_downlink_bots: self.provider_downlink_bots.clone(),
         }))
+        .with_session_authorization(session_management)
     }
 
     fn with_bot(
@@ -2829,6 +2885,11 @@ impl Fixture {
     ) -> Self {
         self.registry
             .insert(bot(bot_uuid, name, visibility, created_by));
+        // Rows 14/15/16: the CURRENT owner edge
+        // replaces the historical `created_by`.
+        if let Some(owner) = created_by {
+            self.authority.seed_owner(bot_uuid, owner);
+        }
         self
     }
 
@@ -2846,6 +2907,9 @@ impl Fixture {
     ) -> Self {
         self.registry
             .insert(bot(bot_uuid, name, visibility, created_by));
+        if let Some(owner) = created_by {
+            self.authority.seed_owner(bot_uuid, owner);
+        }
         self.provider_downlink_bots
             .write()
             .unwrap()
@@ -3019,6 +3083,14 @@ impl BotRegistryCoreService for FakeRegistry {
             .filter(|bot| bot.created_by.as_deref() == Some(created_by))
             .cloned()
             .collect()
+    }
+
+    async fn list_uninitialized_bots_by_creator(
+        &self,
+        _created_by: &str,
+        _limit: usize,
+    ) -> ServiceResult<Vec<RegisteredBot>> {
+        Ok(Vec::new())
     }
 
     async fn discover(&self, _query: &str) -> Vec<RegisteredBot> {
@@ -4201,6 +4273,14 @@ async fn workbench_chat_abort_allows_session_bot_owner_and_absent_target() {
         10,
         Arc::new(StaticSessionManagement::new(session)),
     );
+    service
+        .create_group(create_cmd(
+            Some("driver"),
+            "driver",
+            vec![participant("driver", Some("driver"))],
+        ))
+        .await
+        .unwrap();
 
     service
         .authorize_chat_abort(WorkbenchChatAbortAuthorizationCommand {
@@ -4242,6 +4322,14 @@ async fn workbench_chat_abort_rechecks_human_mode_and_authentication() {
         10,
         Arc::new(StaticSessionManagement::new(session)),
     );
+    service
+        .create_group(create_cmd(
+            Some("driver"),
+            "driver",
+            vec![participant("driver", Some("driver"))],
+        ))
+        .await
+        .unwrap();
 
     let absent = service
         .authorize_chat_abort(WorkbenchChatAbortAuthorizationCommand {

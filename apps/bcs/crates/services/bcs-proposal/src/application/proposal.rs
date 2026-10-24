@@ -42,6 +42,10 @@ pub struct GroupProposalUseCases {
     session_management: Arc<dyn SessionManagementService>,
     system_message: Arc<dyn SystemMessageService>,
     config: GroupProposalUseCasesConfig,
+    /// Narrow bot-authority hook for the Human→Bot control
+    /// judgment (bot-authority plan Task 6.5); unwired
+    /// instances fail closed at that judgment.
+    bot_authority: Option<Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityPort>>,
     confirm_lock: Mutex<()>,
 }
 
@@ -63,8 +67,21 @@ impl GroupProposalUseCases {
             session_management,
             system_message,
             config,
+            bot_authority: None,
             confirm_lock: Mutex::new(()),
         }
+    }
+
+    /// Wire the narrow bot-authority hook (Task 6.5). An
+    /// unwired proposal service fails closed at its
+    /// Human→Bot control judgment instead of consulting
+    /// legacy `created_by` data.
+    pub fn with_bot_authority_hook(
+        mut self,
+        hook: Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityPort>,
+    ) -> Self {
+        self.bot_authority = Some(hook);
+        self
     }
 
     pub fn with_defaults(
@@ -86,6 +103,12 @@ impl GroupProposalUseCases {
         )
     }
 
+    /// Live Human→Bot control judgment (bot-authority
+    /// plan Task 6.5, spec §8): the legacy
+    /// `driver.created_by == staff_no` comparison is
+    /// replaced by the authority hook. A failing
+    /// authority read is an internal error — never a
+    /// deny-as-verdict.
     async fn authorize_driver(
         &self,
         caller_actor_id: Option<&str>,
@@ -98,9 +121,21 @@ impl GroupProposalUseCases {
             return Ok(());
         }
         if let Some(staff_no) = caller.strip_prefix("human_") {
-            if driver.created_by.as_deref() == Some(staff_no) {
-                return Ok(());
-            }
+            let hook = self.bot_authority.as_deref().ok_or_else(|| {
+                GroupUseCaseError::from(ServiceError::InternalError(
+                    "bot authority hook is not wired".to_string(),
+                ))
+            })?;
+            return match hook.can_manage(staff_no, &driver.bot_uuid).await {
+                Ok(true) => Ok(()),
+                Ok(false) => Err(GroupUseCaseError::Forbidden(format!(
+                    "Caller '{}' is not authorized as bot '{}'",
+                    caller, driver.bot_uuid
+                ))),
+                Err(error) => Err(GroupUseCaseError::from(ServiceError::InternalError(
+                    format!("bot authority lookup failed: {error}"),
+                ))),
+            };
         }
         Err(GroupUseCaseError::Forbidden(format!(
             "Caller '{}' is not authorized as bot '{}'",

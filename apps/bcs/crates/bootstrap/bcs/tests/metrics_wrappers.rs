@@ -317,6 +317,7 @@ impl MessageFlowService for MessageFlowFake {
     }
     async fn handle_web_send(&self, _cmd: WebSendCommand) -> ServiceResult<WebSendOutcome> {
         Ok(WebSendOutcome {
+            operation_id: "op-test".to_string(),
             queue_admission: None,
             primary_run_id: "run-wrapper".to_string(),
             status: "ok".to_string(),
@@ -770,5 +771,8 @@ fn frontend_delivery_cmd() -> FrontendDeliveryCommand {
         exclude_conn_id: None,
         visibility_domain: bcs_domain::MessageVisibilityDomain::Chat,
         audience: Some(bcs_domain::MessageAudience::Public),
+        operation_id: None,
+        terminal: false,
+        run_id: None,
     }
 }

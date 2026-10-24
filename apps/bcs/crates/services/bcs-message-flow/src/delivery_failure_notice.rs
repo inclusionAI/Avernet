@@ -73,6 +73,10 @@ pub(crate) async fn publish(
         delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
         run_fallback: None, exclude_conn_id: None, visibility_domain,
         audience: (visibility_domain != MessageVisibilityDomain::Chat).then_some(MessageAudience::Public),
+        // A content-free delivery-failure notice is an independent
+        // resource event: authorized per event against current facts.
+        operation_id: None, terminal: false,
+        run_id: None,
     }).await?;
     Ok(())
 }

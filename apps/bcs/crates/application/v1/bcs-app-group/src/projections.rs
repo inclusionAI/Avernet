@@ -98,9 +98,24 @@ impl GroupServiceImpl {
 
     // Best-effort display metadata, matching the legacy detail response. These
     // lookups do not authorize the caller or change the Group's persisted owner.
+    // Owner display (row 9) prefers the CURRENT ownership view from the
+    // authority Core (a transfer moves the owner without touching
+    // `created_by`); an unwired Core or an uninitialized (version-0)
+    // Bot falls back to the historical `created_by` display.
     async fn resolve_driver_bot_owner(&self, driver_bot_id: &str) -> (Option<String>, Option<String>) {
         if driver_bot_id.is_empty() {
             return (None, None);
+        }
+        if let Some(core) = self.bot_authority_core.as_deref() {
+            if let Ok(view) = core.ownership(driver_bot_id).await {
+                let human_id = view.owner_actor_id;
+                let owner_name = self
+                    .registry
+                    .get(&human_id)
+                    .await
+                    .and_then(|human| human.capabilities.name);
+                return (Some(human_id), owner_name);
+            }
         }
         let Some(driver) = self.registry.get(driver_bot_id).await else {
             return (None, None);
