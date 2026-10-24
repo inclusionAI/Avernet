@@ -19,6 +19,14 @@ fn command(home: &Path) -> Command {
 fn seed(home: &Path, api: &str) -> String {
     let dir = home.join(".bcn-bridge"); std::fs::create_dir_all(&dir).unwrap();
     std::fs::create_dir(home.join("legacy-cwd")).unwrap();
+    // Own the executable fixture instead of assuming a platform-specific true path.
+    let engine = home.join("mock-engine");
+    std::fs::write(&engine, "#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&engine, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let engine = engine.canonicalize().unwrap();
     let text = format!(r#"# Handwritten legacy configuration; startup must not rewrite it.
 provider_id='legacy'
 provider_auth='agentpass'
@@ -35,9 +43,9 @@ provider_bot_ref='parent'
 bot_id='bot_legacy'
 token='legacy-bot-secret'
 engine='codex'
-engine_bin='/bin/true'
+engine_bin='{}'
 cwd='{}'
-"#, home.join("legacy-cwd").display());
+"#, engine.display(), home.join("legacy-cwd").display());
     std::fs::write(dir.join("bridge.toml"), &text).unwrap();
     let db = rusqlite::Connection::open(dir.join("legacy.sqlite3")).unwrap();
     db.execute_batch("CREATE TABLE retained (token TEXT); INSERT INTO retained VALUES ('rotated-legacy-token');").unwrap();
@@ -45,8 +53,9 @@ cwd='{}'
 }
 fn read(home: &Path) -> String { std::fs::read_to_string(home.join(".bcn-bridge/bridge.toml")).unwrap() }
 async fn register(home: &Path, api: &str, provider: &str, auth: &str, extra: &[&str]) -> std::process::Output {
+    let engine = home.join("mock-engine").canonicalize().unwrap();
     let mut cmd=command(home); cmd.args(["register","--token",&token(provider,auth),"--bot-name","Test", "--engine","codex",
-        "--engine-bin","/bin/true","--provider-auth","static-bearer","--api-url",api]);
+        "--engine-bin",engine.to_str().unwrap(),"--provider-auth","static-bearer","--api-url",api]);
     if !extra.contains(&"--bot-id") { cmd.args(["--provider-bot-ref","parent"]); }
     if !extra.contains(&"--upstream-url") { cmd.args(["--upstream-url","ws://127.0.0.1:21000/ws/bot"]); }
     cmd.args(extra).output().await.unwrap()
@@ -84,6 +93,7 @@ async fn legacy_plus_subbots_upgrade_once_and_preserve_all_old_hard_state() {
     let groups=document["provider"].as_array().unwrap(); assert_eq!(groups.len(),2);
     assert_eq!(groups[0]["plugin"],oldbot["plugin"]);
     assert_eq!(groups[1]["plugin"]["url"].as_str(),Some(upstream));
+    assert_eq!(groups[1]["bot"][0]["engine_bin"],oldbot["bot"][0]["engine_bin"]);
     for key in ["provider_bot_ref","bot_id","token","cwd","engine_bin"] { assert_eq!(groups[0]["bot"][0][key],oldbot["bot"][0][key]); }
     assert_eq!(groups[0]["provider_auth"].as_str(),Some("agentpass"));
     assert_eq!(groups[0]["bot"][0]["registration"]["provider_auth"].as_str(),Some("static-bearer"));
@@ -117,6 +127,8 @@ async fn running_lock_refuses_upgrade_before_network() {
     let home=tempfile::tempdir().unwrap(); let before=seed(home.path(),"http://127.0.0.1:9");
     let lock=std::fs::File::create(home.path().join(".bcn-bridge/bridge.lock")).unwrap(); lock.try_lock().unwrap();
     let out=register(home.path(),"http://127.0.0.1:9","multi","agentpass-subbots",&[]).await;
-    assert!(!out.status.success()); assert!(String::from_utf8_lossy(&out.stderr).contains("stop"));
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("stop"), "{stderr}");
     assert_eq!(read(home.path()),before);
 }
