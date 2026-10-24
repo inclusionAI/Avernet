@@ -38,3 +38,8 @@ remain a small infrastructure port, not a business persistence model.
 Every plugin contract must have reusable contract tests in
 `crates/test-support/bcs-test-support`. Every concrete implementation should
 mount those tests in its own crate.
+
+- `bcs-caller-identity-api` owns the v1 subject establishment, execution-proof
+  issuance/verification and static factory contract. The public JWT adapter and
+  private OCB adapters implement it; shared runtime identity envelopes belong to
+  `bcs-domain`. See `bcs-caller-identity-api/CONTEXT.md` for trust and lifecycle.

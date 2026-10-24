@@ -154,7 +154,7 @@ pub async fn post_invocation(
                         opening_message_override: None,
                         input: outcome.session.input.clone().unwrap_or(Value::Null),
                         caller_id: outcome.session.caller_id.clone(),
-                        authenticated_human: None,
+                        authenticated_human: None, caller_association: None,
                     })
                     .await
                 {

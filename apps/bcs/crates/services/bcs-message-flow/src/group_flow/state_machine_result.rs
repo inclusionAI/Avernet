@@ -73,6 +73,7 @@ pub(super) async fn publish(flow: &BcsMessageFlow, cmd: StateMachineResultPublis
         },
     };
     let outcome = web_send::handle_web_send_with_result(flow, WebSendCommand {
+        caller_ingress: None, speaking_lease: None,
         caller: CallerContext::Bot(BotActor { bot_uuid: cmd.sender_bot_id.clone() }),
         group_id: cmd.group_id, session_id: Some(cmd.session_id), from_actor_id: cmd.sender_bot_id,
         from_name: None, message: cmd.content, mentions: Vec::new(), attachments: None,

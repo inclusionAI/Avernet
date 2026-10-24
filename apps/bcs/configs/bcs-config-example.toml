@@ -304,6 +304,39 @@ kind = "github"
 client_id = "replace-with-github-client-id"
 client_secret = "replace-with-github-client-secret"
 
+# =============================================================================
+# Speaking Lease (spec §10.13.9)
+# Workbench speaking-lease idle window, granted at acquire/preempt and
+# required at message submission alike. Absent section = frozen 60s
+# legacy default. Frontends read expiresAt_ms per lease — no frontend
+# change needed when this value is tuned.
+# =============================================================================
+#
+# [speaking_lease]
+# idle_timeout_ms = 60000
+
+# =============================================================================
+# Caller Identity (spec §10.13, docs/caller-identity-configuration.md)
+# Optional: absent = no caller capability (fail-closed, never a fake plugin).
+# Present = every field required; invalid material refuses STARTUP.
+# Secrets must come from secret provisioning, NOT committed files.
+# =============================================================================
+#
+# [caller_identity]
+# plugin = "jwt"          # only "jwt" assembles in this build; "agentpass"
+#                          # is the internal adapter and fails closed here.
+# [caller_identity.jwt]
+# issuer = "https://your-issuer.example.com"
+# signing_kid = "kid-2026-01"          # must match one public_keys entry
+# signing_key_pem = ""                # Ed25519 PKCS#8 PEM; injected via
+#                                     # secret provisioning, never committed
+# pseudonym_key_hex = ""               # >= 16 bytes hex; injected via
+#                                     # secret provisioning, never committed
+# max_ttl_seconds = 300
+# [[caller_identity.jwt.public_keys]]
+# kid = "kid-2026-01"
+# public_pem = "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"
+
 [bcsfuse]
 enabled = false
 url = "https://bcsfuse.example.com"

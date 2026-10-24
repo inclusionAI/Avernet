@@ -365,7 +365,22 @@ if [[ "$no_stop" -eq 0 ]]; then
     bcs-session-store/src/memory_operations/
     bcs-user-identity/src/memory.rs
   )
-  changed_skip_regex="^crates/services/($(IFS='|'; printf '%s' "${e2e_unreachable_memory_repos[*]}" | sed 's/\./\\./g'))"
+  # P2 caller A2A delegation chain: the delegate stage only runs for queue
+  # rows carrying a delegated parent (a Bot handing its own caller turn to a
+  # second Bot, parent execution token exchange). The caller e2e story now
+  # proves the root protected ride, the queue admission seam and the observe
+  # fan-out end to end, but bot-to-bot handoff rows are not produced in the
+  # e2e stack; a listed file that shows any E2E hit is counted again (the
+  # gate warns and re-includes).
+  e2e_unreachable_p2_caller_delivery=(
+    bcs-message-flow/src/caller_dispatch_pipeline/delegate.rs
+    bcs-message-flow/src/delivery_runtime/caller_delegate.rs
+  )
+  e2e_unreachable=(
+    "${e2e_unreachable_memory_repos[@]}"
+    "${e2e_unreachable_p2_caller_delivery[@]}"
+  )
+  changed_skip_regex="^crates/services/($(IFS='|'; printf '%s' "${e2e_unreachable[*]}" | sed 's/\./\\./g'))"
   changed_args=(--changed-line-min "$changed_line_min"
     --changed-line-min-lines "$changed_line_min_lines"
     --changed-skip-regex "$changed_skip_regex")

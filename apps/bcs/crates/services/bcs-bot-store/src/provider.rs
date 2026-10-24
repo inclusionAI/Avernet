@@ -23,8 +23,9 @@ use bcs_db_api::{DbError, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue};
 use bcs_service_api::{
     BotCapabilities, OrganizationCandidateReadPage, OrganizationCandidateReadPort,
     OrganizationCandidateReadQuery, ProviderBotBinding, ProviderBotBindingRepoPort,
-    ProviderBotDiscoveryRecord, ProviderBotDiscoverySelector, ProviderCredential,
-    ProviderCredentialRepoPort, ProviderRecord, ProviderRepoPort, ServiceError, ServiceResult,
+    ProviderBotDiscoveryRecord, ProviderBotDiscoverySelector, ProviderCallerCapabilities,
+    ProviderCredential, ProviderCredentialRepoPort, ProviderRecord, ProviderRepoPort, ServiceError,
+    ServiceResult,
 };
 
 pub type ProviderSqlFlavor = DbSqlFlavor;
@@ -58,6 +59,37 @@ impl OrganizationCandidateReadPort for MemoryProviderStore {}
 
 #[async_trait]
 impl ProviderRepoPort for MemoryProviderStore {
+    async fn get_caller_capabilities(
+        &self,
+        provider_id: &str,
+    ) -> ServiceResult<Option<ProviderCallerCapabilities>> {
+        // Same closed semantics as the SQL store: missing providers are
+        // ProviderNotFound, disabled providers are unavailable, undeclared is
+        // Ok(None), and broken declarations never echo raw config.
+        let provider = self
+            .providers
+            .read()
+            .await
+            .get(provider_id)
+            .cloned()
+            .ok_or_else(|| ServiceError::ProviderNotFound(provider_id.to_string()))?;
+        if provider.disabled {
+            return Err(caller_capabilities_unavailable());
+        }
+        let root: serde_json::Value = serde_json::from_str(&provider.config)
+            .map_err(|_| invalid_provider_caller_capabilities())?;
+        if !root.is_object() {
+            return Err(invalid_provider_caller_capabilities());
+        }
+        match root.get("caller_capabilities") {
+            None => Ok(None),
+            Some(serde_json::Value::Null) => Err(invalid_provider_caller_capabilities()),
+            Some(value) => serde_json::from_value::<ProviderCallerCapabilities>(value.clone())
+                .map(Some)
+                .map_err(|_| invalid_provider_caller_capabilities()),
+        }
+    }
+
     async fn insert_provider(&self, provider: ProviderRecord) -> ServiceResult<()> {
         let mut providers = self.providers.write().await;
         if providers.contains_key(&provider.provider_id) {
@@ -532,6 +564,51 @@ impl DbProviderStore {
 
 #[async_trait]
 impl ProviderRepoPort for DbProviderStore {
+    async fn get_caller_capabilities(
+        &self,
+        provider_id: &str,
+    ) -> ServiceResult<Option<ProviderCallerCapabilities>> {
+        let env = resolve_env();
+        // Deliberately uncached: capability projections must observe
+        // committed rows immediately, including updates committed by other
+        // instances, where the ordinary provider cache may hold an older
+        // record still marked enabled.
+        let sql = "SELECT config, disabled FROM bcs_providers \
+                  WHERE provider_id = ? AND env = ? LIMIT 1";
+        let rows = self
+            .query(
+                "get_caller_capabilities",
+                DbStatement::with_params(
+                    sql,
+                    vec![DbValue::from(provider_id), DbValue::from(env.as_str())],
+                ),
+            )
+            .await?;
+        let Some(row) = rows.first() else {
+            return Err(ServiceError::ProviderNotFound(provider_id.to_string()));
+        };
+        if row_bool(row, "disabled") {
+            return Err(caller_capabilities_unavailable());
+        }
+        let config = optional_string(row, "config").unwrap_or_default();
+        if config.trim().is_empty() {
+            // Legacy row without a config object: never declared.
+            return Ok(None);
+        }
+        let root: serde_json::Value = serde_json::from_str(&config)
+            .map_err(|_| invalid_provider_caller_capabilities())?;
+        if !root.is_object() {
+            return Err(invalid_provider_caller_capabilities());
+        }
+        match root.get("caller_capabilities") {
+            None => Ok(None),
+            Some(serde_json::Value::Null) => Err(invalid_provider_caller_capabilities()),
+            Some(value) => serde_json::from_value::<ProviderCallerCapabilities>(value.clone())
+                .map(Some)
+                .map_err(|_| invalid_provider_caller_capabilities()),
+        }
+    }
+
     async fn insert_provider(&self, provider: ProviderRecord) -> ServiceResult<()> {
         let env = resolve_env();
         self.execute_insert(
@@ -1869,4 +1946,22 @@ fn reject_policy_relaxation(current: &str, incoming: &str) -> ServiceResult<()> 
 
 impl std::fmt::Debug for MemoryProviderStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.debug_struct("MemoryProviderStore").finish_non_exhaustive() }
+}
+
+/// Closed error for a caller-capability projection that exists but is
+/// unusable. The message is fixed: raw config never leaks into errors.
+fn invalid_provider_caller_capabilities() -> ServiceError {
+    ServiceError::InvalidOperation {
+        message: "invalid provider caller capabilities".to_string(),
+        request_id: None,
+    }
+}
+
+/// Closed error for a provider that exists but is disabled; distinct from
+/// "never declared" at the storage seam.
+fn caller_capabilities_unavailable() -> ServiceError {
+    ServiceError::InvalidOperation {
+        message: "caller capabilities unavailable: provider is disabled".to_string(),
+        request_id: None,
+    }
 }

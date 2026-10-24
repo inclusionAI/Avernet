@@ -170,10 +170,25 @@ pub async fn handle_client_connection(
                                         error_kind,
                                     )
                                     .await;
+                                // Echo the request id when the failing frame
+                                // carries one: Workbench clients await responses
+                                // BY REQUEST ID, so a dangling id-less error res
+                                // surfaces in the UI as "no response at all".
+                                // Unparseable/non-request frames keep the
+                                // legacy "error" placeholder.
+                                let request_frame_id = serde_json::from_str::<Value>(&text)
+                                    .ok()
+                                    .and_then(|frame| {
+                                        let is_request =
+                                            frame.get("type").and_then(Value::as_str) == Some("req");
+                                        let id = frame.get("id").and_then(Value::as_str)?;
+                                        is_request.then(|| id.to_string())
+                                    })
+                                    .unwrap_or_else(|| "error".to_string());
                                 let _ = client_tx.send(
                                     serde_json::json!({
                                         "type": "res",
-                                        "id": "error",
+                                        "id": request_frame_id,
                                         "ok": false,
                                         "error": {
                                             "code": "dispatch_error",

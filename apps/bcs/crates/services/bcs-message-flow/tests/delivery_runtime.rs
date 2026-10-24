@@ -48,10 +48,10 @@ async fn storage_outages_retry_without_stopping_or_repeating_send_and_abort() ->
     // Wait for the injected post-commit failure to be reconciled before abort.
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert!(!task.is_finished());
-    service.transition(DeliveryTransitionCommand { delivery_id: row.delivery_id,
+    service.transition(DeliveryTransitionCommand { caller_dispatch_commit: None, delivery_id: row.delivery_id,
         expected_state_version: row.state.state_version, event: Event::CancelRequested,
         now_ms: chrono::Utc::now().timestamp_millis(), request_id: None, actor_id: None, reply: None,
-        transport_context_json: None, deadline_at_ms: Some(chrono::Utc::now().timestamp_millis() + 5000) }).await?;
+        transport_context_json: None, deadline_at_ms: Some(chrono::Utc::now().timestamp_millis() + 5000), caller_cancel: None, caller_terminal: None }).await?;
     wait_status(&service, "retry-db", Status::Cancelled).await?;
     assert!(!task.is_finished());
     assert_eq!(*io.sent.lock().await, vec!["retry-db"]);
@@ -497,6 +497,7 @@ fn command(id: &str, session: &str) -> AdmitMessageDeliveries {
 
 fn runtime(service: Arc<ManagedMessageDelivery>, io: Arc<RecordingIo>) -> DeliveryRuntime {
     DeliveryRuntime {
+        caller_dispatch: None,
         policy: None,
         service,
         preparation: io.clone(),
@@ -801,6 +802,9 @@ async fn pre_io_failures_have_a_durable_backoff_and_bounded_retry_budget()
 
 fn event(row: &PersistedMessageDelivery, event: Event) -> DeliveryTransitionCommand {
     DeliveryTransitionCommand {
+        caller_dispatch_commit: None,
+        caller_cancel: None,
+        caller_terminal: None,
         delivery_id: row.delivery_id.clone(),
         expected_state_version: row.state.state_version,
         event,
@@ -982,6 +986,149 @@ async fn uncertain_send_expires_after_a_fresh_queue_ttl_and_unblocks_its_lane()
     let second = wait_status(&service, "unknown-second", Status::Expired).await?;
     assert!(second.state.may_have_been_sent);
     assert_eq!(*io.sent.lock().await, vec!["unknown-first", "unknown-second"]);
+    stop.send(true)?;
+    task.await??;
+    Ok(())
+}
+
+fn caller_command(id: &str, expire_at_ms: Option<i64>) -> AdmitMessageDeliveries {
+    let mut admission = command(id, "session");
+    admission.expire_at_ms = expire_at_ms;
+    admission.targets[0].semantic_projection_json =
+        serde_json::json!({"version": 1, "caller_required": true});
+    admission
+}
+
+fn caller_transition(
+    row: &PersistedMessageDelivery,
+    event: Event,
+) -> DeliveryTransitionCommand {
+    DeliveryTransitionCommand {
+        caller_dispatch_commit: None,
+        delivery_id: row.delivery_id.clone(),
+        expected_state_version: row.state.state_version,
+        event,
+        now_ms: chrono::Utc::now().timestamp_millis(),
+        request_id: None,
+        actor_id: None,
+        reply: None,
+        transport_context_json: Some(serde_json::json!({})),
+        deadline_at_ms: Some(chrono::Utc::now().timestamp_millis() + 60_000),
+        caller_cancel: None,
+        caller_terminal: None,
+    }
+}
+
+#[tokio::test]
+async fn caller_rows_drop_the_queue_ttl_and_never_expire_into_lane_release() -> Result<(), Box<dyn std::error::Error>> {
+    let service = Arc::new(ManagedMessageDelivery::new(Arc::new(MemoryMessageRepo::new())));
+    let now = chrono::Utc::now().timestamp_millis();
+
+    // StartSend clears the queue TTL only for caller rows; the ordinary
+    // row beside it keeps its expiry.
+    service.admit(caller_command("caller-ttl", Some(now + 1_000))).await?;
+    let mut plain_admission = command("plain-exp", "session3");
+    plain_admission.expire_at_ms = Some(now + 1_000);
+    service.admit(plain_admission).await?;
+
+    let caller_row = service
+        .snapshot(None)
+        .await?
+        .into_iter()
+        .find(|row| row.source_message_id == "caller-ttl")
+        .unwrap();
+    assert!(caller_row.expire_at_ms.is_some(), "precondition: admitted with a queue TTL");
+    let started = service.transition(caller_transition(&caller_row, Event::StartSend)).await?;
+    assert_eq!(started.expire_at_ms, None, "caller StartSend clears the queue TTL in the same CAS");
+    assert!(started.run_deadline_at_ms.is_some(), "the run deadline survives");
+
+    let plain_row = service
+        .snapshot(None)
+        .await?
+        .into_iter()
+        .find(|row| row.source_message_id == "plain-exp")
+        .unwrap();
+    let plain_started = service.transition(caller_transition(&plain_row, Event::StartSend)).await?;
+    assert_eq!(plain_started.expire_at_ms, Some(now + 1_000), "ordinary rows keep the queue TTL");
+
+    // An uncertain caller attempt can never be expired into a lane release:
+    // the CAS refuses QueueExpired regardless of the caller.
+    let uncertain = service
+        .transition(DeliveryTransitionCommand {
+            caller_dispatch_commit: None,
+            delivery_id: started.delivery_id.clone(),
+            expected_state_version: started.state.state_version,
+            event: Event::TransportUnknown,
+            now_ms: chrono::Utc::now().timestamp_millis(),
+            request_id: None,
+            actor_id: None,
+            reply: None,
+            transport_context_json: None,
+            deadline_at_ms: None,
+            caller_cancel: None,
+            caller_terminal: None,
+        })
+        .await?;
+    assert_eq!(uncertain.state.status, Status::Unknown);
+    assert_eq!(uncertain.expire_at_ms, None, "entering Unknown does not re-arm the caller TTL");
+    let error = service
+        .transition(caller_transition(&uncertain, Event::QueueExpired))
+        .await
+        .expect_err("maybe-sent caller rows never expire into stopped");
+    assert!(matches!(error, ManagedDeliveryError::Conflict));
+    let intact = service
+        .snapshot(None)
+        .await?
+        .into_iter()
+        .find(|row| row.delivery_id == uncertain.delivery_id)
+        .unwrap();
+    assert_eq!(intact.state.status, Status::Unknown, "no stop without evidence");
+
+    // A queued caller row that never started still expires normally.
+    service.admit(caller_command("caller-queued", Some(now - 1))).await?;
+    let queued = service
+        .snapshot(None)
+        .await?
+        .into_iter()
+        .find(|row| row.source_message_id == "caller-queued")
+        .unwrap();
+    let expired = service.transition(caller_transition(&queued, Event::QueueExpired)).await?;
+    assert_eq!(expired.state.status, Status::Expired);
+    Ok(())
+}
+
+#[tokio::test]
+async fn policy_less_bots_get_a_no_policy_wait_marker() -> Result<(), Box<dyn std::error::Error>> {
+    // §15.98 visibility: a bot outside the runtime policy map used to be
+    // invisible — never scanned, never claimed, no wait_reason. The rows
+    // now carry NoPolicy so the stall is observable on the row itself.
+    let service = Arc::new(ManagedMessageDelivery::new(Arc::new(MemoryMessageRepo::new())));
+    let io = Arc::new(RecordingIo { service: service.clone(), sent: Default::default(), aborts: Default::default(), fail_send: false, fail_registration: false });
+    let mut scheduler = runtime(service.clone(), io.clone());
+    // The harness runtime only knows "bot"; this admission targets a bot
+    // the policy map has no profile for.
+    scheduler.policy = None;
+    let (stop, shutdown) = tokio::sync::watch::channel(false);
+    let task = tokio::spawn(scheduler.run(shutdown));
+    let mut orphan = command("orphan", "orphan-session");
+    orphan.targets[0].target_bot_id = "unknown-bot".into();
+    service.admit(orphan).await?;
+
+    let marked = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let rows = service.snapshot(None).await?;
+            if let Some(row) = rows.iter().find(|r| r.source_message_id == "orphan") {
+                if row.wait_reason == Some(bcs_domain::message_delivery::DeliveryWaitReason::NoPolicy) {
+                    return Ok::<(), Box<dyn std::error::Error>>(());
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await??;
+    drop(marked);
+    assert!(service.snapshot(None).await?.iter().find(|r| r.source_message_id == "orphan").unwrap().wait_reason
+        == Some(bcs_domain::message_delivery::DeliveryWaitReason::NoPolicy));
     stop.send(true)?;
     task.await??;
     Ok(())

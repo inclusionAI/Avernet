@@ -12,6 +12,7 @@ use bcs_service_api::{
     ProviderManagementService, ProviderRecord, RegisterProviderBotCommand,
     RegisterProviderBotOutcome, RegisterProviderBotParams, RegisterProviderCommand,
     RegisterProviderOutcome, RelationCoreService, ServiceError, ServiceResult,
+    SyncProviderBotCallerConfigurationCommand,
     UpdateProviderBotCommand, UpdateProviderBotOutcome, UpdateProviderCommand,
 };
 use bcs_user_directory_api::UserDirectoryPlugin;
@@ -171,6 +172,19 @@ impl ProviderManagement {
         }
         Ok(provider)
     }
+
+    /// The requested environment must equal the BCS environment of this
+    /// instance; trusted material is never environment-agnostic.
+    fn ensure_env_matches(requested: &str) -> ServiceResult<()> {
+        if requested == bcs_config::resolve_env_str() {
+            Ok(())
+        } else {
+            Err(ServiceError::InvalidOperation {
+                message: "caller configuration environment mismatch".to_string(),
+                request_id: None,
+            })
+        }
+    }
 }
 
 #[async_trait]
@@ -179,6 +193,98 @@ impl ProviderManagementService for ProviderManagement {
         &self, slug: &str,
     ) -> ServiceResult<Option<bcs_service_api::ProviderBasicInfo>> {
         self.provider_core.get_provider_by_slug(slug).await
+    }
+
+    async fn resolve_provider_bot_uuid_for_caller_config(
+        &self,
+        provider_id: &str,
+        provider_bot_ref: &str,
+        provider_admin_token: &str,
+    ) -> ServiceResult<String> {
+        self.ensure_provider_admin_active(provider_id, provider_admin_token)
+            .await?;
+        let binding = self
+            .provider_bot_core
+            .get_provider_bot_binding_by_ref(provider_id, provider_bot_ref)
+            .await?
+            .ok_or_else(|| {
+                ServiceError::BotNotFound(provider_bot_ref.to_string())
+            })?;
+        if binding.disabled {
+            return Err(ServiceError::BotNotFound(provider_bot_ref.to_string()));
+        }
+        Ok(binding.bot_uuid)
+    }
+
+    async fn get_provider_caller_capabilities(
+        &self,
+        provider_id: &str,
+        provider_admin_token: &str,
+    ) -> ServiceResult<Option<bcs_service_api::port::repo::ProviderCallerCapabilities>> {
+        // Authenticate first: capability bytes never flow to callers that
+        // cannot prove provider admin identity against this provider.
+        self.ensure_provider_admin_active(provider_id, provider_admin_token)
+            .await?;
+        self.provider_core.get_caller_capabilities(provider_id).await
+    }
+
+    async fn get_provider_bot_caller_configuration(
+        &self,
+        provider_id: &str,
+        bot_id: &str,
+        env: &str,
+        provider_admin_token: &str,
+    ) -> ServiceResult<bcs_service_api::port::repo::BotCallerConfiguration> {
+        self.ensure_provider_admin_active(provider_id, provider_admin_token)
+            .await?;
+        Self::ensure_env_matches(env)?;
+        // Authoritative capability check before the scoped read: a broken or
+        // disabled declaration rejects; an undeclared one may still read.
+        self.provider_core.get_caller_capabilities(provider_id).await?;
+        let core = self.control_plane.clone().ok_or_else(|| {
+            ServiceError::InvalidOperation {
+                message: "caller configuration management is not configured".to_string(),
+                request_id: None,
+            }
+        })?;
+        core.get_provider_caller_configuration(bot_id, env, provider_id)
+            .await?
+            .ok_or_else(|| ServiceError::InvalidOperation {
+                message: "caller_configuration_target_out_of_scope".to_string(),
+                request_id: None,
+            })
+    }
+
+    async fn sync_provider_bot_caller_configuration(
+        &self,
+        command: SyncProviderBotCallerConfigurationCommand,
+        provider_admin_token: &str,
+    ) -> ServiceResult<bcs_service_api::port::repo::CallerConfigurationSync> {
+        self.ensure_provider_admin_active(&command.provider_id, provider_admin_token)
+            .await?;
+        Self::ensure_env_matches(&command.env)?;
+        // A broken or disabled provider declaration rejects the sync; an
+        // undeclared provider may still persist configuration intent.
+        self.provider_core
+            .get_caller_capabilities(&command.provider_id)
+            .await?;
+        let core = self.control_plane.clone().ok_or_else(|| {
+            ServiceError::InvalidOperation {
+                message: "caller configuration management is not configured".to_string(),
+                request_id: None,
+            }
+        })?;
+        core.sync_provider_caller_configuration(
+            &command.bot_id,
+            &command.env,
+            &command.provider_id,
+            command.snapshot,
+        )
+        .await?
+        .ok_or_else(|| ServiceError::InvalidOperation {
+            message: "caller_configuration_target_out_of_scope".to_string(),
+            request_id: None,
+        })
     }
 
     async fn register_provider(
@@ -197,6 +303,7 @@ impl ProviderManagementService for ProviderManagement {
                 command.slug,
                 command.admin_callback_url,
                 command.collaboration_scope,
+                command.caller_capabilities,
             )
             .await?;
         Ok(RegisterProviderOutcome {
@@ -243,6 +350,7 @@ impl ProviderManagementService for ProviderManagement {
                 command.slug,
                 command.admin_callback_url,
                 command.collaboration_scope,
+                command.caller_capabilities,
             )
             .await
     }
@@ -290,6 +398,7 @@ impl ProviderManagementService for ProviderManagement {
                     scopes: command.scopes,
                     bot_uuid: command.bot_uuid,
                     connection_mode: command.connection_mode,
+                    initial_caller: None,
                 },
             )
             .await?;

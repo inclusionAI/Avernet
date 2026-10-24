@@ -31,14 +31,17 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
         .iter()
         .map(|name| name.split('_').next().unwrap().parse::<i64>().unwrap())
         .collect::<Vec<_>>();
-    // MySQL Provider storage remains version 029; the new Group migration is
-    // MySQL version 030.
-    assert_eq!(versions, (1..=35).collect::<Vec<_>>());
+// MySQL keeps the upstream slug/context/draft versions; speaking leases follow at 036.
+    assert_eq!(versions, (1..=36).collect::<Vec<_>>());
     assert_eq!(mysql[27], "028_fixed_loop_runtime.sql");
     assert_eq!(mysql[28], "029_bot_provider_storage.sql");
     assert_eq!(mysql[29], "030_group_human_mention_notify_mode.sql");
+    assert_eq!(mysql[30], "031_session_registry.sql");
+    assert_eq!(mysql[31], "032_provider_slug.sql");
+    assert_eq!(mysql[32], "033_group_context.sql");
     assert_eq!(mysql[33], "034_group_context_owners.sql");
     assert_eq!(mysql[34], "035_collaboration_drafts.sql");
+    assert_eq!(mysql[35], "036_session_speaking_leases.sql");
 }
 
 #[tokio::test]
@@ -128,4 +131,29 @@ async fn bot_provider_expansion_resumes_every_partial_step() -> DbResult<()> {
         assert!(index_exists(&db, "uk_bcs_bots_provider_ref_env").await?);
     }
     Ok(())
+}
+
+#[test]
+fn mysql_speaking_lease_migration_is_additive_and_unique_scoped() {
+    let baseline = include_str!("../../../../../../migrations/mysql/001_init_schema.sql");
+    let migration = include_str!("../../../../../../migrations/mysql/036_session_speaking_leases.sql");
+
+    assert!(
+        !baseline.contains("bcs_session_speaking_leases"),
+        "Caller speaking leases must remain a versioned MySQL migration, not a baseline edit"
+    );
+    assert!(migration.contains("CREATE TABLE IF NOT EXISTS `bcs_session_speaking_leases`"));
+    for column in [
+        "`env`",
+        "`session_id`",
+        "`holder_actor_id`",
+        "`lease_id`",
+        "`epoch`",
+        "`expires_at_ms`",
+        "`released`",
+    ] {
+        assert!(migration.contains(column), "missing lease column {column}");
+    }
+    assert!(migration.contains("UNIQUE KEY `uk_speaking_leases_env_session` (`env`, `session_id`)"));
+    assert!(migration.contains("KEY `idx_speaking_leases_session` (`env`, `session_id`)"));
 }

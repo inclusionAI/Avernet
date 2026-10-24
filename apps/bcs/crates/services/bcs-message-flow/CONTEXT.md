@@ -229,3 +229,53 @@ policy readiness, cancellation uncertainty and the v3 HTTP/CLI contract.
 ## Provider collaboration scope
 
 Direct A2A and group caller authorization enforce Provider collaboration scope before legacy public/friend/organization exemptions; the authenticated caller and all group participants are checked.
+
+## Caller association ownership
+
+Caller coordination reuses Managed delivery parent/invocation metadata and the
+existing task/run terminal CAS. No independent child repository or result ledger
+consumer remains; Caller wiring no longer initializes a separate repository schema.
+~~Historical migrations and their compatibility schema initialization are unchanged.~~
+(2026-10-20 勘误:The a2a_child table family migrations were later dropped entirely in
+7ea603b8c; current numbered tails are sqlite 032 `session_registry` and mysql
+032 `session_speaking_leases`.)
+Accepted-dispatch lineage and per-session/turn invocation allowances are bounded
+owner-local memory only: 1024 production entries, at most 16 invocation keys per
+turn, depth capped at two. Reserve before ordinary admission; failed/unknown
+admissions keep the allowance. Existing coordination intent/tool-call dedup owns
+replay. Lost identity refuses inheritance; it never blocks existing Worker results.
+This is not a cross-owner durable budget or a parent-terminal/admission transaction.
+Each coordination assignment uses one scoped Managed parent lookup and existing
+run context; no extra child INSERT transaction or child lookup at completion.
+Memory locks are never held across await/network I/O.
+
+Protected Caller dispatch runs in the bounded runtime task set with the existing
+I/O timeout, never inline on the scheduler. In-flight Caller tasks reserve Bot
+capacity conservatively (a persisted active row can also be counted while its
+future is pending). Deadline/cancel control aborts the local future; shutdown
+aborts and drains it before recovery. Timeout before StartSend fails preparation;
+after StartSend it is Unknown, never proof of non-delivery or permission to resend.
+This bounds local futures, not remote execution. Queue TTL does not declare a
+possibly executing dispatch stopped. Stage DEBUG logs carry dispatch IDs only,
+not identity proofs or credentials.
+
+No new queue scan or per-tick per-task lookup is added. Completion/timeout uses
+one scoped delivery lookup and at most one lifecycle CAS; existing bounded control
+(32 rows) and expiry (100 rows) batches remain unchanged. Capacity reservations
+are bounded by max_tasks and use process-local bookkeeping, not another cache.
+
+## Caller identity boundary
+
+Caller dispatch consumes `bcs-caller-identity-api::CallerIdentityPlugin`. Concrete JWT/private adapters are injected by composition roots, never selected by orchestration.
+
+### Caller credential profiles (Plugin API v1.1)
+
+Dispatch authorization (`not_after_ms`, caller context expiry, parent/run/attempt
+ledger checks and container isolation) is independent of identity credential TTL.
+ExecutionBound plugins retain bounded run-attesting proofs. IdentityRelay plugins
+return upstream identity credentials with their actual expiry/reuse semantics;
+they do not attest run/scope/purpose/isolation. Protected send carries both windows
+separately. Cancellation terminates BCS execution, not an upstream identity JWT.
+The material ledger still fences parent run/attempt; plugins never select INITIAL
+as recovery from a failed parent relay. Unsupported purpose-specific issuance
+fails closed. This distinction adds no database access or credential cache.

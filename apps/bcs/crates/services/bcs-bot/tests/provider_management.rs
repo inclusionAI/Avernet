@@ -155,6 +155,7 @@ async fn register_provider(ctx: &TestContext) -> (String, String) {
             created_by: "11111111".to_string(),
             protocol_version: None,
             coordination: None,
+            caller_capabilities: None,
         })
         .await
         .expect("register provider");

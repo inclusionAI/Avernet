@@ -34,11 +34,14 @@ bcs-telemetry   = { workspace = true }
 bcs-observability = { workspace = true }
 bcs-callback    = { workspace = true }
 bcs-route-security = { workspace = true }
+bcs-auth-api    = { workspace = true }
+bcs-config      = { workspace = true }
 
 [dev-dependencies]
 tokio-test  = "0.4"
 tokio-tungstenite = "0.26"
 bcs-session = { workspace = true }
+bcs-session-store = { workspace = true }
 bcs-test-support = { workspace = true, features = ["diagnostic-logs"] }
 bcs-services-container = { workspace = true, features = ["test-support"] }
 bcs-interaction = { workspace = true }

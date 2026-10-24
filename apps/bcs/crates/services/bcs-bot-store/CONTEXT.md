@@ -97,3 +97,35 @@ Bot Provider authorization uses a bounded fresh environment-scoped LEFT JOIN (ma
 Provider tightening to same_owner atomically rejects related public groups through current environment-scoped membership. Memory implementations receive a Group membership projection and weak Bot-metadata reference; their policy gate serializes Group writes against policy updates. Failed tightening leaves all Provider metadata unchanged.
 
 Affiliation into a same_owner Provider rejects current public membership before writing Bot metadata or gateway projection. SQL attachment locks Provider then Bot and checks membership inside the transaction; public Group writes also lock unbound Bot rows. Memory attachment uses the existing policy gate. A fresh preflight port supports registration before capability merging; the write always rechecks.
+
+## Caller configuration storage seam
+
+`PersistentBotRepo` implements the P1.1 caller-configuration read/sync on the
+existing `bcs_bots.bot_info` JSON column — no schema migration. Reads treat a
+missing `$.caller` as "never configured" and surface `caller:null`, non-object
+roots and malformed snapshots as a closed sanitized storage error, never as a
+disable. Sync resolves the §10.7.2 revision matrix in storage order
+(Apply/Unchanged/Stale/Conflict), writes with a binary CAS over the original
+`bot_info` text (CAST on MySQL, binary TEXT compare on SQLite), preserves all
+sibling fields, and after a lost CAS re-reads exactly once — a still-writable
+decision becomes Conflict, never a blind overwrite. `MemoryBotRepo` keeps the
+port's explicit fail-closed defaults. Conformance:
+`tests/conformance_caller_configuration.rs` (real SQLite + contended fake).
+
+## Provider caller capabilities read
+
+`DbProviderStore` implements the P1.4 authoritative caller-capability read on
+`bcs_providers.config.$.caller_capabilities` as a direct, cache-bypassing
+SQLite/MySQL query: missing provider is `ProviderNotFound`, a disabled
+provider is a closed "unavailable" error (never "undeclared"), a missing or
+empty config is a legacy never-declared row, and `caller_capabilities:null`,
+non-object roots and malformed declarations are closed sanitized errors that
+never echo raw config. Conformance:
+`tests/provider_caller_capabilities_contract.rs` (real SQLite).
+
+The caller-configuration seam is also provider-scoped: the read JOINs the
+canonical `bcs_provider_bot_bindings` (non-deleted bot, enabled binding,
+exact provider) and the conditional write re-asserts the same ownership
+inside its WHERE clause, so Bots of other providers, unbound Bots and
+disabled bindings are out of scope without ever being reported
+"unconfigured".

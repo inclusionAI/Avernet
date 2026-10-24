@@ -18,6 +18,7 @@ use bcs_service_api::{
 use super::ids::{new_bot_uuid, new_provider_id, new_session_token};
 use bcs_service_api::bot_provider::{BotConnectionMode, BotProviderRecord};
 use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
+use bcs_service_api::port::repo::BotControlPlaneRepoPort;
 
 #[derive(Clone)]
 pub struct ProviderCore {
@@ -27,6 +28,11 @@ pub struct ProviderCore {
     registry: Arc<dyn BotRegistryCoreService>,
     webhook_url_guard: OutboundUrlGuard,
     bot_providers: Option<Arc<dyn BotProviderRepoPort>>,
+    /// P1.3: caller-config CAS channel for the registration's initial
+    /// snapshot. `None` (memory composition) means registration cannot
+    /// carry `initial_caller` — such requests fail closed with
+    /// reconciliation-required rather than silently skipping the snapshot.
+    caller_config: Option<Arc<dyn BotControlPlaneRepoPort>>,
 }
 
 impl ProviderCore {
@@ -59,7 +65,16 @@ impl ProviderCore {
             registry,
             webhook_url_guard,
             bot_providers: None,
+            caller_config: None,
         }
+    }
+
+    pub fn with_caller_config_store(
+        mut self,
+        store: Arc<dyn BotControlPlaneRepoPort>,
+    ) -> Self {
+        self.caller_config = Some(store);
+        self
     }
 
     pub fn with_bot_provider_repo(mut self, repo: Arc<dyn BotProviderRepoPort>) -> Self {
@@ -145,6 +160,7 @@ impl ProviderCore {
             scopes,
             bot_uuid,
             connection_mode,
+            initial_caller,
         } = params;
         let provider = self
             .authenticated_provider(provider_id, provider_admin_token)
@@ -310,6 +326,48 @@ impl ProviderCore {
                             "register_provider_bot: insert_binding failed; bot record orphaned"
                         );
                     })?;
+                // P1.3 initial caller snapshot: the registration stays
+                // committed; a failed post-commit sync reports
+                // reconciliation-required — never auto-retried, never
+                // deleted, never credential-replayed, and a disabled
+                // caller config can never unblock it (the caller config is
+                // simply absent until the same command is resubmitted).
+                if let Some(snapshot) = &initial_caller {
+                    let synced = match self.caller_config.as_ref() {
+                        Some(store) => {
+                            store
+                                .sync_caller_configuration(
+                                    &bot_uuid,
+                                    &bcs_config::resolve_env_str(),
+                                    snapshot.clone(),
+                                )
+                                .await
+                        }
+                        None => Ok(None),
+                    };
+                    match synced {
+                        Ok(Some(_)) => {}
+                        Ok(None) => {
+                            warn!(
+                                request_id = %bcs_observability::CurrentRequestId,
+                                bot_uuid = %bot_uuid,
+                                provider_bot_ref = %provider_bot_ref,
+                                "register_provider_bot: caller snapshot target missing; reconciliation required"
+                            );
+                            return Err(ServiceError::RegistrationReconciliationRequired);
+                        }
+                        Err(error) => {
+                            warn!(
+                                request_id = %bcs_observability::CurrentRequestId,
+                                bot_uuid = %bot_uuid,
+                                provider_bot_ref = %provider_bot_ref,
+                                error = %error,
+                                "register_provider_bot: initial caller snapshot failed; reconciliation required"
+                            );
+                            return Err(ServiceError::RegistrationReconciliationRequired);
+                        }
+                    }
+                }
                 info!(
                     provider_id = %provider.provider_id,
                     bot_uuid = %bot_uuid,
@@ -713,6 +771,27 @@ fn replace_organization_management_config(
     Ok(value.to_string())
 }
 
+/// Merge a caller-capability declaration into the provider config
+/// (`$.caller_capabilities`, spec §10.7.3). Round-trips through the
+/// domain type so a partially-written or hand-edited JSON stays caught by
+/// the strict `ProviderCallerCapabilities` shape on every later read.
+fn replace_caller_capabilities(
+    config: &str,
+    caller_capabilities: &bcs_service_api::ProviderCallerCapabilities,
+) -> ServiceResult<String> {
+    let mut value: Value = serde_json::from_str(config)?;
+    // Round-trip validates the declared shape end-to-end, exactly the way
+    // `ProviderRepoPort::get_caller_capabilities` parses it later.
+    value["caller_capabilities"] = serde_json::to_value(caller_capabilities)?;
+    let encoded = value.to_string();
+    let root: Value = serde_json::from_str(&encoded)?;
+    match root.get("caller_capabilities") {
+        Some(value) => serde_json::from_value::<bcs_service_api::ProviderCallerCapabilities>(value.clone())?,
+        None => return Err(ServiceError::InternalError("caller capabilities merge failed".into())),
+    };
+    Ok(encoded)
+}
+
 fn ensure_provider_owner(provider: &ProviderRecord, staff_no: &str) -> ServiceResult<()> {
     let staff_no = staff_no.trim();
     if staff_no.is_empty() {
@@ -751,6 +830,13 @@ impl ProviderCoreService for ProviderCore {
         }))
     }
 
+    async fn get_caller_capabilities(
+        &self,
+        provider_id: &str,
+    ) -> ServiceResult<Option<bcs_service_api::port::repo::ProviderCallerCapabilities>> {
+        self.providers.get_caller_capabilities(provider_id).await
+    }
+
     async fn register_provider(
         &self,
         name: String,
@@ -761,7 +847,7 @@ impl ProviderCoreService for ProviderCore {
         coordination: Option<ProviderCoordinationConfig>,
     ) -> ServiceResult<RegisteredProvider> {
         self.register_provider_with_slug(name, webhook_url, auth_mode, created_by,
-            protocol_version, coordination, None, None).await
+            protocol_version, coordination, None, None, None).await
     }
 
     async fn register_provider_with_slug(
@@ -769,8 +855,9 @@ impl ProviderCoreService for ProviderCore {
         created_by: String, protocol_version: Option<String>,
         coordination: Option<ProviderCoordinationConfig>, slug: Option<String>,
         admin_callback_url: Option<String>,
+        caller_capabilities: Option<bcs_service_api::ProviderCallerCapabilities>,
     ) -> ServiceResult<RegisteredProvider> {
-        self.register_provider_with_policy(name, webhook_url, auth_mode, created_by, protocol_version, coordination, slug, admin_callback_url, None).await
+        self.register_provider_with_policy(name, webhook_url, auth_mode, created_by, protocol_version, coordination, slug, admin_callback_url, None, caller_capabilities).await
     }
 
     async fn register_provider_with_policy(
@@ -778,6 +865,7 @@ impl ProviderCoreService for ProviderCore {
         created_by: String, protocol_version: Option<String>,
         coordination: Option<ProviderCoordinationConfig>, slug: Option<String>,
         admin_callback_url: Option<String>, scope: Option<ProviderCollaborationScope>,
+        caller_capabilities: Option<bcs_service_api::ProviderCallerCapabilities>,
     ) -> ServiceResult<RegisteredProvider> {
         if let Some(slug) = slug.as_deref() { validate_provider_slug(slug)?; }
         let provider_id = new_provider_id();
@@ -813,10 +901,13 @@ impl ProviderCoreService for ProviderCore {
         if let Some(url) = admin_callback_url.as_deref() {
             config = replace_admin_callback_url(&config, url)?;
         }
-        if let Some(scope) = scope {
+if let Some(scope) = scope {
             let mut value: serde_json::Map<String, Value> = serde_json::from_str(&config)?;
             value.insert("collaboration_scope".into(), serde_json::to_value(scope)?);
             config = serde_json::to_string(&value)?;
+        }
+        if let Some(caller_capabilities) = caller_capabilities.as_ref() {
+            config = replace_caller_capabilities(&config, caller_capabilities)?;
         }
         let provider = ProviderRecord {
             provider_id: provider_id.clone(),
@@ -955,7 +1046,7 @@ impl ProviderCoreService for ProviderCore {
         organization_management: Option<ProviderOrganizationManagementConfig>,
     ) -> ServiceResult<ProviderRecord> {
         self.update_provider_with_slug(provider_id, provider_admin_token, authenticated_staff_id,
-            name, webhook_url, protocol_version, coordination, organization_management, None, None).await
+            name, webhook_url, protocol_version, coordination, organization_management, None, None, None).await
     }
 
     async fn update_provider_with_slug(
@@ -964,8 +1055,9 @@ impl ProviderCoreService for ProviderCore {
         coordination: Option<ProviderCoordinationConfig>,
         organization_management: Option<ProviderOrganizationManagementConfig>, slug: Option<String>,
         admin_callback_url: Option<String>,
+        caller_capabilities: Option<bcs_service_api::ProviderCallerCapabilities>,
     ) -> ServiceResult<ProviderRecord> {
-        self.update_provider_with_policy(provider_id, provider_admin_token, authenticated_staff_id, name, webhook_url, protocol_version, coordination, organization_management, slug, admin_callback_url, None).await
+        self.update_provider_with_policy(provider_id, provider_admin_token, authenticated_staff_id, name, webhook_url, protocol_version, coordination, organization_management, slug, admin_callback_url, None, caller_capabilities).await
     }
 
     async fn update_provider_with_policy(
@@ -974,6 +1066,7 @@ impl ProviderCoreService for ProviderCore {
         coordination: Option<ProviderCoordinationConfig>,
         organization_management: Option<ProviderOrganizationManagementConfig>, slug: Option<String>,
         admin_callback_url: Option<String>, scope: Option<ProviderCollaborationScope>,
+        caller_capabilities: Option<bcs_service_api::ProviderCallerCapabilities>,
     ) -> ServiceResult<ProviderRecord> {
         let current = self
             .provider_admin_for_path(provider_id, provider_admin_token)
@@ -1037,7 +1130,7 @@ impl ProviderCoreService for ProviderCore {
                 organization_management,
             )?);
         }
-        if let Some(scope) = scope {
+if let Some(scope) = scope {
             let current_scope = ProviderCollaborationScope::from_config(&current.config)?;
             if current_scope == ProviderCollaborationScope::SameOwner && scope == ProviderCollaborationScope::Standard {
                 return Err(ServiceError::Forbidden("same_owner Provider policy cannot be relaxed through Provider administration".into()));
@@ -1045,6 +1138,10 @@ impl ProviderCoreService for ProviderCore {
             let mut value: serde_json::Map<String, Value> = serde_json::from_str(config.as_deref().unwrap_or(&current.config))?;
             value.insert("collaboration_scope".into(), serde_json::to_value(scope)?);
             config = Some(serde_json::to_string(&value)?);
+        }
+        if let Some(caller_capabilities) = caller_capabilities.as_ref() {
+            let source = config.as_deref().unwrap_or(&current.config);
+            config = Some(replace_caller_capabilities(source, caller_capabilities)?);
         }
         self.providers
             .update_provider_metadata(provider_id, name.as_deref(), config.as_deref(), slug.as_deref(), now_ms())

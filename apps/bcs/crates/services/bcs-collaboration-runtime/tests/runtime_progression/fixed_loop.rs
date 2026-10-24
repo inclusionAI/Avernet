@@ -127,7 +127,7 @@ fn command(yaml: String, human: bool) -> StartStateMachineRunCommand {
         group_id: "group-1".into(), session_id: None, definition_yaml: Some(yaml), definition: None,
         definition_ref: None, participant_bindings: None, opening_message_override: None,
         input: json!({"question": "iterate"}), caller_id: None,
-        authenticated_human: human.then(|| AuthenticatedHumanCaller { actor_id: "human_1001".into(), display_name: None }),
+        authenticated_human: human.then(|| AuthenticatedHumanCaller { actor_id: "human_1001".into(), display_name: None }), caller_association: None,
     }
 }
 
@@ -373,7 +373,7 @@ async fn nested_admission_blocks_group_configuration_and_one_shot_before_side_ef
     }).await.unwrap().session;
     let runtime = h.runtime.with_nested_loop_execution_enabled(false);
     let error = runtime.start_session_state_machine_run(StartSessionStateMachineRunCommand {
-        session_id: session.id.clone(), caller_bot_id: "driver-bot".into(),
+        session_id: session.id.clone(), caller_bot_id: "driver-bot".into(), caller_association: None,
         definition_yaml: nested_authoring_yaml(),
         participant_bindings: BTreeMap::from([("worker".into(), RuntimeParticipantBinding {
             source: "manual".into(), bot_ids: vec!["driver-bot".into()], extensions: Default::default(),
@@ -822,7 +822,7 @@ async fn one_shot_loop_uses_session_bindings_and_does_not_persist_a_group_defini
         participant_bindings: BTreeMap::from([("driver".into(), RuntimeParticipantBinding {
             source: "manual".into(), bot_ids: vec!["driver-bot".into()], extensions: Default::default(),
         })]),
-        opening_message: None, input: Value::Null, judge_available: false,
+        opening_message: None, input: Value::Null, judge_available: false, caller_association: None,
     }).await.unwrap();
     let run = &started.view.run;
     assert_eq!(run.session_id, session.id);

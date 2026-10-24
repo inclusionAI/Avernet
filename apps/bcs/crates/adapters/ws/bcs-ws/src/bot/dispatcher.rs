@@ -2332,7 +2332,8 @@ async fn handle_task_dispatch(
             target_bot_id: params.target_bot.clone(),
             target_bot_name: None,
             payload,
-        })
+            caller_delegation: None,
+})
         .await
     {
         Ok(outcome) => {

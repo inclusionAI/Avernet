@@ -153,6 +153,8 @@ async fn resolve_flow_is_agnostic_to_websocket_provider_target() {
         group_session_connections: None,
         frontend_connections: connections.clone(),
         run_channels,
+        speaking_leases: None,
+        lease_idle_timeout_ms: 60_000,
     });
     let (tx, mut rx) = mpsc::channel(16);
     connections
@@ -174,6 +176,7 @@ async fn resolve_flow_is_agnostic_to_websocket_provider_target() {
 
     let auth = WorkbenchConnectionAuth::UserBound {
         actor_id: Some("human-e2e-ws".to_string()),
+        caller_ingress: None,
     };
     let mut connection_state = WebClientConnectionState::default();
     let frame = BcsFrame::Request(RequestFrame::new(
@@ -250,6 +253,8 @@ async fn requested_events_resolve_in_reverse_order_retry_and_continue_on_same_ru
         group_session_connections: None,
         frontend_connections: connections.clone(),
         run_channels,
+        speaking_leases: None,
+        lease_idle_timeout_ms: 60_000,
     });
     let (tx, mut rx) = mpsc::channel(16);
     connections
@@ -277,6 +282,7 @@ async fn requested_events_resolve_in_reverse_order_retry_and_continue_on_same_ru
 
     let auth = WorkbenchConnectionAuth::UserBound {
         actor_id: Some("human-e2e".to_string()),
+        caller_ingress: None,
     };
     let mut connection_state = WebClientConnectionState::default();
     for (request_id, interaction_id, idempotency_key, expect_ok) in [

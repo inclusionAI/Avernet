@@ -244,8 +244,8 @@ pub(crate) fn transition_conflict(error: &bcs_service_api::ManagedDeliveryError)
 }
 
 pub(crate) fn transition(row: &PersistedMessageDelivery, event: Event, actor_id: Option<String>) -> DeliveryTransitionCommand {
-    DeliveryTransitionCommand { delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
-        event, now_ms: now_ms() as i64, request_id: None, actor_id, reply: None, transport_context_json: None, deadline_at_ms: None }
+    DeliveryTransitionCommand { caller_dispatch_commit: None, delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
+        event, now_ms: now_ms() as i64, request_id: None, actor_id, reply: None, transport_context_json: None, deadline_at_ms: None, caller_cancel: None, caller_terminal: None }
 }
 
 

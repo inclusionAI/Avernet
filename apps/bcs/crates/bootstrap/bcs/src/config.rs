@@ -615,6 +615,15 @@ pub struct BcsConfig {
     pub collaboration_drafts: Option<crate::collaboration_drafts::CollaborationDraftConfig>,
     #[serde(default)]
     pub state_machine_history: bcs_config_api::StateMachineHistoryConfig,
+    /// Optional caller identity service section (spec §10.13.7). Absent =
+    /// no caller capability assembled and the anti-downgrade guard stays
+    /// closed; present = full validation at startup, fail closed.
+    #[serde(default)]
+    pub caller_identity: Option<bcs_config_api::CallerIdentityServiceConfig>,
+    /// Speaking-lease idle window (spec §10.13.9, §15.99). Defaults to the
+    /// frozen 60s constant; absent section changes nothing.
+    #[serde(default)]
+    pub speaking_lease: bcs_config_api::SpeakingLeaseConfig,
     /// Address to bind to.
     #[serde(default = "default_bind")]
     pub bind: String,
@@ -1193,6 +1202,8 @@ impl Default for BcsConfig {
     fn default() -> Self {
         Self {
             collaboration_drafts: None,
+            caller_identity: None,
+            speaking_lease: Default::default(),
             state_machine_history: Default::default(),
             bind: default_bind(),
             port: default_port(),
@@ -2116,23 +2127,45 @@ botchat_url = "${BCS_TEST_FROM_FILE_MISSING}"
     }
 
     #[test]
+    fn test_speaking_lease_section_parses_and_defaults_to_the_frozen_60s() {
+        // §15.99: absent section keeps the frozen legacy window; an explicit
+        // [speaking_lease] section overrides it server-wide.
+        let bare: BcsConfig = toml::from_str("bots_base_dir = \"/bots\"").expect("parse bare");
+        assert_eq!(bare.speaking_lease.idle_timeout_ms, 60_000);
+
+        let tuned: BcsConfig = toml::from_str(
+            r#"
+            bots_base_dir = "/bots"
+            [speaking_lease]
+            idle_timeout_ms = 120000
+            "#,
+        )
+        .expect("parse");
+        assert_eq!(tuned.speaking_lease.idle_timeout_ms, 120_000);
+    }
+
+    #[test]
     fn test_config_auth_chain_section_parses() {
+        // "custom_ext" is a stand-in for an extension-registered auth plugin
+        // kind: the chain keeps arbitrary non-builtin names verbatim so
+        // hosts can register their own (it is NOT the caller-identity
+        // "agentpass" plugin kind, which lives in [caller_identity]).
         let toml = r#"
             bots_base_dir = "/bots"
             [auth]
-            chain = ["agentpass", "session"]
+            chain = ["custom_ext", "session"]
             require_authentication = true
             mock_user_id = "12345"
             allow_mock_headers = true
         "#;
         let config: BcsConfig = toml::from_str(toml).expect("parse [auth]");
-        assert_eq!(config.auth.chain, vec!["agentpass", "session"]);
+        assert_eq!(config.auth.chain, vec!["custom_ext", "session"]);
         assert!(config.auth.require_authentication);
         assert!(config.auth.allow_mock_headers);
 
         // resolve honors a non-empty chain verbatim.
         let resolved = crate::auth_wiring::resolve_auth_config(&config.auth, "test");
-        assert_eq!(resolved.chain, vec!["agentpass", "session"]);
+        assert_eq!(resolved.chain, vec!["custom_ext", "session"]);
         assert!(resolved.require_authentication);
         assert_eq!(resolved.local.mock_user_id.as_deref(), Some("12345"));
         assert!(resolved.local.allow_mock_headers);
@@ -3417,8 +3450,24 @@ base_url = "https://directory.example.com"
                 vec!["gateway".to_string(), "backend".to_string()],
                 "{label} config gateway_principal.issuers must accept both issuers"
             );
+            // Section-aware scan: comments and unrelated sections (e.g. OAuth
+            // providers legally carry an `issuer` claim key) are ignored;
+            // the legacy violation is a scalar `issuer` key under
+            // [gateway_principal], which must be the array `issuers` now.
+            let legacy_scalar_issuer = source
+                .lines()
+                .filter(|line| !line.trim_start().starts_with('#'))
+                .fold((String::new(), false), |(section, hit), line| {
+                    let trimmed = line.trim_start();
+                    if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                        return (trimmed.to_string(), hit);
+                    }
+                    let legacy_section = section.trim_end() == "[gateway_principal]";
+                    (section, hit || (legacy_section && trimmed.contains("issuer = ")))
+                })
+                .1;
             assert!(
-                !source.contains("issuer = "),
+                !legacy_scalar_issuer,
                 "{label} config {path} still carries the legacy scalar `issuer` key",
             );
         }

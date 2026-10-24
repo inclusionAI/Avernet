@@ -38,12 +38,44 @@ enum TextProjection {
     ExplicitMentions,
 }
 
+#[allow(dead_code)]
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// A routing decision is fixed at admission; current membership/security is
 /// still checked at dispatch. This snapshot is not an authorization grant.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QueuedGroupProjection {
     version: u32,
+    /// Caller anti-downgrade marker (§15.4 guard): the runtime refuses an
+    /// ordinary prepare on ANY row CARRYING the key — presence alone
+    /// decides, a serialized false would refuse every ordinary row. The
+    /// field is declared (strict decode accepts carrier rows) but only
+    /// serializes when true: ordinary rows stay key-free byte-shape.
+    #[serde(default, skip_serializing_if = "is_false")]
+    caller_required: bool,
+    /// Task text protected-projected by admission (§15.57): a digest input,
+    /// never identity material. Serializes only when non-empty.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    caller_task: String,
+    /// Caller delegation correlation (§15.71, P1-2/P1-9): the trusted
+    /// task edge's non-secret assign facts — the delegate parent run, the
+    /// invocation marker, and the target's config-decided purpose. A
+    /// typed passthrough field (non-secret ids only): the runtime gate
+    /// and the terminal claim gate read them back; absent on ordinary rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    caller_delegation: Option<serde_json::Value>,
+    /// Delegation-only lineage marker (spec §7.2.1, review batch-3 §3.1):
+    /// the trusted admission sets it for a caller-DISABLED routed target in
+    /// a lease-admitted caller group — the row keeps the ORDINARY Owner
+    /// execution (never the protected branch) while the runtime registers
+    /// the delegation-only root association against its own handoff-parked
+    /// Human identity. Non-secret mode field only: presence decides, the
+    /// association material itself never persists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    caller_lineage: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     task: Option<crate::queued_task::TaskIntent>,
     /// Initialization context must survive ordinary history TTL/count limits.
@@ -120,6 +152,39 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
             Ok(target) => flow.bot_delivery.is_available(&target).await,
             Err(_) => false,
         }
+    }
+
+    /// Real protected-dispatch resolution (review P1-5): the caller row's
+    /// own Provider delivery target with its Provider-authorized service
+    /// token, plus the provider routing fields for the wire association.
+    /// Only HttpProvider shapes resolve — caller containers exist behind a
+    /// Provider webhook (spec §10.8); anything else (unregistered bot,
+    /// WebSocket-only target, dead flow handle) refuses and the runtime
+    /// keeps the anti-downgrade guard fail-closed.
+    async fn resolve_caller_dispatch(
+        &self,
+        delivery: &PersistedMessageDelivery,
+    ) -> Option<bcs_service_api::CallerDispatchContext> {
+        let flow = self.flow.upgrade()?;
+        let target = flow
+            .registry
+            .resolve_delivery_target(&delivery.target_bot_id)
+            .await
+            .ok()?;
+        let BotDeliveryTarget::HttpProvider {
+            provider_id,
+            provider_bot_ref,
+            bcs_to_provider_token,
+            ..
+        } = &target else {
+            return None;
+        };
+        Some(bcs_service_api::CallerDispatchContext {
+            service_credential: bcs_to_provider_token.clone(),
+            provider_id: provider_id.clone(),
+            provider_bot_ref: provider_bot_ref.clone(),
+            target,
+        })
     }
 
     async fn prepare(
@@ -407,6 +472,21 @@ impl QueuedGroupProjection {
         projection.target_tags = tags;
         projection.mentions = vec![task.manager.clone()];
         projection.task = Some(task);
+        // The result delivery is a DIFFERENT execution than the dispatch it
+        // answers (review P1.III.2): the worker's caller marks, task text
+        // and the target-config-decided purpose belong to the WORKER's
+        // protected dispatch, never to the Manager's result delivery — a
+        // copied projection would re-send the ORIGINAL TASK text toward
+        // the Manager and carry the Worker's execution purpose onto it.
+        // Cleared here so the result leg rides the ordinary lifecycle with
+        // its own canonical result message as the content of record.
+        projection.caller_required = false;
+        projection.caller_task = String::new();
+        projection.caller_delegation = None;
+        // The result leg is also never a lineage carrier (§7.2.1): the
+        // Manager's own Owner association never rides onto the Worker's
+        // result delivery.
+        projection.caller_lineage = None;
         Ok(projection)
     }
     pub(crate) fn task(group: &Group, recipient: &str, sender_name: &str, task: crate::queued_task::TaskIntent) -> ServiceResult<Self> {
@@ -421,7 +501,8 @@ impl QueuedGroupProjection {
             .ok_or_else(|| invalid("system queue target is not a session participant"))?;
         let snapshot = crate::protocol_context::group_context_input(group);
         Ok(Self {
-            version: 1, task: None, required_context, drain_context: false, policy_version: None,
+            version: 1, caller_required: false, caller_task: String::new(), caller_delegation: None, caller_lineage: None,
+            task: None, required_context, drain_context: false, policy_version: None,
             driver_bot: snapshot.driver_bot, originator: snapshot.originator,
             participants: snapshot.participants.into_iter().map(|p| ParticipantProjection {
                 id: p.id, name: p.name, role: p.role, is_bot: p.is_bot,
@@ -478,6 +559,10 @@ impl QueuedGroupProjection {
             .ok_or_else(|| invalid("queue target is not a session participant"))?;
         let snapshot = crate::protocol_context::group_context_input(group);
         Ok(Self {
+            caller_required: false,
+            caller_task: String::new(),
+            caller_delegation: None,
+            caller_lineage: None,
             task: None,
             required_context: false,
             drain_context: false,
@@ -855,4 +940,127 @@ async fn prepare_queued_group_bounded(
         },
         transport_context_json: transport_json,
     })
+}
+
+#[cfg(test)]
+mod task_result_caller_marks_tests {
+    use super::*;
+
+    // The exact projection the trusted task edge emits for a delegated row
+    // (review P1.III.2's input shape, byte-faithful). Injected into a
+    // synthesized row in the test below.
+    fn serialized_worker_projection() -> serde_json::Value {
+        serde_json::json!({
+            "version": 1,
+            "caller_required": true,
+            "caller_task": "GROUP TASK BODY",
+            "caller_delegation": {
+                "parent_run_id": "run-manager",
+                "parent_attempt": 1,
+                "parent_bot_id": "bot-manager",
+                "invocation_id": "tool-call-1",
+                "execution_purpose": "execution",
+            },
+            "driver_bot": "bot-driver", "originator": "bot-driver",
+            "participants": [{"id": "bot-worker", "is_bot": true}],
+            "direct_bot": false, "mentions": [], "target_tags": [], "sender_name": "mgr",
+            "text_projection": "original",
+            "task": {"leg": "dispatch", "task_id": "t1", "manager": "bot-driver",
+                     "worker": "bot-worker", "worker_name": "Worker",
+                     "response_mode": "full", "summary": ""},
+        })
+    }
+
+
+    fn worker_row() -> PersistedMessageDelivery {
+        PersistedMessageDelivery {
+            delivery_id: "d".into(),
+            env: "local".into(),
+            source_message_id: "m".into(),
+            target_bot_id: "bot-worker".into(),
+            session_id: "s".into(),
+            group_id: "g".into(),
+            source_session_seq: 0,
+            flow_kind: DeliveryFlowKind::Task,
+            state: bcs_domain::message_delivery::MessageDeliveryState {
+                kind: DeliveryType::Send,
+                status: bcs_domain::message_delivery::MessageDeliveryStatus::Queued,
+                state_version: 1,
+                may_have_been_sent: false,
+            },
+            wait_reason: None,
+            available_at_ms: 0,
+            expire_at_ms: None,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            run_id: Some("run-w".into()),
+            idempotency_key: None,
+            attempt_no: 1,
+            request_id: None,
+            send_started_at_ms: None,
+            submitted_at_ms: None,
+            accepted_at_ms: None,
+            run_deadline_at_ms: None,
+            terminal_at_ms: None,
+            bound_to_delivery_id: None,
+            cancel_requested_at_ms: None,
+            cancel_requested_by: None,
+            cancel_reason: None,
+            abort_request_id: None,
+            abort_started_at_ms: None,
+            cancel_deadline_at_ms: None,
+            last_error_code: None,
+            semantic_projection_json: serde_json::Value::Null,
+            transport_context_json: None,
+            context_selection_json: None,
+        }
+    }
+
+    #[test]
+    fn task_result_never_carries_the_worker_dispatch_caller_facts() {
+        // The result delivery answers the dispatch — it is a DIFFERENT
+        // execution: the Manager must see the WORKER'S RESULT (carried by
+        // the reply's own canonical message), never the original task
+        // text, and never the Worker's config-decided execution purpose.
+        let mut row = worker_row();
+        row.semantic_projection_json = serialized_worker_projection();
+        row.semantic_projection_json["task"]["leg"] = serde_json::json!("result");
+        // §7.2.1: even if a lineage marker ever landed on this row, the
+        // result leg is never an association carrier.
+        row.semantic_projection_json["caller_lineage"] = serde_json::json!("delegation_only");
+        let task = crate::queued_task::TaskIntent {
+            leg: crate::queued_task::TaskLeg::Result,
+            task_id: "t1".into(), manager: "bot-driver".into(), worker: "bot-worker".into(),
+            worker_name: "Worker".into(),
+            response_mode: bcs_service_api::ChatResponseMode::Full,
+            assignment_intent_id: None, summary: String::new(),
+        };
+        let projection = QueuedGroupProjection::task_result(&row, task, Vec::new()).unwrap();
+        let out = serde_json::to_value(&projection).unwrap();
+        assert!(
+            out.get("caller_required").is_none(),
+            "the result projection carries no caller_required mark"
+        );
+        assert!(
+            out.get("caller_task").is_none(),
+            "the result projection never re-sends the dispatch task text"
+        );
+        assert!(
+            out.get("caller_delegation").is_none(),
+            "the worker's delegated execution purpose never leaks toward the Manager"
+        );
+        assert!(
+            out.get("caller_lineage").is_none(),
+            "the result projection is never a delegation-only lineage carrier"
+        );
+        // The dispatch row itself stays UNTOUCHED (its parse-shell just
+        // for the result build): re-decode the row and the marks are all
+        // still there — the fix is scoped to the RESULT projection.
+        let again: QueuedGroupProjection = serde_json::from_value(row.semantic_projection_json).unwrap();
+        let again_out = serde_json::to_value(&again).unwrap();
+        assert_eq!(again_out["caller_required"], true);
+        assert_eq!(again_out["caller_task"], "GROUP TASK BODY");
+        assert!(again_out.get("caller_delegation").is_some());
+        assert_eq!(again_out["caller_lineage"], "delegation_only");
+    }
 }

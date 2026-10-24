@@ -29,7 +29,8 @@ use bcs_service_api::{
     BotSearchCandidateQuery, BotSearchFriendshipFilter,
     BotCapabilities, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotTaskModesQuery, TaskModeMatch,
-    BotMetricCount,
+    BotCallerConfiguration, CallerConfigRevisionDecision, CallerConfigurationSync,
+    CallerIdentitySnapshot, BotMetricCount,
     BotMetricsSnapshotPort, ConnectStreamError, RegisteredBot, ServiceError, ServiceResult, Skill,
     is_mock_token,
 };
@@ -44,6 +45,7 @@ fn log_bot_cache_source(source: &'static str) {
 pub mod memory;
 pub mod provider;
 pub mod provider_cache;
+mod caller_config_cache;
 mod registration_create;
 mod agent_registration;
 mod agent_bots;
@@ -55,6 +57,12 @@ mod heartbeat_tests;
 pub use bcs_service_api::port::repo::BotRepoPort;
 pub use memory::MemoryBotRepo;
 pub use provider::{DbProviderStore, MemoryProviderStore};
+
+/// [hits, negative_hits, misses, errors, invalidations, loads] of the
+/// caller-config read cache (§15.96), for diagnostics/metrics taps.
+pub fn caller_config_cache_statistics() -> [u64; 6] {
+    caller_config_cache::statistics()
+}
 
 /// Maximum time before a bot registration expires (5 minutes).
 const BOT_EXPIRY: Duration = Duration::from_secs(300);
@@ -251,6 +259,11 @@ pub struct PersistentBotRepo {
     /// SQL dialect flavor.
     flavor: DbSqlFlavor,
 
+    /// Read-through cache for caller configuration READS (§10.7.2); sync
+    /// writes bypass it and invalidate their key on success. Freshness
+    /// contract lives in `caller_config_cache`.
+    caller_config_cache: caller_config_cache::CallerConfigCache,
+
     /// Pending request-response channels for send_request.
     pending_requests: RwLock<HashMap<String, oneshot::Sender<serde_json::Value>>>,
 }
@@ -271,6 +284,10 @@ impl PersistentBotRepo {
             token_to_bot: RwLock::new(HashMap::new()),
             binding_channel_index: Arc::new(RwLock::new(HashMap::new())),
             bot_info_overrides: RwLock::new(HashMap::new()),
+            caller_config_cache: caller_config_cache::CallerConfigCache::new(
+                caller_config_cache::POSITIVE_TTL,
+                caller_config_cache::NEGATIVE_TTL,
+            ),
             db,
             flavor,
             pending_requests: RwLock::new(HashMap::new()),
@@ -3520,6 +3537,494 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
         }
 
         self.get_control_plane(bot_id, env).await
+    }
+
+    async fn get_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+    ) -> ServiceResult<Option<BotCallerConfiguration>> {
+        // Read-through cache (§15.96): the sync write path invalidates the
+        // key on success, so same-process PATCH→read stays immediate;
+        // cross-process staleness is bounded by the per-class TTLs.
+        self.caller_config_cache
+            .get(&caller_cache_key(bot_id, env), || async {
+                self.read_caller_configuration_scoped(bot_id, env, None).await
+            })
+            .await
+    }
+
+    async fn get_caller_configurations(
+        &self,
+        bot_ids: &[String],
+        env: &str,
+    ) -> ServiceResult<Vec<(String, BotCallerConfiguration)>> {
+        // Dedup preserving first occurrence; fresh entries answer from the
+        // cache, the cold set loads in ONE round trip and refills it
+        // (including negative "missing/unconfigured" answers, so repeat
+        // scans stop touching storage).
+        let mut seen = std::collections::HashSet::new();
+        let mut ordered: Vec<String> = Vec::with_capacity(bot_ids.len());
+        for bot_id in bot_ids {
+            if seen.insert(bot_id.as_str()) {
+                ordered.push(bot_id.clone());
+            }
+        }
+        let mut resolved: HashMap<String, Option<BotCallerConfiguration>> =
+            HashMap::with_capacity(ordered.len());
+        let mut cold: Vec<String> = Vec::new();
+        for bot_id in &ordered {
+            if let Some(fresh) = self
+                .caller_config_cache
+                .peek(&caller_cache_key(bot_id, env))
+                .await
+            {
+                resolved.insert(bot_id.clone(), fresh);
+            } else {
+                cold.push(bot_id.clone());
+            }
+        }
+        // NOTE: insertion into the map then ordered assembly keeps the
+        // FIRST-OCCURRENCE contract of the port default.
+        if !cold.is_empty() {
+            let reloaded = self.read_caller_configurations_projected(env, &cold).await?;
+            let reloaded_ids = reloaded
+                .iter()
+                .map(|(bot_id, _)| bot_id.clone())
+                .collect::<std::collections::HashSet<_>>();
+            for (bot_id, config) in reloaded {
+                self.caller_config_cache
+                    .store(&caller_cache_key(&bot_id, env), Some(config.clone()));
+                resolved.insert(bot_id, Some(config));
+            }
+            for bot_id in &cold {
+                if !reloaded_ids.contains(bot_id) {
+                    // Target missing in this env: cache the negative answer
+                    // so repeated scans of a stale roster stop hitting SQL.
+                    self.caller_config_cache
+                        .store(&caller_cache_key(bot_id, env), None);
+                    resolved.insert(bot_id.clone(), None);
+                }
+            }
+        }
+        // FIRST-OCCURRENCE ordering follows `ordered`, not the HashMap.
+        let mut results = Vec::with_capacity(ordered.len());
+        for bot_id in ordered {
+            if let Some(Some(config)) = resolved.remove(&bot_id) {
+                results.push((bot_id, config));
+            }
+        }
+        Ok(results)
+    }
+
+    async fn sync_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+        incoming: CallerIdentitySnapshot,
+    ) -> ServiceResult<Option<CallerConfigurationSync>> {
+        let outcome = self.sync_caller_configuration_scoped(bot_id, env, None, incoming).await?;
+        // Write-through invalidation: the next read of THIS process reloads,
+        // so same-instance PATCH→read stays immediate (§15.96).
+        self.caller_config_cache.invalidate(&caller_cache_key(bot_id, env));
+        Ok(outcome)
+    }
+
+    async fn get_provider_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+        provider_id: &str,
+    ) -> ServiceResult<Option<BotCallerConfiguration>> {
+        // Admin-frequency route read-back: deliberately NOT cached —
+        // freshness after PATCH is its whole job.
+        self.read_caller_configuration_scoped(bot_id, env, Some(provider_id)).await
+    }
+
+    async fn sync_provider_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+        provider_id: &str,
+        incoming: CallerIdentitySnapshot,
+    ) -> ServiceResult<Option<CallerConfigurationSync>> {
+        let outcome =
+            self.sync_caller_configuration_scoped(bot_id, env, Some(provider_id), incoming).await?;
+        self.caller_config_cache.invalidate(&caller_cache_key(bot_id, env));
+        Ok(outcome)
+    }
+}
+
+/// Closed, sanitized storage failure for caller configuration data. Never
+/// carries raw JSON or parser diagnostics.
+const CALLER_CONFIG_STORAGE_ERROR: &str = "caller configuration storage is unreadable";
+
+impl PersistentBotRepo {
+    /// Read the raw `bot_info` text of one non-deleted row. The outer `None`
+    /// means the target is missing out of scope; the inner `None` is a SQL
+    /// NULL legacy column. With `provider`, the row must carry a canonical,
+    /// enabled binding to exactly that Provider.
+    async fn read_caller_bot_info_raw(
+        &self,
+        bot_id: &str,
+        env: &str,
+        provider: Option<&str>,
+    ) -> ServiceResult<Option<Option<String>>> {
+        let (join, mut params): (&str, Vec<Value>) = match provider {
+            Some(provider_id) => (
+                "JOIN bcs_provider_bot_bindings g \
+                  ON g.bot_uuid = b.bot_uuid AND g.env = b.env AND g.provider_id = ? \
+                  AND COALESCE(g.disabled, 0) = 0",
+                vec![Value::from(provider_id.to_string())],
+            ),
+            None => ("", Vec::new()),
+        };
+        let sql = format!(
+            "SELECT b.bot_info FROM bcs_bots b {join} \
+             WHERE b.bot_uuid = ? AND b.env = ? AND COALESCE(b.is_deleted, 0) = 0 LIMIT 1",
+            join = join.trim_end(),
+        );
+        params.push(Value::from(bot_id.to_string()));
+        params.push(Value::from(env.to_string()));
+        let rows = self
+            .db_query(&sql, params)
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        match rows.first() {
+            None => Ok(None),
+            Some(row) => Ok(Some(
+                db_get_column_opt::<String>(row, "bot_info")
+                    .map_err(|error| ServiceError::InternalError(error.to_string()))?,
+            )),
+        }
+    }
+
+    /// Scope-resolved read-back shared by the unscoped cache loader and the
+    /// provider-scoped port method. Projected read (§15.96): selects only
+    /// `$.caller` plus a validity flag instead of the whole `bot_info`
+    /// blob. A NULL `bot_info` (legal legacy column) reads as "never
+    /// configured"; invalid JSON fails closed with the same closed storage
+    /// error as before. Only realization drift vs the old full-parse: a
+    /// valid-but-non-object root (a shape no writer of this table
+    /// produces) now reads as unconfigured instead of erroring.
+    async fn read_caller_configuration_scoped(
+        &self,
+        bot_id: &str,
+        env: &str,
+        provider: Option<&str>,
+    ) -> ServiceResult<Option<BotCallerConfiguration>> {
+        let (join, mut params): (&str, Vec<Value>) = match provider {
+            Some(provider_id) => (
+                "JOIN bcs_provider_bot_bindings g \
+                  ON g.bot_uuid = b.bot_uuid AND g.env = b.env AND g.provider_id = ? \
+                  AND COALESCE(g.disabled, 0) = 0",
+                vec![Value::from(provider_id.to_string())],
+            ),
+            None => ("", Vec::new()),
+        };
+        let sql = format!(
+            "SELECT {projection} FROM bcs_bots b {join} \
+             WHERE b.bot_uuid = ? AND b.env = ? AND COALESCE(b.is_deleted, 0) = 0 LIMIT 1",
+            projection = caller_config_projection(self.flavor),
+            join = join.trim_end(),
+        );
+        params.push(Value::from(bot_id.to_string()));
+        params.push(Value::from(env.to_string()));
+        let rows = self
+            .db_query(&sql, params)
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        match rows.first() {
+            None => Ok(None),
+            Some(row) => Ok(Some(caller_configuration_from_projected_row(row)?)),
+        }
+    }
+
+    /// Batch read-back of the unscoped caller configurations of several
+    /// targets in ONE environment (§10.7.2 per-target semantics; absent
+    /// targets omitted). Answers in a bounded number of round trips
+    /// (chunks of 500 ids) so the admission-time member scan stays off
+    /// the N+1 path regardless of group size.
+    async fn read_caller_configurations_projected(
+        &self,
+        env: &str,
+        bot_ids: &[String],
+    ) -> ServiceResult<Vec<(String, BotCallerConfiguration)>> {
+        let mut results = Vec::new();
+        const CHUNK: usize = 500;
+        for chunk in bot_ids.chunks(CHUNK) {
+            let mut params: Vec<Value> = Vec::with_capacity(chunk.len() + 1);
+            params.push(Value::from(env.to_string()));
+            let placeholders = chunk
+                .iter()
+                .map(|id| {
+                    params.push(Value::from(id.clone()));
+                    "?"
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT b.bot_uuid, {projection} FROM bcs_bots b \
+                 WHERE b.env = ? AND b.bot_uuid IN ({placeholders}) \
+                 AND COALESCE(b.is_deleted, 0) = 0",
+                projection = caller_config_projection(self.flavor),
+            );
+            let rows = self
+                .db_query(&sql, params)
+                .await
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+            for row in rows {
+                let bot_uuid = db_get_column_opt::<String>(&row, "bot_uuid")
+                    .map_err(|error| ServiceError::InternalError(error.to_string()))?
+                    .ok_or_else(|| {
+                        ServiceError::InternalError(CALLER_CONFIG_STORAGE_ERROR.to_string())
+                    })?;
+                results.push((bot_uuid, caller_configuration_from_projected_row(&row)?));
+            }
+        }
+        Ok(results)
+    }
+
+    /// Read-decide-write with a binary CAS on the original bot_info text:
+    /// never overwrites concurrent sibling-field updates, and retries the
+    /// decision exactly once after a lost race.
+    async fn sync_caller_configuration_scoped(
+        &self,
+        bot_id: &str,
+        env: &str,
+        provider: Option<&str>,
+        incoming: CallerIdentitySnapshot,
+    ) -> ServiceResult<Option<CallerConfigurationSync>> {
+        let raw = match self.read_caller_bot_info_raw(bot_id, env, provider).await? {
+            Some(raw) => raw,
+            None => return Ok(None),
+        };
+        let current = caller_snapshot_from_bot_info(raw.as_deref())?;
+        if let Some(outcome) = caller_sync_decision(&incoming, current.clone()) {
+            return Ok(Some(outcome));
+        }
+        if let Some(outcome) = self
+            .write_caller_snapshot(bot_id, env, raw.as_deref(), &incoming, provider)
+            .await?
+        {
+            return Ok(Some(outcome));
+        }
+        // CAS lost the race: exactly one re-read, then re-decide. Still
+        // writable -> Conflict (the caller retries); never a blind overwrite.
+        let raw = match self.read_caller_bot_info_raw(bot_id, env, provider).await? {
+            Some(raw) => raw,
+            None => return Ok(None),
+        };
+        let current = caller_snapshot_from_bot_info(raw.as_deref())?;
+        Ok(Some(caller_sync_decision(&incoming, current)
+            .unwrap_or(CallerConfigurationSync::Conflict {
+                source_revision: incoming.source_revision,
+            })))
+    }
+
+    /// Replace the `$.caller` sub-object while preserving every sibling
+    /// field, guarded by a binary CAS on the original `bot_info` text.
+    /// Returns `Ok(None)` when the race is lost and the caller re-decides.
+    async fn write_caller_snapshot(
+        &self,
+        bot_id: &str,
+        env: &str,
+        original: Option<&str>,
+        incoming: &CallerIdentitySnapshot,
+        provider: Option<&str>,
+    ) -> ServiceResult<Option<CallerConfigurationSync>> {
+        let mut root: serde_json::Value = match original {
+            Some(text) => serde_json::from_str(text).map_err(|_| {
+                ServiceError::InternalError(CALLER_CONFIG_STORAGE_ERROR.to_string())
+            })?,
+            None => serde_json::json!({}),
+        };
+        if !root.is_object() {
+            return Err(ServiceError::InternalError(
+                CALLER_CONFIG_STORAGE_ERROR.to_string(),
+            ));
+        }
+        root.as_object_mut()
+            .expect("checked object root")
+            .insert(
+                "caller".to_string(),
+                serde_json::to_value(incoming).map_err(|_| {
+                    ServiceError::InternalError(CALLER_CONFIG_STORAGE_ERROR.to_string())
+                })?,
+            );
+        let new_text = root.to_string();
+        // Binary comparison avoids case-insensitive collations weakening the
+        // CAS on MySQL; SQLite TEXT comparison is already binary.
+        let (cas, cas_params): (&str, Vec<Value>) = match original {
+            Some(text) => {
+                let params = vec![Value::from(text.to_string())];
+                if matches!(self.flavor, DbSqlFlavor::Mysql) {
+                    ("CAST(bot_info AS BINARY) = CAST(? AS BINARY)", params)
+                } else {
+                    ("bot_info = ?", params)
+                }
+            }
+            None => ("bot_info IS NULL", Vec::new()),
+        };
+        // Ownership is re-asserted inside the same conditional write, so a
+        // concurrent ownership change can never be overwritten by a stale
+        // provider authority.
+        let (ownership, params): (&str, Vec<Value>) = match provider {
+            Some(provider_id) => (
+                " AND EXISTS (SELECT 1 FROM bcs_provider_bot_bindings g \
+                   WHERE g.bot_uuid = bcs_bots.bot_uuid AND g.env = bcs_bots.env \
+                   AND g.provider_id = ? AND COALESCE(g.disabled, 0) = 0)",
+                vec![Value::from(provider_id.to_string())],
+            ),
+            None => ("", Vec::new()),
+        };
+        let sql = format!(
+            "UPDATE bcs_bots SET bot_info = ? \
+             WHERE bot_uuid = ? AND env = ? AND COALESCE(is_deleted, 0) = 0{ownership} AND {cas}"
+        );
+        let mut params = {
+            let mut head = vec![
+                Value::from(new_text),
+                Value::from(bot_id.to_string()),
+                Value::from(env.to_string()),
+            ];
+            head.extend(params);
+            head
+        };
+        params.extend(cas_params);
+        let affected = self
+            .db_execute_affected(&sql, params)
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        if affected > 0 {
+            Ok(Some(CallerConfigurationSync::Applied {
+                snapshot: incoming.clone(),
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+/// Parse the authoritative caller snapshot out of a raw `bot_info` value.
+/// A missing `caller` sub-object is `Ok(None)` ("never configured"); a SQL
+/// NULL column is a legal legacy row; `caller: null`, a non-object root, or
+/// a malformed snapshot are explicit errors — never a fabricated disable.
+fn caller_snapshot_from_bot_info(
+    raw: Option<&str>,
+) -> ServiceResult<Option<CallerIdentitySnapshot>> {
+    let Some(text) = raw else {
+        return Ok(None);
+    };
+    let root: serde_json::Value = serde_json::from_str(text).map_err(|_| {
+        ServiceError::InternalError(CALLER_CONFIG_STORAGE_ERROR.to_string())
+    })?;
+    if !root.is_object() {
+        return Err(ServiceError::InternalError(
+            CALLER_CONFIG_STORAGE_ERROR.to_string(),
+        ));
+    }
+    match root.get("caller") {
+        None => Ok(None),
+        Some(serde_json::Value::Null) => Err(ServiceError::InternalError(
+            CALLER_CONFIG_STORAGE_ERROR.to_string(),
+        )),
+        Some(value) => serde_json::from_value::<CallerIdentitySnapshot>(value.clone())
+            .map(Some)
+            .map_err(|_| ServiceError::InternalError(CALLER_CONFIG_STORAGE_ERROR.to_string())),
+    }
+}
+
+/// Projected caller columns (§15.96). `$.caller` only, never the whole
+/// `bot_info` blob. A NULL `bot_info` is a legal legacy row and reads as
+/// "never configured"; invalid JSON carries the same closed storage error
+/// as the full parse. Both SQLite (`json_extract` → TEXT) and MySQL
+/// (JSON_EXTRACT → driver-delivered text) map the projection to the
+/// plugin's string value. `caller_type` distinguishes a literal
+/// `caller: null` (a frozen storage ERROR — never a fabricated disable)
+/// from a genuinely missing path: SQLite spells that type lower-case,
+/// MySQL upper-case, so the parser compares case-insensitively.
+fn caller_config_projection(flavor: DbSqlFlavor) -> String {
+    let caller_type = match flavor {
+        DbSqlFlavor::Mysql => "JSON_TYPE(JSON_EXTRACT(b.bot_info, '$.caller'))",
+        DbSqlFlavor::Sqlite => "json_type(b.bot_info, '$.caller')",
+    };
+    // The type subsselect is guarded the same way as the value: the json_*
+    // helpers raise on malformed input, and one corrupt row must surface as
+    // THIS row's closed storage error, never abort the whole query.
+    format!(
+        "CASE WHEN b.bot_info IS NULL THEN NULL \
+         ELSE CASE WHEN COALESCE(JSON_VALID(b.bot_info), 0) = 1 \
+              THEN json_extract(b.bot_info, '$.caller') ELSE NULL END END AS caller_config, \
+         CASE WHEN b.bot_info IS NULL THEN 1 \
+              ELSE COALESCE(JSON_VALID(b.bot_info), 0) END AS bot_info_valid, \
+         CASE WHEN b.bot_info IS NULL OR COALESCE(JSON_VALID(b.bot_info), 0) != 1 THEN NULL \
+              ELSE {caller_type} END AS caller_type",
+    )
+}
+
+/// Parse one projected reader row. Invalid storage fails closed; a missing
+/// `$.caller` is "existing Bot, never configured"; a present-but-null
+/// sub-object keeps the frozen full-parse semantics — an explicit error,
+/// never a fabricated disable.
+fn caller_configuration_from_projected_row(
+    row: &DbRow,
+) -> ServiceResult<BotCallerConfiguration> {
+    let valid = db_get_column_opt::<i64>(row, "bot_info_valid")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        .unwrap_or(0);
+    if valid == 0 {
+        return Err(ServiceError::InternalError(CALLER_CONFIG_STORAGE_ERROR.to_string()));
+    }
+    if db_get_column_opt::<String>(row, "caller_type")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        .is_some_and(|kind| kind.eq_ignore_ascii_case("null"))
+    {
+        return Err(ServiceError::InternalError(CALLER_CONFIG_STORAGE_ERROR.to_string()));
+    }
+    let raw = db_get_column_opt::<String>(row, "caller_config")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+    let snapshot = caller_snapshot_from_extracted(raw.as_deref())?;
+    Ok(BotCallerConfiguration { snapshot })
+}
+
+/// Parse the already-extracted `$.caller` value (NOT the whole bot_info):
+/// SQL NULL / a missing path is "never configured"; a malformed snapshot
+/// object fails closed. A literal `caller: null` never reaches here — the
+/// reader catches it via the caller_type guard first.
+fn caller_snapshot_from_extracted(
+    raw: Option<&str>,
+) -> ServiceResult<Option<CallerIdentitySnapshot>> {
+    let Some(text) = raw else {
+        return Ok(None);
+    };
+    serde_json::from_str::<CallerIdentitySnapshot>(text)
+        .map(Some)
+        .map_err(|_| ServiceError::InternalError(CALLER_CONFIG_STORAGE_ERROR.to_string()))
+}
+
+/// Cache key for the (env, bot) caller configuration entry.
+fn caller_cache_key(bot_id: &str, env: &str) -> String {
+    format!("{env}\u{1}{bot_id}")
+}
+
+/// Resolve the §10.7.2 revision matrix into a terminal sync outcome. `None`
+/// means "still needs to write" (Apply) and defers to the CAS path.
+fn caller_sync_decision(
+    incoming: &CallerIdentitySnapshot,
+    current: Option<CallerIdentitySnapshot>,
+) -> Option<CallerConfigurationSync> {
+    match incoming.compare_revision(current.as_ref()) {
+        Ok(CallerConfigRevisionDecision::Apply) => None,
+        Ok(CallerConfigRevisionDecision::Unchanged) => Some(CallerConfigurationSync::Unchanged {
+            snapshot: current.expect("unchanged requires a stored snapshot"),
+        }),
+        Ok(CallerConfigRevisionDecision::Stale) => Some(CallerConfigurationSync::Stale {
+            snapshot: current.expect("stale requires a stored snapshot"),
+        }),
+        Err(conflict) => Some(CallerConfigurationSync::Conflict {
+            source_revision: conflict.source_revision,
+        }),
     }
 }
 

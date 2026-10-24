@@ -57,6 +57,22 @@ pub enum DeliveryWaitReason {
     BotOffline,
     RetryBackoff,
     Paused,
+    /// Spec §6.8 execution-ready barrier (review-V P1-3): a PROTECTED
+    /// dispatch attempt the Gateway refused with retryable
+    /// `HISTORY_NOT_READY` — parked Dispatching with its committed
+    /// digest/attempt until the history backfill completes and the SAME
+    /// dispatch is re-sent (never a new attempt). Unlike the Queued-only
+    /// reasons above, this marker rides a Dispatching row: the startup
+    /// recovery sweep must leave it parked (its send never entered
+    /// acceptance), and the run-deadline control remains the convergence
+    /// bound.
+    HistoryBarrier,
+    /// §15.98 visibility: the scheduler has NO delivery-policy profile for
+    /// this bot, so its rows are never scanned, never claimed and never
+    /// given another wait reason. The marker makes that silent-stall shape
+    /// observable on the row itself instead of discoverable only by
+    /// inference from queue statistics.
+    NoPolicy,
 }
 
 /// The lifecycle subset of a persisted delivery. Run/request identity and

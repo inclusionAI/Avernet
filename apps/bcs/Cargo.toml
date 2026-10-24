@@ -100,6 +100,8 @@ members = [
     "crates/plugins/bcs-auth-alipay",
     "crates/plugins/bcs-auth-local",
     "crates/plugins/bcs-auth-oauth",
+    "crates/plugins/bcs-caller-identity-jwt",
+    "crates/plugin-api/bcs-caller-identity-api",
     # external-clients
     "crates/external-clients/bcs-fuse-client",
     "crates/external-clients/bcs-webhook-client",
@@ -354,6 +356,8 @@ bcs-auth-wechat            = { path = "crates/plugins/bcs-auth-wechat" }
 bcs-auth-alipay            = { path = "crates/plugins/bcs-auth-alipay" }
 bcs-auth-local             = { path = "crates/plugins/bcs-auth-local" }
 bcs-auth-oauth             = { path = "crates/plugins/bcs-auth-oauth" }
+bcs-caller-identity-jwt = { path = "crates/plugins/bcs-caller-identity-jwt" }
+bcs-caller-identity-api = { path = "crates/plugin-api/bcs-caller-identity-api" }
 
 # ────────────────────────────────────────────────────────────────
 # Optimize the bignum stack even in dev/test builds.
