@@ -73,3 +73,36 @@ fn replacing_an_overridden_resolver_never_changes_sibling_defaults() {
     assert_eq!(merged["bot"][0],first["bot"][0]);
     assert_eq!(merged["bot"][1],selected);
 }
+
+#[test]
+fn replacement_api_resolution_matches_runtime_loading() {
+    for v2 in [false, true] {
+        for (provider_api, bot_api, expected) in [
+            (None, None, "http://localhost/provider"),
+            (Some("http://localhost/default"), None, "http://localhost/default"),
+            (Some("http://localhost/default"), Some("http://localhost/bot"), "http://localhost/bot"),
+        ] {
+            let mut provider = group("a");
+            provider.insert("api_url".into(), "http://localhost/provider".into());
+            if let Some(api) = provider_api {
+                provider.insert("registration".into(), toml::Value::Table(toml::Table::from_iter([("api_url".into(), api.into())])));
+            }
+            let mut metadata = toml::Table::from_iter([("provider_auth".into(), "static-bearer".into())]);
+            if let Some(api) = bot_api { metadata.insert("api_url".into(), api.into()); }
+            provider.get_mut("bot").unwrap().as_array_mut().unwrap()[0].as_table_mut().unwrap()
+                .insert("registration".into(), metadata.into());
+            let root = if v2 {
+                toml::Table::from_iter([("schema_version".into(), 2.into()),
+                    ("provider".into(), toml::Value::Array(vec![provider.into()]))])
+            } else { provider };
+            let dir = tempfile::tempdir().unwrap(); let path = dir.path().join("bridge.toml");
+            let text = toml::to_string(&root).unwrap(); std::fs::write(&path, &text).unwrap();
+            let loaded = load(&path, &crate::credentials::EnvCredentials).unwrap();
+            let selected = read_for_registration(&path, "static-bearer", "a", "plugin", false, true, Some("bot-a")).unwrap();
+            assert_eq!(loaded[0].registrations[0].api_url.as_deref(), Some(expected));
+            assert_eq!(selected.settings.api_url, loaded[0].registrations[0].api_url);
+            assert_eq!(selected.settings.provider_auth.as_deref(), Some("static-bearer"));
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+        }
+    }
+}

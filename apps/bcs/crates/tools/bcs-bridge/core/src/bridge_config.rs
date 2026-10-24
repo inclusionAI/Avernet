@@ -10,9 +10,7 @@ pub struct BridgeConfig { pub providers: Vec<ProviderConfig> }
 impl BridgeConfig {
     pub fn new(providers: Vec<ProviderConfig>) -> anyhow::Result<Self> {
         if providers.is_empty() { bail!("Bridge requires at least one Provider"); }
-        if providers.len() > 64 || providers.iter().map(|p| p.bots.len()).sum::<usize>() > 256 {
-            bail!("Bridge supports at most 64 Providers and 256 Bots per configuration");
-        }
+        Self::validate_capacity(providers.len(), providers.iter().map(|p| p.bots.len()).sum())?;
         let mut ids = HashSet::new();
         let mut bot_ids = HashSet::new();
         let mut paths = HashSet::new();
@@ -40,6 +38,14 @@ impl BridgeConfig {
             }
         }
         Ok(Self { providers })
+    }
+
+    /// Share runtime limits with registration preflight, before allocating a remote Bot.
+    pub fn validate_capacity(providers: usize, bots: usize) -> anyhow::Result<()> {
+        if providers > 64 || bots > 256 {
+            bail!("Bridge supports at most 64 Providers and 256 Bots per configuration");
+        }
+        Ok(())
     }
 
     pub fn bot_count(&self) -> usize { self.providers.iter().map(|p| p.bots.len()).sum() }

@@ -168,7 +168,11 @@ pub(crate) fn read_for_registration(path: &Path, auth: &str, provider: &str, mod
                 None => bail!("Replacement requires --bot-id when a Provider has multiple Bots"),
             };
             let bot = bots[index].clone();
-            if let Some(meta) = bot.get("registration") { defaults = meta.clone().try_into().map_err(|_| anyhow::anyhow!("Invalid Bot registration settings"))?; }
+            if let Some(meta) = bot.get("registration") {
+                let inherited_api = defaults.api_url;
+                defaults = meta.clone().try_into().map_err(|_| anyhow::anyhow!("Invalid Bot registration settings"))?;
+                if defaults.api_url.is_none() { defaults.api_url = inherited_api; }
+            }
             selected_bot = Some(index);
             group.insert("bot".into(), toml::Value::Array(vec![bot]));
             group.remove("registration");
@@ -182,6 +186,14 @@ pub(crate) fn read_for_registration(path: &Path, auth: &str, provider: &str, mod
             (defaults, None, group)
         }
     } else { (RegistrationSettings::default(), None, toml::Table::new()) };
+    if !replace {
+        // Count the final configuration, not just the currently valid source.
+        // Replacement keeps the selected slot; reuse never reaches registration.
+        let providers = source.groups.len() + usize::from(target.is_none());
+        let bots = source.groups.iter().filter_map(|group| group.get("bot").and_then(toml::Value::as_array))
+            .map(Vec::len).sum::<usize>() + 1;
+        BridgeConfig::validate_capacity(providers, bots)?;
+    }
     Ok(Bootstrap { settings, original, previous, document,
         edit: Some(Edit { source, target, bot: selected_bot }) })
 }
