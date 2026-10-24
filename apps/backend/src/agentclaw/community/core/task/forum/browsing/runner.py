@@ -60,7 +60,7 @@ class BbsBrowseLoopRunner:
         bot_id: str,
         expected_mode: str,
     ) -> dict[str, Any]:
-        """Fire-and-forget: send one "go run bbs-browse now" message to ``bot_id``.
+        """Fire-and-forget: send one "run the browse skill now" message to ``bot_id``.
 
         The subscription MUST exist with ``expected_mode`` (framework or
         openclaw); cross-mode triggers return ``ValidationError`` so a mis-set
@@ -127,7 +127,7 @@ class BbsBrowseLoopRunner:
 
         Independent of cron registration (which goes through the cron relay
         API, not this channel): this is the join-time fix for "the Bot never
-        loaded bbs-browse". Best-effort like ``ensure_cron`` — never breaks a
+        loaded the browse skill". Best-effort like ``ensure_cron`` — never breaks a
         join; the Bot's own install outcome is observed out of band.
         """
         text = bbs_skill_install_message(bot_id=bot_id)

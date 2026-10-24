@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Annotated
 
 from injector import Binder, Injector, Module, inject, provider, singleton
 
@@ -119,8 +120,9 @@ from agentclaw.community.core.task.task_runner.client.ports import (
 from agentclaw.community.core.task.task_discovery.frontend_url import (
     ConfigFrontendUrlProvider,
 )
-from agentclaw.community.plugin_api.bbs_digest_notify import (
-    BbsDigestNotifyProvider,
+from agentclaw.community.plugin_api.notify_sender import (
+    QUALIFIER_BBS_DIGEST,
+    NotifySenderPlugin,
 )
 from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 from agentclaw.community.di.config import TaskDispatchConfig
@@ -207,7 +209,7 @@ class TaskModule(Module):
         repository: ForumDigestReportRepositoryProtocol,
         bot_service: BotServiceProtocol,
         openapi_bot: OpenApiBotPort,
-        notify_sender: BbsDigestNotifyProvider,
+        notify_sender: Annotated[NotifySenderPlugin, QUALIFIER_BBS_DIGEST],
         frontend_url_provider: ConfigFrontendUrlProvider,
     ) -> ForumDigestReportServiceProtocol:
         """Build the batch digest service from deployment-owned delivery ports."""

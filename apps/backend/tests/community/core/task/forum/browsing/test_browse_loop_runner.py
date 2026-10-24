@@ -15,7 +15,10 @@ import pytest
 
 from agentclaw.community.core.errors import NotFound, ValidationError
 from agentclaw.community.core.task.forum.browsing.runner import BbsBrowseLoopRunner
-from agentclaw.community.core.task.forum.browsing.messages import BBS_BROWSE_SKILL_NAMES
+from agentclaw.community.core.task.forum.browsing.messages import (
+    bbs_browse_skill_names,
+    browse_skill_name,
+)
 from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
 from agentclaw.community.core.task.forum.models import (
     BBS_BROWSE_LOOP_CRON_NAME,
@@ -70,8 +73,25 @@ def _runner(bot, service) -> BbsBrowseLoopRunner:
     )
 
 
+def test_browse_skill_name_is_environment_selected():
+    assert browse_skill_name("prod") == "bbs-browse"
+    assert browse_skill_name("pre") == "forum-browse"
+    assert browse_skill_name("dev") == "forum-browse"
+    assert bbs_browse_skill_names("prod") == (
+        "bbs-browse",
+        "bbs-topic-handler",
+        "bbs-create-topic",
+    )
+    assert bbs_browse_skill_names("pre") == (
+        "forum-browse",
+        "bbs-topic-handler",
+        "bbs-create-topic",
+    )
+
+
 @pytest.mark.asyncio
-async def test_push_browse_once_returns_bot_result_and_injects_runtime_context():
+async def test_push_browse_once_returns_bot_result_and_injects_runtime_context(monkeypatch):
+    monkeypatch.setenv("SERVER_ENV", "dev")
     runner = _runner(_FakeBot(), _FakeService(_sub(mode="framework", bot_id="bot-a")))
     result = await runner.push_browse_once(bot_id="bot-a", expected_mode="framework")
     bot = runner._bot  # type: ignore[attr-defined]
@@ -84,7 +104,8 @@ async def test_push_browse_once_returns_bot_result_and_injects_runtime_context()
     sent = bot.sent[0]
     assert sent["bot_id"] == "bot-a"
     assert "[BBS-BROWSE]" in sent["message"]
-    assert "使用当前 Bot 已激活的 bbs-browse Skill" in sent["message"]
+    assert "执行一次 forum-browse 逛论坛流程" in sent["message"]
+    assert "使用当前 Bot 已激活的 forum-browse Skill" in sent["message"]
     # The runner only injects trusted identity and origin; the activated skill
     # owns the BBS API paths.
     assert '"bot_id": "bot-a"' in sent["message"]
@@ -92,6 +113,17 @@ async def test_push_browse_once_returns_bot_result_and_injects_runtime_context()
     assert '"subscription_mode": "framework"' in sent["message"]
     assert "/api/v1/collaboration/tasks/bbs/" not in sent["message"]
     assert sent["metadata"] == {"biz_module": "bbs_browse_loop", "mode": "framework"}
+
+
+@pytest.mark.asyncio
+async def test_push_browse_once_prod_keeps_deployment_skill_name(monkeypatch):
+    monkeypatch.setenv("SERVER_ENV", "prod")
+    runner = _runner(_FakeBot(), _FakeService(_sub(mode="framework", bot_id="bot-a")))
+    await runner.push_browse_once(bot_id="bot-a", expected_mode="framework")
+    sent = runner._bot.sent[0]  # type: ignore[attr-defined]
+
+    prod_skill = browse_skill_name("prod")
+    assert f"使用当前 Bot 已激活的 {prod_skill} Skill" in sent["message"]
 
 
 @pytest.mark.asyncio
@@ -110,6 +142,7 @@ async def test_push_browse_once_missing_subscription_raises_not_found():
 
 @pytest.mark.asyncio
 async def test_push_cron_event_only_for_openclaw(monkeypatch):
+    monkeypatch.setenv("SERVER_ENV", "dev")
     runner = _runner(_FakeBot(), _FakeService(_sub(mode="framework")))
     # framework-mode subscription cannot receive cron events
     with pytest.raises(ValidationError):
@@ -131,6 +164,7 @@ async def test_push_cron_event_only_for_openclaw(monkeypatch):
     assert BBS_BROWSE_LOOP_CRON_NAME in sent["message"]
     # register must forbid self-invented names and demand update-on-duplicate
     assert "固定任务名称" in sent["message"]
+    assert "执行一次已激活的 forum-browse Skill" in sent["message"]
     assert "更新原任务" in sent["message"]
 
 
@@ -146,6 +180,17 @@ async def test_push_cron_event_remove_message(monkeypatch):
     assert BBS_BROWSE_LOOP_CRON_NAME in sent["message"]
     # remove must locate the task by the fixed name (idempotent by name)
     assert "按名称" in sent["message"]
+
+@pytest.mark.asyncio
+async def test_push_cron_event_prod_register_keeps_deployment_skill_name(monkeypatch):
+    monkeypatch.setenv("SERVER_ENV", "prod")
+    runner = _runner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-b")))
+    await runner.push_cron_event(bot_id="bot-b", action="register")
+    sent = runner._bot.sent[0]  # type: ignore[attr-defined]
+
+    prod_skill = browse_skill_name("prod")
+    assert f"执行一次已激活的 {prod_skill} Skill" in sent["message"]
+
 
 @pytest.mark.asyncio
 async def test_push_cron_event_register_and_remove_share_fixed_name():
@@ -179,9 +224,10 @@ class _RaisingBot:
 
 
 @pytest.mark.asyncio
-async def test_push_install_bbs_skills_sends_verified_wording():
+async def test_push_install_bbs_skills_sends_verified_wording(monkeypatch):
     """Join-time install prompt carries all skill names and both OpenClaw paths."""
 
+    monkeypatch.setenv("SERVER_ENV", "dev")
     runner = _runner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-a")))
     result = await runner.push_install_bbs_skills(bot_id="bot-a")
     bot = runner._bot  # type: ignore[attr-defined]
@@ -194,8 +240,8 @@ async def test_push_install_bbs_skills_sends_verified_wording():
     sent = bot.sent[0]
     msg = sent["message"]
     assert msg.startswith("[BBS-BROWSE-SKILL]")
-    assert "bbs-browse、bbs-topic-handler 和 bbs-create-topic" in msg
-    for skill in BBS_BROWSE_SKILL_NAMES:
+    assert "forum-browse、bbs-topic-handler 和 bbs-create-topic" in msg
+    for skill in bbs_browse_skill_names("dev"):
         assert skill in msg
     assert "workspace/skills/" in msg
     assert "skills-pool/skills-repo/infra/" in msg
