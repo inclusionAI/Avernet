@@ -265,3 +265,47 @@ jobs:
           name: bailian-readiness
           path: reports/*
           retention-days: 30
+
+  notify-dingtalk:
+    if: ${{ always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    needs: [harness-tests, smoke, build-bcs, e2e, readiness]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download current evidence if available
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: bailian-readiness
+          path: notification/current
+      - name: Find previous scheduled report for version comparison
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_BRANCH: ${{ github.ref_name }}
+        run: |
+          previous=$(gh run list --workflow bailian-engine-smoke.yml --event schedule \
+            --branch "$RUN_BRANCH" --status completed --limit 20 \
+            --json databaseId --jq "[.[] | select(.databaseId < $RUN_ID)][0].databaseId // empty")
+          if [ -n "$previous" ]; then
+            gh run download "$previous" --name bailian-readiness --dir notification/previous
+          fi
+      - name: Send DingTalk daily report
+        if: always()
+        env:
+          BCS_ENGINE_COMPAT_DINGTALK_WEBHOOK: ${{ secrets.BCS_ENGINE_COMPAT_DINGTALK_WEBHOOK }}
+          BCS_ENGINE_COMPAT_DINGTALK_SIGN_SECRET: ${{ secrets.BCS_ENGINE_COMPAT_DINGTALK_SIGN_SECRET }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python singlebox/compat/bailian/notify_dingtalk.py \
+            --report notification/current/readiness.json \
+            --previous notification/previous/readiness.json
