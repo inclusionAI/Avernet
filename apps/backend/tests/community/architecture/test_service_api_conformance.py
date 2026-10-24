@@ -44,6 +44,8 @@ its Protocol is given real signatures.
 from __future__ import annotations
 
 import inspect
+from agentclaw.community.api.bot_knowledge_service import BotKnowledgeServiceProtocol
+from agentclaw.community.core.bot_knowledge.service import BotKnowledgeService
 
 from agentclaw.community.api.space_management_service import SpaceManagementServiceProtocol
 from agentclaw.community.core.spaces.services.space_management_service import SpaceManagementService
@@ -343,6 +345,7 @@ from agentclaw.community.core.user_list.service import UserListService
 
 
 _PAIRS = [
+    (BotKnowledgeServiceProtocol, BotKnowledgeService),
     (UserListServiceProtocol, UserListService),
     (SpaceManagementServiceProtocol, SpaceManagementService),
     (CronAdminServiceProtocol, CronAdminService),

@@ -15,6 +15,7 @@ provides:
 consumes:
   []
 internal_dependencies:
+  - agentclaw.community.kernel.knowledge
   - agentclaw.community.kernel.file_count
   - agentclaw.community.kernel.publish_ignore
   - agentclaw.community.core.base

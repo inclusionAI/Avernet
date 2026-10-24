@@ -20,6 +20,7 @@ What the probes cover:
   *function-locally* inside ``boot.finalize_worker_runtime``, so patching the
   defining module before the app import is enough to intercept them.
 """
+
 from __future__ import annotations
 
 import json
@@ -30,7 +31,7 @@ from pathlib import Path
 
 import pytest
 
-_BACKEND_ROOT = Path(__file__).resolve().parents[4]      # .../apps/backend
+_BACKEND_ROOT = Path(__file__).resolve().parents[4]  # .../apps/backend
 _SRC = _BACKEND_ROOT / "src"
 _MARKER = "@@JSON@@"
 
@@ -124,14 +125,18 @@ def _run(body: str, **env_overrides: str) -> dict:
 
     proc = subprocess.run(
         [sys.executable, "-c", _PREAMBLE + body],
-        capture_output=True, text=True, env=env, cwd=str(_BACKEND_ROOT), timeout=600,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(_BACKEND_ROOT),
+        timeout=600,
     )
     lines = [ln for ln in proc.stdout.splitlines() if ln.startswith(_MARKER)]
     assert lines, (
         f"subprocess emitted no verdict (rc={proc.returncode})\n"
         f"--- stdout ---\n{proc.stdout[-4000:]}\n--- stderr ---\n{proc.stderr[-4000:]}"
     )
-    return json.loads(lines[-1][len(_MARKER):])
+    return json.loads(lines[-1][len(_MARKER) :])
 
 
 # ---------------------------------------------------------------------------
@@ -201,6 +206,7 @@ def test_unset_and_empty_boot_mode_are_eager():
 # ---------------------------------------------------------------------------
 # 2. preload leaves no worker-owned runtime behind
 # ---------------------------------------------------------------------------
+
 
 def test_preload_import_starts_no_worker_runtime():
     got = _run(_IMPORT_AND_REPORT, AGENTCLAW_HTTP_BOOT_MODE="preload", SERVER_ENV="pre")
@@ -295,14 +301,18 @@ def test_finalize_mounts_the_di_conditional_routers(preload_then_finalize):
     """The one route registration that waits for the worker's injector.
 
     Under DEPLOY_PROFILE=test the column binds a populated ``OptionalRouters``,
-    so finalize adds exactly the local-mode surface on top of what construction
-    registered — and touches nothing else.
+    so finalize adds the local tooling and generic knowledge selection surfaces
+    on top of construction, without changing previously registered routes.
     """
     got = preload_then_finalize
     before = {row[0] for row in got["before"]["routes"]}
     after = {row[0] for row in got["after_one"]["routes"]}
 
-    assert after - before == {"/local/sql/execute"}, (
+    assert after - before == {
+        "/local/sql/execute",
+        "/api/bot-knowledge/{bot_id}",
+        "/api/bot-knowledge/{bot_id}/{kb_id}",
+    }, (
         "finalize should mount exactly the profile's OptionalRouters on top of "
         f"the constructed surface; it added {sorted(after - before)}"
     )
@@ -339,6 +349,7 @@ def test_second_finalize_in_the_same_pid_is_inert(preload_then_finalize):
 # 5. the guard is a pid, not a boolean
 # ---------------------------------------------------------------------------
 
+
 def test_a_foreign_finalized_pid_is_never_read_as_this_process_being_done():
     """The flag is a pid, so it says nothing about a process that did not set it.
 
@@ -354,7 +365,7 @@ def test_a_foreign_finalized_pid_is_never_read_as_this_process_being_done():
 
     previous = boot._finalized_pid
     try:
-        boot._finalized_pid = os.getpid() + 1_000_000   # never this process
+        boot._finalized_pid = os.getpid() + 1_000_000  # never this process
         assert boot.worker_runtime_finalized() is False
 
         fresh = FastAPI()
@@ -384,10 +395,12 @@ def test_a_foreign_failed_pid_is_refused_the_same_way():
     previous_finalized, previous_failed = boot._finalized_pid, boot._failed_pid
     try:
         boot._finalized_pid = None
-        boot._failed_pid = os.getpid() + 1_000_000     # never this process
+        boot._failed_pid = os.getpid() + 1_000_000  # never this process
 
         fresh = FastAPI()
-        with pytest.raises(RuntimeError, match="began finalizing the worker runtime and failed"):
+        with pytest.raises(
+            RuntimeError, match="began finalizing the worker runtime and failed"
+        ):
             boot.finalize_worker_runtime(fresh, profile=DeployProfile.detect())
 
         assert getattr(fresh.state, "injector", None) is None
@@ -705,10 +718,13 @@ def test_an_unfinalized_worker_refuses_requests_without_a_lifespan():
 
 def test_a_finalized_worker_serves_normally_through_the_guard():
     """The guard is inert once the runtime is up — in either mode."""
-    got = _run(_REQUEST_WITHOUT_FINALIZE.replace(
-        "client = TestClient(app_mod.app)",
-        "app_mod.finalize_worker_runtime()\nclient = TestClient(app_mod.app)",
-    ), AGENTCLAW_HTTP_BOOT_MODE="preload")
+    got = _run(
+        _REQUEST_WITHOUT_FINALIZE.replace(
+            "client = TestClient(app_mod.app)",
+            "app_mod.finalize_worker_runtime()\nclient = TestClient(app_mod.app)",
+        ),
+        AGENTCLAW_HTTP_BOOT_MODE="preload",
+    )
 
     assert got["status"] == 200, got["body"][:300]
     assert "RequireWorkerRuntime" not in got["middleware"], (
@@ -810,9 +826,10 @@ def test_lifespan_refuses_an_inherited_injector_even_though_one_is_attached():
     real_discover = app_mod.discover_lifecycle_participants
     previous = boot._finalized_pid
     try:
-        app_mod.discover_lifecycle_participants = (
-            lambda injector: (discovered.append(injector), [])[1]
-        )
+        app_mod.discover_lifecycle_participants = lambda injector: (
+            discovered.append(injector),
+            [],
+        )[1]
         boot._finalized_pid = os.getpid() + 1_000_000
 
         async def _drive():
@@ -891,6 +908,6 @@ def test_middleware_cannot_be_installed_after_the_stack_is_built():
     from starlette.middleware.trustedhost import TrustedHostMiddleware
 
     probe = FastAPI()
-    probe.middleware_stack = probe.build_middleware_stack()   # what __call__ does
+    probe.middleware_stack = probe.build_middleware_stack()  # what __call__ does
     with pytest.raises(RuntimeError, match="after an application has started"):
         probe.add_middleware(TrustedHostMiddleware)

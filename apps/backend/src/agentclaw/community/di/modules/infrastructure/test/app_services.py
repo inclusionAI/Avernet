@@ -11,6 +11,7 @@ that exercise it live in ``tests/corp`` (which resolves the real service through
 the ``corp`` profile, not through this test column). Used by the corp-free
 ``test``/``singlebox`` column **and** the ``corp_test`` column.
 """
+
 from __future__ import annotations
 
 from injector import Binder, Module, inject, provider, singleton
@@ -18,7 +19,9 @@ from injector import Binder, Module, inject, provider, singleton
 from agentclaw.community.api.code_platform_service import CodePlatformServiceProtocol
 from agentclaw.community.api.bot_chat_service import BotChatServiceProtocol
 from agentclaw.community.core.bot_chat.service import BotChatService
-from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client import WorkspaceHostingClient
+from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client import (
+    WorkspaceHostingClient,
+)
 from agentclaw.community.di import config as cfg
 from agentclaw.community.di.optional_routers import OptionalRouters
 from agentclaw.community.log import get_logger
@@ -46,9 +49,7 @@ class TestAppServicesModule(Module):
     @singleton
     @provider
     @inject
-    def _bot_chat_service_protocol(
-        self, svc: BotChatService
-    ) -> BotChatServiceProtocol:
+    def _bot_chat_service_protocol(self, svc: BotChatService) -> BotChatServiceProtocol:
         return svc
 
     @singleton
@@ -102,6 +103,12 @@ class TestAppServicesModule(Module):
     def optional_routers(self) -> OptionalRouters:
         """Routers mounted only in local boots (imported lazily to keep
         ``di/ -> api/`` cycle-free at import time)."""
-        from agentclaw.community.adapters.http.local.sql import router as local_sql_router
+        from agentclaw.community.adapters.http.local.sql import (
+            router as local_sql_router,
+        )
 
-        return OptionalRouters(routers=[local_sql_router])
+        from agentclaw.community.adapters.http.bot_knowledge.router import (
+            router as bot_knowledge_router,
+        )
+
+        return OptionalRouters(routers=[local_sql_router, bot_knowledge_router])
