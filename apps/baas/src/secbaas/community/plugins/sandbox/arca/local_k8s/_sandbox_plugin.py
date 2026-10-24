@@ -41,6 +41,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -61,6 +62,12 @@ from secbaas.community.logger import get_logger
 from secbaas.community.plugins.sandbox.utils.arca_utils import ArcaUtils
 from secbaas.community.spi.sandbox.arca import ArcaSandbox, ArcaSandboxPlugin
 
+from ._a2a_discovery import (
+    _ALREADY_IN_FLIGHT,
+    _AT_CAPACITY,
+    A2aUrlDiscoveryState,
+    TaskToken,
+)
 from ._sandbox import LocalK8sArcaSandbox, _convert_outbound_rules
 
 if TYPE_CHECKING:
@@ -96,6 +103,10 @@ _SHARED_BOT_DATA_PVC_NAME = "bot-shared-data"
 _SHARED_BOT_DATA_PVC_SIZE = "10Gi"
 _SHARED_BOT_DATA_PVC_ACCESS_MODE = "ReadWriteOnce"
 
+# a2a 地址发现的 kube 实查上界（review P2：A2A 可选字段绝不拖住 WS 签发——
+# to_thread 挪出事件循环之外的第二道防线）
+_A2A_URL_DISCOVERY_TIMEOUT_S = 5.0
+
 # Environment variable names consumed by this plugin.
 ENV_KUBECONFIG = "LOCAL_K8S_KUBECONFIG"
 _ENV_FALLBACK_KUBECONFIG_PATH = "KUBECONFIG"
@@ -116,6 +127,11 @@ ENV_SHARED_PVC_NAME = "LOCAL_K8S_SHARED_PVC_NAME"
 ENV_SHARED_PVC_SIZE = "LOCAL_K8S_SHARED_PVC_SIZE"
 ENV_SHARED_PVC_HOST_MOUNT_PATH = "LOCAL_K8S_SHARED_PVC_HOST_MOUNT_PATH"
 ENV_APPARMOR_PROFILE = "LOCAL_K8S_APPARMOR_PROFILE"
+# A2A 面（agent-card / rpc）的「浏览器可达」URL 模板，仅 out-of-cluster 之外的
+# in-cluster 部署需要（in-cluster 的 BaaS 自己只能看到 ClusterIP；NodePort 的
+# 端口号经 kube api 实查，host 形态是部署事实，不属于本插件的猜测范围）。
+# 占位符：{service_name}（如 ``<deployment>-svc``）、{namespace}、{node_port}。
+ENV_A2A_URL_TEMPLATE = "LOCAL_K8S_A2A_URL_TEMPLATE"
 
 _INCLUSTER_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 
@@ -439,9 +455,25 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         self,
         credentials: ArcaCredentials | None = None,
         arca_utils: ArcaUtils | None = None,
+        discovery_state: A2aUrlDiscoveryState | None = None,
     ) -> None:
         self._credentials = credentials
         self._arca_utils = arca_utils
+        # review P2（跨请求生命周期）：本插件由 PaasServiceFactory 按请求
+        # 创建（credentials 逐请求注入，插件本身绝不整体单例），而发现缓
+        # 存/负缓存/in-flight/线程表是 *进程级* 语义的执行面——挂在实例上
+        # 活不过一个请求，「首次为空、后续自然带上」不成立，并发上限也随
+        # 实例增殖失效。因此沉淀到 A2aUrlDiscoveryState，由组合入口以
+        # Singleton 注入工厂；None = 未经组合入口直建（测试），各自独立。
+        # 下面三个引用与共享 dict/set 是同一对象：记忆化读写、create 响应
+        # 预热、发现线程收尾逻辑不感知归属变化，只有调度入口走原子原语。
+        self._a2a_discovery = discovery_state or A2aUrlDiscoveryState()
+        self._a2a_node_port_cache: dict[tuple[str, str], int | None | tuple[str, float]]
+        self._a2a_node_port_cache = self._a2a_discovery.node_port_cache
+        self._a2a_inflight: set[tuple[str, str]] = self._a2a_discovery.inflight
+        self._a2a_threads: dict[tuple[str, str], threading.Thread] = (
+            self._a2a_discovery.threads
+        )
         self._client_manager = LocalK8sClientManager()
 
     def _client(self) -> ApiClient:
@@ -718,7 +750,23 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         )
 
         core_api = CoreV1Api(self._client())
-        core_api.create_namespaced_service(namespace=namespace, body=service)
+        created = core_api.create_namespaced_service(namespace=namespace, body=service)
+        # A2A 地址预热（review P2 终闭环）：create 响应里 API server 已完成
+        # NodePort 分配——直接落 a2a 记忆化，后续签发零 kube 查询。响应缺值
+        # （异步分配边缘）时留给后台发现补齐，不影响签发。
+        # 预热按模板门控（review P2 回收）：A2A 关闭（模板空）的普通创建
+        # 对应用级共享状态零落账，销毁/重建来回不积累无用发现记录。
+        try:
+            created_ports = (
+                getattr(created, "spec", None) and created.spec.ports or None
+            )
+            assigned = created_ports[0].node_port if created_ports else None
+            if assigned and self._a2a_template():
+                # 走 state 原语落账（连带记正缓存有效期,过期的快照不再被
+                # 永久交付）而不是直接写共享 dict
+                self._a2a_discovery.note_warm((namespace, service_name), assigned)
+        except Exception:  # noqa: BLE001 — 预热失败无关紧要（还有后台发现）
+            pass
         logger.info(
             "local_k8s: created NodePort service %s/%s",
             namespace,
@@ -875,6 +923,9 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             sidecar_container_name=_SIDECAR_CONTAINER_NAME,
             pvc_name=pvc_name,
             storage=effective_storage,
+            # destroy() 即生命周期失效锚点（review P2 回收）：Service 销毁
+            # 时刻出清该设备的共享发现状态
+            discovery_state=self._a2a_discovery,
         )
 
     def _resolve_storage_id_from_deployment(self, deployment_name: str) -> str | None:
@@ -924,6 +975,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             sidecar_container_name=_SIDECAR_CONTAINER_NAME,
             pvc_name=pvc_name,
             storage=storage,
+            discovery_state=self._a2a_discovery,
         )
 
     def close(self) -> None:
@@ -941,6 +993,8 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
 
         in-cluster 模式下使用 ClusterIP + Service 端口供集群内部访问；
         out-of-cluster 模式下使用 localhost + NodePort。
+        两种模式都附带 ``a2a_base_url``（本插件是少数定义了「浏览器可达」
+        A2A 地址语义的平台；详见 :meth:`_resolve_a2a_base_url`）。
         """
         deployment_name = paas_device_id
         normalized_path = "/" + path.lstrip("/")
@@ -957,14 +1011,186 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
                 ),
                 target=target,
                 expires_at=datetime.now(UTC) + timedelta(seconds=120),
+                a2a_base_url=self._a2a_base_url_cached(deployment_name),
             )
         host, svc_port = self._resolve_public_port(deployment_name)
+        # out-of-cluster：NodePort 就映射在 BaaS 自己的机器上，ws url 用的
+        # 已经是浏览器可达地址，A2A 面同源直连（无凭据、根级路径）。
         return WsConnectionInfo(
             ws_url=f"ws://{host}:{svc_port}{normalized_path}",
             token="",
             target=f"{host}:{svc_port}",
             expires_at=datetime.now(UTC) + timedelta(hours=24),
+            a2a_base_url=f"http://{host}:{svc_port}",
         )
+
+    def _a2a_template(self) -> str:
+        """部署级 A2A host 约定（LOCAL_K8S_A2A_URL_TEMPLATE）。空=未配置。"""
+        return str(_env(ENV_A2A_URL_TEMPLATE) or "").strip()
+
+    def _a2a_base_url_cached(self, deployment_name: str) -> str:
+        """in-cluster 下取本设备 A2A 面的「浏览器可达」HTTP base——**签发
+        关键路径只读本方法，零 kube 查询**（review P2 终闭环：可选地址发现
+        慢/挂/不可用时，存量 WS 签发毫秒级照常返回，最多缺一个加性字段）。
+
+        语义与 ``_resolve_a2a_base_url`` 旧文档一致：地址由模板 + Service
+        NodePort 组成；模板空、NodePort 未知/未配、查询失败——一律返回
+        空串（"本平台当前无可交付的 A2A 地址"），绝不让 A2A 的配置缺陷
+        拖住 WS 签发。NodePort 由 *后台发现线程* 维护进 ``_a2a_node_port_cache``
+        （创建 Service 时亦会从 create 响应预热）；缓存未就绪的第一笔签发
+        得到空地址，后台发现完成后后续签发自然带上。
+
+        正缓存有限有效期（review P2 跨 worker）：本进程的 destroy() 失效
+        拦不住其他 worker/带外的 Service 删除，NodePort 快照只代表「上次
+        验证时」的事实。过期后旧值不再交付（转后台发现再验证），陈旧窗口
+        有界而不是永久；再验证前的签发照旧空地址立即返回，不等 kube。"""
+        template = self._a2a_template()
+        if not template:
+            return ""
+        namespace = _namespace()
+        service_name = _build_service_name(deployment_name)
+        cache_key = (namespace, service_name)
+
+        entry = self._a2a_node_port_cache.get(cache_key)
+        if isinstance(entry, tuple):
+            kind, expire_at = entry
+            if kind == "error" and time.monotonic() >= expire_at:
+                # 负缓存过了 TTL：可以再探一次（仍然后台，不阻塞本签发）
+                self._a2a_node_port_cache.pop(cache_key, None)
+                entry = None
+            else:
+                return ""
+        if isinstance(entry, int):
+            if not self._a2a_discovery.positive_expired(cache_key):
+                return self._a2a_render(template, namespace, service_name, entry)
+            # 正缓存过期：未经验证的旧值不得继续交付，清条目转后台再发现
+            self._a2a_discovery.drop(cache_key)
+            entry = None
+        # 未就绪（无值/None=已知无 NodePort）：值面仍新鲜（未过期）即返回，
+        # 过期或缺失调度后台发现（in-flight 防轰炸），本签发立即以空地址返回
+        if entry is None and cache_key in self._a2a_node_port_cache:
+            if not self._a2a_discovery.positive_expired(cache_key):
+                return ""
+            self._a2a_discovery.drop(cache_key)
+        self._a2a_schedule_discovery(namespace, service_name)
+        return ""
+
+    @staticmethod
+    def _a2a_render(
+        template: str,
+        namespace: str,
+        service_name: str,
+        node_port: int,
+    ) -> str:
+        return (
+            template.replace("{service_name}", service_name)
+            .replace("{namespace}", namespace)
+            .replace("{node_port}", str(node_port))
+        )
+
+    def _a2a_schedule_discovery(self, namespace: str, service_name: str) -> None:
+        """后台发现 NodePort（守护线程、in-flight 去重）。失败写负缓存
+        （短 TTL），持续故障下不会反复等待、也不会线程轰炸。
+
+        跨请求去重与进程级并发上限（review P2）：本插件按请求创建，去重
+        与额度必须由共享 ``A2aUrlDiscoveryState`` 在 *一个原子区* 内完成
+        ——各实例/各请求分别自查额度会同时「都认为自己还有额度」突破上限。
+
+        调度失败边界（review P2-1）：本方法在 WS 签发调用链内同步执行，
+        ``threading.Thread`` 创建/启动失败（线程资源不足）与并发上限触顶都
+        就地降级为「空地址 + 短负缓存」——A2A 是可选面，调度故障绝不上抛
+        打断存量 WS 签发，也绝不残留 in-flight/线程记录（残留会让该设备的
+        后续调度被永久旁路）。负缓存过 TTL 自动出清，资源恢复后再次签发
+        即重新调度。"""
+        cache_key = (namespace, service_name)
+        outcome, token = self._a2a_discovery.acquire(cache_key)
+        if outcome == _ALREADY_IN_FLIGHT:
+            return  # 同 key 发现在途：坐等结果落缓存，不写负缓存
+        if outcome == _AT_CAPACITY:
+            # 容量耗尽：立即降级（不等待），额度留给在途发现
+            self._a2a_note_schedule_failure(
+                cache_key, "background discovery concurrency cap reached"
+            )
+            return
+        thread: threading.Thread | None = None
+        try:
+            thread = threading.Thread(
+                target=self._a2a_discover,
+                args=(namespace, service_name, token),
+                daemon=True,
+                name=f"a2a-url-discovery-{service_name}",
+            )
+            self._a2a_threads[cache_key] = thread
+            thread.start()
+        except Exception as exc:  # noqa: BLE001 — 调度失败降级，不拖垮 WS 签发
+            # 启动失败确认：归还**本代次**额度、按线程身份清记录（token
+            # 校验保证不会误清任何新一代任务的标记），再就地降级
+            self._a2a_discovery.finish(cache_key, token, thread)
+            self._a2a_note_schedule_failure(
+                cache_key, f"failed to start discovery thread: {exc}"
+            )
+
+    def _a2a_note_schedule_failure(
+        self,
+        cache_key: tuple[str, str],
+        reason: str,
+    ) -> None:
+        """调度失败的就地降级位：短负缓存（TTL 后可恢复）+ 空地址语义。
+        与发现失败的负缓存同形状——``_a2a_base_url_cached`` 的 TTL 出清
+        路径无需感知两种失败的差别。"""
+        logger.warning(
+            "local_k8s: a2a base url scheduling skipped for %s/%s: %s",
+            cache_key[0],
+            cache_key[1],
+            reason,
+        )
+        self._a2a_discovery.note_negative(cache_key)
+
+    def _a2a_discover(
+        self, namespace: str, service_name: str, token: TaskToken
+    ) -> None:
+        from kubernetes.client import CoreV1Api
+
+        cache_key = (namespace, service_name)
+        try:
+            core_api = CoreV1Api(self._client())
+            svc = core_api.read_namespaced_service(
+                name=service_name,
+                namespace=namespace,
+                _request_timeout=_A2A_URL_DISCOVERY_TIMEOUT_S,
+            )
+            node_port = (
+                svc.spec.ports[0].node_port if svc.spec and svc.spec.ports else None
+            )
+            # 回写凭任务代际门控：Service 若毁于发现窗口内，迟到结果在 state
+            # 内被拒收（已销毁设备的缓存条目不复活，review P2 回收）
+            self._a2a_discovery.commit_result(cache_key, token, node_port)
+            if not node_port:
+                logger.warning(
+                    "local_k8s: service %s/%s has no NodePort; a2a base url omitted",
+                    namespace,
+                    service_name,
+                )
+        except Exception as exc:  # noqa: BLE001 — 发现失败降级为空地址 + 负缓存
+            logger.warning(
+                "local_k8s: a2a base url discovery failed for %s/%s: %s",
+                namespace,
+                service_name,
+                exc,
+            )
+            self._a2a_discovery.commit_negative(cache_key, token)
+        finally:
+            # 自然收尾即清理：只能归还自己代次的额度、清自己线程对象的
+            # 记录，同锁原子且不依赖诊断 a2a_discovery_join——旧任务收尾
+            # 动不了同 key 新一代任务的任何标记（review P2 回收）
+            self._a2a_discovery.finish(cache_key, token, threading.current_thread())
+
+    def a2a_discovery_join(self, deployment_name: str, timeout: float = 5.0) -> None:
+        """等待在途后台发现完成（测试/诊断 seam；产品路径不等待）。"""
+        cache_key = (_namespace(), _build_service_name(deployment_name))
+        thread = self._a2a_threads.pop(cache_key, None)
+        if thread and thread.is_alive():
+            thread.join(timeout=timeout)
 
     def resolve_http_connection_info(
         self,
@@ -1051,16 +1277,26 @@ def local_k8s_plugin_factory(
     _credentials: ArcaCredentials | None = None,
     *,
     arca_utils: ArcaUtils | None = None,
+    discovery_state: A2aUrlDiscoveryState | None = None,
 ) -> Callable[[ArcaCredentials], LocalK8sArcaSandboxPlugin]:
-    """Return a callable that builds LocalK8sArcaSandboxPlugin with arca_utils baked in.
+    """Return a callable that builds LocalK8sArcaSandboxPlugin with arca_utils
+    and the shared A2A discovery state baked in.
 
     The leading ``_credentials`` arg absorbs any positional argument that
     dependency_injector may pass when the provider is called with args.
     In normal flow, Singleton calls this with keyword args only, returning
     the inner ``_build`` function.
+
+    ``discovery_state`` 是组合入口注入的应用级 Singleton（review P2：插件
+    实例按请求创建，发现缓存/并发额度必须跨请求共享）；None = 未注入（测试
+    直用工厂），每个实例各自独立。
     """
 
     def _build(credentials: ArcaCredentials | None = None) -> LocalK8sArcaSandboxPlugin:
-        return LocalK8sArcaSandboxPlugin(credentials=credentials, arca_utils=arca_utils)
+        return LocalK8sArcaSandboxPlugin(
+            credentials=credentials,
+            arca_utils=arca_utils,
+            discovery_state=discovery_state,
+        )
 
     return _build

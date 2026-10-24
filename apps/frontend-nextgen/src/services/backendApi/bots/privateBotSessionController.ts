@@ -46,7 +46,8 @@ export interface BotModelPageDto {
 }
 
 export interface BotSocketDto {
-  kind: 'chat';
+  /** B17：a2a = 服务端签发的 A2A base（浏览器可达），card/rpc 挂其下 */
+  kind: 'chat' | 'a2a';
   url: string;
 }
 export interface BotConnectionDto {

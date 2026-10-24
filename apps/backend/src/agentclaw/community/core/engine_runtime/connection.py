@@ -308,6 +308,22 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
         sockets = [
             SocketInfo(kind="chat", url=self._socket_url(info, chat_path, token))
         ]
+        # The A2A face, when the provider names one. Additive: a provider that
+        # issues no ``a2a_base_url`` changes nothing — the list stays exactly the
+        # chat socket it was. The URL is published **as issued** rather than
+        # re-addressed or composed: it is an HTTP base for the engine's own
+        # card/RPC routes, already spelled for the *caller's browser* by the layer
+        # that knows the deployment topology, and this endpoint has no second
+        # source of truth to correct it with. Deriving it from the chat socket
+        # instead is what this socket exists to replace — that address points at
+        # the gateway, which routes no ``/.well-known`` path and silently drops
+        # the A2A bootstrap on the floor.
+        a2a_base_url = str(getattr(info, "a2a_base_url", "") or "")
+        if a2a_base_url:
+            sockets.append(SocketInfo(kind="a2a", url=a2a_base_url))
+        # No expiry of its own: the A2A face is uncredentialed HTTP, so the
+        # ``expires_at`` on the result describes the chat socket's credential
+        # and bounds this socket's *availability* the same way.
         return ConnectionResult(
             engine=engine,
             expires_at=self._expires_at(info),

@@ -28302,7 +28302,7 @@
         "type": "object"
       },
       "Socket": {
-        "description": "One WebSocket you may open against the bot.",
+        "description": "One connection endpoint you may reach the bot on.",
         "example": {
           "kind": "chat",
           "url": "wss://gateway.example/openapi/v1/bots/messages/ws/abc/api/openclaw/ws?x-proxypass-token=…"
@@ -28313,7 +28313,7 @@
             "description": "Which socket this is."
           },
           "url": {
-            "description": "Complete WebSocket URL, credential included. Open it as given — do not append to it, rebuild it, or move any part of it into a header; a browser cannot set headers on a WebSocket handshake, which is why everything needed is in the URL.",
+            "description": "Complete URL for this socket, credential included on the chat kinds. Open it as given — do not append to it, rebuild it, or move any part of it into a header; a browser cannot set headers on a WebSocket handshake, which is why everything needed is in the URL. The a2a kind is the exception in shape, not in the rule: it is an HTTP base URL with no credential, and the two A2A paths (/.well-known/agent-card.json and /rpc) hang beneath it as given.",
             "title": "Url",
             "type": "string"
           }
@@ -28326,20 +28326,24 @@
         "type": "object"
       },
       "SocketKind": {
-        "description": "Which WebSocket a connection entry describes.",
+        "description": "Which connection a socket entry describes.",
         "enum": [
-          "chat"
+          "chat",
+          "a2a"
         ],
         "title": "SocketKind",
         "type": "string",
         "x-enum-descriptions": [
-          "Converse with the bot."
+          "Converse with the bot.",
+          "The bot's A2A agent endpoint — an HTTP base URL. The agent card is served at /.well-known/agent-card.json beneath it and the A2A JSON-RPC surface at /rpc; address both against the URL as given. Unlike a chat socket it carries no credential and never expires on its own. Absent when the deployment defines no browser-direct address for it."
         ],
         "x-enum-varnames": [
-          "CHAT"
+          "CHAT",
+          "A2A"
         ],
         "x-enumNames": [
-          "CHAT"
+          "CHAT",
+          "A2A"
         ]
       },
       "SourceCredential": {

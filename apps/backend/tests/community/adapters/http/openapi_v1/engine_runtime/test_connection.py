@@ -39,6 +39,9 @@ class FakeConnections:
     def __init__(self) -> None:
         self.calls: list[dict] = []
         self.raises: Exception | None = None
+        # Optional second socket, mirroring the core service's additive a2a
+        # behavior: set by tests that exercise the published shape.
+        self.extra_socket: SocketInfo | None = None
 
     def __set_relay(self, relay):  # wired by the fixture
         self._relay = relay
@@ -68,6 +71,8 @@ class FakeConnections:
                 ),
             )
         ]
+        if self.extra_socket is not None:
+            sockets.append(self.extra_socket)
         return ConnectionResult(
             engine="openclaw", expires_at="2026-07-30T14:30:00+00:00", sockets=sockets
         )
@@ -123,6 +128,20 @@ def test_no_terminal_socket_is_offered(client, relay):
     """Removed deliberately — the spec excludes an interactive shell on a
     tenant's device from v1 at any scope."""
     assert [s["kind"] for s in ok(client.get(URL))["sockets"]] == ["chat"]
+
+
+def test_an_a2a_socket_is_served_verbatim(client, relay, connections):
+    """When the core service hands the endpoint an A2A base, the published
+    JSON carries it as issued — the URL untouched, no extra field beside
+    kind/url. The kind is a real enum value, so the response validates."""
+    connections.extra_socket = SocketInfo(
+        kind="a2a", url="http://bot-a1b2-vc.stable.alipay.net:32196"
+    )
+    socket = ok(client.get(URL))["sockets"][1]
+    assert socket == {
+        "kind": "a2a",
+        "url": "http://bot-a1b2-vc.stable.alipay.net:32196",
+    }
 
 
 def test_no_capability_probe_is_needed(client, relay):

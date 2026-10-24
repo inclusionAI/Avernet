@@ -4,6 +4,9 @@
     "data": {
       "type": "object",
       "properties": {
+        "a2a_base_url": {
+          "type": "string"
+        },
         "available": {
           "type": "boolean"
         },
@@ -27,6 +30,7 @@
         }
       },
       "required": [
+        "a2a_base_url",
         "available",
         "engine_type",
         "message",
