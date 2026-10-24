@@ -33,13 +33,21 @@ export function useExternalLoginPrompt(): UseExternalLoginPromptResult {
     if (!shouldPrompt) setDismissed(false);
   }, [shouldPrompt]);
 
+  // 登录态探活成功后，业务请求晚到的 401/登录信号不能再覆盖当前已认证视图。
+  // 弹窗只在认证探活确实判定 unauthenticated 时展示，避免 OAuth 回流后 stale prompt 复现。
+  useEffect(() => {
+    if (auth.status !== 'authenticated') return;
+    setDismissed(true);
+  }, [auth.status]);
+
   const onDismiss = useCallback(() => setDismissed(true), []);
+
   const onLogin = useCallback(() => {
     void auth.login();
   }, [auth]);
 
   return {
-    open: shouldPrompt && !dismissed,
+    open: shouldPrompt && !dismissed && auth.status !== 'authenticated',
     onDismiss,
     onLogin,
     loadingLoginUrl: auth.isLoadingLoginUrl,
