@@ -236,19 +236,24 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
       const due = automationDue(now(), current.dailyTime);
       let notifyIssues = false;
       if (current.enabled && current.dailyConfigured && due.at >= current.updatedAtMs) {
-        progress.phase = 'suggestion_version';
-        const analysisVersion = await input.db.query(`SELECT COUNT(*) AS count, MAX(id) AS latest, MAX(completed_at_ms) AS completed, SUM(state_version) AS revision
-          FROM workflow_evolution_analysis_runs WHERE workflow_id = ?`, [policy.workflowId]);
-        const active = await input.db.query('SELECT deploy_number FROM workflow_deploy_history WHERE workflow_id = ? AND is_active = 1', [policy.workflowId]);
-        const evaluated = digestRepairJson([analysisVersion, active, current.version, due.key]);
-        if (cycle.data.evaluated !== evaluated) {
+        // A daily opportunity is handled once, even when empty. New analyses wait
+        // for the next daily plan; existing draft/result recovery below is independent.
+        if (cycle.data.evaluated !== due.key) {
           progress.phase = 'draft_planning';
-          if (current.autoDraft) cycle = await planDraft(cycle, due.key);
-          else logWorkflowBackground('workflow_automatic_draft', 'skipped', { environment, workflowId: policy.workflowId, reason: 'AUTO_DRAFT_DISABLED' });
-          if (cycle.reason !== 'DRAFT_IN_PROGRESS') cycle = await repo.patch(cycle, { data: { ...cycle.data, evaluated, blockingTaskId: null } }, now());
+          try {
+            if (current.autoDraft) cycle = await planDraft(cycle, due.key);
+            else logWorkflowBackground('workflow_automatic_draft', 'skipped', { environment, workflowId: policy.workflowId, reason: 'AUTO_DRAFT_DISABLED' });
+          } catch (error) {
+            progress.failed = true;
+            logWorkflowBackground('workflow_policy', 'failed', { environment, workflowId: policy.workflowId,
+              phase: progress.phase, ...workflowBackgroundError(error) });
+            cycle = await repo.patch(cycle, { reason: error instanceof RepairAutomationDeniedError ? error.message : 'AUTOMATION_RECONCILE_FAILED' }, now());
+          }
+          progress.phase = 'daily_settlement';
+          cycle = await repo.patch(cycle, { data: { ...cycle.data, evaluated: due.key,
+            ...(cycle.reason === 'DRAFT_IN_PROGRESS' ? {} : { blockingTaskId: null }) } }, now());
           notifyIssues = true;
-        } else logWorkflowBackground('workflow_automatic_draft', 'skipped', { environment, workflowId: policy.workflowId,
-          reason: !current.autoDraft ? 'AUTO_DRAFT_DISABLED' : cycle.reason === 'NO_ELIGIBLE_SCOPE' ? 'NO_ELIGIBLE_SUGGESTIONS' : cycle.reason ?? 'SUGGESTIONS_UNCHANGED' });
+        }
       } else logWorkflowBackground('workflow_automatic_draft', 'skipped', { environment, workflowId: policy.workflowId,
         reason: !current.enabled ? 'AUTOMATION_DISABLED' : !current.dailyConfigured ? 'DAILY_NOT_CONFIGURED' : 'NOT_DUE' });
 
