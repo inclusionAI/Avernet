@@ -963,3 +963,39 @@ test('chat.send 在持有有效租约时注入 leaseId/leaseEpoch，无租约不
   // 收敛：断开连接停掉租约轮询/到期定时器并立结在途请求，避免用例结束后定时器继续驱动。
   await provider.disconnect();
 });
+
+test('chat.send 服务端拒绝按请求 id 匹配后广播给订阅者', async () => {
+  sc.createSessionToken.mockResolvedValue({ code: 20000, message: '', request_id: 'r',
+    data: { token: 'tk', expires_at: 999 } });
+  const provider = createGroupChatProvider({ sessionId: 's1', groupId: 'g1', identityId: 'me',
+    createSdkProvider: fakeSdkProvider as unknown as Parameters<typeof createGroupChatProvider>[0]['createSdkProvider'],
+    wsOrigin: 'wss://x.test' });
+  await provider.connect();
+  const inner = (provider as unknown as {
+    inner: { transport: { send: jest.Mock; onMessage?: (msg: unknown) => void } };
+  }).inner;
+  const errors: Array<{ code: string; message: string }> = [];
+  const unsubscribe = provider.subscribeToChatSendErrors((error) => errors.push(error));
+
+  // 在途 chat.send:其失败应答（BCS 回显请求 id）必须广播
+  await inner.transport.send({ type: 'req', id: 'send-rej-1', method: 'chat.send', params: { message: 'hi' } });
+  inner.transport.onMessage?.({
+    type: 'res',
+    id: 'send-rej-1',
+    ok: false,
+    error: { code: 'dispatch_error', message: 'Invalid operation on request unknown: speaking lease required' },
+  });
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toEqual({
+    code: 'dispatch_error',
+    message: 'Invalid operation on request unknown: speaking lease required',
+  });
+
+  // 其它请求的失败应答不属于 chat.send：不误报
+  await inner.transport.send({ type: 'req', id: 'send-rej-2', method: 'chat.send', params: { message: 'hi again' } });
+  inner.transport.onMessage?.({ type: 'res', id: 'not-a-chat-send', ok: false, error: { code: 'x' } });
+  expect(errors).toHaveLength(1);
+
+  unsubscribe();
+  await provider.disconnect();
+});

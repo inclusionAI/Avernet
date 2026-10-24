@@ -134,6 +134,13 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
    */
   private pendingConnectFrameId?: string;
   /**
+   * 本连接周期在途的 chat.send 请求 id：服务端 ok:false 应答按 id 匹配后以
+   * chatSendError 广播给 UI（SDK 会静默吞掉请求失败——没有这层通知，用户
+   * 对"消息被服务端拒绝"毫无感知）。断开时整体清空。
+   */
+  private pendingChatSendFrameIds = new Set<string>();
+  private chatSendErrorListeners = new Set<(error: { code: string; message: string }) => void>();
+  /**
    * 拥有问答状态的连接周期（inner 身份校验）：只有当前周期的 inner 能驱动 questionService。
    * 断开、替换或异步初始化被 disconnect 废弃时置 null——旧回调迟到也不更新新连接状态。
    */
@@ -298,6 +305,19 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     return this.speakingLeaseService.refresh();
   }
 
+  /**
+   * 订阅本连接 chat.send 的服务端拒绝（"无效操作/发言权缺失"等）：SDK 对请求
+   * 失败静默，UI 没有这层通知就感知不到消息根本没被接受。
+   */
+  subscribeToChatSendErrors(
+    listener: (error: { code: string; message: string }) => void,
+  ): () => void {
+    this.chatSendErrorListeners.add(listener);
+    return () => {
+      this.chatSendErrorListeners.delete(listener);
+    };
+  }
+
   private emitViewScopeChanged(): void {
     this.viewScopeListeners.forEach((listener) => listener());
   }
@@ -423,6 +443,7 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
       if (target.method === 'connect') params.view_actor_id = this.options.identityId;
       if (target.method === 'chat.send') {
         params.sessionKey = sessionId;
+        if (typeof target.id === 'string') this.pendingChatSendFrameIds.add(target.id);
         // lease_required 会话：服务端要求 chat.send 携带本会有效租约；临期（≤5s）
         // 租约不注入——服务端逐条判定为权威，前端不据此放宽发送。
         const leaseParams = this.speakingLeaseService.usableLeaseParams(Date.now());
@@ -447,6 +468,19 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     const originalOnMessage = transport.onMessage.bind(transport);
     transport.onMessage = (msg: unknown) => {
       if (!this.liveAllowed || this.inner !== inner) return;
+      // chat.send 请求失败可见化：ok:false 应答按在途 id 匹配后广播错误。
+      // 不吃帧——SDK 照常收到应答，这里只做旁路通知。
+      if (this.isChatSendErrorResponse(msg)) {
+        const frame = msg as { id: string; error?: { code?: string; message?: string } };
+        this.pendingChatSendFrameIds.delete(frame.id);
+        const error = frame.error ?? {};
+        this.chatSendErrorListeners.forEach((listener) =>
+          listener({
+            code: error.code ?? 'chat_send_failed',
+            message: error.message ?? '消息发送失败',
+          }),
+        );
+      }
       if (this.questionScopeInner === inner && this.speakingLeaseService.handleFrame(msg)) {
         return;
       }
@@ -505,6 +539,7 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     this.transportGeneration += 1;
     this.questionScopeInner = null;
     this.pendingConnectFrameId = undefined;
+    this.pendingChatSendFrameIds.clear();
     this.questionService.resetConnection();
     this.execApprovalService.resetConnection();
     this.speakingLeaseService.resetConnection();
@@ -529,6 +564,19 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     const candidate = msg as Record<string, unknown>;
     return (
       candidate.type === 'res' && candidate.id === this.pendingConnectFrameId
+    );
+  }
+
+  /** 在途 chat.send 的失败应答识别：res、ok=false、id 命中本周期在途集合。 */
+  private isChatSendErrorResponse(msg: unknown): msg is {
+    id: string;
+    error?: { code?: string; message?: string };
+  } {
+    if (typeof msg !== 'object' || msg === null) return false;
+    const candidate = msg as Record<string, unknown>;
+    if (candidate.type !== 'res' || candidate.ok !== false) return false;
+    return (
+      typeof candidate.id === 'string' && this.pendingChatSendFrameIds.has(candidate.id)
     );
   }
 

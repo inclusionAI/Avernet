@@ -153,6 +153,8 @@ beforeEach(() => {
     acquireSpeakingLease: jest.fn<any>(() => Promise.resolve(true)),
     releaseSpeakingLease: jest.fn<any>(() => Promise.resolve(undefined)),
     refreshSpeakingLease: jest.fn<any>(() => Promise.resolve(undefined)),
+    // 发送错误可见化（ChatSendErrorProvider 结构面）：Hook 经 useChatSendErrorToasts 订阅。
+    subscribeToChatSendErrors: jest.fn<any>(() => jest.fn<any>()),
   };
   mockedProviderFactory.mockReturnValue(mockProvider);
 
