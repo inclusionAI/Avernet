@@ -649,6 +649,12 @@ class LocalClaudeCodePluginImpl(ClaudeCodePlugin):
     ) -> list[dict]:
         return [{"id": "anthropic", "name": "Claude"}]
 
+    async def models_default(
+        self,
+        token: str | None = None,
+    ) -> dict | None:
+        return {"model": "claude-sonnet-4-5", "source": "fallback"}
+
     # ----------------------------------------------------------------- file
 
     async def file_upload(self, path: str, content_bytes: bytes,

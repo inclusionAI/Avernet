@@ -25,6 +25,7 @@
 | `health.claude` | 健康检查 | — |
 | `providers.available` | 提供商列表 | — |
 | `models.list` | 模型列表 | `provider?` |
+| `models.default` | 默认模型（新会话未指定 model 时生效） | — |
 
 ### 事件一览
 
@@ -1170,6 +1171,49 @@ Claude 服务健康检查。
 ### 10.3 `models.list` 方法
 
 获取模型列表。
+
+### 10.4 `models.default` 方法
+
+获取网关当前生效的默认模型：`session.new` / `chat.send` 未显式指定 `model` 时新会话使用的模型。每次调用实时解析（不在启动时缓存），因此修改 `settings.json` 后无需重启网关。
+
+解析优先级（与 `binding.model` 的种子逻辑一致）：
+
+1. `RELAY_DEFAULT_MODEL` 环境变量 → `source: "env"`
+2. `<CLAUDE_CONFIG_DIR>/settings.json` 的 `env.ANTHROPIC_MODEL` → `source: "settings.json"`
+3. `RELAY_MODEL_SETTINGS_SOURCE` 指向文件的 `env.ANTHROPIC_MODEL` → `source: "model-provider-settings-source"`
+4. 硬编码兜底 → `source: "fallback"`
+
+```json
+{
+  "type": "req",
+  "id": "req-uuid",
+  "method": "models.default",
+  "params": {}
+}
+```
+
+响应：
+
+```json
+{
+  "type": "res",
+  "id": "req-uuid",
+  "ok": true,
+  "payload": {
+    "model": "claude-sonnet-4-5",
+    "source": "settings.json",
+    "path": "/home/admin/.claude/settings.json"
+  }
+}
+```
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `model` | string | 默认模型 id，与 `models.list` 中的 `id` 同一命名空间（可为裸 id，如 `claude-sonnet-4-5`） |
+| `source` | `"env" \| "settings.json" \| "model-provider-settings-source" \| "fallback"` | 取值来源 |
+| `path` | string? | 当 `source` 为文件时，文件的绝对路径；否则省略 |
+
+该方法总是 `ok: true`：解析链保证有兜底值，不会因配置缺失而失败。
 
 ---
 

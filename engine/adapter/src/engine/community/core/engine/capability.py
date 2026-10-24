@@ -134,6 +134,11 @@ class Capability(Enum):
     # ── Model ──
     MODEL_LIST = "model.list"
     MODEL_SWITCH = "model.switch"
+    # ``MODEL_DEFAULT_GET`` — the model the engine uses when a session / run
+    # names none. Each engine reads it from its own config (OpenClaw:
+    # ``agents.defaults.model`` in openclaw.json; Claude Code: the relay's
+    # ``models.default`` RPC). See docs/default-model-api.md.
+    MODEL_DEFAULT_GET = "model.default.get"
 
     # ── Health ──
     HEALTH_CHECK = "health.check"

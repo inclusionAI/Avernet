@@ -145,6 +145,7 @@ class OpenClawEngine(BaseEngine):
             # Model
             Capability.MODEL_LIST,
             Capability.MODEL_SWITCH,
+            Capability.MODEL_DEFAULT_GET,
             # Default config
             Capability.DEFAULT_CONFIG_GET,
             # Web shell

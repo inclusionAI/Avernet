@@ -20,7 +20,13 @@ import logging
 from typing import Any
 
 from engine.community.core.engine.context import AuthContext
-from engine.community.core.models.models import Model, ModelCapabilities, Provider
+from engine.community.core.models.models import (
+    DefaultModel,
+    Model,
+    ModelCapabilities,
+    Provider,
+    find_catalogue_model,
+)
 from engine.community.core.models.protocol import ModelsService
 from engine.community.plugin_api.openclaw.models_port import OpenClawModelsPort
 
@@ -204,6 +210,38 @@ class OpenClawModelsAdapter(ModelsService):
             except Exception as e:  # noqa: BLE001
                 log.warning(f"[list_providers] convert failed: {e}")
         return out
+
+    async def get_default_model(
+        self, auth: AuthContext | None = None,
+    ) -> DefaultModel | None:
+        """``agents.defaults.model`` as a catalogue-shaped entry, or ``None``.
+
+        The configured id is matched against the catalogue so the answer
+        carries the same ``display_name`` / capabilities the picker shows;
+        an id the catalogue does not know (a model configured but not yet
+        advertised by ``models.list``) is returned as a minimal entry.
+        """
+        raw = await self._port.default_model()
+        if raw is None:
+            return None
+        configured = str(raw["model"])
+        provider = configured.split("/", 1)[0] if "/" in configured else "unknown"
+        model_id = _normalize_model_id(configured, provider)
+        match = find_catalogue_model(model_id, await self.list_models(auth))
+        model = match or Model(
+            id=model_id,
+            provider=provider,
+            provider_id=configured,
+            name=configured.rsplit("/", 1)[-1],
+            display_name=configured.rsplit("/", 1)[-1],
+            capabilities=_DEFAULT_CAPABILITIES,
+        )
+        return DefaultModel(
+            model=model,
+            source=str(raw["source"]),
+            source_detail=raw.get("source_detail"),
+            fallbacks=[str(f) for f in raw.get("fallbacks") or []],
+        )
 
 
 __all__ = ["OpenClawModelsAdapter"]

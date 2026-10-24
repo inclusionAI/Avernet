@@ -97,4 +97,52 @@ class Provider(BaseModel):
     models: list[Model] = Field(default_factory=list)
 
 
-__all__ = ["Model", "ModelCapabilities", "ModelPricing", "Provider"]
+class DefaultModel(BaseModel):
+    """The model an engine routes to when a session / run names none.
+
+    ``model`` is the catalogue entry when the configured id matches one
+    (so the caller gets ``display_name`` / capabilities for free), else a
+    minimal :class:`Model` synthesised from the configured id. Its ``id`` is
+    in the same namespace as :meth:`ModelsService.list_models` ids, so a
+    picker can pre-select it by equality.
+
+    ``source`` says where the engine read the value from — a short, stable,
+    engine-specific token (``"openclaw.config.get"``, ``"openclaw.json"``,
+    ``"settings.json"``, ``"env"``, ``"fallback"`` …). ``source_detail`` is the
+    human-readable location (file path + key, env var name) for debugging.
+    ``fallbacks`` carries the engine's configured fallback chain when it has
+    one (OpenClaw ``agents.defaults.model.fallbacks``); empty otherwise.
+    """
+
+    model: Model
+    source: str
+    source_detail: str | None = None
+    fallbacks: list[str] = Field(default_factory=list)
+
+
+def find_catalogue_model(model_id: str, models: list[Model]) -> Model | None:
+    """Return the catalogue entry whose id names ``model_id``.
+
+    Exact id match first; then the bare (provider-stripped) forms, so a
+    config that says ``claude-sonnet-4-5`` matches a catalogue entry
+    ``anthropic/claude-sonnet-4-5`` and vice versa. ``None`` when nothing
+    matches — the caller then synthesises a minimal entry.
+    """
+    for m in models:
+        if m.id == model_id:
+            return m
+    bare = model_id.rsplit("/", 1)[-1]
+    for m in models:
+        if m.id.rsplit("/", 1)[-1] == bare or (m.provider_id or "") == model_id:
+            return m
+    return None
+
+
+__all__ = [
+    "DefaultModel",
+    "Model",
+    "ModelCapabilities",
+    "ModelPricing",
+    "Provider",
+    "find_catalogue_model",
+]

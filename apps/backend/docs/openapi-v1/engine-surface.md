@@ -199,6 +199,7 @@ Two things about this group are not the shape a reader would assume:
 |---|---|---|---|
 | GET | `…/{bot_id}/models` | `GET /api/models` | `Envelope[Page[Model]]` |
 | GET | `…/{bot_id}/models/{model_id}` | `GET /api/models/{model_id:path}` | **model ids contain slashes** (`openai/gpt-5.3`). The engine uses a `:path` converter; the public route must settle URL-encoding vs. a `:path` converter and document it |
+| GET | `…/{bot_id}/models/default` *(pending)* | `GET /api/models/default` | engine route landed (`model.default.get` capability; `engine/adapter/docs/default-model-api.md`). The public wrapper is a follow-up: `Envelope[Model]` plus `source` / `source_detail` / `fallbacks`; 404 when the engine has no explicit default |
 
 ### nodes (1) — engine `/api/nodes`
 

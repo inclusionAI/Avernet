@@ -35,5 +35,17 @@ class OpenClawModelsPort(Protocol):
         """
         ...
 
+    async def default_model(self) -> dict[str, Any] | None:
+        """The gateway's configured default model (``agents.defaults.model``).
+
+        Reads the live config through the ``config.get`` RPC first and falls
+        back to the openclaw.json file on disk when the RPC is unavailable.
+        Returns ``None`` when neither names a model. Otherwise a primitive
+        dict: ``model`` (the raw ``provider/model`` string), ``fallbacks``
+        (list[str]), ``source`` (``"openclaw.config.get"`` |
+        ``"openclaw.json"``) and ``source_detail`` (path + key).
+        """
+        ...
+
 
 __all__ = ["OpenClawModelsPort"]

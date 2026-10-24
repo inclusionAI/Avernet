@@ -22,11 +22,16 @@ class _FakeModelsPort:
         self,
         models_raw: list[dict[str, Any]] | None = None,
         providers_raw: list[dict[str, Any]] | None = None,
+        default_raw: dict[str, Any] | None = None,
     ) -> None:
         self._models_raw = models_raw or []
         self._providers_raw = providers_raw or []
+        self._default_raw = default_raw
         self.models_list_calls = 0
         self.providers_list_calls = 0
+
+    async def default_model(self) -> dict[str, Any] | None:
+        return self._default_raw
 
     async def models_list(self) -> list[dict[str, Any]]:
         self.models_list_calls += 1
@@ -276,3 +281,69 @@ async def test_list_providers_uses_id_when_name_missing():
     adapter = OpenClawModelsAdapter(port)
     providers = await adapter.list_providers()
     assert providers[0].name == "p1"
+
+
+# ── get_default_model ──────────────────────────────────────────────────────────
+
+
+def _default_raw(model: str, **extra: Any) -> dict[str, Any]:
+    return {
+        "model": model,
+        "fallbacks": [],
+        "source": "openclaw.config.get",
+        "source_detail": "/home/admin/.openclaw/openclaw.json#agents.defaults.model",
+        **extra,
+    }
+
+
+async def test_default_model_none_when_port_has_none():
+    adapter = OpenClawModelsAdapter(_FakeModelsPort(default_raw=None))
+    assert await adapter.get_default_model() is None
+
+
+async def test_default_model_uses_catalogue_entry_when_id_matches():
+    port = _FakeModelsPort(
+        models_raw=[
+            {"id": "glm-5.2", "provider": "openai-compatible", "name": "GLM 5.2",
+             "input": ["text", "image"], "contextWindow": 200000},
+            {"id": "gpt-4", "provider": "openai"},
+        ],
+        default_raw=_default_raw(
+            "openai-compatible/glm-5.2", fallbacks=["openai/gpt-4"],
+        ),
+    )
+    out = await OpenClawModelsAdapter(port).get_default_model()
+    assert out is not None
+    assert out.model.id == "openai-compatible/glm-5.2"
+    assert out.model.provider == "openai-compatible"
+    assert out.model.display_name == "GLM 5.2"      # catalogue, not synthesised
+    assert out.model.capabilities.vision is True     # catalogue capabilities
+    assert out.source == "openclaw.config.get"
+    assert out.source_detail.endswith("#agents.defaults.model")
+    assert out.fallbacks == ["openai/gpt-4"]
+    assert port.models_list_calls == 1
+
+
+async def test_default_model_synthesises_entry_when_not_in_catalogue():
+    port = _FakeModelsPort(
+        models_raw=[{"id": "gpt-4", "provider": "openai"}],
+        default_raw=_default_raw("bailian/qwen3.8-flash", source="openclaw.json"),
+    )
+    out = await OpenClawModelsAdapter(port).get_default_model()
+    assert out is not None
+    assert out.model.id == "bailian/qwen3.8-flash"
+    assert out.model.provider == "bailian"
+    assert out.model.provider_id == "bailian/qwen3.8-flash"
+    assert out.model.display_name == "qwen3.8-flash"
+    assert out.source == "openclaw.json"
+    assert out.fallbacks == []
+
+
+async def test_default_model_bare_id_gets_unknown_provider():
+    # A bare id (no provider segment) can't be attributed; mirrors
+    # _normalize_model_id's synthesised prefix for catalogue entries.
+    port = _FakeModelsPort(default_raw=_default_raw("some-model"))
+    out = await OpenClawModelsAdapter(port).get_default_model()
+    assert out is not None
+    assert out.model.id == "unknown/some-model"
+    assert out.model.provider == "unknown"

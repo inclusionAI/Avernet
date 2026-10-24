@@ -1,4 +1,4 @@
-"""_ModelsPortMixin — model + provider enumeration (relay RPC)."""
+"""_ModelsPortMixin — model + provider enumeration and default model (relay RPC)."""
 from __future__ import annotations
 
 import logging
@@ -7,7 +7,7 @@ log = logging.getLogger("claude-code-community-port")
 
 
 class _ModelsPortMixin:
-    """Domain mixin: models.list + providers.list."""
+    """Domain mixin: models.list + providers.list + models.default."""
 
     async def models_list(self, token: str | None = None) -> list[dict]:
         resp = await (await self._relay()).send_request("models.list", {}, timeout=5.0)
@@ -24,3 +24,16 @@ class _ModelsPortMixin:
         data = resp.payload or {}
         entries = data.get("providers") if isinstance(data, dict) else data
         return [e for e in entries if isinstance(e, dict)] if isinstance(entries, list) else []
+
+    async def models_default(self, token: str | None = None) -> dict | None:
+        resp = await (await self._relay()).send_request("models.default", {}, timeout=5.0)
+        if not resp.ok or not isinstance(resp.payload, dict):
+            log.debug(
+                "[models_default] unavailable: %s",
+                resp.error.message if resp.error else "no payload",
+            )
+            return None
+        model = resp.payload.get("model")
+        if not isinstance(model, str) or not model.strip():
+            return None
+        return dict(resp.payload)

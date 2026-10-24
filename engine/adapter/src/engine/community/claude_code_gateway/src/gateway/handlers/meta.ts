@@ -1,9 +1,10 @@
-// health.claude / providers.* / models.list handlers.
+// health.claude / providers.* / models.list / models.default handlers.
 //
 // These expose capability and discovery endpoints. Each handler writes its
 // own response frame.
 
 import { probeClaudeCli } from '../../claude-cli-bridge.js';
+import { resolveDefaultSessionModelDetail } from './sessions.js';
 import type { ConnectionContext } from '../connection-context.js';
 import type { GatewayRequestFrame } from '../../types.js';
 
@@ -60,9 +61,20 @@ export const handleModelsList: MetaHandler = async (ctx, frame, deps) => {
   ctx.response(frame.id, true, { models: deps.models });
 };
 
+/**
+ * `models.default` — the model a new session gets when neither `session.new`
+ * nor `chat.send` names one. Resolved on every call (not cached at boot) so a
+ * `settings.json` edit is reflected without a relay restart. Payload:
+ * `{ model, source, path? }` — see `resolveDefaultSessionModelDetail`.
+ */
+export const handleModelsDefault: MetaHandler = async (ctx, frame) => {
+  ctx.response(frame.id, true, resolveDefaultSessionModelDetail());
+};
+
 export const META_METHODS: Record<string, MetaHandler> = {
   'health.claude': handleHealthClaude,
   'providers.available': handleProvidersAvailable,
   'providers.list': handleProvidersList,
   'models.list': handleModelsList,
+  'models.default': handleModelsDefault,
 };

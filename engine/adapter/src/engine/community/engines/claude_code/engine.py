@@ -105,6 +105,7 @@ CLAUDE_CODE_COMMUNITY_CAPABILITIES: EngineCapabilities = EngineCapabilities(
         # ── Model ──
         Capability.MODEL_LIST,
         Capability.MODEL_SWITCH,
+        Capability.MODEL_DEFAULT_GET,
         # ── File ──
         Capability.FILE_READ,
         Capability.FILE_WRITE,

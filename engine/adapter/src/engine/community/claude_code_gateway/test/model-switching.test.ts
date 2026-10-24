@@ -102,6 +102,26 @@ describe('Model switching (OpenClaw protocol)', () => {
     }
   });
 
+  it('models.default returns the resolved default model and its source', async () => {
+    const { server, store, storePath } = await bootServer([{ kind: 'done' }]);
+    const previous = process.env.RELAY_DEFAULT_MODEL;
+    process.env.RELAY_DEFAULT_MODEL = 'model-from-env';
+    try {
+      const client = await connectedClient(server.port);
+      const res = await client.request('models.default');
+      assert.equal(res.ok, true);
+      const payload = res.payload as { model: string; source: string; path?: string };
+      assert.equal(payload.model, 'model-from-env');
+      assert.equal(payload.source, 'env');
+      assert.equal(payload.path, undefined);
+      await client.close();
+    } finally {
+      if (previous === undefined) delete process.env.RELAY_DEFAULT_MODEL;
+      else process.env.RELAY_DEFAULT_MODEL = previous;
+      await teardown(server, store, storePath);
+    }
+  });
+
   it('chat.send passes model param to runner and returns in response', async () => {
     const { server, store, controller, storePath } = await bootServer([
       { kind: 'lifecycle', phase: 'start' },

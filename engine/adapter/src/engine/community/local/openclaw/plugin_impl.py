@@ -103,6 +103,14 @@ class LocalOpenClawPluginImpl(OpenClawPlugin):
     async def providers_list(self) -> list[dict[str, Any]]:
         return [{"id": "local", "name": "Local", "models": [{"id": "local-model"}]}]
 
+    async def default_model(self) -> dict[str, Any] | None:
+        return {
+            "model": "local/local-model",
+            "fallbacks": [],
+            "source": "local",
+            "source_detail": "in-memory local plugin",
+        }
+
     async def cron_list(self, include_disabled: bool = True, token: str | None = None) -> list[dict]:
         jobs = list(self._cron.values())
         return jobs if include_disabled else [j for j in jobs if not j.get("disabled")]

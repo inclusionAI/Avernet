@@ -1,10 +1,59 @@
-"""_ModelsPortMixin — models_list and providers_list port methods."""
+"""_ModelsPortMixin — models_list / providers_list / default_model port methods."""
 from __future__ import annotations
 
+import json
 import logging
+import os
+from pathlib import Path
 from typing import Any
 
 log = logging.getLogger("openclaw-port")
+
+#: Where OpenClaw keeps its live config when no env var says otherwise. The
+#: adapter runs beside the gateway, so the gateway's own resolution order
+#: applies: ``OPENCLAW_CONFIG_PATH`` → ``$OPENCLAW_STATE_DIR/openclaw.json``
+#: → ``~/.openclaw/openclaw.json``.
+_OPENCLAW_CONFIG_FILENAME = "openclaw.json"
+_DEFAULT_MODEL_KEY = "agents.defaults.model"
+
+
+def _resolve_openclaw_config_path() -> Path:
+    explicit = os.getenv("OPENCLAW_CONFIG_PATH")
+    if explicit:
+        return Path(explicit).expanduser()
+    state_dir = os.getenv("OPENCLAW_STATE_DIR")
+    if state_dir:
+        return Path(state_dir).expanduser() / _OPENCLAW_CONFIG_FILENAME
+    return Path.home() / ".openclaw" / _OPENCLAW_CONFIG_FILENAME
+
+
+def _default_model_from_config(config: Any) -> tuple[str, list[str]] | None:
+    """Extract ``(primary, fallbacks)`` from an OpenClaw config object.
+
+    ``agents.defaults.model`` is either a plain ``provider/model`` string or
+    ``{"primary": str, "fallbacks": [str, ...]}`` (openclaw docs,
+    gateway/configuration-reference). Returns ``None`` when unset / malformed.
+    """
+    if not isinstance(config, dict):
+        return None
+    agents = config.get("agents")
+    defaults = agents.get("defaults") if isinstance(agents, dict) else None
+    model = defaults.get("model") if isinstance(defaults, dict) else None
+    if isinstance(model, str):
+        primary = model.strip()
+        return (primary, []) if primary else None
+    if isinstance(model, dict):
+        primary = model.get("primary")
+        if not isinstance(primary, str) or not primary.strip():
+            return None
+        raw_fallbacks = model.get("fallbacks")
+        fallbacks = (
+            [f.strip() for f in raw_fallbacks if isinstance(f, str) and f.strip()]
+            if isinstance(raw_fallbacks, list)
+            else []
+        )
+        return (primary.strip(), fallbacks)
+    return None
 
 
 class _ModelsPortMixin:
@@ -78,6 +127,69 @@ class _ModelsPortMixin:
 
         log.warning("[models_list] no catalogue available; returning []")
         return []
+
+    async def default_model(self) -> dict[str, Any] | None:
+        """``agents.defaults.model`` from the live gateway config.
+
+        ``config.get`` returns the gateway's config snapshot (``path``,
+        ``parsed``, ``resolved``, ``config`` = runtime-shaped, secrets
+        redacted — see openclaw ``ConfigFileSnapshot``). The runtime-shaped
+        ``config`` is preferred because it has ``$include`` / ``${ENV}``
+        already applied; ``resolved`` / ``parsed`` are read when an older
+        gateway omits it. When the RPC fails (gateway down, method unknown on
+        an old build) the file on disk is read instead, so the answer still
+        reflects what the gateway will load next. ``None`` when neither
+        names a model.
+        """
+        try:
+            client = await self._default_client()
+            resp = await client.send_request("config.get", {}, timeout=5)
+            if resp.ok and isinstance(resp.payload, dict):
+                payload = resp.payload
+                for key in ("config", "resolved", "parsed"):
+                    found = _default_model_from_config(payload.get(key))
+                    if found is not None:
+                        primary, fallbacks = found
+                        path = payload.get("path")
+                        detail = (
+                            f"{path}#{_DEFAULT_MODEL_KEY}"
+                            if isinstance(path, str) and path
+                            else _DEFAULT_MODEL_KEY
+                        )
+                        return {
+                            "model": primary,
+                            "fallbacks": fallbacks,
+                            "source": "openclaw.config.get",
+                            "source_detail": detail,
+                        }
+                log.debug("[default_model] config.get carries no %s", _DEFAULT_MODEL_KEY)
+                return None
+            log.debug(
+                "[default_model] config.get failed: %s",
+                resp.error.message if resp.error else "no payload",
+            )
+        except Exception as e:  # noqa: BLE001 — fall through to the file
+            log.debug("[default_model] config.get unavailable: %s", e)
+
+        path = _resolve_openclaw_config_path()
+        try:
+            config = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            log.warning("[default_model] openclaw config not found: %s", path)
+            return None
+        except (OSError, ValueError) as e:
+            log.warning("[default_model] openclaw config unreadable: %s: %s", path, e)
+            return None
+        found = _default_model_from_config(config)
+        if found is None:
+            return None
+        primary, fallbacks = found
+        return {
+            "model": primary,
+            "fallbacks": fallbacks,
+            "source": "openclaw.json",
+            "source_detail": f"{path}#{_DEFAULT_MODEL_KEY}",
+        }
 
     async def providers_list(self) -> list[dict[str, Any]]:
         """Raw provider dicts from `providers.list`; `[]` on failure.

@@ -80,6 +80,7 @@ class TestClaudeCodeCommunityEngineMetadata:
         # Model
         assert caps.supports(Capability.MODEL_LIST)
         assert caps.supports(Capability.MODEL_SWITCH)
+        assert caps.supports(Capability.MODEL_DEFAULT_GET)
         # File
         assert caps.supports(Capability.FILE_READ)
         assert caps.supports(Capability.FILE_WRITE)
