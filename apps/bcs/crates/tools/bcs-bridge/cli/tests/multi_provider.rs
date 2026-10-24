@@ -41,7 +41,7 @@ url='ws://127.0.0.1:21000/ws/bot'
 [[bot]]
 provider_bot_ref='parent'
 bot_id='bot_legacy'
-token='legacy-bot-secret'
+token='test-token'
 engine='codex'
 engine_bin='{}'
 cwd='{}'
@@ -62,7 +62,8 @@ async fn register(home: &Path, api: &str, provider: &str, auth: &str, extra: &[&
 }
 fn success(output: &std::process::Output) {
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    assert!(!String::from_utf8_lossy(&output.stdout).contains("bot-secret"));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("test-token") && !stdout.contains("bot-token"));
 }
 
 #[tokio::test]
@@ -73,10 +74,10 @@ async fn legacy_plus_subbots_upgrade_once_and_preserve_all_old_hard_state() {
         let calls = captured.clone(); async move {
             let mut count = calls.lock().unwrap(); *count += 1;
             let mut bytes = URL_SAFE_NO_PAD.decode(&q["token"]).unwrap(); bytes.truncate(bytes.len()-32);
-            let token: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            let claims: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
             let (parent,slug)=q["provider_bot_ref"].rsplit_once(':').unwrap();
-            (StatusCode::CREATED, axum::Json(json!({"code":20100,"data":{"bot_uuid":format!("bot_new_{count}"),"bot_token":"new-bot-secret",
-                "registration":{"provider_id":token["provider_id"],"auth_mode":token["auth_mode"],"mode":"plugin",
+            (StatusCode::CREATED, axum::Json(json!({"code":20100,"data":{"bot_uuid":format!("bot_new_{count}"),"bot_token":"bot-token",
+                "registration":{"provider_id":claims["provider_id"],"auth_mode":claims["auth_mode"],"mode":"plugin",
                     "provider_bot_ref":q["provider_bot_ref"],"agent_code":parent,"bot_slug":slug}}})))
         }
     }));

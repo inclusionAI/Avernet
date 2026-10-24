@@ -13,15 +13,15 @@ impl Server {
             let calls = captured.clone(); async move {
                 let count = calls.fetch_add(1, Ordering::SeqCst) + 1;
                 let bytes = URL_SAFE_NO_PAD.decode(&q["token"]).unwrap();
-                let token: serde_json::Value = serde_json::from_slice(&bytes[..bytes.len()-32]).unwrap();
-                let mut registration = json!({"provider_id":token["provider_id"], "auth_mode":token["auth_mode"],
+                let claims: serde_json::Value = serde_json::from_slice(&bytes[..bytes.len()-32]).unwrap();
+                let mut registration = json!({"provider_id":claims["provider_id"], "auth_mode":claims["auth_mode"],
                     "mode":"plugin", "provider_bot_ref":q["provider_bot_ref"]});
-                if token["auth_mode"] == "agentpass-subbots" {
+                if claims["auth_mode"] == "agentpass-subbots" {
                     let (parent, slug) = q["provider_bot_ref"].rsplit_once(':').unwrap();
                     registration["agent_code"] = parent.into(); registration["bot_slug"] = slug.into();
                 }
                 (StatusCode::CREATED, axum::Json(json!({"code":20100,"data":{
-                    "bot_uuid":format!("new_bot_{count}"),"bot_token":"fixture-token","registration":registration}})))
+                    "bot_uuid":format!("new_bot_{count}"),"bot_token":"test-token","registration":registration}})))
             }
         }));
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -57,7 +57,7 @@ impl Fixture {
                     let cwd = home.path().join(format!("cwd-{p}-{b}")); std::fs::create_dir(&cwd).unwrap(); cwd
                 } else { home.path().to_owned() };
                 let reference = if subbots { format!("parent:worker-{b}") } else { format!("worker-{b}") };
-                text.push_str(&format!("[[{prefix}bot]]\nprovider_bot_ref='{reference}'\nbot_id='bot_{p}_{b}'\ntoken='fixture-token'\nengine='codex'\nengine_bin='{}'\ncwd='{}'\n", engine.display(), cwd.display()));
+                text.push_str(&format!("[[{prefix}bot]]\nprovider_bot_ref='{reference}'\nbot_id='bot_{p}_{b}'\ntoken='test-token'\nengine='codex'\nengine_bin='{}'\ncwd='{}'\n", engine.display(), cwd.display()));
                 if subbots { text.push_str(&format!("agent_code='parent'\nbot_slug='worker-{b}'\n")); }
                 text.push_str(&format!("[{prefix}bot.registration]\nprovider_auth='static-bearer'\napi_url='{api}'\n"));
             }
@@ -75,12 +75,12 @@ impl Fixture {
     async fn register(&self, provider: &str, auth: &str, api: Option<&str>, extra: &[&str]) -> std::process::Output {
         let mut bytes = serde_json::to_vec(&json!({"v":2,"purpose":"provider_bot_registration","id":"human_test",
             "provider_id":provider,"auth_mode":auth,"allowed_modes":["plugin"],"exp":4102444800u64})).unwrap();
-        bytes.extend_from_slice(&[0; 32]); let token = URL_SAFE_NO_PAD.encode(bytes);
+        bytes.extend_from_slice(&[0; 32]); let encoded = URL_SAFE_NO_PAD.encode(bytes);
         let mut command = Command::new(env!("CARGO_BIN_EXE_bcs-bridge"));
         command.current_dir(self.home.path()).env("HOME", self.home.path())
             .env_remove("BRIDGE_CONFIG").env_remove("BRIDGE_REGISTER_TOKEN")
             .env("NO_PROXY", "127.0.0.1,localhost").env("no_proxy", "127.0.0.1,localhost")
-            .args(["register", "--token", &token, "--bot-name", "Test", "--engine", "codex",
+            .args(["register", "--token", &encoded, "--bot-name", "Test", "--engine", "codex",
                 "--engine-bin", self.engine.to_str().unwrap(), "--provider-auth", "static-bearer",
                 "--upstream-url", "ws://127.0.0.1:21000/ws/bot"]);
         if !extra.contains(&"--bot-id") { command.args(["--provider-bot-ref", "parent"]); }
