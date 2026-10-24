@@ -21,6 +21,8 @@ use bcs_service_api::{
     SystemMessageService, WorkbenchSessionService, backfill_bot_names,
 };
 use bcs_service_api::InteractionService;
+use bcs_service_api::application::v1::bot_authority::BotAuthorityService;
+use bcs_service_api::port::bot_authority::BotAuthorityPort;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -119,6 +121,13 @@ pub struct Services {
     pub secret: Arc<dyn SecretService>,
     /// Session file workspace application service.
     pub session_files: Arc<dyn SessionFileService>,
+    /// Unified bot-authority application facade
+    /// (manager set + ownership transfers, spec §5/§6).
+    pub bot_authority: Arc<dyn BotAuthorityService>,
+    /// The narrow authority hook business entrypoints
+    /// consult (delegates to the authority Core the
+    /// facade uses).
+    pub bot_authority_hook: Arc<dyn BotAuthorityPort>,
 }
 
 impl Services {
@@ -179,6 +188,8 @@ pub struct ServicesBuilder {
     channel: Option<Arc<dyn ChannelService>>,
     secret: Option<Arc<dyn SecretService>>,
     session_files: Option<Arc<dyn SessionFileService>>,
+    bot_authority: Option<Arc<dyn BotAuthorityService>>,
+    bot_authority_hook: Option<Arc<dyn BotAuthorityPort>>,
 }
 
 impl ServicesBuilder {
@@ -453,6 +464,18 @@ impl ServicesBuilder {
         self
     }
 
+    /// Set the unified bot-authority application facade.
+    pub fn bot_authority(mut self, service: Arc<dyn BotAuthorityService>) -> Self {
+        self.bot_authority = Some(service);
+        self
+    }
+
+    /// Set the narrow bot-authority hook.
+    pub fn bot_authority_hook(mut self, hook: Arc<dyn BotAuthorityPort>) -> Self {
+        self.bot_authority_hook = Some(hook);
+        self
+    }
+
     /// Build the services bundle, failing if any required service is unset.
     pub fn build(self) -> Result<Services, BuilderError> {
         Ok(Services {
@@ -505,6 +528,8 @@ impl ServicesBuilder {
             channel: required(self.channel, "channel")?,
             secret: required(self.secret, "secret")?,
             session_files: required(self.session_files, "session_files")?,
+            bot_authority: required(self.bot_authority, "bot_authority")?,
+            bot_authority_hook: required(self.bot_authority_hook, "bot_authority_hook")?,
         })
     }
 
@@ -513,6 +538,7 @@ impl ServicesBuilder {
     pub fn build_for_test(self) -> Services {
         use bcs_test_support::{
             NoopA2aChatRunService, NoopA2aChatService, NoopActorDirectoryService,
+            NoopBotAuthorityPort, NoopBotAuthorityService,
             NoopBotDeliveryPort, NoopBotDiscoveryService, NoopBotManagementService,
             NoopBotOnboardingService, NoopBotQueryService, NoopBotRegistryCoreService,
             NoopBotRunContextPort, NoopBotRuntimeConnectionService, NoopChannelService,
@@ -653,6 +679,12 @@ impl ServicesBuilder {
             session_files: self
                 .session_files
                 .unwrap_or_else(|| Arc::new(NoopSessionFileService)),
+            bot_authority: self
+                .bot_authority
+                .unwrap_or_else(|| Arc::new(NoopBotAuthorityService)),
+            bot_authority_hook: self
+                .bot_authority_hook
+                .unwrap_or_else(|| Arc::new(NoopBotAuthorityPort)),
         }
     }
 }

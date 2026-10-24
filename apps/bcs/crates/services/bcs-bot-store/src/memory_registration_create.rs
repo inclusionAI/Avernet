@@ -163,7 +163,7 @@ fn existing_record(path: &Path, bot_id: &str) -> ServiceResult<bool> {
     }
 }
 
-fn persist_once(path: &Path, record: &PersistedCapabilities) -> ServiceResult<bool> {
+pub(super) fn persist_once(path: &Path, record: &PersistedCapabilities) -> ServiceResult<bool> {
     if existing_record(path, &record.bot_id)? {
         return Ok(false);
     }

@@ -70,6 +70,13 @@ pub fn create_test_config(bots_dir: &PathBuf) -> BcsConfig {
         async_chat_poll_wait_max_ms: 30_000,
         async_chat_run_max_entries: 100_000,
         security_gateway: Default::default(),
+        // Test servers pin the strict post-migration posture by
+        // default: every suite keeps proving the old strict-deny
+        // semantics; the migration-window shim opts in per-suite.
+        bot_authority: bcs::BotAuthorityConfig {
+            legacy_created_by_fallback: false,
+            ..Default::default()
+        },
         security: Default::default(),
         message_history: MessageHistoryConfig::default(),
         api_keys: vec![],

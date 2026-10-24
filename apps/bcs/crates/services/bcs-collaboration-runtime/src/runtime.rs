@@ -996,6 +996,12 @@ impl CollaborationRuntime {
                 exclude_conn_id: None,
                 visibility_domain: MessageVisibilityDomain::StateMachine,
                 audience: Some(MessageAudience::Public),
+                // State-machine panel events authorize per event
+                // against current facts (v1 boundary: SM runs are
+                // not yet bound into operation permits).
+                operation_id: None,
+                terminal: false,
+                run_id: None,
             }),
         )
         .await;
@@ -1226,6 +1232,12 @@ impl CollaborationRuntime {
                 exclude_conn_id: None,
                 visibility_domain: MessageVisibilityDomain::StateMachine,
                 audience: Some(MessageAudience::FullOnly),
+                // State-machine bot events authorize per event
+                // against current facts (v1 boundary: SM runs are
+                // not yet bound into operation permits).
+                operation_id: None,
+                terminal: false,
+                run_id: None,
             })
             .await
         {

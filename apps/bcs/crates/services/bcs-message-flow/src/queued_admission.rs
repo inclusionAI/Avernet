@@ -300,6 +300,7 @@ pub(crate) async fn commit_routed_reply(
             kind: target.delivery_type,
             max_queued: limit,
             semantic_projection_json: projection,
+            run_id: None,
         });
     }
     let target_ids = targets.iter().map(|t| t.target_bot_id.clone()).collect();
@@ -525,11 +526,20 @@ pub(crate) async fn prepare_group_admission_with_message(
         let mut projection = serde_json::to_value(projection)?;
         projection["drain_context"] = serde_json::json!(drain);
         if let Some(policy) = &policy { projection["policy_version"] = serde_json::json!(policy.version); }
+        // F1 (spec §8.2 — R6): pre-assign the canonical run identity
+        // BEFORE the durable admission commits, so the sender can
+        // install the run's operation binding and frozen producer
+        // facts before ANY queue worker can execute the row. Only
+        // executable Send targets get one; admission-time rejections
+        // never run and stay unassigned.
+        let run_id = (target.delivery_type == bcs_domain::DeliveryType::Send && rejection.is_none())
+            .then(|| uuid::Uuid::new_v4().to_string());
         targets.push(DeliveryAdmissionTarget { rejection,
             target_bot_id: target.bot_uuid.clone(),
             kind: target.delivery_type,
             max_queued: limit,
             semantic_projection_json: projection,
+            run_id,
         });
     }
     let now_ms = chrono::Utc::now().timestamp_millis();

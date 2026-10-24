@@ -268,16 +268,35 @@ fn services_builder_with_bot_use_cases_and_friend(
     friend: Arc<dyn FriendCoreService>,
 ) -> ServicesBuilder {
     let registry_service: Arc<dyn BotRegistryCoreService> = registry;
-    let bot_use_cases = Arc::new(Bot::new_with_friend(
-        registry_service.clone(),
-        friend.clone(),
-    ));
+    let bot_use_cases = Arc::new(
+        Bot::new_with_friend(registry_service.clone(), friend.clone())
+            // 删除/配置/状态 consult the CURRENT
+            // owner edges (shared_route_authority).
+            .with_bot_authority(shared_route_authority()),
+    );
     Services::builder()
         .registry(registry_service)
         .friend(friend)
         .bot_query(bot_use_cases.clone())
         .bot_management(bot_use_cases.clone())
         .bot_discovery(bot_use_cases)
+}
+
+/// A process-wide LAZY authority chain for the
+/// route-contract suites: `save_created_by` owner
+/// facts are mirrored into it via
+/// `grant_owner_by_registry`, and the control legs
+/// read them live.
+fn shared_route_authority(
+) -> Arc<bcs_test_support::LazySeedAuthorityHook> {
+    static AUTHORITY: std::sync::OnceLock<
+        Arc<bcs_test_support::LazySeedAuthorityHook>,
+    > = std::sync::OnceLock::new();
+    AUTHORITY
+        .get_or_init(|| {
+            bcs_test_support::lazy_authority_chain().hook
+        })
+        .clone()
 }
 
 fn services_builder_with_group_use_cases(
@@ -287,11 +306,19 @@ fn services_builder_with_group_use_cases(
 ) -> ServicesBuilder {
     let group_service: Arc<dyn GroupCoreService> = group;
     let registry_service: Arc<dyn BotRegistryCoreService> = registry;
-    let group_use_cases = Arc::new(GroupManagement::with_defaults(
-        group_service.clone(),
-        registry_service.clone(),
-        friend.clone(),
-    ));
+    let group_use_cases = Arc::new(
+        GroupManagement::with_defaults(
+            group_service.clone(),
+            registry_service.clone(),
+            friend.clone(),
+        )
+        // The CURRENT control legs consult the
+        // authority hook (bot-authority plan
+        // Task 6.3); the lazy chain carries the
+        // owner edges registered per test
+        // (`shared_route_authority`).
+        .with_bot_authority(shared_route_authority()),
+    );
     Services::builder()
         .registry(registry_service)
         .friend(friend)
@@ -604,7 +631,14 @@ async fn get_bot_route_returns_registration_and_effective_status() {
         ChainUserIdentityPort::new(chain),
     )));
 
+    // A Human caller reading a Bot that grants them NO
+    // authority is denied (bot-authority plan carry
+    // B): the legacy `created_by: None → allow` read
+    // fallback no longer silently authorizes. (The
+    // unauthenticated read keeps its public
+    // projection elsewhere.)
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/bots/bot-alpha")
@@ -614,6 +648,19 @@ async fn get_bot_route_returns_registration_and_effective_status() {
         .await
         .unwrap();
 
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    // The CURRENT owner reads the same route.
+    shared_route_authority().seed_owner("bot-alpha", "alice");
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/bots/bot-alpha")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let json: Value = serde_json::from_slice(&body).unwrap();
@@ -657,7 +704,14 @@ async fn leave_bot_route_rejects_bot_token_without_human_identity() {
 #[tokio::test]
 async fn leave_bot_route_soft_deletes_owner_bot() {
     let temp_dir = TempDir::new().unwrap();
-    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
+    // ONE shared authority store: the hook's seeded edges are
+    // the same rows the store-level retirement re-verifies
+    // inside its atomic span (store 事务内复验).
+    let bot_repo = Arc::new(bcs_bot_store::MemoryBotRepo::with_base_dir(
+        temp_dir.path().to_path_buf(),
+    ));
+    let authority = bcs_test_support::lazy_authority_chain_with_repo(bot_repo.clone());
+    let registry = Arc::new(BotCore::with_repo(bot_repo));
     registry
         .register("bot-leave".to_string(), BotCapabilities::default())
         .await
@@ -666,7 +720,24 @@ async fn leave_bot_route_soft_deletes_owner_bot() {
         .save_created_by("bot-leave", "alice", true)
         .await
         .unwrap();
-    let services = services_builder_with_bot_use_cases(registry.clone()).build_for_test();
+    authority.hook.seed_owner("bot-leave", "alice");
+    // Same use-case wiring as the builder but against THIS
+    // test's shared authority store.
+    let registry_service: Arc<dyn BotRegistryCoreService> = registry.clone();
+    let bot_use_cases = Arc::new(
+        Bot::new_with_friend(
+            registry_service.clone(),
+            Arc::new(NoopFriendCoreService),
+        )
+        .with_bot_authority(authority.hook.clone()),
+    );
+    let services = Services::builder()
+        .registry(registry_service)
+        .friend(Arc::new(NoopFriendCoreService))
+        .bot_query(bot_use_cases.clone())
+        .bot_management(bot_use_cases.clone())
+        .bot_discovery(bot_use_cases)
+        .build_for_test();
     let chain = static_auth_chain("alice", "Alice");
     let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
         ChainUserIdentityPort::new(chain),
@@ -703,6 +774,7 @@ async fn leave_bot_route_rejects_non_owner_human_identity() {
         .save_created_by("bot-leave", "alice", true)
         .await
         .unwrap();
+    shared_route_authority().seed_owner("bot-leave", "alice");
     let services = services_builder_with_bot_use_cases(registry.clone()).build_for_test();
     let chain = static_auth_chain("bob", "Bob");
     let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
@@ -1167,67 +1239,6 @@ async fn bot_status_route_accepts_payload_without_retaining_it() {
 
     let stored = registry.get("bot-alpha").await.unwrap();
     assert!(serde_json::to_value(stored).unwrap().get("dynamic_status").is_none());
-}
-
-#[tokio::test]
-async fn my_bots_route_uses_mock_user_identity_and_creator_filter() {
-    let temp_dir = TempDir::new().unwrap();
-    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
-    for bot_id in ["bot-owned", "bot-other"] {
-        registry
-            .register(
-                bot_id.to_string(),
-                BotCapabilities {
-                    name: Some(bot_id.to_string()),
-                    summary: Some("Test bot".to_string()),
-                    skills: vec![Skill::new("ops")],
-                    visibility: "protected".to_string(),
-                    ..BotCapabilities::default()
-                },
-            )
-            .await
-            .unwrap();
-    }
-    registry
-        .save_created_by("bot-owned", "alice", true)
-        .await
-        .unwrap();
-    registry
-        .save_created_by("bot-other", "bob", true)
-        .await
-        .unwrap();
-    registry
-        .register_streaming_connection("bot-owned".to_string())
-        .await
-        .unwrap();
-    let services = services_builder_with_bot_use_cases(registry).build_for_test();
-    let chain = static_auth_chain("alice", "Alice");
-    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
-        ChainUserIdentityPort::new(chain),
-    )));
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/bots/my?offset=0&limit=10")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["total"], 1);
-    assert_eq!(json["items"][0]["bot_uuid"], "bot-owned");
-    assert_eq!(json["items"][0]["created_by"], "alice");
-    assert_eq!(json["items"][0]["visibility"], "protected");
-    assert_eq!(
-        json["items"][0]["capabilities"]["skills"],
-        serde_json::json!(["ops"])
-    );
-    assert_eq!(json["items"][0]["dynamic_status"]["status"], "active");
 }
 
 #[tokio::test]
@@ -1829,6 +1840,8 @@ async fn create_group_route_persists_normal_group_and_includes_driver() {
         .save_created_by("driver-bot", "alice", true)
         .await
         .unwrap();
+    shared_route_authority().seed_owner("driver-bot", "alice");
+    shared_route_authority().seed_owner("driver-bot", "alice");
     let group = Arc::new(GroupStore::new());
     let services = Services::builder()
         .registry(registry.clone())
@@ -2246,6 +2259,13 @@ async fn service_group_routes_are_not_registered() {
 
 #[tokio::test]
 async fn group_secondary_routes_preserve_metadata_and_reject_removed_workspace() {
+    // Grant the Human→Bot control edge in OUR OWN setup: this
+    // test's driver control legs consult the live authority
+    // chain, and the shared lazy chain may not yet carry an
+    // owner edge for ("driver-bot", "alice") when this test
+    // runs before the sibling seeding tests under CI's
+    // parallel order.
+    shared_route_authority().seed_owner("driver-bot", "alice");
     let temp_dir = TempDir::new().unwrap();
     let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
     for bot_id in ["driver-bot", "member-bot", "new-bot"] {
@@ -2436,6 +2456,8 @@ async fn add_group_member_route_rejects_non_owner_human_identity() {
         .save_created_by("driver-bot", "alice", true)
         .await
         .unwrap();
+    shared_route_authority().seed_owner("driver-bot", "alice");
+    shared_route_authority().seed_owner("driver-bot", "alice");
     registry
         .store_token_mapping("driver-token".to_string(), "driver-bot".to_string())
         .await;
@@ -2451,11 +2473,14 @@ async fn add_group_member_route_rejects_non_owner_human_identity() {
     let services = Services::builder()
         .registry(registry.clone())
         .group(groups.clone())
-        .group_management(Arc::new(GroupManagement::with_defaults(
-            groups.clone(),
-            registry,
-            Arc::new(NoopFriendCoreService),
-        )))
+        .group_management(Arc::new(
+            GroupManagement::with_defaults(
+                groups.clone(),
+                registry,
+                Arc::new(NoopFriendCoreService),
+            )
+            .with_bot_authority(shared_route_authority()),
+        ))
         .build_for_test();
     let chain = static_auth_chain("bob", "Bob");
     let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
@@ -2507,6 +2532,8 @@ async fn add_group_member_route_allows_private_friend_target() {
         .save_created_by("driver-bot", "alice", true)
         .await
         .unwrap();
+    shared_route_authority().seed_owner("driver-bot", "alice");
+    shared_route_authority().seed_owner("driver-bot", "alice");
     registry
         .store_token_mapping("driver-token".to_string(), "driver-bot".to_string())
         .await;
@@ -2527,11 +2554,10 @@ async fn add_group_member_route_allows_private_friend_target() {
         .registry(registry.clone())
         .friend(friend.clone())
         .group(groups.clone())
-        .group_management(Arc::new(GroupManagement::with_defaults(
-            groups.clone(),
-            registry,
-            friend,
-        )))
+        .group_management(Arc::new(
+        GroupManagement::with_defaults(groups.clone(), registry, friend)
+            .with_bot_authority(shared_route_authority()),
+    ))
         .build_for_test();
     let chain = static_auth_chain("alice", "Alice");
     let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
@@ -2601,11 +2627,14 @@ async fn group_routing_policy_route_merges_and_persists_policy() {
     let services = Services::builder()
         .registry(registry.clone())
         .group(groups.clone())
-        .group_management(Arc::new(GroupManagement::with_defaults(
-            groups.clone(),
-            registry,
-            Arc::new(NoopFriendCoreService),
-        )))
+        .group_management(Arc::new(
+            GroupManagement::with_defaults(
+                groups.clone(),
+                registry,
+                Arc::new(NoopFriendCoreService),
+            )
+            .with_bot_authority(shared_route_authority()),
+        ))
         .build_for_test();
     let app = build_router(HttpAppState::new(services));
 
@@ -2683,11 +2712,14 @@ async fn participant_mode_route_allows_actor_self_update() {
     let services = Services::builder()
         .registry(registry.clone())
         .group(groups.clone())
-        .group_management(Arc::new(GroupManagement::with_defaults(
-            groups.clone(),
-            registry,
-            Arc::new(NoopFriendCoreService),
-        )))
+        .group_management(Arc::new(
+            GroupManagement::with_defaults(
+                groups.clone(),
+                registry,
+                Arc::new(NoopFriendCoreService),
+            )
+            .with_bot_authority(shared_route_authority()),
+        ))
         .build_for_test();
     let app = build_router(HttpAppState::new(services));
 

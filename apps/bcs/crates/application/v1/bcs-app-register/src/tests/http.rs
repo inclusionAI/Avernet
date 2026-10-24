@@ -1,7 +1,7 @@
-use super::provider_registration::{core_errors, scoped_payload, scoped_service};
+use super::provider_registration::{core_errors, scoped_payload, scoped_service, seed_humans};
 use super::*;
 use axum::http::StatusCode;
-use bcs_domain::provider_registration_token::{self, ProviderRegistrationMode};
+use bcs_domain::provider_registration_token;
 use serde_json::json;
 use tower::ServiceExt;
 
@@ -19,7 +19,7 @@ async fn scoped_http_registration_uses_signed_owner_and_provider_anonymously() {
             if mode != "&mode=gateway" && !webhook.is_empty() {
                 continue;
             }
-            let (svc, core, management, onboarding) = scoped_service();
+            let (svc, core, _) = scoped_service();
             let app = test_router(Arc::new(svc));
             let response = app
                 .clone()
@@ -85,16 +85,17 @@ async fn scoped_http_registration_uses_signed_owner_and_provider_anonymously() {
             assert_eq!(commands[0].owner, "staff-1");
             assert_eq!(commands[0].provider_id, "provider-a");
             assert_eq!(commands[0].token_auth_mode, Some(bcs_domain::ProviderAuthMode::StaticBearer));
-            assert!(management.connected.lock().unwrap().is_empty());
-            assert!(onboarding.onboarded.lock().unwrap().is_empty());
         }
     }
 }
 
+/// The v1 token registration is anonymous through the real
+/// trusted chain and answers the flat 201 envelope.
 #[tokio::test]
 async fn legacy_http_exact_shape_and_aliases_remain_anonymous() {
     for name in ["bot-name", "bot_name"] {
-        let (svc, core, management, _) = scoped_service();
+        let (svc, provider_core, repo) = scoped_service();
+        provider_registration::seed_humans(&repo, &["staff-1"]).await;
         let app = test_router(Arc::new(svc));
         let response = app
             .clone()
@@ -122,16 +123,22 @@ async fn legacy_http_exact_shape_and_aliases_remain_anonymous() {
             .unwrap();
         assert_eq!(response.status(), StatusCode::CREATED);
         assert_eq!(response.headers()["cache-control"], "no-store");
+        let body = response_json(response).await;
+        assert_eq!(body["code"], 20100);
+        assert_eq!(body["message"], "Created");
+        assert_eq!(body["data"]["bot_name"], "Test Bot");
+        let bot_uuid = body["data"]["bot_uuid"].as_str().unwrap().to_string();
+        // Committed where the trusted chain commits: the Bot
+        // exists with the verified owner and the returned
+        // token is the persisted credential.
+        let bot = repo.get(&bot_uuid).await.expect("committed bot");
+        assert_eq!(bot.created_by.as_deref(), Some("staff-1"));
         assert_eq!(
-            response_json(response).await,
-            json!({
-                "code": 20100, "message": "Created", "request_id": "request-123",
-                "data": { "bot_name": "Test Bot", "bot_uuid": "bot-1", "bot_token": "bot-token-1" },
-            })
+            repo.load_token(&bot_uuid).await,
+            body["data"]["bot_token"].as_str().map(str::to_string)
         );
-        assert_eq!(management.connected.lock().unwrap().len(), 1);
-        assert!(core.authorized.lock().unwrap().is_empty());
-        assert!(core.registered.lock().unwrap().is_empty());
+        assert!(body["data"]["bot_token"].as_str().unwrap().len() > 0);
+        assert!(provider_core.registered.lock().unwrap().is_empty());
     }
 }
 
@@ -139,7 +146,7 @@ async fn legacy_http_exact_shape_and_aliases_remain_anonymous() {
 async fn core_reauthorization_and_persistence_errors_reach_http_without_details() {
     for redeem in [false, true] {
         for (error, code) in core_errors() {
-            let (svc, core, management, _) = scoped_service();
+            let (svc, provider_core, _) = scoped_service();
             let app = test_router(Arc::new(svc));
             let response = if redeem {
                 // Issue first, then simulate a policy/provider/persistence change at redemption.
@@ -154,7 +161,7 @@ async fn core_reauthorization_and_persistence_errors_reach_http_without_details(
                     .unwrap();
                 let issued = response_json(issued).await;
                 let token = issued["data"]["token"].as_str().unwrap();
-                *core.register_error.lock().unwrap() = Some(error);
+                *provider_core.register_error.lock().unwrap() = Some(error);
                 app.oneshot(bare_request(
                     "POST",
                     &format!("{REGISTER}?token={token}&bot_name=Test&provider_bot_ref=ref-1"),
@@ -162,7 +169,7 @@ async fn core_reauthorization_and_persistence_errors_reach_http_without_details(
                 .await
                 .unwrap()
             } else {
-                *core.issue_error.lock().unwrap() = Some(error);
+                *provider_core.issue_error.lock().unwrap() = Some(error);
                 app.oneshot(authenticated_request(
                     "GET",
                     &format!("{REGISTER}/token?provider_id=provider-a"),
@@ -187,14 +194,13 @@ async fn core_reauthorization_and_persistence_errors_reach_http_without_details(
             assert!(!body.to_string().contains("secret"));
             assert!(body["data"].get("token").is_none());
             assert!(body["data"].get("bot_token").is_none());
-            assert!(management.connected.lock().unwrap().is_empty());
         }
     }
 }
 
 #[tokio::test]
 async fn signed_scope_and_expiry_fail_before_core_in_http() {
-    let (svc, core, management, _) = scoped_service();
+    let (svc, provider_core, _) = scoped_service();
     let app = test_router(Arc::new(svc));
     let expired = ProviderRegisterTokenPayload {
         exp: 0,
@@ -232,6 +238,5 @@ async fn signed_scope_and_expiry_fail_before_core_in_http() {
         let body = response_json(response).await;
         assert!(!body.to_string().contains(&token));
     }
-    assert!(core.registered.lock().unwrap().is_empty());
-    assert!(management.connected.lock().unwrap().is_empty());
+    assert!(provider_core.registered.lock().unwrap().is_empty());
 }

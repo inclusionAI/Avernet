@@ -13,6 +13,7 @@ use bcs_event_store::MemoryEventStore;
 use bcs_service_api::port::repo::{
     CommitGroupEventfulMutation, FinalizeGroupProvisioning, GroupEventfulMutation, GroupRepoPort,
 };
+use bcs_service_api::types::authorization_snapshot::GroupAuthorizationSnapshot;
 use bcs_service_api::types::MessageViewScope;
 use bcs_service_api::{
     Group as DomainGroup, GroupHumanNotifyPolicy, GroupKind, GroupMessage,
@@ -670,6 +671,19 @@ impl GroupRepoPort for MemoryGroupRepo {
             mode: group.human_mention_notify_mode,
             driver_bot_id: group.driver_bot.clone(),
         }))
+    }
+
+    async fn read_authorization_snapshot(
+        &self,
+        group_id: &str,
+    ) -> ServiceResult<Option<GroupAuthorizationSnapshot>> {
+        // Memory projects from the CURRENT state, so a second store
+        // instance always observes the just-committed value.
+        let groups = self.groups.read().await;
+        let env = bcs_config::resolve_env_str();
+        Ok(groups
+            .get(group_id)
+            .map(|group| super::authorization_snapshot::memory_snapshot(env, group)))
     }
 
     async fn message_count(&self, id: &str) -> ServiceResult<usize> {

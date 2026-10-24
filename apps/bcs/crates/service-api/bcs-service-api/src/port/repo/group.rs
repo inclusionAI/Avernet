@@ -232,4 +232,22 @@ pub trait GroupRepoPort: Send + Sync {
             "current Group human-notify policy read is not implemented".to_string(),
         ))
     }
+
+    /// Read the Group's authorization-fact snapshot (spec §8.3).
+    ///
+    /// `Ok(None)` means Group not found. This is a strict read
+    /// against the MASTER data source: implementations must NOT
+    /// consult an ordinary `try_get` display cache and must NOT
+    /// fall back to that cache on a read failure. A storage or
+    /// decoding failure is always `Err`. The default keeps
+    /// unconfigured repository implementations fail-closed.
+    async fn read_authorization_snapshot(
+        &self,
+        _group_id: &str,
+    ) -> ServiceResult<Option<crate::types::authorization_snapshot::GroupAuthorizationSnapshot>>
+    {
+        Err(ServiceError::InternalError(
+            "Group authorization snapshot reads are not implemented".to_string(),
+        ))
+    }
 }

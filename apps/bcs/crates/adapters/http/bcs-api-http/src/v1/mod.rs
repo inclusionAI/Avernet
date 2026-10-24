@@ -1,3 +1,4 @@
+pub mod bot_authority;
 pub mod common;
 pub mod gateway_principal;
 pub mod group_session_connection;
@@ -27,8 +28,22 @@ pub fn router(state: ApiState) -> Router {
             state.clone(),
             verify_principal::<ApiState>,
         ));
+    // The unified authority surface (spec §5.1/§6.1) shares
+    // ONLY the signature verification boundary — it is never
+    // anonymous and never URL-whitelisted. It does NOT take
+    // the always-Human invite gate: Human admission (with the
+    // invite-code check) runs in the application per call
+    // (spec §6.1), while the ordinary routes above keep the
+    // gate unchanged.
+    let authority_protected = Router::new()
+        .merge(bot_authority::protected_router())
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            verify_principal::<ApiState>,
+        ));
     Router::new()
         .merge(protected)
+        .merge(authority_protected)
         .merge(openapi::public_router())
         .merge(internal::public_router())
         .with_state(state)

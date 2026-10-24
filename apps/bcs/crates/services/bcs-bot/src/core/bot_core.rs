@@ -11,17 +11,30 @@ use bcs_service_api::lifecycle::{LifecycleError, ServiceLifecycle};
 use bcs_service_api::port::repo::{
     BotRepoPort, ProviderBotBindingRepoPort, ProviderCredentialRepoPort, ProviderRepoPort,
 };
+use bcs_service_api::core::registry::CommittedBotRegistration;
 use bcs_service_api::{
     ActorStatus, AgentCredentials, BotCapabilities, BotConnectParams, BotConnectResult,
     BotDeliveryTarget, BotRegistryCoreService, ConnectError,
     ConnectStreamError, ConnectionKind, CoordinationSurface, EnsureHumanResult, RedactedToken,
     RegisteredBot, ServiceError, ServiceResult,
 };
+use bcs_service_api::types::bot_authority::BotOwnershipView;
 use tracing::{debug, info, warn};
 
 use super::ids::{new_bot_uuid, new_session_token};
 use super::provider_core::{parse_coordination_config, parse_downlink_config};
 use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
+use bcs_service_api::core::registry::RuntimeActivitySnapshot;
+
+/// Unix milliseconds of the current instant — the
+/// observation-instant clock of [`BotCore::
+/// try_runtime_activity_for`].
+fn unix_millis_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_millis() as u64)
+        .unwrap_or(0)
+}
 
 /// Core bot registry service implementation.
 ///
@@ -86,6 +99,26 @@ impl BotCore {
         &self,
     ) -> Option<&Arc<dyn ProviderBotBindingRepoPort>> {
         self.provider_bindings.as_ref()
+    }
+
+    /// Project the observed ids onto the requested bot ids
+    /// and stamp the observation instant. The snapshot
+    /// NEVER reports activity for ids the caller did not
+    /// ask about.
+    fn activity_snapshot(
+        &self,
+        observed_at_ms: u64,
+        bot_ids: &[String],
+        active: HashSet<String>,
+    ) -> RuntimeActivitySnapshot {
+        let requested = bot_ids.iter().cloned().collect::<HashSet<_>>();
+        RuntimeActivitySnapshot {
+            observed_at_ms,
+            active_bot_ids: active
+                .into_iter()
+                .filter(|bot_id| requested.contains(bot_id))
+                .collect(),
+        }
     }
 
     /// Check affiliation before a delivery switch can create owner edges.
@@ -202,6 +235,90 @@ impl BotRegistryCoreService for BotCore {
         self.repo.create_registration_if_absent(bot_id, capabilities, created_by, token).await
     }
 
+    /// Trusted human registration (spec §10.2): the core
+    /// assigns the Bot ID and runtime token and hands the
+    /// whole committed state to the repo's composite create.
+    /// Failure means NOTHING committed, so no credential ever
+    /// reaches the caller.
+    async fn register_with_ownership(
+        &self,
+        registration: bcs_service_api::core::registry::TrustedBotRegistration,
+    ) -> ServiceResult<CommittedBotRegistration> {
+        let bcs_service_api::core::registry::TrustedBotRegistration {
+            capabilities,
+            initialization,
+        } = registration;
+        let owner = initialization.owner_user_id.trim().to_string();
+        if owner.is_empty() {
+            return Err(ServiceError::InvalidOperation {
+                message: "trusted registration requires an owner".into(),
+                request_id: None,
+            });
+        }
+        if capabilities.name.as_deref().unwrap_or("").trim().is_empty() {
+            return Err(ServiceError::InvalidOperation {
+                message: "trusted registration requires a bot name".into(),
+                request_id: None,
+            });
+        }
+        let bot_id = new_bot_uuid();
+        let token = new_session_token();
+        let created = self
+            .repo
+            .create_registration_if_absent_with_ownership(
+                bot_id.clone(),
+                capabilities,
+                owner.trim(),
+                &token,
+                initialization,
+            )
+            .await?;
+        if !created {
+            return Err(ServiceError::Conflict(
+                "Bot registration identity already exists".into(),
+            ));
+        }
+        Ok(CommittedBotRegistration {
+            bot_name: self
+                .repo
+                .get(&bot_id)
+                .await
+                .and_then(|bot| bot.capabilities.name)
+                .unwrap_or_default(),
+            bot_uuid: bot_id,
+            bot_token: token,
+        })
+    }
+
+    async fn initialize_ownership(
+        &self,
+        bot_id: &str,
+        owner_user_id: &str,
+        mutation: bcs_service_api::types::bot_authority::AuthorityMutation,
+    ) -> ServiceResult<BotOwnershipView> {
+        self.repo.initialize_ownership(bot_id, owner_user_id, mutation).await
+    }
+
+    async fn ownership_governance_state(
+        &self,
+        bot_id: &str,
+    ) -> ServiceResult<
+        Option<bcs_service_api::types::bot_authority::BotOwnershipGovernance>,
+    > {
+        self.repo.ownership_governance_state(bot_id).await
+    }
+
+    async fn retire_with_authority(
+        &self,
+        bot_id: &str,
+        mutation: bcs_service_api::types::bot_authority::AuthorityMutation,
+    ) -> ServiceResult<bool> {
+        // The ordinary `retire` is its own command — never
+        // chained into a Provider retirement (spec §7.1).
+        // The real mutation actor is the audit initiator.
+        self.repo.retire_with_authority(bot_id, mutation).await
+    }
+
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {
         let capabilities = self.protect_provider_identity(&bot_id, capabilities).await?;
         self.repo.register(bot_id, capabilities).await
@@ -239,6 +356,10 @@ impl BotRegistryCoreService for BotCore {
 
     async fn try_get(&self, bot_id: &str) -> ServiceResult<Option<RegisteredBot>> {
         self.repo.try_get(bot_id).await
+    }
+
+    async fn try_get_many(&self, bot_ids: &[String]) -> ServiceResult<Vec<RegisteredBot>> {
+        self.repo.try_get_many(bot_ids).await
     }
 
     async fn get_including_deleted(&self, bot_id: &str) -> Option<RegisteredBot> {
@@ -410,6 +531,16 @@ impl BotRegistryCoreService for BotCore {
         created_by: &str,
     ) -> ServiceResult<Vec<RegisteredBot>> {
         self.repo.try_list_bots_by_creator(created_by).await
+    }
+
+    async fn list_uninitialized_bots_by_creator(
+        &self,
+        created_by: &str,
+        limit: usize,
+    ) -> ServiceResult<Vec<RegisteredBot>> {
+        self.repo
+            .list_uninitialized_bots_by_creator(created_by, limit)
+            .await
     }
 
     async fn discover(&self, query: &str) -> Vec<RegisteredBot> {
@@ -622,7 +753,142 @@ impl BotRegistryCoreService for BotCore {
         self.repo.is_connected(bot_id).await
     }
 
-    async fn list_runtime_active_bot_ids(&self, bot_ids: &[String]) -> Vec<String> {
+    /// ONE runtime-activity observation (spec §8.0
+    /// point 2): ONE WS connection-set read of the
+    /// current instance, then the Provider
+    /// binding/provider/credential resolution over the
+    /// NOT-WS-active ids in bounded batches (≤
+    /// `AUTHORITY_QUERY_CHUNK` ids per bindings query;
+    /// the one provider and credential batch). The
+    /// `WS active || HTTP Provider routable` semantics of
+    /// `list_runtime_active_bot_ids` are preserved
+    /// exactly — but read failures PROPAGATE instead of
+    /// the legacy warn-and-degrade, so a store outage can
+    /// never masquerade as "unreachable".
+    async fn try_runtime_activity_for(
+        &self,
+        bot_ids: &[String],
+    ) -> ServiceResult<RuntimeActivitySnapshot> {
+        let observed_at_ms = unix_millis_now();
+        // ONE observation of the current instance's WS
+        // connection set.
+        let ws_connected = self
+            .repo
+            .list_connected()
+            .await
+            .into_iter()
+            .collect::<HashSet<_>>();
+        let mut active: HashSet<String> = bot_ids
+            .iter()
+            .filter(|bot_id| ws_connected.contains(*bot_id))
+            .cloned()
+            .collect();
+        let mut provider_candidates = bot_ids
+            .iter()
+            .filter(|bot_id| !ws_connected.contains(*bot_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        // The core NEVER returns duplicates regardless of
+        // caller input.
+        provider_candidates.dedup();
+
+        let Some(provider_bindings) = &self.provider_bindings else {
+            return Ok(self.activity_snapshot(observed_at_ms, bot_ids, active));
+        };
+        let Some(provider_repo) = &self.provider_repo else {
+            return Ok(self.activity_snapshot(observed_at_ms, bot_ids, active));
+        };
+        let Some(provider_credentials) = &self.provider_credentials else {
+            return Ok(self.activity_snapshot(observed_at_ms, bot_ids, active));
+        };
+
+        // Bounded provider resolution: at most
+        // AUTHORITY_QUERY_CHUNK ids per bindings query (spec
+        // §8.0: 有界块数而非 N 次 DB 往返).
+        let mut bindings = Vec::new();
+        for chunk in provider_candidates.chunks(
+            bcs_service_api::types::bot_authority::AUTHORITY_QUERY_CHUNK,
+        ) {
+            bindings.extend(
+                provider_bindings
+                    .list_bindings_by_bot_uuids(chunk)
+                    .await?,
+            );
+        }
+        let provider_ids = bindings
+            .iter()
+            .filter(|binding| !binding.disabled)
+            .map(|binding| binding.provider_id.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        if provider_ids.is_empty() {
+            return Ok(self.activity_snapshot(observed_at_ms, bot_ids, active));
+        }
+
+        let providers = provider_repo
+            .list_providers_by_ids(&provider_ids)
+            .await?
+            .into_iter()
+            .map(|provider| (provider.provider_id.clone(), provider))
+            .collect::<HashMap<_, _>>();
+        let credentials = provider_credentials
+            .list_credentials_by_kind_for_providers(
+                &provider_ids,
+                "downlink_bcs_to_provider",
+            )
+            .await?
+            .into_iter()
+            .map(|credential| (credential.provider_id.clone(), credential))
+            .collect::<HashMap<_, _>>();
+
+        // Same routability predicates as the legacy
+        // per-bot target resolution: binding, provider and
+        // credential enabled, downlink enabled and one
+        // delivery endpoint resolvable.
+        for binding in bindings {
+            if binding.disabled {
+                continue;
+            }
+            let Some(provider) = providers.get(&binding.provider_id) else {
+                continue;
+            };
+            if provider.disabled {
+                continue;
+            }
+            let Ok(downlink) = parse_downlink_config(&provider.config) else {
+                continue;
+            };
+            if !downlink.enabled
+                || binding.webhook_url.as_ref().or(downlink.webhook_url.as_ref()).is_none()
+            {
+                continue;
+            }
+            let Some(credential) = credentials.get(&binding.provider_id) else {
+                continue;
+            };
+            if credential.disabled {
+                continue;
+            }
+            active.insert(binding.bot_uuid);
+        }
+        Ok(self.activity_snapshot(observed_at_ms, bot_ids, active))
+    }
+
+    /// Batch check runtime-active actors for owner-facing
+    /// lists (the legacy per-page helper).
+    ///
+    /// Runtime active intentionally ignores actor lifecycle
+    /// visibility (`Hidden`) and means either an active WS
+    /// connection or a routable HTTP provider target. On
+    /// provider read failures this kept the historical
+    /// degraded-success shape — the mine path does NOT use
+    /// it any more; [`Self::try_runtime_activity_for`] is
+    /// the strict §8.0 observation.
+    async fn list_runtime_active_bot_ids(
+        &self,
+        bot_ids: &[String],
+    ) -> Vec<String> {
         let mut active = HashSet::new();
         let mut provider_candidates = Vec::new();
         for bot_id in bot_ids {

@@ -1,3 +1,4 @@
+mod support;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
@@ -153,6 +154,7 @@ async fn resolve_flow_is_agnostic_to_websocket_provider_target() {
         group_session_connections: None,
         frontend_connections: connections.clone(),
         run_channels,
+        delivery_admission: Arc::new(support::AllowAllAdmission),
     });
     let (tx, mut rx) = mpsc::channel(16);
     connections
@@ -176,6 +178,7 @@ async fn resolve_flow_is_agnostic_to_websocket_provider_target() {
         actor_id: Some("human-e2e-ws".to_string()),
     };
     let mut connection_state = WebClientConnectionState::default();
+    let _protected_rx = connection_state.open_protected_queue();
     let frame = BcsFrame::Request(RequestFrame::new(
         "resolve-ws-first",
         "interaction.resolve",
@@ -250,6 +253,7 @@ async fn requested_events_resolve_in_reverse_order_retry_and_continue_on_same_ru
         group_session_connections: None,
         frontend_connections: connections.clone(),
         run_channels,
+        delivery_admission: Arc::new(support::AllowAllAdmission),
     });
     let (tx, mut rx) = mpsc::channel(16);
     connections
@@ -279,6 +283,7 @@ async fn requested_events_resolve_in_reverse_order_retry_and_continue_on_same_ru
         actor_id: Some("human-e2e".to_string()),
     };
     let mut connection_state = WebClientConnectionState::default();
+    let _protected_rx = connection_state.open_protected_queue();
     for (request_id, interaction_id, idempotency_key, expect_ok) in [
         ("resolve-second-1", "second", "idem-second", false),
         ("resolve-second-2", "second", "idem-second", true),

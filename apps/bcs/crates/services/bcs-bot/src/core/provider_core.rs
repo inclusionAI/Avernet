@@ -11,9 +11,11 @@ use bcs_service_api::{
     ProviderBotBinding, ProviderBotBindingRepoPort, ProviderBotConnectionMode,
     ProviderBasicInfo, ProviderBotCoreService, ProviderCoordinationConfig, ProviderCoreService, ProviderCredential,
     ProviderCredentialRepoPort, ProviderOrganizationManagementConfig, ProviderRecord,
-    ProviderRepoPort, RegisterProviderBotParams, RegisteredProvider, RuntimeBotIdentity,
+    ProviderRepoPort, ProviderRetirement, RegisterProviderBotParams, RegisteredProvider, RuntimeBotIdentity,
     ServiceError, ServiceResult, Skill, UpdateProviderBotCoreResult, mock_token,
 };
+
+use bcs_service_api::core::RetireProviderBotParams;
 
 use super::ids::{new_bot_uuid, new_provider_id, new_session_token};
 use bcs_service_api::bot_provider::{BotConnectionMode, BotProviderRecord};
@@ -1104,16 +1106,126 @@ impl ProviderCoreService for ProviderCore {
 
 #[async_trait]
 impl ProviderBotCoreService for ProviderCore {
-    async fn delete_registered_provider_bot(
-        &self, provider_id: &str, provider_admin_token: &str, provider_bot_ref: &str,
-    ) -> ServiceResult<Option<bcs_service_api::core::ProviderBotDeletion>> {
-        self.authenticated_provider(provider_id, provider_admin_token).await?;
-        let Some(metadata) = &self.bot_providers else { return Ok(None); };
-        let Some(record) = metadata.get_provider_bot_by_ref(provider_id, provider_bot_ref).await? else { return Ok(None); };
-        let deleted = metadata.delete_provider_bot(provider_id, &record.bot_uuid, now_ms()).await?;
-        // The durable tombstone has committed. Clear runtime/token caches too.
-        self.registry.soft_delete(&record.bot_uuid).await;
-        Ok(Some(bcs_service_api::core::ProviderBotDeletion { bot_uuid: record.bot_uuid, deleted }))
+    async fn retire_registered_bot(
+        &self,
+        params: bcs_service_api::core::RetireProviderBotParams,
+    ) -> ServiceResult<ProviderRetirement> {
+        use bcs_service_api::core::{
+            ProviderRetire, ProviderRetireBranch,
+        };
+        let RetireProviderBotParams {
+            provider_id,
+            provider_admin_token,
+            provider_bot_ref,
+            allow_unbound_owner_suffixed_bot,
+        } = params;
+        // The credential verification stays in the Core
+        // (the same flows the read/update paths run); the
+        // token NEVER enters the mutation, audit rows or
+        // the return value.
+        let provider = self
+            .authenticated_provider(&provider_id, &provider_admin_token)
+            .await?;
+        if provider.provider_id != provider_id {
+            return Err(ServiceError::Forbidden(
+                "provider_id_mismatch".to_string(),
+            ));
+        }
+        validate_external_id("provider_bot_ref", &provider_bot_ref)?;
+        let Some(metadata) = &self.bot_providers else {
+            return Err(ServiceError::InvalidOperation {
+                message: "provider bot retirement requires the \
+                          Bot Provider metadata adapter"
+                    .to_string(),
+                request_id: None,
+            });
+        };
+
+        // Resolve the Bot within the existing limits on the
+        // three durable identity branches. The flagged
+        // LegacyUnbound lookup NEVER grants delete power by
+        // itself — the owner-suffix admission and the store's
+        // re-verified rules stay intact.
+        let (bot_id, expected_branch) = if let Some(record) =
+            metadata
+                .get_provider_bot_by_ref(
+                    &provider.provider_id,
+                    &provider_bot_ref,
+                )
+                .await?
+        {
+            // The accepted Provider membership routes the
+            // retirement; the tombstone KEEPS the metadata,
+            // so a cleanup retry re-derives the same branch.
+            (record.bot_uuid, ProviderRetireBranch::Metadata)
+        } else if let Some(binding) = self
+            .bindings
+            .get_binding_by_provider_ref(
+                &provider.provider_id,
+                &provider_bot_ref,
+            )
+            .await?
+        {
+            // Legacy gateway before metadata backfill: the
+            // binding routes the retirement.
+            (
+                binding.bot_uuid,
+                ProviderRetireBranch::BindingFallback,
+            )
+        } else if allow_unbound_owner_suffixed_bot
+            && bcs_service_api::core::provider::
+                is_owner_suffixed_bot_id(&provider_bot_ref)
+        {
+            // Existing LegacyUnbound admission (owner-suffixed
+            // Bot that never gained metadata or a binding). A
+            // cleanup retry finds the identity on the retained
+            // tombstone — never a resurrected one.
+            if self.registry.get(&provider_bot_ref).await.is_none()
+                && self
+                    .registry
+                    .get_including_deleted(&provider_bot_ref)
+                    .await
+                    .is_none()
+            {
+                return Err(ServiceError::BotNotFound(
+                    provider_bot_ref.to_string(),
+                ));
+            }
+            (
+                provider_bot_ref.clone(),
+                ProviderRetireBranch::LegacyUnbound,
+            )
+        } else {
+            return Err(ServiceError::BotNotFound(
+                provider_bot_ref.to_string(),
+            ));
+        };
+
+        // The verified Provider identity is the REAL actor
+        // (spec §3.1); no Human impersonation, no token.
+        let mutation =
+            bcs_service_api::types::bot_authority::AuthorityMutation {
+                mutation_id: format!(
+                    "retire_{}",
+                    uuid::Uuid::new_v4().simple()
+                ),
+                actor:
+                    bcs_service_api::types::bot_authority::AuthorityActor::
+                        Provider {
+                            provider_id: provider.provider_id.clone(),
+                        },
+            };
+        // ONE atomic retirement command — never chained into
+        // an ordinary delete afterwards (spec §7.1).
+        metadata
+            .retire_with_authority(ProviderRetire {
+                provider_id: provider.provider_id.clone(),
+                bot_id,
+                provider_bot_ref,
+                mutation,
+                expected_branch,
+            })
+            .await
     }
 
     async fn update_provider_bot_webhook(

@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 
 use super::{ActorStatus, EnsureHumanResult, ServiceError, ServiceResult};
+use crate::types::bot_authority::{AuthorityMutation, BotOwnershipView};
 use bcs_domain::Group;
 
 pub use bcs_domain::registry::deserialize_skills;
@@ -66,6 +67,46 @@ pub enum ConnectStreamError {
 }
 
 // ============================================================================
+// Trusted ownership registration (Bot Authority Task 4)
+// ============================================================================
+
+/// Trusted-registration command carried to
+/// [`BotRegistryCoreService::register_with_ownership`].
+///
+/// `initialization.owner_user_id` must come ONLY from a verified
+/// registration token; adapters never contribute a trusted owner.
+/// The mutation inside keeps the real initiating identity.
+pub struct TrustedBotRegistration {
+    pub capabilities: BotCapabilities,
+    pub initialization: crate::types::bot_authority::OwnershipInitialization,
+}
+
+/// The committed credential receipt of a trusted registration.
+///
+/// A SEPARATE type from [`RegisteredBot`]: it is only returned to
+/// the application after the store transaction succeeded, is never
+/// reused as a transport/query DTO, has no general
+/// serialization/logging capability, and never feeds audit rows.
+pub struct CommittedBotRegistration {
+    pub bot_uuid: String,
+    pub bot_name: String,
+    pub bot_token: String,
+}
+
+/// The result of ONE runtime-activity observation
+/// (bot-authority spec §8.0 point 2): the observation instant
+/// (`observed_at_ms`, unix milliseconds of the sampling point)
+/// plus the set of observed bot ids that are runtime active.
+///
+/// The candidate snapshot and this observation are NOT a
+/// cross-system atomic pair — the mine response is a sampling.
+#[derive(Debug, Clone)]
+pub struct RuntimeActivitySnapshot {
+    pub observed_at_ms: u64,
+    pub active_bot_ids: std::collections::HashSet<String>,
+}
+
+// ============================================================================
 // Service Traits
 // ============================================================================
 
@@ -84,6 +125,82 @@ pub trait BotRegistryCoreService: Send + Sync {
         _created_by: &str, _token: &str,
     ) -> ServiceResult<bool> {
         Err(ServiceError::InternalError("atomic registration creation is not configured".into()))
+    }
+
+    /// Trusted atomic registration with ownership initialization
+    /// (spec §10.2).
+    ///
+    /// `owner_user_id` in [`TrustedBotRegistration`] comes ONLY from a
+    /// verified registration token; the mutation keeps the real
+    /// initiator. The core assigns the Bot ID and runtime token and
+    /// calls the repo's composite create command, so Bot, Human,
+    /// owner, ownership version, default runtime profile and the
+    /// initialization audit commit in one store transaction. Failure
+    /// is all-or-nothing: no [`CommittedBotRegistration`] returns and
+    /// no credential, cache publish or runtime activation happens.
+    /// A reused existing Bot ID never results in a committed
+    /// registration.
+    async fn register_with_ownership(
+        &self,
+        _registration: TrustedBotRegistration,
+    ) -> ServiceResult<CommittedBotRegistration> {
+        Err(ServiceError::InternalError(
+            "trusted ownership registration is not configured".into(),
+        ))
+    }
+
+    /// Backfill ownership on an existing live Bot (governance entry;
+    /// spec §10.5). Idempotent: an already-initialized Bot returns its
+    /// current owner state without rewriting `created_by` or resetting
+    /// a since-transferred owner; a reused/deleted Bot ID never
+    /// resurrects ownership.
+    async fn initialize_ownership(
+        &self,
+        _bot_id: &str,
+        _owner_user_id: &str,
+        _mutation: AuthorityMutation,
+    ) -> ServiceResult<BotOwnershipView> {
+        Err(ServiceError::InternalError(
+            "ownership initialization is not configured".into(),
+        ))
+    }
+
+    /// Governance facts of ONE Bot for the bcs-admin
+    /// ownership-backfill dry-run (spec §10.4/§10.5) —
+    /// the SAME facts the `initialize_ownership` guard
+    /// validates, read through the same Core/facade.
+    /// A pure read; `None` for a Bot unknown in the
+    /// instance's env; failures propagate.
+    async fn ownership_governance_state(
+        &self,
+        _bot_id: &str,
+    ) -> ServiceResult<
+        Option<crate::types::bot_authority::BotOwnershipGovernance>,
+    > {
+        Err(ServiceError::InternalError(
+            "the ownership governance read is not configured".into(),
+        ))
+    }
+
+    /// Atomic ordinary-Bot retirement (bot-authority spec §7.1).
+    ///
+    /// The ordinary `retire` is a command distinct from the
+    /// Provider `retire` (the two are never chained): ONE
+    /// store transaction commits the Bot tombstone, the
+    /// owner/manager edge revocation, the pending-transfer
+    /// closure (system decision, fixed reason) and the
+    /// `retire` audit carrying the real mutation actor.
+    /// `Ok(true)` when this command executed the tombstone
+    /// transition; `Ok(false)` on idempotent re-execution
+    /// of an already-retired Bot (no duplicate audit).
+    async fn retire_with_authority(
+        &self,
+        _bot_id: &str,
+        _mutation: AuthorityMutation,
+    ) -> ServiceResult<bool> {
+        Err(ServiceError::InternalError(
+            "bot retirement with authority is not configured".into(),
+        ))
     }
 
     /// Register or update a bot.
@@ -141,6 +258,25 @@ pub trait BotRegistryCoreService: Send + Sync {
     /// this default. Fallible core/store implementations should override it.
     async fn try_get(&self, bot_id: &str) -> ServiceResult<Option<RegisteredBot>> {
         Ok(self.get(bot_id).await)
+    }
+
+    /// Strict batch read (input order, deduplicated by bot_uuid,
+    /// absent ids skipped): every persistence failure is an `Err`
+    /// — never a silently omitted candidate. Implementations over
+    /// a fallible store SHOULD delegate to the store's batched
+    /// strict read instead of this strict per-id fallback.
+    async fn try_get_many(&self, bot_ids: &[String]) -> ServiceResult<Vec<RegisteredBot>> {
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for bot_id in bot_ids {
+            if !seen.insert(bot_id.as_str()) {
+                continue;
+            }
+            if let Some(bot) = self.try_get(bot_id).await? {
+                out.push(bot);
+            }
+        }
+        Ok(out)
     }
 
     /// Like [`get`](Self::get) but also returns soft-deleted bots.
@@ -247,6 +383,16 @@ pub trait BotRegistryCoreService: Send + Sync {
     ) -> ServiceResult<Vec<RegisteredBot>> {
         Ok(self.list_bots_by_creator(created_by).await)
     }
+
+    /// Bounded ownership-migration candidates for the mine sweep:
+    /// live physical Bots, byte-exact creator, `ownership_version = 0`.
+    /// Straight Repo passthrough (the sweep's steady-state cost stays
+    /// one indexed read instead of a per-Bot governance rescan).
+    async fn list_uninitialized_bots_by_creator(
+        &self,
+        created_by: &str,
+        limit: usize,
+    ) -> ServiceResult<Vec<RegisteredBot>>;
 
     /// Discover bots by capability keywords.
     async fn discover(&self, query: &str) -> Vec<RegisteredBot>;
@@ -578,6 +724,32 @@ pub trait BotRegistryCoreService: Send + Sync {
     /// Check if a bot has an active streaming connection.
     async fn is_connected(&self, bot_id: &str) -> bool;
 
+    /// ONE fallible runtime-activity observation (bot-authority
+    /// spec §8.0 point 2, plan §3 frozen contract).
+    ///
+    /// Reads the current instance's WS connection set ONCE, then
+    /// resolves HTTP-Provider routability over batch provider
+    /// reads (≤
+    /// [`crate::types::bot_authority::AUTHORITY_QUERY_CHUNK`]
+    /// bot ids per provider-bindings query, then the ONE
+    /// provider + credential batch) — never a per-bot target
+    /// resolution. The keeps the existing
+    /// `WS active || HTTP Provider routable` semantics: the
+    /// snapshot lists which of `bot_ids` are runtime active.
+    ///
+    /// Storage/read failures PROPAGATE as `Err` — they are
+    /// never swallowed into a fake-unreachable success
+    /// (spec §8.0 "存储错误返回错误，不伪装成 unreachable").
+    async fn try_runtime_activity_for(
+        &self,
+        bot_ids: &[String],
+    ) -> ServiceResult<RuntimeActivitySnapshot> {
+        let _ = bot_ids;
+        Err(ServiceError::InternalError(
+            "the runtime activity observation is not configured".into(),
+        ))
+    }
+
     /// Batch check runtime-active actors for owner-facing lists.
     ///
     /// Runtime active intentionally ignores actor lifecycle visibility (`Hidden`)
@@ -741,5 +913,79 @@ fn needs_bot_name_backfill(participant: &bcs_domain::Participant) -> bool {
             let name = name.trim();
             name.is_empty() || name == participant.bot_uuid
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bcs_domain::ActorKind;
+
+    /// Bot Authority Task 4 (plan §3.1): the committed registration
+    /// receipt and the domain query projection must stay separable.
+    ///
+    /// 1. `RegisteredBot` (get/list/discovery) serializes without any
+    ///    credential — `agent_code`/`agent_token` are skip-serializing
+    ///    and a runtime token is not even a field.
+    /// 2. The wire registration fields stay exactly
+    ///    `bot_uuid`/`bot_name`/`bot_token` (openapi plugin response
+    ///    shape); no query/log serialization capability is added to
+    ///    `CommittedBotRegistration`.
+    ///
+    /// The negative half is a REVIEW-ENFORCED firewall, not a
+    /// compile-enforced one (stable Rust cannot assert the ABSENCE of
+    /// a trait impl): the receipt deliberately derives no
+    /// `Serialize`/`Deserialize`, and the commented-out
+    /// serialization call below exists so any reviewer who adds it
+    /// sees this invariant while re-enabling it. The positive
+    /// assertions above are the executable part of this test.
+    #[test]
+    fn registration_receipt_is_separate_from_registered_bot() {
+        let registered = RegisteredBot {
+            bot_uuid: "bot_x".to_string(),
+            capabilities: BotCapabilities {
+                name: Some("Bot X".to_string()),
+                agent_code: Some("code-must-not-leak".to_string()),
+                agent_token: Some("secret-must-not-leak".to_string()),
+                ..Default::default()
+            },
+            env: Some("test".to_string()),
+            created_by: Some("11111111".to_string()),
+            actor_kind: ActorKind::Bot,
+            status: ActorStatus::Online,
+        };
+        let bot_json = serde_json::to_string(&registered)
+            .expect("query projection stays serializable (existing contract)");
+        assert!(
+            !bot_json.contains("bot_token"),
+            "query projection must never carry a bot token: {bot_json}"
+        );
+        assert!(
+            !bot_json.contains("agent_token") && !bot_json.contains("agent_code"),
+            "query projection must never carry agent credentials: {bot_json}"
+        );
+
+        // Committed receipt keeps the frozen registration wire fields.
+        let receipt = CommittedBotRegistration {
+            bot_uuid: "bot_x".to_string(),
+            bot_name: "Bot X".to_string(),
+            bot_token: "runtime-token".to_string(),
+        };
+        assert_eq!(receipt.bot_uuid, "bot_x");
+        assert_eq!(receipt.bot_name, "Bot X");
+        assert_eq!(receipt.bot_token, "runtime-token");
+
+        // Negative half of the isolation rule: the receipt has NO
+        // query/log serialization capability — a REVIEW-ENFORCED
+        // firewall (stable Rust cannot assert the absence of a trait
+        // impl at runtime or compile time from inside a passing
+        // test): unlike `RegisteredBot`, the type derives no
+        // `Serialize`/`Deserialize` and carries no serde/Display/log
+        // dump anywhere in this crate. Any reviewer re-enabling the
+        // serialization below must first read this invariant and the
+        // doc on `CommittedBotRegistration`.
+        //
+        // let leaked = serde_json::to_string(&receipt);
+        drop(receipt);
     }
 }

@@ -23,6 +23,7 @@ bcs-service-api = { workspace = true }
 bcs-proposal-store = { workspace = true }
 
 [dev-dependencies]
+bcs-bot-store = { workspace = true }
 bcs-test-support = { workspace = true }
 serde_json       = { workspace = true }
 tokio-test = "0.4"

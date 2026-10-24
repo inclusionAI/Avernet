@@ -1,7 +1,11 @@
 //! Bounded authoritative parent and token identity reads; no runtime tokens escape.
 use bcs_service_api::types::agent_registration::{AgentBotQuery, AgentBotRecord};
 use bcs_service_api::types::AgentBotRegistration;
-use super::{PersistentBotRepo, DbSqlFlavor, DbRow, Value, ServiceError, ServiceResult, db_get_column, db_get_column_opt, resolve_env};
+use bcs_config::resolve_env_str as resolve_env;
+use bcs_db_api::{DbRow, DbSqlFlavor, DbValue as Value, db_get_column, db_get_column_opt};
+use bcs_service_api::{ServiceError, ServiceResult};
+
+use super::PersistentBotRepo;
 
 impl PersistentBotRepo {
     fn agent_identity_select(&self) -> String {

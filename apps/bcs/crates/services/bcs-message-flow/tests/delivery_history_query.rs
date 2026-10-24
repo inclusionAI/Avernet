@@ -56,7 +56,7 @@ async fn fixture_with_messages(count: i64) -> (BcsMessageFlow, Arc<MemoryMessage
             now_ms: seq, expire_at_ms: None, event: None, message: message(seq),
             targets: vec![DeliveryAdmissionTarget {
                 rejection: None, target_bot_id: "bot-driver".into(), kind: DeliveryType::Send,
-                max_queued: 100, semantic_projection_json: json!({"version": 1}),
+                max_queued: 100, semantic_projection_json: json!({"version": 1}), run_id: None,
             }],
         }).await.unwrap();
     }
@@ -64,7 +64,8 @@ async fn fixture_with_messages(count: i64) -> (BcsMessageFlow, Arc<MemoryMessage
         support.bot_delivery, support.frontend_delivery)
         .with_message_repo(repo.clone())
         .with_managed_deliveries(deliveries)
-        .with_session_management(Arc::new(session_support::StaticSessionManagement::new(session)));
+        .with_session_management(Arc::new(session_support::StaticSessionManagement::new(session)))
+        .with_bot_authority_hook(Some(bcs_test_support::lazy_authority_chain().hook));
     (flow, repo)
 }
 
@@ -94,7 +95,7 @@ async fn admit(flow: &BcsMessageFlow, id: &str, message: NewMessage) {
         now_ms: 100, expire_at_ms: None, event: None, message,
         targets: vec![DeliveryAdmissionTarget {
             rejection: None, target_bot_id: "bot-driver".into(), kind: DeliveryType::Send,
-            max_queued: 100, semantic_projection_json: json!({"version": 1}),
+            max_queued: 100, semantic_projection_json: json!({"version": 1}), run_id: None,
         }],
     }).await.unwrap();
 }

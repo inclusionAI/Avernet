@@ -50,7 +50,8 @@ pub async fn managed_message_delivery_service_contract_tests<
                 kind: DeliveryType::Send,
                 max_queued: 10,
                 semantic_projection_json: serde_json::json!({"version":1}),
-            }],
+             run_id: None,
+}],
             message: NewMessage {
                 visibility_domain: bcs_domain::MessageVisibilityDomain::Chat,
                 audience: None,

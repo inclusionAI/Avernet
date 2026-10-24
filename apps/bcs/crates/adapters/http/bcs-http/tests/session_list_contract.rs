@@ -304,6 +304,13 @@ async fn human_owner_app() -> (axum::Router, Arc<RecordingSessions>, TempDir, Ar
     services.registry = registry.clone();
     services.group = group_store;
     services.session_management = sessions.clone();
+    // LIVE authority chain mirroring the fixture
+    // `created_by` rows (bot-authority plan Task 6.5);
+    // the legacy alias (`created_by: None → allow`)
+    // no longer auto-claims.
+    let authority = bcs_test_support::lazy_authority_chain().hook;
+    authority.seed_owner("driver-bot", "alice");
+    services.bot_authority_hook = authority;
 
     let identity_port: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
         staff_no: Some("alice".to_string()),

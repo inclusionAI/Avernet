@@ -8,10 +8,10 @@ use bcs_service_api::{
 };
 use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
-use serde_json::Value;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
+use crate::shared::OutboundFrame;
 use crate::web::{
     dispatch_client_frame, WebClientConnectionState, WebDispatchOutcome, WebDispatchState,
     WebWsDispatchError, WorkbenchConnectionAuth,
@@ -36,6 +36,9 @@ pub async fn handle_client_connection(
     let leadership_shutdown = state.frontend_connections.connection_epoch.subscribe();
     let (mut ws_tx, mut ws_rx) = socket.split();
     let (client_tx, mut client_rx) = mpsc::channel::<String>(256);
+    let mut connection_state = WebClientConnectionState::default();
+    let mut protected_rx = connection_state.open_protected_queue();
+    let connection_shutdown = connection_state.shutdown.clone();
 
     let connected_at = Instant::now();
     let client_id = CLIENT_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -57,8 +60,26 @@ pub async fn handle_client_connection(
                     Some(msg) => msg,
                     None => break,
                 },
+                frame = protected_rx.recv() => {
+                    // The FINAL writer: every protected frame in this
+                    // queue was ALREADY authorized at the enqueue
+                    // boundary against its operation's frozen permit
+                    // (bot-authority spec §8.2 — 已准入输出不追溯).
+                    // No authorization happens here: the writer just
+                    // drains in order, so a mid-operation revocation
+                    // or an admission-store read error can never
+                    // interrupt an admitted stream.
+                    let frame = match frame {
+                        Some(frame) => frame,
+                        None => break,
+                    };
+                    match frame {
+                        OutboundFrame::Data { payload }
+                        | OutboundFrame::Terminal { payload }
+                        | OutboundFrame::ConnectionControl { payload } => payload,
+                    }
+                }
             };
-            let close_after_send = is_view_scope_changed_event(&msg);
             let sent = tokio::select! {
                 biased;
                 _ = write_shutdown.cancelled() => break,
@@ -67,9 +88,6 @@ pub async fn handle_client_connection(
             if sent.is_err() {
                 debug!("WebSocket send error, connection likely closed");
                 write_send_error.store(true, Ordering::Relaxed);
-                break;
-            }
-            if close_after_send {
                 break;
             }
         }
@@ -83,9 +101,6 @@ pub async fn handle_client_connection(
             let _ = ws_tx.send(Message::Close(None)).await;
         }
     });
-
-    let mut connection_state = WebClientConnectionState::default();
-    let connection_shutdown = connection_state.shutdown.clone();
 
     info!(
         client_id = client_id,
@@ -289,15 +304,6 @@ pub async fn handle_client_connection(
             connected_at.elapsed(),
         )
         .await;
-}
-
-fn is_view_scope_changed_event(message: &str) -> bool {
-    serde_json::from_str::<Value>(message).is_ok_and(|frame| {
-        frame.get("type").and_then(Value::as_str) == Some("event")
-            && frame.get("event").and_then(Value::as_str) == Some("close")
-            && frame.pointer("/payload/reason").and_then(Value::as_str)
-                == Some("view_scope_changed")
-    })
 }
 
 fn is_ping_frame(text: &str) -> bool {

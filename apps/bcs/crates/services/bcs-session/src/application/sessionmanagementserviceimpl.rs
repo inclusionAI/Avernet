@@ -518,6 +518,11 @@ pub(super) async fn persist_session_opening_message(
                 exclude_conn_id: None,
                 visibility_domain,
                 audience,
+                // A session-opening message is an independent
+                // resource event: authorized per event.
+                operation_id: None,
+                terminal: false,
+                run_id: None,
             }),
         )
         .await

@@ -45,6 +45,11 @@ fn build_invite_service(
         base_url: host,
         group_link_url: state.invite_group_link_url.clone(),
         session_link_url: state.invite_session_link_url.clone(),
+        // The route is protocol adaptation only; the
+        // invite-issuance control legs resolve the
+        // authority hook live inside the service
+        // (bot-authority plan Task 6.5).
+        bot_authority: Some(state.services.bot_authority_hook.clone()),
     }
 }
 

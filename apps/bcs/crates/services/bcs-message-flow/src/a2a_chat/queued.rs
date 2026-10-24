@@ -94,7 +94,8 @@ impl A2aChat {
             flow_kind: DeliveryFlowKind::DirectA2a,
             targets: vec![DeliveryAdmissionTarget { rejection, target_bot_id: cmd.target_bot_id.clone(), kind: DeliveryType::Send,
                 max_queued: policy.policy.bot(&cmd.target_bot_id).max_queued,
-                semantic_projection_json: serde_json::to_value(projection).map_err(|_| invalid("direct projection encoding failed"))? }],
+                semantic_projection_json: serde_json::to_value(projection).map_err(|_| invalid("direct projection encoding failed"))?, run_id: None,
+}],
             now_ms: now as i64, expire_at_ms: Some(policy.policy.queue_ttl_ms.map_or(expires, |ttl| expires.min((now as i64).saturating_add(ttl as i64)))), event: None,
         };
         // Independent replicas can lose the session-sequence CAS. Reuse the

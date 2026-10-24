@@ -69,6 +69,11 @@ impl InteractionFrontendPort for WorkbenchInteractionDelivery {
                 exclude_conn_id: None,
                 visibility_domain: MessageVisibilityDomain::StateMachine,
                 audience: Some(MessageAudience::FullOnly),
+                // Interaction prompts are independent finite events:
+                // authorized per event at publish time.
+                operation_id: None,
+                terminal: false,
+                run_id: None,
             })
             .await?;
         Ok(())
@@ -95,7 +100,7 @@ impl FrontendDeliveryPort for WorkbenchFrontendDelivery {
                 self.publish_group_or_fallback(session_id, &cmd).await
             }
             FrontendDeliveryTarget::SessionActors { session_id, actor_ids } => {
-                self.connections.broadcast_visible_to_actors(session_id, &cmd.event_json, actor_ids, cmd.exclude_conn_id, cmd.visibility_domain, cmd.audience.as_ref()).await
+                self.connections.broadcast_visible_to_actors(session_id, &cmd.event_json, actor_ids, cmd.exclude_conn_id, cmd.visibility_domain, cmd.audience.as_ref(), cmd.operation_id.as_deref(), cmd.run_id.as_deref(), cmd.terminal).await
             }
             FrontendDeliveryTarget::Run { run_id } => {
                 let sent = match cmd.delivery_kind {
@@ -106,6 +111,7 @@ impl FrontendDeliveryPort for WorkbenchFrontendDelivery {
                                 cmd.event_json.clone(),
                                 cmd.visibility_domain,
                                 cmd.audience.as_ref(),
+                                cmd.terminal,
                             )
                             .await
                     }
@@ -144,6 +150,9 @@ impl WorkbenchFrontendDelivery {
                 cmd.visibility_domain,
                 cmd.audience.as_ref(),
                 cmd.exclude_conn_id,
+                cmd.operation_id.as_deref(),
+                cmd.run_id.as_deref(),
+                cmd.terminal,
             )
             .await;
         if bound == 0 {
@@ -165,12 +174,16 @@ impl WorkbenchFrontendDelivery {
                 fallback.event_json.clone(),
                 cmd.visibility_domain,
                 cmd.audience.as_ref(),
+                cmd.terminal,
             )
             .await;
         if delivered_by_run {
             return 1;
         }
 
+        // Internal sinks only from here on: the public Workbench
+        // lane never borrows the session's latest-Run permit
+        // lineage (spec §7.2).
         let delivered_by_session = self
             .run_channels
             .send_visible_event_by_session(
@@ -178,6 +191,7 @@ impl WorkbenchFrontendDelivery {
                 fallback.event_json.clone(),
                 cmd.visibility_domain,
                 cmd.audience.as_ref(),
+                cmd.terminal,
             )
             .await;
         usize::from(delivered_by_session)

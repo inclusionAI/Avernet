@@ -8,6 +8,8 @@ use tracing::warn;
 
 use bcs_service_api::core::WorkerProfileCoreService;
 use bcs_service_api::{
+    port::bot_authority::BotAuthorityPort,
+   
     ActorCapabilitiesView, ActorDirectoryEntry, ActorDirectoryService, ActorListCommand,
     ActorListResult, ActorSearchCommand, ActorSearchContext, ActorSearchResult,
     ActorStatusUpdateCommand, ActorStatusUpdateResult, BotCandidateSearchCoreService,
@@ -24,6 +26,14 @@ pub struct ActorDirectory {
     relation: Arc<dyn RelationCoreService>,
     worker_profiles: Arc<dyn WorkerProfileCoreService>,
     candidate_search: Arc<dyn BotCandidateSearchCoreService>,
+    /// The live Human→Bot authority hook (bot-authority plan
+    /// Task 6.3): cross-actor status mutations from a Human
+    /// consult ONLY this hook — the historical creator
+    /// relation edge no longer authorizes them (a revoked or
+    /// transferred owner must lose this write the same day).
+    /// Unwired fails closed like the rest of the authority
+    /// cutover.
+    bot_authority: Option<Arc<dyn BotAuthorityPort>>,
 }
 
 impl ActorDirectory {
@@ -40,7 +50,18 @@ impl ActorDirectory {
             relation,
             worker_profiles,
             candidate_search,
+            bot_authority: None,
         }
+    }
+
+    /// Wire the live authority hook used by the Human→Bot
+    /// cross-actor leg of `update_actor_status_for_caller`.
+    pub fn with_bot_authority_hook(
+        mut self,
+        bot_authority: Arc<dyn BotAuthorityPort>,
+    ) -> Self {
+        self.bot_authority = Some(bot_authority);
+        self
     }
 
     async fn friend_set_for(&self, actor_id: &str) -> HashSet<String> {
@@ -210,19 +231,43 @@ impl ActorDirectoryService for ActorDirectory {
         }
 
         if command.caller_actor_id != command.actor_id {
-            let env = bcs_config::resolve_env_str();
-            match self
-                .relation
-                .get_edge(&command.caller_actor_id, &command.actor_id, &env)
-                .await?
+            let authorized = if let Some(user_id) =
+                command.caller_actor_id.strip_prefix("human_")
             {
-                Some(edge) if edge.is_creator => {}
-                _ => {
-                    return Err(ServiceError::Unauthorized(format!(
-                        "Caller '{}' is not the actor itself nor a creator of '{}'",
-                        command.caller_actor_id, command.actor_id
-                    )));
+                // Human→Bot leg: the LIVE authority hook decides
+                // (current owner/manager edge only). The historical
+                // creator relation edge must not keep this write
+                // alive after a transfer or manager revocation
+                // (review P1); unwired wiring is fail-closed.
+                match &self.bot_authority {
+                    Some(authority) => authority
+                        .can_manage(user_id, &command.actor_id)
+                        .await
+                        .map_err(|error| {
+                            ServiceError::InternalError(format!(
+                                "bot authority lookup failed: {error}"
+                            ))
+                        })?,
+                    None => false,
                 }
+            } else {
+                // Non-Human callers (legacy tool/service ids) keep
+                // their long-standing creator-relation contract.
+                let env = bcs_config::resolve_env_str();
+                match self
+                    .relation
+                    .get_edge(&command.caller_actor_id, &command.actor_id, &env)
+                    .await?
+                {
+                    Some(edge) => edge.is_creator,
+                    None => false,
+                }
+            };
+            if !authorized {
+                return Err(ServiceError::Unauthorized(format!(
+                    "Caller '{}' is not the actor itself nor authorized to manage '{}'",
+                    command.caller_actor_id, command.actor_id
+                )));
             }
         }
 

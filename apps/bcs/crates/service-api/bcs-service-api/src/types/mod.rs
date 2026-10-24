@@ -5,13 +5,17 @@
 //! layers.
 
 pub mod collaboration_draft;
+pub mod bot_authority;
 pub mod bot_control_plane;
 pub mod agent_registration;
+pub mod authorization_snapshot;
 pub mod error;
 pub mod event;
 pub mod provider_registration;
 
 pub use bcs_domain::*;
+pub use authorization_snapshot::*;
+pub use bot_authority::*;
 pub use bot_control_plane::*;
 pub use agent_registration::*;
 pub use error::{ServiceError, ServiceResult};

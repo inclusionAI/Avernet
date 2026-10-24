@@ -1,5 +1,6 @@
 pub mod actor;
 pub mod collaboration_draft;
+pub mod bot_authority;
 pub mod bot_control_plane;
 pub mod candidate_search;
 pub mod error;
@@ -16,9 +17,11 @@ pub mod provider_registration;
 pub mod registry;
 pub mod routing;
 pub mod session;
+pub mod session_authorization;
 pub mod system_message;
 
 pub use actor::*;
+pub use bot_authority::*;
 pub use bot_control_plane::*;
 pub use candidate_search::*;
 pub use error::*;
@@ -32,5 +35,6 @@ pub use proposal::*;
 pub use provider::*;
 pub use registry::*;
 pub use routing::*;
+pub use session_authorization::*;
 pub use system_message::*;
 pub use crate::types::{Session, SessionKind, SessionStatus, ServiceSpec};

@@ -48,6 +48,7 @@ use bcs_service_api::application::v1::{
     Invitation, ListBotFriendRequests, ListBotFriendships, Page, Principal,
     RejectFriendRequest, require_authenticated_user, require_human,
 };
+use bcs_service_api::port::bot_authority::BotAuthorityPort;
 use bcs_service_api::{
     application::{ConnectService, ConnectStatus, RequestDirection},
     BotRegistryCoreService, FriendCoreService, FriendRequestCoreService,
@@ -56,6 +57,19 @@ use bcs_service_api::{
     GroupStatus, GroupStrategy, InviteService, InviteUseCaseError, JoinByInviteCommand,
     ParticipantRole, RegisteredBot, ServiceError, SessionManagementService, SessionUseCaseError,
 };
+
+/// Map one authority read to application errors: a strict
+/// deny (`Forbidden`) is 403; every other read failure
+/// propagates as an internal error (spec §3.2: 存储错误
+/// 返回错误 — never a deny-as-false).
+pub(crate) fn map_authority_error(error: ServiceError) -> ApplicationError {
+    match error {
+        ServiceError::Forbidden(message) => ApplicationError::forbidden(message),
+        other => ApplicationError::internal(format!(
+            "bot authority lookup failed: {other}"
+        )),
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct InvitationFriendshipServiceConfig {
@@ -80,6 +94,10 @@ pub struct InvitationFriendshipServiceImpl {
     registry: Arc<dyn BotRegistryCoreService>,
     invite: Arc<dyn InviteService>,
     connect: Option<Arc<dyn ConnectService>>,
+    /// The narrow authority hook (bot-authority plan Task
+    /// 6.3): every Human→Bot control judgment consults it
+    /// live; a missing wiring fails closed.
+    bot_authority: Option<Arc<dyn BotAuthorityPort>>,
     token_secret: Vec<u8>,
     config: InvitationFriendshipServiceConfig,
 }
@@ -104,6 +122,7 @@ impl InvitationFriendshipServiceImpl {
             registry,
             invite,
             connect: None,
+            bot_authority: None,
             token_secret,
             config,
         }
@@ -115,6 +134,41 @@ impl InvitationFriendshipServiceImpl {
     ) -> Self {
         self.connect = Some(connect);
         self
+    }
+
+    /// Wire the authority hook (bot-authority plan Task 6.3).
+    pub fn with_bot_authority_hook(
+        mut self,
+        bot_authority: Arc<dyn BotAuthorityPort>,
+    ) -> Self {
+        self.bot_authority = Some(bot_authority);
+        self
+    }
+
+    /// The wired authority hook; failing to wire one is a
+    /// composition error and must fail closed (never deny-as-Ok).
+    fn authority(&self) -> Result<&dyn BotAuthorityPort, ApplicationError> {
+        self.bot_authority
+            .as_deref()
+            .ok_or_else(|| {
+                ApplicationError::internal(
+                    "bot authority hook is not wired",
+                )
+            })
+    }
+
+    /// Row 11 Human→Bot control leg: a live `can_manage`
+    /// edge; the historical `created_by` no longer
+    /// authorizes anything here.
+    async fn human_controls_bot(
+        &self,
+        user_id: &str,
+        bot_id: &str,
+    ) -> Result<bool, ApplicationError> {
+        self.authority()?
+            .can_manage(user_id, bot_id)
+            .await
+            .map_err(map_authority_error)
     }
 
     fn connect_service(&self) -> Result<&Arc<dyn ConnectService>, ApplicationError> {
@@ -138,15 +192,21 @@ impl InvitationFriendshipServiceImpl {
             })
     }
 
-    /// The authenticated User must own the Bot through exact `created_by`.
+    /// Row 11: the authenticated User may manage the Bot
+    /// through its CURRENT `can_manage` edge; the
+    /// historical `created_by` no longer authorizes
+    /// (bot-authority plan Task 6.3, spec §3.2/§3.3).
     async fn authorize_bot_resource(
         &self,
         caller: &bcs_service_api::application::v1::AuthenticatedCaller,
         bot_uuid: &str,
     ) -> Result<(), ApplicationError> {
         let user = require_authenticated_user(caller)?;
-        let bot = self.load_bot(bot_uuid).await?;
-        if bot.created_by.as_deref() == Some(user.id.as_str()) {
+        self.load_bot(bot_uuid).await?;
+        let controls = self
+            .human_controls_bot(&user.id, bot_uuid)
+            .await?;
+        if controls {
             Ok(())
         } else {
             Err(ApplicationError::forbidden(format!(
@@ -176,15 +236,23 @@ impl InvitationFriendshipServiceImpl {
         let Principal::Human(human) = principal else {
             return Ok(false);
         };
-        let owned_bots = self
-            .registry
-            .try_list_bots_by_creator(&human.subject.id)
-            .await
-            .map_err(map_service_error)?;
-        Ok(owned_bots.iter().any(|bot| {
-            bot.actor_kind == ActorKind::Bot
-                && (bot.bot_uuid == group.driver_bot || bot.bot_uuid == group.originator())
-        }))
+        // Row 11 group-management leg: a Human manages a
+        // Group through a driver/originator Bot it
+        // CURRENTLY controls (live `can_manage`), never
+        // through a creator-list whitelist.
+        if group.driver_bot != group.originator() {
+            if self
+                .human_controls_bot(&human.subject.id, &group.driver_bot)
+                .await?
+            {
+                return Ok(true);
+            }
+        }
+        let originator_bot = group.originator();
+        Ok(!originator_bot.starts_with("human_")
+            && self
+                .human_controls_bot(&human.subject.id, originator_bot)
+                .await?)
     }
 
     async fn load_manageable_group(
@@ -348,19 +416,21 @@ impl InvitationService for InvitationFriendshipServiceImpl {
             ));
         }
         if let Principal::Human(human) = principal {
-            let owned_bots = self
-                .registry
-                .try_list_bots_by_creator(&human.subject.id)
-                .await
-                .map_err(map_service_error)?;
-            if owned_bots.iter().any(|bot| {
-                bot.actor_kind == ActorKind::Bot && is_member(bot.bot_uuid.as_str())
-            }) {
-                return Ok(self.mint_invitation(
-                    InvitationTargetType::Session,
-                    &command.session_id,
-                    command.expires_in_seconds,
-                ));
+            // Row 11: membership through a Bot the Human
+            // CURRENTLY controls (live `can_manage` per
+            // Bot participant, never a creator-list
+            // whitelist).
+            for participant in session.participants.iter() {
+                if self
+                    .human_controls_bot(&human.subject.id, &participant.bot_uuid)
+                    .await?
+                {
+                    return Ok(self.mint_invitation(
+                        InvitationTargetType::Session,
+                        &command.session_id,
+                        command.expires_in_seconds,
+                    ));
+                }
             }
         }
         Err(ApplicationError::forbidden(
@@ -784,8 +854,14 @@ impl InvitationFriendshipServiceImpl {
         }
         if requested.actor_type == FriendConnectionActorType::Bot {
             if let Some(user) = &caller.user {
-                let bot = self.load_bot(&requested.id).await?;
-                if bot.created_by.as_deref() == Some(user.id.as_str()) {
+                self.load_bot(&requested.id).await?;
+                // Row 11: act-as-Bot through the CURRENT
+                // `can_manage`; the historical `created_by`
+                // no longer authorizes.
+                if self
+                    .human_controls_bot(&user.id, &requested.id)
+                    .await?
+                {
                     return Ok(requested_id);
                 }
             }
@@ -806,8 +882,14 @@ impl InvitationFriendshipServiceImpl {
         }
         if let Some(user) = &caller.user {
             if !request.to_id.starts_with("human_") {
-                let bot = self.load_bot(&request.to_id).await?;
-                if bot.created_by.as_deref() == Some(user.id.as_str()) {
+                self.load_bot(&request.to_id).await?;
+                // Row 11: decide for a target Bot through the
+                // CURRENT `can_manage`; the historical
+                // `created_by` no longer authorizes.
+                if self
+                    .human_controls_bot(&user.id, &request.to_id)
+                    .await?
+                {
                     return Ok(request.to_id.clone());
                 }
             }
@@ -829,8 +911,17 @@ impl InvitationFriendshipServiceImpl {
         }
         if let Some(user) = &caller.user {
             if !request.from_id.starts_with("human_") {
-                let bot = self.load_bot(&request.from_id).await?;
-                if bot.created_by.as_deref() == Some(user.id.as_str()) {
+                self.load_bot(&request.from_id).await?;
+                // Row 11: cancel on behalf of a requesting Bot
+                // through the CURRENT `can_manage`; the
+                // historical `created_by` no longer
+                // authorizes. The friend-request asset leg
+                // above (`created_by == default_actor`) is
+                // preserved (row 12).
+                if self
+                    .human_controls_bot(&user.id, &request.from_id)
+                    .await?
+                {
                     return Ok(());
                 }
             }

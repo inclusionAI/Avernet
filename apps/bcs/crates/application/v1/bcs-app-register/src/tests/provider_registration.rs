@@ -1,90 +1,49 @@
 use super::*;
 use bcs_domain::provider_registration_token::ProviderRegistrationMode;
 use bcs_domain::provider_registration_token::{self, ProviderRegisterTokenPayload};
-use bcs_service_api::core::provider_registration::{
-    ProviderRegistrationCoreService, ProviderRegistrationRecord, ProviderRegistrationResult,
-    RegisterProviderBot,
-};
+use bcs_service_api::types::bot_authority::AuthorityActor;
 use serde_json::json;
-use std::sync::Mutex;
 
-#[derive(Default)]
-pub(super) struct FakeProviderRegistration {
-    pub authorized: Mutex<Vec<(String, String)>>,
-    pub registered: Mutex<Vec<RegisterProviderBot>>,
-    pub issue_error: Mutex<Option<ServiceError>>,
-    pub register_error: Mutex<Option<ServiceError>>,
-}
-
-#[async_trait]
-impl ProviderRegistrationCoreService for FakeProviderRegistration {
-    async fn authorize(
-        &self,
-        provider: &str,
-        owner: &str,
-    ) -> Result<bcs_service_api::core::provider_registration::ProviderRegistrationAuthorization, ServiceError> {
-        self.authorized
-            .lock()
-            .unwrap()
-            .push((provider.into(), owner.into()));
-        if let Some(error) = self.issue_error.lock().unwrap().take() {
-            return Err(error);
-        }
-        Ok(bcs_service_api::core::provider_registration::ProviderRegistrationAuthorization {
-            allowed_modes: vec![ProviderRegistrationMode::Plugin, ProviderRegistrationMode::Gateway],
-            auth_mode: bcs_domain::ProviderAuthMode::StaticBearer,
-        })
-    }
-
-    async fn register(
-        &self,
-        command: RegisterProviderBot,
-    ) -> Result<ProviderRegistrationResult, ServiceError> {
-        self.registered.lock().unwrap().push(command.clone());
-        if let Some(error) = self.register_error.lock().unwrap().take() {
-            return Err(error);
-        }
-        Ok(ProviderRegistrationResult {
-            identity: bcs_domain::provider_identity::normalize(bcs_domain::ProviderAuthMode::StaticBearer, &command.provider_bot_ref).unwrap(),
-            auth_mode: bcs_domain::ProviderAuthMode::StaticBearer,
-            effective_webhook_url: if command.mode == ProviderRegistrationMode::Gateway {
-                Some(
-                    command
-                        .webhook_url
-                        .clone()
-                        .unwrap_or_else(|| "https://example.test/default".into()),
-                )
-            } else {
-                None
-            },
-            record: ProviderRegistrationRecord {
-                provider_id: command.provider_id,
-                provider_bot_ref: command.provider_bot_ref,
-                owner: command.owner,
-                mode: command.mode,
-                bot_name: command.bot_name,
-                bot_uuid: "scoped-bot".into(),
-                bot_token: "runtime-token".into(),
-                webhook_url: command.webhook_url,
-            },
-        })
-    }
-}
-
+/// The trusted chain behind the facade: a REAL registry
+/// core over one memory projection; the Provider core is
+/// the recording fake.
 pub(super) fn scoped_service() -> (
     RegisterServiceImpl,
     Arc<FakeProviderRegistration>,
-    Arc<FakeBotManagement>,
-    Arc<FakeBotOnboarding>,
+    Arc<MemoryBotRepo>,
 ) {
-    let (svc, management, onboarding) = service(false, false);
-    let core = Arc::new(FakeProviderRegistration::default());
+    // Isolated durability dir (the memory repo persists
+    // bot-info files; never leak into the crate dir).
+    let dir: &'static tempfile::TempDir =
+        Box::leak(Box::new(tempfile::tempdir().expect("tempdir")));
+    let repo = Arc::new(MemoryBotRepo::with_base_dir(
+        dir.path().to_path_buf(),
+    ));
+    let registry: Arc<BotCore> =
+        Arc::new(BotCore::with_repo(repo.clone()));
+    let core = Arc::new(FakeProviderRegistration::new());
     (
-        svc.with_provider_registration(core.clone()),
+        RegisterServiceImpl::new(SECRET.to_vec())
+            .with_registry(registry)
+            .with_provider_registration(core.clone()),
         core,
-        management,
-        onboarding,
+        repo,
     )
+}
+
+pub(super) async fn seed_humans(
+    repo: &Arc<MemoryBotRepo>,
+    ids: &[&str],
+) {
+    use bcs_service_api::port::repo::BotRepoPort;
+
+    // Live Human ACTOR rows on the shared registry — the
+    // authority guards' Human existence source.
+    for id in ids {
+        repo.ensure_human_actor(id, id)
+            .await
+            .expect("ensure fixture Human actor row");
+    }
 }
 
 pub(super) fn scoped_payload() -> ProviderRegisterTokenPayload {
@@ -114,7 +73,7 @@ fn register_command(token: String) -> RegisterBot {
 
 #[tokio::test]
 async fn legacy_token_cannot_request_provider_registration_before_bot_writes() {
-    let (svc, management, onboarding) = service(false, false);
+    let (svc, provider_core, _) = scoped_service();
     let token = svc
         .issue_register_token(IssueRegisterToken {
             caller: human_caller("staff-1"),
@@ -150,13 +109,15 @@ async fn legacy_token_cannot_request_provider_registration_before_bot_writes() {
             Err(ApplicationError::InvalidInput { .. })
         ));
     }
-    assert!(management.connected.lock().unwrap().is_empty());
-    assert!(onboarding.onboarded.lock().unwrap().is_empty());
+    assert!(provider_core.registered.lock().unwrap().is_empty());
+    assert!(provider_core.authorized.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn provider_issuance_is_disabled_by_default() {
-    let (svc, _, _) = service(false, false);
+    let repo = Arc::new(MemoryBotRepo::new());
+    let svc = RegisterServiceImpl::new(SECRET.to_vec());
+    let _ = repo;
     assert!(matches!(
         svc.issue_register_token(IssueRegisterToken {
             caller: human_caller("staff-1"),
@@ -169,7 +130,7 @@ async fn provider_issuance_is_disabled_by_default() {
 
 #[tokio::test]
 async fn blank_provider_is_invalid_not_legacy_issuance() {
-    let (svc, _, _) = service(false, false);
+    let (svc, _, _) = scoped_service();
     for provider_id in ["", "  ", "\t"] {
         assert!(matches!(
             svc.issue_register_token(IssueRegisterToken {
@@ -184,7 +145,7 @@ async fn blank_provider_is_invalid_not_legacy_issuance() {
 
 #[tokio::test]
 async fn provider_issuance_authorizes_human_and_signs_six_hour_scope() {
-    let (svc, core, _, _) = scoped_service();
+    let (svc, core, _) = scoped_service();
     let view = svc
         .issue_register_token(IssueRegisterToken {
             caller: human_caller("human_staff-1"),
@@ -215,7 +176,7 @@ async fn provider_issuance_authorizes_human_and_signs_six_hour_scope() {
 
 #[tokio::test]
 async fn provider_issuance_requires_human_before_core_authorization() {
-    let (svc, core, _, _) = scoped_service();
+    let (svc, core, _) = scoped_service();
     let mut caller = human_caller("unused");
     caller.user = None;
     assert!(matches!(
@@ -231,7 +192,7 @@ async fn provider_issuance_requires_human_before_core_authorization() {
 
 #[tokio::test]
 async fn scoped_registration_uses_token_identity_and_maps_only_public_result() {
-    let (svc, core, management, onboarding) = scoped_service();
+    let (svc, core, _) = scoped_service();
     for mode in [
         None,
         Some(ProviderRegistrationMode::Plugin),
@@ -276,14 +237,24 @@ async fn scoped_registration_uses_token_identity_and_maps_only_public_result() {
             command.mode,
             mode.unwrap_or(ProviderRegistrationMode::Plugin)
         );
+        let initializations = core.initializations.lock().unwrap();
+        let initialization = initializations.last().unwrap();
+        // The scoped token payload carries "human_human_staff-1"
+        // (the test identity's own double prefix), so the
+        // derived owner is the payload id minus the leading
+        // actor prefix — the real initiator identity.
+        assert_eq!(initialization.owner_user_id, "human_staff-1");
+        assert!(matches!(
+            &initialization.mutation.actor,
+            AuthorityActor::Human { user_id } if user_id == "human_staff-1"
+        ));
+        assert!(!initialization.mutation.mutation_id.is_empty());
     }
-    assert!(management.connected.lock().unwrap().is_empty());
-    assert!(onboarding.onboarded.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn scoped_registration_requires_nonblank_reference_before_core() {
-    let (svc, core, management, _) = scoped_service();
+    let (svc, core, _) = scoped_service();
     for reference in [None, Some(""), Some("  ")] {
         assert!(matches!(
             svc.register_bot(RegisterBot {
@@ -298,12 +269,11 @@ async fn scoped_registration_requires_nonblank_reference_before_core() {
         ));
     }
     assert!(core.registered.lock().unwrap().is_empty());
-    assert!(management.connected.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn requested_mode_must_be_in_signed_allowlist() {
-    let (svc, core, _, _) = scoped_service();
+    let (svc, core, _) = scoped_service();
     for (allowed, requested) in [
         (
             ProviderRegistrationMode::Plugin,
@@ -330,7 +300,7 @@ async fn requested_mode_must_be_in_signed_allowlist() {
 
 #[tokio::test]
 async fn expired_or_wrong_secret_tokens_never_reach_core() {
-    let (svc, core, management, _) = scoped_service();
+    let (svc, provider_core, _) = scoped_service();
     let expired = ProviderRegisterTokenPayload {
         exp: 0,
         ..scoped_payload()
@@ -365,8 +335,7 @@ async fn expired_or_wrong_secret_tokens_never_reach_core() {
             Err(ApplicationError::Unauthenticated)
         ));
     }
-    assert!(core.registered.lock().unwrap().is_empty());
-    assert!(management.connected.lock().unwrap().is_empty());
+    assert!(provider_core.registered.lock().unwrap().is_empty());
 }
 
 pub(super) fn core_errors() -> Vec<(ServiceError, &'static str)> {
@@ -409,7 +378,7 @@ pub(super) fn core_errors() -> Vec<(ServiceError, &'static str)> {
 async fn issuance_and_redemption_core_errors_are_typed_and_redacted() {
     for redeem in [false, true] {
         for (error, expected_code) in core_errors() {
-            let (svc, core, management, onboarding) = scoped_service();
+            let (svc, core, _) = scoped_service();
             let actual = if redeem {
                 *core.register_error.lock().unwrap() = Some(error);
                 svc.register_bot(RegisterBot {
@@ -432,15 +401,16 @@ async fn issuance_and_redemption_core_errors_are_typed_and_redacted() {
             };
             assert_eq!(actual.code(), expected_code);
             assert!(!actual.to_string().contains("secret"));
-            assert!(management.connected.lock().unwrap().is_empty());
-            assert!(onboarding.onboarded.lock().unwrap().is_empty());
         }
     }
 }
 
+/// v1 (Human token) answers keep the flat registration
+/// shape and never reuse the Provider core.
 #[tokio::test]
 async fn legacy_token_and_registration_json_keep_exact_old_shape() {
-    let (svc, core, _, _) = scoped_service();
+    let (svc, provider_core, repo) = scoped_service();
+    seed_humans(&repo, &["staff-1"]).await;
     let view = svc
         .issue_register_token(IssueRegisterToken {
             caller: human_caller("staff-1"),
@@ -462,12 +432,14 @@ async fn legacy_token_and_registration_json_keep_exact_old_shape() {
         })
         .await
         .unwrap();
+    let value = serde_json::to_value(&result).unwrap();
+    assert_eq!(value.as_object().unwrap().len(), 3);
     assert_eq!(
-        serde_json::to_value(result).unwrap(),
-        json!({
-            "bot_name": "Test Bot", "bot_uuid": "bot-1", "bot_token": "bot-token-1",
-        })
+        value["bot_name"],
+        json!("Test Bot")
     );
-    assert!(core.authorized.lock().unwrap().is_empty());
-    assert!(core.registered.lock().unwrap().is_empty());
+    assert!(value["bot_uuid"].as_str().unwrap().len() > 0);
+    assert!(value["bot_token"].as_str().unwrap().len() > 0);
+    assert!(provider_core.authorized.lock().unwrap().is_empty());
+    assert!(provider_core.registered.lock().unwrap().is_empty());
 }

@@ -69,10 +69,44 @@ fn session_to_json_with_state_machine_run(
     v
 }
 
+/// Live Human→Bot control judgment for the Session routes
+/// (bot-authority plan Task 6.5, spec §8): the legacy
+/// `list_bots_by_creator` / `created_by` probes are gone — the
+/// routes consult the container-injected authority hook. A
+/// failing authority read is a 500, never a deny-as-forbidden.
+pub(crate) async fn human_controls_bot(
+    state: &HttpAppState,
+    staff_no: &str,
+    bot_id: &str,
+) -> Result<bool, crate::error::HttpAdapterError> {
+    match state.services.bot_authority_hook.can_manage(staff_no, bot_id).await {
+        Ok(controlled) => Ok(controlled),
+        Err(error) => Err(crate::error::HttpAdapterError::Service(
+            bcs_service_api::ServiceError::InternalError(format!(
+                "bot authority lookup failed: {error}"
+            )),
+        )),
+    }
+}
+
+/// `human_controls_bot` for routes that return bare `Response`s.
+pub(crate) async fn human_controls_bot_response(
+    state: &HttpAppState,
+    staff_no: &str,
+    bot_id: &str,
+) -> Result<bool, Response> {
+    human_controls_bot(state, staff_no, bot_id)
+        .await
+        .map_err(IntoResponse::into_response)
+}
+
+
+
 /// Check whether the Human identified by `actor_id` / `staff_no` has access
 /// to the given session. The Human has access if any of:
 ///   1. The Human's actor_id is a participant in the session.
-///   2. The Human owns at least one bot that is a participant in the session.
+///   2. The Human controls at least one bot that is a participant in the
+///      session (live authority edge).
 ///
 /// Session participants are the authoritative set for session-scoped access
 /// (seeded from the group at creation, then evolving independently); this
@@ -83,17 +117,20 @@ pub(crate) async fn human_has_session_access(
     session: &bcs_service_api::Session,
     actor_id: &str,
     staff_no: &str,
-) -> bool {
+) -> Result<bool, crate::error::HttpAdapterError> {
     if session.participants.iter().any(|p| p.bot_uuid == actor_id) {
-        return true;
+        return Ok(true);
     }
-    let owned = state.services.registry.list_bots_by_creator(staff_no).await;
-    owned.iter().any(|b| {
-        session
-            .participants
-            .iter()
-            .any(|p| p.bot_uuid == b.bot_uuid)
-    })
+    for participant in session
+        .participants
+        .iter()
+        .filter(|p| p.actor_kind == ActorKind::Bot)
+    {
+        if human_controls_bot(state, staff_no, &participant.bot_uuid).await? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 pub fn session_error_to_response(err: &bcs_service_api::SessionUseCaseError) -> Response {
@@ -329,7 +366,7 @@ pub async fn list_sessions_for_group(
     Query(params): Query<ListSessionsQuery>,
     headers: HeaderMap,
     uri: Uri,
-) -> impl IntoResponse {
+) -> Response {
     // collected filter: requires participant, returns only sessions the bot
     // has collected in this group.
     if params.collected == Some(true) {
@@ -432,15 +469,40 @@ pub async fn list_sessions_for_group(
     let caller_ids: Vec<String> = match &caller_actor {
         Some(GroupChatCaller::Bot { bot_uuid }) => vec![bot_uuid.clone()],
         Some(GroupChatCaller::Human(h)) => {
-            let mut ids = vec![h.actor_id.clone()];
-            for b in state
-                .services
-                .registry
-                .list_bots_by_creator(&h.staff_no)
-                .await
-            {
-                ids.push(b.bot_uuid);
+            // Human caller expands to {actor_id, controlled
+            // Bots} (bot-authority plan Task 6.5): the live
+            // authority hook decides per candidate Bot; the
+            // legacy `list_bots_by_creator` expansion is gone.
+            let mut controlled: Vec<String> = Vec::new();
+            let mut candidates: Vec<String> = Vec::new();
+            if let Some(g) = state.services.group.get(&group_id).await {
+                candidates.extend(
+                    g.participants
+                        .iter()
+                        .filter(|p| p.actor_kind == ActorKind::Bot)
+                        .map(|p| p.bot_uuid.clone()),
+                );
             }
+            for session in &sessions {
+                candidates.extend(
+                    session
+                        .participants
+                        .iter()
+                        .filter(|p| p.actor_kind == ActorKind::Bot)
+                        .map(|p| p.bot_uuid.clone()),
+                );
+            }
+            candidates.sort();
+            candidates.dedup();
+            for bot_id in candidates {
+                match human_controls_bot_response(&state, &h.staff_no, &bot_id).await {
+                    Ok(true) => controlled.push(bot_id),
+                    Ok(false) => {}
+                    Err(response) => return response,
+                }
+            }
+            let mut ids = vec![h.actor_id.clone()];
+            ids.extend(controlled);
             ids
         }
         None => Vec::new(),
@@ -661,18 +723,16 @@ pub async fn complete_session(
         }
     };
 
-    // 5. Caller must be driver (bot itself, or Human who owns the driver bot)
+    // 5. Caller must be driver (bot itself, or Human who controls the
+    //    driver bot through the live authority edge)
     let is_driver = match &caller {
         GroupChatCaller::Bot { bot_uuid } => group.driver_bot == *bot_uuid,
         GroupChatCaller::Human(h) => {
-            h.actor_id == group.driver_bot
-                || state
-                    .services
-                    .registry
-                    .list_bots_by_creator(&h.staff_no)
-                    .await
-                    .iter()
-                    .any(|b| b.bot_uuid == group.driver_bot)
+            let controlled = match human_controls_bot_response(&state, &h.staff_no, &group.driver_bot).await {
+                Ok(v) => v,
+                Err(response) => return response,
+            };
+            h.actor_id == group.driver_bot || controlled
         }
     };
     if !is_driver {
@@ -914,42 +974,73 @@ pub async fn remove_session_participant(
         })
         .unwrap_or((None, None, None));
 
-    // Authorization: self, owner, session creator/caller_principal, or coordinator.
+    // Authorization: self, controller, session creator/caller_principal, or
+    // coordinator.
     let is_self = caller_id == bot_uuid;
-    // COSEC: Human authority includes only Bots owned by the authenticated
-    // staff identity. This lets a Human act as a Bot-valued Session manager
-    // without trusting any caller-supplied actor id.
-    let owned_bot_ids = match &caller {
-        GroupChatCaller::Human(h) => state
-            .services
-            .registry
-            .list_bots_by_creator(&h.staff_no)
-            .await
-            .into_iter()
-            .map(|b| b.bot_uuid)
-            .collect::<Vec<_>>(),
-        GroupChatCaller::Bot { .. } => Vec::new(),
+    // COSEC: Human authority includes only Bots the authenticated staff
+    // identity CONTROLS (bot-authority plan Task 6.5): the live authority
+    // hook decides per actor; the legacy `list_bots_by_creator` set is gone.
+    // This lets a Human act as a Bot-valued Session manager without trusting
+    // any caller-supplied actor id.
+    let human_staff_no = match &caller {
+        GroupChatCaller::Human(h) => Some(h.staff_no.clone()),
+        GroupChatCaller::Bot { .. } => None,
     };
-    let human_owns_actor = |actor_id: &str| owned_bot_ids.iter().any(|id| id == actor_id);
-    // A Human caller may remove a bot they own (mirrors delete_session authz).
-    let is_bot_owner = human_owns_actor(&bot_uuid);
-    let is_session_creator = session_created_by
-        .as_deref()
-        .map(|c| caller_id == format!("human_{}", c) || caller_id == c || human_owns_actor(c))
-        .unwrap_or(false);
-    let is_session_principal = session_caller_principal
-        .as_deref()
-        .map(|p| caller_id == p || human_owns_actor(p))
-        .unwrap_or(false);
+    async fn human_controls_actor(
+        state: &HttpAppState,
+        staff_no: &Option<String>,
+        actor_id: &str,
+    ) -> Result<bool, Response> {
+        match staff_no {
+            Some(staff_no) => human_controls_bot_response(state, staff_no, actor_id).await,
+            None => Ok(false),
+        }
+    }
+    // A Human caller may remove a bot they control (mirrors delete_session
+    // authz).
+    let is_bot_owner =
+        match human_controls_actor(&state, &human_staff_no, &bot_uuid).await {
+            Ok(v) => v,
+            Err(response) => return response,
+        };
+    let is_session_creator = match session_created_by.as_deref() {
+        Some(c) => {
+            caller_id == format!("human_{}", c)
+                || caller_id == c
+                || match human_controls_actor(&state, &human_staff_no, c).await {
+                    Ok(v) => v,
+                    Err(response) => return response,
+                }
+        }
+        None => false,
+    };
+    let is_session_principal = match session_caller_principal.as_deref() {
+        Some(p) => {
+            caller_id == p
+                || match human_controls_actor(&state, &human_staff_no, p).await {
+                    Ok(v) => v,
+                    Err(response) => return response,
+                }
+        }
+        None => false,
+    };
     let (is_direct_coordinator, is_coordinator) = if let Some(ref gid) = group_id {
         if let Some(group) = state.services.group.get(gid).await {
             let direct = caller_id == group.driver_bot || caller_id == group.originator();
-            (
-                direct,
-                direct
-                    || human_owns_actor(&group.driver_bot)
-                    || human_owns_actor(group.originator()),
-            )
+            let controls_driver =
+                match human_controls_actor(&state, &human_staff_no, &group.driver_bot).await {
+                    Ok(v) => v,
+                    Err(response) => return response,
+                };
+            let controls_originator = match human_controls_actor(
+                &state,
+                &human_staff_no,
+                group.originator(),
+            ).await {
+                Ok(v) => v,
+                Err(response) => return response,
+            };
+            (direct, direct || controls_driver || controls_originator)
         } else {
             (false, false)
         }
@@ -1755,10 +1846,12 @@ async fn resolve_session_history_view(
                 }) {
                     return Err(forbidden());
                 }
-                let owned = state.services.bot_query.list_bots_by_creator(&human.staff_no)
-                    .await
-                    .map_err(|error| super::bots::bot_use_case_error_to_http(error).into_response())?;
-                if !owned.iter().any(|bot| bot.bot_uuid == requested) {
+                let controlled =
+                    match human_controls_bot_response(state, &human.staff_no, requested).await {
+                        Ok(v) => v,
+                        Err(response) => return Err(response),
+                    };
+                if !controlled {
                     return Err(forbidden());
                 }
                 return Ok(ResolvedSessionHistoryView {
@@ -1819,7 +1912,9 @@ async fn authorize_state_machine_session_history(
 ) -> Result<(), Response> {
     let authorized = match caller {
         bcs_service_api::CallerContext::Human(human) => {
-            human_has_session_access(state, session, &human.actor_id, &human.staff_no).await
+            human_has_session_access(state, session, &human.actor_id, &human.staff_no)
+                .await
+                .map_err(IntoResponse::into_response)?
         }
         bcs_service_api::CallerContext::Bot(bot) => session
             .participants
@@ -1950,16 +2045,30 @@ pub async fn delete_session(
         .map(|g| g.driver_bot);
     let driver_bot = driver_bot.as_deref().unwrap_or("");
 
-    // The session creator, the driver bot, or a human who owns the creator or
-    // driver bot may delete the session.
+    // The session creator, the driver bot, or a human who CONTROLS
+    // the creator or driver bot (live authority hook; bot-authority
+    // plan Task 6.5) may delete the session.
     let authorized = if caller_id == session_creator || caller_id == driver_bot {
         true
     } else if caller_id.starts_with("human_") {
         let staff_no = caller_id.trim_start_matches("human_");
-        let owned_bots = state.services.registry.list_bots_by_creator(staff_no).await;
-        owned_bots
-            .iter()
-            .any(|b| b.bot_uuid == session_creator || b.bot_uuid == driver_bot)
+        if !session_creator.is_empty() {
+            match human_controls_bot_response(&state, staff_no, session_creator).await {
+                Ok(true) => true,
+                Ok(false) => !driver_bot.is_empty()
+                    && match human_controls_bot_response(&state, staff_no, driver_bot).await {
+                        Ok(v) => v,
+                        Err(response) => return response,
+                    },
+                Err(response) => return response,
+            }
+        } else {
+            !driver_bot.is_empty()
+                && match human_controls_bot_response(&state, staff_no, driver_bot).await {
+                    Ok(v) => v,
+                    Err(response) => return response,
+                }
+        }
     } else {
         false
     };
@@ -2056,13 +2165,26 @@ async fn resolve_collector_bot(
                 )
                     .into_response()
             })?;
-            let owns = state
-                .services
-                .registry
-                .list_bots_by_creator(&h.staff_no)
-                .await
-                .iter()
-                .any(|b| b.bot_uuid == bot_uuid);
+            let owns = if bot_uuid == h.actor_id {
+                // §3.3 Human self right: the caller's
+                // OWN `human_{id}` actor (collect /
+                // collect-listing) passes through its
+                // self identity — there are NO
+                // Human→Human authority edges, so the
+                // control-hook leg must not gate it.
+                // This mirrors the V1 collect seam
+                // (`load_session_for_collection`), and
+                // a different Human actor still falls
+                // through to the control edge below.
+                true
+            } else if bot_uuid.starts_with("human_") {
+                false
+            } else {
+                match human_controls_bot_response(&state, &h.staff_no, bot_uuid).await {
+                    Ok(v) => v,
+                    Err(response) => return Err(response),
+                }
+            };
             if !owns {
                 return Err((
                     StatusCode::FORBIDDEN,

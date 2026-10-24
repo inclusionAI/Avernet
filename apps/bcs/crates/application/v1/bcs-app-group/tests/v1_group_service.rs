@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use bcs_bot::BotCore;
-use bcs_bot_store::PersistentBotRepo;
+use bcs_bot_store::{MemoryBotRepo, PersistentBotRepo};
 use bcs_db_api::{
     DbError, DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbStatement, DbTransactionStep,
     DbTransactionStepResult, DbValue,
@@ -45,6 +45,18 @@ use bcs_app_group::{GroupProvisioningReconciler, GroupServiceConfig, GroupServic
 #[path = "v1_group_service/create_notify_mode.rs"]
 mod create_notify_mode;
 
+/// A live Human ACTOR row on the shared bots registry (the
+/// authority guards' Human existence source).
+async fn ensure_human_actor(fixture: &Fixture, user_id: &str) {
+    use bcs_service_api::port::repo::BotRepoPort;
+
+    fixture
+        .authority_repo
+        .ensure_human_actor(user_id, user_id)
+        .await
+        .expect("ensure fixture Human actor row");
+}
+
 struct Fixture {
     service: GroupServiceImpl,
     groups: Arc<GroupCore>,
@@ -52,9 +64,26 @@ struct Fixture {
     friends: Arc<FriendCore>,
     relation: Arc<RelationCore>,
     sessions: Arc<SessionManagementServiceImpl>,
+    /// The authority store backing the Group facade's
+    /// hook (the CURRENT control edges).
+    authority_repo: Arc<MemoryBotRepo>,
 }
 
 impl Fixture {
+    /// Grant the CURRENT owner edge this suite uses
+    /// in place of the historical `created_by`.
+    async fn grant_owner(&self, bot_id: &str, user: &str) {
+        bcs_test_support::grant_owner_edge(&self.authority_repo, bot_id, user)
+            .await;
+    }
+
+    async fn grant_manager(&self, bot_id: &str, user: &str) {
+        bcs_test_support::grant_manager_edge(&self.authority_repo, bot_id, user)
+            .await;
+    }
+
+    /// The failing-store variant builds the
+    /// authority repo inline below.
     async fn new() -> Self {
         Self::build(None, None, None).await
     }
@@ -92,6 +121,7 @@ impl Fixture {
             group_repo,
         ));
         let system_message: Arc<dyn SystemMessageService> = Arc::new(NoopSystemMessageService);
+        let authority_repo = Arc::new(MemoryBotRepo::new());
         let management = Arc::new(
             GroupManagement::new(
                 groups.clone(),
@@ -102,19 +132,21 @@ impl Fixture {
                 sessions.clone(),
                 system_message,
             )
+            .with_bot_authority(bcs_test_support::authority_hook_for(
+                authority_repo.clone(),
+            ))
             .for_v1_openapi(),
         );
         let service = GroupServiceImpl::new(
             groups.clone(),
             bots.clone(),
             friends.clone(),
-            relation.clone(),
             sessions.clone(),
             management,
-            GroupServiceConfig {
-                relation_env: "dev".to_string(),
-            },
-        );
+        )
+        .with_bot_authority_hook(bcs_test_support::authority_hook_for(
+            authority_repo.clone(),
+        ));
         Self {
             service,
             groups,
@@ -122,6 +154,7 @@ impl Fixture {
             friends,
             relation: relation.clone(),
             sessions,
+            authority_repo,
         }
     }
 
@@ -138,6 +171,7 @@ impl Fixture {
             group_repo,
         ));
         let system_message: Arc<dyn SystemMessageService> = Arc::new(NoopSystemMessageService);
+        let authority_repo = Arc::new(MemoryBotRepo::new());
         let management = Arc::new(
             GroupManagement::new(
                 groups.clone(),
@@ -148,6 +182,9 @@ impl Fixture {
                 sessions.clone(),
                 system_message,
             )
+            .with_bot_authority(bcs_test_support::authority_hook_for(
+                authority_repo.clone(),
+            ))
             .for_v1_openapi()
             .with_channel_binding_cleanup(Arc::new(FailingChannelBindingCleanup)),
         );
@@ -155,13 +192,12 @@ impl Fixture {
             groups.clone(),
             bots.clone(),
             friends.clone(),
-            relation.clone(),
             sessions.clone(),
             management,
-            GroupServiceConfig {
-                relation_env: "dev".to_string(),
-            },
         )
+        .with_bot_authority_hook(bcs_test_support::authority_hook_for(
+            authority_repo.clone(),
+        ))
         .with_collaboration_runtime(runtime);
         Self {
             service,
@@ -170,6 +206,7 @@ impl Fixture {
             friends,
             relation,
             sessions,
+            authority_repo,
         }
     }
 
@@ -189,6 +226,7 @@ impl Fixture {
             group_repo,
         ));
         let system_message: Arc<dyn SystemMessageService> = Arc::new(NoopSystemMessageService);
+        let authority_repo = Arc::new(MemoryBotRepo::new());
         let management = Arc::new(
             GroupManagement::new(
                 groups.clone(),
@@ -199,23 +237,26 @@ impl Fixture {
                 sessions.clone(),
                 system_message,
             )
+            .with_bot_authority(bcs_test_support::authority_hook_for(
+                authority_repo.clone(),
+            ))
             .for_v1_openapi(),
         );
         let mut service = GroupServiceImpl::new(
             groups.clone(),
             bots.clone(),
             friends.clone(),
-            relation.clone(),
             sessions.clone(),
             management,
-            GroupServiceConfig {
-                relation_env: "dev".to_string(),
-            },
-        );
+        )
+        .with_bot_authority_hook(bcs_test_support::authority_hook_for(
+            authority_repo.clone(),
+        ));
         if let Some(runtime) = runtime {
             service = service.with_collaboration_runtime(runtime);
         }
         Self {
+            authority_repo,
             service,
             groups,
             bots,
@@ -239,6 +280,12 @@ impl Fixture {
             .save_created_by(bot_uuid, bot_uuid, true)
             .await
             .expect("assign test Bot owner");
+        bcs_test_support::grant_owner_edge(
+            &self.authority_repo,
+            bot_uuid,
+            bot_uuid,
+        )
+        .await;
     }
 
     async fn add_protected_bot(&self, bot_uuid: &str) {
@@ -255,6 +302,12 @@ impl Fixture {
             .save_created_by(bot_uuid, bot_uuid, true)
             .await
             .expect("assign test Bot owner");
+        bcs_test_support::grant_owner_edge(
+            &self.authority_repo,
+            bot_uuid,
+            bot_uuid,
+        )
+        .await;
     }
 
     async fn add_bot_owned_by(
@@ -276,6 +329,14 @@ impl Fixture {
             .save_created_by(bot_uuid, owner_staff_no, true)
             .await
             .expect("assign test Bot owner");
+        // The CURRENT owner edge replaces the historical
+        // `created_by` fact (bot-authority plan Task 6.2).
+        bcs_test_support::grant_owner_edge(
+            &self.authority_repo,
+            bot_uuid,
+            owner_staff_no,
+        )
+        .await;
     }
 }
 
@@ -1078,6 +1139,9 @@ async fn list_defaults_to_the_authenticated_human_and_accepts_only_authorized_vi
         .save_created_by("owned-by-alice", "alice", true)
         .await
         .expect("assign Alice's Bot ownership");
+    // CURRENT owner edge for the alice-owned Bot.
+    bcs_test_support::grant_owner_edge(&fixture.authority_repo, "owned-by-alice", "alice")
+        .await;
     fixture
         .groups
         .upsert(normal_group(
@@ -1167,6 +1231,8 @@ async fn group_detail_accepts_human_or_exact_owned_bot_participation_only() {
         .save_created_by("owned", "alice", true)
         .await
         .expect("assign Alice's Bot ownership");
+    bcs_test_support::grant_owner_edge(&fixture.authority_repo, "owned", "alice")
+        .await;
     fixture
         .relation
         .upsert_edge(bcs_service_api::RelationEdge {
@@ -1263,7 +1329,13 @@ async fn get_public_group_readable_without_participation() {
 }
 
 #[tokio::test]
-async fn group_detail_propagates_owned_bot_lookup_database_failure() {
+async fn group_detail_propagates_authority_read_failure_as_internal() {
+    // Bot-authority plan Task 6.3: the Human participant
+    // view now consults the authority hook; an authority
+    // READ failure must surface as an internal error —
+    // never as a forbidden (deny-as-false masquerade).
+    // The integrity failure is staged with a duplicated
+    // approved-owner edge in the authority store.
     let bots = Arc::new(BotCore::with_repo(Arc::new(
         PersistentBotRepo::new(Arc::new(FailingDb)),
     )));
@@ -1279,19 +1351,61 @@ async fn group_detail_propagates_owned_bot_lookup_database_failure() {
         ))
         .await
         .expect("store Group");
+    fixture.grant_owner("owned", "alice").await;
+    // The duplicate corrupting owner edge is
+    // inserted DIRECTLY (grant_owner deduplicates
+    // by design; the integrity failure is the
+    // staging for the read error).
+    {
+        use bcs_bot_store::memory_authority::{
+            MemoryAuthorityEdgeKind, MemoryAuthorityEdgeStatus,
+        };
+        let authority = fixture.authority_repo.authority_state();
+        let existing = authority.try_read().expect("authority lock");
+        let env = existing
+            .edges
+            .keys()
+            .find_map(|key| {
+                (key.1 == "owned").then(|| key.0.clone())
+            })
+            .expect("first owner edge");
+        drop(existing);
+        ensure_human_actor(&fixture, "bob").await;
+        let mut write = authority.try_write().expect("authority write lock");
+        write.edges.insert(
+            (
+                env,
+                "owned".to_string(),
+                "human_bob".to_string(),
+                MemoryAuthorityEdgeKind::Owner,
+            ),
+            (MemoryAuthorityEdgeStatus::Approved, 0),
+        );
+    }
+    fixture
+        .groups
+        .upsert(normal_group(
+            "owned-bot-lookup-failure",
+            "driver",
+            vec![Participant::bot("owned", ParticipantRole::Consultant)],
+            GroupStrategy::Chat,
+            2,
+        ))
+        .await
+        .expect("store Group");
 
     let error = fixture
         .service
         .get(GetGroup {
-            caller: bot_principal("alice"),
+            caller: human_principal_with_profile("alice", "alice", None, None),
             group_id: "owned-bot-lookup-failure".into(),
         })
         .await
-        .expect_err("owned-Bot lookup failure must not be reported as forbidden");
+        .expect_err("authority failure must not be reported as forbidden");
 
     assert!(matches!(
         error,
-        ApplicationError::Internal(message) if message.contains("bot database unavailable")
+        ApplicationError::Internal(message) if message.contains("bot authority lookup failed")
     ));
 }
 

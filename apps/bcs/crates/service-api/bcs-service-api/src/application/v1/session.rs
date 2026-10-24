@@ -116,7 +116,16 @@ pub struct CreateSessionOutcome {
 
 #[derive(Debug, Clone)]
 pub struct CreateSession {
-    pub caller: SessionCaller,
+    /// The raw authenticated caller. The application
+    /// resolves the effective `SessionCaller` with the
+    /// LIVE Human→Bot hybrid rule
+    /// (`resolve_authorized_principal`): a hybrid
+    /// User+Bot credential becomes the Bot caller only
+    /// through the CURRENT management edge, so a
+    /// revoked historical owner cannot launch behind a
+    /// Bot and a current manager is not rejected
+    /// (bot-authority plan Task 6.3).
+    pub caller: AuthenticatedCaller,
     pub group_id: String,
     pub title: Option<String>,
     pub kind: Option<SessionKind>,
