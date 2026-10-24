@@ -30,9 +30,9 @@ export function useBotEditor(
 ) {
   const copyResourcePath = useResourcePathClipboard();
   const [skills, setSkills] = useState<BotEditorSkill[]>([]);
-  const uploadSkillFolder = useBotLocalSkillUpload(botId, setSkills);
+  const uploadSkillFolder = useBotLocalSkillUpload(botId, setSkills, ownerId);
   const [skillSets, setSkillSets] = useState<BotCapabilitySet[]>([]);
-  const skillSetActivation = useSkillSetActivation(botId, setSkillSets);
+  const skillSetActivation = useSkillSetActivation(botId, setSkillSets, ownerId);
   const [mcps, setMcps] = useState<BotEditorMcp[]>([]);
   const candidates = useBotEditorCandidates(botId, spaceId);
   const [resources, setResources] = useState<BotEditorResource[]>([]);
@@ -46,33 +46,36 @@ export function useBotEditor(
   const [updatingCallType, setUpdatingCallType] = useState<string>();
   const [loading, setLoading] = useState(Boolean(botId));
   // silent 模式跳过 setLoading(true/false)：后台数据照刷，但编辑区不闪 Spin、不卸载弹窗（用于删除等就地操作）。
-  const load = useCallback(async (options?: { silent?: boolean }) => {
-    if (!botId || !enabled) return;
-    if (!options?.silent) setLoading(true);
-    try {
-      const data = await botEditorService.load(botId, ownerId, deployment, engine);
-      setSkills(data.skills);
-      setSkillSets(data.skillSets);
-      setMcps(data.mcps);
-      setResources(data.resources);
-      setScreens(data.screens);
-      setRoutines(data.routines);
-      setEngineStatus(data.engineStatus);
-      if (serviceBot) {
-        const callerContext = await botEditorService.getCallerContext(botId, ownerId).catch(() => undefined);
-        setMcpCallTypes(callerContext?.mcpCallTypes ?? {});
-        setCallerContextEditable(callerContext?.editable ?? false);
-      } else {
-        setMcpCallTypes({});
-        setCallerContextEditable(false);
+  const load = useCallback(
+    async (options?: { silent?: boolean }) => {
+      if (!botId || !enabled) return;
+      if (!options?.silent) setLoading(true);
+      try {
+        const data = await botEditorService.load(botId, ownerId, deployment, engine);
+        setSkills(data.skills);
+        setSkillSets(data.skillSets);
+        setMcps(data.mcps);
+        setResources(data.resources);
+        setScreens(data.screens);
+        setRoutines(data.routines);
+        setEngineStatus(data.engineStatus);
+        if (serviceBot) {
+          const callerContext = await botEditorService.getCallerContext(botId, ownerId).catch(() => undefined);
+          setMcpCallTypes(callerContext?.mcpCallTypes ?? {});
+          setCallerContextEditable(callerContext?.editable ?? false);
+        } else {
+          setMcpCallTypes({});
+          setCallerContextEditable(false);
+        }
+        if (data.errors) toast.warning(`${data.errors} 个配置模块暂时无法加载`);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : '编辑配置加载失败');
+      } finally {
+        if (!options?.silent) setLoading(false);
       }
-      if (data.errors) toast.warning(`${data.errors} 个配置模块暂时无法加载`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '编辑配置加载失败');
-    } finally {
-      if (!options?.silent) setLoading(false);
-    }
-  }, [botId, enabled, serviceBot, spaceId, ownerId, deployment, engine]);
+    },
+    [botId, enabled, serviceBot, spaceId, ownerId, deployment, engine],
+  );
   useEffect(() => {
     void load();
   }, [botId, load]);
@@ -106,18 +109,18 @@ export function useBotEditor(
     loading,
     reload: load,
     toggleSkill: (skill: BotEditorSkill) =>
-      act(() => botEditorService.toggleSkill(botId!, skill), skill.active ? 'Skill 已停用' : 'Skill 已启用'),
+      act(() => botEditorService.toggleSkill(botId!, skill, ownerId), skill.active ? 'Skill 已停用' : 'Skill 已启用'),
     deleteSkill: (id: string) =>
       act(
         async () => {
-          await botEditorService.deleteSkill(botId!, id);
+          await botEditorService.deleteSkill(botId!, id, ownerId);
           // 乐观移除卡片，避免静默全量重载期间卡片滞留(~1s)
           setSkills((current) => current.filter((skill) => skill.id !== id));
         },
         'Skill 已删除',
         { silent: true },
       ),
-    uploadSkill: (file: File) => act(() => botEditorService.uploadSkill(botId!, file), 'Skill 已上传'),
+    uploadSkill: (file: File) => act(() => botEditorService.uploadSkill(botId!, file, ownerId), 'Skill 已上传'),
     setMcpActive: (mcp: BotEditorMcp, active: boolean) =>
       act(() => botEditorService.setMcpActive(botId!, mcp, active), active ? 'MCP 已添加' : 'MCP 已移除'),
     createDirectory: (path: string) => act(() => botEditorService.createDirectory(botId!, path, ownerId), '目录已创建'),
@@ -158,18 +161,21 @@ export function useBotEditor(
             : botEditorService.createScreen(botId!, input, ownerId),
         id ? '副屏配置已更新' : '副屏配置已创建',
       ),
-    createSkillSet: (name: string) => act(() => botEditorService.createSkillSet(botId!, name), '能力集已创建'),
+    createSkillSet: (name: string) => act(() => botEditorService.createSkillSet(botId!, name, ownerId), '能力集已创建'),
     updateSkillSet: (id: string, name: string) =>
-      act(() => botEditorService.updateSkillSet(botId!, id, name), '能力集已更新'),
-    deleteSkillSet: (id: string) => act(() => botEditorService.deleteSkillSet(botId!, id), '能力集已删除'),
+      act(() => botEditorService.updateSkillSet(botId!, id, name, ownerId), '能力集已更新'),
+    deleteSkillSet: (id: string) => act(() => botEditorService.deleteSkillSet(botId!, id, ownerId), '能力集已删除'),
     setSkillSetActive: skillSetActivation.setSkillSetActive,
     setSkillSetSkill: (setId: string, skillId: string, active: boolean) =>
       act(
-        () => botEditorService.setSkillSetSkill(botId!, setId, skillId, active),
+        () => botEditorService.setSkillSetSkill(botId!, setId, skillId, active, ownerId),
         active ? 'Skill 已加入能力集' : 'Skill 已移出能力集',
       ),
     addSkillCenterReferences: (setId: string, skillCodes: string[]) =>
-      act(() => botEditorService.addSkillCenterReferences(botId!, setId, skillCodes), 'SkillCenter Skill 已加入能力集'),
+      act(
+        () => botEditorService.addSkillCenterReferences(botId!, setId, skillCodes, ownerId),
+        'SkillCenter Skill 已加入能力集',
+      ),
     uploadSkillFolder,
     setSkillSetMcp: (setId: string, serverCode: string, active: boolean) =>
       act(

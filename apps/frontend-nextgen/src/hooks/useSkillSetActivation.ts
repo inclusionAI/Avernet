@@ -13,6 +13,7 @@ export interface PendingSkillSetToggle {
 export function useSkillSetActivation(
   botId: string | null,
   setSkillSets: Dispatch<SetStateAction<BotCapabilitySet[]>>,
+  ownerId?: string,
 ) {
   const [pendingSkillSetToggle, setPendingSkillSetToggle] = useState<PendingSkillSetToggle>();
   const inFlight = useRef<{ botId: string; id: string } | null>(null);
@@ -20,7 +21,7 @@ export function useSkillSetActivation(
   useEffect(() => {
     inFlight.current = null;
     setPendingSkillSetToggle(undefined);
-  }, [botId]);
+  }, [botId, ownerId]);
 
   const setSkillSetActive = useCallback(
     async (set: BotCapabilitySet, active: boolean) => {
@@ -34,7 +35,7 @@ export function useSkillSetActivation(
         }
       }, 8_000);
       try {
-        const result = await botEditorService.setSkillSetActive(botId, set, active);
+        const result = await botEditorService.setSkillSetActive(botId, set, active, ownerId);
         if (inFlight.current !== operation) return;
         setSkillSets((current) =>
           current.map((item) => (item.id === result.id ? { ...item, active: result.active } : item)),
@@ -53,7 +54,7 @@ export function useSkillSetActivation(
         }
       }
     },
-    [botId, setSkillSets],
+    [botId, setSkillSets, ownerId],
   );
 
   return { pendingSkillSetToggle, setSkillSetActive };
