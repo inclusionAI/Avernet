@@ -98,7 +98,7 @@ impl GroupManagementService for GroupManagement {
         }
 
         if bot.actor_kind == ActorKind::Bot {
-            self.ensure_add_member_reachable(&group.driver_bot, &cmd.bot_id)
+            self.ensure_reachable(&group.driver_bot, &cmd.bot_id)
                 .await?;
             if group.visibility == "public" && bot.capabilities.visibility != "public" {
                 return Err(GroupUseCaseError::InvalidProposal(format!(
@@ -187,28 +187,29 @@ impl GroupManagementService for GroupManagement {
             ));
         }
 
-        let is_coordinator = group.originator() == caller || group.driver_bot == caller || {
-            if caller.starts_with("human_") {
-                let staff_no = caller.trim_start_matches("human_");
-                let owned = self.registry.list_bots_by_creator(staff_no).await;
-                owned
-                    .iter()
-                    .any(|b| b.bot_uuid == group.driver_bot || b.bot_uuid == group.originator())
-            } else {
-                false
-            }
-        };
+        // Row 15 (bot-authority plan Task 6.3): the
+        // coordinator leg keeps its Group-fact structure
+        // (caller IS the driver/originator, or CONTROLS the
+        // driver/originator Bot through a live `can_manage`
+        // edge); the owner leg is the live control edge for
+        // the target Bot itself. The literal
+        // `list_bots_by_creator` prefix is NEVER used as a
+        // whitelist (plan: 不能把 list 前缀当白名单).
+        let mut is_coordinator =
+            group.originator() == caller || group.driver_bot == caller;
         let is_self = caller == cmd.bot_id;
-        let is_owner = if caller.starts_with("human_") {
-            let staff_no = caller.trim_start_matches("human_");
-            self.registry
-                .list_bots_by_creator(staff_no)
-                .await
-                .iter()
-                .any(|b| b.bot_uuid == cmd.bot_id)
-        } else {
-            false
-        };
+        let mut is_owner = false;
+        if let Some(staff_no) = caller.strip_prefix("human_") {
+            if !is_coordinator {
+                is_coordinator = self
+                    .human_controls_bot(staff_no, &group.driver_bot)
+                    .await?
+                    || self
+                        .human_controls_bot(staff_no, group.originator())
+                        .await?;
+            }
+            is_owner = self.human_controls_bot(staff_no, &cmd.bot_id).await?;
+        }
         if !is_coordinator && !is_self && !is_owner {
             return Err(GroupUseCaseError::Forbidden(
                 "Caller is not authorized to remove this member".to_string(),
@@ -386,15 +387,19 @@ impl GroupManagementService for GroupManagement {
             .await
             .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
 
-        // Only coordinator (driver, originator, or driver's owner) can change visibility
+        // Only coordinator (driver, originator, or the
+        // Bot the caller CURRENTLY controls as the driver)
+        // can change visibility: live `can_manage` on the
+        // driver Bot (row 15).
         let is_coordinator = cmd.caller_actor_id == group.driver_bot
             || group.originator.as_deref() == Some(&cmd.caller_actor_id)
-            || self
-                .registry
-                .list_bots_by_creator(&cmd.caller_actor_id)
-                .await
-                .iter()
-                .any(|b| b.bot_uuid == group.driver_bot);
+            || match cmd.caller_actor_id.strip_prefix("human_") {
+                Some(staff_no) => {
+                    self.human_controls_bot(staff_no, &group.driver_bot)
+                        .await?
+                }
+                None => false,
+            };
         if !is_coordinator {
             return Err(GroupUseCaseError::Forbidden(
                 "Only the group coordinator can change visibility".to_string(),

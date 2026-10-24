@@ -144,15 +144,38 @@ impl LiveStory {
         };
         let client = reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(10)).build().unwrap();
         checked(client.post(format!("http://{addr}/me/ensure-human")).header("X-Mock-User-Id", HUMAN).json(&json!({}))).await;
-        let mut driver = MockBot::connect(addr).await;
+        // bot-authority ruling T6d-1: the driver's
+        // ownership is seeded through the TRUSTED
+        // register surface (`register_with_ownership`
+        // commits the authority owner edge) and the
+        // driver RESUMES via its token; the mock-user
+        // onboard never mints authority.
+        let register_token = checked(
+            client
+                .get(format!("http://{addr}/register/token"))
+                .header("X-Mock-User-Id", HUMAN),
+        )
+        .await["token"]
+            .as_str()
+            .expect("register token")
+            .to_string();
+        let registered = checked(
+            client.post(format!(
+                "http://{addr}/register?token={register_token}&bot-name=Loop-live-driver"
+            )),
+        )
+        .await;
+        let driver_bot_uuid = registered["bot_uuid"].as_str().expect("bot_uuid").to_string();
+        let driver_bot_token = registered["bot_token"].as_str().expect("bot_token").to_string();
+        let mut driver = MockBot::reconnect(addr, &driver_bot_token).await;
         driver.register("Loop live driver", &["drive"], addr).await;
         let provider = start_provider_webhook().await;
         let bot = register_provider_bot(&client, addr, provider.url(), "loop-live-worker", "worker").await;
         let definition = definition(scenario);
         let group = checked(client.post(format!("http://{addr}/groups")).header("X-Mock-User-Id", HUMAN)
-            .json(&json!({"driver_bot": driver.bot_id, "label": format!("Loop live {scenario}"),
+            .json(&json!({"driver_bot": driver_bot_uuid, "label": format!("Loop live {scenario}"),
                 "group_strategy": "state_machine", "collaboration_definition_yaml": definition, "start_initial_run": false,
-                "participants": [{"bot_uuid": driver.bot_id}, {"bot_uuid": bot.bot_uuid}],
+                "participants": [{"bot_uuid": driver_bot_uuid}, {"bot_uuid": bot.bot_uuid}],
                 "participant_bindings": {"worker": {"source": "manual", "bot_ids": [bot.bot_uuid]}}
             }))).await;
         let group_id = group["id"].as_str().unwrap().to_owned();

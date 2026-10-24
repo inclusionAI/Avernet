@@ -174,7 +174,11 @@ pub(crate) fn plan_admission(
         };
         let run_id = (target.kind == DeliveryType::Send).then(|| {
             if command.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a { command.message.run_id.clone() }
-            else { uuid::Uuid::new_v4().to_string() }
+            // A caller-preassigned canonical run id is honoured
+            // verbatim: the producer already installed this run's
+            // operation binding and frozen facts before the durable
+            // admission committed (spec §8.2).
+            else { target.run_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string()) }
         });
         let row = PersistedMessageDelivery {
             delivery_id: if command.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a {

@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use bcs_bot::BotCore;
+use bcs_bot_store::MemoryBotRepo;
 use bcs_domain::{
     invite_token_encode, InviteTargetType, InviteTokenPayload,
 };
@@ -54,6 +55,7 @@ struct Fixture {
     friends: Arc<FriendCore>,
     sessions: Arc<SessionManagementServiceImpl>,
     invite: Arc<dyn InviteService>,
+    authority_repo: Arc<MemoryBotRepo>,
 }
 
 impl Fixture {
@@ -78,6 +80,7 @@ impl Fixture {
         // `NoopSystemMessageService` covers the `join_session_by_invite`
         // notification path without forcing a real dispatcher into the
         // fixture.
+        let authority_repo = Arc::new(MemoryBotRepo::new());
         let invite: Arc<dyn InviteService> = Arc::new(InviteServiceImpl {
             registry: bots.clone(),
             group: groups.clone(),
@@ -88,6 +91,11 @@ impl Fixture {
             base_url: None,
             group_link_url: None,
             session_link_url: None,
+            bot_authority: Some(
+                bcs_test_support::authority_hook_for(
+                    authority_repo.clone(),
+                ),
+            ),
         });
         let service = InvitationFriendshipServiceImpl::new(
             friends.clone(),
@@ -100,6 +108,9 @@ impl Fixture {
             InvitationFriendshipServiceConfig {
                 default_ttl_seconds: 3600,
             },
+        )
+        .with_bot_authority_hook(
+            bcs_test_support::authority_hook_for(authority_repo.clone()),
         );
         Self {
             service,
@@ -108,6 +119,7 @@ impl Fixture {
             friends,
             sessions,
             invite,
+            authority_repo,
         }
     }
 
@@ -130,6 +142,9 @@ impl Fixture {
             InvitationFriendshipServiceConfig {
                 default_ttl_seconds: 3600,
             },
+        )
+        .with_bot_authority_hook(
+            bcs_test_support::authority_hook_for(self.authority_repo.clone()),
         )
     }
 
@@ -161,6 +176,10 @@ impl Fixture {
             .save_created_by(bot_uuid, owner, true)
             .await
             .expect("assign test Bot owner");
+        // Row 11: the CURRENT owner edge replaces the
+        // historical `created_by` fact.
+        bcs_test_support::grant_owner_edge(&self.authority_repo, bot_uuid, owner)
+            .await;
     }
 
     async fn store_group(&self, group_id: &str, driver: &str) {

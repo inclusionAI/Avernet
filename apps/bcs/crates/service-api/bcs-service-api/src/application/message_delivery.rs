@@ -196,6 +196,11 @@ pub trait ManagedMessageDeliveryService: Send + Sync {
         now_ms: i64,
     ) -> Result<Option<PersistedMessageDelivery>, ManagedDeliveryError>;
 
+    /// Atomically admit work. Conflict and Repository(Conflict | Invalid)
+    /// are definitive rejections: no new work from this call was committed.
+    /// Other errors (notably Storage, including a lost COMMIT acknowledgement)
+    /// do not prove rollback. Callers must retain potentially committed Run
+    /// identities/output permits and must not retry under fresh identities.
     async fn admit(
         &self,
         command: AdmitMessageDeliveries,

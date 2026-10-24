@@ -421,6 +421,13 @@ fn bot_query_entry_to_my_json(bot: BotQueryEntry) -> Value {
         obj.insert("skills".to_string(), serde_json::json!(skill_names));
     }
 
+    // Spec §8 mine row: the sampled per-item
+    // relation rides the legacy page additively
+    // (absent on pages without a sampled
+    // relation).
+    let access_relation =
+        bot.access_relation.map(Value::String);
+
     serde_json::json!({
         "bot_uuid": bot.bot_uuid,
         "capabilities": caps,
@@ -430,6 +437,7 @@ fn bot_query_entry_to_my_json(bot: BotQueryEntry) -> Value {
         "env": bot.env,
         "status": actor_status_to_wire(bot.status),
         "dynamic_status": to_wire_dynamic_status_response(bot.dynamic_status),
+        "access_relation": access_relation,
     })
 }
 

@@ -111,7 +111,8 @@ pub(crate) async fn command(flow: &BcsMessageFlow, group: &Group, session: &str,
     let event = crate::queued_admission::prepare_message_event(flow, &message_id, &message)?;
     Ok(AdmitMessageDeliveries { display_message:None, message_id, message, flow_kind:DeliveryFlowKind::Task,
         targets:vec![DeliveryAdmissionTarget { rejection:None, target_bot_id:target.clone(), kind:DeliveryType::Send,
-            max_queued:policy.as_ref().map_or(100, |p| p.policy.bot(target).max_queued), semantic_projection_json:projection }],
+            max_queued:policy.as_ref().map_or(100, |p| p.policy.bot(target).max_queued), semantic_projection_json:projection, run_id: None,
+}],
         now_ms:now, expire_at_ms:policy.as_ref().and_then(|p| p.policy.queue_ttl_ms).map(|ttl| now.saturating_add(ttl as i64)), event })
 }
 

@@ -122,6 +122,7 @@ pub use bcs_routing::MessageRouter;
 
 // Server modules
 pub mod auth_wiring;
+pub mod bot_authority_wiring;
 mod bot_ws_admission_config;
 mod config;
 mod collaboration_drafts;
@@ -164,7 +165,7 @@ pub mod logging;
 
 // Re-exports
 pub use config::{
-    AuthSdkConfig, BcsConfig, CacheConfig, DatabaseConfig, DatabaseType, DingTalkAccountConfig,
+    AuthSdkConfig, BcsConfig, BotAuthorityConfig, CacheConfig, DatabaseConfig, DatabaseType, DingTalkAccountConfig,
     GatewayPrincipalConfig, InviteConfig, LlmConfig, LlmProviderType,
     LoggingConfig, MessageHistoryConfig, MetricsConfig, MetricsMode, RedisCacheConfig,
     SecurityGatewayProviderConfig, StructuredOutputMode, TelemetryConfig, UserDirectoryConfig,

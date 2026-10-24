@@ -90,8 +90,10 @@ async fn human_invitation_is_restricted_only_while_the_local_bot_participates() 
     let workbench = GroupManagement::new(
         groups.clone(), registry.clone(), Arc::new(FriendCore::memory()), Arc::new(RelationCore::memory()),
         GroupConfig::default(), session_management.clone(), Arc::new(NoopSystemMessageService),
-    );
+    ).with_bot_authority(bcs_test_support::authority_hook_for(bots.clone()))
+        .with_session_authorization(Arc::new(bcs_session::SessionAuthorizationCoreImpl::new(sessions.clone())));
     let invites = InviteServiceImpl {
+        bot_authority: Some(bcs_test_support::authority_hook_for(bots.clone())),
         registry, group: groups.clone(),
         session: session_management.clone(),
         system_message: Arc::new(NoopSystemMessageService),

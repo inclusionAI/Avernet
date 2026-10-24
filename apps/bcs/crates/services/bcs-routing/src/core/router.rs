@@ -1650,6 +1650,14 @@ mod tests {
         async fn list_bots_by_creator(&self, _created_by: &str) -> Vec<RegisteredBot> {
             vec![]
         }
+
+    async fn list_uninitialized_bots_by_creator(
+        &self,
+        _created_by: &str,
+        _limit: usize,
+    ) -> bcs_service_api::ServiceResult<Vec<RegisteredBot>> {
+        Ok(Vec::new())
+    }
     }
 
     fn create_structured_test_session() -> Group {

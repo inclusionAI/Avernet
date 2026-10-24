@@ -19,9 +19,12 @@ use bcs_service_api::application::v1::{
     Principal,
     StateMachineConfiguration, StateMachineDefinition, StateMachineDefinitionReference,
     StateMachineParticipantBinding, UpdateGroup, UpdateGroupParticipant,
-    require_authenticated_user, require_human, select_principal,
+    require_authenticated_user, require_human, resolve_authorized_principal,
+    select_principal,
 };
 use bcs_service_api::core::{GroupMutationCommand, GroupMutationKind};
+use bcs_service_api::core::bot_authority::BotAuthorityCoreService;
+use bcs_service_api::port::bot_authority::BotAuthorityPort;
 use bcs_service_api::port::{NoopParticipantViewBindingPort, ParticipantViewBindingPort};
 use bcs_service_api::types::{EventActor, EventActorType, OpeningMessageScope};
 use bcs_service_api::{
@@ -31,7 +34,7 @@ use bcs_service_api::{
     Group as DomainGroup, GroupAddMemberCommand, GroupCoreService, GroupCreateCommand,
     GroupCreateParticipantCommand, GroupDeleteCommand, GroupKind, GroupManagementService,
     GroupMutableFieldsPatch, GroupParticipantView, GroupRemoveMemberCommand, GroupStrategy,
-    GroupUseCaseError, ParticipantMode, RelationCoreService, RoutingMode, RoutingPolicy,
+    GroupUseCaseError, ParticipantMode, RoutingMode, RoutingPolicy,
     RuntimeParticipantBinding, ServiceError, SessionManagementService, StartStateMachineRunCommand,
     generated_group_id,
 };
@@ -43,6 +46,10 @@ use bcs_service_api::lifecycle::{LifecycleError, ServiceLifecycle};
 
 #[derive(Debug, Clone)]
 pub struct GroupServiceConfig {
+    /// Relation environment tag. The V1 Group facade no longer
+    /// consults the legacy creator relation for authorization
+    /// (bot-authority plan Task 6.3); the tag is kept for
+    /// config parity with the sibling Session facade.
     pub relation_env: String,
 }
 
@@ -55,13 +62,33 @@ pub struct GroupServiceImpl {
     groups: Arc<dyn GroupCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
     friends: Arc<dyn FriendCoreService>,
-    relation: Arc<dyn RelationCoreService>,
     sessions: Arc<dyn SessionManagementService>,
     management: Arc<dyn GroupManagementService>,
     participant_view_bindings: Arc<dyn ParticipantViewBindingPort>,
     collaboration_runtime: Option<Arc<dyn CollaborationRuntimeService>>,
     event_subscription_provisioner: Option<Arc<dyn GroupEventSubscriptionProvisioner>>,
-    config: GroupServiceConfig,
+    /// The narrow authority hook (bot-authority plan Task 6.3):
+    /// every Human→Bot control judgment consults it live;
+    /// a missing wiring fails closed.
+    bot_authority: Option<Arc<dyn BotAuthorityPort>>,
+    /// The authority Core (ownership view only, driver-owner
+    /// display projection row 9). Optional: projections fall
+    /// back to the historical `created_by` display when no
+    /// authority Core is wired.
+    bot_authority_core: Option<Arc<dyn BotAuthorityCoreService>>,
+}
+
+/// Map one authority read to application errors: a strict
+/// deny (`Forbidden`) is 403; every other read failure
+/// propagates as an internal error (spec §3.2: 存储错误返回
+/// 错误 — never a deny-as-false).
+pub(crate) fn map_authority_error(error: ServiceError) -> ApplicationError {
+    match error {
+        ServiceError::Forbidden(message) => ApplicationError::forbidden(message),
+        other => ApplicationError::internal(format!(
+            "bot authority lookup failed: {other}"
+        )),
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -372,23 +399,40 @@ impl GroupServiceImpl {
         groups: Arc<dyn GroupCoreService>,
         registry: Arc<dyn BotRegistryCoreService>,
         friends: Arc<dyn FriendCoreService>,
-        relation: Arc<dyn RelationCoreService>,
         sessions: Arc<dyn SessionManagementService>,
         management: Arc<dyn GroupManagementService>,
-        config: GroupServiceConfig,
     ) -> Self {
         Self {
             groups,
             registry,
             friends,
-            relation,
             sessions,
             management,
             participant_view_bindings: Arc::new(NoopParticipantViewBindingPort),
             collaboration_runtime: None,
             event_subscription_provisioner: None,
-            config,
+            bot_authority: None,
+            bot_authority_core: None,
         }
+    }
+
+    /// Wire the authority hook (bot-authority plan Task 6.3).
+    pub fn with_bot_authority_hook(
+        mut self,
+        bot_authority: Arc<dyn BotAuthorityPort>,
+    ) -> Self {
+        self.bot_authority = Some(bot_authority);
+        self
+    }
+
+    /// Wire the authority Core (ownership view for the
+    /// driver-owner display projection, row 9).
+    pub fn with_bot_authority_core(
+        mut self,
+        bot_authority_core: Arc<dyn BotAuthorityCoreService>,
+    ) -> Self {
+        self.bot_authority_core = Some(bot_authority_core);
+        self
     }
 
     pub fn with_collaboration_runtime(

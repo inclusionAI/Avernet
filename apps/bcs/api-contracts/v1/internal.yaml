@@ -52,6 +52,22 @@ paths:
     $ref: ./openapi/manifest.yaml#/ManifestAssetPath
   /api/v1/collaboration/definitions/validate:
     $ref: ./openapi/collaboration-definitions.yaml#/CollaborationDefinitionValidatePath
+  /api/v1/collaboration/bots/{bot_id}/managers:
+    $ref: ./openapi/bot-authority.yaml#/BotManagersPath
+  /api/v1/collaboration/bots/{bot_id}/managers/{user_id}:
+    $ref: ./openapi/bot-authority.yaml#/BotManagerItemPath
+  /api/v1/collaboration/bots/{bot_id}/ownership:
+    $ref: ./openapi/bot-authority.yaml#/BotOwnershipPath
+  /api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}:
+    $ref: ./openapi/bot-authority.yaml#/BotOwnershipTransferItemPath
+  /api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}/accept:
+    $ref: ./openapi/bot-authority.yaml#/AcceptOwnershipTransferPath
+  /api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}/reject:
+    $ref: ./openapi/bot-authority.yaml#/RejectOwnershipTransferPath
+  /api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}/cancel:
+    $ref: ./openapi/bot-authority.yaml#/CancelOwnershipTransferPath
+  /api/v1/collaboration/ownership-transfers:
+    $ref: ./openapi/bot-authority.yaml#/OwnershipTransfersPath
 components:
   securitySchemes:
     AgentIdentityBearer:

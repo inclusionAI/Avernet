@@ -1,7 +1,8 @@
 //! Authorized public projections and per-target cancellation.
 use crate::BcsMessageFlow;
+use crate::group_flow::human_controls_bot;
 use bcs_domain::{PersistedMessage, Session};
-use bcs_service_api::{CallerContext, ServiceError, ServiceResult};
+use bcs_service_api::{ActorKind, CallerContext, ServiceError, ServiceResult};
 use bcs_service_api::{
     CancelLatestQueuedMessageCommand, CancelLatestQueuedMessageOutcome,
     CancelMessageDeliveryCommand, CancelMessageDeliveryResult, DeliveryStatusQuery,
@@ -18,7 +19,7 @@ pub async fn cancel_latest_queued(
         DeliveryLookup, MessageDeliveryRepoError,
     };
 
-    let (session, actor) = authorize_session(flow, &command.caller, &command.session_id).await?;
+    let (session, actor, access) = authorize_session(flow, &command.caller, &command.session_id).await?;
     if session.group_id != command.group_id {
         return Err(ServiceError::Forbidden(
             "session does not belong to the requested group".into(),
@@ -92,7 +93,16 @@ pub async fn cancel_latest_queued(
             cancelled: Vec::new(),
         });
     };
-    visible(flow, &command.caller, &session, &actor, message, SequenceAccess::Joined).await?;
+    visible(
+        flow,
+        &command.caller,
+        &session,
+        &access,
+        &actor,
+        message,
+        SequenceAccess::Joined,
+    )
+    .await?;
 
     let mut cancelled = Vec::new();
     for row in rows.into_iter().filter(|row| {
@@ -146,22 +156,32 @@ pub async fn resolve(
             message: "resolution reason must contain 1..1024 bytes".into(), request_id: None,
         });
     }
-    let (session, actor) = authorize_session(flow, &command.caller, &command.session_id).await?;
+    let (session, actor, access) = authorize_session(flow, &command.caller, &command.session_id).await?;
     let repo = flow.message_repo.as_ref()
         .ok_or_else(|| ServiceError::InternalError("message store unavailable".into()))?;
     let message = repo.get_message_by_id(&session.id, &command.message_id).await
         .map_err(|_| ServiceError::InternalError("message ownership lookup failed".into()))?
         .ok_or_else(|| ServiceError::InvalidOperation { message: "message not found".into(), request_id: None })?;
-    visible(flow, &command.caller, &session, &actor, &message, SequenceAccess::Joined).await?;
+    visible(
+        flow,
+        &command.caller,
+        &session,
+        &access,
+        &actor,
+        &message,
+        SequenceAccess::Joined,
+    )
+    .await?;
     let service = flow.managed_deliveries.as_ref()
         .ok_or_else(|| ServiceError::Conflict("message is not queue-managed".into()))?;
     let row = service.lookup(bcs_service_api::port::repo::message_delivery::DeliveryLookup::Message(command.message_id.clone())).await
         .map_err(|_| ServiceError::InternalError("delivery resolution lookup failed".into()))?
         .into_iter().find(|row| row.delivery_id == command.delivery_id && row.session_id == session.id)
         .ok_or_else(|| ServiceError::Conflict("delivery not found".into()))?;
-    if message.sender_id != actor && !flow.registry.get(&row.target_bot_id).await
-        .is_some_and(|bot| bot.created_by.as_deref() == Some(human.staff_no.as_str())) {
-        return Err(ServiceError::Forbidden("only the sender or target Bot owner can resolve delivery".into()));
+    if message.sender_id != actor
+        && !human_controls_bot(flow, &human.staff_no, &row.target_bot_id).await?
+    {
+        return Err(ServiceError::Forbidden("only the sender or the current manager of the target Bot can resolve delivery".into()));
     }
     if row.state.kind != bcs_domain::DeliveryType::Send
         || !matches!(row.state.status, Status::Unknown | Status::CancelUnknown)
@@ -192,11 +212,29 @@ pub async fn resolve(
     Ok(DeliveryStatusView::from(&updated).with_content_preview(Some(&message.content)))
 }
 
+/// The caller's authorization basis for reading one Session,
+/// resolved ONCE at the entry of an operation and reused by every
+/// per-message visibility check (authority reads stay bounded by
+/// the Bot participant count, never re-run per message). Carrying
+/// a read basis into a write operation never widens it: cancel and
+/// resolve keep their own sender/manager gates on top.
+enum SessionAccess {
+    /// The caller (Human or Bot) is itself a Session participant.
+    Member,
+    /// A non-member Human reads through the participating Bots it
+    /// CURRENTLY controls. Each entry is one COMPLETE basis — the
+    /// Bot's own join boundary plus its own participant scope,
+    /// evaluated as the view the Bot itself receives — never
+    /// spliced across Bots and never derived from the historical
+    /// `created_by` whitelist.
+    ThroughControlledBots(Vec<String>),
+}
+
 async fn authorize_session(
     flow: &BcsMessageFlow,
     caller: &CallerContext,
     id: &str,
-) -> ServiceResult<(Session, String)> {
+) -> ServiceResult<(Session, String, SessionAccess)> {
     let actor = match caller {
         CallerContext::Human(human) => human.actor_id.clone(),
         CallerContext::Bot(bot) => bot.bot_uuid.clone(),
@@ -214,12 +252,40 @@ async fn authorize_session(
         .await
         .map_err(|_| ServiceError::InternalError("session access lookup failed".into()))?
         .ok_or_else(|| ServiceError::SessionNotFound(id.into()))?;
-    if !session.participants.iter().any(|p| p.bot_uuid == actor) {
+    if session.participants.iter().any(|p| p.bot_uuid == actor) {
+        return Ok((session, actor, SessionAccess::Member));
+    }
+    // Row 6 view leg: a Human reads the session through the
+    // participating Bots it CURRENTLY controls (live `can_manage`
+    // per participant, never the historical `created_by`
+    // whitelist). A pure membership shortfall still closes this
+    // call for everyone else, and the finer per-message rules
+    // below still decide what is visible THROUGH each basis Bot.
+    let CallerContext::Human(human) = caller else {
+        return Err(ServiceError::Forbidden(
+            "session membership required".into(),
+        ));
+    };
+    let mut controlled_bots = Vec::new();
+    for participant in session
+        .participants
+        .iter()
+        .filter(|p| p.actor_kind == ActorKind::Bot)
+    {
+        if human_controls_bot(flow, &human.staff_no, &participant.bot_uuid).await? {
+            controlled_bots.push(participant.bot_uuid.clone());
+        }
+    }
+    if controlled_bots.is_empty() {
         return Err(ServiceError::Forbidden(
             "session membership required".into(),
         ));
     }
-    Ok((session, actor))
+    Ok((
+        session,
+        actor,
+        SessionAccess::ThroughControlledBots(controlled_bots),
+    ))
 }
 
 #[derive(Clone, Copy)]
@@ -265,6 +331,7 @@ async fn visible(
     flow: &BcsMessageFlow,
     caller: &CallerContext,
     session: &Session,
+    access: &SessionAccess,
     actor: &str,
     message: &PersistedMessage,
     sequence_access: SequenceAccess,
@@ -274,6 +341,13 @@ async fn visible(
             "message does not belong to this session".into(),
         ));
     }
+    // History boundary basis: a direct member reads from the
+    // resolved window (their own join point for mutations, the
+    // history projection window for listings); a non-member Human
+    // reading through controlled Bots finds no own entry here and
+    // is bounded by EACH basis Bot's own join point instead
+    // (evaluated per basis below, never spliced across Bots). A
+    // missing legacy join entry keeps the legacy open boundary.
     let from_seq = match sequence_access {
         SequenceAccess::Joined => joined_sequence(session, actor),
         SequenceAccess::History { from_seq } => from_seq,
@@ -285,13 +359,19 @@ async fn visible(
             "message predates session access".into(),
         ));
     }
+    let message_predates = |viewer: &str| {
+        session
+            .participant_join_seq
+            .as_ref()
+            .and_then(|v| v.get(viewer))
+            .and_then(|v| v.as_i64())
+            .is_some_and(|joined| message.session_seq < joined)
+    };
     if let Some(owner) = &message.owner_bot_id {
         let allowed = owner == actor
             || match caller {
                 CallerContext::Human(human) => {
-                    flow.registry.get(owner).await.is_some_and(|bot| {
-                        bot.created_by.as_deref() == Some(human.staff_no.as_str())
-                    })
+                    human_controls_bot(flow, &human.staff_no, owner).await?
                 }
                 _ => false,
             };
@@ -302,16 +382,56 @@ async fn visible(
         }
     }
     if matches!(caller, CallerContext::Human(_)) {
-        let participant = session.participants.iter().find(|p| p.bot_uuid == actor)
-            .ok_or_else(|| ServiceError::Forbidden("session membership required".into()))?;
         let group = flow.group.try_get(&session.group_id).await?;
-        let view = bcs_domain::HumanMessageView {
-            actor_id: actor.to_owned(),
-            scope: participant.message_view_scope,
-            allow_legacy_unclassified_chat: group.is_some_and(|g| g.group_strategy == bcs_domain::GroupStrategy::Chat),
-        };
-        if !view.allows(message) {
-            return Err(ServiceError::Forbidden("message audience is not visible".into()));
+        let allow_legacy_unclassified_chat =
+            group.is_some_and(|g| g.group_strategy == bcs_domain::GroupStrategy::Chat);
+        match access {
+            SessionAccess::Member => {
+                let participant = session.participants.iter().find(|p| p.bot_uuid == actor)
+                    .ok_or_else(|| ServiceError::Forbidden("session membership required".into()))?;
+                let view = bcs_domain::HumanMessageView {
+                    actor_id: actor.to_owned(),
+                    scope: participant.message_view_scope,
+                    allow_legacy_unclassified_chat,
+                };
+                if !view.allows(message) {
+                    return Err(ServiceError::Forbidden("message audience is not visible".into()));
+                }
+            }
+            SessionAccess::ThroughControlledBots(bots) => {
+                // Read exactly what ONE basis Bot receives: the view
+                // actor is the Bot (directed audiences resolve
+                // against the Bot, never the reading Human) with the
+                // Bot's own participant scope — the same view the
+                // delivery authorization final-writer computes for
+                // Bot bindings. A basis whose join point postdates
+                // the message cannot admit it; when every basis
+                // postdates it the message simply predates access.
+                let windowed: Vec<&String> = bots
+                    .iter()
+                    .filter(|basis| !message_predates(basis))
+                    .collect();
+                if windowed.is_empty() {
+                    return Err(ServiceError::Forbidden(
+                        "message predates session access".into(),
+                    ));
+                }
+                let admitted = windowed.iter().any(|basis| {
+                    session
+                        .participants
+                        .iter()
+                        .find(|p| p.bot_uuid == **basis)
+                        .map(|participant| bcs_domain::HumanMessageView {
+                            actor_id: (*basis).clone(),
+                            scope: participant.message_view_scope,
+                            allow_legacy_unclassified_chat,
+                        })
+                        .is_some_and(|view| view.allows(message))
+                });
+                if !admitted {
+                    return Err(ServiceError::Forbidden("message audience is not visible".into()));
+                }
+            }
         }
     }
     Ok(())
@@ -334,7 +454,7 @@ pub async fn query(
             request_id: None,
         });
     }
-    let (session, actor) = authorize_session(flow, &query.caller, &query.session_id).await?;
+    let (session, actor, access) = authorize_session(flow, &query.caller, &query.session_id).await?;
     let Some(service) = &flow.managed_deliveries else {
         return Ok(Vec::new());
     };
@@ -370,15 +490,24 @@ pub async fn query(
                 message.sender_id == actor && message.client_msg_id.as_ref() == Some(client)
             });
             if selected {
-                let access = match history_access {
-                    Some(access) => access,
+                let sequence = match history_access {
+                    Some(sequence) => sequence,
                     None => {
-                        let access = history_sequence_access(flow, &session, &actor).await?;
-                        history_access = Some(access);
-                        access
+                        let sequence = history_sequence_access(flow, &session, &actor).await?;
+                        history_access = Some(sequence);
+                        sequence
                     }
                 };
-                visible(flow, &query.caller, &session, &actor, &message, access).await?;
+                visible(
+                    flow,
+                    &query.caller,
+                    &session,
+                    &access,
+                    &actor,
+                    &message,
+                    sequence,
+                )
+                .await?;
             }
             checked.insert(row.source_message_id.clone(), (selected, message.content.clone()));
         }
@@ -394,7 +523,7 @@ pub async fn cancel(
     flow: &BcsMessageFlow,
     command: CancelMessageDeliveryCommand,
 ) -> ServiceResult<Vec<CancelMessageDeliveryResult>> {
-    let (session, actor) = authorize_session(flow, &command.caller, &command.session_id).await?;
+    let (session, actor, access) = authorize_session(flow, &command.caller, &command.session_id).await?;
     let repo = flow
         .message_repo
         .as_ref()
@@ -407,7 +536,16 @@ pub async fn cancel(
             message: "message not found".into(),
             request_id: None,
         })?;
-    visible(flow, &command.caller, &session, &actor, &message, SequenceAccess::Joined).await?;
+    visible(
+        flow,
+        &command.caller,
+        &session,
+        &access,
+        &actor,
+        &message,
+        SequenceAccess::Joined,
+    )
+    .await?;
     if message.sender_id != actor {
         return Err(ServiceError::Forbidden(
             "only the message sender can cancel its delivery".into(),

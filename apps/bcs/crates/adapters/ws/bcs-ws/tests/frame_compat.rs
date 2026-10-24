@@ -2838,7 +2838,7 @@ async fn traced_chat_event_creates_bot_response_child_span_after_message_flow_ac
     state
         .dispatch_state
         .run_channels
-        .register_with_trace_parent(
+        .register_internal_with_trace_parent(
             "run-traced".to_string(),
             "group-1:abcdef12".to_string(),
             client_tx,
@@ -2920,7 +2920,7 @@ async fn traced_plugin_run_alias_creates_bot_response_child_span() {
     state
         .dispatch_state
         .run_channels
-        .register_with_trace_parent(
+        .register_internal_with_trace_parent(
             "gateway-run".to_string(),
             "group-1:abcdef12".to_string(),
             client_tx,
@@ -3129,7 +3129,7 @@ async fn task_response_ack_from_target_worker_registers_sub_run_alias() {
     state
         .dispatch_state
         .run_channels
-        .register(
+        .register_internal(
             "task-1".to_string(),
             "group-1:abcdef12".to_string(),
             client_tx,
@@ -3181,7 +3181,7 @@ async fn direct_chat_response_alias_carries_run_context_to_streaming_events() {
     state
         .dispatch_state
         .run_channels
-        .register(
+        .register_internal(
             "direct-outer-run".to_string(),
             session_id.to_string(),
             client_tx,
@@ -3256,7 +3256,7 @@ async fn task_response_ack_from_manager_does_not_register_sub_run_alias() {
     state
         .dispatch_state
         .run_channels
-        .register(
+        .register_internal(
             "task-1".to_string(),
             "group-1:abcdef12".to_string(),
             client_tx,
@@ -3336,7 +3336,7 @@ async fn bot_event_frame_restores_session_id_from_sub_run_mapping() {
     state
         .dispatch_state
         .run_channels
-        .register(
+        .register_internal(
             "outer-run".to_string(),
             "group-1:abcdef12".to_string(),
             client_tx,

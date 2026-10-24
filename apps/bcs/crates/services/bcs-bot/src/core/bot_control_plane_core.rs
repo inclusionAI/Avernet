@@ -7,6 +7,7 @@ use bcs_service_api::{
     ActorKind, BotCandidateReadQuery, BotControlPlaneCandidate, BotControlPlaneCoreService, BotSearchCandidateQuery,
     BotControlPlaneOwnedQuery, BotControlPlanePatch, BotControlPlaneProvider,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotControlPlaneView, BotTaskModesQuery,
+    ControllableCandidateQuery, ControlledBotCandidate,
     ProviderBotBindingRepoPort, ProviderRepoPort, ServiceResult,
 };
 
@@ -179,6 +180,18 @@ impl BotControlPlaneCoreService for BotControlPlaneCore {
             .list_control_plane_by_creator(query)
             .await?;
         self.hydrate(records).await
+    }
+
+    /// Mine-union candidates (spec §8.0): a pure
+    /// forwarding read — persistent-only filtering,
+    /// role dedup and stable order happen in the ONE
+    /// store snapshot; this core adds no pagination and
+    /// no reachability.
+    async fn list_controllable(
+        &self,
+        query: ControllableCandidateQuery,
+    ) -> ServiceResult<Vec<ControlledBotCandidate>> {
+        self.control_plane.list_controllable(query).await
     }
 
     async fn list_by_task_modes(

@@ -1,6 +1,16 @@
 #[test]
 fn ws_handlers_use_hooks_without_metrics_context_in_dispatch_state() {
-    let bot_dispatcher = include_str!("../src/bot/dispatcher.rs");
+    let bot_dispatcher = [
+        include_str!("../src/bot/dispatcher/mod.rs"),
+        include_str!("../src/bot/dispatcher/connect.rs"),
+        include_str!("../src/bot/dispatcher/error.rs"),
+        include_str!("../src/bot/dispatcher/event.rs"),
+        include_str!("../src/bot/dispatcher/response.rs"),
+        include_str!("../src/bot/dispatcher/routing.rs"),
+        include_str!("../src/bot/dispatcher/tasks.rs"),
+        include_str!("../src/bot/dispatcher/trace.rs"),
+    ]
+    .concat();
     let web_dispatcher = include_str!("../src/web/dispatcher.rs");
     let bot_handler = include_str!("../src/bot/handler.rs");
     let web_handler = include_str!("../src/web/handler.rs");

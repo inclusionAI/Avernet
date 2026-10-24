@@ -20,6 +20,8 @@ use tokio::sync::{Mutex, RwLock};
 #[path = "../../../test-support/message_flow_contract_support.rs"]
 mod support;
 
+use bcs_test_support::LazySeedAuthorityHook;
+
 struct BlockingInterceptor;
 
 #[path = "support/session.rs"]
@@ -356,6 +358,27 @@ impl GroupHistoryBotRequestPort for RecordingTargetHistoryBotRequest {
     }
 }
 
+/// Real authority chain mirroring the fixture
+/// `created_by` rows as live owner edges
+/// (bot-authority plan Task 6.5; the
+/// `created_by` reads themselves are gone).
+fn staff_authority(pairs: &[(&str, &str)]) -> Arc<LazySeedAuthorityHook> {
+    let chain = bcs_test_support::lazy_authority_chain();
+    for (bot_id, owner) in pairs {
+        chain.hook.seed_owner(bot_id, owner);
+    }
+    chain.hook
+}
+
+const DRIVER_OWNER_1: &[(&str, &str)] = &[("bot-driver", "1")];
+
+fn with_hook(
+    flow: BcsMessageFlow,
+    pairs: &[(&str, &str)],
+) -> BcsMessageFlow {
+    flow.with_bot_authority_hook(Some(staff_authority(pairs)))
+}
+
 #[tokio::test]
 async fn session_history_allows_human_who_is_only_session_participant() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
@@ -452,7 +475,8 @@ async fn session_history_allows_human_whose_owned_bot_is_session_participant() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         bot_request,
-    );
+    )
+    .with_bot_authority_hook(Some(staff_authority(&[("bot-driver", "1"), ("bot-observer", "1")])));
 
     let result = history
         .get_session_history(SessionHistoryCommand {
@@ -498,7 +522,10 @@ async fn session_history_denies_human_with_no_session_or_group_stake() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         bot_request,
-    );
+    )
+    .with_bot_authority_hook(Some(
+        bcs_test_support::lazy_authority_chain().hook,
+    ));
 
     let err = history
         .get_session_history(SessionHistoryCommand {
@@ -576,7 +603,8 @@ async fn session_history_denies_group_owner_when_not_in_session_and_owns_no_sess
         support.registry.clone(),
         support.bot_delivery.clone(),
         bot_request,
-    );
+    )
+    .with_bot_authority_hook(Some(staff_authority(&[("bot-observer", "1")])));
 
     let err = history
         .get_session_history(SessionHistoryCommand {
@@ -852,7 +880,8 @@ async fn group_history_falls_back_to_driver_and_normalizes_bot_history() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         history_request.clone(),
-    );
+    )
+    .with_bot_authority_hook(Some(staff_authority(&[("bot-driver", "1"), ("bot-observer", "1")])));
 
     let result = history
         .get_history(GroupHistoryCommand {
@@ -969,7 +998,8 @@ async fn history_requests_provider_target_without_ws_connection() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         history_request.clone(),
-    );
+    )
+    .with_bot_authority_hook(Some(staff_authority(&[("bot-driver", "1"), ("bot-provider", "1")])));
 
     let result = history
         .get_history(GroupHistoryCommand {
@@ -2712,12 +2742,15 @@ async fn group_chat_validates_sender_and_returns_legacy_delivery_projection() {
         .save_created_by("bot-driver", "1", true)
         .await
         .unwrap();
-    let flow = BcsMessageFlow::new(
+    let flow = with_hook(
+        BcsMessageFlow::new(
         support.group.clone(),
         support.routing.clone(),
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
+        ),
+        DRIVER_OWNER_1,
     );
 
     let outcome = flow
@@ -2959,12 +2992,15 @@ async fn group_chat_uses_human_staff_number_as_display_name_when_speaking_as_own
         .save_created_by("bot-driver", "1", true)
         .await
         .unwrap();
-    let flow = BcsMessageFlow::new(
+    let flow = with_hook(
+        BcsMessageFlow::new(
         support.group.clone(),
         support.routing.clone(),
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
+        ),
+        DRIVER_OWNER_1,
     );
 
     flow.handle_group_chat(GroupChatCommand {
@@ -3063,6 +3099,17 @@ async fn persistent_group_send_resolves_running_session_and_persists_message_eve
         .expect("group")
         .participants;
     let repo = Arc::new(RecordingMessageRepo::default());
+    // F4: an absent-mode Human participant cannot send; this
+    // exercise of the persist/event path runs as a Present one.
+    let participants = participants
+        .into_iter()
+        .map(|mut participant| {
+            if participant.bot_uuid == "human_1" {
+                participant.mode = Some(ParticipantMode::Present);
+            }
+            participant
+        })
+        .collect();
     let flow = BcsMessageFlow::new(
         support.group.clone(),
         support.routing.clone(),
@@ -4034,7 +4081,8 @@ async fn group_history_prefers_high_priority_even_when_low_priority_finishes_fir
         support.registry.clone(),
         support.bot_delivery.clone(),
         bot_request.clone(),
-    );
+    )
+    .with_bot_authority_hook(Some(staff_authority(&[("bot-driver", "1"), ("bot-observer", "1")])));
 
     let result = history
         .get_history(GroupHistoryCommand {
@@ -4089,7 +4137,8 @@ async fn group_history_falls_back_to_driver_when_view_bot_fails() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         bot_request.clone(),
-    );
+    )
+    .with_bot_authority_hook(Some(staff_authority(&[("bot-driver", "1"), ("bot-observer", "1")])));
 
     let result = history
         .get_history(GroupHistoryCommand {
@@ -4137,7 +4186,8 @@ async fn group_history_falls_back_to_store_when_all_bots_fail() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         bot_request.clone(),
-    );
+    )
+    .with_bot_authority_hook(Some(staff_authority(&[("bot-driver", "1"), ("bot-observer", "1")])));
 
     let result = history
         .get_history(GroupHistoryCommand {

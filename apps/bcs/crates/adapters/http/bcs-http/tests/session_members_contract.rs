@@ -670,6 +670,23 @@ async fn owner_app(staff: &str, owned_bot: &str) -> (axum::Router, Arc<Recording
     services.registry = registry;
     services.group = group_store;
     services.session_management = sessions.clone();
+    // LIVE authority chain mirroring the fixture
+    // `created_by` rows (bot-authority plan Task 6.5).
+    let authority = bcs_test_support::lazy_authority_chain().hook;
+    // The live mirror: `alice` keeps the
+    // registered owner edges; `bob` is a
+    // provisioned Human without any edge (his
+    // manager contour was added and withdrawn,
+    // so every Bot keeps exactly one owner).
+    authority.seed_owner("driver-bot", "alice");
+    if staff == "alice" {
+        authority.seed_owner(owned_bot, staff);
+    }
+    if staff == "bob" {
+        authority.seed_manager("driver-bot", "bob");
+        authority.revoke_manager("driver-bot", "bob");
+    }
+    services.bot_authority_hook = authority;
 
     let identity_port: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
         staff_no: Some(staff.to_string()),

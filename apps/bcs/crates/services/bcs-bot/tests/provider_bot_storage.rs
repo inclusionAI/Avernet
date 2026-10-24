@@ -108,7 +108,13 @@ async fn admin_modes_and_gateway_mutations_keep_both_views_consistent() {
         assert_eq!(view.provider.unwrap().provider_id, provider.provider.provider_id);
         let management = ProviderManagement::new(Arc::new(admin.clone()), Arc::new(admin.clone()), registry.clone(),
             Arc::new(bcs_relation::RelationCore::memory()));
-        assert!(admin.delete_registered_provider_bot(&provider.provider.provider_id, "invalid-admin-token", "plugin").await.is_err());
+        // The token is verification-only: a wrong token never retires.
+        assert!(admin.retire_registered_bot(bcs_service_api::core::RetireProviderBotParams {
+            provider_id: provider.provider.provider_id.clone(),
+            provider_admin_token: "invalid-admin-token".into(),
+            provider_bot_ref: "plugin".into(),
+            allow_unbound_owner_suffixed_bot: false,
+        }).await.is_err());
         let deleted = management.delete_provider_bot(DeleteProviderBotCommand {
             provider_id: provider.provider.provider_id.clone(), provider_admin_token: provider.provider_admin_token.clone(),
             provider_bot_ref: "plugin".into(), allow_unbound_owner_suffixed_bot: false,

@@ -3,15 +3,16 @@
 use super::*;
 use bcs_service_api::bot_provider::{BotConnectionMode, BotProviderRecord};
 use bcs_service_api::port::repo::{BotRepoPort, bot_provider::BotProviderRepoPort};
+use crate::memory::MemoryBotRepo;
 
 pub struct MemoryBotProviderStore {
-    bots: Arc<dyn BotRepoPort>,
+    bots: Arc<MemoryBotRepo>,
     bindings: Arc<MemoryProviderStore>,
     records: RwLock<BTreeMap<String, BotProviderRecord>>,
 }
 
 impl MemoryBotProviderStore {
-    pub fn new(bots: Arc<dyn BotRepoPort>, bindings: Arc<MemoryProviderStore>) -> Self {
+    pub fn new(bots: Arc<MemoryBotRepo>, bindings: Arc<MemoryProviderStore>) -> Self {
         Self { bots, bindings, records: RwLock::new(BTreeMap::new()) }
     }
 }
@@ -89,12 +90,90 @@ impl BotProviderRepoPort for MemoryBotProviderStore {
             refs.insert(key, record.bot_uuid.clone());
         }
         self.bots.persist_provider_affiliation(&record).await?;
+        self.bots
+            .mark_provider_managed(&record.bot_uuid)
+            .await;
         records.insert(record.bot_uuid.clone(), record);
         Ok(())
     }
 
     async fn get_provider_bot(&self, bot_uuid: &str) -> ServiceResult<Option<BotProviderRecord>> {
         Ok(self.records.read().await.get(bot_uuid).cloned())
+    }
+
+    /// Trusted Provider registration (Task 4, spec §10.2):
+    /// all conflicts are validated BEFORE the repo composite so
+    /// the single staged swap of the shared Bot state and the
+    /// Provider projection publish together; adding a projection
+    /// record is infallible after validation, so a failure
+    /// anywhere leaves no half-written projection.
+    async fn create_provider_bot_with_ownership(
+        &self,
+        record: BotProviderRecord,
+        capabilities: BotCapabilities,
+        owner: &str,
+        token: &str,
+        initialization: bcs_service_api::types::bot_authority::OwnershipInitialization,
+    ) -> ServiceResult<()> {
+        bot_storage::validate_record(&record)?;
+        if owner.trim().is_empty() || token.is_empty() {
+            return Err(ServiceError::InvalidOperation { message: "Bot owner and runtime credential are required".into(), request_id: None });
+        }
+        if owner.trim() != initialization.owner_user_id {
+            return Err(crate::ownership::initialization_invalid_public(
+                "registration owner must be the verified registration owner",
+            ));
+        }
+        // The projection guards span validation AND the Bot
+        // composite AND the install, so a concurrent
+        // same-ref/same-Bot registration cannot pass the
+        // validation window: the winner commits, the loser
+        // sees it and conflicts (old create_provider_bot
+        // discipline).
+        let mut records = self.records.write().await;
+        if records.contains_key(&record.bot_uuid) {
+            return Err(conflict());
+        }
+        if records.values().any(|existing| {
+            existing.provider_id == record.provider_id
+                && existing.provider_bot_ref == record.provider_bot_ref
+        }) {
+            return Err(conflict());
+        }
+        let mut refs = self.bindings.binding_ref_index.write().await;
+        let key = (record.provider_id.clone(), record.provider_bot_ref.clone());
+        if refs.get(&key).is_some_and(|id| *id != record.bot_uuid) {
+            return Err(conflict());
+        }
+        if !self
+            .bots
+            .create_registration_with_ownership(
+                record.bot_uuid.clone(),
+                capabilities,
+                owner,
+                token,
+                &initialization,
+            )
+            .await?
+        {
+            return Err(conflict());
+        }
+        self.bots
+            .mark_provider_managed(&record.bot_uuid)
+            .await;
+        let now = binding_now_ms()?;
+        let mut bindings = self.bindings.bindings_by_bot.write().await;
+        records.insert(record.bot_uuid.clone(), record.clone());
+        if record.connection_mode == BotConnectionMode::Gateway {
+            bindings.insert(record.bot_uuid.clone(), ProviderBotBinding {
+                bot_uuid: record.bot_uuid.clone(), provider_id: record.provider_id.clone(),
+                provider_bot_ref: record.provider_bot_ref.clone(),
+                webhook_url: record.webhook_url.clone(), disabled: false,
+                created_at: now, updated_at: now,
+            });
+            refs.insert((record.provider_id.clone(), record.provider_bot_ref.clone()), record.bot_uuid.clone());
+        }
+        Ok(())
     }
 
     async fn create_provider_bot(&self, record: BotProviderRecord, capabilities: BotCapabilities, owner: &str, token: &str) -> ServiceResult<()> {
@@ -115,6 +194,9 @@ impl BotProviderRepoPort for MemoryBotProviderStore {
         if !self.bots.create_registration_if_absent(record.bot_uuid.clone(), capabilities, owner, token).await? {
             return Err(conflict());
         }
+        self.bots
+            .mark_provider_managed(&record.bot_uuid)
+            .await;
         if record.connection_mode == BotConnectionMode::Gateway {
             bindings.insert(record.bot_uuid.clone(), ProviderBotBinding {
                 bot_uuid: record.bot_uuid.clone(), provider_id: record.provider_id.clone(), provider_bot_ref: record.provider_bot_ref.clone(),
@@ -153,4 +235,108 @@ impl BotProviderRepoPort for MemoryBotProviderStore {
         if let Some(binding) = binding { binding.disabled = true; binding.updated_at = updated_at; }
         Ok(true)
     }
+
+    /// Atomic Provider retirement (memory mirror, Task 4,
+    /// spec §7.1): the branch is derived and re-verified
+    /// from the SAME records the read paths use, then ONE
+    /// staged pass of the shared Bot State revokes the
+    /// authority edges, closes the valid pending
+    /// transfers (fixed system marker) and writes the
+    /// `retire` audit together with the Bot tombstone.
+    /// The metadata record / binding disable publish
+    /// only after that staged pass committed (they are
+    /// infallible memory writes), so a failure anywhere
+    /// leaves the projection byte-identical. A repeat on
+    /// an already-tombstoned Bot is idempotent and returns
+    /// `changed = false`.
+    async fn retire_with_authority(
+        &self,
+        retire: bcs_service_api::core::provider::ProviderRetire,
+    ) -> ServiceResult<bcs_service_api::core::provider::ProviderRetirement> {
+        use bcs_service_api::core::provider::ProviderRetireBranch;
+        crate::ownership::validate_mutation(&retire.mutation)?;
+        // The branch derivation mirrors the SQL store:
+        // same 归属规则, same mismatches.
+        let source = {
+            let records = self.records.read().await;
+            if let Some(existing) = records.get(&retire.bot_id) {
+                if existing.provider_id != retire.provider_id {
+                    return Err(ServiceError::Forbidden("provider_id_mismatch".into()));
+                }
+                if existing.provider_bot_ref != retire.provider_bot_ref {
+                    return Err(ServiceError::Conflict("Bot Provider membership cannot be replaced".into()));
+                }
+                RetireSource::Metadata
+            } else if let Some(binding) = self.bindings.bindings_by_bot.read().await.get(&retire.bot_id) {
+                if binding.provider_id != retire.provider_id
+                    || binding.provider_bot_ref != retire.provider_bot_ref
+                {
+                    return Err(ServiceError::Forbidden("provider_id_mismatch".into()));
+                }
+                RetireSource::BindingFallback
+            } else if crate::retirement::is_owner_suffixed_bot_id(&retire.bot_id)
+                && retire.expected_branch == ProviderRetireBranch::LegacyUnbound
+            {
+                RetireSource::LegacyUnbound
+            } else {
+                return Err(retirement_branch_mismatch(retire.expected_branch));
+            }
+        };
+        if source.branch() != retire.expected_branch {
+            return Err(retirement_branch_mismatch(retire.expected_branch));
+        }
+
+        let changed = self
+            .bots
+            .retire_core_state_provider(&retire.bot_id, &retire.mutation)
+            .await?;
+        // Infallible post-swap publication of the
+        // Provider projection (nothing left can fail).
+        {
+            let mut records = self.records.write().await;
+            if let Some(existing) = records.get_mut(&retire.bot_id) {
+                existing.is_deleted = true;
+            }
+            let mut bindings = self.bindings.bindings_by_bot.write().await;
+            if let Some(binding) = bindings.get_mut(&retire.bot_id) {
+                binding.disabled = true;
+            }
+        }
+        Ok(bcs_service_api::core::provider::ProviderRetirement {
+            bot_id: retire.bot_id,
+            provider_id: retire.provider_id,
+            provider_bot_ref: retire.provider_bot_ref,
+            changed,
+            branch: source.branch(),
+        })
+    }
+}
+
+/// Source of the memory retirement: which durable
+/// record routed the command (mirrors the SQL
+/// store's derivation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RetireSource {
+    Metadata,
+    BindingFallback,
+    LegacyUnbound,
+}
+
+impl RetireSource {
+    fn branch(self) -> bcs_service_api::core::provider::ProviderRetireBranch {
+        match self {
+            RetireSource::Metadata => bcs_service_api::core::provider::ProviderRetireBranch::Metadata,
+            RetireSource::BindingFallback => bcs_service_api::core::provider::ProviderRetireBranch::BindingFallback,
+            RetireSource::LegacyUnbound => bcs_service_api::core::provider::ProviderRetireBranch::LegacyUnbound,
+        }
+    }
+}
+
+fn retirement_branch_mismatch(
+    expected: bcs_service_api::core::provider::ProviderRetireBranch,
+) -> ServiceError {
+    ServiceError::Conflict(format!(
+        "retirement branch does not match the stored identity \
+         state (expected {expected:?})"
+    ))
 }

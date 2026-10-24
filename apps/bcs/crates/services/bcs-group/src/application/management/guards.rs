@@ -189,40 +189,6 @@ impl GroupManagement {
         }
     }
 
-    pub(crate) async fn ensure_add_member_reachable(
-        &self,
-        driver_bot_id: &str,
-        target_bot_id: &str,
-    ) -> Result<(), GroupUseCaseError> {
-        let target = self
-            .registry
-            .get(target_bot_id)
-            .await
-            .ok_or_else(|| ServiceError::BotNotFound(target_bot_id.to_string()))?;
-
-        if target.status == ActorStatus::Hidden {
-            return Err(GroupUseCaseError::Forbidden(format!(
-                "Bot '{}' is hidden (offline) and cannot be invited into a group",
-                target_bot_id
-            )));
-        }
-
-        let is_friend = self.friend.are_friends(driver_bot_id, target_bot_id).await;
-        if self.registry.collaboration_owner(&[driver_bot_id.into(), target.bot_uuid.clone()]).await?.is_some() {
-            return Ok(());
-        }
-
-        match target.capabilities.visibility.as_str() {
-            "public" => Ok(()),
-            _ if is_friend => Ok(()),
-            "protected" => Err(GroupUseCaseError::Forbidden(format!(
-                "Bot '{}' is not friends with '{}'",
-                driver_bot_id, target_bot_id
-            ))),
-            _ => Err(ServiceError::BotNotFound(target_bot_id.to_string()).into()),
-        }
-    }
-
     pub(crate) async fn ensure_manager_worker_accepts_participants(
         &self,
         _strategy: GroupStrategy,
@@ -254,26 +220,6 @@ impl GroupManagement {
             Err(GroupUseCaseError::Service(
                 ServiceError::ExistNonPublicBots { bots: non_public },
             ))
-        }
-    }
-
-    pub(crate) async fn relation_has_creator_edge(
-        &self,
-        human_actor_id: &str,
-        bot_id: &str,
-    ) -> Result<bool, GroupUseCaseError> {
-        match self
-            .relation
-            .get_edge(human_actor_id, bot_id, &self.config.relation_env)
-            .await
-        {
-            Ok(Some(edge)) => Ok(edge.is_creator),
-            Ok(None) => Ok(false),
-            Err(error) => Err(ServiceError::InternalError(format!(
-                "Failed to verify owner relation: {}",
-                error
-            ))
-            .into()),
         }
     }
 
@@ -311,11 +257,11 @@ impl GroupManagement {
             GroupUseCaseError::InvalidProposal("caller actor_id must use human_ prefix".to_string())
         })?;
 
-        if target.created_by.as_deref() == Some(staff_no)
-            || self
-                .relation_has_creator_edge(human_actor_id, &target.bot_uuid)
-                .await?
-        {
+        // Row 14 DM leg (spec §8.1): the Human sponsorship of
+        // the Bot goes through its CURRENT `can_manage`
+        // edge; the historical `created_by` and the legacy
+        // creator relation edge no longer sponsor.
+        if self.human_controls_bot(staff_no, &target.bot_uuid).await? {
             return Ok(());
         }
 
@@ -334,16 +280,18 @@ impl GroupManagement {
         }
     }
 
-    pub(crate) fn is_human_bot_dm(group: &DomainGroup) -> bool {
+    pub(crate) fn is_human_bot_dm(
+        group: &bcs_service_api::types::authorization_snapshot::GroupAuthorizationSnapshot,
+    ) -> bool {
         group.group_kind == GroupKind::Dm
             && group
                 .participants
                 .iter()
-                .any(|participant| participant.is_human())
+                .any(|participant| participant.actor_kind == ActorKind::Human)
             && group
                 .participants
                 .iter()
-                .any(|participant| participant.is_bot())
+                .any(|participant| participant.actor_kind == ActorKind::Bot)
     }
 
     pub(crate) async fn authorize_human_owner(
@@ -357,15 +305,27 @@ impl GroupManagement {
         let staff_no = human_actor_id
             .strip_prefix("human_")
             .unwrap_or(human_actor_id);
-        let bot = self.registry.get(bot_id).await.ok_or_else(|| {
-            GroupUseCaseError::Forbidden(format!("Not authorized as bot '{}'", bot_id))
-        })?;
-        if bot
-            .created_by
-            .as_deref()
-            .map(|owner| owner == staff_no)
-            .unwrap_or(true)
-        {
+        let bot = self
+            .registry
+            .get(bot_id)
+            .await
+            .ok_or_else(|| {
+                GroupUseCaseError::Forbidden(format!(
+                    "Not authorized as bot '{}'",
+                    bot_id
+                ))
+            })?;
+        if bot.actor_kind != ActorKind::Bot {
+            // A Human actor authorization is their own
+            // self; the group coordinator check takes
+            // over from there.
+            return Ok(());
+        }
+        // Row 14: the acting THROUGH-a-controlled-Bot leg
+        // requires the CURRENT `can_manage` edge; the
+        // historical `created_by` (and its `None` legacy
+        // auto-claim) no longer authorizes.
+        if self.human_controls_bot(staff_no, bot_id).await? {
             return Ok(());
         }
 
@@ -436,38 +396,37 @@ impl GroupManagement {
             return Ok(());
         }
 
-        match self
-            .relation
-            .get_edge(caller_actor_id, actor_id, &self.config.relation_env)
-            .await
-        {
-            Ok(Some(edge)) if edge.is_creator => Ok(()),
-            Ok(_) => Err(GroupUseCaseError::Forbidden(format!(
-                "Caller '{}' is not the actor itself nor a creator of '{}'",
-                caller_actor_id, actor_id
-            ))),
-            Err(error) => Err(ServiceError::InternalError(format!(
-                "Failed to verify creator relation: {}",
-                error
-            ))
-            .into()),
+        // Row 14: act-for-another-actor through the CURRENT
+        // `can_manage` edge; the legacy creator relation
+        // edge no longer authorizes (spec §3.2).
+        if let Some(staff_no) = caller_actor_id.strip_prefix("human_") {
+            if self.human_controls_bot(staff_no, actor_id).await? {
+                return Ok(());
+            }
         }
+        Err(GroupUseCaseError::Forbidden(format!(
+            "Caller '{}' is not the actor itself nor a creator of '{}'",
+            caller_actor_id, actor_id
+        )))
     }
 
     pub(crate) async fn authorize_workbench_group_access(
         &self,
-        group: &DomainGroup,
+        group: &bcs_service_api::types::authorization_snapshot::GroupAuthorizationSnapshot,
         bound_actor_id: Option<&str>,
     ) -> Result<WorkbenchAuthorizedHuman, WorkbenchUseCaseError> {
         let actor_id = bound_actor_id.ok_or(WorkbenchUseCaseError::Unauthorized)?;
         let staff_no = staff_no_from_bound_actor(Some(actor_id))?;
 
-        let mut actors = group.participants.iter().map(|p| p.bot_uuid.clone()).collect::<Vec<_>>();
+        let mut actors = group.participants.iter().map(|p| p.actor_id.clone()).collect::<Vec<_>>();
         actors.push(actor_id.into());
         self.registry.collaboration_owner(&actors).await
             .map_err(|error| match error { ServiceError::Forbidden(_) => WorkbenchUseCaseError::ForbiddenCollaborationScope, other => WorkbenchUseCaseError::Service(other) })?;
 
-        if human_has_group_access(self.registry.as_ref(), group, actor_id, staff_no).await {
+        if human_has_group_access(self, group, actor_id, staff_no)
+            .await
+            .map_err(WorkbenchUseCaseError::Group)?
+        {
             return Ok(WorkbenchAuthorizedHuman {
                 actor_id: actor_id.to_string(),
                 staff_no: staff_no.to_string(),
@@ -479,7 +438,7 @@ impl GroupManagement {
 
     pub(crate) async fn authorize_workbench_sender(
         &self,
-        group: &DomainGroup,
+        group: &bcs_service_api::types::authorization_snapshot::GroupAuthorizationSnapshot,
         from_actor_id: &str,
         auth: &WorkbenchAuthorizedHuman,
     ) -> Result<(), WorkbenchUseCaseError> {
@@ -497,31 +456,14 @@ impl GroupManagement {
         if bot.actor_kind != ActorKind::Bot {
             return Err(WorkbenchUseCaseError::ForbiddenSender);
         }
-        if bot_belongs_to_staff(from_actor_id, bot.created_by.as_deref(), &auth.staff_no) {
+        if self
+            .human_controls_bot(&auth.staff_no, from_actor_id)
+            .await
+            .map_err(WorkbenchUseCaseError::Group)?
+        {
             return Ok(());
         }
 
         Err(WorkbenchUseCaseError::ForbiddenSender)
-    }
-
-    pub(crate) async fn session_participant(
-        &self,
-        session_id: Option<&str>,
-        group_id: &str,
-        actor_id: &str,
-    ) -> Result<Option<bcs_service_api::Participant>, WorkbenchUseCaseError> {
-        let Some(session_id) = session_id else {
-            return Ok(None);
-        };
-        let session = self
-            .session_management
-            .get(session_id)
-            .await
-            .map_err(|error| {
-                WorkbenchUseCaseError::Service(ServiceError::InternalError(error.to_string()))
-            })?;
-        Ok(session
-            .filter(|session| session.group_id == group_id)
-            .and_then(|session| find_session_participant(&session, actor_id)))
     }
 }

@@ -201,7 +201,7 @@ impl GroupService for GroupServiceImpl {
         command: CreateGroup,
         event_subscriptions: Vec<InlineGroupEventSubscriptionRequest>,
     ) -> Result<CreateGroupOutcome, ApplicationError> {
-        let principal = select_principal(&command.caller, IdentityPolicy::HumanOrOwnedBot)?;
+        let principal = self.resolve_principal(&command.caller).await?;
         let Some(provisioner) = self.event_subscription_provisioner.as_ref().cloned() else {
             if event_subscriptions.is_empty() {
                 return self.create_without_eventing(command, principal).await;
@@ -403,7 +403,7 @@ impl GroupService for GroupServiceImpl {
     }
 
     async fn update(&self, command: UpdateGroup) -> Result<GroupDetail, ApplicationError> {
-        let principal = select_principal(&command.caller, IdentityPolicy::HumanOrOwnedBot)?;
+        let principal = self.resolve_principal(&command.caller).await?;
         let mutation_actor = event_actor_for_principal(&principal);
         if command.patch.is_empty() {
             return Err(ApplicationError::invalid(
@@ -514,7 +514,7 @@ impl GroupService for GroupServiceImpl {
     }
 
     async fn delete(&self, command: DeleteGroup) -> Result<DeleteResult, ApplicationError> {
-        let principal = select_principal(&command.caller, IdentityPolicy::HumanOrOwnedBot)?;
+        let principal = self.resolve_principal(&command.caller).await?;
         let Some(group) = self
             .groups
             .try_get(&command.group_id)
@@ -565,7 +565,22 @@ impl GroupService for GroupServiceImpl {
                     ));
                 }
             };
-            let management_actor_ids = Self::group_management_actor_ids(&group);
+            // Spec §8.3: the management anchors are
+            // snapshot facts, re-read at the
+            // decision — not the display copy.
+            let management_actor_ids = self
+                .groups
+                .read_authorization_snapshot(&group.id)
+                .await
+                .map_err(map_service_error)?
+                .map(|snapshot| {
+                    snapshot
+                        .management_actor_ids()
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             if !management_actor_ids
                 .iter()
                 .any(|actor_id| actor_id == &acting_actor_id)
@@ -680,12 +695,17 @@ impl GroupService for GroupServiceImpl {
                         .try_get(&manage_actor_id)
                         .await
                         .map_err(map_service_error)?;
-                    manage_actor
-                        .filter(|actor| {
-                            actor.actor_kind == ActorKind::Bot
-                                && actor.created_by.as_deref() == Some(human.subject.id.as_str())
-                        })
-                        .map(|_| human_actor_id)
+                    // Row 10 participant-add leg: the Human may add
+                    // members THROUGH a Bot it currently controls
+                    // (live `can_manage`), never through the
+                    // historical `created_by`.
+                    let manages = manage_actor
+                        .as_ref()
+                        .is_some_and(|actor| actor.actor_kind == ActorKind::Bot)
+                        && self
+                            .human_controls_bot(&human.subject.id, &manage_actor_id)
+                            .await?;
+                    manages.then_some(human_actor_id)
                 }
             }
             Principal::Bot(_) => None,

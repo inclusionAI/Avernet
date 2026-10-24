@@ -41,6 +41,46 @@ pub trait BotProviderRepoPort: Send + Sync {
         owner: &str, token: &str,
     ) -> ServiceResult<()>;
 
+    /// Trusted atomic Provider registration with ownership
+    /// initialization (bot authority spec §10.2).
+    ///
+    /// The same atomic semantics as
+    /// [`BotRepoPort::create_registration_if_absent_with_ownership`],
+    /// including the NECESSARY gateway projection (the compatibility
+    /// binding for gateway-mode records) inside the SAME
+    /// transaction. Duplicate Provider/ref — including tombstoned
+    /// rows — conflicts and writes nothing. `initialization.
+    /// owner_user_id` comes only from the verified registration
+    /// token; the mutation keeps the real initiator.
+    async fn create_provider_bot_with_ownership(
+        &self, _record: BotProviderRecord, _capabilities: BotCapabilities,
+        _owner: &str, _token: &str,
+        _initialization: crate::types::bot_authority::OwnershipInitialization,
+    ) -> ServiceResult<()> {
+        Err(crate::types::ServiceError::InternalError(
+            "trusted Provider registration is not configured".into(),
+        ))
+    }
+
+    /// Atomic Provider retirement (bot authority spec §7.1):
+    /// ONE command commits the Bot tombstone, the Provider/ref
+    /// tombstone, the necessary binding disable, the owner/
+    /// manager edge revocation, the pending-transfer closure
+    /// (system decision, fixed reason) and the retire audit —
+    /// with the branch re-verified under the lock (`expected_
+    /// branch` mismatch is an error, never a reinterpretation).
+    /// Never followed by a second ordinary delete; a repeated
+    /// command on an already-tombstoned Bot is idempotent and
+    /// returns `changed = false` with the identity still
+    /// retrievable from the retained tombstone/metadata/binding.
+    async fn retire_with_authority(
+        &self, _retire: crate::core::provider::ProviderRetire,
+    ) -> ServiceResult<crate::core::provider::ProviderRetirement> {
+        Err(crate::types::ServiceError::InternalError(
+            "atomic Provider retirement is not configured".into(),
+        ))
+    }
+
     /// Atomically update the gateway Bot override and compatibility binding.
     /// Authorization and effective-endpoint validation belong to the core.
     /// No caller version is required; explicit updates use write ordering.
