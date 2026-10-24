@@ -28,6 +28,9 @@ _DOCUMENTED_DATA_BEARING_ERRORS = {
     ("/openapi/v1/bots/with-manifest", 409),
     ("/openapi/v1/bots/{bot_id}/auth-status", 409),
     ("/openapi/v1/bots/{bot_id}/space", 409),
+    # An acli add or remove refused as busy names the running operation.
+    ("/openapi/v1/bots/{bot_id}/clis", 409),
+    ("/openapi/v1/bots/{bot_id}/clis/{cli_code}", 409),
     ("/openapi/v1/bots/{bot_id}/auth-status", 400),
     ("/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline", 409),
 }

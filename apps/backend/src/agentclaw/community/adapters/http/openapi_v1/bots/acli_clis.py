@@ -14,7 +14,9 @@ the identity switch beside them.
 from __future__ import annotations
 
 import asyncio
-from typing import Annotated
+import inspect
+from collections.abc import Callable
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Path, Query, Request
 from fastapi.responses import JSONResponse
@@ -45,6 +47,12 @@ from agentclaw.community.api.collaborator_lock_service import (
 )
 from agentclaw.community.di import Injected
 
+from .schemas_acli_clis_responses import (
+    ADD_RESPONSES,
+    CANCEL_RESPONSES,
+    HOW_IT_RUNS,
+    REMOVE_RESPONSES,
+)
 from .schemas_acli_clis import (
     AcliCliOperation,
     AddBotCli,
@@ -77,8 +85,12 @@ AsyncParam = Annotated[
     Query(alias="async", description="Answer at once with the operation (`202`) instead of "
           "waiting up to 30 s for it to end."),
 ]
-_ACCEPTED = {202: {"model": Envelope[AcliCliOperation],
-                   "description": "Still running; poll `…/cli-operations/{operation_id}`."}}
+
+
+def _runs_as_operation[F: Callable[..., Any]](handler: F) -> F:
+    """Append how a write runs (sync wait, ``202``, polling) to its description."""
+    handler.__doc__ = inspect.cleandoc(handler.__doc__ or "") + HOW_IT_RUNS
+    return handler
 
 
 async def _lock_epoch(
@@ -143,8 +155,9 @@ async def list_bot_clis(
     )
 
 
-@router.post("", response_model=Envelope[AddedBotCli], responses=_ACCEPTED)
+@router.post("", response_model=Envelope[AddedBotCli], responses=ADD_RESPONSES)
 @envelope_errors
+@_runs_as_operation
 async def add_bot_cli(
     bot_id: BotIdPath,
     body: AddBotCli,
@@ -180,8 +193,9 @@ async def add_bot_cli(
     )
 
 
-@router.delete("/{cli_code}", response_model=Envelope[Deleted], responses=_ACCEPTED)
+@router.delete("/{cli_code}", response_model=Envelope[Deleted], responses=REMOVE_RESPONSES)
 @envelope_errors
+@_runs_as_operation
 async def remove_bot_cli(
     bot_id: BotIdPath,
     cli_code: CliCodePath,
@@ -229,9 +243,11 @@ async def _cancel(
 
 
 @router.post(
-    "/{cli_code}/install/cancel", response_model=Envelope[AcliCliOperation], responses=_ACCEPTED
+    "/{cli_code}/install/cancel", response_model=Envelope[AcliCliOperation],
+    responses=CANCEL_RESPONSES,
 )
 @envelope_errors
+@_runs_as_operation
 async def cancel_bot_cli_install(
     bot_id: BotIdPath,
     cli_code: CliCodePath,
@@ -251,9 +267,11 @@ async def cancel_bot_cli_install(
 
 
 @router.post(
-    "/{cli_code}/uninstall/cancel", response_model=Envelope[AcliCliOperation], responses=_ACCEPTED
+    "/{cli_code}/uninstall/cancel", response_model=Envelope[AcliCliOperation],
+    responses=CANCEL_RESPONSES,
 )
 @envelope_errors
+@_runs_as_operation
 async def cancel_bot_cli_uninstall(
     bot_id: BotIdPath,
     cli_code: CliCodePath,
