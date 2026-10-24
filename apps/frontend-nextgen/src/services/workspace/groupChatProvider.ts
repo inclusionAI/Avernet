@@ -13,6 +13,7 @@ import {
   type GroupChatProviderConfig,
 } from '@tc-chat/adapters';
 import type { AixContext, ChatMessage, ChatProvider } from '@tc-chat/core';
+import { normalizeHumanUserId } from '@/domain/userIdentity';
 import { GroupChatHistoryPaginator } from './groupChatHistoryPaginator';
 import {
   buildGroupChatPayload,
@@ -82,6 +83,8 @@ interface GroupChatProviderOptions {
   /** 群 ID——BCS connect 帧的 group_id（旧「我的协作」协议）。 */
   groupId: string;
   identityId: string;
+  /** 登录 Human 的 userId；发言权持有者判定必须与认证连接一致。 */
+  authenticatedUserId?: string | null;
   /** HTTP 历史始终可读；只有实时连接及发送受此开关控制。 */
   liveEnabled?: boolean;
   /** 同源 ws(s) 前缀；测试 / SSR 场景下传入避免访问 window。默认基于 window.location 推导。 */
@@ -170,10 +173,12 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
       send: (frame) => this.sendQuestionFrame(frame),
       isConnected: () => this.isConnected,
     });
+    const authenticatedHumanId = normalizeHumanUserId(options.authenticatedUserId, 'human');
+    const humanUserId = authenticatedHumanId || options.identityId;
     this.speakingLeaseService = new GroupSpeakingLeaseService({
       groupId: options.groupId,
-      // 服务端 holderActorId 形如 human_{userId}；identityId 即登录 userId。
-      humanActorId: `human_${options.identityId}`,
+      // 服务端 holderActorId 形如 human_{userId}；认证 Human 优先，不能沿用 Bot 查看身份。
+      humanActorId: `human_${humanUserId}`,
       send: (frame) => this.sendQuestionFrame(frame),
       isConnected: () => this.isConnected,
     });

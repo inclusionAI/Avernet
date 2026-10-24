@@ -317,6 +317,49 @@ describe('groupChatProvider', () => {
     );
   });
 
+  it('发言权持有者按认证 Human 匹配，不沿用 Bot 查看身份', async () => {
+    sc.createSessionToken.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: { token: 'tk', expires_at: 999 },
+    });
+    const provider = createGroupChatProvider({
+      sessionId: 's-lease',
+      groupId: 'g1',
+      identityId: 'bot_17739dc0',
+      authenticatedUserId: '900001',
+      createSdkProvider: fakeSdkProvider as unknown as Parameters<
+        typeof createGroupChatProvider
+      >[0]['createSdkProvider'],
+      wsOrigin: 'wss://x.test',
+    });
+    const snapshots: Array<{ status?: string; lease?: { leaseId: string } }> = [];
+    const unsubscribe = provider.subscribeToSpeakingLease((snapshot) => snapshots.push(snapshot));
+    await provider.connect();
+
+    const refreshPromise = provider.refreshSpeakingLease();
+    await Promise.resolve().then(() => {});
+    const request = lastOriginalSend.mock.calls.at(-1)?.[0] as { id?: string } | undefined;
+    const inner = (provider as unknown as { inner: { transport: { onMessage: (frame: unknown) => void } } }).inner;
+    inner.transport.onMessage({
+      type: 'res',
+      id: request?.id,
+      payload: {
+        status: 'held',
+        leaseId: 'lease-1',
+        epoch: 2,
+        expiresAt_ms: Date.now() + 60_000,
+        holderActorId: 'human_900001',
+      },
+    });
+    await refreshPromise;
+
+    expect(snapshots.at(-1)?.status).toBe('held');
+    expect(snapshots.at(-1)?.lease?.leaseId).toBe('lease-1');
+    unsubscribe();
+  });
+
   it('断开后重连会重新获取 token、创建新的 SDK provider 并断开旧 provider', async () => {
     sc.createSessionToken
       .mockResolvedValueOnce({
