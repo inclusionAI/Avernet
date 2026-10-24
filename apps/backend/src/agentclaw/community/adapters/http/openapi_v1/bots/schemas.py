@@ -799,6 +799,10 @@ class ConfigManifestCapabilities(BaseModel):
     constructs: list[ManifestConstruct] = Field(
         description="Every construct, supported or not, with its reason."
     )
+    apply_policy_support: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Supported category-level Apply policy keys; not enabled Bot state.",
+    )
     source_matrix: list[ManifestSourceCell] = Field(
         default_factory=list,
         description=(

@@ -31,7 +31,10 @@ checker, so a structurally-satisfied Protocol is verified by nothing at all;
 abstract members make a dropped or renamed method fail at construction instead
 of resolving to an inherited ``...`` stub that silently returns ``None``.
 """
+
 from __future__ import annotations
+
+from agentclaw.community.core.skill_center.manifest_defaults import PackageWriteGuard
 
 from abc import abstractmethod
 from typing import Any, Protocol, runtime_checkable
@@ -43,7 +46,13 @@ class SkillPackageUploadPort(Protocol):
 
     @abstractmethod
     async def upload_local_skill(
-        self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        package: bytes,
+        write_guard: PackageWriteGuard | None = None,
     ) -> dict[str, Any]:
         """Install the validated package and return the skill row it wrote."""
         ...
@@ -55,5 +64,6 @@ class SkillPackageUploadPort(Protocol):
     ) -> None:
         """Physically delete one unreferenced Bot-owned Local package and row."""
         ...
+
 
 __all__ = ["SkillPackageUploadPort"]

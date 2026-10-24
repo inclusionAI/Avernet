@@ -16,7 +16,10 @@ Its platform-managed counterpart is ``PlatformSkillPackageUpload`` in
 instead. Unlike the activation delegates, the two share no body — only the
 port and the skill row they record.
 """
+
 from __future__ import annotations
+
+from agentclaw.community.core.skill_center.manifest_defaults import PackageWriteGuard
 
 from typing import Any
 
@@ -57,10 +60,20 @@ class DeviceSkillPackageUpload(SkillPackageUploadPort):
         self._delete = delete_service
 
     async def upload_local_skill(
-        self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        package: bytes,
+        write_guard: PackageWriteGuard | None = None,
     ) -> dict[str, Any]:
         return await self._inner.upload_local_skill(
-            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id, package=package
+            bot_id=bot_id,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            package=package,
+            **({"write_guard": write_guard} if write_guard is not None else {}),
         )
 
     async def delete_local_skill(
@@ -70,5 +83,6 @@ class DeviceSkillPackageUpload(SkillPackageUploadPort):
         await self._delete.delete_local_skill(
             skill_id=skill_id, owner_id=owner_id, user_id=actor_id
         )
+
 
 __all__ = ["DeviceSkillPackageUpload"]

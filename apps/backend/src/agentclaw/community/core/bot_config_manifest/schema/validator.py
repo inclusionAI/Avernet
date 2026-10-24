@@ -16,7 +16,10 @@ credential, ask a registry whether an MCP server exists, or look at a device.
 Those need either the network or a bot record, and this must be callable during
 bot creation (W13) when neither is available.
 """
+
 from __future__ import annotations
+
+from .apply_policy import validate_apply_policy
 
 from dataclasses import dataclass
 from typing import Any
@@ -56,7 +59,7 @@ from agentclaw.community.core.bot_config_manifest.schema.violations import (
 #: The three sections schema §1 defines, plus the version marker. Closed: an
 #: unknown top-level key is refused rather than ignored.
 _TOP_LEVEL_KEYS: frozenset[str] = frozenset(
-    {"schema_version", "sources", "manifest", "script"}
+    {"schema_version", "sources", "manifest", "script", "apply_policy"}
 )
 
 #: Longest YAML parser message forwarded to a caller. The text is about their
@@ -143,6 +146,7 @@ def validate_document(
 
     schema_version = _check_schema_version(ctx, parsed)
     _check_top_level_keys(ctx, parsed)
+    validate_apply_policy(ctx, parsed)
     _sweep_reserved_keys(ctx, parsed, "")
     _validate_sources(ctx, parsed.get("sources"))
     _validate_manifest(ctx, parsed.get("manifest"))

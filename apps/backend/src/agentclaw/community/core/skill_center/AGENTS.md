@@ -326,3 +326,12 @@ CommunityDatabase 的 operator-managed SQLite（`create_schema=false`）在启�
 ## 数字员工共享凭证保护
 
 已绑定数字员工的服务 Bot 在完整能力投影更新 AgentPass 前，通过数字员工服务申请非公开 MCP 权限，并保留历史 MCP 授权与草稿期望范围的并集。删除仅影响草稿 Runtime 配置；审批通过的发布流程在最终上线时收敛凭证范围。未绑定 Bot 的投影语义保持不变。
+
+## Manifest 默认保留策略
+
+`apply_policy.<skills|mcp>.preserve_defaults` 的规范见 `docs/adr/0019-manifest-preserve-defaults.md`。
+默认快照属于 desired-state UoW：先锁精确 Bot exclusion，再锁 Set；来源写入在同一事务
+复验当前有效来源。包上传通过 `PackageWriteGuard` 在实际发布与恢复字节时先锁目标 Local Skill，
+再非锁定读取当前 Default 快照复验；不持有 Set 锁以避免 legacy 增员的反向锁序，元数据提交和 runtime projection 在边界外执行，避免不同连接自锁。
+受保护包已发布且补偿失败须传播 `ManifestPackageWriteCommittedError`，Apply 报告真实
+confirmed partial。无策略路径不传 guard，保持旧语义。

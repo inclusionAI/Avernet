@@ -28,7 +28,9 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneConflictError,
 )
 from agentclaw.community.utils.env_utils import get_current_env
-from agentclaw.community.core.models.skill_installation_source import SkillInstallationSourceKind
+from agentclaw.community.core.models.skill_installation_source import (
+    SkillInstallationSourceKind,
+)
 
 
 CENTER_MEMBERSHIP_IDENTITY_MISSING = "CENTER_MEMBERSHIP_IDENTITY_MISSING"
@@ -46,7 +48,9 @@ def center_membership_skill_uuid(skill: Skill) -> str | None:
     return skill_uuid
 
 
-def set_member_skill_ids(scope, session, *, skill_set_id: int) -> set[int]:
+def set_member_skill_ids(
+    scope, session, *, skill_set_id: int, locked: bool = False
+) -> set[int]:
     """The Skill ids one SkillSet provides.
 
     Must agree with ``SkillSetRepository.get_skills_in_set_for_env``: a
@@ -70,12 +74,12 @@ def set_member_skill_ids(scope, session, *, skill_set_id: int) -> set[int]:
         .first()
     )
     if malformed_center is not None:
-        raise SkillSetControlPlaneConflictError(
-            CENTER_MEMBERSHIP_IDENTITY_MISSING
-        )
+        raise SkillSetControlPlaneConflictError(CENTER_MEMBERSHIP_IDENTITY_MISSING)
 
     def ids(query) -> set[int]:
-        return {int(row[0]) for row in query.all()}
+        return {
+            int(row[0]) for row in (query.with_for_update() if locked else query).all()
+        }
 
     non_center = ids(
         scope(session.query(Skill.id), Skill)
@@ -115,16 +119,15 @@ def set_member_skill_ids(scope, session, *, skill_set_id: int) -> set[int]:
     return non_center | center
 
 
-def set_member_mcp_codes(scope, session, *, skill_set_id: int) -> set[str]:
+def set_member_mcp_codes(
+    scope, session, *, skill_set_id: int, locked: bool = False
+) -> set[str]:
     """The MCP server codes one SkillSet provides (its membership rows)."""
-    return {
-        str(row[0])
-        for row in scope(
-            session.query(SkillSetMCPServer.server_code), SkillSetMCPServer
-        )
-        .filter(SkillSetMCPServer.skill_set_id == skill_set_id)
-        .all()
-    }
+    query = scope(
+        session.query(SkillSetMCPServer.server_code), SkillSetMCPServer
+    ).filter(SkillSetMCPServer.skill_set_id == skill_set_id)
+
+    return {str(row[0]) for row in (query.with_for_update() if locked else query).all()}
 
 
 class BotSkillSetInstallations:

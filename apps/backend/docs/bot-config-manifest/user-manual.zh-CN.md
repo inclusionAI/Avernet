@@ -2391,3 +2391,31 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 
 **`cli_tools` 条目用 `from` 或 git 源是唯一的例外**：它**不会**在提交时被拒，而是在
 apply 时失败。别按「`PUT` 过了就没问题」推断这一条。
+
+
+## 保留默认供应（schema v1）
+
+默认仍按声明 Replace。只希望保留平台默认 Skill/MCP 及其来源时，在根节点增加：
+
+```yaml
+schema_version: 1
+apply_policy:
+  skills: {preserve_defaults: true}
+  mcp: {preserve_defaults: true}
+manifest:
+  skills: []
+  mcp: []
+```
+
+这个例子清除非默认项，保留当前有效默认供应。类目省略就不执行该类目 Replace；
+策略省略或 false 保持原行为。先查询现有 capabilities 接口的 `apply_policy_support`，
+确认对应类目包含 `preserve_defaults`；不支持时请求会被拒绝，不自动降级。
+
+有效默认 Skill 同名声明会在整个 Skills 类目首次写入前失败；已排除的默认同名
+Skill 可以作为 Local/Direct 声明，原 exclusion 保留。默认 MCP 显式声明只完整替换
+Bot override：非空配置覆盖，省略/空对象清除；未声明默认 MCP 也清除旧 Bot override。
+用户及平台配置不变。最终 MCP 依赖始终包含保留默认 Skills 的依赖。
+
+Dry-run 说明默认来源保留和配置清理；实际 Apply 若默认前提变化会停止不安全写入，
+已确认落库部分如实报告，重试按当前状态重算。相关来源无法确定时拒绝该类目，
+不自动修复历史来源。创建 Bot 复用既有 preflight，无需另一个公开接口。

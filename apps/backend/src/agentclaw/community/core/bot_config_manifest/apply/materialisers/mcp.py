@@ -10,7 +10,13 @@ derived: they are not inserted into the Installation table, do not appear in
 Source-only conversion can therefore report ``unchanged`` while
 ``requires_write`` performs the internal transition.
 """
+
 from __future__ import annotations
+
+from agentclaw.community.core.bot_config_manifest.apply.default_policy import (
+    read_defaults,
+    guard_defaults,
+)
 
 from typing import Any, Sequence
 
@@ -185,9 +191,7 @@ class McpMaterialiser(Materialiser):
             return False
         return bool(result.get("has_permission")) and bool(result.get("access_level"))
 
-    async def plan(
-        self, ctx: ApplyContext, intents: Sequence[Intent]
-    ) -> CategoryPlan:
+    async def plan(self, ctx: ApplyContext, intents: Sequence[Intent]) -> CategoryPlan:
         """Plan public outcomes separately from required source/config writes."""
         installed = set(
             self._activation.list_installed_mcps(
@@ -206,11 +210,15 @@ class McpMaterialiser(Materialiser):
                 bot_id=ctx.bot_id, owner_id=ctx.owner_id, bot=ctx.bot
             ):
                 resolved.update(
-                    mcp_dependency_codes(
-                        getattr(asset, "mcp_dependencies", ()) or ()
-                    )
+                    mcp_dependency_codes(getattr(asset, "mcp_dependencies", ()) or ())
                 )
             dependency_codes = frozenset(resolved)
+        if self.construct in ctx.preserve_default_categories:
+            protected = read_defaults(self._activation, ctx, check_skill_sources=False)
+            ctx.capability_state.default_snapshots[self.construct] = protected
+            return self._preserving_plan(
+                intents, installed, overrides, declared, dependency_codes, protected
+            )
         effective_current = installed | platform_owned | set(dependency_codes)
         current = installed | platform_owned | set(overrides)
         set_managed = self._activation.set_managed_mcp_codes(
@@ -274,13 +282,85 @@ class McpMaterialiser(Materialiser):
             removal_writes=removal_writes,
         )
 
+    def _preserving_plan(
+        self, intents, installed, overrides, declared, dependencies, protected
+    ):
+        defaults = protected.mcp_codes
+        current = installed | set(defaults) | set(overrides)
+        managed = current - declared
+        removal_writes = (managed - set(defaults)) | (managed & set(overrides))
+        removed = removal_writes - set(defaults) - set(dependencies)
+        entries = []
+        for intent in intents:
+            changed_config = _comparison_config(
+                overrides.get(intent.identity)
+            ) != _comparison_config(intent.value)
+            default = intent.identity in defaults
+            outcome = (
+                (EntryOutcome.UPDATED if changed_config else EntryOutcome.UNCHANGED)
+                if default
+                else (
+                    EntryOutcome.UPDATED
+                    if intent.identity in current | set(dependencies)
+                    else EntryOutcome.CREATED
+                )
+            )
+            entries.append(
+                PlannedEntry(
+                    Intent(
+                        intent.identity,
+                        intent.value,
+                        note=(
+                            "Default provenance preserved; Bot override replaced or cleared"
+                            if default
+                            else "Manifest Direct supply and Bot override"
+                        ),
+                    ),
+                    outcome.value,
+                    requires_write=changed_config if default else True,
+                )
+            )
+        for code in sorted((set(defaults) | set(dependencies)) - declared):
+            writing = code in removal_writes
+            entries.append(
+                PlannedEntry(
+                    Intent(
+                        code,
+                        None,
+                        note=(
+                            "Default provenance preserved"
+                            if code in defaults
+                            else "Final Skill dependency retained"
+                        )
+                        + (
+                            "; old Bot override/explicit non-default supply cleared"
+                            if writing
+                            else ""
+                        ),
+                    ),
+                    EntryOutcome.UPDATED.value
+                    if writing
+                    else EntryOutcome.UNCHANGED.value,
+                    requires_write=writing,
+                )
+            )
+        return CategoryPlan(
+            entries=tuple(entries),
+            removals=tuple(sorted(removed)),
+            removal_writes=tuple(sorted(removal_writes)),
+        )
+
     async def write(
         self, ctx: ApplyContext, plan: CategoryPlan
     ) -> Sequence[EntryResult]:
         """Apply Direct conversions, overrides, and dependency-aware cleanup."""
         results: list[EntryResult] = []
         confirmed_write = False
+        protected = ctx.capability_state.default_snapshots.get(self.construct)
+        guarded = {"expected_defaults": protected} if protected is not None else {}
         try:
+            if protected is not None:
+                guard_defaults(self._activation, ctx, protected)
             for planned in plan.entries:
                 if not planned.requires_write:
                     results.append(
@@ -288,6 +368,7 @@ class McpMaterialiser(Materialiser):
                             self.construct,
                             planned.intent.identity,
                             EntryOutcome.UNCHANGED,
+                            note=planned.intent.note,
                         )
                     )
                     continue
@@ -312,6 +393,7 @@ class McpMaterialiser(Materialiser):
                     owner_id=ctx.owner_id,
                     actor_id=ctx.actor_id,
                     apply_id=ctx.apply_id,
+                    **guarded,
                 )
                 confirmed_write = True
                 results.append(
@@ -319,6 +401,7 @@ class McpMaterialiser(Materialiser):
                         self.construct,
                         planned.intent.identity,
                         EntryOutcome(planned.outcome),
+                        note=planned.intent.note,
                     )
                 )
 
@@ -334,12 +417,11 @@ class McpMaterialiser(Materialiser):
                     owner_id=ctx.owner_id,
                     actor_id=ctx.actor_id,
                     apply_id=ctx.apply_id,
+                    **guarded,
                 )
                 confirmed_write = True
         except Exception as exc:
-            if confirmed_write or isinstance(
-                exc, ManifestDesiredStateCommittedError
-            ):
+            if confirmed_write or isinstance(exc, ManifestDesiredStateCommittedError):
                 raise ConfirmedPartialWriteError(
                     "MCP replacement stopped after a durable write"
                 ) from None

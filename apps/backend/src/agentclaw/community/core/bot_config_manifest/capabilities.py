@@ -47,6 +47,7 @@ records for its own support check): ``is_teclaw`` is the engine authority and
 ``bot_type`` is a column. A device-binding read that happened to be failing must
 never look like a verdict about what a bot supports.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -66,6 +67,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from agentclaw.community.core.bot_config_manifest.support_matrix import (
         SourceKind,
     )
+
 
 class ConstructKind(StrEnum):
     """What sort of thing a construct is. Derived, never chosen at a call site."""
@@ -268,12 +270,21 @@ class ManifestCapabilities:
             return f"no verdict for {kind_of(construct).value} '{construct.value}'"
         return capability.reason
 
+    def apply_policy_support(self) -> dict[str, list[str]]:
+        """Policy keys actually supported by this engine/category pair."""
+        return {
+            c.value: ["preserve_defaults"]
+            for c in (ManifestCategory.SKILLS, ManifestCategory.MCP)
+            if self.supports(c)
+        }
+
     def as_payload(self) -> dict[str, Any]:
         """The ``GET …/capabilities`` body."""
         return {
             "engine_type": self.engine_type,
             "bot_type": self.bot_type,
             "schema_versions": list(self.schema_versions),
+            "apply_policy_support": self.apply_policy_support(),
             "constructs": [c.as_dict() for c in self.constructs],
             "source_matrix": [cell.as_dict() for cell in self.source_matrix],
         }

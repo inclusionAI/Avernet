@@ -33,9 +33,7 @@ _AGENTCLAW_ROOT = _BACKEND_ROOT / "src" / "agentclaw"
 _MODELS = {"BotSkillInstallation", "BotMCPInstallation", "BotMCPConfig"}
 
 #: The table-command package — the writes' one home.
-_TABLES_DIR = (
-    "community/core/repository/implementations/skill_center/tables"
-)
+_TABLES_DIR = "community/core/repository/implementations/skill_center/tables"
 
 #: Files that may keep a write, each with a justification.
 _WRITE_ALLOWLIST: dict[str, str] = {
@@ -51,6 +49,8 @@ _TABLES_IMPORTER_ALLOWLIST = {
     "community/core/repository/implementations/skill_center/default_exclusion_commands.py",
     "community/core/repository/implementations/skill_center/direct_installation_commands.py",
     "community/core/repository/implementations/skill_center/manifest_direct_claim_commands.py",
+    # Default protection reads are composed into that same transactional UoW.
+    "community/core/repository/implementations/skill_center/manifest_default_queries.py",
     "community/core/repository/implementations/skill_center/mcp_skill_set_control_plane.py",
     # Scoped user/Bot Header snapshot repository is also a transactional UoW;
     # it calls the shared BotMCPConfig table command in the same session.

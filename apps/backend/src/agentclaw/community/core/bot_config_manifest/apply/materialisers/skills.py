@@ -12,7 +12,17 @@ and removed from the catalog. Shared Repo/Center assets are never physically
 deleted. The complete Local catalog, not only active Installations, makes failed
 cleanup discoverable on a later Apply.
 """
+
 from __future__ import annotations
+
+from agentclaw.community.core.bot_config_manifest.apply.default_policy import (
+    read_defaults,
+    guard_defaults,
+)
+from agentclaw.community.core.skill_center.manifest_defaults import (
+    ManifestDefaultsConflictError,
+    ManifestPackageWriteCommittedError,
+)
 
 import asyncio
 import tempfile
@@ -321,6 +331,19 @@ class SkillsMaterialiser(Materialiser):
         area = self._area(ctx)
         local_assets = self._local_assets(ctx)
         declared = {intent.identity for intent in intents}
+        protected = None
+        if self.construct in ctx.preserve_default_categories:
+            protected = read_defaults(self._activation, ctx)
+            ctx.capability_state.default_snapshots[self.construct] = protected
+            if declared & protected.skill_names:
+                raise ManifestDefaultsConflictError(
+                    "Declared Skill conflicts with effective Default: "
+                    + ", ".join(sorted(declared & protected.skill_names))
+                )
+            if not protected.skill_names.issubset(area):
+                raise ManifestDefaultsConflictError(
+                    "Default Skill supply cannot be read reliably"
+                )
 
         planned = [
             PlannedEntry(
@@ -334,7 +357,16 @@ class SkillsMaterialiser(Materialiser):
             )
             for intent in intents
         ]
-        removals = tuple(sorted((set(area) | set(local_assets)) - declared))
+        preserved = protected.skill_names if protected is not None else frozenset()
+        planned.extend(
+            PlannedEntry(
+                Intent(name, None, note="Default supply and provenance preserved"),
+                EntryOutcome.UNCHANGED.value,
+                requires_write=False,
+            )
+            for name in sorted(preserved)
+        )
+        removals = tuple(sorted((set(area) | set(local_assets)) - declared - preserved))
         # Local package replacement deliberately preserves the row's scanned
         # ``mcp_dependencies``; package validation/upload neither parses nor
         # rewrites them. A new Local row therefore starts dependency-free.
@@ -344,7 +376,7 @@ class SkillsMaterialiser(Materialiser):
             local_assets[name] for name in declared if name in local_assets
         ]
         ctx.capability_state.final_skill_dependency_codes = self._dependency_codes(
-            retained_local
+            [*retained_local, *(area[name] for name in preserved)]
         )
         return CategoryPlan(entries=tuple(planned), removals=removals)
 
@@ -354,14 +386,44 @@ class SkillsMaterialiser(Materialiser):
         """Fully write declarations, establish Direct claims, then clean omissions."""
         results: list[EntryResult] = []
         confirmed_write = False
+        protected = ctx.capability_state.default_snapshots.get(self.construct)
+        guarded = {"expected_defaults": protected} if protected is not None else {}
         try:
+            if protected is not None:
+                guard_defaults(self._activation, ctx, protected)
             for planned in plan.entries:
+                if not planned.requires_write:
+                    results.append(
+                        EntryResult(
+                            self.construct,
+                            planned.intent.identity,
+                            EntryOutcome.UNCHANGED,
+                            note=planned.intent.note,
+                        )
+                    )
+                    continue
+                if protected is not None:
+                    guard_defaults(self._activation, ctx, protected)
                 package = planned.intent.value
+                package_guard = (
+                    {
+                        "write_guard": self._activation.manifest_skill_package_guard(
+                            bot_id=ctx.bot_id,
+                            owner_id=ctx.owner_id,
+                            actor_id=ctx.actor_id,
+                            name=planned.intent.identity,
+                            expected_defaults=protected,
+                        )
+                    }
+                    if protected is not None
+                    else {}
+                )
                 uploaded = await self._uploads.upload_local_skill(
                     bot_id=ctx.bot_id,
                     owner_id=ctx.entity_id,
                     actor_id=ctx.actor_id,
                     package=package.canonical_zip,
+                    **package_guard,
                 )
                 # A returned upload means the complete Local package and row
                 # have committed, even if the following Direct claim fails.
@@ -373,6 +435,7 @@ class SkillsMaterialiser(Materialiser):
                     owner_id=ctx.entity_id,
                     actor_id=ctx.actor_id,
                     apply_id=ctx.apply_id,
+                    **guarded,
                 )
                 results.append(
                     EntryResult(
@@ -398,6 +461,7 @@ class SkillsMaterialiser(Materialiser):
                     actor_id=ctx.actor_id,
                     apply_id=ctx.apply_id,
                     remove_inactive_memberships=is_local,
+                    **guarded,
                 )
                 confirmed_write = True
                 if is_local:
@@ -418,7 +482,11 @@ class SkillsMaterialiser(Materialiser):
             if isinstance(exc, ConfirmedPartialWriteError):
                 raise
             if confirmed_write or isinstance(
-                exc, ManifestDesiredStateCommittedError
+                exc,
+                (
+                    ManifestDesiredStateCommittedError,
+                    ManifestPackageWriteCommittedError,
+                ),
             ):
                 raise ConfirmedPartialWriteError(
                     "Skill replacement stopped after a durable write"

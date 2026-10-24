@@ -26,7 +26,13 @@ other family states its choice in source. Wrapping both makes the pair
 symmetric and the choice greppable: these are the only two places in the
 codebase that pass ``project`` at all.
 """
+
 from __future__ import annotations
+
+from agentclaw.community.core.skill_center.manifest_defaults import (
+    ManifestDefaults,
+    PackageWriteGuard,
+)
 
 from typing import Any, Iterable
 
@@ -59,6 +65,24 @@ class _DelegatingActivation(ActivationPort):
         self._inner = inner
 
     # ── reads, unchanged: `project` is a write-side choice ───────────────
+
+    def manifest_skill_package_guard(self, **kwargs) -> PackageWriteGuard:
+        return self._inner.manifest_skill_package_guard(**kwargs)
+
+    def manifest_defaults(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        check_skill_sources: bool = True,
+    ) -> ManifestDefaults:
+        return self._inner.manifest_defaults(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            check_skill_sources=check_skill_sources,
+        )
 
     def list_installed_mcps(self, *, bot_id: str, owner_id: str, actor_id: str) -> set[str]:
         return self._inner.list_installed_mcps(
@@ -169,6 +193,7 @@ class _DelegatingActivation(ActivationPort):
         owner_id: str,
         actor_id: str,
         apply_id: str | None,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> dict[str, Any]:
         return await self._inner.claim_manifest_skill(
             skill_id=skill_id,
@@ -177,6 +202,11 @@ class _DelegatingActivation(ActivationPort):
             actor_id=actor_id,
             apply_id=apply_id,
             project=self._PROJECT,
+            **(
+                {"expected_defaults": expected_defaults}
+                if expected_defaults is not None
+                else {}
+            ),
         )
 
     async def remove_manifest_skill(
@@ -188,6 +218,7 @@ class _DelegatingActivation(ActivationPort):
         actor_id: str,
         apply_id: str | None,
         remove_inactive_memberships: bool,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> dict[str, Any]:
         return await self._inner.remove_manifest_skill(
             skill_id=skill_id,
@@ -197,6 +228,11 @@ class _DelegatingActivation(ActivationPort):
             apply_id=apply_id,
             remove_inactive_memberships=remove_inactive_memberships,
             project=self._PROJECT,
+            **(
+                {"expected_defaults": expected_defaults}
+                if expected_defaults is not None
+                else {}
+            ),
         )
 
     async def claim_manifest_mcp(
@@ -208,6 +244,7 @@ class _DelegatingActivation(ActivationPort):
         owner_id: str,
         actor_id: str,
         apply_id: str | None,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> dict[str, Any]:
         return await self._inner.claim_manifest_mcp(
             server_code=server_code,
@@ -217,6 +254,11 @@ class _DelegatingActivation(ActivationPort):
             actor_id=actor_id,
             apply_id=apply_id,
             project=self._PROJECT,
+            **(
+                {"expected_defaults": expected_defaults}
+                if expected_defaults is not None
+                else {}
+            ),
         )
 
     async def remove_manifest_mcp(
@@ -227,6 +269,7 @@ class _DelegatingActivation(ActivationPort):
         owner_id: str,
         actor_id: str,
         apply_id: str | None,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> dict[str, Any]:
         return await self._inner.remove_manifest_mcp(
             server_code=server_code,
@@ -235,6 +278,11 @@ class _DelegatingActivation(ActivationPort):
             actor_id=actor_id,
             apply_id=apply_id,
             project=self._PROJECT,
+            **(
+                {"expected_defaults": expected_defaults}
+                if expected_defaults is not None
+                else {}
+            ),
         )
 
 

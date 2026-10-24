@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agentclaw.community.core.skill_center.manifest_defaults import PackageWriteGuard
+
 from collections.abc import Mapping, Sequence
 from typing import Any, Optional, Protocol, runtime_checkable
 
@@ -11,7 +13,13 @@ class LocalSkillUploadServiceProtocol(Protocol):
     """Create or safely replace one Bot-owned Local Skill from a complete package."""
 
     async def upload_local_skill(
-        self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        package: bytes,
+        write_guard: PackageWriteGuard | None = None,
     ) -> dict[str, Any]: ...
 
     async def upload_local_skill_files(

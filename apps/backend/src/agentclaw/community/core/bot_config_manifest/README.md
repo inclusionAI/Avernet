@@ -1,3 +1,22 @@
+## Default-preserving Replace (schema v1)
+
+```yaml
+schema_version: 1
+apply_policy:
+  skills: {preserve_defaults: true}
+  mcp: {preserve_defaults: true}
+manifest:
+  skills: []
+  mcp: []
+```
+
+This removes non-default supply while preserving effective Default provenance.
+Omitting a category still leaves it alone; omitted/false policy preserves legacy
+Replace. Discover supported policy keys using `apply_policy_support` on the
+existing capabilities response. The same resolver validates PUT and creation
+preflight. See [ADR 0019](../../../../../../../docs/adr/0019-manifest-preserve-defaults.md)
+for exclusions, override cleanup, dependency calculation and failure boundaries.
+
 A **configuration manifest** that belongs to a bot: one document declaring what
 that bot should have — MCP servers, workspace resources, skills, engine config,
 identity files, command-line tools — plus the imperative `script` that #926
@@ -655,6 +674,7 @@ consumed_by:
   - "the apply orchestration (`apply/`, W4 #1472 + W5 #1473) — di/modules/manifest_fetch_module.py reads the content store root and the fetch_transport_allowlist (via the store's and W2's pure parsers over config_module's seam; the allowlist reaches SourceCredentialService as endpoint_allow_hosts, its one consumer) and holds the one DeclaredSourceResolver over the object store, the content store (bound by content_store_module) and W3's credentials"
   - "adapters/http/openapi_v1/source_credentials — the public tenant credential register/rotate/read/delete surface (OPEN admission; app-operated — the edge requires an app credential, owner-app guarded)"
 internal_dependencies:
+  - agentclaw.community.core.skill_center.manifest_defaults
   - agentclaw.community.core.base
   - agentclaw.community.core.content_store  # the store Service API, scope, errors, DIGEST_RE and the acm-tree-v1 encoding (W11, moved out in #3064)
   - agentclaw.community.core.bot_app_grant.protocols  # BotAppGrantSweepProtocol — the creation job withdraws the submitting application's creation grant when a creation gives up before a bot exists

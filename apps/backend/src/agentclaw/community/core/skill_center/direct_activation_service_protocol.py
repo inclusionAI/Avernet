@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from agentclaw.community.core.skill_center.manifest_defaults import (
+    ManifestDefaults,
+    PackageWriteGuard,
+)
+
 from abc import abstractmethod
 from typing import Any, Protocol, runtime_checkable
 
@@ -42,15 +47,29 @@ class DirectActivationServiceProtocol(Protocol):
 
     @abstractmethod
     async def claim_manifest_skill(
-        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
-        apply_id: str | None, project: bool = True,
+        self,
+        *,
+        skill_id: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        apply_id: str | None,
+        project: bool = True,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> dict[str, Any]: ...
 
     @abstractmethod
     async def remove_manifest_skill(
-        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
-        apply_id: str | None, remove_inactive_memberships: bool,
+        self,
+        *,
+        skill_id: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        apply_id: str | None,
+        remove_inactive_memberships: bool,
         project: bool = True,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> dict[str, Any]: ...
 
     @abstractmethod
@@ -73,15 +92,29 @@ class DirectActivationServiceProtocol(Protocol):
 
     @abstractmethod
     async def claim_manifest_mcp(
-        self, *, server_code: str, config: dict | None, bot_id: str,
-        owner_id: str, actor_id: str, apply_id: str | None,
+        self,
+        *,
+        server_code: str,
+        config: dict | None,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        apply_id: str | None,
         project: bool = True,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> dict[str, Any]: ...
 
     @abstractmethod
     async def remove_manifest_mcp(
-        self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
-        apply_id: str | None, project: bool = True,
+        self,
+        *,
+        server_code: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        apply_id: str | None,
+        project: bool = True,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> dict[str, Any]: ...
 
     @abstractmethod
@@ -89,6 +122,27 @@ class DirectActivationServiceProtocol(Protocol):
         self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
         project: bool = True,
     ) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def manifest_skill_package_guard(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        name: str,
+        expected_defaults: ManifestDefaults,
+    ) -> PackageWriteGuard: ...
+
+    @abstractmethod
+    def manifest_defaults(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        check_skill_sources: bool = True,
+    ) -> ManifestDefaults: ...
 
     @abstractmethod
     def list_installed_mcps(
