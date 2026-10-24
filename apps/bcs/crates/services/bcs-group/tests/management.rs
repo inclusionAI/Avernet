@@ -2394,7 +2394,7 @@ impl BotControlPlaneCoreService for CallerEnabledControlPlane {
 }
 
 #[tokio::test]
-async fn state_machine_group_connect_stays_plain_with_caller_enabled_members() {
+async fn state_machine_group_connect_requires_lease_with_caller_enabled_members() {
     let fixture = Fixture::new()
         .with_bot("driver", "Driver", "public", None)
         .with_bot("helper", "Helper", "public", None)
@@ -2427,8 +2427,8 @@ async fn state_machine_group_connect_stays_plain_with_caller_enabled_members() {
 
     assert_eq!(
         connected.speaking_mode,
-        bcs_domain::speaking_lease::SessionSpeakingMode::Plain,
-        "state_machine groups stay Plain regardless of caller-enabled members"
+        bcs_domain::speaking_lease::SessionSpeakingMode::LeaseRequired,
+        "state_machine groups expose lease_required when a caller bot is enabled"
     );
 }
 

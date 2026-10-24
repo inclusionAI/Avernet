@@ -94,7 +94,7 @@ impl WorkbenchSessionService for GroupManagement {
             // participant views. Its authorization and participant list are
             // the values produced by the original full-view connection.
             let speaking_mode = self
-                .resolve_connect_speaking_mode(&legacy_participants, group.group_strategy)
+                .resolve_connect_speaking_mode(&legacy_participants)
                 .await;
             return Ok(WorkbenchConnectOutcome {
                 group_id: command.group_id,
@@ -138,7 +138,7 @@ impl WorkbenchSessionService for GroupManagement {
 
         Ok(WorkbenchConnectOutcome {
             speaking_mode: self
-                .resolve_connect_speaking_mode(&participants, group.group_strategy)
+                .resolve_connect_speaking_mode(&participants)
                 .await,
             group_id: command.group_id,
             participants,
@@ -168,7 +168,7 @@ impl WorkbenchSessionService for GroupManagement {
         } else {
             workbench_participants(&group)
         };
-        self.resolve_connect_speaking_mode(&participants, group.group_strategy)
+        self.resolve_connect_speaking_mode(&participants)
             .await
     }
 

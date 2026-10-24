@@ -276,26 +276,17 @@ impl GroupManagement {
     /// Advisory session-UI semantics for the Workbench connect outcome: the
     /// same `resolve_speaking_mode` reduction the message admission fence
     /// performs, read over the CURRENT membership and the CURRENT per-bot
-    /// caller configuration (except state_machine groups, which return
-    /// Plain before any reduction — their Human messages never enter the
-    /// web_send fence). Message admission re-resolves authoritatively
-    /// per submission — this projection never gates server behavior.
+    /// caller configuration. State-machine groups use the same caller-aware
+    /// projection so a caller-enabled bot can show the speaking-lease control;
+    /// message/state-machine admission still re-resolves authoritatively.
     /// Without a wired caller-config plane no caller capability exists, so
     /// the reduction stays `Plain` (assembly-closed default).
     pub(crate) async fn resolve_connect_speaking_mode(
         &self,
         participants: &[WorkbenchParticipantView],
-        group_strategy: GroupStrategy,
     ) -> bcs_domain::speaking_lease::SessionSpeakingMode {
         use bcs_domain::speaking_lease::SessionSpeakingMode;
 
-        // G2 (spec 2026-10-22): state_machine groups route Human messages
-        // through the HumanInput terminal path (dispatcher.rs) — they never
-        // ride the web_send admission fence, so the speaking lease carries
-        // no meaning for their sessions.
-        if group_strategy == GroupStrategy::StateMachine {
-            return SessionSpeakingMode::Plain;
-        }
         // Human members carry the canonical `human_<staff_no>` actor id — the
         // same format every Workbench scope check trims on.
         let has_human_member = participants
