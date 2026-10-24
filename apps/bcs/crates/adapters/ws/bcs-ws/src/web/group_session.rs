@@ -14,9 +14,12 @@ use bcs_service_api::application::v1::{
 };
 use bcs_service_api::port::GROUP_SESSION_TOKEN_MAX_COMPACT_LEN;
 use serde::Serialize;
-use tracing::info;
+use tracing::{info, warn};
 
-use super::{WebDispatchState, WorkbenchConnectionAuth, handle_client_connection, ws_upgrade_caller_ingress};
+use super::{
+    CallerIngressSkipReason, WebDispatchState, WorkbenchConnectionAuth, handle_client_connection,
+    ws_upgrade_caller_ingress,
+};
 
 pub const GROUP_SESSION_WS_ENDPOINT: &str = "/openapi/v1/collaboration/messages/ws";
 
@@ -54,28 +57,58 @@ fn now_ms() -> i64 {
         .unwrap_or_default()
 }
 
+/// Why a session-bound upgrade refused the caller identity. Logged verbatim
+/// at the handshake so a missing caller identity is diagnosable from the
+/// server log alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionBoundIngressSkip {
+    /// The auth chain produced no principal at all (no plugin matched the
+    /// handshake headers, or the chain itself errored).
+    NoPrincipal,
+    /// Chain-level refusal: machine credential, missing user id, etc.
+    Caller(CallerIngressSkipReason),
+    /// The principal names a different user than the token binds: the
+    /// binding never upgrades onto someone else's identity.
+    UserMismatch,
+}
+
+impl SessionBoundIngressSkip {
+    /// Stable reason code for logs: grep `session-bound WS upgrade`.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::NoPrincipal => "no_principal",
+            Self::Caller(reason) => reason.as_str(),
+            Self::UserMismatch => "user_mismatch",
+        }
+    }
+}
+
 /// Strict caller-identity upgrade for the session-bound handshake: the token
 /// stays display-only, but the gateway signs the same authenticated principal
-/// on this upgrade as on any HTTP route. A human principal that (1) names the
-/// SAME user the token binds, (2) carries a live login window upgrades the
-/// binding into a full caller ingress (the exact `ws_upgrade_caller_ingress`
-/// extraction the legacy `/ws` runs). Everything else — machine principals,
-/// missing identities, dead windows, user mismatches — stays display-only
-/// (`None`): fail-closed, never synthesized (spec §10.13/§10.1.1).
+/// on this upgrade as on any HTTP route. A human principal that names the
+/// SAME user the token binds upgrades the binding into a full caller ingress
+/// (the exact `ws_upgrade_caller_ingress` extraction the legacy `/ws` runs;
+/// deployment decision 2026-10-24: login windows are advisory, no longer an
+/// upgrade keystone). Machine credentials, missing identities and user
+/// mismatches are refused with a logged reason — fail-closed, never
+/// synthesized (spec §10.13/§10.1.1).
 fn session_bound_caller_ingress(
     principal: Option<&AuthPrincipal>,
     bound_user_id: &str,
     at_ms: i64,
-) -> Option<AuthenticatedHumanCallerIngress> {
-    let principal = principal?;
+) -> Result<AuthenticatedHumanCallerIngress, SessionBoundIngressSkip> {
+    let principal = principal.ok_or(SessionBoundIngressSkip::NoPrincipal)?;
     let staff_no = principal
         .user_id
         .as_deref()
-        .filter(|user_id| !user_id.is_empty())?;
+        .filter(|user_id| !user_id.is_empty())
+        .ok_or(SessionBoundIngressSkip::Caller(
+            CallerIngressSkipReason::MissingUserId,
+        ))?;
     if staff_no != bound_user_id {
-        return None;
+        return Err(SessionBoundIngressSkip::UserMismatch);
     }
-    ws_upgrade_caller_ingress(principal, at_ms)
+    ws_upgrade_caller_ingress(principal, at_ms).map_err(SessionBoundIngressSkip::Caller)
 }
 
 async fn upgrade(
@@ -106,21 +139,40 @@ async fn upgrade(
     };
     // The V1 connection token itself stays display-only. The gateway, however,
     // signs the same authenticated principal on this handshake as on any HTTP
-    // route, so the strict /ws extraction applies here too: a human principal
-    // matching the token-bound user with a live login window upgrades this
-    // binding into a full caller identity; everything else stays display-only
-    // (None) — fail-closed, never synthesized (spec §10.13/§10.1.1).
+    // route, so the strict /ws extraction applies here too (deployment
+    // decision 2026-10-24: login windows are advisory). Grant or refusal is
+    // ALWAYS logged with a stable reason so a missing caller identity is
+    // diagnosable from the server log alone.
     let at_ms = now_ms();
-    let principal = state
-        .auth_chain
-        .authenticate(&headers)
-        .await
-        .ok()
-        .and_then(|result| result.principal);
-    let caller_ingress = session_bound_caller_ingress(principal.as_ref(), &binding.user_id, at_ms);
-    if caller_ingress.is_some() {
-        info!(user_id = %binding.user_id, "session-bound WS upgrade: full caller identity bound");
-    }
+    let principal = match state.auth_chain.authenticate(&headers).await {
+        Ok(result) => result.principal,
+        Err(error) => {
+            warn!(
+                user_id = %binding.user_id,
+                error = %error,
+                "session-bound WS upgrade: caller identity not granted (auth_chain_error)"
+            );
+            None
+        }
+    };
+    let caller_ingress = match session_bound_caller_ingress(principal.as_ref(), &binding.user_id, at_ms) {
+        Ok(ingress) => {
+            info!(
+                user_id = %binding.user_id,
+                login_window_ms = ?principal.as_ref().and_then(|p| p.human_expires_at_ms),
+                "session-bound WS upgrade: full caller identity bound"
+            );
+            Some(ingress)
+        }
+        Err(skip) => {
+            warn!(
+                user_id = %binding.user_id,
+                reason = skip.as_str(),
+                "session-bound WS upgrade: caller identity not granted"
+            );
+            None
+        }
+    };
     let auth = WorkbenchConnectionAuth::SessionBound {
         tenant: binding.tenant,
         actor_id: format!("human_{}", binding.user_id),
@@ -229,28 +281,45 @@ mod tests {
     }
 
     #[test]
-    fn matching_user_with_live_window_upgrades_to_caller_identity() {
+    fn matching_user_upgrades_to_caller_identity_window_or_not() {
         let ingress =
             session_bound_caller_ingress(Some(&human("152819", Some((NOW_MS + 60_000) as u64))), "152819", NOW_MS)
-                .expect("matching human with live window must carry caller identity");
+                .expect("matching human principal must carry caller identity");
         assert_eq!(ingress.actor().actor_id, "human_152819");
         assert_eq!(ingress.actor().staff_no, "152819");
+
+        // Deployment decision 2026-10-24: login windows are advisory —
+        // window-less (internal identity artifacts) and already-dead
+        // windows still upgrade.
+        for expires in [None, Some(NOW_MS as u64), Some((NOW_MS - 1) as u64)] {
+            assert!(
+                session_bound_caller_ingress(Some(&human("152819", expires)), "152819", NOW_MS).is_ok(),
+                "windowless/dead windows upgrade (expires={expires:?})"
+            );
+        }
     }
 
     #[test]
-    fn user_mismatch_stays_display_only() {
+    fn refusals_carry_a_stable_logged_reason() {
         // The token binds 152819 but the gateway principal names someone else:
         // never upgrade a binding onto another user's identity.
-        assert!(session_bound_caller_ingress(Some(&human("999999", Some((NOW_MS + 60_000) as u64))), "152819", NOW_MS).is_none());
-    }
-
-    #[test]
-    fn dead_window_or_missing_identity_stays_display_only() {
-        assert!(session_bound_caller_ingress(Some(&human("152819", Some(NOW_MS as u64))), "152819", NOW_MS).is_none());
-        assert!(session_bound_caller_ingress(Some(&human("152819", None)), "152819", NOW_MS).is_none());
-        assert!(session_bound_caller_ingress(None, "152819", NOW_MS).is_none());
-        let mut bot = human("152819", Some((NOW_MS + 60_000) as u64));
+        assert_eq!(
+            session_bound_caller_ingress(Some(&human("999999", None)), "152819", NOW_MS).unwrap_err(),
+            SessionBoundIngressSkip::UserMismatch
+        );
+        assert_eq!(
+            session_bound_caller_ingress(None, "152819", NOW_MS).unwrap_err(),
+            SessionBoundIngressSkip::NoPrincipal
+        );
+        let mut bot = human("152819", None);
         bot.bot_uuid = Some("bot-1".to_string());
-        assert!(session_bound_caller_ingress(Some(&bot), "152819", NOW_MS).is_none());
+        assert_eq!(
+            session_bound_caller_ingress(Some(&bot), "152819", NOW_MS).unwrap_err(),
+            SessionBoundIngressSkip::Caller(CallerIngressSkipReason::MachineCredential)
+        );
+        assert_eq!(
+            session_bound_caller_ingress(Some(&human("", None)), "152819", NOW_MS).unwrap_err(),
+            SessionBoundIngressSkip::Caller(CallerIngressSkipReason::MissingUserId)
+        );
     }
 }

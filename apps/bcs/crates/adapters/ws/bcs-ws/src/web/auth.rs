@@ -46,30 +46,64 @@ impl WorkbenchConnectionAuth {
     }
 }
 
+/// Why an upgrade-time caller-identity extraction refused a principal. The
+/// reason rides into the upgrade logs verbatim (INFO on grant, WARN on
+/// refusal) so a missing caller identity is always diagnosable from the
+/// server log without re-running the handshake.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallerIngressSkipReason {
+    /// Machine credential principals (bot/owner) are never human callers.
+    MachineCredential,
+    /// The principal carries no usable user_id: display-only stays
+    /// display-only — the adapter never synthesizes an identity.
+    MissingUserId,
+    /// Runtime-only material validation refused the envelope (practically
+    /// unreachable; the constructor's own fail-closed backstop).
+    InvalidMaterial,
+}
+
+impl CallerIngressSkipReason {
+    /// Stable reason code for logs: grep `caller_identity_skip`.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::MachineCredential => "machine_credential",
+            Self::MissingUserId => "missing_user_id",
+            Self::InvalidMaterial => "invalid_material",
+        }
+    }
+}
+
 /// Strict WS-upgrade caller-identity extraction (spec §10.1.1/§10.13, the
 /// `/ws` counterpart of the HTTP route extractor): builds the runtime-only
 /// ingress from the same authenticated principal the upgrade used for its
-/// display binding. Machine credentials (bot/owner principals), principals
-/// without a trusted session window and logins already dead at the upgrade
-/// moment yield `None` — the adapter never synthesizes an identity from
-/// display data. Past the boundary the WS channel carries NO expiry
-/// (operations decision, plan §15.97): the invariant-value window is a
-/// deliberate "never", kept meaningful by the deeper short-lived layers.
+/// display binding. A human principal with a non-empty user_id upgrades into
+/// a full caller identity; machine credentials (bot/owner principals) and
+/// identity-less principals are refused — never synthesized from display
+/// data.
+///
+/// Deployment decision 2026-10-24 (operator choice): the upgrade boundary no
+/// longer requires a live login window (`human_expires_at_ms`). Internal
+/// office identity artifacts may carry no expirable evidence, and the caller
+/// seam chose availability over the upgrade-time liveness proof. Login
+/// liveness is still bounded by the deeper short-lived layers: the
+/// caller-identity plugin's token TTL (`[caller_identity] max_ttl_seconds`,
+/// default 300s) and per-message admission re-validation remain the
+/// substantive caps, and the WS channel carries no expiry either way
+/// (operations decision, plan §15.97). The window value, when the principal
+/// provides one, is logged for diagnostics.
 pub fn ws_upgrade_caller_ingress(
     principal: &AuthPrincipal,
     now_ms: i64,
-) -> Option<AuthenticatedHumanCallerIngress> {
+) -> Result<AuthenticatedHumanCallerIngress, CallerIngressSkipReason> {
     // Machine credentials/bot principals are never human callers.
     if principal.bot_uuid.is_some() || principal.owner_id.is_some() {
-        return None;
+        return Err(CallerIngressSkipReason::MachineCredential);
     }
-    let staff_no = principal.user_id.as_deref().filter(|id| !id.is_empty())?;
-    // Upgrade-time anchor: the login window must be alive RIGHT NOW. Its
-    // distance-to-expiry is not carried past this boundary (§15.97).
-    let login_expires_at_ms = principal.human_expires_at_ms? as i64;
-    if login_expires_at_ms <= now_ms {
-        return None;
-    }
+    let staff_no = principal
+        .user_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .ok_or(CallerIngressSkipReason::MissingUserId)?;
     AuthenticatedHumanCallerIngress::new(
         bcs_service_api::application::principal::HumanActor {
             actor_id: format!("human_{staff_no}"),
@@ -80,7 +114,7 @@ pub fn ws_upgrade_caller_ingress(
         i64::MAX,
         bcs_config::resolve_env_str(),
     )
-    .ok()
+    .map_err(|_| CallerIngressSkipReason::InvalidMaterial)
 }
 
 #[cfg(test)]
@@ -97,39 +131,58 @@ mod tests {
     }
 
     #[test]
-    fn upgrades_extract_ingress_only_from_windowed_human_principals() {
+    fn upgrades_extract_ingress_from_human_principals_window_or_not() {
         let ingress =
             ws_upgrade_caller_ingress(&human(Some("100001"), Some((NOW_MS + 60_000) as u64)), NOW_MS)
-                .expect("windowed human principal yields an ingress");
+                .expect("human principal yields an ingress");
         assert_eq!(ingress.actor().actor_id, "human_100001");
         assert_eq!(ingress.auth_source(), HumanCallerAuthSource::WsAuth);
         assert_eq!(ingress.authenticated_at_ms(), NOW_MS);
-        // §15.97: the login window gates the upgrade only; the WS channel
-        // carries no expiry afterwards — the invariant window is a
-        // deliberate "never".
+        // §15.97: the WS channel carries no expiry afterwards — the
+        // invariant window is a deliberate "never".
         assert_eq!(ingress.expires_at_ms(), i64::MAX);
         assert!(!ingress.env().is_empty());
 
-        // Machine principals, display-only ids and dead-at-upgrade windows
-        // never synthesize a caller identity.
+        // Deployment decision 2026-10-24: a login window is no longer an
+        // upgrade-keystone — window-less (e.g. internal identity artifacts
+        // with no exp claim) and already-dead windows still upgrade. Deep
+        // materials keep their own short-lived caps.
+        for expires in [None, Some(NOW_MS as u64), Some((NOW_MS - 1) as u64)] {
+            assert!(
+                ws_upgrade_caller_ingress(&human(Some("100001"), expires), NOW_MS).is_ok(),
+                "windowless/dead windows upgrade (expires={expires:?})"
+            );
+        }
+
+        // Machine credentials and display-only ids never synthesize a caller
+        // identity; refusals carry a stable reason for the upgrade logs.
         let mut bot = human(Some("100001"), Some((NOW_MS + 60_000) as u64));
         bot.bot_uuid = Some("bot-1".into());
-        assert!(ws_upgrade_caller_ingress(&bot, NOW_MS).is_none());
+        assert_eq!(
+            ws_upgrade_caller_ingress(&bot, NOW_MS).unwrap_err(),
+            CallerIngressSkipReason::MachineCredential
+        );
         let mut owner = human(Some("100001"), Some((NOW_MS + 60_000) as u64));
         owner.owner_id = Some("owner-1".into());
-        assert!(ws_upgrade_caller_ingress(&owner, NOW_MS).is_none());
-        assert!(ws_upgrade_caller_ingress(&human(None, Some(NOW_MS as u64 + 1)), NOW_MS).is_none());
-        assert!(ws_upgrade_caller_ingress(&human(Some("100001"), None), NOW_MS).is_none());
-        assert!(ws_upgrade_caller_ingress(&human(Some(""), Some(NOW_MS as u64 + 1)), NOW_MS).is_none());
-        assert!(ws_upgrade_caller_ingress(&human(Some("100001"), Some(NOW_MS as u64)), NOW_MS).is_none());
+        assert_eq!(
+            ws_upgrade_caller_ingress(&owner, NOW_MS).unwrap_err(),
+            CallerIngressSkipReason::MachineCredential
+        );
+        assert_eq!(
+            ws_upgrade_caller_ingress(&human(None, Some(NOW_MS as u64 + 1)), NOW_MS).unwrap_err(),
+            CallerIngressSkipReason::MissingUserId
+        );
+        assert_eq!(
+            ws_upgrade_caller_ingress(&human(Some(""), Some(NOW_MS as u64 + 1)), NOW_MS).unwrap_err(),
+            CallerIngressSkipReason::MissingUserId
+        );
     }
 
     #[test]
     fn the_connection_identity_has_no_window_recheck() {
-        // A 1-second login window still validates at upgrade, and the
-        // carried identity has no expiry: any frame time reads it back.
+        // The carried identity has no expiry: any frame time reads it back.
         let ingress =
-            ws_upgrade_caller_ingress(&human(Some("100001"), Some((NOW_MS + 1_000) as u64)), NOW_MS)
+            ws_upgrade_caller_ingress(&human(Some("100001"), None), NOW_MS)
                 .unwrap();
         let auth = WorkbenchConnectionAuth::UserBound {
             actor_id: Some("human_100001".into()),

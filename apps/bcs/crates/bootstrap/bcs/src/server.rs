@@ -6946,13 +6946,30 @@ async fn ws_upgrade_handler(
                     .clone()
                     .filter(|s| !s.is_empty())
                     .map(|staff_no| format!("human_{}", staff_no));
-                let caller_ingress = bound_actor_id.is_some().then(|| {
-                    bcs_ws::web::ws_upgrade_caller_ingress(principal, now_ms)
-                }).flatten();
+                let caller_ingress = match bound_actor_id.is_some() {
+                    true => match bcs_ws::web::ws_upgrade_caller_ingress(principal, now_ms) {
+                        Ok(ingress) => {
+                            info!(
+                                login_window_ms = ?principal.human_expires_at_ms,
+                                "WS upgrade: full caller identity bound"
+                            );
+                            Some(ingress)
+                        }
+                        Err(skip) => {
+                            warn!(
+                                reason = skip.as_str(),
+                                "WS upgrade: caller identity not granted"
+                            );
+                            None
+                        }
+                    },
+                    false => None,
+                };
                 (bound_actor_id, caller_ingress)
             }
             None => (None, None),
         },
+        // 匹配失败按既定语义静默匿名;caller 侧的排查以 session-bound 路径日志为准。
         Err(_) => (None, None),
     };
 
