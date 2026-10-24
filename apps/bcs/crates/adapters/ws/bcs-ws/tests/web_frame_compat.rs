@@ -630,6 +630,20 @@ async fn frontend_socket_malformed_binary_and_abrupt_close_logs_keep_request_id(
         let response: serde_json::Value = serde_json::from_str(response.to_text().unwrap()).unwrap();
         assert_eq!(response["ok"], false);
         assert_eq!(response["error"]["code"], "dispatch_error");
+        // 不可解析帧没有请求 id 可回显：保留 legacy 占位 "error"。
+        assert_eq!(response["id"], "error");
+        // 可解析的 req 帧派发失败时：错误响应必须回显请求 id —— 客户端按 id
+        // 等待应答，id-less 错误在 UI 侧表现为"毫无响应"（客户端永远等不到）。
+        socket
+            .send(Message::Text(
+                r#"{"type":"req","id":"boom-123","method":"connect","params":"malformed"}"#.into(),
+            ))
+            .await.unwrap();
+        let response = timeout(Duration::from_secs(2), socket.next()).await.unwrap().unwrap().unwrap();
+        let response: serde_json::Value = serde_json::from_str(response.to_text().unwrap()).unwrap();
+        assert_eq!(response["ok"], false);
+        assert_eq!(response["id"], "boom-123");
+        assert_eq!(response["error"]["code"], "dispatch_error");
         // Drop TCP without a close frame so the actual read loop observes a protocol error.
         drop(socket);
         timeout(Duration::from_secs(2), finished_rx).await.unwrap().unwrap();
