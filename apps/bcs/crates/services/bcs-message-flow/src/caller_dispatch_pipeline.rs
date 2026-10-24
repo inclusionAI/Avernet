@@ -653,7 +653,15 @@ impl CallerDispatchPipeline {
                 now_ms,
             })
             .await
-            .map_err(|_| CallerDispatchError::EstablishFailed)?;
+            .map_err(|error| {
+                tracing::warn!(
+                    request_id = %bcs_observability::CurrentRequestId,
+                    dispatch_id = %facts.dispatch_id,
+                    error = ?error,
+                    "caller identity plugin refused to establish the subject"
+                );
+                CallerDispatchError::EstablishFailed
+            })?;
         if established.expires_at_ms <= now_ms {
             return Err(CallerDispatchError::IdentityExpired);
         }
@@ -699,7 +707,15 @@ impl CallerDispatchPipeline {
         let proof: ProofToken = match self.identity.issue_execution(issue_input).await {
             Ok(token) => token,
             Err(CallerIdentityError::TokenExpired) => return Err(CallerDispatchError::IdentityExpired),
-            Err(_) => return Err(CallerDispatchError::IssueFailed),
+            Err(error) => {
+                tracing::warn!(
+                    request_id = %bcs_observability::CurrentRequestId,
+                    dispatch_id = %facts.dispatch_id,
+                    error = ?error,
+                    "caller identity plugin refused to issue an execution proof"
+                );
+                return Err(CallerDispatchError::IssueFailed);
+            }
         };
         if proof.expires_at_ms() < effective_deadline {
             // Plugin issued shorter than needed: still legal (never extends),

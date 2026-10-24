@@ -252,7 +252,15 @@ impl CallerDispatchPipeline {
             lineage.identity_subject.clone(),
             lineage.expires_at_ms,
         )
-        .map_err(|_| DelegateDispatchError::IssueFailed)?;
+        .map_err(|error| {
+            tracing::warn!(
+                request_id = %bcs_observability::CurrentRequestId,
+                dispatch_id = %facts.dispatch_id,
+                error = ?error,
+                "delegate dispatch: invalid caller subject material refused by the identity seam"
+            );
+            DelegateDispatchError::IssueFailed
+        })?;
         let source = if facts.purpose
             == bcs_service_api::application::caller_identity::CallerExecutionPurpose::Execution
         {
@@ -304,7 +312,15 @@ impl CallerDispatchPipeline {
         };
         let proof: ProofToken = match self.identity.issue_execution(issue_input).await {
             Ok(token) => token,
-            Err(_) => return Err(DelegateDispatchError::IssueFailed),
+            Err(error) => {
+                tracing::warn!(
+                    request_id = %bcs_observability::CurrentRequestId,
+                    dispatch_id = %facts.dispatch_id,
+                    error = ?error,
+                    "delegate dispatch: caller identity plugin refused to issue an execution proof"
+                );
+                return Err(DelegateDispatchError::IssueFailed);
+            }
         };
         if proof.expires_at_ms() <= now_ms {
             return Err(DelegateDispatchError::IssueFailed);

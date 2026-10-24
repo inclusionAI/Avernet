@@ -69,6 +69,10 @@ impl CallerConfigurationDeliveryGate {
     }
 
     /// True when the target must not be content-dispatched on this chain.
+    /// Every blocking decision is logged: the caller switch is a control-plane
+    /// fact far away from the refused delivery, so the refusal site must
+    /// carry both the decision and its reason (closed code, never identity
+    /// material) or the failure is undiagnosable from logs alone.
     async fn caller_dispatch_blocked(&self, bot_id: &str) -> bool {
         match self
             .control_plane
@@ -77,20 +81,40 @@ impl CallerConfigurationDeliveryGate {
         {
             Ok(Some(config)) => match config.snapshot {
                 None => false,
-                Some(snapshot) => !matches!(
-                    BotCallerEffectiveStatus::merge(
-                        &snapshot.caller_identity,
-                        None,
-                        // P1: no ready caller execution chain exists yet.
-                        false,
-                    ),
-                    BotCallerEffectiveStatus::Disabled
-                ),
+                Some(snapshot) => {
+                    let blocked = !matches!(
+                        BotCallerEffectiveStatus::merge(
+                            &snapshot.caller_identity,
+                            None,
+                            // P1: no ready caller execution chain exists yet.
+                            false,
+                        ),
+                        BotCallerEffectiveStatus::Disabled
+                    );
+                    if blocked {
+                        tracing::warn!(
+                            request_id = %bcs_observability::CurrentRequestId,
+                            target_bot_id = %bot_id,
+                            code = CALLER_EXECUTION_UNAVAILABLE,
+                            "caller delivery gate: caller-enabled bot blocks ordinary content dispatch"
+                        );
+                    }
+                    blocked
+                }
             },
             // Unknown targets are the transport's own concern.
             Ok(None) => false,
             // Unreadable configuration is never a silent downgrade.
-            Err(_) => true,
+            Err(error) => {
+                tracing::warn!(
+                    request_id = %bcs_observability::CurrentRequestId,
+                    target_bot_id = %bot_id,
+                    code = CALLER_EXECUTION_UNAVAILABLE,
+                    error = %error,
+                    "caller delivery gate: unreadable caller configuration fails closed"
+                );
+                true
+            }
         }
     }
 }
