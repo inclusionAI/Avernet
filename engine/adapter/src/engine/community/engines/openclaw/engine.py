@@ -15,6 +15,7 @@ monitor, then tears down the token pool, then disconnects the default client.
 The token pool (owned by the port impl) is exposed via `token_pool` so the
 OpenClaw WS server can `register`/`release` on handshake/disconnect.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -61,6 +62,7 @@ log = logging.getLogger("openclaw-engine")
 #: defines it. A literal on purpose: the location is a property of the
 #: image, not something to derive at runtime.
 OPENCLAW_CLI_DIR = Path("/home/admin/.openclaw/cli")
+
 
 class OpenClawEngine(BaseEngine):
     """OpenClaw engine — assembled from the ACL over one gateway port impl."""
@@ -144,6 +146,7 @@ class OpenClawEngine(BaseEngine):
             Capability.CRON_HISTORY,
             # Model
             Capability.MODEL_LIST,
+            Capability.MODEL_DEFAULT_GET,
             Capability.MODEL_SWITCH,
             # Default config
             Capability.DEFAULT_CONFIG_GET,
@@ -304,7 +307,8 @@ class OpenClawEngine(BaseEngine):
 
     # ── Inbound-connection lifecycle — refcount the token pool ──
     async def on_connection_open(
-        self, auth: AuthContext | None = None,
+        self,
+        auth: AuthContext | None = None,
     ) -> None:
         """Register this inbound connection on the pool.
 
@@ -316,7 +320,8 @@ class OpenClawEngine(BaseEngine):
         self._port.pool.register(auth.token if auth else None)
 
     async def on_connection_close(
-        self, auth: AuthContext | None = None,
+        self,
+        auth: AuthContext | None = None,
     ) -> None:
         """Release this inbound connection from the pool.
 

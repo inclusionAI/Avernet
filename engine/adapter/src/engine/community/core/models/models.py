@@ -19,11 +19,21 @@ The ``provider_id``, ``description``, ``pricing``, ``enterprise_*``,
 slim engines (aicoding) can leave them ``None`` while richer engines
 (openclaw via gateway) populate them.
 """
+
 from __future__ import annotations
 
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+
+class DefaultModel(BaseModel):
+    """Engine-resolved model for a new session without an override."""
+
+    id: str = Field(
+        min_length=1,
+        pattern=r"^[^\s\x00-\x1f\x7f](?:[^\x00-\x1f\x7f]*[^\s\x00-\x1f\x7f])?$",
+    )
 
 
 class ModelCapabilities(BaseModel):

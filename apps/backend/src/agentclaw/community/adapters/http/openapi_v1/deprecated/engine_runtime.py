@@ -76,6 +76,7 @@ _DROP_STAGE = drop_parameter(
     },
 )
 
+
 def _without_instance(endpoint, _method, _path):
     shim = without_parameter(endpoint, "device_uuid")
     shim.__name__ = endpoint.__name__
@@ -99,11 +100,11 @@ engine: APIRouter = relocate(
     # deprecated alias would expand rather than preserve the compatibility
     # surface.
     skip=lambda method, path: (
-        method == "POST" and path.endswith("/engine/restart")
-    )
-    or (
-        method == "GET"
-        and path.endswith("/engine/default-config")
+        (method == "POST" and path.endswith("/engine/restart"))
+        or (
+            method == "GET"
+            and path.endswith(("/engine/default-config", "/engine/default-model"))
+        )
     ),
 )
 

@@ -576,7 +576,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # DWS rollout eligibility adds one owner-scoped Bot-path operation: 196 -> 197.
 # The genome registry (RSI-03) adds thirteen path-addressed, user-scoped
 # operations under /bots/{bot_id}/genome: path 197 -> 210.
-_BOT_ID_PLACEMENT = {"path": 210, "query": 1, "none": 126}
+_BOT_ID_PLACEMENT = {"path": 211, "query": 1, "none": 126}
 
 
 def _schema() -> dict:
@@ -778,15 +778,16 @@ def test_the_pinned_number_of_operations_take_it():
     # 246 -> 252 (and mirrors _BOT_ID_PLACEMENT["path"] 172 -> 178).
     # The Local Skill security read adds one user-scoped path operation.
     # Engine release inspection adds one Bot-addressed read.
-# acli market CLIs: four path-addressed, user-scoped operations under
-# /bots/{bot_id}/clis take user_id like the identity switch beside them,
-# so ``taking`` grows 254 -> 258. The market search then moves to the
-# tenant-wide /bots/market/clis, which takes no user: 258 -> 257.
+    # acli market CLIs: four path-addressed, user-scoped operations under
+    # /bots/{bot_id}/clis take user_id like the identity switch beside them,
+    # so ``taking`` grows 254 -> 258. The market search then moves to the
+    # tenant-wide /bots/market/clis, which takes no user: 258 -> 257.
     # DWS management adds eight owner-scoped operations with explicit user_id.
     # acli operations add four path-addressed, user-scoped ones: 265 -> 269.
     # DWS rollout eligibility also requires the explicit caller: 269 -> 270.
     # The genome registry (RSI-03) adds thirteen: 270 -> 283.
-    assert len(taking) == 283
+    # Effective default-model adds one Bot-addressed, user-scoped read.
+    assert len(taking) == 284
 
 
 def test_the_exempt_operations_take_none():

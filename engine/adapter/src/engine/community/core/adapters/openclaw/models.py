@@ -14,13 +14,19 @@ always a flat list of model dicts (for `list_models`) or provider dicts (for
 Models is token-agnostic: no token is passed; the port impl uses `_default_client`.
 The adapter therefore does NOT extract `auth.token`.
 """
+
 from __future__ import annotations
 
 import logging
 from typing import Any
 
 from engine.community.core.engine.context import AuthContext
-from engine.community.core.models.models import Model, ModelCapabilities, Provider
+from engine.community.core.models.models import (
+    DefaultModel,
+    Model,
+    ModelCapabilities,
+    Provider,
+)
 from engine.community.core.models.protocol import ModelsService
 from engine.community.plugin_api.openclaw.models_port import OpenClawModelsPort
 
@@ -177,8 +183,13 @@ class OpenClawModelsAdapter(ModelsService):
     def __init__(self, port: OpenClawModelsPort) -> None:
         self._port = port
 
+    async def get_default_model(self) -> DefaultModel:
+        raw = await self._port.default_model()
+        return DefaultModel.model_validate({"id": raw.get("id")})
+
     async def list_models(
-        self, auth: AuthContext | None = None,
+        self,
+        auth: AuthContext | None = None,
     ) -> list[Model]:
         """Return the flat model catalogue; auth is ignored (token-agnostic)."""
         raw = await self._port.models_list()
@@ -193,7 +204,8 @@ class OpenClawModelsAdapter(ModelsService):
         return out
 
     async def list_providers(
-        self, auth: AuthContext | None = None,
+        self,
+        auth: AuthContext | None = None,
     ) -> list[Provider]:
         """Return providers with nested models; auth is ignored (token-agnostic)."""
         raw = await self._port.providers_list()

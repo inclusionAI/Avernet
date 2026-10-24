@@ -66,6 +66,7 @@ from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError,
     DeviceAdapterHTTPStatusError,
+    DeviceAdapterTimeoutError,
     DeviceAdapterTransport,
 )
 from agentclaw.community.core.engine_runtime.engine_runtime_service_protocol import EngineRuntimeRelayProtocol
@@ -400,6 +401,8 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
             # arrives as a 501 below, which is a different status entirely.
             raise EngineResourceNotFoundError(f"engine returned 404 for {path}") from exc
         except DeviceAdapterHTTPStatusError as exc:
+            if exc.status_code == 504:
+                raise DeviceAdapterTimeoutError(f"engine timed out for {path}") from exc
             if exc.status_code == _CAPABILITY_UNSUPPORTED_STATUS:
                 raise EngineCapabilityUnsupportedError(
                     f"engine does not support {path}"

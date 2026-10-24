@@ -11,6 +11,7 @@ Error shape mirrors the rest of the web layer:
   409  — conflict (active connections; retry with `force=true`)
   500  — internal error
 """
+
 from __future__ import annotations
 
 import logging
@@ -18,6 +19,7 @@ import logging
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
+from engine.community.api.engine.default_model import default_model
 from engine.community.api.engine.schemas import EngineRestartRequest, EngineSwitchRequest
 from engine.community.manager import EngineManager
 
@@ -99,5 +101,7 @@ async def engine_restart(request: EngineRestartRequest):
         log.exception(f"Engine restart failed: {e}")
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
+
+router.add_api_route("/default-model", default_model, methods=["GET"])
 
 __all__ = ["router"]

@@ -7,6 +7,7 @@ or hide a feature entirely.
 
 See src/engine/docs/heterogeneous-engine-architecture.md §3.2 and §4.1.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -132,6 +133,7 @@ class Capability(Enum):
     CRON_HISTORY = "cron.history"
 
     # ── Model ──
+    MODEL_DEFAULT_GET = "model.default.get"
     MODEL_LIST = "model.list"
     MODEL_SWITCH = "model.switch"
 
