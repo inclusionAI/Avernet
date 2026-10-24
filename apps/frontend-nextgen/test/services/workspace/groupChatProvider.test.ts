@@ -358,6 +358,9 @@ describe('groupChatProvider', () => {
     expect(snapshots.at(-1)?.status).toBe('held');
     expect(snapshots.at(-1)?.lease?.leaseId).toBe('lease-1');
     unsubscribe();
+    // 收敛：断开连接停掉租约轮询/到期定时器，避免用例结束后定时器驱动迟到的
+    // 超时与日志（jest --runInBand 全绿但 exit 1 的根因）。
+    await provider.disconnect();
   });
 
   it('断开后重连会重新获取 token、创建新的 SDK provider 并断开旧 provider', async () => {
