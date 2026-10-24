@@ -246,6 +246,55 @@ it("shortens Chinese and emoji only at sentence boundaries and treats inline Mar
   expect(other.sender.send.mock.calls[0][0].text).toContain("\\*\\*不要加粗\\*\\* \\[不要变链接\\]\\(https://docs\\.invalid\\)");
 });
 
+it("retains distinct action descriptions when their first sentences exceed the notification limit", async () => {
+  const { notifier, task, sender, events } = setup();
+  task.timeline = [{ event_id: "plan-1", kind: "plan", at_ms: 2, actor: "agent", summary: "核实配置后继续原任务", payload: {
+    plan: { summary: "核实配置后继续原任务", actions: [
+      { summary: "核实定时任务的执行条件，" + "根据已经确认的现场证据检查目标任务的配置和实际执行情况".repeat(8) + "。" },
+      { summary: "指导 Bot 继续处理未完成步骤，" + "对照原任务目标核实各个步骤的实际结果并判断剩余阻塞".repeat(8) + "。" },
+    ], owner_cooperation: [] },
+  } }];
+  notifier.after({ ...message, eventId: "plan-1", kind: "plan" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const text = sender.send.mock.calls[0][0].text;
+  expect(text).toContain("- 核实定时任务的执行条件");
+  expect(text).toContain("- 指导 Bot 继续处理未完成步骤");
+  expect(text).not.toContain("内容较长，请查看完整任务");
+  expect(text).not.toMatch(/\[TRUNCATED\]|\uFFFD/);
+});
+
+it("shows one section notice instead of repeating placeholders for content omitted from the notification", async () => {
+  const { notifier, task, sender, events } = setup();
+  task.timeline = [{ event_id: "plan-1", kind: "plan", at_ms: 2, actor: "agent", summary: "修复步骤", payload: {
+    plan: { summary: "修复步骤", actions: [
+      { summary: "first_command_".repeat(400) }, { summary: "second_command_".repeat(400) },
+      { summary: "```bash\nthird_command\n```" },
+    ], owner_cooperation: [] },
+  } }];
+  notifier.after({ ...message, eventId: "plan-1", kind: "plan" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const text = sender.send.mock.calls[0][0].text;
+  expect(text.split("内容较长，请查看完整任务。")).toHaveLength(2);
+  expect(text).not.toContain("- 内容较长");
+  expect(text).not.toMatch(/first_command_|second_command_|third_command/);
+});
+
+it("keeps the action after an oversized inline session identifier without exposing a partial identifier", async () => {
+  const { notifier, task, sender, events } = setup();
+  const sessionKey = "agent:main:session:" + "session-reference-".repeat(20);
+  task.timeline = [{ event_id: "plan-1", kind: "plan", at_ms: 2, actor: "agent", summary: "继续原任务", payload: {
+    plan: { summary: "继续原任务", actions: [
+      { summary: `配置问题解除后，向原会话 \`${sessionKey}\` 发送重试消息，指导 Bot 继续处理未完成步骤。` },
+    ], owner_cooperation: [] },
+  } }];
+  notifier.after({ ...message, eventId: "plan-1", kind: "plan" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const text = sender.send.mock.calls[0][0].text;
+  expect(text).toContain("向原会话 （详见任务页） 发送重试消息");
+  expect(text).toContain("指导 Bot 继续处理未完成步骤");
+  expect(text).not.toContain("session-reference");
+});
+
 it("checks the independent Owner notification switch on each send", async () => {
   const config = { findByKey: vi.fn<() => Promise<{ enabled: number; config_json: string } | null>>().mockResolvedValue(null) };
   const sender = { sendNotification: vi.fn().mockResolvedValue(undefined) };
