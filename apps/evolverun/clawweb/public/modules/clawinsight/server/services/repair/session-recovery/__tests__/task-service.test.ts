@@ -14,7 +14,7 @@ function setup(callbackFails = false) {
     find: async id => records.has(id) ? structuredClone(records.get(id)!) : null,
     listForEvent: async (eventId, ownerId, isAdmin) => [...records.values()].filter(value => value.request.event_id === eventId && (isAdmin || value.request.target.entity_id === ownerId || value.shared === true)),
     listForReporting: async (limit, afterTaskId = "") => ({ tasks: [...records.values()].filter(value => value.taskId > afterTaskId && value.pending_results.length > 0).sort((a, b) => a.taskId.localeCompare(b.taskId)).slice(0, limit), nextTaskId: "" }),
-    listForMaintenance: async (limit, afterTaskId = "") => [...records.values()].filter(value => value.taskId > afterTaskId).slice(0, limit),
+    listForMaintenance: async (limit, afterTaskId = "") => ({ tasks: [...records.values()].filter(value => value.taskId > afterTaskId).slice(0, limit), nextTaskId: "" }),
     update: async (id, version, change) => {
       const value = records.get(id); if (!value || value.version !== version) return null;
       const changed = change(structuredClone(value)); records.set(id, structuredClone(changed)); return changed;
@@ -137,6 +137,18 @@ it("slow callbacks cannot block state changes or expire an Owner wait", async ()
   expect(records.get(ack.task_id)!.pending_results).toHaveLength(1);
   unblock(); await reporting;
   expect(records.get(ack.task_id)!.pending_results).toEqual([]);
+});
+
+it("continues maintenance after a candidate page with no due task", async () => {
+  const { service, records, agent, deps } = setup();
+  const ack = await service.create(request, actor); await flush();
+  const pages = vi.fn().mockResolvedValueOnce({ tasks: [], nextTaskId: "filtered-page" })
+    .mockResolvedValueOnce({ tasks: [records.get(ack.task_id)!], nextTaskId: "" });
+  deps.tasks.listForMaintenance = pages;
+  await service.maintenance();
+  expect(pages).toHaveBeenCalledTimes(2);
+  expect(pages.mock.calls[1][1]).toBe("filtered-page");
+  expect(agent.start).toHaveBeenCalledTimes(2);
 });
 
 
