@@ -1,7 +1,11 @@
 import UmdLoader from '@/components/UmdLoader';
 import type { PanelContentProps } from '@aix-chat/ui';
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom';
+import { decodeOpenCreateGroupOptions } from '@/services/backend-api/GroupCreationController';
+import type { OpenCreateGroupOptions } from '@/services/backend-api/GroupCreationController';
+
+const CreateGroupModal = React.lazy(() => import('@/pages/GroupChat/components/CreateGroupModal'));
 
 /**
  * UmdPanel
@@ -59,6 +63,10 @@ export function UmdPanel({
   // 1. CDN 模式：payload.data 包含业务数据
   // 2. Registry 模式：payload 直接就是业务数据
   const data = payload?.data ?? payload;
+  const [groupRequest, setGroupRequest] = useState<{ options: OpenCreateGroupOptions; sequence: number }>();
+  const [groupOpen, setGroupOpen] = useState(false);
+  const loaderKey = `${cdn}-${entry}-${JSON.stringify(data)}`;
+  useEffect(() => { setGroupRequest(undefined); setGroupOpen(false); }, [loaderKey]);
 
   // 从 payload 获取 eventEmitter（由 SDK 自动创建并注入）
   const { eventEmitter } = payload as {
@@ -94,15 +102,14 @@ export function UmdPanel({
   }
 
   // 生成唯一的 key，确保 payload 数据变化时重新加载组件
-  const loaderKey = `${cdn}-${entry}-${JSON.stringify(data)}`;
 
   // 包装 onAction/onInteraction，添加日志
   const wrappedOnAction = (action: any) => {
-    console.log('[UmdPanel] onAction:', action);
+    console.log('[UmdPanel] onAction:', action?.type);
     onAction?.(action);
   };
   const wrappedOnInteraction = (record: any) => {
-    console.log('[UmdPanel] onInteraction:', record);
+    console.log('[UmdPanel] onInteraction:', record?.type);
     onInteraction?.(record);
   };
 
@@ -114,9 +121,17 @@ export function UmdPanel({
     onAction: wrappedOnAction,
     onInteraction: wrappedOnInteraction,
     eventEmitter,
+    onOpenCreateGroup: (value?: unknown) => {
+      const options = decodeOpenCreateGroupOptions(value);
+      setGroupRequest(current => {
+        const previous = current?.options.draft, next = options.draft;
+        if (current && previous?.draftId === next?.draftId && previous?.revision === next?.revision
+          && previous?.readToken === next?.readToken) return current;
+        return { options, sequence: (current?.sequence || 0) + 1 };
+      });
+      setGroupOpen(true);
+    },
   };
-
-  console.log('[UmdPanel] 传递给 UmdLoader 的 data:', umdData);
 
   return (
     <div
@@ -127,6 +142,10 @@ export function UmdPanel({
         borderRadius: '6px',
       }}
     >
+      {groupRequest ? ReactDOM.createPortal(<React.Suspense fallback={null}>
+        <CreateGroupModal key={groupRequest.sequence} selectOriginator initialDraft={groupRequest.options.draft}
+          open={groupOpen} onClose={() => setGroupOpen(false)} onSuccess={() => {}} />
+      </React.Suspense>, document.body) : null}
       <UmdLoader
         key={loaderKey}
         cdn={cdn}

@@ -3,6 +3,8 @@ pub mod gateway_principal;
 pub mod group_session_connection;
 pub mod internal;
 pub mod openapi;
+pub mod collaboration_drafts;
+pub mod human;
 
 use axum::Router;
 use axum::middleware;
@@ -16,9 +18,11 @@ pub use group_session_connection::group_session_connection_router;
 /// Public and internal collaboration routes that need caller verification share
 /// the same protected boundary.
 pub fn router(state: ApiState) -> Router {
+    let drafts = collaboration_drafts::router(state.collaboration_drafts.clone());
     let protected = Router::new()
         .merge(openapi::protected_router())
         .merge(internal::protected_router())
+        .route("/openapi/v1/collaboration/me", axum::routing::get(human::current_user))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             enforce_invite_code_gate::<ApiState>,
@@ -32,4 +36,5 @@ pub fn router(state: ApiState) -> Router {
         .merge(openapi::public_router())
         .merge(internal::public_router())
         .with_state(state)
+        .merge(drafts)
 }

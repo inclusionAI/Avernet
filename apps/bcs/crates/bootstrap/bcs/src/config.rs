@@ -2590,7 +2590,9 @@ url = "https://cdn.example.com/bcs-panel/1.0.0/index.js"
                 true,
             ),
         ] {
-            let config: BcsConfig = toml::from_str(source).unwrap();
+            let mut value = crate::config_loader::parse_config_content("toml", source, "checked-in config").unwrap();
+            crate::config_loader::expand_env_vars(&mut value).unwrap();
+            let config: BcsConfig = serde_json::from_value(value).unwrap();
             assert_eq!(config.manifest.bundles.len(), 1);
             let bundle = &config.manifest.bundles[0];
             assert_eq!(bundle.name, "bcsPanel");
@@ -3371,7 +3373,9 @@ base_url = "https://directory.example.com"
             ),
         ] {
             let source = std::fs::read_to_string(path).expect("read checked-in config");
-            let _: BcsConfig = toml::from_str(&source).expect("parse checked-in config");
+            let mut value = crate::config_loader::parse_config_content("toml", &source, path).unwrap();
+            crate::config_loader::expand_env_vars(&mut value).unwrap();
+            let _: BcsConfig = serde_json::from_value(value).expect("parse checked-in config");
             assert!(!source.contains("secret_protector"));
             assert!(!source.contains("bcn-eventing-webhook-protector"));
         }
@@ -3384,7 +3388,9 @@ base_url = "https://directory.example.com"
             "/../../../configs/bcs-config-local.toml"
         );
         let source = std::fs::read_to_string(path).expect("read checked-in local config");
-        let config: BcsConfig = toml::from_str(&source).expect("parse checked-in local config");
+        let mut value = crate::config_loader::parse_config_content("toml", &source, path).unwrap();
+        crate::config_loader::expand_env_vars(&mut value).unwrap();
+        let config: BcsConfig = serde_json::from_value(value).expect("parse checked-in local config");
 
         assert!(config.eventing.enabled);
         assert!(config.eventing.dispatcher_enabled);
@@ -3410,7 +3416,9 @@ base_url = "https://directory.example.com"
         for (label, path) in targets {
             let source = std::fs::read_to_string(path)
                 .unwrap_or_else(|e| panic!("read {label} config {path}: {e}"));
-            let config: BcsConfig = toml::from_str(&source)
+            let mut value = crate::config_loader::parse_config_content("toml", &source, path).unwrap();
+            crate::config_loader::expand_env_vars(&mut value).unwrap();
+            let config: BcsConfig = serde_json::from_value(value)
                 .unwrap_or_else(|e| panic!("parse {label} config {path}: {e}"));
             assert_eq!(
                 config.gateway_principal.issuers,

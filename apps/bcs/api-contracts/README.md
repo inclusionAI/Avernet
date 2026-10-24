@@ -27,6 +27,19 @@ capabilities. It uses the existing BCS entry/proxy without Gateway principals
 or chat membership. Its schema 2 AixUI payload is exactly four fields; historical
 schema 1 consumers remain supported.
 
+`v1/internal/collaboration-drafts.yaml` adds only capability-authorized fixed
+revision GET/validate projections with V1 envelopes. It reuses the native source
+and validation schemas; it has no management aliases or Gateway identity fallback.
+
+`collaboration-user/v1.yaml` defines the four-operation native Human browser
+slice: current user, owned Bots, candidates and Group creation. It reuses V1 DTOs
+and application authorization with the existing BCS browser login chain.
+`GET /openapi/v1/collaboration/me` exposes the same safe Human projection behind
+the normal Gateway boundary. `X-BCS-Expected-User` is an optional equality guard
+on V1 requests and mandatory on native browser POST, never an identity credential.
+Cross-site native browser requests are rejected. No Bot or Draft credential can
+replace Human authentication. Native responses use no-store.
+
 `v1/openapi.yaml` is the source of truth for the versioned public BCN OpenAPI.
 `v1/internal.yaml` is the source of truth for the versioned internal BCN
 collaboration API. Domain models and resource path items live in separate YAML
@@ -50,7 +63,7 @@ registration. Every response carries `Cache-Control: no-store`. See the
 [implementation spec](../specs/2026-09-22-bot-self-lookup/spec.md) for isolation,
 legacy nullable fields, error handling, and database cost.
 
-The current public OpenAPI contract contains 72 approved operations: 67
+The current public OpenAPI contract contains 74 operations: 69
 collaboration operations below `/openapi/v1/collaboration/**` and 5 auth
 operations below `/openapi/v1/auth/**`. Collaboration operations span Bot,
 Group, GroupParticipant, Session, SessionParticipant, Invitation, Invite Code,
