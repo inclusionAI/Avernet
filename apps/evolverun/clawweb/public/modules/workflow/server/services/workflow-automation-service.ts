@@ -120,11 +120,11 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
     }
     const selected = await selectAutomaticScope(input.workbench, issues, cycle.workflowId, baseline, policy.scopeVersion === 'all-qualified/v1'
       ? { db: input.db, minimumImpact: policy.minimumImpact ?? 'medium', evidenceCutoffMs: now() } : undefined);
+    const reasons = Object.values(selected?.deferred ?? {});
+    for (const reason of new Set(reasons)) logWorkflowBackground('workflow_automatic_draft', 'filtered', {
+      environment, workflowId: cycle.workflowId, reason, count: reasons.filter(value => value === reason).length });
     if (!selected?.items.length || selected.batches && !selected.batches.length) {
       logWorkflowBackground('workflow_automatic_draft', 'skipped', { environment, workflowId: cycle.workflowId, reason: 'NO_ELIGIBLE_SUGGESTIONS', count: 0 });
-      const reasons = Object.values(selected?.deferred ?? {});
-      for (const reason of new Set(reasons)) logWorkflowBackground('workflow_automatic_draft', 'filtered', {
-        environment, workflowId: cycle.workflowId, reason, count: reasons.filter(value => value === reason).length });
       return repo.patch(cycle, { reason: 'NO_ELIGIBLE_SCOPE' }, now());
     }
     if (selected?.batches) {

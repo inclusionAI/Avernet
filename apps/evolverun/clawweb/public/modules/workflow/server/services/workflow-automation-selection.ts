@@ -9,10 +9,12 @@ import type { RepairBaseline } from '../contracts/repair-batch.js';
 import type { AutomationWorkbench } from '../contracts/workflow-automation.js';
 import type { RepairInboxItem } from '../contracts/repair-workbench.js';
 export type AutomaticPlanningBaseline = Pick<RepairBaseline, 'activeDeployNumber' | 'specDigest' | 'proposalSpecDigest'>;
-/** AIS accepts text or file-repair goals; only explicit identities can conflict with the active baseline. */
+/** Text goals may omit baseline metadata; concrete changes must satisfy generation's baseline guard. */
 function matchesProposalBaseline(item: RepairItem, workflowId: string, baseline: AutomaticPlanningBaseline) {
+  const structured = [item.proposal?.operations, item.proposal?.patches].some(value => Array.isArray(value) && value.length > 0);
   return (item.proposal?.workflowId == null || item.proposal.workflowId === workflowId)
-    && (item.proposal?.baseSpecDigest == null || item.proposal.baseSpecDigest === (baseline.proposalSpecDigest ?? baseline.specDigest));
+    && (!structured && item.proposal?.baseSpecDigest == null
+      || item.proposal?.baseSpecDigest === (baseline.proposalSpecDigest ?? baseline.specDigest));
 }
 async function legacyAutomaticScope(workbench: AutomationWorkbench, issues: IssueAggregationRepository, workflowId: string, baseline: AutomaticPlanningBaseline) {
   const header=await workbench.candidates(workflowId,{state:'pending',pageSize:1,versionScope:'current'});

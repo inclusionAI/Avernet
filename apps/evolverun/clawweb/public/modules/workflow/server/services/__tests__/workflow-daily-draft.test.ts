@@ -61,6 +61,24 @@ it.each([false, true])('still excludes textual goals carrying a different explic
   expect((await new WorkflowAutomationRepository(f.db).recent('wf-1')).filter(job => job.kind === 'auto_draft')).toEqual([]);
 });
 
+it.each([false, true])('excludes structured changes without a baseline without blocking valid text and patch goals (batched=%s)', async full => {
+  const f = await fixture(true, 4, full);
+  f.items[0].proposal = null;
+  f.items[0].instruction = '分析 parse_alert.py 并修复异常处理。';
+  delete f.items[2].proposal!.baseSpecDigest;
+  f.items[3].proposal = { summary: '旧文件修改', baseSpecDigest: null,
+    patches: [{ path: 'scripts/parse_alert.py', before: 'old', after: 'new' }] };
+  const output = vi.spyOn(console, 'info').mockImplementation(() => {});
+  await f.service.tick();
+  expect(f.calls).toHaveLength(1);
+  const job = (await new WorkflowAutomationRepository(f.db).recent('wf-1')).find(row => row.kind === 'auto_draft')!;
+  const task = await f.workbench.task(job.data.realTaskId);
+  expect(task.latestAttempt.input.items.map(item => item.itemId)).toEqual(['item-0', 'item-1']);
+  expect(task.latestAttempt.input.items[0]).toMatchObject({ proposal: null, instruction: '分析 parse_alert.py 并修复异常处理。' });
+  if (full) expect(events(output)).toContainEqual(expect.objectContaining({ job: 'workflow_automatic_draft',
+    event: 'filtered', reason: 'BASELINE_REASSESSMENT_REQUIRED', count: 2 }));
+});
+
 it('records a failed daily selection once instead of retrying candidate reads every minute', async () => {
   const f = await fixture(true, 1, true);
   const candidates = vi.spyOn(f.workbench, 'candidates').mockRejectedValue(new Error('candidate store unavailable'));
