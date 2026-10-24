@@ -325,6 +325,14 @@ pub(crate) async fn commit_routed_reply(
                             "caller_task".into(),
                             serde_json::Value::String(text.to_string()),
                         );
+                        // Trusted ordinary sender facts of the delegating Bot's
+                        // reply: same wire-contract reason as the human seam —
+                        // the protected send derives the envelope `from` from
+                        // these, never from the protected subject.
+                        map.insert("caller_channel".into(), serde_json::json!({
+                            "actor_id": event.bot_id,
+                            "actor_name": sender_name,
+                        }));
                         let mut nested = serde_json::Map::new();
                         nested.insert("parent_run_id".to_string(), serde_json::Value::String(delegation.parent_run_id.clone()));
                         nested.insert("parent_attempt".to_string(), serde_json::Value::from(delegation.parent_attempt));

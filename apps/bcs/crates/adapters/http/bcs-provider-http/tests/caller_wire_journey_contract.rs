@@ -167,6 +167,10 @@ async fn the_whole_protocol_journey_rides_one_transport_and_one_webhook() {
         control_revision: 0,
         not_after_ms: now() + 280_000,
         request_digest: DIGEST.to_string(),
+        // Trusted ordinary sender facts from the original message's
+        // `caller_channel` row projection — the envelope `from` source.
+        channel_actor_id: "human_alice".into(),
+        channel_actor_name: "Alice".into(),
         cross_group_lineage: None,
         callback_timeout_ms: 3_000,
         now_ms: now(),

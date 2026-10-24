@@ -626,6 +626,8 @@ async fn an_orchestration_node_dispatches_on_the_protected_wire_under_the_instan
         provider_bot_ref: "runtime-a".into(),
         not_after_ms: now + 120_000,
         caller_task: "处理这个节点".into(),
+        channel_actor_id: "human_alice".into(),
+        channel_actor_name: "Alice".into(),
         control_revision: 0,
         now_ms: now,
     };
@@ -743,6 +745,8 @@ async fn an_orchestration_node_without_a_live_instance_refuses_closed() {
         provider_bot_ref: "runtime-a".into(),
         not_after_ms: now + 120_000,
         caller_task: "处理这个节点".into(),
+        channel_actor_id: "human_alice".into(),
+        channel_actor_name: "Alice".into(),
         control_revision: 0,
         now_ms: now,
     };

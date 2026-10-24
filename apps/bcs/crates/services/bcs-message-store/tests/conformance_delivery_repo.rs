@@ -54,8 +54,8 @@ async fn sqlite_control_batches_are_indexed_fair_and_bounded() -> Result<(), Box
     let repo = MySqlMessageStore::sqlite(recording.clone(), "dev".into());
     assert!(repo.work_batch(DeliveryWorkBatch::Control, 1000, "ignored", 32).await?.is_empty());
     let queries = recording.queries.lock().unwrap().clone();
-    assert_eq!(queries.len(), 4);
-    for ((query, count), index) in queries.iter().zip(["idx_delivery_run_deadline", "idx_delivery_run_deadline", "idx_delivery_pending_abort", "idx_delivery_cancel_deadline"]) {
+    assert_eq!(queries.len(), 5);
+    for ((query, count), index) in queries.iter().zip(["idx_delivery_run_deadline", "idx_delivery_run_deadline", "idx_delivery_pending_abort", "idx_delivery_cancel_deadline", "idx_delivery_run_deadline"]) {
         assert_eq!(*count, 0);
         let plan = db.query(DbStatement::with_params(format!("EXPLAIN QUERY PLAN {}", query.sql()), query.params().to_vec())).await?;
         let detail = plan.iter().map(|r| bcs_db_api::db_get_column::<String>(r, "detail").unwrap()).collect::<Vec<_>>().join("; ");
@@ -63,18 +63,21 @@ async fn sqlite_control_batches_are_indexed_fair_and_bounded() -> Result<(), Box
         assert!(detail.contains(index), "{detail}");
         assert!(!detail.contains("USE TEMP B-TREE"), "{detail}");
     }
-    db.execute(DbStatement::new("WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<160) INSERT INTO bcs_message_deliveries (delivery_id,env,source_message_id,target_bot_id,session_id,group_id,source_session_seq,flow_kind,kind,status,state_version,may_have_been_sent,available_at_ms,created_at_ms,updated_at_ms,attempt_no,semantic_projection_json,run_deadline_at_ms,cancel_deadline_at_ms,abort_request_id) SELECT printf('due%03d',x),'dev',printf('due-m%d',x),'bot','session','g',x,'group','send',CASE WHEN x<=40 THEN 'dispatching' WHEN x<=80 THEN 'running' ELSE 'cancelling' END,1,1,1,1,1,1,'{}',1000-x,1000-x,CASE WHEN x>120 THEN printf('abort%d',x) ELSE NULL END FROM n")).await?;
+    db.execute(DbStatement::new("WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<160) INSERT INTO bcs_message_deliveries (delivery_id,env,source_message_id,target_bot_id,session_id,group_id,source_session_seq,flow_kind,kind,status,state_version,may_have_been_sent,available_at_ms,created_at_ms,updated_at_ms,attempt_no,semantic_projection_json,run_deadline_at_ms,cancel_deadline_at_ms,abort_request_id) SELECT printf('due%03d',x),'dev',printf('due-m%d',x),'bot','session','g',x,'group','send',CASE WHEN x<=30 THEN 'dispatching' WHEN x<=60 THEN 'running' WHEN x<=120 THEN 'cancelling' ELSE 'unknown' END,1,1,1,1,1,1,'{}',1000-x,1000-x,CASE WHEN x>90 AND x<=120 THEN printf('abort%d',x) ELSE NULL END FROM n")).await?;
     let page = repo.work_batch(DeliveryWorkBatch::Control, 1000, "zzzz", 32).await?;
     assert_eq!(page.len(), 32);
     assert_eq!(page.iter().map(|d| &d.delivery_id).collect::<std::collections::BTreeSet<_>>().len(), 32);
-    // Four equal shares, oldest deadline first rather than delivery-ID order.
-    assert_eq!(page[0].delivery_id, "due040");
-    assert_eq!(page[8].delivery_id, "due080");
-    assert_eq!(page[16].delivery_id, "due081");
-    assert_eq!(page[24].delivery_id, "due160");
+    // Five equal shares, oldest deadline first rather than delivery-ID order:
+    // dispatching(7) running(7) cancelling-unclaimed(6) cancelling-abort(6)
+    // then the uncertain-unknown run-deadline class(6).
+    assert_eq!(page[0].delivery_id, "due030");
+    assert_eq!(page[7].delivery_id, "due060");
+    assert_eq!(page[14].delivery_id, "due061");
+    assert_eq!(page[20].delivery_id, "due120");
+    assert_eq!(page[26].delivery_id, "due160");
     db.execute(DbStatement::new("UPDATE bcs_message_deliveries SET status='completed' WHERE delivery_id LIKE 'due%' AND status != 'running'")).await?;
     let page = repo.work_batch(DeliveryWorkBatch::Control, 1000, "", 32).await?;
-    assert_eq!(page.len(), 32, "unused class shares must be lent");
+    assert_eq!(page.len(), 30, "unused class shares must be lent");
     assert!(page.iter().all(|d| d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::Running));
     assert_eq!(repo.work_batch(DeliveryWorkBatch::Control, 1000, "", 1).await?.len(), 1);
     assert!(repo.work_batch(DeliveryWorkBatch::Control, 1000, "", 0).await?.is_empty());

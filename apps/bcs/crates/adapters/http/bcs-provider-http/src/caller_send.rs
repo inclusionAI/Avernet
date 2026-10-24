@@ -4,7 +4,10 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use bcs_domain::BotDeliveryTarget;
-use bcs_protocol::{BCN_PROTOCOL_VERSION_HEADER, BCN_TIMESTAMP_HEADER, BcsFrame, RequestFrame};
+use bcs_protocol::{
+    BCN_PROTOCOL_VERSION_HEADER, BCN_TIMESTAMP_HEADER, BcsFrame, ChannelInfo, ChannelSource,
+    RequestFrame,
+};
 use serde_json::Value;
 use tracing::{info, warn};
 
@@ -67,6 +70,7 @@ impl bcs_service_api::port::CallerExecutionSendPort for HttpProviderTransport {
             || command.association.environment.is_empty()
             || command.association.target_bot_id.is_empty()
             || command.caller_subject_ref.expose().trim().is_empty()
+            || command.channel_actor_id.trim().is_empty()
             || command.text.is_empty()
             || command.request_digest.len() != 71 // sha256: + 64
             || command.not_after_ms <= wall_now
@@ -76,11 +80,40 @@ impl bcs_service_api::port::CallerExecutionSendPort for HttpProviderTransport {
         }
 
         // Protected chat.send frame: protocol 2.0, id = run id, H2A empty group.
+        // The channel zone is what the webhook envelope derives `from` from
+        // (`provider_sender_from_params`): without a non-empty actor the
+        // envelope ships `from: null`, which the Provider downlink contract
+        // rejects with a 400 (BaaS `ChatSendRequest.from` is required).
+        // The actor is the ORIGINAL message's trusted ordinary sender
+        // (facts committed by the caller admission seam) — never the
+        // protected caller subject, which stays confined to the
+        // `caller_context` extension zone; and identity_forwarding stays
+        // off so the sender is never prepended into the message body.
+        let channel = serde_json::to_value(ChannelInfo {
+            source: ChannelSource::Api,
+            user_id: None,
+            actor_id: Some(command.channel_actor_id.clone()),
+            actor_name: Some(command.channel_actor_name.clone()),
+            thread_id: Some(command.association.session_id.clone()),
+            identity_forwarding: None,
+        })
+        .map_err(|_| Error::NotSent)?;
+        // The envelope's `message` must satisfy the Provider downlink's
+        // `DownlinkMessage` contract (role + content blocks, string text
+        // alone is a required-field 400) — the same shape the ordinary
+        // chat.send frame serializes.
+        let message = serde_json::to_value(bcs_protocol::MessageContent {
+            role: "user".to_string(),
+            content: vec![bcs_protocol::ContentBlock::text(command.text.clone())],
+            timestamp: wall_now.max(0) as u64,
+        })
+        .map_err(|_| Error::NotSent)?;
         let mut params = serde_json::json!({
             "bcs_session_id": command.association.session_id,
             "bcs_group_id": command.group_id.as_deref().unwrap_or_default(),
-            "message": { "text": command.text.clone() },
+            "message": message,
             "timeout_ms": command.callback_timeout_ms,
+            "channel": channel,
             "extensions": {
                 "execution": {
                     "not_after_ms": command.not_after_ms,
@@ -165,14 +198,41 @@ impl bcs_service_api::port::CallerExecutionSendPort for HttpProviderTransport {
         };
         let status = response.status();
         if !status.is_success() {
+            // The response body diagnosticises the Provider's own validation
+            // errors — a 400 from a required-field miss (e.g. the historic
+            // `from: null`) is otherwise indistinguishable from a silence. The
+            // two runtime-only secrets this request carries are redacted out
+            // before logging, then the preview truncates on a char boundary.
+            let body = tokio::time::timeout(
+                Duration::from_millis(command.callback_timeout_ms),
+                response.bytes(),
+            )
+            .await
+            .ok()
+            .and_then(|bytes| bytes.ok())
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            .unwrap_or_default();
+            let redacted = body
+                .replace(command.execution_token.expose(), "[redacted]")
+                .replace(command.caller_subject_ref.expose(), "[redacted]");
+            let preview: &str = match redacted.char_indices().nth(512) {
+                Some((idx, _)) => &redacted[..idx],
+                None => &redacted,
+            };
             warn!(
                 provider_id = %provider_id,
                 run_id = %command.association.run_id,
                 status = %status.as_u16(),
+                body = %preview,
                 "protected caller send: non-ack status"
             );
             return Err(Error::GatewayFailed { retryable: status.is_server_error() });
         }
+        // A 2xx means the request reached the Provider: any ACK-shape failure
+        // from here on (body timeout, oversized body, unparsable JSON) cannot
+        // falsify acceptance, so it stays OutcomeUnknown — never a fabricated
+        // rejection (wire doc §3.2 "传输超时/出错：请求已离栈的一律记
+        // OutcomeUnknown").
         let bytes = match tokio::time::timeout(
             Duration::from_millis(command.callback_timeout_ms),
             response.bytes(),
@@ -180,14 +240,19 @@ impl bcs_service_api::port::CallerExecutionSendPort for HttpProviderTransport {
         .await
         {
             Ok(Ok(bytes)) => bytes,
-            _ => return Err(Error::GatewayFailed { retryable: true }),
+            _ => return Err(Error::OutcomeUnknown),
         };
         if bytes.len() > CALLER_EXECUTION_ACK_MAX_BYTES {
-            return Err(Error::GatewayFailed { retryable: false });
+            warn!(
+                provider_id = %provider_id,
+                run_id = %command.association.run_id,
+                "protected caller send: ack body over the wire cap"
+            );
+            return Err(Error::OutcomeUnknown);
         }
         let parsed: Value = match serde_json::from_slice(&bytes) {
             Ok(value) => value,
-            Err(_) => return Err(Error::GatewayFailed { retryable: true }),
+            Err(_) => return Err(Error::OutcomeUnknown),
         };
         if parsed.get("ok") != Some(&Value::Bool(true)) {
             let retryable = parsed
@@ -224,7 +289,7 @@ impl bcs_service_api::port::CallerExecutionSendPort for HttpProviderTransport {
                     %other,
                     "protected caller send: unknown ack state"
                 );
-                return Err(Error::GatewayFailed { retryable: false });
+                return Err(Error::OutcomeUnknown);
             }
         };
         Ok(acknowledged)

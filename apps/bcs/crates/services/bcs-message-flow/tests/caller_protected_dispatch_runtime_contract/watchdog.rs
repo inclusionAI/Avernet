@@ -94,6 +94,35 @@ async fn hung_protected_send_does_not_block_run_deadline() {
 }
 
 #[tokio::test]
+async fn lapsed_run_deadline_converts_uncertain_caller_row_to_cancel_intent() {
+    // The lane-freeze class: a dispatch that went Unknown keeps no queue TTL
+    // (StartSend cleared it and the transition never re-arms one for caller
+    // rows), so its lapsed run deadline is the only durable bound — the
+    // control loop must convert it into a durable cancel intent (spec 队列
+    // TTL 与执行期限), not leave the lane paused forever waiting for
+    // stop/terminal evidence a never-accepted dispatch cannot produce.
+    let service = Arc::new(ManagedMessageDelivery::new(Arc::new(MemoryMessageRepo::new())));
+    let handoff = seeded_handoff("caller-ok").await;
+    let pipeline = caller_pipeline(handoff, CallerDispatchAck::Unknown);
+    let mut worker = runtime(service.clone(), Arc::new(RecordingIo::default()), Some(pipeline));
+    worker.config.run_timeout = Duration::from_millis(40);
+    service.admit(admission("caller-ok", builder_projection(true, true, true))).await.unwrap();
+    let (stop, task) = start(worker);
+    let uncertain = run_until_status(&service, "caller-ok", |row| row.state.status == Status::Unknown).await;
+    assert!(uncertain.run_deadline_at_ms.is_some(), "StartSend commits the run budget on the row");
+    let converged = tokio::time::timeout(Duration::from_secs(2), run_until_status(
+        &service, "caller-ok",
+        |row| matches!(row.state.status, Status::Cancelling | Status::CancelUnknown),
+    )).await;
+    worker_stop(stop, task).await;
+    let row = converged.expect("the lapsed run deadline must convert the uncertain row into a cancel intent");
+    assert!(
+        row.cancel_requested_at_ms.is_some(),
+        "the conversion must leave durable cancellation evidence on the row"
+    );
+}
+
+#[tokio::test]
 async fn timeout_before_start_send_fails_without_possible_send() {
     let (mut worker, service, _, _) = hanging_fixture().await;
     worker.config.io_timeout = Duration::from_millis(40);

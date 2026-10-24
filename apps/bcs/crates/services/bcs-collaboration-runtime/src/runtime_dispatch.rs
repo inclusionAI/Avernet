@@ -254,6 +254,13 @@ impl CollaborationRuntime {
                                     provider_bot_ref: provider_bot_ref.clone(),
                                     not_after_ms: p.deadline_ms as i64,
                                     caller_task: wire_text,
+                                    // The persisted node frame's own sender
+                                    // identity — the trusted ordinary facts
+                                    // the envelope's `from` derives from.
+                                    channel_actor_id:
+                                        BCS_STATE_MACHINE_MESSAGE_SENDER.to_string(),
+                                    channel_actor_name:
+                                        BCS_STATE_MACHINE_MESSAGE_SENDER_NAME.to_string(),
                                     control_revision: 0,
                                     now_ms: bcs_protocol::now_ms() as i64,
                                 },

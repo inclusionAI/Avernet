@@ -71,6 +71,20 @@ impl DeliveryRuntime {
             self.transition_ok(event(row, Event::PreparationFailed)).await;
             return;
         }
+        // Trusted ordinary sender facts of the ORIGINAL message (fail closed
+        // like the digest/task guards): the envelope's required `from` zone
+        // derives from them. Without the fact the wire would ship `from: null`
+        // (a definite Provider 400), so the row converges failed instead —
+        // the protected caller subject never fills this ordinary zone.
+        let Some((channel_actor_id, channel_actor_name)) = caller_channel_facts(row) else {
+            tracing::warn!(
+                delivery_id = %row.delivery_id,
+                bot_id = %row.target_bot_id,
+                "CALLER_EXECUTION_UNAVAILABLE: caller row carries no committed sender facts, staying closed"
+            );
+            self.transition_ok(event(row, Event::PreparationFailed)).await;
+            return;
+        };
         // The dispatch deadline is a committed fact, not a projection key
         // nobody writes (review P1-5): StartSend carries the row's run
         // budget (the same window the ordinary branch uses), the CAS
@@ -236,6 +250,8 @@ impl DeliveryRuntime {
             request_digest: digest,
             not_after_ms,
             caller_task,
+            channel_actor_id,
+            channel_actor_name,
             control_revision,
             // L225 shared-stream classification: the admitted row's flow
             // kind decides the fan-out eligibility surface. Group chat rows
@@ -324,6 +340,15 @@ impl DeliveryRuntime {
                     "caller protected dispatch: provider rejected"
                 );
                 self.transition_ok(event(&current, Event::TransportRejected)).await;
+            }
+            Ok(crate::caller_dispatch_pipeline::CallerDispatchOutcome::DefinitelyNotSent) => {
+                // 4xx non-ack / 出栈前失败：确定性"未被受理"证据。行判死并
+                // 清掉 may_have_been_sent（上下文 Release 而非 Consume），
+                // lane 立即释放，不再等待终态回执。request_id 是 §7.5.1 的
+                // owing-dispatcher 证据，随 CAS 提交。
+                let mut failed = event(&current, Event::DefinitelyNotSent { retry: false });
+                failed.request_id = current.request_id.clone();
+                self.transition_ok(failed).await;
             }
             Ok(crate::caller_dispatch_pipeline::CallerDispatchOutcome::OutcomeUnknown) => {
                 self.transition_ok(event(&current, Event::TransportUnknown)).await;

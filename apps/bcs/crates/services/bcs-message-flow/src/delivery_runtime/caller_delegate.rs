@@ -67,6 +67,18 @@ impl DeliveryRuntime {
             self.transition_ok(event(&started, Event::PreparationFailed)).await;
             return;
         };
+        // Same trusted ordinary sender facts as the root branch (fail
+        // closed): the delegate wire still needs the envelope's `from`, and
+        // the protected subject never fills the ordinary zone.
+        let Some((channel_actor_id, channel_actor_name)) = caller_channel_facts(&started) else {
+            tracing::warn!(
+                delivery_id = %started.delivery_id,
+                bot_id = %started.target_bot_id,
+                "CALLER_EXECUTION_UNAVAILABLE: delegate row carries no committed sender facts, staying closed"
+            );
+            self.transition_ok(event(&started, Event::PreparationFailed)).await;
+            return;
+        };
         let history_header = {
             let contexts = self.service.bounded_contexts(&started.delivery_id, 25).await;
             let Ok(contexts) = contexts else {
@@ -110,6 +122,8 @@ impl DeliveryRuntime {
             request_digest: digest,
             not_after_ms,
             caller_task,
+            channel_actor_id,
+            channel_actor_name,
             control_revision,
             // Purpose per the TARGET's own caller configuration (§8.3,
             // review P1-2): the runtime default is DelegationOnly — the
@@ -211,6 +225,14 @@ impl DeliveryRuntime {
                     "caller delegate dispatch: provider rejected"
                 );
                 self.transition_ok(event(&current, Event::TransportRejected)).await;
+            }
+            Ok(crate::caller_dispatch_pipeline::CallerDispatchOutcome::DefinitelyNotSent) => {
+                // Same evidence rule as the root branch: a 4xx non-ack or a
+                // pre-wire refusal converges the delegate row failed without
+                // the maybe-sent marker; the request id is the CAS evidence.
+                let mut failed = event(&current, Event::DefinitelyNotSent { retry: false });
+                failed.request_id = current.request_id.clone();
+                self.transition_ok(failed).await;
             }
             Ok(crate::caller_dispatch_pipeline::CallerDispatchOutcome::OutcomeUnknown) => {
                 self.transition_ok(event(&current, Event::TransportUnknown)).await;

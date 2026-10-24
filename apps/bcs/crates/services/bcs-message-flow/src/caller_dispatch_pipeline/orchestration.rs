@@ -54,6 +54,7 @@ impl bcs_service_api::port::OrchestrationCallerDispatchPort for CallerDispatchPi
             || d.session_id.trim().is_empty()
             || d.assignee_bot_id.trim().is_empty()
             || d.caller_task.is_empty()
+            || d.channel_actor_id.trim().is_empty()
             || d.now_ms <= 0
             || d.not_after_ms <= d.now_ms
         {
@@ -316,6 +317,10 @@ impl bcs_service_api::port::OrchestrationCallerDispatchPort for CallerDispatchPi
             proof_type: self.identity.proof_type().to_string(),
             control_revision: d.control_revision,
             not_after_ms: effective_deadline,
+            // The persisted node frame's trusted ordinary sender — the
+            // envelope `from` zone's source, never the protected subject.
+            channel_actor_id: d.channel_actor_id.clone(),
+            channel_actor_name: d.channel_actor_name.clone(),
             request_digest,
             history: None,
             cross_group_lineage: None,

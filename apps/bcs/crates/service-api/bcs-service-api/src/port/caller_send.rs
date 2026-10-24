@@ -84,6 +84,16 @@ pub struct SendCallerExecutionCommand {
     /// canonicalized non-secret projection; only non-secret facts may
     /// contribute to it.
     pub request_digest: String,
+    /// Ordinary sender identity of the ORIGINAL canonical message (the row's
+    /// trusted `caller_channel` facts): what the webhook envelope derives its
+    /// required `from` field from. This is the safe, ordinary actor id —
+    /// NEVER the protected caller subject (which stays confined to the
+    /// `caller_context` extension zone) and never identity derived from the
+    /// token. An empty actor_id is a contract violation (wire refuses NotSent).
+    pub channel_actor_id: String,
+    /// Safe display name accompanying `channel_actor_id`; may be empty — the
+    /// envelope then falls back to the actor id.
+    pub channel_actor_name: String,
     pub cross_group_lineage: Option<String>,
     /// Shared-history facts the gateway must reproduce for group caller
     /// work (spec §6.8/`execution.history`): the snapshot id, cutoff fixed
@@ -122,12 +132,18 @@ pub enum CallerSendError {
     /// emitted bytes). Safe to retry the same dispatch id after re-prepare.
     #[error("invalid protected caller send command")]
     NotSent,
-    /// The transport outcome is unknown after the request started.
+    /// The transport outcome is unknown after the request started: a
+    /// mid-flight transport error/timeout, or a 2xx whose ACK body could not
+    /// be read/parsed (acceptance cannot be falsified once the Provider
+    /// answered success).
     #[error("protected caller send outcome unknown")]
     OutcomeUnknown,
-    /// The Provider answered a definite non-ack (bad shape, contract
-    /// violation or echo mismatch). Retrying this dispatch needs a new
-    /// decision by the dispatcher, never automatic here.
+    /// The Provider answered a definite non-2xx. 4xx (`retryable: false`) is
+    /// deterministic never-accepted evidence — the dispatch can converge
+    /// failed without waiting for stop/terminal observation. 5xx
+    /// (`retryable: true`) may come from an intermediary after acceptance, so
+    /// callers converge it conservatively as unknown. Retrying this dispatch
+    /// needs a new decision by the dispatcher, never automatic here.
     #[error("protected caller send gateway response invalid")]
     GatewayFailed { retryable: bool },
 }

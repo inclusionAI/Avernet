@@ -272,6 +272,7 @@ fn admit_caller_group(id: &str, targets: &[&str]) -> AdmitMessageDeliveries {
                     "version": 1,
                     "caller_required": true,
                     "caller_task": "group caller task",
+                    "caller_channel": {"actor_id": "human_alice", "actor_name": "Alice"},
                     "caller_not_after_ms": now_ms() + 300_000,
                 }),
             })
@@ -310,6 +311,7 @@ fn admit_caller(_managed: &ManagedMessageDelivery, id: &str) -> AdmitMessageDeli
                 "version": 1,
                 "caller_required": true,
                 "caller_task": "runtime caller task",
+                "caller_channel": {"actor_id": "human_alice", "actor_name": "Alice"},
                 "caller_not_after_ms": now_ms() + 300_000,
             }),
         }],

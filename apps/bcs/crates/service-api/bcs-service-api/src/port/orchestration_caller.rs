@@ -48,6 +48,13 @@ pub struct OrchestrationNodeDispatch {
     /// The wire text: the assignee's task material (the very message the
     /// persisted dispatch request carries — non-secret by construction).
     pub caller_task: String,
+    /// Trusted ordinary sender facts backing the webhook envelope's required
+    /// `from` zone: the persisted dispatch request's own sender identity
+    /// (the collaboration runtime's state-machine sender), never the
+    /// protected caller subject. Empty actor_id refuses structurally.
+    pub channel_actor_id: String,
+    /// Safe display name accompanying `channel_actor_id`; may be empty.
+    pub channel_actor_name: String,
     pub control_revision: u64,
     pub now_ms: i64,
 }

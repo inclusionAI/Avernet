@@ -55,6 +55,9 @@ enum Convergence {
     /// A terminal, non-history refusal or an expired window: converge
     /// closed, never a new attempt.
     Refused,
+    /// Deterministic never-accepted evidence (4xx non-ack, or a pre-wire
+    /// refusal): the converging row clears its maybe-sent marker.
+    NotSent,
     /// Unknown post-network outcome: conservative convergence.
     Unknown,
 }
@@ -108,6 +111,7 @@ impl HistoryBarrierConverger {
         let event = match outcome {
             Convergence::Submitted => Event::Submitted,
             Convergence::Refused => Event::TransportRejected,
+            Convergence::NotSent => Event::DefinitelyNotSent { retry: false },
             Convergence::Unknown => Event::TransportUnknown,
         };
         let transition = DeliveryTransitionCommand {
@@ -327,12 +331,28 @@ pub(crate) fn park_and_drive(
                     parks.lock().expect("barrier parks").remove(&delivery_id);
                     return;
                 }
-                Ok(CallerDispatchAck::Unknown) | Err(_) => {
+                Ok(CallerDispatchAck::Unknown)
+                | Err(bcs_service_api::port::CallerSendError::OutcomeUnknown
+                    | bcs_service_api::port::CallerSendError::GatewayFailed { retryable: true }) => {
                     tracing::warn!(
                         delivery_id = %delivery_id,
                         "history barrier: redrive outcome unknown or the proof expired at wire time; converging conservatively"
                     );
                     converger.converge(&delivery_id, Convergence::Unknown, chrono_now()).await;
+                    parks.lock().expect("barrier parks").remove(&delivery_id);
+                    return;
+                }
+                // Same wire rule as the root branch: a 4xx non-ack or a
+                // pre-wire refusal is deterministic never-accepted evidence —
+                // converge the parked row without the sent marker instead of
+                // parking it forever on a rejection that already completed.
+                Err(bcs_service_api::port::CallerSendError::NotSent
+                    | bcs_service_api::port::CallerSendError::GatewayFailed { retryable: false }) => {
+                    tracing::warn!(
+                        delivery_id = %delivery_id,
+                        "history barrier: redrive refused deterministically; converging not-sent"
+                    );
+                    converger.converge(&delivery_id, Convergence::NotSent, chrono_now()).await;
                     parks.lock().expect("barrier parks").remove(&delivery_id);
                     return;
                 }

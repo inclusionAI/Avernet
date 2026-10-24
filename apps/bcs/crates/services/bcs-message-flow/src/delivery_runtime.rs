@@ -100,6 +100,28 @@ fn event(row: &PersistedMessageDelivery, kind: Event) -> DeliveryTransitionComma
     }
 }
 
+/// The trusted ordinary sender facts a caller admission committed alongside
+/// the `caller_required` marker (written only by the trusted producers —
+/// caller_admission / queued_admission, never a request body). They are the
+/// envelope `from` zone's source; the protected caller subject never
+/// substitutes for them. None = the row predates the fact or was misbuilt:
+/// the protected dispatch fails closed rather than shipping `from: null`.
+pub(super) fn caller_channel_facts(row: &PersistedMessageDelivery) -> Option<(String, String)> {
+    let channel = row.semantic_projection_json.get("caller_channel")?;
+    let actor_id = channel
+        .get("actor_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())?;
+    let actor_name = channel
+        .get("actor_name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    Some((actor_id.to_string(), actor_name))
+}
+
 fn schedule_rows(rows: &[PersistedMessageDelivery], bot: &str) -> Vec<DeliveryScheduleEntry> {
     rows.iter()
         .filter(|d| d.target_bot_id == bot && d.state.kind == DeliveryType::Send)
@@ -267,6 +289,27 @@ impl DeliveryRuntime {
                                     "task_timeout": true,
                                 }));
                             }
+                            storage!(self.transition(command.clone()));
+                        } else if row.state.status == Status::Unknown
+                            && row.run_deadline_at_ms.is_some_and(|t| t <= now_ms())
+                            && row.semantic_projection_json.get("caller_required").is_some()
+                        {
+                            // Run-deadline convergence (spec 队列 TTL 与执行期
+                            // 限): a maybe-sent caller dispatch never expires
+                            // into a "stopped" lane release, but its lapsed
+                            // execution budget is durable evidence the
+                            // dispatch will not settle on its own — convert
+                            // it to a cancel intent exactly like the queue-TTL
+                            // lapse, so the stop/terminal arbitration and the
+                            // manual resolution keep their authority.
+                            let mut command = event(row, Event::CancelRequested);
+                            command.deadline_at_ms = Some(now_ms().saturating_add(self.config.cancel_timeout.as_millis() as i64));
+                            tracing::warn!(
+                                delivery_id = %row.delivery_id,
+                                bot_id = %row.target_bot_id,
+                                run_deadline_at_ms = ?row.run_deadline_at_ms,
+                                "uncertain caller delivery passed its run deadline; converting to a cancel intent"
+                            );
                             storage!(self.transition(command.clone()));
                         } else if row.state.status == Status::Cancelling && !aborting.contains(&row.delivery_id) {
                             if row.cancel_deadline_at_ms.is_some_and(|t| t <= now_ms()) {

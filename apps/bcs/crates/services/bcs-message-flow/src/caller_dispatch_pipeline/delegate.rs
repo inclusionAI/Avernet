@@ -40,6 +40,11 @@ pub struct DelegateDispatchFacts {
     pub request_digest: String,
     pub not_after_ms: i64,
     pub caller_task: String,
+    /// Trusted ordinary sender facts of the original message (the row's
+    /// `caller_channel` projection) — the envelope `from` zone's source,
+    /// exactly like the root branch. Never the protected subject.
+    pub channel_actor_id: String,
+    pub channel_actor_name: String,
     pub control_revision: u64,
     pub delivery_commit: Option<DeliveryCommitOrigin>,
     pub history: Option<bcs_service_api::port::CallerExecutionHistory>,
@@ -469,6 +474,8 @@ impl CallerDispatchPipeline {
             control_revision: facts.control_revision,
             not_after_ms: effective_deadline,
             request_digest: committed_digest.clone(),
+            channel_actor_id: facts.channel_actor_id.clone(),
+            channel_actor_name: facts.channel_actor_name.clone(),
             history: history.clone(),
             cross_group_lineage: None,
             callback_timeout_ms: 30_000,
@@ -508,6 +515,12 @@ impl CallerDispatchPipeline {
                     self.park_delegate_barrier(target, service_credential, &command, &facts, &lineage, attestation, accepted, at_term).await;
                 }
                 Ok(CallerDispatchOutcome::Rejected { error_code, retryable })
+            }
+            // Wire doc §3.1/§3.2: 非 2xx 与出栈前失败是确定性"未被受理"
+            // 证据，判死而非记未知 (same rule as the root send branch)。
+            Err(bcs_service_api::port::CallerSendError::NotSent
+            | bcs_service_api::port::CallerSendError::GatewayFailed { retryable: false }) => {
+                Ok(CallerDispatchOutcome::DefinitelyNotSent)
             }
             Err(_) => Ok(CallerDispatchOutcome::OutcomeUnknown),
         }
@@ -675,6 +688,8 @@ use bcs_caller_identity_api::{CallerIdentityError, CallerIdentityPlugin, Establi
             request_digest: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".into(),
             not_after_ms: NOW + 280_000,
             caller_task: "delegated task text".into(),
+            channel_actor_id: "human_alice".into(),
+            channel_actor_name: "Alice".into(),
             control_revision: 0,
             history_cutoff_seq: 0,
             shared_content_kind: None,

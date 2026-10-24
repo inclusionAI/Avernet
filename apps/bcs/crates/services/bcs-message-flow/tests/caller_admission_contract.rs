@@ -163,6 +163,7 @@ fn caller(bot: &str, message_id: &str, expiry: i64) -> CallerMessageAdmission {
         extra_scopes: Vec::new(),
         delegation_scopes: Vec::new(),
         ingress: ingress(expiry),
+        sender_name: String::new(),
         admission: admission(message_id),
     }
 }
@@ -208,6 +209,16 @@ async fn enabled_target_marks_admits_and_parks_identity_once() {
     let projection = &outcome.result.deliveries[0].semantic_projection_json;
     assert_eq!(projection.get("caller_required"), Some(&json!(true)));
     assert_eq!(projection.get("caller_task"), Some(&json!(message_id.as_str())));
+    // The trusted ordinary sender facts the protected wire derives the
+    // envelope `from` from: the CANONICAL message's sender, with the safe
+    // display name — never the protected caller subject.
+    assert_eq!(
+        projection.get("caller_channel"),
+        Some(&json!({
+            "actor_id": "human_alice",
+            "actor_name": "",
+        }))
+    );
 
     // The identity is parked exactly once for the committed dispatch.
     let scope = scope("bot-on", &message_id);

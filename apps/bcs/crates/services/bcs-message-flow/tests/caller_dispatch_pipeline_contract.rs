@@ -138,6 +138,7 @@ impl CallerIdentityPlugin for StubIdentity {
 struct RecordingSender {
     calls: AtomicUsize,
     ack: CallerDispatchAck,
+    error: Option<bcs_service_api::port::CallerSendError>,
 }
 
 #[async_trait]
@@ -149,6 +150,9 @@ impl CallerExecutionSendPort for RecordingSender {
         _command: SendCallerExecutionCommand,
     ) -> Result<CallerDispatchAck, bcs_service_api::port::CallerSendError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        if let Some(error) = &self.error {
+            return Err(error.clone());
+        }
         Ok(self.ack.clone())
     }
 }
@@ -170,6 +174,8 @@ fn facts() -> CommittedDispatchFacts {
         delivery_commit: None,
         not_after_ms: now_clock() + 280_000,
         caller_task: "root h2a task".into(),
+        channel_actor_id: "human_alice".into(),
+        channel_actor_name: "Alice".into(),
         control_revision: 0,
         history: None,
         shared_content_kind: None,
@@ -232,6 +238,7 @@ async fn accepted_path_claims_prepares_issues_and_sends_exactly_once() {
     let gateway = Arc::new(StubGateway { calls: AtomicUsize::new(0), fail_with: None, runs: std::sync::Mutex::new(Vec::new()) });
     let sender = Arc::new(RecordingSender {
         calls: AtomicUsize::new(0),
+        error: None,
         ack: CallerDispatchAck::Accepted { control_revision: 0, request_digest: DIGEST.into() },
     });
     let pipeline = pipeline(gateway.clone(), sender.clone(), handoff.clone());
@@ -263,7 +270,7 @@ async fn rejected_and_unknown_acks_enumerate_without_a_second_send() {
     ] {
         let (handoff, _) = seeded_handoff("turn-1").await;
         let gateway = Arc::new(StubGateway { calls: AtomicUsize::new(0), fail_with: None, runs: std::sync::Mutex::new(Vec::new()) });
-        let sender = Arc::new(RecordingSender { calls: AtomicUsize::new(0), ack });
+        let sender = Arc::new(RecordingSender { calls: AtomicUsize::new(0), ack, error: None });
         let pipeline = pipeline(gateway.clone(), sender.clone(), handoff.clone());
         let outcome = pipeline
             .dispatch_once(&delivery_target(), &RedactedToken::new("svc"), facts(), now_clock())
@@ -282,6 +289,40 @@ async fn rejected_and_unknown_acks_enumerate_without_a_second_send() {
 }
 
 #[tokio::test]
+async fn send_error_taxonomy_converges_not_sent_only_on_definite_non_acceptance() {
+    // Wire doc §3.1/§3.2: NotSent (pre-wire) and a non-retryable gateway
+    // non-2xx are deterministic never-accepted evidence — DefinitelyNotSent,
+    // so the row can converge failed instead of parking Unknown forever.
+    // Ambiguous failures (mid-flight transport, retryable 5xx) stay unknown.
+    use bcs_service_api::port::CallerSendError;
+    for (error, definitely) in [
+        (CallerSendError::NotSent, true),
+        (CallerSendError::GatewayFailed { retryable: false }, true),
+        (CallerSendError::OutcomeUnknown, false),
+        (CallerSendError::GatewayFailed { retryable: true }, false),
+    ] {
+        let (handoff, _) = seeded_handoff("turn-1").await;
+        let gateway = Arc::new(StubGateway { calls: AtomicUsize::new(0), fail_with: None, runs: std::sync::Mutex::new(Vec::new()) });
+        let sender = Arc::new(RecordingSender {
+            calls: AtomicUsize::new(0),
+            ack: CallerDispatchAck::Accepted { control_revision: 0, request_digest: DIGEST.into() },
+            error: Some(error.clone()),
+        });
+        let pipeline = pipeline(gateway.clone(), sender.clone(), handoff.clone());
+        let outcome = pipeline
+            .dispatch_once(&delivery_target(), &RedactedToken::new("svc"), facts(), now_clock())
+            .await
+            .expect("send error outcome");
+        assert_eq!(
+            matches!(outcome, CallerDispatchOutcome::DefinitelyNotSent),
+            definitely,
+            "wrong classification for {error:?}"
+        );
+        assert_eq!(sender.calls.load(Ordering::SeqCst), 1);
+    }
+}
+
+#[tokio::test]
 async fn preparation_failure_consumes_the_identity_fail_closed() {
     let (handoff, _) = seeded_handoff("turn-1").await;
     let gateway = Arc::new(StubGateway {
@@ -291,6 +332,7 @@ async fn preparation_failure_consumes_the_identity_fail_closed() {
     });
     let sender = Arc::new(RecordingSender {
         calls: AtomicUsize::new(0),
+        error: None,
         ack: CallerDispatchAck::Accepted { control_revision: 0, request_digest: DIGEST.into() },
     });
     let pipeline = pipeline(gateway.clone(), sender.clone(), handoff.clone());
@@ -318,6 +360,7 @@ async fn no_identity_for_this_scope_fails_unavailable_with_zero_side_effects() {
     let gateway = Arc::new(StubGateway { calls: AtomicUsize::new(0), fail_with: None, runs: std::sync::Mutex::new(Vec::new()) });
     let sender = Arc::new(RecordingSender {
         calls: AtomicUsize::new(0),
+        error: None,
         ack: CallerDispatchAck::Accepted { control_revision: 0, request_digest: DIGEST.into() },
     });
     let pipeline = pipeline(gateway.clone(), sender.clone(), handoff.clone());
@@ -336,6 +379,7 @@ async fn structurally_invalid_facts_reject_before_any_consumption() {
     let gateway = Arc::new(StubGateway { calls: AtomicUsize::new(0), fail_with: None, runs: std::sync::Mutex::new(Vec::new()) });
     let sender = Arc::new(RecordingSender {
         calls: AtomicUsize::new(0),
+        error: None,
         ack: CallerDispatchAck::Accepted { control_revision: 0, request_digest: DIGEST.into() },
     });
     let pipeline = pipeline(gateway.clone(), sender.clone(), handoff.clone());
@@ -397,6 +441,7 @@ async fn identity_window_capped_by_container_deadline_loss_rejects() {
     let gateway = Arc::new(StubGateway { calls: AtomicUsize::new(0), fail_with: None, runs: std::sync::Mutex::new(Vec::new()) });
     let sender = Arc::new(RecordingSender {
         calls: AtomicUsize::new(0),
+        error: None,
         ack: CallerDispatchAck::Accepted { control_revision: 0, request_digest: DIGEST.into() },
     });
     let pipeline = pipeline(gateway.clone(), sender.clone(), handoff.clone());
@@ -606,6 +651,7 @@ async fn ensure_carries_the_inherited_history_cutoff_ceiling() {
     });
     let sender = Arc::new(RecordingSender {
         calls: AtomicUsize::new(0),
+        error: None,
         ack: CallerDispatchAck::Accepted { control_revision: 0, request_digest: DIGEST.into() },
     });
     let mut root_facts = facts();
@@ -635,6 +681,7 @@ async fn ensure_carries_the_inherited_history_cutoff_ceiling() {
     });
     let sender = Arc::new(RecordingSender {
         calls: AtomicUsize::new(0),
+        error: None,
         ack: CallerDispatchAck::Accepted { control_revision: 0, request_digest: DIGEST.into() },
     });
     pipeline(gateway.clone(), sender, handoff).dispatch_once(

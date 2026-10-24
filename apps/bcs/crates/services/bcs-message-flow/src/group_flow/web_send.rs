@@ -421,6 +421,7 @@ pub(super) async fn handle_web_send_with_result(
                         extra_scopes,
                         delegation_scopes,
                         ingress,
+                        sender_name: sender_display_name.clone(),
                         admission: command,
                     };
                     let now = now_ms().max(0) as i64;

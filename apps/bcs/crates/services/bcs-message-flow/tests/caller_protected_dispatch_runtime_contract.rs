@@ -235,6 +235,7 @@ impl CallerIdentityPlugin for StubIdentity {
 /// Recording protected sender: enumerates the ack under test.
 struct StubSender {
     ack: CallerDispatchAck,
+    error: Option<bcs_service_api::port::CallerSendError>,
     histories: std::sync::Mutex<Vec<Option<bcs_service_api::port::CallerExecutionHistory>>>,
 }
 
@@ -250,17 +251,28 @@ impl CallerExecutionSendPort for StubSender {
             .lock()
             .unwrap()
             .push(command.history.clone());
+        if let Some(error) = &self.error {
+            return Err(error.clone());
+        }
         Ok(self.ack.clone())
     }
 }
 
 fn caller_pipeline(handoff: Arc<HumanCallerDeliveryHandoff>, ack: CallerDispatchAck) -> Arc<CallerDispatchPipeline> {
+    caller_pipeline_with_error(handoff, ack, None)
+}
+
+fn caller_pipeline_with_error(
+    handoff: Arc<HumanCallerDeliveryHandoff>,
+    ack: CallerDispatchAck,
+    error: Option<bcs_service_api::port::CallerSendError>,
+) -> Arc<CallerDispatchPipeline> {
     let preparation = Arc::new(CallerContainerPreparation::new(Arc::new(StubGateway)));
     Arc::new(CallerDispatchPipeline::new(
         handoff as Arc<dyn HumanCallerDeliveryHandoffService>,
         preparation,
         Arc::new(StubIdentity),
-        Arc::new(StubSender { ack, histories: std::sync::Mutex::new(Vec::new()) }),
+        Arc::new(StubSender { ack, error, histories: std::sync::Mutex::new(Vec::new()) }),
         600_000,
     ))
 }
@@ -307,6 +319,12 @@ fn builder_projection(digest: bool, deadline: bool, task: bool) -> Value {
     }
     if task {
         projection["caller_task"] = json!("runtime caller task");
+        // Trusted ordinary sender facts the admission seam commits — the
+        // envelope `from` zone's source (never the protected subject).
+        projection["caller_channel"] = json!({
+            "actor_id": "human_alice",
+            "actor_name": "Alice",
+        });
     }
     projection
 }
@@ -465,6 +483,63 @@ async fn unknown_ack_converges_unknown() {
 }
 
 #[tokio::test]
+async fn definite_non_ack_send_error_converges_failed_and_releases_the_lane() {
+    // Wire doc §3.1/§3.2 (the 400 freezing bug): a non-retryable gateway
+    // non-2xx is deterministic never-accepted evidence — the row must
+    // converge Failed and clear the maybe-sent marker so the lane releases,
+    // instead of parking Unknown waiting for a terminal receipt that the
+    // never-accepted dispatch can never produce.
+    let repo = Arc::new(MemoryMessageRepo::new());
+    let service = Arc::new(ManagedMessageDelivery::new(repo));
+    let io = Arc::new(RecordingIo::default());
+    let handoff = seeded_handoff("caller-ok").await;
+    let pipeline = caller_pipeline_with_error(
+        handoff.clone(),
+        CallerDispatchAck::Accepted { control_revision: 0, request_digest: DIGEST.into() },
+        Some(bcs_service_api::port::CallerSendError::GatewayFailed { retryable: false }),
+    );
+    let worker = runtime(service.clone(), io.clone(), Some(pipeline));
+    service
+        .admit(admission("caller-ok", builder_projection(true, true, true)))
+        .await
+        .expect("admit");
+    let (stop, task) = start(worker);
+    let row = run_until_status(&service, "caller-ok", |row| row.state.status == Status::Failed).await;
+    worker_stop(stop, task).await;
+    assert_eq!(row.attempt_no, 1);
+    assert!(
+        !row.state.may_have_been_sent,
+        "a 4xx non-ack is provable non-acceptance; the row must not keep the conservative sent marker"
+    );
+    // The lane (and a follow-up message behind it) is no longer blocked.
+    assert!(!service.lane_blocked(&row).await.unwrap(), "failed row must release the lane");
+}
+
+#[tokio::test]
+async fn retryable_send_error_stays_conservatively_unknown() {
+    // A 5xx may still have reached acceptance through an intermediary: the
+    // row keeps the uncertain Unknown status with its conservative marker.
+    let repo = Arc::new(MemoryMessageRepo::new());
+    let service = Arc::new(ManagedMessageDelivery::new(repo));
+    let io = Arc::new(RecordingIo::default());
+    let handoff = seeded_handoff("caller-ok").await;
+    let pipeline = caller_pipeline_with_error(
+        handoff.clone(),
+        CallerDispatchAck::Accepted { control_revision: 0, request_digest: DIGEST.into() },
+        Some(bcs_service_api::port::CallerSendError::GatewayFailed { retryable: true }),
+    );
+    let worker = runtime(service.clone(), io.clone(), Some(pipeline));
+    service
+        .admit(admission("caller-ok", builder_projection(true, true, true)))
+        .await
+        .expect("admit");
+    let (stop, task) = start(worker);
+    let row = run_until_status(&service, "caller-ok", |row| row.state.status == Status::Unknown).await;
+    worker_stop(stop, task).await;
+    assert!(row.state.may_have_been_sent, "5xx keeps the conservative maybe-sent marker");
+}
+
+#[tokio::test]
 async fn no_pipeline_keeps_the_closed_guard() {
     let repo = Arc::new(MemoryMessageRepo::new());
     let service = Arc::new(ManagedMessageDelivery::new(repo));
@@ -494,6 +569,32 @@ async fn missing_committed_digest_stays_closed_without_starting_send() {
     worker_stop(stop, task).await;
     assert_eq!(row.state.status, Status::Failed);
     assert_eq!(row.attempt_no, 0, "guard rejects before StartSend: no attempt consumed");
+    assert!(io.sent.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn missing_committed_sender_facts_stay_closed_without_starting_send() {
+    // Wire contract: without the row's trusted `caller_channel` facts the
+    // envelope cannot carry a validated `from` (a definite Provider 400);
+    // the guard refuses before StartSend exactly like the digest/task
+    // guards, and the protected subject never substitutes for them.
+    let (worker, io, service, _handoff) =
+        fixture(CallerDispatchAck::Accepted { control_revision: 0, request_digest: DIGEST.into() }).await;
+    let mut projection = builder_projection(true, true, true);
+    projection
+        .as_object_mut()
+        .expect("object projection")
+        .remove("caller_channel");
+    service
+        .admit(admission("caller-ok", projection))
+        .await
+        .expect("admit");
+    let (stop, task) = start(worker);
+    let row = run_until_status(&service, "caller-ok", |row| row.state.status == Status::Failed).await;
+    worker_stop(stop, task).await;
+    assert_eq!(row.state.status, Status::Failed);
+    assert_eq!(row.attempt_no, 0, "guard rejects before StartSend: no attempt consumed");
+    assert!(!row.state.may_have_been_sent);
     assert!(io.sent.lock().await.is_empty());
 }
 
@@ -583,6 +684,7 @@ async fn a_delegate_row_dispatches_through_the_lineage_issued_address_chain() {
     let preparation = Arc::new(CallerContainerPreparation::new(Arc::new(StubGateway)));
     let sender = Arc::new(StubSender {
         ack: CallerDispatchAck::Accepted { control_revision: 0, request_digest: DIGEST.into() },
+        error: None,
         histories: std::sync::Mutex::new(Vec::new()),
     });
     let pipeline = Arc::new(
@@ -604,6 +706,7 @@ async fn a_delegate_row_dispatches_through_the_lineage_issued_address_chain() {
     let mut projection = json!({"version": 1, "caller_required": true});
     projection["caller_request_digest"] = json!(DIGEST);
     projection["caller_task"] = json!("delegated worker task");
+    projection["caller_channel"] = json!({"actor_id": "human_alice", "actor_name": "Alice"});
     projection["caller_delegation"] = json!({"parent_run_id": "run-manager", "parent_attempt": 1, "parent_bot_id": "bot-manager"});
     service.admit(admission("delegate-e2e", projection)).await.unwrap();
 

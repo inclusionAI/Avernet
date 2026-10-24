@@ -97,6 +97,10 @@ fn command(now: i64) -> SendCallerExecutionCommand {
         control_revision: 0,
         not_after_ms: now + 280_000,
         request_digest: DIGEST.to_string(),
+        // Trusted ordinary sender facts from the original message's
+        // `caller_channel` row projection — the envelope `from` source.
+        channel_actor_id: "human_alice".into(),
+        channel_actor_name: "Alice".into(),
         cross_group_lineage: None,
         callback_timeout_ms: 3_000,
         now_ms: now,
@@ -128,7 +132,19 @@ async fn accepted_ack_round_trips_and_the_wire_carries_the_protected_zone() {
     assert_eq!(body["bcn_group_id"], "");
     assert_eq!(body["session_id"], "session-1");
     assert_eq!(body["to_bot"]["provider_bot_ref"], "runtime-b");
-    assert_eq!(body["message"]["text"], "请处理这部分任务");
+    // The envelope message satisfies the Provider downlink's DownlinkMessage
+    // contract: role + content blocks (a bare `{"text": ...}` is a
+    // required-field 400), the same shape the ordinary chat.send serializes.
+    assert_eq!(body["message"]["role"], "user");
+    assert_eq!(body["message"]["content"][0]["type"], "text");
+    assert_eq!(body["message"]["content"][0]["text"], "请处理这部分任务");
+    // The envelope `from` derives from the trusted ordinary sender facts
+    // (the original message's `caller_channel` projection) — the protected
+    // caller subject NEVER fills this ordinary zone, and a null `from` is
+    // the Provider downlink's required-field 400 that froze lanes in Unknown.
+    assert_eq!(body["from"]["kind"], "bot");
+    assert_eq!(body["from"]["name"], "Alice");
+    assert_eq!(body["from"]["actor_id"], "human_alice");
     let zone = &body["extensions"];
     assert_eq!(zone["execution"], json!({"not_after_ms": t + 280_000}));
     assert_eq!(zone["caller_context"]["subject"]["kind"], "human");
@@ -254,6 +270,16 @@ async fn malformed_commands_fail_not_sent_before_any_network_attempt() {
         .unwrap_err();
     assert_eq!(error, CallerSendError::NotSent);
 
+    // No trusted ordinary sender facts → the envelope would ship `from: null`
+    // (a definite Provider 400): refuse the send structurally instead.
+    let mut broken = command(now());
+    broken.channel_actor_id = "  ".into();
+    let error = transport
+        .send_caller_execution(&target_at("127.0.0.1:1".into()), &RedactedToken::new("svc-token"), broken)
+        .await
+        .unwrap_err();
+    assert_eq!(error, CallerSendError::NotSent);
+
     // Review-V P2-5: freshness is judged at WIRE TIME — an already-expired
     // proof is never shipped even when the command's own entry clock
     // claims the window is still alive.
@@ -272,7 +298,7 @@ async fn non_ack_status_is_a_definite_failure_and_state_unknown_enumerates() {
     let state = Arc::new(AckServer {
         last_request: Mutex::new(None),
         respond_with: axum::http::StatusCode::CONFLICT,
-        body: json!({}),
+        body: json!({ "detail": { "error_code": "INVALID_REQUEST", "message": "validation failed" } }),
     });
     let addr = serve(state).await;
 
@@ -282,6 +308,22 @@ async fn non_ack_status_is_a_definite_failure_and_state_unknown_enumerates() {
         .await
         .unwrap_err();
     assert_eq!(error, CallerSendError::GatewayFailed { retryable: false });
+
+    // 5xx is ambiguous (possibly-forwarded/accepted-then-crashed): retryable,
+    // and the pipeline converges it conservatively as unknown.
+    let state = Arc::new(AckServer {
+        last_request: Mutex::new(None),
+        respond_with: axum::http::StatusCode::BAD_GATEWAY,
+        body: json!({}),
+    });
+    let addr = serve(state).await;
+
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+    let error = transport
+        .send_caller_execution(&target_at(addr), &RedactedToken::new("svc-token"), command(now()))
+        .await
+        .unwrap_err();
+    assert_eq!(error, CallerSendError::GatewayFailed { retryable: true });
 
     // state=unknown ACK enumifies (受理不确定) rather than mapping to error.
     let state = Arc::new(AckServer {
@@ -352,15 +394,29 @@ async fn ack_uses_local_control_facts_without_provider_echo() {
 
 #[tokio::test]
 async fn malformed_or_rejected_success_states_are_not_accepted() {
-    for body in [json!({}), json!({"ok":"true"}), json!({"ok":true,"state":"rejected"}),
-        json!({"ok":true,"state":null}), json!({"ok":true,"state":{}})] {
+    // No business ok:true → a closed Rejected ack, not Accepted.
+    for body in [json!({}), json!({"ok":"true"})] {
         let state = Arc::new(AckServer {
             last_request: Mutex::new(None), respond_with: axum::http::StatusCode::OK, body,
         });
         let target = target_at(serve(state).await);
         let transport = HttpProviderTransport::allowing_private_networks_for_tests();
         let result = transport.send_caller_execution(&target, &RedactedToken::new("svc-token"), command(now())).await;
+        assert!(matches!(result, Ok(CallerDispatchAck::Rejected { .. })));
         assert!(!matches!(result, Ok(CallerDispatchAck::Accepted { .. })));
+    }
+    // ok:true with an unusable state: a 2xx was answered, acceptance cannot
+    // be falsified — the shape failure stays OutcomeUnknown (wire doc §3.2),
+    // never a fabricated rejection.
+    for body in [json!({"ok":true,"state":"rejected"}), json!({"ok":true,"state":null}),
+        json!({"ok":true,"state":{}})] {
+        let state = Arc::new(AckServer {
+            last_request: Mutex::new(None), respond_with: axum::http::StatusCode::OK, body,
+        });
+        let target = target_at(serve(state).await);
+        let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+        let result = transport.send_caller_execution(&target, &RedactedToken::new("svc-token"), command(now())).await;
+        assert_eq!(result.err(), Some(CallerSendError::OutcomeUnknown));
     }
 }
 

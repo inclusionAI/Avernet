@@ -48,6 +48,12 @@ pub struct CallerMessageAdmission {
     pub delegation_scopes: Vec<HandoffScope>,
     /// The handoff park fails if the identity's trusted window already ended.
     pub ingress: AuthenticatedHumanCallerIngress,
+    /// The ORIGINAL sender's safe display name, supplied by the trusted
+    /// route (the same fact the ordinary queue projection records as
+    /// `sender_name`). May be empty — the wire envelope then falls back to
+    /// the actor id. This is ordinary, non-protected metadata: the caller
+    /// subject and its credentials never substitute for it.
+    pub sender_name: String,
     /// The ordinary admission command; its target projections receive the
     /// `caller_required` marker injected here, never by the request body.
     pub admission: AdmitMessageDeliveries,
@@ -95,7 +101,7 @@ pub async fn admit_caller_message(
     caller: CallerMessageAdmission,
     now_ms: i64,
 ) -> Result<CallerAdmissionOutcome, CallerAdmissionError> {
-    let CallerMessageAdmission { scope, extra_scopes, delegation_scopes, ingress, mut admission } = caller;
+    let CallerMessageAdmission { scope, extra_scopes, delegation_scopes, ingress, sender_name, mut admission } = caller;
 
     // 1) Identity window: re-checked at the seam — the route may have raced.
     if ingress.is_expired(now_ms) {
@@ -260,6 +266,31 @@ pub async fn admit_caller_message(
             };
             projection.insert("caller_required".to_string(), serde_json::json!(true));
             projection.insert("caller_task".to_string(), serde_json::json!(caller_task));
+            // Trusted ordinary sender facts (spec §7.5.1 wire contract): the
+            // protected send derives the webhook envelope's required `from`
+            // from these — the canonical message's own sender, NEVER the
+            // caller subject (which stays confined to the runtime-only
+            // `caller_context` zone). Non-empty actor id is fail-closed here
+            // so the wire can treat its absence as a hard contract error.
+            let actor_id = admission.message.sender_id.trim();
+            if actor_id.is_empty() {
+                if let Some(scope) = scope.as_ref() {
+                    let _ = deps.handoff.release(scope).await;
+                }
+                for extra in &extra_scopes {
+                    let _ = deps.handoff.release(extra).await;
+                }
+                for delegation in &delegation_scopes {
+                    let _ = deps.handoff.release(delegation).await;
+                }
+                return Err(CallerAdmissionError::Admission(
+                    "caller dispatch requires the canonical sender identity".into(),
+                ));
+            }
+            projection.insert("caller_channel".to_string(), serde_json::json!({
+                "actor_id": actor_id,
+                "actor_name": sender_name,
+            }));
             target.semantic_projection_json = serde_json::Value::Object(projection);
             continue;
         }

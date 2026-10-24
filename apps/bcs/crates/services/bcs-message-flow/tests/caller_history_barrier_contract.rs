@@ -57,6 +57,7 @@ async fn dispatching_row(
                     "version": 1,
                     "caller_required": true,
                     "caller_task": "task",
+                    "caller_channel": {"actor_id": "human_alice", "actor_name": "Alice"},
                     "caller_not_after_ms": now_ms() + 300_000,
                 }),
             }],

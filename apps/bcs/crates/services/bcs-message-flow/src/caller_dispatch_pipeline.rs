@@ -136,6 +136,12 @@ pub struct CommittedDispatchFacts {
     pub delivery_commit: Option<DeliveryCommitOrigin>,
     /// Caller task text already protected-projected by admission.
     pub caller_task: String,
+    /// Trusted ordinary sender facts of the ORIGINAL canonical message (the
+    /// row's `caller_channel` projection): they build the envelope's required
+    /// `from` zone. Never the protected subject — that stays confined to the
+    /// `caller_context` extension zone.
+    pub channel_actor_id: String,
+    pub channel_actor_name: String,
     pub control_revision: u64,
     /// Shared-history header for group caller work (spec §6.8
     /// `execution.history`): fixed by the runtime from the row's cutoff and
@@ -156,6 +162,11 @@ pub enum CallerDispatchOutcome {
     Accepted,
     /// Provider explicitly rejected: terminal for this dispatch attempt.
     Rejected { error_code: String, retryable: bool },
+    /// Deterministic never-accepted evidence (wire doc §3.2: 非 2xx 是该次
+    /// 投递的确定性拒绝): a 4xx non-ack or a pre-wire refusal. The send is
+    /// provably absent for this dispatch — the row converges failed without
+    /// arming the stop/terminal arbitration.
+    DefinitelyNotSent,
     /// Transport outcome unknown after the network attempt started.
     OutcomeUnknown,
 }
@@ -810,6 +821,10 @@ impl CallerDispatchPipeline {
             control_revision: facts.control_revision,
             not_after_ms: effective_deadline,
             request_digest: committed_digest.clone(),
+            // 从行内 `caller_channel` 可信事实透传的原始消息发送者——
+            // envelope `from` 的唯一来源；受保护 subject 永不进入普通区。
+            channel_actor_id: facts.channel_actor_id.clone(),
+            channel_actor_name: facts.channel_actor_name.clone(),
             history: facts.history.clone(),
             cross_group_lineage: None,
             callback_timeout_ms: 30_000,
@@ -859,6 +874,15 @@ impl CallerDispatchPipeline {
                 }
                 Ok(CallerDispatchOutcome::Rejected { error_code, retryable })
             }
+            // Wire doc §3.1/§3.2: 非 2xx 是该次投递的确定性拒绝，且 NotSent
+            // 根本没有出栈。两类失败都是"未被受理"的可证明证据，行直接判死
+            // (DefinitelyNotSent{retry:false})，不再折叠成 OutcomeUnknown 让
+            // lane 无限期占道等待一个不会到来的回执。
+            Err(bcs_service_api::port::CallerSendError::NotSent
+            | bcs_service_api::port::CallerSendError::GatewayFailed { retryable: false }) => {
+                Ok(CallerDispatchOutcome::DefinitelyNotSent)
+            }
+            // 超时/连接中断与 5xx(可能来自受理后的中间层)保持保守未知。
             Err(_) => Ok(CallerDispatchOutcome::OutcomeUnknown),
         }
     }

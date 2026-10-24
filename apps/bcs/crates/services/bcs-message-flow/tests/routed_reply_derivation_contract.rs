@@ -81,6 +81,7 @@ async fn started_parent_row(
                     "version": 1,
                     "caller_required": true,
                     "caller_task": "root task text",
+                    "caller_channel": {"actor_id": "human_alice", "actor_name": "Alice"},
                 }),
             }],
         })
