@@ -171,16 +171,24 @@ class BotKnowledgeRepository:
                     .one_or_none()
                 )
                 previous = row.revision if row else 0
-                if expected_revision != previous:
+                current_space = row is not None and row.space_id == bot.space_id
+                # Other-space rows are absent from this space's public view.
+                # Reclaim them with revision=0, but never reset the stored CAS
+                # counter: an old-space request must not match the new state.
+                if expected_revision != (previous if current_space else 0):
                     raise KnowledgeError("REVISION_CONFLICT")
-                if row is not None and row.space_id != bot.space_id:
-                    raise KnowledgeError("SPACE_MISMATCH", 403)
-                if value and (row is None or not row.enabled):
+                if row is None and not value:
+                    # Disabling an absent choice is a no-op, not a tombstone.
+                    return binding_view(
+                        Binding(kb_id=kb_id, enabled=False, revision=0), bot
+                    )
+                if value and (not current_space or not row.enabled):
                     count = (
                         session.query(Binding)
                         .filter(
                             Binding.bot_pk == bot.id,
                             Binding.env == scope.env,
+                            Binding.space_id == bot.space_id,
                             Binding.enabled.is_(True),
                         )
                         .count()
@@ -198,7 +206,8 @@ class BotKnowledgeRepository:
                         updated_by=actor_id,
                     )
                     session.add(row)
-                changed = row.enabled != value
+                changed = not current_space or row.enabled != value
+                row.space_id = bot.space_id
                 row.enabled = value
                 if changed or not previous:
                     row.revision += 1

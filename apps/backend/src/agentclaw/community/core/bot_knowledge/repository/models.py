@@ -5,6 +5,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     Integer,
+    Index,
     String,
     UniqueConstraint,
 )
@@ -33,6 +34,16 @@ class BotKnowledgeBindingModel(Base):
         UniqueConstraint(
             "avernet_tenant", "env", "bot_pk", "kb_id", name="uk_bot_knowledge_binding"
         ),
+        Index(
+            "idx_bk_enabled",
+            "avernet_tenant",
+            "env",
+            "bot_pk",
+            "space_id",
+            "enabled",
+            "kb_id",
+        ),
+        Index("idx_bk_page", "avernet_tenant", "env", "bot_pk", "space_id", "id"),
     )
 
 
