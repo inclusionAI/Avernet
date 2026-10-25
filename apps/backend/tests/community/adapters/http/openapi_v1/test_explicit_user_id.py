@@ -581,7 +581,8 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # BBS Bot skill-install repair adds one Bot-path operation: 197 -> 198.
 # The genome registry (RSI-03) adds thirteen path-addressed, user-scoped
 # operations under /bots/{bot_id}/genome: path 198 -> 211.
-_BOT_ID_PLACEMENT = {"path": 211, "query": 1, "none": 126}
+# The configured engine default-model read adds one Bot-path operation: 211 -> 212.
+_BOT_ID_PLACEMENT = {"path": 212, "query": 1, "none": 126}
 
 
 def _schema() -> dict:
@@ -791,7 +792,8 @@ def test_the_pinned_number_of_operations_take_it():
     # acli operations add four path-addressed, user-scoped ones: 265 -> 269.
     # DWS rollout eligibility also requires the explicit caller: 269 -> 270.
     # The genome registry (RSI-03) adds thirteen: 270 -> 283.
-    assert len(taking) == 283
+    # The default-model read adds one Bot-addressed user-scoped operation.
+    assert len(taking) == 284
 
 
 def test_the_exempt_operations_take_none():

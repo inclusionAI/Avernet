@@ -460,7 +460,10 @@ _GRANT_CHECKED_SUBGROUPS = [
 # their order relative to each other and to `_SUBGROUPS` is free. They are still
 # mounted before the bots router for the one rule stated above, not because any
 # of them needs it.
+from .engine_runtime.engine.default_model import router as engine_default_model_router
+
 _ENGINE_RUNTIME_GROUPS = [
+    engine_default_model_router,
     engine_sessions_router,
     engine_engine_router,
     engine_models_router,

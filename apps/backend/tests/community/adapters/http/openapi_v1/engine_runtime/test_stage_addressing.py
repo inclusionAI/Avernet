@@ -489,7 +489,8 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
     # their bot-first address; engine restart, default-config and nodes also
     # have no legacy alias. Session File is OpenAPI-only, yielding 28 current
     # + 16 retiring operations.
-    assert len(engine_runtime) == 44
+    # The default-model read shares the existing owner and stage addressing.
+    assert len(engine_runtime) == 45
     assert sorted(carrying_stage) == sorted(
         set(engine_runtime) | _STAGE_ADDRESSED_ELSEWHERE
     ), (
