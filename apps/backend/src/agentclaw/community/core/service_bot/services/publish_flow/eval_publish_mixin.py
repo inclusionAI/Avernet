@@ -10,7 +10,7 @@ from agentclaw.community.core.service_bot.repository.models import (
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
 )
-from agentclaw.community.core.service_bot.baas_service_errors import BaasServiceError
+from agentclaw.community.core.service_bot.baas_service_errors import BaasBotNotFoundError
 from agentclaw.community.core.service_bot.services.deploy.service_publish_env import (
     service_publish_extra_envs,
     service_publish_template_config,
@@ -269,17 +269,7 @@ class EvalPublishMixin:
         # non-terminal op → adopt-by-query), mirroring execute_restart.
         try:
             op = await self._operation_runner.acquire_workflow(op, _issue)
-        except BaasServiceError as error:
-            response = getattr(error, "response", None)
-            if response is None or response.status_code != 404:
-                raise
-            try:
-                payload = response.json()
-            except ValueError:
-                raise error
-            detail = payload.get("detail") if isinstance(payload, dict) else None
-            if not isinstance(detail, dict) or detail.get("error_code") != "BOT_NOT_FOUND":
-                raise
+        except BaasBotNotFoundError:
             # Teardown's postcondition already holds. Complete the same ledger
             # operation so the durable task does not retry an absent target.
             logger.info(

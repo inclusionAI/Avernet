@@ -117,6 +117,7 @@ def run(coro):
         (400, {'detail': {'error_code': 'INVALID_REQUEST'}}, False),
         (404, ['BOT_NOT_FOUND'], False),
         (404, {'detail': 'BOT_NOT_FOUND'}, False),
+        (404, '<html>BOT_NOT_FOUND</html>', False),
     ],
 )
 def test_eval_teardown_completes_only_structurally_absent_bot(
@@ -130,8 +131,9 @@ def test_eval_teardown_completes_only_structurally_absent_bot(
     service = object.__new__(BaasService)
     service._tenant = 'tenant'
     service._http = Mock()
+    body = {'content': payload} if isinstance(payload, str) else {'json': payload}
     service._http.post.return_value = httpx.Response(
-        status, json=payload, request=httpx.Request('POST', 'https://baas.test/bots/b/destroy')
+        status, **body, request=httpx.Request('POST', 'https://baas.test/bots/b/destroy')
     )
     flow = EvalPublishMixin()
     flow._baas_service = service
@@ -143,10 +145,28 @@ def test_eval_teardown_completes_only_structurally_absent_bot(
     else:
         with pytest.raises(BaasServiceError) as raised:
             run(flow.execute_eval_teardown(publish_id=17, bot_uuid='b'))
-        assert raised.value.response.status_code == status
+        assert raised.value.__cause__.response.status_code == status
     op = ledger.get_latest_by_kind(17, PublishOperationKind.EVAL_TEARDOWN.value, PublishStage.EVAL.value)
     assert (op.state == PublishOperationState.COMPLETED.value) is already_absent
     service._http.post.assert_called_once()
+
+
+def test_eval_teardown_does_not_complete_on_transport_failure(ledger, baas):
+    from agentclaw.community.core.service_bot.baas_service_errors import BaasServiceError
+    from agentclaw.community.core.service_bot.services.baas_service import BaasService
+    from agentclaw.community.core.service_bot.services.publish_flow.eval_publish_mixin import EvalPublishMixin
+
+    service = object.__new__(BaasService)
+    service._tenant = 'tenant'
+    service._http = Mock()
+    service._http.post.side_effect = httpx.ConnectError('unavailable')
+    flow = EvalPublishMixin()
+    flow._baas_service = service
+    flow._operation_runner = _runner(ledger, baas)
+    with pytest.raises(BaasServiceError):
+        run(flow.execute_eval_teardown(publish_id=17, bot_uuid='b'))
+    op = ledger.get_latest_by_kind(17, PublishOperationKind.EVAL_TEARDOWN.value, PublishStage.EVAL.value)
+    assert op.state == PublishOperationState.PENDING.value
 
 
 # ── open / resume ─────────────────────────────────────────────────────────────
