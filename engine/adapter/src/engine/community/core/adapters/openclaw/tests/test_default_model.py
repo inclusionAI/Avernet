@@ -8,6 +8,21 @@ from engine.community.core.adapters.openclaw.default_model import configured_def
 from engine.community.core.adapters.openclaw.models import OpenClawModelsAdapter
 from engine.community.core.engine.exceptions import CapabilityNotSupportedError
 from engine.community.plugins.openclaw._models import _ModelsPortMixin
+from engine.community.core.models.tests.default_model_contract import DefaultModelContract
+
+
+class TestOpenClawDefaultModelContract(DefaultModelContract):
+    @pytest.fixture
+    def default_model_factory(self):
+        def factory(mode):
+            port = SimpleNamespace(model_config_snapshot=AsyncMock(return_value=snapshot(
+                {"agents": {"defaults": {"model": "provider/model"}}}
+                if mode == "configured" else {}
+            )))
+            if mode == "failed":
+                port.model_config_snapshot.side_effect = ConnectionError("unavailable")
+            return OpenClawModelsAdapter(port)
+        return factory
 
 
 def snapshot(parsed):
