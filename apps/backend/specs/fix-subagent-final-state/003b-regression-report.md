@@ -24,9 +24,13 @@ credential bodies.
 
 - First run: 4076 passed, 7 failed. Six failures exposed an attributable
   approval/ack call-site omission and were repaired.
-- Current OpenClaw client suite after repair and review fixes: 129 passed.
-- Full Engine rerun excluding one proven baseline-only macOS ACLI process-group
-  test: **4082 passed, 6 deselected**, total line coverage **95%**.
+- Final post-rebase OpenClaw client suite after repair and review fixes:
+  130 passed.
+- Final full Engine rerun excluding one proven baseline-only macOS ACLI
+  process-group test: **4089 passed, 6 deselected**, total line coverage
+  **95.55%**.
+- The commit-based report gate passed with **100% case pass rate
+  (4089/4089)** and **100% changed-line coverage (154/154)**.
 - The ACLI test fails identically on an untouched detached `github/dev`
   worktree. It depends on Linux `/proc/<pid>/cmdline`, which is absent on the
   Darwin test host; no ACLI source is changed by this branch.

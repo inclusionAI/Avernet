@@ -26,12 +26,16 @@ iteration: 1
 - New reproduction tests failed before the implementation: 2 failed.
 - Gateway client suite: 54 passed.
 - All OpenClaw client tests after ack compatibility repair: 123 passed.
-- Engine full suite excluding the one proven baseline-only macOS ACLI process
-  test: 4082 passed, 6 deselected, 101 warnings; total line coverage 95%.
+- Final post-rebase OpenClaw client suite: 130 passed.
+- Final Engine full suite excluding the one proven baseline-only macOS ACLI
+  process test: 4089 passed, 6 deselected, 101 warnings; total line coverage
+  95.55%.
 - The excluded ACLI test fails identically on an untouched detached
   `github/dev` worktree and does not touch OpenClaw gateway code.
 - Targeted static checks (`F,E117,E701,E702,E712`), Python compilation,
-  `git diff --check`, and the 1000-line production-file limit pass.
+  commit-based SAST, `git diff --check`, and the 1000-line production-file
+  limit pass.
+- Commit-based report gate: case pass rate 100% (4089/4089), total line
+  coverage 95.55%, and changed-line coverage 100% (154/154).
 
-Commit-based SAST, changed-line coverage, rebase, and remote PR checks are
-recorded after the local changes are committed.
+Rebase and remote PR checks are recorded after publishing the branch.
