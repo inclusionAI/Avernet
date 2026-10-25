@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import asdict
 from typing import Any
 
@@ -33,8 +34,22 @@ class BbsTopicTagTaskService(TopicTagTaskExecutorProtocol):
         if task.name != BBS_TOPIC_TAG_TASK_NAME:
             raise ValueError(f"unknown BBS Topic-tag task: {task.name!r}")
 
-        result = await self._topic_tags.execute()
-        logger.info("[bbs-topic-tag][task] completed task=%s", task.name)
+        logger.info("[bbs-topic-tag][task] starting task=%s", task.name)
+        started_at = time.perf_counter()
+        try:
+            result = await self._topic_tags.execute()
+        except Exception:
+            logger.exception("[bbs-topic-tag][task] failed task=%s", task.name)
+            raise
+        duration_ms = int((time.perf_counter() - started_at) * 1000)
+        logger.info(
+            "[bbs-topic-tag][task] completed task=%s topics_examined=%s "
+            "topics_tagged=%s duration_ms=%s",
+            task.name,
+            result.topics_examined,
+            result.topics_tagged,
+            duration_ms,
+        )
         return {
             "task_name": task.name,
             "success": True,
