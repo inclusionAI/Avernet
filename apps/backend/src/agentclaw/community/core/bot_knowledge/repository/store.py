@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from injector import inject
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
@@ -64,6 +64,11 @@ def require_space(
     space = (space_query.with_for_update() if lock else space_query).one_or_none()
     if space is None:
         raise KnowledgeError("SPACE_NOT_FOUND", 404)
+    # Native EditorPolicy revokes editors on Team membership only. Personal
+    # explicit editors need not have a Space-member row (nor does ownership
+    # derive from one). Keep the Space existence/deletion check for both.
+    if space.space_type == "PERSONAL":
+        return
     required = {bot.owner_id} if include_owner else set()
     if actor_id is not None:
         required.add(actor_id)
@@ -114,6 +119,30 @@ def require_editable(session, bot: BotModel, *, lock: bool = False) -> None:
             BotPublishModel.publish_bot_id == bot.bot_id,
             BotPublishModel.owner_id == bot.entity_id,
         )
+        # Publish rows have no tenant column. A retained source Bot (including
+        # a retired source PK in a legacy recovery) is the tenant authority.
+        # Do not rebind legacy records to this Bot's current PK. A hard-deleted
+        # source has no trustworthy tenant attribution: fail closed rather than
+        # accidentally exposing an older draft by dropping an orphan successor.
+        source_table = BotModel.__table__
+        source_exists = (
+            select(source_table.c.id)
+            .where(source_table.c.id == BotPublishModel.source_bot_pk)
+            .exists()
+        )
+        unresolved = query.filter(~source_exists)
+        if (unresolved.with_for_update() if lock else unresolved).first() is not None:
+            raise KnowledgeError("BOT_DRAFT_REQUIRED", 403)
+        trusted_source = (
+            select(BotModel.id)
+            .where(
+                BotModel.id == BotPublishModel.source_bot_pk,
+                BotModel.avernet_tenant == bot.avernet_tenant,
+                BotModel.env == bot.env,
+            )
+            .exists()
+        )
+        query = query.filter(trusted_source)
     query = query.order_by(BotPublishModel.version.desc(), BotPublishModel.id.desc())
     current = (query.with_for_update() if lock else query).first()
     if current is None or current.status != PublishStatus.DRAFT:

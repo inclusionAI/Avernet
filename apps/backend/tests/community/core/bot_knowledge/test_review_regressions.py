@@ -176,7 +176,9 @@ def test_latest_draft_queries_use_matching_indexes(knowledge, default_bot):
         set_enabled(service, BotKnowledgeScope(bot_id, "owner", "dev"))
     finally:
         event.remove(engine, "before_cursor_execute", capture)
-    assert len(queries) == 2
+    # Legacy default also checks for unattributable sources, before and inside
+    # the transaction. Both bounded query shapes must retain the same index.
+    assert len(queries) == (4 if default_bot else 2)
     index = (
         "idx_publish_current_default" if default_bot else "idx_publish_current_source"
     )
@@ -188,6 +190,10 @@ def test_latest_draft_queries_use_matching_indexes(knowledge, default_bot):
                 ).all()
             )
             assert index in plan and "TEMP B-TREE" not in plan
+            if default_bot:
+                # Source provenance uses primary-key probes, not a scan of
+                # every Bot belonging to a tenant for every draft check.
+                assert "SCAN ac_bots" not in plan
 
 
 def test_selection_queries_use_enabled_and_cursor_indexes(knowledge):

@@ -1,0 +1,5 @@
+[
+  {"bot_id":"bk-live-personal","owner_id":"bk_live_owner","env":"dev","space_id":3087001,"kb_ids":["kb", "second"]},
+  {"bot_id":"bk-live-team","owner_id":"bk_live_owner","env":"dev","space_id":3087002,"kb_ids":["kb"]},
+  {"bot_id":"default","owner_id":"bk_live_owner","env":"dev","space_id":3087002,"kb_ids":["kb"]}
+]
