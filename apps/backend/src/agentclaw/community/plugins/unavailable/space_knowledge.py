@@ -80,11 +80,20 @@ class DisabledSpaceKnowledgeSync(UnavailableSpaceKnowledgeSync):
 
 
 @plugin_impl(
-    mode=Mode.PROD, rationale="Membership delivery disabled until a sink is configured"
+    mode=Mode.LOCAL,
+    flavor=Flavor.STUB,
+    rationale="Membership sink unavailable locally; never acknowledge delivery",
 )
-class DisabledSpaceMembershipSink(SpaceMembershipSink):
+class UnavailableSpaceMembershipSink(SpaceMembershipSink):
     def is_enabled(self) -> bool:
         return False
 
     def apply_snapshot(self, snapshot) -> None:
         raise SpaceKnowledgeError("SPACE_SYNC_UNAVAILABLE")
+
+
+@plugin_impl(
+    mode=Mode.PROD, rationale="Membership delivery disabled until a sink is configured"
+)
+class DisabledSpaceMembershipSink(UnavailableSpaceMembershipSink):
+    pass

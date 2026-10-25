@@ -43,3 +43,18 @@ def test_consumer_applies_then_acknowledges_exact_snapshot(world):
     )
     sink.apply_snapshot.assert_called_once_with(snapshot)
     repository.acknowledge.assert_called_once()
+
+
+def test_local_membership_sink_is_classified_and_never_acknowledges():
+    from agentclaw.community.plugin_api.impl_registry import IMPL_REGISTRY, Flavor, Mode
+    from agentclaw.community.plugins.unavailable.space_knowledge import (
+        UnavailableSpaceMembershipSink,
+    )
+
+    entry = next(e for e in IMPL_REGISTRY if e.cls is UnavailableSpaceMembershipSink)
+    assert entry.protocol is SpaceMembershipSink
+    assert entry.mode is Mode.LOCAL and entry.flavor is Flavor.STUB
+    sink = UnavailableSpaceMembershipSink()
+    assert sink.is_enabled() is False
+    with pytest.raises(SpaceKnowledgeError, match="^SPACE_SYNC_UNAVAILABLE$"):
+        sink.apply_snapshot(SpaceMembershipSnapshot("dev", 7, {"revision": 1}))
