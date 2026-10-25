@@ -15,11 +15,16 @@ actor；资源使用不可变 entity。上传/删除在编辑 guard 内复核原
 人员、空间和授权语义保持不变。旧 API 按 skill_id 查询时，从持久资产反查 Bot 后
 仍执行相同权限检查，不能用资源 locator 判定当前调用者是 Owner。
 
-此阶段不开放转交。历史 SkillService/SkillSetService 的直接元数据写入和模板查询
-尚需逐入口核验；不要把核心 Local Skill 链路已通过测试理解为所有 Legacy Skill
-操作均已转交就绪。工厂原有 entity 参数保留其契约，不在工厂内部将其重新解释为
-可变 Owner；Legacy 入参解析在后续 API 兼容阶段统一处理。保持现有 Engine layout
-contract 对物理路径的所有权。
+B6 继续保持转交入口关闭。Legacy BFF Router 已按职责拆分，原 skills.py /
+skillsets.py 保留 Router 和历史导入接口；共享请求解析先解析 Bot，将稳定 entity
+用于资源路径，当前 Owner 仅用于元数据和权限。上传与基于持久 Skill 的删除也使用
+同一身份边界。SkillSetService 按职责拆分为行为模块，Default 模板查询使用 entity。
+Factory 的显式 entity 优先于历史 user_id 路由别名；Pool 路径不再使用当前 Owner。
+真实 actor 仍由每个命令显式传入，不能由上述路径参数获得人员授权。
+共享/离线/无 Bot 的历史目录流保留显式地址，不因此授予活跃 Bot 的访问权限。
+DB 失败或歧义不能当作 Bot 不存在后猜测资源地址。路由顺序及响应合同由 Legacy
+route snapshot 和 endpoint 测试固定。此变更不宣称真实转交事务、凭证及所有消费者
+已完成验收；后续 B7 单独实现和联合验证。
 
 ## 1. 从 OpenAPI 进入
 
