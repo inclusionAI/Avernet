@@ -70,3 +70,13 @@ state-preserving conversion before running this implementation.
 
 ## Scope reduction (2026-10-24)
 ECB automatic initialization compensation was explicitly removed from delivery. The existing single initialization, request idempotency, status projection and legacy ECB internal capabilities remain. This does not remove the separately approved durable TC membership delivery.
+
+## Registered endpoint coverage (2026-10-25)
+All three new HTTP routes are registered in the shared endpoint framework with
+one successful member case and one denied non-member case each. The framework
+owns HTTP invocation on the full application; cases use real space membership,
+orchestration and snapshot persistence, substituting only external provider ports.
+Success assertions pin authenticated identity (ignoring forged actor query input),
+creation acknowledgement, response DTOs and forwarded pagination. Denied cases
+assert no provider call. This complements rather than replaces the closed-default
+lifecycle and provider contract suites. No coverage-baseline exemption is added.
