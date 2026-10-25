@@ -80,3 +80,8 @@ Success assertions pin authenticated identity (ignoring forged actor query input
 creation acknowledgement, response DTOs and forwarded pagination. Denied cases
 assert no provider call. This complements rather than replaces the closed-default
 lifecycle and provider contract suites. No coverage-baseline exemption is added.
+
+Full-suite collection also requires unique module names under non-package test
+directories. The HTTP and service suites use `test_space_knowledge_router.py` and
+`test_space_knowledge_service.py`, avoiding existing `test_router` / `test_service`
+modules without changing pytest collection mode or excluding any tests.
