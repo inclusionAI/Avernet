@@ -16,6 +16,7 @@ consumes:
   - PassportPlugin
   - RuntimePassportTokenUpdaterProtocol
 internal_dependencies:
+  - agentclaw.community.core.bot_management.owner_handoff
   - agentclaw.community.core.base
   - agentclaw.community.core.repository
   - agentclaw.community.core.bot_management

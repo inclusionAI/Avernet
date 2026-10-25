@@ -56,3 +56,14 @@ part of its private-session authorization contract; preserve it and the stable
 binding_id / target identity rather than grant the new Owner private-user
 access. Do not rewrite historical work-order actors or notifications. Active
 Bot approval work must be classified/blocked or explicitly handed over by B7.
+
+## Implemented B7 contract
+
+The handoff coordinator lives within Bot management; see
+[rollout and command/state contracts](rollout.md). The confirmed policy removes
+the old Owner's explicit collaborator row and preserves other collaborators.
+Unfinished Bot approval work blocks transfer; immutable history is unchanged.
+Capability negotiation, generation fencing, strict runtime acknowledgements and
+explicit old-generation retirement precede final Owner commit. Production entry
+remains disabled; real provider/session and deferred consumer acceptance are
+release gates, not claims made by local fixtures.

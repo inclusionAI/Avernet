@@ -42,18 +42,23 @@ class ExecutionIdentityRepository(ExecutionIdentityRepositoryProtocol):
         self._db = db
 
     @staticmethod
-    def _state_query(session, *, bot_pk: int, status: ExecutionIdentityStatus, env: str | None = None):
+    def _state_query(
+        session, *, bot_pk: int, status: ExecutionIdentityStatus, env: str | None = None
+    ):
         return (
             session.query(BotExecutionIdentityBindingModel)
             .filter(
                 BotExecutionIdentityBindingModel.bot_pk == bot_pk,
-                BotExecutionIdentityBindingModel.env == (get_current_env() if env is None else env),
+                BotExecutionIdentityBindingModel.env
+                == (get_current_env() if env is None else env),
                 BotExecutionIdentityBindingModel.status == status.value,
             )
             .order_by(BotExecutionIdentityBindingModel.id.desc())
         )
 
-    def get_active(self, *, bot_pk: int, env: str | None = None) -> ExecutionIdentityBinding | None:
+    def get_active(
+        self, *, bot_pk: int, env: str | None = None
+    ) -> ExecutionIdentityBinding | None:
         with self._db.orm_session() as session:
             row = self._state_query(
                 session, bot_pk=bot_pk, status=ExecutionIdentityStatus.ACTIVE, env=env
@@ -79,12 +84,24 @@ class ExecutionIdentityRepository(ExecutionIdentityRepositoryProtocol):
         with self._db.transactional_orm_session() as session:
             # The Bot row is the aggregate lock: only one PENDING transition is
             # admitted for a Bot, even when two operators race.
-            session.query(BotModel).filter(
-                BotModel.id == bot_pk, BotModel.env == env
-            ).with_for_update().one()
-            pending = self._state_query(
-                session, bot_pk=bot_pk, status=ExecutionIdentityStatus.PENDING
-            ).with_for_update().first()
+            bot = (
+                session.query(BotModel)
+                .filter(BotModel.id == bot_pk, BotModel.env == env)
+                .with_for_update()
+                .one()
+            )
+            from agentclaw.community.core.bot_management.owner_handoff.guard import (
+                assert_bot_mutable,
+            )
+
+            assert_bot_mutable({"ext": bot.ext})
+            pending = (
+                self._state_query(
+                    session, bot_pk=bot_pk, status=ExecutionIdentityStatus.PENDING
+                )
+                .with_for_update()
+                .first()
+            )
             if pending is not None:
                 raise ExecutionIdentityChangeInProgressError(
                     f"Bot {bot_pk} already has a pending execution identity change"
@@ -113,11 +130,16 @@ class ExecutionIdentityRepository(ExecutionIdentityRepositoryProtocol):
         modifier_id: str,
     ) -> ExecutionIdentityBinding:
         with self._db.transactional_orm_session() as session:
-            row = session.query(BotExecutionIdentityBindingModel).filter(
-                BotExecutionIdentityBindingModel.id == binding_id,
-                BotExecutionIdentityBindingModel.status
-                == ExecutionIdentityStatus.PENDING.value,
-            ).with_for_update().one_or_none()
+            row = (
+                session.query(BotExecutionIdentityBindingModel)
+                .filter(
+                    BotExecutionIdentityBindingModel.id == binding_id,
+                    BotExecutionIdentityBindingModel.status
+                    == ExecutionIdentityStatus.PENDING.value,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
             if row is None:
                 raise ExecutionIdentityNotFoundError("Pending binding not found")
             row.authorization_id = authorization_id
@@ -134,22 +156,31 @@ class ExecutionIdentityRepository(ExecutionIdentityRepositoryProtocol):
     ) -> ExecutionIdentityBinding:
         env = get_current_env()
         with self._db.transactional_orm_session() as session:
-            pending = session.query(BotExecutionIdentityBindingModel).filter(
-                BotExecutionIdentityBindingModel.id == binding_id,
-                BotExecutionIdentityBindingModel.env == env,
-                BotExecutionIdentityBindingModel.status
-                == ExecutionIdentityStatus.PENDING.value,
-            ).with_for_update().one_or_none()
+            pending = (
+                session.query(BotExecutionIdentityBindingModel)
+                .filter(
+                    BotExecutionIdentityBindingModel.id == binding_id,
+                    BotExecutionIdentityBindingModel.env == env,
+                    BotExecutionIdentityBindingModel.status
+                    == ExecutionIdentityStatus.PENDING.value,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
             if pending is None:
                 raise ExecutionIdentityNotFoundError("Pending binding not found")
             session.query(BotModel).filter(
                 BotModel.id == pending.bot_pk, BotModel.env == env
             ).with_for_update().one()
-            active_rows = self._state_query(
-                session,
-                bot_pk=int(pending.bot_pk),
-                status=ExecutionIdentityStatus.ACTIVE,
-            ).with_for_update().all()
+            active_rows = (
+                self._state_query(
+                    session,
+                    bot_pk=int(pending.bot_pk),
+                    status=ExecutionIdentityStatus.ACTIVE,
+                )
+                .with_for_update()
+                .all()
+            )
             for active in active_rows:
                 active.status = ExecutionIdentityStatus.SUPERSEDED.value
                 active.modifier_id = modifier_id
@@ -164,11 +195,16 @@ class ExecutionIdentityRepository(ExecutionIdentityRepositoryProtocol):
         self, *, binding_id: int, failure_reason: str, modifier_id: str
     ) -> None:
         with self._db.transactional_orm_session() as session:
-            row = session.query(BotExecutionIdentityBindingModel).filter(
-                BotExecutionIdentityBindingModel.id == binding_id,
-                BotExecutionIdentityBindingModel.status
-                == ExecutionIdentityStatus.PENDING.value,
-            ).with_for_update().one_or_none()
+            row = (
+                session.query(BotExecutionIdentityBindingModel)
+                .filter(
+                    BotExecutionIdentityBindingModel.id == binding_id,
+                    BotExecutionIdentityBindingModel.status
+                    == ExecutionIdentityStatus.PENDING.value,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
             if row is None:
                 return
             row.status = ExecutionIdentityStatus.FAILED.value

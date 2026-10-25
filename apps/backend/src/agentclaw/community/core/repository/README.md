@@ -110,6 +110,7 @@ in a comment, rather than an exception to the rule.
 ```yaml
 purpose: "Every repository contract (protocols/) and implementation (implementations/) in the backend, grouped by domain. Persistence only — no services, no routers, no domain policy."
 provides:
+  - OwnerHandoffRepository
   - BuildIgnoreRepository
   - BuildIgnoreRepositoryProtocol
   - BotCommonConfigRepository
@@ -320,6 +321,7 @@ consumes:
   - get_server_host               # ditto
   - get_current_avernet_tenant    # tenant scoping (utils.avernet_tenant)
 internal_dependencies:
+  - agentclaw.community.core.bot_management.owner_handoff
   - agentclaw.community.kernel.build_ignore
   - agentclaw.community.core.digital_employee.contracts
   - agentclaw.community.plugin_api.database    # DatabasePlugin — the injected session seam

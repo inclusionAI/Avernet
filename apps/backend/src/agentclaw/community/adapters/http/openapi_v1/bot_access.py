@@ -141,6 +141,26 @@ def require_check(rule: Check) -> Callable[..., AsyncIterator[None]]:
             # its three siblings rather than making this one a special case.
             raise BotAccessRefusedError(f"bot {for_log(bot_id)} not found")
 
+        if request.method not in _READ_METHODS:
+            from agentclaw.community.core.bot_management.owner_handoff.guard import (
+                assert_bot_mutable,
+            )
+            from agentclaw.community.core.bot_management.owner_handoff.contracts import (
+                HandoffError,
+            )
+
+            bots = request.app.state.injector.get(BotRepository)
+            addressed = await asyncio.to_thread(
+                BotAddressResolver(bots).resolve,
+                bot_id=bot_id,
+                legacy_owner_id=owner_id,
+            )
+            bot = addressed.bot
+            try:
+                assert_bot_mutable(bot)
+            except HandoffError as exc:
+                raise BotAccessRefusedError("Bot is temporarily read-only") from exc
+
         if rule.edit_lock is not None:
             await _require_edit_lock(
                 request,
@@ -160,7 +180,11 @@ def require_check(rule: Check) -> Callable[..., AsyncIterator[None]]:
         # writes_no_audit_row`` fails if anyone does.
         yield
 
-        if _succeeded(request) and _is_audited(request) and level < PermissionLevel.OWNER:
+        if (
+            _succeeded(request)
+            and _is_audited(request)
+            and level < PermissionLevel.OWNER
+        ):
             await _audit(
                 request,
                 bot_id=bot_id,
@@ -311,7 +335,11 @@ def _level(
     members keeping their view and chat.
     """
     try:
-        bot = BotAddressResolver(bots).resolve(bot_id=bot_id, legacy_owner_id=owner_id).bot
+        bot = (
+            BotAddressResolver(bots)
+            .resolve(bot_id=bot_id, legacy_owner_id=owner_id)
+            .bot
+        )
     except Exception:
         logger.exception(
             "[bot_access] bot lookup failed for bot=%s; refusing", for_log(bot_id)
@@ -329,8 +357,7 @@ def _level(
             )
         except Exception:
             logger.exception(
-                "[bot_access] explicit collaborator lookup failed for bot=%s; "
-                "refusing",
+                "[bot_access] explicit collaborator lookup failed for bot=%s; refusing",
                 for_log(bot_id),
             )
             return PermissionLevel.NONE
