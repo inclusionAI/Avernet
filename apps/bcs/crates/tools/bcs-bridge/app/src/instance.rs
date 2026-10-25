@@ -278,6 +278,7 @@ pub async fn start_daemon(config_path: &Path, runtime_dir: &Path, cwd: Option<&P
             if response.record.pid == pid && response.state == "running" {
                 pending.0.take();
                 println!("Bridge started in background (PID {pid}). Log: {}", paths.file("bridge.log").display());
+                println!("Process initialized; use bcs-bridge status to check Bot connectivity.");
                 return Ok(());
             }
         }
