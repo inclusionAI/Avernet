@@ -6,4 +6,4 @@
 - [x] Implement trusted parent-resume transition and diagnostic logs.
 - [x] Run focused and full engine checks.
 - [x] Complete review and regression reports.
-- [ ] Rebase onto latest `github/dev` and create a GitHub PR to `dev`.
+- [x] Rebase onto latest `github/dev` and create a GitHub PR to `dev`.
