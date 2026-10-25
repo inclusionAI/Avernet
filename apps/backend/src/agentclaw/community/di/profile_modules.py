@@ -55,6 +55,9 @@ def _common_test_doubles() -> list[Module]:
     from agentclaw.community.di.modules.infrastructure.test.bot_publish_approval import (
         TestBotPublishApprovalModule,
     )
+    from agentclaw.community.di.modules.infrastructure.test.evaluation_gate import (
+        TestEvaluationGateModule,
+    )
     from agentclaw.community.di.modules.infrastructure.test.eval_env import (
         TestEvalEnvModule,
     )
@@ -78,6 +81,9 @@ def _common_test_doubles() -> list[Module]:
         TestApprovalWorkflowModule(),
         TestStaffDeptModule(),
         TestBotPublishApprovalModule(),
+        # 评测门禁 seam——测试列 allow-all（未命中）；需要门禁行为的用例
+        # 显式注入可编程 fake。
+        TestEvaluationGateModule(),
         # WorkspaceHostingService stub (offline DIMA) — corp-free.
         TestingAicodingModule(),
         # SQLite + per-module repos (TestingDatabaseModule owns the SQLite engine;
@@ -340,6 +346,9 @@ def modules_for(profile: DeployProfile) -> list[Module]:
         from agentclaw.community.di.modules.infrastructure.community.bot_publish_approval import (
             CommunityBotPublishApprovalModule,
         )
+        from agentclaw.community.di.modules.infrastructure.community.evaluation_gate import (
+            CommunityEvaluationGateModule,
+        )
         from agentclaw.community.di.modules.infrastructure.community.notify import (
             CommunityNotifyModule,
         )
@@ -384,6 +393,9 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             CommunityApprovalWorkflowModule(),
             CommunityStaffDeptModule(),
             CommunityBotPublishApprovalModule(),
+            # 评测门禁 seam（PRD 工作台-评测）——community 形态恒不命中，
+            # 原发布语义不变。
+            CommunityEvaluationGateModule(),
             # Notify sender — no-op (no DingTalk in community; B11 Phase A).
             CommunityNotifyModule(),
             # 评测环境 Prod 绑定。
