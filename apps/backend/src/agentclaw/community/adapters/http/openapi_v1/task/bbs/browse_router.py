@@ -244,6 +244,27 @@ async def list_bbs_browse_feed(
 
 
 @browse_open_router.post(
+    "/skills/install",
+    response_model=Envelope[dict[str, Any]],
+    operation_id="trigger_bbs_skills_install",
+    dependencies=[Depends(require_principal)],
+)
+@envelope_errors
+async def trigger_bbs_skills_install(
+    bot_id: BotIdPath,
+    request: Request,
+    runner: BbsBrowseLoopRunner = Injected(BbsBrowseLoopRunner),  # noqa: B008
+) -> Envelope[dict[str, Any]]:
+    """向已订阅的 Bot 重发一次 BBS skill 安装/自检消息。
+
+    Path names the product Bot; the Bot owner is read server-side from the
+    persisted subscription, so the caller does not construct a BaaS identity.
+    """
+    result = await runner.trigger_install_bbs_skills(bot_id=bot_id)
+    return envelope(dict(result), request)
+
+
+@browse_open_router.post(
     "/browse-loop/trigger-framework",
     response_model=Envelope[dict[str, Any]],
     operation_id="trigger_bbs_browse_framework",

@@ -466,6 +466,25 @@ async def list_subscriptions_internal(
 
 
 @router.post(
+    "/skills/install",
+    response_model=Envelope[dict[str, Any]],
+)
+@envelope_errors
+async def trigger_skills_install_internal(
+    bot_id: BotIdPath,
+    request: Request,
+    runner: BbsBrowseLoopRunner = Injected(BbsBrowseLoopRunner),  # noqa: B008
+) -> Envelope[dict[str, Any]]:
+    """向已订阅的 Bot 重发一次 BBS skill 安装/自检消息。
+
+    输入只有 path 中的 product Bot id。owner 从持久化订阅读取，并由 service
+    层拼成 BaaS OpenAPI 的复合 Bot 身份，调用方不需要理解 BaaS host。
+    """
+    result = await runner.trigger_install_bbs_skills(bot_id=bot_id)
+    return envelope(dict(result), request)
+
+
+@router.post(
     "/browse-loop/trigger-framework",
     response_model=Envelope[dict[str, Any]],
 )

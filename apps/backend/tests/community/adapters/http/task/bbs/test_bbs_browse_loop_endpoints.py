@@ -24,6 +24,7 @@ from agentclaw.community.adapters.http.task.bbs.router import (
     trigger_cron_remove_internal,
     trigger_framework_browse_internal,
     trigger_self_browse_internal,
+    trigger_skills_install_internal,
     upsert_subscription_internal,
 )
 from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
@@ -313,6 +314,53 @@ async def test_list_subscriptions_routes_to_owner_user_id_listing():
         service=Service(),
     )
     assert payload.data is not None and payload.data.total == 1
+
+
+class _FakeSkillInstallRunner:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def trigger_install_bbs_skills(self, *, bot_id: str):
+        self.calls.append(bot_id)
+        return {
+            "run_id": "run_x",
+            "session_id": "sess_x",
+            "mode": "openclaw",
+            "status": "submitted",
+            "action": "install_skills",
+        }
+
+
+@pytest.mark.asyncio
+async def test_trigger_skills_install_internal_delegates_to_runner():
+    runner = _FakeSkillInstallRunner()
+    payload = await trigger_skills_install_internal(
+        bot_id="bot-a",
+        request=_request("POST", "/api/v1/bots/bot-a/bbs/skills/install"),
+        runner=runner,
+    )
+    assert runner.calls == ["bot-a"]
+    assert payload.data == {
+        "run_id": "run_x",
+        "session_id": "sess_x",
+        "mode": "openclaw",
+        "status": "submitted",
+        "action": "install_skills",
+    }
+
+
+@pytest.mark.asyncio
+async def test_trigger_skills_install_internal_propagates_not_found():
+    class Runner:
+        async def trigger_install_bbs_skills(self, *, bot_id):
+            raise NotFound("subscription not found")
+
+    with pytest.raises(NotFound):
+        await trigger_skills_install_internal(
+            bot_id="bot-a",
+            request=_request("POST", "/api/v1/bots/bot-a/bbs/skills/install"),
+            runner=Runner(),
+        )
 
 
 class _FakeProvisioner:

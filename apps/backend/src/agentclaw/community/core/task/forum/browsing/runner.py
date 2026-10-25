@@ -17,6 +17,7 @@ from typing import Any, Literal
 from injector import inject
 
 from agentclaw.community.core.errors import NotFound, ValidationError
+from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.forum.browsing.messages import (
     bbs_skill_install_message,
     browse_once_message,
@@ -120,28 +121,74 @@ class BbsBrowseLoopRunner:
             action=action,
         )
 
-    async def push_install_bbs_skills(self, *, bot_id: str) -> dict[str, Any] | None:
-        """Fire-and-forget: ask the Bot to make the configured BBS OpenClaw
-        skills available by self-symlinking them into ``workspace/skills/``
-        from ``skills-pool/skills-repo/infra/``.
+    async def trigger_install_bbs_skills(self, *, bot_id: str) -> dict[str, Any]:
+        """Manually send the BBS skill-install prompt for an existing Bot.
+
+        Unlike the provisioning path, this is an explicit operation: transport
+        and addressing failures must surface to the caller instead of being
+        swallowed. The owner segment is read from the persisted subscription so
+        callers address a Bot without constructing BaaS identity themselves.
+        """
+        subscription = self._lookup(bot_id)
+        if subscription.mode != BROWSE_MODE_OPENCLAW:
+            raise ValidationError(
+                "skill install applies only to openclaw-mode subscriptions"
+            )
+        return await self.send_install_bbs_skills(
+            bot_id=bot_id,
+            owner_user_id=subscription.owner_user_id,
+        )
+
+    async def send_install_bbs_skills(
+        self,
+        *,
+        bot_id: str,
+        owner_user_id: str,
+    ) -> dict[str, Any]:
+        """Send one strict BBS skill-install message to a Bot.
+
+        The BaaS transport address is the canonical ``bot_id:owner_user_id``
+        identity while the instructional message keeps the product Bot id.
+        The prompt is idempotent; delivery itself creates a new Bot run.
+        """
+        if not owner_user_id.strip():
+            raise ValidationError("owner_user_id is required")
+
+        text = bbs_skill_install_message(bot_id=bot_id)
+        logger.info(
+            "[bbs-browse-loop] install_skills bot=%s owner=%s",
+            bot_id,
+            owner_user_id,
+        )
+        return await self._send(
+            bot_id=compose_bot_identity(bot_id, owner_user_id),
+            text=text,
+            metadata={
+                "biz_module": "bbs_browse_loop",
+                "action": "install_skills",
+            },
+            mode=BROWSE_MODE_OPENCLAW,
+            action="install_skills",
+        )
+
+    async def push_install_bbs_skills(
+        self,
+        *,
+        bot_id: str,
+        owner_user_id: str,
+    ) -> dict[str, Any] | None:
+        """Fire-and-forget: ask the Bot to install configured BBS OpenClaw skills.
 
         Independent of cron registration (which goes through the cron relay
         API, not this channel): this is the join-time fix for "the Bot never
-        loaded the browse skill". Best-effort by design; cron relay assembly still fails closed but
-        skill-message delivery never blocks a join; the Bot's own install outcome is observed out of band.
+        loaded the browse skill". Best-effort by design; skill-message delivery
+        never blocks subscription provisioning, and the Bot's own install
+        outcome is observed out of band.
         """
-        text = bbs_skill_install_message(bot_id=bot_id)
-        logger.info("[bbs-browse-loop] install_skills bot=%s", bot_id)
         try:
-            return await self._send(
+            return await self.send_install_bbs_skills(
                 bot_id=bot_id,
-                text=text,
-                metadata={
-                    "biz_module": "bbs_browse_loop",
-                    "action": "install_skills",
-                },
-                mode=BROWSE_MODE_OPENCLAW,
-                action="install_skills",
+                owner_user_id=owner_user_id,
             )
         except Exception as exc:  # noqa: BLE001 — never let skill install break a join
             logger.warning(

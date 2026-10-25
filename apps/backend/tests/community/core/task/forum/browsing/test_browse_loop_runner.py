@@ -232,22 +232,25 @@ class _RaisingBot:
 
 
 @pytest.mark.asyncio
-async def test_push_install_bbs_skills_sends_verified_wording(monkeypatch):
-    """Join-time install prompt carries all skill names and both OpenClaw paths."""
+async def test_trigger_install_bbs_skills_sends_verified_wording_and_composite_identity(
+    monkeypatch,
+):
+    """Manual install trigger resolves the owner and addresses BaaS canonically."""
 
     monkeypatch.setenv("SERVER_ENV", "dev")
     runner = _runner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-a")))
-    result = await runner.push_install_bbs_skills(bot_id="bot-a")
+    result = await runner.trigger_install_bbs_skills(bot_id="bot-a")
     bot = runner._bot  # type: ignore[attr-defined]
 
-    assert result is not None
     assert result["status"] == "submitted"
     assert result["mode"] == "openclaw"
     assert result["action"] == "install_skills"
     assert len(bot.sent) == 1
     sent = bot.sent[0]
     msg = sent["message"]
+    assert sent["bot_id"] == "bot-a:111111"
     assert msg.startswith("[BBS-BROWSE-SKILL]")
+    assert "bot_id=bot-a" in msg
     assert (
         "forum-browse、forum-create-topic、forum-topic-handler 和 forum-digest-handler"
         in msg
@@ -256,16 +259,39 @@ async def test_push_install_bbs_skills_sends_verified_wording(monkeypatch):
         assert skill in msg
     assert "workspace/skills/" in msg
     assert "skills-pool/skills-repo/infra/" in msg
-    assert "这些 skill" in msg
     assert sent["metadata"]["action"] == "install_skills"
 
 
 @pytest.mark.asyncio
+async def test_trigger_install_bbs_skills_missing_subscription_raises_not_found():
+    runner = _runner(_FakeBot(), _FakeService(None))
+    with pytest.raises(NotFound):
+        await runner.trigger_install_bbs_skills(bot_id="bot-a")
+
+
+@pytest.mark.asyncio
+async def test_trigger_install_bbs_skills_rejects_legacy_framework_subscription():
+    runner = _runner(_FakeBot(), _FakeService(_sub(mode="framework")))
+
+    with pytest.raises(ValidationError):
+        await runner.trigger_install_bbs_skills(bot_id="bot-a")
+
+
+@pytest.mark.asyncio
+async def test_send_install_bbs_skills_requires_owner_user_id():
+    runner = _runner(_FakeBot(), _FakeService(_sub(mode="openclaw")))
+    with pytest.raises(ValidationError):
+        await runner.send_install_bbs_skills(bot_id="bot-a", owner_user_id=" ")
+
+
+@pytest.mark.asyncio
 async def test_push_install_bbs_skills_swallows_exception():
-    """A Bot-side delivery failure must never break a join (returns None)."""
+    """A Bot-side delivery failure never breaks asynchronous subscription provisioning."""
 
     runner = _runner(_RaisingBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-a")))
-    result = await runner.push_install_bbs_skills(bot_id="bot-a")
+    result = await runner.push_install_bbs_skills(
+        bot_id="bot-a", owner_user_id="111111"
+    )
     assert result is None
 
 

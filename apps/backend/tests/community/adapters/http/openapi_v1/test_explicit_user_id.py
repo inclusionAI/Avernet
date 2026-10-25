@@ -325,6 +325,10 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/feed"),
     (
         "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/skills/install",
+    ),
+    (
+        "post",
         f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/trigger-framework",
     ),
     (
@@ -576,7 +580,8 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # DWS rollout eligibility adds one owner-scoped Bot-path operation: 196 -> 197.
 # The genome registry (RSI-03) adds thirteen path-addressed, user-scoped
 # operations under /bots/{bot_id}/genome: path 197 -> 210.
-_BOT_ID_PLACEMENT = {"path": 210, "query": 1, "none": 126}
+# BBS Bot skill-install repair adds one Bot-path operation: path 210 -> 211.
+_BOT_ID_PLACEMENT = {"path": 211, "query": 1, "none": 126}
 
 
 def _schema() -> dict:

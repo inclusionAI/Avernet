@@ -231,7 +231,10 @@ class BbsBrowseSubscriptionProvisioner:
             bot_id=pending.bot_id,
             owner_user_id=pending.owner_user_id,
         )
-        await self._runner.push_install_bbs_skills(bot_id=pending.bot_id)
+        await self._runner.push_install_bbs_skills(
+            bot_id=pending.bot_id,
+            owner_user_id=pending.owner_user_id,
+        )
 
     def _provisional_record(
         self,
