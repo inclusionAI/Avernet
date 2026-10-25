@@ -7,6 +7,10 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 
+from agentclaw.community.core.repository.implementations.spaces.identity import (
+    reserve_new_space_identity,
+)
+
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.models.space_skill import (
     SkillDraftEditLease,
@@ -75,6 +79,7 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
             space = SpaceModel(**payload)
             session.add(space)
             session.flush()
+            reserve_new_space_identity(session, space)
             session.refresh(space)
             return self._space_to_dict(space)
 

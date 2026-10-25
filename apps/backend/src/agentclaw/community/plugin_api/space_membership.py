@@ -2,6 +2,9 @@
 
 The caller owns ordered durable delivery. A successful apply must acknowledge
 exactly this environment, space, revision and content, not merely accept a job.
+A receivable body has at most 2000 members and 1 MiB of UTF-8 JSON encoded with
+json.dumps(body, ensure_ascii=False). Producers must enforce those bounds before
+committing immutable delivery history; storage size alone is not admission.
 """
 
 from dataclasses import dataclass

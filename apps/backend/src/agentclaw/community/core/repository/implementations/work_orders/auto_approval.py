@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from agentclaw.community.core.repository.implementations.spaces.knowledge_sync import (
+    lock_space,
     record_membership_snapshot,
 )
 
@@ -305,12 +306,7 @@ class _AutoApprovalWorkOrderRepository:
             space_id = int(order.biz_id)
         except (TypeError, ValueError) as exc:
             raise WorkOrderNotFoundError("invalid Space id in work order") from exc
-        space = (
-            db.query(self._Space)
-            .filter(self._Space.id == space_id, self._Space.env == env)
-            .with_for_update()
-            .one_or_none()
-        )
+        space = lock_space(db, space_id, env)
         if space is None:
             raise WorkOrderNotFoundError("work-order Space not found")
         member = (

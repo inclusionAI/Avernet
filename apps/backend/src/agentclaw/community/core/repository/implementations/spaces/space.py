@@ -9,6 +9,9 @@ from injector import inject
 from sqlalchemy import exists, func, or_
 from sqlalchemy.exc import IntegrityError
 
+from agentclaw.community.core.repository.implementations.spaces.identity import (
+    reserve_new_space_identity,
+)
 from agentclaw.community.core.repository.implementations.spaces.knowledge_sync import (
     lock_space,
     record_membership_snapshot,
@@ -109,6 +112,7 @@ class SpaceRepository(SpaceRepositoryProtocol):
                 )
                 db.add(space)
                 db.flush()
+                reserve_new_space_identity(db, space)
                 db.add(
                     self._Member(
                         space_id=space.id,
@@ -192,6 +196,7 @@ class SpaceRepository(SpaceRepositoryProtocol):
             )
             db.add(space)
             db.flush()
+            reserve_new_space_identity(db, space)
             db.add(
                 self._Member(
                     space_id=space.id,
@@ -507,16 +512,7 @@ class SpaceRepository(SpaceRepositoryProtocol):
             with self._db.transactional_orm_session() as db:
                 # Share the parent lock with maintenance deletion. Re-check in
                 # this transaction, not only in the calling permission service.
-                parent = (
-                    db.query(self._Space)
-                    .filter(
-                        self._Space.id == space_id,
-                        self._Space.env == env,
-                        self._Space.deleted_at.is_(None),
-                    )
-                    .with_for_update()
-                    .one_or_none()
-                )
+                parent = lock_space(db, space_id, env)
                 if parent is None:
                     raise SpaceNotFoundError(f"space {space_id} not found")
                 row = self._Member(

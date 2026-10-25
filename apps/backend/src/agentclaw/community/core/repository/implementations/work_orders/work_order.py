@@ -6,6 +6,7 @@ import json
 
 from injector import inject
 from agentclaw.community.core.repository.implementations.spaces.knowledge_sync import (
+    lock_space,
     record_membership_snapshot,
 )
 
@@ -263,16 +264,7 @@ class WorkOrderRepository(
                         "invalid Space id in work order"
                     ) from exc
 
-                space = (
-                    db.query(self._Space)
-                    .filter(
-                        self._Space.id == space_id,
-                        self._Space.env == env,
-                        self._Space.deleted_at.is_(None),
-                    )
-                    .with_for_update()
-                    .one_or_none()
-                )
+                space = lock_space(db, space_id, env)
                 if space is None:
                     raise WorkOrderNotFoundError("work-order business object not found")
 
@@ -730,16 +722,7 @@ class WorkOrderRepository(
             )
 
             space_id = int(work_order.biz_id)
-            space = (
-                db.query(self._Space)
-                .filter(
-                    self._Space.id == space_id,
-                    self._Space.env == env,
-                    self._Space.deleted_at.is_(None),
-                )
-                .with_for_update()
-                .one_or_none()
-            )
+            space = lock_space(db, space_id, env)
             if space is None:
                 raise WorkOrderNotFoundError("work-order business object not found")
 

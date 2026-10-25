@@ -118,6 +118,7 @@ def test_browser_retry_route_does_not_exist(client):
     [
         ("SPACE_SYNC_UNAVAILABLE", 503),
         ("CREATE_REQUEST_CONFLICT", 409),
+        ("SPACE_MEMBERSHIP_LIMIT_EXCEEDED", 409),
         ("KB_DELETED", 410),
         ("private error", 503),
     ],

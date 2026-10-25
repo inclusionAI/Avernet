@@ -13,7 +13,11 @@ The latest row identifies an activated space; the latest acknowledged row is the
 delivery cursor. No snapshot cleanup is implemented: retain pending revisions,
 the latest row, and the last acknowledged row if a retention policy is later added.
 
-The source-space row lock serializes revision allocation. All member entry points
+Server-database source-space row locks serialize source/snapshot decisions. On
+SQLite, a scoped no-op source UPDATE takes a real database write reservation
+before reading the source/roster, shared by activation and every member writer.
+The guard preserves metadata, rejects sources deleted before it, and propagates
+busy-timeout/write failures without retry or success masking. All member entry points
 append snapshots inside the source transaction; no network or queue operation
 runs there. A bounded lifecycle scan (every 30 seconds) dispatches only the next
 revision per space through the existing task-queue repository interface. A task
@@ -29,6 +33,23 @@ revoked by the canonical provider. Source deletion appends a disabled snapshot
 without deleting knowledge assets. First creation waits for confirmation; reads
 never activate or publish. Later revocations are eventually consistent, not
 immediate. First-use HTTP work stays bounded to four delivery attempts.
+
+### Receiver admission and retired identities
+
+Every immutable insert enforces the receiver's 2000-member / 1 MiB UTF-8 JSON
+limits before commit. An over-limit activated-space mutation rolls back with
+`SPACE_MEMBERSHIP_LIMIT_EXCEEDED`; first activation leaves no outbox. Only counts
+and scope/revision are logged, never roster/payload content. Rejected additions
+cannot block later removals, rejoins or disabled delivery. No truncation, skipping
+or compaction is permitted. Never-activated ordinary membership is unchanged.
+
+SQLite TEAM/PERSONAL creation, including the additive Space Skill repository seam,
+reserves IDs above retained same-environment outbox
+history while the initial INSERT holds its database write lock, before members
+or external effects. This changes neither source schemas nor physical deletion.
+Other SQL dialects retain their native allocation. Retired outbox scope identities
+must remain retained even after acknowledgement. See the spec's 2026-10-25 repair
+section for upgrade preflight, existing-corruption limitations and rollback gates.
 
 ### Rollout
 

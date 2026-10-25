@@ -85,3 +85,76 @@ Full-suite collection also requires unique module names under non-package test
 directories. The HTTP and service suites use `test_space_knowledge_router.py` and
 `test_space_knowledge_service.py`, avoiding existing `test_router` / `test_service`
 modules without changing pytest collection mode or excluding any tests.
+
+## Receiver admission and identity lifecycle repair (2026-10-25)
+
+- Before inserting **any** immutable snapshot, enforce at most 2000 members and
+  at most 1 MiB of `json.dumps(body, ensure_ascii=False)` encoded as UTF-8 (the
+  receiver adapter's encoding). Storage capacity is not receiver capacity.
+  Over-limit activation leaves no outbox row. Over-limit changes to an activated
+  Space raise the safe `SPACE_MEMBERSHIP_LIMIT_EXCEEDED` error and roll back the
+  entire source transaction: ordinary/bulk membership, approval state, approver
+  state and result notifications cannot commit separately from the snapshot.
+  Knowledge HTTP maps that error to 409. Existing member/maintenance/approval
+  error envelopes remain unchanged; they report failed operations, never success.
+  A payload-free warning records environment, Space/revision, member count and
+  byte count. Ordinary never-activated Spaces retain their existing membership
+  behavior; activation above the receiver capacity is refused.
+- This is admission, not truncation or queue compaction. At capacity a rejected
+  addition consumes no revision. Removals, a subsequent rejoin and physical
+  deletion continue to append complete receivable snapshots in exact order.
+  No revision may be skipped, rewritten, merged, or auto-acknowledged. Existing
+  oversized/corrupt historical rows, if present from an older candidate, need
+  explicit operator reconciliation before rollout; this repair does not silently
+  mutate that history or claim to repair an already poisoned queue.
+- Server databases retain source row locks. SQLite ignores `FOR UPDATE`, so
+  `lock_space` first executes an environment/live-source-scoped no-op UPDATE,
+  then reads the source and roster inside the same transaction. Explicitly
+  assigning `gmt_modified` to itself suppresses ORM onupdate; the guard changes
+  neither identity nor metadata. A zero-row UPDATE still takes the SQLite write
+  reservation and the following read rejects a source deleted before the guard.
+  Activation, ordinary/bulk member/role changes, rename, physical deletion and
+  both manual/AUTO approval entrypoints use this same source guard. This fences
+  "no history yet" decisions as well as revision allocation: a mutation cannot
+  commit between first-roster capture and first-snapshot persistence without a
+  subsequent outbox revision. PK conflict recovery alone is insufficient for
+  that invariant and is not used as a substitute. No process lock, schema change,
+  global database transaction-mode change, unbounded retry or outbound I/O is
+  introduced. Contention honors the configured SQLite busy timeout and propagates
+  a database failure with transaction rollback; unrelated write errors are never
+  converted to idempotent success. SQLite serializes writers at database scope,
+  so this guard can increase write contention; it is limited to these source
+  transactions, not installed globally in DatabasePlugin.
+- SQLite rowids can be reused after physical deletion. Immediately after a new
+  Space INSERT acquires SQLite's cross-connection/process database write lock,
+  but before member INSERTs, caller-visible IDs or external side effects, both
+  TEAM and PERSONAL writers (including the additive Space Skill repository
+  creation seam) reserve an ID above retained outbox Space IDs in
+  that environment if SQLite's generated ID is not above them. The generated
+  ID is already above all live Space rows. The ordered lookup uses the existing
+  `(env,space_id,revision)` primary-key prefix, without reading payload history.
+  Source/member writes still commit or roll back together. Other dialects retain
+  native ID allocation. Old disabled snapshots remain deliverable independently.
+
+### Compatibility, deployment and rollback
+
+No `ac_space`, `ac_space_member`, outbox or shared-queue schema/model/index is
+changed by the repair; the original independent outbox migration is still the
+only DDL prerequisite (including before SQLite Space creation). No receiver DTO,
+revision/hash encoding, provider key, queue pointer or ACL ownership changes.
+The additive safe error and capacity rejection are the intended observable
+behavior changes. SQLite-generated IDs are opaque and may now have gaps; clients
+must not assume contiguous or reusable IDs. All application writers must run
+this repair before resuming SQLite Space creation. Retain at least the latest
+row of every retired outbox scope permanently; deleting that identity tombstone
+would invalidate the non-reuse guarantee.
+
+No automatic migration of pre-existing reused identities is attempted. An upgrade
+must inspect any previously deployed candidate for impossible snapshots, reused
+IDs or direct-SQL writes; resolve them deliberately with the source and provider
+owners before enabling delivery. Never delete pending disabled history to make a
+new Space activate. Rolling back to the old writer reopens the admission/ID-reuse
+bugs; pause knowledge-enabled membership/approval and SQLite creation during such
+rollback rather than serving them with the unfixed writer. Local file-SQLite
+regressions do not prove MySQL/OceanBase concurrency, remote receiver operation,
+gateway/SSO, deployed revocation timing or an online migration.

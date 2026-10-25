@@ -2,6 +2,7 @@
 
 from injector import inject
 from agentclaw.community.core.repository.implementations.spaces.knowledge_sync import (
+    lock_space,
     record_membership_snapshot,
 )
 
@@ -35,9 +36,7 @@ class SpaceManagementRepository(SpaceManagementRepositoryProtocol):
             SpaceModel.env == env,
             SpaceModel.deleted_at.is_(None),
         )
-        if lock:
-            query = query.with_for_update()
-        space = query.one_or_none()
+        space = lock_space(db, space_id, env) if lock else query.one_or_none()
         if space is None:
             raise ManagementError("SPACE_NOT_FOUND")
         if space.space_type != "TEAM":

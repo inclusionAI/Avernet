@@ -1,6 +1,7 @@
 """Single-table transactional membership outbox; no queue storage dependency.
 
 Membership writers lock the source space before reading its latest outbox row.
+SQLite takes a real database write guard before any source/roster decision.
 Snapshots and source changes commit together. The shared queue is only a wakeup:
 its history, retention and availability cannot change the durable snapshots.
 """
@@ -22,9 +23,13 @@ from agentclaw.community.core.spaces.repository.models import (
     SpaceModel,
     SpaceMemberModel,
 )
+from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.space_knowledge import SpaceKnowledgeError
 from agentclaw.community.plugin_api.space_membership import SpaceMembershipSnapshot
+
+
+logger = get_logger()
 
 
 def _rows(db, space_id, environment):
@@ -68,19 +73,43 @@ def _decode(row):
 
 
 def lock_space(db, space_id, environment):
-    return (
-        db.query(SpaceModel)
-        .filter(
-            SpaceModel.id == space_id,
-            SpaceModel.env == environment,
-            SpaceModel.deleted_at.is_(None),
-        )
-        .with_for_update()
-        .one_or_none()
+    query = db.query(SpaceModel).filter(
+        SpaceModel.id == space_id,
+        SpaceModel.env == environment,
+        SpaceModel.deleted_at.is_(None),
     )
+    if db.get_bind().dialect.name == "sqlite":
+        # FOR UPDATE is ignored by SQLite. Acquire its cross-process write
+        # reservation BEFORE reading the source or deciding sync is inactive.
+        # Suppress onupdate: this guard changes neither identity nor timestamps.
+        # Even a zero-row UPDATE acquires the reservation; the following read
+        # then observes a source deleted before the guard as absent.
+        query.update(
+            {
+                SpaceModel.id: SpaceModel.id,
+                SpaceModel.gmt_modified: SpaceModel.gmt_modified,
+            },
+            synchronize_session=False,
+        )
+    return query.with_for_update().one_or_none()
 
 
 def _save_snapshot(db, *, environment, space_id, app, body):
+    # Match the receiver's UTF-8 JSON encoding, not Python character count or
+    # the storage column capacity. Reject before committing an immutable head.
+    payload = json.dumps(body, ensure_ascii=False)
+    payload_bytes = len(payload.encode("utf-8"))
+    if len(body["members"]) > 2000 or payload_bytes > 1024 * 1024:
+        logger.warning(
+            "membership snapshot exceeds receiver limit env=%s space_id=%s "
+            "revision=%s member_count=%s payload_bytes=%s",
+            environment,
+            space_id,
+            body["revision"],
+            len(body["members"]),
+            payload_bytes,
+        )
+        raise SpaceKnowledgeError("SPACE_MEMBERSHIP_LIMIT_EXCEEDED")
     snapshot = SpaceMembershipSnapshot(environment, space_id, body)
     db.add(
         Snapshot(
@@ -88,7 +117,7 @@ def _save_snapshot(db, *, environment, space_id, app, body):
             space_id=space_id,
             revision=snapshot.revision,
             app=app,
-            payload=json.dumps(body, ensure_ascii=False),
+            payload=payload,
             snapshot_hash=snapshot.digest(),
             status=body["status"],
             acknowledged=False,
